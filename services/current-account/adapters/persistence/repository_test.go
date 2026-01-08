@@ -136,30 +136,25 @@ func TestSaveUpdateExisting(t *testing.T) {
 		t.Fatalf("Initial save failed: %v", err)
 	}
 
-	// Modify and save again (immutable: capture returned value)
-	depositMoney, _ := domain.NewMoney("GBP", 10000)
-	account, err = account.Deposit(depositMoney)
-	if err != nil {
-		t.Fatalf("Deposit failed: %v", err)
-	}
+	// Retrieve account (need to get version for optimistic locking)
+	account, err = repo.FindByID(ctx, accountID)
+	require.NoError(t, err)
+
+	// Modify account status (balance is not persisted - delegated to Position Keeping)
+	account, err = account.Freeze("Test freeze reason")
+	require.NoError(t, err)
 
 	if err := repo.Save(ctx, account); err != nil {
 		t.Fatalf("Update save failed: %v", err)
 	}
 
-	// Verify balance was updated
+	// Verify status was updated
 	retrieved, err := repo.FindByID(ctx, accountID)
 	if err != nil {
 		t.Fatalf("FindByID failed: %v", err)
 	}
 
-	balanceCents, err := retrieved.Balance().ToMinorUnits()
-	if err != nil {
-		t.Fatalf("ToMinorUnits failed: %v", err)
-	}
-	if balanceCents != 10000 {
-		t.Errorf("Expected balance 10000, got %d", balanceCents)
-	}
+	assert.Equal(t, domain.AccountStatusFrozen, retrieved.Status(), "Status should be updated to frozen")
 
 	// Version should be incremented after update
 	if retrieved.Version() != 2 {
@@ -310,23 +305,19 @@ func TestOptimisticLocking(t *testing.T) {
 		t.Errorf("Expected same version, got %d and %d", account2.Version(), account3.Version())
 	}
 
-	// First transaction modifies and saves successfully (immutable: capture returned value)
-	deposit1, _ := domain.NewMoney("GBP", 5000)
-	account2, err = account2.Deposit(deposit1)
-	if err != nil {
-		t.Fatalf("Deposit failed: %v", err)
-	}
+	// First transaction modifies and saves successfully
+	// Use Freeze() instead of Deposit() since balance is not persisted
+	account2, err = account2.Freeze("First freeze")
+	require.NoError(t, err)
 
 	if err := repo.Save(ctx, account2); err != nil {
 		t.Fatalf("First save failed: %v", err)
 	}
 
-	// Second transaction tries to save with stale version (immutable: capture returned value)
-	deposit2, _ := domain.NewMoney("GBP", 10000)
-	account3, err = account3.Deposit(deposit2)
-	if err != nil {
-		t.Fatalf("Deposit failed: %v", err)
-	}
+	// Second transaction tries to save with stale version
+	// Use Freeze() which modifies a persisted field (status)
+	account3, err = account3.Freeze("Second freeze attempt")
+	require.NoError(t, err)
 
 	err = repo.Save(ctx, account3)
 	if !errors.Is(err, ErrVersionConflict) {
@@ -339,13 +330,7 @@ func TestOptimisticLocking(t *testing.T) {
 		t.Fatalf("Final FindByID failed: %v", err)
 	}
 
-	finalBalanceCents, err := final.Balance().ToMinorUnits()
-	if err != nil {
-		t.Fatalf("ToMinorUnits failed: %v", err)
-	}
-	if finalBalanceCents != 5000 {
-		t.Errorf("Expected balance 5000, got %d", finalBalanceCents)
-	}
+	assert.Equal(t, domain.AccountStatusFrozen, final.Status(), "Status should be frozen from first transaction")
 
 	// Version should be incremented
 	if final.Version() != 2 {
@@ -549,11 +534,15 @@ func TestSave_UpdatePreservesCreatedByButUpdatesUpdatedBy(t *testing.T) {
 	err = repo.Save(ctx1, account)
 	require.NoError(t, err)
 
+	// Retrieve account (need to get version for optimistic locking)
+	account, err = repo.FindByID(ctx1, accountID)
+	require.NoError(t, err)
+
 	// Update with user2 (ctx already has tenant from setupTestDB)
+	// Use Freeze() since balance is not persisted
 	user2 := "user-updater"
 	ctx2 := context.WithValue(ctx, auth.UserIDContextKey, user2)
-	depositMoney, _ := domain.NewMoney("GBP", 5000)
-	account, err = account.Deposit(depositMoney)
+	account, err = account.Freeze("Test freeze")
 	require.NoError(t, err)
 
 	err = repo.Save(ctx2, account)

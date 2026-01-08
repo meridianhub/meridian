@@ -422,7 +422,8 @@ func toEntity(ctx context.Context, account domain.CurrentAccount) (*CurrentAccou
 
 	// ToMinorUnitsUnchecked is safe here: domain layer validates amounts before persistence,
 	// so overflow (>92 quadrillion cents) cannot occur for valid accounts
-	// Note: Balance fields are not persisted - balance computation delegated to Position Keeping service
+	// Note: Balance fields are not persisted to DB (gorm:"-") but kept on entity for
+	// in-memory round-trip and backward compatibility during migration to Position Keeping.
 	return &CurrentAccountEntity{
 		ID:                    account.ID(),
 		AccountID:             account.AccountID(),             // Business account identifier
@@ -433,6 +434,8 @@ func toEntity(ctx context.Context, account domain.CurrentAccount) (*CurrentAccou
 		PartyID:               partyUUID,
 		OverdraftLimit:        account.OverdraftLimit().ToMinorUnitsUnchecked(),
 		OverdraftRate:         account.OverdraftRate(),
+		Balance:               account.Balance().ToMinorUnitsUnchecked(),          // gorm:"-" - not persisted
+		AvailableBalance:      account.AvailableBalance().ToMinorUnitsUnchecked(), // gorm:"-" - not persisted
 		FreezeReason:          freezeReason,
 		StatusHistory:         statusHistory,
 		Version:               account.Version(),
@@ -448,11 +451,17 @@ func toEntity(ctx context.Context, account domain.CurrentAccount) (*CurrentAccou
 // Note: Balance fields are not persisted - balance computation delegated to Position Keeping service.
 // The service layer is responsible for populating balance from Position Keeping after retrieval.
 func toDomain(entity *CurrentAccountEntity) (domain.CurrentAccount, error) {
-	// Balance fields are no longer stored in the database.
-	// Initialize with zero values - the service layer will populate from Position Keeping.
-	zeroBalance, err := domain.NewMoney(entity.Currency, 0)
+	// Balance fields are no longer persisted to the database.
+	// Use entity's in-memory balance fields if populated (e.g., from recent save),
+	// otherwise initialize with zero values.
+	// The service layer should populate from Position Keeping for authoritative balance.
+	balance, err := domain.NewMoney(entity.Currency, entity.Balance)
 	if err != nil {
-		return domain.CurrentAccount{}, fmt.Errorf("failed to create zero balance: %w", err)
+		return domain.CurrentAccount{}, fmt.Errorf("failed to create balance: %w", err)
+	}
+	availableBalance, err := domain.NewMoney(entity.Currency, entity.AvailableBalance)
+	if err != nil {
+		return domain.CurrentAccount{}, fmt.Errorf("failed to create available balance: %w", err)
 	}
 
 	overdraftLimit, err := domain.NewMoney(entity.Currency, entity.OverdraftLimit)
@@ -489,14 +498,15 @@ func toDomain(entity *CurrentAccountEntity) (domain.CurrentAccount, error) {
 	}
 
 	// Use builder pattern to construct immutable domain model
-	// Note: Balance and AvailableBalance are set to zero - service layer populates from Position Keeping
+	// Note: Balance comes from entity's in-memory fields (gorm:"-") if populated,
+	// otherwise zero. Service layer should fetch authoritative balance from Position Keeping.
 	return domain.NewCurrentAccountBuilder().
 		WithID(entity.ID).
 		WithAccountID(entity.AccountID).
 		WithAccountIdentification(entity.AccountIdentification).
 		WithPartyID(entity.PartyID.String()).
-		WithBalance(zeroBalance).
-		WithAvailableBalance(zeroBalance).
+		WithBalance(balance).
+		WithAvailableBalance(availableBalance).
 		WithStatus(domain.AccountStatus(entity.Status)).
 		WithFreezeReason(freezeReason).
 		WithStatusHistory(statusHistory).

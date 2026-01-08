@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
+	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
@@ -145,7 +146,9 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		}
 
 		// Available = Current Balance - Active Liens
-		balanceCents, err := account.Balance().ToMinorUnits()
+		// Balance is fetched from Position Keeping service per BIAN architecture.
+		// Falls back to account.Balance() for backward compatibility during migration.
+		balanceCents, err := s.getAccountBalanceCents(ctx, req.AccountId, account.Balance())
 		if err != nil {
 			return fmt.Errorf("%w: %v", errTxDomainError, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
@@ -374,6 +377,13 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 			return fmt.Errorf("%w: %v", errTxSaveAccount, txErr) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
 
+		// Hydrate account with balance from Position Keeping.
+		// Balance is no longer persisted - it comes from Position Keeping service.
+		accountResult, txErr = s.hydrateAccountWithBalance(ctx, accountResult)
+		if txErr != nil {
+			return fmt.Errorf("%w: %v", errTxDomainError, txErr) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
+		}
+
 		// Execute lien (domain logic - marks status as executed)
 		if err := lien.Execute(); err != nil {
 			return fmt.Errorf("%w: %v", errTxExecuteFailed, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
@@ -525,6 +535,12 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 			s.logger.Error("failed to find account for idempotent response", "error", acctErr)
 			return &pb.TerminateLienResponse{Lien: toLienProto(lien)}, nil
 		}
+		// Hydrate account with balance from Position Keeping.
+		account, acctErr = s.hydrateAccountWithBalance(ctx, account)
+		if acctErr != nil {
+			s.logger.Error("failed to get account balance for idempotent response", "error", acctErr)
+			return &pb.TerminateLienResponse{Lien: toLienProto(lien)}, nil
+		}
 		availableMoney := s.calculateAvailableBalance(ctx, lien.AccountID, account.Balance())
 		return &pb.TerminateLienResponse{
 			Lien:             toLienProto(lien),
@@ -610,6 +626,14 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 	if err != nil {
 		operationStatus = opStatusRetrieveAccountFailed
 		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
+	}
+
+	// Hydrate account with balance from Position Keeping.
+	// Balance is no longer persisted - it comes from Position Keeping service.
+	account, err = s.hydrateAccountWithBalance(ctx, account)
+	if err != nil {
+		operationStatus = opStatusRetrieveAccountFailed
+		return nil, status.Errorf(codes.Internal, "failed to get account balance: %v", err)
 	}
 
 	availableMoney := s.calculateAvailableBalance(ctx, lien.AccountID, account.Balance())
@@ -716,6 +740,13 @@ func (s *Service) buildExecuteLienIdempotentResponse(ctx context.Context, lien *
 		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
 	}
 
+	// Hydrate account with balance from Position Keeping.
+	// Balance is no longer persisted - it comes from Position Keeping service.
+	account, err = s.hydrateAccountWithBalance(ctx, account)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get account balance: %v", err)
+	}
+
 	availableMoney := s.calculateAvailableBalance(ctx, lien.AccountID, account.Balance())
 	return &pb.ExecuteLienResponse{
 		Lien:             toLienProto(lien),
@@ -752,11 +783,96 @@ func (s *Service) checkLienIdempotency(ctx context.Context, paymentOrderRef stri
 		s.logger.Error("failed to retrieve account for idempotent response", "error", acctErr)
 		return &pb.InitiateLienResponse{Lien: toLienProto(existingLien)}, true, nil
 	}
+	// Hydrate account with balance from Position Keeping.
+	account, acctErr = s.hydrateAccountWithBalance(ctx, account)
+	if acctErr != nil {
+		s.logger.Error("failed to get account balance for idempotent response", "error", acctErr)
+		return &pb.InitiateLienResponse{Lien: toLienProto(existingLien)}, true, nil
+	}
 	availableMoney := s.calculateAvailableBalance(ctx, existingLien.AccountID, account.Balance())
 	return &pb.InitiateLienResponse{
 		Lien:             toLienProto(existingLien),
 		AvailableBalance: toMoneyAmount(availableMoney),
 	}, true, nil
+}
+
+// hydrateAccountWithBalance returns a new CurrentAccount with balance populated from Position Keeping.
+// If Position Keeping is not available, returns the account with its existing (potentially zero) balance.
+// This is needed because balance is no longer persisted to the database - it comes from Position Keeping.
+func (s *Service) hydrateAccountWithBalance(ctx context.Context, account domain.CurrentAccount) (domain.CurrentAccount, error) {
+	if s.posKeepingClient == nil {
+		// Position Keeping not configured - return account as-is.
+		// This maintains backward compatibility during migration.
+		return account, nil
+	}
+
+	balanceCents, err := s.getAccountBalanceCents(ctx, account.AccountID(), account.Balance())
+	if err != nil {
+		return domain.CurrentAccount{}, fmt.Errorf("failed to get balance from Position Keeping: %w", err)
+	}
+
+	// Create balance Money object
+	balance, err := domain.NewMoney(string(account.Balance().Currency()), balanceCents)
+	if err != nil {
+		return domain.CurrentAccount{}, fmt.Errorf("failed to create balance: %w", err)
+	}
+
+	// Create available balance (balance + overdraft - any holds)
+	// For simplicity, use balance as available balance (liens calculated separately)
+	availableBalance := balance
+
+	// Use builder to reconstruct account with new balance
+	return domain.NewCurrentAccountBuilder().
+		WithID(account.ID()).
+		WithAccountID(account.AccountID()).
+		WithAccountIdentification(account.AccountIdentification()).
+		WithPartyID(account.PartyID()).
+		WithBalance(balance).
+		WithAvailableBalance(availableBalance).
+		WithStatus(account.Status()).
+		WithFreezeReason(account.FreezeReason()).
+		WithStatusHistory(account.StatusHistory()).
+		WithOverdraftLimit(account.OverdraftLimit()).
+		WithOverdraftEnabled(account.OverdraftEnabled()).
+		WithOverdraftRate(account.OverdraftRate()).
+		WithVersion(account.Version()).
+		WithCreatedAt(account.CreatedAt()).
+		WithUpdatedAt(account.UpdatedAt()).
+		Build(), nil
+}
+
+// getAccountBalanceCents gets the account balance in cents from Position Keeping service.
+// If Position Keeping is not available, falls back to the provided fallbackBalance for backward compatibility.
+// Returns balance in minor units (cents/pence).
+func (s *Service) getAccountBalanceCents(ctx context.Context, accountID string, fallbackBalance domain.Money) (int64, error) {
+	if s.posKeepingClient == nil {
+		// Position Keeping not configured - fall back to provided balance.
+		// This maintains backward compatibility during migration to Position Keeping.
+		return fallbackBalance.ToMinorUnits()
+	}
+
+	resp, err := s.posKeepingClient.GetAccountBalance(ctx, &positionkeepingv1.GetAccountBalanceRequest{
+		AccountId:   accountID,
+		BalanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
+	})
+	if err != nil {
+		s.logger.Error("failed to get balance from Position Keeping",
+			"account_id", accountID, "error", err)
+		return 0, fmt.Errorf("failed to get balance from Position Keeping: %w", err)
+	}
+
+	if resp.Amount == nil || resp.Amount.Amount == nil {
+		return 0, nil
+	}
+
+	// Convert units.nanos to minor units (cents)
+	// Units are whole currency units, nanos are fractional parts (1 billionth)
+	// For GBP: 1.50 = 150 cents = (1 * 100) + (500000000 / 10000000)
+	units := resp.Amount.Amount.Units
+	nanos := resp.Amount.Amount.Nanos
+	cents := units*100 + int64(nanos/10000000)
+
+	return cents, nil
 }
 
 // calculateAvailableBalance calculates available balance with active liens.

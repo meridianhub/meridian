@@ -750,6 +750,16 @@ func (s *Service) ExecuteWithdrawal(ctx context.Context, req *pb.ExecuteWithdraw
 		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
 	}
 
+	// Hydrate account with balance from Position Keeping (balance no longer persisted locally)
+	account, err = s.hydrateAccountWithBalance(ctx, account)
+	if err != nil {
+		operationStatus = opStatusRetrieveFailed
+		s.logger.Error("failed to hydrate account balance from Position Keeping",
+			"account_id", accountID,
+			"error", err)
+		return nil, status.Errorf(codes.Internal, "failed to retrieve account balance: %v", err)
+	}
+
 	// Check account status - cannot withdraw from frozen or closed accounts
 	if account.Status() == domain.AccountStatusFrozen {
 		operationStatus = opStatusAccountFrozen
@@ -955,6 +965,16 @@ func (s *Service) InitiateWithdrawal(ctx context.Context, req *pb.InitiateWithdr
 		}
 		operationStatus = opStatusRetrieveFailed
 		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
+	}
+
+	// Hydrate account with balance from Position Keeping (balance no longer persisted locally)
+	account, err = s.hydrateAccountWithBalance(ctx, account)
+	if err != nil {
+		operationStatus = opStatusRetrieveFailed
+		s.logger.Error("failed to hydrate account balance from Position Keeping",
+			"account_id", req.AccountId,
+			"error", err)
+		return nil, status.Errorf(codes.Internal, "failed to retrieve account balance: %v", err)
 	}
 
 	var validationMessages []string
@@ -1642,6 +1662,16 @@ func (s *Service) ControlCurrentAccount(ctx context.Context, req *pb.ControlCurr
 			"account_id", req.AccountId)
 
 	case pb.ControlAction_CONTROL_ACTION_CLOSE:
+		// Hydrate account with balance from Position Keeping before close validation
+		account, err = s.hydrateAccountWithBalance(ctx, account)
+		if err != nil {
+			operationStatus = opStatusRetrieveFailed
+			s.logger.Error("failed to hydrate account balance from Position Keeping for close validation",
+				"account_id", req.AccountId,
+				"error", err)
+			return nil, status.Errorf(codes.Internal, "failed to retrieve account balance: %v", err)
+		}
+
 		// Validate balance is zero before attempting close
 		if !account.Balance().IsZero() {
 			operationStatus = "non_zero_balance"

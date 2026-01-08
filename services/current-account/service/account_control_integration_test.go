@@ -12,7 +12,6 @@ import (
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/domain"
-	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
@@ -291,20 +290,17 @@ func TestAccountControl_CloseWithBalance(t *testing.T) {
 	repo, lienRepo, ctx, cleanup := setupControlTestDB(t)
 	defer cleanup()
 
-	svc := mustNewService(t, repo, lienRepo)
-
-	// Create account and add balance
+	// Create account
 	accountID := "ACC-BALANCE-001"
-	account := createTestAccountForControl(t, ctx, repo, accountID)
+	_ = createTestAccountForControl(t, ctx, repo, accountID)
 
-	// Add balance via deposit
-	depositAmount, _ := domain.NewMoney("GBP", 10000) // 100.00 GBP
-	account, err := account.Deposit(depositAmount)
-	require.NoError(t, err)
-	require.NoError(t, repo.Save(ctx, account))
+	// Create service with Position Keeping mock that reports non-zero balance
+	svc := mustNewServiceWithPositionKeeping(t, repo, lienRepo, map[string]int64{
+		accountID: 10000, // 100.00 GBP
+	})
 
-	// Attempt to close - should fail
-	_, err = svc.ControlCurrentAccount(ctx, &pb.ControlCurrentAccountRequest{
+	// Attempt to close - should fail because Position Keeping reports non-zero balance
+	_, err := svc.ControlCurrentAccount(ctx, &pb.ControlCurrentAccountRequest{
 		AccountId:     accountID,
 		ControlAction: pb.ControlAction_CONTROL_ACTION_CLOSE,
 		Reason:        "Attempting to close account with balance",
@@ -312,30 +308,13 @@ func TestAccountControl_CloseWithBalance(t *testing.T) {
 	require.Error(t, err, "Close should fail with non-zero balance")
 	assert.Contains(t, err.Error(), "non-zero balance")
 
-	// Zero the balance via withdrawal
-	account, err = repo.FindByID(ctx, accountID)
-	require.NoError(t, err)
+	// Create service with Position Keeping mock that reports zero balance
+	svcZeroBalance := mustNewServiceWithPositionKeeping(t, repo, lienRepo, map[string]int64{
+		accountID: 0, // Zero balance
+	})
 
-	withdrawAmount, _ := domain.NewMoney("GBP", 10000)
-	account, err = account.Withdraw(withdrawAmount)
-	require.NoError(t, err)
-	require.NoError(t, repo.Save(ctx, account))
-
-	// Wait for balance to be zeroed (use await instead of time.Sleep)
-	err = await.New().
-		AtMost(5 * time.Second).
-		PollInterval(100 * time.Millisecond).
-		Until(func() bool {
-			acc, findErr := repo.FindByID(ctx, accountID)
-			if findErr != nil {
-				return false
-			}
-			return acc.Balance().IsZero()
-		})
-	require.NoError(t, err, "Balance should be zeroed")
-
-	// Now close should succeed
-	closeResp, err := svc.ControlCurrentAccount(ctx, &pb.ControlCurrentAccountRequest{
+	// Now close should succeed with zero balance
+	closeResp, err := svcZeroBalance.ControlCurrentAccount(ctx, &pb.ControlCurrentAccountRequest{
 		AccountId:     accountID,
 		ControlAction: pb.ControlAction_CONTROL_ACTION_CLOSE,
 		Reason:        "Account closed after balance zeroed",

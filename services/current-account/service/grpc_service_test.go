@@ -40,6 +40,32 @@ func mustNewServiceWithIdempotency(t *testing.T, repo *persistence.Repository, l
 	return svc
 }
 
+// mustNewServiceWithPositionKeeping creates a Service with Position Keeping client for balance queries.
+// The accountBalances map configures expected balance for each account ID (in cents).
+func mustNewServiceWithPositionKeeping(t *testing.T, repo *persistence.Repository, lienRepo *persistence.LienRepository, accountBalances map[string]int64) *Service {
+	t.Helper()
+	svc, err := NewService(repo, lienRepo)
+	require.NoError(t, err, "unexpected error creating service")
+	// Inject Position Keeping client for balance queries
+	svc.posKeepingClient = &mockPositionKeepingClient{
+		accountBalances: accountBalances,
+	}
+	return svc
+}
+
+// mustNewServiceWithIdempotencyAndPositionKeeping creates a Service with both idempotency service
+// and Position Keeping client for balance queries.
+func mustNewServiceWithIdempotencyAndPositionKeeping(t *testing.T, repo *persistence.Repository, lienRepo *persistence.LienRepository, idempotencyService idempotency.Service, accountBalances map[string]int64) *Service {
+	t.Helper()
+	svc, err := NewServiceWithIdempotency(repo, lienRepo, idempotencyService)
+	require.NoError(t, err, "unexpected error creating service")
+	// Inject Position Keeping client for balance queries
+	svc.posKeepingClient = &mockPositionKeepingClient{
+		accountBalances: accountBalances,
+	}
+	return svc
+}
+
 // TestNewService_DefensiveTests verifies nil dependency validation for NewService.
 // Per ADR-0008: Constructors must validate dependencies and return errors instead of panicking.
 func TestNewService_DefensiveTests(t *testing.T) {
