@@ -64,6 +64,7 @@ func TestDefaultTopicConfig(t *testing.T) {
 	assert.Equal(t, "position-keeping.transaction-failed.v1", config.TransactionFailedTopic)
 	assert.Equal(t, "position-keeping.transaction-cancelled.v1", config.TransactionCancelledTopic)
 	assert.Equal(t, "position-keeping.bulk-transaction-captured.v1", config.BulkTransactionCapturedTopic)
+	assert.Equal(t, "position-keeping.opening-balance-recorded.v1", config.OpeningBalanceRecordedTopic)
 }
 
 func TestNewKafkaEventPublisher_NilProducer(t *testing.T) {
@@ -320,6 +321,20 @@ func TestKafkaEventPublisher_TopicMapping(t *testing.T) {
 				Timestamp: timestamp,
 			},
 			expectedTopic: "position-keeping.bulk-transaction-captured.v1",
+		},
+		{
+			name: "OpeningBalanceRecorded",
+			event: &domain.OpeningBalanceRecorded{
+				LogID:              logID,
+				AccountID:          "ACC-123",
+				OpeningBalance:     money,
+				EffectiveDate:      timestamp,
+				MigrationReference: "MIGRATION-001",
+				CorrelationID:      "CORR-123",
+				Timestamp:          timestamp,
+				Version:            1,
+			},
+			expectedTopic: "position-keeping.opening-balance-recorded.v1",
 		},
 	}
 
