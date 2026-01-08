@@ -21,10 +21,16 @@ var (
 // skipIfKafkaUnavailable checks if Kafka is available and skips the test if not.
 // This is used for integration tests that require a running Kafka broker.
 // Tests are skipped when:
+// - Running in short mode (go test -short)
 // - SKIP_KAFKA_TESTS environment variable is set (useful for CI)
 // - Cannot connect to localhost:9092 within 1 second
 func skipIfKafkaUnavailable(t *testing.T) {
 	t.Helper()
+
+	// Skip in short mode (CI runs tests with -short flag)
+	if testing.Short() {
+		t.Skip("Skipping Kafka integration test in short mode")
+	}
 
 	// Skip if explicitly requested via environment variable
 	if os.Getenv("SKIP_KAFKA_TESTS") != "" {

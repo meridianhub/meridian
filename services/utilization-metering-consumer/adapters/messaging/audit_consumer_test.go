@@ -441,6 +441,10 @@ func TestAuditConsumer_handleAuditEvent_ContextCancellation(t *testing.T) {
 }
 
 func TestAuditConsumer_Start(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping Kafka integration test in short mode")
+	}
+
 	transformer := newTestTransformer()
 	mockPK := newMockPositionKeepingClient()
 
@@ -464,15 +468,30 @@ func TestAuditConsumer_Start(t *testing.T) {
 		"tenant.audit.events",
 	}
 
-	err = consumer.Start(topics)
-	// Start may fail if Kafka is not available, but that's expected in unit tests
-	// The important part is that the method doesn't panic and handles errors
-	if err != nil {
-		t.Logf("Start failed (expected if Kafka unavailable): %v", err)
+	// Start in a goroutine with timeout since Start blocks
+	done := make(chan error, 1)
+	go func() {
+		done <- consumer.Start(topics)
+	}()
+
+	// Wait briefly then close - this test just validates Start doesn't panic
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Logf("Start returned error (expected if Kafka unavailable): %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		// Expected case - Start is blocking, which is correct behavior
+		// Close will trigger shutdown
+		t.Log("Start is blocking as expected, triggering shutdown")
 	}
 }
 
 func TestAuditConsumer_Close(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping Kafka integration test in short mode")
+	}
+
 	transformer := newTestTransformer()
 	mockPK := newMockPositionKeepingClient()
 
