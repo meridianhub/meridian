@@ -423,7 +423,7 @@ func toEntity(ctx context.Context, account domain.CurrentAccount) (*CurrentAccou
 	// ToMinorUnitsUnchecked is safe here: domain layer validates amounts before persistence,
 	// so overflow (>92 quadrillion cents) cannot occur for valid accounts
 	// Note: Balance fields are not persisted to DB (gorm:"-") but kept on entity for
-	// in-memory round-trip and backward compatibility during migration to Position Keeping.
+	// in-memory round-trip. Position Keeping is now the source of truth for balances.
 	return &CurrentAccountEntity{
 		ID:                    account.ID(),
 		AccountID:             account.AccountID(),             // Business account identifier

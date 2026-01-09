@@ -418,32 +418,6 @@ func TestInitiateCurrentAccount_PartyServiceTimeout(t *testing.T) {
 		"Should return Internal error for timeout")
 }
 
-// TestInitiateCurrentAccount_WithoutPartyClient_BackwardCompatibility verifies
-// that account creation works without party validation when party client is not configured.
-//
-// This ensures backward compatibility with existing deployments that may not have
-// the Party Service available yet.
-func TestInitiateCurrentAccount_WithoutPartyClient_BackwardCompatibility(t *testing.T) {
-	// Setup
-	db, ctx, cleanup := setupPartyIntegrationTestDB(t)
-	defer cleanup()
-
-	repo := persistence.NewRepository(db)
-
-	// Create service WITHOUT party client (backward compatibility mode)
-	svc := mustNewService(t, repo, nil)
-
-	// Execute account creation with valid UUID party ID
-	partyID := newTestPartyID()
-	req := createInitiateAccountRequest(partyID, "GB82WEST12345698765432")
-	resp, err := svc.InitiateCurrentAccount(ctx, req)
-
-	// Verify success (no party validation performed)
-	require.NoError(t, err, "Account creation should succeed without party client")
-	assert.NotNil(t, resp)
-	assert.NotEmpty(t, resp.AccountId)
-}
-
 // TestInitiateCurrentAccount_ConcurrentCreationSameParty verifies that
 // multiple accounts can be created for the same party concurrently.
 func TestInitiateCurrentAccount_ConcurrentCreationSameParty(t *testing.T) {
