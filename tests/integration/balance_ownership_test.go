@@ -573,6 +573,8 @@ func createTestAccount(t *testing.T, infra *BalanceOwnershipTestInfra, accountID
 }
 
 // recordDeposit records a deposit in both services.
+// Note: In Position Keeping domain, PostingDirectionDebit ADDS to balance (see balance_computer.go).
+// This follows the implementation where Debit increases the position, not standard accounting convention.
 func recordDeposit(t *testing.T, infra *BalanceOwnershipTestInfra, accountID string, amount money.Money, reference string) {
 	t.Helper()
 	ctx := context.Background()
@@ -581,13 +583,15 @@ func recordDeposit(t *testing.T, infra *BalanceOwnershipTestInfra, accountID str
 	err := infra.mockCAService.Deposit(ctx, accountID, amount, reference)
 	require.NoError(t, err, "failed to record deposit in Current Account")
 
-	// Record in Position Keeping
+	// Record in Position Keeping - Debit direction adds to balance
 	txnID := uuid.New()
 	err = infra.mockPKService.RecordTransaction(ctx, accountID, txnID, amount, pkdomain.PostingDirectionDebit, reference)
 	require.NoError(t, err, "failed to record deposit in Position Keeping")
 }
 
 // recordWithdrawal records a withdrawal in both services.
+// Note: In Position Keeping domain, PostingDirectionCredit SUBTRACTS from balance (see balance_computer.go).
+// This follows the implementation where Credit decreases the position, not standard accounting convention.
 func recordWithdrawal(t *testing.T, infra *BalanceOwnershipTestInfra, accountID string, amount money.Money, reference string) {
 	t.Helper()
 	ctx := context.Background()
@@ -596,7 +600,7 @@ func recordWithdrawal(t *testing.T, infra *BalanceOwnershipTestInfra, accountID 
 	err := infra.mockCAService.Withdraw(ctx, accountID, amount, reference)
 	require.NoError(t, err, "failed to record withdrawal in Current Account")
 
-	// Record in Position Keeping
+	// Record in Position Keeping - Credit direction subtracts from balance
 	txnID := uuid.New()
 	err = infra.mockPKService.RecordTransaction(ctx, accountID, txnID, amount, pkdomain.PostingDirectionCredit, reference)
 	require.NoError(t, err, "failed to record withdrawal in Position Keeping")
