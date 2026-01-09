@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -45,8 +46,10 @@ func balanceCents(m domain.Money) int64 {
 }
 
 // Mock PositionKeeping Client
+// Thread-safe for concurrent access in tests like TestExecuteWithdrawal_ConcurrentWithdrawals.
 
 type mockPositionKeepingClient struct {
+	mu              sync.Mutex
 	updateCalls     int
 	failOnUpdate    bool
 	failureError    error
@@ -63,10 +66,15 @@ type mockPositionKeepingClient struct {
 }
 
 func (m *mockPositionKeepingClient) InitiateFinancialPositionLog(_ context.Context, _ *positionkeepingv1.InitiateFinancialPositionLogRequest) (*positionkeepingv1.InitiateFinancialPositionLogResponse, error) {
+	m.mu.Lock()
 	m.initiateCalls++
-	if m.failOnInitiate {
-		if m.initiateError != nil {
-			return nil, m.initiateError
+	failOnInitiate := m.failOnInitiate
+	initiateError := m.initiateError
+	m.mu.Unlock()
+
+	if failOnInitiate {
+		if initiateError != nil {
+			return nil, initiateError
 		}
 		return nil, errPositionKeepingUnavailable
 	}
@@ -78,11 +86,15 @@ func (m *mockPositionKeepingClient) InitiateFinancialPositionLog(_ context.Conte
 }
 
 func (m *mockPositionKeepingClient) UpdateFinancialPositionLog(_ context.Context, req *positionkeepingv1.UpdateFinancialPositionLogRequest) (*positionkeepingv1.UpdateFinancialPositionLogResponse, error) {
+	m.mu.Lock()
 	m.updateCalls++
+	failOnUpdate := m.failOnUpdate
+	failureError := m.failureError
 
-	if m.failOnUpdate {
-		if m.failureError != nil {
-			return nil, m.failureError
+	if failOnUpdate {
+		m.mu.Unlock()
+		if failureError != nil {
+			return nil, failureError
 		}
 		return nil, errPositionKeepingUnavailable
 	}
@@ -126,12 +138,15 @@ func (m *mockPositionKeepingClient) UpdateFinancialPositionLog(_ context.Context
 		resp = m.updateResponses[0]
 		m.updateResponses = m.updateResponses[1:]
 	}
+	m.mu.Unlock()
 
 	return resp, nil
 }
 
 func (m *mockPositionKeepingClient) RetrieveFinancialPositionLog(_ context.Context, req *positionkeepingv1.RetrieveFinancialPositionLogRequest) (*positionkeepingv1.RetrieveFinancialPositionLogResponse, error) {
+	m.mu.Lock()
 	m.retrieveCalls++
+	m.mu.Unlock()
 	return &positionkeepingv1.RetrieveFinancialPositionLogResponse{
 		Log: &positionkeepingv1.FinancialPositionLog{
 			LogId: req.LogId,
@@ -140,21 +155,27 @@ func (m *mockPositionKeepingClient) RetrieveFinancialPositionLog(_ context.Conte
 }
 
 func (m *mockPositionKeepingClient) BulkImportTransactions(_ context.Context, _ *positionkeepingv1.BulkImportTransactionsRequest) (*positionkeepingv1.BulkImportTransactionsResponse, error) {
+	m.mu.Lock()
 	m.bulkImportCalls++
+	m.mu.Unlock()
 	return &positionkeepingv1.BulkImportTransactionsResponse{}, nil
 }
 
 func (m *mockPositionKeepingClient) ListFinancialPositionLogs(_ context.Context, _ *positionkeepingv1.ListFinancialPositionLogsRequest) (*positionkeepingv1.ListFinancialPositionLogsResponse, error) {
+	m.mu.Lock()
 	m.listCalls++
+	m.mu.Unlock()
 	return &positionkeepingv1.ListFinancialPositionLogsResponse{}, nil
 }
 
 func (m *mockPositionKeepingClient) GetAccountBalance(_ context.Context, req *positionkeepingv1.GetAccountBalanceRequest) (*positionkeepingv1.GetAccountBalanceResponse, error) {
+	m.mu.Lock()
 	// Return configured balance if available
 	var balanceCents int64
 	if m.accountBalances != nil {
 		balanceCents = m.accountBalances[req.AccountId]
 	}
+	m.mu.Unlock()
 	// Convert cents to units.nanos format (e.g., 10050 cents = 100 units + 500000000 nanos)
 	units := balanceCents / 100
 	nanos := (balanceCents % 100) * 10000000
@@ -184,8 +205,10 @@ func (m *mockPositionKeepingClient) Close() error {
 }
 
 // Mock FinancialAccounting Client
+// Thread-safe for concurrent access in tests like TestExecuteWithdrawal_ConcurrentWithdrawals.
 
 type mockFinancialAccountingClient struct {
+	mu                  sync.Mutex
 	captureCalls        int
 	debitCaptureCalls   int // Track debit postings specifically
 	creditCaptureCalls  int // Track credit postings specifically
@@ -205,7 +228,9 @@ type mockFinancialAccountingClient struct {
 }
 
 func (m *mockFinancialAccountingClient) InitiateFinancialBookingLog(_ context.Context, _ *financialaccountingv1.InitiateFinancialBookingLogRequest) (*financialaccountingv1.InitiateFinancialBookingLogResponse, error) {
+	m.mu.Lock()
 	m.initiateCalls++
+	m.mu.Unlock()
 	return &financialaccountingv1.InitiateFinancialBookingLogResponse{
 		FinancialBookingLog: &financialaccountingv1.FinancialBookingLog{
 			Id:        "BOOK-LOG-001",
@@ -217,11 +242,15 @@ func (m *mockFinancialAccountingClient) InitiateFinancialBookingLog(_ context.Co
 }
 
 func (m *mockFinancialAccountingClient) UpdateFinancialBookingLog(_ context.Context, req *financialaccountingv1.UpdateFinancialBookingLogRequest) (*financialaccountingv1.UpdateFinancialBookingLogResponse, error) {
+	m.mu.Lock()
 	m.updateCalls++
+	failOnUpdate := m.failOnUpdate
+	failureError := m.failureError
+	m.mu.Unlock()
 
-	if m.failOnUpdate {
-		if m.failureError != nil {
-			return nil, m.failureError
+	if failOnUpdate {
+		if failureError != nil {
+			return nil, failureError
 		}
 		return nil, errFinancialAccountingUnavailable
 	}
@@ -237,7 +266,9 @@ func (m *mockFinancialAccountingClient) UpdateFinancialBookingLog(_ context.Cont
 }
 
 func (m *mockFinancialAccountingClient) RetrieveFinancialBookingLog(_ context.Context, req *financialaccountingv1.RetrieveFinancialBookingLogRequest) (*financialaccountingv1.RetrieveFinancialBookingLogResponse, error) {
+	m.mu.Lock()
 	m.retrieveLogCalls++
+	m.mu.Unlock()
 	return &financialaccountingv1.RetrieveFinancialBookingLogResponse{
 		FinancialBookingLog: &financialaccountingv1.FinancialBookingLog{
 			Id:        req.Id,
@@ -249,41 +280,50 @@ func (m *mockFinancialAccountingClient) RetrieveFinancialBookingLog(_ context.Co
 }
 
 func (m *mockFinancialAccountingClient) ListFinancialBookingLogs(_ context.Context, _ *financialaccountingv1.ListFinancialBookingLogsRequest) (*financialaccountingv1.ListFinancialBookingLogsResponse, error) {
+	m.mu.Lock()
 	m.listCalls++
+	m.mu.Unlock()
 	return &financialaccountingv1.ListFinancialBookingLogsResponse{}, nil
 }
 
 func (m *mockFinancialAccountingClient) CaptureLedgerPosting(_ context.Context, req *financialaccountingv1.CaptureLedgerPostingRequest) (*financialaccountingv1.CaptureLedgerPostingResponse, error) {
+	m.mu.Lock()
 	m.captureCalls++
 	m.lastCapturedReq = req
+	failOnDebitCapture := m.failOnDebitCapture
+	failOnCreditCapture := m.failOnCreditCapture
+	failOnCapture := m.failOnCapture
+	failureError := m.failureError
+	m.mu.Unlock()
 
 	// Check for debit-specific failure before tracking
-	if m.failOnDebitCapture && req.PostingDirection == commonpb.PostingDirection_POSTING_DIRECTION_DEBIT {
-		if m.failureError != nil {
-			return nil, m.failureError
+	if failOnDebitCapture && req.PostingDirection == commonpb.PostingDirection_POSTING_DIRECTION_DEBIT {
+		if failureError != nil {
+			return nil, failureError
 		}
 		return nil, errFinancialAccountingUnavailable
 	}
 
 	// Check for credit-specific failure (simulates credit posting failure after debit succeeds)
-	if m.failOnCreditCapture && req.PostingDirection == commonpb.PostingDirection_POSTING_DIRECTION_CREDIT {
+	if failOnCreditCapture && req.PostingDirection == commonpb.PostingDirection_POSTING_DIRECTION_CREDIT {
 		// Only fail on non-compensation credits (original credit posting, not compensation reversals)
 		if req.IdempotencyKey == nil || len(req.IdempotencyKey.Key) < 4 || req.IdempotencyKey.Key[:4] != "COMP" {
-			if m.failureError != nil {
-				return nil, m.failureError
+			if failureError != nil {
+				return nil, failureError
 			}
 			return nil, errFinancialAccountingUnavailable
 		}
 	}
 
-	if m.failOnCapture {
-		if m.failureError != nil {
-			return nil, m.failureError
+	if failOnCapture {
+		if failureError != nil {
+			return nil, failureError
 		}
 		return nil, errFinancialAccountingUnavailable
 	}
 
 	// Track debit vs credit postings separately (only on success)
+	m.mu.Lock()
 	if req.PostingDirection == commonpb.PostingDirection_POSTING_DIRECTION_DEBIT { //nolint:staticcheck // QF1003 suggests switch but if-else is clearer for binary cases
 		m.debitCaptureCalls++
 		// Only count as compensation if this is a reversal (idempotency key contains "COMP")
@@ -311,12 +351,15 @@ func (m *mockFinancialAccountingClient) CaptureLedgerPosting(_ context.Context, 
 		resp = m.captureResponses[0]
 		m.captureResponses = m.captureResponses[1:]
 	}
+	m.mu.Unlock()
 
 	return resp, nil
 }
 
 func (m *mockFinancialAccountingClient) RetrieveLedgerPosting(_ context.Context, req *financialaccountingv1.RetrieveLedgerPostingRequest) (*financialaccountingv1.RetrieveLedgerPostingResponse, error) {
+	m.mu.Lock()
 	m.retrievePostCalls++
+	m.mu.Unlock()
 	return &financialaccountingv1.RetrieveLedgerPostingResponse{
 		LedgerPosting: &financialaccountingv1.LedgerPosting{
 			Id:        req.Id,
@@ -717,45 +760,6 @@ func TestExecuteDeposit_WithOrchestration_ContextPropagation(t *testing.T) {
 	// correlation IDs in distributed traces.
 }
 
-// Test 8: Backward compatibility (no clients configured)
-
-// TestExecuteDeposit_WithoutClients_BackwardCompatibility verifies that
-// the service continues to work when clients are not configured, falling
-// back to simple database-only operation.
-//
-// This ensures backward compatibility with existing deployments that may
-// not have the downstream services available yet.
-func TestExecuteDeposit_WithoutClients_BackwardCompatibility(t *testing.T) {
-	// Setup
-	db, ctx, cleanup := setupIntegrationTestDB(t)
-	defer cleanup()
-
-	repo := persistence.NewRepository(db)
-	_ = createTestAccount(t, ctx, repo, "ACC-006")
-
-	// Create service WITHOUT clients (backward compatibility mode)
-	svc := mustNewService(t, repo, nil)
-
-	// Execute deposit
-	req := createTestDepositRequest("ACC-006", 200, 0) // £200.00
-	resp, err := svc.ExecuteDeposit(ctx, req)
-
-	// Verify success
-	require.NoError(t, err)
-	assert.Equal(t, "ACC-006", resp.AccountId)
-	assert.NotEmpty(t, resp.TransactionId)
-	assert.Equal(t, pb.TransactionStatus_TRANSACTION_STATUS_COMPLETED, resp.Status)
-
-	// Verify balance is updated in response
-	// Note: Balance is now managed by Position Keeping service, not persisted locally
-	assert.NotNil(t, resp.NewBalance)
-	assert.Equal(t, int64(200), resp.NewBalance.Amount.Units)
-
-	// Verify account exists (balance not checked - Position Keeping is authoritative)
-	_, err = repo.FindByID(ctx, "ACC-006")
-	require.NoError(t, err)
-}
-
 // Double-Entry Bookkeeping Tests (with AccountConfig)
 
 // TestExecuteDeposit_DoubleEntry_CreatesDualPostings verifies that when AccountConfig
@@ -1055,49 +1059,6 @@ func TestExecuteDeposit_DoubleEntry_CreditPostingFailure(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, originalBalance, balanceCents(updatedAccount.Balance()),
 		"Account balance should remain unchanged after failure and compensation")
-}
-
-// TestExecuteDeposit_SingleEntry_BackwardCompatibility verifies that deposits work
-// without AccountConfig (backward compatibility - single-entry mode).
-func TestExecuteDeposit_SingleEntry_BackwardCompatibility(t *testing.T) {
-	// Setup
-	db, ctx, cleanup := setupIntegrationTestDB(t)
-	defer cleanup()
-
-	repo := persistence.NewRepository(db)
-	_ = createTestAccount(t, ctx, repo, "ACC-SE-001")
-
-	// Create mock clients
-	mockPosKeeping := &mockPositionKeepingClient{}
-	mockFinAcct := &mockFinancialAccountingClient{}
-
-	// Create service WITHOUT AccountConfig (single-entry/backward compatible mode)
-	svc := &Service{
-		repo:                repo,
-		posKeepingClient:    mockPosKeeping,
-		finAcctClient:       mockFinAcct,
-		accountConfig:       nil, // No AccountConfig - single-entry mode
-		logger:              testLogger(),
-		depositOrchestrator: testDepositOrchestrator(repo, mockPosKeeping, mockFinAcct),
-	}
-
-	// Execute deposit
-	req := createTestDepositRequest("ACC-SE-001", 75, 0) // £75.00
-	resp, err := svc.ExecuteDeposit(ctx, req)
-
-	// Verify success
-	require.NoError(t, err, "Deposit should succeed")
-	assert.Equal(t, "ACC-SE-001", resp.AccountId)
-	assert.Equal(t, pb.TransactionStatus_TRANSACTION_STATUS_COMPLETED, resp.Status)
-
-	// Verify single posting (credit only, no debit)
-	assert.Equal(t, 1, mockFinAcct.captureCalls, "Should have 1 capture call (credit only)")
-	assert.Equal(t, 0, mockFinAcct.debitCaptureCalls, "Should have no debit posting")
-	assert.Equal(t, 1, mockFinAcct.creditCaptureCalls, "Should have 1 credit posting")
-
-	// Verify BookingLog flow
-	assert.Equal(t, 1, mockFinAcct.initiateCalls, "Should initiate 1 BookingLog")
-	assert.Equal(t, 1, mockFinAcct.updateCalls, "Should update BookingLog to POSTED")
 }
 
 // TestExecuteDeposit_DoubleEntry_ClearingAccountUsedForDebit verifies that the debit

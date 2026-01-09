@@ -1,7 +1,7 @@
 # PositionKeeping Service Behavioral API Contract
 
-**Document Version:** 1.0
-**Last Updated:** 2025-11-19
+**Document Version:** 1.1
+**Last Updated:** 2026-01-08
 **Status:** Active
 **BIAN Domain:** Position Keeping (Service Domain)
 **Proto Definition:** `api/proto/meridian/position_keeping/v1/position_keeping.proto`
@@ -10,6 +10,7 @@
 
 - [BIAN Service Boundaries](../bian-service-boundaries.md)
 - [Service Coupling Analysis](../service-coupling-analysis.md)
+- [ADR-0023: Balance Delegation to Position Keeping](../adr/0023-balance-delegation-to-position-keeping.md)
 
 ## Overview
 
@@ -24,6 +25,7 @@ The PositionKeeping service implements the BIAN Position Keeping service domain,
 - Position snapshot generation and reporting
 - Bulk transaction import (up to 1,000 entries per batch)
 - Event publishing for downstream consumers
+- **Balance computation** (authoritative source for all 7 BIAN balance types - see ADR-0023)
 
 **Architectural Pattern:** Stable Provider Service (Instability I=0.00)
 
@@ -1294,6 +1296,245 @@ The PositionKeeping service publishes events to Kafka for downstream consumers (
 
 Defined in `api/proto/meridian/events/v1/position_keeping_events.proto`.
 
+## Balance Query APIs
+
+Position Keeping is the authoritative source for balance computation (ADR-0023). Balance is
+computed on-demand from POSTED transaction entries.
+
+### GetAccountBalance
+
+Retrieves a single balance type for an account.
+
+**Proto Definition:**
+
+```protobuf
+rpc GetAccountBalance(GetAccountBalanceRequest) returns (GetAccountBalanceResponse);
+
+message GetAccountBalanceRequest {
+  string account_id = 1;                          // Account to query (required)
+  BalanceType balance_type = 2;                   // Balance type to retrieve (required)
+  string currency = 3;                            // Currency filter (optional)
+}
+
+message GetAccountBalanceResponse {
+  string account_id = 1;                          // Account queried
+  BalanceType balance_type = 2;                   // Balance type returned
+  meridian.common.v1.MoneyAmount amount = 3;      // Balance amount
+  google.protobuf.Timestamp as_of = 4;            // Timestamp of computation
+}
+```
+
+**Behavioral Semantics:**
+
+This operation computes the requested balance type from POSTED transaction entries.
+
+**Preconditions:**
+
+- `account_id` must be non-empty (1-255 chars)
+- `balance_type` must be defined enum value (not UNSPECIFIED)
+- If `currency` provided, must be valid currency code
+
+**Postconditions:**
+
+- Returns computed balance for requested type
+- `as_of` reflects timestamp of computation
+- No state changes (read-only)
+
+**Balance Types:**
+
+| Balance Type | Proto Enum | Computation |
+|--------------|------------|-------------|
+| Opening | `BALANCE_TYPE_OPENING` | Balance at start of accounting period |
+| Closing | `BALANCE_TYPE_CLOSING` | Balance at end of accounting period |
+| Current | `BALANCE_TYPE_CURRENT` | Sum of all POSTED transactions |
+| Available | `BALANCE_TYPE_AVAILABLE` | Current minus holds, liens, reserves |
+| Ledger | `BALANCE_TYPE_LEDGER` | Book balance |
+| Reserve | `BALANCE_TYPE_RESERVE` | Amount held in reserve |
+| Free | `BALANCE_TYPE_FREE` | Unencumbered balance |
+
+**Error Handling:**
+
+| Error Code | Condition | Response | Retry Strategy |
+|------------|-----------|----------|----------------|
+| `INVALID_ARGUMENT` | Missing account_id | Details indicate field | Do not retry |
+| `INVALID_ARGUMENT` | Invalid balance_type | Details show valid types | Do not retry |
+| `NOT_FOUND` | Account has no transactions | Returns zero balance | Normal (new account) |
+| `DEADLINE_EXCEEDED` | Computation timeout | Timeout duration | Retry with backoff |
+| `INTERNAL` | Database failure | Stack trace in logs | Retry with backoff |
+
+**Idempotency:**
+
+Fully idempotent. Read-only operation with no side effects.
+
+**Examples:**
+
+```json
+// Query available balance
+Request: {
+  "account_id": "acc-550e8400-e29b-41d4-a716-446655440000",
+  "balance_type": "BALANCE_TYPE_AVAILABLE",
+  "currency": "GBP"
+}
+
+Response: {
+  "account_id": "acc-550e8400-e29b-41d4-a716-446655440000",
+  "balance_type": "BALANCE_TYPE_AVAILABLE",
+  "amount": {
+    "currency_code": "GBP",
+    "units": 1500,
+    "nanos": 500000000
+  },
+  "as_of": "2026-01-08T14:30:00Z"
+}
+```
+
+---
+
+### GetAccountBalances
+
+Retrieves all balance types for an account in a single call.
+
+**Proto Definition:**
+
+```protobuf
+rpc GetAccountBalances(GetAccountBalancesRequest) returns (GetAccountBalancesResponse);
+
+message GetAccountBalancesRequest {
+  string account_id = 1;                          // Account to query (required)
+  string currency = 2;                            // Currency filter (optional)
+}
+
+message GetAccountBalancesResponse {
+  string account_id = 1;                          // Account queried
+  repeated BalanceEntry balances = 2;             // All balance types
+  google.protobuf.Timestamp as_of = 3;            // Timestamp of computation
+}
+
+message BalanceEntry {
+  BalanceType balance_type = 1;
+  meridian.common.v1.MoneyAmount amount = 2;
+}
+```
+
+**Behavioral Semantics:**
+
+This operation computes all 7 balance types in a single pass over POSTED transactions.
+More efficient than calling `GetAccountBalance` 7 times.
+
+**Preconditions:**
+
+- `account_id` must be non-empty (1-255 chars)
+- If `currency` provided, must be valid currency code
+
+**Postconditions:**
+
+- Returns 7 balance entries (one per balance type)
+- All balances computed from same transaction snapshot
+- `as_of` reflects timestamp of computation
+- No state changes (read-only)
+
+**Performance:**
+
+- Single query: O(n) where n = number of POSTED transactions
+- All 7 balance types computed in single pass
+- More efficient than 7 individual `GetAccountBalance` calls
+
+**Error Handling:**
+
+| Error Code | Condition | Response | Retry Strategy |
+|------------|-----------|----------|----------------|
+| `INVALID_ARGUMENT` | Missing account_id | Details indicate field | Do not retry |
+| `NOT_FOUND` | Account has no transactions | Returns zero for all types | Normal (new account) |
+| `DEADLINE_EXCEEDED` | Computation timeout | Timeout duration | Retry with backoff |
+| `INTERNAL` | Database failure | Stack trace in logs | Retry with backoff |
+
+**Idempotency:**
+
+Fully idempotent. Read-only operation with no side effects.
+
+**Examples:**
+
+```json
+// Query all balances
+Request: {
+  "account_id": "acc-550e8400-e29b-41d4-a716-446655440000",
+  "currency": "GBP"
+}
+
+Response: {
+  "account_id": "acc-550e8400-e29b-41d4-a716-446655440000",
+  "balances": [
+    {
+      "balance_type": "BALANCE_TYPE_OPENING",
+      "amount": { "currency_code": "GBP", "units": 10000, "nanos": 0 }
+    },
+    {
+      "balance_type": "BALANCE_TYPE_CLOSING",
+      "amount": { "currency_code": "GBP", "units": 15000, "nanos": 0 }
+    },
+    {
+      "balance_type": "BALANCE_TYPE_CURRENT",
+      "amount": { "currency_code": "GBP", "units": 15500, "nanos": 500000000 }
+    },
+    {
+      "balance_type": "BALANCE_TYPE_AVAILABLE",
+      "amount": { "currency_code": "GBP", "units": 14000, "nanos": 0 }
+    },
+    {
+      "balance_type": "BALANCE_TYPE_LEDGER",
+      "amount": { "currency_code": "GBP", "units": 15500, "nanos": 500000000 }
+    },
+    {
+      "balance_type": "BALANCE_TYPE_RESERVE",
+      "amount": { "currency_code": "GBP", "units": 500, "nanos": 0 }
+    },
+    {
+      "balance_type": "BALANCE_TYPE_FREE",
+      "amount": { "currency_code": "GBP", "units": 14000, "nanos": 0 }
+    }
+  ],
+  "as_of": "2026-01-08T14:30:00Z"
+}
+```
+
+---
+
+### Balance Computation Semantics
+
+Balance is computed on-demand from POSTED transactions:
+
+```text
+CURRENT   = Σ(POSTED transactions: credits - debits)
+AVAILABLE = CURRENT - RESERVE - ACTIVE_LIENS
+LEDGER    = CURRENT (excluding pending transactions)
+FREE      = CURRENT - RESERVE - HOLDS
+OPENING   = Balance at accounting period start
+CLOSING   = Balance at accounting period end
+```
+
+### Balance Query Architecture
+
+```mermaid
+sequenceDiagram
+    participant CA as CurrentAccount
+    participant PK as PositionKeeping
+    participant DB as PositionKeeping DB
+
+    CA->>PK: GetAccountBalances(accountID)
+    PK->>DB: SELECT entries WHERE status=POSTED
+    DB-->>PK: Transaction entries
+    PK->>PK: Compute all balance types
+    PK-->>CA: BalanceEntry[] (7 types)
+```
+
+### Performance Optimization
+
+For high-traffic accounts, consider:
+
+- **Balance snapshots**: Periodic materialized balance at EOD
+- **Caching**: Short-lived cache (TTL 1-5 seconds) for read-heavy workloads
+- **Async computation**: Background balance computation for non-critical queries
+
 ## Future Enhancements
 
 ### Planned Features
@@ -1305,6 +1546,7 @@ Defined in `api/proto/meridian/events/v1/position_keeping_events.proto`.
 5. **Archival**: Automatic archival of old logs (> 1 year)
 6. **Lineage API**: Dedicated RPC for lineage traversal queries
 7. **Aggregate Queries**: Sum/count operations across logs
+8. **Balance Snapshots**: Materialized balance views for high-traffic accounts
 
 ## Related Documentation
 
@@ -1316,4 +1558,5 @@ Defined in `api/proto/meridian/events/v1/position_keeping_events.proto`.
 - **Financial Accounting Contract**: `docs/architecture/api-contracts/financial-accounting-contract.md`
 - **ADR-0002**: Microservices Per BIAN Domain
 - **ADR-0004**: Event Schema Evolution
+- **ADR-0023**: Balance Delegation to Position Keeping
 - **BIAN Reference**: Position Keeping Service Domain (Release 13.0)

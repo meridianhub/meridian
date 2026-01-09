@@ -24,45 +24,75 @@ import (
 	"gorm.io/gorm"
 )
 
-// mustNewService creates a Service and fails the test if an error occurs.
+// injectMandatoryClients sets up mock Position Keeping and Financial Accounting clients with orchestrators.
+// Position Keeping and orchestration are now mandatory for all deposit/withdrawal operations.
+func injectMandatoryClients(t *testing.T, svc *Service, repo *persistence.Repository, accountBalances map[string]int64) {
+	t.Helper()
+	if accountBalances == nil {
+		accountBalances = make(map[string]int64)
+	}
+	mockPosKeeping := &mockPositionKeepingClient{accountBalances: accountBalances}
+	mockFinAcct := &mockFinancialAccountingClient{}
+
+	svc.posKeepingClient = mockPosKeeping
+	svc.finAcctClient = mockFinAcct
+
+	// Create orchestrators with mocked clients
+	depositOrch, err := NewDepositOrchestrator(DepositOrchestratorConfig{
+		Logger:           testLogger(),
+		Repo:             repo,
+		PosKeepingClient: mockPosKeeping,
+		FinAcctClient:    mockFinAcct,
+	})
+	require.NoError(t, err, "failed to create deposit orchestrator")
+	svc.depositOrchestrator = depositOrch
+
+	withdrawalOrch, err := NewWithdrawalOrchestrator(WithdrawalOrchestratorConfig{
+		Logger:           testLogger(),
+		Repo:             repo,
+		PosKeepingClient: mockPosKeeping,
+		FinAcctClient:    mockFinAcct,
+	})
+	require.NoError(t, err, "failed to create withdrawal orchestrator")
+	svc.withdrawalOrchestrator = withdrawalOrch
+}
+
+// mustNewService creates a Service with mock Position Keeping, Financial Accounting, and orchestrators.
+// Position Keeping is now mandatory - all operations require balance queries and orchestration.
 func mustNewService(t *testing.T, repo *persistence.Repository, lienRepo *persistence.LienRepository) *Service {
 	t.Helper()
 	svc, err := NewService(repo, lienRepo)
 	require.NoError(t, err, "unexpected error creating service")
+	injectMandatoryClients(t, svc, repo, nil)
 	return svc
 }
 
-// mustNewServiceWithIdempotency creates a Service with idempotency and fails the test if an error occurs.
+// mustNewServiceWithIdempotency creates a Service with idempotency and mock clients.
+// Position Keeping is now mandatory - all operations require balance queries and orchestration.
 func mustNewServiceWithIdempotency(t *testing.T, repo *persistence.Repository, lienRepo *persistence.LienRepository, idempotencyService idempotency.Service) *Service {
 	t.Helper()
 	svc, err := NewServiceWithIdempotency(repo, lienRepo, idempotencyService)
 	require.NoError(t, err, "unexpected error creating service")
+	injectMandatoryClients(t, svc, repo, nil)
 	return svc
 }
 
-// mustNewServiceWithPositionKeeping creates a Service with Position Keeping client for balance queries.
+// mustNewServiceWithPositionKeeping creates a Service with mock clients and specified account balances.
 // The accountBalances map configures expected balance for each account ID (in cents).
 func mustNewServiceWithPositionKeeping(t *testing.T, repo *persistence.Repository, lienRepo *persistence.LienRepository, accountBalances map[string]int64) *Service {
 	t.Helper()
 	svc, err := NewService(repo, lienRepo)
 	require.NoError(t, err, "unexpected error creating service")
-	// Inject Position Keeping client for balance queries
-	svc.posKeepingClient = &mockPositionKeepingClient{
-		accountBalances: accountBalances,
-	}
+	injectMandatoryClients(t, svc, repo, accountBalances)
 	return svc
 }
 
-// mustNewServiceWithIdempotencyAndPositionKeeping creates a Service with both idempotency service
-// and Position Keeping client for balance queries.
+// mustNewServiceWithIdempotencyAndPositionKeeping creates a Service with idempotency and mock clients.
 func mustNewServiceWithIdempotencyAndPositionKeeping(t *testing.T, repo *persistence.Repository, lienRepo *persistence.LienRepository, idempotencyService idempotency.Service, accountBalances map[string]int64) *Service {
 	t.Helper()
 	svc, err := NewServiceWithIdempotency(repo, lienRepo, idempotencyService)
 	require.NoError(t, err, "unexpected error creating service")
-	// Inject Position Keeping client for balance queries
-	svc.posKeepingClient = &mockPositionKeepingClient{
-		accountBalances: accountBalances,
-	}
+	injectMandatoryClients(t, svc, repo, accountBalances)
 	return svc
 }
 
@@ -282,7 +312,10 @@ func TestExecuteDeposit(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := mustNewService(t, repo, nil)
+	// Configure mock with expected post-deposit balance (£100.50 = 10050 cents)
+	svc := mustNewServiceWithPositionKeeping(t, repo, nil, map[string]int64{
+		"ACC-001": 10050, // £100.50 after deposit
+	})
 
 	// Create account first
 	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
@@ -321,12 +354,12 @@ func TestExecuteDeposit(t *testing.T) {
 		t.Errorf("Expected COMPLETED status, got %v", resp.Status)
 	}
 
-	// Verify balance
+	// Verify balance (from Position Keeping mock)
 	if resp.NewBalance == nil {
 		t.Fatal("Expected new balance in response")
 	}
 
-	expectedUnits := int64(100)
+	expectedUnits := int64(100) // £100.50 = 10050 cents = 100 units + 50 cents
 	if resp.NewBalance.Amount.Units != expectedUnits {
 		t.Errorf("Expected balance units %d, got %d", expectedUnits, resp.NewBalance.Amount.Units)
 	}
@@ -963,7 +996,12 @@ func TestExecuteDeposit_IdempotencyProceedsWithoutKey(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	mockIdemp := newMockIdempotencyService()
-	svc := mustNewServiceWithIdempotency(t, repo, nil, mockIdemp)
+	// Configure mock with POST-deposit balance (5000 cents = £50.00).
+	// Position Keeping is the source of truth and would have recorded the CREDIT
+	// by the time we query the balance.
+	svc := mustNewServiceWithIdempotencyAndPositionKeeping(t, repo, nil, mockIdemp, map[string]int64{
+		"ACC-IDEMP-003": 5000, // £50 post-deposit
+	})
 
 	// Create account
 	account, err := domain.NewCurrentAccount("ACC-IDEMP-003", "ACC-IDEMP-003", uuid.New().String(), "GBP")

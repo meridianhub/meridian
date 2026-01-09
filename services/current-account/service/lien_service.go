@@ -120,8 +120,8 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 	// 2. Liens are reservations - actual fund movement happens only on ExecuteLien
 	// 3. The alternative (external calls inside transaction) risks deadlocks
 	// 4. False rejections are recoverable (retry), false acceptances fail at execution time
-	prefetchAccount, err := s.repo.FindByID(ctx, req.AccountId)
-	if err != nil {
+	// Verify account exists before prefetching balance from Position Keeping
+	if _, err := s.repo.FindByID(ctx, req.AccountId); err != nil {
 		if errors.Is(err, persistence.ErrAccountNotFound) {
 			operationStatus = opStatusAccountNotFound
 			return nil, status.Errorf(codes.NotFound, "account not found: %s", req.AccountId)
@@ -129,7 +129,7 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		operationStatus = opStatusRetrieveFailed
 		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
 	}
-	prefetchedBalanceCents, err := s.getAccountBalanceCents(ctx, req.AccountId, prefetchAccount.Balance())
+	prefetchedBalanceCents, err := s.getAccountBalanceCents(ctx, req.AccountId)
 	if err != nil {
 		operationStatus = opStatusRetrieveFailed
 		s.logger.Error("failed to prefetch balance from Position Keeping", "account_id", req.AccountId, "error", err)
@@ -379,7 +379,7 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 		operationStatus = opStatusRetrieveAccountFailed
 		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
 	}
-	prefetchedBalanceCents, err := s.getAccountBalanceCents(ctx, prefetchAccount.AccountID(), prefetchAccount.Balance())
+	prefetchedBalanceCents, err := s.getAccountBalanceCents(ctx, prefetchAccount.AccountID())
 	if err != nil {
 		operationStatus = opStatusRetrieveFailed
 		s.logger.Error("failed to prefetch balance from Position Keeping", "account_id", prefetchAccount.AccountID(), "error", err)
@@ -837,16 +837,10 @@ func (s *Service) checkLienIdempotency(ctx context.Context, paymentOrderRef stri
 }
 
 // hydrateAccountWithBalance returns a new CurrentAccount with balance populated from Position Keeping.
-// If Position Keeping is not available, returns the account with its existing (potentially zero) balance.
-// This is needed because balance is no longer persisted to the database - it comes from Position Keeping.
+// Position Keeping is the source of truth for account balances - this method MUST be called
+// before any operation that requires the current balance.
 func (s *Service) hydrateAccountWithBalance(ctx context.Context, account domain.CurrentAccount) (domain.CurrentAccount, error) {
-	if s.posKeepingClient == nil {
-		// Position Keeping not configured - return account as-is.
-		// This maintains backward compatibility during migration.
-		return account, nil
-	}
-
-	balanceCents, err := s.getAccountBalanceCents(ctx, account.AccountID(), account.Balance())
+	balanceCents, err := s.getAccountBalanceCents(ctx, account.AccountID())
 	if err != nil {
 		return domain.CurrentAccount{}, fmt.Errorf("failed to get balance from Position Keeping: %w", err)
 	}
@@ -934,15 +928,9 @@ func (s *Service) hydrateAccountWithPrefetchedBalance(account domain.CurrentAcco
 }
 
 // getAccountBalanceCents gets the account balance in cents from Position Keeping service.
-// If Position Keeping is not available, falls back to the provided fallbackBalance for backward compatibility.
+// Position Keeping is the mandatory source of truth for all account balances.
 // Returns balance in minor units (cents/pence).
-func (s *Service) getAccountBalanceCents(ctx context.Context, accountID string, fallbackBalance domain.Money) (int64, error) {
-	if s.posKeepingClient == nil {
-		// Position Keeping not configured - fall back to provided balance.
-		// This maintains backward compatibility during migration to Position Keeping.
-		return fallbackBalance.ToMinorUnits()
-	}
-
+func (s *Service) getAccountBalanceCents(ctx context.Context, accountID string) (int64, error) {
 	resp, err := s.posKeepingClient.GetAccountBalance(ctx, &positionkeepingv1.GetAccountBalanceRequest{
 		AccountId:   accountID,
 		BalanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
