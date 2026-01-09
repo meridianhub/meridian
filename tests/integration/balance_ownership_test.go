@@ -399,11 +399,11 @@ func (m *MockPositionKeepingService) GetAccountBalance(ctx context.Context, acco
 		if m.caClient == nil {
 			return nil, fmt.Errorf("current account client not configured")
 		}
-		liens, err := m.caClient.GetActiveAmountBlocks(ctx, accountID)
-		if err != nil {
-			return nil, err
+		liens, liensErr := m.caClient.GetActiveAmountBlocks(ctx, accountID)
+		if liensErr != nil {
+			return nil, liensErr
 		}
-		balance, err = calculateReserveBalance(liens)
+		balance, err = calculateReserveBalance(liens, log.OpeningBalance.Currency())
 		if err != nil {
 			return nil, err
 		}
@@ -412,13 +412,13 @@ func (m *MockPositionKeepingService) GetAccountBalance(ctx context.Context, acco
 			return nil, fmt.Errorf("current account client not configured")
 		}
 		current := log.CalculateCurrentBalance()
-		liens, err := m.caClient.GetActiveAmountBlocks(ctx, accountID)
-		if err != nil {
-			return nil, err
+		liens, liensErr := m.caClient.GetActiveAmountBlocks(ctx, accountID)
+		if liensErr != nil {
+			return nil, liensErr
 		}
-		reserve, err := calculateReserveBalance(liens)
-		if err != nil {
-			return nil, err
+		reserve, reserveErr := calculateReserveBalance(liens, current.Currency())
+		if reserveErr != nil {
+			return nil, reserveErr
 		}
 		balance, err = current.Subtract(*reserve)
 		if err != nil {
@@ -492,9 +492,11 @@ func (m *MockPositionKeepingService) persistEntry(ctx context.Context, logID uui
 }
 
 // calculateReserveBalance sums all active liens.
-func calculateReserveBalance(liens []cadomain.AmountBlock) (*money.Money, error) {
+// Returns zero money in the given currency if no liens exist.
+func calculateReserveBalance(liens []cadomain.AmountBlock, defaultCurrency money.Currency) (*money.Money, error) {
 	if len(liens) == 0 {
-		return &money.Money{}, nil
+		zeroMoney := money.MustNewMoney(decimal.Zero, defaultCurrency)
+		return &zeroMoney, nil
 	}
 
 	// Use the currency of the first lien
@@ -519,6 +521,7 @@ func calculateReserveBalance(liens []cadomain.AmountBlock) (*money.Money, error)
 // createTestAccount creates an account in Current Account and initializes position log.
 func createTestAccount(t *testing.T, infra *BalanceOwnershipTestInfra, accountID, currency string, openingBalance money.Money) {
 	t.Helper()
+	require.GreaterOrEqual(t, len(accountID), 6, "accountID must be at least 6 characters for IBAN generation")
 	ctx := context.Background()
 
 	// Create account in Current Account
