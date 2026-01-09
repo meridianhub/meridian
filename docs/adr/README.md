@@ -60,6 +60,13 @@ Architectural Decision Records) format.
 <!-- markdownlint-disable-next-line MD013 -->
 | [ADR-0017](0017-temporal-quality-ladder.md) | Temporal Quality Ledger (Data Physics) | Proposed | 2025-12-14 |
 | [ADR-0018](0018-settlement-reconciliation.md) | Settlement & Reconciliation (Lifecycle) | Proposed | 2025-12-14 |
+| [ADR-0019](0019-resilient-client-patterns.md) | Resilient Client Patterns | Accepted | 2025-12-18 |
+| [ADR-0020](0020-per-service-audit-workers.md) | Per-Service Audit Workers | Accepted | 2025-12-20 |
+<!-- markdownlint-disable-next-line MD013 -->
+| [ADR-0021](0021-kyc-aml-verification-provider-architecture.md) | KYC/AML Verification Provider Architecture | Proposed | 2025-12-22 |
+| [ADR-0022](0022-instrument-successor-lineage.md) | Instrument Successor Lineage | Proposed | 2025-12-28 |
+<!-- markdownlint-disable-next-line MD013 -->
+| [ADR-0023](0023-balance-delegation-to-position-keeping.md) | Balance Delegation to Position Keeping | Accepted | 2026-01-08 |
 
 ## Categories
 
@@ -80,6 +87,7 @@ Architectural Decision Records) format.
 - [ADR-0014](0014-financial-instrument-reference-data.md) - Financial Instrument Reference Data (BIAN)
 - [ADR-0017](0017-temporal-quality-ladder.md) - Temporal Quality Ledger (Data Physics)
 - [ADR-0018](0018-settlement-reconciliation.md) - Settlement & Reconciliation (Lifecycle)
+- [ADR-0023](0023-balance-delegation-to-position-keeping.md) - Balance Delegation to Position Keeping
 
 ### Development Environment & Infrastructure
 

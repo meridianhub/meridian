@@ -9,18 +9,25 @@ triggers:
   - Integration with payment order saga patterns
   - Transaction logging and position keeping
   - Financial accounting and ledger posting
-  - Account balance validation and reconciliation
+  - Account balance queries (delegated to Position Keeping)
 instructions: |
   CurrentAccount orchestrates customer-facing banking operations with three upstream dependencies:
   - Party (validate customer exists and is active)
-  - PositionKeeping (transaction audit trail)
+  - PositionKeeping (balance queries and transaction audit trail)
   - FinancialAccounting (double-entry ledger posting)
 
   Key patterns:
+  - Balance delegation: All balance queries use Position Keeping service (not stored locally)
   - Lien-based fund reservation for payment processing (ACTIVE → EXECUTED or TERMINATED)
-  - Overdraft facility: AvailableBalance = Balance + (OverdraftEnabled ? OverdraftLimit : 0)
   - Account lifecycle: ACTIVE → FROZEN → CLOSED (state machine)
   - Optimistic locking via version field for concurrent updates
+
+  Balance Query Pattern:
+  ```go
+  // Query all balance types from Position Keeping
+  balances, err := positionKeepingClient.GetAccountBalances(ctx, accountID)
+  // Returns: OPENING, CLOSING, CURRENT, AVAILABLE, LEDGER, RESERVE, FREE
+  ```
 
   Port: 50057 (gRPC)
 ---
@@ -67,8 +74,6 @@ classDiagram
         +string AccountID
         +string AccountIdentification
         +UUID PartyID
-        +Money Balance
-        +Money AvailableBalance
         +AccountStatus Status
         +Money OverdraftLimit
         +bool OverdraftEnabled
@@ -109,6 +114,8 @@ classDiagram
 - `AccountID`: Business ID format `ACC-{uuid[:8]}`
 - `AccountIdentification`: IBAN format
 - `PaymentOrderReference`: Idempotency key for payment orders
+- **Balance fields removed**: Balance is computed by Position Keeping service (see
+  [Balance Query Delegation](#balance-query-delegation))
 
 ## Lien Lifecycle
 
@@ -145,8 +152,6 @@ erDiagram
         varchar(100) account_id UK "ACC-xxxxxxxx"
         varchar(34) account_identification UK "IBAN"
         uuid party_id FK
-        bigint balance "cents"
-        bigint available_balance "cents"
         varchar(20) status "ACTIVE, FROZEN, CLOSED"
         bigint overdraft_limit "cents"
         bigint version "optimistic lock"
@@ -163,6 +168,10 @@ erDiagram
 
     accounts ||--o{ liens : "has"
 ```
+
+> **Note:** Balance columns (`balance`, `available_balance`, `balance_updated_at`) were removed
+> in migration `20260108000001_remove_balance_columns.sql`. Balance is now computed by Position
+> Keeping service.
 
 ## Configuration
 
@@ -197,10 +206,64 @@ erDiagram
 
 - `InitiateCurrentAccount`: Creating duplicate accounts requires unique party/IBAN
 
+### Balance Query Delegation
+
+Balance is computed by Position Keeping service, not stored locally. Current Account queries
+Position Keeping for all balance operations.
+
+**Balance Types (BIAN-compliant):**
+
+| Type | Description |
+|------|-------------|
+| `OPENING` | Balance at start of accounting period |
+| `CLOSING` | Balance at end of accounting period |
+| `CURRENT` | Real-time balance including all posted transactions |
+| `AVAILABLE` | Balance available for withdrawal (considers holds/liens) |
+| `LEDGER` | Balance on the books (may differ from current due to holds) |
+| `RESERVE` | Amount held in reserve (not available for use) |
+| `FREE` | Unencumbered balance (current minus holds and reserves) |
+
+**Query Pattern:**
+
+```go
+import pk "meridian/position_keeping/v1"
+
+// Query single balance type
+resp, err := pkClient.GetAccountBalance(ctx, &pk.GetAccountBalanceRequest{
+    AccountId:   accountID,
+    BalanceType: pk.BALANCE_TYPE_AVAILABLE,
+})
+
+// Query all balance types
+resp, err := pkClient.GetAccountBalances(ctx, &pk.GetAccountBalancesRequest{
+    AccountId: accountID,
+})
+for _, balance := range resp.Balances {
+    log.Printf("%s: %v", balance.BalanceType, balance.Amount)
+}
+```
+
+**Sequence Diagram:**
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant CA as CurrentAccount
+    participant PK as PositionKeeping
+
+    Client->>CA: RetrieveCurrentAccount(accountID)
+    CA->>PK: GetAccountBalances(accountID)
+    PK-->>CA: BalanceEntry[] (7 types)
+    CA-->>Client: CurrentAccountFacility with balances
+```
+
 ### Overdraft Facility
 
+Overdraft configuration is stored in Current Account. When calculating available balance,
+Position Keeping considers the overdraft limit.
+
 ```text
-AvailableBalance = Balance + (OverdraftEnabled ? OverdraftLimit : 0)
+AvailableBalance = CurrentBalance + (OverdraftEnabled ? OverdraftLimit : 0) - ActiveLiens
 ```
 
 Allows withdrawals beyond zero balance up to the configured limit.

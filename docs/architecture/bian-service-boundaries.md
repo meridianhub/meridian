@@ -135,7 +135,10 @@ The CurrentAccount service owns:
 
 **Position-Keeping Service (gRPC Client):**
 
-- Balance queries for account operations
+- **Balance queries** via `GetAccountBalance` and `GetAccountBalances` RPCs
+  - Returns 7 BIAN balance types: OPENING, CLOSING, CURRENT, AVAILABLE, LEDGER, RESERVE, FREE
+  - Balance is computed by Position Keeping, not stored in Current Account
+  - See [ADR-0023](../adr/0023-balance-delegation-to-position-keeping.md)
 - Transaction log retrieval for account history
 - Position snapshot data for reconciliation
 - **Implementation:** `services/current-account/client/positionkeeping_client.go`
@@ -165,9 +168,10 @@ The CurrentAccount service owns:
 
 **Forbidden Operations:**
 
-1. **Direct balance manipulation** - Balances are owned by position-keeping service
-   - MUST call `PositionKeepingService.UpdateFinancialPositionLog` instead
-   - MUST NOT store balance state except in read-only cache
+1. **Direct balance storage or computation** - Balances are owned by Position Keeping service
+   - MUST call `PositionKeepingService.GetAccountBalance` or `GetAccountBalances` for balance queries
+   - MUST NOT store balance in database (balance columns removed per ADR-0023)
+   - MUST NOT compute balance from local transaction data
 
 2. **Direct ledger posting** - Double-entry bookkeeping is owned by financial-accounting service
    - MUST call `FinancialAccountingService.CaptureLedgerPosting` instead
@@ -309,6 +313,22 @@ The PositionKeeping service owns:
   - Point-in-time account positions
   - Reconciliation support
   - Audit trail queries
+
+#### Balance Computation (Authoritative Source)
+
+- **Balance calculation** - Position Keeping is the authoritative source for all balance types
+  - Computes 7 BIAN balance types: OPENING, CLOSING, CURRENT, AVAILABLE, LEDGER, RESERVE, FREE
+  - Balance derived from POSTED transaction log entries
+  - See [ADR-0023](../adr/0023-balance-delegation-to-position-keeping.md)
+
+- **Balance query APIs** (`GetAccountBalance`, `GetAccountBalances` RPCs)
+  - `GetAccountBalance` - Query single balance type for an account
+  - `GetAccountBalances` - Query all 7 balance types for an account
+  - Returns `as_of` timestamp indicating when balance was calculated
+
+- **Opening balance support** for account migration
+  - Initialize accounts with opening balance via synthetic transaction entry
+  - Supports migration from legacy systems
 
 ### Boundaries
 
