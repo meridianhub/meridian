@@ -542,6 +542,7 @@ func calculateReserveBalance(liens []cadomain.AmountBlock, defaultCurrency money
 // =============================================================================
 
 // createTestAccount creates an account in Current Account and initializes position log.
+// Both services are initialized with the same opening balance to maintain consistency.
 func createTestAccount(t *testing.T, infra *BalanceOwnershipTestInfra, accountID, currency string, openingBalance money.Money) {
 	t.Helper()
 	require.GreaterOrEqual(t, len(accountID), 6, "accountID must be at least 6 characters for IBAN generation")
@@ -553,6 +554,12 @@ func createTestAccount(t *testing.T, infra *BalanceOwnershipTestInfra, accountID
 
 	_, err := infra.mockCAService.CreateAccount(ctx, accountID, iban, partyID, currency)
 	require.NoError(t, err, "failed to create account in Current Account")
+
+	// Initialize CA balance with opening balance (simulates migration scenario)
+	if !openingBalance.IsZero() {
+		err = infra.mockCAService.Deposit(ctx, accountID, openingBalance, "OPENING-BALANCE")
+		require.NoError(t, err, "failed to set opening balance in Current Account")
+	}
 
 	// Create position log in Position Keeping
 	infra.mockPKService.SetInfra(infra)
