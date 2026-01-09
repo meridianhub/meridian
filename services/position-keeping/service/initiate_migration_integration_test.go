@@ -445,7 +445,9 @@ func TestIntegration_MigrationIdempotency(t *testing.T) {
 
 	// Either it should succeed (idempotent) or fail with AlreadyExists error
 	if err != nil {
-		assert.Contains(t, err.Error(), "already exists", "Should fail with already exists error")
+		st, ok := status.FromError(err)
+		require.True(t, ok, "Expected gRPC status error")
+		assert.Equal(t, codes.AlreadyExists, st.Code(), "Should fail with AlreadyExists code")
 	} else {
 		// If idempotent, should return same log ID
 		assert.Equal(t, firstLogID, resp2.Log.LogId, "Idempotent call should return same log")

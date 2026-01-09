@@ -120,7 +120,10 @@ func TestPositionKeeping_Unavailable_DepositSagaCompensates(t *testing.T) {
 		err: errServiceUnavailable,
 	}
 
-	// Track that no further steps are executed after Position Keeping fails
+	// Track that no further steps are executed after Position Keeping fails.
+	// This client demonstrates what WOULD be called in a real saga - it's intentionally
+	// unused in this test because the saga should never reach Financial Accounting
+	// when the Position Keeping step fails first.
 	financialAccountingCalled := false
 	_ = &trackingFinancialAccountingClient{
 		onCall: func() {

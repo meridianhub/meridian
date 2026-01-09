@@ -14,6 +14,7 @@ package integration
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -223,7 +224,9 @@ func (infra *BalanceOwnershipTestInfra) cleanup() {
 // =============================================================================
 
 // MockCurrentAccountService simulates Current Account service behavior.
+// Thread-safe for concurrent test execution.
 type MockCurrentAccountService struct {
+	mu       sync.RWMutex
 	accounts map[string]*cadomain.CurrentAccount
 	liens    map[string][]cadomain.AmountBlock
 }
@@ -242,12 +245,16 @@ func (m *MockCurrentAccountService) CreateAccount(ctx context.Context, accountID
 	if err != nil {
 		return nil, err
 	}
+	m.mu.Lock()
 	m.accounts[accountID] = &account
+	m.mu.Unlock()
 	return &account, nil
 }
 
 // Deposit adds funds to an account.
 func (m *MockCurrentAccountService) Deposit(ctx context.Context, accountID string, amount money.Money, reference string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	account, ok := m.accounts[accountID]
 	if !ok {
 		return fmt.Errorf("account not found: %s", accountID)
@@ -262,6 +269,8 @@ func (m *MockCurrentAccountService) Deposit(ctx context.Context, accountID strin
 
 // Withdraw removes funds from an account.
 func (m *MockCurrentAccountService) Withdraw(ctx context.Context, accountID string, amount money.Money, reference string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	account, ok := m.accounts[accountID]
 	if !ok {
 		return fmt.Errorf("account not found: %s", accountID)
@@ -276,6 +285,8 @@ func (m *MockCurrentAccountService) Withdraw(ctx context.Context, accountID stri
 
 // GetBalance returns the current balance.
 func (m *MockCurrentAccountService) GetBalance(ctx context.Context, accountID string) (money.Money, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	account, ok := m.accounts[accountID]
 	if !ok {
 		return money.Money{}, fmt.Errorf("account not found: %s", accountID)
@@ -285,12 +296,16 @@ func (m *MockCurrentAccountService) GetBalance(ctx context.Context, accountID st
 
 // AddLien adds a lien to an account.
 func (m *MockCurrentAccountService) AddLien(ctx context.Context, accountID string, lien cadomain.AmountBlock) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.liens[accountID] = append(m.liens[accountID], lien)
 	return nil
 }
 
 // GetActiveLiens returns all active liens for an account.
 func (m *MockCurrentAccountService) GetActiveLiens(ctx context.Context, accountID string) ([]cadomain.AmountBlock, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.liens[accountID], nil
 }
 
