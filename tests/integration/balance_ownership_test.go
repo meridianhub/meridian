@@ -114,8 +114,12 @@ func (infra *BalanceOwnershipTestInfra) setupPostgres(ctx context.Context, t *te
 func (infra *BalanceOwnershipTestInfra) createSchemas(ctx context.Context, t *testing.T) {
 	t.Helper()
 
+	// Ensure pgcrypto extension for gen_random_uuid() (available built-in in PG14+, but safe to create)
+	_, err := infra.pool.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS pgcrypto`)
+	require.NoError(t, err, "failed to create pgcrypto extension")
+
 	// Create Current Account schema
-	_, err := infra.pool.Exec(ctx, `CREATE SCHEMA IF NOT EXISTS current_account`)
+	_, err = infra.pool.Exec(ctx, `CREATE SCHEMA IF NOT EXISTS current_account`)
 	require.NoError(t, err, "failed to create current_account schema")
 
 	_, err = infra.pool.Exec(ctx, `
@@ -302,8 +306,9 @@ func (m *MockCurrentAccountService) AddLien(ctx context.Context, accountID strin
 	return nil
 }
 
-// GetActiveLiens returns all active liens for an account.
-func (m *MockCurrentAccountService) GetActiveLiens(ctx context.Context, accountID string) ([]cadomain.AmountBlock, error) {
+// GetActiveAmountBlocks returns all active liens/amount blocks for an account.
+// Implements cadomain.CurrentAccountClient interface used by Position Keeping.
+func (m *MockCurrentAccountService) GetActiveAmountBlocks(ctx context.Context, accountID string) ([]cadomain.AmountBlock, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.liens[accountID], nil
