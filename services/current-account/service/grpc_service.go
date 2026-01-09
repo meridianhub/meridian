@@ -515,6 +515,9 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 		return nil, err
 	}
 
+	// Record deposit transaction (the deposit itself succeeded regardless of balance fetch)
+	caobservability.RecordDeposit(string(amount.Currency()))
+
 	// After saga completes, query Position Keeping for the new balance
 	account, err = s.hydrateAccountWithBalance(ctx, account)
 	if err != nil {
@@ -528,8 +531,7 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 		// Update response with balance from Position Keeping
 		resp.NewBalance = toMoneyAmount(account.Balance())
 		resp.AvailableBalance = toMoneyAmount(account.AvailableBalance())
-		// Record business metrics on success with accurate post-transaction balance
-		caobservability.RecordDeposit(string(account.Balance().Currency()))
+		// Record balance gauge only when we have accurate post-transaction balance
 		caobservability.RecordBalance(safeMinorUnits(account.Balance()), string(account.Balance().Currency()))
 	}
 
@@ -856,6 +858,9 @@ func (s *Service) ExecuteWithdrawal(ctx context.Context, req *pb.ExecuteWithdraw
 		return nil, err
 	}
 
+	// Record withdrawal transaction (the withdrawal itself succeeded regardless of balance fetch)
+	caobservability.RecordWithdrawal(string(amount.Currency()))
+
 	// After saga completes, query Position Keeping for the new balance
 	account, err = s.hydrateAccountWithBalance(ctx, account)
 	if err != nil {
@@ -869,8 +874,7 @@ func (s *Service) ExecuteWithdrawal(ctx context.Context, req *pb.ExecuteWithdraw
 		// Update response with balance from Position Keeping
 		resp.NewBalance = toMoneyAmount(account.Balance())
 		resp.AvailableBalance = toMoneyAmount(account.AvailableBalance())
-		// Record business metrics on success with accurate post-transaction balance
-		caobservability.RecordWithdrawal(string(account.Balance().Currency()))
+		// Record balance gauge only when we have accurate post-transaction balance
 		caobservability.RecordBalance(safeMinorUnits(account.Balance()), string(account.Balance().Currency()))
 	}
 
