@@ -996,7 +996,12 @@ func TestExecuteDeposit_IdempotencyProceedsWithoutKey(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	mockIdemp := newMockIdempotencyService()
-	svc := mustNewServiceWithIdempotency(t, repo, nil, mockIdemp)
+	// Configure mock with POST-deposit balance (5000 cents = £50.00).
+	// Position Keeping is the source of truth and would have recorded the CREDIT
+	// by the time we query the balance.
+	svc := mustNewServiceWithIdempotencyAndPositionKeeping(t, repo, nil, mockIdemp, map[string]int64{
+		"ACC-IDEMP-003": 5000, // £50 post-deposit
+	})
 
 	// Create account
 	account, err := domain.NewCurrentAccount("ACC-IDEMP-003", "ACC-IDEMP-003", uuid.New().String(), "GBP")
