@@ -528,11 +528,10 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 		// Update response with balance from Position Keeping
 		resp.NewBalance = toMoneyAmount(account.Balance())
 		resp.AvailableBalance = toMoneyAmount(account.AvailableBalance())
+		// Record business metrics on success with accurate post-transaction balance
+		caobservability.RecordDeposit(string(account.Balance().Currency()))
+		caobservability.RecordBalance(safeMinorUnits(account.Balance()), string(account.Balance().Currency()))
 	}
-
-	// Record business metrics on success
-	caobservability.RecordDeposit(string(account.Balance().Currency()))
-	caobservability.RecordBalance(safeMinorUnits(account.Balance()), string(account.Balance().Currency()))
 
 	// Store successful result in Redis for future idempotency checks
 	if idempotencyKey != "" && s.idempotencyService != nil {
@@ -870,11 +869,10 @@ func (s *Service) ExecuteWithdrawal(ctx context.Context, req *pb.ExecuteWithdraw
 		// Update response with balance from Position Keeping
 		resp.NewBalance = toMoneyAmount(account.Balance())
 		resp.AvailableBalance = toMoneyAmount(account.AvailableBalance())
+		// Record business metrics on success with accurate post-transaction balance
+		caobservability.RecordWithdrawal(string(account.Balance().Currency()))
+		caobservability.RecordBalance(safeMinorUnits(account.Balance()), string(account.Balance().Currency()))
 	}
-
-	// Record business metrics on success
-	caobservability.RecordWithdrawal(string(account.Balance().Currency()))
-	caobservability.RecordBalance(safeMinorUnits(account.Balance()), string(account.Balance().Currency()))
 
 	// Mark pending withdrawal as completed (if executing a pending withdrawal)
 	// TODO(tm:tech-debt-cleanup.33): This represents an eventual consistency tradeoff - if the
