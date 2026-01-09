@@ -310,7 +310,9 @@ func (m *MockCurrentAccountService) GetActiveLiens(ctx context.Context, accountI
 }
 
 // MockPositionKeepingService simulates Position Keeping service behavior.
+// Thread-safe for concurrent test execution.
 type MockPositionKeepingService struct {
+	mu       sync.RWMutex
 	logs     map[string]*pkdomain.FinancialPositionLog
 	infra    *BalanceOwnershipTestInfra
 	caClient cadomain.CurrentAccountClient
@@ -345,7 +347,9 @@ func (m *MockPositionKeepingService) CreatePositionLog(ctx context.Context, acco
 		return nil, err
 	}
 
+	m.mu.Lock()
 	m.logs[accountID] = log
+	m.mu.Unlock()
 
 	// Persist to database
 	if m.infra != nil {
@@ -360,6 +364,8 @@ func (m *MockPositionKeepingService) CreatePositionLog(ctx context.Context, acco
 
 // RecordTransaction records a transaction entry in the position log.
 func (m *MockPositionKeepingService) RecordTransaction(ctx context.Context, accountID string, txnID uuid.UUID, amount money.Money, direction pkdomain.PostingDirection, reference string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	log, ok := m.logs[accountID]
 	if !ok {
 		return fmt.Errorf("position log not found for account: %s", accountID)
@@ -397,6 +403,8 @@ func (m *MockPositionKeepingService) RecordTransaction(ctx context.Context, acco
 
 // GetAccountBalance returns a specific balance type for an account.
 func (m *MockPositionKeepingService) GetAccountBalance(ctx context.Context, accountID string, balanceType positionkeepingv1.BalanceType, currency string) (*money.Money, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	log, ok := m.logs[accountID]
 	if !ok {
 		return nil, fmt.Errorf("position log not found for account: %s", accountID)
