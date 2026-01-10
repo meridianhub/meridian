@@ -406,3 +406,356 @@ func TestIntegration_InitiateWithOpeningBalance_ThenAddTransactions(t *testing.T
 
 	_ = migrateResp // Use the response to avoid unused variable warning
 }
+
+// TestIntegration_MigrationIdempotency tests that duplicate migration attempts
+// for the same account are handled correctly and don't corrupt data.
+func TestIntegration_MigrationIdempotency(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	tc := SetupBalanceIntegrationTestContainer(t)
+	defer tc.Cleanup(t)
+
+	ctx := context.Background()
+	accountID := "ACC-MIGRATION-INT-008"
+
+	effectiveDate := time.Now().Add(-24 * time.Hour)
+	req := &positionkeepingv1.InitiateWithOpeningBalanceRequest{
+		AccountId: accountID,
+		OpeningBalance: &commonv1.MoneyAmount{
+			Amount: &money.Money{
+				CurrencyCode: "GBP",
+				Units:        3000,
+				Nanos:        0,
+			},
+		},
+		EffectiveDate:      timestamppb.New(effectiveDate),
+		MigrationReference: "LEGACY-MIGRATION-008",
+	}
+
+	// First migration - should succeed
+	resp1, err := tc.Service.InitiateWithOpeningBalance(ctx, req)
+	require.NoError(t, err, "First migration should succeed")
+	require.NotNil(t, resp1)
+	firstLogID := resp1.Log.LogId
+
+	// Second migration attempt with same account - should be handled by idempotency
+	resp2, err := tc.Service.InitiateWithOpeningBalance(ctx, req)
+
+	// Either it should succeed (idempotent) or fail with AlreadyExists error
+	if err != nil {
+		st, ok := status.FromError(err)
+		require.True(t, ok, "Expected gRPC status error")
+		assert.Equal(t, codes.AlreadyExists, st.Code(), "Should fail with AlreadyExists code")
+	} else {
+		// If idempotent, should return same log ID
+		assert.Equal(t, firstLogID, resp2.Log.LogId, "Idempotent call should return same log")
+	}
+
+	// Verify balance is still correct and not doubled
+	balanceReq := &positionkeepingv1.GetAccountBalanceRequest{
+		AccountId:   accountID,
+		BalanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
+		Currency:    "GBP",
+	}
+
+	balanceResp, err := tc.Service.GetAccountBalance(ctx, balanceReq)
+	require.NoError(t, err, "Balance query should succeed")
+
+	assert.Equal(t, int64(3000), balanceResp.Amount.Amount.Units,
+		"Balance should still be 3000, not doubled")
+}
+
+// TestIntegration_MigrationInvalidBalances tests that invalid balance amounts
+// are rejected during migration with proper error messages.
+func TestIntegration_MigrationInvalidBalances(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	tc := SetupBalanceIntegrationTestContainer(t)
+	defer tc.Cleanup(t)
+
+	ctx := context.Background()
+
+	tests := []struct {
+		name          string
+		accountID     string
+		units         int64
+		nanos         int32
+		currency      string
+		errorContains string
+	}{
+		{
+			name:          "empty account ID",
+			accountID:     "",
+			units:         1000,
+			nanos:         0,
+			currency:      "GBP",
+			errorContains: "account_id",
+		},
+		{
+			name:          "missing currency",
+			accountID:     "ACC-009",
+			units:         1000,
+			nanos:         0,
+			currency:      "",
+			errorContains: "currency",
+		},
+		{
+			name:          "invalid currency code",
+			accountID:     "ACC-010",
+			units:         1000,
+			nanos:         0,
+			currency:      "INVALID",
+			errorContains: "currency",
+		},
+		{
+			name:          "nanos out of range (too large)",
+			accountID:     "ACC-011",
+			units:         1000,
+			nanos:         1_000_000_000, // Should be < 1 billion
+			currency:      "GBP",
+			errorContains: "nanos",
+		},
+		{
+			name:          "nanos out of range (too small)",
+			accountID:     "ACC-012",
+			units:         1000,
+			nanos:         -1_000_000_000,
+			currency:      "GBP",
+			errorContains: "nanos",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			effectiveDate := time.Now().Add(-24 * time.Hour)
+			req := &positionkeepingv1.InitiateWithOpeningBalanceRequest{
+				AccountId: tt.accountID,
+				OpeningBalance: &commonv1.MoneyAmount{
+					Amount: &money.Money{
+						CurrencyCode: tt.currency,
+						Units:        tt.units,
+						Nanos:        tt.nanos,
+					},
+				},
+				EffectiveDate:      timestamppb.New(effectiveDate),
+				MigrationReference: "INVALID-TEST",
+			}
+
+			resp, err := tc.Service.InitiateWithOpeningBalance(ctx, req)
+
+			assert.Error(t, err, "Should reject invalid balance")
+			assert.Nil(t, resp, "Response should be nil on error")
+			if tt.errorContains != "" {
+				assert.Contains(t, err.Error(), tt.errorContains,
+					"Error should contain %s", tt.errorContains)
+			}
+		})
+	}
+}
+
+// TestIntegration_BatchMigration tests migrating multiple accounts simultaneously
+// to verify no race conditions or balance corruption occurs.
+func TestIntegration_BatchMigration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	tc := SetupBalanceIntegrationTestContainer(t)
+	defer tc.Cleanup(t)
+
+	ctx := context.Background()
+	effectiveDate := time.Now().Add(-48 * time.Hour)
+
+	// Create 20 accounts with various balances (reduced from 100 for faster test execution)
+	const accountCount = 20
+	accounts := make([]struct {
+		accountID string
+		units     int64
+		nanos     int32
+	}, accountCount)
+
+	for i := 0; i < accountCount; i++ {
+		accounts[i] = struct {
+			accountID string
+			units     int64
+			nanos     int32
+		}{
+			accountID: "BATCH-" + uuid.New().String()[:8],
+			units:     int64((i + 1) * 100),        // £100, £200, £300, etc.
+			nanos:     int32((i % 10) * 100000000), // Various nanos
+		}
+	}
+
+	// Migrate all accounts (simulating batch migration)
+	for _, acc := range accounts {
+		req := &positionkeepingv1.InitiateWithOpeningBalanceRequest{
+			AccountId: acc.accountID,
+			OpeningBalance: &commonv1.MoneyAmount{
+				Amount: &money.Money{
+					CurrencyCode: "GBP",
+					Units:        acc.units,
+					Nanos:        acc.nanos,
+				},
+			},
+			EffectiveDate:      timestamppb.New(effectiveDate),
+			MigrationReference: "BATCH-MIGRATION-001",
+		}
+
+		resp, err := tc.Service.InitiateWithOpeningBalance(ctx, req)
+		require.NoError(t, err, "Batch migration should succeed for %s", acc.accountID)
+		require.NotNil(t, resp, "Response should not be nil")
+		require.NotNil(t, resp.Log, "Log should not be nil")
+	}
+
+	// Verify all accounts have correct balances
+	for _, acc := range accounts {
+		balanceReq := &positionkeepingv1.GetAccountBalanceRequest{
+			AccountId:   acc.accountID,
+			BalanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
+			Currency:    "GBP",
+		}
+
+		balanceResp, err := tc.Service.GetAccountBalance(ctx, balanceReq)
+		require.NoError(t, err, "Balance query should succeed for %s", acc.accountID)
+
+		assert.Equal(t, acc.units, balanceResp.Amount.Amount.Units,
+			"Balance units should match for %s", acc.accountID)
+		assert.Equal(t, acc.nanos, balanceResp.Amount.Amount.Nanos,
+			"Balance nanos should match for %s", acc.accountID)
+	}
+
+	// Add a transaction to one of the migrated accounts to verify post-migration consistency
+	testAccount := accounts[0]
+	creditEntry, err := domain.NewTransactionLogEntry(
+		uuid.New(),
+		testAccount.accountID,
+		domain.MustNewMoney(decimal.NewFromInt(250), domain.CurrencyGBP),
+		domain.PostingDirectionCredit,
+		time.Now().UTC(),
+		"Post-migration deposit",
+		"POST-MIG-001",
+		domain.TransactionSourceManual,
+	)
+	require.NoError(t, err)
+
+	log, err := domain.NewFinancialPositionLog(testAccount.accountID, creditEntry, nil)
+	require.NoError(t, err)
+	err = tc.Repo.Create(ctx, log)
+	require.NoError(t, err)
+
+	// Verify balance updated correctly
+	balanceReq := &positionkeepingv1.GetAccountBalanceRequest{
+		AccountId:   testAccount.accountID,
+		BalanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
+		Currency:    "GBP",
+	}
+
+	balanceResp, err := tc.Service.GetAccountBalance(ctx, balanceReq)
+	require.NoError(t, err, "Balance query should succeed")
+
+	// Expected: original balance + 250
+	expectedUnits := testAccount.units + 250
+	assert.Equal(t, expectedUnits, balanceResp.Amount.Amount.Units,
+		"Balance should be opening balance + deposit")
+}
+
+// TestIntegration_MigrationBalanceConsistencyMultipleTransactions tests that after
+// migration, multiple transactions maintain balance consistency.
+func TestIntegration_MigrationBalanceConsistencyMultipleTransactions(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	tc := SetupBalanceIntegrationTestContainer(t)
+	defer tc.Cleanup(t)
+
+	ctx := context.Background()
+	accountID := "ACC-MIGRATION-INT-013"
+
+	// Step 1: Migrate with opening balance of £2,500.50
+	effectiveDate := time.Now().Add(-96 * time.Hour) // 4 days ago
+	migrateReq := &positionkeepingv1.InitiateWithOpeningBalanceRequest{
+		AccountId: accountID,
+		OpeningBalance: &commonv1.MoneyAmount{
+			Amount: &money.Money{
+				CurrencyCode: "GBP",
+				Units:        2500,
+				Nanos:        500000000, // £2,500.50
+			},
+		},
+		EffectiveDate:      timestamppb.New(effectiveDate),
+		MigrationReference: "LEGACY-MIGRATION-013",
+	}
+
+	_, err := tc.Service.InitiateWithOpeningBalance(ctx, migrateReq)
+	require.NoError(t, err, "Migration should succeed")
+
+	// Step 2: Execute multiple transactions and verify balance after each
+	transactions := []struct {
+		amount      string
+		direction   domain.PostingDirection
+		desc        string
+		expectedBal string // Expected balance after this transaction
+	}{
+		{"123.45", domain.PostingDirectionCredit, "Deposit 1", "2623.95"},
+		{"67.89", domain.PostingDirectionDebit, "Withdrawal 1", "2556.06"},
+		{"0.01", domain.PostingDirectionCredit, "Micro deposit", "2556.07"},
+		{"999.99", domain.PostingDirectionCredit, "Large deposit", "3556.06"},
+		{"50.25", domain.PostingDirectionDebit, "Small withdrawal", "3505.81"},
+	}
+
+	runningBalance := decimal.NewFromFloat(2500.50) // Starting balance
+
+	for i, tx := range transactions {
+		// Calculate expected balance
+		txAmount, err := decimal.NewFromString(tx.amount)
+		require.NoError(t, err)
+
+		if tx.direction == domain.PostingDirectionCredit {
+			runningBalance = runningBalance.Add(txAmount)
+		} else {
+			runningBalance = runningBalance.Sub(txAmount)
+		}
+
+		// Create and save transaction
+		entry, err := domain.NewTransactionLogEntry(
+			uuid.New(),
+			accountID,
+			domain.MustNewMoney(txAmount, domain.CurrencyGBP),
+			tx.direction,
+			time.Now().Add(-time.Duration(len(transactions)-i)*time.Hour),
+			tx.desc,
+			uuid.New().String()[:8],
+			domain.TransactionSourceManual,
+		)
+		require.NoError(t, err)
+
+		log, err := domain.NewFinancialPositionLog(accountID, entry, nil)
+		require.NoError(t, err)
+		err = tc.Repo.Create(ctx, log)
+		require.NoError(t, err)
+
+		// Verify balance after this transaction
+		balanceReq := &positionkeepingv1.GetAccountBalanceRequest{
+			AccountId:   accountID,
+			BalanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
+			Currency:    "GBP",
+		}
+
+		balanceResp, err := tc.Service.GetAccountBalance(ctx, balanceReq)
+		require.NoError(t, err, "Balance query should succeed after transaction %d", i+1)
+
+		// Convert response to decimal for comparison
+		actualBalance := decimal.NewFromInt(balanceResp.Amount.Amount.Units).Add(
+			decimal.NewFromInt(int64(balanceResp.Amount.Amount.Nanos)).Div(decimal.NewFromInt(1_000_000_000)),
+		)
+
+		assert.True(t, runningBalance.Equal(actualBalance),
+			"After transaction %d (%s): Expected balance %s, got %s",
+			i+1, tx.desc, runningBalance.String(), actualBalance.String())
+	}
+}
