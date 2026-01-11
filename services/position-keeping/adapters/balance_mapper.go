@@ -230,7 +230,7 @@ func ToDomainAssetFromInstrumentAmount(protoAmount *quantityv1.InstrumentAmount)
 
 	instrument, err := domain.NewInstrument(protoAmount.InstrumentCode, version, dimension, precision)
 	if err != nil {
-		return domain.Asset{}, fmt.Errorf("%w: %v", ErrInvalidInstrumentCode, err)
+		return domain.Asset{}, fmt.Errorf("%w: %w", ErrInvalidInstrumentCode, err)
 	}
 
 	return domain.NewAsset(amount, instrument), nil
