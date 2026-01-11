@@ -744,6 +744,16 @@ func TestToDomainMoneyFromInstrumentAmount(t *testing.T) {
 			expectError: true,
 			errContains: "currency",
 		},
+		{
+			name: "negative version returns error",
+			proto: &quantityv1.InstrumentAmount{
+				Amount:         "100",
+				InstrumentCode: "GBP",
+				Version:        -1,
+			},
+			expectError: true,
+			errContains: "version",
+		},
 	}
 
 	for _, tt := range tests {
@@ -844,6 +854,16 @@ func TestToDomainAssetFromInstrumentAmount(t *testing.T) {
 			},
 			expectError: true,
 			errContains: "invalid amount",
+		},
+		{
+			name: "negative version returns error",
+			proto: &quantityv1.InstrumentAmount{
+				Amount:         "100",
+				InstrumentCode: "KWH",
+				Version:        -1,
+			},
+			expectError: true,
+			errContains: "version",
 		},
 	}
 

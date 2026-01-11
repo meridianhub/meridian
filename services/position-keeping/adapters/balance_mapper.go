@@ -150,6 +150,9 @@ var ErrInvalidAmount = errors.New("invalid amount string")
 // ErrInvalidInstrumentCode is returned when the instrument code is empty or invalid.
 var ErrInvalidInstrumentCode = errors.New("invalid or empty instrument code")
 
+// ErrInvalidVersion is returned when the instrument version is negative.
+var ErrInvalidVersion = errors.New("invalid instrument version")
+
 // ToProtoInstrumentAmount converts a domain Money to its protobuf InstrumentAmount representation.
 // This supports the Universal Asset System for multi-asset position tracking by representing
 // monetary quantities as InstrumentAmount with the currency code as instrument_code.
@@ -189,6 +192,11 @@ func ToDomainMoneyFromInstrumentAmount(protoAmount *quantityv1.InstrumentAmount)
 		return domain.Money{}, ErrInvalidInstrumentCode
 	}
 
+	// Reject negative version values
+	if protoAmount.Version < 0 {
+		return domain.Money{}, fmt.Errorf("%w: negative version %d", ErrInvalidVersion, protoAmount.Version)
+	}
+
 	amount, err := decimal.NewFromString(protoAmount.Amount)
 	if err != nil {
 		return domain.Money{}, fmt.Errorf("%w: %s", ErrInvalidAmount, protoAmount.Amount)
@@ -222,6 +230,11 @@ func ToDomainAssetFromInstrumentAmount(protoAmount *quantityv1.InstrumentAmount)
 
 	// Infer dimension and precision from instrument code
 	dimension, precision := inferInstrumentProperties(protoAmount.InstrumentCode)
+
+	// Reject negative version values (would wrap to large uint32)
+	if protoAmount.Version < 0 {
+		return domain.Asset{}, fmt.Errorf("%w: negative version %d", ErrInvalidVersion, protoAmount.Version)
+	}
 
 	version := uint32(protoAmount.Version)
 	if version == 0 {
