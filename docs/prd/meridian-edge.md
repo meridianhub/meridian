@@ -45,8 +45,8 @@ The same codebase produces three deployment targets:
 | Target | Runtime | Persistence | Messaging | Use Case |
 |--------|---------|-------------|-----------|----------|
 | **Cloud** | k8s pods | CockroachDB | Kafka | Multi-tenant SaaS |
-| **Edge** | systemd/native | SQLite | Channels + Outbox | IoT devices, smart meters |
-| **Browser** | WASM | sql.js/IndexedDB | PostMessage | Personal ledger, PWA |
+| **Edge** | systemd/native | SQLite (WAL) | Channels + Outbox | IoT devices, smart meters |
+| **Browser** | WASM | SQLite (OPFS) | PostMessage | Personal ledger, PWA |
 
 **The Commercial Goal:** Enable "Smart" devices (Meters, POS, Wallets) to calculate value and
 settle transactions locally, solving the latency, connectivity, and trust issues inherent in
@@ -121,6 +121,26 @@ The Edge device acts as a Sovereign Bank for a single Tenant (The Device Owner).
 - **Security:** Every `LedgerPosting` is signed by the Device's key
   (software ECDSA for MVP, hardware TPM/ATECC608A for production)
 
+### 3.5 The Authority Model (Conflict Prevention)
+
+To prevent split-brain scenarios and eliminate conflict resolution complexity, we define strict
+authority domains by asset class:
+
+| Authority | Domain | Examples |
+|-----------|--------|----------|
+| **Edge** | Usage, Flow, Local Transfers | kWh consumed, GPU-hours used, local account moves |
+| **Cloud** | Deposits, Tariffs, Configuration | Top-ups, pricing rules, firmware updates |
+
+**Why This Works:**
+
+- The Cloud accepts Edge measurements as truth (because they are device-signed)
+- The Edge accepts Cloud deposits as truth (because they are cloud-signed)
+- No entity can modify the other's authoritative domain
+- Conflicts are impossible by design - not resolved, but prevented
+
+This segregation mirrors real-world authority: the meter measures consumption (Edge), the utility
+sets the price (Cloud). Neither can forge the other's signature.
+
 ## 4. Key Functional Requirements
 
 ### 4.1 Feature: Local Valuation (The "Smart" Meter)
@@ -170,14 +190,20 @@ the cryptographic chain breaks. The Device is the Source of Truth.
 **Mechanism:**
 
 - Compile to WASM: `GOOS=js GOARCH=wasm go build`
-- SQLite via sql.js (SQLite compiled to WASM) or IndexedDB adapter
-- Sync via fetch API to cloud endpoints
+- Persistence via **OPFS (Origin Private File System)** for high-performance SQLite in browser
+- Sync via fetch API / WebSocket to cloud endpoints
 - Same CEL expressions, same domain logic
+
+**Why OPFS over alternatives:**
+
+- `sql.js` loads entire database into RAM - not viable for larger ledgers
+- IndexedDB is asynchronous and slow for transactional workloads
+- OPFS provides a virtual filesystem with near-native SQLite performance
 
 **Use Cases:**
 
 - Offline PWA - Works without internet
-- Local-first - Transactions commit to IndexedDB immediately
+- Local-first - Transactions commit to OPFS immediately
 - Portable - Export ledger as signed SQLite file
 - Verifiable - Anyone can validate the transaction chain
 
@@ -242,11 +268,11 @@ the cryptographic chain breaks. The Device is the Source of Truth.
 **Actions:**
 
 - Create `cmd/meridian-browser/main.go` with WASM build tags
-- Implement IndexedDB adapter as alternative to SQLite
+- Integrate SQLite WASM with OPFS VFS for persistent storage
 - Wrap network calls with fetch API via `syscall/js`
 - Create web worker wrapper for non-blocking operation
 
-**Success Criteria:** Ledger operations work in Chrome/Firefox with offline support.
+**Success Criteria:** Ledger operations work in Chrome/Firefox with offline support using OPFS.
 
 ## 6. Non-Functional Requirements
 
@@ -335,6 +361,22 @@ cloud. The signed proof prevents disputes.
 - mTLS for device-to-cloud communication
 - Signed event batches prevent tampering in transit
 - Cloud validates signature chain before accepting sync
+
+### 9.4 Device Genesis (Provisioning)
+
+The device enrollment lifecycle establishes trust before any transactions occur:
+
+1. **Factory Mode:** Device boots for first time, generates asymmetric key pair
+2. **Enrollment Request:** Device sends CSR (Certificate Signing Request) to Cloud provisioning
+   endpoint, including hardware serial number
+3. **Attestation:** Cloud verifies device hardware ID against manufacturing records
+4. **Certificate Issuance:** Cloud issues a "Ledger Certificate" binding the device's public key
+   to specific authorized accounts
+5. **Genesis Sync:** Device receives its initial state (tariffs, account structure, reference data)
+6. **Operational Mode:** Device can now sign valid transactions for its authorized scope
+
+**Revocation:** If a device is compromised, the Cloud revokes the Ledger Certificate. The device
+can still operate offline, but its signed events will be rejected on next sync attempt.
 
 ## 10. Success Metrics
 
