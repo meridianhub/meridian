@@ -90,7 +90,8 @@ We do not rewrite the domain logic. We implement new **Adapters** for the existi
 
 ### 3.2 Why This Works
 
-The architectural constraints we embraced for CockroachDB compatibility are exactly what SQLite needs:
+The architectural constraints we embraced for CockroachDB compatibility are precisely what
+SQLite needs:
 
 | CockroachDB Constraint | Why We Did It | SQLite Benefit |
 |------------------------|---------------|----------------|
@@ -137,7 +138,7 @@ No code deployment required to change pricing logic.
 
 **Input:** `Measurement` (e.g., 1 kWh)
 **Context:** `MarketData` (received via MQTT from Cloud)
-**Logic:** Executes the exact same CEL (`qty * price[now]`) as the cloud
+**Logic:** Executes the identical CEL (`qty * price[now]`) as the cloud
 **Output:** `FinancialPositionLog` (Debit Customer / Credit Revenue)
 
 ### 4.2 Feature: Store & Forward Sync
@@ -275,7 +276,6 @@ func TestDoubleEntryInvariant(t *testing.T, repo domain.FinancialPositionLogRepo
 
 ```go
 //go:build edge
-// +build edge
 
 package persistence
 
@@ -284,7 +284,6 @@ package persistence
 
 ```go
 //go:build !edge
-// +build !edge
 
 package persistence
 
