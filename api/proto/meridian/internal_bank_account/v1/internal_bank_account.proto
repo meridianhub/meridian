@@ -245,6 +245,9 @@ message InitiateInternalBankAccountRequest {
 
   // description provides additional context about this account's purpose.
   string description = 6 [(buf.validate.field).string.max_len = 1000];
+
+  // idempotency_key ensures exactly-once processing for retry scenarios.
+  meridian.common.v1.IdempotencyKey idempotency_key = 7;
 }
 
 // InitiateInternalBankAccountResponse returns the newly created account.
@@ -274,6 +277,9 @@ message UpdateInternalBankAccountRequest {
 
   // correspondent_details updates correspondent information (for NOSTRO/VOSTRO accounts).
   CorrespondentBankDetails correspondent_details = 4;
+
+  // expected_version for optimistic locking. If provided, update fails if current version differs.
+  int32 expected_version = 5 [(buf.validate.field).int32 = {gte: 0}];
 }
 
 // UpdateInternalBankAccountResponse returns the updated account.
@@ -299,7 +305,8 @@ message ControlInternalBankAccountRequest {
   }];
 
   // reason explains why this control action is being performed.
-  // Required for SUSPEND and CLOSE actions (minimum 10 characters for audit trail).
+  // Required for all control actions with minimum 10 characters for audit trail completeness.
+  // This ensures meaningful audit records for compliance and traceability.
   string reason = 3 [(buf.validate.field).string = {
     min_len: 10
     max_len: 1000
@@ -417,11 +424,11 @@ service InternalBankAccountService {
     };
   }
 
-  // UpdateInternalBankAccount modifies account settings.
+  // UpdateInternalBankAccount modifies account settings (partial update).
   // Cannot change account_type or instrument_code after creation.
   rpc UpdateInternalBankAccount(UpdateInternalBankAccountRequest) returns (UpdateInternalBankAccountResponse) {
     option (google.api.http) = {
-      put: "/v1/internal-bank-accounts/{account_id}"
+      patch: "/v1/internal-bank-accounts/{account_id}"
       body: "*"
     };
   }
