@@ -954,8 +954,9 @@ func (s *Service) getAccountBalanceCents(ctx context.Context, accountID string) 
 		return 0, fmt.Errorf("failed to parse balance amount: %w", err)
 	}
 
-	// Convert to minor units (cents/pence) - multiply by 100 for 2 decimal currencies
-	// Using RoundBank (banker's rounding) for consistent handling of half-cents
+	// Convert to minor units (cents/pence) - multiply by 100 for 2 decimal currencies.
+	// Uses banker's rounding (round-to-even) which differs from half-up at .5 boundaries:
+	// e.g., 0.015 -> 2 (rounds to even), 0.025 -> 2 (rounds to even), 0.035 -> 4 (rounds to even)
 	cents := amount.Mul(decimal.NewFromInt(100)).RoundBank(0)
 
 	// Check for overflow using int64 bounds
