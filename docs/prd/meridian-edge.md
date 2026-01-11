@@ -190,7 +190,9 @@ the cryptographic chain breaks. The Device is the Source of Truth.
 **Mechanism:**
 
 - Compile to WASM: `GOOS=js GOARCH=wasm go build`
-- Persistence via **OPFS (Origin Private File System)** for high-performance SQLite in browser
+- Persistence via **OPFS (Origin Private File System)** using `sqlite-wasm` with
+  `file-system-access` API
+- All SQLite operations run in a **Web Worker** to prevent blocking the UI thread
 - Sync via fetch API / WebSocket to cloud endpoints
 - Same CEL expressions, same domain logic
 
@@ -199,6 +201,7 @@ the cryptographic chain breaks. The Device is the Source of Truth.
 - `sql.js` loads entire database into RAM - not viable for larger ledgers
 - IndexedDB is asynchronous and slow for transactional workloads
 - OPFS provides a virtual filesystem with near-native SQLite performance
+- Works offline as a Progressive Web App (PWA)
 
 **Use Cases:**
 
@@ -284,6 +287,32 @@ the cryptographic chain breaks. The Device is the Source of Truth.
 | **Resilience** | Clean recovery from power loss | ACID properties of SQLite WAL |
 | **Startup Time** | < 2 seconds to ready | Systemd service expectations |
 | **WASM Size** | < 10MB gzipped | Acceptable for SPA load |
+| **RTO** | < 5 seconds after power loss | Proves ACID compliance and WAL recovery |
+
+### 6.1 Storage & Wear Leveling
+
+To ensure device longevity on flash storage (SD/eMMC):
+
+- **WAL Mode:** SQLite must run in WAL mode (`PRAGMA journal_mode = WAL`)
+- **Synchronous Normal:** Reduce fsync frequency while maintaining consistency
+  (`PRAGMA synchronous = NORMAL` - safe in WAL mode, reduces fsyncs by ~90%)
+- **Batching:** Position Keeping buffers measurements in RAM and flushes to disk every N seconds
+  or M events to minimize write cycles
+- **Pruning:** `SyncWorker` aggressively prunes `sync_outbox` after Cloud acknowledgement to
+  maintain fixed disk usage footprint (< 100MB ledger data)
+
+### 6.2 Schema Migration Strategy
+
+Unlike Cloud deployments with orchestrated rollouts, Edge devices require self-healing migrations:
+
+- **Embedded Migrations:** On binary startup, the application runs embedded migrations (Atlas or
+  go-migrate) before starting domain services
+- **Version Check:** Device stores schema version; binary refuses to start if forward migration
+  is not possible
+- **A/B Partitioning:** For critical deployments, maintain dual root partitions - if migration
+  fails, rollback to previous binary automatically
+- **Safe Mode:** If migration fails and rollback unavailable, enter read-only Safe Mode that
+  allows sync of existing data but blocks new transactions
 
 ## 7. Parity Testing Strategy
 
@@ -377,6 +406,24 @@ The device enrollment lifecycle establishes trust before any transactions occur:
 
 **Revocation:** If a device is compromised, the Cloud revokes the Ledger Certificate. The device
 can still operate offline, but its signed events will be rejected on next sync attempt.
+
+### 9.5 Trusted Time Enforcement
+
+Financial ledgers require monotonic, trustworthy time. Raspberry Pi Zero lacks an RTC battery -
+after power loss without internet, it defaults to epoch (1970-01-01).
+
+**Requirements:**
+
+- **Boot Check:** Service refuses to record financial transactions until time sync is confirmed
+  (NTP, cellular, or GPS)
+- **Drift Detection:** If internal clock detects significant drift vs. Cloud timestamp in MQTT
+  heartbeat (> 30 seconds), suspend transaction recording and alert
+- **Monotonic Guard:** Reject any transaction with timestamp earlier than the last recorded
+  transaction (prevents clock rollback attacks)
+- **Hardware RTC:** Recommended for critical metering applications (DS3231 module, ~$2)
+
+**Degraded Mode:** If time cannot be verified, device continues measuring (kWh counter) but
+defers valuation until time sync is restored. Measurements are tagged as "pending-valuation".
 
 ## 10. Success Metrics
 
