@@ -9,15 +9,14 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
+	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"github.com/meridianhub/meridian/services/position-keeping/client"
 )
 
@@ -94,12 +93,10 @@ func TestGetAccountBalance_Success(t *testing.T) {
 		getAccountBalanceResp: &positionkeepingv1.GetAccountBalanceResponse{
 			AccountId:   "acc-123",
 			BalanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
-			Amount: &commonv1.MoneyAmount{
-				Amount: &money.Money{
-					CurrencyCode: "GBP",
-					Units:        100,
-					Nanos:        500000000, // 0.50
-				},
+			Amount: &quantityv1.InstrumentAmount{
+				Amount:         "100.50",
+				InstrumentCode: "GBP",
+				Version:        1,
 			},
 			AsOf: timestamppb.New(now),
 		},
@@ -122,9 +119,9 @@ func TestGetAccountBalance_Success(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "acc-123", resp.AccountId)
 	assert.Equal(t, positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT, resp.BalanceType)
-	assert.Equal(t, "GBP", resp.Amount.Amount.CurrencyCode)
-	assert.Equal(t, int64(100), resp.Amount.Amount.Units)
-	assert.Equal(t, int32(500000000), resp.Amount.Amount.Nanos)
+	assert.Equal(t, "GBP", resp.Amount.InstrumentCode)
+	assert.Equal(t, "100.50", resp.Amount.Amount)
+	assert.Equal(t, int32(1), resp.Amount.Version)
 }
 
 func TestGetAccountBalance_NotFound(t *testing.T) {
@@ -191,22 +188,18 @@ func TestGetAccountBalances_Success(t *testing.T) {
 			Balances: []*positionkeepingv1.BalanceEntry{
 				{
 					BalanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
-					Amount: &commonv1.MoneyAmount{
-						Amount: &money.Money{
-							CurrencyCode: "GBP",
-							Units:        1000,
-							Nanos:        0,
-						},
+					Amount: &quantityv1.InstrumentAmount{
+						Amount:         "1000.00",
+						InstrumentCode: "GBP",
+						Version:        1,
 					},
 				},
 				{
 					BalanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_AVAILABLE,
-					Amount: &commonv1.MoneyAmount{
-						Amount: &money.Money{
-							CurrencyCode: "GBP",
-							Units:        800,
-							Nanos:        0,
-						},
+					Amount: &quantityv1.InstrumentAmount{
+						Amount:         "800.00",
+						InstrumentCode: "GBP",
+						Version:        1,
 					},
 				},
 			},
@@ -233,11 +226,11 @@ func TestGetAccountBalances_Success(t *testing.T) {
 
 	// Check current balance
 	assert.Equal(t, positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT, resp.Balances[0].BalanceType)
-	assert.Equal(t, int64(1000), resp.Balances[0].Amount.Amount.Units)
+	assert.Equal(t, "1000.00", resp.Balances[0].Amount.Amount)
 
 	// Check available balance
 	assert.Equal(t, positionkeepingv1.BalanceType_BALANCE_TYPE_AVAILABLE, resp.Balances[1].BalanceType)
-	assert.Equal(t, int64(800), resp.Balances[1].Amount.Amount.Units)
+	assert.Equal(t, "800.00", resp.Balances[1].Amount.Amount)
 }
 
 func TestGetAccountBalances_NotFound(t *testing.T) {
@@ -323,7 +316,7 @@ func TestGetAccountBalance_ContextCanceled(t *testing.T) {
 	assert.Nil(t, resp)
 }
 
-func TestGetAccountBalances_WithCurrencyFilter(t *testing.T) {
+func TestGetAccountBalances_WithInstrumentFilter(t *testing.T) {
 	// Arrange
 	now := time.Now()
 	mock := &mockPositionKeepingServer{
@@ -332,12 +325,10 @@ func TestGetAccountBalances_WithCurrencyFilter(t *testing.T) {
 			Balances: []*positionkeepingv1.BalanceEntry{
 				{
 					BalanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
-					Amount: &commonv1.MoneyAmount{
-						Amount: &money.Money{
-							CurrencyCode: "USD",
-							Units:        500,
-							Nanos:        0,
-						},
+					Amount: &quantityv1.InstrumentAmount{
+						Amount:         "500.00",
+						InstrumentCode: "USD",
+						Version:        1,
 					},
 				},
 			},
@@ -352,15 +343,15 @@ func TestGetAccountBalances_WithCurrencyFilter(t *testing.T) {
 	require.NoError(t, err)
 	defer clientCleanup()
 
-	// Act - request with currency filter
+	// Act - request with instrument code filter
 	resp, err := c.GetAccountBalances(context.Background(), &positionkeepingv1.GetAccountBalancesRequest{
-		AccountId: "acc-123",
-		Currency:  "USD",
+		AccountId:      "acc-123",
+		InstrumentCode: "USD",
 	})
 
 	// Assert
 	require.NoError(t, err)
 	assert.Equal(t, "acc-123", resp.AccountId)
 	require.Len(t, resp.Balances, 1)
-	assert.Equal(t, "USD", resp.Balances[0].Amount.Amount.CurrencyCode)
+	assert.Equal(t, "USD", resp.Balances[0].Amount.InstrumentCode)
 }
