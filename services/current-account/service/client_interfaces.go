@@ -60,16 +60,19 @@ type PositionKeepingClient interface {
 	// Supports pagination for efficient retrieval of large result sets.
 	ListFinancialPositionLogs(ctx context.Context, req *positionkeepingv1.ListFinancialPositionLogsRequest) (*positionkeepingv1.ListFinancialPositionLogsResponse, error)
 
-	// GetAccountBalance retrieves a specific balance type for an account
+	// GetAccountBalance retrieves a specific balance type for an account by instrument
 	//
-	// Used to query the current, available, ledger, or other balance types.
-	// Returns the balance amount with currency and timestamp.
+	// Used to query the current, available, ledger, or other balance types for a specific instrument.
+	// Supports both currency instruments (GBP, USD, EUR) and non-currency instruments (KWH, GPU_HOUR, CARBON_TONNE).
+	// Returns the balance amount as InstrumentAmount with instrument_code and timestamp.
+	// For Current Account operations, always pass instrument_code="GBP" (currency dimension).
 	GetAccountBalance(ctx context.Context, req *positionkeepingv1.GetAccountBalanceRequest) (*positionkeepingv1.GetAccountBalanceResponse, error)
 
-	// GetAccountBalances retrieves all balance types for an account
+	// GetAccountBalances retrieves all balance types for an account by instrument
 	//
 	// Returns all balance types (opening, closing, current, available, ledger, reserve, free)
-	// in a single call, useful for comprehensive account status display.
+	// for a specific instrument in a single call. Useful for comprehensive account status display.
+	// Supports both currency and non-currency instruments.
 	GetAccountBalances(ctx context.Context, req *positionkeepingv1.GetAccountBalancesRequest) (*positionkeepingv1.GetAccountBalancesResponse, error)
 
 	// Close terminates the client connection gracefully

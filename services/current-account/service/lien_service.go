@@ -28,12 +28,13 @@ import (
 
 // Lien-specific errors
 var (
-	ErrLienRepositoryNil     = errors.New("lien repository cannot be nil")
-	ErrInsufficientFunds     = errors.New("insufficient available balance for lien")
-	ErrLienCurrencyMismatch  = errors.New("lien currency must match account currency")
-	ErrLienAmountNotPositive = errors.New("lien amount must be positive")
-	ErrAmountRequired        = errors.New("amount is required")
-	ErrAmountOverflow        = errors.New("amount too large: would overflow")
+	ErrLienRepositoryNil      = errors.New("lien repository cannot be nil")
+	ErrInsufficientFunds      = errors.New("insufficient available balance for lien")
+	ErrLienCurrencyMismatch   = errors.New("lien currency must match account currency")
+	ErrLienAmountNotPositive  = errors.New("lien amount must be positive")
+	ErrAmountRequired         = errors.New("amount is required")
+	ErrAmountOverflow         = errors.New("amount too large: would overflow")
+	ErrInstrumentCodeMismatch = errors.New("instrument code mismatch in balance response")
 	// Transaction operation errors for error detection
 	errTxSaveAccount       = errors.New("save_account")
 	errTxUpdateLien        = errors.New("update_lien")
@@ -928,22 +929,41 @@ func (s *Service) hydrateAccountWithPrefetchedBalance(account domain.CurrentAcco
 		Build(), nil
 }
 
+// currentAccountInstrumentCode is the instrument code used for Current Account balance queries.
+// Current Account operates exclusively with GBP currency (CURRENCY dimension).
+// The Internal Bank Account service will use different instrument codes for multi-asset support.
+const currentAccountInstrumentCode = "GBP"
+
 // getAccountBalanceCents gets the account balance in cents from Position Keeping service.
 // Position Keeping is the mandatory source of truth for all account balances.
+// Uses the multi-asset API with explicit instrument_code="GBP" for currency operations.
 // Returns balance in minor units (cents/pence).
 func (s *Service) getAccountBalanceCents(ctx context.Context, accountID string) (int64, error) {
 	resp, err := s.posKeepingClient.GetAccountBalance(ctx, &positionkeepingv1.GetAccountBalanceRequest{
-		AccountId:   accountID,
-		BalanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
+		AccountId:      accountID,
+		BalanceType:    positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
+		InstrumentCode: currentAccountInstrumentCode, // Explicit instrument for multi-asset API
 	})
 	if err != nil {
 		s.logger.Error("failed to get balance from Position Keeping",
-			"account_id", accountID, "error", err)
+			"account_id", accountID, "instrument_code", currentAccountInstrumentCode, "error", err)
 		return 0, fmt.Errorf("failed to get balance from Position Keeping: %w", err)
 	}
 
 	if resp.Amount == nil || resp.Amount.Amount == "" {
 		return 0, nil
+	}
+
+	// Validate that the response instrument matches the requested instrument.
+	// This guards against configuration mismatches where Position Keeping might
+	// return a different currency than expected.
+	if resp.Amount.InstrumentCode != currentAccountInstrumentCode {
+		s.logger.Error("instrument code mismatch in balance response",
+			"account_id", accountID,
+			"expected", currentAccountInstrumentCode,
+			"received", resp.Amount.InstrumentCode)
+		return 0, fmt.Errorf("%w: expected %s, got %s",
+			ErrInstrumentCodeMismatch, currentAccountInstrumentCode, resp.Amount.InstrumentCode)
 	}
 
 	// Parse InstrumentAmount as decimal
