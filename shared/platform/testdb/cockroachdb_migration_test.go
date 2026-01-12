@@ -44,6 +44,7 @@ func TestAtlasMigrations_CockroachDBCompatibility(t *testing.T) {
 	services := []string{
 		"current-account",
 		"financial-accounting",
+		"internal-bank-account",
 		"party",
 		"payment-order",
 		"position-keeping",
