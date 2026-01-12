@@ -64,7 +64,11 @@ type mockPositionKeepingClient struct {
 	bulkImportCalls int
 	listCalls       int
 	// Balance configuration for GetAccountBalance
-	accountBalances map[string]int64 // accountID -> balance in cents
+	accountBalances             map[string]int64 // accountID -> balance in cents
+	getBalanceCalls             int              // Track GetAccountBalance calls
+	lastRequestedInstrumentCode string           // Track last requested instrument code
+	requireInstrumentCode       bool             // If true, return error when instrument_code is missing
+	returnInstrumentCode        string           // Override the instrument code in response (for testing mismatches)
 }
 
 func (m *mockPositionKeepingClient) InitiateFinancialPositionLog(_ context.Context, _ *positionkeepingv1.InitiateFinancialPositionLogRequest) (*positionkeepingv1.InitiateFinancialPositionLogResponse, error) {
@@ -172,12 +176,28 @@ func (m *mockPositionKeepingClient) ListFinancialPositionLogs(_ context.Context,
 
 func (m *mockPositionKeepingClient) GetAccountBalance(_ context.Context, req *positionkeepingv1.GetAccountBalanceRequest) (*positionkeepingv1.GetAccountBalanceResponse, error) {
 	m.mu.Lock()
+	m.getBalanceCalls++
+	m.lastRequestedInstrumentCode = req.InstrumentCode
+
+	// Optionally require instrument_code to be present (for testing validation)
+	if m.requireInstrumentCode && req.InstrumentCode == "" {
+		m.mu.Unlock()
+		return nil, status.Error(codes.InvalidArgument, "instrument_code is required")
+	}
+
 	// Return configured balance if available
 	var balanceCents int64
 	if m.accountBalances != nil {
 		balanceCents = m.accountBalances[req.AccountId]
 	}
+
+	// Determine which instrument code to return (default to GBP, but allow override for mismatch testing)
+	responseInstrumentCode := "GBP"
+	if m.returnInstrumentCode != "" {
+		responseInstrumentCode = m.returnInstrumentCode
+	}
 	m.mu.Unlock()
+
 	// Convert cents to decimal amount string (e.g., 10050 cents = "100.50")
 	amount := decimal.NewFromInt(balanceCents).Div(decimal.NewFromInt(100))
 	return &positionkeepingv1.GetAccountBalanceResponse{
@@ -185,7 +205,7 @@ func (m *mockPositionKeepingClient) GetAccountBalance(_ context.Context, req *po
 		BalanceType: req.BalanceType,
 		Amount: &quantityv1.InstrumentAmount{
 			Amount:         amount.StringFixed(2),
-			InstrumentCode: "GBP",
+			InstrumentCode: responseInstrumentCode,
 			Version:        1,
 		},
 		AsOf: timestamppb.Now(),
@@ -1296,6 +1316,78 @@ func TestPositionKeeping_BalanceDelegation_NegativeBalanceHandled(t *testing.T) 
 	assert.NotNil(t, resp.Facility)
 	assert.NotNil(t, resp.Facility.CurrentBalance)
 	assert.Equal(t, int64(-50), resp.Facility.CurrentBalance.CurrentBalance.Amount.Units, "Negative balance should be handled correctly")
+}
+
+// TestPositionKeeping_MultiAssetAPI_InstrumentCodeSent verifies that
+// Current Account sends instrument_code="GBP" in balance queries.
+func TestPositionKeeping_MultiAssetAPI_InstrumentCodeSent(t *testing.T) {
+	db, ctx, cleanup := setupIntegrationTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	_ = createTestAccount(t, ctx, repo, "ACC-MULTI-001")
+
+	// Configure Position Keeping mock with tracking
+	mockPosKeeping := &mockPositionKeepingClient{
+		accountBalances: map[string]int64{
+			"ACC-MULTI-001": 50000, // £500.00
+		},
+	}
+
+	svc := &Service{
+		repo:             repo,
+		posKeepingClient: mockPosKeeping,
+		logger:           testLogger(),
+	}
+
+	// Retrieve account
+	resp, err := svc.RetrieveCurrentAccount(ctx, &pb.RetrieveCurrentAccountRequest{
+		AccountId: "ACC-MULTI-001",
+	})
+
+	require.NoError(t, err, "Retrieve should succeed")
+	assert.NotNil(t, resp.Facility)
+
+	// Verify instrument_code was sent in the request
+	assert.Equal(t, 1, mockPosKeeping.getBalanceCalls, "GetAccountBalance should be called once")
+	assert.Equal(t, "GBP", mockPosKeeping.lastRequestedInstrumentCode,
+		"Request should include instrument_code='GBP' for multi-asset API")
+
+	// Verify response balance is correct
+	assert.Equal(t, int64(500), resp.Facility.CurrentBalance.CurrentBalance.Amount.Units)
+}
+
+// TestPositionKeeping_MultiAssetAPI_InstrumentCodeMismatch verifies that
+// Current Account rejects responses with mismatched instrument codes.
+func TestPositionKeeping_MultiAssetAPI_InstrumentCodeMismatch(t *testing.T) {
+	db, ctx, cleanup := setupIntegrationTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	_ = createTestAccount(t, ctx, repo, "ACC-MULTI-002")
+
+	// Configure Position Keeping mock to return wrong instrument code
+	mockPosKeeping := &mockPositionKeepingClient{
+		accountBalances: map[string]int64{
+			"ACC-MULTI-002": 50000, // £500.00
+		},
+		returnInstrumentCode: "EUR", // Return EUR instead of GBP
+	}
+
+	svc := &Service{
+		repo:             repo,
+		posKeepingClient: mockPosKeeping,
+		logger:           testLogger(),
+	}
+
+	// Retrieve account should fail due to instrument mismatch
+	_, err := svc.RetrieveCurrentAccount(ctx, &pb.RetrieveCurrentAccountRequest{
+		AccountId: "ACC-MULTI-002",
+	})
+
+	require.Error(t, err, "Retrieve should fail due to instrument mismatch")
+	assert.Contains(t, err.Error(), "instrument code mismatch",
+		"Error should indicate instrument code mismatch")
 }
 
 // Circuit Breaker Tests for Position Keeping Balance Queries
