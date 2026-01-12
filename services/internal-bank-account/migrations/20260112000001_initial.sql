@@ -73,6 +73,14 @@ CREATE TABLE "internal_bank_account_status_history" (
 
   PRIMARY KEY ("id"),
 
+  -- Status value constraints (matching main table)
+  CONSTRAINT "chk_from_status" CHECK (from_status IN (
+    'ACTIVE', 'SUSPENDED', 'CLOSED'
+  )),
+  CONSTRAINT "chk_to_status" CHECK (to_status IN (
+    'ACTIVE', 'SUSPENDED', 'CLOSED'
+  )),
+
   -- Foreign key to internal_bank_account via account_id
   CONSTRAINT "fk_status_history_account" FOREIGN KEY ("account_id")
     REFERENCES "internal_bank_account" ("account_id")
