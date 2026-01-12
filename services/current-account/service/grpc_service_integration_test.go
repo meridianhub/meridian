@@ -14,11 +14,13 @@ import (
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
+	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/config"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
+	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/genproto/googleapis/type/money"
@@ -176,18 +178,15 @@ func (m *mockPositionKeepingClient) GetAccountBalance(_ context.Context, req *po
 		balanceCents = m.accountBalances[req.AccountId]
 	}
 	m.mu.Unlock()
-	// Convert cents to units.nanos format (e.g., 10050 cents = 100 units + 500000000 nanos)
-	units := balanceCents / 100
-	nanos := (balanceCents % 100) * 10000000
+	// Convert cents to decimal amount string (e.g., 10050 cents = "100.50")
+	amount := decimal.NewFromInt(balanceCents).Div(decimal.NewFromInt(100))
 	return &positionkeepingv1.GetAccountBalanceResponse{
 		AccountId:   req.AccountId,
 		BalanceType: req.BalanceType,
-		Amount: &commonpb.MoneyAmount{
-			Amount: &money.Money{
-				CurrencyCode: "GBP",
-				Units:        units,
-				Nanos:        int32(nanos),
-			},
+		Amount: &quantityv1.InstrumentAmount{
+			Amount:         amount.StringFixed(2),
+			InstrumentCode: "GBP",
+			Version:        1,
 		},
 		AsOf: timestamppb.Now(),
 	}, nil
@@ -1329,17 +1328,15 @@ func (m *mockPositionKeepingClientWithGetBalanceFailure) GetAccountBalance(_ con
 	if m.accountBalances != nil {
 		balanceCents = m.accountBalances[req.AccountId]
 	}
-	units := balanceCents / 100
-	nanos := (balanceCents % 100) * 10000000
+	// Convert cents to decimal amount string
+	amount := decimal.NewFromInt(balanceCents).Div(decimal.NewFromInt(100))
 	return &positionkeepingv1.GetAccountBalanceResponse{
 		AccountId:   req.AccountId,
 		BalanceType: req.BalanceType,
-		Amount: &commonpb.MoneyAmount{
-			Amount: &money.Money{
-				CurrencyCode: "GBP",
-				Units:        units,
-				Nanos:        int32(nanos),
-			},
+		Amount: &quantityv1.InstrumentAmount{
+			Amount:         amount.StringFixed(2),
+			InstrumentCode: "GBP",
+			Version:        1,
 		},
 		AsOf: timestamppb.Now(),
 	}, nil

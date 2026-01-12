@@ -18,6 +18,7 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/db"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
+	"github.com/shopspring/decimal"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -941,32 +942,31 @@ func (s *Service) getAccountBalanceCents(ctx context.Context, accountID string) 
 		return 0, fmt.Errorf("failed to get balance from Position Keeping: %w", err)
 	}
 
-	if resp.Amount == nil || resp.Amount.Amount == nil {
+	if resp.Amount == nil || resp.Amount.Amount == "" {
 		return 0, nil
 	}
 
-	units := resp.Amount.Amount.Units
-	nanos := resp.Amount.Amount.Nanos
+	// Parse InstrumentAmount as decimal
+	amount, err := decimal.NewFromString(resp.Amount.Amount)
+	if err != nil {
+		s.logger.Error("failed to parse balance amount",
+			"account_id", accountID, "amount", resp.Amount.Amount, "error", err)
+		return 0, fmt.Errorf("failed to parse balance amount: %w", err)
+	}
 
-	// Calculate nanosCents first to include in overflow check
-	// Round nanos instead of truncating (add 5000000 before division for banker's rounding)
-	// Consistent with protoToMoney conversion logic
-	// nanosCents is at most 100 (nanos range 0-999999999, (999999999+5000000)/10000000 = 100)
-	nanosCents := (nanos + 5000000) / 10000000
+	// Convert to minor units (cents/pence) - multiply by 100 for 2 decimal currencies.
+	// Uses banker's rounding (round-to-even) which differs from half-up at .5 boundaries:
+	// e.g., 0.015 -> 2 (rounds to even), 0.025 -> 2 (rounds to even), 0.035 -> 4 (rounds to even)
+	cents := amount.Mul(decimal.NewFromInt(100)).RoundBank(0)
 
-	// Validate units won't overflow when multiplied by 100 and added to nanosCents
-	// Reserve space for nanosCents (max 100) to prevent overflow in final addition
-	if units > (math.MaxInt64-100)/100 || units < (math.MinInt64+100)/100 {
+	// Check for overflow using int64 bounds
+	maxInt64 := decimal.NewFromInt(math.MaxInt64)
+	minInt64 := decimal.NewFromInt(math.MinInt64)
+	if cents.GreaterThan(maxInt64) || cents.LessThan(minInt64) {
 		return 0, ErrAmountOverflow
 	}
 
-	// Convert units.nanos to minor units (cents)
-	// Units are whole currency units, nanos are fractional parts (1 billionth)
-	// For GBP: 1.50 = 150 cents = (1 * 100) + rounded(500000000 / 10000000)
-	unitsCents := units * 100
-	cents := unitsCents + int64(nanosCents)
-
-	return cents, nil
+	return cents.IntPart(), nil
 }
 
 // calculateAvailableBalance calculates available balance with active liens.

@@ -180,7 +180,9 @@ func TestGetAccountBalance_Success(t *testing.T) {
 			assert.Equal(t, tt.balanceType, resp.BalanceType)
 			assert.NotNil(t, resp.Amount)
 			assert.NotNil(t, resp.AsOf)
-			assert.Equal(t, tt.expectAmount, resp.Amount.Amount.Units)
+			// InstrumentAmount uses string representation, convert expected units for comparison
+			expectedAmount := decimal.NewFromInt(tt.expectAmount).StringFixed(2)
+			assert.Equal(t, expectedAmount, resp.Amount.Amount)
 			mockRepo.AssertExpectations(t)
 			mockCurrentAccount.AssertExpectations(t)
 		})
@@ -323,9 +325,9 @@ func TestGetAccountBalance_CurrencyFilter(t *testing.T) {
 		require.NoError(t, err)
 
 		req := &positionkeepingv1.GetAccountBalanceRequest{
-			AccountId:   "test-account",
-			BalanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_OPENING,
-			Currency:    "GBP",
+			AccountId:      "test-account",
+			BalanceType:    positionkeepingv1.BalanceType_BALANCE_TYPE_OPENING,
+			InstrumentCode: "GBP",
 		}
 
 		// Act
@@ -334,10 +336,10 @@ func TestGetAccountBalance_CurrencyFilter(t *testing.T) {
 		// Assert
 		require.NoError(t, err)
 		assert.NotNil(t, resp)
-		assert.Equal(t, "GBP", resp.Amount.Amount.CurrencyCode)
+		assert.Equal(t, "GBP", resp.Amount.InstrumentCode)
 	})
 
-	t.Run("returns NotFound when currency does not match", func(t *testing.T) {
+	t.Run("returns NotFound when instrument code does not match", func(t *testing.T) {
 		// Arrange
 		mockRepo := new(MockRepository)
 		mockMeasurementRepo := new(MockMeasurementRepository)
@@ -356,9 +358,9 @@ func TestGetAccountBalance_CurrencyFilter(t *testing.T) {
 		require.NoError(t, err)
 
 		req := &positionkeepingv1.GetAccountBalanceRequest{
-			AccountId:   "test-account",
-			BalanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_OPENING,
-			Currency:    "USD", // Different currency
+			AccountId:      "test-account",
+			BalanceType:    positionkeepingv1.BalanceType_BALANCE_TYPE_OPENING,
+			InstrumentCode: "USD", // Different instrument
 		}
 
 		// Act
@@ -604,8 +606,8 @@ func TestGetAccountBalances_CurrencyFilter(t *testing.T) {
 		require.NoError(t, err)
 
 		req := &positionkeepingv1.GetAccountBalancesRequest{
-			AccountId: "test-account",
-			Currency:  "GBP",
+			AccountId:      "test-account",
+			InstrumentCode: "GBP",
 		}
 
 		// Act
@@ -617,7 +619,7 @@ func TestGetAccountBalances_CurrencyFilter(t *testing.T) {
 		assert.NotEmpty(t, resp.Balances)
 	})
 
-	t.Run("returns NotFound when currency does not match", func(t *testing.T) {
+	t.Run("returns NotFound when instrument code does not match", func(t *testing.T) {
 		// Arrange
 		mockRepo := new(MockRepository)
 		mockMeasurementRepo := new(MockMeasurementRepository)
@@ -636,8 +638,8 @@ func TestGetAccountBalances_CurrencyFilter(t *testing.T) {
 		require.NoError(t, err)
 
 		req := &positionkeepingv1.GetAccountBalancesRequest{
-			AccountId: "test-account",
-			Currency:  "EUR", // Different currency
+			AccountId:      "test-account",
+			InstrumentCode: "EUR", // Different instrument
 		}
 
 		// Act
@@ -732,5 +734,5 @@ func TestGetAccountBalance_WithLiens(t *testing.T) {
 	// Assert
 	require.NoError(t, err)
 	assert.NotNil(t, resp)
-	assert.Equal(t, int64(200), resp.Amount.Amount.Units) // Total liens = 200
+	assert.Equal(t, "200.00", resp.Amount.Amount) // Total liens = 200
 }

@@ -486,7 +486,7 @@ func TestIntegration_GetAccountBalance_AllBalanceTypes(t *testing.T) {
 			assert.Equal(t, tt.balanceType, resp.BalanceType)
 			assert.NotNil(t, resp.Amount)
 			assert.NotNil(t, resp.AsOf)
-			assert.Equal(t, "GBP", resp.Amount.Amount.CurrencyCode)
+			assert.Equal(t, "GBP", resp.Amount.InstrumentCode)
 		})
 	}
 }
@@ -550,7 +550,7 @@ func TestIntegration_GetAccountBalance_WithLiens(t *testing.T) {
 
 		resp, err := tc.Service.GetAccountBalance(ctx, req)
 		require.NoError(t, err)
-		assert.Equal(t, int64(300), resp.Amount.Amount.Units)
+		assert.Equal(t, "300.00", resp.Amount.Amount)
 	})
 
 	// Test Available balance (Current - Reserve = 1000 - 300 = 700)
@@ -562,7 +562,7 @@ func TestIntegration_GetAccountBalance_WithLiens(t *testing.T) {
 
 		resp, err := tc.Service.GetAccountBalance(ctx, req)
 		require.NoError(t, err)
-		assert.Equal(t, int64(700), resp.Amount.Amount.Units)
+		assert.Equal(t, "700.00", resp.Amount.Amount)
 	})
 
 	// Test Free balance (Current - Reserve = 1000 - 300 = 700)
@@ -574,7 +574,7 @@ func TestIntegration_GetAccountBalance_WithLiens(t *testing.T) {
 
 		resp, err := tc.Service.GetAccountBalance(ctx, req)
 		require.NoError(t, err)
-		assert.Equal(t, int64(700), resp.Amount.Amount.Units)
+		assert.Equal(t, "700.00", resp.Amount.Amount)
 	})
 }
 
@@ -697,7 +697,7 @@ func TestIntegration_GetAccountBalance_CurrencyFiltering(t *testing.T) {
 
 		resp, err := tc.Service.GetAccountBalance(ctx, req)
 		require.NoError(t, err)
-		assert.Equal(t, "GBP", resp.Amount.Amount.CurrencyCode)
+		assert.Equal(t, "GBP", resp.Amount.InstrumentCode)
 	})
 
 	t.Run("returns NotFound when currency does not match", func(t *testing.T) {
@@ -722,7 +722,7 @@ func TestIntegration_GetAccountBalance_CurrencyFiltering(t *testing.T) {
 
 		resp, err := tc.Service.GetAccountBalance(ctx, req)
 		require.NoError(t, err)
-		assert.Equal(t, "USD", resp.Amount.Amount.CurrencyCode)
+		assert.Equal(t, "USD", resp.Amount.InstrumentCode)
 	})
 }
 
@@ -811,7 +811,7 @@ func TestIntegration_ConcurrentBalanceQueries(t *testing.T) {
 		resultCount++
 		assert.Equal(t, accountID, resp.AccountId)
 		assert.NotNil(t, resp.Amount)
-		assert.Equal(t, "GBP", resp.Amount.Amount.CurrencyCode)
+		assert.Equal(t, "GBP", resp.Amount.InstrumentCode)
 	}
 
 	assert.Equal(t, numGoroutines*queriesPerGoroutine, resultCount,

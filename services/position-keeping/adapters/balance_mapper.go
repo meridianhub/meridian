@@ -10,6 +10,7 @@ import (
 
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
+	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
 )
 
@@ -138,4 +139,135 @@ func ToDomainMoney(protoMoney *commonv1.MoneyAmount) (domain.Money, error) {
 	amount := unitsDecimal.Add(nanosDecimal)
 
 	return domain.MustNewMoney(amount, currency), nil
+}
+
+// ErrNilInstrumentAmount is returned when attempting to convert a nil InstrumentAmount.
+var ErrNilInstrumentAmount = errors.New("InstrumentAmount is nil")
+
+// ErrInvalidAmount is returned when the amount string cannot be parsed as a decimal.
+var ErrInvalidAmount = errors.New("invalid amount string")
+
+// ErrInvalidInstrumentCode is returned when the instrument code is empty or invalid.
+var ErrInvalidInstrumentCode = errors.New("invalid or empty instrument code")
+
+// ErrInvalidVersion is returned when the instrument version is negative.
+var ErrInvalidVersion = errors.New("invalid instrument version")
+
+// ToProtoInstrumentAmount converts a domain Money to its protobuf InstrumentAmount representation.
+// This supports the Universal Asset System for multi-asset position tracking by representing
+// monetary quantities as InstrumentAmount with the currency code as instrument_code.
+func ToProtoInstrumentAmount(domainMoney domain.Money) *quantityv1.InstrumentAmount {
+	// Use the instrument precision for fixed-point string representation
+	precision := int32(domainMoney.Instrument.Precision)
+
+	return &quantityv1.InstrumentAmount{
+		Amount:         domainMoney.Amount.StringFixed(precision),
+		InstrumentCode: domainMoney.Instrument.Code,
+		Version:        int32(domainMoney.Instrument.Version),
+	}
+}
+
+// ToProtoInstrumentAmountFromAsset converts a domain Asset to its protobuf InstrumentAmount representation.
+// This supports non-monetary quantities like energy (KWH), compute (GPU_HOUR), and carbon credits.
+func ToProtoInstrumentAmountFromAsset(domainAsset domain.Asset) *quantityv1.InstrumentAmount {
+	// Use the instrument precision for fixed-point string representation
+	precision := int32(domainAsset.Instrument.Precision)
+
+	return &quantityv1.InstrumentAmount{
+		Amount:         domainAsset.Amount.StringFixed(precision),
+		InstrumentCode: domainAsset.Instrument.Code,
+		Version:        int32(domainAsset.Instrument.Version),
+	}
+}
+
+// ToDomainMoneyFromInstrumentAmount converts a protobuf InstrumentAmount to its domain Money representation.
+// This function expects the InstrumentAmount to represent a currency (e.g., USD, GBP, EUR).
+// Returns an error if the amount is invalid or the instrument code is not a valid currency.
+func ToDomainMoneyFromInstrumentAmount(protoAmount *quantityv1.InstrumentAmount) (domain.Money, error) {
+	if protoAmount == nil {
+		return domain.Money{}, ErrNilInstrumentAmount
+	}
+
+	if protoAmount.InstrumentCode == "" {
+		return domain.Money{}, ErrInvalidInstrumentCode
+	}
+
+	// Reject negative version values
+	if protoAmount.Version < 0 {
+		return domain.Money{}, fmt.Errorf("%w: negative version %d", ErrInvalidVersion, protoAmount.Version)
+	}
+
+	amount, err := decimal.NewFromString(protoAmount.Amount)
+	if err != nil {
+		return domain.Money{}, fmt.Errorf("%w: %s", ErrInvalidAmount, protoAmount.Amount)
+	}
+
+	// Parse as currency - this validates it's a valid ISO 4217 code
+	currency, err := domain.ParseCurrency(protoAmount.InstrumentCode)
+	if err != nil {
+		return domain.Money{}, fmt.Errorf("%w: %s", ErrInvalidCurrency, protoAmount.InstrumentCode)
+	}
+
+	return domain.MustNewMoney(amount, currency), nil
+}
+
+// ToDomainAssetFromInstrumentAmount converts a protobuf InstrumentAmount to its domain Asset representation.
+// This function is for non-monetary quantities like energy (KWH), compute (GPU_HOUR), and carbon credits.
+// Returns an error if the amount is invalid or the instrument code is empty.
+func ToDomainAssetFromInstrumentAmount(protoAmount *quantityv1.InstrumentAmount) (domain.Asset, error) {
+	if protoAmount == nil {
+		return domain.Asset{}, ErrNilInstrumentAmount
+	}
+
+	if protoAmount.InstrumentCode == "" {
+		return domain.Asset{}, ErrInvalidInstrumentCode
+	}
+
+	amount, err := decimal.NewFromString(protoAmount.Amount)
+	if err != nil {
+		return domain.Asset{}, fmt.Errorf("%w: %s", ErrInvalidAmount, protoAmount.Amount)
+	}
+
+	// Infer dimension and precision from instrument code
+	dimension, precision := inferInstrumentProperties(protoAmount.InstrumentCode)
+
+	// Reject negative version values (would wrap to large uint32)
+	if protoAmount.Version < 0 {
+		return domain.Asset{}, fmt.Errorf("%w: negative version %d", ErrInvalidVersion, protoAmount.Version)
+	}
+
+	version := uint32(protoAmount.Version)
+	if version == 0 {
+		version = 1 // Default version
+	}
+
+	instrument, err := domain.NewInstrument(protoAmount.InstrumentCode, version, dimension, precision)
+	if err != nil {
+		return domain.Asset{}, fmt.Errorf("%w: %w", ErrInvalidInstrumentCode, err)
+	}
+
+	return domain.NewAsset(amount, instrument), nil
+}
+
+// inferInstrumentProperties returns the dimension and precision for a given instrument code.
+// Known instrument codes get specific precision, others default to 6 decimal places.
+func inferInstrumentProperties(code string) (dimension string, precision int) {
+	// Currency codes (3-char uppercase letters)
+	switch code {
+	case "USD", "EUR", "GBP", "CHF", "CAD", "AUD":
+		return domain.DimensionCurrency, 2
+	case "JPY":
+		return domain.DimensionCurrency, 0
+	case "KWH":
+		return "ENERGY", 6 // Kilowatt-hours
+	case "GPU_HOUR":
+		return "COMPUTE", 6 // GPU compute hours
+	case "CARBON_TONNE":
+		return "CARBON", 3 // Carbon credits
+	case "CARBON_CREDIT":
+		return "CARBON", 3 // Carbon credits
+	default:
+		// Default to commodity dimension with 6 decimal places
+		return "COMMODITY", 6
+	}
 }

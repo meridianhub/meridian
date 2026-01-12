@@ -6,6 +6,7 @@ import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
 import "google/protobuf/timestamp.proto";
 import "meridian/common/v1/types.proto";
+import "meridian/quantity/v1/quantity.proto";
 import "protoc-gen-openapiv2/options/annotations.proto";
 
 option go_package = "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1;positionkeepingv1";
@@ -529,10 +530,11 @@ message GetAccountBalanceRequest {
     not_in: [0] /* Disallow UNSPECIFIED */
   }];
 
-  // currency filters the balance by currency (optional, ISO 4217 format).
-  string currency = 3 [(buf.validate.field).string = {
-    max_len: 3
-    pattern: "^[A-Z]{0,3}$"
+  // instrument_code filters the balance by instrument (optional).
+  // Supports ISO 4217 currency codes (USD, GBP) and extended asset codes (KWH, GPU_HOUR, CARBON_TONNE).
+  string instrument_code = 3 [(buf.validate.field).string = {
+    max_len: 32
+    pattern: "^[A-Z][A-Z0-9_]*$"
   }];
 }
 
@@ -547,8 +549,9 @@ message GetAccountBalanceResponse {
   // balance_type is the type of balance returned.
   BalanceType balance_type = 2 [(buf.validate.field).enum.defined_only = true];
 
-  // amount is the balance amount.
-  meridian.common.v1.MoneyAmount amount = 3 [(buf.validate.field).required = true];
+  // amount is the balance amount expressed as an InstrumentAmount.
+  // Supports both currency amounts (USD, GBP) and multi-asset amounts (KWH, GPU_HOUR).
+  meridian.quantity.v1.InstrumentAmount amount = 3 [(buf.validate.field).required = true];
 
   // as_of is the timestamp representing when this balance was calculated.
   google.protobuf.Timestamp as_of = 4 [(buf.validate.field).required = true];
@@ -566,10 +569,11 @@ message GetAccountBalancesRequest {
     }
   ];
 
-  // currency filters balances by currency (optional, ISO 4217 format).
-  string currency = 2 [(buf.validate.field).string = {
-    max_len: 3
-    pattern: "^[A-Z]{0,3}$"
+  // instrument_code filters balances by instrument (optional).
+  // Supports ISO 4217 currency codes (USD, GBP) and extended asset codes (KWH, GPU_HOUR, CARBON_TONNE).
+  string instrument_code = 2 [(buf.validate.field).string = {
+    max_len: 32
+    pattern: "^[A-Z][A-Z0-9_]*$"
   }];
 }
 
@@ -578,8 +582,9 @@ message BalanceEntry {
   // balance_type is the type of this balance.
   BalanceType balance_type = 1 [(buf.validate.field).enum.defined_only = true];
 
-  // amount is the balance amount.
-  meridian.common.v1.MoneyAmount amount = 2 [(buf.validate.field).required = true];
+  // amount is the balance amount expressed as an InstrumentAmount.
+  // Supports both currency amounts (USD, GBP) and multi-asset amounts (KWH, GPU_HOUR).
+  meridian.quantity.v1.InstrumentAmount amount = 2 [(buf.validate.field).required = true];
 }
 
 // GetAccountBalancesResponse returns all balances for an account.

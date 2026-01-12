@@ -10,6 +10,7 @@ import (
 
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
+	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"github.com/meridianhub/meridian/services/position-keeping/adapters"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
 )
@@ -550,4 +551,384 @@ func mustNewMoney(amount string, currency domain.Currency) domain.Money {
 		panic(err)
 	}
 	return m
+}
+
+// =============================================================================
+// InstrumentAmount Adapter Tests
+// =============================================================================
+
+// TestToProtoInstrumentAmount tests conversion of domain Money to proto InstrumentAmount.
+func TestToProtoInstrumentAmount(t *testing.T) {
+	tests := []struct {
+		name           string
+		domainMoney    domain.Money
+		expectedAmount string
+		expectedCode   string
+		expectedVer    int32
+	}{
+		{
+			name:           "GBP with 2 decimal places",
+			domainMoney:    mustNewMoney("123.45", domain.CurrencyGBP),
+			expectedAmount: "123.45",
+			expectedCode:   "GBP",
+			expectedVer:    1,
+		},
+		{
+			name:           "USD with fractional cents",
+			domainMoney:    mustNewMoney("100.999", domain.CurrencyUSD),
+			expectedAmount: "101.00", // Rounded to precision
+			expectedCode:   "USD",
+			expectedVer:    1,
+		},
+		{
+			name:           "JPY with 0 decimal places",
+			domainMoney:    mustNewMoney("1000", domain.CurrencyJPY),
+			expectedAmount: "1000",
+			expectedCode:   "JPY",
+			expectedVer:    1,
+		},
+		{
+			name:           "EUR zero amount",
+			domainMoney:    mustNewMoney("0", domain.CurrencyEUR),
+			expectedAmount: "0.00",
+			expectedCode:   "EUR",
+			expectedVer:    1,
+		},
+		{
+			name:           "negative amount",
+			domainMoney:    mustNewMoney("-50.25", domain.CurrencyGBP),
+			expectedAmount: "-50.25",
+			expectedCode:   "GBP",
+			expectedVer:    1,
+		},
+		{
+			name:           "large amount",
+			domainMoney:    mustNewMoney("9999999.99", domain.CurrencyGBP),
+			expectedAmount: "9999999.99",
+			expectedCode:   "GBP",
+			expectedVer:    1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := adapters.ToProtoInstrumentAmount(tt.domainMoney)
+
+			assert.Equal(t, tt.expectedAmount, result.Amount)
+			assert.Equal(t, tt.expectedCode, result.InstrumentCode)
+			assert.Equal(t, tt.expectedVer, result.Version)
+		})
+	}
+}
+
+// TestToProtoInstrumentAmountFromAsset tests conversion of domain Asset to proto InstrumentAmount.
+func TestToProtoInstrumentAmountFromAsset(t *testing.T) {
+	tests := []struct {
+		name           string
+		instrument     domain.Instrument
+		amount         decimal.Decimal
+		expectedAmount string
+		expectedCode   string
+	}{
+		{
+			name:           "KWH energy asset",
+			instrument:     domain.MustNewInstrument("KWH", 1, "ENERGY", 6),
+			amount:         decimal.NewFromFloat(1234.567890),
+			expectedAmount: "1234.567890",
+			expectedCode:   "KWH",
+		},
+		{
+			name:           "GPU_HOUR compute asset",
+			instrument:     domain.MustNewInstrument("GPU_HOUR", 1, "COMPUTE", 6),
+			amount:         decimal.NewFromFloat(100.5),
+			expectedAmount: "100.500000",
+			expectedCode:   "GPU_HOUR",
+		},
+		{
+			name:           "CARBON_TONNE asset",
+			instrument:     domain.MustNewInstrument("CARBON_TONNE", 1, "CARBON", 3),
+			amount:         decimal.NewFromFloat(500.123),
+			expectedAmount: "500.123",
+			expectedCode:   "CARBON_TONNE",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			asset := domain.NewAsset(tt.amount, tt.instrument)
+			result := adapters.ToProtoInstrumentAmountFromAsset(asset)
+
+			assert.Equal(t, tt.expectedAmount, result.Amount)
+			assert.Equal(t, tt.expectedCode, result.InstrumentCode)
+			assert.Equal(t, int32(1), result.Version)
+		})
+	}
+}
+
+// TestToDomainMoneyFromInstrumentAmount tests conversion of proto InstrumentAmount to domain Money.
+func TestToDomainMoneyFromInstrumentAmount(t *testing.T) {
+	tests := []struct {
+		name         string
+		proto        *quantityv1.InstrumentAmount
+		expectError  bool
+		errContains  string
+		expectAmount string
+		expectCode   string
+	}{
+		{
+			name: "valid GBP amount",
+			proto: &quantityv1.InstrumentAmount{
+				Amount:         "123.45",
+				InstrumentCode: "GBP",
+				Version:        1,
+			},
+			expectError:  false,
+			expectAmount: "123.45",
+			expectCode:   "GBP",
+		},
+		{
+			name: "valid USD zero amount",
+			proto: &quantityv1.InstrumentAmount{
+				Amount:         "0",
+				InstrumentCode: "USD",
+				Version:        1,
+			},
+			expectError:  false,
+			expectAmount: "0",
+			expectCode:   "USD",
+		},
+		{
+			name: "valid negative amount",
+			proto: &quantityv1.InstrumentAmount{
+				Amount:         "-50.25",
+				InstrumentCode: "EUR",
+				Version:        1,
+			},
+			expectError:  false,
+			expectAmount: "-50.25",
+			expectCode:   "EUR",
+		},
+		{
+			name:        "nil InstrumentAmount returns error",
+			proto:       nil,
+			expectError: true,
+			errContains: "nil",
+		},
+		{
+			name: "empty instrument code returns error",
+			proto: &quantityv1.InstrumentAmount{
+				Amount:         "100",
+				InstrumentCode: "",
+				Version:        1,
+			},
+			expectError: true,
+			errContains: "instrument code",
+		},
+		{
+			name: "invalid amount string returns error",
+			proto: &quantityv1.InstrumentAmount{
+				Amount:         "not-a-number",
+				InstrumentCode: "GBP",
+				Version:        1,
+			},
+			expectError: true,
+			errContains: "invalid amount",
+		},
+		{
+			name: "non-currency code returns error",
+			proto: &quantityv1.InstrumentAmount{
+				Amount:         "100",
+				InstrumentCode: "KWH", // Not a currency
+				Version:        1,
+			},
+			expectError: true,
+			errContains: "currency",
+		},
+		{
+			name: "negative version returns error",
+			proto: &quantityv1.InstrumentAmount{
+				Amount:         "100",
+				InstrumentCode: "GBP",
+				Version:        -1,
+			},
+			expectError: true,
+			errContains: "version",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := adapters.ToDomainMoneyFromInstrumentAmount(tt.proto)
+
+			if tt.expectError {
+				require.Error(t, err)
+				if tt.errContains != "" {
+					assert.Contains(t, err.Error(), tt.errContains)
+				}
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.expectAmount, result.Amount.String())
+			assert.Equal(t, tt.expectCode, result.Instrument.Code)
+		})
+	}
+}
+
+// TestToDomainAssetFromInstrumentAmount tests conversion of proto InstrumentAmount to domain Asset.
+func TestToDomainAssetFromInstrumentAmount(t *testing.T) {
+	tests := []struct {
+		name         string
+		proto        *quantityv1.InstrumentAmount
+		expectError  bool
+		errContains  string
+		expectAmount string
+		expectCode   string
+	}{
+		{
+			name: "valid KWH asset",
+			proto: &quantityv1.InstrumentAmount{
+				Amount:         "1234.567890",
+				InstrumentCode: "KWH",
+				Version:        1,
+			},
+			expectError:  false,
+			expectAmount: "1234.56789",
+			expectCode:   "KWH",
+		},
+		{
+			name: "valid GPU_HOUR asset",
+			proto: &quantityv1.InstrumentAmount{
+				Amount:         "100.5",
+				InstrumentCode: "GPU_HOUR",
+				Version:        1,
+			},
+			expectError:  false,
+			expectAmount: "100.5",
+			expectCode:   "GPU_HOUR",
+		},
+		{
+			name: "valid CARBON_TONNE asset",
+			proto: &quantityv1.InstrumentAmount{
+				Amount:         "500.123",
+				InstrumentCode: "CARBON_TONNE",
+				Version:        1,
+			},
+			expectError:  false,
+			expectAmount: "500.123",
+			expectCode:   "CARBON_TONNE",
+		},
+		{
+			name: "zero version defaults to 1",
+			proto: &quantityv1.InstrumentAmount{
+				Amount:         "100",
+				InstrumentCode: "KWH",
+				Version:        0, // Should default to 1
+			},
+			expectError:  false,
+			expectAmount: "100",
+			expectCode:   "KWH",
+		},
+		{
+			name:        "nil InstrumentAmount returns error",
+			proto:       nil,
+			expectError: true,
+			errContains: "nil",
+		},
+		{
+			name: "empty instrument code returns error",
+			proto: &quantityv1.InstrumentAmount{
+				Amount:         "100",
+				InstrumentCode: "",
+				Version:        1,
+			},
+			expectError: true,
+			errContains: "instrument code",
+		},
+		{
+			name: "invalid amount string returns error",
+			proto: &quantityv1.InstrumentAmount{
+				Amount:         "not-a-number",
+				InstrumentCode: "KWH",
+				Version:        1,
+			},
+			expectError: true,
+			errContains: "invalid amount",
+		},
+		{
+			name: "negative version returns error",
+			proto: &quantityv1.InstrumentAmount{
+				Amount:         "100",
+				InstrumentCode: "KWH",
+				Version:        -1,
+			},
+			expectError: true,
+			errContains: "version",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := adapters.ToDomainAssetFromInstrumentAmount(tt.proto)
+
+			if tt.expectError {
+				require.Error(t, err)
+				if tt.errContains != "" {
+					assert.Contains(t, err.Error(), tt.errContains)
+				}
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.expectAmount, result.Amount.String())
+			assert.Equal(t, tt.expectCode, result.Instrument.Code)
+		})
+	}
+}
+
+// TestRoundTripMoneyToInstrumentAmount tests round-trip conversion preserves precision.
+func TestRoundTripMoneyToInstrumentAmount(t *testing.T) {
+	tests := []struct {
+		name     string
+		amount   string
+		currency domain.Currency
+	}{
+		{
+			name:     "GBP round trip",
+			amount:   "123.45",
+			currency: domain.CurrencyGBP,
+		},
+		{
+			name:     "USD round trip",
+			amount:   "1000.00",
+			currency: domain.CurrencyUSD,
+		},
+		{
+			name:     "EUR round trip with zero fraction",
+			amount:   "500.00",
+			currency: domain.CurrencyEUR,
+		},
+		{
+			name:     "JPY round trip (no decimals)",
+			amount:   "1000",
+			currency: domain.CurrencyJPY,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Domain -> Proto
+			original := mustNewMoney(tt.amount, tt.currency)
+			proto := adapters.ToProtoInstrumentAmount(original)
+
+			// Proto -> Domain
+			result, err := adapters.ToDomainMoneyFromInstrumentAmount(proto)
+			require.NoError(t, err)
+
+			// Compare
+			assert.True(t, original.Amount.Equal(result.Amount),
+				"Expected %s, got %s", original.Amount.String(), result.Amount.String())
+			assert.Equal(t, original.Instrument.Code, result.Instrument.Code)
+		})
+	}
 }

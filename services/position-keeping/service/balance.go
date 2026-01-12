@@ -84,10 +84,10 @@ func (s *PositionKeepingService) GetAccountBalance(
 		currency = openingBalance.Instrument
 	}
 
-	// Apply currency filter if specified
-	if req.GetCurrency() != "" {
-		if currency.Code != req.GetCurrency() {
-			return nil, status.Errorf(codes.NotFound, "no balance found for currency: %s", req.GetCurrency())
+	// Apply instrument filter if specified (supports both currency codes and extended asset codes)
+	if req.GetInstrumentCode() != "" {
+		if currency.Code != req.GetInstrumentCode() {
+			return nil, status.Errorf(codes.NotFound, "no balance found for instrument: %s", req.GetInstrumentCode())
 		}
 	}
 
@@ -111,7 +111,7 @@ func (s *PositionKeepingService) GetAccountBalance(
 	return &positionkeepingv1.GetAccountBalanceResponse{
 		AccountId:   req.GetAccountId(),
 		BalanceType: adapters.ToProtoBalanceType(balance.Type),
-		Amount:      adapters.ToProtoMoneyAmount(balance.Amount),
+		Amount:      adapters.ToProtoInstrumentAmount(balance.Amount),
 		AsOf:        timestamppb.New(balance.AsOf),
 	}, nil
 }
@@ -163,10 +163,10 @@ func (s *PositionKeepingService) GetAccountBalances(
 		currency = openingBalance.Instrument
 	}
 
-	// Apply currency filter if specified
-	if req.GetCurrency() != "" {
-		if currency.Code != req.GetCurrency() {
-			return nil, status.Errorf(codes.NotFound, "no balances found for currency: %s", req.GetCurrency())
+	// Apply instrument filter if specified (supports both currency codes and extended asset codes)
+	if req.GetInstrumentCode() != "" {
+		if currency.Code != req.GetInstrumentCode() {
+			return nil, status.Errorf(codes.NotFound, "no balances found for instrument: %s", req.GetInstrumentCode())
 		}
 	}
 
@@ -194,7 +194,7 @@ func (s *PositionKeepingService) GetAccountBalances(
 
 		balanceEntries = append(balanceEntries, &positionkeepingv1.BalanceEntry{
 			BalanceType: adapters.ToProtoBalanceType(balance.Type),
-			Amount:      adapters.ToProtoMoneyAmount(balance.Amount),
+			Amount:      adapters.ToProtoInstrumentAmount(balance.Amount),
 		})
 	}
 
