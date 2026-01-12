@@ -11,6 +11,7 @@ CREATE TABLE "internal_bank_account" (
   "created_by" character varying(100) NOT NULL,
   "updated_at" timestamptz NOT NULL DEFAULT now(),
   "updated_by" character varying(100) NOT NULL,
+  "deleted_at" timestamptz NULL,
 
   -- Account identifiers
   "account_id" character varying(100) NOT NULL,
@@ -34,7 +35,7 @@ CREATE TABLE "internal_bank_account" (
   "attributes" jsonb NOT NULL DEFAULT '{}',
 
   -- Optimistic locking
-  "version" integer NOT NULL DEFAULT 1,
+  "version" bigint NOT NULL DEFAULT 1,
 
   PRIMARY KEY ("id"),
 
@@ -60,6 +61,10 @@ CREATE INDEX "idx_internal_bank_account_type" ON "internal_bank_account" ("accou
 CREATE INDEX "idx_internal_bank_account_instrument" ON "internal_bank_account" ("instrument_code");
 CREATE INDEX "idx_internal_bank_account_status" ON "internal_bank_account" ("status");
 CREATE INDEX "idx_internal_bank_account_code" ON "internal_bank_account" ("account_code");
+CREATE INDEX "idx_internal_bank_account_deleted_at" ON "internal_bank_account" ("deleted_at");
+
+-- Composite index for common query patterns (e.g., "find all NOSTRO accounts for USD")
+CREATE INDEX "idx_internal_bank_account_type_instrument" ON "internal_bank_account" ("account_type", "instrument_code");
 
 -- Create "internal_bank_account_status_history" table for audit trail
 CREATE TABLE "internal_bank_account_status_history" (
@@ -88,7 +93,8 @@ CREATE TABLE "internal_bank_account_status_history" (
 );
 
 -- Indexes for status history queries
-CREATE INDEX "idx_status_history_account" ON "internal_bank_account_status_history" ("account_id");
+-- Composite index optimized for audit log queries (filter by account, sort by time DESC)
+CREATE INDEX "idx_status_history_account_changed" ON "internal_bank_account_status_history" ("account_id", "changed_at" DESC);
 CREATE INDEX "idx_status_history_changed_at" ON "internal_bank_account_status_history" ("changed_at");
 
 -- Comments

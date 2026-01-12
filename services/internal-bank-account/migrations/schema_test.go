@@ -96,14 +96,14 @@ func TestSchema_TableStructure(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, tableCount, "internal_bank_account_status_history table should exist")
 
-	// Verify indexes exist (at least 5 on main table)
+	// Verify indexes exist (at least 7 on main table)
 	var indexCount int
 	err = db.Raw(`
 		SELECT COUNT(*) FROM pg_indexes
 		WHERE tablename = 'internal_bank_account'
 	`).Scan(&indexCount).Error
 	require.NoError(t, err)
-	assert.GreaterOrEqual(t, indexCount, 5, "Should have at least 5 indexes on internal_bank_account")
+	assert.GreaterOrEqual(t, indexCount, 7, "Should have at least 7 indexes on internal_bank_account")
 
 	// Verify specific indexes exist
 	var indexNames []string
@@ -117,9 +117,11 @@ func TestSchema_TableStructure(t *testing.T) {
 	expectedIndexes := []string{
 		"idx_internal_bank_account_account_id",
 		"idx_internal_bank_account_code",
+		"idx_internal_bank_account_deleted_at",
 		"idx_internal_bank_account_instrument",
 		"idx_internal_bank_account_status",
 		"idx_internal_bank_account_type",
+		"idx_internal_bank_account_type_instrument",
 	}
 	for _, expected := range expectedIndexes {
 		assert.Contains(t, indexNames, expected, "Index %s should exist", expected)
@@ -455,4 +457,108 @@ func TestSchema_CorrespondentBankFields(t *testing.T) {
 	assert.Equal(t, "JPMORGAN", *bankID)
 	assert.Equal(t, "JPMorgan Chase Bank", *bankName)
 	assert.Equal(t, "REF-123456", *extRef)
+}
+
+// TestSchema_SoftDelete verifies soft delete column works correctly.
+func TestSchema_SoftDelete(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping soft delete test in short mode")
+	}
+
+	migrationsDir := getMigrationsDir(t)
+
+	db, cleanup := testdb.SetupPostgres(t, nil)
+	defer cleanup()
+
+	migrationSQL, err := readMigrationFile(filepath.Join(migrationsDir, "20260112000001_initial.sql"))
+	require.NoError(t, err)
+	require.NoError(t, db.Exec(migrationSQL).Error)
+
+	// Insert an account
+	err = db.Exec(`
+		INSERT INTO internal_bank_account (
+			account_id, account_code, name, account_type,
+			instrument_code, dimension, created_by, updated_by
+		) VALUES (
+			'ACC-SOFT-DEL', 'SOFT-DEL', 'Soft Delete Test', 'CLEARING',
+			'GBP', 'CURRENCY', 'test', 'test'
+		)
+	`).Error
+	require.NoError(t, err)
+
+	// Verify deleted_at is NULL initially
+	var deletedAt *string
+	err = db.Raw(`
+		SELECT deleted_at FROM internal_bank_account
+		WHERE account_id = 'ACC-SOFT-DEL'
+	`).Scan(&deletedAt).Error
+	require.NoError(t, err)
+	assert.Nil(t, deletedAt, "deleted_at should be NULL initially")
+
+	// Soft delete the account
+	err = db.Exec(`
+		UPDATE internal_bank_account
+		SET deleted_at = NOW()
+		WHERE account_id = 'ACC-SOFT-DEL'
+	`).Error
+	require.NoError(t, err)
+
+	// Verify deleted_at is set
+	err = db.Raw(`
+		SELECT deleted_at FROM internal_bank_account
+		WHERE account_id = 'ACC-SOFT-DEL'
+	`).Scan(&deletedAt).Error
+	require.NoError(t, err)
+	assert.NotNil(t, deletedAt, "deleted_at should be set after soft delete")
+
+	// Account still exists (not hard deleted)
+	var count int
+	err = db.Raw(`
+		SELECT COUNT(*) FROM internal_bank_account
+		WHERE account_id = 'ACC-SOFT-DEL'
+	`).Scan(&count).Error
+	require.NoError(t, err)
+	assert.Equal(t, 1, count, "Account should still exist after soft delete")
+
+	// Query excluding soft-deleted accounts
+	err = db.Raw(`
+		SELECT COUNT(*) FROM internal_bank_account
+		WHERE account_id = 'ACC-SOFT-DEL' AND deleted_at IS NULL
+	`).Scan(&count).Error
+	require.NoError(t, err)
+	assert.Equal(t, 0, count, "Soft-deleted account should be excluded with WHERE deleted_at IS NULL")
+}
+
+// TestSchema_CompositeIndexes verifies composite indexes exist.
+func TestSchema_CompositeIndexes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping composite index test in short mode")
+	}
+
+	migrationsDir := getMigrationsDir(t)
+
+	db, cleanup := testdb.SetupPostgres(t, nil)
+	defer cleanup()
+
+	migrationSQL, err := readMigrationFile(filepath.Join(migrationsDir, "20260112000001_initial.sql"))
+	require.NoError(t, err)
+	require.NoError(t, db.Exec(migrationSQL).Error)
+
+	// Verify composite index on main table
+	var typeInstrumentIdx int
+	err = db.Raw(`
+		SELECT COUNT(*) FROM pg_indexes
+		WHERE indexname = 'idx_internal_bank_account_type_instrument'
+	`).Scan(&typeInstrumentIdx).Error
+	require.NoError(t, err)
+	assert.Equal(t, 1, typeInstrumentIdx, "Composite index idx_internal_bank_account_type_instrument should exist")
+
+	// Verify composite index on status history (account_id, changed_at DESC)
+	var historyCompositeIdx int
+	err = db.Raw(`
+		SELECT COUNT(*) FROM pg_indexes
+		WHERE indexname = 'idx_status_history_account_changed'
+	`).Scan(&historyCompositeIdx).Error
+	require.NoError(t, err)
+	assert.Equal(t, 1, historyCompositeIdx, "Composite index idx_status_history_account_changed should exist")
 }
