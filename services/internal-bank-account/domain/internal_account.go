@@ -2,21 +2,9 @@
 package domain
 
 import (
-	"errors"
 	"time"
 
 	"github.com/google/uuid"
-)
-
-// Validation errors for InternalBankAccount.
-var (
-	errAccountIDRequired       = errors.New("account ID is required")
-	errAccountCodeRequired     = errors.New("account code is required")
-	errAccountNameRequired     = errors.New("account name is required")
-	errInvalidAccountType      = errors.New("invalid account type")
-	errCorrespondentRequired   = errors.New("correspondent details required for NOSTRO/VOSTRO accounts")
-	errCorrespondentNotAllowed = errors.New("correspondent details not allowed for this account type")
-	errAccountClosed           = errors.New("cannot modify closed account")
 )
 
 // InternalBankAccount represents an internal bank account aggregate root.
@@ -63,16 +51,16 @@ func NewInternalBankAccount(
 	instrumentCode, dimension string,
 ) (InternalBankAccount, error) {
 	if accountID == "" {
-		return InternalBankAccount{}, errAccountIDRequired
+		return InternalBankAccount{}, ErrAccountIDRequired
 	}
 	if accountCode == "" {
-		return InternalBankAccount{}, errAccountCodeRequired
+		return InternalBankAccount{}, ErrAccountCodeRequired
 	}
 	if name == "" {
-		return InternalBankAccount{}, errAccountNameRequired
+		return InternalBankAccount{}, ErrNameRequired
 	}
 	if !accountType.IsValid() {
-		return InternalBankAccount{}, errInvalidAccountType
+		return InternalBankAccount{}, ErrInvalidAccountType
 	}
 
 	now := time.Now()
@@ -132,16 +120,16 @@ func (a InternalBankAccount) Close(reason string) (InternalBankAccount, error) {
 //   - Other account types REJECT correspondent details (cannot pass non-nil)
 func (a InternalBankAccount) UpdateCorrespondent(details *CorrespondentDetails) (InternalBankAccount, error) {
 	if a.status == AccountStatusClosed {
-		return a, errAccountClosed
+		return a, ErrAccountClosed
 	}
 
 	requiresCorrespondent := a.accountType.RequiresCorrespondent()
 
 	if requiresCorrespondent && details == nil {
-		return a, errCorrespondentRequired
+		return a, ErrCorrespondentRequired
 	}
 	if !requiresCorrespondent && details != nil {
-		return a, errCorrespondentNotAllowed
+		return a, ErrCorrespondentNotAllowed
 	}
 
 	// Create new instance with updated correspondent

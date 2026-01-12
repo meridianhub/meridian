@@ -123,7 +123,7 @@ func TestNewInternalBankAccount_ValidationErrors(t *testing.T) {
 			accountType:    AccountTypeClearing,
 			instrumentCode: "GBP",
 			dimension:      "CURRENCY",
-			expectedErr:    errAccountIDRequired,
+			expectedErr:    ErrAccountIDRequired,
 		},
 		{
 			name:           "empty account code",
@@ -133,7 +133,7 @@ func TestNewInternalBankAccount_ValidationErrors(t *testing.T) {
 			accountType:    AccountTypeClearing,
 			instrumentCode: "GBP",
 			dimension:      "CURRENCY",
-			expectedErr:    errAccountCodeRequired,
+			expectedErr:    ErrAccountCodeRequired,
 		},
 		{
 			name:           "empty name",
@@ -143,7 +143,7 @@ func TestNewInternalBankAccount_ValidationErrors(t *testing.T) {
 			accountType:    AccountTypeClearing,
 			instrumentCode: "GBP",
 			dimension:      "CURRENCY",
-			expectedErr:    errAccountNameRequired,
+			expectedErr:    ErrNameRequired,
 		},
 		{
 			name:           "invalid account type",
@@ -153,7 +153,7 @@ func TestNewInternalBankAccount_ValidationErrors(t *testing.T) {
 			accountType:    AccountType("INVALID"),
 			instrumentCode: "GBP",
 			dimension:      "CURRENCY",
-			expectedErr:    errInvalidAccountType,
+			expectedErr:    ErrInvalidAccountType,
 		},
 		{
 			name:           "empty account type",
@@ -163,7 +163,7 @@ func TestNewInternalBankAccount_ValidationErrors(t *testing.T) {
 			accountType:    AccountType(""),
 			instrumentCode: "GBP",
 			dimension:      "CURRENCY",
-			expectedErr:    errInvalidAccountType,
+			expectedErr:    ErrInvalidAccountType,
 		},
 	}
 
@@ -370,7 +370,7 @@ func TestUpdateCorrespondent_ValidationForType(t *testing.T) {
 		// Try to set nil correspondent on NOSTRO
 		_, err := nostro.UpdateCorrespondent(nil)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, errCorrespondentRequired)
+		assert.ErrorIs(t, err, ErrCorrespondentRequired)
 	})
 
 	t.Run("VOSTRO requires correspondent", func(t *testing.T) {
@@ -379,7 +379,7 @@ func TestUpdateCorrespondent_ValidationForType(t *testing.T) {
 		// Try to set nil correspondent on VOSTRO
 		_, err := vostro.UpdateCorrespondent(nil)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, errCorrespondentRequired)
+		assert.ErrorIs(t, err, ErrCorrespondentRequired)
 	})
 
 	t.Run("CLEARING rejects correspondent", func(t *testing.T) {
@@ -395,7 +395,7 @@ func TestUpdateCorrespondent_ValidationForType(t *testing.T) {
 		// Try to set correspondent on CLEARING account
 		_, err = clearing.UpdateCorrespondent(correspondent)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, errCorrespondentNotAllowed)
+		assert.ErrorIs(t, err, ErrCorrespondentNotAllowed)
 	})
 
 	t.Run("HOLDING rejects correspondent", func(t *testing.T) {
@@ -411,7 +411,7 @@ func TestUpdateCorrespondent_ValidationForType(t *testing.T) {
 		// Try to set correspondent on HOLDING account
 		_, err = holding.UpdateCorrespondent(correspondent)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, errCorrespondentNotAllowed)
+		assert.ErrorIs(t, err, ErrCorrespondentNotAllowed)
 	})
 
 	t.Run("SUSPENSE rejects correspondent", func(t *testing.T) {
@@ -426,7 +426,7 @@ func TestUpdateCorrespondent_ValidationForType(t *testing.T) {
 
 		_, err = suspense.UpdateCorrespondent(correspondent)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, errCorrespondentNotAllowed)
+		assert.ErrorIs(t, err, ErrCorrespondentNotAllowed)
 	})
 }
 
@@ -447,7 +447,7 @@ func TestUpdateCorrespondent_ClosedAccount(t *testing.T) {
 
 	_, err = closed.UpdateCorrespondent(correspondent)
 	require.Error(t, err)
-	assert.ErrorIs(t, err, errAccountClosed)
+	assert.ErrorIs(t, err, ErrAccountClosed)
 }
 
 func TestBuilder_Reconstruction(t *testing.T) {
