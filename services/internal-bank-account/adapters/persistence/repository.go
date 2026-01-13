@@ -94,7 +94,11 @@ func (r *Repository) Save(ctx context.Context, account domain.InternalBankAccoun
 			entity.CreatedAt = existing.CreatedAt
 			entity.CreatedBy = existing.CreatedBy
 
-			// Optimistic locking: domain already incremented version during mutation.
+			// Optimistic locking contract: The domain model increments version on all
+			// mutations (Suspend, Activate, Close, UpdateCorrespondent) before passing
+			// to Save. We check the original version (current - 1) to detect concurrent
+			// modifications. If another transaction has modified the record, the version
+			// won't match and we return ErrVersionConflict.
 			originalVersion := entity.Version - 1
 			updateResult := tx.Model(&InternalBankAccountEntity{}).
 				Where("account_id = ? AND version = ?", entity.AccountID, originalVersion).
@@ -214,7 +218,8 @@ func (r *Repository) FindByCode(ctx context.Context, accountCode string) (domain
 func (r *Repository) List(ctx context.Context, filter domain.ListFilter) ([]domain.InternalBankAccount, error) {
 	var accounts []domain.InternalBankAccount
 	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
-		query := tx.Where("deleted_at IS NULL")
+		// Deterministic ordering is required for stable pagination
+		query := tx.Where("deleted_at IS NULL").Order("created_at ASC, id ASC")
 
 		if filter.AccountType != nil {
 			query = query.Where("account_type = ?", string(*filter.AccountType))
