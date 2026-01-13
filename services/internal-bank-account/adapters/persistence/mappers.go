@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/meridianhub/meridian/services/internal-bank-account/domain"
 	"github.com/meridianhub/meridian/shared/platform/audit"
@@ -101,8 +102,14 @@ func reconstructCorrespondent(bankID, bankName, externalRef string) *domain.Corr
 	// Use the domain constructor - persisted data should always be valid
 	details, err := domain.NewCorrespondentDetails(bankID, bankName, externalRef)
 	if err != nil {
-		// This should never happen for valid persisted data
-		// Return nil to gracefully handle corrupt data
+		// Log at warn level - this indicates data corruption that needs investigation.
+		// Return nil to gracefully handle corrupt data without failing the request.
+		slog.Warn("corrupt correspondent data in database",
+			"bankID", bankID,
+			"bankName", bankName,
+			"externalRef", externalRef,
+			"error", err,
+		)
 		return nil
 	}
 	return details

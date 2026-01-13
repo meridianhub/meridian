@@ -72,6 +72,9 @@ func (r *Repository) isInTransaction() bool {
 }
 
 // withForUpdateScope executes the given function with FOR UPDATE locking support.
+// Implementation is identical to withTenantTransaction but kept separate for semantic
+// clarity: this method is specifically for operations that will use SELECT FOR UPDATE
+// (pessimistic locking), making the intent explicit at call sites.
 func (r *Repository) withForUpdateScope(ctx context.Context, fn func(tx *gorm.DB) error) error {
 	if r.isInTransaction() {
 		tx, err := r.withTenantScope(ctx, r.db.WithContext(ctx))
@@ -230,6 +233,9 @@ func (r *Repository) FindByCode(ctx context.Context, accountCode string) (domain
 }
 
 // List returns accounts matching the filter criteria.
+// Query performance supported by: idx_account_type, idx_instrument_code, idx_status, idx_deleted_at.
+// For high-volume filtered queries, consider composite index on (account_type, instrument_code).
+// Uses offset-based pagination; for large datasets cursor-based pagination would be more performant.
 func (r *Repository) List(ctx context.Context, filter domain.ListFilter) ([]domain.InternalBankAccount, error) {
 	var accounts []domain.InternalBankAccount
 	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
@@ -292,6 +298,9 @@ func (r *Repository) ExistsByCode(ctx context.Context, accountCode string) (bool
 }
 
 // RecordStatusChange persists a status change to the audit trail.
+// Note: Does not validate account existence at app level; relies on FK constraint
+// (fk_status_history_account) to enforce referential integrity. This allows the
+// database to be the single source of truth for constraint enforcement.
 func (r *Repository) RecordStatusChange(ctx context.Context, accountID, fromStatus, toStatus, reason string) error {
 	auditUser := audit.GetUserFromContext(ctx)
 
@@ -309,11 +318,18 @@ func (r *Repository) RecordStatusChange(ctx context.Context, accountID, fromStat
 }
 
 // Delete soft deletes an account by its UUID.
+// Records both deleted_at and updated_by for complete audit trail.
 func (r *Repository) Delete(ctx context.Context, id uuid.UUID) error {
+	auditUser := audit.GetUserFromContext(ctx)
+
 	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		result := tx.Model(&InternalBankAccountEntity{}).
 			Where("id = ? AND deleted_at IS NULL", id).
-			Update("deleted_at", gorm.Expr("now()"))
+			Updates(map[string]interface{}{
+				"deleted_at": gorm.Expr("now()"),
+				"updated_at": gorm.Expr("now()"),
+				"updated_by": auditUser,
+			})
 
 		if result.Error != nil {
 			return result.Error
