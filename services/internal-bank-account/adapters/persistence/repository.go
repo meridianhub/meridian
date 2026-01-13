@@ -3,9 +3,9 @@ package persistence
 import (
 	"context"
 	"errors"
-	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/meridianhub/meridian/services/internal-bank-account/domain"
 	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/db"
@@ -49,7 +49,16 @@ func (r *Repository) withTenantScope(ctx context.Context, tx *gorm.DB) (*gorm.DB
 }
 
 // withTenantTransaction executes the given function with tenant scoping in a transaction.
+// If already in a transaction (via WithTx), it uses the existing transaction directly
+// with tenant scope set, avoiding nested transactions.
 func (r *Repository) withTenantTransaction(ctx context.Context, fn func(tx *gorm.DB) error) error {
+	if r.isInTransaction() {
+		tx, err := r.withTenantScope(ctx, r.db.WithContext(ctx))
+		if err != nil {
+			return err
+		}
+		return fn(tx)
+	}
 	return db.WithGormTenantTransaction(ctx, r.db, fn)
 }
 
@@ -85,14 +94,21 @@ func (r *Repository) Save(ctx context.Context, account domain.InternalBankAccoun
 		}
 
 		// Check if exists by account_id (business identifier)
+		// Explicit deleted_at check for code clarity
 		var existing InternalBankAccountEntity
-		result := tx.Where("account_id = ?", entity.AccountID).First(&existing)
+		result := tx.Where("account_id = ? AND deleted_at IS NULL", entity.AccountID).First(&existing)
 
 		if result.Error == nil {
 			// Update existing with optimistic locking
 			entity.ID = existing.ID
 			entity.CreatedAt = existing.CreatedAt
 			entity.CreatedBy = existing.CreatedBy
+
+			// Version guard: domain contract says version is incremented before Save
+			// on updates. Version 0 indicates an invalid state for updates.
+			if entity.Version == 0 {
+				return ErrVersionConflict
+			}
 
 			// Optimistic locking contract: The domain model increments version on all
 			// mutations (Suspend, Activate, Close, UpdateCorrespondent) before passing
@@ -101,7 +117,7 @@ func (r *Repository) Save(ctx context.Context, account domain.InternalBankAccoun
 			// won't match and we return ErrVersionConflict.
 			originalVersion := entity.Version - 1
 			updateResult := tx.Model(&InternalBankAccountEntity{}).
-				Where("account_id = ? AND version = ?", entity.AccountID, originalVersion).
+				Where("account_id = ? AND version = ? AND deleted_at IS NULL", entity.AccountID, originalVersion).
 				Updates(map[string]interface{}{
 					"account_code":               entity.AccountCode,
 					"name":                       entity.Name,
@@ -116,6 +132,9 @@ func (r *Repository) Save(ctx context.Context, account domain.InternalBankAccoun
 				})
 
 			if updateResult.Error != nil {
+				if isDuplicateKeyError(updateResult.Error) {
+					return ErrDuplicateCode
+				}
 				return updateResult.Error
 			}
 
@@ -317,13 +336,18 @@ func (r *Repository) Ping() error {
 }
 
 // isDuplicateKeyError checks if the error is a PostgreSQL unique constraint violation.
+// Uses structured pgconn.PgError detection, consistent with other services in the codebase.
 func isDuplicateKeyError(err error) bool {
 	if err == nil {
 		return false
 	}
-	errStr := err.Error()
-	return errors.Is(err, gorm.ErrDuplicatedKey) ||
-		strings.Contains(errStr, "23505") ||
-		strings.Contains(errStr, "duplicate key") ||
-		strings.Contains(errStr, "unique constraint")
+
+	// Check for pgconn.PgError with unique violation code (23505)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return true
+	}
+
+	// Fallback for GORM-wrapped duplicate key errors
+	return errors.Is(err, gorm.ErrDuplicatedKey)
 }
