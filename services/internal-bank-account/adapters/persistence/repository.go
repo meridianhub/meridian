@@ -84,15 +84,11 @@ func (r *Repository) withForUpdateScope(ctx context.Context, fn func(tx *gorm.DB
 }
 
 // Save creates or updates an account with optimistic locking.
+// Uses withTenantTransaction to respect existing transactions from WithTx.
 func (r *Repository) Save(ctx context.Context, account domain.InternalBankAccount) error {
 	entity := toEntity(ctx, account)
 
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		tx, err := r.withTenantScope(ctx, tx)
-		if err != nil {
-			return err
-		}
-
+	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		// Check if exists by account_id (business identifier)
 		// Explicit deleted_at check for code clarity
 		var existing InternalBankAccountEntity
