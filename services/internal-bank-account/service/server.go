@@ -472,17 +472,26 @@ func (s *Service) GetBalance(ctx context.Context, req *pb.GetBalanceRequest) (*p
 	pkCtx, pkCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer pkCancel()
 
+	pkStart := time.Now()
 	balanceResp, err := s.positionKeepingClient.GetAccountBalances(pkCtx, &positionkeepingv1.GetAccountBalancesRequest{
 		AccountId:      account.AccountID(),
 		InstrumentCode: account.InstrumentCode(),
 	})
+	pkDuration := time.Since(pkStart)
+
 	if err != nil {
 		operationStatus = opStatusPositionKeepingError
+		ibaobservability.RecordBalanceQueryDuration(operationStatusFailed, pkDuration)
 		s.logger.Error("failed to query balance from Position Keeping",
 			"account_id", req.AccountId,
+			"duration_ms", pkDuration.Milliseconds(),
 			"error", err)
-		return nil, status.Errorf(codes.Internal, "failed to retrieve balance: %v", err)
+		// Map Position Keeping errors to appropriate gRPC codes
+		return nil, mapPositionKeepingErrorToGRPC(err)
 	}
+
+	// Record successful balance query duration (target <50ms p99)
+	ibaobservability.RecordBalanceQueryDuration(operationStatusSuccess, pkDuration)
 
 	// Find the current balance from the response.
 	// AsOf reflects the timestamp from Position Keeping when the balance was calculated.
@@ -508,6 +517,31 @@ func (s *Service) GetBalance(ctx context.Context, req *pb.GetBalanceRequest) (*p
 	}
 
 	return currentBalanceResp, nil
+}
+
+// mapPositionKeepingErrorToGRPC maps Position Keeping service errors to appropriate gRPC status codes.
+func mapPositionKeepingErrorToGRPC(err error) error {
+	st, ok := status.FromError(err)
+	if !ok {
+		// Non-gRPC error - treat as unavailable
+		return status.Errorf(codes.Unavailable, "position keeping service unavailable: %v", err)
+	}
+
+	//exhaustive:ignore
+	switch st.Code() {
+	case codes.NotFound:
+		// Position/account not found in Position Keeping - internal error from our perspective
+		return status.Errorf(codes.Internal, "balance not found in position keeping: %v", st.Message())
+	case codes.Unavailable, codes.DeadlineExceeded, codes.ResourceExhausted:
+		// Service unavailable - map to Unavailable
+		return status.Errorf(codes.Unavailable, "position keeping service unavailable: %v", st.Message())
+	case codes.InvalidArgument:
+		// Bad request to Position Keeping - internal error (our code is wrong)
+		return status.Errorf(codes.Internal, "invalid request to position keeping: %v", st.Message())
+	default:
+		// Other errors - map to Internal
+		return status.Errorf(codes.Internal, "failed to retrieve balance: %v", st.Message())
+	}
 }
 
 // findAccountByID finds an account by its ID (UUID or business ID).

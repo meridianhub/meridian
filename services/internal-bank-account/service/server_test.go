@@ -433,7 +433,7 @@ func TestGetBalance_Success(t *testing.T) {
 	assert.NotNil(t, balanceResp.AsOf)
 }
 
-func TestGetBalance_AccountNotActive(t *testing.T) {
+func TestGetBalance_AccountSuspended(t *testing.T) {
 	repo := newMockRepository()
 	posClient := &mockPositionKeepingClient{}
 	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
@@ -457,7 +457,7 @@ func TestGetBalance_AccountNotActive(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Try to get balance - should fail
+	// Try to get balance - should fail with FailedPrecondition
 	_, err = svc.GetBalance(ctx, &pb.GetBalanceRequest{
 		AccountId: createResp.Facility.AccountCode,
 	})
@@ -465,6 +465,7 @@ func TestGetBalance_AccountNotActive(t *testing.T) {
 	st, ok := status.FromError(err)
 	require.True(t, ok)
 	assert.Equal(t, codes.FailedPrecondition, st.Code())
+	assert.Contains(t, st.Message(), "not active")
 }
 
 func TestGetBalance_NoPositionKeepingClient(t *testing.T) {
@@ -496,10 +497,64 @@ func TestGetBalance_NoPositionKeepingClient(t *testing.T) {
 // ErrPositionKeepingUnavailable is used in tests.
 var errPositionKeepingUnavailable = errors.New("position keeping service unavailable")
 
+func TestGetBalance_AccountNotFound(t *testing.T) {
+	repo := newMockRepository()
+	posClient := &mockPositionKeepingClient{}
+	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Try to get balance for non-existent account
+	_, err = svc.GetBalance(ctx, &pb.GetBalanceRequest{
+		AccountId: "non-existent-account",
+	})
+	assert.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.NotFound, st.Code())
+}
+
+func TestGetBalance_AccountClosed(t *testing.T) {
+	repo := newMockRepository()
+	posClient := &mockPositionKeepingClient{}
+	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Create account
+	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+		AccountCode:    "CLR-001",
+		Name:           "USD Clearing Account",
+		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		InstrumentCode: "USD",
+	})
+	require.NoError(t, err)
+
+	// Close the account
+	_, err = svc.ControlInternalBankAccount(ctx, &pb.ControlInternalBankAccountRequest{
+		AccountId:     createResp.Facility.AccountCode,
+		ControlAction: pb.ControlAction_CONTROL_ACTION_CLOSE,
+		Reason:        "Closing account for balance test",
+	})
+	require.NoError(t, err)
+
+	// Try to get balance - should fail with FailedPrecondition
+	_, err = svc.GetBalance(ctx, &pb.GetBalanceRequest{
+		AccountId: createResp.Facility.AccountCode,
+	})
+	assert.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.FailedPrecondition, st.Code())
+	assert.Contains(t, st.Message(), "not active")
+}
+
 func TestGetBalance_PositionKeepingError(t *testing.T) {
 	repo := newMockRepository()
 	posClient := &mockPositionKeepingClient{
-		err: errPositionKeepingUnavailable,
+		err: errPositionKeepingUnavailable, // Non-gRPC error maps to Unavailable
 	}
 	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
 	require.NoError(t, err)
@@ -515,14 +570,43 @@ func TestGetBalance_PositionKeepingError(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Try to get balance - position keeping error
+	// Try to get balance - position keeping error (non-gRPC error maps to Unavailable)
 	_, err = svc.GetBalance(ctx, &pb.GetBalanceRequest{
 		AccountId: createResp.Facility.AccountCode,
 	})
 	assert.Error(t, err)
 	st, ok := status.FromError(err)
 	require.True(t, ok)
-	assert.Equal(t, codes.Internal, st.Code())
+	assert.Equal(t, codes.Unavailable, st.Code())
+}
+
+func TestGetBalance_PositionKeepingUnavailable(t *testing.T) {
+	repo := newMockRepository()
+	posClient := &mockPositionKeepingClient{
+		err: status.Error(codes.Unavailable, "service temporarily unavailable"),
+	}
+	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Create account
+	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+		AccountCode:    "CLR-001",
+		Name:           "USD Clearing Account",
+		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		InstrumentCode: "USD",
+	})
+	require.NoError(t, err)
+
+	// Try to get balance - Position Keeping Unavailable maps to Unavailable
+	_, err = svc.GetBalance(ctx, &pb.GetBalanceRequest{
+		AccountId: createResp.Facility.AccountCode,
+	})
+	assert.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Unavailable, st.Code())
 }
 
 func TestUpdateInternalBankAccount_Success(t *testing.T) {
