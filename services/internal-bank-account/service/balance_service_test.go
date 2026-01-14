@@ -451,3 +451,117 @@ func TestBalanceService_MultipleBalanceTypes(t *testing.T) {
 	// Should return the CURRENT balance (12500.00), not opening or available
 	assert.Equal(t, "12500.00", balanceResp.CurrentBalance.Amount)
 }
+
+// ============================================================================
+// Performance Benchmarks
+// ============================================================================
+//
+// These benchmarks test performance for critical service operations.
+// Performance targets:
+//   - Balance query p99: <50ms
+//   - Account creation p99: <50ms
+//   - Account lookup (by ID) p99: <5ms
+//   - Account lookup (by code) p99: <5ms
+//
+// Run with: go test -bench=. -benchmem ./services/internal-bank-account/service/...
+
+// BenchmarkGetBalance benchmarks the balance query operation.
+// Target: P99 < 50ms
+func BenchmarkGetBalance(b *testing.B) {
+	repo := newMockRepository()
+	posClient := &mockPositionKeepingClient{
+		balances: []*positionkeepingv1.BalanceEntry{
+			{
+				BalanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
+				Amount: &quantityv1.InstrumentAmount{
+					InstrumentCode: "USD",
+					Amount:         "10000.00",
+				},
+			},
+		},
+		asOf: timestamppb.Now(),
+	}
+	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	if err != nil {
+		b.Fatalf("failed to create service: %v", err)
+	}
+
+	ctx := context.Background()
+	resp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+		AccountCode:    "BENCH-BAL-001",
+		Name:           "Benchmark Balance Account",
+		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		InstrumentCode: "USD",
+	})
+	if err != nil {
+		b.Fatalf("failed to create account: %v", err)
+	}
+	accountCode := resp.Facility.AccountCode
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_, err := svc.GetBalance(ctx, &pb.GetBalanceRequest{
+			AccountId: accountCode,
+		})
+		if err != nil {
+			b.Fatalf("GetBalance failed: %v", err)
+		}
+	}
+}
+
+// BenchmarkGetBalance_MultipleBalanceTypes benchmarks balance retrieval when
+// position keeping returns multiple balance types.
+func BenchmarkGetBalance_MultipleBalanceTypes(b *testing.B) {
+	repo := newMockRepository()
+	posClient := &mockPositionKeepingClient{
+		balances: []*positionkeepingv1.BalanceEntry{
+			{
+				BalanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_OPENING,
+				Amount:      &quantityv1.InstrumentAmount{InstrumentCode: "USD", Amount: "8000.00"},
+			},
+			{
+				BalanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
+				Amount:      &quantityv1.InstrumentAmount{InstrumentCode: "USD", Amount: "12500.00"},
+			},
+			{
+				BalanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_AVAILABLE,
+				Amount:      &quantityv1.InstrumentAmount{InstrumentCode: "USD", Amount: "10000.00"},
+			},
+			{
+				BalanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_LEDGER,
+				Amount:      &quantityv1.InstrumentAmount{InstrumentCode: "USD", Amount: "12500.00"},
+			},
+		},
+		asOf: timestamppb.Now(),
+	}
+	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	if err != nil {
+		b.Fatalf("failed to create service: %v", err)
+	}
+
+	ctx := context.Background()
+	resp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+		AccountCode:    "BENCH-MULTI-001",
+		Name:           "Benchmark Multi Balance Account",
+		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		InstrumentCode: "USD",
+	})
+	if err != nil {
+		b.Fatalf("failed to create account: %v", err)
+	}
+	accountCode := resp.Facility.AccountCode
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_, err := svc.GetBalance(ctx, &pb.GetBalanceRequest{
+			AccountId: accountCode,
+		})
+		if err != nil {
+			b.Fatalf("GetBalance failed: %v", err)
+		}
+	}
+}

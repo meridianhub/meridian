@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1112,4 +1113,428 @@ func TestIntegration_MultiTenant_MissingContext(t *testing.T) {
 
 	err = tc.repo.Delete(ctxNoTenant, account.ID())
 	assert.Error(t, err, "Delete should fail without tenant context")
+}
+
+// ============================================================================
+// Performance Benchmarks
+// ============================================================================
+//
+// These benchmarks test repository layer performance against a real PostgreSQL
+// database using testcontainers.
+//
+// Performance targets:
+//   - Account creation p99: <50ms
+//   - Account lookup (by ID) p99: <5ms
+//   - Account lookup (by code) p99: <5ms
+//   - Concurrent creation: 1000 accounts in <30s
+//
+// Run with: go test -tags=integration -bench=. -benchmem ./services/internal-bank-account/adapters/persistence/...
+
+// benchTestContainer holds the benchmark test database container.
+type benchTestContainer struct {
+	container *postgres.PostgresContainer
+	pool      *pgxpool.Pool
+	db        *gorm.DB
+	repo      *Repository
+}
+
+// setupBenchContainer creates a PostgreSQL testcontainer for benchmarks.
+func setupBenchContainer(b *testing.B) *benchTestContainer {
+	b.Helper()
+
+	ctx := context.Background()
+
+	// Create PostgreSQL container with explicit wait strategy
+	pgContainer, err := postgres.Run(ctx,
+		"postgres:16-alpine",
+		postgres.WithDatabase("bench_internal_bank_account"),
+		postgres.WithUsername("bench"),
+		postgres.WithPassword("bench"),
+		testcontainers.WithWaitStrategy(
+			wait.ForAll(
+				wait.ForLog("database system is ready to accept connections").WithOccurrence(2),
+				wait.ForListeningPort("5432/tcp"),
+			).WithDeadline(60*time.Second)),
+	)
+	if err != nil {
+		b.Fatalf("Failed to start PostgreSQL container: %v", err)
+	}
+
+	// Get connection string
+	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
+	if err != nil {
+		b.Fatalf("Failed to get connection string: %v", err)
+	}
+
+	// Create pgx pool for direct queries
+	poolConfig, err := pgxpool.ParseConfig(connStr)
+	if err != nil {
+		b.Fatalf("Failed to parse pool config: %v", err)
+	}
+
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
+	if err != nil {
+		b.Fatalf("Failed to create connection pool: %v", err)
+	}
+
+	// Create GORM connection
+	db, err := gorm.Open(gormpg.Open(connStr), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		b.Fatalf("Failed to connect to database with GORM: %v", err)
+	}
+
+	// Load schema using pgx pool
+	loadBenchSchema(b, pool)
+
+	// Create repository
+	repo := NewRepository(db)
+
+	return &benchTestContainer{
+		container: pgContainer,
+		pool:      pool,
+		db:        db,
+		repo:      repo,
+	}
+}
+
+// loadBenchSchema creates the schema for benchmarks.
+func loadBenchSchema(b *testing.B, pool *pgxpool.Pool) {
+	b.Helper()
+
+	ctx := context.Background()
+	schemaName := tenant.TenantID("bench_tenant").SchemaName()
+
+	// Create schema
+	_, err := pool.Exec(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName))
+	if err != nil {
+		b.Fatalf("Failed to create schema: %v", err)
+	}
+
+	// Create internal_bank_account table
+	_, err = pool.Exec(ctx, fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS %q.internal_bank_account (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			created_by VARCHAR(100) NOT NULL,
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			updated_by VARCHAR(100) NOT NULL,
+			deleted_at TIMESTAMPTZ,
+			account_id VARCHAR(100) NOT NULL UNIQUE,
+			account_code VARCHAR(50) NOT NULL,
+			name VARCHAR(255) NOT NULL,
+			account_type VARCHAR(20) NOT NULL,
+			instrument_code VARCHAR(32) NOT NULL,
+			dimension VARCHAR(20) NOT NULL,
+			status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+			correspondent_bank_id VARCHAR(50),
+			correspondent_bank_name VARCHAR(255),
+			correspondent_external_ref VARCHAR(100),
+			attributes JSONB NOT NULL DEFAULT '{}',
+			version BIGINT NOT NULL DEFAULT 1
+		)
+	`, schemaName))
+	if err != nil {
+		b.Fatalf("Failed to create internal_bank_account table: %v", err)
+	}
+
+	// Create indexes
+	_, err = pool.Exec(ctx, fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_bench_account_code ON %q.internal_bank_account (account_code)`, schemaName))
+	if err != nil {
+		b.Fatalf("Failed to create account_code index: %v", err)
+	}
+
+	// Create status history table
+	_, err = pool.Exec(ctx, fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS %q.internal_bank_account_status_history (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			created_by VARCHAR(100) NOT NULL,
+			account_id VARCHAR(100) NOT NULL,
+			old_status VARCHAR(20) NOT NULL,
+			new_status VARCHAR(20) NOT NULL,
+			reason TEXT
+		)
+	`, schemaName))
+	if err != nil {
+		b.Fatalf("Failed to create status_history table: %v", err)
+	}
+}
+
+// cleanup closes the pool and terminates the container for benchmarks.
+func (tc *benchTestContainer) cleanup(b *testing.B) {
+	b.Helper()
+	ctx := context.Background()
+
+	if tc.pool != nil {
+		tc.pool.Close()
+	}
+
+	if tc.container != nil {
+		if err := tc.container.Terminate(ctx); err != nil {
+			b.Logf("Warning: failed to terminate container: %v", err)
+		}
+	}
+}
+
+// createBenchAccount creates an account for benchmarking.
+func createBenchAccount(accountID, accountCode, name string, accountType domain.AccountType) domain.InternalBankAccount {
+	account, err := domain.NewInternalBankAccount(
+		accountID,
+		accountCode,
+		name,
+		accountType,
+		"GBP",
+		"CURRENCY",
+	)
+	if err != nil {
+		panic(fmt.Sprintf("failed to create account: %v", err))
+	}
+	return account
+}
+
+// BenchmarkRepository_Save benchmarks saving a new account to PostgreSQL.
+// Target: p99 < 50ms
+func BenchmarkRepository_Save(b *testing.B) {
+	tc := setupBenchContainer(b)
+	defer tc.cleanup(b)
+
+	tid := tenant.TenantID("bench_tenant")
+	ctx := tenant.WithTenant(context.Background(), tid)
+	ctx = context.WithValue(ctx, auth.UserIDContextKey, "bench-user")
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		account := createBenchAccount(
+			fmt.Sprintf("IBA-BENCH-%08d", i),
+			fmt.Sprintf("BENCH_%08d", i),
+			fmt.Sprintf("Benchmark Account %d", i),
+			domain.AccountTypeClearing,
+		)
+
+		err := tc.repo.Save(ctx, account)
+		if err != nil {
+			b.Fatalf("Save failed: %v", err)
+		}
+	}
+}
+
+// BenchmarkRepository_FindByID benchmarks finding an account by ID.
+// Target: p99 < 5ms
+func BenchmarkRepository_FindByID(b *testing.B) {
+	tc := setupBenchContainer(b)
+	defer tc.cleanup(b)
+
+	tid := tenant.TenantID("bench_tenant")
+	ctx := tenant.WithTenant(context.Background(), tid)
+	ctx = context.WithValue(ctx, auth.UserIDContextKey, "bench-user")
+
+	// Create test account
+	account := createBenchAccount("IBA-FIND-ID", "FIND_BY_ID", "Find By ID Test", domain.AccountTypeClearing)
+	if err := tc.repo.Save(ctx, account); err != nil {
+		b.Fatalf("Setup failed: %v", err)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_, err := tc.repo.FindByID(ctx, account.ID())
+		if err != nil {
+			b.Fatalf("FindByID failed: %v", err)
+		}
+	}
+}
+
+// BenchmarkRepository_FindByCode benchmarks finding an account by code.
+// Target: p99 < 5ms
+func BenchmarkRepository_FindByCode(b *testing.B) {
+	tc := setupBenchContainer(b)
+	defer tc.cleanup(b)
+
+	tid := tenant.TenantID("bench_tenant")
+	ctx := tenant.WithTenant(context.Background(), tid)
+	ctx = context.WithValue(ctx, auth.UserIDContextKey, "bench-user")
+
+	// Create test account
+	account := createBenchAccount("IBA-FIND-CODE", "FIND_BY_CODE", "Find By Code Test", domain.AccountTypeClearing)
+	if err := tc.repo.Save(ctx, account); err != nil {
+		b.Fatalf("Setup failed: %v", err)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_, err := tc.repo.FindByCode(ctx, "FIND_BY_CODE")
+		if err != nil {
+			b.Fatalf("FindByCode failed: %v", err)
+		}
+	}
+}
+
+// BenchmarkRepository_ExistsByCode benchmarks checking account existence.
+// Target: p99 < 5ms
+func BenchmarkRepository_ExistsByCode(b *testing.B) {
+	tc := setupBenchContainer(b)
+	defer tc.cleanup(b)
+
+	tid := tenant.TenantID("bench_tenant")
+	ctx := tenant.WithTenant(context.Background(), tid)
+	ctx = context.WithValue(ctx, auth.UserIDContextKey, "bench-user")
+
+	// Create test account
+	account := createBenchAccount("IBA-EXISTS", "EXISTS_CODE", "Exists Test", domain.AccountTypeClearing)
+	if err := tc.repo.Save(ctx, account); err != nil {
+		b.Fatalf("Setup failed: %v", err)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		exists, err := tc.repo.ExistsByCode(ctx, "EXISTS_CODE")
+		if err != nil {
+			b.Fatalf("ExistsByCode failed: %v", err)
+		}
+		if !exists {
+			b.Fatalf("ExistsByCode returned false, expected true")
+		}
+	}
+}
+
+// BenchmarkRepository_SaveParallel benchmarks concurrent account creation.
+// Target: 1000 accounts in < 30s
+func BenchmarkRepository_SaveParallel(b *testing.B) {
+	tc := setupBenchContainer(b)
+	defer tc.cleanup(b)
+
+	tid := tenant.TenantID("bench_tenant")
+	baseCtx := tenant.WithTenant(context.Background(), tid)
+	baseCtx = context.WithValue(baseCtx, auth.UserIDContextKey, "bench-user")
+
+	var counter int64
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	b.RunParallel(func(pbb *testing.PB) {
+		for pbb.Next() {
+			i := atomic.AddInt64(&counter, 1)
+			account := createBenchAccount(
+				fmt.Sprintf("IBA-PAR-%08d", i),
+				fmt.Sprintf("PAR_%08d", i),
+				fmt.Sprintf("Parallel Account %d", i),
+				domain.AccountTypeClearing,
+			)
+
+			err := tc.repo.Save(baseCtx, account)
+			if err != nil {
+				b.Errorf("Parallel Save failed: %v", err)
+			}
+		}
+	})
+}
+
+// BenchmarkRepository_FindByIDParallel benchmarks concurrent FindByID operations.
+func BenchmarkRepository_FindByIDParallel(b *testing.B) {
+	tc := setupBenchContainer(b)
+	defer tc.cleanup(b)
+
+	tid := tenant.TenantID("bench_tenant")
+	ctx := tenant.WithTenant(context.Background(), tid)
+	ctx = context.WithValue(ctx, auth.UserIDContextKey, "bench-user")
+
+	// Create test account
+	account := createBenchAccount("IBA-PAR-FIND", "PAR_FIND", "Parallel Find Test", domain.AccountTypeClearing)
+	if err := tc.repo.Save(ctx, account); err != nil {
+		b.Fatalf("Setup failed: %v", err)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	b.RunParallel(func(pbb *testing.PB) {
+		for pbb.Next() {
+			_, err := tc.repo.FindByID(ctx, account.ID())
+			if err != nil {
+				b.Errorf("Parallel FindByID failed: %v", err)
+			}
+		}
+	})
+}
+
+// TestIntegration_LoadTest_ConcurrentCreation tests creating 1000 accounts concurrently.
+// Target: Complete in < 30 seconds
+func TestIntegration_LoadTest_ConcurrentCreation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping load test in short mode")
+	}
+
+	tc := setupIntegrationTestContainer(t)
+	defer tc.cleanup(t)
+
+	tid := tenant.TenantID(integrationTenantID)
+	ctx := tenant.WithTenant(context.Background(), tid)
+	ctx = context.WithValue(ctx, auth.UserIDContextKey, "load-test-user")
+
+	const numAccounts = 1000
+	const numWorkers = 10
+	accountsPerWorker := numAccounts / numWorkers
+
+	start := time.Now()
+	var wg sync.WaitGroup
+	errChan := make(chan error, numAccounts)
+
+	for w := 0; w < numWorkers; w++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			for i := 0; i < accountsPerWorker; i++ {
+				accountNum := workerID*accountsPerWorker + i
+				account := createTestAccountIntegration(t,
+					fmt.Sprintf("IBA-LOAD-%04d", accountNum),
+					fmt.Sprintf("LOAD_%04d", accountNum),
+					fmt.Sprintf("Load Test Account %d", accountNum),
+					domain.AccountTypeClearing,
+				)
+				if err := tc.repo.Save(ctx, account); err != nil {
+					errChan <- fmt.Errorf("worker %d account %d: %w", workerID, i, err)
+				}
+			}
+		}(w)
+	}
+
+	wg.Wait()
+	close(errChan)
+
+	duration := time.Since(start)
+
+	// Collect errors
+	var errors []error
+	for err := range errChan {
+		errors = append(errors, err)
+	}
+
+	// Verify results
+	assert.Empty(t, errors, "Should have no errors creating accounts")
+	assert.Less(t, duration, 30*time.Second, "Should complete in under 30 seconds")
+
+	t.Logf("Created %d accounts in %v (%.2f accounts/sec)",
+		numAccounts, duration, float64(numAccounts)/duration.Seconds())
+
+	// Verify all accounts were created
+	accounts, err := tc.repo.List(ctx, domain.ListFilter{PageSize: numAccounts + 10})
+	require.NoError(t, err)
+	// Count accounts with LOAD_ prefix
+	loadAccountCount := 0
+	for _, acc := range accounts {
+		if len(acc.Code()) >= 5 && acc.Code()[:5] == "LOAD_" {
+			loadAccountCount++
+		}
+	}
+	assert.Equal(t, numAccounts, loadAccountCount, "Should have created all load test accounts")
 }
