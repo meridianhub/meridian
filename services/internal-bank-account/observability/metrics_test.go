@@ -32,7 +32,7 @@ func TestRecordBalanceQueryDuration(t *testing.T) {
 	t.Helper()
 
 	// Record a balance query duration - this should not panic
-	RecordBalanceQueryDuration(25 * time.Millisecond)
+	RecordBalanceQueryDuration(StatusSuccess, 25*time.Millisecond)
 
 	// For histograms, we verify the metric has been registered and doesn't panic.
 	// Actual histogram values are tested through integration tests.

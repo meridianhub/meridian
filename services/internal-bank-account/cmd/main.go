@@ -12,15 +12,19 @@ import (
 	"strconv"
 	"strings"
 
-	internalbankaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_bank_account/v1"
+	pb "github.com/meridianhub/meridian/api/proto/meridian/internal_bank_account/v1"
 	"github.com/meridianhub/meridian/services/internal-bank-account/adapters/persistence"
-	"github.com/meridianhub/meridian/services/internal-bank-account/observability"
+	ibaobservability "github.com/meridianhub/meridian/services/internal-bank-account/observability"
 	"github.com/meridianhub/meridian/services/internal-bank-account/service"
+	poskeepingclient "github.com/meridianhub/meridian/services/position-keeping/client"
+	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
+	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/ports"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/sony/gobreaker/v2"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 )
@@ -44,10 +48,6 @@ func main() {
 		"version", Version,
 		"commit", Commit,
 		"build_date", BuildDate)
-
-	// Log environment for operational visibility
-	environment := env.GetEnvOrDefault("ENVIRONMENT", "production")
-	logger.Info("service environment configured", "environment", environment)
 
 	// Run the service
 	if err := run(logger); err != nil {
@@ -82,27 +82,28 @@ func run(logger *slog.Logger) error {
 
 	logger.Info("database connection established")
 
-	// Create persistence repository
+	// Create repository
 	repo := persistence.NewRepository(db)
 
-	// Create InternalBankAccount service
-	// Position Keeping and Reference Data clients are optional - pass nil for now
-	// These will be configured when inter-service communication is enabled
-	var positionKeepingClient service.PositionKeepingClient
-	var referenceDataClient service.ReferenceDataClient
+	// Get Kubernetes namespace from environment (defaults to "default")
+	namespace := env.GetEnvOrDefault("K8S_NAMESPACE", "default")
 
-	internalBankAccountSvc, err := service.NewServiceWithClients(
+	logger.Info("external service configuration",
+		"position_keeping", fmt.Sprintf("position-keeping.%s.svc.cluster.local:%d", namespace, ports.PositionKeeping),
+		"load_balancing", "DNS-based round_robin")
+
+	// Create service with external clients and capture the clients for health checking
+	internalBankAccountService, svcClients, err := createServiceWithClients(
 		repo,
-		positionKeepingClient,
-		referenceDataClient,
+		namespace,
 		logger,
 		tracer,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to create internal bank account service: %w", err)
+		return fmt.Errorf("failed to create service: %w", err)
 	}
 
-	logger.Info("internal bank account service initialized")
+	logger.Info("service initialized with external clients")
 
 	// Initialize auth interceptor (optional - based on AUTH_ENABLED)
 	authConfig := bootstrap.DefaultAuthConfig(logger)
@@ -117,15 +118,17 @@ func run(logger *slog.Logger) error {
 		WithAuthInterceptor(authInterceptor).
 		Build()
 
-	// Register InternalBankAccount gRPC service
-	internalbankaccountv1.RegisterInternalBankAccountServiceServer(grpcServer, internalBankAccountSvc)
+	// Register services
+	pb.RegisterInternalBankAccountServiceServer(grpcServer, internalBankAccountService)
 
-	// Register health check service with database connectivity check
-	healthChecker, err := observability.NewHealthChecker(observability.HealthCheckerConfig{
-		DB:           db,
-		Logger:       logger,
-		ServiceName:  "internal-bank-account",
-		CheckTimeout: defaults.DefaultHealthCheckTimeout,
+	// Register health check service with dependency checking
+	healthChecker, err := service.NewHealthChecker(service.HealthCheckerConfig{
+		Repository:                  repo,
+		PositionKeepingClient:       svcClients.positionKeeping,
+		PositionKeepingHealthClient: svcClients.positionKeepingHealth,
+		Logger:                      logger,
+		ServiceName:                 "internal-bank-account",
+		CheckTimeout:                defaults.DefaultHealthCheckTimeout,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create health checker: %w", err)
@@ -220,51 +223,35 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 
-	// Wait for interrupt signal or server error
-	sigChan, signalCleanup := bootstrap.SignalHandler()
-	defer signalCleanup()
+	// Wait for shutdown signal and orchestrate graceful shutdown
+	orchestrator := bootstrap.NewShutdownOrchestrator(grpcServer, logger)
 
-	select {
-	case sig := <-sigChan:
-		logger.Info("received signal", "signal", sig)
-	case err := <-serverErrors:
-		return fmt.Errorf("server error: %w", err)
-	}
-
-	// Graceful shutdown
-	logger.Info("shutting down server...")
-
-	// Create shutdown context with timeout
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), defaults.DefaultGracefulShutdown)
-	defer cancel()
-
-	// Close database connection during shutdown
-	defer bootstrap.CloseDatabase(db, logger)
-
-	// Shutdown HTTP server (faster, allows metrics scraping during gRPC drain)
-	if err := httpServer.Shutdown(shutdownCtx); err != nil {
-		logger.Error("HTTP server shutdown error", "error", err)
-	} else {
+	// Register cleanup functions (LIFO order - HTTP server first, then external clients, then database)
+	orchestrator.AddCleanup(func() error {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), defaults.DefaultGracefulShutdown)
+		defer cancel()
+		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+			logger.Error("HTTP server shutdown error", "error", err)
+			return err
+		}
 		logger.Info("HTTP server stopped")
+		return nil
+	})
+
+	for _, cleanup := range svcClients.cleanupFuncs {
+		fn := cleanup // capture for closure
+		orchestrator.AddCleanup(func() error {
+			fn()
+			return nil
+		})
 	}
 
-	// Gracefully stop gRPC server
-	stopped := make(chan struct{})
-	go func() {
-		grpcServer.GracefulStop()
-		close(stopped)
-	}()
+	orchestrator.AddCleanup(func() error {
+		bootstrap.CloseDatabase(db, logger)
+		return nil
+	})
 
-	// Wait for graceful stop or timeout
-	select {
-	case <-stopped:
-		logger.Info("gRPC server stopped gracefully")
-	case <-shutdownCtx.Done():
-		logger.Warn("graceful shutdown timeout, forcing stop")
-		grpcServer.Stop()
-	}
-
-	return nil
+	return orchestrator.Wait(serverErrors)
 }
 
 // parseLogLevel converts a string log level to slog.Level.
@@ -279,5 +266,103 @@ func parseLogLevel(levelStr string) slog.Level {
 		return slog.LevelError
 	default:
 		return slog.LevelInfo
+	}
+}
+
+// serviceClients holds the clients created by createServiceWithClients.
+type serviceClients struct {
+	positionKeeping service.PositionKeepingClient
+	// Health client bypasses the circuit breaker for health checks
+	positionKeepingHealth grpc_health_v1.HealthClient
+	// Cleanup functions for graceful shutdown
+	cleanupFuncs []func()
+}
+
+// createServiceWithClients creates the service and returns it along with the external clients
+// for use in health checking. This approach creates the clients once and shares them between
+// the service and health checker to avoid duplicate connections.
+//
+// Uses the service-owned client package with built-in resilience patterns:
+//   - services/position-keeping/client
+//
+// The client is configured with DNS-based client-side load balancing and optional
+// circuit breaker + retry resilience.
+func createServiceWithClients(
+	repo *persistence.Repository,
+	namespace string,
+	logger *slog.Logger,
+	tracer *observability.Tracer,
+) (*service.Service, *serviceClients, error) {
+	// Track cleanup functions for graceful shutdown
+	var cleanupFuncs []func()
+
+	// Create Position Keeping client using service-owned client package
+	// The client has built-in resilience patterns (circuit breaker + retry)
+	posKeepingClient, posKeepingCleanup, err := poskeepingclient.New(poskeepingclient.Config{
+		ServiceName: poskeepingclient.ServiceName,
+		Namespace:   namespace,
+		Port:        ports.PositionKeeping,
+		Timeout:     defaults.DefaultRPCTimeout,
+		Tracer:      tracer,
+		Resilience: &sharedclients.ResilientClientConfig{
+			Logger:             logger,
+			CircuitBreakerName: "position-keeping",
+			OnStateChange:      makeCircuitBreakerCallback(),
+		},
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create position keeping client: %w", err)
+	}
+	cleanupFuncs = append(cleanupFuncs, posKeepingCleanup)
+
+	// Create service with the pre-created client
+	// The position-keeping client implements service.PositionKeepingClient interface
+	svc, err := service.NewServiceWithClients(
+		repo,
+		posKeepingClient, // *poskeepingclient.Client implements service.PositionKeepingClient
+		nil,              // referenceDataClient - not wired yet (future task)
+		logger,
+		tracer,
+	)
+	if err != nil {
+		// Cleanup all clients before returning
+		for _, cleanup := range cleanupFuncs {
+			cleanup()
+		}
+		return nil, nil, fmt.Errorf("failed to create service with existing clients: %w", err)
+	}
+
+	// Create health client from the underlying gRPC connection
+	// This bypasses the circuit breaker to avoid health checks tripping business operation circuit breakers
+	svcClients := &serviceClients{
+		positionKeeping:       posKeepingClient,
+		positionKeepingHealth: grpc_health_v1.NewHealthClient(posKeepingClient.Conn()),
+		cleanupFuncs:          cleanupFuncs,
+	}
+
+	return svc, svcClients, nil
+}
+
+// makeCircuitBreakerCallback creates a circuit breaker state change callback
+// that records metrics for the given service name.
+func makeCircuitBreakerCallback() func(string, gobreaker.State, gobreaker.State) {
+	return func(name string, from gobreaker.State, to gobreaker.State) {
+		ibaobservability.RecordCircuitBreakerState(name, gobreakerStateToMetricState(to))
+		ibaobservability.RecordCircuitBreakerStateChange(name, from.String(), to.String())
+	}
+}
+
+// gobreakerStateToMetricState converts a gobreaker.State to the observability CircuitBreakerState
+// for Prometheus metrics recording.
+func gobreakerStateToMetricState(state gobreaker.State) ibaobservability.CircuitBreakerState {
+	switch state {
+	case gobreaker.StateClosed:
+		return ibaobservability.CircuitBreakerStateClosed
+	case gobreaker.StateHalfOpen:
+		return ibaobservability.CircuitBreakerStateHalfOpen
+	case gobreaker.StateOpen:
+		return ibaobservability.CircuitBreakerStateOpen
+	default:
+		return ibaobservability.CircuitBreakerStateClosed
 	}
 }
