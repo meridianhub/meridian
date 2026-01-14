@@ -86,7 +86,7 @@ func TestNewAccountResolver_CustomCacheTTL(t *testing.T) {
 
 	resolver, err := NewAccountResolver(AccountResolverConfig{
 		Client:   mockClient,
-		Logger:   testLogger(),
+		Logger:   accountResolverTestLogger(),
 		CacheTTL: customTTL,
 	})
 
@@ -131,7 +131,7 @@ func TestAccountResolver_GetDepositClearingAccount_CacheHit(t *testing.T) {
 
 	resolver, err := NewAccountResolver(AccountResolverConfig{
 		Client:   mockClient,
-		Logger:   testLogger(),
+		Logger:   accountResolverTestLogger(),
 		CacheTTL: 5 * time.Minute,
 	})
 	require.NoError(t, err)
@@ -162,7 +162,7 @@ func TestAccountResolver_GetDepositClearingAccount_CacheExpiry(t *testing.T) {
 	// Use very short TTL for testing
 	resolver, err := NewAccountResolver(AccountResolverConfig{
 		Client:   mockClient,
-		Logger:   testLogger(),
+		Logger:   accountResolverTestLogger(),
 		CacheTTL: 10 * time.Millisecond,
 	})
 	require.NoError(t, err)
@@ -250,7 +250,7 @@ func TestAccountResolver_InvalidateCache(t *testing.T) {
 
 	resolver, err := NewAccountResolver(AccountResolverConfig{
 		Client:   mockClient,
-		Logger:   testLogger(),
+		Logger:   accountResolverTestLogger(),
 		CacheTTL: 5 * time.Minute,
 	})
 	require.NoError(t, err)
@@ -285,7 +285,7 @@ func TestAccountResolver_InvalidateCacheEntry(t *testing.T) {
 
 	resolver, err := NewAccountResolver(AccountResolverConfig{
 		Client:   mockClient,
-		Logger:   testLogger(),
+		Logger:   accountResolverTestLogger(),
 		CacheTTL: 5 * time.Minute,
 	})
 	require.NoError(t, err)
@@ -344,7 +344,7 @@ func TestAccountResolver_ConcurrentAccess(t *testing.T) {
 
 	resolver, err := NewAccountResolver(AccountResolverConfig{
 		Client:   mockClient,
-		Logger:   testLogger(),
+		Logger:   accountResolverTestLogger(),
 		CacheTTL: 5 * time.Minute,
 	})
 	require.NoError(t, err)
@@ -388,7 +388,7 @@ func TestAccountResolver_DepositVsWithdrawal_SeparateCacheKeys(t *testing.T) {
 
 	resolver, err := NewAccountResolver(AccountResolverConfig{
 		Client:   mockClient,
-		Logger:   testLogger(),
+		Logger:   accountResolverTestLogger(),
 		CacheTTL: 5 * time.Minute,
 	})
 	require.NoError(t, err)

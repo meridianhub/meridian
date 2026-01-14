@@ -11,6 +11,7 @@ import (
 
 	internalbankaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_bank_account/v1"
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
+	"golang.org/x/sync/singleflight"
 )
 
 // AccountResolverErrors defines sentinel errors for the AccountResolver.
@@ -23,6 +24,9 @@ var (
 
 	// ErrAccountResolverLoggerNil is returned when attempting to create an AccountResolver with a nil logger.
 	ErrAccountResolverLoggerNil = errors.New("logger cannot be nil")
+
+	// ErrAccountResolverInternalError is returned when an unexpected internal error occurs.
+	ErrAccountResolverInternalError = errors.New("internal error: unexpected result type from singleflight")
 )
 
 // ClearingAccountType defines the type of clearing account being resolved.
@@ -47,16 +51,21 @@ type cacheEntry struct {
 // clearing account lookups.
 //
 // Thread-safe: All methods can be called concurrently from multiple goroutines.
+// Uses singleflight to prevent cache stampede (multiple concurrent requests for the same key).
 type AccountResolver struct {
 	client InternalBankAccountClient
 	logger *slog.Logger
 
 	// Cache configuration
-	cacheTTL time.Duration
+	cacheTTL      time.Duration
+	lookupTimeout time.Duration
 
 	// Thread-safe cache: key is "TYPE:INSTRUMENT" (e.g., "DEPOSIT:GBP")
 	mu    sync.RWMutex
 	cache map[string]cacheEntry
+
+	// Singleflight to coalesce concurrent requests for the same cache key
+	sfGroup singleflight.Group
 }
 
 // AccountResolverConfig holds configuration for creating an AccountResolver.
@@ -70,10 +79,20 @@ type AccountResolverConfig struct {
 	// CacheTTL is how long resolved account IDs are cached.
 	// Defaults to 5 minutes if not specified.
 	CacheTTL time.Duration
+
+	// LookupTimeout is the timeout for individual lookup requests to the Internal Bank Account service.
+	// Defaults to 2 seconds if not specified.
+	LookupTimeout time.Duration
 }
 
-// DefaultCacheTTL is the default cache TTL for resolved account IDs.
-const DefaultCacheTTL = 5 * time.Minute
+const (
+	// DefaultCacheTTL is the default cache TTL for resolved account IDs.
+	DefaultCacheTTL = 5 * time.Minute
+
+	// DefaultLookupTimeout is the default timeout for clearing account lookups.
+	// This is shorter than the typical RPC timeout to allow graceful fallback to static config.
+	DefaultLookupTimeout = 2 * time.Second
+)
 
 // NewAccountResolver creates a new AccountResolver with the given configuration.
 // Returns an error if required configuration is missing.
@@ -90,11 +109,17 @@ func NewAccountResolver(cfg AccountResolverConfig) (*AccountResolver, error) {
 		ttl = DefaultCacheTTL
 	}
 
+	lookupTimeout := cfg.LookupTimeout
+	if lookupTimeout == 0 {
+		lookupTimeout = DefaultLookupTimeout
+	}
+
 	return &AccountResolver{
-		client:   cfg.Client,
-		logger:   cfg.Logger,
-		cacheTTL: ttl,
-		cache:    make(map[string]cacheEntry),
+		client:        cfg.Client,
+		logger:        cfg.Logger,
+		cacheTTL:      ttl,
+		lookupTimeout: lookupTimeout,
+		cache:         make(map[string]cacheEntry),
 	}, nil
 }
 
@@ -117,6 +142,7 @@ func (r *AccountResolver) GetWithdrawalClearingAccount(ctx context.Context, inst
 }
 
 // resolveClearingAccount is the internal implementation for resolving clearing accounts.
+// Uses singleflight to prevent cache stampede when multiple concurrent requests miss the cache.
 func (r *AccountResolver) resolveClearingAccount(ctx context.Context, clearingType ClearingAccountType, instrumentCode string) (string, error) {
 	cacheKey := r.cacheKey(clearingType, instrumentCode)
 
@@ -135,28 +161,58 @@ func (r *AccountResolver) resolveClearingAccount(ctx context.Context, clearingTy
 
 	caobservability.RecordClearingAccountCacheMiss()
 
-	// Query the Internal Bank Account service
+	// Use singleflight to coalesce concurrent requests for the same cache key.
+	// This prevents cache stampede when multiple goroutines miss the cache simultaneously.
 	start := time.Now()
-	accountID, err := r.queryInternalBankAccount(ctx, clearingType, instrumentCode)
+	result, err, shared := r.sfGroup.Do(cacheKey, func() (interface{}, error) {
+		// Double-check cache after acquiring the singleflight "lock"
+		// Another goroutine might have already populated the cache
+		r.mu.RLock()
+		if entry, ok := r.cache[cacheKey]; ok && time.Now().Before(entry.expiresAt) {
+			r.mu.RUnlock()
+			return entry.accountID, nil
+		}
+		r.mu.RUnlock()
+
+		// Create a timeout context for the lookup to enable faster fallback
+		lookupCtx, cancel := context.WithTimeout(ctx, r.lookupTimeout)
+		defer cancel()
+
+		// Query the Internal Bank Account service
+		accountID, err := r.queryInternalBankAccount(lookupCtx, clearingType, instrumentCode)
+		if err != nil {
+			return "", err
+		}
+
+		// Cache the result (write lock)
+		r.mu.Lock()
+		r.cache[cacheKey] = cacheEntry{
+			accountID: accountID,
+			expiresAt: time.Now().Add(r.cacheTTL),
+		}
+		r.mu.Unlock()
+
+		return accountID, nil
+	})
+
 	if err != nil {
 		caobservability.RecordClearingAccountLookupError(string(clearingType))
 		return "", err
 	}
-	caobservability.RecordClearingAccountLookupDuration(time.Since(start))
 
-	// Cache the result (write lock)
-	r.mu.Lock()
-	r.cache[cacheKey] = cacheEntry{
-		accountID: accountID,
-		expiresAt: time.Now().Add(r.cacheTTL),
+	accountID, ok := result.(string)
+	if !ok {
+		// This should never happen as we control the singleflight function return type
+		return "", ErrAccountResolverInternalError
 	}
-	r.mu.Unlock()
+	caobservability.RecordClearingAccountLookupDuration(time.Since(start))
 
 	r.logger.Info("resolved clearing account",
 		"clearing_type", clearingType,
 		"instrument_code", instrumentCode,
 		"account_id", accountID,
-		"duration_ms", time.Since(start).Milliseconds())
+		"duration_ms", time.Since(start).Milliseconds(),
+		"shared", shared)
 
 	return accountID, nil
 }
