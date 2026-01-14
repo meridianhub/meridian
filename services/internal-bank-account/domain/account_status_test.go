@@ -234,3 +234,137 @@ func TestAccountStatus_Constants(t *testing.T) {
 	assert.Equal(t, AccountStatus("SUSPENDED"), AccountStatusSuspended)
 	assert.Equal(t, AccountStatus("CLOSED"), AccountStatusClosed)
 }
+
+func TestAccountStatus_AllValidTransitionsMatrix(t *testing.T) {
+	// Comprehensive matrix test for all possible transitions
+	statuses := []AccountStatus{
+		AccountStatusActive,
+		AccountStatusSuspended,
+		AccountStatusClosed,
+	}
+
+	expectedTransitions := map[AccountStatus]map[AccountStatus]bool{
+		AccountStatusActive: {
+			AccountStatusActive:    false, // same status
+			AccountStatusSuspended: true,
+			AccountStatusClosed:    true,
+		},
+		AccountStatusSuspended: {
+			AccountStatusActive:    true,
+			AccountStatusSuspended: false, // same status
+			AccountStatusClosed:    true,
+		},
+		AccountStatusClosed: {
+			AccountStatusActive:    false,
+			AccountStatusSuspended: false,
+			AccountStatusClosed:    false, // same status
+		},
+	}
+
+	for _, from := range statuses {
+		for _, to := range statuses {
+			t.Run(string(from)+"_to_"+string(to), func(t *testing.T) {
+				expected := expectedTransitions[from][to]
+				actual := from.CanTransitionTo(to)
+				assert.Equal(t, expected, actual,
+					"unexpected transition result from %s to %s", from, to)
+			})
+		}
+	}
+}
+
+func TestValidateTransition_ErrorMessages(t *testing.T) {
+	// Test that error messages are informative
+	t.Run("same status error contains both statuses", func(t *testing.T) {
+		err := ValidateTransition(AccountStatusActive, AccountStatusActive)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "same")
+	})
+
+	t.Run("invalid transition error contains both statuses", func(t *testing.T) {
+		err := ValidateTransition(AccountStatusClosed, AccountStatusActive)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "CLOSED")
+		assert.Contains(t, err.Error(), "ACTIVE")
+	})
+}
+
+func TestStatusChange_ZeroValues(t *testing.T) {
+	// Test StatusChange with zero values
+	var change StatusChange
+
+	assert.Empty(t, string(change.From))
+	assert.Empty(t, string(change.To))
+	assert.Empty(t, change.Reason)
+	assert.True(t, change.Timestamp.IsZero())
+	assert.Empty(t, change.ChangedBy)
+}
+
+func TestStatusChange_PartialPopulation(t *testing.T) {
+	// Test StatusChange with only some fields populated
+	change := StatusChange{
+		From: AccountStatusActive,
+		To:   AccountStatusSuspended,
+	}
+
+	assert.Equal(t, AccountStatusActive, change.From)
+	assert.Equal(t, AccountStatusSuspended, change.To)
+	assert.Empty(t, change.Reason)
+	assert.True(t, change.Timestamp.IsZero())
+	assert.Empty(t, change.ChangedBy)
+}
+
+func TestAccountStatus_BidirectionalTransitions(t *testing.T) {
+	// Verify that ACTIVE <-> SUSPENDED is truly bidirectional
+	assert.True(t, AccountStatusActive.CanTransitionTo(AccountStatusSuspended),
+		"ACTIVE should be able to transition to SUSPENDED")
+	assert.True(t, AccountStatusSuspended.CanTransitionTo(AccountStatusActive),
+		"SUSPENDED should be able to transition to ACTIVE")
+}
+
+func TestAccountStatus_TerminalStateCannotTransition(t *testing.T) {
+	// CLOSED is terminal - verify it can't go anywhere
+	allStatuses := []AccountStatus{
+		AccountStatusActive,
+		AccountStatusSuspended,
+		AccountStatusClosed,
+	}
+
+	for _, target := range allStatuses {
+		t.Run("CLOSED cannot transition to "+string(target), func(t *testing.T) {
+			assert.False(t, AccountStatusClosed.CanTransitionTo(target),
+				"CLOSED should not be able to transition to %s", target)
+		})
+	}
+}
+
+func TestAccountStatus_AllPathsToClosed(t *testing.T) {
+	// Verify both ACTIVE and SUSPENDED can reach CLOSED
+	t.Run("ACTIVE can reach CLOSED", func(t *testing.T) {
+		assert.True(t, AccountStatusActive.CanTransitionTo(AccountStatusClosed))
+	})
+
+	t.Run("SUSPENDED can reach CLOSED", func(t *testing.T) {
+		assert.True(t, AccountStatusSuspended.CanTransitionTo(AccountStatusClosed))
+	})
+}
+
+func TestValidateTransition_ReturnsNilOnSuccess(t *testing.T) {
+	// Verify that valid transitions return nil error
+	validTransitions := []struct {
+		from AccountStatus
+		to   AccountStatus
+	}{
+		{AccountStatusActive, AccountStatusSuspended},
+		{AccountStatusActive, AccountStatusClosed},
+		{AccountStatusSuspended, AccountStatusActive},
+		{AccountStatusSuspended, AccountStatusClosed},
+	}
+
+	for _, tt := range validTransitions {
+		t.Run(string(tt.from)+"_to_"+string(tt.to), func(t *testing.T) {
+			err := ValidateTransition(tt.from, tt.to)
+			assert.NoError(t, err, "expected no error for valid transition from %s to %s", tt.from, tt.to)
+		})
+	}
+}
