@@ -474,12 +474,14 @@ func TestCorrespondentDetails_EdgeCases(t *testing.T) {
 		t.Parallel()
 
 		details, err := NewCorrespondentDetails(
-			"BANK001",
-			"Deutsche Bank AG",
-			"REF-001",
+			"银行001",
+			"東京三菱UFJ銀行",
+			"REF-日本-001",
 		)
 		require.NoError(t, err)
-		assert.Equal(t, "Deutsche Bank AG", details.BankName())
+		assert.Equal(t, "银行001", details.BankID())
+		assert.Equal(t, "東京三菱UFJ銀行", details.BankName())
+		assert.Equal(t, "REF-日本-001", details.ExternalAccountRef())
 	})
 }
 

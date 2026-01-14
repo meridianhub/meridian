@@ -15,9 +15,9 @@ import (
 
 // Test error to gRPC status code mappings as specified in subtask 15.3:
 // - ErrAccountNotFound -> codes.NotFound
-// - ErrDuplicateCode -> codes.AlreadyExists
-// - ErrVersionConflict -> codes.FailedPrecondition (via codes.Aborted for optimistic locking)
-// - ErrInvalidTransition -> codes.InvalidArgument (via codes.FailedPrecondition)
+// - ErrDuplicateAccountCode -> codes.AlreadyExists
+// - ErrVersionMismatch -> codes.Aborted (for optimistic locking conflicts)
+// - ErrInvalidTransition -> codes.FailedPrecondition (for invalid state transitions)
 
 // Test sentinel errors for error mapping tests.
 var (

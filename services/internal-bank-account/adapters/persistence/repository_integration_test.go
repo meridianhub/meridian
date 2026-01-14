@@ -1532,7 +1532,7 @@ func TestIntegration_LoadTest_ConcurrentCreation(t *testing.T) {
 	// Count accounts with LOAD_ prefix
 	loadAccountCount := 0
 	for _, acc := range accounts {
-		if len(acc.Code()) >= 5 && acc.Code()[:5] == "LOAD_" {
+		if len(acc.AccountCode()) >= 5 && acc.AccountCode()[:5] == "LOAD_" {
 			loadAccountCount++
 		}
 	}
