@@ -3,9 +3,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -21,6 +23,7 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/ports"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sony/gobreaker/v2"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
@@ -137,9 +140,10 @@ func run(logger *slog.Logger) error {
 
 	logger.Info("gRPC services registered")
 
-	// Get port from environment
+	// Get ports from environment
 	port := env.GetEnvOrDefault("GRPC_PORT", strconv.Itoa(ports.InternalBankAccount))
 	address := fmt.Sprintf(":%s", port)
+	metricsPort := env.GetEnvOrDefault("METRICS_PORT", "8082")
 
 	// Create listener
 	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", address)
@@ -148,7 +152,9 @@ func run(logger *slog.Logger) error {
 	}
 
 	// Start gRPC server in background
-	serverErrors := make(chan error, 1)
+	// Buffer size must match number of goroutines writing to this channel
+	// to prevent deadlock on simultaneous failures (gRPC + HTTP = 2)
+	serverErrors := make(chan error, 2)
 	go func() {
 		logger.Info("starting gRPC server", "address", address)
 		if err := grpcServer.Serve(listener); err != nil {
@@ -156,10 +162,82 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 
+	// Start HTTP server for metrics and health endpoints
+	httpMux := http.NewServeMux()
+	httpMux.Handle("/metrics", promhttp.Handler())
+	httpMux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		// Simple health endpoint for HTTP probes
+		resp, err := healthChecker.Check(r.Context(), &grpc_health_v1.HealthCheckRequest{})
+		if err != nil || resp.Status != grpc_health_v1.HealthCheckResponse_SERVING {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			if _, err := w.Write([]byte("NOT_SERVING")); err != nil {
+				logger.Warn("failed to write health response",
+					"error", err,
+					"endpoint", r.URL.Path,
+					"remote_addr", r.RemoteAddr)
+			}
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		if _, err := w.Write([]byte("SERVING")); err != nil {
+			logger.Warn("failed to write health response",
+				"error", err,
+				"endpoint", r.URL.Path,
+				"remote_addr", r.RemoteAddr)
+		}
+	})
+	httpMux.HandleFunc("/ready", func(w http.ResponseWriter, r *http.Request) {
+		// Readiness endpoint - checks database connectivity
+		resp, err := healthChecker.Check(r.Context(), &grpc_health_v1.HealthCheckRequest{Service: "database"})
+		if err != nil || resp.Status != grpc_health_v1.HealthCheckResponse_SERVING {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			if _, err := w.Write([]byte("NOT_READY")); err != nil {
+				logger.Warn("failed to write readiness response",
+					"error", err,
+					"endpoint", r.URL.Path,
+					"remote_addr", r.RemoteAddr)
+			}
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		if _, err := w.Write([]byte("READY")); err != nil {
+			logger.Warn("failed to write readiness response",
+				"error", err,
+				"endpoint", r.URL.Path,
+				"remote_addr", r.RemoteAddr)
+		}
+	})
+
+	httpServer := &http.Server{
+		Addr:              fmt.Sprintf(":%s", metricsPort),
+		Handler:           httpMux,
+		ReadHeaderTimeout: defaults.DefaultHTTPReadHeaderTimeout,
+		WriteTimeout:      defaults.DefaultHTTPWriteTimeout,
+	}
+
+	go func() {
+		logger.Info("starting HTTP server for metrics", "address", httpServer.Addr)
+		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("HTTP server error", "error", err)
+			serverErrors <- fmt.Errorf("HTTP server error: %w", err)
+		}
+	}()
+
 	// Wait for shutdown signal and orchestrate graceful shutdown
 	orchestrator := bootstrap.NewShutdownOrchestrator(grpcServer, logger)
 
-	// Register cleanup functions (LIFO order - external clients first, then database)
+	// Register cleanup functions (LIFO order - HTTP server first, then external clients, then database)
+	orchestrator.AddCleanup(func() error {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), defaults.DefaultGracefulShutdown)
+		defer cancel()
+		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+			logger.Error("HTTP server shutdown error", "error", err)
+			return err
+		}
+		logger.Info("HTTP server stopped")
+		return nil
+	})
+
 	for _, cleanup := range svcClients.cleanupFuncs {
 		fn := cleanup // capture for closure
 		orchestrator.AddCleanup(func() error {
