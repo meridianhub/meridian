@@ -20,6 +20,9 @@ data:
   GRPC_PORT: "50057"
   GRPC_MAX_CONCURRENT_STREAMS: "100"
 
+  # HTTP metrics server configuration
+  METRICS_PORT: "8082"
+
   # OpenTelemetry configuration
   OTEL_SERVICE_NAME: "internal-bank-account-service"
   OTEL_SAMPLING_RATE: "0.1"

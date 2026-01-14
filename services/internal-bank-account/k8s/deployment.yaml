@@ -40,6 +40,9 @@ spec:
         - name: grpc
           containerPort: 50057
           protocol: TCP
+        - name: http-metrics
+          containerPort: 8082
+          protocol: TCP
         envFrom:
         - configMapRef:
             name: internal-bank-account-config

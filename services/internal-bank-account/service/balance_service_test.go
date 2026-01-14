@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // Balance service tests for Position Keeping integration as specified in subtask 15.3.
@@ -36,7 +35,6 @@ func TestBalanceService_GetBalance_ReturnsCurrentBalance(t *testing.T) {
 				},
 			},
 		},
-		asOf: timestamppb.Now(),
 	}
 	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
 	require.NoError(t, err)
@@ -479,7 +477,6 @@ func BenchmarkGetBalance(b *testing.B) {
 				},
 			},
 		},
-		asOf: timestamppb.Now(),
 	}
 	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
 	if err != nil {
@@ -534,7 +531,6 @@ func BenchmarkGetBalance_MultipleBalanceTypes(b *testing.B) {
 				Amount:      &quantityv1.InstrumentAmount{InstrumentCode: "USD", Amount: "12500.00"},
 			},
 		},
-		asOf: timestamppb.Now(),
 	}
 	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
 	if err != nil {
