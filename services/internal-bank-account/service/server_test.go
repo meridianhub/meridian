@@ -709,3 +709,257 @@ func TestUpdateInternalBankAccount_ClosedAccount(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, codes.FailedPrecondition, st.Code())
 }
+
+// =============================================================================
+// Reference Data Validation Tests
+// =============================================================================
+
+func TestInitiateInternalBankAccount_WithReferenceDataValidation_Success(t *testing.T) {
+	repo := newMockRepository()
+	refClient := &mockReferenceDataClient{
+		instrument: &referencedatav1.InstrumentDefinition{
+			Code:      "USD",
+			Status:    referencedatav1.InstrumentStatus_INSTRUMENT_STATUS_ACTIVE,
+			Dimension: referencedatav1.Dimension_DIMENSION_CURRENCY,
+		},
+	}
+
+	svc, err := NewServiceWithClients(repo, nil, refClient, nil, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	req := &pb.InitiateInternalBankAccountRequest{
+		AccountCode:    "CLR-001",
+		Name:           "USD Clearing Account",
+		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		InstrumentCode: "USD",
+	}
+
+	resp, err := svc.InitiateInternalBankAccount(ctx, req)
+	require.NoError(t, err)
+	assert.NotEmpty(t, resp.AccountId)
+	assert.Equal(t, "CLR-001", resp.Facility.AccountCode)
+
+	// Verify dimension was correctly extracted and stored (DIMENSION_ prefix stripped)
+	savedAccount, err := repo.FindByCode(ctx, "CLR-001")
+	require.NoError(t, err)
+	assert.Equal(t, "CURRENCY", savedAccount.Dimension(), "dimension should be stripped of DIMENSION_ prefix")
+}
+
+func TestInitiateInternalBankAccount_InstrumentNotFound(t *testing.T) {
+	repo := newMockRepository()
+	refClient := &mockReferenceDataClient{
+		err: status.Error(codes.NotFound, "instrument not found"),
+	}
+
+	svc, err := NewServiceWithClients(repo, nil, refClient, nil, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	req := &pb.InitiateInternalBankAccountRequest{
+		AccountCode:    "CLR-001",
+		Name:           "Test Account",
+		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		InstrumentCode: "INVALID",
+	}
+
+	resp, err := svc.InitiateInternalBankAccount(ctx, req)
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+	assert.Contains(t, st.Message(), "instrument not found")
+}
+
+func TestInitiateInternalBankAccount_InstrumentNotActive(t *testing.T) {
+	repo := newMockRepository()
+	refClient := &mockReferenceDataClient{
+		instrument: &referencedatav1.InstrumentDefinition{
+			Code:      "DRAFT_COIN",
+			Status:    referencedatav1.InstrumentStatus_INSTRUMENT_STATUS_DRAFT,
+			Dimension: referencedatav1.Dimension_DIMENSION_CURRENCY,
+		},
+	}
+
+	svc, err := NewServiceWithClients(repo, nil, refClient, nil, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	req := &pb.InitiateInternalBankAccountRequest{
+		AccountCode:    "CLR-001",
+		Name:           "Test Account",
+		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		InstrumentCode: "DRAFT_COIN",
+	}
+
+	resp, err := svc.InitiateInternalBankAccount(ctx, req)
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+	assert.Contains(t, st.Message(), "is not active")
+}
+
+func TestInitiateInternalBankAccount_InstrumentDeprecated(t *testing.T) {
+	repo := newMockRepository()
+	refClient := &mockReferenceDataClient{
+		instrument: &referencedatav1.InstrumentDefinition{
+			Code:      "OLD_COIN",
+			Status:    referencedatav1.InstrumentStatus_INSTRUMENT_STATUS_DEPRECATED,
+			Dimension: referencedatav1.Dimension_DIMENSION_CURRENCY,
+		},
+	}
+
+	svc, err := NewServiceWithClients(repo, nil, refClient, nil, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	req := &pb.InitiateInternalBankAccountRequest{
+		AccountCode:    "CLR-001",
+		Name:           "Test Account",
+		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		InstrumentCode: "OLD_COIN",
+	}
+
+	resp, err := svc.InitiateInternalBankAccount(ctx, req)
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+	assert.Contains(t, st.Message(), "is not active")
+}
+
+func TestInitiateInternalBankAccount_ReferenceDataServiceUnavailable(t *testing.T) {
+	repo := newMockRepository()
+	refClient := &mockReferenceDataClient{
+		err: status.Error(codes.Unavailable, "service unavailable"),
+	}
+
+	svc, err := NewServiceWithClients(repo, nil, refClient, nil, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	req := &pb.InitiateInternalBankAccountRequest{
+		AccountCode:    "CLR-001",
+		Name:           "Test Account",
+		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		InstrumentCode: "USD",
+	}
+
+	resp, err := svc.InitiateInternalBankAccount(ctx, req)
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Internal, st.Code())
+	assert.Contains(t, st.Message(), "failed to validate instrument")
+}
+
+func TestInitiateInternalBankAccount_ReferenceDataTimeout(t *testing.T) {
+	repo := newMockRepository()
+	refClient := &mockReferenceDataClient{
+		err: status.Error(codes.DeadlineExceeded, "context deadline exceeded"),
+	}
+
+	svc, err := NewServiceWithClients(repo, nil, refClient, nil, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	req := &pb.InitiateInternalBankAccountRequest{
+		AccountCode:    "CLR-001",
+		Name:           "Test Account",
+		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		InstrumentCode: "USD",
+	}
+
+	resp, err := svc.InitiateInternalBankAccount(ctx, req)
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.DeadlineExceeded, st.Code())
+	assert.Contains(t, st.Message(), "timed out")
+}
+
+func TestInitiateInternalBankAccount_NilInstrumentInResponse(t *testing.T) {
+	repo := newMockRepository()
+	refClient := &mockReferenceDataClient{
+		instrument: nil, // Simulate malformed response
+	}
+
+	svc, err := NewServiceWithClients(repo, nil, refClient, nil, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	req := &pb.InitiateInternalBankAccountRequest{
+		AccountCode:    "CLR-001",
+		Name:           "Test Account",
+		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		InstrumentCode: "USD",
+	}
+
+	resp, err := svc.InitiateInternalBankAccount(ctx, req)
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Internal, st.Code())
+	assert.Contains(t, st.Message(), "invalid response")
+}
+
+func TestInitiateInternalBankAccount_EnergyInstrument(t *testing.T) {
+	repo := newMockRepository()
+	refClient := &mockReferenceDataClient{
+		instrument: &referencedatav1.InstrumentDefinition{
+			Code:      "KWH",
+			Status:    referencedatav1.InstrumentStatus_INSTRUMENT_STATUS_ACTIVE,
+			Dimension: referencedatav1.Dimension_DIMENSION_ENERGY,
+		},
+	}
+
+	svc, err := NewServiceWithClients(repo, nil, refClient, nil, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	req := &pb.InitiateInternalBankAccountRequest{
+		AccountCode:    "INV-ENERGY-001",
+		Name:           "Energy Inventory Account",
+		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_INVENTORY,
+		InstrumentCode: "KWH",
+	}
+
+	resp, err := svc.InitiateInternalBankAccount(ctx, req)
+	require.NoError(t, err)
+	assert.NotEmpty(t, resp.AccountId)
+	assert.Equal(t, "INV-ENERGY-001", resp.Facility.AccountCode)
+}
+
+func TestInitiateInternalBankAccount_ComputeInstrument(t *testing.T) {
+	repo := newMockRepository()
+	refClient := &mockReferenceDataClient{
+		instrument: &referencedatav1.InstrumentDefinition{
+			Code:      "GPU_HOUR",
+			Status:    referencedatav1.InstrumentStatus_INSTRUMENT_STATUS_ACTIVE,
+			Dimension: referencedatav1.Dimension_DIMENSION_COMPUTE,
+		},
+	}
+
+	svc, err := NewServiceWithClients(repo, nil, refClient, nil, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	req := &pb.InitiateInternalBankAccountRequest{
+		AccountCode:    "INV-COMPUTE-001",
+		Name:           "GPU Compute Inventory",
+		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_INVENTORY,
+		InstrumentCode: "GPU_HOUR",
+	}
+
+	resp, err := svc.InitiateInternalBankAccount(ctx, req)
+	require.NoError(t, err)
+	assert.NotEmpty(t, resp.AccountId)
+	assert.Equal(t, "INV-COMPUTE-001", resp.Facility.AccountCode)
+}
