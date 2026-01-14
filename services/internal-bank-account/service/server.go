@@ -485,31 +485,29 @@ func (s *Service) GetBalance(ctx context.Context, req *pb.GetBalanceRequest) (*p
 	}
 
 	// Find the current balance from the response.
-	// Note: LastUpdated reflects when this service queried Position Keeping,
-	// not when the balance was last modified. Position Keeping is the source
-	// of truth for balance timestamps if needed.
-	var currentBalance *pb.GetBalanceResponse
+	// AsOf reflects the timestamp from Position Keeping when the balance was calculated.
+	var currentBalanceResp *pb.GetBalanceResponse
 	for _, entry := range balanceResp.GetBalances() {
 		if entry.GetBalanceType() == positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT {
-			currentBalance = &pb.GetBalanceResponse{
-				AccountId:   req.AccountId,
-				Balance:     entry.GetAmount(),
-				LastUpdated: timestamppb.Now(), // Query time, not balance update time
+			currentBalanceResp = &pb.GetBalanceResponse{
+				AccountId:      req.AccountId,
+				CurrentBalance: entry.GetAmount(),
+				AsOf:           balanceResp.GetAsOf(), // Use Position Keeping's as_of timestamp
 			}
 			break
 		}
 	}
 
-	if currentBalance == nil {
-		// No current balance found - return zero balance
+	if currentBalanceResp == nil {
+		// No current balance found - return zero balance with current time
 		return &pb.GetBalanceResponse{
-			AccountId:   req.AccountId,
-			Balance:     nil,
-			LastUpdated: timestamppb.Now(), // Query time
+			AccountId:      req.AccountId,
+			CurrentBalance: nil,
+			AsOf:           timestamppb.Now(),
 		}, nil
 	}
 
-	return currentBalance, nil
+	return currentBalanceResp, nil
 }
 
 // findAccountByID finds an account by its ID (UUID or business ID).

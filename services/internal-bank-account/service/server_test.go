@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // mockRepository implements domain.Repository for testing.
@@ -98,6 +99,7 @@ func (m *mockPositionKeepingClient) GetAccountBalances(_ context.Context, req *p
 	return &positionkeepingv1.GetAccountBalancesResponse{
 		AccountId: req.AccountId,
 		Balances:  m.balances,
+		AsOf:      timestamppb.Now(), // Provide timestamp for balance calculation time
 	}, nil
 }
 
@@ -425,9 +427,10 @@ func TestGetBalance_Success(t *testing.T) {
 		AccountId: createResp.Facility.AccountCode,
 	})
 	require.NoError(t, err)
-	assert.NotNil(t, balanceResp.Balance)
-	assert.Equal(t, "USD", balanceResp.Balance.InstrumentCode)
-	assert.Equal(t, "1000.00", balanceResp.Balance.Amount)
+	assert.NotNil(t, balanceResp.CurrentBalance)
+	assert.Equal(t, "USD", balanceResp.CurrentBalance.InstrumentCode)
+	assert.Equal(t, "1000.00", balanceResp.CurrentBalance.Amount)
+	assert.NotNil(t, balanceResp.AsOf)
 }
 
 func TestGetBalance_AccountNotActive(t *testing.T) {
