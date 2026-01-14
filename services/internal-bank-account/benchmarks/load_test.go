@@ -427,7 +427,9 @@ func TestConcurrentMixedOperations(t *testing.T) {
 	// Pre-populate accounts
 	accounts := createBenchAccounts(t, tc, 100)
 
-	concurrency := 500
+	// Reduced concurrency to avoid PostgreSQL max_connections limit (default 100)
+	// in testcontainer environments. Production deployments should use connection pooling.
+	concurrency := 50
 	var wg sync.WaitGroup
 	errChan := make(chan error, concurrency)
 	var createCounter int64
