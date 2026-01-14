@@ -137,6 +137,16 @@ func (s *Service) InitiateInternalBankAccount(ctx context.Context, req *pb.Initi
 			return nil, status.Errorf(codes.Internal, "failed to validate instrument: %v", err)
 		}
 
+		// Guard against nil instrument in response (defensive programming)
+		if refDataResp.Instrument == nil {
+			validationDuration := time.Since(validationStart)
+			operationStatus = opStatusInstrumentValidationErr
+			s.logger.Error("reference data service returned nil instrument",
+				"instrument_code", req.InstrumentCode)
+			ibaobservability.RecordInstrumentValidation("error", validationDuration)
+			return nil, status.Errorf(codes.Internal, "reference data service returned invalid response for instrument: %s", req.InstrumentCode)
+		}
+
 		// Validate instrument status is ACTIVE
 		if refDataResp.Instrument.Status != referencedatav1.InstrumentStatus_INSTRUMENT_STATUS_ACTIVE {
 			validationDuration := time.Since(validationStart)

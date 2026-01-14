@@ -797,6 +797,32 @@ func TestInitiateInternalBankAccount_ReferenceDataTimeout(t *testing.T) {
 	assert.Contains(t, st.Message(), "timed out")
 }
 
+func TestInitiateInternalBankAccount_NilInstrumentInResponse(t *testing.T) {
+	repo := newMockRepository()
+	refClient := &mockReferenceDataClient{
+		instrument: nil, // Simulate malformed response
+	}
+
+	svc, err := NewServiceWithClients(repo, nil, refClient, nil, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	req := &pb.InitiateInternalBankAccountRequest{
+		AccountCode:    "CLR-001",
+		Name:           "Test Account",
+		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		InstrumentCode: "USD",
+	}
+
+	resp, err := svc.InitiateInternalBankAccount(ctx, req)
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Internal, st.Code())
+	assert.Contains(t, st.Message(), "invalid response")
+}
+
 func TestInitiateInternalBankAccount_EnergyInstrument(t *testing.T) {
 	repo := newMockRepository()
 	refClient := &mockReferenceDataClient{
