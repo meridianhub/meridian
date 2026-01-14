@@ -102,37 +102,58 @@ func (s *Service) InitiateInternalBankAccount(ctx context.Context, req *pb.Initi
 		return nil, status.Errorf(codes.InvalidArgument, "invalid account type: %v", err)
 	}
 
-	// Validate instrument exists via Reference Data service (if client is configured)
+	// Validate instrument exists and is ACTIVE via Reference Data service (if client is configured)
+	var dimension string
 	if s.referenceDataClient != nil {
+		validationStart := time.Now()
 		refDataCtx, refDataCancel := context.WithTimeout(ctx, 5*time.Second)
 		defer refDataCancel()
 
-		_, err := s.referenceDataClient.RetrieveInstrument(refDataCtx, &referencedatav1.RetrieveInstrumentRequest{
+		refDataResp, err := s.referenceDataClient.RetrieveInstrument(refDataCtx, &referencedatav1.RetrieveInstrumentRequest{
 			Code: req.InstrumentCode,
 		})
 		if err != nil {
+			validationDuration := time.Since(validationStart)
 			operationStatus = opStatusInstrumentNotFound
 			s.logger.Warn("instrument validation failed",
 				"instrument_code", req.InstrumentCode,
 				"error", err)
 			if status.Code(err) == codes.NotFound {
+				ibaobservability.RecordInstrumentValidation("not_found", validationDuration)
 				return nil, status.Errorf(codes.InvalidArgument, "instrument not found: %s", req.InstrumentCode)
 			}
+			ibaobservability.RecordInstrumentValidation("error", validationDuration)
 			return nil, status.Errorf(codes.Internal, "failed to validate instrument: %v", err)
 		}
+
+		// Validate instrument status is ACTIVE
+		if refDataResp.Instrument.Status != referencedatav1.InstrumentStatus_INSTRUMENT_STATUS_ACTIVE {
+			validationDuration := time.Since(validationStart)
+			operationStatus = opStatusInstrumentNotFound
+			s.logger.Warn("instrument not active",
+				"instrument_code", req.InstrumentCode,
+				"status", refDataResp.Instrument.Status.String())
+			ibaobservability.RecordInstrumentValidation("not_active", validationDuration)
+			return nil, status.Errorf(codes.InvalidArgument, "instrument %s is not active (status: %s)",
+				req.InstrumentCode, refDataResp.Instrument.Status.String())
+		}
+
+		// Extract dimension from validated instrument
+		dimension = refDataResp.Instrument.Dimension.String()
+		ibaobservability.RecordInstrumentValidation("success", time.Since(validationStart))
 	}
 
 	// Generate account ID using full UUID for uniqueness
 	accountID := fmt.Sprintf("IBA-%s", uuid.New().String())
 
-	// Create domain entity
+	// Create domain entity with dimension from Reference Data
 	account, err := domain.NewInternalBankAccount(
 		accountID,
 		req.AccountCode,
 		req.Name,
 		accountType,
 		req.InstrumentCode,
-		"", // dimension - could be populated from Reference Data response
+		dimension,
 	)
 	if err != nil {
 		operationStatus = operationStatusFailed

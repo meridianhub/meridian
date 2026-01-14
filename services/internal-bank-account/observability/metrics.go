@@ -35,6 +35,24 @@ var (
 		},
 		[]string{"from_status", "to_status"},
 	)
+
+	// Instrument validation metrics
+	instrumentValidation = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "internal_bank_account_instrument_validation_total",
+			Help: "Total number of instrument validation attempts",
+		},
+		[]string{"result"},
+	)
+
+	instrumentValidationDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "internal_bank_account_instrument_validation_duration_seconds",
+			Help:    "Duration of instrument validation calls to Reference Data service",
+			Buckets: []float64{.001, .005, .01, .05, .1, .5, 1.0},
+		},
+		[]string{"result"},
+	)
 )
 
 // RecordOperationDuration records the duration of an internal bank account operation.
@@ -50,4 +68,11 @@ func RecordAccountCreated(accountType string) {
 // RecordAccountStatusChange records an account status transition.
 func RecordAccountStatusChange(fromStatus, toStatus string) {
 	accountStatusChanges.WithLabelValues(fromStatus, toStatus).Inc()
+}
+
+// RecordInstrumentValidation records an instrument validation attempt with its result.
+// Result should be one of: "success", "not_found", "not_active", "error".
+func RecordInstrumentValidation(result string, duration time.Duration) {
+	instrumentValidation.WithLabelValues(result).Inc()
+	instrumentValidationDuration.WithLabelValues(result).Observe(duration.Seconds())
 }
