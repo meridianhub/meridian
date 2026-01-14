@@ -34,6 +34,7 @@ const (
 	opStatusVersionConflict         = "version_conflict"
 	opStatusDuplicateCode           = "duplicate_code"
 	opStatusInstrumentNotFound      = "instrument_not_found"
+	opStatusInstrumentNotActive     = "instrument_not_active"
 	opStatusPositionKeepingError    = "position_keeping_error"
 )
 
@@ -129,7 +130,7 @@ func (s *Service) InitiateInternalBankAccount(ctx context.Context, req *pb.Initi
 		// Validate instrument status is ACTIVE
 		if refDataResp.Instrument.Status != referencedatav1.InstrumentStatus_INSTRUMENT_STATUS_ACTIVE {
 			validationDuration := time.Since(validationStart)
-			operationStatus = opStatusInstrumentNotFound
+			operationStatus = opStatusInstrumentNotActive
 			s.logger.Warn("instrument not active",
 				"instrument_code", req.InstrumentCode,
 				"status", refDataResp.Instrument.Status.String())
