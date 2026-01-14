@@ -371,9 +371,12 @@ message ListInternalBankAccountsResponse {
 }
 
 // GetBalanceRequest queries the balance for an internal account.
-// Balance is retrieved from Position Keeping service via internal query.
+// Balance is retrieved from Position Keeping service (source of truth).
+// Internal Bank Account does not store balance locally - it delegates to Position Keeping.
 message GetBalanceRequest {
-  // account_id identifies the account to query balance for.
+  // account_id identifies the account to query balance for (KSUID format).
+  // Pattern accepts alphanumeric characters with hyphens and underscores to support
+  // both KSUID identifiers and legacy account IDs.
   string account_id = 1 [(buf.validate.field).string = {
     min_len: 1
     max_len: 100
@@ -383,17 +386,20 @@ message GetBalanceRequest {
 
 // GetBalanceResponse returns the account balance.
 // Uses InstrumentAmount for multi-asset support per ADR-0013.
+// Balance is retrieved from Position Keeping service (source of truth).
 message GetBalanceResponse {
   // account_id is the queried account.
   string account_id = 1;
 
-  // balance is the current account balance in instrument units.
+  // current_balance is the account balance in instrument units.
   // Uses InstrumentAmount instead of MoneyAmount for multi-asset support
   // (energy, compute, carbon credits, etc.).
-  meridian.quantity.v1.InstrumentAmount balance = 2;
+  // This value comes from Position Keeping service - Internal Bank Account
+  // does not store balance locally.
+  meridian.quantity.v1.InstrumentAmount current_balance = 2;
 
-  // last_updated is when the balance was last calculated.
-  google.protobuf.Timestamp last_updated = 3;
+  // as_of is the timestamp when this balance was calculated by Position Keeping.
+  google.protobuf.Timestamp as_of = 3;
 }
 
 // ========================================
@@ -469,7 +475,9 @@ service InternalBankAccountService {
   }
 
   // GetBalance queries the current balance for an internal account.
-  // The balance is retrieved from Position Keeping service.
+  // The balance is retrieved from Position Keeping service (source of truth).
+  // Internal Bank Account does not store balance locally - Position Keeping maintains
+  // the transaction log and computes balances per BIAN architecture.
   rpc GetBalance(GetBalanceRequest) returns (GetBalanceResponse) {
     option (google.api.http) = {
       get: "/v1/internal-bank-accounts/{account_id}/balance"

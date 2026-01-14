@@ -14,3 +14,9 @@ var (
 	// ErrPositionKeepingClientNil is returned when Position Keeping client is required but not configured.
 	ErrPositionKeepingClientNil = errors.New("position keeping client is required for balance queries")
 )
+
+// Health checker errors.
+var (
+	// ErrHealthCheckerRepositoryNil is returned when attempting to create a health checker with a nil repository.
+	ErrHealthCheckerRepositoryNil = errors.New("health checker repository cannot be nil")
+)

@@ -10,19 +10,59 @@ import (
 
 // PositionKeepingClient defines the interface for communicating with the PositionKeeping service.
 //
+// # Architecture: Position Keeping as Source of Truth for Balance
+//
+// The PositionKeeping service is the SINGLE SOURCE OF TRUTH for all account balance data.
+// InternalBankAccount is a registry service that manages account metadata (status, ownership,
+// configuration) but deliberately does NOT store or compute balances locally.
+//
+// This architectural separation provides:
+//   - Single source of truth: All balance queries go through Position Keeping
+//   - Consistency: No risk of balance drift between services
+//   - Clear responsibilities: InternalBankAccount = metadata, PositionKeeping = positions
+//
+// # Performance: O(1) Balance Queries
+//
+// Balance queries via GetAccountBalances are O(1) operations because Position Keeping
+// pre-computes and maintains running balance totals. Unlike systems that compute balance
+// by summing transactions (O(n) where n = transaction count), Position Keeping updates
+// running totals on each transaction, enabling constant-time balance retrieval regardless
+// of account history length.
+//
+// # Integration Pattern
+//
+// InternalBankAccount calls Position Keeping to:
+//   - Query current/available/ledger balances for account status display
+//   - Validate balance thresholds for account status transitions
+//   - Provide balance data in RetrieveInternalBankAccount responses
+//
+// InternalBankAccount does NOT call Position Keeping to:
+//   - Record transactions (that's CurrentAccount's responsibility)
+//   - Modify balances (PositionKeeping handles this via transaction processing)
+//   - Initialize position logs (done by CurrentAccount when linking accounts)
+//
 // This interface represents the subset of PositionKeeping operations used by InternalBankAccount.
 // The actual implementation is provided by services/position-keeping/client.Client.
-//
-// The PositionKeeping service maintains balances for all accounts in the system.
-// InternalBankAccount uses this service to query balances - it does NOT store balance locally.
 type PositionKeepingClient interface {
 	// GetAccountBalances retrieves all balance types for an account by instrument.
 	//
+	// This is an O(1) operation - Position Keeping maintains pre-computed running balances,
+	// so retrieval time is constant regardless of transaction history length.
+	//
 	// Returns all balance types (opening, closing, current, available, ledger, reserve, free)
-	// for a specific instrument in a single call.
+	// for a specific instrument in a single call. Useful for comprehensive account status display.
+	//
+	// Supports both currency instruments (GBP, USD, EUR) and non-currency instruments
+	// (KWH, GPU_HOUR, CARBON_TONNE) for multi-asset account types.
+	//
+	// Returns:
+	//   - GetAccountBalancesResponse with all balance types and as_of timestamp on success
+	//   - NotFound error if no position exists for the account/instrument combination
+	//   - InvalidArgument error if account_id format is invalid
 	GetAccountBalances(ctx context.Context, req *positionkeepingv1.GetAccountBalancesRequest) (*positionkeepingv1.GetAccountBalancesResponse, error)
 
 	// Close terminates the client connection gracefully.
+	// Should be called during service shutdown to release gRPC resources.
 	Close() error
 }
 
