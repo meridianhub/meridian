@@ -6,6 +6,7 @@ on:
     paths:
       - 'shared/domain/models/**'
       - 'shared/platform/audit/**'
+      - 'services/internal-bank-account/**'
       - '.github/workflows/benchmarks.yml'
   workflow_dispatch: # Allow manual trigger
 
@@ -61,6 +62,32 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
           go test -bench=BenchmarkAuditWorker -benchmem -benchtime=3s -count=3 \
             ./shared/platform/audit/ 2>&1 | tee -a $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Run Internal Bank Account benchmarks
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Internal Bank Account Service Benchmarks" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**NFR Targets:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Balance queries: P99 < 50ms" >> $GITHUB_STEP_SUMMARY
+          echo "- Account creation: P99 < 50ms" >> $GITHUB_STEP_SUMMARY
+          echo "- Account lookups: P99 < 5ms" >> $GITHUB_STEP_SUMMARY
+          echo "- Concurrent operations: 1000 simultaneous" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          go test -bench=. -benchmem -benchtime=5s -timeout=30m \
+            ./services/internal-bank-account/benchmarks/ 2>&1 | tee -a $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Run Internal Bank Account NFR validation
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Internal Bank Account NFR Validation" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          go test -v -run TestNFR -timeout=10m \
+            ./services/internal-bank-account/benchmarks/ 2>&1 | tee -a $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
       # Note: Benchmark comparison against base branch moved to nightly.yml
       # to reduce PR CI time. PRs run basic benchmarks, nightly runs full comparison.
