@@ -399,17 +399,15 @@ func TestConcurrent1000Operations(t *testing.T) {
 	close(errChan)
 	elapsed := time.Since(start)
 
-	// Collect and report errors
-	var errs []error
+	// Collect errors from channel
+	var errCount int
 	for err := range errChan {
-		errs = append(errs, err)
+		t.Errorf("Concurrent operation failed: %v", err)
+		errCount++
 	}
 
-	if len(errs) > 0 {
-		for _, err := range errs {
-			t.Errorf("Concurrent operation failed: %v", err)
-		}
-		t.Fatalf("Failed operations: %d/%d", len(errs), concurrency)
+	if errCount > 0 {
+		t.Fatalf("Failed operations: %d/%d", errCount, concurrency)
 	}
 
 	t.Logf("1000 concurrent operations completed in %v", elapsed)
@@ -482,17 +480,15 @@ func TestConcurrentMixedOperations(t *testing.T) {
 	close(errChan)
 	elapsed := time.Since(start)
 
-	// Collect and report errors
-	var errs []error
+	// Collect errors from channel
+	var errCount int
 	for err := range errChan {
-		errs = append(errs, err)
+		t.Errorf("Operation failed: %v", err)
+		errCount++
 	}
 
-	if len(errs) > 0 {
-		for _, err := range errs {
-			t.Errorf("Operation failed: %v", err)
-		}
-		t.Fatalf("Failed operations: %d/%d", len(errs), concurrency)
+	if errCount > 0 {
+		t.Fatalf("Failed operations: %d/%d", errCount, concurrency)
 	}
 
 	t.Logf("%d concurrent mixed operations completed in %v", concurrency, elapsed)
