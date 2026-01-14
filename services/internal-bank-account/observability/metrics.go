@@ -68,3 +68,44 @@ func RecordAccountStatusChange(fromStatus, toStatus string) {
 func RecordBalanceQueryDuration(status string, duration time.Duration) {
 	balanceQueryDuration.WithLabelValues(status).Observe(duration.Seconds())
 }
+
+// Circuit breaker metrics
+var (
+	circuitBreakerState = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "internal_bank_account_circuit_breaker_state",
+			Help: "Current state of circuit breakers (0=closed, 1=half-open, 2=open)",
+		},
+		[]string{"service"},
+	)
+
+	circuitBreakerStateChanges = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "internal_bank_account_circuit_breaker_state_changes_total",
+			Help: "Total number of circuit breaker state changes",
+		},
+		[]string{"service", "from_state", "to_state"},
+	)
+)
+
+// CircuitBreakerState represents the state of a circuit breaker.
+type CircuitBreakerState int
+
+const (
+	// CircuitBreakerStateClosed indicates the circuit is closed (healthy).
+	CircuitBreakerStateClosed CircuitBreakerState = 0
+	// CircuitBreakerStateHalfOpen indicates the circuit is testing recovery.
+	CircuitBreakerStateHalfOpen CircuitBreakerState = 1
+	// CircuitBreakerStateOpen indicates the circuit is open (failing fast).
+	CircuitBreakerStateOpen CircuitBreakerState = 2
+)
+
+// RecordCircuitBreakerState records the current state of a circuit breaker.
+func RecordCircuitBreakerState(service string, state CircuitBreakerState) {
+	circuitBreakerState.WithLabelValues(service).Set(float64(state))
+}
+
+// RecordCircuitBreakerStateChange records a circuit breaker state transition.
+func RecordCircuitBreakerStateChange(service, fromState, toState string) {
+	circuitBreakerStateChanges.WithLabelValues(service, fromState, toState).Inc()
+}
