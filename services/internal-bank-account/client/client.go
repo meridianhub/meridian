@@ -1,8 +1,9 @@
 // Package client provides a gRPC client for the InternalBankAccount service.
 //
 // The InternalBankAccount service provides BIAN-compliant internal bank account
-// operations for managing counterparty and operational accounts. This client enables
-// inter-service communication with proper context propagation, tracing, and
+// operations for managing non-customer-facing accounts including clearing, nostro,
+// vostro, holding, suspense, revenue, expense, and inventory accounts. This client
+// enables inter-service communication with proper context propagation, tracing, and
 // resilience patterns.
 //
 // Usage with Kubernetes DNS-based load balancing (recommended for production):
@@ -32,6 +33,7 @@ import (
 	"fmt"
 	"time"
 
+	internalbankaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_bank_account/v1"
 	"github.com/meridianhub/meridian/shared/pkg/clients"
 	platformgrpc "github.com/meridianhub/meridian/shared/pkg/grpc"
 	"github.com/meridianhub/meridian/shared/platform/observability"
@@ -94,12 +96,11 @@ type Config struct {
 
 // Client provides access to the InternalBankAccount service.
 type Client struct {
-	conn      *grpc.ClientConn
-	tracer    *observability.Tracer
-	resilient *clients.ResilientClient
-	timeout   time.Duration
-	// TODO: Add generated proto client when proto is defined in task 6
-	// internalBankAccount internalbankaccountv1.InternalBankAccountServiceClient
+	conn                *grpc.ClientConn
+	internalBankAccount internalbankaccountv1.InternalBankAccountServiceClient
+	tracer              *observability.Tracer
+	resilient           *clients.ResilientClient
+	timeout             time.Duration
 }
 
 // New creates a new InternalBankAccount gRPC client.
@@ -191,12 +192,11 @@ func New(cfg Config) (*Client, func(), error) {
 	}
 
 	client := &Client{
-		conn:      conn,
-		tracer:    cfg.Tracer,
-		resilient: resilient,
-		timeout:   cfg.Timeout,
-		// TODO: Initialize proto client when proto is defined in task 6
-		// internalBankAccount: internalbankaccountv1.NewInternalBankAccountServiceClient(conn),
+		conn:                conn,
+		internalBankAccount: internalbankaccountv1.NewInternalBankAccountServiceClient(conn),
+		tracer:              cfg.Tracer,
+		resilient:           resilient,
+		timeout:             cfg.Timeout,
 	}
 
 	cleanup := func() {
@@ -224,10 +224,155 @@ func (c *Client) Conn() *grpc.ClientConn {
 	return c.conn
 }
 
-// TODO: Add service methods when proto is defined in task 6
-// Example methods that will be implemented:
-//
-// - InitiateInternalBankAccount: Create a new internal bank account
-// - RetrieveInternalBankAccount: Get account details
-// - UpdateInternalBankAccount: Modify account properties
-// - TerminateInternalBankAccount: Close an account
+// ============================================================================
+// Write Operations (Non-Idempotent) - Circuit breaker WITHOUT retry
+// ============================================================================
+
+// InitiateInternalBankAccount creates a new internal bank account.
+// This is a non-idempotent operation, so it uses circuit breaker without retry.
+func (c *Client) InitiateInternalBankAccount(ctx context.Context, req *internalbankaccountv1.InitiateInternalBankAccountRequest) (*internalbankaccountv1.InitiateInternalBankAccountResponse, error) {
+	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	ctx = clients.PropagateCorrelationID(ctx)
+	ctx = clients.PropagateOrganization(ctx)
+
+	// Use resilience patterns if configured (no retry for non-idempotent operations)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilienceNoRetry(ctx, c.resilient, "InitiateInternalBankAccount", func() (*internalbankaccountv1.InitiateInternalBankAccountResponse, error) {
+			return c.internalBankAccount.InitiateInternalBankAccount(ctx, req)
+		})
+	}
+
+	resp, err := c.internalBankAccount.InitiateInternalBankAccount(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initiate internal bank account: %w", err)
+	}
+
+	return resp, nil
+}
+
+// ControlInternalBankAccount performs lifecycle state transitions (suspend, activate, close).
+// This is a non-idempotent operation, so it uses circuit breaker without retry.
+func (c *Client) ControlInternalBankAccount(ctx context.Context, req *internalbankaccountv1.ControlInternalBankAccountRequest) (*internalbankaccountv1.ControlInternalBankAccountResponse, error) {
+	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	ctx = clients.PropagateCorrelationID(ctx)
+	ctx = clients.PropagateOrganization(ctx)
+
+	// Use resilience patterns if configured (no retry for non-idempotent operations)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilienceNoRetry(ctx, c.resilient, "ControlInternalBankAccount", func() (*internalbankaccountv1.ControlInternalBankAccountResponse, error) {
+			return c.internalBankAccount.ControlInternalBankAccount(ctx, req)
+		})
+	}
+
+	resp, err := c.internalBankAccount.ControlInternalBankAccount(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to control internal bank account: %w", err)
+	}
+
+	return resp, nil
+}
+
+// ============================================================================
+// Read/Idempotent Operations - Circuit breaker WITH retry
+// ============================================================================
+
+// UpdateInternalBankAccount modifies account settings (partial update).
+// Updates are idempotent when using version-based concurrency (expected_version),
+// so retry is enabled.
+func (c *Client) UpdateInternalBankAccount(ctx context.Context, req *internalbankaccountv1.UpdateInternalBankAccountRequest) (*internalbankaccountv1.UpdateInternalBankAccountResponse, error) {
+	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	ctx = clients.PropagateCorrelationID(ctx)
+	ctx = clients.PropagateOrganization(ctx)
+
+	// Use resilience patterns if configured (with retry for idempotent update)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilience(ctx, c.resilient, "UpdateInternalBankAccount", func() (*internalbankaccountv1.UpdateInternalBankAccountResponse, error) {
+			return c.internalBankAccount.UpdateInternalBankAccount(ctx, req)
+		})
+	}
+
+	resp, err := c.internalBankAccount.UpdateInternalBankAccount(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update internal bank account: %w", err)
+	}
+
+	return resp, nil
+}
+
+// RetrieveInternalBankAccount fetches a single account by ID.
+// This is an idempotent read operation, so it uses circuit breaker with retry.
+func (c *Client) RetrieveInternalBankAccount(ctx context.Context, req *internalbankaccountv1.RetrieveInternalBankAccountRequest) (*internalbankaccountv1.RetrieveInternalBankAccountResponse, error) {
+	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	ctx = clients.PropagateCorrelationID(ctx)
+	ctx = clients.PropagateOrganization(ctx)
+
+	// Use resilience patterns if configured (with retry for idempotent read)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilience(ctx, c.resilient, "RetrieveInternalBankAccount", func() (*internalbankaccountv1.RetrieveInternalBankAccountResponse, error) {
+			return c.internalBankAccount.RetrieveInternalBankAccount(ctx, req)
+		})
+	}
+
+	resp, err := c.internalBankAccount.RetrieveInternalBankAccount(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve internal bank account: %w", err)
+	}
+
+	return resp, nil
+}
+
+// ListInternalBankAccounts queries accounts with filtering and pagination.
+// This is an idempotent read operation, so it uses circuit breaker with retry.
+func (c *Client) ListInternalBankAccounts(ctx context.Context, req *internalbankaccountv1.ListInternalBankAccountsRequest) (*internalbankaccountv1.ListInternalBankAccountsResponse, error) {
+	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	ctx = clients.PropagateCorrelationID(ctx)
+	ctx = clients.PropagateOrganization(ctx)
+
+	// Use resilience patterns if configured (with retry for idempotent read)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilience(ctx, c.resilient, "ListInternalBankAccounts", func() (*internalbankaccountv1.ListInternalBankAccountsResponse, error) {
+			return c.internalBankAccount.ListInternalBankAccounts(ctx, req)
+		})
+	}
+
+	resp, err := c.internalBankAccount.ListInternalBankAccounts(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list internal bank accounts: %w", err)
+	}
+
+	return resp, nil
+}
+
+// GetBalance queries the current balance for an internal account.
+// This is an idempotent read operation, so it uses circuit breaker with retry.
+func (c *Client) GetBalance(ctx context.Context, req *internalbankaccountv1.GetBalanceRequest) (*internalbankaccountv1.GetBalanceResponse, error) {
+	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	ctx = clients.PropagateCorrelationID(ctx)
+	ctx = clients.PropagateOrganization(ctx)
+
+	// Use resilience patterns if configured (with retry for idempotent read)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilience(ctx, c.resilient, "GetBalance", func() (*internalbankaccountv1.GetBalanceResponse, error) {
+			return c.internalBankAccount.GetBalance(ctx, req)
+		})
+	}
+
+	resp, err := c.internalBankAccount.GetBalance(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get balance: %w", err)
+	}
+
+	return resp, nil
+}
