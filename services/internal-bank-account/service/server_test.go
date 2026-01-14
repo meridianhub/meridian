@@ -547,6 +547,45 @@ func TestUpdateInternalBankAccount_Success(t *testing.T) {
 	assert.NotNil(t, updateResp.Facility)
 }
 
+func TestUpdateInternalBankAccount_VersionConflict(t *testing.T) {
+	repo := newMockRepository()
+	svc, err := NewService(repo)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Create account (version 1)
+	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+		AccountCode:    "CLR-001",
+		Name:           "USD Clearing Account",
+		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		InstrumentCode: "USD",
+	})
+	require.NoError(t, err)
+	originalVersion := createResp.Facility.Version
+	assert.Equal(t, int32(1), originalVersion)
+
+	// Suspend the account - this bumps version to 2
+	controlResp, err := svc.ControlInternalBankAccount(ctx, &pb.ControlInternalBankAccountRequest{
+		AccountId:     createResp.Facility.AccountCode,
+		ControlAction: pb.ControlAction_CONTROL_ACTION_SUSPEND,
+		Reason:        "Testing version conflict",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int32(2), controlResp.Facility.Version)
+
+	// Try to update with stale version - should fail with Aborted
+	_, err = svc.UpdateInternalBankAccount(ctx, &pb.UpdateInternalBankAccountRequest{
+		AccountId:       createResp.Facility.AccountCode,
+		Name:            "Update with stale version",
+		ExpectedVersion: originalVersion, // Version 1 is now stale, current is 2
+	})
+	assert.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Aborted, st.Code())
+}
+
 func TestUpdateInternalBankAccount_ClosedAccount(t *testing.T) {
 	repo := newMockRepository()
 	svc, err := NewService(repo)
