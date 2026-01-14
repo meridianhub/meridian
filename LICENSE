@@ -1,10 +1,21 @@
 Business Source License 1.1
 
-TODO: Add full BSL 1.1 text from https://mariadb.com/bsl11/
+Parameters
 
-Parameters:
-- Licensor: Meridian Hub Contributors
-- Licensed Work: Meridian
-- Additional Use Grant: Commercial Billing/Ledger/Treasury-as-a-Service is prohibited
-- Change Date: January 14, 2030
-- Change License: Apache License 2.0
+Licensor:             Meridian Hub Contributors
+Licensed Work:        Meridian
+                      The Licensed Work is (c) 2025 Meridian Hub Contributors.
+Additional Use Grant: You may make production use of the Licensed Work, provided
+                      Your use does not include offering the Licensed Work to third
+                      parties as a commercial billing, ledger, treasury, or financial
+                      accounting service that competes with Meridian Hub products.
+Change Date:          January 14, 2030
+Change License:       Apache License, Version 2.0
+
+For information about alternative licensing arrangements, contact licensing@meridianhub.org.
+
+Notice
+
+The Business Source License (this document, or the "License") is not an Open Source
+license. However, the Licensed Work will eventually be made available under an Open
+Source License, as stated in this License.
