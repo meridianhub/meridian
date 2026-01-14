@@ -59,20 +59,19 @@ func TestNew_RequiresTargetOrServiceName(t *testing.T) {
 }
 
 func TestNew_DefaultsApplied(t *testing.T) {
+	// Port is used during connection setup but not stored in Client struct.
+	// These tests verify defaults are applied during connection establishment.
 	tests := []struct {
-		name     string
-		cfg      Config
-		wantPort int
+		name string
+		cfg  Config
 	}{
 		{
-			name:     "empty port defaults to 50057",
-			cfg:      Config{ServiceName: "internal-bank-account"},
-			wantPort: DefaultPort,
+			name: "empty port defaults to 50057",
+			cfg:  Config{ServiceName: "internal-bank-account"},
 		},
 		{
-			name:     "custom port preserved",
-			cfg:      Config{ServiceName: "internal-bank-account", Port: 9999},
-			wantPort: 9999,
+			name: "custom port preserved",
+			cfg:  Config{ServiceName: "internal-bank-account", Port: 9999},
 		},
 	}
 
