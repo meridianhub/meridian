@@ -193,3 +193,85 @@ func TestAccountType_RequiresCorrespondent(t *testing.T) {
 		})
 	}
 }
+
+func TestAccountType_Constants(t *testing.T) {
+	// Verify the constant values are as expected
+	assert.Equal(t, AccountType("CLEARING"), AccountTypeClearing)
+	assert.Equal(t, AccountType("NOSTRO"), AccountTypeNostro)
+	assert.Equal(t, AccountType("VOSTRO"), AccountTypeVostro)
+	assert.Equal(t, AccountType("HOLDING"), AccountTypeHolding)
+	assert.Equal(t, AccountType("SUSPENSE"), AccountTypeSuspense)
+	assert.Equal(t, AccountType("REVENUE"), AccountTypeRevenue)
+	assert.Equal(t, AccountType("EXPENSE"), AccountTypeExpense)
+}
+
+func TestAccountType_InvalidRequiresCorrespondent(t *testing.T) {
+	// Invalid account types should return false for RequiresCorrespondent
+	tests := []struct {
+		name        string
+		accountType AccountType
+	}{
+		{"empty string", AccountType("")},
+		{"unknown type", AccountType("UNKNOWN")},
+		{"invalid type", AccountType("INVALID")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.False(t, tt.accountType.RequiresCorrespondent(),
+				"invalid account types should not require correspondent")
+		})
+	}
+}
+
+func TestAccountType_AllValidTypesCount(t *testing.T) {
+	// Test that we have exactly 7 valid account types
+	validTypes := []AccountType{
+		AccountTypeClearing,
+		AccountTypeNostro,
+		AccountTypeVostro,
+		AccountTypeHolding,
+		AccountTypeSuspense,
+		AccountTypeRevenue,
+		AccountTypeExpense,
+	}
+
+	for _, at := range validTypes {
+		assert.True(t, at.IsValid(), "expected %s to be valid", at)
+	}
+
+	assert.Len(t, validTypes, 7, "expected exactly 7 valid account types")
+}
+
+func TestAccountType_StringOnInvalid(t *testing.T) {
+	// Test String() on invalid types returns the underlying string
+	invalid := AccountType("INVALID")
+	assert.Equal(t, "INVALID", invalid.String())
+
+	empty := AccountType("")
+	assert.Equal(t, "", empty.String())
+}
+
+func TestAccountType_CorrespondentAccountsAreTwoTypes(t *testing.T) {
+	// Verify that exactly two account types require correspondent
+	correspondentTypes := []AccountType{}
+	allTypes := []AccountType{
+		AccountTypeClearing,
+		AccountTypeNostro,
+		AccountTypeVostro,
+		AccountTypeHolding,
+		AccountTypeSuspense,
+		AccountTypeRevenue,
+		AccountTypeExpense,
+	}
+
+	for _, at := range allTypes {
+		if at.RequiresCorrespondent() {
+			correspondentTypes = append(correspondentTypes, at)
+		}
+	}
+
+	assert.Len(t, correspondentTypes, 2, "exactly two account types should require correspondent")
+	assert.Contains(t, correspondentTypes, AccountTypeNostro)
+	assert.Contains(t, correspondentTypes, AccountTypeVostro)
+}

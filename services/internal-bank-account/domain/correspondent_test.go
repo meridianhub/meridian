@@ -391,3 +391,186 @@ func TestCorrespondentDetails_Immutability(t *testing.T) {
 		assert.NotContains(t, freshAttrs, "new_key", "original attributes should not have new keys")
 	})
 }
+
+func TestCorrespondentDetails_Equality_AttributeCountDifference(t *testing.T) {
+	t.Parallel()
+
+	// Test where one has more attributes than another (different length)
+	t.Run("different number of attributes", func(t *testing.T) {
+		t.Parallel()
+
+		attrs1 := map[string]string{"key1": "value1"}
+		attrs2 := map[string]string{"key1": "value1", "key2": "value2"}
+
+		details1, err := NewCorrespondentDetailsWithOptions("BANK1", "First Bank", "ACC001", "", attrs1)
+		require.NoError(t, err)
+
+		details2, err := NewCorrespondentDetailsWithOptions("BANK1", "First Bank", "ACC001", "", attrs2)
+		require.NoError(t, err)
+
+		assert.False(t, details1.Equals(details2), "different attribute counts should not be equal")
+		assert.False(t, details2.Equals(details1), "equality should be symmetric")
+	})
+}
+
+func TestCorrespondentDetails_Equality_AttributeKeyNotPresent(t *testing.T) {
+	t.Parallel()
+
+	// Test where both have same number of attributes but different keys
+	// This tests the "key not found" branch in the Equals method
+	t.Run("same attribute count but different keys", func(t *testing.T) {
+		t.Parallel()
+
+		attrs1 := map[string]string{"keyA": "value", "keyB": "value"}
+		attrs2 := map[string]string{"keyA": "value", "keyC": "value"}
+
+		details1, err := NewCorrespondentDetailsWithOptions("BANK1", "First Bank", "ACC001", "", attrs1)
+		require.NoError(t, err)
+
+		details2, err := NewCorrespondentDetailsWithOptions("BANK1", "First Bank", "ACC001", "", attrs2)
+		require.NoError(t, err)
+
+		assert.False(t, details1.Equals(details2), "different attribute keys should not be equal")
+	})
+}
+
+func TestCorrespondentDetails_EdgeCases(t *testing.T) {
+	t.Parallel()
+
+	t.Run("minimum valid bank name (3 chars)", func(t *testing.T) {
+		t.Parallel()
+
+		details, err := NewCorrespondentDetails("B1", "ABC", "REF")
+		require.NoError(t, err)
+		assert.Equal(t, "ABC", details.BankName())
+	})
+
+	t.Run("very long values", func(t *testing.T) {
+		t.Parallel()
+
+		longString := "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+		details, err := NewCorrespondentDetails(longString, longString, longString)
+		require.NoError(t, err)
+		assert.Equal(t, longString, details.BankID())
+		assert.Equal(t, longString, details.BankName())
+		assert.Equal(t, longString, details.ExternalAccountRef())
+	})
+
+	t.Run("special characters in values", func(t *testing.T) {
+		t.Parallel()
+
+		details, err := NewCorrespondentDetails(
+			"BANK-123/456",
+			"Test Bank (UK) Ltd.",
+			"ACC#001@REF",
+		)
+		require.NoError(t, err)
+		assert.Equal(t, "BANK-123/456", details.BankID())
+		assert.Equal(t, "Test Bank (UK) Ltd.", details.BankName())
+		assert.Equal(t, "ACC#001@REF", details.ExternalAccountRef())
+	})
+
+	t.Run("unicode in values", func(t *testing.T) {
+		t.Parallel()
+
+		details, err := NewCorrespondentDetails(
+			"银行001",
+			"東京三菱UFJ銀行",
+			"REF-日本-001",
+		)
+		require.NoError(t, err)
+		assert.Equal(t, "银行001", details.BankID())
+		assert.Equal(t, "東京三菱UFJ銀行", details.BankName())
+		assert.Equal(t, "REF-日本-001", details.ExternalAccountRef())
+	})
+}
+
+func TestCorrespondentDetails_SwiftCodeVariations(t *testing.T) {
+	t.Parallel()
+
+	t.Run("8-character SWIFT code", func(t *testing.T) {
+		t.Parallel()
+
+		details, err := NewCorrespondentDetailsWithOptions(
+			"BANK1", "First Bank", "ACC001",
+			"BOFAUS3N", nil,
+		)
+		require.NoError(t, err)
+		assert.Equal(t, "BOFAUS3N", details.SwiftCode())
+	})
+
+	t.Run("11-character SWIFT code", func(t *testing.T) {
+		t.Parallel()
+
+		details, err := NewCorrespondentDetailsWithOptions(
+			"BANK1", "First Bank", "ACC001",
+			"BOFAUS3NXXX", nil,
+		)
+		require.NoError(t, err)
+		assert.Equal(t, "BOFAUS3NXXX", details.SwiftCode())
+	})
+}
+
+func TestCorrespondentDetails_MultipleAttributes(t *testing.T) {
+	t.Parallel()
+
+	t.Run("many attributes", func(t *testing.T) {
+		t.Parallel()
+
+		attrs := map[string]string{
+			"region":     "EMEA",
+			"tier":       "primary",
+			"priority":   "high",
+			"category":   "clearing",
+			"department": "treasury",
+			"costCenter": "CC001",
+			"createdBy":  "admin@example.com",
+			"approvedBy": "manager@example.com",
+		}
+
+		details, err := NewCorrespondentDetailsWithOptions(
+			"BANK1", "First Bank", "ACC001", "SWIFT123", attrs,
+		)
+		require.NoError(t, err)
+
+		retrievedAttrs := details.Attributes()
+		assert.Len(t, retrievedAttrs, 8)
+		assert.Equal(t, "EMEA", retrievedAttrs["region"])
+		assert.Equal(t, "primary", retrievedAttrs["tier"])
+	})
+}
+
+func TestCorrespondentDetails_EqualityReflexive(t *testing.T) {
+	t.Parallel()
+
+	// Test that x.Equals(x) is always true
+	details, err := NewCorrespondentDetailsWithOptions(
+		"BANK1", "First Bank", "ACC001", "SWIFT123",
+		map[string]string{"key": "value"},
+	)
+	require.NoError(t, err)
+
+	assert.True(t, details.Equals(details), "a value should equal itself")
+}
+
+func TestCorrespondentDetails_ValidationPriority(t *testing.T) {
+	t.Parallel()
+
+	// Test that validation errors are returned in the expected order
+	// bankID is checked first, then bankName, then externalAccountRef
+	t.Run("empty bankID checked before other validations", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := NewCorrespondentDetails("", "AB", "")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, errBankIDRequired)
+	})
+
+	t.Run("bankName checked before externalAccountRef", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := NewCorrespondentDetails("BANK1", "AB", "")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, errBankNameTooShort)
+	})
+}

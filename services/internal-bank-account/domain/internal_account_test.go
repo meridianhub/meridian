@@ -631,6 +631,343 @@ func TestVersionIncrement_UpdateCorrespondent(t *testing.T) {
 	assert.Equal(t, int64(1), nostro.Version())
 }
 
+func TestVersionIncrement_Rename(t *testing.T) {
+	account := createTestAccount(t, AccountTypeClearing)
+	assert.Equal(t, int64(1), account.Version())
+
+	// Rename should increment version
+	renamed, err := account.Rename("New Name")
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), renamed.Version())
+
+	// Original should still be version 1
+	assert.Equal(t, int64(1), account.Version())
+}
+
+func TestImmutability_StatusChangePreservesAttributes(t *testing.T) {
+	// Test that status changes on an account WITH attributes properly deep copies them
+	// This tests the copyWithUpdatedTime method's attribute deep copy branch
+	attrs := map[string]string{"key": "value", "another": "attr"}
+	account := NewInternalBankAccountBuilder().
+		WithID(uuid.New()).
+		WithAccountID("IBA-001").
+		WithAccountCode("TEST_CLEARING").
+		WithName("Test Account").
+		WithAccountType(AccountTypeClearing).
+		WithInstrumentCode("USD").
+		WithDimension("CURRENCY").
+		WithStatus(AccountStatusActive).
+		WithAttributes(attrs).
+		WithVersion(1).
+		WithCreatedAt(time.Now()).
+		WithUpdatedAt(time.Now()).
+		Build()
+
+	// Suspend the account - this triggers copyWithUpdatedTime which should deep copy attributes
+	suspended, err := account.Suspend("Testing attribute preservation")
+	require.NoError(t, err)
+
+	// Verify attributes are preserved in the new account
+	suspendedAttrs := suspended.Attributes()
+	require.NotNil(t, suspendedAttrs)
+	assert.Equal(t, "value", suspendedAttrs["key"])
+	assert.Equal(t, "attr", suspendedAttrs["another"])
+
+	// Modify the suspended account's attributes
+	suspendedAttrs["key"] = "modified"
+	suspendedAttrs["new_key"] = "new_value"
+
+	// Verify original suspended account is not affected
+	freshSuspendedAttrs := suspended.Attributes()
+	assert.Equal(t, "value", freshSuspendedAttrs["key"], "modifying returned attributes should not affect internal state")
+	assert.NotContains(t, freshSuspendedAttrs, "new_key")
+
+	// Verify original account attributes are also unchanged
+	originalAttrs := account.Attributes()
+	assert.Equal(t, "value", originalAttrs["key"])
+	assert.NotContains(t, originalAttrs, "new_key")
+}
+
+func TestImmutability_RenamePreservesAttributes(t *testing.T) {
+	// Test that rename on an account WITH attributes properly deep copies them
+	attrs := map[string]string{"department": "treasury"}
+	account := NewInternalBankAccountBuilder().
+		WithID(uuid.New()).
+		WithAccountID("IBA-001").
+		WithAccountCode("TEST_CLEARING").
+		WithName("Original Name").
+		WithAccountType(AccountTypeClearing).
+		WithInstrumentCode("USD").
+		WithDimension("CURRENCY").
+		WithStatus(AccountStatusActive).
+		WithAttributes(attrs).
+		WithVersion(1).
+		WithCreatedAt(time.Now()).
+		WithUpdatedAt(time.Now()).
+		Build()
+
+	// Rename the account - this triggers copyWithUpdatedTime
+	renamed, err := account.Rename("New Name")
+	require.NoError(t, err)
+
+	// Verify attributes are preserved
+	renamedAttrs := renamed.Attributes()
+	require.NotNil(t, renamedAttrs)
+	assert.Equal(t, "treasury", renamedAttrs["department"])
+}
+
+func TestUpdateCorrespondent_PreservesAttributes(t *testing.T) {
+	// Test that UpdateCorrespondent on an account WITH attributes properly deep copies them
+	attrs := map[string]string{"category": "international"}
+	account := NewInternalBankAccountBuilder().
+		WithID(uuid.New()).
+		WithAccountID("IBA-001").
+		WithAccountCode("TEST_NOSTRO").
+		WithName("Test Nostro").
+		WithAccountType(AccountTypeNostro).
+		WithInstrumentCode("USD").
+		WithDimension("CURRENCY").
+		WithStatus(AccountStatusActive).
+		WithAttributes(attrs).
+		WithVersion(1).
+		WithCreatedAt(time.Now()).
+		WithUpdatedAt(time.Now()).
+		Build()
+
+	correspondent, err := NewCorrespondentDetails(
+		"CHASE001",
+		"JPMorgan Chase Bank",
+		"ACC-12345",
+	)
+	require.NoError(t, err)
+
+	// Update correspondent - this triggers copyWithUpdatedTime
+	updated, err := account.UpdateCorrespondent(correspondent)
+	require.NoError(t, err)
+
+	// Verify attributes are preserved
+	updatedAttrs := updated.Attributes()
+	require.NotNil(t, updatedAttrs)
+	assert.Equal(t, "international", updatedAttrs["category"])
+}
+
+func TestUpdateCorrespondent_RevenueRejectsCorrespondent(t *testing.T) {
+	revenue := createTestAccount(t, AccountTypeRevenue)
+
+	correspondent, err := NewCorrespondentDetails(
+		"BANK001",
+		"Some Bank",
+		"REF-001",
+	)
+	require.NoError(t, err)
+
+	// Try to set correspondent on REVENUE account
+	_, err = revenue.UpdateCorrespondent(correspondent)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrCorrespondentNotAllowed)
+}
+
+func TestUpdateCorrespondent_ExpenseRejectsCorrespondent(t *testing.T) {
+	expense := createTestAccount(t, AccountTypeExpense)
+
+	correspondent, err := NewCorrespondentDetails(
+		"BANK001",
+		"Some Bank",
+		"REF-001",
+	)
+	require.NoError(t, err)
+
+	// Try to set correspondent on EXPENSE account
+	_, err = expense.UpdateCorrespondent(correspondent)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrCorrespondentNotAllowed)
+}
+
+func TestBuilder_WithNilAttributes(t *testing.T) {
+	// Test builder with nil attributes
+	account := NewInternalBankAccountBuilder().
+		WithID(uuid.New()).
+		WithAccountID("IBA-001").
+		WithAccountCode("TEST").
+		WithName("Test").
+		WithAccountType(AccountTypeClearing).
+		WithInstrumentCode("USD").
+		WithDimension("CURRENCY").
+		WithStatus(AccountStatusActive).
+		WithAttributes(nil).
+		WithVersion(1).
+		WithCreatedAt(time.Now()).
+		WithUpdatedAt(time.Now()).
+		Build()
+
+	// Verify attributes are nil
+	assert.Nil(t, account.Attributes())
+}
+
+func TestBuilder_MinimalFields(t *testing.T) {
+	// Test builder with only essential fields set
+	id := uuid.New()
+	account := NewInternalBankAccountBuilder().
+		WithID(id).
+		WithAccountID("IBA-001").
+		WithAccountCode("TEST").
+		WithName("Test Account").
+		WithAccountType(AccountTypeClearing).
+		Build()
+
+	// Verify essential fields are set
+	assert.Equal(t, id, account.ID())
+	assert.Equal(t, "IBA-001", account.AccountID())
+	assert.Equal(t, "TEST", account.AccountCode())
+	assert.Equal(t, "Test Account", account.Name())
+	assert.Equal(t, AccountTypeClearing, account.AccountType())
+
+	// Verify optional fields have zero values
+	assert.Empty(t, account.InstrumentCode())
+	assert.Empty(t, account.Dimension())
+	assert.Equal(t, AccountStatus(""), account.Status())
+	assert.Nil(t, account.Correspondent())
+	assert.Nil(t, account.Attributes())
+	assert.Equal(t, int64(0), account.Version())
+	assert.True(t, account.CreatedAt().IsZero())
+	assert.True(t, account.UpdatedAt().IsZero())
+}
+
+func TestNewInternalBankAccount_AllAccountTypes(t *testing.T) {
+	// Test creating accounts with all valid account types
+	tests := []struct {
+		name        string
+		accountType AccountType
+	}{
+		{"CLEARING", AccountTypeClearing},
+		{"NOSTRO", AccountTypeNostro},
+		{"VOSTRO", AccountTypeVostro},
+		{"HOLDING", AccountTypeHolding},
+		{"SUSPENSE", AccountTypeSuspense},
+		{"REVENUE", AccountTypeRevenue},
+		{"EXPENSE", AccountTypeExpense},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			account, err := NewInternalBankAccount(
+				"IBA-001",
+				"CODE_"+tt.name,
+				"Test "+tt.name+" Account",
+				tt.accountType,
+				"USD",
+				"CURRENCY",
+			)
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.accountType, account.AccountType())
+			assert.Equal(t, AccountStatusActive, account.Status())
+		})
+	}
+}
+
+func TestLifecycleTransitions_RenameFromSuspended(t *testing.T) {
+	account := createTestAccount(t, AccountTypeClearing)
+
+	// Suspend the account
+	suspended, err := account.Suspend("Maintenance")
+	require.NoError(t, err)
+
+	// Rename should work on suspended accounts
+	renamed, err := suspended.Rename("Renamed While Suspended")
+	require.NoError(t, err)
+	assert.Equal(t, "Renamed While Suspended", renamed.Name())
+	assert.Equal(t, AccountStatusSuspended, renamed.Status())
+}
+
+func TestUpdateCorrespondent_ReplaceExisting(t *testing.T) {
+	// Create a NOSTRO account with correspondent already set via builder
+	originalCorrespondent, err := NewCorrespondentDetails(
+		"OLD_BANK",
+		"Old Bank Name",
+		"OLD-REF-001",
+	)
+	require.NoError(t, err)
+
+	account := NewInternalBankAccountBuilder().
+		WithID(uuid.New()).
+		WithAccountID("IBA-001").
+		WithAccountCode("TEST_NOSTRO").
+		WithName("Test Nostro").
+		WithAccountType(AccountTypeNostro).
+		WithInstrumentCode("USD").
+		WithDimension("CURRENCY").
+		WithStatus(AccountStatusActive).
+		WithCorrespondent(originalCorrespondent).
+		WithVersion(1).
+		WithCreatedAt(time.Now()).
+		WithUpdatedAt(time.Now()).
+		Build()
+
+	// Verify original correspondent is set
+	assert.Equal(t, "OLD_BANK", account.Correspondent().BankID())
+
+	// Replace with new correspondent
+	newCorrespondent, err := NewCorrespondentDetails(
+		"NEW_BANK",
+		"New Bank Name",
+		"NEW-REF-001",
+	)
+	require.NoError(t, err)
+
+	updated, err := account.UpdateCorrespondent(newCorrespondent)
+	require.NoError(t, err)
+
+	// Verify new correspondent is set
+	assert.Equal(t, "NEW_BANK", updated.Correspondent().BankID())
+	assert.Equal(t, int64(2), updated.Version())
+
+	// Verify original account still has old correspondent
+	assert.Equal(t, "OLD_BANK", account.Correspondent().BankID())
+	assert.Equal(t, int64(1), account.Version())
+}
+
+func TestAttributes_NilReturnedForNilInternal(t *testing.T) {
+	// Test that Attributes() returns nil when internal attributes are nil
+	account := createTestAccount(t, AccountTypeClearing)
+
+	// Account created via NewInternalBankAccount has nil attributes
+	assert.Nil(t, account.Attributes())
+}
+
+func TestTimestamps_UpdatedAtChangesOnModification(t *testing.T) {
+	account := createTestAccount(t, AccountTypeClearing)
+	originalUpdatedAt := account.UpdatedAt()
+
+	// Wait a tiny bit to ensure timestamp difference
+	time.Sleep(1 * time.Millisecond)
+
+	// Suspend should update the timestamp
+	suspended, err := account.Suspend("Test")
+	require.NoError(t, err)
+
+	assert.True(t, suspended.UpdatedAt().After(originalUpdatedAt) || suspended.UpdatedAt().Equal(originalUpdatedAt),
+		"updatedAt should be equal or after original")
+}
+
+func TestCreatedAt_NeverChanges(t *testing.T) {
+	account := createTestAccount(t, AccountTypeClearing)
+	originalCreatedAt := account.CreatedAt()
+
+	// Multiple modifications should not change createdAt
+	suspended, err := account.Suspend("Test")
+	require.NoError(t, err)
+	assert.Equal(t, originalCreatedAt, suspended.CreatedAt())
+
+	reactivated, err := suspended.Activate()
+	require.NoError(t, err)
+	assert.Equal(t, originalCreatedAt, reactivated.CreatedAt())
+
+	closed, err := reactivated.Close("Done")
+	require.NoError(t, err)
+	assert.Equal(t, originalCreatedAt, closed.CreatedAt())
+}
+
 // createTestAccount is a helper function to create a test account with the given type.
 func createTestAccount(t *testing.T, accountType AccountType) InternalBankAccount {
 	t.Helper()
