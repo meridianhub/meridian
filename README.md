@@ -27,7 +27,7 @@ Meridian is available in two editions:
 ## Mission
 
 When your system accuses someone of a shortfall, you need absolute certainty. Meridian is
-open-source treasury infrastructure designed to prove itself - every position recorded with
+source-available treasury infrastructure designed to prove itself - every position recorded with
 atomic audit trails, every transaction path traceable, every balance verifiable.
 
 ### Measure
@@ -345,11 +345,12 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines on:
 Business Source License 1.1 - See [LICENSE](LICENSE) file for details.
 
 **What this means:**
+
 - You can read, use, and modify the code for development and internal use
 - You cannot offer a commercial Billing, Ledger, or Treasury-as-a-Service that competes with Meridian Hub
 - On January 14, 2030, this version automatically converts to Apache License 2.0
 
-This is the same licensing model used by CockroachDB, MariaDB, Sentry, and HashiCorp.
+This is the same licensing model used by CockroachDB, MariaDB, and HashiCorp.
 
 ## Disclaimer
 
