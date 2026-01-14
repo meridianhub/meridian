@@ -104,7 +104,10 @@ func (s *Service) InitiateInternalBankAccount(ctx context.Context, req *pb.Initi
 
 	// Validate instrument exists via Reference Data service (if client is configured)
 	if s.referenceDataClient != nil {
-		_, err := s.referenceDataClient.RetrieveInstrument(ctx, &referencedatav1.RetrieveInstrumentRequest{
+		refDataCtx, refDataCancel := context.WithTimeout(ctx, 5*time.Second)
+		defer refDataCancel()
+
+		_, err := s.referenceDataClient.RetrieveInstrument(refDataCtx, &referencedatav1.RetrieveInstrumentRequest{
 			Code: req.InstrumentCode,
 		})
 		if err != nil {
@@ -119,8 +122,8 @@ func (s *Service) InitiateInternalBankAccount(ctx context.Context, req *pb.Initi
 		}
 	}
 
-	// Generate account ID
-	accountID := fmt.Sprintf("IBA-%s", uuid.New().String()[:8])
+	// Generate account ID using full UUID for uniqueness
+	accountID := fmt.Sprintf("IBA-%s", uuid.New().String())
 
 	// Create domain entity
 	account, err := domain.NewInternalBankAccount(
@@ -169,6 +172,9 @@ func (s *Service) InitiateInternalBankAccount(ctx context.Context, req *pb.Initi
 		s.logger.Error("failed to save account", "error", err)
 		return nil, status.Errorf(codes.Internal, "failed to create account: %v", err)
 	}
+
+	// Record metric for account creation
+	ibaobservability.RecordAccountCreated(accountType.String())
 
 	s.logger.Info("created internal bank account",
 		"account_id", accountID,
@@ -227,6 +233,17 @@ func (s *Service) updateAccount(ctx context.Context, account domain.InternalBank
 		return nil, status.Error(codes.FailedPrecondition, "cannot update closed account")
 	}
 
+	var err error
+
+	// Update name if provided
+	if req.Name != "" {
+		account, err = account.Rename(req.Name)
+		if err != nil {
+			*operationStatus = operationStatusFailed
+			return nil, mapDomainErrorToGRPC(err)
+		}
+	}
+
 	// Update correspondent details if provided
 	if req.CorrespondentDetails != nil {
 		correspondent, err := domain.NewCorrespondentDetailsWithOptions(
@@ -277,6 +294,9 @@ func (s *Service) ControlInternalBankAccount(ctx context.Context, req *pb.Contro
 		return nil, err
 	}
 
+	// Capture previous status for metrics
+	previousStatus := account.Status()
+
 	// Execute state transition based on control action
 	switch req.ControlAction {
 	case pb.ControlAction_CONTROL_ACTION_SUSPEND:
@@ -311,6 +331,9 @@ func (s *Service) ControlInternalBankAccount(ctx context.Context, req *pb.Contro
 		operationStatus = operationStatusFailed
 		return nil, status.Errorf(codes.Internal, "failed to save account: %v", err)
 	}
+
+	// Record status change metric
+	ibaobservability.RecordAccountStatusChange(string(previousStatus), string(account.Status()))
 
 	s.logger.Info("executed control action on internal bank account",
 		"account_id", req.AccountId,
@@ -445,8 +468,11 @@ func (s *Service) GetBalance(ctx context.Context, req *pb.GetBalanceRequest) (*p
 		return nil, status.Error(codes.Unimplemented, "position keeping service not configured")
 	}
 
-	// Query Position Keeping service (source of truth for balance)
-	balanceResp, err := s.positionKeepingClient.GetAccountBalances(ctx, &positionkeepingv1.GetAccountBalancesRequest{
+	// Query Position Keeping service (source of truth for balance) with timeout
+	pkCtx, pkCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer pkCancel()
+
+	balanceResp, err := s.positionKeepingClient.GetAccountBalances(pkCtx, &positionkeepingv1.GetAccountBalancesRequest{
 		AccountId:      account.AccountID(),
 		InstrumentCode: account.InstrumentCode(),
 	})

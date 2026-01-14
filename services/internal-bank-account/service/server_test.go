@@ -537,14 +537,17 @@ func TestUpdateInternalBankAccount_Success(t *testing.T) {
 		InstrumentCode: "USD",
 	})
 	require.NoError(t, err)
+	assert.Equal(t, "USD Clearing Account", createResp.Facility.Name)
 
-	// Update account
+	// Update account name
 	updateResp, err := svc.UpdateInternalBankAccount(ctx, &pb.UpdateInternalBankAccountRequest{
 		AccountId: createResp.Facility.AccountCode,
 		Name:      "Updated USD Clearing Account",
 	})
 	require.NoError(t, err)
 	assert.NotNil(t, updateResp.Facility)
+	assert.Equal(t, "Updated USD Clearing Account", updateResp.Facility.Name)
+	assert.Equal(t, int32(2), updateResp.Facility.Version) // Version should be bumped
 }
 
 func TestUpdateInternalBankAccount_VersionConflict(t *testing.T) {

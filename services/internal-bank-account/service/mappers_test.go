@@ -41,6 +41,27 @@ func TestProtoToAccountType_Unspecified(t *testing.T) {
 	assert.ErrorIs(t, err, ErrUnspecifiedEnum)
 }
 
+func TestProtoToAccountType_Inventory(t *testing.T) {
+	// INVENTORY should map to HOLDING as the closest equivalent
+	result, err := protoToAccountType(pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_INVENTORY)
+	require.NoError(t, err)
+	assert.Equal(t, domain.AccountTypeHolding, result)
+}
+
+func TestProtoToAccountType_Unknown(t *testing.T) {
+	// Unknown enum values should return an error
+	_, err := protoToAccountType(pb.InternalAccountType(9999))
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrUnknownAccountType)
+}
+
+func TestProtoToAccountStatus_Unknown(t *testing.T) {
+	// Unknown enum values should return an error
+	_, err := protoToAccountStatus(pb.InternalAccountStatus(9999))
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrUnknownAccountStatus)
+}
+
 func TestAccountTypeToProto_RoundTrip(t *testing.T) {
 	tests := []domain.AccountType{
 		domain.AccountTypeClearing,
