@@ -49,7 +49,7 @@ var (
 		prometheus.HistogramOpts{
 			Name:    "internal_bank_account_instrument_validation_duration_seconds",
 			Help:    "Duration of instrument validation calls to Reference Data service",
-			Buckets: []float64{.001, .005, .01, .05, .1, .5, 1.0},
+			Buckets: []float64{.001, .005, .01, .05, .1, .5, 1.0, 2.5, 5.0},
 		},
 		[]string{"result"},
 	)
@@ -71,7 +71,7 @@ func RecordAccountStatusChange(fromStatus, toStatus string) {
 }
 
 // RecordInstrumentValidation records an instrument validation attempt with its result.
-// Result should be one of: "success", "not_found", "not_active", "error".
+// Result should be one of: "success", "not_found", "not_active", "timeout", "error".
 func RecordInstrumentValidation(result string, duration time.Duration) {
 	instrumentValidation.WithLabelValues(result).Inc()
 	instrumentValidationDuration.WithLabelValues(result).Observe(duration.Seconds())

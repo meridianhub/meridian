@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -35,6 +36,7 @@ const (
 	opStatusDuplicateCode           = "duplicate_code"
 	opStatusInstrumentNotFound      = "instrument_not_found"
 	opStatusInstrumentNotActive     = "instrument_not_active"
+	opStatusInstrumentValidationErr = "instrument_validation_error"
 	opStatusPositionKeepingError    = "position_keeping_error"
 )
 
@@ -115,14 +117,22 @@ func (s *Service) InitiateInternalBankAccount(ctx context.Context, req *pb.Initi
 		})
 		if err != nil {
 			validationDuration := time.Since(validationStart)
-			operationStatus = opStatusInstrumentNotFound
+			errCode := status.Code(err)
 			s.logger.Warn("instrument validation failed",
 				"instrument_code", req.InstrumentCode,
 				"error", err)
-			if status.Code(err) == codes.NotFound {
+
+			if errCode == codes.NotFound {
+				operationStatus = opStatusInstrumentNotFound
 				ibaobservability.RecordInstrumentValidation("not_found", validationDuration)
 				return nil, status.Errorf(codes.InvalidArgument, "instrument not found: %s", req.InstrumentCode)
 			}
+			if errCode == codes.DeadlineExceeded || errCode == codes.Canceled {
+				operationStatus = opStatusInstrumentValidationErr
+				ibaobservability.RecordInstrumentValidation("timeout", validationDuration)
+				return nil, status.Errorf(codes.DeadlineExceeded, "instrument validation timed out for: %s", req.InstrumentCode)
+			}
+			operationStatus = opStatusInstrumentValidationErr
 			ibaobservability.RecordInstrumentValidation("error", validationDuration)
 			return nil, status.Errorf(codes.Internal, "failed to validate instrument: %v", err)
 		}
@@ -139,8 +149,8 @@ func (s *Service) InitiateInternalBankAccount(ctx context.Context, req *pb.Initi
 				req.InstrumentCode, refDataResp.Instrument.Status.String())
 		}
 
-		// Extract dimension from validated instrument
-		dimension = refDataResp.Instrument.Dimension.String()
+		// Extract dimension from validated instrument (strip DIMENSION_ prefix for domain consistency)
+		dimension = strings.TrimPrefix(refDataResp.Instrument.Dimension.String(), "DIMENSION_")
 		ibaobservability.RecordInstrumentValidation("success", time.Since(validationStart))
 	}
 
