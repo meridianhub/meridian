@@ -126,14 +126,7 @@ func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.Cu
 	var creditPosted bool
 
 	// Resolve clearing account ID (dynamic resolver preferred, fallback to static config)
-	clearingAccountID, err := o.resolveClearingAccountID(ctx, string(amount.Currency()))
-	if err != nil {
-		o.logger.Warn("failed to resolve clearing account, deposit will proceed without double-entry clearing",
-			"account_id", account.AccountID(),
-			"transaction_id", transactionID,
-			"error", err)
-		clearingAccountID = ""
-	}
+	clearingAccountID := o.resolveClearingAccountID(ctx, string(amount.Currency()))
 
 	// Step 1: Log position in PositionKeeping service
 	o.addLogPositionStep(saga, account, amount, transactionID, &positionLogID, &positionLogVersion)
@@ -667,8 +660,9 @@ func (o *DepositOrchestrator) addSaveAccountStep(
 //  1. AccountResolver (dynamic lookup from Internal Bank Account service)
 //  2. AccountConfig (static environment variable fallback)
 //
-// Returns empty string and nil error if neither is configured (single-entry mode).
-func (o *DepositOrchestrator) resolveClearingAccountID(ctx context.Context, currency string) (string, error) {
+// Returns empty string if neither is configured (single-entry mode).
+// All error cases are handled internally with fallback behavior.
+func (o *DepositOrchestrator) resolveClearingAccountID(ctx context.Context, currency string) string {
 	// Try dynamic resolver first (preferred)
 	if o.accountResolver != nil {
 		accountID, err := o.accountResolver.GetDepositClearingAccount(ctx, currency)
@@ -681,7 +675,7 @@ func (o *DepositOrchestrator) resolveClearingAccountID(ctx context.Context, curr
 			o.logger.Debug("resolved clearing account dynamically",
 				"currency", currency,
 				"account_id", accountID)
-			return accountID, nil
+			return accountID
 		}
 	}
 
@@ -689,10 +683,10 @@ func (o *DepositOrchestrator) resolveClearingAccountID(ctx context.Context, curr
 	if o.accountConfig != nil && o.accountConfig.DepositClearingAccountID != "" {
 		o.logger.Debug("using static clearing account from config",
 			"account_id", o.accountConfig.DepositClearingAccountID)
-		return o.accountConfig.DepositClearingAccountID, nil
+		return o.accountConfig.DepositClearingAccountID
 	}
 
 	// Neither configured - single-entry mode
 	o.logger.Debug("no clearing account configured, operating in single-entry mode")
-	return "", nil
+	return ""
 }
