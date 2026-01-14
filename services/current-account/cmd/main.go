@@ -16,6 +16,7 @@ import (
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
 	"github.com/meridianhub/meridian/services/current-account/service"
 	finacctclient "github.com/meridianhub/meridian/services/financial-accounting/client"
+	internalbankaccountclient "github.com/meridianhub/meridian/services/internal-bank-account/client"
 	partyclient "github.com/meridianhub/meridian/services/party/client"
 	poskeepingclient "github.com/meridianhub/meridian/services/position-keeping/client"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
@@ -234,6 +235,8 @@ type serviceClients struct {
 	positionKeeping     service.PositionKeepingClient
 	financialAccounting service.FinancialAccountingClient
 	party               service.PartyClient
+	internalBankAccount service.InternalBankAccountClient
+	accountResolver     *service.AccountResolver
 	// Health clients bypass the circuit breaker for health checks
 	positionKeepingHealth     grpc_health_v1.HealthClient
 	financialAccountingHealth grpc_health_v1.HealthClient
@@ -343,6 +346,45 @@ func createServiceWithClients(
 	// Wrap the party client with CurrentAccount-specific methods (ValidateParty, GetParty)
 	partyClientWrapper := NewPartyClientWrapper(partyBaseClient)
 
+	// Create Internal Bank Account client for dynamic clearing account resolution.
+	// This is optional - if it fails, the service will fall back to static config.
+	var internalBankAccountClient *internalbankaccountclient.Client
+	var accountResolver *service.AccountResolver
+
+	ibaClient, ibaCleanup, err := internalbankaccountclient.New(internalbankaccountclient.Config{
+		ServiceName: internalbankaccountclient.ServiceName,
+		Namespace:   namespace,
+		Port:        ports.InternalBankAccount,
+		Timeout:     defaults.DefaultRPCTimeout,
+		Tracer:      tracer,
+		Resilience: &sharedclients.ResilientClientConfig{
+			Logger:             logger,
+			CircuitBreakerName: "internal-bank-account",
+			OnStateChange:      makeCircuitBreakerCallback(),
+		},
+	})
+	if err != nil {
+		logger.Warn("internal bank account client not available, clearing accounts will use static config",
+			"error", err)
+	} else {
+		internalBankAccountClient = ibaClient
+		cleanupFuncs = append(cleanupFuncs, ibaCleanup)
+
+		// Create AccountResolver with the client
+		accountResolver, err = service.NewAccountResolver(service.AccountResolverConfig{
+			Client:   internalBankAccountClient,
+			Logger:   logger,
+			CacheTTL: service.DefaultCacheTTL,
+		})
+		if err != nil {
+			logger.Warn("failed to create account resolver, clearing accounts will use static config",
+				"error", err)
+			accountResolver = nil
+		} else {
+			logger.Info("dynamic clearing account resolution enabled via Internal Bank Account service")
+		}
+	}
+
 	// Create service with the pre-created clients
 	// The new service-owned clients implement the same interfaces as defined in
 	// services/current-account/service/client_interfaces.go
@@ -357,6 +399,7 @@ func createServiceWithClients(
 		idempotencyService,
 		logger,
 		tracer,
+		accountResolver, // Optional: dynamic clearing account resolution
 	)
 	if err != nil {
 		// Cleanup all clients before returning
@@ -372,6 +415,8 @@ func createServiceWithClients(
 		positionKeeping:           posKeepingClient,
 		financialAccounting:       finAcctClient,
 		party:                     partyClientWrapper,
+		internalBankAccount:       internalBankAccountClient,
+		accountResolver:           accountResolver,
 		positionKeepingHealth:     grpc_health_v1.NewHealthClient(posKeepingClient.Conn()),
 		financialAccountingHealth: grpc_health_v1.NewHealthClient(finAcctClient.Conn()),
 		cleanupFuncs:              cleanupFuncs,

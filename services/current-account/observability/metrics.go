@@ -115,6 +115,37 @@ var (
 		},
 		[]string{"service", "from_state", "to_state"},
 	)
+
+	// Clearing account resolver metrics
+	clearingAccountCacheHits = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "current_account_clearing_account_cache_hits_total",
+			Help: "Total number of clearing account cache hits",
+		},
+	)
+
+	clearingAccountCacheMisses = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "current_account_clearing_account_cache_misses_total",
+			Help: "Total number of clearing account cache misses",
+		},
+	)
+
+	clearingAccountLookupDuration = promauto.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "current_account_clearing_account_lookup_duration_seconds",
+			Help:    "Duration of clearing account lookups from Internal Bank Account service",
+			Buckets: []float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5},
+		},
+	)
+
+	clearingAccountLookupErrors = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "current_account_clearing_account_lookup_errors_total",
+			Help: "Total number of clearing account lookup errors",
+		},
+		[]string{"clearing_type"},
+	)
 )
 
 // RecordOperationDuration records the duration of a current account operation
@@ -202,4 +233,24 @@ func RecordCircuitBreakerState(service string, state CircuitBreakerState) {
 // RecordCircuitBreakerStateChange records a circuit breaker state transition
 func RecordCircuitBreakerStateChange(service, fromState, toState string) {
 	circuitBreakerStateChanges.WithLabelValues(service, fromState, toState).Inc()
+}
+
+// RecordClearingAccountCacheHit records a cache hit for clearing account resolution
+func RecordClearingAccountCacheHit() {
+	clearingAccountCacheHits.Inc()
+}
+
+// RecordClearingAccountCacheMiss records a cache miss for clearing account resolution
+func RecordClearingAccountCacheMiss() {
+	clearingAccountCacheMisses.Inc()
+}
+
+// RecordClearingAccountLookupDuration records the duration of a clearing account lookup
+func RecordClearingAccountLookupDuration(duration time.Duration) {
+	clearingAccountLookupDuration.Observe(duration.Seconds())
+}
+
+// RecordClearingAccountLookupError records a clearing account lookup error
+func RecordClearingAccountLookupError(clearingType string) {
+	clearingAccountLookupErrors.WithLabelValues(clearingType).Inc()
 }

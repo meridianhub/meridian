@@ -36,6 +36,7 @@ type WithdrawalOrchestrator struct {
 	posKeepingClient PositionKeepingClient
 	finAcctClient    FinancialAccountingClient
 	accountConfig    *config.AccountConfig
+	accountResolver  *AccountResolver
 }
 
 // WithdrawalOrchestratorConfig contains dependencies for creating a WithdrawalOrchestrator
@@ -45,6 +46,10 @@ type WithdrawalOrchestratorConfig struct {
 	PosKeepingClient PositionKeepingClient
 	FinAcctClient    FinancialAccountingClient
 	AccountConfig    *config.AccountConfig
+	// AccountResolver enables dynamic clearing account resolution from Internal Bank Account service.
+	// If provided, takes precedence over AccountConfig for clearing account lookup.
+	// If nil, falls back to static AccountConfig environment variables.
+	AccountResolver *AccountResolver
 }
 
 // NewWithdrawalOrchestrator creates a new withdrawal orchestrator with the given dependencies.
@@ -68,6 +73,7 @@ func NewWithdrawalOrchestrator(cfg WithdrawalOrchestratorConfig) (*WithdrawalOrc
 		posKeepingClient: cfg.PosKeepingClient,
 		finAcctClient:    cfg.FinAcctClient,
 		accountConfig:    cfg.AccountConfig,
+		accountResolver:  cfg.AccountResolver,
 	}, nil
 }
 
@@ -120,10 +126,14 @@ func (o *WithdrawalOrchestrator) Orchestrate(ctx context.Context, account domain
 	var debitPosted bool
 	var creditPosted bool
 
-	// Get clearing account ID from config (for withdrawals, this is the bank cash account)
-	var withdrawalClearingAccountID string
-	if o.accountConfig != nil {
-		withdrawalClearingAccountID = o.accountConfig.WithdrawalClearingAccountID
+	// Resolve clearing account ID (dynamic resolver preferred, fallback to static config)
+	withdrawalClearingAccountID, err := o.resolveClearingAccountID(ctx, string(amount.Currency()))
+	if err != nil {
+		o.logger.Warn("failed to resolve clearing account, withdrawal will proceed without double-entry clearing",
+			"account_id", account.AccountID(),
+			"transaction_id", transactionID,
+			"error", err)
+		withdrawalClearingAccountID = ""
 	}
 
 	// Step 1: Log position in PositionKeeping service with DEBIT direction (opposite of deposit)
@@ -638,4 +648,39 @@ func (o *WithdrawalOrchestrator) addSaveAccountStep(
 			return nil
 		},
 	)
+}
+
+// resolveClearingAccountID resolves the clearing account ID for withdrawal operations.
+// Priority:
+//  1. AccountResolver (dynamic lookup from Internal Bank Account service)
+//  2. AccountConfig (static environment variable fallback)
+//
+// Returns empty string and nil error if neither is configured (single-entry mode).
+func (o *WithdrawalOrchestrator) resolveClearingAccountID(ctx context.Context, currency string) (string, error) {
+	// Try dynamic resolver first (preferred)
+	if o.accountResolver != nil {
+		accountID, err := o.accountResolver.GetWithdrawalClearingAccount(ctx, currency)
+		if err != nil {
+			// Log but don't fail - allow fallback to static config
+			o.logger.Warn("dynamic clearing account resolution failed, trying static config",
+				"currency", currency,
+				"error", err)
+		} else {
+			o.logger.Debug("resolved clearing account dynamically",
+				"currency", currency,
+				"account_id", accountID)
+			return accountID, nil
+		}
+	}
+
+	// Fallback to static config
+	if o.accountConfig != nil && o.accountConfig.WithdrawalClearingAccountID != "" {
+		o.logger.Debug("using static clearing account from config",
+			"account_id", o.accountConfig.WithdrawalClearingAccountID)
+		return o.accountConfig.WithdrawalClearingAccountID, nil
+	}
+
+	// Neither configured - single-entry mode
+	o.logger.Debug("no clearing account configured, operating in single-entry mode")
+	return "", nil
 }
