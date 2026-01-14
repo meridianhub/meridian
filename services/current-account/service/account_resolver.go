@@ -218,6 +218,12 @@ func (r *AccountResolver) resolveClearingAccount(ctx context.Context, clearingTy
 }
 
 // queryInternalBankAccount queries the Internal Bank Account service for a clearing account.
+//
+// Note: clearingType is currently used only for logging and cache key generation.
+// The Internal Bank Account API doesn't yet support filtering by clearing purpose
+// (deposit vs withdrawal), so the same account is returned for both operations.
+// Cache keys include clearingType intentionally to support future differentiation
+// without cache invalidation when the API is extended.
 func (r *AccountResolver) queryInternalBankAccount(ctx context.Context, clearingType ClearingAccountType, instrumentCode string) (string, error) {
 	resp, err := r.client.ListInternalBankAccounts(ctx, &internalbankaccountv1.ListInternalBankAccountsRequest{
 		AccountTypeFilter:    internalbankaccountv1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
@@ -240,8 +246,10 @@ func (r *AccountResolver) queryInternalBankAccount(ctx context.Context, clearing
 	}
 
 	// Use the first active clearing account found.
-	// In the future, we could add logic to select based on additional criteria
-	// (e.g., account name pattern for deposit vs withdrawal).
+	// TODO(future): When the Internal Bank Account API supports clearing purpose filtering,
+	// use clearingType to select deposit-specific vs withdrawal-specific accounts.
+	// The current implementation returns the same account for both, which is acceptable
+	// for initial deployment where a single clearing account handles all operations.
 	account := resp.Facilities[0]
 	return account.AccountId, nil
 }
