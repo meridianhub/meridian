@@ -494,14 +494,14 @@ func (s *Service) GetBalance(ctx context.Context, req *pb.GetBalanceRequest) (*p
 	ibaobservability.RecordBalanceQueryDuration(operationStatusSuccess, pkDuration)
 
 	// Find the current balance from the response.
-	// LastUpdated reflects the timestamp from Position Keeping when the balance was calculated.
+	// AsOf reflects the timestamp from Position Keeping when the balance was calculated.
 	var currentBalanceResp *pb.GetBalanceResponse
 	for _, entry := range balanceResp.GetBalances() {
 		if entry.GetBalanceType() == positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT {
 			currentBalanceResp = &pb.GetBalanceResponse{
-				AccountId:   req.AccountId,
-				Balance:     entry.GetAmount(),
-				LastUpdated: balanceResp.GetAsOf(), // Use Position Keeping's as_of timestamp
+				AccountId:      req.AccountId,
+				CurrentBalance: entry.GetAmount(),
+				AsOf:           balanceResp.GetAsOf(), // Use Position Keeping's as_of timestamp
 			}
 			break
 		}
@@ -510,9 +510,9 @@ func (s *Service) GetBalance(ctx context.Context, req *pb.GetBalanceRequest) (*p
 	if currentBalanceResp == nil {
 		// No current balance found - return zero balance with current time
 		return &pb.GetBalanceResponse{
-			AccountId:   req.AccountId,
-			Balance:     nil,
-			LastUpdated: timestamppb.Now(),
+			AccountId:      req.AccountId,
+			CurrentBalance: nil,
+			AsOf:           timestamppb.Now(),
 		}, nil
 	}
 

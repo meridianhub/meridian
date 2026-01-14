@@ -427,10 +427,10 @@ func TestGetBalance_Success(t *testing.T) {
 		AccountId: createResp.Facility.AccountCode,
 	})
 	require.NoError(t, err)
-	assert.NotNil(t, balanceResp.Balance)
-	assert.Equal(t, "USD", balanceResp.Balance.InstrumentCode)
-	assert.Equal(t, "1000.00", balanceResp.Balance.Amount)
-	assert.NotNil(t, balanceResp.LastUpdated)
+	assert.NotNil(t, balanceResp.CurrentBalance)
+	assert.Equal(t, "USD", balanceResp.CurrentBalance.InstrumentCode)
+	assert.Equal(t, "1000.00", balanceResp.CurrentBalance.Amount)
+	assert.NotNil(t, balanceResp.AsOf)
 }
 
 func TestGetBalance_AccountSuspended(t *testing.T) {
