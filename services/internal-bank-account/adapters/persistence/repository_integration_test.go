@@ -1,0 +1,1115 @@
+//go:build integration
+
+// Package persistence provides integration tests for the internal bank account repository.
+// These tests use testcontainers to run against a real PostgreSQL database.
+package persistence
+
+import (
+	"context"
+	"fmt"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/meridianhub/meridian/services/internal-bank-account/domain"
+	"github.com/meridianhub/meridian/shared/platform/auth"
+	"github.com/meridianhub/meridian/shared/platform/await"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/modules/postgres"
+	"github.com/testcontainers/testcontainers-go/wait"
+	gormpg "gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
+)
+
+// testContainer holds the test database container, connection pool, and repository.
+type testContainer struct {
+	container *postgres.PostgresContainer
+	pool      *pgxpool.Pool
+	db        *gorm.DB
+	repo      *Repository
+}
+
+// setupIntegrationTestContainer creates a PostgreSQL testcontainer with the schema loaded.
+// This function:
+//   - Creates an isolated PostgreSQL 16 container
+//   - Waits for the database to be ready (up to 30s)
+//   - Creates a GORM connection
+//   - Loads the internal_bank_account schema
+//   - Creates a Repository instance
+func setupIntegrationTestContainer(t *testing.T) *testContainer {
+	t.Helper()
+
+	ctx := context.Background()
+
+	// Create PostgreSQL container with explicit wait strategy
+	pgContainer, err := postgres.Run(ctx,
+		"postgres:16-alpine",
+		postgres.WithDatabase("test_internal_bank_account"),
+		postgres.WithUsername("test"),
+		postgres.WithPassword("test"),
+		testcontainers.WithWaitStrategy(
+			wait.ForAll(
+				wait.ForLog("database system is ready to accept connections").WithOccurrence(2),
+				wait.ForListeningPort("5432/tcp"),
+			).WithDeadline(30*time.Second)),
+	)
+	require.NoError(t, err, "Failed to start PostgreSQL container")
+
+	// Get connection string
+	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
+	require.NoError(t, err, "Failed to get connection string")
+
+	// Create pgx pool for direct queries
+	poolConfig, err := pgxpool.ParseConfig(connStr)
+	require.NoError(t, err, "Failed to parse pool config")
+
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
+	require.NoError(t, err, "Failed to create connection pool")
+
+	// Create GORM connection
+	db, err := gorm.Open(gormpg.Open(connStr), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	require.NoError(t, err, "Failed to connect to database with GORM")
+
+	// Load schema
+	loadInternalBankAccountSchema(t, pool)
+
+	// Create repository
+	repo := NewRepository(db)
+
+	return &testContainer{
+		container: pgContainer,
+		pool:      pool,
+		db:        db,
+		repo:      repo,
+	}
+}
+
+// cleanup closes the pool and terminates the container.
+func (tc *testContainer) cleanup(t *testing.T) {
+	t.Helper()
+	ctx := context.Background()
+
+	if tc.pool != nil {
+		tc.pool.Close()
+	}
+
+	sqlDB, _ := tc.db.DB()
+	if sqlDB != nil {
+		_ = sqlDB.Close()
+	}
+
+	if tc.container != nil {
+		require.NoError(t, tc.container.Terminate(ctx), "Failed to terminate container")
+	}
+}
+
+const defaultTestTenantID = tenant.TenantID("test_tenant")
+
+// loadInternalBankAccountSchema loads the complete internal_bank_account schema in the tenant schema.
+func loadInternalBankAccountSchema(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	ctx := context.Background()
+
+	// Create tenant schema
+	schemaName := defaultTestTenantID.SchemaName()
+	_, err := pool.Exec(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName))
+	require.NoError(t, err, "Failed to create tenant schema")
+
+	// Create internal_bank_account table in tenant schema (matches migration 20260112000001_initial.sql)
+	_, err = pool.Exec(ctx, fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS %q.internal_bank_account (`, schemaName)+`
+			id uuid NOT NULL DEFAULT gen_random_uuid(),
+			created_at timestamptz NOT NULL DEFAULT now(),
+			created_by character varying(100) NOT NULL,
+			updated_at timestamptz NOT NULL DEFAULT now(),
+			updated_by character varying(100) NOT NULL,
+			deleted_at timestamptz NULL,
+			account_id character varying(100) NOT NULL,
+			account_code character varying(50) NOT NULL,
+			name character varying(255) NOT NULL,
+			account_type character varying(20) NOT NULL,
+			instrument_code character varying(32) NOT NULL,
+			dimension character varying(20) NOT NULL,
+			status character varying(20) NOT NULL DEFAULT 'ACTIVE',
+			correspondent_bank_id character varying(50) NULL,
+			correspondent_bank_name character varying(255) NULL,
+			correspondent_external_ref character varying(100) NULL,
+			attributes jsonb NOT NULL DEFAULT '{}',
+			version bigint NOT NULL DEFAULT 1,
+			PRIMARY KEY (id),
+			CONSTRAINT chk_account_type CHECK (account_type IN (
+				'CLEARING', 'NOSTRO', 'VOSTRO', 'HOLDING',
+				'SUSPENSE', 'REVENUE', 'EXPENSE', 'INVENTORY'
+			)),
+			CONSTRAINT chk_dimension CHECK (dimension IN (
+				'CURRENCY', 'ENERGY', 'MASS', 'VOLUME', 'TIME',
+				'COMPUTE', 'CARBON', 'DATA', 'COUNT'
+			)),
+			CONSTRAINT chk_status CHECK (status IN (
+				'ACTIVE', 'SUSPENDED', 'CLOSED'
+			))
+		)
+	`)
+	require.NoError(t, err, "Failed to create internal_bank_account table")
+
+	// Create unique constraint on account_id
+	_, err = pool.Exec(ctx, fmt.Sprintf(`
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_internal_bank_account_account_id ON %q.internal_bank_account (account_id)
+	`, schemaName))
+	require.NoError(t, err, "Failed to create account_id unique index")
+
+	// Create indexes for query optimization
+	_, err = pool.Exec(ctx, fmt.Sprintf(`
+		CREATE INDEX IF NOT EXISTS idx_internal_bank_account_type ON %q.internal_bank_account (account_type);
+		CREATE INDEX IF NOT EXISTS idx_internal_bank_account_instrument ON %q.internal_bank_account (instrument_code);
+		CREATE INDEX IF NOT EXISTS idx_internal_bank_account_status ON %q.internal_bank_account (status);
+		CREATE INDEX IF NOT EXISTS idx_internal_bank_account_code ON %q.internal_bank_account (account_code);
+		CREATE INDEX IF NOT EXISTS idx_internal_bank_account_deleted_at ON %q.internal_bank_account (deleted_at)
+	`, schemaName, schemaName, schemaName, schemaName, schemaName))
+	require.NoError(t, err, "Failed to create indexes")
+
+	// Create status history table in tenant schema
+	_, err = pool.Exec(ctx, fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS %q.internal_bank_account_status_history (
+			id uuid NOT NULL DEFAULT gen_random_uuid(),
+			account_id character varying(100) NOT NULL,
+			from_status character varying(20) NOT NULL,
+			to_status character varying(20) NOT NULL,
+			reason text NULL,
+			changed_by character varying(100) NOT NULL,
+			changed_at timestamptz NOT NULL DEFAULT now(),
+			PRIMARY KEY (id),
+			CONSTRAINT chk_from_status CHECK (from_status IN ('ACTIVE', 'SUSPENDED', 'CLOSED')),
+			CONSTRAINT chk_to_status CHECK (to_status IN ('ACTIVE', 'SUSPENDED', 'CLOSED')),
+			CONSTRAINT fk_status_history_account FOREIGN KEY (account_id)
+				REFERENCES %q.internal_bank_account (account_id)
+				ON UPDATE NO ACTION ON DELETE RESTRICT
+		)
+	`, schemaName, schemaName))
+	require.NoError(t, err, "Failed to create status_history table")
+
+	// Create status history indexes
+	_, err = pool.Exec(ctx, fmt.Sprintf(`
+		CREATE INDEX IF NOT EXISTS idx_status_history_account_changed
+			ON %q.internal_bank_account_status_history (account_id, changed_at DESC);
+		CREATE INDEX IF NOT EXISTS idx_status_history_changed_at
+			ON %q.internal_bank_account_status_history (changed_at)
+	`, schemaName, schemaName))
+	require.NoError(t, err, "Failed to create status history indexes")
+}
+
+// createTestContext creates a context with tenant and audit user information for tests.
+func createTestContext() context.Context {
+	ctx := context.Background()
+	ctx = tenant.WithTenant(ctx, defaultTestTenantID)
+	return context.WithValue(ctx, auth.UserIDContextKey, "test-user")
+}
+
+// createTestAccountIntegration creates a test account for integration tests.
+func createTestAccountIntegration(t *testing.T, accountID, accountCode, name string, accountType domain.AccountType) domain.InternalBankAccount {
+	t.Helper()
+	account, err := domain.NewInternalBankAccount(
+		accountID,
+		accountCode,
+		name,
+		accountType,
+		"GBP",
+		"CURRENCY",
+	)
+	require.NoError(t, err)
+	return account
+}
+
+// TestIntegration_SaveNewAccount tests creating a new account and verifying persistence.
+func TestIntegration_SaveNewAccount(t *testing.T) {
+	tc := setupIntegrationTestContainer(t)
+	defer tc.cleanup(t)
+
+	ctx := createTestContext()
+	account := createTestAccountIntegration(t, "IBA-INT-001", "GBP_CLEARING", "GBP Clearing Account", domain.AccountTypeClearing)
+
+	// Save new account
+	err := tc.repo.Save(ctx, account)
+	require.NoError(t, err)
+
+	// Verify account was persisted
+	retrieved, err := tc.repo.FindByID(ctx, account.ID())
+	require.NoError(t, err)
+
+	assert.Equal(t, account.AccountID(), retrieved.AccountID())
+	assert.Equal(t, account.AccountCode(), retrieved.AccountCode())
+	assert.Equal(t, account.Name(), retrieved.Name())
+	assert.Equal(t, domain.AccountStatusActive, retrieved.Status())
+	assert.Equal(t, int64(1), retrieved.Version())
+}
+
+// TestIntegration_FindByID tests retrieving an account by its UUID.
+func TestIntegration_FindByID(t *testing.T) {
+	tc := setupIntegrationTestContainer(t)
+	defer tc.cleanup(t)
+
+	ctx := createTestContext()
+	account := createTestAccountIntegration(t, "IBA-INT-002", "EUR_CLEARING", "EUR Clearing Account", domain.AccountTypeClearing)
+
+	err := tc.repo.Save(ctx, account)
+	require.NoError(t, err)
+
+	// Find by UUID
+	found, err := tc.repo.FindByID(ctx, account.ID())
+	require.NoError(t, err)
+	assert.Equal(t, account.AccountID(), found.AccountID())
+
+	// Test not found
+	_, err = tc.repo.FindByID(ctx, uuid.New())
+	assert.ErrorIs(t, err, ErrAccountNotFound)
+}
+
+// TestIntegration_FindByCode tests retrieving an account by its unique code.
+func TestIntegration_FindByCode(t *testing.T) {
+	tc := setupIntegrationTestContainer(t)
+	defer tc.cleanup(t)
+
+	ctx := createTestContext()
+	account := createTestAccountIntegration(t, "IBA-INT-003", "USD_CLEARING", "USD Clearing Account", domain.AccountTypeClearing)
+
+	err := tc.repo.Save(ctx, account)
+	require.NoError(t, err)
+
+	// Find by code
+	found, err := tc.repo.FindByCode(ctx, "USD_CLEARING")
+	require.NoError(t, err)
+	assert.Equal(t, account.AccountID(), found.AccountID())
+
+	// Test not found
+	_, err = tc.repo.FindByCode(ctx, "NONEXISTENT")
+	assert.ErrorIs(t, err, ErrAccountNotFound)
+}
+
+// TestIntegration_ListWithFilters tests querying accounts with type/instrument/status filters.
+func TestIntegration_ListWithFilters(t *testing.T) {
+	tc := setupIntegrationTestContainer(t)
+	defer tc.cleanup(t)
+
+	ctx := createTestContext()
+
+	// Create accounts of different types
+	clearing := createTestAccountIntegration(t, "IBA-INT-010", "GBP_CLR", "GBP Clearing", domain.AccountTypeClearing)
+	holding := createTestAccountIntegration(t, "IBA-INT-011", "GBP_HOLD", "GBP Holding", domain.AccountTypeHolding)
+	suspense := createTestAccountIntegration(t, "IBA-INT-012", "GBP_SUSP", "GBP Suspense", domain.AccountTypeSuspense)
+
+	require.NoError(t, tc.repo.Save(ctx, clearing))
+	require.NoError(t, tc.repo.Save(ctx, holding))
+	require.NoError(t, tc.repo.Save(ctx, suspense))
+
+	// Filter by account type
+	clearingType := domain.AccountTypeClearing
+	filter := domain.ListFilter{AccountType: &clearingType}
+	results, err := tc.repo.List(ctx, filter)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "GBP_CLR", results[0].AccountCode())
+
+	// Filter by instrument code
+	instrumentCode := "GBP"
+	filter = domain.ListFilter{InstrumentCode: &instrumentCode}
+	results, err = tc.repo.List(ctx, filter)
+	require.NoError(t, err)
+	assert.Len(t, results, 3)
+
+	// Filter by status
+	activeStatus := domain.AccountStatusActive
+	filter = domain.ListFilter{Status: &activeStatus}
+	results, err = tc.repo.List(ctx, filter)
+	require.NoError(t, err)
+	assert.Len(t, results, 3)
+
+	// Test pagination
+	filter = domain.ListFilter{Limit: 2, Offset: 0}
+	results, err = tc.repo.List(ctx, filter)
+	require.NoError(t, err)
+	assert.Len(t, results, 2)
+
+	filter = domain.ListFilter{Limit: 2, Offset: 2}
+	results, err = tc.repo.List(ctx, filter)
+	require.NoError(t, err)
+	assert.Len(t, results, 1)
+}
+
+// TestIntegration_OptimisticLocking tests that concurrent updates trigger version conflicts.
+func TestIntegration_OptimisticLocking(t *testing.T) {
+	tc := setupIntegrationTestContainer(t)
+	defer tc.cleanup(t)
+
+	ctx := createTestContext()
+	account := createTestAccountIntegration(t, "IBA-INT-020", "LOCK_TEST", "Lock Test Account", domain.AccountTypeClearing)
+
+	// Save initial
+	err := tc.repo.Save(ctx, account)
+	require.NoError(t, err)
+
+	// Retrieve two copies
+	retrieved1, err := tc.repo.FindByID(ctx, account.ID())
+	require.NoError(t, err)
+
+	retrieved2, err := tc.repo.FindByID(ctx, account.ID())
+	require.NoError(t, err)
+
+	// Modify and save first copy (increments version to 2)
+	suspended1, err := retrieved1.Suspend("First update")
+	require.NoError(t, err)
+	err = tc.repo.Save(ctx, suspended1)
+	require.NoError(t, err)
+
+	// Try to modify and save second copy (still has version 1)
+	// This should fail due to optimistic locking
+	suspended2, err := retrieved2.Suspend("Concurrent update")
+	require.NoError(t, err)
+	err = tc.repo.Save(ctx, suspended2)
+	assert.ErrorIs(t, err, ErrVersionConflict)
+}
+
+// TestIntegration_OptimisticLocking_Concurrent tests concurrent access with goroutines.
+func TestIntegration_OptimisticLocking_Concurrent(t *testing.T) {
+	tc := setupIntegrationTestContainer(t)
+	defer tc.cleanup(t)
+
+	ctx := createTestContext()
+	account := createTestAccountIntegration(t, "IBA-INT-021", "CONCURRENT_TEST", "Concurrent Test", domain.AccountTypeClearing)
+
+	err := tc.repo.Save(ctx, account)
+	require.NoError(t, err)
+
+	const numGoroutines = 5
+	var wg sync.WaitGroup
+	var successCount, conflictCount int
+	var mu sync.Mutex
+
+	// Launch concurrent updates
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+
+			// Read account
+			acc, err := tc.repo.FindByID(ctx, account.ID())
+			if err != nil {
+				return
+			}
+
+			// Small delay to increase contention
+			time.Sleep(10 * time.Millisecond)
+
+			// Try to update
+			renamed, err := acc.Rename(fmt.Sprintf("Updated by goroutine %d", idx))
+			if err != nil {
+				return
+			}
+
+			err = tc.repo.Save(ctx, renamed)
+
+			mu.Lock()
+			if err == nil {
+				successCount++
+			} else if err == ErrVersionConflict {
+				conflictCount++
+			}
+			mu.Unlock()
+		}(i)
+	}
+
+	wg.Wait()
+
+	// Exactly one should succeed, rest should fail with version conflict
+	assert.Equal(t, 1, successCount, "Exactly one goroutine should succeed")
+	assert.Equal(t, numGoroutines-1, conflictCount, "Rest should fail with version conflict")
+}
+
+// TestIntegration_UpdateAccount tests modifying account metadata and settings.
+func TestIntegration_UpdateAccount(t *testing.T) {
+	tc := setupIntegrationTestContainer(t)
+	defer tc.cleanup(t)
+
+	ctx := createTestContext()
+	account := createTestAccountIntegration(t, "IBA-INT-030", "UPDATE_TEST", "Update Test Account", domain.AccountTypeClearing)
+
+	err := tc.repo.Save(ctx, account)
+	require.NoError(t, err)
+
+	// Retrieve and update
+	retrieved, err := tc.repo.FindByID(ctx, account.ID())
+	require.NoError(t, err)
+
+	// Rename
+	renamed, err := retrieved.Rename("Updated Account Name")
+	require.NoError(t, err)
+	err = tc.repo.Save(ctx, renamed)
+	require.NoError(t, err)
+
+	// Verify update
+	updated, err := tc.repo.FindByID(ctx, account.ID())
+	require.NoError(t, err)
+	assert.Equal(t, "Updated Account Name", updated.Name())
+	assert.Equal(t, int64(2), updated.Version())
+}
+
+// TestIntegration_StatusHistory tests that status_history audit table records transitions.
+func TestIntegration_StatusHistory(t *testing.T) {
+	tc := setupIntegrationTestContainer(t)
+	defer tc.cleanup(t)
+
+	ctx := createTestContext()
+	account := createTestAccountIntegration(t, "IBA-INT-040", "STATUS_HIST", "Status History Test", domain.AccountTypeClearing)
+
+	// Save account
+	err := tc.repo.Save(ctx, account)
+	require.NoError(t, err)
+
+	// Record status change
+	err = tc.repo.RecordStatusChange(ctx, account.AccountID(), "ACTIVE", "SUSPENDED", "Test suspension")
+	require.NoError(t, err)
+
+	// Verify using direct query with schema-qualified table name
+	schemaName := defaultTestTenantID.SchemaName()
+	var count int64
+	err = tc.db.Raw(fmt.Sprintf(`SELECT COUNT(*) FROM %q.internal_bank_account_status_history WHERE account_id = ?`, schemaName), account.AccountID()).Scan(&count).Error
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), count)
+
+	// Record another status change
+	err = tc.repo.RecordStatusChange(ctx, account.AccountID(), "SUSPENDED", "ACTIVE", "Reactivation")
+	require.NoError(t, err)
+
+	err = tc.db.Raw(fmt.Sprintf(`SELECT COUNT(*) FROM %q.internal_bank_account_status_history WHERE account_id = ?`, schemaName), account.AccountID()).Scan(&count).Error
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), count)
+
+	// Verify order (most recent first) using raw query
+	type historyRow struct {
+		ToStatus string
+	}
+	var history []historyRow
+	err = tc.db.Raw(fmt.Sprintf(`SELECT to_status FROM %q.internal_bank_account_status_history WHERE account_id = ? ORDER BY changed_at DESC`, schemaName), account.AccountID()).Scan(&history).Error
+	require.NoError(t, err)
+	require.Len(t, history, 2)
+	assert.Equal(t, "ACTIVE", history[0].ToStatus)
+	assert.Equal(t, "SUSPENDED", history[1].ToStatus)
+}
+
+// TestIntegration_CorrespondentDetails tests persistence of correspondent bank details.
+func TestIntegration_CorrespondentDetails(t *testing.T) {
+	tc := setupIntegrationTestContainer(t)
+	defer tc.cleanup(t)
+
+	ctx := createTestContext()
+
+	// Create a NOSTRO account
+	nostro, err := domain.NewInternalBankAccount(
+		"IBA-INT-050",
+		"USD_NOSTRO_CITI",
+		"USD NOSTRO at Citibank",
+		domain.AccountTypeNostro,
+		"USD",
+		"CURRENCY",
+	)
+	require.NoError(t, err)
+
+	// Add correspondent details
+	correspondent, err := domain.NewCorrespondentDetails("CITI001", "Citibank NA", "12345678")
+	require.NoError(t, err)
+	nostro, err = nostro.UpdateCorrespondent(correspondent)
+	require.NoError(t, err)
+
+	// Save
+	err = tc.repo.Save(ctx, nostro)
+	require.NoError(t, err)
+
+	// Retrieve and verify correspondent details
+	retrieved, err := tc.repo.FindByID(ctx, nostro.ID())
+	require.NoError(t, err)
+
+	require.NotNil(t, retrieved.Correspondent())
+	assert.Equal(t, "CITI001", retrieved.Correspondent().BankID())
+	assert.Equal(t, "Citibank NA", retrieved.Correspondent().BankName())
+	assert.Equal(t, "12345678", retrieved.Correspondent().ExternalAccountRef())
+}
+
+// TestIntegration_JSONBAttributes tests persistence and retrieval of JSONB attributes.
+func TestIntegration_JSONBAttributes(t *testing.T) {
+	tc := setupIntegrationTestContainer(t)
+	defer tc.cleanup(t)
+
+	ctx := createTestContext()
+
+	// Create account with custom attributes using the builder
+	account := domain.NewInternalBankAccountBuilder().
+		WithID(uuid.New()).
+		WithAccountID("IBA-INT-060").
+		WithAccountCode("GBP_SPECIAL").
+		WithName("GBP Special Account").
+		WithAccountType(domain.AccountTypeClearing).
+		WithInstrumentCode("GBP").
+		WithDimension("CURRENCY").
+		WithStatus(domain.AccountStatusActive).
+		WithAttributes(map[string]string{
+			"cost_center": "CC001",
+			"department":  "Treasury",
+			"region":      "EMEA",
+		}).
+		WithVersion(1).
+		Build()
+
+	err := tc.repo.Save(ctx, account)
+	require.NoError(t, err)
+
+	// Retrieve and verify attributes
+	retrieved, err := tc.repo.FindByID(ctx, account.ID())
+	require.NoError(t, err)
+
+	attrs := retrieved.Attributes()
+	require.NotNil(t, attrs)
+	assert.Equal(t, "CC001", attrs["cost_center"])
+	assert.Equal(t, "Treasury", attrs["department"])
+	assert.Equal(t, "EMEA", attrs["region"])
+}
+
+// TestIntegration_SoftDelete tests soft deletion of accounts.
+func TestIntegration_SoftDelete(t *testing.T) {
+	tc := setupIntegrationTestContainer(t)
+	defer tc.cleanup(t)
+
+	ctx := createTestContext()
+	account := createTestAccountIntegration(t, "IBA-INT-070", "DELETE_TEST", "Delete Test Account", domain.AccountTypeClearing)
+
+	err := tc.repo.Save(ctx, account)
+	require.NoError(t, err)
+
+	// Delete
+	err = tc.repo.Delete(ctx, account.ID())
+	require.NoError(t, err)
+
+	// Should not be found after delete
+	_, err = tc.repo.FindByID(ctx, account.ID())
+	assert.ErrorIs(t, err, ErrAccountNotFound)
+
+	// Should not appear in list
+	results, err := tc.repo.List(ctx, domain.ListFilter{})
+	require.NoError(t, err)
+	assert.Len(t, results, 0)
+
+	// Verify deleted_at is set in database using raw query with schema-qualified table
+	schemaName := defaultTestTenantID.SchemaName()
+	var deletedAt *time.Time
+	err = tc.db.Raw(fmt.Sprintf(`SELECT deleted_at FROM %q.internal_bank_account WHERE id = ?`, schemaName), account.ID()).Scan(&deletedAt).Error
+	require.NoError(t, err)
+	assert.NotNil(t, deletedAt)
+}
+
+// TestIntegration_Delete_NotFound tests deleting a non-existent account.
+func TestIntegration_Delete_NotFound(t *testing.T) {
+	tc := setupIntegrationTestContainer(t)
+	defer tc.cleanup(t)
+
+	ctx := createTestContext()
+
+	err := tc.repo.Delete(ctx, uuid.New())
+	assert.ErrorIs(t, err, ErrAccountNotFound)
+}
+
+// TestIntegration_ExistsByCode tests checking account existence by code.
+func TestIntegration_ExistsByCode(t *testing.T) {
+	tc := setupIntegrationTestContainer(t)
+	defer tc.cleanup(t)
+
+	ctx := createTestContext()
+	account := createTestAccountIntegration(t, "IBA-INT-080", "EXISTS_TEST", "Exists Test Account", domain.AccountTypeClearing)
+
+	// Should not exist before save
+	exists, err := tc.repo.ExistsByCode(ctx, "EXISTS_TEST")
+	require.NoError(t, err)
+	assert.False(t, exists)
+
+	// Save
+	err = tc.repo.Save(ctx, account)
+	require.NoError(t, err)
+
+	// Should exist after save
+	exists, err = tc.repo.ExistsByCode(ctx, "EXISTS_TEST")
+	require.NoError(t, err)
+	assert.True(t, exists)
+}
+
+// TestIntegration_DuplicateCode tests that duplicate account codes are rejected.
+func TestIntegration_DuplicateCode(t *testing.T) {
+	tc := setupIntegrationTestContainer(t)
+	defer tc.cleanup(t)
+
+	ctx := createTestContext()
+	account1 := createTestAccountIntegration(t, "IBA-INT-090", "DUP_CODE", "First Account", domain.AccountTypeClearing)
+
+	err := tc.repo.Save(ctx, account1)
+	require.NoError(t, err)
+
+	// Try to create another account with duplicate account_id
+	account2 := createTestAccountIntegration(t, "IBA-INT-090", "DUP_CODE_2", "Second Account", domain.AccountTypeClearing)
+
+	err = tc.repo.Save(ctx, account2)
+	assert.Error(t, err) // Should fail due to unique constraint on account_id
+}
+
+// TestIntegration_Ping tests database connectivity check.
+func TestIntegration_Ping(t *testing.T) {
+	tc := setupIntegrationTestContainer(t)
+	defer tc.cleanup(t)
+
+	err := tc.repo.Ping()
+	require.NoError(t, err)
+}
+
+// TestIntegration_FindByIDForUpdate tests pessimistic locking.
+func TestIntegration_FindByIDForUpdate(t *testing.T) {
+	tc := setupIntegrationTestContainer(t)
+	defer tc.cleanup(t)
+
+	ctx := createTestContext()
+	account := createTestAccountIntegration(t, "IBA-INT-100", "LOCK_FOR_UPDATE", "Lock For Update Test", domain.AccountTypeClearing)
+
+	err := tc.repo.Save(ctx, account)
+	require.NoError(t, err)
+
+	// Test FindByIDForUpdate works
+	found, err := tc.repo.FindByIDForUpdate(ctx, account.ID())
+	require.NoError(t, err)
+	assert.Equal(t, account.AccountID(), found.AccountID())
+
+	// Test not found
+	_, err = tc.repo.FindByIDForUpdate(ctx, uuid.New())
+	assert.ErrorIs(t, err, ErrAccountNotFound)
+}
+
+// TestIntegration_AwaitPattern demonstrates using await package instead of time.Sleep.
+func TestIntegration_AwaitPattern(t *testing.T) {
+	tc := setupIntegrationTestContainer(t)
+	defer tc.cleanup(t)
+
+	ctx := createTestContext()
+	account := createTestAccountIntegration(t, "IBA-INT-110", "AWAIT_TEST", "Await Test Account", domain.AccountTypeClearing)
+
+	// Save account in goroutine with small delay
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		_ = tc.repo.Save(ctx, account)
+	}()
+
+	// Use await to poll for account existence instead of time.Sleep
+	err := await.New().
+		AtMost(5 * time.Second).
+		PollInterval(50 * time.Millisecond).
+		UntilNoError(func() error {
+			_, findErr := tc.repo.FindByID(ctx, account.ID())
+			return findErr
+		})
+
+	require.NoError(t, err, "Account should be found after async save")
+
+	// Verify account exists
+	found, err := tc.repo.FindByID(ctx, account.ID())
+	require.NoError(t, err)
+	assert.Equal(t, account.AccountID(), found.AccountID())
+}
+
+// ============================================================================
+// Multi-Tenant Isolation Tests
+// ============================================================================
+
+// setupMultiTenantContainer creates a PostgreSQL testcontainer with multiple tenant schemas.
+func setupMultiTenantContainer(t *testing.T, tenants ...tenant.TenantID) *testContainer {
+	t.Helper()
+
+	ctx := context.Background()
+
+	// Create PostgreSQL container
+	pgContainer, err := postgres.Run(ctx,
+		"postgres:16-alpine",
+		postgres.WithDatabase("test_multitenant"),
+		postgres.WithUsername("test"),
+		postgres.WithPassword("test"),
+		testcontainers.WithWaitStrategy(
+			wait.ForAll(
+				wait.ForLog("database system is ready to accept connections").WithOccurrence(2),
+				wait.ForListeningPort("5432/tcp"),
+			).WithDeadline(30*time.Second)),
+	)
+	require.NoError(t, err, "Failed to start PostgreSQL container")
+
+	// Get connection string
+	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
+	require.NoError(t, err, "Failed to get connection string")
+
+	// Create pgx pool
+	poolConfig, err := pgxpool.ParseConfig(connStr)
+	require.NoError(t, err, "Failed to parse pool config")
+
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
+	require.NoError(t, err, "Failed to create connection pool")
+
+	// Create GORM connection
+	db, err := gorm.Open(gormpg.Open(connStr), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	require.NoError(t, err, "Failed to connect to database with GORM")
+
+	// Create schema for each tenant
+	for _, tenantID := range tenants {
+		schemaName := tenantID.SchemaName()
+
+		_, err := pool.Exec(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName))
+		require.NoError(t, err, "Failed to create schema for tenant %s", tenantID)
+
+		// Create internal_bank_account table in tenant schema
+		_, err = pool.Exec(ctx, fmt.Sprintf(`
+			CREATE TABLE IF NOT EXISTS %q.internal_bank_account (
+				id uuid NOT NULL DEFAULT gen_random_uuid(),
+				created_at timestamptz NOT NULL DEFAULT now(),
+				created_by character varying(100) NOT NULL,
+				updated_at timestamptz NOT NULL DEFAULT now(),
+				updated_by character varying(100) NOT NULL,
+				deleted_at timestamptz NULL,
+				account_id character varying(100) NOT NULL,
+				account_code character varying(50) NOT NULL,
+				name character varying(255) NOT NULL,
+				account_type character varying(20) NOT NULL,
+				instrument_code character varying(32) NOT NULL,
+				dimension character varying(20) NOT NULL,
+				status character varying(20) NOT NULL DEFAULT 'ACTIVE',
+				correspondent_bank_id character varying(50) NULL,
+				correspondent_bank_name character varying(255) NULL,
+				correspondent_external_ref character varying(100) NULL,
+				attributes jsonb NOT NULL DEFAULT '{}',
+				version bigint NOT NULL DEFAULT 1,
+				PRIMARY KEY (id)
+			)
+		`, schemaName))
+		require.NoError(t, err, "Failed to create table for tenant %s", tenantID)
+
+		// Create unique index on account_id
+		_, err = pool.Exec(ctx, fmt.Sprintf(
+			`CREATE UNIQUE INDEX IF NOT EXISTS idx_%s_account_id ON %q.internal_bank_account (account_id)`,
+			string(tenantID), schemaName))
+		require.NoError(t, err, "Failed to create account_id index for tenant %s", tenantID)
+
+		// Create status_history table
+		_, err = pool.Exec(ctx, fmt.Sprintf(`
+			CREATE TABLE IF NOT EXISTS %q.internal_bank_account_status_history (
+				id uuid NOT NULL DEFAULT gen_random_uuid(),
+				account_id character varying(100) NOT NULL,
+				from_status character varying(20) NOT NULL,
+				to_status character varying(20) NOT NULL,
+				reason text NULL,
+				changed_by character varying(100) NOT NULL,
+				changed_at timestamptz NOT NULL DEFAULT now(),
+				PRIMARY KEY (id),
+				CONSTRAINT fk_status_history_account_%s FOREIGN KEY (account_id)
+					REFERENCES %q.internal_bank_account (account_id)
+					ON UPDATE NO ACTION ON DELETE RESTRICT
+			)
+		`, schemaName, string(tenantID), schemaName))
+		require.NoError(t, err, "Failed to create status_history table for tenant %s", tenantID)
+	}
+
+	repo := NewRepository(db)
+
+	return &testContainer{
+		container: pgContainer,
+		pool:      pool,
+		db:        db,
+		repo:      repo,
+	}
+}
+
+// createTenantContext creates a context with tenant and audit user information.
+func createTenantContext(tenantID tenant.TenantID) context.Context {
+	ctx := context.Background()
+	ctx = tenant.WithTenant(ctx, tenantID)
+	ctx = context.WithValue(ctx, auth.UserIDContextKey, "test-user")
+	return ctx
+}
+
+// TestIntegration_MultiTenant_Isolation tests that tenant A cannot see tenant B's data.
+func TestIntegration_MultiTenant_Isolation(t *testing.T) {
+	tenantA := tenant.TenantID("tenant_a")
+	tenantB := tenant.TenantID("tenant_b")
+
+	tc := setupMultiTenantContainer(t, tenantA, tenantB)
+	defer tc.cleanup(t)
+
+	// Create context for each tenant
+	ctxTenantA := createTenantContext(tenantA)
+	ctxTenantB := createTenantContext(tenantB)
+
+	// Create account for tenant A
+	accountA := createTestAccountIntegration(t, "IBA-TENANT-A", "TENANT_A_ACC", "Tenant A Account", domain.AccountTypeClearing)
+	err := tc.repo.Save(ctxTenantA, accountA)
+	require.NoError(t, err)
+
+	// Create account for tenant B
+	accountB := createTestAccountIntegration(t, "IBA-TENANT-B", "TENANT_B_ACC", "Tenant B Account", domain.AccountTypeClearing)
+	err = tc.repo.Save(ctxTenantB, accountB)
+	require.NoError(t, err)
+
+	// Tenant A should not see tenant B's account
+	_, err = tc.repo.FindByID(ctxTenantA, accountB.ID())
+	assert.ErrorIs(t, err, ErrAccountNotFound, "Tenant A should not see tenant B's account by ID")
+
+	_, err = tc.repo.FindByCode(ctxTenantA, "TENANT_B_ACC")
+	assert.ErrorIs(t, err, ErrAccountNotFound, "Tenant A should not see tenant B's account by code")
+
+	// Tenant B should not see tenant A's account
+	_, err = tc.repo.FindByID(ctxTenantB, accountA.ID())
+	assert.ErrorIs(t, err, ErrAccountNotFound, "Tenant B should not see tenant A's account by ID")
+
+	_, err = tc.repo.FindByCode(ctxTenantB, "TENANT_A_ACC")
+	assert.ErrorIs(t, err, ErrAccountNotFound, "Tenant B should not see tenant A's account by code")
+}
+
+// TestIntegration_MultiTenant_ListIsolation tests that List() only returns current tenant's data.
+func TestIntegration_MultiTenant_ListIsolation(t *testing.T) {
+	tenantA := tenant.TenantID("tenant_a")
+	tenantB := tenant.TenantID("tenant_b")
+
+	tc := setupMultiTenantContainer(t, tenantA, tenantB)
+	defer tc.cleanup(t)
+
+	ctxTenantA := createTenantContext(tenantA)
+	ctxTenantB := createTenantContext(tenantB)
+
+	// Create 3 accounts for tenant A
+	for i := 1; i <= 3; i++ {
+		account := createTestAccountIntegration(t,
+			fmt.Sprintf("IBA-A-%d", i),
+			fmt.Sprintf("A_ACC_%d", i),
+			fmt.Sprintf("Tenant A Account %d", i),
+			domain.AccountTypeClearing)
+		require.NoError(t, tc.repo.Save(ctxTenantA, account))
+	}
+
+	// Create 2 accounts for tenant B
+	for i := 1; i <= 2; i++ {
+		account := createTestAccountIntegration(t,
+			fmt.Sprintf("IBA-B-%d", i),
+			fmt.Sprintf("B_ACC_%d", i),
+			fmt.Sprintf("Tenant B Account %d", i),
+			domain.AccountTypeClearing)
+		require.NoError(t, tc.repo.Save(ctxTenantB, account))
+	}
+
+	// Tenant A should only see their 3 accounts
+	accountsA, err := tc.repo.List(ctxTenantA, domain.ListFilter{})
+	require.NoError(t, err)
+	assert.Len(t, accountsA, 3)
+	for _, acc := range accountsA {
+		assert.Contains(t, acc.AccountCode(), "A_ACC_")
+	}
+
+	// Tenant B should only see their 2 accounts
+	accountsB, err := tc.repo.List(ctxTenantB, domain.ListFilter{})
+	require.NoError(t, err)
+	assert.Len(t, accountsB, 2)
+	for _, acc := range accountsB {
+		assert.Contains(t, acc.AccountCode(), "B_ACC_")
+	}
+}
+
+// TestIntegration_MultiTenant_UpdateIsolation tests that tenants cannot update each other's accounts.
+func TestIntegration_MultiTenant_UpdateIsolation(t *testing.T) {
+	tenantA := tenant.TenantID("tenant_a")
+	tenantB := tenant.TenantID("tenant_b")
+
+	tc := setupMultiTenantContainer(t, tenantA, tenantB)
+	defer tc.cleanup(t)
+
+	ctxTenantA := createTenantContext(tenantA)
+	ctxTenantB := createTenantContext(tenantB)
+
+	// Create account for tenant A
+	accountA := createTestAccountIntegration(t, "IBA-UPDATE-A", "UPDATE_A_ACC", "Tenant A Account", domain.AccountTypeClearing)
+	err := tc.repo.Save(ctxTenantA, accountA)
+	require.NoError(t, err)
+
+	// Try to retrieve from tenant B context (simulating attempt to modify)
+	// First verify we can't even find it
+	_, err = tc.repo.FindByID(ctxTenantB, accountA.ID())
+	assert.ErrorIs(t, err, ErrAccountNotFound)
+
+	// Even if tenant B has the account object, saving with their context should create a new account
+	// in tenant B's schema, not modify tenant A's account
+	err = tc.repo.Save(ctxTenantB, accountA)
+	require.NoError(t, err)
+
+	// Verify tenant A's account is unchanged
+	retrievedA, err := tc.repo.FindByID(ctxTenantA, accountA.ID())
+	require.NoError(t, err)
+	assert.Equal(t, "Tenant A Account", retrievedA.Name())
+
+	// Tenant B now has a copy in their schema
+	retrievedB, err := tc.repo.FindByID(ctxTenantB, accountA.ID())
+	require.NoError(t, err)
+	assert.Equal(t, "Tenant A Account", retrievedB.Name())
+
+	// Both accounts exist independently
+	listA, _ := tc.repo.List(ctxTenantA, domain.ListFilter{})
+	listB, _ := tc.repo.List(ctxTenantB, domain.ListFilter{})
+	assert.Len(t, listA, 1)
+	assert.Len(t, listB, 1)
+}
+
+// TestIntegration_MultiTenant_DeleteIsolation tests that tenants cannot delete each other's accounts.
+func TestIntegration_MultiTenant_DeleteIsolation(t *testing.T) {
+	tenantA := tenant.TenantID("tenant_a")
+	tenantB := tenant.TenantID("tenant_b")
+
+	tc := setupMultiTenantContainer(t, tenantA, tenantB)
+	defer tc.cleanup(t)
+
+	ctxTenantA := createTenantContext(tenantA)
+	ctxTenantB := createTenantContext(tenantB)
+
+	// Create account for tenant A
+	accountA := createTestAccountIntegration(t, "IBA-DELETE-A", "DELETE_A_ACC", "Tenant A Account", domain.AccountTypeClearing)
+	err := tc.repo.Save(ctxTenantA, accountA)
+	require.NoError(t, err)
+
+	// Tenant B tries to delete tenant A's account - should fail (not found in their schema)
+	err = tc.repo.Delete(ctxTenantB, accountA.ID())
+	assert.ErrorIs(t, err, ErrAccountNotFound)
+
+	// Verify tenant A's account still exists
+	retrievedA, err := tc.repo.FindByID(ctxTenantA, accountA.ID())
+	require.NoError(t, err)
+	assert.Equal(t, "Tenant A Account", retrievedA.Name())
+}
+
+// TestIntegration_MultiTenant_ExistsByCodeIsolation tests ExistsByCode tenant isolation.
+func TestIntegration_MultiTenant_ExistsByCodeIsolation(t *testing.T) {
+	tenantA := tenant.TenantID("tenant_a")
+	tenantB := tenant.TenantID("tenant_b")
+
+	tc := setupMultiTenantContainer(t, tenantA, tenantB)
+	defer tc.cleanup(t)
+
+	ctxTenantA := createTenantContext(tenantA)
+	ctxTenantB := createTenantContext(tenantB)
+
+	// Create account for tenant A with specific code
+	accountA := createTestAccountIntegration(t, "IBA-EXISTS-A", "SHARED_CODE", "Tenant A Account", domain.AccountTypeClearing)
+	err := tc.repo.Save(ctxTenantA, accountA)
+	require.NoError(t, err)
+
+	// Tenant A should see the code exists
+	exists, err := tc.repo.ExistsByCode(ctxTenantA, "SHARED_CODE")
+	require.NoError(t, err)
+	assert.True(t, exists)
+
+	// Tenant B should not see the code exists
+	exists, err = tc.repo.ExistsByCode(ctxTenantB, "SHARED_CODE")
+	require.NoError(t, err)
+	assert.False(t, exists)
+
+	// Tenant B can use the same code
+	accountB := createTestAccountIntegration(t, "IBA-EXISTS-B", "SHARED_CODE", "Tenant B Account", domain.AccountTypeHolding)
+	err = tc.repo.Save(ctxTenantB, accountB)
+	require.NoError(t, err)
+
+	// Both tenants now have accounts with the same code but different schemas
+	codeExistsA, _ := tc.repo.ExistsByCode(ctxTenantA, "SHARED_CODE")
+	codeExistsB, _ := tc.repo.ExistsByCode(ctxTenantB, "SHARED_CODE")
+	assert.True(t, codeExistsA)
+	assert.True(t, codeExistsB)
+}
+
+// TestIntegration_MultiTenant_StatusHistoryIsolation tests status history tenant isolation.
+func TestIntegration_MultiTenant_StatusHistoryIsolation(t *testing.T) {
+	tenantA := tenant.TenantID("tenant_a")
+	tenantB := tenant.TenantID("tenant_b")
+
+	tc := setupMultiTenantContainer(t, tenantA, tenantB)
+	defer tc.cleanup(t)
+
+	ctxTenantA := createTenantContext(tenantA)
+	ctxTenantB := createTenantContext(tenantB)
+
+	// Create account for tenant A
+	accountA := createTestAccountIntegration(t, "IBA-HIST-A", "HIST_A_ACC", "Tenant A Account", domain.AccountTypeClearing)
+	err := tc.repo.Save(ctxTenantA, accountA)
+	require.NoError(t, err)
+
+	// Record status change for tenant A
+	err = tc.repo.RecordStatusChange(ctxTenantA, "IBA-HIST-A", "ACTIVE", "SUSPENDED", "Test suspension")
+	require.NoError(t, err)
+
+	// Tenant B should not see tenant A's status history
+	// We can verify this by querying the status_history table with tenant B's context
+	// The history record should only exist in tenant A's schema
+
+	// Create account for tenant B with same account_id (different schema)
+	accountB := createTestAccountIntegration(t, "IBA-HIST-A", "HIST_B_ACC", "Tenant B Account", domain.AccountTypeClearing)
+	err = tc.repo.Save(ctxTenantB, accountB)
+	require.NoError(t, err)
+
+	// Record status change for tenant B
+	err = tc.repo.RecordStatusChange(ctxTenantB, "IBA-HIST-A", "ACTIVE", "CLOSED", "Closing account")
+	require.NoError(t, err)
+
+	// Query status history directly to verify isolation
+	// Each tenant's status_history should only contain their own records
+	var countA int64
+	err = tc.db.Raw(fmt.Sprintf(`SELECT COUNT(*) FROM %q.internal_bank_account_status_history WHERE account_id = ?`, tenantA.SchemaName()), "IBA-HIST-A").Scan(&countA).Error
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), countA, "Tenant A should have 1 status history record")
+
+	var countB int64
+	err = tc.db.Raw(fmt.Sprintf(`SELECT COUNT(*) FROM %q.internal_bank_account_status_history WHERE account_id = ?`, tenantB.SchemaName()), "IBA-HIST-A").Scan(&countB).Error
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), countB, "Tenant B should have 1 status history record")
+}
+
+// TestIntegration_MultiTenant_MissingContext tests that operations fail without tenant context.
+func TestIntegration_MultiTenant_MissingContext(t *testing.T) {
+	tenantA := tenant.TenantID("tenant_a")
+
+	tc := setupMultiTenantContainer(t, tenantA)
+	defer tc.cleanup(t)
+
+	// Create context without tenant (only audit user, no tenant)
+	ctxNoTenant := context.WithValue(context.Background(), auth.UserIDContextKey, "test-user")
+
+	// Create an account
+	account := createTestAccountIntegration(t, "IBA-NO-TENANT", "NO_TENANT_ACC", "No Tenant Account", domain.AccountTypeClearing)
+
+	// All operations should fail without tenant context
+	err := tc.repo.Save(ctxNoTenant, account)
+	assert.Error(t, err, "Save should fail without tenant context")
+	assert.Contains(t, err.Error(), "tenant")
+
+	_, err = tc.repo.FindByID(ctxNoTenant, account.ID())
+	assert.Error(t, err, "FindByID should fail without tenant context")
+
+	_, err = tc.repo.FindByCode(ctxNoTenant, "NO_TENANT_ACC")
+	assert.Error(t, err, "FindByCode should fail without tenant context")
+
+	_, err = tc.repo.List(ctxNoTenant, domain.ListFilter{})
+	assert.Error(t, err, "List should fail without tenant context")
+
+	_, err = tc.repo.ExistsByCode(ctxNoTenant, "NO_TENANT_ACC")
+	assert.Error(t, err, "ExistsByCode should fail without tenant context")
+
+	err = tc.repo.Delete(ctxNoTenant, account.ID())
+	assert.Error(t, err, "Delete should fail without tenant context")
+}
