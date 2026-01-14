@@ -450,6 +450,67 @@ func TestUpdateCorrespondent_ClosedAccount(t *testing.T) {
 	assert.ErrorIs(t, err, ErrAccountClosed)
 }
 
+func TestRename_Success(t *testing.T) {
+	account, err := NewInternalBankAccount(
+		"IBA-001",
+		"CLR-001",
+		"Original Name",
+		AccountTypeClearing,
+		"USD",
+		"CURRENCY",
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "Original Name", account.Name())
+	assert.Equal(t, int64(1), account.Version())
+
+	// Rename the account
+	renamed, err := account.Rename("Updated Name")
+	require.NoError(t, err)
+	assert.Equal(t, "Updated Name", renamed.Name())
+	assert.Equal(t, int64(2), renamed.Version())
+
+	// Original should be unchanged (immutability)
+	assert.Equal(t, "Original Name", account.Name())
+	assert.Equal(t, int64(1), account.Version())
+}
+
+func TestRename_EmptyName(t *testing.T) {
+	account, err := NewInternalBankAccount(
+		"IBA-001",
+		"CLR-001",
+		"Original Name",
+		AccountTypeClearing,
+		"USD",
+		"CURRENCY",
+	)
+	require.NoError(t, err)
+
+	_, err = account.Rename("")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrNameRequired)
+}
+
+func TestRename_ClosedAccount(t *testing.T) {
+	account, err := NewInternalBankAccount(
+		"IBA-001",
+		"CLR-001",
+		"Original Name",
+		AccountTypeClearing,
+		"USD",
+		"CURRENCY",
+	)
+	require.NoError(t, err)
+
+	// Close the account
+	closed, err := account.Close("Decommissioned")
+	require.NoError(t, err)
+
+	// Try to rename closed account
+	_, err = closed.Rename("New Name")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrAccountClosed)
+}
+
 func TestBuilder_Reconstruction(t *testing.T) {
 	// Simulate values from persistence
 	id := uuid.New()

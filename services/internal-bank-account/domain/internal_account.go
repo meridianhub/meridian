@@ -112,6 +112,23 @@ func (a InternalBankAccount) Close(reason string) (InternalBankAccount, error) {
 	return a.withStatusChange(AccountStatusClosed, reason), nil
 }
 
+// Rename updates the account display name.
+// Returns a new instance with updated name.
+// Returns error if account is closed or name is empty.
+func (a InternalBankAccount) Rename(newName string) (InternalBankAccount, error) {
+	if a.status == AccountStatusClosed {
+		return a, ErrAccountClosed
+	}
+	if newName == "" {
+		return a, ErrNameRequired
+	}
+
+	newAccount := a.copyWithUpdatedTime()
+	newAccount.name = newName
+	newAccount.version++
+	return newAccount, nil
+}
+
 // UpdateCorrespondent sets or updates the correspondent bank details.
 // Returns a new instance with updated correspondent.
 //
