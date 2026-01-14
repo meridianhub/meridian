@@ -10,6 +10,7 @@ import (
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
+	"github.com/meridianhub/meridian/services/internal-bank-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/internal-bank-account/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -89,6 +90,7 @@ func (m *mockRepository) ExistsByCode(_ context.Context, accountCode string) (bo
 // mockPositionKeepingClient implements PositionKeepingClient for testing.
 type mockPositionKeepingClient struct {
 	balances []*positionkeepingv1.BalanceEntry
+	asOf     *timestamppb.Timestamp
 	err      error
 }
 
@@ -96,10 +98,14 @@ func (m *mockPositionKeepingClient) GetAccountBalances(_ context.Context, req *p
 	if m.err != nil {
 		return nil, m.err
 	}
+	asOf := m.asOf
+	if asOf == nil {
+		asOf = timestamppb.Now() // Default to current time if not specified
+	}
 	return &positionkeepingv1.GetAccountBalancesResponse{
 		AccountId: req.AccountId,
 		Balances:  m.balances,
-		AsOf:      timestamppb.Now(), // Provide timestamp for balance calculation time
+		AsOf:      asOf,
 	}, nil
 }
 
@@ -494,8 +500,12 @@ func TestGetBalance_NoPositionKeepingClient(t *testing.T) {
 	assert.Equal(t, codes.Unimplemented, st.Code())
 }
 
-// ErrPositionKeepingUnavailable is used in tests.
-var errPositionKeepingUnavailable = errors.New("position keeping service unavailable")
+// Test sentinel errors for use in mock error scenarios.
+var (
+	errPositionKeepingUnavailable = errors.New("position keeping service unavailable")
+	errDatabaseConnection         = errors.New("database connection failed")
+	errDatabaseQuery              = errors.New("database query failed")
+)
 
 func TestGetBalance_AccountNotFound(t *testing.T) {
 	repo := newMockRepository()
@@ -708,4 +718,448 @@ func TestUpdateInternalBankAccount_ClosedAccount(t *testing.T) {
 	st, ok := status.FromError(err)
 	require.True(t, ok)
 	assert.Equal(t, codes.FailedPrecondition, st.Code())
+}
+
+// Additional test cases for comprehensive coverage per subtask 15.3
+
+func TestInitiateInternalBankAccount_DuplicateCode(t *testing.T) {
+	repo := newMockRepository()
+	svc, err := NewService(repo)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Create first account
+	_, err = svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+		AccountCode:    "CLR-001",
+		Name:           "USD Clearing Account",
+		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		InstrumentCode: "USD",
+	})
+	require.NoError(t, err)
+
+	// Simulate duplicate code error from repository
+	repo.saveErr = persistence.ErrDuplicateCode
+
+	// Try to create account with same code - should fail
+	resp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+		AccountCode:    "CLR-001",
+		Name:           "Another USD Clearing Account",
+		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		InstrumentCode: "USD",
+	})
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.AlreadyExists, st.Code())
+	assert.Contains(t, st.Message(), "account code already exists")
+}
+
+func TestInitiateInternalBankAccount_InvalidInstrument(t *testing.T) {
+	repo := newMockRepository()
+	refClient := &mockReferenceDataClient{
+		err: status.Error(codes.NotFound, "instrument not found"),
+	}
+	svc, err := NewServiceWithClients(repo, nil, refClient, nil, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Try to create account with invalid instrument
+	resp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+		AccountCode:    "CLR-001",
+		Name:           "USD Clearing Account",
+		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		InstrumentCode: "INVALID_CURRENCY",
+	})
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+	assert.Contains(t, st.Message(), "instrument not found")
+}
+
+func TestInitiateInternalBankAccount_ReferenceDataInternalError(t *testing.T) {
+	repo := newMockRepository()
+	refClient := &mockReferenceDataClient{
+		err: status.Error(codes.Internal, "reference data service error"),
+	}
+	svc, err := NewServiceWithClients(repo, nil, refClient, nil, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Try to create account when reference data has internal error
+	resp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+		AccountCode:    "CLR-001",
+		Name:           "USD Clearing Account",
+		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		InstrumentCode: "USD",
+	})
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Internal, st.Code())
+	assert.Contains(t, st.Message(), "failed to validate instrument")
+}
+
+func TestInitiateInternalBankAccount_RepositoryError(t *testing.T) {
+	repo := newMockRepository()
+	repo.saveErr = errDatabaseConnection
+	svc, err := NewService(repo)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Try to create account when repository has error
+	resp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+		AccountCode:    "CLR-001",
+		Name:           "USD Clearing Account",
+		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		InstrumentCode: "USD",
+	})
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Internal, st.Code())
+	assert.Contains(t, st.Message(), "failed to create account")
+}
+
+func TestUpdateInternalBankAccount_NotFound(t *testing.T) {
+	repo := newMockRepository()
+	svc, err := NewService(repo)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Try to update non-existent account
+	resp, err := svc.UpdateInternalBankAccount(ctx, &pb.UpdateInternalBankAccountRequest{
+		AccountId: "non-existent-account",
+		Name:      "Updated Name",
+	})
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.NotFound, st.Code())
+}
+
+func TestUpdateInternalBankAccount_RepositorySaveError(t *testing.T) {
+	repo := newMockRepository()
+	svc, err := NewService(repo)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Create account
+	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+		AccountCode:    "CLR-001",
+		Name:           "USD Clearing Account",
+		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		InstrumentCode: "USD",
+	})
+	require.NoError(t, err)
+
+	// Set save error for the update
+	repo.saveErr = persistence.ErrVersionConflict
+
+	// Try to update - should fail with Aborted due to version conflict
+	resp, err := svc.UpdateInternalBankAccount(ctx, &pb.UpdateInternalBankAccountRequest{
+		AccountId: createResp.Facility.AccountCode,
+		Name:      "Updated Name",
+	})
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Aborted, st.Code())
+}
+
+func TestControlInternalBankAccount_Reactivate(t *testing.T) {
+	repo := newMockRepository()
+	svc, err := NewService(repo)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Create account
+	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+		AccountCode:    "CLR-001",
+		Name:           "USD Clearing Account",
+		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		InstrumentCode: "USD",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, pb.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE, createResp.Facility.AccountStatus)
+
+	// Suspend the account
+	suspendResp, err := svc.ControlInternalBankAccount(ctx, &pb.ControlInternalBankAccountRequest{
+		AccountId:     createResp.Facility.AccountCode,
+		ControlAction: pb.ControlAction_CONTROL_ACTION_SUSPEND,
+		Reason:        "Temporary suspension for maintenance",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, pb.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_SUSPENDED, suspendResp.Facility.AccountStatus)
+
+	// Reactivate the account
+	reactivateResp, err := svc.ControlInternalBankAccount(ctx, &pb.ControlInternalBankAccountRequest{
+		AccountId:     createResp.Facility.AccountCode,
+		ControlAction: pb.ControlAction_CONTROL_ACTION_ACTIVATE,
+		Reason:        "Maintenance complete, reactivating account",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, pb.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE, reactivateResp.Facility.AccountStatus)
+	assert.NotNil(t, reactivateResp.ActionTimestamp)
+}
+
+func TestControlInternalBankAccount_NotFound(t *testing.T) {
+	repo := newMockRepository()
+	svc, err := NewService(repo)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Try to control non-existent account
+	resp, err := svc.ControlInternalBankAccount(ctx, &pb.ControlInternalBankAccountRequest{
+		AccountId:     "non-existent-account",
+		ControlAction: pb.ControlAction_CONTROL_ACTION_SUSPEND,
+		Reason:        "Testing",
+	})
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.NotFound, st.Code())
+}
+
+func TestControlInternalBankAccount_UnspecifiedAction(t *testing.T) {
+	repo := newMockRepository()
+	svc, err := NewService(repo)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Create account
+	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+		AccountCode:    "CLR-001",
+		Name:           "USD Clearing Account",
+		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		InstrumentCode: "USD",
+	})
+	require.NoError(t, err)
+
+	// Try to control with unspecified action
+	resp, err := svc.ControlInternalBankAccount(ctx, &pb.ControlInternalBankAccountRequest{
+		AccountId:     createResp.Facility.AccountCode,
+		ControlAction: pb.ControlAction_CONTROL_ACTION_UNSPECIFIED,
+	})
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+	assert.Contains(t, st.Message(), "control action must be specified")
+}
+
+func TestControlInternalBankAccount_RepositorySaveError(t *testing.T) {
+	repo := newMockRepository()
+	svc, err := NewService(repo)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Create account
+	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+		AccountCode:    "CLR-001",
+		Name:           "USD Clearing Account",
+		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		InstrumentCode: "USD",
+	})
+	require.NoError(t, err)
+
+	// Set save error
+	repo.saveErr = persistence.ErrVersionConflict
+
+	// Try to suspend - should fail due to version conflict
+	resp, err := svc.ControlInternalBankAccount(ctx, &pb.ControlInternalBankAccountRequest{
+		AccountId:     createResp.Facility.AccountCode,
+		ControlAction: pb.ControlAction_CONTROL_ACTION_SUSPEND,
+		Reason:        "Testing version conflict",
+	})
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Aborted, st.Code())
+}
+
+func TestListInternalBankAccounts_WithFilters(t *testing.T) {
+	repo := newMockRepository()
+	svc, err := NewService(repo)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Create accounts with different types
+	_, err = svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+		AccountCode:    "CLR-001",
+		Name:           "USD Clearing Account",
+		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		InstrumentCode: "USD",
+	})
+	require.NoError(t, err)
+
+	_, err = svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+		AccountCode:    "HOLD-001",
+		Name:           "EUR Holding Account",
+		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_HOLDING,
+		InstrumentCode: "EUR",
+	})
+	require.NoError(t, err)
+
+	// List with type filter - should get all accounts since mock doesn't filter
+	resp, err := svc.ListInternalBankAccounts(ctx, &pb.ListInternalBankAccountsRequest{
+		AccountTypeFilter: pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+	})
+	require.NoError(t, err)
+	assert.NotNil(t, resp)
+	assert.GreaterOrEqual(t, len(resp.Facilities), 1)
+}
+
+func TestListInternalBankAccounts_RepositoryError(t *testing.T) {
+	repo := newMockRepository()
+	repo.listErr = errDatabaseQuery
+	svc, err := NewService(repo)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Try to list - should fail
+	resp, err := svc.ListInternalBankAccounts(ctx, &pb.ListInternalBankAccountsRequest{})
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Internal, st.Code())
+}
+
+func TestGetBalance_ZeroBalance(t *testing.T) {
+	repo := newMockRepository()
+	posClient := &mockPositionKeepingClient{
+		balances: []*positionkeepingv1.BalanceEntry{
+			// No current balance entry - should return zero balance
+		},
+	}
+	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Create account
+	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+		AccountCode:    "CLR-001",
+		Name:           "USD Clearing Account",
+		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		InstrumentCode: "USD",
+	})
+	require.NoError(t, err)
+
+	// Get balance - should return nil balance when no current balance found
+	balanceResp, err := svc.GetBalance(ctx, &pb.GetBalanceRequest{
+		AccountId: createResp.Facility.AccountCode,
+	})
+	require.NoError(t, err)
+	assert.Nil(t, balanceResp.CurrentBalance)
+	assert.NotNil(t, balanceResp.AsOf)
+}
+
+func TestGetBalance_PositionKeepingNotFound(t *testing.T) {
+	repo := newMockRepository()
+	posClient := &mockPositionKeepingClient{
+		err: status.Error(codes.NotFound, "position not found"),
+	}
+	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Create account
+	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+		AccountCode:    "CLR-001",
+		Name:           "USD Clearing Account",
+		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		InstrumentCode: "USD",
+	})
+	require.NoError(t, err)
+
+	// Get balance - Position Keeping NotFound maps to Internal
+	_, err = svc.GetBalance(ctx, &pb.GetBalanceRequest{
+		AccountId: createResp.Facility.AccountCode,
+	})
+	assert.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Internal, st.Code())
+}
+
+func TestGetBalance_PositionKeepingDeadlineExceeded(t *testing.T) {
+	repo := newMockRepository()
+	posClient := &mockPositionKeepingClient{
+		err: status.Error(codes.DeadlineExceeded, "request timeout"),
+	}
+	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Create account
+	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+		AccountCode:    "CLR-001",
+		Name:           "USD Clearing Account",
+		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		InstrumentCode: "USD",
+	})
+	require.NoError(t, err)
+
+	// Get balance - DeadlineExceeded maps to Unavailable
+	_, err = svc.GetBalance(ctx, &pb.GetBalanceRequest{
+		AccountId: createResp.Facility.AccountCode,
+	})
+	assert.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Unavailable, st.Code())
+}
+
+func TestGetBalance_PositionKeepingInvalidArgument(t *testing.T) {
+	repo := newMockRepository()
+	posClient := &mockPositionKeepingClient{
+		err: status.Error(codes.InvalidArgument, "invalid account id format"),
+	}
+	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Create account
+	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+		AccountCode:    "CLR-001",
+		Name:           "USD Clearing Account",
+		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		InstrumentCode: "USD",
+	})
+	require.NoError(t, err)
+
+	// Get balance - InvalidArgument from PK maps to Internal (our code is wrong)
+	_, err = svc.GetBalance(ctx, &pb.GetBalanceRequest{
+		AccountId: createResp.Facility.AccountCode,
+	})
+	assert.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Internal, st.Code())
 }
