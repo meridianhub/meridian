@@ -20,22 +20,35 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
+// PostProvisioningHook is called after schema provisioning succeeds but before
+// marking the tenant as active. Hooks are non-blocking - errors are logged but
+// do not prevent tenant activation. This allows for best-effort initialization
+// of tenant-specific resources (e.g., default internal bank accounts).
+type PostProvisioningHook func(ctx context.Context, tenantID tenant.TenantID) error
+
 // ProvisioningWorker polls for tenants in PROVISIONING_PENDING status
 // and triggers schema provisioning for them.
 type ProvisioningWorker struct {
-	repo           *persistence.Repository
-	provisioner    provisioner.SchemaProvisioner
-	alertManager   *AlertManager
-	pollInterval   time.Duration
-	alertInterval  time.Duration
-	alertThreshold time.Duration
-	maxRetries     int
-	retryBaseDelay time.Duration
-	retryMaxDelay  time.Duration
-	maxConcurrent  int
-	logger         *slog.Logger
-	done           chan struct{}
-	wg             sync.WaitGroup // Tracks in-flight provisioning goroutines
+	repo                  *persistence.Repository
+	provisioner           provisioner.SchemaProvisioner
+	alertManager          *AlertManager
+	postProvisioningHooks []namedHook
+	pollInterval          time.Duration
+	alertInterval         time.Duration
+	alertThreshold        time.Duration
+	maxRetries            int
+	retryBaseDelay        time.Duration
+	retryMaxDelay         time.Duration
+	maxConcurrent         int
+	logger                *slog.Logger
+	done                  chan struct{}
+	wg                    sync.WaitGroup // Tracks in-flight provisioning goroutines
+}
+
+// namedHook wraps a hook with its name for logging.
+type namedHook struct {
+	name string
+	hook PostProvisioningHook
 }
 
 // Errors returned by NewProvisioningWorker and provisioning operations.
@@ -177,6 +190,56 @@ func (w *ProvisioningWorker) Stop() {
 	w.logger.Info("waiting for in-flight provisioning to complete")
 	w.wg.Wait()
 	w.logger.Info("all provisioning goroutines completed")
+}
+
+// RegisterPostProvisioningHook adds a hook to be called after schema provisioning succeeds.
+// Hooks are executed in registration order and are non-blocking - errors are logged
+// but do not prevent tenant activation. Use this for best-effort initialization like
+// creating default internal bank accounts.
+//
+// The name parameter is used for logging to identify which hook succeeded or failed.
+func (w *ProvisioningWorker) RegisterPostProvisioningHook(name string, hook PostProvisioningHook) {
+	w.postProvisioningHooks = append(w.postProvisioningHooks, namedHook{
+		name: name,
+		hook: hook,
+	})
+	w.logger.Info("registered post-provisioning hook", "name", name)
+}
+
+// executePostProvisioningHooks runs all registered hooks sequentially.
+// Errors are logged but do not stop execution of subsequent hooks.
+// Returns the count of hooks that succeeded.
+func (w *ProvisioningWorker) executePostProvisioningHooks(ctx context.Context, tenantID tenant.TenantID) int {
+	if len(w.postProvisioningHooks) == 0 {
+		return 0
+	}
+
+	w.logger.Debug("executing post-provisioning hooks",
+		"tenant_id", tenantID,
+		"hook_count", len(w.postProvisioningHooks))
+
+	succeeded := 0
+	for _, nh := range w.postProvisioningHooks {
+		if err := nh.hook(ctx, tenantID); err != nil {
+			// Log error but continue - hooks are non-blocking
+			w.logger.Warn("post-provisioning hook failed",
+				"tenant_id", tenantID,
+				"hook_name", nh.name,
+				"error", err)
+		} else {
+			w.logger.Debug("post-provisioning hook succeeded",
+				"tenant_id", tenantID,
+				"hook_name", nh.name)
+			succeeded++
+		}
+	}
+
+	w.logger.Info("post-provisioning hooks completed",
+		"tenant_id", tenantID,
+		"succeeded", succeeded,
+		"total", len(w.postProvisioningHooks))
+
+	return succeeded
 }
 
 // checkFailedProvisioningAlerts checks for persistent provisioning failures
@@ -365,10 +428,18 @@ func (w *ProvisioningWorker) checkContextCancellation(ctx context.Context, tenan
 }
 
 // markTenantAsActive updates tenant status to active after successful provisioning.
+// Before marking as active, it executes any registered post-provisioning hooks
+// (e.g., creating default internal bank accounts). Hook failures are logged but
+// do not prevent tenant activation.
 func (w *ProvisioningWorker) markTenantAsActive(ctx context.Context, tenantID tenant.TenantID, attempt int) {
 	w.logger.Info("provisioning succeeded",
 		"tenant_id", tenantID,
 		"attempt", attempt)
+
+	// Execute post-provisioning hooks (non-blocking)
+	// These hooks can initialize tenant-specific resources like default internal bank accounts.
+	// Failures are logged but do not prevent tenant activation.
+	w.executePostProvisioningHooks(ctx, tenantID)
 
 	tenant, getErr := w.repo.GetByID(ctx, tenantID)
 	if getErr != nil {
