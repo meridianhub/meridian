@@ -36,6 +36,7 @@ type DepositOrchestrator struct {
 	posKeepingClient PositionKeepingClient
 	finAcctClient    FinancialAccountingClient
 	accountConfig    *config.AccountConfig
+	accountResolver  *AccountResolver
 }
 
 // DepositOrchestratorConfig contains dependencies for creating a DepositOrchestrator
@@ -45,6 +46,10 @@ type DepositOrchestratorConfig struct {
 	PosKeepingClient PositionKeepingClient
 	FinAcctClient    FinancialAccountingClient
 	AccountConfig    *config.AccountConfig
+	// AccountResolver enables dynamic clearing account resolution from Internal Bank Account service.
+	// If provided, takes precedence over AccountConfig for clearing account lookup.
+	// If nil, falls back to static AccountConfig environment variables.
+	AccountResolver *AccountResolver
 }
 
 // NewDepositOrchestrator creates a new deposit orchestrator with the given dependencies.
@@ -68,6 +73,7 @@ func NewDepositOrchestrator(cfg DepositOrchestratorConfig) (*DepositOrchestrator
 		posKeepingClient: cfg.PosKeepingClient,
 		finAcctClient:    cfg.FinAcctClient,
 		accountConfig:    cfg.AccountConfig,
+		accountResolver:  cfg.AccountResolver,
 	}, nil
 }
 
@@ -119,11 +125,8 @@ func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.Cu
 	var debitPosted bool
 	var creditPosted bool
 
-	// Get clearing account ID from config
-	var clearingAccountID string
-	if o.accountConfig != nil {
-		clearingAccountID = o.accountConfig.DepositClearingAccountID
-	}
+	// Resolve clearing account ID (dynamic resolver preferred, fallback to static config)
+	clearingAccountID := o.resolveClearingAccountID(ctx, string(amount.Currency()))
 
 	// Step 1: Log position in PositionKeeping service
 	o.addLogPositionStep(saga, account, amount, transactionID, &positionLogID, &positionLogVersion)
@@ -650,4 +653,40 @@ func (o *DepositOrchestrator) addSaveAccountStep(
 			return nil
 		},
 	)
+}
+
+// resolveClearingAccountID resolves the clearing account ID for deposit operations.
+// Priority:
+//  1. AccountResolver (dynamic lookup from Internal Bank Account service)
+//  2. AccountConfig (static environment variable fallback)
+//
+// Returns empty string if neither is configured (single-entry mode).
+// All error cases are handled internally with fallback behavior.
+func (o *DepositOrchestrator) resolveClearingAccountID(ctx context.Context, currency string) string {
+	// Try dynamic resolver first (preferred)
+	if o.accountResolver != nil {
+		accountID, err := o.accountResolver.GetDepositClearingAccount(ctx, currency)
+		if err != nil {
+			// Log but don't fail - allow fallback to static config
+			o.logger.Warn("dynamic clearing account resolution failed, trying static config",
+				"currency", currency,
+				"error", err)
+		} else {
+			o.logger.Debug("resolved clearing account dynamically",
+				"currency", currency,
+				"account_id", accountID)
+			return accountID
+		}
+	}
+
+	// Fallback to static config
+	if o.accountConfig != nil && o.accountConfig.DepositClearingAccountID != "" {
+		o.logger.Debug("using static clearing account from config",
+			"account_id", o.accountConfig.DepositClearingAccountID)
+		return o.accountConfig.DepositClearingAccountID
+	}
+
+	// Neither configured - single-entry mode
+	o.logger.Debug("no clearing account configured, operating in single-entry mode")
+	return ""
 }

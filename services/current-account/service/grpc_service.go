@@ -203,6 +203,13 @@ func NewServiceWithIdempotency(repo *persistence.Repository, lienRepo *persisten
 // NewServiceWithExistingClients creates a new service with pre-created client instances.
 // This constructor is useful when clients need to be shared with other components
 // (e.g., health checkers) to avoid creating duplicate connections.
+//
+// Optional parameters:
+//   - accountConfig: Static clearing account configuration (environment variables)
+//   - accountResolver: Dynamic clearing account resolution from Internal Bank Account service
+//
+// If both accountConfig and accountResolver are provided, the resolver takes precedence
+// with fallback to static config.
 func NewServiceWithExistingClients(
 	repo *persistence.Repository,
 	lienRepo *persistence.LienRepository,
@@ -214,6 +221,7 @@ func NewServiceWithExistingClients(
 	idempotencyService idempotency.Service,
 	logger *slog.Logger,
 	tracer *observability.Tracer,
+	accountResolver *AccountResolver, // Optional: dynamic clearing account resolution
 ) (*Service, error) {
 	if repo == nil {
 		return nil, ErrRepositoryNil
@@ -231,6 +239,7 @@ func NewServiceWithExistingClients(
 		PosKeepingClient: posKeepingClient,
 		FinAcctClient:    finAcctClient,
 		AccountConfig:    accountConfig,
+		AccountResolver:  accountResolver,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create deposit orchestrator: %w", err)
@@ -243,6 +252,7 @@ func NewServiceWithExistingClients(
 		PosKeepingClient: posKeepingClient,
 		FinAcctClient:    finAcctClient,
 		AccountConfig:    accountConfig,
+		AccountResolver:  accountResolver,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create withdrawal orchestrator: %w", err)
