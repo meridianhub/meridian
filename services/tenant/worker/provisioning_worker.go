@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
@@ -43,6 +44,7 @@ type ProvisioningWorker struct {
 	logger                *slog.Logger
 	done                  chan struct{}
 	wg                    sync.WaitGroup // Tracks in-flight provisioning goroutines
+	stopping              atomic.Bool    // Prevents new work during shutdown
 }
 
 // namedHook wraps a hook with its name for logging.
@@ -179,6 +181,12 @@ func (w *ProvisioningWorker) Start(ctx context.Context) {
 // It waits for all in-flight provisioning goroutines to complete.
 // It is safe to call Stop multiple times.
 func (w *ProvisioningWorker) Stop() {
+	// Set stopping flag first to prevent new wg.Add() calls.
+	// This must happen before closing the done channel to avoid a race
+	// where processPendingTenants() is mid-execution and tries to add
+	// new work while we're waiting.
+	w.stopping.Store(true)
+
 	select {
 	case <-w.done:
 		// Already closed
@@ -302,6 +310,15 @@ func (w *ProvisioningWorker) processPendingTenants(ctx context.Context) {
 		w.logger.Info("claimed tenant for provisioning",
 			"tenant_id", tenant.ID,
 			"schema", tenant.SchemaName())
+
+		// Check if worker is stopping before adding new work.
+		// This prevents a race condition where wg.Add(1) is called
+		// after Stop() has already called wg.Wait().
+		if w.stopping.Load() {
+			w.logger.Warn("not spawning provisioning goroutine - worker is stopping",
+				"tenant_id", tenant.ID)
+			continue
+		}
 
 		// Track the goroutine in the WaitGroup
 		w.wg.Add(1)
