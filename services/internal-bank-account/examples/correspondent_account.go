@@ -122,7 +122,7 @@ func main() {
 			// For VOSTRO, ExternalAccountRef is our internal reference for their account
 			ExternalAccountRef: "VOSTRO-MUFG-001",
 
-			SwiftCode: "BOABORADR00001",
+			SwiftCode: "BOTKJPJT",
 
 			CorrespondentType: ibav1.CorrespondentType_CORRESPONDENT_TYPE_VOSTRO,
 		},

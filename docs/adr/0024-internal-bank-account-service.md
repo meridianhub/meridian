@@ -290,9 +290,9 @@ service InternalBankAccountService {
 ## Links
 
 * [ADR-0002: Microservices Per BIAN Domain](0002-microservices-per-bian-domain.md)
+* [ADR-0013: Generic Asset Quantity Types](0013-generic-asset-quantity-types.md)
 * [ADR-0023: Balance Delegation to Position Keeping](0023-balance-delegation-to-position-keeping.md)
 * [BIAN Internal Bank Account Service Domain](https://bian.org/semantic-apis/internal-bank-account/)
-* [Meridian Multi-Asset Architecture](../architecture/multi-asset-architecture.md)
 
 ## Notes
 

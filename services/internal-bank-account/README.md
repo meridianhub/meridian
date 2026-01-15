@@ -525,7 +525,7 @@ vostro := &iba.InitiateInternalBankAccountRequest{
         BankId:             "mufg-tokyo",
         BankName:           "MUFG Bank Tokyo",
         ExternalAccountRef: "VOSTRO-MUFG-001",
-        SwiftCode:          "BOABORADR00001",
+        SwiftCode:          "BOTKJPJT",
         CorrespondentType:  iba.CORRESPONDENT_TYPE_VOSTRO,
     },
 }

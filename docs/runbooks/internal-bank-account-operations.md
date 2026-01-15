@@ -778,9 +778,10 @@ watch -n 2 'kubectl get pods -n production -l app=internal-bank-account'
 stern -n production internal-bank-account
 
 # Check connectivity to dependencies
-for svc in position-keeping cockroachdb; do
-  kubectl exec -it <iba-pod> -n production -- nc -zv $svc 50053
-done
+# Position Keeping on gRPC port
+kubectl exec -it <iba-pod> -n production -- nc -zv position-keeping 50053
+# CockroachDB on SQL port
+kubectl exec -it <iba-pod> -n production -- nc -zv cockroachdb 26257
 ```
 
 ---

@@ -114,7 +114,9 @@
           },
           "201": {
             "description": "Internal bank account created successfully",
-            "schema": {}
+            "schema": {
+              "$ref": "#/definitions/InitiateInternalBankAccountResponse"
+            }
           },
           "default": {
             "description": "An unexpected error response.",

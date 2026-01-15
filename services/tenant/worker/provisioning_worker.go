@@ -314,6 +314,11 @@ func (w *ProvisioningWorker) processPendingTenants(ctx context.Context) {
 		// Check if worker is stopping before adding new work.
 		// This prevents a race condition where wg.Add(1) is called
 		// after Stop() has already called wg.Wait().
+		//
+		// TODO: When this branch is taken, the tenant remains in PROVISIONING status
+		// but won't be provisioned. On restart, processPendingTenants only queries
+		// PROVISIONING_PENDING tenants, leaving these stuck. Consider adding a startup
+		// recovery mechanism to reset or resume PROVISIONING tenants after a timeout.
 		if w.stopping.Load() {
 			w.logger.Warn("not spawning provisioning goroutine - worker is stopping",
 				"tenant_id", tenant.ID)
