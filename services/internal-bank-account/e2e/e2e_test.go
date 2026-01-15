@@ -8,11 +8,13 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/lib/pq"
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/internal_bank_account/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
@@ -122,7 +124,7 @@ func setupTenantSchema(t *testing.T, tc *e2eTestContext, tenantID string) contex
 	ctx := context.Background()
 
 	// Create the tenant schema
-	_, err := tc.pool.Exec(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName))
+	_, err := tc.pool.Exec(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName)))
 	require.NoError(t, err, "Failed to create tenant schema %s", schemaName)
 
 	// Apply internal_bank_account schema
@@ -134,7 +136,39 @@ func setupTenantSchema(t *testing.T, tc *e2eTestContext, tenantID string) contex
 
 	t.Cleanup(func() {
 		cleanupCtx := context.Background()
-		_, _ = tc.pool.Exec(cleanupCtx, fmt.Sprintf("DROP SCHEMA IF EXISTS %q CASCADE", schemaName))
+		_, _ = tc.pool.Exec(cleanupCtx, fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", pq.QuoteIdentifier(schemaName)))
+	})
+
+	return tenantCtx
+}
+
+// setupTenantWithSchemas creates a tenant schema with both internal-bank-account and position-keeping tables.
+// This enables E2E tests that verify integration between the two services.
+func setupTenantWithSchemas(t *testing.T, pool *pgxpool.Pool, tenantID string) context.Context {
+	t.Helper()
+
+	tid := tenant.TenantID(tenantID)
+	schemaName := tid.SchemaName()
+
+	ctx := context.Background()
+
+	// Create the tenant schema
+	_, err := pool.Exec(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName)))
+	require.NoError(t, err, "Failed to create tenant schema %s", schemaName)
+
+	// Apply internal-bank-account schema
+	applyInternalBankAccountSchema(t, pool, schemaName)
+
+	// Apply position-keeping schema
+	applyPositionKeepingSchema(t, pool, schemaName)
+
+	// Create context with tenant and audit user
+	tenantCtx := tenant.WithTenant(context.Background(), tid)
+	tenantCtx = context.WithValue(tenantCtx, auth.UserIDContextKey, "e2e-test-user")
+
+	t.Cleanup(func() {
+		cleanupCtx := context.Background()
+		_, _ = pool.Exec(cleanupCtx, fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", pq.QuoteIdentifier(schemaName)))
 	})
 
 	return tenantCtx
@@ -149,7 +183,7 @@ func applyInternalBankAccountSchema(t *testing.T, pool *pgxpool.Pool, schemaName
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	_, err = tx.Exec(ctx, fmt.Sprintf("SET search_path TO %q, public", schemaName))
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
 	require.NoError(t, err)
 
 	// Create internal_bank_account table
@@ -233,6 +267,280 @@ func applyInternalBankAccountSchema(t *testing.T, pool *pgxpool.Pool, schemaName
 	require.NoError(t, err, "Failed to create status history indexes")
 
 	require.NoError(t, tx.Commit(ctx))
+}
+
+// applyPositionKeepingSchema creates the position table in the tenant schema.
+// This matches the schema from position-keeping service for E2E integration testing.
+func applyPositionKeepingSchema(t *testing.T, pool *pgxpool.Pool, schemaName string) {
+	t.Helper()
+	ctx := context.Background()
+
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+	require.NoError(t, err)
+
+	// Create position table (append-only)
+	_, err = tx.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS position (
+			id uuid NOT NULL DEFAULT gen_random_uuid(),
+			created_at timestamptz NOT NULL DEFAULT now(),
+			created_by character varying(100) NOT NULL,
+			deleted_at timestamptz NULL,
+			account_id character varying(34) NOT NULL,
+			instrument_code character varying(32) NOT NULL,
+			bucket_key character varying(256) NOT NULL,
+			amount decimal(38, 18) NOT NULL,
+			dimension character varying(32) NOT NULL DEFAULT 'Monetary',
+			attributes jsonb NULL,
+			reference_id uuid NULL,
+			PRIMARY KEY (id),
+			CONSTRAINT position_dimension_check CHECK (dimension IN ('Monetary', 'Energy', 'Compute', 'Carbon', 'Time', 'Physical', 'Custom'))
+		)
+	`)
+	require.NoError(t, err, "Failed to create position table")
+
+	// Create indexes
+	_, err = tx.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_position_account_id ON position (account_id);
+		CREATE INDEX IF NOT EXISTS idx_position_aggregation ON position (account_id, instrument_code, bucket_key);
+		CREATE INDEX IF NOT EXISTS idx_position_deleted_at ON position (deleted_at);
+		CREATE INDEX IF NOT EXISTS idx_position_active ON position (account_id, instrument_code, bucket_key)
+			WHERE deleted_at IS NULL;
+		CREATE INDEX IF NOT EXISTS idx_position_reference_id ON position (reference_id);
+		CREATE INDEX IF NOT EXISTS idx_position_created_at ON position (created_at)
+	`)
+	require.NoError(t, err, "Failed to create position indexes")
+
+	// Create append-only trigger function
+	_, err = tx.Exec(ctx, `
+		CREATE OR REPLACE FUNCTION positions_append_only()
+		RETURNS TRIGGER AS $$
+		BEGIN
+			IF OLD.amount IS DISTINCT FROM NEW.amount THEN
+				RAISE EXCEPTION 'positions table is append-only - UPDATE on amount column is forbidden'
+					USING ERRCODE = 'P0001';
+			END IF;
+			IF OLD.account_id IS DISTINCT FROM NEW.account_id THEN
+				RAISE EXCEPTION 'positions table is append-only - UPDATE on account_id column is forbidden'
+					USING ERRCODE = 'P0001';
+			END IF;
+			IF OLD.instrument_code IS DISTINCT FROM NEW.instrument_code THEN
+				RAISE EXCEPTION 'positions table is append-only - UPDATE on instrument_code column is forbidden'
+					USING ERRCODE = 'P0001';
+			END IF;
+			IF OLD.bucket_key IS DISTINCT FROM NEW.bucket_key THEN
+				RAISE EXCEPTION 'positions table is append-only - UPDATE on bucket_key column is forbidden'
+					USING ERRCODE = 'P0001';
+			END IF;
+			IF OLD.reference_id IS DISTINCT FROM NEW.reference_id THEN
+				RAISE EXCEPTION 'positions table is append-only - UPDATE on reference_id column is forbidden'
+					USING ERRCODE = 'P0001';
+			END IF;
+			RETURN NEW;
+		END;
+		$$ LANGUAGE plpgsql
+	`)
+	require.NoError(t, err, "Failed to create append-only trigger function")
+
+	_, err = tx.Exec(ctx, `
+		DROP TRIGGER IF EXISTS positions_append_only ON position;
+		CREATE TRIGGER positions_append_only
+			BEFORE UPDATE ON position
+			FOR EACH ROW
+			EXECUTE FUNCTION positions_append_only()
+	`)
+	require.NoError(t, err, "Failed to create append-only trigger")
+
+	require.NoError(t, tx.Commit(ctx))
+}
+
+// ============================================================================
+// Helper Functions for Position-Based Testing
+// ============================================================================
+
+// createAccount creates an internal bank account directly via SQL.
+// Returns the generated account_id.
+func createAccount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, accountType, accountCode, instrumentCode, dimension string) string {
+	t.Helper()
+
+	tenantID, _ := tenant.FromContext(ctx)
+	schemaName := tenantID.SchemaName()
+
+	accountID := fmt.Sprintf("ACC-%s", uuid.New().String()[:8])
+
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+	require.NoError(t, err)
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO internal_bank_account (
+			id, created_at, created_by, updated_at, updated_by,
+			account_id, account_code, name, account_type, instrument_code, dimension, status
+		) VALUES (
+			gen_random_uuid(), NOW(), 'e2e-test', NOW(), 'e2e-test',
+			$1, $2, $3, $4, $5, $6, 'ACTIVE'
+		)`,
+		accountID, accountCode, fmt.Sprintf("%s Account", accountCode), accountType, instrumentCode, dimension,
+	)
+	require.NoError(t, err)
+
+	require.NoError(t, tx.Commit(ctx))
+	return accountID
+}
+
+// insertPosition inserts a position record directly via SQL.
+// Returns the position UUID.
+func insertPosition(t *testing.T, pool *pgxpool.Pool, ctx context.Context, accountID, instrumentCode, bucketKey string, amount decimal.Decimal, dimension string, attributes map[string]string) uuid.UUID {
+	t.Helper()
+
+	tenantID, _ := tenant.FromContext(ctx)
+	schemaName := tenantID.SchemaName()
+
+	id := uuid.New()
+
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+	require.NoError(t, err)
+
+	var attrsJSON interface{}
+	if attributes != nil {
+		attrsJSON = attributes
+	}
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO position (id, created_at, created_by, account_id, instrument_code, bucket_key, amount, dimension, attributes)
+		VALUES ($1, NOW(), 'e2e-test', $2, $3, $4, $5, $6, $7)`,
+		id, accountID, instrumentCode, bucketKey, amount, dimension, attrsJSON,
+	)
+	require.NoError(t, err)
+
+	require.NoError(t, tx.Commit(ctx))
+	return id
+}
+
+// getAggregatedBalance retrieves the aggregated balance for an account and instrument.
+// Returns the sum of all position amounts where deleted_at IS NULL.
+func getAggregatedBalance(t *testing.T, pool *pgxpool.Pool, ctx context.Context, accountID, instrumentCode string) decimal.Decimal {
+	t.Helper()
+
+	tenantID, _ := tenant.FromContext(ctx)
+	schemaName := tenantID.SchemaName()
+
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+	require.NoError(t, err)
+
+	var totalAmount decimal.Decimal
+	err = tx.QueryRow(ctx, `
+		SELECT COALESCE(SUM(amount), 0)
+		FROM position
+		WHERE account_id = $1 AND instrument_code = $2 AND deleted_at IS NULL`,
+		accountID, instrumentCode,
+	).Scan(&totalAmount)
+	require.NoError(t, err)
+
+	require.NoError(t, tx.Commit(ctx))
+	return totalAmount
+}
+
+// updateAccountStatus updates the account status and increments the version.
+// Also inserts a record into the status history table.
+func updateAccountStatus(t *testing.T, ctx context.Context, pool *pgxpool.Pool, accountID, newStatus string) {
+	t.Helper()
+
+	tenantID, _ := tenant.FromContext(ctx)
+	schemaName := tenantID.SchemaName()
+
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+	require.NoError(t, err)
+
+	// Get current status
+	var currentStatus string
+	err = tx.QueryRow(ctx, `SELECT status FROM internal_bank_account WHERE account_id = $1`, accountID).Scan(&currentStatus)
+	require.NoError(t, err)
+
+	// Update status and increment version
+	_, err = tx.Exec(ctx, `
+		UPDATE internal_bank_account
+		SET status = $1, version = version + 1, updated_at = NOW(), updated_by = 'e2e-test'
+		WHERE account_id = $2`,
+		newStatus, accountID,
+	)
+	require.NoError(t, err)
+
+	// Insert status history record
+	_, err = tx.Exec(ctx, `
+		INSERT INTO internal_bank_account_status_history (account_id, from_status, to_status, changed_by)
+		VALUES ($1, $2, $3, 'e2e-test')`,
+		accountID, currentStatus, newStatus,
+	)
+	require.NoError(t, err)
+
+	require.NoError(t, tx.Commit(ctx))
+}
+
+// StatusHistoryRecord represents a record from the status history table.
+type StatusHistoryRecord struct {
+	ID         uuid.UUID
+	AccountID  string
+	FromStatus string
+	ToStatus   string
+	Reason     *string
+	ChangedBy  string
+	ChangedAt  time.Time
+}
+
+// getStatusHistory retrieves the status history for an account.
+// Returns records ordered by changed_at DESC (most recent first).
+func getStatusHistory(t *testing.T, ctx context.Context, pool *pgxpool.Pool, accountID string) []StatusHistoryRecord {
+	t.Helper()
+
+	tenantID, _ := tenant.FromContext(ctx)
+	schemaName := tenantID.SchemaName()
+
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+	require.NoError(t, err)
+
+	rows, err := tx.Query(ctx, `
+		SELECT id, account_id, from_status, to_status, reason, changed_by, changed_at
+		FROM internal_bank_account_status_history
+		WHERE account_id = $1
+		ORDER BY changed_at DESC`,
+		accountID,
+	)
+	require.NoError(t, err)
+	defer rows.Close()
+
+	var records []StatusHistoryRecord
+	for rows.Next() {
+		var r StatusHistoryRecord
+		err := rows.Scan(&r.ID, &r.AccountID, &r.FromStatus, &r.ToStatus, &r.Reason, &r.ChangedBy, &r.ChangedAt)
+		require.NoError(t, err)
+		records = append(records, r)
+	}
+
+	require.NoError(t, tx.Commit(ctx))
+	return records
 }
 
 // createServiceWithMockPositionKeeping creates a service with a mock Position Keeping client.
@@ -1211,4 +1519,333 @@ func TestE2E_AllAccountTypes(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ============================================================================
+// E2E Test: Position Keeping Integration
+// ============================================================================
+
+// TestE2E_PositionKeepingIntegration tests the integration between internal bank accounts
+// and the Position Keeping service for balance tracking.
+func TestE2E_PositionKeepingIntegration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	tc := setupE2ETestPool(t)
+	// Use setupTenantWithSchemas which includes both account AND position tables
+	ctx := setupTenantWithSchemas(t, tc.pool, "e2e_pk_integration_tenant")
+
+	t.Run("Balance updates reflect in account via position table", func(t *testing.T) {
+		// Create an account directly via SQL
+		accountID := createAccount(t, ctx, tc.pool, "CLEARING", "GBP_CLEARING_PK", "GBP", "Monetary")
+
+		// Insert position records via SQL (simulating Position Keeping)
+		insertPosition(t, tc.pool, ctx, accountID, "GBP", "CURRENT", decimal.NewFromFloat(10000.00), "Monetary", nil)
+		insertPosition(t, tc.pool, ctx, accountID, "GBP", "CURRENT", decimal.NewFromFloat(5000.00), "Monetary", nil)
+		insertPosition(t, tc.pool, ctx, accountID, "GBP", "CURRENT", decimal.NewFromFloat(-2000.00), "Monetary", nil)
+
+		// Query aggregated balance
+		balance := getAggregatedBalance(t, tc.pool, ctx, accountID, "GBP")
+
+		// Verify: 10000 + 5000 - 2000 = 13000
+		expectedBalance := decimal.NewFromFloat(13000.00)
+		assert.True(t, expectedBalance.Equal(balance),
+			"Balance mismatch: expected %s, got %s", expectedBalance.String(), balance.String())
+	})
+
+	t.Run("Multi-bucket balances aggregate correctly", func(t *testing.T) {
+		// Create holding account for energy
+		accountID := createAccount(t, ctx, tc.pool, "HOLDING", "KWH_HOLDING_PK", "KWH", "Energy")
+
+		// Insert positions with different bucket keys (e.g., different pricing tiers)
+		insertPosition(t, tc.pool, ctx, accountID, "KWH", "PEAK", decimal.NewFromFloat(500.5), "Energy", nil)
+		insertPosition(t, tc.pool, ctx, accountID, "KWH", "OFF_PEAK", decimal.NewFromFloat(1000.25), "Energy", nil)
+		insertPosition(t, tc.pool, ctx, accountID, "KWH", "SHOULDER", decimal.NewFromFloat(300.0), "Energy", nil)
+
+		// Get total balance (all buckets)
+		totalBalance := getAggregatedBalance(t, tc.pool, ctx, accountID, "KWH")
+
+		// Verify: 500.5 + 1000.25 + 300 = 1800.75
+		expectedTotal := decimal.NewFromFloat(1800.75)
+		assert.True(t, expectedTotal.Equal(totalBalance),
+			"Total balance mismatch: expected %s, got %s", expectedTotal.String(), totalBalance.String())
+	})
+
+	t.Run("Soft deleted positions excluded from balance", func(t *testing.T) {
+		accountID := createAccount(t, ctx, tc.pool, "SUSPENSE", "GBP_SUSPENSE_PK", "GBP", "Monetary")
+
+		// Insert positions
+		pos1 := insertPosition(t, tc.pool, ctx, accountID, "GBP", "CURRENT", decimal.NewFromFloat(1000.00), "Monetary", nil)
+		insertPosition(t, tc.pool, ctx, accountID, "GBP", "CURRENT", decimal.NewFromFloat(500.00), "Monetary", nil)
+
+		// Soft delete one position
+		softDeletePosition(t, tc.pool, ctx, pos1)
+
+		// Verify balance excludes deleted position
+		balance := getAggregatedBalance(t, tc.pool, ctx, accountID, "GBP")
+		expectedBalance := decimal.NewFromFloat(500.00)
+		assert.True(t, expectedBalance.Equal(balance),
+			"Balance should exclude deleted position: expected %s, got %s", expectedBalance.String(), balance.String())
+	})
+
+	t.Run("Position attributes stored correctly", func(t *testing.T) {
+		accountID := createAccount(t, ctx, tc.pool, "REVENUE", "GPU_REVENUE_PK", "GPU_HOUR", "Compute")
+
+		// Insert position with attributes
+		attrs := map[string]string{
+			"instance_type": "A100",
+			"region":        "us-east-1",
+			"customer_id":   "cust-12345",
+		}
+		insertPosition(t, tc.pool, ctx, accountID, "GPU_HOUR", "A100_US_EAST", decimal.NewFromFloat(100.0), "Compute", attrs)
+
+		// Verify balance (attributes don't affect sum)
+		balance := getAggregatedBalance(t, tc.pool, ctx, accountID, "GPU_HOUR")
+		expectedBalance := decimal.NewFromFloat(100.0)
+		assert.True(t, expectedBalance.Equal(balance),
+			"Balance mismatch: expected %s, got %s", expectedBalance.String(), balance.String())
+	})
+
+	t.Run("Cross-instrument isolation", func(t *testing.T) {
+		// Single account can track multiple instruments
+		accountID := createAccount(t, ctx, tc.pool, "CLEARING", "MULTI_CURRENCY_PK", "GBP", "Monetary")
+
+		// Insert GBP and USD positions for same account
+		insertPosition(t, tc.pool, ctx, accountID, "GBP", "CURRENT", decimal.NewFromFloat(10000.00), "Monetary", nil)
+		insertPosition(t, tc.pool, ctx, accountID, "USD", "CURRENT", decimal.NewFromFloat(15000.00), "Monetary", nil)
+
+		// Verify balances are isolated by instrument
+		gbpBalance := getAggregatedBalance(t, tc.pool, ctx, accountID, "GBP")
+		usdBalance := getAggregatedBalance(t, tc.pool, ctx, accountID, "USD")
+
+		assert.True(t, decimal.NewFromFloat(10000.00).Equal(gbpBalance), "GBP balance mismatch")
+		assert.True(t, decimal.NewFromFloat(15000.00).Equal(usdBalance), "USD balance mismatch")
+	})
+}
+
+// softDeletePosition marks a position as deleted.
+func softDeletePosition(t *testing.T, pool *pgxpool.Pool, ctx context.Context, positionID uuid.UUID) {
+	t.Helper()
+
+	tenantID, _ := tenant.FromContext(ctx)
+	schemaName := tenantID.SchemaName()
+
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+	require.NoError(t, err)
+
+	_, err = tx.Exec(ctx, `UPDATE position SET deleted_at = NOW() WHERE id = $1`, positionID)
+	require.NoError(t, err)
+
+	require.NoError(t, tx.Commit(ctx))
+}
+
+// ============================================================================
+// E2E Test: Performance Baselines
+// ============================================================================
+
+// TestE2E_PerformanceBaselines verifies performance requirements are met.
+// These are baseline measurements, not strict SLAs, but help detect regressions.
+func TestE2E_PerformanceBaselines(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	tc := setupE2ETestPool(t)
+	ctx := setupTenantWithSchemas(t, tc.pool, "e2e_perf_tenant")
+
+	t.Run("Account creation under 100ms average", func(t *testing.T) {
+		const iterations = 50 // Reduced from 100 for faster CI
+		var totalDuration time.Duration
+
+		for i := 0; i < iterations; i++ {
+			start := time.Now()
+
+			_, err := tc.svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+				AccountCode:    fmt.Sprintf("PERF_ACC_%04d", i),
+				Name:           fmt.Sprintf("Performance Test Account %d", i),
+				AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+				InstrumentCode: "GBP",
+			})
+			require.NoError(t, err)
+
+			totalDuration += time.Since(start)
+		}
+
+		avgDuration := totalDuration / iterations
+		t.Logf("Average account creation time: %v (over %d iterations)", avgDuration, iterations)
+
+		// Assert average is under 100ms (testcontainer adds overhead)
+		assert.Less(t, avgDuration, 100*time.Millisecond,
+			"Account creation average %v exceeds 100ms baseline", avgDuration)
+	})
+
+	t.Run("Account retrieval under 50ms average", func(t *testing.T) {
+		// Create accounts to retrieve
+		const numAccounts = 20
+		codes := make([]string, numAccounts)
+		for i := 0; i < numAccounts; i++ {
+			code := fmt.Sprintf("RETRIEVE_ACC_%04d", i)
+			codes[i] = code
+			_, err := tc.svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+				AccountCode:    code,
+				Name:           fmt.Sprintf("Retrieval Test Account %d", i),
+				AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_HOLDING,
+				InstrumentCode: "EUR",
+			})
+			require.NoError(t, err)
+		}
+
+		// Measure retrieval times
+		const iterations = 50
+		var totalDuration time.Duration
+
+		for i := 0; i < iterations; i++ {
+			code := codes[i%numAccounts]
+
+			start := time.Now()
+			_, err := tc.svc.RetrieveInternalBankAccount(ctx, &pb.RetrieveInternalBankAccountRequest{
+				AccountId: code,
+			})
+			require.NoError(t, err)
+			totalDuration += time.Since(start)
+		}
+
+		avgDuration := totalDuration / iterations
+		t.Logf("Average account retrieval time: %v (over %d iterations)", avgDuration, iterations)
+
+		assert.Less(t, avgDuration, 50*time.Millisecond,
+			"Account retrieval average %v exceeds 50ms baseline", avgDuration)
+	})
+
+	t.Run("Balance query under 50ms average", func(t *testing.T) {
+		// Create account with positions
+		accountID := createAccount(t, ctx, tc.pool, "CLEARING", "BALANCE_PERF_ACC", "GBP", "Monetary")
+
+		// Insert multiple positions to make aggregation meaningful
+		for i := 0; i < 100; i++ {
+			insertPosition(t, tc.pool, ctx, accountID, "GBP", fmt.Sprintf("BUCKET_%d", i%10),
+				decimal.NewFromFloat(float64(i)*10.5), "Monetary", nil)
+		}
+
+		// Measure balance query times
+		const iterations = 50
+		var totalDuration time.Duration
+
+		for i := 0; i < iterations; i++ {
+			start := time.Now()
+			_ = getAggregatedBalance(t, tc.pool, ctx, accountID, "GBP")
+			totalDuration += time.Since(start)
+		}
+
+		avgDuration := totalDuration / iterations
+		t.Logf("Average balance query time: %v (over %d iterations)", avgDuration, iterations)
+
+		assert.Less(t, avgDuration, 50*time.Millisecond,
+			"Balance query average %v exceeds 50ms baseline", avgDuration)
+	})
+
+	t.Run("List accounts pagination under 50ms average", func(t *testing.T) {
+		// Create 50 accounts for pagination tests
+		for i := 0; i < 50; i++ {
+			_, err := tc.svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+				AccountCode:    fmt.Sprintf("LIST_ACC_%04d", i),
+				Name:           fmt.Sprintf("List Test Account %d", i),
+				AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_SUSPENSE,
+				InstrumentCode: "USD",
+			})
+			require.NoError(t, err)
+		}
+
+		// Measure list query times
+		const iterations = 30
+		var totalDuration time.Duration
+
+		for i := 0; i < iterations; i++ {
+			start := time.Now()
+			_, err := tc.svc.ListInternalBankAccounts(ctx, &pb.ListInternalBankAccountsRequest{
+				Pagination: &commonpb.Pagination{
+					PageSize: 10,
+				},
+			})
+			require.NoError(t, err)
+			totalDuration += time.Since(start)
+		}
+
+		avgDuration := totalDuration / iterations
+		t.Logf("Average list accounts time: %v (over %d iterations)", avgDuration, iterations)
+
+		assert.Less(t, avgDuration, 50*time.Millisecond,
+			"List accounts average %v exceeds 50ms baseline", avgDuration)
+	})
+
+	t.Run("Concurrent operations complete without deadlock", func(t *testing.T) {
+		const numWorkers = 10
+		const opsPerWorker = 5
+
+		var wg sync.WaitGroup
+		errChan := make(chan error, numWorkers*opsPerWorker)
+
+		for w := 0; w < numWorkers; w++ {
+			wg.Add(1)
+			workerID := w
+			go func() {
+				defer wg.Done()
+				for i := 0; i < opsPerWorker; i++ {
+					code := fmt.Sprintf("CONCURRENT_%d_%d", workerID, i)
+					_, err := tc.svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+						AccountCode:    code,
+						Name:           fmt.Sprintf("Concurrent Account %d-%d", workerID, i),
+						AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+						InstrumentCode: "GBP",
+					})
+					if err != nil {
+						errChan <- err
+					}
+				}
+			}()
+		}
+
+		// Wait with timeout to detect deadlocks
+		done := make(chan struct{})
+		go func() {
+			wg.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			// All workers completed
+		case <-time.After(30 * time.Second):
+			t.Fatal("Concurrent operations timed out - possible deadlock")
+		}
+
+		close(errChan)
+		for err := range errChan {
+			t.Errorf("Concurrent operation failed: %v", err)
+		}
+
+		// Verify all accounts were created
+		resp, err := tc.svc.ListInternalBankAccounts(ctx, &pb.ListInternalBankAccountsRequest{
+			Pagination: &commonpb.Pagination{
+				PageSize: 200,
+			},
+		})
+		require.NoError(t, err)
+
+		// Should have at least the concurrent accounts (plus any from other tests)
+		// Filter to count only CONCURRENT_ accounts
+		concurrentCount := 0
+		for _, f := range resp.Facilities {
+			if len(f.AccountCode) >= 11 && f.AccountCode[:11] == "CONCURRENT_" {
+				concurrentCount++
+			}
+		}
+		assert.Equal(t, numWorkers*opsPerWorker, concurrentCount,
+			"Expected %d concurrent accounts, found %d", numWorkers*opsPerWorker, concurrentCount)
+	})
 }

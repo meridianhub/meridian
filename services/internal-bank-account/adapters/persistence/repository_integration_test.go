@@ -6,6 +6,7 @@ package persistence
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -417,9 +418,10 @@ func TestIntegration_OptimisticLocking_Concurrent(t *testing.T) {
 			err = tc.repo.Save(ctx, renamed)
 
 			mu.Lock()
-			if err == nil {
+			switch {
+			case err == nil:
 				successCount++
-			} else if err == ErrVersionConflict {
+			case errors.Is(err, ErrVersionConflict):
 				conflictCount++
 			}
 			mu.Unlock()
@@ -1477,7 +1479,7 @@ func TestIntegration_LoadTest_ConcurrentCreation(t *testing.T) {
 	tc := setupIntegrationTestContainer(t)
 	defer tc.cleanup(t)
 
-	tid := tenant.TenantID(integrationTenantID)
+	tid := defaultTestTenantID
 	ctx := tenant.WithTenant(context.Background(), tid)
 	ctx = context.WithValue(ctx, auth.UserIDContextKey, "load-test-user")
 
@@ -1514,20 +1516,20 @@ func TestIntegration_LoadTest_ConcurrentCreation(t *testing.T) {
 	duration := time.Since(start)
 
 	// Collect errors
-	var errors []error
+	errs := make([]error, 0, len(errChan))
 	for err := range errChan {
-		errors = append(errors, err)
+		errs = append(errs, err)
 	}
 
 	// Verify results
-	assert.Empty(t, errors, "Should have no errors creating accounts")
+	assert.Empty(t, errs, "Should have no errors creating accounts")
 	assert.Less(t, duration, 30*time.Second, "Should complete in under 30 seconds")
 
 	t.Logf("Created %d accounts in %v (%.2f accounts/sec)",
 		numAccounts, duration, float64(numAccounts)/duration.Seconds())
 
 	// Verify all accounts were created
-	accounts, err := tc.repo.List(ctx, domain.ListFilter{PageSize: numAccounts + 10})
+	accounts, err := tc.repo.List(ctx, domain.ListFilter{Limit: numAccounts + 10})
 	require.NoError(t, err)
 	// Count accounts with LOAD_ prefix
 	loadAccountCount := 0

@@ -282,83 +282,6 @@ func loadBalanceTestSchema(t *testing.T, pool *pgxpool.Pool) {
 	require.NoError(t, err, "Failed to create audit_trail_entry table")
 }
 
-// createTestPositionLog creates a FinancialPositionLog with transactions for testing.
-func createTestPositionLog(t *testing.T, accountID string, entries []testTransactionEntry, openingBalance *domain.Money) *domain.FinancialPositionLog {
-	t.Helper()
-
-	var log *domain.FinancialPositionLog
-	var err error
-
-	if openingBalance != nil {
-		log, err = domain.NewFinancialPositionLogWithOpeningBalance(
-			accountID,
-			*openingBalance,
-			time.Now().UTC().Add(-24*time.Hour),
-			"TEST-MIGRATION",
-		)
-		require.NoError(t, err)
-	} else if len(entries) > 0 {
-		// Create with first entry
-		firstEntry := entries[0]
-		entry, err := domain.NewTransactionLogEntry(
-			uuid.New(),
-			accountID,
-			firstEntry.amount,
-			firstEntry.direction,
-			firstEntry.timestamp,
-			firstEntry.description,
-			firstEntry.reference,
-			domain.TransactionSourceManual,
-		)
-		require.NoError(t, err)
-
-		log, err = domain.NewFinancialPositionLog(accountID, entry, nil)
-		require.NoError(t, err)
-
-		// Add remaining entries
-		for _, e := range entries[1:] {
-			entry, err := domain.NewTransactionLogEntry(
-				uuid.New(),
-				accountID,
-				e.amount,
-				e.direction,
-				e.timestamp,
-				e.description,
-				e.reference,
-				domain.TransactionSourceManual,
-			)
-			require.NoError(t, err)
-			err = log.AddEntry(entry)
-			require.NoError(t, err)
-		}
-	} else {
-		// Create empty log with a minimal entry
-		entry, err := domain.NewTransactionLogEntry(
-			uuid.New(),
-			accountID,
-			domain.MustNewMoney(decimal.Zero, domain.CurrencyGBP),
-			domain.PostingDirectionDebit,
-			time.Now().UTC(),
-			"Initial entry",
-			"INIT-001",
-			domain.TransactionSourceManual,
-		)
-		require.NoError(t, err)
-		log, err = domain.NewFinancialPositionLog(accountID, entry, nil)
-		require.NoError(t, err)
-	}
-
-	return log
-}
-
-type testTransactionEntry struct {
-	amount      domain.Money
-	direction   domain.PostingDirection
-	timestamp   time.Time
-	description string
-	reference   string
-}
-
 // InMemoryCurrentAccountClient is a mock CurrentAccountClient for integration tests.
 type InMemoryCurrentAccountClient struct {
 	blocks map[string][]domain.AmountBlock
@@ -370,7 +293,7 @@ func NewInMemoryCurrentAccountClient() *InMemoryCurrentAccountClient {
 	}
 }
 
-func (c *InMemoryCurrentAccountClient) GetActiveAmountBlocks(ctx context.Context, accountID string) ([]domain.AmountBlock, error) {
+func (c *InMemoryCurrentAccountClient) GetActiveAmountBlocks(_ context.Context, accountID string) ([]domain.AmountBlock, error) {
 	if blocks, ok := c.blocks[accountID]; ok {
 		return blocks, nil
 	}
@@ -690,9 +613,9 @@ func TestIntegration_GetAccountBalance_CurrencyFiltering(t *testing.T) {
 
 	t.Run("returns balance when currency matches", func(t *testing.T) {
 		req := &positionkeepingv1.GetAccountBalanceRequest{
-			AccountId:   gbpAccountID,
-			BalanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
-			Currency:    "GBP",
+			AccountId:      gbpAccountID,
+			BalanceType:    positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
+			InstrumentCode: "GBP",
 		}
 
 		resp, err := tc.Service.GetAccountBalance(ctx, req)
@@ -702,9 +625,9 @@ func TestIntegration_GetAccountBalance_CurrencyFiltering(t *testing.T) {
 
 	t.Run("returns NotFound when currency does not match", func(t *testing.T) {
 		req := &positionkeepingv1.GetAccountBalanceRequest{
-			AccountId:   gbpAccountID,
-			BalanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
-			Currency:    "USD", // GBP account, requesting USD
+			AccountId:      gbpAccountID,
+			BalanceType:    positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
+			InstrumentCode: "USD", // GBP account, requesting USD
 		}
 
 		resp, err := tc.Service.GetAccountBalance(ctx, req)
@@ -715,9 +638,9 @@ func TestIntegration_GetAccountBalance_CurrencyFiltering(t *testing.T) {
 
 	t.Run("USD account returns USD balance", func(t *testing.T) {
 		req := &positionkeepingv1.GetAccountBalanceRequest{
-			AccountId:   usdAccountID,
-			BalanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
-			Currency:    "USD",
+			AccountId:      usdAccountID,
+			BalanceType:    positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
+			InstrumentCode: "USD",
 		}
 
 		resp, err := tc.Service.GetAccountBalance(ctx, req)
@@ -799,11 +722,11 @@ func TestIntegration_ConcurrentBalanceQueries(t *testing.T) {
 	close(resultChan)
 
 	// Collect and verify results
-	var errors []error
+	errs := make([]error, 0, len(errChan))
 	for err := range errChan {
-		errors = append(errors, err)
+		errs = append(errs, err)
 	}
-	assert.Empty(t, errors, "concurrent queries should not cause errors: %v", errors)
+	assert.Empty(t, errs, "concurrent queries should not cause errors: %v", errs)
 
 	// Verify all results are valid
 	resultCount := 0
