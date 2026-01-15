@@ -12,13 +12,14 @@ import (
 
 // Config holds all configuration for the position-keeping service
 type Config struct {
-	Server        ServerConfig
-	Database      DatabaseConfig
-	Kafka         KafkaConfig
-	Redis         RedisConfig
-	Auth          AuthConfig
-	Observability ObservabilityConfig
-	Compaction    CompactionConfig
+	Server            ServerConfig
+	Database          DatabaseConfig
+	Kafka             KafkaConfig
+	Redis             RedisConfig
+	Auth              AuthConfig
+	Observability     ObservabilityConfig
+	Compaction        CompactionConfig
+	AccountValidation AccountValidationConfig
 }
 
 // ServerConfig holds gRPC server configuration
@@ -117,16 +118,34 @@ type CompactionConfig struct {
 	BatchSize int
 }
 
+// AccountValidationConfig holds account validation configuration
+type AccountValidationConfig struct {
+	// Enabled indicates if account validation is enabled
+	// When enabled, the service validates that accounts exist in Current Account
+	// before creating position logs. Defaults to false for backwards compatibility.
+	Enabled bool
+	// CurrentAccountServiceURL is the gRPC address of the Current Account service
+	// Required when validation is enabled
+	CurrentAccountServiceURL string
+	// CacheTTL is how long to cache validation results
+	// Defaults to 1 minute if not specified
+	CacheTTL time.Duration
+	// ConnectionTimeout is the timeout for connecting to Current Account service
+	// Defaults to 5 seconds if not specified
+	ConnectionTimeout time.Duration
+}
+
 // LoadConfig loads configuration from environment variables with defaults
 func LoadConfig() (*Config, error) {
 	config := &Config{
-		Server:        loadServerConfig(),
-		Database:      loadDatabaseConfig(),
-		Kafka:         loadKafkaConfig(),
-		Redis:         loadRedisConfig(),
-		Auth:          loadAuthConfig(),
-		Observability: loadObservabilityConfig(),
-		Compaction:    loadCompactionConfig(),
+		Server:            loadServerConfig(),
+		Database:          loadDatabaseConfig(),
+		Kafka:             loadKafkaConfig(),
+		Redis:             loadRedisConfig(),
+		Auth:              loadAuthConfig(),
+		Observability:     loadObservabilityConfig(),
+		Compaction:        loadCompactionConfig(),
+		AccountValidation: loadAccountValidationConfig(),
 	}
 
 	if err := config.Validate(); err != nil {
@@ -219,6 +238,16 @@ func loadCompactionConfig() CompactionConfig {
 	}
 }
 
+// loadAccountValidationConfig loads account validation configuration from environment variables
+func loadAccountValidationConfig() AccountValidationConfig {
+	return AccountValidationConfig{
+		Enabled:                  env.GetEnvAsBool("ACCOUNT_VALIDATION_ENABLED", false),
+		CurrentAccountServiceURL: env.GetEnvOrDefault("CURRENT_ACCOUNT_SERVICE_URL", ""),
+		CacheTTL:                 env.GetEnvAsDuration("ACCOUNT_VALIDATION_CACHE_TTL", 1*time.Minute),
+		ConnectionTimeout:        env.GetEnvAsDuration("ACCOUNT_VALIDATION_CONNECTION_TIMEOUT", 5*time.Second),
+	}
+}
+
 // Validation errors
 var (
 	ErrEmptyPort                  = fmt.Errorf("server port must not be empty")
@@ -233,6 +262,8 @@ var (
 	ErrInvalidCompactionInterval  = fmt.Errorf("compaction run interval must be greater than zero")
 	ErrInvalidFragmentThreshold   = fmt.Errorf("compaction fragment threshold must be at least 2")
 	ErrInvalidCompactionBatchSize = fmt.Errorf("compaction batch size must be at least 1")
+	// ErrAccountValidationURLRequired is returned when account validation is enabled but URL is not provided
+	ErrAccountValidationURLRequired = fmt.Errorf("current account service URL is required when account validation is enabled")
 )
 
 // Validate validates the configuration
@@ -270,18 +301,34 @@ func (c *Config) Validate() error {
 		return ErrInvalidSamplingRate
 	}
 
-	// Compaction validation (only when enabled)
-	if c.Compaction.Enabled {
-		if c.Compaction.RunInterval <= 0 {
-			return ErrInvalidCompactionInterval
-		}
-		if c.Compaction.FragmentThreshold < 2 {
-			return ErrInvalidFragmentThreshold
-		}
-		if c.Compaction.BatchSize < 1 {
-			return ErrInvalidCompactionBatchSize
-		}
+	if err := c.Compaction.Validate(); err != nil {
+		return err
 	}
 
+	return c.AccountValidation.Validate()
+}
+
+// Validate validates the compaction configuration
+func (c *CompactionConfig) Validate() error {
+	if !c.Enabled {
+		return nil
+	}
+	if c.RunInterval <= 0 {
+		return ErrInvalidCompactionInterval
+	}
+	if c.FragmentThreshold < 2 {
+		return ErrInvalidFragmentThreshold
+	}
+	if c.BatchSize < 1 {
+		return ErrInvalidCompactionBatchSize
+	}
+	return nil
+}
+
+// Validate validates the account validation configuration
+func (c *AccountValidationConfig) Validate() error {
+	if c.Enabled && c.CurrentAccountServiceURL == "" {
+		return ErrAccountValidationURLRequired
+	}
 	return nil
 }

@@ -11,6 +11,7 @@ import (
 	"os"
 	"time"
 
+	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/meridianhub/meridian/services/position-keeping/app"
 	"github.com/meridianhub/meridian/services/position-keeping/observability"
@@ -26,6 +27,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 )
@@ -187,12 +189,68 @@ func run(logger *slog.Logger) error {
 		logger.Info("idempotency service disabled (Redis not configured)")
 	}
 
+	// Create account validator if validation is enabled
+	var serviceOpts []service.Option
+	var currentAccountConn *grpc.ClientConn
+
+	if config.AccountValidation.Enabled {
+		// Create gRPC connection to Current Account service
+		// Note: We use NewClient (non-blocking) with insecure credentials.
+		// Connection is established lazily on first RPC call.
+		var connErr error
+		currentAccountConn, connErr = grpc.NewClient(
+			config.AccountValidation.CurrentAccountServiceURL,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+		)
+
+		if connErr != nil {
+			return fmt.Errorf("failed to create current account client at %s: %w",
+				config.AccountValidation.CurrentAccountServiceURL, connErr)
+		}
+
+		// Create Current Account client
+		currentAccountClient := currentaccountv1.NewCurrentAccountServiceClient(currentAccountConn)
+
+		// Create account validator
+		validator, validatorErr := service.NewCurrentAccountValidator(service.CurrentAccountValidatorConfig{
+			Client:        &currentAccountClientAdapter{client: currentAccountClient},
+			Logger:        logger,
+			CacheTTL:      config.AccountValidation.CacheTTL,
+			LookupTimeout: config.AccountValidation.ConnectionTimeout,
+		})
+		if validatorErr != nil {
+			currentAccountConn.Close()
+			return fmt.Errorf("failed to create account validator: %w", validatorErr)
+		}
+
+		serviceOpts = append(serviceOpts,
+			service.WithAccountValidator(validator),
+			service.WithAccountValidationEnabled(true),
+		)
+
+		logger.Info("account validation enabled",
+			"current_account_service_url", config.AccountValidation.CurrentAccountServiceURL,
+			"cache_ttl", config.AccountValidation.CacheTTL)
+	} else {
+		logger.Info("account validation disabled")
+	}
+
+	// Ensure Current Account connection is closed on shutdown
+	defer func() {
+		if currentAccountConn != nil {
+			if err := currentAccountConn.Close(); err != nil {
+				logger.Error("failed to close current account connection", "error", err)
+			}
+		}
+	}()
+
 	// Create gRPC service
 	positionKeepingService, err := service.NewPositionKeepingService(
 		container.PositionLogRepository,
 		container.MeasurementRepository,
 		container.EventPublisher,
 		idempotencySvc,
+		serviceOpts...,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create position keeping service: %w", err)
@@ -459,4 +517,16 @@ func (h *healthServer) Watch(_ *grpc_health_v1.HealthCheckRequest, stream grpc_h
 			}
 		}
 	}
+}
+
+// currentAccountClientAdapter adapts the generated gRPC client to the service.CurrentAccountClient interface.
+// This adapter is needed because the service package defines its own interface for testability,
+// while the generated client has a different method signature.
+type currentAccountClientAdapter struct {
+	client currentaccountv1.CurrentAccountServiceClient
+}
+
+// RetrieveCurrentAccount implements service.CurrentAccountClient by delegating to the generated client.
+func (a *currentAccountClientAdapter) RetrieveCurrentAccount(ctx context.Context, req *currentaccountv1.RetrieveCurrentAccountRequest) (*currentaccountv1.RetrieveCurrentAccountResponse, error) {
+	return a.client.RetrieveCurrentAccount(ctx, req)
 }
