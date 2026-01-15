@@ -232,16 +232,6 @@ func runMigrations(t *testing.T, pool *pgxpool.Pool) {
 	require.NoError(t, err, "failed to create timestamp trigger")
 }
 
-// getTestdataPath returns the absolute path to a testdata file.
-func getTestdataPath(t *testing.T, filename string) string {
-	t.Helper()
-
-	// Use relative path from current working directory
-	cwd, err := os.Getwd()
-	require.NoError(t, err)
-	return filepath.Join(cwd, "cmd", "position-tool", "testdata", filename)
-}
-
 // computeFileChecksum calculates SHA256 checksum of a file.
 func computeFileChecksum(t *testing.T, filePath string) string {
 	t.Helper()
@@ -319,9 +309,8 @@ type importManifest struct {
 }
 
 // createManifest creates an import manifest record in the database.
-func createManifest(t *testing.T, pool *pgxpool.Pool, tenantID, sourceFile, checksum, status string, totalRows, processedRows, successCount, failureCount int) uuid.UUID {
+func createManifest(ctx context.Context, t *testing.T, pool *pgxpool.Pool, tenantID, sourceFile, checksum, status string, totalRows, processedRows, successCount, failureCount int) uuid.UUID {
 	t.Helper()
-	ctx := context.Background()
 
 	id := uuid.New()
 	_, err := pool.Exec(ctx, `
@@ -333,9 +322,8 @@ func createManifest(t *testing.T, pool *pgxpool.Pool, tenantID, sourceFile, chec
 }
 
 // updateManifest updates an import manifest record.
-func updateManifest(t *testing.T, pool *pgxpool.Pool, id uuid.UUID, status string, processedRows, successCount, failureCount int) {
+func updateManifest(ctx context.Context, t *testing.T, pool *pgxpool.Pool, id uuid.UUID, status string, processedRows, successCount, failureCount int) {
 	t.Helper()
-	ctx := context.Background()
 
 	_, err := pool.Exec(ctx, `
 		UPDATE import_manifest
@@ -343,28 +331,6 @@ func updateManifest(t *testing.T, pool *pgxpool.Pool, id uuid.UUID, status strin
 		WHERE id = $1
 	`, id, status, processedRows, successCount, failureCount)
 	require.NoError(t, err, "failed to update manifest")
-}
-
-// insertTestPositions inserts test positions for a given manifest.
-func insertTestPositions(t *testing.T, pool *pgxpool.Pool, count int, referenceID uuid.UUID) {
-	t.Helper()
-	ctx := context.Background()
-
-	repo := persistence.NewPositionRepository(pool)
-	for i := 0; i < count; i++ {
-		pos, err := domain.NewPosition(
-			fmt.Sprintf("ACC-%03d", i+1),
-			"CARBON_CREDIT",
-			"2024|VERRA",
-			decimal.NewFromFloat(100.0),
-			"Carbon",
-			map[string]string{"vintage_year": "2024", "registry": "VERRA"},
-			referenceID,
-			"test-system",
-		)
-		require.NoError(t, err)
-		require.NoError(t, repo.Insert(ctx, pos))
-	}
 }
 
 // TestIntegration_HappyPath_ImportValidCSV tests importing a valid CSV file with 100 rows.
@@ -392,7 +358,7 @@ func TestIntegration_HappyPath_ImportValidCSV(t *testing.T) {
 	checksum := computeFileChecksum(t, absPath)
 
 	// Create manifest to track import
-	manifestID := createManifest(t, tc.pool, tenantID, absPath, checksum, "RUNNING", 100, 0, 0, 0)
+	manifestID := createManifest(ctx, t, tc.pool, tenantID, absPath, checksum, "RUNNING", 100, 0, 0, 0)
 
 	// Simulate import by inserting positions via repository
 	// (In production this would be done by executeImport)
@@ -419,7 +385,7 @@ func TestIntegration_HappyPath_ImportValidCSV(t *testing.T) {
 	}
 
 	// Update manifest to completed
-	updateManifest(t, tc.pool, manifestID, "COMPLETED", 100, positionsInserted, 0)
+	updateManifest(ctx, t, tc.pool, manifestID, "COMPLETED", 100, positionsInserted, 0)
 
 	// Verify results
 	totalCount := countAllPositions(t, tc.pool)
@@ -458,7 +424,7 @@ func TestIntegration_DuplicateDetection(t *testing.T) {
 	checksum := computeFileChecksum(t, absPath)
 
 	// First import - should succeed
-	manifestID1 := createManifest(t, tc.pool, tenantID, absPath, checksum, "RUNNING", 10, 0, 0, 0)
+	manifestID1 := createManifest(ctx, t, tc.pool, tenantID, absPath, checksum, "RUNNING", 10, 0, 0, 0)
 
 	// Insert positions for first import
 	repo := persistence.NewPositionRepository(tc.pool)
@@ -477,7 +443,7 @@ func TestIntegration_DuplicateDetection(t *testing.T) {
 		require.NoError(t, repo.Insert(ctx, pos))
 	}
 
-	updateManifest(t, tc.pool, manifestID1, "COMPLETED", 10, 10, 0)
+	updateManifest(ctx, t, tc.pool, manifestID1, "COMPLETED", 10, 10, 0)
 
 	// Second import attempt with same file - should fail due to unique constraint
 	_, err = tc.pool.Exec(ctx, `
@@ -518,7 +484,7 @@ func TestIntegration_PartialFailure(t *testing.T) {
 	checksum := computeFileChecksum(t, absPath)
 
 	// Create manifest
-	manifestID := createManifest(t, tc.pool, tenantID, absPath, checksum, "RUNNING", 20, 0, 0, 0)
+	manifestID := createManifest(ctx, t, tc.pool, tenantID, absPath, checksum, "RUNNING", 20, 0, 0, 0)
 
 	// Simulate processing rows - some will fail validation
 	// Based on with_errors.csv:
@@ -555,7 +521,7 @@ func TestIntegration_PartialFailure(t *testing.T) {
 	failureCount = 6
 
 	// Update manifest with results
-	updateManifest(t, tc.pool, manifestID, "COMPLETED", 20, successCount, failureCount)
+	updateManifest(ctx, t, tc.pool, manifestID, "COMPLETED", 20, successCount, failureCount)
 
 	// Verify results
 	totalCount := countAllPositions(t, tc.pool)
@@ -592,7 +558,7 @@ func TestIntegration_ResumeFromCheckpoint(t *testing.T) {
 	checksum := "resume-test-checksum-" + uuid.New().String()[:8]
 
 	// Create manifest for import of 50 rows
-	manifestID := createManifest(t, tc.pool, tenantID, "test-resume.csv", checksum, "RUNNING", 50, 0, 0, 0)
+	manifestID := createManifest(ctx, t, tc.pool, tenantID, "test-resume.csv", checksum, "RUNNING", 50, 0, 0, 0)
 
 	repo := persistence.NewPositionRepository(tc.pool)
 
@@ -645,7 +611,7 @@ func TestIntegration_ResumeFromCheckpoint(t *testing.T) {
 	}
 
 	// Mark import complete
-	updateManifest(t, tc.pool, manifestID, "COMPLETED", 50, 50, 0)
+	updateManifest(ctx, t, tc.pool, manifestID, "COMPLETED", 50, 50, 0)
 
 	// Verify final results
 	totalCount := countAllPositions(t, tc.pool)
@@ -688,9 +654,9 @@ func TestIntegration_ManifestStatusTransitions(t *testing.T) {
 
 	t.Run("RUNNING to COMPLETED", func(t *testing.T) {
 		checksum := "status-test-completed-" + uuid.New().String()[:8]
-		manifestID := createManifest(t, tc.pool, tenantID, "test.csv", checksum, "RUNNING", 10, 0, 0, 0)
+		manifestID := createManifest(ctx, t, tc.pool, tenantID, "test.csv", checksum, "RUNNING", 10, 0, 0, 0)
 
-		updateManifest(t, tc.pool, manifestID, "COMPLETED", 10, 10, 0)
+		updateManifest(ctx, t, tc.pool, manifestID, "COMPLETED", 10, 10, 0)
 
 		var status string
 		err := tc.pool.QueryRow(ctx, "SELECT status FROM import_manifest WHERE id = $1", manifestID).Scan(&status)
@@ -700,7 +666,7 @@ func TestIntegration_ManifestStatusTransitions(t *testing.T) {
 
 	t.Run("RUNNING to FAILED", func(t *testing.T) {
 		checksum := "status-test-failed-" + uuid.New().String()[:8]
-		manifestID := createManifest(t, tc.pool, tenantID, "test.csv", checksum, "RUNNING", 10, 0, 0, 0)
+		manifestID := createManifest(ctx, t, tc.pool, tenantID, "test.csv", checksum, "RUNNING", 10, 0, 0, 0)
 
 		_, err := tc.pool.Exec(ctx, `
 			UPDATE import_manifest SET status = 'FAILED', failure_count = 10
@@ -716,7 +682,7 @@ func TestIntegration_ManifestStatusTransitions(t *testing.T) {
 
 	t.Run("RUNNING to CANCELLED", func(t *testing.T) {
 		checksum := "status-test-cancelled-" + uuid.New().String()[:8]
-		manifestID := createManifest(t, tc.pool, tenantID, "test.csv", checksum, "RUNNING", 10, 0, 0, 0)
+		manifestID := createManifest(ctx, t, tc.pool, tenantID, "test.csv", checksum, "RUNNING", 10, 0, 0, 0)
 
 		_, err := tc.pool.Exec(ctx, `
 			UPDATE import_manifest SET status = 'CANCELLED', processed_rows = 5
@@ -734,7 +700,7 @@ func TestIntegration_ManifestStatusTransitions(t *testing.T) {
 
 	t.Run("Invalid status rejected", func(t *testing.T) {
 		checksum := "status-test-invalid-" + uuid.New().String()[:8]
-		manifestID := createManifest(t, tc.pool, tenantID, "test.csv", checksum, "RUNNING", 10, 0, 0, 0)
+		manifestID := createManifest(ctx, t, tc.pool, tenantID, "test.csv", checksum, "RUNNING", 10, 0, 0, 0)
 
 		_, err := tc.pool.Exec(ctx, `
 			UPDATE import_manifest SET status = 'INVALID_STATUS'
