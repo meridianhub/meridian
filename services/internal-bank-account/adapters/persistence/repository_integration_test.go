@@ -1479,7 +1479,7 @@ func TestIntegration_LoadTest_ConcurrentCreation(t *testing.T) {
 	tc := setupIntegrationTestContainer(t)
 	defer tc.cleanup(t)
 
-	tid := tenant.TenantID("load_test_tenant")
+	tid := defaultTestTenantID
 	ctx := tenant.WithTenant(context.Background(), tid)
 	ctx = context.WithValue(ctx, auth.UserIDContextKey, "load-test-user")
 
