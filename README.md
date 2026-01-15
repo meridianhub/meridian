@@ -1,14 +1,33 @@
 # Meridian
 
-**Trust Your Numbers.** Open-source treasury infrastructure for the modern economy.
+**Trust Your Numbers.** Source-available treasury infrastructure for the modern economy.
 
 > **Status: Active Development** | Core ledger, audit trails, and saga orchestration implemented.
 > Valuation/settlement integrations are architectural placeholders.
 
+## Editions
+
+Meridian is available in two editions:
+
+| Capability | Meridian Core | Meridian Enterprise |
+| :--- | :---: | :---: |
+| **Double-Entry Ledger** | Yes | Yes |
+| **Multi-Asset Support** (Crypto, Commodities, kWh) | Yes | Yes |
+| **BIAN-Compliant Architecture** | Yes | Yes |
+| **Atomic Audit Trails** | Yes | Yes |
+| **Saga Orchestration** | Yes | Yes |
+| **Valuation** | Static Rates | Dynamic Engine (CEL + Market Data) |
+| **Billing** | Manual API Trigger | Automated Settlement Workers |
+| **Payments** | Log / No-Op | Stripe / Adyen / SWIFT Integration |
+| **Marketplace** | Atomic Swaps | Revenue Splitting and Fan-out |
+| **Tenancy** | Single Schema | Multi-Tenant / Schema-per-Tenant |
+
+*All current code is Meridian Core. Enterprise features are on the roadmap.*
+
 ## Mission
 
 When your system accuses someone of a shortfall, you need absolute certainty. Meridian is
-open-source treasury infrastructure designed to prove itself - every position recorded with
+source-available treasury infrastructure designed to prove itself - every position recorded with
 atomic audit trails, every transaction path traceable, every balance verifiable.
 
 ### Measure
@@ -323,10 +342,18 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines on:
 
 ## License
 
-Apache License 2.0 - See LICENSE file for details.
+Business Source License 1.1 - See [LICENSE](LICENSE) file for details.
+
+**What this means:**
+
+- You can read, use, and modify the code for development and internal use
+- You cannot offer a commercial Billing, Ledger, or Treasury-as-a-Service that competes with Meridian Hub
+- On January 14, 2030, this version automatically converts to Apache License 2.0
+
+This is the same licensing model used by CockroachDB, MariaDB, and HashiCorp.
 
 ## Disclaimer
 
-This software is provided "as-is" under the Apache License 2.0. Before deploying in production environments, ensure
-thorough security audits, compliance verification, and testing appropriate for your regulatory requirements and risk
-profile.
+This software is provided "as-is" under the Business Source License 1.1. Before deploying in production environments,
+ensure thorough security audits, compliance verification, and testing appropriate for your regulatory requirements
+and risk profile.
