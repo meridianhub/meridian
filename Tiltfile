@@ -86,6 +86,7 @@ db_urls = {
   'position_keeping': os.getenv('POSITION_KEEPING_DATABASE_URL', 'postgres://meridian_position_keeping_user@cockroachdb:26257/meridian_position_keeping?sslmode=disable'),
   'payment_order': os.getenv('PAYMENT_ORDER_DATABASE_URL', 'postgres://meridian_payment_order_user@cockroachdb:26257/meridian_payment_order?sslmode=disable'),
   'party': os.getenv('PARTY_DATABASE_URL', 'postgres://meridian_party_user@cockroachdb:26257/meridian_party?sslmode=disable'),
+  'internal_bank_account': os.getenv('INTERNAL_BANK_ACCOUNT_DATABASE_URL', 'postgres://meridian_internal_bank_account_user@cockroachdb:26257/meridian_internal_bank_account?sslmode=disable'),
 }
 
 # NOTE: Migrations now run as Kubernetes Jobs inside the cluster
@@ -464,15 +465,16 @@ k8s_resource(
 # If updating ports here, ensure shared/platform/ports/ports.go is also updated.
 #
 # Port assignments:
-#   - CurrentAccount:      50051
-#   - FinancialAccounting: 50052
-#   - PositionKeeping:     50053
-#   - PaymentOrder:        50054
-#   - Party:               50055
-#   - Tenant:              50056
-#   - Gateway (HTTP):      8080
-#   - HTTPHealth:          8081
-#   - HTTPMetrics:         9090
+#   - CurrentAccount:       50051
+#   - FinancialAccounting:  50052
+#   - PositionKeeping:      50053
+#   - PaymentOrder:         50054
+#   - Party:                50055
+#   - Tenant:               50056
+#   - InternalBankAccount:  50057
+#   - Gateway (HTTP):       8080
+#   - HTTPHealth:           8081
+#   - HTTPMetrics:          9090
 
 # Current-Account Service - gRPC microservice for customer and account management
 grpc_microservice(
@@ -514,6 +516,13 @@ grpc_microservice(
     'party',
     grpc_port=50055,  # ports.Party
     resource_deps=['cockroachdb', 'migrate-party'],
+)
+
+# Internal-Bank-Account Service - gRPC microservice for internal account management
+grpc_microservice(
+    'internal-bank-account',
+    grpc_port=50057,  # ports.InternalBankAccount
+    resource_deps=['cockroachdb', 'migrate-internal-bank-account', 'position-keeping', 'current-account'],
 )
 
 # =============================================================================
@@ -720,6 +729,13 @@ migration_job(
   resource_deps=['init-database'],  # Independent database, only needs init to complete
 )
 
+migration_job(
+  'migrate-internal-bank-account',
+  'internal-bank-account',
+  'internal_bank_account',
+  resource_deps=['init-database'],  # Independent database, only needs init to complete
+)
+
 # Kafka cluster health check - runs automatically after kafka-cluster is ready
 local_resource(
   'kafka-health',
@@ -779,6 +795,7 @@ Microservices:
   • Payment-Order          → localhost:50054 (gRPC)
   • Party                  → localhost:50055 (gRPC)
   • Tenant                 → localhost:50056 (gRPC)
+  • Internal-Bank-Account  → localhost:50057 (gRPC)
 
 Gateway:
   • HTTP Gateway           → localhost:8090 (subdomain routing)
@@ -815,19 +832,21 @@ Database Architecture (database-per-service):
     - meridian_position_keeping
     - meridian_payment_order
     - meridian_party
+    - meridian_internal_bank_account
   • Within each database: org schemas for multi-tenant isolation
   • Tables use singular, unqualified names (search_path routing)
   • See ADR-0003 for architecture details
 
 Database Migrations:
-  • Migrations run automatically on startup (6 resources):
+  • Migrations run automatically on startup (7 resources):
     1. current_account → meridian_current_account (account, lien, audit tables)
     2. financial_accounting → meridian_financial_accounting (ledger, booking)
     3. position_keeping → meridian_position_keeping (positions, transactions)
     4. payment_order → meridian_payment_order (payment orders, saga state)
     5. party → meridian_party (party reference data)
     6. tenant → meridian_platform (tenant registry)
-  • Parallel execution: current_account + financial_accounting + party + tenant
+    7. internal_bank_account → meridian_internal_bank_account (internal accounts)
+  • Parallel execution: current_account + financial_accounting + party + tenant + internal_bank_account
   • Sequential dependencies:
     - position_keeping waits for current_account (Account FK)
     - payment_order waits for current_account (Account FK)
@@ -838,6 +857,7 @@ Database Migrations:
     - tilt trigger migrate-payment-order
     - tilt trigger migrate-party
     - tilt trigger migrate-tenant
+    - tilt trigger migrate-internal-bank-account
 
 Testing Kafka Failover:
   kubectl delete pod kafka-1  # Kill broker
