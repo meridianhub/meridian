@@ -121,6 +121,7 @@ func (r *Repository) Save(ctx context.Context, account domain.InternalBankAccoun
 					"account_code":               entity.AccountCode,
 					"name":                       entity.Name,
 					"status":                     entity.Status,
+					"clearing_purpose":           entity.ClearingPurpose,
 					"correspondent_bank_id":      entity.CorrespondentBankID,
 					"correspondent_bank_name":    entity.CorrespondentBankName,
 					"correspondent_external_ref": entity.CorrespondentExternalRef,
@@ -250,6 +251,9 @@ func (r *Repository) List(ctx context.Context, filter domain.ListFilter) ([]doma
 		}
 		if filter.Status != nil {
 			query = query.Where("status = ?", string(*filter.Status))
+		}
+		if filter.ClearingPurpose != nil {
+			query = query.Where("clearing_purpose = ?", string(*filter.ClearingPurpose))
 		}
 
 		// Apply pagination

@@ -46,4 +46,15 @@ var (
 
 	// ErrNameRequired indicates the account name was not provided.
 	ErrNameRequired = errors.New("name is required")
+
+	// ErrInvalidClearingPurpose indicates an unrecognized clearing purpose was provided.
+	ErrInvalidClearingPurpose = errors.New("invalid clearing purpose")
+
+	// ErrClearingPurposeNotAllowed indicates that a clearing purpose was specified
+	// for an account type that is not CLEARING.
+	ErrClearingPurposeNotAllowed = errors.New("clearing purpose only allowed for CLEARING account type")
+
+	// ErrClearingPurposeRequired indicates that a CLEARING account was created
+	// without specifying a clearing purpose (cannot be UNSPECIFIED).
+	ErrClearingPurposeRequired = errors.New("clearing purpose required for CLEARING account type")
 )

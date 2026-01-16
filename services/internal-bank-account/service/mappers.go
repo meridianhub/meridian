@@ -21,18 +21,22 @@ var ErrUnknownAccountType = errors.New("unknown account type")
 // ErrUnknownAccountStatus is returned when an account status value is not recognized.
 var ErrUnknownAccountStatus = errors.New("unknown account status")
 
+// ErrUnknownClearingPurpose is returned when a clearing purpose value is not recognized.
+var ErrUnknownClearingPurpose = errors.New("unknown clearing purpose")
+
 // toProtoFacility converts a domain InternalBankAccount to a proto InternalBankAccountFacility.
 func toProtoFacility(account domain.InternalBankAccount) *pb.InternalBankAccountFacility {
 	facility := &pb.InternalBankAccountFacility{
-		AccountId:      account.AccountID(),
-		AccountCode:    account.AccountCode(),
-		Name:           account.Name(),
-		AccountType:    accountTypeToProto(account.AccountType()),
-		AccountStatus:  accountStatusToProto(account.Status()),
-		InstrumentCode: account.InstrumentCode(),
-		CreatedAt:      timestamppb.New(account.CreatedAt()),
-		UpdatedAt:      timestamppb.New(account.UpdatedAt()),
-		Version:        int32(account.Version()),
+		AccountId:       account.AccountID(),
+		AccountCode:     account.AccountCode(),
+		Name:            account.Name(),
+		AccountType:     accountTypeToProto(account.AccountType()),
+		ClearingPurpose: clearingPurposeToProto(account.ClearingPurpose()),
+		AccountStatus:   accountStatusToProto(account.Status()),
+		InstrumentCode:  account.InstrumentCode(),
+		CreatedAt:       timestamppb.New(account.CreatedAt()),
+		UpdatedAt:       timestamppb.New(account.UpdatedAt()),
+		Version:         int32(account.Version()),
 	}
 
 	// Map correspondent details if present
@@ -128,6 +132,42 @@ func accountStatusToProto(as domain.AccountStatus) pb.InternalAccountStatus {
 	}
 }
 
+// protoToClearingPurpose converts a proto ClearingPurpose to a domain ClearingPurpose.
+func protoToClearingPurpose(pc pb.ClearingPurpose) (domain.ClearingPurpose, error) {
+	switch pc {
+	case pb.ClearingPurpose_CLEARING_PURPOSE_UNSPECIFIED:
+		return domain.ClearingPurposeUnspecified, nil
+	case pb.ClearingPurpose_CLEARING_PURPOSE_DEPOSIT:
+		return domain.ClearingPurposeDeposit, nil
+	case pb.ClearingPurpose_CLEARING_PURPOSE_WITHDRAWAL:
+		return domain.ClearingPurposeWithdrawal, nil
+	case pb.ClearingPurpose_CLEARING_PURPOSE_SETTLEMENT:
+		return domain.ClearingPurposeSettlement, nil
+	case pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL:
+		return domain.ClearingPurposeGeneral, nil
+	default:
+		return "", fmt.Errorf("%w: %v", ErrUnknownClearingPurpose, pc)
+	}
+}
+
+// clearingPurposeToProto converts a domain ClearingPurpose to a proto ClearingPurpose.
+func clearingPurposeToProto(cp domain.ClearingPurpose) pb.ClearingPurpose {
+	switch cp {
+	case domain.ClearingPurposeDeposit:
+		return pb.ClearingPurpose_CLEARING_PURPOSE_DEPOSIT
+	case domain.ClearingPurposeWithdrawal:
+		return pb.ClearingPurpose_CLEARING_PURPOSE_WITHDRAWAL
+	case domain.ClearingPurposeSettlement:
+		return pb.ClearingPurpose_CLEARING_PURPOSE_SETTLEMENT
+	case domain.ClearingPurposeGeneral:
+		return pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL
+	case domain.ClearingPurposeUnspecified:
+		return pb.ClearingPurpose_CLEARING_PURPOSE_UNSPECIFIED
+	default:
+		return pb.ClearingPurpose_CLEARING_PURPOSE_UNSPECIFIED
+	}
+}
+
 // correspondentTypeFromAccountType returns the correspondent type based on account type.
 func correspondentTypeFromAccountType(at domain.AccountType) pb.CorrespondentType {
 	switch at {
@@ -169,7 +209,10 @@ func mapDomainErrorToGRPC(err error) error {
 		return status.Error(codes.Aborted, err.Error())
 	case errors.Is(err, domain.ErrAccountIDRequired),
 		errors.Is(err, domain.ErrAccountCodeRequired),
-		errors.Is(err, domain.ErrNameRequired):
+		errors.Is(err, domain.ErrNameRequired),
+		errors.Is(err, domain.ErrInvalidClearingPurpose),
+		errors.Is(err, domain.ErrClearingPurposeNotAllowed),
+		errors.Is(err, domain.ErrClearingPurposeRequired):
 		return status.Error(codes.InvalidArgument, err.Error())
 	default:
 		return status.Errorf(codes.Internal, "internal error: %v", err)

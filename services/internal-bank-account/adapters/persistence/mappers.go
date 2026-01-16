@@ -34,12 +34,20 @@ func toEntity(ctx context.Context, account domain.InternalBankAccount) *Internal
 		attributes = make(AttributesJSON)
 	}
 
+	// Handle nullable clearing_purpose field
+	var clearingPurpose *string
+	if cp := account.ClearingPurpose(); cp != "" && cp != domain.ClearingPurposeUnspecified {
+		cpStr := string(cp)
+		clearingPurpose = &cpStr
+	}
+
 	return &InternalBankAccountEntity{
 		ID:                       account.ID(),
 		AccountID:                account.AccountID(),
 		AccountCode:              account.AccountCode(),
 		Name:                     account.Name(),
 		AccountType:              string(account.AccountType()),
+		ClearingPurpose:          clearingPurpose,
 		InstrumentCode:           account.InstrumentCode(),
 		Dimension:                account.Dimension(),
 		Status:                   string(account.Status()),
@@ -78,6 +86,12 @@ func toDomain(entity *InternalBankAccountEntity) domain.InternalBankAccount {
 		}
 	}
 
+	// Handle nullable clearing_purpose - default to UNSPECIFIED if nil
+	clearingPurpose := domain.ClearingPurposeUnspecified
+	if entity.ClearingPurpose != nil {
+		clearingPurpose = domain.ClearingPurpose(*entity.ClearingPurpose)
+	}
+
 	// Use builder pattern to reconstruct domain model
 	return domain.NewInternalBankAccountBuilder().
 		WithID(entity.ID).
@@ -85,6 +99,7 @@ func toDomain(entity *InternalBankAccountEntity) domain.InternalBankAccount {
 		WithAccountCode(entity.AccountCode).
 		WithName(entity.Name).
 		WithAccountType(domain.AccountType(entity.AccountType)).
+		WithClearingPurpose(clearingPurpose).
 		WithInstrumentCode(entity.InstrumentCode).
 		WithDimension(entity.Dimension).
 		WithStatus(domain.AccountStatus(entity.Status)).

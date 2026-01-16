@@ -41,6 +41,9 @@ type InternalBankAccountEntity struct {
 	// Account status
 	Status string `gorm:"column:status;type:varchar(20);not null;default:'ACTIVE';index"`
 
+	// Clearing purpose (only meaningful for CLEARING account type)
+	ClearingPurpose *string `gorm:"column:clearing_purpose;type:varchar(32)"`
+
 	// Correspondent bank details (nullable for non-nostro/vostro accounts)
 	CorrespondentBankID      *string `gorm:"column:correspondent_bank_id;type:varchar(50)"`
 	CorrespondentBankName    *string `gorm:"column:correspondent_bank_name;type:varchar(255)"`

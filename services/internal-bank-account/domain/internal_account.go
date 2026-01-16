@@ -19,19 +19,20 @@ import (
 // - REVENUE: Tracking income and revenue streams
 // - EXPENSE: Tracking operational expenses
 type InternalBankAccount struct {
-	id             uuid.UUID
-	accountID      string // Business identifier like 'IBA-001'
-	accountCode    string // Unique code like 'GBP_CLEARING'
-	name           string // Display name
-	accountType    AccountType
-	instrumentCode string // References Reference Data (e.g., "USD", "GBP")
-	dimension      string // From reference_data (e.g., "CURRENCY", "ENERGY")
-	status         AccountStatus
-	correspondent  *CorrespondentDetails // Required for NOSTRO/VOSTRO
-	attributes     map[string]string     // Metadata
-	version        int64
-	createdAt      time.Time
-	updatedAt      time.Time
+	id              uuid.UUID
+	accountID       string // Business identifier like 'IBA-001'
+	accountCode     string // Unique code like 'GBP_CLEARING'
+	name            string // Display name
+	accountType     AccountType
+	clearingPurpose ClearingPurpose // Only meaningful for CLEARING accounts
+	instrumentCode  string          // References Reference Data (e.g., "USD", "GBP")
+	dimension       string          // From reference_data (e.g., "CURRENCY", "ENERGY")
+	status          AccountStatus
+	correspondent   *CorrespondentDetails // Required for NOSTRO/VOSTRO
+	attributes      map[string]string     // Metadata
+	version         int64
+	createdAt       time.Time
+	updatedAt       time.Time
 }
 
 // NewInternalBankAccount creates a new InternalBankAccount with validated fields.
@@ -45,9 +46,12 @@ type InternalBankAccount struct {
 // Validation:
 //   - accountID, accountCode, name cannot be empty
 //   - accountType must be valid
+//   - clearingPurpose must be valid if provided
+//   - clearingPurpose can only be non-UNSPECIFIED for CLEARING accounts
 func NewInternalBankAccount(
 	accountID, accountCode, name string,
 	accountType AccountType,
+	clearingPurpose ClearingPurpose,
 	instrumentCode, dimension string,
 ) (InternalBankAccount, error) {
 	if accountID == "" {
@@ -62,22 +66,34 @@ func NewInternalBankAccount(
 	if !accountType.IsValid() {
 		return InternalBankAccount{}, ErrInvalidAccountType
 	}
+	if !clearingPurpose.IsValid() {
+		return InternalBankAccount{}, ErrInvalidClearingPurpose
+	}
+	// Non-CLEARING accounts must not have a specific clearing purpose
+	if accountType != AccountTypeClearing && clearingPurpose != ClearingPurposeUnspecified {
+		return InternalBankAccount{}, ErrClearingPurposeNotAllowed
+	}
+	// CLEARING accounts must have a specific clearing purpose (not UNSPECIFIED)
+	if accountType == AccountTypeClearing && clearingPurpose == ClearingPurposeUnspecified {
+		return InternalBankAccount{}, ErrClearingPurposeRequired
+	}
 
 	now := time.Now()
 	return InternalBankAccount{
-		id:             uuid.New(),
-		accountID:      accountID,
-		accountCode:    accountCode,
-		name:           name,
-		accountType:    accountType,
-		instrumentCode: instrumentCode,
-		dimension:      dimension,
-		status:         AccountStatusActive,
-		correspondent:  nil,
-		attributes:     nil,
-		version:        1,
-		createdAt:      now,
-		updatedAt:      now,
+		id:              uuid.New(),
+		accountID:       accountID,
+		accountCode:     accountCode,
+		name:            name,
+		accountType:     accountType,
+		clearingPurpose: clearingPurpose,
+		instrumentCode:  instrumentCode,
+		dimension:       dimension,
+		status:          AccountStatusActive,
+		correspondent:   nil,
+		attributes:      nil,
+		version:         1,
+		createdAt:       now,
+		updatedAt:       now,
 	}, nil
 }
 
@@ -209,6 +225,12 @@ func (a InternalBankAccount) AccountType() AccountType {
 	return a.accountType
 }
 
+// ClearingPurpose returns the clearing purpose.
+// Only meaningful for CLEARING account type; returns UNSPECIFIED for other types.
+func (a InternalBankAccount) ClearingPurpose() ClearingPurpose {
+	return a.clearingPurpose
+}
+
 // InstrumentCode returns the instrument code reference (e.g., "USD", "GBP").
 func (a InternalBankAccount) InstrumentCode() string {
 	return a.instrumentCode
@@ -299,6 +321,12 @@ func (b *InternalBankAccountBuilder) WithName(name string) *InternalBankAccountB
 // WithAccountType sets the account type.
 func (b *InternalBankAccountBuilder) WithAccountType(accountType AccountType) *InternalBankAccountBuilder {
 	b.account.accountType = accountType
+	return b
+}
+
+// WithClearingPurpose sets the clearing purpose.
+func (b *InternalBankAccountBuilder) WithClearingPurpose(clearingPurpose ClearingPurpose) *InternalBankAccountBuilder {
+	b.account.clearingPurpose = clearingPurpose
 	return b
 }
 

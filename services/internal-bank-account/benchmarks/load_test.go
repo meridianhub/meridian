@@ -61,10 +61,11 @@ func BenchmarkConcurrentWrites(b *testing.B) {
 		for pbt.Next() {
 			id := atomic.AddInt64(&counter, 1)
 			req := &pb.InitiateInternalBankAccountRequest{
-				AccountCode:    fmt.Sprintf("CONC-%08d", id),
-				Name:           fmt.Sprintf("Concurrent Test Account %d", id),
-				AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-				InstrumentCode: "USD",
+				AccountCode:     fmt.Sprintf("CONC-%08d", id),
+				Name:            fmt.Sprintf("Concurrent Test Account %d", id),
+				AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+				ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
+				InstrumentCode:  "USD",
 			}
 
 			_, err := tc.service.InitiateInternalBankAccount(ctx, req)
@@ -139,10 +140,11 @@ func BenchmarkMixedWorkloadWithBalance(b *testing.B) {
 		default: // 10% creates
 			id := atomic.AddInt64(&createCounter, 1)
 			req := &pb.InitiateInternalBankAccountRequest{
-				AccountCode:    fmt.Sprintf("MIXED-%08d", id+1000),
-				Name:           fmt.Sprintf("Mixed Workload Account %d", id),
-				AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-				InstrumentCode: "USD",
+				AccountCode:     fmt.Sprintf("MIXED-%08d", id+1000),
+				Name:            fmt.Sprintf("Mixed Workload Account %d", id),
+				AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+				ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
+				InstrumentCode:  "USD",
 			}
 			_, err := tc.service.InitiateInternalBankAccount(ctx, req)
 			if err != nil {
@@ -194,10 +196,11 @@ func BenchmarkMixedWorkloadParallel(b *testing.B) {
 			default: // 10% creates
 				id := atomic.AddInt64(&createCounter, 1)
 				req := &pb.InitiateInternalBankAccountRequest{
-					AccountCode:    fmt.Sprintf("MIXPAR-%08d", id+10000),
-					Name:           fmt.Sprintf("Mixed Parallel Account %d", id),
-					AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-					InstrumentCode: "USD",
+					AccountCode:     fmt.Sprintf("MIXPAR-%08d", id+10000),
+					Name:            fmt.Sprintf("Mixed Parallel Account %d", id),
+					AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+					ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
+					InstrumentCode:  "USD",
 				}
 				_, err := tc.service.InitiateInternalBankAccount(ctx, req)
 				if err != nil {
@@ -335,10 +338,11 @@ func TestThroughputMixedWorkload(t *testing.T) {
 				default: // 10% creates
 					id := atomic.AddInt64(&createCounter, 1)
 					req := &pb.InitiateInternalBankAccountRequest{
-						AccountCode:    fmt.Sprintf("THRU-%d-%08d", workerID, id),
-						Name:           fmt.Sprintf("Throughput Account %d", id),
-						AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-						InstrumentCode: "USD",
+						AccountCode:     fmt.Sprintf("THRU-%d-%08d", workerID, id),
+						Name:            fmt.Sprintf("Throughput Account %d", id),
+						AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+						ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
+						InstrumentCode:  "USD",
 					}
 					_, err := tc.service.InitiateInternalBankAccount(ctx, req)
 					if err != nil {
@@ -467,10 +471,11 @@ func TestConcurrentMixedOperations(t *testing.T) {
 			default: // 10% creates
 				id := atomic.AddInt64(&createCounter, 1)
 				req := &pb.InitiateInternalBankAccountRequest{
-					AccountCode:    fmt.Sprintf("CMIX-%08d", id),
-					Name:           fmt.Sprintf("Concurrent Mixed Account %d", id),
-					AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-					InstrumentCode: "USD",
+					AccountCode:     fmt.Sprintf("CMIX-%08d", id),
+					Name:            fmt.Sprintf("Concurrent Mixed Account %d", id),
+					AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+					ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
+					InstrumentCode:  "USD",
 				}
 				_, err := tc.service.InitiateInternalBankAccount(ctx, req)
 				if err != nil {
@@ -518,10 +523,11 @@ func TestConcurrentWriteContention(t *testing.T) {
 			defer wg.Done()
 
 			req := &pb.InitiateInternalBankAccountRequest{
-				AccountCode:    fmt.Sprintf("CONT-%08d", idx),
-				Name:           fmt.Sprintf("Contention Test Account %d", idx),
-				AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-				InstrumentCode: "USD",
+				AccountCode:     fmt.Sprintf("CONT-%08d", idx),
+				Name:            fmt.Sprintf("Contention Test Account %d", idx),
+				AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+				ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
+				InstrumentCode:  "USD",
 			}
 
 			_, err := tc.service.InitiateInternalBankAccount(ctx, req)

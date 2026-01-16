@@ -155,7 +155,8 @@ func setupTestContainer(t *testing.T) *testContainer {
 		correspondent_bank_name VARCHAR(255),
 		correspondent_external_ref VARCHAR(100),
 		attributes JSONB NOT NULL DEFAULT '{}',
-		version BIGINT NOT NULL DEFAULT 1
+		version BIGINT NOT NULL DEFAULT 1,
+		clearing_purpose VARCHAR(32) NULL
 	)`, schemaName)).Error
 	if err != nil {
 		t.Fatalf("Failed to create internal_bank_account table: %v", err)
@@ -231,12 +232,19 @@ func setupTestContainer(t *testing.T) *testContainer {
 func createBenchAccount(tb testing.TB, tc *testContainer, accountCode string, accountType domain.AccountType) domain.InternalBankAccount {
 	tb.Helper()
 
+	// CLEARING accounts require a specific purpose; use GENERAL for benchmarks
+	clearingPurpose := domain.ClearingPurposeUnspecified
+	if accountType == domain.AccountTypeClearing {
+		clearingPurpose = domain.ClearingPurposeGeneral
+	}
+
 	accountID := fmt.Sprintf("IBA-%s", uuid.New().String())
 	account, err := domain.NewInternalBankAccount(
 		accountID,
 		accountCode,
 		fmt.Sprintf("Benchmark %s Account", accountType),
 		accountType,
+		clearingPurpose,
 		"GBP",
 		"CURRENCY",
 	)
@@ -272,6 +280,12 @@ func createBenchAccounts(tb testing.TB, tc *testContainer, count int) []domain.I
 		accountType := accountTypes[i%len(accountTypes)]
 		instrumentCode := instrumentCodes[i%len(instrumentCodes)]
 
+		// CLEARING accounts require a specific purpose; use GENERAL for benchmarks
+		clearingPurpose := domain.ClearingPurposeUnspecified
+		if accountType == domain.AccountTypeClearing {
+			clearingPurpose = domain.ClearingPurposeGeneral
+		}
+
 		accountID := fmt.Sprintf("IBA-%s", uuid.New().String())
 		accountCode := fmt.Sprintf("BENCH_%s_%04d", accountType, i)
 
@@ -280,6 +294,7 @@ func createBenchAccounts(tb testing.TB, tc *testContainer, count int) []domain.I
 			accountCode,
 			fmt.Sprintf("Benchmark %s Account %d", accountType, i),
 			accountType,
+			clearingPurpose,
 			instrumentCode,
 			"CURRENCY",
 		)

@@ -12,6 +12,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// ptr returns a pointer to the given string value.
+func ptr(s string) *string {
+	return &s
+}
+
 // createTestContextForMappers creates a context with audit information for mapper tests.
 func createTestContextForMappers() context.Context {
 	ctx := context.Background()
@@ -28,6 +33,7 @@ func TestToEntity_BasicFields(t *testing.T) {
 		"GBP_CLEARING",
 		"GBP Clearing Account",
 		domain.AccountTypeClearing,
+		domain.ClearingPurposeDeposit,
 		"GBP",
 		"CURRENCY",
 	)
@@ -42,6 +48,8 @@ func TestToEntity_BasicFields(t *testing.T) {
 	assert.Equal(t, account.AccountCode(), entity.AccountCode)
 	assert.Equal(t, account.Name(), entity.Name)
 	assert.Equal(t, string(account.AccountType()), entity.AccountType)
+	require.NotNil(t, entity.ClearingPurpose)
+	assert.Equal(t, string(account.ClearingPurpose()), *entity.ClearingPurpose)
 	assert.Equal(t, account.InstrumentCode(), entity.InstrumentCode)
 	assert.Equal(t, account.Dimension(), entity.Dimension)
 	assert.Equal(t, string(account.Status()), entity.Status)
@@ -69,6 +77,7 @@ func TestToEntity_WithCorrespondent(t *testing.T) {
 		"USD_NOSTRO_CITI",
 		"USD NOSTRO at Citibank",
 		domain.AccountTypeNostro,
+		domain.ClearingPurposeUnspecified,
 		"USD",
 		"CURRENCY",
 	)
@@ -132,6 +141,7 @@ func TestToEntity_NilAttributes(t *testing.T) {
 		"GBP_BASIC",
 		"GBP Basic Account",
 		domain.AccountTypeClearing,
+		domain.ClearingPurposeGeneral, // CLEARING accounts require a specific purpose
 		"GBP",
 		"CURRENCY",
 	)
@@ -150,20 +160,21 @@ func TestToDomain_BasicFields(t *testing.T) {
 	entityID := uuid.New()
 
 	entity := &InternalBankAccountEntity{
-		ID:             entityID,
-		AccountID:      "IBA-MAP-010",
-		AccountCode:    "EUR_CLEARING",
-		Name:           "EUR Clearing Account",
-		AccountType:    "CLEARING",
-		InstrumentCode: "EUR",
-		Dimension:      "CURRENCY",
-		Status:         "ACTIVE",
-		Version:        1,
-		CreatedAt:      now,
-		UpdatedAt:      now,
-		CreatedBy:      "system",
-		UpdatedBy:      "system",
-		Attributes:     make(AttributesJSON),
+		ID:              entityID,
+		AccountID:       "IBA-MAP-010",
+		AccountCode:     "EUR_CLEARING",
+		Name:            "EUR Clearing Account",
+		AccountType:     "CLEARING",
+		ClearingPurpose: ptr("CLEARING_PURPOSE_SETTLEMENT"),
+		InstrumentCode:  "EUR",
+		Dimension:       "CURRENCY",
+		Status:          "ACTIVE",
+		Version:         1,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		CreatedBy:       "system",
+		UpdatedBy:       "system",
+		Attributes:      make(AttributesJSON),
 	}
 
 	// Convert to domain
@@ -175,6 +186,7 @@ func TestToDomain_BasicFields(t *testing.T) {
 	assert.Equal(t, "EUR_CLEARING", account.AccountCode())
 	assert.Equal(t, "EUR Clearing Account", account.Name())
 	assert.Equal(t, domain.AccountTypeClearing, account.AccountType())
+	assert.Equal(t, domain.ClearingPurposeSettlement, account.ClearingPurpose())
 	assert.Equal(t, "EUR", account.InstrumentCode())
 	assert.Equal(t, "CURRENCY", account.Dimension())
 	assert.Equal(t, domain.AccountStatusActive, account.Status())
@@ -197,6 +209,7 @@ func TestToDomain_WithCorrespondent(t *testing.T) {
 		AccountCode:              "USD_NOSTRO_CITI",
 		Name:                     "USD NOSTRO at Citibank",
 		AccountType:              "NOSTRO",
+		ClearingPurpose:          nil, // NOSTRO accounts don't have clearing purpose
 		InstrumentCode:           "USD",
 		Dimension:                "CURRENCY",
 		Status:                   "ACTIVE",
@@ -226,14 +239,15 @@ func TestToDomain_WithAttributes(t *testing.T) {
 	now := time.Now()
 
 	entity := &InternalBankAccountEntity{
-		ID:             uuid.New(),
-		AccountID:      "IBA-MAP-012",
-		AccountCode:    "GBP_SPECIAL",
-		Name:           "GBP Special Account",
-		AccountType:    "CLEARING",
-		InstrumentCode: "GBP",
-		Dimension:      "CURRENCY",
-		Status:         "ACTIVE",
+		ID:              uuid.New(),
+		AccountID:       "IBA-MAP-012",
+		AccountCode:     "GBP_SPECIAL",
+		Name:            "GBP Special Account",
+		AccountType:     "CLEARING",
+		ClearingPurpose: ptr("CLEARING_PURPOSE_GENERAL"),
+		InstrumentCode:  "GBP",
+		Dimension:       "CURRENCY",
+		Status:          "ACTIVE",
 		Attributes: AttributesJSON{
 			"cost_center": "CC001",
 			"department":  "Treasury",
@@ -263,20 +277,21 @@ func TestToDomain_EmptyAttributes(t *testing.T) {
 	now := time.Now()
 
 	entity := &InternalBankAccountEntity{
-		ID:             uuid.New(),
-		AccountID:      "IBA-MAP-013",
-		AccountCode:    "GBP_BASIC",
-		Name:           "GBP Basic Account",
-		AccountType:    "CLEARING",
-		InstrumentCode: "GBP",
-		Dimension:      "CURRENCY",
-		Status:         "ACTIVE",
-		Attributes:     make(AttributesJSON),
-		Version:        1,
-		CreatedAt:      now,
-		UpdatedAt:      now,
-		CreatedBy:      "system",
-		UpdatedBy:      "system",
+		ID:              uuid.New(),
+		AccountID:       "IBA-MAP-013",
+		AccountCode:     "GBP_BASIC",
+		Name:            "GBP Basic Account",
+		AccountType:     "CLEARING",
+		ClearingPurpose: nil, // nil means unspecified
+		InstrumentCode:  "GBP",
+		Dimension:       "CURRENCY",
+		Status:          "ACTIVE",
+		Attributes:      make(AttributesJSON),
+		Version:         1,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		CreatedBy:       "system",
+		UpdatedBy:       "system",
 	}
 
 	// Convert to domain
@@ -304,20 +319,21 @@ func TestToDomain_AllAccountTypes(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.entityType, func(t *testing.T) {
 			entity := &InternalBankAccountEntity{
-				ID:             uuid.New(),
-				AccountID:      "IBA-TYPE-" + tc.entityType,
-				AccountCode:    "CODE_" + tc.entityType,
-				Name:           tc.entityType + " Account",
-				AccountType:    tc.entityType,
-				InstrumentCode: "GBP",
-				Dimension:      "CURRENCY",
-				Status:         "ACTIVE",
-				Attributes:     make(AttributesJSON),
-				Version:        1,
-				CreatedAt:      time.Now(),
-				UpdatedAt:      time.Now(),
-				CreatedBy:      "system",
-				UpdatedBy:      "system",
+				ID:              uuid.New(),
+				AccountID:       "IBA-TYPE-" + tc.entityType,
+				AccountCode:     "CODE_" + tc.entityType,
+				Name:            tc.entityType + " Account",
+				AccountType:     tc.entityType,
+				ClearingPurpose: nil, // nil means unspecified
+				InstrumentCode:  "GBP",
+				Dimension:       "CURRENCY",
+				Status:          "ACTIVE",
+				Attributes:      make(AttributesJSON),
+				Version:         1,
+				CreatedAt:       time.Now(),
+				UpdatedAt:       time.Now(),
+				CreatedBy:       "system",
+				UpdatedBy:       "system",
 			}
 
 			account := toDomain(entity)
@@ -340,26 +356,121 @@ func TestToDomain_AllStatuses(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.entityStatus, func(t *testing.T) {
 			entity := &InternalBankAccountEntity{
-				ID:             uuid.New(),
-				AccountID:      "IBA-STATUS-" + tc.entityStatus,
-				AccountCode:    "CODE_" + tc.entityStatus,
-				Name:           tc.entityStatus + " Account",
-				AccountType:    "CLEARING",
-				InstrumentCode: "GBP",
-				Dimension:      "CURRENCY",
-				Status:         tc.entityStatus,
-				Attributes:     make(AttributesJSON),
-				Version:        1,
-				CreatedAt:      time.Now(),
-				UpdatedAt:      time.Now(),
-				CreatedBy:      "system",
-				UpdatedBy:      "system",
+				ID:              uuid.New(),
+				AccountID:       "IBA-STATUS-" + tc.entityStatus,
+				AccountCode:     "CODE_" + tc.entityStatus,
+				Name:            tc.entityStatus + " Account",
+				AccountType:     "CLEARING",
+				ClearingPurpose: nil, // nil means unspecified
+				InstrumentCode:  "GBP",
+				Dimension:       "CURRENCY",
+				Status:          tc.entityStatus,
+				Attributes:      make(AttributesJSON),
+				Version:         1,
+				CreatedAt:       time.Now(),
+				UpdatedAt:       time.Now(),
+				CreatedBy:       "system",
+				UpdatedBy:       "system",
 			}
 
 			account := toDomain(entity)
 			assert.Equal(t, tc.domainStatus, account.Status())
 		})
 	}
+}
+
+// TestToDomain_AllClearingPurposes tests mapping for all clearing purpose values.
+func TestToDomain_AllClearingPurposes(t *testing.T) {
+	testCases := []struct {
+		name          string
+		entityPurpose *string
+		domainPurpose domain.ClearingPurpose
+	}{
+		{"nil (unspecified)", nil, domain.ClearingPurposeUnspecified},
+		{"DEPOSIT", ptr("CLEARING_PURPOSE_DEPOSIT"), domain.ClearingPurposeDeposit},
+		{"WITHDRAWAL", ptr("CLEARING_PURPOSE_WITHDRAWAL"), domain.ClearingPurposeWithdrawal},
+		{"SETTLEMENT", ptr("CLEARING_PURPOSE_SETTLEMENT"), domain.ClearingPurposeSettlement},
+		{"GENERAL", ptr("CLEARING_PURPOSE_GENERAL"), domain.ClearingPurposeGeneral},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			entity := &InternalBankAccountEntity{
+				ID:              uuid.New(),
+				AccountID:       "IBA-PURPOSE-" + tc.name,
+				AccountCode:     "CODE_" + tc.name,
+				Name:            tc.name + " Purpose Account",
+				AccountType:     "CLEARING",
+				ClearingPurpose: tc.entityPurpose,
+				InstrumentCode:  "GBP",
+				Dimension:       "CURRENCY",
+				Status:          "ACTIVE",
+				Attributes:      make(AttributesJSON),
+				Version:         1,
+				CreatedAt:       time.Now(),
+				UpdatedAt:       time.Now(),
+				CreatedBy:       "system",
+				UpdatedBy:       "system",
+			}
+
+			account := toDomain(entity)
+			assert.Equal(t, tc.domainPurpose, account.ClearingPurpose())
+		})
+	}
+}
+
+// TestToEntity_ClearingPurpose tests that toEntity correctly maps clearing purpose field.
+func TestToEntity_ClearingPurpose(t *testing.T) {
+	ctx := createTestContextForMappers()
+
+	// Test specific clearing purposes for CLEARING accounts
+	testCases := []struct {
+		name            string
+		clearingPurpose domain.ClearingPurpose
+	}{
+		{"Deposit", domain.ClearingPurposeDeposit},
+		{"Withdrawal", domain.ClearingPurposeWithdrawal},
+		{"Settlement", domain.ClearingPurposeSettlement},
+		{"General", domain.ClearingPurposeGeneral},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			account, err := domain.NewInternalBankAccount(
+				"IBA-CP-"+tc.name,
+				"CODE_"+tc.name,
+				tc.name+" Clearing Account",
+				domain.AccountTypeClearing,
+				tc.clearingPurpose,
+				"GBP",
+				"CURRENCY",
+			)
+			require.NoError(t, err)
+
+			entity := toEntity(ctx, account)
+
+			require.NotNil(t, entity.ClearingPurpose)
+			assert.Equal(t, string(tc.clearingPurpose), *entity.ClearingPurpose)
+		})
+	}
+
+	// Test that non-CLEARING accounts with UNSPECIFIED purpose have nil ClearingPurpose
+	t.Run("Unspecified_NonClearing", func(t *testing.T) {
+		account, err := domain.NewInternalBankAccount(
+			"IBA-CP-Unspecified",
+			"CODE_Unspecified",
+			"Holding Account with Unspecified Purpose",
+			domain.AccountTypeHolding, // Non-CLEARING account type
+			domain.ClearingPurposeUnspecified,
+			"GBP",
+			"CURRENCY",
+		)
+		require.NoError(t, err)
+
+		entity := toEntity(ctx, account)
+
+		assert.Nil(t, entity.ClearingPurpose)
+	})
 }
 
 // TestRoundTrip_BasicAccount tests domain -> entity -> domain preserves equality.
@@ -372,6 +483,7 @@ func TestRoundTrip_BasicAccount(t *testing.T) {
 		"GBP_CLEARING",
 		"GBP Clearing Account",
 		domain.AccountTypeClearing,
+		domain.ClearingPurposeGeneral,
 		"GBP",
 		"CURRENCY",
 	)
@@ -387,6 +499,7 @@ func TestRoundTrip_BasicAccount(t *testing.T) {
 	assert.Equal(t, original.AccountCode(), reconstructed.AccountCode())
 	assert.Equal(t, original.Name(), reconstructed.Name())
 	assert.Equal(t, original.AccountType(), reconstructed.AccountType())
+	assert.Equal(t, original.ClearingPurpose(), reconstructed.ClearingPurpose())
 	assert.Equal(t, original.InstrumentCode(), reconstructed.InstrumentCode())
 	assert.Equal(t, original.Dimension(), reconstructed.Dimension())
 	assert.Equal(t, original.Status(), reconstructed.Status())
@@ -403,6 +516,7 @@ func TestRoundTrip_WithCorrespondent(t *testing.T) {
 		"USD_NOSTRO_CITI",
 		"USD NOSTRO at Citibank",
 		domain.AccountTypeNostro,
+		domain.ClearingPurposeUnspecified,
 		"USD",
 		"CURRENCY",
 	)
@@ -472,6 +586,7 @@ func TestRoundTrip_VostroAccount(t *testing.T) {
 		"EUR_VOSTRO_DB",
 		"EUR VOSTRO from Deutsche Bank",
 		domain.AccountTypeVostro,
+		domain.ClearingPurposeUnspecified,
 		"EUR",
 		"CURRENCY",
 	)
@@ -513,6 +628,7 @@ func TestRoundTrip_SuspendedStatus(t *testing.T) {
 		"GBP_SUSPENDED",
 		"GBP Suspended Account",
 		domain.AccountTypeClearing,
+		domain.ClearingPurposeGeneral, // CLEARING accounts require a specific purpose
 		"GBP",
 		"CURRENCY",
 	)
@@ -645,6 +761,7 @@ func TestToDomain_PartialCorrespondent(t *testing.T) {
 			AccountCode:         "TEST",
 			Name:                "Test Account",
 			AccountType:         "CLEARING",
+			ClearingPurpose:     nil, // nil means unspecified
 			InstrumentCode:      "GBP",
 			Dimension:           "CURRENCY",
 			Status:              "ACTIVE",
@@ -673,6 +790,7 @@ func TestToDomain_PartialCorrespondent(t *testing.T) {
 			AccountCode:           "TEST",
 			Name:                  "Test Account",
 			AccountType:           "CLEARING",
+			ClearingPurpose:       nil, // nil means unspecified
 			InstrumentCode:        "GBP",
 			Dimension:             "CURRENCY",
 			Status:                "ACTIVE",

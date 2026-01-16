@@ -41,6 +41,7 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 		account_code VARCHAR(50) NOT NULL,
 		name VARCHAR(255) NOT NULL,
 		account_type VARCHAR(20) NOT NULL,
+		clearing_purpose VARCHAR(32) NULL,
 		instrument_code VARCHAR(32) NOT NULL,
 		dimension VARCHAR(20) NOT NULL,
 		status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
@@ -80,11 +81,32 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 
 func createTestAccount(t *testing.T, accountID, accountCode, name string, accountType domain.AccountType) domain.InternalBankAccount {
 	t.Helper()
+	// CLEARING accounts require a specific purpose; use GENERAL for tests
+	clearingPurpose := domain.ClearingPurposeUnspecified
+	if accountType == domain.AccountTypeClearing {
+		clearingPurpose = domain.ClearingPurposeGeneral
+	}
 	account, err := domain.NewInternalBankAccount(
 		accountID,
 		accountCode,
 		name,
 		accountType,
+		clearingPurpose,
+		"GBP",
+		"CURRENCY",
+	)
+	require.NoError(t, err)
+	return account
+}
+
+func createTestAccountWithClearingPurpose(t *testing.T, accountID, accountCode, name string, accountType domain.AccountType, clearingPurpose domain.ClearingPurpose) domain.InternalBankAccount {
+	t.Helper()
+	account, err := domain.NewInternalBankAccount(
+		accountID,
+		accountCode,
+		name,
+		accountType,
+		clearingPurpose,
 		"GBP",
 		"CURRENCY",
 	)
@@ -212,6 +234,58 @@ func TestListWithFilters(t *testing.T) {
 	assert.Len(t, results, 3)
 }
 
+func TestListWithClearingPurposeFilter(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+
+	// Create clearing accounts with different purposes
+	depositAcc := createTestAccountWithClearingPurpose(t, "IBA-CP-001", "CLR_DEPOSIT", "Deposit Clearing", domain.AccountTypeClearing, domain.ClearingPurposeDeposit)
+	withdrawalAcc := createTestAccountWithClearingPurpose(t, "IBA-CP-002", "CLR_WITHDRAWAL", "Withdrawal Clearing", domain.AccountTypeClearing, domain.ClearingPurposeWithdrawal)
+	settlementAcc := createTestAccountWithClearingPurpose(t, "IBA-CP-003", "CLR_SETTLEMENT", "Settlement Clearing", domain.AccountTypeClearing, domain.ClearingPurposeSettlement)
+	generalAcc := createTestAccountWithClearingPurpose(t, "IBA-CP-004", "CLR_GENERAL", "General Clearing", domain.AccountTypeClearing, domain.ClearingPurposeGeneral)
+
+	require.NoError(t, repo.Save(ctx, depositAcc))
+	require.NoError(t, repo.Save(ctx, withdrawalAcc))
+	require.NoError(t, repo.Save(ctx, settlementAcc))
+	require.NoError(t, repo.Save(ctx, generalAcc))
+
+	// Filter by clearing purpose - DEPOSIT
+	depositPurpose := domain.ClearingPurposeDeposit
+	filter := domain.ListFilter{ClearingPurpose: &depositPurpose}
+	results, err := repo.List(ctx, filter)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "CLR_DEPOSIT", results[0].AccountCode())
+	assert.Equal(t, domain.ClearingPurposeDeposit, results[0].ClearingPurpose())
+
+	// Filter by clearing purpose - SETTLEMENT
+	settlementPurpose := domain.ClearingPurposeSettlement
+	filter = domain.ListFilter{ClearingPurpose: &settlementPurpose}
+	results, err = repo.List(ctx, filter)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "CLR_SETTLEMENT", results[0].AccountCode())
+
+	// Combine filters: account type + clearing purpose
+	clearingType := domain.AccountTypeClearing
+	filter = domain.ListFilter{
+		AccountType:     &clearingType,
+		ClearingPurpose: &depositPurpose,
+	}
+	results, err = repo.List(ctx, filter)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "CLR_DEPOSIT", results[0].AccountCode())
+
+	// No filter returns all accounts
+	filter = domain.ListFilter{}
+	results, err = repo.List(ctx, filter)
+	require.NoError(t, err)
+	assert.Len(t, results, 4)
+}
+
 func TestOptimisticLocking(t *testing.T) {
 	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
@@ -271,6 +345,7 @@ func TestTenantIsolation(t *testing.T) {
 			account_code VARCHAR(50) NOT NULL,
 			name VARCHAR(255) NOT NULL,
 			account_type VARCHAR(20) NOT NULL,
+			clearing_purpose VARCHAR(32) NULL,
 			instrument_code VARCHAR(32) NOT NULL,
 			dimension VARCHAR(20) NOT NULL,
 			status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
@@ -337,6 +412,7 @@ func TestCorrespondentDetails(t *testing.T) {
 		"USD_NOSTRO_CITI",
 		"USD NOSTRO at Citibank",
 		domain.AccountTypeNostro,
+		domain.ClearingPurposeUnspecified,
 		"USD",
 		"CURRENCY",
 	)
@@ -412,6 +488,7 @@ func TestRoundTripMapping(t *testing.T) {
 		"EUR_VOSTRO_DB",
 		"EUR VOSTRO from Deutsche Bank",
 		domain.AccountTypeVostro,
+		domain.ClearingPurposeUnspecified,
 		"EUR",
 		"CURRENCY",
 	)
