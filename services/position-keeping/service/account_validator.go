@@ -9,6 +9,7 @@ import (
 
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	internalbankaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_bank_account/v1"
+	"github.com/meridianhub/meridian/shared/pkg/clients"
 	"golang.org/x/sync/singleflight"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -154,7 +155,7 @@ func (v *CurrentAccountValidator) ValidateExists(ctx context.Context, accountID 
 		v.mu.RUnlock()
 
 		// Create a timeout context for the lookup to enable faster fallback
-		lookupCtx, cancel := context.WithTimeout(ctx, v.lookupTimeout)
+		lookupCtx, cancel := clients.WithTimeout(ctx, v.lookupTimeout)
 		defer cancel()
 
 		// Query the Current Account service
@@ -349,7 +350,7 @@ func (v *InternalBankAccountValidator) ValidateExists(ctx context.Context, accou
 		v.mu.RUnlock()
 
 		// Create a timeout context for the lookup to enable faster fallback
-		lookupCtx, cancel := context.WithTimeout(ctx, v.lookupTimeout)
+		lookupCtx, cancel := clients.WithTimeout(ctx, v.lookupTimeout)
 		defer cancel()
 
 		// Query the Internal Bank Account service
