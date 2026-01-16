@@ -551,6 +551,39 @@ message DataSource {
 }
 
 // =============================================================================
+// Domain Events (FR-2.8: Market Data Switch)
+// =============================================================================
+
+// ObservationRecorded is published when an ACTUAL or VERIFIED observation is ingested.
+// Topic: meridian.market_information.v1.ObservationRecorded
+// This enables real-time valuation triggers and event-driven downstream processing.
+message ObservationRecorded {
+  // observation_id is the unique identifier of the recorded observation.
+  string observation_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // dataset_code identifies the dataset this observation belongs to.
+  string dataset_code = 2;
+
+  // resolution_key is the computed temporal lookup key.
+  string resolution_key = 3;
+
+  // value is the observed price/rate/measurement (decimal string).
+  string value = 4;
+
+  // observed_at is when the observation was captured at source (event time).
+  google.protobuf.Timestamp observed_at = 5;
+
+  // quality indicates the authority level of this observation.
+  QualityLevel quality = 6;
+
+  // source_id references the data source that provided this observation.
+  string source_id = 7;
+
+  // recorded_at is when this event was published (system time).
+  google.protobuf.Timestamp recorded_at = 8;
+}
+
+// =============================================================================
 // Request/Response Messages
 // =============================================================================
 
@@ -1238,20 +1271,9 @@ when retrieving schema metadata for validation or interpretation.
 #### ObservationRecorded Event (FR-2.8)
 
 Published to Kafka when an ACTUAL or VERIFIED observation is successfully ingested.
+See `ObservationRecorded` message in the Proto Definitions section above.
 
-```protobuf
-// Topic: meridian.market_information.v1.ObservationRecorded
-message ObservationRecorded {
-  string observation_id = 1;
-  string dataset_code = 2;
-  string resolution_key = 3;
-  string value = 4;
-  google.protobuf.Timestamp observed_at = 5;
-  QualityLevel quality = 6;
-  string source_id = 7;
-  google.protobuf.Timestamp recorded_at = 8;  // When the event was published
-}
-```
+**Topic:** `meridian.market_information.v1.ObservationRecorded`
 
 This enables:
 
