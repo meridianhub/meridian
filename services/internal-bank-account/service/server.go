@@ -167,12 +167,20 @@ func (s *Service) InitiateInternalBankAccount(ctx context.Context, req *pb.Initi
 	// Generate account ID using full UUID for uniqueness
 	accountID := fmt.Sprintf("IBA-%s", uuid.New().String())
 
+	// Convert clearing purpose from proto to domain
+	clearingPurpose, err := protoToClearingPurpose(req.ClearingPurpose)
+	if err != nil {
+		operationStatus = operationStatusFailed
+		return nil, status.Errorf(codes.InvalidArgument, "invalid clearing purpose: %v", err)
+	}
+
 	// Create domain entity with dimension from Reference Data
 	account, err := domain.NewInternalBankAccount(
 		accountID,
 		req.AccountCode,
 		req.Name,
 		accountType,
+		clearingPurpose,
 		req.InstrumentCode,
 		dimension,
 	)
@@ -439,6 +447,14 @@ func (s *Service) ListInternalBankAccounts(ctx context.Context, req *pb.ListInte
 		accountStatus, err := protoToAccountStatus(req.StatusFilter)
 		if err == nil {
 			filter.Status = &accountStatus
+		}
+	}
+
+	// Apply clearing purpose filter
+	if req.ClearingPurposeFilter != pb.ClearingPurpose_CLEARING_PURPOSE_UNSPECIFIED {
+		clearingPurpose, err := protoToClearingPurpose(req.ClearingPurposeFilter)
+		if err == nil {
+			filter.ClearingPurpose = &clearingPurpose
 		}
 	}
 

@@ -223,6 +223,7 @@ func createTestAccountIntegration(t *testing.T, accountID, accountCode, name str
 		accountCode,
 		name,
 		accountType,
+		domain.ClearingPurposeUnspecified,
 		"GBP",
 		"CURRENCY",
 	)
@@ -519,6 +520,7 @@ func TestIntegration_CorrespondentDetails(t *testing.T) {
 		"USD_NOSTRO_CITI",
 		"USD NOSTRO at Citibank",
 		domain.AccountTypeNostro,
+		domain.ClearingPurposeUnspecified,
 		"USD",
 		"CURRENCY",
 	)
@@ -1287,6 +1289,7 @@ func createBenchAccount(accountID, accountCode, name string, accountType domain.
 		accountCode,
 		name,
 		accountType,
+		domain.ClearingPurposeUnspecified,
 		"GBP",
 		"CURRENCY",
 	)

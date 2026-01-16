@@ -155,7 +155,8 @@ func setupTestContainer(t *testing.T) *testContainer {
 		correspondent_bank_name VARCHAR(255),
 		correspondent_external_ref VARCHAR(100),
 		attributes JSONB NOT NULL DEFAULT '{}',
-		version BIGINT NOT NULL DEFAULT 1
+		version BIGINT NOT NULL DEFAULT 1,
+		clearing_purpose VARCHAR(32) NULL
 	)`, schemaName)).Error
 	if err != nil {
 		t.Fatalf("Failed to create internal_bank_account table: %v", err)
@@ -237,6 +238,7 @@ func createBenchAccount(tb testing.TB, tc *testContainer, accountCode string, ac
 		accountCode,
 		fmt.Sprintf("Benchmark %s Account", accountType),
 		accountType,
+		domain.ClearingPurposeUnspecified,
 		"GBP",
 		"CURRENCY",
 	)
@@ -280,6 +282,7 @@ func createBenchAccounts(tb testing.TB, tc *testContainer, count int) []domain.I
 			accountCode,
 			fmt.Sprintf("Benchmark %s Account %d", accountType, i),
 			accountType,
+			domain.ClearingPurposeUnspecified,
 			instrumentCode,
 			"CURRENCY",
 		)

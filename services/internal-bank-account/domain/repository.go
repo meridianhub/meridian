@@ -46,6 +46,10 @@ type ListFilter struct {
 	// Status filters by account status. Nil matches all statuses.
 	Status *AccountStatus
 
+	// ClearingPurpose filters by clearing purpose. Nil matches all purposes.
+	// Only meaningful when filtering for CLEARING account types.
+	ClearingPurpose *ClearingPurpose
+
 	// Limit specifies the maximum number of results to return.
 	// Zero or negative values use the implementation's default limit.
 	Limit int

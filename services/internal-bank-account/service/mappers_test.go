@@ -183,6 +183,7 @@ func TestToProtoFacility(t *testing.T) {
 		"CLR-001",
 		"Test Clearing Account",
 		domain.AccountTypeClearing,
+		domain.ClearingPurposeDeposit,
 		"USD",
 		"CURRENCY",
 	)
@@ -194,6 +195,7 @@ func TestToProtoFacility(t *testing.T) {
 	assert.Equal(t, "CLR-001", facility.AccountCode)
 	assert.Equal(t, "Test Clearing Account", facility.Name)
 	assert.Equal(t, pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING, facility.AccountType)
+	assert.Equal(t, pb.ClearingPurpose_CLEARING_PURPOSE_DEPOSIT, facility.ClearingPurpose)
 	assert.Equal(t, pb.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE, facility.AccountStatus)
 	assert.Equal(t, "USD", facility.InstrumentCode)
 	assert.Nil(t, facility.CorrespondentDetails)
@@ -209,6 +211,7 @@ func TestToProtoFacility_WithCorrespondent(t *testing.T) {
 		"NOSTRO-USD-HSBC",
 		"HSBC USD Nostro",
 		domain.AccountTypeNostro,
+		domain.ClearingPurposeUnspecified,
 		"USD",
 		"CURRENCY",
 	)
@@ -235,4 +238,55 @@ func TestToProtoFacility_WithCorrespondent(t *testing.T) {
 	assert.Equal(t, "12345678", facility.CorrespondentDetails.ExternalAccountRef)
 	assert.Equal(t, "HSBCGB2L", facility.CorrespondentDetails.SwiftCode)
 	assert.Equal(t, pb.CorrespondentType_CORRESPONDENT_TYPE_NOSTRO, facility.CorrespondentDetails.CorrespondentType)
+}
+
+func TestProtoToClearingPurpose(t *testing.T) {
+	testCases := []struct {
+		name     string
+		proto    pb.ClearingPurpose
+		expected domain.ClearingPurpose
+		wantErr  bool
+	}{
+		{"Unspecified", pb.ClearingPurpose_CLEARING_PURPOSE_UNSPECIFIED, domain.ClearingPurposeUnspecified, false},
+		{"Deposit", pb.ClearingPurpose_CLEARING_PURPOSE_DEPOSIT, domain.ClearingPurposeDeposit, false},
+		{"Withdrawal", pb.ClearingPurpose_CLEARING_PURPOSE_WITHDRAWAL, domain.ClearingPurposeWithdrawal, false},
+		{"Settlement", pb.ClearingPurpose_CLEARING_PURPOSE_SETTLEMENT, domain.ClearingPurposeSettlement, false},
+		{"General", pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL, domain.ClearingPurposeGeneral, false},
+		{"Unknown", pb.ClearingPurpose(999), "", true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := protoToClearingPurpose(tc.proto)
+			if tc.wantErr {
+				assert.Error(t, err)
+				assert.ErrorIs(t, err, ErrUnknownClearingPurpose)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tc.expected, result)
+			}
+		})
+	}
+}
+
+func TestClearingPurposeToProto(t *testing.T) {
+	testCases := []struct {
+		name     string
+		domain   domain.ClearingPurpose
+		expected pb.ClearingPurpose
+	}{
+		{"Unspecified", domain.ClearingPurposeUnspecified, pb.ClearingPurpose_CLEARING_PURPOSE_UNSPECIFIED},
+		{"Deposit", domain.ClearingPurposeDeposit, pb.ClearingPurpose_CLEARING_PURPOSE_DEPOSIT},
+		{"Withdrawal", domain.ClearingPurposeWithdrawal, pb.ClearingPurpose_CLEARING_PURPOSE_WITHDRAWAL},
+		{"Settlement", domain.ClearingPurposeSettlement, pb.ClearingPurpose_CLEARING_PURPOSE_SETTLEMENT},
+		{"General", domain.ClearingPurposeGeneral, pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL},
+		{"Unknown", domain.ClearingPurpose("UNKNOWN"), pb.ClearingPurpose_CLEARING_PURPOSE_UNSPECIFIED},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := clearingPurposeToProto(tc.domain)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
 }
