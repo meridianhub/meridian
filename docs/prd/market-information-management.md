@@ -19,12 +19,14 @@ instructions: |
 # PRD: Market Information Management Service
 
 **Status:** Draft
-**Version:** 1.1
+**Version:** 1.2
 **Date:** 2026-01-16
 **Author:** Architecture Team
 
 **Version History:**
 
+- v1.2 (2026-01-16): PR review feedback - causation_id in request, UpdateDataSource/
+  DeactivateDataSource RPCs, structured batch errors, CEL map conversion docs, bi-temporal index
 - v1.1 (2026-01-16): Added bi-temporal integrity (knowledge_base_time), knowledge lineage
   (superseded_by, causation_id), deterministic resolution precedence, Market Data Switch
   (FR-2.8), and technical hardening specifications
