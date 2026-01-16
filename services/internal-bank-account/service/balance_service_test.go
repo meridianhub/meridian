@@ -43,10 +43,11 @@ func TestBalanceService_GetBalance_ReturnsCurrentBalance(t *testing.T) {
 
 	// Create an active account
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
-		AccountCode:    "CLR-USD-001",
-		Name:           "USD Clearing Account",
-		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-		InstrumentCode: "USD",
+		AccountCode:     "CLR-USD-001",
+		Name:            "USD Clearing Account",
+		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
+		InstrumentCode:  "USD",
 	})
 	require.NoError(t, err)
 
@@ -84,10 +85,11 @@ func TestBalanceService_GetBalance_MultiCurrency(t *testing.T) {
 
 	// Create EUR account
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
-		AccountCode:    "CLR-EUR-001",
-		Name:           "EUR Clearing Account",
-		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-		InstrumentCode: "EUR",
+		AccountCode:     "CLR-EUR-001",
+		Name:            "EUR Clearing Account",
+		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
+		InstrumentCode:  "EUR",
 	})
 	require.NoError(t, err)
 
@@ -151,10 +153,11 @@ func TestBalanceService_GetBalance_RequiresActiveAccount(t *testing.T) {
 
 	// Create and suspend account
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
-		AccountCode:    "CLR-001",
-		Name:           "USD Clearing Account",
-		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-		InstrumentCode: "USD",
+		AccountCode:     "CLR-001",
+		Name:            "USD Clearing Account",
+		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
+		InstrumentCode:  "USD",
 	})
 	require.NoError(t, err)
 
@@ -196,10 +199,11 @@ func TestBalanceService_GetBalance_ReactivatedAccountQueryable(t *testing.T) {
 
 	// Create account
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
-		AccountCode:    "CLR-001",
-		Name:           "USD Clearing Account",
-		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-		InstrumentCode: "USD",
+		AccountCode:     "CLR-001",
+		Name:            "USD Clearing Account",
+		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
+		InstrumentCode:  "USD",
 	})
 	require.NoError(t, err)
 
@@ -237,10 +241,11 @@ func TestBalanceService_GetBalance_ClosedAccountNotQueryable(t *testing.T) {
 
 	// Create and close account
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
-		AccountCode:    "CLR-001",
-		Name:           "USD Clearing Account",
-		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-		InstrumentCode: "USD",
+		AccountCode:     "CLR-001",
+		Name:            "USD Clearing Account",
+		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
+		InstrumentCode:  "USD",
 	})
 	require.NoError(t, err)
 
@@ -273,10 +278,11 @@ func TestBalanceService_GetBalance_HandlesPositionKeepingTimeout(t *testing.T) {
 
 	// Create account
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
-		AccountCode:    "CLR-001",
-		Name:           "USD Clearing Account",
-		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-		InstrumentCode: "USD",
+		AccountCode:     "CLR-001",
+		Name:            "USD Clearing Account",
+		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
+		InstrumentCode:  "USD",
 	})
 	require.NoError(t, err)
 
@@ -302,10 +308,11 @@ func TestBalanceService_GetBalance_HandlesPositionKeepingRateLimiting(t *testing
 
 	// Create account
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
-		AccountCode:    "CLR-001",
-		Name:           "USD Clearing Account",
-		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-		InstrumentCode: "USD",
+		AccountCode:     "CLR-001",
+		Name:            "USD Clearing Account",
+		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
+		InstrumentCode:  "USD",
 	})
 	require.NoError(t, err)
 
@@ -329,10 +336,11 @@ func TestBalanceService_RequiresPositionKeepingClient(t *testing.T) {
 
 	// Create account
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
-		AccountCode:    "CLR-001",
-		Name:           "USD Clearing Account",
-		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-		InstrumentCode: "USD",
+		AccountCode:     "CLR-001",
+		Name:            "USD Clearing Account",
+		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
+		InstrumentCode:  "USD",
 	})
 	require.NoError(t, err)
 
@@ -433,10 +441,11 @@ func TestBalanceService_MultipleBalanceTypes(t *testing.T) {
 
 	// Create account
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
-		AccountCode:    "CLR-001",
-		Name:           "USD Clearing Account",
-		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-		InstrumentCode: "USD",
+		AccountCode:     "CLR-001",
+		Name:            "USD Clearing Account",
+		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
+		InstrumentCode:  "USD",
 	})
 	require.NoError(t, err)
 
@@ -485,10 +494,11 @@ func BenchmarkGetBalance(b *testing.B) {
 
 	ctx := context.Background()
 	resp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
-		AccountCode:    "BENCH-BAL-001",
-		Name:           "Benchmark Balance Account",
-		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-		InstrumentCode: "USD",
+		AccountCode:     "BENCH-BAL-001",
+		Name:            "Benchmark Balance Account",
+		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
+		InstrumentCode:  "USD",
 	})
 	if err != nil {
 		b.Fatalf("failed to create account: %v", err)
@@ -539,10 +549,11 @@ func BenchmarkGetBalance_MultipleBalanceTypes(b *testing.B) {
 
 	ctx := context.Background()
 	resp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
-		AccountCode:    "BENCH-MULTI-001",
-		Name:           "Benchmark Multi Balance Account",
-		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-		InstrumentCode: "USD",
+		AccountCode:     "BENCH-MULTI-001",
+		Name:            "Benchmark Multi Balance Account",
+		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
+		InstrumentCode:  "USD",
 	})
 	if err != nil {
 		b.Fatalf("failed to create account: %v", err)

@@ -21,12 +21,12 @@ func TestNewInternalBankAccount_Success(t *testing.T) {
 		dimension       string
 	}{
 		{
-			name:            "clearing account with unspecified purpose",
+			name:            "clearing account with general purpose",
 			accountID:       "IBA-001",
 			accountCode:     "GBP_CLEARING",
 			accountName:     "GBP Clearing Account",
 			accountType:     AccountTypeClearing,
-			clearingPurpose: ClearingPurposeUnspecified,
+			clearingPurpose: ClearingPurposeGeneral,
 			instrumentCode:  "GBP",
 			dimension:       "CURRENCY",
 		},
@@ -130,7 +130,7 @@ func TestNewInternalBankAccount_ValidationErrors(t *testing.T) {
 			accountCode:     "GBP_CLEARING",
 			accountName:     "GBP Clearing Account",
 			accountType:     AccountTypeClearing,
-			clearingPurpose: ClearingPurposeUnspecified,
+			clearingPurpose: ClearingPurposeGeneral,
 			instrumentCode:  "GBP",
 			dimension:       "CURRENCY",
 			expectedErr:     ErrAccountIDRequired,
@@ -141,7 +141,7 @@ func TestNewInternalBankAccount_ValidationErrors(t *testing.T) {
 			accountCode:     "",
 			accountName:     "GBP Clearing Account",
 			accountType:     AccountTypeClearing,
-			clearingPurpose: ClearingPurposeUnspecified,
+			clearingPurpose: ClearingPurposeGeneral,
 			instrumentCode:  "GBP",
 			dimension:       "CURRENCY",
 			expectedErr:     ErrAccountCodeRequired,
@@ -152,7 +152,7 @@ func TestNewInternalBankAccount_ValidationErrors(t *testing.T) {
 			accountCode:     "GBP_CLEARING",
 			accountName:     "",
 			accountType:     AccountTypeClearing,
-			clearingPurpose: ClearingPurposeUnspecified,
+			clearingPurpose: ClearingPurposeGeneral,
 			instrumentCode:  "GBP",
 			dimension:       "CURRENCY",
 			expectedErr:     ErrNameRequired,
@@ -163,7 +163,7 @@ func TestNewInternalBankAccount_ValidationErrors(t *testing.T) {
 			accountCode:     "GBP_CLEARING",
 			accountName:     "GBP Clearing Account",
 			accountType:     AccountType("INVALID"),
-			clearingPurpose: ClearingPurposeUnspecified,
+			clearingPurpose: ClearingPurposeGeneral,
 			instrumentCode:  "GBP",
 			dimension:       "CURRENCY",
 			expectedErr:     ErrInvalidAccountType,
@@ -174,7 +174,7 @@ func TestNewInternalBankAccount_ValidationErrors(t *testing.T) {
 			accountCode:     "GBP_CLEARING",
 			accountName:     "GBP Clearing Account",
 			accountType:     AccountType(""),
-			clearingPurpose: ClearingPurposeUnspecified,
+			clearingPurpose: ClearingPurposeGeneral,
 			instrumentCode:  "GBP",
 			dimension:       "CURRENCY",
 			expectedErr:     ErrInvalidAccountType,
@@ -189,6 +189,17 @@ func TestNewInternalBankAccount_ValidationErrors(t *testing.T) {
 			instrumentCode:  "GBP",
 			dimension:       "CURRENCY",
 			expectedErr:     ErrInvalidClearingPurpose,
+		},
+		{
+			name:            "clearing account with unspecified purpose",
+			accountID:       "IBA-001",
+			accountCode:     "GBP_CLEARING",
+			accountName:     "GBP Clearing Account",
+			accountType:     AccountTypeClearing,
+			clearingPurpose: ClearingPurposeUnspecified,
+			instrumentCode:  "GBP",
+			dimension:       "CURRENCY",
+			expectedErr:     ErrClearingPurposeRequired,
 		},
 	}
 
@@ -482,7 +493,7 @@ func TestRename_Success(t *testing.T) {
 		"CLR-001",
 		"Original Name",
 		AccountTypeClearing,
-		ClearingPurposeUnspecified,
+		ClearingPurposeGeneral,
 		"USD",
 		"CURRENCY",
 	)
@@ -507,7 +518,7 @@ func TestRename_EmptyName(t *testing.T) {
 		"CLR-001",
 		"Original Name",
 		AccountTypeClearing,
-		ClearingPurposeUnspecified,
+		ClearingPurposeGeneral,
 		"USD",
 		"CURRENCY",
 	)
@@ -524,7 +535,7 @@ func TestRename_ClosedAccount(t *testing.T) {
 		"CLR-001",
 		"Original Name",
 		AccountTypeClearing,
-		ClearingPurposeUnspecified,
+		ClearingPurposeGeneral,
 		"USD",
 		"CURRENCY",
 	)
@@ -865,16 +876,17 @@ func TestBuilder_MinimalFields(t *testing.T) {
 func TestNewInternalBankAccount_AllAccountTypes(t *testing.T) {
 	// Test creating accounts with all valid account types
 	tests := []struct {
-		name        string
-		accountType AccountType
+		name            string
+		accountType     AccountType
+		clearingPurpose ClearingPurpose
 	}{
-		{"CLEARING", AccountTypeClearing},
-		{"NOSTRO", AccountTypeNostro},
-		{"VOSTRO", AccountTypeVostro},
-		{"HOLDING", AccountTypeHolding},
-		{"SUSPENSE", AccountTypeSuspense},
-		{"REVENUE", AccountTypeRevenue},
-		{"EXPENSE", AccountTypeExpense},
+		{"CLEARING", AccountTypeClearing, ClearingPurposeGeneral},
+		{"NOSTRO", AccountTypeNostro, ClearingPurposeUnspecified},
+		{"VOSTRO", AccountTypeVostro, ClearingPurposeUnspecified},
+		{"HOLDING", AccountTypeHolding, ClearingPurposeUnspecified},
+		{"SUSPENSE", AccountTypeSuspense, ClearingPurposeUnspecified},
+		{"REVENUE", AccountTypeRevenue, ClearingPurposeUnspecified},
+		{"EXPENSE", AccountTypeExpense, ClearingPurposeUnspecified},
 	}
 
 	for _, tt := range tests {
@@ -884,7 +896,7 @@ func TestNewInternalBankAccount_AllAccountTypes(t *testing.T) {
 				"CODE_"+tt.name,
 				"Test "+tt.name+" Account",
 				tt.accountType,
-				ClearingPurposeUnspecified,
+				tt.clearingPurpose,
 				"USD",
 				"CURRENCY",
 			)
@@ -1006,12 +1018,18 @@ func createTestAccount(t *testing.T, accountType AccountType) InternalBankAccoun
 	accountCode := "TEST_" + string(accountType)
 	name := "Test " + string(accountType) + " Account"
 
+	// CLEARING accounts require a specific purpose, other types must use UNSPECIFIED
+	clearingPurpose := ClearingPurposeUnspecified
+	if accountType == AccountTypeClearing {
+		clearingPurpose = ClearingPurposeGeneral
+	}
+
 	account, err := NewInternalBankAccount(
 		accountID,
 		accountCode,
 		name,
 		accountType,
-		ClearingPurposeUnspecified,
+		clearingPurpose,
 		"USD",
 		"CURRENCY",
 	)
@@ -1021,12 +1039,11 @@ func createTestAccount(t *testing.T, accountType AccountType) InternalBankAccoun
 }
 
 func TestNewInternalBankAccount_ClearingTypeWithPurpose(t *testing.T) {
-	// CLEARING accounts can have any valid clearing purpose
+	// CLEARING accounts must have a specific clearing purpose (not UNSPECIFIED)
 	tests := []struct {
 		name            string
 		clearingPurpose ClearingPurpose
 	}{
-		{"UNSPECIFIED purpose", ClearingPurposeUnspecified},
 		{"DEPOSIT purpose", ClearingPurposeDeposit},
 		{"WITHDRAWAL purpose", ClearingPurposeWithdrawal},
 		{"SETTLEMENT purpose", ClearingPurposeSettlement},
@@ -1093,7 +1110,7 @@ func TestNewInternalBankAccount_NonClearingTypeWithPurpose(t *testing.T) {
 }
 
 func TestNewInternalBankAccount_ClearingTypeWithUnspecified(t *testing.T) {
-	// CLEARING accounts with UNSPECIFIED purpose should be valid
+	// CLEARING accounts with UNSPECIFIED purpose should be rejected
 	account, err := NewInternalBankAccount(
 		"IBA-001",
 		"GBP_CLEARING",
@@ -1104,9 +1121,9 @@ func TestNewInternalBankAccount_ClearingTypeWithUnspecified(t *testing.T) {
 		"CURRENCY",
 	)
 
-	require.NoError(t, err)
-	assert.Equal(t, AccountTypeClearing, account.AccountType())
-	assert.Equal(t, ClearingPurposeUnspecified, account.ClearingPurpose())
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrClearingPurposeRequired)
+	assert.Equal(t, InternalBankAccount{}, account, "should return zero value on error")
 }
 
 func TestBuilder_WithClearingPurpose(t *testing.T) {

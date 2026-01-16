@@ -141,7 +141,7 @@ func TestToEntity_NilAttributes(t *testing.T) {
 		"GBP_BASIC",
 		"GBP Basic Account",
 		domain.AccountTypeClearing,
-		domain.ClearingPurposeUnspecified,
+		domain.ClearingPurposeGeneral, // CLEARING accounts require a specific purpose
 		"GBP",
 		"CURRENCY",
 	)
@@ -423,16 +423,15 @@ func TestToDomain_AllClearingPurposes(t *testing.T) {
 func TestToEntity_ClearingPurpose(t *testing.T) {
 	ctx := createTestContextForMappers()
 
+	// Test specific clearing purposes for CLEARING accounts
 	testCases := []struct {
 		name            string
 		clearingPurpose domain.ClearingPurpose
-		expectNil       bool // true if entity.ClearingPurpose should be nil
 	}{
-		{"Deposit", domain.ClearingPurposeDeposit, false},
-		{"Withdrawal", domain.ClearingPurposeWithdrawal, false},
-		{"Settlement", domain.ClearingPurposeSettlement, false},
-		{"General", domain.ClearingPurposeGeneral, false},
-		{"Unspecified", domain.ClearingPurposeUnspecified, true},
+		{"Deposit", domain.ClearingPurposeDeposit},
+		{"Withdrawal", domain.ClearingPurposeWithdrawal},
+		{"Settlement", domain.ClearingPurposeSettlement},
+		{"General", domain.ClearingPurposeGeneral},
 	}
 
 	for _, tc := range testCases {
@@ -450,14 +449,28 @@ func TestToEntity_ClearingPurpose(t *testing.T) {
 
 			entity := toEntity(ctx, account)
 
-			if tc.expectNil {
-				assert.Nil(t, entity.ClearingPurpose)
-			} else {
-				require.NotNil(t, entity.ClearingPurpose)
-				assert.Equal(t, string(tc.clearingPurpose), *entity.ClearingPurpose)
-			}
+			require.NotNil(t, entity.ClearingPurpose)
+			assert.Equal(t, string(tc.clearingPurpose), *entity.ClearingPurpose)
 		})
 	}
+
+	// Test that non-CLEARING accounts with UNSPECIFIED purpose have nil ClearingPurpose
+	t.Run("Unspecified_NonClearing", func(t *testing.T) {
+		account, err := domain.NewInternalBankAccount(
+			"IBA-CP-Unspecified",
+			"CODE_Unspecified",
+			"Holding Account with Unspecified Purpose",
+			domain.AccountTypeHolding, // Non-CLEARING account type
+			domain.ClearingPurposeUnspecified,
+			"GBP",
+			"CURRENCY",
+		)
+		require.NoError(t, err)
+
+		entity := toEntity(ctx, account)
+
+		assert.Nil(t, entity.ClearingPurpose)
+	})
 }
 
 // TestRoundTrip_BasicAccount tests domain -> entity -> domain preserves equality.
@@ -615,7 +628,7 @@ func TestRoundTrip_SuspendedStatus(t *testing.T) {
 		"GBP_SUSPENDED",
 		"GBP Suspended Account",
 		domain.AccountTypeClearing,
-		domain.ClearingPurposeUnspecified,
+		domain.ClearingPurposeGeneral, // CLEARING accounts require a specific purpose
 		"GBP",
 		"CURRENCY",
 	)

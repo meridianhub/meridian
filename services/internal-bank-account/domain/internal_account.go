@@ -73,6 +73,10 @@ func NewInternalBankAccount(
 	if accountType != AccountTypeClearing && clearingPurpose != ClearingPurposeUnspecified {
 		return InternalBankAccount{}, ErrClearingPurposeNotAllowed
 	}
+	// CLEARING accounts must have a specific clearing purpose (not UNSPECIFIED)
+	if accountType == AccountTypeClearing && clearingPurpose == ClearingPurposeUnspecified {
+		return InternalBankAccount{}, ErrClearingPurposeRequired
+	}
 
 	now := time.Now()
 	return InternalBankAccount{

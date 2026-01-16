@@ -211,7 +211,8 @@ func mapDomainErrorToGRPC(err error) error {
 		errors.Is(err, domain.ErrAccountCodeRequired),
 		errors.Is(err, domain.ErrNameRequired),
 		errors.Is(err, domain.ErrInvalidClearingPurpose),
-		errors.Is(err, domain.ErrClearingPurposeNotAllowed):
+		errors.Is(err, domain.ErrClearingPurposeNotAllowed),
+		errors.Is(err, domain.ErrClearingPurposeRequired):
 		return status.Error(codes.InvalidArgument, err.Error())
 	default:
 		return status.Errorf(codes.Internal, "internal error: %v", err)

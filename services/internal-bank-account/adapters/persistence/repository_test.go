@@ -81,12 +81,17 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 
 func createTestAccount(t *testing.T, accountID, accountCode, name string, accountType domain.AccountType) domain.InternalBankAccount {
 	t.Helper()
+	// CLEARING accounts require a specific purpose; use GENERAL for tests
+	clearingPurpose := domain.ClearingPurposeUnspecified
+	if accountType == domain.AccountTypeClearing {
+		clearingPurpose = domain.ClearingPurposeGeneral
+	}
 	account, err := domain.NewInternalBankAccount(
 		accountID,
 		accountCode,
 		name,
 		accountType,
-		domain.ClearingPurposeUnspecified,
+		clearingPurpose,
 		"GBP",
 		"CURRENCY",
 	)

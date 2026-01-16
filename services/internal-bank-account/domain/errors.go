@@ -53,4 +53,8 @@ var (
 	// ErrClearingPurposeNotAllowed indicates that a clearing purpose was specified
 	// for an account type that is not CLEARING.
 	ErrClearingPurposeNotAllowed = errors.New("clearing purpose only allowed for CLEARING account type")
+
+	// ErrClearingPurposeRequired indicates that a CLEARING account was created
+	// without specifying a clearing purpose (cannot be UNSPECIFIED).
+	ErrClearingPurposeRequired = errors.New("clearing purpose required for CLEARING account type")
 )

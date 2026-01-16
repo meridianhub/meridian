@@ -65,10 +65,11 @@ func createNFRBenchAccount(t *testing.T, tc *testContainer, codePrefix string) d
 // createNFRAccountRequest creates a proto request for NFR account creation tests.
 func createNFRAccountRequest(codePrefix string) *pb.InitiateInternalBankAccountRequest {
 	return &pb.InitiateInternalBankAccountRequest{
-		AccountCode:    fmt.Sprintf("%s-%d", codePrefix, time.Now().UnixNano()%100000),
-		Name:           fmt.Sprintf("%s NFR Benchmark Account", codePrefix),
-		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-		InstrumentCode: "USD",
+		AccountCode:     fmt.Sprintf("%s-%d", codePrefix, time.Now().UnixNano()%100000),
+		Name:            fmt.Sprintf("%s NFR Benchmark Account", codePrefix),
+		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
+		InstrumentCode:  "USD",
 	}
 }
 
