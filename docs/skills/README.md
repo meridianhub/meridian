@@ -28,6 +28,10 @@ Each skill document includes:
 
 - **[testing.md](testing.md)** - Testing standards: await package, testcontainers, defensive testing
 
+### Tooling
+
+- **[generate-llm-blueprint.md](generate-llm-blueprint.md)** - Generate codebase blueprint for LLMs
+
 ## Skill Metadata Format
 
 Skills use YAML frontmatter at the start of each document:
