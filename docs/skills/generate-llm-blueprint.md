@@ -1,3 +1,15 @@
+---
+name: generate-llm-blueprint
+description: Generate codebase blueprint for Claude Projects or other LLMs
+triggers:
+  - Uploading codebase to Claude Projects
+  - Creating context for LLMs
+  - Repomix blueprint generation
+instructions: |
+  Run repomix from meridian-main to generate meridian-blueprint.md.
+  Includes docs, protos, SQL, atlas configs. Excludes Go implementation code.
+---
+
 # Generate LLM Blueprint
 
 Generate a comprehensive codebase blueprint for uploading to Claude Projects or other LLMs.
@@ -14,7 +26,7 @@ repomix --style markdown \
   -o ../meridian-blueprint.md
 ```
 
-## What's Included (~495k tokens)
+## What's Included
 
 | Content | Purpose |
 |---------|---------|
