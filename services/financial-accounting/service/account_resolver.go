@@ -234,22 +234,21 @@ func (r *AccountResolver) resolveClearingAccount(ctx context.Context, clearingTy
 	return accountID, nil
 }
 
-// queryInternalBankAccount queries the Internal Bank Account service for a clearing account.
-//
-// Note: clearingType is currently used only for logging and cache key generation.
-// The Internal Bank Account API doesn't yet support filtering by clearing purpose
-// (deposit vs withdrawal vs settlement), so the same account is returned for all operations.
-// Cache keys include clearingType intentionally to support future differentiation
-// without cache invalidation when the API is extended.
+// queryInternalBankAccount queries the Internal Bank Account service for a clearing account
+// with the specified clearing purpose.
 func (r *AccountResolver) queryInternalBankAccount(ctx context.Context, clearingType ClearingAccountType, instrumentCode string) (string, error) {
+	clearingPurpose := mapClearingTypeToPurpose(clearingType)
+
 	resp, err := r.client.ListInternalBankAccounts(ctx, &internalbankaccountv1.ListInternalBankAccountsRequest{
-		AccountTypeFilter:    internalbankaccountv1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-		InstrumentCodeFilter: instrumentCode,
-		StatusFilter:         internalbankaccountv1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE,
+		AccountTypeFilter:     internalbankaccountv1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		InstrumentCodeFilter:  instrumentCode,
+		StatusFilter:          internalbankaccountv1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE,
+		ClearingPurposeFilter: clearingPurpose,
 	})
 	if err != nil {
 		r.logger.Error("failed to query internal bank accounts",
 			"clearing_type", clearingType,
+			"clearing_purpose", clearingPurpose.String(),
 			"instrument_code", instrumentCode,
 			"error", err)
 		return "", fmt.Errorf("failed to query clearing account: %w", err)
@@ -258,17 +257,29 @@ func (r *AccountResolver) queryInternalBankAccount(ctx context.Context, clearing
 	if len(resp.Facilities) == 0 {
 		r.logger.Warn("no active clearing account found",
 			"clearing_type", clearingType,
+			"clearing_purpose", clearingPurpose.String(),
 			"instrument_code", instrumentCode)
 		return "", fmt.Errorf("%w for %s %s", ErrNoClearingAccountFound, clearingType, instrumentCode)
 	}
 
-	// Use the first active clearing account found.
-	// TODO(future): When the Internal Bank Account API supports clearing purpose filtering,
-	// use clearingType to select deposit-specific vs withdrawal-specific vs settlement-specific accounts.
-	// The current implementation returns the same account for all, which is acceptable
-	// for initial deployment where a single clearing account handles all operations.
+	// Use the first active clearing account matching the criteria.
 	account := resp.Facilities[0]
 	return account.AccountId, nil
+}
+
+// mapClearingTypeToPurpose converts the internal ClearingAccountType to the proto ClearingPurpose enum.
+func mapClearingTypeToPurpose(clearingType ClearingAccountType) internalbankaccountv1.ClearingPurpose {
+	switch clearingType {
+	case ClearingAccountTypeDeposit:
+		return internalbankaccountv1.ClearingPurpose_CLEARING_PURPOSE_DEPOSIT
+	case ClearingAccountTypeWithdrawal:
+		return internalbankaccountv1.ClearingPurpose_CLEARING_PURPOSE_WITHDRAWAL
+	case ClearingAccountTypeSettlement:
+		return internalbankaccountv1.ClearingPurpose_CLEARING_PURPOSE_SETTLEMENT
+	default:
+		// For unknown types, return UNSPECIFIED which means no filtering by clearing purpose.
+		return internalbankaccountv1.ClearingPurpose_CLEARING_PURPOSE_UNSPECIFIED
+	}
 }
 
 // cacheKey generates a cache key for the given clearing type and instrument.
