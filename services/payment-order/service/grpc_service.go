@@ -15,6 +15,7 @@ import (
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
+	internalbankaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_bank_account/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
@@ -97,6 +98,22 @@ type FinancialAccountingClient interface {
 	Close() error
 }
 
+// InternalBankAccountClient defines the interface for communicating with the Internal Bank Account service
+// for clearing account resolution. This is an optional dependency for internal clearing operations.
+type InternalBankAccountClient interface {
+	// GetBalance retrieves the current balance for an internal bank account.
+	// Used to query clearing account balances for reconciliation.
+	GetBalance(ctx context.Context, req *internalbankaccountv1.GetBalanceRequest) (*internalbankaccountv1.GetBalanceResponse, error)
+	// RetrieveInternalBankAccount fetches account details by ID.
+	// Used to verify clearing account configuration.
+	RetrieveInternalBankAccount(ctx context.Context, req *internalbankaccountv1.RetrieveInternalBankAccountRequest) (*internalbankaccountv1.RetrieveInternalBankAccountResponse, error)
+	// ListInternalBankAccounts queries accounts with filtering.
+	// Used to discover clearing accounts by type and instrument.
+	ListInternalBankAccounts(ctx context.Context, req *internalbankaccountv1.ListInternalBankAccountsRequest) (*internalbankaccountv1.ListInternalBankAccountsResponse, error)
+	// Close terminates the client connection
+	Close() error
+}
+
 // KafkaPublisher defines the interface for publishing protobuf messages to Kafka.
 // This abstraction allows for mocking in tests and alternative implementations.
 type KafkaPublisher interface {
@@ -159,6 +176,7 @@ type Service struct {
 	repo                      persistence.Repository
 	currentAccountClient      CurrentAccountClient
 	financialAccountingClient FinancialAccountingClient
+	internalBankAccountClient InternalBankAccountClient // Optional - for internal clearing operations
 	paymentGateway            gateway.PaymentGateway
 	gatewayAccountConfig      *config.GatewayAccountConfig
 	kafkaPublisher            KafkaPublisher
@@ -171,6 +189,7 @@ type Service struct {
 	maxIdempotencyKeyLength   int
 	lienExecutionRetryConfig  *sharedclients.RetryConfig // nil means use default
 	orchestrator              *PaymentOrchestrator       // Handles payment saga orchestration
+	internalClearingEnabled   bool                       // Feature flag for internal clearing operations
 }
 
 // Config contains configuration for creating a new Service
@@ -178,6 +197,7 @@ type Config struct {
 	Repository                persistence.Repository
 	CurrentAccountClient      CurrentAccountClient
 	FinancialAccountingClient FinancialAccountingClient
+	InternalBankAccountClient InternalBankAccountClient // Optional - for internal clearing operations
 	PaymentGateway            gateway.PaymentGateway
 	GatewayAccountConfig      *config.GatewayAccountConfig
 	KafkaPublisher            KafkaPublisher
@@ -197,6 +217,9 @@ type Config struct {
 	// LienExecutionRetryConfig configures retry behavior for async lien execution.
 	// If nil, default retry config is used. Primarily useful for testing.
 	LienExecutionRetryConfig *sharedclients.RetryConfig
+	// InternalClearingEnabled enables internal clearing operations (default: false).
+	// When enabled, the service uses InternalBankAccountClient for clearing account resolution.
+	InternalClearingEnabled bool
 }
 
 // NewService creates a new payment order service with minimal dependencies.
@@ -292,9 +315,11 @@ func NewServiceWithConfig(cfg Config) (*Service, error) {
 		CurrentAccountClient:      cfg.CurrentAccountClient,
 		PaymentGateway:            cfg.PaymentGateway,
 		FinancialAccountingClient: cfg.FinancialAccountingClient,
+		InternalBankAccountClient: cfg.InternalBankAccountClient,
 		GatewayAccountConfig:      cfg.GatewayAccountConfig,
 		KafkaPublisher:            cfg.KafkaPublisher,
 		LienExecutionRetryConfig:  cfg.LienExecutionRetryConfig,
+		InternalClearingEnabled:   cfg.InternalClearingEnabled,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create payment orchestrator: %w", err)
@@ -304,6 +329,7 @@ func NewServiceWithConfig(cfg Config) (*Service, error) {
 		repo:                      cfg.Repository,
 		currentAccountClient:      cfg.CurrentAccountClient,
 		financialAccountingClient: cfg.FinancialAccountingClient,
+		internalBankAccountClient: cfg.InternalBankAccountClient, // Optional - may be nil
 		paymentGateway:            cfg.PaymentGateway,
 		gatewayAccountConfig:      cfg.GatewayAccountConfig,
 		kafkaPublisher:            cfg.KafkaPublisher,
@@ -316,6 +342,7 @@ func NewServiceWithConfig(cfg Config) (*Service, error) {
 		maxIdempotencyKeyLength:   maxIdempotencyKeyLength,
 		lienExecutionRetryConfig:  cfg.LienExecutionRetryConfig, // nil means use default
 		orchestrator:              orchestrator,
+		internalClearingEnabled:   cfg.InternalClearingEnabled,
 	}, nil
 }
 
