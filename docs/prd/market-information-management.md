@@ -326,10 +326,12 @@ enum DataSetStatus {
 
 // QualityLevel defines the authority/certainty of an observation.
 // Per ADR-0017 Time-Bound Quality Ladder.
+// IMPORTANT: Values are ordered for database INDEX sorting (higher = more authoritative).
+// This enables efficient ORDER BY quality DESC without CASE expressions.
 enum QualityLevel {
   QUALITY_LEVEL_UNSPECIFIED = 0;
 
-  // ESTIMATE - Projected or forecasted value, may be revised
+  // ESTIMATE - Projected or forecasted value, may be revised (lowest authority)
   QUALITY_LEVEL_ESTIMATE = 1;
 
   // ACTUAL - Observed value from primary source
@@ -999,8 +1001,9 @@ CREATE TABLE market_price_observation (
     -- Source attribution
     source_id VARCHAR(64) NOT NULL REFERENCES data_source(id),
 
-    -- Quality ladder
-    quality VARCHAR(20) NOT NULL CHECK (quality IN ('ESTIMATE', 'ACTUAL', 'VERIFIED')),
+    -- Quality ladder (INTEGER for correct index ordering)
+    -- 1 = ESTIMATE, 2 = ACTUAL, 3 = VERIFIED (higher = more authoritative)
+    quality INTEGER NOT NULL CHECK (quality IN (1, 2, 3)),
 
     -- Computed resolution key (from CEL expression, for efficient lookup)
     resolution_key VARCHAR(256) NOT NULL,
@@ -1037,7 +1040,7 @@ CREATE INDEX idx_observation_observed_at ON market_price_observation(observed_at
 
 COMMENT ON TABLE market_price_observation IS 'Market data observations with temporal and quality metadata';
 COMMENT ON COLUMN market_price_observation.resolution_key IS 'Computed from CEL expression for efficient temporal queries';
-COMMENT ON COLUMN market_price_observation.quality IS 'ADR-0017 Quality Ladder: ESTIMATE < ACTUAL < VERIFIED';
+COMMENT ON COLUMN market_price_observation.quality IS 'ADR-0017: 1=ESTIMATE, 2=ACTUAL, 3=VERIFIED';
 
 -- =============================================================================
 -- Seed System Data Sources
@@ -1383,15 +1386,13 @@ the system resolves using this precedence:
 
 ```sql
 -- Example resolution query
+-- quality is INTEGER: 1=ESTIMATE, 2=ACTUAL, 3=VERIFIED
+-- No CASE expression needed - ORDER BY quality DESC works correctly
 SELECT * FROM market_price_observation
 WHERE resolution_key = 'USD/GBP'
   AND observed_at <= '2026-01-15T14:30:00Z'
 ORDER BY
-  CASE quality
-    WHEN 'VERIFIED' THEN 3
-    WHEN 'ACTUAL' THEN 2
-    WHEN 'ESTIMATE' THEN 1
-  END DESC,
+  quality DESC,      -- 3 (VERIFIED) > 2 (ACTUAL) > 1 (ESTIMATE)
   observed_at DESC
 LIMIT 1;
 ```
