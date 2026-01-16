@@ -52,16 +52,51 @@ option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
 
 // ClearingPurpose distinguishes the specific purpose of clearing accounts.
 // Only applicable when account_type is INTERNAL_ACCOUNT_TYPE_CLEARING.
+//
+// Usage pattern:
+// - DEPOSIT: Clearing accounts that handle deposit operations (customer deposits flow here)
+// - WITHDRAWAL: Clearing accounts that handle withdrawal operations (customer withdrawals flow here)
+// - SETTLEMENT: Clearing accounts that handle settlement operations (interbank settlements)
+// - GENERAL: General-purpose clearing accounts (catch-all for other clearing operations)
+//
+// Validation rules:
+// - For CLEARING accounts: clearing_purpose MUST be non-UNSPECIFIED
+// - For non-CLEARING accounts: clearing_purpose MUST be UNSPECIFIED
+//
+// Example usage:
+//   account_type: INTERNAL_ACCOUNT_TYPE_CLEARING
+//   clearing_purpose: CLEARING_PURPOSE_DEPOSIT
+//   account_code: "CLR-GBP-DEPOSIT"
+//
+// Query example:
+//   ListInternalBankAccounts with:
+//     account_type_filter: INTERNAL_ACCOUNT_TYPE_CLEARING
+//     clearing_purpose_filter: CLEARING_PURPOSE_DEPOSIT
+//
+// See ADR-0025: Clearing Purpose Specialization for design rationale.
 enum ClearingPurpose {
   // CLEARING_PURPOSE_UNSPECIFIED is the default value for non-clearing accounts.
+  // MUST be used when account_type is NOT INTERNAL_ACCOUNT_TYPE_CLEARING.
   CLEARING_PURPOSE_UNSPECIFIED = 0;
+
   // CLEARING_PURPOSE_DEPOSIT is for clearing accounts handling deposit operations.
+  // Use when the clearing account receives funds from customer deposits.
+  // Example: CLR-GBP-DEPOSIT handles all GBP customer deposits.
   CLEARING_PURPOSE_DEPOSIT = 1;
+
   // CLEARING_PURPOSE_WITHDRAWAL is for clearing accounts handling withdrawal operations.
+  // Use when the clearing account disburses funds for customer withdrawals.
+  // Example: CLR-USD-WITHDRAW handles all USD customer withdrawals.
   CLEARING_PURPOSE_WITHDRAWAL = 2;
+
   // CLEARING_PURPOSE_SETTLEMENT is for clearing accounts handling settlement operations.
+  // Use for interbank settlement, payment clearing, and correspondent bank transactions.
+  // Example: CLR-EUR-SETTLE handles EUR settlement with correspondent banks.
   CLEARING_PURPOSE_SETTLEMENT = 3;
+
   // CLEARING_PURPOSE_GENERAL is for general-purpose clearing accounts.
+  // Use when the clearing account serves multiple purposes or doesn't fit other categories.
+  // Example: CLR-JPY-GENERAL handles miscellaneous JPY clearing operations.
   CLEARING_PURPOSE_GENERAL = 4;
 }
 
@@ -224,9 +259,25 @@ message InternalBankAccountFacility {
   // version is for optimistic locking.
   int32 version = 11 [(buf.validate.field).int32 = {gte: 0}];
 
-  // clearing_purpose distinguishes the specific purpose of clearing accounts.
+  // clearing_purpose specifies the operational purpose of this clearing account.
   // Only applicable when account_type is INTERNAL_ACCOUNT_TYPE_CLEARING.
-  // Should be CLEARING_PURPOSE_UNSPECIFIED for non-clearing account types.
+  //
+  // Validation rules:
+  // - MUST be non-UNSPECIFIED when account_type is INTERNAL_ACCOUNT_TYPE_CLEARING
+  // - MUST be CLEARING_PURPOSE_UNSPECIFIED for all other account types
+  //
+  // Purpose values:
+  // - CLEARING_PURPOSE_DEPOSIT: For deposit clearing operations
+  // - CLEARING_PURPOSE_WITHDRAWAL: For withdrawal clearing operations
+  // - CLEARING_PURPOSE_SETTLEMENT: For settlement clearing operations
+  // - CLEARING_PURPOSE_GENERAL: For general clearing operations
+  //
+  // Example: A GBP deposit clearing account would have:
+  //   account_type: INTERNAL_ACCOUNT_TYPE_CLEARING
+  //   clearing_purpose: CLEARING_PURPOSE_DEPOSIT
+  //   account_code: "CLR-GBP-DEPOSIT"
+  //
+  // See ADR-0025: Clearing Purpose Specialization for design rationale.
   ClearingPurpose clearing_purpose = 12;
 }
 
@@ -274,8 +325,15 @@ message InitiateInternalBankAccountRequest {
   meridian.common.v1.IdempotencyKey idempotency_key = 7;
 
   // clearing_purpose specifies the purpose when account_type is CLEARING.
-  // Required when account_type is INTERNAL_ACCOUNT_TYPE_CLEARING.
-  // Must be CLEARING_PURPOSE_UNSPECIFIED for non-clearing account types.
+  //
+  // Validation rules:
+  // - REQUIRED when account_type is INTERNAL_ACCOUNT_TYPE_CLEARING (must be non-UNSPECIFIED)
+  // - MUST be CLEARING_PURPOSE_UNSPECIFIED (or omitted) for non-CLEARING account types
+  // - Attempting to set clearing_purpose on a non-CLEARING account returns InvalidArgument error
+  //
+  // Example for deposit clearing account:
+  //   account_type: INTERNAL_ACCOUNT_TYPE_CLEARING
+  //   clearing_purpose: CLEARING_PURPOSE_DEPOSIT
   ClearingPurpose clearing_purpose = 8;
 }
 
@@ -386,7 +444,16 @@ message ListInternalBankAccountsRequest {
   meridian.common.v1.Pagination pagination = 4;
 
   // clearing_purpose_filter returns only clearing accounts with this purpose (optional).
-  // If CLEARING_PURPOSE_UNSPECIFIED, no filtering by clearing purpose is applied.
+  // If CLEARING_PURPOSE_UNSPECIFIED (or omitted), no filtering by clearing purpose is applied.
+  //
+  // Usage: Combine with account_type_filter for precise clearing account queries:
+  //   account_type_filter: INTERNAL_ACCOUNT_TYPE_CLEARING
+  //   clearing_purpose_filter: CLEARING_PURPOSE_DEPOSIT
+  //   instrument_code_filter: "GBP"
+  // Returns: All GBP deposit clearing accounts
+  //
+  // Note: If account_type_filter is not CLEARING, this filter has no effect
+  // since only CLEARING accounts have non-UNSPECIFIED clearing_purpose values.
   ClearingPurpose clearing_purpose_filter = 5;
 }
 

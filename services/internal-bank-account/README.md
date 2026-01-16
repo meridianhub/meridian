@@ -134,6 +134,7 @@ classDiagram
         +string AccountCode
         +string Name
         +InternalAccountType AccountType
+        +ClearingPurpose ClearingPurpose
         +InternalAccountStatus AccountStatus
         +string InstrumentCode
         +CorrespondentBankDetails CorrespondentDetails
@@ -163,6 +164,15 @@ classDiagram
         INVENTORY
     }
 
+    class ClearingPurpose {
+        <<enumeration>>
+        UNSPECIFIED
+        DEPOSIT
+        WITHDRAWAL
+        SETTLEMENT
+        GENERAL
+    }
+
     class InternalAccountStatus {
         <<enumeration>>
         ACTIVE
@@ -184,6 +194,7 @@ classDiagram
     }
 
     InternalBankAccountFacility --> InternalAccountType
+    InternalBankAccountFacility --> ClearingPurpose
     InternalBankAccountFacility --> InternalAccountStatus
     InternalBankAccountFacility --> CorrespondentBankDetails
     CorrespondentBankDetails --> CorrespondentType
@@ -208,6 +219,77 @@ classDiagram
 | `REVENUE` | Income tracking | Fee collection, interest income |
 | `EXPENSE` | Cost tracking | Operating expenses, fee payments |
 | `INVENTORY` | Non-cash assets | Energy inventory, carbon credits, compute allocation |
+
+## Clearing Account Purposes
+
+Clearing accounts can be specialized for specific purposes using the `clearing_purpose` field:
+
+| Purpose | Enum Value | Use Case |
+|---------|------------|----------|
+| Deposit | `CLEARING_PURPOSE_DEPOSIT` | Clearing accounts for deposit operations |
+| Withdrawal | `CLEARING_PURPOSE_WITHDRAWAL` | Clearing accounts for withdrawal operations |
+| Settlement | `CLEARING_PURPOSE_SETTLEMENT` | Clearing accounts for settlement operations |
+| General | `CLEARING_PURPOSE_GENERAL` | General-purpose clearing accounts |
+
+**Important**: The `clearing_purpose` field is only applicable when `account_type` is
+`INTERNAL_ACCOUNT_TYPE_CLEARING`. For all other account types, the value must be
+`CLEARING_PURPOSE_UNSPECIFIED`.
+
+### Example: Creating Purpose-Specific Clearing Accounts
+
+```go
+// Deposit clearing account
+req := &iba.InitiateInternalBankAccountRequest{
+    AccountCode:     "CLR-GBP-DEPOSIT",
+    Name:            "GBP Deposit Clearing",
+    AccountType:     iba.INTERNAL_ACCOUNT_TYPE_CLEARING,
+    ClearingPurpose: iba.CLEARING_PURPOSE_DEPOSIT,
+    InstrumentCode:  "GBP",
+}
+
+// Withdrawal clearing account
+req := &iba.InitiateInternalBankAccountRequest{
+    AccountCode:     "CLR-USD-WITHDRAW",
+    Name:            "USD Withdrawal Clearing",
+    AccountType:     iba.INTERNAL_ACCOUNT_TYPE_CLEARING,
+    ClearingPurpose: iba.CLEARING_PURPOSE_WITHDRAWAL,
+    InstrumentCode:  "USD",
+}
+
+// Settlement clearing account
+req := &iba.InitiateInternalBankAccountRequest{
+    AccountCode:     "CLR-EUR-SETTLE",
+    Name:            "EUR Settlement Clearing",
+    AccountType:     iba.INTERNAL_ACCOUNT_TYPE_CLEARING,
+    ClearingPurpose: iba.CLEARING_PURPOSE_SETTLEMENT,
+    InstrumentCode:  "EUR",
+}
+```
+
+### Querying by Clearing Purpose
+
+Use the `clearing_purpose_filter` in `ListInternalBankAccounts`:
+
+```bash
+# List all deposit clearing accounts
+grpcurl -plaintext -d '{
+  "account_type_filter": "INTERNAL_ACCOUNT_TYPE_CLEARING",
+  "clearing_purpose_filter": "CLEARING_PURPOSE_DEPOSIT"
+}' localhost:50057 meridian.internal_bank_account.v1.InternalBankAccountService/ListInternalBankAccounts
+```
+
+### Default Clearing Accounts
+
+Each tenant is provisioned with purpose-specific clearing accounts per instrument:
+
+| Account Code | Purpose | Instrument | Usage |
+|--------------|---------|------------|-------|
+| `CLR-GBP-DEPOSIT` | DEPOSIT | GBP | Customer deposits |
+| `CLR-GBP-WITHDRAW` | WITHDRAWAL | GBP | Customer withdrawals |
+| `CLR-USD-DEPOSIT` | DEPOSIT | USD | Customer deposits |
+| `CLR-USD-WITHDRAW` | WITHDRAWAL | USD | Customer withdrawals |
+| `CLR-EUR-DEPOSIT` | DEPOSIT | EUR | Customer deposits |
+| `CLR-EUR-WITHDRAW` | WITHDRAWAL | EUR | Customer withdrawals |
 
 ## Account Lifecycle State Machine
 
@@ -611,6 +693,8 @@ grpcurl -plaintext -d '{"account_id": "2rPxMVkj3tNmqPwT5Wk8Lc4M9xZ"}' \
 - [ADR-0013: Multi-Asset Instrument Support](../../docs/adr/0013-multi-asset-instrument-support.md)
 - [ADR-0015: Service Directory Structure](../../docs/adr/0015-service-directory-structure.md)
 - [ADR-0023: Balance Delegation to Position Keeping](../../docs/adr/0023-balance-delegation-to-position-keeping.md)
+- [ADR-0024: Internal Bank Account Service](../../docs/adr/0024-internal-bank-account-service.md)
+- [ADR-0025: Clearing Purpose Specialization](../../docs/adr/0025-clearing-purpose-specialization.md)
 - [Proto Definitions](../../api/proto/meridian/internal_bank_account/v1/)
 - [Position Keeping Service](../position-keeping/README.md)
 - [Reference Data Service](../reference-data/README.md)

@@ -766,11 +766,169 @@ docs/update-developer-guide
 
 ---
 
+## Working with Clearing Purposes
+
+Clearing accounts can be specialized by purpose to enable type-safe account resolution. This feature was introduced in ADR-0025.
+
+### Overview
+
+| Purpose | Enum Value | Use Case |
+|---------|------------|----------|
+| Deposit | `CLEARING_PURPOSE_DEPOSIT` | Handles customer deposit operations |
+| Withdrawal | `CLEARING_PURPOSE_WITHDRAWAL` | Handles customer withdrawal operations |
+| Settlement | `CLEARING_PURPOSE_SETTLEMENT` | Handles interbank settlement operations |
+| General | `CLEARING_PURPOSE_GENERAL` | General-purpose clearing operations |
+
+### Creating Purpose-Specific Clearing Accounts
+
+```go
+import pb "github.com/meridianhub/meridian/api/proto/meridian/internal_bank_account/v1"
+
+// Create a deposit clearing account
+depositReq := &pb.InitiateInternalBankAccountRequest{
+    AccountCode:     "CLR-GBP-DEPOSIT",
+    Name:            "GBP Deposit Clearing",
+    AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+    ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_DEPOSIT,
+    InstrumentCode:  "GBP",
+    Description:     "Clearing account for GBP customer deposits",
+}
+
+resp, err := client.InitiateInternalBankAccount(ctx, depositReq)
+if err != nil {
+    return fmt.Errorf("failed to create deposit clearing account: %w", err)
+}
+
+// Create a withdrawal clearing account
+withdrawReq := &pb.InitiateInternalBankAccountRequest{
+    AccountCode:     "CLR-USD-WITHDRAW",
+    Name:            "USD Withdrawal Clearing",
+    AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+    ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_WITHDRAWAL,
+    InstrumentCode:  "USD",
+    Description:     "Clearing account for USD customer withdrawals",
+}
+```
+
+### Querying Clearing Accounts by Purpose
+
+```go
+// List all withdrawal clearing accounts for USD
+listReq := &pb.ListInternalBankAccountsRequest{
+    AccountTypeFilter:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+    ClearingPurposeFilter: pb.ClearingPurpose_CLEARING_PURPOSE_WITHDRAWAL,
+    InstrumentCodeFilter:  "USD",
+}
+
+resp, err := client.ListInternalBankAccounts(ctx, listReq)
+if err != nil {
+    return fmt.Errorf("failed to list withdrawal clearing accounts: %w", err)
+}
+
+// Use the first matching account as counterparty
+if len(resp.Facilities) == 0 {
+    return fmt.Errorf("no active USD withdrawal clearing account found")
+}
+withdrawalAccountID := resp.Facilities[0].AccountId
+```
+
+### Validation Rules
+
+The following validation rules are enforced:
+
+| Account Type | clearing_purpose Requirement |
+|--------------|------------------------------|
+| CLEARING | MUST be non-UNSPECIFIED (DEPOSIT, WITHDRAWAL, SETTLEMENT, or GENERAL) |
+| All others | MUST be UNSPECIFIED (or omitted) |
+
+**Examples of validation errors:**
+
+```go
+// ERROR: Clearing account without purpose
+req := &pb.InitiateInternalBankAccountRequest{
+    AccountCode:    "CLR-GBP-001",
+    AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+    // ClearingPurpose not set - will return InvalidArgument
+}
+
+// ERROR: Non-clearing account with purpose
+req := &pb.InitiateInternalBankAccountRequest{
+    AccountCode:     "NOSTRO-USD-001",
+    AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_NOSTRO,
+    ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_DEPOSIT, // Invalid!
+    // Will return InvalidArgument
+}
+```
+
+### Testing with grpcurl
+
+```bash
+# Create a deposit clearing account
+grpcurl -plaintext -d '{
+  "account_code": "CLR-GBP-DEPOSIT",
+  "name": "GBP Deposit Clearing",
+  "account_type": "INTERNAL_ACCOUNT_TYPE_CLEARING",
+  "clearing_purpose": "CLEARING_PURPOSE_DEPOSIT",
+  "instrument_code": "GBP"
+}' localhost:50057 meridian.internal_bank_account.v1.InternalBankAccountService/InitiateInternalBankAccount
+
+# List all deposit clearing accounts
+grpcurl -plaintext -d '{
+  "account_type_filter": "INTERNAL_ACCOUNT_TYPE_CLEARING",
+  "clearing_purpose_filter": "CLEARING_PURPOSE_DEPOSIT"
+}' localhost:50057 meridian.internal_bank_account.v1.InternalBankAccountService/ListInternalBankAccounts
+
+# List withdrawal clearing accounts for USD
+grpcurl -plaintext -d '{
+  "account_type_filter": "INTERNAL_ACCOUNT_TYPE_CLEARING",
+  "clearing_purpose_filter": "CLEARING_PURPOSE_WITHDRAWAL",
+  "instrument_code_filter": "USD"
+}' localhost:50057 meridian.internal_bank_account.v1.InternalBankAccountService/ListInternalBankAccounts
+```
+
+### Domain Model Integration
+
+When working with the domain layer:
+
+```go
+import "github.com/meridianhub/meridian/services/internal-bank-account/domain"
+
+// Create a clearing account with purpose in domain layer
+account, err := domain.NewInternalBankAccount(
+    "ACC-001",
+    "CLR-GBP-DEPOSIT",
+    "GBP Deposit Clearing",
+    domain.AccountTypeClearing,
+    "GBP",
+    "CURRENCY",
+    domain.WithClearingPurpose(domain.ClearingPurposeDeposit),
+)
+require.NoError(t, err)
+
+// Verify purpose is set
+assert.Equal(t, domain.ClearingPurposeDeposit, account.ClearingPurpose())
+
+// Attempting to set purpose on non-clearing account fails
+_, err = domain.NewInternalBankAccount(
+    "ACC-002",
+    "NOSTRO-USD-001",
+    "USD Nostro",
+    domain.AccountTypeNostro,
+    "USD",
+    "CURRENCY",
+    domain.WithClearingPurpose(domain.ClearingPurposeDeposit), // Invalid!
+)
+assert.Error(t, err) // ErrClearingPurposeNotApplicable
+```
+
+---
+
 ## Additional Resources
 
 - [README.md](./README.md) - Service overview and API documentation
 - [ADR-0015: Service Directory Structure](../../docs/adr/0015-standard-service-directory-structure.md)
 - [ADR-0023: Balance Delegation to Position Keeping](../../docs/adr/0023-balance-delegation-to-position-keeping.md)
 - [ADR-0024: Internal Bank Account Service](../../docs/adr/0024-internal-bank-account-service.md)
+- [ADR-0025: Clearing Purpose Specialization](../../docs/adr/0025-clearing-purpose-specialization.md)
 - [Proto Definitions](../../api/proto/meridian/internal_bank_account/v1/)
 - [Benchmarks README](./benchmarks/README.md)
