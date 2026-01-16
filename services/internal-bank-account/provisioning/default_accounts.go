@@ -28,6 +28,13 @@ type AccountTemplate struct {
 	// Type is the account type (CLEARING, REVENUE, EXPENSE, SUSPENSE, etc.).
 	Type pb.InternalAccountType
 
+	// ClearingPurpose specifies the operational purpose of clearing accounts.
+	// Only applicable when Type is INTERNAL_ACCOUNT_TYPE_CLEARING.
+	// Must be CLEARING_PURPOSE_UNSPECIFIED for non-clearing account types.
+	// Values: DEPOSIT (incoming funds), WITHDRAWAL (outgoing funds),
+	// SETTLEMENT (inter-party clearing), GENERAL (multi-purpose clearing).
+	ClearingPurpose pb.ClearingPurpose
+
 	// InstrumentCode references the instrument from Reference Data (e.g., "GBP", "USD").
 	InstrumentCode string
 
@@ -53,63 +60,71 @@ const (
 
 // DefaultAccounts defines the standard accounts created for every new tenant.
 // These accounts support core banking operations:
-// - Clearing accounts for deposit/withdrawal settlement across major currencies
-// - Revenue accounts for tracking fee income
-// - Expense accounts for operational costs
-// - Suspense account for unidentified transactions
+//   - Clearing accounts for deposit/withdrawal settlement across major currencies
+//     Each clearing account specifies a ClearingPurpose (DEPOSIT or WITHDRAWAL)
+//     to enable filtering and routing of funds by settlement direction.
+//   - Revenue accounts for tracking fee income
+//   - Expense accounts for operational costs
+//   - Suspense account for unidentified transactions
 var DefaultAccounts = []AccountTemplate{
 	// GBP Clearing Accounts
 	{
-		Code:           "CLR-GBP-DEPOSIT",
-		Name:           "GBP Deposit Clearing",
-		Type:           pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-		InstrumentCode: "GBP",
-		Dimension:      DimensionCurrency,
-		Description:    "Clearing account for GBP deposits pending settlement",
+		Code:            "CLR-GBP-DEPOSIT",
+		Name:            "GBP Deposit Clearing",
+		Type:            pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_DEPOSIT,
+		InstrumentCode:  "GBP",
+		Dimension:       DimensionCurrency,
+		Description:     "Clearing account for GBP deposits pending settlement",
 	},
 	{
-		Code:           "CLR-GBP-WITHDRAW",
-		Name:           "GBP Withdrawal Clearing",
-		Type:           pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-		InstrumentCode: "GBP",
-		Dimension:      DimensionCurrency,
-		Description:    "Clearing account for GBP withdrawals pending settlement",
+		Code:            "CLR-GBP-WITHDRAW",
+		Name:            "GBP Withdrawal Clearing",
+		Type:            pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_WITHDRAWAL,
+		InstrumentCode:  "GBP",
+		Dimension:       DimensionCurrency,
+		Description:     "Clearing account for GBP withdrawals pending settlement",
 	},
 
 	// USD Clearing Accounts
 	{
-		Code:           "CLR-USD-DEPOSIT",
-		Name:           "USD Deposit Clearing",
-		Type:           pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-		InstrumentCode: "USD",
-		Dimension:      DimensionCurrency,
-		Description:    "Clearing account for USD deposits pending settlement",
+		Code:            "CLR-USD-DEPOSIT",
+		Name:            "USD Deposit Clearing",
+		Type:            pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_DEPOSIT,
+		InstrumentCode:  "USD",
+		Dimension:       DimensionCurrency,
+		Description:     "Clearing account for USD deposits pending settlement",
 	},
 	{
-		Code:           "CLR-USD-WITHDRAW",
-		Name:           "USD Withdrawal Clearing",
-		Type:           pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-		InstrumentCode: "USD",
-		Dimension:      DimensionCurrency,
-		Description:    "Clearing account for USD withdrawals pending settlement",
+		Code:            "CLR-USD-WITHDRAW",
+		Name:            "USD Withdrawal Clearing",
+		Type:            pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_WITHDRAWAL,
+		InstrumentCode:  "USD",
+		Dimension:       DimensionCurrency,
+		Description:     "Clearing account for USD withdrawals pending settlement",
 	},
 
 	// EUR Clearing Accounts
 	{
-		Code:           "CLR-EUR-DEPOSIT",
-		Name:           "EUR Deposit Clearing",
-		Type:           pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-		InstrumentCode: "EUR",
-		Dimension:      DimensionCurrency,
-		Description:    "Clearing account for EUR deposits pending settlement",
+		Code:            "CLR-EUR-DEPOSIT",
+		Name:            "EUR Deposit Clearing",
+		Type:            pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_DEPOSIT,
+		InstrumentCode:  "EUR",
+		Dimension:       DimensionCurrency,
+		Description:     "Clearing account for EUR deposits pending settlement",
 	},
 	{
-		Code:           "CLR-EUR-WITHDRAW",
-		Name:           "EUR Withdrawal Clearing",
-		Type:           pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-		InstrumentCode: "EUR",
-		Dimension:      DimensionCurrency,
-		Description:    "Clearing account for EUR withdrawals pending settlement",
+		Code:            "CLR-EUR-WITHDRAW",
+		Name:            "EUR Withdrawal Clearing",
+		Type:            pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_WITHDRAWAL,
+		InstrumentCode:  "EUR",
+		Dimension:       DimensionCurrency,
+		Description:     "Clearing account for EUR withdrawals pending settlement",
 	},
 
 	// Revenue Accounts
@@ -236,11 +251,12 @@ func (p *Provisioner) ProvisionFromTemplates(ctx context.Context, tenantID tenan
 		idempotencyKey := fmt.Sprintf("default-account:%s:%s", tenantID, template.Code)
 
 		req := &pb.InitiateInternalBankAccountRequest{
-			AccountCode:    template.Code,
-			Name:           template.Name,
-			AccountType:    template.Type,
-			InstrumentCode: template.InstrumentCode,
-			Description:    template.Description,
+			AccountCode:     template.Code,
+			Name:            template.Name,
+			AccountType:     template.Type,
+			ClearingPurpose: template.ClearingPurpose,
+			InstrumentCode:  template.InstrumentCode,
+			Description:     template.Description,
 			IdempotencyKey: &commonpb.IdempotencyKey{
 				Key: idempotencyKey,
 			},
