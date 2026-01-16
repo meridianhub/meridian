@@ -707,6 +707,11 @@ message RecordObservationRequest {
     not_in: [0]
   }];
   meridian.common.v1.IdempotencyKey idempotency_key = 9;
+
+  // causation_id links this observation to the upstream event that caused it.
+  // Used for tracing data lineage back to source systems.
+  // Examples: "ecb-feed-2026-01-15", "tariff-upload-batch-123"
+  string causation_id = 10 [(buf.validate.field).string.max_len = 256];
 }
 
 message RecordObservationResponse {
@@ -720,9 +725,33 @@ message RecordObservationBatchRequest {
   }];
 }
 
+// BatchObservationResult represents the outcome of a single observation in a batch.
+message BatchObservationResult {
+  // index is the position in the original request (0-based).
+  int32 index = 1;
+
+  // Result is either success (observation) or failure (error).
+  oneof result {
+    MarketPriceObservation observation = 2;
+    BatchError error = 3;
+  }
+}
+
+// BatchError provides structured error information for failed observations.
+message BatchError {
+  // code is a machine-readable error code (e.g., "VALIDATION_FAILED", "DATASET_NOT_FOUND").
+  string code = 1;
+  // message is a human-readable error description.
+  string message = 2;
+}
+
 message RecordObservationBatchResponse {
-  repeated MarketPriceObservation observations = 1;
-  repeated string errors = 2;  // Indexed by position in request
+  // results contains the outcome for each observation in request order.
+  repeated BatchObservationResult results = 1;
+  // success_count is the number of successfully recorded observations.
+  int32 success_count = 2;
+  // failure_count is the number of failed observations.
+  int32 failure_count = 3;
 }
 
 // RetrieveObservationRequest queries observations for a specific resolution key and time.
@@ -818,6 +847,35 @@ message ListDataSourcesRequest {
 message ListDataSourcesResponse {
   repeated DataSource sources = 1;
   string next_page_token = 2;
+}
+
+message UpdateDataSourceRequest {
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 64
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+  // Fields to update (only non-null fields are applied)
+  string name = 2;
+  string description = 3;
+  int32 trust_level = 4 [(buf.validate.field).int32 = {gte: 0, lte: 100}];
+  map<string, string> metadata = 5;
+}
+
+message UpdateDataSourceResponse {
+  DataSource source = 1;
+}
+
+message DeactivateDataSourceRequest {
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 64
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+}
+
+message DeactivateDataSourceResponse {
+  DataSource source = 1;
 }
 
 // --- CEL Playground ---
@@ -948,6 +1006,23 @@ service MarketInformationService {
   rpc ListDataSources(ListDataSourcesRequest) returns (ListDataSourcesResponse) {
     option (google.api.http) = {
       get: "/v1/sources"
+    };
+  }
+
+  // UpdateDataSource modifies an existing data source configuration.
+  rpc UpdateDataSource(UpdateDataSourceRequest) returns (UpdateDataSourceResponse) {
+    option (google.api.http) = {
+      put: "/v1/sources/{id}"
+      body: "*"
+    };
+  }
+
+  // DeactivateDataSource marks a data source as inactive.
+  // Inactive sources cannot accept new observations but existing data is preserved.
+  rpc DeactivateDataSource(DeactivateDataSourceRequest) returns (DeactivateDataSourceResponse) {
+    option (google.api.http) = {
+      post: "/v1/sources/{id}/deactivate"
+      body: "*"
     };
   }
 
@@ -1127,6 +1202,16 @@ CREATE INDEX idx_observation_superseded ON market_price_observation(superseded_b
 -- For bi-temporal queries (filter by knowledge time)
 CREATE INDEX idx_observation_created_at ON market_price_observation(created_at);
 
+-- Composite index for full bi-temporal resolution query with supersession filter
+-- Optimized for: WHERE resolution_key = ? AND superseded_by IS NULL AND created_at <= ?
+-- ORDER BY quality DESC, observed_at DESC, created_at DESC
+CREATE INDEX idx_observation_resolution_bitemporal ON market_price_observation(
+    resolution_key,
+    quality DESC,
+    observed_at DESC,
+    created_at DESC
+) WHERE superseded_by IS NULL;
+
 COMMENT ON TABLE market_price_observation IS 'Market data observations with bi-temporal and quality metadata';
 COMMENT ON COLUMN market_price_observation.resolution_key IS 'Computed from CEL expression for efficient temporal queries';
 COMMENT ON COLUMN market_price_observation.quality IS 'ADR-0017: 1=ESTIMATE, 2=ACTUAL, 3=VERIFIED';
@@ -1240,10 +1325,33 @@ The `validation_expression` CEL environment MUST provide:
 
 1. **`value` as string** - The raw observation value (preserved precision)
 2. **`decimal(value)` function** - Converts string to decimal for numeric comparisons
-3. **`observation_context` as map** - Key-value attributes for the observation
+3. **`observation_context` as map[string]string** - Key-value attributes (see below)
 4. **`observed_at`, `valid_from`, `valid_to`** - Temporal bounds as timestamps
 5. **`source_id`** - The data source identifier
 6. **`quality`** - The quality level as integer (1, 2, or 3)
+
+##### observation_context Conversion
+
+In the proto definition, `observation_context` is `repeated AttributeEntry` (a list of
+key-value pairs). Before CEL evaluation, the service MUST convert this to a `map[string]string`
+for natural map-style access in expressions:
+
+```go
+// Convert repeated AttributeEntry to map for CEL
+func toContextMap(entries []*AttributeEntry) map[string]string {
+    result := make(map[string]string, len(entries))
+    for _, e := range entries {
+        result[e.Key] = e.Value
+    }
+    return result
+}
+```
+
+This allows CEL expressions to use map-style access:
+
+- `has(observation_context.base_code)` - Check if key exists
+- `observation_context.base_code` - Access value by key
+- `size(observation_context.base_code)` - String length operations
 
 Example validation expression using numeric checks:
 
