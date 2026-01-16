@@ -19,9 +19,16 @@ instructions: |
 # PRD: Market Information Management Service
 
 **Status:** Draft
-**Version:** 1.0
+**Version:** 1.1
 **Date:** 2026-01-16
 **Author:** Architecture Team
+
+**Version History:**
+
+- v1.1 (2026-01-16): Added bi-temporal integrity (knowledge_base_time), knowledge lineage
+  (superseded_by, causation_id), deterministic resolution precedence, Market Data Switch
+  (FR-2.8), and technical hardening specifications
+- v1.0 (2026-01-16): Initial draft
 
 **ADRs:**
 
@@ -69,6 +76,8 @@ This creates several problems:
 3. No quality/authority tracking (is this an estimate, actual, or verified value?)
 4. Cannot support tenant-specific pricing (custom tariffs, negotiated rates)
 5. No foundation for the Valuation Engine to build upon
+6. Cannot replay valuations exactly as they executed (no bi-temporal / knowledge time support)
+7. No audit trail for "why was this rate used?" (no supersession tracking)
 
 ### Solution
 
@@ -77,10 +86,11 @@ platform with CEL-validated schemas, enabling:
 
 - **Unified schema pattern**: DataSetDefinition mirrors InstrumentDefinition (same CEL approach)
 - **Runtime validation**: All observations validated against dataset schemas before storage
-- **Temporal queries**: Both point-in-time snapshots and effective date ranges
-- **Quality ladder**: Estimates, actuals, verified values per ADR-0017
+- **Bi-temporal queries**: Both Event Time (observed_at) and Knowledge Time (created_at)
+- **Quality ladder**: Estimates, actuals, verified values per ADR-0017 with knowledge lineage
 - **Tenant isolation**: Shared platform sources with tenant override capability
 - **Generic ingestion**: Not just pricing - weather, load forecasts, any external dataset
+- **Market Data Switch**: Real-time event publishing for downstream valuation triggers
 
 ---
 
@@ -100,8 +110,13 @@ platform with CEL-validated schemas, enabling:
 **BIAN References:**
 
 - Control Record: **Financial Market Information Administrative Plan**
-- Related: Market Data Switch Operation (real-time dissemination)
+- Related: **Market Data Switch Operation** (real-time dissemination - FR-2.8)
 - Related: Market Analysis (forecasting - out of scope for this PRD)
+
+**Market Data Switch Integration:** Per FR-2.8, when an ACTUAL or VERIFIED observation is
+successfully ingested, the service publishes a domain event to Kafka. This enables real-time
+"Mark-to-Market" and event-driven valuation downstream. Event topic:
+`meridian.market_information.v1.ObservationRecorded`
 
 ### Functional Pattern
 
@@ -163,8 +178,9 @@ in Reference Data (onboarding, external feeds, non-instrument data like weather)
 | FR-2.5 | Observations SHALL include quality level (ESTIMATE, ACTUAL, VERIFIED) | P0 |
 | FR-2.6 | System SHALL reject observations that fail CEL validation | P0 |
 | FR-2.7 | System SHALL support batch ingestion for bulk data loads | P1 |
+| FR-2.8 | System SHALL publish domain event on ACTUAL/VERIFIED ingestion (Market Data Switch) | P0 |
 
-#### FR-3: Temporal Queries
+#### FR-3: Temporal Queries (Bi-Temporal)
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
@@ -173,6 +189,8 @@ in Reference Data (onboarding, external feeds, non-instrument data like weather)
 | FR-3.3 | System SHALL use resolution_key_expression for efficient temporal lookup | P0 |
 | FR-3.4 | System SHALL return the highest-quality observation when multiple exist | P0 |
 | FR-3.5 | System SHALL support historical range queries for analytics | P1 |
+| FR-3.6 | System SHALL support bi-temporal queries via knowledge_base_time parameter | P0 |
+| FR-3.7 | Bi-temporal queries SHALL exclude observations with created_at > knowledge_base_time | P0 |
 
 #### FR-4: Data Source Configuration
 
@@ -184,7 +202,7 @@ in Reference Data (onboarding, external feeds, non-instrument data like weather)
 | FR-4.4 | Tenants SHALL be able to override platform source priority | P1 |
 | FR-4.5 | System SHALL support source-specific ingestion credentials (future) | P2 |
 
-#### FR-5: Quality Ladder Integration
+#### FR-5: Quality Ladder and Knowledge Lineage
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
@@ -192,6 +210,9 @@ in Reference Data (onboarding, external feeds, non-instrument data like weather)
 | FR-5.2 | ESTIMATE < ACTUAL < VERIFIED in resolution precedence | P0 |
 | FR-5.3 | Higher quality observations SHALL supersede lower quality for same key | P0 |
 | FR-5.4 | System SHALL track quality transitions for audit | P1 |
+| FR-5.5 | Corrections SHALL mark old observations as superseded (superseded_by FK) | P0 |
+| FR-5.6 | Observations SHALL track causation_id for data lineage | P0 |
+| FR-5.7 | Supersession chain SHALL be traversable for "Truth Evolution" audit | P1 |
 
 #### FR-6: BIAN Control Record Operations
 
@@ -469,8 +490,23 @@ message MarketPriceObservation {
   // Populated by the service during ingestion.
   string resolution_key = 11;
 
-  // created_at is when this observation was ingested.
+  // created_at is when this observation was ingested (knowledge time).
+  // Used for bi-temporal queries to filter by knowledge state.
   google.protobuf.Timestamp created_at = 12;
+
+  // ===========================================================================
+  // Knowledge Lineage (ADR-0017 "Wash and Reload" audit trail)
+  // ===========================================================================
+
+  // superseded_by points to the observation that replaced this one (if any).
+  // When a correction arrives for the same resolution_key and observed_at,
+  // the old record is marked as superseded. Creates traversable audit trail.
+  string superseded_by = 13 [(buf.validate.field).ignore = IGNORE_IF_UNPOPULATED];
+
+  // causation_id links this observation to the upstream event that caused it.
+  // Used for tracing data lineage back to source systems.
+  // Examples: "ecb-feed-2026-01-15", "tariff-upload-batch-123"
+  string causation_id = 14 [(buf.validate.field).string.max_len = 256];
 }
 
 // DataSource represents an external or internal data provider.
@@ -657,6 +693,7 @@ message RecordObservationBatchResponse {
 }
 
 // RetrieveObservationRequest queries observations for a specific resolution key and time.
+// Supports bi-temporal queries via knowledge_base_time for audit and replay scenarios.
 message RetrieveObservationRequest {
   string dataset_code = 1 [(buf.validate.field).string = {
     min_len: 1
@@ -681,6 +718,13 @@ message RetrieveObservationRequest {
 
   // min_quality filters to observations at or above this quality level
   QualityLevel min_quality = 5;
+
+  // knowledge_base_time enables bi-temporal queries for audit and valuation replay.
+  // When set, excludes any observations with created_at > knowledge_base_time.
+  // This answers: "What would the system have returned at this point in time?"
+  // Required for regulatory audit trails and idempotent valuation replay.
+  // If omitted, defaults to current time (latest knowledge state).
+  google.protobuf.Timestamp knowledge_base_time = 6;
 }
 
 message RetrieveObservationResponse {
@@ -1008,8 +1052,14 @@ CREATE TABLE market_price_observation (
     -- Computed resolution key (from CEL expression, for efficient lookup)
     resolution_key VARCHAR(256) NOT NULL,
 
-    -- Ingestion timestamp
+    -- Ingestion timestamp (knowledge time for bi-temporal queries)
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    -- Knowledge lineage (ADR-0017 "Wash and Reload" audit trail)
+    -- Points to the observation that superseded this one (NULL = current)
+    superseded_by UUID REFERENCES market_price_observation(id),
+    -- Links to upstream event that caused this observation
+    causation_id VARCHAR(256),
 
     -- Foreign key to dataset (code+version)
     FOREIGN KEY (dataset_code, dataset_version) REFERENCES dataset_definition(code, version)
@@ -1038,9 +1088,17 @@ CREATE INDEX idx_observation_dataset ON market_price_observation(dataset_code, d
 -- For time-range analytics
 CREATE INDEX idx_observation_observed_at ON market_price_observation(observed_at DESC);
 
-COMMENT ON TABLE market_price_observation IS 'Market data observations with temporal and quality metadata';
+-- For knowledge lineage traversal
+CREATE INDEX idx_observation_superseded ON market_price_observation(superseded_by) WHERE superseded_by IS NOT NULL;
+
+-- For bi-temporal queries (filter by knowledge time)
+CREATE INDEX idx_observation_created_at ON market_price_observation(created_at);
+
+COMMENT ON TABLE market_price_observation IS 'Market data observations with bi-temporal and quality metadata';
 COMMENT ON COLUMN market_price_observation.resolution_key IS 'Computed from CEL expression for efficient temporal queries';
 COMMENT ON COLUMN market_price_observation.quality IS 'ADR-0017: 1=ESTIMATE, 2=ACTUAL, 3=VERIFIED';
+COMMENT ON COLUMN market_price_observation.created_at IS 'Knowledge time - when system learned of this observation';
+COMMENT ON COLUMN market_price_observation.superseded_by IS 'FK to replacement observation (NULL = current)';
 
 -- =============================================================================
 -- Seed System Data Sources
@@ -1121,6 +1179,85 @@ INSERT INTO dataset_definition (
     NOW()
 );
 ```
+
+### Technical Hardening Requirements
+
+#### Decimal Safety (Critical for Valuation)
+
+The `value` field in observations is stored as `VARCHAR(64)` to preserve arbitrary precision from
+source systems. **Implementers MUST use `shopspring/decimal` for all value manipulation.**
+
+```go
+import "github.com/shopspring/decimal"
+
+// CORRECT: Parse and compute with shopspring/decimal
+rate, err := decimal.NewFromString(observation.Value)
+if err != nil {
+    return fmt.Errorf("invalid decimal value: %w", err)
+}
+result := rate.Mul(quantity)
+
+// WRONG: Never use float64 for financial values
+// rate, _ := strconv.ParseFloat(observation.Value, 64)  // PRECISION LOSS
+```
+
+#### CEL Context for Validation
+
+The `validation_expression` CEL environment MUST provide:
+
+1. **`value` as string** - The raw observation value (preserved precision)
+2. **`decimal(value)` function** - Converts string to decimal for numeric comparisons
+3. **`observation_context` as map** - Key-value attributes for the observation
+4. **`observed_at`, `valid_from`, `valid_to`** - Temporal bounds as timestamps
+5. **`source_id`** - The data source identifier
+6. **`quality`** - The quality level as integer (1, 2, or 3)
+
+Example validation expression using numeric checks:
+
+```cel
+has(observation_context.base_code) &&
+size(observation_context.base_code) == 3 &&
+decimal(value) > 0 &&
+decimal(value) < 1000
+```
+
+#### Dataset Versioning and Temporal Consistency
+
+When processing temporal queries, the system MUST use the `DataSetDefinition` version that was
+**ACTIVE at the requested observation time**, not the current active version. This ensures:
+
+1. Observations are interpreted using the schema that was valid when they were recorded
+2. Historical queries return consistent results even after schema evolution
+3. Audit trails accurately reflect the business rules in effect at each point in time
+
+Implementation note: Store `dataset_version` on each observation and join on that version
+when retrieving schema metadata for validation or interpretation.
+
+### Domain Events
+
+#### ObservationRecorded Event (FR-2.8)
+
+Published to Kafka when an ACTUAL or VERIFIED observation is successfully ingested.
+
+```protobuf
+// Topic: meridian.market_information.v1.ObservationRecorded
+message ObservationRecorded {
+  string observation_id = 1;
+  string dataset_code = 2;
+  string resolution_key = 3;
+  string value = 4;
+  google.protobuf.Timestamp observed_at = 5;
+  QualityLevel quality = 6;
+  string source_id = 7;
+  google.protobuf.Timestamp recorded_at = 8;  // When the event was published
+}
+```
+
+This enables:
+
+- **Real-time valuation triggers** - Valuation Engine can recompute positions on price updates
+- **Event-driven architecture** - Downstream services react to market data changes
+- **Audit trail** - All price updates are captured as events
 
 ### Integration Points
 
@@ -1274,6 +1411,9 @@ func (w *Worker) provisionMarketInformation(ctx context.Context, tenantID string
 - [ ] Quality ladder resolution selects highest quality observation
 - [ ] Batch ingestion handles 1,000 observations/request
 - [ ] System datasets seeded on tenant provisioning
+- [ ] Bi-temporal queries with knowledge_base_time work correctly
+- [ ] Supersession tracking creates traversable audit trail
+- [ ] Domain events published for ACTUAL/VERIFIED observations
 
 ### Technical Success
 
@@ -1290,6 +1430,9 @@ func (w *Worker) provisionMarketInformation(ctx context.Context, tenantID string
 - [ ] Can configure tenant-specific tariffs with priority over system defaults
 - [ ] Valuation Engine (future) has a stable API to build upon
 - [ ] Data quality (estimate vs actual vs verified) is tracked for audit
+- [ ] Can replay valuations exactly as they would have executed at any past moment (bi-temporal)
+- [ ] Auditors can trace "Truth Evolution" - why a rate was used at a specific time
+- [ ] Downstream services receive real-time price update notifications (Market Data Switch)
 
 ---
 
@@ -1378,23 +1521,41 @@ resolution_key_expression: |
 ## Appendix B: Quality Ladder Resolution
 
 Per ADR-0017, when multiple observations exist for the same resolution key and time window,
-the system resolves using this precedence:
+the system resolves using this **deterministic precedence** (required for idempotent replay):
 
-1. **Quality Level** (VERIFIED > ACTUAL > ESTIMATE)
-2. **Source Trust Level** (higher trust_level wins for same quality)
-3. **Observation Time** (more recent observed_at wins for same quality and trust)
+1. **Quality Level** (VERIFIED > ACTUAL > ESTIMATE) - Authority of data
+2. **Observation Time** (more recent observed_at wins) - Freshness within quality tier
+3. **Source Trust Level** (higher trust_level wins) - Tie-breaker for same quality and time
+4. **System Sequence** (more recent created_at wins) - Final deterministic tie-breaker
+
+**Why this order?** Within a single quality tier, the most recent observation represents the
+market's latest state. Source trust only matters when two sources report at the same time.
+The created_at tie-breaker ensures deterministic results even in edge cases.
 
 ```sql
--- Example resolution query
+-- Example resolution query with bi-temporal support
 -- quality is INTEGER: 1=ESTIMATE, 2=ACTUAL, 3=VERIFIED
--- No CASE expression needed - ORDER BY quality DESC works correctly
-SELECT * FROM market_price_observation
-WHERE resolution_key = 'USD/GBP'
-  AND observed_at <= '2026-01-15T14:30:00Z'
+-- Joins data_source for trust_level tie-breaking
+SELECT o.* FROM market_price_observation o
+JOIN data_source s ON o.source_id = s.id
+WHERE o.resolution_key = 'USD/GBP'
+  AND o.observed_at <= '2026-01-15T14:30:00Z'
+  AND o.superseded_by IS NULL                    -- Only current observations
+  AND o.created_at <= :knowledge_base_time       -- Bi-temporal: knowledge cutoff
 ORDER BY
-  quality DESC,      -- 3 (VERIFIED) > 2 (ACTUAL) > 1 (ESTIMATE)
-  observed_at DESC
+  o.quality DESC,       -- 3 (VERIFIED) > 2 (ACTUAL) > 1 (ESTIMATE)
+  o.observed_at DESC,   -- Freshest observation within quality tier
+  s.trust_level DESC,   -- Higher trust source wins ties
+  o.created_at DESC     -- System sequence as final tie-breaker
 LIMIT 1;
+```
+
+**Bi-temporal query example**: To replay a valuation as of 9:00 AM on Jan 15th:
+
+```sql
+-- What rate would the system have used at 9:00 AM?
+-- knowledge_base_time = '2026-01-15T09:00:00Z'
+-- This excludes any "Verified" data that arrived later that day
 ```
 
 ---
