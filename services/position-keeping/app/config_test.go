@@ -14,6 +14,8 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	clearEnv(t)
 	// DATABASE_URL is required (no default to avoid hardcoded credentials)
 	t.Setenv("DATABASE_URL", "postgres://localhost:5432/testdb")
+	// Disable account validation for default config tests (it's enabled by default)
+	t.Setenv("ACCOUNT_VALIDATION_ENABLED", "false")
 
 	config, err := LoadConfig()
 	if err != nil {
@@ -87,6 +89,8 @@ func TestLoadConfig_CustomValues(t *testing.T) {
 	t.Setenv("LOG_LEVEL", "debug")
 	t.Setenv("METRICS_ENABLED", "false")
 	t.Setenv("METRICS_PORT", "9091")
+	// Disable account validation for this test (enabled by default)
+	t.Setenv("ACCOUNT_VALIDATION_ENABLED", "false")
 
 	config, err := LoadConfig()
 	if err != nil {
@@ -691,6 +695,8 @@ func TestValidate_CompactionInvalidBatchSize(t *testing.T) {
 func TestLoadConfig_CompactionDefaults(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("DATABASE_URL", "postgres://localhost:5432/testdb")
+	// Disable account validation for this test (enabled by default)
+	t.Setenv("ACCOUNT_VALIDATION_ENABLED", "false")
 
 	config, err := LoadConfig()
 	if err != nil {
@@ -719,6 +725,8 @@ func TestLoadConfig_CompactionCustomValues(t *testing.T) {
 	t.Setenv("COMPACTION_RUN_INTERVAL", "10m")
 	t.Setenv("COMPACTION_FRAGMENT_THRESHOLD", "200")
 	t.Setenv("COMPACTION_BATCH_SIZE", "100")
+	// Disable account validation for this test (enabled by default)
+	t.Setenv("ACCOUNT_VALIDATION_ENABLED", "false")
 
 	config, err := LoadConfig()
 	if err != nil {
@@ -740,6 +748,118 @@ func TestLoadConfig_CompactionCustomValues(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_AccountValidation_Defaults(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost:5432/testdb")
+	// Provide at least one URL since validation is enabled by default
+	t.Setenv("CURRENT_ACCOUNT_SERVICE_URL", "localhost:50051")
+
+	config, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v, want nil", err)
+	}
+
+	// Verify account validation defaults
+	if !config.AccountValidation.Enabled {
+		t.Error("AccountValidation.Enabled = false, want true (default)")
+	}
+	if config.AccountValidation.CurrentAccountServiceURL != "localhost:50051" {
+		t.Errorf("AccountValidation.CurrentAccountServiceURL = %s, want localhost:50051",
+			config.AccountValidation.CurrentAccountServiceURL)
+	}
+	if config.AccountValidation.CacheTTL != 1*time.Minute {
+		t.Errorf("AccountValidation.CacheTTL = %v, want 1m", config.AccountValidation.CacheTTL)
+	}
+	if config.AccountValidation.ConnectionTimeout != 5*time.Second {
+		t.Errorf("AccountValidation.ConnectionTimeout = %v, want 5s", config.AccountValidation.ConnectionTimeout)
+	}
+}
+
+func TestLoadConfig_AccountValidation_CustomValues(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost:5432/testdb")
+	t.Setenv("ACCOUNT_VALIDATION_ENABLED", "true")
+	t.Setenv("CURRENT_ACCOUNT_SERVICE_URL", "current-account:50051")
+	t.Setenv("INTERNAL_BANK_ACCOUNT_SERVICE_URL", "internal-bank-account:50052")
+	t.Setenv("ACCOUNT_VALIDATION_CACHE_TTL", "5m")
+	t.Setenv("ACCOUNT_VALIDATION_CONNECTION_TIMEOUT", "10s")
+
+	config, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v, want nil", err)
+	}
+
+	if !config.AccountValidation.Enabled {
+		t.Error("AccountValidation.Enabled = false, want true")
+	}
+	if config.AccountValidation.CurrentAccountServiceURL != "current-account:50051" {
+		t.Errorf("AccountValidation.CurrentAccountServiceURL = %s, want current-account:50051",
+			config.AccountValidation.CurrentAccountServiceURL)
+	}
+	if config.AccountValidation.InternalBankAccountServiceURL != "internal-bank-account:50052" {
+		t.Errorf("AccountValidation.InternalBankAccountServiceURL = %s, want internal-bank-account:50052",
+			config.AccountValidation.InternalBankAccountServiceURL)
+	}
+	if config.AccountValidation.CacheTTL != 5*time.Minute {
+		t.Errorf("AccountValidation.CacheTTL = %v, want 5m", config.AccountValidation.CacheTTL)
+	}
+	if config.AccountValidation.ConnectionTimeout != 10*time.Second {
+		t.Errorf("AccountValidation.ConnectionTimeout = %v, want 10s", config.AccountValidation.ConnectionTimeout)
+	}
+}
+
+func TestLoadConfig_AccountValidation_Disabled(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost:5432/testdb")
+	t.Setenv("ACCOUNT_VALIDATION_ENABLED", "false")
+	// No URLs needed when validation is disabled
+
+	config, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v, want nil", err)
+	}
+
+	if config.AccountValidation.Enabled {
+		t.Error("AccountValidation.Enabled = true, want false")
+	}
+}
+
+func TestLoadConfig_AccountValidation_OnlyInternalBankAccount(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost:5432/testdb")
+	t.Setenv("ACCOUNT_VALIDATION_ENABLED", "true")
+	// Only Internal Bank Account URL - should be valid
+	t.Setenv("INTERNAL_BANK_ACCOUNT_SERVICE_URL", "internal-bank-account:50052")
+
+	config, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v, want nil", err)
+	}
+
+	if !config.AccountValidation.Enabled {
+		t.Error("AccountValidation.Enabled = false, want true")
+	}
+	if config.AccountValidation.InternalBankAccountServiceURL != "internal-bank-account:50052" {
+		t.Errorf("AccountValidation.InternalBankAccountServiceURL = %s, want internal-bank-account:50052",
+			config.AccountValidation.InternalBankAccountServiceURL)
+	}
+}
+
+func TestLoadConfig_AccountValidation_EnabledNoURL_ReturnsError(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost:5432/testdb")
+	t.Setenv("ACCOUNT_VALIDATION_ENABLED", "true")
+	// No URLs provided - should fail validation
+
+	_, err := LoadConfig()
+	if err == nil {
+		t.Fatal("LoadConfig() error = nil, want error for missing account service URLs")
+	}
+	if !errors.Is(err, ErrAccountValidationURLRequired) {
+		t.Errorf("LoadConfig() error = %v, want ErrAccountValidationURLRequired", err)
+	}
+}
+
 // clearEnv clears environment variables used in tests
 func clearEnv(t *testing.T) {
 	t.Helper()
@@ -754,6 +874,9 @@ func clearEnv(t *testing.T) {
 		"SAMPLING_RATE", "LOG_LEVEL", "METRICS_ENABLED", "METRICS_PORT",
 		"COMPACTION_ENABLED", "COMPACTION_RUN_INTERVAL",
 		"COMPACTION_FRAGMENT_THRESHOLD", "COMPACTION_BATCH_SIZE",
+		"ACCOUNT_VALIDATION_ENABLED", "CURRENT_ACCOUNT_SERVICE_URL",
+		"INTERNAL_BANK_ACCOUNT_SERVICE_URL", "ACCOUNT_VALIDATION_CACHE_TTL",
+		"ACCOUNT_VALIDATION_CONNECTION_TIMEOUT",
 	}
 	for _, key := range envVars {
 		_ = os.Unsetenv(key)

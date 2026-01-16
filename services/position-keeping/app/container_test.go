@@ -19,8 +19,9 @@ func TestNewContainer_Success(t *testing.T) {
 	// Set up test environment with minimal config
 	clearEnv(t)
 	t.Setenv("DATABASE_URL", "postgres://test:test@localhost:5432/testdb")
-	t.Setenv("KAFKA_ENABLED", "false") // Disable Kafka for unit test
-	t.Setenv("OTLP_ENDPOINT", "")      // Disable tracing for unit test
+	t.Setenv("KAFKA_ENABLED", "false")              // Disable Kafka for unit test
+	t.Setenv("OTLP_ENDPOINT", "")                   // Disable tracing for unit test
+	t.Setenv("ACCOUNT_VALIDATION_ENABLED", "false") // Disable account validation for unit test
 
 	config, err := LoadConfig()
 	if err != nil {
@@ -112,6 +113,7 @@ func TestKafkaDisabled(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("DATABASE_URL", "postgres://localhost:5432/testdb")
 	t.Setenv("KAFKA_ENABLED", "false")
+	t.Setenv("ACCOUNT_VALIDATION_ENABLED", "false")
 
 	config, err := LoadConfig()
 	if err != nil {
@@ -135,6 +137,7 @@ func TestDatabasePoolConfiguration(t *testing.T) {
 	t.Setenv("DB_MAX_IDLE_CONNS", "10")
 	t.Setenv("DB_CONN_MAX_LIFETIME", "15m")
 	t.Setenv("DB_CONN_MAX_IDLE_TIME", "20m")
+	t.Setenv("ACCOUNT_VALIDATION_ENABLED", "false")
 
 	config, err := LoadConfig()
 	if err != nil {
@@ -163,6 +166,7 @@ func TestObservabilityConfiguration(t *testing.T) {
 	t.Setenv("SERVICE_VERSION", "1.2.3")
 	t.Setenv("ENVIRONMENT", "test")
 	t.Setenv("SAMPLING_RATE", "0.25")
+	t.Setenv("ACCOUNT_VALIDATION_ENABLED", "false")
 
 	config, err := LoadConfig()
 	if err != nil {

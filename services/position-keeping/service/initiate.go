@@ -52,6 +52,16 @@ func (s *PositionKeepingService) InitiateFinancialPositionLog(
 		return nil, status.Errorf(codes.Canceled, "request cancelled: %v", err)
 	}
 
+	// Validate account exists if validation is enabled
+	// This check ensures we don't create position logs for non-existent accounts.
+	// The validator uses graceful degradation: if Current Account service is unavailable,
+	// validation is skipped to avoid blocking operations during service outages.
+	if s.accountValidationEnabled && s.accountValidator != nil {
+		if err := s.accountValidator.ValidateExists(ctx, req.AccountId); err != nil {
+			return nil, err // Returns codes.InvalidArgument if account not found
+		}
+	}
+
 	// Convert initial entry from proto to domain if provided
 	var initialEntry *domain.TransactionLogEntry
 	if req.InitialEntry != nil {

@@ -11,6 +11,8 @@ import (
 	"os"
 	"time"
 
+	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
+	internalbankaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_bank_account/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/meridianhub/meridian/services/position-keeping/app"
 	"github.com/meridianhub/meridian/services/position-keeping/observability"
@@ -26,6 +28,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 )
@@ -187,12 +190,127 @@ func run(logger *slog.Logger) error {
 		logger.Info("idempotency service disabled (Redis not configured)")
 	}
 
+	// Create account validator if validation is enabled
+	var serviceOpts []service.Option
+	var currentAccountConn *grpc.ClientConn
+	var internalBankAccountConn *grpc.ClientConn
+
+	if config.AccountValidation.Enabled {
+		var currentAccountValidator *service.CurrentAccountValidator
+		var internalBankAccountValidator *service.InternalBankAccountValidator
+
+		// Create Current Account validator if URL is configured
+		if config.AccountValidation.CurrentAccountServiceURL != "" {
+			var connErr error
+			currentAccountConn, connErr = grpc.NewClient(
+				config.AccountValidation.CurrentAccountServiceURL,
+				grpc.WithTransportCredentials(insecure.NewCredentials()),
+			)
+			if connErr != nil {
+				return fmt.Errorf("failed to create current account client at %s: %w",
+					config.AccountValidation.CurrentAccountServiceURL, connErr)
+			}
+
+			currentAccountClient := currentaccountv1.NewCurrentAccountServiceClient(currentAccountConn)
+			var validatorErr error
+			currentAccountValidator, validatorErr = service.NewCurrentAccountValidator(service.CurrentAccountValidatorConfig{
+				Client:        &currentAccountClientAdapter{client: currentAccountClient},
+				Logger:        logger,
+				CacheTTL:      config.AccountValidation.CacheTTL,
+				LookupTimeout: config.AccountValidation.ConnectionTimeout,
+			})
+			if validatorErr != nil {
+				currentAccountConn.Close()
+				return fmt.Errorf("failed to create current account validator: %w", validatorErr)
+			}
+			logger.Info("current account validator configured",
+				"url", config.AccountValidation.CurrentAccountServiceURL)
+		}
+
+		// Create Internal Bank Account validator if URL is configured
+		if config.AccountValidation.InternalBankAccountServiceURL != "" {
+			var connErr error
+			internalBankAccountConn, connErr = grpc.NewClient(
+				config.AccountValidation.InternalBankAccountServiceURL,
+				grpc.WithTransportCredentials(insecure.NewCredentials()),
+			)
+			if connErr != nil {
+				if currentAccountConn != nil {
+					currentAccountConn.Close()
+				}
+				return fmt.Errorf("failed to create internal bank account client at %s: %w",
+					config.AccountValidation.InternalBankAccountServiceURL, connErr)
+			}
+
+			internalBankAccountClient := internalbankaccountv1.NewInternalBankAccountServiceClient(internalBankAccountConn)
+			var validatorErr error
+			internalBankAccountValidator, validatorErr = service.NewInternalBankAccountValidator(service.InternalBankAccountValidatorConfig{
+				Client:        &internalBankAccountClientAdapter{client: internalBankAccountClient},
+				Logger:        logger,
+				CacheTTL:      config.AccountValidation.CacheTTL,
+				LookupTimeout: config.AccountValidation.ConnectionTimeout,
+			})
+			if validatorErr != nil {
+				if currentAccountConn != nil {
+					currentAccountConn.Close()
+				}
+				internalBankAccountConn.Close()
+				return fmt.Errorf("failed to create internal bank account validator: %w", validatorErr)
+			}
+			logger.Info("internal bank account validator configured",
+				"url", config.AccountValidation.InternalBankAccountServiceURL)
+		}
+
+		// Create composite validator that checks both services
+		compositeValidator, compositeErr := service.NewCompositeAccountValidator(service.CompositeAccountValidatorConfig{
+			CurrentAccountValidator:      currentAccountValidator,
+			InternalBankAccountValidator: internalBankAccountValidator,
+			Logger:                       logger,
+		})
+		if compositeErr != nil {
+			if currentAccountConn != nil {
+				currentAccountConn.Close()
+			}
+			if internalBankAccountConn != nil {
+				internalBankAccountConn.Close()
+			}
+			return fmt.Errorf("failed to create composite account validator: %w", compositeErr)
+		}
+
+		serviceOpts = append(serviceOpts,
+			service.WithAccountValidator(compositeValidator),
+			service.WithAccountValidationEnabled(true),
+		)
+
+		logger.Info("account validation enabled",
+			"current_account_url", config.AccountValidation.CurrentAccountServiceURL,
+			"internal_bank_account_url", config.AccountValidation.InternalBankAccountServiceURL,
+			"cache_ttl", config.AccountValidation.CacheTTL)
+	} else {
+		logger.Info("account validation disabled")
+	}
+
+	// Ensure account service connections are closed on shutdown
+	defer func() {
+		if currentAccountConn != nil {
+			if err := currentAccountConn.Close(); err != nil {
+				logger.Error("failed to close current account connection", "error", err)
+			}
+		}
+		if internalBankAccountConn != nil {
+			if err := internalBankAccountConn.Close(); err != nil {
+				logger.Error("failed to close internal bank account connection", "error", err)
+			}
+		}
+	}()
+
 	// Create gRPC service
 	positionKeepingService, err := service.NewPositionKeepingService(
 		container.PositionLogRepository,
 		container.MeasurementRepository,
 		container.EventPublisher,
 		idempotencySvc,
+		serviceOpts...,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create position keeping service: %w", err)
@@ -459,4 +577,28 @@ func (h *healthServer) Watch(_ *grpc_health_v1.HealthCheckRequest, stream grpc_h
 			}
 		}
 	}
+}
+
+// currentAccountClientAdapter adapts the generated gRPC client to the service.CurrentAccountClient interface.
+// This adapter is needed because the service package defines its own interface for testability,
+// while the generated client has a different method signature.
+type currentAccountClientAdapter struct {
+	client currentaccountv1.CurrentAccountServiceClient
+}
+
+// RetrieveCurrentAccount implements service.CurrentAccountClient by delegating to the generated client.
+func (a *currentAccountClientAdapter) RetrieveCurrentAccount(ctx context.Context, req *currentaccountv1.RetrieveCurrentAccountRequest) (*currentaccountv1.RetrieveCurrentAccountResponse, error) {
+	return a.client.RetrieveCurrentAccount(ctx, req)
+}
+
+// internalBankAccountClientAdapter adapts the generated gRPC client to the service.InternalBankAccountClient interface.
+// This adapter is needed because the service package defines its own interface for testability,
+// while the generated client has a different method signature.
+type internalBankAccountClientAdapter struct {
+	client internalbankaccountv1.InternalBankAccountServiceClient
+}
+
+// RetrieveInternalBankAccount implements service.InternalBankAccountClient by delegating to the generated client.
+func (a *internalBankAccountClientAdapter) RetrieveInternalBankAccount(ctx context.Context, req *internalbankaccountv1.RetrieveInternalBankAccountRequest) (*internalbankaccountv1.RetrieveInternalBankAccountResponse, error) {
+	return a.client.RetrieveInternalBankAccount(ctx, req)
 }

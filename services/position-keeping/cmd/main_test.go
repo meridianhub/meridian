@@ -42,7 +42,11 @@ func TestHealthServer_Check_WithHealthyDatabase(t *testing.T) {
 	// This test requires a real database connection
 	// Set up minimal environment
 	_ = os.Setenv("DATABASE_URL", "postgres://test:test@localhost:5432/testdb")
-	defer func() { _ = os.Unsetenv("DATABASE_URL") }()
+	_ = os.Setenv("ACCOUNT_VALIDATION_ENABLED", "false")
+	defer func() {
+		_ = os.Unsetenv("DATABASE_URL")
+		_ = os.Unsetenv("ACCOUNT_VALIDATION_ENABLED")
+	}()
 
 	config, err := app.LoadConfig()
 	if err != nil {
@@ -99,7 +103,11 @@ func TestHealthServer_Check_WithHealthyDatabase(t *testing.T) {
 func TestHealthServer_Check_ReturnsResponse(t *testing.T) {
 	// This test doesn't require a real database - just validates structure
 	_ = os.Setenv("DATABASE_URL", "postgres://test:test@localhost:5432/testdb")
-	defer func() { _ = os.Unsetenv("DATABASE_URL") }()
+	_ = os.Setenv("ACCOUNT_VALIDATION_ENABLED", "false")
+	defer func() {
+		_ = os.Unsetenv("DATABASE_URL")
+		_ = os.Unsetenv("ACCOUNT_VALIDATION_ENABLED")
+	}()
 
 	config, err := app.LoadConfig()
 	if err != nil {
@@ -153,7 +161,11 @@ func TestHealthServer_Check_ReturnsResponse(t *testing.T) {
 
 func TestHealthServer_Watch_SendsInitialStatus(t *testing.T) {
 	_ = os.Setenv("DATABASE_URL", "postgres://test:test@localhost:5432/testdb")
-	defer func() { _ = os.Unsetenv("DATABASE_URL") }()
+	_ = os.Setenv("ACCOUNT_VALIDATION_ENABLED", "false")
+	defer func() {
+		_ = os.Unsetenv("DATABASE_URL")
+		_ = os.Unsetenv("ACCOUNT_VALIDATION_ENABLED")
+	}()
 
 	config, err := app.LoadConfig()
 	if err != nil {
@@ -225,7 +237,11 @@ func TestHealthServer_Watch_SendsInitialStatus(t *testing.T) {
 
 func TestHealthServer_Watch_RespectsContext(t *testing.T) {
 	_ = os.Setenv("DATABASE_URL", "postgres://test:test@localhost:5432/testdb")
-	defer func() { _ = os.Unsetenv("DATABASE_URL") }()
+	_ = os.Setenv("ACCOUNT_VALIDATION_ENABLED", "false")
+	defer func() {
+		_ = os.Unsetenv("DATABASE_URL")
+		_ = os.Unsetenv("ACCOUNT_VALIDATION_ENABLED")
+	}()
 
 	config, err := app.LoadConfig()
 	if err != nil {
