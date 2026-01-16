@@ -41,6 +41,7 @@ var (
 	ErrRepositoryNil                = errors.New("repository cannot be nil")
 	ErrCurrentAccountClientNil      = errors.New("current account client cannot be nil")
 	ErrFinancialAccountingClientNil = errors.New("financial accounting client cannot be nil")
+	ErrInternalBankAccountClientNil = errors.New("internal bank account client cannot be nil when internal clearing is enabled")
 	ErrPaymentGatewayNil            = errors.New("payment gateway cannot be nil")
 	ErrGatewayAccountConfigNil      = errors.New("gateway account config cannot be nil")
 	ErrIdempotencyServiceNil        = errors.New("idempotency service cannot be nil")
@@ -280,6 +281,10 @@ func NewServiceWithConfig(cfg Config) (*Service, error) {
 		return nil, ErrIdempotencyServiceNil
 	}
 	// KafkaPublisher is optional - nil is handled gracefully by publishEvent
+	// InternalBankAccountClient is optional but required if internal clearing is enabled
+	if cfg.InternalClearingEnabled && cfg.InternalBankAccountClient == nil {
+		return nil, ErrInternalBankAccountClientNil
+	}
 
 	// Apply default logger if not provided
 	logger := cfg.Logger
