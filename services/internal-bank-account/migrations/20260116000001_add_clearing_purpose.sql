@@ -6,20 +6,13 @@
 ALTER TABLE "internal_bank_account"
 ADD COLUMN "clearing_purpose" character varying(32) NULL;
 
--- Add check constraint to enforce that CLEARING accounts must have a non-null clearing_purpose
--- Non-CLEARING accounts should have NULL or CLEARING_PURPOSE_UNSPECIFIED
-ALTER TABLE "internal_bank_account"
-ADD CONSTRAINT "chk_clearing_purpose_for_clearing_type"
-CHECK (
-  account_type != 'CLEARING' OR clearing_purpose IS NOT NULL
-);
-
 -- Backfill existing CLEARING accounts based on account_code patterns
 -- This is a best-effort mapping based on common naming conventions:
 --   - Codes ending in '-DEPOSIT' -> CLEARING_PURPOSE_DEPOSIT
 --   - Codes ending in '-WITHDRAW' or '-WITHDRAWAL' -> CLEARING_PURPOSE_WITHDRAWAL
 --   - Codes ending in '-SETTLEMENT' -> CLEARING_PURPOSE_SETTLEMENT
 --   - All other CLEARING accounts -> CLEARING_PURPOSE_GENERAL
+-- NOTE: Backfill MUST run before adding the constraint to avoid migration failure
 UPDATE "internal_bank_account"
 SET "clearing_purpose" = CASE
   WHEN account_code LIKE '%-DEPOSIT' OR account_code LIKE '%-deposit' THEN 'CLEARING_PURPOSE_DEPOSIT'
@@ -29,6 +22,15 @@ SET "clearing_purpose" = CASE
   ELSE 'CLEARING_PURPOSE_GENERAL'
 END
 WHERE account_type = 'CLEARING' AND clearing_purpose IS NULL;
+
+-- Add check constraint to enforce that CLEARING accounts must have a non-null clearing_purpose
+-- Non-CLEARING accounts should have NULL or CLEARING_PURPOSE_UNSPECIFIED
+-- NOTE: Constraint added AFTER backfill to ensure existing data satisfies it
+ALTER TABLE "internal_bank_account"
+ADD CONSTRAINT "chk_clearing_purpose_for_clearing_type"
+CHECK (
+  account_type != 'CLEARING' OR clearing_purpose IS NOT NULL
+);
 
 -- Create partial index for efficient filtering of clearing accounts by purpose
 -- Only indexes rows where account_type = 'CLEARING', reducing index size
