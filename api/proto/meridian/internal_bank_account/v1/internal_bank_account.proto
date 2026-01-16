@@ -50,6 +50,21 @@ option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
   }
 };
 
+// ClearingPurpose distinguishes the specific purpose of clearing accounts.
+// Only applicable when account_type is INTERNAL_ACCOUNT_TYPE_CLEARING.
+enum ClearingPurpose {
+  // CLEARING_PURPOSE_UNSPECIFIED is the default value for non-clearing accounts.
+  CLEARING_PURPOSE_UNSPECIFIED = 0;
+  // CLEARING_PURPOSE_DEPOSIT is for clearing accounts handling deposit operations.
+  CLEARING_PURPOSE_DEPOSIT = 1;
+  // CLEARING_PURPOSE_WITHDRAWAL is for clearing accounts handling withdrawal operations.
+  CLEARING_PURPOSE_WITHDRAWAL = 2;
+  // CLEARING_PURPOSE_SETTLEMENT is for clearing accounts handling settlement operations.
+  CLEARING_PURPOSE_SETTLEMENT = 3;
+  // CLEARING_PURPOSE_GENERAL is for general-purpose clearing accounts.
+  CLEARING_PURPOSE_GENERAL = 4;
+}
+
 // InternalAccountType defines the type of internal bank account per BIAN v13.0.
 // Internal accounts are non-customer-facing accounts used for operational purposes.
 enum InternalAccountType {
@@ -208,6 +223,11 @@ message InternalBankAccountFacility {
 
   // version is for optimistic locking.
   int32 version = 11 [(buf.validate.field).int32 = {gte: 0}];
+
+  // clearing_purpose distinguishes the specific purpose of clearing accounts.
+  // Only applicable when account_type is INTERNAL_ACCOUNT_TYPE_CLEARING.
+  // Should be CLEARING_PURPOSE_UNSPECIFIED for non-clearing account types.
+  ClearingPurpose clearing_purpose = 12;
 }
 
 // ========================================
@@ -252,6 +272,11 @@ message InitiateInternalBankAccountRequest {
 
   // idempotency_key ensures exactly-once processing for retry scenarios.
   meridian.common.v1.IdempotencyKey idempotency_key = 7;
+
+  // clearing_purpose specifies the purpose when account_type is CLEARING.
+  // Required when account_type is INTERNAL_ACCOUNT_TYPE_CLEARING.
+  // Must be CLEARING_PURPOSE_UNSPECIFIED for non-clearing account types.
+  ClearingPurpose clearing_purpose = 8;
 }
 
 // InitiateInternalBankAccountResponse returns the newly created account.
@@ -359,6 +384,10 @@ message ListInternalBankAccountsRequest {
 
   // pagination controls result pagination.
   meridian.common.v1.Pagination pagination = 4;
+
+  // clearing_purpose_filter returns only clearing accounts with this purpose (optional).
+  // If CLEARING_PURPOSE_UNSPECIFIED, no filtering by clearing purpose is applied.
+  ClearingPurpose clearing_purpose_filter = 5;
 }
 
 // ListInternalBankAccountsResponse returns a paginated list of accounts.
