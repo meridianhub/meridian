@@ -18,6 +18,7 @@ PRDs define the requirements, design, and implementation approach for significan
 |-----|-------|--------|-----------------|
 | [Universal Asset System](universal-asset-system.md) | Multi-asset ledger support | Draft | `universal-asset-system` |
 | [Internal Bank Account](internal-bank-account.md) | Non-customer-facing account management | Draft | `internal-bank-account` |
+| [Market Information Management](market-information-management.md) | Market data, pricing feeds, and external datasets | Draft | `market-information-management` |
 | [Meridian Edge](meridian-edge.md) | Embedded financial kernel for IoT/Browser | Proposed | `meridian-edge` |
 
 ## Categories
@@ -26,6 +27,7 @@ PRDs define the requirements, design, and implementation approach for significan
 
 - [Universal Asset System](universal-asset-system.md) - Multi-asset support with dimensional safety
 - [Internal Bank Account](internal-bank-account.md) - BIAN service for clearing, nostro/vostro accounts
+- [Market Information Management](market-information-management.md) - BIAN service for market data and pricing
 
 ### Deployment Targets
 
