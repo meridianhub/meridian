@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,13 +17,60 @@ import (
 type PostingService struct {
 	repo              *persistence.LedgerRepository
 	bankCashAccountID string
+	accountResolver   *AccountResolver
+	logger            *slog.Logger
 }
 
-// NewPostingService creates a new posting service
+// PostingServiceConfig holds configuration for creating a PostingService.
+type PostingServiceConfig struct {
+	// Repo is the ledger repository for database operations.
+	Repo *persistence.LedgerRepository
+
+	// BankCashAccountID is the static fallback account ID for clearing operations.
+	// Used when AccountResolver is nil or when dynamic lookup fails.
+	BankCashAccountID string
+
+	// AccountResolver is optional. When provided, enables dynamic clearing account
+	// lookup by instrument. Falls back to BankCashAccountID on lookup failure.
+	AccountResolver *AccountResolver
+
+	// Logger is optional. If nil, a default logger is used.
+	Logger *slog.Logger
+}
+
+// NewPostingService creates a new posting service.
+//
+// Deprecated: Use NewPostingServiceWithConfig for full configuration options.
 func NewPostingService(repo *persistence.LedgerRepository, bankCashAccountID string) *PostingService {
 	return &PostingService{
 		repo:              repo,
 		bankCashAccountID: bankCashAccountID,
+		logger:            slog.Default(),
+	}
+}
+
+// NewPostingServiceWithConfig creates a new posting service with full configuration.
+// When AccountResolver is provided, the service will attempt dynamic clearing account
+// lookup before falling back to the static BankCashAccountID.
+func NewPostingServiceWithConfig(cfg PostingServiceConfig) *PostingService {
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	mode := "static config"
+	if cfg.AccountResolver != nil {
+		mode = "dynamic clearing"
+	}
+	logger.Info("posting service initialized",
+		"mode", mode,
+		"static_account_id", cfg.BankCashAccountID)
+
+	return &PostingService{
+		repo:              cfg.Repo,
+		bankCashAccountID: cfg.BankCashAccountID,
+		accountResolver:   cfg.AccountResolver,
+		logger:            logger,
 	}
 }
 
@@ -83,12 +131,15 @@ func (s *PostingService) ProcessDeposit(ctx context.Context, event DepositEvent)
 		return fmt.Errorf("failed to create debit posting: %w", err)
 	}
 
-	// Create credit posting (bank cash account)
+	// Resolve clearing account for the credit posting
+	clearingAccountID := s.resolveClearingAccountForDeposit(ctx, instrument.Code)
+
+	// Create credit posting (clearing/bank cash account)
 	creditPosting, err := domain.NewLedgerPosting(
 		bookingLogID,
 		domain.PostingDirectionCredit,
 		money,
-		s.bankCashAccountID,
+		clearingAccountID,
 		event.ValueDate,
 		event.CorrelationID,
 	)
@@ -197,4 +248,42 @@ func (s *PostingService) ValidateDoubleEntry(ctx context.Context, bookingLogID u
 	}
 
 	return balanced, nil
+}
+
+// resolveClearingAccountForDeposit attempts dynamic clearing account lookup,
+// falling back to static config on any error or empty result.
+func (s *PostingService) resolveClearingAccountForDeposit(ctx context.Context, instrumentCode string) string {
+	// If no resolver configured, use static fallback
+	if s.accountResolver == nil {
+		s.logger.Debug("using static clearing account (no resolver configured)",
+			"instrument_code", instrumentCode,
+			"account_id", s.bankCashAccountID)
+		return s.bankCashAccountID
+	}
+
+	// Attempt dynamic lookup
+	accountID, err := s.accountResolver.GetDepositClearingAccount(ctx, instrumentCode)
+	if err != nil {
+		// Log fallback event for observability
+		s.logger.Warn("dynamic clearing account lookup failed, using static fallback",
+			"instrument_code", instrumentCode,
+			"fallback_account_id", s.bankCashAccountID,
+			"error", err)
+		observability.RecordResolverFallback(instrumentCode, observability.OperationProcessDeposit)
+		return s.bankCashAccountID
+	}
+
+	// Guard against empty account ID - treat as lookup failure
+	if accountID == "" {
+		s.logger.Warn("dynamic clearing account lookup returned empty result, using static fallback",
+			"instrument_code", instrumentCode,
+			"fallback_account_id", s.bankCashAccountID)
+		observability.RecordResolverFallback(instrumentCode, observability.OperationProcessDeposit)
+		return s.bankCashAccountID
+	}
+
+	s.logger.Debug("using dynamic clearing account",
+		"instrument_code", instrumentCode,
+		"account_id", accountID)
+	return accountID
 }

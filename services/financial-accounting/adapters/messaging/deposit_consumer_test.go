@@ -183,7 +183,10 @@ func setupTestServices(t *testing.T) (*service.PostingService, context.Context, 
 	ctx := tenant.WithTenant(context.Background(), tid)
 
 	repo := persistence.NewLedgerRepository(db)
-	return service.NewPostingService(repo, "BANK-CASH-001"), ctx, cleanup
+	return service.NewPostingServiceWithConfig(service.PostingServiceConfig{
+		Repo:              repo,
+		BankCashAccountID: "BANK-CASH-001",
+	}), ctx, cleanup
 }
 
 func TestNewDepositConsumer(t *testing.T) {

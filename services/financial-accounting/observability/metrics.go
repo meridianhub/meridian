@@ -186,6 +186,14 @@ var (
 		},
 		[]string{"clearing_type"},
 	)
+
+	resolverFallbackTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "financial_accounting_resolver_fallback_total",
+			Help: "Total number of times the posting service fell back to static clearing account",
+		},
+		[]string{"instrument_code", "operation"},
+	)
 )
 
 // RecordOperationDuration records the duration of a financial accounting operation.
@@ -321,4 +329,9 @@ func RecordClearingAccountLookupDuration(duration time.Duration) {
 // RecordClearingAccountLookupError records a clearing account lookup error.
 func RecordClearingAccountLookupError(clearingType string) {
 	clearingAccountLookupErrors.WithLabelValues(clearingType).Inc()
+}
+
+// RecordResolverFallback records when the posting service falls back to static clearing account.
+func RecordResolverFallback(instrumentCode, operation string) {
+	resolverFallbackTotal.WithLabelValues(instrumentCode, operation).Inc()
 }
