@@ -32,6 +32,7 @@ import (
 	// Service-owned clients (standardized client packages from each service)
 	currentaccountclient "github.com/meridianhub/meridian/services/current-account/client"
 	financialaccountingclient "github.com/meridianhub/meridian/services/financial-accounting/client"
+	internalbankaccountclient "github.com/meridianhub/meridian/services/internal-bank-account/client"
 )
 
 // Build information set via ldflags during compilation.
@@ -110,6 +111,22 @@ func run(logger *slog.Logger) error {
 	}
 	defer faCleanup()
 
+	// Create internal bank account client (optional - for internal clearing operations)
+	// This client is only created if INTERNAL_CLEARING_ENABLED is true
+	internalClearingEnabled := env.GetEnvAsBool("INTERNAL_CLEARING_ENABLED", false)
+	var internalBankAccountClient service.InternalBankAccountClient
+	var ibaCleanup func()
+	if internalClearingEnabled {
+		internalBankAccountClient, ibaCleanup, err = createInternalBankAccountClient(namespace, logger, tracer)
+		if err != nil {
+			return fmt.Errorf("failed to create internal bank account client: %w", err)
+		}
+		defer ibaCleanup()
+		logger.Info("internal clearing enabled - internal bank account client configured")
+	} else {
+		logger.Info("internal clearing disabled - gateway-only mode")
+	}
+
 	// Create payment gateway
 	paymentGateway := createPaymentGateway(logger)
 
@@ -143,12 +160,14 @@ func run(logger *slog.Logger) error {
 		Repository:                repo,
 		CurrentAccountClient:      currentAccountClient,
 		FinancialAccountingClient: financialAccountingClient,
+		InternalBankAccountClient: internalBankAccountClient, // May be nil if internal clearing disabled
 		PaymentGateway:            paymentGateway,
 		GatewayAccountConfig:      gatewayAccountConfig,
 		KafkaPublisher:            kafkaProducer,
 		IdempotencyService:        idempotencyService,
 		Logger:                    logger,
 		Tracer:                    tracer,
+		InternalClearingEnabled:   internalClearingEnabled,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create payment order service: %w", err)
@@ -403,6 +422,57 @@ func createFinancialAccountingClient(namespace string, logger *slog.Logger, trac
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create financial-accounting client: %w", err)
+	}
+
+	return client, cleanup, nil
+}
+
+// createInternalBankAccountClient creates the InternalBankAccount gRPC client with resilience patterns.
+// Uses the service-owned client package from services/internal-bank-account/client for standardized
+// client creation with built-in tracing and resilience patterns.
+// This client is optional and only created when INTERNAL_CLEARING_ENABLED is true.
+func createInternalBankAccountClient(namespace string, logger *slog.Logger, tracer *observability.Tracer) (service.InternalBankAccountClient, func(), error) {
+	logger.Info("connecting to internal-bank-account service",
+		"service", internalbankaccountclient.ServiceName,
+		"namespace", namespace,
+		"port", ports.InternalBankAccount)
+
+	// Configure resilience settings from environment
+	resilientConfig := &sharedclients.ResilientClientConfig{
+		// Circuit breaker settings
+		CircuitBreakerName:     "internal-bank-account",
+		CircuitBreakerTimeout:  env.GetEnvAsDuration("INTERNAL_BANK_ACCOUNT_CIRCUIT_BREAKER_TIMEOUT", defaults.DefaultCircuitBreakerOpenTimeout),
+		CircuitBreakerInterval: env.GetEnvAsDuration("INTERNAL_BANK_ACCOUNT_CIRCUIT_BREAKER_INTERVAL", defaults.DefaultCircuitBreakerInterval),
+		MaxRequests:            env.GetEnvAsUint32("INTERNAL_BANK_ACCOUNT_CIRCUIT_BREAKER_MAX_REQUESTS", 1),
+		FailureThreshold:       env.GetEnvAsUint32("INTERNAL_BANK_ACCOUNT_CIRCUIT_BREAKER_FAILURE_THRESHOLD", 5),
+
+		// Retry settings
+		MaxRetries:          env.GetEnvAsInt("INTERNAL_BANK_ACCOUNT_MAX_RETRIES", 3),
+		InitialInterval:     env.GetEnvAsDuration("INTERNAL_BANK_ACCOUNT_RETRY_INITIAL_INTERVAL", defaults.DefaultRetryDelay),
+		MaxInterval:         env.GetEnvAsDuration("INTERNAL_BANK_ACCOUNT_RETRY_MAX_INTERVAL", defaults.DefaultMaxRetryInterval),
+		Multiplier:          env.GetEnvAsFloat("INTERNAL_BANK_ACCOUNT_RETRY_MULTIPLIER", 2.0),
+		RandomizationFactor: env.GetEnvAsFloat("INTERNAL_BANK_ACCOUNT_RETRY_RANDOMIZATION", 0.5),
+
+		Logger: logger,
+	}
+
+	logger.Info("internal-bank-account client configured with resilience patterns",
+		"circuit_breaker_timeout", resilientConfig.CircuitBreakerTimeout,
+		"circuit_breaker_failure_threshold", resilientConfig.FailureThreshold,
+		"max_retries", resilientConfig.MaxRetries,
+	)
+
+	// Use the service-owned client package with DNS-based load balancing
+	client, cleanup, err := internalbankaccountclient.New(internalbankaccountclient.Config{
+		ServiceName: internalbankaccountclient.ServiceName,
+		Namespace:   namespace,
+		Port:        ports.InternalBankAccount,
+		Timeout:     env.GetEnvAsDuration("INTERNAL_BANK_ACCOUNT_TIMEOUT", internalbankaccountclient.DefaultTimeout),
+		Tracer:      tracer,
+		Resilience:  resilientConfig,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create internal-bank-account client: %w", err)
 	}
 
 	return client, cleanup, nil

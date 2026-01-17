@@ -55,9 +55,11 @@ type PaymentOrchestrator struct {
 	currentAccountClient      CurrentAccountClient
 	paymentGateway            gateway.PaymentGateway
 	financialAccountingClient FinancialAccountingClient
+	internalBankAccountClient InternalBankAccountClient // Optional - for internal clearing
 	gatewayAccountConfig      *config.GatewayAccountConfig
 	kafkaPublisher            KafkaPublisher
 	lienExecutionRetryConfig  *sharedclients.RetryConfig
+	internalClearingEnabled   bool
 }
 
 // PaymentOrchestratorConfig contains dependencies for creating a PaymentOrchestrator
@@ -67,9 +69,11 @@ type PaymentOrchestratorConfig struct {
 	CurrentAccountClient      CurrentAccountClient
 	PaymentGateway            gateway.PaymentGateway
 	FinancialAccountingClient FinancialAccountingClient
+	InternalBankAccountClient InternalBankAccountClient // Optional - for internal clearing
 	GatewayAccountConfig      *config.GatewayAccountConfig
 	KafkaPublisher            KafkaPublisher
 	LienExecutionRetryConfig  *sharedclients.RetryConfig
+	InternalClearingEnabled   bool
 }
 
 // NewPaymentOrchestrator creates a new payment orchestrator with the given dependencies.
@@ -88,9 +92,11 @@ func NewPaymentOrchestrator(cfg PaymentOrchestratorConfig) (*PaymentOrchestrator
 		currentAccountClient:      cfg.CurrentAccountClient,
 		paymentGateway:            cfg.PaymentGateway,
 		financialAccountingClient: cfg.FinancialAccountingClient,
+		internalBankAccountClient: cfg.InternalBankAccountClient,
 		gatewayAccountConfig:      cfg.GatewayAccountConfig,
 		kafkaPublisher:            cfg.KafkaPublisher,
 		lienExecutionRetryConfig:  cfg.LienExecutionRetryConfig,
+		internalClearingEnabled:   cfg.InternalClearingEnabled,
 	}, nil
 }
 
