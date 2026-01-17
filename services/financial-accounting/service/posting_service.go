@@ -39,6 +39,7 @@ type PostingServiceConfig struct {
 }
 
 // NewPostingService creates a new posting service.
+//
 // Deprecated: Use NewPostingServiceWithConfig for full configuration options.
 func NewPostingService(repo *persistence.LedgerRepository, bankCashAccountID string) *PostingService {
 	return &PostingService{
