@@ -17,7 +17,7 @@
 // service's bounded context, ensuring complete isolation and reproducibility.
 //
 // Test organization:
-//   - infra.go: Test infrastructure setup (containers, databases, services)
+//   - infra_test.go: Test infrastructure setup (containers, databases, services)
 //   - deposit_flow_test.go: Deposit clearing flow E2E tests
 //   - withdrawal_flow_test.go: Withdrawal clearing flow E2E tests
 //   - payment_settlement_test.go: Payment settlement E2E tests
@@ -26,9 +26,9 @@
 //
 // Running the tests:
 //
-//	go test -tags integration ./tests/clearing-e2e/...
+//	go test -tags integration ./tests/clearinge2e/...
 //
 // Or with verbose output:
 //
-//	go test -tags integration -v ./tests/clearing-e2e/...
+//	go test -tags integration -v ./tests/clearinge2e/...
 package clearinge2e

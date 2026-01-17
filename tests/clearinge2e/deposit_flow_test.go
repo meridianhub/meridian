@@ -5,9 +5,11 @@ package clearinge2e
 
 import (
 	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -210,12 +212,18 @@ func TestDepositClearingFlow(t *testing.T) {
 
 		// Simulate async position update using await pattern
 		// In a real system, position updates might happen asynchronously via Kafka
+		var wg sync.WaitGroup
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			// Simulate async delay
 			recordPosition(t, ctx,
 				infra.positionKeepingDB, schemaName,
 				customerAccountID, "GBP", "AVAILABLE", depositAmount, depositRef, "DEPOSIT")
 		}()
+
+		// Ensure goroutine completes before test ends (for safe t usage)
+		defer wg.Wait()
 
 		// Use await to wait for position to be recorded
 		var finalBalance string
@@ -269,7 +277,7 @@ func TestDepositClearingAccountResolution(t *testing.T) {
 		_, err := infra.internalBankAccountDB.pool.Exec(ctx, fmt.Sprintf(`
 			UPDATE %s.internal_bank_accounts SET status = 'SUSPENDED'
 			WHERE account_code = 'CLR-GBP-DEP'
-		`, schemaName))
+		`, pq.QuoteIdentifier(schemaName)))
 		require.NoError(t, err)
 
 		// Try to resolve - should not find it
