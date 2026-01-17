@@ -2,11 +2,15 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	internalbankaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_bank_account/v1"
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
 	"github.com/meridianhub/meridian/shared/platform/audit"
@@ -311,4 +315,233 @@ func TestValidateDoubleEntry_Unbalanced(t *testing.T) {
 	if balanced {
 		t.Error("Expected double entry to be unbalanced, but was balanced")
 	}
+}
+
+// =============================================================================
+// Tests for AccountResolver integration
+// =============================================================================
+
+func TestProcessDeposit_WithDynamicClearingAccount(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+	repo := persistence.NewLedgerRepository(db)
+
+	// Create mock that returns a dynamic clearing account
+	mockClient := &postingServiceMockClient{
+		accountID: "DYNAMIC-CLEARING-GBP",
+	}
+
+	resolver, err := NewAccountResolver(AccountResolverConfig{
+		Client: mockClient,
+		Logger: postingTestLogger(),
+	})
+	require.NoError(t, err)
+
+	service := NewPostingServiceWithConfig(PostingServiceConfig{
+		Repo:              repo,
+		BankCashAccountID: "STATIC-FALLBACK",
+		AccountResolver:   resolver,
+		Logger:            postingTestLogger(),
+	})
+
+	event := DepositEvent{
+		AccountID:     "ACC-DYNAMIC-123",
+		AmountCents:   10000,
+		Currency:      "GBP",
+		CorrelationID: "deposit-dynamic-001",
+		ValueDate:     time.Now(),
+	}
+
+	err = service.ProcessDeposit(ctx, event)
+	require.NoError(t, err)
+
+	// Verify credit posting used dynamic clearing account
+	var creditEntity persistence.LedgerPostingEntity
+	err = db.Where("posting_direction = ?", "CREDIT").First(&creditEntity).Error
+	require.NoError(t, err)
+	require.Equal(t, "DYNAMIC-CLEARING-GBP", creditEntity.AccountID)
+}
+
+func TestProcessDeposit_FallbackOnResolverError(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+	repo := persistence.NewLedgerRepository(db)
+
+	// Create mock that returns an error
+	mockClient := &postingServiceMockClient{
+		err: errMockServiceUnavailable,
+	}
+
+	resolver, err := NewAccountResolver(AccountResolverConfig{
+		Client: mockClient,
+		Logger: postingTestLogger(),
+	})
+	require.NoError(t, err)
+
+	service := NewPostingServiceWithConfig(PostingServiceConfig{
+		Repo:              repo,
+		BankCashAccountID: "STATIC-FALLBACK",
+		AccountResolver:   resolver,
+		Logger:            postingTestLogger(),
+	})
+
+	event := DepositEvent{
+		AccountID:     "ACC-FALLBACK-123",
+		AmountCents:   10000,
+		Currency:      "GBP",
+		CorrelationID: "deposit-fallback-001",
+		ValueDate:     time.Now(),
+	}
+
+	err = service.ProcessDeposit(ctx, event)
+	require.NoError(t, err)
+
+	// Verify credit posting used static fallback account
+	var creditEntity persistence.LedgerPostingEntity
+	err = db.Where("posting_direction = ?", "CREDIT").First(&creditEntity).Error
+	require.NoError(t, err)
+	require.Equal(t, "STATIC-FALLBACK", creditEntity.AccountID)
+}
+
+func TestProcessDeposit_WithoutResolver_UsesStaticAccount(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+	repo := persistence.NewLedgerRepository(db)
+
+	// Create service without AccountResolver
+	service := NewPostingServiceWithConfig(PostingServiceConfig{
+		Repo:              repo,
+		BankCashAccountID: "STATIC-ONLY",
+		AccountResolver:   nil, // Explicitly nil
+		Logger:            postingTestLogger(),
+	})
+
+	event := DepositEvent{
+		AccountID:     "ACC-STATIC-123",
+		AmountCents:   10000,
+		Currency:      "GBP",
+		CorrelationID: "deposit-static-001",
+		ValueDate:     time.Now(),
+	}
+
+	err := service.ProcessDeposit(ctx, event)
+	require.NoError(t, err)
+
+	// Verify credit posting used static account
+	var creditEntity persistence.LedgerPostingEntity
+	err = db.Where("posting_direction = ?", "CREDIT").First(&creditEntity).Error
+	require.NoError(t, err)
+	require.Equal(t, "STATIC-ONLY", creditEntity.AccountID)
+}
+
+func TestProcessDeposit_MultiAsset_DynamicLookup(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+	repo := persistence.NewLedgerRepository(db)
+
+	// Create mock that returns different accounts per instrument
+	mockClient := &postingServiceMockClient{
+		accountsByInstrument: map[string]string{
+			"GBP": "CLEARING-GBP-001",
+			"USD": "CLEARING-USD-001",
+		},
+	}
+
+	resolver, err := NewAccountResolver(AccountResolverConfig{
+		Client: mockClient,
+		Logger: postingTestLogger(),
+	})
+	require.NoError(t, err)
+
+	service := NewPostingServiceWithConfig(PostingServiceConfig{
+		Repo:              repo,
+		BankCashAccountID: "FALLBACK",
+		AccountResolver:   resolver,
+		Logger:            postingTestLogger(),
+	})
+
+	// Process GBP deposit
+	gbpEvent := DepositEvent{
+		AccountID:     "ACC-GBP-123",
+		AmountCents:   10000,
+		Currency:      "GBP",
+		CorrelationID: "deposit-gbp-001",
+		ValueDate:     time.Now(),
+	}
+	err = service.ProcessDeposit(ctx, gbpEvent)
+	require.NoError(t, err)
+
+	// Process USD deposit
+	usdEvent := DepositEvent{
+		AccountID:     "ACC-USD-123",
+		AmountCents:   20000,
+		Currency:      "USD",
+		CorrelationID: "deposit-usd-001",
+		ValueDate:     time.Now(),
+	}
+	err = service.ProcessDeposit(ctx, usdEvent)
+	require.NoError(t, err)
+
+	// Verify GBP credit used GBP clearing account
+	var gbpCredit persistence.LedgerPostingEntity
+	err = db.Where("correlation_id = ? AND posting_direction = ?", "deposit-gbp-001", "CREDIT").First(&gbpCredit).Error
+	require.NoError(t, err)
+	require.Equal(t, "CLEARING-GBP-001", gbpCredit.AccountID)
+
+	// Verify USD credit used USD clearing account
+	var usdCredit persistence.LedgerPostingEntity
+	err = db.Where("correlation_id = ? AND posting_direction = ?", "deposit-usd-001", "CREDIT").First(&usdCredit).Error
+	require.NoError(t, err)
+	require.Equal(t, "CLEARING-USD-001", usdCredit.AccountID)
+}
+
+// =============================================================================
+// Test helpers
+// =============================================================================
+
+// Sentinel error for testing fallback behavior
+var errMockServiceUnavailable = errors.New("mock: service unavailable")
+
+// postingServiceMockClient is a mock for testing PostingService integration
+type postingServiceMockClient struct {
+	accountID            string
+	accountsByInstrument map[string]string
+	err                  error
+}
+
+func (m *postingServiceMockClient) ListInternalBankAccounts(_ context.Context, req *internalbankaccountv1.ListInternalBankAccountsRequest) (*internalbankaccountv1.ListInternalBankAccountsResponse, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+
+	accountID := m.accountID
+	if m.accountsByInstrument != nil {
+		if id, ok := m.accountsByInstrument[req.InstrumentCodeFilter]; ok {
+			accountID = id
+		}
+	}
+
+	if accountID == "" {
+		return &internalbankaccountv1.ListInternalBankAccountsResponse{
+			Facilities: []*internalbankaccountv1.InternalBankAccountFacility{},
+		}, nil
+	}
+
+	return &internalbankaccountv1.ListInternalBankAccountsResponse{
+		Facilities: []*internalbankaccountv1.InternalBankAccountFacility{
+			{AccountId: accountID},
+		},
+	}, nil
+}
+
+func (m *postingServiceMockClient) RetrieveInternalBankAccount(_ context.Context, _ *internalbankaccountv1.RetrieveInternalBankAccountRequest) (*internalbankaccountv1.RetrieveInternalBankAccountResponse, error) {
+	return nil, nil
+}
+
+func (m *postingServiceMockClient) Close() error {
+	return nil
+}
+
+func postingTestLogger() *slog.Logger {
+	return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 }

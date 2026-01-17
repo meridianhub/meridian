@@ -20,6 +20,7 @@ import (
 	serviceobs "github.com/meridianhub/meridian/services/financial-accounting/observability"
 	"github.com/meridianhub/meridian/services/financial-accounting/service"
 	"github.com/meridianhub/meridian/services/financial-accounting/worker"
+	ibaclient "github.com/meridianhub/meridian/services/internal-bank-account/client"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
@@ -175,10 +176,46 @@ func run(logger *slog.Logger) error {
 	// Create ledger repository
 	ledgerRepo := persistence.NewLedgerRepository(db)
 
-	// Create posting service (using validated bankCashAccountID from above)
-	postingService := service.NewPostingService(ledgerRepo, bankCashAccountID)
+	// Initialize Internal Bank Account client (optional - for dynamic clearing account lookup)
+	var accountResolver *service.AccountResolver
+	ibaServiceURL := env.GetEnvOrDefault("INTERNAL_BANK_ACCOUNT_SERVICE_URL", "")
+	if ibaServiceURL != "" {
+		ibaClient, ibaCleanup, err := ibaclient.New(ibaclient.Config{
+			Target:  ibaServiceURL,
+			Timeout: service.DefaultLookupTimeout,
+		})
+		if err != nil {
+			// Non-fatal: fall back to static config
+			logger.Warn("failed to create Internal Bank Account client, using static clearing account",
+				"error", err,
+				"service_url", ibaServiceURL)
+		} else {
+			defer ibaCleanup()
 
-	logger.Info("posting service initialized", "bank_cash_account_id", bankCashAccountID)
+			resolver, err := service.NewAccountResolver(service.AccountResolverConfig{
+				Client: ibaClient,
+				Logger: logger,
+			})
+			if err != nil {
+				logger.Warn("failed to create AccountResolver, using static clearing account",
+					"error", err)
+			} else {
+				accountResolver = resolver
+				logger.Info("dynamic clearing account resolution enabled",
+					"service_url", ibaServiceURL)
+			}
+		}
+	} else {
+		logger.Info("dynamic clearing account resolution disabled (INTERNAL_BANK_ACCOUNT_SERVICE_URL not set)")
+	}
+
+	// Create posting service with optional AccountResolver
+	postingService := service.NewPostingServiceWithConfig(service.PostingServiceConfig{
+		Repo:              ledgerRepo,
+		BankCashAccountID: bankCashAccountID,
+		AccountResolver:   accountResolver,
+		Logger:            logger,
+	})
 
 	// Create Redis client and idempotency service
 	var idempotencySvc idempotency.Service
