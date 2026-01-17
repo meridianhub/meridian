@@ -19,6 +19,10 @@ var (
 	// ErrNoClearingAccountFound is returned when no active clearing account is found for the given criteria.
 	ErrNoClearingAccountFound = errors.New("no active clearing account found")
 
+	// ErrMultipleClearingAccounts is returned when multiple active clearing accounts are found for the same criteria.
+	// This indicates a data inconsistency - each instrument/purpose combination should have exactly one active account.
+	ErrMultipleClearingAccounts = errors.New("multiple active clearing accounts found")
+
 	// ErrAccountResolverClientNil is returned when attempting to create an AccountResolver with a nil client.
 	ErrAccountResolverClientNil = errors.New("internal bank account client cannot be nil")
 
@@ -262,7 +266,18 @@ func (r *AccountResolver) queryInternalBankAccount(ctx context.Context, clearing
 		return "", fmt.Errorf("%w for %s %s", ErrNoClearingAccountFound, clearingType, instrumentCode)
 	}
 
-	// Use the first active clearing account matching the criteria.
+	// Fail fast on multiple results to prevent nondeterministic routing.
+	// Each instrument/purpose combination should have exactly one active clearing account.
+	if len(resp.Facilities) > 1 {
+		r.logger.Error("multiple active clearing accounts found - data inconsistency",
+			"clearing_type", clearingType,
+			"clearing_purpose", clearingPurpose.String(),
+			"instrument_code", instrumentCode,
+			"count", len(resp.Facilities))
+		return "", fmt.Errorf("%w for %s %s (count: %d)", ErrMultipleClearingAccounts, clearingType, instrumentCode, len(resp.Facilities))
+	}
+
+	// Use the single active clearing account matching the criteria.
 	account := resp.Facilities[0]
 	return account.AccountId, nil
 }
