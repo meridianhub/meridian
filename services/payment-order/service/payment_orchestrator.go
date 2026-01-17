@@ -56,6 +56,7 @@ type PaymentOrchestrator struct {
 	paymentGateway            gateway.PaymentGateway
 	financialAccountingClient FinancialAccountingClient
 	internalBankAccountClient InternalBankAccountClient // Optional - for internal clearing
+	accountResolver           *AccountResolver          // Optional - resolves clearing accounts dynamically
 	gatewayAccountConfig      *config.GatewayAccountConfig
 	kafkaPublisher            KafkaPublisher
 	lienExecutionRetryConfig  *sharedclients.RetryConfig
@@ -70,6 +71,7 @@ type PaymentOrchestratorConfig struct {
 	PaymentGateway            gateway.PaymentGateway
 	FinancialAccountingClient FinancialAccountingClient
 	InternalBankAccountClient InternalBankAccountClient // Optional - for internal clearing
+	AccountResolver           *AccountResolver          // Optional - auto-created if InternalBankAccountClient is provided
 	GatewayAccountConfig      *config.GatewayAccountConfig
 	KafkaPublisher            KafkaPublisher
 	LienExecutionRetryConfig  *sharedclients.RetryConfig
@@ -79,6 +81,9 @@ type PaymentOrchestratorConfig struct {
 // NewPaymentOrchestrator creates a new payment orchestrator with the given dependencies.
 // Returns an error if required dependencies (Logger, Repo) are nil. CurrentAccountClient and
 // PaymentGateway are validated at runtime in Orchestrate() with graceful error handling.
+//
+// If InternalBankAccountClient is provided but AccountResolver is nil, an AccountResolver
+// is automatically created using the client and logger.
 func NewPaymentOrchestrator(cfg PaymentOrchestratorConfig) (*PaymentOrchestrator, error) {
 	if cfg.Logger == nil {
 		return nil, ErrOrchestratorLoggerNil
@@ -86,6 +91,20 @@ func NewPaymentOrchestrator(cfg PaymentOrchestratorConfig) (*PaymentOrchestrator
 	if cfg.Repo == nil {
 		return nil, ErrOrchestratorRepoNil
 	}
+
+	// Auto-create AccountResolver if InternalBankAccountClient is provided but AccountResolver is nil
+	accountResolver := cfg.AccountResolver
+	if cfg.InternalBankAccountClient != nil && accountResolver == nil {
+		var err error
+		accountResolver, err = NewAccountResolver(AccountResolverConfig{
+			Client: cfg.InternalBankAccountClient,
+			Logger: cfg.Logger,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create account resolver: %w", err)
+		}
+	}
+
 	return &PaymentOrchestrator{
 		logger:                    cfg.Logger,
 		repo:                      cfg.Repo,
@@ -93,6 +112,7 @@ func NewPaymentOrchestrator(cfg PaymentOrchestratorConfig) (*PaymentOrchestrator
 		paymentGateway:            cfg.PaymentGateway,
 		financialAccountingClient: cfg.FinancialAccountingClient,
 		internalBankAccountClient: cfg.InternalBankAccountClient,
+		accountResolver:           accountResolver,
 		gatewayAccountConfig:      cfg.GatewayAccountConfig,
 		kafkaPublisher:            cfg.KafkaPublisher,
 		lienExecutionRetryConfig:  cfg.LienExecutionRetryConfig,
