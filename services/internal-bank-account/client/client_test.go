@@ -1,12 +1,17 @@
 package client
 
 import (
+	"context"
+	"strings"
 	"testing"
 	"time"
 
+	internalbankaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_bank_account/v1"
 	"github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func TestNew_WithTarget(t *testing.T) {
@@ -145,4 +150,124 @@ func TestConn(t *testing.T) {
 	conn := client.Conn()
 	assert.NotNil(t, conn)
 	assert.Equal(t, client.conn, conn)
+}
+
+// Account ID validation tests
+
+func TestRetrieveInternalBankAccount_InvalidAccountID(t *testing.T) {
+	client, cleanup, err := New(Config{
+		Target: "localhost:50057",
+	})
+	require.NoError(t, err)
+	defer cleanup()
+
+	tests := []struct {
+		name      string
+		accountID string
+	}{
+		{"empty string", ""},
+		{"contains space", "ACC 123"},
+		{"contains at symbol", "ACC@123"},
+		{"contains slash", "ACC/123"},
+		{"exceeds max length", strings.Repeat("a", 101)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := client.RetrieveInternalBankAccount(context.Background(), &internalbankaccountv1.RetrieveInternalBankAccountRequest{
+				AccountId: tt.accountID,
+			})
+
+			require.Error(t, err)
+			assert.Equal(t, codes.InvalidArgument, status.Code(err))
+			assert.Contains(t, err.Error(), "invalid account_id format")
+		})
+	}
+}
+
+func TestUpdateInternalBankAccount_InvalidAccountID(t *testing.T) {
+	client, cleanup, err := New(Config{
+		Target: "localhost:50057",
+	})
+	require.NoError(t, err)
+	defer cleanup()
+
+	tests := []struct {
+		name      string
+		accountID string
+	}{
+		{"empty string", ""},
+		{"contains special char", "ACC#123"},
+		{"exceeds max length", strings.Repeat("a", 101)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := client.UpdateInternalBankAccount(context.Background(), &internalbankaccountv1.UpdateInternalBankAccountRequest{
+				AccountId: tt.accountID,
+			})
+
+			require.Error(t, err)
+			assert.Equal(t, codes.InvalidArgument, status.Code(err))
+			assert.Contains(t, err.Error(), "invalid account_id format")
+		})
+	}
+}
+
+func TestControlInternalBankAccount_InvalidAccountID(t *testing.T) {
+	client, cleanup, err := New(Config{
+		Target: "localhost:50057",
+	})
+	require.NoError(t, err)
+	defer cleanup()
+
+	tests := []struct {
+		name      string
+		accountID string
+	}{
+		{"empty string", ""},
+		{"contains dot", "ACC.123"},
+		{"exceeds max length", strings.Repeat("a", 101)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := client.ControlInternalBankAccount(context.Background(), &internalbankaccountv1.ControlInternalBankAccountRequest{
+				AccountId: tt.accountID,
+			})
+
+			require.Error(t, err)
+			assert.Equal(t, codes.InvalidArgument, status.Code(err))
+			assert.Contains(t, err.Error(), "invalid account_id format")
+		})
+	}
+}
+
+func TestGetBalance_InvalidAccountID(t *testing.T) {
+	client, cleanup, err := New(Config{
+		Target: "localhost:50057",
+	})
+	require.NoError(t, err)
+	defer cleanup()
+
+	tests := []struct {
+		name      string
+		accountID string
+	}{
+		{"empty string", ""},
+		{"contains newline", "ACC\n123"},
+		{"exceeds max length", strings.Repeat("a", 101)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := client.GetBalance(context.Background(), &internalbankaccountv1.GetBalanceRequest{
+				AccountId: tt.accountID,
+			})
+
+			require.Error(t, err)
+			assert.Equal(t, codes.InvalidArgument, status.Code(err))
+			assert.Contains(t, err.Error(), "invalid account_id format")
+		})
+	}
 }

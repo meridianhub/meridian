@@ -36,9 +36,12 @@ import (
 	internalbankaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_bank_account/v1"
 	"github.com/meridianhub/meridian/shared/pkg/clients"
 	platformgrpc "github.com/meridianhub/meridian/shared/pkg/grpc"
+	"github.com/meridianhub/meridian/shared/pkg/validation"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -255,6 +258,10 @@ func (c *Client) InitiateInternalBankAccount(ctx context.Context, req *internalb
 // ControlInternalBankAccount performs lifecycle state transitions (suspend, activate, close).
 // This is a non-idempotent operation, so it uses circuit breaker without retry.
 func (c *Client) ControlInternalBankAccount(ctx context.Context, req *internalbankaccountv1.ControlInternalBankAccountRequest) (*internalbankaccountv1.ControlInternalBankAccountResponse, error) {
+	if err := validation.ValidateAccountID(req.GetAccountId()); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid account_id format: %v", err)
+	}
+
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
@@ -284,6 +291,10 @@ func (c *Client) ControlInternalBankAccount(ctx context.Context, req *internalba
 // Updates are idempotent when using version-based concurrency (expected_version),
 // so retry is enabled.
 func (c *Client) UpdateInternalBankAccount(ctx context.Context, req *internalbankaccountv1.UpdateInternalBankAccountRequest) (*internalbankaccountv1.UpdateInternalBankAccountResponse, error) {
+	if err := validation.ValidateAccountID(req.GetAccountId()); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid account_id format: %v", err)
+	}
+
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
@@ -308,6 +319,10 @@ func (c *Client) UpdateInternalBankAccount(ctx context.Context, req *internalban
 // RetrieveInternalBankAccount fetches a single account by ID.
 // This is an idempotent read operation, so it uses circuit breaker with retry.
 func (c *Client) RetrieveInternalBankAccount(ctx context.Context, req *internalbankaccountv1.RetrieveInternalBankAccountRequest) (*internalbankaccountv1.RetrieveInternalBankAccountResponse, error) {
+	if err := validation.ValidateAccountID(req.GetAccountId()); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid account_id format: %v", err)
+	}
+
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
@@ -356,6 +371,10 @@ func (c *Client) ListInternalBankAccounts(ctx context.Context, req *internalbank
 // GetBalance queries the current balance for an internal account.
 // This is an idempotent read operation, so it uses circuit breaker with retry.
 func (c *Client) GetBalance(ctx context.Context, req *internalbankaccountv1.GetBalanceRequest) (*internalbankaccountv1.GetBalanceResponse, error) {
+	if err := validation.ValidateAccountID(req.GetAccountId()); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid account_id format: %v", err)
+	}
+
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 

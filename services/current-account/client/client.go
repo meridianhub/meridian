@@ -35,9 +35,12 @@ import (
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	"github.com/meridianhub/meridian/shared/pkg/clients"
 	platformgrpc "github.com/meridianhub/meridian/shared/pkg/grpc"
+	"github.com/meridianhub/meridian/shared/pkg/validation"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -234,6 +237,10 @@ func (c *Client) InitiateCurrentAccount(ctx context.Context, req *currentaccount
 // ExecuteDeposit processes a deposit transaction (Behavior Qualifier).
 // This is a non-idempotent operation, so it uses circuit breaker without retry.
 func (c *Client) ExecuteDeposit(ctx context.Context, req *currentaccountv1.ExecuteDepositRequest) (*currentaccountv1.ExecuteDepositResponse, error) {
+	if err := validation.ValidateAccountID(req.GetAccountId()); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid account_id format: %v", err)
+	}
+
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
@@ -258,6 +265,10 @@ func (c *Client) ExecuteDeposit(ctx context.Context, req *currentaccountv1.Execu
 // RetrieveCurrentAccount gets current account details.
 // This is an idempotent read operation, so it uses circuit breaker with retry.
 func (c *Client) RetrieveCurrentAccount(ctx context.Context, req *currentaccountv1.RetrieveCurrentAccountRequest) (*currentaccountv1.RetrieveCurrentAccountResponse, error) {
+	if err := validation.ValidateAccountID(req.GetAccountId()); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid account_id format: %v", err)
+	}
+
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
@@ -283,6 +294,10 @@ func (c *Client) RetrieveCurrentAccount(ctx context.Context, req *currentaccount
 // Used by Payment Order to reserve funds before external payment execution.
 // This is a non-idempotent operation, so it uses circuit breaker without retry.
 func (c *Client) InitiateLien(ctx context.Context, req *currentaccountv1.InitiateLienRequest) (*currentaccountv1.InitiateLienResponse, error) {
+	if err := validation.ValidateAccountID(req.GetAccountId()); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid account_id format: %v", err)
+	}
+
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
