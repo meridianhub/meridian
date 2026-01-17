@@ -1,16 +1,18 @@
 ---
 name: adr-026-canonical-ingestion-contract
-description: External systems structure data; Meridian validates and stores
+description: Keep ETL off critical path; Meridian validates and stores structured data at 100k TPS
 triggers:
   - Designing data ingestion from external sources
   - Building adapters for market data, IoT, or third-party feeds
   - Deciding where ETL logic should live
-  - Implementing validation at service boundaries
+  - Performance concerns about ingestion overhead
+  - Scaling decisions for high-throughput data pipelines
 instructions: |
-  Meridian services accept ONLY pre-structured data conforming to their Protobuf schemas.
-  All extraction, transformation, and normalization is the caller's responsibility.
-  CEL validation at the boundary enforces the contract - invalid data is rejected, not fixed.
-  External adapters are reference utilities, not core service features.
+  Meridian is a high-performance persistence layer (100k TPS target). Keep messy ETL OFF the
+  critical path. Services accept ONLY pre-structured Protobuf - all extraction, transformation,
+  and normalization is the caller's responsibility. This extends hexagonal architecture: Meridian
+  defines the Port (structured schema), external systems implement the Adapter (messy translation).
+  CEL validation at the boundary enforces the contract. Adapters scale independently from core.
 ---
 
 # 26. Canonical Ingestion Contract
@@ -23,36 +25,49 @@ Accepted
 
 ## Context
 
-Meridian needs to ingest data from diverse external sources: market data providers (ECB, Bloomberg),
-IoT devices (smart meters), weather APIs, and tenant-specific systems. Each source has different:
+**Meridian is a high-performance persistence layer for structured financial data.** The design
+target is **100,000 transactions per second** - writes to the database and reads from the database
+must be blazing fast.
 
-- **Protocols**: REST, WebSocket, TCP, file drops
-- **Formats**: XML, JSON, CSV, binary
-- **Schedules**: Real-time streaming, daily batches, on-demand
-- **Error modes**: Rate limits, connection drops, schema changes
+The critical path is simple: **Structured Data → Validation → Storage → Query**
 
-The question is: **Where should the "messy ETL" logic live?**
+External data sources (market data providers, IoT devices, weather APIs) introduce complexity
+that is fundamentally incompatible with this performance goal:
 
-BIAN's Service Domain encapsulation principle provides guidance:
+| External Source Characteristic | Impact on Critical Path |
+|-------------------------------|------------------------|
+| Variable protocols (REST, WebSocket, TCP) | Connection management overhead |
+| Diverse formats (XML, JSON, CSV, binary) | Parsing and transformation CPU cost |
+| Unpredictable latency (rate limits, timeouts) | Blocking or queueing delays |
+| Schema drift (API version changes) | Runtime adaptation logic |
+| Scaling requirements (burst handling) | Resource contention with core |
 
-> "Because the Service Domain handles all activities for the complete life cycle it internalizes
-> or encapsulates away much of the more complex processing logic."
+**The question is: Where should the "messy ETL" logic live?**
 
-However, this refers to **domain-specific** processing, not universal data integration middleware.
-Market Information Management's domain is storing and querying market observations with bi-temporal
-integrity - not parsing arbitrary external formats.
+The answer is driven by a fundamental architectural principle: **Keep slow, unpredictable work
+OFF the critical path.** Data ingestion from external sources is inherently slow and variable.
+Scaling up or scaling down to handle ingestion load is a separate concern from scaling the
+persistence layer.
+
+This extends the **Hexagonal Architecture** (Ports and Adapters) pattern:
+- **Meridian defines the Port** (the structured Protobuf schema)
+- **External systems implement the Adapter** (the messy translation logic)
+- **We are responsible for the structured database, not for adapting the messy external world**
 
 ## Decision Drivers
 
-* **Separation of Concerns**: Domain services should focus on their core capability, not protocol
-  translation
-* **Maintainability**: Source-specific adapters change frequently (API versions, format changes);
-  core services should remain stable
-* **Testability**: CEL validation at the boundary provides a clear contract that's easy to test
-* **Flexibility**: Tenants should be able to build their own adapters without modifying Meridian
-* **Security**: Rejecting malformed data at the boundary prevents garbage-in scenarios
-* **BIAN Alignment**: Follows the atomic service design principle where each domain handles one
-  type of asset/pattern
+* **Performance (PRIMARY)**: The critical path (validate → store → query) must achieve 100k TPS.
+  ETL logic in the critical path would destroy this target.
+* **Predictable Latency**: Database writes should have consistent, low latency. External source
+  variability (rate limits, connection drops, slow APIs) must not affect core service SLAs.
+* **Independent Scaling**: Adapters may need to scale differently than the core. A burst of
+  weather data shouldn't compete for resources with payment processing.
+* **Hexagonal Architecture**: Meridian defines structured ports; adapters are external. This is
+  the classic ports-and-adapters pattern applied to data ingestion.
+* **Operational Isolation**: Adapter failures (Bloomberg API down) should not crash or degrade
+  core services. Blast radius containment.
+* **Tenant Flexibility**: Tenants can build, scale, and operate their own adapters without
+  touching Meridian core.
 
 ## Considered Options
 
@@ -65,8 +80,9 @@ integrity - not parsing arbitrary external formats.
 
 ## Decision Outcome
 
-Chosen option: **"Canonical Ingestion Contract"**, because it provides the cleanest separation of
-concerns while maintaining data integrity through CEL validation at the boundary.
+Chosen option: **"Canonical Ingestion Contract"**, because it keeps the messy, slow, unpredictable
+ETL work OFF the critical path, enabling Meridian to achieve its 100k TPS target while maintaining
+data integrity through CEL validation at the boundary.
 
 ### The Contract
 
@@ -118,16 +134,20 @@ concerns while maintaining data integrity through CEL validation at the boundary
 
 ### Positive Consequences
 
+* **100k TPS Achievable**: Critical path contains only validation and storage - no ETL overhead
+* **Predictable Latency**: Database operations have consistent performance; external variability
+  is isolated in adapters
+* **Independent Scaling**: Adapters scale separately from core; burst ingestion doesn't starve
+  transaction processing
+* **Operational Isolation**: Adapter failures don't crash core services; blast radius contained
 * **Clean Domain Services**: Core services remain focused on their BIAN responsibility
-* **Stable APIs**: Service contracts don't change when external sources change their formats
 * **Testable Boundaries**: CEL validation provides deterministic, testable contract enforcement
 * **Tenant Flexibility**: Tenants can build custom adapters without modifying Meridian
-* **Security**: Malformed data is rejected at the boundary, preventing data quality issues
-* **Reusability**: Reference adapters can be shared across deployments
 
 ### Negative Consequences
 
 * **More Components**: Requires separate adapter deployment/maintenance for each external source
+* **Adapter Scaling Responsibility**: Tenants must scale their own adapters for burst handling
 * **Duplication Risk**: Without good reference implementations, teams might reinvent adapters
 * **Operational Complexity**: Adapters need their own monitoring, logging, and error handling
 
