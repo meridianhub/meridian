@@ -434,6 +434,47 @@ func TestProcessDeposit_WithoutResolver_UsesStaticAccount(t *testing.T) {
 	require.Equal(t, "STATIC-ONLY", creditEntity.AccountID)
 }
 
+func TestProcessDeposit_FallbackOnNoClearingAccountFound(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+	repo := persistence.NewLedgerRepository(db)
+
+	// Create mock that returns no accounts (ErrNoClearingAccountFound path)
+	mockClient := &postingServiceMockClient{
+		accountID: "", // Empty means no accounts returned
+	}
+
+	resolver, err := NewAccountResolver(AccountResolverConfig{
+		Client: mockClient,
+		Logger: postingTestLogger(),
+	})
+	require.NoError(t, err)
+
+	service := NewPostingServiceWithConfig(PostingServiceConfig{
+		Repo:              repo,
+		BankCashAccountID: "STATIC-FALLBACK-EMPTY",
+		AccountResolver:   resolver,
+		Logger:            postingTestLogger(),
+	})
+
+	event := DepositEvent{
+		AccountID:     "ACC-EMPTY-123",
+		AmountCents:   10000,
+		Currency:      "GBP",
+		CorrelationID: "deposit-empty-001",
+		ValueDate:     time.Now(),
+	}
+
+	err = service.ProcessDeposit(ctx, event)
+	require.NoError(t, err)
+
+	// Verify credit posting used static fallback account
+	var creditEntity persistence.LedgerPostingEntity
+	err = db.Where("posting_direction = ?", "CREDIT").First(&creditEntity).Error
+	require.NoError(t, err)
+	require.Equal(t, "STATIC-FALLBACK-EMPTY", creditEntity.AccountID)
+}
+
 func TestProcessDeposit_MultiAsset_DynamicLookup(t *testing.T) {
 	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()

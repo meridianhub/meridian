@@ -251,7 +251,7 @@ func (s *PostingService) ValidateDoubleEntry(ctx context.Context, bookingLogID u
 }
 
 // resolveClearingAccountForDeposit attempts dynamic clearing account lookup,
-// falling back to static config on any error.
+// falling back to static config on any error or empty result.
 func (s *PostingService) resolveClearingAccountForDeposit(ctx context.Context, instrumentCode string) string {
 	// If no resolver configured, use static fallback
 	if s.accountResolver == nil {
@@ -269,7 +269,16 @@ func (s *PostingService) resolveClearingAccountForDeposit(ctx context.Context, i
 			"instrument_code", instrumentCode,
 			"fallback_account_id", s.bankCashAccountID,
 			"error", err)
-		observability.RecordResolverFallback(instrumentCode, "deposit")
+		observability.RecordResolverFallback(instrumentCode, observability.OperationProcessDeposit)
+		return s.bankCashAccountID
+	}
+
+	// Guard against empty account ID - treat as lookup failure
+	if accountID == "" {
+		s.logger.Warn("dynamic clearing account lookup returned empty result, using static fallback",
+			"instrument_code", instrumentCode,
+			"fallback_account_id", s.bankCashAccountID)
+		observability.RecordResolverFallback(instrumentCode, observability.OperationProcessDeposit)
 		return s.bankCashAccountID
 	}
 
