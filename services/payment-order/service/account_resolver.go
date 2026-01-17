@@ -19,6 +19,16 @@ var (
 	// ErrNoClearingAccountFound is returned when no active clearing account is found for the given criteria.
 	ErrNoClearingAccountFound = errors.New("no active clearing account found")
 
+	// ErrMultipleClearingAccounts is returned when multiple active clearing accounts are found for the same criteria.
+	// This indicates a data inconsistency - each instrument/purpose combination should have exactly one active account.
+	ErrMultipleClearingAccounts = errors.New("multiple active clearing accounts found")
+
+	// ErrEmptyClearingAccountID is returned when a clearing account has an empty account_id.
+	ErrEmptyClearingAccountID = errors.New("clearing account has empty account_id")
+
+	// ErrNilClearingAccountResponse is returned when the internal bank account service returns a nil response.
+	ErrNilClearingAccountResponse = errors.New("nil response from internal bank account service")
+
 	// ErrAccountResolverClientNil is returned when attempting to create an AccountResolver with a nil client.
 	ErrAccountResolverClientNil = errors.New("internal bank account client cannot be nil")
 
@@ -229,6 +239,15 @@ func (r *AccountResolver) queryInternalBankAccount(ctx context.Context, clearing
 		return "", fmt.Errorf("failed to query clearing account: %w", err)
 	}
 
+	// Defensive check for nil response
+	if resp == nil {
+		r.logger.Error("nil response from internal bank account service",
+			"clearing_type", clearingType,
+			"clearing_purpose", clearingPurpose.String(),
+			"instrument_code", instrumentCode)
+		return "", fmt.Errorf("%w for %s %s", ErrNilClearingAccountResponse, clearingType, instrumentCode)
+	}
+
 	if len(resp.Facilities) == 0 {
 		r.logger.Warn("no active clearing account found",
 			"clearing_type", clearingType,
@@ -237,8 +256,29 @@ func (r *AccountResolver) queryInternalBankAccount(ctx context.Context, clearing
 		return "", fmt.Errorf("%w for %s %s", ErrNoClearingAccountFound, clearingType, instrumentCode)
 	}
 
-	// Use the first active clearing account matching the criteria.
+	// Fail fast on multiple results to prevent nondeterministic routing.
+	// Each instrument/purpose combination should have exactly one active clearing account.
+	if len(resp.Facilities) > 1 {
+		r.logger.Error("multiple active clearing accounts found - data inconsistency",
+			"clearing_type", clearingType,
+			"clearing_purpose", clearingPurpose.String(),
+			"instrument_code", instrumentCode,
+			"count", len(resp.Facilities))
+		return "", fmt.Errorf("%w for %s %s (count: %d)", ErrMultipleClearingAccounts, clearingType, instrumentCode, len(resp.Facilities))
+	}
+
+	// Use the single active clearing account matching the criteria.
 	account := resp.Facilities[0]
+
+	// Defensive check for empty account_id
+	if account.AccountId == "" {
+		r.logger.Error("clearing account has empty account_id",
+			"clearing_type", clearingType,
+			"clearing_purpose", clearingPurpose.String(),
+			"instrument_code", instrumentCode)
+		return "", fmt.Errorf("%w for %s %s", ErrEmptyClearingAccountID, clearingType, instrumentCode)
+	}
+
 	return account.AccountId, nil
 }
 
