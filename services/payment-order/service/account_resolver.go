@@ -207,7 +207,12 @@ func (r *AccountResolver) resolveClearingAccount(ctx context.Context, clearingTy
 		// This should never happen as we control the singleflight function return type
 		return "", ErrAccountResolverInternalError
 	}
-	poobservability.RecordClearingAccountLookupDuration(time.Since(start))
+
+	// Only record lookup duration for the primary request, not for shared waiters.
+	// Shared requests just waited for the primary, so their "duration" is actually wait time.
+	if !shared {
+		poobservability.RecordClearingAccountLookupDuration(time.Since(start))
+	}
 
 	r.logger.Info("resolved clearing account",
 		"clearing_type", clearingType,
