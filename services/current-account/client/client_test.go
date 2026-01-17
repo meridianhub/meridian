@@ -1,12 +1,17 @@
 package client
 
 import (
+	"context"
+	"strings"
 	"testing"
 	"time"
 
+	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	"github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func TestNew_WithTarget(t *testing.T) {
@@ -134,4 +139,95 @@ func TestNew_WithoutResilience(t *testing.T) {
 
 	// Verify resilient client was not created
 	assert.Nil(t, client.resilient)
+}
+
+// Account ID validation tests
+
+func TestRetrieveCurrentAccount_InvalidAccountID(t *testing.T) {
+	client, cleanup, err := New(Config{
+		Target: "localhost:50051",
+	})
+	require.NoError(t, err)
+	defer cleanup()
+
+	tests := []struct {
+		name      string
+		accountID string
+	}{
+		{"empty string", ""},
+		{"contains space", "ACC 123"},
+		{"contains at symbol", "ACC@123"},
+		{"contains slash", "ACC/123"},
+		{"exceeds max length", strings.Repeat("a", 101)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := client.RetrieveCurrentAccount(context.Background(), &currentaccountv1.RetrieveCurrentAccountRequest{
+				AccountId: tt.accountID,
+			})
+
+			require.Error(t, err)
+			assert.Equal(t, codes.InvalidArgument, status.Code(err))
+			assert.Contains(t, err.Error(), "invalid account_id format")
+		})
+	}
+}
+
+func TestExecuteDeposit_InvalidAccountID(t *testing.T) {
+	client, cleanup, err := New(Config{
+		Target: "localhost:50051",
+	})
+	require.NoError(t, err)
+	defer cleanup()
+
+	tests := []struct {
+		name      string
+		accountID string
+	}{
+		{"empty string", ""},
+		{"contains special char", "ACC#123"},
+		{"exceeds max length", strings.Repeat("a", 101)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := client.ExecuteDeposit(context.Background(), &currentaccountv1.ExecuteDepositRequest{
+				AccountId: tt.accountID,
+			})
+
+			require.Error(t, err)
+			assert.Equal(t, codes.InvalidArgument, status.Code(err))
+			assert.Contains(t, err.Error(), "invalid account_id format")
+		})
+	}
+}
+
+func TestInitiateLien_InvalidAccountID(t *testing.T) {
+	client, cleanup, err := New(Config{
+		Target: "localhost:50051",
+	})
+	require.NoError(t, err)
+	defer cleanup()
+
+	tests := []struct {
+		name      string
+		accountID string
+	}{
+		{"empty string", ""},
+		{"contains dot", "ACC.123"},
+		{"exceeds max length", strings.Repeat("a", 101)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := client.InitiateLien(context.Background(), &currentaccountv1.InitiateLienRequest{
+				AccountId: tt.accountID,
+			})
+
+			require.Error(t, err)
+			assert.Equal(t, codes.InvalidArgument, status.Code(err))
+			assert.Contains(t, err.Error(), "invalid account_id format")
+		})
+	}
 }
