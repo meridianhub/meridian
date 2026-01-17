@@ -28,6 +28,40 @@ Each skill document includes:
 
 - **[testing.md](testing.md)** - Testing standards: await package, testcontainers, defensive testing
 
+### Tooling
+
+- **[generate-llm-blueprint.md](generate-llm-blueprint.md)** - Generate codebase blueprint for LLMs
+
+## Additional Skill Locations
+
+Skills are also found in these directories - each document has YAML frontmatter with triggers:
+
+### Architecture Decision Records (ADRs)
+
+**Location:** [`../adr/`](../adr/README.md)
+
+ADRs capture architectural decisions with context and rationale. Load when discussing:
+- Service design and boundaries
+- Technology choices and trade-offs
+- Implementation patterns
+
+### Runbooks
+
+**Location:** [`../runbooks/`](../runbooks/)
+
+Operational procedures for incidents and recovery. Load when handling:
+- Security incidents or outages
+- Disaster recovery scenarios
+- Service degradation
+
+### Product Requirements (PRDs)
+
+**Location:** [`../prd/`](../prd/)
+
+Product specifications and feature designs. Load when understanding:
+- Feature scope and requirements
+- Business context and goals
+
 ## Skill Metadata Format
 
 Skills use YAML frontmatter at the start of each document:
@@ -145,7 +179,4 @@ Content starts here...
 
 ## Related Documentation
 
-- Architecture decisions: `../adr/` - Architectural choices and rationale
-- Runbooks: `../runbooks/` - Operational procedures
-- Main project docs: `../` - General documentation
-- Claude Code config: `../claude-code-skills.md` - Skills system overview
+- Claude Code skills system: `../claude-code-skills.md` - How the skills system works
