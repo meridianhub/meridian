@@ -8,8 +8,10 @@ import (
 	"regexp"
 )
 
-// accountIDPattern matches proto validation: ^[a-zA-Z0-9_-]+$
-// Length: 1-100 characters
+// accountIDPattern is compiled once at package init (regexp.MustCompile panics on invalid patterns).
+// Matches proto validation: ^[a-zA-Z0-9_-]+$ with length 1-100 characters.
+// Note: This is for API/RPC layer validation matching proto rules. Domain primitives
+// in shared/domain/primitives may enforce stricter formats (e.g., UUID v4).
 var accountIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,100}$`)
 
 // ErrAccountIDRequired is returned when account ID is empty.
