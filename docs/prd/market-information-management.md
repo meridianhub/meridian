@@ -19,12 +19,15 @@ instructions: |
 # PRD: Market Information Management Service
 
 **Status:** Draft
-**Version:** 1.2
-**Date:** 2026-01-16
+**Version:** 1.3
+**Date:** 2026-01-17
 **Author:** Architecture Team
 
 **Version History:**
 
+- v1.3 (2026-01-17): Added Service Boundaries section defining Canonical Ingestion Contract,
+  clarified in-scope vs out-of-scope responsibilities, positioned external adapters as
+  reference utilities per BIAN Service Domain encapsulation principle
 - v1.2 (2026-01-16): PR review feedback - causation_id in request, UpdateDataSource/
   DeactivateDataSource RPCs, structured batch errors, CEL map conversion docs, bi-temporal index
 - v1.1 (2026-01-16): Added bi-temporal integrity (knowledge_base_time), knowledge lineage
@@ -35,11 +38,13 @@ instructions: |
 **ADRs:**
 
 - [0002 - Microservices Per BIAN Domain](../adr/0002-microservices-per-bian-domain.md)
+- [0005 - Adapter Pattern for Layer Translation](../adr/0005-adapter-pattern-layer-translation.md)
 - [0013 - Universal Quantity Type System](../adr/0013-generic-asset-quantity-types.md)
 - [0014 - Financial Instrument Reference Data](../adr/0014-financial-instrument-reference-data.md)
 - [0015 - Standard Service Directory Structure](../adr/0015-standard-service-directory-structure.md)
 - [0016 - Tenant ID Naming Strategy](../adr/0016-tenant-id-naming-strategy.md)
 - [0017 - Temporal Quality Ladder](../adr/0017-temporal-quality-ladder.md)
+- [0026 - Canonical Ingestion Contract](../adr/0026-canonical-ingestion-contract.md)
 
 **Related PRDs:**
 
@@ -150,6 +155,101 @@ different purpose:
 
 **Loose coupling benefit**: Market Information can ingest data for instruments not yet defined
 in Reference Data (onboarding, external feeds, non-instrument data like weather).
+
+---
+
+## Service Boundaries (Canonical Ingestion Contract)
+
+This section defines the strict boundary between Meridian's responsibility and external systems.
+Following BIAN's Service Domain encapsulation principle, Market Information Management provides
+the **Vault** (storage) and **Rules** (validation), while external systems provide the
+**Translation** (data structuring).
+
+### In-Scope (Meridian's Responsibility)
+
+| Capability | Description |
+|------------|-------------|
+| **Schema Definition** | Maintaining `DataSetDefinition` with `attribute_schema` and validation rules |
+| **Contract Enforcement** | Validating incoming data against CEL expressions (`validation_expression`) |
+| **Bi-Temporal Storage** | Storing observations with Event Time (observed_at) and Knowledge Time (created_at) |
+| **Quality Resolution** | Resolving conflicts via Quality Ladder (ESTIMATE < ACTUAL < VERIFIED) |
+| **Knowledge Lineage** | Tracking supersession chains and causation_id for audit |
+| **Temporal Queries** | Answering "What was the value at time X with knowledge at time Y?" |
+| **Event Publishing** | Market Data Switch events on ACTUAL/VERIFIED ingestion |
+
+### Out-of-Scope (External Adapter Responsibility)
+
+| Capability | Description | Example |
+|------------|-------------|---------|
+| **Connectivity** | Maintaining connections to external sources | WebSocket to Bloomberg, TCP to Smart Meters |
+| **Extraction** | Polling APIs, scraping, reading raw feeds | Calling ECB SDMX API, reading meter registers |
+| **Normalization** | Converting source-specific formats to Meridian Protobuf | XML → `MarketPriceObservation`, CSV → gRPC request |
+| **Scheduling** | Managing ingestion timing and frequency | Cron jobs, event-driven triggers |
+| **Error Recovery** | Handling source-specific failure modes | API rate limits, connection timeouts |
+
+### The Formatted Data Contract
+
+Meridian's `RecordObservation` and `RecordObservationBatch` endpoints are **Strict Gatekeepers**.
+The service accepts ONLY pre-structured data conforming to the `MarketPriceObservation` schema.
+
+**Key Principles:**
+
+1. **No Protocol Adapters in Core**: The service SHALL NOT contain source-specific logic
+   (e.g., no code for weather APIs or smart meter protocols inside the service).
+
+2. **Validation-on-Arrival**: The system MUST validate every observation against the
+   `DataSetDefinition` CEL expressions. Invalid data is rejected with `INVALID_ARGUMENT`.
+
+3. **Caller Responsibility**: It is the responsibility of the *caller* (external adapter)
+   to structure data into the Meridian `MarketPriceObservation` format before calling.
+
+4. **No Implicit Transformation**: If an observation doesn't match the schema, the service
+   does not attempt to fix it. The "messy ETL" stays on the external side.
+
+### CEL as Contract Enforcer
+
+The CEL validator (FR-2.2, FR-2.6) becomes the **Compliance Auditor** at the boundary:
+
+```text
+External World                    │  Meridian Core
+                                  │
+┌─────────────────┐               │   ┌───────────────────────┐
+│ Smart Meter     │               │   │                       │
+│ ─────────────── │               │   │  DataSetDefinition    │
+│ Raw Binary Data │               │   │  ─────────────────    │
+└────────┬────────┘               │   │  validation_expr:     │
+         │                        │   │  "decimal(value) > 0  │
+         ▼                        │   │   && tou_period in    │
+┌─────────────────┐               │   │   ['PEAK','OFF_PEAK']"│
+│ External        │               │   └───────────┬───────────┘
+│ Adapter         │  Formatted    │               │
+│ ─────────────── │  Protobuf     │               ▼
+│ Normalize to    ├───────────────┼──►┌───────────────────────┐
+│ MarketPrice     │               │   │ CEL Validator         │
+│ Observation     │               │   │ ─────────────────     │
+└─────────────────┘               │   │ PASS → Store          │
+                                  │   │ FAIL → INVALID_ARG    │
+                                  │   └───────────────────────┘
+```
+
+### External Adapters as Reference Utilities
+
+Adapters (like the ECB Daily Rates example) are **demonstration utilities**, not core service
+features. They show how external systems should structure data for Meridian:
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| `market-data-tool` | `cmd/market-data-tool/` | Reference CLI for tenant bulk imports |
+| ECB Adapter | `cmd/market-data-tool/adapters/ecb/` | Example of external API → Meridian format |
+
+These utilities are **operationally independent** from the core service. Tenants may:
+
+- Use the reference utilities as-is
+- Build their own adapters following the same pattern
+- Integrate via any system that can call gRPC with properly structured payloads
+
+**This approach mirrors ADR-0005 (Adapter Pattern): Meridian owns the Domain and the Port;
+the external world owns the Adapter.**
 
 ---
 
