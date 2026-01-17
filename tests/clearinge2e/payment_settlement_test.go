@@ -6,6 +6,7 @@ package clearinge2e
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -300,7 +301,10 @@ func TestPaymentSettlementFlow(t *testing.T) {
 			customerAccountID, paymentAmount, "PAYMENT", paymentRef)
 
 		// Simulate async settlement processing
+		var wg sync.WaitGroup
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			time.Sleep(50 * time.Millisecond) // Simulate processing delay
 
 			// Debit customer, credit clearing
@@ -320,6 +324,9 @@ func TestPaymentSettlementFlow(t *testing.T) {
 			// Release lien
 			releaseLien(t, ctx, infra.currentAccountDB, schemaName, lienID)
 		}()
+
+		// Ensure goroutine completes before test ends (for safe t usage)
+		defer wg.Wait()
 
 		// Wait for settlement using await
 		var finalCustomerBalance string

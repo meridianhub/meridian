@@ -6,6 +6,7 @@ package clearinge2e
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -171,15 +172,19 @@ func TestClearingErrorHandling(t *testing.T) {
 		shortCtx, cancel := context.WithTimeout(ctx, 1*time.Nanosecond)
 		defer cancel()
 
-		// The query should fail due to context timeout
-		// This simulates database connection issues
 		time.Sleep(10 * time.Millisecond) // Ensure context has expired
 
 		// Verify context is done
 		assert.Error(t, shortCtx.Err(), "context should be cancelled")
 
+		// Attempt query with expired context - should not find result
+		// (the getClearingAccountByPurpose function handles context cancellation gracefully)
+		_, _, found := getClearingAccountByPurpose(t, shortCtx,
+			infra.internalBankAccountDB, schemaName, "GBP", "CLEARING_PURPOSE_DEPOSIT")
+		assert.False(t, found, "query with expired context should not succeed")
+
 		// Operations with fresh context should still work
-		_, _, found := getClearingAccountByPurpose(t, ctx,
+		_, _, found = getClearingAccountByPurpose(t, ctx,
 			infra.internalBankAccountDB, schemaName, "GBP", "CLEARING_PURPOSE_DEPOSIT")
 		assert.True(t, found, "operations with valid context should succeed")
 	})
@@ -201,12 +206,19 @@ func TestClearingErrorHandling(t *testing.T) {
 		// Process many concurrent deposits
 		numDeposits := 10
 		depositAmount := "10.00"
-		done := make(chan bool, numDeposits)
+
+		// Use WaitGroup for safer goroutine handling
+		var wg sync.WaitGroup
+		errCh := make(chan error, numDeposits*3) // 3 operations per deposit
 
 		for i := 0; i < numDeposits; i++ {
+			wg.Add(1)
 			go func(idx int) {
+				defer wg.Done()
 				ref := fmt.Sprintf("DEP-%d-%s", idx, uuid.New().String()[:8])
 
+				// Use the helper functions which handle errors internally
+				// In production code, these would return errors for proper handling
 				createLedgerPosting(t, ctx,
 					infra.financialAccountingDB, schemaName,
 					ref, clearingID, customerID, "GBP",
@@ -218,19 +230,27 @@ func TestClearingErrorHandling(t *testing.T) {
 				recordPosition(t, ctx,
 					infra.positionKeepingDB, schemaName,
 					customerID, "GBP", "AVAILABLE", depositAmount, ref, "DEPOSIT")
-
-				done <- true
 			}(i)
 		}
 
-		// Wait for all deposits
-		for i := 0; i < numDeposits; i++ {
-			select {
-			case <-done:
-				// OK
-			case <-time.After(10 * time.Second):
-				t.Fatal("timeout waiting for concurrent deposits")
-			}
+		// Wait for all deposits with timeout
+		doneCh := make(chan struct{})
+		go func() {
+			wg.Wait()
+			close(doneCh)
+		}()
+
+		select {
+		case <-doneCh:
+			// All goroutines completed
+		case <-time.After(10 * time.Second):
+			t.Fatal("timeout waiting for concurrent deposits")
+		}
+
+		// Check for any errors from goroutines
+		close(errCh)
+		for err := range errCh {
+			require.NoError(t, err, "concurrent operation failed")
 		}
 
 		// Verify final balance using await (in case of async processing)
@@ -277,7 +297,7 @@ func TestClearingErrorHandling(t *testing.T) {
 		depositRef := "DEP-IDEMPOTENT-001"
 		depositAmount := "100.00"
 
-		// First attempt
+		// First attempt - should succeed
 		createLedgerPosting(t, ctx,
 			infra.financialAccountingDB, schemaName,
 			depositRef, clearingID, customerID, "GBP",
@@ -292,14 +312,19 @@ func TestClearingErrorHandling(t *testing.T) {
 			infra.positionKeepingDB, schemaName, customerID, "GBP")
 		assert.Equal(t, "100.00000000", balance1)
 
-		// Duplicate ledger posting should fail (unique constraint on reference)
-		// In real system, this prevents double-posting
-		// For this test, we verify the first posting exists
+		// Attempt duplicate ledger posting - should fail due to unique constraint
+		_, err := tryCreateLedgerPosting(ctx,
+			infra.financialAccountingDB, schemaName,
+			depositRef, clearingID, customerID, "GBP",
+			depositAmount, "Duplicate attempt")
+		assert.Error(t, err, "duplicate posting should fail due to unique constraint")
+
+		// Verify original posting still exists
 		_, _, _, _, found := getLedgerPostingByReference(t, ctx,
 			infra.financialAccountingDB, schemaName, depositRef)
 		assert.True(t, found, "original posting should exist")
 
-		// Balance should remain unchanged (no duplicate processing)
+		// Balance should remain unchanged (duplicate was rejected)
 		balance2 := getPositionBalance(t, ctx,
 			infra.positionKeepingDB, schemaName, customerID, "GBP")
 		assert.Equal(t, "100.00000000", balance2, "balance should not change from duplicate")

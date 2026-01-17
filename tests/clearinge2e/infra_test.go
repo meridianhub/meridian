@@ -304,7 +304,7 @@ func setupFinancialAccountingSchema(t *testing.T, db *serviceDB, schemaName stri
 	postingsSQL := fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS %s.ledger_postings (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-			posting_reference VARCHAR(100) NOT NULL,
+			posting_reference VARCHAR(100) NOT NULL UNIQUE,
 			debit_account_id UUID NOT NULL,
 			credit_account_id UUID NOT NULL,
 			instrument_code VARCHAR(20) NOT NULL,
@@ -320,15 +320,6 @@ func setupFinancialAccountingSchema(t *testing.T, db *serviceDB, schemaName stri
 
 	_, err := db.pool.Exec(ctx, postingsSQL)
 	require.NoError(t, err, "failed to create ledger_postings table")
-
-	// Create index for posting queries
-	indexSQL := fmt.Sprintf(`
-		CREATE INDEX IF NOT EXISTS idx_posting_reference
-		ON %s.ledger_postings(posting_reference)
-	`, pq.QuoteIdentifier(schemaName))
-
-	_, err = db.pool.Exec(ctx, indexSQL)
-	require.NoError(t, err, "failed to create ledger_postings index")
 }
 
 // =============================================================================
@@ -492,6 +483,30 @@ func createLedgerPosting(
 	require.NoError(t, err, "failed to create ledger posting")
 
 	return postingID
+}
+
+// tryCreateLedgerPosting attempts to create a ledger posting and returns whether it succeeded.
+// This is used for testing idempotency where duplicate references should be rejected.
+func tryCreateLedgerPosting(
+	ctx context.Context,
+	db *serviceDB,
+	schemaName string,
+	postingReference string,
+	debitAccountID string,
+	creditAccountID string,
+	instrumentCode string,
+	amount string,
+	narrative string,
+) (postingID string, err error) {
+	insertSQL := fmt.Sprintf(`
+		INSERT INTO %s.ledger_postings
+		(posting_reference, debit_account_id, credit_account_id, instrument_code, amount, posting_date, value_date, status, narrative)
+		VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, CURRENT_DATE, 'COMPLETED', $6)
+		RETURNING id
+	`, pq.QuoteIdentifier(schemaName))
+
+	err = db.pool.QueryRow(ctx, insertSQL, postingReference, debitAccountID, creditAccountID, instrumentCode, amount, narrative).Scan(&postingID)
+	return postingID, err
 }
 
 // =============================================================================
