@@ -207,10 +207,11 @@ func TestAccountResolver_GetSettlementClearingAccount_CacheExpiry(t *testing.T) 
 	}
 
 	// Use very short TTL for testing
+	cacheTTL := 10 * time.Millisecond
 	resolver, err := NewAccountResolver(AccountResolverConfig{
 		Client:   mockClient,
 		Logger:   accountResolverTestLogger(),
-		CacheTTL: 10 * time.Millisecond,
+		CacheTTL: cacheTTL,
 	})
 	require.NoError(t, err)
 
@@ -219,8 +220,8 @@ func TestAccountResolver_GetSettlementClearingAccount_CacheExpiry(t *testing.T) 
 	require.NoError(t, err)
 	assert.Equal(t, 1, mockClient.getCallCount())
 
-	// Wait for cache to expire
-	time.Sleep(20 * time.Millisecond)
+	// Wait for cache to expire (3x safety margin for CI scheduling variance)
+	time.Sleep(3 * cacheTTL)
 
 	// Second call - cache expired, should call client again
 	_, err = resolver.GetSettlementClearingAccount(context.Background(), "GBP")
@@ -393,19 +394,23 @@ func TestAccountResolver_InvalidateCacheEntry(t *testing.T) {
 	require.NoError(t, err)
 
 	// Populate cache for GBP and USD
-	_, _ = resolver.GetSettlementClearingAccount(context.Background(), "GBP")
-	_, _ = resolver.GetSettlementClearingAccount(context.Background(), "USD")
+	_, err = resolver.GetSettlementClearingAccount(context.Background(), "GBP")
+	require.NoError(t, err)
+	_, err = resolver.GetSettlementClearingAccount(context.Background(), "USD")
+	require.NoError(t, err)
 	assert.Equal(t, 2, mockClient.getCallCount())
 
 	// Invalidate only GBP entry
 	resolver.InvalidateCacheEntry(ClearingAccountTypeSettlement, "GBP")
 
 	// GBP should trigger new lookup
-	_, _ = resolver.GetSettlementClearingAccount(context.Background(), "GBP")
+	_, err = resolver.GetSettlementClearingAccount(context.Background(), "GBP")
+	require.NoError(t, err)
 	assert.Equal(t, 3, mockClient.getCallCount())
 
 	// USD should still be cached
-	_, _ = resolver.GetSettlementClearingAccount(context.Background(), "USD")
+	_, err = resolver.GetSettlementClearingAccount(context.Background(), "USD")
+	require.NoError(t, err)
 	assert.Equal(t, 3, mockClient.getCallCount()) // No additional call
 }
 
