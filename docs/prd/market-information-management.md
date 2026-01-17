@@ -38,11 +38,13 @@ instructions: |
 **ADRs:**
 
 - [0002 - Microservices Per BIAN Domain](../adr/0002-microservices-per-bian-domain.md)
+- [0005 - Adapter Pattern for Layer Translation](../adr/0005-adapter-pattern-layer-translation.md)
 - [0013 - Universal Quantity Type System](../adr/0013-generic-asset-quantity-types.md)
 - [0014 - Financial Instrument Reference Data](../adr/0014-financial-instrument-reference-data.md)
 - [0015 - Standard Service Directory Structure](../adr/0015-standard-service-directory-structure.md)
 - [0016 - Tenant ID Naming Strategy](../adr/0016-tenant-id-naming-strategy.md)
 - [0017 - Temporal Quality Ladder](../adr/0017-temporal-quality-ladder.md)
+- [0026 - Canonical Ingestion Contract](../adr/0026-canonical-ingestion-contract.md)
 
 **Related PRDs:**
 
