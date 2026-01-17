@@ -445,6 +445,142 @@ func TestBackendError_PropagatesError(t *testing.T) {
 }
 
 // =============================================================================
+// Multiple accounts error tests (fail-fast behavior)
+// =============================================================================
+
+func TestMultipleAccounts_GetDepositClearingAccount_ReturnsError(t *testing.T) {
+	mockClient := &mockInternalBankAccountClient{
+		listResponse: &internalbankaccountv1.ListInternalBankAccountsResponse{
+			Facilities: []*internalbankaccountv1.InternalBankAccountFacility{
+				{AccountId: "clearing-account-1"},
+				{AccountId: "clearing-account-2"},
+			},
+		},
+	}
+
+	resolver, err := NewAccountResolver(AccountResolverConfig{
+		Client: mockClient,
+		Logger: accountResolverTestLogger(),
+	})
+	require.NoError(t, err)
+
+	_, err = resolver.GetDepositClearingAccount(context.Background(), "GBP")
+
+	assert.ErrorIs(t, err, ErrMultipleClearingAccounts)
+	assert.Contains(t, err.Error(), "DEPOSIT")
+	assert.Contains(t, err.Error(), "GBP")
+	assert.Contains(t, err.Error(), "count: 2")
+}
+
+func TestMultipleAccounts_GetWithdrawalClearingAccount_ReturnsError(t *testing.T) {
+	mockClient := &mockInternalBankAccountClient{
+		listResponse: &internalbankaccountv1.ListInternalBankAccountsResponse{
+			Facilities: []*internalbankaccountv1.InternalBankAccountFacility{
+				{AccountId: "clearing-account-1"},
+				{AccountId: "clearing-account-2"},
+				{AccountId: "clearing-account-3"},
+			},
+		},
+	}
+
+	resolver, err := NewAccountResolver(AccountResolverConfig{
+		Client: mockClient,
+		Logger: accountResolverTestLogger(),
+	})
+	require.NoError(t, err)
+
+	_, err = resolver.GetWithdrawalClearingAccount(context.Background(), "USD")
+
+	assert.ErrorIs(t, err, ErrMultipleClearingAccounts)
+	assert.Contains(t, err.Error(), "WITHDRAWAL")
+	assert.Contains(t, err.Error(), "USD")
+	assert.Contains(t, err.Error(), "count: 3")
+}
+
+func TestMultipleAccounts_GetSettlementClearingAccount_ReturnsError(t *testing.T) {
+	mockClient := &mockInternalBankAccountClient{
+		listResponse: &internalbankaccountv1.ListInternalBankAccountsResponse{
+			Facilities: []*internalbankaccountv1.InternalBankAccountFacility{
+				{AccountId: "clearing-account-1"},
+				{AccountId: "clearing-account-2"},
+			},
+		},
+	}
+
+	resolver, err := NewAccountResolver(AccountResolverConfig{
+		Client: mockClient,
+		Logger: accountResolverTestLogger(),
+	})
+	require.NoError(t, err)
+
+	_, err = resolver.GetSettlementClearingAccount(context.Background(), "EUR")
+
+	assert.ErrorIs(t, err, ErrMultipleClearingAccounts)
+	assert.Contains(t, err.Error(), "SETTLEMENT")
+	assert.Contains(t, err.Error(), "EUR")
+	assert.Contains(t, err.Error(), "count: 2")
+}
+
+func TestMultipleAccounts_DoesNotCache(t *testing.T) {
+	mockClient := &mockInternalBankAccountClient{
+		listResponse: &internalbankaccountv1.ListInternalBankAccountsResponse{
+			Facilities: []*internalbankaccountv1.InternalBankAccountFacility{
+				{AccountId: "clearing-account-1"},
+				{AccountId: "clearing-account-2"},
+			},
+		},
+	}
+
+	resolver, err := NewAccountResolver(AccountResolverConfig{
+		Client:   mockClient,
+		Logger:   accountResolverTestLogger(),
+		CacheTTL: 5 * time.Minute,
+	})
+	require.NoError(t, err)
+
+	// First call - should fail
+	_, err = resolver.GetDepositClearingAccount(context.Background(), "GBP")
+	assert.ErrorIs(t, err, ErrMultipleClearingAccounts)
+	assert.Equal(t, 1, mockClient.getCallCount())
+
+	// Second call - should also fail, and should NOT be cached (client called again)
+	_, err = resolver.GetDepositClearingAccount(context.Background(), "GBP")
+	assert.ErrorIs(t, err, ErrMultipleClearingAccounts)
+	assert.Equal(t, 2, mockClient.getCallCount(), "Error responses should not be cached")
+}
+
+func TestSingleAccount_StillWorks(t *testing.T) {
+	mockClient := &mockInternalBankAccountClient{
+		listResponse: &internalbankaccountv1.ListInternalBankAccountsResponse{
+			Facilities: []*internalbankaccountv1.InternalBankAccountFacility{
+				{AccountId: "single-clearing-account"},
+			},
+		},
+	}
+
+	resolver, err := NewAccountResolver(AccountResolverConfig{
+		Client: mockClient,
+		Logger: accountResolverTestLogger(),
+	})
+	require.NoError(t, err)
+
+	// Test deposit
+	accountID, err := resolver.GetDepositClearingAccount(context.Background(), "GBP")
+	require.NoError(t, err)
+	assert.Equal(t, "single-clearing-account", accountID)
+
+	// Test withdrawal
+	accountID, err = resolver.GetWithdrawalClearingAccount(context.Background(), "USD")
+	require.NoError(t, err)
+	assert.Equal(t, "single-clearing-account", accountID)
+
+	// Test settlement
+	accountID, err = resolver.GetSettlementClearingAccount(context.Background(), "EUR")
+	require.NoError(t, err)
+	assert.Equal(t, "single-clearing-account", accountID)
+}
+
+// =============================================================================
 // Additional tests (from current-account patterns)
 // =============================================================================
 
