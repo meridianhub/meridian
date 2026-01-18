@@ -76,7 +76,19 @@ func (s *Server) RecordObservation(ctx context.Context, req *pb.RecordObservatio
 		return nil, err // Already formatted as gRPC status error
 	}
 
-	// 6. Parse the decimal value
+	// 6. Validate required timestamps (guard against nil dereference)
+	if req.ObservedAt == nil {
+		s.logger.Warn("observed_at timestamp is required",
+			"dataset_code", req.DatasetCode)
+		return nil, status.Errorf(codes.InvalidArgument, "observed_at timestamp is required")
+	}
+	if req.ValidFrom == nil {
+		s.logger.Warn("valid_from timestamp is required",
+			"dataset_code", req.DatasetCode)
+		return nil, status.Errorf(codes.InvalidArgument, "valid_from timestamp is required")
+	}
+
+	// 7. Parse the decimal value
 	value, err := decimal.NewFromString(req.Value)
 	if err != nil {
 		s.logger.Warn("invalid decimal value",
@@ -85,16 +97,16 @@ func (s *Server) RecordObservation(ctx context.Context, req *pb.RecordObservatio
 		return nil, status.Errorf(codes.InvalidArgument, "invalid decimal value: %s", req.Value)
 	}
 
-	// 7. Convert proto QualityLevel to domain QualityLevel
+	// 8. Convert proto QualityLevel to domain QualityLevel
 	qualityLevel := protoQualityLevelToDomain(req.Quality)
 
-	// 8. Determine valid_to (use provided or default to 100 years in future)
+	// 9. Determine valid_to (use provided or default to 100 years in future)
 	validTo := time.Now().Add(100 * 365 * 24 * time.Hour) // Default: far future
 	if req.ValidTo != nil {
 		validTo = req.ValidTo.AsTime()
 	}
 
-	// 9. Create the domain observation
+	// 10. Create the domain observation
 	observation, err := domain.NewMarketPriceObservation(
 		req.DatasetCode,
 		source.ID(),
@@ -115,7 +127,7 @@ func (s *Server) RecordObservation(ctx context.Context, req *pb.RecordObservatio
 		return nil, s.mapObservationDomainError(err, "RecordObservation", req.DatasetCode)
 	}
 
-	// 10. Persist the observation
+	// 11. Persist the observation
 	if err := s.observationRepo.Record(ctx, observation); err != nil {
 		s.logger.Error("failed to record observation",
 			"dataset_code", req.DatasetCode,
@@ -129,7 +141,7 @@ func (s *Server) RecordObservation(ctx context.Context, req *pb.RecordObservatio
 		"resolution_key", resolutionKey,
 		"quality", qualityLevel.String())
 
-	// 11. Publish ObservationRecorded event to Kafka ONLY if quality is ACTUAL or VERIFIED (not ESTIMATE)
+	// 12. Publish ObservationRecorded event to Kafka ONLY if quality is ACTUAL or VERIFIED (not ESTIMATE)
 	if s.eventPublisher != nil && shouldPublishObservationEvent(qualityLevel) {
 		// Use the specialized publisher if available, otherwise use generic publisher
 		if obsPublisher, ok := s.eventPublisher.(ObservationEventPublisher); ok {
@@ -150,7 +162,7 @@ func (s *Server) RecordObservation(ctx context.Context, req *pb.RecordObservatio
 		}
 	}
 
-	// 12. Return proto response
+	// 13. Return proto response
 	return &pb.RecordObservationResponse{
 		Observation: domainObservationToProto(observation, req.Attributes),
 	}, nil
@@ -239,6 +251,16 @@ func (s *Server) RecordObservationBatch(ctx context.Context, req *pb.RecordObser
 				// Verify source is active
 				if !source.IsActive() {
 					validationErrors.Store(i, fmt.Sprintf("source %s is not active", entry.SourceCode))
+					return
+				}
+
+				// Validate required timestamps (guard against nil dereference)
+				if entry.ObservedAt == nil {
+					validationErrors.Store(i, "observed_at timestamp is required")
+					return
+				}
+				if entry.ValidFrom == nil {
+					validationErrors.Store(i, "valid_from timestamp is required")
 					return
 				}
 
@@ -516,6 +538,9 @@ func (s *Server) ListObservations(ctx context.Context, req *pb.ListObservationsR
 
 	// Apply pagination
 	pageSize := int(req.PageSize)
+	if pageSize < 0 {
+		return nil, status.Errorf(codes.InvalidArgument, "page_size cannot be negative")
+	}
 	if pageSize == 0 {
 		pageSize = 100 // Default
 	}
