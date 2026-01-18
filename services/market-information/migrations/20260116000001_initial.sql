@@ -214,7 +214,8 @@ CREATE TABLE "market_price_observation" (
   PRIMARY KEY ("id")
 );
 
-COMMENT ON TABLE "market_price_observation" IS 'Bi-temporal market price observations with quality ladder (1=ESTIMATE, 2=ACTUAL, 3=VERIFIED) and supersession tracking per ADR-0017';
+COMMENT ON TABLE "market_price_observation" IS 'Bi-temporal market price observations with quality ladder (1=ESTIMATE, 2=ACTUAL, 3=VERIFIED) and supersession tracking per ADR-0017. Quality determines precedence within same source; for cross-source, combine with data_source.trust_level.';
+COMMENT ON COLUMN "market_price_observation"."superseded_by" IS 'Forward reference to observation that replaces this one. To find replacement: SELECT WHERE id = superseded_by. To find what this replaces: SELECT WHERE superseded_by = this.id';
 COMMENT ON COLUMN "market_price_observation"."causation_id" IS 'Links to external event triggering this observation (e.g., Kafka message ID, API request ID)';
 
 -- Foreign key to dataset definition (RESTRICT: prevent deletion of referenced definitions)
