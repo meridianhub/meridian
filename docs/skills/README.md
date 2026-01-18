@@ -62,6 +62,30 @@ Product specifications and feature designs. Load when understanding:
 - Feature scope and requirements
 - Business context and goals
 
+### Services
+
+Service documentation includes YAML frontmatter for Claude Code discovery:
+
+**Domain Services:**
+- **[current-account](../../services/current-account/README.md)** - BIAN current account with lien-based fund reservations
+- **[position-keeping](../../services/position-keeping/README.md)** - Transaction log and balance queries
+- **[financial-accounting](../../services/financial-accounting/README.md)** - Double-entry bookkeeping
+- **[payment-order](../../services/payment-order/README.md)** - Payment saga orchestrator
+- **[party](../../services/party/README.md)** - Party reference data directory
+- **[internal-bank-account](../../services/internal-bank-account/README.md)** - Internal bank account registry
+- **[reference-data](../../services/reference-data/README.md)** - Instrument definitions and CEL validation
+
+**Infrastructure Services:**
+- **[gateway](../../services/gateway/README.md)** - Multi-tenant API gateway
+- **[tenant](../../services/tenant/README.md)** - Multi-tenant platform infrastructure
+- **[audit-worker](../../services/audit-worker/README.md)** - Fallback audit logging worker
+
+**Shared Modules:**
+- **[migrations](../../shared/migrations/README.md)** - Database migrations
+- **[bootstrap](../../shared/platform/bootstrap/README.md)** - Service initialization
+- **[audit](../../shared/platform/audit/README.md)** - Audit hook helpers
+- **[observability](../../shared/platform/observability/README.md)** - OpenTelemetry tracing
+
 ## Skill Metadata Format
 
 Skills use YAML frontmatter at the start of each document:

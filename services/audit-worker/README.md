@@ -1,3 +1,19 @@
+---
+name: audit-worker-service
+description: Fallback audit logging worker for Kafka outage recovery
+triggers:
+  - Audit log processing and outbox draining
+  - Kafka unavailability and fallback mode
+  - Audit metrics and monitoring
+  - Audit event retention and recovery
+instructions: |
+  The audit-worker processes audit_outbox entries when Kafka is unavailable.
+  It polls the outbox table every 5 seconds and moves entries to audit_log.
+  Monitor via Prometheus metrics: meridian_audit_worker_outbox_depth (alert if > 1000).
+
+  Port: 8080 (HTTP for health/metrics)
+---
+
 # audit-worker
 
 **Fallback service** that processes audit log entries from the outbox table when Kafka is unavailable.

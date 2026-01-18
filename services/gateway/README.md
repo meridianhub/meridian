@@ -1,3 +1,20 @@
+---
+name: gateway-service
+description: Multi-tenant API gateway with JWT/API key authentication and request routing
+triggers:
+  - JWT authentication and JWKS configuration
+  - API key authentication and rate limiting
+  - Tenant resolution from subdomain or headers
+  - Request routing and proxy configuration
+  - Local development mode setup
+instructions: |
+  Gateway handles authentication (JWT or API key), tenant resolution, and proxying.
+  Configure via environment variables: BASE_DOMAIN, JWKS_URL, API_KEYS, BACKENDS.
+  Use LOCAL_DEV_MODE=true with X-Tenant-Slug header for local development.
+
+  Port: 8080 (HTTP)
+---
+
 # Gateway Service
 
 The Gateway Service is a multi-tenant API gateway that provides authentication,
@@ -15,26 +32,29 @@ The gateway handles:
 
 ## Architecture
 
-```text
-                                    +-------------------+
-                                    |   JWKS Provider   |
-                                    | (Auth0, Keycloak) |
-                                    +--------+----------+
-                                             |
-                                             | JWKS fetch
-                                             v
-+--------+     +----------+     +-----------+-----------+     +----------+
-| Client | --> | Gateway  | --> | Auth      | Tenant    | --> | Backend  |
-|        | <-- | (proxy)  | <-- | Middleware| Resolver  | <-- | Services |
-+--------+     +----------+     +-----------+-----------+     +----------+
-                                             |
-                                             v
-                                    +-------------------+
-                                    | Identity Context  |
-                                    | - User ID         |
-                                    | - Tenant ID       |
-                                    | - Roles/Scopes    |
-                                    +-------------------+
+```mermaid
+flowchart LR
+    subgraph External
+        Client["Client"]
+        JWKS["JWKS Provider<br/>(Auth0, Keycloak)"]
+    end
+
+    subgraph Gateway["Gateway (proxy)"]
+        Auth["Auth<br/>Middleware"]
+        Tenant["Tenant<br/>Resolver"]
+    end
+
+    subgraph Identity["Identity Context"]
+        Ctx["- User ID<br/>- Tenant ID<br/>- Roles/Scopes"]
+    end
+
+    Backend["Backend<br/>Services"]
+
+    Client --> Gateway
+    JWKS -.->|"JWKS fetch"| Auth
+    Gateway --> Backend
+    Auth --> Tenant
+    Tenant --> Ctx
 ```
 
 ### Middleware Chain

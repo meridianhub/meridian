@@ -119,12 +119,14 @@ classDiagram
 
 ## Lien Lifecycle
 
-```text
-ACTIVE (reservation)
-   │
-   ├──→ EXECUTED (funds debited, payment committed)
-   │
-   └──→ TERMINATED (reservation released, payment cancelled)
+```mermaid
+stateDiagram-v2
+    ACTIVE : ACTIVE (reservation)
+    EXECUTED : EXECUTED (funds debited)
+    TERMINATED : TERMINATED (released)
+
+    ACTIVE --> EXECUTED : Execute lien
+    ACTIVE --> TERMINATED : Cancel/timeout
 ```
 
 - **ACTIVE**: Funds reserved, reduces AvailableBalance
