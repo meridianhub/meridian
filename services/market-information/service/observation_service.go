@@ -572,7 +572,7 @@ func (s *Server) ListObservations(ctx context.Context, req *pb.ListObservationsR
 	return &pb.ListObservationsResponse{
 		Observations:  pbObservations,
 		NextPageToken: "", // TODO: Implement cursor-based pagination
-		TotalCount:    int32(len(pbObservations)),
+		TotalCount:    0,  // TODO: Add count query - 0 means unknown per proto spec
 	}, nil
 }
 
