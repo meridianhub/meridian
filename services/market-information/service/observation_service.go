@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -67,7 +68,7 @@ func (s *Server) RecordObservation(ctx context.Context, req *pb.RecordObservatio
 	}
 
 	// 5. Evaluate validation expression (reject if false)
-	if err := s.validateObservation(dataset, req, observationContext); err != nil {
+	if err := s.validateObservation(dataset, req, observationContext, source.ID().String()); err != nil {
 		s.logger.Warn("observation validation failed",
 			"dataset_code", req.DatasetCode,
 			"value", req.Value,
@@ -294,8 +295,11 @@ func (s *Server) RecordObservationBatch(ctx context.Context, req *pb.RecordObser
 
 	// Wait for all validations to complete
 	if err := g.Wait(); err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		if errors.Is(err, context.DeadlineExceeded) {
 			return nil, status.Errorf(codes.DeadlineExceeded, "batch validation timed out")
+		}
+		if errors.Is(err, context.Canceled) {
+			return nil, status.Errorf(codes.Canceled, "batch validation was canceled")
 		}
 		return nil, status.Errorf(codes.Internal, "batch validation failed: %v", err)
 	}
@@ -556,9 +560,14 @@ func (s *Server) computeResolutionKey(dataset domain.DataSetDefinition, observat
 		if len(observationContext) == 0 {
 			return defaultResolutionKey, nil
 		}
-		// Simple fallback - just use first non-empty value or default
-		for _, v := range observationContext {
-			if v != "" {
+		// Sort keys for deterministic selection of first non-empty value
+		keys := make([]string, 0, len(observationContext))
+		for k := range observationContext {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			if v := observationContext[k]; v != "" {
 				return v, nil
 			}
 		}
@@ -586,7 +595,7 @@ func (s *Server) computeResolutionKey(dataset domain.DataSetDefinition, observat
 }
 
 // validateObservation evaluates the validation CEL expression.
-func (s *Server) validateObservation(dataset domain.DataSetDefinition, req *pb.RecordObservationRequest, observationContext map[string]string) error {
+func (s *Server) validateObservation(dataset domain.DataSetDefinition, req *pb.RecordObservationRequest, observationContext map[string]string, sourceID string) error {
 	if s.celValidator == nil {
 		// No validator available - skip validation
 		return nil
@@ -609,7 +618,7 @@ func (s *Server) validateObservation(dataset domain.DataSetDefinition, req *pb.R
 		ObservedAt:         req.ObservedAt.AsTime(),
 		ValidFrom:          req.ValidFrom.AsTime(),
 		ValidTo:            validTo,
-		SourceID:           req.SourceCode,
+		SourceID:           sourceID,
 		Quality:            int(req.Quality),
 	}
 

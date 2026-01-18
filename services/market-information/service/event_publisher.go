@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	marketinformationv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
 	"github.com/meridianhub/meridian/services/market-information/domain"
@@ -23,6 +22,8 @@ var (
 	ErrNilProducer = errors.New("kafka producer cannot be nil")
 	// ErrNilObservation is returned when the observation is nil.
 	ErrNilObservation = errors.New("observation cannot be nil")
+	// ErrUnsupportedEventType is returned when Publish receives an unsupported event type.
+	ErrUnsupportedEventType = errors.New("unsupported event type")
 )
 
 // ObservationEventPublisher defines the interface for publishing observation-related events.
@@ -83,8 +84,8 @@ func NewKafkaObservationPublisher(producer protoPublisher) (*KafkaObservationPub
 // PublishObservationRecorded publishes an ObservationRecorded event when a new
 // observation is recorded in the system.
 //
-// The event is published to the ObservationRecordedTopic with the tenant ID as
-// the partition key to ensure ordering of events for the same tenant.
+// The event is published to the ObservationRecordedTopic with the dataset code as
+// the partition key to ensure ordering of events for the same dataset.
 //
 // The method maps the domain MarketPriceObservation to the proto ObservationRecorded
 // event message before publishing.
@@ -121,6 +122,24 @@ func (p *KafkaObservationPublisher) FlushWithTimeout(timeoutMs int) int {
 	return p.producer.FlushWithTimeout(timeoutMs)
 }
 
+// Publish implements the EventPublisher interface by type-switching on the event
+// and delegating to the appropriate publish method.
+// Currently supports *marketinformationv1.ObservationRecorded events.
+// Returns ErrUnsupportedEventType for unsupported event types.
+func (p *KafkaObservationPublisher) Publish(ctx context.Context, event any) error {
+	switch e := event.(type) {
+	case *marketinformationv1.ObservationRecorded:
+		// Use dataset_code as partition key for ordering within the same dataset
+		partitionKey := e.DatasetCode
+		if err := p.producer.PublishWithTenant(ctx, p.topic, partitionKey, e); err != nil {
+			return fmt.Errorf("failed to publish ObservationRecorded event: %w", err)
+		}
+		return nil
+	default:
+		return fmt.Errorf("%w: %T", ErrUnsupportedEventType, event)
+	}
+}
+
 // mapObservationToProtoEvent converts a domain MarketPriceObservation to a proto
 // ObservationRecorded event message.
 func mapObservationToProtoEvent(obs domain.MarketPriceObservation) *marketinformationv1.ObservationRecorded {
@@ -132,7 +151,7 @@ func mapObservationToProtoEvent(obs domain.MarketPriceObservation) *marketinform
 		Quality:            mapQualityLevelToProto(obs.QualityLevel()),
 		Value:              obs.Value().String(),
 		SourceId:           obs.SourceID().String(),
-		RecordedAt:         timestamppb.New(time.Now()),
+		RecordedAt:         timestamppb.New(obs.CreatedAt()),
 	}
 
 	// Note: The proto event has supersedes_observation_id to track what this observation
