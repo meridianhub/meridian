@@ -1,3 +1,19 @@
+---
+name: observability
+description: OpenTelemetry tracing with OTLP exporter and Grafana stack integration
+triggers:
+  - OpenTelemetry tracing setup
+  - Distributed tracing across services
+  - gRPC tracing interceptors
+  - Kafka and database span creation
+  - Grafana Tempo integration
+instructions: |
+  Initialize tracer with observability.NewTracer() and configure via OTEL_* env vars.
+  Use tracer.UnaryServerInterceptor() for gRPC.
+  Create spans with tracer.Start() or semantic helpers (StartDatabaseSpan, etc.).
+  Access Grafana at localhost:3000 when running Tilt.
+---
+
 # Observability Package
 
 This package provides distributed tracing functionality using OpenTelemetry for the Meridian platform.

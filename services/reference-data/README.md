@@ -1,3 +1,21 @@
+---
+name: reference-data-service
+description: Instrument definitions with CEL validation and multi-tenant isolation
+triggers:
+  - Instrument definitions and asset types
+  - CEL validation expressions
+  - Currency and measurement unit configuration
+  - System vs tenant instrument management
+  - Instrument lifecycle (DRAFT, ACTIVE, DEPRECATED)
+instructions: |
+  Reference Data manages instrument definitions for the ledger system.
+  System instruments are seeded during tenant provisioning (read-only via API).
+  Tenant instruments follow DRAFT → ACTIVE → DEPRECATED lifecycle.
+  CEL expressions validate quantities and generate fungibility bucket keys.
+
+  Port: 50054 (gRPC)
+---
+
 # Reference Data Service
 
 The Reference Data service manages instrument definitions for the Meridian ledger system.
@@ -58,12 +76,14 @@ This service uses schema-per-tenant architecture:
 
 ## Instrument Lifecycle
 
-```text
-DRAFT ─────► ACTIVE ─────► DEPRECATED
-  │            │               │
-  │ Editable   │ Immutable     │ Read-only
-  │            │ validation    │ not for new
-  └────────────┴───────────────┴─────────────
+```mermaid
+stateDiagram-v2
+    DRAFT : DRAFT<br/>Editable
+    ACTIVE : ACTIVE<br/>Immutable
+    DEPRECATED : DEPRECATED<br/>Read-only
+
+    DRAFT --> ACTIVE : Activate
+    ACTIVE --> DEPRECATED : Deprecate
 ```
 
 ### Status Transitions
