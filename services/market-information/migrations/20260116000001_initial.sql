@@ -164,6 +164,9 @@ CREATE TABLE "market_price_observation" (
   "data_source_id" uuid NOT NULL,
   "resolution_key" character varying(255) NOT NULL,
   "observed_at" timestamptz NOT NULL,
+  -- valid_from/valid_to: Reserved for state-based temporal validity (e.g., "this rate was
+  -- valid from 2026-01-01 to 2026-01-31"). Distinct from bi-temporal observed_at/created_at.
+  -- Enables queries like "what rate applied on date X?" vs "what did we know at time T?"
   "valid_from" timestamptz NULL,
   "valid_to" timestamptz NULL,
   "created_at" timestamptz NOT NULL DEFAULT now(),
@@ -176,20 +179,20 @@ CREATE TABLE "market_price_observation" (
   PRIMARY KEY ("id")
 );
 
--- Foreign key to dataset definition
+-- Foreign key to dataset definition (RESTRICT: prevent deletion of referenced definitions)
 ALTER TABLE "market_price_observation"
   ADD CONSTRAINT "fk_observation_dataset_definition"
-  FOREIGN KEY ("dataset_definition_id") REFERENCES "dataset_definition"("id");
+  FOREIGN KEY ("dataset_definition_id") REFERENCES "dataset_definition"("id") ON DELETE RESTRICT;
 
--- Foreign key to data source
+-- Foreign key to data source (RESTRICT: prevent deletion of referenced sources)
 ALTER TABLE "market_price_observation"
   ADD CONSTRAINT "fk_observation_data_source"
-  FOREIGN KEY ("data_source_id") REFERENCES "data_source"("id");
+  FOREIGN KEY ("data_source_id") REFERENCES "data_source"("id") ON DELETE RESTRICT;
 
--- Self-referencing FK for supersession chain (knowledge lineage)
+-- Self-referencing FK for supersession chain (SET NULL: allow deletion without breaking chain)
 ALTER TABLE "market_price_observation"
   ADD CONSTRAINT "fk_observation_superseded_by"
-  FOREIGN KEY ("superseded_by") REFERENCES "market_price_observation"("id");
+  FOREIGN KEY ("superseded_by") REFERENCES "market_price_observation"("id") ON DELETE SET NULL;
 
 -- Quality must be 1 (ESTIMATE), 2 (ACTUAL), or 3 (VERIFIED)
 ALTER TABLE "market_price_observation"
@@ -260,7 +263,7 @@ INSERT INTO "dataset_definition" (
   'Foreign Exchange Rate',
   'Exchange rates between currency pairs',
   'PRICE',
-  'decimal(observation_context.rate) > 0',
+  'parse_decimal(observation_context.rate) > 0',
   'observation_context.base_currency + "/" + observation_context.quote_currency',
   '"Invalid exchange rate: must be positive"',
   '{"type":"object","properties":{"base_currency":{"type":"string","minLength":3,"maxLength":3},"quote_currency":{"type":"string","minLength":3,"maxLength":3},"rate":{"type":"number","exclusiveMinimum":0}},"required":["base_currency","quote_currency","rate"]}',
@@ -279,7 +282,7 @@ INSERT INTO "dataset_definition" (
   'Energy Spot Price',
   'Spot prices for energy commodities (electricity, gas, etc.)',
   'PRICE',
-  'decimal(observation_context.price) >= 0',
+  'parse_decimal(observation_context.price) >= 0',
   'observation_context.market + "/" + observation_context.commodity + "/" + observation_context.delivery_period',
   '"Invalid energy spot price: must be non-negative"',
   '{"type":"object","properties":{"market":{"type":"string"},"commodity":{"type":"string","enum":["ELECTRICITY","NATURAL_GAS","COAL","OIL"]},"delivery_period":{"type":"string"},"price":{"type":"number","minimum":0},"unit":{"type":"string"}},"required":["market","commodity","delivery_period","price"]}',
@@ -298,7 +301,7 @@ INSERT INTO "dataset_definition" (
   'Energy Tariff Rate',
   'Published tariff rates for energy consumption',
   'RATE',
-  'decimal(observation_context.rate) >= 0',
+  'parse_decimal(observation_context.rate) >= 0',
   'observation_context.provider + "/" + observation_context.tariff_code + "/" + observation_context.effective_date',
   '"Invalid tariff rate: must be non-negative"',
   '{"type":"object","properties":{"provider":{"type":"string"},"tariff_code":{"type":"string"},"effective_date":{"type":"string","format":"date"},"rate":{"type":"number","minimum":0},"unit":{"type":"string"}},"required":["provider","tariff_code","effective_date","rate"]}',
@@ -317,7 +320,7 @@ INSERT INTO "dataset_definition" (
   'Carbon Credit Price',
   'Prices for carbon credits and emission allowances',
   'PRICE',
-  'decimal(observation_context.price) >= 0',
+  'parse_decimal(observation_context.price) >= 0',
   'observation_context.scheme + "/" + observation_context.credit_type + "/" + observation_context.vintage',
   '"Invalid carbon price: must be non-negative"',
   '{"type":"object","properties":{"scheme":{"type":"string","enum":["EU_ETS","VCS","GOLD_STANDARD","CDM"]},"credit_type":{"type":"string"},"vintage":{"type":"integer","minimum":2000},"price":{"type":"number","minimum":0},"currency":{"type":"string"}},"required":["scheme","credit_type","vintage","price"]}',
@@ -326,6 +329,7 @@ INSERT INTO "dataset_definition" (
 );
 
 -- WEATHER_TEMP: Temperature observations for weather derivatives
+-- Canonical unit: Celsius. Clients must convert Fahrenheit before submission.
 INSERT INTO "dataset_definition" (
   "id", "code", "version", "name", "description", "data_category",
   "validation_expression", "resolution_key_expression", "error_message_expression",
@@ -334,12 +338,12 @@ INSERT INTO "dataset_definition" (
   gen_random_uuid(),
   'WEATHER_TEMP', 1,
   'Weather Temperature',
-  'Temperature observations for weather derivatives and hedging',
+  'Temperature observations for weather derivatives and hedging. All values stored in Celsius.',
   'MEASUREMENT',
-  'decimal(observation_context.temperature) >= -100 && decimal(observation_context.temperature) <= 100',
+  'parse_decimal(observation_context.temperature_celsius) >= -100 && parse_decimal(observation_context.temperature_celsius) <= 100',
   'observation_context.station_code + "/" + string(observation_context.observation_date)',
   '"Invalid temperature: must be between -100 and 100 Celsius"',
-  '{"type":"object","properties":{"station_code":{"type":"string"},"observation_date":{"type":"string","format":"date"},"temperature":{"type":"number","minimum":-100,"maximum":100},"unit":{"type":"string","enum":["CELSIUS","FAHRENHEIT"]}},"required":["station_code","observation_date","temperature"]}',
+  '{"type":"object","properties":{"station_code":{"type":"string"},"observation_date":{"type":"string","format":"date"},"temperature_celsius":{"type":"number","minimum":-100,"maximum":100}},"required":["station_code","observation_date","temperature_celsius"]}',
   'ACTIVE',
   now()
 );
