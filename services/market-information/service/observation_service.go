@@ -538,6 +538,9 @@ func (s *Server) ListObservations(ctx context.Context, req *pb.ListObservationsR
 	}
 
 	// Apply pagination
+	if req.PageToken != "" {
+		return nil, status.Errorf(codes.Unimplemented, "cursor pagination not implemented, page_token must be empty")
+	}
 	pageSize := int(req.PageSize)
 	if pageSize < 0 {
 		return nil, status.Errorf(codes.InvalidArgument, "page_size cannot be negative")
