@@ -41,6 +41,7 @@ Skills are also found in these directories - each document has YAML frontmatter 
 **Location:** [`../adr/`](../adr/README.md)
 
 ADRs capture architectural decisions with context and rationale. Load when discussing:
+
 - Service design and boundaries
 - Technology choices and trade-offs
 - Implementation patterns
@@ -50,6 +51,7 @@ ADRs capture architectural decisions with context and rationale. Load when discu
 **Location:** [`../runbooks/`](../runbooks/)
 
 Operational procedures for incidents and recovery. Load when handling:
+
 - Security incidents or outages
 - Disaster recovery scenarios
 - Service degradation
@@ -59,6 +61,7 @@ Operational procedures for incidents and recovery. Load when handling:
 **Location:** [`../prd/`](../prd/)
 
 Product specifications and feature designs. Load when understanding:
+
 - Feature scope and requirements
 - Business context and goals
 
@@ -67,6 +70,7 @@ Product specifications and feature designs. Load when understanding:
 Service documentation includes YAML frontmatter for Claude Code discovery:
 
 **Domain Services:**
+
 - **[current-account](../../services/current-account/README.md)** - BIAN current account with lien-based fund reservations
 - **[position-keeping](../../services/position-keeping/README.md)** - Transaction log and balance queries
 - **[financial-accounting](../../services/financial-accounting/README.md)** - Double-entry bookkeeping
@@ -76,11 +80,13 @@ Service documentation includes YAML frontmatter for Claude Code discovery:
 - **[reference-data](../../services/reference-data/README.md)** - Instrument definitions and CEL validation
 
 **Infrastructure Services:**
+
 - **[gateway](../../services/gateway/README.md)** - Multi-tenant API gateway
 - **[tenant](../../services/tenant/README.md)** - Multi-tenant platform infrastructure
 - **[audit-worker](../../services/audit-worker/README.md)** - Fallback audit logging worker
 
 **Shared Modules:**
+
 - **[migrations](../../shared/migrations/README.md)** - Database migrations
 - **[bootstrap](../../shared/platform/bootstrap/README.md)** - Service initialization
 - **[audit](../../shared/platform/audit/README.md)** - Audit hook helpers
