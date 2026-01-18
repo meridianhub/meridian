@@ -117,11 +117,15 @@ func NewMarketPriceObservation(
 
 // Supersede marks this observation as superseded by another observation.
 // Returns a new instance with SupersededAt and SupersededBy set.
-// Returns error if the observation is already superseded.
+// Returns error if the observation is already superseded, the target is nil UUID,
+// or the target is the same as this observation's ID.
 //
 // This method is used when a higher quality observation replaces this one,
 // or when the same observation is updated with corrected data.
 func (o MarketPriceObservation) Supersede(newObservationID uuid.UUID) (MarketPriceObservation, error) {
+	if newObservationID == uuid.Nil || newObservationID == o.id {
+		return o, ErrInvalidSupersedeTarget
+	}
 	if o.IsSuperseded() {
 		return o, ErrObservationAlreadySuperseded
 	}
@@ -134,8 +138,10 @@ func (o MarketPriceObservation) Supersede(newObservationID uuid.UUID) (MarketPri
 }
 
 // IsSuperseded returns true if this observation has been superseded by another.
+// Checks both supersededAt and supersededBy for consistency, as the builder
+// pattern allows setting either field independently during persistence reconstruction.
 func (o MarketPriceObservation) IsSuperseded() bool {
-	return o.supersededAt != nil
+	return o.supersededAt != nil || o.supersededBy != nil
 }
 
 // Getters for all unexported fields.

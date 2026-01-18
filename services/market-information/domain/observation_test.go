@@ -422,6 +422,25 @@ func TestMarketPriceObservation_Supersede_AlreadySuperseded_Fails(t *testing.T) 
 	assert.ErrorIs(t, err, ErrObservationAlreadySuperseded)
 }
 
+func TestMarketPriceObservation_Supersede_NilUUID_Fails(t *testing.T) {
+	obs := createValidObservation(t)
+
+	_, err := obs.Supersede(uuid.Nil)
+
+	assert.ErrorIs(t, err, ErrInvalidSupersedeTarget)
+	assert.False(t, obs.IsSuperseded()) // Original unchanged
+}
+
+func TestMarketPriceObservation_Supersede_SelfReference_Fails(t *testing.T) {
+	obs := createValidObservation(t)
+
+	// Try to supersede with own ID
+	_, err := obs.Supersede(obs.ID())
+
+	assert.ErrorIs(t, err, ErrInvalidSupersedeTarget)
+	assert.False(t, obs.IsSuperseded()) // Original unchanged
+}
+
 func TestMarketPriceObservation_IsSuperseded(t *testing.T) {
 	t.Run("new observation is not superseded", func(t *testing.T) {
 		obs := createValidObservation(t)
@@ -433,6 +452,30 @@ func TestMarketPriceObservation_IsSuperseded(t *testing.T) {
 		superseded, err := obs.Supersede(uuid.New())
 		require.NoError(t, err)
 		assert.True(t, superseded.IsSuperseded())
+	})
+
+	t.Run("builder with only supersededBy set is considered superseded", func(t *testing.T) {
+		// This tests the edge case where builder reconstruction sets only supersededBy
+		// (e.g., from legacy data or incomplete persistence)
+		supersededByID := uuid.New()
+		obs := NewMarketPriceObservationBuilder().
+			WithID(uuid.New()).
+			WithDataSetCode("TEST").
+			WithSourceID(uuid.New()).
+			WithResolutionKey("key").
+			WithValue(decimal.NewFromInt(100)).
+			WithUnit("USD").
+			WithObservedAt(time.Now()).
+			WithValidFrom(time.Now()).
+			WithValidTo(time.Now().Add(time.Hour)).
+			WithCreatedAt(time.Now()).
+			WithCausationID(uuid.New()).
+			WithQualityLevel(QualityLevelActual).
+			WithTrustLevel(50).
+			WithSupersededBy(&supersededByID). // Only set supersededBy, not supersededAt
+			Build()
+
+		assert.True(t, obs.IsSuperseded())
 	})
 }
 

@@ -53,6 +53,9 @@ var (
 	// ErrObservationAlreadySuperseded indicates the observation has already been superseded.
 	ErrObservationAlreadySuperseded = errors.New("observation already superseded")
 
+	// ErrInvalidSupersedeTarget indicates the supersede target is invalid (nil UUID or self-reference).
+	ErrInvalidSupersedeTarget = errors.New("invalid supersede target: cannot be nil or self-reference")
+
 	// ErrDataSetCodeRequired indicates the dataset code was not provided for an observation.
 	ErrDataSetCodeRequired = errors.New("dataset code is required")
 
