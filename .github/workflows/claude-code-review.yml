@@ -93,14 +93,31 @@ jobs:
             - Do not flag Go version references (like "Go 1.25") as errors or future versions
             - CI has already passed (tests, build, linting) - focus on code quality
 
-            Please review this pull request and provide feedback on:
-            - Code quality and best practices
-            - Potential bugs or issues
-            - Performance considerations
-            - Security concerns
-            - Test coverage
+            Review this pull request. Structure your feedback as:
 
-            Use the repository's CLAUDE.md for guidance on style and conventions. Be constructive and helpful in your feedback.
+            ## Must Fix
+            Issues that should be addressed before merge (bugs, security issues, correctness problems).
+
+            ## Should Fix
+            Improvements worth making in this PR (race conditions, error handling, edge cases, performance).
+            If you mention it here, it's worth implementing - not a footnote.
+
+            ## Future Work
+            Larger refactors or enhancements that belong in a separate PR.
+
+            REVIEW STANDARDS:
+            - Be direct. "Consider using X" → "Use X because Y"
+            - No "low priority" labels. Either it's worth fixing or don't mention it.
+            - Race conditions, concurrency issues, edge cases = Should Fix, not optional
+            - If a section is empty, omit it. Don't pad with low-value suggestions.
+            - Assume the author will implement your suggestions. Be worth implementing.
+
+            PROJECT CONTEXT (read what's helpful):
+            - CONTRIBUTING.md - development guidelines and conventions
+            - docs/adr/ - Architecture Decision Records for design context
+            - docs/prd/ - Product Requirements for feature context
+            - docs/skills/ - available automation skills
+            - Service-specific README.md files for local conventions
 
             Use `gh pr comment ${{ steps.pr.outputs.number }}` with your Bash tool to leave your review as a comment on the PR.
 
