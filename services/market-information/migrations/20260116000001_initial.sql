@@ -15,10 +15,19 @@ CREATE TABLE "data_source" (
   "name" character varying(255) NOT NULL,
   "description" text NULL,
   "trust_level" integer NOT NULL DEFAULT 50,
+  -- Audit columns
   "created_at" timestamptz NOT NULL DEFAULT now(),
+  "created_by" character varying(100) NOT NULL,
   "updated_at" timestamptz NOT NULL DEFAULT now(),
+  "updated_by" character varying(100) NOT NULL,
+  "deleted_at" timestamptz NULL,
+  -- Optimistic locking
+  "version" bigint NOT NULL DEFAULT 1,
   PRIMARY KEY ("id")
 );
+
+COMMENT ON TABLE "data_source" IS 'External and internal sources of market data with trust levels for quality precedence';
+COMMENT ON COLUMN "data_source"."trust_level" IS 'Source reliability ranking 0-100 (used for source selection when multiple sources provide same data)';
 
 -- Code must be unique
 ALTER TABLE "data_source"
@@ -32,6 +41,9 @@ ALTER TABLE "data_source"
 
 -- Index for lookups by trust level
 CREATE INDEX "idx_data_source_trust_level" ON "data_source" ("trust_level" DESC);
+
+-- Soft-delete support: index for finding non-deleted records
+CREATE INDEX "idx_data_source_deleted_at" ON "data_source" ("deleted_at");
 
 --------------------------------------------------------------------------------
 -- Section 2: Dataset Definition Table
@@ -50,12 +62,19 @@ CREATE TABLE "dataset_definition" (
   "error_message_expression" text NULL,
   "attribute_schema" jsonb NULL,
   "status" character varying(20) NOT NULL DEFAULT 'DRAFT',
+  -- Audit columns
   "created_at" timestamptz NOT NULL DEFAULT now(),
+  "created_by" character varying(100) NOT NULL,
   "updated_at" timestamptz NOT NULL DEFAULT now(),
+  "updated_by" character varying(100) NOT NULL,
+  "deleted_at" timestamptz NULL,
+  -- Lifecycle timestamps
   "activated_at" timestamptz NULL,
   "deprecated_at" timestamptz NULL,
   PRIMARY KEY ("id")
 );
+
+COMMENT ON TABLE "dataset_definition" IS 'Market data type definitions with CEL validation expressions and lifecycle management';
 
 -- Status validation
 ALTER TABLE "dataset_definition"
@@ -97,6 +116,9 @@ CREATE INDEX "idx_dataset_definition_status" ON "dataset_definition" ("status");
 
 -- Index for temporal queries
 CREATE INDEX "idx_dataset_definition_created_at" ON "dataset_definition" ("created_at");
+
+-- Soft-delete support: index for finding non-deleted records
+CREATE INDEX "idx_dataset_definition_deleted_at" ON "dataset_definition" ("deleted_at");
 
 -- Trigger function to enforce dataset lifecycle rules
 -- Immutable fields cannot be changed once dataset is ACTIVE or DEPRECATED
@@ -178,15 +200,22 @@ CREATE TABLE "market_price_observation" (
   -- Enables queries like "what rate applied on date X?" vs "what did we know at time T?"
   "valid_from" timestamptz NULL,
   "valid_to" timestamptz NULL,
+  -- Audit: created_at/created_by only (observations are immutable, superseded not updated)
   "created_at" timestamptz NOT NULL DEFAULT now(),
+  "created_by" character varying(100) NOT NULL,
   "quality" integer NOT NULL,
-  "observation_context" jsonb NOT NULL,
+  "observation_context" jsonb NOT NULL DEFAULT '{}'::jsonb,
   "numeric_value" numeric NULL,
   "text_value" text NULL,
+  -- Knowledge lineage: points to the observation that supersedes this one
   "superseded_by" uuid NULL,
+  -- Data provenance: links to external event (e.g., Kafka message ID, API request ID)
   "causation_id" uuid NULL,
   PRIMARY KEY ("id")
 );
+
+COMMENT ON TABLE "market_price_observation" IS 'Bi-temporal market price observations with quality ladder (1=ESTIMATE, 2=ACTUAL, 3=VERIFIED) and supersession tracking per ADR-0017';
+COMMENT ON COLUMN "market_price_observation"."causation_id" IS 'Links to external event triggering this observation (e.g., Kafka message ID, API request ID)';
 
 -- Foreign key to dataset definition (RESTRICT: prevent deletion of referenced definitions)
 ALTER TABLE "market_price_observation"
@@ -255,17 +284,17 @@ CREATE INDEX "idx_observation_causation"
 --------------------------------------------------------------------------------
 
 -- Insert system data sources
-INSERT INTO "data_source" ("id", "code", "name", "description", "trust_level") VALUES
-  (gen_random_uuid(), 'ECB_DAILY', 'ECB Daily Rates', 'European Central Bank daily reference rates', 90),
-  (gen_random_uuid(), 'INTERNAL_ADMIN', 'Internal Admin', 'Manual administrative overrides', 100),
-  (gen_random_uuid(), 'SYSTEM_DEFAULT', 'System Defaults', 'Fallback rates when no other source available', 50);
+INSERT INTO "data_source" ("id", "code", "name", "description", "trust_level", "created_by", "updated_by") VALUES
+  (gen_random_uuid(), 'ECB_DAILY', 'ECB Daily Rates', 'European Central Bank daily reference rates', 90, 'SYSTEM', 'SYSTEM'),
+  (gen_random_uuid(), 'INTERNAL_ADMIN', 'Internal Admin', 'Manual administrative overrides', 100, 'SYSTEM', 'SYSTEM'),
+  (gen_random_uuid(), 'SYSTEM_DEFAULT', 'System Defaults', 'Fallback rates when no other source available', 50, 'SYSTEM', 'SYSTEM');
 
 -- Insert dataset definitions with CEL expressions
 -- FX_RATE: Foreign exchange rates
 INSERT INTO "dataset_definition" (
   "id", "code", "version", "name", "description", "data_category",
   "validation_expression", "resolution_key_expression", "error_message_expression",
-  "attribute_schema", "status", "activated_at"
+  "attribute_schema", "status", "created_by", "updated_by", "activated_at"
 ) VALUES (
   gen_random_uuid(),
   'FX_RATE', 1,
@@ -277,6 +306,7 @@ INSERT INTO "dataset_definition" (
   '"Invalid exchange rate: must be positive"',
   '{"type":"object","properties":{"base_currency":{"type":"string","minLength":3,"maxLength":3},"quote_currency":{"type":"string","minLength":3,"maxLength":3},"rate":{"type":"number","exclusiveMinimum":0}},"required":["base_currency","quote_currency","rate"]}',
   'ACTIVE',
+  'SYSTEM', 'SYSTEM',
   now()
 );
 
@@ -284,7 +314,7 @@ INSERT INTO "dataset_definition" (
 INSERT INTO "dataset_definition" (
   "id", "code", "version", "name", "description", "data_category",
   "validation_expression", "resolution_key_expression", "error_message_expression",
-  "attribute_schema", "status", "activated_at"
+  "attribute_schema", "status", "created_by", "updated_by", "activated_at"
 ) VALUES (
   gen_random_uuid(),
   'ENERGY_SPOT', 1,
@@ -296,6 +326,7 @@ INSERT INTO "dataset_definition" (
   '"Invalid energy spot price: must be non-negative"',
   '{"type":"object","properties":{"market":{"type":"string"},"commodity":{"type":"string","enum":["ELECTRICITY","NATURAL_GAS","COAL","OIL"]},"delivery_period":{"type":"string"},"price":{"type":"number","minimum":0},"unit":{"type":"string"}},"required":["market","commodity","delivery_period","price"]}',
   'ACTIVE',
+  'SYSTEM', 'SYSTEM',
   now()
 );
 
@@ -303,7 +334,7 @@ INSERT INTO "dataset_definition" (
 INSERT INTO "dataset_definition" (
   "id", "code", "version", "name", "description", "data_category",
   "validation_expression", "resolution_key_expression", "error_message_expression",
-  "attribute_schema", "status", "activated_at"
+  "attribute_schema", "status", "created_by", "updated_by", "activated_at"
 ) VALUES (
   gen_random_uuid(),
   'ENERGY_TARIFF', 1,
@@ -315,6 +346,7 @@ INSERT INTO "dataset_definition" (
   '"Invalid tariff rate: must be non-negative"',
   '{"type":"object","properties":{"provider":{"type":"string"},"tariff_code":{"type":"string"},"effective_date":{"type":"string","format":"date"},"rate":{"type":"number","minimum":0},"unit":{"type":"string"}},"required":["provider","tariff_code","effective_date","rate"]}',
   'ACTIVE',
+  'SYSTEM', 'SYSTEM',
   now()
 );
 
@@ -322,7 +354,7 @@ INSERT INTO "dataset_definition" (
 INSERT INTO "dataset_definition" (
   "id", "code", "version", "name", "description", "data_category",
   "validation_expression", "resolution_key_expression", "error_message_expression",
-  "attribute_schema", "status", "activated_at"
+  "attribute_schema", "status", "created_by", "updated_by", "activated_at"
 ) VALUES (
   gen_random_uuid(),
   'CARBON_PRICE', 1,
@@ -334,6 +366,7 @@ INSERT INTO "dataset_definition" (
   '"Invalid carbon price: must be non-negative"',
   '{"type":"object","properties":{"scheme":{"type":"string","enum":["EU_ETS","VCS","GOLD_STANDARD","CDM"]},"credit_type":{"type":"string"},"vintage":{"type":"integer","minimum":2000},"price":{"type":"number","minimum":0},"currency":{"type":"string"}},"required":["scheme","credit_type","vintage","price"]}',
   'ACTIVE',
+  'SYSTEM', 'SYSTEM',
   now()
 );
 
@@ -342,7 +375,7 @@ INSERT INTO "dataset_definition" (
 INSERT INTO "dataset_definition" (
   "id", "code", "version", "name", "description", "data_category",
   "validation_expression", "resolution_key_expression", "error_message_expression",
-  "attribute_schema", "status", "activated_at"
+  "attribute_schema", "status", "created_by", "updated_by", "activated_at"
 ) VALUES (
   gen_random_uuid(),
   'WEATHER_TEMP', 1,
@@ -354,5 +387,6 @@ INSERT INTO "dataset_definition" (
   '"Invalid temperature: must be between -100 and 100 Celsius"',
   '{"type":"object","properties":{"station_code":{"type":"string"},"observation_date":{"type":"string","format":"date"},"temperature_celsius":{"type":"number","minimum":-100,"maximum":100}},"required":["station_code","observation_date","temperature_celsius"]}',
   'ACTIVE',
+  'SYSTEM', 'SYSTEM',
   now()
 );
