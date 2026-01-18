@@ -88,7 +88,9 @@ CREATE INDEX "idx_data_source_trust_level" ON "data_source" ("trust_level" DESC)
 
 -- Trigger function to enforce dataset lifecycle rules
 -- Immutable fields cannot be changed once dataset is ACTIVE or DEPRECATED
--- Status transitions are strictly controlled: DRAFT -> ACTIVE -> DEPRECATED
+-- Status transitions: DRAFT can go to ACTIVE or DEPRECATED (for abandoned drafts)
+--                     ACTIVE can only go to DEPRECATED
+--                     DEPRECATED is terminal (no transitions allowed)
 CREATE OR REPLACE FUNCTION "enforce_dataset_lifecycle"()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -100,7 +102,7 @@ BEGIN
     -- If transitioning from DRAFT to ACTIVE, set activated_at
     IF NEW."status" = 'ACTIVE' THEN
       NEW."activated_at" = NOW();
-    -- If transitioning from DRAFT to DEPRECATED, set deprecated_at
+    -- Allow DRAFT to DEPRECATED for abandoned drafts (skips ACTIVE)
     ELSIF NEW."status" = 'DEPRECATED' THEN
       NEW."deprecated_at" = NOW();
     END IF;
