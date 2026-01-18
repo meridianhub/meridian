@@ -152,18 +152,29 @@ func createErrorMessageEnv() (*cel.Env, error) {
 
 // CompileValidation compiles a validation expression and caches the result.
 // Returns the compiled program that can be evaluated with validation context.
+// Uses double-checked locking to prevent redundant compilation when multiple
+// goroutines request the same expression concurrently.
 func (v *CelValidator) CompileValidation(expression string) (cel.Program, error) {
 	if err := validateExpressionConstraints(expression); err != nil {
 		return nil, err
 	}
 
-	// Check cache first
+	// Fast path: check cache with read lock
 	v.validationMu.RLock()
 	if prg, ok := v.validationCache[expression]; ok {
 		v.validationMu.RUnlock()
 		return prg, nil
 	}
 	v.validationMu.RUnlock()
+
+	// Slow path: acquire write lock and double-check
+	v.validationMu.Lock()
+	defer v.validationMu.Unlock()
+
+	// Double-check: another goroutine may have compiled while we waited for the lock
+	if prg, ok := v.validationCache[expression]; ok {
+		return prg, nil
+	}
 
 	// Compile the expression
 	ast, issues := v.validationEnv.Compile(expression)
@@ -177,27 +188,36 @@ func (v *CelValidator) CompileValidation(expression string) (cel.Program, error)
 	}
 
 	// Cache the compiled program
-	v.validationMu.Lock()
 	v.validationCache[expression] = prg
-	v.validationMu.Unlock()
 
 	return prg, nil
 }
 
 // CompileResolutionKey compiles a resolution key expression and caches the result.
 // Returns the compiled program that can be evaluated with observation context.
+// Uses double-checked locking to prevent redundant compilation when multiple
+// goroutines request the same expression concurrently.
 func (v *CelValidator) CompileResolutionKey(expression string) (cel.Program, error) {
 	if err := validateExpressionConstraints(expression); err != nil {
 		return nil, err
 	}
 
-	// Check cache first
+	// Fast path: check cache with read lock
 	v.resolutionKeyMu.RLock()
 	if prg, ok := v.resolutionKeyCache[expression]; ok {
 		v.resolutionKeyMu.RUnlock()
 		return prg, nil
 	}
 	v.resolutionKeyMu.RUnlock()
+
+	// Slow path: acquire write lock and double-check
+	v.resolutionKeyMu.Lock()
+	defer v.resolutionKeyMu.Unlock()
+
+	// Double-check: another goroutine may have compiled while we waited for the lock
+	if prg, ok := v.resolutionKeyCache[expression]; ok {
+		return prg, nil
+	}
 
 	// Compile the expression
 	ast, issues := v.resolutionKeyEnv.Compile(expression)
@@ -211,27 +231,36 @@ func (v *CelValidator) CompileResolutionKey(expression string) (cel.Program, err
 	}
 
 	// Cache the compiled program
-	v.resolutionKeyMu.Lock()
 	v.resolutionKeyCache[expression] = prg
-	v.resolutionKeyMu.Unlock()
 
 	return prg, nil
 }
 
 // CompileErrorMessage compiles an error message expression and caches the result.
 // Returns the compiled program that can be evaluated with error context.
+// Uses double-checked locking to prevent redundant compilation when multiple
+// goroutines request the same expression concurrently.
 func (v *CelValidator) CompileErrorMessage(expression string) (cel.Program, error) {
 	if err := validateExpressionConstraints(expression); err != nil {
 		return nil, err
 	}
 
-	// Check cache first
+	// Fast path: check cache with read lock
 	v.errorMessageMu.RLock()
 	if prg, ok := v.errorMessageCache[expression]; ok {
 		v.errorMessageMu.RUnlock()
 		return prg, nil
 	}
 	v.errorMessageMu.RUnlock()
+
+	// Slow path: acquire write lock and double-check
+	v.errorMessageMu.Lock()
+	defer v.errorMessageMu.Unlock()
+
+	// Double-check: another goroutine may have compiled while we waited for the lock
+	if prg, ok := v.errorMessageCache[expression]; ok {
+		return prg, nil
+	}
 
 	// Compile the expression
 	ast, issues := v.errorMessageEnv.Compile(expression)
@@ -245,9 +274,7 @@ func (v *CelValidator) CompileErrorMessage(expression string) (cel.Program, erro
 	}
 
 	// Cache the compiled program
-	v.errorMessageMu.Lock()
 	v.errorMessageCache[expression] = prg
-	v.errorMessageMu.Unlock()
 
 	return prg, nil
 }
