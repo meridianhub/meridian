@@ -91,6 +91,13 @@ const (
 	// Protocol: gRPC (internal)
 	// Visibility: Cluster-internal only
 	InternalBankAccount = 50057
+
+	// MarketInformation is the gRPC port for the Market Information service.
+	// BIAN Service Domain: Market Information Management
+	// Manages price benchmarks, market data feeds, and reference prices.
+	// Protocol: gRPC (internal)
+	// Visibility: Cluster-internal only
+	MarketInformation = 50058
 )
 
 // HTTP service ports (various protocols).

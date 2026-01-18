@@ -87,6 +87,7 @@ db_urls = {
   'payment_order': os.getenv('PAYMENT_ORDER_DATABASE_URL', 'postgres://meridian_payment_order_user@cockroachdb:26257/meridian_payment_order?sslmode=disable'),
   'party': os.getenv('PARTY_DATABASE_URL', 'postgres://meridian_party_user@cockroachdb:26257/meridian_party?sslmode=disable'),
   'internal_bank_account': os.getenv('INTERNAL_BANK_ACCOUNT_DATABASE_URL', 'postgres://meridian_internal_bank_account_user@cockroachdb:26257/meridian_internal_bank_account?sslmode=disable'),
+  'market_information': os.getenv('MARKET_INFORMATION_DATABASE_URL', 'postgres://meridian_market_information_user@cockroachdb:26257/meridian_market_information?sslmode=disable'),
 }
 
 # NOTE: Migrations now run as Kubernetes Jobs inside the cluster
@@ -472,6 +473,7 @@ k8s_resource(
 #   - Party:                50055
 #   - Tenant:               50056
 #   - InternalBankAccount:  50057
+#   - MarketInformation:    50058
 #   - Gateway (HTTP):       8080
 #   - HTTPHealth:           8081
 #   - HTTPMetrics:          9090
@@ -523,6 +525,13 @@ grpc_microservice(
     'internal-bank-account',
     grpc_port=50057,  # ports.InternalBankAccount
     resource_deps=['cockroachdb', 'migrate-internal-bank-account', 'position-keeping', 'current-account'],
+)
+
+# Market-Information Service - gRPC microservice for price benchmarks and market data
+grpc_microservice(
+    'market-information',
+    grpc_port=50058,  # ports.MarketInformation
+    resource_deps=['cockroachdb', 'migrate-market-information'],
 )
 
 # =============================================================================
@@ -736,6 +745,13 @@ migration_job(
   resource_deps=['init-database'],  # Independent database, only needs init to complete
 )
 
+migration_job(
+  'migrate-market-information',
+  'market-information',
+  'market_information',
+  resource_deps=['init-database'],  # Independent database, only needs init to complete
+)
+
 # Kafka cluster health check - runs automatically after kafka-cluster is ready
 local_resource(
   'kafka-health',
@@ -796,6 +812,7 @@ Microservices:
   • Party                  → localhost:50055 (gRPC)
   • Tenant                 → localhost:50056 (gRPC)
   • Internal-Bank-Account  → localhost:50057 (gRPC)
+  • Market-Information     → localhost:50058 (gRPC)
 
 Gateway:
   • HTTP Gateway           → localhost:8090 (subdomain routing)
@@ -833,12 +850,13 @@ Database Architecture (database-per-service):
     - meridian_payment_order
     - meridian_party
     - meridian_internal_bank_account
+    - meridian_market_information
   • Within each database: org schemas for multi-tenant isolation
   • Tables use singular, unqualified names (search_path routing)
   • See ADR-0003 for architecture details
 
 Database Migrations:
-  • Migrations run automatically on startup (7 resources):
+  • Migrations run automatically on startup (8 resources):
     1. current_account → meridian_current_account (account, lien, audit tables)
     2. financial_accounting → meridian_financial_accounting (ledger, booking)
     3. position_keeping → meridian_position_keeping (positions, transactions)
@@ -846,7 +864,8 @@ Database Migrations:
     5. party → meridian_party (party reference data)
     6. tenant → meridian_platform (tenant registry)
     7. internal_bank_account → meridian_internal_bank_account (internal accounts)
-  • Parallel execution: current_account + financial_accounting + party + tenant + internal_bank_account
+    8. market_information → meridian_market_information (price benchmarks, market data)
+  • Parallel execution: current_account + financial_accounting + party + tenant + internal_bank_account + market_information
   • Sequential dependencies:
     - position_keeping waits for current_account (Account FK)
     - payment_order waits for current_account (Account FK)
@@ -858,6 +877,7 @@ Database Migrations:
     - tilt trigger migrate-party
     - tilt trigger migrate-tenant
     - tilt trigger migrate-internal-bank-account
+    - tilt trigger migrate-market-information
 
 Testing Kafka Failover:
   kubectl delete pod kafka-1  # Kill broker

@@ -25,6 +25,7 @@ DATABASES=(
   "meridian_payment_order:meridian_payment_order_user"
   "meridian_party:meridian_party_user"
   "meridian_internal_bank_account:meridian_internal_bank_account_user"
+  "meridian_market_information:meridian_market_information_user"
 )
 
 echo "Initializing CockroachDB databases..."
