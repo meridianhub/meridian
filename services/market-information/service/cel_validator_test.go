@@ -1,12 +1,12 @@
 package service
 
 import (
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/google/cel-go/cel"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -764,6 +764,18 @@ func TestMeasureExpressionDepth(t *testing.T) {
 		{"((((()))))", 5},
 		{`observation_context["key"]`, 1},
 		{`has(observation_context.key)`, 1},
+		// Test brackets inside strings are ignored
+		{`value == "((("`, 0},
+		{`value == "(((test)))"`, 0},
+		{`func("arg with [brackets]")`, 1},
+		{`observation_context["key"] == "value with {braces}"`, 1},
+		// Test escaped quotes inside strings
+		{`value == "hello \"world\""`, 0},
+		{`value == 'it\'s a test'`, 0},
+		// Test backtick strings
+		{"value == `nested ((( content`", 0},
+		// Mixed: real depth with strings containing brackets
+		{`func(a, "(()", b(c))`, 2},
 	}
 
 	for _, tt := range tests {
@@ -959,18 +971,11 @@ func BenchmarkCompileValidation(b *testing.B) {
 	v, err := NewCelValidator()
 	require.NoError(b, err)
 
-	// Use a new expression each time to avoid cache hits
-	expressions := make([]string, b.N)
-	for i := 0; i < b.N; i++ {
-		expressions[i] = `decimal(value) > 0.0 && quality >= 2`
-	}
-
-	// Reset cache before benchmark
-	v.validationCache = make(map[string]cel.Program)
-
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := v.CompileValidation(expressions[i])
+		// Create a unique expression each iteration to avoid cache hits
+		expr := fmt.Sprintf(`decimal(value) > %d.0 && quality >= 2`, i)
+		_, err := v.CompileValidation(expr)
 		if err != nil {
 			b.Fatal(err)
 		}
