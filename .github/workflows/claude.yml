@@ -65,6 +65,12 @@ jobs:
             - Ensure golangci-lint compliance
             - Do NOT question tool versions unless genuinely outdated
 
+            Review standards:
+            - Be direct. "Consider using X" → "Use X because Y"
+            - No "low priority" labels. Either it's worth fixing or don't mention it.
+            - Race conditions, concurrency issues, edge cases = worth fixing, not optional
+            - Assume the author will implement your suggestions. Be worth implementing.
+
             Read CONTRIBUTING.md in the repository root for full development guidelines.
 
           # Customize Claude's behavior
