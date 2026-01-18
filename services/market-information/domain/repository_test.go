@@ -78,6 +78,10 @@ func (m *mockObservationRepository) GetLatest(_ context.Context, _ string, _ str
 	return MarketPriceObservation{}, ErrObservationNotFound
 }
 
+func (m *mockObservationRepository) RetrieveObservation(_ context.Context, _ string, _ string, _ time.Time) (MarketPriceObservation, error) {
+	return MarketPriceObservation{}, ErrObservationNotFound
+}
+
 // Verify mockObservationRepository implements ObservationRepository
 var _ ObservationRepository = (*mockObservationRepository)(nil)
 

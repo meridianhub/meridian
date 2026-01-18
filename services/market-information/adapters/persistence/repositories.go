@@ -1,0 +1,25 @@
+// Package persistence provides PostgreSQL persistence implementations for the Market Information service.
+package persistence
+
+import (
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/meridianhub/meridian/services/market-information/domain"
+)
+
+// Repositories holds all repository implementations for the Market Information service.
+// All repositories share the same connection pool for efficiency.
+type Repositories struct {
+	DataSet     domain.DataSetRepository
+	Observation domain.ObservationRepository
+	Source      domain.SourceRepository
+}
+
+// NewRepositories creates all repository implementations with a shared connection pool.
+// This is the recommended way to create repositories for production use.
+func NewRepositories(pool *pgxpool.Pool) *Repositories {
+	return &Repositories{
+		DataSet:     NewDataSetRepository(pool),
+		Observation: NewObservationRepository(pool),
+		Source:      NewSourceRepository(pool),
+	}
+}
