@@ -80,6 +80,19 @@ type ObservationRepository interface {
 	// for a specific dataset and resolution key combination.
 	// Returns ErrObservationNotFound if no matching observation exists.
 	GetLatest(ctx context.Context, dataSetCode string, resolutionKey string) (MarketPriceObservation, error)
+
+	// RetrieveObservation retrieves the best observation for a resolution key at a specific knowledge time.
+	// This enables bi-temporal "time travel" queries - what did we know at a given point in time?
+	// Uses the quality ladder with trust level tiebreaker:
+	// ORDER BY quality DESC, observed_at DESC, trust_level DESC, created_at DESC
+	//
+	// Parameters:
+	//   - dataSetCode: The dataset code to query
+	//   - resolutionKey: The unique resolution key (e.g., "EUR/USD")
+	//   - knowledgeBaseTime: The point in time to query "what was known". Use zero time for current knowledge.
+	//
+	// Returns ErrObservationNotFound if no matching observation exists.
+	RetrieveObservation(ctx context.Context, dataSetCode string, resolutionKey string, knowledgeBaseTime time.Time) (MarketPriceObservation, error)
 }
 
 // ObservationQuery specifies criteria for querying market price observations.
