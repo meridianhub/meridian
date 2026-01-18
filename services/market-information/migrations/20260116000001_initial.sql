@@ -62,6 +62,15 @@ ALTER TABLE "dataset_definition"
   ADD CONSTRAINT "chk_dataset_definition_status"
   CHECK ("status" IN ('DRAFT', 'ACTIVE', 'DEPRECATED'));
 
+-- Enforce lifecycle timestamp consistency (trigger only runs on UPDATE, this covers INSERT)
+ALTER TABLE "dataset_definition"
+  ADD CONSTRAINT "chk_dataset_definition_lifecycle_timestamps"
+  CHECK (
+    ("status" = 'DRAFT' AND "activated_at" IS NULL AND "deprecated_at" IS NULL) OR
+    ("status" = 'ACTIVE' AND "activated_at" IS NOT NULL AND "deprecated_at" IS NULL) OR
+    ("status" = 'DEPRECATED' AND "deprecated_at" IS NOT NULL)
+  );
+
 -- Limit expression columns to 4KB to prevent abuse
 ALTER TABLE "dataset_definition"
   ADD CONSTRAINT "chk_dataset_definition_validation_expression_length"
