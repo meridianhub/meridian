@@ -55,28 +55,8 @@ func (s *Server) RecordObservation(ctx context.Context, req *pb.RecordObservatio
 		return nil, status.Errorf(codes.FailedPrecondition, "data source %s is not active", req.SourceCode)
 	}
 
-	// 3. Convert observation context to CEL map
-	observationContext := ToContextMap(req.Attributes)
-
-	// 4. Compute resolution key via CEL evaluation (if celValidator is available)
-	resolutionKey, err := s.computeResolutionKey(dataset, observationContext)
-	if err != nil {
-		s.logger.Warn("resolution key computation failed",
-			"dataset_code", req.DatasetCode,
-			"error", err)
-		return nil, status.Errorf(codes.InvalidArgument, "failed to compute resolution key: %v", err)
-	}
-
-	// 5. Evaluate validation expression (reject if false)
-	if err := s.validateObservation(dataset, req, observationContext, source.ID().String()); err != nil {
-		s.logger.Warn("observation validation failed",
-			"dataset_code", req.DatasetCode,
-			"value", req.Value,
-			"error", err)
-		return nil, err // Already formatted as gRPC status error
-	}
-
-	// 6. Validate required timestamps (guard against nil dereference)
+	// 3. Validate required timestamps BEFORE any usage (guard against nil dereference)
+	// This must happen before validateObservation which calls AsTime() on these fields.
 	if req.ObservedAt == nil {
 		s.logger.Warn("observed_at timestamp is required",
 			"dataset_code", req.DatasetCode)
@@ -86,6 +66,27 @@ func (s *Server) RecordObservation(ctx context.Context, req *pb.RecordObservatio
 		s.logger.Warn("valid_from timestamp is required",
 			"dataset_code", req.DatasetCode)
 		return nil, status.Errorf(codes.InvalidArgument, "valid_from timestamp is required")
+	}
+
+	// 4. Convert observation context to CEL map
+	observationContext := ToContextMap(req.Attributes)
+
+	// 5. Compute resolution key via CEL evaluation (if celValidator is available)
+	resolutionKey, err := s.computeResolutionKey(dataset, observationContext)
+	if err != nil {
+		s.logger.Warn("resolution key computation failed",
+			"dataset_code", req.DatasetCode,
+			"error", err)
+		return nil, status.Errorf(codes.InvalidArgument, "failed to compute resolution key: %v", err)
+	}
+
+	// 6. Evaluate validation expression (reject if false)
+	if err := s.validateObservation(dataset, req, observationContext, source.ID().String()); err != nil {
+		s.logger.Warn("observation validation failed",
+			"dataset_code", req.DatasetCode,
+			"value", req.Value,
+			"error", err)
+		return nil, err // Already formatted as gRPC status error
 	}
 
 	// 7. Parse the decimal value
@@ -106,7 +107,7 @@ func (s *Server) RecordObservation(ctx context.Context, req *pb.RecordObservatio
 		validTo = req.ValidTo.AsTime()
 	}
 
-	// 10. Create the domain observation
+	// 10. Create the domain observation (timestamps already validated in step 3)
 	observation, err := domain.NewMarketPriceObservation(
 		req.DatasetCode,
 		source.ID(),
