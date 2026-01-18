@@ -112,7 +112,12 @@ jobs:
             - If a section is empty, omit it. Don't pad with low-value suggestions.
             - Assume the author will implement your suggestions. Be worth implementing.
 
-            Use the repository's CLAUDE.md for guidance on style and conventions.
+            PROJECT CONTEXT (read what's helpful):
+            - CONTRIBUTING.md - development guidelines and conventions
+            - docs/adr/ - Architecture Decision Records for design context
+            - docs/prd/ - Product Requirements for feature context
+            - docs/skills/ - available automation skills
+            - Service-specific README.md files for local conventions
 
             Use `gh pr comment ${{ steps.pr.outputs.number }}` with your Bash tool to leave your review as a comment on the PR.
 

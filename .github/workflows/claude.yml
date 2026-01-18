@@ -71,7 +71,12 @@ jobs:
             - Race conditions, concurrency issues, edge cases = worth fixing, not optional
             - Assume the author will implement your suggestions. Be worth implementing.
 
-            Read CONTRIBUTING.md in the repository root for full development guidelines.
+            Project context (read what's helpful):
+            - CONTRIBUTING.md - development guidelines and conventions
+            - docs/adr/ - Architecture Decision Records for design context
+            - docs/prd/ - Product Requirements for feature context
+            - docs/skills/ - available automation skills
+            - Service-specific README.md files for local conventions
 
           # Customize Claude's behavior
           # Using Opus 4.5 for higher quality responses
