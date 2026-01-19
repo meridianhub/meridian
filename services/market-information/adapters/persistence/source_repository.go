@@ -73,6 +73,30 @@ func (r *SourceRepository) Save(ctx context.Context, source domain.DataSource) e
 	})
 }
 
+// Delete soft-deletes a data source by setting deleted_at.
+// Returns ErrDataSourceNotFound if the source does not exist.
+func (r *SourceRepository) Delete(ctx context.Context, code string) error {
+	return r.withWriteTransaction(ctx, func(tx pgx.Tx) error {
+		userID := getUserFromContext(ctx)
+
+		query := `
+			UPDATE data_source
+			SET deleted_at = NOW(), updated_at = NOW(), updated_by = $2
+			WHERE code = $1 AND deleted_at IS NULL`
+
+		result, err := tx.Exec(ctx, query, code, userID)
+		if err != nil {
+			return fmt.Errorf("failed to delete data source: %w", err)
+		}
+
+		if result.RowsAffected() == 0 {
+			return domain.ErrDataSourceNotFound
+		}
+
+		return nil
+	})
+}
+
 // FindByID retrieves a data source by its unique identifier.
 // Returns ErrDataSourceNotFound if the source does not exist.
 func (r *SourceRepository) FindByID(ctx context.Context, id uuid.UUID) (domain.DataSource, error) {

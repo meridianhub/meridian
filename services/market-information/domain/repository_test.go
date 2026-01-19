@@ -115,6 +115,10 @@ func (m *mockSourceRepository) List(_ context.Context, _ bool) ([]DataSource, er
 	return nil, nil
 }
 
+func (m *mockSourceRepository) Delete(_ context.Context, _ string) error {
+	return nil
+}
+
 // Verify mockSourceRepository implements SourceRepository
 var _ SourceRepository = (*mockSourceRepository)(nil)
 
