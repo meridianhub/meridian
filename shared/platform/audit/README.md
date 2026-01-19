@@ -1,3 +1,18 @@
+---
+name: audit-hooks
+description: GORM audit hooks with dual-path Kafka/outbox delivery
+triggers:
+  - Adding audit logging to entities
+  - GORM hooks for audit trails
+  - Audit outbox and fallback processing
+  - Auditable interface implementation
+instructions: |
+  Implement Auditable interface (AuditID, AuditTableName) on your entity.
+  Use audit.RecordCreate/RecordUpdate/RecordDelete in GORM hooks.
+  Dual-path: Kafka (primary) → audit_outbox (fallback) → audit_log.
+  See examples in shared/domain/models/ for reference implementations.
+---
+
 # Audit Hook Helpers
 
 This package provides reusable generic helper functions for adding audit logging to GORM entities.

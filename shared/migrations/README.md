@@ -1,3 +1,19 @@
+---
+name: database-migrations
+description: Atlas and SQL migrations for schema-per-service architecture
+triggers:
+  - Database schema migrations
+  - Atlas migration generation and application
+  - Audit system setup and triggers
+  - Schema-per-service patterns
+  - Migration troubleshooting
+instructions: |
+  Migrations use Atlas for GORM models and raw SQL for audit triggers.
+  Generate migrations: make migrate-diff-all
+  Apply migrations: make migrate-apply-all (or via Tilt automatically)
+  Each service has business + audit schemas for complete isolation.
+---
+
 # Database Migrations
 
 This directory contains database migrations organized by schema, following BIAN service domain boundaries.
