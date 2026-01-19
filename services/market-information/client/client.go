@@ -91,6 +91,10 @@ type Config struct {
 	Resilience *clients.ResilientClientConfig
 
 	// DialOptions allows custom gRPC dial options.
+	// When using Target (direct connection), if DialOptions is nil, insecure credentials
+	// are added by default. If DialOptions is provided, the caller must include
+	// appropriate transport credentials (e.g., grpc.WithTransportCredentials).
+	// When using ServiceName (Kubernetes DNS), credentials are handled by the platform factory.
 	DialOptions []grpc.DialOption
 }
 
