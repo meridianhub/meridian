@@ -95,6 +95,7 @@ func TestRegisterDataSet_Errors(t *testing.T) {
 			Code:                    "DUPLICATE_TEST",
 			DisplayName:             "Duplicate Test",
 			Category:                pb.DataCategory_DATA_CATEGORY_FX_RATE,
+			ValidationExpression:    "true",
 			ResolutionKeyExpression: "key",
 		}
 
@@ -117,6 +118,7 @@ func TestRegisterDataSet_Errors(t *testing.T) {
 			Code:                    "INVALID_CATEGORY",
 			DisplayName:             "Invalid Category Test",
 			Category:                pb.DataCategory_DATA_CATEGORY_UNSPECIFIED,
+			ValidationExpression:    "true",
 			ResolutionKeyExpression: "key",
 		}
 
@@ -134,6 +136,7 @@ func TestRegisterDataSet_Errors(t *testing.T) {
 			Code:                    "",
 			DisplayName:             "Empty Code Test",
 			Category:                pb.DataCategory_DATA_CATEGORY_FX_RATE,
+			ValidationExpression:    "true",
 			ResolutionKeyExpression: "key",
 		}
 
@@ -150,6 +153,7 @@ func TestRegisterDataSet_Errors(t *testing.T) {
 			Code:                    "NO_NAME",
 			DisplayName:             "",
 			Category:                pb.DataCategory_DATA_CATEGORY_FX_RATE,
+			ValidationExpression:    "true",
 			ResolutionKeyExpression: "key",
 		}
 
@@ -175,6 +179,7 @@ func TestUpdateDataSet_Success(t *testing.T) {
 			DisplayName:             "Update Test",
 			Description:             "Original description",
 			Category:                pb.DataCategory_DATA_CATEGORY_FX_RATE,
+			ValidationExpression:    "true",
 			ResolutionKeyExpression: "key",
 		}
 
@@ -246,6 +251,7 @@ func TestUpdateDataSet_Errors(t *testing.T) {
 			Code:                    "ACTIVE_DATASET",
 			DisplayName:             "Active Dataset",
 			Category:                pb.DataCategory_DATA_CATEGORY_FX_RATE,
+			ValidationExpression:    "true",
 			ResolutionKeyExpression: "key",
 		}
 
@@ -257,13 +263,13 @@ func TestUpdateDataSet_Errors(t *testing.T) {
 			Code:    "ACTIVE_DATASET",
 			Version: registerResp.Dataset.Version,
 		}
-		_, err = server.ActivateDataSet(ctx, activateReq)
+		activateResp, err := server.ActivateDataSet(ctx, activateReq)
 		require.NoError(t, err)
 
-		// Try to update - should fail
+		// Try to update - should fail (use version from activate response)
 		updateReq := &pb.UpdateDataSetRequest{
 			Code:        "ACTIVE_DATASET",
-			Version:     registerResp.Dataset.Version,
+			Version:     activateResp.Dataset.Version,
 			Description: "This should fail",
 		}
 
@@ -289,6 +295,7 @@ func TestActivateDataSet_Success(t *testing.T) {
 			Code:                    "ACTIVATE_TEST",
 			DisplayName:             "Activate Test",
 			Category:                pb.DataCategory_DATA_CATEGORY_FX_RATE,
+			ValidationExpression:    "true",
 			ResolutionKeyExpression: "key",
 		}
 
@@ -336,6 +343,7 @@ func TestActivateDataSet_Errors(t *testing.T) {
 			Code:                    "ALREADY_ACTIVE",
 			DisplayName:             "Already Active",
 			Category:                pb.DataCategory_DATA_CATEGORY_FX_RATE,
+			ValidationExpression:    "true",
 			ResolutionKeyExpression: "key",
 		}
 
@@ -347,11 +355,15 @@ func TestActivateDataSet_Errors(t *testing.T) {
 			Version: registerResp.Dataset.Version,
 		}
 
-		_, err = server.ActivateDataSet(ctx, activateReq)
+		activateResp, err := server.ActivateDataSet(ctx, activateReq)
 		require.NoError(t, err)
 
-		// Try to activate again - should fail
-		_, err = server.ActivateDataSet(ctx, activateReq)
+		// Try to activate again - should fail (use version from activate response)
+		activateReq2 := &pb.ActivateDataSetRequest{
+			Code:    "ALREADY_ACTIVE",
+			Version: activateResp.Dataset.Version,
+		}
+		_, err = server.ActivateDataSet(ctx, activateReq2)
 		require.Error(t, err)
 
 		st, ok := status.FromError(err)
@@ -372,6 +384,7 @@ func TestDeprecateDataSet_Success(t *testing.T) {
 			Code:                    "DEPRECATE_TEST",
 			DisplayName:             "Deprecate Test",
 			Category:                pb.DataCategory_DATA_CATEGORY_FX_RATE,
+			ValidationExpression:    "true",
 			ResolutionKeyExpression: "key",
 		}
 
@@ -434,6 +447,7 @@ func TestRetrieveDataSet_Success(t *testing.T) {
 			DisplayName:             "Retrieve Test",
 			Description:             "Test retrieval",
 			Category:                pb.DataCategory_DATA_CATEGORY_FX_RATE,
+			ValidationExpression:    "true",
 			ResolutionKeyExpression: "key",
 		}
 
@@ -460,6 +474,7 @@ func TestRetrieveDataSet_Success(t *testing.T) {
 			Code:                    "LATEST_VERSION_TEST",
 			DisplayName:             "Latest Version Test",
 			Category:                pb.DataCategory_DATA_CATEGORY_FX_RATE,
+			ValidationExpression:    "true",
 			ResolutionKeyExpression: "key",
 		}
 

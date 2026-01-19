@@ -114,6 +114,7 @@ func DataSourceToEntity(s domain.DataSource) DataSourceEntity {
 }
 
 // EntityToDataSource converts a database entity to a domain DataSource.
+// Sources loaded from DB are always active (soft-deleted sources are excluded by WHERE deleted_at IS NULL).
 func EntityToDataSource(e DataSourceEntity) domain.DataSource {
 	builder := domain.NewDataSourceBuilder().
 		WithID(e.ID).
@@ -121,7 +122,8 @@ func EntityToDataSource(e DataSourceEntity) domain.DataSource {
 		WithName(e.Name).
 		WithTrustLevel(e.TrustLevel).
 		WithCreatedAt(e.CreatedAt).
-		WithUpdatedAt(e.UpdatedAt)
+		WithUpdatedAt(e.UpdatedAt).
+		WithIsActive(true) // Sources from DB are active (soft-deleted excluded by query)
 
 	if e.Description.Valid {
 		builder.WithDescription(e.Description.String)
