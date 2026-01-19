@@ -32,6 +32,9 @@ CREATE INDEX idx_dataset_definition_is_shared ON dataset_definition (is_shared) 
 -- Section 2: Create tenant_data_entitlements table
 --------------------------------------------------------------------------------
 
+-- Ensure pgcrypto extension is available for UUID generation (gen_random_uuid)
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 CREATE TABLE tenant_data_entitlements (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id VARCHAR(255) NOT NULL,
@@ -69,20 +72,18 @@ CREATE INDEX idx_entitlements_expires_at
 -- Update ECB FX_RATE datasets to be shared and public
 -- This allows all tenants to access ECB rates without per-tenant ingestion
 --
--- Pattern 'ECB_%_FX' intentionally matches all ECB foreign exchange datasets:
---   - ECB_EUR_USD_FX (Euro to US Dollar)
---   - ECB_EUR_GBP_FX (Euro to British Pound)
---   - etc.
+-- Explicit list of ECB foreign exchange datasets to mark as shared:
+--   - ECB_DAILY_FX: Daily ECB foreign exchange reference rates
 --
--- This broad match ensures new ECB currency pairs are automatically shared.
--- If specific datasets need different access levels, create a follow-up migration.
+-- Using explicit IN clause rather than LIKE pattern for predictability.
+-- If additional ECB datasets need to be shared, add them here explicitly.
 UPDATE dataset_definition
 SET
   is_shared = TRUE,
   access_level = 'PUBLIC',
   updated_at = NOW(),
   updated_by = 'MIGRATION'
-WHERE code LIKE 'ECB_%_FX'
+WHERE code IN ('ECB_DAILY_FX')
   AND status = 'ACTIVE'
   AND deleted_at IS NULL;
 

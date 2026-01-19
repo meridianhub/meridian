@@ -271,14 +271,32 @@ func (r *ObservationRepository) RetrieveObservation(ctx context.Context, dataSet
 	}
 
 	// Step 1: Check if dataset is shared (determines whether fallback is allowed)
-	dataset, err := r.datasetRepo.FindByCode(ctx, dataSetCode)
+	// IMPORTANT: Dataset metadata lookups must use master tenant context, not the tenant-scoped context.
+	// The dataset_definition table structure (is_shared, access_level) is configuration data that exists
+	// in the master schema, not duplicated per tenant. Using tenant context here would fail for tenants
+	// without dataset_definition in their schema.
+	//
+	// There is a benign race condition here: if dataset config is updated between this check and the
+	// actual observation query, we may use stale is_shared/access_level values. This is acceptable
+	// because dataset config changes are rare and eventual consistency is sufficient.
+	tenantID, hasTenantContext := tenant.FromContext(ctx)
+	masterCtxForConfig := ctx
+	if hasTenantContext {
+		masterTenantID, err := tenant.NewTenantID(r.masterTenantID)
+		if err != nil {
+			return domain.MarketPriceObservation{}, fmt.Errorf("invalid master tenant ID: %w", err)
+		}
+		masterCtxForConfig = tenant.WithTenant(ctx, masterTenantID)
+	}
+	dataset, err := r.datasetRepo.FindByCode(masterCtxForConfig, dataSetCode)
 	if err != nil {
 		return domain.MarketPriceObservation{}, err
 	}
 
-	// Step 2: For RESTRICTED datasets with tenant context, verify entitlements upfront
-	// This check applies regardless of where the data is stored (tenant or master schema)
-	tenantID, hasTenantContext := tenant.FromContext(ctx)
+	// Step 2: For RESTRICTED datasets with tenant context, verify entitlements upfront.
+	// This check applies regardless of where the data is stored (tenant or master schema).
+	// For RESTRICTED datasets, access is only granted if the tenant has an active entitlement.
+	// PUBLIC datasets skip this check entirely. PRIVATE datasets are tenant-isolated by schema.
 	if dataset.AccessLevel() == domain.AccessLevelRestricted && hasTenantContext {
 		hasAccess, err := r.checkTenantAccess(ctx, tenantID, dataSetCode)
 		if err != nil {
@@ -299,18 +317,20 @@ func (r *ObservationRepository) RetrieveObservation(ctx context.Context, dataSet
 	}
 	// Not found in current schema - proceed to hierarchical fallback if applicable
 
-	// Step 4: If shared dataset and not found in tenant schema, try master fallback
+	// Step 4: If shared dataset and not found in tenant schema, try master fallback.
+	// When no tenant context exists (e.g., background jobs, system queries), we're already
+	// querying the default schema (likely master), so no fallback is needed.
 	if dataset.IsShared() && hasTenantContext {
 		// Fall through to master tenant schema
-		masterTenantID, err := tenant.NewTenantID(r.masterTenantID)
+		masterTenantIDForData, err := tenant.NewTenantID(r.masterTenantID)
 		if err != nil {
 			return domain.MarketPriceObservation{}, fmt.Errorf("invalid master tenant ID: %w", err)
 		}
-		masterCtx := tenant.WithTenant(ctx, masterTenantID)
+		masterCtx := tenant.WithTenant(ctx, masterTenantIDForData)
 		return r.queryObservationInSchema(masterCtx, dataSetCode, resolutionKey, kbt)
 	}
 
-	// Not found (either not shared, or already queried master fallback)
+	// Not found (either not shared, or already queried master fallback, or no tenant context)
 	return domain.MarketPriceObservation{}, domain.ErrObservationNotFound
 }
 
@@ -359,10 +379,13 @@ func (r *ObservationRepository) queryObservationInSchema(ctx context.Context, da
 
 // checkTenantAccess verifies tenant has rights to access shared dataset.
 // Queries the tenant_data_entitlements table to check for active entitlements.
+// IMPORTANT: This query intentionally uses the public schema (not tenant-scoped).
+// The tenant_data_entitlements table is a global registry that lives in the public schema,
+// not replicated per tenant. Using pool.QueryRow directly ensures we query public.tenant_data_entitlements.
 func (r *ObservationRepository) checkTenantAccess(ctx context.Context, tenantID tenant.TenantID, dataSetCode string) (bool, error) {
 	query := `
 		SELECT EXISTS(
-			SELECT 1 FROM tenant_data_entitlements
+			SELECT 1 FROM public.tenant_data_entitlements
 			WHERE tenant_id = $1 AND dataset_code = $2 AND is_active = TRUE
 			AND (expires_at IS NULL OR expires_at > NOW())
 		)`
