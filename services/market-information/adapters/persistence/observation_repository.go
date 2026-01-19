@@ -276,23 +276,21 @@ func (r *ObservationRepository) RetrieveObservation(ctx context.Context, dataSet
 		return domain.MarketPriceObservation{}, err
 	}
 
-	// Step 2: Query tenant-specific schema first
+	// Step 2: Query current schema first (tenant-specific or default/public)
 	tenantID, hasTenantContext := tenant.FromContext(ctx)
-	if hasTenantContext {
-		obs, err := r.queryObservationInSchema(ctx, dataSetCode, resolutionKey, kbt)
-		if err == nil {
-			return obs, nil // Found in tenant schema
-		}
-		if !errors.Is(err, domain.ErrObservationNotFound) {
-			return domain.MarketPriceObservation{}, err // Real error
-		}
-		// Not found in tenant schema - proceed to fallback check
+	obs, err := r.queryObservationInSchema(ctx, dataSetCode, resolutionKey, kbt)
+	if err == nil {
+		return obs, nil // Found in current schema
 	}
+	if !errors.Is(err, domain.ErrObservationNotFound) {
+		return domain.MarketPriceObservation{}, err // Real error
+	}
+	// Not found in current schema - proceed to hierarchical fallback if applicable
 
 	// Step 3: If shared dataset and not found in tenant schema, try master fallback
-	if dataset.IsShared() {
+	if dataset.IsShared() && hasTenantContext {
 		// Verify tenant has access rights for RESTRICTED datasets
-		if hasTenantContext && dataset.AccessLevel() == domain.AccessLevelRestricted {
+		if dataset.AccessLevel() == domain.AccessLevelRestricted {
 			hasAccess, err := r.checkTenantAccess(ctx, tenantID, dataSetCode)
 			if err != nil {
 				return domain.MarketPriceObservation{}, err
@@ -311,7 +309,7 @@ func (r *ObservationRepository) RetrieveObservation(ctx context.Context, dataSet
 		return r.queryObservationInSchema(masterCtx, dataSetCode, resolutionKey, kbt)
 	}
 
-	// Not shared, not found in tenant schema
+	// Not found (either not shared, or already queried master fallback)
 	return domain.MarketPriceObservation{}, domain.ErrObservationNotFound
 }
 

@@ -215,7 +215,7 @@ func (r *DataSetRepository) List(ctx context.Context, filters domain.DataSetFilt
 		query := `
 			SELECT id, code, version, name, description, data_category,
 				validation_expression, resolution_key_expression, error_message_expression,
-				status, created_at, updated_at, activated_at, deprecated_at
+				status, is_shared, access_level, created_at, updated_at, activated_at, deprecated_at
 			FROM dataset_definition
 			WHERE deleted_at IS NULL`
 
