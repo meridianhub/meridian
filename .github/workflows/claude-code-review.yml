@@ -112,6 +112,12 @@ jobs:
             - If a section is empty, omit it. Don't pad with low-value suggestions.
             - Assume the author will implement your suggestions. Be worth implementing.
 
+            VERIFY BEFORE FLAGGING:
+            - Before claiming a race condition, trace the actual code flow - is the lock really missing?
+            - Before claiming an issue, check if the code already handles it
+            - One accurate finding beats six repeated incorrect ones
+            - If you're uncertain, say "verify this:" rather than stating it as fact
+
             PROJECT CONTEXT (read what's helpful):
             - CONTRIBUTING.md - development guidelines and conventions
             - docs/adr/ - Architecture Decision Records for design context
@@ -119,10 +125,35 @@ jobs:
             - docs/skills/ - available automation skills
             - Service-specific README.md files for local conventions
 
-            Use `gh pr comment ${{ steps.pr.outputs.number }}` with your Bash tool to leave your review as a comment on the PR.
+            LEAVE INLINE COMMENTS on specific lines where possible. Use this format for each inline comment:
+
+            ```
+            **Issue**: Brief description of the problem
+
+            **Suggestion**: What to do instead
+
+            <details>
+            <summary>🤖 AI Instructions</summary>
+
+            Category: must-fix | should-fix | future-work
+            File: path/to/file.go
+            Line: 42
+            Action: Replace X with Y / Add error handling / etc.
+
+            </details>
+            ```
+
+            To submit inline comments, use `gh api` to create a review:
+            ```bash
+            gh api repos/${{ github.repository }}/pulls/${{ steps.pr.outputs.number }}/reviews \
+              --method POST \
+              --input - <<< '{"event":"COMMENT","comments":[{"path":"path/to/file.go","line":42,"body":"Your comment with AI instructions"}]}'
+            ```
+
+            For general summary, use `gh pr comment ${{ steps.pr.outputs.number }}`.
 
           # Using Opus 4.5 for higher quality code reviews
-          claude_args: '--model claude-opus-4-5-20251101 --allowed-tools "Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"'
+          claude_args: '--model claude-opus-4-5-20251101 --allowed-tools "Bash(gh api:*),Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"'
 
       - name: Report Final Status
         if: always() && steps.pr.outputs.number
