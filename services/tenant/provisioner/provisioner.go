@@ -352,6 +352,7 @@ func (c *Config) Validate() error {
 //   - POSITION_KEEPING_DATABASE_URL
 //   - FINANCIAL_ACCOUNTING_DATABASE_URL
 //   - PAYMENT_ORDER_DATABASE_URL
+//   - MARKET_INFORMATION_DATABASE_URL
 //
 // If not set, fallback URLs are constructed based on service name.
 func DefaultConfig() *Config {
@@ -386,6 +387,11 @@ func DefaultConfig() *Config {
 				Name:          "payment-order",
 				MigrationPath: basePath + "/payment-order",
 				DatabaseURL:   getServiceDatabaseURL("payment-order"),
+			},
+			{
+				Name:          "market-information",
+				MigrationPath: basePath + "/market-information",
+				DatabaseURL:   getServiceDatabaseURL("market-information"),
 			},
 		},
 		ProvisioningTimeout: defaults.DefaultRPCTimeout,
