@@ -644,6 +644,158 @@ This service is a stable foundation for financial operations with:
 
 ---
 
+## MarketInformation Service
+
+**BIAN Domain:** Market Information Management
+**Service Location:** `services/market-information/`
+**Proto Definition:** `api/proto/meridian/market_information/v1/market_information.proto`
+**Database Schema:** `meridian_market_information`
+
+### Purpose
+
+Manages market data, reference prices, and rate information with bi-temporal support and quality-based supersession. Provides price benchmarks, indices, and reference data for energy pricing, FX rates, weather derivatives, and general market information.
+
+### Ownership
+
+The MarketInformation service owns:
+
+#### Market Price Observations
+
+- **Observation recording** (`RecordObservation`, `RecordObservationBatch` RPCs)
+  - High-precision decimal values with units
+  - Bi-temporal fields: observed_at (event time), valid_from/valid_to (effective time), created_at (knowledge time)
+  - Quality ladder: ESTIMATE < ACTUAL < VERIFIED
+  - Resolution key computation via CEL expressions
+  - Trust level inheritance from data sources
+
+- **Bi-temporal queries** (`RetrieveObservation`, `ListObservations` RPCs)
+  - Current knowledge queries (superseded_by IS NULL)
+  - Historical knowledge queries (what did we know at time T?)
+  - Effective time queries (what rate was valid on date D?)
+
+- **Supersession tracking**
+  - Automatic supersession based on quality level
+  - Forward references via superseded_by field
+  - Full lineage preservation for audit
+
+#### Dataset Definitions
+
+- **Dataset lifecycle management** (`CreateDataSet`, `ActivateDataSet`, `DeprecateDataSet` RPCs)
+  - DRAFT: Configuration phase, CEL expressions editable
+  - ACTIVE: Production use, CEL expressions immutable
+  - DEPRECATED: Retired, no new observations accepted
+
+- **CEL expression configuration**
+  - Validation expressions (e.g., `decimal(value) > 0`)
+  - Resolution key expressions (e.g., `base_currency + "/" + quote_currency`)
+  - Error message expressions for custom validation failures
+
+#### Data Sources
+
+- **Source configuration** (`CreateDataSource`, `ListDataSources` RPCs)
+  - Trust levels (0-100) for conflict resolution
+  - Source types: API, MANUAL, SCHEDULED
+  - Active/inactive status management
+
+### Boundaries
+
+#### What This Service OWNS
+
+**Data Entities (Proto Definitions):**
+
+- `MarketPriceObservation` - Bi-temporal market data observations
+- `DataSetDefinition` - Dataset configurations with CEL expressions
+- `DataSource` - External/internal data source definitions
+- `QualityLevel` enum - ESTIMATE, ACTUAL, VERIFIED
+- `DataSetStatus` enum - DRAFT, ACTIVE, DEPRECATED
+
+**Operations:**
+
+- Observation recording (single and batch)
+- Bi-temporal observation queries
+- Dataset lifecycle management
+- Data source configuration
+- CEL expression compilation and evaluation
+- Quality-based supersession logic
+
+**Database Tables:**
+
+- `market_price_observation` - Bi-temporal observations with quality ladder
+- `dataset_definition` - Dataset configurations
+- `data_source` - Data source definitions
+
+**gRPC Service:**
+
+- `MarketInformationService` - All RPCs defined in `market_information.proto`
+
+**Event Publications (Kafka):**
+
+- `ObservationRecordedEvent` - Published for ACTUAL and VERIFIED observations only
+- ESTIMATE observations are not published (too noisy, will be superseded)
+
+#### What This Service DEPENDS ON
+
+**Platform Services:**
+
+- Observability (OpenTelemetry tracing, structured logging, metrics)
+- Kafka event publishing infrastructure
+
+**No Direct Service Dependencies:**
+
+- Market Information is a provider service with zero efferent coupling (Ce=0)
+- Does not call other BIAN domain services
+- Publishes events for asynchronous consumer processing
+
+#### What This Service MUST NOT Do
+
+**Forbidden Operations:**
+
+1. **Transaction processing** - Owned by Position Keeping service
+   - MUST NOT maintain transaction logs with debit/credit entries
+   - Market data is observational, not transactional
+
+2. **Account balance tracking** - Owned by Position Keeping service
+   - MUST NOT compute or store account balances
+   - Market data has no balance concept
+
+3. **Double-entry bookkeeping** - Owned by Financial Accounting service
+   - MUST NOT create ledger postings
+   - Market observations are single-valued, not balanced entries
+
+4. **ETL from external sources** - Per ADR-0026 Canonical Ingestion Contract
+   - MUST NOT implement data extraction or transformation logic
+   - External adapters handle ETL; this service accepts pre-structured Protobuf
+
+5. **Cross-service internal imports**
+   - MUST NOT import `internal/<other-service>/` packages
+   - MUST use proto-defined gRPC clients only
+
+### Service Stability Analysis
+
+**Coupling Metrics:**
+
+- **Afferent Coupling (Ca):** 0 (no services depend on market-information yet)
+- **Efferent Coupling (Ce):** 0 (no dependencies on other domain services)
+- **Instability (I):** 0.00 (fully stable)
+- **Assessment:** Stable provider service - foundational layer
+
+**Interpretation:**
+This service is a stable foundation for market data with:
+
+- No outbound dependencies on other BIAN domains
+- Event-driven architecture for asynchronous consumers
+- Low risk of cascading changes
+- Appropriate role as a data persistence and query service
+
+**Stability Benefits:**
+
+- Changes isolated to market data logic
+- Proto contract evolution is controlled
+- Event schema managed via buf breaking change detection (ADR-0004)
+- Decoupled from other services via async events
+
+---
+
 ## Shared vs Service-Specific Code
 
 ### Platform Code (`pkg/platform/` - Shared Infrastructure)
@@ -1358,6 +1510,9 @@ This matrix provides a clear mapping of which service owns each proto-defined en
 | `StatusTracking` | PositionKeeping | `position_keeping.proto` | Transaction lifecycle status | Status management |
 | `FinancialBookingLog` | FinancialAccounting | `financial_accounting.proto` | Booking log for financial transactions | BIAN Financial Accounting domain |
 | `LedgerPosting` | FinancialAccounting | `financial_accounting.proto` | Individual debit/credit postings | Double-entry bookkeeping |
+| `MarketPriceObservation` | MarketInformation | `market_information.proto` | Bi-temporal market data observations | BIAN Market Information domain |
+| `DataSetDefinition` | MarketInformation | `market_information.proto` | Dataset configurations with CEL expressions | Market data validation config |
+| `DataSource` | MarketInformation | `market_information.proto` | External/internal data source definitions | Data provenance tracking |
 
 ### Shared Entities (Common Proto)
 
@@ -1464,6 +1619,32 @@ This section maps Meridian services to their corresponding BIAN service domains 
 - Chart of accounts rules align with BIAN financial configuration
 - Posting direction (debit/credit) matches BIAN standards
 - Status lifecycle supports BIAN posting finalization (POSTED status)
+
+### MarketInformation Service → BIAN Market Information Management
+
+**BIAN Service Domain:** Market Information Management (SD)
+**BIAN Definition:** "This service domain supports the distribution and management of market pricing and information including price benchmarks, indices, and reference data."
+
+**Meridian Implementation:**
+
+- Observation recording (`RecordObservation`, `RecordObservationBatch` → BIAN Capture)
+- Observation retrieval (`RetrieveObservation` → BIAN Retrieve)
+- Observation listing (`ListObservations` → BIAN Retrieve with filtering)
+- Dataset management (`CreateDataSet`, `ActivateDataSet` → BIAN Initiate, Update)
+
+**BIAN Control Record:** `MarketPriceObservation`
+**BIAN Behavior Qualifiers:**
+
+- PriceObservation (implemented via `MarketPriceObservation` entity)
+- DataSetConfiguration (implemented via `DataSetDefinition` entity)
+- SourceManagement (implemented via `DataSource` entity)
+
+**Alignment:**
+
+- Bi-temporal data model supports BIAN audit and compliance requirements
+- Quality ladder (ESTIMATE → ACTUAL → VERIFIED) matches BIAN data quality patterns
+- Resolution keys enable BIAN-style instrument identification
+- CEL expressions provide configurable validation per BIAN dataset specifications
 
 ---
 
