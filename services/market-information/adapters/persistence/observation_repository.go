@@ -270,6 +270,13 @@ func (r *ObservationRepository) RetrieveObservation(ctx context.Context, dataSet
 		kbt = time.Now()
 	}
 
+	// Parse master tenant ID once upfront - this is reused for both config lookup and data fallback.
+	// The validation in NewRepositories ensures this won't be empty, but we handle errors defensively.
+	masterTenantIDParsed, err := tenant.NewTenantID(r.masterTenantID)
+	if err != nil {
+		return domain.MarketPriceObservation{}, fmt.Errorf("invalid master tenant ID: %w", err)
+	}
+
 	// Step 1: Check if dataset is shared (determines whether fallback is allowed)
 	// IMPORTANT: Dataset metadata lookups must use master tenant context, not the tenant-scoped context.
 	// The dataset_definition table structure (is_shared, access_level) is configuration data that exists
@@ -280,15 +287,8 @@ func (r *ObservationRepository) RetrieveObservation(ctx context.Context, dataSet
 	// actual observation query, we may use stale is_shared/access_level values. This is acceptable
 	// because dataset config changes are rare and eventual consistency is sufficient.
 	tenantID, hasTenantContext := tenant.FromContext(ctx)
-	masterCtxForConfig := ctx
-	if hasTenantContext {
-		masterTenantID, err := tenant.NewTenantID(r.masterTenantID)
-		if err != nil {
-			return domain.MarketPriceObservation{}, fmt.Errorf("invalid master tenant ID: %w", err)
-		}
-		masterCtxForConfig = tenant.WithTenant(ctx, masterTenantID)
-	}
-	dataset, err := r.datasetRepo.FindByCode(masterCtxForConfig, dataSetCode)
+	masterCtx := tenant.WithTenant(ctx, masterTenantIDParsed)
+	dataset, err := r.datasetRepo.FindByCode(masterCtx, dataSetCode)
 	if err != nil {
 		return domain.MarketPriceObservation{}, err
 	}
@@ -312,8 +312,11 @@ func (r *ObservationRepository) RetrieveObservation(ctx context.Context, dataSet
 	if err == nil {
 		return obs, nil // Found in current schema
 	}
+	// Non-NotFound errors indicate real database issues (connection, permissions, etc.).
+	// We intentionally do NOT fall back to master for real errors - this prevents masking
+	// underlying issues that should be surfaced and investigated.
 	if !errors.Is(err, domain.ErrObservationNotFound) {
-		return domain.MarketPriceObservation{}, err // Real error
+		return domain.MarketPriceObservation{}, err
 	}
 	// Not found in current schema - proceed to hierarchical fallback if applicable
 
@@ -321,12 +324,7 @@ func (r *ObservationRepository) RetrieveObservation(ctx context.Context, dataSet
 	// When no tenant context exists (e.g., background jobs, system queries), we're already
 	// querying the default schema (likely master), so no fallback is needed.
 	if dataset.IsShared() && hasTenantContext {
-		// Fall through to master tenant schema
-		masterTenantIDForData, err := tenant.NewTenantID(r.masterTenantID)
-		if err != nil {
-			return domain.MarketPriceObservation{}, fmt.Errorf("invalid master tenant ID: %w", err)
-		}
-		masterCtx := tenant.WithTenant(ctx, masterTenantIDForData)
+		// Fall through to master tenant schema (reusing the already-parsed masterTenantIDParsed)
 		return r.queryObservationInSchema(masterCtx, dataSetCode, resolutionKey, kbt)
 	}
 

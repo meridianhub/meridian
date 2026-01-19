@@ -32,8 +32,8 @@ CREATE INDEX idx_dataset_definition_is_shared ON dataset_definition (is_shared) 
 -- Section 2: Create tenant_data_entitlements table
 --------------------------------------------------------------------------------
 
--- Ensure pgcrypto extension is available for UUID generation (gen_random_uuid)
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
+-- Note: gen_random_uuid() is built-in since PostgreSQL 13 (no extension needed).
+-- Meridian targets PostgreSQL 15+ where this function is natively available.
 
 CREATE TABLE tenant_data_entitlements (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -66,14 +66,18 @@ CREATE INDEX idx_entitlements_expires_at
   WHERE expires_at IS NOT NULL AND is_active = TRUE;
 
 --------------------------------------------------------------------------------
--- Section 3: Mark ECB FX_RATE datasets as shared/public
+-- Section 3: Mark ECB datasets as shared/public (forward-looking)
 --------------------------------------------------------------------------------
 
--- Update ECB FX_RATE datasets to be shared and public
--- This allows all tenants to access ECB rates without per-tenant ingestion
+-- This UPDATE is idempotent and forward-looking: it will mark ECB datasets as shared
+-- when they are created by the ECB adapter worker. Until then, this safely matches
+-- zero rows since seed data uses 'FX_RATE' (a generic test dataset), not ECB-specific codes.
+--
+-- When the ECB adapter creates datasets (e.g., ECB_DAILY_FX), re-running this migration
+-- or creating a new migration with the same logic will enable multi-tenant sharing.
 --
 -- Explicit list of ECB foreign exchange datasets to mark as shared:
---   - ECB_DAILY_FX: Daily ECB foreign exchange reference rates
+--   - ECB_DAILY_FX: Daily ECB foreign exchange reference rates (created by ECB adapter)
 --
 -- Using explicit IN clause rather than LIKE pattern for predictability.
 -- If additional ECB datasets need to be shared, add them here explicitly.
@@ -87,5 +91,5 @@ WHERE code IN ('ECB_DAILY_FX')
   AND status = 'ACTIVE'
   AND deleted_at IS NULL;
 
--- Note: No need to populate tenant_data_entitlements for PUBLIC datasets
--- PUBLIC datasets skip entitlement checks and allow access to all tenants
+-- Note: No need to populate tenant_data_entitlements for PUBLIC datasets.
+-- PUBLIC datasets skip entitlement checks and allow access to all tenants.
