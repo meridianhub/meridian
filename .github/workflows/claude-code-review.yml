@@ -147,8 +147,7 @@ jobs:
             ```bash
             gh api repos/${{ github.repository }}/pulls/${{ steps.pr.outputs.number }}/reviews \
               --method POST \
-              -f event="COMMENT" \
-              -f 'comments=[{"path":"path/to/file.go","line":42,"body":"Your comment with AI instructions"}]'
+              --input - <<< '{"event":"COMMENT","comments":[{"path":"path/to/file.go","line":42,"body":"Your comment with AI instructions"}]}'
             ```
 
             For general summary, use `gh pr comment ${{ steps.pr.outputs.number }}`.
