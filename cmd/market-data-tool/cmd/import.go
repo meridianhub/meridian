@@ -123,14 +123,9 @@ func init() {
 	_ = importCmd.MarkFlagRequired("dataset")
 }
 
-// runImportWrapper handles exit codes for the import command.
+// runImportWrapper handles errors for the import command.
 func runImportWrapper(cmd *cobra.Command, args []string) error {
-	err := runImport(cmd, args)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-	return nil
+	return runImport(cmd, args)
 }
 
 func runImport(_ *cobra.Command, _ []string) error {
@@ -446,9 +441,12 @@ func executeLiveImport(
 
 		for _, csvRow := range batch.Rows {
 			// Skip rows before the resume point.
-			// LineNumber is 1-indexed where line 1 is the header.
-			// LastProcessedLine is a count of processed data rows.
-			// To skip already-processed rows, we compare: lineNumber <= processedRows + 1 (the +1 accounts for header)
+			// LineNumber is 1-indexed where line 1 is the header (line 2 is first data row).
+			// ProcessedRows counts data rows processed (both successful and failed).
+			// LastProcessedLine equals ProcessedRows (the count of processed data rows).
+			// Example: If we've processed 100 data rows (lines 2-101), ProcessedRows=100.
+			// To resume, skip lines 2-101: lineNumber <= ProcessedRows + 1 = 101.
+			// The +1 accounts for the header being line 1.
 			if cp.ProcessedRows > 0 && csvRow.LineNumber <= cp.LastProcessedLine+1 {
 				continue
 			}
