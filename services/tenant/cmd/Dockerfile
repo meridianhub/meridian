@@ -51,6 +51,7 @@ COPY --from=builder --chown=65532:65532 /build/services/current-account/migratio
 COPY --from=builder --chown=65532:65532 /build/services/position-keeping/migrations /migrations/position-keeping
 COPY --from=builder --chown=65532:65532 /build/services/financial-accounting/migrations /migrations/financial-accounting
 COPY --from=builder --chown=65532:65532 /build/services/payment-order/migrations /migrations/payment-order
+COPY --from=builder --chown=65532:65532 /build/services/market-information/migrations /migrations/market-information
 
 # Use non-root user (distroless provides nonroot user at uid 65532)
 USER nonroot:nonroot
