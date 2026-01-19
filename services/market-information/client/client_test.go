@@ -583,21 +583,47 @@ func TestConcurrentCalls(t *testing.T) {
 
 func TestClose(t *testing.T) {
 	mock := &mockServer{}
-	client, cleanup := setupMockServer(t, mock)
 
-	// Don't use defer cleanup() since we're testing Close explicitly
-	// Instead, manually stop the server after testing
-	defer func() {
-		// cleanup() would call Close() again, but we've already done that
-		// Just let the resources be cleaned up when the test ends
-		cleanup()
+	// Manually set up the mock server to have more control over cleanup
+	lis := bufconn.Listen(bufSize)
+	server := grpc.NewServer()
+	marketinformationv1.RegisterMarketInformationServiceServer(server, mock)
+
+	go func() {
+		_ = server.Serve(lis)
 	}()
 
-	err := client.Close()
+	bufDialer := func(context.Context, string) (net.Conn, error) {
+		return lis.Dial()
+	}
+
+	conn, err := grpc.NewClient("passthrough:///bufnet",
+		grpc.WithContextDialer(bufDialer),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
 	require.NoError(t, err)
 
-	// Set conn to nil so the deferred cleanup doesn't try to close again
-	client.conn = nil
+	client := &Client{
+		conn:       conn,
+		grpcClient: marketinformationv1.NewMarketInformationServiceClient(conn),
+		timeout:    DefaultTimeout,
+	}
+
+	defer func() {
+		server.Stop()
+		lis.Close()
+	}()
+
+	// First close should succeed
+	err = client.Close()
+	require.NoError(t, err)
+
+	// Second close should be a no-op (idempotent)
+	err = client.Close()
+	require.NoError(t, err)
+
+	// Verify conn is now nil
+	assert.Nil(t, client.conn)
 }
 
 func TestConn(t *testing.T) {

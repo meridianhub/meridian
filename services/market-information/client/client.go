@@ -155,7 +155,9 @@ func New(ctx context.Context, cfg Config) (*Client, func() error, error) {
 
 	cleanup := func() error {
 		if client.conn != nil {
-			if err := client.conn.Close(); err != nil {
+			conn := client.conn
+			client.conn = nil // Prevent double-close
+			if err := conn.Close(); err != nil {
 				return fmt.Errorf("close grpc: %w", err)
 			}
 		}
@@ -487,9 +489,12 @@ func (c *Client) ListObservations(
 }
 
 // Close releases the gRPC connection.
+// Safe to call multiple times - subsequent calls are no-ops.
 func (c *Client) Close() error {
 	if c.conn != nil {
-		if err := c.conn.Close(); err != nil {
+		conn := c.conn
+		c.conn = nil // Prevent double-close
+		if err := conn.Close(); err != nil {
 			return fmt.Errorf("close grpc: %w", err)
 		}
 	}
