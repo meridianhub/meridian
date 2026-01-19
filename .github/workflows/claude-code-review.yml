@@ -2,13 +2,13 @@ name: Claude Code Review
 
 on:
   workflow_run:
-    workflows: ["Test", "Build", "Quality"]
+    workflows: ["Test", "Build & Test", "Code Quality"]
     types: [completed]
 
-# Prevent concurrent Claude Code installations which cause lock conflicts
-# Only one Claude review can run at a time per repo
+# Prevent duplicate reviews for the same PR branch
+# Uses branch name so different PRs can be reviewed in parallel
 concurrency:
-  group: claude-code-review-${{ github.repository }}
+  group: claude-code-review-${{ github.repository }}-${{ github.event.workflow_run.head_branch }}
   cancel-in-progress: false
 
 jobs:
