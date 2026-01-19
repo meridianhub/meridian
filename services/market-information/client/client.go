@@ -159,23 +159,16 @@ func New(ctx context.Context, cfg Config) (*Client, func() error, error) {
 		timeout:    cfg.Timeout,
 	}
 
-	cleanup := func() error {
-		if client.conn != nil {
-			if err := client.conn.Close(); err != nil {
-				return fmt.Errorf("close grpc: %w", err)
-			}
-		}
-		return nil
-	}
-
-	return client, cleanup, nil
+	return client, client.Close, nil
 }
 
 // createGRPCConnection creates the gRPC connection based on configuration.
 func createGRPCConnection(ctx context.Context, cfg Config) (*grpc.ClientConn, error) {
 	// Use platform gRPC factory when ServiceName is provided (preferred)
 	if cfg.ServiceName != "" {
-		dialOpts := cfg.DialOptions
+		// Copy dial options to avoid mutating caller's slice
+		dialOpts := make([]grpc.DialOption, len(cfg.DialOptions))
+		copy(dialOpts, cfg.DialOptions)
 
 		// Add tracing interceptors if tracer is provided
 		if cfg.Tracer != nil {
@@ -199,8 +192,12 @@ func createGRPCConnection(ctx context.Context, cfg Config) (*grpc.ClientConn, er
 
 	if cfg.Target != "" {
 		// Fallback to legacy direct connection
-		dialOpts := cfg.DialOptions
-		if dialOpts == nil {
+		// Copy dial options to avoid mutating caller's slice
+		var dialOpts []grpc.DialOption
+		if cfg.DialOptions != nil {
+			dialOpts = make([]grpc.DialOption, len(cfg.DialOptions))
+			copy(dialOpts, cfg.DialOptions)
+		} else {
 			dialOpts = []grpc.DialOption{
 				grpc.WithTransportCredentials(insecure.NewCredentials()),
 			}
@@ -256,6 +253,8 @@ func (c *Client) GetRate(
 	ctx = clients.PropagateCorrelationID(ctx)
 	ctx = clients.PropagateOrganization(ctx)
 
+	// ListObservations returns observations ordered by valid_from DESC by default,
+	// so PageSize=1 retrieves the most recent matching observation
 	req := &marketinformationv1.ListObservationsRequest{
 		DatasetCode:        datasetCode,
 		ResolutionKeyValue: resolutionKey,

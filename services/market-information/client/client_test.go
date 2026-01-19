@@ -64,9 +64,16 @@ func (m *mockServer) ListObservations(ctx context.Context, _ *marketinformationv
 	}
 	m.metadataMu.Unlock()
 
-	// Simulate transient failures for retry testing
-	if remaining := m.failsRemain.Add(-1); remaining >= 0 {
-		return nil, m.failureError
+	// Simulate transient failures for retry testing using compare-and-swap
+	// to avoid going negative
+	for {
+		current := m.failsRemain.Load()
+		if current <= 0 {
+			break
+		}
+		if m.failsRemain.CompareAndSwap(current, current-1) {
+			return nil, m.failureError
+		}
 	}
 
 	if m.listObservationsErr != nil {
