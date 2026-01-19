@@ -321,11 +321,68 @@ func TestRecordObservation_NonExistentSource(t *testing.T) {
 	assert.Equal(t, codes.NotFound, st.Code())
 }
 
-// NOTE: TestRecordObservation_InactiveSource is skipped because the current
-// persistence layer does not persist the is_active flag to the database.
-// The data_source table uses soft deletion (deleted_at) instead of an explicit
-// is_active column, so deactivated sources appear active when reloaded.
-// See: services/market-information/migrations/20260116000001_initial.sql
+func TestRecordObservation_InactiveSource(t *testing.T) {
+	server, _, cleanup := setupTestServerForObservation(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Register and activate a dataset
+	datasetReq := &pb.RegisterDataSetRequest{
+		Code:                    "INACTIVE_SOURCE_DATASET",
+		DisplayName:             "Inactive Source Test",
+		Category:                pb.DataCategory_DATA_CATEGORY_FX_RATE,
+		ValidationExpression:    "true",
+		ResolutionKeyExpression: "currency_pair",
+	}
+	datasetResp, err := server.RegisterDataSet(ctx, datasetReq)
+	require.NoError(t, err)
+
+	activateReq := &pb.ActivateDataSetRequest{
+		Code:    "INACTIVE_SOURCE_DATASET",
+		Version: datasetResp.Dataset.Version,
+	}
+	_, err = server.ActivateDataSet(ctx, activateReq)
+	require.NoError(t, err)
+
+	// Register a data source
+	sourceReq := &pb.RegisterDataSourceRequest{
+		Code:       "DEACTIVATE_ME",
+		Name:       "Source to Deactivate",
+		TrustLevel: 50,
+	}
+	_, err = server.RegisterDataSource(ctx, sourceReq)
+	require.NoError(t, err)
+
+	// Deactivate the source (soft-delete)
+	deactivateReq := &pb.DeactivateDataSourceRequest{
+		Code: "DEACTIVATE_ME",
+	}
+	_, err = server.DeactivateDataSource(ctx, deactivateReq)
+	require.NoError(t, err)
+
+	// Try to record an observation using the deactivated source
+	now := time.Now()
+	observationReq := &pb.RecordObservationRequest{
+		DatasetCode: "INACTIVE_SOURCE_DATASET",
+		SourceCode:  "DEACTIVATE_ME",
+		Value:       "1.2345",
+		ObservedAt:  timestamppb.New(now),
+		ValidFrom:   timestamppb.New(now),
+		Quality:     pb.QualityLevel_QUALITY_LEVEL_ACTUAL,
+		Attributes: []*quantityv1.AttributeEntry{
+			{Key: "currency_pair", Value: "EUR/USD"},
+		},
+	}
+
+	_, err = server.RecordObservation(ctx, observationReq)
+	require.Error(t, err, "recording observation against deactivated source should fail")
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.NotFound, st.Code(),
+		"deactivated source should return NOT_FOUND")
+}
 
 func TestRecordObservation_InactiveDataset(t *testing.T) {
 	server, _, cleanup := setupTestServerForObservation(t)
@@ -1027,9 +1084,9 @@ func TestRecordObservationBatch_WithBatchId(t *testing.T) {
 	assert.Equal(t, customBatchID, resp.BatchId)
 }
 
-// NOTE: TestRecordObservationBatch_InactiveSource is skipped because the current
-// persistence layer does not persist the is_active flag to the database.
-// See comment on TestRecordObservation_InactiveSource above.
+// NOTE: Batch recording against an inactive source would fail similarly to
+// TestRecordObservation_InactiveSource - the source lookup returns NOT_FOUND.
+// The single observation test covers this scenario adequately.
 
 // ============================================
 // CEL Validation Tests

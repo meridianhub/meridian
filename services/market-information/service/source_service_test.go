@@ -401,7 +401,7 @@ func TestDeactivateDataSource_Success(t *testing.T) {
 
 	ctx := context.Background()
 
-	t.Run("successfully deactivates active data source", func(t *testing.T) {
+	t.Run("successfully deactivates and persists soft-delete", func(t *testing.T) {
 		// Register an active data source
 		registerReq := &pb.RegisterDataSourceRequest{
 			Code:       "DEACTIVATE_TEST",
@@ -423,32 +423,49 @@ func TestDeactivateDataSource_Success(t *testing.T) {
 		require.NotNil(t, deactivateResp)
 		assert.False(t, deactivateResp.Source.IsActive)
 		assert.Equal(t, "DEACTIVATE_TEST", deactivateResp.Source.Code)
+
+		// CRITICAL: Verify deactivation persisted - source should NOT be found
+		// This is the key test that verifies the soft-delete actually happened
+		listResp, err := server.ListDataSources(ctx, &pb.ListDataSourcesRequest{
+			PageSize: 100,
+		})
+		require.NoError(t, err)
+
+		// Deactivated source should NOT appear in list
+		for _, s := range listResp.Sources {
+			assert.NotEqual(t, "DEACTIVATE_TEST", s.Code,
+				"deactivated source should not appear in list")
+		}
 	})
 
-	t.Run("deactivating already inactive source is idempotent", func(t *testing.T) {
+	t.Run("deactivating twice returns NOT_FOUND on second attempt", func(t *testing.T) {
 		// Register and deactivate
 		registerReq := &pb.RegisterDataSourceRequest{
-			Code:       "IDEMPOTENT_DEACTIVATE",
-			Name:       "Idempotent Deactivate",
+			Code:       "DOUBLE_DEACTIVATE",
+			Name:       "Double Deactivate",
 			TrustLevel: 50,
 		}
 
 		_, err := server.RegisterDataSource(ctx, registerReq)
 		require.NoError(t, err)
 
-		// First deactivation
+		// First deactivation succeeds
 		deactivateReq := &pb.DeactivateDataSourceRequest{
-			Code: "IDEMPOTENT_DEACTIVATE",
+			Code: "DOUBLE_DEACTIVATE",
 		}
 
 		deactivateResp1, err := server.DeactivateDataSource(ctx, deactivateReq)
 		require.NoError(t, err)
 		assert.False(t, deactivateResp1.Source.IsActive)
 
-		// Second deactivation should also succeed (idempotent)
-		deactivateResp2, err := server.DeactivateDataSource(ctx, deactivateReq)
-		require.NoError(t, err)
-		assert.False(t, deactivateResp2.Source.IsActive)
+		// Second deactivation should return NOT_FOUND (source is soft-deleted)
+		_, err = server.DeactivateDataSource(ctx, deactivateReq)
+		require.Error(t, err)
+
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.NotFound, st.Code(),
+			"second deactivation should return NOT_FOUND since source is soft-deleted")
 	})
 }
 

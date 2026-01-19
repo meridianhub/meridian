@@ -104,15 +104,26 @@
 - RPC and event patterns
 - BIAN mapping
 
-### ✅ Bug Fix
+### ✅ Bug Fixes
 
-**Issue**: Data sources loaded from database were marked as inactive
-**Root Cause**: `EntityToDataSource` mapper in `adapters/persistence/mappers.go` was not setting `isActive=true`
-**Fix**: Added `WithIsActive(true)` to the mapper builder chain
+#### Bug 1: Mapper not setting isActive
 
-**Note**: The database uses soft-delete pattern (`deleted_at` column) rather than an explicit
-`is_active` column. Sources loaded from DB are always active since soft-deleted records are
-excluded by the repository query (`WHERE deleted_at IS NULL`).
+- **Issue**: Data sources loaded from database were marked as inactive
+- **Root Cause**: `EntityToDataSource` mapper was not setting `isActive=true`
+- **Fix**: Added `WithIsActive(true)` to the mapper builder chain in `mappers.go`
+
+#### Bug 2: DeactivateDataSource not persisting deactivation
+
+- **Issue**: `DeactivateDataSource` set `isActive=false` on domain object but `Save()` didn't persist it
+- **Root Cause**: Repository had no `Delete` method; `Save()` only updates name/description/trust_level
+- **Fix**:
+  - Added `Delete(ctx, code)` method to `SourceRepository` interface
+  - Implemented soft-delete: `UPDATE ... SET deleted_at = NOW() WHERE code = $1`
+  - Updated `DeactivateDataSource` to call `Delete()` instead of `Save()`
+  - Now deactivated sources are properly excluded from queries
+
+> **Note**: The database uses soft-delete pattern (`deleted_at` column). Sources with
+> `deleted_at IS NOT NULL` are excluded from `FindByCode`, `FindByID`, and `List` queries.
 
 ## Remaining Work (16.9% to reach 80%)
 

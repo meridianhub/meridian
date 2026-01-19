@@ -122,24 +122,24 @@ func (s *Server) UpdateDataSource(ctx context.Context, req *pb.UpdateDataSourceR
 
 // DeactivateDataSource marks a data source as inactive (soft delete).
 // Returns NOT_FOUND if data source doesn't exist.
+// After deactivation, the source will not be found by FindByCode or included in List results.
 func (s *Server) DeactivateDataSource(ctx context.Context, req *pb.DeactivateDataSourceRequest) (*pb.DeactivateDataSourceResponse, error) {
-	// Retrieve existing source
+	// Retrieve existing source to return in response (and verify it exists)
 	existing, err := s.sourceRepo.FindByCode(ctx, req.Code)
 	if err != nil {
 		return nil, s.mapSourceDomainError(err, "DeactivateDataSource", req.Code)
 	}
 
-	// Check if already inactive (idempotent operation)
-	if !existing.IsActive() {
-		s.logger.Debug("data source already inactive",
-			"code", req.Code,
-			"id", existing.ID().String())
-		return &pb.DeactivateDataSourceResponse{
-			Source: domainSourceToProto(existing),
-		}, nil
+	// Soft-delete the source by setting deleted_at
+	if err := s.sourceRepo.Delete(ctx, req.Code); err != nil {
+		return nil, s.mapSourceDomainError(err, "DeactivateDataSource", req.Code)
 	}
 
-	// Build deactivated source
+	s.logger.Info("data source deactivated",
+		"code", existing.Code(),
+		"id", existing.ID().String())
+
+	// Return the source with IsActive=false to indicate deactivation
 	deactivated := domain.NewDataSourceBuilder().
 		WithID(existing.ID()).
 		WithCode(existing.Code()).
@@ -151,15 +151,6 @@ func (s *Server) DeactivateDataSource(ctx context.Context, req *pb.DeactivateDat
 		WithCreatedAt(existing.CreatedAt()).
 		WithUpdatedAt(time.Now()).
 		Build()
-
-	// Persist the deactivated source
-	if err := s.sourceRepo.Save(ctx, deactivated); err != nil {
-		return nil, s.mapSourceDomainError(err, "DeactivateDataSource", req.Code)
-	}
-
-	s.logger.Info("data source deactivated",
-		"code", deactivated.Code(),
-		"id", deactivated.ID().String())
 
 	return &pb.DeactivateDataSourceResponse{
 		Source: domainSourceToProto(deactivated),

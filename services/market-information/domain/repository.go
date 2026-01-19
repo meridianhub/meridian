@@ -132,6 +132,11 @@ type SourceRepository interface {
 	// For new sources, returns ErrDuplicateDataSourceCode if the code already exists.
 	Save(ctx context.Context, source DataSource) error
 
+	// Delete soft-deletes a data source by setting deleted_at.
+	// Returns ErrDataSourceNotFound if the source does not exist.
+	// Soft-deleted sources are excluded from FindByCode, FindByID, and List queries.
+	Delete(ctx context.Context, code string) error
+
 	// FindByID retrieves a data source by its unique identifier.
 	// Returns ErrDataSourceNotFound if the source does not exist.
 	FindByID(ctx context.Context, id uuid.UUID) (DataSource, error)
