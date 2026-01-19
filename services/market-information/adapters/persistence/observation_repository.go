@@ -21,15 +21,21 @@ import (
 type ObservationRepository struct {
 	baseRepository
 	datasetRepo    *DataSetRepository
-	masterTenantID string
+	masterTenantID tenant.TenantID // Pre-parsed at construction for efficiency
 }
 
 // NewObservationRepository creates a new PostgreSQL observation repository.
+// The masterTenantID is parsed once at construction to avoid repeated parsing on every query.
+// Panics if masterTenantID is invalid - this should be caught at startup.
 func NewObservationRepository(pool *pgxpool.Pool, datasetRepo *DataSetRepository, masterTenantID string) *ObservationRepository {
+	parsedID, err := tenant.NewTenantID(masterTenantID)
+	if err != nil {
+		panic(fmt.Sprintf("invalid masterTenantID %q: %v", masterTenantID, err))
+	}
 	return &ObservationRepository{
 		baseRepository: newBaseRepository(pool),
 		datasetRepo:    datasetRepo,
-		masterTenantID: masterTenantID,
+		masterTenantID: parsedID,
 	}
 }
 
@@ -270,24 +276,17 @@ func (r *ObservationRepository) RetrieveObservation(ctx context.Context, dataSet
 		kbt = time.Now()
 	}
 
-	// Parse master tenant ID once upfront - this is reused for both config lookup and data fallback.
-	// The validation in NewRepositories ensures this won't be empty, but we handle errors defensively.
-	masterTenantIDParsed, err := tenant.NewTenantID(r.masterTenantID)
-	if err != nil {
-		return domain.MarketPriceObservation{}, fmt.Errorf("invalid master tenant ID: %w", err)
-	}
-
 	// Step 1: Check if dataset is shared (determines whether fallback is allowed)
 	// IMPORTANT: Dataset metadata lookups must use master tenant context, not the tenant-scoped context.
-	// The dataset_definition table structure (is_shared, access_level) is configuration data that exists
-	// in the master schema, not duplicated per tenant. Using tenant context here would fail for tenants
-	// without dataset_definition in their schema.
+	// The dataset_definition table (is_shared, access_level) is the authoritative source of truth
+	// for sharing configuration and lives in the master schema. Even though test helpers may copy
+	// dataset definitions to tenant schemas, the master schema is canonical for configuration decisions.
 	//
 	// There is a benign race condition here: if dataset config is updated between this check and the
 	// actual observation query, we may use stale is_shared/access_level values. This is acceptable
 	// because dataset config changes are rare and eventual consistency is sufficient.
 	tenantID, hasTenantContext := tenant.FromContext(ctx)
-	masterCtx := tenant.WithTenant(ctx, masterTenantIDParsed)
+	masterCtx := tenant.WithTenant(ctx, r.masterTenantID)
 	dataset, err := r.datasetRepo.FindByCode(masterCtx, dataSetCode)
 	if err != nil {
 		return domain.MarketPriceObservation{}, err
@@ -297,6 +296,11 @@ func (r *ObservationRepository) RetrieveObservation(ctx context.Context, dataSet
 	// This check applies regardless of where the data is stored (tenant or master schema).
 	// For RESTRICTED datasets, access is only granted if the tenant has an active entitlement.
 	// PUBLIC datasets skip this check entirely. PRIVATE datasets are tenant-isolated by schema.
+	//
+	// Security note: When no tenant context exists (system/background jobs), RESTRICTED datasets
+	// are accessible without entitlement checks. This is intentional - system processes need
+	// full data access for operations like ingestion, reconciliation, and reporting. Tenant context
+	// should always be set for user-facing API requests to enforce proper access control.
 	if dataset.AccessLevel() == domain.AccessLevelRestricted && hasTenantContext {
 		hasAccess, err := r.checkTenantAccess(ctx, tenantID, dataSetCode)
 		if err != nil {
@@ -324,7 +328,7 @@ func (r *ObservationRepository) RetrieveObservation(ctx context.Context, dataSet
 	// When no tenant context exists (e.g., background jobs, system queries), we're already
 	// querying the default schema (likely master), so no fallback is needed.
 	if dataset.IsShared() && hasTenantContext {
-		// Fall through to master tenant schema (reusing the already-parsed masterTenantIDParsed)
+		// Fall through to master tenant schema (masterCtx was created with r.masterTenantID above)
 		return r.queryObservationInSchema(masterCtx, dataSetCode, resolutionKey, kbt)
 	}
 
