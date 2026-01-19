@@ -2,6 +2,7 @@ package validation
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -30,12 +31,18 @@ func NewDatasetChecker(client *infra.GRPCClient, datasetCode string) *DatasetChe
 	}
 }
 
+// ErrDatasetCodeMismatch indicates the passed datasetCode does not match the checker's configured dataset.
+var ErrDatasetCodeMismatch = errors.New("dataset code mismatch")
+
 // Check validates that the dataset exists and is active.
 // The result is cached after the first call.
-// Note: The datasetCode parameter is ignored in favor of the configured c.datasetCode
-// to ensure consistency with the checker's construction. The parameter is kept for
-// interface compatibility.
-func (c *DatasetChecker) Check(ctx context.Context, _ string) error {
+// The datasetCode parameter must match the configured c.datasetCode to ensure
+// consistency - the cache is bound to a single dataset code.
+func (c *DatasetChecker) Check(ctx context.Context, datasetCode string) error {
+	// Validate the datasetCode matches the configured dataset
+	if datasetCode != "" && datasetCode != c.datasetCode {
+		return fmt.Errorf("%w: expected %q, got %q", ErrDatasetCodeMismatch, c.datasetCode, datasetCode)
+	}
 	// Fast path: already checked
 	c.mu.RLock()
 	if c.checked {

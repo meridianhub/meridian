@@ -214,8 +214,8 @@ func executeValidation(ctx context.Context, cfg *validateConfig) (*validateResul
 			}
 		}
 
+		// Log parse errors (count is added from parseResult.ErrorCount after parsing)
 		for _, rowErr := range batch.Errors {
-			result.ErrorCount++
 			if logger.Enabled(ctx, slog.LevelDebug) {
 				logger.Debug("parse error",
 					"line", rowErr.LineNumber,

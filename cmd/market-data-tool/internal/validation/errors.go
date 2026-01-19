@@ -15,9 +15,6 @@ var (
 	// ErrDatasetNotActive indicates the dataset exists but is not in ACTIVE status.
 	ErrDatasetNotActive = errors.New("dataset is not in ACTIVE status")
 
-	// ErrMissingRequiredField indicates a mandatory field is empty.
-	ErrMissingRequiredField = errors.New("missing required field")
-
 	// ErrInvalidAttributeSchema indicates attributes do not conform to the dataset's schema.
 	ErrInvalidAttributeSchema = errors.New("attributes do not conform to dataset schema")
 
@@ -160,9 +157,6 @@ type Summary struct {
 
 	// SchemaErrorCount is the number of attribute schema validation errors.
 	SchemaErrorCount int
-
-	// CELErrorCount is the number of CEL validation errors.
-	CELErrorCount int
 
 	// CELWarningCount is the number of CEL preview warnings.
 	CELWarningCount int

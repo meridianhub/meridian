@@ -148,12 +148,19 @@ func NewParser(dataset *infra.DataSetDefinition) *Parser {
 }
 
 // ParseConfig configures the parsing behavior.
+// Use DefaultParseConfig() to get a config with sensible defaults, then override as needed.
 type ParseConfig struct {
 	// BatchSize is the number of rows to emit per batch (default: 1000).
 	BatchSize int
 
-	// SkipEmptyRows skips rows where all values are empty (default: true).
+	// SkipEmptyRows skips rows where all values are empty.
+	// NOTE: This field is NOT auto-defaulted because Go's zero value (false) is valid.
+	// Use DefaultParseConfig() to get the recommended default (true).
 	SkipEmptyRows bool
+
+	// skipEmptyRowsSet tracks whether SkipEmptyRows was explicitly configured.
+	// This is set automatically by WithSkipEmptyRows.
+	skipEmptyRowsSet bool
 
 	// TimestampFormats specifies the acceptable timestamp formats to try.
 	// Defaults to RFC3339 and common variants if not specified.
@@ -163,8 +170,9 @@ type ParseConfig struct {
 // DefaultParseConfig returns a ParseConfig with sensible defaults.
 func DefaultParseConfig() ParseConfig {
 	return ParseConfig{
-		BatchSize:     1000,
-		SkipEmptyRows: true,
+		BatchSize:        1000,
+		SkipEmptyRows:    true,
+		skipEmptyRowsSet: true,
 		TimestampFormats: []string{
 			time.RFC3339,
 			time.RFC3339Nano,
@@ -174,6 +182,13 @@ func DefaultParseConfig() ParseConfig {
 			"2006-01-02",
 		},
 	}
+}
+
+// WithSkipEmptyRows returns a copy of the config with SkipEmptyRows explicitly set.
+func (c ParseConfig) WithSkipEmptyRows(skip bool) ParseConfig {
+	c.SkipEmptyRows = skip
+	c.skipEmptyRowsSet = true
+	return c
 }
 
 // ParseResult contains the results of parsing.
@@ -222,8 +237,15 @@ func (e RowError) Error() string {
 	return fmt.Sprintf("line %d: %v", e.LineNumber, e.Err)
 }
 
+// ErrNilDataset is returned when the parser's dataset is nil.
+var ErrNilDataset = errors.New("dataset definition is required")
+
 // Parse reads a CSV file and streams batches of parsed rows.
 func (p *Parser) Parse(ctx context.Context, reader io.Reader, config ParseConfig, batchHandler func(RowBatch) error) (*ParseResult, error) {
+	if p.dataset == nil {
+		return nil, ErrNilDataset
+	}
+
 	config = p.normalizeConfig(config)
 
 	csvReader := p.createCSVReader(reader)
@@ -245,11 +267,16 @@ func (p *Parser) Parse(ctx context.Context, reader io.Reader, config ParseConfig
 
 // normalizeConfig ensures config has valid defaults.
 func (p *Parser) normalizeConfig(config ParseConfig) ParseConfig {
+	defaults := DefaultParseConfig()
 	if config.BatchSize <= 0 {
-		config.BatchSize = DefaultParseConfig().BatchSize
+		config.BatchSize = defaults.BatchSize
 	}
 	if len(config.TimestampFormats) == 0 {
-		config.TimestampFormats = DefaultParseConfig().TimestampFormats
+		config.TimestampFormats = defaults.TimestampFormats
+	}
+	// Apply SkipEmptyRows default only if not explicitly set
+	if !config.skipEmptyRowsSet {
+		config.SkipEmptyRows = defaults.SkipEmptyRows
 	}
 	return config
 }

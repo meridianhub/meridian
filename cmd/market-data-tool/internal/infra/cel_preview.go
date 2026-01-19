@@ -67,10 +67,11 @@ type PreviewResult struct {
 }
 
 // Evaluate runs the CEL expression preview.
-// Returns a warning if the preview is disabled or evaluation fails.
+// Returns a warning if the preview is disabled, evaluation fails, or result is invalid/non-boolean.
 // NOTE: This is NOT authoritative - the service validation is the source of truth.
 func (p *CELPreview) Evaluate(value, datasetCode, qualityLevel string, attributes map[string]string) PreviewResult {
 	if !p.enabled || p.program == nil {
+		atomic.AddInt64(&p.warningCount, 1)
 		return PreviewResult{
 			Valid:   true, // Assume valid if preview is disabled
 			Warning: "CEL preview disabled - service validation is authoritative",
@@ -97,14 +98,19 @@ func (p *CELPreview) Evaluate(value, datasetCode, qualityLevel string, attribute
 	if boolVal, ok := out.Value().(bool); ok {
 		if !boolVal {
 			atomic.AddInt64(&p.warningCount, 1)
+			return PreviewResult{
+				Valid:   false,
+				Warning: "CEL preview validation failed - service validation is authoritative",
+			}
 		}
+		// Success case - no warning needed
 		return PreviewResult{
-			Valid:   boolVal,
-			Warning: "CEL preview result - service validation is authoritative",
+			Valid: true,
 		}
 	}
 
-	// Non-boolean result, assume valid
+	// Non-boolean result, assume valid but warn
+	atomic.AddInt64(&p.warningCount, 1)
 	return PreviewResult{
 		Valid:   true,
 		Warning: "CEL preview returned non-boolean - service validation is authoritative",

@@ -28,6 +28,13 @@ func NewFieldValidatorWithFields(fields []string) *FieldValidator {
 
 // Validate checks that all required fields are present in the observation row.
 func (v *FieldValidator) Validate(row *ObservationRow) []*FieldError {
+	if row == nil {
+		return []*FieldError{{
+			Field:  "row",
+			Reason: "observation row is nil",
+		}}
+	}
+
 	var errors []*FieldError
 
 	if row.Value == "" {

@@ -360,7 +360,10 @@ func (m *Manager) Cancel(ctx context.Context, checkpoint *Checkpoint) error {
 	return nil
 }
 
-// ResumeByID finds a checkpoint by its manifest ID.
+// ErrNotResumable is returned when attempting to resume a checkpoint that cannot be resumed.
+var ErrNotResumable = errors.New("checkpoint is not resumable")
+
+// ResumeByID finds a checkpoint by its manifest ID and prepares it for resumption.
 func (m *Manager) ResumeByID(ctx context.Context, manifestID uuid.UUID) (*Checkpoint, error) {
 	query := `
 		SELECT id, tenant_id, source_file, file_checksum,
@@ -374,6 +377,12 @@ func (m *Manager) ResumeByID(ctx context.Context, manifestID uuid.UUID) (*Checkp
 	checkpoint, err := m.scanCheckpoint(ctx, query, manifestID)
 	if err != nil {
 		return nil, err
+	}
+
+	// Validate checkpoint is resumable (RUNNING, CANCELLED, or FAILED)
+	if !checkpoint.IsResumable() {
+		return nil, fmt.Errorf("%w: status is %s (must be RUNNING, CANCELLED, or FAILED)",
+			ErrNotResumable, checkpoint.Status)
 	}
 
 	// Verify the source file still exists and checksum matches

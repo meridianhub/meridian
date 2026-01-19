@@ -51,7 +51,6 @@ type Pipeline struct {
 	missingFields int64
 	datasetErrors int64
 	schemaErrors  int64
-	celErrors     int64
 	celWarnings   int64
 }
 
@@ -187,7 +186,6 @@ func (p *Pipeline) Summary() *Summary {
 		MissingFieldCount: int(atomic.LoadInt64(&p.missingFields)),
 		DatasetErrorCount: int(atomic.LoadInt64(&p.datasetErrors)),
 		SchemaErrorCount:  int(atomic.LoadInt64(&p.schemaErrors)),
-		CELErrorCount:     int(atomic.LoadInt64(&p.celErrors)),
 		CELWarningCount:   int(atomic.LoadInt64(&p.celWarnings)),
 	}
 }
@@ -200,6 +198,5 @@ func (p *Pipeline) Reset() {
 	atomic.StoreInt64(&p.missingFields, 0)
 	atomic.StoreInt64(&p.datasetErrors, 0)
 	atomic.StoreInt64(&p.schemaErrors, 0)
-	atomic.StoreInt64(&p.celErrors, 0)
 	atomic.StoreInt64(&p.celWarnings, 0)
 }
