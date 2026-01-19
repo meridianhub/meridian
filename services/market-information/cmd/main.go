@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/meridianhub/meridian/services/market-information/adapters/external/ecb"
+	"github.com/meridianhub/meridian/services/market-information/config"
 	"github.com/meridianhub/meridian/services/market-information/service"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
@@ -55,6 +57,9 @@ func main() {
 
 func run(logger *slog.Logger) error {
 	ctx := context.Background()
+
+	// Load service configuration
+	cfg := config.LoadConfig()
 
 	// Initialize OpenTelemetry tracer
 	tracer, err := bootstrap.NewTracer(ctx, bootstrap.TracerConfig{
@@ -191,6 +196,51 @@ func run(logger *slog.Logger) error {
 
 	// Wait for shutdown signal and orchestrate graceful shutdown
 	orchestrator := bootstrap.NewShutdownOrchestrator(grpcServer, logger)
+
+	// Initialize ECB adapter worker (if enabled)
+	// Note: This requires the Market Information service to be fully wired up.
+	// The ECB worker calls RecordObservation on the service to ingest FX rates.
+	if cfg.ECB.Enabled {
+		// TODO: Enable ECB worker once marketInformationServer is available
+		// The ECB worker needs a MarketInformationClient interface which the Server implements.
+		// Once the Server is created above, uncomment and wire up:
+		//
+		// ecbClient := ecb.NewClient(ecb.Config{
+		// 	Endpoint: cfg.ECB.Endpoint,
+		// 	Timeout:  cfg.ECB.Timeout,
+		// }, ecb.WithLogger(logger))
+		//
+		// ecbWorker := ecb.NewWorker(
+		// 	ecbClient,
+		// 	marketInformationServer, // Server implements MarketInformationClient interface
+		// 	ecb.WorkerConfig{
+		// 		DatasetCode:   cfg.ECB.DatasetCode,
+		// 		SourceCode:    cfg.ECB.SourceCode,
+		// 		FetchInterval: cfg.ECB.Interval,
+		// 		MaxRetries:    cfg.ECB.MaxRetries,
+		// 	},
+		// 	logger,
+		// )
+		//
+		// ecbWorker.Start(ctx)
+		//
+		// // Register cleanup to stop ECB worker before other services
+		// orchestrator.AddCleanup(func() error {
+		// 	ecbWorker.Stop()
+		// 	return nil
+		// })
+		//
+		// logger.Info("ECB adapter initialized",
+		// 	"interval", cfg.ECB.Interval,
+		// 	"source_code", cfg.ECB.SourceCode,
+		// 	"dataset_code", cfg.ECB.DatasetCode)
+
+		logger.Warn("ECB adapter enabled but Market Information service not yet wired up",
+			"ecb_enabled", cfg.ECB.Enabled)
+
+		// Suppress unused import warning - remove this block when ECB worker is wired up
+		_ = ecb.NewClient
+	}
 
 	// Register cleanup functions (LIFO order - HTTP server first, then database)
 	orchestrator.AddCleanup(func() error {
