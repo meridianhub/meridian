@@ -61,14 +61,16 @@ debugging bi-temporal queries, configuring data sources, or investigating CEL va
 Observations are ranked by quality level (higher takes precedence):
 
 ```text
-REVISED (4)    ← Corrected final value (highest)
+VERIFIED (3)   ← Cross-checked, audited values (highest)
     │
-ACTUAL (3)     ← Verified final value
+ACTUAL (2)     ← Real measured values from data sources
     │
-PROVISIONAL (2) ← Pending verification
-    │
-ESTIMATE (1)   ← Preliminary (lowest)
+ESTIMATE (1)   ← Forecasted or projected values (lowest)
 ```
+
+> **Note**: The proto defines 4 quality levels (ESTIMATE, PROVISIONAL, ACTUAL, REVISED) but the domain
+> implementation currently supports 3 levels (ESTIMATE, ACTUAL, VERIFIED) for the core reconciliation
+> use case. PROVISIONAL and REVISED are mapped appropriately at the service layer.
 
 #### Bi-Temporal Model
 
@@ -484,6 +486,6 @@ ORDER BY o.created_at DESC;
 
 ## Related Documentation
 
-- [ADR-0025: Market Information Management Architecture](../adr/0025-market-information-management.md)
+- [ADR-0027: Market Information Management Architecture](../adr/0027-market-information-management.md)
 - [BIAN Market Information Management Service Domain](https://bian.org/servicelandscape-12-0-0/views/view_51081.html)
 - [CEL Expression Language](https://github.com/google/cel-spec)

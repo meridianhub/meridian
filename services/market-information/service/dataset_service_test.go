@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
@@ -652,8 +653,8 @@ func TestDataSetStatusTransitions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Register dataset
-			code := "TRANSITION_" + tt.name
+			// Register dataset with slugified name (replace spaces with underscores)
+			code := "TRANSITION_" + strings.ReplaceAll(strings.ToUpper(tt.name), " ", "_")
 			registerReq := &pb.RegisterDataSetRequest{
 				Code:                    code,
 				DisplayName:             "Transition Test",

@@ -1,7 +1,7 @@
 # BIAN Service Boundaries
 
-**Document Version:** 1.0
-**Last Updated:** 2025-11-19
+**Document Version:** 1.1
+**Last Updated:** 2026-01-19
 **Status:** Active
 **Related ADR:** [ADR-0002: Microservices Per BIAN Domain](../adr/0002-microservices-per-bian-domain.md)
 **Related Analysis:** [Service Coupling Analysis](service-coupling-analysis.md)
