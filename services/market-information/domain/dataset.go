@@ -28,15 +28,23 @@ type DataSetDefinition struct {
 	description             string
 	dataCategory            DataCategory
 	status                  DataSetStatus
-	validationExpression    string          // CEL expression for data validation
-	resolutionKeyExpression string          // CEL expression for extracting resolution key
-	errorMessageExpression  string          // CEL expression for error message generation
-	isShared                bool            // Enables hierarchical lookup (tenant-first, master fallback)
-	accessLevel             DataAccessLevel // Controls visibility and entitlement requirements
-	createdAt               time.Time
-	updatedAt               time.Time
-	activatedAt             *time.Time // Set when transitioning to ACTIVE
-	deprecatedAt            *time.Time // Set when transitioning to DEPRECATED
+	validationExpression    string // CEL expression for data validation
+	resolutionKeyExpression string // CEL expression for extracting resolution key
+	errorMessageExpression  string // CEL expression for error message generation
+	// isShared enables hierarchical lookup (tenant-first, then master fallback).
+	// When true, if observation not found in tenant schema, query falls through to master.
+	// Note: isShared=true with accessLevel=PRIVATE is valid but unusual - it means
+	// shared data exists but each tenant must have their own copy to access it.
+	isShared bool
+	// accessLevel controls visibility and entitlement requirements for shared data.
+	// PUBLIC: all tenants can access, no entitlements needed
+	// PRIVATE: tenant-isolated, no sharing (default)
+	// RESTRICTED: shared but requires explicit entitlements
+	accessLevel  DataAccessLevel
+	createdAt    time.Time
+	updatedAt    time.Time
+	activatedAt  *time.Time // Set when transitioning to ACTIVE
+	deprecatedAt *time.Time // Set when transitioning to DEPRECATED
 }
 
 // NewDataSetDefinition creates a new DataSetDefinition with validated fields.
