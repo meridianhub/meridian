@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/meridianhub/meridian/services/market-information/adapters/persistence"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -246,15 +247,17 @@ func (tc *TestContainer) CreateTenantSchema(tenantIDStr string) (tenant.TenantID
 	}
 
 	schemaName := tenantID.SchemaName()
+	// Use pgx.Identifier for proper SQL identifier quoting to prevent injection
+	quotedSchema := pgx.Identifier{schemaName}.Sanitize()
 
 	// Create schema
-	_, err = tc.Pool.Exec(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", schemaName))
+	_, err = tc.Pool.Exec(ctx, "CREATE SCHEMA IF NOT EXISTS "+quotedSchema)
 	if err != nil {
 		return tenant.TenantID(""), fmt.Errorf("failed to create schema %s: %w", schemaName, err)
 	}
 
 	// Set search path and create tables in tenant schema
-	_, err = tc.Pool.Exec(ctx, fmt.Sprintf("SET search_path TO %s", schemaName))
+	_, err = tc.Pool.Exec(ctx, "SET search_path TO "+quotedSchema)
 	if err != nil {
 		return tenant.TenantID(""), fmt.Errorf("failed to set search_path: %w", err)
 	}
@@ -271,7 +274,7 @@ func (tc *TestContainer) CreateTenantSchema(tenantIDStr string) (tenant.TenantID
 		INSERT INTO %s.dataset_definition
 		SELECT * FROM public.dataset_definition
 		WHERE is_shared = TRUE
-	`, schemaName))
+	`, quotedSchema))
 	if err != nil {
 		return tenant.TenantID(""), fmt.Errorf("failed to copy shared datasets: %w", err)
 	}
@@ -281,7 +284,7 @@ func (tc *TestContainer) CreateTenantSchema(tenantIDStr string) (tenant.TenantID
 	_, err = tc.Pool.Exec(ctx, fmt.Sprintf(`
 		INSERT INTO %s.data_source
 		SELECT * FROM public.data_source
-	`, schemaName))
+	`, quotedSchema))
 	if err != nil {
 		return tenant.TenantID(""), fmt.Errorf("failed to copy data sources: %w", err)
 	}
@@ -331,8 +334,9 @@ func (tc *TestContainer) RevokeTenantEntitlement(ctx context.Context, tenantID t
 
 // loadSchemaInSchema creates tables within a specific schema for multi-tenant testing.
 func loadSchemaInSchema(ctx context.Context, pool *pgxpool.Pool, schemaName string) error {
-	// Set search path to tenant schema
-	_, err := pool.Exec(ctx, fmt.Sprintf("SET search_path TO %s", schemaName))
+	// Set search path to tenant schema (use pgx.Identifier for proper quoting)
+	quotedSchema := pgx.Identifier{schemaName}.Sanitize()
+	_, err := pool.Exec(ctx, "SET search_path TO "+quotedSchema)
 	if err != nil {
 		return fmt.Errorf("failed to set search_path: %w", err)
 	}

@@ -63,11 +63,19 @@ CREATE INDEX idx_entitlements_expires_at
   WHERE expires_at IS NOT NULL AND is_active = TRUE;
 
 --------------------------------------------------------------------------------
--- Section 3: Mark ECB FX_RATE dataset as shared/public
+-- Section 3: Mark ECB FX_RATE datasets as shared/public
 --------------------------------------------------------------------------------
 
--- Update ECB FX_RATE dataset to be shared and public
+-- Update ECB FX_RATE datasets to be shared and public
 -- This allows all tenants to access ECB rates without per-tenant ingestion
+--
+-- Pattern 'ECB_%_FX' intentionally matches all ECB foreign exchange datasets:
+--   - ECB_EUR_USD_FX (Euro to US Dollar)
+--   - ECB_EUR_GBP_FX (Euro to British Pound)
+--   - etc.
+--
+-- This broad match ensures new ECB currency pairs are automatically shared.
+-- If specific datasets need different access levels, create a follow-up migration.
 UPDATE dataset_definition
 SET
   is_shared = TRUE,

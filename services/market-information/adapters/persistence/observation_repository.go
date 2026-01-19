@@ -276,8 +276,20 @@ func (r *ObservationRepository) RetrieveObservation(ctx context.Context, dataSet
 		return domain.MarketPriceObservation{}, err
 	}
 
-	// Step 2: Query current schema first (tenant-specific or default/public)
+	// Step 2: For RESTRICTED datasets with tenant context, verify entitlements upfront
+	// This check applies regardless of where the data is stored (tenant or master schema)
 	tenantID, hasTenantContext := tenant.FromContext(ctx)
+	if dataset.AccessLevel() == domain.AccessLevelRestricted && hasTenantContext {
+		hasAccess, err := r.checkTenantAccess(ctx, tenantID, dataSetCode)
+		if err != nil {
+			return domain.MarketPriceObservation{}, err
+		}
+		if !hasAccess {
+			return domain.MarketPriceObservation{}, domain.ErrAccessDenied
+		}
+	}
+
+	// Step 3: Query current schema first (tenant-specific or default/public)
 	obs, err := r.queryObservationInSchema(ctx, dataSetCode, resolutionKey, kbt)
 	if err == nil {
 		return obs, nil // Found in current schema
@@ -287,19 +299,8 @@ func (r *ObservationRepository) RetrieveObservation(ctx context.Context, dataSet
 	}
 	// Not found in current schema - proceed to hierarchical fallback if applicable
 
-	// Step 3: If shared dataset and not found in tenant schema, try master fallback
+	// Step 4: If shared dataset and not found in tenant schema, try master fallback
 	if dataset.IsShared() && hasTenantContext {
-		// Verify tenant has access rights for RESTRICTED datasets
-		if dataset.AccessLevel() == domain.AccessLevelRestricted {
-			hasAccess, err := r.checkTenantAccess(ctx, tenantID, dataSetCode)
-			if err != nil {
-				return domain.MarketPriceObservation{}, err
-			}
-			if !hasAccess {
-				return domain.MarketPriceObservation{}, domain.ErrAccessDenied
-			}
-		}
-
 		// Fall through to master tenant schema
 		masterTenantID, err := tenant.NewTenantID(r.masterTenantID)
 		if err != nil {
