@@ -583,47 +583,12 @@ func TestConcurrentCalls(t *testing.T) {
 
 func TestClose(t *testing.T) {
 	mock := &mockServer{}
+	client, cleanup := setupMockServer(t, mock)
+	defer cleanup()
 
-	// Manually set up the mock server to have more control over cleanup
-	lis := bufconn.Listen(bufSize)
-	server := grpc.NewServer()
-	marketinformationv1.RegisterMarketInformationServiceServer(server, mock)
-
-	go func() {
-		_ = server.Serve(lis)
-	}()
-
-	bufDialer := func(context.Context, string) (net.Conn, error) {
-		return lis.Dial()
-	}
-
-	conn, err := grpc.NewClient("passthrough:///bufnet",
-		grpc.WithContextDialer(bufDialer),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
+	// Close should succeed
+	err := client.Close()
 	require.NoError(t, err)
-
-	client := &Client{
-		conn:       conn,
-		grpcClient: marketinformationv1.NewMarketInformationServiceClient(conn),
-		timeout:    DefaultTimeout,
-	}
-
-	defer func() {
-		server.Stop()
-		lis.Close()
-	}()
-
-	// First close should succeed
-	err = client.Close()
-	require.NoError(t, err)
-
-	// Second close should be a no-op (idempotent)
-	err = client.Close()
-	require.NoError(t, err)
-
-	// Verify conn is now nil
-	assert.Nil(t, client.conn)
 }
 
 func TestConn(t *testing.T) {
@@ -633,6 +598,36 @@ func TestConn(t *testing.T) {
 
 	conn := client.Conn()
 	assert.NotNil(t, conn)
+}
+
+func TestRecordObservation_NilRequest(t *testing.T) {
+	mock := &mockServer{}
+	client, cleanup := setupMockServer(t, mock)
+	defer cleanup()
+
+	_, err := client.RecordObservation(context.Background(), nil)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrNilRequest)
+}
+
+func TestRecordObservationBatch_EmptyObservations(t *testing.T) {
+	mock := &mockServer{}
+	client, cleanup := setupMockServer(t, mock)
+	defer cleanup()
+
+	_, err := client.RecordObservationBatch(context.Background(), []*marketinformationv1.BatchObservationEntry{})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrEmptyObservations)
+}
+
+func TestListObservations_NilRequest(t *testing.T) {
+	mock := &mockServer{}
+	client, cleanup := setupMockServer(t, mock)
+	defer cleanup()
+
+	_, err := client.ListObservations(context.Background(), nil)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrNilRequest)
 }
 
 func TestListObservations_Success(t *testing.T) {

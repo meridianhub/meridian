@@ -104,6 +104,12 @@ var ErrTargetRequired = errors.New("either Target or ServiceName must be provide
 // ErrObservationNotFound is returned when no observation matches the query criteria.
 var ErrObservationNotFound = errors.New("observation not found")
 
+// ErrNilRequest is returned when a nil request is passed to a method.
+var ErrNilRequest = errors.New("request cannot be nil")
+
+// ErrEmptyObservations is returned when an empty observations slice is passed to batch methods.
+var ErrEmptyObservations = errors.New("observations cannot be empty")
+
 // Client provides access to the Market Information service.
 type Client struct {
 	conn       *grpc.ClientConn
@@ -155,9 +161,7 @@ func New(ctx context.Context, cfg Config) (*Client, func() error, error) {
 
 	cleanup := func() error {
 		if client.conn != nil {
-			conn := client.conn
-			client.conn = nil // Prevent double-close
-			if err := conn.Close(); err != nil {
+			if err := client.conn.Close(); err != nil {
 				return fmt.Errorf("close grpc: %w", err)
 			}
 		}
@@ -359,6 +363,10 @@ func (c *Client) RecordObservation(
 	ctx context.Context,
 	req *marketinformationv1.RecordObservationRequest,
 ) (*marketinformationv1.RecordObservationResponse, error) {
+	if req == nil {
+		return nil, ErrNilRequest
+	}
+
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
@@ -401,6 +409,10 @@ func (c *Client) RecordObservationBatch(
 	ctx context.Context,
 	observations []*marketinformationv1.BatchObservationEntry,
 ) (*marketinformationv1.RecordObservationBatchResponse, error) {
+	if len(observations) == 0 {
+		return nil, ErrEmptyObservations
+	}
+
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
@@ -473,6 +485,10 @@ func (c *Client) ListObservations(
 	ctx context.Context,
 	req *marketinformationv1.ListObservationsRequest,
 ) (*marketinformationv1.ListObservationsResponse, error) {
+	if req == nil {
+		return nil, ErrNilRequest
+	}
+
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
@@ -489,12 +505,9 @@ func (c *Client) ListObservations(
 }
 
 // Close releases the gRPC connection.
-// Safe to call multiple times - subsequent calls are no-ops.
 func (c *Client) Close() error {
 	if c.conn != nil {
-		conn := c.conn
-		c.conn = nil // Prevent double-close
-		if err := conn.Close(); err != nil {
+		if err := c.conn.Close(); err != nil {
 			return fmt.Errorf("close grpc: %w", err)
 		}
 	}
