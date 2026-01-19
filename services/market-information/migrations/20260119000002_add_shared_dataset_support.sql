@@ -40,6 +40,8 @@ CREATE TABLE tenant_data_entitlements (
   tenant_id VARCHAR(255) NOT NULL,
   dataset_code VARCHAR(255) NOT NULL,
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  -- granted_at may differ from created_at when backdating historical entitlements
+  -- imported from external access control systems during migration.
   granted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   expires_at TIMESTAMPTZ NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

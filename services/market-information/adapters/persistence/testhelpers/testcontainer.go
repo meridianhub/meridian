@@ -270,7 +270,7 @@ func (tc *TestContainer) CreateTenantSchema(tenantIDStr string) (tenant.TenantID
 
 	// Copy shared datasets from public schema to tenant schema.
 	// This allows tenant observations to reference shared dataset definitions.
-	// Note: quotedSchema is safely quoted via pgx.Identifier.Sanitize() above (line 251).
+	// Note: quotedSchema is safely quoted via pgx.Identifier.Sanitize() above.
 	_, err = tc.Pool.Exec(ctx, fmt.Sprintf(`
 		INSERT INTO %s.dataset_definition
 		SELECT * FROM public.dataset_definition

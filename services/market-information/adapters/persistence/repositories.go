@@ -26,7 +26,7 @@ type Repositories struct {
 func NewRepositories(pool *pgxpool.Pool, masterTenantID string) *Repositories {
 	// Validate masterTenantID upfront - fail fast if misconfigured
 	if masterTenantID == "" {
-		panic("masterTenantID cannot be empty - this is a required configuration parameter for multi-tenant data access")
+		panic("masterTenantID cannot be empty - set MASTER_TENANT_ID environment variable for multi-tenant data access")
 	}
 
 	datasetRepo := NewDataSetRepository(pool)

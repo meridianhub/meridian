@@ -377,9 +377,14 @@ func (r *ObservationRepository) queryObservationInSchema(ctx context.Context, da
 
 // checkTenantAccess verifies tenant has rights to access shared dataset.
 // Queries the tenant_data_entitlements table to check for active entitlements.
+//
 // IMPORTANT: This query intentionally uses the public schema (not tenant-scoped).
 // The tenant_data_entitlements table is a global registry that lives in the public schema,
 // not replicated per tenant. Using pool.QueryRow directly ensures we query public.tenant_data_entitlements.
+//
+// Note: This check runs outside the observation query transaction. There's a small TOCTOU window
+// where entitlement could be revoked between this check and data access. This is acceptable
+// because entitlement revocations are rare and eventual consistency is sufficient for this use case.
 func (r *ObservationRepository) checkTenantAccess(ctx context.Context, tenantID tenant.TenantID, dataSetCode string) (bool, error) {
 	query := `
 		SELECT EXISTS(
