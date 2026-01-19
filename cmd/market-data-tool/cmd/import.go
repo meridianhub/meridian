@@ -29,6 +29,8 @@ var (
 	ErrSourceCodeRequired = errors.New("--source-code is required")
 	// ErrDBURLRequired is returned when --db-url flag is missing and DATABASE_URL is not set.
 	ErrDBURLRequired = errors.New("--db-url is required for checkpoint persistence (or set DATABASE_URL environment variable)")
+	// ErrSourceIDNotSupported is returned when --source-id is used instead of --source-code.
+	ErrSourceIDNotSupported = errors.New("--source-id is not supported; use --source-code instead (e.g., --source-code=BLOOMBERG)")
 )
 
 // Import command flags.
@@ -254,14 +256,20 @@ func executeImport(ctx context.Context, cfg *importConfig) (*importResult, error
 	}
 	defer cleanup()
 
-	// Resolve source ID if source code provided
-	sourceID := cfg.SourceID
-	if sourceID == "" && cfg.SourceCode != "" {
-		resolvedID, err := grpcClient.ResolveSourceID(ctx, cfg.SourceCode)
-		if err != nil {
-			return nil, fmt.Errorf("failed to resolve source code %q: %w", cfg.SourceCode, err)
+	// Determine source code for observations.
+	// The proto expects source_code (e.g., "BLOOMBERG"), not UUID.
+	// If --source-id was provided, validate it exists via list and get its code.
+	sourceCode := cfg.SourceCode
+	if sourceCode == "" && cfg.SourceID != "" {
+		// User provided UUID, but the API expects source code
+		return nil, ErrSourceIDNotSupported
+	}
+
+	// Validate the source code exists
+	if sourceCode != "" {
+		if _, err := grpcClient.ResolveSourceID(ctx, sourceCode); err != nil {
+			return nil, fmt.Errorf("failed to validate source code %q: %w", sourceCode, err)
 		}
-		sourceID = resolvedID
 	}
 
 	// Fetch dataset definition for schema
@@ -275,6 +283,7 @@ func executeImport(ctx context.Context, cfg *importConfig) (*importResult, error
 	if err != nil {
 		return nil, fmt.Errorf("failed to create checkpoint manager: %w", err)
 	}
+	defer checkpointMgr.Close()
 
 	// Start or resume checkpoint
 	var cp *checkpoint.Checkpoint
@@ -303,7 +312,7 @@ func executeImport(ctx context.Context, cfg *importConfig) (*importResult, error
 	}
 
 	// Execute live import with checkpoint support
-	return executeLiveImport(ctx, cfg, cp, checkpointMgr, grpcClient, dataset, sourceID, causationID, logger)
+	return executeLiveImport(ctx, cfg, cp, checkpointMgr, grpcClient, dataset, sourceCode, causationID, logger)
 }
 
 // executeDryRun validates the CSV without persisting observations.
@@ -355,7 +364,8 @@ func executeDryRun(
 				result.ImportedRows++
 			}
 		}
-		// Parse errors are counted via parseResult.ErrorCount after parsing completes
+		// Count parse errors from this batch
+		result.ValidationErrors += int64(len(batch.Errors))
 		return nil
 	})
 	if err != nil {
@@ -363,7 +373,6 @@ func executeDryRun(
 	}
 
 	result.TotalRows = int64(parseResult.RowCount) + int64(parseResult.ErrorCount)
-	result.ValidationErrors += int64(parseResult.ErrorCount)
 
 	logger.Info("dry-run validation complete",
 		"total_rows", result.TotalRows,
@@ -384,7 +393,7 @@ func executeLiveImport(
 	checkpointMgr *infra.CheckpointManagerAdapter,
 	grpcClient *infra.GRPCClient,
 	dataset *infra.DataSetDefinition,
-	sourceID string,
+	sourceCode string,
 	causationID string,
 	logger *slog.Logger,
 ) (*importResult, error) {
@@ -405,7 +414,7 @@ func executeLiveImport(
 		Client:      grpcClient,
 		BatchSize:   cfg.BatchSize,
 		DatasetCode: cfg.Dataset,
-		SourceID:    sourceID,
+		SourceCode:  sourceCode,
 		OnBatchComplete: func(batchNum, observationsInBatch, totalInserted int) {
 			logger.Debug("batch inserted", "batch", batchNum, "count", observationsInBatch, "total", totalInserted)
 		},
@@ -436,8 +445,11 @@ func executeLiveImport(
 		}
 
 		for _, csvRow := range batch.Rows {
-			// Skip rows before the resume point
-			if cp.ProcessedRows > 0 && csvRow.LineNumber <= cp.LastProcessedLine {
+			// Skip rows before the resume point.
+			// LineNumber is 1-indexed where line 1 is the header.
+			// LastProcessedLine is a count of processed data rows.
+			// To skip already-processed rows, we compare: lineNumber <= processedRows + 1 (the +1 accounts for header)
+			if cp.ProcessedRows > 0 && csvRow.LineNumber <= cp.LastProcessedLine+1 {
 				continue
 			}
 
@@ -450,7 +462,7 @@ func executeLiveImport(
 			}
 
 			// Add to batch inserter
-			if err := batchInserter.Add(ctx, csvRowToObservation(&csvRow, cfg.Dataset, sourceID)); err != nil {
+			if err := batchInserter.Add(ctx, csvRowToObservation(&csvRow, cfg.Dataset, sourceCode)); err != nil {
 				return fmt.Errorf("failed to add observation to batch: %w", err)
 			}
 
@@ -549,7 +561,7 @@ func csvRowToValidationRow(csvRow *csv.ObservationRow, datasetCode string) *vali
 }
 
 // csvRowToObservation converts a CSV row to a gRPC observation entry.
-func csvRowToObservation(csvRow *csv.ObservationRow, datasetCode, sourceID string) *infra.ObservationEntry {
+func csvRowToObservation(csvRow *csv.ObservationRow, datasetCode, sourceCode string) *infra.ObservationEntry {
 	return &infra.ObservationEntry{
 		DatasetCode:     datasetCode,
 		ObservedAt:      csvRow.ObservedAt,
@@ -557,7 +569,7 @@ func csvRowToObservation(csvRow *csv.ObservationRow, datasetCode, sourceID strin
 		ValidTo:         csvRow.ValidTo,
 		Value:           csvRow.Value,
 		QualityLevel:    csvRow.QualityLevel,
-		SourceID:        sourceID,
+		SourceCode:      sourceCode,
 		Attributes:      csvRow.Attributes,
 		ClientReference: fmt.Sprintf("line-%d", csvRow.LineNumber),
 	}

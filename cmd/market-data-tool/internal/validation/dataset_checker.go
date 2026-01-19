@@ -32,7 +32,10 @@ func NewDatasetChecker(client *infra.GRPCClient, datasetCode string) *DatasetChe
 
 // Check validates that the dataset exists and is active.
 // The result is cached after the first call.
-func (c *DatasetChecker) Check(ctx context.Context, datasetCode string) error {
+// Note: The datasetCode parameter is ignored in favor of the configured c.datasetCode
+// to ensure consistency with the checker's construction. The parameter is kept for
+// interface compatibility.
+func (c *DatasetChecker) Check(ctx context.Context, _ string) error {
 	// Fast path: already checked
 	c.mu.RLock()
 	if c.checked {
@@ -50,12 +53,12 @@ func (c *DatasetChecker) Check(ctx context.Context, datasetCode string) error {
 		return c.err
 	}
 
-	// Perform the check
-	dataset, err := c.client.GetDataSet(ctx, datasetCode, nil)
+	// Perform the check using the configured datasetCode
+	dataset, err := c.client.GetDataSet(ctx, c.datasetCode, nil)
 	if err != nil {
 		c.checked = true
 		c.exists = false
-		c.err = fmt.Errorf("%w: %s: %w", ErrDatasetNotFound, datasetCode, err)
+		c.err = fmt.Errorf("%w: %s: %w", ErrDatasetNotFound, c.datasetCode, err)
 		return c.err
 	}
 
@@ -64,7 +67,7 @@ func (c *DatasetChecker) Check(ctx context.Context, datasetCode string) error {
 	c.checked = true
 
 	if !c.isActive {
-		c.err = fmt.Errorf("%w: %s (status: %s)", ErrDatasetNotActive, datasetCode, dataset.Status)
+		c.err = fmt.Errorf("%w: %s (status: %s)", ErrDatasetNotActive, c.datasetCode, dataset.Status)
 		return c.err
 	}
 

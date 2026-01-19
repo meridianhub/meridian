@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"google.golang.org/grpc"
@@ -15,6 +16,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	marketinformationv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
+	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 )
 
 const (
@@ -234,7 +236,7 @@ type ObservationEntry struct {
 	ValidTo         *time.Time
 	Value           string
 	QualityLevel    string
-	SourceID        string
+	SourceCode      string
 	Attributes      map[string]string
 	ClientReference string
 }
@@ -247,7 +249,7 @@ func (e *ObservationEntry) ToProto() *marketinformationv1.BatchObservationEntry 
 		ObservedAt:      timestamppb.New(e.ObservedAt),
 		Value:           e.Value,
 		Quality:         qualityStringToProto(e.QualityLevel),
-		SourceCode:      e.SourceID,
+		SourceCode:      e.SourceCode,
 		ClientReference: e.ClientReference,
 	}
 
@@ -262,11 +264,36 @@ func (e *ObservationEntry) ToProto() *marketinformationv1.BatchObservationEntry 
 		entry.ValidTo = timestamppb.New(*e.ValidTo)
 	}
 
-	// Note: Attributes are converted to proto format by the batch inserter
-	// The proto uses repeated AttributeEntry from quantity/v1
-	_ = e.Attributes // Acknowledge attributes exist but are handled elsewhere
+	// Convert attributes map to proto format
+	if len(e.Attributes) > 0 {
+		entry.Attributes = attributesToProto(e.Attributes)
+	}
 
 	return entry
+}
+
+// attributesToProto converts a map of attributes to proto format.
+// Keys are sorted for deterministic ordering.
+func attributesToProto(attrs map[string]string) []*quantityv1.AttributeEntry {
+	if len(attrs) == 0 {
+		return nil
+	}
+
+	// Sort keys for deterministic ordering
+	keys := make([]string, 0, len(attrs))
+	for k := range attrs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	entries := make([]*quantityv1.AttributeEntry, 0, len(attrs))
+	for _, k := range keys {
+		entries = append(entries, &quantityv1.AttributeEntry{
+			Key:   k,
+			Value: attrs[k],
+		})
+	}
+	return entries
 }
 
 // qualityStringToProto converts a quality level string to the proto enum.

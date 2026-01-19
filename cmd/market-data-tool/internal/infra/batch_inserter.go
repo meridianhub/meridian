@@ -26,7 +26,7 @@ type BatchInserter struct {
 	client      *GRPCClient
 	batchSize   int
 	datasetCode string
-	sourceID    string
+	sourceCode  string
 
 	// Callback for progress tracking (optional)
 	onBatchComplete func(batchNum int, observationsInBatch int, totalInserted int)
@@ -50,8 +50,8 @@ type BatchInserterConfig struct {
 	// DatasetCode is the target dataset for all observations.
 	DatasetCode string
 
-	// SourceID is the data source UUID for all observations.
-	SourceID string
+	// SourceCode is the data source code (e.g., "BLOOMBERG") for all observations.
+	SourceCode string
 
 	// OnBatchComplete is called after each batch is successfully inserted.
 	OnBatchComplete func(batchNum int, observationsInBatch int, totalInserted int)
@@ -68,7 +68,7 @@ func NewBatchInserter(config BatchInserterConfig) *BatchInserter {
 		client:          config.Client,
 		batchSize:       batchSize,
 		datasetCode:     config.DatasetCode,
-		sourceID:        config.SourceID,
+		sourceCode:      config.SourceCode,
 		onBatchComplete: config.OnBatchComplete,
 		buffer:          make([]*ObservationEntry, 0, batchSize),
 	}
@@ -86,8 +86,8 @@ func (bi *BatchInserter) Add(ctx context.Context, entry *ObservationEntry) error
 	if entry.DatasetCode == "" {
 		entry.DatasetCode = bi.datasetCode
 	}
-	if entry.SourceID == "" {
-		entry.SourceID = bi.sourceID
+	if entry.SourceCode == "" {
+		entry.SourceCode = bi.sourceCode
 	}
 
 	bi.buffer = append(bi.buffer, entry)

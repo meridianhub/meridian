@@ -150,9 +150,13 @@ func ShutdownContext() (context.Context, context.CancelFunc) {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
-		sig := <-sigChan
-		slog.Info("received shutdown signal", "signal", sig)
-		cancel()
+		select {
+		case sig := <-sigChan:
+			slog.Info("received shutdown signal", "signal", sig)
+			cancel()
+		case <-ctx.Done():
+			// Context was cancelled by caller, clean up signal handling
+		}
 		signal.Stop(sigChan)
 	}()
 

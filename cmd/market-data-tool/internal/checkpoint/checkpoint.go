@@ -169,7 +169,11 @@ func (m *Manager) StartImport(ctx context.Context, tenantID, sourceFile string) 
 		UpdatedAt:    time.Now(),
 	}
 
-	// Insert into database
+	// Insert into database.
+	// Note: The status check for FAILED/CANCELLED is already done in findExistingImport above.
+	// The ON CONFLICT clause handles the case where a previous failed/cancelled import exists.
+	// Since we only reach here when existing status is FAILED/CANCELLED (or no existing record),
+	// we can safely update on conflict without a WHERE clause.
 	query := `
 		INSERT INTO import_manifest (
 			id, tenant_id, source_file, file_checksum,
@@ -177,8 +181,8 @@ func (m *Manager) StartImport(ctx context.Context, tenantID, sourceFile string) 
 			status, created_at, updated_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		ON CONFLICT (tenant_id, source_file, file_checksum)
-		WHERE status IN ('FAILED', 'CANCELLED')
 		DO UPDATE SET
+			id = EXCLUDED.id,
 			status = EXCLUDED.status,
 			processed_rows = EXCLUDED.processed_rows,
 			success_count = EXCLUDED.success_count,
