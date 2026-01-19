@@ -16,10 +16,12 @@ type Repositories struct {
 
 // NewRepositories creates all repository implementations with a shared connection pool.
 // This is the recommended way to create repositories for production use.
-func NewRepositories(pool *pgxpool.Pool) *Repositories {
+// masterTenantID is the tenant ID that hosts shared/public market data (e.g., "master").
+func NewRepositories(pool *pgxpool.Pool, masterTenantID string) *Repositories {
+	datasetRepo := NewDataSetRepository(pool)
 	return &Repositories{
-		DataSet:     NewDataSetRepository(pool),
-		Observation: NewObservationRepository(pool),
+		DataSet:     datasetRepo,
+		Observation: NewObservationRepository(pool, datasetRepo, masterTenantID),
 		Source:      NewSourceRepository(pool),
 	}
 }

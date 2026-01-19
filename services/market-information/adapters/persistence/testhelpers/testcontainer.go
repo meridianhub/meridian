@@ -55,8 +55,8 @@ func SetupTestContainer(t *testing.T) *TestContainer {
 	// Load schema
 	loadSchema(t, pool)
 
-	// Create repositories
-	repos := persistence.NewRepositories(pool)
+	// Create repositories with test master tenant
+	repos := persistence.NewRepositories(pool, "test_master")
 
 	return &TestContainer{
 		container: pgContainer,
