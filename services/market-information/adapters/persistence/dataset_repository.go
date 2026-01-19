@@ -54,13 +54,13 @@ func (r *DataSetRepository) insertDataSet(ctx context.Context, tx pgx.Tx, entity
 		INSERT INTO dataset_definition (
 			id, code, version, name, description, data_category,
 			validation_expression, resolution_key_expression, error_message_expression,
-			status, created_at, created_by, updated_at, updated_by,
+			status, is_shared, access_level, created_at, created_by, updated_at, updated_by,
 			activated_at, deprecated_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6,
 			$7, $8, $9,
-			$10, $11, $12, $13, $14,
-			$15, $16
+			$10, $11, $12, $13, $14, $15, $16,
+			$17, $18
 		)`
 
 	_, err := tx.Exec(ctx, query,
@@ -74,6 +74,8 @@ func (r *DataSetRepository) insertDataSet(ctx context.Context, tx pgx.Tx, entity
 		entity.ResolutionKeyExpression,
 		nullStringPtr(entity.ErrorMessageExpression),
 		entity.Status,
+		entity.IsShared,
+		entity.AccessLevel,
 		entity.CreatedAt,
 		userID,
 		entity.UpdatedAt,
@@ -110,12 +112,14 @@ func (r *DataSetRepository) updateDataSet(ctx context.Context, tx pgx.Tx, entity
 			resolution_key_expression = $5,
 			error_message_expression = $6,
 			status = $7,
-			version = $8,
-			updated_at = $9,
-			updated_by = $10,
-			activated_at = $11,
-			deprecated_at = $12
-		WHERE id = $13 AND version = $14 AND deleted_at IS NULL`
+			is_shared = $8,
+			access_level = $9,
+			version = $10,
+			updated_at = $11,
+			updated_by = $12,
+			activated_at = $13,
+			deprecated_at = $14
+		WHERE id = $15 AND version = $16 AND deleted_at IS NULL`
 
 	result, err := tx.Exec(ctx, query,
 		entity.Name,
@@ -125,6 +129,8 @@ func (r *DataSetRepository) updateDataSet(ctx context.Context, tx pgx.Tx, entity
 		entity.ResolutionKeyExpression,
 		nullStringPtr(entity.ErrorMessageExpression),
 		entity.Status,
+		entity.IsShared,
+		entity.AccessLevel,
 		entity.Version,
 		entity.UpdatedAt,
 		userID,
@@ -155,7 +161,7 @@ func (r *DataSetRepository) FindByCode(ctx context.Context, code string) (domain
 		query := `
 			SELECT id, code, version, name, description, data_category,
 				validation_expression, resolution_key_expression, error_message_expression,
-				status, created_at, updated_at, activated_at, deprecated_at
+				status, is_shared, access_level, created_at, updated_at, activated_at, deprecated_at
 			FROM dataset_definition
 			WHERE code = $1 AND deleted_at IS NULL
 			ORDER BY
@@ -184,7 +190,7 @@ func (r *DataSetRepository) FindByCodeAndVersion(ctx context.Context, code strin
 		query := `
 			SELECT id, code, version, name, description, data_category,
 				validation_expression, resolution_key_expression, error_message_expression,
-				status, created_at, updated_at, activated_at, deprecated_at
+				status, is_shared, access_level, created_at, updated_at, activated_at, deprecated_at
 			FROM dataset_definition
 			WHERE code = $1 AND version = $2 AND deleted_at IS NULL`
 
@@ -209,7 +215,7 @@ func (r *DataSetRepository) List(ctx context.Context, filters domain.DataSetFilt
 		query := `
 			SELECT id, code, version, name, description, data_category,
 				validation_expression, resolution_key_expression, error_message_expression,
-				status, created_at, updated_at, activated_at, deprecated_at
+				status, is_shared, access_level, created_at, updated_at, activated_at, deprecated_at
 			FROM dataset_definition
 			WHERE deleted_at IS NULL`
 
@@ -301,6 +307,8 @@ func (r *DataSetRepository) scanDataSetDefinition(ctx context.Context, tx pgx.Tx
 		&entity.ResolutionKeyExpression,
 		&entity.ErrorMessageExpression,
 		&entity.Status,
+		&entity.IsShared,
+		&entity.AccessLevel,
 		&entity.CreatedAt,
 		&entity.UpdatedAt,
 		&entity.ActivatedAt,
@@ -331,6 +339,8 @@ func (r *DataSetRepository) scanDataSetDefinitionFromRows(rows pgx.Rows) (DataSe
 		&entity.ResolutionKeyExpression,
 		&entity.ErrorMessageExpression,
 		&entity.Status,
+		&entity.IsShared,
+		&entity.AccessLevel,
 		&entity.CreatedAt,
 		&entity.UpdatedAt,
 		&entity.ActivatedAt,

@@ -74,6 +74,10 @@ var (
 	// ErrCausationIDRequired indicates the causation ID was not provided for an observation.
 	ErrCausationIDRequired = errors.New("causation ID is required")
 
+	// ErrAccessDenied indicates the tenant lacks permission to access the dataset.
+	// This occurs when attempting to access a RESTRICTED shared dataset without valid entitlements.
+	ErrAccessDenied = errors.New("access denied: tenant not entitled to dataset")
+
 	// DataSource errors for repository operations.
 
 	// ErrDataSourceNotFound indicates the requested data source does not exist.

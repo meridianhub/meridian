@@ -521,3 +521,433 @@ func TestObservationRepository_Record_InvalidDataSetCode(t *testing.T) {
 	err = tc.Repos.Observation.Record(ctx, obs)
 	assert.ErrorIs(t, err, domain.ErrDataSetNotFound)
 }
+
+// setupSharedDataSetAndSource creates a shared dataset with specified access level.
+func setupSharedDataSetAndSource(t *testing.T, tc *testhelpers.TestContainer, code string, accessLevel domain.DataAccessLevel) (domain.DataSetDefinition, domain.DataSource) {
+	t.Helper()
+	ctx := context.Background()
+
+	// Create and activate a shared dataset
+	dataset, err := domain.NewDataSetDefinition(
+		code,
+		"Shared "+code,
+		"Shared test dataset for multi-tenant observations",
+		domain.DataCategoryPricing,
+		"value > 0",
+		"observation_context.key",
+		"",
+	)
+	require.NoError(t, err)
+
+	// Build with shared flags - copy all fields manually
+	builder := domain.NewDataSetDefinitionBuilder().
+		WithID(dataset.ID()).
+		WithCode(dataset.Code()).
+		WithVersion(dataset.Version()).
+		WithName(dataset.Name()).
+		WithDescription(dataset.Description()).
+		WithDataCategory(dataset.DataCategory()).
+		WithValidationExpression(dataset.ValidationExpression()).
+		WithResolutionKeyExpression(dataset.ResolutionKeyExpression()).
+		WithErrorMessageExpression(dataset.ErrorMessageExpression()).
+		WithStatus(dataset.Status()).
+		WithIsShared(true).
+		WithAccessLevel(accessLevel).
+		WithCreatedAt(dataset.CreatedAt()).
+		WithUpdatedAt(dataset.UpdatedAt())
+	sharedDataset := builder.Build()
+
+	err = tc.Repos.DataSet.Save(ctx, sharedDataset)
+	require.NoError(t, err)
+
+	// Retrieve to get the generated ID
+	sharedDataset, err = tc.Repos.DataSet.FindByCode(ctx, code)
+	require.NoError(t, err)
+
+	// Activate the dataset
+	activatedDataset, err := sharedDataset.ActivateDataSet()
+	require.NoError(t, err)
+	err = tc.Repos.DataSet.Save(ctx, activatedDataset)
+	require.NoError(t, err)
+
+	// Create a data source
+	source, err := domain.NewDataSource(
+		"ECB_SHARED_TEST",
+		"ECB Shared Test",
+		"European Central Bank shared test feed",
+		domain.SourceTypeAPI,
+		90,
+	)
+	require.NoError(t, err)
+
+	err = tc.Repos.Source.Save(ctx, source)
+	require.NoError(t, err)
+
+	source, err = tc.Repos.Source.FindByCode(ctx, "ECB_SHARED_TEST")
+	require.NoError(t, err)
+
+	return activatedDataset, source
+}
+
+func TestObservationRepository_HierarchicalLookup_TenantOverride(t *testing.T) {
+	tc := testhelpers.SetupTestContainer(t)
+	defer tc.Cleanup(t)
+
+	ctx := context.Background()
+	_, source := setupSharedDataSetAndSource(t, tc, "SHARED_FX_RATE", domain.AccessLevelPublic)
+
+	now := time.Now()
+
+	// Record observation in master tenant (test_master)
+	masterObs, err := domain.NewMarketPriceObservation(
+		"SHARED_FX_RATE",
+		source.ID(),
+		"EUR/USD",
+		decimal.NewFromFloat(1.0850),
+		"USD",
+		now,
+		now,
+		now.Add(24*time.Hour),
+		uuid.New(),
+		domain.QualityLevelActual,
+		source.TrustLevel(),
+	)
+	require.NoError(t, err)
+	err = tc.Repos.Observation.Record(ctx, masterObs)
+	require.NoError(t, err)
+
+	// Create tenant context
+	tenantID, err := tc.CreateTenantSchema("tenant_a")
+	require.NoError(t, err)
+	tenantCtx := tc.WithTenant(ctx, tenantID)
+
+	// Record tenant-specific observation with different value
+	tenantObs, err := domain.NewMarketPriceObservation(
+		"SHARED_FX_RATE",
+		source.ID(),
+		"EUR/USD",
+		decimal.NewFromFloat(1.1000), // Different value
+		"USD",
+		now.Add(1*time.Minute),
+		now,
+		now.Add(24*time.Hour),
+		uuid.New(),
+		domain.QualityLevelActual,
+		source.TrustLevel(),
+	)
+	require.NoError(t, err)
+	err = tc.Repos.Observation.Record(tenantCtx, tenantObs)
+	require.NoError(t, err)
+
+	// Query from tenant context - should get tenant-specific observation
+	result, err := tc.Repos.Observation.GetLatest(tenantCtx, "SHARED_FX_RATE", "EUR/USD")
+	require.NoError(t, err)
+	assert.True(t, decimal.NewFromFloat(1.1000).Equal(result.Value()),
+		"Expected tenant override value, got master value")
+	assert.Equal(t, tenantObs.ID(), result.ID(),
+		"Should return tenant observation, not master")
+}
+
+func TestObservationRepository_HierarchicalLookup_MasterFallback(t *testing.T) {
+	tc := testhelpers.SetupTestContainer(t)
+	defer tc.Cleanup(t)
+
+	ctx := context.Background()
+	_, source := setupSharedDataSetAndSource(t, tc, "SHARED_FX_RATE_FALLBACK", domain.AccessLevelPublic)
+
+	now := time.Now()
+
+	// Record observation in master tenant only
+	masterObs, err := domain.NewMarketPriceObservation(
+		"SHARED_FX_RATE_FALLBACK",
+		source.ID(),
+		"GBP/USD",
+		decimal.NewFromFloat(1.2500),
+		"USD",
+		now,
+		now,
+		now.Add(24*time.Hour),
+		uuid.New(),
+		domain.QualityLevelActual,
+		source.TrustLevel(),
+	)
+	require.NoError(t, err)
+	err = tc.Repos.Observation.Record(ctx, masterObs)
+	require.NoError(t, err)
+
+	// Create tenant context
+	tenantID, err := tc.CreateTenantSchema("tenant_b")
+	require.NoError(t, err)
+	tenantCtx := tc.WithTenant(ctx, tenantID)
+
+	// Query from tenant context - should fall back to master
+	result, err := tc.Repos.Observation.GetLatest(tenantCtx, "SHARED_FX_RATE_FALLBACK", "GBP/USD")
+	require.NoError(t, err)
+	assert.True(t, decimal.NewFromFloat(1.2500).Equal(result.Value()),
+		"Should fall back to master tenant data")
+	assert.Equal(t, masterObs.ID(), result.ID(),
+		"Should return master observation via fallback")
+}
+
+func TestObservationRepository_HierarchicalLookup_PrivateDatasetNoFallback(t *testing.T) {
+	tc := testhelpers.SetupTestContainer(t)
+	defer tc.Cleanup(t)
+
+	ctx := context.Background()
+
+	// Create a PRIVATE (non-shared) dataset
+	dataset, err := domain.NewDataSetDefinition(
+		"PRIVATE_FX_RATE",
+		"Private FX Rate",
+		"Private test dataset - no sharing",
+		domain.DataCategoryPricing,
+		"value > 0",
+		"observation_context.key",
+		"",
+	)
+	require.NoError(t, err)
+	// Default is private, but be explicit
+	builder := domain.NewDataSetDefinitionBuilder().
+		WithID(dataset.ID()).
+		WithCode(dataset.Code()).
+		WithVersion(dataset.Version()).
+		WithName(dataset.Name()).
+		WithDescription(dataset.Description()).
+		WithDataCategory(dataset.DataCategory()).
+		WithValidationExpression(dataset.ValidationExpression()).
+		WithResolutionKeyExpression(dataset.ResolutionKeyExpression()).
+		WithErrorMessageExpression(dataset.ErrorMessageExpression()).
+		WithStatus(dataset.Status()).
+		WithIsShared(false).
+		WithAccessLevel(domain.AccessLevelPrivate).
+		WithCreatedAt(dataset.CreatedAt()).
+		WithUpdatedAt(dataset.UpdatedAt())
+	privateDataset := builder.Build()
+
+	err = tc.Repos.DataSet.Save(ctx, privateDataset)
+	require.NoError(t, err)
+
+	privateDataset, err = tc.Repos.DataSet.FindByCode(ctx, "PRIVATE_FX_RATE")
+	require.NoError(t, err)
+
+	activatedDataset, err := privateDataset.ActivateDataSet()
+	require.NoError(t, err)
+	err = tc.Repos.DataSet.Save(ctx, activatedDataset)
+	require.NoError(t, err)
+
+	// Create data source
+	source, err := domain.NewDataSource(
+		"PRIVATE_SOURCE",
+		"Private Source",
+		"Private data source",
+		domain.SourceTypeAPI,
+		90,
+	)
+	require.NoError(t, err)
+	err = tc.Repos.Source.Save(ctx, source)
+	require.NoError(t, err)
+	source, err = tc.Repos.Source.FindByCode(ctx, "PRIVATE_SOURCE")
+	require.NoError(t, err)
+
+	now := time.Now()
+
+	// Record observation in master tenant
+	masterObs, err := domain.NewMarketPriceObservation(
+		"PRIVATE_FX_RATE",
+		source.ID(),
+		"CHF/USD",
+		decimal.NewFromFloat(1.0900),
+		"USD",
+		now,
+		now,
+		now.Add(24*time.Hour),
+		uuid.New(),
+		domain.QualityLevelActual,
+		source.TrustLevel(),
+	)
+	require.NoError(t, err)
+	err = tc.Repos.Observation.Record(ctx, masterObs)
+	require.NoError(t, err)
+
+	// Create tenant context
+	tenantID, err := tc.CreateTenantSchema("tenant_c")
+	require.NoError(t, err)
+	tenantCtx := tc.WithTenant(ctx, tenantID)
+
+	// Query from tenant context - should NOT fall back to master for private dataset
+	// Private datasets don't get copied to tenant schemas, so we get ErrDataSetNotFound
+	_, err = tc.Repos.Observation.GetLatest(tenantCtx, "PRIVATE_FX_RATE", "CHF/USD")
+	assert.ErrorIs(t, err, domain.ErrDataSetNotFound,
+		"Private datasets should not be accessible from tenant schemas")
+}
+
+func TestObservationRepository_HierarchicalLookup_RestrictedAccessDenied(t *testing.T) {
+	tc := testhelpers.SetupTestContainer(t)
+	defer tc.Cleanup(t)
+
+	ctx := context.Background()
+	_, source := setupSharedDataSetAndSource(t, tc, "RESTRICTED_FX_RATE", domain.AccessLevelRestricted)
+
+	now := time.Now()
+
+	// Record observation in master tenant
+	masterObs, err := domain.NewMarketPriceObservation(
+		"RESTRICTED_FX_RATE",
+		source.ID(),
+		"JPY/USD",
+		decimal.NewFromFloat(0.0085),
+		"USD",
+		now,
+		now,
+		now.Add(24*time.Hour),
+		uuid.New(),
+		domain.QualityLevelActual,
+		source.TrustLevel(),
+	)
+	require.NoError(t, err)
+	err = tc.Repos.Observation.Record(ctx, masterObs)
+	require.NoError(t, err)
+
+	// Create tenant context WITHOUT entitlement
+	tenantID, err := tc.CreateTenantSchema("tenant_d")
+	require.NoError(t, err)
+	tenantCtx := tc.WithTenant(ctx, tenantID)
+
+	// Query from tenant context - should be denied access
+	_, err = tc.Repos.Observation.GetLatest(tenantCtx, "RESTRICTED_FX_RATE", "JPY/USD")
+	assert.ErrorIs(t, err, domain.ErrAccessDenied,
+		"RESTRICTED dataset should deny access without entitlement")
+}
+
+func TestObservationRepository_HierarchicalLookup_RestrictedAccessGranted(t *testing.T) {
+	tc := testhelpers.SetupTestContainer(t)
+	defer tc.Cleanup(t)
+
+	ctx := context.Background()
+	_, source := setupSharedDataSetAndSource(t, tc, "RESTRICTED_FX_RATE_GRANTED", domain.AccessLevelRestricted)
+
+	now := time.Now()
+
+	// Record observation in master tenant
+	masterObs, err := domain.NewMarketPriceObservation(
+		"RESTRICTED_FX_RATE_GRANTED",
+		source.ID(),
+		"CAD/USD",
+		decimal.NewFromFloat(0.7200),
+		"USD",
+		now,
+		now,
+		now.Add(24*time.Hour),
+		uuid.New(),
+		domain.QualityLevelActual,
+		source.TrustLevel(),
+	)
+	require.NoError(t, err)
+	err = tc.Repos.Observation.Record(ctx, masterObs)
+	require.NoError(t, err)
+
+	// Create tenant context
+	tenantID, err := tc.CreateTenantSchema("tenant_e")
+	require.NoError(t, err)
+	tenantCtx := tc.WithTenant(ctx, tenantID)
+
+	// Grant entitlement to tenant
+	err = tc.GrantTenantEntitlement(ctx, tenantID, "RESTRICTED_FX_RATE_GRANTED", nil)
+	require.NoError(t, err)
+
+	// Query from tenant context - should succeed with entitlement
+	result, err := tc.Repos.Observation.GetLatest(tenantCtx, "RESTRICTED_FX_RATE_GRANTED", "CAD/USD")
+	require.NoError(t, err, "RESTRICTED dataset should allow access with valid entitlement")
+	assert.True(t, decimal.NewFromFloat(0.7200).Equal(result.Value()),
+		"Should access master data with valid entitlement")
+	assert.Equal(t, masterObs.ID(), result.ID())
+}
+
+func TestObservationRepository_HierarchicalLookup_RestrictedAccessExpired(t *testing.T) {
+	tc := testhelpers.SetupTestContainer(t)
+	defer tc.Cleanup(t)
+
+	ctx := context.Background()
+	_, source := setupSharedDataSetAndSource(t, tc, "RESTRICTED_FX_RATE_EXPIRED", domain.AccessLevelRestricted)
+
+	now := time.Now()
+
+	// Record observation in master tenant
+	masterObs, err := domain.NewMarketPriceObservation(
+		"RESTRICTED_FX_RATE_EXPIRED",
+		source.ID(),
+		"AUD/USD",
+		decimal.NewFromFloat(0.6500),
+		"USD",
+		now,
+		now,
+		now.Add(24*time.Hour),
+		uuid.New(),
+		domain.QualityLevelActual,
+		source.TrustLevel(),
+	)
+	require.NoError(t, err)
+	err = tc.Repos.Observation.Record(ctx, masterObs)
+	require.NoError(t, err)
+
+	// Create tenant context
+	tenantID, err := tc.CreateTenantSchema("tenant_f")
+	require.NoError(t, err)
+	tenantCtx := tc.WithTenant(ctx, tenantID)
+
+	// Grant entitlement with past expiration date
+	expiresAt := now.Add(-24 * time.Hour) // Already expired
+	err = tc.GrantTenantEntitlement(ctx, tenantID, "RESTRICTED_FX_RATE_EXPIRED", &expiresAt)
+	require.NoError(t, err)
+
+	// Query from tenant context - should be denied due to expired entitlement
+	_, err = tc.Repos.Observation.GetLatest(tenantCtx, "RESTRICTED_FX_RATE_EXPIRED", "AUD/USD")
+	assert.ErrorIs(t, err, domain.ErrAccessDenied,
+		"RESTRICTED dataset should deny access with expired entitlement")
+}
+
+func TestObservationRepository_HierarchicalLookup_RestrictedAccessInactive(t *testing.T) {
+	tc := testhelpers.SetupTestContainer(t)
+	defer tc.Cleanup(t)
+
+	ctx := context.Background()
+	_, source := setupSharedDataSetAndSource(t, tc, "RESTRICTED_FX_RATE_INACTIVE", domain.AccessLevelRestricted)
+
+	now := time.Now()
+
+	// Record observation in master tenant
+	masterObs, err := domain.NewMarketPriceObservation(
+		"RESTRICTED_FX_RATE_INACTIVE",
+		source.ID(),
+		"NZD/USD",
+		decimal.NewFromFloat(0.6000),
+		"USD",
+		now,
+		now,
+		now.Add(24*time.Hour),
+		uuid.New(),
+		domain.QualityLevelActual,
+		source.TrustLevel(),
+	)
+	require.NoError(t, err)
+	err = tc.Repos.Observation.Record(ctx, masterObs)
+	require.NoError(t, err)
+
+	// Create tenant context
+	tenantID, err := tc.CreateTenantSchema("tenant_g")
+	require.NoError(t, err)
+	tenantCtx := tc.WithTenant(ctx, tenantID)
+
+	// Grant inactive entitlement
+	err = tc.GrantTenantEntitlement(ctx, tenantID, "RESTRICTED_FX_RATE_INACTIVE", nil)
+	require.NoError(t, err)
+
+	// Revoke entitlement (set is_active = false)
+	err = tc.RevokeTenantEntitlement(ctx, tenantID, "RESTRICTED_FX_RATE_INACTIVE")
+	require.NoError(t, err)
+
+	// Query from tenant context - should be denied due to inactive entitlement
+	_, err = tc.Repos.Observation.GetLatest(tenantCtx, "RESTRICTED_FX_RATE_INACTIVE", "NZD/USD")
+	assert.ErrorIs(t, err, domain.ErrAccessDenied,
+		"RESTRICTED dataset should deny access with inactive entitlement")
+}

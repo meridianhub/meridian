@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/meridianhub/meridian/services/market-information/domain"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/shopspring/decimal"
 )
 
@@ -19,12 +20,22 @@ import (
 // Supports bi-temporal queries with quality ladder resolution.
 type ObservationRepository struct {
 	baseRepository
+	datasetRepo    *DataSetRepository
+	masterTenantID tenant.TenantID // Pre-parsed at construction for efficiency
 }
 
 // NewObservationRepository creates a new PostgreSQL observation repository.
-func NewObservationRepository(pool *pgxpool.Pool) *ObservationRepository {
+// The masterTenantID is parsed once at construction to avoid repeated parsing on every query.
+// Panics if masterTenantID is invalid - this should be caught at startup.
+func NewObservationRepository(pool *pgxpool.Pool, datasetRepo *DataSetRepository, masterTenantID string) *ObservationRepository {
+	parsedID, err := tenant.NewTenantID(masterTenantID)
+	if err != nil {
+		panic(fmt.Sprintf("invalid masterTenantID %q: %v", masterTenantID, err))
+	}
 	return &ObservationRepository{
 		baseRepository: newBaseRepository(pool),
+		datasetRepo:    datasetRepo,
+		masterTenantID: parsedID,
 	}
 }
 
@@ -237,45 +248,11 @@ func (r *ObservationRepository) Query(ctx context.Context, query domain.Observat
 // GetLatest retrieves the most recent non-superseded observation
 // for a specific dataset and resolution key combination.
 // Uses the quality ladder for precedence: VERIFIED > ACTUAL > ESTIMATE.
+// For shared datasets, implements hierarchical lookup: tenant-first, then master fallback.
 // Returns ErrObservationNotFound if no matching observation exists.
 func (r *ObservationRepository) GetLatest(ctx context.Context, dataSetCode string, resolutionKey string) (domain.MarketPriceObservation, error) {
-	var result domain.MarketPriceObservation
-
-	err := r.withReadTransaction(ctx, func(tx pgx.Tx) error {
-		// First, resolve dataset definition ID from code
-		dataSetDefID, err := r.resolveDataSetDefinitionID(ctx, tx, dataSetCode)
-		if err != nil {
-			return err
-		}
-
-		// Use the bi-temporal index for efficient query
-		// Order by quality DESC (VERIFIED > ACTUAL > ESTIMATE), then observed_at DESC, then trust_level DESC
-		query := `
-			SELECT o.id, o.dataset_definition_id, o.data_source_id, o.resolution_key,
-				o.observed_at, o.valid_from, o.valid_to, o.created_at,
-				o.quality, o.numeric_value, o.text_value,
-				o.superseded_by, o.causation_id,
-				d.code as dataset_code,
-				s.trust_level
-			FROM market_price_observation o
-			JOIN dataset_definition d ON o.dataset_definition_id = d.id
-			JOIN data_source s ON o.data_source_id = s.id
-			WHERE o.dataset_definition_id = $1
-				AND o.resolution_key = $2
-				AND o.superseded_by IS NULL
-			ORDER BY o.quality DESC, o.observed_at DESC, s.trust_level DESC, o.created_at DESC
-			LIMIT 1`
-
-		obs, err := r.scanObservation(ctx, tx, query, dataSetDefID, resolutionKey)
-		if err != nil {
-			return err
-		}
-
-		result = obs
-		return nil
-	})
-
-	return result, err
+	// Delegate to RetrieveObservation with zero time (current knowledge)
+	return r.RetrieveObservation(ctx, dataSetCode, resolutionKey, time.Time{})
 }
 
 // RetrieveObservation retrieves the best observation for a resolution key at a specific knowledge time.
@@ -283,15 +260,89 @@ func (r *ObservationRepository) GetLatest(ctx context.Context, dataSetCode strin
 // Uses the quality ladder with trust level tiebreaker:
 // ORDER BY quality DESC, observed_at DESC, trust_level DESC, created_at DESC
 //
+// For shared datasets, implements hierarchical lookup:
+// 1. Query tenant-specific schema first
+// 2. If shared dataset and not found, fall through to master tenant schema
+// 3. For RESTRICTED datasets, verify tenant has active entitlements
+//
 // Parameters:
 //   - dataSetCode: The dataset code to query
 //   - resolutionKey: The unique resolution key (e.g., "EUR/USD")
 //   - knowledgeBaseTime: The point in time to query "what was known". Use time.Time{} for current knowledge.
 func (r *ObservationRepository) RetrieveObservation(ctx context.Context, dataSetCode string, resolutionKey string, knowledgeBaseTime time.Time) (domain.MarketPriceObservation, error) {
+	// If knowledgeBaseTime is zero, use current time
+	kbt := knowledgeBaseTime
+	if kbt.IsZero() {
+		kbt = time.Now()
+	}
+
+	// Step 1: Check if dataset is shared (determines whether fallback is allowed)
+	// IMPORTANT: Dataset metadata lookups must use master tenant context, not the tenant-scoped context.
+	// The dataset_definition table (is_shared, access_level) is the authoritative source of truth
+	// for sharing configuration and lives in the master schema. Even though test helpers may copy
+	// dataset definitions to tenant schemas, the master schema is canonical for configuration decisions.
+	//
+	// There is a benign race condition here: if dataset config is updated between this check and the
+	// actual observation query, we may use stale is_shared/access_level values. This is acceptable
+	// because dataset config changes are rare and eventual consistency is sufficient.
+	tenantID, hasTenantContext := tenant.FromContext(ctx)
+	masterCtx := tenant.WithTenant(ctx, r.masterTenantID)
+	dataset, err := r.datasetRepo.FindByCode(masterCtx, dataSetCode)
+	if err != nil {
+		return domain.MarketPriceObservation{}, err
+	}
+
+	// Step 2: For RESTRICTED datasets with tenant context, verify entitlements upfront.
+	// This check applies regardless of where the data is stored (tenant or master schema).
+	// For RESTRICTED datasets, access is only granted if the tenant has an active entitlement.
+	// PUBLIC datasets skip this check entirely. PRIVATE datasets are tenant-isolated by schema.
+	//
+	// Security note: When no tenant context exists (system/background jobs), RESTRICTED datasets
+	// are accessible without entitlement checks. This is intentional - system processes need
+	// full data access for operations like ingestion, reconciliation, and reporting. Tenant context
+	// should always be set for user-facing API requests to enforce proper access control.
+	if dataset.AccessLevel() == domain.AccessLevelRestricted && hasTenantContext {
+		hasAccess, err := r.checkTenantAccess(ctx, tenantID, dataSetCode)
+		if err != nil {
+			return domain.MarketPriceObservation{}, err
+		}
+		if !hasAccess {
+			return domain.MarketPriceObservation{}, domain.ErrAccessDenied
+		}
+	}
+
+	// Step 3: Query current schema first (tenant-specific or default/public)
+	obs, err := r.queryObservationInSchema(ctx, dataSetCode, resolutionKey, kbt)
+	if err == nil {
+		return obs, nil // Found in current schema
+	}
+	// Non-NotFound errors indicate real database issues (connection, permissions, etc.).
+	// We intentionally do NOT fall back to master for real errors - this prevents masking
+	// underlying issues that should be surfaced and investigated.
+	if !errors.Is(err, domain.ErrObservationNotFound) {
+		return domain.MarketPriceObservation{}, err
+	}
+	// Not found in current schema - proceed to hierarchical fallback if applicable
+
+	// Step 4: If shared dataset and not found in tenant schema, try master fallback.
+	// When no tenant context exists (e.g., background jobs, system queries), we're already
+	// querying the default schema (likely master), so no fallback is needed.
+	if dataset.IsShared() && hasTenantContext {
+		// Fall through to master tenant schema (masterCtx was created with r.masterTenantID above)
+		return r.queryObservationInSchema(masterCtx, dataSetCode, resolutionKey, kbt)
+	}
+
+	// Not found (either not shared, or already queried master fallback, or no tenant context)
+	return domain.MarketPriceObservation{}, domain.ErrObservationNotFound
+}
+
+// queryObservationInSchema performs the actual database query in the current tenant scope.
+// This method respects the search_path set by baseRepository's transaction wrapper.
+func (r *ObservationRepository) queryObservationInSchema(ctx context.Context, dataSetCode string, resolutionKey string, knowledgeBaseTime time.Time) (domain.MarketPriceObservation, error) {
 	var result domain.MarketPriceObservation
 
 	err := r.withReadTransaction(ctx, func(tx pgx.Tx) error {
-		// First, resolve dataset definition ID from code
+		// Resolve dataset definition ID from code
 		dataSetDefID, err := r.resolveDataSetDefinitionID(ctx, tx, dataSetCode)
 		if err != nil {
 			return err
@@ -316,13 +367,7 @@ func (r *ObservationRepository) RetrieveObservation(ctx context.Context, dataSet
 			ORDER BY o.quality DESC, o.observed_at DESC, s.trust_level DESC, o.created_at DESC
 			LIMIT 1`
 
-		// If knowledgeBaseTime is zero, use current time
-		kbt := knowledgeBaseTime
-		if kbt.IsZero() {
-			kbt = time.Now()
-		}
-
-		obs, err := r.scanObservation(ctx, tx, query, dataSetDefID, resolutionKey, kbt)
+		obs, err := r.scanObservation(ctx, tx, query, dataSetDefID, resolutionKey, knowledgeBaseTime)
 		if err != nil {
 			return err
 		}
@@ -332,6 +377,33 @@ func (r *ObservationRepository) RetrieveObservation(ctx context.Context, dataSet
 	})
 
 	return result, err
+}
+
+// checkTenantAccess verifies tenant has rights to access shared dataset.
+// Queries the tenant_data_entitlements table to check for active entitlements.
+//
+// IMPORTANT: This query intentionally uses the public schema (not tenant-scoped).
+// The tenant_data_entitlements table is a global registry that lives in the public schema,
+// not replicated per tenant. Using pool.QueryRow directly ensures we query public.tenant_data_entitlements.
+//
+// Note: This check runs outside the observation query transaction. There's a small TOCTOU window
+// where entitlement could be revoked between this check and data access. This is acceptable
+// because entitlement revocations are rare and eventual consistency is sufficient for this use case.
+func (r *ObservationRepository) checkTenantAccess(ctx context.Context, tenantID tenant.TenantID, dataSetCode string) (bool, error) {
+	query := `
+		SELECT EXISTS(
+			SELECT 1 FROM public.tenant_data_entitlements
+			WHERE tenant_id = $1 AND dataset_code = $2 AND is_active = TRUE
+			AND (expires_at IS NULL OR expires_at > NOW())
+		)`
+
+	var hasAccess bool
+	err := r.pool.QueryRow(ctx, query, tenantID.String(), dataSetCode).Scan(&hasAccess)
+	if err != nil {
+		return false, fmt.Errorf("failed to check tenant access: %w", err)
+	}
+
+	return hasAccess, nil
 }
 
 // resolveDataSetDefinitionID looks up the dataset definition ID from code.

@@ -18,6 +18,8 @@ func DataSetDefinitionToEntity(d domain.DataSetDefinition) DataSetDefinitionEnti
 		Name:                    d.Name(),
 		ResolutionKeyExpression: d.ResolutionKeyExpression(),
 		Status:                  d.Status().String(),
+		IsShared:                d.IsShared(),
+		AccessLevel:             d.AccessLevel().String(),
 		CreatedAt:               d.CreatedAt(),
 		UpdatedAt:               d.UpdatedAt(),
 	}
@@ -53,6 +55,8 @@ func EntityToDataSetDefinition(e DataSetDefinitionEntity) domain.DataSetDefiniti
 		WithName(e.Name).
 		WithResolutionKeyExpression(e.ResolutionKeyExpression).
 		WithStatus(parseDataSetStatus(e.Status)).
+		WithIsShared(e.IsShared).
+		WithAccessLevel(parseAccessLevel(e.AccessLevel)).
 		WithCreatedAt(e.CreatedAt).
 		WithUpdatedAt(e.UpdatedAt)
 
@@ -92,6 +96,16 @@ func parseDataSetStatus(s string) domain.DataSetStatus {
 	default:
 		return domain.DataSetStatusDraft
 	}
+}
+
+// parseAccessLevel converts a string to domain.DataAccessLevel with validation.
+// Returns AccessLevelPrivate (the safest default) if the value is invalid.
+func parseAccessLevel(s string) domain.DataAccessLevel {
+	level := domain.DataAccessLevel(s)
+	if !level.IsValid() {
+		return domain.AccessLevelPrivate
+	}
+	return level
 }
 
 // DataSourceToEntity converts a domain DataSource to a database entity.

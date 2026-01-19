@@ -16,10 +16,23 @@ type Repositories struct {
 
 // NewRepositories creates all repository implementations with a shared connection pool.
 // This is the recommended way to create repositories for production use.
-func NewRepositories(pool *pgxpool.Pool) *Repositories {
+//
+// masterTenantID is the tenant ID that hosts shared/public market data (e.g., "master").
+// This should be sourced from the MASTER_TENANT_ID environment variable in production.
+// The master tenant's schema contains canonical shared datasets that other tenants
+// can access via hierarchical lookup (tenant-first, then master fallback).
+//
+// Panics if masterTenantID is empty - this is a fatal configuration error that should be caught at startup.
+func NewRepositories(pool *pgxpool.Pool, masterTenantID string) *Repositories {
+	// Validate masterTenantID upfront - fail fast if misconfigured
+	if masterTenantID == "" {
+		panic("masterTenantID cannot be empty - set MASTER_TENANT_ID environment variable for multi-tenant data access")
+	}
+
+	datasetRepo := NewDataSetRepository(pool)
 	return &Repositories{
-		DataSet:     NewDataSetRepository(pool),
-		Observation: NewObservationRepository(pool),
+		DataSet:     datasetRepo,
+		Observation: NewObservationRepository(pool, datasetRepo, masterTenantID),
 		Source:      NewSourceRepository(pool),
 	}
 }
