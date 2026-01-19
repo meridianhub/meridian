@@ -119,6 +119,8 @@ func loadSchema(t *testing.T, pool *pgxpool.Pool) {
 			error_message_expression text NULL,
 			attribute_schema jsonb NULL,
 			status character varying(20) NOT NULL DEFAULT 'DRAFT',
+			is_shared BOOLEAN NOT NULL DEFAULT FALSE,
+			access_level VARCHAR(50) NOT NULL DEFAULT 'PRIVATE',
 			created_at timestamptz NOT NULL DEFAULT now(),
 			created_by character varying(100) NOT NULL DEFAULT 'SYSTEM',
 			updated_at timestamptz NOT NULL DEFAULT now(),
@@ -128,7 +130,8 @@ func loadSchema(t *testing.T, pool *pgxpool.Pool) {
 			deprecated_at timestamptz NULL,
 			PRIMARY KEY (id),
 			CONSTRAINT uq_dataset_definition_code_version UNIQUE (code, version),
-			CONSTRAINT chk_dataset_definition_status CHECK (status IN ('DRAFT', 'ACTIVE', 'DEPRECATED'))
+			CONSTRAINT chk_dataset_definition_status CHECK (status IN ('DRAFT', 'ACTIVE', 'DEPRECATED')),
+			CONSTRAINT chk_dataset_definition_access_level CHECK (access_level IN ('PUBLIC', 'PRIVATE', 'RESTRICTED'))
 		)
 	`)
 	require.NoError(t, err, "Failed to create dataset_definition table")
@@ -200,4 +203,33 @@ func loadSchema(t *testing.T, pool *pgxpool.Pool) {
 		CREATE INDEX idx_data_source_deleted_at ON data_source (deleted_at);
 	`)
 	require.NoError(t, err, "Failed to create data_source indexes")
+
+	// Create tenant_data_entitlements table
+	_, err = pool.Exec(ctx, `
+		CREATE TABLE tenant_data_entitlements (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			tenant_id VARCHAR(255) NOT NULL,
+			dataset_code VARCHAR(255) NOT NULL,
+			is_active BOOLEAN NOT NULL DEFAULT TRUE,
+			granted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			expires_at TIMESTAMPTZ NULL,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			created_by VARCHAR(100) NOT NULL DEFAULT 'SYSTEM',
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_by VARCHAR(100) NOT NULL DEFAULT 'SYSTEM',
+			CONSTRAINT uq_tenant_dataset UNIQUE (tenant_id, dataset_code)
+		)
+	`)
+	require.NoError(t, err, "Failed to create tenant_data_entitlements table")
+
+	// Create tenant_data_entitlements indexes
+	_, err = pool.Exec(ctx, `
+		CREATE INDEX idx_entitlements_tenant_dataset
+			ON tenant_data_entitlements(tenant_id, dataset_code, is_active)
+			WHERE is_active = TRUE;
+		CREATE INDEX idx_entitlements_expires_at
+			ON tenant_data_entitlements(expires_at)
+			WHERE expires_at IS NOT NULL AND is_active = TRUE;
+	`)
+	require.NoError(t, err, "Failed to create tenant_data_entitlements indexes")
 }

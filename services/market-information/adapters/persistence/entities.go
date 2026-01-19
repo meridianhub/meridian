@@ -21,6 +21,8 @@ type DataSetDefinitionEntity struct {
 	ResolutionKeyExpression string
 	ErrorMessageExpression  sql.NullString
 	Status                  string
+	IsShared                bool
+	AccessLevel             string
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
 	ActivatedAt             sql.NullTime

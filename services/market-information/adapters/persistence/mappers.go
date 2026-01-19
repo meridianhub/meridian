@@ -18,6 +18,8 @@ func DataSetDefinitionToEntity(d domain.DataSetDefinition) DataSetDefinitionEnti
 		Name:                    d.Name(),
 		ResolutionKeyExpression: d.ResolutionKeyExpression(),
 		Status:                  d.Status().String(),
+		IsShared:                d.IsShared(),
+		AccessLevel:             d.AccessLevel().String(),
 		CreatedAt:               d.CreatedAt(),
 		UpdatedAt:               d.UpdatedAt(),
 	}
@@ -53,6 +55,8 @@ func EntityToDataSetDefinition(e DataSetDefinitionEntity) domain.DataSetDefiniti
 		WithName(e.Name).
 		WithResolutionKeyExpression(e.ResolutionKeyExpression).
 		WithStatus(parseDataSetStatus(e.Status)).
+		WithIsShared(e.IsShared).
+		WithAccessLevel(domain.DataAccessLevel(e.AccessLevel)).
 		WithCreatedAt(e.CreatedAt).
 		WithUpdatedAt(e.UpdatedAt)
 
