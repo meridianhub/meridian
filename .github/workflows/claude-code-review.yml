@@ -157,36 +157,35 @@ jobs:
 
             ## How to Comment
 
-            **Summary comment**: Post via `gh pr comment --repo ${{ github.repository }} --number ${{ steps.pr.outputs.number }} --body "..."`
-
-            **Inline comments on specific lines**: Use `gh api` to post review comments:
+            **Submit a review with approval status and inline comments** using the reviews endpoint:
             ```bash
-            gh api repos/${{ github.repository }}/pulls/${{ steps.pr.outputs.number }}/comments \
+            gh api repos/${{ github.repository }}/pulls/${{ steps.pr.outputs.number }}/reviews \
               --method POST \
-              -f body="Your comment" \
-              -f commit_id="$(gh pr view ${{ steps.pr.outputs.number }} --json headRefOid -q .headRefOid)" \
-              -f path="path/to/file.go" \
-              -f line=42
+              -f event="APPROVE" \
+              -f body="Your summary comment" \
+              --raw-field comments='[{"path":"file.go","line":42,"body":"Inline comment"}]'
             ```
 
+            The `event` field can be: `APPROVE`, `REQUEST_CHANGES`, or `COMMENT`.
+            This batches all inline comments in one API call and sets the review status.
+
             **For actionable suggestions** (copy-pasteable by humans into their local Claude):
-            ```markdown
+            Use collapsible details blocks in the inline comment body:
+            ```
             <details>
             <summary>💡 Suggestion: Brief title</summary>
-
-            **File**: `path/to/file.go:42`
 
             **Issue**: What's wrong and why it matters
 
             **Suggested fix**:
-            ```go
-            // paste the corrected code here
-            ```
+            ~~~go
+            // corrected code here
+            ~~~
 
             </details>
             ```
 
-            This format is collapsible in GitHub, and humans can copy the content to paste into their local Claude session.
+            This format is collapsible in GitHub. Humans can copy the content to paste into their local Claude session.
 
             ---
 
