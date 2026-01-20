@@ -31,6 +31,7 @@ flowchart LR
             Party["Party<br/>:50055"]
             PO["PaymentOrder<br/>:50054, :8080"]
             RD["ReferenceData<br/>:50051"]
+            MI["MarketInformation<br/>:50058"]
         end
 
         subgraph Infrastructure["Infrastructure"]
@@ -49,6 +50,7 @@ flowchart LR
     GW -->|"Proxy (gRPC)"| CA
     GW -->|"Proxy (gRPC)"| PO
     GW -->|"Proxy (gRPC)"| Party
+    GW -->|"Proxy (gRPC)"| MI
     PayGW -->|"HTTP Webhook"| PO
 
     %% Admin tool connections
@@ -79,6 +81,7 @@ flowchart LR
     PO -->|"SQL"| DB
     Tenant -->|"SQL"| DB
     RD -->|"SQL"| DB
+    MI -->|"SQL"| DB
     GW -->|"SQL (tenant lookup)"| DB
 
     %% Redis (optional caching/idempotency)
@@ -98,7 +101,7 @@ flowchart LR
     classDef external fill:#ff9800,stroke:#e65100,color:#fff
     classDef admin fill:#9c27b0,stroke:#6a1b9a,color:#fff
 
-    class CA,PK,FA,Party,PO,RD service
+    class CA,PK,FA,Party,PO,RD,MI service
     class GW edge
     class Tenant,AW,UMC,DB,Kafka,Redis storage
     class User,PayGW,AuthProvider external
@@ -235,6 +238,7 @@ Redis provides optional distributed idempotency for exactly-once semantics:
 | Party | 50055 | - | 9090 |
 | PaymentOrder | 50054 | 8080 | 9090 |
 | ReferenceData | 50051 | - | 9090 |
+| MarketInformation | 50058 | - | 8082 |
 | Tenant | 50056 | - | 9090 |
 | audit-worker | - | 8080 | 8080 |
 | utilization-metering-consumer | - | 8080 | 8080 |
