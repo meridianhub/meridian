@@ -157,18 +157,36 @@ jobs:
 
             ## How to Comment
 
-            Use inline comments on specific lines where helpful. For the summary, post via `gh pr comment`.
+            **Summary comment**: Post via `gh pr comment --repo ${{ github.repository }} --number ${{ steps.pr.outputs.number }} --body "..."`
 
-            For inline comments that the local Claude can action:
+            **Inline comments on specific lines**: Use `gh api` to post review comments:
+            ```bash
+            gh api repos/${{ github.repository }}/pulls/${{ steps.pr.outputs.number }}/comments \
+              --method POST \
+              -f body="Your comment" \
+              -f commit_id="$(gh pr view ${{ steps.pr.outputs.number }} --json headRefOid -q .headRefOid)" \
+              -f path="path/to/file.go" \
+              -f line=42
             ```
-            <details>
-            <summary>💡 Suggestion</summary>
 
-            File: path/to/file.go:42
-            Action: Brief description of what to change
+            **For actionable suggestions** (copy-pasteable by humans into their local Claude):
+            ```markdown
+            <details>
+            <summary>💡 Suggestion: Brief title</summary>
+
+            **File**: `path/to/file.go:42`
+
+            **Issue**: What's wrong and why it matters
+
+            **Suggested fix**:
+            ```go
+            // paste the corrected code here
+            ```
 
             </details>
             ```
+
+            This format is collapsible in GitHub, and humans can copy the content to paste into their local Claude session.
 
             ---
 
