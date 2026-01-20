@@ -28,10 +28,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const (
-	benchTenantID = "bench_tenant"
-)
-
 // testContainer holds all benchmark infrastructure components.
 type testContainer struct {
 	ctx      context.Context
@@ -42,6 +38,8 @@ type testContainer struct {
 }
 
 // setupTestContainer creates a fresh test container for validation tests.
+// Uses master context (no tenant) to match repository test patterns and avoid
+// multi-tenant complexity in performance benchmarks.
 func setupTestContainer(t *testing.T) *testContainer {
 	t.Helper()
 
@@ -51,18 +49,15 @@ func setupTestContainer(t *testing.T) *testContainer {
 		tc.Cleanup(t)
 	})
 
-	// Create tenant schema for benchmarks
-	tenantID, err := tc.CreateTenantSchema(benchTenantID)
-	require.NoError(t, err, "Failed to create tenant schema")
-
-	// Create context with tenant ID
-	ctx := tc.WithTenant(context.Background(), tenantID)
+	// Use master context (no tenant) for benchmark operations
+	// This matches how repository tests work and avoids multi-tenant lookup complexity
+	ctx := context.Background()
 
 	return &testContainer{
 		ctx:      ctx,
 		pool:     tc.Pool,
 		repos:    tc.Repos,
-		tenantID: tenantID,
+		tenantID: tenant.TenantID(""),
 		tc:       tc,
 	}
 }

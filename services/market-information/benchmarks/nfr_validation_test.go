@@ -44,6 +44,7 @@ func TestNFR_PointInTimeQueryLatency(t *testing.T) {
 	for i := 0; i < numObservations; i++ {
 		observedAt := baseTime.Add(time.Duration(i) * 10 * time.Minute)
 		obs := domain.NewMarketPriceObservationBuilder().
+			WithID(uuid.New()).
 			WithDataSetCode(dataset.Code()).
 			WithSourceID(source.ID()).
 			WithResolutionKey(resolutionKey).
@@ -114,6 +115,7 @@ func TestNFR_ObservationIngestionLatency(t *testing.T) {
 	// Warm up
 	for i := 0; i < 10; i++ {
 		obs := domain.NewMarketPriceObservationBuilder().
+			WithID(uuid.New()).
 			WithDataSetCode(dataset.Code()).
 			WithSourceID(source.ID()).
 			WithResolutionKey(fmt.Sprintf("WARMUP-KEY-%d", i)).
@@ -133,6 +135,7 @@ func TestNFR_ObservationIngestionLatency(t *testing.T) {
 	// Measure latencies
 	for i := 0; i < iterations; i++ {
 		obs := domain.NewMarketPriceObservationBuilder().
+			WithID(uuid.New()).
 			WithDataSetCode(dataset.Code()).
 			WithSourceID(source.ID()).
 			WithResolutionKey(fmt.Sprintf("INGEST-KEY-%08d", i)).
@@ -244,6 +247,7 @@ func TestNFR_ConcurrentIngestion(t *testing.T) {
 
 			for op := 0; op < operationsPerWorker; op++ {
 				obs := domain.NewMarketPriceObservationBuilder().
+					WithID(uuid.New()).
 					WithDataSetCode(dataset.Code()).
 					WithSourceID(source.ID()).
 					WithResolutionKey(fmt.Sprintf("CONC-%03d-%04d", workerID, op)).
@@ -328,6 +332,7 @@ func TestNFR_SupersessionPerformance(t *testing.T) {
 	// Measure baseline ingestion (no supersession)
 	for i := 0; i < iterations; i++ {
 		obs := domain.NewMarketPriceObservationBuilder().
+			WithID(uuid.New()).
 			WithDataSetCode(dataset.Code()).
 			WithSourceID(source.ID()).
 			WithResolutionKey(fmt.Sprintf("BASELINE-KEY-%08d", i)).
@@ -350,6 +355,7 @@ func TestNFR_SupersessionPerformance(t *testing.T) {
 	for i := 0; i < iterations; i++ {
 		// First, insert an ESTIMATE
 		estimate := domain.NewMarketPriceObservationBuilder().
+			WithID(uuid.New()).
 			WithDataSetCode(dataset.Code()).
 			WithSourceID(source.ID()).
 			WithResolutionKey(fmt.Sprintf("SUPER-KEY-%08d", i)).
@@ -367,6 +373,7 @@ func TestNFR_SupersessionPerformance(t *testing.T) {
 
 		// Then insert an ACTUAL (which should supersede the ESTIMATE)
 		actual := domain.NewMarketPriceObservationBuilder().
+			WithID(uuid.New()).
 			WithDataSetCode(dataset.Code()).
 			WithSourceID(source.ID()).
 			WithResolutionKey(fmt.Sprintf("SUPER-KEY-%08d", i)).
@@ -492,6 +499,7 @@ func TestNFR_SustainedThroughput(t *testing.T) {
 	numObservations := 100
 	for i := 0; i < numObservations; i++ {
 		obs := domain.NewMarketPriceObservationBuilder().
+			WithID(uuid.New()).
 			WithDataSetCode(dataset.Code()).
 			WithSourceID(source.ID()).
 			WithResolutionKey(fmt.Sprintf("SUSTAINED-KEY-%04d", i)).
@@ -532,6 +540,7 @@ func TestNFR_SustainedThroughput(t *testing.T) {
 				if localCount%5 == 0 {
 					// 20% writes
 					obs := domain.NewMarketPriceObservationBuilder().
+						WithID(uuid.New()).
 						WithDataSetCode(dataset.Code()).
 						WithSourceID(source.ID()).
 						WithResolutionKey(fmt.Sprintf("SUSTAINED-WRITE-%d-%d", workerID, localCount)).
