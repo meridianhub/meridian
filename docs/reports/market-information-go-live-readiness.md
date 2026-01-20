@@ -7,6 +7,7 @@
 ## Executive Summary
 
 The Market Information Management service is **READY FOR GO-LIVE** with the following caveats:
+
 - All P0 and P1 functional requirements are implemented
 - Documentation is complete (ADR, runbook, integration guide)
 - Performance validation tests are in place
@@ -23,6 +24,7 @@ The Market Information Management service is **READY FOR GO-LIVE** with the foll
 | ADR-0027 | `docs/adr/0027-market-information-management.md` | COMPLETE |
 
 **ADR Coverage:**
+
 - [x] Context and problem statement
 - [x] Decision drivers
 - [x] Core domain model (MarketPriceObservation, DataSetDefinition, DataSource)
@@ -43,6 +45,7 @@ The Market Information Management service is **READY FOR GO-LIVE** with the foll
 | Operations Runbook | `docs/runbooks/market-information-operations.md` | COMPLETE |
 
 **Runbook Coverage:**
+
 - [x] Service overview (ports, dependencies)
 - [x] Key concepts (data categories, quality ladder, bi-temporal model)
 - [x] Dataset lifecycle diagram
@@ -60,6 +63,7 @@ The Market Information Management service is **READY FOR GO-LIVE** with the foll
 | Integration Analysis | `docs/reports/market-information-integration.md` | COMPLETE |
 
 **Integration Coverage:**
+
 - [x] Client library analysis (capabilities table)
 - [x] Usage examples (Kubernetes, development, rate lookup, batch)
 - [x] Integration patterns by consuming service
