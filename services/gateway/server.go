@@ -8,8 +8,11 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/meridianhub/meridian/services/gateway/auth"
+	gwhealth "github.com/meridianhub/meridian/services/gateway/health"
+	"github.com/meridianhub/meridian/shared/pkg/health"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	platformgateway "github.com/meridianhub/meridian/shared/platform/gateway"
 )
@@ -24,6 +27,7 @@ type Server struct {
 	tenantResolver        *platformgateway.TenantResolverMiddleware
 	authMiddleware        *auth.CombinedAuthMiddleware
 	tenantAuthzMiddleware *auth.TenantAuthorizationMiddleware
+	healthChecker         *gwhealth.GatewayHealthChecker
 }
 
 // ServerOption is a functional option for configuring the server.
@@ -33,6 +37,13 @@ type ServerOption func(*Server)
 func WithAuthMiddleware(authMiddleware *auth.CombinedAuthMiddleware) ServerOption {
 	return func(s *Server) {
 		s.authMiddleware = authMiddleware
+	}
+}
+
+// WithHealthChecker sets the health checker for readiness probes.
+func WithHealthChecker(healthChecker *gwhealth.GatewayHealthChecker) ServerOption {
+	return func(s *Server) {
+		s.healthChecker = healthChecker
 	}
 }
 
@@ -132,15 +143,89 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 // handleReady is the readiness probe endpoint.
 // Returns 200 OK if the server is ready to accept traffic.
 // This endpoint does NOT require tenant context.
+//
+// Health status to HTTP mapping:
+//   - Healthy: 200 OK (all critical dependencies up)
+//   - Degraded: 200 OK (critical dependencies up, optional may be down)
+//   - Unhealthy: 503 Service Unavailable (critical dependencies down)
+//   - Unknown: 503 Service Unavailable (cannot determine)
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
-	// TODO: Add actual readiness checks (database, redis, backends)
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	if _, err := w.Write([]byte("READY")); err != nil {
-		s.logger.Warn("failed to write readiness response",
-			"error", err,
-			"endpoint", r.URL.Path,
-			"remote_addr", r.RemoteAddr)
+	// If no health checker configured, fail open (return ready)
+	// This maintains backwards compatibility during migration
+	if s.healthChecker == nil {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		if _, err := w.Write([]byte("READY")); err != nil {
+			s.logger.Warn("failed to write readiness response",
+				"error", err,
+				"endpoint", r.URL.Path,
+				"remote_addr", r.RemoteAddr)
+		}
+		return
+	}
+
+	// Execute health checks with timeout
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	report := s.healthChecker.Check(ctx)
+	overallStatus := report.OverallStatus()
+
+	// Map health status to HTTP status
+	if overallStatus == health.StatusHealthy || overallStatus == health.StatusDegraded {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		if _, err := w.Write([]byte("READY")); err != nil {
+			s.logger.Warn("failed to write readiness response",
+				"error", err,
+				"endpoint", r.URL.Path,
+				"remote_addr", r.RemoteAddr)
+		}
+
+		// Log degraded status as warning
+		if overallStatus == health.StatusDegraded {
+			s.logHealthCheckResult(ctx, report, overallStatus, slog.LevelWarn)
+		}
+	} else {
+		// Unhealthy or Unknown - not ready for traffic
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		if _, err := w.Write([]byte("NOT READY")); err != nil {
+			s.logger.Warn("failed to write readiness response",
+				"error", err,
+				"endpoint", r.URL.Path,
+				"remote_addr", r.RemoteAddr)
+		}
+
+		s.logHealthCheckResult(ctx, report, overallStatus, slog.LevelError)
+	}
+}
+
+// logHealthCheckResult logs the health check result with structured details.
+func (s *Server) logHealthCheckResult(ctx context.Context, report *health.Report, overallStatus health.Status, level slog.Level) {
+	// Build component status map for structured logging
+	componentStatuses := make(map[string]string)
+	for _, comp := range report.Components {
+		componentStatuses[comp.Name] = comp.Status.String()
+	}
+
+	s.logger.Log(ctx, level, "gateway readiness check",
+		"overall_status", overallStatus.String(),
+		"component_count", len(report.Components),
+		"components", componentStatuses)
+
+	// Log individual component failures at error level
+	if level >= slog.LevelWarn {
+		for _, comp := range report.Components {
+			if comp.Status == health.StatusUnhealthy || comp.Status == health.StatusUnknown {
+				s.logger.Error("component unhealthy",
+					"component", comp.Name,
+					"status", comp.Status.String(),
+					"message", comp.Message,
+					"response_time_ms", comp.ResponseTime.Milliseconds(),
+					"error", comp.Error)
+			}
+		}
 	}
 }
 

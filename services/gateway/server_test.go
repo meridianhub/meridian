@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -9,8 +10,17 @@ import (
 	"testing"
 	"time"
 
+	gwhealth "github.com/meridianhub/meridian/services/gateway/health"
+	"github.com/meridianhub/meridian/shared/pkg/health"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+)
+
+// Test error sentinels
+var (
+	errConnectionTimeout = errors.New("connection timeout")
+	errConnectionRefused = errors.New("connection refused")
+	errServiceDown       = errors.New("down")
 )
 
 // TestHealthEndpoints_NoTenantContext verifies that health endpoints
@@ -438,4 +448,217 @@ func TestHealthEndpoints_NoPanicOnWriteError(t *testing.T) {
 			assert.Equal(t, http.StatusOK, w.statusCode)
 		})
 	}
+}
+
+// mockChecker implements health.Checker for testing.
+type mockChecker struct {
+	name   string
+	status health.Status
+	err    error
+}
+
+func (m *mockChecker) Name() string {
+	return m.name
+}
+
+func (m *mockChecker) Check(_ context.Context) health.ComponentResult {
+	message := m.name + " check successful"
+	if m.err != nil {
+		message = m.name + " check failed: " + m.err.Error()
+	}
+	return health.ComponentResult{
+		Name:         m.name,
+		Status:       m.status,
+		Message:      message,
+		ResponseTime: 10 * time.Millisecond,
+		CheckedAt:    time.Now(),
+		Error:        m.err,
+	}
+}
+
+// TestHandleReady_NoHealthChecker verifies backwards compatibility when health checker is nil.
+func TestHandleReady_NoHealthChecker(t *testing.T) {
+	config := &Config{
+		Port:        8080,
+		BaseDomain:  "api.example.com",
+		DatabaseURL: "postgres://localhost/test",
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	server := NewServer(config, logger, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+	rec := httptest.NewRecorder()
+
+	server.mux.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "READY", rec.Body.String())
+}
+
+// TestHandleReady_AllHealthy verifies 200 OK when all checks pass.
+func TestHandleReady_AllHealthy(t *testing.T) {
+	config := &Config{
+		Port:        8080,
+		BaseDomain:  "api.example.com",
+		DatabaseURL: "postgres://localhost/test",
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	checkers := []health.Checker{
+		&mockChecker{name: "database", status: health.StatusHealthy},
+		&mockChecker{name: "redis", status: health.StatusHealthy},
+	}
+	healthChecker := gwhealth.NewGatewayHealthChecker(gwhealth.Config{
+		Checkers:     checkers,
+		CheckTimeout: 5 * time.Second,
+	})
+
+	server := NewServer(config, logger, nil, WithHealthChecker(healthChecker))
+
+	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+	rec := httptest.NewRecorder()
+
+	server.mux.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "READY", rec.Body.String())
+}
+
+// TestHandleReady_Degraded verifies 200 OK when system is degraded (optional deps down).
+func TestHandleReady_Degraded(t *testing.T) {
+	config := &Config{
+		Port:        8080,
+		BaseDomain:  "api.example.com",
+		DatabaseURL: "postgres://localhost/test",
+	}
+
+	logHandler := &logCapture{}
+	logger := slog.New(logHandler)
+
+	checkers := []health.Checker{
+		&mockChecker{name: "database", status: health.StatusHealthy},
+		&mockChecker{name: "redis", status: health.StatusDegraded, err: errConnectionTimeout},
+	}
+	healthChecker := gwhealth.NewGatewayHealthChecker(gwhealth.Config{
+		Checkers:     checkers,
+		CheckTimeout: 5 * time.Second,
+	})
+
+	server := NewServer(config, logger, nil, WithHealthChecker(healthChecker))
+
+	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+	rec := httptest.NewRecorder()
+
+	server.mux.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code, "degraded system should still return 200 OK")
+	assert.Equal(t, "READY", rec.Body.String())
+
+	// Verify warning was logged
+	require.GreaterOrEqual(t, len(logHandler.entries), 1)
+	found := false
+	for _, entry := range logHandler.entries {
+		if entry["level"] == "WARN" && entry["msg"] == "gateway readiness check" {
+			found = true
+			assert.Equal(t, "degraded", entry["overall_status"])
+			break
+		}
+	}
+	assert.True(t, found, "expected warning log for degraded status")
+}
+
+// TestHandleReady_Unhealthy verifies 503 when critical deps are down.
+func TestHandleReady_Unhealthy(t *testing.T) {
+	config := &Config{
+		Port:        8080,
+		BaseDomain:  "api.example.com",
+		DatabaseURL: "postgres://localhost/test",
+	}
+
+	logHandler := &logCapture{}
+	logger := slog.New(logHandler)
+
+	checkers := []health.Checker{
+		&mockChecker{name: "database", status: health.StatusUnhealthy, err: errConnectionRefused},
+		&mockChecker{name: "redis", status: health.StatusHealthy},
+	}
+	healthChecker := gwhealth.NewGatewayHealthChecker(gwhealth.Config{
+		Checkers:     checkers,
+		CheckTimeout: 5 * time.Second,
+	})
+
+	server := NewServer(config, logger, nil, WithHealthChecker(healthChecker))
+
+	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+	rec := httptest.NewRecorder()
+
+	server.mux.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code, "unhealthy system should return 503")
+	assert.Equal(t, "NOT READY", rec.Body.String())
+
+	// Verify error was logged
+	require.GreaterOrEqual(t, len(logHandler.entries), 1)
+	foundReadinessLog := false
+	foundComponentLog := false
+	for _, entry := range logHandler.entries {
+		if entry["level"] == "ERROR" && entry["msg"] == "gateway readiness check" {
+			foundReadinessLog = true
+			assert.Equal(t, "unhealthy", entry["overall_status"])
+		}
+		if entry["level"] == "ERROR" && entry["msg"] == "component unhealthy" {
+			foundComponentLog = true
+			assert.Equal(t, "database", entry["component"])
+		}
+	}
+	assert.True(t, foundReadinessLog, "expected error log for unhealthy status")
+	assert.True(t, foundComponentLog, "expected error log for unhealthy component")
+}
+
+// TestHandleReady_WithHealthChecker_LegacyEndpoints verifies legacy endpoints also use health checker.
+func TestHandleReady_WithHealthChecker_LegacyEndpoints(t *testing.T) {
+	config := &Config{
+		Port:        8080,
+		BaseDomain:  "api.example.com",
+		DatabaseURL: "postgres://localhost/test",
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	checkers := []health.Checker{
+		&mockChecker{name: "database", status: health.StatusUnhealthy, err: errServiceDown},
+	}
+	healthChecker := gwhealth.NewGatewayHealthChecker(gwhealth.Config{
+		Checkers:     checkers,
+		CheckTimeout: 5 * time.Second,
+	})
+
+	server := NewServer(config, logger, nil, WithHealthChecker(healthChecker))
+
+	// Test /readyz legacy endpoint
+	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	rec := httptest.NewRecorder()
+
+	server.mux.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code, "/readyz should also use health checker")
+	assert.Equal(t, "NOT READY", rec.Body.String())
+}
+
+// TestWithHealthChecker verifies the functional option works correctly.
+func TestWithHealthChecker(t *testing.T) {
+	config := &Config{
+		Port:        8080,
+		BaseDomain:  "api.example.com",
+		DatabaseURL: "postgres://localhost/test",
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	healthChecker := gwhealth.NewGatewayHealthChecker(gwhealth.Config{
+		Checkers:     []health.Checker{},
+		CheckTimeout: 5 * time.Second,
+	})
+
+	server := NewServer(config, logger, nil, WithHealthChecker(healthChecker))
+
+	assert.Equal(t, healthChecker, server.healthChecker)
 }
