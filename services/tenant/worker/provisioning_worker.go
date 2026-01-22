@@ -37,6 +37,7 @@ type ProvisioningWorker struct {
 	pollInterval          time.Duration
 	alertInterval         time.Duration
 	alertThreshold        time.Duration
+	recoveryThreshold     time.Duration
 	maxRetries            int
 	retryBaseDelay        time.Duration
 	retryMaxDelay         time.Duration
@@ -64,13 +65,14 @@ var (
 
 // Config holds configuration for worker behavior.
 type Config struct {
-	PollInterval   time.Duration
-	AlertInterval  time.Duration // Interval for checking failed provisioning alerts
-	AlertThreshold time.Duration // Age threshold for failed tenant alerting (default: 1 hour)
-	MaxRetries     int
-	RetryBaseDelay time.Duration
-	RetryMaxDelay  time.Duration
-	MaxConcurrent  int
+	PollInterval      time.Duration
+	AlertInterval     time.Duration // Interval for checking failed provisioning alerts
+	AlertThreshold    time.Duration // Age threshold for failed tenant alerting (default: 1 hour)
+	RecoveryThreshold time.Duration // Age threshold for recovering stuck PROVISIONING tenants (default: 5 minutes)
+	MaxRetries        int
+	RetryBaseDelay    time.Duration
+	RetryMaxDelay     time.Duration
+	MaxConcurrent     int
 }
 
 // NewProvisioningWorker creates a new ProvisioningWorker.
@@ -107,6 +109,14 @@ func NewProvisioningWorker(
 		alertThreshold = 1 * time.Hour
 	}
 
+	// Default recovery threshold to 5 minutes if not specified
+	// This is the time a tenant can be in PROVISIONING status before being
+	// considered stuck and eligible for recovery on worker startup.
+	recoveryThreshold := config.RecoveryThreshold
+	if recoveryThreshold <= 0 {
+		recoveryThreshold = 5 * time.Minute
+	}
+
 	// Default max retries to 5 if not specified
 	maxRetries := config.MaxRetries
 	if maxRetries <= 0 {
@@ -132,25 +142,38 @@ func NewProvisioningWorker(
 	}
 
 	return &ProvisioningWorker{
-		repo:           repo,
-		provisioner:    provisioner,
-		alertManager:   NewAlertManager(repo, logger),
-		pollInterval:   config.PollInterval,
-		alertInterval:  alertInterval,
-		alertThreshold: alertThreshold,
-		maxRetries:     maxRetries,
-		retryBaseDelay: retryBaseDelay,
-		retryMaxDelay:  retryMaxDelay,
-		maxConcurrent:  maxConcurrent,
-		logger:         logger,
-		done:           make(chan struct{}),
+		repo:              repo,
+		provisioner:       provisioner,
+		alertManager:      NewAlertManager(repo, logger),
+		pollInterval:      config.PollInterval,
+		alertInterval:     alertInterval,
+		alertThreshold:    alertThreshold,
+		recoveryThreshold: recoveryThreshold,
+		maxRetries:        maxRetries,
+		retryBaseDelay:    retryBaseDelay,
+		retryMaxDelay:     retryMaxDelay,
+		maxConcurrent:     maxConcurrent,
+		logger:            logger,
+		done:              make(chan struct{}),
 	}, nil
 }
 
 // Start begins the polling loop to process pending tenant provisioning.
 // It runs until ctx is cancelled or Stop() is called.
 // The method blocks and should be run in a separate goroutine.
+//
+// On startup, it recovers any tenants that were stuck in PROVISIONING status
+// from a previous worker crash. This ensures they get re-queued for provisioning.
 func (w *ProvisioningWorker) Start(ctx context.Context) {
+	// Recover any tenants stuck in PROVISIONING status from previous worker crash.
+	// This is best-effort - we log errors but continue starting the worker.
+	recoveredCount, err := w.RecoverStuckTenants(ctx, w.recoveryThreshold)
+	if err != nil {
+		w.logger.Error("failed to recover stuck tenants during startup", "error", err)
+	} else if recoveredCount > 0 {
+		w.logger.Info("startup recovery completed", "recovered_count", recoveredCount)
+	}
+
 	ticker := time.NewTicker(w.pollInterval)
 	defer ticker.Stop()
 
@@ -159,7 +182,8 @@ func (w *ProvisioningWorker) Start(ctx context.Context) {
 
 	w.logger.Info("provisioning worker started",
 		"pollInterval", w.pollInterval,
-		"alertInterval", w.alertInterval)
+		"alertInterval", w.alertInterval,
+		"recoveryThreshold", w.recoveryThreshold)
 
 	for {
 		select {
@@ -315,10 +339,10 @@ func (w *ProvisioningWorker) processPendingTenants(ctx context.Context) {
 		// This prevents a race condition where wg.Add(1) is called
 		// after Stop() has already called wg.Wait().
 		//
-		// TODO: When this branch is taken, the tenant remains in PROVISIONING status
-		// but won't be provisioned. On restart, processPendingTenants only queries
-		// PROVISIONING_PENDING tenants, leaving these stuck. Consider adding a startup
-		// recovery mechanism to reset or resume PROVISIONING tenants after a timeout.
+		// Note: When this branch is taken, the tenant remains in PROVISIONING status
+		// but won't be provisioned in this session. On restart, the RecoverStuckTenants
+		// method (called during Start()) will reset any stale PROVISIONING tenants back
+		// to PROVISIONING_PENDING so they can be picked up by the next polling cycle.
 		if w.stopping.Load() {
 			w.logger.Warn("not spawning provisioning goroutine - worker is stopping",
 				"tenant_id", tenant.ID)
@@ -581,6 +605,71 @@ var permanentPatterns = []string{
 	"invalid tenant", // Specific provisioner validation error
 	"already active", // Tenant already provisioned
 	"deprovisioned",  // Tenant is deprovisioned
+}
+
+// RecoverStuckTenants resets tenants that have been stuck in PROVISIONING status
+// for longer than the specified threshold back to PROVISIONING_PENDING status.
+// This allows them to be picked up and re-provisioned on the next polling cycle.
+//
+// This method is designed to handle crash recovery scenarios where the worker
+// stopped before completing provisioning. It uses optimistic locking to prevent
+// race conditions with tenants that are actively being provisioned.
+//
+// Returns the count of tenants successfully recovered and any query error.
+// Version conflicts during recovery are logged but not treated as errors since
+// they indicate the tenant is likely being actively provisioned.
+func (w *ProvisioningWorker) RecoverStuckTenants(ctx context.Context, staleThreshold time.Duration) (int, error) {
+	cutoff := time.Now().Add(-staleThreshold)
+
+	// Query for tenants stuck in PROVISIONING status older than threshold
+	stuckTenants, err := w.repo.ListByStatusOlderThan(ctx, domain.StatusProvisioning, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("failed to find stale provisioning tenants: %w", err)
+	}
+
+	if len(stuckTenants) == 0 {
+		w.logger.Debug("no stuck tenants found for recovery")
+		return 0, nil
+	}
+
+	w.logger.Info("found stuck tenants for recovery",
+		"count", len(stuckTenants),
+		"stale_threshold", staleThreshold)
+
+	recovered := 0
+	for _, t := range stuckTenants {
+		// Attempt to reset tenant to PROVISIONING_PENDING
+		_, updateErr := w.repo.UpdateStatus(ctx, t.ID, domain.StatusProvisioningPending, t.Version)
+		if updateErr != nil {
+			// Version conflict is expected if tenant was concurrently modified
+			// (e.g., actually being provisioned right now)
+			if errors.Is(updateErr, persistence.ErrVersionConflict) {
+				w.logger.Debug("skipping recovery for concurrently modified tenant",
+					"tenant_id", t.ID,
+					"version", t.Version)
+				continue
+			}
+			// Log other errors at warn level but continue with other tenants
+			w.logger.Warn("failed to recover stale tenant",
+				"tenant_id", t.ID,
+				"version", t.Version,
+				"error", updateErr)
+			continue
+		}
+
+		recovered++
+		w.logger.Info("recovered stale tenant from PROVISIONING to PROVISIONING_PENDING",
+			"tenant_id", t.ID,
+			"stale_threshold", staleThreshold)
+	}
+
+	if recovered > 0 {
+		w.logger.Info("stuck tenant recovery completed",
+			"recovered", recovered,
+			"total_stuck", len(stuckTenants))
+	}
+
+	return recovered, nil
 }
 
 // isRetryableError determines if a provisioning error is transient and worth retrying.
