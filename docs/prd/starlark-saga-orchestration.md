@@ -1,7 +1,7 @@
 # PRD: Starlark Saga Orchestration
 
 **Status:** Draft
-**Version:** 1.4
+**Version:** 1.5
 **Author:** Architecture Team
 **ADR Reference:** [ADR-028](../adr/0028-starlark-saga-cel-valuation.md)
 
@@ -174,6 +174,7 @@ The saga definitions become **Administrative Plan Records** - auditable configur
 - **Compensation linking**: Compensation steps receive the parent step's `causation_id`
 - **Audit trail**: All "Do" and "Undo" actions are linked via causation chain
 - **Traceability**: Given any entry, trace back to the saga step that created it
+- **See also**: FR-24 for `correlation_id` (groups entire business operation)
 
 ### FR-18: Side-Effect Idempotency Enforcement
 
@@ -233,6 +234,7 @@ def pay_external(ctx):
 - **Rationale**: Random UUIDs would break determinism during replay (different UUID each time)
 - **Usage**: Reference numbers, correlation IDs, any generated identifiers within saga logic
 - **Industry standard**: Version 5 UUIDs are the standard approach for deterministic UUID generation
+- **Replay safety**: See FR-26 for seed reset requirements on step replay
 
 ### FR-22: Saga Hot-Fixing for Zombie Recovery
 
@@ -285,6 +287,57 @@ def pay_external(ctx):
 │                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
+
+### FR-23: Reactive Orphan Wake-up (Fast-Path Resumption)
+
+- **Requirement**: The system SHOULD use a reactive event signal to alert available
+  pods immediately when a peer pod terminates, triggering an instant orphan scan
+- **Performance gap**: 5-minute lease expiry is too slow for high-volume energy/wealth
+  transactions where bills must resume within seconds of pod crash
+- **Implementation options**:
+  - PostgreSQL `LISTEN/NOTIFY` on lease expiry
+  - NATS subject for pod health events
+  - Kubernetes pod termination webhook
+- **Fallback**: Background orphan scan at lease expiry interval (existing mechanism)
+- **Latency target**: Resume orphaned saga within 10 seconds of pod crash (vs. 5 minutes passive)
+
+### FR-24: Correlation ID Propagation
+
+- **Requirement**: The Runtime MUST propagate a `correlation_id` from the trigger
+  event through the entire saga lifecycle
+- **Distinction from causation_id**:
+  - `causation_id`: Links cause→effect within saga (step created this entry)
+  - `correlation_id`: Groups ALL related actions across the entire business operation
+- **Use case**: Energy settlement splits into Retail, Wholesale, Tax entries. The
+  `correlation_id` enables "Unified Position View" dashboard query:
+  `SELECT * FROM entries WHERE correlation_id = ?`
+- **Propagation**: `correlation_id` flows to `ObservationRecorded`, `PostingCreated`,
+  and all downstream events
+- **Schema**: Add `correlation_id UUID NOT NULL` to `saga_instances`
+
+### FR-25: Progress Emission for UI Integration
+
+- **Requirement**: Starlark scripts MUST be able to emit non-blocking progress updates
+- **Builtin**: `ctx.emit_progress(message, percentage)` where percentage is 0-100
+- **Implementation**: Progress updates published to Kafka topic `saga.progress.{tenant_id}`
+- **Consumer**: Mobile/Edge apps subscribe to show real-time settlement status
+  (e.g., "Step 2 of 4: Valuating positions... 50%")
+- **Non-blocking**: `emit_progress()` does NOT persist to database; fire-and-forget
+- **Idempotency**: Progress is informational; safe to emit same progress on replay
+
+### FR-26: Deterministic UUID Seed Reset on Replay
+
+- **Requirement**: The `ctx.new_uuid()` generator MUST be reset to a consistent
+  seed at the start of every Step Replay
+- **Problem**: If a pod crashes during step execution (after some `new_uuid()` calls),
+  the second attempt must generate the exact same identifiers
+- **Implementation**:
+  - Seed = `SHA256(saga_instance_id + step_index)`
+  - `CallIndex` counter reset to 0 at step start
+  - UUID = `UUIDv5(namespace=seed, name=CallIndex)`
+- **Guarantee**: Same saga instance, same step, same call sequence = identical UUIDs
+- **Downstream benefit**: External systems using these UUIDs for idempotency will
+  correctly deduplicate retried calls
 
 ---
 
@@ -1342,6 +1395,10 @@ CREATE TABLE saga_instances (
     party_id UUID NOT NULL,
     knowledge_at TIMESTAMPTZ,             -- Bi-temporal context
 
+    -- Tracing (FR-17, FR-24)
+    correlation_id UUID NOT NULL,         -- Groups entire business operation (FR-24)
+    causation_id UUID,                    -- Parent saga/step that triggered this (FR-17)
+
     -- Ownership (race condition prevention)
     claimed_by_pod VARCHAR(128),          -- e.g., "payment-order-5d4f8c-xyz"
     claimed_at TIMESTAMPTZ,
@@ -1820,6 +1877,7 @@ Meridian extends vanilla Starlark with domain-specific builtins. These are the
 | `fail()` | `fail(message)` | Abort saga with error message |
 | `log()` | `log(level, message, **fields)` | Emit structured log entry |
 | `ctx.new_uuid()` | `ctx.new_uuid() → UUID` | Deterministic Version 5 UUID (namespace=saga_id, name=step:call). Stable across replays |
+| `ctx.emit_progress()` | `ctx.emit_progress(message, percentage)` | Non-blocking progress update (0-100%). Published to Kafka `saga.progress.{tenant_id}` for UI consumption |
 | `verify_external_state()` | `verify_external_state(handler, check_fn) → bool` | Pre-Step Check for non-idempotent external handlers. Required before EXTERNAL_NOT_SUPPORTED calls |
 
 #### Data Access Builtins
@@ -2578,6 +2636,20 @@ use these attributes for account resolution without hardcoding attribute keys:
 | **AC-EI-10** | Saga hot-fix re-points instance to new definition version | Admin API test: hot-fix stuck saga, verify `saga_definition_id` updated, resumed execution |
 | **AC-EI-11** | Hot-fix audit trail captures operator, reason, old/new version | Unit test: verify audit log contains hot-fix details |
 | **AC-EI-12** | Hot-fix preserves bi-temporal integrity (step_results timestamps accurate) | Query test: after hot-fix, steps 0-5 timestamps < hot-fix, step 6+ > hot-fix |
+
+### Acceptance Criteria: Performance & Observability (FR-23 through FR-26)
+
+| ID | Criterion | Test Method |
+|----|-----------|-------------|
+| **AC-PO-01** | Orphaned saga resumes within 10 seconds of pod crash (reactive wake-up) | Integration test: kill pod mid-saga, measure time to resume on new pod |
+| **AC-PO-02** | Fallback orphan scan still works when reactive signal unavailable | Integration test: disable LISTEN/NOTIFY, verify 5-minute scan detects orphan |
+| **AC-PO-03** | `correlation_id` propagated to all downstream events | Integration test: trigger saga, verify `ObservationRecorded`, `PostingCreated` have same `correlation_id` |
+| **AC-PO-04** | "Unified Position View" query returns all entries for `correlation_id` | Query test: `WHERE correlation_id = X` returns Retail + Wholesale + Tax entries |
+| **AC-PO-05** | `ctx.emit_progress()` publishes to Kafka topic | Integration test: emit progress, verify message on `saga.progress.{tenant_id}` |
+| **AC-PO-06** | Progress emission is non-blocking (no database write) | Unit test: emit 1000 progress updates, verify no `saga_*` table writes |
+| **AC-PO-07** | Progress emission safe on replay (idempotent/informational) | Unit test: replay saga, verify duplicate progress OK |
+| **AC-PO-08** | `ctx.new_uuid()` produces identical UUIDs after mid-step crash | Unit test: start step, generate 3 UUIDs, simulate crash, restart step, verify same 3 UUIDs |
+| **AC-PO-09** | UUID seed reset at step boundary | Unit test: verify `CallIndex` reset to 0 when step changes |
 
 ---
 
