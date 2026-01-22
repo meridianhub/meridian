@@ -1,7 +1,7 @@
 # PRD: Starlark Saga Orchestration
 
-**Status:** Draft
-**Version:** 1.5
+**Status:** Baselined
+**Version:** 1.6
 **Author:** Architecture Team
 **ADR Reference:** [ADR-028](../adr/0028-starlark-saga-cel-valuation.md)
 
@@ -338,6 +338,42 @@ def pay_external(ctx):
 - **Guarantee**: Same saga instance, same step, same call sequence = identical UUIDs
 - **Downstream benefit**: External systems using these UUIDs for idempotency will
   correctly deduplicate retried calls
+
+### FR-27: Starlark Decimal Type
+
+- **Requirement**: The Runtime MUST provide a custom Starlark type for Decimals
+- **Problem**: Starlark natively supports `int`, `float`, `string` but financial math
+  requires `shopspring/decimal` precision
+- **Implementation**: Custom `Decimal` type in `shared/pkg/saga` with operator overloading
+  (`+`, `-`, `*`, `/`)
+- **Step handler contract**: All handlers returning monetary values (especially Valuation)
+  MUST return `Decimal` type, not `float`
+- **Starlark usage**: `retail_val + wholesale_val` maintains Go backend precision
+- **Prevention**: Eliminates "Rounding Drift" during saga execution
+
+### FR-28: Step Error Severity Classification
+
+- **Requirement**: Step Handlers MUST return an error category to distinguish failure modes
+- **Categories**:
+  - `TRANSIENT` (e.g., network timeout, temporary unavailability): Increments `replay_count`,
+    triggers retry
+  - `FATAL` (e.g., insufficient funds, CEL validation failure, business rule violation):
+    Transitions saga to `COMPENSATING` immediately without wasting replay attempts
+- **Rationale**: Prevents a "broken meter read" from attempting 5 retries before failing
+- **Benefits**: Improves throughput, reduces P1 alert noise, faster failure resolution
+- **Schema**: Add `error_category VARCHAR(16)` to `saga_step_results` (TRANSIENT/FATAL/NULL)
+
+### FR-29: Valuation Snapshot Stability
+
+- **Requirement**: The `valuate_batch()` builtin MUST be treated as a side-effecting step
+  for replay purposes
+- **Persistence**: Once a Valuation result is obtained, the **entire response** (including
+  market observation IDs, rates, and basis) MUST be persisted in `saga_step_results`
+- **Replay behavior**: On replay, return the cached valuation result instead of re-calling
+  the Valuation Engine
+- **Audit continuity**: If market data is purged from MIM after 7 years (per retention
+  policy), legacy audit replay still works because the valuation was "snapshotted"
+- **Schema**: `saga_step_results.output` stores full valuation response as JSONB
 
 ---
 
@@ -1876,6 +1912,7 @@ Meridian extends vanilla Starlark with domain-specific builtins. These are the
 | `valuate_batch()` | `valuate_batch(instrument, quantity, context_types[]) → Dict[context_type, valuation]` | Valuate same basis across multiple contexts; returns dictionary keyed by context_type (e.g., `results["RETAIL"]`, `results["WHOLESALE"]`) |
 | `fail()` | `fail(message)` | Abort saga with error message |
 | `log()` | `log(level, message, **fields)` | Emit structured log entry |
+| `Decimal()` | `Decimal(string) → Decimal` | Financial-precision decimal type (FR-27). Supports `+`, `-`, `*`, `/`. Backed by `shopspring/decimal` |
 | `ctx.new_uuid()` | `ctx.new_uuid() → UUID` | Deterministic Version 5 UUID (namespace=saga_id, name=step:call). Stable across replays |
 | `ctx.emit_progress()` | `ctx.emit_progress(message, percentage)` | Non-blocking progress update (0-100%). Published to Kafka `saga.progress.{tenant_id}` for UI consumption |
 | `verify_external_state()` | `verify_external_state(handler, check_fn) → bool` | Pre-Step Check for non-idempotent external handlers. Required before EXTERNAL_NOT_SUPPORTED calls |
@@ -2183,6 +2220,35 @@ func (w *SagaWorker) claimOrphanedSagas(ctx context.Context) {
 **Rationale**: Without jitter, all pods attempt to claim all orphaned sagas at the
 same microsecond after restart, causing lock contention on `saga_instances`.
 
+**Partition-Aware Scaling (100k TPS)**:
+
+At high volume, scanning the entire `saga_instances` table for orphans becomes a
+bottleneck. The orphan scan SHALL be partitioned by tenant:
+
+```go
+// Partition-aware orphan scan - each pod scans only its assigned tenants
+func (w *SagaWorker) claimOrphanedSagas(ctx context.Context) {
+    jitter := time.Duration(rand.Intn(500)) * time.Millisecond
+    time.Sleep(jitter)
+
+    // Only scan tenants this pod is serving (from service mesh / config)
+    for _, tenantID := range w.assignedTenants {
+        orphans := w.repo.FindOrphanedByTenant(ctx, tenantID, w.claimBatchSize)
+        for _, saga := range orphans {
+            w.attemptClaim(ctx, saga)
+        }
+    }
+}
+```
+
+**Index support**: Add tenant-scoped partial index for efficient orphan queries:
+
+```sql
+CREATE INDEX idx_saga_instances_orphan_by_tenant
+    ON saga_instances(tenant_id, lease_expires_at)
+    WHERE status IN ('RUNNING', 'PENDING', 'COMPENSATING');
+```
+
 #### B. Step Output Hydration: Immutable Structs (Replay Safety)
 
 When replaying a saga, the runtime MUST "hydrate" the Starlark VM with results
@@ -2415,11 +2481,13 @@ use these attributes for account resolution without hardcoding attribute keys:
 | **SAGA-001** | Create `saga_definitions` table in Reference Data | P0 | - |
 | **SAGA-002** | Implement `SagaRegistry` interface (CRUD + lifecycle) | P0 | SAGA-001 |
 | **SAGA-003** | Integrate `go.starlark.net` runtime | P0 | - |
-| **SAGA-004** | Implement Starlark builtins (`cel_eval`, `posting`, etc.) | P0 | SAGA-003 |
+| **SAGA-004a** | Implement Starlark Decimal extension (FR-27: operator overloading for financial math) | P0 | SAGA-003 |
+| **SAGA-004b** | Implement time-injection logic (strip `time.now()`, inject `ctx.knowledge_at`) | P0 | SAGA-003 |
+| **SAGA-004c** | Implement core builtins (`cel_eval`, `posting`, `resolve_account`, etc.) | P0 | SAGA-003, SAGA-004a |
 | **SAGA-005** | Create step handler registry with default handlers | P0 | - |
 | **SAGA-006** | Implement Redis caching layer | P1 | SAGA-002 |
 | **SAGA-007** | Implement tenant default resolution | P1 | SAGA-002, SAGA-006 |
-| **SAGA-008** | Migrate `withdrawal_orchestrator.go` to Starlark | P0 | SAGA-003, SAGA-004, SAGA-005 |
+| **SAGA-008** | Migrate `withdrawal_orchestrator.go` to Starlark | P0 | SAGA-003, SAGA-004c, SAGA-005 |
 | **SAGA-009** | Migrate `deposit_orchestrator.go` to Starlark | P1 | SAGA-008 |
 | **SAGA-010** | Migrate `payment_orchestrator.go` to Starlark | P1 | SAGA-008 |
 | **SAGA-011** | Implement simulation mode for DRAFT sagas | P1 | SAGA-008 |
@@ -2437,7 +2505,7 @@ use these attributes for account resolution without hardcoding attribute keys:
 | **SAGA-023** | Add `ctx.party_scope` injection with immutability enforcement | P0 | SAGA-022 |
 | **SAGA-024** | Implement `authorized_lookups` declaration and runtime enforcement | P0 | SAGA-022 |
 | **SAGA-025** | Add `party_id` and `visible_parties` to saga execution audit log | P1 | SAGA-012 |
-| **SAGA-026** | Implement `invoke_saga()` builtin with scope inheritance | P1 | SAGA-004, SAGA-023 |
+| **SAGA-026** | Implement `invoke_saga()` builtin with scope inheritance | P1 | SAGA-004c, SAGA-023 |
 | **SAGA-027** | Add circular saga reference detection (DRAFT + ACTIVATION) | P1 | SAGA-017, SAGA-026 |
 | **SAGA-028** | Add runtime circular detection via call stack | P1 | SAGA-026 |
 | **SAGA-029** | Implement compensation cascade for child sagas | P1 | SAGA-026 |
@@ -2458,20 +2526,25 @@ use these attributes for account resolution without hardcoding attribute keys:
 | **SAGA-044** | Implement orphan saga detection and adoption on pod startup | P0 | SAGA-043 |
 | **SAGA-045** | Implement replay execution (skip completed steps) | P0 | SAGA-042 |
 | **SAGA-046** | Add lease renewal background worker | P1 | SAGA-043 |
-| **SAGA-047** | Implement `valuate_batch()` builtin for multi-context valuation | P1 | SAGA-004 |
+| **SAGA-047** | Implement `valuate_batch()` builtin for multi-context valuation (FR-29: snapshot stability) | P1 | SAGA-004a, SAGA-004c |
 | **SAGA-048** | Add Logic/Physics Linter (warn on math in Starlark, enforce Pre-Step Check for EXTERNAL_NOT_SUPPORTED) | P1 | SAGA-017, SAGA-053 |
 | **SAGA-049** | Define step handler output schemas (typed contracts) | P1 | SAGA-005 |
 | **SAGA-050** | Validate script accesses against handler output schemas | P2 | SAGA-049 |
-| **SAGA-051** | Add `ctx.is_simulation` flag and handler enforcement | P1 | SAGA-004 |
-| **SAGA-052** | Implement automatic `causation_id` propagation to compensations | P1 | SAGA-004 |
+| **SAGA-051** | Add `ctx.is_simulation` flag and handler enforcement | P1 | SAGA-004c |
+| **SAGA-052** | Implement automatic `causation_id` propagation to compensations | P1 | SAGA-004c |
 | **SAGA-053** | Add idempotency declaration to step handler interface (EXTERNAL_SUPPORTED/NOT_SUPPORTED) | P0 | SAGA-005 |
 | **SAGA-054** | Implement ACTIVATION fail-fast for non-idempotent external handlers without Pre-Step Check | P0 | SAGA-053, SAGA-019 |
 | **SAGA-055** | Implement zombie saga detection (`replay_count` > MAX_REPLAYS → FAILED_MANUAL_INTERVENTION) | P0 | SAGA-044 |
 | **SAGA-056** | Add high-severity alerting for zombie sagas (operator notification) | P1 | SAGA-055 |
 | **SAGA-057** | Implement `ExecuteDryRun` RPC (mocked handlers, execution plan output) | P1 | SAGA-017 |
-| **SAGA-058** | Implement `ctx.new_uuid()` deterministic UUID generator (Version 5 UUIDs) | P0 | SAGA-004 |
+| **SAGA-058** | Implement `ctx.new_uuid()` deterministic UUID generator (Version 5 UUIDs, FR-26 seed reset) | P0 | SAGA-004b |
 | **SAGA-059** | Implement `verify_external_state()` builtin for Pre-Step Check pattern | P0 | SAGA-053 |
 | **SAGA-060** | Add Admin API for saga hot-fixing (definition re-pointing, replay_count reset) | P1 | SAGA-055 |
+| **SAGA-061** | Implement reactive orphan wake-up via LISTEN/NOTIFY (FR-23) | P1 | SAGA-044 |
+| **SAGA-062** | Add `correlation_id` propagation to saga lifecycle (FR-24) | P0 | SAGA-041 |
+| **SAGA-063** | Implement `ctx.emit_progress()` builtin with Kafka publisher (FR-25) | P1 | SAGA-004c |
+| **SAGA-064** | Implement step error severity classification (FR-28: TRANSIENT vs FATAL) | P0 | SAGA-005 |
+| **SAGA-065** | Add partition-aware orphan scanning for high-volume (100k TPS) | P2 | SAGA-044, SAGA-061 |
 
 ---
 
@@ -2650,6 +2723,21 @@ use these attributes for account resolution without hardcoding attribute keys:
 | **AC-PO-07** | Progress emission safe on replay (idempotent/informational) | Unit test: replay saga, verify duplicate progress OK |
 | **AC-PO-08** | `ctx.new_uuid()` produces identical UUIDs after mid-step crash | Unit test: start step, generate 3 UUIDs, simulate crash, restart step, verify same 3 UUIDs |
 | **AC-PO-09** | UUID seed reset at step boundary | Unit test: verify `CallIndex` reset to 0 when step changes |
+
+### Acceptance Criteria: Type Safety & Resilience (FR-27 through FR-29)
+
+| ID | Criterion | Test Method |
+|----|-----------|-------------|
+| **AC-TR-01** | Starlark Decimal type supports `+`, `-`, `*`, `/` operators | Unit test: `Decimal("10.50") + Decimal("3.25")` = `Decimal("13.75")` |
+| **AC-TR-02** | Decimal arithmetic matches `shopspring/decimal` precision | Unit test: compare Starlark result with Go `decimal.Decimal` for edge cases |
+| **AC-TR-03** | Valuation handlers return Decimal type (not float) | Unit test: call `valuate()`, verify return type is Decimal |
+| **AC-TR-04** | Float-to-Decimal conversion rejected (prevent precision loss) | Unit test: `Decimal(3.14)` throws error, must use `Decimal("3.14")` |
+| **AC-TR-05** | `TRANSIENT` error increments `replay_count` and triggers retry | Unit test: return TRANSIENT error, verify retry scheduled |
+| **AC-TR-06** | `FATAL` error transitions saga to `COMPENSATING` immediately | Unit test: return FATAL error, verify status = COMPENSATING, replay_count unchanged |
+| **AC-TR-07** | `error_category` persisted in `saga_step_results` | Unit test: verify column populated after step failure |
+| **AC-TR-08** | `valuate_batch()` result cached in `saga_step_results` | Unit test: call valuate_batch, verify full response in output JSONB |
+| **AC-TR-09** | Replay of `valuate_batch()` returns cached result (no Valuation Engine call) | Integration test: replay saga, verify Valuation Engine not called for cached step |
+| **AC-TR-10** | Cached valuation contains market observation IDs for 7-year audit replay | Unit test: verify `saga_step_results.output` includes observation references |
 
 ---
 
