@@ -2,7 +2,7 @@ name: Claude Code Review
 
 on:
   workflow_run:
-    workflows: ["Test", "Build & Test", "Code Quality"]
+    workflows: ["Test"]
     types: [completed]
 
 # Prevent duplicate reviews for the same PR branch
