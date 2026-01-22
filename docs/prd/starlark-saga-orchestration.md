@@ -99,11 +99,109 @@ The saga definitions become **Administrative Plan Records** - auditable configur
 - **Contents**: Saga version, input parameters, step results, duration, outcome
 - **Retention**: Per tenant retention policy
 
+### FR-9: Reference Validation
+
+- **Requirement**: Saga definitions MUST be validated for reference integrity at multiple lifecycle phases
+- **DRAFT phase**: Warn on missing references, allow save
+- **ACTIVATION phase**: Error on missing/deprecated references, block activation
+- **RUNTIME phase**: Fail fast with actionable error if reference no longer valid
+
+### FR-10: Deprecation Impact Analysis
+
+- **Requirement**: When deprecating instruments, accounts, or sagas, the system MUST report dependent sagas
+- **Scope**: Identify all ACTIVE sagas that reference the item being deprecated
+- **Action**: Require explicit acknowledgment or block deprecation until dependents updated
+
 ---
 
-## 4. Technical Architecture
+## 4. CEL Valuation: Context and Boundaries
 
-### 4.1 System Context
+> **Note**: CEL-based valuation is **out of scope** for this PRD but provides essential context. This refactor establishes the foundation that the Valuation Engine will build upon.
+
+### 4.1 Composition Model (Not Embedding)
+
+Starlark sagas **call** the Valuation Engine; they do not embed CEL valuation logic:
+
+```
+WRONG: CEL embedded in Starlark
+──────────────────────────────
+def posting_rules(ctx):
+    # Don't do this - valuation logic coupled to saga
+    value = cel_eval("qty * 0.35", {"qty": ctx.quantity})
+
+
+RIGHT: Valuation as service call
+────────────────────────────────
+def posting_rules(ctx):
+    # Saga orchestrates; valuation logic is elsewhere
+    valuations = valuation_engine.valuate(
+        quantity = ctx.quantity,
+        instrument = ctx.instrument,
+        contexts = ["RETAIL", "WHOLESALE"],
+    )
+```
+
+### 4.2 CEL Valuation Use Cases (Future)
+
+CEL valuation rules will be stored separately in Reference Data, not in saga definitions:
+
+| Use Case | CEL Expression (stored in Reference Data) |
+|----------|-------------------------------------------|
+| **Asset pair conversion** | `qty * lookup_rate(from_instrument, to_instrument, ctx.effective_date)` |
+| **Time-of-use pricing** | `qty * lookup_tariff(attrs.tou_period, attrs.zone)` |
+| **Vintage-aware carbon** | `qty * lookup_price("VCU", attrs.vintage, attrs.project)` |
+| **FX conversion** | `amount * lookup_fx(from_ccy, to_ccy, ctx.knowledge_at)` |
+
+### 4.3 Non-Fungible Asset Totalling
+
+CEL valuation enables totalling non-fungible positions of the same instrument class:
+
+```
+Position Keeping holds (non-fungible due to different attributes):
+├── 10 VCU (vintage: 2023, project: ABC)
+├── 5 VCU (vintage: 2024, project: ABC)
+└── 3 VCU (vintage: 2023, project: XYZ)
+
+CEL valuation applied per-bucket:
+├── 10 × $45 (2023 vintage price) = $450
+├── 5 × $52 (2024 vintage price)  = $520
+└── 3 × $45 (2023 vintage price)  = $135
+                                    ─────
+                        Total:      $1,105
+```
+
+The saga orchestrates the totalling; CEL provides the per-bucket calculation.
+
+### 4.4 Saga ↔ Valuation Integration Point
+
+The Starlark saga will call the Valuation Engine via a step handler:
+
+```python
+# In saga definition (Starlark)
+step(
+    name = "valuate_positions",
+    action = "valuation_engine.valuate",  # Step handler
+    params = lambda ctx: {
+        "positions": ctx.positions,
+        "contexts": ["MARKET_VALUE", "COST_BASIS"],
+        "knowledge_at": ctx.knowledge_at,
+    },
+)
+```
+
+The `valuation_engine.valuate` step handler will:
+1. Load CEL valuation rules from Reference Data
+2. Fetch market data from MIM (respecting `knowledge_at`)
+3. Evaluate CEL expressions
+4. Return `ValuationReceipt` with full lineage
+
+This PRD establishes the runtime; the Valuation Engine PRD will define the CEL rule storage and evaluation.
+
+---
+
+## 5. Technical Architecture
+
+### 5.1 System Context
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -137,7 +235,7 @@ The saga definitions become **Administrative Plan Records** - auditable configur
 └─────────────────────┘  └─────────────────────┘  └─────────────────────┘
 ```
 
-### 4.2 Saga Definition Schema
+### 5.2 Saga Definition Schema
 
 ```sql
 CREATE TABLE saga_definitions (
@@ -187,7 +285,7 @@ CREATE INDEX idx_saga_definitions_active
     WHERE status = 'ACTIVE';
 ```
 
-### 4.3 Redis Caching Strategy
+### 5.3 Redis Caching Strategy
 
 **Cache Key Format:**
 ```
@@ -254,7 +352,7 @@ Execute Saga Request
 | Definition deprecated | Delete from cache |
 | TTL expiry | Automatic eviction |
 
-### 4.4 Tenant Default Resolution
+### 5.4 Tenant Default Resolution
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -282,7 +380,7 @@ Execute Saga Request
 
 Platform-provided sagas use `is_system = true` and are seeded to each tenant's schema during provisioning (same pattern as system instruments).
 
-### 4.5 Step Handler Registry
+### 5.5 Step Handler Registry
 
 Platform-controlled vocabulary of allowed actions:
 
@@ -321,7 +419,167 @@ var DefaultHandlers = map[string]StepHandler{
 
 Starlark scripts can ONLY invoke handlers in this registry. Attempting to call an unregistered handler returns an error.
 
-### 4.6 Starlark Builtins
+### 5.6 Reference Validation System
+
+#### Reference Types Tracked
+
+| Reference Type | Example | Source of Truth |
+|----------------|---------|-----------------|
+| Step handlers | `"position_keeping.initiate_log"` | Step handler registry |
+| Instruments | `resolve_instrument("KWH")` | `instrument_definitions` |
+| Accounts | `resolve_account("clearing", "GBP")` | Internal Bank Account service |
+| Other sagas | `invoke_saga("sub_workflow")` | `saga_definitions` |
+| Valuation rules | `valuate("KWH", "GBP", "RETAIL")` | Valuation rules (future) |
+
+#### Reference Tracking Schema
+
+```sql
+-- Track references for impact analysis and validation
+CREATE TABLE saga_references (
+    saga_definition_id UUID NOT NULL REFERENCES saga_definitions(id) ON DELETE CASCADE,
+    reference_type VARCHAR(32) NOT NULL,
+    reference_key VARCHAR(128) NOT NULL,
+    line_number INTEGER,
+    extracted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    PRIMARY KEY (saga_definition_id, reference_type, reference_key)
+);
+
+-- Query: What sagas reference this instrument?
+CREATE INDEX idx_saga_references_by_target
+    ON saga_references(reference_type, reference_key);
+
+-- Query: What does this saga reference?
+CREATE INDEX idx_saga_references_by_saga
+    ON saga_references(saga_definition_id);
+```
+
+#### Validation Phases
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                             DRAFT Phase                                      │
+│                                                                              │
+│  Trigger: CreateDraft(), UpdateDefinition()                                 │
+│                                                                              │
+│  Actions:                                                                    │
+│    1. Parse Starlark script                                                 │
+│    2. Extract all references (step handlers, instruments, accounts, etc.)   │
+│    3. Validate each reference exists                                        │
+│    4. Store warnings for missing/deprecated references                      │
+│    5. Populate saga_references table                                        │
+│                                                                              │
+│  Outcome: Save succeeds with warnings; activation blocked if errors         │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     │
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          ACTIVATION Phase                                    │
+│                                                                              │
+│  Trigger: ActivateSaga()                                                    │
+│                                                                              │
+│  Actions:                                                                    │
+│    1. Re-validate ALL references (state may have changed since DRAFT)       │
+│    2. Check step handlers exist in registry                                 │
+│    3. Check instruments are ACTIVE (not DRAFT or DEPRECATED)                │
+│    4. Check accounts exist and are active                                   │
+│    5. Check referenced sagas are ACTIVE                                     │
+│                                                                              │
+│  Outcome: Hard failure if any reference invalid; activation blocked         │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     │
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                            RUNTIME Phase                                     │
+│                                                                              │
+│  Trigger: Execute()                                                          │
+│                                                                              │
+│  Actions:                                                                    │
+│    1. Load saga (should be cached and pre-validated)                        │
+│    2. On each step, verify handler still registered                         │
+│    3. On instrument/account resolution, verify still valid                  │
+│                                                                              │
+│  Outcome: Fail fast with actionable error message                           │
+│           Include: what's missing, where in script, suggested fix           │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Validation Feedback Format
+
+```
+Saga: withdrawal.star (DRAFT)
+Tenant: acme-corp
+
+Validation Results:
+═══════════════════
+
+Starlark Syntax
+  ✓ Script parses successfully
+  ✓ 3 steps defined
+  ✓ All steps have compensation defined
+
+Step Handlers
+  ✓ position_keeping.initiate_log .......... exists
+  ✓ financial_accounting.post_entries ...... exists
+  ✗ notification.send_sms .................. NOT FOUND
+    └─ Available alternatives: notification.send, notification.send_email
+
+Instrument References
+  ✓ GBP .................................. ACTIVE (v1)
+  ⚠ KWH .................................. DEPRECATED
+    └─ Successor available: KWH-V2 (ACTIVE)
+    └─ Consider updating before activation
+
+Account References
+  ✓ clearing/GBP ......................... exists
+  ✓ tax_withholding/GBP .................. exists
+
+──────────────────────────────────────────────────
+Status: BLOCKED - Cannot activate
+        1 error, 1 warning
+
+Errors (must fix):
+  • Step handler 'notification.send_sms' not found (line 47)
+
+Warnings (recommended):
+  • Instrument 'KWH' is deprecated; successor 'KWH-V2' available
+```
+
+#### Deprecation Cascade Detection
+
+When deprecating an instrument, account, or saga, check dependencies:
+
+```
+Request: Deprecate instrument KWH (version 1)
+
+Impact Analysis:
+════════════════
+
+Active sagas referencing KWH:1
+──────────────────────────────
+  • energy_settlement.star v2 (tenant: ACME_ENERGY)
+      └─ Line 23: resolve_instrument("KWH")
+      └─ Line 45: valuation_engine.valuate(instrument="KWH", ...)
+
+  • meter_reconciliation.star v1 (tenant: ACME_ENERGY)
+      └─ Line 12: ctx.instrument == "KWH"
+
+  • wholesale_settlement.star v3 (SYSTEM)
+      └─ Line 67: position_keeping.initiate_log(instrument="KWH", ...)
+
+Summary: 3 active sagas across 2 tenants
+
+Options:
+  [1] Block deprecation until sagas updated
+  [2] Force deprecate (sagas will fail at runtime with clear error)
+  [3] Specify successor KWH-V2 (sagas warned but continue working)
+
+Recommendation: Option [3] - deprecate with successor
+                Sagas will log warnings; runtime continues
+                Tenants notified to update their definitions
+```
+
+### 5.8 Starlark Builtins
 
 Functions available within Starlark scripts:
 
@@ -333,7 +591,7 @@ Functions available within Starlark scripts:
 | `step` | `step(name, action, params, compensation) → Step` | Define saga step |
 | `saga` | `saga(name, version, steps, preconditions) → SagaDefinition` | Define saga |
 
-### 4.7 Example Saga Definition
+### 5.9 Example Saga Definition
 
 ```python
 # withdrawal.star
@@ -448,9 +706,9 @@ saga(
 
 ---
 
-## 5. Security Constraints
+## 6. Security Constraints
 
-### 5.1 Starlark Sandbox
+### 6.1 Starlark Sandbox
 
 | Constraint | Value | Rationale |
 |------------|-------|-----------|
@@ -462,7 +720,7 @@ saga(
 | No network access | Language design | No external calls |
 | Deterministic | Language design | Reproducible execution |
 
-### 5.2 CEL Constraints (from ADR-014)
+### 6.2 CEL Constraints (from ADR-014)
 
 | Constraint | Value |
 |------------|-------|
@@ -470,7 +728,7 @@ saga(
 | Max expression depth | 10 levels |
 | Cost limit | 10,000 units |
 
-### 5.3 Step Handler Authorization
+### 6.3 Step Handler Authorization
 
 - Handlers are platform-controlled Go functions
 - Starlark cannot invoke arbitrary code
@@ -478,7 +736,41 @@ saga(
 
 ---
 
-## 6. Implementation Tasks
+## 7. Existing Saga Mapping
+
+### Current Go Sagas → Starlark Definitions
+
+| Current File | Service | New Definition | Step Handlers Extracted |
+|--------------|---------|----------------|-------------------------|
+| `shared/pkg/clients/saga.go` | Shared | `shared/pkg/saga/runtime.go` | N/A (runtime, not definition) |
+| `payment_orchestrator.go:128-281` | Payment Order | `payment_execution.star` | `current_account.create_lien`, `payment_gateway.send`, `financial_accounting.post_entries` |
+| `withdrawal_orchestrator.go:100-185` | Current Account | `withdrawal.star` | `position_keeping.initiate_log`, `financial_accounting.post_entries`, `repository.save` |
+| `deposit_orchestrator.go:100-185` | Current Account | `deposit.star` | `position_keeping.initiate_log`, `financial_accounting.post_entries`, `repository.save` |
+
+### Test Coverage Mapping
+
+| Current Test | New Test | What It Validates |
+|--------------|----------|-------------------|
+| `saga_test.go` (14 cases) | `runtime_test.go` | Orchestrator contract: step order, LIFO compensation, context cancellation |
+| `payment_orchestrator_test.go` | `handlers/payment_test.go` | Step handler behavior (Go code, unchanged) |
+| `withdrawal_orchestrator_test.go` | `handlers/current_account_test.go` | Step handler behavior (Go code, unchanged) |
+| N/A | `definition_test.go` | Starlark parsing, reference extraction, validation |
+| N/A | `registry_test.go` | CRUD, lifecycle, tenant resolution, caching |
+| Integration tests | Integration tests (same) | End-to-end saga execution, same expected outcomes |
+
+### Adding New Tests
+
+| Test Type | How to Add | Example |
+|-----------|------------|---------|
+| **Step handler test** | Standard Go unit test | `TestPositionKeepingInitiateLog_Success` |
+| **Definition parsing test** | Load `.star` file, assert steps extracted | `TestWithdrawalStar_ParsesCorrectly` |
+| **Reference validation test** | Create saga with missing ref, assert warning | `TestValidation_MissingHandler_ReturnsWarning` |
+| **Tenant override test** | Create system + tenant saga, assert tenant wins | `TestResolution_TenantOverridesSystem` |
+| **Simulation test** | Run DRAFT saga with `knowledge_at`, assert no side effects | `TestSimulation_NoLiveDataModified` |
+
+---
+
+## 8. Implementation Tasks
 
 | Task ID | Description | Priority | Dependencies |
 |---------|-------------|----------|--------------|
@@ -497,10 +789,16 @@ saga(
 | **SAGA-013** | Seed platform default sagas | P0 | SAGA-002 |
 | **SAGA-014** | Admin API for saga management | P2 | SAGA-002 |
 | **SAGA-015** | Documentation and tenant onboarding guide | P2 | SAGA-008 |
+| **SAGA-016** | Create `saga_references` table | P0 | SAGA-001 |
+| **SAGA-017** | Implement reference extraction from Starlark AST | P0 | SAGA-003, SAGA-016 |
+| **SAGA-018** | Implement DRAFT phase validation with warnings | P0 | SAGA-017 |
+| **SAGA-019** | Implement ACTIVATION phase validation (hard fail) | P0 | SAGA-017 |
+| **SAGA-020** | Implement deprecation impact analysis | P1 | SAGA-016 |
+| **SAGA-021** | Add validation feedback API endpoint | P1 | SAGA-018, SAGA-019 |
 
 ---
 
-## 7. Migration Strategy
+## 9. Migration Strategy
 
 ### Phase 1: Foundation (SAGA-001 through SAGA-007)
 - Schema, registry, runtime, caching
@@ -521,7 +819,7 @@ saga(
 
 ---
 
-## 8. Success Criteria
+## 10. Success Criteria
 
 | Metric | Target | Measurement |
 |--------|--------|-------------|
@@ -533,7 +831,7 @@ saga(
 
 ---
 
-## 9. Risks and Mitigations
+## 11. Risks and Mitigations
 
 | Risk | Impact | Likelihood | Mitigation |
 |------|--------|------------|------------|
@@ -544,7 +842,7 @@ saga(
 
 ---
 
-## 10. Appendix: Why Starlark?
+## 12. Appendix: Why Starlark?
 
 ### Comparison with Alternatives
 
@@ -589,7 +887,7 @@ For tenant communication:
 
 ---
 
-## 11. Links
+## 13. Links
 
 - [ADR-028: Starlark Saga Orchestration with CEL Valuation](../adr/0028-starlark-saga-cel-valuation.md)
 - [ADR-014: Financial Instrument Reference Data](../adr/0014-financial-instrument-reference-data.md)
