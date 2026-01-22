@@ -1,9 +1,4 @@
-//go:build integration_broken
-// +build integration_broken
-
 // Package integration contains integration tests validating BIAN balance ownership
-// NOTE: This file is disabled due to API changes in cadomain.AmountBlock and cadomain.CurrentAccountClient
-// TODO: Update to use current API once the current-account domain is refactored
 // between Current Account and Position Keeping services.
 //
 // These tests verify:
@@ -30,7 +25,6 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	cadomain "github.com/meridianhub/meridian/services/current-account/domain"
 	pkdomain "github.com/meridianhub/meridian/services/position-keeping/domain"
@@ -234,59 +228,69 @@ func (infra *BalanceOwnershipTestInfra) cleanup() {
 // Thread-safe for concurrent test execution.
 type MockCurrentAccountService struct {
 	mu       sync.RWMutex
-	accounts map[string]*cadomain.CurrentAccount
-	liens    map[string][]cadomain.AmountBlock
+	accounts map[string]cadomain.CurrentAccount
+	liens    map[string][]pkdomain.AmountBlock
 }
 
 // NewMockCurrentAccountService creates a new mock Current Account service.
 func NewMockCurrentAccountService() *MockCurrentAccountService {
 	return &MockCurrentAccountService{
-		accounts: make(map[string]*cadomain.CurrentAccount),
-		liens:    make(map[string][]cadomain.AmountBlock),
+		accounts: make(map[string]cadomain.CurrentAccount),
+		liens:    make(map[string][]pkdomain.AmountBlock),
 	}
 }
 
 // CreateAccount creates a new account.
-func (m *MockCurrentAccountService) CreateAccount(ctx context.Context, accountID, iban, partyID, currency string) (*cadomain.CurrentAccount, error) {
+func (m *MockCurrentAccountService) CreateAccount(ctx context.Context, accountID, iban, partyID, currency string) (cadomain.CurrentAccount, error) {
 	account, err := cadomain.NewCurrentAccount(accountID, iban, partyID, currency)
 	if err != nil {
-		return nil, err
+		return cadomain.CurrentAccount{}, err
 	}
 	m.mu.Lock()
-	m.accounts[accountID] = &account
+	m.accounts[accountID] = account
 	m.mu.Unlock()
-	return &account, nil
+	return account, nil
 }
 
 // Deposit adds funds to an account.
-func (m *MockCurrentAccountService) Deposit(ctx context.Context, accountID string, amount money.Money, reference string) error {
+func (m *MockCurrentAccountService) Deposit(ctx context.Context, accountID string, amount money.Money) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	account, ok := m.accounts[accountID]
 	if !ok {
 		return fmt.Errorf("account not found: %s", accountID)
 	}
-	updated, err := account.Deposit(amount, reference)
+	// Convert money.Money to cadomain.Money
+	caAmount, err := cadomain.NewMoneyDecimal(amount.Amount(), cadomain.Currency(amount.Currency().String()))
 	if err != nil {
 		return err
 	}
-	m.accounts[accountID] = &updated
+	updated, err := account.Deposit(caAmount)
+	if err != nil {
+		return err
+	}
+	m.accounts[accountID] = updated
 	return nil
 }
 
 // Withdraw removes funds from an account.
-func (m *MockCurrentAccountService) Withdraw(ctx context.Context, accountID string, amount money.Money, reference string) error {
+func (m *MockCurrentAccountService) Withdraw(ctx context.Context, accountID string, amount money.Money) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	account, ok := m.accounts[accountID]
 	if !ok {
 		return fmt.Errorf("account not found: %s", accountID)
 	}
-	updated, err := account.Withdraw(amount, reference)
+	// Convert money.Money to cadomain.Money
+	caAmount, err := cadomain.NewMoneyDecimal(amount.Amount(), cadomain.Currency(amount.Currency().String()))
 	if err != nil {
 		return err
 	}
-	m.accounts[accountID] = &updated
+	updated, err := account.Withdraw(caAmount)
+	if err != nil {
+		return err
+	}
+	m.accounts[accountID] = updated
 	return nil
 }
 
@@ -298,11 +302,13 @@ func (m *MockCurrentAccountService) GetBalance(ctx context.Context, accountID st
 	if !ok {
 		return money.Money{}, fmt.Errorf("account not found: %s", accountID)
 	}
-	return account.Balance(), nil
+	// Convert cadomain.Money to money.Money
+	caBalance := account.Balance()
+	return money.MustNew(caBalance.Amount(), money.Currency(string(caBalance.Currency()))), nil
 }
 
 // AddLien adds a lien to an account.
-func (m *MockCurrentAccountService) AddLien(ctx context.Context, accountID string, lien cadomain.AmountBlock) error {
+func (m *MockCurrentAccountService) AddLien(ctx context.Context, accountID string, lien pkdomain.AmountBlock) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.liens[accountID] = append(m.liens[accountID], lien)
@@ -310,8 +316,8 @@ func (m *MockCurrentAccountService) AddLien(ctx context.Context, accountID strin
 }
 
 // GetActiveAmountBlocks returns all active liens/amount blocks for an account.
-// Implements cadomain.CurrentAccountClient interface used by Position Keeping.
-func (m *MockCurrentAccountService) GetActiveAmountBlocks(ctx context.Context, accountID string) ([]cadomain.AmountBlock, error) {
+// Implements pkdomain.CurrentAccountClient interface used by Position Keeping.
+func (m *MockCurrentAccountService) GetActiveAmountBlocks(ctx context.Context, accountID string) ([]pkdomain.AmountBlock, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.liens[accountID], nil
@@ -323,7 +329,7 @@ type MockPositionKeepingService struct {
 	mu       sync.RWMutex
 	logs     map[string]*pkdomain.FinancialPositionLog
 	infra    *BalanceOwnershipTestInfra
-	caClient cadomain.CurrentAccountClient
+	caClient pkdomain.CurrentAccountClient
 }
 
 // NewMockPositionKeepingService creates a new mock Position Keeping service.
@@ -339,21 +345,43 @@ func (m *MockPositionKeepingService) SetInfra(infra *BalanceOwnershipTestInfra) 
 }
 
 // SetCurrentAccountClient sets the Current Account client for lien queries.
-func (m *MockPositionKeepingService) SetCurrentAccountClient(client cadomain.CurrentAccountClient) {
+func (m *MockPositionKeepingService) SetCurrentAccountClient(client pkdomain.CurrentAccountClient) {
 	m.caClient = client
 }
 
 // CreatePositionLog creates a position log with opening balance.
 func (m *MockPositionKeepingService) CreatePositionLog(ctx context.Context, accountID string, openingBalance money.Money) (*pkdomain.FinancialPositionLog, error) {
-	log, err := pkdomain.NewFinancialPositionLogWithOpeningBalance(
-		accountID,
-		openingBalance,
-		time.Now().UTC(),
-		"INTEGRATION-TEST",
-	)
+	// Convert money.Money to pkdomain.Money
+	pkOpeningBalance := pkdomain.MustNewMoney(openingBalance.Amount(), pkdomain.Currency(openingBalance.Currency().String()))
+
+	// Create initial entry for opening balance if non-zero
+	// Use DEBIT direction for positive balance (increases the account balance)
+	var initialEntry *pkdomain.TransactionLogEntry
+	if !openingBalance.IsZero() {
+		var err error
+		initialEntry, err = pkdomain.NewTransactionLogEntry(
+			uuid.New(),
+			accountID,
+			pkOpeningBalance,
+			pkdomain.PostingDirectionDebit, // DEBIT adds to balance for positive opening balance
+			time.Now().UTC(),
+			"Opening balance",
+			"INTEGRATION-TEST",
+			pkdomain.TransactionSourceOpeningBalance,
+		)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	log, err := pkdomain.NewFinancialPositionLog(accountID, initialEntry, nil)
 	if err != nil {
 		return nil, err
 	}
+
+	// Store the opening balance for reference (even though it's tracked via entry)
+	// Note: We can't set OpeningBalance directly since it's a public field but semantically
+	// the log uses entries for balance computation. We leave OpeningBalance at zero value.
 
 	m.mu.Lock()
 	m.logs[accountID] = log
@@ -379,15 +407,18 @@ func (m *MockPositionKeepingService) RecordTransaction(ctx context.Context, acco
 		return fmt.Errorf("position log not found for account: %s", accountID)
 	}
 
+	// Convert money.Money to pkdomain.Money
+	pkAmount := pkdomain.MustNewMoney(amount.Amount(), pkdomain.Currency(amount.Currency().String()))
+
 	entry, err := pkdomain.NewTransactionLogEntry(
 		txnID,
 		accountID,
-		amount,
+		pkAmount,
 		direction,
 		time.Now().UTC(),
 		reference,
 		reference,
-		pkdomain.TransactionSourceAPI,
+		pkdomain.TransactionSourceCurrentAccount,
 	)
 	if err != nil {
 		return err
@@ -418,46 +449,70 @@ func (m *MockPositionKeepingService) GetAccountBalance(ctx context.Context, acco
 		return nil, fmt.Errorf("position log not found for account: %s", accountID)
 	}
 
-	var balance money.Money
-	var err error
+	// Determine currency from entries or from filter
+	var currencyCode string
+	if len(log.TransactionLogEntries) > 0 {
+		currencyCode = log.TransactionLogEntries[0].Amount.Instrument.Code
+	} else if currency != "" {
+		currencyCode = currency
+	} else {
+		return nil, fmt.Errorf("cannot determine currency for account: %s", accountID)
+	}
+
+	// Create a LogBalanceComputer to calculate balances
+	// Pass zero as openingBalance since the log already contains the opening balance as a transaction entry
+	zeroBalance := pkdomain.MustNewMoney(decimal.Zero, pkdomain.Currency(currencyCode))
+	lbc, err := pkdomain.NewLogBalanceComputer(log, zeroBalance, m.caClient)
+	if err != nil {
+		return nil, err
+	}
+
+	var pkBalance pkdomain.Balance
+	var balErr error
 
 	switch balanceType {
 	case positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT:
-		balance = log.CalculateCurrentBalance()
+		pkBalance, balErr = lbc.CurrentBalance()
 	case positionkeepingv1.BalanceType_BALANCE_TYPE_LEDGER:
-		balance = log.CalculateCurrentBalance()
+		pkBalance, balErr = lbc.CurrentBalance()
 	case positionkeepingv1.BalanceType_BALANCE_TYPE_RESERVE:
 		if m.caClient == nil {
 			return nil, fmt.Errorf("current account client not configured")
 		}
-		liens, liensErr := m.caClient.GetActiveAmountBlocks(ctx, accountID)
-		if liensErr != nil {
-			return nil, liensErr
-		}
-		balance, err = calculateReserveBalance(liens, log.OpeningBalance.Currency())
-		if err != nil {
-			return nil, err
-		}
+		pkBalance, balErr = lbc.ReserveBalance(ctx)
 	case positionkeepingv1.BalanceType_BALANCE_TYPE_AVAILABLE:
 		if m.caClient == nil {
 			return nil, fmt.Errorf("current account client not configured")
 		}
-		current := log.CalculateCurrentBalance()
-		liens, liensErr := m.caClient.GetActiveAmountBlocks(ctx, accountID)
-		if liensErr != nil {
-			return nil, liensErr
+		// Available = Current - Reserve
+		currentBal, currentErr := lbc.CurrentBalance()
+		if currentErr != nil {
+			return nil, currentErr
 		}
-		reserve, reserveErr := calculateReserveBalance(liens, current.Currency())
+		reserveBal, reserveErr := lbc.ReserveBalance(ctx)
 		if reserveErr != nil {
 			return nil, reserveErr
 		}
-		balance, err = current.Subtract(*reserve)
-		if err != nil {
-			return nil, err
+		availableAmount, subErr := currentBal.Amount.Subtract(reserveBal.Amount)
+		if subErr != nil {
+			return nil, subErr
 		}
+		pkBalance = pkdomain.Balance{
+			Amount: availableAmount,
+			Type:   currentBal.Type,
+			AsOf:   currentBal.AsOf,
+		}
+		balErr = nil
 	default:
 		return nil, fmt.Errorf("unsupported balance type: %v", balanceType)
 	}
+
+	if balErr != nil {
+		return nil, balErr
+	}
+
+	// Convert pkdomain.Money to money.Money for return value
+	balance := money.MustNew(pkBalance.Amount.Amount, money.Currency(pkBalance.Amount.Instrument.Code))
 
 	// Check currency filter
 	if currency != "" && balance.Currency().String() != currency {
@@ -474,8 +529,8 @@ func (m *MockPositionKeepingService) persistLog(ctx context.Context, log *pkdoma
 	var openingRecordedAt *time.Time
 
 	if !log.OpeningBalance.IsZero() {
-		amount := log.OpeningBalance.Amount()
-		currency := log.OpeningBalance.Currency().String()
+		amount := log.OpeningBalance.Amount
+		currency := log.OpeningBalance.Instrument.Code
 		recordedAt := log.OpeningBalanceRecordedAt
 		openingAmount = &amount
 		openingCurrency = &currency
@@ -506,7 +561,9 @@ func (m *MockPositionKeepingService) persistEntry(ctx context.Context, logID uui
 		return err
 	}
 
-	amountCents := entry.Amount.MinorUnits()
+	// Convert amount to minor units (cents) based on currency precision
+	precision := int32(entry.Amount.Instrument.Precision)
+	amountCents := entry.Amount.Amount.Shift(precision).IntPart()
 
 	_, err = m.infra.pool.Exec(ctx, `
 		INSERT INTO position_keeping.transaction_log_entry
@@ -515,7 +572,7 @@ func (m *MockPositionKeepingService) persistEntry(ctx context.Context, logID uui
 		 created_at, created_by, updated_at, updated_by)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 	`, entry.EntryID, dbID, entry.TransactionID, entry.AccountID,
-		amountCents, entry.Amount.Currency().String(), entry.Direction, entry.Timestamp,
+		amountCents, entry.Amount.Instrument.Code, entry.Direction, entry.Timestamp,
 		entry.Description, entry.Reference, entry.Source,
 		time.Now().UTC(), "TEST", time.Now().UTC(), "TEST")
 
@@ -524,18 +581,21 @@ func (m *MockPositionKeepingService) persistEntry(ctx context.Context, logID uui
 
 // calculateReserveBalance sums all active liens.
 // Returns zero money in the given currency if no liens exist.
-func calculateReserveBalance(liens []cadomain.AmountBlock, defaultCurrency money.Currency) (*money.Money, error) {
+func calculateReserveBalance(liens []pkdomain.AmountBlock, defaultCurrency money.Currency) (*money.Money, error) {
 	if len(liens) == 0 {
-		zeroMoney := money.MustNewMoney(decimal.Zero, defaultCurrency)
+		zeroMoney := money.MustNew(decimal.Zero, defaultCurrency)
 		return &zeroMoney, nil
 	}
 
 	// Use the currency of the first lien
-	currency := liens[0].Amount.Currency()
-	total := money.MustNewMoney(decimal.Zero, currency)
+	// pkdomain.Money is quantity.Money which has Amount and Instrument fields
+	currency := money.Currency(liens[0].Amount.Instrument.Code)
+	total := money.MustNew(decimal.Zero, currency)
 
 	for _, lien := range liens {
-		sum, err := total.Add(lien.Amount)
+		// Convert pkdomain.Money to money.Money for addition
+		lienMoney := money.MustNew(lien.Amount.Amount, currency)
+		sum, err := total.Add(lienMoney)
 		if err != nil {
 			return nil, err
 		}
@@ -565,7 +625,7 @@ func createTestAccount(t *testing.T, infra *BalanceOwnershipTestInfra, accountID
 
 	// Initialize CA balance with opening balance (simulates migration scenario)
 	if !openingBalance.IsZero() {
-		err = infra.mockCAService.Deposit(ctx, accountID, openingBalance, "OPENING-BALANCE")
+		err = infra.mockCAService.Deposit(ctx, accountID, openingBalance)
 		require.NoError(t, err, "failed to set opening balance in Current Account")
 	}
 
@@ -583,7 +643,7 @@ func recordDeposit(t *testing.T, infra *BalanceOwnershipTestInfra, accountID str
 	ctx := context.Background()
 
 	// Record in Current Account
-	err := infra.mockCAService.Deposit(ctx, accountID, amount, reference)
+	err := infra.mockCAService.Deposit(ctx, accountID, amount)
 	require.NoError(t, err, "failed to record deposit in Current Account")
 
 	// Record in Position Keeping - Debit direction adds to balance
@@ -600,7 +660,7 @@ func recordWithdrawal(t *testing.T, infra *BalanceOwnershipTestInfra, accountID 
 	ctx := context.Background()
 
 	// Record in Current Account
-	err := infra.mockCAService.Withdraw(ctx, accountID, amount, reference)
+	err := infra.mockCAService.Withdraw(ctx, accountID, amount)
 	require.NoError(t, err, "failed to record withdrawal in Current Account")
 
 	// Record in Position Keeping - Credit direction subtracts from balance
@@ -623,25 +683,25 @@ func TestBalanceOwnership_CreateAccountAndVerifyBalance(t *testing.T) {
 
 	t.Run("create_GBP_account_with_opening_balance", func(t *testing.T) {
 		accountID := "ACC-GBP-001"
-		openingBalance := money.MustNewMoney(decimal.NewFromInt(1000), money.CurrencyGBP)
+		openingBalance := money.MustNew(decimal.NewFromInt(1000), money.CurrencyGBP)
 
 		createTestAccount(t, infra, accountID, "GBP", openingBalance)
 
 		// Verify balance in Current Account
 		balance, err := infra.mockCAService.GetBalance(ctx, accountID)
 		require.NoError(t, err)
-		assert.Equal(t, decimal.NewFromInt(1000), balance.Amount())
+		assert.True(t, decimal.NewFromInt(1000).Equal(balance.Amount()), "CA balance should be 1000, got %s", balance.Amount())
 
 		// Verify balance in Position Keeping
 		pkBalance, err := infra.mockPKService.GetAccountBalance(ctx, accountID, positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT, "GBP")
 		require.NoError(t, err)
-		assert.Equal(t, decimal.NewFromInt(1000), pkBalance.Amount())
+		assert.True(t, decimal.NewFromInt(1000).Equal(pkBalance.Amount()), "PK balance should be 1000, got %s", pkBalance.Amount())
 		assert.Equal(t, "GBP", pkBalance.Currency().String())
 	})
 
 	t.Run("create_USD_account_with_zero_opening_balance", func(t *testing.T) {
 		accountID := "ACC-USD-001"
-		openingBalance := money.MustNewMoney(decimal.Zero, money.CurrencyUSD)
+		openingBalance := money.MustNew(decimal.Zero, money.CurrencyUSD)
 
 		createTestAccount(t, infra, accountID, "USD", openingBalance)
 
@@ -662,14 +722,14 @@ func TestBalanceOwnership_DepositAndWithdrawalFlow(t *testing.T) {
 	ctx := context.Background()
 
 	accountID := "ACC-TXN-001"
-	openingBalance := money.MustNewMoney(decimal.NewFromInt(5000), money.CurrencyGBP)
+	openingBalance := money.MustNew(decimal.NewFromInt(5000), money.CurrencyGBP)
 
 	t.Run("setup_account", func(t *testing.T) {
 		createTestAccount(t, infra, accountID, "GBP", openingBalance)
 	})
 
 	t.Run("deposit_increases_balance", func(t *testing.T) {
-		depositAmount := money.MustNewMoney(decimal.NewFromInt(1000), money.CurrencyGBP)
+		depositAmount := money.MustNew(decimal.NewFromInt(1000), money.CurrencyGBP)
 		recordDeposit(t, infra, accountID, depositAmount, "DEPOSIT-001")
 
 		// Wait for balance to update using await.Until
@@ -688,11 +748,11 @@ func TestBalanceOwnership_DepositAndWithdrawalFlow(t *testing.T) {
 		// Final verification
 		pkBalance, err := infra.mockPKService.GetAccountBalance(ctx, accountID, positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT, "GBP")
 		require.NoError(t, err)
-		assert.Equal(t, decimal.NewFromInt(6000), pkBalance.Amount())
+		assert.True(t, decimal.NewFromInt(6000).Equal(pkBalance.Amount()), "balance should be 6000, got %s", pkBalance.Amount())
 	})
 
 	t.Run("withdrawal_decreases_balance", func(t *testing.T) {
-		withdrawalAmount := money.MustNewMoney(decimal.NewFromInt(2000), money.CurrencyGBP)
+		withdrawalAmount := money.MustNew(decimal.NewFromInt(2000), money.CurrencyGBP)
 		recordWithdrawal(t, infra, accountID, withdrawalAmount, "WITHDRAWAL-001")
 
 		// Wait for balance to update
@@ -711,14 +771,14 @@ func TestBalanceOwnership_DepositAndWithdrawalFlow(t *testing.T) {
 		// Final verification
 		pkBalance, err := infra.mockPKService.GetAccountBalance(ctx, accountID, positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT, "GBP")
 		require.NoError(t, err)
-		assert.Equal(t, decimal.NewFromInt(4000), pkBalance.Amount())
+		assert.True(t, decimal.NewFromInt(4000).Equal(pkBalance.Amount()), "balance should be 4000, got %s", pkBalance.Amount())
 	})
 
 	t.Run("multiple_transactions_compute_correctly", func(t *testing.T) {
 		// Execute multiple deposits and withdrawals
-		recordDeposit(t, infra, accountID, money.MustNewMoney(decimal.NewFromInt(500), money.CurrencyGBP), "DEPOSIT-002")
-		recordWithdrawal(t, infra, accountID, money.MustNewMoney(decimal.NewFromInt(300), money.CurrencyGBP), "WITHDRAWAL-002")
-		recordDeposit(t, infra, accountID, money.MustNewMoney(decimal.NewFromInt(800), money.CurrencyGBP), "DEPOSIT-003")
+		recordDeposit(t, infra, accountID, money.MustNew(decimal.NewFromInt(500), money.CurrencyGBP), "DEPOSIT-002")
+		recordWithdrawal(t, infra, accountID, money.MustNew(decimal.NewFromInt(300), money.CurrencyGBP), "WITHDRAWAL-002")
+		recordDeposit(t, infra, accountID, money.MustNew(decimal.NewFromInt(800), money.CurrencyGBP), "DEPOSIT-003")
 
 		// Expected: 4000 + 500 - 300 + 800 = 5000
 		err := await.New().
@@ -736,7 +796,7 @@ func TestBalanceOwnership_DepositAndWithdrawalFlow(t *testing.T) {
 		// Final verification
 		pkBalance, err := infra.mockPKService.GetAccountBalance(ctx, accountID, positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT, "GBP")
 		require.NoError(t, err)
-		assert.Equal(t, decimal.NewFromInt(5000), pkBalance.Amount())
+		assert.True(t, decimal.NewFromInt(5000).Equal(pkBalance.Amount()), "balance should be 5000, got %s", pkBalance.Amount())
 	})
 }
 
@@ -749,7 +809,7 @@ func TestBalanceOwnership_LiensAndAvailableBalance(t *testing.T) {
 	ctx := context.Background()
 
 	accountID := "ACC-LIEN-001"
-	openingBalance := money.MustNewMoney(decimal.NewFromInt(10000), money.CurrencyGBP)
+	openingBalance := money.MustNew(decimal.NewFromInt(10000), money.CurrencyGBP)
 
 	// Configure Position Keeping to use Current Account for liens
 	infra.mockPKService.SetCurrentAccountClient(infra.mockCAService)
@@ -767,25 +827,25 @@ func TestBalanceOwnership_LiensAndAvailableBalance(t *testing.T) {
 	t.Run("available_balance_equals_current_without_liens", func(t *testing.T) {
 		pkBalance, err := infra.mockPKService.GetAccountBalance(ctx, accountID, positionkeepingv1.BalanceType_BALANCE_TYPE_AVAILABLE, "GBP")
 		require.NoError(t, err)
-		assert.Equal(t, decimal.NewFromInt(10000), pkBalance.Amount())
+		assert.True(t, decimal.NewFromInt(10000).Equal(pkBalance.Amount()), "balance should be 10000, got %s", pkBalance.Amount())
 	})
 
 	t.Run("add_liens_and_verify_reserve_balance", func(t *testing.T) {
 		// Add first lien
-		lien1 := cadomain.AmountBlock{
+		lien1 := pkdomain.AmountBlock{
 			BlockID:   "LIEN-001",
-			Amount:    money.MustNewMoney(decimal.NewFromInt(2000), money.CurrencyGBP),
-			BlockType: cadomain.AmountBlockTypePending,
+			Amount:    pkdomain.MustNewMoney(decimal.NewFromInt(2000), pkdomain.CurrencyGBP),
+			BlockType: pkdomain.AmountBlockTypePending,
 			Purpose:   "Payment authorization hold",
 		}
 		err := infra.mockCAService.AddLien(ctx, accountID, lien1)
 		require.NoError(t, err)
 
 		// Add second lien
-		lien2 := cadomain.AmountBlock{
+		lien2 := pkdomain.AmountBlock{
 			BlockID:   "LIEN-002",
-			Amount:    money.MustNewMoney(decimal.NewFromInt(1500), money.CurrencyGBP),
-			BlockType: cadomain.AmountBlockTypeTemporary,
+			Amount:    pkdomain.MustNewMoney(decimal.NewFromInt(1500), pkdomain.CurrencyGBP),
+			BlockType: pkdomain.AmountBlockTypeTemporary,
 			Purpose:   "Preauthorization hold",
 		}
 		err = infra.mockCAService.AddLien(ctx, accountID, lien2)
@@ -808,7 +868,7 @@ func TestBalanceOwnership_LiensAndAvailableBalance(t *testing.T) {
 		// Verify reserve balance
 		reserve, err := infra.mockPKService.GetAccountBalance(ctx, accountID, positionkeepingv1.BalanceType_BALANCE_TYPE_RESERVE, "GBP")
 		require.NoError(t, err)
-		assert.Equal(t, decimal.NewFromInt(3500), reserve.Amount())
+		assert.True(t, decimal.NewFromInt(3500).Equal(reserve.Amount()), "reserve should be 3500, got %s", reserve.Amount())
 	})
 
 	t.Run("available_balance_is_current_minus_reserve", func(t *testing.T) {
@@ -817,7 +877,7 @@ func TestBalanceOwnership_LiensAndAvailableBalance(t *testing.T) {
 		// Available: 10000 - 3500 = 6500
 		available, err := infra.mockPKService.GetAccountBalance(ctx, accountID, positionkeepingv1.BalanceType_BALANCE_TYPE_AVAILABLE, "GBP")
 		require.NoError(t, err)
-		assert.Equal(t, decimal.NewFromInt(6500), available.Amount())
+		assert.True(t, decimal.NewFromInt(6500).Equal(available.Amount()), "available should be 6500, got %s", available.Amount())
 	})
 }
 
@@ -842,7 +902,7 @@ func TestBalanceOwnership_MultiCurrencySupport(t *testing.T) {
 
 	for _, tc := range currencies {
 		t.Run(fmt.Sprintf("create_%s_account", tc.code), func(t *testing.T) {
-			openingBalance := money.MustNewMoney(tc.openingBalance, tc.code)
+			openingBalance := money.MustNew(tc.openingBalance, tc.code)
 			createTestAccount(t, infra, tc.accountID, tc.code.String(), openingBalance)
 
 			// Verify balance in Position Keeping
@@ -870,7 +930,7 @@ func TestBalanceOwnership_BalanceConsistency(t *testing.T) {
 	ctx := context.Background()
 
 	accountID := "ACC-CONSISTENCY-001"
-	openingBalance := money.MustNewMoney(decimal.NewFromInt(10000), money.CurrencyGBP)
+	openingBalance := money.MustNew(decimal.NewFromInt(10000), money.CurrencyGBP)
 
 	t.Run("setup_account", func(t *testing.T) {
 		createTestAccount(t, infra, accountID, "GBP", openingBalance)
@@ -888,9 +948,9 @@ func TestBalanceOwnership_BalanceConsistency(t *testing.T) {
 
 	t.Run("consistency_after_transactions", func(t *testing.T) {
 		// Execute several transactions
-		recordDeposit(t, infra, accountID, money.MustNewMoney(decimal.NewFromInt(3000), money.CurrencyGBP), "DEP-001")
-		recordWithdrawal(t, infra, accountID, money.MustNewMoney(decimal.NewFromInt(1500), money.CurrencyGBP), "WD-001")
-		recordDeposit(t, infra, accountID, money.MustNewMoney(decimal.NewFromInt(500), money.CurrencyGBP), "DEP-002")
+		recordDeposit(t, infra, accountID, money.MustNew(decimal.NewFromInt(3000), money.CurrencyGBP), "DEP-001")
+		recordWithdrawal(t, infra, accountID, money.MustNew(decimal.NewFromInt(1500), money.CurrencyGBP), "WD-001")
+		recordDeposit(t, infra, accountID, money.MustNew(decimal.NewFromInt(500), money.CurrencyGBP), "DEP-002")
 
 		// Expected: 10000 + 3000 - 1500 + 500 = 12000
 		err := await.New().
@@ -918,8 +978,8 @@ func TestBalanceOwnership_BalanceConsistency(t *testing.T) {
 		caBalance, err := infra.mockCAService.GetBalance(ctx, accountID)
 		require.NoError(t, err)
 
-		assert.Equal(t, decimal.NewFromInt(12000), pkCurrent.Amount())
-		assert.Equal(t, pkCurrent.Amount(), caBalance.Amount(), "Position Keeping and Current Account balances must match")
+		assert.True(t, decimal.NewFromInt(12000).Equal(pkCurrent.Amount()), "PK balance should be 12000, got %s", pkCurrent.Amount())
+		assert.True(t, pkCurrent.Amount().Equal(caBalance.Amount()), "Position Keeping and Current Account balances must match")
 	})
 }
 
@@ -939,7 +999,7 @@ func TestBalanceOwnership_ErrorCases(t *testing.T) {
 
 	t.Run("reserve_balance_without_client_returns_error", func(t *testing.T) {
 		accountID := "ACC-NO-CLIENT-001"
-		openingBalance := money.MustNewMoney(decimal.NewFromInt(1000), money.CurrencyGBP)
+		openingBalance := money.MustNew(decimal.NewFromInt(1000), money.CurrencyGBP)
 		createTestAccount(t, infra, accountID, "GBP", openingBalance)
 
 		// Don't configure Current Account client
