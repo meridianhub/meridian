@@ -2,7 +2,7 @@ name: Claude Code Review
 
 on:
   workflow_run:
-    workflows: ["Test", "Build & Test", "Code Quality"]
+    workflows: ["Test"]
     types: [completed]
 
 # Prevent duplicate reviews for the same PR branch
@@ -155,6 +155,11 @@ jobs:
             - **Be proportional**: Don't pad reviews with low-value suggestions
             - **Be yourself**: Genuine engagement, not robotic checklist. You care about the code and the person who wrote it.
 
+            ## Priority Signals
+
+            Use 🔴 for blocking issues that must be fixed before merge.
+            Use 🟡 for suggestions and improvements that aren't blocking.
+
             ## How to Comment
 
             **Submit a review with approval status and inline comments** using the reviews endpoint:
@@ -168,6 +173,8 @@ jobs:
 
             The `event` field can be: `APPROVE`, `REQUEST_CHANGES`, or `COMMENT`.
             This batches all inline comments in one API call and sets the review status.
+
+            **CRITICAL**: Post inline comments BEFORE referencing them. Include them in the `comments` array when submitting the review. Never say "see inline comment below" without actually posting one.
 
             **For actionable suggestions** (copy-pasteable by humans into their local Claude):
             Use collapsible details blocks in the inline comment body:
