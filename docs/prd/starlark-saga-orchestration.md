@@ -165,6 +165,40 @@ The saga definitions become **Administrative Plan Records** - auditable configur
 - **Audit trail**: All "Do" and "Undo" actions are linked via causation chain
 - **Traceability**: Given any entry, trace back to the saga step that created it
 
+### FR-18: Side-Effect Idempotency Enforcement
+
+- **Requirement**: Step Handlers for external integrations MUST explicitly declare their idempotency capability
+- **Declaration**: Handlers marked `idempotency: "EXTERNAL_SUPPORTED"` or `idempotency: "EXTERNAL_NOT_SUPPORTED"`
+- **Fail-fast**: If an external service does not support idempotency, the Runtime MUST fail-fast during ACTIVATION if that handler is used in a saga that lacks a "Pre-Step Check" pattern
+- **Pre-Step Check pattern**: Query external system state before executing (e.g., check if payment already exists before creating)
+- **Rationale**: Replay execution could trigger double payments if external gateways don't support our idempotency keys
+
+### FR-19: Zombie Saga Detection
+
+- **Requirement**: The `saga_instances` table MUST include a `replay_count` column
+- **Max Replays**: If a saga exceeds `MAX_REPLAYS` (configurable, default: 5), it MUST be transitioned to `FAILED_MANUAL_INTERVENTION` status
+- **Alerting**: Zombie detection MUST trigger a high-severity alert (P1) for operator intervention
+- **Manual resolution**: Operator can inspect, fix Starlark logic, and reset replay_count or mark as permanently failed
+- **Rationale**: Prevents infinite "Try → Fail → Replay → Fail" loops from consuming resources indefinitely
+
+### FR-20: Starlark Dry-Run Testing
+
+- **Requirement**: The service SHALL provide an `ExecuteDryRun` RPC
+- **Behavior**: Runs the Starlark script in a virtual environment where all Step Handlers are mocked
+- **Output**: Returns the intended "Execution Plan" (what steps would have been called, in what order, with what parameters)
+- **No persistence**: Dry-run MUST NOT persist anything to the database
+- **Use case**: Tenants can test their Starlark logic before calling `RegisterDataSet` to deploy to production
+- **Validation**: Dry-run also validates attribute references against instrument schema
+
+### FR-21: Deterministic UUID Generator
+
+- **Requirement**: The Runtime MUST provide a `ctx.new_uuid()` builtin
+- **Determinism**: Returns a UUID derived from `sha256(SagaInstance.ID + StepIndex + CallIndex)`
+- **Stability**: Same saga instance replaying same step produces identical UUIDs
+- **Call tracking**: `CallIndex` increments for each `new_uuid()` call within a step, reset to 0 on next step
+- **Rationale**: Random UUIDs would break determinism during replay (different UUID each time)
+- **Usage**: Reference numbers, correlation IDs, any generated identifiers within saga logic
+
 ---
 
 ## 4. CEL Valuation: Context and Boundaries
@@ -1207,8 +1241,9 @@ CREATE TABLE saga_instances (
 
     -- Progress
     current_step_index INTEGER NOT NULL DEFAULT 0,
-    status VARCHAR(16) NOT NULL DEFAULT 'PENDING',
-    -- PENDING, RUNNING, COMPLETED, COMPENSATING, COMPENSATED, FAILED
+    replay_count INTEGER NOT NULL DEFAULT 0,   -- Incremented on each replay attempt
+    status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+    -- PENDING, RUNNING, COMPLETED, COMPENSATING, COMPENSATED, FAILED, FAILED_MANUAL_INTERVENTION
 
     -- Timestamps
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -1338,8 +1373,15 @@ func (r *Runtime) executeStep(ctx context.Context, instance *SagaInstance, stepI
         return nil, err
     }
 
-    // Persist result BEFORE returning to Starlark
-    err = r.stepResultRepo.Save(ctx, &SagaStepResult{
+    // CRITICAL: Transaction Affinity - result save and index update MUST be atomic
+    tx, err := r.db.BeginTx(ctx, nil)
+    if err != nil {
+        return nil, fmt.Errorf("failed to begin transaction: %w", err)
+    }
+    defer tx.Rollback()
+
+    // 1. Persist step result
+    err = r.stepResultRepo.SaveTx(tx, &SagaStepResult{
         SagaInstanceID:  instance.ID,
         StepIndex:       stepIndex,
         IdempotencyKey:  idempotencyKey,
@@ -1351,9 +1393,31 @@ func (r *Runtime) executeStep(ctx context.Context, instance *SagaInstance, stepI
         return nil, fmt.Errorf("failed to persist step result: %w", err)
     }
 
+    // 2. Update current_step_index in SAME transaction
+    _, err = tx.ExecContext(ctx, `
+        UPDATE saga_instances
+        SET current_step_index = $1, replay_count = 0
+        WHERE id = $2
+    `, stepIndex+1, instance.ID)
+    if err != nil {
+        return nil, fmt.Errorf("failed to update step index: %w", err)
+    }
+
+    if err := tx.Commit(); err != nil {
+        return nil, fmt.Errorf("failed to commit step: %w", err)
+    }
+
     return output, nil
 }
 ```
+
+> **Implementation Directive: Transaction Affinity**
+>
+> The update to `current_step_index` and the insertion into `saga_step_results` MUST happen in the same database transaction. This prevents the "Gap of Uncertainty" where:
+> - A result is saved but the index isn't moved (step re-executes on recovery, but idempotency key catches it)
+> - Or the index is moved but result isn't saved (step is skipped on recovery, losing data)
+>
+> By making these atomic, we guarantee that saga state is always consistent. The `replay_count` is also reset to 0 on successful step completion.
 
 #### Lease Renewal (Keep-Alive)
 
@@ -1630,9 +1694,10 @@ Meridian extends vanilla Starlark with domain-specific builtins. These are the *
 | `resolve_instrument()` | `resolve_instrument(code, version=None) → instrument` | Lookup instrument definition |
 | `invoke_saga()` | `invoke_saga(name, version=None, context={}) → result` | Invoke child saga |
 | `valuate()` | `valuate(instrument, quantity, context_type) → valuation` | Call Valuation Engine (single context) |
-| `valuate_batch()` | `valuate_batch(instrument, quantity, context_types[]) → [valuation]` | Valuate same basis across multiple contexts (guarantees identical measurement) |
+| `valuate_batch()` | `valuate_batch(instrument, quantity, context_types[]) → Dict[context_type, valuation]` | Valuate same basis across multiple contexts; returns dictionary keyed by context_type (e.g., `results["RETAIL"]`, `results["WHOLESALE"]`) |
 | `fail()` | `fail(message)` | Abort saga with error message |
 | `log()` | `log(level, message, **fields)` | Emit structured log entry |
+| `ctx.new_uuid()` | `ctx.new_uuid() → UUID` | Deterministic UUID: `sha256(saga_id + step_index + call_index)`. Stable across replays |
 
 #### Data Access Builtins
 
@@ -1907,6 +1972,12 @@ Position attributes are **tenant-defined** via the asset class model. Sagas use 
 | **SAGA-050** | Validate script accesses against handler output schemas | P2 | SAGA-049 |
 | **SAGA-051** | Add `ctx.is_simulation` flag and handler enforcement | P1 | SAGA-004 |
 | **SAGA-052** | Implement automatic `causation_id` propagation to compensations | P1 | SAGA-004 |
+| **SAGA-053** | Add idempotency declaration to step handler interface (EXTERNAL_SUPPORTED/NOT_SUPPORTED) | P0 | SAGA-005 |
+| **SAGA-054** | Implement ACTIVATION fail-fast for non-idempotent external handlers without Pre-Step Check | P0 | SAGA-053, SAGA-019 |
+| **SAGA-055** | Implement zombie saga detection (`replay_count` > MAX_REPLAYS → FAILED_MANUAL_INTERVENTION) | P0 | SAGA-044 |
+| **SAGA-056** | Add high-severity alerting for zombie sagas (operator notification) | P1 | SAGA-055 |
+| **SAGA-057** | Implement `ExecuteDryRun` RPC (mocked handlers, execution plan output) | P1 | SAGA-017 |
+| **SAGA-058** | Implement `ctx.new_uuid()` deterministic UUID generator | P0 | SAGA-004 |
 
 ---
 
@@ -2045,6 +2116,18 @@ Position attributes are **tenant-defined** via the asset class model. Sagas use 
 | **AC-DH-05** | `causation_id` auto-propagated to compensation steps | Unit test: verify compensation has parent's causation_id |
 | **AC-DH-06** | `valuate_batch()` uses identical measurement for all contexts | Unit test: verify all valuations reference same basis |
 | **AC-DH-07** | Logic/Physics Linter warns on `a * b` in Starlark | Unit test: script with multiplication, verify warning |
+
+### Acceptance Criteria: External Integration & Resilience
+
+| ID | Criterion | Test Method |
+|----|-----------|-------------|
+| **AC-EI-01** | External step handlers declare idempotency capability | Code review: all external handlers have `idempotency` attribute |
+| **AC-EI-02** | ACTIVATION fails for non-idempotent external handler without Pre-Step Check | Unit test: saga with non-idempotent handler, verify activation error |
+| **AC-EI-03** | Zombie saga (replay_count > MAX_REPLAYS) transitions to FAILED_MANUAL_INTERVENTION | Integration test: force 6 replays, verify status transition |
+| **AC-EI-04** | Zombie detection triggers high-severity alert | Integration test: verify alerting system receives P1 notification |
+| **AC-EI-05** | `ExecuteDryRun` returns execution plan without persisting | Unit test: call dry-run, verify no database writes |
+| **AC-EI-06** | `ctx.new_uuid()` returns deterministic UUID (stable across replays) | Unit test: replay saga, verify same UUIDs generated |
+| **AC-EI-07** | Transaction affinity: step result + index update are atomic | Unit test: inject failure mid-step, verify no partial state |
 
 ---
 
