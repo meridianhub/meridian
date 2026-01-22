@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -43,6 +44,7 @@ type mockVerificationRepository struct {
 	verificationsByProvID map[string]*persistence.PartyVerificationEntity
 	createFn              func(ctx context.Context, v *persistence.PartyVerificationEntity) error
 	updateStatusFn        func(ctx context.Context, id uuid.UUID, status string, riskScore *float64, reason *string, completedAt *time.Time, version int64) error
+	updateMetadataFn      func(ctx context.Context, id uuid.UUID, metadata string) error
 	getByIDFn             func(ctx context.Context, id uuid.UUID) (*persistence.PartyVerificationEntity, error)
 	getByProviderIDFn     func(ctx context.Context, verificationID string) (*persistence.PartyVerificationEntity, error)
 	listByPartyFn         func(ctx context.Context, partyID uuid.UUID) ([]persistence.PartyVerificationEntity, error)
@@ -129,6 +131,19 @@ func (m *mockVerificationRepository) ListVerificationsByParty(ctx context.Contex
 		}
 	}
 	return result, nil
+}
+
+func (m *mockVerificationRepository) UpdateVerificationMetadata(ctx context.Context, id uuid.UUID, metadata string) error {
+	if m.updateMetadataFn != nil {
+		return m.updateMetadataFn(ctx, id, metadata)
+	}
+	v, ok := m.verifications[id]
+	if !ok {
+		return persistence.ErrVerificationNotFound
+	}
+	v.Metadata = &metadata
+	v.UpdatedAt = time.Now()
+	return nil
 }
 
 // mockEventPublisher implements VerificationEventPublisher for testing
@@ -502,4 +517,57 @@ func TestListVerificationsForParty(t *testing.T) {
 	verifications, err := svc.ListVerificationsForParty(ctx, partyID)
 	require.NoError(t, err)
 	assert.Len(t, verifications, 3)
+}
+
+func TestUpdateVerification_WithMetadata(t *testing.T) {
+	partyID := uuid.New()
+	partyRepo := &mockPartyRepository{}
+	verificationRepo := newMockVerificationRepository()
+	eventPublisher := &mockEventPublisher{}
+	provider := &mockProvider{}
+
+	svc, err := NewVerificationService(partyRepo, verificationRepo, provider, eventPublisher, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Create a pending verification
+	providerVerificationID := "prov-metadata"
+	entity := &persistence.PartyVerificationEntity{
+		PartyID:        partyID,
+		VerificationID: providerVerificationID,
+		Provider:       "onfido",
+		Status:         "PENDING",
+	}
+	err = verificationRepo.CreateVerification(ctx, entity)
+	require.NoError(t, err)
+
+	// Update with metadata
+	riskScore := 0.1
+	err = svc.UpdateVerification(ctx, UpdateVerificationRequest{
+		ProviderVerificationID: providerVerificationID,
+		Status:                 "APPROVED",
+		RiskScore:              &riskScore,
+		Metadata: map[string]string{
+			"document_type": "passport",
+			"confidence":    "0.95",
+		},
+	})
+	require.NoError(t, err)
+
+	// Verify metadata was persisted
+	updated, err := verificationRepo.GetVerificationByProviderID(ctx, providerVerificationID)
+	require.NoError(t, err)
+	require.NotNil(t, updated.Metadata, "metadata should be persisted")
+
+	// Verify metadata content is valid JSON with expected keys
+	var metadata map[string]string
+	err = json.Unmarshal([]byte(*updated.Metadata), &metadata)
+	require.NoError(t, err)
+	assert.Equal(t, "passport", metadata["document_type"])
+	assert.Equal(t, "0.95", metadata["confidence"])
+
+	// Verify event was still published
+	require.Len(t, eventPublisher.publishedEvents, 1)
+	assert.Equal(t, "APPROVED", eventPublisher.publishedEvents[0].Status)
 }
