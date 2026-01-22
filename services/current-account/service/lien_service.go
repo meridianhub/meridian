@@ -131,10 +131,22 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		operationStatus = opStatusRetrieveFailed
 		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
 	}
+
+	// Get bucket_id from request (may be empty for non-bucket-scoped liens)
+	bucketID := req.BucketId
+
+	// Prefetch balance from Position Keeping.
+	// Note: Currently Position Keeping returns total balance regardless of bucket.
+	// Bucket-aware balance tracking will be added in future iterations when Position Keeping
+	// supports bucket-scoped balance queries. For now, we validate against total balance
+	// but scope lien reservations to buckets.
 	prefetchedBalanceCents, err := s.getAccountBalanceCents(ctx, req.AccountId)
 	if err != nil {
 		operationStatus = opStatusRetrieveFailed
-		s.logger.Error("failed to prefetch balance from Position Keeping", "account_id", req.AccountId, "error", err)
+		s.logger.Error("failed to prefetch balance from Position Keeping",
+			"account_id", req.AccountId,
+			"bucket_id", bucketID,
+			"error", err)
 		return nil, status.Errorf(codes.Internal, "failed to retrieve account balance: %v", err)
 	}
 
@@ -167,13 +179,21 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 			return errTxCurrencyMismatch
 		}
 
-		// Calculate available balance using pre-fetched balance (no external call inside tx)
-		activeLiensTotal, err := txLienRepo.SumActiveAmountByAccountID(ctx, account.ID())
+		// Calculate available balance using pre-fetched balance (no external call inside tx).
+		// When bucket_id is provided, sum only liens scoped to that bucket for solvency validation.
+		// This ensures liens within a bucket don't exceed the bucket's share of funds, providing
+		// partial isolation even though Position Keeping doesn't yet support bucket-scoped balances.
+		var activeLiensTotal int64
+		if bucketID != "" {
+			activeLiensTotal, err = txLienRepo.SumActiveAmountByAccountIDAndBucket(ctx, account.ID(), bucketID)
+		} else {
+			activeLiensTotal, err = txLienRepo.SumActiveAmountByAccountID(ctx, account.ID())
+		}
 		if err != nil {
 			return fmt.Errorf("%w: %v", errTxSumLiensFailed, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
 
-		// Available = Pre-fetched Balance - Active Liens
+		// Available = Pre-fetched Balance - Active Liens (scoped to bucket if bucket_id provided)
 		// Balance was fetched from Position Keeping before entering transaction.
 		availableBalance = prefetchedBalanceCents - activeLiensTotal
 
@@ -186,17 +206,8 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 			return errTxInsufficientFunds
 		}
 
-		// Get bucket_id from request (Phase 1: use empty string if not provided)
-		// The bucket_id is stored for future bucket-aware position tracking.
-		//
-		// TODO(tm:universal-asset-system.26): Phase 2 will implement bucket-aware solvency validation.
-		// Currently, solvency is validated against total account balance regardless of bucket.
-		// When Phase 2 is implemented, liens with a bucket_id should validate solvency against
-		// only the balance within that specific fungibility bucket, using the bucket-scoped
-		// SumActiveAmountByAccountIDAndBucket query already available in the repository.
-		bucketID := req.BucketId // Will be empty string if not provided (proto default)
-
 		// Create lien domain object with bucket awareness
+		// bucket_id was extracted from request before entering transaction
 		lien, err = domain.NewLien(account.ID(), lienAmount, bucketID, req.PaymentOrderReference, nil)
 		if err != nil {
 			return fmt.Errorf("%w: %v", errTxDomainError, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
@@ -381,10 +392,18 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 		operationStatus = opStatusRetrieveAccountFailed
 		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
 	}
+
+	// Prefetch balance from Position Keeping.
+	// Note: Currently Position Keeping returns total balance regardless of bucket.
+	// The lien's bucket_id is used for bucket-scoped lien calculations within Current Account,
+	// but the balance comes from total Position Keeping balance.
 	prefetchedBalanceCents, err := s.getAccountBalanceCents(ctx, prefetchAccount.AccountID())
 	if err != nil {
 		operationStatus = opStatusRetrieveFailed
-		s.logger.Error("failed to prefetch balance from Position Keeping", "account_id", prefetchAccount.AccountID(), "error", err)
+		s.logger.Error("failed to prefetch balance from Position Keeping",
+			"account_id", prefetchAccount.AccountID(),
+			"bucket_id", lien.BucketID,
+			"error", err)
 		return nil, status.Errorf(codes.Internal, "failed to retrieve account balance: %v", err)
 	}
 
@@ -501,7 +520,8 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 		"amount_cents", safeMinorUnits(lien.Amount),
 		"transaction_id", transactionID)
 
-	availableMoney := s.calculateAvailableBalance(ctx, lien.AccountID, account.Balance())
+	// Calculate available balance scoped to the lien's bucket (if any)
+	availableMoney := s.calculateAvailableBalanceByBucket(ctx, lien.AccountID, lien.BucketID, account.Balance())
 	resp := &pb.ExecuteLienResponse{
 		Lien:             toLienProto(lien),
 		NewBalance:       toMoneyAmount(account.Balance()),
@@ -582,7 +602,8 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 			s.logger.Error("failed to get account balance for idempotent response", "error", acctErr)
 			return &pb.TerminateLienResponse{Lien: toLienProto(lien)}, nil
 		}
-		availableMoney := s.calculateAvailableBalance(ctx, lien.AccountID, account.Balance())
+		// Calculate available balance scoped to the lien's bucket (if any)
+		availableMoney := s.calculateAvailableBalanceByBucket(ctx, lien.AccountID, lien.BucketID, account.Balance())
 		return &pb.TerminateLienResponse{
 			Lien:             toLienProto(lien),
 			AvailableBalance: toMoneyAmount(availableMoney),
@@ -677,7 +698,8 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 		return nil, status.Errorf(codes.Internal, "failed to get account balance: %v", err)
 	}
 
-	availableMoney := s.calculateAvailableBalance(ctx, lien.AccountID, account.Balance())
+	// Calculate available balance scoped to the lien's bucket (if any)
+	availableMoney := s.calculateAvailableBalanceByBucket(ctx, lien.AccountID, lien.BucketID, account.Balance())
 	return &pb.TerminateLienResponse{
 		Lien:             toLienProto(lien),
 		AvailableBalance: toMoneyAmount(availableMoney),
@@ -789,7 +811,8 @@ func (s *Service) buildExecuteLienIdempotentResponse(ctx context.Context, lien *
 		return nil, status.Errorf(codes.Internal, "failed to get account balance: %v", err)
 	}
 
-	availableMoney := s.calculateAvailableBalance(ctx, lien.AccountID, account.Balance())
+	// Calculate available balance scoped to the lien's bucket (if any)
+	availableMoney := s.calculateAvailableBalanceByBucket(ctx, lien.AccountID, lien.BucketID, account.Balance())
 	return &pb.ExecuteLienResponse{
 		Lien:             toLienProto(lien),
 		NewBalance:       toMoneyAmount(account.Balance()),
@@ -831,7 +854,8 @@ func (s *Service) checkLienIdempotency(ctx context.Context, paymentOrderRef stri
 		s.logger.Error("failed to get account balance for idempotent response", "error", acctErr)
 		return &pb.InitiateLienResponse{Lien: toLienProto(existingLien)}, true, nil
 	}
-	availableMoney := s.calculateAvailableBalance(ctx, existingLien.AccountID, account.Balance())
+	// Calculate available balance scoped to the lien's bucket (if any)
+	availableMoney := s.calculateAvailableBalanceByBucket(ctx, existingLien.AccountID, existingLien.BucketID, account.Balance())
 	return &pb.InitiateLienResponse{
 		Lien:             toLienProto(existingLien),
 		AvailableBalance: toMoneyAmount(availableMoney),
@@ -993,20 +1017,40 @@ func (s *Service) getAccountBalanceCents(ctx context.Context, accountID string) 
 // Logs errors but returns best-effort values since primary operations already succeeded.
 // Context is required for organization scoping in multi-org mode.
 func (s *Service) calculateAvailableBalance(ctx context.Context, accountID uuid.UUID, currentBalance domain.Money) domain.Money {
+	return s.calculateAvailableBalanceByBucket(ctx, accountID, "", currentBalance)
+}
+
+// calculateAvailableBalanceByBucket calculates available balance with active liens scoped to bucket.
+// If bucketID is empty, calculates against all liens for the account (backward compatible).
+// Logs errors but returns best-effort values since primary operations already succeeded.
+// Context is required for organization scoping in multi-org mode.
+func (s *Service) calculateAvailableBalanceByBucket(ctx context.Context, accountID uuid.UUID, bucketID string, currentBalance domain.Money) domain.Money {
 	if s.lienRepo == nil {
 		// Lien repository not configured - return balance without lien adjustment
 		return currentBalance
 	}
-	activeLiensTotal, err := s.lienRepo.SumActiveAmountByAccountID(ctx, accountID)
+
+	var activeLiensTotal int64
+	var err error
+	if bucketID != "" {
+		activeLiensTotal, err = s.lienRepo.SumActiveAmountByAccountIDAndBucket(ctx, accountID, bucketID)
+	} else {
+		activeLiensTotal, err = s.lienRepo.SumActiveAmountByAccountID(ctx, accountID)
+	}
 	if err != nil {
-		s.logger.Error("failed to sum active liens for response", "error", err)
+		s.logger.Error("failed to sum active liens for response",
+			"account_id", accountID,
+			"bucket_id", bucketID,
+			"error", err)
 		return currentBalance // Best effort: return current balance if liens can't be summed
 	}
+
 	currentBalanceCents, err := currentBalance.ToMinorUnits()
 	if err != nil {
 		s.logger.Error("failed to convert balance to minor units", "error", err)
 		return currentBalance // Best effort
 	}
+
 	availableBalance := currentBalanceCents - activeLiensTotal
 	availableMoney, err := domain.NewMoney(string(currentBalance.Currency()), availableBalance)
 	if err != nil {

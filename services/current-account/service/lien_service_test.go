@@ -986,8 +986,9 @@ func TestInitiateLien_MultipleBuckets_IndependentLiens(t *testing.T) {
 	resp2, err := svc.InitiateLien(ctx, req2)
 	require.NoError(t, err)
 	require.Equal(t, "bucket-B", resp2.Lien.BucketId)
-	// Phase 1: solvency is against total balance, so available = £1000 - £500 - £300 = £200
-	require.Equal(t, int64(200), resp2.AvailableBalance.Amount.Units)
+	// Phase 2: available balance is bucket-scoped, so for bucket-B: £1000 - £300 = £700
+	// (bucket-A's £500 lien doesn't affect bucket-B's available balance)
+	require.Equal(t, int64(700), resp2.AvailableBalance.Amount.Units)
 
 	// Create lien for default bucket (empty string) (£100)
 	req3 := &pb.InitiateLienRequest{
@@ -1001,7 +1002,165 @@ func TestInitiateLien_MultipleBuckets_IndependentLiens(t *testing.T) {
 	resp3, err := svc.InitiateLien(ctx, req3)
 	require.NoError(t, err)
 	require.Equal(t, "", resp3.Lien.BucketId)
-	require.Equal(t, int64(100), resp3.AvailableBalance.Amount.Units) // £200 - £100 = £100
+	// Default bucket (empty string) considers ALL liens for available balance
+	// £1000 - £500 (bucket-A) - £300 (bucket-B) - £100 (default) = £100
+	require.Equal(t, int64(100), resp3.AvailableBalance.Amount.Units)
+}
+
+// TestInitiateLien_BucketAwareSolvency_UsesOnlyBucketLiens verifies that when a bucket_id
+// is provided, solvency validation only considers liens from that specific bucket.
+// This is Phase 2 bucket-aware solvency validation.
+//
+// Philosophy: Different buckets represent different fungibility domains (e.g., Grade A rice
+// vs Grade B rice). Bucket-A liens should NOT affect bucket-B's available balance.
+// This allows independent reservation within each fungibility bucket.
+//
+// Until Position Keeping supports bucket-scoped balances, we use total balance as a safety net.
+// The formula is: Available = Total Balance - Bucket-Specific Liens
+func TestInitiateLien_BucketAwareSolvency_UsesOnlyBucketLiens(t *testing.T) {
+	db, ctx, cleanup := setupLienTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	lienRepo := persistence.NewLienRepository(db)
+	// Configure Position Keeping mock with £1000 balance
+	svc := mustNewServiceWithPositionKeeping(t, repo, lienRepo, map[string]int64{
+		"ACC-BUCKET-SOLVENCY-001": 100000, // £1000
+	})
+
+	// Create account with £1000 balance
+	createTestAccountWithBalance(t, ctx, repo, "ACC-BUCKET-SOLVENCY-001", 100000)
+
+	// Step 1: Create lien for bucket-A (£600)
+	req1 := &pb.InitiateLienRequest{
+		AccountId: "ACC-BUCKET-SOLVENCY-001",
+		Amount: &commonpb.MoneyAmount{
+			Amount: &money.Money{CurrencyCode: "GBP", Units: 600},
+		},
+		PaymentOrderReference: "PO-SOLVENCY-A1",
+		BucketId:              "bucket-A",
+	}
+	resp1, err := svc.InitiateLien(ctx, req1)
+	require.NoError(t, err)
+	require.Equal(t, "bucket-A", resp1.Lien.BucketId)
+	// Bucket-A available = £1000 - £600 (bucket-A liens) = £400
+	require.Equal(t, int64(400), resp1.AvailableBalance.Amount.Units)
+
+	// Step 2: Create lien for bucket-B (£600)
+	// With bucket-aware solvency, bucket-B should be able to reserve £600 because:
+	// - Total balance = £1000
+	// - Bucket-B liens = £0 (bucket-A's £600 doesn't count for bucket-B)
+	// - Bucket-B available = £1000 - £0 = £1000
+	//
+	// This ALLOWS "over-reservation" across buckets, which is INTENTIONAL.
+	// In a multi-asset system, bucket-A (Grade A rice) and bucket-B (Grade B rice)
+	// are different assets, so reservations should be independent.
+	req2 := &pb.InitiateLienRequest{
+		AccountId: "ACC-BUCKET-SOLVENCY-001",
+		Amount: &commonpb.MoneyAmount{
+			Amount: &money.Money{CurrencyCode: "GBP", Units: 600},
+		},
+		PaymentOrderReference: "PO-SOLVENCY-B1",
+		BucketId:              "bucket-B",
+	}
+	resp2, err := svc.InitiateLien(ctx, req2)
+	require.NoError(t, err, "bucket-B should succeed with bucket-scoped solvency")
+	require.Equal(t, "bucket-B", resp2.Lien.BucketId)
+	// Bucket-B available = £1000 - £600 (bucket-B liens) = £400
+	require.Equal(t, int64(400), resp2.AvailableBalance.Amount.Units)
+
+	// Step 3: Try to create another bucket-A lien (£500)
+	// Bucket-A already has £600 reserved
+	// Bucket-A available = £1000 - £600 = £400
+	// Requesting £500 should fail
+	req3 := &pb.InitiateLienRequest{
+		AccountId: "ACC-BUCKET-SOLVENCY-001",
+		Amount: &commonpb.MoneyAmount{
+			Amount: &money.Money{CurrencyCode: "GBP", Units: 500},
+		},
+		PaymentOrderReference: "PO-SOLVENCY-A2",
+		BucketId:              "bucket-A",
+	}
+	_, err = svc.InitiateLien(ctx, req3)
+	require.Error(t, err, "should fail - bucket-A available is only £400")
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	require.Equal(t, codes.FailedPrecondition, st.Code())
+	require.Contains(t, st.Message(), "insufficient available balance")
+
+	// Step 4: But bucket-A can still reserve its remaining £400
+	req4 := &pb.InitiateLienRequest{
+		AccountId: "ACC-BUCKET-SOLVENCY-001",
+		Amount: &commonpb.MoneyAmount{
+			Amount: &money.Money{CurrencyCode: "GBP", Units: 400},
+		},
+		PaymentOrderReference: "PO-SOLVENCY-A3",
+		BucketId:              "bucket-A",
+	}
+	resp4, err := svc.InitiateLien(ctx, req4)
+	require.NoError(t, err, "bucket-A should succeed with exactly remaining balance")
+	require.Equal(t, "bucket-A", resp4.Lien.BucketId)
+	// Bucket-A available = £1000 - £1000 (bucket-A liens: £600 + £400) = £0
+	require.Equal(t, int64(0), resp4.AvailableBalance.Amount.Units)
+}
+
+// TestInitiateLien_BucketAwareSolvency_DefaultBucketUsesAllLiens verifies that when
+// NO bucket_id is provided (empty string), solvency validation considers ALL liens
+// regardless of their bucket. This maintains backward compatibility with Phase 1.
+func TestInitiateLien_BucketAwareSolvency_DefaultBucketUsesAllLiens(t *testing.T) {
+	db, ctx, cleanup := setupLienTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	lienRepo := persistence.NewLienRepository(db)
+	// Configure Position Keeping mock with £1000 balance
+	svc := mustNewServiceWithPositionKeeping(t, repo, lienRepo, map[string]int64{
+		"ACC-DEFAULT-BUCKET-001": 100000, // £1000
+	})
+
+	// Create account with £1000 balance
+	createTestAccountWithBalance(t, ctx, repo, "ACC-DEFAULT-BUCKET-001", 100000)
+
+	// Create bucket-A lien (£600)
+	req1 := &pb.InitiateLienRequest{
+		AccountId: "ACC-DEFAULT-BUCKET-001",
+		Amount: &commonpb.MoneyAmount{
+			Amount: &money.Money{CurrencyCode: "GBP", Units: 600},
+		},
+		PaymentOrderReference: "PO-DEFAULT-A1",
+		BucketId:              "bucket-A",
+	}
+	_, err := svc.InitiateLien(ctx, req1)
+	require.NoError(t, err)
+
+	// Create lien WITHOUT bucket_id (should use ALL liens for solvency)
+	// Available = £1000 - £600 (all liens) = £400
+	req2 := &pb.InitiateLienRequest{
+		AccountId: "ACC-DEFAULT-BUCKET-001",
+		Amount: &commonpb.MoneyAmount{
+			Amount: &money.Money{CurrencyCode: "GBP", Units: 500}, // Exceeds £400 available
+		},
+		PaymentOrderReference: "PO-DEFAULT-NONE",
+		// BucketId not set - defaults to empty string
+	}
+	_, err = svc.InitiateLien(ctx, req2)
+	require.Error(t, err, "default bucket should consider ALL liens")
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	require.Equal(t, codes.FailedPrecondition, st.Code())
+
+	// But £400 should work
+	req3 := &pb.InitiateLienRequest{
+		AccountId: "ACC-DEFAULT-BUCKET-001",
+		Amount: &commonpb.MoneyAmount{
+			Amount: &money.Money{CurrencyCode: "GBP", Units: 400},
+		},
+		PaymentOrderReference: "PO-DEFAULT-NONE2",
+	}
+	resp3, err := svc.InitiateLien(ctx, req3)
+	require.NoError(t, err)
+	require.Equal(t, "", resp3.Lien.BucketId)
+	require.Equal(t, int64(0), resp3.AvailableBalance.Amount.Units)
 }
 
 // ============================================================================
