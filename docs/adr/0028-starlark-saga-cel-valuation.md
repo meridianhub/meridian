@@ -650,7 +650,11 @@ type StepHandler struct {
 - `replay_count` incremented on each replay attempt
 - If `replay_count > MAX_REPLAYS` (default: 5) → status = `FAILED_MANUAL_INTERVENTION`
 - High-severity (P1) alert triggered for operator intervention
-- Admin API supports "hot-fixing": update script for specific instance, reset replay_count, resume
+- **Hot-fix via definition re-pointing** (bi-temporal compatible):
+  1. Deploy fixed definition as new version (v2)
+  2. Update instance's `saga_definition_id` to v2, reset `replay_count`
+  3. On resume: cached step results are respected, failed step executes with v2 logic
+  4. Audit trail preserves: which version used, when each step executed
 
 **Dry-Run Testing**: Validate Starlark logic before deployment:
 

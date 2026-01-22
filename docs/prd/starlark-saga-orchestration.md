@@ -214,15 +214,51 @@ def pay_external(ctx):
 
 ### FR-22: Saga Hot-Fixing for Zombie Recovery
 
-- **Requirement**: The Admin API MUST allow an operator to hot-fix a stuck `SagaInstance`
-- **Capabilities**:
-  - Update the Starlark script of a *specific* running saga instance (override definition)
-  - Reset `replay_count` to 0 to allow resumed execution
-  - Resume from the failed step (not from beginning)
-  - Mark as permanently failed (skip retry, close out)
-- **Audit trail**: All hot-fix operations MUST be logged with operator ID and reason
-- **Use case**: Fix a "poison pill" transaction caused by logic bug or bad data without manually rolling back completed steps
-- **Guard rails**: Hot-fix only available for `FAILED_MANUAL_INTERVENTION` status sagas
+- **Requirement**: The Admin API MUST allow an operator to hot-fix a stuck `SagaInstance` via definition re-pointing (not instance-level script override)
+- **Bi-temporal model**: Hot-fix works WITH the versioning system, not around it:
+  1. Deploy fixed saga definition as new version (e.g., v1 → v2)
+  2. Update stuck instance's `saga_definition_id` to point to new version
+  3. Reset `replay_count` to 0, set status to `PENDING`
+  4. On resume: replay respects cached `saga_step_results` (completed steps skip)
+  5. Failed step executes with NEW definition logic
+- **Audit trail**:
+  - `saga_instances.saga_definition_id` reflects actual version used
+  - `saga_step_results` timestamps show when each step executed
+  - Audit log captures: "Instance X re-pointed from v1 to v2 by operator Y, reason: Z"
+- **Bi-temporal query**: "What actually happened?" → Steps 0-5 under v1, step 6+ under v2
+- **Guard rails**:
+  - Hot-fix only available for `FAILED_MANUAL_INTERVENTION` status sagas
+  - New definition version must pass ACTIVATION validation
+- **Compensation scenario**: If completed steps produced wrong results (not just failed step), operator must trigger compensation first, then re-point and replay
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  HOT-FIX FLOW (Bi-Temporal Compatible)                                  │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  BEFORE:                                                                │
+│  saga_definitions:  v1 (bug in step 6)                                  │
+│  saga_instances:    instance_123, definition_id=v1, step=6, FAILED      │
+│  saga_step_results: steps 0-5 COMPLETED (cached)                        │
+│                                                                         │
+│  HOT-FIX:                                                               │
+│  1. INSERT saga_definitions v2 (with fix)                               │
+│  2. UPDATE saga_instances SET definition_id=v2, replay_count=0,         │
+│            status='PENDING' WHERE id=instance_123                       │
+│  3. INSERT audit_log (operator, reason, old_version, new_version)       │
+│                                                                         │
+│  ON RESUME:                                                             │
+│  - Load definition v2                                                   │
+│  - Replay: steps 0-5 → cached results exist → SKIP                      │
+│  - Replay: step 6 → no cached result → EXECUTE with v2 logic            │
+│                                                                         │
+│  BI-TEMPORAL RECORD:                                                    │
+│  saga_instances.saga_definition_id = v2                                 │
+│  saga_step_results[0-5].executed_at < hot-fix time                      │
+│  saga_step_results[6+].executed_at > hot-fix time                       │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
@@ -2007,7 +2043,7 @@ Position attributes are **tenant-defined** via the asset class model. Sagas use 
 | **SAGA-057** | Implement `ExecuteDryRun` RPC (mocked handlers, execution plan output) | P1 | SAGA-017 |
 | **SAGA-058** | Implement `ctx.new_uuid()` deterministic UUID generator (Version 5 UUIDs) | P0 | SAGA-004 |
 | **SAGA-059** | Implement `verify_external_state()` builtin for Pre-Step Check pattern | P0 | SAGA-053 |
-| **SAGA-060** | Add Admin API for saga hot-fixing (script override, replay_count reset) | P1 | SAGA-055 |
+| **SAGA-060** | Add Admin API for saga hot-fixing (definition re-pointing, replay_count reset) | P1 | SAGA-055 |
 
 ---
 
@@ -2160,8 +2196,9 @@ Position attributes are **tenant-defined** via the asset class model. Sagas use 
 | **AC-EI-07** | Transaction affinity: step result + index update are atomic | Unit test: inject failure mid-step, verify no partial state |
 | **AC-EI-08** | `verify_external_state()` prevents duplicate external calls | Integration test: replay saga, verify external call made once |
 | **AC-EI-09** | Linter warns on EXTERNAL_NOT_SUPPORTED without verify_external_state | Unit test: script missing check, verify linter warning |
-| **AC-EI-10** | Saga hot-fix updates script for specific instance | Admin API test: hot-fix stuck saga, verify resumed execution |
-| **AC-EI-11** | Hot-fix audit trail captures operator and reason | Unit test: verify audit log contains hot-fix details |
+| **AC-EI-10** | Saga hot-fix re-points instance to new definition version | Admin API test: hot-fix stuck saga, verify `saga_definition_id` updated, resumed execution |
+| **AC-EI-11** | Hot-fix audit trail captures operator, reason, old/new version | Unit test: verify audit log contains hot-fix details |
+| **AC-EI-12** | Hot-fix preserves bi-temporal integrity (step_results timestamps accurate) | Query test: after hot-fix, steps 0-5 timestamps < hot-fix, step 6+ > hot-fix |
 
 ---
 
