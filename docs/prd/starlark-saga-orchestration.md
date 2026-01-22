@@ -1,7 +1,7 @@
 # PRD: Starlark Saga Orchestration
 
 **Status:** Draft
-**Version:** 1.0
+**Version:** 1.4
 **Author:** Architecture Team
 **ADR Reference:** [ADR-028](../adr/0028-starlark-saga-cel-valuation.md)
 
@@ -2099,6 +2099,130 @@ func (r *Runtime) ExecuteWithLimits(
 - Handlers are platform-controlled Go functions
 - Starlark cannot invoke arbitrary code
 - New handlers require platform deployment and review
+
+### 6.4 Critical Implementation Directives
+
+The following directives are **mandatory** during Phase 1 and Durable Execution implementation:
+
+#### A. Recovery Worker: Staggered Lease Strategy (SAGA-044)
+
+The recovery worker MUST use a "Staggered Lease" strategy to prevent thundering herd:
+
+```go
+// CORRECT: Random jitter prevents stampede on cluster-wide restart
+func (w *SagaWorker) claimOrphanedSagas(ctx context.Context) {
+    // Jitter: 0-500ms random delay before claiming
+    jitter := time.Duration(rand.Intn(500)) * time.Millisecond
+    time.Sleep(jitter)
+
+    orphans := w.repo.FindOrphaned(ctx, w.claimBatchSize)
+    for _, saga := range orphans {
+        w.attemptClaim(ctx, saga)
+    }
+}
+```
+
+**Rationale**: Without jitter, all pods attempt to claim all orphaned sagas at the
+same microsecond after restart, causing lock contention on `saga_instances`.
+
+#### B. Step Output Hydration: Immutable Structs (Replay Safety)
+
+When replaying a saga, the runtime MUST "hydrate" the Starlark VM with results
+from `saga_step_results`. Step handlers MUST return **Starlark Structs** (immutable)
+rather than Dicts:
+
+```go
+// CORRECT: Return Struct (immutable) - script cannot modify cached result
+func (h *PaymentHandler) Execute(ctx *SagaContext) (starlark.Value, error) {
+    result := &PaymentResult{ID: "pay_123", Status: "PENDING"}
+    return starlarkstruct.FromStringDict(
+        starlark.String("PaymentResult"),
+        starlark.StringDict{
+            "id":     starlark.String(result.ID),
+            "status": starlark.String(result.Status),
+        },
+    ), nil
+}
+
+// WRONG: Dict is mutable - script could modify cached replay result
+func (h *PaymentHandler) Execute(ctx *SagaContext) (starlark.Value, error) {
+    return starlark.NewDict(1), nil  // Mutable!
+}
+```
+
+**Constraint**: All step handler return types MUST be validated as Struct at
+handler registration time.
+
+#### C. Compensation Context: Full Failure Context (SAGA-052)
+
+Compensation logic MUST have access to the **full context** of the failed execution:
+
+```go
+type CompensationContext struct {
+    // Standard context
+    SagaContext
+
+    // Failure-specific fields (REQUIRED for compensation logic)
+    FailedStepIndex  int              `json:"failed_step_index"`
+    FailedStepName   string           `json:"failed_step_name"`
+    ErrorMessage     string           `json:"error_message"`
+    ErrorCode        string           `json:"error_code,omitempty"`
+    CompletedResults []StepResult     `json:"completed_results"`
+}
+```
+
+**Requirement**: Compensation functions can decide between "undo everything" and
+"partial compensation" based on `failed_step_index` and `error_message`:
+
+```python
+# In Starlark compensation:
+def compensate(ctx):
+    if ctx.failed_step_index < 2:
+        # Early failure - just reverse the lien
+        reverse_lien(ctx.completed_results[0])
+    else:
+        # Late failure - full reversal needed
+        reverse_all_postings(ctx.completed_results)
+```
+
+#### D. Zombie Alerting: Immediate Incident Response
+
+When a saga transitions to `FAILED_MANUAL_INTERVENTION`, the system MUST:
+
+1. **Trigger immediate P1 alert** to the Incident Response Runbook
+2. **Preserve bi-temporal integrity**: When an operator hot-fixes via Admin API,
+   the `knowledge_at` timestamp for resume MUST be the *original* knowledge
+   timestamp of the instance, NOT the time of the fix
+
+```go
+// Hot-fix preserves original knowledge_at
+func (api *AdminAPI) HotFixSaga(ctx context.Context, req HotFixRequest) error {
+    saga, _ := api.repo.FindByID(ctx, req.SagaInstanceID)
+
+    // CRITICAL: Use original knowledge_at, not time.Now()
+    resumeCtx := &SagaContext{
+        KnowledgeAt: saga.OriginalKnowledgeAt,  // Preserves bi-temporal integrity
+        EffectiveAt: saga.EffectiveAt,
+    }
+
+    // Audit the hot-fix with current time
+    api.audit.Log(AuditEntry{
+        Action:       "SAGA_HOT_FIX",
+        Operator:     req.OperatorID,
+        SagaID:       req.SagaInstanceID,
+        OldVersion:   saga.SagaDefinitionID,
+        NewVersion:   req.NewDefinitionID,
+        Reason:       req.Reason,
+        HotFixTime:   time.Now(),  // Current time for audit
+    })
+
+    return api.runtime.Resume(resumeCtx, saga, req.NewDefinitionID)
+}
+```
+
+**Why**: Step results from steps 0-5 must have timestamps that precede the hot-fix.
+Steps 6+ (after hot-fix) must have timestamps after the fix. This maintains the
+audit trail's bi-temporal correctness.
 
 ---
 
