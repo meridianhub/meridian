@@ -128,6 +128,43 @@ The saga definitions become **Administrative Plan Records** - auditable configur
 - **Scope inheritance**: Child saga inherits parent's party scope (cannot escalate)
 - **Circular detection**: Runtime MUST detect and reject circular saga references
 
+### FR-13: Durable Execution via Replay
+
+- **Requirement**: Saga execution MUST survive pod restarts without data loss
+- **Checkpointing**: Before executing any side-effect-producing step, persist `SagaInstance` state
+- **Recovery**: On pod restart, orphaned sagas MUST be detected and resumed
+- **Replay**: Starlark script re-executes from start; completed steps return cached results
+- **Idempotency**: Step handlers MUST be idempotent (use idempotency keys)
+
+### FR-14: Strict Determinism
+
+- **Requirement**: The Starlark runtime environment MUST be strictly deterministic
+- **No time access**: Runtime MUST NOT provide `time.now()` or similar functions
+- **Injected time**: All time-related logic MUST use `ctx.effective_at` or `ctx.knowledge_at`
+- **No randomness**: Runtime MUST NOT provide random number generation
+- **Handler purity**: Step handlers MUST return results derived solely from inputs and `knowledge_at`
+
+### FR-15: Step Handler Output Contracts
+
+- **Requirement**: Step handlers MUST return Starlark-compatible `Dict` or `Struct` types
+- **Schema definition**: Each handler declares its output schema (keys and types)
+- **Validation**: Reference validation SHOULD check that scripts access valid output keys
+- **Documentation**: Handler schemas are auto-documented for saga authors
+
+### FR-16: Simulation Mode Boundary
+
+- **Requirement**: Step handlers MUST check `ctx.is_simulation` flag
+- **Side-effect handlers**: When `is_simulation=true`, handlers for Financial Accounting, Payment Gateway, etc. MUST return mock success without executing real transactions
+- **Read handlers**: May execute normally (data access is safe)
+- **Audit**: Simulation executions are logged but marked as non-production
+
+### FR-17: Causation ID Propagation
+
+- **Requirement**: Runtime MUST automatically inject `causation_id` into all step handler calls
+- **Compensation linking**: Compensation steps receive the parent step's `causation_id`
+- **Audit trail**: All "Do" and "Undo" actions are linked via causation chain
+- **Traceability**: Given any entry, trace back to the saga step that created it
+
 ---
 
 ## 4. CEL Valuation: Context and Boundaries
@@ -1131,7 +1168,220 @@ def verify_execution(execution_id: UUID) -> VerificationResult:
     )
 ```
 
-### 5.9 Starlark Builtins
+### 5.9 Durable Execution (Pod Survival)
+
+Saga execution must survive pod restarts. This is achieved through **Replay** - re-executing the Starlark script while returning cached results for completed steps.
+
+#### Ownership Model
+
+| Component | Location | Rationale |
+|-----------|----------|-----------|
+| `saga_definitions` | Reference Data (shared) | Definitions are tenant config, cached globally |
+| `saga_instances` | Each service's schema | Execution state is service-local (like audit log) |
+| `saga_step_results` | Each service's schema | Step results are service-local |
+
+> **Pattern**: Common schema definition, service-local tables. Each service (Payment Order, Current Account, etc.) has its own saga execution state.
+
+#### Service-Local Execution State Schema
+
+```sql
+-- Each service has these tables in its schema (common pattern, local data)
+
+CREATE TABLE saga_instances (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    -- Saga definition reference
+    saga_definition_id UUID NOT NULL,     -- References saga_definitions (cross-service)
+    saga_name VARCHAR(64) NOT NULL,       -- Denormalized for query
+    saga_version INTEGER NOT NULL,
+
+    -- Input and context (for replay)
+    input_snapshot JSONB NOT NULL,
+    party_id UUID NOT NULL,
+    knowledge_at TIMESTAMPTZ,             -- Bi-temporal context
+
+    -- Ownership (race condition prevention)
+    claimed_by_pod VARCHAR(128),          -- e.g., "payment-order-5d4f8c-xyz"
+    claimed_at TIMESTAMPTZ,
+    lease_expires_at TIMESTAMPTZ,         -- claimed_at + lease_duration (default 5 min)
+
+    -- Progress
+    current_step_index INTEGER NOT NULL DEFAULT 0,
+    status VARCHAR(16) NOT NULL DEFAULT 'PENDING',
+    -- PENDING, RUNNING, COMPLETED, COMPENSATING, COMPENSATED, FAILED
+
+    -- Timestamps
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+
+    -- Error context
+    error_message TEXT,
+    failed_step_index INTEGER
+);
+
+CREATE INDEX idx_saga_instances_orphaned
+    ON saga_instances(status, lease_expires_at)
+    WHERE status IN ('PENDING', 'RUNNING', 'COMPENSATING');
+
+CREATE TABLE saga_step_results (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    saga_instance_id UUID NOT NULL REFERENCES saga_instances(id) ON DELETE CASCADE,
+    step_index INTEGER NOT NULL,
+    step_name VARCHAR(64) NOT NULL,
+
+    -- Idempotency (critical for replay safety)
+    idempotency_key VARCHAR(128) NOT NULL,
+
+    -- Result (for replay - skip re-execution)
+    output_snapshot JSONB,
+    status VARCHAR(16) NOT NULL,          -- COMPLETED, FAILED
+    executed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    -- Causation linkage
+    causation_id UUID NOT NULL,
+
+    UNIQUE(saga_instance_id, step_index),
+    UNIQUE(idempotency_key)
+);
+```
+
+#### Lease-Based Claiming (Race Condition Prevention)
+
+When multiple pods exist, only one should process a given saga:
+
+```go
+// Pod startup or worker loop: claim orphaned sagas
+func (w *SagaWorker) claimOrphanedSagas(ctx context.Context) ([]uuid.UUID, error) {
+    // SELECT FOR UPDATE SKIP LOCKED prevents race conditions
+    rows, err := w.db.QueryContext(ctx, `
+        UPDATE saga_instances
+        SET claimed_by_pod = $1,
+            claimed_at = NOW(),
+            lease_expires_at = NOW() + INTERVAL '5 minutes'
+        WHERE id IN (
+            SELECT id FROM saga_instances
+            WHERE status IN ('PENDING', 'RUNNING', 'COMPENSATING')
+              AND (
+                  lease_expires_at < NOW()           -- Lease expired (pod died)
+                  OR claimed_by_pod IS NULL          -- Never claimed
+              )
+            FOR UPDATE SKIP LOCKED                   -- Prevent race with other pods
+            LIMIT 10                                 -- Batch size
+        )
+        RETURNING id
+    `, w.podID)
+    // ... return claimed instance IDs
+}
+```
+
+#### Replay Execution Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    Durable Execution via Replay                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  NORMAL EXECUTION (Pod A):                                                  │
+│  ─────────────────────────                                                  │
+│  1. INSERT saga_instances (claimed_by="pod-A", lease_expires=NOW()+5m)     │
+│  2. Execute Step 0:                                                         │
+│     a. Generate idempotency_key = "saga_{id}_step_0"                       │
+│     b. Call step handler                                                    │
+│     c. INSERT saga_step_results (output, causation_id)                     │
+│     d. UPDATE saga_instances SET current_step_index = 1                    │
+│  3. Renew lease (background goroutine, every 2 minutes)                    │
+│  4. Execute Step 1 → same pattern                                          │
+│  5. Pod A dies mid-Step 2 (after handler call, before result save)         │
+│                                                                             │
+│  RECOVERY (Pod B picks up orphaned saga):                                  │
+│  ─────────────────────────────────────────                                 │
+│  1. SELECT orphaned sagas WHERE lease_expires < NOW()                      │
+│  2. UPDATE ... SET claimed_by="pod-B" ... FOR UPDATE SKIP LOCKED          │
+│  3. Load saga_definition (from Reference Data, cached)                     │
+│  4. Load saga_step_results for this instance                               │
+│  5. REPLAY Starlark script from start:                                     │
+│     Step 0: Check saga_step_results → EXISTS → return cached output        │
+│     Step 1: Check saga_step_results → EXISTS → return cached output        │
+│     Step 2: Check saga_step_results → NOT FOUND → execute handler          │
+│             Handler uses idempotency_key → downstream service says         │
+│             "already processed" → return existing result                   │
+│  6. Continue normally from Step 3                                          │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Step Handler Wrapper (Replay-Safe)
+
+```go
+// Runtime wraps all step handler calls for replay safety
+func (r *Runtime) executeStep(ctx context.Context, instance *SagaInstance, stepIndex int, handler StepHandler) (any, error) {
+    // Generate deterministic idempotency key
+    idempotencyKey := fmt.Sprintf("saga_%s_step_%d", instance.ID, stepIndex)
+
+    // Check if step already completed (replay case)
+    existing, err := r.stepResultRepo.GetByIdempotencyKey(ctx, idempotencyKey)
+    if err == nil && existing != nil {
+        log.Info("Replaying step - returning cached result",
+            "saga_id", instance.ID, "step", stepIndex)
+        return existing.OutputSnapshot, nil
+    }
+
+    // Not yet executed - call the handler
+    output, err := handler.Execute(ctx, StepContext{
+        IdempotencyKey: idempotencyKey,
+        CausationID:    uuid.New(),
+        IsSimulation:   instance.IsSimulation,
+        KnowledgeAt:    instance.KnowledgeAt,
+    })
+    if err != nil {
+        return nil, err
+    }
+
+    // Persist result BEFORE returning to Starlark
+    err = r.stepResultRepo.Save(ctx, &SagaStepResult{
+        SagaInstanceID:  instance.ID,
+        StepIndex:       stepIndex,
+        IdempotencyKey:  idempotencyKey,
+        OutputSnapshot:  output,
+        Status:          "COMPLETED",
+        CausationID:     causationID,
+    })
+    if err != nil {
+        return nil, fmt.Errorf("failed to persist step result: %w", err)
+    }
+
+    return output, nil
+}
+```
+
+#### Lease Renewal (Keep-Alive)
+
+```go
+// While processing, keep renewing the lease to prevent other pods from claiming
+func (w *SagaWorker) renewLease(ctx context.Context, instanceID uuid.UUID) {
+    ticker := time.NewTicker(2 * time.Minute)  // Renew well before 5min expiry
+    defer ticker.Stop()
+
+    for {
+        select {
+        case <-ctx.Done():
+            return
+        case <-ticker.C:
+            _, err := w.db.ExecContext(ctx, `
+                UPDATE saga_instances
+                SET lease_expires_at = NOW() + INTERVAL '5 minutes'
+                WHERE id = $1 AND claimed_by_pod = $2
+            `, instanceID, w.podID)
+            if err != nil {
+                log.Warn("Failed to renew saga lease", "instance_id", instanceID, "error", err)
+            }
+        }
+    }
+}
+```
+
+### 5.10 Starlark Builtins
 
 Functions available within Starlark scripts:
 
@@ -1143,7 +1393,7 @@ Functions available within Starlark scripts:
 | `step` | `step(name, action, params, compensation) → Step` | Define saga step |
 | `saga` | `saga(name, version, steps, preconditions) → SagaDefinition` | Define saga |
 
-### 5.10 Example Saga Definition
+### 5.11 Example Saga Definition
 
 ```python
 # withdrawal.star
@@ -1256,7 +1506,7 @@ saga(
 )
 ```
 
-### 5.11 Saga Composition
+### 5.12 Saga Composition
 
 Sagas can invoke other sagas as steps, enabling reusable workflow components.
 
@@ -1364,7 +1614,7 @@ Cannot activate saga_c: would create circular dependency.
 | Max total steps | 50 | Limit execution complexity |
 | Child saga timeout | Inherited from parent | Prevent runaway children |
 
-### 5.12 Meridian Starlark Extensions
+### 5.13 Meridian Starlark Extensions
 
 Meridian extends vanilla Starlark with domain-specific builtins. These are the **only** functions available beyond standard Starlark syntax.
 
@@ -1379,7 +1629,8 @@ Meridian extends vanilla Starlark with domain-specific builtins. These are the *
 | `resolve_account()` | `resolve_account(purpose, currency) → account_id` | Lookup internal bank account by purpose |
 | `resolve_instrument()` | `resolve_instrument(code, version=None) → instrument` | Lookup instrument definition |
 | `invoke_saga()` | `invoke_saga(name, version=None, context={}) → result` | Invoke child saga |
-| `valuate()` | `valuate(instrument, quantity, context_type) → valuation` | Call Valuation Engine |
+| `valuate()` | `valuate(instrument, quantity, context_type) → valuation` | Call Valuation Engine (single context) |
+| `valuate_batch()` | `valuate_batch(instrument, quantity, context_types[]) → [valuation]` | Valuate same basis across multiple contexts (guarantees identical measurement) |
 | `fail()` | `fail(message)` | Abort saga with error message |
 | `log()` | `log(level, message, **fields)` | Emit structured log entry |
 
@@ -1644,6 +1895,18 @@ Position attributes are **tenant-defined** via the asset class model. Sagas use 
 | **SAGA-038** | Validate attribute refs against instrument schema at ACTIVATION | P0 | SAGA-037 |
 | **SAGA-039** | Add attribute dependency check to instrument schema update | P1 | SAGA-037 |
 | **SAGA-040** | Extend `saga_references` table for attribute tracking | P0 | SAGA-016, SAGA-037 |
+| **SAGA-041** | Create `saga_instances` table (service-local, common pattern) | P0 | - |
+| **SAGA-042** | Create `saga_step_results` table with idempotency keys | P0 | SAGA-041 |
+| **SAGA-043** | Implement lease-based claiming with `FOR UPDATE SKIP LOCKED` | P0 | SAGA-041 |
+| **SAGA-044** | Implement orphan saga detection and adoption on pod startup | P0 | SAGA-043 |
+| **SAGA-045** | Implement replay execution (skip completed steps) | P0 | SAGA-042 |
+| **SAGA-046** | Add lease renewal background worker | P1 | SAGA-043 |
+| **SAGA-047** | Implement `valuate_batch()` builtin for multi-context valuation | P1 | SAGA-004 |
+| **SAGA-048** | Add Logic/Physics Linter (warn on math in Starlark) | P2 | SAGA-017 |
+| **SAGA-049** | Define step handler output schemas (typed contracts) | P1 | SAGA-005 |
+| **SAGA-050** | Validate script accesses against handler output schemas | P2 | SAGA-049 |
+| **SAGA-051** | Add `ctx.is_simulation` flag and handler enforcement | P1 | SAGA-004 |
+| **SAGA-052** | Implement automatic `causation_id` propagation to compensations | P1 | SAGA-004 |
 
 ---
 
@@ -1685,6 +1948,20 @@ Position attributes are **tenant-defined** via the asset class model. Sagas use 
 - Validate saga attribute refs against instrument schema at ACTIVATION
 - Block instrument schema changes that would break active sagas
 - Bidirectional dependency tracking (saga ↔ instrument attributes)
+
+### Phase 8: Durable Execution (SAGA-041 through SAGA-046)
+- Service-local `saga_instances` and `saga_step_results` tables
+- Lease-based claiming prevents race conditions across pods
+- Orphan detection and adoption on pod startup
+- Replay execution skips completed steps using cached results
+- Transforms Meridian into "Mini-Temporal" for BIAN ledgers
+
+### Phase 9: Hardening & Validation (SAGA-047 through SAGA-052)
+- `valuate_batch()` for multi-context valuation (same basis guarantee)
+- Logic/Physics Linter warns on math in Starlark ("move to CEL")
+- Step handler output schemas (typed contracts)
+- Simulation mode enforcement (`ctx.is_simulation`)
+- Causation ID propagation to compensation steps
 
 ---
 
@@ -1744,6 +2021,30 @@ Position attributes are **tenant-defined** via the asset class model. Sagas use 
 | **AC-AV-05** | Instrument attribute addition does not affect existing sagas | Unit test: add new attr → no saga validation errors |
 | **AC-AV-06** | `saga_references` tracks attribute refs with instrument code | Query test: find sagas using `KWH.attributes["gsp_code"]` |
 | **AC-AV-07** | Validation feedback suggests similar attribute names | Unit test: ref `settlement_period`, suggest `settlement_date` |
+
+### Acceptance Criteria: Durable Execution
+
+| ID | Criterion | Test Method |
+|----|-----------|-------------|
+| **AC-DE-01** | Saga state persisted before each step execution | Unit test: verify `saga_step_results` row exists before handler returns |
+| **AC-DE-02** | Pod restart resumes saga from last completed step | Integration test: kill pod mid-saga, restart, verify completion |
+| **AC-DE-03** | Replay returns cached results for completed steps | Unit test: replay saga, verify handler not called for completed steps |
+| **AC-DE-04** | Lease-based claiming prevents duplicate processing | Concurrency test: two pods claim same saga, only one succeeds |
+| **AC-DE-05** | Orphan detection finds sagas with expired leases | Unit test: expire lease, verify saga appears in orphan query |
+| **AC-DE-06** | Idempotency keys prevent duplicate side effects | Integration test: replay step, downstream service returns cached result |
+| **AC-DE-07** | Lease renewal extends expiry while processing | Unit test: verify `lease_expires_at` updated during long saga |
+
+### Acceptance Criteria: Determinism & Hardening
+
+| ID | Criterion | Test Method |
+|----|-----------|-------------|
+| **AC-DH-01** | No `time.now()` or clock access in Starlark | Unit test: attempt to call time function, verify error |
+| **AC-DH-02** | All time logic uses `ctx.knowledge_at` or `ctx.effective_at` | Code review: audit all handlers for time access |
+| **AC-DH-03** | Step handler returns Starlark-compatible Dict/Struct | Unit test: verify all handlers return typed responses |
+| **AC-DH-04** | `ctx.is_simulation` prevents side effects in sim mode | Integration test: run simulation, verify no real transactions |
+| **AC-DH-05** | `causation_id` auto-propagated to compensation steps | Unit test: verify compensation has parent's causation_id |
+| **AC-DH-06** | `valuate_batch()` uses identical measurement for all contexts | Unit test: verify all valuations reference same basis |
+| **AC-DH-07** | Logic/Physics Linter warns on `a * b` in Starlark | Unit test: script with multiplication, verify warning |
 
 ---
 
