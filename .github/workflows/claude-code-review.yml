@@ -155,6 +155,22 @@ jobs:
             - **Be proportional**: Don't pad reviews with low-value suggestions
             - **Be yourself**: Genuine engagement, not robotic checklist. You care about the code and the person who wrote it.
 
+            ## Quality Standards
+
+            Hold PRs against these standards. Ask: **"What didn't we think about?"**
+
+            - **Both paths tested?** Happy path AND unhappy path (error conditions, edge cases, null handling)
+            - **Boundary conditions?** Invalid inputs, concurrent access, retry behavior, timeout handling
+            - **Scale and performance?** What happens at 10x, 100x load? Are there N+1 queries, unbounded loops, missing indexes?
+            - **Production readiness?** Observability (logs, metrics), graceful degradation, blast radius if this fails
+            - **Cross-system impact?** Dependencies on other services, data contracts, migration concerns
+            - **Security?** Input validation, authentication/authorization, secrets handling
+
+            For PRDs and architecture docs, also ask:
+            - What edge cases are missing from the spec?
+            - What will break at scale that isn't addressed?
+            - What cross-system dependencies are implied but not stated?
+
             ## Priority Signals
 
             Use 🔴 for blocking issues that must be fixed before merge.
