@@ -1,7 +1,7 @@
 # PRD: Starlark Saga Orchestration
 
-**Status:** Baselined
-**Version:** 1.6
+**Status:** Production-Ready
+**Version:** 1.7
 **Author:** Architecture Team
 **ADR Reference:** [ADR-028](../adr/0028-starlark-saga-cel-valuation.md)
 
@@ -374,6 +374,67 @@ def pay_external(ctx):
 - **Audit continuity**: If market data is purged from MIM after 7 years (per retention
   policy), legacy audit replay still works because the valuation was "snapshotted"
 - **Schema**: `saga_step_results.output` stores full valuation response as JSONB
+
+### FR-30: Async/Wait Pattern for External Events
+
+- **Requirement**: The Runtime MUST support a `ctx.suspend(idempotency_key)` builtin
+  for long-running external waits (e.g., DNO payment confirmation webhook)
+- **Problem**: Pod holding lease for days while waiting for webhook is inefficient
+- **Behavior**:
+  1. `ctx.suspend()` saves current saga state to `saga_step_results`
+  2. Releases pod lease
+  3. Transitions status to `WAITING_FOR_EVENT`
+- **Resume**: Separate gRPC endpoint `CompleteSagaStep(saga_id, idempotency_key, result)`
+  wakes the saga when external callback arrives
+- **Idempotency**: Multiple callbacks with same `idempotency_key` are deduplicated
+- **Timeout**: Optional `ctx.suspend(key, timeout=duration)` auto-fails after deadline
+
+### FR-31: Deep-Copy Serialization Boundary
+
+- **Requirement**: When persisting `SagaStepResult.output_snapshot`, the Go runtime
+  MUST serialize the Starlark value to JSON and deserialize back
+- **Problem**: If step handler returns pointer to Go map and Starlark modifies it,
+  the persisted result may differ from what the script "thinks" it has
+- **Implementation**: `output_snapshot = json.Unmarshal(json.Marshal(starlarkValue))`
+- **Guarantee**: Replayed steps always receive fresh, immutable copy of result
+- **Prevention**: Eliminates memory-leaked side effects from infecting replay logic
+
+### FR-32: Causation Tree Visualization API
+
+- **Requirement**: The `saga_execution_log` MUST support a recursive query that
+  visualizes the "Causation Tree" (Parent → Step → Child Saga → Step)
+- **Use case**: Energy settlement with 1 parent + 3 child sagas across pod restarts
+- **Primary consumer**: Ken's support team debugging complex nested workflow failures
+- **Query**: `GET /admin/sagas/{id}/causation-tree` returns:
+
+```json
+{
+  "saga_id": "parent-123",
+  "steps": [
+    {"index": 0, "name": "validate", "status": "COMPLETED"},
+    {"index": 1, "name": "split", "status": "COMPLETED", "child_sagas": [
+      {"saga_id": "child-456", "name": "retail_posting", "status": "COMPLETED"},
+      {"saga_id": "child-789", "name": "wholesale_posting", "status": "FAILED",
+       "failed_step": {"index": 2, "error": "Insufficient balance"}}
+    ]},
+    {"index": 2, "name": "finalize", "status": "PENDING"}
+  ]
+}
+```
+
+- **Schema**: Add `parent_saga_id UUID` and `parent_step_index INTEGER` to `saga_instances`
+
+### FR-33: Semantic Logic/Physics Linter
+
+- **Requirement**: The Linter SHALL be semantic, not just syntactic, for Decimal arithmetic
+- **Problem**: Developers may bypass "no math in Starlark" rule using new Decimal type
+- **Detection**: Warn on any arithmetic operator (`+`, `-`, `*`, `/`) where operands
+  are not derived from simple counters or loop indices
+- **Suggested message**: "Financial math detected. Move this to a CEL Valuation
+  Strategy in Reference Data."
+- **Exemptions**: Counter arithmetic (`i + 1`), list indexing, percentage calculations
+  using pre-validated rates from Valuation Engine
+- **Enforcement level**: WARNING at DRAFT, ERROR at ACTIVATION (configurable)
 
 ---
 
@@ -1431,9 +1492,15 @@ CREATE TABLE saga_instances (
     party_id UUID NOT NULL,
     knowledge_at TIMESTAMPTZ,             -- Bi-temporal context
 
-    -- Tracing (FR-17, FR-24)
+    -- Tracing (FR-17, FR-24, FR-32)
     correlation_id UUID NOT NULL,         -- Groups entire business operation (FR-24)
     causation_id UUID,                    -- Parent saga/step that triggered this (FR-17)
+    parent_saga_id UUID,                  -- For causation tree visualization (FR-32)
+    parent_step_index INTEGER,            -- Which step in parent invoked this child
+
+    -- Async/Wait (FR-30)
+    suspend_idempotency_key VARCHAR(128), -- Key for external event correlation
+    suspend_timeout_at TIMESTAMPTZ,       -- Auto-fail deadline for suspended sagas
 
     -- Ownership (race condition prevention)
     claimed_by_pod VARCHAR(128),          -- e.g., "payment-order-5d4f8c-xyz"
@@ -1444,7 +1511,7 @@ CREATE TABLE saga_instances (
     current_step_index INTEGER NOT NULL DEFAULT 0,
     replay_count INTEGER NOT NULL DEFAULT 0,   -- Incremented on each replay attempt
     status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
-    -- PENDING, RUNNING, COMPLETED, COMPENSATING, COMPENSATED, FAILED, FAILED_MANUAL_INTERVENTION
+    -- PENDING, RUNNING, WAITING_FOR_EVENT, COMPLETED, COMPENSATING, COMPENSATED, FAILED, FAILED_MANUAL_INTERVENTION
 
     -- Timestamps
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -1915,6 +1982,7 @@ Meridian extends vanilla Starlark with domain-specific builtins. These are the
 | `Decimal()` | `Decimal(string) → Decimal` | Financial-precision decimal type (FR-27). Supports `+`, `-`, `*`, `/`. Backed by `shopspring/decimal` |
 | `ctx.new_uuid()` | `ctx.new_uuid() → UUID` | Deterministic Version 5 UUID (namespace=saga_id, name=step:call). Stable across replays |
 | `ctx.emit_progress()` | `ctx.emit_progress(message, percentage)` | Non-blocking progress update (0-100%). Published to Kafka `saga.progress.{tenant_id}` for UI consumption |
+| `ctx.suspend()` | `ctx.suspend(idempotency_key, timeout=None) → void` | Suspend saga waiting for external event (FR-30). Releases lease, status → WAITING_FOR_EVENT. Resume via `CompleteSagaStep` gRPC |
 | `verify_external_state()` | `verify_external_state(handler, check_fn) → bool` | Pre-Step Check for non-idempotent external handlers. Required before EXTERNAL_NOT_SUPPORTED calls |
 
 #### Data Access Builtins
@@ -2545,6 +2613,12 @@ use these attributes for account resolution without hardcoding attribute keys:
 | **SAGA-063** | Implement `ctx.emit_progress()` builtin with Kafka publisher (FR-25) | P1 | SAGA-004c |
 | **SAGA-064** | Implement step error severity classification (FR-28: TRANSIENT vs FATAL) | P0 | SAGA-005 |
 | **SAGA-065** | Add partition-aware orphan scanning for high-volume (100k TPS) | P2 | SAGA-044, SAGA-061 |
+| **SAGA-066** | Implement `ctx.suspend()` builtin and WAITING_FOR_EVENT status (FR-30) | P1 | SAGA-004c, SAGA-041 |
+| **SAGA-067** | Implement `CompleteSagaStep` gRPC endpoint for async wake-up (FR-30) | P1 | SAGA-066 |
+| **SAGA-068** | Add suspend timeout worker (auto-fail expired WAITING_FOR_EVENT sagas) | P2 | SAGA-066 |
+| **SAGA-069** | Implement deep-copy serialization boundary for step results (FR-31) | P0 | SAGA-042 |
+| **SAGA-070** | Add causation tree recursive query and Admin API endpoint (FR-32) | P1 | SAGA-026, SAGA-041 |
+| **SAGA-071** | Enhance Logic/Physics Linter with semantic Decimal arithmetic detection (FR-33) | P1 | SAGA-048, SAGA-004a |
 
 ---
 
@@ -2738,6 +2812,22 @@ use these attributes for account resolution without hardcoding attribute keys:
 | **AC-TR-08** | `valuate_batch()` result cached in `saga_step_results` | Unit test: call valuate_batch, verify full response in output JSONB |
 | **AC-TR-09** | Replay of `valuate_batch()` returns cached result (no Valuation Engine call) | Integration test: replay saga, verify Valuation Engine not called for cached step |
 | **AC-TR-10** | Cached valuation contains market observation IDs for 7-year audit replay | Unit test: verify `saga_step_results.output` includes observation references |
+
+### Acceptance Criteria: Async Handling & Debugging (FR-30 through FR-33)
+
+| ID | Criterion | Test Method |
+|----|-----------|-------------|
+| **AC-AD-01** | `ctx.suspend()` transitions saga to WAITING_FOR_EVENT and releases lease | Unit test: call suspend, verify status and `claimed_by_pod = NULL` |
+| **AC-AD-02** | `CompleteSagaStep` resumes suspended saga with provided result | Integration test: suspend saga, call CompleteSagaStep, verify saga continues |
+| **AC-AD-03** | Duplicate `CompleteSagaStep` calls with same idempotency_key are deduplicated | Unit test: call twice, verify saga only resumes once |
+| **AC-AD-04** | Suspended saga auto-fails after timeout deadline | Integration test: suspend with 1s timeout, wait 2s, verify status = FAILED |
+| **AC-AD-05** | Step result serialization boundary prevents Go memory leakage | Unit test: return mutable Go map, modify it, verify persisted value unchanged |
+| **AC-AD-06** | Replayed step receives fresh copy (not pointer to original) | Unit test: replay step, modify result in script, verify original unchanged |
+| **AC-AD-07** | Causation tree API returns full parent→child hierarchy | Integration test: create nested saga (3 levels), query tree, verify structure |
+| **AC-AD-08** | Causation tree shows failed step location in child saga | Query test: fail child step 2, verify tree shows `failed_step: {index: 2}` |
+| **AC-AD-09** | Semantic linter warns on Decimal arithmetic (non-counter) | Unit test: script with `Decimal("10") * Decimal("0.05")`, verify WARNING |
+| **AC-AD-10** | Semantic linter allows counter arithmetic (`i + 1`) | Unit test: script with loop counter, verify no warning |
+| **AC-AD-11** | Linter enforcement configurable (WARNING at DRAFT, ERROR at ACTIVATION) | Config test: set strict mode, verify ACTIVATION blocked on warning |
 
 ---
 
