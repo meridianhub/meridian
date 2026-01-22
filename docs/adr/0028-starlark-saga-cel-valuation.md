@@ -625,7 +625,7 @@ timestamp = time.now()  # Error: time access not allowed
 
 # RIGHT: Deterministic
 timestamp = ctx.knowledge_at  # Injected, stable across replays
-ref_id = ctx.new_uuid()       # sha256(saga_id + step_index + call_index)
+ref_id = ctx.new_uuid()       # Version 5 UUID (namespace=saga_id, name=step:call)
 ```
 
 ### External Integration Guardrails
@@ -641,13 +641,16 @@ type StepHandler struct {
 ```
 
 - `EXTERNAL_NOT_SUPPORTED` handlers require "Pre-Step Check" pattern (query before mutation)
+- Runtime provides `verify_external_state(handler, check_fn)` builtin
 - ACTIVATION fails if non-idempotent handler used without Pre-Step Check
+- Logic/Physics Linter enforces Pre-Step Check pattern
 
-**Zombie Saga Detection**: Sagas stuck in retry loops are detected and escalated:
+**Zombie Saga Detection & Hot-Fixing**: Sagas stuck in retry loops are detected and escalated:
 
 - `replay_count` incremented on each replay attempt
 - If `replay_count > MAX_REPLAYS` (default: 5) → status = `FAILED_MANUAL_INTERVENTION`
 - High-severity (P1) alert triggered for operator intervention
+- Admin API supports "hot-fixing": update script for specific instance, reset replay_count, resume
 
 **Dry-Run Testing**: Validate Starlark logic before deployment:
 

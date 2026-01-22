@@ -171,7 +171,17 @@ The saga definitions become **Administrative Plan Records** - auditable configur
 - **Declaration**: Handlers marked `idempotency: "EXTERNAL_SUPPORTED"` or `idempotency: "EXTERNAL_NOT_SUPPORTED"`
 - **Fail-fast**: If an external service does not support idempotency, the Runtime MUST fail-fast during ACTIVATION if that handler is used in a saga that lacks a "Pre-Step Check" pattern
 - **Pre-Step Check pattern**: Query external system state before executing (e.g., check if payment already exists before creating)
+- **Standard library**: Runtime provides `verify_external_state(gateway, check_func)` builtin for Pre-Step Check enforcement
+- **Linter enforcement**: Logic/Physics Linter (SAGA-048) MUST warn if `EXTERNAL_NOT_SUPPORTED` handler is called without preceding `verify_external_state()` call
 - **Rationale**: Replay execution could trigger double payments if external gateways don't support our idempotency keys
+
+```python
+# Pre-Step Check pattern for non-idempotent gateways
+def pay_external(ctx):
+    # REQUIRED: verify state before mutation
+    if not verify_external_state(payment_gateway, lambda: gateway.check_exists(ctx.ref)):
+        payment_gateway.pay(ctx.amount, ctx.ref)
+```
 
 ### FR-19: Zombie Saga Detection
 
@@ -193,11 +203,26 @@ The saga definitions become **Administrative Plan Records** - auditable configur
 ### FR-21: Deterministic UUID Generator
 
 - **Requirement**: The Runtime MUST provide a `ctx.new_uuid()` builtin
-- **Determinism**: Returns a UUID derived from `sha256(SagaInstance.ID + StepIndex + CallIndex)`
+- **Implementation**: Use **Version 5 UUIDs (Namespace UUIDs)** per RFC 4122
+  - Namespace: `SagaInstance.ID`
+  - Name: `"{StepIndex}:{CallIndex}"` (e.g., `"2:0"` for first call in step 2)
 - **Stability**: Same saga instance replaying same step produces identical UUIDs
 - **Call tracking**: `CallIndex` increments for each `new_uuid()` call within a step, reset to 0 on next step
 - **Rationale**: Random UUIDs would break determinism during replay (different UUID each time)
 - **Usage**: Reference numbers, correlation IDs, any generated identifiers within saga logic
+- **Industry standard**: Version 5 UUIDs are the standard approach for deterministic UUID generation
+
+### FR-22: Saga Hot-Fixing for Zombie Recovery
+
+- **Requirement**: The Admin API MUST allow an operator to hot-fix a stuck `SagaInstance`
+- **Capabilities**:
+  - Update the Starlark script of a *specific* running saga instance (override definition)
+  - Reset `replay_count` to 0 to allow resumed execution
+  - Resume from the failed step (not from beginning)
+  - Mark as permanently failed (skip retry, close out)
+- **Audit trail**: All hot-fix operations MUST be logged with operator ID and reason
+- **Use case**: Fix a "poison pill" transaction caused by logic bug or bad data without manually rolling back completed steps
+- **Guard rails**: Hot-fix only available for `FAILED_MANUAL_INTERVENTION` status sagas
 
 ---
 
@@ -1418,6 +1443,8 @@ func (r *Runtime) executeStep(ctx context.Context, instance *SagaInstance, stepI
 > - Or the index is moved but result isn't saved (step is skipped on recovery, losing data)
 >
 > By making these atomic, we guarantee that saga state is always consistent. The `replay_count` is also reset to 0 on successful step completion.
+>
+> **Database Requirement**: PostgreSQL fully supports transactional DDL and multi-statement transactions within a single `BEGIN`/`COMMIT` block. This is the "Gold Standard" for preventing "Ghost Steps" where partial state persists.
 
 #### Lease Renewal (Keep-Alive)
 
@@ -1697,7 +1724,8 @@ Meridian extends vanilla Starlark with domain-specific builtins. These are the *
 | `valuate_batch()` | `valuate_batch(instrument, quantity, context_types[]) → Dict[context_type, valuation]` | Valuate same basis across multiple contexts; returns dictionary keyed by context_type (e.g., `results["RETAIL"]`, `results["WHOLESALE"]`) |
 | `fail()` | `fail(message)` | Abort saga with error message |
 | `log()` | `log(level, message, **fields)` | Emit structured log entry |
-| `ctx.new_uuid()` | `ctx.new_uuid() → UUID` | Deterministic UUID: `sha256(saga_id + step_index + call_index)`. Stable across replays |
+| `ctx.new_uuid()` | `ctx.new_uuid() → UUID` | Deterministic Version 5 UUID (namespace=saga_id, name=step:call). Stable across replays |
+| `verify_external_state()` | `verify_external_state(handler, check_fn) → bool` | Pre-Step Check for non-idempotent external handlers. Required before EXTERNAL_NOT_SUPPORTED calls |
 
 #### Data Access Builtins
 
@@ -1967,7 +1995,7 @@ Position attributes are **tenant-defined** via the asset class model. Sagas use 
 | **SAGA-045** | Implement replay execution (skip completed steps) | P0 | SAGA-042 |
 | **SAGA-046** | Add lease renewal background worker | P1 | SAGA-043 |
 | **SAGA-047** | Implement `valuate_batch()` builtin for multi-context valuation | P1 | SAGA-004 |
-| **SAGA-048** | Add Logic/Physics Linter (warn on math in Starlark) | P2 | SAGA-017 |
+| **SAGA-048** | Add Logic/Physics Linter (warn on math in Starlark, enforce Pre-Step Check for EXTERNAL_NOT_SUPPORTED) | P1 | SAGA-017, SAGA-053 |
 | **SAGA-049** | Define step handler output schemas (typed contracts) | P1 | SAGA-005 |
 | **SAGA-050** | Validate script accesses against handler output schemas | P2 | SAGA-049 |
 | **SAGA-051** | Add `ctx.is_simulation` flag and handler enforcement | P1 | SAGA-004 |
@@ -1977,7 +2005,9 @@ Position attributes are **tenant-defined** via the asset class model. Sagas use 
 | **SAGA-055** | Implement zombie saga detection (`replay_count` > MAX_REPLAYS → FAILED_MANUAL_INTERVENTION) | P0 | SAGA-044 |
 | **SAGA-056** | Add high-severity alerting for zombie sagas (operator notification) | P1 | SAGA-055 |
 | **SAGA-057** | Implement `ExecuteDryRun` RPC (mocked handlers, execution plan output) | P1 | SAGA-017 |
-| **SAGA-058** | Implement `ctx.new_uuid()` deterministic UUID generator | P0 | SAGA-004 |
+| **SAGA-058** | Implement `ctx.new_uuid()` deterministic UUID generator (Version 5 UUIDs) | P0 | SAGA-004 |
+| **SAGA-059** | Implement `verify_external_state()` builtin for Pre-Step Check pattern | P0 | SAGA-053 |
+| **SAGA-060** | Add Admin API for saga hot-fixing (script override, replay_count reset) | P1 | SAGA-055 |
 
 ---
 
@@ -2128,6 +2158,10 @@ Position attributes are **tenant-defined** via the asset class model. Sagas use 
 | **AC-EI-05** | `ExecuteDryRun` returns execution plan without persisting | Unit test: call dry-run, verify no database writes |
 | **AC-EI-06** | `ctx.new_uuid()` returns deterministic UUID (stable across replays) | Unit test: replay saga, verify same UUIDs generated |
 | **AC-EI-07** | Transaction affinity: step result + index update are atomic | Unit test: inject failure mid-step, verify no partial state |
+| **AC-EI-08** | `verify_external_state()` prevents duplicate external calls | Integration test: replay saga, verify external call made once |
+| **AC-EI-09** | Linter warns on EXTERNAL_NOT_SUPPORTED without verify_external_state | Unit test: script missing check, verify linter warning |
+| **AC-EI-10** | Saga hot-fix updates script for specific instance | Admin API test: hot-fix stuck saga, verify resumed execution |
+| **AC-EI-11** | Hot-fix audit trail captures operator and reason | Unit test: verify audit log contains hot-fix details |
 
 ---
 
