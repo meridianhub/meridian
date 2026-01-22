@@ -32,6 +32,9 @@ type Config struct {
 	// Tenant Zero configuration
 	TenantZeroID string // Required: Tenant ID for Meridian's platform billing tenant
 
+	// Tenant-to-Account Mapping
+	TenantAccountMapping string // Optional: JSON mapping of tenant UUIDs to account UUIDs
+
 	// HTTP server configuration
 	HTTPPort string // HTTP port for health checks and metrics (default: "8080")
 }
@@ -55,6 +58,7 @@ func LoadConfig() (*Config, error) {
 		AuditTopics:             defaultAuditTopics, // Use default topics
 		PositionKeepingEndpoint: env.GetEnvOrDefault("POSITION_KEEPING_ENDPOINT", ""),
 		TenantZeroID:            env.GetEnvOrDefault("TENANT_ZERO_ID", ""),
+		TenantAccountMapping:    env.GetEnvOrDefault("TENANT_ACCOUNT_MAPPING", ""),
 		HTTPPort:                env.GetEnvOrDefault("HTTP_PORT", "8080"),
 	}
 

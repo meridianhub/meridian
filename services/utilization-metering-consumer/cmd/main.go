@@ -19,6 +19,7 @@ import (
 	"github.com/meridianhub/meridian/services/utilization-metering-consumer/adapters/grpc"
 	"github.com/meridianhub/meridian/services/utilization-metering-consumer/adapters/messaging"
 	"github.com/meridianhub/meridian/services/utilization-metering-consumer/app"
+	"github.com/meridianhub/meridian/services/utilization-metering-consumer/domain"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
@@ -182,12 +183,21 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("invalid TENANT_ZERO_ID: %w", err)
 	}
 
-	// For now, we map all tenants to tenant-zero's billing account
-	// In a real implementation, this would be loaded from configuration or a database
-	// TODO: Load tenant-to-account mapping from configuration or database
-	tenantAccountMap := make(map[uuid.UUID]uuid.UUID)
-	// Map tenant-zero to itself for self-billing
-	tenantAccountMap[tenantZeroID] = tenantZeroID
+	// Load tenant-to-account mapping from configuration
+	tenantAccountMap, err := domain.ParseTenantAccountMapping(config.TenantAccountMapping)
+	if err != nil {
+		return fmt.Errorf("failed to load tenant account mapping: %w", err)
+	}
+
+	// Ensure tenant-zero maps to itself if not explicitly configured
+	if _, exists := tenantAccountMap[tenantZeroID]; !exists {
+		logger.Info("tenant-zero not found in TENANT_ACCOUNT_MAPPING, mapping to itself",
+			"tenant_zero_id", tenantZeroID)
+		tenantAccountMap[tenantZeroID] = tenantZeroID
+	}
+
+	logger.Info("tenant account mapping loaded",
+		"mapping_count", len(tenantAccountMap))
 
 	// Initialize transformer with tenant account mapping
 	transformer := auditdomain.NewAuditEventTransformer(tenantAccountMap)
