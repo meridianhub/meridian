@@ -390,3 +390,42 @@ func TestListPendingVerifications(t *testing.T) {
 		assert.Equal(t, "PENDING", v.Status)
 	}
 }
+
+func TestUpdateVerificationMetadata(t *testing.T) {
+	db, ctx, cleanup := setupVerificationTestDB(t)
+	defer cleanup()
+
+	partyID := createTestParty(t, db, ctx)
+	repo := NewVerificationRepository(db)
+
+	// Create verification
+	verification := &PartyVerificationEntity{
+		PartyID:        partyID,
+		VerificationID: "prov-metadata-test",
+		Provider:       "onfido",
+		Status:         "PENDING",
+	}
+	err := repo.CreateVerification(ctx, verification)
+	require.NoError(t, err)
+
+	// Update metadata
+	metadata := `{"document_type":"passport","confidence":0.95}`
+	err = repo.UpdateVerificationMetadata(ctx, verification.ID, metadata)
+	require.NoError(t, err)
+
+	// Verify metadata persisted
+	updated, err := repo.GetVerificationByID(ctx, verification.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updated.Metadata)
+	assert.JSONEq(t, metadata, *updated.Metadata)
+}
+
+func TestUpdateVerificationMetadata_NotFound(t *testing.T) {
+	db, ctx, cleanup := setupVerificationTestDB(t)
+	defer cleanup()
+
+	repo := NewVerificationRepository(db)
+
+	err := repo.UpdateVerificationMetadata(ctx, uuid.New(), `{"test": "data"}`)
+	assert.ErrorIs(t, err, ErrVerificationNotFound)
+}

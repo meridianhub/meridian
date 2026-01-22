@@ -171,3 +171,33 @@ func (r *VerificationRepository) ListPendingVerifications(ctx context.Context) (
 	})
 	return verifications, err
 }
+
+// UpdateVerificationMetadata updates only the metadata field for a verification.
+// This is separate from status updates to allow metadata enrichment without
+// triggering optimistic locking checks.
+func (r *VerificationRepository) UpdateVerificationMetadata(
+	ctx context.Context,
+	verificationID uuid.UUID,
+	metadata string,
+) error {
+	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		updates := map[string]interface{}{
+			"metadata":   metadata,
+			"updated_at": time.Now(),
+		}
+
+		result := tx.Model(&PartyVerificationEntity{}).
+			Where("id = ?", verificationID).
+			Updates(updates)
+
+		if result.Error != nil {
+			return result.Error
+		}
+
+		if result.RowsAffected == 0 {
+			return ErrVerificationNotFound
+		}
+
+		return nil
+	})
+}

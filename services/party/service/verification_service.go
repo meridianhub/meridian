@@ -62,6 +62,7 @@ type PartyRepository interface {
 type VerificationRepository interface {
 	CreateVerification(ctx context.Context, verification *persistence.PartyVerificationEntity) error
 	UpdateVerificationStatus(ctx context.Context, verificationID uuid.UUID, status string, riskScore *float64, reason *string, completedAt *time.Time, currentVersion int64) error
+	UpdateVerificationMetadata(ctx context.Context, verificationID uuid.UUID, metadata string) error
 	GetVerificationByID(ctx context.Context, id uuid.UUID) (*persistence.PartyVerificationEntity, error)
 	GetVerificationByProviderID(ctx context.Context, verificationID string) (*persistence.PartyVerificationEntity, error)
 	ListVerificationsByParty(ctx context.Context, partyID uuid.UUID) ([]persistence.PartyVerificationEntity, error)
@@ -267,8 +268,15 @@ func (s *VerificationService) UpdateVerification(ctx context.Context, req Update
 		}
 	}
 
-	// Update metadata separately if provided (simplified approach)
-	_ = metadataJSON // TODO: Add metadata update to repository if needed
+	// Update metadata separately if provided
+	if metadataJSON != nil {
+		if err := s.verificationRepo.UpdateVerificationMetadata(ctx, entity.ID, *metadataJSON); err != nil {
+			s.logger.Error("failed to update verification metadata",
+				"verification_id", entity.ID,
+				"error", err)
+			// Don't fail the overall operation - metadata is supplementary
+		}
+	}
 
 	return nil
 }
