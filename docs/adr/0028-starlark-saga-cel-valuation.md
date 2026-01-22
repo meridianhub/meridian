@@ -77,7 +77,8 @@ Use each tool for its strength:
 * **Separation of concerns**: Business logic (Starlark) vs financial physics (CEL)
 * **Auditability**: Versioned saga definitions with full history
 * **Performance**: CEL for high-frequency calculations (~100ns), Starlark for orchestration
-* **Safety**: Both languages are sandboxed, deterministic, non-Turing complete (no infinite loops)
+* **Safety**: Both languages are sandboxed and deterministic; Starlark guarantees bounded
+  execution via recursion depth limits and timeouts (no `while` loops by language design)
 * **Bi-temporal consistency**: Valuation replay requires deterministic execution
 
 ## Considered Options
@@ -421,6 +422,9 @@ func (r *SagaRuntime) Execute(
 }
 
 // createBuiltins registers Go functions callable from Starlark.
+// NOTE: Production implementation MUST add type assertion error handling:
+//   str, ok := args[0].(starlark.String)
+//   if !ok { return nil, fmt.Errorf("cel_eval: expected string, got %T", args[0]) }
 func (r *SagaRuntime) createBuiltins(
     ctx context.Context,
     tenantID uuid.UUID,
@@ -585,6 +589,11 @@ CREATE TABLE saga_instances (
     completed_at TIMESTAMPTZ,
     error_message TEXT
 );
+
+-- Index for efficient orphaned saga detection (frequent query in multi-pod deployments)
+CREATE INDEX idx_saga_instances_lease_expires
+    ON saga_instances(lease_expires_at)
+    WHERE status IN ('RUNNING', 'PENDING', 'COMPENSATING');
 
 CREATE TABLE saga_step_results (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
