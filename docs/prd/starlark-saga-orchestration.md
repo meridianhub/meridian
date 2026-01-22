@@ -253,11 +253,12 @@ This PRD establishes the runtime; the Valuation Engine PRD will define the CEL r
 
 ### 5.2 Saga Definition Schema
 
+> **Note**: Tenant isolation is schema-based (per ADR-0016). Tables do not include `tenant_id` - isolation is enforced via PostgreSQL search_path.
+
 ```sql
 CREATE TABLE saga_definitions (
     -- Identity
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL,
 
     -- Identification (mirrors InstrumentDefinition pattern)
     name VARCHAR(64) NOT NULL,           -- "withdrawal", "deposit", "payment_execution"
@@ -277,36 +278,42 @@ CREATE TABLE saga_definitions (
     display_name VARCHAR(128),
     description TEXT,
 
-    -- Timestamps
+    -- Bi-temporal timestamps (when was this version active?)
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    activated_at TIMESTAMPTZ,
-    deprecated_at TIMESTAMPTZ,
+    activated_at TIMESTAMPTZ,            -- When this version became ACTIVE
+    deprecated_at TIMESTAMPTZ,           -- When this version was deprecated
 
     -- Successor for deprecation lineage
     successor_id UUID REFERENCES saga_definitions(id),
 
     -- Constraints
-    UNIQUE(tenant_id, name, version),
+    UNIQUE(name, version),
     CHECK (status IN ('DRAFT', 'ACTIVE', 'DEPRECATED')),
     CHECK (char_length(script) <= 65536),  -- 64KB max
     CHECK (char_length(preconditions_expression) <= 4096)
 );
 
 CREATE INDEX idx_saga_definitions_lookup
-    ON saga_definitions(tenant_id, name, status);
+    ON saga_definitions(name, status);
 
 CREATE INDEX idx_saga_definitions_active
-    ON saga_definitions(tenant_id, name)
+    ON saga_definitions(name)
     WHERE status = 'ACTIVE';
+
+-- Bi-temporal query: What saga was active at a given point in time?
+CREATE INDEX idx_saga_definitions_temporal
+    ON saga_definitions(name, activated_at, deprecated_at);
 ```
 
 ### 5.3 Redis Caching Strategy
 
 **Cache Key Format:**
 ```
-saga:compiled:{tenant_id}:{name}:{version}
+saga:compiled:{name}:{version}
 ```
+
+> **Note**: Cache is per-schema (tenant). Redis key namespace is prefixed by tenant at connection level.
 
 **Cache Entry Structure:**
 ```json
@@ -363,28 +370,32 @@ Execute Saga Request
 
 | Event | Action |
 |-------|--------|
-| Definition updated | Delete `saga:compiled:{tenant}:{name}:*` |
+| Definition updated | Delete `saga:compiled:{name}:*` |
 | Definition activated | Delete and repopulate |
 | Definition deprecated | Delete from cache |
 | TTL expiry | Automatic eviction |
 
 ### 5.4 Tenant Default Resolution
 
+> **Note**: Schema-based isolation - query runs within tenant's schema via search_path.
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │               Saga Resolution Order                          │
 │                                                              │
+│  Connection: SET search_path = tenant_schema                │
+│                                                              │
 │  1. Tenant Override    saga_definitions WHERE               │
-│                        tenant_id = :tenant AND              │
 │                        name = :saga_name AND                │
 │                        status = 'ACTIVE'                    │
+│                        AND is_system = FALSE                │
 │                        ORDER BY version DESC                │
 │                        LIMIT 1                              │
 │                                                              │
 │  2. Platform Default   saga_definitions WHERE               │
-│                        tenant_id = SYSTEM_TENANT AND        │
 │                        name = :saga_name AND                │
 │                        status = 'ACTIVE'                    │
+│                        AND is_system = TRUE                 │
 │                        ORDER BY version DESC                │
 │                        LIMIT 1                              │
 │                                                              │
@@ -392,9 +403,7 @@ Execute Saga Request
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**System Tenant ID:** `00000000-0000-0000-0000-000000000000`
-
-Platform-provided sagas use `is_system = true` and are seeded to each tenant's schema during provisioning (same pattern as system instruments).
+Platform-provided sagas use `is_system = true` and are seeded to each tenant's schema during provisioning (same pattern as system instruments in Reference Data).
 
 ### 5.5 Step Handler Registry
 
@@ -761,20 +770,113 @@ A saga executing under party A may create ledger entries affecting party B when 
 | **READ positions** | Party hierarchy only (self + descendants) |
 | **READ accounts** | Party hierarchy only |
 | **READ transactions** | Party hierarchy only |
-| **WRITE postings** | Authorized by party relationship (operator, custodian, etc.) |
-| **WRITE positions** | Authorized by party relationship |
+| **WRITE postings** | Contextual lookup - saga resolves target from input data |
+| **WRITE positions** | Contextual lookup - saga resolves target from input data |
 
-#### Party Relationships
+#### Cross-Party Authorization: Contextual Lookup Model
 
-Posting authorization is determined by explicit relationships stored in Party Service:
+> **Note**: The Party Service currently has `party_association` for personal relationships (SPOUSE, DEPENDENT, GUARANTOR). Operational authorization (OPERATOR, CUSTODIAN, BROKER) is **not yet implemented**.
+
+Rather than rigid party-to-party relationship tables, authorization flows from **contextual lookup**:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    ENERGY: MPAN → Account Resolution                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  MPAN Attributes (from meter read):                                         │
+│    mpan: "1200023305967"                                                    │
+│    customer_party_id: "P-CUST-001"      → Current Account lookup           │
+│    gsp_code: "P"                         → Internal Bank Account lookup    │
+│    dno_code: "WPD"                       → (GSP maps to DNO org party)     │
+│                                                                             │
+│  Saga Context Resolution:                                                   │
+│    1. MPAN → customer_party_id → current_account.by_party()                │
+│       Result: Customer's receivable account                                 │
+│                                                                             │
+│    2. MPAN → gsp_code → internal_bank_account.by_attributes(gsp="P")       │
+│       Result: GSP "P" wholesale payable account                            │
+│                                                                             │
+│  Authorization is IMPLICIT:                                                 │
+│    - Saga type "energy_settlement" is authorized for these lookup patterns │
+│    - Runtime validates saga can only use declared lookup types             │
+│    - Posting targets come from resolved lookups, not arbitrary party IDs   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Saga Authorized Lookups
+
+Each saga declares what account resolution patterns it may use:
+
+```python
+# energy_settlement.star
+saga(
+    name = "energy_settlement",
+    version = "1.0.0",
+    authorized_lookups = [
+        "current_account.by_party",           # Can resolve customer accounts
+        "internal_bank_account.by_gsp",       # Can resolve GSP internal accounts
+    ],
+    steps = [
+        step(
+            name = "post_customer_receivable",
+            action = "financial_accounting.post_entries",
+            params = lambda ctx: {
+                "postings": [
+                    posting(
+                        # Account resolved via authorized lookup
+                        account_id = current_account.by_party(ctx.mpan.customer_party_id),
+                        direction = "CREDIT",
+                        amount = ctx.kwh * ctx.tariff,
+                    ),
+                    posting(
+                        # Account resolved via authorized lookup
+                        account_id = internal_bank_account.by_gsp(ctx.mpan.gsp_code),
+                        direction = "DEBIT",
+                        amount = ctx.kwh * ctx.wholesale_rate,
+                    ),
+                ],
+            },
+        ),
+    ],
+)
+```
+
+#### Runtime Lookup Enforcement
+
+```go
+// Runtime validates lookups against saga's authorized_lookups
+func (r *Runtime) ResolveLookup(sagaDef SagaDefinition, lookupType string, key any) (Account, error) {
+    // Check if saga is authorized for this lookup type
+    if !contains(sagaDef.AuthorizedLookups, lookupType) {
+        return nil, fmt.Errorf("saga %s not authorized for lookup type %s", sagaDef.Name, lookupType)
+    }
+
+    // Perform the lookup
+    switch lookupType {
+    case "current_account.by_party":
+        return r.currentAccountClient.GetByParty(ctx, key.(uuid.UUID))
+    case "internal_bank_account.by_gsp":
+        return r.internalBankClient.GetByAttributes(ctx, map[string]string{"gsp": key.(string)})
+    // ... other lookup types
+    }
+}
+```
+
+#### Optional: Explicit Party Relationships
+
+For use cases requiring explicit authorization tracking (audit, compliance), an optional `party_relationships` table can be added to Party Service:
 
 ```sql
+-- PROPOSED: Not currently in Party Service
+-- Only needed if explicit relationship auditing required
 CREATE TABLE party_relationships (
     id UUID PRIMARY KEY,
-    source_party_id UUID NOT NULL,      -- The party that CAN post
-    target_party_id UUID NOT NULL,      -- The party being posted TO
-    relationship_type VARCHAR(32) NOT NULL,  -- OPERATOR, CUSTODIAN, BROKER, etc.
-    permissions JSONB NOT NULL,         -- {"can_post": true, "can_settle": true}
+    source_party_id UUID NOT NULL REFERENCES party(id),
+    target_party_id UUID NOT NULL REFERENCES party(id),
+    relationship_type VARCHAR(32) NOT NULL,  -- OPERATOR, CUSTODIAN, BROKER
+    permissions JSONB NOT NULL DEFAULT '{}', -- {"can_post": true, "can_settle": true}
     valid_from TIMESTAMPTZ NOT NULL,
     valid_to TIMESTAMPTZ,
 
@@ -782,68 +884,143 @@ CREATE TABLE party_relationships (
 );
 ```
 
-#### Runtime Authorization Check
-
-```python
-# In saga definition
-def settlement_postings(ctx):
-    # ctx.party_scope = Market Operator (party A)
-    # ctx.trade.seller = Generator (party B)
-    # ctx.trade.buyer = Retailer (party C)
-
-    postings = [
-        posting(
-            account_id = ctx.trade.seller.position_account,
-            party_id = ctx.trade.seller.party_id,  # Party B
-            direction = "DEBIT",
-            amount = ctx.trade.quantity,
-        ),
-        posting(
-            account_id = ctx.trade.buyer.position_account,
-            party_id = ctx.trade.buyer.party_id,  # Party C
-            direction = "CREDIT",
-            amount = ctx.trade.quantity,
-        ),
-    ]
-    return postings
-
-# Runtime validates BEFORE executing postings:
-for posting in postings:
-    if posting.party_id != ctx.party_scope.party_id:
-        # Cross-party posting - check authorization
-        authorized = party_service.check_relationship(
-            source_party = ctx.party_scope.party_id,
-            target_party = posting.party_id,
-            permission = "can_post",
-        )
-        if not authorized:
-            fail(f"Party {ctx.party_scope.party_id} not authorized to post to {posting.party_id}")
-```
+This is **optional** - the contextual lookup model provides authorization implicitly through saga definition.
 
 #### Audit Trail
 
-All saga executions are logged with party context:
+All saga executions are logged with party context and bi-temporal references:
 
 ```sql
 CREATE TABLE saga_execution_log (
     id UUID PRIMARY KEY,
-    saga_definition_id UUID NOT NULL,
-    tenant_id UUID NOT NULL,
-    party_id UUID NOT NULL,           -- Executing party
-    party_type VARCHAR(16) NOT NULL,  -- INDIVIDUAL, ORGANIZATION, SYSTEM
-    visible_parties UUID[] NOT NULL,  -- Parties data was accessed for
+
+    -- Saga reference (bi-temporal: which version was active when?)
+    saga_definition_id UUID NOT NULL REFERENCES saga_definitions(id),
+    saga_name VARCHAR(64) NOT NULL,       -- Denormalized for query
+    saga_version INTEGER NOT NULL,        -- Version that was executed
+
+    -- Party context
+    party_id UUID NOT NULL,               -- Executing party
+    party_type VARCHAR(16) NOT NULL,      -- INDIVIDUAL, ORGANIZATION, SYSTEM
+    visible_parties UUID[] NOT NULL,      -- Parties data was accessed for
+
+    -- Bi-temporal timestamps
     started_at TIMESTAMPTZ NOT NULL,
     completed_at TIMESTAMPTZ,
-    status VARCHAR(16) NOT NULL,      -- RUNNING, COMPLETED, COMPENSATED, FAILED
-    -- ... other fields
+    knowledge_at TIMESTAMPTZ,             -- For replay: what time context was used
+
+    -- Execution result
+    status VARCHAR(16) NOT NULL,          -- RUNNING, COMPLETED, COMPENSATED, FAILED
+    input_hash VARCHAR(64),               -- SHA256 of input for replay verification
+    output_snapshot JSONB,                -- Result for audit
+
+    -- Error context
+    error_message TEXT,
+    failed_step VARCHAR(64)
 );
 
 -- Query: What sagas touched party P005's data?
 CREATE INDEX idx_saga_execution_visible_parties
     ON saga_execution_log USING GIN(visible_parties);
+
+-- Query: What saga version was used for this execution?
+CREATE INDEX idx_saga_execution_temporal
+    ON saga_execution_log(saga_name, started_at);
 ```
 
-### 5.8 Starlark Builtins
+### 5.8 Bi-Temporal Saga Replay
+
+Audit and compliance require answering: "What saga was used 3 months ago to derive this value?"
+
+#### Temporal Query Pattern
+
+```sql
+-- What saga version was ACTIVE on 2025-10-15?
+SELECT * FROM saga_definitions
+WHERE name = 'energy_settlement'
+  AND activated_at <= '2025-10-15'
+  AND (deprecated_at IS NULL OR deprecated_at > '2025-10-15')
+ORDER BY version DESC
+LIMIT 1;
+
+-- What saga was used to produce execution X?
+SELECT sd.*
+FROM saga_execution_log sel
+JOIN saga_definitions sd ON sd.id = sel.saga_definition_id
+WHERE sel.id = :execution_id;
+```
+
+#### Replay with Historical Saga
+
+```python
+# Replay execution with the EXACT saga version that was active then
+def replay_execution(execution_id: UUID, knowledge_at: datetime) -> SagaResult:
+    # Get original execution
+    original = saga_execution_log.get(execution_id)
+
+    # Load the saga version that was used (not current ACTIVE)
+    saga_def = saga_definitions.get(original.saga_definition_id)
+
+    # Replay with same inputs and knowledge_at
+    return runtime.execute(
+        saga_definition = saga_def,
+        inputs = original.input_snapshot,
+        knowledge_at = knowledge_at,  # Bi-temporal: what we knew then
+        mode = "REPLAY",              # No side effects, just compute
+    )
+```
+
+#### Saga Version Lineage
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    Saga Version Timeline                                     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  energy_settlement v1.0                                                     │
+│  ├─ activated_at: 2025-01-01                                               │
+│  ├─ deprecated_at: 2025-06-15                                              │
+│  └─ successor_id: → v2.0                                                   │
+│                                                                             │
+│  energy_settlement v2.0                                                     │
+│  ├─ activated_at: 2025-06-15                                               │
+│  ├─ deprecated_at: 2025-11-01                                              │
+│  └─ successor_id: → v3.0                                                   │
+│                                                                             │
+│  energy_settlement v3.0                                                     │
+│  ├─ activated_at: 2025-11-01                                               │
+│  ├─ deprecated_at: NULL (current)                                          │
+│  └─ successor_id: NULL                                                     │
+│                                                                             │
+│  Query: "What saga was active on 2025-08-20?"                              │
+│  Answer: energy_settlement v2.0                                            │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Replay Verification
+
+To verify historical calculations haven't drifted:
+
+```python
+# Verify: does replaying with original saga produce same result?
+def verify_execution(execution_id: UUID) -> VerificationResult:
+    original = saga_execution_log.get(execution_id)
+
+    replayed = replay_execution(
+        execution_id = execution_id,
+        knowledge_at = original.knowledge_at,
+    )
+
+    return VerificationResult(
+        original_hash = original.output_hash,
+        replayed_hash = hash(replayed.output),
+        matches = original.output_hash == hash(replayed.output),
+        drift_details = diff(original.output_snapshot, replayed.output) if not matches else None,
+    )
+```
+
+### 5.9 Starlark Builtins
 
 Functions available within Starlark scripts:
 
@@ -855,7 +1032,7 @@ Functions available within Starlark scripts:
 | `step` | `step(name, action, params, compensation) → Step` | Define saga step |
 | `saga` | `saga(name, version, steps, preconditions) → SagaDefinition` | Define saga |
 
-### 5.9 Example Saga Definition
+### 5.10 Example Saga Definition
 
 ```python
 # withdrawal.star
@@ -968,7 +1145,7 @@ saga(
 )
 ```
 
-### 5.10 Saga Composition
+### 5.11 Saga Composition
 
 Sagas can invoke other sagas as steps, enabling reusable workflow components.
 
@@ -1076,7 +1253,7 @@ Cannot activate saga_c: would create circular dependency.
 | Max total steps | 50 | Limit execution complexity |
 | Child saga timeout | Inherited from parent | Prevent runaway children |
 
-### 5.11 Meridian Starlark Extensions
+### 5.12 Meridian Starlark Extensions
 
 Meridian extends vanilla Starlark with domain-specific builtins. These are the **only** functions available beyond standard Starlark syntax.
 
@@ -1224,7 +1401,64 @@ Meridian Starlark explicitly excludes:
 
 ---
 
-## 8. Implementation Tasks
+## 8. Service Feature Gap Analysis
+
+This PRD references capabilities across multiple services. This section clarifies what **exists today** vs what is **proposed**.
+
+### Existing Features
+
+| Service | Feature | Status | Notes |
+|---------|---------|--------|-------|
+| **Party Service** | `party` table with PERSON/ORGANIZATION types | ✅ Exists | Core party identity |
+| **Party Service** | `party_association` for personal relationships | ✅ Exists | SPOUSE, DEPENDENT, GUARANTOR, etc. |
+| **Party Service** | Party hierarchy (org → child parties) | ❓ Partial | Need to verify recursive query support |
+| **Current Account** | `account.party_id` reference | ✅ Exists | Links account to party (not FK) |
+| **Current Account** | Account lookup by party | ✅ Exists | `current_account.by_party()` |
+| **Internal Bank Account** | `attributes` JSONB column | ✅ Exists | Can store GSP, DNO, etc. |
+| **Internal Bank Account** | Lookup by attributes | ❓ Partial | May need index/API |
+| **Reference Data** | Instrument definitions with lifecycle | ✅ Exists | Pattern to follow |
+| **Position Keeping** | Position with `party_id` | ✅ Exists | Core position model |
+| **Market Information** | Bi-temporal observations | ✅ Exists | `knowledge_at` support |
+
+### Proposed Features (This PRD)
+
+| Service | Feature | Priority | Notes |
+|---------|---------|----------|-------|
+| **Reference Data** | `saga_definitions` table | P0 | New table for Starlark scripts |
+| **Reference Data** | `saga_references` table | P0 | Reference tracking for validation |
+| **Reference Data** | `saga_execution_log` table | P1 | Audit trail with bi-temporal |
+| **Shared Runtime** | Starlark VM integration | P0 | `go.starlark.net` |
+| **Shared Runtime** | Step handler registry | P0 | Platform-controlled actions |
+| **Shared Runtime** | Party scope injection | P0 | `ctx.party_scope` |
+| **Party Service** | Party hierarchy query (recursive) | P1 | `visible_parties` resolution |
+| **Party Service** | `party_relationships` table (optional) | P2 | OPERATOR, CUSTODIAN, BROKER |
+| **Internal Bank Account** | Lookup by GSP code | P1 | `by_attributes(gsp="P")` |
+
+### Integration Points Requiring Coordination
+
+| Integration | Services Involved | Dependency |
+|-------------|-------------------|------------|
+| Party scope resolution | Party Service ↔ Saga Runtime | Runtime calls Party Service to resolve hierarchy |
+| Account lookup | Current Account ↔ Saga Runtime | Runtime calls Current Account for party's accounts |
+| Internal account lookup | Internal Bank Account ↔ Saga Runtime | Runtime calls IBA for GSP/DNO accounts |
+| Position access | Position Keeping ↔ Saga Runtime | Step handlers query positions with party scope |
+| Valuation (future) | Valuation Engine ↔ Saga Runtime | `valuate()` step handler |
+
+### MPAN-Specific Requirements (Energy Domain)
+
+For energy settlement, MPAN attributes need to map to accounts:
+
+| MPAN Attribute | Maps To | Lookup Method |
+|----------------|---------|---------------|
+| `customer_party_id` | Customer's current account | `current_account.by_party(party_id)` |
+| `gsp_code` | GSP internal bank account | `internal_bank_account.by_attributes(gsp=code)` |
+| `dno_code` | DNO org party (for reporting) | `party.get(dno_party_id)` |
+
+**Required**: Internal Bank Account service needs API/index for attribute-based lookup if not already present.
+
+---
+
+## 9. Implementation Tasks
 
 | Task ID | Description | Priority | Dependencies |
 |---------|-------------|----------|--------------|
@@ -1251,17 +1485,23 @@ Meridian Starlark explicitly excludes:
 | **SAGA-021** | Add validation feedback API endpoint | P1 | SAGA-018, SAGA-019 |
 | **SAGA-022** | Implement party scope resolution from Party Service | P0 | SAGA-003 |
 | **SAGA-023** | Add `ctx.party_scope` injection with immutability enforcement | P0 | SAGA-022 |
-| **SAGA-024** | Implement party relationship authorization for cross-party postings | P0 | SAGA-022 |
+| **SAGA-024** | Implement `authorized_lookups` declaration and runtime enforcement | P0 | SAGA-022 |
 | **SAGA-025** | Add `party_id` and `visible_parties` to saga execution audit log | P1 | SAGA-012 |
 | **SAGA-026** | Implement `invoke_saga()` builtin with scope inheritance | P1 | SAGA-004, SAGA-023 |
 | **SAGA-027** | Add circular saga reference detection (DRAFT + ACTIVATION) | P1 | SAGA-017, SAGA-026 |
 | **SAGA-028** | Add runtime circular detection via call stack | P1 | SAGA-026 |
 | **SAGA-029** | Implement compensation cascade for child sagas | P1 | SAGA-026 |
 | **SAGA-030** | Add composition depth and total steps limits | P1 | SAGA-026 |
+| **SAGA-031** | Add bi-temporal index on `saga_definitions` for version replay | P1 | SAGA-001 |
+| **SAGA-032** | Implement `replay_execution()` with historical saga version | P1 | SAGA-012, SAGA-031 |
+| **SAGA-033** | Add `verify_execution()` for audit drift detection | P2 | SAGA-032 |
+| **SAGA-034** | Internal Bank Account: Add attribute-based lookup API (`by_gsp`, `by_dno`) | P1 | - |
+| **SAGA-035** | Party Service: Implement recursive party hierarchy query | P1 | - |
+| **SAGA-036** | Party Service: Add `party_relationships` table (optional) | P2 | - |
 
 ---
 
-## 9. Migration Strategy
+## 10. Migration Strategy
 
 ### Phase 1: Foundation (SAGA-001 through SAGA-007)
 - Schema, registry, runtime, caching
@@ -1282,14 +1522,21 @@ Meridian Starlark explicitly excludes:
 
 ### Phase 5: Party Isolation & Composition (SAGA-022 through SAGA-030)
 - Party scope resolution and injection
-- Cross-party posting authorization via party relationships
+- Authorized lookups for cross-party posting (contextual model)
 - `invoke_saga()` builtin for saga composition
 - Circular reference detection and compensation cascade
 - Enables multi-party settlement (energy, wealth management)
 
+### Phase 6: Bi-Temporal & Service Integration (SAGA-031 through SAGA-036)
+- Bi-temporal saga versioning for audit replay
+- Historical saga replay with `verify_execution()`
+- Internal Bank Account attribute-based lookup (GSP, DNO)
+- Party Service recursive hierarchy query
+- Optional: Party relationships table for explicit authorization tracking
+
 ---
 
-## 10. Success Criteria
+## 11. Success Criteria
 
 | Metric | Target | Measurement |
 |--------|--------|-------------|
@@ -1336,7 +1583,7 @@ Meridian Starlark explicitly excludes:
 
 ---
 
-## 11. Risks and Mitigations
+## 12. Risks and Mitigations
 
 | Risk | Impact | Likelihood | Mitigation |
 |------|--------|------------|------------|
@@ -1347,7 +1594,7 @@ Meridian Starlark explicitly excludes:
 
 ---
 
-## 12. Appendix: Why Starlark?
+## 13. Appendix: Why Starlark?
 
 ### Comparison with Alternatives
 
@@ -1392,7 +1639,7 @@ For tenant communication:
 
 ---
 
-## 13. Links
+## 14. Links
 
 - [ADR-028: Starlark Saga Orchestration with CEL Valuation](../adr/0028-starlark-saga-cel-valuation.md)
 - [ADR-014: Financial Instrument Reference Data](../adr/0014-financial-instrument-reference-data.md)
