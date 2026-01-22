@@ -1901,6 +1901,191 @@ Meridian Starlark explicitly excludes:
 | No network access | Language design | No external calls |
 | Deterministic | Language design | Reproducible execution |
 
+#### Implementation Guidance (go.starlark.net)
+
+The Go implementation requires explicit hardening beyond Starlark's language-level safety.
+
+##### Restricted Built-in Environment
+
+Create a custom `starlark.Thread` with filtered built-ins:
+
+```go
+// Create hardened Starlark environment
+func NewSagaThread(ctx context.Context, auditLogger AuditLogger) *starlark.Thread {
+    thread := &starlark.Thread{
+        Name: "saga-executor",
+        Print: func(_ *starlark.Thread, msg string) {
+            // Route print() to audit system, not stdout
+            auditLogger.Log("STARLARK_PRINT", msg)
+        },
+    }
+
+    // Set execution timeout
+    thread.SetLocal("context", ctx) // For cancellation checks
+
+    return thread
+}
+
+// Whitelisted built-ins only - no load(), no file access
+var SagaBuiltins = starlark.StringDict{
+    // Domain-specific orchestration functions
+    "saga":               starlark.NewBuiltin("saga", sagaBuiltin),
+    "step":               starlark.NewBuiltin("step", stepBuiltin),
+    "posting":            starlark.NewBuiltin("posting", postingBuiltin),
+    "cel_eval":           starlark.NewBuiltin("cel_eval", celEvalBuiltin),
+    "resolve_account":    starlark.NewBuiltin("resolve_account", resolveAccountBuiltin),
+    "resolve_instrument": starlark.NewBuiltin("resolve_instrument", resolveInstrumentBuiltin),
+    "invoke_saga":        starlark.NewBuiltin("invoke_saga", invokeSagaBuiltin),
+    "fail":               starlark.NewBuiltin("fail", failBuiltin),
+    "log":                starlark.NewBuiltin("log", logBuiltin),
+
+    // Safe subset of standard library
+    "True":  starlark.True,
+    "False": starlark.False,
+    "None":  starlark.None,
+    "list":  starlark.NewBuiltin("list", starlark.ListBuiltin),
+    "dict":  starlark.NewBuiltin("dict", starlark.DictBuiltin),
+    "len":   starlark.NewBuiltin("len", starlark.LenBuiltin),
+    "str":   starlark.NewBuiltin("str", starlark.StrBuiltin),
+    "int":   starlark.NewBuiltin("int", starlark.IntBuiltin),
+
+    // Explicitly BLOCKED (not included):
+    // - load()      → No module imports
+    // - print()     → Replaced with audit-routed version above
+    // - time.now()  → Use ctx.knowledge_at instead
+    // - random()    → Non-deterministic, forbidden
+}
+```
+
+##### Timeout and Cancellation
+
+Use Go's `context` package to enforce execution limits:
+
+```go
+func (r *Runtime) ExecuteSaga(
+    ctx context.Context, def *SagaDefinition, input any,
+) (*SagaResult, error) {
+    // Enforce 5-second timeout
+    ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+    defer cancel()
+
+    thread := NewSagaThread(ctx, r.auditLogger)
+
+    // Check for cancellation periodically during execution
+    thread.SetLocal("cancel_check", func() error {
+        select {
+        case <-ctx.Done():
+            return fmt.Errorf("saga execution cancelled: %w", ctx.Err())
+        default:
+            return nil
+        }
+    })
+
+    // Execute with resource limits
+    _, err := starlark.ExecFile(thread, def.Name, def.Script, SagaBuiltins)
+    if err != nil {
+        if errors.Is(err, context.DeadlineExceeded) {
+            return nil, fmt.Errorf("saga exceeded 5s execution limit")
+        }
+        return nil, err
+    }
+    // ...
+}
+```
+
+##### Disabled Functions Reference
+
+| Function | Status | Alternative |
+|----------|--------|-------------|
+| `load()` | **Blocked** | Use whitelisted builtins only |
+| `print()` | **Redirected** | Routes to `AuditLogger`, not stdout |
+| `time.now()` | **Blocked** | Use `ctx.knowledge_at` or `ctx.effective_at` |
+| `random()` | **Blocked** | Use `ctx.new_uuid()` for deterministic IDs |
+| `exec()` | **Blocked** | Not in go.starlark.net, explicitly excluded |
+| `compile()` | **Blocked** | Not in go.starlark.net, explicitly excluded |
+| `open()` | **Blocked** | No file I/O |
+| `http.*` | **Blocked** | No network; use step handlers for external calls |
+
+##### Static Analysis at Upload
+
+Validate scripts before storing in `saga_definitions`:
+
+```go
+func (v *SagaValidator) ValidateScript(script string) []ValidationError {
+    var errors []ValidationError
+
+    // 1. Parse without executing
+    _, err := starlark.ExecFile(nil, "validation", script, SagaBuiltins)
+    if err != nil {
+        errors = append(errors, ValidationError{
+            Type: "SYNTAX", Message: err.Error(),
+        })
+    }
+
+    // 2. AST analysis for suspicious patterns
+    f, _ := syntax.Parse("validation", script, 0)
+    syntax.Walk(f, func(n syntax.Node) bool {
+        switch x := n.(type) {
+        case *syntax.CallExpr:
+            // Check for blocked function calls
+            if ident, ok := x.Fn.(*syntax.Ident); ok {
+                if isBlocked(ident.Name) {
+                    errors = append(errors, ValidationError{
+                        Type:    "BLOCKED_FUNCTION",
+                        Message: fmt.Sprintf("function '%s' is not allowed", ident.Name),
+                        Line:    int(x.Lparen.Line),
+                    })
+                }
+            }
+        case *syntax.ForStmt:
+            // Warn on deeply nested loops (potential DoS)
+            depth := countLoopDepth(x)
+            if depth > 3 {
+                errors = append(errors, ValidationError{
+                    Type:    "COMPLEXITY",
+                    Message: fmt.Sprintf("loop nesting depth %d exceeds limit", depth),
+                    Line:    int(x.For.Line),
+                })
+            }
+        }
+        return true
+    })
+
+    return errors
+}
+```
+
+##### Memory and Allocation Monitoring
+
+Track allocations during execution for observability:
+
+```go
+func (r *Runtime) ExecuteWithLimits(
+    ctx context.Context, def *SagaDefinition, input any,
+) (*SagaResult, error) {
+    // Track allocations
+    var memStats runtime.MemStats
+    runtime.ReadMemStats(&memStats)
+    startAlloc := memStats.TotalAlloc
+
+    result, err := r.ExecuteSaga(ctx, def, input)
+
+    runtime.ReadMemStats(&memStats)
+    allocDelta := memStats.TotalAlloc - startAlloc
+
+    // Log allocation for monitoring; alert if excessive
+    if allocDelta > 10*1024*1024 { // 10MB threshold
+        r.metrics.RecordHighAllocation(def.Name, allocDelta)
+        r.alerter.Warn("saga_high_allocation", map[string]any{
+            "saga":        def.Name,
+            "alloc_bytes": allocDelta,
+        })
+    }
+
+    return result, err
+}
+```
+
 ### 6.2 CEL Constraints (from ADR-014)
 
 | Constraint | Value |
