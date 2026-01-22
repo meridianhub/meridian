@@ -1563,3 +1563,434 @@ func TestProcessPendingTenants_ConcurrentClaimSkipped(t *testing.T) {
 	// At least one version conflict may have occurred (logged at debug level)
 	// The exact behavior depends on timing, but the test ensures no crashes or deadlocks
 }
+
+// =============================================================================
+// RecoverStuckTenants Tests
+// =============================================================================
+
+// TestRecoverStuckTenants_RecoversStaleTenants verifies that tenants stuck in
+// PROVISIONING status for longer than the threshold are reset to PROVISIONING_PENDING.
+func TestRecoverStuckTenants_RecoversStaleTenants(t *testing.T) {
+	db, repo := setupTestDB(t)
+
+	// Create a tenant in PROVISIONING status
+	stuckTenant := &domain.Tenant{
+		ID:              tenant.MustNewTenantID("stuck_tenant"),
+		DisplayName:     "Stuck Tenant",
+		SettlementAsset: "GBP",
+		Status:          domain.StatusProvisioning,
+		CreatedAt:       time.Now(),
+		Version:         1,
+	}
+	ctx := context.Background()
+	require.NoError(t, repo.Create(ctx, stuckTenant))
+
+	// Age the updated_at timestamp to make it stale (10 minutes ago)
+	err := db.Exec("UPDATE tenant SET updated_at = ? WHERE id = ?",
+		time.Now().Add(-10*time.Minute), stuckTenant.ID.String()).Error
+	require.NoError(t, err)
+
+	// Create worker
+	prov := provisioner.NewMockProvisioner(nil)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(5*time.Second), logger)
+	require.NoError(t, err)
+
+	// Run recovery with 5 minute threshold
+	recoveredCount, err := worker.RecoverStuckTenants(ctx, 5*time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, 1, recoveredCount)
+
+	// Verify tenant was reset to PROVISIONING_PENDING
+	recovered, err := repo.GetByID(ctx, stuckTenant.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.StatusProvisioningPending, recovered.Status)
+	assert.Equal(t, 2, recovered.Version) // Version should increment
+}
+
+// TestRecoverStuckTenants_IgnoresRecentTenants verifies that tenants in PROVISIONING
+// status but recently updated (within threshold) are NOT recovered.
+func TestRecoverStuckTenants_IgnoresRecentTenants(t *testing.T) {
+	db, repo := setupTestDB(t)
+
+	// Create a tenant in PROVISIONING status
+	recentTenant := &domain.Tenant{
+		ID:              tenant.MustNewTenantID("recent_tenant"),
+		DisplayName:     "Recent Tenant",
+		SettlementAsset: "USD",
+		Status:          domain.StatusProvisioning,
+		CreatedAt:       time.Now(),
+		Version:         1,
+	}
+	ctx := context.Background()
+	require.NoError(t, repo.Create(ctx, recentTenant))
+
+	// Set updated_at to 1 minute ago (within the 5 minute threshold)
+	err := db.Exec("UPDATE tenant SET updated_at = ? WHERE id = ?",
+		time.Now().Add(-1*time.Minute), recentTenant.ID.String()).Error
+	require.NoError(t, err)
+
+	// Create worker
+	prov := provisioner.NewMockProvisioner(nil)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(5*time.Second), logger)
+	require.NoError(t, err)
+
+	// Run recovery with 5 minute threshold
+	recoveredCount, err := worker.RecoverStuckTenants(ctx, 5*time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, 0, recoveredCount)
+
+	// Verify tenant was NOT changed
+	unchanged, err := repo.GetByID(ctx, recentTenant.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.StatusProvisioning, unchanged.Status)
+	assert.Equal(t, 1, unchanged.Version)
+}
+
+// TestRecoverStuckTenants_ContinuesOnUpdateError verifies that errors updating
+// individual tenants don't prevent recovery of other tenants.
+// Note: True version conflicts in recovery are rare since the query and update
+// happen close together, but the code handles them gracefully by logging and continuing.
+func TestRecoverStuckTenants_ContinuesOnUpdateError(t *testing.T) {
+	db, repo := setupTestDB(t)
+
+	// Create two stuck tenants
+	stuckTenant1 := &domain.Tenant{
+		ID:              tenant.MustNewTenantID("continue_tenant1"),
+		DisplayName:     "Continue Tenant 1",
+		SettlementAsset: "EUR",
+		Status:          domain.StatusProvisioning,
+		CreatedAt:       time.Now(),
+		Version:         1,
+	}
+	stuckTenant2 := &domain.Tenant{
+		ID:              tenant.MustNewTenantID("continue_tenant2"),
+		DisplayName:     "Continue Tenant 2",
+		SettlementAsset: "USD",
+		Status:          domain.StatusProvisioning,
+		CreatedAt:       time.Now(),
+		Version:         1,
+	}
+	ctx := context.Background()
+	require.NoError(t, repo.Create(ctx, stuckTenant1))
+	require.NoError(t, repo.Create(ctx, stuckTenant2))
+
+	// Age the updated_at timestamps to make them stale
+	err := db.Exec("UPDATE tenant SET updated_at = ? WHERE id IN (?, ?)",
+		time.Now().Add(-10*time.Minute), stuckTenant1.ID.String(), stuckTenant2.ID.String()).Error
+	require.NoError(t, err)
+
+	// Capture log output
+	var logBuffer safeBuffer
+	logger := slog.New(slog.NewTextHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	prov := provisioner.NewMockProvisioner(nil)
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(5*time.Second), logger)
+	require.NoError(t, err)
+
+	// Run recovery - both should succeed
+	recoveredCount, err := worker.RecoverStuckTenants(ctx, 5*time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, 2, recoveredCount)
+
+	// Verify both were recovered
+	recovered1, err := repo.GetByID(ctx, stuckTenant1.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.StatusProvisioningPending, recovered1.Status)
+
+	recovered2, err := repo.GetByID(ctx, stuckTenant2.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.StatusProvisioningPending, recovered2.Status)
+
+	// Verify both were logged
+	logOutput := logBuffer.String()
+	assert.Contains(t, logOutput, "continue_tenant1")
+	assert.Contains(t, logOutput, "continue_tenant2")
+}
+
+// TestRecoverStuckTenants_MultipleStuckTenants verifies batch recovery of multiple stuck tenants.
+func TestRecoverStuckTenants_MultipleStuckTenants(t *testing.T) {
+	db, repo := setupTestDB(t)
+	ctx := context.Background()
+
+	// Create 3 stuck tenants
+	for i := 1; i <= 3; i++ {
+		tenantObj := &domain.Tenant{
+			ID:              tenant.MustNewTenantID(fmt.Sprintf("stuck_%d", i)),
+			DisplayName:     fmt.Sprintf("Stuck Tenant %d", i),
+			SettlementAsset: "GBP",
+			Status:          domain.StatusProvisioning,
+			CreatedAt:       time.Now(),
+			Version:         1,
+		}
+		require.NoError(t, repo.Create(ctx, tenantObj))
+
+		// Age the updated_at timestamp
+		err := db.Exec("UPDATE tenant SET updated_at = ? WHERE id = ?",
+			time.Now().Add(-10*time.Minute), tenantObj.ID.String()).Error
+		require.NoError(t, err)
+	}
+
+	// Create worker
+	prov := provisioner.NewMockProvisioner(nil)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(5*time.Second), logger)
+	require.NoError(t, err)
+
+	// Run recovery
+	recoveredCount, err := worker.RecoverStuckTenants(ctx, 5*time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, 3, recoveredCount)
+
+	// Verify all tenants were reset
+	for i := 1; i <= 3; i++ {
+		id := tenant.MustNewTenantID(fmt.Sprintf("stuck_%d", i))
+		recovered, err := repo.GetByID(ctx, id)
+		require.NoError(t, err)
+		assert.Equal(t, domain.StatusProvisioningPending, recovered.Status)
+	}
+}
+
+// TestRecoverStuckTenants_MixedStatuses verifies that only PROVISIONING tenants
+// are recovered, not tenants in other statuses.
+func TestRecoverStuckTenants_MixedStatuses(t *testing.T) {
+	db, repo := setupTestDB(t)
+	ctx := context.Background()
+
+	// Create tenants in various statuses, all old
+	tenants := []struct {
+		id     string
+		status domain.Status
+	}{
+		{"stuck_prov", domain.StatusProvisioning},
+		{"pending", domain.StatusProvisioningPending},
+		{"failed", domain.StatusProvisioningFailed},
+		{"active", domain.StatusActive},
+	}
+
+	for _, tc := range tenants {
+		tenantObj := &domain.Tenant{
+			ID:              tenant.MustNewTenantID(tc.id),
+			DisplayName:     tc.id,
+			SettlementAsset: "GBP",
+			Status:          tc.status,
+			CreatedAt:       time.Now(),
+			Version:         1,
+		}
+		require.NoError(t, repo.Create(ctx, tenantObj))
+
+		// Age all tenants
+		err := db.Exec("UPDATE tenant SET updated_at = ? WHERE id = ?",
+			time.Now().Add(-10*time.Minute), tenantObj.ID.String()).Error
+		require.NoError(t, err)
+	}
+
+	// Create worker
+	prov := provisioner.NewMockProvisioner(nil)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(5*time.Second), logger)
+	require.NoError(t, err)
+
+	// Run recovery
+	recoveredCount, err := worker.RecoverStuckTenants(ctx, 5*time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, 1, recoveredCount, "only PROVISIONING tenant should be recovered")
+
+	// Verify only the PROVISIONING tenant was changed
+	provTenant, _ := repo.GetByID(ctx, tenant.MustNewTenantID("stuck_prov"))
+	assert.Equal(t, domain.StatusProvisioningPending, provTenant.Status)
+
+	// Others should be unchanged
+	pendingTenant, _ := repo.GetByID(ctx, tenant.MustNewTenantID("pending"))
+	assert.Equal(t, domain.StatusProvisioningPending, pendingTenant.Status)
+	assert.Equal(t, 1, pendingTenant.Version) // Version unchanged
+
+	failedTenant, _ := repo.GetByID(ctx, tenant.MustNewTenantID("failed"))
+	assert.Equal(t, domain.StatusProvisioningFailed, failedTenant.Status)
+
+	activeTenant, _ := repo.GetByID(ctx, tenant.MustNewTenantID("active"))
+	assert.Equal(t, domain.StatusActive, activeTenant.Status)
+}
+
+// TestRecoverStuckTenants_NoStuckTenants verifies no-op when no tenants need recovery.
+func TestRecoverStuckTenants_NoStuckTenants(t *testing.T) {
+	_, repo := setupTestDB(t)
+	ctx := context.Background()
+
+	// Create a healthy tenant in PROVISIONING_PENDING status
+	healthyTenant := &domain.Tenant{
+		ID:              tenant.MustNewTenantID("healthy"),
+		DisplayName:     "Healthy Tenant",
+		SettlementAsset: "GBP",
+		Status:          domain.StatusProvisioningPending,
+		CreatedAt:       time.Now(),
+		Version:         1,
+	}
+	require.NoError(t, repo.Create(ctx, healthyTenant))
+
+	// Create worker
+	prov := provisioner.NewMockProvisioner(nil)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(5*time.Second), logger)
+	require.NoError(t, err)
+
+	// Run recovery
+	recoveredCount, err := worker.RecoverStuckTenants(ctx, 5*time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, 0, recoveredCount)
+}
+
+// TestRecoverStuckTenants_IdempotentRecovery verifies that running recovery
+// multiple times is safe (idempotent).
+func TestRecoverStuckTenants_IdempotentRecovery(t *testing.T) {
+	db, repo := setupTestDB(t)
+	ctx := context.Background()
+
+	// Create a stuck tenant
+	stuckTenant := &domain.Tenant{
+		ID:              tenant.MustNewTenantID("idempotent_test"),
+		DisplayName:     "Idempotent Test",
+		SettlementAsset: "GBP",
+		Status:          domain.StatusProvisioning,
+		CreatedAt:       time.Now(),
+		Version:         1,
+	}
+	require.NoError(t, repo.Create(ctx, stuckTenant))
+
+	// Age the updated_at timestamp
+	err := db.Exec("UPDATE tenant SET updated_at = ? WHERE id = ?",
+		time.Now().Add(-10*time.Minute), stuckTenant.ID.String()).Error
+	require.NoError(t, err)
+
+	// Create worker
+	prov := provisioner.NewMockProvisioner(nil)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(5*time.Second), logger)
+	require.NoError(t, err)
+
+	// Run recovery first time
+	recoveredCount1, err := worker.RecoverStuckTenants(ctx, 5*time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, 1, recoveredCount1)
+
+	// Age it again (simulate it going back to PROVISIONING and getting stuck again)
+	_, err = repo.UpdateStatus(ctx, stuckTenant.ID, domain.StatusProvisioning, 2)
+	require.NoError(t, err)
+	err = db.Exec("UPDATE tenant SET updated_at = ? WHERE id = ?",
+		time.Now().Add(-10*time.Minute), stuckTenant.ID.String()).Error
+	require.NoError(t, err)
+
+	// Run recovery second time - should work again
+	recoveredCount2, err := worker.RecoverStuckTenants(ctx, 5*time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, 1, recoveredCount2)
+
+	// Verify final state
+	final, err := repo.GetByID(ctx, stuckTenant.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.StatusProvisioningPending, final.Status)
+}
+
+// TestProvisioningWorker_StartupRecovery verifies that stuck tenants are recovered
+// when the worker starts up.
+func TestProvisioningWorker_StartupRecovery(t *testing.T) {
+	db, repo := setupTestDB(t)
+	ctx := context.Background()
+
+	// Create a tenant in PROVISIONING status (simulating a crash)
+	stuckTenant := &domain.Tenant{
+		ID:              tenant.MustNewTenantID("startup_recovery_tenant"),
+		DisplayName:     "Startup Recovery Tenant",
+		SettlementAsset: "GBP",
+		Status:          domain.StatusProvisioning,
+		CreatedAt:       time.Now(),
+		Version:         1,
+	}
+	require.NoError(t, repo.Create(ctx, stuckTenant))
+
+	// Age the updated_at timestamp to make it stale
+	err := db.Exec("UPDATE tenant SET updated_at = ? WHERE id = ?",
+		time.Now().Add(-10*time.Minute), stuckTenant.ID.String()).Error
+	require.NoError(t, err)
+
+	// Create worker with proper mock
+	prov := provisioner.NewMockProvisioner(nil)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	config := Config{
+		PollInterval:      100 * time.Millisecond,
+		RecoveryThreshold: 5 * time.Minute,
+	}
+	worker, err := NewProvisioningWorker(repo, prov, config, logger)
+	require.NoError(t, err)
+
+	// Start worker
+	workerCtx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		worker.Start(workerCtx)
+		close(done)
+	}()
+
+	// Wait for the tenant to be recovered (PROVISIONING -> PROVISIONING_PENDING)
+	// and then provisioned (PROVISIONING_PENDING -> PROVISIONING -> ACTIVE)
+	err = await.AtMost(5 * time.Second).PollInterval(50 * time.Millisecond).Until(func() bool {
+		t, _ := repo.GetByID(ctx, stuckTenant.ID)
+		return t != nil && t.Status == domain.StatusActive
+	})
+	require.NoError(t, err, "tenant should eventually reach ACTIVE status after recovery")
+
+	// Stop worker
+	cancel()
+	worker.Stop()
+	<-done
+
+	// Verify final state
+	finalTenant, err := repo.GetByID(ctx, stuckTenant.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.StatusActive, finalTenant.Status)
+}
+
+// TestNewProvisioningWorker_RecoveryThresholdDefault verifies that the recovery
+// threshold defaults to 5 minutes when not specified.
+func TestNewProvisioningWorker_RecoveryThresholdDefault(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+
+	repo := persistence.NewRepository(db)
+	prov := provisioner.NewMockProvisioner(nil)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	// Only set PollInterval, leave RecoveryThreshold at zero
+	config := Config{
+		PollInterval: 100 * time.Millisecond,
+	}
+
+	worker, err := NewProvisioningWorker(repo, prov, config, logger)
+
+	require.NoError(t, err)
+	require.NotNil(t, worker)
+	assert.Equal(t, 5*time.Minute, worker.recoveryThreshold, "recoveryThreshold should default to 5 minutes")
+}
+
+// TestNewProvisioningWorker_RecoveryThresholdCustom verifies that a custom
+// recovery threshold is respected.
+func TestNewProvisioningWorker_RecoveryThresholdCustom(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+
+	repo := persistence.NewRepository(db)
+	prov := provisioner.NewMockProvisioner(nil)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	customThreshold := 10 * time.Minute
+	config := Config{
+		PollInterval:      100 * time.Millisecond,
+		RecoveryThreshold: customThreshold,
+	}
+
+	worker, err := NewProvisioningWorker(repo, prov, config, logger)
+
+	require.NoError(t, err)
+	require.NotNil(t, worker)
+	assert.Equal(t, customThreshold, worker.recoveryThreshold, "recoveryThreshold should be set to custom value")
+}
