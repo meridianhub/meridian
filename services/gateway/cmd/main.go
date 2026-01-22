@@ -10,7 +10,11 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/services/gateway"
+	gwhealth "github.com/meridianhub/meridian/services/gateway/health"
+	"github.com/meridianhub/meridian/shared/pkg/health"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
+	"github.com/meridianhub/meridian/shared/platform/db"
+	"github.com/redis/go-redis/v9"
 )
 
 // Build information set via ldflags during compilation.
@@ -63,11 +67,48 @@ func run(logger *slog.Logger) error {
 		"redis_enabled", config.RedisURL != "",
 		"backend_routes", len(config.Backends))
 
-	// Create server
+	// Initialize database pool for tenant resolution and health checks
+	dbPool, err := db.NewPostgresPool(context.Background(), db.DefaultConfig(config.DatabaseURL))
+	if err != nil {
+		return fmt.Errorf("failed to create database pool: %w", err)
+	}
+	defer func() { _ = dbPool.Close() }()
+
+	logger.Info("database pool initialized")
+
+	// Build health checkers list
+	checkers := []health.Checker{
+		health.NewDatabaseChecker(dbPool), // Critical dependency
+	}
+
+	// Initialize Redis client if configured (optional dependency)
+	var redisClient *redis.Client
+	if config.RedisURL != "" {
+		redisClient = redis.NewClient(&redis.Options{
+			Addr: config.RedisURL,
+		})
+		defer func() { _ = redisClient.Close() }()
+
+		// Verify Redis connection (log warning on failure, don't fail startup)
+		if err := redisClient.Ping(context.Background()).Err(); err != nil {
+			logger.Warn("redis connection failed (will operate in degraded mode)", "error", err)
+		} else {
+			logger.Info("redis client initialized")
+			checkers = append(checkers, health.NewRedisChecker(redisClient))
+		}
+	}
+
+	// Create health checker with all components
+	healthChecker := gwhealth.NewGatewayHealthChecker(gwhealth.Config{
+		Checkers:     checkers,
+		CheckTimeout: 5 * time.Second,
+	})
+
+	// Create server with health checker
 	// Note: Tenant resolver will be initialized in a future task when database connection is available.
 	// For now, pass nil to allow the server to start without tenant resolution.
 	// Health endpoints will work regardless of tenant resolver configuration.
-	server := gateway.NewServer(config, logger, nil)
+	server := gateway.NewServer(config, logger, nil, gateway.WithHealthChecker(healthChecker))
 
 	// Start server in background
 	serverErrors := make(chan error, 1)
