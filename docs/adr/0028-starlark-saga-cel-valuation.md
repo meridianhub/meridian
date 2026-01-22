@@ -701,9 +701,18 @@ func (r *Runtime) ExecuteDryRun(ctx, sagaName, input) (*ExecutionPlan, error)
 
 ## Links
 
-* [Starlark Saga Orchestration PRD](../prd/starlark-saga-orchestration.md) - Detailed implementation plan
+### Implementation PRDs (Parallel Work Streams)
+
+* [PRD: Starlark Saga Orchestration (Core)](../prd/starlark-saga-orchestration-core.md) - Runtime, builtins, party isolation, composition (Streams 1-6, 6 developers)
+* [PRD: Durable Execution Engine](../prd/durable-execution-engine.md) - Persistence, replay, async wait, hot-fixing (Streams 7-8, 3 developers)
+
+### Related ADRs
+
 * [ADR-0014: Financial Instrument Reference Data](0014-financial-instrument-reference-data.md) - CEL foundation
 * [ADR-0013: Generic Asset Quantity Types](0013-generic-asset-quantity-types.md) - Type system
+
+### External References
+
 * [go.starlark.net](https://pkg.go.dev/go.starlark.net/starlark) - Starlark Go implementation
 * [google/cel-go](https://github.com/google/cel-go) - CEL Go implementation
 * [Starlark Language Spec](https://github.com/bazelbuild/starlark/blob/master/spec.md) - Language specification
