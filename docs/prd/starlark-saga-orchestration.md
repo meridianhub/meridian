@@ -112,6 +112,22 @@ The saga definitions become **Administrative Plan Records** - auditable configur
 - **Scope**: Identify all ACTIVE sagas that reference the item being deprecated
 - **Action**: Require explicit acknowledgment or block deprecation until dependents updated
 
+### FR-11: Party-Level Data Isolation
+
+- **Requirement**: Saga execution MUST be scoped to the party hierarchy from Party Service
+- **Individual party**: Access only own positions, accounts, and data
+- **Organization party**: Access own + descendant parties (enables aggregate views)
+- **Enforcement**: Runtime resolves party tree; injects immutable `ctx.party_scope`
+- **No bypass**: Saga authors cannot access parties outside their scope
+- **Audit**: All executions logged with `party_id` for compliance
+
+### FR-12: Saga Composition
+
+- **Requirement**: Sagas MAY invoke other sagas as steps via `invoke_saga()` builtin
+- **Compensation**: Child saga compensation cascades automatically on parent failure
+- **Scope inheritance**: Child saga inherits parent's party scope (cannot escalate)
+- **Circular detection**: Runtime MUST detect and reject circular saga references
+
 ---
 
 ## 4. CEL Valuation: Context and Boundaries
@@ -579,6 +595,254 @@ Recommendation: Option [3] - deprecate with successor
                 Tenants notified to update their definitions
 ```
 
+### 5.7 Party Hierarchy and Data Isolation
+
+Saga execution is scoped to the party hierarchy from the Party Service. This ensures tenants cannot accidentally or intentionally access data belonging to other parties.
+
+#### Party Scope Resolution
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        Party Hierarchy Example                               │
+│                                                                              │
+│                      ┌─────────────────────┐                                │
+│                      │  ACME Corp (ORG)    │                                │
+│                      │  party_id: P001     │                                │
+│                      └──────────┬──────────┘                                │
+│                                 │                                           │
+│              ┌──────────────────┼──────────────────┐                       │
+│              │                  │                  │                        │
+│     ┌────────▼────────┐ ┌──────▼───────┐ ┌───────▼───────┐                │
+│     │ ACME UK (ORG)   │ │ ACME DE (ORG)│ │ ACME FR (ORG) │                │
+│     │ party_id: P002  │ │ party_id:P003│ │ party_id: P004│                │
+│     └────────┬────────┘ └──────────────┘ └───────────────┘                │
+│              │                                                              │
+│     ┌────────┴────────┐                                                    │
+│     │                 │                                                    │
+│┌────▼─────┐  ┌───────▼────────┐                                           │
+││ John Doe │  │ Jane Smith     │                                           │
+││(INDIV)   │  │ (INDIV)        │                                           │
+││P005      │  │ P006           │                                           │
+│└──────────┘  └────────────────┘                                           │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Scope Rules by Party Type
+
+| Party Type | Visible Data |
+|------------|--------------|
+| **Individual** | Own positions, accounts, transactions only |
+| **Organization** | Own + all descendant parties (recursive) |
+| **System** | All parties within tenant (admin use only) |
+
+#### Runtime Context Injection
+
+The saga runtime resolves the party tree and injects an immutable `ctx.party_scope`:
+
+```python
+# Runtime injects this before saga execution
+ctx.party_scope = PartyScope(
+    party_id = "P002",          # Executing party
+    party_type = "ORGANIZATION",
+    visible_parties = ["P002", "P005", "P006"],  # Self + descendants
+    tenant_id = "ACME_TENANT",
+)
+
+# Saga cannot modify or bypass:
+ctx.party_scope.visible_parties.append("P003")  # Error: immutable
+del ctx.party_scope  # Error: cannot delete
+
+# All data access filters automatically:
+positions = position_keeping.list(party_scope=ctx.party_scope)
+# SQL: WHERE party_id IN ('P002', 'P005', 'P006')
+```
+
+#### Step Handler Enforcement
+
+Every step handler that accesses data MUST respect party scope:
+
+```go
+// Step handler implementation
+func positionKeepingList(ctx StarlarkContext, params map[string]any) (any, error) {
+    // Runtime ALWAYS passes party_scope - handlers cannot opt out
+    partyScope := ctx.PartyScope
+
+    // Query builder enforces scope
+    positions, err := r.db.WithContext(ctx).
+        Where("party_id IN ?", partyScope.VisibleParties).
+        Find(&positions).Error
+
+    return positions, err
+}
+```
+
+#### Cross-Party Aggregate Views
+
+Organization parties can run sagas that aggregate across their hierarchy:
+
+```python
+# aggregate_positions.star - Only valid for ORG party types
+def aggregate_by_instrument(ctx):
+    """Sum positions across all subsidiaries."""
+    if ctx.party_scope.party_type != "ORGANIZATION":
+        fail("aggregate sagas require ORGANIZATION party type")
+
+    totals = {}
+    for party_id in ctx.party_scope.visible_parties:
+        positions = position_keeping.list(party_id=party_id)
+        for pos in positions:
+            key = pos.instrument_code
+            totals[key] = totals.get(key, 0) + pos.quantity
+
+    return totals
+
+saga(
+    name = "aggregate_positions",
+    version = "1.0.0",
+    preconditions = [
+        "ctx.party_scope.party_type == 'ORGANIZATION'",
+    ],
+    steps = [
+        step(
+            name = "compute_aggregates",
+            action = "valuation_engine.valuate",
+            params = lambda ctx: {
+                "positions": aggregate_by_instrument(ctx),
+            },
+        ),
+    ],
+)
+```
+
+#### Cross-Party Posting Authorization
+
+**Key distinction**: Read isolation ≠ Write authorization.
+
+A saga executing under party A may create ledger entries affecting party B when authorized by relationship:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    Cross-Party Posting Examples                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ENERGY SETTLEMENT                                                          │
+│  ─────────────────                                                          │
+│  Market Operator (party A) settles trade:                                   │
+│    • Generator (party B) sells 100 MWh                                      │
+│    • Retailer (party C) buys 100 MWh                                        │
+│                                                                             │
+│  Saga executes as: Market Operator (A)                                      │
+│  Postings created:                                                          │
+│    DEBIT  Generator (B)  position: -100 MWh                                │
+│    CREDIT Retailer (C)   position: +100 MWh                                │
+│    DEBIT  Retailer (C)   cash: -$5,000                                     │
+│    CREDIT Generator (B)  cash: +$5,000                                     │
+│                                                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  WEALTH MANAGEMENT                                                          │
+│  ─────────────────                                                          │
+│  Custodian (party A) executes client transfer:                             │
+│    • Client 1 (party B) transfers $10,000                                  │
+│    • Client 2 (party C) receives $10,000                                   │
+│                                                                             │
+│  Saga executes as: Custodian (A)                                           │
+│  Postings created:                                                          │
+│    DEBIT  Client 1 (B)  cash: -$10,000                                     │
+│    CREDIT Client 2 (C)  cash: +$10,000                                     │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Read vs Write Authorization Model
+
+| Operation | Scope Rule |
+|-----------|------------|
+| **READ positions** | Party hierarchy only (self + descendants) |
+| **READ accounts** | Party hierarchy only |
+| **READ transactions** | Party hierarchy only |
+| **WRITE postings** | Authorized by party relationship (operator, custodian, etc.) |
+| **WRITE positions** | Authorized by party relationship |
+
+#### Party Relationships
+
+Posting authorization is determined by explicit relationships stored in Party Service:
+
+```sql
+CREATE TABLE party_relationships (
+    id UUID PRIMARY KEY,
+    source_party_id UUID NOT NULL,      -- The party that CAN post
+    target_party_id UUID NOT NULL,      -- The party being posted TO
+    relationship_type VARCHAR(32) NOT NULL,  -- OPERATOR, CUSTODIAN, BROKER, etc.
+    permissions JSONB NOT NULL,         -- {"can_post": true, "can_settle": true}
+    valid_from TIMESTAMPTZ NOT NULL,
+    valid_to TIMESTAMPTZ,
+
+    UNIQUE(source_party_id, target_party_id, relationship_type)
+);
+```
+
+#### Runtime Authorization Check
+
+```python
+# In saga definition
+def settlement_postings(ctx):
+    # ctx.party_scope = Market Operator (party A)
+    # ctx.trade.seller = Generator (party B)
+    # ctx.trade.buyer = Retailer (party C)
+
+    postings = [
+        posting(
+            account_id = ctx.trade.seller.position_account,
+            party_id = ctx.trade.seller.party_id,  # Party B
+            direction = "DEBIT",
+            amount = ctx.trade.quantity,
+        ),
+        posting(
+            account_id = ctx.trade.buyer.position_account,
+            party_id = ctx.trade.buyer.party_id,  # Party C
+            direction = "CREDIT",
+            amount = ctx.trade.quantity,
+        ),
+    ]
+    return postings
+
+# Runtime validates BEFORE executing postings:
+for posting in postings:
+    if posting.party_id != ctx.party_scope.party_id:
+        # Cross-party posting - check authorization
+        authorized = party_service.check_relationship(
+            source_party = ctx.party_scope.party_id,
+            target_party = posting.party_id,
+            permission = "can_post",
+        )
+        if not authorized:
+            fail(f"Party {ctx.party_scope.party_id} not authorized to post to {posting.party_id}")
+```
+
+#### Audit Trail
+
+All saga executions are logged with party context:
+
+```sql
+CREATE TABLE saga_execution_log (
+    id UUID PRIMARY KEY,
+    saga_definition_id UUID NOT NULL,
+    tenant_id UUID NOT NULL,
+    party_id UUID NOT NULL,           -- Executing party
+    party_type VARCHAR(16) NOT NULL,  -- INDIVIDUAL, ORGANIZATION, SYSTEM
+    visible_parties UUID[] NOT NULL,  -- Parties data was accessed for
+    started_at TIMESTAMPTZ NOT NULL,
+    completed_at TIMESTAMPTZ,
+    status VARCHAR(16) NOT NULL,      -- RUNNING, COMPLETED, COMPENSATED, FAILED
+    -- ... other fields
+);
+
+-- Query: What sagas touched party P005's data?
+CREATE INDEX idx_saga_execution_visible_parties
+    ON saga_execution_log USING GIN(visible_parties);
+```
+
 ### 5.8 Starlark Builtins
 
 Functions available within Starlark scripts:
@@ -704,6 +968,196 @@ saga(
 )
 ```
 
+### 5.10 Saga Composition
+
+Sagas can invoke other sagas as steps, enabling reusable workflow components.
+
+#### The `invoke_saga()` Builtin
+
+```python
+# parent_saga.star
+saga(
+    name = "complex_settlement",
+    version = "1.0.0",
+    steps = [
+        step(
+            name = "validate_positions",
+            action = "position_keeping.validate",
+            params = lambda ctx: {"positions": ctx.positions},
+        ),
+        step(
+            name = "process_fees",
+            action = "invoke_saga",  # Special action type
+            params = lambda ctx: {
+                "saga_name": "fee_calculation",  # Child saga
+                "saga_version": None,  # Latest ACTIVE
+                "context": {
+                    "amount": ctx.amount,
+                    "fee_type": "SETTLEMENT",
+                },
+            },
+            compensation = lambda ctx, result: {
+                "saga_name": "fee_calculation",
+                "action": "compensate",
+                "execution_id": result.execution_id,
+            },
+        ),
+        step(
+            name = "post_ledger",
+            action = "financial_accounting.post_entries",
+            params = lambda ctx: {"postings": ctx.postings},
+        ),
+    ],
+)
+```
+
+#### Compensation Cascade
+
+When a parent saga fails, child saga compensation is triggered automatically in LIFO order:
+
+```
+Parent Saga Execution:
+──────────────────────
+Step 1: validate_positions ✓
+Step 2: process_fees (invoke_saga → fee_calculation)
+    └─ Child Saga: fee_calculation
+       Step 2.1: calculate_fee ✓
+       Step 2.2: record_fee ✓
+Step 3: post_ledger ✗ FAILED
+
+Compensation Cascade:
+────────────────────
+Step 3: post_ledger - no compensation (never completed)
+Step 2: process_fees - compensate child saga
+    └─ Child Saga: fee_calculation (compensating)
+       Step 2.2: record_fee → REVERSE ✓
+       Step 2.1: calculate_fee → REVERSE ✓
+Step 1: validate_positions - compensate ✓
+```
+
+#### Scope Inheritance
+
+Child sagas inherit (cannot escalate) the parent's party scope:
+
+```python
+# Parent executing as party P002 (ACME UK)
+# ctx.party_scope.visible_parties = ["P002", "P005", "P006"]
+
+# Child saga receives SAME scope - cannot access P003 (ACME DE)
+invoke_saga("fee_calculation", context={...})
+# Child ctx.party_scope.visible_parties = ["P002", "P005", "P006"] (inherited)
+```
+
+#### Circular Reference Detection
+
+The runtime detects and rejects circular saga invocations at multiple phases:
+
+| Phase | Detection Method |
+|-------|-----------------|
+| **DRAFT** | Static analysis of `invoke_saga()` calls in Starlark AST |
+| **ACTIVATION** | Check all referenced sagas; fail if cycle detected |
+| **RUNTIME** | Maintain call stack; fail if saga already in stack |
+
+```
+Error: Circular saga reference detected
+────────────────────────────────────────
+saga_a.star → invoke_saga("saga_b")
+saga_b.star → invoke_saga("saga_c")
+saga_c.star → invoke_saga("saga_a") ← CYCLE
+
+Cannot activate saga_c: would create circular dependency.
+```
+
+#### Composition Depth Limit
+
+| Constraint | Value | Rationale |
+|------------|-------|-----------|
+| Max nesting depth | 5 | Prevent deep call stacks |
+| Max total steps | 50 | Limit execution complexity |
+| Child saga timeout | Inherited from parent | Prevent runaway children |
+
+### 5.11 Meridian Starlark Extensions
+
+Meridian extends vanilla Starlark with domain-specific builtins. These are the **only** functions available beyond standard Starlark syntax.
+
+#### Core Builtins Reference
+
+| Builtin | Signature | Description |
+|---------|-----------|-------------|
+| `saga()` | `saga(name, version, steps, preconditions=None)` | Define a saga workflow |
+| `step()` | `step(name, action, params, compensation=None)` | Define a saga step |
+| `posting()` | `posting(account_id, direction, amount, description=None)` | Create ledger posting instruction |
+| `cel_eval()` | `cel_eval(expression, context) → value` | Evaluate CEL expression |
+| `resolve_account()` | `resolve_account(purpose, currency) → account_id` | Lookup internal bank account by purpose |
+| `resolve_instrument()` | `resolve_instrument(code, version=None) → instrument` | Lookup instrument definition |
+| `invoke_saga()` | `invoke_saga(name, version=None, context={}) → result` | Invoke child saga |
+| `valuate()` | `valuate(instrument, quantity, context_type) → valuation` | Call Valuation Engine |
+| `fail()` | `fail(message)` | Abort saga with error message |
+| `log()` | `log(level, message, **fields)` | Emit structured log entry |
+
+#### Data Access Builtins
+
+| Builtin | Signature | Description |
+|---------|-----------|-------------|
+| `position_keeping.list()` | `list(party_id=None, instrument=None) → [Position]` | List positions (party-scoped) |
+| `position_keeping.get()` | `get(position_id) → Position` | Get single position (party-scoped) |
+| `market_data.lookup()` | `lookup(dataset, resolution_key, knowledge_at=None) → Observation` | Get market price |
+| `party.get()` | `get(party_id) → Party` | Get party details (scope-checked) |
+
+#### Built-in Types
+
+```python
+# Posting - instruction to create ledger entry
+Posting = {
+    "account_id": UUID,
+    "direction": "DEBIT" | "CREDIT",
+    "amount": Decimal,
+    "description": str,
+    "metadata": dict,
+}
+
+# ValuationResult - output from valuate()
+ValuationResult = {
+    "value": Decimal,
+    "currency": str,
+    "as_of": Timestamp,
+    "rule_id": UUID,
+    "lineage": [ObservationReference],
+}
+
+# Position - from position_keeping
+Position = {
+    "id": UUID,
+    "party_id": UUID,
+    "instrument_code": str,
+    "quantity": Decimal,
+    "attributes": dict,
+    "fungibility_key": str,
+}
+
+# SagaResult - output from invoke_saga()
+SagaResult = {
+    "execution_id": UUID,
+    "status": "COMPLETED" | "FAILED",
+    "output": any,
+    "steps_completed": int,
+}
+```
+
+#### What Is NOT Available
+
+Meridian Starlark explicitly excludes:
+
+| Excluded | Reason |
+|----------|--------|
+| `import` | No external modules |
+| `open()`, `read()` | No file I/O |
+| `http`, `requests` | No network access |
+| `os`, `sys` | No system access |
+| `exec()`, `eval()` | No dynamic code |
+| `while True` | No unbounded loops |
+| Global mutation | Deterministic execution |
+
 ---
 
 ## 6. Security Constraints
@@ -795,6 +1249,15 @@ saga(
 | **SAGA-019** | Implement ACTIVATION phase validation (hard fail) | P0 | SAGA-017 |
 | **SAGA-020** | Implement deprecation impact analysis | P1 | SAGA-016 |
 | **SAGA-021** | Add validation feedback API endpoint | P1 | SAGA-018, SAGA-019 |
+| **SAGA-022** | Implement party scope resolution from Party Service | P0 | SAGA-003 |
+| **SAGA-023** | Add `ctx.party_scope` injection with immutability enforcement | P0 | SAGA-022 |
+| **SAGA-024** | Implement party relationship authorization for cross-party postings | P0 | SAGA-022 |
+| **SAGA-025** | Add `party_id` and `visible_parties` to saga execution audit log | P1 | SAGA-012 |
+| **SAGA-026** | Implement `invoke_saga()` builtin with scope inheritance | P1 | SAGA-004, SAGA-023 |
+| **SAGA-027** | Add circular saga reference detection (DRAFT + ACTIVATION) | P1 | SAGA-017, SAGA-026 |
+| **SAGA-028** | Add runtime circular detection via call stack | P1 | SAGA-026 |
+| **SAGA-029** | Implement compensation cascade for child sagas | P1 | SAGA-026 |
+| **SAGA-030** | Add composition depth and total steps limits | P1 | SAGA-026 |
 
 ---
 
@@ -817,6 +1280,13 @@ saga(
 - Simulation mode, admin API, documentation
 - Tenant self-service for custom sagas
 
+### Phase 5: Party Isolation & Composition (SAGA-022 through SAGA-030)
+- Party scope resolution and injection
+- Cross-party posting authorization via party relationships
+- `invoke_saga()` builtin for saga composition
+- Circular reference detection and compensation cascade
+- Enables multi-party settlement (energy, wealth management)
+
 ---
 
 ## 10. Success Criteria
@@ -828,6 +1298,41 @@ saga(
 | **Cache hit rate** | > 95% | Redis metrics |
 | **Tenant adoption** | 3+ custom sagas within 90 days | Usage tracking |
 | **Deployment reduction** | 0 deployments for tenant workflow changes | Release tracking |
+
+### Acceptance Criteria: Party-Level Data Isolation
+
+| ID | Criterion | Test Method |
+|----|-----------|-------------|
+| **AC-PI-01** | Individual party saga CANNOT read positions of sibling parties | Unit test: assert `position_keeping.list()` returns empty for sibling party_id |
+| **AC-PI-02** | Organization party saga CAN read positions of descendant parties | Unit test: assert `position_keeping.list()` returns descendant positions |
+| **AC-PI-03** | Saga `ctx.party_scope` is immutable | Unit test: assert mutation throws error |
+| **AC-PI-04** | Cross-party posting requires explicit relationship authorization | Integration test: assert posting to unrelated party fails |
+| **AC-PI-05** | Authorized cross-party posting succeeds (OPERATOR, CUSTODIAN) | Integration test: market operator can post to counterparties |
+| **AC-PI-06** | Saga execution log includes `party_id` and `visible_parties` | Unit test: verify audit record fields |
+| **AC-PI-07** | Child saga inherits parent party scope (cannot escalate) | Unit test: `invoke_saga()` passes same `party_scope` |
+| **AC-PI-08** | Query by `visible_parties` returns correct executions | Query test: GIN index query returns expected results |
+
+### Acceptance Criteria: Saga Composition
+
+| ID | Criterion | Test Method |
+|----|-----------|-------------|
+| **AC-SC-01** | `invoke_saga()` executes child saga synchronously | Unit test: verify child completes before parent continues |
+| **AC-SC-02** | Parent failure triggers child compensation (LIFO) | Integration test: fail step 3, verify step 2 child compensates |
+| **AC-SC-03** | Circular saga references detected at ACTIVATION | Unit test: A→B→C→A fails activation |
+| **AC-SC-04** | Circular saga references detected at RUNTIME (defense in depth) | Unit test: call stack check prevents re-entry |
+| **AC-SC-05** | Nesting depth > 5 rejected | Unit test: 6-level nesting fails |
+| **AC-SC-06** | Total steps > 50 rejected | Unit test: saga with 51 total steps fails |
+| **AC-SC-07** | Child saga result accessible in parent context | Unit test: `result.execution_id` available for compensation |
+
+### Acceptance Criteria: Reference Validation
+
+| ID | Criterion | Test Method |
+|----|-----------|-------------|
+| **AC-RV-01** | DRAFT saves with warnings for missing references | Unit test: save succeeds, warnings returned |
+| **AC-RV-02** | ACTIVATION fails with missing step handler | Unit test: activation rejected, error message includes handler name |
+| **AC-RV-03** | ACTIVATION fails with DEPRECATED instrument reference | Unit test: activation rejected, successor suggested |
+| **AC-RV-04** | Deprecation impact analysis lists dependent sagas | Unit test: deprecate instrument shows 3 dependent sagas |
+| **AC-RV-05** | RUNTIME fails fast with actionable error for invalid reference | Integration test: error includes line number and suggestion |
 
 ---
 
@@ -894,3 +1399,4 @@ For tenant communication:
 - [go.starlark.net](https://pkg.go.dev/go.starlark.net/starlark) - Starlark Go implementation
 - [Starlark Language Spec](https://github.com/bazelbuild/starlark/blob/master/spec.md)
 - [google/cel-go](https://github.com/google/cel-go) - CEL Go implementation
+- [Party Service](../adr/0003-party-management.md) - Party hierarchy and relationships (cross-party authorization)
