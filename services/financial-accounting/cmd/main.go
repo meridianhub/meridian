@@ -21,6 +21,8 @@ import (
 	"github.com/meridianhub/meridian/services/financial-accounting/service"
 	"github.com/meridianhub/meridian/services/financial-accounting/worker"
 	ibaclient "github.com/meridianhub/meridian/services/internal-bank-account/client"
+	"github.com/meridianhub/meridian/services/reference-data/cache"
+	refclient "github.com/meridianhub/meridian/services/reference-data/client"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
@@ -268,13 +270,47 @@ func run(logger *slog.Logger) error {
 	eventPublisher := &noopEventPublisher{}
 	logger.Info("event publisher initialized (noop mode)")
 
+	// Initialize reference-data client for fungibility validation (optional)
+	var registryOption service.Option
+	referenceDataURL := env.GetEnvOrDefault("REFERENCE_DATA_SERVICE_URL", "")
+	if referenceDataURL != "" {
+		refClient, refCleanup, refErr := refclient.New(ctx, refclient.Config{
+			Target: referenceDataURL,
+		})
+		if refErr != nil {
+			// Non-fatal: fungibility validation will be skipped
+			logger.Warn("failed to create reference-data client, fungibility validation disabled",
+				"error", refErr,
+				"service_url", referenceDataURL)
+		} else {
+			defer func() {
+				if err := refCleanup(); err != nil {
+					logger.Error("failed to close reference-data client", "error", err)
+				}
+			}()
+
+			// Create adapter to translate between reference-data client and service interface
+			registryAdapter := service.NewReferenceDataRegistryAdapter(&referenceDataClientAdapter{client: refClient})
+			registryOption = service.WithRegistry(registryAdapter)
+			logger.Info("fungibility validation enabled",
+				"reference_data_service", referenceDataURL)
+		}
+	} else {
+		logger.Info("fungibility validation disabled (REFERENCE_DATA_SERVICE_URL not set)")
+	}
+
 	// Create Financial Accounting service
+	var svcOpts []service.Option
+	if registryOption != nil {
+		svcOpts = append(svcOpts, registryOption)
+	}
 	financialAccountingSvc, err := service.NewFinancialAccountingService(
 		ledgerRepo,
 		eventPublisher,
 		idempotencySvc,
 		outboxPublisher,
 		outboxRepo,
+		svcOpts...,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create financial accounting service: %w", err)
@@ -634,4 +670,30 @@ func parseLogLevel(levelStr string) slog.Level {
 	default:
 		return slog.LevelInfo
 	}
+}
+
+// referenceDataClientAdapter adapts refclient.Client to the service.ReferenceDataClient interface.
+// This is necessary because the service layer defines its own interface to avoid direct
+// dependency on the reference-data cache types.
+type referenceDataClientAdapter struct {
+	client *refclient.Client
+}
+
+// GetInstrument retrieves an instrument from the reference-data service's tiered cache.
+func (a *referenceDataClientAdapter) GetInstrument(ctx context.Context, code string, version int) (service.CachedInstrumentResult, error) {
+	cached, err := a.client.GetInstrument(ctx, code, version)
+	if err != nil {
+		return nil, err
+	}
+	return &cachedInstrumentResultAdapter{cached: cached}, nil
+}
+
+// cachedInstrumentResultAdapter adapts cache.CachedInstrument to service.CachedInstrumentResult.
+type cachedInstrumentResultAdapter struct {
+	cached *cache.CachedInstrument
+}
+
+// GetBucketKeyProgram returns the CEL program for fungibility key evaluation.
+func (a *cachedInstrumentResultAdapter) GetBucketKeyProgram() interface{} {
+	return a.cached.BucketKeyProgram
 }

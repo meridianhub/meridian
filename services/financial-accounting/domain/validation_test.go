@@ -475,3 +475,142 @@ func containsSubstring(s, substr string) bool {
 	}
 	return false
 }
+
+// =============================================================================
+// Fungibility Validation Tests
+// =============================================================================
+
+// mockFungibilityKeyProgram implements FungibilityKeyProgram for testing.
+// It uses a function to generate deterministic keys based on attributes.
+type mockFungibilityKeyProgram struct {
+	keyFunc func(attributes map[string]string) string
+}
+
+// Ensure mockFungibilityKeyProgram implements FungibilityKeyProgram
+var _ FungibilityKeyProgram = (*mockFungibilityKeyProgram)(nil)
+
+func (m *mockFungibilityKeyProgram) Eval(activation interface{}) (interface{}, error) {
+	// Extract attributes from activation map
+	if act, ok := activation.(map[string]interface{}); ok {
+		if attrs, ok := act["attributes"].(map[string]string); ok {
+			return m.keyFunc(attrs), nil
+		}
+	}
+	// Return empty string for missing/invalid attributes
+	return m.keyFunc(map[string]string{}), nil
+}
+
+func TestValidateFungibility_NoExpression_FullyFungible(t *testing.T) {
+	// When instrument has no fungibility_key_expression, all quantities are fungible
+	debitAttrs := map[string]string{"batch_id": "2024-A", "grade": "1"}
+	creditAttrs := map[string]string{"batch_id": "2024-B", "grade": "2"}
+
+	err := ValidateFungibility(nil, debitAttrs, creditAttrs)
+	if err != nil {
+		t.Errorf("Expected no error for fully fungible instrument (nil program), got: %v", err)
+	}
+}
+
+func TestValidateFungibility_MatchingKeys_Valid(t *testing.T) {
+	// When both debit and credit evaluate to the same fungibility key, validation passes
+	program := &mockFungibilityKeyProgram{
+		keyFunc: func(attrs map[string]string) string {
+			// Key based only on grade - batch_id doesn't affect fungibility
+			return "grade:" + attrs["grade"]
+		},
+	}
+
+	debitAttrs := map[string]string{"batch_id": "2024-A", "grade": "1"}
+	creditAttrs := map[string]string{"batch_id": "2024-B", "grade": "1"} // Same grade
+
+	err := ValidateFungibility(program, debitAttrs, creditAttrs)
+	if err != nil {
+		t.Errorf("Expected no error for matching fungibility keys, got: %v", err)
+	}
+}
+
+func TestValidateFungibility_MismatchedKeys_ReturnsError(t *testing.T) {
+	// When debit and credit evaluate to different fungibility keys, validation fails
+	program := &mockFungibilityKeyProgram{
+		keyFunc: func(attrs map[string]string) string {
+			// Key based on grade
+			return "grade:" + attrs["grade"]
+		},
+	}
+
+	debitAttrs := map[string]string{"batch_id": "2024-A", "grade": "1"}
+	creditAttrs := map[string]string{"batch_id": "2024-B", "grade": "2"} // Different grade
+
+	err := ValidateFungibility(program, debitAttrs, creditAttrs)
+	if err == nil {
+		t.Error("Expected error for mismatched fungibility keys, got nil")
+	}
+
+	if !errors.Is(err, ErrFungibilityMismatch) {
+		t.Errorf("Expected ErrFungibilityMismatch, got: %v", err)
+	}
+
+	// Verify error message contains useful debugging information
+	errMsg := err.Error()
+	if !containsString(errMsg, "grade:1") || !containsString(errMsg, "grade:2") {
+		t.Errorf("Expected error to contain fungibility keys, got: %v", err)
+	}
+}
+
+func TestValidateFungibility_EmptyAttributes_BothSides(t *testing.T) {
+	// Empty attributes on both sides should still be comparable
+	program := &mockFungibilityKeyProgram{
+		keyFunc: func(attrs map[string]string) string {
+			if len(attrs) == 0 {
+				return "default"
+			}
+			return "has-attrs"
+		},
+	}
+
+	err := ValidateFungibility(program, map[string]string{}, map[string]string{})
+	if err != nil {
+		t.Errorf("Expected no error for matching empty attributes, got: %v", err)
+	}
+}
+
+func TestValidateFungibility_NilAttributes_TreatedAsEmpty(t *testing.T) {
+	// Nil attributes should be treated same as empty map
+	program := &mockFungibilityKeyProgram{
+		keyFunc: func(attrs map[string]string) string {
+			if len(attrs) == 0 {
+				return "default"
+			}
+			return "has-attrs"
+		},
+	}
+
+	err := ValidateFungibility(program, nil, nil)
+	if err != nil {
+		t.Errorf("Expected no error for nil attributes, got: %v", err)
+	}
+}
+
+func TestValidateFungibility_RealWorldRiceExample(t *testing.T) {
+	// The bug scenario from the task: RICE-KG with different batch_id and grade
+	// should NOT be fungible if the fungibility expression checks both
+	program := &mockFungibilityKeyProgram{
+		keyFunc: func(attrs map[string]string) string {
+			// Expression: bucket_key([attributes["batch_id"], attributes["grade"]])
+			return attrs["batch_id"] + ":" + attrs["grade"]
+		},
+	}
+
+	// This is the invalid transaction that should be rejected
+	debitAttrs := map[string]string{"batch_id": "2024-A", "grade": "1"}
+	creditAttrs := map[string]string{"batch_id": "2024-B", "grade": "2"}
+
+	err := ValidateFungibility(program, debitAttrs, creditAttrs)
+	if err == nil {
+		t.Error("Expected error: RICE-KG with different batch/grade should not be fungible")
+	}
+
+	if !errors.Is(err, ErrFungibilityMismatch) {
+		t.Errorf("Expected ErrFungibilityMismatch, got: %v", err)
+	}
+}
