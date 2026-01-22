@@ -169,6 +169,8 @@ jobs:
             The `event` field can be: `APPROVE`, `REQUEST_CHANGES`, or `COMMENT`.
             This batches all inline comments in one API call and sets the review status.
 
+            **Important**: Only mention inline comments in your summary if you actually include them in the `comments` array. Don't say "see inline comment below" without posting one.
+
             **For actionable suggestions** (copy-pasteable by humans into their local Claude):
             Use collapsible details blocks in the inline comment body:
             ```
