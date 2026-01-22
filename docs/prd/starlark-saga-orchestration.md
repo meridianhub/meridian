@@ -455,6 +455,7 @@ Starlark scripts can ONLY invoke handlers in this registry. Attempting to call a
 | Accounts | `resolve_account("clearing", "GBP")` | Internal Bank Account service |
 | Other sagas | `invoke_saga("sub_workflow")` | `saga_definitions` |
 | Valuation rules | `valuate("KWH", "GBP", "RETAIL")` | Valuation rules (future) |
+| **Attribute keys** | `ctx.position.attributes["gsp_code"]` | Instrument attribute schema |
 
 #### Reference Tracking Schema
 
@@ -603,6 +604,94 @@ Recommendation: Option [3] - deprecate with successor
                 Sagas will log warnings; runtime continues
                 Tenants notified to update their definitions
 ```
+
+#### Attribute Schema Validation
+
+Sagas that access `ctx.position.attributes["key"]` must be validated against the instrument definition's attribute schema. This is **bidirectional**:
+
+**1. Saga Activation → Instrument Schema**
+
+When activating a saga, extract attribute key accesses and validate against the instrument definition:
+
+```
+Saga: energy_settlement.star (DRAFT → ACTIVE)
+
+Attribute References Extracted:
+════════════════════════════════
+  • Line 23: ctx.position.attributes["gsp_code"]
+  • Line 24: ctx.position.attributes["dno_code"]
+  • Line 31: ctx.position.attributes["settlement_period"]
+
+Validating against instrument: KWH
+──────────────────────────────────
+  ✓ gsp_code ......................... defined (type: string)
+  ✓ dno_code ......................... defined (type: string)
+  ✗ settlement_period ................ NOT DEFINED
+    └─ Available attributes: gsp_code, dno_code, meter_type, profile_class
+    └─ Did you mean: 'settlement_date'?
+
+Status: BLOCKED - Cannot activate
+        Saga references attribute 'settlement_period' not defined in instrument KWH
+```
+
+**2. Instrument Update → Saga Dependencies**
+
+When modifying an instrument's attribute schema, check for dependent sagas:
+
+```
+Request: Remove attribute 'gsp_code' from instrument KWH
+
+Impact Analysis:
+════════════════
+
+Active sagas referencing KWH.attributes["gsp_code"]:
+────────────────────────────────────────────────────
+  • energy_settlement.star v2 (tenant: ACME_ENERGY)
+      └─ Line 23: ctx.position.attributes["gsp_code"]
+
+  • wholesale_reconciliation.star v1 (SYSTEM)
+      └─ Line 45: ctx.position.attributes["gsp_code"]
+
+Summary: 2 active sagas depend on this attribute
+
+Options:
+  [1] Block removal until sagas updated
+  [2] Force remove (sagas will fail at runtime)
+
+Recommendation: Option [1] - update sagas first
+```
+
+**3. Reference Tracking Schema Extension**
+
+```sql
+-- Extended to track attribute references
+CREATE TABLE saga_references (
+    saga_definition_id UUID NOT NULL REFERENCES saga_definitions(id) ON DELETE CASCADE,
+    reference_type VARCHAR(32) NOT NULL,
+    reference_key VARCHAR(128) NOT NULL,
+    -- NEW: For attribute references, track the instrument
+    instrument_code VARCHAR(32),          -- Which instrument's attributes
+    attribute_key VARCHAR(64),            -- Which attribute key
+    line_number INTEGER,
+    extracted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    PRIMARY KEY (saga_definition_id, reference_type, reference_key)
+);
+
+-- Query: What sagas use this instrument's attribute?
+CREATE INDEX idx_saga_references_attribute
+    ON saga_references(instrument_code, attribute_key)
+    WHERE reference_type = 'attribute';
+```
+
+**4. Validation at Each Phase**
+
+| Phase | Attribute Validation | Outcome |
+|-------|---------------------|---------|
+| **DRAFT** | Extract attribute accesses, warn if not in schema | Save succeeds with warnings |
+| **ACTIVATION** | Re-validate all attribute refs against current schema | Hard fail if missing |
+| **INSTRUMENT UPDATE** | Check if attribute removal breaks active sagas | Block or warn |
+| **RUNTIME** | Verify attribute exists before access | Fail fast with actionable error |
 
 ### 5.7 Party Hierarchy and Data Isolation
 
@@ -1551,6 +1640,10 @@ Position attributes are **tenant-defined** via the asset class model. Sagas use 
 | **SAGA-034** | Internal Bank Account: Add generic attribute-based lookup API (`by_attributes(map)`) | P1 | - |
 | **SAGA-035** | Party Service: Implement recursive party hierarchy query | P1 | - |
 | **SAGA-036** | Party Service: Add `party_relationships` table (optional) | P2 | - |
+| **SAGA-037** | Extract attribute key accesses from Starlark AST | P0 | SAGA-017 |
+| **SAGA-038** | Validate attribute refs against instrument schema at ACTIVATION | P0 | SAGA-037 |
+| **SAGA-039** | Add attribute dependency check to instrument schema update | P1 | SAGA-037 |
+| **SAGA-040** | Extend `saga_references` table for attribute tracking | P0 | SAGA-016, SAGA-037 |
 
 ---
 
@@ -1586,6 +1679,12 @@ Position attributes are **tenant-defined** via the asset class model. Sagas use 
 - Internal Bank Account generic attribute-based lookup (tenant-defined keys)
 - Party Service recursive hierarchy query
 - Optional: Party relationships table for explicit authorization tracking
+
+### Phase 7: Attribute Schema Validation (SAGA-037 through SAGA-040)
+- Extract attribute key accesses from Starlark AST
+- Validate saga attribute refs against instrument schema at ACTIVATION
+- Block instrument schema changes that would break active sagas
+- Bidirectional dependency tracking (saga ↔ instrument attributes)
 
 ---
 
@@ -1633,6 +1732,18 @@ Position attributes are **tenant-defined** via the asset class model. Sagas use 
 | **AC-RV-03** | ACTIVATION fails with DEPRECATED instrument reference | Unit test: activation rejected, successor suggested |
 | **AC-RV-04** | Deprecation impact analysis lists dependent sagas | Unit test: deprecate instrument shows 3 dependent sagas |
 | **AC-RV-05** | RUNTIME fails fast with actionable error for invalid reference | Integration test: error includes line number and suggestion |
+
+### Acceptance Criteria: Attribute Schema Validation
+
+| ID | Criterion | Test Method |
+|----|-----------|-------------|
+| **AC-AV-01** | DRAFT extracts attribute key accesses from Starlark | Unit test: parse `ctx.position.attributes["gsp_code"]`, extract "gsp_code" |
+| **AC-AV-02** | ACTIVATION fails if attribute not in instrument schema | Unit test: saga refs `["foo"]`, instrument has no `foo` → blocked |
+| **AC-AV-03** | ACTIVATION succeeds if all attributes exist in schema | Unit test: saga refs match instrument attributes → activated |
+| **AC-AV-04** | Instrument attribute removal blocked if saga depends on it | Integration test: remove attr → error listing dependent sagas |
+| **AC-AV-05** | Instrument attribute addition does not affect existing sagas | Unit test: add new attr → no saga validation errors |
+| **AC-AV-06** | `saga_references` tracks attribute refs with instrument code | Query test: find sagas using `KWH.attributes["gsp_code"]` |
+| **AC-AV-07** | Validation feedback suggests similar attribute names | Unit test: ref `settlement_period`, suggest `settlement_date` |
 
 ---
 
