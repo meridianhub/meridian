@@ -2053,9 +2053,9 @@ Position attributes are **tenant-defined** via the asset class model. Sagas use 
 | **AC-PI-01** | Individual party saga CANNOT read positions of sibling parties | Unit test: assert `position_keeping.list()` returns empty for sibling party_id |
 | **AC-PI-02** | Organization party saga CAN read positions of descendant parties | Unit test: assert `position_keeping.list()` returns descendant positions |
 | **AC-PI-03** | Saga `ctx.party_scope` is immutable | Unit test: assert mutation throws error |
-| **AC-PI-04** | Cross-party posting requires explicit relationship authorization | Integration test: assert posting to unrelated party fails |
-| **AC-PI-05** | Authorized cross-party posting succeeds (OPERATOR, CUSTODIAN) | Integration test: market operator can post to counterparties |
-| **AC-PI-06** | Saga execution log includes `party_id` and `visible_parties` | Unit test: verify audit record fields |
+| **AC-PI-04** | Cross-party posting governed by contextual lookup model (Section 5.7) | Integration test: posting to unrelated party fails |
+| **AC-PI-05** | Authorized cross-party posting succeeds via contextual visibility rules | Integration test: contextual lookup resolves counterparty accounts correctly |
+| **AC-PI-06** | Saga execution log includes `party_id` and `visible_parties` from contextual lookup | Unit test: verify audit fields reflect contextual visibility at execution time |
 | **AC-PI-07** | Child saga inherits parent party scope (cannot escalate) | Unit test: `invoke_saga()` passes same `party_scope` |
 | **AC-PI-08** | Query by `visible_parties` returns correct executions | Query test: GIN index query returns expected results |
 

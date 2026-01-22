@@ -19,7 +19,7 @@ Date: 2025-01-20
 
 ## Status
 
-Proposed
+Accepted (PRD approved for baseline)
 
 ## Context
 
@@ -127,11 +127,13 @@ balance of flexibility, safety, and performance for a multi-tenant financial pla
 
 ### Saga Definition Schema
 
+> **Note**: Tenant isolation is achieved via PostgreSQL schema-per-tenant (search_path).
+> No `tenant_id` column needed - each tenant's schema contains only their data.
+
 ```sql
--- Extends reference-data for saga definitions
+-- Lives in Reference Data service (each tenant's schema)
 CREATE TABLE saga_definitions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL,
 
     -- Identification
     name VARCHAR(64) NOT NULL,           -- "withdrawal", "deposit", "settlement"
@@ -139,23 +141,63 @@ CREATE TABLE saga_definitions (
 
     -- Starlark script (the orchestration logic)
     script TEXT NOT NULL,
+    script_hash VARCHAR(64) NOT NULL,    -- SHA-256 for cache invalidation
 
     -- Lifecycle
     status VARCHAR(16) NOT NULL DEFAULT 'DRAFT',  -- DRAFT, ACTIVE, DEPRECATED
+
+    -- Validation tracking
+    last_validated_at TIMESTAMPTZ,
+    validation_errors JSONB,
 
     -- Metadata
     description TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     activated_at TIMESTAMPTZ,
+    deprecated_at TIMESTAMPTZ,
 
-    UNIQUE(tenant_id, name, version),
+    -- Bi-temporal for replay
+    valid_from TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    valid_to TIMESTAMPTZ,
+
+    UNIQUE(name, version),
     CHECK (status IN ('DRAFT', 'ACTIVE', 'DEPRECATED')),
     CHECK (script <> '')
 );
 
 CREATE INDEX idx_saga_definitions_lookup
-    ON saga_definitions(tenant_id, name, status);
+    ON saga_definitions(name, status);
+
+CREATE INDEX idx_saga_definitions_bitemporal
+    ON saga_definitions(name, valid_from, valid_to);
 ```
+
+### Validation Phases
+
+Saga definitions pass through three validation phases with increasing strictness:
+
+| Phase | Trigger | Strictness | Failures |
+|-------|---------|------------|----------|
+| **DRAFT** | On save | Warnings only | Store with warnings |
+| **ACTIVATION** | Status → ACTIVE | Hard errors | Reject activation |
+| **DEPRECATION** | Status → DEPRECATED | Impact analysis | Warn of dependents |
+
+**DRAFT validation** (warnings):
+- Syntax check (Starlark parses)
+- Unknown step handler references
+- Unreachable code paths
+- Missing compensation handlers
+
+**ACTIVATION validation** (errors):
+- All step handlers must exist and be registered
+- Attribute references must match instrument schema
+- External handlers without idempotency support must have Pre-Step Check
+- Circular saga references prohibited
+- CEL expressions must compile
+
+**DEPRECATION validation**:
+- List all sagas that `invoke_saga()` this definition
+- Warn operator of downstream impact
 
 ### Starlark Saga Example: Tenant-Configurable Withdrawal
 
@@ -359,8 +401,11 @@ func (r *SagaRuntime) Execute(
         Name: fmt.Sprintf("saga-%s-%s", sagaName, uuid.New().String()),
     }
 
-    // 3. Register built-in functions (cel_eval, posting, resolve_account)
+    // 3. Register built-in functions
     builtins := r.createBuiltins(ctx, tenantID, input)
+    // Available: cel_eval, posting, resolve_account, valuate, valuate_batch,
+    //            ctx.new_uuid, invoke_saga, fail, log, position_keeping.*,
+    //            market_data.*, party.*
 
     // 4. Execute Starlark script
     globals, err := starlark.ExecFile(thread, sagaName+".star", def.Script, builtins)
@@ -488,6 +533,133 @@ const (
 )
 ```
 
+### Party Isolation
+
+Sagas execute within a party scope, ensuring data isolation across organizational boundaries:
+
+```python
+# Runtime injects immutable party scope
+ctx.party_scope = PartyScope(
+    party_id = "P001",                    # Executing party
+    party_type = "ORGANIZATION",          # INDIVIDUAL, ORGANIZATION
+    visible_parties = ["P001", "P002"],   # Party + authorized children
+)
+
+# All lookups are automatically scoped
+positions = position_keeping.list(party_scope=ctx.party_scope)  # Only visible positions
+```
+
+**Enforcement rules:**
+- Runtime resolves party tree from Party Service before execution
+- `ctx.party_scope` is immutable (attempts to modify raise error)
+- Cross-party lookups require explicit `authorized_lookups` declaration in saga definition
+- Audit log captures `party_id` and `visible_parties` for every execution
+
+### Durable Execution via Replay
+
+Sagas survive pod death through checkpoint-and-replay (mini-Temporal pattern):
+
+```sql
+-- Service-local tables (not in Reference Data)
+CREATE TABLE saga_instances (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    saga_definition_id UUID NOT NULL,
+    saga_name VARCHAR(64) NOT NULL,
+    saga_version INTEGER NOT NULL,
+    input_snapshot JSONB NOT NULL,
+    party_id UUID NOT NULL,
+    knowledge_at TIMESTAMPTZ,
+
+    -- Lease-based claiming (race condition prevention)
+    claimed_by_pod VARCHAR(128),
+    claimed_at TIMESTAMPTZ,
+    lease_expires_at TIMESTAMPTZ,
+
+    -- Progress
+    current_step_index INTEGER NOT NULL DEFAULT 0,
+    replay_count INTEGER NOT NULL DEFAULT 0,
+    status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+    -- PENDING, RUNNING, COMPLETED, COMPENSATING, COMPENSATED, FAILED, FAILED_MANUAL_INTERVENTION
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at TIMESTAMPTZ,
+    error_message TEXT
+);
+
+CREATE TABLE saga_step_results (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    saga_instance_id UUID NOT NULL REFERENCES saga_instances(id),
+    step_index INTEGER NOT NULL,
+    step_name VARCHAR(64) NOT NULL,
+    idempotency_key VARCHAR(128) NOT NULL,  -- "saga_{id}_step_{index}"
+    output_snapshot JSONB,
+    status VARCHAR(16) NOT NULL,
+    causation_id UUID NOT NULL,
+    UNIQUE(saga_instance_id, step_index),
+    UNIQUE(idempotency_key)
+);
+```
+
+**Recovery flow:**
+1. Pod B detects orphaned sagas: `WHERE lease_expires_at < NOW()`
+2. Claims with `FOR UPDATE SKIP LOCKED` (no race conditions)
+3. Replays Starlark from start; completed steps return cached results
+4. Continues from first incomplete step
+
+**Transaction affinity:** Step result INSERT and `current_step_index` UPDATE must be atomic.
+
+### Determinism Requirements
+
+Saga execution must be 100% deterministic for replay safety:
+
+| Constraint | Enforcement |
+|------------|-------------|
+| No `time.now()` | Runtime blocks; use `ctx.knowledge_at` |
+| No random numbers | Runtime blocks; use `ctx.new_uuid()` |
+| No external I/O | Only via registered step handlers |
+| Idempotent handlers | External integrations must declare capability |
+
+```python
+# WRONG: Non-deterministic
+timestamp = time.now()  # Error: time access not allowed
+
+# RIGHT: Deterministic
+timestamp = ctx.knowledge_at  # Injected, stable across replays
+ref_id = ctx.new_uuid()       # sha256(saga_id + step_index + call_index)
+```
+
+### External Integration Guardrails
+
+**Side-Effect Idempotency**: External integrations (payment gateways, etc.) must declare idempotency support:
+
+```go
+type StepHandler struct {
+    Name        string
+    Idempotency IdempotencyCapability  // INTERNAL, EXTERNAL_SUPPORTED, EXTERNAL_NOT_SUPPORTED
+    Execute     func(ctx, params) (result, error)
+}
+```
+
+- `EXTERNAL_NOT_SUPPORTED` handlers require "Pre-Step Check" pattern (query before mutation)
+- ACTIVATION fails if non-idempotent handler used without Pre-Step Check
+
+**Zombie Saga Detection**: Sagas stuck in retry loops are detected and escalated:
+
+- `replay_count` incremented on each replay attempt
+- If `replay_count > MAX_REPLAYS` (default: 5) → status = `FAILED_MANUAL_INTERVENTION`
+- High-severity (P1) alert triggered for operator intervention
+
+**Dry-Run Testing**: Validate Starlark logic before deployment:
+
+```go
+// ExecuteDryRun runs saga with mocked handlers, returns execution plan
+func (r *Runtime) ExecuteDryRun(ctx, sagaName, input) (*ExecutionPlan, error)
+```
+
+- No database writes
+- Returns intended step sequence with parameters
+- Validates attribute references against instrument schema
+
 ### Positive Consequences
 
 * **Tenant flexibility**: Different posting patterns without code deployment
@@ -495,10 +667,13 @@ const (
 * **Separation of concerns**: Business logic in Starlark, financial math in CEL
 * **Hot-reloadable**: Saga changes without service restart
 * **Auditability**: Versioned definitions with full history in reference data
-* **Testability**: Unit test posting rules independently of orchestration
+* **Testability**: Unit test posting rules independently; dry-run API for validation
 * **Performance**: CEL (~100ns) for high-frequency calculations
 * **Safety**: Both languages sandboxed, deterministic, guaranteed termination
 * **Bi-temporal replay**: Deterministic execution enables valuation replay
+* **Durable execution**: Sagas survive pod death via checkpoint-and-replay
+* **Party isolation**: Cross-party data access enforced at runtime
+* **Financial grade**: External idempotency enforcement, zombie detection, transaction affinity
 
 ### Negative Consequences
 
@@ -510,6 +685,7 @@ const (
 
 ## Links
 
+* [Starlark Saga Orchestration PRD](../prd/starlark-saga-orchestration.md) - Detailed implementation plan
 * [ADR-0014: Financial Instrument Reference Data](0014-financial-instrument-reference-data.md) - CEL foundation
 * [ADR-0013: Generic Asset Quantity Types](0013-generic-asset-quantity-types.md) - Type system
 * [go.starlark.net](https://pkg.go.dev/go.starlark.net/starlark) - Starlark Go implementation
@@ -521,11 +697,17 @@ const (
 
 ### Migration Path
 
-1. **Phase 1**: Add Starlark runtime to shared library, create saga definition schema
-2. **Phase 2**: Port withdrawal saga as proof-of-concept, maintain Go fallback
-3. **Phase 3**: Port deposit saga, add CEL valuation expressions
-4. **Phase 4**: Port payment-order saga with 4-posting clearing model
-5. **Phase 5**: Deprecate Go orchestrators, full Starlark operation
+1. **Phase 1: Foundation** — Schema, registry, runtime, caching (no production impact)
+2. **Phase 2: Prove the Pattern** — Migrate withdrawal saga, shadow mode alongside Go
+3. **Phase 3: Expand** — Migrate remaining sagas, deprecate Go orchestrators
+4. **Phase 4: Enable Tenants** — Simulation mode, admin API, tenant self-service
+5. **Phase 5: Party Isolation** — Party scope resolution, contextual cross-party posting
+6. **Phase 6: Bi-Temporal** — Historical saga replay, `verify_execution()` for audit
+7. **Phase 7: Attribute Validation** — AST extraction, instrument schema validation at ACTIVATION
+8. **Phase 8: Durable Execution** — `saga_instances`, lease-based claiming, pod death recovery
+9. **Phase 9: Hardening** — `valuate_batch()`, Logic/Physics Linter, external integration guardrails
+
+See [Starlark Saga Orchestration PRD](../prd/starlark-saga-orchestration.md) for detailed implementation tasks.
 
 ### Ken's "Policy and Procedure" Framing
 
