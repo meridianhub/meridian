@@ -30,7 +30,7 @@ echo -e "${YELLOW}[1/4] Running coupling analysis...${NC}"
 
 # Step 2: Extract services list
 SERVICES=$(jq -r '.services_analyzed[]' "${TEMP_ANALYSIS}")
-echo -e "${YELLOW}[2/4] Services analyzed: $(echo $SERVICES | tr '\n' ' ')${NC}"
+echo -e "${YELLOW}[2/4] Services analyzed: $(echo "$SERVICES" | tr '\n' ' ')${NC}"
 
 # Step 3: Calculate metrics using jq
 echo -e "${YELLOW}[3/4] Calculating coupling metrics...${NC}"

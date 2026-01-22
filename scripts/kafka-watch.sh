@@ -15,7 +15,7 @@ echo ""
 # Watch both topics in parallel
 {
   echo "=== current-account.deposits ==="
-  kubectl exec -it $KAFKA_POD -- kafka-console-consumer.sh \
+  kubectl exec -it "$KAFKA_POD" -- kafka-console-consumer.sh \
     --bootstrap-server localhost:9092 \
     --topic current-account.deposits \
     --from-beginning
@@ -23,7 +23,7 @@ echo ""
 
 {
   echo "=== financial-accounting.postings ==="
-  kubectl exec -it $KAFKA_POD -- kafka-console-consumer.sh \
+  kubectl exec -it "$KAFKA_POD" -- kafka-console-consumer.sh \
     --bootstrap-server localhost:9092 \
     --topic financial-accounting.postings \
     --from-beginning

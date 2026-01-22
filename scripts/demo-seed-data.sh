@@ -116,6 +116,7 @@ create_account_with_deposit() {
 
     # Try to create account (will fail if exists - that's OK, idempotent)
     local create_result
+    # shellcheck disable=SC2086 # metadata_args must word-split for grpcurl -H flag
     create_result=$(grpcurl -plaintext ${metadata_args} \
         -d "{
             \"party_id\": \"${party_id}\",
@@ -155,6 +156,7 @@ create_account_with_deposit() {
         fi
 
         local deposit_result
+        # shellcheck disable=SC2086 # metadata_args must word-split for grpcurl -H flag
         deposit_result=$(grpcurl -plaintext ${metadata_args} \
             -d "{
                 \"account_id\": \"${target_account_id}\",
@@ -193,8 +195,8 @@ seed_post_office() {
 
     for i in {1..5}; do
         local acc_id="po-customer-${i}"
-        local party_id="PO-CUST-$(printf '%05d' $i)"
-        local iban="GB82WEST1234500000$(printf '%03d' $i)"
+        local party_id="PO-CUST-$(printf '%05d' "$i")"
+        local iban="GB82WEST1234500000$(printf '%03d' "$i")"
 
         create_account_with_deposit \
             "${org_id}" \
@@ -221,8 +223,8 @@ seed_motive() {
 
     for i in {1..3}; do
         local acc_id="motive-provider-${i}"
-        local party_id="MOT-PROV-$(printf '%05d' $i)"
-        local iban="GB82MOTI1234500000$(printf '%03d' $i)"
+        local party_id="MOT-PROV-$(printf '%05d' "$i")"
+        local iban="GB82MOTI1234500000$(printf '%03d' "$i")"
 
         # Note: GPU-HOUR is a non-standard currency, we use USD as proxy.
         # In production, use actual asset codes from the Dynamic Asset Registry.
@@ -251,8 +253,8 @@ seed_un_wfp() {
 
     for i in {1..10}; do
         local acc_id="wfp-beneficiary-${i}"
-        local party_id="WFP-BEN-$(printf '%05d' $i)"
-        local iban="GB82UNWF1234500000$(printf '%03d' $i)"
+        local party_id="WFP-BEN-$(printf '%05d' "$i")"
+        local iban="GB82UNWF1234500000$(printf '%03d' "$i")"
 
         # Note: RICE-VOUCHER is a non-standard currency, we use USD as proxy.
         # In production, use actual asset codes from the Dynamic Asset Registry.
