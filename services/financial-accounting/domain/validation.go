@@ -45,6 +45,19 @@ var (
 
 	// ErrInvalidCreditDirection is returned when the second posting is not a CREDIT.
 	ErrInvalidCreditDirection = errors.New("second posting must be CREDIT")
+
+	// ErrFungibilityMismatch is returned when debit and credit postings have attributes
+	// that evaluate to different fungibility keys. This prevents invalid transactions
+	// like exchanging RICE-KG with different batch IDs or grades when the instrument
+	// defines these as non-fungible attributes.
+	ErrFungibilityMismatch = errors.New("fungibility validation failed: debit and credit have incompatible attributes")
+
+	// ErrFungibilityKeyEvaluation is returned when the CEL program fails to evaluate
+	// the fungibility key expression.
+	ErrFungibilityKeyEvaluation = errors.New("failed to evaluate fungibility key expression")
+
+	// ErrFungibilityKeyResultType is returned when the CEL program returns a non-string type.
+	ErrFungibilityKeyResultType = errors.New("fungibility key expression must return string")
 )
 
 // ValidateDoubleEntryPair validates that a debit and credit posting have matching instruments.
@@ -225,4 +238,148 @@ func ValidatePostingPairBalance(debit, credit *LedgerPosting) error {
 	}
 
 	return nil
+}
+
+// FungibilityKeyProgram represents a pre-compiled CEL program for evaluating
+// fungibility keys. This is a simplified interface that wraps cel.Program
+// for easier testing and decoupling from the CEL library.
+//
+// The Eval method takes an activation (map of variable bindings) and returns:
+//   - result: The fungibility key as a string
+//   - error: Any evaluation error
+//
+// For production use, wrap cel.Program using CELProgramAdapter.
+// For testing, use mockFungibilityKeyProgram or similar test doubles.
+type FungibilityKeyProgram interface {
+	Eval(activation interface{}) (interface{}, error)
+}
+
+// CELProgramAdapter wraps a cel.Program to implement FungibilityKeyProgram.
+// This adapter handles the three-value return of cel.Program.Eval() and
+// extracts the string value from ref.Val.
+type CELProgramAdapter struct {
+	// program is the underlying cel.Program.
+	// We use interface{} here to avoid importing cel-go in the domain layer.
+	// The actual type is cel.Program.
+	program interface {
+		Eval(interface{}) (interface{ Value() interface{} }, interface{}, error)
+	}
+}
+
+// NewCELProgramAdapter creates an adapter that wraps a cel.Program.
+// The program parameter should be a cel.Program from github.com/google/cel-go.
+func NewCELProgramAdapter(program interface{}) *CELProgramAdapter {
+	// Type assertion to verify the program has the expected Eval signature
+	if p, ok := program.(interface {
+		Eval(interface{}) (interface{ Value() interface{} }, interface{}, error)
+	}); ok {
+		return &CELProgramAdapter{program: p}
+	}
+	return nil
+}
+
+// Eval evaluates the CEL program with the given activation and returns the result.
+func (a *CELProgramAdapter) Eval(activation interface{}) (interface{}, error) {
+	if a.program == nil {
+		return "", nil
+	}
+
+	result, _, err := a.program.Eval(activation)
+	if err != nil {
+		return nil, err
+	}
+
+	// Extract the actual value from ref.Val
+	if result != nil {
+		return result.Value(), nil
+	}
+	return "", nil
+}
+
+// ValidateFungibility checks that debit and credit postings have compatible
+// fungibility attributes as defined by the instrument's fungibility_key_expression.
+//
+// Fungibility determines whether two quantities of the same instrument can be
+// exchanged. For example:
+//   - USD is fully fungible: $100 from any source equals $100 from any other source
+//   - RICE-KG may NOT be fungible across batch_id or grade: 100kg of Grade-1 rice
+//     from batch 2024-A cannot be exchanged for 100kg of Grade-2 rice from batch 2024-B
+//
+// Parameters:
+//   - program: Pre-compiled CEL program for evaluating fungibility keys.
+//     If nil, the instrument is fully fungible (returns nil immediately).
+//   - debitAttrs: Attributes from the debit posting
+//   - creditAttrs: Attributes from the credit posting
+//
+// Returns:
+//   - nil if fungibility validation passes (keys match or instrument is fully fungible)
+//   - ErrFungibilityMismatch if keys don't match
+//   - ErrFungibilityKeyEvaluation if CEL evaluation fails
+//
+// Thread-safety: Safe for concurrent use as CEL programs are thread-safe.
+func ValidateFungibility(program FungibilityKeyProgram, debitAttrs, creditAttrs map[string]string) error {
+	// No program means fully fungible - all quantities are interchangeable
+	if program == nil {
+		return nil
+	}
+
+	// Normalize nil attributes to empty maps for CEL evaluation
+	if debitAttrs == nil {
+		debitAttrs = make(map[string]string)
+	}
+	if creditAttrs == nil {
+		creditAttrs = make(map[string]string)
+	}
+
+	// Evaluate fungibility key for debit posting
+	debitKey, err := evaluateFungibilityKey(program, debitAttrs)
+	if err != nil {
+		return fmt.Errorf("%w: debit attributes: %w", ErrFungibilityKeyEvaluation, err)
+	}
+
+	// Evaluate fungibility key for credit posting
+	creditKey, err := evaluateFungibilityKey(program, creditAttrs)
+	if err != nil {
+		return fmt.Errorf("%w: credit attributes: %w", ErrFungibilityKeyEvaluation, err)
+	}
+
+	// Compare keys - they must match for the transaction to be valid
+	if debitKey != creditKey {
+		return fmt.Errorf("%w: debit key %q does not match credit key %q",
+			ErrFungibilityMismatch,
+			debitKey,
+			creditKey)
+	}
+
+	return nil
+}
+
+// evaluateFungibilityKey evaluates the CEL program with the given attributes
+// and returns the resulting fungibility key string.
+func evaluateFungibilityKey(program FungibilityKeyProgram, attributes map[string]string) (string, error) {
+	// Build CEL activation with attributes variable
+	// The bucket key environment expects: attributes: map[string]string
+	activation := map[string]interface{}{
+		"attributes": attributes,
+	}
+
+	result, err := program.Eval(activation)
+	if err != nil {
+		return "", err
+	}
+
+	// Extract string value from result
+	// For cel.Program, result is ref.Val; for mocks, it may be string directly
+	switch v := result.(type) {
+	case string:
+		return v, nil
+	default:
+		// Handle cel.Program's ref.Val interface
+		if valuer, ok := result.(interface{ Value() interface{} }); ok {
+			if str, ok := valuer.Value().(string); ok {
+				return str, nil
+			}
+		}
+		return "", fmt.Errorf("%w: got %T", ErrFungibilityKeyResultType, result)
+	}
 }

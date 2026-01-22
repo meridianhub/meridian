@@ -28,10 +28,12 @@ import (
 
 // Test-specific errors for defensive testing scenarios
 var (
-	errTestRedisConnectionFailed  = errors.New("redis connection failed")
-	errTestCannotMarkPending      = errors.New("cannot mark pending")
-	errTestDatabaseConnectionLost = errors.New("database connection lost")
-	errTestDatabaseWriteFailed    = errors.New("database write failed")
+	errTestRedisConnectionFailed     = errors.New("redis connection failed")
+	errTestCannotMarkPending         = errors.New("cannot mark pending")
+	errTestDatabaseConnectionLost    = errors.New("database connection lost")
+	errTestDatabaseWriteFailed       = errors.New("database write failed")
+	errTestRegistryConnectionRefused = errors.New("registry connection refused")
+	errTestRegistryShouldNotCall     = errors.New("registry should not be called")
 )
 
 // mockEventPublisher is a test double for EventPublisher
@@ -1979,4 +1981,388 @@ func TestExtractUserFromContext(t *testing.T) {
 		// Assert
 		assert.Equal(t, expectedUserID, result)
 	})
+}
+
+// =============================================================================
+// Fungibility Validation Tests
+// =============================================================================
+
+// mockInstrumentRegistry implements InstrumentRegistry for testing.
+type mockInstrumentRegistry struct {
+	instrument InstrumentDefinition
+	err        error
+}
+
+func (m *mockInstrumentRegistry) GetInstrument(_ context.Context, _ string, _ int) (InstrumentDefinition, error) {
+	return m.instrument, m.err
+}
+
+// mockInstrumentDefinition implements InstrumentDefinition for testing.
+type mockInstrumentDefinition struct {
+	program domain.FungibilityKeyProgram
+}
+
+func (m *mockInstrumentDefinition) GetFungibilityKeyProgram() domain.FungibilityKeyProgram {
+	return m.program
+}
+
+// mockFungibilityKeyProgram implements domain.FungibilityKeyProgram for testing.
+type mockFungibilityKeyProgram struct {
+	keyFunc func(attributes map[string]string) string
+}
+
+var _ domain.FungibilityKeyProgram = (*mockFungibilityKeyProgram)(nil)
+
+func (m *mockFungibilityKeyProgram) Eval(activation interface{}) (interface{}, error) {
+	if act, ok := activation.(map[string]interface{}); ok {
+		if attrs, ok := act["attributes"].(map[string]string); ok {
+			return m.keyFunc(attrs), nil
+		}
+	}
+	return m.keyFunc(map[string]string{}), nil
+}
+
+// TestValidatePostingPair_NoRegistry tests that fungibility validation is skipped
+// when no registry is configured (backward compatibility mode).
+func TestValidatePostingPair_NoRegistry(t *testing.T) {
+	// Arrange
+	db := &gorm.DB{}
+	repo := persistence.NewLedgerRepository(db)
+	publisher := &mockEventPublisher{}
+	idempotencySvc := &mockIdempotencyService{}
+	outboxPublisher := events.NewOutboxPublisher("financial-accounting")
+	outboxRepo := events.NewPostgresOutboxRepository(db)
+
+	// Create service WITHOUT registry (backward compatibility)
+	svc, err := NewFinancialAccountingService(repo, publisher, idempotencySvc, outboxPublisher, outboxRepo)
+	require.NoError(t, err)
+
+	// Create postings with different attributes that would fail fungibility validation
+	usdInstrument, _ := domain.NewInstrument("USD", 1, "CURRENCY", 2)
+	amount := domain.NewMoney(decimal.NewFromInt(100), usdInstrument)
+
+	debit, err := domain.NewLedgerPosting(
+		uuid.New(),
+		domain.PostingDirectionDebit,
+		amount,
+		"ACC-1",
+		time.Now(),
+		"test-correlation",
+	)
+	require.NoError(t, err)
+	debit.Attributes = map[string]string{"batch_id": "2024-A"}
+
+	credit, err := domain.NewLedgerPosting(
+		uuid.New(),
+		domain.PostingDirectionCredit,
+		amount,
+		"ACC-2",
+		time.Now(),
+		"test-correlation",
+	)
+	require.NoError(t, err)
+	credit.Attributes = map[string]string{"batch_id": "2024-B"} // Different batch!
+
+	// Act - should pass because no registry means no fungibility check
+	validationErr := svc.validatePostingPair(context.Background(), debit, credit)
+
+	// Assert
+	assert.NoError(t, validationErr, "Without registry, fungibility validation should be skipped")
+}
+
+// TestValidatePostingPair_FullyFungibleInstrument tests that instruments without
+// fungibility_key_expression are treated as fully fungible.
+func TestValidatePostingPair_FullyFungibleInstrument(t *testing.T) {
+	// Arrange
+	db := &gorm.DB{}
+	repo := persistence.NewLedgerRepository(db)
+	publisher := &mockEventPublisher{}
+	idempotencySvc := &mockIdempotencyService{}
+	outboxPublisher := events.NewOutboxPublisher("financial-accounting")
+	outboxRepo := events.NewPostgresOutboxRepository(db)
+
+	// Create mock registry that returns instrument with NO fungibility program
+	registry := &mockInstrumentRegistry{
+		instrument: &mockInstrumentDefinition{
+			program: nil, // No program = fully fungible
+		},
+		err: nil,
+	}
+
+	svc, err := NewFinancialAccountingService(
+		repo, publisher, idempotencySvc, outboxPublisher, outboxRepo,
+		WithRegistry(registry),
+	)
+	require.NoError(t, err)
+
+	// Create postings with different attributes
+	usdInstrument, _ := domain.NewInstrument("USD", 1, "CURRENCY", 2)
+	amount := domain.NewMoney(decimal.NewFromInt(100), usdInstrument)
+
+	debit, _ := domain.NewLedgerPosting(
+		uuid.New(),
+		domain.PostingDirectionDebit,
+		amount,
+		"ACC-1",
+		time.Now(),
+		"test",
+	)
+	debit.Attributes = map[string]string{"source": "bank-A"}
+
+	credit, _ := domain.NewLedgerPosting(
+		uuid.New(),
+		domain.PostingDirectionCredit,
+		amount,
+		"ACC-2",
+		time.Now(),
+		"test",
+	)
+	credit.Attributes = map[string]string{"source": "bank-B"}
+
+	// Act - should pass because USD is fully fungible
+	validationErr := svc.validatePostingPair(context.Background(), debit, credit)
+
+	// Assert
+	assert.NoError(t, validationErr, "Fully fungible instruments should accept any attributes")
+}
+
+// TestValidatePostingPair_FungibilityMismatch tests that transactions with
+// incompatible attributes are rejected.
+func TestValidatePostingPair_FungibilityMismatch(t *testing.T) {
+	// Arrange
+	db := &gorm.DB{}
+	repo := persistence.NewLedgerRepository(db)
+	publisher := &mockEventPublisher{}
+	idempotencySvc := &mockIdempotencyService{}
+	outboxPublisher := events.NewOutboxPublisher("financial-accounting")
+	outboxRepo := events.NewPostgresOutboxRepository(db)
+
+	// Create mock fungibility program that checks batch_id
+	program := &mockFungibilityKeyProgram{
+		keyFunc: func(attrs map[string]string) string {
+			return "batch:" + attrs["batch_id"]
+		},
+	}
+
+	registry := &mockInstrumentRegistry{
+		instrument: &mockInstrumentDefinition{
+			program: program,
+		},
+		err: nil,
+	}
+
+	svc, err := NewFinancialAccountingService(
+		repo, publisher, idempotencySvc, outboxPublisher, outboxRepo,
+		WithRegistry(registry),
+	)
+	require.NoError(t, err)
+
+	// Create RICE-KG postings with DIFFERENT batch IDs
+	riceInstrument, _ := domain.NewInstrument("RICE-KG", 1, "COMMODITY", 3)
+	amount := domain.NewMoney(decimal.NewFromInt(100), riceInstrument)
+
+	debit, _ := domain.NewLedgerPosting(
+		uuid.New(),
+		domain.PostingDirectionDebit,
+		amount,
+		"ACC-INVENTORY-A",
+		time.Now(),
+		"test",
+	)
+	debit.Attributes = map[string]string{"batch_id": "2024-A", "grade": "1"}
+
+	credit, _ := domain.NewLedgerPosting(
+		uuid.New(),
+		domain.PostingDirectionCredit,
+		amount,
+		"ACC-INVENTORY-B",
+		time.Now(),
+		"test",
+	)
+	credit.Attributes = map[string]string{"batch_id": "2024-B", "grade": "2"} // Different batch!
+
+	// Act
+	validationErr := svc.validatePostingPair(context.Background(), debit, credit)
+
+	// Assert
+	require.Error(t, validationErr, "Should reject mismatched fungibility keys")
+	grpcStatus, ok := status.FromError(validationErr)
+	require.True(t, ok, "Error should be gRPC status")
+	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
+	assert.Contains(t, grpcStatus.Message(), "fungibility")
+}
+
+// TestValidatePostingPair_MatchingFungibilityKeys tests that transactions with
+// compatible attributes are accepted.
+func TestValidatePostingPair_MatchingFungibilityKeys(t *testing.T) {
+	// Arrange
+	db := &gorm.DB{}
+	repo := persistence.NewLedgerRepository(db)
+	publisher := &mockEventPublisher{}
+	idempotencySvc := &mockIdempotencyService{}
+	outboxPublisher := events.NewOutboxPublisher("financial-accounting")
+	outboxRepo := events.NewPostgresOutboxRepository(db)
+
+	// Create mock fungibility program that checks batch_id
+	program := &mockFungibilityKeyProgram{
+		keyFunc: func(attrs map[string]string) string {
+			return "batch:" + attrs["batch_id"]
+		},
+	}
+
+	registry := &mockInstrumentRegistry{
+		instrument: &mockInstrumentDefinition{
+			program: program,
+		},
+		err: nil,
+	}
+
+	svc, err := NewFinancialAccountingService(
+		repo, publisher, idempotencySvc, outboxPublisher, outboxRepo,
+		WithRegistry(registry),
+	)
+	require.NoError(t, err)
+
+	// Create RICE-KG postings with SAME batch ID (different grades are OK)
+	riceInstrument, _ := domain.NewInstrument("RICE-KG", 1, "COMMODITY", 3)
+	amount := domain.NewMoney(decimal.NewFromInt(100), riceInstrument)
+
+	debit, _ := domain.NewLedgerPosting(
+		uuid.New(),
+		domain.PostingDirectionDebit,
+		amount,
+		"ACC-INVENTORY-A",
+		time.Now(),
+		"test",
+	)
+	debit.Attributes = map[string]string{"batch_id": "2024-A", "grade": "1"}
+
+	credit, _ := domain.NewLedgerPosting(
+		uuid.New(),
+		domain.PostingDirectionCredit,
+		amount,
+		"ACC-INVENTORY-B",
+		time.Now(),
+		"test",
+	)
+	// Same batch_id, different grade - should pass because program only checks batch_id
+	credit.Attributes = map[string]string{"batch_id": "2024-A", "grade": "2"}
+
+	// Act
+	validationErr := svc.validatePostingPair(context.Background(), debit, credit)
+
+	// Assert
+	assert.NoError(t, validationErr, "Matching fungibility keys should pass validation")
+}
+
+// TestValidatePostingPair_RegistryUnavailable tests fail-closed behavior
+// when the registry cannot be reached.
+func TestValidatePostingPair_RegistryUnavailable(t *testing.T) {
+	// Arrange
+	db := &gorm.DB{}
+	repo := persistence.NewLedgerRepository(db)
+	publisher := &mockEventPublisher{}
+	idempotencySvc := &mockIdempotencyService{}
+	outboxPublisher := events.NewOutboxPublisher("financial-accounting")
+	outboxRepo := events.NewPostgresOutboxRepository(db)
+
+	// Create mock registry that returns an error (simulating unavailability)
+	registry := &mockInstrumentRegistry{
+		instrument: nil,
+		err:        errTestRegistryConnectionRefused,
+	}
+
+	svc, err := NewFinancialAccountingService(
+		repo, publisher, idempotencySvc, outboxPublisher, outboxRepo,
+		WithRegistry(registry),
+	)
+	require.NoError(t, err)
+
+	// Create valid postings
+	usdInstrument, _ := domain.NewInstrument("USD", 1, "CURRENCY", 2)
+	amount := domain.NewMoney(decimal.NewFromInt(100), usdInstrument)
+
+	debit, _ := domain.NewLedgerPosting(
+		uuid.New(),
+		domain.PostingDirectionDebit,
+		amount,
+		"ACC-1",
+		time.Now(),
+		"test",
+	)
+
+	credit, _ := domain.NewLedgerPosting(
+		uuid.New(),
+		domain.PostingDirectionCredit,
+		amount,
+		"ACC-2",
+		time.Now(),
+		"test",
+	)
+
+	// Act
+	validationErr := svc.validatePostingPair(context.Background(), debit, credit)
+
+	// Assert - should fail-closed (reject transaction when registry unavailable)
+	require.Error(t, validationErr, "Should reject transaction when registry is unavailable")
+	grpcStatus, ok := status.FromError(validationErr)
+	require.True(t, ok, "Error should be gRPC status")
+	assert.Equal(t, codes.Unavailable, grpcStatus.Code())
+	assert.Contains(t, grpcStatus.Message(), "registry")
+}
+
+// TestValidatePostingPair_DoubleEntryValidationFirst tests that double-entry
+// validation happens before fungibility validation.
+func TestValidatePostingPair_DoubleEntryValidationFirst(t *testing.T) {
+	// Arrange
+	db := &gorm.DB{}
+	repo := persistence.NewLedgerRepository(db)
+	publisher := &mockEventPublisher{}
+	idempotencySvc := &mockIdempotencyService{}
+	outboxPublisher := events.NewOutboxPublisher("financial-accounting")
+	outboxRepo := events.NewPostgresOutboxRepository(db)
+
+	// Create mock registry - should NOT be called if double-entry fails
+	registry := &mockInstrumentRegistry{
+		instrument: &mockInstrumentDefinition{},
+		err:        errTestRegistryShouldNotCall,
+	}
+
+	svc, err := NewFinancialAccountingService(
+		repo, publisher, idempotencySvc, outboxPublisher, outboxRepo,
+		WithRegistry(registry),
+	)
+	require.NoError(t, err)
+
+	// Create postings with MISMATCHED instruments (should fail double-entry validation)
+	usdInstrument, _ := domain.NewInstrument("USD", 1, "CURRENCY", 2)
+	eurInstrument, _ := domain.NewInstrument("EUR", 1, "CURRENCY", 2)
+
+	debit, _ := domain.NewLedgerPosting(
+		uuid.New(),
+		domain.PostingDirectionDebit,
+		domain.NewMoney(decimal.NewFromInt(100), usdInstrument),
+		"ACC-USD",
+		time.Now(),
+		"test",
+	)
+
+	credit, _ := domain.NewLedgerPosting(
+		uuid.New(),
+		domain.PostingDirectionCredit,
+		domain.NewMoney(decimal.NewFromInt(100), eurInstrument), // Different instrument!
+		"ACC-EUR",
+		time.Now(),
+		"test",
+	)
+
+	// Act
+	validationErr := svc.validatePostingPair(context.Background(), debit, credit)
+
+	// Assert - should fail with double-entry error, not registry error
+	require.Error(t, validationErr)
+	grpcStatus, ok := status.FromError(validationErr)
+	require.True(t, ok, "Error should be gRPC status")
+	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
+	assert.Contains(t, grpcStatus.Message(), "double-entry")
 }

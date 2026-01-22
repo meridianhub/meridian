@@ -44,7 +44,77 @@ var (
 	ErrOutboxPublisherNil = errors.New("financial accounting service: outbox publisher cannot be nil")
 	// ErrOutboxRepositoryNil is returned when attempting to create a service with a nil outbox repository
 	ErrOutboxRepositoryNil = errors.New("financial accounting service: outbox repository cannot be nil")
+	// ErrRegistryUnavailable is returned when the reference-data registry cannot be reached
+	// and fungibility validation is required.
+	ErrRegistryUnavailable = errors.New("reference-data registry unavailable")
 )
+
+// InstrumentRegistry defines the interface for looking up instrument definitions.
+// This is implemented by the reference-data client for production use,
+// and can be mocked for testing.
+type InstrumentRegistry interface {
+	// GetInstrument retrieves an instrument definition with pre-compiled CEL programs.
+	// Returns an error if the instrument is not found or the registry is unavailable.
+	GetInstrument(ctx context.Context, code string, version int) (InstrumentDefinition, error)
+}
+
+// InstrumentDefinition contains instrument metadata needed for fungibility validation.
+// This mirrors the relevant fields from the reference-data cache.CachedInstrument.
+type InstrumentDefinition interface {
+	// GetFungibilityKeyProgram returns the pre-compiled CEL program for evaluating
+	// fungibility keys. Returns nil if the instrument is fully fungible (no expression).
+	GetFungibilityKeyProgram() domain.FungibilityKeyProgram
+}
+
+// ReferenceDataClient defines the interface for the reference-data service client.
+// This is the interface that the actual refclient.Client implements.
+type ReferenceDataClient interface {
+	// GetInstrument retrieves an instrument with compiled CEL programs from the tiered cache.
+	GetInstrument(ctx context.Context, code string, version int) (CachedInstrumentResult, error)
+}
+
+// CachedInstrumentResult defines the interface for cached instrument results.
+// This matches the relevant methods from cache.CachedInstrument.
+type CachedInstrumentResult interface {
+	// GetBucketKeyProgram returns the CEL program for fungibility key evaluation.
+	// Returns nil if no expression is defined (fully fungible).
+	GetBucketKeyProgram() interface{}
+}
+
+// ReferenceDataRegistryAdapter adapts the reference-data client to the InstrumentRegistry interface.
+// This allows the financial-accounting service to use the reference-data client for
+// fungibility validation without directly depending on the cache package types.
+type ReferenceDataRegistryAdapter struct {
+	client ReferenceDataClient
+}
+
+// NewReferenceDataRegistryAdapter creates a new adapter wrapping the reference-data client.
+func NewReferenceDataRegistryAdapter(client ReferenceDataClient) *ReferenceDataRegistryAdapter {
+	return &ReferenceDataRegistryAdapter{client: client}
+}
+
+// GetInstrument retrieves an instrument definition from the reference-data service.
+func (a *ReferenceDataRegistryAdapter) GetInstrument(ctx context.Context, code string, version int) (InstrumentDefinition, error) {
+	cached, err := a.client.GetInstrument(ctx, code, version)
+	if err != nil {
+		return nil, err
+	}
+	return &cachedInstrumentAdapter{cached: cached}, nil
+}
+
+// cachedInstrumentAdapter adapts CachedInstrumentResult to InstrumentDefinition.
+type cachedInstrumentAdapter struct {
+	cached CachedInstrumentResult
+}
+
+// GetFungibilityKeyProgram returns the CEL program wrapped as a FungibilityKeyProgram.
+func (a *cachedInstrumentAdapter) GetFungibilityKeyProgram() domain.FungibilityKeyProgram {
+	program := a.cached.GetBucketKeyProgram()
+	if program == nil {
+		return nil
+	}
+	return domain.NewCELProgramAdapter(program)
+}
 
 // DomainEvent is a marker interface for all financial accounting domain events.
 // In practice, events are protobuf messages from eventsv1 package.
@@ -86,6 +156,7 @@ type EventPublisher interface {
 // - Financial Booking Log lifecycle management (Initiate, Update, Retrieve, List)
 // - Ledger Posting operations (Capture, Retrieve)
 // - Double-entry bookkeeping validation
+// - Fungibility validation for non-fungible instruments
 //
 // Architecture patterns:
 // - ADR-0002: One microservice per BIAN domain
@@ -116,6 +187,23 @@ type FinancialAccountingService struct {
 
 	// outboxRepo provides persistence operations for the event outbox table
 	outboxRepo *events.PostgresOutboxRepository
+
+	// registry provides instrument definitions for fungibility validation.
+	// May be nil if fungibility validation is disabled (e.g., in tests or legacy mode).
+	// When nil, fungibility validation is skipped (all instruments treated as fully fungible).
+	registry InstrumentRegistry
+}
+
+// Option configures a FinancialAccountingService.
+type Option func(*FinancialAccountingService)
+
+// WithRegistry enables fungibility validation using the provided instrument registry.
+// When the registry is nil or this option is not used, fungibility validation is skipped
+// and all instruments are treated as fully fungible.
+func WithRegistry(registry InstrumentRegistry) Option {
+	return func(s *FinancialAccountingService) {
+		s.registry = registry
+	}
 }
 
 // NewFinancialAccountingService creates a new FinancialAccountingService with dependency injection.
@@ -127,11 +215,14 @@ type FinancialAccountingService struct {
 //   - outboxPublisher: Publishes events through transactional outbox (must not be nil)
 //   - outboxRepo: Persistence for event outbox entries (must not be nil)
 //
+// Optional configuration via Option:
+//   - WithRegistry: Enables fungibility validation using a reference-data registry
+//
 // The returned service embeds UnimplementedFinancialAccountingServiceServer, which provides
 // default "Unimplemented" responses for all gRPC methods. Methods will be implemented incrementally
 // in subsequent subtasks (9.2, 9.3, 9.4, 9.5).
 //
-// Returns an error if any dependency is nil.
+// Returns an error if any required dependency is nil.
 //
 // Example usage:
 //
@@ -140,8 +231,12 @@ type FinancialAccountingService struct {
 //	idempotencySvc := idempotency.NewRedisService(redisClient)
 //	outboxPublisher := events.NewOutboxPublisher("financial-accounting")
 //	outboxRepo := events.NewPostgresOutboxRepository(db)
+//	registryClient := refclient.New(...)
 //
-//	service, err := NewFinancialAccountingService(repo, publisher, idempotencySvc, outboxPublisher, outboxRepo)
+//	service, err := NewFinancialAccountingService(
+//	    repo, publisher, idempotencySvc, outboxPublisher, outboxRepo,
+//	    WithRegistry(registryClient),
+//	)
 //	if err != nil {
 //	    return fmt.Errorf("failed to create financial accounting service: %w", err)
 //	}
@@ -151,6 +246,7 @@ func NewFinancialAccountingService(
 	idempotencySvc idempotency.Service,
 	outboxPublisher *events.OutboxPublisher,
 	outboxRepo *events.PostgresOutboxRepository,
+	opts ...Option,
 ) (*FinancialAccountingService, error) {
 	if repository == nil {
 		return nil, ErrRepositoryNil
@@ -171,14 +267,95 @@ func NewFinancialAccountingService(
 	// Create the idempotency executor with default configuration
 	executor := idempotency.NewExecutor(idempotencySvc, nil)
 
-	return &FinancialAccountingService{
+	svc := &FinancialAccountingService{
 		repository:          repository,
 		eventPublisher:      eventPublisher,
 		idempotency:         idempotencySvc,
 		idempotencyExecutor: executor,
 		outboxPublisher:     outboxPublisher,
 		outboxRepo:          outboxRepo,
-	}, nil
+	}
+
+	// Apply optional configurations
+	for _, opt := range opts {
+		opt(svc)
+	}
+
+	return svc, nil
+}
+
+// validatePostingPair performs comprehensive validation on a debit/credit posting pair.
+// This includes:
+// 1. Double-entry validation (instrument matching, direction validation)
+// 2. Fungibility validation (attribute compatibility for non-fungible instruments)
+//
+// The fungibility validation is only performed if:
+// - The registry client is configured
+// - The instrument has a fungibility_key_expression defined
+//
+// Error behavior (fail-closed):
+// - If the registry is unavailable, the transaction is rejected
+// - If CEL evaluation fails, the transaction is rejected
+// - This ensures data integrity is never compromised by infrastructure issues
+//
+// Returns nil if validation passes, or a gRPC status error if validation fails.
+func (s *FinancialAccountingService) validatePostingPair(
+	ctx context.Context,
+	debit, credit *domain.LedgerPosting,
+) error {
+	// Step 1: Perform double-entry validation (instrument match, directions)
+	if err := domain.ValidateDoubleEntryPair(debit, credit); err != nil {
+		if errors.Is(err, domain.ErrDoubleEntryInstrumentMismatch) {
+			return status.Errorf(codes.InvalidArgument, "double-entry validation failed: %v", err)
+		}
+		if errors.Is(err, domain.ErrNilPosting) {
+			return status.Error(codes.InvalidArgument, "posting cannot be nil")
+		}
+		if errors.Is(err, domain.ErrInvalidDebitDirection) || errors.Is(err, domain.ErrInvalidCreditDirection) {
+			return status.Errorf(codes.InvalidArgument, "invalid posting direction: %v", err)
+		}
+		return status.Errorf(codes.InvalidArgument, "validation failed: %v", err)
+	}
+
+	// Step 2: Perform fungibility validation if registry is configured
+	if s.registry != nil {
+		instrument := debit.Amount.Instrument
+		// Cast uint32 version to int for registry API compatibility
+		instrumentDef, err := s.registry.GetInstrument(ctx, instrument.Code, int(instrument.Version))
+		if err != nil {
+			// Fail-closed: reject transaction if registry is unavailable
+			slog.Error("failed to fetch instrument for fungibility validation",
+				"error", err,
+				"instrument_code", instrument.Code,
+				"instrument_version", instrument.Version)
+			return status.Errorf(codes.Unavailable, "%v: cannot validate fungibility", ErrRegistryUnavailable)
+		}
+
+		// Get the pre-compiled CEL program for fungibility key evaluation
+		program := instrumentDef.GetFungibilityKeyProgram()
+
+		// Perform fungibility validation
+		if err := domain.ValidateFungibility(program, debit.Attributes, credit.Attributes); err != nil {
+			if errors.Is(err, domain.ErrFungibilityMismatch) {
+				slog.Warn("fungibility validation failed",
+					"instrument_code", instrument.Code,
+					"debit_attributes", debit.Attributes,
+					"credit_attributes", credit.Attributes,
+					"error", err)
+				return status.Errorf(codes.InvalidArgument, "fungibility validation failed: %v", err)
+			}
+			if errors.Is(err, domain.ErrFungibilityKeyEvaluation) {
+				// CEL evaluation error - fail-closed
+				slog.Error("CEL evaluation error during fungibility validation",
+					"error", err,
+					"instrument_code", instrument.Code)
+				return status.Errorf(codes.Internal, "fungibility key evaluation failed: %v", err)
+			}
+			return status.Errorf(codes.Internal, "fungibility validation error: %v", err)
+		}
+	}
+
+	return nil
 }
 
 // CaptureLedgerPosting creates a new ledger posting with validation and event publishing.
