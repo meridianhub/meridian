@@ -777,64 +777,74 @@ A saga executing under party A may create ledger entries affecting party B when 
 
 > **Note**: The Party Service currently has `party_association` for personal relationships (SPOUSE, DEPENDENT, GUARANTOR). Operational authorization (OPERATOR, CUSTODIAN, BROKER) is **not yet implemented**.
 
-Rather than rigid party-to-party relationship tables, authorization flows from **contextual lookup**:
+Rather than rigid party-to-party relationship tables, authorization flows from **contextual lookup** using the position's flexible attributes:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                    ENERGY: MPAN → Account Resolution                         │
+│                    Position Attributes → Account Resolution                  │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│  MPAN Attributes (from meter read):                                         │
-│    mpan: "1200023305967"                                                    │
-│    customer_party_id: "P-CUST-001"      → Current Account lookup           │
-│    gsp_code: "P"                         → Internal Bank Account lookup    │
-│    dno_code: "WPD"                       → (GSP maps to DNO org party)     │
+│  Position (from Position Keeping) with tenant-defined attributes:           │
+│    {                                                                        │
+│      "id": "pos-123",                                                       │
+│      "party_id": "P-CUST-001",                                             │
+│      "instrument_code": "KWH",                                              │
+│      "quantity": 100,                                                       │
+│      "attributes": {                   # Tenant-defined, flexible           │
+│        "customer_party_id": "P-CUST-001",                                  │
+│        "gsp_code": "P",                # Energy tenant uses this           │
+│        "settlement_period": "2026-01-15/HH23",                             │
+│      }                                                                      │
+│    }                                                                        │
 │                                                                             │
-│  Saga Context Resolution:                                                   │
-│    1. MPAN → customer_party_id → current_account.by_party()                │
-│       Result: Customer's receivable account                                 │
+│  Saga Context Resolution (using position attributes):                       │
+│    1. ctx.position.party_id → current_account.by_party()                   │
+│       Result: Customer's current account                                    │
 │                                                                             │
-│    2. MPAN → gsp_code → internal_bank_account.by_attributes(gsp="P")       │
-│       Result: GSP "P" wholesale payable account                            │
+│    2. ctx.position.attributes → internal_bank_account.by_attributes()      │
+│       Result: Account matching those attributes                             │
 │                                                                             │
 │  Authorization is IMPLICIT:                                                 │
-│    - Saga type "energy_settlement" is authorized for these lookup patterns │
-│    - Runtime validates saga can only use declared lookup types             │
-│    - Posting targets come from resolved lookups, not arbitrary party IDs   │
+│    - Saga declares which lookup types it may use                           │
+│    - Runtime validates lookups against declaration                          │
+│    - Posting targets come from resolved lookups, not arbitrary IDs         │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 #### Saga Authorized Lookups
 
-Each saga declares what account resolution patterns it may use:
+Each saga declares what account resolution patterns it may use. Lookups are **generic** - attribute keys are tenant-defined:
 
 ```python
-# energy_settlement.star
+# settlement.star - works for any tenant's attribute schema
 saga(
-    name = "energy_settlement",
+    name = "settlement",
     version = "1.0.0",
     authorized_lookups = [
-        "current_account.by_party",           # Can resolve customer accounts
-        "internal_bank_account.by_gsp",       # Can resolve GSP internal accounts
+        "current_account.by_party",           # Can resolve party → account
+        "internal_bank_account.by_attributes", # Can resolve attributes → account
     ],
     steps = [
         step(
-            name = "post_customer_receivable",
+            name = "post_entries",
             action = "financial_accounting.post_entries",
             params = lambda ctx: {
                 "postings": [
                     posting(
-                        # Account resolved via authorized lookup
-                        account_id = current_account.by_party(ctx.mpan.customer_party_id),
+                        # Resolve customer account from position's party
+                        account_id = current_account.by_party(ctx.position.party_id),
                         direction = "CREDIT",
-                        amount = ctx.kwh * ctx.tariff,
+                        amount = ctx.position.quantity * ctx.rate,
                     ),
                     posting(
-                        # Account resolved via authorized lookup
-                        account_id = internal_bank_account.by_gsp(ctx.mpan.gsp_code),
+                        # Resolve internal account from position's attributes
+                        # Attributes are tenant-defined (gsp_code, region, etc.)
+                        account_id = internal_bank_account.by_attributes(
+                            ctx.position.attributes
+                        ),
                         direction = "DEBIT",
-                        amount = ctx.kwh * ctx.wholesale_rate,
+                        amount = ctx.position.quantity * ctx.wholesale_rate,
                     ),
                 ],
             },
@@ -853,14 +863,26 @@ func (r *Runtime) ResolveLookup(sagaDef SagaDefinition, lookupType string, key a
         return nil, fmt.Errorf("saga %s not authorized for lookup type %s", sagaDef.Name, lookupType)
     }
 
-    // Perform the lookup
+    // Perform the lookup - attribute keys are tenant-defined
     switch lookupType {
     case "current_account.by_party":
         return r.currentAccountClient.GetByParty(ctx, key.(uuid.UUID))
-    case "internal_bank_account.by_gsp":
-        return r.internalBankClient.GetByAttributes(ctx, map[string]string{"gsp": key.(string)})
-    // ... other lookup types
+    case "internal_bank_account.by_attributes":
+        // Generic lookup - matches against attributes JSONB
+        attrs := key.(map[string]any)
+        return r.internalBankClient.GetByAttributes(ctx, attrs)
     }
+}
+
+// Internal Bank Account: generic attribute matching
+func (s *InternalBankAccountService) GetByAttributes(ctx context.Context, attrs map[string]any) (*Account, error) {
+    query := s.db.Model(&InternalBankAccount{})
+    // Build query dynamically from whatever attributes are passed
+    for k, v := range attrs {
+        query = query.Where("attributes @> ?", map[string]any{k: v})
+    }
+    var account InternalBankAccount
+    return &account, query.First(&account).Error
 }
 ```
 
@@ -1444,17 +1466,48 @@ This PRD references capabilities across multiple services. This section clarifie
 | Position access | Position Keeping ↔ Saga Runtime | Step handlers query positions with party scope |
 | Valuation (future) | Valuation Engine ↔ Saga Runtime | `valuate()` step handler |
 
-### MPAN-Specific Requirements (Energy Domain)
+### Flexible Attribute Model for Account Resolution
 
-For energy settlement, MPAN attributes need to map to accounts:
+Position attributes are **tenant-defined** via the asset class model. Sagas use these attributes for account resolution without hardcoding attribute keys:
 
-| MPAN Attribute | Maps To | Lookup Method |
-|----------------|---------|---------------|
-| `customer_party_id` | Customer's current account | `current_account.by_party(party_id)` |
-| `gsp_code` | GSP internal bank account | `internal_bank_account.by_attributes(gsp=code)` |
-| `dno_code` | DNO org party (for reporting) | `party.get(dno_party_id)` |
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    Tenant-Defined Attribute Examples                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ENERGY TENANT:                                                             │
+│    position.attributes = {                                                  │
+│      "gsp_code": "P",           # Grid Supply Point                        │
+│      "dno_code": "WPD",         # Distribution Network Operator            │
+│      "settlement_period": "HH23"                                           │
+│    }                                                                        │
+│                                                                             │
+│  WEALTH TENANT:                                                             │
+│    position.attributes = {                                                  │
+│      "custodian_id": "CUST-001", # Custodian                               │
+│      "sub_account": "TRADING",   # Account classification                  │
+│    }                                                                        │
+│                                                                             │
+│  CARBON TENANT:                                                             │
+│    position.attributes = {                                                  │
+│      "vintage": "2024",          # Credit vintage year                     │
+│      "registry": "VERRA",        # Carbon registry                         │
+│      "project_id": "VCS-1234"                                              │
+│    }                                                                        │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
-**Required**: Internal Bank Account service needs API/index for attribute-based lookup if not already present.
+| Lookup Type | Method | Notes |
+|-------------|--------|-------|
+| Party → Account | `current_account.by_party(party_id)` | Standard party lookup |
+| Attributes → Account | `internal_bank_account.by_attributes(attrs)` | Generic JSONB matching |
+| Party details | `party.get(party_id)` | Scope-checked party lookup |
+
+**Required**: Internal Bank Account service needs generic attribute-based lookup API:
+- Input: `map[string]any` (tenant-defined keys)
+- Query: JSONB `@>` containment or key matching
+- Index: GIN index on `attributes` column for performance
 
 ---
 
@@ -1495,7 +1548,7 @@ For energy settlement, MPAN attributes need to map to accounts:
 | **SAGA-031** | Add bi-temporal index on `saga_definitions` for version replay | P1 | SAGA-001 |
 | **SAGA-032** | Implement `replay_execution()` with historical saga version | P1 | SAGA-012, SAGA-031 |
 | **SAGA-033** | Add `verify_execution()` for audit drift detection | P2 | SAGA-032 |
-| **SAGA-034** | Internal Bank Account: Add attribute-based lookup API (`by_gsp`, `by_dno`) | P1 | - |
+| **SAGA-034** | Internal Bank Account: Add generic attribute-based lookup API (`by_attributes(map)`) | P1 | - |
 | **SAGA-035** | Party Service: Implement recursive party hierarchy query | P1 | - |
 | **SAGA-036** | Party Service: Add `party_relationships` table (optional) | P2 | - |
 
@@ -1530,7 +1583,7 @@ For energy settlement, MPAN attributes need to map to accounts:
 ### Phase 6: Bi-Temporal & Service Integration (SAGA-031 through SAGA-036)
 - Bi-temporal saga versioning for audit replay
 - Historical saga replay with `verify_execution()`
-- Internal Bank Account attribute-based lookup (GSP, DNO)
+- Internal Bank Account generic attribute-based lookup (tenant-defined keys)
 - Party Service recursive hierarchy query
 - Optional: Party relationships table for explicit authorization tracking
 
