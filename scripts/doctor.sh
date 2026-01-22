@@ -365,19 +365,19 @@ check_k8s_cluster() {
     local network_available=true
     if [ "$is_remote_cluster" = true ]; then
         # Check if timeout command is available (not default on macOS)
-        local has_timeout=false
+        # Use a variable instead of alias (aliases don't work in same parsing unit)
+        local timeout_cmd=""
         if command -v timeout &> /dev/null; then
-            has_timeout=true
+            timeout_cmd="timeout"
         elif command -v gtimeout &> /dev/null; then
             # GNU timeout on macOS (from coreutils)
-            alias timeout=gtimeout
-            has_timeout=true
+            timeout_cmd="gtimeout"
         fi
 
         # Use curl as primary check (more reliable cross-platform)
         if command -v curl &> /dev/null; then
-            if [ "$has_timeout" = true ]; then
-                if ! timeout 2 curl -sI --fail https://google.com &>/dev/null; then
+            if [ -n "$timeout_cmd" ]; then
+                if ! "$timeout_cmd" 2 curl -sI --fail https://google.com &>/dev/null; then
                     network_available=false
                 fi
             else
@@ -387,8 +387,8 @@ check_k8s_cluster() {
             fi
         # Fallback to nc and host if curl not available
         elif command -v nc &> /dev/null && command -v host &> /dev/null; then
-            if [ "$has_timeout" = true ]; then
-                if ! timeout 2 nc -z 8.8.8.8 53 2>/dev/null || ! timeout 2 host google.com >/dev/null 2>&1; then
+            if [ -n "$timeout_cmd" ]; then
+                if ! "$timeout_cmd" 2 nc -z 8.8.8.8 53 2>/dev/null || ! "$timeout_cmd" 2 host google.com >/dev/null 2>&1; then
                     network_available=false
                 fi
             else

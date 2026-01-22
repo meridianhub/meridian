@@ -19,5 +19,5 @@ disable=SC2120
 # Disable SC2262: Alias in same parsing unit (fix these scripts to use functions)
 disable=SC2262
 
-# TODO: Re-enable these and fix scripts incrementally:
-# - SC2086: Double quote to prevent globbing (many existing scripts need fixes)
+# SC2086 (Double quote to prevent globbing) is now ENABLED
+# All scripts have been fixed. Intentional word-splitting is documented with inline disable comments.
