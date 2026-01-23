@@ -31,12 +31,13 @@ import (
 // It handles the multi-step deposit workflow including position keeping logging,
 // ledger posting with double-entry bookkeeping, and account balance persistence.
 type DepositOrchestrator struct {
-	logger           *slog.Logger
-	repo             *persistence.Repository
-	posKeepingClient PositionKeepingClient
-	finAcctClient    FinancialAccountingClient
-	accountConfig    *config.AccountConfig
-	accountResolver  *AccountResolver
+	logger               *slog.Logger
+	repo                 *persistence.Repository
+	posKeepingClient     PositionKeepingClient
+	finAcctClient        FinancialAccountingClient
+	accountConfig        *config.AccountConfig
+	accountResolver      *AccountResolver
+	fungibilityValidator *FungibilityValidator
 }
 
 // DepositOrchestratorConfig contains dependencies for creating a DepositOrchestrator
@@ -50,6 +51,9 @@ type DepositOrchestratorConfig struct {
 	// If provided, takes precedence over AccountConfig for clearing account lookup.
 	// If nil, falls back to static AccountConfig environment variables.
 	AccountResolver *AccountResolver
+	// FungibilityValidator validates fungibility for non-fungible instruments.
+	// If nil, fungibility validation is skipped (fully fungible instruments only).
+	FungibilityValidator *FungibilityValidator
 }
 
 // NewDepositOrchestrator creates a new deposit orchestrator with the given dependencies.
@@ -68,12 +72,13 @@ func NewDepositOrchestrator(cfg DepositOrchestratorConfig) (*DepositOrchestrator
 		return nil, ErrOrchestratorFinAcctClientNil
 	}
 	return &DepositOrchestrator{
-		logger:           cfg.Logger,
-		repo:             cfg.Repo,
-		posKeepingClient: cfg.PosKeepingClient,
-		finAcctClient:    cfg.FinAcctClient,
-		accountConfig:    cfg.AccountConfig,
-		accountResolver:  cfg.AccountResolver,
+		logger:               cfg.Logger,
+		repo:                 cfg.Repo,
+		posKeepingClient:     cfg.PosKeepingClient,
+		finAcctClient:        cfg.FinAcctClient,
+		accountConfig:        cfg.AccountConfig,
+		accountResolver:      cfg.AccountResolver,
+		fungibilityValidator: cfg.FungibilityValidator,
 	}, nil
 }
 
@@ -96,7 +101,13 @@ func NewDepositOrchestrator(cfg DepositOrchestratorConfig) (*DepositOrchestrator
 // Callers must use optimistic locking (version field) or database-level locking when
 // processing deposits for the same account concurrently. The repository layer enforces
 // optimistic locking via ErrVersionConflict.
-func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.CurrentAccount, amount domain.Money, transactionID string) (*pb.ExecuteDepositResponse, error) {
+//
+// Parameters:
+//   - attributes: Optional key-value pairs for fungibility validation. For non-fungible
+//     instruments (e.g., RICE-KG with batch tracking), both debit and credit sides
+//     of the double-entry must have matching fungibility keys. If nil, no fungibility
+//     validation is performed (suitable for fully fungible instruments like USD).
+func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.CurrentAccount, amount domain.Money, transactionID string, attributes map[string]string) (*pb.ExecuteDepositResponse, error) {
 	sagaStart := time.Now()
 	sagaStatus := operationStatusSuccess
 	defer func() {
@@ -111,6 +122,25 @@ func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.Cu
 		ctx = observability.WithCorrelationID(ctx, correlationID)
 	} else {
 		o.logger.Info("using existing correlation ID", "correlation_id", correlationID)
+	}
+
+	// Validate fungibility before starting the saga.
+	// For double-entry deposits: DEBIT from clearing account, CREDIT to customer account
+	// Both sides use the same attributes since this is a single incoming deposit.
+	if o.fungibilityValidator != nil {
+		instrumentCode := string(amount.Currency())
+		if err := o.fungibilityValidator.ValidateDoubleEntry(ctx, instrumentCode, 1, attributes, attributes); err != nil {
+			sagaStatus = operationStatusFailed
+			o.logger.Error("fungibility validation failed",
+				"account_id", account.AccountID(),
+				"transaction_id", transactionID,
+				"instrument", instrumentCode,
+				"error", err)
+			return nil, status.Errorf(codes.InvalidArgument, "fungibility validation failed: %v", err)
+		}
+		o.logger.Debug("fungibility validation passed",
+			"account_id", account.AccountID(),
+			"instrument", instrumentCode)
 	}
 
 	// Create saga orchestrator

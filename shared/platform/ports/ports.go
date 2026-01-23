@@ -98,6 +98,13 @@ const (
 	// Protocol: gRPC (internal)
 	// Visibility: Cluster-internal only
 	MarketInformation = 50058
+
+	// ReferenceData is the gRPC port for the Reference Data service.
+	// BIAN Service Domain: Reference Data Directory
+	// Manages instrument definitions, validation rules, and fungibility expressions.
+	// Protocol: gRPC (internal)
+	// Visibility: Cluster-internal only
+	ReferenceData = 50059
 )
 
 // HTTP service ports (various protocols).
