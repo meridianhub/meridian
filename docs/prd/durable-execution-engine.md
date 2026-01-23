@@ -1,7 +1,7 @@
 # PRD: Durable Execution Engine
 
 **Status:** Production-Ready
-**Version:** 1.0
+**Version:** 1.1
 **Companion PRD:** [Starlark Saga Orchestration (Core)](./starlark-saga-orchestration-core.md)
 
 ---
@@ -153,6 +153,13 @@ def pay_external(ctx):
 - **Usage**: Reference numbers, correlation IDs, any generated identifiers within saga logic
 - **Industry standard**: Version 5 UUIDs are the standard approach for deterministic UUID generation
 - **Replay safety**: See FR-26 for seed reset requirements on step replay
+- **CRITICAL: Namespace Immutability on Hot-Fix**: If a saga is hot-fixed (FR-22) and pointed
+  to a new definition, it MUST RETAIN the original `saga_instance_id` as the namespace. This
+  ensures ID stability across the version-migration boundary:
+  - Steps 0-5 under v1: UUIDs = `UUIDv5(instance_123, "0:0")`, `UUIDv5(instance_123, "0:1")`, etc.
+  - Step 6 under v2 (after hot-fix): UUIDs = `UUIDv5(instance_123, "6:0")` (SAME namespace!)
+  - **Why**: Downstream systems using these UUIDs for idempotency must see consistent IDs
+    even when the saga definition version changes mid-flight
 
 ### FR-22: Saga Hot-Fixing for Zombie Recovery
 
@@ -614,6 +621,33 @@ func (r *Runtime) executeStep(
 > **Database Requirement**: PostgreSQL fully supports transactional DDL and
 > multi-statement transactions within a single `BEGIN`/`COMMIT` block. This is
 > the "Gold Standard" for preventing "Ghost Steps" where partial state persists.
+>
+> **Implementation Directive: Outbox Integration**
+>
+> The atomic transaction that persists a Step Result MUST also include any Domain Events
+> (FR-25: Progress) in a local `outbox` table. This ensures that progress updates and
+> side-effects are never "orphaned" from the persisted saga state.
+>
+> ```go
+> // Within the same transaction as step result:
+> err = r.outboxRepo.InsertTx(tx, &OutboxEvent{
+>     SagaInstanceID: instance.ID,
+>     StepIndex:      stepIndex,
+>     EventType:      "saga.progress",
+>     Payload:        progressPayload,
+>     CreatedAt:      time.Now(),
+> })
+> ```
+>
+> **Rationale**: If progress events are published directly to Kafka without outbox,
+> a pod crash between Kafka publish and database commit could result in:
+>
+> - Progress event published but step not persisted (UI shows progress, but saga restarts)
+> - Progress event lost but step persisted (UI shows stale progress)
+>
+> **Outbox pattern**: Events are persisted transactionally, then a background worker
+> publishes to Kafka and deletes from outbox. This guarantees exactly-once semantics
+> for domain events relative to saga state.
 
 #### Lease Renewal (Keep-Alive)
 
@@ -1166,6 +1200,7 @@ graph TD
         SAGA061[SAGA-061: Reactive orphan wake-up]
         SAGA062[SAGA-062: Correlation ID propagation]
         SAGA063[SAGA-063: Progress emission]
+        SAGA074[SAGA-074: Outbox integration]
         SAGA064[SAGA-064: Error severity classification]
         SAGA065[SAGA-065: Partition-aware scanning]
         SAGA069[SAGA-069: Deep-copy serialization]
@@ -1219,6 +1254,8 @@ graph TD
     SAGA044 --> SAGA061
     SAGA044 --> SAGA065
     SAGA003 --> SAGA063
+    SAGA042 --> SAGA074
+    SAGA063 --> SAGA074
 
     %% Stream 8 internal dependencies
     SAGA041 --> SAGA055
@@ -1259,6 +1296,7 @@ graph TD
 | **SAGA-061** | Implement reactive orphan wake-up via LISTEN/NOTIFY (FR-23) | P1 | SAGA-044 | TBD |
 | **SAGA-062** | Add `correlation_id` propagation to saga lifecycle (FR-24) | P0 | SAGA-041 | TBD |
 | **SAGA-063** | Implement `ctx.emit_progress()` builtin with Kafka publisher (FR-25) | P1 | SAGA-003 | TBD |
+| **SAGA-074** | Implement outbox pattern for domain events (transactional event publishing) | P1 | SAGA-042, SAGA-063 | TBD |
 | **SAGA-064** | Implement step error severity classification (FR-28: TRANSIENT vs FATAL) | P0 | SAGA-005 | TBD |
 | **SAGA-065** | Add partition-aware orphan scanning for high-volume (100k TPS) | P2 | SAGA-044, SAGA-061 | TBD |
 | **SAGA-069** | Implement deep-copy serialization boundary for step results (FR-31) | P0 | SAGA-042 | TBD |
@@ -1410,6 +1448,8 @@ graph TD
 | **AC-EI-10** | Saga hot-fix re-points instance to new definition version | Admin API test: hot-fix stuck saga, verify `saga_definition_id` updated, resumed execution |
 | **AC-EI-11** | Hot-fix audit trail captures operator, reason, old/new version | Unit test: verify audit log contains hot-fix details |
 | **AC-EI-12** | Hot-fix preserves bi-temporal integrity (step_results timestamps accurate) | Query test: after hot-fix, steps 0-5 timestamps < hot-fix, step 6+ > hot-fix |
+| **AC-EI-13** | Hot-fix preserves UUID namespace (saga_instance_id unchanged) | Unit test: hot-fix saga v1->v2, step 6 generates UUIDs with original instance namespace |
+| **AC-EI-14** | UUIDs stable across version-migration boundary | Integration test: steps 0-5 under v1, step 6 under v2, all UUIDs use same namespace |
 
 ### Acceptance Criteria: Performance & Observability (FR-23 through FR-26)
 
@@ -1420,8 +1460,10 @@ graph TD
 | **AC-PO-03** | `correlation_id` propagated to all downstream events | Integration test: trigger saga, verify `ObservationRecorded`, `PostingCreated` have same `correlation_id` |
 | **AC-PO-04** | "Unified Position View" query returns all entries for `correlation_id` | Query test: `WHERE correlation_id = X` returns Retail + Wholesale + Tax entries |
 | **AC-PO-05** | `ctx.emit_progress()` publishes to Kafka topic | Integration test: emit progress, verify message on `saga.progress.{tenant_id}` |
-| **AC-PO-06** | Progress emission is non-blocking (no database write) | Unit test: emit 1000 progress updates, verify no `saga_*` table writes |
+| **AC-PO-06** | Progress emission uses outbox pattern (transactional with step result) | Unit test: verify `outbox` table insert in same transaction as `saga_step_results` |
 | **AC-PO-07** | Progress emission safe on replay (idempotent/informational) | Unit test: replay saga, verify duplicate progress OK |
+| **AC-PO-10** | Outbox worker publishes events exactly once | Integration test: verify Kafka message count matches outbox entries |
+| **AC-PO-11** | Pod crash between Kafka publish and commit does not orphan events | Fault injection test: crash mid-publish, verify retry publishes event |
 | **AC-PO-08** | `ctx.new_uuid()` produces identical UUIDs after mid-step crash | Unit test: start step, generate 3 UUIDs, simulate crash, restart step, verify same 3 UUIDs |
 | **AC-PO-09** | UUID seed reset at step boundary | Unit test: verify `CallIndex` reset to 0 when step changes |
 

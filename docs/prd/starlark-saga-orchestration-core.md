@@ -1,7 +1,7 @@
 # PRD: Starlark Saga Orchestration (Core)
 
 **Status:** Production-Ready
-**Version:** 1.0
+**Version:** 1.1
 **Author:** Architecture Team
 **ADR Reference:** [ADR-028](../adr/0028-starlark-saga-cel-valuation.md)
 **Companion PRD:** [Durable Execution Engine](./durable-execution-engine.md)
@@ -90,6 +90,22 @@ The saga definitions become **Administrative Plan Records** - auditable configur
 - **Language**: Starlark (deterministic subset of Python - no while loops, no I/O, no imports)
 - **Builtins**: Platform provides `cel_eval()`, `posting()`, `resolve_account()`, step handlers
 
+### FR-34: External Lookup Result Capture (Replay Safety)
+
+- **Requirement**: The Runtime MUST capture and serialize all external lookup results into
+  `saga_step_results` if they are called outside of a formal `step()` block
+- **Problem**: Replay-based recovery relies on determinism. If `resolve_account()` returns a
+  different ID during replay than it did during the first run, the logic will diverge
+- **Affected builtins**: `resolve_account()`, `resolve_instrument()`, any lookup that touches
+  Reference Data or external services
+- **Implementation options**:
+  1. **Implicit Step Wrapping**: Runtime auto-wraps lookup calls in ephemeral steps
+  2. **Input Snapshot Enhancement**: Expand `input_snapshot` to include all lookup results
+  3. **Lookup Cache Table**: Dedicated `saga_lookup_results` table for non-step lookups
+- **Guarantee**: Same saga instance replaying same lookups produces identical results
+- **Bridge to Durable PRD**: This requirement enables the Durable Execution Engine's replay
+  mechanism to function correctly even when scripts call lookups outside formal steps
+
 ### FR-3: CEL Integration for Calculations
 
 - **Requirement**: Starlark scripts MUST call CEL expressions for financial calculations
@@ -148,6 +164,25 @@ The saga definitions become **Administrative Plan Records** - auditable configur
 - **Enforcement**: Runtime resolves party tree; injects immutable `ctx.party_scope`
 - **No bypass**: Saga authors cannot access parties outside their scope
 - **Audit**: All executions logged with `party_id` for compliance
+
+### FR-35: Visibility Manifest Pre-Flight Check
+
+- **Requirement**: Before a Saga transitions from PENDING to RUNNING, the Runtime SHALL
+  generate a "Visibility Manifest" listing all Party IDs that will be accessed
+- **Problem**: "Implicit Authorization" (allowing access mid-execution) is high-risk for
+  auditors and can result in partial executions that fail halfway due to permission issues
+- **Implementation**:
+  1. Static analysis extracts all `party_id` references from the Starlark AST
+  2. Runtime resolves executing party's recursive visibility (from Party Service hierarchy)
+  3. Manifest = union of all referenced party IDs in the saga
+  4. Pre-flight check: IF executing party does NOT have visibility over the entire manifest,
+     THEN saga MUST fail-fast BEFORE the first step executes
+- **Benefit**: Moves security check from "middle of execution" to "pre-flight," preventing
+  partial executions that fail halfway due to permission issues
+- **Error message**: "Party P002 lacks visibility over parties [P003, P007] required by
+  this saga. Execution blocked."
+- **Exemptions**: Contextual lookups (e.g., `resolve_account("clearing", currency)`) where
+  the target party is determined at runtime are validated per-step, not pre-flight
 
 ### FR-12: Saga Composition
 
@@ -1824,6 +1859,7 @@ The streams can be parallelized with dependencies as shown below.
 | **SAGA-004a** | Implement Starlark Decimal extension (FR-27: operator overloading for financial math) | P0 | TBD |
 | **SAGA-004b** | Implement time-injection logic (strip `time.now()`, inject `ctx.knowledge_at`) | P0 | TBD |
 | **SAGA-004c** | Implement core builtins (`cel_eval`, `posting`, `resolve_account`, etc.) | P0 | TBD |
+| **SAGA-072** | Implement external lookup result capture for replay safety (FR-34) | P0 | TBD |
 
 ### Stream 3: Registry and Caching
 
@@ -1861,6 +1897,7 @@ The streams can be parallelized with dependencies as shown below.
 | **SAGA-023** | Add `ctx.party_scope` injection with immutability enforcement | P0 | TBD |
 | **SAGA-024** | Implement `authorized_lookups` declaration and runtime enforcement | P0 | TBD |
 | **SAGA-025** | Add `party_id` and `visible_parties` to saga execution audit log | P1 | TBD |
+| **SAGA-073** | Implement Visibility Manifest pre-flight check (FR-35) | P0 | TBD |
 
 ### Stream 6: Saga Composition
 
@@ -1909,6 +1946,17 @@ The streams can be parallelized with dependencies as shown below.
 | **AC-PI-06** | Saga execution log includes `party_id` and `visible_parties` from contextual lookup | Unit test: verify audit fields reflect contextual visibility at execution time |
 | **AC-PI-07** | Child saga inherits parent party scope (cannot escalate) | Unit test: `invoke_saga()` passes same `party_scope` |
 | **AC-PI-08** | Query by `visible_parties` returns correct executions | Query test: GIN index query returns expected results |
+| **AC-PI-09** | Visibility Manifest generated before saga transitions to RUNNING (FR-35) | Unit test: verify manifest extraction from AST before first step |
+| **AC-PI-10** | Saga fails fast if executing party lacks visibility over manifest parties | Unit test: party without recursive visibility over referenced parties triggers pre-flight failure |
+| **AC-PI-11** | Pre-flight failure includes actionable error message with missing parties | Unit test: error message contains "Party P002 lacks visibility over parties [P003, P007]" |
+
+### Acceptance Criteria: Runtime & Replay Safety
+
+| ID | Criterion | Test Method |
+|----|-----------|-------------|
+| **AC-RT-01** | External lookup results (`resolve_account`, `resolve_instrument`) captured for replay (FR-34) | Unit test: replay saga, verify lookup returns cached result not live query |
+| **AC-RT-02** | Lookup called outside `step()` block is persisted in `saga_step_results` or `input_snapshot` | Unit test: call `resolve_account()` outside step, verify result in snapshot |
+| **AC-RT-03** | Replay with different Reference Data returns original lookup result | Integration test: change account mapping, replay saga, verify original account ID used |
 
 ### Acceptance Criteria: Saga Composition
 
