@@ -35,51 +35,14 @@ var (
 	BuildDate = "unknown"
 )
 
-func main() {
-	// Initialize structured logging
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	}))
-	slog.SetDefault(logger)
-
-	logger.Info("starting utilization-metering-consumer service",
-		"version", Version,
-		"commit", Commit,
-		"build_date", BuildDate)
-
-	// Run the service
-	if err := run(logger); err != nil {
-		logger.Error("service failed", "error", err)
-		os.Exit(1)
-	}
-
-	logger.Info("service stopped gracefully")
+// readinessState tracks the readiness of service components for the /ready probe.
+type readinessState struct {
+	consumerInitialized bool
 }
 
-func run(logger *slog.Logger) error {
-	// Load configuration
-	config, err := app.LoadConfig()
-	if err != nil {
-		return fmt.Errorf("failed to load configuration: %w", err)
-	}
-
-	logger.Info("configuration loaded",
-		"kafka_bootstrap_servers", config.KafkaBootstrapServers,
-		"consumer_group_id", config.ConsumerGroupID,
-		"audit_topics", config.AuditTopics,
-		"position_keeping_endpoint", config.PositionKeepingEndpoint,
-		"tenant_zero_id", config.TenantZeroID)
-
-	// Create readiness tracker
-	type readinessState struct {
-		consumerInitialized bool
-	}
-	var (
-		readiness   = &readinessState{}
-		readinessMu = &sync.RWMutex{}
-	)
-
-	// Create HTTP server for health checks and metrics
+// createHTTPServer creates an HTTP server with health checks and metrics.
+// Extracted from run() to enable unit testing without starting full service.
+func createHTTPServer(httpPort string, readiness *readinessState, readinessMu *sync.RWMutex, logger *slog.Logger) *http.Server {
 	httpMux := http.NewServeMux()
 
 	// Health check endpoints
@@ -118,13 +81,58 @@ func run(logger *slog.Logger) error {
 	// Prometheus metrics endpoint
 	httpMux.Handle("/metrics", promhttp.Handler())
 
-	httpServer := &http.Server{
-		Addr:              fmt.Sprintf(":%s", config.HTTPPort),
+	return &http.Server{
+		Addr:              fmt.Sprintf(":%s", httpPort),
 		Handler:           httpMux,
 		ReadHeaderTimeout: 10 * time.Second,
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
+}
+
+func main() {
+	// Initialize structured logging
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
+	slog.SetDefault(logger)
+
+	logger.Info("starting utilization-metering-consumer service",
+		"version", Version,
+		"commit", Commit,
+		"build_date", BuildDate)
+
+	// Run the service
+	if err := run(logger); err != nil {
+		logger.Error("service failed", "error", err)
+		os.Exit(1)
+	}
+
+	logger.Info("service stopped gracefully")
+}
+
+func run(logger *slog.Logger) error {
+	// Load configuration
+	config, err := app.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load configuration: %w", err)
+	}
+
+	logger.Info("configuration loaded",
+		"kafka_bootstrap_servers", config.KafkaBootstrapServers,
+		"consumer_group_id", config.ConsumerGroupID,
+		"audit_topics", config.AuditTopics,
+		"position_keeping_endpoint", config.PositionKeepingEndpoint,
+		"tenant_zero_id", config.TenantZeroID)
+
+	// Create readiness tracker
+	var (
+		readiness   = &readinessState{}
+		readinessMu = &sync.RWMutex{}
+	)
+
+	// Create HTTP server for health checks and metrics
+	httpServer := createHTTPServer(config.HTTPPort, readiness, readinessMu, logger)
 
 	// Start HTTP server in background
 	serverErrors := make(chan error, 1)
