@@ -207,6 +207,7 @@ func NewServiceWithIdempotency(repo *persistence.Repository, lienRepo *persisten
 // Optional parameters:
 //   - accountConfig: Static clearing account configuration (environment variables)
 //   - accountResolver: Dynamic clearing account resolution from Internal Bank Account service
+//   - fungibilityValidator: Validates fungibility for non-fungible instruments
 //
 // If both accountConfig and accountResolver are provided, the resolver takes precedence
 // with fallback to static config.
@@ -222,6 +223,7 @@ func NewServiceWithExistingClients(
 	logger *slog.Logger,
 	tracer *observability.Tracer,
 	accountResolver *AccountResolver, // Optional: dynamic clearing account resolution
+	fungibilityValidator *FungibilityValidator, // Optional: validates fungibility for non-fungible instruments
 ) (*Service, error) {
 	if repo == nil {
 		return nil, ErrRepositoryNil
@@ -234,12 +236,13 @@ func NewServiceWithExistingClients(
 
 	// Create deposit orchestrator
 	depositOrchestrator, err := NewDepositOrchestrator(DepositOrchestratorConfig{
-		Logger:           logger,
-		Repo:             repo,
-		PosKeepingClient: posKeepingClient,
-		FinAcctClient:    finAcctClient,
-		AccountConfig:    accountConfig,
-		AccountResolver:  accountResolver,
+		Logger:               logger,
+		Repo:                 repo,
+		PosKeepingClient:     posKeepingClient,
+		FinAcctClient:        finAcctClient,
+		AccountConfig:        accountConfig,
+		AccountResolver:      accountResolver,
+		FungibilityValidator: fungibilityValidator,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create deposit orchestrator: %w", err)
@@ -247,12 +250,13 @@ func NewServiceWithExistingClients(
 
 	// Create withdrawal orchestrator
 	withdrawalOrchestrator, err := NewWithdrawalOrchestrator(WithdrawalOrchestratorConfig{
-		Logger:           logger,
-		Repo:             repo,
-		PosKeepingClient: posKeepingClient,
-		FinAcctClient:    finAcctClient,
-		AccountConfig:    accountConfig,
-		AccountResolver:  accountResolver,
+		Logger:               logger,
+		Repo:                 repo,
+		PosKeepingClient:     posKeepingClient,
+		FinAcctClient:        finAcctClient,
+		AccountConfig:        accountConfig,
+		AccountResolver:      accountResolver,
+		FungibilityValidator: fungibilityValidator,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create withdrawal orchestrator: %w", err)
@@ -519,7 +523,7 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 	}
 
 	// Orchestrate transaction with saga pattern - Position Keeping is the source of truth for balance
-	resp, err := s.depositOrchestrator.Orchestrate(ctx, account, amount, transactionID)
+	resp, err := s.depositOrchestrator.Orchestrate(ctx, account, amount, transactionID, req.Attributes)
 	if err != nil {
 		operationStatus = opStatusSagaFailed
 		return nil, err
@@ -862,7 +866,7 @@ func (s *Service) ExecuteWithdrawal(ctx context.Context, req *pb.ExecuteWithdraw
 	}
 
 	// Orchestrate transaction with saga pattern - Position Keeping is the source of truth for balance
-	resp, err := s.withdrawalOrchestrator.Orchestrate(ctx, account, amount, transactionID)
+	resp, err := s.withdrawalOrchestrator.Orchestrate(ctx, account, amount, transactionID, req.Attributes)
 	if err != nil {
 		operationStatus = opStatusSagaFailed
 		return nil, err

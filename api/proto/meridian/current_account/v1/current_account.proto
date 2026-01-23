@@ -351,6 +351,13 @@ message ExecuteDepositRequest {
 
   // idempotency_key ensures exactly-once deposit execution for retry scenarios
   meridian.common.v1.IdempotencyKey idempotency_key = 5;
+
+  // attributes contains optional key-value pairs for fungibility validation.
+  // For non-fungible instruments (e.g., RICE-KG with batch tracking), the deposit
+  // must have attributes that match the credit side's attributes according to
+  // the instrument's fungibility_key_expression.
+  // Example: {"batch_id": "2024-A", "grade": "premium"}
+  map<string, string> attributes = 6;
 }
 
 // Response for deposit execution
@@ -457,6 +464,13 @@ message InitiateWithdrawalRequest {
 
   // idempotency_key ensures exactly-once withdrawal initiation
   meridian.common.v1.IdempotencyKey idempotency_key = 5;
+
+  // attributes contains optional key-value pairs for fungibility validation.
+  // For non-fungible instruments (e.g., RICE-KG with batch tracking), the withdrawal
+  // must have attributes that match the debit side's attributes according to
+  // the instrument's fungibility_key_expression.
+  // Example: {"batch_id": "2024-A", "grade": "premium"}
+  map<string, string> attributes = 6;
 }
 
 // Response for initiating a withdrawal
@@ -501,6 +515,13 @@ message ExecuteWithdrawalRequest {
 
   // idempotency_key ensures exactly-once withdrawal execution
   meridian.common.v1.IdempotencyKey idempotency_key = 6;
+
+  // attributes contains optional key-value pairs for fungibility validation.
+  // For non-fungible instruments (e.g., RICE-KG with batch tracking), the withdrawal
+  // must have attributes that match the debit side's attributes according to
+  // the instrument's fungibility_key_expression.
+  // Example: {"batch_id": "2024-A", "grade": "premium"}
+  map<string, string> attributes = 7;
 }
 
 // Response for executing a withdrawal

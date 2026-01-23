@@ -19,6 +19,7 @@ import (
 	internalbankaccountclient "github.com/meridianhub/meridian/services/internal-bank-account/client"
 	partyclient "github.com/meridianhub/meridian/services/party/client"
 	poskeepingclient "github.com/meridianhub/meridian/services/position-keeping/client"
+	refdataclient "github.com/meridianhub/meridian/services/reference-data/client"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
@@ -385,6 +386,36 @@ func createServiceWithClients(
 		}
 	}
 
+	// Create Reference Data client for instrument lookup (required for fungibility validation).
+	// This is optional - if it fails, fungibility validation is disabled.
+	var fungibilityValidator *service.FungibilityValidator
+
+	refDataClient, refDataCleanup, err := refdataclient.New(context.Background(), refdataclient.Config{
+		ServiceName: refdataclient.ServiceName,
+		Namespace:   namespace,
+		Port:        ports.ReferenceData,
+		Timeout:     defaults.DefaultRPCTimeout,
+		Tracer:      tracer,
+		Resilience: &sharedclients.ResilientClientConfig{
+			Logger:             logger,
+			CircuitBreakerName: "reference-data",
+			OnStateChange:      makeCircuitBreakerCallback(),
+		},
+	})
+	if err != nil {
+		logger.Warn("reference data client not available, fungibility validation disabled",
+			"error", err)
+	} else {
+		// Wrap the cleanup function to match expected signature (func() instead of func() error)
+		cleanupFuncs = append(cleanupFuncs, func() {
+			if closeErr := refDataCleanup(); closeErr != nil {
+				logger.Error("failed to close reference data client", "error", closeErr)
+			}
+		})
+		fungibilityValidator = service.NewFungibilityValidator(refDataClient)
+		logger.Info("fungibility validation enabled via Reference Data service")
+	}
+
 	// Create service with the pre-created clients
 	// The new service-owned clients implement the same interfaces as defined in
 	// services/current-account/service/client_interfaces.go
@@ -399,7 +430,8 @@ func createServiceWithClients(
 		idempotencyService,
 		logger,
 		tracer,
-		accountResolver, // Optional: dynamic clearing account resolution
+		accountResolver,      // Optional: dynamic clearing account resolution
+		fungibilityValidator, // Optional: validates fungibility for non-fungible instruments
 	)
 	if err != nil {
 		// Cleanup all clients before returning
