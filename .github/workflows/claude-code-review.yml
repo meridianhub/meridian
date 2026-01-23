@@ -138,15 +138,17 @@ jobs:
             - Validate: Does the implementation fulfill those stated requirements?
             - Acknowledge when requirements are met: "This satisfies the requirement for X"
 
-            ## Approval Matters
+            ## Approval vs Request Changes
 
-            When the code is good, say so clearly. The person on the other end worked hard on this.
+            **APPROVE** means "merge as-is" - use only when you have NO actionable suggestions.
 
-            - **Clean PR**: "✅ Approved. Clean implementation, tests are solid."
-            - **Minor suggestions**: "✅ Approved with minor suggestions. These are worth considering but not blocking."
-            - **Issues found**: Be direct about what needs fixing and why, but remain collegial.
+            **REQUEST_CHANGES** means "please address these" - use when you have suggestions that would improve the code, even minor ones. This ensures they get addressed rather than ignored.
 
-            The approval signal has emotional weight. Don't withhold it when earned.
+            - **Nothing to improve**: APPROVE. "Clean implementation, tests are solid."
+            - **Actionable suggestions exist**: REQUEST_CHANGES. "Quick fixes needed" - then list them.
+            - **Style-only preferences** (no objective improvement): APPROVE with comment. These are truly optional.
+
+            The bar for APPROVE is: "I have nothing actionable to suggest." If you found something worth mentioning, it's worth fixing.
 
             ## Feedback Principles
 
@@ -173,8 +175,10 @@ jobs:
 
             ## Priority Signals
 
-            Use 🔴 for blocking issues that must be fixed before merge.
-            Use 🟡 for suggestions and improvements that aren't blocking.
+            Use 🔴 for critical issues (security, correctness, data loss risk).
+            Use 🟡 for improvements that should be addressed (edge cases, code quality, simplifications).
+
+            Both warrant REQUEST_CHANGES. The difference is severity, not whether to fix.
 
             ## How to Comment
 
