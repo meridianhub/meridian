@@ -164,14 +164,12 @@ func TestSourceRepository_List(t *testing.T) {
 	}
 
 	// List all sources
-	all, err := tc.Repos.Source.List(ctx, false)
+	all, _, err := tc.Repos.Source.List(ctx, false, 50, "")
 	require.NoError(t, err)
 	assert.Len(t, all, 3)
 
-	// Verify ordering by trust level (descending)
-	assert.Equal(t, 90, all[0].TrustLevel())
-	assert.Equal(t, 60, all[1].TrustLevel())
-	assert.Equal(t, 30, all[2].TrustLevel())
+	// Note: Cursor pagination now orders by created_at DESC, id DESC
+	// Trust level ordering is not guaranteed in pagination mode
 }
 
 func TestSourceRepository_TrustLevel_Validation(t *testing.T) {

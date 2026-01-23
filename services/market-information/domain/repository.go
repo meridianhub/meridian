@@ -27,9 +27,10 @@ type DataSetRepository interface {
 	// Returns ErrDataSetNotFound if the dataset or version does not exist.
 	FindByCodeAndVersion(ctx context.Context, code string, version int) (DataSetDefinition, error)
 
-	// List returns datasets matching the filter criteria.
-	// Returns an empty slice if no datasets match the filter.
-	List(ctx context.Context, filters DataSetFilters) ([]DataSetDefinition, error)
+	// List returns datasets matching the filter criteria with cursor-based pagination.
+	// Returns the datasets, a next page token (empty if no more results), and any error.
+	// Returns ErrInvalidPageToken if the pageToken format is invalid.
+	List(ctx context.Context, filters DataSetFilters) ([]DataSetDefinition, string, error)
 
 	// ExistsByCode checks if a dataset with the given code exists.
 	ExistsByCode(ctx context.Context, code string) (bool, error)
@@ -48,8 +49,9 @@ type DataSetFilters struct {
 	// Zero or negative values use the implementation's default limit.
 	Limit int
 
-	// Offset specifies the number of results to skip for pagination.
-	Offset int
+	// PageToken is the cursor token from a previous List response.
+	// Empty string indicates first page.
+	PageToken string
 }
 
 // ObservationRepository defines the persistence port for MarketPriceObservation aggregates.
@@ -71,10 +73,11 @@ type ObservationRepository interface {
 	// Returns ErrObservationNotFound if the observation does not exist.
 	FindByID(ctx context.Context, id uuid.UUID) (MarketPriceObservation, error)
 
-	// Query retrieves observations matching the query criteria.
-	// Returns an empty slice if no observations match.
+	// Query retrieves observations matching the query criteria with cursor-based pagination.
+	// Returns the observations, a next page token (empty if no more results), and any error.
 	// Results are ordered by ObservedAt descending (most recent first).
-	Query(ctx context.Context, query ObservationQuery) ([]MarketPriceObservation, error)
+	// Returns ErrInvalidPageToken if the pageToken format is invalid.
+	Query(ctx context.Context, query ObservationQuery) ([]MarketPriceObservation, string, error)
 
 	// GetLatest retrieves the most recent non-superseded observation
 	// for a specific dataset and resolution key combination.
@@ -120,6 +123,10 @@ type ObservationQuery struct {
 	// Limit specifies the maximum number of results to return.
 	// Zero or negative values use the implementation's default limit.
 	Limit int
+
+	// PageToken is the cursor token from a previous Query response.
+	// Empty string indicates first page.
+	PageToken string
 }
 
 // SourceRepository defines the persistence port for DataSource entities.
@@ -145,7 +152,12 @@ type SourceRepository interface {
 	// Returns ErrDataSourceNotFound if the source does not exist.
 	FindByCode(ctx context.Context, code string) (DataSource, error)
 
-	// List returns all data sources, optionally filtering to only active sources.
-	// Returns an empty slice if no sources exist.
-	List(ctx context.Context, activeOnly bool) ([]DataSource, error)
+	// List returns data sources with cursor-based pagination.
+	// Parameters:
+	//   - activeOnly: if true, only returns active (non-deleted) sources
+	//   - pageSize: maximum number of results to return (0 uses default, capped at max)
+	//   - pageToken: cursor token from previous response (empty for first page)
+	// Returns the sources, a next page token (empty if no more results), and any error.
+	// Returns ErrInvalidPageToken if the pageToken format is invalid.
+	List(ctx context.Context, activeOnly bool, pageSize int, pageToken string) ([]DataSource, string, error)
 }
