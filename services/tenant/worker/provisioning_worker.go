@@ -505,9 +505,9 @@ func (w *ProvisioningWorker) markTenantAsActive(ctx context.Context, tenantID te
 }
 
 // markTenantAsFailed updates tenant status to provisioning_failed with error details.
-// TODO: When service-specific provisioning is implemented, call observability.IncrementServiceFailure(serviceName)
-// here based on which service (database, kafka, etc.) caused the failure. Currently, the provisioner
-// returns generic errors without service attribution.
+// Service-specific failure tracking is implemented in postgres_provisioner.go:provisionAllServices()
+// which calls observability.IncrementServiceFailure(serviceName) for each service failure type:
+// database connection errors, circuit breaker open/half-open states, and migration failures.
 func (w *ProvisioningWorker) markTenantAsFailed(ctx context.Context, tenantID tenant.TenantID, lastErr error, attempts int) {
 	tenant, getErr := w.repo.GetByID(ctx, tenantID)
 	if getErr != nil {

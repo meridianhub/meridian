@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/meridianhub/meridian/services/tenant/observability"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/sony/gobreaker/v2"
 	"gorm.io/driver/postgres"
@@ -313,6 +314,7 @@ func (p *PostgresProvisioner) provisionAllServices(ctx context.Context, status *
 		serviceDB, ok := p.serviceDbs[svc.Name]
 		if !ok {
 			logger.Error("service database not found", "service", svc.Name)
+			observability.IncrementServiceFailure(svc.Name)
 			p.markProvisioningFailed(ctx, status, fmt.Sprintf("no database connection for service: %s", svc.Name))
 			return fmt.Errorf("%w: %s", ErrServiceDatabaseNotFound, svc.Name)
 		}
@@ -340,6 +342,7 @@ func (p *PostgresProvisioner) provisionAllServices(ctx context.Context, status *
 				"service", svc.Name,
 				"breaker_state", "open",
 				"retry_after", retryAfter.Format(time.RFC3339))
+			observability.IncrementServiceFailure(svc.Name)
 			status.Services[i].State = ServiceStateCircuitOpen
 			status.Services[i].ErrorMessage = fmt.Sprintf(
 				"circuit breaker open for %s: too many recent failures. Retry after %s",
@@ -352,6 +355,7 @@ func (p *PostgresProvisioner) provisionAllServices(ctx context.Context, status *
 				"service", svc.Name,
 				"breaker_state", "half-open",
 				"max_requests", BreakerMaxRequests)
+			observability.IncrementServiceFailure(svc.Name)
 			status.Services[i].State = ServiceStateCircuitOpen
 			status.Services[i].ErrorMessage = fmt.Sprintf(
 				"circuit breaker half-open for %s: max test requests (%d) exceeded. Waiting for test results",
@@ -362,6 +366,7 @@ func (p *PostgresProvisioner) provisionAllServices(ctx context.Context, status *
 
 		if err != nil {
 			logger.Error("service migration failed", "service", svc.Name, "error", err)
+			observability.IncrementServiceFailure(svc.Name)
 			status.Services[i].State = ServiceStateFailed
 			status.Services[i].ErrorMessage = err.Error()
 			p.markProvisioningFailed(ctx, status, fmt.Sprintf("%s migrations failed: %v", svc.Name, err))
