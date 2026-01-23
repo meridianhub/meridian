@@ -1312,3 +1312,157 @@ func TestRecordObservationBatch_NonExistentSource(t *testing.T) {
 	assert.False(t, resp.Results[0].Success)
 	assert.Contains(t, resp.Results[0].ErrorMessage, "source not found")
 }
+
+// ============================================
+// TotalCount and DatasetVersion Tests
+// ============================================
+
+func TestListObservations_TotalCountPopulated(t *testing.T) {
+	server, _, cleanup := setupTestServerForObservation(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	datasetCode, sourceCode := setupTestDataSetAndSource(t, server, ctx)
+
+	now := time.Now()
+
+	// Record 10 observations
+	for i := 0; i < 10; i++ {
+		req := &pb.RecordObservationRequest{
+			DatasetCode: datasetCode,
+			SourceCode:  sourceCode,
+			Value:       "1.0",
+			ObservedAt:  timestamppb.New(now.Add(time.Duration(i) * time.Minute)),
+			ValidFrom:   timestamppb.New(now.Add(time.Duration(i) * time.Minute)),
+			Quality:     pb.QualityLevel_QUALITY_LEVEL_ACTUAL,
+			Attributes: []*quantityv1.AttributeEntry{
+				{Key: "currency_pair", Value: "EUR/USD"},
+			},
+		}
+		_, err := server.RecordObservation(ctx, req)
+		require.NoError(t, err)
+	}
+
+	// List with page size of 5 - should get 5 observations but TotalCount should be 10
+	listReq := &pb.ListObservationsRequest{
+		DatasetCode: datasetCode,
+		PageSize:    5,
+	}
+
+	listResp, err := server.ListObservations(ctx, listReq)
+	require.NoError(t, err)
+	require.NotNil(t, listResp)
+
+	assert.Len(t, listResp.Observations, 5)
+	assert.Equal(t, int32(10), listResp.TotalCount, "TotalCount should reflect total observations in dataset")
+}
+
+func TestRecordObservation_DatasetVersionPopulated(t *testing.T) {
+	server, _, cleanup := setupTestServerForObservation(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	datasetCode, sourceCode := setupTestDataSetAndSource(t, server, ctx)
+
+	now := time.Now()
+	req := &pb.RecordObservationRequest{
+		DatasetCode: datasetCode,
+		SourceCode:  sourceCode,
+		Value:       "1.2345",
+		ObservedAt:  timestamppb.New(now),
+		ValidFrom:   timestamppb.New(now),
+		Quality:     pb.QualityLevel_QUALITY_LEVEL_ACTUAL,
+		Attributes: []*quantityv1.AttributeEntry{
+			{Key: "currency_pair", Value: "EUR/USD"},
+		},
+	}
+
+	resp, err := server.RecordObservation(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.NotNil(t, resp.Observation)
+
+	// The dataset was registered (v1) and activated (v2), so version should be 2
+	assert.Equal(t, int32(2), resp.Observation.DatasetVersion,
+		"DatasetVersion should match the activated dataset version")
+}
+
+func TestRetrieveObservation_DatasetVersionPopulated(t *testing.T) {
+	server, _, cleanup := setupTestServerForObservation(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	datasetCode, sourceCode := setupTestDataSetAndSource(t, server, ctx)
+
+	// First, record an observation
+	now := time.Now()
+	recordReq := &pb.RecordObservationRequest{
+		DatasetCode: datasetCode,
+		SourceCode:  sourceCode,
+		Value:       "3.14",
+		ObservedAt:  timestamppb.New(now),
+		ValidFrom:   timestamppb.New(now),
+		Quality:     pb.QualityLevel_QUALITY_LEVEL_ACTUAL,
+		Attributes: []*quantityv1.AttributeEntry{
+			{Key: "currency_pair", Value: "EUR/USD"},
+		},
+	}
+
+	recordResp, err := server.RecordObservation(ctx, recordReq)
+	require.NoError(t, err)
+
+	// Retrieve it
+	retrieveReq := &pb.RetrieveObservationRequest{
+		ObservationId: recordResp.Observation.Id,
+	}
+
+	retrieveResp, err := server.RetrieveObservation(ctx, retrieveReq)
+	require.NoError(t, err)
+	require.NotNil(t, retrieveResp)
+	require.NotNil(t, retrieveResp.Observation)
+
+	// The dataset was registered (v1) and activated (v2), so version should be 2
+	assert.Equal(t, int32(2), retrieveResp.Observation.DatasetVersion,
+		"DatasetVersion should match the activated dataset version")
+}
+
+func TestListObservations_DatasetVersionPopulated(t *testing.T) {
+	server, _, cleanup := setupTestServerForObservation(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	datasetCode, sourceCode := setupTestDataSetAndSource(t, server, ctx)
+
+	// Record an observation
+	now := time.Now()
+	req := &pb.RecordObservationRequest{
+		DatasetCode: datasetCode,
+		SourceCode:  sourceCode,
+		Value:       "1.0",
+		ObservedAt:  timestamppb.New(now),
+		ValidFrom:   timestamppb.New(now),
+		Quality:     pb.QualityLevel_QUALITY_LEVEL_ACTUAL,
+		Attributes: []*quantityv1.AttributeEntry{
+			{Key: "currency_pair", Value: "EUR/USD"},
+		},
+	}
+	_, err := server.RecordObservation(ctx, req)
+	require.NoError(t, err)
+
+	// List observations
+	listReq := &pb.ListObservationsRequest{
+		DatasetCode: datasetCode,
+		PageSize:    10,
+	}
+
+	listResp, err := server.ListObservations(ctx, listReq)
+	require.NoError(t, err)
+	require.NotNil(t, listResp)
+	require.NotEmpty(t, listResp.Observations)
+
+	// All observations should have the correct dataset version
+	for _, obs := range listResp.Observations {
+		assert.Equal(t, int32(2), obs.DatasetVersion,
+			"DatasetVersion should match the activated dataset version")
+	}
+}
