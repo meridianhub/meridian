@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/meridianhub/meridian/services/tenant/observability"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -1645,4 +1647,49 @@ func TestFilterMigrationsAfter(t *testing.T) {
 			}
 		})
 	}
+}
+
+// =============================================================================
+// Service Failure Observability Tests
+// =============================================================================
+
+// TestPostgresProvisioner_MigrationFailure_IncrementsServiceFailureMetric verifies that
+// when a service migration fails, the observability.IncrementServiceFailure metric is called.
+func TestPostgresProvisioner_MigrationFailure_IncrementsServiceFailureMetric(t *testing.T) {
+	tc := setupTestContainer(t)
+	defer tc.cleanup(t)
+
+	// Create tenant
+	tenantID := tenant.MustNewTenantID("metric_test_tenant")
+	createTestTenant(t, tc.db, tenantID.String())
+
+	// Create a migration directory with invalid SQL that will fail
+	failingDir := filepath.Join(tc.migDir, "failing-service")
+	require.NoError(t, os.MkdirAll(failingDir, 0o755))
+	createTestMigration(t, failingDir, "20251201000000_broken.sql", `
+		THIS IS NOT VALID SQL AND WILL FAIL;
+	`)
+
+	config := &Config{
+		Services: []ServiceConfig{
+			{Name: "failing-service", MigrationPath: failingDir, DatabaseURL: tc.connStr},
+		},
+		ProvisioningTimeout: 30 * time.Second,
+	}
+
+	prov, err := NewPostgresProvisioner(tc.db, config)
+	require.NoError(t, err)
+	defer prov.Close()
+
+	// Get initial metric count
+	initialCount := testutil.CollectAndCount(observability.GetServiceProvisioningFailuresMetric())
+
+	// Attempt provisioning - should fail
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
+	require.Error(t, err, "Provisioning should fail with invalid SQL")
+	assert.ErrorIs(t, err, ErrMigrationFailed)
+
+	// Verify the service failure metric was incremented
+	finalCount := testutil.CollectAndCount(observability.GetServiceProvisioningFailuresMetric())
+	assert.Greater(t, finalCount, initialCount, "Service failure metric should be incremented on migration failure")
 }
