@@ -6,8 +6,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"time"
 
+	"github.com/meridianhub/meridian/services/market-information/config"
 	"github.com/meridianhub/meridian/services/market-information/observability"
 	"github.com/meridianhub/meridian/shared/pkg/health"
 	"github.com/meridianhub/meridian/shared/platform/db"
@@ -24,6 +26,8 @@ type HealthCheckerConfig struct {
 	ServiceName string
 	// CheckTimeout is the maximum duration for health checks
 	CheckTimeout time.Duration
+	// ServiceConfig holds service-specific configuration for external dependencies
+	ServiceConfig config.Config
 }
 
 // HealthChecker implements the gRPC health check protocol with dependency aggregation.
@@ -35,6 +39,9 @@ type HealthChecker struct {
 	timeout     time.Duration
 }
 
+// DefaultECBHealthCheckEndpoint is the base ECB SDMX Web Service URL used for health checks.
+const DefaultECBHealthCheckEndpoint = "https://sdw-wsrest.ecb.europa.eu"
+
 // NewHealthChecker creates a new HealthChecker with health check aggregation.
 func NewHealthChecker(cfg HealthCheckerConfig) *HealthChecker {
 	// Build list of health checkers
@@ -44,8 +51,26 @@ func NewHealthChecker(cfg HealthCheckerConfig) *HealthChecker {
 	if cfg.Database != nil {
 		checkers = append(checkers, health.NewDatabaseChecker(cfg.Database))
 	}
-	// TODO: Add external service checkers when dependencies are added
-	// Example: checkers = append(checkers, NewExternalServiceChecker(...))
+
+	// Add ECB API health checker if ECB integration is enabled
+	if cfg.ServiceConfig.ECB.Enabled {
+		endpoint := cfg.ServiceConfig.ECB.Endpoint
+		if endpoint == "" {
+			endpoint = DefaultECBHealthCheckEndpoint
+		}
+
+		timeout := cfg.ServiceConfig.ECB.Timeout
+		if timeout == 0 {
+			timeout = 5 * time.Second // Default health check timeout
+		}
+
+		checkers = append(checkers, health.NewHTTPChecker(health.HTTPCheckerConfig{
+			Name:       "ecb-api",
+			Endpoint:   endpoint,
+			Timeout:    timeout,
+			HTTPClient: &http.Client{Timeout: timeout},
+		}))
+	}
 
 	aggregator := health.NewAggregator(checkers)
 
