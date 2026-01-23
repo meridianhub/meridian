@@ -1,3 +1,4 @@
+-- atlas:txn false
 -- Migration: Add Cursor-Based Pagination Indexes
 -- Optimizes cursor-based pagination queries for list endpoints.
 -- Uses functional indexes on date_trunc('second', created_at) to match the cursor token format.

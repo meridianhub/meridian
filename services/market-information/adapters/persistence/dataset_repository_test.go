@@ -223,7 +223,7 @@ func TestDataSetRepository_List_Pagination(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Create 5 datasets with slight delay to ensure different timestamps
+	// Create 5 datasets - cursor pagination uses timestamp+UUID ordering as tie-breaker
 	for i := 0; i < 5; i++ {
 		dataset, err := domain.NewDataSetDefinition(
 			"PAGINATION_"+string(rune('A'+i)),

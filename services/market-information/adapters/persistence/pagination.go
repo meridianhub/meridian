@@ -38,8 +38,8 @@ func parseCursorToken(token string) (time.Time, uuid.UUID, error) {
 		return time.Time{}, uuid.Nil, nil
 	}
 
-	// Use SplitN to handle edge cases where UUID might theoretically contain underscore
-	// (though standard UUIDs use hyphens). This ensures we only split on the first underscore.
+	// Use SplitN to split only on the first underscore, ensuring the UUID portion
+	// (which uses hyphens, not underscores) remains intact.
 	parts := strings.SplitN(token, "_", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return time.Time{}, uuid.Nil, ErrInvalidPageToken
