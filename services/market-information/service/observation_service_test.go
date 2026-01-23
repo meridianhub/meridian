@@ -838,7 +838,7 @@ func TestListObservations_DefaultPageSize(t *testing.T) {
 	assert.GreaterOrEqual(t, len(listResp.Observations), 5)
 }
 
-func TestListObservations_PageTokenNotImplemented(t *testing.T) {
+func TestListObservations_InvalidPageToken(t *testing.T) {
 	server, _, cleanup := setupTestServerForObservation(t)
 	defer cleanup()
 
@@ -848,7 +848,7 @@ func TestListObservations_PageTokenNotImplemented(t *testing.T) {
 	listReq := &pb.ListObservationsRequest{
 		DatasetCode: datasetCode,
 		PageSize:    10,
-		PageToken:   "some-token",
+		PageToken:   "invalid-token-format",
 	}
 
 	_, err := server.ListObservations(ctx, listReq)
@@ -856,7 +856,8 @@ func TestListObservations_PageTokenNotImplemented(t *testing.T) {
 
 	st, ok := status.FromError(err)
 	require.True(t, ok)
-	assert.Equal(t, codes.Unimplemented, st.Code())
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+	assert.Contains(t, st.Message(), "invalid page_token")
 }
 
 // ============================================

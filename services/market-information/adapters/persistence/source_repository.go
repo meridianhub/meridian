@@ -169,24 +169,68 @@ func (r *SourceRepository) FindByCode(ctx context.Context, code string) (domain.
 	return result, err
 }
 
-// List returns all data sources, optionally filtering to only active sources.
-// Returns an empty slice if no sources exist.
-func (r *SourceRepository) List(ctx context.Context, _ bool) ([]domain.DataSource, error) {
+// List returns data sources with cursor-based pagination.
+// Parameters:
+//   - activeOnly: currently unused (all returned sources are non-deleted)
+//   - pageSize: maximum number of results to return (0 uses default, capped at MaxPageSize)
+//   - pageToken: cursor token from previous response (empty for first page)
+//
+// Returns the sources, a next page token (empty if no more results), and any error.
+// Returns ErrInvalidPageToken (wrapped as domain.ErrInvalidPageToken) if the pageToken format is invalid.
+func (r *SourceRepository) List(ctx context.Context, _ bool, pageSize int, pageToken string) ([]domain.DataSource, string, error) {
+	// Apply pagination defaults and limits
+	if pageSize <= 0 {
+		pageSize = DefaultPageSize
+	}
+	if pageSize > MaxPageSize {
+		pageSize = MaxPageSize
+	}
+
+	// Parse cursor token
+	cursorTime, cursorID, err := parseCursorToken(pageToken)
+	if err != nil {
+		return nil, "", domain.ErrInvalidPageToken
+	}
+
 	var results []domain.DataSource
+	var nextPageToken string
 
-	err := r.withReadTransaction(ctx, func(tx pgx.Tx) error {
-		query := `
-			SELECT id, code, name, description, trust_level, created_at, updated_at, version
-			FROM data_source
-			WHERE deleted_at IS NULL
-			ORDER BY trust_level DESC, name ASC`
+	err = r.withReadTransaction(ctx, func(tx pgx.Tx) error {
+		var query string
+		var args []interface{}
 
-		rows, err := tx.Query(ctx, query)
+		// Base query - order by created_at DESC, id DESC for consistent cursor pagination
+		if cursorTime.IsZero() {
+			// First page - no cursor condition
+			query = `
+				SELECT id, code, name, description, trust_level, created_at, updated_at, version
+				FROM data_source
+				WHERE deleted_at IS NULL
+				ORDER BY date_trunc('second', created_at) DESC, id DESC
+				LIMIT $1`
+			args = []interface{}{pageSize + 1} // Fetch one extra to detect if there's a next page
+		} else {
+			// Subsequent page - apply cursor condition
+			query = `
+				SELECT id, code, name, description, trust_level, created_at, updated_at, version
+				FROM data_source
+				WHERE deleted_at IS NULL
+					AND (
+						date_trunc('second', created_at) < $1
+						OR (date_trunc('second', created_at) = $1 AND id < $2)
+					)
+				ORDER BY date_trunc('second', created_at) DESC, id DESC
+				LIMIT $3`
+			args = []interface{}{cursorTime, cursorID, pageSize + 1}
+		}
+
+		rows, err := tx.Query(ctx, query, args...)
 		if err != nil {
 			return fmt.Errorf("failed to list data sources: %w", err)
 		}
 		defer rows.Close()
 
+		var entities []DataSourceEntity
 		for rows.Next() {
 			var entity DataSourceEntity
 			err := rows.Scan(
@@ -202,21 +246,33 @@ func (r *SourceRepository) List(ctx context.Context, _ bool) ([]domain.DataSourc
 			if err != nil {
 				return fmt.Errorf("failed to scan data source: %w", err)
 			}
-
-			results = append(results, EntityToDataSource(entity))
+			entities = append(entities, entity)
 		}
 
 		if err := rows.Err(); err != nil {
 			return fmt.Errorf("error iterating data sources: %w", err)
 		}
 
+		// Check for more results - we fetched pageSize+1 to detect this
+		hasMore := len(entities) > pageSize
+		if hasMore {
+			entities = entities[:pageSize] // Trim to actual page size
+			lastEntity := entities[len(entities)-1]
+			nextPageToken = formatCursorToken(lastEntity.CreatedAt, lastEntity.ID)
+		}
+
+		// Convert to domain
+		for _, entity := range entities {
+			results = append(results, EntityToDataSource(entity))
+		}
+
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
-	return results, nil
+	return results, nextPageToken, nil
 }
 
 // GetTrustLevel retrieves the trust level for a data source by ID.

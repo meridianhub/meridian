@@ -523,13 +523,27 @@ func (s *Server) RetrieveObservation(ctx context.Context, req *pb.RetrieveObserv
 	}, nil
 }
 
-// ListObservations returns observations matching the filter criteria.
+// ListObservations returns observations matching the filter criteria with cursor-based pagination.
 // Supports filtering by data set, time ranges, quality level, and pagination.
 func (s *Server) ListObservations(ctx context.Context, req *pb.ListObservationsRequest) (*pb.ListObservationsResponse, error) {
+	// Apply pagination defaults
+	pageSize := int(req.PageSize)
+	if pageSize < 0 {
+		return nil, status.Errorf(codes.InvalidArgument, "page_size cannot be negative")
+	}
+	if pageSize == 0 {
+		pageSize = 100 // Default
+	}
+	if pageSize > 1000 {
+		pageSize = 1000 // Max from proto validation
+	}
+
 	// Build query from request filters
 	query := domain.ObservationQuery{
 		DataSetCode:       req.DatasetCode,
 		IncludeSuperseded: req.IncludeSuperseded,
+		Limit:             pageSize,
+		PageToken:         req.PageToken,
 	}
 
 	// Apply resolution key filter
@@ -553,25 +567,14 @@ func (s *Server) ListObservations(ctx context.Context, req *pb.ListObservationsR
 		query.QualityLevel = &qualityLevel
 	}
 
-	// Apply pagination
-	if req.PageToken != "" {
-		return nil, status.Errorf(codes.Unimplemented, "cursor pagination not implemented, page_token must be empty")
-	}
-	pageSize := int(req.PageSize)
-	if pageSize < 0 {
-		return nil, status.Errorf(codes.InvalidArgument, "page_size cannot be negative")
-	}
-	if pageSize == 0 {
-		pageSize = 100 // Default
-	}
-	if pageSize > 1000 {
-		pageSize = 1000 // Max from proto validation
-	}
-	query.Limit = pageSize
-
 	// Execute query
-	observations, err := s.observationRepo.Query(ctx, query)
+	observations, nextPageToken, err := s.observationRepo.Query(ctx, query)
 	if err != nil {
+		if errors.Is(err, domain.ErrInvalidPageToken) {
+			s.logger.Warn("invalid page token",
+				"page_token", req.PageToken)
+			return nil, status.Errorf(codes.InvalidArgument, "invalid page_token: malformed cursor")
+		}
 		s.logger.Error("failed to query observations",
 			"dataset_code", req.DatasetCode,
 			"error", err)
@@ -600,11 +603,12 @@ func (s *Server) ListObservations(ctx context.Context, req *pb.ListObservationsR
 	s.logger.Debug("listed observations",
 		"dataset_code", req.DatasetCode,
 		"count", len(pbObservations),
-		"total_count", totalCount)
+		"total_count", totalCount,
+		"has_more", nextPageToken != "")
 
 	return &pb.ListObservationsResponse{
 		Observations:  pbObservations,
-		NextPageToken: "", // TODO: Implement cursor-based pagination
+		NextPageToken: nextPageToken,
 		TotalCount:    int32(totalCount),
 	}, nil
 }
