@@ -443,11 +443,12 @@ func toEntity(po *domain.PaymentOrder) *PaymentOrderEntity {
 		entity.BucketID = &po.BucketID
 	}
 
-	// Serialize PaymentAttributes to JSON
+	// Serialize PaymentAttributes to JSON (NULL when empty to satisfy JSONB constraint)
 	if len(po.PaymentAttributes) > 0 {
 		attrs, err := json.Marshal(po.PaymentAttributes)
 		if err == nil {
-			entity.PaymentAttributes = string(attrs)
+			attrsStr := string(attrs)
+			entity.PaymentAttributes = &attrsStr
 		}
 	}
 
@@ -479,8 +480,8 @@ func toDomain(entity *PaymentOrderEntity) (*domain.PaymentOrder, error) {
 
 	// Deserialize PaymentAttributes from JSON
 	var paymentAttributes map[string]string
-	if entity.PaymentAttributes != "" {
-		if err := json.Unmarshal([]byte(entity.PaymentAttributes), &paymentAttributes); err != nil {
+	if entity.PaymentAttributes != nil && *entity.PaymentAttributes != "" {
+		if err := json.Unmarshal([]byte(*entity.PaymentAttributes), &paymentAttributes); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal payment attributes: %w", err)
 		}
 	}

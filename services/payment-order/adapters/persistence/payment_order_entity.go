@@ -56,7 +56,7 @@ type PaymentOrderEntity struct {
 
 	// Bucket-aware solvency fields for fungibility constraints
 	InstrumentCode    string  `gorm:"column:instrument_code;size:32"`
-	PaymentAttributes string  `gorm:"column:payment_attributes;type:jsonb"` // JSON map[string]string
+	PaymentAttributes *string `gorm:"column:payment_attributes;type:jsonb"` // JSON map[string]string, NULL when empty
 	BucketID          *string `gorm:"column:bucket_id;size:255"`
 
 	// Audit fields
