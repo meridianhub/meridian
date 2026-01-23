@@ -3,6 +3,8 @@ package health
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -273,6 +275,200 @@ func TestKafkaChecker_Check_Unhealthy(t *testing.T) {
 	}
 	if result.Error == nil {
 		t.Error("Error should not be nil for unhealthy Kafka")
+	}
+}
+
+const componentNameHTTP = "http-test"
+
+// TestNewHTTPChecker_PanicsEmptyName verifies panic on empty name
+func TestNewHTTPChecker_PanicsEmptyName(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("Expected panic for empty name")
+		}
+	}()
+	NewHTTPChecker(HTTPCheckerConfig{
+		Name:     "",
+		Endpoint: "http://example.com",
+	})
+}
+
+// TestNewHTTPChecker_PanicsEmptyEndpoint verifies panic on empty endpoint
+func TestNewHTTPChecker_PanicsEmptyEndpoint(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("Expected panic for empty endpoint")
+		}
+	}()
+	NewHTTPChecker(HTTPCheckerConfig{
+		Name:     "test",
+		Endpoint: "",
+	})
+}
+
+// TestHTTPChecker_Name verifies the checker name
+func TestHTTPChecker_Name(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	checker := NewHTTPChecker(HTTPCheckerConfig{
+		Name:     componentNameHTTP,
+		Endpoint: server.URL,
+	})
+	if checker.Name() != componentNameHTTP {
+		t.Errorf("Name() = %v, want %s", checker.Name(), componentNameHTTP)
+	}
+}
+
+// TestHTTPChecker_Check_Healthy tests successful HTTP check with 200 OK
+func TestHTTPChecker_Check_Healthy(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodHead {
+			t.Errorf("Expected HEAD request, got %s", r.Method)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	checker := NewHTTPChecker(HTTPCheckerConfig{
+		Name:     componentNameHTTP,
+		Endpoint: server.URL,
+		Timeout:  5 * time.Second,
+	})
+
+	result := checker.Check(context.Background())
+
+	if result.Name != componentNameHTTP {
+		t.Errorf("Name = %v, want %s", result.Name, componentNameHTTP)
+	}
+	if result.Status != StatusHealthy {
+		t.Errorf("Status = %v, want %v (error: %v)", result.Status, StatusHealthy, result.Error)
+	}
+	if result.Error != nil {
+		t.Errorf("Error = %v, want nil", result.Error)
+	}
+	if result.ResponseTime <= 0 {
+		t.Error("ResponseTime should be > 0")
+	}
+}
+
+// TestHTTPChecker_Check_Healthy2xx tests various 2xx status codes
+func TestHTTPChecker_Check_Healthy2xx(t *testing.T) {
+	statusCodes := []int{200, 201, 202, 204, 299}
+
+	for _, code := range statusCodes {
+		t.Run(http.StatusText(code), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(code)
+			}))
+			defer server.Close()
+
+			checker := NewHTTPChecker(HTTPCheckerConfig{
+				Name:     componentNameHTTP,
+				Endpoint: server.URL,
+			})
+
+			result := checker.Check(context.Background())
+
+			if result.Status != StatusHealthy {
+				t.Errorf("Status = %v, want %v for status code %d", result.Status, StatusHealthy, code)
+			}
+		})
+	}
+}
+
+// TestHTTPChecker_Check_UnhealthyStatusCode tests non-2xx status codes
+func TestHTTPChecker_Check_UnhealthyStatusCode(t *testing.T) {
+	statusCodes := []int{400, 404, 500, 503}
+
+	for _, code := range statusCodes {
+		t.Run(http.StatusText(code), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(code)
+			}))
+			defer server.Close()
+
+			checker := NewHTTPChecker(HTTPCheckerConfig{
+				Name:     componentNameHTTP,
+				Endpoint: server.URL,
+			})
+
+			result := checker.Check(context.Background())
+
+			if result.Status != StatusUnhealthy {
+				t.Errorf("Status = %v, want %v for status code %d", result.Status, StatusUnhealthy, code)
+			}
+			if result.Error == nil {
+				t.Error("Error should not be nil for non-2xx status")
+			}
+		})
+	}
+}
+
+// TestHTTPChecker_Check_Timeout tests timeout behavior
+func TestHTTPChecker_Check_Timeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	checker := NewHTTPChecker(HTTPCheckerConfig{
+		Name:     componentNameHTTP,
+		Endpoint: server.URL,
+		Timeout:  50 * time.Millisecond,
+	})
+
+	result := checker.Check(context.Background())
+
+	if result.Status != StatusUnhealthy {
+		t.Errorf("Status = %v, want %v", result.Status, StatusUnhealthy)
+	}
+	if result.Error == nil {
+		t.Error("Error should not be nil for timeout")
+	}
+}
+
+// TestHTTPChecker_Check_NetworkError tests network error handling
+func TestHTTPChecker_Check_NetworkError(t *testing.T) {
+	// Use non-routable IP to simulate network failure
+	checker := NewHTTPChecker(HTTPCheckerConfig{
+		Name:     componentNameHTTP,
+		Endpoint: "http://192.0.2.1:9999", // TEST-NET-1, guaranteed to fail
+		Timeout:  1 * time.Second,
+	})
+
+	result := checker.Check(context.Background())
+
+	if result.Status != StatusUnhealthy {
+		t.Errorf("Status = %v, want %v", result.Status, StatusUnhealthy)
+	}
+	if result.Error == nil {
+		t.Error("Error should not be nil for network error")
+	}
+}
+
+// TestHTTPChecker_Check_CustomHTTPClient tests using a custom HTTP client
+func TestHTTPChecker_Check_CustomHTTPClient(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	customClient := &http.Client{Timeout: 10 * time.Second}
+
+	checker := NewHTTPChecker(HTTPCheckerConfig{
+		Name:       componentNameHTTP,
+		Endpoint:   server.URL,
+		HTTPClient: customClient,
+	})
+
+	result := checker.Check(context.Background())
+
+	if result.Status != StatusHealthy {
+		t.Errorf("Status = %v, want %v", result.Status, StatusHealthy)
 	}
 }
 
