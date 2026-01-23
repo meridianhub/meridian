@@ -57,6 +57,7 @@ type PaymentOrchestrator struct {
 	financialAccountingClient FinancialAccountingClient
 	internalBankAccountClient InternalBankAccountClient // Optional - for internal clearing
 	referenceDataClient       ReferenceDataClient       // Optional - for bucket-aware solvency
+	bucketEvaluator           *BucketEvaluator          // Cached CEL evaluator for bucket IDs
 	accountResolver           *AccountResolver          // Optional - resolves clearing accounts dynamically
 	gatewayAccountConfig      *config.GatewayAccountConfig
 	kafkaPublisher            KafkaPublisher
@@ -107,6 +108,12 @@ func NewPaymentOrchestrator(cfg PaymentOrchestratorConfig) (*PaymentOrchestrator
 		}
 	}
 
+	// Create bucket evaluator for CEL expression caching across requests
+	bucketEvaluator, err := NewBucketEvaluator(cfg.Logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create bucket evaluator: %w", err)
+	}
+
 	return &PaymentOrchestrator{
 		logger:                    cfg.Logger,
 		repo:                      cfg.Repo,
@@ -115,6 +122,7 @@ func NewPaymentOrchestrator(cfg PaymentOrchestratorConfig) (*PaymentOrchestrator
 		financialAccountingClient: cfg.FinancialAccountingClient,
 		internalBankAccountClient: cfg.InternalBankAccountClient,
 		referenceDataClient:       cfg.ReferenceDataClient,
+		bucketEvaluator:           bucketEvaluator,
 		accountResolver:           accountResolver,
 		gatewayAccountConfig:      cfg.GatewayAccountConfig,
 		kafkaPublisher:            cfg.KafkaPublisher,
@@ -309,14 +317,8 @@ func (o *PaymentOrchestrator) evaluateBucketID(ctx context.Context, po *domain.P
 		return "", nil
 	}
 
-	// Create bucket evaluator (could be cached on orchestrator for better performance)
-	evaluator, err := NewBucketEvaluator(o.logger)
-	if err != nil {
-		return "", fmt.Errorf("failed to create bucket evaluator: %w", err)
-	}
-
-	// Evaluate the bucket ID
-	bucketID, err := evaluator.Evaluate(ctx, instrument.FungibilityKeyExpression, BucketEvalContext{
+	// Evaluate the bucket ID using cached evaluator
+	bucketID, err := o.bucketEvaluator.Evaluate(ctx, instrument.FungibilityKeyExpression, BucketEvalContext{
 		InstrumentCode: po.InstrumentCode,
 		Attributes:     po.PaymentAttributes,
 	})

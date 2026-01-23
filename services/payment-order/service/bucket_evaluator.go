@@ -18,7 +18,9 @@ import (
 var ErrBucketExpressionNull = errors.New("bucket expression returned null")
 
 // BucketEvaluator evaluates CEL expressions to compute bucket IDs for fungibility constraints.
-// It caches compiled CEL programs for performance and thread-safety.
+// It caches compiled CEL programs keyed by expression string for performance and thread-safety.
+// The cache is unbounded but expressions come from a finite set of instrument definitions,
+// so memory growth is limited to O(number of distinct instruments).
 type BucketEvaluator struct {
 	mu     sync.RWMutex
 	cache  map[string]cel.Program
