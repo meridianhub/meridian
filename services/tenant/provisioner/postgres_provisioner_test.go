@@ -1681,8 +1681,9 @@ func TestPostgresProvisioner_MigrationFailure_IncrementsServiceFailureMetric(t *
 	require.NoError(t, err)
 	defer prov.Close()
 
-	// Get initial metric count
-	initialCount := testutil.CollectAndCount(observability.GetServiceProvisioningFailuresMetric())
+	// Get initial metric value for the specific service label
+	counter := observability.GetServiceProvisioningFailuresMetric().WithLabelValues("failing-service")
+	initialVal := testutil.ToFloat64(counter)
 
 	// Attempt provisioning - should fail
 	err = prov.ProvisionSchemas(context.Background(), tenantID)
@@ -1690,6 +1691,6 @@ func TestPostgresProvisioner_MigrationFailure_IncrementsServiceFailureMetric(t *
 	assert.ErrorIs(t, err, ErrMigrationFailed)
 
 	// Verify the service failure metric was incremented
-	finalCount := testutil.CollectAndCount(observability.GetServiceProvisioningFailuresMetric())
-	assert.Greater(t, finalCount, initialCount, "Service failure metric should be incremented on migration failure")
+	finalVal := testutil.ToFloat64(counter)
+	assert.Equal(t, initialVal+1, finalVal, "Service failure metric should be incremented on migration failure")
 }
