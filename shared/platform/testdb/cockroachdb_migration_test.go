@@ -45,6 +45,7 @@ func TestAtlasMigrations_CockroachDBCompatibility(t *testing.T) {
 		"current-account",
 		"financial-accounting",
 		"internal-bank-account",
+		"market-information",
 		"party",
 		"payment-order",
 		"position-keeping",

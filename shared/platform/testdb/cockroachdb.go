@@ -4,6 +4,7 @@ package testdb
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -113,7 +114,7 @@ type CockroachDBConnectionInfo struct {
 	Port     string
 	Database string
 	User     string
-	ConnStr  string
+	ConnStr  string // Uses crdb:// scheme for Atlas compatibility
 }
 
 // SetupCockroachDBWithInfo creates a CockroachDB testcontainer and returns connection info
@@ -168,7 +169,10 @@ func SetupCockroachDBWithInfo(t *testing.T, opts ...PostgresOption) (CockroachDB
 	if err != nil {
 		t.Fatalf("Failed to get connection config: %v", err)
 	}
+	// Convert postgres:// to crdb:// for Atlas compatibility
+	// Atlas CLI now requires the crdb:// scheme for CockroachDB connections
 	connStr := connConfig.ConnString()
+	connStr = toAtlasCrdbURL(connStr)
 
 	info := CockroachDBConnectionInfo{
 		Host:     host,
@@ -185,4 +189,12 @@ func SetupCockroachDBWithInfo(t *testing.T, opts ...PostgresOption) (CockroachDB
 	}
 
 	return info, cleanup
+}
+
+// toAtlasCrdbURL converts a PostgreSQL connection string to use the crdb:// scheme
+// required by Atlas CLI for CockroachDB connections.
+func toAtlasCrdbURL(connStr string) string {
+	connStr = strings.Replace(connStr, "postgresql://", "crdb://", 1)
+	connStr = strings.Replace(connStr, "postgres://", "crdb://", 1)
+	return connStr
 }
