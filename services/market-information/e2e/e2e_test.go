@@ -422,7 +422,7 @@ func TestE2E_FXRateIngestionAndQuery(t *testing.T) {
 			ResolutionKey: stringPtr("USD/EUR"),
 		}
 
-		observations, err := tc.repos.Observation.Query(ctx, query)
+		observations, _, err := tc.repos.Observation.Query(ctx, query)
 		require.NoError(t, err)
 
 		assert.Len(t, observations, 1)
@@ -540,7 +540,7 @@ func TestE2E_EnergyTariffTemporalValidity(t *testing.T) {
 			DataSetCode:   "ENERGY_TARIFF",
 			ResolutionKey: stringPtr("PEAK_RATE"),
 		}
-		observations, err := tc.repos.Observation.Query(ctx, query)
+		observations, _, err := tc.repos.Observation.Query(ctx, query)
 		require.NoError(t, err)
 
 		// Should have 3 tariffs for different quarters
@@ -662,7 +662,7 @@ func TestE2E_BatchIngestionAndSupersession(t *testing.T) {
 			IncludeSuperseded: true,
 		}
 
-		observations, err := tc.repos.Observation.Query(ctx, query)
+		observations, _, err := tc.repos.Observation.Query(ctx, query)
 		require.NoError(t, err)
 
 		// Should have both observations
@@ -776,7 +776,7 @@ func TestE2E_AuditTrailAndKnowledgeLineage(t *testing.T) {
 			IncludeSuperseded: true,
 		}
 
-		observations, err := tc.repos.Observation.Query(ctx, query)
+		observations, _, err := tc.repos.Observation.Query(ctx, query)
 		require.NoError(t, err)
 
 		// Should have both ACTUAL (superseded) and VERIFIED (current)
@@ -895,7 +895,7 @@ func TestE2E_MultiTenantIsolation(t *testing.T) {
 			DataSetCode:   "SHARED_FX",
 			ResolutionKey: stringPtr("TENANT_A_RATE"),
 		}
-		obsA, err := tc.repos.Observation.Query(ctxTenantA, queryA)
+		obsA, _, err := tc.repos.Observation.Query(ctxTenantA, queryA)
 		require.NoError(t, err)
 		assert.Len(t, obsA, 1)
 		assert.Equal(t, "TENANT_A_RATE", obsA[0].ResolutionKey())
@@ -905,7 +905,7 @@ func TestE2E_MultiTenantIsolation(t *testing.T) {
 			DataSetCode:   "SHARED_FX",
 			ResolutionKey: stringPtr("TENANT_B_RATE"),
 		}
-		obsB, err := tc.repos.Observation.Query(ctxTenantB, queryB)
+		obsB, _, err := tc.repos.Observation.Query(ctxTenantB, queryB)
 		require.NoError(t, err)
 		assert.Len(t, obsB, 1)
 		assert.Equal(t, "TENANT_B_RATE", obsB[0].ResolutionKey())
@@ -1007,7 +1007,7 @@ func TestE2E_ConcurrentIngestion(t *testing.T) {
 			DataSetCode: "CONCURRENT_TEST",
 			Limit:       1000,
 		}
-		observations, err := tc.repos.Observation.Query(ctx, query)
+		observations, _, err := tc.repos.Observation.Query(ctx, query)
 		require.NoError(t, err)
 
 		assert.Equal(t, numWorkers*opsPerWorker, len(observations),
@@ -1077,7 +1077,7 @@ func TestE2E_AsyncOperationsWithAwait(t *testing.T) {
 					DataSetCode:   "ASYNC_TEST",
 					ResolutionKey: &resKey,
 				}
-				observations, err := tc.repos.Observation.Query(ctx, query)
+				observations, _, err := tc.repos.Observation.Query(ctx, query)
 				if err != nil || len(observations) == 0 {
 					return false
 				}
