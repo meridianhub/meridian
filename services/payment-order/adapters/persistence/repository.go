@@ -3,6 +3,7 @@ package persistence
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -362,6 +363,9 @@ func (r *PaymentOrderRepository) Update(ctx context.Context, po *domain.PaymentO
 				"lien_execution_status":   newEntity.LienExecutionStatus,
 				"lien_execution_attempts": newEntity.LienExecutionAttempts,
 				"lien_execution_error":    newEntity.LienExecutionError,
+				"instrument_code":         newEntity.InstrumentCode,
+				"payment_attributes":      newEntity.PaymentAttributes,
+				"bucket_id":               newEntity.BucketID,
 				"updated_at":              newEntity.UpdatedAt,
 				"reserved_at":             newEntity.ReservedAt,
 				"executing_at":            newEntity.ExecutingAt,
@@ -415,6 +419,7 @@ func toEntity(po *domain.PaymentOrder) *PaymentOrderEntity {
 		FailureReason:         po.FailureReason,
 		ErrorCode:             po.ErrorCode,
 		LienExecutionAttempts: po.LienExecutionAttempts,
+		InstrumentCode:        po.InstrumentCode,
 		Version:               po.Version,
 		CreatedAt:             po.CreatedAt,
 		UpdatedAt:             po.UpdatedAt,
@@ -433,6 +438,17 @@ func toEntity(po *domain.PaymentOrder) *PaymentOrderEntity {
 	}
 	if po.LienExecutionError != "" {
 		entity.LienExecutionError = &po.LienExecutionError
+	}
+	if po.BucketID != "" {
+		entity.BucketID = &po.BucketID
+	}
+
+	// Serialize PaymentAttributes to JSON
+	if len(po.PaymentAttributes) > 0 {
+		attrs, err := json.Marshal(po.PaymentAttributes)
+		if err == nil {
+			entity.PaymentAttributes = string(attrs)
+		}
 	}
 
 	return entity
@@ -456,6 +472,19 @@ func toDomain(entity *PaymentOrderEntity) (*domain.PaymentOrder, error) {
 		lienExecutionError = *entity.LienExecutionError
 	}
 
+	var bucketID string
+	if entity.BucketID != nil {
+		bucketID = *entity.BucketID
+	}
+
+	// Deserialize PaymentAttributes from JSON
+	var paymentAttributes map[string]string
+	if entity.PaymentAttributes != "" {
+		if err := json.Unmarshal([]byte(entity.PaymentAttributes), &paymentAttributes); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal payment attributes: %w", err)
+		}
+	}
+
 	return &domain.PaymentOrder{
 		ID:                    entity.ID,
 		DebtorAccountID:       entity.DebtorAccountID,
@@ -473,6 +502,9 @@ func toDomain(entity *PaymentOrderEntity) (*domain.PaymentOrder, error) {
 		LienExecutionStatus:   lienExecutionStatus,
 		LienExecutionAttempts: entity.LienExecutionAttempts,
 		LienExecutionError:    lienExecutionError,
+		InstrumentCode:        entity.InstrumentCode,
+		PaymentAttributes:     paymentAttributes,
+		BucketID:              bucketID,
 		Version:               entity.Version,
 		CreatedAt:             entity.CreatedAt,
 		UpdatedAt:             entity.UpdatedAt,

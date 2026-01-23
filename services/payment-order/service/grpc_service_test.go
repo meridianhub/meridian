@@ -393,10 +393,13 @@ type MockCurrentAccountClient struct {
 	executeLienDone chan struct{}
 	// executeLienDoneOnce ensures executeLienDone is closed only once (prevents race condition)
 	executeLienDoneOnce sync.Once
+	// lastInitiateLienRequest captures the last InitiateLien request for verification
+	lastInitiateLienRequest *currentaccountv1.InitiateLienRequest
 }
 
-func (m *MockCurrentAccountClient) InitiateLien(_ context.Context, _ *currentaccountv1.InitiateLienRequest) (*currentaccountv1.InitiateLienResponse, error) {
+func (m *MockCurrentAccountClient) InitiateLien(_ context.Context, req *currentaccountv1.InitiateLienRequest) (*currentaccountv1.InitiateLienResponse, error) {
 	m.initiateLienCalled = true
+	m.lastInitiateLienRequest = req
 	if m.initiateLienErr != nil {
 		return nil, m.initiateLienErr
 	}

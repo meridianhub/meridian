@@ -109,6 +109,16 @@ type PaymentOrder struct {
 	LienExecutionStatus   LienExecutionStatus
 	LienExecutionAttempts int
 	LienExecutionError    string
+
+	// InstrumentCode is the payment instrument code (e.g., "RICE-v1", "USD").
+	// Used to look up fungibility_key_expression from reference-data service.
+	InstrumentCode string
+	// PaymentAttributes are instrument-specific metadata for fungibility evaluation.
+	// Example: {"grade": "A", "lot_number": "LOT123"} for rice payments.
+	PaymentAttributes map[string]string
+	// BucketID is the evaluated fungibility bucket key (computed from PaymentAttributes).
+	// Empty string means default fungibility (all quantities are fungible).
+	BucketID string
 }
 
 // NewPaymentOrder creates a new payment order in INITIATED status.
