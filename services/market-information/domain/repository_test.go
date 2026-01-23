@@ -82,6 +82,10 @@ func (m *mockObservationRepository) RetrieveObservation(_ context.Context, _ str
 	return MarketPriceObservation{}, ErrObservationNotFound
 }
 
+func (m *mockObservationRepository) CountByDataset(_ context.Context, _ string, _ bool) (int64, error) {
+	return int64(len(m.recordedObservations)), nil
+}
+
 // Verify mockObservationRepository implements ObservationRepository
 var _ ObservationRepository = (*mockObservationRepository)(nil)
 

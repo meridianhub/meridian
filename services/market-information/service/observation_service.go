@@ -165,7 +165,7 @@ func (s *Server) RecordObservation(ctx context.Context, req *pb.RecordObservatio
 
 	// 13. Return proto response
 	return &pb.RecordObservationResponse{
-		Observation: domainObservationToProto(observation, req.Attributes),
+		Observation: domainObservationToProto(observation, req.Attributes, dataset.Version()),
 	}, nil
 }
 
@@ -437,7 +437,7 @@ func (s *Server) RecordObservationBatch(ctx context.Context, req *pb.RecordObser
 
 		results[i] = &pb.BatchObservationResult{
 			Success:         true,
-			Observation:     domainObservationToProto(observation, entry.Attributes),
+			Observation:     domainObservationToProto(observation, entry.Attributes, dataset.Version()),
 			ClientReference: entry.ClientReference,
 			Index:           int32(i),
 		}
@@ -457,6 +457,19 @@ func (s *Server) RecordObservationBatch(ctx context.Context, req *pb.RecordObser
 		SuccessCount: successCount,
 		FailureCount: failureCount,
 	}, nil
+}
+
+// getDatasetVersion looks up the version for a dataset by code.
+// Returns 1 as fallback if the dataset cannot be found.
+func (s *Server) getDatasetVersion(ctx context.Context, datasetCode string) int {
+	dataset, err := s.dataSetRepo.FindByCode(ctx, datasetCode)
+	if err != nil {
+		s.logger.Warn("failed to get dataset version, using fallback",
+			"dataset_code", datasetCode,
+			"error", err)
+		return 1 // Fallback to version 1
+	}
+	return dataset.Version()
 }
 
 // RetrieveObservation fetches a specific observation with bi-temporal query support.
@@ -502,8 +515,11 @@ func (s *Server) RetrieveObservation(ctx context.Context, req *pb.RetrieveObserv
 		}
 	}
 
+	// Get dataset version for proto conversion
+	datasetVersion := s.getDatasetVersion(ctx, observation.DataSetCode())
+
 	return &pb.RetrieveObservationResponse{
-		Observation: domainObservationToProto(observation, nil),
+		Observation: domainObservationToProto(observation, nil, datasetVersion),
 	}, nil
 }
 
@@ -565,21 +581,35 @@ func (s *Server) ListObservations(ctx context.Context, req *pb.ListObservationsR
 		return nil, status.Errorf(codes.Internal, "failed to query observations: %v", err)
 	}
 
+	// Get total count for pagination info
+	totalCount, err := s.observationRepo.CountByDataset(ctx, req.DatasetCode, req.IncludeSuperseded)
+	if err != nil {
+		// Log warning but don't fail the request - 0 means unknown per proto spec
+		s.logger.Warn("failed to get observation count",
+			"dataset_code", req.DatasetCode,
+			"error", err)
+		totalCount = 0
+	}
+
+	// Get dataset version for proto conversion
+	datasetVersion := s.getDatasetVersion(ctx, req.DatasetCode)
+
 	// Convert to proto messages
 	pbObservations := make([]*pb.MarketPriceObservation, len(observations))
 	for i, obs := range observations {
-		pbObservations[i] = domainObservationToProto(obs, nil)
+		pbObservations[i] = domainObservationToProto(obs, nil, datasetVersion)
 	}
 
 	s.logger.Debug("listed observations",
 		"dataset_code", req.DatasetCode,
 		"count", len(pbObservations),
+		"total_count", totalCount,
 		"has_more", nextPageToken != "")
 
 	return &pb.ListObservationsResponse{
 		Observations:  pbObservations,
 		NextPageToken: nextPageToken,
-		TotalCount:    0, // 0 means unknown per proto spec - count query would be expensive
+		TotalCount:    int32(totalCount),
 	}, nil
 }
 
@@ -824,11 +854,13 @@ func domainQualityLevelToProto(domainQuality domain.QualityLevel) pb.QualityLeve
 }
 
 // domainObservationToProto converts a domain MarketPriceObservation to proto.
-func domainObservationToProto(obs domain.MarketPriceObservation, attributes []*quantityv1.AttributeEntry) *pb.MarketPriceObservation {
+// The datasetVersion parameter should be obtained from the dataset definition.
+// If the version cannot be determined, pass 1 as a fallback.
+func domainObservationToProto(obs domain.MarketPriceObservation, attributes []*quantityv1.AttributeEntry, datasetVersion int) *pb.MarketPriceObservation {
 	pbObs := &pb.MarketPriceObservation{
 		Id:                 obs.ID().String(),
 		DatasetCode:        obs.DataSetCode(),
-		DatasetVersion:     1, // TODO: Track dataset version in observation
+		DatasetVersion:     int32(datasetVersion),
 		ResolutionKeyValue: obs.ResolutionKey(),
 		ObservedAt:         timestamppb.New(obs.ObservedAt()),
 		ValidFrom:          timestamppb.New(obs.ValidFrom()),

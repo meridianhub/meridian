@@ -950,3 +950,113 @@ func TestObservationRepository_HierarchicalLookup_RestrictedAccessInactive(t *te
 	assert.ErrorIs(t, err, domain.ErrAccessDenied,
 		"RESTRICTED dataset should deny access with inactive entitlement")
 }
+
+func TestObservationRepository_CountByDataset_Basic(t *testing.T) {
+	tc := testhelpers.SetupTestContainer(t)
+	defer tc.Cleanup(t)
+
+	ctx := context.Background()
+	_, source := setupTestDataSetAndSource(t, tc)
+
+	now := time.Now()
+
+	// Insert 5 observations
+	for i := 0; i < 5; i++ {
+		obs, err := domain.NewMarketPriceObservation(
+			"FX_RATE_TEST",
+			source.ID(),
+			"EUR/USD/"+string(rune('0'+i)),
+			decimal.NewFromFloat(1.08+float64(i)*0.001),
+			"USD",
+			now.Add(time.Duration(i)*time.Minute),
+			now,
+			now.Add(24*time.Hour),
+			uuid.New(),
+			domain.QualityLevelActual,
+			source.TrustLevel(),
+		)
+		require.NoError(t, err)
+		err = tc.Repos.Observation.Record(ctx, obs)
+		require.NoError(t, err)
+	}
+
+	// Count should be 5
+	count, err := tc.Repos.Observation.CountByDataset(ctx, "FX_RATE_TEST", false)
+	require.NoError(t, err)
+	assert.Equal(t, int64(5), count)
+}
+
+func TestObservationRepository_CountByDataset_ExcludesSuperseded(t *testing.T) {
+	tc := testhelpers.SetupTestContainer(t)
+	defer tc.Cleanup(t)
+
+	ctx := context.Background()
+	_, source := setupTestDataSetAndSource(t, tc)
+
+	now := time.Now()
+
+	// Insert 5 observations for the same resolution key
+	// They will progressively supersede each other based on quality
+	for i := 0; i < 5; i++ {
+		quality := domain.QualityLevelEstimate
+		if i >= 3 {
+			quality = domain.QualityLevelActual
+		}
+		if i >= 4 {
+			quality = domain.QualityLevelVerified
+		}
+		obs, err := domain.NewMarketPriceObservation(
+			"FX_RATE_TEST",
+			source.ID(),
+			"EUR/USD",
+			decimal.NewFromFloat(1.08+float64(i)*0.001),
+			"USD",
+			now.Add(time.Duration(i)*time.Minute),
+			now,
+			now.Add(24*time.Hour),
+			uuid.New(),
+			quality,
+			source.TrustLevel(),
+		)
+		require.NoError(t, err)
+		err = tc.Repos.Observation.Record(ctx, obs)
+		require.NoError(t, err)
+	}
+
+	// Count without superseded - should exclude the ones that were superseded
+	countWithoutSuperseded, err := tc.Repos.Observation.CountByDataset(ctx, "FX_RATE_TEST", false)
+	require.NoError(t, err)
+
+	// Count with superseded - should include all 5
+	countWithSuperseded, err := tc.Repos.Observation.CountByDataset(ctx, "FX_RATE_TEST", true)
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(5), countWithSuperseded)
+	assert.Less(t, countWithoutSuperseded, countWithSuperseded,
+		"Non-superseded count should be less than total count")
+}
+
+func TestObservationRepository_CountByDataset_EmptyDataset(t *testing.T) {
+	tc := testhelpers.SetupTestContainer(t)
+	defer tc.Cleanup(t)
+
+	ctx := context.Background()
+	// Setup creates dataset but we don't insert any observations
+	setupTestDataSetAndSource(t, tc)
+
+	// Count for empty dataset should be 0
+	count, err := tc.Repos.Observation.CountByDataset(ctx, "FX_RATE_TEST", false)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), count)
+}
+
+func TestObservationRepository_CountByDataset_NonExistentDataset(t *testing.T) {
+	tc := testhelpers.SetupTestContainer(t)
+	defer tc.Cleanup(t)
+
+	ctx := context.Background()
+
+	// Count for non-existent dataset should return ErrDataSetNotFound
+	_, err := tc.Repos.Observation.CountByDataset(ctx, "NON_EXISTENT_DATASET", false)
+	assert.ErrorIs(t, err, domain.ErrDataSetNotFound)
+}

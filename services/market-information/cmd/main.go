@@ -100,9 +100,10 @@ func run(logger *slog.Logger) error {
 
 	// Register health check service
 	healthChecker := service.NewHealthChecker(service.HealthCheckerConfig{
-		Logger:       logger,
-		ServiceName:  "market-information",
-		CheckTimeout: defaults.DefaultHealthCheckTimeout,
+		Logger:        logger,
+		ServiceName:   "market-information",
+		CheckTimeout:  defaults.DefaultHealthCheckTimeout,
+		ServiceConfig: cfg,
 	})
 	grpc_health_v1.RegisterHealthServer(grpcServer, healthChecker)
 

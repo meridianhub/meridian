@@ -142,3 +142,9 @@ func RecordAlertSent(provider, severity, status string) {
 func SetAlertDLQDepth(depth int) {
 	alertDLQDepth.Set(float64(depth))
 }
+
+// GetServiceProvisioningFailuresMetric returns the service provisioning failures counter
+// for use in tests that need to verify metric behavior.
+func GetServiceProvisioningFailuresMetric() *prometheus.CounterVec {
+	return serviceProvisioningFailures
+}
