@@ -51,6 +51,49 @@ var (
 	ErrCompilation = errors.New("CEL compilation failed")
 )
 
+// timeBasedAttributePatterns contains attribute names that suggest time-based bucketing.
+// Using these in fungibility expressions can cause bucket cardinality explosion.
+// For example, half-hourly periods create 17,520 buckets per year per meter.
+//
+// Time should be stored as position metadata for valuation, not as part of the bucket key.
+// See ADR-0013 for guidance on separating fungibility from valuation dimensions.
+var timeBasedAttributePatterns = []string{
+	"time",
+	"timestamp",
+	"date",
+	"period",
+	"hour",
+	"minute",
+	"second",
+	"day",
+	"week",
+	"month",
+	"year",
+	"settlement_period",
+	"trading_period",
+	"half_hour",
+	"halfhour",
+	"interval",
+	"slot",
+	"epoch",
+}
+
+// BucketKeyLintWarning represents a lint warning for bucket key expressions.
+type BucketKeyLintWarning struct {
+	// AttributeName is the detected time-based attribute name.
+	AttributeName string
+	// Message describes why this attribute may cause scalability issues.
+	Message string
+}
+
+// BucketKeyResult contains the compiled program and any lint warnings.
+type BucketKeyResult struct {
+	// Program is the compiled CEL program.
+	Program cel.Program
+	// Warnings contains lint warnings about potential scalability issues.
+	Warnings []BucketKeyLintWarning
+}
+
 // Compiler provides CEL expression compilation with security constraints.
 type Compiler struct {
 	validationEnv *cel.Env
@@ -130,7 +173,38 @@ func (c *Compiler) CompileValidation(expression string) (cel.Program, error) {
 // CompileBucketKey compiles a bucket key expression against the bucket key environment.
 // Returns a cel.Program that can be evaluated to generate a fungibility key.
 // The expression should return a string representing the bucket key.
+//
+// Note: Use CompileBucketKeyWithLint to also receive warnings about potential
+// scalability issues such as time-based attributes in the expression.
 func (c *Compiler) CompileBucketKey(expression string) (cel.Program, error) {
+	result, err := c.CompileBucketKeyWithLint(expression)
+	if err != nil {
+		return nil, err
+	}
+	return result.Program, nil
+}
+
+// CompileBucketKeyWithLint compiles a bucket key expression and returns lint warnings.
+// This method detects potential scalability issues such as time-based attributes
+// that could cause bucket cardinality explosion.
+//
+// Time-based attributes (e.g., settlement_period, hour, timestamp) should typically
+// be stored as position metadata for valuation purposes, not as part of the
+// fungibility key. Including them in the bucket key can create thousands of buckets
+// per day, leading to:
+//   - Storage bloat (17,520 buckets/year for half-hourly data)
+//   - Query performance degradation
+//   - Hitting the 10,000 bucket cardinality limit
+//
+// Example of problematic expression:
+//
+//	bucket_key([attributes["region"], attributes["settlement_period"]])  // WARNING!
+//
+// Recommended pattern:
+//
+//	bucket_key([attributes["region"], attributes["supplier"]])  // Fungibility only
+//	// Store settlement_period as position metadata for valuation
+func (c *Compiler) CompileBucketKeyWithLint(expression string) (*BucketKeyResult, error) {
 	if err := validateExpressionConstraints(expression); err != nil {
 		return nil, err
 	}
@@ -145,7 +219,53 @@ func (c *Compiler) CompileBucketKey(expression string) (cel.Program, error) {
 		return nil, errors.Join(ErrCompilation, err)
 	}
 
-	return prg, nil
+	// Lint the expression for time-based attributes
+	warnings := lintBucketKeyExpression(expression)
+
+	return &BucketKeyResult{
+		Program:  prg,
+		Warnings: warnings,
+	}, nil
+}
+
+// lintBucketKeyExpression checks a bucket key expression for time-based attributes
+// that could cause bucket cardinality explosion.
+//
+// Returns warnings for any detected time-based attribute patterns.
+// This is a heuristic check that looks for common time-related attribute names
+// in the expression string.
+func lintBucketKeyExpression(expression string) []BucketKeyLintWarning {
+	var warnings []BucketKeyLintWarning
+	lowerExpr := strings.ToLower(expression)
+
+	for _, pattern := range timeBasedAttributePatterns {
+		// Check for attribute access patterns like attributes["period"] or attributes['period']
+		// Also check for the pattern appearing as a standalone identifier
+		accessPatterns := []string{
+			fmt.Sprintf(`attributes["%s"]`, pattern),
+			fmt.Sprintf(`attributes['%s']`, pattern),
+			fmt.Sprintf(`attributes["%s`, pattern),  // partial match for composite names
+			fmt.Sprintf(`attributes['%s`, pattern),  // partial match for composite names
+			fmt.Sprintf(`.%s`, pattern),             // dot access
+		}
+
+		for _, accessPattern := range accessPatterns {
+			if strings.Contains(lowerExpr, accessPattern) {
+				warnings = append(warnings, BucketKeyLintWarning{
+					AttributeName: pattern,
+					Message: fmt.Sprintf(
+						"time-based attribute %q detected in bucket key expression; "+
+							"this may cause bucket cardinality explosion (e.g., 17,520 buckets/year for half-hourly data); "+
+							"consider storing time as position metadata for valuation instead of including it in the fungibility key",
+						pattern,
+					),
+				})
+				break // Only warn once per pattern
+			}
+		}
+	}
+
+	return warnings
 }
 
 // validateExpressionConstraints checks that an expression meets security constraints.

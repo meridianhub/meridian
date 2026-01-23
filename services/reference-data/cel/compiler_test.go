@@ -543,3 +543,197 @@ func BenchmarkBucketKeyGeneration(b *testing.B) {
 		}
 	}
 }
+
+func TestCompileBucketKeyWithLint(t *testing.T) {
+	c, err := NewCompiler()
+	require.NoError(t, err)
+
+	tests := []struct {
+		name             string
+		expression       string
+		wantErr          bool
+		wantWarnings     int
+		wantAttrPatterns []string
+	}{
+		{
+			name:             "no time attributes - no warnings",
+			expression:       `bucket_key([attributes["region"], attributes["supplier"]])`,
+			wantErr:          false,
+			wantWarnings:     0,
+			wantAttrPatterns: nil,
+		},
+		{
+			name:             "settlement_period - warning",
+			expression:       `bucket_key([attributes["region"], attributes["settlement_period"]])`,
+			wantErr:          false,
+			wantWarnings:     1,
+			wantAttrPatterns: []string{"settlement_period"},
+		},
+		{
+			name:             "timestamp - warning",
+			expression:       `bucket_key([attributes["timestamp"], attributes["region"]])`,
+			wantErr:          false,
+			wantWarnings:     1,
+			wantAttrPatterns: []string{"timestamp"},
+		},
+		{
+			name:             "hour - warning",
+			expression:       `bucket_key([attributes["hour"], attributes["region"]])`,
+			wantErr:          false,
+			wantWarnings:     1,
+			wantAttrPatterns: []string{"hour"},
+		},
+		{
+			name:             "half_hour - warning",
+			expression:       `bucket_key([attributes["half_hour"], attributes["region"]])`,
+			wantErr:          false,
+			wantWarnings:     1,
+			wantAttrPatterns: []string{"half_hour"},
+		},
+		{
+			name:             "period - warning",
+			expression:       `bucket_key([attributes["period"], attributes["type"]])`,
+			wantErr:          false,
+			wantWarnings:     1,
+			wantAttrPatterns: []string{"period"},
+		},
+		{
+			name:             "date - warning",
+			expression:       `bucket_key([attributes["date"], attributes["supplier"]])`,
+			wantErr:          false,
+			wantWarnings:     1,
+			wantAttrPatterns: []string{"date"},
+		},
+		{
+			name:             "multiple time attributes - multiple warnings",
+			expression:       `bucket_key([attributes["date"], attributes["hour"], attributes["period"]])`,
+			wantErr:          false,
+			wantWarnings:     3,
+			wantAttrPatterns: []string{"date", "hour", "period"},
+		},
+		{
+			name:             "time in composite name - warning",
+			expression:       `bucket_key([attributes["trading_period_id"], attributes["region"]])`,
+			wantErr:          false,
+			wantWarnings:     1,
+			wantAttrPatterns: []string{"trading_period"},
+		},
+		{
+			name:             "case insensitive - warning",
+			expression:       `bucket_key([attributes["TIMESTAMP"], attributes["region"]])`,
+			wantErr:          false,
+			wantWarnings:     1,
+			wantAttrPatterns: []string{"timestamp"},
+		},
+		{
+			name:             "single quote - warning",
+			expression:       `bucket_key([attributes['settlement_period'], attributes['region']])`,
+			wantErr:          false,
+			wantWarnings:     1,
+			wantAttrPatterns: []string{"settlement_period"},
+		},
+		{
+			name:             "vintage is not time - no warning",
+			expression:       `bucket_key([attributes["vintage"], attributes["region"]])`,
+			wantErr:          false,
+			wantWarnings:     0,
+			wantAttrPatterns: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := c.CompileBucketKeyWithLint(tt.expression)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.NotNil(t, result.Program)
+
+			assert.Len(t, result.Warnings, tt.wantWarnings,
+				"expected %d warnings, got %d", tt.wantWarnings, len(result.Warnings))
+
+			if tt.wantAttrPatterns != nil {
+				for _, pattern := range tt.wantAttrPatterns {
+					found := false
+					for _, w := range result.Warnings {
+						if w.AttributeName == pattern {
+							found = true
+							assert.Contains(t, w.Message, "cardinality explosion",
+								"warning message should mention cardinality explosion")
+							break
+						}
+					}
+					assert.True(t, found, "expected warning for attribute %q", pattern)
+				}
+			}
+		})
+	}
+}
+
+func TestCompileBucketKeyWithLint_StillCompiles(t *testing.T) {
+	c, err := NewCompiler()
+	require.NoError(t, err)
+
+	// Even with warnings, the program should compile and execute correctly
+	result, err := c.CompileBucketKeyWithLint(`bucket_key([attributes["settlement_period"], attributes["region"]])`)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, result.Warnings, 1, "should have warning for settlement_period")
+
+	// Program should still work
+	evalResult, _, err := result.Program.Eval(map[string]any{
+		"attributes": map[string]string{
+			"settlement_period": "2024-01-15T14:00Z",
+			"region":            "uk-south",
+		},
+	})
+	require.NoError(t, err)
+
+	// Should return a valid bucket key (64-char hex string)
+	hash := evalResult.Value().(string)
+	assert.Len(t, hash, 64, "bucket_key should return 64-char SHA256 hex")
+}
+
+func TestLintBucketKeyExpression(t *testing.T) {
+	tests := []struct {
+		name         string
+		expression   string
+		wantWarnings int
+	}{
+		{"empty", "", 0},
+		{"no time attrs", `bucket_key([attributes["region"]])`, 0},
+		{"timestamp", `attributes["timestamp"]`, 1},
+		{"multiple time", `attributes["date"] + attributes["hour"]`, 2},
+		{"all time patterns", `timestamp date period hour minute second day week month year`, 10},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			warnings := lintBucketKeyExpression(tt.expression)
+			assert.Len(t, warnings, tt.wantWarnings)
+		})
+	}
+}
+
+func TestTimeBasedAttributePatterns(t *testing.T) {
+	// Verify expected patterns are in the list
+	expectedPatterns := []string{
+		"time", "timestamp", "date", "period", "hour", "minute", "second",
+		"day", "week", "month", "year", "settlement_period", "trading_period",
+		"half_hour", "halfhour", "interval", "slot", "epoch",
+	}
+
+	for _, pattern := range expectedPatterns {
+		found := false
+		for _, p := range timeBasedAttributePatterns {
+			if p == pattern {
+				found = true
+				break
+			}
+		}
+		assert.True(t, found, "expected pattern %q in timeBasedAttributePatterns", pattern)
+	}
+}
