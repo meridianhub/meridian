@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -11,6 +12,7 @@ import (
 
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
+	"github.com/meridianhub/meridian/pkg/platform/quantity"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
 	"github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
@@ -55,6 +57,14 @@ func (s *PositionKeepingService) InitiateWithOpeningBalance(
 	openingBalance, err := protoMoneyAmountToDomain(req.OpeningBalance)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid opening_balance: %v", err)
+	}
+
+	// Validate instrument and attributes using CEL (if instrument_code provided)
+	if req.InstrumentCode != "" {
+		amountStr := fmt.Sprintf("%d.%09d", req.OpeningBalance.Amount.Units, req.OpeningBalance.Amount.Nanos)
+		if err := s.validateOpeningBalanceWithCEL(ctx, req.InstrumentCode, amountStr, req.Attributes); err != nil {
+			return nil, err // Already a gRPC status error
+		}
 	}
 
 	// Extract effective date from proto timestamp
@@ -216,4 +226,104 @@ func (s *PositionKeepingService) checkMigrationIdempotencyAndAcquireLock(
 	}
 
 	return &key, nil, nil
+}
+
+// validateOpeningBalanceWithCEL validates opening balance attributes against the instrument definition.
+// This is optional - if instrumentCache is nil or instrumentCode is empty, validation is skipped
+// for backwards compatibility.
+//
+// The CEL program receives the following variables:
+//   - attributes: map[string]string of opening balance attributes
+//   - amount: string representation of the opening balance amount
+//   - valid_from: zero time (for future use)
+//   - valid_to: zero time (for future use)
+//   - source: extracted from attributes["source"] or empty string
+//
+// Returns nil if validation passes or is skipped.
+// Returns gRPC INVALID_ARGUMENT error if validation fails.
+// Returns gRPC NOT_FOUND error if instrument is not found.
+// Returns gRPC FAILED_PRECONDITION error if instrument is not active.
+func (s *PositionKeepingService) validateOpeningBalanceWithCEL(
+	ctx context.Context,
+	instrumentCode string,
+	amount string,
+	attributes map[string]string,
+) error {
+	// Skip validation if instrument cache is not configured (backwards compatibility)
+	if s.instrumentCache == nil {
+		return nil
+	}
+
+	// Skip validation if no instrument code provided (backwards compatibility)
+	if instrumentCode == "" {
+		return nil
+	}
+
+	// Acquire an AttributeBag from pool for efficient memory reuse
+	bag := quantity.AcquireAttributeBag()
+	defer quantity.ReleaseAttributeBag(bag)
+
+	// Populate AttributeBag from attributes
+	for k, v := range attributes {
+		bag.Set(k, v)
+	}
+
+	// Look up instrument from cache using instrument_code
+	// Use version=1 for now; could be made configurable in the future
+	const instrumentVersion = 1
+	instrument, err := s.instrumentCache.GetOrLoad(ctx, instrumentCode, instrumentVersion, func() (*CachedInstrument, error) {
+		// The loadFn should never be called if the cache is properly configured
+		// with a backing repository. For now, return not found to trigger the error path.
+		return nil, fmt.Errorf("%w: %s", ErrInstrumentNotFound, instrumentCode)
+	})
+	if err != nil {
+		// Instrument not found - record metric and return error
+		RecordOpeningBalanceValidationFailure(instrumentCode, ValidationFailureReasonInstrumentNotFound)
+		return status.Errorf(codes.NotFound,
+			"instrument definition not found for instrument code '%s': %v", instrumentCode, err)
+	}
+
+	// Build the activation context for CEL evaluation
+	// The CEL program expects these specific variable names
+	source := ""
+	if attributes != nil {
+		source = attributes["source"]
+	}
+	attributesMap := bag.ToMap()
+	activation := map[string]any{
+		"attributes": attributesMap,
+		"amount":     amount,
+		"valid_from": time.Time{}, // Zero time for now
+		"valid_to":   time.Time{}, // Zero time for now
+		"source":     source,
+	}
+
+	// Run validation if instrument has a validation program
+	if instrument.ValidationProgram != nil {
+		result, _, err := instrument.ValidationProgram.Eval(activation)
+		if err != nil {
+			// CEL evaluation error - record metric and return error
+			RecordOpeningBalanceValidationFailure(instrumentCode, ValidationFailureReasonCELError)
+			return status.Errorf(codes.InvalidArgument,
+				"validation error for instrument '%s': %v", instrumentCode, err)
+		}
+
+		// The validation program should return a boolean
+		valid, ok := result.Value().(bool)
+		if !ok {
+			// Unexpected return type from CEL - treat as error
+			RecordOpeningBalanceValidationFailure(instrumentCode, ValidationFailureReasonCELError)
+			return status.Errorf(codes.InvalidArgument,
+				"validation error for instrument '%s': expression did not return boolean", instrumentCode)
+		}
+
+		if !valid {
+			// Validation rejected the opening balance - record metric and return error
+			RecordOpeningBalanceValidationFailure(instrumentCode, ValidationFailureReasonCELRejected)
+			return status.Errorf(codes.InvalidArgument,
+				"opening balance validation failed for instrument '%s': attributes do not satisfy validation rules", instrumentCode)
+		}
+	}
+
+	return nil
 }

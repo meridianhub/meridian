@@ -337,6 +337,19 @@ message InitiateWithOpeningBalanceRequest {
 
   // idempotency_key ensures exactly-once processing.
   meridian.common.v1.IdempotencyKey idempotency_key = 5;
+
+  // instrument_code is the instrument code for CEL validation (optional).
+  // When provided, the opening balance attributes are validated against the instrument's
+  // validation expression (e.g., "USD", "EUR_ELECTRICITY_KWH").
+  // If empty, validation is skipped for backwards compatibility with legacy migrations.
+  string instrument_code = 6 [(buf.validate.field).string = {
+    max_len: 32
+    pattern: "^[A-Z][A-Z0-9_]*$"
+  }];
+
+  // attributes are optional key-value pairs for CEL validation (e.g., batch_id, grade, vintage).
+  // These are validated against the instrument's validation expression when instrument_code is set.
+  map<string, string> attributes = 7 [(buf.validate.field).map.max_pairs = 50];
 }
 
 // InitiateWithOpeningBalanceResponse returns the created log with opening balance.
