@@ -3,6 +3,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -11,6 +12,9 @@ import (
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 )
+
+// ErrBucketExpressionNull is returned when a bucket expression evaluates to null.
+var ErrBucketExpressionNull = errors.New("bucket expression returned null")
 
 // BucketEvaluator evaluates CEL expressions to compute bucket IDs for fungibility constraints.
 // It caches compiled CEL programs for performance and thread-safety.
@@ -146,7 +150,7 @@ func resultToString(result ref.Val) (string, error) {
 		// Try to convert to native and format as string
 		native := result.Value()
 		if native == nil {
-			return "", nil
+			return "", ErrBucketExpressionNull
 		}
 		return fmt.Sprintf("%v", native), nil
 	}
