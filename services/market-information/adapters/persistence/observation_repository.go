@@ -578,5 +578,39 @@ func (r *ObservationRepository) buildObservation(
 	return builder.Build()
 }
 
+// CountByDataset returns the total number of observations for a dataset.
+// When includeSuperseded is false, only active (non-superseded) observations are counted.
+// Returns 0 (not an error) if the dataset exists but has no observations.
+// Returns ErrDataSetNotFound if the dataset does not exist.
+func (r *ObservationRepository) CountByDataset(ctx context.Context, dataSetCode string, includeSuperseded bool) (int64, error) {
+	var count int64
+
+	err := r.withReadTransaction(ctx, func(tx pgx.Tx) error {
+		// Resolve dataset definition ID from code
+		dataSetDefID, err := r.resolveDataSetDefinitionID(ctx, tx, dataSetCode)
+		if err != nil {
+			return err
+		}
+
+		query := `
+			SELECT COUNT(*)
+			FROM market_price_observation
+			WHERE dataset_definition_id = $1`
+
+		if !includeSuperseded {
+			query += " AND superseded_by IS NULL"
+		}
+
+		err = tx.QueryRow(ctx, query, dataSetDefID).Scan(&count)
+		if err != nil {
+			return fmt.Errorf("failed to count observations: %w", err)
+		}
+
+		return nil
+	})
+
+	return count, err
+}
+
 // Ensure ObservationRepository implements domain.ObservationRepository.
 var _ domain.ObservationRepository = (*ObservationRepository)(nil)

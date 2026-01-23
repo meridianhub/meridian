@@ -93,6 +93,12 @@ type ObservationRepository interface {
 	//
 	// Returns ErrObservationNotFound if no matching observation exists.
 	RetrieveObservation(ctx context.Context, dataSetCode string, resolutionKey string, knowledgeBaseTime time.Time) (MarketPriceObservation, error)
+
+	// CountByDataset returns the total number of observations for a dataset.
+	// When includeSuperseded is false, only active (non-superseded) observations are counted.
+	// Returns 0 (not an error) if the dataset exists but has no observations.
+	// Returns ErrDataSetNotFound if the dataset does not exist.
+	CountByDataset(ctx context.Context, dataSetCode string, includeSuperseded bool) (int64, error)
 }
 
 // ObservationQuery specifies criteria for querying market price observations.
