@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"sync"
 
 	"github.com/google/cel-go/cel"
@@ -143,7 +144,7 @@ func resultToString(result ref.Val) (string, error) {
 	case types.Int:
 		return fmt.Sprintf("%d", int64(v)), nil
 	case types.Double:
-		return fmt.Sprintf("%f", float64(v)), nil
+		return strconv.FormatFloat(float64(v), 'f', -1, 64), nil
 	case types.Bool:
 		return fmt.Sprintf("%t", bool(v)), nil
 	default:
