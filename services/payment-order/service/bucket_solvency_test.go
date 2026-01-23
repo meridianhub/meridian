@@ -448,3 +448,32 @@ func TestPaymentOrchestrator_Orchestrate_UpdatesPaymentOrderWithBucketID(t *test
 	require.NoError(t, err)
 	assert.Equal(t, "RICE_V1:B", updated.BucketID, "bucket_id should be saved in payment order")
 }
+
+func TestPaymentOrchestrator_EvaluateBucketID_CELEvaluationFailure(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	repo := NewMockRepository()
+	refClient := NewMockReferenceDataClient()
+	refClient.AddInstrument("RICE_V1", &InstrumentInfo{
+		Code:                     "RICE_V1",
+		Version:                  1,
+		FungibilityKeyExpression: `attributes.grade`, // requires grade attribute
+	})
+
+	orchestrator, err := NewPaymentOrchestrator(PaymentOrchestratorConfig{
+		Logger:              logger,
+		Repo:                repo,
+		ReferenceDataClient: refClient,
+	})
+	require.NoError(t, err)
+
+	po := &domain.PaymentOrder{
+		ID:                uuid.New(),
+		InstrumentCode:    "RICE_V1",
+		PaymentAttributes: map[string]string{}, // missing "grade" attribute - will cause no_such_key error
+	}
+
+	// CEL evaluation failure should gracefully degrade to default bucket (empty string)
+	bucketID, err := orchestrator.evaluateBucketID(context.Background(), po)
+	require.NoError(t, err, "CEL evaluation failure should gracefully degrade, not error")
+	assert.Equal(t, "", bucketID, "should return empty bucket ID on CEL evaluation failure")
+}

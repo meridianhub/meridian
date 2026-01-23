@@ -318,12 +318,18 @@ func (o *PaymentOrchestrator) evaluateBucketID(ctx context.Context, po *domain.P
 	}
 
 	// Evaluate the bucket ID using cached evaluator
+	// On evaluation failure, gracefully degrade to default bucket (consistent with instrument lookup)
 	bucketID, err := o.bucketEvaluator.Evaluate(ctx, instrument.FungibilityKeyExpression, BucketEvalContext{
 		InstrumentCode: po.InstrumentCode,
 		Attributes:     po.PaymentAttributes,
 	})
 	if err != nil {
-		return "", fmt.Errorf("failed to evaluate bucket ID: %w", err)
+		o.logger.Warn("failed to evaluate bucket ID, using default bucket",
+			"payment_order_id", po.ID.String(),
+			"instrument_code", po.InstrumentCode,
+			"expression", instrument.FungibilityKeyExpression,
+			"error", err)
+		return "", nil
 	}
 
 	o.logger.Info("evaluated bucket ID for payment order",
