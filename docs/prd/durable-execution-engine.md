@@ -536,6 +536,10 @@ func (r *Runtime) executeStep(
     // Generate deterministic idempotency key
     idempotencyKey := fmt.Sprintf("saga_%s_step_%d", instance.ID, stepIndex)
 
+    // Generate deterministic causation_id (CRITICAL: must be stable across replays)
+    // Uses UUID v5 with saga instance as namespace and step index as name
+    causationID := uuid.NewSHA1(uuid.MustParse(instance.ID), []byte(fmt.Sprintf("step_%d", stepIndex)))
+
     // Check if step already completed (replay case)
     existing, err := r.stepResultRepo.GetByIdempotencyKey(ctx, idempotencyKey)
     if err == nil && existing != nil {
@@ -547,7 +551,7 @@ func (r *Runtime) executeStep(
     // Not yet executed - call the handler
     output, err := handler.Execute(ctx, StepContext{
         IdempotencyKey: idempotencyKey,
-        CausationID:    uuid.New(),
+        CausationID:    causationID,  // Deterministic - same on replay
         IsSimulation:   instance.IsSimulation,
         KnowledgeAt:    instance.KnowledgeAt,
     })
