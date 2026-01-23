@@ -64,9 +64,14 @@ func (e *BucketEvaluator) Evaluate(_ context.Context, expression string, evalCtx
 	}
 
 	// Build activation with context variables
+	// Ensure attributes is non-nil to prevent CEL map access issues
+	attrs := evalCtx.Attributes
+	if attrs == nil {
+		attrs = make(map[string]string)
+	}
 	activation := map[string]interface{}{
 		"instrument_code": evalCtx.InstrumentCode,
-		"attributes":      evalCtx.Attributes,
+		"attributes":      attrs,
 	}
 
 	// Evaluate the program

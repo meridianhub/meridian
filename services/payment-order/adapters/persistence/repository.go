@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -446,7 +447,13 @@ func toEntity(po *domain.PaymentOrder) *PaymentOrderEntity {
 	// Serialize PaymentAttributes to JSON (NULL when empty to satisfy JSONB constraint)
 	if len(po.PaymentAttributes) > 0 {
 		attrs, err := json.Marshal(po.PaymentAttributes)
-		if err == nil {
+		if err != nil {
+			// Log the error - this shouldn't happen with map[string]string
+			// but indicates a programming error if it does
+			slog.Error("failed to marshal payment attributes",
+				"error", err,
+				"payment_order_id", po.ID.String())
+		} else {
 			attrsStr := string(attrs)
 			entity.PaymentAttributes = &attrsStr
 		}
