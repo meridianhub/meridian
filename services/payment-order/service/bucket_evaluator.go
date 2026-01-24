@@ -12,10 +12,17 @@ import (
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
+	"github.com/google/cel-go/common/types/traits"
 )
 
 // ErrBucketExpressionNull is returned when a bucket expression evaluates to null.
 var ErrBucketExpressionNull = errors.New("bucket expression returned null")
+
+// ErrBucketExpressionList is returned when a bucket expression evaluates to a list (composite type).
+var ErrBucketExpressionList = errors.New("bucket expression must return a scalar, got list")
+
+// ErrBucketExpressionMap is returned when a bucket expression evaluates to a map (composite type).
+var ErrBucketExpressionMap = errors.New("bucket expression must return a scalar, got map")
 
 // BucketEvaluator evaluates CEL expressions to compute bucket IDs for fungibility constraints.
 // It caches compiled CEL programs keyed by expression string for performance and thread-safety.
@@ -144,21 +151,30 @@ func (e *BucketEvaluator) getOrCompile(expression string) (cel.Program, error) {
 }
 
 // resultToString converts a CEL result to a string.
+// Only scalar types are allowed; composite types (list/map) are rejected.
 func resultToString(result ref.Val) (string, error) {
 	switch v := result.(type) {
 	case types.String:
 		return string(v), nil
 	case types.Int:
 		return fmt.Sprintf("%d", int64(v)), nil
+	case types.Uint:
+		return strconv.FormatUint(uint64(v), 10), nil
 	case types.Double:
 		return strconv.FormatFloat(float64(v), 'f', -1, 64), nil
 	case types.Bool:
 		return fmt.Sprintf("%t", bool(v)), nil
 	default:
-		// Try to convert to native and format as string
 		native := result.Value()
 		if native == nil {
 			return "", ErrBucketExpressionNull
+		}
+		// Reject composite types (list/map) - bucket IDs must be scalar values
+		if _, ok := result.(traits.Lister); ok {
+			return "", ErrBucketExpressionList
+		}
+		if _, ok := result.(traits.Mapper); ok {
+			return "", ErrBucketExpressionMap
 		}
 		return fmt.Sprintf("%v", native), nil
 	}
