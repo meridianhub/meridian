@@ -191,15 +191,18 @@ func (r *StepHandlerRegistry) List() []string {
 }
 
 // defaultRegistry is the global registry with default handlers.
-var defaultRegistry *StepHandlerRegistry
+var (
+	defaultRegistry     *StepHandlerRegistry
+	defaultRegistryOnce sync.Once
+)
 
 // DefaultRegistry returns the global registry with all default handlers registered.
-// This is initialized on first call (lazy initialization).
+// This is initialized on first call using sync.Once for thread-safe lazy initialization.
 func DefaultRegistry() *StepHandlerRegistry {
-	if defaultRegistry == nil {
+	defaultRegistryOnce.Do(func() {
 		defaultRegistry = NewStepHandlerRegistry()
 		registerDefaultHandlers(defaultRegistry)
-	}
+	})
 	return defaultRegistry
 }
 
