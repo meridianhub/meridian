@@ -1,0 +1,100 @@
+syntax = "proto3";
+
+package meridian.saga.v1;
+
+import "buf/validate/validate.proto";
+import "google/api/annotations.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/saga/v1;sagav1";
+
+// SagaAdminService provides administrative operations for saga debugging and visualization.
+// These endpoints are intended for support teams to debug complex nested workflow failures.
+service SagaAdminService {
+  // GetCausationTree returns the full parent->child saga hierarchy for debugging.
+  // The tree includes all descendant sagas spawned from the root saga,
+  // along with their step execution details and failure information.
+  //
+  // Per FR-32: Enables Ken's support team to debug complex nested saga failures
+  // (e.g., energy settlement with 1 parent + 3 child sagas across pod restarts).
+  rpc GetCausationTree(GetCausationTreeRequest) returns (GetCausationTreeResponse) {
+    option (google.api.http) = {
+      get: "/admin/sagas/{saga_id}/causation-tree"
+    };
+  }
+}
+
+// GetCausationTreeRequest identifies the root saga for tree retrieval.
+message GetCausationTreeRequest {
+  // saga_id is the UUID of the root saga instance.
+  string saga_id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+// GetCausationTreeResponse contains the complete causation tree.
+message GetCausationTreeResponse {
+  // tree is the root node of the causation tree.
+  CausationTreeNode tree = 1;
+
+  // depth is the maximum depth of the tree (for observability).
+  int32 depth = 2;
+}
+
+// CausationTreeNode represents a saga instance in the causation tree.
+message CausationTreeNode {
+  // saga_id is the unique identifier for this saga instance.
+  string saga_id = 1;
+
+  // saga_name is the human-readable name of the saga definition.
+  string saga_name = 2;
+
+  // status is the current lifecycle state (PENDING, RUNNING, COMPLETED, FAILED, etc.).
+  string status = 3;
+
+  // steps contains the execution history of this saga.
+  repeated StepNode steps = 4;
+
+  // effective_at is when this saga's business logic took effect (bi-temporal).
+  google.protobuf.Timestamp effective_at = 5;
+
+  // knowledge_at is the point-in-time knowledge context for replay (bi-temporal).
+  google.protobuf.Timestamp knowledge_at = 6;
+
+  // failed_step contains details about the step that caused the saga to fail.
+  // Only populated if the saga failed.
+  FailedStep failed_step = 7;
+}
+
+// StepNode represents an executed step within a saga.
+message StepNode {
+  // index is the 0-based position of this step in the saga execution sequence.
+  int32 index = 1;
+
+  // name is the human-readable step identifier.
+  string name = 2;
+
+  // status is the step execution status (COMPLETED or FAILED).
+  string status = 3;
+
+  // executed_at is when this step was executed.
+  google.protobuf.Timestamp executed_at = 4;
+
+  // child_sagas contains sagas spawned by this step.
+  // Empty if this step did not spawn any child sagas.
+  repeated CausationTreeNode child_sagas = 5;
+
+  // error contains the error message if this step failed.
+  string error = 6;
+}
+
+// FailedStep contains information about a failed step for debugging.
+message FailedStep {
+  // index is the step index where the failure occurred.
+  int32 index = 1;
+
+  // error is the error message from the failed step.
+  string error = 2;
+
+  // error_category classifies the failure as TRANSIENT or FATAL.
+  // TRANSIENT errors may be retried, FATAL errors require manual intervention.
+  string error_category = 3;
+}
