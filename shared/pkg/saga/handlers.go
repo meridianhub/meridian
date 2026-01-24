@@ -57,6 +57,10 @@ type StarlarkContext struct {
 	// SagaExecutionID is the unique identifier for this saga execution.
 	SagaExecutionID uuid.UUID
 
+	// CorrelationID groups ALL related actions across the entire business operation (FR-24).
+	// This ID is propagated to all downstream events for distributed tracing.
+	CorrelationID uuid.UUID
+
 	// KnowledgeAt enables bi-temporal queries - what we knew at a specific point in time.
 	KnowledgeAt time.Time
 

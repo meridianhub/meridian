@@ -64,6 +64,13 @@ type TransactionalRepository interface {
 	BeginTx(ctx context.Context) (TxContext, error)
 }
 
+// TransactionalRepositoryWithOutbox extends TransactionalRepository with outbox support.
+// Use this when you need to write saga events atomically with step results (FR-31).
+type TransactionalRepositoryWithOutbox interface {
+	// BeginTxWithOutbox starts a new database transaction with outbox writing capability.
+	BeginTxWithOutbox(ctx context.Context) (TxContextWithOutbox, error)
+}
+
 // StepExecutor handles the execution of saga steps with idempotency and caching.
 // It implements the replay mechanism specified in FR-13 and FR-17.
 type StepExecutor struct {
@@ -244,6 +251,7 @@ func (e *StepExecutor) ExecuteStep(
 type TransactionalStepExecutor struct {
 	txRepo         TransactionalRepository
 	stepResultRepo StepResultRepository
+	eventPublisher EventPublisher
 	logger         *slog.Logger
 }
 
@@ -258,6 +266,13 @@ func NewTransactionalStepExecutor(txRepo TransactionalRepository) *Transactional
 // WithStepResultRepo sets the step result repository for cache lookups.
 func (e *TransactionalStepExecutor) WithStepResultRepo(repo StepResultRepository) *TransactionalStepExecutor {
 	e.stepResultRepo = repo
+	return e
+}
+
+// WithEventPublisher sets the event publisher for saga event emission (FR-24, FR-25).
+// When set, step completion and failure events are published via the outbox pattern.
+func (e *TransactionalStepExecutor) WithEventPublisher(publisher EventPublisher) *TransactionalStepExecutor {
+	e.eventPublisher = publisher
 	return e
 }
 
@@ -378,6 +393,185 @@ func (e *TransactionalStepExecutor) ExecuteStepInTx(
 	}
 
 	return output, nil
+}
+
+// ExecuteStepWithOutbox executes a saga step with atomic outbox event publishing.
+// This method extends ExecuteStepInTx by also writing saga events to the outbox
+// within the same database transaction, ensuring exactly-once event delivery (FR-31).
+//
+// Transaction affinity (CRITICAL):
+//  1. Insert saga_step_results
+//  2. Insert event_outbox entry for step completion/failure event
+//  3. Update saga_instances.current_step_index
+//  4. ALL in SAME transaction
+//
+// The outbox entry is processed by a background worker that publishes to Kafka.
+// If the pod crashes between Kafka publish and marking the entry as processed,
+// the entry will be republished (at-least-once, with idempotency).
+//
+//nolint:gocognit,gocyclo // Complexity is inherent to transactional outbox pattern
+func (e *TransactionalStepExecutor) ExecuteStepWithOutbox(
+	ctx context.Context,
+	instance *SagaInstance,
+	stepIndex int,
+	stepName string,
+	handler StepHandler,
+	input map[string]interface{},
+	txWithOutbox TxContextWithOutbox,
+) (interface{}, error) {
+	idempotencyKey := FormatIdempotencyKey(instance.ID, stepIndex)
+
+	// Check cache first (outside transaction for efficiency)
+	if e.stepResultRepo != nil {
+		cachedResult, err := e.stepResultRepo.FindByIdempotencyKey(ctx, idempotencyKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check step result cache: %w", err)
+		}
+		if cachedResult != nil {
+			e.logger.Info("cache hit for saga step (with outbox)",
+				"saga_id", instance.ID,
+				"step_index", stepIndex,
+				"correlation_id", instance.CorrelationID,
+			)
+			if cachedResult.Status == StepStatusFailed {
+				if cachedResult.Error != nil {
+					return nil, fmt.Errorf("%w: %s", ErrStepPreviouslyFailed, *cachedResult.Error)
+				}
+				return nil, ErrStepPreviouslyFailed
+			}
+			output, hydrateErr := hydrateOutputSnapshot(cachedResult.Result)
+			if hydrateErr != nil {
+				return nil, fmt.Errorf("failed to hydrate cached result: %w", hydrateErr)
+			}
+			return output, nil
+		}
+	}
+
+	// Execute the handler
+	output, handlerErr := handler(ctx, input)
+
+	// Generate deterministic causation_id (FR-17)
+	causationID := GenerateCausationID(instance.ID, stepIndex)
+
+	// Prepare step result
+	now := time.Now()
+	stepResult := &SagaStepResult{
+		ID:             uuid.New(),
+		SagaInstanceID: instance.ID,
+		StepIndex:      stepIndex,
+		StepName:       stepName,
+		IdempotencyKey: idempotencyKey,
+		CausationID:    &causationID,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+
+	// Prepare the saga event for the outbox
+	var sagaEvent Event
+
+	if handlerErr != nil {
+		errStr := handlerErr.Error()
+		stepResult.Status = StepStatusFailed
+		stepResult.Error = &errStr
+		stepResult.ErrorCategory = categorizeError(handlerErr)
+
+		// Create step failed event
+		errCat := ErrorCategoryFatal
+		if stepResult.ErrorCategory != nil && *stepResult.ErrorCategory == string(ErrorCategoryTransient) {
+			errCat = ErrorCategoryTransient
+		}
+		sagaEvent = NewStepFailedEvent(
+			instance.ID,
+			instance.CorrelationID,
+			causationID,
+			stepIndex,
+			stepName,
+			errStr,
+			errCat,
+		)
+	} else {
+		// Deep-copy output (FR-31)
+		deepCopiedOutput, copyErr := DeepCopyJSON(output)
+		if copyErr != nil {
+			return nil, fmt.Errorf("failed to deep-copy step output: %w", copyErr)
+		}
+		stepResult.Status = StepStatusCompleted
+		stepResult.Result = toJSONB(deepCopiedOutput)
+
+		// Create step completed event
+		sagaEvent = NewStepCompletedEvent(
+			instance.ID,
+			instance.CorrelationID,
+			causationID,
+			stepIndex,
+			stepName,
+			deepCopiedOutput,
+		)
+	}
+
+	// Ensure cleanup on panic or error
+	committed := false
+	defer func() {
+		if !committed {
+			_ = txWithOutbox.Rollback()
+		}
+	}()
+
+	// 1. Save step result in transaction
+	if err := txWithOutbox.SaveStepResult(ctx, stepResult); err != nil {
+		return nil, fmt.Errorf("failed to save step result in transaction: %w", err)
+	}
+
+	// 2. Write outbox entry in SAME transaction (FR-31 atomicity guarantee)
+	outboxEntry := createOutboxEntry(sagaEvent, instance.CorrelationID, causationID)
+	if err := txWithOutbox.WriteOutboxEntry(ctx, outboxEntry); err != nil {
+		return nil, fmt.Errorf("failed to write outbox entry in transaction: %w", err)
+	}
+
+	e.logger.Debug("outbox entry written atomically with step result",
+		"saga_id", instance.ID,
+		"step_index", stepIndex,
+		"event_type", sagaEvent.EventType(),
+		"correlation_id", instance.CorrelationID,
+	)
+
+	// 3. Update step index in transaction (only on success)
+	if handlerErr == nil {
+		if err := txWithOutbox.UpdateStepIndex(ctx, instance.ID, stepIndex+1); err != nil {
+			return nil, fmt.Errorf("failed to update step index in transaction: %w", err)
+		}
+	}
+
+	// 4. Commit the transaction - step result, outbox entry, and step index all committed together
+	if err := txWithOutbox.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+	committed = true
+
+	if handlerErr != nil {
+		return nil, handlerErr
+	}
+
+	return output, nil
+}
+
+// createOutboxEntry creates an OutboxEntry from an Event.
+func createOutboxEntry(event Event, correlationID, causationID uuid.UUID) *OutboxEntry {
+	payload, _ := json.Marshal(event) // Event types are designed to be JSON-serializable
+
+	entry := &OutboxEntry{
+		ID:            uuid.New(),
+		EventType:     string(event.EventType()),
+		AggregateID:   event.SagaID().String(),
+		AggregateType: "SagaInstance",
+		EventPayload:  payload,
+		CorrelationID: correlationID.String(),
+		CausationID:   causationID.String(),
+		Topic:         "saga-events", // Default topic, can be configured
+		ServiceName:   "saga",        // Default service name, can be configured
+	}
+
+	return entry
 }
 
 // FormatIdempotencyKey generates an idempotency key in the format: saga_{instance_id}_step_{index}
