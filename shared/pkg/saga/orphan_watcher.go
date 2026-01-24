@@ -353,12 +353,31 @@ func (w *OrphanWatcher) handleNotification(ctx context.Context, notification *pq
 		// Too soon - queue a scan for later if not already queued
 		if !w.scanQueued {
 			w.scanQueued = true
+			delay := w.watchConfig.NotificationDebounce - timeSinceLastScan
+			// Intentionally not passing ctx - the goroutine will use context.Background()
+			// since the original ctx may be cancelled by the time the debounce delay completes.
+			//nolint:contextcheck // Intentional: uses fresh context.Background() for delayed scan
 			go func() {
-				time.Sleep(w.watchConfig.NotificationDebounce - timeSinceLastScan)
+				// Wait for debounce delay or shutdown signal
+				select {
+				case <-time.After(delay):
+				case <-w.done:
+					w.scanMu.Lock()
+					w.scanQueued = false
+					w.scanMu.Unlock()
+					return
+				}
 				w.scanMu.Lock()
 				w.scanQueued = false
 				w.scanMu.Unlock()
-				w.performScan(ctx)
+				// Check if watcher is still running before scanning
+				select {
+				case <-w.done:
+					return
+				default:
+					// Use fresh context since original ctx may be cancelled
+					w.performScan(context.Background())
+				}
 			}()
 		}
 		w.scanMu.Unlock()

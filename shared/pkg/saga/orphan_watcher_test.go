@@ -447,12 +447,20 @@ func TestOrphanWatcherDebounce(t *testing.T) {
 	}
 
 	// Release all leases in rapid succession (simulating rapid notifications)
+	// PostgreSQL doesn't support LIMIT in UPDATE, so use CTE with ctid
 	for i := 0; i < 10; i++ {
 		_, _ = sqlDB.ExecContext(ctx, `
+			WITH to_upd AS (
+				SELECT ctid
+				FROM saga_instances
+				WHERE claimed_by_pod = 'rapid-dying-pod'
+				LIMIT 1
+				FOR UPDATE SKIP LOCKED
+			)
 			UPDATE saga_instances
 			SET claimed_by_pod = NULL, claimed_at = NULL, lease_expires_at = NULL
-			WHERE claimed_by_pod = 'rapid-dying-pod'
-			LIMIT 1
+			FROM to_upd
+			WHERE saga_instances.ctid = to_upd.ctid
 		`)
 		// Ignore errors - some updates may not match any rows
 		time.Sleep(10 * time.Millisecond) // Small delay between updates
