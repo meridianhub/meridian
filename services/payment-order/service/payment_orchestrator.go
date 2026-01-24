@@ -46,6 +46,18 @@ var (
 	ErrNilBookingLogResponse           = errors.New("financial accounting returned nil booking log")
 )
 
+// Parameter validation errors for PostLedgerEntriesFromParams.
+var (
+	ErrMissingPaymentOrderID     = errors.New("missing or invalid payment_order_id")
+	ErrMissingDebtorAccountID    = errors.New("missing or invalid debtor_account_id")
+	ErrMissingGatewayReferenceID = errors.New("missing or invalid gateway_reference_id")
+	ErrMissingAmountCents        = errors.New("missing or invalid amount_cents")
+	ErrMissingCurrency           = errors.New("missing or invalid currency")
+	ErrMissingIdempotencyKey     = errors.New("missing or invalid idempotency_key")
+	ErrParamKeyNotFound          = errors.New("param key not found")
+	ErrParamInvalidType          = errors.New("param has invalid type")
+)
+
 // PaymentOrchestrator encapsulates payment saga orchestration logic.
 // It handles the multi-step payment workflow including fund reservation,
 // gateway communication, ledger posting, and lien execution.
@@ -1169,6 +1181,92 @@ func (o *PaymentOrchestrator) updateLienExecutionStatus(
 // isVersionConflict checks if an error is a version conflict error
 func isVersionConflict(err error) bool {
 	return errors.Is(err, persistence.ErrPaymentOrderVersionConflict)
+}
+
+// PostLedgerEntriesFromParams creates double-entry bookkeeping entries using map params.
+// This method is used by Starlark saga handlers that pass parameters as maps.
+// It constructs a minimal PaymentOrder from the params and delegates to PostLedgerEntries.
+//
+// Required params:
+//   - payment_order_id: string
+//   - debtor_account_id: string
+//   - gateway_reference_id: string
+//   - amount_cents: int64
+//   - currency: string
+//   - idempotency_key: string
+//
+// Optional params:
+//   - internal_clearing_enabled: bool (overrides orchestrator setting if present)
+func (o *PaymentOrchestrator) PostLedgerEntriesFromParams(ctx context.Context, params map[string]any) (string, error) {
+	// Extract required parameters
+	paymentOrderIDStr, ok := params["payment_order_id"].(string)
+	if !ok || paymentOrderIDStr == "" {
+		return "", ErrMissingPaymentOrderID
+	}
+	paymentOrderID, err := uuid.Parse(paymentOrderIDStr)
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", ErrMissingPaymentOrderID, err)
+	}
+
+	debtorAccountID, ok := params["debtor_account_id"].(string)
+	if !ok || debtorAccountID == "" {
+		return "", ErrMissingDebtorAccountID
+	}
+
+	gatewayReferenceID, ok := params["gateway_reference_id"].(string)
+	if !ok || gatewayReferenceID == "" {
+		return "", ErrMissingGatewayReferenceID
+	}
+
+	amountCents, err := extractInt64Param(params, "amount_cents")
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", ErrMissingAmountCents, err)
+	}
+
+	currency, ok := params["currency"].(string)
+	if !ok || currency == "" {
+		return "", ErrMissingCurrency
+	}
+
+	idempotencyKey, ok := params["idempotency_key"].(string)
+	if !ok || idempotencyKey == "" {
+		return "", ErrMissingIdempotencyKey
+	}
+
+	// Construct Money - NewMoney takes (currency, amountCents)
+	amount, err := domain.NewMoney(currency, amountCents)
+	if err != nil {
+		return "", fmt.Errorf("invalid currency %s: %w", currency, err)
+	}
+
+	// Construct minimal PaymentOrder for PostLedgerEntries
+	po := &domain.PaymentOrder{
+		ID:                 paymentOrderID,
+		DebtorAccountID:    debtorAccountID,
+		GatewayReferenceID: gatewayReferenceID,
+		Amount:             amount,
+		IdempotencyKey:     idempotencyKey,
+	}
+
+	return o.PostLedgerEntries(ctx, po)
+}
+
+// extractInt64Param extracts an int64 from params, handling various numeric types.
+func extractInt64Param(params map[string]any, key string) (int64, error) {
+	val, ok := params[key]
+	if !ok {
+		return 0, ErrParamKeyNotFound
+	}
+	switch v := val.(type) {
+	case int64:
+		return v, nil
+	case int:
+		return int64(v), nil
+	case float64:
+		return int64(v), nil
+	default:
+		return 0, fmt.Errorf("%w: got %T", ErrParamInvalidType, val)
+	}
 }
 
 // publishEvent publishes a Kafka event if the publisher is configured.
