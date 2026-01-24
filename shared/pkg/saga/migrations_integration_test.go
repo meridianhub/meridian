@@ -3,7 +3,6 @@ package saga
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 	"time"
 
@@ -315,27 +314,20 @@ func TestSagaMigrations_PartialIndex(t *testing.T) {
 		assert.Equal(t, orphanedSaga.ID, orphans[0].ID, "Orphaned saga should be the one with expired lease")
 	}
 
-	// Verify the partial index exists via EXPLAIN ANALYZE
-	t.Run("partial index is used for orphan query", func(t *testing.T) {
-		var explainResult []struct {
-			QueryPlan string `gorm:"column:QUERY PLAN"`
-		}
+	// Verify the partial index exists using pg_indexes catalog
+	// Note: EXPLAIN ANALYZE is unreliable on tiny test tables as Postgres
+	// will choose sequential scan for small datasets regardless of index presence
+	t.Run("partial index exists for orphan query", func(t *testing.T) {
+		var idxCount int64
 		err := db.Raw(`
-			EXPLAIN ANALYZE
-			SELECT * FROM saga_instances
-			WHERE status IN ('RUNNING', 'SUSPENDED')
-			AND lease_expires_at < NOW()
-		`).Scan(&explainResult).Error
+			SELECT COUNT(*)
+			FROM pg_indexes
+			WHERE schemaname = current_schema()
+			  AND tablename = 'saga_instances'
+			  AND indexname = 'idx_saga_instances_orphaned'
+		`).Scan(&idxCount).Error
 		require.NoError(t, err)
-
-		// Check that the explain plan mentions the partial index
-		fullPlan := ""
-		for _, row := range explainResult {
-			fullPlan += row.QueryPlan + "\n"
-		}
-		// The index should be named idx_saga_instances_orphaned
-		assert.Contains(t, fullPlan, "idx_saga_instances_orphaned",
-			"EXPLAIN should show partial index usage. Plan: %s", fullPlan)
+		assert.Equal(t, int64(1), idxCount, "partial index idx_saga_instances_orphaned should exist")
 	})
 }
 
@@ -379,6 +371,3 @@ func setupTestPostgres(t *testing.T) (*gorm.DB, func()) {
 
 	return db, cleanup
 }
-
-// Suppress unused import warning for sql package
-var _ = sql.ErrNoRows
