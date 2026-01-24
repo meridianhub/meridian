@@ -79,6 +79,7 @@ linters:
           - gocritic         # Style checks less critical in tests
           - nilnil           # Tests may use (nil, nil) for mock implementations
           - govet            # unusedwrite and nilness checks too strict for test scaffolding
+          - err113           # Tests need dynamic errors to test error pattern matching
 
       # Allow context-as-argument after *testing.T in test helper functions
       - path: _test\.go
