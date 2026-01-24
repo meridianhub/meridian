@@ -970,3 +970,67 @@ func TestInitiateWithOpeningBalance_CEL_ComplexValidationFails(t *testing.T) {
 	mockRepo.AssertNotCalled(t, "Create")
 	mockCache.AssertExpectations(t)
 }
+
+func TestInitiateWithOpeningBalance_CEL_NegativeAmountPassesValidation(t *testing.T) {
+	// Test that negative opening balances (e.g., overdraft positions) are correctly
+	// formatted and passed to CEL validation. This covers the edge case for
+	// migrating accounts with negative balances.
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockMeasurementRepo := new(MockMeasurementRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+	mockCache := new(MockInstrumentCache)
+
+	svc, err := service.NewPositionKeepingService(
+		mockRepo,
+		mockMeasurementRepo,
+		mockEventPublisher,
+		mockIdempotency,
+		service.WithInstrumentCache(mockCache),
+	)
+	require.NoError(t, err)
+
+	effectiveDate := time.Now().Add(-24 * time.Hour)
+
+	// Create a CEL program that validates the batch_id attribute exists
+	// (doesn't check the amount value, just ensures CEL receives it correctly)
+	validationProgram := createMigrationTestCELProgram(t, `"batch_id" in attributes`)
+
+	cachedInstrument := &service.CachedInstrument{
+		InstrumentCode:    "USD",
+		ValidationProgram: validationProgram,
+	}
+
+	mockCache.On("GetOrLoad", ctx, "USD", 1).Return(cachedInstrument, nil)
+	mockRepo.On("Create", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).Return(nil)
+
+	// Negative opening balance: -$500.50 (overdraft position)
+	req := &positionkeepingv1.InitiateWithOpeningBalanceRequest{
+		AccountId: "overdraft-account-001",
+		OpeningBalance: &commonv1.MoneyAmount{
+			Amount: &money.Money{
+				CurrencyCode: "USD",
+				Units:        -500,
+				Nanos:        -500000000, // -$500.50 (money.Money requires same sign)
+			},
+		},
+		EffectiveDate:  timestamppb.New(effectiveDate),
+		InstrumentCode: "USD",
+		Attributes: map[string]string{
+			"batch_id": "OVERDRAFT-MIGRATION-2024",
+		},
+	}
+
+	resp, err := svc.InitiateWithOpeningBalance(ctx, req)
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.NotNil(t, resp.Log)
+	assert.NotEmpty(t, resp.Log.LogId)
+	// Verify the transaction entry shows DEBIT direction for negative balance
+	assert.Len(t, resp.Log.TransactionLogEntries, 1)
+	assert.Equal(t, commonv1.PostingDirection_POSTING_DIRECTION_DEBIT, resp.Log.TransactionLogEntries[0].Direction)
+	mockRepo.AssertExpectations(t)
+	mockCache.AssertExpectations(t)
+}

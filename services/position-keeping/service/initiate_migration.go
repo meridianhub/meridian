@@ -61,23 +61,9 @@ func (s *PositionKeepingService) InitiateWithOpeningBalance(
 
 	// Validate instrument and attributes using CEL (if instrument_code provided)
 	if req.InstrumentCode != "" {
-		// Format amount as decimal string, handling negative values correctly.
-		// money.Money spec requires Units and Nanos to have the same sign.
-		units := req.OpeningBalance.Amount.Units
-		nanos := req.OpeningBalance.Amount.Nanos
-		var amountStr string
-		if units < 0 || nanos < 0 {
-			// For negative amounts, use absolute values and prepend minus
-			if units < 0 {
-				units = -units
-			}
-			if nanos < 0 {
-				nanos = -nanos
-			}
-			amountStr = fmt.Sprintf("-%d.%09d", units, nanos)
-		} else {
-			amountStr = fmt.Sprintf("%d.%09d", units, nanos)
-		}
+		// Reuse the already-converted domain amount for string formatting.
+		// This uses the battle-tested decimal library and handles all edge cases correctly.
+		amountStr := openingBalance.Amount.String()
 		if err := s.validateOpeningBalanceWithCEL(ctx, req.InstrumentCode, amountStr, req.Attributes); err != nil {
 			return nil, err // Already a gRPC status error
 		}
