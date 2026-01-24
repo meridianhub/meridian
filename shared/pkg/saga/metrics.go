@@ -3,6 +3,8 @@
 package saga
 
 import (
+	"time"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
@@ -70,6 +72,41 @@ var (
 			Help: "Total number of idempotent saga resume calls (already resumed)",
 		},
 	)
+
+	// Orphan watcher metrics
+
+	// sagaOrphanScansTotal tracks orphan scan operations.
+	sagaOrphanScansTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "saga_orphan_scans_total",
+			Help: "Total number of orphan scan operations performed",
+		},
+	)
+
+	// sagaOrphanScanErrorsTotal tracks orphan scan failures.
+	sagaOrphanScanErrorsTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "saga_orphan_scan_errors_total",
+			Help: "Total number of orphan scan errors",
+		},
+	)
+
+	// sagaOrphansClaimedTotal tracks sagas claimed during orphan scans.
+	sagaOrphansClaimedTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "saga_orphans_claimed_total",
+			Help: "Total number of orphaned sagas claimed",
+		},
+	)
+
+	// sagaOrphanScanDuration tracks the duration of orphan scan operations.
+	sagaOrphanScanDuration = promauto.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "saga_orphan_scan_duration_seconds",
+			Help:    "Duration of orphan scan operations in seconds",
+			Buckets: []float64{0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5},
+		},
+	)
 )
 
 // RecordZombieSagaDetected records that a zombie saga was detected.
@@ -107,6 +144,22 @@ func RecordResume() {
 // RecordResumeIdempotent records an idempotent resume call.
 func RecordResumeIdempotent() {
 	sagaResumeIdempotentTotal.Inc()
+}
+
+// RecordOrphanScan records an orphan scan operation with its duration.
+func RecordOrphanScan(duration time.Duration) {
+	sagaOrphanScansTotal.Inc()
+	sagaOrphanScanDuration.Observe(duration.Seconds())
+}
+
+// RecordOrphanScanError records an orphan scan error.
+func RecordOrphanScanError() {
+	sagaOrphanScanErrorsTotal.Inc()
+}
+
+// RecordOrphansClaimed records the number of sagas claimed during an orphan scan.
+func RecordOrphansClaimed(count int) {
+	sagaOrphansClaimedTotal.Add(float64(count))
 }
 
 // ExposeMetricsForTesting provides access to the raw Prometheus metrics for testing.

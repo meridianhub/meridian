@@ -49,6 +49,12 @@ func RunSagaMigrations(db *gorm.DB) error {
 		return fmt.Errorf("failed to create composite unique constraint: %w", err)
 	}
 
+	// Create the orphan notification trigger (FR-23)
+	// This enables reactive orphan wake-up with <10 second latency target
+	if err := createOrphanNotifyTrigger(db); err != nil {
+		return fmt.Errorf("failed to create orphan notify trigger: %w", err)
+	}
+
 	return nil
 }
 
@@ -99,6 +105,55 @@ func createCompositeUniqueConstraint(db *gorm.DB) error {
 		UNIQUE (saga_instance_id, step_index)
 	`
 	return db.Exec(sql).Error
+}
+
+// createOrphanNotifyTrigger creates the PostgreSQL trigger function and trigger
+// that fires NOTIFY 'saga_orphaned' when a saga's lease is released.
+// This enables reactive orphan detection with <10 second latency target (FR-23).
+//
+// The trigger fires when:
+// - claimed_by_pod changes from a non-NULL value to NULL
+// - This typically happens when a pod crashes (lease expires) or gracefully releases
+//
+// The notification payload includes the saga instance ID for targeted handling.
+func createOrphanNotifyTrigger(db *gorm.DB) error {
+	// Create the trigger function
+	functionSQL := `
+		CREATE OR REPLACE FUNCTION notify_saga_orphaned()
+		RETURNS TRIGGER AS $$
+		BEGIN
+			-- Fire notification when claimed_by_pod is set to NULL from a non-NULL value
+			IF OLD.claimed_by_pod IS NOT NULL AND NEW.claimed_by_pod IS NULL THEN
+				PERFORM pg_notify('saga_orphaned', NEW.id::text);
+			END IF;
+			RETURN NEW;
+		END;
+		$$ LANGUAGE plpgsql;
+	`
+	if err := db.Exec(functionSQL).Error; err != nil {
+		return fmt.Errorf("failed to create notify_saga_orphaned function: %w", err)
+	}
+
+	// Create the trigger (use IF NOT EXISTS pattern via conditional drop/create)
+	// First drop if exists to ensure clean state, then create
+	dropTriggerSQL := `
+		DROP TRIGGER IF EXISTS saga_orphaned_trigger ON saga_instances;
+	`
+	if err := db.Exec(dropTriggerSQL).Error; err != nil {
+		return fmt.Errorf("failed to drop existing saga_orphaned_trigger: %w", err)
+	}
+
+	createTriggerSQL := `
+		CREATE TRIGGER saga_orphaned_trigger
+		AFTER UPDATE ON saga_instances
+		FOR EACH ROW
+		EXECUTE FUNCTION notify_saga_orphaned();
+	`
+	if err := db.Exec(createTriggerSQL).Error; err != nil {
+		return fmt.Errorf("failed to create saga_orphaned_trigger: %w", err)
+	}
+
+	return nil
 }
 
 // DropSagaTables removes all saga-related tables.
