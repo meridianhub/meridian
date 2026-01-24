@@ -138,17 +138,22 @@ jobs:
             - Validate: Does the implementation fulfill those stated requirements?
             - Acknowledge when requirements are met: "This satisfies the requirement for X"
 
-            ## Approval vs Request Changes
+            ## Review Outcomes (Three States)
 
-            **APPROVE** means "merge as-is" - use only when you have NO actionable suggestions.
+            GitHub supports three review states. Use them precisely:
 
-            **REQUEST_CHANGES** means "please address these" - use when you have suggestions that would improve the code, even minor ones. This ensures they get addressed rather than ignored.
+            | State | GitHub Event | When to Use |
+            |-------|--------------|-------------|
+            | 🔴 **Blocking** | `REQUEST_CHANGES` | Critical issues that MUST be fixed before merge: security vulnerabilities, bugs, data loss risks, correctness problems |
+            | 🟡 **Suggestions** | `COMMENT` | Improvements that SHOULD be addressed but don't block merge: code quality, edge cases, performance, style with objective benefit |
+            | 🟢 **Approve** | `APPROVE` | Ready to merge as-is, possibly with minor informational notes |
 
-            - **Nothing to improve**: APPROVE. "Clean implementation, tests are solid."
-            - **Actionable suggestions exist**: REQUEST_CHANGES. "Quick fixes needed" - then list them.
-            - **Style-only preferences** (no objective improvement): APPROVE with comment. These are truly optional.
+            **Decision criteria:**
+            - **🔴 Blocking (REQUEST_CHANGES)**: Would this cause a bug, security issue, data loss, or break functionality? Use sparingly - this blocks the merge.
+            - **🟡 Suggestions (COMMENT)**: Is this an improvement that doesn't affect correctness? Use for "should fix" items that shouldn't hold up the merge.
+            - **🟢 Approve (APPROVE)**: Does the code meet requirements and pass tests with no actionable feedback?
 
-            The bar for APPROVE is: "I have nothing actionable to suggest." If you found something worth mentioning, it's worth fixing.
+            **Important**: `REQUEST_CHANGES` is reserved for genuine blockers. Using it for minor suggestions frustrates authors and slows velocity. If it's not a blocker, use `COMMENT`.
 
             ## Feedback Principles
 
@@ -175,26 +180,67 @@ jobs:
 
             ## Priority Signals
 
-            Use 🔴 for critical issues (security, correctness, data loss risk).
-            Use 🟡 for improvements that should be addressed (edge cases, code quality, simplifications).
+            Use icons to signal severity, which determines the review event:
 
-            Both warrant REQUEST_CHANGES. The difference is severity, not whether to fix.
+            - 🔴 **Critical** (security, correctness, data loss risk) → `REQUEST_CHANGES` - blocks merge
+            - 🟡 **Improvement** (edge cases, code quality, simplifications) → `COMMENT` - doesn't block merge
+            - 🟢 **Note** (informational, no action needed) → Include in `APPROVE` body
 
-            ## How to Comment
+            The icon determines the GitHub action. Don't use `REQUEST_CHANGES` for 🟡 items.
 
-            **Submit a review with approval status and inline comments** using the reviews endpoint:
+            ## How to Post Inline Comments
+
+            **Step 1: Get the PR diff to find file paths and line numbers**
+            ```bash
+            gh pr diff ${{ steps.pr.outputs.number }}
+            ```
+
+            **Step 2: Submit a review with inline comments using the reviews endpoint**
+
+            All inline comments MUST be submitted as part of a review (not standalone). Use this pattern:
+
             ```bash
             gh api repos/${{ github.repository }}/pulls/${{ steps.pr.outputs.number }}/reviews \
               --method POST \
-              -f event="APPROVE" \
-              -f body="Your summary comment" \
-              --raw-field comments='[{"path":"file.go","line":42,"body":"Inline comment"}]'
+              -f event="COMMENT" \
+              -f body="## Review Summary
+
+            Found 2 suggestions for improvement (non-blocking)." \
+              --raw-field comments='[
+                {
+                  "path": "services/foo/handler.go",
+                  "line": 42,
+                  "body": "🟡 **Suggestion**: Consider using `errors.Is()` here for proper error comparison.\n\n```go\nif errors.Is(err, ErrNotFound) {\n```"
+                },
+                {
+                  "path": "services/foo/handler.go",
+                  "start_line": 55,
+                  "line": 60,
+                  "body": "🟡 **Suggestion**: This block could be simplified."
+                }
+              ]'
             ```
 
-            The `event` field can be: `APPROVE`, `REQUEST_CHANGES`, or `COMMENT`.
-            This batches all inline comments in one API call and sets the review status.
+            **Key fields in the comments array:**
+            - `path`: File path relative to repo root (from the diff output)
+            - `line`: The line number to comment on (must be in the diff)
+            - `start_line`: (optional) For multi-line comments, the starting line
+            - `body`: The comment text (supports markdown)
 
-            **CRITICAL**: Post inline comments BEFORE referencing them. Include them in the `comments` array when submitting the review. Never say "see inline comment below" without actually posting one.
+            **The `event` field determines review status:**
+            - `APPROVE` - Ready to merge (🟢)
+            - `COMMENT` - Has suggestions but doesn't block (🟡)
+            - `REQUEST_CHANGES` - Has blockers that must be fixed (🔴)
+
+            **Comment body prefixes** (use consistently):
+            - `🔴 **MUST FIX**:` - Blocker that must be addressed
+            - `🟡 **Suggestion**:` - Non-blocking improvement
+            - `🟢 **Note**:` - Informational, no action needed
+
+            **CRITICAL**:
+            - Inline comments MUST be included in the `comments` array when submitting the review
+            - Never say "see inline comment" without actually posting one
+            - Line numbers must be lines that appear in the diff (added or context lines)
 
             **For actionable suggestions** (copy-pasteable by humans into their local Claude):
             Use collapsible details blocks in the inline comment body:
