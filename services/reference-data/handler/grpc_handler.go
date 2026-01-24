@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -143,11 +144,16 @@ func (s *Service) RetrieveInstrument(ctx context.Context, req *pb.RetrieveInstru
 	}, nil
 }
 
-// ListInstruments returns instruments matching the filter criteria.
+// ListInstruments returns instruments matching the filter criteria with cursor-based pagination.
 // NOTE: The underlying registry only supports ListActive. Filtering by
 // DRAFT or DEPRECATED status will return empty results. This is a known
 // limitation that should be addressed by extending InstrumentRegistry.
 func (s *Service) ListInstruments(ctx context.Context, req *pb.ListInstrumentsRequest) (*pb.ListInstrumentsResponse, error) {
+	cursorTime, cursorID, err := parseCursorToken(req.PageToken)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid page token: %v", err)
+	}
+
 	// TODO(universal-asset-system.13): Add ListAll/ListByStatus to InstrumentRegistry
 	// Currently registry only supports ListActive, so non-ACTIVE filters return empty.
 	defs, err := s.registry.ListActive(ctx)
@@ -156,29 +162,11 @@ func (s *Service) ListInstruments(ctx context.Context, req *pb.ListInstrumentsRe
 		return nil, status.Errorf(codes.Internal, "failed to list instruments: %v", err)
 	}
 
-	// Filter by status if specified
-	var filtered []*registry.InstrumentDefinition
-	if req.StatusFilter != pb.InstrumentStatus_INSTRUMENT_STATUS_UNSPECIFIED {
-		domainStatus := protoStatusToDomain(req.StatusFilter)
-		for _, def := range defs {
-			if def.Status == domainStatus {
-				filtered = append(filtered, def)
-			}
-		}
-	} else {
-		filtered = defs
-	}
-
-	// Apply pagination
-	pageSize := int(req.PageSize)
-	if pageSize == 0 {
-		pageSize = 50 // Default page size
-	}
-
-	// TODO: Implement proper cursor-based pagination
-	if len(filtered) > pageSize {
-		filtered = filtered[:pageSize]
-	}
+	filtered := filterByStatus(defs, req.StatusFilter)
+	sortByCreatedAtDesc(filtered)
+	filtered = applyCursorFilter(filtered, cursorTime, cursorID)
+	pageSize := normalizePageSize(int(req.PageSize))
+	filtered, hasMore := applyPageLimit(filtered, pageSize)
 
 	instruments := make([]*pb.InstrumentDefinition, len(filtered))
 	for i, def := range filtered {
@@ -187,8 +175,80 @@ func (s *Service) ListInstruments(ctx context.Context, req *pb.ListInstrumentsRe
 
 	return &pb.ListInstrumentsResponse{
 		Instruments:   instruments,
-		NextPageToken: "", // TODO: Implement pagination token
+		NextPageToken: generateNextPageToken(filtered, hasMore),
 	}, nil
+}
+
+// filterByStatus filters instruments by the requested status, returning all if unspecified.
+func filterByStatus(defs []*registry.InstrumentDefinition, statusFilter pb.InstrumentStatus) []*registry.InstrumentDefinition {
+	if statusFilter == pb.InstrumentStatus_INSTRUMENT_STATUS_UNSPECIFIED {
+		return defs
+	}
+	domainStatus := protoStatusToDomain(statusFilter)
+	var filtered []*registry.InstrumentDefinition
+	for _, def := range defs {
+		if def.Status == domainStatus {
+			filtered = append(filtered, def)
+		}
+	}
+	return filtered
+}
+
+// sortByCreatedAtDesc sorts instruments by CreatedAt DESC, ID DESC.
+func sortByCreatedAtDesc(defs []*registry.InstrumentDefinition) {
+	sort.Slice(defs, func(i, j int) bool {
+		ti := defs[i].CreatedAt.Truncate(time.Second)
+		tj := defs[j].CreatedAt.Truncate(time.Second)
+		if ti.Equal(tj) {
+			return defs[i].ID.String() > defs[j].ID.String()
+		}
+		return ti.After(tj)
+	})
+}
+
+// applyCursorFilter filters instruments to those after the cursor position.
+func applyCursorFilter(defs []*registry.InstrumentDefinition, cursorTime time.Time, cursorID uuid.UUID) []*registry.InstrumentDefinition {
+	if cursorTime.IsZero() {
+		return defs
+	}
+	cursorTimeCompare := cursorTime.Truncate(time.Second)
+	var filtered []*registry.InstrumentDefinition
+	for _, def := range defs {
+		defTime := def.CreatedAt.Truncate(time.Second)
+		if defTime.Before(cursorTimeCompare) ||
+			(defTime.Equal(cursorTimeCompare) && def.ID.String() < cursorID.String()) {
+			filtered = append(filtered, def)
+		}
+	}
+	return filtered
+}
+
+// normalizePageSize applies default and max limits to page size.
+func normalizePageSize(pageSize int) int {
+	if pageSize == 0 {
+		return DefaultPageSize
+	}
+	if pageSize > MaxPageSize {
+		return MaxPageSize
+	}
+	return pageSize
+}
+
+// applyPageLimit returns a page of results and whether more exist.
+func applyPageLimit(defs []*registry.InstrumentDefinition, pageSize int) ([]*registry.InstrumentDefinition, bool) {
+	if len(defs) <= pageSize {
+		return defs, false
+	}
+	return defs[:pageSize], true
+}
+
+// generateNextPageToken creates a token for the next page, or empty if no more results.
+func generateNextPageToken(defs []*registry.InstrumentDefinition, hasMore bool) string {
+	if !hasMore || len(defs) == 0 {
+		return ""
+	}
+	lastItem := defs[len(defs)-1]
+	return encodeCursorToken(lastItem.CreatedAt, lastItem.ID)
 }
 
 // ActivateInstrument transitions an instrument from DRAFT to ACTIVE.

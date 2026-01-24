@@ -196,13 +196,13 @@ func TestDataSetRepository_List_WithFilters(t *testing.T) {
 	}
 
 	// List all
-	all, err := tc.Repos.DataSet.List(ctx, domain.DataSetFilters{})
+	all, _, err := tc.Repos.DataSet.List(ctx, domain.DataSetFilters{})
 	require.NoError(t, err)
 	assert.Len(t, all, 3)
 
 	// Filter by category
 	pricingCategory := domain.DataCategoryPricing
-	pricingOnly, err := tc.Repos.DataSet.List(ctx, domain.DataSetFilters{
+	pricingOnly, _, err := tc.Repos.DataSet.List(ctx, domain.DataSetFilters{
 		Category: &pricingCategory,
 	})
 	require.NoError(t, err)
@@ -210,7 +210,7 @@ func TestDataSetRepository_List_WithFilters(t *testing.T) {
 
 	// Filter by status
 	draftStatus := domain.DataSetStatusDraft
-	draftsOnly, err := tc.Repos.DataSet.List(ctx, domain.DataSetFilters{
+	draftsOnly, _, err := tc.Repos.DataSet.List(ctx, domain.DataSetFilters{
 		Status: &draftStatus,
 	})
 	require.NoError(t, err)
@@ -223,7 +223,7 @@ func TestDataSetRepository_List_Pagination(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Create 5 datasets
+	// Create 5 datasets - cursor pagination uses timestamp+UUID ordering as tie-breaker
 	for i := 0; i < 5; i++ {
 		dataset, err := domain.NewDataSetDefinition(
 			"PAGINATION_"+string(rune('A'+i)),
@@ -240,28 +240,46 @@ func TestDataSetRepository_List_Pagination(t *testing.T) {
 	}
 
 	// Get first page
-	page1, err := tc.Repos.DataSet.List(ctx, domain.DataSetFilters{
-		Limit:  2,
-		Offset: 0,
+	page1, token1, err := tc.Repos.DataSet.List(ctx, domain.DataSetFilters{
+		Limit: 2,
 	})
 	require.NoError(t, err)
 	assert.Len(t, page1, 2)
+	assert.NotEmpty(t, token1, "Should return next page token when more results exist")
 
-	// Get second page
-	page2, err := tc.Repos.DataSet.List(ctx, domain.DataSetFilters{
-		Limit:  2,
-		Offset: 2,
+	// Get second page using cursor
+	page2, token2, err := tc.Repos.DataSet.List(ctx, domain.DataSetFilters{
+		Limit:     2,
+		PageToken: token1,
 	})
 	require.NoError(t, err)
 	assert.Len(t, page2, 2)
+	assert.NotEmpty(t, token2)
 
-	// Get third page
-	page3, err := tc.Repos.DataSet.List(ctx, domain.DataSetFilters{
-		Limit:  2,
-		Offset: 4,
+	// Get third page using cursor
+	page3, token3, err := tc.Repos.DataSet.List(ctx, domain.DataSetFilters{
+		Limit:     2,
+		PageToken: token2,
 	})
 	require.NoError(t, err)
 	assert.Len(t, page3, 1)
+	assert.Empty(t, token3, "Last page should have empty token")
+
+	// Verify no duplicates across pages
+	allIDs := make(map[string]bool)
+	for _, ds := range page1 {
+		assert.False(t, allIDs[ds.ID().String()], "Duplicate ID in page1")
+		allIDs[ds.ID().String()] = true
+	}
+	for _, ds := range page2 {
+		assert.False(t, allIDs[ds.ID().String()], "Duplicate ID in page2")
+		allIDs[ds.ID().String()] = true
+	}
+	for _, ds := range page3 {
+		assert.False(t, allIDs[ds.ID().String()], "Duplicate ID in page3")
+		allIDs[ds.ID().String()] = true
+	}
+	assert.Len(t, allIDs, 5, "Should see all 5 datasets exactly once")
 }
 
 func TestDataSetRepository_ExistsByCode(t *testing.T) {

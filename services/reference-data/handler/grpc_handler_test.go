@@ -416,22 +416,25 @@ func TestListInstruments(t *testing.T) {
 	t.Run("list all active", func(t *testing.T) {
 		reg := newMockRegistry()
 		reg.definitions["USD:1"] = &registry.InstrumentDefinition{
-			ID:      uuid.New(),
-			Code:    "USD",
-			Version: 1,
-			Status:  registry.StatusActive,
+			ID:        uuid.New(),
+			Code:      "USD",
+			Version:   1,
+			Status:    registry.StatusActive,
+			CreatedAt: time.Now(),
 		}
 		reg.definitions["EUR:1"] = &registry.InstrumentDefinition{
-			ID:      uuid.New(),
-			Code:    "EUR",
-			Version: 1,
-			Status:  registry.StatusActive,
+			ID:        uuid.New(),
+			Code:      "EUR",
+			Version:   1,
+			Status:    registry.StatusActive,
+			CreatedAt: time.Now(),
 		}
 		reg.definitions["DRAFT:1"] = &registry.InstrumentDefinition{
-			ID:      uuid.New(),
-			Code:    "DRAFT",
-			Version: 1,
-			Status:  registry.StatusDraft, // Not active
+			ID:        uuid.New(),
+			Code:      "DRAFT",
+			Version:   1,
+			Status:    registry.StatusDraft, // Not active
+			CreatedAt: time.Now(),
 		}
 		svc, _ := NewService(reg, compiler, nil)
 
@@ -451,6 +454,282 @@ func TestListInstruments(t *testing.T) {
 		assert.Error(t, err)
 		st, _ := status.FromError(err)
 		assert.Equal(t, codes.Internal, st.Code())
+	})
+
+	t.Run("pagination first page with more results", func(t *testing.T) {
+		reg := newMockRegistry()
+		baseTime := time.Now()
+
+		// Populate with 75 instruments
+		for i := 0; i < 75; i++ {
+			code := "INST" + strconv.Itoa(i)
+			reg.definitions[code+":1"] = &registry.InstrumentDefinition{
+				ID:        uuid.New(),
+				Code:      code,
+				Version:   1,
+				Status:    registry.StatusActive,
+				CreatedAt: baseTime.Add(-time.Duration(i) * time.Minute),
+			}
+		}
+		svc, _ := NewService(reg, compiler, nil)
+
+		resp, err := svc.ListInstruments(context.Background(), &pb.ListInstrumentsRequest{
+			PageSize: 50,
+		})
+
+		require.NoError(t, err)
+		assert.Len(t, resp.Instruments, 50)
+		assert.NotEmpty(t, resp.NextPageToken)
+	})
+
+	t.Run("pagination second page", func(t *testing.T) {
+		reg := newMockRegistry()
+		baseTime := time.Now()
+
+		// Populate with 75 instruments
+		for i := 0; i < 75; i++ {
+			code := "INST" + strconv.Itoa(i)
+			reg.definitions[code+":1"] = &registry.InstrumentDefinition{
+				ID:        uuid.New(),
+				Code:      code,
+				Version:   1,
+				Status:    registry.StatusActive,
+				CreatedAt: baseTime.Add(-time.Duration(i) * time.Minute),
+			}
+		}
+		svc, _ := NewService(reg, compiler, nil)
+
+		// Get first page
+		resp1, err := svc.ListInstruments(context.Background(), &pb.ListInstrumentsRequest{
+			PageSize: 50,
+		})
+		require.NoError(t, err)
+		require.NotEmpty(t, resp1.NextPageToken)
+
+		// Get second page using token
+		resp2, err := svc.ListInstruments(context.Background(), &pb.ListInstrumentsRequest{
+			PageSize:  50,
+			PageToken: resp1.NextPageToken,
+		})
+
+		require.NoError(t, err)
+		assert.Len(t, resp2.Instruments, 25) // Remaining items
+		assert.Empty(t, resp2.NextPageToken) // No more pages
+
+		// Verify no overlap between pages
+		firstPageIDs := make(map[string]bool)
+		for _, inst := range resp1.Instruments {
+			firstPageIDs[inst.Id] = true
+		}
+		for _, inst := range resp2.Instruments {
+			assert.False(t, firstPageIDs[inst.Id], "Found duplicate instrument in second page: %s", inst.Id)
+		}
+	})
+
+	t.Run("pagination exact boundary", func(t *testing.T) {
+		reg := newMockRegistry()
+		baseTime := time.Now()
+
+		// Populate with exactly 100 instruments
+		for i := 0; i < 100; i++ {
+			code := "INST" + strconv.Itoa(i)
+			reg.definitions[code+":1"] = &registry.InstrumentDefinition{
+				ID:        uuid.New(),
+				Code:      code,
+				Version:   1,
+				Status:    registry.StatusActive,
+				CreatedAt: baseTime.Add(-time.Duration(i) * time.Minute),
+			}
+		}
+		svc, _ := NewService(reg, compiler, nil)
+
+		// First page
+		resp1, err := svc.ListInstruments(context.Background(), &pb.ListInstrumentsRequest{
+			PageSize: 50,
+		})
+		require.NoError(t, err)
+		assert.Len(t, resp1.Instruments, 50)
+		assert.NotEmpty(t, resp1.NextPageToken)
+
+		// Second page
+		resp2, err := svc.ListInstruments(context.Background(), &pb.ListInstrumentsRequest{
+			PageSize:  50,
+			PageToken: resp1.NextPageToken,
+		})
+		require.NoError(t, err)
+		assert.Len(t, resp2.Instruments, 50)
+		assert.Empty(t, resp2.NextPageToken) // No more pages
+	})
+
+	t.Run("pagination single page no more results", func(t *testing.T) {
+		reg := newMockRegistry()
+		baseTime := time.Now()
+
+		// Populate with 30 instruments
+		for i := 0; i < 30; i++ {
+			code := "INST" + strconv.Itoa(i)
+			reg.definitions[code+":1"] = &registry.InstrumentDefinition{
+				ID:        uuid.New(),
+				Code:      code,
+				Version:   1,
+				Status:    registry.StatusActive,
+				CreatedAt: baseTime.Add(-time.Duration(i) * time.Minute),
+			}
+		}
+		svc, _ := NewService(reg, compiler, nil)
+
+		resp, err := svc.ListInstruments(context.Background(), &pb.ListInstrumentsRequest{
+			PageSize: 50,
+		})
+
+		require.NoError(t, err)
+		assert.Len(t, resp.Instruments, 30)
+		assert.Empty(t, resp.NextPageToken) // No more pages
+	})
+
+	t.Run("pagination invalid page token", func(t *testing.T) {
+		reg := newMockRegistry()
+		svc, _ := NewService(reg, compiler, nil)
+
+		_, err := svc.ListInstruments(context.Background(), &pb.ListInstrumentsRequest{
+			PageToken: "invalid_token",
+		})
+
+		require.Error(t, err)
+		st, _ := status.FromError(err)
+		assert.Equal(t, codes.InvalidArgument, st.Code())
+	})
+
+	t.Run("pagination empty registry", func(t *testing.T) {
+		reg := newMockRegistry()
+		svc, _ := NewService(reg, compiler, nil)
+
+		resp, err := svc.ListInstruments(context.Background(), &pb.ListInstrumentsRequest{})
+
+		require.NoError(t, err)
+		assert.Len(t, resp.Instruments, 0)
+		assert.Empty(t, resp.NextPageToken)
+	})
+
+	t.Run("pagination default page size", func(t *testing.T) {
+		reg := newMockRegistry()
+		baseTime := time.Now()
+
+		// Populate with 100 instruments
+		for i := 0; i < 100; i++ {
+			code := "INST" + strconv.Itoa(i)
+			reg.definitions[code+":1"] = &registry.InstrumentDefinition{
+				ID:        uuid.New(),
+				Code:      code,
+				Version:   1,
+				Status:    registry.StatusActive,
+				CreatedAt: baseTime.Add(-time.Duration(i) * time.Minute),
+			}
+		}
+		svc, _ := NewService(reg, compiler, nil)
+
+		resp, err := svc.ListInstruments(context.Background(), &pb.ListInstrumentsRequest{
+			PageSize: 0, // Should use default
+		})
+
+		require.NoError(t, err)
+		assert.Len(t, resp.Instruments, 50) // Default page size is 50
+		assert.NotEmpty(t, resp.NextPageToken)
+	})
+
+	t.Run("pagination max page size enforcement", func(t *testing.T) {
+		reg := newMockRegistry()
+		baseTime := time.Now()
+
+		// Populate with 2000 instruments
+		for i := 0; i < 2000; i++ {
+			code := "INST" + strconv.Itoa(i)
+			reg.definitions[code+":1"] = &registry.InstrumentDefinition{
+				ID:        uuid.New(),
+				Code:      code,
+				Version:   1,
+				Status:    registry.StatusActive,
+				CreatedAt: baseTime.Add(-time.Duration(i) * time.Second),
+			}
+		}
+		svc, _ := NewService(reg, compiler, nil)
+
+		resp, err := svc.ListInstruments(context.Background(), &pb.ListInstrumentsRequest{
+			PageSize: 5000, // Exceeds max
+		})
+
+		require.NoError(t, err)
+		assert.Len(t, resp.Instruments, 1000) // Max page size is 1000
+		assert.NotEmpty(t, resp.NextPageToken)
+	})
+
+	t.Run("pagination ordering consistency", func(t *testing.T) {
+		reg := newMockRegistry()
+		// Create instruments with same timestamp but different IDs
+		sameTime := time.Now().Truncate(time.Second)
+
+		for i := 0; i < 10; i++ {
+			code := "INST" + strconv.Itoa(i)
+			reg.definitions[code+":1"] = &registry.InstrumentDefinition{
+				ID:        uuid.New(),
+				Code:      code,
+				Version:   1,
+				Status:    registry.StatusActive,
+				CreatedAt: sameTime, // All same timestamp
+			}
+		}
+		svc, _ := NewService(reg, compiler, nil)
+
+		// Get all instruments
+		resp, err := svc.ListInstruments(context.Background(), &pb.ListInstrumentsRequest{
+			PageSize: 100,
+		})
+		require.NoError(t, err)
+		assert.Len(t, resp.Instruments, 10)
+
+		// Verify they are sorted by ID DESC when timestamps are equal
+		for i := 1; i < len(resp.Instruments); i++ {
+			prev := resp.Instruments[i-1].Id
+			curr := resp.Instruments[i].Id
+			assert.Greater(t, prev, curr, "Expected IDs to be in descending order")
+		}
+	})
+
+	t.Run("pagination status filter with pagination", func(t *testing.T) {
+		reg := newMockRegistry()
+		baseTime := time.Now()
+
+		// Create 60 ACTIVE instruments
+		for i := 0; i < 60; i++ {
+			code := "ACTIVE" + strconv.Itoa(i)
+			reg.definitions[code+":1"] = &registry.InstrumentDefinition{
+				ID:        uuid.New(),
+				Code:      code,
+				Version:   1,
+				Status:    registry.StatusActive,
+				CreatedAt: baseTime.Add(-time.Duration(i) * time.Minute),
+			}
+		}
+		svc, _ := NewService(reg, compiler, nil)
+
+		// First page
+		resp1, err := svc.ListInstruments(context.Background(), &pb.ListInstrumentsRequest{
+			StatusFilter: pb.InstrumentStatus_INSTRUMENT_STATUS_ACTIVE,
+			PageSize:     50,
+		})
+		require.NoError(t, err)
+		assert.Len(t, resp1.Instruments, 50)
+		assert.NotEmpty(t, resp1.NextPageToken)
+
+		// Second page
+		resp2, err := svc.ListInstruments(context.Background(), &pb.ListInstrumentsRequest{
+			StatusFilter: pb.InstrumentStatus_INSTRUMENT_STATUS_ACTIVE,
+			PageSize:     50,
+			PageToken:    resp1.NextPageToken,
+		})
+		require.NoError(t, err)
+		assert.Len(t, resp2.Instruments, 10) // Remaining 10 ACTIVE instruments
+		assert.Empty(t, resp2.NextPageToken)
 	})
 }
 

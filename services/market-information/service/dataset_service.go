@@ -298,7 +298,7 @@ func (s *Server) RetrieveDataSet(ctx context.Context, req *pb.RetrieveDataSetReq
 	}, nil
 }
 
-// ListDataSets returns data sets matching the filter criteria.
+// ListDataSets returns data sets matching the filter criteria with cursor-based pagination.
 // Supports filtering by status, category, and pagination.
 func (s *Server) ListDataSets(ctx context.Context, req *pb.ListDataSetsRequest) (*pb.ListDataSetsResponse, error) {
 	// Build domain filters from proto request
@@ -335,14 +335,16 @@ func (s *Server) ListDataSets(ctx context.Context, req *pb.ListDataSetsRequest) 
 		pageSize = 100 // Max page size from proto validation
 	}
 	filters.Limit = pageSize
-
-	// TODO: Implement proper cursor-based pagination using page_token
-	// For now, we only support the first page
-	filters.Offset = 0
+	filters.PageToken = req.PageToken
 
 	// Delegate to repository
-	datasets, err := s.dataSetRepo.List(ctx, filters)
+	datasets, nextPageToken, err := s.dataSetRepo.List(ctx, filters)
 	if err != nil {
+		if errors.Is(err, domain.ErrInvalidPageToken) {
+			s.logger.Warn("invalid page token",
+				"page_token", req.PageToken)
+			return nil, status.Errorf(codes.InvalidArgument, "invalid page_token: malformed cursor")
+		}
 		s.logger.Error("failed to list datasets",
 			"error", err)
 		return nil, status.Errorf(codes.Internal, "failed to list datasets: %v", err)
@@ -357,11 +359,12 @@ func (s *Server) ListDataSets(ctx context.Context, req *pb.ListDataSetsRequest) 
 	s.logger.Debug("listed datasets",
 		"count", len(pbDatasets),
 		"status_filter", req.StatusFilter,
-		"category_filter", req.CategoryFilter)
+		"category_filter", req.CategoryFilter,
+		"has_more", nextPageToken != "")
 
 	return &pb.ListDataSetsResponse{
 		Datasets:      pbDatasets,
-		NextPageToken: "", // TODO: Implement pagination token
+		NextPageToken: nextPageToken,
 	}, nil
 }
 

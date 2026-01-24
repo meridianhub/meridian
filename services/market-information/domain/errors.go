@@ -85,4 +85,9 @@ var (
 
 	// ErrDuplicateDataSourceCode indicates a data source with the given code already exists.
 	ErrDuplicateDataSourceCode = errors.New("data source code already exists")
+
+	// Pagination errors.
+
+	// ErrInvalidPageToken indicates the pagination token has an invalid format.
+	ErrInvalidPageToken = errors.New("invalid page token format")
 )
