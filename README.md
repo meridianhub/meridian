@@ -57,6 +57,32 @@ the same technical language as the world's largest banks. Kubernetes-native, hor
 built for growth. Every deployment builds institutional expertise that stays with you.
 Full sovereignty. Open access. Verify everything.
 
+## Use Cases
+
+Meridian's multi-asset architecture enables transaction integrity across diverse domains:
+
+### Energy Retail
+
+Quality-aware metering with the Time-Bound Quality Ladder. One meter read creates two positions:
+what the customer owes you (revenue at tariff), what you owe the grid (cost at wholesale). GSP
+exposure visible at the moment of consumption, not at month-end. When estimates become actuals,
+the ledger reloads automatically with full bi-temporal audit trail.
+
+### Wealth Management
+
+One event, multiple accounting views. Corporate actions like accumulating dividends adjust cost
+basis without cash movement. Market value and tax basis tracked as separate views on the same
+positions. Bi-temporal queries answer "what was the cost basis on that date?" without reconstruction.
+
+### Edge Computing
+
+The same BIAN-compliant engine that runs in the cloud, running on Pi Zero class hardware.
+In-home displays compute value locally in sub-second response times. 13 months of history on-device.
+When connectivity is flaky, idempotency ensures no double-counting. Only settlement-ready aggregates
+leave the home.
+
+See [meridianhub.org](https://meridianhub.org) for detailed use case documentation.
+
 ## What it Demonstrates
 
 - BIAN-compliant service domain architecture
@@ -69,6 +95,8 @@ Full sovereignty. Open access. Verify everything.
   ([ADR-0013](docs/adr/0013-generic-asset-quantity-types.md))
 - Tenant-defined instrument catalogs with CEL validation
   ([ADR-0014](docs/adr/0014-financial-instrument-reference-data.md))
+- Bi-temporal market data with quality ladder (ESTIMATE < PROVISIONAL < ACTUAL < REVISED)
+- Internal bank accounts for nostro/vostro and operational accounting
 
 ## Multi-Asset Capabilities
 
@@ -120,6 +148,8 @@ meridian/
 │   │   └── k8s/                 # Kubernetes manifests
 │   ├── financial-accounting/    # FinancialAccounting service
 │   ├── gateway/                 # Gateway service
+│   ├── internal-bank-account/   # InternalBankAccount service
+│   ├── market-information/      # MarketInformation service
 │   ├── party/                   # Party service
 │   ├── payment-order/           # PaymentOrder service
 │   ├── position-keeping/        # PositionKeeping service
@@ -149,6 +179,8 @@ This implementation includes the following BIAN service domains:
 |---------|-------------|---------|:----------:|-----------|
 | [**CurrentAccount**][svc-ca] | Current Account | Customer-facing account management and transaction orchestration | No | [OAS3][bian-ca] |
 | [**FinancialAccounting**][svc-fa] | Financial Standard Management | Double-entry bookkeeping and general ledger | Yes | [OAS3][bian-fa] |
+| [**InternalBankAccount**][svc-iba] | Internal Bank Account | Nostro/vostro, clearing, and operational accounts | Yes | [OAS3][bian-iba] |
+| [**MarketInformation**][svc-mi] | Market Information Management | Bi-temporal market data with quality ladder | Yes | [OAS3][bian-mi] |
 | [**Party**][svc-party] | Party Reference Data Directory | Customer and party reference data management | Yes | [OAS3][bian-party] |
 | [**PaymentOrder**][svc-po] | Payment Order | Payment initiation, saga orchestration, and settlement | No | [OAS3][bian-po] |
 | [**PositionKeeping**][svc-pk] | Position Keeping | Pre-ledger transaction log and position tracking | Yes | [OAS3][bian-pk] |
@@ -161,12 +193,16 @@ Reference specifications: [BIAN Service Landscape 13.0.0](https://github.com/bia
 
 [bian-ca]: https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/CurrentAccount.yaml
 [bian-fa]: https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/FinancialAccounting.yaml
+[bian-iba]: https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/InternalBankAccount.yaml
+[bian-mi]: https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/MarketInformationManagement.yaml
 [bian-party]: https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/PartyReferenceDataDirectory.yaml
 [bian-po]: https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/PaymentOrder.yaml
 [bian-pk]: https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/PositionKeeping.yaml
 [bian-rd]: https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/FinancialInstrumentReferenceDataManagement.yaml
 [svc-ca]: services/current-account/
 [svc-fa]: services/financial-accounting/
+[svc-iba]: services/internal-bank-account/
+[svc-mi]: services/market-information/
 [svc-party]: services/party/
 [svc-po]: services/payment-order/
 [svc-pk]: services/position-keeping/
