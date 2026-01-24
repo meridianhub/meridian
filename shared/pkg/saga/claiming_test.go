@@ -97,6 +97,7 @@ func TestSagaClaimService_ClaimOrphanedSagas_Integration(t *testing.T) {
 		LeaseDuration: 5 * time.Minute,
 		BatchSize:     10,
 		MaxJitterMS:   0, // Disable jitter for deterministic tests
+		MaxReplays:    DefaultMaxReplays,
 		PodID:         "test-pod-1",
 	}
 	service := NewClaimService(db, config)
@@ -161,6 +162,7 @@ func TestSagaClaimService_ClaimOrphanedSagas_Integration(t *testing.T) {
 			LeaseDuration: 5 * time.Minute,
 			BatchSize:     2,
 			MaxJitterMS:   0,
+			MaxReplays:    DefaultMaxReplays,
 			PodID:         "batch-test-pod",
 		}
 		smallBatchService := NewClaimService(db, configSmallBatch)
@@ -197,12 +199,14 @@ func TestSagaClaimService_Concurrency_Integration(t *testing.T) {
 		LeaseDuration: 5 * time.Minute,
 		BatchSize:     10,
 		MaxJitterMS:   0,
+		MaxReplays:    DefaultMaxReplays,
 		PodID:         "pod-1",
 	})
 	service2 := NewClaimService(db, &ClaimConfig{
 		LeaseDuration: 5 * time.Minute,
 		BatchSize:     10,
 		MaxJitterMS:   0,
+		MaxReplays:    DefaultMaxReplays,
 		PodID:         "pod-2",
 	})
 
@@ -269,6 +273,7 @@ func TestSagaClaimService_LeaseExpiry_Integration(t *testing.T) {
 		LeaseDuration: 5 * time.Minute,
 		BatchSize:     10,
 		MaxJitterMS:   0,
+		MaxReplays:    DefaultMaxReplays,
 		PodID:         "recovery-pod",
 	})
 
@@ -300,6 +305,7 @@ func TestSagaClaimService_ClaimsCorrectStatuses(t *testing.T) {
 		LeaseDuration: 5 * time.Minute,
 		BatchSize:     100,
 		MaxJitterMS:   0,
+		MaxReplays:    DefaultMaxReplays,
 		PodID:         "status-test-pod",
 	})
 
