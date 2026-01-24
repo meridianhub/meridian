@@ -168,6 +168,31 @@ jobs:
 
             ## How to Post Inline Comments
 
+            ## Reading Existing Comments (Do This First)
+
+            Before posting your review, check for existing feedback to avoid duplicates and understand context:
+
+            **Step 1: Read existing inline comments (CodeRabbit, previous Claude reviews, etc.)**
+            ```bash
+            gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments \
+              --jq '.[] | {author: .user.login, path, line, body: .body[0:300], created: .created_at}'
+            ```
+
+            **Step 2: Read PR conversation comments**
+            ```bash
+            gh pr view ${{ github.event.pull_request.number }} --comments
+            ```
+
+            **How to use this context:**
+            - **Don't duplicate**: If CodeRabbit or a previous review already flagged an issue, don't repeat it
+            - **Acknowledge fixes**: If the author addressed feedback in subsequent commits, note it positively
+            - **Build on discussions**: Reference ongoing conversations where relevant
+            - **Disagree respectfully**: If you disagree with previous feedback, explain why with evidence
+
+            ---
+
+            ## How to Post Inline Comments
+
             **Step 1: Get the PR diff to find file paths and line numbers**
             ```bash
             gh pr diff ${{ github.event.pull_request.number }}
