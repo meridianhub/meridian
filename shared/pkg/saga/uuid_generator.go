@@ -71,6 +71,11 @@ func (ctx *StepContext) NewUUID() uuid.UUID {
 
 // ResetForStep resets the call index counter and updates the step index.
 // This must be called when entering a new step to ensure UUID determinism (FR-26).
+//
+// IMPORTANT: This method is NOT safe to call concurrently with NewUUID.
+// It must be called only during step transitions when no UUID generation
+// is in progress (i.e., between steps, not during step execution).
+// The saga orchestrator is responsible for ensuring this serialization.
 func (ctx *StepContext) ResetForStep(stepIndex int) {
 	ctx.stepIndex = stepIndex
 	atomic.StoreInt32(&ctx.callIndex, 0)
@@ -86,8 +91,8 @@ func (ctx *StepContext) StepIndex() int {
 	return ctx.stepIndex
 }
 
-// CallIndex returns the current call index (number of UUIDs generated in this step).
-// Note: This returns the next index that will be used, not the last used index.
+// CallIndex returns the number of UUIDs generated so far in the current step.
+// This value equals the call index that will be used for the next NewUUID call.
 func (ctx *StepContext) CallIndex() int32 {
 	return atomic.LoadInt32(&ctx.callIndex)
 }
