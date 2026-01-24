@@ -1,26 +1,19 @@
 name: Claude Code Review
 
 on:
-  workflow_run:
-    workflows: ["Test"]
-    types: [completed]
+  pull_request:
+    types: [opened, synchronize, reopened]
 
-# Prevent duplicate reviews for the same PR branch
-# Uses branch name so different PRs can be reviewed in parallel
+# Cancel in-progress reviews when new commits are pushed
+# This prevents multiple reviews on the same PR and saves API costs
 concurrency:
-  group: claude-code-review-${{ github.repository }}-${{ github.event.workflow_run.head_branch }}
-  cancel-in-progress: false
+  group: claude-code-review-${{ github.repository }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   claude-review:
-    # Only run when ALL conditions are met:
-    # 1. The triggering workflow succeeded
-    # 2. It was triggered by a pull request (not push to develop/main)
-    # 3. Not a Dependabot PR (they're automated dependency updates)
-    if: >
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.actor.login != 'dependabot[bot]'
+    # Skip Dependabot PRs (automated dependency updates)
+    if: github.actor != 'dependabot[bot]'
 
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -32,39 +25,10 @@ jobs:
       actions: read
 
     steps:
-      - name: Get PR number
-        id: pr
-        uses: actions/github-script@v8
-        with:
-          script: |
-            const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              run_id: context.payload.workflow_run.id
-            });
-
-            // Get PR number from the workflow run
-            const pulls = await github.rest.pulls.list({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              head: `${context.repo.owner}:${context.payload.workflow_run.head_branch}`,
-              state: 'open'
-            });
-
-            if (pulls.data.length === 0) {
-              console.log('No open PR found for this branch');
-              return;
-            }
-
-            const prNumber = pulls.data[0].number;
-            console.log(`Found PR #${prNumber}`);
-            core.setOutput('number', prNumber);
-
       # SECURITY: Checkout the default branch, NOT the PR's head_sha
-      # This prevents malicious PRs from executing untrusted code in a privileged workflow_run context
-      # Claude Code can still review the PR diff via gh CLI commands
+      # This prevents malicious PRs from executing untrusted code
+      # Claude Code reviews the PR diff via gh CLI commands
       - name: Checkout repository (default branch)
-        if: steps.pr.outputs.number
         uses: actions/checkout@v6
         with:
           ref: ${{ github.event.repository.default_branch }}
@@ -72,12 +36,10 @@ jobs:
           persist-credentials: false
 
       - name: Get current date
-        if: steps.pr.outputs.number
         id: date
         run: echo "current_date=$(date -u '+%Y-%m-%d')" >> $GITHUB_OUTPUT
 
       - name: Run Claude Code Review
-        if: steps.pr.outputs.number
         id: claude-review
         continue-on-error: true
         uses: anthropics/claude-code-action@v1
@@ -85,12 +47,12 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
             REPO: ${{ github.repository }}
-            PR NUMBER: ${{ steps.pr.outputs.number }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
 
             CONTEXT:
             - Today's date is ${{ steps.date.outputs.current_date }}
             - Go 1.25+ is the current stable release - don't flag version references
-            - CI has passed (tests, build, linting)
+            - CI may still be running - check status with `gh pr checks ${{ github.event.pull_request.number }}`
 
             ---
 
@@ -137,6 +99,20 @@ jobs:
             - The PR description should summarize the requirements
             - Validate: Does the implementation fulfill those stated requirements?
             - Acknowledge when requirements are met: "This satisfies the requirement for X"
+
+            ## CI Status
+
+            This review runs in parallel with CI. Check the current status:
+            ```bash
+            gh pr checks ${{ github.event.pull_request.number }}
+            ```
+
+            Include CI status in your review summary:
+            - **CI passing**: Proceed with normal review
+            - **CI running**: Note "CI still running" in summary - review the code anyway
+            - **CI failing**: Note which checks failed - the author may already be fixing them
+
+            Don't block on CI status alone. Your review provides value regardless of CI state.
 
             ## Review Outcomes (Three States)
 
@@ -192,7 +168,7 @@ jobs:
 
             **Step 1: Get the PR diff to find file paths and line numbers**
             ```bash
-            gh pr diff ${{ steps.pr.outputs.number }}
+            gh pr diff ${{ github.event.pull_request.number }}
             ```
 
             **Step 2: Submit a review with inline comments using the reviews endpoint**
@@ -200,7 +176,7 @@ jobs:
             All inline comments MUST be submitted as part of a review (not standalone). Use this pattern:
 
             ```bash
-            gh api repos/${{ github.repository }}/pulls/${{ steps.pr.outputs.number }}/reviews \
+            gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews \
               --method POST \
               -f event="COMMENT" \
               -f body="## Review Summary
@@ -266,28 +242,28 @@ jobs:
             - CONTRIBUTING.md, docs/adr/, docs/prd/, service README files
 
           # Using Opus 4.5 for higher quality code reviews
-          claude_args: '--model claude-opus-4-5-20251101 --allowed-tools "Bash(gh api:*),Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"'
+          claude_args: '--model claude-opus-4-5-20251101 --allowed-tools "Bash(gh api:*),Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr checks:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"'
 
       - name: Report Final Status
-        if: always() && steps.pr.outputs.number
+        if: always()
         run: |
           echo "## Claude Code Review Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **PR:** #${{ steps.pr.outputs.number }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **PR:** #${{ github.event.pull_request.number }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           if [ "${{ steps.claude-review.outcome }}" == "success" ]; then
             echo "### Result: Success" >> $GITHUB_STEP_SUMMARY
             echo "Claude Code review completed successfully." >> $GITHUB_STEP_SUMMARY
-            echo "::notice::Claude Code review completed successfully for PR #${{ steps.pr.outputs.number }}"
+            echo "::notice::Claude Code review completed successfully for PR #${{ github.event.pull_request.number }}"
           elif [ "${{ steps.claude-review.outcome }}" == "failure" ]; then
             echo "### Result: Failed" >> $GITHUB_STEP_SUMMARY
             echo "Claude Code review failed - this is non-blocking." >> $GITHUB_STEP_SUMMARY
-            echo "::warning::Claude Code review failed for PR #${{ steps.pr.outputs.number }} - this is non-blocking"
+            echo "::warning::Claude Code review failed for PR #${{ github.event.pull_request.number }} - this is non-blocking"
           elif [ "${{ steps.claude-review.outcome }}" == "cancelled" ]; then
             echo "### Result: Cancelled" >> $GITHUB_STEP_SUMMARY
             echo "Claude Code review was cancelled." >> $GITHUB_STEP_SUMMARY
-            echo "::warning::Claude Code review was cancelled for PR #${{ steps.pr.outputs.number }}"
+            echo "::warning::Claude Code review was cancelled for PR #${{ github.event.pull_request.number }}"
           elif [ "${{ steps.claude-review.outcome }}" == "skipped" ]; then
             echo "### Result: Skipped" >> $GITHUB_STEP_SUMMARY
             echo "Claude Code review was skipped." >> $GITHUB_STEP_SUMMARY
