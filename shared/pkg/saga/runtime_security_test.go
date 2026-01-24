@@ -428,7 +428,6 @@ result = "new_key" in input_data
 `
 	result2, err := runtime.ExecuteSaga(ctx, "input_test2", script2, input)
 	require.NoError(t, err)
-	// The original Go map may have been modified, but each execution gets a fresh copy
-	// This test verifies the input isn't cross-contaminated in unexpected ways
-	assert.NotNil(t, result2)
+	// Each execution should get a fresh copy of input_data without modifications from previous runs
+	assert.Equal(t, false, result2.Globals["result"], "new_key should not persist across executions")
 }

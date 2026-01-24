@@ -132,6 +132,34 @@ def inner():
 `,
 			wantErr: false,
 		},
+		{
+			name: "three nested comprehensions - allowed (at limit)",
+			script: `
+result = [[[z for z in range(2)] for y in range(2)] for x in range(2)]
+`,
+			wantErr: false,
+		},
+		{
+			name: "four nested comprehensions - rejected",
+			script: `
+result = [[[[w for w in range(2)] for z in range(2)] for y in range(2)] for x in range(2)]
+`,
+			wantErr: true,
+		},
+		{
+			name: "comprehension with multiple for clauses - counts depth",
+			script: `
+result = [x+y+z for x in range(2) for y in range(2) for z in range(2)]
+`,
+			wantErr: false,
+		},
+		{
+			name: "comprehension with four for clauses - rejected",
+			script: `
+result = [x+y+z+w for x in range(2) for y in range(2) for z in range(2) for w in range(2)]
+`,
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {

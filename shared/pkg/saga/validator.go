@@ -272,21 +272,19 @@ func (v *validationVisitor) walkExpr(expr syntax.Expr) error {
 		}
 
 	case *syntax.Comprehension:
-		// List/Dict comprehension - walk clauses
-		if err := v.walkExpr(e.Body); err != nil {
-			return err
-		}
+		// List/Dict comprehension - clauses are nested; track cumulative depth.
+		// In Starlark, [body for x in xs for y in ys] desugars to nested for loops.
+		savedDepth := v.loopDepth
+		localDepth := v.loopDepth
 		for _, clause := range e.Clauses {
 			if forClause, ok := clause.(*syntax.ForClause); ok {
-				v.loopDepth++
-				if v.loopDepth > v.maxDepth {
-					v.maxDepth = v.loopDepth
+				localDepth++
+				if localDepth > v.maxDepth {
+					v.maxDepth = localDepth
 				}
 				if err := v.walkExpr(forClause.X); err != nil {
-					v.loopDepth--
 					return err
 				}
-				v.loopDepth--
 			}
 			if ifClause, ok := clause.(*syntax.IfClause); ok {
 				if err := v.walkExpr(ifClause.Cond); err != nil {
@@ -294,6 +292,13 @@ func (v *validationVisitor) walkExpr(expr syntax.Expr) error {
 				}
 			}
 		}
+
+		v.loopDepth = localDepth
+		if err := v.walkExpr(e.Body); err != nil {
+			v.loopDepth = savedDepth
+			return err
+		}
+		v.loopDepth = savedDepth
 
 	case *syntax.LambdaExpr:
 		return v.walkExpr(e.Body)
