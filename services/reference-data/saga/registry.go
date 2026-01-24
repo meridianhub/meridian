@@ -39,7 +39,7 @@ var (
 	ErrInvalidStatus = errors.New("invalid saga status")
 
 	// ErrInvalidStateTransition is returned for illegal status transitions.
-	// Valid transitions: DRAFT→ACTIVE, DRAFT→DEPRECATED, ACTIVE→DEPRECATED.
+	// Valid transitions: DRAFT→ACTIVE, ACTIVE→DEPRECATED.
 	ErrInvalidStateTransition = errors.New("invalid state transition")
 
 	// ErrNotDraft is returned when attempting to modify a saga that is not in DRAFT status.

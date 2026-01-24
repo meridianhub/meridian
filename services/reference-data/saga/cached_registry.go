@@ -134,6 +134,7 @@ func (r *CachedRegistry) ActivateSaga(ctx context.Context, id uuid.UUID) error {
 
 	// Invalidate all cache entries for this saga name
 	// because active resolution may have changed
+	r.cache.InvalidateByID(ctx, id)
 	r.cache.InvalidateName(ctx, current.Name)
 
 	return nil
@@ -154,6 +155,7 @@ func (r *CachedRegistry) DeprecateSaga(ctx context.Context, id uuid.UUID, succes
 
 	// Invalidate all cache entries for this saga name
 	// because active resolution may have changed
+	r.cache.InvalidateByID(ctx, id)
 	r.cache.InvalidateName(ctx, current.Name)
 
 	return nil

@@ -330,21 +330,22 @@ func (r *PostgresRegistry) UpdateDefinition(ctx context.Context, id uuid.UUID, u
 		}
 
 		// Update the saga
+		// Use COALESCE(NULLIF(...)) pattern to preserve existing values when empty string is passed
 		updateQuery := `
 			UPDATE saga_definition SET
 				script = COALESCE(NULLIF($1, ''), script),
-				preconditions_expression = $2,
-				display_name = $3,
-				description = $4,
+				preconditions_expression = COALESCE(NULLIF($2, ''), preconditions_expression),
+				display_name = COALESCE(NULLIF($3, ''), display_name),
+				description = COALESCE(NULLIF($4, ''), description),
 				updated_at = $5
 			WHERE id = $6 AND updated_at = $7`
 
 		now := time.Now()
 		result, err := tx.Exec(ctx, updateQuery,
 			updates.Script,
-			nullString(updates.PreconditionsExpression),
-			nullString(updates.DisplayName),
-			nullString(updates.Description),
+			updates.PreconditionsExpression,
+			updates.DisplayName,
+			updates.Description,
 			now,
 			id, currentUpdatedAt,
 		)
