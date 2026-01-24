@@ -61,12 +61,33 @@ func RecordCardinalityViolation(instrumentCode string) {
 	bucketCardinalityViolationsTotal.WithLabelValues(instrumentCode).Inc()
 }
 
+// openingBalanceValidationFailuresTotal counts validation failures for opening balances.
+// Labels:
+//   - instrument_code: the instrument code being validated
+//   - failure_reason: bounded set (cel_rejected, cel_error, instrument_not_found)
+var openingBalanceValidationFailuresTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Namespace: "meridian",
+		Subsystem: "position_keeping",
+		Name:      "opening_balance_validation_failures_total",
+		Help:      "Total number of opening balance validation failures by instrument code and reason",
+	},
+	[]string{"instrument_code", "failure_reason"},
+)
+
+// RecordOpeningBalanceValidationFailure increments the opening balance validation failure counter.
+func RecordOpeningBalanceValidationFailure(instrumentCode string, reason string) {
+	openingBalanceValidationFailuresTotal.WithLabelValues(instrumentCode, reason).Inc()
+}
+
 // ExposeMetricsForTesting provides access to the raw Prometheus metrics for testing.
 // This should only be used in test code.
 var ExposeMetricsForTesting = struct {
-	MeasurementValidationFailuresTotal *prometheus.CounterVec
-	BucketCardinalityViolationsTotal   *prometheus.CounterVec
+	MeasurementValidationFailuresTotal    *prometheus.CounterVec
+	BucketCardinalityViolationsTotal      *prometheus.CounterVec
+	OpeningBalanceValidationFailuresTotal *prometheus.CounterVec
 }{
-	MeasurementValidationFailuresTotal: measurementValidationFailuresTotal,
-	BucketCardinalityViolationsTotal:   bucketCardinalityViolationsTotal,
+	MeasurementValidationFailuresTotal:    measurementValidationFailuresTotal,
+	BucketCardinalityViolationsTotal:      bucketCardinalityViolationsTotal,
+	OpeningBalanceValidationFailuresTotal: openingBalanceValidationFailuresTotal,
 }
