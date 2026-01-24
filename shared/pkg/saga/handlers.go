@@ -63,6 +63,11 @@ type StarlarkContext struct {
 	// Logger for structured logging within handlers.
 	Logger *slog.Logger
 
+	// LookupCache stores external lookup results for deterministic replay (FR-34).
+	// When replaying a saga, this cache is pre-populated from the input snapshot
+	// to ensure the same lookup results are returned even if Reference Data changed.
+	LookupCache *LookupResultCache
+
 	// Suspension state
 	suspended     bool
 	SuspendReason string
