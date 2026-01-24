@@ -279,10 +279,16 @@ func (s *PositionKeepingService) validateOpeningBalanceWithCEL(
 		return nil, fmt.Errorf("%w: %s", ErrInstrumentNotFound, instrumentCode)
 	})
 	if err != nil {
-		// Instrument not found - record metric and return error
-		RecordOpeningBalanceValidationFailure(instrumentCode, ValidationFailureReasonInstrumentNotFound)
-		return status.Errorf(codes.NotFound,
-			"instrument definition not found for instrument code '%s': %v", instrumentCode, err)
+		// Distinguish instrument-not-found from other cache/backend errors
+		if errors.Is(err, ErrInstrumentNotFound) {
+			RecordOpeningBalanceValidationFailure(instrumentCode, ValidationFailureReasonInstrumentNotFound)
+			return status.Errorf(codes.NotFound,
+				"instrument definition not found for instrument code '%s': %v", instrumentCode, err)
+		}
+		// Other errors (cache failures, backend timeouts, etc.) are internal errors
+		RecordOpeningBalanceValidationFailure(instrumentCode, ValidationFailureReasonCELError)
+		return status.Errorf(codes.Internal,
+			"failed to load instrument definition for instrument code '%s': %v", instrumentCode, err)
 	}
 
 	// Build the activation context for CEL evaluation

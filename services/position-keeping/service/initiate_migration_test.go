@@ -856,6 +856,54 @@ func TestInitiateWithOpeningBalance_CEL_InstrumentNotFound(t *testing.T) {
 	mockCache.AssertExpectations(t)
 }
 
+func TestInitiateWithOpeningBalance_CEL_CacheFailure(t *testing.T) {
+	// Test that cache/backend failures return codes.Internal (not NotFound)
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockMeasurementRepo := new(MockMeasurementRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+	mockCache := new(MockInstrumentCache)
+
+	svc, err := service.NewPositionKeepingService(
+		mockRepo,
+		mockMeasurementRepo,
+		mockEventPublisher,
+		mockIdempotency,
+		service.WithInstrumentCache(mockCache),
+	)
+	require.NoError(t, err)
+
+	effectiveDate := time.Now().Add(-24 * time.Hour)
+
+	// Cache returns a generic error (e.g., Redis timeout, backend failure)
+	mockCache.On("GetOrLoad", ctx, "USD", 1).Return(nil, assert.AnError)
+
+	req := &positionkeepingv1.InitiateWithOpeningBalanceRequest{
+		AccountId: "migrated-account-001",
+		OpeningBalance: &commonv1.MoneyAmount{
+			Amount: &money.Money{
+				CurrencyCode: "USD",
+				Units:        1500,
+				Nanos:        0,
+			},
+		},
+		EffectiveDate:  timestamppb.New(effectiveDate),
+		InstrumentCode: "USD",
+	}
+
+	resp, err := svc.InitiateWithOpeningBalance(ctx, req)
+
+	require.Error(t, err)
+	require.Nil(t, resp)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Internal, st.Code())
+	assert.Contains(t, st.Message(), "failed to load instrument definition")
+	mockRepo.AssertNotCalled(t, "Create")
+	mockCache.AssertExpectations(t)
+}
+
 func TestInitiateWithOpeningBalance_CEL_ComplexValidationExpression(t *testing.T) {
 	ctx := context.Background()
 	mockRepo := new(MockRepository)
