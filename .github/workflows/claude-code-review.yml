@@ -23,6 +23,8 @@ jobs:
       issues: read
       id-token: write
       actions: read
+      checks: read
+      statuses: read
 
     steps:
       # SECURITY: Checkout the default branch, NOT the PR's head_sha
