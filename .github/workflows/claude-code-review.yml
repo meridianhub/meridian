@@ -265,6 +265,50 @@ jobs:
 
             ---
 
+            ## Resolving Your Previous Comments
+
+            When you approve a PR (or when issues from your previous review have been addressed), **resolve your own review threads**:
+
+            **Step 1: Find your unresolved review threads**
+            ```bash
+            gh api graphql -f query='
+            query {
+              repository(owner: "${{ github.repository_owner }}", name: "${{ github.event.repository.name }}") {
+                pullRequest(number: ${{ github.event.pull_request.number }}) {
+                  reviewThreads(first: 50) {
+                    nodes {
+                      id
+                      isResolved
+                      comments(first: 1) {
+                        nodes {
+                          author { login }
+                          body
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }' --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false) | select(.comments.nodes[0].author.login == "claude") | {id, body: .comments.nodes[0].body[0:100]}'
+            ```
+
+            **Step 2: Resolve each thread that has been addressed**
+            ```bash
+            gh api graphql -f query='
+            mutation {
+              resolveReviewThread(input: {threadId: "PRRT_xxx"}) {
+                thread { isResolved }
+              }
+            }'
+            ```
+
+            **When to resolve threads:**
+            - When approving: Resolve all your threads (issues addressed or superseded)
+            - When re-reviewing: Resolve threads where the author fixed the issue
+            - Do NOT resolve threads that are still valid concerns
+
+            ---
+
             PROJECT CONTEXT (reference as needed):
             - CONTRIBUTING.md, docs/adr/, docs/prd/, service README files
 
