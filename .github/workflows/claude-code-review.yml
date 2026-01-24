@@ -138,17 +138,22 @@ jobs:
             - Validate: Does the implementation fulfill those stated requirements?
             - Acknowledge when requirements are met: "This satisfies the requirement for X"
 
-            ## Approval vs Request Changes
+            ## Review Outcomes (Three States)
 
-            **APPROVE** means "merge as-is" - use only when you have NO actionable suggestions.
+            GitHub supports three review states. Use them precisely:
 
-            **REQUEST_CHANGES** means "please address these" - use when you have suggestions that would improve the code, even minor ones. This ensures they get addressed rather than ignored.
+            | State | GitHub Event | When to Use |
+            |-------|--------------|-------------|
+            | 🔴 **Blocking** | `REQUEST_CHANGES` | Critical issues that MUST be fixed before merge: security vulnerabilities, bugs, data loss risks, correctness problems |
+            | 🟡 **Suggestions** | `COMMENT` | Improvements that SHOULD be addressed but don't block merge: code quality, edge cases, performance, style with objective benefit |
+            | 🟢 **Approve** | `APPROVE` | Ready to merge as-is, possibly with minor informational notes |
 
-            - **Nothing to improve**: APPROVE. "Clean implementation, tests are solid."
-            - **Actionable suggestions exist**: REQUEST_CHANGES. "Quick fixes needed" - then list them.
-            - **Style-only preferences** (no objective improvement): APPROVE with comment. These are truly optional.
+            **Decision criteria:**
+            - **🔴 Blocking (REQUEST_CHANGES)**: Would this cause a bug, security issue, data loss, or break functionality? Use sparingly - this blocks the merge.
+            - **🟡 Suggestions (COMMENT)**: Is this an improvement that doesn't affect correctness? Use for "should fix" items that shouldn't hold up the merge.
+            - **🟢 Approve (APPROVE)**: Does the code meet requirements and pass tests with no actionable feedback?
 
-            The bar for APPROVE is: "I have nothing actionable to suggest." If you found something worth mentioning, it's worth fixing.
+            **Important**: `REQUEST_CHANGES` is reserved for genuine blockers. Using it for minor suggestions frustrates authors and slows velocity. If it's not a blocker, use `COMMENT`.
 
             ## Feedback Principles
 
@@ -175,10 +180,13 @@ jobs:
 
             ## Priority Signals
 
-            Use 🔴 for critical issues (security, correctness, data loss risk).
-            Use 🟡 for improvements that should be addressed (edge cases, code quality, simplifications).
+            Use icons to signal severity, which determines the review event:
 
-            Both warrant REQUEST_CHANGES. The difference is severity, not whether to fix.
+            - 🔴 **Critical** (security, correctness, data loss risk) → `REQUEST_CHANGES` - blocks merge
+            - 🟡 **Improvement** (edge cases, code quality, simplifications) → `COMMENT` - doesn't block merge
+            - 🟢 **Note** (informational, no action needed) → Include in `APPROVE` body
+
+            The icon determines the GitHub action. Don't use `REQUEST_CHANGES` for 🟡 items.
 
             ## How to Comment
 
