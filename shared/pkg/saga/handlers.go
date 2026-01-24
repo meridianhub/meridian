@@ -582,14 +582,16 @@ func notificationSend(ctx *StarlarkContext, params map[string]any) (any, error) 
 		return nil, wrapHandlerError(handlerName, err)
 	}
 
+	notificationID := ctx.NewUUID(ctx.SagaExecutionID, "notification_"+recipient).String()
+
 	ctx.Logger.Info("sending notification",
 		"saga_execution_id", ctx.SagaExecutionID,
 		"notification_type", notificationType,
-		"recipient", recipient,
+		"notification_id", notificationID,
 	)
 
 	return map[string]any{
-		"notification_id": ctx.NewUUID(ctx.SagaExecutionID, "notification_"+recipient).String(),
+		"notification_id": notificationID,
 		"type":            notificationType,
 		"recipient":       recipient,
 		"status":          "SENT",
