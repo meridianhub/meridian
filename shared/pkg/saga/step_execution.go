@@ -102,6 +102,8 @@ func (e *StepExecutor) WithLogger(logger *slog.Logger) *StepExecutor {
 // Returns:
 //   - The step result (from cache or fresh execution)
 //   - Error if execution or persistence fails
+//
+//nolint:gocognit,gocyclo // Complexity is inherent to idempotency and concurrent execution handling
 func (e *StepExecutor) ExecuteStep(
 	ctx context.Context,
 	instance *SagaInstance,
@@ -135,13 +137,20 @@ func (e *StepExecutor) ExecuteStep(
 		)
 
 		// If the cached result was a failure, return the error
-		if cachedResult.Status == StepStatusFailed && cachedResult.Error != nil {
-			return nil, fmt.Errorf("%w: %s", ErrStepPreviouslyFailed, *cachedResult.Error)
+		if cachedResult.Status == StepStatusFailed {
+			if cachedResult.Error != nil {
+				return nil, fmt.Errorf("%w: %s", ErrStepPreviouslyFailed, *cachedResult.Error)
+			}
+			return nil, ErrStepPreviouslyFailed
 		}
 
 		// Return the cached output snapshot
 		// Convert JSONB to interface{} for compatibility
-		return hydrateOutputSnapshot(cachedResult.Result), nil
+		output, hydrateErr := hydrateOutputSnapshot(cachedResult.Result)
+		if hydrateErr != nil {
+			return nil, fmt.Errorf("failed to hydrate cached result: %w", hydrateErr)
+		}
+		return output, nil
 	}
 
 	// Cache miss - execute the handler
@@ -188,18 +197,38 @@ func (e *StepExecutor) ExecuteStep(
 
 	// Persist the step result
 	if err := e.stepResultRepo.Save(ctx, stepResult); err != nil {
+		// Handle concurrent first runs: if another worker already persisted,
+		// re-query cache and return the persisted result (idempotency guarantee)
+		cachedResult, cacheErr := e.stepResultRepo.FindByIdempotencyKey(ctx, idempotencyKey)
+		if cacheErr != nil {
+			return nil, fmt.Errorf("failed to persist step result: %w (cache re-check also failed: %w)", err, cacheErr)
+		}
+		if cachedResult != nil {
+			e.logger.Info("concurrent execution detected, returning winner's result",
+				"saga_id", instance.ID,
+				"step_index", stepIndex,
+				"step_name", stepName,
+			)
+			if cachedResult.Status == StepStatusFailed {
+				if cachedResult.Error != nil {
+					return nil, fmt.Errorf("%w: %s", ErrStepPreviouslyFailed, *cachedResult.Error)
+				}
+				return nil, ErrStepPreviouslyFailed
+			}
+			output, hydrateErr := hydrateOutputSnapshot(cachedResult.Result)
+			if hydrateErr != nil {
+				return nil, fmt.Errorf("failed to hydrate cached result after concurrent save: %w", hydrateErr)
+			}
+			return output, nil
+		}
+		// No cached result found despite save failure - propagate original error
 		return nil, fmt.Errorf("failed to persist step result: %w", err)
 	}
 
 	// Update the saga instance's current step index (if successful)
 	if handlerErr == nil {
 		if err := e.instanceRepo.UpdateStepIndex(ctx, instance.ID, stepIndex+1); err != nil {
-			e.logger.Warn("failed to update saga step index",
-				"saga_id", instance.ID,
-				"step_index", stepIndex,
-				"error", err,
-			)
-			// Note: We continue even if this fails - the step result is persisted
+			return nil, fmt.Errorf("failed to update saga step index: %w", err)
 		}
 	}
 
@@ -242,7 +271,7 @@ func (e *TransactionalStepExecutor) WithStepResultRepo(repo StepResultRepository
 //
 // On commit failure, no partial state is persisted.
 //
-//nolint:gocognit // Complexity is inherent to transaction handling; extraction would reduce clarity
+//nolint:gocognit,gocyclo // Complexity is inherent to transaction handling; extraction would reduce clarity
 func (e *TransactionalStepExecutor) ExecuteStepInTx(
 	ctx context.Context,
 	instance *SagaInstance,
@@ -264,10 +293,17 @@ func (e *TransactionalStepExecutor) ExecuteStepInTx(
 				"saga_id", instance.ID,
 				"step_index", stepIndex,
 			)
-			if cachedResult.Status == StepStatusFailed && cachedResult.Error != nil {
-				return nil, fmt.Errorf("%w: %s", ErrStepPreviouslyFailed, *cachedResult.Error)
+			if cachedResult.Status == StepStatusFailed {
+				if cachedResult.Error != nil {
+					return nil, fmt.Errorf("%w: %s", ErrStepPreviouslyFailed, *cachedResult.Error)
+				}
+				return nil, ErrStepPreviouslyFailed
 			}
-			return hydrateOutputSnapshot(cachedResult.Result), nil
+			output, hydrateErr := hydrateOutputSnapshot(cachedResult.Result)
+			if hydrateErr != nil {
+				return nil, fmt.Errorf("failed to hydrate cached result: %w", hydrateErr)
+			}
+			return output, nil
 		}
 	}
 
@@ -387,17 +423,17 @@ func DeepCopyJSON(v interface{}) (interface{}, error) {
 
 // hydrateOutputSnapshot converts a persisted JSONB result back to interface{}.
 // This is used when returning cached results during replay.
-func hydrateOutputSnapshot(jsonb JSONB) interface{} {
+// It performs a deep copy to ensure nested maps/slices are not shared,
+// preserving immutability of the cached data.
+//
+//nolint:nilnil // Returning nil, nil is intentional for nil input (consistent with DeepCopyJSON)
+func hydrateOutputSnapshot(jsonb JSONB) (interface{}, error) {
 	if jsonb == nil {
-		return nil
+		return nil, nil
 	}
-	// JSONB is already map[string]interface{}, so we can return it directly
-	// But we should return a copy to prevent modification of cached data
-	result := make(map[string]interface{}, len(jsonb))
-	for k, v := range jsonb {
-		result[k] = v
-	}
-	return result
+	// Use DeepCopyJSON to ensure nested structures are fully copied
+	// A shallow copy would leave nested maps/slices shared, allowing mutation
+	return DeepCopyJSON(jsonb)
 }
 
 // toJSONB converts an interface{} to JSONB for persistence.
