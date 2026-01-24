@@ -206,13 +206,31 @@ func (r *DataSetRepository) FindByCodeAndVersion(ctx context.Context, code strin
 	return result, err
 }
 
-// List returns datasets matching the filter criteria.
-// Returns an empty slice if no datasets match the filter.
-func (r *DataSetRepository) List(ctx context.Context, filters domain.DataSetFilters) ([]domain.DataSetDefinition, error) {
-	var results []domain.DataSetDefinition
+// List returns datasets matching the filter criteria with cursor-based pagination.
+// Returns the datasets, a next page token (empty if no more results), and any error.
+// Returns ErrInvalidPageToken (wrapped as domain.ErrInvalidPageToken) if the pageToken format is invalid.
+func (r *DataSetRepository) List(ctx context.Context, filters domain.DataSetFilters) ([]domain.DataSetDefinition, string, error) {
+	// Apply pagination defaults and limits
+	pageSize := filters.Limit
+	if pageSize <= 0 {
+		pageSize = DefaultPageSize
+	}
+	if pageSize > MaxPageSize {
+		pageSize = MaxPageSize
+	}
 
-	err := r.withReadTransaction(ctx, func(tx pgx.Tx) error {
-		query := `
+	// Parse cursor token
+	cursorTime, cursorID, err := parseCursorToken(filters.PageToken)
+	if err != nil {
+		return nil, "", domain.ErrInvalidPageToken
+	}
+
+	var results []domain.DataSetDefinition
+	var nextPageToken string
+
+	err = r.withReadTransaction(ctx, func(tx pgx.Tx) error {
+		// Build dynamic query with filters
+		baseQuery := `
 			SELECT id, code, version, name, description, data_category,
 				validation_expression, resolution_key_expression, error_message_expression,
 				status, is_shared, access_level, created_at, updated_at, activated_at, deprecated_at
@@ -224,60 +242,72 @@ func (r *DataSetRepository) List(ctx context.Context, filters domain.DataSetFilt
 
 		// Apply category filter
 		if filters.Category != nil {
-			query += fmt.Sprintf(" AND data_category = $%d", argPos)
+			baseQuery += fmt.Sprintf(" AND data_category = $%d", argPos)
 			args = append(args, filters.Category.String())
 			argPos++
 		}
 
 		// Apply status filter
 		if filters.Status != nil {
-			query += fmt.Sprintf(" AND status = $%d", argPos)
+			baseQuery += fmt.Sprintf(" AND status = $%d", argPos)
 			args = append(args, filters.Status.String())
 			argPos++
 		}
 
-		// Order by created_at descending
-		query += " ORDER BY created_at DESC"
-
-		// Apply pagination
-		limit := filters.Limit
-		if limit <= 0 {
-			limit = 100 // Default limit
-		}
-		query += fmt.Sprintf(" LIMIT $%d", argPos)
-		args = append(args, limit)
-		argPos++
-
-		if filters.Offset > 0 {
-			query += fmt.Sprintf(" OFFSET $%d", argPos)
-			args = append(args, filters.Offset)
+		// Apply cursor pagination if not first page
+		if !cursorTime.IsZero() {
+			baseQuery += fmt.Sprintf(" AND (date_trunc('second', created_at) < $%d OR (date_trunc('second', created_at) = $%d AND id < $%d))",
+				argPos, argPos+1, argPos+2)
+			args = append(args, cursorTime, cursorTime, cursorID)
+			argPos += 3
 		}
 
-		rows, err := tx.Query(ctx, query, args...)
+		// Order by created_at DESC, id DESC for consistent cursor pagination
+		baseQuery += " ORDER BY date_trunc('second', created_at) DESC, id DESC"
+
+		// Fetch one extra to detect if there's a next page
+		baseQuery += fmt.Sprintf(" LIMIT $%d", argPos)
+		args = append(args, pageSize+1)
+
+		rows, err := tx.Query(ctx, baseQuery, args...)
 		if err != nil {
 			return fmt.Errorf("failed to list dataset definitions: %w", err)
 		}
 		defer rows.Close()
 
+		var entities []DataSetDefinitionEntity
 		for rows.Next() {
 			entity, err := r.scanDataSetDefinitionFromRows(rows)
 			if err != nil {
 				return err
 			}
-			results = append(results, EntityToDataSetDefinition(entity))
+			entities = append(entities, entity)
 		}
 
 		if err := rows.Err(); err != nil {
 			return fmt.Errorf("error iterating dataset definitions: %w", err)
 		}
 
+		// Check for more results
+		hasMore := len(entities) > pageSize
+		if hasMore {
+			entities = entities[:pageSize]
+			lastEntity := entities[len(entities)-1]
+			nextPageToken = formatCursorToken(lastEntity.CreatedAt, lastEntity.ID)
+		}
+
+		// Convert to domain
+		for _, entity := range entities {
+			results = append(results, EntityToDataSetDefinition(entity))
+		}
+
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
-	return results, nil
+	return results, nextPageToken, nil
 }
 
 // ExistsByCode checks if a dataset with the given code exists.

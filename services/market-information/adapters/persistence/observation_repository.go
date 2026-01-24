@@ -148,13 +148,30 @@ func (r *ObservationRepository) FindByID(ctx context.Context, id uuid.UUID) (dom
 	return result, err
 }
 
-// Query retrieves observations matching the query criteria.
-// Returns an empty slice if no observations match.
-// Results are ordered by ObservedAt descending (most recent first).
-func (r *ObservationRepository) Query(ctx context.Context, query domain.ObservationQuery) ([]domain.MarketPriceObservation, error) {
-	var results []domain.MarketPriceObservation
+// Query retrieves observations matching the query criteria with cursor-based pagination.
+// Returns the observations, a next page token (empty if no more results), and any error.
+// Results are ordered by created_at descending (most recent first) for cursor consistency.
+// Returns ErrInvalidPageToken (wrapped as domain.ErrInvalidPageToken) if the pageToken format is invalid.
+func (r *ObservationRepository) Query(ctx context.Context, query domain.ObservationQuery) ([]domain.MarketPriceObservation, string, error) {
+	// Apply pagination defaults and limits
+	pageSize := query.Limit
+	if pageSize <= 0 {
+		pageSize = DefaultPageSize
+	}
+	if pageSize > MaxPageSize {
+		pageSize = MaxPageSize
+	}
 
-	err := r.withReadTransaction(ctx, func(tx pgx.Tx) error {
+	// Parse cursor token
+	cursorTime, cursorID, err := parseCursorToken(query.PageToken)
+	if err != nil {
+		return nil, "", domain.ErrInvalidPageToken
+	}
+
+	var results []domain.MarketPriceObservation
+	var nextPageToken string
+
+	err = r.withReadTransaction(ctx, func(tx pgx.Tx) error {
 		// First, resolve dataset definition ID from code
 		dataSetDefID, err := r.resolveDataSetDefinitionID(ctx, tx, query.DataSetCode)
 		if err != nil {
@@ -207,16 +224,20 @@ func (r *ObservationRepository) Query(ctx context.Context, query domain.Observat
 			sqlQuery += " AND o.superseded_by IS NULL"
 		}
 
-		// Order by observed_at descending
-		sqlQuery += " ORDER BY o.observed_at DESC"
-
-		// Apply limit
-		limit := query.Limit
-		if limit <= 0 {
-			limit = 100 // Default limit
+		// Apply cursor pagination if not first page
+		if !cursorTime.IsZero() {
+			sqlQuery += fmt.Sprintf(" AND (date_trunc('second', o.created_at) < $%d OR (date_trunc('second', o.created_at) = $%d AND o.id < $%d))",
+				argPos, argPos+1, argPos+2)
+			args = append(args, cursorTime, cursorTime, cursorID)
+			argPos += 3
 		}
+
+		// Order by created_at DESC, id DESC for consistent cursor pagination
+		sqlQuery += " ORDER BY date_trunc('second', o.created_at) DESC, o.id DESC"
+
+		// Fetch one extra to detect if there's a next page
 		sqlQuery += fmt.Sprintf(" LIMIT $%d", argPos)
-		args = append(args, limit)
+		args = append(args, pageSize+1)
 
 		rows, err := tx.Query(ctx, sqlQuery, args...)
 		if err != nil {
@@ -224,25 +245,49 @@ func (r *ObservationRepository) Query(ctx context.Context, query domain.Observat
 		}
 		defer rows.Close()
 
+		type obsWithCreatedAt struct {
+			obs       domain.MarketPriceObservation
+			createdAt time.Time
+			id        uuid.UUID
+		}
+		var observations []obsWithCreatedAt
+
 		for rows.Next() {
 			obs, err := r.scanObservationFromRows(rows)
 			if err != nil {
 				return err
 			}
-			results = append(results, obs)
+			observations = append(observations, obsWithCreatedAt{
+				obs:       obs,
+				createdAt: obs.CreatedAt(),
+				id:        obs.ID(),
+			})
 		}
 
 		if err := rows.Err(); err != nil {
 			return fmt.Errorf("error iterating observations: %w", err)
 		}
 
+		// Check for more results
+		hasMore := len(observations) > pageSize
+		if hasMore {
+			observations = observations[:pageSize]
+			last := observations[len(observations)-1]
+			nextPageToken = formatCursorToken(last.createdAt, last.id)
+		}
+
+		// Extract observations
+		for _, o := range observations {
+			results = append(results, o.obs)
+		}
+
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
-	return results, nil
+	return results, nextPageToken, nil
 }
 
 // GetLatest retrieves the most recent non-superseded observation

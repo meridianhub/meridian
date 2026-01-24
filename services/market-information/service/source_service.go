@@ -157,18 +157,9 @@ func (s *Server) DeactivateDataSource(ctx context.Context, req *pb.DeactivateDat
 	}, nil
 }
 
-// ListDataSources returns data sources matching the filter criteria.
+// ListDataSources returns data sources matching the filter criteria with cursor-based pagination.
 func (s *Server) ListDataSources(ctx context.Context, req *pb.ListDataSourcesRequest) (*pb.ListDataSourcesResponse, error) {
-	// Delegate to repository with active/inactive filter
-	sources, err := s.sourceRepo.List(ctx, req.ActiveOnly)
-	if err != nil {
-		s.logger.Error("failed to list data sources",
-			"active_only", req.ActiveOnly,
-			"error", err)
-		return nil, status.Errorf(codes.Internal, "failed to list data sources: %v", err)
-	}
-
-	// Apply pagination
+	// Apply pagination defaults
 	pageSize := int(req.PageSize)
 	if pageSize == 0 {
 		pageSize = 50 // Default page size
@@ -177,9 +168,18 @@ func (s *Server) ListDataSources(ctx context.Context, req *pb.ListDataSourcesReq
 		pageSize = 100 // Max page size from proto validation
 	}
 
-	// TODO: Implement proper cursor-based pagination
-	if len(sources) > pageSize {
-		sources = sources[:pageSize]
+	// Delegate to repository with pagination
+	sources, nextPageToken, err := s.sourceRepo.List(ctx, req.ActiveOnly, pageSize, req.PageToken)
+	if err != nil {
+		if errors.Is(err, domain.ErrInvalidPageToken) {
+			s.logger.Warn("invalid page token",
+				"page_token", req.PageToken)
+			return nil, status.Errorf(codes.InvalidArgument, "invalid page_token: malformed cursor")
+		}
+		s.logger.Error("failed to list data sources",
+			"active_only", req.ActiveOnly,
+			"error", err)
+		return nil, status.Errorf(codes.Internal, "failed to list data sources: %v", err)
 	}
 
 	// Convert to proto messages
@@ -190,11 +190,12 @@ func (s *Server) ListDataSources(ctx context.Context, req *pb.ListDataSourcesReq
 
 	s.logger.Debug("listed data sources",
 		"active_only", req.ActiveOnly,
-		"count", len(pbSources))
+		"count", len(pbSources),
+		"has_more", nextPageToken != "")
 
 	return &pb.ListDataSourcesResponse{
 		Sources:       pbSources,
-		NextPageToken: "", // TODO: Implement pagination token
+		NextPageToken: nextPageToken,
 	}, nil
 }
 

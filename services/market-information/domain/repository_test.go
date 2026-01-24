@@ -38,8 +38,8 @@ func (m *mockDataSetRepository) FindByCodeAndVersion(_ context.Context, _ string
 	return DataSetDefinition{}, ErrDataSetNotFound
 }
 
-func (m *mockDataSetRepository) List(_ context.Context, _ DataSetFilters) ([]DataSetDefinition, error) {
-	return nil, nil
+func (m *mockDataSetRepository) List(_ context.Context, _ DataSetFilters) ([]DataSetDefinition, string, error) {
+	return nil, "", nil
 }
 
 func (m *mockDataSetRepository) ExistsByCode(_ context.Context, _ string) (bool, error) {
@@ -70,8 +70,8 @@ func (m *mockObservationRepository) FindByID(ctx context.Context, id uuid.UUID) 
 	return MarketPriceObservation{}, ErrObservationNotFound
 }
 
-func (m *mockObservationRepository) Query(_ context.Context, _ ObservationQuery) ([]MarketPriceObservation, error) {
-	return nil, nil
+func (m *mockObservationRepository) Query(_ context.Context, _ ObservationQuery) ([]MarketPriceObservation, string, error) {
+	return nil, "", nil
 }
 
 func (m *mockObservationRepository) GetLatest(_ context.Context, _ string, _ string) (MarketPriceObservation, error) {
@@ -115,8 +115,8 @@ func (m *mockSourceRepository) FindByCode(ctx context.Context, code string) (Dat
 	return DataSource{}, ErrDataSourceNotFound
 }
 
-func (m *mockSourceRepository) List(_ context.Context, _ bool) ([]DataSource, error) {
-	return nil, nil
+func (m *mockSourceRepository) List(_ context.Context, _ bool, _ int, _ string) ([]DataSource, string, error) {
+	return nil, "", nil
 }
 
 func (m *mockSourceRepository) Delete(_ context.Context, _ string) error {
@@ -255,22 +255,22 @@ func TestDataSetFilters_Initialization(t *testing.T) {
 	assert.Nil(t, filters.Category)
 	assert.Nil(t, filters.Status)
 	assert.Equal(t, 0, filters.Limit)
-	assert.Equal(t, 0, filters.Offset)
+	assert.Equal(t, "", filters.PageToken)
 
 	// Test with values
 	category := DataCategoryPricing
 	status := DataSetStatusActive
 	filtersWithValues := DataSetFilters{
-		Category: &category,
-		Status:   &status,
-		Limit:    100,
-		Offset:   50,
+		Category:  &category,
+		Status:    &status,
+		Limit:     100,
+		PageToken: "1234567890_550e8400-e29b-41d4-a716-446655440000",
 	}
 
 	assert.Equal(t, DataCategoryPricing, *filtersWithValues.Category)
 	assert.Equal(t, DataSetStatusActive, *filtersWithValues.Status)
 	assert.Equal(t, 100, filtersWithValues.Limit)
-	assert.Equal(t, 50, filtersWithValues.Offset)
+	assert.Equal(t, "1234567890_550e8400-e29b-41d4-a716-446655440000", filtersWithValues.PageToken)
 }
 
 func TestObservationQuery_Initialization(t *testing.T) {
@@ -469,10 +469,11 @@ func TestDataSetRepository_MethodSignatures(t *testing.T) {
 	_, findVerErr := repo.FindByCodeAndVersion(ctx, "code", 1)
 	require.Error(t, findVerErr)
 
-	// List takes context and DataSetFilters, returns ([]DataSetDefinition, error)
-	datasets, listErr := repo.List(ctx, DataSetFilters{})
+	// List takes context and DataSetFilters, returns ([]DataSetDefinition, string, error)
+	datasets, nextToken, listErr := repo.List(ctx, DataSetFilters{})
 	require.NoError(t, listErr)
 	assert.Empty(t, datasets)
+	assert.Empty(t, nextToken)
 
 	// ExistsByCode takes context and string, returns (bool, error)
 	exists, existsErr := repo.ExistsByCode(ctx, "code")
@@ -493,10 +494,11 @@ func TestObservationRepository_MethodSignatures(t *testing.T) {
 	_, findErr := repo.FindByID(ctx, uuid.New())
 	require.Error(t, findErr) // Expected: ErrObservationNotFound
 
-	// Query takes context and ObservationQuery, returns ([]MarketPriceObservation, error)
-	observations, queryErr := repo.Query(ctx, ObservationQuery{})
+	// Query takes context and ObservationQuery, returns ([]MarketPriceObservation, string, error)
+	observations, nextToken, queryErr := repo.Query(ctx, ObservationQuery{})
 	require.NoError(t, queryErr)
 	assert.Empty(t, observations)
+	assert.Empty(t, nextToken)
 
 	// GetLatest takes context, string, string, returns (MarketPriceObservation, error)
 	_, latestErr := repo.GetLatest(ctx, "code", "key")
@@ -520,10 +522,11 @@ func TestSourceRepository_MethodSignatures(t *testing.T) {
 	_, codeErr := repo.FindByCode(ctx, "code")
 	require.Error(t, codeErr)
 
-	// List takes context and bool, returns ([]DataSource, error)
-	sources, listErr := repo.List(ctx, true)
+	// List takes context, bool, int, string, returns ([]DataSource, string, error)
+	sources, nextToken, listErr := repo.List(ctx, true, 50, "")
 	require.NoError(t, listErr)
 	assert.Empty(t, sources)
+	assert.Empty(t, nextToken)
 }
 
 // Test that filter structs work with optional pointer fields
@@ -535,10 +538,10 @@ func TestDataSetFilters_AllCombinations(t *testing.T) {
 	for _, category := range categories {
 		for _, status := range statuses {
 			filters := DataSetFilters{
-				Category: category,
-				Status:   status,
-				Limit:    10,
-				Offset:   0,
+				Category:  category,
+				Status:    status,
+				Limit:     10,
+				PageToken: "",
 			}
 
 			// Verify filters can be created and accessed without panic
