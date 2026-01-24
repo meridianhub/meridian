@@ -37,10 +37,12 @@ var (
 	ErrInvalidDirection = errors.New("direction must be DEBIT or CREDIT")
 )
 
-// StepHandler is the function signature for saga step handlers.
-// Handlers receive context for cancellation/logging and params from the saga step.
-// They return a result (any type) or an error.
-type StepHandler func(ctx *StarlarkContext, params map[string]any) (result any, err error)
+// DomainHandler is the function signature for domain-specific saga step handlers.
+// These handlers receive a rich StarlarkContext for platform features (PartyScope,
+// deterministic UUIDs, progress emission, suspension) and return typed results.
+// DomainHandlers are registered in the DomainHandlerRegistry and invoked by the
+// step executor when processing saga steps.
+type DomainHandler func(ctx *StarlarkContext, params map[string]any) (result any, err error)
 
 // StarlarkContext provides execution context for step handlers.
 // It includes the parent context for cancellation, saga metadata, and helper methods.
@@ -122,23 +124,23 @@ func (c *StarlarkContext) IsSuspended() bool {
 	return c.suspended
 }
 
-// StepHandlerRegistry manages the collection of registered step handlers.
+// DomainHandlerRegistry manages the collection of registered step handlers.
 // It is thread-safe for concurrent read/write access.
-type StepHandlerRegistry struct {
+type DomainHandlerRegistry struct {
 	mu       sync.RWMutex
-	handlers map[string]StepHandler
+	handlers map[string]DomainHandler
 }
 
-// NewStepHandlerRegistry creates a new empty handler registry.
-func NewStepHandlerRegistry() *StepHandlerRegistry {
-	return &StepHandlerRegistry{
-		handlers: make(map[string]StepHandler),
+// NewDomainHandlerRegistry creates a new empty handler registry.
+func NewDomainHandlerRegistry() *DomainHandlerRegistry {
+	return &DomainHandlerRegistry{
+		handlers: make(map[string]DomainHandler),
 	}
 }
 
 // Register adds a handler to the registry under the given name.
 // Returns ErrInvalidHandlerName if name is empty, or ErrHandlerAlreadyRegistered if name exists.
-func (r *StepHandlerRegistry) Register(name string, handler StepHandler) error {
+func (r *DomainHandlerRegistry) Register(name string, handler DomainHandler) error {
 	if name == "" {
 		return ErrInvalidHandlerName
 	}
@@ -156,7 +158,7 @@ func (r *StepHandlerRegistry) Register(name string, handler StepHandler) error {
 
 // Get retrieves a handler by name.
 // Returns ErrHandlerNotFound if the handler does not exist.
-func (r *StepHandlerRegistry) Get(name string) (StepHandler, error) {
+func (r *DomainHandlerRegistry) Get(name string) (DomainHandler, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -169,7 +171,7 @@ func (r *StepHandlerRegistry) Get(name string) (StepHandler, error) {
 }
 
 // Has returns true if a handler with the given name is registered.
-func (r *StepHandlerRegistry) Has(name string) bool {
+func (r *DomainHandlerRegistry) Has(name string) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -178,7 +180,7 @@ func (r *StepHandlerRegistry) Has(name string) bool {
 }
 
 // List returns a sorted list of all registered handler names.
-func (r *StepHandlerRegistry) List() []string {
+func (r *DomainHandlerRegistry) List() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -192,22 +194,22 @@ func (r *StepHandlerRegistry) List() []string {
 
 // defaultRegistry is the global registry with default handlers.
 var (
-	defaultRegistry     *StepHandlerRegistry
+	defaultRegistry     *DomainHandlerRegistry
 	defaultRegistryOnce sync.Once
 )
 
 // DefaultRegistry returns the global registry with all default handlers registered.
 // This is initialized on first call using sync.Once for thread-safe lazy initialization.
-func DefaultRegistry() *StepHandlerRegistry {
+func DefaultRegistry() *DomainHandlerRegistry {
 	defaultRegistryOnce.Do(func() {
-		defaultRegistry = NewStepHandlerRegistry()
+		defaultRegistry = NewDomainHandlerRegistry()
 		registerDefaultHandlers(defaultRegistry)
 	})
 	return defaultRegistry
 }
 
 // registerDefaultHandlers registers all platform-provided step handlers.
-func registerDefaultHandlers(r *StepHandlerRegistry) {
+func registerDefaultHandlers(r *DomainHandlerRegistry) {
 	// Position Keeping handlers
 	_ = r.Register("position_keeping.initiate_log", positionKeepingInitiateLog)
 	_ = r.Register("position_keeping.update_log", positionKeepingUpdateLog)

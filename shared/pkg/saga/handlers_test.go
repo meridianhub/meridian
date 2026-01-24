@@ -88,9 +88,9 @@ func TestStarlarkContext_ContextCancellation(t *testing.T) {
 	assert.True(t, errors.Is(ctx.Err(), context.Canceled))
 }
 
-// TestStepHandlerRegistry_Register tests handler registration.
-func TestStepHandlerRegistry_Register(t *testing.T) {
-	registry := NewStepHandlerRegistry()
+// TestDomainHandlerRegistry_Register tests handler registration.
+func TestDomainHandlerRegistry_Register(t *testing.T) {
+	registry := NewDomainHandlerRegistry()
 
 	handler := func(_ *StarlarkContext, _ map[string]any) (any, error) {
 		return "result", nil
@@ -103,9 +103,9 @@ func TestStepHandlerRegistry_Register(t *testing.T) {
 	assert.True(t, registry.Has("test.handler"))
 }
 
-// TestStepHandlerRegistry_Register_RejectsDuplicates tests duplicate rejection.
-func TestStepHandlerRegistry_Register_RejectsDuplicates(t *testing.T) {
-	registry := NewStepHandlerRegistry()
+// TestDomainHandlerRegistry_Register_RejectsDuplicates tests duplicate rejection.
+func TestDomainHandlerRegistry_Register_RejectsDuplicates(t *testing.T) {
+	registry := NewDomainHandlerRegistry()
 
 	handler := func(_ *StarlarkContext, _ map[string]any) (any, error) {
 		return "result", nil
@@ -119,9 +119,9 @@ func TestStepHandlerRegistry_Register_RejectsDuplicates(t *testing.T) {
 	assert.ErrorIs(t, err, ErrHandlerAlreadyRegistered)
 }
 
-// TestStepHandlerRegistry_Register_RejectsEmptyName tests empty name rejection.
-func TestStepHandlerRegistry_Register_RejectsEmptyName(t *testing.T) {
-	registry := NewStepHandlerRegistry()
+// TestDomainHandlerRegistry_Register_RejectsEmptyName tests empty name rejection.
+func TestDomainHandlerRegistry_Register_RejectsEmptyName(t *testing.T) {
+	registry := NewDomainHandlerRegistry()
 
 	handler := func(_ *StarlarkContext, _ map[string]any) (any, error) {
 		return "result", nil
@@ -131,9 +131,9 @@ func TestStepHandlerRegistry_Register_RejectsEmptyName(t *testing.T) {
 	assert.ErrorIs(t, err, ErrInvalidHandlerName)
 }
 
-// TestStepHandlerRegistry_Get tests handler retrieval.
-func TestStepHandlerRegistry_Get(t *testing.T) {
-	registry := NewStepHandlerRegistry()
+// TestDomainHandlerRegistry_Get tests handler retrieval.
+func TestDomainHandlerRegistry_Get(t *testing.T) {
+	registry := NewDomainHandlerRegistry()
 
 	expectedResult := "test-result"
 	handler := func(_ *StarlarkContext, _ map[string]any) (any, error) {
@@ -159,17 +159,17 @@ func TestStepHandlerRegistry_Get(t *testing.T) {
 	assert.Equal(t, expectedResult, result)
 }
 
-// TestStepHandlerRegistry_Get_ReturnsErrorForUnknown tests unknown handler.
-func TestStepHandlerRegistry_Get_ReturnsErrorForUnknown(t *testing.T) {
-	registry := NewStepHandlerRegistry()
+// TestDomainHandlerRegistry_Get_ReturnsErrorForUnknown tests unknown handler.
+func TestDomainHandlerRegistry_Get_ReturnsErrorForUnknown(t *testing.T) {
+	registry := NewDomainHandlerRegistry()
 
 	_, err := registry.Get("unknown.handler")
 	assert.ErrorIs(t, err, ErrHandlerNotFound)
 }
 
-// TestStepHandlerRegistry_Has tests existence checking.
-func TestStepHandlerRegistry_Has(t *testing.T) {
-	registry := NewStepHandlerRegistry()
+// TestDomainHandlerRegistry_Has tests existence checking.
+func TestDomainHandlerRegistry_Has(t *testing.T) {
+	registry := NewDomainHandlerRegistry()
 
 	handler := func(_ *StarlarkContext, _ map[string]any) (any, error) {
 		return nil, nil
@@ -184,9 +184,9 @@ func TestStepHandlerRegistry_Has(t *testing.T) {
 	assert.True(t, registry.Has("test.handler"))
 }
 
-// TestStepHandlerRegistry_List tests listing all handlers.
-func TestStepHandlerRegistry_List(t *testing.T) {
-	registry := NewStepHandlerRegistry()
+// TestDomainHandlerRegistry_List tests listing all handlers.
+func TestDomainHandlerRegistry_List(t *testing.T) {
+	registry := NewDomainHandlerRegistry()
 
 	handler := func(_ *StarlarkContext, _ map[string]any) (any, error) {
 		return nil, nil
@@ -202,9 +202,9 @@ func TestStepHandlerRegistry_List(t *testing.T) {
 	assert.Equal(t, []string{"a.handler", "m.handler", "z.handler"}, list)
 }
 
-// TestStepHandlerRegistry_ConcurrentAccess tests thread safety.
-func TestStepHandlerRegistry_ConcurrentAccess(t *testing.T) {
-	registry := NewStepHandlerRegistry()
+// TestDomainHandlerRegistry_ConcurrentAccess tests thread safety.
+func TestDomainHandlerRegistry_ConcurrentAccess(t *testing.T) {
+	registry := NewDomainHandlerRegistry()
 
 	handler := func(_ *StarlarkContext, _ map[string]any) (any, error) {
 		return nil, nil
