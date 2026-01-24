@@ -35,6 +35,7 @@ require (
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.39.0
 	go.opentelemetry.io/otel/sdk v1.39.0
 	go.opentelemetry.io/otel/trace v1.39.0
+	go.starlark.net v0.0.0-20260102030733-3fee463870c9
 	go.uber.org/goleak v1.3.0
 	google.golang.org/genproto v0.0.0-20251111163417-95abcf5c77ba
 	google.golang.org/grpc v1.78.0
@@ -58,7 +59,6 @@ require (
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/twmb/franz-go/pkg/kmsg v1.12.0 // indirect
-	go.starlark.net v0.0.0-20260102030733-3fee463870c9 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	golang.org/x/mod v0.30.0 // indirect
 )

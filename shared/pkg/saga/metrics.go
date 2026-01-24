@@ -38,6 +38,38 @@ var (
 			Help: "Total number of times saga replay counts were incremented",
 		},
 	)
+
+	// sagaSuspendedTotal tracks the total number of saga suspensions.
+	sagaSuspendedTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "saga_suspended_total",
+			Help: "Total number of times sagas were suspended waiting for external events",
+		},
+	)
+
+	// sagaSuspendTimeoutTotal tracks the total number of suspend timeouts.
+	sagaSuspendTimeoutTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "saga_suspend_timeout_total",
+			Help: "Total number of saga suspensions that timed out",
+		},
+	)
+
+	// sagaResumedTotal tracks the total number of successful saga resumptions.
+	sagaResumedTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "saga_resumed_total",
+			Help: "Total number of sagas successfully resumed from suspension",
+		},
+	)
+
+	// sagaResumeIdempotentTotal tracks idempotent resume calls.
+	sagaResumeIdempotentTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "saga_resume_idempotent_total",
+			Help: "Total number of idempotent saga resume calls (already resumed)",
+		},
+	)
 )
 
 // RecordZombieSagaDetected records that a zombie saga was detected.
@@ -57,14 +89,42 @@ func RecordReplayIncrement() {
 	sagaReplayIncrementedTotal.Inc()
 }
 
+// RecordSuspend records that a saga was suspended.
+func RecordSuspend() {
+	sagaSuspendedTotal.Inc()
+}
+
+// RecordSuspendTimeout records that a saga suspension timed out.
+func RecordSuspendTimeout() {
+	sagaSuspendTimeoutTotal.Inc()
+}
+
+// RecordResume records that a saga was successfully resumed.
+func RecordResume() {
+	sagaResumedTotal.Inc()
+}
+
+// RecordResumeIdempotent records an idempotent resume call.
+func RecordResumeIdempotent() {
+	sagaResumeIdempotentTotal.Inc()
+}
+
 // ExposeMetricsForTesting provides access to the raw Prometheus metrics for testing.
 // This should only be used in test code.
 var ExposeMetricsForTesting = struct {
 	ZombieDetectedTotal    *prometheus.CounterVec
 	ReplayCount            prometheus.Histogram
 	ReplayIncrementedTotal prometheus.Counter
+	SuspendedTotal         prometheus.Counter
+	SuspendTimeoutTotal    prometheus.Counter
+	ResumedTotal           prometheus.Counter
+	ResumeIdempotentTotal  prometheus.Counter
 }{
 	ZombieDetectedTotal:    sagaZombieDetectedTotal,
 	ReplayCount:            sagaReplayCount,
 	ReplayIncrementedTotal: sagaReplayIncrementedTotal,
+	SuspendedTotal:         sagaSuspendedTotal,
+	SuspendTimeoutTotal:    sagaSuspendTimeoutTotal,
+	ResumedTotal:           sagaResumedTotal,
+	ResumeIdempotentTotal:  sagaResumeIdempotentTotal,
 }
