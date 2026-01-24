@@ -245,19 +245,17 @@ func BenchmarkUUIDGenerator_NewUUID(b *testing.B) {
 	}
 }
 
-// TestGenerateCausationID_ConsistencyWithStepContext verifies that
-// the existing GenerateCausationID function produces the same result
-// as StepContext.NewUUID for callIndex=0 (for backward compatibility).
-func TestGenerateCausationID_ConsistencyWithStepContext(t *testing.T) {
+// TestStepContext_NewUUID_MatchesUUIDGenerator verifies that StepContext.NewUUID
+// produces the same result as directly calling UUIDGenerator.NewUUID with the
+// corresponding step and call indices.
+func TestStepContext_NewUUID_MatchesUUIDGenerator(t *testing.T) {
 	instanceID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440000")
 
-	// The existing GenerateCausationID uses stepIndex only as name
-	// NewUUID uses "{stepIndex}:{callIndex}" format
-	// These are intentionally DIFFERENT formats, but let's verify our new format works
 	ctx := NewStepContext(instanceID, 5)
 	newUUID := ctx.NewUUID()
 
-	// Verify the new format is being used correctly
+	// StepContext.NewUUID should produce identical result to UUIDGenerator.NewUUID
+	// with the same namespace, stepIndex, and callIndex
 	gen := NewUUIDGenerator(instanceID)
 	expected := gen.NewUUID(5, 0)
 	assert.Equal(t, expected, newUUID)
