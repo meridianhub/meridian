@@ -100,10 +100,10 @@ var transientPatterns = []string{
 	"unavailable",
 	"retry",
 	"retryable",
-	"EAGAIN",
-	"ETIMEDOUT",
-	"ECONNRESET",
-	"ECONNREFUSED",
+	"eagain",
+	"etimedout",
+	"econnreset",
+	"econnrefused",
 	"network error",
 	"network unreachable",
 	"host unreachable",
@@ -118,7 +118,7 @@ var transientPatterns = []string{
 	"could not serialize",
 	"serialization failure",
 	"i/o timeout",
-	"EOF",
+	"eof",
 	"broken pipe",
 }
 

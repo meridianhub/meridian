@@ -325,6 +325,38 @@ func TestClassifyError_HTTPErrors(t *testing.T) {
 	}
 }
 
+// TestClassifyError_SyscallErrors verifies that syscall error patterns are correctly classified as TRANSIENT.
+// These patterns must be lowercase since ClassifyError normalizes error strings to lowercase.
+func TestClassifyError_SyscallErrors(t *testing.T) {
+	tests := []struct {
+		name     string
+		errMsg   string
+		expected ErrorCategory
+	}{
+		// Unix syscall errors - should be TRANSIENT (retriable)
+		{"EAGAIN uppercase", "syscall error: EAGAIN", ErrorCategoryTransient},
+		{"eagain lowercase", "resource temporarily unavailable: eagain", ErrorCategoryTransient},
+		{"ETIMEDOUT uppercase", "connection ETIMEDOUT after 30s", ErrorCategoryTransient},
+		{"etimedout lowercase", "socket etimedout", ErrorCategoryTransient},
+		{"ECONNRESET uppercase", "read tcp: ECONNRESET by peer", ErrorCategoryTransient},
+		{"econnreset lowercase", "connection econnreset", ErrorCategoryTransient},
+		{"ECONNREFUSED uppercase", "dial tcp: ECONNREFUSED", ErrorCategoryTransient},
+		{"econnrefused lowercase", "econnrefused on port 5432", ErrorCategoryTransient},
+		{"EOF uppercase", "unexpected EOF", ErrorCategoryTransient},
+		{"eof lowercase", "eof reached", ErrorCategoryTransient},
+		{"broken pipe", "write: broken pipe", ErrorCategoryTransient},
+		{"i/o timeout", "read i/o timeout", ErrorCategoryTransient},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := errors.New(tc.errMsg)
+			result := ClassifyError(err)
+			assert.Equal(t, tc.expected, result, "Syscall error '%s' should be classified as %s", tc.errMsg, tc.expected)
+		})
+	}
+}
+
 // TestFatalErrorNilWrapping verifies FatalError handles nil correctly.
 func TestFatalErrorNilWrapping(t *testing.T) {
 	fatalErr := NewFatalError(nil)
