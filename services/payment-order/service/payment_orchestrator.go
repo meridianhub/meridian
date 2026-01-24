@@ -279,11 +279,13 @@ func (o *PaymentOrchestrator) addReserveFundsStep(saga *sharedclients.SagaOrches
 }
 
 // evaluateBucketID evaluates the bucket ID for a payment order based on instrument fungibility rules.
-// Returns empty string if:
+// Returns empty string and no error if:
 // - InstrumentCode is empty (no instrument specified)
 // - ReferenceDataClient is nil (bucket evaluation not enabled)
+// - Instrument lookup fails (graceful degradation)
 // - Instrument has no fungibility_key_expression (fully fungible)
-// Returns an error only if the CEL evaluation fails after successfully fetching the instrument.
+// - CEL evaluation fails (graceful degradation)
+// This method never returns an error - it always gracefully degrades to the default bucket.
 func (o *PaymentOrchestrator) evaluateBucketID(ctx context.Context, po *domain.PaymentOrder) (string, error) {
 	// Skip if no instrument code specified
 	if po.InstrumentCode == "" {

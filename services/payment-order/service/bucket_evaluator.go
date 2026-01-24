@@ -37,6 +37,10 @@ type BucketEvalContext struct {
 	Attributes map[string]string
 }
 
+// celCostLimit is the maximum cost allowed for CEL expression evaluation.
+// This prevents DoS from pathological expressions. 10000 is generous for bucket expressions.
+const celCostLimit = 10000
+
 // NewBucketEvaluator creates a new bucket evaluator with a CEL environment.
 func NewBucketEvaluator(logger *slog.Logger) (*BucketEvaluator, error) {
 	// Create CEL environment with standard library and variable declarations
@@ -58,6 +62,7 @@ func NewBucketEvaluator(logger *slog.Logger) (*BucketEvaluator, error) {
 // Evaluate compiles and evaluates a CEL expression with the given context.
 // Returns the bucket ID as a string. Returns empty string if expression is empty.
 // Caches compiled programs for performance.
+// The ctx parameter is currently unused but retained for future instrumentation (tracing, timeouts).
 func (e *BucketEvaluator) Evaluate(_ context.Context, expression string, evalCtx BucketEvalContext) (string, error) {
 	if expression == "" {
 		// Empty expression means fully fungible - return empty bucket ID
@@ -127,8 +132,8 @@ func (e *BucketEvaluator) getOrCompile(expression string) (cel.Program, error) {
 		return nil, fmt.Errorf("CEL compilation error: %w", issues.Err())
 	}
 
-	// Create the program
-	program, err := e.env.Program(ast)
+	// Create the program with cost limit to prevent DoS from pathological expressions
+	program, err := e.env.Program(ast, cel.CostLimit(celCostLimit))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create CEL program: %w", err)
 	}
