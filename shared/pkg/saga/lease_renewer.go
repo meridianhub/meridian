@@ -153,7 +153,12 @@ func (r *LeaseRenewer) Stop() {
 
 // run is the main renewal loop that periodically calls RenewLease.
 func (r *LeaseRenewer) run(ctx context.Context) {
-	defer r.wg.Done()
+	defer func() {
+		r.mu.Lock()
+		r.running = false
+		r.mu.Unlock()
+		r.wg.Done()
+	}()
 
 	ticker := time.NewTicker(r.renewalInterval)
 	defer ticker.Stop()
