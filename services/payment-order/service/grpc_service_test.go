@@ -380,6 +380,7 @@ func (m *MockIdempotencyService) IsHeld(_ context.Context, _ idempotency.Key) (b
 
 // MockCurrentAccountClient implements CurrentAccountClient for testing
 type MockCurrentAccountClient struct {
+	mu                 sync.Mutex
 	initiateLienResp   *currentaccountv1.InitiateLienResponse
 	initiateLienErr    error
 	terminateLienResp  *currentaccountv1.TerminateLienResponse
@@ -393,10 +394,15 @@ type MockCurrentAccountClient struct {
 	executeLienDone chan struct{}
 	// executeLienDoneOnce ensures executeLienDone is closed only once (prevents race condition)
 	executeLienDoneOnce sync.Once
+	// lastInitiateLienRequest captures the last InitiateLien request for verification
+	lastInitiateLienRequest *currentaccountv1.InitiateLienRequest
 }
 
-func (m *MockCurrentAccountClient) InitiateLien(_ context.Context, _ *currentaccountv1.InitiateLienRequest) (*currentaccountv1.InitiateLienResponse, error) {
+func (m *MockCurrentAccountClient) InitiateLien(_ context.Context, req *currentaccountv1.InitiateLienRequest) (*currentaccountv1.InitiateLienResponse, error) {
+	m.mu.Lock()
 	m.initiateLienCalled = true
+	m.lastInitiateLienRequest = req
+	m.mu.Unlock()
 	if m.initiateLienErr != nil {
 		return nil, m.initiateLienErr
 	}

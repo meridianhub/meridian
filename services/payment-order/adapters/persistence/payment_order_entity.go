@@ -54,6 +54,11 @@ type PaymentOrderEntity struct {
 	LienExecutionAttempts int     `gorm:"column:lien_execution_attempts;not null;default:0"`
 	LienExecutionError    *string `gorm:"column:lien_execution_error;size:1000"`
 
+	// Bucket-aware solvency fields for fungibility constraints
+	InstrumentCode    string  `gorm:"column:instrument_code;size:32"`
+	PaymentAttributes *string `gorm:"column:payment_attributes;type:jsonb"` // JSON map[string]string, NULL when empty
+	BucketID          *string `gorm:"column:bucket_id;size:255"`
+
 	// Audit fields
 	CreatedAt   time.Time `gorm:"not null"`
 	UpdatedAt   time.Time `gorm:"not null"`

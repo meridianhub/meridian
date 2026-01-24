@@ -56,6 +56,8 @@ type PaymentOrchestrator struct {
 	paymentGateway            gateway.PaymentGateway
 	financialAccountingClient FinancialAccountingClient
 	internalBankAccountClient InternalBankAccountClient // Optional - for internal clearing
+	referenceDataClient       ReferenceDataClient       // Optional - for bucket-aware solvency
+	bucketEvaluator           *BucketEvaluator          // Cached CEL evaluator for bucket IDs
 	accountResolver           *AccountResolver          // Optional - resolves clearing accounts dynamically
 	gatewayAccountConfig      *config.GatewayAccountConfig
 	kafkaPublisher            KafkaPublisher
@@ -71,6 +73,7 @@ type PaymentOrchestratorConfig struct {
 	PaymentGateway            gateway.PaymentGateway
 	FinancialAccountingClient FinancialAccountingClient
 	InternalBankAccountClient InternalBankAccountClient // Optional - for internal clearing
+	ReferenceDataClient       ReferenceDataClient       // Optional - for bucket-aware solvency validation
 	AccountResolver           *AccountResolver          // Optional - auto-created if InternalBankAccountClient is provided
 	GatewayAccountConfig      *config.GatewayAccountConfig
 	KafkaPublisher            KafkaPublisher
@@ -105,6 +108,12 @@ func NewPaymentOrchestrator(cfg PaymentOrchestratorConfig) (*PaymentOrchestrator
 		}
 	}
 
+	// Create bucket evaluator for CEL expression caching across requests
+	bucketEvaluator, err := NewBucketEvaluator(cfg.Logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create bucket evaluator: %w", err)
+	}
+
 	return &PaymentOrchestrator{
 		logger:                    cfg.Logger,
 		repo:                      cfg.Repo,
@@ -112,6 +121,8 @@ func NewPaymentOrchestrator(cfg PaymentOrchestratorConfig) (*PaymentOrchestrator
 		paymentGateway:            cfg.PaymentGateway,
 		financialAccountingClient: cfg.FinancialAccountingClient,
 		internalBankAccountClient: cfg.InternalBankAccountClient,
+		referenceDataClient:       cfg.ReferenceDataClient,
+		bucketEvaluator:           bucketEvaluator,
 		accountResolver:           accountResolver,
 		gatewayAccountConfig:      cfg.GatewayAccountConfig,
 		kafkaPublisher:            cfg.KafkaPublisher,
@@ -168,13 +179,34 @@ func (o *PaymentOrchestrator) addReserveFundsStep(saga *sharedclients.SagaOrches
 
 			o.logger.Info("executing reserve_funds step",
 				"payment_order_id", po.ID.String(),
-				"debtor_account_id", po.DebtorAccountID)
+				"debtor_account_id", po.DebtorAccountID,
+				"instrument_code", po.InstrumentCode)
 
-			resp, err := o.currentAccountClient.InitiateLien(stepCtx, &currentaccountv1.InitiateLienRequest{
+			// Evaluate bucket ID for bucket-aware solvency validation
+			bucketID, err := o.evaluateBucketID(stepCtx, po)
+			if err != nil {
+				return fmt.Errorf("failed to evaluate bucket ID: %w", err)
+			}
+
+			// Store the computed bucket ID in the payment order
+			if bucketID != "" {
+				po.BucketID = bucketID
+			}
+
+			// Create InitiateLien request with optional bucket_id
+			lienRequest := &currentaccountv1.InitiateLienRequest{
 				AccountId:             po.DebtorAccountID,
 				Amount:                toMoneyAmount(po.Amount),
 				PaymentOrderReference: po.ID.String(),
-			})
+			}
+			if bucketID != "" {
+				lienRequest.BucketId = bucketID
+				o.logger.Info("requesting bucket-scoped lien",
+					"payment_order_id", po.ID.String(),
+					"bucket_id", bucketID)
+			}
+
+			resp, err := o.currentAccountClient.InitiateLien(stepCtx, lienRequest)
 			if err != nil {
 				return fmt.Errorf("failed to reserve funds: %w", err)
 			}
@@ -197,7 +229,8 @@ func (o *PaymentOrchestrator) addReserveFundsStep(saga *sharedclients.SagaOrches
 
 			o.logger.Info("reserve_funds step completed",
 				"payment_order_id", po.ID.String(),
-				"lien_id", *lienID)
+				"lien_id", *lienID,
+				"bucket_id", bucketID)
 
 			// Publish PaymentOrderReserved event
 			o.publishEvent(stepCtx, TopicPaymentOrderReserved, po.ID.String(), &eventsv1.PaymentOrderReservedEvent{
@@ -243,6 +276,70 @@ func (o *PaymentOrchestrator) addReserveFundsStep(saga *sharedclients.SagaOrches
 			return nil
 		},
 	)
+}
+
+// evaluateBucketID evaluates the bucket ID for a payment order based on instrument fungibility rules.
+// Returns empty string and no error if:
+// - InstrumentCode is empty (no instrument specified)
+// - ReferenceDataClient is nil (bucket evaluation not enabled)
+// - Instrument lookup fails (graceful degradation)
+// - Instrument has no fungibility_key_expression (fully fungible)
+// - CEL evaluation fails (graceful degradation)
+// This method never returns an error - it always gracefully degrades to the default bucket.
+func (o *PaymentOrchestrator) evaluateBucketID(ctx context.Context, po *domain.PaymentOrder) (string, error) {
+	// Skip if no instrument code specified
+	if po.InstrumentCode == "" {
+		return "", nil
+	}
+
+	// Skip if reference data client not configured
+	if o.referenceDataClient == nil {
+		o.logger.Debug("bucket evaluation skipped - reference data client not configured",
+			"payment_order_id", po.ID.String(),
+			"instrument_code", po.InstrumentCode)
+		return "", nil
+	}
+
+	// Fetch instrument definition
+	instrument, err := o.referenceDataClient.RetrieveInstrument(ctx, po.InstrumentCode)
+	if err != nil {
+		// Log but don't fail - use default bucket
+		o.logger.Warn("failed to retrieve instrument for bucket evaluation, using default bucket",
+			"payment_order_id", po.ID.String(),
+			"instrument_code", po.InstrumentCode,
+			"error", err)
+		return "", nil
+	}
+
+	// Check if instrument has fungibility expression
+	if instrument.FungibilityKeyExpression == "" {
+		o.logger.Debug("instrument has no fungibility expression, using default bucket",
+			"payment_order_id", po.ID.String(),
+			"instrument_code", po.InstrumentCode)
+		return "", nil
+	}
+
+	// Evaluate the bucket ID using cached evaluator
+	// On evaluation failure, gracefully degrade to default bucket (consistent with instrument lookup)
+	bucketID, err := o.bucketEvaluator.Evaluate(ctx, instrument.FungibilityKeyExpression, BucketEvalContext{
+		InstrumentCode: po.InstrumentCode,
+		Attributes:     po.PaymentAttributes,
+	})
+	if err != nil {
+		o.logger.Warn("failed to evaluate bucket ID, using default bucket",
+			"payment_order_id", po.ID.String(),
+			"instrument_code", po.InstrumentCode,
+			"expression", instrument.FungibilityKeyExpression,
+			"error", err)
+		return "", nil
+	}
+
+	o.logger.Info("evaluated bucket ID for payment order",
+		"payment_order_id", po.ID.String(),
+		"instrument_code", po.InstrumentCode,
+		"bucket_id", bucketID)
+
+	return bucketID, nil
 }
 
 // addSendToGatewayStep adds the send_to_gateway saga step that sends payment to the external gateway.

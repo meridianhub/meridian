@@ -115,6 +115,28 @@ type InternalBankAccountClient interface {
 	Close() error
 }
 
+// ReferenceDataClient defines the interface for communicating with the Reference Data service
+// to fetch instrument definitions and CEL expressions for bucket-aware solvency validation.
+type ReferenceDataClient interface {
+	// RetrieveInstrument fetches an instrument definition by code.
+	// Returns the fungibility_key_expression needed for bucket evaluation.
+	RetrieveInstrument(ctx context.Context, code string) (*InstrumentInfo, error)
+	// Close terminates the client connection
+	Close() error
+}
+
+// InstrumentInfo contains the subset of instrument definition needed for payment processing.
+// This is a simplified view of the full InstrumentDefinition from reference-data service.
+type InstrumentInfo struct {
+	// Code is the unique instrument code (e.g., "USD", "RICE_V1").
+	Code string
+	// Version is the schema version of the instrument definition.
+	Version int32
+	// FungibilityKeyExpression is the CEL expression for generating bucket keys.
+	// Empty string means fully fungible (no bucketing).
+	FungibilityKeyExpression string
+}
+
 // KafkaPublisher defines the interface for publishing protobuf messages to Kafka.
 // This abstraction allows for mocking in tests and alternative implementations.
 type KafkaPublisher interface {
@@ -178,6 +200,7 @@ type Service struct {
 	currentAccountClient      CurrentAccountClient
 	financialAccountingClient FinancialAccountingClient
 	internalBankAccountClient InternalBankAccountClient // Optional - for internal clearing operations
+	referenceDataClient       ReferenceDataClient       // Optional - for bucket-aware solvency validation
 	paymentGateway            gateway.PaymentGateway
 	gatewayAccountConfig      *config.GatewayAccountConfig
 	kafkaPublisher            KafkaPublisher
@@ -199,6 +222,7 @@ type Config struct {
 	CurrentAccountClient      CurrentAccountClient
 	FinancialAccountingClient FinancialAccountingClient
 	InternalBankAccountClient InternalBankAccountClient // Optional - for internal clearing operations
+	ReferenceDataClient       ReferenceDataClient       // Optional - for bucket-aware solvency validation
 	PaymentGateway            gateway.PaymentGateway
 	GatewayAccountConfig      *config.GatewayAccountConfig
 	KafkaPublisher            KafkaPublisher
@@ -321,6 +345,7 @@ func NewServiceWithConfig(cfg Config) (*Service, error) {
 		PaymentGateway:            cfg.PaymentGateway,
 		FinancialAccountingClient: cfg.FinancialAccountingClient,
 		InternalBankAccountClient: cfg.InternalBankAccountClient,
+		ReferenceDataClient:       cfg.ReferenceDataClient,
 		GatewayAccountConfig:      cfg.GatewayAccountConfig,
 		KafkaPublisher:            cfg.KafkaPublisher,
 		LienExecutionRetryConfig:  cfg.LienExecutionRetryConfig,
@@ -335,6 +360,7 @@ func NewServiceWithConfig(cfg Config) (*Service, error) {
 		currentAccountClient:      cfg.CurrentAccountClient,
 		financialAccountingClient: cfg.FinancialAccountingClient,
 		internalBankAccountClient: cfg.InternalBankAccountClient, // Optional - may be nil
+		referenceDataClient:       cfg.ReferenceDataClient,       // Optional - may be nil
 		paymentGateway:            cfg.PaymentGateway,
 		gatewayAccountConfig:      cfg.GatewayAccountConfig,
 		kafkaPublisher:            cfg.KafkaPublisher,
