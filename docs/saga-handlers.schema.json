@@ -1,0 +1,526 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Saga Handler Schemas",
+  "description": "JSON Schema definitions for all saga handlers in the Meridian platform",
+  "definitions": {
+    "current_account.create_lien": {
+      "type": "object",
+      "description": "Create a lien (hold) on an account for a specified amount",
+      "properties": {
+        "params": {
+          "type": "object",
+          "properties": {
+            "account_id": {
+              "type": "string",
+              "description": "Identifier of the account to place lien on"
+            },
+            "amount": {
+              "type": "string",
+              "description": "Amount to hold (must be positive)"
+            }
+          },
+          "required": [
+            "account_id",
+            "amount"
+          ]
+        },
+        "returns": {
+          "type": "object",
+          "properties": {
+            "account_id": {
+              "type": "string",
+              "description": "Echo of the input account ID"
+            },
+            "amount": {
+              "type": "string",
+              "description": "Echo of the input amount"
+            },
+            "lien_id": {
+              "type": "string",
+              "description": "Generated lien identifier (UUID)"
+            },
+            "status": {
+              "type": "string",
+              "description": "Status of the lien (ACTIVE)"
+            }
+          }
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    },
+    "current_account.execute_lien": {
+      "type": "object",
+      "description": "Execute (consume) a previously created lien",
+      "properties": {
+        "params": {
+          "type": "object",
+          "properties": {
+            "lien_id": {
+              "type": "string",
+              "description": "Identifier of the lien to execute"
+            }
+          },
+          "required": [
+            "lien_id"
+          ]
+        },
+        "returns": {
+          "type": "object",
+          "properties": {
+            "lien_id": {
+              "type": "string",
+              "description": "Echo of the input lien ID"
+            },
+            "status": {
+              "type": "string",
+              "description": "Status of the lien (EXECUTED)"
+            }
+          }
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    },
+    "current_account.terminate_lien": {
+      "type": "object",
+      "description": "Terminate (release) a lien without execution (compensation handler)",
+      "properties": {
+        "params": {
+          "type": "object",
+          "properties": {
+            "lien_id": {
+              "type": "string",
+              "description": "Identifier of the lien to terminate"
+            }
+          },
+          "required": [
+            "lien_id"
+          ]
+        },
+        "returns": {
+          "type": "object",
+          "properties": {
+            "lien_id": {
+              "type": "string",
+              "description": "Echo of the input lien ID"
+            },
+            "status": {
+              "type": "string",
+              "description": "Status of the lien (TERMINATED)"
+            }
+          }
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    },
+    "financial_accounting.create_booking": {
+      "type": "object",
+      "description": "Create a booking log entry for audit purposes",
+      "properties": {
+        "params": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "type": "string",
+              "description": "Human-readable description of the booking"
+            }
+          },
+          "required": [
+            "description"
+          ]
+        },
+        "returns": {
+          "type": "object",
+          "properties": {
+            "booking_id": {
+              "type": "string",
+              "description": "Generated booking identifier (UUID)"
+            },
+            "description": {
+              "type": "string",
+              "description": "Echo of the input description"
+            },
+            "status": {
+              "type": "string",
+              "description": "Status of the booking (CREATED)"
+            }
+          }
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    },
+    "financial_accounting.post_entries": {
+      "type": "object",
+      "description": "Post double-entry accounting entries to the ledger",
+      "properties": {
+        "params": {
+          "type": "object",
+          "properties": {
+            "entries": {
+              "type": "array",
+              "description": "Array of accounting entries to post"
+            }
+          },
+          "required": [
+            "entries"
+          ]
+        },
+        "returns": {
+          "type": "object",
+          "properties": {
+            "posting_ids": {
+              "type": "array",
+              "description": "Array of generated posting IDs (UUIDs)"
+            },
+            "status": {
+              "type": "string",
+              "description": "Status of the posting (POSTED)"
+            }
+          }
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    },
+    "financial_accounting.reverse_entries": {
+      "type": "object",
+      "description": "Reverse previously posted accounting entries (compensation handler)",
+      "properties": {
+        "params": {
+          "type": "object",
+          "properties": {
+            "posting_ids": {
+              "type": "array",
+              "description": "Array of posting IDs to reverse"
+            }
+          },
+          "required": [
+            "posting_ids"
+          ]
+        },
+        "returns": {
+          "type": "object",
+          "properties": {
+            "original_posting_ids": {
+              "type": "array",
+              "description": "Echo of the input posting IDs"
+            },
+            "status": {
+              "type": "string",
+              "description": "Status of the reversal (REVERSED)"
+            }
+          }
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    },
+    "notification.send": {
+      "type": "object",
+      "description": "Send a notification to a recipient",
+      "properties": {
+        "params": {
+          "type": "object",
+          "properties": {
+            "recipient": {
+              "type": "string",
+              "description": "Recipient identifier (email, phone, user ID)"
+            },
+            "type": {
+              "type": "string",
+              "description": "Notification type (e.g., EMAIL, SMS, PUSH)"
+            }
+          },
+          "required": [
+            "recipient",
+            "type"
+          ]
+        },
+        "returns": {
+          "type": "object",
+          "properties": {
+            "notification_id": {
+              "type": "string",
+              "description": "Generated notification identifier (UUID)"
+            },
+            "recipient": {
+              "type": "string",
+              "description": "Echo of the input recipient"
+            },
+            "status": {
+              "type": "string",
+              "description": "Status of the notification (SENT)"
+            },
+            "type": {
+              "type": "string",
+              "description": "Echo of the input notification type"
+            }
+          }
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    },
+    "position_keeping.cancel_log": {
+      "type": "object",
+      "description": "Cancel a position log entry (compensation handler)",
+      "properties": {
+        "params": {
+          "type": "object",
+          "properties": {
+            "log_id": {
+              "type": "string",
+              "description": "Identifier of the log entry to cancel"
+            }
+          },
+          "required": [
+            "log_id"
+          ]
+        },
+        "returns": {
+          "type": "object",
+          "properties": {
+            "log_id": {
+              "type": "string",
+              "description": "Echo of the input log ID"
+            },
+            "status": {
+              "type": "string",
+              "description": "Status of the log entry (CANCELLED)"
+            }
+          }
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    },
+    "position_keeping.initiate_log": {
+      "type": "object",
+      "description": "Initiate a position log entry for a DEBIT or CREDIT transaction",
+      "properties": {
+        "params": {
+          "type": "object",
+          "properties": {
+            "amount": {
+              "type": "string",
+              "description": "Transaction amount (must be positive)"
+            },
+            "direction": {
+              "type": "string",
+              "description": "Direction of the transaction",
+              "enum": [
+                "DEBIT",
+                "CREDIT"
+              ]
+            },
+            "position_id": {
+              "type": "string",
+              "description": "Unique identifier for the position"
+            }
+          },
+          "required": [
+            "amount",
+            "direction",
+            "position_id"
+          ]
+        },
+        "returns": {
+          "type": "object",
+          "properties": {
+            "amount": {
+              "type": "string",
+              "description": "Echo of the input amount"
+            },
+            "direction": {
+              "type": "string",
+              "description": "Echo of the input direction"
+            },
+            "log_id": {
+              "type": "string",
+              "description": "Generated log entry identifier (UUID)"
+            },
+            "position_id": {
+              "type": "string",
+              "description": "Echo of the input position ID"
+            },
+            "status": {
+              "type": "string",
+              "description": "Status of the log entry (INITIATED)"
+            }
+          }
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    },
+    "position_keeping.update_log": {
+      "type": "object",
+      "description": "Update an existing position log entry",
+      "properties": {
+        "params": {
+          "type": "object",
+          "properties": {
+            "log_id": {
+              "type": "string",
+              "description": "Identifier of the log entry to update"
+            }
+          },
+          "required": [
+            "log_id"
+          ]
+        },
+        "returns": {
+          "type": "object",
+          "properties": {
+            "log_id": {
+              "type": "string",
+              "description": "Echo of the input log ID"
+            },
+            "status": {
+              "type": "string",
+              "description": "Status of the log entry (UPDATED)"
+            }
+          }
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    },
+    "repository.save": {
+      "type": "object",
+      "description": "Persist an entity to the repository",
+      "properties": {
+        "params": {
+          "type": "object",
+          "properties": {
+            "entity": {
+              "type": "object",
+              "description": "Entity data to persist"
+            },
+            "entity_type": {
+              "type": "string",
+              "description": "Type of entity being saved (e.g., Account, Transaction)"
+            }
+          },
+          "required": [
+            "entity",
+            "entity_type"
+          ]
+        },
+        "returns": {
+          "type": "object",
+          "properties": {
+            "entity": {
+              "type": "object",
+              "description": "Echo of the saved entity"
+            },
+            "entity_id": {
+              "type": "string",
+              "description": "Generated or existing entity identifier (UUID)"
+            },
+            "entity_type": {
+              "type": "string",
+              "description": "Echo of the input entity type"
+            },
+            "status": {
+              "type": "string",
+              "description": "Status of the save operation (SAVED)"
+            }
+          }
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    },
+    "valuation_engine.valuate": {
+      "type": "object",
+      "description": "Valuate an instrument at a specific point in time",
+      "properties": {
+        "params": {
+          "type": "object",
+          "properties": {
+            "context_type": {
+              "type": "string",
+              "description": "Valuation context (e.g., MARK_TO_MARKET, FAIR_VALUE)"
+            },
+            "instrument": {
+              "type": "string",
+              "description": "Instrument identifier or code"
+            },
+            "quantity": {
+              "type": "string",
+              "description": "Quantity to valuate"
+            }
+          },
+          "required": [
+            "context_type",
+            "instrument",
+            "quantity"
+          ]
+        },
+        "returns": {
+          "type": "object",
+          "properties": {
+            "context_type": {
+              "type": "string",
+              "description": "Echo of the input context type"
+            },
+            "currency": {
+              "type": "string",
+              "description": "Currency of the valuation"
+            },
+            "instrument": {
+              "type": "string",
+              "description": "Echo of the input instrument"
+            },
+            "quantity": {
+              "type": "string",
+              "description": "Echo of the input quantity"
+            },
+            "unit_price": {
+              "type": "string",
+              "description": "Price per unit of the instrument"
+            },
+            "value": {
+              "type": "string",
+              "description": "Total value (quantity * unit_price)"
+            },
+            "valued_at": {
+              "type": "string",
+              "description": "Timestamp when valuation was computed"
+            }
+          }
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    }
+  }
+}
