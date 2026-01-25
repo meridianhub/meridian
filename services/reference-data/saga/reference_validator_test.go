@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	pkgsaga "github.com/meridianhub/meridian/shared/pkg/saga"
+	"github.com/meridianhub/meridian/shared/pkg/saga/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -635,4 +636,193 @@ func TestListHandlers(t *testing.T) {
 
 	// Should be sorted alphabetically
 	assert.Equal(t, []string{"a_handler", "m_handler", "z_handler"}, handlers)
+}
+
+func TestExtractReferences_StepHandlerWithParams(t *testing.T) {
+	registry := pkgsaga.NewDomainHandlerRegistry()
+	v := NewReferenceValidator(registry, nil, nil, nil)
+
+	script := `
+def execute(ctx):
+    step(
+        action = "position_keeping.initiate_log",
+        params = {
+            "position_id": ctx.position_id,
+            "amount": ctx.amount,
+            "direction": "DEBIT",
+        }
+    )
+`
+
+	refs, err := v.ExtractReferences(script)
+	require.NoError(t, err)
+	require.Len(t, refs, 1)
+
+	ref := refs[0]
+	assert.Equal(t, ReferenceTypeStepHandler, ref.Type)
+	assert.Equal(t, "position_keeping.initiate_log", ref.Key)
+	assert.NotNil(t, ref.Params)
+	assert.True(t, ref.Params["position_id"])
+	assert.True(t, ref.Params["amount"])
+	assert.True(t, ref.Params["direction"])
+}
+
+func TestValidateDraft_WithSchemaRegistry(t *testing.T) {
+	// Register the handler in DomainHandlerRegistry
+	handlerRegistry := pkgsaga.NewDomainHandlerRegistry()
+	_ = handlerRegistry.Register("test.handler", nil)
+
+	// Create schema registry with handler schema
+	schemaRegistry := schema.NewRegistry()
+	schemaYAML := `
+service: test
+version: "1.0"
+handlers:
+  test.handler:
+    description: "Test handler"
+    params:
+      required_field:
+        type: string
+        required: true
+      optional_field:
+        type: string
+        required: false
+`
+	require.NoError(t, schemaRegistry.LoadFromYAML([]byte(schemaYAML)))
+
+	v := NewReferenceValidator(handlerRegistry, nil, nil, nil)
+	v.SetSchemaRegistry(schemaRegistry)
+
+	tests := []struct {
+		name       string
+		script     string
+		wantErrors int
+		checkMsg   string
+	}{
+		{
+			name: "valid params - all required present",
+			script: `
+def execute(ctx):
+    step(
+        action = "test.handler",
+        params = {
+            "required_field": "value",
+        }
+    )
+`,
+			wantErrors: 0,
+		},
+		{
+			name: "missing required param",
+			script: `
+def execute(ctx):
+    step(
+        action = "test.handler",
+        params = {
+            "optional_field": "value",
+        }
+    )
+`,
+			wantErrors: 1,
+			checkMsg:   "missing required parameter 'required_field'",
+		},
+		{
+			name: "unknown param (warning)",
+			script: `
+def execute(ctx):
+    step(
+        action = "test.handler",
+        params = {
+            "required_field": "value",
+            "unknown_field": "value",
+        }
+    )
+`,
+			wantErrors: 1,
+			checkMsg:   "unknown parameter 'unknown_field'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sagaID := uuid.New()
+			result, err := v.ValidateDraft(context.Background(), sagaID, tt.script)
+			require.NoError(t, err)
+
+			assert.Len(t, result.Errors, tt.wantErrors)
+			if tt.checkMsg != "" && len(result.Errors) > 0 {
+				assert.Contains(t, result.Errors[0].Message, tt.checkMsg)
+			}
+		})
+	}
+}
+
+func TestValidateActivation_BlocksOnMissingRequiredParams(t *testing.T) {
+	// Register the handler
+	handlerRegistry := pkgsaga.NewDomainHandlerRegistry()
+	_ = handlerRegistry.Register("test.handler", nil)
+
+	// Create schema registry
+	schemaRegistry := schema.NewRegistry()
+	schemaYAML := `
+service: test
+version: "1.0"
+handlers:
+  test.handler:
+    description: "Test handler"
+    params:
+      required_field:
+        type: string
+        required: true
+`
+	require.NoError(t, schemaRegistry.LoadFromYAML([]byte(schemaYAML)))
+
+	v := NewReferenceValidator(handlerRegistry, nil, nil, nil)
+	v.SetSchemaRegistry(schemaRegistry)
+
+	script := `
+def execute(ctx):
+    step(
+        action = "test.handler",
+        params = {}
+    )
+`
+
+	sagaID := uuid.New()
+	result, err := v.ValidateActivation(context.Background(), sagaID, script)
+	require.NoError(t, err)
+
+	// Activation should be blocked
+	assert.Equal(t, statusBlocked, result.Status)
+	assert.Len(t, result.Errors, 1)
+	assert.True(t, result.Errors[0].IsCritical)
+	assert.Contains(t, result.Errors[0].Message, "missing required parameter")
+}
+
+func TestValidateDraft_NoSchemaRegistry(t *testing.T) {
+	// When no schema registry is set, validation should still work
+	// but skip parameter validation
+	handlerRegistry := pkgsaga.NewDomainHandlerRegistry()
+	_ = handlerRegistry.Register("test.handler", nil)
+
+	v := NewReferenceValidator(handlerRegistry, nil, nil, nil)
+	// Note: NOT setting schema registry
+
+	script := `
+def execute(ctx):
+    step(
+        action = "test.handler",
+        params = {
+            "any_field": "value",
+        }
+    )
+`
+
+	sagaID := uuid.New()
+	result, err := v.ValidateDraft(context.Background(), sagaID, script)
+	require.NoError(t, err)
+
+	// Should pass with no errors (no schema to validate against)
+	assert.Empty(t, result.Errors)
+	assert.Equal(t, statusReady, result.Status)
 }

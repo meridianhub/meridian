@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	pkgsaga "github.com/meridianhub/meridian/shared/pkg/saga"
+	"github.com/meridianhub/meridian/shared/pkg/saga/schema"
 	"go.starlark.net/syntax"
 )
 
@@ -24,6 +25,9 @@ var (
 
 	// ErrPoolNotConfigured is returned when database pool is not configured for reference persistence.
 	ErrPoolNotConfigured = errors.New("database pool not configured")
+
+	// ErrHandlerParamValidationFailed is returned when handler parameter validation fails.
+	ErrHandlerParamValidationFailed = errors.New("handler parameter validation failed")
 )
 
 // Validation status constants.
@@ -76,6 +80,11 @@ type Reference struct {
 
 	// AttributeKey is set for attribute references to indicate the attribute name.
 	AttributeKey string
+
+	// Params holds extracted parameters for step handler references.
+	// Keys are parameter names extracted from the step() call.
+	// This enables schema validation of handler invocations.
+	Params map[string]bool
 }
 
 // ValidationError represents a validation issue found during reference checking.
@@ -207,6 +216,7 @@ type DefinitionChecker interface {
 // ReferenceValidator validates saga scripts by extracting and checking references.
 type ReferenceValidator struct {
 	handlerRegistry   *pkgsaga.DomainHandlerRegistry
+	schemaRegistry    *schema.Registry
 	instrumentChecker InstrumentChecker
 	definitionChecker DefinitionChecker
 	pool              *pgxpool.Pool
@@ -225,6 +235,12 @@ func NewReferenceValidator(
 		definitionChecker: definitionChecker,
 		pool:              pool,
 	}
+}
+
+// SetSchemaRegistry configures the schema registry for parameter validation.
+// If set, handler invocations will be validated against their schemas.
+func (v *ReferenceValidator) SetSchemaRegistry(registry *schema.Registry) {
+	v.schemaRegistry = registry
 }
 
 // ExtractReferences parses a Starlark script and extracts all external references.
@@ -451,6 +467,44 @@ func (v *ReferenceValidator) checkStepHandler(ref Reference, strict bool, result
 			Suggestion: suggestion,
 			IsCritical: strict,
 		})
+		return
+	}
+
+	// If schema registry is configured, validate parameters against schema
+	if v.schemaRegistry != nil && v.schemaRegistry.HasHandler(ref.Key) {
+		v.validateHandlerParams(ref, strict, result)
+	}
+}
+
+// validateHandlerParams validates that extracted parameter names match the handler schema.
+func (v *ReferenceValidator) validateHandlerParams(ref Reference, strict bool, result *ValidationResult) {
+	handlerDef, err := v.schemaRegistry.GetHandler(ref.Key)
+	if err != nil {
+		return // Schema not found - skip param validation
+	}
+
+	// Check for missing required parameters
+	for paramName, paramDef := range handlerDef.Params {
+		if paramDef.Required {
+			if _, provided := ref.Params[paramName]; !provided {
+				result.Errors = append(result.Errors, ValidationError{
+					Reference:  ref,
+					Message:    fmt.Sprintf("handler '%s' missing required parameter '%s'", ref.Key, paramName),
+					IsCritical: strict,
+				})
+			}
+		}
+	}
+
+	// Check for unknown parameters (params not in schema)
+	for paramName := range ref.Params {
+		if _, exists := handlerDef.Params[paramName]; !exists {
+			result.Errors = append(result.Errors, ValidationError{
+				Reference:  ref,
+				Message:    fmt.Sprintf("handler '%s' has unknown parameter '%s'", ref.Key, paramName),
+				IsCritical: false, // Unknown params are warnings, not errors
+			})
+		}
 	}
 }
 
@@ -821,20 +875,44 @@ func (e *referenceExtractor) walkExpr(expr syntax.Expr) {
 				}
 
 			case "step":
-				// Extract step handler from 'action' keyword argument
+				// Extract step handler and params from keyword arguments
+				var handler string
+				var lineNum int
+				paramNames := make(map[string]bool)
+
 				for _, kwarg := range ex.Args {
 					if binExpr, ok := kwarg.(*syntax.BinaryExpr); ok && binExpr.Op == syntax.EQ {
-						if nameIdent, ok := binExpr.X.(*syntax.Ident); ok && nameIdent.Name == "action" {
-							if lit, ok := binExpr.Y.(*syntax.Literal); ok && lit.Token == syntax.STRING {
-								handler := strings.Trim(lit.Raw, `"'`)
-								e.references = append(e.references, Reference{
-									Type:       ReferenceTypeStepHandler,
-									Key:        handler,
-									LineNumber: int(ident.NamePos.Line),
-								})
+						if nameIdent, ok := binExpr.X.(*syntax.Ident); ok {
+							switch nameIdent.Name {
+							case "action":
+								if lit, ok := binExpr.Y.(*syntax.Literal); ok && lit.Token == syntax.STRING {
+									handler = strings.Trim(lit.Raw, `"'`)
+									lineNum = int(ident.NamePos.Line)
+								}
+							case "params":
+								// Extract param names from the params dict
+								if dictExpr, ok := binExpr.Y.(*syntax.DictExpr); ok {
+									for _, entry := range dictExpr.List {
+										if dictEntry, ok := entry.(*syntax.DictEntry); ok {
+											if keyLit, ok := dictEntry.Key.(*syntax.Literal); ok && keyLit.Token == syntax.STRING {
+												paramName := strings.Trim(keyLit.Raw, `"'`)
+												paramNames[paramName] = true
+											}
+										}
+									}
+								}
 							}
 						}
 					}
+				}
+
+				if handler != "" {
+					e.references = append(e.references, Reference{
+						Type:       ReferenceTypeStepHandler,
+						Key:        handler,
+						LineNumber: lineNum,
+						Params:     paramNames,
+					})
 				}
 			}
 		}
