@@ -1,4 +1,3 @@
--- atlas:txn false
 -- Extend Saga Definition with Platform Reference Support
 -- Implements FR-13: Allow tenant sagas to reference platform saga definitions
 -- Tenant sagas can either reference platform templates OR provide custom scripts, not both
@@ -8,7 +7,6 @@
 -- - override_reason: Audit trail for why tenant deviated from platform default
 -- - platform_version_at_override: Tracks which platform version was active when override was created
 -- - Mutual exclusivity: Either platform_ref OR script must be set, never both
--- - Non-transactional: Uses CONCURRENTLY for index to avoid table locks during deployment
 
 -- Add new columns for platform reference support
 ALTER TABLE "saga_definition"
@@ -33,7 +31,7 @@ ALTER TABLE "saga_definition"
 
 -- Add index for efficient lookups of sagas by platform reference
 -- Used for: "Which tenant sagas reference this platform saga?"
-CREATE INDEX CONCURRENTLY "idx_saga_definition_platform_ref" ON "saga_definition" ("platform_ref")
+CREATE INDEX "idx_saga_definition_platform_ref" ON "saga_definition" ("platform_ref")
   WHERE "platform_ref" IS NOT NULL;
 
 -- Comment on new columns for clarity
