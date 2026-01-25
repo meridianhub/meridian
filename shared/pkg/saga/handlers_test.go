@@ -350,3 +350,87 @@ func TestHandler_ErrorWrapping(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "financial_accounting.post_entries")
 }
+
+// TestStarlarkContext_ValidatePartyAccess tests party scope enforcement.
+func TestStarlarkContext_ValidatePartyAccess(t *testing.T) {
+	ownPartyID := uuid.New()
+	allowedPartyID := uuid.New()
+	forbiddenPartyID := uuid.New()
+
+	ctx := &StarlarkContext{
+		Context:         context.Background(),
+		SagaExecutionID: uuid.New(),
+		Logger:          slog.Default(),
+		PartyScope: &PartyScope{
+			PartyID:        ownPartyID,
+			PartyType:      PartyTypeOrganization,
+			VisibleParties: []uuid.UUID{ownPartyID, allowedPartyID},
+			TenantID:       "tenant-1",
+		},
+	}
+
+	t.Run("allows access to own party", func(t *testing.T) {
+		err := ctx.ValidatePartyAccess(ownPartyID)
+		require.NoError(t, err)
+	})
+
+	t.Run("allows access to visible party", func(t *testing.T) {
+		err := ctx.ValidatePartyAccess(allowedPartyID)
+		require.NoError(t, err)
+	})
+
+	t.Run("rejects access to forbidden party", func(t *testing.T) {
+		err := ctx.ValidatePartyAccess(forbiddenPartyID)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrPartyScopeViolation)
+		assert.Contains(t, err.Error(), forbiddenPartyID.String())
+		assert.Contains(t, err.Error(), ownPartyID.String())
+	})
+}
+
+func TestStarlarkContext_ValidatePartyAccess_NilScope(t *testing.T) {
+	ctx := &StarlarkContext{
+		Context:         context.Background(),
+		SagaExecutionID: uuid.New(),
+		Logger:          slog.Default(),
+		PartyScope:      nil, // No party scope configured
+	}
+
+	// With nil PartyScope, all access should be allowed (backward compatibility)
+	anyPartyID := uuid.New()
+	err := ctx.ValidatePartyAccess(anyPartyID)
+	require.NoError(t, err)
+}
+
+func TestStarlarkContext_ValidatePartyAccessFromString(t *testing.T) {
+	ownPartyID := uuid.New()
+
+	ctx := &StarlarkContext{
+		Context:         context.Background(),
+		SagaExecutionID: uuid.New(),
+		Logger:          slog.Default(),
+		PartyScope: &PartyScope{
+			PartyID:        ownPartyID,
+			PartyType:      PartyTypeIndividual,
+			VisibleParties: []uuid.UUID{ownPartyID},
+			TenantID:       "tenant-1",
+		},
+	}
+
+	t.Run("allows valid party string", func(t *testing.T) {
+		err := ctx.ValidatePartyAccessFromString(ownPartyID.String())
+		require.NoError(t, err)
+	})
+
+	t.Run("rejects invalid UUID string", func(t *testing.T) {
+		err := ctx.ValidatePartyAccessFromString("not-a-uuid")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidParamType)
+	})
+
+	t.Run("rejects empty string", func(t *testing.T) {
+		err := ctx.ValidatePartyAccessFromString("")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidParamType)
+	})
+}

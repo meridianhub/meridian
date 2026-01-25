@@ -35,6 +35,10 @@ var (
 
 	// ErrInvalidDirection is returned when a direction parameter is not DEBIT or CREDIT.
 	ErrInvalidDirection = errors.New("direction must be DEBIT or CREDIT")
+
+	// ErrPartyScopeViolation is returned when a step tries to access a party outside its visible scope.
+	// This is a fatal error that cannot be retried - it indicates a security/authorization failure.
+	ErrPartyScopeViolation = errors.New("party scope violation: party_id not in visible_parties")
 )
 
 // DomainHandler is the function signature for domain-specific saga step handlers.
@@ -80,12 +84,24 @@ type StarlarkContext struct {
 
 // PartyScope defines the data access boundary for a saga execution.
 // Handlers must respect this scope when querying or modifying data.
+//
+// The scope is resolved at saga start based on the executing party's type:
+//   - INDIVIDUAL: Can only see own data
+//   - ORGANIZATION: Can see own data plus all descendant parties
+//   - SYSTEM: Can see all parties in the tenant
 type PartyScope struct {
 	// PartyID is the owning party's identifier.
 	PartyID uuid.UUID
 
+	// PartyType indicates the classification of the party (INDIVIDUAL, ORGANIZATION, SYSTEM).
+	PartyType string
+
+	// VisibleParties is the list of party IDs whose data the executing party can access.
+	// This is immutable after creation.
+	VisibleParties []uuid.UUID
+
 	// TenantID is the tenant context (for multi-tenant deployments).
-	TenantID uuid.UUID
+	TenantID string
 
 	// Permissions lists the allowed operations for this scope.
 	Permissions []string
@@ -95,6 +111,49 @@ type PartyScope struct {
 // This ensures idempotent saga replay - the same step will generate the same UUIDs.
 func (c *StarlarkContext) NewUUID(namespace uuid.UUID, name string) uuid.UUID {
 	return uuid.NewSHA1(namespace, []byte(name))
+}
+
+// ValidatePartyAccess checks if the given party ID is within the visible scope.
+// Returns ErrPartyScopeViolation if the party is not accessible.
+// If PartyScope is nil (party isolation disabled), all access is allowed.
+//
+// Step handlers should call this method when accessing party-specific data:
+//
+//	if err := ctx.ValidatePartyAccess(targetPartyID); err != nil {
+//	    return nil, err
+//	}
+func (c *StarlarkContext) ValidatePartyAccess(partyID uuid.UUID) error {
+	// If no party scope is configured, allow all access (backward compatibility)
+	if c.PartyScope == nil {
+		return nil
+	}
+
+	// Check if the party is in the visible scope
+	if !c.PartyScope.Contains(partyID) {
+		if c.Logger != nil {
+			c.Logger.Warn("party scope violation",
+				"saga_execution_id", c.SagaExecutionID,
+				"executing_party_id", c.PartyScope.PartyID,
+				"requested_party_id", partyID,
+				"party_type", c.PartyScope.PartyType,
+				"visible_parties_count", len(c.PartyScope.VisibleParties),
+			)
+		}
+		return fmt.Errorf("%w: requested party %s, executing party %s (type: %s)",
+			ErrPartyScopeViolation, partyID, c.PartyScope.PartyID, c.PartyScope.PartyType)
+	}
+
+	return nil
+}
+
+// ValidatePartyAccessFromString validates party access for a string party ID.
+// Returns ErrPartyScopeViolation if the party is not accessible, or an error if the ID is invalid.
+func (c *StarlarkContext) ValidatePartyAccessFromString(partyIDStr string) error {
+	partyID, err := uuid.Parse(partyIDStr)
+	if err != nil {
+		return fmt.Errorf("%w: party_id must be a valid UUID, got %q", ErrInvalidParamType, partyIDStr)
+	}
+	return c.ValidatePartyAccess(partyID)
 }
 
 // EmitProgress logs progress information for monitoring/UI updates.
