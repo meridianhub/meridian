@@ -240,6 +240,9 @@ func (r *StarlarkSagaRunner) ExecuteSaga(ctx context.Context, sagaName string, s
 
 // WithLogger returns a new runner with the given logger.
 func (r *StarlarkSagaRunner) WithLogger(logger *slog.Logger) *StarlarkSagaRunner {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &StarlarkSagaRunner{
 		runtime:  r.runtime,
 		registry: r.registry,

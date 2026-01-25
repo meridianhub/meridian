@@ -80,4 +80,8 @@ var (
 	// ErrCircuitBreakerTooManyRequests indicates too many requests are being
 	// sent to a service in half-open state. Wait for the test requests to complete.
 	ErrCircuitBreakerTooManyRequests = errors.New("circuit breaker rejecting requests")
+
+	// ErrHookPanic indicates a post-provisioning hook panicked.
+	// The recovered panic value is wrapped in the error chain.
+	ErrHookPanic = errors.New("post-provisioning hook panicked")
 )

@@ -490,7 +490,14 @@ func (p *PostgresProvisioner) runPostProvisioningHooks(ctx context.Context, tena
 	logger.Debug("running post-provisioning hooks", "hook_count", len(p.config.PostProvisioningHooks))
 
 	for i, hook := range p.config.PostProvisioningHooks {
-		if err := hook(ctx, tenantID); err != nil {
+		if err := func() (err error) {
+			defer func() {
+				if r := recover(); r != nil {
+					err = fmt.Errorf("%w: %v", ErrHookPanic, r)
+				}
+			}()
+			return hook(ctx, tenantID)
+		}(); err != nil {
 			logger.Warn("post-provisioning hook failed",
 				"hook_index", i,
 				"error", err,
