@@ -37,6 +37,16 @@ func TestSuspendSaga_ValidationErrors(t *testing.T) {
 	ctx := context.Background()
 	instance := &SagaInstance{ID: uuid.New()}
 
+	t.Run("nil instance returns error", func(t *testing.T) {
+		req := &SuspendRequest{
+			IdempotencyKey: "test-key",
+			Timeout:        time.Hour,
+		}
+		result, err := suspendService.SuspendSaga(ctx, nil, 0, "step", req)
+		assert.Nil(t, result)
+		assert.ErrorIs(t, err, ErrSuspendSagaNotFound)
+	})
+
 	t.Run("nil request returns error", func(t *testing.T) {
 		result, err := suspendService.SuspendSaga(ctx, instance, 0, "step", nil)
 		assert.Nil(t, result)

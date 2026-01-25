@@ -140,7 +140,10 @@ func (s *SuspendService) SuspendSaga(
 	stepName string,
 	req *SuspendRequest,
 ) (*SuspendResult, error) {
-	// Validate request
+	// Validate inputs
+	if instance == nil {
+		return nil, fmt.Errorf("%w: saga instance is required", ErrSuspendSagaNotFound)
+	}
 	if req == nil {
 		return nil, fmt.Errorf("%w: suspend request is required", ErrIdempotencyKeyRequired)
 	}
