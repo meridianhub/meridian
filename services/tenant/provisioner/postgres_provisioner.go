@@ -237,6 +237,10 @@ func (p *PostgresProvisioner) ProvisionSchemas(ctx context.Context, tenantID ten
 		return fmt.Errorf("save final status: %w", err)
 	}
 
+	// Run post-provisioning hooks (e.g., saga seeding).
+	// Hook failures are logged but do NOT fail provisioning since schemas are ready.
+	p.runPostProvisioningHooks(ctx, tenantID, logger)
+
 	logger.Info("schema provisioning completed",
 		"duration_ms", time.Since(startTime).Milliseconds(),
 		"services_count", len(p.config.Services))
@@ -472,6 +476,28 @@ func (p *PostgresProvisioner) markProvisioningFailed(_ context.Context, status *
 		p.logger.Warn("failed to save failed status",
 			"tenant_id", status.TenantID.String(),
 			"error", err)
+	}
+}
+
+// runPostProvisioningHooks executes all registered post-provisioning hooks.
+// Hook failures are logged but do NOT fail provisioning since schemas are ready.
+// This is used for seeding default data (e.g., saga definitions).
+func (p *PostgresProvisioner) runPostProvisioningHooks(ctx context.Context, tenantID tenant.TenantID, logger *slog.Logger) {
+	if len(p.config.PostProvisioningHooks) == 0 {
+		return
+	}
+
+	logger.Debug("running post-provisioning hooks", "hook_count", len(p.config.PostProvisioningHooks))
+
+	for i, hook := range p.config.PostProvisioningHooks {
+		if err := hook(ctx, tenantID); err != nil {
+			logger.Warn("post-provisioning hook failed",
+				"hook_index", i,
+				"error", err,
+				"note", "provisioning succeeded despite hook failure")
+		} else {
+			logger.Debug("post-provisioning hook completed", "hook_index", i)
+		}
 	}
 }
 

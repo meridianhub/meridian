@@ -1,0 +1,148 @@
+# Deposit Saga Definition
+#
+# This Starlark script defines the deposit saga workflow for the Current Account service.
+# The saga executes a multi-step deposit operation with compensation on failure.
+#
+# Steps (executed sequentially):
+#   1. log_position: Create CREDIT entry in PositionKeeping service
+#   2. initiate_booking_log: Create booking log in FinancialAccounting service
+#   3. capture_debit_posting: Post DEBIT to clearing account (double-entry source)
+#   4. capture_credit_posting: Post CREDIT to customer account
+#   5. finalize_booking_log: Transition booking log to POSTED
+#   6. save_account: Persist account metadata
+#
+# Compensation Order (LIFO - Last In, First Out):
+#   Failures trigger compensation of completed steps in reverse order.
+#
+# Input data (provided via input_data dictionary):
+#   - account_id: string - Account identifier
+#   - account_identification: string - Account identification for external services
+#   - amount: string - Decimal amount as string (e.g., "100.50")
+#   - currency: string - Currency code (e.g., "GBP")
+#   - transaction_id: string - Unique transaction identifier
+#   - clearing_account_id: string - Clearing account for double-entry (optional)
+
+# Define the deposit saga
+deposit_saga = saga(name="current_account_deposit")
+
+# Extract input data
+account_id = input_data["account_id"]
+account_identification = input_data["account_identification"]
+amount = Decimal(input_data["amount"])
+currency = input_data["currency"]
+transaction_id = input_data["transaction_id"]
+clearing_account_id = input_data.get("clearing_account_id", "")
+
+# Step 1: Log position in PositionKeeping service with CREDIT direction
+log_position_step = step(name="log_position")
+log_position_result = invoke_handler(
+    handler="current_account.position_keeping.initiate_log",
+    params={
+        "account_id": account_identification,
+        "amount": amount,
+        "currency": currency,
+        "direction": "CREDIT",
+        "transaction_id": transaction_id,
+    },
+    compensate_handler="current_account.position_keeping.cancel_log",
+    compensate_params={
+        "log_id": "${log_position_result.log_id}",
+        "version": "${log_position_result.version}",
+        "transaction_id": transaction_id,
+        "account_id": account_identification,
+        "direction": "CREDIT",
+    },
+)
+
+# Step 2: Initiate booking log in FinancialAccounting service
+initiate_booking_step = step(name="initiate_booking_log")
+booking_log_result = invoke_handler(
+    handler="current_account.financial_accounting.initiate_booking_log",
+    params={
+        "account_id": account_id,
+        "currency": currency,
+        "transaction_id": transaction_id,
+        "transaction_type": "DEPOSIT",
+    },
+)
+
+# Step 3: Capture DEBIT posting to clearing account (if double-entry enabled)
+# For deposits: DEBIT the clearing account (where funds come from)
+if clearing_account_id != "":
+    debit_posting_step = step(name="capture_debit_posting")
+    debit_result = invoke_handler(
+        handler="current_account.financial_accounting.capture_posting",
+        params={
+            "booking_log_id": "${booking_log_result.booking_log_id}",
+            "account_id": clearing_account_id,
+            "amount": amount,
+            "currency": currency,
+            "direction": "DEBIT",
+            "transaction_id": transaction_id,
+            "posting_type": "debit",
+        },
+        compensate_handler="current_account.financial_accounting.compensate_posting",
+        compensate_params={
+            "booking_log_id": "${booking_log_result.booking_log_id}",
+            "account_id": clearing_account_id,
+            "amount": amount,
+            "currency": currency,
+            "direction": "CREDIT",  # Reverse direction for compensation
+            "transaction_id": transaction_id,
+            "posting_type": "debit",
+        },
+    )
+
+# Step 4: Capture CREDIT posting to customer account
+credit_posting_step = step(name="capture_credit_posting")
+credit_result = invoke_handler(
+    handler="current_account.financial_accounting.capture_posting",
+    params={
+        "booking_log_id": "${booking_log_result.booking_log_id}",
+        "account_id": account_id,
+        "amount": amount,
+        "currency": currency,
+        "direction": "CREDIT",
+        "transaction_id": transaction_id,
+        "posting_type": "credit",
+    },
+    compensate_handler="current_account.financial_accounting.compensate_posting",
+    compensate_params={
+        "booking_log_id": "${booking_log_result.booking_log_id}",
+        "account_id": account_id,
+        "amount": amount,
+        "currency": currency,
+        "direction": "DEBIT",  # Reverse direction for compensation
+        "transaction_id": transaction_id,
+        "posting_type": "credit",
+    },
+)
+
+# Step 5: Finalize booking log (transition to POSTED)
+finalize_booking_step = step(name="finalize_booking_log")
+finalize_result = invoke_handler(
+    handler="current_account.financial_accounting.update_booking_log",
+    params={
+        "booking_log_id": "${booking_log_result.booking_log_id}",
+        "status": "POSTED",
+    },
+)
+
+# Step 6: Save account metadata
+save_account_step = step(name="save_account")
+save_result = invoke_handler(
+    handler="current_account.repository.save",
+    params={
+        "account_id": account_id,
+        "transaction_id": transaction_id,
+    },
+)
+
+# Output the saga result
+result = {
+    "status": "COMPLETED",
+    "transaction_id": transaction_id,
+    "position_log_id": log_position_result["log_id"],
+    "booking_log_id": booking_log_result["booking_log_id"],
+    "credit_posting_id": credit_result["posting_id"],
+}
