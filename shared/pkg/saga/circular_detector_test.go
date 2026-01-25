@@ -217,13 +217,12 @@ func TestCircularDetectorIntegration(t *testing.T) {
 		detector := NewCircularDetector()
 
 		// Phase 1: DRAFT - Static analysis
+		// None of these sagas have direct self-references (A->B, B->C, C->A)
+		// so draft-phase analysis should find no cycles
 		for name, script := range scripts {
 			cycles, err := detector.AnalyzeDraft(name, script)
 			require.NoError(t, err)
-			// Direct self-reference check (none here)
-			if name != "saga-C" {
-				assert.Empty(t, cycles, "unexpected cycle in draft phase for %s", name)
-			}
+			assert.Empty(t, cycles, "unexpected self-reference in draft phase for %s", name)
 		}
 
 		// Build graph from scripts

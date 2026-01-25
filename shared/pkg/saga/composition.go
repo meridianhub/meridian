@@ -248,6 +248,12 @@ func NewComposer(registry Registry, runtime *Runtime) *Composer {
 }
 
 // InvokeSagaBuiltin returns the Starlark builtin function for invoke_saga.
+//
+// NOTE: This method provides the complete invoke_saga builtin implementation
+// that will replace the placeholder in builtins.go when the runtime is wired up
+// to support saga composition. The placeholder in builtins.go returns None;
+// this method returns a proper sagaResultValue. Integration is planned for a
+// future PR that connects the Composer to the Runtime execution flow.
 func (c *Composer) InvokeSagaBuiltin() *starlark.Builtin {
 	return starlark.NewBuiltin("invoke_saga", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 		var sagaName string
@@ -287,11 +293,14 @@ func (c *Composer) InvokeSaga(
 		return nil, fmt.Errorf("%w: %v -> %s", ErrCircularSagaReference, names, sagaName)
 	}
 
+	// Generate a consistent execution ID for this invocation
+	executionID := uuid.New()
+
 	// Check nesting depth
 	if stack != nil {
 		entry := CallEntry{
 			SagaName:    sagaName,
-			ExecutionID: uuid.New(),
+			ExecutionID: executionID,
 		}
 		if err := stack.Push(entry); err != nil {
 			return nil, err
@@ -310,10 +319,15 @@ func (c *Composer) InvokeSaga(
 	result, err := c.registry.Execute(ctx, saga, input, parentScope)
 	if err != nil {
 		return &Result{
-			ExecutionID: uuid.New(),
+			ExecutionID: executionID,
 			Status:      ResultStatusFailed,
 			Error:       err.Error(),
 		}, nil
+	}
+
+	// Ensure result uses the consistent execution ID
+	if result != nil {
+		result.ExecutionID = executionID
 	}
 
 	// Track steps for limit enforcement
@@ -382,21 +396,33 @@ func (cc *CompensationCascade) SetParentStepCompensation(compensate func()) {
 
 // CompensateAll compensates all child sagas in LIFO order.
 func (cc *CompensationCascade) CompensateAll(ctx context.Context) error {
+	// Copy children while holding lock, then release before calling external funcs
 	cc.mu.Lock()
-	defer cc.mu.Unlock()
+	children := make([]*Result, len(cc.childSagas))
+	copy(children, cc.childSagas)
+	cc.mu.Unlock()
 
 	// Compensate in LIFO order (reverse)
-	for i := len(cc.childSagas) - 1; i >= 0; i-- {
-		child := cc.childSagas[i]
+	for i := len(children) - 1; i >= 0; i-- {
+		child := children[i]
 		if child.CompensateFunc != nil {
 			if err := child.CompensateFunc(ctx); err != nil {
+				// Record partial compensation status before returning error
+				cc.mu.Lock()
+				cc.compensationStatus = append(cc.compensationStatus, CompensationEntry{
+					ExecutionID:      child.ExecutionID,
+					ChildCompensated: false,
+				})
+				cc.mu.Unlock()
 				return fmt.Errorf("failed to compensate child saga %s: %w", child.ExecutionID, err)
 			}
 		}
+		cc.mu.Lock()
 		cc.compensationStatus = append(cc.compensationStatus, CompensationEntry{
 			ExecutionID:      child.ExecutionID,
 			ChildCompensated: true,
 		})
+		cc.mu.Unlock()
 	}
 
 	return nil

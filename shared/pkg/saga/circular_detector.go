@@ -112,7 +112,7 @@ func (d *CircularDetector) extractFromStmt(stmt syntax.Stmt) []string {
 
 // extractFromExpr extracts invoke_saga calls from an expression.
 //
-//nolint:gocyclo // AST walking requires handling many expression types
+//nolint:gocyclo,gocognit // AST walking requires handling many expression types
 func (d *CircularDetector) extractFromExpr(expr syntax.Expr) []string {
 	if expr == nil {
 		return nil
@@ -170,6 +170,29 @@ func (d *CircularDetector) extractFromExpr(expr syntax.Expr) []string {
 	case *syntax.IndexExpr:
 		refs = append(refs, d.extractFromExpr(e.X)...)
 		refs = append(refs, d.extractFromExpr(e.Y)...)
+
+	case *syntax.SliceExpr:
+		refs = append(refs, d.extractFromExpr(e.X)...)
+		refs = append(refs, d.extractFromExpr(e.Lo)...)
+		refs = append(refs, d.extractFromExpr(e.Hi)...)
+		refs = append(refs, d.extractFromExpr(e.Step)...)
+
+	case *syntax.DotExpr:
+		refs = append(refs, d.extractFromExpr(e.X)...)
+
+	case *syntax.Comprehension:
+		refs = append(refs, d.extractFromExpr(e.Body)...)
+		for _, clause := range e.Clauses {
+			if forClause, ok := clause.(*syntax.ForClause); ok {
+				refs = append(refs, d.extractFromExpr(forClause.X)...)
+			}
+			if ifClause, ok := clause.(*syntax.IfClause); ok {
+				refs = append(refs, d.extractFromExpr(ifClause.Cond)...)
+			}
+		}
+
+	case *syntax.LambdaExpr:
+		refs = append(refs, d.extractFromExpr(e.Body)...)
 	}
 
 	return refs
