@@ -145,10 +145,14 @@ func TestClassifyError_CaseInsensitive(t *testing.T) {
 	}
 }
 
-// TestClassifyError_NilError verifies nil error returns TRANSIENT.
+// TestClassifyError_NilError verifies nil error returns empty category.
 func TestClassifyError_NilError(t *testing.T) {
 	result := ClassifyError(nil)
-	assert.Equal(t, ErrorCategoryTransient, result, "nil error should return TRANSIENT")
+	assert.Equal(t, ErrorCategory(""), result, "nil error should return empty category")
+
+	// Also verify helper functions return false for nil
+	assert.False(t, IsFatalError(nil), "IsFatalError(nil) should return false")
+	assert.False(t, IsTransientError(nil), "IsTransientError(nil) should return false")
 }
 
 // TestClassifyError_UnknownError verifies unknown errors default to FATAL.
@@ -189,7 +193,7 @@ func TestIsFatalError(t *testing.T) {
 // TestIsTransientError verifies the IsTransientError helper.
 func TestIsTransientError(t *testing.T) {
 	assert.True(t, IsTransientError(errTestNetworkTimeout))
-	assert.True(t, IsTransientError(nil))
+	assert.False(t, IsTransientError(nil)) // nil is not a transient error
 	assert.False(t, IsTransientError(ErrInsufficientFunds))
 }
 

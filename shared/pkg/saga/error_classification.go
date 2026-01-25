@@ -132,10 +132,10 @@ var transientPatterns = []string{
 //  4. Check if error message matches TRANSIENT patterns
 //  5. Default to FATAL for unknown errors (fail-safe: don't retry unknowns)
 //
-// Returns ErrorCategoryFatal or ErrorCategoryTransient.
+// Returns ErrorCategoryFatal or ErrorCategoryTransient. Returns "" when err is nil.
 func ClassifyError(err error) ErrorCategory {
 	if err == nil {
-		return ErrorCategoryTransient
+		return ""
 	}
 
 	// Check for explicit wrapper types first (highest priority)
@@ -187,13 +187,15 @@ func ClassifyErrorString(err error) string {
 }
 
 // IsFatalError returns true if the error is classified as FATAL.
+// Returns false for nil errors.
 func IsFatalError(err error) bool {
-	return ClassifyError(err) == ErrorCategoryFatal
+	return err != nil && ClassifyError(err) == ErrorCategoryFatal
 }
 
 // IsTransientError returns true if the error is classified as TRANSIENT.
+// Returns false for nil errors.
 func IsTransientError(err error) bool {
-	return ClassifyError(err) == ErrorCategoryTransient
+	return err != nil && ClassifyError(err) == ErrorCategoryTransient
 }
 
 // FatalError wraps an error to be classified as FATAL.
