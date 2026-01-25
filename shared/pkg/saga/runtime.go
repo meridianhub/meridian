@@ -114,7 +114,7 @@ type ExecutionInput struct {
 
 // ExecuteSaga executes a Starlark script with the given input.
 // It enforces timeout constraints and restricts dangerous operations.
-// For party isolation support, use ExecuteSagaWithPartyScope instead.
+// For party isolation support, use ExecuteSagaWithInput instead.
 func (r *Runtime) ExecuteSaga(ctx context.Context, name string, script string, input map[string]interface{}) (*ExecutionResult, error) {
 	return r.ExecuteSagaWithInput(ctx, name, script, ExecutionInput{Data: input})
 }

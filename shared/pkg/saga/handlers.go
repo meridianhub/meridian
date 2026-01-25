@@ -130,13 +130,15 @@ func (c *StarlarkContext) ValidatePartyAccess(partyID uuid.UUID) error {
 
 	// Check if the party is in the visible scope
 	if !c.PartyScope.Contains(partyID) {
-		c.Logger.Warn("party scope violation",
-			"saga_execution_id", c.SagaExecutionID,
-			"executing_party_id", c.PartyScope.PartyID,
-			"requested_party_id", partyID,
-			"party_type", c.PartyScope.PartyType,
-			"visible_parties_count", len(c.PartyScope.VisibleParties),
-		)
+		if c.Logger != nil {
+			c.Logger.Warn("party scope violation",
+				"saga_execution_id", c.SagaExecutionID,
+				"executing_party_id", c.PartyScope.PartyID,
+				"requested_party_id", partyID,
+				"party_type", c.PartyScope.PartyType,
+				"visible_parties_count", len(c.PartyScope.VisibleParties),
+			)
+		}
 		return fmt.Errorf("%w: requested party %s, executing party %s (type: %s)",
 			ErrPartyScopeViolation, partyID, c.PartyScope.PartyID, c.PartyScope.PartyType)
 	}

@@ -37,6 +37,10 @@ type VisibilityManifest struct {
 }
 
 // isAuthorizedLookup checks if a lookup type is in the authorized list.
+// This is a hook for future per-step validation where step handlers can
+// declare lookup types (e.g., "exchange_rate", "market_data") that are
+// authorized even when referencing external parties. Currently tested but
+// not integrated into step execution; integration is planned for future work.
 func (m *VisibilityManifest) isAuthorizedLookup(lookupType string) bool {
 	for _, auth := range m.AuthorizedLookups {
 		if auth == lookupType {
@@ -176,36 +180,58 @@ func ExtractPartyReferencesFromInput(input map[string]interface{}) []uuid.UUID {
 }
 
 // extractFromArray extracts party IDs from a named array field.
+// Handles []interface{}, []string, and []uuid.UUID typed slices.
 func (c *partyCollector) extractFromArray(input map[string]interface{}, fieldName string) {
 	val, ok := input[fieldName]
 	if !ok {
 		return
 	}
-	arr, ok := val.([]interface{})
-	if !ok {
-		return
-	}
-	for _, item := range arr {
-		c.add(item)
+	switch arr := val.(type) {
+	case []interface{}:
+		for _, item := range arr {
+			c.add(item)
+		}
+	case []string:
+		for _, item := range arr {
+			c.add(item)
+		}
+	case []uuid.UUID:
+		for _, item := range arr {
+			c.add(item)
+		}
 	}
 }
 
 // extractFromPartiesArray extracts party IDs from a "parties" array that may contain objects.
+// Handles []interface{}, []string, []uuid.UUID, and []map[string]interface{} typed slices.
 func (c *partyCollector) extractFromPartiesArray(input map[string]interface{}) {
 	val, ok := input["parties"]
 	if !ok {
 		return
 	}
-	arr, ok := val.([]interface{})
-	if !ok {
-		return
-	}
-	for _, item := range arr {
-		// Try as direct party ID
-		c.add(item)
-		// Try as map with party_id field
-		if m, ok := item.(map[string]interface{}); ok {
-			if id, ok := m["party_id"]; ok {
+	switch arr := val.(type) {
+	case []interface{}:
+		for _, item := range arr {
+			// Try as direct party ID
+			c.add(item)
+			// Try as map with party_id field
+			if m, ok := item.(map[string]interface{}); ok {
+				if id, ok := m["party_id"]; ok {
+					c.add(id)
+				}
+			}
+		}
+	case []string:
+		for _, item := range arr {
+			c.add(item)
+		}
+	case []uuid.UUID:
+		for _, item := range arr {
+			c.add(item)
+		}
+	case []map[string]interface{}:
+		for _, item := range arr {
+			if id, ok := item["party_id"]; ok {
 				c.add(id)
 			}
 		}
