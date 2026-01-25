@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -397,8 +398,13 @@ func isDuplicateKeyError(err error) bool {
 		return false
 	}
 	errStr := err.Error()
-	// PostgreSQL duplicate key error codes/messages
+	// PostgreSQL/CockroachDB duplicate key error codes/messages
 	return containsIgnoreCase(errStr, "duplicate key") ||
 		containsIgnoreCase(errStr, "unique constraint") ||
 		containsIgnoreCase(errStr, "23505") // PostgreSQL unique_violation error code
+}
+
+// containsIgnoreCase checks if s contains substr, case-insensitively.
+func containsIgnoreCase(s, substr string) bool {
+	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }

@@ -75,16 +75,14 @@ func createPartialIndexForOrphanDetection(db *gorm.DB) error {
 // This ensures that each step in a saga instance can only have one result.
 func createCompositeUniqueConstraint(db *gorm.DB) error {
 	// Check if constraint already exists to make migration idempotent
-	// Query is schema-aware for multi-schema deployments
+	// Uses information_schema which is compatible with both PostgreSQL and CockroachDB
 	var count int64
 	if err := db.Raw(`
 		SELECT COUNT(*)
-		FROM pg_constraint c
-		JOIN pg_class r ON r.oid = c.conrelid
-		JOIN pg_namespace n ON n.oid = r.relnamespace
-		WHERE c.conname = 'uq_saga_step_results_instance_step'
-		  AND r.relname = 'saga_step_results'
-		  AND n.nspname = current_schema()
+		FROM information_schema.table_constraints
+		WHERE constraint_name = 'uq_saga_step_results_instance_step'
+		  AND table_name = 'saga_step_results'
+		  AND constraint_type = 'UNIQUE'
 	`).Scan(&count).Error; err != nil {
 		return fmt.Errorf("failed to check constraint existence: %w", err)
 	}
