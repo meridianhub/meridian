@@ -298,6 +298,11 @@ type ServiceConfig struct {
 	DatabaseURL string
 }
 
+// PostProvisioningHook is called after successful schema provisioning for a tenant.
+// It receives the tenant ID and should return an error if the hook fails.
+// Hook failures are logged but do NOT fail the overall provisioning.
+type PostProvisioningHook func(ctx context.Context, tenantID tenant.TenantID) error
+
 // Config holds configuration for the schema provisioner.
 type Config struct {
 	// Services lists the BIAN services that need schema provisioning.
@@ -314,6 +319,11 @@ type Config struct {
 	// regulations (e.g., financial record keeping requirements).
 	// Default: 7 years (2555 days) for financial services compliance.
 	DataRetentionPeriod time.Duration
+
+	// PostProvisioningHooks are called after successful schema provisioning.
+	// Hook failures are logged but do NOT fail the overall provisioning.
+	// Use for seeding default data, configuring services, etc.
+	PostProvisioningHooks []PostProvisioningHook
 }
 
 // Validate checks that the configuration is valid.
@@ -353,6 +363,7 @@ func (c *Config) Validate() error {
 //   - FINANCIAL_ACCOUNTING_DATABASE_URL
 //   - PAYMENT_ORDER_DATABASE_URL
 //   - MARKET_INFORMATION_DATABASE_URL
+//   - REFERENCE_DATA_DATABASE_URL
 //
 // If not set, fallback URLs are constructed based on service name.
 func DefaultConfig() *Config {
@@ -392,6 +403,11 @@ func DefaultConfig() *Config {
 				Name:          "market-information",
 				MigrationPath: basePath + "/market-information",
 				DatabaseURL:   getServiceDatabaseURL("market-information"),
+			},
+			{
+				Name:          "reference-data",
+				MigrationPath: basePath + "/reference-data",
+				DatabaseURL:   getServiceDatabaseURL("reference-data"),
 			},
 		},
 		ProvisioningTimeout: defaults.DefaultRPCTimeout,

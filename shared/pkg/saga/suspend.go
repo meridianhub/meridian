@@ -392,6 +392,11 @@ func (s *SuspendService) FindSuspendedByIdempotencyKey(ctx context.Context, key 
 	return &saga, nil
 }
 
+// containsIgnoreCase checks if s contains substr, case-insensitively.
+func containsIgnoreCase(s, substr string) bool {
+	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
+}
+
 // isDuplicateKeyError checks if the error is a duplicate key violation.
 func isDuplicateKeyError(err error) bool {
 	if err == nil {
@@ -402,9 +407,4 @@ func isDuplicateKeyError(err error) bool {
 	return containsIgnoreCase(errStr, "duplicate key") ||
 		containsIgnoreCase(errStr, "unique constraint") ||
 		containsIgnoreCase(errStr, "23505") // PostgreSQL unique_violation error code
-}
-
-// containsIgnoreCase checks if s contains substr, case-insensitively.
-func containsIgnoreCase(s, substr string) bool {
-	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }
