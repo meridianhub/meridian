@@ -6,6 +6,8 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"sort"
+	"strconv"
 
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
@@ -98,6 +100,7 @@ func (h *RegistryHandler) CreateSagaDraft(
 }
 
 // UpdateSagaDefinition modifies a DRAFT saga definition.
+// Only fields that are explicitly set in the request are updated.
 func (h *RegistryHandler) UpdateSagaDefinition(
 	ctx context.Context,
 	req *sagav1.UpdateSagaDefinitionRequest,
@@ -107,11 +110,19 @@ func (h *RegistryHandler) UpdateSagaDefinition(
 		return nil, status.Errorf(codes.InvalidArgument, "invalid saga id: %v", err)
 	}
 
-	updates := &Definition{
-		Script:                  req.Script,
-		PreconditionsExpression: req.PreconditionsExpression,
-		DisplayName:             req.DisplayName,
-		Description:             req.Description,
+	// Only update fields that are explicitly provided (proto3 optional fields)
+	updates := &Definition{}
+	if req.Script != nil {
+		updates.Script = *req.Script
+	}
+	if req.PreconditionsExpression != nil {
+		updates.PreconditionsExpression = *req.PreconditionsExpression
+	}
+	if req.DisplayName != nil {
+		updates.DisplayName = *req.DisplayName
+	}
+	if req.Description != nil {
+		updates.Description = *req.Description
 	}
 
 	if err := h.registry.UpdateDefinition(ctx, id, updates); err != nil {
@@ -282,65 +293,131 @@ func (h *RegistryHandler) ListSagas(
 	ctx context.Context,
 	req *sagav1.ListSagasRequest,
 ) (*sagav1.ListSagasResponse, error) {
-	var defs []*Definition
-	var err error
-
-	// Filter by status if specified
-	if req.StatusFilter != sagav1.SagaStatus_SAGA_STATUS_UNSPECIFIED {
-		domainStatus := h.protoStatusToDomain(req.StatusFilter)
-		defs, err = h.registry.ListByStatus(ctx, domainStatus)
-	} else {
-		// Get all sagas by listing each status
-		drafts, err1 := h.registry.ListByStatus(ctx, StatusDraft)
-		actives, err2 := h.registry.ListByStatus(ctx, StatusActive)
-		deprecated, err3 := h.registry.ListByStatus(ctx, StatusDeprecated)
-
-		if err1 != nil || err2 != nil || err3 != nil {
-			return nil, status.Errorf(codes.Internal, "failed to list sagas")
-		}
-		defs = append(defs, drafts...)
-		defs = append(defs, actives...)
-		defs = append(defs, deprecated...)
-	}
-
+	defs, err := h.fetchSagas(ctx, req.StatusFilter)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to list sagas: %v", err)
 	}
 
 	// Filter out system sagas if requested
 	if req.ExcludeSystem {
-		filtered := make([]*Definition, 0, len(defs))
-		for _, def := range defs {
-			if !def.IsSystem {
-				filtered = append(filtered, def)
-			}
-		}
-		defs = filtered
+		defs = h.filterNonSystemSagas(defs)
 	}
 
-	// Apply pagination (simple implementation)
-	pageSize := int(req.PageSize)
-	if pageSize == 0 {
-		pageSize = 50
-	}
-	if pageSize > 100 {
-		pageSize = 100
+	// Sort for stable pagination
+	h.sortDefinitions(defs)
+
+	// Parse and validate pagination
+	offset, err := h.parsePageToken(req.PageToken)
+	if err != nil {
+		return nil, err
 	}
 
-	// TODO: Implement proper cursor-based pagination
-	if len(defs) > pageSize {
-		defs = defs[:pageSize]
-	}
+	// Apply pagination
+	pageSize := h.normalizePageSize(int(req.PageSize))
+	paginatedDefs, nextToken := h.paginate(defs, offset, pageSize)
 
-	sagas := make([]*sagav1.SagaDefinition, len(defs))
-	for i, def := range defs {
+	// Convert to proto
+	sagas := make([]*sagav1.SagaDefinition, len(paginatedDefs))
+	for i, def := range paginatedDefs {
 		sagas[i] = h.definitionToProto(def)
 	}
 
 	return &sagav1.ListSagasResponse{
 		Sagas:         sagas,
-		NextPageToken: "", // TODO: Implement pagination
+		NextPageToken: nextToken,
 	}, nil
+}
+
+// fetchSagas retrieves sagas filtered by status.
+func (h *RegistryHandler) fetchSagas(ctx context.Context, statusFilter sagav1.SagaStatus) ([]*Definition, error) {
+	if statusFilter != sagav1.SagaStatus_SAGA_STATUS_UNSPECIFIED {
+		domainStatus := h.protoStatusToDomain(statusFilter)
+		return h.registry.ListByStatus(ctx, domainStatus)
+	}
+
+	// Get all sagas by listing each status
+	drafts, err1 := h.registry.ListByStatus(ctx, StatusDraft)
+	actives, err2 := h.registry.ListByStatus(ctx, StatusActive)
+	deprecated, err3 := h.registry.ListByStatus(ctx, StatusDeprecated)
+
+	if err1 != nil {
+		return nil, err1
+	}
+	if err2 != nil {
+		return nil, err2
+	}
+	if err3 != nil {
+		return nil, err3
+	}
+
+	defs := make([]*Definition, 0, len(drafts)+len(actives)+len(deprecated))
+	defs = append(defs, drafts...)
+	defs = append(defs, actives...)
+	defs = append(defs, deprecated...)
+	return defs, nil
+}
+
+// filterNonSystemSagas returns only non-system sagas.
+func (h *RegistryHandler) filterNonSystemSagas(defs []*Definition) []*Definition {
+	filtered := make([]*Definition, 0, len(defs))
+	for _, def := range defs {
+		if !def.IsSystem {
+			filtered = append(filtered, def)
+		}
+	}
+	return filtered
+}
+
+// sortDefinitions sorts definitions by name, then version for stable pagination.
+func (h *RegistryHandler) sortDefinitions(defs []*Definition) {
+	sort.Slice(defs, func(i, j int) bool {
+		if defs[i].Name == defs[j].Name {
+			return defs[i].Version < defs[j].Version
+		}
+		return defs[i].Name < defs[j].Name
+	})
+}
+
+// parsePageToken parses the offset from a page token.
+func (h *RegistryHandler) parsePageToken(token string) (int, error) {
+	if token == "" {
+		return 0, nil
+	}
+	offset, err := strconv.Atoi(token)
+	if err != nil || offset < 0 {
+		return 0, status.Error(codes.InvalidArgument, "invalid page_token")
+	}
+	return offset, nil
+}
+
+// normalizePageSize ensures page size is within valid bounds.
+func (h *RegistryHandler) normalizePageSize(pageSize int) int {
+	if pageSize <= 0 {
+		return 50
+	}
+	if pageSize > 100 {
+		return 100
+	}
+	return pageSize
+}
+
+// paginate returns a slice of definitions and the next page token.
+func (h *RegistryHandler) paginate(defs []*Definition, offset, pageSize int) ([]*Definition, string) {
+	if offset > len(defs) {
+		offset = len(defs)
+	}
+
+	end := offset + pageSize
+	if end > len(defs) {
+		end = len(defs)
+	}
+
+	nextToken := ""
+	if end < len(defs) {
+		nextToken = strconv.Itoa(end)
+	}
+
+	return defs[offset:end], nextToken
 }
 
 // ValidateSagaDraft validates a saga script without activating it.

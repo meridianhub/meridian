@@ -16,6 +16,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 // setupTestPostgres starts a PostgreSQL container and returns the pool and cleanup function.
@@ -166,9 +167,9 @@ func TestRegistryHandler_UpdateSagaDefinition(t *testing.T) {
 	t.Run("updates draft successfully", func(t *testing.T) {
 		req := &sagav1.UpdateSagaDefinitionRequest{
 			Id:          sagaID,
-			Script:      `saga(name="updatable_saga", version="2.0")`,
-			DisplayName: "Updated Saga",
-			Description: "Updated description",
+			Script:      proto.String(`saga(name="updatable_saga", version="2.0")`),
+			DisplayName: proto.String("Updated Saga"),
+			Description: proto.String("Updated description"),
 		}
 
 		resp, err := handler.UpdateSagaDefinition(ctx, req)
@@ -182,7 +183,7 @@ func TestRegistryHandler_UpdateSagaDefinition(t *testing.T) {
 	t.Run("rejects invalid saga id", func(t *testing.T) {
 		req := &sagav1.UpdateSagaDefinitionRequest{
 			Id:     "not-a-uuid",
-			Script: `saga(name="test")`,
+			Script: proto.String(`saga(name="test")`),
 		}
 
 		_, err := handler.UpdateSagaDefinition(ctx, req)
@@ -196,7 +197,7 @@ func TestRegistryHandler_UpdateSagaDefinition(t *testing.T) {
 	t.Run("rejects non-existent saga", func(t *testing.T) {
 		req := &sagav1.UpdateSagaDefinitionRequest{
 			Id:     uuid.New().String(),
-			Script: `saga(name="test")`,
+			Script: proto.String(`saga(name="test")`),
 		}
 
 		_, err := handler.UpdateSagaDefinition(ctx, req)
@@ -507,8 +508,8 @@ func TestRegistryHandler_SagaLifecycle(t *testing.T) {
 		// Step 2: Update draft
 		updateResp, err := handler.UpdateSagaDefinition(ctx, &sagav1.UpdateSagaDefinitionRequest{
 			Id:          sagaID,
-			Script:      `saga(name="lifecycle_saga", version="1.1")`,
-			Description: "Updated description",
+			Script:      proto.String(`saga(name="lifecycle_saga", version="1.1")`),
+			Description: proto.String("Updated description"),
 		})
 		require.NoError(t, err)
 		assert.Contains(t, updateResp.Saga.Script, "version=\"1.1\"")
@@ -524,7 +525,7 @@ func TestRegistryHandler_SagaLifecycle(t *testing.T) {
 		// Step 4: Try to update (should fail - not in draft)
 		_, err = handler.UpdateSagaDefinition(ctx, &sagav1.UpdateSagaDefinitionRequest{
 			Id:     sagaID,
-			Script: `saga(name="lifecycle_saga", version="1.2")`,
+			Script: proto.String(`saga(name="lifecycle_saga", version="1.2")`),
 		})
 		require.Error(t, err)
 		st, _ := status.FromError(err)
@@ -596,7 +597,7 @@ func TestRegistryHandler_TenantOverride(t *testing.T) {
 		// Try to update it
 		_, err = handler.UpdateSagaDefinition(ctx, &sagav1.UpdateSagaDefinitionRequest{
 			Id:     systemID,
-			Script: `saga(name="modified_system")`,
+			Script: proto.String(`saga(name="modified_system")`),
 		})
 		require.Error(t, err)
 

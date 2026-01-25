@@ -235,21 +235,22 @@ message CreateSagaDraftResponse {
 }
 
 // UpdateSagaDefinitionRequest contains updates for a DRAFT saga.
+// All fields except id are optional - only provided fields are updated.
 message UpdateSagaDefinitionRequest {
   // id is the UUID of the saga to update (required).
   string id = 1 [(buf.validate.field).string.uuid = true];
 
   // script is the updated Starlark source code.
-  string script = 2;
+  optional string script = 2;
 
   // preconditions_expression is the updated CEL expression.
-  string preconditions_expression = 3;
+  optional string preconditions_expression = 3;
 
   // display_name is the updated human-readable name.
-  string display_name = 4;
+  optional string display_name = 4;
 
   // description is the updated description.
-  string description = 5;
+  optional string description = 5;
 }
 
 // UpdateSagaDefinitionResponse contains the updated saga definition.
