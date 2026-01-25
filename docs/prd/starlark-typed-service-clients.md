@@ -904,7 +904,7 @@ Provide IDE support for Starlark saga development.
 
     ┌──────────────────────┐              ┌──────────────────────┐
     │  Task 1: Schema      │              │  Task 3: Platform    │
-    │  Registry (5 pts)    │              │  Inheritance (8 pts) │
+    │  Registry (8 pts)    │              │  Inheritance (8 pts) │
     │                      │              │                      │
     │  No dependencies     │              │  No dependencies     │
     └──────────┬───────────┘              └──────────┬───────────┘
@@ -912,7 +912,7 @@ Provide IDE support for Starlark saga development.
                ▼                                     ▼
     ┌──────────────────────┐              ┌──────────────────────┐
     │  Task 2: Starlark    │              │  Task 4: Migrate     │
-    │  Modules (8 pts)     │              │  Existing (5 pts)    │
+    │  Modules (10 pts)    │              │  Existing (5 pts)    │
     │                      │              │                      │
     │  Depends on: Task 1  │              │  Depends on: Task 3  │
     └──────────┬───────────┘              └──────────────────────┘
@@ -941,9 +941,9 @@ Provide IDE support for Starlark saga development.
 
 **Parallel Execution Strategy**:
 
-- **Sprint 1**: Task 1 + Task 3 (concurrent, 13 points total)
-- **Sprint 2**: Task 2 + Task 4 (concurrent, 13 points total)
-- **Sprint 3**: Task 5 if desired (13 points, optional)
+- **Sprint 1**: Task 1 (8 pts) + Task 3 (8 pts) concurrent - 8 pts elapsed
+- **Sprint 2**: Task 2 (10 pts) + Task 4 (5 pts) concurrent - 10 pts elapsed
+- **Sprint 3**: Task 5 if desired (13 pts, optional)
 
 ### Subtask Complexity Breakdown
 
