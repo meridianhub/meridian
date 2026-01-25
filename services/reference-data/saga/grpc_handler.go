@@ -44,6 +44,9 @@ func (h *RegistryHandler) CreateSagaDraft(
 	req *sagav1.CreateSagaDraftRequest,
 ) (*sagav1.CreateSagaDraftResponse, error) {
 	version := int(req.Version)
+	if version < 0 {
+		return nil, status.Errorf(codes.InvalidArgument, "version must be non-negative")
+	}
 	if version == 0 {
 		version = 1
 	}
@@ -305,7 +308,7 @@ func (h *RegistryHandler) ListSagas(
 	}
 
 	// Filter out system sagas if requested
-	if !req.IncludeSystem {
+	if req.ExcludeSystem {
 		filtered := make([]*Definition, 0, len(defs))
 		for _, def := range defs {
 			if !def.IsSystem {

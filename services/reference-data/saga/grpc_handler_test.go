@@ -445,7 +445,7 @@ func TestRegistryHandler_ListSagas(t *testing.T) {
 
 	t.Run("lists all sagas", func(t *testing.T) {
 		req := &sagav1.ListSagasRequest{
-			IncludeSystem: true,
+			ExcludeSystem: false,
 		}
 
 		resp, err := handler.ListSagas(ctx, req)
@@ -456,7 +456,7 @@ func TestRegistryHandler_ListSagas(t *testing.T) {
 	t.Run("filters by status", func(t *testing.T) {
 		req := &sagav1.ListSagasRequest{
 			StatusFilter:  sagav1.SagaStatus_SAGA_STATUS_DRAFT,
-			IncludeSystem: true,
+			ExcludeSystem: false,
 		}
 
 		resp, err := handler.ListSagas(ctx, req)
@@ -470,7 +470,7 @@ func TestRegistryHandler_ListSagas(t *testing.T) {
 	t.Run("respects page size", func(t *testing.T) {
 		req := &sagav1.ListSagasRequest{
 			PageSize:      2,
-			IncludeSystem: true,
+			ExcludeSystem: false,
 		}
 
 		resp, err := handler.ListSagas(ctx, req)

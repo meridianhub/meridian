@@ -297,7 +297,8 @@ message GetSagaRequest {
   // name is the saga name (required if id not provided).
   string name = 2;
 
-  // version is the specific version to retrieve (0 = latest).
+  // version is the specific version to retrieve.
+  // If 0 (default), returns the active version (same as GetActiveSaga).
   int32 version = 3;
 }
 
@@ -330,8 +331,9 @@ message ListSagasRequest {
   // status_filter filters by saga status. Unspecified returns all statuses.
   SagaStatus status_filter = 1;
 
-  // include_system includes system sagas in the response (default: true).
-  bool include_system = 2;
+  // exclude_system excludes system sagas from the response.
+  // When false (default), system sagas are included.
+  bool exclude_system = 2;
 
   // page_size is the maximum number of sagas to return.
   int32 page_size = 3 [(buf.validate.field).int32 = {
