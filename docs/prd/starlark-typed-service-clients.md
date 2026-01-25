@@ -130,9 +130,10 @@ However, this validation happens **after** the script is written, not during aut
 
 From [Starlark Types | Buck2](https://buck2.build/docs/developers/starlark/types/) and [Bazel Issue #22935](https://github.com/bazelbuild/bazel/issues/22935):
 
-- Bazel 9 introduces experimental type annotations via `--experimental_starlark_type_checking`
+- As of Bazel 9.0 (Jan 2026), experimental type annotations available via
+  `--experimental_starlark_type_checking`
 - Syntax inspired by PEP 484: `def foo(x: int) -> str:`
-- Goal for Bazel 10 is full type checking
+- Bazel 10 roadmap targets stabilization of the typing system
 - Currently useful for IDE tooling and static analysis
 
 **Relevance**: Could annotate saga DSL functions with type hints, but doesn't solve the service discovery problem.
