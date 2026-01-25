@@ -85,6 +85,10 @@ type Reference struct {
 	// Keys are parameter names extracted from the step() call.
 	// This enables schema validation of handler invocations.
 	Params map[string]bool
+
+	// ParamsKnown indicates whether params were statically extractable.
+	// When false (e.g., params passed as a variable), skip validation.
+	ParamsKnown bool
 }
 
 // ValidationError represents a validation issue found during reference checking.
@@ -478,6 +482,11 @@ func (v *ReferenceValidator) checkStepHandler(ref Reference, strict bool, result
 
 // validateHandlerParams validates that extracted parameter names match the handler schema.
 func (v *ReferenceValidator) validateHandlerParams(ref Reference, strict bool, result *ValidationResult) {
+	// Skip validation if params weren't statically extractable (e.g., passed as variable)
+	if !ref.ParamsKnown {
+		return
+	}
+
 	handlerDef, err := v.schemaRegistry.GetHandler(ref.Key)
 	if err != nil {
 		return // Schema not found - skip param validation
@@ -879,6 +888,7 @@ func (e *referenceExtractor) walkExpr(expr syntax.Expr) {
 				var handler string
 				var lineNum int
 				paramNames := make(map[string]bool)
+				paramsKnown := true // Assume known unless we encounter non-literal params
 
 				for _, kwarg := range ex.Args {
 					if binExpr, ok := kwarg.(*syntax.BinaryExpr); ok && binExpr.Op == syntax.EQ {
@@ -894,12 +904,19 @@ func (e *referenceExtractor) walkExpr(expr syntax.Expr) {
 								if dictExpr, ok := binExpr.Y.(*syntax.DictExpr); ok {
 									for _, entry := range dictExpr.List {
 										if dictEntry, ok := entry.(*syntax.DictEntry); ok {
-											if keyLit, ok := dictEntry.Key.(*syntax.Literal); ok && keyLit.Token == syntax.STRING {
-												paramName := strings.Trim(keyLit.Raw, `"'`)
-												paramNames[paramName] = true
+											keyLit, ok := dictEntry.Key.(*syntax.Literal)
+											if !ok || keyLit.Token != syntax.STRING {
+												// Non-literal key (e.g., variable) - can't extract
+												paramsKnown = false
+												continue
 											}
+											paramName := strings.Trim(keyLit.Raw, `"'`)
+											paramNames[paramName] = true
 										}
 									}
+								} else {
+									// params is not a literal dict (e.g., a variable)
+									paramsKnown = false
 								}
 							}
 						}
@@ -908,10 +925,11 @@ func (e *referenceExtractor) walkExpr(expr syntax.Expr) {
 
 				if handler != "" {
 					e.references = append(e.references, Reference{
-						Type:       ReferenceTypeStepHandler,
-						Key:        handler,
-						LineNumber: lineNum,
-						Params:     paramNames,
+						Type:        ReferenceTypeStepHandler,
+						Key:         handler,
+						LineNumber:  lineNum,
+						Params:      paramNames,
+						ParamsKnown: paramsKnown,
 					})
 				}
 			}

@@ -661,6 +661,7 @@ def execute(ctx):
 	ref := refs[0]
 	assert.Equal(t, ReferenceTypeStepHandler, ref.Type)
 	assert.Equal(t, "position_keeping.initiate_log", ref.Key)
+	assert.True(t, ref.ParamsKnown, "ParamsKnown should be true for literal dict")
 	assert.NotNil(t, ref.Params)
 	assert.True(t, ref.Params["position_id"])
 	assert.True(t, ref.Params["amount"])
@@ -823,6 +824,71 @@ def execute(ctx):
 	require.NoError(t, err)
 
 	// Should pass with no errors (no schema to validate against)
+	assert.Empty(t, result.Errors)
+	assert.Equal(t, statusReady, result.Status)
+}
+
+func TestExtractReferences_StepHandlerWithVariableParams(t *testing.T) {
+	// When params is a variable, we can't statically extract it
+	registry := pkgsaga.NewDomainHandlerRegistry()
+	v := NewReferenceValidator(registry, nil, nil, nil)
+
+	script := `
+def execute(ctx):
+    my_params = {"position_id": ctx.position_id}
+    step(
+        action = "position_keeping.initiate_log",
+        params = my_params  # Variable, not a literal dict
+    )
+`
+
+	refs, err := v.ExtractReferences(script)
+	require.NoError(t, err)
+	require.Len(t, refs, 1)
+
+	ref := refs[0]
+	assert.Equal(t, ReferenceTypeStepHandler, ref.Type)
+	assert.Equal(t, "position_keeping.initiate_log", ref.Key)
+	assert.False(t, ref.ParamsKnown, "ParamsKnown should be false for variable params")
+	assert.Empty(t, ref.Params)
+}
+
+func TestValidateDraft_SkipsValidationForVariableParams(t *testing.T) {
+	// When params is a variable, we should skip validation (no false positives)
+	handlerRegistry := pkgsaga.NewDomainHandlerRegistry()
+	_ = handlerRegistry.Register("test.handler", nil)
+
+	schemaRegistry := schema.NewRegistry()
+	schemaYAML := `
+service: test
+version: "1.0"
+handlers:
+  test.handler:
+    description: "Test handler"
+    params:
+      required_field:
+        type: string
+        required: true
+`
+	require.NoError(t, schemaRegistry.LoadFromYAML([]byte(schemaYAML)))
+
+	v := NewReferenceValidator(handlerRegistry, nil, nil, nil)
+	v.SetSchemaRegistry(schemaRegistry)
+
+	script := `
+def execute(ctx):
+    params_dict = {"required_field": "value"}
+    step(
+        action = "test.handler",
+        params = params_dict  # Variable - can't validate statically
+    )
+`
+
+	sagaID := uuid.New()
+	result, err := v.ValidateDraft(context.Background(), sagaID, script)
+	require.NoError(t, err)
+
+	// Should pass - we skip validation for non-static params
 	assert.Empty(t, result.Errors)
 	assert.Equal(t, statusReady, result.Status)
 }
