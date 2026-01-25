@@ -250,6 +250,9 @@ func (h *RegistryHandler) GetSaga(
 		}
 		def, err = h.registry.GetByID(ctx, id)
 	} else if req.Name != "" {
+		if req.Version < 0 {
+			return nil, status.Errorf(codes.InvalidArgument, "version must be >= 0")
+		}
 		if req.Version == 0 {
 			def, err = h.registry.GetActive(ctx, req.Name)
 		} else {
