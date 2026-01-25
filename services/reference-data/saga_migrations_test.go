@@ -85,6 +85,8 @@ func applySagaMigrations(t *testing.T, pool *pgxpool.Pool) {
 	migrations := []string{
 		"20260124000001_saga_definitions.sql",
 		"20260124000002_saga_references.sql",
+		"20260125000001_platform_saga_definition.sql",
+		"20260125000002_extend_saga_definition_platform_ref.sql",
 	}
 
 	for _, migration := range migrations {
@@ -146,6 +148,7 @@ func TestSagaMigration_AppliesCleanly(t *testing.T) {
 		"id", "name", "version", "script", "status", "is_system",
 		"preconditions_expression", "display_name", "description",
 		"created_at", "updated_at", "activated_at", "deprecated_at", "successor_id",
+		"platform_ref", "override_reason", "platform_version_at_override",
 	}
 
 	rows, err := tc.pool.Query(ctx, `
@@ -947,4 +950,253 @@ func TestSagaMigration_SchemaIsolation(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "DRAFT", status, "tenant_beta saga should still be DRAFT")
 	})
+}
+
+func TestSagaMigration_PlatformRefExtension_ColumnsExist(t *testing.T) {
+	tc := setupSagaTestContainer(t)
+	defer tc.cleanup(t)
+
+	ctx := context.Background()
+
+	// Verify new columns exist
+	expectedColumns := []string{
+		"platform_ref",
+		"override_reason",
+		"platform_version_at_override",
+	}
+
+	rows, err := tc.pool.Query(ctx, `
+		SELECT column_name
+		FROM information_schema.columns
+		WHERE table_name = 'saga_definition'
+	`)
+	require.NoError(t, err)
+	defer rows.Close()
+
+	var columns []string
+	for rows.Next() {
+		var col string
+		require.NoError(t, rows.Scan(&col))
+		columns = append(columns, col)
+	}
+
+	for _, expected := range expectedColumns {
+		assert.Contains(t, columns, expected, "missing column: %s", expected)
+	}
+}
+
+func TestSagaMigration_PlatformRefExtension_ForeignKey(t *testing.T) {
+	tc := setupSagaTestContainer(t)
+	defer tc.cleanup(t)
+
+	ctx := context.Background()
+
+	// Create a platform saga definition
+	platformID := uuid.New()
+	_, err := tc.pool.Exec(ctx, `
+		INSERT INTO public.platform_saga_definition (id, name, version, script)
+		VALUES ($1, 'platform_withdrawal', '1.0.0', 'def posting_rules(ctx): pass')
+	`, platformID)
+	require.NoError(t, err)
+
+	// Create a tenant saga referencing the platform saga
+	tenantID := uuid.New()
+	_, err = tc.pool.Exec(ctx, `
+		INSERT INTO saga_definition (id, name, version, script, status, platform_ref)
+		VALUES ($1, 'tenant_withdrawal', 1, '', 'DRAFT', $2)
+	`, tenantID, platformID)
+	require.NoError(t, err)
+
+	// Verify the reference was stored
+	var storedPlatformRef uuid.UUID
+	err = tc.pool.QueryRow(ctx, `
+		SELECT platform_ref FROM saga_definition WHERE id = $1
+	`, tenantID).Scan(&storedPlatformRef)
+	require.NoError(t, err)
+	assert.Equal(t, platformID, storedPlatformRef)
+}
+
+func TestSagaMigration_PlatformRefExtension_ForeignKeyOnDeleteSetNull(t *testing.T) {
+	tc := setupSagaTestContainer(t)
+	defer tc.cleanup(t)
+
+	ctx := context.Background()
+
+	// Create a platform saga
+	platformID := uuid.New()
+	_, err := tc.pool.Exec(ctx, `
+		INSERT INTO public.platform_saga_definition (id, name, version, script)
+		VALUES ($1, 'platform_delete_test', '1.0.0', 'def posting_rules(ctx): pass')
+	`, platformID)
+	require.NoError(t, err)
+
+	// Create a tenant saga referencing it
+	tenantID := uuid.New()
+	_, err = tc.pool.Exec(ctx, `
+		INSERT INTO saga_definition (id, name, version, script, status, platform_ref)
+		VALUES ($1, 'tenant_delete_test', 1, '', 'DRAFT', $2)
+	`, tenantID, platformID)
+	require.NoError(t, err)
+
+	// Delete the platform saga
+	_, err = tc.pool.Exec(ctx, `DELETE FROM public.platform_saga_definition WHERE id = $1`, platformID)
+	require.NoError(t, err)
+
+	// Verify the tenant saga's platform_ref is now NULL (ON DELETE SET NULL)
+	var platformRef *uuid.UUID
+	var script string
+	err = tc.pool.QueryRow(ctx, `
+		SELECT platform_ref, script FROM saga_definition WHERE id = $1
+	`, tenantID).Scan(&platformRef, &script)
+	require.NoError(t, err)
+	assert.Nil(t, platformRef, "platform_ref should be NULL after platform saga deletion")
+	assert.Equal(t, "", script, "script should still be empty")
+
+	// This creates an "orphaned" saga state (no platform_ref, no script)
+	// Application logic should handle these cases by either:
+	// 1. Providing a custom script to make it valid
+	// 2. Deleting the orphaned saga
+	// The CHECK constraint allows this state because FK cascade creates it automatically
+}
+
+func TestSagaMigration_PlatformRefExtension_MutualExclusivity(t *testing.T) {
+	tc := setupSagaTestContainer(t)
+	defer tc.cleanup(t)
+
+	ctx := context.Background()
+
+	// Create a platform saga for testing
+	platformID := uuid.New()
+	_, err := tc.pool.Exec(ctx, `
+		INSERT INTO public.platform_saga_definition (id, name, version, script)
+		VALUES ($1, 'platform_mutual_test', '1.0.0', 'def posting_rules(ctx): pass')
+	`, platformID)
+	require.NoError(t, err)
+
+	t.Run("accepts platform_ref with empty script", func(t *testing.T) {
+		id := uuid.New()
+		_, err := tc.pool.Exec(ctx, `
+			INSERT INTO saga_definition (id, name, version, script, status, platform_ref)
+			VALUES ($1, 'valid_platform_ref', 1, '', 'DRAFT', $2)
+		`, id, platformID)
+		require.NoError(t, err)
+	})
+
+	t.Run("accepts custom script with NULL platform_ref", func(t *testing.T) {
+		id := uuid.New()
+		_, err := tc.pool.Exec(ctx, `
+			INSERT INTO saga_definition (id, name, version, script, status, platform_ref)
+			VALUES ($1, 'valid_custom_script', 1, 'def posting_rules(ctx): pass', 'DRAFT', NULL)
+		`, id)
+		require.NoError(t, err)
+	})
+
+	t.Run("rejects both platform_ref and script set", func(t *testing.T) {
+		id := uuid.New()
+		_, err := tc.pool.Exec(ctx, `
+			INSERT INTO saga_definition (id, name, version, script, status, platform_ref)
+			VALUES ($1, 'invalid_both_set', 1, 'def posting_rules(ctx): pass', 'DRAFT', $2)
+		`, id, platformID)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "chk_saga_definition_platform_or_custom")
+	})
+
+	t.Run("allows orphaned state (neither platform_ref nor script)", func(t *testing.T) {
+		// This state is allowed because ON DELETE SET NULL can create it
+		// Application logic should detect and handle orphaned sagas
+		id := uuid.New()
+		_, err := tc.pool.Exec(ctx, `
+			INSERT INTO saga_definition (id, name, version, script, status, platform_ref)
+			VALUES ($1, 'orphaned_saga', 1, '', 'DRAFT', NULL)
+		`, id)
+		require.NoError(t, err, "orphaned state should be allowed for FK cascade compatibility")
+	})
+}
+
+func TestSagaMigration_PlatformRefExtension_OverrideTracking(t *testing.T) {
+	tc := setupSagaTestContainer(t)
+	defer tc.cleanup(t)
+
+	ctx := context.Background()
+
+	// Insert a custom saga with override tracking
+	id := uuid.New()
+	_, err := tc.pool.Exec(ctx, `
+		INSERT INTO saga_definition (
+			id, name, version, script, status,
+			platform_ref, override_reason, platform_version_at_override
+		)
+		VALUES (
+			$1, 'custom_override', 1, 'def posting_rules(ctx): pass', 'DRAFT',
+			NULL, 'Need custom business logic for regional compliance', '1.2.3'
+		)
+	`, id)
+	require.NoError(t, err)
+
+	// Verify override tracking fields were stored
+	var overrideReason, platformVersion string
+	err = tc.pool.QueryRow(ctx, `
+		SELECT override_reason, platform_version_at_override
+		FROM saga_definition
+		WHERE id = $1
+	`, id).Scan(&overrideReason, &platformVersion)
+	require.NoError(t, err)
+	assert.Equal(t, "Need custom business logic for regional compliance", overrideReason)
+	assert.Equal(t, "1.2.3", platformVersion)
+}
+
+func TestSagaMigration_PlatformRefExtension_Index(t *testing.T) {
+	tc := setupSagaTestContainer(t)
+	defer tc.cleanup(t)
+
+	ctx := context.Background()
+
+	// Verify the platform_ref index exists
+	var exists bool
+	err := tc.pool.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM pg_indexes
+			WHERE indexname = 'idx_saga_definition_platform_ref'
+		)
+	`).Scan(&exists)
+	require.NoError(t, err)
+	assert.True(t, exists, "idx_saga_definition_platform_ref index should exist")
+}
+
+func TestSagaMigration_PlatformRefExtension_ExistingDataRemainValid(t *testing.T) {
+	tc := setupSagaTestContainer(t)
+	defer tc.cleanup(t)
+
+	ctx := context.Background()
+
+	// This test verifies that existing sagas with scripts (pre-migration) remain valid
+	// after the migration adds the platform_ref columns
+
+	// The migration should allow existing rows where:
+	// - platform_ref is NULL (default after ALTER TABLE ADD COLUMN)
+	// - script has a value
+
+	// Insert a saga that mimics pre-migration data (script set, platform_ref NULL)
+	id := uuid.New()
+	_, err := tc.pool.Exec(ctx, `
+		INSERT INTO saga_definition (id, name, version, script, status)
+		VALUES ($1, 'legacy_saga', 1, 'def posting_rules(ctx): pass', 'DRAFT')
+	`, id)
+	require.NoError(t, err)
+
+	// Verify the saga exists and has NULL platform_ref
+	var platformRef *uuid.UUID
+	var script string
+	err = tc.pool.QueryRow(ctx, `
+		SELECT platform_ref, script FROM saga_definition WHERE id = $1
+	`, id).Scan(&platformRef, &script)
+	require.NoError(t, err)
+	assert.Nil(t, platformRef)
+	assert.NotEmpty(t, script)
+
+	// Verify we can query and update it without issues
+	_, err = tc.pool.Exec(ctx, `
+		UPDATE saga_definition SET description = 'Updated legacy saga' WHERE id = $1
+	`, id)
+	require.NoError(t, err)
 }
