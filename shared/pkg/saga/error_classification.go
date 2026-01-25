@@ -12,7 +12,7 @@ var (
 	// ErrInsufficientFunds indicates the account lacks required funds (business rule violation).
 	ErrInsufficientFunds = errors.New("insufficient funds")
 
-	// ErrInsufficientBalance is an alias for ErrInsufficientFunds for compatibility.
+	// ErrInsufficientBalance indicates insufficient account balance (same semantic as ErrInsufficientFunds).
 	ErrInsufficientBalance = errors.New("insufficient balance")
 
 	// ErrAccountClosed indicates the account is closed and cannot process transactions.
