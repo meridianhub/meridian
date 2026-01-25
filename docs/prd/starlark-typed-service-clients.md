@@ -597,14 +597,120 @@ platform_sagas:
 3. **Phase 3**: Update seeder to create references instead of copies
 4. **Phase 4**: Existing tenant copies become "frozen overrides" (opt-in to platform updates)
 
+## Implementation Tasks
+
+### Task 1: Handler Schema Registry
+
+Define handler schemas that serve as single source of truth for both Go and Starlark.
+
+1.1. **Create handler schema YAML format** - Define schema structure for handler metadata
+     (params, returns, description, compensate handler)
+
+1.2. **Add schema files for existing handlers** - Create YAML schemas for `current_account`,
+     `payment_order`, `position_keeping`, `financial_accounting` handlers
+
+1.3. **Build schema loader in Go** - Parse YAML schemas at startup, validate against
+     registered handlers
+
+1.4. **Enhance SemanticLinter with schema validation** - Validate handler params in Starlark
+     scripts against schema definitions
+
+1.5. **Add schema validation to ValidateDraft/ValidateActivation** - Integrate schema
+     checking into existing validation pipeline
+
+### Task 2: Starlark Service Modules
+
+Generate typed service modules that replace magic string handler references.
+
+2.1. **Design service module structure** - Define how `current_account.position_keeping.initiate_log()`
+     maps to handler registry
+
+2.2. **Implement service module generator** - Generate Starlark structs from handler schemas
+
+2.3. **Add service modules to NewRestrictedBuiltins** - Pre-declare generated modules in
+     Starlark runtime
+
+2.4. **Create invoke shim for backward compatibility** - Support both old `invoke_handler()`
+     and new `service.handler()` syntax
+
+2.5. **Add parameter type coercion** - Convert Starlark types to handler-expected Go types
+     based on schema
+
+2.6. **Write migration guide** - Document how to update existing scripts to new syntax
+
+### Task 3: Platform Default Saga Inheritance
+
+Replace copy-based seeding with reference-based inheritance.
+
+3.1. **Create platform_saga_definition table** - Add Flyway migration for
+     `public.platform_saga_definition` table with versioning support
+
+3.2. **Add platform sync mechanism** - Sync embedded `.star` files to platform table on
+     application startup
+
+3.3. **Modify saga_definition schema** - Add `platform_ref`, `override_reason`, and
+     `platform_version_at_override` columns
+
+3.4. **Implement fallback resolution in Registry** - Update `GetSaga` to check tenant first,
+     then fall back to platform defaults
+
+3.5. **Update SagaSeeder for reference-based seeding** - New tenants get references to
+     platform defaults, not copies
+
+3.6. **Create tenant override API** - Endpoint for tenants to create custom override of
+     platform saga with reason
+
+3.7. **Add platform update notification** - Notify tenants when platform default they
+     override has been updated
+
+3.8. **Build override audit view** - Query to show which tenants have overrides vs defaults
+
+### Task 4: Migrate Existing Tenants
+
+Handle existing tenants that have copied platform defaults.
+
+4.1. **Create migration analysis query** - Identify tenants with platform default copies
+     vs custom modifications
+
+4.2. **Implement diff tool** - Compare tenant saga script against current platform default
+     to detect modifications
+
+4.3. **Build bulk migration script** - For tenants with unmodified copies, convert to
+     platform references
+
+4.4. **Add opt-in upgrade endpoint** - Allow tenants with frozen overrides to adopt latest
+     platform version
+
+4.5. **Create rollback mechanism** - Allow tenants to revert from platform default to
+     previous override
+
+### Task 5: IDE Integration (Optional)
+
+Provide IDE support for Starlark saga development.
+
+5.1. **Generate JSON schema for handlers** - Export handler schemas in JSON Schema format
+     for IDE consumption
+
+5.2. **Create VS Code extension scaffold** - Basic extension structure with Starlark
+     language support
+
+5.3. **Implement autocomplete provider** - Suggest service/handler names based on schemas
+
+5.4. **Add hover documentation** - Show handler description, params, returns on hover
+
+5.5. **Implement go-to-definition** - Navigate from handler call to schema definition
+
 ## Implementation Effort Estimates
 
 | Phase | Scope | Estimate |
 |-------|-------|----------|
-| Phase 1 | Schema YAML + Enhanced Linter | 2-3 days |
-| Phase 2 | Starlark Service Modules | 3-5 days |
-| Phase 3 | LSP/IDE Integration | 5-8 days |
-| Phase 4 | Platform Default Inheritance | 3-4 days |
+| Task 1 | Handler Schema Registry | 2-3 days |
+| Task 2 | Starlark Service Modules | 3-5 days |
+| Task 3 | Platform Default Inheritance | 3-4 days |
+| Task 4 | Migrate Existing Tenants | 2-3 days |
+| Task 5 | IDE Integration (Optional) | 5-8 days |
+
+**Total**: 15-23 days (excluding optional IDE work: 10-15 days)
 
 ## References
 
