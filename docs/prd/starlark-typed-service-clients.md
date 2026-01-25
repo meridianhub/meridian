@@ -700,17 +700,95 @@ Provide IDE support for Starlark saga development.
 
 5.5. **Implement go-to-definition** - Navigate from handler call to schema definition
 
-## Implementation Effort Estimates
+## Task Dependencies and Complexity
 
-| Phase | Scope | Estimate |
-|-------|-------|----------|
-| Task 1 | Handler Schema Registry | 2-3 days |
-| Task 2 | Starlark Service Modules | 3-5 days |
-| Task 3 | Platform Default Inheritance | 3-4 days |
-| Task 4 | Migrate Existing Tenants | 2-3 days |
-| Task 5 | IDE Integration (Optional) | 5-8 days |
+### Dependency Graph
 
-**Total**: 15-23 days (excluding optional IDE work: 10-15 days)
+```text
+                    ┌─────────────────────────────────────────────────┐
+                    │              Can Run Concurrently               │
+                    └─────────────────────────────────────────────────┘
+
+    ┌──────────────────────┐              ┌──────────────────────┐
+    │  Task 1: Schema      │              │  Task 3: Platform    │
+    │  Registry (5 pts)    │              │  Inheritance (8 pts) │
+    │                      │              │                      │
+    │  No dependencies     │              │  No dependencies     │
+    └──────────┬───────────┘              └──────────┬───────────┘
+               │                                     │
+               ▼                                     ▼
+    ┌──────────────────────┐              ┌──────────────────────┐
+    │  Task 2: Starlark    │              │  Task 4: Migrate     │
+    │  Modules (8 pts)     │              │  Existing (5 pts)    │
+    │                      │              │                      │
+    │  Depends on: Task 1  │              │  Depends on: Task 3  │
+    └──────────┬───────────┘              └──────────────────────┘
+               │
+               ▼
+    ┌──────────────────────┐
+    │  Task 5: IDE         │
+    │  Integration (13 pts)│
+    │  [Optional]          │
+    │                      │
+    │  Depends on: Task 1  │
+    └──────────────────────┘
+```
+
+### Complexity Estimates (Story Points)
+
+| Task | Scope | Points | Dependencies | Concurrency |
+|------|-------|--------|--------------|-------------|
+| **1** | Handler Schema Registry | 5 | None | ✅ Can start immediately |
+| **2** | Starlark Service Modules | 8 | Task 1 | ⏳ Blocked by Task 1 |
+| **3** | Platform Default Inheritance | 8 | None | ✅ Can start immediately |
+| **4** | Migrate Existing Tenants | 5 | Task 3 | ⏳ Blocked by Task 3 |
+| **5** | IDE Integration (Optional) | 13 | Task 1 | ⏳ Blocked by Task 1 |
+
+**Critical Path**: Task 1 → Task 2 (13 points) or Task 3 → Task 4 (13 points)
+
+**Parallel Execution Strategy**:
+
+- **Sprint 1**: Task 1 + Task 3 (concurrent, 13 points total)
+- **Sprint 2**: Task 2 + Task 4 (concurrent, 13 points total)
+- **Sprint 3**: Task 5 if desired (13 points, optional)
+
+### Subtask Complexity Breakdown
+
+| Subtask | Points | Dependencies |
+|---------|--------|--------------|
+| 1.1 Schema YAML format | 2 | None |
+| 1.2 Add schema files | 2 | 1.1 |
+| 1.3 Build schema loader | 3 | 1.1 |
+| 1.4 Enhance linter | 3 | 1.3 |
+| 1.5 Integrate validation | 2 | 1.4 |
+| | | |
+| 2.1 Design module structure | 2 | 1.3 |
+| 2.2 Implement generator | 5 | 2.1 |
+| 2.3 Add to builtins | 2 | 2.2 |
+| 2.4 Backward compat shim | 3 | 2.3 |
+| 2.5 Type coercion | 3 | 2.3 |
+| 2.6 Migration guide | 1 | 2.4 |
+| | | |
+| 3.1 Platform table migration | 3 | None |
+| 3.2 Platform sync mechanism | 3 | 3.1 |
+| 3.3 Modify saga_definition | 2 | 3.1 |
+| 3.4 Fallback resolution | 3 | 3.3 |
+| 3.5 Update seeder | 3 | 3.4 |
+| 3.6 Override API | 2 | 3.5 |
+| 3.7 Update notification | 2 | 3.6 |
+| 3.8 Audit view | 1 | 3.3 |
+| | | |
+| 4.1 Migration analysis | 2 | 3.4 |
+| 4.2 Diff tool | 3 | 3.4 |
+| 4.3 Bulk migration | 3 | 4.2 |
+| 4.4 Opt-in upgrade | 2 | 4.3 |
+| 4.5 Rollback mechanism | 2 | 4.4 |
+| | | |
+| 5.1 JSON schema export | 2 | 1.3 |
+| 5.2 VS Code extension | 3 | None |
+| 5.3 Autocomplete | 5 | 5.1, 5.2 |
+| 5.4 Hover docs | 3 | 5.1, 5.2 |
+| 5.5 Go-to-definition | 3 | 5.1, 5.2 |
 
 ## References
 
