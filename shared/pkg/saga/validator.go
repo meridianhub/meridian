@@ -3,9 +3,60 @@ package saga
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"go.starlark.net/syntax"
 )
+
+// ValidationResult contains both validation errors and lint warnings.
+type ValidationResult struct {
+	// Errors contains fatal validation errors that block execution.
+	Errors []error
+
+	// LintIssues contains semantic lint issues (warnings and errors).
+	LintIssues []LintIssue
+}
+
+// HasErrors returns true if there are any fatal errors.
+func (r *ValidationResult) HasErrors() bool {
+	return len(r.Errors) > 0
+}
+
+// HasBlockingLintIssues returns true if any lint issues have ERROR severity.
+func (r *ValidationResult) HasBlockingLintIssues() bool {
+	for _, issue := range r.LintIssues {
+		if issue.Severity == LintSeverityError {
+			return true
+		}
+	}
+	return false
+}
+
+// IsValid returns true if the script can be activated (no errors and no blocking lint issues).
+func (r *ValidationResult) IsValid() bool {
+	return !r.HasErrors() && !r.HasBlockingLintIssues()
+}
+
+// Summary returns a human-readable summary of all issues.
+func (r *ValidationResult) Summary() string {
+	totalIssues := len(r.Errors) + len(r.LintIssues)
+	if totalIssues == 0 {
+		return "No issues found"
+	}
+
+	parts := make([]string, 0, totalIssues)
+
+	for _, err := range r.Errors {
+		parts = append(parts, fmt.Sprintf("ERROR: %s", err.Error()))
+	}
+
+	for _, issue := range r.LintIssues {
+		parts = append(parts, fmt.Sprintf("%s [line %d]: %s",
+			issue.Severity, issue.LineNumber, issue.Message))
+	}
+
+	return strings.Join(parts, "\n")
+}
 
 // Validation errors.
 var (
@@ -14,6 +65,9 @@ var (
 
 	// ErrExcessiveLoopNesting is returned when loop nesting exceeds MaxLoopNestingDepth.
 	ErrExcessiveLoopNesting = errors.New("excessive loop nesting")
+
+	// ErrValidationFailed is returned when activation validation fails.
+	ErrValidationFailed = errors.New("validation failed")
 )
 
 // blockedFunctions is the set of function names that are not allowed in saga scripts.
@@ -314,4 +368,51 @@ func (v *validationVisitor) walkExpr(expr syntax.Expr) error {
 	}
 
 	return nil
+}
+
+// ValidateDraft performs full validation including semantic linting for draft scripts.
+// This is used during script development and returns warnings that may be addressed.
+func ValidateDraft(script string) (*ValidationResult, error) {
+	return ValidateWithLinter(script, NewSemanticLinter())
+}
+
+// ValidateActivation performs strict validation for scripts being activated.
+// Returns an error if any blocking issues are found.
+func ValidateActivation(script string) error {
+	linter := NewSemanticLinter()
+	// Enforce ERROR level for Decimal arithmetic in activation
+	linter.SetEnforcementLevel(LintIssueTypeDecimalArithmetic, EnforcementLevelError)
+
+	result, err := ValidateWithLinter(script, linter)
+	if err != nil {
+		return err
+	}
+
+	if !result.IsValid() {
+		return fmt.Errorf("%w: %s", ErrValidationFailed, result.Summary())
+	}
+
+	return nil
+}
+
+// ValidateWithLinter performs validation using a custom linter configuration.
+func ValidateWithLinter(script string, linter *SemanticLinter) (*ValidationResult, error) {
+	result := &ValidationResult{}
+
+	// First, run basic validation
+	if err := ValidateSagaScript(script); err != nil {
+		result.Errors = append(result.Errors, err)
+	}
+
+	// If basic validation passed, run semantic linting
+	if len(result.Errors) == 0 && linter != nil {
+		lintIssues, err := linter.Analyze(script)
+		if err != nil {
+			// Lint errors are also added to the result
+			result.Errors = append(result.Errors, fmt.Errorf("lint error: %w", err))
+		}
+		result.LintIssues = lintIssues
+	}
+
+	return result, nil
 }
