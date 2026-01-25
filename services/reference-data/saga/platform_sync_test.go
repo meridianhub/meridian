@@ -317,14 +317,14 @@ func TestPlatformSync_SyncPlatformDefaults(t *testing.T) {
 		err = sync.SyncPlatformDefaults(ctx)
 		require.NoError(t, err)
 
-		// Verify timestamps haven't changed
+		// Verify timestamps haven't changed (compare full timestamps, not just Unix seconds)
 		for _, initial := range initialTimestamps {
 			var currentUpdatedAt time.Time
 			err := pool.QueryRow(ctx, `
 				SELECT updated_at FROM public.platform_saga_definition WHERE name = $1
 			`, initial.name).Scan(&currentUpdatedAt)
 			require.NoError(t, err)
-			assert.Equal(t, initial.updatedAt.Unix(), currentUpdatedAt.Unix(),
+			require.True(t, currentUpdatedAt.Equal(initial.updatedAt),
 				"updated_at should not change for %s when version is same", initial.name)
 		}
 	})
