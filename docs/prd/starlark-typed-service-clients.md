@@ -423,6 +423,18 @@ handlers:
     compensate: position_keeping.cancel_log
 ```
 
+**Build-Time Proto Validation:**
+
+To prevent the "Triple Entry" problem (changes requiring updates in Proto, Go, AND YAML),
+add a build step that validates YAML schemas against `.proto` definitions:
+
+```bash
+# In CI pipeline
+go run ./tools/validate-saga-schemas --yaml=services/*/saga/handlers.yaml --proto=api/proto/
+```
+
+This ensures handler parameter types in YAML match the corresponding gRPC request messages.
+
 ### Option 3: Proto Extensions
 
 Since Meridian uses protobuf, could extend service definitions:
@@ -526,6 +538,16 @@ func (r *Registry) GetSaga(ctx context.Context, name string) (*Definition, error
 - Cross-schema queries (minor performance impact)
 - Need to handle platform version upgrades carefully
 
+**Override Similarity Warning:**
+
+When a tenant creates an override, the `ReferenceValidator` should run a diff analysis. If the
+override is >90% identical to the platform default, prompt:
+
+> "You are overriding a system saga with nearly identical logic. Consider using parameters
+> instead to stay on the platform update path."
+
+This prevents unnecessary overrides that block platform maintenance updates.
+
 ### Option B: Symbolic Reference in Tenant Table
 
 Store only a reference marker in tenant `saga_definition`, not the script content.
@@ -590,6 +612,32 @@ platform_sagas:
         migration: "Requires handler registry v3"
 ```
 
+### Bi-Temporal Integrity for In-Flight Sagas
+
+**Critical Requirement:** A running `SagaInstance` MUST be pinned to the exact
+`platform_saga_definition.id` (and version) that was active when it started.
+
+```go
+// When starting a saga, capture the current platform version
+type SagaInstance struct {
+    // ... existing fields
+    PlatformSagaVersionID uuid.UUID  // Pinned at saga start
+    ScriptHashAtStart     string     // SHA256 of script content
+}
+
+// During replay after pod restart, use pinned version
+func (e *Engine) ReplaySaga(ctx context.Context, instance *SagaInstance) error {
+    // Load the EXACT script version used when saga started
+    def, err := e.registry.GetSagaByVersionID(ctx, instance.PlatformSagaVersionID)
+    // ...
+}
+```
+
+**Rationale:**
+- Prevents "hot-swap" of scripts mid-replay
+- Ensures deterministic replay after pod restarts
+- Platform updates only affect NEW saga instances, not in-flight ones
+
 ### Migration Strategy
 
 1. **Phase 1**: Create `public.platform_saga_definition` and populate from embedded files
@@ -618,6 +666,9 @@ Define handler schemas that serve as single source of truth for both Go and Star
 1.5. **Add schema validation to ValidateDraft/ValidateActivation** - Integrate schema
      checking into existing validation pipeline
 
+1.6. **Automated documentation generator** - Generate Markdown "Service Catalog" from YAML
+     schemas. Ensures up-to-date reference of every `service.method()` and required params.
+
 ### Task 2: Starlark Service Modules
 
 Generate typed service modules that replace magic string handler references.
@@ -633,8 +684,12 @@ Generate typed service modules that replace magic string handler references.
 2.4. **Create invoke shim for backward compatibility** - Support both old `invoke_handler()`
      and new `service.handler()` syntax
 
-2.5. **Add parameter type coercion** - Convert Starlark types to handler-expected Go types
-     based on schema
+2.5. **Add parameter type coercion** ⚠️ HIGH RISK - Starlark `int` vs Go `int64`/`uint32`
+     causes frequent type mismatches. Coercion layer MUST:
+     - Handle overflow checks for numeric types
+     - Convert Starlark `number` to schema-specified Go type (`int32`, `int64`, `uint32`)
+     - Reject out-of-range values with clear error messages
+     - Support `Decimal` → `string` for gRPC Money types
 
 2.6. **Write migration guide** - Document how to update existing scripts to new syntax
 
@@ -738,13 +793,13 @@ Provide IDE support for Starlark saga development.
 
 | Task | Scope | Points | Dependencies | Concurrency |
 |------|-------|--------|--------------|-------------|
-| **1** | Handler Schema Registry | 5 | None | ✅ Can start immediately |
-| **2** | Starlark Service Modules | 8 | Task 1 | ⏳ Blocked by Task 1 |
+| **1** | Handler Schema Registry | 8 | None | ✅ Can start immediately |
+| **2** | Starlark Service Modules | 10 | Task 1 | ⏳ Blocked by Task 1 |
 | **3** | Platform Default Inheritance | 8 | None | ✅ Can start immediately |
 | **4** | Migrate Existing Tenants | 5 | Task 3 | ⏳ Blocked by Task 3 |
 | **5** | IDE Integration (Optional) | 13 | Task 1 | ⏳ Blocked by Task 1 |
 
-**Critical Path**: Task 1 → Task 2 (13 points) or Task 3 → Task 4 (13 points)
+**Critical Path**: Task 1 → Task 2 (18 points) or Task 3 → Task 4 (13 points)
 
 **Parallel Execution Strategy**:
 
@@ -761,12 +816,13 @@ Provide IDE support for Starlark saga development.
 | 1.3 Build schema loader | 3 | 1.1 |
 | 1.4 Enhance linter | 3 | 1.3 |
 | 1.5 Integrate validation | 2 | 1.4 |
+| 1.6 Doc generator | 3 | 1.3 |
 | | | |
 | 2.1 Design module structure | 2 | 1.3 |
 | 2.2 Implement generator | 5 | 2.1 |
 | 2.3 Add to builtins | 2 | 2.2 |
 | 2.4 Backward compat shim | 3 | 2.3 |
-| 2.5 Type coercion | 3 | 2.3 |
+| 2.5 Type coercion ⚠️ | 5 | 2.3 |
 | 2.6 Migration guide | 1 | 2.4 |
 | | | |
 | 3.1 Platform table migration | 3 | None |
