@@ -311,10 +311,10 @@ func TestSagaMigrations_PartialIndex(t *testing.T) {
 	// CockroachDB uses information_schema for index queries
 	t.Run("partial index exists for orphan query", func(t *testing.T) {
 		var idxCount int64
-		// CockroachDB stores indexes in crdb_internal.table_indexes
-		// Fall back to checking the index exists by name
+		// CockroachDB stores indexes in information_schema.statistics
+		// Use COUNT(DISTINCT index_name) since multi-column indexes return one row per column
 		err := db.Raw(`
-			SELECT COUNT(*)
+			SELECT COUNT(DISTINCT index_name)
 			FROM information_schema.statistics
 			WHERE table_name = 'saga_instances'
 			  AND index_name = 'idx_saga_instances_orphaned'
