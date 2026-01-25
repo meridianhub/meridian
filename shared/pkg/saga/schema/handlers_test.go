@@ -18,7 +18,7 @@ func TestPlatformHandlersSchema(t *testing.T) {
 	assert.Equal(t, "platform", schema.Service)
 	assert.Equal(t, "1.0", schema.Version)
 
-	// Expected handlers from handlers.go
+	// Expected handlers from handlers.yaml
 	expectedHandlers := []string{
 		"position_keeping.initiate_log",
 		"position_keeping.update_log",
