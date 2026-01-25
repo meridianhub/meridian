@@ -186,11 +186,11 @@ func (e *StepExecutor) ExecuteStep(
 	}
 
 	if handlerErr != nil {
-		// Persist failure
+		// Persist failure with error classification (FR-28)
 		errStr := handlerErr.Error()
 		stepResult.Status = StepStatusFailed
 		stepResult.Error = &errStr
-		stepResult.ErrorCategory = categorizeError(handlerErr)
+		stepResult.SetErrorCategory(ClassifyError(handlerErr))
 	} else {
 		// Deep-copy output before persistence to prevent pointer leaks (FR-31)
 		deepCopiedOutput, copyErr := DeepCopyJSON(output)
@@ -342,10 +342,11 @@ func (e *TransactionalStepExecutor) ExecuteStepInTx(
 	}
 
 	if handlerErr != nil {
+		// Persist failure with error classification (FR-28)
 		errStr := handlerErr.Error()
 		stepResult.Status = StepStatusFailed
 		stepResult.Error = &errStr
-		stepResult.ErrorCategory = categorizeError(handlerErr)
+		stepResult.SetErrorCategory(ClassifyError(handlerErr))
 	} else {
 		// Deep-copy output (FR-31)
 		deepCopiedOutput, copyErr := DeepCopyJSON(output)
@@ -473,7 +474,7 @@ func (e *TransactionalStepExecutor) ExecuteStepWithOutbox(
 		errStr := handlerErr.Error()
 		stepResult.Status = StepStatusFailed
 		stepResult.Error = &errStr
-		stepResult.ErrorCategory = categorizeError(handlerErr)
+		stepResult.SetErrorCategory(ClassifyError(handlerErr))
 
 		// Create step failed event
 		errCat := ErrorCategoryFatal
@@ -649,85 +650,4 @@ func toJSONB(v interface{}) JSONB {
 		// For non-map types, wrap in a result key
 		return JSONB{"_value": v}
 	}
-}
-
-// categorizeError determines if an error is TRANSIENT (retryable) or FATAL (FR-28).
-// Returns a pointer to the error category string, or nil if uncategorized.
-func categorizeError(err error) *string {
-	if err == nil {
-		return nil
-	}
-
-	// Check for common transient error patterns
-	errStr := err.Error()
-
-	// Network/timeout errors are transient
-	transientPatterns := []string{
-		"timeout",
-		"deadline exceeded",
-		"connection refused",
-		"connection reset",
-		"temporary failure",
-		"unavailable",
-		"retry",
-		"EAGAIN",
-		"ETIMEDOUT",
-	}
-
-	for _, pattern := range transientPatterns {
-		if containsIgnoreCase(errStr, pattern) {
-			cat := string(ErrorCategoryTransient)
-			return &cat
-		}
-	}
-
-	// Default to fatal for unrecognized errors
-	cat := string(ErrorCategoryFatal)
-	return &cat
-}
-
-// containsIgnoreCase checks if s contains substr (case-insensitive).
-func containsIgnoreCase(s, substr string) bool {
-	sLower := make([]byte, len(s))
-	substrLower := make([]byte, len(substr))
-
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c >= 'A' && c <= 'Z' {
-			c += 'a' - 'A'
-		}
-		sLower[i] = c
-	}
-
-	for i := 0; i < len(substr); i++ {
-		c := substr[i]
-		if c >= 'A' && c <= 'Z' {
-			c += 'a' - 'A'
-		}
-		substrLower[i] = c
-	}
-
-	return containsBytes(sLower, substrLower)
-}
-
-func containsBytes(s, substr []byte) bool {
-	if len(substr) == 0 {
-		return true
-	}
-	if len(s) < len(substr) {
-		return false
-	}
-	for i := 0; i <= len(s)-len(substr); i++ {
-		match := true
-		for j := 0; j < len(substr); j++ {
-			if s[i+j] != substr[j] {
-				match = false
-				break
-			}
-		}
-		if match {
-			return true
-		}
-	}
-	return false
 }
