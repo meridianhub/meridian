@@ -65,9 +65,6 @@ var (
 
 	// ErrExcessiveLoopNesting is returned when loop nesting exceeds MaxLoopNestingDepth.
 	ErrExcessiveLoopNesting = errors.New("excessive loop nesting")
-
-	// ErrValidationFailed is returned when activation validation fails.
-	ErrValidationFailed = errors.New("validation failed")
 )
 
 // blockedFunctions is the set of function names that are not allowed in saga scripts.
