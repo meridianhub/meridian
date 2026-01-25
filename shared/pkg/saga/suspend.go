@@ -408,8 +408,3 @@ func isDuplicateKeyError(err error) bool {
 		containsIgnoreCase(errStr, "unique constraint") ||
 		containsIgnoreCase(errStr, "23505") // PostgreSQL unique_violation error code
 }
-
-// containsIgnoreCase checks if s contains substr, case-insensitively.
-func containsIgnoreCase(s, substr string) bool {
-	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
-}

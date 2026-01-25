@@ -141,7 +141,7 @@ save_result = invoke_handler(
 result = {
     "status": "COMPLETED",
     "transaction_id": transaction_id,
-    "position_log_id": log_position_result["log_id"],
-    "booking_log_id": booking_log_result["booking_log_id"],
-    "debit_posting_id": debit_result["posting_id"],
+    "position_log_id": log_position_result.log_id,
+    "booking_log_id": booking_log_result.booking_log_id,
+    "debit_posting_id": debit_result.posting_id,
 }
