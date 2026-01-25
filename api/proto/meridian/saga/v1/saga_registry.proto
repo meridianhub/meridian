@@ -1,0 +1,389 @@
+syntax = "proto3";
+
+package meridian.saga.v1;
+
+import "buf/validate/validate.proto";
+import "google/api/annotations.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/saga/v1;sagav1";
+
+// SagaStatus defines the lifecycle state of a saga definition.
+enum SagaStatus {
+  // SAGA_STATUS_UNSPECIFIED means the status is unknown.
+  SAGA_STATUS_UNSPECIFIED = 0;
+  // SAGA_STATUS_DRAFT means the saga is being defined and cannot be executed.
+  SAGA_STATUS_DRAFT = 1;
+  // SAGA_STATUS_ACTIVE means the saga is available for execution.
+  SAGA_STATUS_ACTIVE = 2;
+  // SAGA_STATUS_DEPRECATED means the saga is no longer recommended for new executions.
+  SAGA_STATUS_DEPRECATED = 3;
+}
+
+// SagaDefinition represents a Starlark saga workflow definition.
+message SagaDefinition {
+  // id is the unique identifier for this definition (UUID).
+  string id = 1 [(buf.validate.field).string.uuid = true];
+
+  // name is the saga identifier (e.g., "current_account_withdrawal").
+  string name = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 64
+    pattern: "^[a-z][a-z0-9_]*$"
+  }];
+
+  // version allows multiple versions of the same saga name.
+  int32 version = 3 [(buf.validate.field).int32.gte = 1];
+
+  // script is the Starlark source code defining the saga workflow.
+  string script = 4 [(buf.validate.field).string.max_len = 65536];
+
+  // status is the current lifecycle status.
+  SagaStatus status = 5;
+
+  // is_system indicates this is a system saga seeded during tenant provisioning.
+  // System sagas are read-only.
+  bool is_system = 6;
+
+  // preconditions_expression is an optional CEL expression for validating
+  // preconditions before saga execution.
+  string preconditions_expression = 7 [(buf.validate.field).string.max_len = 2048];
+
+  // display_name is a human-readable name.
+  string display_name = 8 [(buf.validate.field).string.max_len = 128];
+
+  // description provides additional context about this saga.
+  string description = 9 [(buf.validate.field).string.max_len = 2048];
+
+  // created_at is when this definition was created.
+  google.protobuf.Timestamp created_at = 10;
+
+  // updated_at is when this definition was last modified.
+  google.protobuf.Timestamp updated_at = 11;
+
+  // activated_at is when this definition transitioned to ACTIVE.
+  google.protobuf.Timestamp activated_at = 12;
+
+  // deprecated_at is when this definition transitioned to DEPRECATED.
+  google.protobuf.Timestamp deprecated_at = 13;
+
+  // successor_id is the UUID of the saga that replaces this one when deprecated.
+  string successor_id = 14;
+}
+
+// ValidationWarning represents a non-blocking validation issue.
+message ValidationWarning {
+  // reference_type is the type of reference (step_handler, instrument, saga, etc.).
+  string reference_type = 1;
+
+  // reference_key is the identifier that failed validation.
+  string reference_key = 2;
+
+  // line_number is the source line where the reference appears.
+  int32 line_number = 3;
+
+  // message describes the validation issue.
+  string message = 4;
+
+  // suggestion provides a hint for fixing the issue.
+  string suggestion = 5;
+}
+
+// ValidationResult contains the outcome of saga validation.
+message ValidationResult {
+  // status summarizes the validation outcome: "READY", "WARNINGS", or "BLOCKED".
+  string status = 1;
+
+  // warnings contains non-critical validation issues.
+  repeated ValidationWarning warnings = 2;
+
+  // critical_errors contains issues that block activation.
+  repeated ValidationWarning critical_errors = 3;
+}
+
+// SagaDependency represents a saga that depends on an external reference.
+message SagaDependency {
+  // saga_id is the UUID of the dependent saga.
+  string saga_id = 1;
+
+  // saga_name is the name of the dependent saga.
+  string saga_name = 2;
+
+  // saga_version is the version of the dependent saga.
+  int32 saga_version = 3;
+
+  // saga_status is the current status of the dependent saga.
+  SagaStatus saga_status = 4;
+
+  // line_number is where the dependency appears in the saga script.
+  int32 line_number = 5;
+}
+
+// SagaRegistryService provides management operations for saga definitions.
+// These endpoints allow creating, updating, and managing saga lifecycles.
+service SagaRegistryService {
+  // CreateSagaDraft creates a new saga definition in DRAFT status.
+  // The saga's script is NOT validated at creation time - validation occurs at activation.
+  rpc CreateSagaDraft(CreateSagaDraftRequest) returns (CreateSagaDraftResponse) {
+    option (google.api.http) = {
+      post: "/v1/sagas"
+      body: "*"
+    };
+  }
+
+  // UpdateSagaDefinition modifies a DRAFT saga definition.
+  // Returns error if the saga is not in DRAFT status or is a system saga.
+  rpc UpdateSagaDefinition(UpdateSagaDefinitionRequest) returns (UpdateSagaDefinitionResponse) {
+    option (google.api.http) = {
+      patch: "/v1/sagas/{id}"
+      body: "*"
+    };
+  }
+
+  // ActivateSaga transitions a saga from DRAFT to ACTIVE.
+  // Validates the saga script before activation.
+  // Once activated, the script becomes immutable.
+  rpc ActivateSaga(ActivateSagaRequest) returns (ActivateSagaResponse) {
+    option (google.api.http) = {
+      post: "/v1/sagas/{id}/activate"
+    };
+  }
+
+  // DeprecateSaga transitions a saga from ACTIVE to DEPRECATED.
+  // Optionally specifies a successor saga.
+  rpc DeprecateSaga(DeprecateSagaRequest) returns (DeprecateSagaResponse) {
+    option (google.api.http) = {
+      post: "/v1/sagas/{id}/deprecate"
+      body: "*"
+    };
+  }
+
+  // GetSaga retrieves a specific saga by ID or by name+version.
+  rpc GetSaga(GetSagaRequest) returns (GetSagaResponse) {
+    option (google.api.http) = {
+      get: "/v1/sagas/{id}"
+    };
+  }
+
+  // GetActiveSaga retrieves the active saga for a name using tenant resolution.
+  // Resolution order: tenant override (is_system=FALSE) > platform default (is_system=TRUE).
+  rpc GetActiveSaga(GetActiveSagaRequest) returns (GetActiveSagaResponse) {
+    option (google.api.http) = {
+      get: "/v1/sagas/active/{name}"
+    };
+  }
+
+  // ListSagas retrieves sagas matching the filter criteria.
+  rpc ListSagas(ListSagasRequest) returns (ListSagasResponse) {
+    option (google.api.http) = {
+      get: "/v1/sagas"
+    };
+  }
+
+  // ValidateSagaDraft validates a saga script without activating it.
+  // Returns warnings for missing references.
+  rpc ValidateSagaDraft(ValidateSagaDraftRequest) returns (ValidateSagaDraftResponse) {
+    option (google.api.http) = {
+      post: "/v1/sagas/{id}/validate"
+    };
+  }
+
+  // AnalyzeDeprecationImpact finds all sagas that reference a given instrument.
+  // Used to understand the impact before deprecating an instrument.
+  rpc AnalyzeDeprecationImpact(AnalyzeDeprecationImpactRequest) returns (AnalyzeDeprecationImpactResponse) {
+    option (google.api.http) = {
+      get: "/v1/sagas/deprecation-impact"
+    };
+  }
+}
+
+// CreateSagaDraftRequest contains the data for creating a new saga draft.
+message CreateSagaDraftRequest {
+  // name is the saga identifier (required).
+  string name = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 64
+    pattern: "^[a-z][a-z0-9_]*$"
+  }];
+
+  // version allows multiple versions of the same saga name (default: 1).
+  int32 version = 2;
+
+  // script is the Starlark source code (required).
+  string script = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 65536
+  }];
+
+  // preconditions_expression is an optional CEL expression for preconditions.
+  string preconditions_expression = 4;
+
+  // display_name is a human-readable name.
+  string display_name = 5;
+
+  // description provides additional context.
+  string description = 6;
+}
+
+// CreateSagaDraftResponse contains the created saga definition.
+message CreateSagaDraftResponse {
+  // saga is the created saga definition.
+  SagaDefinition saga = 1;
+
+  // validation contains initial validation warnings (non-blocking).
+  ValidationResult validation = 2;
+}
+
+// UpdateSagaDefinitionRequest contains updates for a DRAFT saga.
+// All fields except id are optional - only provided fields are updated.
+message UpdateSagaDefinitionRequest {
+  // id is the UUID of the saga to update (required).
+  string id = 1 [(buf.validate.field).string.uuid = true];
+
+  // script is the updated Starlark source code.
+  optional string script = 2;
+
+  // preconditions_expression is the updated CEL expression.
+  optional string preconditions_expression = 3;
+
+  // display_name is the updated human-readable name.
+  optional string display_name = 4;
+
+  // description is the updated description.
+  optional string description = 5;
+}
+
+// UpdateSagaDefinitionResponse contains the updated saga definition.
+message UpdateSagaDefinitionResponse {
+  // saga is the updated saga definition.
+  SagaDefinition saga = 1;
+}
+
+// ActivateSagaRequest identifies the saga to activate.
+message ActivateSagaRequest {
+  // id is the UUID of the saga to activate (required).
+  string id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+// ActivateSagaResponse contains the activated saga definition.
+message ActivateSagaResponse {
+  // saga is the activated saga definition.
+  SagaDefinition saga = 1;
+
+  // validation contains the final validation result.
+  ValidationResult validation = 2;
+}
+
+// DeprecateSagaRequest identifies the saga to deprecate.
+message DeprecateSagaRequest {
+  // id is the UUID of the saga to deprecate (required).
+  string id = 1 [(buf.validate.field).string.uuid = true];
+
+  // successor_id is the UUID of the replacement saga (optional).
+  // If provided, must be ACTIVE with the same name.
+  string successor_id = 2;
+}
+
+// DeprecateSagaResponse contains the deprecated saga definition.
+message DeprecateSagaResponse {
+  // saga is the deprecated saga definition.
+  SagaDefinition saga = 1;
+}
+
+// GetSagaRequest identifies the saga to retrieve.
+message GetSagaRequest {
+  // id is the UUID of the saga (required if name not provided).
+  string id = 1;
+
+  // name is the saga name (required if id not provided).
+  string name = 2;
+
+  // version is the specific version to retrieve.
+  // If 0 (default), returns the active version (same as GetActiveSaga).
+  int32 version = 3;
+}
+
+// GetSagaResponse contains the requested saga definition.
+message GetSagaResponse {
+  // saga is the requested saga definition.
+  SagaDefinition saga = 1;
+}
+
+// GetActiveSagaRequest identifies the saga name to resolve.
+message GetActiveSagaRequest {
+  // name is the saga name to resolve (required).
+  string name = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 64
+  }];
+}
+
+// GetActiveSagaResponse contains the resolved active saga.
+message GetActiveSagaResponse {
+  // saga is the resolved active saga definition.
+  SagaDefinition saga = 1;
+
+  // is_tenant_override indicates if this is a tenant-specific override.
+  bool is_tenant_override = 2;
+}
+
+// ListSagasRequest specifies the filter criteria for listing sagas.
+message ListSagasRequest {
+  // status_filter filters by saga status. Unspecified returns all statuses.
+  SagaStatus status_filter = 1;
+
+  // exclude_system excludes system sagas from the response.
+  // When false (default), system sagas are included.
+  bool exclude_system = 2;
+
+  // page_size is the maximum number of sagas to return.
+  int32 page_size = 3 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 100
+  }];
+
+  // page_token is the pagination token from a previous response.
+  string page_token = 4;
+}
+
+// ListSagasResponse contains the matching sagas.
+message ListSagasResponse {
+  // sagas is the list of saga definitions.
+  repeated SagaDefinition sagas = 1;
+
+  // next_page_token is the token for retrieving the next page.
+  string next_page_token = 2;
+}
+
+// ValidateSagaDraftRequest identifies the saga to validate.
+message ValidateSagaDraftRequest {
+  // id is the UUID of the saga to validate (required).
+  string id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+// ValidateSagaDraftResponse contains the validation result.
+message ValidateSagaDraftResponse {
+  // validation contains the validation result.
+  ValidationResult validation = 1;
+
+  // report is a human-readable validation report.
+  string report = 2;
+}
+
+// AnalyzeDeprecationImpactRequest specifies the instrument to analyze.
+message AnalyzeDeprecationImpactRequest {
+  // instrument_code is the instrument code to check (required).
+  string instrument_code = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 32
+  }];
+}
+
+// AnalyzeDeprecationImpactResponse contains the impact analysis.
+message AnalyzeDeprecationImpactResponse {
+  // dependencies lists all sagas that reference the instrument.
+  repeated SagaDependency dependencies = 1;
+
+  // total_count is the total number of affected sagas.
+  int32 total_count = 2;
+}

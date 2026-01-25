@@ -1,0 +1,608 @@
+package saga
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+	sagav1 "github.com/meridianhub/meridian/api/proto/meridian/saga/v1"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/modules/postgres"
+	"github.com/testcontainers/testcontainers-go/wait"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
+)
+
+// setupTestPostgres starts a PostgreSQL container and returns the pool and cleanup function.
+func setupTestPostgres(t *testing.T) (*pgxpool.Pool, tenant.TenantID, func()) {
+	ctx := context.Background()
+
+	pgContainer, err := postgres.Run(ctx,
+		"postgres:16-alpine",
+		postgres.WithDatabase("testdb"),
+		postgres.WithUsername("test"),
+		postgres.WithPassword("test"),
+		testcontainers.WithWaitStrategy(
+			wait.ForLog("database system is ready to accept connections").
+				WithOccurrence(2).
+				WithStartupTimeout(30*time.Second),
+		),
+	)
+	require.NoError(t, err)
+
+	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
+	require.NoError(t, err)
+
+	pool, err := pgxpool.New(ctx, connStr)
+	require.NoError(t, err)
+
+	// Create tenant schema and saga_definition table
+	tenantID, err := tenant.NewTenantID("test_grpc_handler")
+	require.NoError(t, err)
+
+	schemaName := tenantID.SchemaName()
+	_, err = pool.Exec(ctx, "CREATE SCHEMA IF NOT EXISTS "+schemaName)
+	require.NoError(t, err)
+
+	createTableSQL := `
+		CREATE TABLE ` + schemaName + `.saga_definition (
+			id uuid NOT NULL DEFAULT gen_random_uuid(),
+			name varchar(64) NOT NULL,
+			version integer NOT NULL DEFAULT 1,
+			script text NOT NULL,
+			status varchar(16) NOT NULL DEFAULT 'DRAFT',
+			is_system boolean NOT NULL DEFAULT FALSE,
+			preconditions_expression text NULL,
+			display_name varchar(128) NULL,
+			description text NULL,
+			created_at timestamptz NOT NULL DEFAULT now(),
+			updated_at timestamptz NOT NULL DEFAULT now(),
+			activated_at timestamptz NULL,
+			deprecated_at timestamptz NULL,
+			successor_id uuid NULL,
+			PRIMARY KEY (id),
+			CONSTRAINT uq_saga_definition_name_version UNIQUE (name, version)
+		)`
+	_, err = pool.Exec(ctx, createTableSQL)
+	require.NoError(t, err)
+
+	cleanup := func() {
+		pool.Close()
+		_ = pgContainer.Terminate(ctx)
+	}
+
+	return pool, tenantID, cleanup
+}
+
+func TestRegistryHandler_CreateSagaDraft(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	pool, tenantID, cleanup := setupTestPostgres(t)
+	defer cleanup()
+
+	registry := NewPostgresRegistry(pool, nil)
+	handler := NewRegistryHandler(registry, nil, nil)
+
+	ctx := tenant.WithTenant(context.Background(), tenantID)
+
+	t.Run("creates draft saga successfully", func(t *testing.T) {
+		req := &sagav1.CreateSagaDraftRequest{
+			Name:        "test_saga",
+			Script:      `saga(name="test_saga")`,
+			DisplayName: "Test Saga",
+			Description: "A test saga for unit testing",
+		}
+
+		resp, err := handler.CreateSagaDraft(ctx, req)
+		require.NoError(t, err)
+		require.NotNil(t, resp.Saga)
+
+		assert.Equal(t, "test_saga", resp.Saga.Name)
+		assert.Equal(t, int32(1), resp.Saga.Version)
+		assert.Equal(t, sagav1.SagaStatus_SAGA_STATUS_DRAFT, resp.Saga.Status)
+		assert.Equal(t, `saga(name="test_saga")`, resp.Saga.Script)
+		assert.False(t, resp.Saga.IsSystem)
+		assert.NotEmpty(t, resp.Saga.Id)
+		assert.NotNil(t, resp.Saga.CreatedAt)
+	})
+
+	t.Run("creates draft with specific version", func(t *testing.T) {
+		req := &sagav1.CreateSagaDraftRequest{
+			Name:    "versioned_saga",
+			Version: 2,
+			Script:  `saga(name="versioned_saga")`,
+		}
+
+		resp, err := handler.CreateSagaDraft(ctx, req)
+		require.NoError(t, err)
+		assert.Equal(t, int32(2), resp.Saga.Version)
+	})
+
+	t.Run("rejects duplicate name+version", func(t *testing.T) {
+		req := &sagav1.CreateSagaDraftRequest{
+			Name:   "test_saga",
+			Script: `saga(name="test_saga")`,
+		}
+
+		_, err := handler.CreateSagaDraft(ctx, req)
+		require.Error(t, err)
+
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.AlreadyExists, st.Code())
+	})
+}
+
+func TestRegistryHandler_UpdateSagaDefinition(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	pool, tenantID, cleanup := setupTestPostgres(t)
+	defer cleanup()
+
+	registry := NewPostgresRegistry(pool, nil)
+	handler := NewRegistryHandler(registry, nil, nil)
+
+	ctx := tenant.WithTenant(context.Background(), tenantID)
+
+	// Create a draft first
+	createReq := &sagav1.CreateSagaDraftRequest{
+		Name:   "updatable_saga",
+		Script: `saga(name="updatable_saga")`,
+	}
+	createResp, err := handler.CreateSagaDraft(ctx, createReq)
+	require.NoError(t, err)
+
+	sagaID := createResp.Saga.Id
+
+	t.Run("updates draft successfully", func(t *testing.T) {
+		req := &sagav1.UpdateSagaDefinitionRequest{
+			Id:          sagaID,
+			Script:      proto.String(`saga(name="updatable_saga", version="2.0")`),
+			DisplayName: proto.String("Updated Saga"),
+			Description: proto.String("Updated description"),
+		}
+
+		resp, err := handler.UpdateSagaDefinition(ctx, req)
+		require.NoError(t, err)
+
+		assert.Equal(t, `saga(name="updatable_saga", version="2.0")`, resp.Saga.Script)
+		assert.Equal(t, "Updated Saga", resp.Saga.DisplayName)
+		assert.Equal(t, "Updated description", resp.Saga.Description)
+	})
+
+	t.Run("rejects invalid saga id", func(t *testing.T) {
+		req := &sagav1.UpdateSagaDefinitionRequest{
+			Id:     "not-a-uuid",
+			Script: proto.String(`saga(name="test")`),
+		}
+
+		_, err := handler.UpdateSagaDefinition(ctx, req)
+		require.Error(t, err)
+
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.InvalidArgument, st.Code())
+	})
+
+	t.Run("rejects non-existent saga", func(t *testing.T) {
+		req := &sagav1.UpdateSagaDefinitionRequest{
+			Id:     uuid.New().String(),
+			Script: proto.String(`saga(name="test")`),
+		}
+
+		_, err := handler.UpdateSagaDefinition(ctx, req)
+		require.Error(t, err)
+
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.NotFound, st.Code())
+	})
+}
+
+func TestRegistryHandler_ActivateSaga(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	pool, tenantID, cleanup := setupTestPostgres(t)
+	defer cleanup()
+
+	registry := NewPostgresRegistry(pool, nil)
+	handler := NewRegistryHandler(registry, nil, nil)
+
+	ctx := tenant.WithTenant(context.Background(), tenantID)
+
+	// Create a draft first
+	createReq := &sagav1.CreateSagaDraftRequest{
+		Name:   "activatable_saga",
+		Script: `saga(name="activatable_saga")`,
+	}
+	createResp, err := handler.CreateSagaDraft(ctx, createReq)
+	require.NoError(t, err)
+
+	sagaID := createResp.Saga.Id
+
+	t.Run("activates saga successfully", func(t *testing.T) {
+		req := &sagav1.ActivateSagaRequest{
+			Id: sagaID,
+		}
+
+		resp, err := handler.ActivateSaga(ctx, req)
+		require.NoError(t, err)
+
+		assert.Equal(t, sagav1.SagaStatus_SAGA_STATUS_ACTIVE, resp.Saga.Status)
+		assert.NotNil(t, resp.Saga.ActivatedAt)
+	})
+
+	t.Run("rejects activation of already active saga", func(t *testing.T) {
+		req := &sagav1.ActivateSagaRequest{
+			Id: sagaID,
+		}
+
+		_, err := handler.ActivateSaga(ctx, req)
+		require.Error(t, err)
+
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.FailedPrecondition, st.Code())
+	})
+}
+
+func TestRegistryHandler_DeprecateSaga(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	pool, tenantID, cleanup := setupTestPostgres(t)
+	defer cleanup()
+
+	registry := NewPostgresRegistry(pool, nil)
+	handler := NewRegistryHandler(registry, nil, nil)
+
+	ctx := tenant.WithTenant(context.Background(), tenantID)
+
+	// Create and activate a saga
+	createReq := &sagav1.CreateSagaDraftRequest{
+		Name:   "deprecatable_saga",
+		Script: `saga(name="deprecatable_saga")`,
+	}
+	createResp, err := handler.CreateSagaDraft(ctx, createReq)
+	require.NoError(t, err)
+
+	_, err = handler.ActivateSaga(ctx, &sagav1.ActivateSagaRequest{Id: createResp.Saga.Id})
+	require.NoError(t, err)
+
+	t.Run("deprecates saga successfully", func(t *testing.T) {
+		req := &sagav1.DeprecateSagaRequest{
+			Id: createResp.Saga.Id,
+		}
+
+		resp, err := handler.DeprecateSaga(ctx, req)
+		require.NoError(t, err)
+
+		assert.Equal(t, sagav1.SagaStatus_SAGA_STATUS_DEPRECATED, resp.Saga.Status)
+		assert.NotNil(t, resp.Saga.DeprecatedAt)
+	})
+
+	t.Run("rejects deprecation of non-active saga", func(t *testing.T) {
+		// Create a draft saga
+		draftReq := &sagav1.CreateSagaDraftRequest{
+			Name:   "draft_saga",
+			Script: `saga(name="draft_saga")`,
+		}
+		draftResp, err := handler.CreateSagaDraft(ctx, draftReq)
+		require.NoError(t, err)
+
+		req := &sagav1.DeprecateSagaRequest{
+			Id: draftResp.Saga.Id,
+		}
+
+		_, err = handler.DeprecateSaga(ctx, req)
+		require.Error(t, err)
+
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.FailedPrecondition, st.Code())
+	})
+}
+
+func TestRegistryHandler_GetSaga(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	pool, tenantID, cleanup := setupTestPostgres(t)
+	defer cleanup()
+
+	registry := NewPostgresRegistry(pool, nil)
+	handler := NewRegistryHandler(registry, nil, nil)
+
+	ctx := tenant.WithTenant(context.Background(), tenantID)
+
+	// Create a saga
+	createReq := &sagav1.CreateSagaDraftRequest{
+		Name:        "get_saga_test",
+		Script:      `saga(name="get_saga_test")`,
+		DisplayName: "Get Saga Test",
+	}
+	createResp, err := handler.CreateSagaDraft(ctx, createReq)
+	require.NoError(t, err)
+
+	t.Run("gets saga by id", func(t *testing.T) {
+		req := &sagav1.GetSagaRequest{
+			Id: createResp.Saga.Id,
+		}
+
+		resp, err := handler.GetSaga(ctx, req)
+		require.NoError(t, err)
+		assert.Equal(t, "get_saga_test", resp.Saga.Name)
+	})
+
+	t.Run("gets saga by name and version", func(t *testing.T) {
+		req := &sagav1.GetSagaRequest{
+			Name:    "get_saga_test",
+			Version: 1,
+		}
+
+		resp, err := handler.GetSaga(ctx, req)
+		require.NoError(t, err)
+		assert.Equal(t, "get_saga_test", resp.Saga.Name)
+	})
+
+	t.Run("requires either id or name", func(t *testing.T) {
+		req := &sagav1.GetSagaRequest{}
+
+		_, err := handler.GetSaga(ctx, req)
+		require.Error(t, err)
+
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.InvalidArgument, st.Code())
+	})
+}
+
+func TestRegistryHandler_GetActiveSaga(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	pool, tenantID, cleanup := setupTestPostgres(t)
+	defer cleanup()
+
+	registry := NewPostgresRegistry(pool, nil)
+	handler := NewRegistryHandler(registry, nil, nil)
+
+	ctx := tenant.WithTenant(context.Background(), tenantID)
+
+	// Create and activate a saga
+	createReq := &sagav1.CreateSagaDraftRequest{
+		Name:   "active_saga",
+		Script: `saga(name="active_saga")`,
+	}
+	createResp, err := handler.CreateSagaDraft(ctx, createReq)
+	require.NoError(t, err)
+
+	_, err = handler.ActivateSaga(ctx, &sagav1.ActivateSagaRequest{Id: createResp.Saga.Id})
+	require.NoError(t, err)
+
+	t.Run("gets active saga by name", func(t *testing.T) {
+		req := &sagav1.GetActiveSagaRequest{
+			Name: "active_saga",
+		}
+
+		resp, err := handler.GetActiveSaga(ctx, req)
+		require.NoError(t, err)
+		assert.Equal(t, "active_saga", resp.Saga.Name)
+		assert.Equal(t, sagav1.SagaStatus_SAGA_STATUS_ACTIVE, resp.Saga.Status)
+		assert.True(t, resp.IsTenantOverride) // Not a system saga
+	})
+
+	t.Run("returns not found for non-existent saga", func(t *testing.T) {
+		req := &sagav1.GetActiveSagaRequest{
+			Name: "non_existent",
+		}
+
+		_, err := handler.GetActiveSaga(ctx, req)
+		require.Error(t, err)
+
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.NotFound, st.Code())
+	})
+}
+
+func TestRegistryHandler_ListSagas(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	pool, tenantID, cleanup := setupTestPostgres(t)
+	defer cleanup()
+
+	registry := NewPostgresRegistry(pool, nil)
+	handler := NewRegistryHandler(registry, nil, nil)
+
+	ctx := tenant.WithTenant(context.Background(), tenantID)
+
+	// Create multiple sagas
+	for i := 0; i < 3; i++ {
+		createReq := &sagav1.CreateSagaDraftRequest{
+			Name:   "list_saga_" + string(rune('a'+i)),
+			Script: `saga(name="list_saga")`,
+		}
+		_, err := handler.CreateSagaDraft(ctx, createReq)
+		require.NoError(t, err)
+	}
+
+	t.Run("lists all sagas", func(t *testing.T) {
+		req := &sagav1.ListSagasRequest{
+			ExcludeSystem: false,
+		}
+
+		resp, err := handler.ListSagas(ctx, req)
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, len(resp.Sagas), 3)
+	})
+
+	t.Run("filters by status", func(t *testing.T) {
+		req := &sagav1.ListSagasRequest{
+			StatusFilter:  sagav1.SagaStatus_SAGA_STATUS_DRAFT,
+			ExcludeSystem: false,
+		}
+
+		resp, err := handler.ListSagas(ctx, req)
+		require.NoError(t, err)
+
+		for _, saga := range resp.Sagas {
+			assert.Equal(t, sagav1.SagaStatus_SAGA_STATUS_DRAFT, saga.Status)
+		}
+	})
+
+	t.Run("respects page size", func(t *testing.T) {
+		req := &sagav1.ListSagasRequest{
+			PageSize:      2,
+			ExcludeSystem: false,
+		}
+
+		resp, err := handler.ListSagas(ctx, req)
+		require.NoError(t, err)
+		assert.LessOrEqual(t, len(resp.Sagas), 2)
+	})
+}
+
+func TestRegistryHandler_SagaLifecycle(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	pool, tenantID, cleanup := setupTestPostgres(t)
+	defer cleanup()
+
+	registry := NewPostgresRegistry(pool, nil)
+	handler := NewRegistryHandler(registry, nil, nil)
+
+	ctx := tenant.WithTenant(context.Background(), tenantID)
+
+	t.Run("full lifecycle: create -> update -> activate -> deprecate", func(t *testing.T) {
+		// Step 1: Create draft
+		createResp, err := handler.CreateSagaDraft(ctx, &sagav1.CreateSagaDraftRequest{
+			Name:        "lifecycle_saga",
+			Script:      `saga(name="lifecycle_saga")`,
+			DisplayName: "Lifecycle Test Saga",
+		})
+		require.NoError(t, err)
+		assert.Equal(t, sagav1.SagaStatus_SAGA_STATUS_DRAFT, createResp.Saga.Status)
+
+		sagaID := createResp.Saga.Id
+
+		// Step 2: Update draft
+		updateResp, err := handler.UpdateSagaDefinition(ctx, &sagav1.UpdateSagaDefinitionRequest{
+			Id:          sagaID,
+			Script:      proto.String(`saga(name="lifecycle_saga", version="1.1")`),
+			Description: proto.String("Updated description"),
+		})
+		require.NoError(t, err)
+		assert.Contains(t, updateResp.Saga.Script, "version=\"1.1\"")
+
+		// Step 3: Activate
+		activateResp, err := handler.ActivateSaga(ctx, &sagav1.ActivateSagaRequest{
+			Id: sagaID,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, sagav1.SagaStatus_SAGA_STATUS_ACTIVE, activateResp.Saga.Status)
+		assert.NotNil(t, activateResp.Saga.ActivatedAt)
+
+		// Step 4: Try to update (should fail - not in draft)
+		_, err = handler.UpdateSagaDefinition(ctx, &sagav1.UpdateSagaDefinitionRequest{
+			Id:     sagaID,
+			Script: proto.String(`saga(name="lifecycle_saga", version="1.2")`),
+		})
+		require.Error(t, err)
+		st, _ := status.FromError(err)
+		assert.Equal(t, codes.FailedPrecondition, st.Code())
+
+		// Step 5: Deprecate
+		deprecateResp, err := handler.DeprecateSaga(ctx, &sagav1.DeprecateSagaRequest{
+			Id: sagaID,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, sagav1.SagaStatus_SAGA_STATUS_DEPRECATED, deprecateResp.Saga.Status)
+		assert.NotNil(t, deprecateResp.Saga.DeprecatedAt)
+	})
+}
+
+func TestRegistryHandler_TenantOverride(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	pool, tenantID, cleanup := setupTestPostgres(t)
+	defer cleanup()
+
+	ctx := tenant.WithTenant(context.Background(), tenantID)
+	schemaName := tenantID.SchemaName()
+
+	// Seed a system saga
+	_, err := pool.Exec(ctx, `
+		INSERT INTO `+schemaName+`.saga_definition
+			(name, version, script, status, is_system, display_name, activated_at)
+		VALUES
+			('system_saga', 1, 'saga(name="system_saga")', 'ACTIVE', true, 'System Saga', now())`)
+	require.NoError(t, err)
+
+	registry := NewPostgresRegistry(pool, nil)
+	handler := NewRegistryHandler(registry, nil, nil)
+
+	t.Run("tenant override takes precedence over system saga", func(t *testing.T) {
+		// Create and activate a tenant override
+		createResp, err := handler.CreateSagaDraft(ctx, &sagav1.CreateSagaDraftRequest{
+			Name:   "system_saga",
+			Script: `saga(name="system_saga", tenant_override=True)`,
+		})
+		require.NoError(t, err)
+
+		_, err = handler.ActivateSaga(ctx, &sagav1.ActivateSagaRequest{
+			Id: createResp.Saga.Id,
+		})
+		require.NoError(t, err)
+
+		// GetActiveSaga should return the tenant override
+		activeResp, err := handler.GetActiveSaga(ctx, &sagav1.GetActiveSagaRequest{
+			Name: "system_saga",
+		})
+		require.NoError(t, err)
+
+		assert.True(t, activeResp.IsTenantOverride)
+		assert.Contains(t, activeResp.Saga.Script, "tenant_override")
+	})
+
+	t.Run("cannot modify system saga", func(t *testing.T) {
+		// Try to get the system saga's ID
+		var systemID string
+		err := pool.QueryRow(ctx, `
+			SELECT id FROM `+schemaName+`.saga_definition
+			WHERE name = 'system_saga' AND is_system = true`).Scan(&systemID)
+		require.NoError(t, err)
+
+		// Try to update it
+		_, err = handler.UpdateSagaDefinition(ctx, &sagav1.UpdateSagaDefinitionRequest{
+			Id:     systemID,
+			Script: proto.String(`saga(name="modified_system")`),
+		})
+		require.Error(t, err)
+
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.PermissionDenied, st.Code())
+	})
+}
