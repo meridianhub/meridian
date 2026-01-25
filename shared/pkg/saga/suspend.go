@@ -141,8 +141,11 @@ func (s *SuspendService) SuspendSaga(
 	req *SuspendRequest,
 ) (*SuspendResult, error) {
 	// Validate request
+	if req == nil {
+		return nil, fmt.Errorf("%w: suspend request is required", ErrIdempotencyKeyRequired)
+	}
 	if req.IdempotencyKey == "" {
-		return nil, fmt.Errorf("%w: idempotency key required", ErrInvalidTimeout)
+		return nil, ErrIdempotencyKeyRequired
 	}
 
 	timeout := req.Timeout
@@ -283,10 +286,13 @@ func (s *SuspendService) CompleteSagaStep(
 			// Look for a step result that was previously suspended with this idempotency key
 			// We stored the suspend data in Result when suspending
 			var stepWithKey SagaStepResult
-			lookupErr := tx.Where("result->>'idempotency_key' = ? OR result->>'_suspend_key' = ?",
-				req.IdempotencyKey, req.IdempotencyKey).
-				Order("created_at DESC").
-				First(&stepWithKey).Error
+			stepQuery := tx.Where("result->>'idempotency_key' = ? OR result->>'_suspend_key' = ?",
+				req.IdempotencyKey, req.IdempotencyKey)
+			// If SagaInstanceID provided, filter by it for consistency
+			if req.SagaInstanceID != nil {
+				stepQuery = stepQuery.Where("saga_instance_id = ?", *req.SagaInstanceID)
+			}
+			lookupErr := stepQuery.Order("created_at DESC").First(&stepWithKey).Error
 
 			if lookupErr == nil {
 				// Found a step that had this idempotency key - fetch the saga

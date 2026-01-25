@@ -31,6 +31,29 @@ func TestSuspendRequest_Validation(t *testing.T) {
 	})
 }
 
+func TestSuspendSaga_ValidationErrors(t *testing.T) {
+	// These tests don't need a database - they test validation before DB calls
+	suspendService := &SuspendService{config: DefaultSuspendConfig()}
+	ctx := context.Background()
+	instance := &SagaInstance{ID: uuid.New()}
+
+	t.Run("nil request returns error", func(t *testing.T) {
+		result, err := suspendService.SuspendSaga(ctx, instance, 0, "step", nil)
+		assert.Nil(t, result)
+		assert.ErrorIs(t, err, ErrIdempotencyKeyRequired)
+	})
+
+	t.Run("empty idempotency key returns error", func(t *testing.T) {
+		req := &SuspendRequest{
+			IdempotencyKey: "",
+			Timeout:        time.Hour,
+		}
+		result, err := suspendService.SuspendSaga(ctx, instance, 0, "step", req)
+		assert.Nil(t, result)
+		assert.ErrorIs(t, err, ErrIdempotencyKeyRequired)
+	})
+}
+
 func TestStepStatusSuspended(t *testing.T) {
 	assert.Equal(t, StepStatus("SUSPENDED"), StepStatusSuspended)
 }

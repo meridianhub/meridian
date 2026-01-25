@@ -44,6 +44,13 @@ func NewTimeoutWorker(db *gorm.DB, config *TimeoutWorkerConfig) *TimeoutWorker {
 	if config == nil {
 		config = DefaultTimeoutWorkerConfig()
 	}
+	// Guard against invalid configuration values
+	if config.PollInterval <= 0 {
+		config.PollInterval = DefaultTimeoutWorkerConfig().PollInterval
+	}
+	if config.BatchSize <= 0 {
+		config.BatchSize = DefaultTimeoutWorkerConfig().BatchSize
+	}
 	return &TimeoutWorker{
 		db:     db,
 		config: config,
@@ -101,9 +108,18 @@ func (w *TimeoutWorker) processExpiredSuspensions(ctx context.Context) error {
 
 	err := w.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Find and transition expired suspensions atomically
+		// Use CTE to capture idempotency_key before clearing suspend_data
 		// The JSONB query extracts the timeout_at field and compares with NOW()
 		result := tx.Raw(`
-			UPDATE saga_instances
+			WITH expired_sagas AS (
+				SELECT id, correlation_id, suspend_data->>'idempotency_key' as idempotency_key
+				FROM saga_instances
+				WHERE status = ?
+				  AND (suspend_data->>'timeout_at')::timestamptz < ?
+				FOR UPDATE SKIP LOCKED
+				LIMIT ?
+			)
+			UPDATE saga_instances si
 			SET
 				status = ?,
 				error_message = ?,
@@ -111,22 +127,17 @@ func (w *TimeoutWorker) processExpiredSuspensions(ctx context.Context) error {
 				updated_at = ?,
 				suspend_reason = NULL,
 				suspend_data = NULL
-			WHERE id IN (
-				SELECT id FROM saga_instances
-				WHERE status = ?
-				  AND (suspend_data->>'timeout_at')::timestamptz < ?
-				FOR UPDATE SKIP LOCKED
-				LIMIT ?
-			)
-			RETURNING id, correlation_id, suspend_data->>'idempotency_key' as idempotency_key
+			FROM expired_sagas es
+			WHERE si.id = es.id
+			RETURNING si.id, es.correlation_id, es.idempotency_key
 		`,
+			SagaStatusWaitingForEvent,
+			now,
+			w.config.BatchSize,
 			SagaStatusFailed,
 			"Suspend timeout exceeded - external event not received within deadline",
 			string(ErrorCategoryFatal),
 			now,
-			SagaStatusWaitingForEvent,
-			now,
-			w.config.BatchSize,
 		).Scan(&expired)
 
 		if result.Error != nil {
