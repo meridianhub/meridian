@@ -61,6 +61,7 @@ var (
 	ErrNilLogger            = errors.New("logger cannot be nil")
 	ErrInvalidPollInterval  = errors.New("pollInterval must be greater than zero")
 	ErrPanicDuringProvision = errors.New("panic during provisioning")
+	ErrHookPanic            = errors.New("post-provisioning hook panicked")
 )
 
 // Config holds configuration for worker behavior.
@@ -252,7 +253,14 @@ func (w *ProvisioningWorker) executePostProvisioningHooks(ctx context.Context, t
 
 	succeeded := 0
 	for _, nh := range w.postProvisioningHooks {
-		if err := nh.hook(ctx, tenantID); err != nil {
+		if err := func() (err error) {
+			defer func() {
+				if r := recover(); r != nil {
+					err = fmt.Errorf("%w: %v", ErrHookPanic, r)
+				}
+			}()
+			return nh.hook(ctx, tenantID)
+		}(); err != nil {
 			// Log error but continue - hooks are non-blocking
 			w.logger.Warn("post-provisioning hook failed",
 				"tenant_id", tenantID,
