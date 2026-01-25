@@ -5,6 +5,8 @@ package schema
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 
@@ -290,4 +292,50 @@ func (r *Registry) HasHandler(name string) bool {
 
 	_, ok := r.handlers[name]
 	return ok
+}
+
+// LoadFromFile loads a schema from a YAML file.
+func (r *Registry) LoadFromFile(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("failed to read schema file %s: %w", path, err)
+	}
+	return r.LoadFromYAML(data)
+}
+
+// LoadFromDirectory loads all YAML schema files from a directory.
+// Files must have .yaml or .yml extension. Subdirectories are not traversed.
+func (r *Registry) LoadFromDirectory(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("failed to read schema directory %s: %w", dir, err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		ext := filepath.Ext(entry.Name())
+		if ext != ".yaml" && ext != ".yml" {
+			continue
+		}
+
+		path := filepath.Join(dir, entry.Name())
+		if err := r.LoadFromFile(path); err != nil {
+			return fmt.Errorf("failed to load schema %s: %w", path, err)
+		}
+	}
+
+	return nil
+}
+
+// ValidateHandlerParams validates parameters for a named handler.
+// Returns ErrHandlerNotFound if the handler schema is not registered.
+func (r *Registry) ValidateHandlerParams(handlerName string, params map[string]any) error {
+	handler, err := r.GetHandler(handlerName)
+	if err != nil {
+		return err
+	}
+	return handler.ValidateParams(params)
 }

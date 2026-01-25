@@ -1,6 +1,8 @@
 package schema
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -303,4 +305,152 @@ handlers:
 			}
 		})
 	}
+}
+
+func TestLoadFromFile(t *testing.T) {
+	// Create a temporary YAML file
+	tmpDir := t.TempDir()
+	schemaPath := filepath.Join(tmpDir, "test_handlers.yaml")
+
+	yamlContent := `
+service: file_test
+version: "1.0"
+handlers:
+  file_test.handler:
+    description: "Handler loaded from file"
+    params:
+      id:
+        type: string
+        required: true
+    returns:
+      status:
+        type: string
+`
+	err := os.WriteFile(schemaPath, []byte(yamlContent), 0o644)
+	require.NoError(t, err)
+
+	registry := NewRegistry()
+	err = registry.LoadFromFile(schemaPath)
+	require.NoError(t, err)
+
+	handler, err := registry.GetHandler("file_test.handler")
+	require.NoError(t, err)
+	assert.Equal(t, "Handler loaded from file", handler.Description)
+}
+
+func TestLoadFromFile_NotFound(t *testing.T) {
+	registry := NewRegistry()
+	err := registry.LoadFromFile("/nonexistent/path/schema.yaml")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to read schema file")
+}
+
+func TestLoadFromDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create multiple YAML files
+	files := map[string]string{
+		"service_a.yaml": `
+service: service_a
+version: "1.0"
+handlers:
+  service_a.method1:
+    description: "Method 1 from service A"
+`,
+		"service_b.yml": `
+service: service_b
+version: "1.0"
+handlers:
+  service_b.method1:
+    description: "Method 1 from service B"
+`,
+		"not_a_schema.txt": `This should be ignored`,
+	}
+
+	for name, content := range files {
+		path := filepath.Join(tmpDir, name)
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+	}
+
+	// Create a subdirectory (should be skipped)
+	subDir := filepath.Join(tmpDir, "subdir")
+	require.NoError(t, os.MkdirAll(subDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(subDir, "ignored.yaml"),
+		[]byte(`service: ignored`),
+		0o644,
+	))
+
+	registry := NewRegistry()
+	err := registry.LoadFromDirectory(tmpDir)
+	require.NoError(t, err)
+
+	handlers := registry.ListHandlers()
+	assert.Len(t, handlers, 2)
+	assert.Contains(t, handlers, "service_a.method1")
+	assert.Contains(t, handlers, "service_b.method1")
+}
+
+func TestLoadFromDirectory_InvalidSchema(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create an invalid YAML file
+	invalidPath := filepath.Join(tmpDir, "invalid.yaml")
+	err := os.WriteFile(invalidPath, []byte(`
+service: ""
+handlers: {}
+`), 0o644)
+	require.NoError(t, err)
+
+	registry := NewRegistry()
+	err = registry.LoadFromDirectory(tmpDir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "service is required")
+}
+
+func TestLoadFromDirectory_NotFound(t *testing.T) {
+	registry := NewRegistry()
+	err := registry.LoadFromDirectory("/nonexistent/directory")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to read schema directory")
+}
+
+func TestRegistryValidateHandlerParams(t *testing.T) {
+	registry := NewRegistry()
+
+	yamlContent := `
+service: test
+version: "1.0"
+handlers:
+  test.handler:
+    description: "Test handler"
+    params:
+      required_field:
+        type: string
+        required: true
+      direction:
+        type: enum
+        values: [DEBIT, CREDIT]
+        required: true
+`
+	require.NoError(t, registry.LoadFromYAML([]byte(yamlContent)))
+
+	// Valid params
+	err := registry.ValidateHandlerParams("test.handler", map[string]any{
+		"required_field": "value",
+		"direction":      "DEBIT",
+	})
+	require.NoError(t, err)
+
+	// Missing required field
+	err = registry.ValidateHandlerParams("test.handler", map[string]any{
+		"direction": "DEBIT",
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrMissingRequiredParam)
+
+	// Handler not found
+	err = registry.ValidateHandlerParams("nonexistent.handler", map[string]any{})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrHandlerNotFound)
 }
