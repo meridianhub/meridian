@@ -440,6 +440,67 @@ result = current_account.position_keeping.initiate_log(
 # load("@meridian//services:current_account.star", "current_account")
 ```
 
+### Implementation Constraints (Task 2)
+
+These constraints ensure "Train Track Precision" in the generated runtime:
+
+#### Return Provider Pattern
+
+Every handler MUST return a branded struct. The Go generator (Task 2.2) creates these
+automatically from the YAML `returns:` block:
+
+```yaml
+# handlers.yaml
+returns:
+  log_id: {type: string}
+  version: {type: int64}
+```
+
+Generates:
+
+```go
+// Auto-generated return provider
+type PositionLogResult struct { ... }
+func (r *PositionLogResult) ToStarlark() *starlarkstruct.Struct { ... }
+```
+
+Scripts use `result.log_id` (not `result["log_id"]`), enabling load-time field validation.
+
+#### Proto-YAML Build Guard
+
+CI MUST fail if gRPC field names change in `.proto` but not in `handlers.yaml`:
+
+```yaml
+# .github/workflows/ci.yaml
+- name: Validate Saga Schemas
+  run: |
+    go run ./tools/validate-saga-schemas \
+      --yaml=services/*/saga/handlers.yaml \
+      --proto=api/proto/
+```
+
+This eliminates the "Triple Entry" liability (Proto + Go + YAML divergence).
+
+#### Strict Determinism Guard
+
+When binding Go functions as `starlark.Builtin`, the runtime MUST verify no hidden
+non-deterministic dependencies:
+
+```go
+// ❌ FORBIDDEN inside handler
+time.Now()           // Use ctx.KnowledgeAt instead
+rand.Int()           // Use ctx.DeterministicRandom(seed)
+uuid.New()           // Use ctx.GenerateUUID()
+
+// ✅ REQUIRED: All context from SagaContext
+func handler(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
+    timestamp := ctx.KnowledgeAt  // Deterministic bi-temporal timestamp
+    // ...
+}
+```
+
+The semantic linter should flag any handler using `time.Now()` or similar.
+
 ## Recommended Approach
 
 **Phase 1: Schema Registry + Enhanced Validation** (Low effort, high value)
