@@ -1,4 +1,5 @@
 # payment_execution.star
+# Version: 1.0.0
 # Payment Order execution saga with bucket-aware lien, gateway submission, and ledger posting.
 #
 # This saga orchestrates the complete payment flow:

@@ -1,4 +1,5 @@
 # Deposit Saga Definition
+# Version: 1.0.0
 #
 # This Starlark script defines the deposit saga workflow for the Current Account service.
 # The saga executes a multi-step deposit operation with compensation on failure.
