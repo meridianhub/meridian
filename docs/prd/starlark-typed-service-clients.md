@@ -311,59 +311,134 @@ func (l *SemanticLinter) CheckHandlerParams(handlerName string, params map[strin
 - Still uses magic strings in scripts
 - Validation at lint time, not write time
 
-### Option C: Constants + Validation (Hybrid)
+### ~~Option C: Constants + Validation~~ (REJECTED)
 
-Generate Go constants and use them in both handler registration and Starlark validation.
+> **Not Bazel-Idiomatic.** In the Starlark/Bazel philosophy, if you have to use a constant to
+> look up a function, you've failed to build a proper API.
+>
+> ❌ `Handlers.CURRENT_ACCOUNT_POSITION_INITIATE_LOG`
+> ✅ `current_account.position_keeping.initiate_log()`
+>
+> Constants are useful internally in Go for type safety, but should never be exposed to
+> Starlark scripts. The service module pattern (Option A) provides the same benefits with
+> a proper API.
 
-**Generated Go:**
+## Bazel Idiomatic Alignment
+
+This PRD independently rediscovered the **Standard Distributed Logic Pattern** used by Bazel.
+The following table shows alignment:
+
+| PRD Feature | Bazel Equivalent | Alignment |
+|-------------|------------------|-----------|
+| Option A: Pre-declared Structs | `native.cc_binary` | ✅ Perfect |
+| Dot Notation | `proto.common_v1` | ✅ Perfect |
+| Reference-based Inheritance | Bazel "Toolchains" | ✅ Strong |
+| YAML Schema → Code Gen | Bazel internal rule definitions | ✅ Correct |
+
+### Implementation Directives (Bazel-Idiomatic)
+
+To ensure idiomatic alignment, implementers MUST follow these directives:
+
+#### 1. Native Builtins, Not Shims
+
+Don't build Starlark functions that call Go functions. Build Go functions and bind them
+directly to Starlark struct attributes:
 
 ```go
-// shared/pkg/saga/handlers_gen.go
-package saga
+// ✅ CORRECT: Go handler bound directly as Starlark builtin
+func buildPositionKeepingModule(registry *DomainHandlerRegistry) *starlarkstruct.Struct {
+    return starlarkstruct.FromStringDict(starlark.String("position_keeping"), starlark.StringDict{
+        "initiate_log": starlark.NewBuiltin("initiate_log", func(
+            thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple,
+        ) (starlark.Value, error) {
+            // Direct handler implementation - no shim layer
+            return registry.Call("current_account.position_keeping.initiate_log", args, kwargs)
+        }),
+    })
+}
 
-// Handler name constants (single source of truth)
-const (
-    HandlerCurrentAccountPositionInitLog = "current_account.position_keeping.initiate_log"
-    HandlerCurrentAccountPositionCancelLog = "current_account.position_keeping.cancel_log"
-    // ...
+// ❌ WRONG: Shim function that looks up handler by string
+// invoke_handler(handler="...", params={...})
+```
+
+#### 2. Branded Structs (Providers) for Returns
+
+Handler returns MUST be typed `starlarkstruct` instances, not `map[string]any`:
+
+```go
+// ✅ CORRECT: Return branded struct with named fields
+type PositionLogResult struct {
+    LogID   string
+    Version int64
+    Status  string
+}
+
+func (r *PositionLogResult) ToStarlark() *starlarkstruct.Struct {
+    return starlarkstruct.FromStringDict(starlark.String("PositionLogResult"), starlark.StringDict{
+        "log_id":  starlark.String(r.LogID),
+        "version": starlark.MakeInt64(r.Version),
+        "status":  starlark.String(r.Status),
+    })
+}
+
+// Script can now use: result.log_id (not result["log_id"])
+// And: type(result) == "PositionLogResult"
+```
+
+#### 3. Universe vs Predeclared Scope
+
+Platform defaults go in `starlark.Universe` (global). Tenant overrides go in `predeclared`:
+
+```go
+// Platform services available to ALL threads (Universe)
+func BuildPlatformUniverse() starlark.StringDict {
+    return starlark.StringDict{
+        "current_account": buildCurrentAccountModule(),
+        "payment_order":   buildPaymentOrderModule(),
+        "Decimal":         DecimalBuiltin(),
+        // ... platform-provided services
+    }
+}
+
+// Tenant-specific overrides (Predeclared, per-thread)
+func BuildTenantPredeclared(tenantID TenantID) starlark.StringDict {
+    predeclared := make(starlark.StringDict)
+    // Override platform services with tenant-specific implementations
+    if override := getTenantOverride(tenantID, "current_account"); override != nil {
+        predeclared["current_account"] = override
+    }
+    return predeclared
+}
+
+// Thread initialization
+thread := &starlark.Thread{Name: sagaName}
+globals, err := starlark.ExecFileOptions(
+    &syntax.FileOptions{},
+    thread,
+    "saga.star",
+    script,
+    BuildTenantPredeclared(tenantID),  // Tenant overrides shadow Universe
 )
-
-// Handler registry validation
-var AllHandlers = []string{
-    HandlerCurrentAccountPositionInitLog,
-    HandlerCurrentAccountPositionCancelLog,
-}
 ```
 
-**Starlark Validation (enhanced):**
+This makes the "Hierarchy of Truth" (Platform → Tenant) a feature of the **Environment
+Loader**, not script logic.
 
-```go
-func NewRestrictedBuiltins() starlark.StringDict {
-    builtins["Handlers"] = buildHandlersEnum()  // Exposes constants to Starlark
-    // ...
-}
-```
+#### 4. No load() Required for Core Services
 
-**Starlark Usage:**
+Service objects are injected into global scope during thread initialization. Scripts access
+them directly without imports:
 
 ```starlark
-# Constants exposed to scripts
-invoke_handler(
-    handler=Handlers.CURRENT_ACCOUNT_POSITION_INITIATE_LOG,
-    params={...}
+# ✅ CORRECT: Services available immediately
+result = current_account.position_keeping.initiate_log(
+    account_id=input_data["account_id"],
+    amount=input_data["amount"],
 )
+
+# ❌ WRONG: Requiring load() for core services
+# load("@meridian//services:current_account.star", "current_account")
 ```
-
-**Pros:**
-
-- Single source of truth in Go
-- IDE can autocomplete constant names
-- Easy to add parameter validation incrementally
-
-**Cons:**
-
-- Ugly constant names in Starlark
-- Doesn't provide parameter schema validation
 
 ## Recommended Approach
 
@@ -371,15 +446,15 @@ invoke_handler(
 
 1. Define handler schemas in YAML/JSON alongside handler registration
 2. Enhance `SemanticLinter` to validate parameters against schemas
-3. Generate Go constants from schemas for type safety
+3. Generate Go constants from schemas for internal type safety (not exposed to Starlark)
 4. Add validation at `ValidateDraft` and `ValidateActivation`
 
 **Phase 2: Starlark Service Modules** (Medium effort, high value)
 
-1. Generate Starlark module definitions from handler schemas
-2. Pre-declare service modules in `NewRestrictedBuiltins()`
-3. Handlers become callable methods on frozen structs
-4. Migrate existing scripts incrementally (support both syntaxes)
+1. Build service tree using `starlarkstruct.Make` per Bazel-idiomatic directives
+2. Bind Go handlers directly as `starlark.NewBuiltin` (no shim layer)
+3. Return `starlarkstruct` instances from all handlers (branded returns)
+4. Inject into Universe (platform) and Predeclared (tenant overrides)
 
 **Phase 3: IDE Integration** (Optional, high polish)
 
@@ -634,6 +709,7 @@ func (e *Engine) ReplaySaga(ctx context.Context, instance *SagaInstance) error {
 ```
 
 **Rationale:**
+
 - Prevents "hot-swap" of scripts mid-replay
 - Ensures deterministic replay after pod restarts
 - Platform updates only affect NEW saga instances, not in-flight ones
