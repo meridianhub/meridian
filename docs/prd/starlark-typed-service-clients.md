@@ -19,6 +19,60 @@ invoke_handler(
 3. **Brittle Refactoring**: Renaming a handler requires grep-and-replace across all `.star` files
 4. **Missing Schema Validation**: No way to validate parameters match handler expectations
 5. **Documentation Gap**: Handler contracts (inputs/outputs) aren't discoverable from Starlark
+6. **Platform Default Copy Semantics**: Platform sagas are copied to each tenant, preventing automatic propagation of updates
+
+## Problem: Platform Default Saga Inheritance
+
+The current `SagaSeeder` copies platform default `.star` files into each tenant's `saga_definition` table:
+
+```go
+// services/reference-data/saga/seeder.go - Current approach
+query := `
+    INSERT INTO saga_definition (id, name, version, script, status, is_system, ...)
+    VALUES ($1, $2, $3, $4, ...)
+    ON CONFLICT (name, version) DO NOTHING`
+```
+
+**Consequences:**
+
+| Issue | Impact |
+|-------|--------|
+| **No Update Propagation** | Bug fixes to `deposit.star` don't reach existing tenants |
+| **Storage Duplication** | Same script content stored N times (once per tenant) |
+| **Inconsistent Behavior** | Older tenants run different code than newer tenants |
+| **Manual Migration Required** | Platform updates require explicit migration across all tenants |
+
+**Desired Behavior:**
+
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│                    Platform Defaults (public schema)            │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │ platform_saga_definition                                  │  │
+│  │   - current_account_deposit (v1.2.0)                     │  │
+│  │   - current_account_withdrawal (v1.2.0)                  │  │
+│  │   - payment_execution (v1.1.0)                           │  │
+│  └──────────────────────────────────────────────────────────┘  │
+└────────────────────────────────┬────────────────────────────────┘
+                                 │ REFERENCE (not copy)
+        ┌────────────────────────┼────────────────────────┐
+        │                        │                        │
+        ▼                        ▼                        ▼
+┌───────────────┐      ┌───────────────┐      ┌───────────────┐
+│   Tenant A    │      │   Tenant B    │      │   Tenant C    │
+│ (uses default)│      │ (uses default)│      │ (custom)      │
+│               │      │               │      │               │
+│ saga_def:     │      │ saga_def:     │      │ saga_def:     │
+│ - (empty or   │      │ - (empty or   │      │ - deposit     │
+│    ref only)  │      │    ref only)  │      │   (override)  │
+└───────────────┘      └───────────────┘      └───────────────┘
+        │                        │                        │
+        └────────────────────────┼────────────────────────┘
+                                 ▼
+                    When platform updates deposit.star:
+                    - Tenant A & B: automatic update
+                    - Tenant C: keeps custom override
+```
 
 ## Current Architecture
 
@@ -370,6 +424,7 @@ handlers:
 ```
 
 ### Option 3: Proto Extensions
+
 Since Meridian uses protobuf, could extend service definitions:
 
 ```protobuf
@@ -412,6 +467,135 @@ The new syntax would internally call the same handler registry, just with compil
 3. **Self-documenting**: Handler parameters and return types visible in scripts
 4. **Refactoring-safe**: Renaming handlers updates all references (via constants)
 5. **Backward compatible**: Existing scripts continue to work during migration
+6. **Automatic platform updates**: Platform saga improvements propagate to all tenants using defaults
+7. **Override transparency**: Clear visibility into which tenants have custom overrides vs defaults
+
+## Platform Default Saga Inheritance
+
+To address the copy-vs-reference problem, we propose a **reference-based inheritance model** for platform default sagas.
+
+### Option A: Platform Schema with Fallback Resolution (Recommended)
+
+Store platform defaults in `public.platform_saga_definition`. Tenant saga resolution falls back to
+platform when no tenant override exists.
+
+**Schema Changes:**
+
+```sql
+-- public schema (shared across all tenants)
+CREATE TABLE public.platform_saga_definition (
+    id UUID PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    version SEMVER NOT NULL,  -- e.g., '1.2.0'
+    script TEXT NOT NULL,
+    display_name TEXT,
+    description TEXT,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL
+);
+
+-- Tenant schema saga_definition gains optional reference
+ALTER TABLE saga_definition ADD COLUMN platform_ref UUID REFERENCES public.platform_saga_definition(id);
+ALTER TABLE saga_definition ADD COLUMN override_reason TEXT;  -- Why tenant overrode default
+```
+
+**Resolution Logic:**
+
+```go
+func (r *Registry) GetSaga(ctx context.Context, name string) (*Definition, error) {
+    // 1. Check tenant-specific override first
+    def, err := r.getTenantSaga(ctx, name)
+    if err == nil && def != nil {
+        return def, nil
+    }
+
+    // 2. Fall back to platform default
+    return r.getPlatformDefault(ctx, name)
+}
+```
+
+**Pros:**
+
+- Clean separation between platform and tenant sagas
+- Automatic propagation of platform updates
+- Tenants can override when needed with audit trail
+- No migration of existing data required (existing copies become overrides)
+
+**Cons:**
+
+- Cross-schema queries (minor performance impact)
+- Need to handle platform version upgrades carefully
+
+### Option B: Symbolic Reference in Tenant Table
+
+Store only a reference marker in tenant `saga_definition`, not the script content.
+
+```sql
+-- Tenant saga_definition for platform defaults
+INSERT INTO saga_definition (name, is_platform_ref, platform_version)
+VALUES ('current_account_deposit', true, '1.2.0');
+
+-- Tenant saga_definition for overrides (existing behavior)
+INSERT INTO saga_definition (name, script, override_reason)
+VALUES ('current_account_deposit', '...custom script...', 'Custom settlement timing');
+```
+
+**Resolution:**
+
+```go
+if def.IsPlatformRef {
+    return r.loadPlatformSaga(ctx, def.Name, def.PlatformVersion)
+}
+return def
+```
+
+### Option C: View-Based Unification
+
+Create a view that unions platform and tenant sagas with tenant taking precedence.
+
+```sql
+CREATE VIEW effective_saga_definition AS
+SELECT
+    COALESCE(t.id, p.id) AS id,
+    COALESCE(t.name, p.name) AS name,
+    COALESCE(t.script, p.script) AS script,
+    t.id IS NOT NULL AS is_tenant_override,
+    p.version AS platform_version
+FROM public.platform_saga_definition p
+LEFT JOIN saga_definition t ON t.name = p.name AND t.is_system = false
+UNION ALL
+SELECT id, name, script, true, NULL
+FROM saga_definition
+WHERE name NOT IN (SELECT name FROM public.platform_saga_definition);
+```
+
+### Platform Version Management
+
+Platform sagas should be versioned independently of tenant overrides:
+
+```yaml
+# Platform saga manifest (deployed with application)
+platform_sagas:
+  current_account_deposit:
+    version: 1.2.0
+    changelog:
+      - "1.2.0: Added bucket-aware solvency validation"
+      - "1.1.0: Fixed compensation ordering"
+      - "1.0.0: Initial release"
+
+  payment_execution:
+    version: 1.1.0
+    breaking_changes:
+      - version: 2.0.0
+        migration: "Requires handler registry v3"
+```
+
+### Migration Strategy
+
+1. **Phase 1**: Create `public.platform_saga_definition` and populate from embedded files
+2. **Phase 2**: Add `platform_ref` column to tenant `saga_definition`
+3. **Phase 3**: Update seeder to create references instead of copies
+4. **Phase 4**: Existing tenant copies become "frozen overrides" (opt-in to platform updates)
 
 ## Implementation Effort Estimates
 
@@ -420,6 +604,7 @@ The new syntax would internally call the same handler registry, just with compil
 | Phase 1 | Schema YAML + Enhanced Linter | 2-3 days |
 | Phase 2 | Starlark Service Modules | 3-5 days |
 | Phase 3 | LSP/IDE Integration | 5-8 days |
+| Phase 4 | Platform Default Inheritance | 3-4 days |
 
 ## References
 
