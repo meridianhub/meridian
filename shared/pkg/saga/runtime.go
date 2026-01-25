@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/google/uuid"
 	"go.starlark.net/starlark"
 )
 
@@ -50,8 +51,9 @@ var (
 // Runtime provides a secure Starlark execution environment for saga scripts.
 // It enforces timeouts, restricts builtins, and logs print statements.
 type Runtime struct {
-	logger  *slog.Logger
-	timeout time.Duration
+	logger             *slog.Logger
+	timeout            time.Duration
+	partyScopeResolver PartyScopeResolver
 }
 
 // RuntimeOption configures a Runtime.
@@ -61,6 +63,14 @@ type RuntimeOption func(*Runtime)
 func WithTimeout(timeout time.Duration) RuntimeOption {
 	return func(r *Runtime) {
 		r.timeout = timeout
+	}
+}
+
+// WithPartyScopeResolver sets the party scope resolver for the runtime.
+// When set, the runtime will resolve party scope before executing saga scripts.
+func WithPartyScopeResolver(resolver PartyScopeResolver) RuntimeOption {
+	return func(r *Runtime) {
+		r.partyScopeResolver = resolver
 	}
 }
 
@@ -86,17 +96,81 @@ func NewRuntime(logger *slog.Logger, opts ...RuntimeOption) (*Runtime, error) {
 type ExecutionResult struct {
 	// Globals contains the final global variables after execution.
 	Globals map[string]interface{}
+
+	// PartyScope is the resolved party scope for this execution (if party isolation is enabled).
+	// This is set when a PartyScopeResolver is configured and executing_party_id is provided.
+	PartyScope *PartyScope
+}
+
+// ExecutionInput holds the input parameters for saga execution.
+type ExecutionInput struct {
+	// Data is the input data passed to the Starlark script as input_data.
+	Data map[string]interface{}
+
+	// ExecutingPartyID is the ID of the party executing the saga (for party isolation).
+	// If set and a PartyScopeResolver is configured, party scope will be resolved.
+	ExecutingPartyID *uuid.UUID
 }
 
 // ExecuteSaga executes a Starlark script with the given input.
 // It enforces timeout constraints and restricts dangerous operations.
+// For party isolation support, use ExecuteSagaWithPartyScope instead.
 func (r *Runtime) ExecuteSaga(ctx context.Context, name string, script string, input map[string]interface{}) (*ExecutionResult, error) {
+	return r.ExecuteSagaWithInput(ctx, name, script, ExecutionInput{Data: input})
+}
+
+// ExecuteSagaWithInput executes a Starlark script with the given execution input.
+// This variant supports party scope resolution when ExecutingPartyID is provided.
+//
+// Party Scope Resolution (FR-35):
+//   - If ExecutingPartyID is set and PartyScopeResolver is configured, party scope is resolved
+//   - The resolved scope is made available as ctx.party_scope in Starlark
+//   - Party scope resolution happens BEFORE the first user step (synthetic step -1)
+//   - Resolution failures cause the saga to fail before any user steps execute
+func (r *Runtime) ExecuteSagaWithInput(ctx context.Context, name string, script string, execInput ExecutionInput) (*ExecutionResult, error) {
 	// Apply timeout to context
 	ctx, cancel := context.WithTimeout(ctx, r.timeout)
 	defer cancel()
 
-	// Build predeclared variables including input
-	predeclared := r.buildPredeclared(input)
+	// Resolve party scope BEFORE executing user script (synthetic step -1)
+	var partyScope *PartyScope
+	if execInput.ExecutingPartyID != nil && r.partyScopeResolver != nil {
+		r.logger.Debug("resolving party scope",
+			"saga", name,
+			"executing_party_id", execInput.ExecutingPartyID,
+		)
+
+		var err error
+		partyScope, err = r.partyScopeResolver.Resolve(ctx, *execInput.ExecutingPartyID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve party scope (step -1): %w", err)
+		}
+
+		r.logger.Info("party scope resolved",
+			"saga", name,
+			"party_id", partyScope.PartyID,
+			"party_type", partyScope.PartyType,
+			"visible_parties_count", len(partyScope.VisibleParties),
+			"tenant_id", partyScope.TenantID,
+		)
+
+		// Perform visibility pre-flight validation (step -0.5)
+		// Extract party references from input and validate against scope
+		manifest := NewVisibilityManifestFromInput(execInput.Data)
+		if len(manifest.ReferencedParties) > 0 {
+			validator := NewVisibilityValidator()
+			if err := validator.ValidateOrError(partyScope, manifest); err != nil {
+				return nil, fmt.Errorf("visibility pre-flight check failed (step -0.5): %w", err)
+			}
+			r.logger.Debug("visibility pre-flight check passed",
+				"saga", name,
+				"referenced_parties_count", len(manifest.ReferencedParties),
+			)
+		}
+	}
+
+	// Build predeclared variables including input and party scope
+	predeclared := r.buildPredeclaredWithScope(execInput.Data, partyScope)
 
 	// Create thread with context-based cancellation
 	thread := &starlark.Thread{
@@ -144,19 +218,20 @@ func (r *Runtime) ExecuteSaga(ctx context.Context, name string, script string, i
 
 	// Convert globals to result
 	result := &ExecutionResult{
-		Globals: make(map[string]interface{}),
+		Globals:    make(map[string]interface{}),
+		PartyScope: partyScope,
 	}
 
-	for name, val := range globals {
-		result.Globals[name] = starlarkToGo(val)
+	for n, val := range globals {
+		result.Globals[n] = starlarkToGo(val)
 	}
 
 	return result, nil
 }
 
-// buildPredeclared creates the predeclared environment for script execution.
-// It includes restricted builtins and the input data.
-func (r *Runtime) buildPredeclared(input map[string]interface{}) starlark.StringDict {
+// buildPredeclaredWithScope creates the predeclared environment with party scope support.
+// It includes restricted builtins, input data, and optionally party scope.
+func (r *Runtime) buildPredeclaredWithScope(input map[string]interface{}, partyScope *PartyScope) starlark.StringDict {
 	// Start with restricted builtins
 	predeclared := NewRestrictedBuiltins(r.logger)
 
@@ -171,7 +246,39 @@ func (r *Runtime) buildPredeclared(input map[string]interface{}) starlark.String
 		predeclared["input_data"] = starlark.NewDict(0)
 	}
 
+	// Add party_scope if provided (will be added as immutable in Task 6.3)
+	// For now, we make it available as a frozen dict
+	if partyScope != nil {
+		predeclared["party_scope"] = partyScopeToStarlark(partyScope)
+	}
+
 	return predeclared
+}
+
+// partyScopeToStarlark converts a PartyScope to a frozen Starlark value.
+// The returned value is immutable to prevent modification by scripts.
+func partyScopeToStarlark(ps *PartyScope) starlark.Value {
+	// Build visible_parties list
+	visiblePartiesList := make([]starlark.Value, len(ps.VisibleParties))
+	for i, partyID := range ps.VisibleParties {
+		visiblePartiesList[i] = starlark.String(partyID.String())
+	}
+
+	// Create and freeze the visible parties list
+	visiblePartiesValue := starlark.NewList(visiblePartiesList)
+	visiblePartiesValue.Freeze()
+
+	// Build the party_scope dict
+	scopeDict := starlark.NewDict(4)
+	_ = scopeDict.SetKey(starlark.String("party_id"), starlark.String(ps.PartyID.String()))
+	_ = scopeDict.SetKey(starlark.String("party_type"), starlark.String(ps.PartyType))
+	_ = scopeDict.SetKey(starlark.String("visible_parties"), visiblePartiesValue)
+	_ = scopeDict.SetKey(starlark.String("tenant_id"), starlark.String(ps.TenantID))
+
+	// Freeze the dict to make it immutable
+	scopeDict.Freeze()
+
+	return scopeDict
 }
 
 // wrapError wraps Starlark errors with appropriate package errors.
