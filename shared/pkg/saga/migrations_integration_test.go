@@ -2,19 +2,12 @@
 package saga
 
 import (
-	"context"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
-	"github.com/testcontainers/testcontainers-go/wait"
-	gormpg "gorm.io/driver/postgres"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 )
 
 // TestSagaMigrations_SchemaCreation verifies that RunSagaMigrations creates
@@ -314,60 +307,19 @@ func TestSagaMigrations_PartialIndex(t *testing.T) {
 		assert.Equal(t, orphanedSaga.ID, orphans[0].ID, "Orphaned saga should be the one with expired lease")
 	}
 
-	// Verify the partial index exists using pg_indexes catalog
-	// Note: EXPLAIN ANALYZE is unreliable on tiny test tables as Postgres
-	// will choose sequential scan for small datasets regardless of index presence
+	// Verify the partial index exists
+	// CockroachDB uses information_schema for index queries
 	t.Run("partial index exists for orphan query", func(t *testing.T) {
 		var idxCount int64
+		// CockroachDB stores indexes in crdb_internal.table_indexes
+		// Fall back to checking the index exists by name
 		err := db.Raw(`
 			SELECT COUNT(*)
-			FROM pg_indexes
-			WHERE schemaname = current_schema()
-			  AND tablename = 'saga_instances'
-			  AND indexname = 'idx_saga_instances_orphaned'
+			FROM information_schema.statistics
+			WHERE table_name = 'saga_instances'
+			  AND index_name = 'idx_saga_instances_orphaned'
 		`).Scan(&idxCount).Error
 		require.NoError(t, err)
 		assert.Equal(t, int64(1), idxCount, "partial index idx_saga_instances_orphaned should exist")
 	})
-}
-
-// setupTestPostgres creates a PostgreSQL testcontainer and returns a GORM DB connection.
-func setupTestPostgres(t *testing.T) (*gorm.DB, func()) {
-	t.Helper()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-	defer cancel()
-
-	pgContainer, err := postgres.Run(ctx,
-		"postgres:15-alpine",
-		postgres.WithDatabase("saga_test"),
-		postgres.WithUsername("test_user"),
-		postgres.WithPassword("test_password"),
-		testcontainers.WithWaitStrategy(
-			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).
-				WithStartupTimeout(60*time.Second)),
-	)
-	require.NoError(t, err, "Failed to start PostgreSQL container")
-
-	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err, "Failed to get connection string")
-
-	db, err := gorm.Open(gormpg.Open(connStr), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Silent),
-	})
-	require.NoError(t, err, "Failed to connect to database")
-
-	cleanup := func() {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cleanupCancel()
-
-		sqlDB, _ := db.DB()
-		if sqlDB != nil {
-			_ = sqlDB.Close()
-		}
-		_ = pgContainer.Terminate(cleanupCtx)
-	}
-
-	return db, cleanup
 }

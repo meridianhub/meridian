@@ -3,7 +3,6 @@ package saga
 import (
 	"context"
 	"log/slog"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -14,105 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestOrphanNotifyTriggerCreated verifies the PostgreSQL trigger and function
-// are created by RunSagaMigrations.
-func TestOrphanNotifyTriggerCreated(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-
-	db, cleanup := setupTestPostgres(t)
-	defer cleanup()
-
-	err := RunSagaMigrations(db)
-	require.NoError(t, err, "RunSagaMigrations should succeed")
-
-	// Verify the trigger function exists
-	t.Run("notify_saga_orphaned function exists", func(t *testing.T) {
-		var count int64
-		err := db.Raw(`
-			SELECT COUNT(*)
-			FROM pg_proc p
-			JOIN pg_namespace n ON n.oid = p.pronamespace
-			WHERE p.proname = 'notify_saga_orphaned'
-			  AND n.nspname = current_schema()
-		`).Scan(&count).Error
-		require.NoError(t, err)
-		assert.Equal(t, int64(1), count, "notify_saga_orphaned function should exist")
-	})
-
-	// Verify the trigger exists
-	t.Run("saga_orphaned_trigger exists", func(t *testing.T) {
-		var count int64
-		err := db.Raw(`
-			SELECT COUNT(*)
-			FROM pg_trigger t
-			JOIN pg_class c ON c.oid = t.tgrelid
-			JOIN pg_namespace n ON n.oid = c.relnamespace
-			WHERE t.tgname = 'saga_orphaned_trigger'
-			  AND c.relname = 'saga_instances'
-			  AND n.nspname = current_schema()
-		`).Scan(&count).Error
-		require.NoError(t, err)
-		assert.Equal(t, int64(1), count, "saga_orphaned_trigger should exist")
-	})
-}
-
-// TestOrphanNotifyTriggerFires verifies the PostgreSQL trigger fires
-// NOTIFY when a saga's lease is released (claimed_by_pod becomes NULL).
-func TestOrphanNotifyTriggerFires(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-
-	db, cleanup := setupTestPostgres(t)
-	defer cleanup()
-
-	err := RunSagaMigrations(db)
-	require.NoError(t, err, "RunSagaMigrations should succeed")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	// Create a saga instance with a lease
-	sagaID := uuid.New()
-	now := time.Now()
-	pod := "test-pod-1"
-	saga := &SagaInstance{
-		ID:               sagaID,
-		SagaDefinitionID: uuid.New(),
-		PartyID:          uuid.New(),
-		CorrelationID:    uuid.New(),
-		Status:           SagaStatusRunning,
-		ClaimedByPod:     &pod,
-		ClaimedAt:        &now,
-		LeaseExpiresAt:   timePtr(now.Add(5 * time.Minute)),
-	}
-	require.NoError(t, db.Create(saga).Error)
-
-	// Release the lease (set claimed_by_pod to NULL)
-	// This should trigger the NOTIFY (we verify the trigger fired by checking the saga state)
-	err = db.Model(&SagaInstance{}).
-		Where("id = ?", sagaID).
-		Updates(map[string]interface{}{
-			"claimed_by_pod":   nil,
-			"claimed_at":       nil,
-			"lease_expires_at": nil,
-		}).Error
-	require.NoError(t, err)
-
-	// Verify the saga now has NULL claimed_by_pod
-	var updated SagaInstance
-	err = db.First(&updated, "id = ?", sagaID).Error
-	require.NoError(t, err)
-	assert.Nil(t, updated.ClaimedByPod, "claimed_by_pod should be NULL after release")
-
-	_ = ctx // Used for timeout context
-}
-
-// TestOrphanWatcherFallbackToPeriodicScan verifies that when LISTEN fails or
-// DATABASE_URL is not set, the watcher falls back to periodic scanning.
-func TestOrphanWatcherFallbackToPeriodicScan(t *testing.T) {
+// TestOrphanWatcherPeriodicScan verifies that the watcher performs periodic scans.
+func TestOrphanWatcherPeriodicScan(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
@@ -126,15 +28,14 @@ func TestOrphanWatcherFallbackToPeriodicScan(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	// Track claim scan invocations
+	// Track scan invocations
 	var scanCount atomic.Int32
 
 	config := NewClaimConfig()
 	config.MaxJitterMS = 0 // Disable jitter for deterministic tests
-	config.PodID = "test-fallback-pod"
+	config.PodID = "test-periodic-pod"
 
-	// Create watcher with short fallback interval
-	// Note: DATABASE_URL is not set, so LISTEN will fail and fallback kicks in
+	// Create watcher with short scan interval
 	watcher := NewOrphanWatcher(
 		db,
 		config,
@@ -142,7 +43,7 @@ func TestOrphanWatcherFallbackToPeriodicScan(t *testing.T) {
 		WithOrphanScanCallback(func() {
 			scanCount.Add(1)
 		}),
-		WithFallbackScanInterval(500*time.Millisecond), // Short interval for testing
+		WithScanInterval(200*time.Millisecond), // Short interval for testing
 	)
 
 	// Start the watcher
@@ -156,8 +57,8 @@ func TestOrphanWatcherFallbackToPeriodicScan(t *testing.T) {
 		Until(func() bool {
 			return scanCount.Load() >= 3 // Initial + at least 2 periodic scans
 		})
-	require.NoError(t, err, "expected periodic fallback scans to occur")
-	t.Logf("Fallback scan count: %d", scanCount.Load())
+	require.NoError(t, err, "expected periodic scans to occur")
+	t.Logf("Scan count: %d", scanCount.Load())
 }
 
 // TestOrphanWatcherClaimsOrphanedSagas verifies the watcher claims orphaned sagas.
@@ -188,7 +89,7 @@ func TestOrphanWatcherClaimsOrphanedSagas(t *testing.T) {
 		WithOrphanScanCallback(func() {
 			scanCompleted.Add(1)
 		}),
-		WithFallbackScanInterval(200*time.Millisecond),
+		WithScanInterval(200*time.Millisecond),
 	)
 
 	// Create orphaned sagas before starting watcher
@@ -219,9 +120,9 @@ func TestOrphanWatcherClaimsOrphanedSagas(t *testing.T) {
 	assert.Len(t, claimedSagas, 5, "all 5 sagas should be claimed")
 }
 
-// TestOrphanWatcherConcurrentNotifications verifies the watcher handles
-// multiple simultaneous orphan events correctly.
-func TestOrphanWatcherConcurrentNotifications(t *testing.T) {
+// TestOrphanWatcherClaimsConcurrentOrphans verifies the watcher handles
+// multiple orphaned sagas correctly.
+func TestOrphanWatcherClaimsConcurrentOrphans(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
@@ -236,8 +137,6 @@ func TestOrphanWatcherConcurrentNotifications(t *testing.T) {
 	defer cancel()
 
 	var scanCount atomic.Int32
-	var mu sync.Mutex
-	claimedSagas := make(map[uuid.UUID]bool)
 
 	config := NewClaimConfig()
 	config.PodID = "concurrent-test-pod"
@@ -251,59 +150,31 @@ func TestOrphanWatcherConcurrentNotifications(t *testing.T) {
 		WithOrphanScanCallback(func() {
 			scanCount.Add(1)
 		}),
-		WithFallbackScanInterval(100*time.Millisecond),
+		WithScanInterval(100*time.Millisecond),
 	)
 
-	// Create 100 sagas, all with a different "dying" pod
-	now := time.Now()
+	// Create 100 orphaned sagas (no claimed_by_pod)
 	for i := 0; i < 100; i++ {
-		dyingPod := "dying-pod"
-		saga := &SagaInstance{
-			ID:               uuid.New(),
-			SagaDefinitionID: uuid.New(),
-			PartyID:          uuid.New(),
-			CorrelationID:    uuid.New(),
-			Status:           SagaStatusRunning,
-			ClaimedByPod:     &dyingPod,
-			ClaimedAt:        &now,
-			LeaseExpiresAt:   timePtr(now.Add(5 * time.Minute)),
-		}
-		require.NoError(t, db.Create(saga).Error)
+		createTestSaga(t, db, SagaStatusRunning, nil, nil)
 	}
 
 	watcher.Start(ctx)
 	defer watcher.Stop()
-
-	// Simulate pod crash: release all leases at once using raw SQL
-	// This triggers multiple NOTIFY events
-	sqlDB, err := db.DB()
-	require.NoError(t, err)
-	_, err = sqlDB.ExecContext(ctx, `
-		UPDATE saga_instances
-		SET claimed_by_pod = NULL, claimed_at = NULL, lease_expires_at = NULL
-		WHERE claimed_by_pod = 'dying-pod'
-	`)
-	require.NoError(t, err)
 
 	// Wait for all sagas to be claimed
 	err = await.New().
 		AtMost(30 * time.Second).
 		PollInterval(200 * time.Millisecond).
 		Until(func() bool {
-			var claimed []SagaInstance
-			db.Where("claimed_by_pod = ?", config.PodID).Find(&claimed)
-			mu.Lock()
-			for _, s := range claimed {
-				claimedSagas[s.ID] = true
-			}
-			count := len(claimedSagas)
-			mu.Unlock()
-			return count == 100
+			var claimed int64
+			db.Model(&SagaInstance{}).
+				Where("claimed_by_pod = ?", config.PodID).
+				Count(&claimed)
+			return claimed == 100
 		})
 	require.NoError(t, err, "expected all 100 sagas to be claimed")
 
 	t.Logf("Total scans performed: %d", scanCount.Load())
-	t.Logf("Sagas claimed: %d", len(claimedSagas))
 }
 
 // TestOrphanWatcherGracefulShutdown verifies the watcher shuts down cleanly.
@@ -377,9 +248,9 @@ func TestOrphanWatcherIdempotentStartStop(t *testing.T) {
 	watcher.Stop() // Third stop should block briefly then return
 }
 
-// TestOrphanWatcherDebounce verifies the debounce mechanism prevents
-// excessive scans from rapid notifications.
-func TestOrphanWatcherDebounce(t *testing.T) {
+// TestOrphanWatcherClaimsExpiredLeases verifies the watcher claims sagas
+// with expired leases (simulating pod crash scenario).
+func TestOrphanWatcherClaimsExpiredLeases(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
@@ -393,95 +264,49 @@ func TestOrphanWatcherDebounce(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	var scanCount atomic.Int32
-
 	config := NewClaimConfig()
-	config.PodID = "debounce-test-pod"
 	config.MaxJitterMS = 0
+	config.PodID = "new-claimer-pod"
 
 	watcher := NewOrphanWatcher(
 		db,
 		config,
 		slog.Default(),
-		WithOrphanScanCallback(func() {
-			scanCount.Add(1)
-		}),
-		WithFallbackScanInterval(5*time.Second), // Long fallback to isolate debounce behavior
-		WithNotificationDebounce(500*time.Millisecond),
+		WithScanInterval(200*time.Millisecond),
 	)
 
-	watcher.Start(ctx)
-	defer watcher.Stop()
-
-	// Wait for initial scan
-	err = await.New().
-		AtMost(2 * time.Second).
-		PollInterval(50 * time.Millisecond).
-		Until(func() bool {
-			return scanCount.Load() >= 1
-		})
-	require.NoError(t, err)
-
-	initialScans := scanCount.Load()
-	t.Logf("Initial scans: %d", initialScans)
-
-	// Create multiple orphans in rapid succession to trigger debounce
-	sqlDB, err := db.DB()
-	require.NoError(t, err)
-
-	// Create 10 sagas with leases
+	// Create sagas with expired leases (simulating crashed pod)
 	now := time.Now()
-	for i := 0; i < 10; i++ {
-		dyingPod := "rapid-dying-pod"
+	expiredLease := now.Add(-10 * time.Minute)
+	deadPod := "dead-pod"
+
+	for i := 0; i < 5; i++ {
 		saga := &SagaInstance{
 			ID:               uuid.New(),
 			SagaDefinitionID: uuid.New(),
 			PartyID:          uuid.New(),
 			CorrelationID:    uuid.New(),
 			Status:           SagaStatusRunning,
-			ClaimedByPod:     &dyingPod,
+			ClaimedByPod:     &deadPod,
 			ClaimedAt:        &now,
-			LeaseExpiresAt:   timePtr(now.Add(5 * time.Minute)),
+			LeaseExpiresAt:   &expiredLease, // Lease already expired
 		}
 		require.NoError(t, db.Create(saga).Error)
 	}
 
-	// Release all leases in rapid succession (simulating rapid notifications)
-	// PostgreSQL doesn't support LIMIT in UPDATE, so use CTE with ctid
-	for i := 0; i < 10; i++ {
-		_, _ = sqlDB.ExecContext(ctx, `
-			WITH to_upd AS (
-				SELECT ctid
-				FROM saga_instances
-				WHERE claimed_by_pod = 'rapid-dying-pod'
-				LIMIT 1
-				FOR UPDATE SKIP LOCKED
-			)
-			UPDATE saga_instances
-			SET claimed_by_pod = NULL, claimed_at = NULL, lease_expires_at = NULL
-			FROM to_upd
-			WHERE saga_instances.ctid = to_upd.ctid
-		`)
-		// Ignore errors - some updates may not match any rows
-		time.Sleep(10 * time.Millisecond) // Small delay between updates
-	}
+	watcher.Start(ctx)
+	defer watcher.Stop()
 
-	// Wait a bit for any scans to complete
-	time.Sleep(1 * time.Second)
-
-	finalScans := scanCount.Load()
-	additionalScans := finalScans - initialScans
-
-	t.Logf("Final scans: %d, Additional scans: %d", finalScans, additionalScans)
-
-	// Due to debouncing, we should have far fewer scans than notifications
-	// (10 rapid notifications should not result in 10 scans)
-	// The fallback interval is 5s, so within 1s we should see debounced behavior
-	assert.Less(t, additionalScans, int32(10),
-		"debouncing should reduce number of scans from rapid notifications")
-}
-
-// Helper functions
-func timePtr(t time.Time) *time.Time {
-	return &t
+	// Wait for sagas to be claimed by the new pod
+	err = await.New().
+		AtMost(10 * time.Second).
+		PollInterval(100 * time.Millisecond).
+		Until(func() bool {
+			var claimed int64
+			db.Model(&SagaInstance{}).
+				Where("claimed_by_pod = ?", config.PodID).
+				Count(&claimed)
+			return claimed == 5
+		})
+	require.NoError(t, err, "expected all 5 sagas with expired leases to be claimed")
 }
