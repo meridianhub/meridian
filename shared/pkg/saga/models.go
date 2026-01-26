@@ -82,6 +82,15 @@ type SagaInstance struct {
 	SagaName         string    `gorm:"column:saga_name;type:varchar(64)"`
 	SagaVersion      int       `gorm:"column:saga_version"`
 
+	// Bi-temporal version pinning for platform fallback determinism.
+	// When a saga instance is started from a definition that uses platform_ref,
+	// the platform saga version is pinned so replay always uses the same script.
+	// PlatformSagaVersionID is the UUID of the platform_saga_definition row at start time.
+	PlatformSagaVersionID *uuid.UUID `gorm:"column:platform_saga_version_id;type:uuid"`
+	// ScriptHashAtStart is the SHA-256 hash of the resolved script at saga start time.
+	// Used during replay to detect script corruption or unexpected changes.
+	ScriptHashAtStart string `gorm:"column:script_hash_at_start;type:varchar(64)"`
+
 	// Input and context (for replay)
 	// InputSnapshot stores the original input parameters as JSONB for deterministic replay
 	InputSnapshot JSONB     `gorm:"column:input_snapshot;type:jsonb"`

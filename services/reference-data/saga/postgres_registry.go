@@ -3,9 +3,12 @@ package saga
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -21,6 +24,7 @@ import (
 type PostgresRegistry struct {
 	pool      *pgxpool.Pool
 	validator Validator
+	logger    *slog.Logger
 }
 
 // NewPostgresRegistry creates a new PostgreSQL-backed saga registry.
@@ -29,6 +33,7 @@ func NewPostgresRegistry(pool *pgxpool.Pool, validator Validator) *PostgresRegis
 	return &PostgresRegistry{
 		pool:      pool,
 		validator: validator,
+		logger:    slog.Default().With("component", "saga_registry"),
 	}
 }
 
@@ -103,20 +108,26 @@ func (r *PostgresRegistry) withWriteTransaction(ctx context.Context, fn func(tx 
 	return nil
 }
 
-// GetByID retrieves a specific saga by its UUID.
+// GetByID retrieves a specific saga by its UUID, resolving platform fallback if needed.
 func (r *PostgresRegistry) GetByID(ctx context.Context, id uuid.UUID) (*Definition, error) {
 	var result *Definition
 
 	err := r.withReadTransaction(ctx, func(tx pgx.Tx) error {
 		query := `
-			SELECT id, name, version, script, status, is_system,
-				preconditions_expression, display_name, description,
-				created_at, updated_at, activated_at, deprecated_at, successor_id
-			FROM saga_definition
-			WHERE id = $1`
+			SELECT sd.id, sd.name, sd.version,
+				COALESCE(sd.script, psd.script, '') AS resolved_script,
+				sd.script,
+				sd.status, sd.is_system,
+				sd.preconditions_expression, sd.display_name, sd.description,
+				sd.created_at, sd.updated_at, sd.activated_at, sd.deprecated_at, sd.successor_id,
+				sd.platform_ref, sd.override_reason, sd.platform_version_at_override,
+				psd.script IS NOT NULL AND (sd.script IS NULL OR sd.script = '') AS used_platform_fallback
+			FROM saga_definition sd
+			LEFT JOIN public.platform_saga_definition psd ON sd.platform_ref = psd.id
+			WHERE sd.id = $1`
 
 		row := tx.QueryRow(ctx, query, id)
-		def, err := r.scanDefinition(row)
+		def, err := r.scanDefinitionWithFallback(row)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrNotFound
@@ -134,20 +145,26 @@ func (r *PostgresRegistry) GetByID(ctx context.Context, id uuid.UUID) (*Definiti
 	return result, nil
 }
 
-// GetDefinition retrieves a specific saga by name and version.
+// GetDefinition retrieves a specific saga by name and version, resolving platform fallback if needed.
 func (r *PostgresRegistry) GetDefinition(ctx context.Context, name string, version int) (*Definition, error) {
 	var result *Definition
 
 	err := r.withReadTransaction(ctx, func(tx pgx.Tx) error {
 		query := `
-			SELECT id, name, version, script, status, is_system,
-				preconditions_expression, display_name, description,
-				created_at, updated_at, activated_at, deprecated_at, successor_id
-			FROM saga_definition
-			WHERE name = $1 AND version = $2`
+			SELECT sd.id, sd.name, sd.version,
+				COALESCE(sd.script, psd.script, '') AS resolved_script,
+				sd.script,
+				sd.status, sd.is_system,
+				sd.preconditions_expression, sd.display_name, sd.description,
+				sd.created_at, sd.updated_at, sd.activated_at, sd.deprecated_at, sd.successor_id,
+				sd.platform_ref, sd.override_reason, sd.platform_version_at_override,
+				psd.script IS NOT NULL AND (sd.script IS NULL OR sd.script = '') AS used_platform_fallback
+			FROM saga_definition sd
+			LEFT JOIN public.platform_saga_definition psd ON sd.platform_ref = psd.id
+			WHERE sd.name = $1 AND sd.version = $2`
 
 		row := tx.QueryRow(ctx, query, name, version)
-		def, err := r.scanDefinition(row)
+		def, err := r.scanDefinitionWithFallback(row)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrNotFound
@@ -165,27 +182,45 @@ func (r *PostgresRegistry) GetDefinition(ctx context.Context, name string, versi
 	return result, nil
 }
 
-// GetActive retrieves the active saga for a name using tenant resolution.
+// GetActive retrieves the active saga for a name using tenant resolution with platform fallback.
 // Resolution order:
 //  1. Tenant override (is_system=FALSE, status=ACTIVE, highest version)
+//     - If tenant saga has platform_ref, resolve script via COALESCE with platform
 //  2. Platform default (is_system=TRUE, status=ACTIVE, highest version)
+//     - System sagas may also have platform_ref for script inheritance
 func (r *PostgresRegistry) GetActive(ctx context.Context, name string) (*Definition, error) {
 	var result *Definition
 
 	err := r.withReadTransaction(ctx, func(tx pgx.Tx) error {
-		// Step 1: Try tenant override (is_system=FALSE)
+		// Step 1: Try tenant override (is_system=FALSE) with platform fallback via LEFT JOIN
 		tenantQuery := `
-			SELECT id, name, version, script, status, is_system,
-				preconditions_expression, display_name, description,
-				created_at, updated_at, activated_at, deprecated_at, successor_id
-			FROM saga_definition
-			WHERE name = $1 AND status = 'ACTIVE' AND is_system = FALSE
-			ORDER BY version DESC
+			SELECT sd.id, sd.name, sd.version,
+				COALESCE(sd.script, psd.script, '') AS resolved_script,
+				sd.script,
+				sd.status, sd.is_system,
+				sd.preconditions_expression, sd.display_name, sd.description,
+				sd.created_at, sd.updated_at, sd.activated_at, sd.deprecated_at, sd.successor_id,
+				sd.platform_ref, sd.override_reason, sd.platform_version_at_override,
+				psd.script IS NOT NULL AND (sd.script IS NULL OR sd.script = '') AS used_platform_fallback
+			FROM saga_definition sd
+			LEFT JOIN public.platform_saga_definition psd ON sd.platform_ref = psd.id
+			WHERE sd.name = $1 AND sd.status = 'ACTIVE' AND sd.is_system = FALSE
+			ORDER BY sd.version DESC
 			LIMIT 1`
 
 		row := tx.QueryRow(ctx, tenantQuery, name)
-		def, err := r.scanDefinition(row)
+		def, err := r.scanDefinitionWithFallback(row)
 		if err == nil {
+			if def.UsedPlatformFallback {
+				r.logger.Debug("resolved saga using platform fallback",
+					"name", name,
+					"saga_id", def.ID,
+					"platform_ref", def.PlatformRef)
+			} else {
+				r.logger.Debug("resolved saga using tenant override",
+					"name", name,
+					"saga_id", def.ID)
+			}
 			result = def
 			return nil
 		}
@@ -193,18 +228,24 @@ func (r *PostgresRegistry) GetActive(ctx context.Context, name string) (*Definit
 			return fmt.Errorf("failed to query tenant saga: %w", err)
 		}
 
-		// Step 2: Fall back to platform default (is_system=TRUE)
+		// Step 2: Fall back to platform default (is_system=TRUE) with platform reference support
 		platformQuery := `
-			SELECT id, name, version, script, status, is_system,
-				preconditions_expression, display_name, description,
-				created_at, updated_at, activated_at, deprecated_at, successor_id
-			FROM saga_definition
-			WHERE name = $1 AND status = 'ACTIVE' AND is_system = TRUE
-			ORDER BY version DESC
+			SELECT sd.id, sd.name, sd.version,
+				COALESCE(sd.script, psd.script, '') AS resolved_script,
+				sd.script,
+				sd.status, sd.is_system,
+				sd.preconditions_expression, sd.display_name, sd.description,
+				sd.created_at, sd.updated_at, sd.activated_at, sd.deprecated_at, sd.successor_id,
+				sd.platform_ref, sd.override_reason, sd.platform_version_at_override,
+				psd.script IS NOT NULL AND (sd.script IS NULL OR sd.script = '') AS used_platform_fallback
+			FROM saga_definition sd
+			LEFT JOIN public.platform_saga_definition psd ON sd.platform_ref = psd.id
+			WHERE sd.name = $1 AND sd.status = 'ACTIVE' AND sd.is_system = TRUE
+			ORDER BY sd.version DESC
 			LIMIT 1`
 
 		row = tx.QueryRow(ctx, platformQuery, name)
-		def, err = r.scanDefinition(row)
+		def, err = r.scanDefinitionWithFallback(row)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrNotFound
@@ -212,6 +253,10 @@ func (r *PostgresRegistry) GetActive(ctx context.Context, name string) (*Definit
 			return fmt.Errorf("failed to query platform saga: %w", err)
 		}
 
+		r.logger.Debug("resolved saga using platform default",
+			"name", name,
+			"saga_id", def.ID,
+			"is_system", true)
 		result = def
 		return nil
 	})
@@ -222,18 +267,24 @@ func (r *PostgresRegistry) GetActive(ctx context.Context, name string) (*Definit
 	return result, nil
 }
 
-// ListByStatus retrieves all sagas with the specified status.
+// ListByStatus retrieves all sagas with the specified status, resolving platform fallback.
 func (r *PostgresRegistry) ListByStatus(ctx context.Context, status Status) ([]*Definition, error) {
 	var result []*Definition
 
 	err := r.withReadTransaction(ctx, func(tx pgx.Tx) error {
 		query := `
-			SELECT id, name, version, script, status, is_system,
-				preconditions_expression, display_name, description,
-				created_at, updated_at, activated_at, deprecated_at, successor_id
-			FROM saga_definition
-			WHERE status = $1
-			ORDER BY name, version DESC`
+			SELECT sd.id, sd.name, sd.version,
+				COALESCE(sd.script, psd.script, '') AS resolved_script,
+				sd.script,
+				sd.status, sd.is_system,
+				sd.preconditions_expression, sd.display_name, sd.description,
+				sd.created_at, sd.updated_at, sd.activated_at, sd.deprecated_at, sd.successor_id,
+				sd.platform_ref, sd.override_reason, sd.platform_version_at_override,
+				psd.script IS NOT NULL AND (sd.script IS NULL OR sd.script = '') AS used_platform_fallback
+			FROM saga_definition sd
+			LEFT JOIN public.platform_saga_definition psd ON sd.platform_ref = psd.id
+			WHERE sd.status = $1
+			ORDER BY sd.name, sd.version DESC`
 
 		rows, err := tx.Query(ctx, query, string(status))
 		if err != nil {
@@ -242,7 +293,7 @@ func (r *PostgresRegistry) ListByStatus(ctx context.Context, status Status) ([]*
 		defer rows.Close()
 
 		for rows.Next() {
-			def, err := r.scanDefinitionFromRows(rows)
+			def, err := r.scanDefinitionWithFallbackFromRows(rows)
 			if err != nil {
 				return err
 			}
@@ -270,11 +321,13 @@ func (r *PostgresRegistry) CreateDraft(ctx context.Context, def *Definition) err
 			INSERT INTO saga_definition (
 				id, name, version, script, status, is_system,
 				preconditions_expression, display_name, description,
+				platform_ref, override_reason, platform_version_at_override,
 				created_at, updated_at
 			) VALUES (
 				$1, $2, $3, $4, $5, $6,
 				$7, $8, $9,
-				$10, $11
+				$10, $11, $12,
+				$13, $14
 			)`
 
 		// Generate ID if not set
@@ -287,9 +340,18 @@ func (r *PostgresRegistry) CreateDraft(ctx context.Context, def *Definition) err
 		def.UpdatedAt = now
 		def.Status = StatusDraft
 
+		// Handle script: if platform_ref is set and no script, pass NULL
+		var scriptValue interface{}
+		if def.Script == "" && def.PlatformRef != nil {
+			scriptValue = nil
+		} else {
+			scriptValue = def.Script
+		}
+
 		_, err := tx.Exec(ctx, query,
-			def.ID, def.Name, def.Version, def.Script, string(def.Status), def.IsSystem,
+			def.ID, def.Name, def.Version, scriptValue, string(def.Status), def.IsSystem,
 			nullString(def.PreconditionsExpression), nullString(def.DisplayName), nullString(def.Description),
+			def.PlatformRef, nullString(def.OverrideReason), nullString(def.PlatformVersionAtOverride),
 			def.CreatedAt, def.UpdatedAt,
 		)
 		if err != nil {
@@ -472,17 +534,29 @@ func (r *PostgresRegistry) DeprecateSaga(ctx context.Context, id uuid.UUID, succ
 	})
 }
 
-// scanDefinition scans a single row into a Definition.
-func (r *PostgresRegistry) scanDefinition(row pgx.Row) (*Definition, error) {
+// scanDefinitionWithFallback scans a single row from a query that includes platform fallback columns.
+// The query must select: resolved_script, sd.script, ...standard columns...,
+// platform_ref, override_reason, platform_version_at_override, used_platform_fallback
+func (r *PostgresRegistry) scanDefinitionWithFallback(row pgx.Row) (*Definition, error) {
 	var def Definition
 	var status string
+	var resolvedScript string
+	var rawScript sql.NullString
 	var preconditionsExpr, displayName, description sql.NullString
 	var successorID *uuid.UUID
+	var platformRef *uuid.UUID
+	var overrideReason, platformVersionAtOverride sql.NullString
+	var usedPlatformFallback sql.NullBool
 
 	err := row.Scan(
-		&def.ID, &def.Name, &def.Version, &def.Script, &status, &def.IsSystem,
+		&def.ID, &def.Name, &def.Version,
+		&resolvedScript,
+		&rawScript,
+		&status, &def.IsSystem,
 		&preconditionsExpr, &displayName, &description,
 		&def.CreatedAt, &def.UpdatedAt, &def.ActivatedAt, &def.DeprecatedAt, &successorID,
+		&platformRef, &overrideReason, &platformVersionAtOverride,
+		&usedPlatformFallback,
 	)
 	if err != nil {
 		return nil, err
@@ -490,6 +564,14 @@ func (r *PostgresRegistry) scanDefinition(row pgx.Row) (*Definition, error) {
 
 	def.Status = Status(status)
 	def.SuccessorID = successorID
+	def.PlatformRef = platformRef
+	def.ResolvedScript = resolvedScript
+	def.UsedPlatformFallback = usedPlatformFallback.Valid && usedPlatformFallback.Bool
+
+	// Script stores the tenant's own script (may be empty for platform-ref sagas)
+	if rawScript.Valid {
+		def.Script = rawScript.String
+	}
 
 	if preconditionsExpr.Valid {
 		def.PreconditionsExpression = preconditionsExpr.String
@@ -499,22 +581,38 @@ func (r *PostgresRegistry) scanDefinition(row pgx.Row) (*Definition, error) {
 	}
 	if description.Valid {
 		def.Description = description.String
+	}
+	if overrideReason.Valid {
+		def.OverrideReason = overrideReason.String
+	}
+	if platformVersionAtOverride.Valid {
+		def.PlatformVersionAtOverride = platformVersionAtOverride.String
 	}
 
 	return &def, nil
 }
 
-// scanDefinitionFromRows scans from pgx.Rows.
-func (r *PostgresRegistry) scanDefinitionFromRows(rows pgx.Rows) (*Definition, error) {
+// scanDefinitionWithFallbackFromRows scans from pgx.Rows with platform fallback columns.
+func (r *PostgresRegistry) scanDefinitionWithFallbackFromRows(rows pgx.Rows) (*Definition, error) {
 	var def Definition
 	var status string
+	var resolvedScript string
+	var rawScript sql.NullString
 	var preconditionsExpr, displayName, description sql.NullString
 	var successorID *uuid.UUID
+	var platformRef *uuid.UUID
+	var overrideReason, platformVersionAtOverride sql.NullString
+	var usedPlatformFallback sql.NullBool
 
 	err := rows.Scan(
-		&def.ID, &def.Name, &def.Version, &def.Script, &status, &def.IsSystem,
+		&def.ID, &def.Name, &def.Version,
+		&resolvedScript,
+		&rawScript,
+		&status, &def.IsSystem,
 		&preconditionsExpr, &displayName, &description,
 		&def.CreatedAt, &def.UpdatedAt, &def.ActivatedAt, &def.DeprecatedAt, &successorID,
+		&platformRef, &overrideReason, &platformVersionAtOverride,
+		&usedPlatformFallback,
 	)
 	if err != nil {
 		return nil, err
@@ -522,6 +620,13 @@ func (r *PostgresRegistry) scanDefinitionFromRows(rows pgx.Rows) (*Definition, e
 
 	def.Status = Status(status)
 	def.SuccessorID = successorID
+	def.PlatformRef = platformRef
+	def.ResolvedScript = resolvedScript
+	def.UsedPlatformFallback = usedPlatformFallback.Valid && usedPlatformFallback.Bool
+
+	if rawScript.Valid {
+		def.Script = rawScript.String
+	}
 
 	if preconditionsExpr.Valid {
 		def.PreconditionsExpression = preconditionsExpr.String
@@ -531,6 +636,12 @@ func (r *PostgresRegistry) scanDefinitionFromRows(rows pgx.Rows) (*Definition, e
 	}
 	if description.Valid {
 		def.Description = description.String
+	}
+	if overrideReason.Valid {
+		def.OverrideReason = overrideReason.String
+	}
+	if platformVersionAtOverride.Valid {
+		def.PlatformVersionAtOverride = platformVersionAtOverride.String
 	}
 
 	return &def, nil
@@ -542,4 +653,90 @@ func nullString(s string) sql.NullString {
 		return sql.NullString{Valid: false}
 	}
 	return sql.NullString{String: s, Valid: true}
+}
+
+// GetPlatformSagaByID retrieves a platform saga definition from the public schema.
+// This is used for version pinning: when a saga instance starts, the current platform
+// version ID is recorded so replay always uses the same script.
+func (r *PostgresRegistry) GetPlatformSagaByID(ctx context.Context, id uuid.UUID) (*PlatformSagaDefinition, error) {
+	query := `
+		SELECT id, name, version, script, display_name, description
+		FROM public.platform_saga_definition
+		WHERE id = $1`
+
+	row := r.pool.QueryRow(ctx, query, id)
+
+	var psd PlatformSagaDefinition
+	var displayName, description sql.NullString
+
+	err := row.Scan(
+		&psd.ID, &psd.Name, &psd.Version, &psd.Script,
+		&displayName, &description,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrPlatformDefinitionNotFound
+		}
+		return nil, fmt.Errorf("failed to query platform saga definition: %w", err)
+	}
+
+	if displayName.Valid {
+		psd.DisplayName = displayName.String
+	}
+	if description.Valid {
+		psd.Description = description.String
+	}
+
+	return &psd, nil
+}
+
+// GetPlatformSagaByName retrieves a platform saga definition by name from the public schema.
+func (r *PostgresRegistry) GetPlatformSagaByName(ctx context.Context, name string) (*PlatformSagaDefinition, error) {
+	query := `
+		SELECT id, name, version, script, display_name, description
+		FROM public.platform_saga_definition
+		WHERE name = $1`
+
+	row := r.pool.QueryRow(ctx, query, name)
+
+	var psd PlatformSagaDefinition
+	var displayName, description sql.NullString
+
+	err := row.Scan(
+		&psd.ID, &psd.Name, &psd.Version, &psd.Script,
+		&displayName, &description,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrPlatformDefinitionNotFound
+		}
+		return nil, fmt.Errorf("failed to query platform saga definition by name: %w", err)
+	}
+
+	if displayName.Valid {
+		psd.DisplayName = displayName.String
+	}
+	if description.Valid {
+		psd.Description = description.String
+	}
+
+	return &psd, nil
+}
+
+// ComputeScriptHash computes a SHA-256 hash of the given script content.
+// This is used for bi-temporal pinning: the hash is recorded when a saga instance
+// starts and verified during replay to detect script corruption or drift.
+func ComputeScriptHash(script string) string {
+	hash := sha256.Sum256([]byte(script))
+	return hex.EncodeToString(hash[:])
+}
+
+// VerifyScriptHash checks if the given script matches the expected hash.
+// Returns nil if the hash matches, ErrScriptHashMismatch otherwise.
+func VerifyScriptHash(script, expectedHash string) error {
+	actual := ComputeScriptHash(script)
+	if actual != expectedHash {
+		return fmt.Errorf("%w: expected %s, got %s", ErrScriptHashMismatch, expectedHash, actual)
+	}
+	return nil
 }
