@@ -267,7 +267,7 @@ jobs:
 
             ## Resolving Your Previous Comments
 
-            When you approve a PR (or when issues from your previous review have been addressed), **resolve your own review threads**:
+            Before submitting your review, check if YOU have unresolved threads from a previous review. Evaluate EACH thread individually.
 
             **Step 1: Find your unresolved review threads**
             ```bash
@@ -279,7 +279,9 @@ jobs:
                     nodes {
                       id
                       isResolved
-                      comments(first: 1) {
+                      path
+                      line
+                      comments(first: 5) {
                         nodes {
                           author { login }
                           body
@@ -289,10 +291,17 @@ jobs:
                   }
                 }
               }
-            }' --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false) | select(.comments.nodes[0].author.login == "claude") | {id, body: .comments.nodes[0].body[0:100]}'
+            }' --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false) | select(.comments.nodes[0].author.login == "claude") | {id, path, line, body: .comments.nodes[0].body[0:200]}'
             ```
 
-            **Step 2: Resolve each thread that has been addressed**
+            **Step 2: For each unresolved thread, evaluate whether the concern is addressed**
+
+            For each thread, check the current code at that file/line:
+            - Has the code changed to address the concern?
+            - Did the author reply explaining why they chose a different approach?
+            - Is the concern superseded by other changes?
+
+            **Step 3: Resolve threads that have been addressed**
             ```bash
             gh api graphql -f query='
             mutation {
@@ -302,10 +311,11 @@ jobs:
             }'
             ```
 
-            **When to resolve threads:**
-            - When approving: Resolve all your threads (issues addressed or superseded)
-            - When re-reviewing: Resolve threads where the author fixed the issue
-            - Do NOT resolve threads that are still valid concerns
+            **Resolution rules:**
+            - **Addressed**: Code changed to fix the concern → **resolve**
+            - **Explained**: Author replied with valid reasoning for a different approach → **resolve**
+            - **Superseded**: The code was refactored/removed, making the concern moot → **resolve**
+            - **Still valid**: The concern remains unaddressed in the current code → **do NOT resolve**
 
             ---
 
