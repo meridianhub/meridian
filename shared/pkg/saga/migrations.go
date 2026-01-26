@@ -23,10 +23,17 @@ import (
 //	    }
 //	}
 func RunSagaMigrations(db *gorm.DB) error {
-	// Run AutoMigrate for the saga models
-	// This creates the tables and standard indexes defined in struct tags
-	if err := db.AutoMigrate(&SagaInstance{}, &SagaStepResult{}); err != nil {
-		return fmt.Errorf("failed to auto-migrate saga models: %w", err)
+	// Only run AutoMigrate when tables don't yet exist.
+	// GORM's AutoMigrate is not idempotent on CockroachDB: re-running it
+	// fails with SQLSTATE 42704 because CockroachDB names unique constraints
+	// differently than what GORM expects when checking existing schema.
+	// The partial indexes and composite constraint below are already
+	// idempotent (IF NOT EXISTS / information_schema checks).
+	migrator := db.Migrator()
+	if !migrator.HasTable(&SagaInstance{}) || !migrator.HasTable(&SagaStepResult{}) {
+		if err := db.AutoMigrate(&SagaInstance{}, &SagaStepResult{}); err != nil {
+			return fmt.Errorf("failed to auto-migrate saga models: %w", err)
+		}
 	}
 
 	// Create the partial index for orphan detection
