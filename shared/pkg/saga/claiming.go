@@ -72,7 +72,7 @@ func GetPodID() string {
 	return uuid.New().String()
 }
 
-// ClaimService handles claiming orphaned sagas using FOR UPDATE SKIP LOCKED.
+// ClaimService handles claiming orphaned sagas using FOR UPDATE row locking.
 // This service enables safe concurrent recovery across multiple pods without
 // race conditions.
 type ClaimService struct {
