@@ -745,7 +745,10 @@ func (r *PostgresRegistry) GetPlatformSagaByName(ctx context.Context, name strin
 		SELECT id, name, version, script, display_name, description
 		FROM public.platform_saga_definition
 		WHERE name = $1
-		ORDER BY version DESC
+		ORDER BY
+			split_part(version, '.', 1)::int DESC,
+			split_part(version, '.', 2)::int DESC,
+			split_part(version, '.', 3)::int DESC
 		LIMIT 1`
 
 	row := r.pool.QueryRow(ctx, query, name)

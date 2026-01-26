@@ -95,14 +95,13 @@ func applySagaMigrations(t *testing.T, pool *pgxpool.Pool) {
 		migrationSQL, err := os.ReadFile(migrationPath)
 		require.NoError(t, err, "failed to read migration file: %s", migration)
 
-		// The unique constraint fix migration uses CockroachDB-specific DROP INDEX CASCADE.
-		// PostgreSQL requires ALTER TABLE DROP CONSTRAINT instead, so apply that first.
-		if migration == "20260127000001_fix_platform_saga_unique_constraint.sql" {
-			_, err = pool.Exec(ctx, `ALTER TABLE "public"."platform_saga_definition" DROP CONSTRAINT IF EXISTS "uq_platform_saga_definition_name"`)
-			require.NoError(t, err, "failed to drop constraint for PostgreSQL compatibility")
-		}
+		// CockroachDB-specific DDL needs adaptation for PostgreSQL test containers.
+		sql := strings.ReplaceAll(string(migrationSQL),
+			`DROP INDEX IF EXISTS "public"."uq_platform_saga_definition_name" CASCADE`,
+			`ALTER TABLE "public"."platform_saga_definition" DROP CONSTRAINT IF EXISTS "uq_platform_saga_definition_name"`,
+		)
 
-		_, err = pool.Exec(ctx, string(migrationSQL))
+		_, err = pool.Exec(ctx, sql)
 		require.NoError(t, err, "failed to apply migration: %s", migration)
 	}
 }

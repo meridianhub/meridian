@@ -160,7 +160,9 @@ func (s *Seeder) lookupPlatformRefs(ctx context.Context, defaults []Metadata) (m
 	for _, meta := range defaults {
 		var platformID uuid.UUID
 		err := s.pool.QueryRow(ctx,
-			`SELECT id FROM public.platform_saga_definition WHERE name = $1 ORDER BY version DESC LIMIT 1`,
+			`SELECT id FROM public.platform_saga_definition WHERE name = $1
+			ORDER BY split_part(version, '.', 1)::int DESC, split_part(version, '.', 2)::int DESC, split_part(version, '.', 3)::int DESC
+			LIMIT 1`,
 			meta.Name,
 		).Scan(&platformID)
 		if err != nil {

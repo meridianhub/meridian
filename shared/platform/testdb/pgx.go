@@ -156,7 +156,8 @@ func applyMigrationsWithPgx(t *testing.T, pool *pgxpool.Pool, service string) {
 			t.Fatalf("Failed to read migration %s: %v", entry.Name(), err)
 		}
 
-		_, err = pool.Exec(ctx, string(content))
+		sql := adaptCockroachDDLForPostgres(string(content))
+		_, err = pool.Exec(ctx, sql)
 		if err != nil {
 			t.Fatalf("Failed to apply migration %s: %v", entry.Name(), err)
 		}
@@ -261,16 +262,7 @@ func applyMigrationsToSchema(t *testing.T, pool *pgxpool.Pool, service string, s
 			t.Fatalf("Failed to read migration %s: %v", entry.Name(), err)
 		}
 
-		// CockroachDB-specific migrations may need PostgreSQL adaptation.
-		// DROP INDEX CASCADE for unique constraints must be converted to ALTER TABLE DROP CONSTRAINT.
-		sql := string(content)
-		if strings.Contains(sql, `DROP INDEX IF EXISTS "public"."uq_platform_saga_definition_name" CASCADE`) {
-			_, err = tx.Exec(ctx, `ALTER TABLE "public"."platform_saga_definition" DROP CONSTRAINT IF EXISTS "uq_platform_saga_definition_name"`)
-			if err != nil {
-				t.Fatalf("Failed to drop constraint (PostgreSQL compat) before migration %s: %v", entry.Name(), err)
-			}
-		}
-
+		sql := adaptCockroachDDLForPostgres(string(content))
 		_, err = tx.Exec(ctx, sql)
 		if err != nil {
 			t.Fatalf("Failed to apply migration %s to schema %s: %v", entry.Name(), schemaName, err)
@@ -281,4 +273,14 @@ func applyMigrationsToSchema(t *testing.T, pool *pgxpool.Pool, service string, s
 	if err != nil {
 		t.Fatalf("Failed to commit migrations: %v", err)
 	}
+}
+
+// adaptCockroachDDLForPostgres rewrites CockroachDB-specific DDL statements to work on PostgreSQL.
+// CockroachDB requires DROP INDEX CASCADE to drop unique constraints, while PostgreSQL requires
+// ALTER TABLE DROP CONSTRAINT. This function translates the CockroachDB form to PostgreSQL.
+func adaptCockroachDDLForPostgres(sql string) string {
+	return strings.ReplaceAll(sql,
+		`DROP INDEX IF EXISTS "public"."uq_platform_saga_definition_name" CASCADE`,
+		`ALTER TABLE "public"."platform_saga_definition" DROP CONSTRAINT IF EXISTS "uq_platform_saga_definition_name"`,
+	)
 }
