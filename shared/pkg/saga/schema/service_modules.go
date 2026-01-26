@@ -1,0 +1,556 @@
+// Package schema provides Starlark service module generation from handler schemas.
+// This implements typed service clients that replace magic string handler references
+// with direct method calls like `position_keeping.initiate_log(...)`.
+package schema
+
+import (
+	"errors"
+	"fmt"
+	"sort"
+	"strings"
+
+	"github.com/meridianhub/meridian/shared/pkg/saga"
+	"github.com/shopspring/decimal"
+	"go.starlark.net/starlark"
+	"go.starlark.net/starlarkstruct"
+)
+
+// Thread-local storage key for StarlarkContext.
+// This key is used to pass the StarlarkContext through the Starlark thread
+// so handlers can access it during execution.
+const starlarkContextKey = "saga.StarlarkContext"
+
+// Service module generation errors.
+var (
+	// ErrHandlerMissingFromRegistry is returned when a schema defines a handler
+	// that is not registered in the DomainHandlerRegistry.
+	ErrHandlerMissingFromRegistry = errors.New("handler defined in schema but not in registry")
+
+	// ErrHandlerMissingSchema is returned when a registered handler has no schema.
+	ErrHandlerMissingSchema = errors.New("handler registered but has no schema definition")
+
+	// ErrNamingConflict is returned when a handler name creates a conflict
+	// (e.g., "foo.bar" and "foo.bar.baz" where "bar" would be both a handler and namespace).
+	ErrNamingConflict = errors.New("handler naming conflict: name used as both handler and namespace")
+
+	// ErrMissingStarlarkContext is returned when the StarlarkContext is not set on the thread.
+	ErrMissingStarlarkContext = errors.New("StarlarkContext not set on thread")
+
+	// ErrPositionalArgsNotAllowed is returned when a handler is called with positional args.
+	ErrPositionalArgsNotAllowed = errors.New("positional arguments not allowed, use keyword arguments")
+
+	// ErrDictKeyNotString is returned when a Starlark dict has a non-string key.
+	ErrDictKeyNotString = errors.New("dict key must be string")
+
+	// ErrDecimalConversion is returned when a value cannot be converted to Decimal.
+	ErrDecimalConversion = errors.New("cannot convert to Decimal")
+)
+
+// handlerTree represents a hierarchical tree of handler names.
+// Handler names like "service.domain.action" are split into a tree structure:
+//
+//	service
+//	  └─ domain
+//	       └─ action (handler)
+type handlerTree struct {
+	children map[string]*handlerTree // Nested namespaces
+	handlers map[string]string       // Handler names at this level (name -> full qualified name)
+}
+
+// newHandlerTree creates a new empty handler tree.
+func newHandlerTree() *handlerTree {
+	return &handlerTree{
+		children: make(map[string]*handlerTree),
+		handlers: make(map[string]string),
+	}
+}
+
+// parseHandlerTree builds a handler tree from a list of handler names.
+// Handler names are expected in the format "service.action" or "service.domain.action".
+func parseHandlerTree(handlerNames []string) *handlerTree {
+	root := newHandlerTree()
+
+	for _, name := range handlerNames {
+		parts := strings.Split(name, ".")
+		if len(parts) < 2 {
+			// Invalid handler name, skip
+			continue
+		}
+
+		current := root
+
+		// Navigate/create the tree structure for all parts except the last
+		for i := 0; i < len(parts)-1; i++ {
+			part := parts[i]
+			if current.children[part] == nil {
+				current.children[part] = newHandlerTree()
+			}
+			current = current.children[part]
+		}
+
+		// The last part is the handler name
+		handlerName := parts[len(parts)-1]
+		current.handlers[handlerName] = name
+	}
+
+	return root
+}
+
+// findNode finds a node at the given dot-separated path.
+// Returns nil if the path does not exist.
+func (t *handlerTree) findNode(path string) *handlerTree {
+	parts := strings.Split(path, ".")
+	current := t
+
+	for _, part := range parts {
+		if current.children[part] == nil {
+			return nil
+		}
+		current = current.children[part]
+	}
+
+	return current
+}
+
+// validate checks the tree for naming conflicts.
+// A conflict occurs when a name is used as both a handler and a namespace.
+func (t *handlerTree) validate() error {
+	return t.validateNode("")
+}
+
+func (t *handlerTree) validateNode(path string) error {
+	// Check for conflicts at this level
+	for handlerName := range t.handlers {
+		if _, exists := t.children[handlerName]; exists {
+			fullPath := handlerName
+			if path != "" {
+				fullPath = path + "." + handlerName
+			}
+			return fmt.Errorf("%w: %q is used as both a handler and a namespace", ErrNamingConflict, fullPath)
+		}
+	}
+
+	// Recursively validate children
+	for name, child := range t.children {
+		childPath := name
+		if path != "" {
+			childPath = path + "." + name
+		}
+		if err := child.validateNode(childPath); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// BuildServiceModules creates Starlark service modules from the handler registry and schema.
+// It returns a StringDict containing all top-level service structs that can be injected
+// into the Starlark runtime.
+//
+// The resulting modules enable typed handler calls like:
+//
+//	position_keeping.initiate_log(position_id="123", amount="100.00", direction="DEBIT")
+//
+// Instead of:
+//
+//	invoke_handler(handler="position_keeping.initiate_log", params={...})
+func BuildServiceModules(registry *saga.DomainHandlerRegistry, schemaRegistry *Registry) (starlark.StringDict, error) {
+	// Get all handler names from the schema registry
+	schemaHandlers := schemaRegistry.ListHandlers()
+
+	// Get all handler names from the domain registry
+	registryHandlers := registry.List()
+
+	// Validate that all schema handlers exist in registry
+	registrySet := make(map[string]bool, len(registryHandlers))
+	for _, name := range registryHandlers {
+		registrySet[name] = true
+	}
+	for _, name := range schemaHandlers {
+		if !registrySet[name] {
+			return nil, fmt.Errorf("%w: %s", ErrHandlerMissingFromRegistry, name)
+		}
+	}
+
+	// Validate that all registry handlers have schemas
+	schemaSet := make(map[string]bool, len(schemaHandlers))
+	for _, name := range schemaHandlers {
+		schemaSet[name] = true
+	}
+	for _, name := range registryHandlers {
+		if !schemaSet[name] {
+			return nil, fmt.Errorf("%w: %s", ErrHandlerMissingSchema, name)
+		}
+	}
+
+	// Build handler tree
+	tree := parseHandlerTree(schemaHandlers)
+
+	// Validate tree structure
+	if err := tree.validate(); err != nil {
+		return nil, err
+	}
+
+	// Build Starlark structs from tree
+	modules := make(starlark.StringDict)
+	for name, child := range tree.children {
+		module, err := buildServiceStruct(name, child, registry, schemaRegistry)
+		if err != nil {
+			return nil, err
+		}
+		modules[name] = module
+	}
+
+	return modules, nil
+}
+
+// buildServiceStruct recursively builds a starlarkstruct from a handler tree node.
+func buildServiceStruct(name string, node *handlerTree, registry *saga.DomainHandlerRegistry, schemaRegistry *Registry) (*starlarkstruct.Struct, error) {
+	members := make(starlark.StringDict)
+
+	// Add child namespaces as nested structs
+	for childName, childNode := range node.children {
+		childStruct, err := buildServiceStruct(childName, childNode, registry, schemaRegistry)
+		if err != nil {
+			return nil, err
+		}
+		members[childName] = childStruct
+	}
+
+	// Add handlers as builtin functions
+	for handlerName, fullName := range node.handlers {
+		handler, err := registry.Get(fullName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get handler %s: %w", fullName, err)
+		}
+
+		handlerDef, err := schemaRegistry.GetHandler(fullName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get handler schema %s: %w", fullName, err)
+		}
+
+		members[handlerName] = wrapHandler(fullName, handler, handlerDef)
+	}
+
+	return starlarkstruct.FromStringDict(starlark.String(name), members), nil
+}
+
+// wrapHandler creates a Starlark builtin that wraps a Go DomainHandler.
+// It handles parameter validation against the schema and type conversion.
+//
+//nolint:gocognit // Handler wrapping inherently requires checking multiple conditions
+func wrapHandler(fullName string, handler saga.DomainHandler, handlerDef *HandlerDef) *starlark.Builtin {
+	return starlark.NewBuiltin(fullName, func(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+		// Handle positional args (should be empty for handlers) - check first for fast fail
+		if len(args) > 0 {
+			return nil, fmt.Errorf("%w: handler %s", ErrPositionalArgsNotAllowed, fullName)
+		}
+
+		// Get StarlarkContext from thread-local storage
+		ctx := getStarlarkContext(thread)
+		if ctx == nil {
+			return nil, ErrMissingStarlarkContext
+		}
+
+		// Convert kwargs to Go map
+		params, err := convertKwargsToParams(kwargs)
+		if err != nil {
+			return nil, err
+		}
+
+		// Convert Decimal parameters from string/int/float
+		if err := convertDecimalParams(params, handlerDef); err != nil {
+			return nil, err
+		}
+
+		// Validate parameters against schema
+		if err := handlerDef.ValidateParams(params); err != nil {
+			return nil, fmt.Errorf("handler %s: %w", fullName, err)
+		}
+
+		// Call the handler
+		result, err := handler(ctx, params)
+		if err != nil {
+			return nil, err
+		}
+
+		// Convert result to Starlark value
+		return goToStarlarkResult(fullName, result)
+	})
+}
+
+// convertKwargsToParams converts Starlark kwargs to a Go map.
+func convertKwargsToParams(kwargs []starlark.Tuple) (map[string]any, error) {
+	params := make(map[string]any, len(kwargs))
+	for _, kwarg := range kwargs {
+		keyVal, ok := kwarg[0].(starlark.String)
+		if !ok {
+			return nil, fmt.Errorf("%w: got %s", ErrDictKeyNotString, kwarg[0].Type())
+		}
+		key := string(keyVal)
+		value, err := starlarkToGoValue(kwarg[1])
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert parameter %s: %w", key, err)
+		}
+		params[key] = value
+	}
+	return params, nil
+}
+
+// convertDecimalParams converts Decimal-typed parameters from string/int/float to decimal.Decimal.
+func convertDecimalParams(params map[string]any, handlerDef *HandlerDef) error {
+	for paramName, fieldDef := range handlerDef.Params {
+		if fieldDef.Type == TypeDecimal {
+			if val, ok := params[paramName]; ok {
+				dec, err := toDecimal(val)
+				if err != nil {
+					return fmt.Errorf("parameter %s: %w", paramName, err)
+				}
+				params[paramName] = dec
+			}
+		}
+	}
+	return nil
+}
+
+// setStarlarkContext stores the StarlarkContext in thread-local storage.
+func setStarlarkContext(thread *starlark.Thread, ctx *saga.StarlarkContext) {
+	thread.SetLocal(starlarkContextKey, ctx)
+}
+
+// getStarlarkContext retrieves the StarlarkContext from thread-local storage.
+func getStarlarkContext(thread *starlark.Thread) *saga.StarlarkContext {
+	val := thread.Local(starlarkContextKey)
+	if val == nil {
+		return nil
+	}
+	ctx, ok := val.(*saga.StarlarkContext)
+	if !ok {
+		return nil
+	}
+	return ctx
+}
+
+// starlarkToGoValue converts a Starlark value to a Go value.
+//
+//nolint:gocognit // Type switch for Starlark values requires checking multiple types
+func starlarkToGoValue(v starlark.Value) (any, error) {
+	switch val := v.(type) {
+	case starlark.String:
+		return string(val), nil
+	case starlark.Int:
+		return starlarkIntToGo(val), nil
+	case starlark.Float:
+		return float64(val), nil
+	case starlark.Bool:
+		return bool(val), nil
+	case starlark.NoneType:
+		//nolint:nilnil // nil,nil is the correct representation of Starlark None
+		return nil, nil
+	case *starlark.List:
+		return starlarkListToGo(val)
+	case *starlark.Dict:
+		return starlarkDictToGo(val)
+	case *starlarkstruct.Struct:
+		return starlarkStructToGo(val)
+	default:
+		// For custom types, try to convert to string
+		return val.String(), nil
+	}
+}
+
+// starlarkIntToGo converts a Starlark Int to Go int64 or string (for very large ints).
+func starlarkIntToGo(val starlark.Int) any {
+	if i, ok := val.Int64(); ok {
+		return i
+	}
+	// Fall back to string for very large ints
+	return val.String()
+}
+
+// starlarkListToGo converts a Starlark List to Go []any.
+func starlarkListToGo(val *starlark.List) ([]any, error) {
+	result := make([]any, val.Len())
+	for i := 0; i < val.Len(); i++ {
+		elem, err := starlarkToGoValue(val.Index(i))
+		if err != nil {
+			return nil, err
+		}
+		result[i] = elem
+	}
+	return result, nil
+}
+
+// starlarkDictToGo converts a Starlark Dict to Go map[string]any.
+func starlarkDictToGo(val *starlark.Dict) (map[string]any, error) {
+	result := make(map[string]any)
+	for _, item := range val.Items() {
+		key, ok := item[0].(starlark.String)
+		if !ok {
+			return nil, fmt.Errorf("%w: got %s", ErrDictKeyNotString, item[0].Type())
+		}
+		value, err := starlarkToGoValue(item[1])
+		if err != nil {
+			return nil, err
+		}
+		result[string(key)] = value
+	}
+	return result, nil
+}
+
+// starlarkStructToGo converts a Starlark Struct to Go map[string]any.
+func starlarkStructToGo(val *starlarkstruct.Struct) (map[string]any, error) {
+	result := make(map[string]any)
+	for _, attrName := range val.AttrNames() {
+		attrVal, _ := val.Attr(attrName)
+		converted, err := starlarkToGoValue(attrVal)
+		if err != nil {
+			return nil, err
+		}
+		result[attrName] = converted
+	}
+	return result, nil
+}
+
+// toDecimal converts various Go types to decimal.Decimal.
+func toDecimal(v any) (decimal.Decimal, error) {
+	switch val := v.(type) {
+	case decimal.Decimal:
+		return val, nil
+	case string:
+		return decimal.NewFromString(val)
+	case int:
+		return decimal.NewFromInt(int64(val)), nil
+	case int64:
+		return decimal.NewFromInt(val), nil
+	case float64:
+		return decimal.NewFromFloat(val), nil
+	default:
+		return decimal.Zero, fmt.Errorf("%w: unsupported type %T", ErrDecimalConversion, v)
+	}
+}
+
+// goToStarlarkResult converts a Go handler result to a Starlark struct.
+// Handler results are expected to be map[string]any which gets converted
+// to a branded starlarkstruct.Struct for type-safe field access.
+func goToStarlarkResult(handlerName string, result any) (starlark.Value, error) {
+	if result == nil {
+		return starlark.None, nil
+	}
+
+	resultMap, ok := result.(map[string]any)
+	if !ok {
+		// If not a map, convert directly to Starlark value
+		return goToStarlarkValue(result)
+	}
+
+	// Build struct from map
+	members := make(starlark.StringDict, len(resultMap))
+
+	// Sort keys for deterministic output
+	keys := make([]string, 0, len(resultMap))
+	for k := range resultMap {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		val, err := goToStarlarkValue(resultMap[key])
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert result field %s: %w", key, err)
+		}
+		members[key] = val
+	}
+
+	// Create a branded struct with handler name as the type
+	// This allows scripts to check type(result) == "position_keeping.initiate_log.Result"
+	typeName := handlerName + ".Result"
+	return starlarkstruct.FromStringDict(starlark.String(typeName), members), nil
+}
+
+// goToStarlarkValue converts a Go value to a Starlark value.
+//
+//nolint:gocyclo // Type switch for Go values requires checking multiple types
+func goToStarlarkValue(v any) (starlark.Value, error) {
+	if v == nil {
+		return starlark.None, nil
+	}
+
+	switch val := v.(type) {
+	case string:
+		return starlark.String(val), nil
+	case int:
+		return starlark.MakeInt(val), nil
+	case int64:
+		return starlark.MakeInt64(val), nil
+	case int32:
+		return starlark.MakeInt(int(val)), nil
+	case uint32:
+		return starlark.MakeUint(uint(val)), nil
+	case float64:
+		return starlark.Float(val), nil
+	case bool:
+		return starlark.Bool(val), nil
+	case decimal.Decimal:
+		// Convert Decimal to string for lossless representation in Starlark
+		// Starlark scripts should use Decimal() builtin to work with these values
+		return starlark.String(val.String()), nil
+	case []any:
+		return goSliceToStarlark(val)
+	case []string:
+		return goStringSliceToStarlark(val), nil
+	case map[string]any:
+		return goMapToStarlark(val)
+	default:
+		// Try to convert to string as fallback
+		return starlark.String(fmt.Sprintf("%v", v)), nil
+	}
+}
+
+// goSliceToStarlark converts a Go []any to a Starlark List.
+func goSliceToStarlark(val []any) (*starlark.List, error) {
+	list := make([]starlark.Value, len(val))
+	for i, elem := range val {
+		converted, err := goToStarlarkValue(elem)
+		if err != nil {
+			return nil, err
+		}
+		list[i] = converted
+	}
+	return starlark.NewList(list), nil
+}
+
+// goStringSliceToStarlark converts a Go []string to a Starlark List.
+func goStringSliceToStarlark(val []string) *starlark.List {
+	list := make([]starlark.Value, len(val))
+	for i, elem := range val {
+		list[i] = starlark.String(elem)
+	}
+	return starlark.NewList(list)
+}
+
+// goMapToStarlark converts a Go map[string]any to a Starlark Dict.
+func goMapToStarlark(val map[string]any) (*starlark.Dict, error) {
+	dict := starlark.NewDict(len(val))
+	for k, v := range val {
+		converted, err := goToStarlarkValue(v)
+		if err != nil {
+			return nil, err
+		}
+		if err := dict.SetKey(starlark.String(k), converted); err != nil {
+			return nil, err
+		}
+	}
+	return dict, nil
+}
+
+// SetStarlarkContext is the exported version for external packages to set context.
+func SetStarlarkContext(thread *starlark.Thread, ctx *saga.StarlarkContext) {
+	setStarlarkContext(thread, ctx)
+}
+
+// GetStarlarkContext is the exported version for external packages to get context.
+func GetStarlarkContext(thread *starlark.Thread) *saga.StarlarkContext {
+	return getStarlarkContext(thread)
+}
