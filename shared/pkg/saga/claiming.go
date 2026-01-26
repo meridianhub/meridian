@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // DefaultMaxReplays is the default maximum number of replay attempts before a saga
@@ -104,10 +105,9 @@ func (s *ClaimService) WithLogger(logger *slog.Logger) *ClaimService {
 // A zombie saga is one that has exceeded MaxReplays attempts (FR-19).
 // Zombie sagas are transitioned to FAILED_MANUAL_INTERVENTION and not claimed.
 //
-// Uses PostgreSQL FOR UPDATE SKIP LOCKED to prevent race conditions when
-// multiple pods attempt to claim simultaneously. The SKIP LOCKED clause
-// ensures that rows being claimed by another transaction are skipped,
-// rather than waiting for the lock.
+// Uses FOR UPDATE row locking to prevent race conditions when multiple pods
+// attempt to claim simultaneously. CockroachDB's serializable isolation
+// ensures transaction-level safety without requiring SKIP LOCKED.
 //
 // Random jitter (0-MaxJitterMS) is applied before claiming to prevent
 // thundering herd when multiple pods start recovery simultaneously.
@@ -131,56 +131,55 @@ func (s *ClaimService) ClaimOrphanedSagas(ctx context.Context) ([]uuid.UUID, err
 	now := time.Now()
 	leaseExpiry := now.Add(s.config.LeaseDuration)
 
-	// The claiming query uses a subquery with FOR UPDATE SKIP LOCKED
-	// to atomically select and update orphaned sagas.
-	//
-	// Query explanation:
-	// 1. Inner SELECT finds orphaned sagas (expired lease or no owner)
-	// 2. Filter out zombies (replay_count >= MaxReplays)
-	// 3. FOR UPDATE SKIP LOCKED acquires row locks, skipping locked rows
-	// 4. LIMIT controls batch size
-	// 5. Outer UPDATE claims the selected rows and increments replay_count
-	// 6. RETURNING gives us the claimed saga IDs
-	//
-	// Note: PostgreSQL requires the subquery to be a CTE for UPDATE...FROM syntax
-	// when using FOR UPDATE SKIP LOCKED in the subquery.
+	// The claiming operation uses FOR UPDATE to atomically select and update
+	// orphaned sagas. Split into two steps (SELECT then UPDATE) because
+	// CockroachDB requires FOR UPDATE at the top level of a SELECT.
 
 	var claimedIDs []uuid.UUID
 
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Execute the claim query with replay_count filter and increment
-		result := tx.Raw(`
-			UPDATE saga_instances
-			SET
-				claimed_by_pod = ?,
-				claimed_at = ?,
-				lease_expires_at = ?,
-				replay_count = replay_count + 1
-			WHERE id IN (
-				SELECT id FROM saga_instances
-				WHERE status IN (?, ?, ?)
-				  AND (lease_expires_at < ? OR claimed_by_pod IS NULL)
-				  AND replay_count < ?
-				FOR UPDATE SKIP LOCKED
-				LIMIT ?
-			)
-			RETURNING id
-		`,
-			s.config.PodID,
-			now,
-			leaseExpiry,
-			SagaStatusPending,
-			SagaStatusRunning,
-			SagaStatusCompensating,
-			now,
-			s.config.MaxReplays,
-			s.config.BatchSize,
-		).Scan(&claimedIDs)
+		// Step 1: SELECT orphaned saga IDs with FOR UPDATE.
+		// CockroachDB's serializable isolation prevents concurrent claiming
+		// races at the transaction level, making SKIP LOCKED unnecessary.
+		// (CockroachDB does not support SKIP LOCKED under serializable isolation.)
+		var candidates []SagaInstance
+		result := tx.Model(&SagaInstance{}).
+			Where("status IN ?", []SagaStatus{SagaStatusPending, SagaStatusRunning, SagaStatusCompensating}).
+			Where("(lease_expires_at < ? OR claimed_by_pod IS NULL)", now).
+			Where("replay_count < ?", s.config.MaxReplays).
+			Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id").
+			Limit(s.config.BatchSize).
+			Find(&candidates)
+
+		if result.Error != nil {
+			return result.Error
+		}
+		if len(candidates) == 0 {
+			return nil
+		}
+
+		// Extract IDs for the UPDATE
+		ids := make([]uuid.UUID, len(candidates))
+		for i, c := range candidates {
+			ids[i] = c.ID
+		}
+
+		// Step 2: UPDATE the locked rows.
+		result = tx.Model(&SagaInstance{}).
+			Where("id IN ?", ids).
+			Updates(map[string]interface{}{
+				"claimed_by_pod":   s.config.PodID,
+				"claimed_at":       now,
+				"lease_expires_at": leaseExpiry,
+				"replay_count":     gorm.Expr("replay_count + 1"),
+			})
 
 		if result.Error != nil {
 			return result.Error
 		}
 
+		claimedIDs = ids
 		return nil
 	})
 	if err != nil {
@@ -201,48 +200,58 @@ func (s *ClaimService) ClaimOrphanedSagas(ctx context.Context) ([]uuid.UUID, err
 func (s *ClaimService) transitionZombieSagas(ctx context.Context) error {
 	now := time.Now()
 
-	// Find and transition zombie sagas in a single atomic operation
-	// We use a struct to scan the results including saga_definition_id for metrics
+	// Find and transition zombie sagas atomically.
+	// We capture saga data before updating for metrics logging.
 	type zombieResult struct {
-		ID               uuid.UUID `gorm:"column:id"`
-		SagaDefinitionID uuid.UUID `gorm:"column:saga_definition_id"`
-		ReplayCount      int       `gorm:"column:replay_count"`
+		ID               uuid.UUID
+		SagaDefinitionID uuid.UUID
+		ReplayCount      int
 	}
 	var zombies []zombieResult
 
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Select zombie sagas and transition them atomically
-		result := tx.Raw(`
-			UPDATE saga_instances
-			SET
-				status = ?,
-				claimed_by_pod = NULL,
-				claimed_at = NULL,
-				lease_expires_at = NULL,
-				updated_at = ?
-			WHERE id IN (
-				SELECT id FROM saga_instances
-				WHERE status IN (?, ?, ?)
-				  AND (lease_expires_at < ? OR claimed_by_pod IS NULL)
-				  AND replay_count >= ?
-				FOR UPDATE SKIP LOCKED
-			)
-			RETURNING id, saga_definition_id, replay_count
-		`,
-			SagaStatusFailedManualIntervention,
-			now,
-			SagaStatusPending,
-			SagaStatusRunning,
-			SagaStatusCompensating,
-			now,
-			s.config.MaxReplays,
-		).Scan(&zombies)
+		// Step 1: SELECT zombie sagas with FOR UPDATE.
+		// CockroachDB's serializable isolation prevents concurrent races,
+		// making SKIP LOCKED unnecessary.
+		var candidates []SagaInstance
+		result := tx.Model(&SagaInstance{}).
+			Where("status IN ?", []SagaStatus{SagaStatusPending, SagaStatusRunning, SagaStatusCompensating}).
+			Where("(lease_expires_at < ? OR claimed_by_pod IS NULL)", now).
+			Where("replay_count >= ?", s.config.MaxReplays).
+			Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id, saga_definition_id, replay_count").
+			Find(&candidates)
 
 		if result.Error != nil {
 			return result.Error
 		}
+		if len(candidates) == 0 {
+			return nil
+		}
 
-		return nil
+		// Capture data for metrics before updating
+		ids := make([]uuid.UUID, len(candidates))
+		for i, c := range candidates {
+			ids[i] = c.ID
+			zombies = append(zombies, zombieResult{
+				ID:               c.ID,
+				SagaDefinitionID: c.SagaDefinitionID,
+				ReplayCount:      c.ReplayCount,
+			})
+		}
+
+		// Step 2: UPDATE the locked rows.
+		result = tx.Model(&SagaInstance{}).
+			Where("id IN ?", ids).
+			Updates(map[string]interface{}{
+				"status":           SagaStatusFailedManualIntervention,
+				"claimed_by_pod":   nil,
+				"claimed_at":       nil,
+				"lease_expires_at": nil,
+				"updated_at":       now,
+			})
+
+		return result.Error
 	})
 	if err != nil {
 		return err

@@ -258,6 +258,36 @@ func (r *PostgresRegistry) ListByStatus(ctx context.Context, status Status) ([]*
 	return result, nil
 }
 
+// resolveVersionForTenantOverride bumps the version if a system saga occupies
+// the requested version slot. This allows tenant overrides to coexist with
+// system sagas that occupy version 1 for the same name in the tenant schema.
+func resolveVersionForTenantOverride(ctx context.Context, tx pgx.Tx, def *Definition) error {
+	var systemVersion sql.NullInt64
+	err := tx.QueryRow(ctx,
+		`SELECT version FROM saga_definition WHERE name = $1 AND version = $2 AND is_system = true`,
+		def.Name, def.Version,
+	).Scan(&systemVersion)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("failed to check system saga version: %w", err)
+	}
+	if !systemVersion.Valid {
+		return nil
+	}
+
+	// System saga occupies this version slot; find next available
+	var maxVersion sql.NullInt64
+	err = tx.QueryRow(ctx,
+		`SELECT MAX(version) FROM saga_definition WHERE name = $1`, def.Name,
+	).Scan(&maxVersion)
+	if err != nil {
+		return fmt.Errorf("failed to check existing versions: %w", err)
+	}
+	if maxVersion.Valid {
+		def.Version = int(maxVersion.Int64) + 1
+	}
+	return nil
+}
+
 // CreateDraft creates a new saga definition in DRAFT status.
 func (r *PostgresRegistry) CreateDraft(ctx context.Context, def *Definition) error {
 	// Reject system saga creation
@@ -266,6 +296,20 @@ func (r *PostgresRegistry) CreateDraft(ctx context.Context, def *Definition) err
 	}
 
 	return r.withWriteTransaction(ctx, func(tx pgx.Tx) error {
+		// Generate ID if not set
+		if def.ID == uuid.Nil {
+			def.ID = uuid.New()
+		}
+
+		now := time.Now()
+		def.CreatedAt = now
+		def.UpdatedAt = now
+		def.Status = StatusDraft
+
+		if err := resolveVersionForTenantOverride(ctx, tx, def); err != nil {
+			return err
+		}
+
 		query := `
 			INSERT INTO saga_definition (
 				id, name, version, script, status, is_system,
@@ -276,16 +320,6 @@ func (r *PostgresRegistry) CreateDraft(ctx context.Context, def *Definition) err
 				$7, $8, $9,
 				$10, $11
 			)`
-
-		// Generate ID if not set
-		if def.ID == uuid.Nil {
-			def.ID = uuid.New()
-		}
-
-		now := time.Now()
-		def.CreatedAt = now
-		def.UpdatedAt = now
-		def.Status = StatusDraft
 
 		_, err := tx.Exec(ctx, query,
 			def.ID, def.Name, def.Version, def.Script, string(def.Status), def.IsSystem,
@@ -400,10 +434,12 @@ func (r *PostgresRegistry) ActivateSaga(ctx context.Context, id uuid.UUID) error
 			return ErrNotDraft
 		}
 
-		// Transition to ACTIVE (trigger will set activated_at)
+		// Transition to ACTIVE and record activation timestamp
 		updateQuery := `
 			UPDATE saga_definition SET
-				status = 'ACTIVE'
+				status = 'ACTIVE',
+				activated_at = now(),
+				updated_at = now()
 			WHERE id = $1`
 
 		_, err = tx.Exec(ctx, updateQuery, id)
@@ -439,11 +475,12 @@ func (r *PostgresRegistry) DeprecateSaga(ctx context.Context, id uuid.UUID, succ
 			return ErrNotActive
 		}
 
-		// Transition to DEPRECATED with optional successor
-		// The database trigger will validate the successor and set deprecated_at
+		// Transition to DEPRECATED with optional successor and record timestamp
 		updateQuery := `
 			UPDATE saga_definition SET
 				status = 'DEPRECATED',
+				deprecated_at = now(),
+				updated_at = now(),
 				successor_id = $2
 			WHERE id = $1`
 
