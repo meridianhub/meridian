@@ -103,6 +103,13 @@ func TestCoerceInt64(t *testing.T) {
 		assert.ErrorIs(t, err, ErrOverflow)
 	})
 
+	t.Run("from non-numeric string", func(t *testing.T) {
+		_, err := coerceInt64("not-a-number")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrTypeCoercion)
+		assert.NotErrorIs(t, err, ErrOverflow)
+	})
+
 	t.Run("unsupported type", func(t *testing.T) {
 		_, err := coerceInt64(true)
 		require.Error(t, err)

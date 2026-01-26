@@ -94,7 +94,11 @@ func coerceInt64(val any) (int64, error) {
 		// Starlark represents very large ints as strings (from starlarkIntToGo).
 		i, err := strconv.ParseInt(v, 10, 64)
 		if err != nil {
-			return 0, fmt.Errorf("%w for int64: %q does not fit in int64", ErrOverflow, v)
+			var numErr *strconv.NumError
+			if errors.As(err, &numErr) && errors.Is(numErr.Err, strconv.ErrRange) {
+				return 0, fmt.Errorf("%w for int64: %q exceeds int64 range", ErrOverflow, v)
+			}
+			return 0, fmt.Errorf("%w: cannot parse %q as int64", ErrTypeCoercion, v)
 		}
 		return i, nil
 	default:
