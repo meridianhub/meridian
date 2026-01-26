@@ -110,6 +110,15 @@ type ExecutionInput struct {
 	// ExecutingPartyID is the ID of the party executing the saga (for party isolation).
 	// If set and a PartyScopeResolver is configured, party scope will be resolved.
 	ExecutingPartyID *uuid.UUID
+
+	// Predeclared contains additional Starlark values to inject into the global scope.
+	// These are merged after restricted builtins and input_data, allowing callers
+	// to inject service modules, backward-compat shims, or other globals.
+	Predeclared starlark.StringDict
+
+	// ThreadSetup is called after the thread is created but before script execution.
+	// It allows callers to set thread-local storage (e.g., StarlarkContext for handlers).
+	ThreadSetup func(thread *starlark.Thread)
 }
 
 // ExecuteSaga executes a Starlark script with the given input.
@@ -172,6 +181,11 @@ func (r *Runtime) ExecuteSagaWithInput(ctx context.Context, name string, script 
 	// Build predeclared variables including input and party scope
 	predeclared := r.buildPredeclaredWithScope(execInput.Data, partyScope)
 
+	// Merge additional predeclared globals (e.g., service modules, backward-compat shims)
+	for k, v := range execInput.Predeclared {
+		predeclared[k] = v
+	}
+
 	// Create thread with context-based cancellation
 	thread := &starlark.Thread{
 		Name: name,
@@ -182,6 +196,11 @@ func (r *Runtime) ExecuteSagaWithInput(ctx context.Context, name string, script 
 
 	// Store context in thread-local for cancellation checking
 	thread.SetLocal("ctx", ctx)
+
+	// Allow callers to set up thread-local storage (e.g., StarlarkContext for handlers)
+	if execInput.ThreadSetup != nil {
+		execInput.ThreadSetup(thread)
+	}
 
 	// Set up cancellation checking
 	done := make(chan struct{})
