@@ -50,12 +50,29 @@ func setupTestPostgres(t *testing.T) (*pgxpool.Pool, tenant.TenantID, func()) {
 	_, err = pool.Exec(ctx, "CREATE SCHEMA IF NOT EXISTS "+schemaName)
 	require.NoError(t, err)
 
+	// Create platform_saga_definition in public schema (needed for LEFT JOINs in queries)
+	platformTableSQL := `
+		CREATE TABLE IF NOT EXISTS public.platform_saga_definition (
+			id uuid NOT NULL DEFAULT gen_random_uuid(),
+			name varchar(64) NOT NULL,
+			version varchar(16) NOT NULL,
+			script text NOT NULL,
+			display_name varchar(128) NULL,
+			description text NULL,
+			created_at timestamptz NOT NULL DEFAULT now(),
+			updated_at timestamptz NOT NULL DEFAULT now(),
+			PRIMARY KEY (id),
+			CONSTRAINT uq_platform_saga_definition_name UNIQUE (name)
+		)`
+	_, err = pool.Exec(ctx, platformTableSQL)
+	require.NoError(t, err)
+
 	createTableSQL := `
 		CREATE TABLE ` + schemaName + `.saga_definition (
 			id uuid NOT NULL DEFAULT gen_random_uuid(),
 			name varchar(64) NOT NULL,
 			version integer NOT NULL DEFAULT 1,
-			script text NOT NULL,
+			script text NULL,
 			status varchar(16) NOT NULL DEFAULT 'DRAFT',
 			is_system boolean NOT NULL DEFAULT FALSE,
 			preconditions_expression text NULL,
@@ -66,8 +83,15 @@ func setupTestPostgres(t *testing.T) (*pgxpool.Pool, tenant.TenantID, func()) {
 			activated_at timestamptz NULL,
 			deprecated_at timestamptz NULL,
 			successor_id uuid NULL,
+			platform_ref uuid NULL,
+			override_reason text NULL,
+			platform_version_at_override varchar(16) NULL,
 			PRIMARY KEY (id),
-			CONSTRAINT uq_saga_definition_name_version UNIQUE (name, version)
+			CONSTRAINT uq_saga_definition_name_version UNIQUE (name, version),
+			CONSTRAINT fk_saga_definition_platform_ref
+				FOREIGN KEY (platform_ref) REFERENCES public.platform_saga_definition (id) ON DELETE SET NULL,
+			CONSTRAINT chk_saga_definition_script_source
+				CHECK (NOT (platform_ref IS NOT NULL AND script IS NOT NULL AND script != ''))
 		)`
 	_, err = pool.Exec(ctx, createTableSQL)
 	require.NoError(t, err)

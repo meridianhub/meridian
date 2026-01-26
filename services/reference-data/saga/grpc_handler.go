@@ -162,7 +162,12 @@ func (h *RegistryHandler) ActivateSaga(
 			return nil, h.mapDomainError(err, "ActivateSaga", id.String())
 		}
 
-		result, err := h.validator.ValidateActivation(ctx, id, saga.Script)
+		// Use ResolvedScript for platform-ref sagas (Script is empty, script comes from platform)
+		script := saga.Script
+		if script == "" {
+			script = saga.ResolvedScript
+		}
+		result, err := h.validator.ValidateActivation(ctx, id, script)
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "validation error: %v", err)
 		}
@@ -449,7 +454,12 @@ func (h *RegistryHandler) ValidateSagaDraft(
 		}, nil
 	}
 
-	result, err := h.validator.ValidateDraft(ctx, id, saga.Script)
+	// Use ResolvedScript for platform-ref sagas (Script is empty, script comes from platform)
+	validationScript := saga.Script
+	if validationScript == "" {
+		validationScript = saga.ResolvedScript
+	}
+	result, err := h.validator.ValidateDraft(ctx, id, validationScript)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "validation error: %v", err)
 	}

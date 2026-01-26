@@ -60,6 +60,21 @@ var (
 
 	// ErrValidationFailed is returned when the saga script fails validation.
 	ErrValidationFailed = errors.New("saga validation failed")
+
+	// ErrPlatformDefinitionNotFound is returned when a saga references a platform definition
+	// via platform_ref but the platform definition no longer exists.
+	ErrPlatformDefinitionNotFound = errors.New("referenced platform saga definition not found")
+
+	// ErrNoScriptSource is returned when a saga has neither a custom script nor a platform_ref.
+	ErrNoScriptSource = errors.New("saga has no script source: neither custom script nor platform reference")
+
+	// ErrScriptHashMismatch is returned during replay when the pinned script hash
+	// does not match the current script, indicating potential corruption.
+	ErrScriptHashMismatch = errors.New("script hash mismatch: pinned version differs from current")
+
+	// ErrPinnedVersionNotFound is returned when attempting to replay a saga
+	// whose pinned platform version no longer exists.
+	ErrPinnedVersionNotFound = errors.New("pinned platform saga version not found")
 )
 
 // Definition represents a Starlark saga workflow definition
@@ -113,6 +128,29 @@ type Definition struct {
 	// clients can follow SuccessorID to find the current replacement.
 	// Only set when Status is DEPRECATED. Nil if no successor designated.
 	SuccessorID *uuid.UUID
+
+	// PlatformRef is an optional FK to public.platform_saga_definition.
+	// When set, this saga inherits its script from the platform template.
+	// Mutually exclusive with Script: either PlatformRef OR Script is set, never both.
+	PlatformRef *uuid.UUID
+
+	// OverrideReason is an audit trail explaining why the tenant deviated from the platform default.
+	OverrideReason string
+
+	// PlatformVersionAtOverride tracks which platform saga version was active
+	// when this override was created. Useful for migration impact analysis.
+	PlatformVersionAtOverride string
+
+	// ResolvedScript is the effective script after fallback resolution.
+	// When Script is set, this equals Script (tenant override).
+	// When PlatformRef is set and Script is empty, this is populated from the platform definition.
+	// This field is populated by GetActive/GetByID queries, not stored in the database.
+	ResolvedScript string
+
+	// UsedPlatformFallback indicates whether the resolved script came from
+	// the platform definition (true) or the tenant's own script (false).
+	// This is populated during query resolution, not stored in the database.
+	UsedPlatformFallback bool
 }
 
 // Validator validates saga definitions before activation.
