@@ -2,6 +2,7 @@ package saga
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"testing"
 	"time"
@@ -9,6 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.starlark.net/starlark"
+	"go.starlark.net/starlarkstruct"
 )
 
 func TestNewStarlarkSagaRunner(t *testing.T) {
@@ -144,24 +147,25 @@ result = "Processed"
 	})
 }
 
-func TestStarlarkSagaRunner_StepTracking(t *testing.T) {
+func TestStarlarkSagaRunner_InvokeHandler(t *testing.T) {
 	logger := slog.Default()
 	runtime, err := NewRuntime(logger, WithTimeout(10*time.Second))
 	require.NoError(t, err)
 
 	registry := NewDomainHandlerRegistry()
 
-	// Register handlers that will be called by the script
-	handlerCalls := make([]string, 0)
-
-	err = registry.Register("step.first", func(_ *StarlarkContext, _ map[string]any) (any, error) {
-		handlerCalls = append(handlerCalls, "step.first")
-		return map[string]any{"result": "first_done"}, nil
+	// Register test handlers
+	err = registry.Register("step.first", func(ctx *StarlarkContext, params map[string]any) (any, error) {
+		msg, _ := params["message"].(string)
+		return map[string]any{
+			"result":  "first_done",
+			"message": "Echo: " + msg,
+			"saga_id": ctx.SagaExecutionID.String(),
+		}, nil
 	})
 	require.NoError(t, err)
 
 	err = registry.Register("step.second", func(_ *StarlarkContext, _ map[string]any) (any, error) {
-		handlerCalls = append(handlerCalls, "step.second")
 		return map[string]any{"result": "second_done"}, nil
 	})
 	require.NoError(t, err)
@@ -173,15 +177,239 @@ func TestStarlarkSagaRunner_StepTracking(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	t.Run("tracks step execution", func(t *testing.T) {
-		// Note: The current implementation passes _domain_call as input,
-		// but Starlark doesn't support calling Go functions directly this way.
-		// A more sophisticated implementation would use Starlark builtins.
-		// For now, we'll test that the runner handles the scenario gracefully.
-
+	t.Run("invoke_handler calls handler and returns result", func(t *testing.T) {
 		script := `
-# Script that doesn't call domain handlers directly
-# (domain_call integration requires Starlark builtin registration)
+result = invoke_handler(handler="step.first", params={"message": "hello"})
+output_result = result["result"]
+output_message = result["message"]
+`
+		input := RunnerInput{
+			SagaExecutionID: uuid.New(),
+			CorrelationID:   uuid.New(),
+			KnowledgeAt:     time.Now(),
+			Input:           map[string]interface{}{},
+		}
+
+		output, err := runner.ExecuteSaga(context.Background(), "invoke_saga", script, input)
+		require.NoError(t, err)
+		assert.True(t, output.Success)
+		assert.Equal(t, "first_done", output.Output["output_result"])
+		assert.Equal(t, "Echo: hello", output.Output["output_message"])
+
+		// Step results should be tracked
+		require.Len(t, output.StepResults, 1)
+		assert.Equal(t, "step.first", output.StepResults[0].StepName)
+		assert.True(t, output.StepResults[0].Success)
+	})
+
+	t.Run("invoke_handler tracks multiple steps", func(t *testing.T) {
+		script := `
+r1 = invoke_handler(handler="step.first", params={"message": "one"})
+r2 = invoke_handler(handler="step.second", params={})
+status = "completed"
+`
+		input := RunnerInput{
+			SagaExecutionID: uuid.New(),
+			CorrelationID:   uuid.New(),
+			KnowledgeAt:     time.Now(),
+			Input:           map[string]interface{}{},
+		}
+
+		output, err := runner.ExecuteSaga(context.Background(), "multi_step_saga", script, input)
+		require.NoError(t, err)
+		assert.True(t, output.Success)
+
+		require.Len(t, output.StepResults, 2)
+		assert.Equal(t, "step.first", output.StepResults[0].StepName)
+		assert.Equal(t, "step.second", output.StepResults[1].StepName)
+	})
+
+	t.Run("invoke_handler errors on missing handler", func(t *testing.T) {
+		script := `
+result = invoke_handler(handler="nonexistent.handler", params={})
+`
+		input := RunnerInput{
+			SagaExecutionID: uuid.New(),
+			CorrelationID:   uuid.New(),
+			KnowledgeAt:     time.Now(),
+			Input:           map[string]interface{}{},
+		}
+
+		output, err := runner.ExecuteSaga(context.Background(), "missing_handler_saga", script, input)
+		require.NoError(t, err)
+		assert.False(t, output.Success)
+		assert.Contains(t, output.Error, "not found")
+
+		// Step should be tracked as failure
+		require.Len(t, output.StepResults, 1)
+		assert.False(t, output.StepResults[0].Success)
+	})
+
+	t.Run("invoke_handler errors without handler kwarg", func(t *testing.T) {
+		script := `
+result = invoke_handler(params={})
+`
+		input := RunnerInput{
+			SagaExecutionID: uuid.New(),
+			CorrelationID:   uuid.New(),
+			KnowledgeAt:     time.Now(),
+			Input:           map[string]interface{}{},
+		}
+
+		output, err := runner.ExecuteSaga(context.Background(), "no_handler_kwarg", script, input)
+		require.NoError(t, err)
+		assert.False(t, output.Success)
+		assert.Contains(t, output.Error, "handler keyword argument is required")
+	})
+}
+
+func TestStarlarkSagaRunner_ServiceModules(t *testing.T) {
+	logger := slog.Default()
+	runtime, err := NewRuntime(logger, WithTimeout(10*time.Second))
+	require.NoError(t, err)
+
+	registry := NewDomainHandlerRegistry()
+
+	err = registry.Register("test.echo", func(ctx *StarlarkContext, params map[string]any) (any, error) {
+		msg, _ := params["message"].(string)
+		return map[string]any{
+			"echoed": "Echo: " + msg,
+			"saga":   ctx.SagaExecutionID.String(),
+		}, nil
+	})
+	require.NoError(t, err)
+
+	// Build a simple service module manually (simulating schema.BuildServiceModules output)
+	testModule := starlark.StringDict{
+		"echo": starlark.NewBuiltin("test.echo", func(thread *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+			// Get StarlarkContext from thread-local
+			ctxVal := thread.Local("saga.StarlarkContext")
+			ctx, ok := ctxVal.(*StarlarkContext)
+			if !ok || ctx == nil {
+				return nil, fmt.Errorf("StarlarkContext not set on thread")
+			}
+
+			// Convert kwargs to params map
+			params := make(map[string]any)
+			for _, kwarg := range kwargs {
+				key := string(kwarg[0].(starlark.String))
+				params[key] = starlarkToGo(kwarg[1])
+			}
+
+			// Call the handler
+			handler, err := registry.Get("test.echo")
+			if err != nil {
+				return nil, err
+			}
+			result, err := handler(ctx, params)
+			if err != nil {
+				return nil, err
+			}
+
+			// Convert result to Starlark dict
+			return goToStarlark(result), nil
+		}),
+	}
+	serviceModules := starlark.StringDict{
+		"test": starlarkstruct.FromStringDict(starlark.String("test"), testModule),
+	}
+
+	runner, err := NewStarlarkSagaRunner(StarlarkSagaRunnerConfig{
+		Runtime:        runtime,
+		Registry:       registry,
+		ServiceModules: serviceModules,
+		Logger:         logger,
+	})
+	require.NoError(t, err)
+
+	t.Run("service module handler accessible in script", func(t *testing.T) {
+		script := `
+result = test.echo(message="hello world")
+output_echoed = result["echoed"]
+`
+		sagaID := uuid.New()
+		input := RunnerInput{
+			SagaExecutionID: sagaID,
+			CorrelationID:   uuid.New(),
+			KnowledgeAt:     time.Now(),
+			Input:           map[string]interface{}{},
+		}
+
+		output, err := runner.ExecuteSaga(context.Background(), "typed_saga", script, input)
+		require.NoError(t, err)
+		assert.True(t, output.Success)
+		assert.Equal(t, "Echo: hello world", output.Output["output_echoed"])
+	})
+
+	t.Run("mixed syntax - both service modules and invoke_handler", func(t *testing.T) {
+		script := `
+# New typed syntax
+new_result = test.echo(message="new style")
+new_echoed = new_result["echoed"]
+
+# Old invoke_handler syntax (backward compat)
+old_result = invoke_handler(handler="test.echo", params={"message": "old style"})
+old_echoed = old_result["echoed"]
+`
+		input := RunnerInput{
+			SagaExecutionID: uuid.New(),
+			CorrelationID:   uuid.New(),
+			KnowledgeAt:     time.Now(),
+			Input:           map[string]interface{}{},
+		}
+
+		output, err := runner.ExecuteSaga(context.Background(), "mixed_saga", script, input)
+		require.NoError(t, err)
+		assert.True(t, output.Success)
+		assert.Equal(t, "Echo: new style", output.Output["new_echoed"])
+		assert.Equal(t, "Echo: old style", output.Output["old_echoed"])
+
+		// invoke_handler call should be tracked in step results
+		require.Len(t, output.StepResults, 1) // Only invoke_handler tracks steps
+		assert.Equal(t, "test.echo", output.StepResults[0].StepName)
+	})
+
+	t.Run("service modules available via dir()", func(t *testing.T) {
+		script := `
+# Verify the service module is accessible
+attrs = dir(test)
+has_echo = "echo" in attrs
+`
+		input := RunnerInput{
+			SagaExecutionID: uuid.New(),
+			CorrelationID:   uuid.New(),
+			KnowledgeAt:     time.Now(),
+			Input:           map[string]interface{}{},
+		}
+
+		output, err := runner.ExecuteSaga(context.Background(), "dir_saga", script, input)
+		require.NoError(t, err)
+		assert.True(t, output.Success)
+		assert.Equal(t, true, output.Output["has_echo"])
+	})
+}
+
+func TestStarlarkSagaRunner_StepTracking(t *testing.T) {
+	logger := slog.Default()
+	runtime, err := NewRuntime(logger, WithTimeout(10*time.Second))
+	require.NoError(t, err)
+
+	registry := NewDomainHandlerRegistry()
+
+	err = registry.Register("step.first", func(_ *StarlarkContext, _ map[string]any) (any, error) {
+		return map[string]any{"result": "first_done"}, nil
+	})
+	require.NoError(t, err)
+
+	runner, err := NewStarlarkSagaRunner(StarlarkSagaRunnerConfig{
+		Runtime:  runtime,
+		Registry: registry,
+		Logger:   logger,
+	})
+	require.NoError(t, err)
+
+	t.Run("no step results without handler calls", func(t *testing.T) {
+		script := `
 status = "completed"
 `
 		input := RunnerInput{
@@ -194,7 +422,27 @@ status = "completed"
 		output, err := runner.ExecuteSaga(context.Background(), "tracked_saga", script, input)
 		require.NoError(t, err)
 		assert.True(t, output.Success)
-		// No handlers were called since we didn't integrate domain_call as a builtin
 		assert.Empty(t, output.StepResults)
+	})
+
+	t.Run("step results tracked via invoke_handler", func(t *testing.T) {
+		script := `
+result = invoke_handler(handler="step.first", params={})
+status = result["result"]
+`
+		input := RunnerInput{
+			SagaExecutionID: uuid.New(),
+			CorrelationID:   uuid.New(),
+			KnowledgeAt:     time.Now(),
+			Input:           map[string]interface{}{},
+		}
+
+		output, err := runner.ExecuteSaga(context.Background(), "step_tracked_saga", script, input)
+		require.NoError(t, err)
+		assert.True(t, output.Success)
+		require.Len(t, output.StepResults, 1)
+		assert.Equal(t, "step.first", output.StepResults[0].StepName)
+		assert.True(t, output.StepResults[0].Success)
+		assert.True(t, output.StepResults[0].Duration > 0)
 	})
 }

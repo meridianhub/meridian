@@ -1040,6 +1040,203 @@ func TestExportedContextFunctions(t *testing.T) {
 	assert.Equal(t, starlarkCtx.SagaExecutionID, retrieved.SagaExecutionID)
 }
 
+// TestIntegration_StarlarkSagaRunnerWithServiceModules tests the full integration
+// of BuildServiceModules with StarlarkSagaRunner, verifying that service modules
+// are correctly injected into the Starlark global scope during saga execution.
+func TestIntegration_StarlarkSagaRunnerWithServiceModules(t *testing.T) {
+	// Set up handler registry with test handlers
+	registry := saga.NewDomainHandlerRegistry()
+	_ = registry.Register("position_keeping.initiate_log", func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
+		return map[string]any{
+			"log_id":   ctx.NewUUID(ctx.SagaExecutionID, "position_log").String(),
+			"status":   "INITIATED",
+			"position": params["position_id"],
+		}, nil
+	})
+	_ = registry.Register("position_keeping.cancel_log", func(_ *saga.StarlarkContext, params map[string]any) (any, error) {
+		return map[string]any{
+			"log_id": params["log_id"],
+			"status": "CANCELLED",
+		}, nil
+	})
+
+	// Set up schema registry
+	schemaRegistry := NewRegistry()
+	err := schemaRegistry.LoadFromYAML([]byte(`
+service: test
+version: "1.0"
+handlers:
+  position_keeping.initiate_log:
+    description: "Initiate position log"
+    params:
+      position_id:
+        type: string
+        required: true
+      amount:
+        type: Decimal
+        required: true
+      direction:
+        type: enum
+        values: [DEBIT, CREDIT]
+        required: true
+    returns:
+      log_id:
+        type: string
+      status:
+        type: string
+      position:
+        type: string
+  position_keeping.cancel_log:
+    description: "Cancel position log"
+    params:
+      log_id:
+        type: string
+        required: true
+    returns:
+      log_id:
+        type: string
+      status:
+        type: string
+`))
+	require.NoError(t, err)
+
+	// Build service modules
+	modules, err := BuildServiceModules(registry, schemaRegistry)
+	require.NoError(t, err)
+
+	// Create runtime and runner
+	runtime, err := saga.NewRuntime(slog.Default(), saga.WithTimeout(10*time.Second))
+	require.NoError(t, err)
+
+	runner, err := saga.NewStarlarkSagaRunner(saga.StarlarkSagaRunnerConfig{
+		Runtime:        runtime,
+		Registry:       registry,
+		ServiceModules: modules,
+		Logger:         slog.Default(),
+	})
+	require.NoError(t, err)
+
+	t.Run("typed handler calls via service modules", func(t *testing.T) {
+		script := `
+# Use typed service module syntax
+result = position_keeping.initiate_log(
+    position_id="pos-123",
+    amount="100.00",
+    direction="DEBIT"
+)
+output_log_id = result.log_id
+output_status = result.status
+output_position = result.position
+`
+		output, err := runner.ExecuteSaga(context.Background(), "typed_saga", script, saga.RunnerInput{
+			SagaExecutionID: uuid.New(),
+			CorrelationID:   uuid.New(),
+			KnowledgeAt:     time.Now(),
+			Input:           map[string]interface{}{},
+		})
+		require.NoError(t, err)
+		assert.True(t, output.Success)
+		assert.NotEmpty(t, output.Output["output_log_id"])
+		assert.Equal(t, "INITIATED", output.Output["output_status"])
+		assert.Equal(t, "pos-123", output.Output["output_position"])
+	})
+
+	t.Run("invoke_handler backward compatibility", func(t *testing.T) {
+		script := `
+# Old-style invoke_handler still works
+result = invoke_handler(
+    handler="position_keeping.initiate_log",
+    params={
+        "position_id": "pos-456",
+        "amount": "200.00",
+        "direction": "CREDIT",
+    }
+)
+output_status = result["status"]
+output_position = result["position"]
+`
+		output, err := runner.ExecuteSaga(context.Background(), "compat_saga", script, saga.RunnerInput{
+			SagaExecutionID: uuid.New(),
+			CorrelationID:   uuid.New(),
+			KnowledgeAt:     time.Now(),
+			Input:           map[string]interface{}{},
+		})
+		require.NoError(t, err)
+		assert.True(t, output.Success)
+		assert.Equal(t, "INITIATED", output.Output["output_status"])
+		assert.Equal(t, "pos-456", output.Output["output_position"])
+
+		// Step results tracked via invoke_handler
+		require.Len(t, output.StepResults, 1)
+		assert.Equal(t, "position_keeping.initiate_log", output.StepResults[0].StepName)
+		assert.True(t, output.StepResults[0].Success)
+	})
+
+	t.Run("mixed syntax in same script", func(t *testing.T) {
+		script := `
+# New typed syntax
+new_result = position_keeping.initiate_log(
+    position_id="pos-new",
+    amount="50.00",
+    direction="DEBIT"
+)
+
+# Old invoke_handler syntax
+old_result = invoke_handler(
+    handler="position_keeping.cancel_log",
+    params={"log_id": new_result.log_id}
+)
+
+new_status = new_result.status
+old_status = old_result["status"]
+`
+		output, err := runner.ExecuteSaga(context.Background(), "mixed_saga", script, saga.RunnerInput{
+			SagaExecutionID: uuid.New(),
+			CorrelationID:   uuid.New(),
+			KnowledgeAt:     time.Now(),
+			Input:           map[string]interface{}{},
+		})
+		require.NoError(t, err)
+		assert.True(t, output.Success)
+		assert.Equal(t, "INITIATED", output.Output["new_status"])
+		assert.Equal(t, "CANCELLED", output.Output["old_status"])
+	})
+
+	t.Run("service modules discoverable via dir()", func(t *testing.T) {
+		script := `
+# Verify service module structure
+pk_attrs = dir(position_keeping)
+has_initiate = "initiate_log" in pk_attrs
+has_cancel = "cancel_log" in pk_attrs
+`
+		output, err := runner.ExecuteSaga(context.Background(), "dir_saga", script, saga.RunnerInput{
+			SagaExecutionID: uuid.New(),
+			CorrelationID:   uuid.New(),
+			KnowledgeAt:     time.Now(),
+			Input:           map[string]interface{}{},
+		})
+		require.NoError(t, err)
+		assert.True(t, output.Success)
+		assert.Equal(t, true, output.Output["has_initiate"])
+		assert.Equal(t, true, output.Output["has_cancel"])
+	})
+
+	t.Run("invoke_handler error for missing handler", func(t *testing.T) {
+		script := `
+result = invoke_handler(handler="nonexistent.handler", params={})
+`
+		output, err := runner.ExecuteSaga(context.Background(), "error_saga", script, saga.RunnerInput{
+			SagaExecutionID: uuid.New(),
+			CorrelationID:   uuid.New(),
+			KnowledgeAt:     time.Now(),
+			Input:           map[string]interface{}{},
+		})
+		require.NoError(t, err)
+		assert.False(t, output.Success)
+		assert.Contains(t, output.Error, "not found")
+	})
+}
+
 // TestParseHandlerTree_SinglePart tests that single-part names are ignored.
 func TestParseHandlerTree_SinglePart(t *testing.T) {
 	tree := parseHandlerTree([]string{
