@@ -145,7 +145,7 @@ func TestFallbackResolution_SchemaConstraints(t *testing.T) {
 				$2, NOW(), NOW()
 			)`, uuid.New(), platformID)
 
-		assert.Error(t, err, "should reject saga with both script and platform_ref")
+		require.Error(t, err, "should reject saga with both script and platform_ref")
 		assert.Contains(t, err.Error(), "chk_saga_definition_script_source")
 
 		_ = tx.Rollback(ctx)

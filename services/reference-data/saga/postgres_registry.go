@@ -316,6 +316,11 @@ func (r *PostgresRegistry) CreateDraft(ctx context.Context, def *Definition) err
 		return ErrSystemSagaReadOnly
 	}
 
+	// Require at least one script source
+	if def.Script == "" && def.PlatformRef == nil {
+		return ErrNoScriptSource
+	}
+
 	return r.withWriteTransaction(ctx, func(tx pgx.Tx) error {
 		query := `
 			INSERT INTO saga_definition (
@@ -437,6 +442,11 @@ func (r *PostgresRegistry) ActivateSaga(ctx context.Context, id uuid.UUID) error
 
 	if saga.Status != StatusDraft {
 		return ErrNotDraft
+	}
+
+	// Reject activation if no script source is resolvable
+	if saga.ResolvedScript == "" {
+		return ErrNoScriptSource
 	}
 
 	// Validate the saga if a validator is configured

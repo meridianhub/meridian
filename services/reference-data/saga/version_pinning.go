@@ -7,6 +7,7 @@ package saga
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -95,8 +96,12 @@ func (vp *VersionPinning) ResolveForReplay(ctx context.Context, instance *pkgsag
 		// Load from pinned platform version
 		platformDef, err := vp.registry.GetPlatformSagaByID(ctx, *instance.PlatformSagaVersionID)
 		if err != nil {
-			return "", fmt.Errorf("%w: platform_saga_version_id=%s: %w",
-				ErrPinnedVersionNotFound, instance.PlatformSagaVersionID, err)
+			if errors.Is(err, ErrPlatformDefinitionNotFound) {
+				return "", fmt.Errorf("%w: platform_saga_version_id=%s",
+					ErrPinnedVersionNotFound, instance.PlatformSagaVersionID)
+			}
+			return "", fmt.Errorf("load pinned platform version %s: %w",
+				instance.PlatformSagaVersionID, err)
 		}
 		script = platformDef.Script
 
