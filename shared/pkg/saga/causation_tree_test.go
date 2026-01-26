@@ -481,13 +481,18 @@ func TestGetTreeDepth(t *testing.T) {
 		prevID = &sagaID
 	}
 
-	// Get the root saga ID (first created)
-	var rootID uuid.UUID
+	// Get the root saga ID (first created).
+	// Use a struct wrapper for scanning because GORM cannot directly scan
+	// a CockroachDB UUID string into a uuid.UUID primitive.
+	var rootResult struct {
+		ID uuid.UUID `gorm:"column:id"`
+	}
 	err = db.Model(&SagaInstance{}).
 		Where("parent_saga_id IS NULL AND correlation_id = ?", correlationID).
 		Select("id").
-		Scan(&rootID).Error
+		Take(&rootResult).Error
 	require.NoError(t, err)
+	rootID := rootResult.ID
 
 	repo := NewCausationTreeRepository(db)
 	depth, err := repo.GetTreeDepth(context.Background(), rootID)
