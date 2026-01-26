@@ -115,7 +115,7 @@ func (r *PostgresRegistry) GetByID(ctx context.Context, id uuid.UUID) (*Definiti
 	err := r.withReadTransaction(ctx, func(tx pgx.Tx) error {
 		query := `
 			SELECT sd.id, sd.name, sd.version,
-				COALESCE(sd.script, psd.script, '') AS resolved_script,
+				COALESCE(NULLIF(sd.script, ''), psd.script, '') AS resolved_script,
 				sd.script,
 				sd.status, sd.is_system,
 				sd.preconditions_expression, sd.display_name, sd.description,
@@ -152,7 +152,7 @@ func (r *PostgresRegistry) GetDefinition(ctx context.Context, name string, versi
 	err := r.withReadTransaction(ctx, func(tx pgx.Tx) error {
 		query := `
 			SELECT sd.id, sd.name, sd.version,
-				COALESCE(sd.script, psd.script, '') AS resolved_script,
+				COALESCE(NULLIF(sd.script, ''), psd.script, '') AS resolved_script,
 				sd.script,
 				sd.status, sd.is_system,
 				sd.preconditions_expression, sd.display_name, sd.description,
@@ -195,7 +195,7 @@ func (r *PostgresRegistry) GetActive(ctx context.Context, name string) (*Definit
 		// Step 1: Try tenant override (is_system=FALSE) with platform fallback via LEFT JOIN
 		tenantQuery := `
 			SELECT sd.id, sd.name, sd.version,
-				COALESCE(sd.script, psd.script, '') AS resolved_script,
+				COALESCE(NULLIF(sd.script, ''), psd.script, '') AS resolved_script,
 				sd.script,
 				sd.status, sd.is_system,
 				sd.preconditions_expression, sd.display_name, sd.description,
@@ -231,7 +231,7 @@ func (r *PostgresRegistry) GetActive(ctx context.Context, name string) (*Definit
 		// Step 2: Fall back to platform default (is_system=TRUE) with platform reference support
 		platformQuery := `
 			SELECT sd.id, sd.name, sd.version,
-				COALESCE(sd.script, psd.script, '') AS resolved_script,
+				COALESCE(NULLIF(sd.script, ''), psd.script, '') AS resolved_script,
 				sd.script,
 				sd.status, sd.is_system,
 				sd.preconditions_expression, sd.display_name, sd.description,
@@ -274,7 +274,7 @@ func (r *PostgresRegistry) ListByStatus(ctx context.Context, status Status) ([]*
 	err := r.withReadTransaction(ctx, func(tx pgx.Tx) error {
 		query := `
 			SELECT sd.id, sd.name, sd.version,
-				COALESCE(sd.script, psd.script, '') AS resolved_script,
+				COALESCE(NULLIF(sd.script, ''), psd.script, '') AS resolved_script,
 				sd.script,
 				sd.status, sd.is_system,
 				sd.preconditions_expression, sd.display_name, sd.description,
