@@ -10,6 +10,7 @@ package saga
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -65,8 +66,13 @@ func (s *TenantMigrationSummary) Counts() (migrated, skipped, wouldMigrate int) 
 	return migrated, skipped, wouldMigrate
 }
 
+// ErrPartialMigrationFailure is returned when some tenants failed migration
+// while others succeeded. The summaries contain per-tenant details.
+var ErrPartialMigrationFailure = errors.New("some tenant migrations failed")
+
 // MigrateAllTenants runs the migration for multiple tenants.
 // When dryRun is true, reports what would change without making modifications.
+// Returns ErrPartialMigrationFailure if any tenant migration fails.
 func (m *PlatformRefMigrator) MigrateAllTenants(
 	ctx context.Context,
 	tenantIDs []tenant.TenantID,
@@ -77,6 +83,7 @@ func (m *PlatformRefMigrator) MigrateAllTenants(
 		"dry_run", dryRun)
 
 	summaries := make([]TenantMigrationSummary, 0, len(tenantIDs))
+	var failedCount int
 
 	for _, tid := range tenantIDs {
 		results, err := m.overrideService.MigrateToPlatformRef(ctx, tid, dryRun)
@@ -88,6 +95,7 @@ func (m *PlatformRefMigrator) MigrateAllTenants(
 		summaries = append(summaries, summary)
 
 		if err != nil {
+			failedCount++
 			m.logger.Error("migration failed for tenant",
 				"tenant_id", tid.String(),
 				"error", err)
@@ -100,6 +108,11 @@ func (m *PlatformRefMigrator) MigrateAllTenants(
 			"migrated", migrated,
 			"skipped", skipped,
 			"would_migrate", wouldMigrate)
+	}
+
+	if failedCount > 0 {
+		return summaries, fmt.Errorf("%w: %d of %d tenants failed",
+			ErrPartialMigrationFailure, failedCount, len(tenantIDs))
 	}
 
 	return summaries, nil
