@@ -9,9 +9,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/Masterminds/semver/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -48,12 +48,16 @@ func NewPlatformSync(pool *pgxpool.Pool) *PlatformSync {
 // SyncPlatformDefaults synchronizes all embedded saga definitions to the platform table.
 // This method is idempotent - running it multiple times with the same versions has no effect.
 //
-// The sync logic:
+// The sync logic uses INSERT-only semantics to preserve version history:
 //  1. Loads all embedded .star files from the defaults directory
 //  2. Extracts version from "# Version: X.Y.Z" comment in each script
-//  3. For each saga, compares embedded version with database version
-//  4. Updates if embedded version is newer (semver comparison)
-//  5. Inserts if saga doesn't exist in database
+//  3. For each saga, checks if the exact (name, version) pair already exists
+//  4. Inserts a new row if the (name, version) pair is not found
+//  5. Skips if the exact (name, version) already exists (idempotent)
+//
+// Old versions are never overwritten or deleted. This guarantees that running
+// saga instances which pinned a PlatformSagaVersionID at execution time can
+// always replay using the exact script they started with.
 func (s *PlatformSync) SyncPlatformDefaults(ctx context.Context) error {
 	s.logger.Info("starting platform saga sync")
 
@@ -109,8 +113,9 @@ func (s *PlatformSync) loadEmbeddedSagas() ([]PlatformSagaDefinition, error) {
 				"default_version", version)
 		}
 
-		// Generate deterministic UUID based on name
-		id := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("platform.saga."+meta.Name))
+		// Generate deterministic UUID based on name and version
+		// Each (name, version) pair gets a unique, reproducible ID
+		id := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("platform.saga."+meta.Name+"."+version))
 
 		sagas = append(sagas, PlatformSagaDefinition{
 			ID:          id,
@@ -140,64 +145,52 @@ func (s *PlatformSync) readEmbeddedScript(filename string) (string, error) {
 	return script, nil
 }
 
-// syncSaga syncs a single saga to the database.
-// Returns true if the saga was inserted/updated, false if skipped.
+// syncSaga syncs a single saga version to the database using INSERT-only semantics.
+// Returns true if the saga was inserted, false if skipped (already exists).
+//
+// Old versions are never modified or deleted. Each unique (name, version) pair
+// gets its own row, ensuring pinned saga instances can always replay correctly.
 func (s *PlatformSync) syncSaga(ctx context.Context, saga PlatformSagaDefinition) (bool, error) {
-	// Check if saga exists and get current version
-	var existingVersion string
+	// Check if exact (name, version) already exists
+	var existingID uuid.UUID
 	err := s.pool.QueryRow(ctx, `
-		SELECT version FROM public.platform_saga_definition WHERE name = $1
-	`, saga.Name).Scan(&existingVersion)
+		SELECT id FROM public.platform_saga_definition
+		WHERE name = $1 AND version = $2
+	`, saga.Name, saga.Version).Scan(&existingID)
 
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return false, fmt.Errorf("query existing version: %w", err)
 	}
 
-	if errors.Is(err, pgx.ErrNoRows) {
-		// Insert new saga
-		_, err = s.pool.Exec(ctx, `
-			INSERT INTO public.platform_saga_definition
-				(id, name, version, script, display_name, description)
-			VALUES ($1, $2, $3, $4, $5, $6)
-		`, saga.ID, saga.Name, saga.Version, saga.Script, saga.DisplayName, saga.Description)
-		if err != nil {
-			return false, fmt.Errorf("insert saga: %w", err)
-		}
-
-		s.logger.Info("inserted platform saga",
+	if err == nil {
+		// Exact (name, version) already exists - skip (idempotent)
+		s.logger.Debug("skipping saga (version already exists)",
 			"name", saga.Name,
 			"version", saga.Version)
-		return true, nil
-	}
-
-	// Compare versions using semver
-	shouldUpdate, err := shouldUpdateVersion(existingVersion, saga.Version)
-	if err != nil {
-		return false, fmt.Errorf("compare versions: %w", err)
-	}
-
-	if !shouldUpdate {
-		s.logger.Debug("skipping saga (version not newer)",
-			"name", saga.Name,
-			"existing_version", existingVersion,
-			"embedded_version", saga.Version)
 		return false, nil
 	}
 
-	// Update saga with newer version
+	// INSERT new row for this version
 	_, err = s.pool.Exec(ctx, `
-		UPDATE public.platform_saga_definition
-		SET version = $1, script = $2, display_name = $3, description = $4, updated_at = NOW()
-		WHERE name = $5
-	`, saga.Version, saga.Script, saga.DisplayName, saga.Description, saga.Name)
+		INSERT INTO public.platform_saga_definition
+			(id, name, version, script, display_name, description)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`, saga.ID, saga.Name, saga.Version, saga.Script, saga.DisplayName, saga.Description)
 	if err != nil {
-		return false, fmt.Errorf("update saga: %w", err)
+		// Handle race condition: another process may have inserted the same (name, version)
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			s.logger.Debug("saga version inserted by concurrent process",
+				"name", saga.Name,
+				"version", saga.Version)
+			return false, nil
+		}
+		return false, fmt.Errorf("insert saga: %w", err)
 	}
 
-	s.logger.Info("updated platform saga",
+	s.logger.Info("inserted platform saga",
 		"name", saga.Name,
-		"old_version", existingVersion,
-		"new_version", saga.Version)
+		"version", saga.Version)
 	return true, nil
 }
 
@@ -209,22 +202,6 @@ func extractVersionFromScript(script string) string {
 		return ""
 	}
 	return matches[1]
-}
-
-// shouldUpdateVersion returns true if newVersion is greater than existingVersion.
-// Uses semver comparison for proper version ordering.
-func shouldUpdateVersion(existingVersion, newVersion string) (bool, error) {
-	existingVer, err := semver.NewVersion(existingVersion)
-	if err != nil {
-		return false, fmt.Errorf("parse existing version %q: %w", existingVersion, err)
-	}
-
-	newVer, err := semver.NewVersion(newVersion)
-	if err != nil {
-		return false, fmt.Errorf("parse new version %q: %w", newVersion, err)
-	}
-
-	return newVer.GreaterThan(existingVer), nil
 }
 
 // humanizeName converts snake_case to Title Case.

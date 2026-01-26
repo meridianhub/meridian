@@ -75,77 +75,6 @@ func TestExtractVersionFromScript(t *testing.T) {
 	}
 }
 
-func TestShouldUpdateVersion(t *testing.T) {
-	tests := []struct {
-		name     string
-		existing string
-		new      string
-		expected bool
-		wantErr  bool
-	}{
-		{
-			name:     "new major version",
-			existing: "1.0.0",
-			new:      "2.0.0",
-			expected: true,
-		},
-		{
-			name:     "new minor version",
-			existing: "1.0.0",
-			new:      "1.1.0",
-			expected: true,
-		},
-		{
-			name:     "new patch version",
-			existing: "1.0.0",
-			new:      "1.0.1",
-			expected: true,
-		},
-		{
-			name:     "same version",
-			existing: "1.0.0",
-			new:      "1.0.0",
-			expected: false,
-		},
-		{
-			name:     "older version",
-			existing: "2.0.0",
-			new:      "1.0.0",
-			expected: false,
-		},
-		{
-			name:     "older minor version",
-			existing: "1.5.0",
-			new:      "1.4.9",
-			expected: false,
-		},
-		{
-			name:     "invalid existing version",
-			existing: "not-a-version",
-			new:      "1.0.0",
-			wantErr:  true,
-		},
-		{
-			name:     "invalid new version",
-			existing: "1.0.0",
-			new:      "invalid",
-			wantErr:  true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := shouldUpdateVersion(tt.existing, tt.new)
-			if tt.wantErr {
-				require.Error(t, err)
-				return
-			}
-			require.NoError(t, err)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
 func TestHumanizeName(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -208,7 +137,8 @@ func TestEmbeddedScriptsHaveVersionComments(t *testing.T) {
 	}
 }
 
-// setupPlatformTestDB creates a CockroachDB testcontainer with the platform migration applied.
+// setupPlatformTestDB creates a CockroachDB testcontainer with both the
+// platform saga definition migration and the unique constraint fix applied.
 func setupPlatformTestDB(t *testing.T) (*pgxpool.Pool, func()) {
 	t.Helper()
 
@@ -235,13 +165,21 @@ func setupPlatformTestDB(t *testing.T) (*pgxpool.Pool, func()) {
 	pool, err := pgxpool.New(ctx, connConfig.ConnString())
 	require.NoError(t, err)
 
-	// Apply platform saga definition migration
+	// Apply platform saga definition migration (creates table with UNIQUE(name))
 	migrationPath := filepath.Join("..", "migrations", "20260125000001_platform_saga_definition.sql")
 	migrationSQL, err := os.ReadFile(migrationPath)
-	require.NoError(t, err, "failed to read migration file")
+	require.NoError(t, err, "failed to read platform saga definition migration")
 
 	_, err = pool.Exec(ctx, string(migrationSQL))
-	require.NoError(t, err, "failed to apply migration")
+	require.NoError(t, err, "failed to apply platform saga definition migration")
+
+	// Apply unique constraint fix migration (UNIQUE(name) -> UNIQUE(name, version))
+	fixMigrationPath := filepath.Join("..", "migrations", "20260127000001_fix_platform_saga_unique_constraint.sql")
+	fixMigrationSQL, err := os.ReadFile(fixMigrationPath)
+	require.NoError(t, err, "failed to read unique constraint fix migration")
+
+	_, err = pool.Exec(ctx, string(fixMigrationSQL))
+	require.NoError(t, err, "failed to apply unique constraint fix migration")
 
 	cleanup := func() {
 		pool.Close()
@@ -287,20 +225,26 @@ func TestPlatformSync_SyncPlatformDefaults(t *testing.T) {
 	})
 
 	t.Run("idempotent sync - no changes when same version", func(t *testing.T) {
+		// Get initial row count
+		var initialCount int
+		err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM public.platform_saga_definition`).Scan(&initialCount)
+		require.NoError(t, err)
+
 		// Get initial updated_at timestamps
 		type sagaTimestamp struct {
 			name      string
+			version   string
 			updatedAt time.Time
 		}
 		var initialTimestamps []sagaTimestamp
 
-		rows, err := pool.Query(ctx, `SELECT name, updated_at FROM public.platform_saga_definition`)
+		rows, err := pool.Query(ctx, `SELECT name, version, updated_at FROM public.platform_saga_definition`)
 		require.NoError(t, err)
 		defer rows.Close()
 
 		for rows.Next() {
 			var ts sagaTimestamp
-			err := rows.Scan(&ts.name, &ts.updatedAt)
+			err := rows.Scan(&ts.name, &ts.version, &ts.updatedAt)
 			require.NoError(t, err)
 			initialTimestamps = append(initialTimestamps, ts)
 		}
@@ -313,109 +257,309 @@ func TestPlatformSync_SyncPlatformDefaults(t *testing.T) {
 		err = sync.SyncPlatformDefaults(ctx)
 		require.NoError(t, err)
 
-		// Verify timestamps haven't changed (compare full timestamps, not just Unix seconds)
+		// Verify no new rows were added
+		var currentCount int
+		err = pool.QueryRow(ctx, `SELECT COUNT(*) FROM public.platform_saga_definition`).Scan(&currentCount)
+		require.NoError(t, err)
+		assert.Equal(t, initialCount, currentCount, "no new rows should be added on idempotent sync")
+
+		// Verify timestamps haven't changed
 		for _, initial := range initialTimestamps {
 			var currentUpdatedAt time.Time
 			err := pool.QueryRow(ctx, `
-				SELECT updated_at FROM public.platform_saga_definition WHERE name = $1
-			`, initial.name).Scan(&currentUpdatedAt)
+				SELECT updated_at FROM public.platform_saga_definition
+				WHERE name = $1 AND version = $2
+			`, initial.name, initial.version).Scan(&currentUpdatedAt)
 			require.NoError(t, err)
 			require.True(t, currentUpdatedAt.Equal(initial.updatedAt),
-				"updated_at should not change for %s when version is same", initial.name)
+				"updated_at should not change for %s@%s when version is same", initial.name, initial.version)
 		}
 	})
 
-	t.Run("deterministic UUIDs", func(t *testing.T) {
-		// Verify UUIDs are deterministic based on saga name
+	t.Run("deterministic UUIDs based on name and version", func(t *testing.T) {
+		// Verify UUIDs are deterministic based on saga name and version
 		for _, meta := range PlatformDefaults() {
-			expectedID := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("platform.saga."+meta.Name))
+			// Get the version from the embedded script
+			script, err := GetEmbeddedScripts()
+			require.NoError(t, err)
+			version := extractVersionFromScript(script[meta.Filename])
+			if version == "" {
+				version = "1.0.0"
+			}
+
+			expectedID := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("platform.saga."+meta.Name+"."+version))
 
 			var actualID uuid.UUID
-			err := pool.QueryRow(ctx, `
-				SELECT id FROM public.platform_saga_definition WHERE name = $1
-			`, meta.Name).Scan(&actualID)
+			err = pool.QueryRow(ctx, `
+				SELECT id FROM public.platform_saga_definition
+				WHERE name = $1 AND version = $2
+			`, meta.Name, version).Scan(&actualID)
 			require.NoError(t, err)
 			assert.Equal(t, expectedID, actualID,
-				"UUID for %s should be deterministic", meta.Name)
+				"UUID for %s@%s should be deterministic", meta.Name, version)
 		}
 	})
 }
 
-func TestPlatformSync_VersionUpdate(t *testing.T) {
+func TestPlatformSync_InsertOnlyBehavior(t *testing.T) {
 	pool, cleanup := setupPlatformTestDB(t)
 	defer cleanup()
 
 	ctx := context.Background()
 
-	t.Run("updates saga when version is newer", func(t *testing.T) {
-		// Insert a saga with old version directly
-		id := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("platform.saga.test_saga"))
+	t.Run("inserts new version as separate row", func(t *testing.T) {
+		// Insert v1.0.0
+		oldID := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("platform.saga.test_saga.1.0.0"))
 		_, err := pool.Exec(ctx, `
 			INSERT INTO public.platform_saga_definition
 				(id, name, version, script, display_name, description)
-			VALUES ($1, 'test_saga', '0.0.1', 'old script', 'Old Name', 'Old description')
-		`, id)
+			VALUES ($1, 'test_saga', '1.0.0', 'old script v1', 'Old Name', 'Old description')
+		`, oldID)
 		require.NoError(t, err)
 
-		// Create sync and manually sync a newer version
+		// Sync v2.0.0 via syncSaga
 		sync := NewPlatformSync(pool)
+		newID := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("platform.saga.test_saga.2.0.0"))
 		synced, err := sync.syncSaga(ctx, PlatformSagaDefinition{
-			ID:          id,
+			ID:          newID,
 			Name:        "test_saga",
-			Version:     "1.0.0",
-			Script:      "new script",
+			Version:     "2.0.0",
+			Script:      "new script v2",
 			DisplayName: "New Name",
 			Description: "New description",
 		})
 		require.NoError(t, err)
-		assert.True(t, synced, "saga should be updated with newer version")
+		assert.True(t, synced, "new version should be inserted")
 
-		// Verify update
-		var version, script, displayName string
+		// Verify both versions exist
+		var count int
 		err = pool.QueryRow(ctx, `
-			SELECT version, script, display_name
-			FROM public.platform_saga_definition
-			WHERE name = 'test_saga'
-		`).Scan(&version, &script, &displayName)
+			SELECT COUNT(*) FROM public.platform_saga_definition WHERE name = 'test_saga'
+		`).Scan(&count)
 		require.NoError(t, err)
-		assert.Equal(t, "1.0.0", version)
-		assert.Equal(t, "new script", script)
-		assert.Equal(t, "New Name", displayName)
+		assert.Equal(t, 2, count, "both v1 and v2 should exist")
+
+		// Verify old version is untouched
+		var oldScript string
+		err = pool.QueryRow(ctx, `
+			SELECT script FROM public.platform_saga_definition
+			WHERE name = 'test_saga' AND version = '1.0.0'
+		`).Scan(&oldScript)
+		require.NoError(t, err)
+		assert.Equal(t, "old script v1", oldScript, "old version script should be unchanged")
+
+		// Verify new version has new data
+		var newScript string
+		err = pool.QueryRow(ctx, `
+			SELECT script FROM public.platform_saga_definition
+			WHERE name = 'test_saga' AND version = '2.0.0'
+		`).Scan(&newScript)
+		require.NoError(t, err)
+		assert.Equal(t, "new script v2", newScript, "new version should have new script")
 	})
 
-	t.Run("skips saga when version is older", func(t *testing.T) {
-		// Insert a saga with newer version directly
-		id := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("platform.saga.skip_test"))
-		_, err := pool.Exec(ctx, `
-			INSERT INTO public.platform_saga_definition
-				(id, name, version, script, display_name, description)
-			VALUES ($1, 'skip_test', '2.0.0', 'existing script', 'Existing Name', 'Existing description')
-		`, id)
-		require.NoError(t, err)
-
-		// Try to sync with older version
+	t.Run("insert same version twice is idempotent", func(t *testing.T) {
 		sync := NewPlatformSync(pool)
-		synced, err := sync.syncSaga(ctx, PlatformSagaDefinition{
+		id := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("platform.saga.idempotent_saga.1.0.0"))
+
+		saga := PlatformSagaDefinition{
 			ID:          id,
-			Name:        "skip_test",
+			Name:        "idempotent_saga",
 			Version:     "1.0.0",
-			Script:      "older script",
-			DisplayName: "Older Name",
-			Description: "Older description",
+			Script:      "idempotent script",
+			DisplayName: "Idempotent",
+			Description: "Test idempotency",
+		}
+
+		// First insert
+		synced, err := sync.syncSaga(ctx, saga)
+		require.NoError(t, err)
+		assert.True(t, synced, "first insert should succeed")
+
+		// Second insert of same (name, version) - should be skipped
+		synced, err = sync.syncSaga(ctx, saga)
+		require.NoError(t, err)
+		assert.False(t, synced, "duplicate (name, version) should be skipped")
+
+		// Verify only one row exists
+		var count int
+		err = pool.QueryRow(ctx, `
+			SELECT COUNT(*) FROM public.platform_saga_definition
+			WHERE name = 'idempotent_saga' AND version = '1.0.0'
+		`).Scan(&count)
+		require.NoError(t, err)
+		assert.Equal(t, 1, count, "exactly one row should exist for same (name, version)")
+	})
+
+	t.Run("multiple versions of same saga coexist in database", func(t *testing.T) {
+		sync := NewPlatformSync(pool)
+		versions := []string{"1.0.0", "1.1.0", "2.0.0"}
+
+		for _, v := range versions {
+			id := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("platform.saga.multi_version."+v))
+			synced, err := sync.syncSaga(ctx, PlatformSagaDefinition{
+				ID:          id,
+				Name:        "multi_version",
+				Version:     v,
+				Script:      "script for " + v,
+				DisplayName: "Multi Version",
+				Description: "Version " + v,
+			})
+			require.NoError(t, err)
+			assert.True(t, synced, "version %s should be inserted", v)
+		}
+
+		// All three versions should exist
+		var count int
+		err := pool.QueryRow(ctx, `
+			SELECT COUNT(*) FROM public.platform_saga_definition
+			WHERE name = 'multi_version'
+		`).Scan(&count)
+		require.NoError(t, err)
+		assert.Equal(t, 3, count, "all three versions should coexist")
+
+		// Each version should have its own script
+		for _, v := range versions {
+			var script string
+			err := pool.QueryRow(ctx, `
+				SELECT script FROM public.platform_saga_definition
+				WHERE name = 'multi_version' AND version = $1
+			`, v).Scan(&script)
+			require.NoError(t, err)
+			assert.Equal(t, "script for "+v, script, "version %s should have correct script", v)
+		}
+	})
+
+	t.Run("old versions remain accessible after inserting new version", func(t *testing.T) {
+		sync := NewPlatformSync(pool)
+
+		// Insert v1.0.0
+		v1ID := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("platform.saga.retained_saga.1.0.0"))
+		synced, err := sync.syncSaga(ctx, PlatformSagaDefinition{
+			ID:          v1ID,
+			Name:        "retained_saga",
+			Version:     "1.0.0",
+			Script:      "original script content",
+			DisplayName: "Retained Saga",
+			Description: "Original version",
 		})
 		require.NoError(t, err)
-		assert.False(t, synced, "saga should not be updated with older version")
+		assert.True(t, synced)
 
-		// Verify no update
-		var version, script string
+		// Record the v1.0.0 data
+		var v1Script string
+		var v1UpdatedAt time.Time
 		err = pool.QueryRow(ctx, `
-			SELECT version, script
-			FROM public.platform_saga_definition
-			WHERE name = 'skip_test'
-		`).Scan(&version, &script)
+			SELECT script, updated_at FROM public.platform_saga_definition
+			WHERE id = $1
+		`, v1ID).Scan(&v1Script, &v1UpdatedAt)
 		require.NoError(t, err)
-		assert.Equal(t, "2.0.0", version, "version should remain unchanged")
-		assert.Equal(t, "existing script", script, "script should remain unchanged")
+		assert.Equal(t, "original script content", v1Script)
+
+		// Insert v2.0.0
+		v2ID := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("platform.saga.retained_saga.2.0.0"))
+		synced, err = sync.syncSaga(ctx, PlatformSagaDefinition{
+			ID:          v2ID,
+			Name:        "retained_saga",
+			Version:     "2.0.0",
+			Script:      "updated script content",
+			DisplayName: "Retained Saga",
+			Description: "Updated version",
+		})
+		require.NoError(t, err)
+		assert.True(t, synced)
+
+		// Verify v1.0.0 is completely unchanged (script, timestamps)
+		var v1ScriptAfter string
+		var v1UpdatedAtAfter time.Time
+		err = pool.QueryRow(ctx, `
+			SELECT script, updated_at FROM public.platform_saga_definition
+			WHERE id = $1
+		`, v1ID).Scan(&v1ScriptAfter, &v1UpdatedAtAfter)
+		require.NoError(t, err)
+		assert.Equal(t, "original script content", v1ScriptAfter, "v1 script must be unchanged")
+		assert.True(t, v1UpdatedAtAfter.Equal(v1UpdatedAt), "v1 updated_at must be unchanged")
+
+		// Verify both are independently accessible by ID
+		var v2Script string
+		err = pool.QueryRow(ctx, `
+			SELECT script FROM public.platform_saga_definition WHERE id = $1
+		`, v2ID).Scan(&v2Script)
+		require.NoError(t, err)
+		assert.Equal(t, "updated script content", v2Script)
+	})
+}
+
+func TestPlatformSync_ReplayDeterminism(t *testing.T) {
+	pool, cleanup := setupPlatformTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	sync := NewPlatformSync(pool)
+
+	t.Run("pinned version survives new platform inserts", func(t *testing.T) {
+		// Simulate the production scenario:
+		// 1. v1.0.0 is synced to platform table
+		// 2. A saga instance starts and pins PlatformSagaVersionID = v1.0.0 row ID
+		// 3. v1.1.0 is synced (new release)
+		// 4. The running instance replays using the pinned v1.0.0 ID
+		// 5. The v1.0.0 script must still be the original content
+
+		v1Script := "# Version: 1.0.0\ndef posting_rules(ctx):\n    return debit('clearing', ctx.amount)"
+		v1ID := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("platform.saga.replay_test.1.0.0"))
+
+		// Step 1: Sync v1.0.0
+		synced, err := sync.syncSaga(ctx, PlatformSagaDefinition{
+			ID:      v1ID,
+			Name:    "replay_test",
+			Version: "1.0.0",
+			Script:  v1Script,
+		})
+		require.NoError(t, err)
+		assert.True(t, synced)
+
+		// Step 2: Simulate pinning - record the ID and compute script hash
+		pinnedVersionID := v1ID
+		pinnedHash := ComputeScriptHash(v1Script)
+
+		// Step 3: Sync v1.1.0 (simulates a platform upgrade)
+		v2Script := "# Version: 1.1.0\ndef posting_rules(ctx):\n    return debit('clearing', ctx.amount) + credit('revenue', ctx.fee)"
+		v2ID := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("platform.saga.replay_test.1.1.0"))
+
+		synced, err = sync.syncSaga(ctx, PlatformSagaDefinition{
+			ID:      v2ID,
+			Name:    "replay_test",
+			Version: "1.1.0",
+			Script:  v2Script,
+		})
+		require.NoError(t, err)
+		assert.True(t, synced)
+
+		// Step 4: Replay using pinned version ID - load the script
+		var replayScript string
+		err = pool.QueryRow(ctx, `
+			SELECT script FROM public.platform_saga_definition WHERE id = $1
+		`, pinnedVersionID).Scan(&replayScript)
+		require.NoError(t, err)
+
+		// Step 5: Verify the replay script matches the original
+		assert.Equal(t, v1Script, replayScript,
+			"replayed script must match the original v1.0.0 content")
+
+		// Verify hash still matches (deterministic replay)
+		replayHash := ComputeScriptHash(replayScript)
+		assert.Equal(t, pinnedHash, replayHash,
+			"script hash must match the pinned hash for replay determinism")
+
+		// Also verify that the v1.1.0 version exists separately
+		var v2ScriptFromDB string
+		err = pool.QueryRow(ctx, `
+			SELECT script FROM public.platform_saga_definition WHERE id = $1
+		`, v2ID).Scan(&v2ScriptFromDB)
+		require.NoError(t, err)
+		assert.Equal(t, v2Script, v2ScriptFromDB)
+		assert.NotEqual(t, v1Script, v2ScriptFromDB,
+			"v1.1.0 script should differ from v1.0.0")
 	})
 }
 
@@ -437,18 +581,34 @@ func TestPlatformSync_MigrationConstraints(t *testing.T) {
 		assert.Contains(t, err.Error(), "23514")
 	})
 
-	t.Run("rejects duplicate name", func(t *testing.T) {
+	t.Run("allows same name with different versions", func(t *testing.T) {
 		_, err := pool.Exec(ctx, `
 			INSERT INTO public.platform_saga_definition
 				(name, version, script)
-			VALUES ('duplicate_test', '1.0.0', 'script1')
+			VALUES ('multi_version_test', '1.0.0', 'script1')
 		`)
 		require.NoError(t, err)
 
 		_, err = pool.Exec(ctx, `
 			INSERT INTO public.platform_saga_definition
 				(name, version, script)
-			VALUES ('duplicate_test', '2.0.0', 'script2')
+			VALUES ('multi_version_test', '2.0.0', 'script2')
+		`)
+		require.NoError(t, err, "same name with different version should be allowed")
+	})
+
+	t.Run("rejects duplicate name and version", func(t *testing.T) {
+		_, err := pool.Exec(ctx, `
+			INSERT INTO public.platform_saga_definition
+				(name, version, script)
+			VALUES ('dup_name_version', '1.0.0', 'script1')
+		`)
+		require.NoError(t, err)
+
+		_, err = pool.Exec(ctx, `
+			INSERT INTO public.platform_saga_definition
+				(name, version, script)
+			VALUES ('dup_name_version', '1.0.0', 'script2')
 		`)
 		require.Error(t, err)
 		// CockroachDB uses SQLSTATE 23505 for unique constraint violations.

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -260,7 +261,17 @@ func applyMigrationsToSchema(t *testing.T, pool *pgxpool.Pool, service string, s
 			t.Fatalf("Failed to read migration %s: %v", entry.Name(), err)
 		}
 
-		_, err = tx.Exec(ctx, string(content))
+		// CockroachDB-specific migrations may need PostgreSQL adaptation.
+		// DROP INDEX CASCADE for unique constraints must be converted to ALTER TABLE DROP CONSTRAINT.
+		sql := string(content)
+		if strings.Contains(sql, `DROP INDEX IF EXISTS "public"."uq_platform_saga_definition_name" CASCADE`) {
+			_, err = tx.Exec(ctx, `ALTER TABLE "public"."platform_saga_definition" DROP CONSTRAINT IF EXISTS "uq_platform_saga_definition_name"`)
+			if err != nil {
+				t.Fatalf("Failed to drop constraint (PostgreSQL compat) before migration %s: %v", entry.Name(), err)
+			}
+		}
+
+		_, err = tx.Exec(ctx, sql)
 		if err != nil {
 			t.Fatalf("Failed to apply migration %s to schema %s: %v", entry.Name(), schemaName, err)
 		}
