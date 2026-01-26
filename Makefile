@@ -29,7 +29,7 @@ GOMOD=$(GOCMD) mod
 GOGET=$(GOCMD) get
 GOFMT=$(GOCMD) fmt
 
-.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-openapi proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt validate-semconv migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-status-all migrate-lint-all migrate-hash-all migrate-apply-orgs migrate-status-orgs docs
+.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-openapi proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt validate-semconv migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-status-all migrate-lint-all migrate-hash-all migrate-apply-orgs migrate-status-orgs docs generate-saga-docs
 
 # Default target
 all: help
@@ -72,6 +72,9 @@ help:
 	@echo "  make migrate-hash-all          - Verify all migration checksums"
 	@echo "  make migrate-apply-orgs        - Apply migrations to all organization schemas"
 	@echo "  make migrate-status-orgs       - Show migration status for all organization schemas"
+	@echo ""
+	@echo "Documentation targets:"
+	@echo "  make generate-saga-docs        - Generate Markdown and JSON Schema docs for saga handlers"
 	@echo ""
 	@echo "Variables:"
 	@echo "  VERSION=$(VERSION)"
@@ -380,3 +383,9 @@ docs:
 	@echo "Press Ctrl+C to stop"
 	@command -v pkgsite >/dev/null 2>&1 || { echo "Installing pkgsite..."; go install golang.org/x/pkgsite/cmd/pkgsite@latest; }
 	@pkgsite -open=false -http=:6060
+
+## generate-saga-docs: Generate Markdown and JSON Schema documentation for saga handlers
+generate-saga-docs:
+	@echo "Generating saga handler documentation..."
+	@go run tools/saga-doc-gen/main.go tools/saga-doc-gen/generator.go -schema-dir=shared/pkg/saga/schema -output-dir=docs
+	@echo "Documentation generated successfully"
