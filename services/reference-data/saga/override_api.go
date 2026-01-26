@@ -28,6 +28,11 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
+// migrationSimilarityThreshold is the threshold for considering a tenant script
+// identical to the platform default during migration. Intentionally stricter (0.95)
+// than the override threshold (0.90) because migration targets near-identical copies.
+const migrationSimilarityThreshold = 0.95
+
 // Override error types.
 var (
 	// ErrAlreadyOverridden is returned when attempting to override a saga that
@@ -334,12 +339,12 @@ func (s *OverrideService) evaluateCandidate(
 		}, nil
 	}
 
-	simResult := ComputeSimilarityWithThreshold(ts.script, platformSaga.Script, 0.95)
+	simResult := ComputeSimilarityWithThreshold(ts.script, platformSaga.Script, migrationSimilarityThreshold)
 	if !simResult.TooSimilar {
 		return MigrationResult{
 			SagaName:        ts.name,
 			SagaID:          ts.id,
-			Action:          "skipped",
+			Action:          MigrationActionSkipped,
 			Reason:          fmt.Sprintf("script differs from platform (%.1f%% similar)", simResult.Ratio*100),
 			SimilarityRatio: simResult.Ratio,
 		}, nil

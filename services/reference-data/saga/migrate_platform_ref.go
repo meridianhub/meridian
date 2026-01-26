@@ -12,6 +12,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -107,19 +108,19 @@ func (m *PlatformRefMigrator) MigrateAllTenants(
 // FormatReport generates a human-readable migration report.
 func FormatReport(summaries []TenantMigrationSummary, dryRun bool) string {
 	var totalMigrated, totalSkipped, totalWouldMigrate, totalErrors int
+	var b strings.Builder
 
-	var report string
 	if dryRun {
-		report = "=== Platform Reference Migration Report (DRY RUN) ===\n\n"
+		b.WriteString("=== Platform Reference Migration Report (DRY RUN) ===\n\n")
 	} else {
-		report = "=== Platform Reference Migration Report ===\n\n"
+		b.WriteString("=== Platform Reference Migration Report ===\n\n")
 	}
 
 	for _, s := range summaries {
-		report += fmt.Sprintf("Tenant: %s\n", s.TenantID)
+		fmt.Fprintf(&b, "Tenant: %s\n", s.TenantID)
 
 		if s.Error != nil {
-			report += fmt.Sprintf("  ERROR: %v\n", s.Error)
+			fmt.Fprintf(&b, "  ERROR: %v\n", s.Error)
 			totalErrors++
 			continue
 		}
@@ -130,24 +131,24 @@ func FormatReport(summaries []TenantMigrationSummary, dryRun bool) string {
 		totalWouldMigrate += wouldMigrate
 
 		for _, r := range s.Results {
-			report += fmt.Sprintf("  [%s] %s: %s", r.Action, r.SagaName, r.Reason)
+			fmt.Fprintf(&b, "  [%s] %s: %s", r.Action, r.SagaName, r.Reason)
 			if r.PlatformRefID != nil {
-				report += fmt.Sprintf(" (platform_ref=%s)", r.PlatformRefID)
+				fmt.Fprintf(&b, " (platform_ref=%s)", r.PlatformRefID)
 			}
-			report += "\n"
+			b.WriteString("\n")
 		}
-		report += "\n"
+		b.WriteString("\n")
 	}
 
-	report += "=== Summary ===\n"
-	report += fmt.Sprintf("Tenants processed: %d\n", len(summaries))
+	b.WriteString("=== Summary ===\n")
+	fmt.Fprintf(&b, "Tenants processed: %d\n", len(summaries))
 	if dryRun {
-		report += fmt.Sprintf("Would migrate: %d\n", totalWouldMigrate)
+		fmt.Fprintf(&b, "Would migrate: %d\n", totalWouldMigrate)
 	} else {
-		report += fmt.Sprintf("Migrated: %d\n", totalMigrated)
+		fmt.Fprintf(&b, "Migrated: %d\n", totalMigrated)
 	}
-	report += fmt.Sprintf("Skipped: %d\n", totalSkipped)
-	report += fmt.Sprintf("Errors: %d\n", totalErrors)
+	fmt.Fprintf(&b, "Skipped: %d\n", totalSkipped)
+	fmt.Fprintf(&b, "Errors: %d\n", totalErrors)
 
-	return report
+	return b.String()
 }
