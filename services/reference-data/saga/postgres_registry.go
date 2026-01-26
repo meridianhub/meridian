@@ -737,12 +737,19 @@ func (r *PostgresRegistry) GetPlatformSagaByID(ctx context.Context, id uuid.UUID
 	return &psd, nil
 }
 
-// GetPlatformSagaByName retrieves a platform saga definition by name from the public schema.
+// GetPlatformSagaByName retrieves the latest version of a platform saga definition
+// by name from the public schema. When multiple versions exist, returns the one
+// with the highest semver version string.
 func (r *PostgresRegistry) GetPlatformSagaByName(ctx context.Context, name string) (*PlatformSagaDefinition, error) {
 	query := `
 		SELECT id, name, version, script, display_name, description
 		FROM public.platform_saga_definition
-		WHERE name = $1`
+		WHERE name = $1
+		ORDER BY
+			split_part(version, '.', 1)::int DESC,
+			split_part(version, '.', 2)::int DESC,
+			split_part(version, '.', 3)::int DESC
+		LIMIT 1`
 
 	row := r.pool.QueryRow(ctx, query, name)
 

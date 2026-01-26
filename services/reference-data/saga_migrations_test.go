@@ -87,6 +87,7 @@ func applySagaMigrations(t *testing.T, pool *pgxpool.Pool) {
 		"20260124000002_saga_references.sql",
 		"20260125000001_platform_saga_definition.sql",
 		"20260125000002_extend_saga_definition_platform_ref.sql",
+		"20260127000001_fix_platform_saga_unique_constraint.sql",
 	}
 
 	for _, migration := range migrations {
@@ -94,7 +95,13 @@ func applySagaMigrations(t *testing.T, pool *pgxpool.Pool) {
 		migrationSQL, err := os.ReadFile(migrationPath)
 		require.NoError(t, err, "failed to read migration file: %s", migration)
 
-		_, err = pool.Exec(ctx, string(migrationSQL))
+		// CockroachDB-specific DDL needs adaptation for PostgreSQL test containers.
+		sql := strings.ReplaceAll(string(migrationSQL),
+			`DROP INDEX IF EXISTS "public"."uq_platform_saga_definition_name" CASCADE`,
+			`ALTER TABLE "public"."platform_saga_definition" DROP CONSTRAINT IF EXISTS "uq_platform_saga_definition_name"`,
+		)
+
+		_, err = pool.Exec(ctx, sql)
 		require.NoError(t, err, "failed to apply migration: %s", migration)
 	}
 }
