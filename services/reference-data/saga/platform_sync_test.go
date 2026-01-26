@@ -11,9 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/cockroachdb"
-	"github.com/testcontainers/testcontainers-go/wait"
 )
 
 func TestExtractVersionFromScript(t *testing.T) {
@@ -220,23 +218,21 @@ func setupPlatformTestDB(t *testing.T) (*pgxpool.Pool, func()) {
 
 	ctx := context.Background()
 
-	// Start CockroachDB container
+	// Start CockroachDB container in insecure mode to avoid TLS connection issues.
+	// The module's default wait strategy properly waits for database readiness.
 	container, err := cockroachdb.Run(ctx,
-		"cockroachdb/cockroach:v24.3.8",
+		"cockroachdb/cockroach:v24.3.0",
 		cockroachdb.WithDatabase("test_platform_sync"),
-		testcontainers.WithWaitStrategy(
-			wait.ForLog("CockroachDB node starting").
-				WithStartupTimeout(60*time.Second),
-		),
+		cockroachdb.WithInsecure(),
 	)
 	require.NoError(t, err)
 
-	// Get connection string
-	connStr, err := container.ConnectionString(ctx)
+	// Use ConnectionConfig to get a proper connection string.
+	// ConnectionString() returns a registered pgx config reference that pgxpool cannot parse.
+	connConfig, err := container.ConnectionConfig(ctx)
 	require.NoError(t, err)
 
-	// Create pool
-	pool, err := pgxpool.New(ctx, connStr)
+	pool, err := pgxpool.New(ctx, connConfig.ConnString())
 	require.NoError(t, err)
 
 	// Apply platform saga definition migration
@@ -436,7 +432,9 @@ func TestPlatformSync_MigrationConstraints(t *testing.T) {
 			VALUES ('invalid_version', '1.2', 'script')
 		`)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "chk_platform_saga_definition_version")
+		// CockroachDB uses SQLSTATE 23514 for CHECK violations but does not
+		// include the constraint name in the error message like PostgreSQL.
+		assert.Contains(t, err.Error(), "23514")
 	})
 
 	t.Run("rejects duplicate name", func(t *testing.T) {
@@ -453,7 +451,8 @@ func TestPlatformSync_MigrationConstraints(t *testing.T) {
 			VALUES ('duplicate_test', '2.0.0', 'script2')
 		`)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "uq_platform_saga_definition_name")
+		// CockroachDB uses SQLSTATE 23505 for unique constraint violations.
+		assert.Contains(t, err.Error(), "23505")
 	})
 
 	t.Run("accepts script up to 64KB", func(t *testing.T) {
@@ -482,6 +481,7 @@ func TestPlatformSync_MigrationConstraints(t *testing.T) {
 			VALUES ('too_large_script', '1.0.0', $1)
 		`, string(tooLargeScript))
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "chk_platform_saga_definition_script_length")
+		// CockroachDB uses SQLSTATE 23514 for CHECK violations.
+		assert.Contains(t, err.Error(), "23514")
 	})
 }

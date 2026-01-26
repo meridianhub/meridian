@@ -259,9 +259,9 @@ func wrapHandler(fullName string, handler saga.DomainHandler, handlerDef *Handle
 			return nil, err
 		}
 
-		// Convert Decimal parameters from string/int/float
-		if err := convertDecimalParams(params, handlerDef); err != nil {
-			return nil, err
+		// Coerce all parameters to their schema-defined types
+		if err := CoerceParams(params, handlerDef); err != nil {
+			return nil, fmt.Errorf("handler %s: %w", fullName, err)
 		}
 
 		// Validate parameters against schema
@@ -296,22 +296,6 @@ func convertKwargsToParams(kwargs []starlark.Tuple) (map[string]any, error) {
 		params[key] = value
 	}
 	return params, nil
-}
-
-// convertDecimalParams converts Decimal-typed parameters from string/int/float to decimal.Decimal.
-func convertDecimalParams(params map[string]any, handlerDef *HandlerDef) error {
-	for paramName, fieldDef := range handlerDef.Params {
-		if fieldDef.Type == TypeDecimal {
-			if val, ok := params[paramName]; ok {
-				dec, err := toDecimal(val)
-				if err != nil {
-					return fmt.Errorf("parameter %s: %w", paramName, err)
-				}
-				params[paramName] = dec
-			}
-		}
-	}
-	return nil
 }
 
 // setStarlarkContext stores the StarlarkContext in thread-local storage.

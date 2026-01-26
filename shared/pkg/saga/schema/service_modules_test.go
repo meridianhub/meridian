@@ -817,6 +817,211 @@ func TestWrapHandler_MapParameter(t *testing.T) {
 	assert.Equal(t, "Test", receivedEntity["name"])
 }
 
+// TestWrapHandler_IntegerCoercion tests that integer types are coerced through wrapHandler.
+func TestWrapHandler_IntegerCoercion(t *testing.T) {
+	var receivedCount int32
+	var receivedVersion uint32
+	var receivedTimestamp int64
+	handler := func(_ *saga.StarlarkContext, params map[string]any) (any, error) {
+		if v, ok := params["count"]; ok {
+			receivedCount = v.(int32)
+		}
+		if v, ok := params["version"]; ok {
+			receivedVersion = v.(uint32)
+		}
+		if v, ok := params["timestamp"]; ok {
+			receivedTimestamp = v.(int64)
+		}
+		return map[string]any{"status": "ok"}, nil
+	}
+
+	handlerDef := &HandlerDef{
+		Params: map[string]*FieldDef{
+			"count":     {Type: TypeInt32, Required: true},
+			"version":   {Type: TypeUint32, Required: true},
+			"timestamp": {Type: TypeInt64, Required: true},
+		},
+		Returns: map[string]*FieldDef{
+			"status": {Type: TypeString},
+		},
+	}
+
+	starlarkCtx := &saga.StarlarkContext{
+		Context:         context.Background(),
+		SagaExecutionID: uuid.New(),
+		Logger:          slog.Default(),
+	}
+
+	builtin := wrapHandler("test.handler", handler, handlerDef)
+	thread := &starlark.Thread{Name: "test"}
+	setStarlarkContext(thread, starlarkCtx)
+
+	t.Run("int32 coercion from Starlark int", func(t *testing.T) {
+		kwargs := []starlark.Tuple{
+			{starlark.String("count"), starlark.MakeInt(42)},
+			{starlark.String("version"), starlark.MakeUint(100)},
+			{starlark.String("timestamp"), starlark.MakeInt64(1706000000)},
+		}
+		_, err := builtin.CallInternal(thread, nil, kwargs)
+		require.NoError(t, err)
+		assert.Equal(t, int32(42), receivedCount)
+		assert.Equal(t, uint32(100), receivedVersion)
+		assert.Equal(t, int64(1706000000), receivedTimestamp)
+	})
+
+	t.Run("int32 overflow rejected", func(t *testing.T) {
+		kwargs := []starlark.Tuple{
+			{starlark.String("count"), starlark.MakeInt64(3000000000)}, // > MaxInt32
+			{starlark.String("version"), starlark.MakeUint(1)},
+			{starlark.String("timestamp"), starlark.MakeInt64(1)},
+		}
+		_, err := builtin.CallInternal(thread, nil, kwargs)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "int32")
+		assert.Contains(t, err.Error(), "count")
+	})
+
+	t.Run("uint32 negative rejected", func(t *testing.T) {
+		kwargs := []starlark.Tuple{
+			{starlark.String("count"), starlark.MakeInt(1)},
+			{starlark.String("version"), starlark.MakeInt(-1)}, // negative for uint32
+			{starlark.String("timestamp"), starlark.MakeInt64(1)},
+		}
+		_, err := builtin.CallInternal(thread, nil, kwargs)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "uint32")
+		assert.Contains(t, err.Error(), "version")
+	})
+}
+
+// TestIntegration_NumericCoercion tests end-to-end numeric coercion via Starlark script.
+func TestIntegration_NumericCoercion(t *testing.T) {
+	var receivedCount int32
+	var receivedVersion uint32
+
+	registry := saga.NewDomainHandlerRegistry()
+	_ = registry.Register("test_service.process", func(_ *saga.StarlarkContext, params map[string]any) (any, error) {
+		receivedCount = params["count"].(int32)
+		receivedVersion = params["version"].(uint32)
+		return map[string]any{"processed": true}, nil
+	})
+
+	schemaRegistry := NewRegistry()
+	err := schemaRegistry.LoadFromYAML([]byte(`
+service: test
+version: "1.0"
+handlers:
+  test_service.process:
+    description: "Process with numeric types"
+    params:
+      count:
+        type: int32
+        required: true
+      version:
+        type: uint32
+        required: true
+    returns:
+      processed:
+        type: bool
+`))
+	require.NoError(t, err)
+
+	modules, err := BuildServiceModules(registry, schemaRegistry)
+	require.NoError(t, err)
+
+	starlarkCtx := &saga.StarlarkContext{
+		Context:         context.Background(),
+		SagaExecutionID: uuid.New(),
+		CorrelationID:   uuid.New(),
+		KnowledgeAt:     time.Now(),
+		Logger:          slog.Default(),
+	}
+
+	thread := &starlark.Thread{Name: "test_saga"}
+	setStarlarkContext(thread, starlarkCtx)
+
+	predeclared := starlark.StringDict{
+		"True":  starlark.True,
+		"False": starlark.False,
+		"None":  starlark.None,
+	}
+	for name, module := range modules {
+		predeclared[name] = module
+	}
+
+	script := `
+result = test_service.process(
+    count=10,
+    version=42
+)
+output_processed = result.processed
+`
+
+	globals, err := starlark.ExecFileOptions(&syntax.FileOptions{}, thread, "test.star", script, predeclared)
+	require.NoError(t, err)
+
+	processedVal, ok := globals["output_processed"]
+	require.True(t, ok)
+	assert.Equal(t, starlark.Bool(true), processedVal)
+	assert.Equal(t, int32(10), receivedCount)
+	assert.Equal(t, uint32(42), receivedVersion)
+}
+
+// TestIntegration_OverflowRejectedFromStarlark tests that overflow is caught end-to-end.
+func TestIntegration_OverflowRejectedFromStarlark(t *testing.T) {
+	registry := saga.NewDomainHandlerRegistry()
+	_ = registry.Register("test_service.process", func(_ *saga.StarlarkContext, _ map[string]any) (any, error) {
+		return map[string]any{"ok": true}, nil
+	})
+
+	schemaRegistry := NewRegistry()
+	err := schemaRegistry.LoadFromYAML([]byte(`
+service: test
+version: "1.0"
+handlers:
+  test_service.process:
+    description: "Process with numeric types"
+    params:
+      count:
+        type: int32
+        required: true
+    returns:
+      ok:
+        type: bool
+`))
+	require.NoError(t, err)
+
+	modules, err := BuildServiceModules(registry, schemaRegistry)
+	require.NoError(t, err)
+
+	starlarkCtx := &saga.StarlarkContext{
+		Context:         context.Background(),
+		SagaExecutionID: uuid.New(),
+		Logger:          slog.Default(),
+	}
+
+	thread := &starlark.Thread{Name: "test_saga"}
+	setStarlarkContext(thread, starlarkCtx)
+
+	predeclared := starlark.StringDict{
+		"True":  starlark.True,
+		"False": starlark.False,
+		"None":  starlark.None,
+	}
+	for name, module := range modules {
+		predeclared[name] = module
+	}
+
+	// 3 billion overflows int32 (max is ~2.1 billion)
+	script := `
+result = test_service.process(count=3000000000)
+`
+
+	_, err = starlark.ExecFileOptions(&syntax.FileOptions{}, thread, "test.star", script, predeclared)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "int32")
+}
+
 // TestExportedContextFunctions tests the exported context functions.
 func TestExportedContextFunctions(t *testing.T) {
 	starlarkCtx := &saga.StarlarkContext{
