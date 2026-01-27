@@ -287,8 +287,10 @@ func adaptCockroachDDLForPostgres(sql string) string {
 		`ALTER TABLE "public"."platform_saga_definition" DROP CONSTRAINT IF EXISTS "uq_platform_saga_definition_name"`,
 	)
 	// CockroachDB supports ADD CONSTRAINT IF NOT EXISTS; PostgreSQL does not.
-	// Find each ALTER TABLE ... ADD CONSTRAINT IF NOT EXISTS statement and wrap it
-	// in a DO block that ignores duplicate_object errors.
+	// Find each ALTER TABLE ... ADD CONSTRAINT IF NOT EXISTS CHECK(...) statement
+	// and wrap it in a DO block that ignores duplicate_object errors.
+	// NOTE: This only handles CHECK constraints. UNIQUE/FK constraints would need
+	// additional patterns if future migrations use IF NOT EXISTS with them.
 	re := regexp.MustCompile(`(?s)(ALTER TABLE\s+\S+\s+)ADD CONSTRAINT IF NOT EXISTS\s+(\S+\s+CHECK\s*\([^;]+?\));`)
 	result = re.ReplaceAllStringFunc(result, func(match string) string {
 		// Strip "IF NOT EXISTS" and wrap in exception handler

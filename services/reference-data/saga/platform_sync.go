@@ -104,9 +104,11 @@ func (s *PlatformSync) SyncPlatformDefaults(ctx context.Context) error {
 		}
 	}
 
-	// Activate latest version per saga, deprecate older ones
-	if err := s.activateLatestVersions(ctx); err != nil {
-		return fmt.Errorf("activate latest versions: %w", err)
+	// Activate latest version per saga, deprecate older ones (skip if no new versions)
+	if syncedCount > 0 {
+		if err := s.activateLatestVersions(ctx); err != nil {
+			return fmt.Errorf("activate latest versions: %w", err)
+		}
 	}
 
 	s.logger.Info("platform saga sync completed",
