@@ -15,22 +15,36 @@ func TestGetEmbeddedScripts(t *testing.T) {
 	scripts, err := GetEmbeddedScripts()
 	require.NoError(t, err)
 
-	// Verify all expected scripts are embedded
-	expectedScripts := []string{
+	// Verify versioned scripts are embedded with full path keys
+	expectedVersioned := []string{
+		"deposit/v1.0.0.star",
+		"withdrawal/v1.0.0.star",
+		"payment_execution/v1.0.0.star",
+	}
+
+	for _, expected := range expectedVersioned {
+		script, ok := scripts[expected]
+		assert.True(t, ok, "expected script %s to be embedded", expected)
+		assert.NotEmpty(t, script, "script %s should not be empty", expected)
+	}
+
+	// Verify backward-compatible flat keys exist
+	expectedFlat := []string{
 		"withdrawal.star",
 		"deposit.star",
 		"payment_execution.star",
 	}
 
-	for _, expected := range expectedScripts {
+	for _, expected := range expectedFlat {
 		script, ok := scripts[expected]
-		assert.True(t, ok, "expected script %s to be embedded", expected)
+		assert.True(t, ok, "expected backward-compatible script %s to be embedded", expected)
 		assert.NotEmpty(t, script, "script %s should not be empty", expected)
 	}
 }
 
 func TestPlatformDefaults(t *testing.T) {
-	defaults := PlatformDefaults()
+	defaults, err := PlatformDefaults()
+	require.NoError(t, err)
 
 	assert.Len(t, defaults, 3)
 
