@@ -1,8 +1,9 @@
 # PRD: Starlark Saga Orchestration (Core)
 
-**Status:** Production-Ready
+**Status:** Implemented
 **Version:** 1.1
 **Author:** Architecture Team
+**Task Master Tag:** `starlark-saga-orchestration` (24/24 tasks done)
 **ADR Reference:** [ADR-028](../adr/0028-starlark-saga-cel-valuation.md)
 **Companion PRD:** [Durable Execution Engine](./durable-execution-engine.md)
 

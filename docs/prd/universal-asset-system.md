@@ -18,13 +18,12 @@ instructions: |
 
 # PRD: Universal Asset System
 
-**Status:** Draft
+**Status:** Implemented
+**Task Master Tag:** `universal-asset-system` (36/36 tasks done)
 **ADRs:**
 
 - [0013 - Universal Quantity Type System](../adr/0013-generic-asset-quantity-types.md)
 - [0014 - Financial Instrument Reference Data](../adr/0014-financial-instrument-reference-data.md)
-
-**Target Task Master Tag:** `universal-asset-system`
 
 ## Overview
 

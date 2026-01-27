@@ -18,10 +18,11 @@ instructions: |
 
 # PRD: Internal Bank Account Service
 
-**Status:** Draft
+**Status:** Implemented
 **Version:** 1.0
 **Date:** 2026-01-06
 **Author:** Architecture Team
+**Task Master Tag:** `internal-bank-account` (33/33 tasks done)
 
 **ADRs:**
 

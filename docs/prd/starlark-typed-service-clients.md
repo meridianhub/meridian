@@ -1,5 +1,8 @@
 # PRD: Starlark Typed Service Clients
 
+**Status:** Implemented
+**Task Master Tag:** `starlark-typed-clients` (10/10 tasks done)
+
 ## Problem Statement
 
 Currently, Meridian's saga definitions use magic strings to reference service handlers:
