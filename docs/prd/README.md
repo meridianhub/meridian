@@ -64,19 +64,31 @@ These PRDs are used to generate Task Master tasks and are not tracked in git.
 |-----|-----------------|-------|
 | N/A (saga-script-versioning has no dedicated PRD) | `saga-script-versioning` | 2/3 done, 1 in-progress |
 
-#### Not Started (No Task Master Tasks)
+#### Implemented Under Other Tags (No Dedicated Tag)
+
+These PRDs were implemented by appending tasks to existing tags rather than creating dedicated tags.
+
+| PRD | Where Tracked | Notes |
+|-----|---------------|-------|
+| `prd-party-service.md` | `8-multi-tenancy`, `bian-alignment`, `tech-debt-cleanup`, `75-async-audit` | Party service fully operational at `services/party/` |
+| `api-gateway-service-prd.md` | `8-multi-tenancy`, `tech-debt-cleanup` | Gateway service at `services/gateway/`, JWT auth, subdomain routing |
+| `async-schema-provisioning-prd.md` | `8-multi-tenancy` (tasks 46-48) | Schema provisioner integrated into InitiateTenant workflow |
+| `external-tenant-isolation-prd.md` | `8-multi-tenancy`, `tech-debt-cleanup` | Subdomain resolution, slug cache, auth interceptor |
+| `prd-current-account-refactor.md` | `223-shared-client-patterns`, `position-keeping-balance`, `universal-asset-system`, `starlark-saga-orchestration` | Refactored across multiple initiatives |
+| `prd-docs-sync-q1-2026.md` | `tech-debt-cleanup` (task 53) | Documentation sync completed |
+| `prd-multi-tenancy-phase2.md` | `8-multi-tenancy` | Most critical gaps addressed (89/95 done), 1 deferred (K8s wildcard ingress) |
+
+#### Partially Addressed
+
+| PRD | Where Tracked | Remaining |
+|-----|---------------|-----------|
+| `prd-concurrency-reliability-q1-2026.md` | `tech-debt-cleanup` (deadlock fix), `8-multi-tenancy` (retry logic) | Needs review to identify unaddressed items |
+
+#### Not Started
 
 | PRD | Description | Date Created |
 |-----|-------------|--------------|
-| `api-gateway-service-prd.md` | Dynamic subdomain routing for tenant isolation | 2025-12-26 |
-| `async-schema-provisioning-prd.md` | Async schema provisioning for multi-tenant onboarding | 2025-12-26 |
-| `external-tenant-isolation-prd.md` | Edge isolation for multi-tenancy | 2025-12-26 |
-| `prd-concurrency-reliability-q1-2026.md` | Concurrency and reliability fixes | 2026-01-01 |
-| `prd-current-account-refactor.md` | Current account refactor (tag: `253-current-account-refactor`) | 2025-12-08 |
-| `prd-docs-sync-q1-2026.md` | Documentation sync after service client migration | 2026-01-01 |
 | `prd-internal-bank-account-integration-phase2.md` | Phase 2: FA, Payment Order, Position Keeping integration | 2026-01-15 |
-| `prd-multi-tenancy-phase2.md` | Multi-tenancy critical gap remediation | 2025-12-12 |
-| `prd-party-service.md` | Party service (tag: `252-party-service`) | 2025-12-08 |
 
 ### Other Documents (`.taskmaster/docs/`)
 
