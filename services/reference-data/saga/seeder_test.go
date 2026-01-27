@@ -43,7 +43,8 @@ func TestGetEmbeddedScripts(t *testing.T) {
 }
 
 func TestPlatformDefaults(t *testing.T) {
-	defaults := PlatformDefaults()
+	defaults, err := PlatformDefaults()
+	require.NoError(t, err)
 
 	assert.Len(t, defaults, 3)
 

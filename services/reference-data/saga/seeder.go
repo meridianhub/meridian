@@ -43,10 +43,10 @@ type Metadata struct {
 
 // PlatformDefaults discovers sagas from the embedded directory structure.
 // Each subdirectory under defaults/ represents a saga.
-func PlatformDefaults() []Metadata {
+func PlatformDefaults() ([]Metadata, error) {
 	entries, err := defaultSagas.ReadDir("defaults")
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("read embedded defaults directory: %w", err)
 	}
 
 	defaults := make([]Metadata, 0, len(entries))
@@ -71,7 +71,7 @@ func PlatformDefaults() []Metadata {
 		})
 	}
 
-	return defaults
+	return defaults, nil
 }
 
 // sagaNameFromDir converts a directory name to the full saga name.
@@ -131,7 +131,11 @@ func (s *Seeder) SeedTenant(ctx context.Context, tenantID tenant.TenantID) error
 	logger := s.logger.With("tenant_id", tenantID.String(), "schema", tenantID.SchemaName())
 	logger.Info("seeding platform default sagas")
 
-	defaults := PlatformDefaults()
+	defaults, err := PlatformDefaults()
+	if err != nil {
+		logger.Error("failed to read embedded defaults", "error", err)
+		return err
+	}
 
 	// Look up platform saga IDs from public.platform_saga_definition
 	platformRefs, err := s.lookupPlatformRefs(ctx, defaults)
@@ -182,7 +186,7 @@ func (s *Seeder) lookupPlatformRefs(ctx context.Context, defaults []Metadata) (m
 		err := s.pool.QueryRow(ctx,
 			`SELECT id FROM public.platform_saga_definition
 			WHERE name = $1 AND status = 'ACTIVE'
-			ORDER BY split_part(version, '.', 1)::int DESC, split_part(version, '.', 2)::int DESC, split_part(version, '.', 3)::int DESC
+			ORDER BY COALESCE(NULLIF(split_part(version, '.', 1), ''), '0')::int DESC, COALESCE(NULLIF(split_part(version, '.', 2), ''), '0')::int DESC, COALESCE(NULLIF(split_part(version, '.', 3), ''), '0')::int DESC
 			LIMIT 1`,
 			meta.Name,
 		).Scan(&platformID)

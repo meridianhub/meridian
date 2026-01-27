@@ -280,10 +280,12 @@ func TestPlatformSync_SyncPlatformDefaults(t *testing.T) {
 		var count int
 		err = pool.QueryRow(ctx, `SELECT COUNT(*) FROM public.platform_saga_definition`).Scan(&count)
 		require.NoError(t, err)
-		assert.Equal(t, len(PlatformDefaults()), count, "expected all platform defaults to be inserted")
+		defaults, defaultsErr := PlatformDefaults()
+		require.NoError(t, defaultsErr)
+		assert.Equal(t, len(defaults), count, "expected all platform defaults to be inserted")
 
 		// Verify each saga has correct fields and ACTIVE status
-		for _, meta := range PlatformDefaults() {
+		for _, meta := range defaults {
 			var name, displayName, description, version, status string
 			err := pool.QueryRow(ctx, `
 				SELECT name, version, display_name, description, status
@@ -317,7 +319,9 @@ func TestPlatformSync_SyncPlatformDefaults(t *testing.T) {
 
 	t.Run("deterministic UUIDs based on name and version", func(t *testing.T) {
 		// Verify UUIDs are deterministic based on saga name and version
-		for _, meta := range PlatformDefaults() {
+		uuidDefaults, uuidDefaultsErr := PlatformDefaults()
+		require.NoError(t, uuidDefaultsErr)
+		for _, meta := range uuidDefaults {
 			// Get the version from the embedded script using the directory key
 			scripts, err := GetEmbeddedScripts()
 			require.NoError(t, err)

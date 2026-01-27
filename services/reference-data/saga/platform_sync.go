@@ -22,8 +22,15 @@ var versionCommentRegex = regexp.MustCompile(`(?m)^#\s*Version:\s*(\d+\.\d+\.\d+
 // versionFilenameRegex matches version filenames like "v1.0.0.star".
 var versionFilenameRegex = regexp.MustCompile(`^v(\d+\.\d+\.\d+)\.star$`)
 
+// metadataHeaderRegex matches metadata header lines like "# Key: value".
+var metadataHeaderRegex = regexp.MustCompile(`(?m)^#\s*(\w+):\s*(.+)$`)
+
 // ErrEmbeddedScriptNotFound is returned when a saga script is not found in the embedded filesystem.
 var ErrEmbeddedScriptNotFound = errors.New("embedded script not found")
+
+// ErrMetadataMismatch is returned when a .star file's metadata header does not match
+// the filename-derived saga name or version.
+var ErrMetadataMismatch = errors.New("metadata header mismatch")
 
 // ScriptMetadata represents parsed header metadata from a .star file.
 type ScriptMetadata struct {
@@ -171,8 +178,14 @@ func (s *PlatformSync) loadSagaVersions(sagaDir, sagaName string) ([]PlatformSag
 
 		script := strings.TrimSpace(string(content))
 
-		// Parse metadata header
+		// Parse metadata header and validate against filename-derived values
 		metadata := parseMetadataHeader(script)
+		if metadata.Version != "" && metadata.Version != version {
+			return nil, fmt.Errorf("%w: version header=%s filename=%s for %s", ErrMetadataMismatch, metadata.Version, version, sagaName)
+		}
+		if metadata.SagaName != "" && metadata.SagaName != sagaName {
+			return nil, fmt.Errorf("%w: saga header=%s dir=%s", ErrMetadataMismatch, metadata.SagaName, sagaName)
+		}
 
 		// Generate deterministic UUID based on name AND version
 		id := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("platform.saga."+sagaName+"."+version))
@@ -251,9 +264,9 @@ func (s *PlatformSync) activateLatestVersions(ctx context.Context) error {
 				ROW_NUMBER() OVER (
 					PARTITION BY name
 					ORDER BY
-						CAST(split_part(version, '.', 1) AS INTEGER) DESC,
-						CAST(split_part(version, '.', 2) AS INTEGER) DESC,
-						CAST(split_part(version, '.', 3) AS INTEGER) DESC
+						COALESCE(NULLIF(split_part(version, '.', 1), ''), '0')::int DESC,
+						COALESCE(NULLIF(split_part(version, '.', 2), ''), '0')::int DESC,
+						COALESCE(NULLIF(split_part(version, '.', 3), ''), '0')::int DESC
 				) as rn
 			FROM public.platform_saga_definition
 		)
@@ -273,8 +286,7 @@ func (s *PlatformSync) activateLatestVersions(ctx context.Context) error {
 // parseMetadataHeader extracts structured metadata from the script header comments.
 func parseMetadataHeader(script string) ScriptMetadata {
 	meta := ScriptMetadata{}
-	headerRegex := regexp.MustCompile(`(?m)^#\s*(\w+):\s*(.+)$`)
-	matches := headerRegex.FindAllStringSubmatch(script, -1)
+	matches := metadataHeaderRegex.FindAllStringSubmatch(script, -1)
 
 	for _, match := range matches {
 		key := match[1]
