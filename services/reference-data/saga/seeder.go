@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -270,7 +271,7 @@ func (s *Seeder) seedSaga(ctx context.Context, tx pgx.Tx, meta Metadata, platfor
 // GetEmbeddedScripts returns all embedded saga scripts keyed by saga directory name.
 // The returned map uses keys like "deposit/v1.0.0.star" for the new directory structure.
 // For backward compatibility in tests, it also provides flat keys like "deposit.star"
-// pointing to the latest version file found for each saga.
+// pointing to the highest semver version file found for each saga.
 func GetEmbeddedScripts() (map[string]string, error) {
 	scripts := make(map[string]string)
 
@@ -285,43 +286,54 @@ func GetEmbeddedScripts() (map[string]string, error) {
 			continue
 		}
 
-		sagaDir := entry.Name()
-		dirPath := path.Join("defaults", sagaDir)
-
-		// Read version files within saga directory
-		versionEntries, err := defaultSagas.ReadDir(dirPath)
-		if err != nil {
-			return nil, fmt.Errorf("read saga directory %s: %w", sagaDir, err)
-		}
-
-		var latestContent string
-		for _, vEntry := range versionEntries {
-			if vEntry.IsDir() || !strings.HasSuffix(vEntry.Name(), ".star") {
-				continue
-			}
-
-			filePath := path.Join(dirPath, vEntry.Name())
-			content, err := defaultSagas.ReadFile(filePath)
-			if err != nil {
-				return nil, fmt.Errorf("read %s: %w", filePath, err)
-			}
-
-			trimmed := strings.TrimSpace(string(content))
-
-			// Store with full path key
-			scripts[sagaDir+"/"+vEntry.Name()] = trimmed
-
-			// Track latest for backward-compatible flat key
-			latestContent = trimmed
-		}
-
-		// Backward-compatible flat key (e.g., "deposit.star" -> latest version content)
-		if latestContent != "" {
-			scripts[sagaDir+".star"] = latestContent
+		if err := loadSagaDirScripts(scripts, entry.Name()); err != nil {
+			return nil, err
 		}
 	}
 
 	return scripts, nil
+}
+
+// loadSagaDirScripts reads all version files from a saga directory into the scripts map.
+// It stores each file with a full path key (e.g. "deposit/v1.0.0.star") and adds a
+// backward-compatible flat key (e.g. "deposit.star") pointing to the highest semver content.
+func loadSagaDirScripts(scripts map[string]string, sagaDir string) error {
+	dirPath := path.Join("defaults", sagaDir)
+
+	versionEntries, err := defaultSagas.ReadDir(dirPath)
+	if err != nil {
+		return fmt.Errorf("read saga directory %s: %w", sagaDir, err)
+	}
+
+	var latestContent string
+	var latestVersion string
+	for _, vEntry := range versionEntries {
+		if vEntry.IsDir() || !strings.HasSuffix(vEntry.Name(), ".star") {
+			continue
+		}
+
+		filePath := path.Join(dirPath, vEntry.Name())
+		content, err := defaultSagas.ReadFile(filePath)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", filePath, err)
+		}
+
+		trimmed := strings.TrimSpace(string(content))
+		scripts[sagaDir+"/"+vEntry.Name()] = trimmed
+
+		// Track highest semver for backward-compatible flat key
+		matches := versionFilenameRegex.FindStringSubmatch(vEntry.Name())
+		if len(matches) > 1 && isSemverGreater(matches[1], latestVersion) {
+			latestVersion = matches[1]
+			latestContent = trimmed
+		}
+	}
+
+	if latestContent != "" {
+		scripts[sagaDir+".star"] = latestContent
+	}
+
+	return nil
 }
 
 // AsPostProvisioningHook returns a function compatible with provisioner.PostProvisioningHook
@@ -333,4 +345,22 @@ func GetEmbeddedScripts() (map[string]string, error) {
 //	config.PostProvisioningHooks = append(config.PostProvisioningHooks, seeder.AsPostProvisioningHook())
 func (s *Seeder) AsPostProvisioningHook() func(ctx context.Context, tenantID tenant.TenantID) error {
 	return s.SeedTenant
+}
+
+// isSemverGreater returns true if version a is greater than version b.
+// Both must be in "major.minor.patch" format. An empty b always returns true.
+func isSemverGreater(a, b string) bool {
+	if b == "" {
+		return true
+	}
+	ap := strings.Split(a, ".")
+	bp := strings.Split(b, ".")
+	for i := 0; i < 3 && i < len(ap) && i < len(bp); i++ {
+		ai, _ := strconv.Atoi(ap[i])
+		bi, _ := strconv.Atoi(bp[i])
+		if ai != bi {
+			return ai > bi
+		}
+	}
+	return false
 }

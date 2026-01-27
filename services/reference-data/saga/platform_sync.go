@@ -242,18 +242,10 @@ func (s *PlatformSync) syncSaga(ctx context.Context, saga PlatformSagaDefinition
 }
 
 // activateLatestVersions sets status=ACTIVE for the highest version per saga
-// and DEPRECATED for all other versions. This uses semver comparison.
+// and DEPRECATED for all other versions in a single statement to avoid a
+// transient window where no ACTIVE rows exist.
 func (s *PlatformSync) activateLatestVersions(ctx context.Context) error {
-	// Deprecate all versions first
 	_, err := s.pool.Exec(ctx, `
-		UPDATE public.platform_saga_definition SET status = 'DEPRECATED'
-	`)
-	if err != nil {
-		return fmt.Errorf("deprecate all versions: %w", err)
-	}
-
-	// Activate highest version per saga using semver comparison
-	_, err = s.pool.Exec(ctx, `
 		WITH ranked_versions AS (
 			SELECT name, version,
 				ROW_NUMBER() OVER (
@@ -266,11 +258,10 @@ func (s *PlatformSync) activateLatestVersions(ctx context.Context) error {
 			FROM public.platform_saga_definition
 		)
 		UPDATE public.platform_saga_definition psd
-		SET status = 'ACTIVE'
+		SET status = CASE WHEN rv.rn = 1 THEN 'ACTIVE' ELSE 'DEPRECATED' END
 		FROM ranked_versions rv
 		WHERE psd.name = rv.name
 			AND psd.version = rv.version
-			AND rv.rn = 1
 	`)
 	if err != nil {
 		return fmt.Errorf("activate latest versions: %w", err)
