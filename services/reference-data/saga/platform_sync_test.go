@@ -326,7 +326,9 @@ func TestPlatformSync_SyncPlatformDefaults(t *testing.T) {
 			scripts, err := GetEmbeddedScripts()
 			require.NoError(t, err)
 			// Use backward-compatible flat key
-			script := scripts[meta.Filename+".star"]
+			script, ok := scripts[meta.Filename+".star"]
+			require.True(t, ok, "expected embedded script %s.star", meta.Filename)
+			require.NotEmpty(t, script)
 			version := extractVersionFromScript(script)
 			if version == "" {
 				version = "1.0.0"

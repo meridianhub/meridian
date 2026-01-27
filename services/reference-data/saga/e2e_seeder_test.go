@@ -113,7 +113,9 @@ def posting_rules(ctx):
 	e2eDefaults, e2eDefaultsErr := PlatformDefaults()
 	require.NoError(t, e2eDefaultsErr)
 	for _, meta := range e2eDefaults {
-		script := scripts[meta.Filename+".star"]
+		script, ok := scripts[meta.Filename+".star"]
+		require.True(t, ok, "expected embedded script %s.star", meta.Filename)
+		require.NotEmpty(t, script)
 		_, err := pool.Exec(ctx, `
 			INSERT INTO `+betaSchema+`.saga_definition (
 				name, version, script, status, is_system,

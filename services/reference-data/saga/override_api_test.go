@@ -161,7 +161,9 @@ func TestOverrideService_MigrateToPlatformRef(t *testing.T) {
 	overrideDefaults, overrideDefaultsErr := PlatformDefaults()
 	require.NoError(t, overrideDefaultsErr)
 	for _, meta := range overrideDefaults {
-		script := scripts[meta.Filename+".star"]
+		script, ok := scripts[meta.Filename+".star"]
+		require.True(t, ok, "expected embedded script %s.star", meta.Filename)
+		require.NotEmpty(t, script)
 		_, err := pool.Exec(ctx, `
 			INSERT INTO `+schemaName+`.saga_definition (
 				name, version, script, status, is_system,
