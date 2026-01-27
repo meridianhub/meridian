@@ -251,12 +251,22 @@ func TestDefaultHandlers_Registered(t *testing.T) {
 		"financial_accounting.post_entries",
 		"financial_accounting.reverse_entries",
 		"financial_accounting.create_booking",
+		"financial_accounting.initiate_booking_log",
+		"financial_accounting.capture_posting",
+		"financial_accounting.compensate_posting",
+		"financial_accounting.update_booking_log",
 		"current_account.create_lien",
 		"current_account.execute_lien",
 		"current_account.terminate_lien",
+		"current_account.save",
 		"valuation_engine.valuate",
 		"repository.save",
 		"notification.send",
+		"payment_order.create_lien",
+		"payment_order.terminate_lien",
+		"payment_order.send_to_gateway",
+		"payment_order.post_ledger_entries",
+		"payment_order.execute_lien",
 	}
 
 	for _, name := range expectedHandlers {
@@ -287,7 +297,22 @@ func TestHandler_PositionKeeping_InitiateLog(t *testing.T) {
 		assert.NotNil(t, result)
 	})
 
-	t.Run("missing position_id", func(t *testing.T) {
+	t.Run("accepts account_id as alias for position_id", func(t *testing.T) {
+		params := map[string]any{
+			"account_id": uuid.New().String(),
+			"amount":     decimal.NewFromInt(100),
+			"direction":  "CREDIT",
+		}
+		result, err := handler(ctx, params)
+		require.NoError(t, err)
+		assert.NotNil(t, result)
+
+		resultMap, ok := result.(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, "INITIATED", resultMap["status"])
+	})
+
+	t.Run("missing both position_id and account_id", func(t *testing.T) {
 		params := map[string]any{
 			"amount":    decimal.NewFromInt(100),
 			"direction": "DEBIT",

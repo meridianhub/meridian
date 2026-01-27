@@ -13,7 +13,11 @@ handlers:
       position_id:
         type: string
         required: true
-        description: "Unique identifier for the position"
+        description: "Unique identifier for the position (alias: account_id)"
+      account_id:
+        type: string
+        required: false
+        description: "Alternative name for position_id, used by deposit/withdrawal scripts"
       amount:
         type: Decimal
         required: true
@@ -121,6 +125,133 @@ handlers:
         type: string
         description: "Status of the booking (CREATED)"
 
+  financial_accounting.initiate_booking_log:
+    description: "Initiate a booking log for a deposit or withdrawal transaction"
+    params:
+      account_id:
+        type: string
+        required: true
+        description: "Account identifier for the booking"
+      currency:
+        type: string
+        required: true
+        description: "Currency code (e.g., GBP, USD)"
+      transaction_id:
+        type: string
+        required: true
+        description: "Unique transaction identifier"
+      transaction_type:
+        type: string
+        required: true
+        description: "Type of transaction (e.g., DEPOSIT, WITHDRAWAL)"
+    returns:
+      booking_log_id:
+        type: string
+        description: "Generated booking log identifier (UUID)"
+      status:
+        type: string
+        description: "Status of the booking log (INITIATED)"
+
+  financial_accounting.capture_posting:
+    description: "Capture a single-sided posting entry within a booking log"
+    params:
+      booking_log_id:
+        type: string
+        required: true
+        description: "Booking log to attach this posting to"
+      account_id:
+        type: string
+        required: true
+        description: "Account identifier for the posting"
+      amount:
+        type: Decimal
+        required: true
+        description: "Posting amount (must be positive)"
+      currency:
+        type: string
+        required: true
+        description: "Currency code (e.g., GBP, USD)"
+      direction:
+        type: enum
+        values: [DEBIT, CREDIT]
+        required: true
+        description: "Direction of the posting"
+      transaction_id:
+        type: string
+        required: true
+        description: "Unique transaction identifier"
+      posting_type:
+        type: string
+        required: true
+        description: "Type of posting (e.g., debit, credit)"
+    returns:
+      posting_id:
+        type: string
+        description: "Generated posting identifier (UUID)"
+      status:
+        type: string
+        description: "Status of the posting (CAPTURED)"
+    compensate: financial_accounting.compensate_posting
+
+  financial_accounting.compensate_posting:
+    description: "Compensate (reverse) a captured posting entry"
+    params:
+      booking_log_id:
+        type: string
+        required: true
+        description: "Booking log containing the posting to compensate"
+      account_id:
+        type: string
+        required: true
+        description: "Account identifier for the compensation posting"
+      amount:
+        type: Decimal
+        required: true
+        description: "Compensation amount (must be positive)"
+      currency:
+        type: string
+        required: true
+        description: "Currency code (e.g., GBP, USD)"
+      direction:
+        type: enum
+        values: [DEBIT, CREDIT]
+        required: true
+        description: "Direction of the compensation (reversed from original)"
+      transaction_id:
+        type: string
+        required: true
+        description: "Unique transaction identifier"
+      posting_type:
+        type: string
+        required: true
+        description: "Type of posting being compensated (e.g., debit, credit)"
+    returns:
+      posting_id:
+        type: string
+        description: "Generated compensation posting identifier (UUID)"
+      status:
+        type: string
+        description: "Status of the compensation posting (COMPENSATED)"
+
+  financial_accounting.update_booking_log:
+    description: "Update the status of an existing booking log"
+    params:
+      booking_log_id:
+        type: string
+        required: true
+        description: "Identifier of the booking log to update"
+      status:
+        type: string
+        required: true
+        description: "New status for the booking log (e.g., POSTED)"
+    returns:
+      booking_log_id:
+        type: string
+        description: "Echo of the input booking log ID"
+      status:
+        type: string
+        description: "Echo of the updated status"
+
   # Current Account Service
   current_account.create_lien:
     description: "Create a lien (hold) on an account for a specified amount"
@@ -177,6 +308,25 @@ handlers:
       status:
         type: string
         description: "Status of the lien (TERMINATED)"
+
+  current_account.save:
+    description: "Persist current account metadata for a transaction"
+    params:
+      account_id:
+        type: string
+        required: true
+        description: "Identifier of the account to save"
+      transaction_id:
+        type: string
+        required: true
+        description: "Identifier of the transaction triggering the save"
+    returns:
+      account_id:
+        type: string
+        description: "Echo of the input account ID"
+      status:
+        type: string
+        description: "Status of the save operation (SAVED)"
 
   # Valuation Engine Service
   valuation_engine.valuate:
@@ -268,3 +418,148 @@ handlers:
       status:
         type: string
         description: "Status of the notification (SENT)"
+
+  # Payment Order Service
+  payment_order.create_lien:
+    description: "Create a bucket-aware lien (hold) for a payment order"
+    params:
+      account_id:
+        type: string
+        required: true
+        description: "Debtor account identifier"
+      amount_cents:
+        type: int64
+        required: true
+        description: "Amount in minor currency units (cents)"
+      currency:
+        type: string
+        required: true
+        description: "Currency code (e.g., GBP, USD)"
+      payment_order_id:
+        type: string
+        required: true
+        description: "Identifier of the payment order"
+      instrument_code:
+        type: string
+        required: false
+        description: "Instrument code for bucket-aware solvency evaluation"
+      payment_attributes:
+        type: map
+        required: false
+        description: "Attributes for CEL bucket expression evaluation"
+    returns:
+      lien_id:
+        type: string
+        description: "Generated lien identifier (UUID)"
+      bucket_id:
+        type: string
+        description: "Bucket identifier used for solvency evaluation (UUID)"
+      status:
+        type: string
+        description: "Status of the lien (ACTIVE)"
+    compensate: payment_order.terminate_lien
+
+  payment_order.terminate_lien:
+    description: "Terminate (release) a payment order lien (compensation handler)"
+    params:
+      lien_id:
+        type: string
+        required: true
+        description: "Identifier of the lien to terminate"
+      reason:
+        type: string
+        required: false
+        description: "Reason for termination"
+    returns:
+      lien_id:
+        type: string
+        description: "Echo of the input lien ID"
+      status:
+        type: string
+        description: "Status of the lien (TERMINATED)"
+
+  payment_order.send_to_gateway:
+    description: "Send a payment order to the external payment gateway"
+    params:
+      payment_order_id:
+        type: string
+        required: true
+        description: "Identifier of the payment order"
+      debtor_account_id:
+        type: string
+        required: true
+        description: "Debtor account identifier"
+      creditor_reference:
+        type: string
+        required: true
+        description: "Creditor reference for the payment"
+      amount_cents:
+        type: int64
+        required: true
+        description: "Amount in minor currency units (cents)"
+      currency:
+        type: string
+        required: true
+        description: "Currency code (e.g., GBP, USD)"
+      idempotency_key:
+        type: string
+        required: true
+        description: "Idempotency key for gateway deduplication"
+    returns:
+      gateway_reference_id:
+        type: string
+        description: "Gateway-assigned reference identifier (UUID)"
+      gateway_status:
+        type: string
+        description: "Status from the gateway (ACCEPTED)"
+
+  payment_order.post_ledger_entries:
+    description: "Post ledger entries for a confirmed payment order"
+    params:
+      payment_order_id:
+        type: string
+        required: true
+        description: "Identifier of the payment order"
+      debtor_account_id:
+        type: string
+        required: true
+        description: "Debtor account identifier"
+      gateway_reference_id:
+        type: string
+        required: true
+        description: "Gateway-assigned reference identifier"
+      amount_cents:
+        type: int64
+        required: true
+        description: "Amount in minor currency units (cents)"
+      currency:
+        type: string
+        required: true
+        description: "Currency code (e.g., GBP, USD)"
+      idempotency_key:
+        type: string
+        required: true
+        description: "Idempotency key for ledger deduplication"
+      internal_clearing_enabled:
+        type: bool
+        required: false
+        description: "Whether to use 4-posting internal clearing flow (default: false)"
+    returns:
+      booking_log_id:
+        type: string
+        description: "Generated booking log identifier (UUID)"
+      status:
+        type: string
+        description: "Status of the ledger posting (POSTED)"
+
+  payment_order.execute_lien:
+    description: "Execute (finalize) a payment order lien after ledger posting"
+    params:
+      lien_id:
+        type: string
+        required: true
+        description: "Identifier of the lien to execute"
+    returns:
+      execution_status:
+        type: string
+        description: "Status of the lien execution (EXECUTED)"
