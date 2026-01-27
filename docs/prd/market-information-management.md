@@ -18,10 +18,11 @@ instructions: |
 
 # PRD: Market Information Management Service
 
-**Status:** Draft
+**Status:** Implemented
 **Version:** 1.3
 **Date:** 2026-01-17
 **Author:** Architecture Team
+**Task Master Tag:** `market-information-management` (17/18 tasks done, 1 cancelled)
 
 **Version History:**
 

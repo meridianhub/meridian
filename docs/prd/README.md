@@ -3,6 +3,87 @@
 This directory contains Product Requirements Documents for Meridian features. Like ADRs, these
 documents are configured as Claude Code skills that automatically load when relevant triggers match.
 
+## PRD Status Overview
+
+### Status Definitions
+
+| Status | Meaning |
+|--------|---------|
+| **Implemented** | All tasks completed (remaining tasks cancelled or deferred) |
+| **Paused** | Mostly implemented with deferred items remaining |
+| **In Progress** | Active work ongoing |
+| **Not Started** | PRD exists but no Task Master tasks created |
+
+### Git-Tracked PRDs (`docs/prd/`)
+
+| PRD | Status | Task Master Tag | Tasks |
+|-----|--------|-----------------|-------|
+| [Durable Execution Engine](durable-execution-engine.md) | Implemented | `starlark-saga-orchestration` | 24/24 done |
+| [Internal Bank Account](internal-bank-account.md) | Implemented | `internal-bank-account` | 33/33 done |
+| [Market Information Management](market-information-management.md) | Implemented | `market-information-management` | 17/18 done, 1 cancelled |
+| [Meridian Edge](meridian-edge.md) | Not Started | N/A | N/A |
+| [Starlark Saga Orchestration (Core)](starlark-saga-orchestration-core.md) | Implemented | `starlark-saga-orchestration` | 24/24 done |
+| [Starlark Typed Service Clients](starlark-typed-service-clients.md) | Implemented | `starlark-typed-clients` | 10/10 done |
+| [Universal Asset System](universal-asset-system.md) | Implemented | `universal-asset-system` | 36/36 done |
+
+### Task Master PRDs (`.taskmaster/docs/`)
+
+These PRDs are used to generate Task Master tasks and are not tracked in git.
+
+#### Implemented
+
+| PRD | Task Master Tag | Tasks |
+|-----|-----------------|-------|
+| `prd-infra.md` | `1-infra-completed-2025-10-30` | 11/11 done |
+| `prd-api-contracts.md` | `2-api-contracts-completed-2024-12-15` | 16/19 done, 3 cancelled |
+| `prd-platform.md` | `3-platform` | 10/10 done |
+| `prd-financial-accounting.md` | `4-financial-accounting` | 9/10 done, 1 cancelled |
+| `prd-position-keeping.md` | `5-position-keeping` | 15/15 done |
+| `prd-current-account.md` | `6-current-account` | 10/10 done |
+| `prd-payment-order.md` | `7-payment-order` | 19/19 done |
+| `prd-99-horizon-proof.md` | `99-horizon-proof` | 10/10 done |
+| `go-compile-time-safety-prd.md` | `go-compile-time-safety-completed-2024-12-15` | 7/10 done, 3 cancelled |
+| `prd-technical-debt-remediation.md` | `tech-debt-cleanup` | 71/71 done |
+| `prd-position-keeping-balance-ownership.md` | `position-keeping-balance` | 17/17 done |
+| `prd-database-per-service.md` | `database-per-service` | 14/15 done, 1 cancelled |
+| `prd.md` (Master) | `master` | 5/5 done |
+
+#### Paused (Deferred Items Remain)
+
+| PRD | Task Master Tag | Tasks | Deferred |
+|-----|-----------------|-------|----------|
+| `prd-multi-tenancy.md` | `8-multi-tenancy` | 89/95 done, 5 cancelled | 1 deferred |
+| `ledger-integrity-prd.md` | `ledger-integrity` | 14/15 done | 1 deferred |
+| `prd-audit-foundation.md` | `75-async-audit` | 19/20 done | 1 deferred |
+| `prd-bian-alignment.md` | `bian-alignment` | 6/15 done, 4 cancelled | 5 deferred |
+| `prd-iso-standards-alignment.md` | `iso-standards-alignment` | 4/15 done, 6 cancelled | 5 deferred |
+
+#### In Progress
+
+| PRD | Task Master Tag | Tasks |
+|-----|-----------------|-------|
+| N/A (saga-script-versioning has no dedicated PRD) | `saga-script-versioning` | 2/3 done, 1 in-progress |
+
+#### Not Started (No Task Master Tasks)
+
+| PRD | Description | Date Created |
+|-----|-------------|--------------|
+| `api-gateway-service-prd.md` | Dynamic subdomain routing for tenant isolation | 2025-12-26 |
+| `async-schema-provisioning-prd.md` | Async schema provisioning for multi-tenant onboarding | 2025-12-26 |
+| `external-tenant-isolation-prd.md` | Edge isolation for multi-tenancy | 2025-12-26 |
+| `prd-concurrency-reliability-q1-2026.md` | Concurrency and reliability fixes | 2026-01-01 |
+| `prd-current-account-refactor.md` | Current account refactor (tag: `253-current-account-refactor`) | 2025-12-08 |
+| `prd-docs-sync-q1-2026.md` | Documentation sync after service client migration | 2026-01-01 |
+| `prd-internal-bank-account-integration-phase2.md` | Phase 2: FA, Payment Order, Position Keeping integration | 2026-01-15 |
+| `prd-multi-tenancy-phase2.md` | Multi-tenancy critical gap remediation | 2025-12-12 |
+| `prd-party-service.md` | Party service (tag: `252-party-service`) | 2025-12-08 |
+
+### Other Documents (`.taskmaster/docs/`)
+
+| File | Type |
+|------|------|
+| `panic-audit-inventory.md` | Audit inventory (reference doc, not a PRD) |
+
 ## What are PRDs?
 
 PRDs define the requirements, design, and implementation approach for significant features. They:
@@ -12,16 +93,6 @@ PRDs define the requirements, design, and implementation approach for significan
 - Define Task Master tags for tracking work
 - Link to related ADRs for architectural decisions
 
-## PRD Index
-
-| PRD | Title | Status | Task Master Tag |
-|-----|-------|--------|-----------------|
-| [Universal Asset System](universal-asset-system.md) | Multi-asset ledger support | Draft | `universal-asset-system` |
-| [Internal Bank Account](internal-bank-account.md) | Non-customer-facing account management | Draft | `internal-bank-account` |
-| [Market Information Management](market-information-management.md) | Market data, pricing feeds, and external datasets | Draft | `market-information-management` |
-| [Meridian Edge](meridian-edge.md) | Embedded financial kernel for IoT/Browser | Proposed | `meridian-edge` |
-| [Starlark Typed Service Clients](starlark-typed-service-clients.md) | Type-safe service handlers for saga orchestration | Draft | `starlark-typed-clients` |
-
 ## Categories
 
 ### Core Platform
@@ -30,6 +101,11 @@ PRDs define the requirements, design, and implementation approach for significan
 - [Internal Bank Account](internal-bank-account.md) - BIAN service for clearing, nostro/vostro accounts
 - [Market Information Management](market-information-management.md) - BIAN service for market data and pricing
 - [Starlark Typed Service Clients](starlark-typed-service-clients.md) - Type-safe service handlers for saga orchestration
+
+### Execution Engine
+
+- [Starlark Saga Orchestration (Core)](starlark-saga-orchestration-core.md) - Runtime-configurable saga definitions
+- [Durable Execution Engine](durable-execution-engine.md) - Resilience layer for saga execution
 
 ### Deployment Targets
 
@@ -66,8 +142,9 @@ Claude Code loads PRDs when:
    - `triggers`: List of scenarios when this PRD should load
    - `instructions`: Key guidance for Claude Code
 3. Write the PRD content following the existing structure
-4. Update this README with the new entry
-5. If applicable, create related ADRs for architectural decisions
+4. Set **Status** to `Not Started` until Task Master tasks are created
+5. Update this README with the new entry
+6. If applicable, create related ADRs for architectural decisions
 
 ## PRD Structure
 

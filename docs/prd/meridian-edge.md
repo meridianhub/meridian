@@ -24,7 +24,7 @@ instructions: |
 | Meta | Details |
 |:-----|:--------|
 | **Project Name** | Meridian Edge |
-| **Status** | Proposed |
+| **Status** | Not Started |
 | **Type** | New Build Target (Modular Monolith) |
 | **Target Hardware** | Raspberry Pi Zero 2 W / ARM64 / Android / Linux IoT / Browser (WASM) |
 | **Core Philosophy** | "Local Authority, Global Consistency" |

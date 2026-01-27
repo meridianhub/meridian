@@ -1,7 +1,8 @@
 # PRD: Durable Execution Engine
 
-**Status:** Production-Ready
+**Status:** Implemented
 **Version:** 1.1
+**Task Master Tag:** `starlark-saga-orchestration` (24/24 tasks done)
 **Companion PRD:** [Starlark Saga Orchestration (Core)](./starlark-saga-orchestration-core.md)
 
 ---
