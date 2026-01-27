@@ -246,6 +246,8 @@ func setupPlatformTestDB(t *testing.T) (*pgxpool.Pool, func()) {
 		"20260127000001_fix_platform_saga_unique_constraint.sql",
 		"20260128000001_versioned_platform_sagas.sql",
 		"20260128000002_versioned_platform_sagas_constraints.sql",
+		"20260129000001_bitemporal_platform_sagas.sql",
+		"20260129000002_bitemporal_platform_sagas_constraints.sql",
 	}
 
 	for _, migration := range migrations {
@@ -924,6 +926,324 @@ func TestPlatformSync_MigrationConstraints(t *testing.T) {
 		// CockroachDB uses SQLSTATE 23514 for CHECK violations.
 		assert.Contains(t, err.Error(), "23514")
 	})
+}
+
+func TestPlatformSync_BitemporalTracking(t *testing.T) {
+	pool, cleanup := setupPlatformTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	sync := NewPlatformSync(pool)
+
+	t.Run("new versions have valid_from set and valid_to NULL", func(t *testing.T) {
+		id := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("platform.saga.temporal_test.1.0.0"))
+		beforeInsert := time.Now().Add(-1 * time.Second)
+
+		_, err := sync.syncSaga(ctx, PlatformSagaDefinition{
+			ID:      id,
+			Name:    "temporal_test",
+			Version: "1.0.0",
+			Script:  "temporal script v1",
+		})
+		require.NoError(t, err)
+
+		var validFrom time.Time
+		var validTo *time.Time
+		err = pool.QueryRow(ctx, `
+			SELECT valid_from, valid_to FROM public.platform_saga_definition
+			WHERE name = 'temporal_test' AND version = '1.0.0'
+		`).Scan(&validFrom, &validTo)
+		require.NoError(t, err)
+
+		assert.True(t, validFrom.After(beforeInsert), "valid_from should be set to approximately now")
+		assert.Nil(t, validTo, "valid_to should be NULL for newly inserted version")
+	})
+
+	t.Run("deprecated version gets valid_to set during activation", func(t *testing.T) {
+		// Insert v1.0.0 and activate it
+		v1ID := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("platform.saga.temporal_deprecation.1.0.0"))
+		_, err := sync.syncSaga(ctx, PlatformSagaDefinition{
+			ID:      v1ID,
+			Name:    "temporal_deprecation",
+			Version: "1.0.0",
+			Script:  "v1 script",
+		})
+		require.NoError(t, err)
+		err = sync.activateLatestVersions(ctx)
+		require.NoError(t, err)
+
+		// Verify v1.0.0 is ACTIVE with valid_to NULL
+		var v1ValidTo *time.Time
+		err = pool.QueryRow(ctx, `
+			SELECT valid_to FROM public.platform_saga_definition
+			WHERE name = 'temporal_deprecation' AND version = '1.0.0'
+		`).Scan(&v1ValidTo)
+		require.NoError(t, err)
+		assert.Nil(t, v1ValidTo, "active version should have NULL valid_to")
+
+		// Insert v2.0.0 and activate
+		v2ID := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("platform.saga.temporal_deprecation.2.0.0"))
+		_, err = sync.syncSaga(ctx, PlatformSagaDefinition{
+			ID:      v2ID,
+			Name:    "temporal_deprecation",
+			Version: "2.0.0",
+			Script:  "v2 script",
+		})
+		require.NoError(t, err)
+		err = sync.activateLatestVersions(ctx)
+		require.NoError(t, err)
+
+		// v1.0.0 should now have valid_to set (deprecated)
+		err = pool.QueryRow(ctx, `
+			SELECT valid_to FROM public.platform_saga_definition
+			WHERE name = 'temporal_deprecation' AND version = '1.0.0'
+		`).Scan(&v1ValidTo)
+		require.NoError(t, err)
+		require.NotNil(t, v1ValidTo, "deprecated version should have valid_to set")
+
+		// v2.0.0 should have valid_to NULL (active)
+		var v2ValidTo *time.Time
+		err = pool.QueryRow(ctx, `
+			SELECT valid_to FROM public.platform_saga_definition
+			WHERE name = 'temporal_deprecation' AND version = '2.0.0'
+		`).Scan(&v2ValidTo)
+		require.NoError(t, err)
+		assert.Nil(t, v2ValidTo, "active version should have NULL valid_to")
+	})
+
+	t.Run("valid_to is preserved for already-deprecated versions", func(t *testing.T) {
+		// Insert three versions: v1, v2, v3
+		for _, v := range []string{"1.0.0", "2.0.0"} {
+			id := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("platform.saga.preserve_valid_to."+v))
+			_, err := sync.syncSaga(ctx, PlatformSagaDefinition{
+				ID: id, Name: "preserve_valid_to", Version: v,
+				Script: "script " + v,
+			})
+			require.NoError(t, err)
+		}
+
+		// Activate: v2.0.0 active, v1.0.0 deprecated
+		err := sync.activateLatestVersions(ctx)
+		require.NoError(t, err)
+
+		// Record v1.0.0's valid_to timestamp
+		var v1ValidToOriginal *time.Time
+		err = pool.QueryRow(ctx, `
+			SELECT valid_to FROM public.platform_saga_definition
+			WHERE name = 'preserve_valid_to' AND version = '1.0.0'
+		`).Scan(&v1ValidToOriginal)
+		require.NoError(t, err)
+		require.NotNil(t, v1ValidToOriginal)
+
+		// Insert v3.0.0 and re-activate
+		v3ID := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("platform.saga.preserve_valid_to.3.0.0"))
+		_, err = sync.syncSaga(ctx, PlatformSagaDefinition{
+			ID: v3ID, Name: "preserve_valid_to", Version: "3.0.0",
+			Script: "script 3.0.0",
+		})
+		require.NoError(t, err)
+		err = sync.activateLatestVersions(ctx)
+		require.NoError(t, err)
+
+		// v1.0.0's valid_to should be unchanged (preserved, not overwritten)
+		var v1ValidToAfter *time.Time
+		err = pool.QueryRow(ctx, `
+			SELECT valid_to FROM public.platform_saga_definition
+			WHERE name = 'preserve_valid_to' AND version = '1.0.0'
+		`).Scan(&v1ValidToAfter)
+		require.NoError(t, err)
+		require.NotNil(t, v1ValidToAfter)
+		assert.True(t, v1ValidToOriginal.Equal(*v1ValidToAfter),
+			"v1.0.0 valid_to should be preserved, not overwritten on re-activation")
+	})
+
+	t.Run("validity range constraint rejects valid_to before valid_from", func(t *testing.T) {
+		past := time.Now().Add(-24 * time.Hour)
+		future := time.Now().Add(24 * time.Hour)
+
+		// valid_to < valid_from should fail the CHECK constraint
+		_, err := pool.Exec(ctx, `
+			INSERT INTO public.platform_saga_definition
+				(name, version, script, status, valid_from, valid_to)
+			VALUES ('constraint_test', '1.0.0', 'script', 'ACTIVE', $1, $2)
+		`, future, past)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "23514", "should violate CHECK constraint")
+	})
+
+	t.Run("validity range constraint allows valid_to after valid_from", func(t *testing.T) {
+		past := time.Now().Add(-24 * time.Hour)
+		future := time.Now().Add(24 * time.Hour)
+
+		_, err := pool.Exec(ctx, `
+			INSERT INTO public.platform_saga_definition
+				(name, version, script, status, valid_from, valid_to)
+			VALUES ('constraint_ok', '1.0.0', 'script', 'ACTIVE', $1, $2)
+		`, past, future)
+		require.NoError(t, err)
+	})
+
+	t.Run("validity range constraint allows NULL valid_to", func(t *testing.T) {
+		_, err := pool.Exec(ctx, `
+			INSERT INTO public.platform_saga_definition
+				(name, version, script, status, valid_from, valid_to)
+			VALUES ('constraint_null', '1.0.0', 'script', 'ACTIVE', now(), NULL)
+		`)
+		require.NoError(t, err)
+	})
+
+	t.Run("validity range constraint rejects equal valid_from and valid_to", func(t *testing.T) {
+		now := time.Now()
+		_, err := pool.Exec(ctx, `
+			INSERT INTO public.platform_saga_definition
+				(name, version, script, status, valid_from, valid_to)
+			VALUES ('constraint_equal', '1.0.0', 'script', 'ACTIVE', $1, $2)
+		`, now, now)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "23514", "equal valid_from/valid_to should violate CHECK (strict >)")
+	})
+}
+
+func TestGetPlatformSagaAtTime(t *testing.T) {
+	pool, cleanup := setupPlatformTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create a registry for the GetPlatformSagaAtTime method
+	registry := NewPostgresRegistry(pool, nil)
+
+	// Set up timeline:
+	// t0: v1.0.0 inserted (valid_from=t0, valid_to=t1)
+	// t1: v2.0.0 inserted (valid_from=t1, valid_to=NULL) -- currently active
+	t0 := time.Now().Add(-2 * time.Hour)
+	t1 := time.Now().Add(-1 * time.Hour)
+
+	// Insert v1.0.0: was active from t0 to t1
+	v1ID := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("platform.saga.at_time_test.1.0.0"))
+	_, err := pool.Exec(ctx, `
+		INSERT INTO public.platform_saga_definition
+			(id, name, version, script, status, valid_from, valid_to, display_name, description)
+		VALUES ($1, 'at_time_test', '1.0.0', 'v1 script content', 'DEPRECATED', $2, $3, 'At Time Test', 'Version 1')
+	`, v1ID, t0, t1)
+	require.NoError(t, err)
+
+	// Insert v2.0.0: active from t1 onwards
+	v2ID := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("platform.saga.at_time_test.2.0.0"))
+	_, err = pool.Exec(ctx, `
+		INSERT INTO public.platform_saga_definition
+			(id, name, version, script, status, valid_from, valid_to, display_name, description)
+		VALUES ($1, 'at_time_test', '2.0.0', 'v2 script content', 'ACTIVE', $2, NULL, 'At Time Test', 'Version 2')
+	`, v2ID, t1)
+	require.NoError(t, err)
+
+	t.Run("resolves v1 when querying between t0 and t1", func(t *testing.T) {
+		queryTime := t0.Add(30 * time.Minute) // midpoint between t0 and t1
+		result, err := registry.GetPlatformSagaAtTime(ctx, "at_time_test", queryTime)
+		require.NoError(t, err)
+		assert.Equal(t, v1ID, result.ID)
+		assert.Equal(t, "1.0.0", result.Version)
+		assert.Equal(t, "v1 script content", result.Script)
+		assert.Equal(t, "At Time Test", result.DisplayName)
+	})
+
+	t.Run("resolves v2 when querying after t1", func(t *testing.T) {
+		queryTime := t1.Add(30 * time.Minute)
+		result, err := registry.GetPlatformSagaAtTime(ctx, "at_time_test", queryTime)
+		require.NoError(t, err)
+		assert.Equal(t, v2ID, result.ID)
+		assert.Equal(t, "2.0.0", result.Version)
+		assert.Equal(t, "v2 script content", result.Script)
+	})
+
+	t.Run("resolves v1 exactly at valid_from boundary", func(t *testing.T) {
+		result, err := registry.GetPlatformSagaAtTime(ctx, "at_time_test", t0)
+		require.NoError(t, err)
+		assert.Equal(t, v1ID, result.ID, "exactly at valid_from should match (using <=)")
+	})
+
+	t.Run("resolves v2 exactly at t1 boundary", func(t *testing.T) {
+		// At t1: v1.0.0 has valid_to=t1 (exclusive), v2.0.0 has valid_from=t1 (inclusive)
+		result, err := registry.GetPlatformSagaAtTime(ctx, "at_time_test", t1)
+		require.NoError(t, err)
+		assert.Equal(t, v2ID, result.ID,
+			"at the transition boundary, the new version should be resolved (v1.valid_to=t1 is exclusive, v2.valid_from=t1 is inclusive)")
+	})
+
+	t.Run("returns not found before first version", func(t *testing.T) {
+		queryTime := t0.Add(-1 * time.Hour) // before v1.0.0 existed
+		_, err := registry.GetPlatformSagaAtTime(ctx, "at_time_test", queryTime)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrPlatformDefinitionNotFound)
+	})
+
+	t.Run("returns not found for non-existent saga name", func(t *testing.T) {
+		_, err := registry.GetPlatformSagaAtTime(ctx, "nonexistent_saga", time.Now())
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrPlatformDefinitionNotFound)
+	})
+
+	t.Run("resolves current time for currently active version", func(t *testing.T) {
+		result, err := registry.GetPlatformSagaAtTime(ctx, "at_time_test", time.Now())
+		require.NoError(t, err)
+		assert.Equal(t, v2ID, result.ID, "current time should resolve to the active version with NULL valid_to")
+		assert.Nil(t, result.ValidTo, "active version should have nil ValidTo")
+		assert.False(t, result.ValidFrom.IsZero(), "ValidFrom should be populated")
+	})
+
+	t.Run("populates temporal fields on returned struct", func(t *testing.T) {
+		queryTime := t0.Add(30 * time.Minute)
+		result, err := registry.GetPlatformSagaAtTime(ctx, "at_time_test", queryTime)
+		require.NoError(t, err)
+
+		assert.False(t, result.ValidFrom.IsZero(), "ValidFrom should be populated")
+		require.NotNil(t, result.ValidTo, "ValidTo should be populated for deprecated version")
+		assert.True(t, result.ValidFrom.Before(*result.ValidTo),
+			"ValidFrom should be before ValidTo")
+	})
+}
+
+func TestGetPlatformSagaByID_IncludesTemporalFields(t *testing.T) {
+	pool, cleanup := setupPlatformTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	registry := NewPostgresRegistry(pool, nil)
+
+	past := time.Now().Add(-1 * time.Hour)
+	id := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("platform.saga.byid_temporal.1.0.0"))
+	_, err := pool.Exec(ctx, `
+		INSERT INTO public.platform_saga_definition
+			(id, name, version, script, status, valid_from, valid_to)
+		VALUES ($1, 'byid_temporal', '1.0.0', 'script', 'DEPRECATED', $2, $3)
+	`, id, past, time.Now())
+	require.NoError(t, err)
+
+	result, err := registry.GetPlatformSagaByID(ctx, id)
+	require.NoError(t, err)
+	assert.False(t, result.ValidFrom.IsZero(), "GetPlatformSagaByID should populate ValidFrom")
+	assert.NotNil(t, result.ValidTo, "GetPlatformSagaByID should populate ValidTo for deprecated versions")
+}
+
+func TestGetPlatformSagaByName_IncludesTemporalFields(t *testing.T) {
+	pool, cleanup := setupPlatformTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	registry := NewPostgresRegistry(pool, nil)
+
+	id := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("platform.saga.byname_temporal.1.0.0"))
+	_, err := pool.Exec(ctx, `
+		INSERT INTO public.platform_saga_definition
+			(id, name, version, script, status, valid_from, valid_to)
+		VALUES ($1, 'byname_temporal', '1.0.0', 'script', 'ACTIVE', now(), NULL)
+	`, id)
+	require.NoError(t, err)
+
+	result, err := registry.GetPlatformSagaByName(ctx, "byname_temporal")
+	require.NoError(t, err)
+	assert.False(t, result.ValidFrom.IsZero(), "GetPlatformSagaByName should populate ValidFrom")
+	assert.Nil(t, result.ValidTo, "active version should have nil ValidTo")
 }
 
 func TestPlatformSync_EmbeddedMetadataHeaders(t *testing.T) {

@@ -9,6 +9,7 @@ import (
 	"path"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -51,6 +52,11 @@ type PlatformSagaDefinition struct {
 	PreviousVersion *string
 	DisplayName     string
 	Description     string
+	// ValidFrom is the system time when this version became effective.
+	ValidFrom time.Time
+	// ValidTo is the system time when this version was superseded.
+	// A nil value means this is the currently active version.
+	ValidTo *time.Time
 }
 
 // PlatformSync synchronizes embedded saga definitions to the platform_saga_definition table.
@@ -259,6 +265,10 @@ func (s *PlatformSync) syncSaga(ctx context.Context, saga PlatformSagaDefinition
 // activateLatestVersions sets status=ACTIVE for the highest version per saga
 // and DEPRECATED for all other versions in a single statement to avoid a
 // transient window where no ACTIVE rows exist.
+//
+// Temporal tracking: when a version transitions to DEPRECATED, valid_to is set
+// to NOW() to record when it ceased being the active version. The new ACTIVE
+// version retains its valid_from (set at insert time) with valid_to = NULL.
 func (s *PlatformSync) activateLatestVersions(ctx context.Context) error {
 	_, err := s.pool.Exec(ctx, `
 		WITH ranked_versions AS (
@@ -273,7 +283,12 @@ func (s *PlatformSync) activateLatestVersions(ctx context.Context) error {
 			FROM public.platform_saga_definition
 		)
 		UPDATE public.platform_saga_definition psd
-		SET status = CASE WHEN rv.rn = 1 THEN 'ACTIVE' ELSE 'DEPRECATED' END
+		SET status = CASE WHEN rv.rn = 1 THEN 'ACTIVE' ELSE 'DEPRECATED' END,
+			valid_to = CASE
+				WHEN rv.rn = 1 THEN NULL
+				WHEN psd.valid_to IS NULL THEN now()
+				ELSE psd.valid_to
+			END
 		FROM ranked_versions rv
 		WHERE psd.name = rv.name
 			AND psd.version = rv.version
