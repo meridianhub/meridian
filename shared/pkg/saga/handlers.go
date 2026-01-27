@@ -371,11 +371,17 @@ func requireInt64Param(params map[string]any, key string) (int64, error) {
 	case int:
 		return int64(v), nil
 	case float64:
+		if v != float64(int64(v)) {
+			return 0, fmt.Errorf("%w: %s must be a whole number, got %v", ErrInvalidParamType, key, v)
+		}
 		return int64(v), nil
 	case string:
 		d, err := decimal.NewFromString(v)
 		if err != nil {
 			return 0, fmt.Errorf("%w: %s must be int64, got invalid string", ErrInvalidParamType, key)
+		}
+		if !d.Equal(d.Truncate(0)) {
+			return 0, fmt.Errorf("%w: %s must be a whole number, got %s", ErrInvalidParamType, key, v)
 		}
 		return d.IntPart(), nil
 	default:
