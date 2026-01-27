@@ -18,7 +18,7 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
-//go:embed defaults/*.star
+//go:embed all:defaults
 var defaultSagas embed.FS
 
 // ErrPlatformSagaNotSynced is returned when a platform saga referenced by the seeder
@@ -36,35 +36,54 @@ type Metadata struct {
 	// Description provides context about the saga.
 	Description string
 
-	// Filename is the embedded file name (e.g., "withdrawal.star").
+	// Filename is the directory name within defaults/ (e.g., "withdrawal").
 	Filename string
 }
 
-// PlatformDefaults returns the metadata for all platform default sagas.
-// The order determines seeding order.
+// PlatformDefaults discovers sagas from the embedded directory structure.
+// Each subdirectory under defaults/ represents a saga.
 func PlatformDefaults() []Metadata {
-	return []Metadata{
-		{
-			Name:        "current_account_withdrawal",
-			DisplayName: "Current Account Withdrawal",
-			Description: "Platform default saga for processing withdrawals from current accounts. " +
-				"Coordinates position logging, booking log creation, double-entry postings, and account persistence.",
-			Filename: "withdrawal.star",
-		},
-		{
-			Name:        "current_account_deposit",
-			DisplayName: "Current Account Deposit",
-			Description: "Platform default saga for processing deposits to current accounts. " +
-				"Coordinates position logging, booking log creation, double-entry postings, and account persistence.",
-			Filename: "deposit.star",
-		},
-		{
-			Name:        "payment_execution",
-			DisplayName: "Payment Order Execution",
-			Description: "Platform default saga for executing payment orders. " +
-				"Coordinates lien creation, gateway submission, ledger posting, and lien execution.",
-			Filename: "payment_execution.star",
-		},
+	entries, err := defaultSagas.ReadDir("defaults")
+	if err != nil {
+		return nil
+	}
+
+	defaults := make([]Metadata, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		sagaDir := entry.Name()
+
+		// Convention: directory name maps to saga name
+		// deposit/ -> current_account_deposit
+		// withdrawal/ -> current_account_withdrawal
+		// payment_execution/ -> payment_execution (no prefix for non-account sagas)
+		fullName := sagaNameFromDir(sagaDir)
+
+		defaults = append(defaults, Metadata{
+			Name:        fullName,
+			DisplayName: humanizeName(fullName),
+			Description: fmt.Sprintf("Platform default saga for %s operations.", strings.ReplaceAll(sagaDir, "_", " ")),
+			Filename:    sagaDir,
+		})
+	}
+
+	return defaults
+}
+
+// sagaNameFromDir converts a directory name to the full saga name.
+// For current account sagas, the convention is to prefix with "current_account_".
+// payment_execution is used as-is since it's not an account-specific saga.
+func sagaNameFromDir(dirName string) string {
+	switch dirName {
+	case "deposit":
+		return "current_account_deposit"
+	case "withdrawal":
+		return "current_account_withdrawal"
+	default:
+		return dirName
 	}
 }
 
@@ -152,7 +171,7 @@ func (s *Seeder) SeedTenant(ctx context.Context, tenantID tenant.TenantID) error
 	return nil
 }
 
-// lookupPlatformRefs resolves the platform_saga_definition IDs for each default saga.
+// lookupPlatformRefs resolves the ACTIVE platform_saga_definition ID for each default saga.
 // Returns a map of saga name to platform saga definition UUID.
 func (s *Seeder) lookupPlatformRefs(ctx context.Context, defaults []Metadata) (map[string]uuid.UUID, error) {
 	refs := make(map[string]uuid.UUID, len(defaults))
@@ -160,14 +179,15 @@ func (s *Seeder) lookupPlatformRefs(ctx context.Context, defaults []Metadata) (m
 	for _, meta := range defaults {
 		var platformID uuid.UUID
 		err := s.pool.QueryRow(ctx,
-			`SELECT id FROM public.platform_saga_definition WHERE name = $1
+			`SELECT id FROM public.platform_saga_definition
+			WHERE name = $1 AND status = 'ACTIVE'
 			ORDER BY split_part(version, '.', 1)::int DESC, split_part(version, '.', 2)::int DESC, split_part(version, '.', 3)::int DESC
 			LIMIT 1`,
 			meta.Name,
 		).Scan(&platformID)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				return nil, fmt.Errorf("%w: %s", ErrPlatformSagaNotSynced, meta.Name)
+				return nil, fmt.Errorf("%w: %s (no ACTIVE version)", ErrPlatformSagaNotSynced, meta.Name)
 			}
 			return nil, fmt.Errorf("lookup platform saga %s: %w", meta.Name, err)
 		}
@@ -247,27 +267,58 @@ func (s *Seeder) seedSaga(ctx context.Context, tx pgx.Tx, meta Metadata, platfor
 	return result.RowsAffected() > 0, nil
 }
 
-// GetEmbeddedScripts returns all embedded saga scripts.
-// Useful for validation and testing.
+// GetEmbeddedScripts returns all embedded saga scripts keyed by saga directory name.
+// The returned map uses keys like "deposit/v1.0.0.star" for the new directory structure.
+// For backward compatibility in tests, it also provides flat keys like "deposit.star"
+// pointing to the latest version file found for each saga.
 func GetEmbeddedScripts() (map[string]string, error) {
 	scripts := make(map[string]string)
 
+	// Read top-level directories
 	entries, err := defaultSagas.ReadDir("defaults")
 	if err != nil {
 		return nil, fmt.Errorf("read defaults directory: %w", err)
 	}
 
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".star") {
+		if !entry.IsDir() {
 			continue
 		}
 
-		content, err := defaultSagas.ReadFile(path.Join("defaults", entry.Name()))
+		sagaDir := entry.Name()
+		dirPath := path.Join("defaults", sagaDir)
+
+		// Read version files within saga directory
+		versionEntries, err := defaultSagas.ReadDir(dirPath)
 		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", entry.Name(), err)
+			return nil, fmt.Errorf("read saga directory %s: %w", sagaDir, err)
 		}
 
-		scripts[entry.Name()] = strings.TrimSpace(string(content))
+		var latestContent string
+		for _, vEntry := range versionEntries {
+			if vEntry.IsDir() || !strings.HasSuffix(vEntry.Name(), ".star") {
+				continue
+			}
+
+			filePath := path.Join(dirPath, vEntry.Name())
+			content, err := defaultSagas.ReadFile(filePath)
+			if err != nil {
+				return nil, fmt.Errorf("read %s: %w", filePath, err)
+			}
+
+			trimmed := strings.TrimSpace(string(content))
+
+			// Store with full path key
+			scripts[sagaDir+"/"+vEntry.Name()] = trimmed
+
+			// Track latest for backward-compatible flat key
+			latestContent = trimmed
+		}
+
+		// Backward-compatible flat key (e.g., "deposit.star" -> latest version content)
+		if latestContent != "" {
+			scripts[sagaDir+".star"] = latestContent
+		}
 	}
 
 	return scripts, nil

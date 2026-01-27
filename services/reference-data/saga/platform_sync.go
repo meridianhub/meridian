@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path"
 	"regexp"
 	"strings"
 
@@ -18,17 +19,31 @@ import (
 // versionCommentRegex matches "# Version: X.Y.Z" comments at the start of the script.
 var versionCommentRegex = regexp.MustCompile(`(?m)^#\s*Version:\s*(\d+\.\d+\.\d+)\s*$`)
 
+// versionFilenameRegex matches version filenames like "v1.0.0.star".
+var versionFilenameRegex = regexp.MustCompile(`^v(\d+\.\d+\.\d+)\.star$`)
+
 // ErrEmbeddedScriptNotFound is returned when a saga script is not found in the embedded filesystem.
 var ErrEmbeddedScriptNotFound = errors.New("embedded script not found")
 
+// ScriptMetadata represents parsed header metadata from a .star file.
+type ScriptMetadata struct {
+	SagaName        string
+	Version         string
+	PreviousVersion *string
+	ChangeSummary   string
+	Author          string
+	Date            string
+}
+
 // PlatformSagaDefinition represents a saga definition in the platform table.
 type PlatformSagaDefinition struct {
-	ID          uuid.UUID
-	Name        string
-	Version     string
-	Script      string
-	DisplayName string
-	Description string
+	ID              uuid.UUID
+	Name            string
+	Version         string
+	Script          string
+	PreviousVersion *string
+	DisplayName     string
+	Description     string
 }
 
 // PlatformSync synchronizes embedded saga definitions to the platform_saga_definition table.
@@ -49,11 +64,10 @@ func NewPlatformSync(pool *pgxpool.Pool) *PlatformSync {
 // This method is idempotent - running it multiple times with the same versions has no effect.
 //
 // The sync logic uses INSERT-only semantics to preserve version history:
-//  1. Loads all embedded .star files from the defaults directory
-//  2. Extracts version from "# Version: X.Y.Z" comment in each script
-//  3. For each saga, checks if the exact (name, version) pair already exists
-//  4. Inserts a new row if the (name, version) pair is not found
-//  5. Skips if the exact (name, version) already exists (idempotent)
+//  1. Scans per-saga versioned directories (defaults/<saga>/vX.Y.Z.star)
+//  2. Extracts version from filename and validates against header metadata
+//  3. For each saga version, checks if the exact (name, version) pair already exists
+//  4. Inserts new versions as DEPRECATED, then activates the latest per saga
 //
 // Old versions are never overwritten or deleted. This guarantees that running
 // saga instances which pinned a PlatformSagaVersionID at execution time can
@@ -61,7 +75,7 @@ func NewPlatformSync(pool *pgxpool.Pool) *PlatformSync {
 func (s *PlatformSync) SyncPlatformDefaults(ctx context.Context) error {
 	s.logger.Info("starting platform saga sync")
 
-	// Load all embedded sagas
+	// Load all embedded sagas from versioned directories
 	sagas, err := s.loadEmbeddedSagas()
 	if err != nil {
 		return fmt.Errorf("load embedded sagas: %w", err)
@@ -69,18 +83,23 @@ func (s *PlatformSync) SyncPlatformDefaults(ctx context.Context) error {
 
 	s.logger.Info("loaded embedded sagas", "count", len(sagas))
 
-	// Sync each saga
+	// Sync each saga version
 	var syncedCount, skippedCount int
 	for _, saga := range sagas {
 		synced, err := s.syncSaga(ctx, saga)
 		if err != nil {
-			return fmt.Errorf("sync saga %s: %w", saga.Name, err)
+			return fmt.Errorf("sync saga %s@%s: %w", saga.Name, saga.Version, err)
 		}
 		if synced {
 			syncedCount++
 		} else {
 			skippedCount++
 		}
+	}
+
+	// Activate latest version per saga, deprecate older ones
+	if err := s.activateLatestVersions(ctx); err != nil {
+		return fmt.Errorf("activate latest versions: %w", err)
 	}
 
 	s.logger.Info("platform saga sync completed",
@@ -91,65 +110,92 @@ func (s *PlatformSync) SyncPlatformDefaults(ctx context.Context) error {
 	return nil
 }
 
-// loadEmbeddedSagas reads all embedded .star files and parses their metadata.
+// loadEmbeddedSagas discovers sagas from per-saga versioned directories.
 func (s *PlatformSync) loadEmbeddedSagas() ([]PlatformSagaDefinition, error) {
-	defaults := PlatformDefaults()
-	sagas := make([]PlatformSagaDefinition, 0, len(defaults))
+	sagas := make([]PlatformSagaDefinition, 0)
 
-	for _, meta := range defaults {
-		// Read embedded script
-		script, err := s.readEmbeddedScript(meta.Filename)
+	// Read top-level saga directories (deposit/, withdrawal/, etc.)
+	entries, err := defaultSagas.ReadDir("defaults")
+	if err != nil {
+		return nil, fmt.Errorf("read defaults directory: %w", err)
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		sagaDir := entry.Name()
+		sagaName := sagaNameFromDir(sagaDir)
+
+		// Read version files within saga directory
+		versions, err := s.loadSagaVersions(sagaDir, sagaName)
 		if err != nil {
-			return nil, fmt.Errorf("read script %s: %w", meta.Filename, err)
+			return nil, fmt.Errorf("load versions for %s: %w", sagaDir, err)
 		}
 
-		// Extract version from script
-		version := extractVersionFromScript(script)
-		if version == "" {
-			// Default to 1.0.0 if no version comment found
-			version = "1.0.0"
-			s.logger.Warn("no version comment found in script, using default",
-				"filename", meta.Filename,
-				"default_version", version)
-		}
-
-		// Generate deterministic UUID based on name and version
-		// Each (name, version) pair gets a unique, reproducible ID
-		id := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("platform.saga."+meta.Name+"."+version))
-
-		sagas = append(sagas, PlatformSagaDefinition{
-			ID:          id,
-			Name:        meta.Name,
-			Version:     version,
-			Script:      script,
-			DisplayName: meta.DisplayName,
-			Description: meta.Description,
-		})
+		sagas = append(sagas, versions...)
 	}
 
 	return sagas, nil
 }
 
-// readEmbeddedScript reads a saga script from the embedded filesystem.
-func (s *PlatformSync) readEmbeddedScript(filename string) (string, error) {
-	scripts, err := GetEmbeddedScripts()
+// loadSagaVersions reads all vX.Y.Z.star files for a specific saga.
+func (s *PlatformSync) loadSagaVersions(sagaDir, sagaName string) ([]PlatformSagaDefinition, error) {
+	dirPath := path.Join("defaults", sagaDir)
+	entries, err := defaultSagas.ReadDir(dirPath)
 	if err != nil {
-		return "", err
+		return nil, fmt.Errorf("read saga directory %s: %w", dirPath, err)
 	}
 
-	script, ok := scripts[filename]
-	if !ok {
-		return "", fmt.Errorf("%w: %s", ErrEmbeddedScriptNotFound, filename)
+	versions := make([]PlatformSagaDefinition, 0)
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		matches := versionFilenameRegex.FindStringSubmatch(entry.Name())
+		if matches == nil {
+			s.logger.Warn("skipping non-version file", "saga", sagaDir, "file", entry.Name())
+			continue
+		}
+
+		version := matches[1] // Extract "1.0.0" from "v1.0.0.star"
+
+		filePath := path.Join(dirPath, entry.Name())
+		content, err := defaultSagas.ReadFile(filePath)
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", filePath, err)
+		}
+
+		script := strings.TrimSpace(string(content))
+
+		// Parse metadata header
+		metadata := parseMetadataHeader(script)
+
+		// Generate deterministic UUID based on name AND version
+		id := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("platform.saga."+sagaName+"."+version))
+
+		versions = append(versions, PlatformSagaDefinition{
+			ID:              id,
+			Name:            sagaName,
+			Version:         version,
+			Script:          script,
+			PreviousVersion: metadata.PreviousVersion,
+			DisplayName:     humanizeName(sagaName),
+			Description:     fmt.Sprintf("Platform default saga for %s operations.", strings.ReplaceAll(sagaDir, "_", " ")),
+		})
 	}
 
-	return script, nil
+	return versions, nil
 }
 
 // syncSaga syncs a single saga version to the database using INSERT-only semantics.
 // Returns true if the saga was inserted, false if skipped (already exists).
 //
-// Old versions are never modified or deleted. Each unique (name, version) pair
-// gets its own row, ensuring pinned saga instances can always replay correctly.
+// New versions are inserted with status=DEPRECATED. The activateLatestVersions
+// method then sets the highest version per saga to ACTIVE.
 func (s *PlatformSync) syncSaga(ctx context.Context, saga PlatformSagaDefinition) (bool, error) {
 	// Check if exact (name, version) already exists
 	var existingID uuid.UUID
@@ -170,12 +216,12 @@ func (s *PlatformSync) syncSaga(ctx context.Context, saga PlatformSagaDefinition
 		return false, nil
 	}
 
-	// INSERT new row for this version
+	// INSERT new row for this version (as DEPRECATED; activateLatestVersions will promote)
 	_, err = s.pool.Exec(ctx, `
 		INSERT INTO public.platform_saga_definition
-			(id, name, version, script, display_name, description)
-		VALUES ($1, $2, $3, $4, $5, $6)
-	`, saga.ID, saga.Name, saga.Version, saga.Script, saga.DisplayName, saga.Description)
+			(id, name, version, script, status, previous_version, display_name, description)
+		VALUES ($1, $2, $3, $4, 'DEPRECATED', $5, $6, $7)
+	`, saga.ID, saga.Name, saga.Version, saga.Script, saga.PreviousVersion, saga.DisplayName, saga.Description)
 	if err != nil {
 		// Handle race condition: another process may have inserted the same (name, version)
 		var pgErr *pgconn.PgError
@@ -188,10 +234,79 @@ func (s *PlatformSync) syncSaga(ctx context.Context, saga PlatformSagaDefinition
 		return false, fmt.Errorf("insert saga: %w", err)
 	}
 
-	s.logger.Info("inserted platform saga",
+	s.logger.Info("inserted platform saga version",
 		"name", saga.Name,
-		"version", saga.Version)
+		"version", saga.Version,
+		"previous", saga.PreviousVersion)
 	return true, nil
+}
+
+// activateLatestVersions sets status=ACTIVE for the highest version per saga
+// and DEPRECATED for all other versions. This uses semver comparison.
+func (s *PlatformSync) activateLatestVersions(ctx context.Context) error {
+	// Deprecate all versions first
+	_, err := s.pool.Exec(ctx, `
+		UPDATE public.platform_saga_definition SET status = 'DEPRECATED'
+	`)
+	if err != nil {
+		return fmt.Errorf("deprecate all versions: %w", err)
+	}
+
+	// Activate highest version per saga using semver comparison
+	_, err = s.pool.Exec(ctx, `
+		WITH ranked_versions AS (
+			SELECT name, version,
+				ROW_NUMBER() OVER (
+					PARTITION BY name
+					ORDER BY
+						CAST(split_part(version, '.', 1) AS INTEGER) DESC,
+						CAST(split_part(version, '.', 2) AS INTEGER) DESC,
+						CAST(split_part(version, '.', 3) AS INTEGER) DESC
+				) as rn
+			FROM public.platform_saga_definition
+		)
+		UPDATE public.platform_saga_definition psd
+		SET status = 'ACTIVE'
+		FROM ranked_versions rv
+		WHERE psd.name = rv.name
+			AND psd.version = rv.version
+			AND rv.rn = 1
+	`)
+	if err != nil {
+		return fmt.Errorf("activate latest versions: %w", err)
+	}
+
+	return nil
+}
+
+// parseMetadataHeader extracts structured metadata from the script header comments.
+func parseMetadataHeader(script string) ScriptMetadata {
+	meta := ScriptMetadata{}
+	headerRegex := regexp.MustCompile(`(?m)^#\s*(\w+):\s*(.+)$`)
+	matches := headerRegex.FindAllStringSubmatch(script, -1)
+
+	for _, match := range matches {
+		key := match[1]
+		value := strings.TrimSpace(match[2])
+		switch key {
+		case "Saga":
+			meta.SagaName = value
+		case "Version":
+			meta.Version = value
+		case "Previous":
+			if value != "" && value != "none" {
+				meta.PreviousVersion = &value
+			}
+		case "Changed":
+			meta.ChangeSummary = value
+		case "Author":
+			meta.Author = value
+		case "Date":
+			meta.Date = value
+		}
+	}
+
+	return meta
 }
 
 // extractVersionFromScript extracts the version from a "# Version: X.Y.Z" comment.

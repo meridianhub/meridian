@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -278,9 +279,23 @@ func applyMigrationsToSchema(t *testing.T, pool *pgxpool.Pool, service string, s
 // adaptCockroachDDLForPostgres rewrites CockroachDB-specific DDL statements to work on PostgreSQL.
 // CockroachDB requires DROP INDEX CASCADE to drop unique constraints, while PostgreSQL requires
 // ALTER TABLE DROP CONSTRAINT. This function translates the CockroachDB form to PostgreSQL.
+// It also rewrites "ADD CONSTRAINT IF NOT EXISTS" to use DO blocks that ignore duplicate
+// constraint errors, since PostgreSQL does not support IF NOT EXISTS on ADD CONSTRAINT.
 func adaptCockroachDDLForPostgres(sql string) string {
-	return strings.ReplaceAll(sql,
+	result := strings.ReplaceAll(sql,
 		`DROP INDEX IF EXISTS "public"."uq_platform_saga_definition_name" CASCADE`,
 		`ALTER TABLE "public"."platform_saga_definition" DROP CONSTRAINT IF EXISTS "uq_platform_saga_definition_name"`,
 	)
+	// CockroachDB supports ADD CONSTRAINT IF NOT EXISTS; PostgreSQL does not.
+	// Find each ALTER TABLE ... ADD CONSTRAINT IF NOT EXISTS statement and wrap it
+	// in a DO block that ignores duplicate_object errors.
+	re := regexp.MustCompile(`(?s)(ALTER TABLE\s+\S+\s+)ADD CONSTRAINT IF NOT EXISTS\s+(\S+\s+CHECK\s*\([^;]+?\));`)
+	result = re.ReplaceAllStringFunc(result, func(match string) string {
+		// Strip "IF NOT EXISTS" and wrap in exception handler
+		inner := strings.Replace(match, "ADD CONSTRAINT IF NOT EXISTS", "ADD CONSTRAINT", 1)
+		// Remove trailing semicolon since it goes inside the DO block
+		inner = strings.TrimSuffix(strings.TrimSpace(inner), ";")
+		return "DO $compat$ BEGIN " + inner + "; EXCEPTION WHEN duplicate_object THEN NULL; END $compat$;"
+	})
+	return result
 }

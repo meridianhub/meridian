@@ -1,5 +1,9 @@
-# Withdrawal Saga Definition
+# Saga: current_account_withdrawal
 # Version: 1.0.0
+# Previous: none
+# Changed: Initial version
+# Author: Platform Team
+# Date: 2026-01-26
 #
 # This Starlark script defines the withdrawal saga workflow for the Current Account service.
 # The saga executes a multi-step withdrawal operation with compensation on failure.

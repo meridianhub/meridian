@@ -159,7 +159,7 @@ func TestOverrideService_MigrateToPlatformRef(t *testing.T) {
 	require.NoError(t, err)
 
 	for _, meta := range PlatformDefaults() {
-		script := scripts[meta.Filename]
+		script := scripts[meta.Filename+".star"]
 		_, err := pool.Exec(ctx, `
 			INSERT INTO `+schemaName+`.saga_definition (
 				name, version, script, status, is_system,
