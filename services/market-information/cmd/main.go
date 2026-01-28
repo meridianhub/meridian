@@ -14,7 +14,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+	marketinformationv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
 	"github.com/meridianhub/meridian/services/market-information/adapters/external/ecb"
+	"github.com/meridianhub/meridian/services/market-information/adapters/persistence"
 	"github.com/meridianhub/meridian/services/market-information/config"
 	"github.com/meridianhub/meridian/services/market-information/service"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
@@ -72,16 +75,36 @@ func run(logger *slog.Logger) error {
 	}
 	defer bootstrap.ShutdownTracer(tracer, logger)
 
-	// TODO: Wire database into repository once persistence layer is implemented (Task 3)
-	// Currently scaffolding without database to avoid holding idle connections.
-	// Uncomment when ready:
-	// dbConfig := bootstrap.DefaultDatabaseConfig()
-	// dbConfig.Logger = logger
-	// db, err := bootstrap.NewDatabase(ctx, dbConfig)
-	// if err != nil {
-	// 	return fmt.Errorf("failed to initialize database: %w", err)
-	// }
-	// logger.Info("database connection established")
+	// Initialize database connection using pgxpool
+	dbURL := env.GetEnvOrDefault("DATABASE_URL", "postgres://meridian_user@localhost:26257/meridian?sslmode=disable")
+	dbPool, err := pgxpool.New(ctx, dbURL)
+	if err != nil {
+		return fmt.Errorf("failed to create database connection pool: %w", err)
+	}
+	defer dbPool.Close()
+
+	// Verify database connectivity
+	if err := dbPool.Ping(ctx); err != nil {
+		return fmt.Errorf("failed to ping database: %w", err)
+	}
+	logger.Info("database connection established", "url", dbURL)
+
+	// Create repositories for persistence
+	masterTenantID := env.GetEnvOrDefault("MASTER_TENANT_ID", "meridian_master")
+	repos := persistence.NewRepositories(dbPool, masterTenantID)
+	logger.Info("repositories initialized", "master_tenant_id", masterTenantID)
+
+	// Create Market Information service server
+	marketInformationServer, err := service.NewServer(
+		repos.DataSet,
+		repos.Observation,
+		repos.Source,
+		service.WithLogger(logger.With("component", "market_information_server")),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create market information server: %w", err)
+	}
+	logger.Info("market information server created")
 
 	// Initialize auth interceptor (optional - based on AUTH_ENABLED)
 	authConfig := bootstrap.DefaultAuthConfig(logger)
@@ -95,8 +118,8 @@ func run(logger *slog.Logger) error {
 		WithAuthInterceptor(authInterceptor).
 		Build()
 
-	// TODO: Register Market Information service when proto definitions are available
-	// pb.RegisterMarketInformationServiceServer(grpcServer, marketInformationService)
+	// Register Market Information service
+	marketinformationv1.RegisterMarketInformationServiceServer(grpcServer, marketInformationServer)
 
 	// Register health check service
 	healthChecker := service.NewHealthChecker(service.HealthCheckerConfig{
@@ -199,48 +222,37 @@ func run(logger *slog.Logger) error {
 	orchestrator := bootstrap.NewShutdownOrchestrator(grpcServer, logger)
 
 	// Initialize ECB adapter worker (if enabled)
-	// Note: This requires the Market Information service to be fully wired up.
-	// The ECB worker calls RecordObservation on the service to ingest FX rates.
+	// Note: The ECB worker calls RecordObservation on the Server to ingest FX rates.
 	if cfg.ECB.Enabled {
-		// TODO: Enable ECB worker once marketInformationServer is available
-		// The ECB worker needs a MarketInformationClient interface which the Server implements.
-		// Once the Server is created above, uncomment and wire up:
-		//
-		// ecbClient := ecb.NewClient(ecb.Config{
-		// 	Endpoint: cfg.ECB.Endpoint,
-		// 	Timeout:  cfg.ECB.Timeout,
-		// }, ecb.WithLogger(logger))
-		//
-		// ecbWorker := ecb.NewWorker(
-		// 	ecbClient,
-		// 	marketInformationServer, // Server implements MarketInformationClient interface
-		// 	ecb.WorkerConfig{
-		// 		DatasetCode:   cfg.ECB.DatasetCode,
-		// 		SourceCode:    cfg.ECB.SourceCode,
-		// 		FetchInterval: cfg.ECB.Interval,
-		// 		MaxRetries:    cfg.ECB.MaxRetries,
-		// 	},
-		// 	logger,
-		// )
-		//
-		// ecbWorker.Start(ctx)
-		//
-		// // Register cleanup to stop ECB worker before other services
-		// orchestrator.AddCleanup(func() error {
-		// 	ecbWorker.Stop()
-		// 	return nil
-		// })
-		//
-		// logger.Info("ECB adapter initialized",
-		// 	"interval", cfg.ECB.Interval,
-		// 	"source_code", cfg.ECB.SourceCode,
-		// 	"dataset_code", cfg.ECB.DatasetCode)
+		ecbClient := ecb.NewClient(ecb.Config{
+			Endpoint: cfg.ECB.Endpoint,
+			Timeout:  cfg.ECB.Timeout,
+		}, ecb.WithLogger(logger))
 
-		logger.Warn("ECB adapter enabled but Market Information service not yet wired up",
-			"ecb_enabled", cfg.ECB.Enabled)
+		ecbWorker := ecb.NewWorker(
+			ecbClient,
+			marketInformationServer, // Server implements MarketInformationClient interface
+			ecb.WorkerConfig{
+				DatasetCode:   cfg.ECB.DatasetCode,
+				SourceCode:    cfg.ECB.SourceCode,
+				FetchInterval: cfg.ECB.Interval,
+				MaxRetries:    cfg.ECB.MaxRetries,
+			},
+			logger,
+		)
 
-		// Suppress unused import warning - remove this block when ECB worker is wired up
-		_ = ecb.NewClient
+		ecbWorker.Start(ctx)
+
+		// Register cleanup to stop ECB worker before other services
+		orchestrator.AddCleanup(func() error {
+			ecbWorker.Stop()
+			return nil
+		})
+
+		logger.Info("ECB adapter initialized",
+			"interval", cfg.ECB.Interval,
+			"source_code", cfg.ECB.SourceCode,
+			"dataset_code", cfg.ECB.DatasetCode)
 	}
 
 	// Register cleanup functions (LIFO order - HTTP server first, then database)
@@ -255,11 +267,8 @@ func run(logger *slog.Logger) error {
 		return nil
 	})
 
-	// TODO: Re-enable database cleanup when persistence layer is implemented
-	// orchestrator.AddCleanup(func() error {
-	// 	bootstrap.CloseDatabase(db, logger)
-	// 	return nil
-	// })
+	// Note: Database pool cleanup is handled via defer dbPool.Close() above
+	// This ensures the pool is closed even if orchestrator.Wait returns early
 
 	return orchestrator.Wait(serverErrors)
 }
