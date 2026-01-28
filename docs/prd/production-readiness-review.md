@@ -955,7 +955,7 @@ func TestAsyncOperation_E2E(t *testing.T) {
 
 **Assumptions**:
 
-- Developers are familiar with testcontainers and e2e testing patterns
+- Developers are familiar with Testcontainers and e2e testing patterns
 - Can run tests in parallel without blocking each other
 - Reference existing e2e tests as templates to accelerate development
 
@@ -1172,7 +1172,7 @@ starlark.NewBuiltin("invoke_saga", func(...) (starlark.Value, error) {
 1. Implement actual CEL evaluation using `github.com/google/cel-go`
 2. Implement account resolution (query reference-data service)
 3. Implement saga composition (nested saga invocation)
-4. Add tests for each builtin
+4. Add tests for each built-in
 
 ---
 
