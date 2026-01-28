@@ -39,6 +39,12 @@ var (
 	// ErrPartyScopeViolation is returned when a step tries to access a party outside its visible scope.
 	// This is a fatal error that cannot be retried - it indicates a security/authorization failure.
 	ErrPartyScopeViolation = errors.New("party scope violation: party_id not in visible_parties")
+
+	// ErrConservationViolation is returned when a saga violates the Conservation of Dimension Rule.
+	// This prevents Physics instruments (KWH, GAS) from producing more Physics instruments in settlement sagas,
+	// which would create infinite causation loops.
+	// This is a fatal error (FR-28) as it indicates a logical impossibility in the domain model.
+	ErrConservationViolation = errors.New("conservation violation: settlement saga triggered by Physics instrument cannot produce Physics instruments")
 )
 
 // Direction constants for transaction operations.
@@ -184,6 +190,13 @@ type StarlarkContext struct {
 	// to ensure the same lookup results are returned even if Reference Data changed.
 	LookupCache *LookupResultCache
 
+	// TriggerInstrument is the instrument code that triggered this saga execution (e.g., "KWH", "GAS", "USD").
+	// Used for conservation rule enforcement: settlement sagas triggered by Physics instruments (KWH, GAS)
+	// cannot produce new Physics instruments to prevent causation loops.
+	// Empty string means no specific instrument trigger (e.g., user-initiated actions).
+	// This field is immutable after creation and set based on the event/transaction that triggered the saga.
+	TriggerInstrument string
+
 	// stepCounter tracks the number of handler invocations for idempotency key generation.
 	// This is incremented atomically before each handler call to generate unique step IDs.
 	// Protected by stepMutex for thread-safe access.
@@ -219,6 +232,68 @@ type PartyScope struct {
 
 	// Permissions lists the allowed operations for this scope.
 	Permissions []string
+}
+
+// IsPhysicsInstrument returns true if the instrument represents a physical quantity (KWH, GAS).
+// Physics instruments are subject to conservation laws - they cannot be created from nothing in settlement sagas.
+func IsPhysicsInstrument(instrument string) bool {
+	return instrument == "KWH" || instrument == "GAS"
+}
+
+// CheckConservationRule enforces the Conservation of Dimension Rule.
+// Returns ErrConservationViolation if a settlement saga triggered by a Physics instrument
+// attempts to produce the same Physics instrument, which would create a causation loop.
+//
+// Conservation Rule:
+//   - Settlement sagas triggered by Physics instruments (KWH, GAS) cannot produce Physics instruments
+//   - This prevents infinite causation loops (e.g., KWH settlement creating more KWH)
+//   - Ingestion and valuation handlers are exempt from this rule
+//   - Financial instruments (USD, NZD) can always be produced
+//
+// Parameters:
+//   - ctx: The Starlark execution context (contains TriggerInstrument)
+//   - metadata: Handler metadata (contains Category and ProducesInstruments)
+//   - handlerName: The name of the handler being checked (for error messages)
+//
+// Returns:
+//   - nil if the rule is satisfied or not applicable
+//   - ErrConservationViolation if the rule is violated
+func CheckConservationRule(ctx *StarlarkContext, metadata *HandlerMetadata, handlerName string) error {
+	// Skip check if no metadata (backward compatibility)
+	if metadata == nil {
+		return nil
+	}
+
+	// Skip check if no trigger instrument (user-initiated sagas)
+	if ctx.TriggerInstrument == "" {
+		return nil
+	}
+
+	// Skip check if handler doesn't produce instruments
+	if len(metadata.ProducesInstruments) == 0 {
+		return nil
+	}
+
+	// Rule only applies to settlement handlers
+	if metadata.Category != HandlerCategorySettlement {
+		return nil
+	}
+
+	// Check if trigger is a Physics instrument
+	triggerIsPhysics := IsPhysicsInstrument(ctx.TriggerInstrument)
+	if !triggerIsPhysics {
+		return nil
+	}
+
+	// Check if handler produces any Physics instruments
+	for _, instrument := range metadata.ProducesInstruments {
+		if IsPhysicsInstrument(instrument) {
+			return fmt.Errorf("%w: handler=%s, trigger=%s, produces=%v",
+				ErrConservationViolation, handlerName, ctx.TriggerInstrument, metadata.ProducesInstruments)
+		}
+	}
+
+	return nil
 }
 
 // NewUUID generates a deterministic V5 UUID using the given namespace and name.
@@ -327,18 +402,29 @@ func (c *StarlarkContext) IsSuspended() bool {
 type HandlerRegistry struct {
 	mu       sync.RWMutex
 	handlers map[string]Handler
+	metadata map[string]*HandlerMetadata
 }
 
 // NewHandlerRegistry creates a new empty handler registry.
 func NewHandlerRegistry() *HandlerRegistry {
 	return &HandlerRegistry{
 		handlers: make(map[string]Handler),
+		metadata: make(map[string]*HandlerMetadata),
 	}
 }
 
-// Register adds a handler to the registry under the given name.
+// Register adds a handler to the registry under the given name without metadata.
+// For backward compatibility with existing handlers.
 // Returns ErrInvalidHandlerName if name is empty, or ErrHandlerAlreadyRegistered if name exists.
 func (r *HandlerRegistry) Register(name string, handler Handler) error {
+	return r.RegisterWithMetadata(name, handler, nil)
+}
+
+// RegisterWithMetadata adds a handler to the registry with operational metadata.
+// Metadata is used for conservation rule enforcement and handler categorization.
+// Pass nil metadata for backward compatibility with handlers that don't need metadata.
+// Returns ErrInvalidHandlerName if name is empty, or ErrHandlerAlreadyRegistered if name exists.
+func (r *HandlerRegistry) RegisterWithMetadata(name string, handler Handler, metadata *HandlerMetadata) error {
 	if name == "" {
 		return ErrInvalidHandlerName
 	}
@@ -351,21 +437,33 @@ func (r *HandlerRegistry) Register(name string, handler Handler) error {
 	}
 
 	r.handlers[name] = handler
+	r.metadata[name] = metadata
 	return nil
 }
 
-// Get retrieves a handler by name.
+// Get retrieves a handler by name without metadata.
+// For backward compatibility with existing code.
 // Returns ErrHandlerNotFound if the handler does not exist.
 func (r *HandlerRegistry) Get(name string) (Handler, error) {
+	h, _, err := r.GetWithMetadata(name)
+	return h, err
+}
+
+// GetWithMetadata retrieves a handler and its metadata by name.
+// Returns nil metadata if the handler was registered without metadata (backward compatibility).
+// Returns ErrHandlerNotFound if the handler does not exist.
+func (r *HandlerRegistry) GetWithMetadata(name string) (Handler, *HandlerMetadata, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	handler, exists := r.handlers[name]
 	if !exists {
-		return nil, fmt.Errorf("%w: %s", ErrHandlerNotFound, name)
+		return nil, nil, fmt.Errorf("%w: %s", ErrHandlerNotFound, name)
 	}
 
-	return handler, nil
+	metadata := r.metadata[name] // May be nil for handlers registered without metadata
+
+	return handler, metadata, nil
 }
 
 // Has returns true if a handler with the given name is registered.

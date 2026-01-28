@@ -692,6 +692,85 @@ func TestRequireDirectionParam(t *testing.T) {
 	})
 }
 
+// TestHandlerRegistry_RegisterWithMetadata tests handler registration with metadata.
+func TestHandlerRegistry_RegisterWithMetadata(t *testing.T) {
+	registry := NewHandlerRegistry()
+
+	handler := func(_ *StarlarkContext, _ map[string]any) (any, error) {
+		return "result", nil
+	}
+
+	metadata := &HandlerMetadata{
+		Category:            HandlerCategorySettlement,
+		ProducesInstruments: []string{"USD"},
+	}
+
+	err := registry.RegisterWithMetadata("test.handler", handler, metadata)
+	require.NoError(t, err)
+
+	// Verify handler is registered
+	assert.True(t, registry.Has("test.handler"))
+
+	// Verify metadata is stored
+	h, md, err := registry.GetWithMetadata("test.handler")
+	require.NoError(t, err)
+	require.NotNil(t, h)
+	require.NotNil(t, md)
+	assert.Equal(t, HandlerCategorySettlement, md.Category)
+	assert.Equal(t, []string{"USD"}, md.ProducesInstruments)
+}
+
+// TestHandlerRegistry_GetWithMetadata tests handler retrieval with metadata.
+func TestHandlerRegistry_GetWithMetadata(t *testing.T) {
+	registry := NewHandlerRegistry()
+
+	handler := func(_ *StarlarkContext, _ map[string]any) (any, error) {
+		return "result", nil
+	}
+
+	metadata := &HandlerMetadata{
+		Category:            HandlerCategoryIngestion,
+		ProducesInstruments: []string{"KWH", "GAS"},
+	}
+
+	err := registry.RegisterWithMetadata("test.handler", handler, metadata)
+	require.NoError(t, err)
+
+	// Get with metadata
+	h, md, err := registry.GetWithMetadata("test.handler")
+	require.NoError(t, err)
+	require.NotNil(t, h)
+	require.NotNil(t, md)
+	assert.Equal(t, HandlerCategoryIngestion, md.Category)
+	assert.Equal(t, []string{"KWH", "GAS"}, md.ProducesInstruments)
+}
+
+// TestHandlerRegistry_GetWithMetadata_NoMetadata tests backward compatibility.
+func TestHandlerRegistry_GetWithMetadata_NoMetadata(t *testing.T) {
+	registry := NewHandlerRegistry()
+
+	handler := func(_ *StarlarkContext, _ map[string]any) (any, error) {
+		return "result", nil
+	}
+
+	// Register without metadata (backward compatibility)
+	err := registry.Register("test.handler", handler)
+	require.NoError(t, err)
+
+	// Get with metadata should return nil metadata
+	h, md, err := registry.GetWithMetadata("test.handler")
+	require.NoError(t, err)
+	require.NotNil(t, h)
+	assert.Nil(t, md, "handlers registered without metadata should return nil metadata")
+}
+
+// TestHandlerCategory_Values tests handler category constants.
+func TestHandlerCategory_Values(t *testing.T) {
+	assert.Equal(t, HandlerCategory("ingestion"), HandlerCategoryIngestion)
+	assert.Equal(t, HandlerCategory("settlement"), HandlerCategorySettlement)
+	assert.Equal(t, HandlerCategory("valuation"), HandlerCategoryValuation)
+}
+
 func TestStarlarkContext_IdempotencyKey(t *testing.T) {
 	t.Run("struct has IdempotencyKey field", func(t *testing.T) {
 		ctx := &StarlarkContext{
