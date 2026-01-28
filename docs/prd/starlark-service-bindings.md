@@ -1,0 +1,794 @@
+# PRD: Starlark Service Bindings - Real Service Integration
+
+**Status:** Draft
+**Related PRDs:** [Starlark Typed Service Clients](./starlark-typed-service-clients.md)
+
+## Problem Statement
+
+Currently, Starlark service handlers in `shared/pkg/saga/handlers.go` are **stub implementations**
+that only log operations and return mock data. They don't call actual services, write to databases,
+or perform real business operations.
+
+### Current Implementation (Mock Handlers)
+
+```go
+// shared/pkg/saga/handlers.go:761-786
+func currentAccountCreateLien(ctx *StarlarkContext, params map[string]any) (any, error) {
+    accountID, err := requireStringParam(params, "account_id")
+    amount, err := requireDecimalParam(params, "amount")
+
+    ctx.Logger.Info("creating lien", ...)  // Just logs!
+
+    return map[string]any{                 // Returns fake data!
+        "lien_id": ctx.NewUUID(...),
+        "status": "ACTIVE",
+    }, nil
+}
+```
+
+**This handler doesn't actually create a lien** - no gRPC call, no database write, nothing.
+
+### Meanwhile, Real Service Clients Already Exist
+
+Each service has a fully-functional gRPC client:
+
+```go
+// services/current-account/client/client.go:293-320
+func (c *Client) InitiateLien(ctx context.Context, req *InitiateLienRequest) (*InitiateLienResponse, error) {
+    // ✅ Validation
+    if err := validation.ValidateAccountID(req.GetAccountId()); err != nil {
+        return nil, status.Errorf(codes.InvalidArgument, ...)
+    }
+
+    // ✅ Timeout, correlation, tracing
+    ctx, cancel := clients.WithTimeout(ctx, c.timeout)
+    ctx = clients.PropagateCorrelationID(ctx)
+
+    // ✅ Circuit breaker, retry logic
+    if c.resilient != nil {
+        return clients.ExecuteWithResilienceNoRetry(...)
+    }
+
+    // ✅ Actual gRPC call
+    resp, err := c.currentAccount.InitiateLien(ctx, req)
+    return resp, nil
+}
+```
+
+### The Gap: Handlers and Clients Are Disconnected
+
+| Aspect | Service Client (`client.go`) | Starlark Handler (`handlers.go`) |
+|--------|------------------------------|----------------------------------|
+| **Location** | `services/{service}/client/` | `shared/pkg/saga/handlers.go` |
+| **Implementation** | Real gRPC calls | Mock/stub |
+| **Validation** | Full input validation | Basic param checking |
+| **Resilience** | Circuit breaker + retry | None |
+| **Tracing** | OpenTelemetry propagation | Basic logging |
+| **Testing** | Client tests only | Framework tests only |
+| **Ownership** | Service team | Platform team |
+
+**Problem**: We've built the same operations twice in disconnected locations, and the Starlark versions don't actually work.
+
+## Current Pain Points
+
+### 1. Mock Implementations Hide Production Issues
+
+```starlark
+# services/current-account/sagas/deposit.star:39-45
+step(name="log_position")
+log_position_result = position_keeping.initiate_log(
+    account_id=account_identification,
+    amount=amount,
+    currency=currency,
+    direction="CREDIT",
+    transaction_id=transaction_id,
+)
+```
+
+This script **appears to work** in tests because the handler returns mock data:
+
+```go
+return map[string]any{
+    "log_id": ctx.NewUUID(...),  // Deterministic fake ID
+    "status": "INITIATED",        // Always succeeds
+}, nil
+```
+
+**But in production**, this would never actually log the position because there's no service call.
+
+### 2. Testing Gap
+
+Current test coverage (`shared/pkg/saga/handlers_test.go`):
+
+```go
+// Line 289-298: What tests actually check
+params := map[string]any{
+    "position_id": uuid.New().String(),
+    "amount":      decimal.NewFromInt(100),
+    "direction":   "DEBIT",
+}
+result, err := handler(ctx, params)
+require.NoError(t, err)
+assert.NotNil(t, result)  // ← Just checks SOMETHING was returned!
+```
+
+**Tests verify:**
+
+- ✅ Registry works (can register/retrieve handlers)
+- ✅ Handlers accept correct parameters
+- ✅ Handlers reject invalid parameters
+- ✅ Handlers return a result structure
+
+**Tests DON'T verify:**
+
+- ❌ Does the handler call the real service?
+- ❌ Does it correctly transform data (Starlark → protobuf)?
+- ❌ Does it handle service errors properly?
+- ❌ Does compensation/rollback work?
+- ❌ Does it actually persist anything?
+
+### 3. Wrong Location for Service-Specific Logic
+
+`shared/pkg/saga/handlers.go` is **1139 lines** containing:
+
+- 22 handler implementations across 7 domains
+- Service-specific business logic
+- Will grow linearly with new services
+
+**This violates separation of concerns:**
+
+- Platform code (`shared/pkg/saga/`) should provide the **framework**
+- Service code (`services/*/client/`) should provide the **implementations**
+
+### 4. Duplicate API Surface
+
+Each service effectively exposes its operations **three ways**:
+
+1. **gRPC proto** (`api/proto/{service}/v1/*.proto`) - Contract
+2. **Go client** (`services/{service}/client/client.go`) - Go consumers
+3. **Starlark handlers** (`shared/pkg/saga/handlers.go`) - Starlark consumers
+
+Ways 2 and 3 should share implementation, but currently don't.
+
+### 5. Naming Confusion
+
+Current terminology suggests these handlers are **only for sagas**, but they're actually
+general-purpose service bindings usable for:
+
+- ✅ Sagas (multi-step transactions with compensation)
+- ✅ Workflows (orchestration without compensation)
+- ✅ Valuation calculations (read-only multi-service queries)
+- ✅ Business rule evaluation
+- ✅ Custom reporting scripts
+
+**Example non-saga use case:**
+
+```starlark
+# Valuation service: gather data from multiple sources
+# This is NOT a saga (no compensation), but uses the same handlers
+
+step(name="get_market_price")
+market_price = market_information.get_spot_price(
+    instrument="ELEC-SPOT-NZ",
+    timestamp=valuation_at,
+)
+
+step(name="get_contract_terms")
+contract = internal_bank_account.get_contract(
+    contract_id=contract_id,
+)
+
+# CEL-based valuation calculation
+result = evaluate_valuation_formula(
+    formula=contract.valuation_formula,
+    market_price=market_price,
+    quantity=quantity,
+)
+```
+
+This script uses the same "handlers" but has nothing to do with sagas.
+
+## Proposed Solution
+
+### 1. Move Handlers to Service Client Packages
+
+**Before:**
+
+```text
+shared/pkg/saga/
+├── handlers.go                 # 1139 lines - ALL handlers
+├── handlers_test.go            # Framework tests only
+└── ...
+
+services/current-account/
+├── client/
+│   ├── client.go               # gRPC client
+│   └── client_test.go
+└── ...
+```
+
+**After:**
+
+```text
+shared/pkg/saga/
+├── handler.go                  # Framework only (~200 lines)
+├── handler_test.go             # Framework tests
+└── ...
+
+services/current-account/
+├── client/
+│   ├── client.go               # gRPC client (unchanged)
+│   ├── starlark.go             # NEW - Starlark service bindings
+│   ├── client_test.go          # Client tests (unchanged)
+│   └── starlark_test.go        # NEW - Integration tests for bindings
+└── ...
+
+services/position-keeping/
+├── client/
+│   ├── client.go
+│   ├── starlark.go             # NEW
+│   └── starlark_test.go        # NEW
+└── ...
+```
+
+### 2. Handlers Call Real Clients
+
+**Pattern:**
+
+```go
+// services/current-account/client/starlark.go
+package client
+
+import "github.com/meridianhub/meridian/shared/pkg/saga"
+
+// RegisterStarlarkHandlers registers all Starlark service bindings for Current Account.
+// These handlers adapt the Starlark interface (map[string]any) to gRPC client calls.
+func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) error {
+    handlers := map[string]saga.Handler{
+        "current_account.create_lien":    createLienHandler(client),
+        "current_account.execute_lien":   executeLienHandler(client),
+        "current_account.terminate_lien": terminateLienHandler(client),
+        "current_account.save":           saveHandler(client),
+    }
+
+    for name, handler := range handlers {
+        if err := registry.Register(name, handler); err != nil {
+            return fmt.Errorf("failed to register %s: %w", name, err)
+        }
+    }
+    return nil
+}
+
+// createLienHandler adapts Starlark params to Client.InitiateLien gRPC call.
+func createLienHandler(client *Client) saga.Handler {
+    return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
+        // 1. Parse Starlark params (map[string]any → protobuf)
+        accountID, err := saga.RequireStringParam(params, "account_id")
+        if err != nil {
+            return nil, err
+        }
+
+        amount, err := saga.RequireDecimalParam(params, "amount")
+        if err != nil {
+            return nil, err
+        }
+
+        // 2. Call the REAL client method (via gRPC)
+        resp, err := client.InitiateLien(ctx.Context, &currentaccountv1.InitiateLienRequest{
+            AccountId: accountID,
+            Amount:    convertDecimalToProto(amount),
+            Currency:  params["currency"].(string),
+        })
+        if err != nil {
+            return nil, fmt.Errorf("current_account.create_lien: %w", err)
+        }
+
+        // 3. Convert response back to Starlark format (protobuf → map[string]any)
+        return map[string]any{
+            "lien_id":    resp.GetLienId(),
+            "account_id": resp.GetAccountId(),
+            "amount":     convertProtoToDecimal(resp.GetAmount()),
+            "status":     "ACTIVE",
+        }, nil
+    }
+}
+
+// executeLienHandler adapts Starlark params to Client.ExecuteLien gRPC call.
+func executeLienHandler(client *Client) saga.Handler {
+    return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
+        lienID, err := saga.RequireStringParam(params, "lien_id")
+        if err != nil {
+            return nil, err
+        }
+
+        resp, err := client.ExecuteLien(ctx.Context, &currentaccountv1.ExecuteLienRequest{
+            LienId: lienID,
+        })
+        if err != nil {
+            return nil, fmt.Errorf("current_account.execute_lien: %w", err)
+        }
+
+        return map[string]any{
+            "lien_id": resp.GetLienId(),
+            "status":  "EXECUTED",
+        }, nil
+    }
+}
+```
+
+### 3. Rename to Reflect Broader Usage
+
+| Old Name | New Name | Rationale |
+|----------|----------|-----------|
+| `DomainHandler` | `Handler` | Simpler, more general |
+| `DomainHandlerRegistry` | `HandlerRegistry` | Not domain-specific |
+| "Saga handler" (docs) | "Starlark service binding" or "service handler" | Emphasizes general-purpose usage |
+| `handlers.go` | `starlark.go` in each service's `client/` | Co-located with gRPC client |
+
+**Note**: The saga **engine** (`shared/pkg/saga/`) remains unchanged - it's a consumer of these handlers.
+
+### 4. Dependency Injection Pattern
+
+Handlers need access to initialized service clients. Use constructor injection:
+
+```go
+// cmd/saga-executor/main.go
+func main() {
+    // Initialize service clients
+    currentAccountClient, cleanup, err := currentaccount.New(currentaccount.Config{...})
+    defer cleanup()
+
+    positionKeepingClient, cleanup, err := positionkeeping.New(positionkeeping.Config{...})
+    defer cleanup()
+
+    // Create handler registry
+    registry := saga.NewHandlerRegistry()
+
+    // Register handlers with their clients
+    currentaccount.RegisterStarlarkHandlers(registry, currentAccountClient)
+    positionkeeping.RegisterStarlarkHandlers(registry, positionKeepingClient)
+    // ... other services
+
+    // Start saga executor with registry
+    executor := saga.NewExecutor(saga.ExecutorConfig{
+        Handlers: registry,
+        // ...
+    })
+}
+```
+
+### 5. Service Handler Mapping
+
+Each service's client methods map 1:1 to Starlark handlers:
+
+| Service | Client Method | Starlark Handler | Purpose |
+|---------|---------------|------------------|---------|
+| **Current Account** | | | |
+| | `InitiateLien()` | `current_account.create_lien` | Create fund reservation |
+| | `ExecuteLien()` | `current_account.execute_lien` | Execute reservation |
+| | `TerminateLien()` | `current_account.terminate_lien` | Cancel reservation |
+| **Position Keeping** | | | |
+| | `InitiateLog()` | `position_keeping.initiate_log` | Log position entry |
+| | `UpdateLog()` | `position_keeping.update_log` | Update log status |
+| | `CancelLog()` | `position_keeping.cancel_log` | Cancel log entry |
+| **Financial Accounting** | | | |
+| | `PostEntries()` | `financial_accounting.post_entries` | Post GL entries |
+| | `ReverseEntries()` | `financial_accounting.reverse_entries` | Reverse compensation |
+| | `CreateBooking()` | `financial_accounting.create_booking` | Create booking |
+| **Payment Order** | | | |
+| | `CreateLien()` | `payment_order.create_lien` | Reserve payment funds |
+| | `SendToGateway()` | `payment_order.send_to_gateway` | Submit to gateway |
+| | `ExecuteLien()` | `payment_order.execute_lien` | Execute payment lien |
+
+**Guideline**: If an operation appears in a saga/workflow, it should have a Starlark handler.
+Not every client method needs a handler, but every handler should call a client method.
+
+## Testing Strategy
+
+### 1. Framework Tests (Unchanged)
+
+`shared/pkg/saga/handler_test.go` continues testing the framework:
+
+- ✅ Registry registration/retrieval
+- ✅ Context propagation
+- ✅ PartyScope validation
+- ✅ Parameter validation helpers
+- ✅ Thread safety
+
+### 2. NEW: Handler Integration Tests
+
+Each service's `client/starlark_test.go` tests the bindings:
+
+```go
+// services/current-account/client/starlark_test.go
+func TestCreateLienHandler_Success(t *testing.T) {
+    // Setup test server + client
+    server, client := setupTestServer(t)
+    defer server.Close()
+
+    // Register handlers
+    registry := saga.NewHandlerRegistry()
+    RegisterStarlarkHandlers(registry, client)
+
+    // Get handler
+    handler, err := registry.Get("current_account.create_lien")
+    require.NoError(t, err)
+
+    // Execute handler
+    ctx := &saga.StarlarkContext{
+        Context: context.Background(),
+        SagaExecutionID: uuid.New(),
+        Logger: slog.Default(),
+    }
+    params := map[string]any{
+        "account_id": "acc-123",
+        "amount": decimal.NewFromInt(100),
+        "currency": "USD",
+    }
+
+    result, err := handler(ctx, params)
+    require.NoError(t, err)
+
+    // Verify result structure
+    resultMap := result.(map[string]any)
+    assert.NotEmpty(t, resultMap["lien_id"])
+    assert.Equal(t, "ACTIVE", resultMap["status"])
+
+    // Verify actual service call occurred
+    liens := server.GetCreatedLiens()
+    assert.Len(t, liens, 1)
+    assert.Equal(t, "acc-123", liens[0].AccountId)
+}
+
+func TestCreateLienHandler_ServiceError(t *testing.T) {
+    // Setup server that returns error
+    server, client := setupTestServer(t)
+    server.SetLienError(codes.FailedPrecondition, "insufficient funds")
+
+    registry := saga.NewHandlerRegistry()
+    RegisterStarlarkHandlers(registry, client)
+
+    handler, err := registry.Get("current_account.create_lien")
+    require.NoError(t, err)
+
+    // Execute should propagate service error
+    result, err := handler(testContext(), testParams())
+    require.Error(t, err)
+    assert.Contains(t, err.Error(), "insufficient funds")
+    assert.Nil(t, result)
+}
+
+func TestCreateLienHandler_InvalidParams(t *testing.T) {
+    server, client := setupTestServer(t)
+    registry := saga.NewHandlerRegistry()
+    RegisterStarlarkHandlers(registry, client)
+
+    handler, err := registry.Get("current_account.create_lien")
+    require.NoError(t, err)
+
+    // Missing required param
+    params := map[string]any{
+        "account_id": "acc-123",
+        // Missing "amount"
+    }
+
+    result, err := handler(testContext(), params)
+    require.Error(t, err)
+    assert.ErrorIs(t, err, saga.ErrMissingParam)
+}
+```
+
+### 3. E2E Tests (Enhanced)
+
+Existing e2e tests in `services/*/e2e/` should be enhanced to cover:
+
+**Saga Execution with Real Services:**
+
+```go
+// services/current-account/e2e/saga_e2e_test.go
+func TestDepositSaga_E2E(t *testing.T) {
+    // Setup: Real services in testcontainers
+    ctx := context.Background()
+    testEnv := setupE2EEnvironment(t, ctx)
+    defer testEnv.Cleanup()
+
+    // Execute deposit saga
+    req := &currentaccountv1.ExecuteDepositRequest{
+        AccountId: testEnv.AccountID,
+        Amount: &commonv1.Money{
+            Amount: "100.00",
+            Currency: "USD",
+        },
+        TransactionId: uuid.New().String(),
+    }
+
+    resp, err := testEnv.CurrentAccountClient.ExecuteDeposit(ctx, req)
+    require.NoError(t, err)
+    assert.Equal(t, "COMPLETED", resp.GetStatus())
+
+    // Verify position was logged
+    position := testEnv.PositionKeepingDB.GetPosition(t, testEnv.AccountID)
+    assert.Equal(t, "100.00", position.Balance)
+
+    // Verify GL entries were posted
+    entries := testEnv.FinancialAccountingDB.GetEntries(t, resp.GetTransactionId())
+    assert.Len(t, entries, 2) // Debit + Credit
+}
+```
+
+**Saga Compensation/Rollback:**
+
+```go
+func TestDepositSaga_Rollback_E2E(t *testing.T) {
+    ctx := context.Background()
+    testEnv := setupE2EEnvironment(t, ctx)
+    defer testEnv.Cleanup()
+
+    // Setup: Make step 4 fail (e.g., insufficient clearing account funds)
+    testEnv.FinancialAccountingService.SetCapturePostingError(
+        codes.FailedPrecondition,
+        "clearing account insufficient funds",
+    )
+
+    // Execute deposit saga - should fail at step 4
+    req := &currentaccountv1.ExecuteDepositRequest{...}
+    resp, err := testEnv.CurrentAccountClient.ExecuteDeposit(ctx, req)
+    require.Error(t, err)
+
+    // Verify compensation occurred (LIFO order)
+    // Step 3 compensation: Reverse debit posting
+    entries := testEnv.FinancialAccountingDB.GetEntries(t, req.GetTransactionId())
+    assert.True(t, hasReversalEntry(entries), "step 3 should be compensated")
+
+    // Step 2 compensation: Cancel booking log
+    bookingLog := testEnv.FinancialAccountingDB.GetBookingLog(t, req.GetTransactionId())
+    assert.Equal(t, "CANCELLED", bookingLog.Status)
+
+    // Step 1 compensation: Cancel position log
+    positionLog := testEnv.PositionKeepingDB.GetLog(t, req.GetTransactionId())
+    assert.Equal(t, "CANCELLED", positionLog.Status)
+
+    // Verify final state: No net changes (perfect rollback)
+    position := testEnv.PositionKeepingDB.GetPosition(t, testEnv.AccountID)
+    assert.Equal(t, initialBalance, position.Balance, "position should be unchanged after rollback")
+}
+```
+
+**Multi-Service Workflow (Non-Saga):**
+
+```go
+func TestValuationWorkflow_E2E(t *testing.T) {
+    // Test read-only multi-service orchestration (no compensation needed)
+    ctx := context.Background()
+    testEnv := setupE2EEnvironment(t, ctx)
+
+    // Execute Starlark valuation script
+    script := `
+        market_price = market_information.get_spot_price(
+            instrument="ELEC-SPOT-NZ",
+            timestamp=input_data["valuation_at"],
+        )
+
+        contract = internal_bank_account.get_contract(
+            contract_id=input_data["contract_id"],
+        )
+
+        result = {
+            "value": market_price.value * contract.quantity,
+            "currency": market_price.currency,
+        }
+    `
+
+    result, err := testEnv.StarlarkEngine.Execute(ctx, script, inputData)
+    require.NoError(t, err)
+    assert.NotNil(t, result["value"])
+}
+```
+
+### 4. Test Coverage Goals
+
+| Test Type | Coverage Target | What It Verifies |
+|-----------|----------------|------------------|
+| Framework unit tests | 100% | Registry, context, helpers |
+| Handler integration tests | 100% of handlers | Param parsing, client calls, response mapping |
+| Service e2e tests | Happy path + 1 failure scenario per service | Real service integration |
+| Saga e2e tests | All compensation paths | Rollback works correctly |
+| Workflow e2e tests | At least 1 non-saga workflow | General-purpose usage |
+
+## Implementation Plan
+
+### Phase 1: Infrastructure (Estimated: 3 story points)
+
+1. **Refactor framework** (`shared/pkg/saga/`)
+   - Rename `DomainHandler` → `Handler`
+   - Rename `DomainHandlerRegistry` → `HandlerRegistry`
+   - Move helper functions (`requireStringParam`, etc.) to public API
+   - Update framework tests
+   - **Files changed**: 3-4 files in `shared/pkg/saga/`
+
+2. **Create integration test helpers**
+   - Test server factory for gRPC services
+   - Mock service implementations for testing
+   - **Files changed**: 1 new file `shared/pkg/saga/testing/helpers.go`
+
+### Phase 2: Migrate Handlers Service-by-Service (Estimated: 13 story points)
+
+Migrate in dependency order (dependencies first):
+
+#### 2.1 Position Keeping (2 story points)
+
+- **Files changed**: 2 new files
+  - `services/position-keeping/client/starlark.go` (~100 lines)
+  - `services/position-keeping/client/starlark_test.go` (~200 lines)
+- **Handlers migrated**: 3
+  - `position_keeping.initiate_log`
+  - `position_keeping.update_log`
+  - `position_keeping.cancel_log`
+- **Risk**: Low (no dependencies on other handlers)
+
+#### 2.2 Financial Accounting (3 story points)
+
+- **Files changed**: 2 new files
+  - `services/financial-accounting/client/starlark.go` (~200 lines)
+  - `services/financial-accounting/client/starlark_test.go` (~400 lines)
+- **Handlers migrated**: 7
+  - `financial_accounting.post_entries`
+  - `financial_accounting.reverse_entries`
+  - `financial_accounting.create_booking`
+  - `financial_accounting.initiate_booking_log`
+  - `financial_accounting.capture_posting`
+  - `financial_accounting.compensate_posting`
+  - `financial_accounting.update_booking_log`
+- **Risk**: Low (no dependencies on other handlers)
+
+#### 2.3 Current Account (2 story points)
+
+- **Files changed**: 2 new files
+  - `services/current-account/client/starlark.go` (~100 lines)
+  - `services/current-account/client/starlark_test.go` (~200 lines)
+- **Handlers migrated**: 4
+  - `current_account.create_lien`
+  - `current_account.execute_lien`
+  - `current_account.terminate_lien`
+  - `current_account.save`
+- **Risk**: Low (straightforward mappings)
+
+#### 2.4 Payment Order (3 story points)
+
+- **Files changed**: 2 new files
+  - `services/payment-order/client/starlark.go` (~150 lines)
+  - `services/payment-order/client/starlark_test.go` (~300 lines)
+- **Handlers migrated**: 5
+  - `payment_order.create_lien`
+  - `payment_order.terminate_lien`
+  - `payment_order.send_to_gateway`
+  - `payment_order.post_ledger_entries`
+  - `payment_order.execute_lien`
+- **Risk**: Medium (external gateway interaction)
+
+#### 2.5 Remaining Services (3 story points)
+
+- Valuation Engine (1 handler)
+- Repository (1 handler)
+- Notification (1 handler)
+- **Risk**: Low (simple handlers)
+
+### Phase 3: E2E Testing & Cleanup (Estimated: 5 story points)
+
+1. **Add e2e saga tests** (3 story points)
+   - Deposit saga with rollback
+   - Withdrawal saga with rollback
+   - Payment execution saga with rollback
+   - **Files changed**: 3 new files in `services/*/e2e/`
+
+2. **Add workflow e2e tests** (1 story point)
+   - At least one non-saga workflow (e.g., valuation)
+   - **Files changed**: 1 new file
+
+3. **Remove old handlers** (1 story point)
+   - Delete stub implementations from `shared/pkg/saga/handlers.go`
+   - Update documentation
+   - **Files changed**: Remove ~800 lines from `handlers.go`
+
+### Phase 4: Documentation (Estimated: 2 story points)
+
+1. **Update developer docs**
+   - How to add new service handlers
+   - How to test handlers
+   - Migration guide for existing sagas
+
+2. **Update architecture diagrams**
+   - Show handler registration flow
+   - Show dependency injection pattern
+
+## Total Estimated Effort
+
+**23 story points** across 4 phases, approximately **3-4 weeks** with 1 developer.
+
+## Success Criteria
+
+### Functional Requirements
+
+- ✅ All 22 handlers migrated to service client packages
+- ✅ All handlers call real service clients (no more mocks)
+- ✅ All handlers have integration tests (100% coverage)
+- ✅ At least 3 saga e2e tests with compensation paths
+- ✅ At least 1 workflow e2e test (non-saga)
+
+### Quality Requirements
+
+- ✅ No increase in handler latency (client calls already fast)
+- ✅ No degradation in error handling
+- ✅ All existing saga scripts continue to work unchanged
+
+### Documentation Requirements
+
+- ✅ Migration guide for adding new handlers
+- ✅ Updated architecture documentation
+- ✅ Code examples for each pattern
+
+## Risks & Mitigations
+
+| Risk | Impact | Likelihood | Mitigation |
+|------|--------|------------|------------|
+| **Breaking existing sagas** | High | Low | Maintain handler names/signatures, comprehensive tests |
+| **Handler latency increase** | Medium | Low | Handlers are thin adapters, client calls already optimized |
+| **Dependency injection complexity** | Medium | Medium | Use constructor injection pattern, document clearly |
+| **Test environment setup overhead** | Low | Medium | Create reusable test helpers, share across services |
+| **Incomplete e2e coverage** | Medium | Medium | Define minimum coverage requirements upfront |
+
+## Dependencies
+
+### Prerequisites
+
+- ✅ All service clients exist and are functional (already done)
+- ✅ Starlark typed service modules completed ([PRD](./starlark-typed-service-clients.md))
+- ✅ Saga executor framework stable
+
+### Blocking
+
+- ❌ None - this is a refactoring that improves existing functionality
+
+## Open Questions
+
+1. **Should we support handler versioning?**
+   - Handlers map to client methods, so versioning is at proto level
+   - Recommendation: Not needed initially, revisit if breaking changes occur
+
+2. **How to handle handlers for services without clients?**
+   - Example: `repository.save`, `notification.send` are generic
+   - Recommendation: Keep these in `shared/pkg/saga/` as platform utilities
+
+3. **Should handlers support streaming RPCs?**
+   - Starlark is synchronous, streaming doesn't fit well
+   - Recommendation: No streaming support in handlers
+
+4. **Client lifecycle management?**
+   - Who owns client creation/cleanup when used by handlers?
+   - Recommendation: Application (saga executor) owns clients, passes to handlers via DI
+
+## References
+
+- **Related ADRs:**
+  - [ADR-019: Starlark for Saga Orchestration](../adr/019-starlark-saga-orchestration.md)
+  - [ADR-025: Service Client Patterns](../adr/025-service-client-patterns.md) (if exists)
+
+- **Related PRDs:**
+  - [Starlark Typed Service Clients](./starlark-typed-service-clients.md) - Predecessor work
+
+- **Related Issues:**
+  - GitHub Issue tracking handler migration (TBD)
+
+- **Code References:**
+  - Current handlers: `shared/pkg/saga/handlers.go:420-1139`
+  - Example client: `services/current-account/client/client.go`
+  - Saga scripts: `services/current-account/sagas/*.star`
+
+---
+
+**Next Steps:**
+
+1. Review and approve this PRD
+2. Create GitHub issue for tracking
+3. Create Task Master tag for implementation
+4. Begin Phase 1 implementation
