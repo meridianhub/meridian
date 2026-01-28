@@ -1,6 +1,7 @@
 package env
 
 import (
+	"os"
 	"testing"
 	"time"
 )
@@ -618,6 +619,15 @@ func TestIsProduction(t *testing.T) {
 			key := "ENVIRONMENT"
 			if tt.setEnv {
 				t.Setenv(key, tt.envValue)
+			} else {
+				// Explicitly unset ENVIRONMENT to ensure test isolation
+				// CI environments may have ENVIRONMENT set
+				if old, ok := os.LookupEnv(key); ok {
+					t.Cleanup(func() { _ = os.Setenv(key, old) })
+				} else {
+					t.Cleanup(func() { _ = os.Unsetenv(key) })
+				}
+				_ = os.Unsetenv(key)
 			}
 
 			result := IsProduction()
