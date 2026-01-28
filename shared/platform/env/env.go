@@ -118,3 +118,11 @@ func GetEnvAsSlice(key string, defaultValue []string) []string {
 	}
 	return result
 }
+
+// IsProduction returns true if the ENVIRONMENT variable indicates a production
+// environment. Recognized production values (case-insensitive): "production", "prod".
+// Returns false for all other values including empty string.
+func IsProduction() bool {
+	environment := strings.ToLower(strings.TrimSpace(os.Getenv("ENVIRONMENT")))
+	return environment == "production" || environment == "prod"
+}

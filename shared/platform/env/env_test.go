@@ -549,3 +549,82 @@ func slicesEqual(a, b []string) bool {
 	}
 	return true
 }
+
+func TestIsProduction(t *testing.T) {
+	tests := []struct {
+		name     string
+		envValue string
+		setEnv   bool
+		expected bool
+	}{
+		{
+			name:     "returns true for 'production'",
+			envValue: "production",
+			setEnv:   true,
+			expected: true,
+		},
+		{
+			name:     "returns true for 'prod'",
+			envValue: "prod",
+			setEnv:   true,
+			expected: true,
+		},
+		{
+			name:     "returns true for 'PRODUCTION' (case-insensitive)",
+			envValue: "PRODUCTION",
+			setEnv:   true,
+			expected: true,
+		},
+		{
+			name:     "returns true for 'Prod' (case-insensitive)",
+			envValue: "Prod",
+			setEnv:   true,
+			expected: true,
+		},
+		{
+			name:     "returns false for 'development'",
+			envValue: "development",
+			setEnv:   true,
+			expected: false,
+		},
+		{
+			name:     "returns false for 'staging'",
+			envValue: "staging",
+			setEnv:   true,
+			expected: false,
+		},
+		{
+			name:     "returns false for empty string",
+			envValue: "",
+			setEnv:   true,
+			expected: false,
+		},
+		{
+			name:     "returns false for missing var",
+			envValue: "",
+			setEnv:   false,
+			expected: false,
+		},
+		{
+			name:     "trims whitespace around 'production'",
+			envValue: "  production  ",
+			setEnv:   true,
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			key := "ENVIRONMENT"
+			if tt.setEnv {
+				t.Setenv(key, tt.envValue)
+			}
+
+			result := IsProduction()
+			if result != tt.expected {
+				t.Errorf("IsProduction() = %v, expected %v (env=%q)",
+					result, tt.expected, tt.envValue)
+			}
+		})
+	}
+}
