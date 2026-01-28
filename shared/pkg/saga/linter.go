@@ -58,6 +58,23 @@ type LintIssue struct {
 	SuggestedFix string
 }
 
+// HandlerCategory categorizes handlers by their operational role for conservation rule enforcement.
+type HandlerCategory string
+
+const (
+	// HandlerCategoryIngestion represents handlers that ingest external data (e.g., meter readings, trades).
+	// These handlers typically produce Physics instruments (KWH, GAS) from external sources.
+	HandlerCategoryIngestion HandlerCategory = "ingestion"
+
+	// HandlerCategorySettlement represents handlers that settle positions and create financial postings.
+	// Conservation Rule: Settlement sagas triggered by Physics instruments cannot produce Physics instruments.
+	HandlerCategorySettlement HandlerCategory = "settlement"
+
+	// HandlerCategoryValuation represents handlers that perform valuation calculations.
+	// These handlers typically convert between instruments using market rates.
+	HandlerCategoryValuation HandlerCategory = "valuation"
+)
+
 // HandlerMetadata describes a step handler's characteristics.
 type HandlerMetadata struct {
 	// IsExternal indicates the handler calls external systems (non-idempotent).
@@ -65,6 +82,16 @@ type HandlerMetadata struct {
 
 	// RequiresPreCheck indicates verify_external_state must be called before this handler.
 	RequiresPreCheck bool
+
+	// Category indicates the handler's operational role (ingestion, settlement, valuation).
+	// Used for conservation rule enforcement (FR-Conservation).
+	Category HandlerCategory
+
+	// ProducesInstruments lists the instrument codes this handler can create/produce.
+	// Example: ["KWH", "GAS"] for meter reading ingestion, ["USD", "NZD"] for financial settlement.
+	// Empty means the handler doesn't produce instruments.
+	// Used for conservation rule enforcement to prevent causation loops.
+	ProducesInstruments []string
 }
 
 // SemanticLinter performs AST-based semantic analysis on Starlark scripts.
