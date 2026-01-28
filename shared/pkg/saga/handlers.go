@@ -47,12 +47,106 @@ const (
 	DirectionCredit = "CREDIT"
 )
 
-// DomainHandler is the function signature for domain-specific saga step handlers.
-// These handlers receive a rich StarlarkContext for platform features (PartyScope,
-// deterministic UUIDs, progress emission, suspension) and return typed results.
-// DomainHandlers are registered in the DomainHandlerRegistry and invoked by the
-// step executor when processing saga steps.
-type DomainHandler func(ctx *StarlarkContext, params map[string]any) (result any, err error)
+// Public parameter validation helpers for use in Handler implementations.
+// These helpers extract and validate parameters from the Starlark params map.
+// They return ErrMissingParam if the parameter is not present, and ErrInvalidParamType
+// if the parameter has an unexpected type.
+
+// RequireStringParam extracts a required string parameter from Starlark params.
+// Returns ErrMissingParam if not present, ErrInvalidParamType if wrong type.
+// Use in Handler implementations to validate string inputs.
+func RequireStringParam(params map[string]any, key string) (string, error) {
+	val, ok := params[key]
+	if !ok {
+		return "", fmt.Errorf("%w: %s", ErrMissingParam, key)
+	}
+	str, ok := val.(string)
+	if !ok {
+		return "", fmt.Errorf("%w: %s must be string, got %T", ErrInvalidParamType, key, val)
+	}
+	return str, nil
+}
+
+// RequireDecimalParam extracts a required decimal parameter from Starlark params.
+// Accepts decimal.Decimal, string (parsed), float64, int, or int64 values.
+// Returns ErrMissingParam if not present, ErrInvalidParamType if wrong type.
+// Use in Handler implementations to validate decimal/monetary inputs.
+func RequireDecimalParam(params map[string]any, key string) (decimal.Decimal, error) {
+	val, ok := params[key]
+	if !ok {
+		return decimal.Zero, fmt.Errorf("%w: %s", ErrMissingParam, key)
+	}
+	switch v := val.(type) {
+	case decimal.Decimal:
+		return v, nil
+	case string:
+		d, err := decimal.NewFromString(v)
+		if err != nil {
+			return decimal.Zero, fmt.Errorf("%w: %s must be decimal, got invalid string", ErrInvalidParamType, key)
+		}
+		return d, nil
+	case float64:
+		return decimal.NewFromFloat(v), nil
+	case int:
+		return decimal.NewFromInt(int64(v)), nil
+	case int64:
+		return decimal.NewFromInt(v), nil
+	default:
+		return decimal.Zero, fmt.Errorf("%w: %s must be decimal, got %T", ErrInvalidParamType, key, val)
+	}
+}
+
+// RequireUUIDParam extracts a required UUID parameter from Starlark params.
+// Accepts uuid.UUID or string (parsed) values.
+// Returns ErrMissingParam if not present, ErrInvalidParamType if wrong type or parse fails.
+// Use in Handler implementations to validate UUID inputs.
+func RequireUUIDParam(params map[string]any, key string) (uuid.UUID, error) {
+	val, ok := params[key]
+	if !ok {
+		return uuid.Nil, fmt.Errorf("%w: %s", ErrMissingParam, key)
+	}
+	switch v := val.(type) {
+	case uuid.UUID:
+		return v, nil
+	case string:
+		parsed, err := uuid.Parse(v)
+		if err != nil {
+			return uuid.Nil, fmt.Errorf("%w: %s must be UUID, got invalid string %q", ErrInvalidParamType, key, v)
+		}
+		return parsed, nil
+	default:
+		return uuid.Nil, fmt.Errorf("%w: %s must be UUID, got %T", ErrInvalidParamType, key, val)
+	}
+}
+
+// RequireDirectionParam extracts a required direction parameter from Starlark params.
+// Accepts only "DEBIT" or "CREDIT" string values.
+// Returns ErrMissingParam if not present, ErrInvalidDirection if wrong value.
+// Use in Handler implementations to validate transaction direction.
+func RequireDirectionParam(params map[string]any, key string) (string, error) {
+	val, ok := params[key]
+	if !ok {
+		return "", fmt.Errorf("%w: %s", ErrMissingParam, key)
+	}
+	str, ok := val.(string)
+	if !ok {
+		return "", fmt.Errorf("%w: %s must be string, got %T", ErrInvalidParamType, key, val)
+	}
+	if str != DirectionDebit && str != DirectionCredit {
+		return "", fmt.Errorf("%w: got %q", ErrInvalidDirection, str)
+	}
+	return str, nil
+}
+
+// Handler is a service binding function that adapts Starlark parameters
+// to gRPC service calls. Handlers receive StarlarkContext for platform
+// features and return typed results.
+//
+// Handlers bridge the Starlark runtime to real backend services, providing
+// PartyScope for tenant isolation, deterministic UUIDs, progress emission,
+// and suspension capabilities. They are registered in the HandlerRegistry
+// and invoked by the step executor when processing saga steps.
+type Handler func(ctx *StarlarkContext, params map[string]any) (result any, err error)
 
 // StarlarkContext provides execution context for step handlers.
 // It includes the parent context for cancellation, saga metadata, and helper methods.
@@ -198,23 +292,24 @@ func (c *StarlarkContext) IsSuspended() bool {
 	return c.suspended
 }
 
-// DomainHandlerRegistry manages the collection of registered step handlers.
+// HandlerRegistry manages service bindings for Starlark step execution.
+// Service packages register their handlers via RegisterStarlarkHandlers() functions.
 // It is thread-safe for concurrent read/write access.
-type DomainHandlerRegistry struct {
+type HandlerRegistry struct {
 	mu       sync.RWMutex
-	handlers map[string]DomainHandler
+	handlers map[string]Handler
 }
 
-// NewDomainHandlerRegistry creates a new empty handler registry.
-func NewDomainHandlerRegistry() *DomainHandlerRegistry {
-	return &DomainHandlerRegistry{
-		handlers: make(map[string]DomainHandler),
+// NewHandlerRegistry creates a new empty handler registry.
+func NewHandlerRegistry() *HandlerRegistry {
+	return &HandlerRegistry{
+		handlers: make(map[string]Handler),
 	}
 }
 
 // Register adds a handler to the registry under the given name.
 // Returns ErrInvalidHandlerName if name is empty, or ErrHandlerAlreadyRegistered if name exists.
-func (r *DomainHandlerRegistry) Register(name string, handler DomainHandler) error {
+func (r *HandlerRegistry) Register(name string, handler Handler) error {
 	if name == "" {
 		return ErrInvalidHandlerName
 	}
@@ -232,7 +327,7 @@ func (r *DomainHandlerRegistry) Register(name string, handler DomainHandler) err
 
 // Get retrieves a handler by name.
 // Returns ErrHandlerNotFound if the handler does not exist.
-func (r *DomainHandlerRegistry) Get(name string) (DomainHandler, error) {
+func (r *HandlerRegistry) Get(name string) (Handler, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -245,7 +340,7 @@ func (r *DomainHandlerRegistry) Get(name string) (DomainHandler, error) {
 }
 
 // Has returns true if a handler with the given name is registered.
-func (r *DomainHandlerRegistry) Has(name string) bool {
+func (r *HandlerRegistry) Has(name string) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -254,7 +349,7 @@ func (r *DomainHandlerRegistry) Has(name string) bool {
 }
 
 // List returns a sorted list of all registered handler names.
-func (r *DomainHandlerRegistry) List() []string {
+func (r *HandlerRegistry) List() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -268,22 +363,22 @@ func (r *DomainHandlerRegistry) List() []string {
 
 // defaultRegistry is the global registry with default handlers.
 var (
-	defaultRegistry     *DomainHandlerRegistry
+	defaultRegistry     *HandlerRegistry
 	defaultRegistryOnce sync.Once
 )
 
 // DefaultRegistry returns the global registry with all default handlers registered.
 // This is initialized on first call using sync.Once for thread-safe lazy initialization.
-func DefaultRegistry() *DomainHandlerRegistry {
+func DefaultRegistry() *HandlerRegistry {
 	defaultRegistryOnce.Do(func() {
-		defaultRegistry = NewDomainHandlerRegistry()
+		defaultRegistry = NewHandlerRegistry()
 		registerDefaultHandlers(defaultRegistry)
 	})
 	return defaultRegistry
 }
 
 // registerDefaultHandlers registers all platform-provided step handlers.
-func registerDefaultHandlers(r *DomainHandlerRegistry) {
+func registerDefaultHandlers(r *HandlerRegistry) {
 	// Position Keeping handlers
 	_ = r.Register("position_keeping.initiate_log", positionKeepingInitiateLog)
 	_ = r.Register("position_keeping.update_log", positionKeepingUpdateLog)
@@ -321,43 +416,14 @@ func registerDefaultHandlers(r *DomainHandlerRegistry) {
 	_ = r.Register("payment_order.execute_lien", paymentOrderExecuteLien)
 }
 
-// Helper functions for parameter validation
+// Helper functions for parameter validation (private wrappers for backward compatibility)
 
 func requireStringParam(params map[string]any, key string) (string, error) {
-	val, ok := params[key]
-	if !ok {
-		return "", fmt.Errorf("%w: %s", ErrMissingParam, key)
-	}
-	str, ok := val.(string)
-	if !ok {
-		return "", fmt.Errorf("%w: %s must be string, got %T", ErrInvalidParamType, key, val)
-	}
-	return str, nil
+	return RequireStringParam(params, key)
 }
 
 func requireDecimalParam(params map[string]any, key string) (decimal.Decimal, error) {
-	val, ok := params[key]
-	if !ok {
-		return decimal.Zero, fmt.Errorf("%w: %s", ErrMissingParam, key)
-	}
-	switch v := val.(type) {
-	case decimal.Decimal:
-		return v, nil
-	case string:
-		d, err := decimal.NewFromString(v)
-		if err != nil {
-			return decimal.Zero, fmt.Errorf("%w: %s must be decimal, got invalid string", ErrInvalidParamType, key)
-		}
-		return d, nil
-	case float64:
-		return decimal.NewFromFloat(v), nil
-	case int:
-		return decimal.NewFromInt(int64(v)), nil
-	case int64:
-		return decimal.NewFromInt(v), nil
-	default:
-		return decimal.Zero, fmt.Errorf("%w: %s must be decimal, got %T", ErrInvalidParamType, key, val)
-	}
+	return RequireDecimalParam(params, key)
 }
 
 func requireInt64Param(params map[string]any, key string) (int64, error) {

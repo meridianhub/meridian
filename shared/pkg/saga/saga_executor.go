@@ -21,7 +21,7 @@ var ErrNilError = errors.New("nil error passed to failure handler")
 type SagaExecutor struct {
 	instanceRepo    SagaInstanceRepository
 	stepResultRepo  StepResultRepository
-	handlerRegistry *DomainHandlerRegistry
+	handlerRegistry *HandlerRegistry
 	claimService    *ClaimService
 	logger          *slog.Logger
 }
@@ -50,7 +50,7 @@ type SagaInstanceRepository interface {
 func NewSagaExecutor(
 	instanceRepo SagaInstanceRepository,
 	stepResultRepo StepResultRepository,
-	handlerRegistry *DomainHandlerRegistry,
+	handlerRegistry *HandlerRegistry,
 	claimService *ClaimService,
 ) *SagaExecutor {
 	return &SagaExecutor{

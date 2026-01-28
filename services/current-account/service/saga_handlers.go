@@ -65,7 +65,7 @@ const (
 )
 
 // RegisterCurrentAccountHandlers registers all Current Account-specific step handlers
-// with the given DomainHandlerRegistry. These handlers are used by the Starlark
+// with the given HandlerRegistry. These handlers are used by the Starlark
 // saga runtime to execute withdrawal and deposit operations.
 //
 // Handler naming convention: current_account.<domain>.<action>
@@ -73,10 +73,10 @@ const (
 //   - current_account.position_keeping.initiate_log
 //   - current_account.financial_accounting.post_entries
 //   - current_account.repository.save
-func RegisterCurrentAccountHandlers(registry *saga.DomainHandlerRegistry) error {
+func RegisterCurrentAccountHandlers(registry *saga.HandlerRegistry) error {
 	handlers := []struct {
 		name    string
-		handler saga.DomainHandler
+		handler saga.Handler
 	}{
 		// Position Keeping handlers
 		{"current_account.position_keeping.initiate_log", currentAccountPositionKeepingInitiateLog},

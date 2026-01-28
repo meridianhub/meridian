@@ -219,7 +219,7 @@ type DefinitionChecker interface {
 
 // ReferenceValidator validates saga scripts by extracting and checking references.
 type ReferenceValidator struct {
-	handlerRegistry   *pkgsaga.DomainHandlerRegistry
+	handlerRegistry   *pkgsaga.HandlerRegistry
 	schemaRegistry    *schema.Registry
 	instrumentChecker InstrumentChecker
 	definitionChecker DefinitionChecker
@@ -228,7 +228,7 @@ type ReferenceValidator struct {
 
 // NewReferenceValidator creates a new reference validator.
 func NewReferenceValidator(
-	handlerRegistry *pkgsaga.DomainHandlerRegistry,
+	handlerRegistry *pkgsaga.HandlerRegistry,
 	instrumentChecker InstrumentChecker,
 	definitionChecker DefinitionChecker,
 	pool *pgxpool.Pool,

@@ -19,7 +19,7 @@ func TestNewStarlarkSagaRunner(t *testing.T) {
 	runtime, err := NewRuntime(logger)
 	require.NoError(t, err)
 
-	registry := NewDomainHandlerRegistry()
+	registry := NewHandlerRegistry()
 
 	t.Run("creates runner with valid config", func(t *testing.T) {
 		runner, err := NewStarlarkSagaRunner(StarlarkSagaRunnerConfig{
@@ -56,7 +56,7 @@ func TestStarlarkSagaRunner_ExecuteSaga(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create a registry with a test handler
-	registry := NewDomainHandlerRegistry()
+	registry := NewHandlerRegistry()
 
 	// Register a simple test handler
 	err = registry.Register("test.echo", func(ctx *StarlarkContext, params map[string]any) (any, error) {
@@ -152,7 +152,7 @@ func TestStarlarkSagaRunner_InvokeHandler(t *testing.T) {
 	runtime, err := NewRuntime(logger, WithTimeout(10*time.Second))
 	require.NoError(t, err)
 
-	registry := NewDomainHandlerRegistry()
+	registry := NewHandlerRegistry()
 
 	// Register test handlers
 	err = registry.Register("step.first", func(ctx *StarlarkContext, params map[string]any) (any, error) {
@@ -268,7 +268,7 @@ func TestStarlarkSagaRunner_ServiceModules(t *testing.T) {
 	runtime, err := NewRuntime(logger, WithTimeout(10*time.Second))
 	require.NoError(t, err)
 
-	registry := NewDomainHandlerRegistry()
+	registry := NewHandlerRegistry()
 
 	err = registry.Register("test.echo", func(ctx *StarlarkContext, params map[string]any) (any, error) {
 		msg, _ := params["message"].(string)
@@ -394,7 +394,7 @@ func TestStarlarkSagaRunner_StepTracking(t *testing.T) {
 	runtime, err := NewRuntime(logger, WithTimeout(10*time.Second))
 	require.NoError(t, err)
 
-	registry := NewDomainHandlerRegistry()
+	registry := NewHandlerRegistry()
 
 	err = registry.Register("step.first", func(_ *StarlarkContext, _ map[string]any) (any, error) {
 		return map[string]any{"result": "first_done"}, nil

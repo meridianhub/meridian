@@ -118,7 +118,7 @@ func TestParseHandlerTree_ConflictDetection(t *testing.T) {
 // TestBuildServiceModules tests the module building from handler registry and schema.
 func TestBuildServiceModules(t *testing.T) {
 	// Create a minimal handler registry
-	registry := saga.NewDomainHandlerRegistry()
+	registry := saga.NewHandlerRegistry()
 	_ = registry.Register("position_keeping.initiate_log", func(_ *saga.StarlarkContext, _ map[string]any) (any, error) {
 		return map[string]any{"log_id": "test-123", "status": "INITIATED"}, nil
 	})
@@ -196,7 +196,7 @@ handlers:
 
 // TestBuildServiceModules_NestedModules tests 3-level nested modules.
 func TestBuildServiceModules_NestedModules(t *testing.T) {
-	registry := saga.NewDomainHandlerRegistry()
+	registry := saga.NewHandlerRegistry()
 	_ = registry.Register("current_account.position_keeping.initiate_log", func(_ *saga.StarlarkContext, _ map[string]any) (any, error) {
 		return map[string]any{"log_id": "test-123"}, nil
 	})
@@ -468,7 +468,7 @@ func TestWrapHandler_ReturnValueConversion(t *testing.T) {
 // TestIntegration_StarlarkExecution tests end-to-end execution with a real Starlark script.
 func TestIntegration_StarlarkExecution(t *testing.T) {
 	// Set up handler registry
-	registry := saga.NewDomainHandlerRegistry()
+	registry := saga.NewHandlerRegistry()
 	_ = registry.Register("position_keeping.initiate_log", func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 		return map[string]any{
 			"log_id":   ctx.NewUUID(ctx.SagaExecutionID, "position_log").String(),
@@ -593,7 +593,7 @@ func TestHandlerTree_FindNode(t *testing.T) {
 // TestBuildServiceModules_MissingHandler tests error when registry is missing a handler.
 func TestBuildServiceModules_MissingHandler(t *testing.T) {
 	// Empty handler registry
-	registry := saga.NewDomainHandlerRegistry()
+	registry := saga.NewHandlerRegistry()
 
 	// Schema registry with a handler
 	schemaRegistry := NewRegistry()
@@ -616,7 +616,7 @@ handlers:
 // TestBuildServiceModules_NoSchema tests handler without schema definition.
 func TestBuildServiceModules_NoSchema(t *testing.T) {
 	// Handler registry with a handler
-	registry := saga.NewDomainHandlerRegistry()
+	registry := saga.NewHandlerRegistry()
 	_ = registry.Register("test.orphan", func(_ *saga.StarlarkContext, _ map[string]any) (any, error) {
 		return nil, nil
 	})
@@ -899,7 +899,7 @@ func TestIntegration_NumericCoercion(t *testing.T) {
 	var receivedCount int32
 	var receivedVersion uint32
 
-	registry := saga.NewDomainHandlerRegistry()
+	registry := saga.NewHandlerRegistry()
 	_ = registry.Register("test_service.process", func(_ *saga.StarlarkContext, params map[string]any) (any, error) {
 		receivedCount = params["count"].(int32)
 		receivedVersion = params["version"].(uint32)
@@ -969,7 +969,7 @@ output_processed = result.processed
 
 // TestIntegration_OverflowRejectedFromStarlark tests that overflow is caught end-to-end.
 func TestIntegration_OverflowRejectedFromStarlark(t *testing.T) {
-	registry := saga.NewDomainHandlerRegistry()
+	registry := saga.NewHandlerRegistry()
 	_ = registry.Register("test_service.process", func(_ *saga.StarlarkContext, _ map[string]any) (any, error) {
 		return map[string]any{"ok": true}, nil
 	})
@@ -1045,7 +1045,7 @@ func TestExportedContextFunctions(t *testing.T) {
 // are correctly injected into the Starlark global scope during saga execution.
 func TestIntegration_StarlarkSagaRunnerWithServiceModules(t *testing.T) {
 	// Set up handler registry with test handlers
-	registry := saga.NewDomainHandlerRegistry()
+	registry := saga.NewHandlerRegistry()
 	_ = registry.Register("position_keeping.initiate_log", func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 		return map[string]any{
 			"log_id":   ctx.NewUUID(ctx.SagaExecutionID, "position_log").String(),
