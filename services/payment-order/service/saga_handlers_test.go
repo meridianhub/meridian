@@ -18,7 +18,7 @@ func TestRegisterPaymentOrderHandlers(t *testing.T) {
 	t.Parallel()
 
 	t.Run("registers all handlers", func(t *testing.T) {
-		registry := saga.NewDomainHandlerRegistry()
+		registry := saga.NewHandlerRegistry()
 		mockClient := &MockCurrentAccountClient{
 			initiateLienResp: &currentaccountv1.InitiateLienResponse{
 				Lien: &currentaccountv1.Lien{LienId: "lien-123"},
@@ -49,7 +49,7 @@ func TestRegisterPaymentOrderHandlers(t *testing.T) {
 	})
 
 	t.Run("fails with nil deps", func(t *testing.T) {
-		registry := saga.NewDomainHandlerRegistry()
+		registry := saga.NewHandlerRegistry()
 		err := RegisterPaymentOrderHandlers(registry, nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "dependencies cannot be nil")
@@ -67,7 +67,7 @@ func TestCreatePaymentOrderLienHandler(t *testing.T) {
 			},
 		}
 
-		registry := saga.NewDomainHandlerRegistry()
+		registry := saga.NewHandlerRegistry()
 		deps := &PaymentOrderHandlerDeps{
 			CurrentAccountClient: mockClient,
 			Logger:               testLogger(),
@@ -111,7 +111,7 @@ func TestCreatePaymentOrderLienHandler(t *testing.T) {
 			},
 		}
 
-		registry := saga.NewDomainHandlerRegistry()
+		registry := saga.NewHandlerRegistry()
 		deps := &PaymentOrderHandlerDeps{
 			CurrentAccountClient: mockClient,
 			Logger:               testLogger(),
@@ -139,7 +139,7 @@ func TestCreatePaymentOrderLienHandler(t *testing.T) {
 	})
 
 	t.Run("fails when current account client not configured", func(t *testing.T) {
-		registry := saga.NewDomainHandlerRegistry()
+		registry := saga.NewHandlerRegistry()
 		deps := &PaymentOrderHandlerDeps{
 			CurrentAccountClient: nil, // Not configured
 			Logger:               testLogger(),
@@ -171,7 +171,7 @@ func TestCreatePaymentOrderLienHandler(t *testing.T) {
 			initiateLienErr: ErrMalformedLienResponse, // Using an existing error
 		}
 
-		registry := saga.NewDomainHandlerRegistry()
+		registry := saga.NewHandlerRegistry()
 		deps := &PaymentOrderHandlerDeps{
 			CurrentAccountClient: mockClient,
 			Logger:               testLogger(),
@@ -211,7 +211,7 @@ func TestSendToGatewayHandler(t *testing.T) {
 			},
 		}
 
-		registry := saga.NewDomainHandlerRegistry()
+		registry := saga.NewHandlerRegistry()
 		deps := &PaymentOrderHandlerDeps{
 			PaymentGateway: mockGateway,
 			Logger:         testLogger(),
@@ -253,7 +253,7 @@ func TestSendToGatewayHandler(t *testing.T) {
 			},
 		}
 
-		registry := saga.NewDomainHandlerRegistry()
+		registry := saga.NewHandlerRegistry()
 		deps := &PaymentOrderHandlerDeps{
 			PaymentGateway: mockGateway,
 			Logger:         testLogger(),
@@ -285,7 +285,7 @@ func TestSendToGatewayHandler(t *testing.T) {
 	})
 
 	t.Run("fails when gateway not configured", func(t *testing.T) {
-		registry := saga.NewDomainHandlerRegistry()
+		registry := saga.NewHandlerRegistry()
 		deps := &PaymentOrderHandlerDeps{
 			PaymentGateway: nil, // Not configured
 			Logger:         testLogger(),
@@ -325,7 +325,7 @@ func TestExecuteLienHandler(t *testing.T) {
 			executeLienResp: &currentaccountv1.ExecuteLienResponse{},
 		}
 
-		registry := saga.NewDomainHandlerRegistry()
+		registry := saga.NewHandlerRegistry()
 		deps := &PaymentOrderHandlerDeps{
 			CurrentAccountClient: mockClient,
 			Logger:               testLogger(),
@@ -354,7 +354,7 @@ func TestExecuteLienHandler(t *testing.T) {
 	})
 
 	t.Run("fails when client not configured", func(t *testing.T) {
-		registry := saga.NewDomainHandlerRegistry()
+		registry := saga.NewHandlerRegistry()
 		deps := &PaymentOrderHandlerDeps{
 			CurrentAccountClient: nil, // Not configured
 			Logger:               testLogger(),
@@ -388,7 +388,7 @@ func TestTerminateLienHandler(t *testing.T) {
 			terminateLienResp: &currentaccountv1.TerminateLienResponse{},
 		}
 
-		registry := saga.NewDomainHandlerRegistry()
+		registry := saga.NewHandlerRegistry()
 		deps := &PaymentOrderHandlerDeps{
 			CurrentAccountClient: mockClient,
 			Logger:               testLogger(),
@@ -421,7 +421,7 @@ func TestPostLedgerEntriesHandler(t *testing.T) {
 	t.Parallel()
 
 	t.Run("fails when orchestrator not configured", func(t *testing.T) {
-		registry := saga.NewDomainHandlerRegistry()
+		registry := saga.NewHandlerRegistry()
 		deps := &PaymentOrderHandlerDeps{
 			Orchestrator: nil, // Not configured
 			Logger:       testLogger(),

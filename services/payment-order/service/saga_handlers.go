@@ -54,7 +54,7 @@ type PaymentOrderHandlerDeps struct {
 // RegisterPaymentOrderHandlers registers all Payment Order saga step handlers
 // with the domain handler registry. These handlers call the actual gRPC clients
 // and integrate with the bucket evaluation and retry logic.
-func RegisterPaymentOrderHandlers(registry *saga.DomainHandlerRegistry, deps *PaymentOrderHandlerDeps) error {
+func RegisterPaymentOrderHandlers(registry *saga.HandlerRegistry, deps *PaymentOrderHandlerDeps) error {
 	if registry == nil {
 		return ErrRegistryNil
 	}
@@ -105,7 +105,7 @@ func RegisterPaymentOrderHandlers(registry *saga.DomainHandlerRegistry, deps *Pa
 
 // createPaymentOrderLienHandler creates a handler for the payment_order.create_lien step.
 // This handler includes bucket evaluation for non-fungible instruments.
-func createPaymentOrderLienHandler(deps *PaymentOrderHandlerDeps, logger *slog.Logger) saga.DomainHandler {
+func createPaymentOrderLienHandler(deps *PaymentOrderHandlerDeps, logger *slog.Logger) saga.Handler {
 	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 		const handlerName = "payment_order.create_lien"
 
@@ -202,7 +202,7 @@ func createPaymentOrderLienHandler(deps *PaymentOrderHandlerDeps, logger *slog.L
 }
 
 // sendToGatewayHandler creates a handler for the payment_order.send_to_gateway step.
-func sendToGatewayHandler(deps *PaymentOrderHandlerDeps, logger *slog.Logger) saga.DomainHandler {
+func sendToGatewayHandler(deps *PaymentOrderHandlerDeps, logger *slog.Logger) saga.Handler {
 	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 		const handlerName = "payment_order.send_to_gateway"
 
@@ -290,7 +290,7 @@ func sendToGatewayHandler(deps *PaymentOrderHandlerDeps, logger *slog.Logger) sa
 
 // postLedgerEntriesHandler creates a handler for the payment_order.post_ledger_entries step.
 // This handler delegates to the orchestrator's PostLedgerEntriesFromParams method.
-func postLedgerEntriesHandler(deps *PaymentOrderHandlerDeps, logger *slog.Logger) saga.DomainHandler {
+func postLedgerEntriesHandler(deps *PaymentOrderHandlerDeps, logger *slog.Logger) saga.Handler {
 	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 		const handlerName = "payment_order.post_ledger_entries"
 
@@ -324,7 +324,7 @@ func postLedgerEntriesHandler(deps *PaymentOrderHandlerDeps, logger *slog.Logger
 
 // executeLienHandler creates a handler for the payment_order.execute_lien step.
 // This handler includes retry logic with exponential backoff.
-func executeLienHandler(deps *PaymentOrderHandlerDeps, logger *slog.Logger) saga.DomainHandler {
+func executeLienHandler(deps *PaymentOrderHandlerDeps, logger *slog.Logger) saga.Handler {
 	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 		const handlerName = "payment_order.execute_lien"
 
@@ -414,7 +414,7 @@ func executeLienHandler(deps *PaymentOrderHandlerDeps, logger *slog.Logger) saga
 
 // terminateLienHandler creates a handler for the payment_order.terminate_lien step.
 // This is used as compensation when the saga needs to rollback.
-func terminateLienHandler(deps *PaymentOrderHandlerDeps, logger *slog.Logger) saga.DomainHandler {
+func terminateLienHandler(deps *PaymentOrderHandlerDeps, logger *slog.Logger) saga.Handler {
 	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 		const handlerName = "payment_order.terminate_lien"
 

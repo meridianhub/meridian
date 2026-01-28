@@ -108,7 +108,7 @@ func (m *mockDefinitionChecker) ListActiveSagaNames(_ context.Context) ([]string
 }
 
 func TestExtractReferences_Empty(t *testing.T) {
-	registry := pkgsaga.NewDomainHandlerRegistry()
+	registry := pkgsaga.NewHandlerRegistry()
 	v := NewReferenceValidator(registry, nil, nil, nil)
 
 	refs, err := v.ExtractReferences("")
@@ -117,7 +117,7 @@ func TestExtractReferences_Empty(t *testing.T) {
 }
 
 func TestExtractReferences_InstrumentReferences(t *testing.T) {
-	registry := pkgsaga.NewDomainHandlerRegistry()
+	registry := pkgsaga.NewHandlerRegistry()
 	v := NewReferenceValidator(registry, nil, nil, nil)
 
 	script := `
@@ -140,7 +140,7 @@ def my_saga():
 }
 
 func TestExtractReferences_AccountReferences(t *testing.T) {
-	registry := pkgsaga.NewDomainHandlerRegistry()
+	registry := pkgsaga.NewHandlerRegistry()
 	v := NewReferenceValidator(registry, nil, nil, nil)
 
 	script := `
@@ -163,7 +163,7 @@ def my_saga():
 }
 
 func TestExtractReferences_SagaReferences(t *testing.T) {
-	registry := pkgsaga.NewDomainHandlerRegistry()
+	registry := pkgsaga.NewHandlerRegistry()
 	v := NewReferenceValidator(registry, nil, nil, nil)
 
 	script := `
@@ -185,7 +185,7 @@ def my_saga():
 }
 
 func TestExtractReferences_StepHandlerReferences(t *testing.T) {
-	registry := pkgsaga.NewDomainHandlerRegistry()
+	registry := pkgsaga.NewHandlerRegistry()
 	v := NewReferenceValidator(registry, nil, nil, nil)
 
 	script := `
@@ -207,7 +207,7 @@ def my_saga():
 }
 
 func TestExtractReferences_AttributeReferences(t *testing.T) {
-	registry := pkgsaga.NewDomainHandlerRegistry()
+	registry := pkgsaga.NewHandlerRegistry()
 	v := NewReferenceValidator(registry, nil, nil, nil)
 
 	script := `
@@ -229,7 +229,7 @@ def my_saga(ctx):
 }
 
 func TestExtractReferences_AllTypes(t *testing.T) {
-	registry := pkgsaga.NewDomainHandlerRegistry()
+	registry := pkgsaga.NewHandlerRegistry()
 	v := NewReferenceValidator(registry, nil, nil, nil)
 
 	script := `
@@ -267,7 +267,7 @@ def my_saga(ctx):
 }
 
 func TestExtractReferences_SyntaxError(t *testing.T) {
-	registry := pkgsaga.NewDomainHandlerRegistry()
+	registry := pkgsaga.NewHandlerRegistry()
 	v := NewReferenceValidator(registry, nil, nil, nil)
 
 	script := `
@@ -280,7 +280,7 @@ def my_saga(
 }
 
 func TestValidateDraft_AllowsWarnings(t *testing.T) {
-	registry := pkgsaga.NewDomainHandlerRegistry()
+	registry := pkgsaga.NewHandlerRegistry()
 	instrumentChecker := newMockInstrumentChecker()
 	// KWH exists but is not active
 	instrumentChecker.instruments["KWH"] = false
@@ -305,7 +305,7 @@ def my_saga():
 }
 
 func TestValidateActivation_BlocksOnMissingHandler(t *testing.T) {
-	registry := pkgsaga.NewDomainHandlerRegistry()
+	registry := pkgsaga.NewHandlerRegistry()
 	// Don't register any handlers
 
 	v := NewReferenceValidator(registry, nil, nil, nil)
@@ -324,7 +324,7 @@ def my_saga():
 }
 
 func TestValidateActivation_BlocksOnDeprecatedInstrument(t *testing.T) {
-	registry := pkgsaga.NewDomainHandlerRegistry()
+	registry := pkgsaga.NewHandlerRegistry()
 	instrumentChecker := newMockInstrumentChecker()
 	// KWH exists but is not active (deprecated)
 	instrumentChecker.instruments["KWH"] = false
@@ -345,7 +345,7 @@ def my_saga():
 }
 
 func TestValidateActivation_BlocksOnMissingSaga(t *testing.T) {
-	registry := pkgsaga.NewDomainHandlerRegistry()
+	registry := pkgsaga.NewHandlerRegistry()
 	sagaChecker := newMockDefinitionChecker()
 	// No sagas registered
 
@@ -365,7 +365,7 @@ def my_saga():
 }
 
 func TestValidateActivation_BlocksOnInactiveSaga(t *testing.T) {
-	registry := pkgsaga.NewDomainHandlerRegistry()
+	registry := pkgsaga.NewHandlerRegistry()
 	sagaChecker := newMockDefinitionChecker()
 	sagaChecker.sagas["withdrawal"] = false // exists but not active
 
@@ -385,7 +385,7 @@ def my_saga():
 }
 
 func TestValidateActivation_BlocksOnMissingAttribute(t *testing.T) {
-	registry := pkgsaga.NewDomainHandlerRegistry()
+	registry := pkgsaga.NewHandlerRegistry()
 	instrumentChecker := newMockInstrumentChecker()
 	instrumentChecker.instruments["KWH"] = true
 	instrumentChecker.attributeSchemas["KWH"] = map[string]interface{}{
@@ -411,7 +411,7 @@ def my_saga():
 }
 
 func TestValidateActivation_SuggestsSimilarNames(t *testing.T) {
-	registry := pkgsaga.NewDomainHandlerRegistry()
+	registry := pkgsaga.NewHandlerRegistry()
 	_ = registry.Register("position_keeping.initiate_log", nil)
 	_ = registry.Register("position_keeping.update_log", nil)
 	_ = registry.Register("financial_accounting.post_entries", nil)
@@ -433,7 +433,7 @@ def my_saga():
 }
 
 func TestValidateActivation_PassesWithValidReferences(t *testing.T) {
-	registry := pkgsaga.NewDomainHandlerRegistry()
+	registry := pkgsaga.NewHandlerRegistry()
 	_ = registry.Register("position_keeping.initiate_log", nil)
 
 	instrumentChecker := newMockInstrumentChecker()
@@ -459,7 +459,7 @@ def my_saga():
 }
 
 func TestValidateRuntime_ChecksHandlersOnly(t *testing.T) {
-	registry := pkgsaga.NewDomainHandlerRegistry()
+	registry := pkgsaga.NewHandlerRegistry()
 	_ = registry.Register("position_keeping.initiate_log", nil)
 
 	v := NewReferenceValidator(registry, nil, nil, nil)
@@ -518,7 +518,7 @@ func TestValidationResult_FormatReport(t *testing.T) {
 }
 
 func TestValidator_ImplementsValidatorInterface(t *testing.T) {
-	registry := pkgsaga.NewDomainHandlerRegistry()
+	registry := pkgsaga.NewHandlerRegistry()
 	_ = registry.Register("position_keeping.initiate_log", nil)
 
 	v := NewReferenceValidator(registry, nil, nil, nil)
@@ -540,7 +540,7 @@ func TestValidator_ImplementsValidatorInterface(t *testing.T) {
 }
 
 func TestExtractReferences_NestedExpressions(t *testing.T) {
-	registry := pkgsaga.NewDomainHandlerRegistry()
+	registry := pkgsaga.NewHandlerRegistry()
 	v := NewReferenceValidator(registry, nil, nil, nil)
 
 	script := `
@@ -572,7 +572,7 @@ def my_saga(ctx):
 }
 
 func TestExtractReferences_ListComprehension(t *testing.T) {
-	registry := pkgsaga.NewDomainHandlerRegistry()
+	registry := pkgsaga.NewHandlerRegistry()
 	v := NewReferenceValidator(registry, nil, nil, nil)
 
 	script := `
@@ -625,7 +625,7 @@ func TestFindSimilar(t *testing.T) {
 }
 
 func TestListHandlers(t *testing.T) {
-	registry := pkgsaga.NewDomainHandlerRegistry()
+	registry := pkgsaga.NewHandlerRegistry()
 	_ = registry.Register("z_handler", nil)
 	_ = registry.Register("a_handler", nil)
 	_ = registry.Register("m_handler", nil)
@@ -639,7 +639,7 @@ func TestListHandlers(t *testing.T) {
 }
 
 func TestExtractReferences_StepHandlerWithParams(t *testing.T) {
-	registry := pkgsaga.NewDomainHandlerRegistry()
+	registry := pkgsaga.NewHandlerRegistry()
 	v := NewReferenceValidator(registry, nil, nil, nil)
 
 	script := `
@@ -670,7 +670,7 @@ def execute(ctx):
 
 func TestValidateDraft_WithSchemaRegistry(t *testing.T) {
 	// Register the handler in DomainHandlerRegistry
-	handlerRegistry := pkgsaga.NewDomainHandlerRegistry()
+	handlerRegistry := pkgsaga.NewHandlerRegistry()
 	_ = handlerRegistry.Register("test.handler", nil)
 
 	// Create schema registry with handler schema
@@ -760,7 +760,7 @@ def execute(ctx):
 
 func TestValidateActivation_BlocksOnMissingRequiredParams(t *testing.T) {
 	// Register the handler
-	handlerRegistry := pkgsaga.NewDomainHandlerRegistry()
+	handlerRegistry := pkgsaga.NewHandlerRegistry()
 	_ = handlerRegistry.Register("test.handler", nil)
 
 	// Create schema registry
@@ -803,7 +803,7 @@ def execute(ctx):
 func TestValidateDraft_NoSchemaRegistry(t *testing.T) {
 	// When no schema registry is set, validation should still work
 	// but skip parameter validation
-	handlerRegistry := pkgsaga.NewDomainHandlerRegistry()
+	handlerRegistry := pkgsaga.NewHandlerRegistry()
 	_ = handlerRegistry.Register("test.handler", nil)
 
 	v := NewReferenceValidator(handlerRegistry, nil, nil, nil)
@@ -830,7 +830,7 @@ def execute(ctx):
 
 func TestExtractReferences_StepHandlerWithVariableParams(t *testing.T) {
 	// When params is a variable, we can't statically extract it
-	registry := pkgsaga.NewDomainHandlerRegistry()
+	registry := pkgsaga.NewHandlerRegistry()
 	v := NewReferenceValidator(registry, nil, nil, nil)
 
 	script := `
@@ -855,7 +855,7 @@ def execute(ctx):
 
 func TestValidateDraft_SkipsValidationForVariableParams(t *testing.T) {
 	// When params is a variable, we should skip validation (no false positives)
-	handlerRegistry := pkgsaga.NewDomainHandlerRegistry()
+	handlerRegistry := pkgsaga.NewHandlerRegistry()
 	_ = handlerRegistry.Register("test.handler", nil)
 
 	schemaRegistry := schema.NewRegistry()
