@@ -273,11 +273,16 @@ func createLienHandler(client *Client) saga.Handler {
             return nil, err
         }
 
+        currency, err := saga.RequireStringParam(params, "currency")
+        if err != nil {
+            return nil, err
+        }
+
         // 2. Call the REAL client method (via gRPC)
         resp, err := client.InitiateLien(ctx.Context, &currentaccountv1.InitiateLienRequest{
             AccountId: accountID,
             Amount:    convertDecimalToProto(amount),
-            Currency:  params["currency"].(string),
+            Currency:  currency,
         })
         if err != nil {
             return nil, fmt.Errorf("current_account.create_lien: %w", err)
@@ -597,19 +602,248 @@ func TestValuationWorkflow_E2E(t *testing.T) {
 
 ## Implementation Plan
 
-### Phase 1: Infrastructure (Estimated: 3 story points)
+### Phase 1: Infrastructure (Estimated: 5 story points)
 
-1. **Refactor framework** (`shared/pkg/saga/`)
-   - Rename `DomainHandler` → `Handler`
-   - Rename `DomainHandlerRegistry` → `HandlerRegistry`
-   - Move helper functions (`requireStringParam`, etc.) to public API
-   - Update framework tests
-   - **Files changed**: 3-4 files in `shared/pkg/saga/`
+#### 1.1 Refactor Framework (2 story points)
 
-2. **Create integration test helpers**
-   - Test server factory for gRPC services
-   - Mock service implementations for testing
-   - **Files changed**: 1 new file `shared/pkg/saga/testing/helpers.go`
+- **Rename types** (`shared/pkg/saga/`)
+  - `DomainHandler` → `Handler` (or `ServiceBinding` per feedback)
+  - `DomainHandlerRegistry` → `HandlerRegistry`
+  - Move helper functions (`requireStringParam`, etc.) to public API
+  - Update framework tests
+  - **Files changed**: 3-4 files in `shared/pkg/saga/`
+
+- **Circular dependency resolution**:
+  - ✅ `HandlerRegistry` stays in `shared/pkg/saga/`
+  - ✅ Service clients import `saga.Handler` type (no circular dep)
+  - ✅ Wiring happens in `cmd/saga-executor/main.go`:
+
+  ```go
+  // cmd/saga-executor/main.go
+  func main() {
+      // Initialize clients
+      currentAccountClient, cleanup, _ := currentaccount.New(...)
+      defer cleanup()
+
+      positionKeepingClient, cleanup, _ := positionkeeping.New(...)
+      defer cleanup()
+
+      // Create registry
+      registry := saga.NewHandlerRegistry()
+
+      // Service packages register their own handlers
+      currentaccount.RegisterStarlarkHandlers(registry, currentAccountClient)
+      positionkeeping.RegisterStarlarkHandlers(registry, positionKeepingClient)
+      // ... other services
+
+      // Start executor with registry
+      executor := saga.NewExecutor(saga.ExecutorConfig{
+          Handlers: registry,
+          // ...
+      })
+  }
+  ```
+
+#### 1.2 Add Bi-Temporal Integrity Support (2 story points) **CRITICAL**
+
+**Requirement**: All service calls MUST respect `knowledge_at` timestamp for deterministic replay.
+
+**Implementation**:
+
+1. **Update gRPC clients** to accept optional `KnowledgeAt` timestamp:
+
+   ```go
+   // services/current-account/client/client.go
+   func (c *Client) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest) (*pb.InitiateLienResponse, error) {
+       // Extract knowledge_at from context (if present)
+       if knowledgeAt, ok := ctx.Value("knowledge_at").(time.Time); ok {
+           // Add to gRPC metadata
+           ctx = metadata.AppendToOutgoingContext(ctx, "x-knowledge-at", knowledgeAt.Format(time.RFC3339Nano))
+       }
+
+       // OR add to request message if proto supports it:
+       // req.KnowledgeAt = timestamppb.New(knowledgeAt)
+
+       resp, err := c.currentAccount.InitiateLien(ctx, req)
+       // ...
+   }
+   ```
+
+2. **Starlark handlers propagate** `ctx.KnowledgeAt`:
+
+   ```go
+   // services/current-account/client/starlark.go
+   func createLienHandler(client *Client) saga.Handler {
+       return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
+           // Inject knowledge_at into client context
+           clientCtx := context.WithValue(ctx.Context, "knowledge_at", ctx.KnowledgeAt)
+
+           resp, err := client.InitiateLien(clientCtx, &pb.InitiateLienRequest{
+               AccountId: accountID,
+               Amount:    convertDecimalToProto(amount),
+           })
+           // ...
+       }
+   }
+   ```
+
+3. **Service backends** query historical state using the `knowledge_at` timestamp:
+
+   ```sql
+   -- Position Keeping service reads balance as-of timestamp
+   SELECT balance FROM positions
+   WHERE account_id = $1
+     AND valid_from <= $2  -- knowledge_at
+     AND (valid_to IS NULL OR valid_to > $2)
+   ```
+
+**Why Critical**: Without this, saga replays query current state instead of historical state,
+breaking deterministic replay and making the Durable Execution Engine (ADR-017/018) non-functional.
+
+#### 1.3 Add Error Mapping Strategy (1 story point)
+
+**Requirement**: Distinguish transient (retryable) from fatal (compensate) errors.
+
+**Implementation**:
+
+```go
+// shared/pkg/saga/errors.go
+package saga
+
+import "google.golang.org/grpc/codes"
+
+// ErrorCategory determines saga flow control
+type ErrorCategory int
+
+const (
+    ErrorTransient ErrorCategory = iota  // Retry with backoff
+    ErrorFatal                            // Skip to compensation
+    ErrorUnknown                          // Treat as transient
+)
+
+// CategorizeGRPCError maps gRPC status codes to saga error categories
+func CategorizeGRPCError(err error) ErrorCategory {
+    code := status.Code(err)
+    switch code {
+    case codes.Unavailable, codes.DeadlineExceeded, codes.ResourceExhausted:
+        return ErrorTransient  // Retry
+    case codes.FailedPrecondition, codes.InvalidArgument, codes.PermissionDenied:
+        return ErrorFatal      // Compensate immediately
+    default:
+        return ErrorUnknown    // Retry (conservative)
+    }
+}
+```
+
+**Handler usage**:
+
+```go
+resp, err := client.InitiateLien(ctx.Context, req)
+if err != nil {
+    category := saga.CategorizeGRPCError(err)
+    return nil, saga.NewStepError(err, category)  // Wraps error with category
+}
+```
+
+**Why Important**: Prevents wasting 5 retries on `FailedPrecondition` errors
+(e.g., insufficient funds) that are logically impossible to resolve.
+
+#### 1.4 Create Integration Test Helpers (included in 1.1)
+
+- Test server factory for gRPC services
+- Mock service implementations for testing
+- **Idempotency key verification**: Add test case verifying saga-generated
+  idempotency keys reach gRPC mock server
+- **Files changed**: 1 new file `shared/pkg/saga/testing/helpers.go`
+
+### Phase 1.5: Conservation of Dimension Rule (Estimated: 3 story points) **NEW**
+
+**Moved from Future Work** - This is the cheapest causation loop prevention.
+
+**Requirement**: Prevent sagas triggered by instrument type X from creating
+new positions of type X (blocks most common infinite loops).
+
+**Implementation**:
+
+1. **Handler categorization** in registry:
+
+   ```go
+   // shared/pkg/saga/handler.go
+   type HandlerCategory string
+
+   const (
+       CategoryIngestion  HandlerCategory = "ingestion"   // Can write Physics
+       CategorySettlement HandlerCategory = "settlement"  // Can write Money, NOT Physics
+       CategoryValuation  HandlerCategory = "valuation"   // Read-only
+   )
+
+   type HandlerMetadata struct {
+       Category   HandlerCategory
+       ProducesInstruments []string  // e.g., ["KWH", "GAS"]
+   }
+
+   func (r *HandlerRegistry) RegisterWithMetadata(name string, handler Handler, meta HandlerMetadata) error {
+       // Store metadata for runtime checks
+   }
+   ```
+
+2. **Saga trigger context** carries triggering instrument:
+
+   ```go
+   type StarlarkContext struct {
+       // ... existing fields
+       TriggerInstrument string  // The instrument type that triggered this saga
+   }
+   ```
+
+3. **Runtime enforcement** before handler execution:
+
+   ```go
+   func (e *Executor) executeStep(ctx *StarlarkContext, stepName string) error {
+       handler, meta := e.registry.GetWithMetadata(stepName)
+
+       // Conservation check
+       if meta.Category == CategorySettlement {
+           if contains(meta.ProducesInstruments, ctx.TriggerInstrument) {
+               return fmt.Errorf(
+                   "CONSERVATION_VIOLATION: Settlement saga triggered by %s "+
+                   "attempted to produce %s via handler %s. "+
+                   "Settlement sagas cannot create Physics positions.",
+                   ctx.TriggerInstrument, ctx.TriggerInstrument, stepName)
+           }
+       }
+
+       return handler(ctx, params)
+   }
+   ```
+
+4. **Service handler registration**:
+
+   ```go
+   // services/position-keeping/client/starlark.go
+   func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) error {
+       registry.RegisterWithMetadata("position_keeping.initiate_log", initiateLogHandler(client),
+           saga.HandlerMetadata{
+               Category: saga.CategoryIngestion,
+               ProducesInstruments: []string{"KWH", "GAS", "WATER"}, // Physics
+           })
+   }
+
+   // services/financial-accounting/client/starlark.go
+   func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) error {
+       registry.RegisterWithMetadata("financial_accounting.post_entries", postEntriesHandler(client),
+           saga.HandlerMetadata{
+               Category: saga.CategorySettlement,
+               ProducesInstruments: []string{"USD", "EUR", "GBP"}, // Money
+           })
+   }
+   ```
+
+**Why Now, Not Later**:
+- Blocks 80% of causation loops with simple type-check
+- No distributed tracing required
+- Fails fast at runtime with clear error message
+- Foundation for full Causation Safety PRD later
 
 ### Phase 2: Migrate Handlers Service-by-Service (Estimated: 13 story points)
 
@@ -703,7 +937,14 @@ Migrate in dependency order (dependencies first):
 
 ## Total Estimated Effort
 
-**23 story points** across 4 phases, approximately **3-4 weeks** with 1 developer.
+**31 story points** across 5 phases (including Conservation of Dimension rule from Future Work):
+
+- Phase 1: Infrastructure (5 points) - includes bi-temporal integrity
+- Phase 1.5: Conservation of Dimension Rule (3 points) - loop prevention
+- Phase 2: Migrate Handlers (13 points) - service-by-service
+- Phase 3: E2E Testing (5 points) - saga compensation tests
+- Phase 4: Documentation (2 points) - guides and diagrams
+- **Removed**: Phase 5 (Causation Depth/Lineage) → Deferred to dedicated PRD (8 points)
 
 ## Success Criteria
 
@@ -733,10 +974,15 @@ Migrate in dependency order (dependencies first):
 |------|--------|------------|------------|
 | **Breaking existing sagas** | High | Low | Maintain handler names/signatures, comprehensive tests |
 | **Handler latency increase** | Medium | Low | Handlers are thin adapters, client calls already optimized |
-| **Dependency injection complexity** | Medium | Medium | Use constructor injection pattern, document clearly |
+| **Dependency injection complexity** | Medium | Medium | Wiring in cmd/main.go (see Phase 1.1), document pattern |
 | **Test environment setup overhead** | Low | Medium | Create reusable test helpers, share across services |
 | **Incomplete e2e coverage** | Medium | Medium | Define minimum coverage requirements upfront |
-| **Distributed causation loops** | High | Low | Defer to dedicated PRD (see Future Work below) |
+| **Distributed causation loops** | High | Low→Medium* | Phase 1.5 (Conservation of Dimension) + Future PRD |
+| **Bi-temporal integrity violations** | **CRITICAL** | **High** | Phase 1.2 (knowledge_at propagation) - MUST HAVE |
+
+\* **Causation loop likelihood**: Low with mock handlers (can't create real positions), Medium after
+Phase 2 migration (real service calls). Phase 1.5 mitigates 80% of risk via type-checking. Remaining
+20% (Causation Depth, Lineage Cycle Detection) deferred to dedicated Saga Causation Safety PRD.
 
 ## Future Work: Distributed Causation Loop Prevention
 
