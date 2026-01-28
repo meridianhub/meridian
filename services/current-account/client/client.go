@@ -393,6 +393,34 @@ func (c *Client) RetrieveLien(ctx context.Context, req *currentaccountv1.Retriev
 	return resp, nil
 }
 
+// UpdateCurrentAccount updates account settings like overdraft limits.
+// This is a non-idempotent operation, so it uses circuit breaker without retry.
+func (c *Client) UpdateCurrentAccount(ctx context.Context, req *currentaccountv1.UpdateCurrentAccountRequest) (*currentaccountv1.UpdateCurrentAccountResponse, error) {
+	if err := validation.ValidateAccountID(req.GetAccountId()); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid account_id format: %v", err)
+	}
+
+	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	ctx = clients.PropagateCorrelationID(ctx)
+	ctx = clients.PropagateOrganization(ctx)
+
+	// Use resilience patterns if configured (no retry for non-idempotent operations)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilienceNoRetry(ctx, c.resilient, "UpdateCurrentAccount", func() (*currentaccountv1.UpdateCurrentAccountResponse, error) {
+			return c.currentAccount.UpdateCurrentAccount(ctx, req)
+		})
+	}
+
+	resp, err := c.currentAccount.UpdateCurrentAccount(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update current account: %w", err)
+	}
+
+	return resp, nil
+}
+
 // GetActiveAmountBlocks retrieves active fund reservations for balance calculations.
 // Used by Position Keeping to query blocked amounts without coupling to lien details.
 // This is an idempotent read operation, so it uses circuit breaker with retry.
