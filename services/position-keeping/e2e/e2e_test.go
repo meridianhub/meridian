@@ -498,9 +498,9 @@ func TestHighFrequencyInserts_E2E(t *testing.T) {
 
 					// Use context with timeout to detect deadlocks
 					insertCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-					defer cancel()
 
 					posID, err := insertPosition(insertCtx, db, accountID, instrumentCode, bucketKey, amount, "Monetary")
+					cancel() // Release context resources immediately
 					if err != nil {
 						errChan <- fmt.Errorf("worker %d insert %d failed: %w", workerID, i, err)
 						return
