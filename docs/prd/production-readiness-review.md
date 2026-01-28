@@ -1064,295 +1064,40 @@ while the bug ships to production.
 
 ## Appendix A: Starlark Saga Architecture Gaps
 
-**Source**: Earlier architectural audit (pre-starlark-service-bindings PRD)
-**Status**: These findings are **ADDITIONAL** to the e2e testing gaps covered in [starlark-service-bindings.md](./starlark-service-bindings.md)
-**Last Verified**: 2026-01-28
+> **Tracked in Task Master**: These gaps are now tracked in the `saga-script-versioning` TM tag.
+> See tasks 13, 16, 17, 18 for implementation details.
 
-The typed service client infrastructure is **85% architecturally built but never connected to runtime**. These are
-**implementation/wiring issues**, not testing gaps.
+**Source**: Architectural audit (2026-01-28)
+**Status**: Tracked in Task Master for implementation
 
----
+The typed service client infrastructure is **85% architecturally built but never connected to runtime**.
 
-### A.1 ~~CRITICAL~~: Schema-Runtime Mismatch — ✅ FIXED
+### Summary
 
-**Status**: **RESOLVED** (2026-01-27)
+| Issue | Severity | TM Task | Status |
+|-------|----------|---------|--------|
+| Schema-Runtime mismatch | ~~CRITICAL~~ | Task 4 | ✅ **FIXED** |
+| BuildServiceModules never called | **CRITICAL** | Task 13 | Pending |
+| Compensation not implemented | **HIGH** | Task 16 | Pending |
+| DSL builtins are stubs | **MEDIUM** | Task 18 | Pending |
+| Linter pre-check dead | **LOW** | Task 17 | Pending |
+| starlarkToGo duplication | LOW | — | Cleanup (not blocking) |
+| Doc generator orphaned | LOW | — | Cleanup (not blocking) |
+| Type coercion unused | LOW | — | Auto-fixed when Task 13 done |
 
-**What was fixed**: All `.star` files have been migrated from `invoke_handler()` to typed service module
-syntax. Scripts now use 2-part names (e.g., `position_keeping.initiate_log()`) that match `handlers.yaml`.
+### Critical Path
 
-**Evidence**:
+1. ~~Fix schema mismatch~~ ✅ **DONE** (Task 4)
+2. Wire `BuildServiceModules` into service init (Task 13) — **NOW THE CRITICAL BLOCKER**
+3. Implement compensation in typed path (Task 16)
 
-- `services/reference-data/saga/defaults/deposit/v1.0.0.star:4` — "Migrated from invoke_handler() to typed service modules"
-- Scripts now call `position_keeping.initiate_log()`, `financial_accounting.initiate_booking_log()`, etc.
-- `handlers.yaml` defines matching 2-part names
-
-**Remaining work**: None — schema and runtime are now aligned.
-
----
-
-### A.2 CRITICAL: BuildServiceModules Never Called in Production
-
-**File**: `shared/pkg/saga/starlark_runner.go:33-80`
-
-**Problem**: `StarlarkSagaRunnerConfig.ServiceModules` field exists but is **always nil** in production. The entire typed
-module system is architecturally wired but never activated.
-
-**Evidence**:
-
-```go
-// shared/pkg/saga/starlark_runner.go:33-80
-type StarlarkSagaRunnerConfig struct {
-    Runtime        *Runtime
-    Registry       *DomainHandlerRegistry
-    Logger         *slog.Logger
-    ServiceModules []starlark.StringDict // ← Always nil in production
-}
-```
-
-**No production call sites**:
-
-```bash
-$ grep -r "BuildServiceModules" services/ --include="*.go" | grep -v "_test.go"
-# (no results)
-```
-
-**Impact**: The typed service client infrastructure is dead code - never executed in production.
-
-**Remediation**:
-
-1. Call `BuildServiceModules()` during service initialization
-2. Pass result to `StarlarkSagaRunnerConfig.ServiceModules`
-3. Add e2e test to verify typed modules work
-
-**Example**:
-
-```go
-// services/current-account/cmd/main.go
-func main() {
-    // ...
-    schema := saga.LoadSchemaFromDirectory("shared/pkg/saga/schema")
-    serviceModules, err := saga.BuildServiceModules(schema, handlerRegistry)
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    sagaRunner, err := saga.NewStarlarkSagaRunner(saga.StarlarkSagaRunnerConfig{
-        Runtime:        runtime,
-        Registry:       handlerRegistry,
-        ServiceModules: serviceModules, // ← Now wired
-        Logger:         logger,
-    })
-}
-```
-
----
-
-### A.3 HIGH: Compensation Not Implemented for Typed Modules
-
-**File**: `shared/pkg/saga/schema/service_modules.go:243-281`
-
-**Problem**: `handlers.yaml` has `compensate:` fields but `wrapHandler()` ignores them entirely.
-
-**Schema** (`handlers.yaml`):
-
-```yaml
-position_keeping:
-  initiate_log:
-    handler: position_keeping.initiate_log
-    compensate: position_keeping.cancel_log  # ← Defined but ignored
-```
-
-**Implementation** (`service_modules.go:243-281`):
-
-```go
-func wrapHandler(...) starlark.Callable {
-    return starlark.NewBuiltin(handlerName, func(...) {
-        // Calls handler.Handler but never reads handler.Compensate
-        result, err := handler.Handler(ctx, params)
-        // ...
-    })
-}
-```
-
-**Also affected**: Old `invoke_handler` shim
-
-- `shared/pkg/saga/handlers.go` - Parses `compensate_handler`/`compensate_params` kwargs but never uses them
-
-**Impact**: Saga compensation/rollback cannot work with typed modules.
-
-**Remediation**:
-
-1. Store compensation handler in step metadata
-2. Execute compensation handlers in reverse order (LIFO) when saga fails
-3. See `starlark-service-bindings.md` for expected behavior
-
----
-
-### A.4 MEDIUM: DSL Builtins Are Stubs
-
-**File**: `shared/pkg/saga/builtins.go:104-171`
-
-**Problem**: DSL builtins return placeholder/noop values.
-
-**Examples**:
-
-```go
-// Line 109: saga() returns placeholder
-starlark.NewBuiltin("saga", func(...) (starlark.Value, error) {
-    return starlarkstruct.FromStringDict(...), nil // Placeholder
-}),
-
-// Line 139: cel_eval() returns expression as string (doesn't actually evaluate)
-starlark.NewBuiltin("cel_eval", func(...) (starlark.Value, error) {
-    return starlark.String(expression), nil // Doesn't evaluate!
-}),
-
-// Line 149: resolve_account() returns None
-starlark.NewBuiltin("resolve_account", func(...) (starlark.Value, error) {
-    return starlark.None, nil
-}),
-
-// Line 169: invoke_saga() returns None
-starlark.NewBuiltin("invoke_saga", func(...) (starlark.Value, error) {
-    return starlark.None, nil
-}),
-```
-
-**Impact**: Advanced saga features (saga composition, CEL evaluation, account resolution) don't work.
-
-**Remediation**:
-
-1. Implement actual CEL evaluation using `github.com/google/cel-go`
-2. Implement account resolution (query reference-data service)
-3. Implement saga composition (nested saga invocation)
-4. Add tests for each built-in
-
----
-
-### A.5 MEDIUM: Linter Pre-Check Rule Dead
-
-**File**: `shared/pkg/saga/linter.go:72-102`
-
-**Problem**: `SetHandlerMetadata()` is never called, so `verifiedHandlers` map stays empty and
-`LintIssueTypeMissingPreCheck` can never fire.
-
-**Code**:
-
-```go
-// Line 72: verifiedHandlers stays empty
-func (l *Linter) SetHandlerMetadata(handlers map[string]*HandlerMetadata) {
-    l.verifiedHandlers = handlers // Never called
-}
-
-// Line 98: This lint check never triggers
-if !handlerInfo.HasPreCheck {
-    issue := &LintIssue{
-        Type:    LintIssueTypeMissingPreCheck, // Dead code
-        // ...
-    }
-}
-```
-
-**Only wired enforcement**: `SetEnforcementLevel()` for Decimal arithmetic
-
-**Remediation**:
-
-1. Call `SetHandlerMetadata()` during saga runner initialization
-2. Pass handler metadata from schema
-3. OR remove the dead pre-check lint rule
-
----
-
-### A.6 LOW: starlarkToGo Duplication
-
-**Problem**: Two implementations with different capabilities.
-
-**Basic version** (`runtime.go`):
-
-- Missing many types
-- No error handling
-
-**Comprehensive version** (`schema/service_modules.go:starlarkToGoValue()`):
-
-- 8 type handlers
-- Proper error handling
-- Only runs inside `BuildServiceModules` (never called)
-
-**Remediation**: Consolidate into single implementation in shared location
-
----
-
-### A.7 LOW: Documentation Generator Orphaned
-
-**File**: `tools/saga-doc-gen/`
-
-**Problem**: Complete CLI tool with tests but not invoked by CI/Makefile. Would fail immediately due to schema mismatch
-(#A.1).
-
-**Remediation**:
-
-1. Fix schema mismatch first (#A.1)
-2. Add `make docs` target to run generator
-3. Add to CI to regenerate docs on schema changes
-
----
-
-### A.8 LOW: Schema LoadFromDirectory Unused
-
-**Problem**: Only called by orphaned doc-gen tool (#A.7).
-
-**Remediation**: Keep for future use after doc-gen is wired up
-
----
-
-### A.9 LOW: Type Coercion Layer Unused
-
-**File**: `shared/pkg/saga/schema/coercion.go`
-
-**Problem**: `CoerceParams()` and `CoerceValue()` are comprehensive (8 type handlers) but only execute inside
-`BuildServiceModules` wrappers, which never run (#A.2).
-
-**Remediation**: Automatically fixed when #A.2 is resolved
-
----
-
-## Summary: Starlark Architecture Issues
-
-| # | Issue | Severity | Status | Blocks |
-|---|-------|----------|--------|--------|
-| **A.1** | ~~Schema-Runtime name mismatch~~ | ~~CRITICAL~~ | ✅ **FIXED** | — |
-| **A.2** | BuildServiceModules never called | **CRITICAL** | ❌ Not addressed | Entire typed system is dead code |
-| **A.3** | Compensation not implemented | **HIGH** | ❌ Not addressed | Saga rollback broken |
-| **A.4** | DSL builtins are stubs | **MEDIUM** | ❌ Not addressed | Advanced features unavailable |
-| **A.5** | Linter pre-check dead | **MEDIUM** | ❌ Not addressed | Lint rule never fires |
-| **A.6** | starlarkToGo duplication | **LOW** | ❌ Not addressed | Code quality issue |
-| **A.7** | Doc generator orphaned | **LOW** | ❌ Not addressed | Documentation generation unavailable |
-| **A.8** | Schema loader unused | **LOW** | ❌ Not addressed | Depends on #A.7 |
-| **A.9** | Type coercion unused | **LOW** | ❌ Not addressed | Depends on #A.2 |
-
-**Critical Path** (updated):
-
-1. ~~Fix schema mismatch (#A.1)~~ ✅ **DONE**
-2. Wire `BuildServiceModules` into service init (#A.2) — **NOW THE CRITICAL BLOCKER**
-3. Implement compensation in typed path (#A.3)
-
-Without #A.2, the typed service modules exist but are never injected into the Starlark universe — scripts
-can reference `position_keeping.initiate_log()` but at runtime the identifier won't resolve.
+**Note**: Low-severity items (duplication, orphaned tools) are tracked for cleanup but don't block production readiness.
 
 ---
 
 ## Relationship to starlark-service-bindings.md PRD
 
-**starlark-service-bindings.md** focuses on:
+**starlark-service-bindings.md** focuses on **testing** the typed service infrastructure (assumes it works).
 
-- **Testing** the typed service infrastructure (assumes it works)
-- E2E tests for saga execution with real services
-- Compensation testing
-
-**This appendix** documents:
-
-- **Architectural gaps** that prevent typed infrastructure from working
-- Wiring issues (BuildServiceModules never called)
-- Implementation stubs (DSL builtins)
-
-**Both are needed**: Fix the architecture first (this appendix), then test it works (starlark-service-bindings.md).
+**This appendix** documents **architectural gaps** that must be fixed first. Both are needed: fix architecture
+(Task Master tasks above), then test it works (starlark-service-bindings.md).
