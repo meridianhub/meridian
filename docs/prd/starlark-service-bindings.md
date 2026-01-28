@@ -332,6 +332,7 @@ func executeLienHandler(client *Client) saga.Handler {
 | `handlers.go` | `starlark.go` in each service's `client/` | Co-located with gRPC client |
 
 **Terminology Recommendation**:
+
 - **Type name**: `saga.Handler` (Go interface)
 - **Documentation/comments**: "ServiceBinding" or "service binding"
 - **Rationale**: In distributed ledger context, "Handler" often refers to logic *inside* the
@@ -685,6 +686,7 @@ func TestValuationWorkflow_E2E(t *testing.T) {
   ```
 
   **Saga usage**:
+
   ```go
   // Starlark handler generates saga-prefixed key
   idempotencyKey := fmt.Sprintf("saga_%s_step_%d", ctx.SagaExecutionID, stepIndex)
