@@ -283,6 +283,9 @@ func (r *StarlarkSagaRunner) buildInvokeHandlerShim(starlarkCtx *StarlarkContext
 			}
 		}
 
+		// Generate idempotency key for this step
+		starlarkCtx.IdempotencyKey = starlarkCtx.NextIdempotencyKey()
+
 		// Call handler
 		result, err := handler(starlarkCtx, params)
 		duration := time.Since(stepStart)

@@ -174,6 +174,14 @@ type StarlarkContext struct {
 	// KnowledgeAt enables bi-temporal queries - what we knew at a specific point in time.
 	KnowledgeAt time.Time
 
+	// IdempotencyKey is the unique idempotency key for this saga step execution.
+	// Format: saga_{execution_id}_step_{step_index}
+	// This key is used to ensure idempotent service calls - replaying the same step
+	// will use the same idempotency key, allowing downstream services to deduplicate.
+	// Handlers should propagate this key using shared/pkg/clients.PropagateIdempotencyKey
+	// before making external service calls.
+	IdempotencyKey string
+
 	// Logger for structured logging within handlers.
 	Logger *slog.Logger
 
@@ -188,6 +196,12 @@ type StarlarkContext struct {
 	// Empty string means no specific instrument trigger (e.g., user-initiated actions).
 	// This field is immutable after creation and set based on the event/transaction that triggered the saga.
 	TriggerInstrument string
+
+	// stepCounter tracks the number of handler invocations for idempotency key generation.
+	// This is incremented atomically before each handler call to generate unique step IDs.
+	// Protected by stepMutex for thread-safe access.
+	stepCounter int
+	stepMutex   sync.Mutex
 
 	// Suspension state
 	suspended     bool
@@ -286,6 +300,21 @@ func CheckConservationRule(ctx *StarlarkContext, metadata *HandlerMetadata, hand
 // This ensures idempotent saga replay - the same step will generate the same UUIDs.
 func (c *StarlarkContext) NewUUID(namespace uuid.UUID, name string) uuid.UUID {
 	return uuid.NewSHA1(namespace, []byte(name))
+}
+
+// NextIdempotencyKey generates the next idempotency key for this saga execution.
+// The key format is: saga_{execution_id}_step_{step_index}
+// This method is thread-safe and atomically increments the internal step counter.
+// Each call generates a unique key for the current saga execution.
+//
+// This method is called internally before each handler invocation to ensure
+// deterministic idempotency keys during saga replay.
+func (c *StarlarkContext) NextIdempotencyKey() string {
+	c.stepMutex.Lock()
+	defer c.stepMutex.Unlock()
+
+	c.stepCounter++
+	return fmt.Sprintf("saga_%s_step_%d", c.SagaExecutionID.String(), c.stepCounter)
 }
 
 // ValidatePartyAccess checks if the given party ID is within the visible scope.

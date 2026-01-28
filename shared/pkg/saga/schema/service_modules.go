@@ -269,6 +269,9 @@ func wrapHandler(fullName string, handler saga.Handler, handlerDef *HandlerDef) 
 			return nil, fmt.Errorf("handler %s: %w", fullName, err)
 		}
 
+		// Generate idempotency key for this step
+		ctx.IdempotencyKey = ctx.NextIdempotencyKey()
+
 		// Call the handler
 		result, err := handler(ctx, params)
 		if err != nil {
