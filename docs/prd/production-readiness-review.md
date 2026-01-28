@@ -1066,47 +1066,27 @@ while the bug ships to production.
 
 **Source**: Earlier architectural audit (pre-starlark-service-bindings PRD)
 **Status**: These findings are **ADDITIONAL** to the e2e testing gaps covered in [starlark-service-bindings.md](./starlark-service-bindings.md)
+**Last Verified**: 2026-01-28
 
 The typed service client infrastructure is **85% architecturally built but never connected to runtime**. These are
 **implementation/wiring issues**, not testing gaps.
 
 ---
 
-### A.1 CRITICAL: Schema-Runtime Mismatch
+### A.1 ~~CRITICAL~~: Schema-Runtime Mismatch — ✅ FIXED
 
-**File**: `shared/pkg/saga/schema/handlers.yaml` vs `.star` files
+**Status**: **RESOLVED** (2026-01-27)
 
-**Problem**: `handlers.yaml` defines **2-part handler names** but `.star` files use **3-part names**.
-
-**Schema** (`handlers.yaml`):
-
-```yaml
-position_keeping:
-  initiate_log:
-    params: [...]
-```
-
-**.star files** (`services/current-account/sagas/withdrawal.star`):
-
-```python
-# Uses 3-part name: current_account.position_keeping.initiate_log
-log_position_result = current_account.position_keeping.initiate_log(...)
-```
-
-**Impact**: `BuildServiceModules()` can never match handlers because naming convention doesn't align.
+**What was fixed**: All `.star` files have been migrated from `invoke_handler()` to typed service module
+syntax. Scripts now use 2-part names (e.g., `position_keeping.initiate_log()`) that match `handlers.yaml`.
 
 **Evidence**:
 
-- `shared/pkg/saga/schema/handlers.yaml` - Defines 2-part names
-- `shared/pkg/saga/handlers.go:281-303` - Handler registration expects 3-part names
+- `services/reference-data/saga/defaults/deposit/v1.0.0.star:4` — "Migrated from invoke_handler() to typed service modules"
+- Scripts now call `position_keeping.initiate_log()`, `financial_accounting.initiate_booking_log()`, etc.
+- `handlers.yaml` defines matching 2-part names
 
-**Remediation**:
-
-1. **Option 1**: Update `handlers.yaml` to use 3-part names
-2. **Option 2**: Update `.star` files to use 2-part names
-3. **Option 3**: Add name mapping layer in `BuildServiceModules()`
-
-**Recommended**: Option 1 - Update schema to match runtime
+**Remaining work**: None — schema and runtime are now aligned.
 
 ---
 
@@ -1340,23 +1320,24 @@ if !handlerInfo.HasPreCheck {
 
 | # | Issue | Severity | Status | Blocks |
 |---|-------|----------|--------|--------|
-| **A.1** | Schema-Runtime name mismatch | **CRITICAL** | Not addressed | Typed modules unusable |
-| **A.2** | BuildServiceModules never called | **CRITICAL** | Not addressed | Entire typed system is dead code |
-| **A.3** | Compensation not implemented | **HIGH** | Not addressed | Saga rollback broken |
-| **A.4** | DSL builtins are stubs | **MEDIUM** | Not addressed | Advanced features unavailable |
-| **A.5** | Linter pre-check dead | **MEDIUM** | Not addressed | Lint rule never fires |
-| **A.6** | starlarkToGo duplication | **LOW** | Not addressed | Code quality issue |
-| **A.7** | Doc generator orphaned | **LOW** | Not addressed | Documentation generation unavailable |
-| **A.8** | Schema loader unused | **LOW** | Not addressed | Depends on #A.7 |
-| **A.9** | Type coercion unused | **LOW** | Not addressed | Depends on #A.2 |
+| **A.1** | ~~Schema-Runtime name mismatch~~ | ~~CRITICAL~~ | ✅ **FIXED** | — |
+| **A.2** | BuildServiceModules never called | **CRITICAL** | ❌ Not addressed | Entire typed system is dead code |
+| **A.3** | Compensation not implemented | **HIGH** | ❌ Not addressed | Saga rollback broken |
+| **A.4** | DSL builtins are stubs | **MEDIUM** | ❌ Not addressed | Advanced features unavailable |
+| **A.5** | Linter pre-check dead | **MEDIUM** | ❌ Not addressed | Lint rule never fires |
+| **A.6** | starlarkToGo duplication | **LOW** | ❌ Not addressed | Code quality issue |
+| **A.7** | Doc generator orphaned | **LOW** | ❌ Not addressed | Documentation generation unavailable |
+| **A.8** | Schema loader unused | **LOW** | ❌ Not addressed | Depends on #A.7 |
+| **A.9** | Type coercion unused | **LOW** | ❌ Not addressed | Depends on #A.2 |
 
-**Critical Path**:
+**Critical Path** (updated):
 
-1. Fix schema mismatch (#A.1)
-2. Wire `BuildServiceModules` into service init (#A.2)
+1. ~~Fix schema mismatch (#A.1)~~ ✅ **DONE**
+2. Wire `BuildServiceModules` into service init (#A.2) — **NOW THE CRITICAL BLOCKER**
 3. Implement compensation in typed path (#A.3)
 
-Without #A.1 and #A.2, the entire typed client infrastructure is architectural dead code that can never execute.
+Without #A.2, the typed service modules exist but are never injected into the Starlark universe — scripts
+can reference `position_keeping.initiate_log()` but at runtime the identifier won't resolve.
 
 ---
 
