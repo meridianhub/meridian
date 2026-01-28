@@ -33,6 +33,8 @@ import (
 	currentaccountclient "github.com/meridianhub/meridian/services/current-account/client"
 	financialaccountingclient "github.com/meridianhub/meridian/services/financial-accounting/client"
 	internalbankaccountclient "github.com/meridianhub/meridian/services/internal-bank-account/client"
+	positionkeepingclient "github.com/meridianhub/meridian/services/position-keeping/client"
+	"github.com/meridianhub/meridian/shared/pkg/saga"
 )
 
 // Build information set via ldflags during compilation.
@@ -154,6 +156,61 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 	idempotencyService := idempotency.NewRedisService(redisClient)
+
+	// Create Starlark handler registry with service client handlers.
+	// This enables saga scripts to call real services (not mocks).
+	// See PRD: docs/prd/starlark-service-bindings.md
+	handlerRegistry := saga.NewHandlerRegistry()
+
+	// Create position-keeping client for Starlark handlers.
+	// Note: payment-order needs position-keeping for payment execution sagas.
+	posKeepingClient, posKeepingCleanup, err := positionkeepingclient.New(positionkeepingclient.Config{
+		ServiceName: positionkeepingclient.ServiceName,
+		Namespace:   namespace,
+		Port:        ports.PositionKeeping,
+		Timeout:     defaults.DefaultRPCTimeout,
+		Tracer:      tracer,
+		// No circuit breaker for saga handlers - saga has its own retry logic
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create position-keeping client: %w", err)
+	}
+	defer posKeepingCleanup()
+
+	// Register handlers from service clients.
+	// Each RegisterStarlarkHandlers function adapts Starlark params (map[string]any)
+	// to gRPC client calls, propagating saga metadata (idempotency, correlation, etc.)
+	//
+	// Note: Type assertions are required because the createXxxClient functions return
+	// interface types (service.XxxClient) but RegisterStarlarkHandlers needs the
+	// concrete *Client type to access the gRPC connection.
+	if caClient, ok := currentAccountClient.(*currentaccountclient.Client); ok {
+		if err := currentaccountclient.RegisterStarlarkHandlers(handlerRegistry, caClient); err != nil {
+			return fmt.Errorf("failed to register current-account handlers: %w", err)
+		}
+	} else {
+		logger.Warn("current-account client type assertion failed, Starlark handlers not registered")
+	}
+
+	if faClient, ok := financialAccountingClient.(*financialaccountingclient.Client); ok {
+		if err := financialaccountingclient.RegisterStarlarkHandlers(handlerRegistry, faClient); err != nil {
+			return fmt.Errorf("failed to register financial-accounting handlers: %w", err)
+		}
+	} else {
+		logger.Warn("financial-accounting client type assertion failed, Starlark handlers not registered")
+	}
+
+	if err := positionkeepingclient.RegisterStarlarkHandlers(handlerRegistry, posKeepingClient); err != nil {
+		return fmt.Errorf("failed to register position-keeping handlers: %w", err)
+	}
+
+	logger.Info("Starlark handler registry initialized",
+		"registered_handlers", len(handlerRegistry.List()))
+
+	// Note: handlerRegistry is available for use with StarlarkRunner when
+	// payment execution sagas are migrated from Go orchestrators to Starlark.
+	// See task 13 in saga-script-versioning for migration details.
+	_ = handlerRegistry // TODO: Wire to StarlarkRunner when saga migration completes
 
 	// Create payment order service
 	paymentOrderService, err := service.NewServiceWithConfig(service.Config{

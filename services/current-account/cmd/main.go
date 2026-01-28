@@ -12,6 +12,7 @@ import (
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
+	currentaccountclient "github.com/meridianhub/meridian/services/current-account/client"
 	"github.com/meridianhub/meridian/services/current-account/config"
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
 	"github.com/meridianhub/meridian/services/current-account/service"
@@ -22,6 +23,7 @@ import (
 	refdataclient "github.com/meridianhub/meridian/services/reference-data/client"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
@@ -241,6 +243,10 @@ type serviceClients struct {
 	// Health clients bypass the circuit breaker for health checks
 	positionKeepingHealth     grpc_health_v1.HealthClient
 	financialAccountingHealth grpc_health_v1.HealthClient
+	// HandlerRegistry for Starlark saga execution with service client handlers.
+	// This registry contains handlers that call real gRPC services (not mocks).
+	// See PRD: docs/prd/starlark-service-bindings.md
+	handlerRegistry *saga.HandlerRegistry
 	// Cleanup functions for graceful shutdown
 	cleanupFuncs []func()
 }
@@ -441,6 +447,53 @@ func createServiceWithClients(
 		return nil, nil, fmt.Errorf("failed to create service with existing clients: %w", err)
 	}
 
+	// Create Starlark handler registry with service client handlers.
+	// This enables saga scripts to call real services (not mocks).
+	// See PRD: docs/prd/starlark-service-bindings.md
+	handlerRegistry := saga.NewHandlerRegistry()
+
+	// Register handlers from service clients.
+	// Each RegisterStarlarkHandlers function adapts Starlark params (map[string]any)
+	// to gRPC client calls, propagating saga metadata (idempotency, correlation, etc.)
+	if err := poskeepingclient.RegisterStarlarkHandlers(handlerRegistry, posKeepingClient); err != nil {
+		for _, cleanup := range cleanupFuncs {
+			cleanup()
+		}
+		return nil, nil, fmt.Errorf("failed to register position-keeping handlers: %w", err)
+	}
+
+	if err := finacctclient.RegisterStarlarkHandlers(handlerRegistry, finAcctClient); err != nil {
+		for _, cleanup := range cleanupFuncs {
+			cleanup()
+		}
+		return nil, nil, fmt.Errorf("failed to register financial-accounting handlers: %w", err)
+	}
+
+	// Register current-account handlers (for self-referential operations in sagas)
+	// Note: We need a current-account client that connects to this service's gRPC endpoint.
+	// For now, we create one using the same namespace/port configuration.
+	currentAcctClient, currentAcctCleanup, err := currentaccountclient.New(currentaccountclient.Config{
+		ServiceName: currentaccountclient.ServiceName,
+		Namespace:   namespace,
+		Port:        ports.CurrentAccount,
+		Timeout:     defaults.DefaultRPCTimeout,
+		Tracer:      tracer,
+		// No resilience for self-calls - we want fast failure for local issues
+	})
+	if err != nil {
+		// Current-account handlers are optional - service can work without them
+		logger.Warn("failed to create current-account client for Starlark handlers",
+			"error", err)
+	} else {
+		cleanupFuncs = append(cleanupFuncs, currentAcctCleanup)
+		if regErr := currentaccountclient.RegisterStarlarkHandlers(handlerRegistry, currentAcctClient); regErr != nil {
+			logger.Warn("failed to register current-account handlers", "error", regErr)
+		}
+	}
+
+	logger.Info("Starlark handler registry initialized",
+		"registered_handlers", len(handlerRegistry.List()))
+
 	// Create health clients from the underlying gRPC connections
 	// These bypass the circuit breaker to avoid health checks tripping business operation circuit breakers
 	svcClients := &serviceClients{
@@ -451,6 +504,7 @@ func createServiceWithClients(
 		accountResolver:           accountResolver,
 		positionKeepingHealth:     grpc_health_v1.NewHealthClient(posKeepingClient.Conn()),
 		financialAccountingHealth: grpc_health_v1.NewHealthClient(finAcctClient.Conn()),
+		handlerRegistry:           handlerRegistry,
 		cleanupFuncs:              cleanupFuncs,
 	}
 
