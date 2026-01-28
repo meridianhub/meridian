@@ -45,6 +45,9 @@ var (
 
 	// ErrInvalidPostingIDType is returned when posting_id has unexpected type.
 	ErrInvalidPostingIDType = errors.New("invalid posting_id type")
+
+	// ErrInvalidStatus is returned when an unknown status value is provided.
+	ErrInvalidStatus = errors.New("invalid status")
 )
 
 // RegisterStarlarkHandlers registers all Starlark service bindings for Financial Accounting.
@@ -211,12 +214,18 @@ func updateBookingLogHandler(client *Client) saga.Handler {
 		}
 
 		// Parse optional status parameter
-		statusStr, _ := params["status"].(string)
-		var status commonv1.TransactionStatus
-		if statusStr == "POSTED" {
-			status = commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED
-		} else {
-			status = commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING
+		status := commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING
+		if statusStr, ok := params["status"].(string); ok {
+			switch statusStr {
+			case "POSTED":
+				status = commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED
+			case "CANCELLED":
+				status = commonv1.TransactionStatus_TRANSACTION_STATUS_CANCELLED
+			case "PENDING":
+				status = commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING
+			default:
+				return nil, fmt.Errorf("%w: %s", ErrInvalidStatus, statusStr)
+			}
 		}
 
 		clientCtx := prepareClientContext(ctx)
@@ -480,6 +489,8 @@ func validateBalancedEntries(entriesArray []any) error {
 			totalDebits = totalDebits.Add(amount)
 		case "CREDIT":
 			totalCredits = totalCredits.Add(amount)
+		default:
+			return fmt.Errorf("%w: got %q", ErrInvalidDirection, direction)
 		}
 	}
 
@@ -495,7 +506,7 @@ func validateBalancedEntries(entriesArray []any) error {
 func postEntries(ctx *saga.StarlarkContext, client *Client, bookingLogID string, entriesArray []any) ([]string, error) {
 	postingIDs := make([]string, 0, len(entriesArray))
 
-	for _, entryRaw := range entriesArray {
+	for i, entryRaw := range entriesArray {
 		entryMap, ok := entryRaw.(map[string]any)
 		if !ok {
 			return nil, ErrEntryMustBeObject
@@ -510,8 +521,22 @@ func postEntries(ctx *saga.StarlarkContext, client *Client, bookingLogID string,
 			"direction":      entryMap["direction"],
 		}
 
+		// Create context with unique idempotency key per entry
+		// Note: We create a new StarlarkContext to avoid copying the mutex in the original context
+		entryCtx := &saga.StarlarkContext{
+			Context:           ctx.Context,
+			PartyScope:        ctx.PartyScope,
+			SagaExecutionID:   ctx.SagaExecutionID,
+			CorrelationID:     ctx.CorrelationID,
+			KnowledgeAt:       ctx.KnowledgeAt,
+			IdempotencyKey:    fmt.Sprintf("%s_entry_%d", ctx.IdempotencyKey, i),
+			Logger:            ctx.Logger,
+			LookupCache:       ctx.LookupCache,
+			TriggerInstrument: ctx.TriggerInstrument,
+		}
+
 		// Call capture_posting handler
-		result, err := capturePostingHandler(client)(ctx, postingParams)
+		result, err := capturePostingHandler(client)(entryCtx, postingParams)
 		if err != nil {
 			return nil, fmt.Errorf("failed to post entry: %w", err)
 		}
@@ -535,6 +560,12 @@ func postEntries(ctx *saga.StarlarkContext, client *Client, bookingLogID string,
 // reverseEntriesHandler reverses posted GL entries during saga compensation.
 // This is a critical compensation handler for saga rollback.
 //
+// Implementation Note: This handler cancels the booking log to prevent its entries
+// from being finalized. An alternative approach would be to create offsetting
+// entries (a new booking log with type=REVERSAL), but cancellation is simpler
+// for compensation and maintains audit trail through the CANCELLED status.
+// The choice depends on the Financial Accounting service's reversal semantics.
+//
 // Parameters:
 //   - booking_log_id (string): The booking log identifier containing entries to reverse
 //
@@ -550,7 +581,7 @@ func reverseEntriesHandler(client *Client) saga.Handler {
 
 		clientCtx := prepareClientContext(ctx)
 
-		// Update booking log to CANCELLED status to reverse entries
+		// Cancel the booking log to reverse its entries
 		resp, err := client.UpdateFinancialBookingLog(clientCtx, &financialaccountingv1.UpdateFinancialBookingLogRequest{
 			Id:     bookingLogID,
 			Status: commonv1.TransactionStatus_TRANSACTION_STATUS_CANCELLED,
@@ -586,6 +617,9 @@ const correlationIDContextKey contextKey = "x-correlation-id"
 
 func prepareClientContext(ctx *saga.StarlarkContext) context.Context {
 	clientCtx := ctx.Context
+	if clientCtx == nil {
+		clientCtx = context.Background()
+	}
 
 	// Add correlation ID to context value so the client's PropagateCorrelationID can extract it
 	clientCtx = context.WithValue(clientCtx, correlationIDContextKey, ctx.CorrelationID.String())
