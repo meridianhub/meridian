@@ -88,7 +88,7 @@ boundaries, error handling, and validation logic.
 - NoOp fallback behavior under Redis/Kafka failure
 - Orphaned booking logs from partial failures
 
-**Current Coverage**: Integration tests with testcontainers (`service/grpc_integration_test.go`)
+**Current Coverage**: Integration tests with Testcontainers (`service/grpc_integration_test.go`)
 
 **Impact**: Incorrect financial statements, audit failures, unbalanced ledgers
 
@@ -740,7 +740,7 @@ Based on `internal-bank-account/e2e/e2e_test.go`:
 
 ```go
 func TestAccountLifecycle_E2E(t *testing.T) {
-    // Setup testcontainers
+    // Setup Testcontainers
     db, cleanup := testdb.SetupCockroachDB(t, nil)
     defer cleanup()
 
@@ -1048,7 +1048,7 @@ while the bug ships to production.
 
 - [Starlark Service Bindings PRD](./starlark-service-bindings.md) - Covers Starlark saga e2e testing
 - [CLAUDE.md Testing Guidelines](../../CLAUDE.md#testing-guidelines) - Use `await` instead of `time.Sleep`
-- [ADR 0028: Starlark Saga CEL Validation](../adr/0028-starlark-saga-cel-valuation.md)
+- [ADR 0028: Starlark Saga CEL Valuation](../adr/0028-starlark-saga-cel-valuation.md)
 - Existing E2E Tests:
   - `services/reference-data/e2e/e2e_test.go`
   - `services/internal-bank-account/e2e/e2e_test.go`
