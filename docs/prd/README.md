@@ -23,6 +23,7 @@ documents are configured as Claude Code skills that automatically load when rele
 | [Market Information Management](market-information-management.md) | Implemented | `market-information-management` | 17/18 done, 1 cancelled |
 | [Meridian Edge](meridian-edge.md) | Not Started | N/A | N/A |
 | [Starlark Saga Orchestration (Core)](starlark-saga-orchestration-core.md) | Implemented | `starlark-saga-orchestration` | 24/24 done |
+| [Starlark Service Bindings](starlark-service-bindings.md) | Not Started | N/A | N/A |
 | [Starlark Typed Service Clients](starlark-typed-service-clients.md) | Implemented | `starlark-typed-clients` | 10/10 done |
 | [Universal Asset System](universal-asset-system.md) | Implemented | `universal-asset-system` | 36/36 done |
 
