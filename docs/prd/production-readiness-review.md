@@ -890,6 +890,79 @@ func TestAsyncOperation_E2E(t *testing.T) {
 
 ---
 
+### Pattern 6: Fix Code, Not Tests
+
+**CRITICAL TESTING PRINCIPLE**: When e2e tests fail, **fix the production code, not the test assertions**.
+
+**The Problem**: It's tempting to "fix" failing tests by adjusting expected values to match incorrect behavior. This
+defeats the entire purpose of testing.
+
+**The Rule**:
+
+```go
+// ❌ WRONG - Making test match incorrect behavior
+func TestWithdrawal_E2E(t *testing.T) {
+    withdrawal := executeWithdrawal(t, ctx, service, 100)
+
+    // Test discovers withdrawal status is stuck in PENDING
+    // Developer changes assertion to match broken behavior:
+    assert.Equal(t, StatusPending, withdrawal.Status) // ❌ Makes test pass, hides bug
+}
+
+// ✅ CORRECT - Fix the production code
+func TestWithdrawal_E2E(t *testing.T) {
+    withdrawal := executeWithdrawal(t, ctx, service, 100)
+
+    // Test discovers withdrawal status is stuck in PENDING
+    // Developer investigates and finds the bug in current-account/service/grpc_service.go:896-913
+    // Developer implements Outbox Pattern to fix eventual consistency issue
+    // Now test passes with correct assertion:
+    assert.Equal(t, StatusCompleted, withdrawal.Status) // ✅ Verifies correct behavior
+}
+```
+
+**When to Fix Code vs. Tests**:
+
+| Scenario | Action | Reason |
+|----------|--------|--------|
+| Test expects COMPLETED but gets PENDING | Fix production code | Status should transition to COMPLETED |
+| Test expects balance 100 but gets 95 | Fix production code | Math is wrong, not the expectation |
+| Test expects 3 audit logs but gets 2 | Fix production code | Missing audit trail entry |
+| Test expects response in 50ms but takes 500ms | Fix production code OR adjust baseline | Performance regression |
+| Test uses wrong tenant ID in assertion | Fix test | Test bug, not production bug |
+| Test expects deprecated API format | Fix test | API evolved correctly, test outdated |
+
+**Red Flags** (indicators you're fixing tests instead of code):
+
+- "Let's just change the expected value to match what we're getting"
+- "The test is too strict, let's loosen the assertion"
+- "It's working in production, the test is wrong"
+- Removing assertions instead of fixing root cause
+- Using `t.Skip()` to hide failures instead of fixing
+
+**Correct Approach**:
+
+1. **Test fails** - E2E test discovers withdrawal status stuck in PENDING
+2. **Investigate** - Why is the status not updating? Found eventual consistency bug
+3. **Fix production code** - Implement Outbox Pattern (not just change assertion)
+4. **Test passes** - Now verifies correct behavior
+5. **Document** - Add comment explaining the fix: "Fixed eventual consistency issue with Outbox Pattern"
+
+**Exception**: Only "fix" tests when the test itself has a bug (wrong tenant ID, outdated API expectations, etc.) - not
+when production behavior is incorrect.
+
+**Why This Matters**:
+
+- E2E tests are our **truth detector** - they expose real production issues
+- Weakening assertions to make tests pass **hides bugs** that will hit customers
+- **Tests should fail** when behavior is wrong - that's their job
+- If a test is "too strict", the production code is probably **not strict enough**
+
+**Bottom Line**: **Tests that pass by hiding broken behavior are worse than no tests at all.** They give false confidence
+while the bug ships to production.
+
+---
+
 ## 6. Success Criteria
 
 ### Phase 1 Complete (Weeks 1-4)
