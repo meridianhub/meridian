@@ -23,7 +23,7 @@ const starlarkContextKey = "saga.StarlarkContext"
 // Service module generation errors.
 var (
 	// ErrHandlerMissingFromRegistry is returned when a schema defines a handler
-	// that is not registered in the DomainHandlerRegistry.
+	// that is not registered in the HandlerRegistry.
 	ErrHandlerMissingFromRegistry = errors.New("handler defined in schema but not in registry")
 
 	// ErrHandlerMissingSchema is returned when a registered handler has no schema.
@@ -155,7 +155,7 @@ func (t *handlerTree) validateNode(path string) error {
 // Instead of:
 //
 //	invoke_handler(handler="position_keeping.initiate_log", params={...})
-func BuildServiceModules(registry *saga.DomainHandlerRegistry, schemaRegistry *Registry) (starlark.StringDict, error) {
+func BuildServiceModules(registry *saga.HandlerRegistry, schemaRegistry *Registry) (starlark.StringDict, error) {
 	// Get all handler names from the schema registry
 	schemaHandlers := schemaRegistry.ListHandlers()
 
@@ -206,7 +206,7 @@ func BuildServiceModules(registry *saga.DomainHandlerRegistry, schemaRegistry *R
 }
 
 // buildServiceStruct recursively builds a starlarkstruct from a handler tree node.
-func buildServiceStruct(name string, node *handlerTree, registry *saga.DomainHandlerRegistry, schemaRegistry *Registry) (*starlarkstruct.Struct, error) {
+func buildServiceStruct(name string, node *handlerTree, registry *saga.HandlerRegistry, schemaRegistry *Registry) (*starlarkstruct.Struct, error) {
 	members := make(starlark.StringDict)
 
 	// Add child namespaces as nested structs
@@ -236,11 +236,11 @@ func buildServiceStruct(name string, node *handlerTree, registry *saga.DomainHan
 	return starlarkstruct.FromStringDict(starlark.String(name), members), nil
 }
 
-// wrapHandler creates a Starlark builtin that wraps a Go DomainHandler.
+// wrapHandler creates a Starlark builtin that wraps a Go Handler.
 // It handles parameter validation against the schema and type conversion.
 //
 //nolint:gocognit // Handler wrapping inherently requires checking multiple conditions
-func wrapHandler(fullName string, handler saga.DomainHandler, handlerDef *HandlerDef) *starlark.Builtin {
+func wrapHandler(fullName string, handler saga.Handler, handlerDef *HandlerDef) *starlark.Builtin {
 	return starlark.NewBuiltin(fullName, func(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 		// Handle positional args (should be empty for handlers) - check first for fast fail
 		if len(args) > 0 {

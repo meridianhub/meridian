@@ -88,9 +88,9 @@ func TestStarlarkContext_ContextCancellation(t *testing.T) {
 	assert.True(t, errors.Is(ctx.Err(), context.Canceled))
 }
 
-// TestDomainHandlerRegistry_Register tests handler registration.
-func TestDomainHandlerRegistry_Register(t *testing.T) {
-	registry := NewDomainHandlerRegistry()
+// TestHandlerRegistry_Register tests handler registration.
+func TestHandlerRegistry_Register(t *testing.T) {
+	registry := NewHandlerRegistry()
 
 	handler := func(_ *StarlarkContext, _ map[string]any) (any, error) {
 		return "result", nil
@@ -103,9 +103,9 @@ func TestDomainHandlerRegistry_Register(t *testing.T) {
 	assert.True(t, registry.Has("test.handler"))
 }
 
-// TestDomainHandlerRegistry_Register_RejectsDuplicates tests duplicate rejection.
-func TestDomainHandlerRegistry_Register_RejectsDuplicates(t *testing.T) {
-	registry := NewDomainHandlerRegistry()
+// TestHandlerRegistry_Register_RejectsDuplicates tests duplicate rejection.
+func TestHandlerRegistry_Register_RejectsDuplicates(t *testing.T) {
+	registry := NewHandlerRegistry()
 
 	handler := func(_ *StarlarkContext, _ map[string]any) (any, error) {
 		return "result", nil
@@ -119,9 +119,9 @@ func TestDomainHandlerRegistry_Register_RejectsDuplicates(t *testing.T) {
 	assert.ErrorIs(t, err, ErrHandlerAlreadyRegistered)
 }
 
-// TestDomainHandlerRegistry_Register_RejectsEmptyName tests empty name rejection.
-func TestDomainHandlerRegistry_Register_RejectsEmptyName(t *testing.T) {
-	registry := NewDomainHandlerRegistry()
+// TestHandlerRegistry_Register_RejectsEmptyName tests empty name rejection.
+func TestHandlerRegistry_Register_RejectsEmptyName(t *testing.T) {
+	registry := NewHandlerRegistry()
 
 	handler := func(_ *StarlarkContext, _ map[string]any) (any, error) {
 		return "result", nil
@@ -131,9 +131,9 @@ func TestDomainHandlerRegistry_Register_RejectsEmptyName(t *testing.T) {
 	assert.ErrorIs(t, err, ErrInvalidHandlerName)
 }
 
-// TestDomainHandlerRegistry_Get tests handler retrieval.
-func TestDomainHandlerRegistry_Get(t *testing.T) {
-	registry := NewDomainHandlerRegistry()
+// TestHandlerRegistry_Get tests handler retrieval.
+func TestHandlerRegistry_Get(t *testing.T) {
+	registry := NewHandlerRegistry()
 
 	expectedResult := "test-result"
 	handler := func(_ *StarlarkContext, _ map[string]any) (any, error) {
@@ -159,17 +159,17 @@ func TestDomainHandlerRegistry_Get(t *testing.T) {
 	assert.Equal(t, expectedResult, result)
 }
 
-// TestDomainHandlerRegistry_Get_ReturnsErrorForUnknown tests unknown handler.
-func TestDomainHandlerRegistry_Get_ReturnsErrorForUnknown(t *testing.T) {
-	registry := NewDomainHandlerRegistry()
+// TestHandlerRegistry_Get_ReturnsErrorForUnknown tests unknown handler.
+func TestHandlerRegistry_Get_ReturnsErrorForUnknown(t *testing.T) {
+	registry := NewHandlerRegistry()
 
 	_, err := registry.Get("unknown.handler")
 	assert.ErrorIs(t, err, ErrHandlerNotFound)
 }
 
-// TestDomainHandlerRegistry_Has tests existence checking.
-func TestDomainHandlerRegistry_Has(t *testing.T) {
-	registry := NewDomainHandlerRegistry()
+// TestHandlerRegistry_Has tests existence checking.
+func TestHandlerRegistry_Has(t *testing.T) {
+	registry := NewHandlerRegistry()
 
 	handler := func(_ *StarlarkContext, _ map[string]any) (any, error) {
 		return nil, nil
@@ -184,9 +184,9 @@ func TestDomainHandlerRegistry_Has(t *testing.T) {
 	assert.True(t, registry.Has("test.handler"))
 }
 
-// TestDomainHandlerRegistry_List tests listing all handlers.
-func TestDomainHandlerRegistry_List(t *testing.T) {
-	registry := NewDomainHandlerRegistry()
+// TestHandlerRegistry_List tests listing all handlers.
+func TestHandlerRegistry_List(t *testing.T) {
+	registry := NewHandlerRegistry()
 
 	handler := func(_ *StarlarkContext, _ map[string]any) (any, error) {
 		return nil, nil
@@ -202,9 +202,9 @@ func TestDomainHandlerRegistry_List(t *testing.T) {
 	assert.Equal(t, []string{"a.handler", "m.handler", "z.handler"}, list)
 }
 
-// TestDomainHandlerRegistry_ConcurrentAccess tests thread safety.
-func TestDomainHandlerRegistry_ConcurrentAccess(t *testing.T) {
-	registry := NewDomainHandlerRegistry()
+// TestHandlerRegistry_ConcurrentAccess tests thread safety.
+func TestHandlerRegistry_ConcurrentAccess(t *testing.T) {
+	registry := NewHandlerRegistry()
 
 	handler := func(_ *StarlarkContext, _ map[string]any) (any, error) {
 		return nil, nil
@@ -455,6 +455,237 @@ func TestStarlarkContext_ValidatePartyAccessFromString(t *testing.T) {
 
 	t.Run("rejects empty string", func(t *testing.T) {
 		err := ctx.ValidatePartyAccessFromString("")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidParamType)
+	})
+}
+
+// TestRequireStringParam tests the public RequireStringParam helper.
+func TestRequireStringParam(t *testing.T) {
+	t.Run("returns valid string value", func(t *testing.T) {
+		params := map[string]any{"name": "test-value"}
+		result, err := RequireStringParam(params, "name")
+		require.NoError(t, err)
+		assert.Equal(t, "test-value", result)
+	})
+
+	t.Run("returns empty string as valid", func(t *testing.T) {
+		params := map[string]any{"name": ""}
+		result, err := RequireStringParam(params, "name")
+		require.NoError(t, err)
+		assert.Equal(t, "", result)
+	})
+
+	t.Run("handles unicode strings", func(t *testing.T) {
+		params := map[string]any{"name": "测试-Тест-🎉"}
+		result, err := RequireStringParam(params, "name")
+		require.NoError(t, err)
+		assert.Equal(t, "测试-Тест-🎉", result)
+	})
+
+	t.Run("returns ErrMissingParam when key absent", func(t *testing.T) {
+		params := map[string]any{}
+		_, err := RequireStringParam(params, "name")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrMissingParam)
+		assert.Contains(t, err.Error(), "name")
+	})
+
+	t.Run("returns ErrInvalidParamType for non-string", func(t *testing.T) {
+		params := map[string]any{"name": 123}
+		_, err := RequireStringParam(params, "name")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidParamType)
+		assert.Contains(t, err.Error(), "int")
+	})
+
+	t.Run("handles nil params map", func(t *testing.T) {
+		_, err := RequireStringParam(nil, "name")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrMissingParam)
+	})
+}
+
+// TestRequireDecimalParam tests the public RequireDecimalParam helper.
+func TestRequireDecimalParam(t *testing.T) {
+	t.Run("returns valid decimal.Decimal value", func(t *testing.T) {
+		expected := decimal.NewFromFloat(123.45)
+		params := map[string]any{"amount": expected}
+		result, err := RequireDecimalParam(params, "amount")
+		require.NoError(t, err)
+		assert.True(t, expected.Equal(result))
+	})
+
+	t.Run("parses string to decimal", func(t *testing.T) {
+		params := map[string]any{"amount": "123.45"}
+		result, err := RequireDecimalParam(params, "amount")
+		require.NoError(t, err)
+		assert.True(t, decimal.NewFromFloat(123.45).Equal(result))
+	})
+
+	t.Run("accepts float64", func(t *testing.T) {
+		params := map[string]any{"amount": float64(123.45)}
+		result, err := RequireDecimalParam(params, "amount")
+		require.NoError(t, err)
+		assert.True(t, decimal.NewFromFloat(123.45).Equal(result))
+	})
+
+	t.Run("accepts int", func(t *testing.T) {
+		params := map[string]any{"amount": 123}
+		result, err := RequireDecimalParam(params, "amount")
+		require.NoError(t, err)
+		assert.True(t, decimal.NewFromInt(123).Equal(result))
+	})
+
+	t.Run("accepts int64", func(t *testing.T) {
+		params := map[string]any{"amount": int64(123)}
+		result, err := RequireDecimalParam(params, "amount")
+		require.NoError(t, err)
+		assert.True(t, decimal.NewFromInt(123).Equal(result))
+	})
+
+	t.Run("handles zero value", func(t *testing.T) {
+		params := map[string]any{"amount": decimal.Zero}
+		result, err := RequireDecimalParam(params, "amount")
+		require.NoError(t, err)
+		assert.True(t, decimal.Zero.Equal(result))
+	})
+
+	t.Run("handles negative values", func(t *testing.T) {
+		params := map[string]any{"amount": "-123.45"}
+		result, err := RequireDecimalParam(params, "amount")
+		require.NoError(t, err)
+		assert.True(t, decimal.NewFromFloat(-123.45).Equal(result))
+	})
+
+	t.Run("handles very large values", func(t *testing.T) {
+		params := map[string]any{"amount": "999999999999999999.99"}
+		result, err := RequireDecimalParam(params, "amount")
+		require.NoError(t, err)
+		expected, _ := decimal.NewFromString("999999999999999999.99")
+		assert.True(t, expected.Equal(result))
+	})
+
+	t.Run("returns ErrMissingParam when key absent", func(t *testing.T) {
+		params := map[string]any{}
+		_, err := RequireDecimalParam(params, "amount")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrMissingParam)
+	})
+
+	t.Run("returns ErrInvalidParamType for invalid string", func(t *testing.T) {
+		params := map[string]any{"amount": "not-a-number"}
+		_, err := RequireDecimalParam(params, "amount")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidParamType)
+	})
+
+	t.Run("returns ErrInvalidParamType for unsupported type", func(t *testing.T) {
+		params := map[string]any{"amount": true}
+		_, err := RequireDecimalParam(params, "amount")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidParamType)
+		assert.Contains(t, err.Error(), "bool")
+	})
+}
+
+// TestRequireUUIDParam tests the public RequireUUIDParam helper.
+func TestRequireUUIDParam(t *testing.T) {
+	validUUID := uuid.MustParse("12345678-1234-1234-1234-123456789012")
+
+	t.Run("returns valid uuid.UUID value", func(t *testing.T) {
+		params := map[string]any{"id": validUUID}
+		result, err := RequireUUIDParam(params, "id")
+		require.NoError(t, err)
+		assert.Equal(t, validUUID, result)
+	})
+
+	t.Run("parses valid UUID string", func(t *testing.T) {
+		params := map[string]any{"id": "12345678-1234-1234-1234-123456789012"}
+		result, err := RequireUUIDParam(params, "id")
+		require.NoError(t, err)
+		assert.Equal(t, validUUID, result)
+	})
+
+	t.Run("parses UUID without hyphens", func(t *testing.T) {
+		params := map[string]any{"id": "12345678123412341234123456789012"}
+		result, err := RequireUUIDParam(params, "id")
+		require.NoError(t, err)
+		assert.Equal(t, validUUID, result)
+	})
+
+	t.Run("returns ErrMissingParam when key absent", func(t *testing.T) {
+		params := map[string]any{}
+		_, err := RequireUUIDParam(params, "id")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrMissingParam)
+	})
+
+	t.Run("returns ErrInvalidParamType for malformed UUID string", func(t *testing.T) {
+		params := map[string]any{"id": "not-a-uuid"}
+		_, err := RequireUUIDParam(params, "id")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidParamType)
+		assert.Contains(t, err.Error(), "not-a-uuid")
+	})
+
+	t.Run("returns ErrInvalidParamType for wrong type", func(t *testing.T) {
+		params := map[string]any{"id": 12345}
+		_, err := RequireUUIDParam(params, "id")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidParamType)
+		assert.Contains(t, err.Error(), "int")
+	})
+
+	t.Run("handles nil UUID", func(t *testing.T) {
+		params := map[string]any{"id": uuid.Nil}
+		result, err := RequireUUIDParam(params, "id")
+		require.NoError(t, err)
+		assert.Equal(t, uuid.Nil, result)
+	})
+}
+
+// TestRequireDirectionParam tests the public RequireDirectionParam helper.
+func TestRequireDirectionParam(t *testing.T) {
+	t.Run("accepts DEBIT", func(t *testing.T) {
+		params := map[string]any{"direction": "DEBIT"}
+		result, err := RequireDirectionParam(params, "direction")
+		require.NoError(t, err)
+		assert.Equal(t, "DEBIT", result)
+	})
+
+	t.Run("accepts CREDIT", func(t *testing.T) {
+		params := map[string]any{"direction": "CREDIT"}
+		result, err := RequireDirectionParam(params, "direction")
+		require.NoError(t, err)
+		assert.Equal(t, "CREDIT", result)
+	})
+
+	t.Run("returns ErrMissingParam when key absent", func(t *testing.T) {
+		params := map[string]any{}
+		_, err := RequireDirectionParam(params, "direction")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrMissingParam)
+	})
+
+	t.Run("returns ErrInvalidDirection for lowercase", func(t *testing.T) {
+		params := map[string]any{"direction": "debit"}
+		_, err := RequireDirectionParam(params, "direction")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidDirection)
+	})
+
+	t.Run("returns ErrInvalidDirection for invalid value", func(t *testing.T) {
+		params := map[string]any{"direction": "INVALID"}
+		_, err := RequireDirectionParam(params, "direction")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidDirection)
+		assert.Contains(t, err.Error(), "INVALID")
+	})
+
+	t.Run("returns ErrInvalidParamType for non-string", func(t *testing.T) {
+		params := map[string]any{"direction": 123}
+		_, err := RequireDirectionParam(params, "direction")
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrInvalidParamType)
 	})
