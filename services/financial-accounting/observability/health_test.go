@@ -217,3 +217,114 @@ func TestMapStatusToGRPC(t *testing.T) {
 		assert.Equal(t, tt.expected, result, "status %v should map to %v", tt.status, tt.expected)
 	}
 }
+
+func TestNoopFallbackChecker_Healthy(t *testing.T) {
+	checker := NewNoopFallbackChecker(false, false)
+
+	result := checker.Check(context.Background())
+
+	assert.Equal(t, "noop-fallbacks", result.Name)
+	assert.Equal(t, health.StatusHealthy, result.Status)
+	assert.Equal(t, "all production services connected", result.Message)
+	assert.Nil(t, result.Error)
+}
+
+func TestNoopFallbackChecker_DegradedIdempotency(t *testing.T) {
+	checker := NewNoopFallbackChecker(true, false)
+
+	result := checker.Check(context.Background())
+
+	assert.Equal(t, "noop-fallbacks", result.Name)
+	assert.Equal(t, health.StatusDegraded, result.Status)
+	assert.Contains(t, result.Message, "idempotency (Redis)")
+	assert.Contains(t, result.Message, "DEVELOPMENT ONLY")
+}
+
+func TestNoopFallbackChecker_DegradedEvents(t *testing.T) {
+	checker := NewNoopFallbackChecker(false, true)
+
+	result := checker.Check(context.Background())
+
+	assert.Equal(t, "noop-fallbacks", result.Name)
+	assert.Equal(t, health.StatusDegraded, result.Status)
+	assert.Contains(t, result.Message, "event publishing (Kafka)")
+	assert.Contains(t, result.Message, "DEVELOPMENT ONLY")
+}
+
+func TestNoopFallbackChecker_DegradedBoth(t *testing.T) {
+	checker := NewNoopFallbackChecker(true, true)
+
+	result := checker.Check(context.Background())
+
+	assert.Equal(t, "noop-fallbacks", result.Name)
+	assert.Equal(t, health.StatusDegraded, result.Status)
+	assert.Contains(t, result.Message, "idempotency (Redis)")
+	assert.Contains(t, result.Message, "event publishing (Kafka)")
+	assert.Contains(t, result.Message, "DEVELOPMENT ONLY")
+}
+
+func TestNoopFallbackChecker_Name(t *testing.T) {
+	checker := NewNoopFallbackChecker(false, false)
+	assert.Equal(t, "noop-fallbacks", checker.Name())
+}
+
+func TestHealthChecker_WithNoopFallbacks_Degraded(t *testing.T) {
+	gormDB, mock := setupMockDB(t)
+	mock.ExpectPing()
+
+	healthChecker, err := NewHealthChecker(HealthCheckerConfig{
+		DB:                   gormDB,
+		CheckTimeout:         5 * time.Second,
+		UsingNoopIdempotency: true,
+		UsingNoopEvents:      false,
+	})
+	require.NoError(t, err)
+
+	resp, err := healthChecker.Check(context.Background(), &grpc_health_v1.HealthCheckRequest{})
+
+	require.NoError(t, err)
+	// Degraded still returns SERVING per gRPC health protocol
+	assert.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, resp.Status)
+
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestHealthChecker_WithNoopFallbacks_ChecksComponent(t *testing.T) {
+	gormDB, _ := setupMockDB(t)
+
+	healthChecker, err := NewHealthChecker(HealthCheckerConfig{
+		DB:                   gormDB,
+		UsingNoopIdempotency: true,
+		UsingNoopEvents:      true,
+	})
+	require.NoError(t, err)
+
+	// Check noop-fallbacks component specifically
+	resp, err := healthChecker.Check(context.Background(), &grpc_health_v1.HealthCheckRequest{
+		Service: "noop-fallbacks",
+	})
+
+	require.NoError(t, err)
+	// Degraded maps to SERVING
+	assert.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, resp.Status)
+}
+
+func TestHealthChecker_WithoutNoopFallbacks_NoFallbackComponent(t *testing.T) {
+	gormDB, _ := setupMockDB(t)
+
+	healthChecker, err := NewHealthChecker(HealthCheckerConfig{
+		DB:                   gormDB,
+		UsingNoopIdempotency: false,
+		UsingNoopEvents:      false,
+	})
+	require.NoError(t, err)
+
+	// noop-fallbacks component should not exist when not using fallbacks
+	resp, err := healthChecker.Check(context.Background(), &grpc_health_v1.HealthCheckRequest{
+		Service: "noop-fallbacks",
+	})
+
+	require.NoError(t, err)
+	// Component not found returns UNKNOWN
+	assert.Equal(t, grpc_health_v1.HealthCheckResponse_UNKNOWN, resp.Status)
+}

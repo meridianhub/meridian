@@ -31,10 +31,12 @@ type HealthChecker struct {
 
 // HealthCheckerConfig contains configuration for creating a new HealthChecker.
 type HealthCheckerConfig struct {
-	DB           *gorm.DB
-	Logger       *slog.Logger
-	ServiceName  string        // Defaults to "financial-accounting"
-	CheckTimeout time.Duration // Defaults to 5 seconds
+	DB                   *gorm.DB
+	Logger               *slog.Logger
+	ServiceName          string        // Defaults to "financial-accounting"
+	CheckTimeout         time.Duration // Defaults to 5 seconds
+	UsingNoopIdempotency bool          // Set to true if using NoOp idempotency service
+	UsingNoopEvents      bool          // Set to true if using NoOp event publisher
 }
 
 // NewHealthChecker creates a new health checker with dependency checking.
@@ -67,6 +69,11 @@ func NewHealthChecker(config HealthCheckerConfig) (*HealthChecker, error) {
 	// Build list of health checkers
 	checkers := []health.Checker{
 		NewGormDatabaseHealthChecker(config.DB, config.CheckTimeout),
+	}
+
+	// Add NoOp fallback checker if any fallback is active
+	if config.UsingNoopIdempotency || config.UsingNoopEvents {
+		checkers = append(checkers, NewNoopFallbackChecker(config.UsingNoopIdempotency, config.UsingNoopEvents))
 	}
 
 	aggregator := health.NewAggregator(checkers)
@@ -265,6 +272,59 @@ func (h *HealthChecker) logHealthCheck(report *health.Report, overallStatus heal
 					"error", comp.Error)
 			}
 		}
+	}
+}
+
+// NoopFallbackChecker reports health degradation when NoOp fallback services are active.
+// This alerts operators that the service is running in a reduced functionality mode
+// (typically development/testing) where some guarantees are not enforced.
+type NoopFallbackChecker struct {
+	usingNoopIdempotency bool
+	usingNoopEvents      bool
+}
+
+// NewNoopFallbackChecker creates a checker that reports DEGRADED status when
+// NoOp fallback services are being used instead of production implementations.
+func NewNoopFallbackChecker(usingNoopIdempotency, usingNoopEvents bool) *NoopFallbackChecker {
+	return &NoopFallbackChecker{
+		usingNoopIdempotency: usingNoopIdempotency,
+		usingNoopEvents:      usingNoopEvents,
+	}
+}
+
+// Name returns the component name.
+func (n *NoopFallbackChecker) Name() string {
+	return "noop-fallbacks"
+}
+
+// Check returns the health status based on whether NoOp fallbacks are active.
+func (n *NoopFallbackChecker) Check(_ context.Context) health.ComponentResult {
+	start := time.Now()
+
+	if !n.usingNoopIdempotency && !n.usingNoopEvents {
+		return health.ComponentResult{
+			Name:         n.Name(),
+			Status:       health.StatusHealthy,
+			Message:      "all production services connected",
+			ResponseTime: time.Since(start),
+			CheckedAt:    start,
+		}
+	}
+
+	var degradedServices []string
+	if n.usingNoopIdempotency {
+		degradedServices = append(degradedServices, "idempotency (Redis)")
+	}
+	if n.usingNoopEvents {
+		degradedServices = append(degradedServices, "event publishing (Kafka)")
+	}
+
+	return health.ComponentResult{
+		Name:         n.Name(),
+		Status:       health.StatusDegraded,
+		Message:      fmt.Sprintf("using noop fallbacks for: %v - DEVELOPMENT ONLY", degradedServices),
+		ResponseTime: time.Since(start),
+		CheckedAt:    start,
 	}
 }
 
