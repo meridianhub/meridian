@@ -325,12 +325,20 @@ func executeLienHandler(client *Client) saga.Handler {
 
 | Old Name | New Name | Rationale |
 |----------|----------|-----------|
-| `DomainHandler` | `Handler` | Simpler, more general |
+| `DomainHandler` | `Handler` (type name) | Simpler, more general |
+| | `ServiceBinding` (documentation term) | Clarifies this is a bridge between Starlark and gRPC |
 | `DomainHandlerRegistry` | `HandlerRegistry` | Not domain-specific |
 | "Saga handler" (docs) | "Starlark service binding" or "service handler" | Emphasizes general-purpose usage |
 | `handlers.go` | `starlark.go` in each service's `client/` | Co-located with gRPC client |
 
-**Note**: The saga **engine** (`shared/pkg/saga/`) remains unchanged - it's a consumer of these handlers.
+**Terminology Recommendation**:
+- **Type name**: `saga.Handler` (Go interface)
+- **Documentation/comments**: "ServiceBinding" or "service binding"
+- **Rationale**: In distributed ledger context, "Handler" often refers to logic *inside* the
+  destination service. "Binding" accurately describes what this Go code does: it's a bridge
+  between Starlark and a gRPC Client.
+
+**Note**: The saga **engine** (`shared/pkg/saga/`) remains unchanged - it's a consumer of these bindings.
 
 ### 4. Dependency Injection Pattern
 
@@ -607,7 +615,8 @@ func TestValuationWorkflow_E2E(t *testing.T) {
 #### 1.1 Refactor Framework (2 story points)
 
 - **Rename types** (`shared/pkg/saga/`)
-  - `DomainHandler` → `Handler` (or `ServiceBinding` per feedback)
+  - `DomainHandler` → `Handler` (type name in code)
+    - Use "ServiceBinding" in documentation/comments to clarify it's a bridge between Starlark and gRPC
   - `DomainHandlerRegistry` → `HandlerRegistry`
   - Move helper functions (`requireStringParam`, etc.) to public API
   - Update framework tests
@@ -643,6 +652,48 @@ func TestValuationWorkflow_E2E(t *testing.T) {
       })
   }
   ```
+
+- **Idempotency key standardization** (`shared/pkg/clients`):
+
+  **Requirement**: Standardize idempotency key propagation across all service clients.
+  Some BIAN services use `meridian.common.v1.IdempotencyKey` field in protobuf, others use
+  `x-idempotency-key` header.
+
+  **Implementation**:
+
+  ```go
+  // shared/pkg/clients/idempotency.go
+  func PropagateIdempotencyKey(ctx context.Context, key string) context.Context {
+      // Store in context for later extraction
+      return context.WithValue(ctx, "idempotency_key", key)
+  }
+
+  // In each client method:
+  func (c *Client) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest) (*pb.InitiateLienResponse, error) {
+      // Extract saga-generated key from context
+      if key, ok := ctx.Value("idempotency_key").(string); ok {
+          // Option 1: Set in protobuf message (if field exists)
+          if req.IdempotencyKey == nil {
+              req.IdempotencyKey = &commonv1.IdempotencyKey{Value: key}
+          }
+
+          // Option 2: Set in gRPC metadata (fallback)
+          ctx = metadata.AppendToOutgoingContext(ctx, "x-idempotency-key", key)
+      }
+      // ...
+  }
+  ```
+
+  **Saga usage**:
+  ```go
+  // Starlark handler generates saga-prefixed key
+  idempotencyKey := fmt.Sprintf("saga_%s_step_%d", ctx.SagaExecutionID, stepIndex)
+  clientCtx := clients.PropagateIdempotencyKey(ctx.Context, idempotencyKey)
+  resp, err := client.InitiateLien(clientCtx, req)
+  ```
+
+  **Why Important**: Ensures saga replay uses the same idempotency key for the same step,
+  preventing duplicate operations across retries and replays.
 
 #### 1.2 Add Bi-Temporal Integrity Support (2 story points) **CRITICAL**
 
@@ -696,6 +747,29 @@ func TestValuationWorkflow_E2E(t *testing.T) {
      AND valid_from <= $2  -- knowledge_at
      AND (valid_to IS NULL OR valid_to > $2)
    ```
+
+4. **Update service interceptors** to respect `x-knowledge-at` header:
+
+   ```go
+   // shared/platform/db/interceptor.go (or similar)
+   func KnowledgeAtInterceptor() grpc.UnaryServerInterceptor {
+       return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+           // Extract knowledge_at from gRPC metadata
+           if md, ok := metadata.FromIncomingContext(ctx); ok {
+               if values := md.Get("x-knowledge-at"); len(values) > 0 {
+                   if knowledgeAt, err := time.Parse(time.RFC3339Nano, values[0]); err == nil {
+                       // Override time.Now() for historical queries
+                       ctx = context.WithValue(ctx, "knowledge_at", knowledgeAt)
+                   }
+               }
+           }
+           return handler(ctx, req)
+       }
+   }
+   ```
+
+   **Critical**: Ensure `shared/platform/tenant` or `shared/platform/db` interceptors are updated
+   to respect this header if present, overriding `time.Now()` for historical queries.
 
 **Why Critical**: Without this, saga replays query current state instead of historical state,
 breaking deterministic replay and making the Durable Execution Engine (ADR-017/018) non-functional.
@@ -796,6 +870,10 @@ new positions of type X (blocks most common infinite loops).
    }
    ```
 
+   **Implementation Note**: Ensure `TriggerInstrument` is extracted from the event that kicked off
+   the saga and made **immutable** in the `StarlarkContext`. It should be set once at saga creation
+   and never modified during execution to prevent tampering with causation checks.
+
 3. **Runtime enforcement** before handler execution:
 
    ```go
@@ -840,6 +918,7 @@ new positions of type X (blocks most common infinite loops).
    ```
 
 **Why Now, Not Later**:
+
 - Blocks 80% of causation loops with simple type-check
 - No distributed tracing required
 - Fails fast at runtime with clear error message
