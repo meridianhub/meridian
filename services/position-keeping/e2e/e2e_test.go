@@ -70,19 +70,21 @@ func setupTenantSchema(t *testing.T, db *gorm.DB, tenantID string) context.Conte
 
 // applyPositionKeepingSchema creates the position table in the tenant schema.
 // This matches the schema from services/position-keeping/migrations.
+// Uses schema-qualified DDL to avoid connection pool issues where SET search_path
+// can execute on different connections.
 func applyPositionKeepingSchema(t *testing.T, db *gorm.DB, schemaName string) {
 	t.Helper()
 
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 
-	// Set search path for this connection
-	_, err = sqlDB.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
-	require.NoError(t, err)
+	// Use schema-qualified table name to ensure DDL lands in correct schema
+	// (avoids connection pool issues with SET search_path)
+	qualifiedTable := fmt.Sprintf("%s.position", pq.QuoteIdentifier(schemaName))
 
-	// Create position table (append-only)
-	_, err = sqlDB.Exec(`
-		CREATE TABLE IF NOT EXISTS position (
+	// Create position table (append-only) with schema-qualified name
+	createTableSQL := fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS %s (
 			id UUID NOT NULL DEFAULT gen_random_uuid(),
 			created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 			created_by VARCHAR(100) NOT NULL,
@@ -96,20 +98,21 @@ func applyPositionKeepingSchema(t *testing.T, db *gorm.DB, schemaName string) {
 			reference_id UUID NULL,
 			PRIMARY KEY (id),
 			CONSTRAINT position_dimension_check CHECK (dimension IN ('Monetary', 'Energy', 'Compute', 'Carbon', 'Time', 'Physical', 'Custom'))
-		)
-	`)
+		)`, qualifiedTable)
+	_, err = sqlDB.Exec(createTableSQL)
 	require.NoError(t, err, "Failed to create position table")
 
-	// Create indexes for query performance
-	_, err = sqlDB.Exec(`
-		CREATE INDEX IF NOT EXISTS idx_position_account_id ON position (account_id);
-		CREATE INDEX IF NOT EXISTS idx_position_aggregation ON position (account_id, instrument_code, bucket_key);
-		CREATE INDEX IF NOT EXISTS idx_position_deleted_at ON position (deleted_at);
-		CREATE INDEX IF NOT EXISTS idx_position_active ON position (account_id, instrument_code, bucket_key)
+	// Create indexes with schema-qualified table names
+	createIndexesSQL := fmt.Sprintf(`
+		CREATE INDEX IF NOT EXISTS idx_position_account_id ON %[1]s (account_id);
+		CREATE INDEX IF NOT EXISTS idx_position_aggregation ON %[1]s (account_id, instrument_code, bucket_key);
+		CREATE INDEX IF NOT EXISTS idx_position_deleted_at ON %[1]s (deleted_at);
+		CREATE INDEX IF NOT EXISTS idx_position_active ON %[1]s (account_id, instrument_code, bucket_key)
 			WHERE deleted_at IS NULL;
-		CREATE INDEX IF NOT EXISTS idx_position_reference_id ON position (reference_id);
-		CREATE INDEX IF NOT EXISTS idx_position_created_at ON position (created_at)
-	`)
+		CREATE INDEX IF NOT EXISTS idx_position_reference_id ON %[1]s (reference_id);
+		CREATE INDEX IF NOT EXISTS idx_position_created_at ON %[1]s (created_at)
+	`, qualifiedTable)
+	_, err = sqlDB.Exec(createIndexesSQL)
 	require.NoError(t, err, "Failed to create position indexes")
 
 	// NOTE: CockroachDB has limited trigger support. Append-only enforcement
@@ -126,12 +129,12 @@ func applyPositionKeepingSchema(t *testing.T, db *gorm.DB, schemaName string) {
 // ============================================================================
 
 // insertPosition inserts a position record directly via SQL.
-// Returns the position UUID.
-func insertPosition(t *testing.T, db *gorm.DB, ctx context.Context, accountID, instrumentCode, bucketKey string, amount decimal.Decimal, dimension string) uuid.UUID {
-	t.Helper()
-
+// Returns the position UUID and error. Safe for concurrent use in goroutines.
+func insertPosition(ctx context.Context, db *gorm.DB, accountID, instrumentCode, bucketKey string, amount decimal.Decimal, dimension string) (uuid.UUID, error) {
 	tenantID, ok := tenant.FromContext(ctx)
-	require.True(t, ok, "Tenant ID not found in context")
+	if !ok {
+		return uuid.Nil, fmt.Errorf("tenant ID not found in context")
+	}
 	schemaName := tenantID.SchemaName()
 
 	id := uuid.New()
@@ -144,12 +147,16 @@ func insertPosition(t *testing.T, db *gorm.DB, ctx context.Context, accountID, i
 	)
 
 	sqlDB, err := db.DB()
-	require.NoError(t, err)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to get sql.DB: %w", err)
+	}
 
-	_, err = sqlDB.Exec(query, id, accountID, instrumentCode, bucketKey, amount, dimension)
-	require.NoError(t, err, "Failed to insert position")
+	_, err = sqlDB.ExecContext(ctx, query, id, accountID, instrumentCode, bucketKey, amount, dimension)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to insert position: %w", err)
+	}
 
-	return id
+	return id, nil
 }
 
 // getAggregatedBalance retrieves the aggregated balance for an account, instrument, and bucket.
@@ -237,7 +244,8 @@ func TestPositionAggregation_E2E(t *testing.T) {
 		expectedTotal := decimal.Zero
 		for _, amt := range amounts {
 			amountDec := decimal.NewFromFloat(amt)
-			insertPosition(t, db, ctx, accountID, instrumentCode, bucketKey, amountDec, "Monetary")
+			_, err := insertPosition(ctx, db, accountID, instrumentCode, bucketKey, amountDec, "Monetary")
+			require.NoError(t, err)
 			expectedTotal = expectedTotal.Add(amountDec)
 		}
 
@@ -258,9 +266,12 @@ func TestPositionAggregation_E2E(t *testing.T) {
 
 	t.Run("Aggregation with positive and negative amounts", func(t *testing.T) {
 		accountID2 := "ACC-002"
-		insertPosition(t, db, ctx, accountID2, "USD", "CURRENT", decimal.NewFromInt(5000), "Monetary")
-		insertPosition(t, db, ctx, accountID2, "USD", "CURRENT", decimal.NewFromInt(-3000), "Monetary")
-		insertPosition(t, db, ctx, accountID2, "USD", "CURRENT", decimal.NewFromInt(2000), "Monetary")
+		_, err := insertPosition(ctx, db, accountID2, "USD", "CURRENT", decimal.NewFromInt(5000), "Monetary")
+		require.NoError(t, err)
+		_, err = insertPosition(ctx, db, accountID2, "USD", "CURRENT", decimal.NewFromInt(-3000), "Monetary")
+		require.NoError(t, err)
+		_, err = insertPosition(ctx, db, accountID2, "USD", "CURRENT", decimal.NewFromInt(2000), "Monetary")
+		require.NoError(t, err)
 
 		balance := getAggregatedBalance(t, db, ctx, accountID2, "USD", "CURRENT")
 		expected := decimal.NewFromInt(4000)
@@ -269,8 +280,10 @@ func TestPositionAggregation_E2E(t *testing.T) {
 
 	t.Run("Aggregation handles zero amounts", func(t *testing.T) {
 		accountID3 := "ACC-003"
-		insertPosition(t, db, ctx, accountID3, "EUR", "CURRENT", decimal.Zero, "Monetary")
-		insertPosition(t, db, ctx, accountID3, "EUR", "CURRENT", decimal.NewFromInt(100), "Monetary")
+		_, err := insertPosition(ctx, db, accountID3, "EUR", "CURRENT", decimal.Zero, "Monetary")
+		require.NoError(t, err)
+		_, err = insertPosition(ctx, db, accountID3, "EUR", "CURRENT", decimal.NewFromInt(100), "Monetary")
+		require.NoError(t, err)
 
 		balance := getAggregatedBalance(t, db, ctx, accountID3, "EUR", "CURRENT")
 		expected := decimal.NewFromInt(100)
@@ -283,7 +296,8 @@ func TestPositionAggregation_E2E(t *testing.T) {
 		// Insert 1000 positions
 		for i := 0; i < 1000; i++ {
 			amount := decimal.NewFromFloat(float64(i) * 10.5)
-			insertPosition(t, db, ctx, perfAccountID, "GBP", "CURRENT", amount, "Monetary")
+			_, err := insertPosition(ctx, db, perfAccountID, "GBP", "CURRENT", amount, "Monetary")
+			require.NoError(t, err)
 		}
 
 		// Measure aggregation time
@@ -318,11 +332,16 @@ func TestSoftDeletion_E2E(t *testing.T) {
 
 	t.Run("Soft-deleted positions excluded from aggregation", func(t *testing.T) {
 		// Insert 5 positions
-		pos1 := insertPosition(t, db, ctx, accountID, instrumentCode, bucketKey, decimal.NewFromInt(1000), "Monetary")
-		pos2 := insertPosition(t, db, ctx, accountID, instrumentCode, bucketKey, decimal.NewFromInt(2000), "Monetary")
-		insertPosition(t, db, ctx, accountID, instrumentCode, bucketKey, decimal.NewFromInt(3000), "Monetary")
-		insertPosition(t, db, ctx, accountID, instrumentCode, bucketKey, decimal.NewFromInt(4000), "Monetary")
-		insertPosition(t, db, ctx, accountID, instrumentCode, bucketKey, decimal.NewFromInt(5000), "Monetary")
+		pos1, err := insertPosition(ctx, db, accountID, instrumentCode, bucketKey, decimal.NewFromInt(1000), "Monetary")
+		require.NoError(t, err)
+		pos2, err := insertPosition(ctx, db, accountID, instrumentCode, bucketKey, decimal.NewFromInt(2000), "Monetary")
+		require.NoError(t, err)
+		_, err = insertPosition(ctx, db, accountID, instrumentCode, bucketKey, decimal.NewFromInt(3000), "Monetary")
+		require.NoError(t, err)
+		_, err = insertPosition(ctx, db, accountID, instrumentCode, bucketKey, decimal.NewFromInt(4000), "Monetary")
+		require.NoError(t, err)
+		_, err = insertPosition(ctx, db, accountID, instrumentCode, bucketKey, decimal.NewFromInt(5000), "Monetary")
+		require.NoError(t, err)
 
 		// Soft-delete 2 positions (1000 + 2000 = 3000)
 		softDeletePosition(t, db, ctx, pos1)
@@ -330,7 +349,7 @@ func TestSoftDeletion_E2E(t *testing.T) {
 
 		// Use await to ensure consistency
 		var balance decimal.Decimal
-		err := await.New().
+		err = await.New().
 			AtMost(3 * time.Second).
 			PollInterval(50 * time.Millisecond).
 			Until(func() bool {
@@ -372,7 +391,8 @@ func TestAppendOnly_E2E(t *testing.T) {
 
 	t.Run("Document append-only pattern for position table", func(t *testing.T) {
 		// Insert a position
-		posID := insertPosition(t, db, ctx, accountID, instrumentCode, bucketKey, decimal.NewFromInt(5000), "Monetary")
+		posID, err := insertPosition(ctx, db, accountID, instrumentCode, bucketKey, decimal.NewFromInt(5000), "Monetary")
+		require.NoError(t, err)
 
 		// Verify position was created
 		tenantID, _ := tenant.FromContext(ctx)
@@ -380,7 +400,7 @@ func TestAppendOnly_E2E(t *testing.T) {
 
 		query := fmt.Sprintf(`SELECT COUNT(*) FROM %s.position WHERE id = ?`, pq.QuoteIdentifier(schemaName))
 		var count int64
-		err := db.Raw(query, posID).Scan(&count).Error
+		err = db.Raw(query, posID).Scan(&count).Error
 		require.NoError(t, err)
 		assert.Equal(t, int64(1), count, "Position should exist")
 
@@ -393,7 +413,8 @@ func TestAppendOnly_E2E(t *testing.T) {
 	})
 
 	t.Run("Soft-delete via deleted_at is allowed", func(t *testing.T) {
-		posID := insertPosition(t, db, ctx, accountID, instrumentCode, bucketKey, decimal.NewFromInt(3000), "Monetary")
+		posID, err := insertPosition(ctx, db, accountID, instrumentCode, bucketKey, decimal.NewFromInt(3000), "Monetary")
+		require.NoError(t, err)
 
 		// Soft-delete should succeed (deleted_at is NOT immutable)
 		require.NotPanics(t, func() {
@@ -406,7 +427,7 @@ func TestAppendOnly_E2E(t *testing.T) {
 
 		query := fmt.Sprintf(`SELECT deleted_at FROM %s.position WHERE id = ?`, pq.QuoteIdentifier(schemaName))
 		var deletedAt *time.Time
-		err := db.Raw(query, posID).Scan(&deletedAt).Error
+		err = db.Raw(query, posID).Scan(&deletedAt).Error
 		require.NoError(t, err)
 		assert.NotNil(t, deletedAt, "deleted_at should be set")
 	})
@@ -416,11 +437,13 @@ func TestAppendOnly_E2E(t *testing.T) {
 		// not modifying existing ones
 		// Use a unique bucket key to avoid interference from earlier test cases
 		uniqueBucket := "APPEND_ONLY_TEST"
-		pos1 := insertPosition(t, db, ctx, accountID, instrumentCode, uniqueBucket, decimal.NewFromInt(1000), "Monetary")
+		pos1, err := insertPosition(ctx, db, accountID, instrumentCode, uniqueBucket, decimal.NewFromInt(1000), "Monetary")
+		require.NoError(t, err)
 		softDeletePosition(t, db, ctx, pos1)
 
 		// Insert correction entry
-		pos2 := insertPosition(t, db, ctx, accountID, instrumentCode, uniqueBucket, decimal.NewFromInt(1500), "Monetary")
+		pos2, err := insertPosition(ctx, db, accountID, instrumentCode, uniqueBucket, decimal.NewFromInt(1500), "Monetary")
+		require.NoError(t, err)
 
 		// Verify both positions exist, but only pos2 is active
 		balance := getAggregatedBalance(t, db, ctx, accountID, instrumentCode, uniqueBucket)
@@ -477,7 +500,11 @@ func TestHighFrequencyInserts_E2E(t *testing.T) {
 					insertCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 					defer cancel()
 
-					posID := insertPosition(t, db, insertCtx, accountID, instrumentCode, bucketKey, amount, "Monetary")
+					posID, err := insertPosition(insertCtx, db, accountID, instrumentCode, bucketKey, amount, "Monetary")
+					if err != nil {
+						errChan <- fmt.Errorf("worker %d insert %d failed: %w", workerID, i, err)
+						return
+					}
 					insertedIDs <- posID
 				}
 			}()
@@ -553,13 +580,18 @@ func TestBucketIsolation_E2E(t *testing.T) {
 
 	t.Run("Different buckets have isolated balances", func(t *testing.T) {
 		// Insert positions in different buckets
-		insertPosition(t, db, ctx, accountID, instrumentCode, "PEAK", decimal.NewFromFloat(500.5), "Energy")
-		insertPosition(t, db, ctx, accountID, instrumentCode, "PEAK", decimal.NewFromFloat(250.25), "Energy")
+		_, err := insertPosition(ctx, db, accountID, instrumentCode, "PEAK", decimal.NewFromFloat(500.5), "Energy")
+		require.NoError(t, err)
+		_, err = insertPosition(ctx, db, accountID, instrumentCode, "PEAK", decimal.NewFromFloat(250.25), "Energy")
+		require.NoError(t, err)
 
-		insertPosition(t, db, ctx, accountID, instrumentCode, "OFF_PEAK", decimal.NewFromFloat(1000.0), "Energy")
-		insertPosition(t, db, ctx, accountID, instrumentCode, "OFF_PEAK", decimal.NewFromFloat(500.0), "Energy")
+		_, err = insertPosition(ctx, db, accountID, instrumentCode, "OFF_PEAK", decimal.NewFromFloat(1000.0), "Energy")
+		require.NoError(t, err)
+		_, err = insertPosition(ctx, db, accountID, instrumentCode, "OFF_PEAK", decimal.NewFromFloat(500.0), "Energy")
+		require.NoError(t, err)
 
-		insertPosition(t, db, ctx, accountID, instrumentCode, "SHOULDER", decimal.NewFromFloat(300.0), "Energy")
+		_, err = insertPosition(ctx, db, accountID, instrumentCode, "SHOULDER", decimal.NewFromFloat(300.0), "Energy")
+		require.NoError(t, err)
 
 		// Query each bucket independently
 		peakBalance := getAggregatedBalance(t, db, ctx, accountID, instrumentCode, "PEAK")
@@ -597,12 +629,16 @@ func TestMultiTenantIsolation_E2E(t *testing.T) {
 
 	t.Run("Tenant A and Tenant B have isolated positions", func(t *testing.T) {
 		// Tenant A creates positions
-		insertPosition(t, db, ctxTenantA, accountID, instrumentCode, bucketKey, decimal.NewFromInt(10000), "Monetary")
-		insertPosition(t, db, ctxTenantA, accountID, instrumentCode, bucketKey, decimal.NewFromInt(5000), "Monetary")
+		_, err := insertPosition(ctxTenantA, db, accountID, instrumentCode, bucketKey, decimal.NewFromInt(10000), "Monetary")
+		require.NoError(t, err)
+		_, err = insertPosition(ctxTenantA, db, accountID, instrumentCode, bucketKey, decimal.NewFromInt(5000), "Monetary")
+		require.NoError(t, err)
 
 		// Tenant B creates positions
-		insertPosition(t, db, ctxTenantB, accountID, instrumentCode, bucketKey, decimal.NewFromInt(20000), "Monetary")
-		insertPosition(t, db, ctxTenantB, accountID, instrumentCode, bucketKey, decimal.NewFromInt(10000), "Monetary")
+		_, err = insertPosition(ctxTenantB, db, accountID, instrumentCode, bucketKey, decimal.NewFromInt(20000), "Monetary")
+		require.NoError(t, err)
+		_, err = insertPosition(ctxTenantB, db, accountID, instrumentCode, bucketKey, decimal.NewFromInt(10000), "Monetary")
+		require.NoError(t, err)
 
 		// Query balances in each tenant context
 		balanceA := getAggregatedBalance(t, db, ctxTenantA, accountID, instrumentCode, bucketKey)
@@ -653,7 +689,8 @@ func TestPerformanceBaselines_E2E(t *testing.T) {
 		// Insert 1000 positions
 		for i := 0; i < 1000; i++ {
 			amount := decimal.NewFromFloat(float64(i) * 1.5)
-			insertPosition(t, db, ctx, accountID, "GBP", "CURRENT", amount, "Monetary")
+			_, err := insertPosition(ctx, db, accountID, "GBP", "CURRENT", amount, "Monetary")
+			require.NoError(t, err)
 		}
 
 		// Measure aggregation time
@@ -670,7 +707,8 @@ func TestPerformanceBaselines_E2E(t *testing.T) {
 
 		// Insert 100 positions and soft-delete 50
 		for i := 0; i < 100; i++ {
-			posID := insertPosition(t, db, ctx, accountID, "EUR", "RESERVED", decimal.NewFromInt(int64(i*10)), "Monetary")
+			posID, err := insertPosition(ctx, db, accountID, "EUR", "RESERVED", decimal.NewFromInt(int64(i*10)), "Monetary")
+			require.NoError(t, err)
 			if i%2 == 0 {
 				softDeletePosition(t, db, ctx, posID)
 			}
@@ -690,6 +728,7 @@ func TestPerformanceBaselines_E2E(t *testing.T) {
 		const targetThroughput = 1000.0 // inserts/sec
 
 		var wg sync.WaitGroup
+		errChan := make(chan error, numInserts)
 		start := time.Now()
 
 		for i := 0; i < numInserts; i++ {
@@ -699,11 +738,24 @@ func TestPerformanceBaselines_E2E(t *testing.T) {
 				defer wg.Done()
 				accountID := fmt.Sprintf("ACC-PERF-CONC-%d", idx%10)
 				amount := decimal.NewFromInt(int64(idx))
-				insertPosition(t, db, ctx, accountID, "USD", "CURRENT", amount, "Monetary")
+				_, err := insertPosition(ctx, db, accountID, "USD", "CURRENT", amount, "Monetary")
+				if err != nil {
+					errChan <- fmt.Errorf("insert %d failed: %w", idx, err)
+				}
 			}()
 		}
 
 		wg.Wait()
+		close(errChan)
+
+		// Check for errors
+		errorCount := 0
+		for err := range errChan {
+			t.Errorf("Insert error: %v", err)
+			errorCount++
+		}
+		require.Zero(t, errorCount, "All inserts should succeed")
+
 		duration := time.Since(start)
 		throughput := float64(numInserts) / duration.Seconds()
 
@@ -718,7 +770,8 @@ func TestPerformanceBaselines_E2E(t *testing.T) {
 		for i := 0; i < 50; i++ {
 			bucket := fmt.Sprintf("BUCKET-%d", i%10)
 			amount := decimal.NewFromInt(int64(i * 100))
-			insertPosition(t, db, ctx, accountID, "KWH", bucket, amount, "Energy")
+			_, err := insertPosition(ctx, db, accountID, "KWH", bucket, amount, "Energy")
+			require.NoError(t, err)
 		}
 
 		// Measure single bucket query time
