@@ -164,6 +164,7 @@ func run(logger *slog.Logger) error {
 
 	// Create position-keeping client for Starlark handlers.
 	// Note: payment-order needs position-keeping for payment execution sagas.
+	// This is optional during migration - service can start without it until Starlark is active.
 	posKeepingClient, posKeepingCleanup, err := positionkeepingclient.New(positionkeepingclient.Config{
 		ServiceName: positionkeepingclient.ServiceName,
 		Namespace:   namespace,
@@ -173,9 +174,12 @@ func run(logger *slog.Logger) error {
 		// No circuit breaker for saga handlers - saga has its own retry logic
 	})
 	if err != nil {
-		return fmt.Errorf("failed to create position-keeping client: %w", err)
+		// Downgrade to warning - Starlark runtime isn't wired yet, service can operate without handlers
+		logger.Warn("position-keeping client unavailable, Starlark handlers not registered",
+			"error", err)
+	} else {
+		defer posKeepingCleanup()
 	}
-	defer posKeepingCleanup()
 
 	// Register handlers from service clients.
 	// Each RegisterStarlarkHandlers function adapts Starlark params (map[string]any)
@@ -184,9 +188,12 @@ func run(logger *slog.Logger) error {
 	// Note: Type assertions are required because the createXxxClient functions return
 	// interface types (service.XxxClient) but RegisterStarlarkHandlers needs the
 	// concrete *Client type to access the gRPC connection.
+	//
+	// Handler registration failures are warnings (not errors) since Starlark runner
+	// isn't wired yet - service can operate without handlers during migration.
 	if caClient, ok := currentAccountClient.(*currentaccountclient.Client); ok {
 		if err := currentaccountclient.RegisterStarlarkHandlers(handlerRegistry, caClient); err != nil {
-			return fmt.Errorf("failed to register current-account handlers: %w", err)
+			logger.Warn("failed to register current-account handlers", "error", err)
 		}
 	} else {
 		logger.Warn("current-account client type assertion failed, Starlark handlers not registered")
@@ -194,14 +201,16 @@ func run(logger *slog.Logger) error {
 
 	if faClient, ok := financialAccountingClient.(*financialaccountingclient.Client); ok {
 		if err := financialaccountingclient.RegisterStarlarkHandlers(handlerRegistry, faClient); err != nil {
-			return fmt.Errorf("failed to register financial-accounting handlers: %w", err)
+			logger.Warn("failed to register financial-accounting handlers", "error", err)
 		}
 	} else {
 		logger.Warn("financial-accounting client type assertion failed, Starlark handlers not registered")
 	}
 
-	if err := positionkeepingclient.RegisterStarlarkHandlers(handlerRegistry, posKeepingClient); err != nil {
-		return fmt.Errorf("failed to register position-keeping handlers: %w", err)
+	if posKeepingClient != nil {
+		if err := positionkeepingclient.RegisterStarlarkHandlers(handlerRegistry, posKeepingClient); err != nil {
+			logger.Warn("failed to register position-keeping handlers", "error", err)
+		}
 	}
 
 	logger.Info("Starlark handler registry initialized",
