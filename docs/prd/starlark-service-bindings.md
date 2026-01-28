@@ -736,6 +736,172 @@ Migrate in dependency order (dependencies first):
 | **Dependency injection complexity** | Medium | Medium | Use constructor injection pattern, document clearly |
 | **Test environment setup overhead** | Low | Medium | Create reusable test helpers, share across services |
 | **Incomplete e2e coverage** | Medium | Medium | Define minimum coverage requirements upfront |
+| **Distributed causation loops** | High | Low | Defer to dedicated PRD (see Future Work below) |
+
+## Future Work: Distributed Causation Loop Prevention
+
+### The Problem
+
+Once handlers call real services, a new distributed systems risk emerges: **Causation Loops**
+(also called "Distributed Recursion" or "Event Chain Amplification").
+
+**Scenario:**
+
+1. KWH position created → triggers Settlement Saga
+2. Settlement Saga creates a new KWH position (e.g., a "reward" or "split")
+3. New KWH position → triggers another Settlement Saga
+4. Loop continues indefinitely across the cluster
+
+**Why This Is Critical:**
+
+- **Not protected by Starlark CPU limits** - Each individual saga execution is bounded,
+  but the CHAIN across the cluster is unbounded
+- **Asset Inflation Risk** - Can create infinite kWh/tokens from nothing
+- **Cluster Resource Exhaustion** - Fan-out can overwhelm Kafka, databases, all services
+- **Different from local recursion** - This is a distributed problem across service boundaries
+
+### Example Attack Vector
+
+```starlark
+# Tenant registers this saga for KWH settlement
+def settlement_saga(input_data):
+    # Legitimate: Convert kWh to monetary position
+    financial_accounting.post_entries(...)
+
+    # DANGEROUS: Create a "bonus" kWh position (maybe for loyalty rewards)
+    position_keeping.initiate_log(
+        instrument="KWH",  # Same type that triggered this saga!
+        amount=input_data["amount"] * 0.01,  # 1% bonus
+        direction="CREDIT",
+    )
+```
+
+**Result**: Each settlement creates 1% more KWH, which triggers another settlement,
+creating infinite kWh.
+
+### Proposed Solution: Multi-Layer Protection
+
+This deserves a **dedicated PRD**, but the outline is:
+
+#### 1. Causation Depth Header (Distributed TTL)
+
+Like IP packet TTL, every transaction carries `causation_depth` in metadata:
+
+```yaml
+kafka_headers:
+  causation_depth: 3      # Incremented on each saga invocation
+  causation_path:         # Ancestry chain
+    - saga-id-1
+    - saga-id-2
+    - saga-id-3
+  max_depth: 5            # Configured per tenant/environment
+```
+
+**Enforcement:**
+
+- Saga runtime increments depth before invoking child sagas
+- Services reject requests with `depth > max_depth`
+- Logged as "CAUSATION_LOOP_PREVENTED" for monitoring
+
+#### 2. Conservation of Dimension Rule (One-Way Valve)
+
+Categorize handlers in the Step Registry:
+
+| Handler Category | Can Call | Cannot Call |
+|------------------|----------|-------------|
+| **Ingestion** | Position Keeping, Reference Data | Financial Accounting |
+| **Settlement** | Financial Accounting, Payment Order | Position Keeping (Physics) |
+| **Valuation** | Market Information, Read-only queries | Any writes |
+
+**Enforcement**: Settlement sagas can move value from Physics → Money,
+but are **forbidden** from creating new Physics positions.
+
+This breaks the loop at the type level.
+
+#### 3. Cycle Detection via Causation Lineage
+
+Leverage existing `causation_id` / `superseded_by` lineage:
+
+```go
+// Before creating a position, check ancestry
+func (s *PositionKeepingService) InitiateLog(ctx context.Context, req *pb.InitiateLogRequest) error {
+    causationPath := ctx.Value("causation_path").([]uuid.UUID)
+    accountInstrumentKey := fmt.Sprintf("%s:%s", req.AccountId, req.Instrument)
+
+    // Has this account/instrument combo already appeared in this transaction's ancestry?
+    if containsKey(causationPath, accountInstrumentKey) {
+        return status.Errorf(codes.FailedPrecondition,
+            "CAUSATION_LOOP_DETECTED: %s already in ancestry", accountInstrumentKey)
+    }
+
+    // Proceed with log creation...
+}
+```
+
+#### 4. Semantic Linter (Registration-Time Check)
+
+When a tenant registers a Starlark saga:
+
+```go
+// Linter rule: Check if saga outputs same asset type that triggers it
+func lintRecursiveAsset(script *starlark.Script, triggerInstrument string) error {
+    outputInstruments := extractOutputInstruments(script)
+
+    if contains(outputInstruments, triggerInstrument) {
+        return fmt.Errorf(
+            "RECURSIVE_ASSET_WARNING: Saga triggered by %s produces %s. "+
+            "This may cause infinite loops. Requires explicit authorization.",
+            triggerInstrument, triggerInstrument)
+    }
+    return nil
+}
+```
+
+Reject registration unless tenant provides `recursive_authorization: true` with justification.
+
+#### 5. Protection Layer Summary
+
+| Layer | Component | Check |
+|-------|-----------|-------|
+| **Network** | Kafka/gRPC headers | `causation_depth > max_depth` → Reject |
+| **Service** | Step Registry | Settlement sagas cannot invoke Position Keeping |
+| **Runtime** | Lineage tracker | `account:instrument` in ancestry → Cycle detected |
+| **Governance** | Starlark linter | Script outputs same type as trigger → Require authorization |
+
+### Why This Is Separate Work
+
+1. **Architectural Scope** - Requires changes to:
+   - Event infrastructure (Kafka headers)
+   - Saga runtime (depth tracking)
+   - Service interceptors (depth enforcement)
+   - Lineage system (cycle detection)
+   - Linter (registration-time checks)
+
+2. **Story Point Estimate** - 8-13 points across multiple services
+
+3. **Implementation Order**:
+   - **This PRD**: Make handlers work (foundation)
+   - **Future PRD**: Add causation loop protection (safety layer)
+
+4. **Independent Value**:
+   - Real handlers are valuable without loop prevention
+   - Loop prevention is needed regardless of handler implementation location
+
+### Recommendation
+
+Create a dedicated **"Saga Causation Safety"** PRD that:
+
+- Defines causation loop risk with concrete examples
+- Proposes multi-layer protection strategy (depth, dimension, lineage, linter)
+- Integrates with existing event/lineage infrastructure
+- Provides implementation plan and test strategy
+- References this PRD as the foundation that makes the risk concrete
+
+### Related Work
+
+- **Distributed Tracing**: OpenTelemetry already tracks span depth for similar reasons
+- **Circuit Breakers**: Similar philosophy (bound cascading failures)
+- **BIAN Integrity**: Financial systems must prevent value creation from loops
 
 ## Dependencies
 
