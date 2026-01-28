@@ -3,6 +3,7 @@ package saga
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"testing"
@@ -688,5 +689,134 @@ func TestRequireDirectionParam(t *testing.T) {
 		_, err := RequireDirectionParam(params, "direction")
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrInvalidParamType)
+	})
+}
+
+func TestStarlarkContext_IdempotencyKey(t *testing.T) {
+	t.Run("struct has IdempotencyKey field", func(t *testing.T) {
+		ctx := &StarlarkContext{
+			Context:         context.Background(),
+			SagaExecutionID: uuid.New(),
+			IdempotencyKey:  "saga_abc123_step_5",
+			Logger:          slog.Default(),
+		}
+
+		assert.Equal(t, "saga_abc123_step_5", ctx.IdempotencyKey, "should store idempotency key")
+	})
+
+	t.Run("can be empty", func(t *testing.T) {
+		ctx := &StarlarkContext{
+			Context:         context.Background(),
+			SagaExecutionID: uuid.New(),
+			Logger:          slog.Default(),
+		}
+
+		assert.Empty(t, ctx.IdempotencyKey, "idempotency key should default to empty")
+	})
+
+	t.Run("follows saga key format", func(t *testing.T) {
+		executionID := uuid.New()
+		expectedKey := "saga_" + executionID.String() + "_step_3"
+
+		ctx := &StarlarkContext{
+			Context:         context.Background(),
+			SagaExecutionID: executionID,
+			IdempotencyKey:  expectedKey,
+			Logger:          slog.Default(),
+		}
+
+		assert.Contains(t, ctx.IdempotencyKey, "saga_", "should contain saga prefix")
+		assert.Contains(t, ctx.IdempotencyKey, executionID.String(), "should contain execution ID")
+		assert.Contains(t, ctx.IdempotencyKey, "step_", "should contain step marker")
+		assert.Contains(t, ctx.IdempotencyKey, "3", "should contain step index")
+	})
+}
+
+func TestStarlarkContext_NextIdempotencyKey(t *testing.T) {
+	t.Run("generates sequential keys", func(t *testing.T) {
+		executionID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+		ctx := &StarlarkContext{
+			Context:         context.Background(),
+			SagaExecutionID: executionID,
+			Logger:          slog.Default(),
+		}
+
+		key1 := ctx.NextIdempotencyKey()
+		key2 := ctx.NextIdempotencyKey()
+		key3 := ctx.NextIdempotencyKey()
+
+		assert.Equal(t, "saga_11111111-1111-1111-1111-111111111111_step_1", key1)
+		assert.Equal(t, "saga_11111111-1111-1111-1111-111111111111_step_2", key2)
+		assert.Equal(t, "saga_11111111-1111-1111-1111-111111111111_step_3", key3)
+	})
+
+	t.Run("is thread-safe", func(t *testing.T) {
+		executionID := uuid.New()
+		ctx := &StarlarkContext{
+			Context:         context.Background(),
+			SagaExecutionID: executionID,
+			Logger:          slog.Default(),
+		}
+
+		// Generate keys concurrently
+		const goroutines = 10
+		const keysPerGoroutine = 10
+		keys := make([]string, goroutines*keysPerGoroutine)
+		var wg sync.WaitGroup
+
+		for i := 0; i < goroutines; i++ {
+			wg.Add(1)
+			go func(offset int) {
+				defer wg.Done()
+				for j := 0; j < keysPerGoroutine; j++ {
+					keys[offset*keysPerGoroutine+j] = ctx.NextIdempotencyKey()
+				}
+			}(i)
+		}
+
+		wg.Wait()
+
+		// All keys should be unique
+		keySet := make(map[string]bool)
+		for _, key := range keys {
+			require.False(t, keySet[key], "duplicate key generated: %s", key)
+			keySet[key] = true
+		}
+
+		// Should have exactly the expected number of unique keys
+		assert.Len(t, keySet, goroutines*keysPerGoroutine, "should generate unique keys")
+
+		// Final counter should equal the number of keys generated
+		finalKey := ctx.NextIdempotencyKey()
+		expectedStep := goroutines*keysPerGoroutine + 1
+		assert.Contains(t, finalKey, fmt.Sprintf("_step_%d", expectedStep), "counter should be accurate")
+	})
+
+	t.Run("deterministic for same execution ID", func(t *testing.T) {
+		executionID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+
+		// Create two contexts with same execution ID
+		ctx1 := &StarlarkContext{
+			Context:         context.Background(),
+			SagaExecutionID: executionID,
+			Logger:          slog.Default(),
+		}
+
+		ctx2 := &StarlarkContext{
+			Context:         context.Background(),
+			SagaExecutionID: executionID,
+			Logger:          slog.Default(),
+		}
+
+		// Generate keys in same order
+		key1_1 := ctx1.NextIdempotencyKey()
+		key1_2 := ctx1.NextIdempotencyKey()
+
+		key2_1 := ctx2.NextIdempotencyKey()
+		key2_2 := ctx2.NextIdempotencyKey()
+
+		// Keys should match for same step number in replay scenario
+		assert.Equal(t, key1_1, key2_1, "first step should generate same key")
+		assert.Equal(t, key1_2, key2_2, "second step should generate same key")
 	})
 }
