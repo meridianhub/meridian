@@ -41,6 +41,12 @@ var (
 	ErrPartyScopeViolation = errors.New("party scope violation: party_id not in visible_parties")
 )
 
+// Direction constants for transaction operations.
+const (
+	DirectionDebit  = "DEBIT"
+	DirectionCredit = "CREDIT"
+)
+
 // DomainHandler is the function signature for domain-specific saga step handlers.
 // These handlers receive a rich StarlarkContext for platform features (PartyScope,
 // deterministic UUIDs, progress emission, suspension) and return typed results.
@@ -287,11 +293,16 @@ func registerDefaultHandlers(r *DomainHandlerRegistry) {
 	_ = r.Register("financial_accounting.post_entries", financialAccountingPostEntries)
 	_ = r.Register("financial_accounting.reverse_entries", financialAccountingReverseEntries)
 	_ = r.Register("financial_accounting.create_booking", financialAccountingCreateBooking)
+	_ = r.Register("financial_accounting.initiate_booking_log", financialAccountingInitiateBookingLog)
+	_ = r.Register("financial_accounting.capture_posting", financialAccountingCapturePosting)
+	_ = r.Register("financial_accounting.compensate_posting", financialAccountingCompensatePosting)
+	_ = r.Register("financial_accounting.update_booking_log", financialAccountingUpdateBookingLog)
 
 	// Current Account handlers
 	_ = r.Register("current_account.create_lien", currentAccountCreateLien)
 	_ = r.Register("current_account.execute_lien", currentAccountExecuteLien)
 	_ = r.Register("current_account.terminate_lien", currentAccountTerminateLien)
+	_ = r.Register("current_account.save", currentAccountSave)
 
 	// Valuation Engine handler
 	_ = r.Register("valuation_engine.valuate", valuationEngineValuate)
@@ -301,6 +312,13 @@ func registerDefaultHandlers(r *DomainHandlerRegistry) {
 
 	// Notification handler
 	_ = r.Register("notification.send", notificationSend)
+
+	// Payment Order handlers
+	_ = r.Register("payment_order.create_lien", paymentOrderCreateLien)
+	_ = r.Register("payment_order.terminate_lien", paymentOrderTerminateLien)
+	_ = r.Register("payment_order.send_to_gateway", paymentOrderSendToGateway)
+	_ = r.Register("payment_order.post_ledger_entries", paymentOrderPostLedgerEntries)
+	_ = r.Register("payment_order.execute_lien", paymentOrderExecuteLien)
 }
 
 // Helper functions for parameter validation
@@ -342,6 +360,59 @@ func requireDecimalParam(params map[string]any, key string) (decimal.Decimal, er
 	}
 }
 
+func requireInt64Param(params map[string]any, key string) (int64, error) {
+	val, ok := params[key]
+	if !ok {
+		return 0, fmt.Errorf("%w: %s", ErrMissingParam, key)
+	}
+	switch v := val.(type) {
+	case int64:
+		return v, nil
+	case int:
+		return int64(v), nil
+	case float64:
+		if v != float64(int64(v)) {
+			return 0, fmt.Errorf("%w: %s must be a whole number, got %v", ErrInvalidParamType, key, v)
+		}
+		return int64(v), nil
+	case string:
+		d, err := decimal.NewFromString(v)
+		if err != nil {
+			return 0, fmt.Errorf("%w: %s must be int64, got invalid string", ErrInvalidParamType, key)
+		}
+		if !d.Equal(d.Truncate(0)) {
+			return 0, fmt.Errorf("%w: %s must be a whole number, got %s", ErrInvalidParamType, key, v)
+		}
+		return d.IntPart(), nil
+	default:
+		return 0, fmt.Errorf("%w: %s must be int64, got %T", ErrInvalidParamType, key, val)
+	}
+}
+
+func optionalStringParam(params map[string]any, key string, defaultVal string) string {
+	val, ok := params[key]
+	if !ok {
+		return defaultVal
+	}
+	str, ok := val.(string)
+	if !ok {
+		return defaultVal
+	}
+	return str
+}
+
+func optionalBoolParam(params map[string]any, key string, defaultVal bool) bool {
+	val, ok := params[key]
+	if !ok {
+		return defaultVal
+	}
+	b, ok := val.(bool)
+	if !ok {
+		return defaultVal
+	}
+	return b
+}
+
 func wrapHandlerError(handlerName string, err error) error {
 	return fmt.Errorf("%s: %w", handlerName, err)
 }
@@ -351,9 +422,16 @@ func wrapHandlerError(handlerName string, err error) error {
 func positionKeepingInitiateLog(ctx *StarlarkContext, params map[string]any) (any, error) {
 	const handlerName = "position_keeping.initiate_log"
 
+	// Accept either "position_id" or "account_id" as the position identifier.
+	// The deposit/withdrawal .star scripts pass "account_id" while the canonical
+	// parameter name is "position_id".
 	positionID, err := requireStringParam(params, "position_id")
 	if err != nil {
-		return nil, wrapHandlerError(handlerName, err)
+		// Fall back to account_id if position_id is missing
+		positionID, err = requireStringParam(params, "account_id")
+		if err != nil {
+			return nil, wrapHandlerError(handlerName, fmt.Errorf("%w: position_id (or account_id)", ErrMissingParam))
+		}
 	}
 
 	amount, err := requireDecimalParam(params, "amount")
@@ -367,7 +445,7 @@ func positionKeepingInitiateLog(ctx *StarlarkContext, params map[string]any) (an
 	}
 
 	// Validate direction
-	if direction != "DEBIT" && direction != "CREDIT" {
+	if direction != DirectionDebit && direction != DirectionCredit {
 		return nil, wrapHandlerError(handlerName, fmt.Errorf("%w: got %s", ErrInvalidDirection, direction))
 	}
 
@@ -498,6 +576,186 @@ func financialAccountingCreateBooking(ctx *StarlarkContext, params map[string]an
 	}, nil
 }
 
+func financialAccountingInitiateBookingLog(ctx *StarlarkContext, params map[string]any) (any, error) {
+	const handlerName = "financial_accounting.initiate_booking_log"
+
+	accountID, err := requireStringParam(params, "account_id")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	currency, err := requireStringParam(params, "currency")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	transactionID, err := requireStringParam(params, "transaction_id")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	transactionType, err := requireStringParam(params, "transaction_type")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	ctx.Logger.Info("initiating booking log",
+		"saga_execution_id", ctx.SagaExecutionID,
+		"account_id", accountID,
+		"currency", currency,
+		"transaction_id", transactionID,
+		"transaction_type", transactionType,
+	)
+
+	return map[string]any{
+		"booking_log_id": ctx.NewUUID(ctx.SagaExecutionID, "booking_log_"+transactionID).String(),
+		"status":         "INITIATED",
+	}, nil
+}
+
+func financialAccountingCapturePosting(ctx *StarlarkContext, params map[string]any) (any, error) {
+	const handlerName = "financial_accounting.capture_posting"
+
+	bookingLogID, err := requireStringParam(params, "booking_log_id")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	accountID, err := requireStringParam(params, "account_id")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	amount, err := requireDecimalParam(params, "amount")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	currency, err := requireStringParam(params, "currency")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	direction, err := requireStringParam(params, "direction")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	if direction != DirectionDebit && direction != DirectionCredit {
+		return nil, wrapHandlerError(handlerName, fmt.Errorf("%w: got %s", ErrInvalidDirection, direction))
+	}
+
+	transactionID, err := requireStringParam(params, "transaction_id")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	postingType, err := requireStringParam(params, "posting_type")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	ctx.Logger.Info("capturing posting",
+		"saga_execution_id", ctx.SagaExecutionID,
+		"booking_log_id", bookingLogID,
+		"account_id", accountID,
+		"amount", amount.String(),
+		"currency", currency,
+		"direction", direction,
+		"transaction_id", transactionID,
+		"posting_type", postingType,
+	)
+
+	return map[string]any{
+		"posting_id": ctx.NewUUID(ctx.SagaExecutionID, "posting_"+transactionID+"_"+postingType).String(),
+		"status":     "CAPTURED",
+	}, nil
+}
+
+func financialAccountingCompensatePosting(ctx *StarlarkContext, params map[string]any) (any, error) {
+	const handlerName = "financial_accounting.compensate_posting"
+
+	bookingLogID, err := requireStringParam(params, "booking_log_id")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	accountID, err := requireStringParam(params, "account_id")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	amount, err := requireDecimalParam(params, "amount")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	currency, err := requireStringParam(params, "currency")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	direction, err := requireStringParam(params, "direction")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	if direction != DirectionDebit && direction != DirectionCredit {
+		return nil, wrapHandlerError(handlerName, fmt.Errorf("%w: got %s", ErrInvalidDirection, direction))
+	}
+
+	transactionID, err := requireStringParam(params, "transaction_id")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	postingType, err := requireStringParam(params, "posting_type")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	ctx.Logger.Info("compensating posting",
+		"saga_execution_id", ctx.SagaExecutionID,
+		"booking_log_id", bookingLogID,
+		"account_id", accountID,
+		"amount", amount.String(),
+		"currency", currency,
+		"direction", direction,
+		"transaction_id", transactionID,
+		"posting_type", postingType,
+	)
+
+	return map[string]any{
+		"posting_id": ctx.NewUUID(ctx.SagaExecutionID, "compensate_posting_"+transactionID+"_"+postingType).String(),
+		"status":     "COMPENSATED",
+	}, nil
+}
+
+func financialAccountingUpdateBookingLog(ctx *StarlarkContext, params map[string]any) (any, error) {
+	const handlerName = "financial_accounting.update_booking_log"
+
+	bookingLogID, err := requireStringParam(params, "booking_log_id")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	status, err := requireStringParam(params, "status")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	ctx.Logger.Info("updating booking log",
+		"saga_execution_id", ctx.SagaExecutionID,
+		"booking_log_id", bookingLogID,
+		"status", status,
+	)
+
+	return map[string]any{
+		"booking_log_id": bookingLogID,
+		"status":         status,
+	}, nil
+}
+
 // Current Account handlers
 
 func currentAccountCreateLien(ctx *StarlarkContext, params map[string]any) (any, error) {
@@ -562,6 +820,31 @@ func currentAccountTerminateLien(ctx *StarlarkContext, params map[string]any) (a
 	return map[string]any{
 		"lien_id": lienID,
 		"status":  "TERMINATED",
+	}, nil
+}
+
+func currentAccountSave(ctx *StarlarkContext, params map[string]any) (any, error) {
+	const handlerName = "current_account.save"
+
+	accountID, err := requireStringParam(params, "account_id")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	transactionID, err := requireStringParam(params, "transaction_id")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	ctx.Logger.Info("saving current account",
+		"saga_execution_id", ctx.SagaExecutionID,
+		"account_id", accountID,
+		"transaction_id", transactionID,
+	)
+
+	return map[string]any{
+		"account_id": accountID,
+		"status":     "SAVED",
 	}, nil
 }
 
@@ -665,5 +948,192 @@ func notificationSend(ctx *StarlarkContext, params map[string]any) (any, error) 
 		"type":            notificationType,
 		"recipient":       recipient,
 		"status":          "SENT",
+	}, nil
+}
+
+// Payment Order handlers
+
+func paymentOrderCreateLien(ctx *StarlarkContext, params map[string]any) (any, error) {
+	const handlerName = "payment_order.create_lien"
+
+	accountID, err := requireStringParam(params, "account_id")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	amountCents, err := requireInt64Param(params, "amount_cents")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	currency, err := requireStringParam(params, "currency")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	paymentOrderID, err := requireStringParam(params, "payment_order_id")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	instrumentCode := optionalStringParam(params, "instrument_code", "")
+	_ = instrumentCode // Used for bucket-aware solvency evaluation
+
+	// payment_attributes is optional and may be a map
+	_ = params["payment_attributes"] // Used for CEL bucket expression evaluation
+
+	ctx.Logger.Info("creating payment order lien",
+		"saga_execution_id", ctx.SagaExecutionID,
+		"account_id", accountID,
+		"amount_cents", amountCents,
+		"currency", currency,
+		"payment_order_id", paymentOrderID,
+	)
+
+	return map[string]any{
+		"lien_id":   ctx.NewUUID(ctx.SagaExecutionID, "po_lien_"+paymentOrderID).String(),
+		"bucket_id": ctx.NewUUID(ctx.SagaExecutionID, "bucket_"+accountID).String(),
+		"status":    "ACTIVE",
+	}, nil
+}
+
+func paymentOrderTerminateLien(ctx *StarlarkContext, params map[string]any) (any, error) {
+	const handlerName = "payment_order.terminate_lien"
+
+	lienID, err := requireStringParam(params, "lien_id")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	reason := optionalStringParam(params, "reason", "")
+
+	ctx.Logger.Info("terminating payment order lien",
+		"saga_execution_id", ctx.SagaExecutionID,
+		"lien_id", lienID,
+		"reason", reason,
+	)
+
+	return map[string]any{
+		"lien_id": lienID,
+		"status":  "TERMINATED",
+	}, nil
+}
+
+func paymentOrderSendToGateway(ctx *StarlarkContext, params map[string]any) (any, error) {
+	const handlerName = "payment_order.send_to_gateway"
+
+	paymentOrderID, err := requireStringParam(params, "payment_order_id")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	debtorAccountID, err := requireStringParam(params, "debtor_account_id")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	creditorReference, err := requireStringParam(params, "creditor_reference")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	amountCents, err := requireInt64Param(params, "amount_cents")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	currency, err := requireStringParam(params, "currency")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	idempotencyKey, err := requireStringParam(params, "idempotency_key")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	ctx.Logger.Info("sending payment to gateway",
+		"saga_execution_id", ctx.SagaExecutionID,
+		"payment_order_id", paymentOrderID,
+		"debtor_account_id", debtorAccountID,
+		"creditor_reference", creditorReference,
+		"amount_cents", amountCents,
+		"currency", currency,
+		"idempotency_key", idempotencyKey,
+	)
+
+	return map[string]any{
+		"gateway_reference_id": ctx.NewUUID(ctx.SagaExecutionID, "gw_ref_"+paymentOrderID).String(),
+		"gateway_status":       "ACCEPTED",
+	}, nil
+}
+
+func paymentOrderPostLedgerEntries(ctx *StarlarkContext, params map[string]any) (any, error) {
+	const handlerName = "payment_order.post_ledger_entries"
+
+	paymentOrderID, err := requireStringParam(params, "payment_order_id")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	debtorAccountID, err := requireStringParam(params, "debtor_account_id")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	gatewayReferenceID, err := requireStringParam(params, "gateway_reference_id")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	amountCents, err := requireInt64Param(params, "amount_cents")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	currency, err := requireStringParam(params, "currency")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	idempotencyKey, err := requireStringParam(params, "idempotency_key")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	internalClearingEnabled := optionalBoolParam(params, "internal_clearing_enabled", false)
+
+	ctx.Logger.Info("posting ledger entries for payment order",
+		"saga_execution_id", ctx.SagaExecutionID,
+		"payment_order_id", paymentOrderID,
+		"debtor_account_id", debtorAccountID,
+		"gateway_reference_id", gatewayReferenceID,
+		"amount_cents", amountCents,
+		"currency", currency,
+		"idempotency_key", idempotencyKey,
+		"internal_clearing_enabled", internalClearingEnabled,
+	)
+
+	return map[string]any{
+		"booking_log_id": ctx.NewUUID(ctx.SagaExecutionID, "po_booking_"+paymentOrderID).String(),
+		"status":         "POSTED",
+	}, nil
+}
+
+func paymentOrderExecuteLien(ctx *StarlarkContext, params map[string]any) (any, error) {
+	const handlerName = "payment_order.execute_lien"
+
+	lienID, err := requireStringParam(params, "lien_id")
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	ctx.Logger.Info("executing payment order lien",
+		"saga_execution_id", ctx.SagaExecutionID,
+		"lien_id", lienID,
+	)
+
+	return map[string]any{
+		"execution_status": "EXECUTED",
 	}, nil
 }
