@@ -707,8 +707,30 @@ func (s *Service) ExchangeDemographics(ctx context.Context, req *pb.ExchangeDemo
 		return nil, status.Errorf(codes.Internal, "failed to retrieve party: %v", err)
 	}
 
-	// TODO: Integrate with external verification service (KYC/AML provider)
-	// Currently returns hardcoded "VERIFIED" status for development
+	// Production safety check - prevent stub KYC usage in production
+	if os.Getenv("ENVIRONMENT") == "production" && os.Getenv("KYC_STUB_ENABLED") != "true" {
+		return nil, status.Error(codes.Unimplemented,
+			"KYC/AML verification not implemented - cannot operate in production without external provider integration")
+	}
+
+	// Check if stub KYC is explicitly enabled
+	if os.Getenv("KYC_STUB_ENABLED") == "true" {
+		s.logger.Warn("Using stubbed KYC verification - DEVELOPMENT ONLY",
+			"party_id", req.PartyId,
+			"environment", os.Getenv("ENVIRONMENT"))
+
+		// TODO: Integrate with external KYC/AML provider (Task 5 - Option 2)
+		verificationStatus := "VERIFIED"
+
+		return &pb.ExchangeDemographicsResponse{
+			PartyId:               req.PartyId,
+			VerificationStatus:    verificationStatus,
+			VerificationTimestamp: timestamppb.Now(),
+		}, nil
+	}
+
+	// Default behavior for non-production environments without explicit flag
+	// TODO: Integrate with external KYC/AML provider (Task 5 - Option 2)
 	verificationStatus := "VERIFIED"
 	s.logger.Info("demographics verified", "party_id", req.PartyId)
 

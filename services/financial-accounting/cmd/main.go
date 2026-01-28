@@ -56,6 +56,12 @@ var (
 	ErrBankCashAccountIDInvalid  = errors.New("BANK_CASH_ACCOUNT_ID must be a valid UUID")
 )
 
+// Static errors for production environment requirements
+var (
+	ErrRedisRequiredInProduction = errors.New("redis required for idempotency in production environment")
+	ErrKafkaRequiredInProduction = errors.New("kafka required for event publishing in production environment")
+)
+
 func main() {
 	// Initialize structured logging with configurable log level
 	// Note: bootstrap.NewLogger hardcodes INFO level, so we create logger manually for LOG_LEVEL support
@@ -130,6 +136,7 @@ func run(logger *slog.Logger) error {
 
 	// Initialize Kafka producer for outbox worker (optional - depends on KAFKA_BOOTSTRAP_SERVERS)
 	var kafkaProducer *kafka.ProtoProducer
+	var usingNoopEventPublisher bool
 	bootstrapServers := env.GetEnvOrDefault("KAFKA_BOOTSTRAP_SERVERS", "")
 	if bootstrapServers != "" {
 		producer, err := kafka.NewProtoProducer(kafka.ProducerConfig{
@@ -140,15 +147,32 @@ func run(logger *slog.Logger) error {
 			Compression:      "snappy",
 		})
 		if err != nil {
-			logger.Warn("failed to create Kafka producer for outbox worker",
-				"error", err)
+			// Fail fast in production - Kafka is required for event publishing
+			if env.IsProduction() {
+				logger.Error("CRITICAL: Failed to create Kafka producer in production - failing fast",
+					"error", err)
+				return fmt.Errorf("%w: %w", ErrKafkaRequiredInProduction, err)
+			}
+			logger.Warn("failed to create Kafka producer for outbox worker - DEVELOPMENT ONLY",
+				"error", err,
+				"environment", os.Getenv("ENVIRONMENT"))
+			usingNoopEventPublisher = true
 		} else {
 			kafkaProducer = producer
 			logger.Info("Kafka producer initialized for outbox worker",
 				"bootstrap_servers", bootstrapServers)
 		}
 	} else {
-		logger.Info("outbox worker disabled: KAFKA_BOOTSTRAP_SERVERS not set")
+		// Fail fast in production - Kafka is required for event publishing
+		if env.IsProduction() {
+			logger.Error("CRITICAL: Kafka unavailable in production - failing fast",
+				"reason", "KAFKA_BOOTSTRAP_SERVERS not set")
+			return ErrKafkaRequiredInProduction
+		}
+		logger.Warn("outbox worker disabled - DEVELOPMENT ONLY",
+			"reason", "KAFKA_BOOTSTRAP_SERVERS not set",
+			"environment", os.Getenv("ENVIRONMENT"))
+		usingNoopEventPublisher = true
 	}
 
 	// Start outbox worker if Kafka producer is available
@@ -222,12 +246,21 @@ func run(logger *slog.Logger) error {
 	// Create Redis client and idempotency service
 	var idempotencySvc idempotency.Service
 	var redisSvc *idempotency.RedisService // Keep reference for cleanup worker
+	var usingNoopIdempotency bool
 	redisClient, err := createRedisClient(logger)
 	if err != nil {
-		// Non-fatal: fall back to noop service for development/testing
-		logger.Warn("failed to connect to Redis, using noop idempotency service",
-			"error", err)
+		// Fail fast in production - Redis is required for idempotency guarantees
+		if env.IsProduction() {
+			logger.Error("CRITICAL: Redis unavailable in production - failing fast",
+				"error", err)
+			return fmt.Errorf("%w: %w", ErrRedisRequiredInProduction, err)
+		}
+		// Non-fatal in non-production: fall back to noop service for development/testing
+		logger.Warn("using noop idempotency service - DEVELOPMENT ONLY",
+			"error", err,
+			"environment", os.Getenv("ENVIRONMENT"))
 		idempotencySvc = newNoopIdempotencyService()
+		usingNoopIdempotency = true
 	} else {
 		redisSvc = idempotency.NewRedisService(redisClient)
 		idempotencySvc = redisSvc
@@ -266,9 +299,16 @@ func run(logger *slog.Logger) error {
 		logger.Info("idempotency cleanup worker disabled by configuration")
 	}
 
-	// Create event publisher (noop for now - Kafka implementation for production)
+	// Create event publisher
+	// Note: The primary event publishing mechanism is the outbox pattern (transactional).
+	// This direct publisher is for optional synchronous publishing scenarios.
 	eventPublisher := &noopEventPublisher{}
-	logger.Info("event publisher initialized (noop mode)")
+	if usingNoopEventPublisher {
+		logger.Warn("using noop event publisher - DEVELOPMENT ONLY",
+			"environment", os.Getenv("ENVIRONMENT"))
+	} else {
+		logger.Info("event publisher initialized (noop mode for direct publishing, outbox handles primary events)")
+	}
 
 	// Initialize reference-data client for fungibility validation (optional)
 	var registryOption service.Option
@@ -337,10 +377,12 @@ func run(logger *slog.Logger) error {
 
 	// Register health check service with database connectivity check
 	healthChecker, err := serviceobs.NewHealthChecker(serviceobs.HealthCheckerConfig{
-		DB:           db,
-		Logger:       logger,
-		ServiceName:  "financial-accounting",
-		CheckTimeout: defaults.DefaultHealthCheckTimeout,
+		DB:                   db,
+		Logger:               logger,
+		ServiceName:          "financial-accounting",
+		CheckTimeout:         defaults.DefaultHealthCheckTimeout,
+		UsingNoopIdempotency: usingNoopIdempotency,
+		UsingNoopEvents:      usingNoopEventPublisher,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create health checker: %w", err)
