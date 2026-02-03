@@ -369,14 +369,27 @@ func (v *validationVisitor) walkExpr(expr syntax.Expr) error {
 
 // ValidateDraft performs full validation including semantic linting for draft scripts.
 // This is used during script development and returns warnings that may be addressed.
-func ValidateDraft(script string) (*ValidationResult, error) {
-	return ValidateWithLinter(script, NewSemanticLinter())
+// If handlerMetadata is provided, it will be configured for pre-check validation.
+func ValidateDraft(script string, handlerMetadata map[string]HandlerMetadata) (*ValidationResult, error) {
+	linter := NewSemanticLinter()
+
+	if len(handlerMetadata) > 0 {
+		linter.SetHandlerMetadata(handlerMetadata)
+	}
+
+	return ValidateWithLinter(script, linter)
 }
 
 // ValidateActivation performs strict validation for scripts being activated.
 // Returns an error if any blocking issues are found.
-func ValidateActivation(script string) error {
+// If handlerMetadata is provided, it will be configured for pre-check validation.
+func ValidateActivation(script string, handlerMetadata map[string]HandlerMetadata) error {
 	linter := NewSemanticLinter()
+
+	if len(handlerMetadata) > 0 {
+		linter.SetHandlerMetadata(handlerMetadata)
+	}
+
 	// Enforce ERROR level for Decimal arithmetic in activation
 	linter.SetEnforcementLevel(LintIssueTypeDecimalArithmetic, EnforcementLevelError)
 

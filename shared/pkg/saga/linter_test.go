@@ -473,7 +473,7 @@ qty = Decimal("10")
 rate = Decimal("0.05")
 result = qty * rate
 `
-	result, err := ValidateDraft(script)
+	result, err := ValidateDraft(script, nil)
 	require.NoError(t, err)
 	assert.False(t, result.HasErrors())
 	assert.Len(t, result.LintIssues, 1)
@@ -487,7 +487,7 @@ qty = Decimal("10")
 rate = Decimal("0.05")
 result = qty * rate
 `
-	err := ValidateActivation(script)
+	err := ValidateActivation(script, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "validation failed")
 }
@@ -499,7 +499,7 @@ def process(input):
     amount = input["amount"]
     return {"account": account, "amount": amount}
 `
-	err := ValidateActivation(script)
+	err := ValidateActivation(script, nil)
 	require.NoError(t, err)
 }
 
