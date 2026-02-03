@@ -454,3 +454,106 @@ handlers:
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrHandlerNotFound)
 }
+
+func TestHandlerDef_ExternalField(t *testing.T) {
+	tests := []struct {
+		name     string
+		yaml     string
+		expected bool
+	}{
+		{
+			name: "handler with external: true",
+			yaml: `
+service: test
+version: "1.0"
+handlers:
+  test.external_handler:
+    description: "External payment gateway handler"
+    external: true
+    params:
+      payment_id:
+        type: string
+        required: true
+`,
+			expected: true,
+		},
+		{
+			name: "handler without external field (defaults to false)",
+			yaml: `
+service: test
+version: "1.0"
+handlers:
+  test.internal_handler:
+    description: "Internal handler"
+    params:
+      id:
+        type: string
+        required: true
+`,
+			expected: false,
+		},
+		{
+			name: "handler with explicit external: false",
+			yaml: `
+service: test
+version: "1.0"
+handlers:
+  test.internal_handler:
+    description: "Internal handler"
+    external: false
+    params:
+      id:
+        type: string
+        required: true
+`,
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			schema, err := Parse([]byte(tt.yaml))
+			require.NoError(t, err)
+			require.Len(t, schema.Handlers, 1)
+
+			// Get the handler (extract from map)
+			var handler *HandlerDef
+			for _, h := range schema.Handlers {
+				handler = h
+				break
+			}
+
+			assert.Equal(t, tt.expected, handler.External,
+				"Expected External=%v, got %v", tt.expected, handler.External)
+		})
+	}
+}
+
+func TestPlatformHandlersSchema_ExternalHandlers(t *testing.T) {
+	// Load the actual handlers.yaml from the filesystem
+	schemaPath := filepath.Join("..", "..", "..", "..", "shared", "pkg", "saga", "schema", "handlers.yaml")
+	registry := NewRegistry()
+	err := registry.LoadFromFile(schemaPath)
+	require.NoError(t, err, "Failed to load handlers.yaml")
+
+	// Verify payment_order.send_to_gateway is marked as external
+	handler, err := registry.GetHandler("payment_order.send_to_gateway")
+	require.NoError(t, err, "payment_order.send_to_gateway handler should exist")
+	assert.True(t, handler.External, "payment_order.send_to_gateway should be marked as external")
+
+	// Verify a few internal handlers are NOT marked as external
+	internalHandlers := []string{
+		"financial_accounting.post_entries",
+		"position_keeping.initiate_log",
+		"reference_data.check_sufficient_balance",
+	}
+
+	for _, handlerName := range internalHandlers {
+		h, err := registry.GetHandler(handlerName)
+		if err == nil {
+			// Handler exists, verify it's not external
+			assert.False(t, h.External, "%s should NOT be marked as external", handlerName)
+		}
+		// If handler doesn't exist in the schema yet, skip this check
+	}
+}

@@ -88,6 +88,10 @@ type HandlerDef struct {
 
 	// Compensate is the handler name used for compensation/rollback.
 	Compensate string `yaml:"compensate,omitempty"`
+
+	// External indicates this handler calls external systems (non-idempotent).
+	// External handlers must have verify_external_state() called before invocation.
+	External bool `yaml:"external,omitempty"`
 }
 
 // FieldDef defines a single field (parameter or return value).
