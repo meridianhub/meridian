@@ -1,6 +1,6 @@
 -- Backfill clearing_purpose column and add constraints (Part 2)
--- This migration runs after the column has been added and CockroachDB's
--- asynchronous backfill has completed
+-- This migration runs after the column has been added (nullable, no DEFAULT),
+-- so the data backfill and constraints are applied separately
 --
 -- CockroachDB compatibility: Separated from column addition to avoid
 -- "column is being backfilled" errors
