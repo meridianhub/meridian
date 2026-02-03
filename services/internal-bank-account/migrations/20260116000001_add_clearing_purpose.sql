@@ -2,6 +2,10 @@
 -- This column distinguishes the specific purpose of CLEARING accounts
 -- Matches the ClearingPurpose enum in the protobuf definition
 
+-- CockroachDB compatibility: Run this migration outside a transaction
+-- because CockroachDB cannot UPDATE a column being backfilled within the same transaction
+-- atlas:txmode none
+
 -- Add the clearing_purpose column (nullable initially to allow existing data)
 ALTER TABLE "internal_bank_account"
 ADD COLUMN "clearing_purpose" character varying(32) NULL;
