@@ -343,3 +343,33 @@ func (r *Registry) ValidateHandlerParams(handlerName string, params map[string]a
 	}
 	return handler.ValidateParams(params)
 }
+
+// LinterMetadata describes handler characteristics needed by the semantic linter.
+type LinterMetadata struct {
+	// IsExternal indicates the handler calls external systems (non-idempotent).
+	IsExternal bool
+
+	// RequiresPreCheck indicates verify_external_state must be called before this handler.
+	RequiresPreCheck bool
+}
+
+// BuildLinterMetadata extracts linter metadata from the schema registry.
+// Returns a map of handler names to their metadata for pre-check validation.
+// Only external handlers (those marked with external: true) are included in the metadata.
+func (r *Registry) BuildLinterMetadata() map[string]LinterMetadata {
+	metadata := make(map[string]LinterMetadata)
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for name, handler := range r.handlers {
+		if handler.External {
+			metadata[name] = LinterMetadata{
+				IsExternal:       true,
+				RequiresPreCheck: true, // All external handlers require pre-check
+			}
+		}
+	}
+
+	return metadata
+}

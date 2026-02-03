@@ -557,3 +557,135 @@ func TestPlatformHandlersSchema_ExternalHandlers(t *testing.T) {
 		// If handler doesn't exist in the schema yet, skip this check
 	}
 }
+
+func TestBuildLinterMetadata(t *testing.T) {
+	tests := []struct {
+		name           string
+		yaml           string
+		expectedMeta   map[string]LinterMetadata
+		expectedCounts struct {
+			total    int
+			external int
+		}
+	}{
+		{
+			name: "registry with external and internal handlers",
+			yaml: `
+service: test
+version: "1.0"
+handlers:
+  internal.save:
+    description: "Internal save operation"
+    external: false
+    params:
+      id:
+        type: string
+        required: true
+  gateway.send:
+    description: "External gateway call"
+    external: true
+    params:
+      amount:
+        type: Decimal
+        required: true
+  accounting.post:
+    description: "No external field (defaults to false)"
+    params:
+      entry_id:
+        type: string
+        required: true
+`,
+			expectedMeta: map[string]LinterMetadata{
+				"gateway.send": {
+					IsExternal:       true,
+					RequiresPreCheck: true,
+				},
+			},
+			expectedCounts: struct {
+				total    int
+				external int
+			}{
+				total:    3,
+				external: 1,
+			},
+		},
+		{
+			name: "registry with no external handlers",
+			yaml: `
+service: test
+version: "1.0"
+handlers:
+  internal.handler1:
+    description: "Internal handler 1"
+    params: {}
+  internal.handler2:
+    description: "Internal handler 2"
+    external: false
+    params: {}
+`,
+			expectedMeta: map[string]LinterMetadata{},
+			expectedCounts: struct {
+				total    int
+				external int
+			}{
+				total:    2,
+				external: 0,
+			},
+		},
+		{
+			name: "empty registry",
+			yaml: `
+service: empty
+version: "1.0"
+handlers: {}
+`,
+			expectedMeta: map[string]LinterMetadata{},
+			expectedCounts: struct {
+				total    int
+				external int
+			}{
+				total:    0,
+				external: 0,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := NewRegistry()
+			err := registry.LoadFromYAML([]byte(tt.yaml))
+			require.NoError(t, err)
+
+			metadata := registry.BuildLinterMetadata()
+
+			// Verify expected metadata
+			assert.Equal(t, len(tt.expectedMeta), len(metadata),
+				"Expected %d external handlers, got %d", len(tt.expectedMeta), len(metadata))
+
+			for handlerName, expectedMeta := range tt.expectedMeta {
+				actualMeta, exists := metadata[handlerName]
+				assert.True(t, exists, "Expected handler %s to be in metadata", handlerName)
+				assert.Equal(t, expectedMeta.IsExternal, actualMeta.IsExternal)
+				assert.Equal(t, expectedMeta.RequiresPreCheck, actualMeta.RequiresPreCheck)
+			}
+
+			// Verify internal handlers are NOT in metadata
+			allHandlers := registry.ListHandlers()
+			assert.Len(t, allHandlers, tt.expectedCounts.total,
+				"Expected %d total handlers", tt.expectedCounts.total)
+
+			for _, handlerName := range allHandlers {
+				handler, err := registry.GetHandler(handlerName)
+				require.NoError(t, err)
+
+				if handler.External {
+					_, exists := metadata[handlerName]
+					assert.True(t, exists, "External handler %s should be in metadata", handlerName)
+				} else {
+					_, exists := metadata[handlerName]
+					assert.False(t, exists, "Internal handler %s should NOT be in metadata", handlerName)
+				}
+			}
+		})
+	}
+}
