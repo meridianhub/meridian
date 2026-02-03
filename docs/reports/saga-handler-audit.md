@@ -576,8 +576,13 @@ Each handler must have tests covering:
 1. **Happy path**: Valid parameters → successful gRPC call → correct Starlark result
 2. **Missing required params**: `saga.RequireStringParam` returns error
 3. **gRPC error handling**: Downstream error propagates correctly
-4. **Idempotency**: Duplicate calls with same idempotency key
+4. **Idempotency**: Duplicate calls with same idempotency key return identical results
+   (only for handlers marked "Idempotent: Yes")
 5. **Context propagation**: CorrelationID, KnowledgeTime, IdempotencyKey passed correctly
+
+**Note**: Idempotency tests (item 4) only apply to handlers with `Idempotent: Yes (with retry)`.
+Handlers using circuit breaker patterns (`Idempotent: No`) rely on downstream service guarantees
+and do not require idempotency key-based duplicate detection tests.
 
 ### Integration Tests (Per Service)
 
