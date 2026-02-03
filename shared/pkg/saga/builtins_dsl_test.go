@@ -82,7 +82,7 @@ func TestCelEvalBuiltin(t *testing.T) {
 		_, err := celEval.CallInternal(thread, args, nil)
 
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "StarlarkContext not found")
+		assert.ErrorIs(t, err, ErrMissingStarlarkContext)
 	})
 }
 
@@ -176,7 +176,7 @@ func TestResolveAccountBuiltin(t *testing.T) {
 		_, err := resolveAccount.CallInternal(thread, args, nil)
 
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "client not configured")
+		assert.ErrorIs(t, err, ErrMissingClient)
 	})
 }
 

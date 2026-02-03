@@ -15,6 +15,18 @@ var (
 
 	// ErrUnhashable is returned when attempting to hash an unhashable type.
 	ErrUnhashable = errors.New("unhashable type")
+
+	// ErrMissingStarlarkContext is returned when StarlarkContext is not found in thread locals.
+	ErrMissingStarlarkContext = errors.New("StarlarkContext not found in thread")
+
+	// ErrInvalidStarlarkContext is returned when StarlarkContext has invalid type.
+	ErrInvalidStarlarkContext = errors.New("invalid StarlarkContext type")
+
+	// ErrMissingClient is returned when a required client is not configured in thread locals.
+	ErrMissingClient = errors.New("required client not configured")
+
+	// ErrInvalidClientType is returned when a client has invalid type.
+	ErrInvalidClientType = errors.New("invalid client type")
 )
 
 // NewRestrictedBuiltins creates a hardened Starlark environment with whitelisted functions.
@@ -36,7 +48,7 @@ var (
 //
 // BLOCKED: load(), print() (redirected), time.now(), random(), exec(), compile(), open(), http
 //
-//nolint:gocognit // This function deliberately configures many builtins; complexity is unavoidable
+//nolint:gocognit,gocyclo // This function deliberately configures many builtins; complexity is unavoidable
 func NewRestrictedBuiltins(logger *slog.Logger) starlark.StringDict {
 	if logger == nil {
 		logger = slog.Default()
@@ -140,11 +152,11 @@ func NewRestrictedBuiltins(logger *slog.Logger) starlark.StringDict {
 		// Get StarlarkContext from thread local storage
 		ctxVal := thread.Local("saga.StarlarkContext")
 		if ctxVal == nil {
-			return nil, fmt.Errorf("cel_eval: StarlarkContext not found in thread")
+			return nil, fmt.Errorf("cel_eval: %w", ErrMissingStarlarkContext)
 		}
 		starlarkCtx, ok := ctxVal.(*StarlarkContext)
 		if !ok {
-			return nil, fmt.Errorf("cel_eval: invalid StarlarkContext type")
+			return nil, fmt.Errorf("cel_eval: %w", ErrInvalidStarlarkContext)
 		}
 
 		// Create CEL evaluator
@@ -180,11 +192,11 @@ func NewRestrictedBuiltins(logger *slog.Logger) starlark.StringDict {
 		// Get StarlarkContext from thread
 		ctxVal := thread.Local("saga.StarlarkContext")
 		if ctxVal == nil {
-			return nil, fmt.Errorf("resolve_account: StarlarkContext not found")
+			return nil, fmt.Errorf("resolve_account: %w", ErrMissingStarlarkContext)
 		}
 		starlarkCtx, ok := ctxVal.(*StarlarkContext)
 		if !ok {
-			return nil, fmt.Errorf("resolve_account: invalid StarlarkContext type")
+			return nil, fmt.Errorf("resolve_account: %w", ErrInvalidStarlarkContext)
 		}
 
 		// Check lookup cache for deterministic replay (FR-34)
@@ -200,11 +212,11 @@ func NewRestrictedBuiltins(logger *slog.Logger) starlark.StringDict {
 		// Get reference-data client from thread
 		clientVal := thread.Local("saga.ReferenceDataClient")
 		if clientVal == nil {
-			return nil, fmt.Errorf("resolve_account: reference-data client not configured")
+			return nil, fmt.Errorf("resolve_account: %w", ErrMissingClient)
 		}
 		refDataClient, ok := clientVal.(ReferenceDataClient)
 		if !ok {
-			return nil, fmt.Errorf("resolve_account: invalid client type")
+			return nil, fmt.Errorf("resolve_account: %w", ErrInvalidClientType)
 		}
 
 		// Query reference-data service with bi-temporal KnowledgeAt
@@ -231,11 +243,11 @@ func NewRestrictedBuiltins(logger *slog.Logger) starlark.StringDict {
 		// Get StarlarkContext from thread
 		ctxVal := thread.Local("saga.StarlarkContext")
 		if ctxVal == nil {
-			return nil, fmt.Errorf("resolve_instrument: StarlarkContext not found")
+			return nil, fmt.Errorf("resolve_instrument: %w", ErrMissingStarlarkContext)
 		}
 		starlarkCtx, ok := ctxVal.(*StarlarkContext)
 		if !ok {
-			return nil, fmt.Errorf("resolve_instrument: invalid StarlarkContext type")
+			return nil, fmt.Errorf("resolve_instrument: %w", ErrInvalidStarlarkContext)
 		}
 
 		// Check cache
@@ -251,11 +263,11 @@ func NewRestrictedBuiltins(logger *slog.Logger) starlark.StringDict {
 		// Get reference-data client from thread
 		clientVal := thread.Local("saga.ReferenceDataClient")
 		if clientVal == nil {
-			return nil, fmt.Errorf("resolve_instrument: reference-data client not configured")
+			return nil, fmt.Errorf("resolve_instrument: %w", ErrMissingClient)
 		}
 		refDataClient, ok := clientVal.(ReferenceDataClient)
 		if !ok {
-			return nil, fmt.Errorf("resolve_instrument: invalid client type")
+			return nil, fmt.Errorf("resolve_instrument: %w", ErrInvalidClientType)
 		}
 
 		// Query with KnowledgeAt for bi-temporal lookup
@@ -287,31 +299,31 @@ func NewRestrictedBuiltins(logger *slog.Logger) starlark.StringDict {
 		// Get StarlarkContext
 		ctxVal := thread.Local("saga.StarlarkContext")
 		if ctxVal == nil {
-			return nil, fmt.Errorf("invoke_saga: StarlarkContext not found")
+			return nil, fmt.Errorf("invoke_saga: %w", ErrMissingStarlarkContext)
 		}
 		starlarkCtx, ok := ctxVal.(*StarlarkContext)
 		if !ok {
-			return nil, fmt.Errorf("invoke_saga: invalid StarlarkContext type")
+			return nil, fmt.Errorf("invoke_saga: %w", ErrInvalidStarlarkContext)
 		}
 
 		// Get Composer from thread
 		composerVal := thread.Local("saga.Composer")
 		if composerVal == nil {
-			return nil, fmt.Errorf("invoke_saga: Composer not configured")
+			return nil, fmt.Errorf("invoke_saga: %w", ErrMissingClient)
 		}
 		composer, ok := composerVal.(*Composer)
 		if !ok {
-			return nil, fmt.Errorf("invoke_saga: invalid Composer type")
+			return nil, fmt.Errorf("invoke_saga: %w", ErrInvalidClientType)
 		}
 
 		// Get CallStack for nesting tracking
 		stackVal := thread.Local("saga.CallStack")
 		if stackVal == nil {
-			return nil, fmt.Errorf("invoke_saga: CallStack not found")
+			return nil, fmt.Errorf("invoke_saga: %w", ErrMissingClient)
 		}
 		stack, ok := stackVal.(*CallStack)
 		if !ok {
-			return nil, fmt.Errorf("invoke_saga: invalid CallStack type")
+			return nil, fmt.Errorf("invoke_saga: %w", ErrInvalidClientType)
 		}
 
 		// Convert Starlark dict to Go map
