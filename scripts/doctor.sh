@@ -140,6 +140,9 @@ get_version() {
         grpcurl)
             version=$(grpcurl --version 2>&1 | head -1 | awk '{print $2}')
             ;;
+        cockroach)
+            version=$(cockroach version 2>/dev/null | head -1 | awk '{print $3}')
+            ;;
         make)
             version=$(make --version 2>/dev/null | head -1 | awk '{print $3}')
             ;;
@@ -177,6 +180,7 @@ get_install_cmd() {
         macos-grpcurl) echo "brew install grpcurl" ;;
         macos-golangci-lint) echo "brew install golangci-lint" ;;
         macos-node) echo "brew install node" ;;
+        macos-cockroach) echo "brew install cockroachdb/tap/cockroach" ;;
 
         linux-go) echo "sudo ${PKG_MANAGER} install -y golang-go" ;;
         linux-git) echo "sudo ${PKG_MANAGER} install -y git" ;;
@@ -191,6 +195,7 @@ get_install_cmd() {
         linux-grpcurl) echo "go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest" ;;
         linux-golangci-lint) echo "curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b \$(go env GOPATH)/bin" ;;
         linux-node) echo "sudo ${PKG_MANAGER} install -y nodejs npm" ;;
+        linux-cockroach) echo "curl https://binaries.cockroachdb.com/cockroach-latest.linux-amd64.tgz | tar -xz && sudo cp -i cockroach-*/cockroach /usr/local/bin/ && sudo mkdir -p /usr/local/lib/cockroach && sudo cp -i cockroach-*/lib/* /usr/local/lib/cockroach/ && rm -rf cockroach-*" ;;
 
         *) echo "" ;;  # Unknown combination
     esac
@@ -652,6 +657,15 @@ check_tool "protoc" "3.x+"
 echo ""
 
 check_tool "grpcurl" ""
+echo ""
+
+# Database Tools
+echo "═══════════════════════════════════════"
+echo " Database Tools"
+echo "═══════════════════════════════════════"
+echo ""
+
+check_tool "cockroach" "23.x+"
 echo ""
 
 # Code Quality
