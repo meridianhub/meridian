@@ -1,14 +1,9 @@
--- Add clearing_purpose column to internal_bank_account table
--- This column distinguishes the specific purpose of CLEARING accounts
--- Matches the ClearingPurpose enum in the protobuf definition
-
--- CockroachDB compatibility: Run this migration outside a transaction
--- because CockroachDB cannot UPDATE a column being backfilled within the same transaction
--- atlas:txmode none
-
--- Add the clearing_purpose column (nullable initially to allow existing data)
-ALTER TABLE "internal_bank_account"
-ADD COLUMN "clearing_purpose" character varying(32) NULL;
+-- Backfill clearing_purpose column and add constraints (Part 2)
+-- This migration runs after the column has been added and CockroachDB's
+-- asynchronous backfill has completed
+--
+-- CockroachDB compatibility: Separated from column addition to avoid
+-- "column is being backfilled" errors
 
 -- Backfill existing CLEARING accounts based on account_code patterns
 -- This is a best-effort mapping based on common naming conventions:
@@ -16,7 +11,6 @@ ADD COLUMN "clearing_purpose" character varying(32) NULL;
 --   - Codes ending in '-WITHDRAW' or '-WITHDRAWAL' -> CLEARING_PURPOSE_WITHDRAWAL
 --   - Codes ending in '-SETTLEMENT' -> CLEARING_PURPOSE_SETTLEMENT
 --   - All other CLEARING accounts -> CLEARING_PURPOSE_GENERAL
--- NOTE: Backfill MUST run before adding the constraint to avoid migration failure
 UPDATE "internal_bank_account"
 SET "clearing_purpose" = CASE
   WHEN account_code LIKE '%-DEPOSIT' OR account_code LIKE '%-deposit' THEN 'CLEARING_PURPOSE_DEPOSIT'
@@ -29,7 +23,6 @@ WHERE account_type = 'CLEARING' AND clearing_purpose IS NULL;
 
 -- Add check constraint to enforce that CLEARING accounts must have a non-null clearing_purpose
 -- Non-CLEARING accounts should have NULL or CLEARING_PURPOSE_UNSPECIFIED
--- NOTE: Constraint added AFTER backfill to ensure existing data satisfies it
 ALTER TABLE "internal_bank_account"
 ADD CONSTRAINT "chk_clearing_purpose_for_clearing_type"
 CHECK (
@@ -41,7 +34,3 @@ CHECK (
 CREATE INDEX "idx_internal_bank_account_clearing_purpose"
 ON "internal_bank_account" ("clearing_purpose")
 WHERE account_type = 'CLEARING';
-
--- Add comment documenting the column
-COMMENT ON COLUMN "internal_bank_account"."clearing_purpose" IS
-  'Purpose classification for CLEARING accounts: CLEARING_PURPOSE_DEPOSIT (deposits), CLEARING_PURPOSE_WITHDRAWAL (withdrawals), CLEARING_PURPOSE_SETTLEMENT (settlements), CLEARING_PURPOSE_GENERAL (general). NULL or UNSPECIFIED for non-CLEARING account types.';

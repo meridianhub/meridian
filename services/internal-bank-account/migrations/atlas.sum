@@ -1,3 +1,4 @@
-h1:Ip51NHrgj5Z/ofoBf6bjDWLMUqtT7IWYQWGROqpa6h0=
+h1:giPEeLxYxtlSjID7cSpUC0g/s61sqYazaWWxQxPu9A8=
 20260112000001_initial.sql h1:DGFY67QMovT7UV5WkUEOrSZE7dLYIppV90Ix2x+qMls=
-20260116000001_add_clearing_purpose.sql h1:CTOu1RMW0KDIHSYmTFOQxPL2R41rdZ8nXZV8Kmh+QE8=
+20260116000001_add_clearing_purpose_column.sql h1:DHT3cTeEUEWjJEysajU7QV4uy5D+7N4nuygKLsjrzn8=
+20260116000002_backfill_clearing_purpose.sql h1:JDWPfRDQLAb4Kdf2nQry9UylsRj2GN8f2OjwBAivP24=
