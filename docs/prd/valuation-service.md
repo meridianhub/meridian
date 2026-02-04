@@ -22,9 +22,9 @@ instructions: |
 # PRD: Account-Scoped Valuation Engine
 
 **Status:** Draft - Revised Architecture
-**Version:** 2.6 (Ghost Pricing Prevention & Lien Immutability)
+**Version:** 2.7 (Dimension-Tagged Buckets & Ghost Pricing Regression)
 **Task Master Tag:** `valuation-engine`
-**Story Points:** 75 (11 streams)
+**Story Points:** 76 (11 streams)
 **Core ADR:** [ADR-0028: Starlark Saga Orchestration with CEL Valuation](../adr/0028-starlark-saga-cel-valuation.md)
 
 **Version History:**
@@ -36,6 +36,7 @@ instructions: |
 - v2.4: Reservation Ledger pattern, calculation path audit, canonical bucketing library
 - v2.5: Idempotency guards, basis drift detection, architecture enforcement, size limits
 - v2.6: Ghost Pricing prevention (shared valuation logic), lien immutability constraint
+- v2.7: Dimension-tagged buckets for DB enforcement, Ghost Pricing regression test
 
 ## 1. Executive Summary
 
@@ -335,6 +336,41 @@ func (s *Service) InitiateLien(ctx context.Context, req *InitiateLienRequest) (*
 
 **Test Requirement:** Integration tests MUST verify that `GetValuedAmount` and `InitiateLien` return
 identical valuations when given the same inputs and projected balance.
+
+**Regression Test (MANDATORY):**
+
+Add a fuzz-style regression test that runs 1,000 random inputs through both `GetValuedAmount` and
+`InitiateLien` and asserts they are identical to the last decimal place:
+
+```go
+func TestGhostPricingPrevention(t *testing.T) {
+    svc := setupTestService(t)
+
+    for i := 0; i < 1000; i++ {
+        // Generate random input
+        input := generateRandomInstrumentAmount(t)
+        projectedBalance := generateRandomBalance(t)
+        knowledgeAt := time.Now()
+
+        // Call inquiry path
+        inquiryResp, err := svc.GetValuedAmount(ctx, &GetValuedAmountRequest{
+            AccountId:   testAccountID,
+            Input:       input,
+            KnowledgeAt: timestamppb.New(knowledgeAt),
+        })
+        require.NoError(t, err)
+
+        // Call transactional path (mocking projected balance to match)
+        txnResp, err := svc.valuateInternal(ctx, testAccountID, input, knowledgeAt, &projectedBalance)
+        require.NoError(t, err)
+
+        // CRITICAL: Values must match exactly
+        assert.True(t, inquiryResp.Output.Amount.Equal(txnResp.Output.Amount),
+            "Ghost pricing detected! Inquiry: %s, Transaction: %s, Input: %v",
+            inquiryResp.Output.Amount, txnResp.Output.Amount, input)
+    }
+}
+```
 
 **Design Note (Naming):**
 
@@ -2062,22 +2098,72 @@ dependencies. Position Keeping owns reservation data, enabling local-only projec
 - Isolation test: Solar reservations don't contaminate grid tier calculations
 - Idempotency test: 3 retries of same RecordReservation don't affect ProjectedBalance
 
-### Stream 11: Shared Bucketing Library (P0, 2 points)
+### Stream 11: Shared Bucketing Library (P0, 3 points)
 
 **Tasks:**
 
 1. Create `shared/pkg/bucketing` package
 2. Implement `CalculateBucketID(InstrumentAmount) string` with canonical key generation
-3. Add comprehensive unit tests for edge cases (nil, empty attributes, special characters)
-4. Document bucket key format and usage patterns
-5. Audit all services to ensure consistent bucket_id usage
+3. **Include Dimension Tag in bucket_id** (see below)
+4. Add comprehensive unit tests for edge cases (nil, empty attributes, special characters)
+5. Document bucket key format and usage patterns
+6. Audit all services to ensure consistent bucket_id usage
+
+**Dimension Tag Enhancement:**
+
+To enable database-level enforcement that a MONETARY account never accepts a COMMODITY bucket,
+include the **Dimension Tag** in the bucket_id:
+
+```go
+func CalculateBucketID(amount *quantity.InstrumentAmount) string {
+    if amount == nil {
+        return ""
+    }
+
+    // Include dimension as prefix for database-level enforcement
+    dimension := GetDimension(amount.InstrumentCode)  // "MONETARY", "COMMODITY", "COMPUTE"
+
+    // Build canonical key
+    parts := []string{strings.ToLower(dimension), strings.ToLower(amount.InstrumentCode)}
+
+    // Add sorted attributes
+    keys := make([]string, 0, len(amount.Attributes))
+    for k := range amount.Attributes {
+        keys = append(keys, k)
+    }
+    sort.Strings(keys)
+    for _, k := range keys {
+        parts = append(parts, fmt.Sprintf("%s=%s", k, amount.Attributes[k]))
+    }
+
+    return strings.Join(parts, "_")
+}
+
+// Examples:
+// GBP                           → "monetary_gbp"
+// KWH (source=solar)            → "commodity_kwh_source=solar"
+// GPU_HOUR (tier=premium)       → "compute_gpu_hour_tier=premium"
+```
+
+**Database Enforcement:**
+
+With dimension-prefixed bucket_ids, accounts can enforce dimension constraints:
+
+```sql
+-- Account can only accept monetary buckets
+ALTER TABLE account_positions
+    ADD CONSTRAINT chk_monetary_only
+    CHECK (bucket_id LIKE 'monetary_%' OR bucket_id IS NULL);
+```
 
 **Success Criteria:**
 
 - All services use `bucketing.CalculateBucketID()` for bucket calculation
 - No direct string construction of bucket_id anywhere in codebase
 - Same InstrumentAmount produces identical bucket_id across all services
+- **Bucket_id includes dimension prefix** (monetary_, commodity_, compute_)
 - Unit tests cover: nil input, empty attributes, multi-attribute sorting, special characters
+- Dimension mismatch test: verify database rejects commodity bucket on monetary-only account
 
 ## 7. Testing Strategy
 
