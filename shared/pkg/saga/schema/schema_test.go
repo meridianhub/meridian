@@ -454,3 +454,238 @@ handlers:
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrHandlerNotFound)
 }
+
+func TestHandlerDef_ExternalField(t *testing.T) {
+	tests := []struct {
+		name     string
+		yaml     string
+		expected bool
+	}{
+		{
+			name: "handler with external: true",
+			yaml: `
+service: test
+version: "1.0"
+handlers:
+  test.external_handler:
+    description: "External payment gateway handler"
+    external: true
+    params:
+      payment_id:
+        type: string
+        required: true
+`,
+			expected: true,
+		},
+		{
+			name: "handler without external field (defaults to false)",
+			yaml: `
+service: test
+version: "1.0"
+handlers:
+  test.internal_handler:
+    description: "Internal handler"
+    params:
+      id:
+        type: string
+        required: true
+`,
+			expected: false,
+		},
+		{
+			name: "handler with explicit external: false",
+			yaml: `
+service: test
+version: "1.0"
+handlers:
+  test.internal_handler:
+    description: "Internal handler"
+    external: false
+    params:
+      id:
+        type: string
+        required: true
+`,
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			schema, err := Parse([]byte(tt.yaml))
+			require.NoError(t, err)
+			require.Len(t, schema.Handlers, 1)
+
+			// Get the handler (extract from map)
+			var handler *HandlerDef
+			for _, h := range schema.Handlers {
+				handler = h
+				break
+			}
+
+			assert.Equal(t, tt.expected, handler.External,
+				"Expected External=%v, got %v", tt.expected, handler.External)
+		})
+	}
+}
+
+func TestPlatformHandlersSchema_ExternalHandlers(t *testing.T) {
+	// Load the actual handlers.yaml from the filesystem
+	schemaPath := filepath.Join("..", "..", "..", "..", "shared", "pkg", "saga", "schema", "handlers.yaml")
+	registry := NewRegistry()
+	err := registry.LoadFromFile(schemaPath)
+	require.NoError(t, err, "Failed to load handlers.yaml")
+
+	// Verify payment_order.send_to_gateway is marked as external
+	handler, err := registry.GetHandler("payment_order.send_to_gateway")
+	require.NoError(t, err, "payment_order.send_to_gateway handler should exist")
+	assert.True(t, handler.External, "payment_order.send_to_gateway should be marked as external")
+
+	// Verify a few internal handlers are NOT marked as external
+	internalHandlers := []string{
+		"financial_accounting.post_entries",
+		"position_keeping.initiate_log",
+		"reference_data.check_sufficient_balance",
+	}
+
+	for _, handlerName := range internalHandlers {
+		h, err := registry.GetHandler(handlerName)
+		if err == nil {
+			// Handler exists, verify it's not external
+			assert.False(t, h.External, "%s should NOT be marked as external", handlerName)
+		}
+		// If handler doesn't exist in the schema yet, skip this check
+	}
+}
+
+func TestBuildLinterMetadata(t *testing.T) {
+	tests := []struct {
+		name           string
+		yaml           string
+		expectedMeta   map[string]LinterMetadata
+		expectedCounts struct {
+			total    int
+			external int
+		}
+	}{
+		{
+			name: "registry with external and internal handlers",
+			yaml: `
+service: test
+version: "1.0"
+handlers:
+  internal.save:
+    description: "Internal save operation"
+    external: false
+    params:
+      id:
+        type: string
+        required: true
+  gateway.send:
+    description: "External gateway call"
+    external: true
+    params:
+      amount:
+        type: Decimal
+        required: true
+  accounting.post:
+    description: "No external field (defaults to false)"
+    params:
+      entry_id:
+        type: string
+        required: true
+`,
+			expectedMeta: map[string]LinterMetadata{
+				"gateway.send": {
+					IsExternal:       true,
+					RequiresPreCheck: true,
+				},
+			},
+			expectedCounts: struct {
+				total    int
+				external int
+			}{
+				total:    3,
+				external: 1,
+			},
+		},
+		{
+			name: "registry with no external handlers",
+			yaml: `
+service: test
+version: "1.0"
+handlers:
+  internal.handler1:
+    description: "Internal handler 1"
+    params: {}
+  internal.handler2:
+    description: "Internal handler 2"
+    external: false
+    params: {}
+`,
+			expectedMeta: map[string]LinterMetadata{},
+			expectedCounts: struct {
+				total    int
+				external int
+			}{
+				total:    2,
+				external: 0,
+			},
+		},
+		{
+			name: "empty registry",
+			yaml: `
+service: empty
+version: "1.0"
+handlers: {}
+`,
+			expectedMeta: map[string]LinterMetadata{},
+			expectedCounts: struct {
+				total    int
+				external int
+			}{
+				total:    0,
+				external: 0,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := NewRegistry()
+			err := registry.LoadFromYAML([]byte(tt.yaml))
+			require.NoError(t, err)
+
+			metadata := registry.BuildLinterMetadata()
+
+			// Verify expected metadata
+			assert.Equal(t, len(tt.expectedMeta), len(metadata),
+				"Expected %d external handlers, got %d", len(tt.expectedMeta), len(metadata))
+
+			for handlerName, expectedMeta := range tt.expectedMeta {
+				actualMeta, exists := metadata[handlerName]
+				assert.True(t, exists, "Expected handler %s to be in metadata", handlerName)
+				assert.Equal(t, expectedMeta.IsExternal, actualMeta.IsExternal)
+				assert.Equal(t, expectedMeta.RequiresPreCheck, actualMeta.RequiresPreCheck)
+			}
+
+			// Verify internal handlers are NOT in metadata
+			allHandlers := registry.ListHandlers()
+			assert.Len(t, allHandlers, tt.expectedCounts.total,
+				"Expected %d total handlers", tt.expectedCounts.total)
+
+			for _, handlerName := range allHandlers {
+				handler, err := registry.GetHandler(handlerName)
+				require.NoError(t, err)
+
+				if handler.External {
+					_, exists := metadata[handlerName]
+					assert.True(t, exists, "External handler %s should be in metadata", handlerName)
+				} else {
+					_, exists := metadata[handlerName]
+					assert.False(t, exists, "Internal handler %s should NOT be in metadata", handlerName)
+				}
+			}
+		})
+	}
+}

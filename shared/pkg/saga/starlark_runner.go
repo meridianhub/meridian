@@ -128,6 +128,14 @@ type StepResult struct {
 
 	// Duration is how long the step took to execute.
 	Duration time.Duration
+
+	// CompensateHandler is the qualified name of the compensation handler to call
+	// if the saga fails (e.g., "position_keeping.cancel_log").
+	CompensateHandler string
+
+	// CompensateParams contains parameters derived from the forward step output
+	// to be passed to the compensation handler.
+	CompensateParams map[string]any
 }
 
 // ExecuteSaga executes a Starlark saga script with the given input.
@@ -183,10 +191,20 @@ func (r *StarlarkSagaRunner) ExecuteSaga(ctx context.Context, sagaName string, s
 		ThreadSetup: func(thread *starlark.Thread) {
 			// Set StarlarkContext on the thread so service module handlers can access it
 			thread.SetLocal("saga.StarlarkContext", starlarkCtx)
+			// Set stepResults pointer so service modules can append compensation metadata
+			thread.SetLocal("saga.StepResults", &stepResults)
 		},
 	})
 	if err != nil {
 		logger.Error("Starlark saga execution failed", "error", err)
+
+		// Execute compensation handlers in LIFO order
+		if compErr := r.executeCompensation(starlarkCtx, stepResults); compErr != nil {
+			logger.Error("compensation execution failed", "error", compErr)
+			// Append compensation error to saga error
+			err = fmt.Errorf("saga failed: %w; compensation also failed: %w", err, compErr)
+		}
+
 		return &RunnerOutput{
 			Success:     false,
 			Error:       err.Error(),
@@ -323,4 +341,111 @@ func (r *StarlarkSagaRunner) WithLogger(logger *slog.Logger) *StarlarkSagaRunner
 		serviceModules: r.serviceModules,
 		logger:         logger,
 	}
+}
+
+// deriveCompensationParams extracts relevant fields from a forward step's output
+// to be used as input parameters for the compensation handler.
+// It follows a simple heuristic: copy any fields ending in "_id" or named "id",
+// as these typically identify resources created by the forward step that need
+// to be cancelled/reverted by the compensation handler.
+func deriveCompensationParams(forwardStep StepResult) map[string]any {
+	params := make(map[string]any)
+
+	// Check if output is a map
+	output, ok := forwardStep.Output.(map[string]interface{})
+	if !ok {
+		return params
+	}
+
+	// Copy fields that look like IDs
+	for key, value := range output {
+		if key == "id" || len(key) > 3 && key[len(key)-3:] == "_id" {
+			params[key] = value
+		}
+	}
+
+	return params
+}
+
+// executeCompensation executes compensation handlers in LIFO (Last In, First Out) order
+// for all completed saga steps. This implements the standard saga compensation pattern
+// where the most recently completed step is compensated first, working backwards to
+// the first step.
+//
+// Compensation is best-effort: if a compensation handler fails, the error is logged
+// and returned, but execution continues to compensate remaining steps. This ensures
+// maximum rollback coverage even in the presence of failures.
+func (r *StarlarkSagaRunner) executeCompensation(ctx *StarlarkContext, completedSteps []StepResult) error {
+	if len(completedSteps) == 0 {
+		return nil
+	}
+
+	logger := r.logger.With(
+		"saga_execution_id", ctx.SagaExecutionID.String(),
+		"compensation_step_count", len(completedSteps),
+	)
+
+	logger.Info("starting compensation execution")
+
+	var compensationErrors []error
+
+	// Iterate in reverse order (LIFO)
+	for i := len(completedSteps) - 1; i >= 0; i-- {
+		step := completedSteps[i]
+
+		// Skip steps without compensation handlers
+		if step.CompensateHandler == "" {
+			logger.Debug("skipping step without compensation handler", "step_name", step.StepName)
+			continue
+		}
+
+		logger.Info("executing compensation",
+			"step_name", step.StepName,
+			"compensate_handler", step.CompensateHandler,
+			"step_index", i,
+		)
+
+		// Look up compensation handler
+		handler, err := r.registry.Get(step.CompensateHandler)
+		if err != nil {
+			logger.Error("compensation handler not found",
+				"compensate_handler", step.CompensateHandler,
+				"error", err,
+			)
+			compensationErrors = append(compensationErrors,
+				fmt.Errorf("compensation handler %s not found for step %s: %w",
+					step.CompensateHandler, step.StepName, err))
+			continue
+		}
+
+		// Execute compensation handler
+		_, err = handler(ctx, step.CompensateParams)
+		if err != nil {
+			logger.Error("compensation failed",
+				"compensate_handler", step.CompensateHandler,
+				"step_name", step.StepName,
+				"error", err,
+			)
+			compensationErrors = append(compensationErrors,
+				fmt.Errorf("compensation failed for %s (step %s): %w",
+					step.CompensateHandler, step.StepName, err))
+			continue
+		}
+
+		logger.Info("compensation succeeded",
+			"compensate_handler", step.CompensateHandler,
+			"step_name", step.StepName,
+		)
+	}
+
+	if len(compensationErrors) > 0 {
+		logger.Error("compensation completed with errors",
+			"error_count", len(compensationErrors),
+		)
+		// Return first error for simplicity, but log all errors above
+		return compensationErrors[0]
+	}
+
+	logger.Info("compensation execution completed successfully")
+	return nil
 }
