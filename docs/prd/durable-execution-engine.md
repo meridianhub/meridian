@@ -7,6 +7,20 @@
 
 ---
 
+## Table of Contents
+
+- [1. Executive Summary](#1-executive-summary)
+- [2. Functional Requirements](#2-functional-requirements)
+- [3. Technical Architecture](#3-technical-architecture)
+- [4. Critical Implementation Directives](#4-critical-implementation-directives)
+- [5. Parallel Work Streams](#5-parallel-work-streams)
+- [6. Migration Strategy](#6-migration-strategy)
+- [7. Success Criteria](#7-success-criteria)
+- [8. Risks and Mitigations](#8-risks-and-mitigations)
+- [9. Links](#9-links)
+
+---
+
 ## 1. Executive Summary
 
 The Durable Execution Engine provides the resilience layer ("The Muscle") for Meridian's

@@ -4,6 +4,25 @@
 **Implementation Tag:** saga-script-versioning
 **Related PRDs:** [Starlark Typed Service Clients](./starlark-typed-service-clients.md)
 
+## Table of Contents
+
+- [Implementation Status](#implementation-status)
+- [Problem Statement](#problem-statement)
+- [Current Pain Points](#current-pain-points)
+- [Proposed Solution](#proposed-solution)
+- [Testing Strategy](#testing-strategy)
+- [Implementation Plan](#implementation-plan)
+- [Total Estimated Effort](#total-estimated-effort)
+- [Lessons Learned](#lessons-learned)
+- [Success Criteria](#success-criteria)
+- [Risks & Mitigations](#risks--mitigations)
+- [Future Work: Distributed Causation Loop Prevention](#future-work-distributed-causation-loop-prevention)
+- [Dependencies](#dependencies)
+- [Open Questions](#open-questions)
+- [References](#references)
+
+---
+
 ## Implementation Status
 
 **Completed:** All handlers migrated from mock implementations in `shared/pkg/saga/handlers.go` to real service
