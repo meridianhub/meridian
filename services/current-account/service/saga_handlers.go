@@ -197,9 +197,13 @@ func currentAccountPositionKeepingInitiateLog(ctx *saga.StarlarkContext, params 
 	}
 
 	// Extract required parameters
-	accountID, err := requireString(params, "account_id")
-	if err != nil {
-		return nil, wrapHandlerError(handlerName, err)
+	// Accept either position_id (schema primary) or account_id (legacy alias)
+	accountID, ok := params["position_id"].(string)
+	if !ok || accountID == "" {
+		accountID, ok = params["account_id"].(string)
+		if !ok || accountID == "" {
+			return nil, wrapHandlerError(handlerName, fmt.Errorf("%w: position_id or account_id", errMissingParameter))
+		}
 	}
 
 	amount, err := requireDecimal(params, "amount")
