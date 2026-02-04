@@ -1799,8 +1799,15 @@ func TestBalanceCheck_ConcurrentWithdrawals_E2E(t *testing.T) {
 	_, err := executor.ExecuteDepositSaga(testEnv.AccountID, transactionID, initialBalance, "USD")
 	require.NoError(t, err, "Initial deposit should succeed")
 
-	// Wait for deposit to complete
-	time.Sleep(500 * time.Millisecond)
+	// Wait for deposit to complete and position log to be available
+	err = await.New().
+		AtMost(2 * time.Second).
+		PollInterval(50 * time.Millisecond).
+		Until(func() bool {
+			posLog := executor.GetPositionKeepingService().GetLog(transactionID)
+			return posLog != nil
+		})
+	require.NoError(t, err, "Position log should be available after deposit")
 
 	// Verify initial balance in position-keeping
 	posLog := executor.GetPositionKeepingService().GetLog(transactionID)
