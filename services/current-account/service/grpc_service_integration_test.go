@@ -665,8 +665,9 @@ func TestExecuteDeposit_WithOrchestration_PositionKeepingFailure(t *testing.T) {
 	// so the error message doesn't mention compensation.
 
 	// Verify account state after failure
-	// With the fixed saga ordering, the account is never saved if external services fail,
-	// so the balance should remain unchanged
+	// The saga is designed to perform all external service interactions before the final
+	// save_account step. If an external service fails, the save_account step is never
+	// executed, so the persisted account balance must remain unchanged.
 	updatedAccount, err := repo.FindByID(ctx, "ACC-002")
 	require.NoError(t, err)
 	// Account balance should be unchanged because save_account is the final step
