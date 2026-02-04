@@ -1,6 +1,6 @@
 module github.com/meridianhub/meridian
 
-go 1.25.7
+go 1.25.5
 
 require (
 	ariga.io/atlas-provider-gorm v0.6.0
@@ -49,6 +49,7 @@ require (
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bits-and-blooms/bitset v1.24.2 // indirect
+	github.com/bsm/redislock v0.9.4 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/mdelapenya/tlscert v0.2.0 // indirect

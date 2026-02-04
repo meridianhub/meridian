@@ -548,7 +548,7 @@ Provided scripts make onboarding easy:
 
 # Output:
 
-# ✓ Go 1.25.7 installed
+# ✓ Go 1.25.3 installed
 
 # ✓ Docker running
 
