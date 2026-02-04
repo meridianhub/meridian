@@ -22,9 +22,9 @@ instructions: |
 # PRD: Account-Scoped Valuation Engine
 
 **Status:** Draft - Revised Architecture
-**Version:** 2.3 (Security & Resilience Enhancements)
+**Version:** 2.4 (Reservation Ledger & Audit Enhancements)
 **Task Master Tag:** `valuation-engine`
-**Story Points:** 63 (10 streams)
+**Story Points:** 72 (11 streams)
 **Core ADR:** [ADR-0028: Starlark Saga Orchestration with CEL Valuation](../adr/0028-starlark-saga-cel-valuation.md)
 
 **Version History:**
@@ -33,6 +33,7 @@ instructions: |
 - v2.1: Gemini safety enhancements (passport pattern, event-driven cache)
 - v2.2: Atomic valuation with price lock (TOCTOU elimination)
 - v2.3: Security & resilience (read-only VM, graceful stale, bucket filtering, quality tracking)
+- v2.4: Reservation Ledger pattern, calculation path audit, canonical bucketing library
 
 ## 1. Executive Summary
 
@@ -274,6 +275,12 @@ message ValuationBasis {
 
   // Quality level of market data used (per ADR-018 Settlement & Reconciliation)
   repeated MarketDataQuality market_data_qualities = 8;
+
+  // Calculation path breadcrumbs (for regulatory audit of complex strategies)
+  repeated string calculation_path = 9;  // e.g., ["tier_2_applied", "markup_standard", "weekend_discount"]
+
+  // Degraded mode flag (set if fallback rates used due to service unavailability)
+  bool degraded_mode = 10;
 }
 
 message MarketDataQuality {
@@ -461,6 +468,47 @@ was booked**. This is essential for:
 Later, when `ACTUAL` arrives, the reconciliation process sees: "Original booking used ESTIMATE quality,
 revision is justified."
 
+#### Calculation Path (Audit Trail for Complex Strategies)
+
+**Requirement:** For complex strategies with branching logic (tiered pricing, time-of-use, conditional markups),
+the `ValuationBasis` MUST include a **calculation path** - a breadcrumb trail of which decision branches
+were taken during execution.
+
+**Purpose:** For M+14 regulatory settlement audits, auditors need to understand which parts of a complex
+strategy were executed without re-running the entire logic.
+
+**Implementation:** Starlark strategies call `record_path("tier_2_applied")` at key decision points:
+
+```python
+def valuate_tiered(input_quantity, params, knowledge_at):
+    projected = position_keeping.get_projected_balance(...)
+
+    if projected.amount < 500.0:
+        record_path("tier_1_applied")  # Breadcrumb
+        rate = 0.20
+    else:
+        record_path("tier_2_applied")  # Breadcrumb
+        rate = 0.35
+
+    if params.get("customer_tier") == "premium":
+        record_path("premium_discount_applied")  # Breadcrumb
+        rate = rate * 0.95
+
+    return calculate_value(input_quantity, rate)
+```
+
+**Result in ValuationBasis:**
+
+```json
+{
+  "calculation_path": ["tier_2_applied", "premium_discount_applied"],
+  "applied_rates": {"base_rate": "0.35", "discount_multiplier": "0.95"}
+}
+```
+
+**Audit Value:** Auditor sees: "This transaction used tier 2 pricing with premium discount. No weekend
+or time-of-use adjustments applied."
+
 ### FR-6: Caching Strategy
 
 **L1 Cache (In-Memory within Account Service):**
@@ -484,16 +532,32 @@ To achieve faster consistency than the 5-minute TTL, the system SHOULD implement
 
 **Graceful Stale Policy (Resilience):**
 
-If Reference Data is unavailable and the L1 cache is cold, `InitiateLien` would fail, blocking the entire saga.
+If Reference Data or Market Information is unavailable and the L1 cache is cold, `InitiateLien` would fail,
+blocking the entire saga.
 
 **Mitigation:** The cache SHOULD implement a **"Graceful Stale"** policy:
+
+**For Reference Data (strategies):**
 
 - If Reference Data backend is down, continue using expired strategies for up to **1 hour**
 - Log high-priority warning: "Using stale strategy due to Reference Data unavailability"
 - Metrics: `valuation_stale_cache_hits_total`
 
+**For Market Information (rates):**
+
+- If Market Information backend is down, the `market_data.get_price()` builtin SHOULD:
+  1. Return last known good value from L1 cache (if available)
+  2. OR use tenant-configured default rate (fallback)
+  3. Log high-priority warning: "Using fallback rate due to Market Information unavailability"
+  4. Set `degraded_mode: true` in ValuationBasis
+  5. Metrics: `valuation_degraded_mode_total`
+
 **Rationale:** In a ledger, "Calculated with slightly old formula" is preferable to "System Down."
-The 1-hour grace period allows operations teams to restore Reference Data without blocking transactions.
+The grace period allows operations teams to restore services without blocking transactions.
+
+**Risk Acceptance:** Degraded mode means the valuation may be less accurate, but the transaction proceeds.
+The `degraded_mode` flag in the basis allows downstream reconciliation to identify and adjust these
+transactions when services are restored.
 
 **Why no L2 Redis cache:**
 
@@ -673,8 +737,106 @@ Retrying `InitiateLien` with same `idempotency_key` returns the existing lien wi
 **Formula:**
 
 ```go
-ProjectedBalance = CurrentBalance + Sum(ActiveLiens)
+ProjectedBalance = CurrentBalance + Sum(ActiveReservations)
 ```
+
+#### The Architectural Challenge
+
+**Problem:** Liens are stored in **CurrentAccount service**, but `ProjectedBalance` queries happen in
+**Position Keeping service**. How does Position Keeping see active liens without:
+
+1. Cross-service JOINs (performance nightmare)
+2. Calling back to CurrentAccount (circular dependency)
+3. Polling CurrentAccount for lien state (latency, consistency issues)
+
+#### Solution: Reservation Ledger
+
+When `InitiateLien` is called in CurrentAccount, it MUST **synchronously** call a new Position Keeping RPC:
+
+```protobuf
+service PositionKeepingService {
+  // Record a reservation (called by Account Services during InitiateLien)
+  rpc RecordReservation(RecordReservationRequest) returns (RecordReservationResponse);
+
+  // Release a reservation (called during ExecuteLien or TerminateLien)
+  rpc ReleaseReservation(ReleaseReservationRequest) returns (ReleaseReservationResponse);
+
+  // Query projected balance (includes reservations)
+  rpc GetProjectedBalance(GetProjectedBalanceRequest) returns (GetProjectedBalanceResponse);
+}
+
+message RecordReservationRequest {
+  string account_id = 1;
+  string lien_id = 2;  // Links back to CurrentAccount lien
+  meridian.quantity.v1.InstrumentAmount reserved_amount = 3;
+  string bucket_id = 4;
+  google.protobuf.Timestamp knowledge_at = 5;
+}
+
+message ReleaseReservationRequest {
+  string lien_id = 1;
+  string reason = 2;  // "EXECUTED" or "TERMINATED"
+}
+```
+
+**Position Keeping Schema Enhancement:**
+
+```sql
+CREATE TABLE reservations (
+    lien_id UUID PRIMARY KEY,           -- Links to CurrentAccount liens table
+    account_id UUID NOT NULL,
+    instrument_code VARCHAR(32) NOT NULL,
+    bucket_id VARCHAR(64),              -- For fungibility-aware filtering
+    reserved_amount DECIMAL NOT NULL,
+    status VARCHAR(16) NOT NULL,        -- 'ACTIVE', 'EXECUTED', 'TERMINATED'
+    created_at TIMESTAMPTZ NOT NULL,
+    executed_at TIMESTAMPTZ,
+    terminated_at TIMESTAMPTZ,
+
+    INDEX idx_reservations_active (account_id, instrument_code, status, bucket_id)
+);
+```
+
+**CurrentAccount Flow Enhancement:**
+
+```go
+func (s *Service) InitiateLien(ctx context.Context, req *InitiateLienRequest) (*InitiateLienResponse, error) {
+    // 1. Query Projected Balance from Position Keeping (includes active reservations)
+    projectedBalance, err := s.positionClient.GetProjectedBalance(ctx, ...)
+
+    // 2. Execute valuation using projected balance
+    result, err := s.valuationEngine.Valuate(ctx, ...)
+
+    // 3. Create lien in CurrentAccount database
+    lien := s.repo.CreateLien(ctx, Lien{
+        ReservedQuantity: req.Amount,
+        ValuedAmount:     result.Output,
+        Basis:            result.Basis,
+    })
+
+    // 4. SYNCHRONOUSLY record reservation in Position Keeping
+    _, err = s.positionClient.RecordReservation(ctx, &positionkeepingv1.RecordReservationRequest{
+        AccountId:      req.AccountId,
+        LienId:         lien.ID,
+        ReservedAmount: req.Amount,
+        BucketId:       calculateBucketID(req.Amount),
+    })
+    if err != nil {
+        // CRITICAL: Rollback lien if reservation fails
+        s.repo.DeleteLien(ctx, lien.ID)
+        return nil, fmt.Errorf("failed to record reservation: %w", err)
+    }
+
+    return &InitiateLienResponse{LienId: lien.ID, ValuedAmount: result.Output}, nil
+}
+```
+
+**Why This Works:**
+
+- **No cross-service JOINs:** Position Keeping owns reservation data
+- **No circular dependencies:** One-way call from CurrentAccount → PositionKeeping
+- **High performance:** `GetProjectedBalance` is a simple local query
+- **Strong consistency:** Synchronous `RecordReservation` ensures atomicity
 
 **Use Case:**
 
@@ -748,23 +910,86 @@ For tiered pricing on `KWH` with attribute `source: solar` vs `source: grid`:
 Without bucket filtering, liens for `source:grid` would incorrectly affect the tier calculation for
 `source:solar`, causing cross-contamination of tier thresholds.
 
-**Implementation:** Stream 10 (Position Keeping) MUST implement bucket-aware aggregation:
+**Implementation:** Stream 10 (Position Keeping) MUST implement bucket-aware aggregation using the
+`reservations` table:
 
 ```sql
--- Without bucket filtering (WRONG for fungibility-aware tiering)
-SELECT SUM(amount) FROM position_entries WHERE instrument_code = 'KWH'
-
--- With bucket filtering (CORRECT)
-SELECT SUM(amount) FROM position_entries
-WHERE instrument_code = 'KWH'
-  AND bucket_id = 'kwh_solar'  -- Only solar kWh
+-- GetProjectedBalance implementation with Reservation Ledger
+WITH current AS (
+  SELECT COALESCE(SUM(amount), 0) AS balance
+  FROM position_entries
+  WHERE account_id = $1
+    AND instrument_code = $2
+    AND (bucket_id = $3 OR $3 IS NULL)
+    AND status IN ('POSTED', 'PENDING')
+),
+active_reservations AS (
+  SELECT COALESCE(SUM(reserved_amount), 0) AS reserved
+  FROM reservations
+  WHERE account_id = $1
+    AND instrument_code = $2
+    AND (bucket_id = $3 OR $3 IS NULL)
+    AND status = 'ACTIVE'
+)
+SELECT
+  current.balance AS current_balance,
+  active_reservations.reserved AS active_liens_total,
+  (current.balance + active_reservations.reserved) AS projected_balance
+FROM current, active_reservations;
 ```
+
+**Key Points:**
+
+1. **Local query:** No cross-service calls, no distributed JOINs
+2. **Bucket-aware:** Filters both position_entries and reservations by bucket_id
+3. **Performance:** Indexed on `(account_id, instrument_code, status, bucket_id)`
+4. **O(1) complexity:** Sum aggregations with proper indexes
 
 **Concurrency Safety:**
 
 By using Projected Balance with bucket filtering, the second concurrent lien sees the first lien's
 reservation (within the same bucket) and calculates the correct tier pricing. This eliminates the
 "Tiered Valuation Drift" bug while preserving fungibility boundaries.
+
+#### Canonical Bucket ID Calculation (CRITICAL)
+
+**Requirement:** The `bucket_id` calculation MUST be identical across all services to prevent "Bucket Drift."
+
+**Solution:** Create a shared library `shared/pkg/bucketing`:
+
+```go
+package bucketing
+
+// CalculateBucketID generates a canonical bucket key from an InstrumentAmount.
+// Used by: CurrentAccount, InternalBankAccount, PositionKeeping, ReferenceData, Valuation
+func CalculateBucketID(amount *quantity.InstrumentAmount) string {
+    if amount == nil || len(amount.Attributes) == 0 {
+        return ""  // No bucketing for simple instruments
+    }
+
+    // Sort attributes for deterministic key generation
+    keys := make([]string, 0, len(amount.Attributes))
+    for k := range amount.Attributes {
+        keys = append(keys, k)
+    }
+    sort.Strings(keys)
+
+    // Build canonical key: instrument_attr1=val1_attr2=val2
+    var parts []string
+    parts = append(parts, strings.ToLower(amount.InstrumentCode))
+    for _, k := range keys {
+        parts = append(parts, fmt.Sprintf("%s=%s", k, amount.Attributes[k]))
+    }
+    return strings.Join(parts, "_")
+}
+
+// Example:
+// InstrumentAmount{Code: "KWH", Attributes: {"source": "solar", "vintage": "2024"}}
+// → "kwh_source=solar_vintage=2024"
+```
+
+**Enforcement:** All services importing the valuation library MUST use `bucketing.CalculateBucketID()`.
+Direct bucket_id string construction is FORBIDDEN to prevent drift.
 
 ## 5. Technical Architecture
 
@@ -1112,7 +1337,7 @@ func main() {
 - Cache invalidation works on strategy updates
 - Identity strategies are available for all fiat currencies
 
-### Stream 4: Current Account Integration (P1, 8 points)
+### Stream 4: Current Account Integration (P1, 10 points)
 
 **Tasks:**
 
@@ -1121,25 +1346,32 @@ func main() {
 3. Update `InitiateLien` response to include `valued_amount` and `basis`
 4. Update `ExecuteDeposit` to perform atomic valuation
 5. Wire up valuation library in service initialization
-6. Add Position Keeping client for projected balance queries
+6. Add Position Keeping client for projected balance AND reservation RPCs
 7. Implement valuation in `InitiateLien` handler (price lock)
-8. Implement valuation in `ExecuteDeposit` handler
-9. Implement `GetValuedAmount` handler (inquiry-only, non-binding)
-10. Add Market Information client dependency
-11. Add observability (metrics, logging, tracing)
-12. Integration tests with mock strategies
-13. Concurrency tests (verify tiered pricing with parallel liens)
+8. **CRITICAL:** Call `position_keeping.RecordReservation()` after creating lien
+9. **CRITICAL:** Call `position_keeping.ReleaseReservation()` in ExecuteLien/TerminateLien
+10. Implement valuation in `ExecuteDeposit` handler
+11. Implement `GetValuedAmount` handler (inquiry-only, non-binding)
+12. Add Market Information client dependency with graceful degradation
+13. Add `record_path()` builtin for calculation path audit trail
+14. Add observability (metrics, logging, tracing, degraded_mode counter)
+15. Integration tests with mock strategies
+16. Concurrency tests (verify tiered pricing with parallel liens)
+17. Rollback test: If RecordReservation fails, lien must be deleted
 
 **Success Criteria:**
 
 - `InitiateLien` accepts non-monetary assets (kWh, TONNE_CO2E)
 - Lien stores price lock (valued_amount) alongside reserved_quantity
+- **RecordReservation called synchronously** after lien creation
+- **ReleaseReservation called** during ExecuteLien/TerminateLien
 - Concurrent liens on tiered pricing account get correct rates (no drift)
 - `GetValuedAmount` returns `is_estimate=true` (non-binding)
-- Valuation basis includes all applied rates and observation IDs
+- Valuation basis includes calculation_path and degraded_mode flag
+- Graceful degradation when Market Information unavailable
 - Metrics show execution time and cache hit rate
 
-### Stream 5: Internal Bank Account Integration (P1, 8 points)
+### Stream 5: Internal Bank Account Integration (P1, 10 points)
 
 **Tasks:**
 
@@ -1148,20 +1380,27 @@ func main() {
 3. Update `InitiateLien` response to include `valued_amount` and `basis`
 4. Update `ExecuteDeposit` to perform atomic valuation
 5. Wire up valuation library (same as Current Account)
-6. Add Position Keeping client for projected balance queries
+6. Add Position Keeping client for projected balance AND reservation RPCs
 7. Implement valuation in `InitiateLien` handler (price lock)
-8. Implement valuation in `ExecuteDeposit` handler
-9. Implement `GetValuedAmount` handler (inquiry-only, non-binding)
-10. Add Market Information client dependency
-11. Integration tests
-12. Concurrency tests (verify tiered pricing with parallel liens)
+8. **CRITICAL:** Call `position_keeping.RecordReservation()` after creating lien
+9. **CRITICAL:** Call `position_keeping.ReleaseReservation()` in ExecuteLien/TerminateLien
+10. Implement valuation in `ExecuteDeposit` handler
+11. Implement `GetValuedAmount` handler (inquiry-only, non-binding)
+12. Add Market Information client dependency with graceful degradation
+13. Add `record_path()` builtin for calculation path audit trail
+14. Integration tests
+15. Concurrency tests (verify tiered pricing with parallel liens)
+16. Rollback test: If RecordReservation fails, lien must be deleted
 
 **Success Criteria:**
 
 - Internal accounts can value assets using same strategies
 - Wholesale energy strategy works (spot price × GSP coefficient)
+- **RecordReservation called synchronously** after lien creation
+- **ReleaseReservation called** during ExecuteLien/TerminateLien
 - `InitiateLien` stores price lock for regulatory accounts
 - Concurrent liens handle tiered pricing correctly
+- Valuation basis includes calculation_path for regulatory audit
 - Audit trail is complete for regulatory accounts
 
 ### Stream 6: Saga Integration (P1, 8 points)
@@ -1245,31 +1484,56 @@ func main() {
 - Idempotent retries return same valuation (no recalculation)
 - Lien basis stored in JSONB includes observation_ids, rates, strategy version
 
-### Stream 10: Position Keeping Projected Balance (P0, 5 points)
+### Stream 10: Position Keeping Reservation Ledger & Projected Balance (P0, 8 points)
+
+**Architectural Note:** This stream implements the Reservation Ledger pattern to avoid cross-service
+dependencies. Position Keeping owns reservation data, enabling local-only projected balance queries.
 
 **Tasks:**
 
-1. Add `GetProjectedBalance` RPC to Position Keeping service
-2. Implement query with bucket filtering:
-   - `SELECT SUM(amount) FROM position_entries WHERE status IN ('POSTED', 'PENDING') AND bucket_id = ?`
-3. Add lien aggregation with bucket filtering:
-   - `SELECT SUM(reserved_amount) FROM liens WHERE status = 'ACTIVE' AND bucket_id = ?`
-4. Return structured response (current, liens, projected, bucket_id)
-5. **CRITICAL:** Implement bucket_id calculation from InstrumentAmount attributes
-6. Add caching (5-minute TTL, invalidated on writes)
-7. Add integration tests with concurrent liens on same bucket
-8. Add integration tests with concurrent liens on different buckets (verify isolation)
-9. Performance testing (must complete <10ms for account queries)
+1. Add `reservations` table to Position Keeping schema (see FR-9 for schema)
+2. Add `RecordReservation` RPC (called by Account Services during InitiateLien)
+3. Add `ReleaseReservation` RPC (called during ExecuteLien/TerminateLien)
+4. Add `GetProjectedBalance` RPC with bucket filtering
+5. Implement projected balance query using local reservations table:
+   - `SELECT SUM(amount) FROM position_entries WHERE ... AND bucket_id = ?`
+   - `SELECT SUM(reserved_amount) FROM reservations WHERE status = 'ACTIVE' AND bucket_id = ?`
+6. Add indexes: `(account_id, instrument_code, status, bucket_id)` on both tables
+7. **CRITICAL:** Use `shared/pkg/bucketing.CalculateBucketID()` for bucket calculation
+8. Add caching (5-minute TTL, invalidated on writes)
+9. Add integration tests: RecordReservation → GetProjectedBalance → ReleaseReservation lifecycle
+10. Add integration tests with concurrent reservations on same bucket
+11. Add integration tests with concurrent reservations on different buckets (verify isolation)
+12. Performance testing (must complete <10ms for projected balance queries)
 
 **Success Criteria:**
 
-- `GetProjectedBalance` returns current balance + active liens
-- Bucket filtering works: liens for `source:solar` don't affect `source:grid` tiers
-- Tiered pricing strategies can query projected balance per bucket
-- Second concurrent lien sees first lien's reservation (within same bucket)
+- `RecordReservation` creates reservation record in Position Keeping
+- `ReleaseReservation` marks reservation as EXECUTED or TERMINATED
+- `GetProjectedBalance` returns current balance + active reservations (local query only)
+- **No cross-service JOINs** - Position Keeping doesn't call back to Account Services
+- Bucket filtering works: reservations for `source:solar` don't affect `source:grid` tiers
+- Second concurrent reservation sees first reservation (within same bucket)
 - Performance: <10ms p99 for projected balance queries
-- Concurrency test: 10 parallel liens on tiered account all get correct rates
-- Isolation test: Solar liens don't contaminate grid tier calculations
+- Concurrency test: 10 parallel reservations on tiered account all get correct rates
+- Isolation test: Solar reservations don't contaminate grid tier calculations
+
+### Stream 11: Shared Bucketing Library (P0, 2 points)
+
+**Tasks:**
+
+1. Create `shared/pkg/bucketing` package
+2. Implement `CalculateBucketID(InstrumentAmount) string` with canonical key generation
+3. Add comprehensive unit tests for edge cases (nil, empty attributes, special characters)
+4. Document bucket key format and usage patterns
+5. Audit all services to ensure consistent bucket_id usage
+
+**Success Criteria:**
+
+- All services use `bucketing.CalculateBucketID()` for bucket calculation
+- No direct string construction of bucket_id anywhere in codebase
+- Same InstrumentAmount produces identical bucket_id across all services
+- Unit tests cover: nil input, empty attributes, multi-attribute sorting, special characters
 
 ## 7. Testing Strategy
 
