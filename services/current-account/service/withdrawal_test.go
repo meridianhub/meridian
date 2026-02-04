@@ -672,7 +672,8 @@ func TestRetrieveWithdrawal_MissingIdentifier(t *testing.T) {
 
 // TestExecuteWithdrawal_ConcurrentWithdrawals verifies optimistic locking prevents
 // concurrent withdrawals from overdrawing the account.
-// Uses await.Until instead of time.Sleep per project guidelines.
+// Concurrency is coordinated via sync.WaitGroup; await.Until is used for non-sleep
+// polling to wait for all withdrawals to complete, per project guidelines.
 func TestExecuteWithdrawal_ConcurrentWithdrawals(t *testing.T) {
 	db, ctx, cleanup := setupIntegrationTestDB(t)
 	defer cleanup()
@@ -717,10 +718,10 @@ func TestExecuteWithdrawal_ConcurrentWithdrawals(t *testing.T) {
 		})
 	require.NoError(t, err, "All withdrawals should complete")
 
-	// With Position Keeping mocks, the balance check always passes.
-	// However, optimistic locking on the database account version still causes
-	// concurrent modification conflicts (version mismatch).
-	// This is correct behavior - it prevents race conditions on account state.
+	// In a real system, concurrent withdrawals may still fail due to optimistic
+	// locking or other contention (e.g. version mismatches). This test only
+	// verifies that all concurrent withdrawal attempts complete and that at
+	// least one succeeds; it does not assert the specific cause of any failures.
 	successes := successCount.Load()
 	failures := failCount.Load()
 

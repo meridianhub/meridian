@@ -34,6 +34,23 @@ import (
 // Test Infrastructure (Subtask 4.1: Multi-Service E2E Setup)
 // ============================================================================
 
+// createTestCurrentAccount creates a unique test current account identifier for use
+// in end-to-end payment tests. Once the current-account service wiring is complete,
+// this helper can be extended to call the real service and persist the account.
+//
+//nolint:unused // Placeholder for future E2E test expansion
+func createTestCurrentAccount(t *testing.T, _ context.Context) string {
+	t.Helper()
+
+	// Generate a unique account ID for this test run to avoid collisions across
+	// concurrent E2E tests. Once current account service is integrated, this will
+	// call the real InitiateCurrentAccount RPC with proper IBAN formatting.
+	return fmt.Sprintf("ACC-PAY-E2E-%s", uuid.NewString())
+}
+
+// Additional test infrastructure and helpers
+// //
+
 // mockPaymentGateway simulates external payment gateway for testing.
 // It tracks invocations to verify saga short-circuit behavior.
 type mockPaymentGateway struct {
