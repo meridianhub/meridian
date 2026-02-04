@@ -25,10 +25,14 @@ var (
 // 2. Log the specific error with context about which dependency is missing
 // 3. Enter crash loop backoff in Kubernetes until the configuration is fixed
 var (
-	ErrOrchestratorLoggerNil           = sharedclients.ErrConfigLoggerNil
-	ErrOrchestratorRepositoryNil       = sharedclients.ErrConfigRepositoryNil
-	ErrOrchestratorPosKeepingClientNil = sharedclients.ErrConfigPositionKeepingClientNil
-	ErrOrchestratorFinAcctClientNil    = sharedclients.ErrConfigFinancialAccountingClientNil
+	ErrOrchestratorLoggerNil             = sharedclients.ErrConfigLoggerNil
+	ErrOrchestratorRepositoryNil         = sharedclients.ErrConfigRepositoryNil
+	ErrOrchestratorPosKeepingClientNil   = sharedclients.ErrConfigPositionKeepingClientNil
+	ErrOrchestratorFinAcctClientNil      = sharedclients.ErrConfigFinancialAccountingClientNil
+	ErrOrchestratorSagaRunnerNil         = errors.New("saga runner cannot be nil")
+	ErrOrchestratorDepositScriptEmpty    = errors.New("deposit script cannot be empty")
+	ErrOrchestratorWithdrawalScriptEmpty = errors.New("withdrawal script cannot be empty")
+	ErrSagaScriptLoadFailed              = errors.New("failed to get current file path for saga script loading")
 )
 
 // Saga orchestration errors for compensation and state tracking

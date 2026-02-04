@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"math"
 	"os"
+	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,6 +21,8 @@ import (
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	"github.com/meridianhub/meridian/shared/pkg/saga"
+	"github.com/meridianhub/meridian/shared/pkg/saga/schema"
 	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -234,6 +238,55 @@ func NewServiceWithExistingClients(
 		logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	}
 
+	// Load saga scripts
+	depositScript, err := loadSagaScript("sagas/deposit.star")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load deposit saga script: %w", err)
+	}
+	withdrawalScript, err := loadSagaScript("sagas/withdrawal.star")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load withdrawal saga script: %w", err)
+	}
+
+	// Create saga handler registry
+	handlerRegistry := saga.NewHandlerRegistry()
+	if err := RegisterCurrentAccountHandlers(handlerRegistry); err != nil {
+		return nil, fmt.Errorf("failed to register saga handlers: %w", err)
+	}
+
+	// Load schema registry from handlers.yaml
+	schemaRegistryData, err := os.ReadFile("../../shared/pkg/saga/schema/handlers.yaml")
+	if err != nil {
+		return nil, fmt.Errorf("failed to read handlers schema: %w", err)
+	}
+	schemaRegistry := schema.NewRegistry()
+	if err := schemaRegistry.LoadFromYAML(schemaRegistryData); err != nil {
+		return nil, fmt.Errorf("failed to load schema: %w", err)
+	}
+
+	// Build service modules for Starlark
+	serviceModules, err := schema.BuildServiceModules(handlerRegistry, schemaRegistry)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build service modules: %w", err)
+	}
+
+	// Create Starlark saga runtime
+	runtime, err := saga.NewRuntime(logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create saga runtime: %w", err)
+	}
+
+	// Create Starlark saga runner
+	sagaRunner, err := saga.NewStarlarkSagaRunner(saga.StarlarkSagaRunnerConfig{
+		Runtime:        runtime,
+		Registry:       handlerRegistry,
+		ServiceModules: serviceModules,
+		Logger:         logger,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create saga runner: %w", err)
+	}
+
 	// Create deposit orchestrator
 	depositOrchestrator, err := NewDepositOrchestrator(DepositOrchestratorConfig{
 		Logger:               logger,
@@ -243,6 +296,8 @@ func NewServiceWithExistingClients(
 		AccountConfig:        accountConfig,
 		AccountResolver:      accountResolver,
 		FungibilityValidator: fungibilityValidator,
+		SagaRunner:           sagaRunner,
+		DepositScript:        depositScript,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create deposit orchestrator: %w", err)
@@ -257,6 +312,8 @@ func NewServiceWithExistingClients(
 		AccountConfig:        accountConfig,
 		AccountResolver:      accountResolver,
 		FungibilityValidator: fungibilityValidator,
+		SagaRunner:           sagaRunner,
+		WithdrawalScript:     withdrawalScript,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create withdrawal orchestrator: %w", err)
@@ -1964,4 +2021,25 @@ func (s *Service) sendCloseWebhook(tenantID, accountID, reason string, balance *
 			"account_id", accountID,
 			"tenant_id", tenantID)
 	}
+}
+
+// loadSagaScript loads a saga script from the given path relative to the service directory.
+func loadSagaScript(relativePath string) (string, error) {
+	// Get the directory where this source file is located
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		return "", ErrSagaScriptLoadFailed
+	}
+	serviceDir := filepath.Dir(filename)
+
+	// Construct the full path to the saga script
+	scriptPath := filepath.Join(serviceDir, "..", relativePath)
+
+	// Read the script file
+	content, err := os.ReadFile(scriptPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read saga script %s: %w", scriptPath, err)
+	}
+
+	return string(content), nil
 }
