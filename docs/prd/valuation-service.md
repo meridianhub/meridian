@@ -22,10 +22,17 @@ instructions: |
 # PRD: Account-Scoped Valuation Engine
 
 **Status:** Draft - Revised Architecture
-**Version:** 2.2 (Atomic Valuation with Price Lock)
+**Version:** 2.3 (Security & Resilience Enhancements)
 **Task Master Tag:** `valuation-engine`
 **Story Points:** 63 (10 streams)
 **Core ADR:** [ADR-0028: Starlark Saga Orchestration with CEL Valuation](../adr/0028-starlark-saga-cel-valuation.md)
+
+**Version History:**
+
+- v2.0: Embedded library architecture (vs standalone service)
+- v2.1: Gemini safety enhancements (passport pattern, event-driven cache)
+- v2.2: Atomic valuation with price lock (TOCTOU elimination)
+- v2.3: Security & resilience (read-only VM, graceful stale, bucket filtering, quality tracking)
 
 ## 1. Executive Summary
 
@@ -228,6 +235,12 @@ guarantee the returned price will be honored in subsequent transactions. It is i
 **For transactional flows** (actual withdrawals/deposits), valuation MUST happen atomically within
 `InitiateLien` or `ExecuteDeposit` (see FR-8).
 
+**Design Note (Naming):**
+
+BIAN uses "Probe" terminology for non-binding inquiries. Alternative naming: `EvaluateAmount` emphasizes
+computation/simulation semantics vs `Get...` which implies simple field retrieval. Current name
+`GetValuedAmount` is acceptable but may be revisited in implementation for stronger BIAN alignment.
+
 ```protobuf
 service CurrentAccountService {
   // Inquiry-only valuation (non-binding)
@@ -258,6 +271,16 @@ message ValuationBasis {
   google.protobuf.Timestamp computed_at = 5;
   google.protobuf.Timestamp knowledge_at = 6;
   google.protobuf.Struct account_parameters = 7;
+
+  // Quality level of market data used (per ADR-018 Settlement & Reconciliation)
+  repeated MarketDataQuality market_data_qualities = 8;
+}
+
+message MarketDataQuality {
+  string observation_id = 1;
+  string source_trust_level = 2;  // "ESTIMATE", "COEFFICIENT", "ACTUAL", "REVISED"
+  string instrument_code = 3;     // e.g., "EPEX_SPOT"
+  string value = 4;               // The rate/price used
 }
 ```
 
@@ -399,6 +422,45 @@ of the evidence used for that valuation.
 **Auditability:** Seven years from now, an auditor can examine a single `PositionEntry` and see the complete
 "Receipt" for the valuation without calling any external services.
 
+**Quality Level Tracking (Settlement & Reconciliation):**
+
+Per ADR-018, the `ValuationBasis` MUST include the `SourceTrustLevel` of each market data observation used:
+
+- `ESTIMATE` (Quality 1): Forecast or projection
+- `COEFFICIENT` (Quality 2): Model-derived value
+- `ACTUAL` (Quality 3): Metered or observed value
+- `REVISED` (Quality 4): Corrected after audit
+
+**Why This Matters:**
+
+If a valuation was performed using an `ESTIMATE` (Quality 1) at T0, but later an `ACTUAL` (Quality 3)
+arrives at T1, the `ValuationBasis` in the ledger provides **proof of why the original (now "wrong") amount
+was booked**. This is essential for:
+
+- Settlement processes (explaining why provisional amounts differ from final)
+- Reconciliation (tracking estimate-to-actual adjustments)
+- Regulatory audit (demonstrating best available information at transaction time)
+
+**Example `ValuationBasis` with Quality Levels:**
+
+```json
+{
+  "strategy_id": "wholesale-spot-v2",
+  "applied_rates": {"EPEX_SPOT": "0.456"},
+  "market_data_qualities": [
+    {
+      "observation_id": "obs_abc123",
+      "source_trust_level": "ESTIMATE",
+      "instrument_code": "EPEX_SPOT",
+      "value": "0.456"
+    }
+  ]
+}
+```
+
+Later, when `ACTUAL` arrives, the reconciliation process sees: "Original booking used ESTIMATE quality,
+revision is justified."
+
 ### FR-6: Caching Strategy
 
 **L1 Cache (In-Memory within Account Service):**
@@ -419,6 +481,19 @@ To achieve faster consistency than the 5-minute TTL, the system SHOULD implement
 3. New transactions use the updated strategy within milliseconds, not minutes
 
 **Implementation:** This is a P2 enhancement (Stream 8). The 5-minute TTL provides acceptable baseline behavior.
+
+**Graceful Stale Policy (Resilience):**
+
+If Reference Data is unavailable and the L1 cache is cold, `InitiateLien` would fail, blocking the entire saga.
+
+**Mitigation:** The cache SHOULD implement a **"Graceful Stale"** policy:
+
+- If Reference Data backend is down, continue using expired strategies for up to **1 hour**
+- Log high-priority warning: "Using stale strategy due to Reference Data unavailability"
+- Metrics: `valuation_stale_cache_hits_total`
+
+**Rationale:** In a ledger, "Calculated with slightly old formula" is preferable to "System Down."
+The 1-hour grace period allows operations teams to restore Reference Data without blocking transactions.
 
 **Why no L2 Redis cache:**
 
@@ -444,12 +519,52 @@ BAD: Valuation triggers position log → Position log triggers valuation → Loo
 2. **Domain Boundary:** Valuation is "Math-as-a-Service" - it calculates, it does not transact.
 3. **Saga Responsibility:** Only the Saga Orchestrator can write to Position Keeping, and only AFTER
    receiving the valuation response.
+4. **Separate Builtin Registry (CRITICAL):** The `shared/pkg/valuation` library MUST use a **different
+   Starlark builtin registry** than `shared/pkg/saga`. Specifically, it MUST EXCLUDE all write-capable
+   handlers:
+   - `position_keeping.initiate_log` (blocked)
+   - `financial_accounting.post_entries` (blocked)
+   - `current_account.execute_debit` (blocked)
+   - Any other state-mutating operations
 
-**Architectural Safety:** By making valuation a read-only operation, we prevent:
+**Implementation Requirement:**
+
+```go
+// shared/pkg/valuation/starlark_runtime.go
+func newValuationBuiltins() starlark.StringDict {
+    return starlark.StringDict{
+        "market_data":    builtinMarketData,     // ✅ Read-only
+        "cel_eval":       builtinCelEval,        // ✅ Pure computation
+        "quantity":       builtinQuantity,       // ✅ Math operations
+        // ❌ NO position_keeping, NO financial_accounting
+    }
+}
+```
+
+**Verification:** Stream 2 MUST include a unit test:
+
+```go
+func TestValuationCannotWriteToPositionKeeping(t *testing.T) {
+    strategy := `
+        def valuate(input, params, knowledge_at):
+            # Attempt to write (should fail at VM level)
+            position_keeping.initiate_log(...)
+            return {"amount": 100}
+    `
+    engine := NewEngine(...)
+    _, err := engine.Valuate(ctx, Request{Strategy: strategy})
+
+    // Expect: name 'position_keeping' is not defined
+    assert.ErrorContains(t, err, "name 'position_keeping' is not defined")
+}
+```
+
+**Architectural Safety:** By making valuation a read-only operation with VM-level enforcement, we prevent:
 
 - Recursive valuation loops
 - Non-deterministic execution (valuation affecting its own inputs)
 - Unauthorized state mutations
+- Malicious or buggy strategies triggering writes
 
 ### FR-8: Atomic Valuation in Lien Initiation (Price Lock)
 
@@ -519,6 +634,32 @@ locked value, NOT a recalculated value. This protects both:
 - **Customer**: Price won't increase between reservation and execution
 - **Merchant**: Tiered discounts can't be gamed by concurrent reservations
 
+**CRITICAL Constraint:** The `ExecuteLien` RPC MUST be updated to **forbid amount overrides**. The handler
+MUST strictly use the `valued_amount` stored in the database lien record created by `InitiateLien`. No
+parameters in the `ExecuteLienRequest` may override this value.
+
+**Implementation Check:**
+
+```go
+func (s *Service) ExecuteLien(ctx context.Context, req *ExecuteLienRequest) (*ExecuteLienResponse, error) {
+    // Load lien from database
+    lien, err := s.repo.FindLienByID(ctx, req.LienId)
+
+    // ❌ FORBIDDEN: Allow override
+    // if req.OverrideAmount != nil {
+    //     amount = req.OverrideAmount
+    // }
+
+    // ✅ REQUIRED: Use stored valued_amount
+    valuedAmount := lien.ValuedAmount  // Price lock from InitiateLien
+
+    // Post to Position Keeping with locked value
+    return s.positionClient.Post(ctx, valuedAmount, lien.Basis)
+}
+```
+
+**Rationale:** Allowing overrides would defeat the price lock guarantee and reintroduce TOCTOU vulnerabilities.
+
 #### Idempotency
 
 Retrying `InitiateLien` with same `idempotency_key` returns the existing lien with its original
@@ -575,19 +716,55 @@ message GetProjectedBalanceRequest {
   string account_id = 1;
   string instrument_code = 2;
   google.protobuf.Timestamp knowledge_at = 3;
+
+  // CRITICAL: Bucket filtering for fungibility-aware tiering
+  // If strategy uses tiered pricing for source:solar vs source:grid separately,
+  // the projection must only include liens/balance for the same bucket
+  string bucket_id = 4;  // Optional: filters by instrument attributes
 }
 
 message GetProjectedBalanceResponse {
   meridian.quantity.v1.InstrumentAmount current_balance = 1;
   meridian.quantity.v1.InstrumentAmount active_liens_total = 2;
   meridian.quantity.v1.InstrumentAmount projected_balance = 3;  // current + liens
+
+  // Echo back the bucket filter used (for debugging)
+  string bucket_id = 4;
 }
+```
+
+**Bucket Filtering Requirement (CRITICAL):**
+
+When querying `ProjectedBalance`, the system MUST support filtering by `bucket_id`. A `bucket_id` represents
+a specific fungibility partition of an instrument.
+
+**Example:**
+
+For tiered pricing on `KWH` with attribute `source: solar` vs `source: grid`:
+
+- Tier strategy for `source:solar` queries: `GetProjectedBalance(instrument=KWH, bucket_id=kwh_solar)`
+- Tier strategy for `source:grid` queries: `GetProjectedBalance(instrument=KWH, bucket_id=kwh_grid)`
+
+Without bucket filtering, liens for `source:grid` would incorrectly affect the tier calculation for
+`source:solar`, causing cross-contamination of tier thresholds.
+
+**Implementation:** Stream 10 (Position Keeping) MUST implement bucket-aware aggregation:
+
+```sql
+-- Without bucket filtering (WRONG for fungibility-aware tiering)
+SELECT SUM(amount) FROM position_entries WHERE instrument_code = 'KWH'
+
+-- With bucket filtering (CORRECT)
+SELECT SUM(amount) FROM position_entries
+WHERE instrument_code = 'KWH'
+  AND bucket_id = 'kwh_solar'  -- Only solar kWh
 ```
 
 **Concurrency Safety:**
 
-By using Projected Balance, the second concurrent lien sees the first lien's reservation and calculates
-the correct tier pricing. This eliminates the "Tiered Valuation Drift" bug.
+By using Projected Balance with bucket filtering, the second concurrent lien sees the first lien's
+reservation (within the same bucket) and calculates the correct tier pricing. This eliminates the
+"Tiered Valuation Drift" bug while preserving fungibility boundaries.
 
 ## 5. Technical Architecture
 
@@ -900,10 +1077,12 @@ func main() {
 2. Implement CEL compiler wrapper with security constraints
 3. Implement Starlark VM wrapper with timeouts
 4. Register built-in functions (market_data, cel_eval, quantity operations)
-5. Implement L1 in-memory cache
-6. Add comprehensive unit tests
-7. Add benchmarks (target: <5ms in-process execution)
-8. Document library usage patterns
+5. **CRITICAL:** Implement separate read-only builtin registry (exclude position_keeping, financial_accounting)
+6. Implement L1 in-memory cache with graceful stale policy (1-hour grace if backend down)
+7. Add comprehensive unit tests
+8. **CRITICAL:** Add security verification test (strategy cannot call write handlers)
+9. Add benchmarks (target: <5ms in-process execution)
+10. Document library usage patterns
 
 **Success Criteria:**
 
@@ -912,6 +1091,9 @@ func main() {
 - Expression cost limits prevent infinite loops
 - Benchmark shows <5ms execution time for typical strategies
 - Cache hit rate >80% after warmup (for same strategy_id)
+- **Security test passes:** Strategy attempting `position_keeping.initiate_log` fails with
+  `name 'position_keeping' is not defined`
+- Graceful stale cache activates when Reference Data unavailable (logs warning, continues)
 
 ### Stream 3: Reference Data Strategy Storage (P0, 5 points)
 
@@ -1068,20 +1250,26 @@ func main() {
 **Tasks:**
 
 1. Add `GetProjectedBalance` RPC to Position Keeping service
-2. Implement query: `SELECT SUM(amount) FROM position_entries WHERE status IN ('POSTED', 'PENDING')`
-3. Add lien aggregation: `SELECT SUM(reserved_amount) FROM liens WHERE status = 'ACTIVE'`
-4. Return structured response (current, liens, projected)
-5. Add caching (5-minute TTL, invalidated on writes)
-6. Add integration tests with concurrent liens
-7. Performance testing (must complete <10ms for account queries)
+2. Implement query with bucket filtering:
+   - `SELECT SUM(amount) FROM position_entries WHERE status IN ('POSTED', 'PENDING') AND bucket_id = ?`
+3. Add lien aggregation with bucket filtering:
+   - `SELECT SUM(reserved_amount) FROM liens WHERE status = 'ACTIVE' AND bucket_id = ?`
+4. Return structured response (current, liens, projected, bucket_id)
+5. **CRITICAL:** Implement bucket_id calculation from InstrumentAmount attributes
+6. Add caching (5-minute TTL, invalidated on writes)
+7. Add integration tests with concurrent liens on same bucket
+8. Add integration tests with concurrent liens on different buckets (verify isolation)
+9. Performance testing (must complete <10ms for account queries)
 
 **Success Criteria:**
 
 - `GetProjectedBalance` returns current balance + active liens
-- Tiered pricing strategies can query projected balance
-- Second concurrent lien sees first lien's reservation
+- Bucket filtering works: liens for `source:solar` don't affect `source:grid` tiers
+- Tiered pricing strategies can query projected balance per bucket
+- Second concurrent lien sees first lien's reservation (within same bucket)
 - Performance: <10ms p99 for projected balance queries
 - Concurrency test: 10 parallel liens on tiered account all get correct rates
+- Isolation test: Solar liens don't contaminate grid tier calculations
 
 ## 7. Testing Strategy
 
