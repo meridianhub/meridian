@@ -31,17 +31,18 @@ const (
 
 // Sentinel errors for handler operations.
 var (
-	errHandlerDepsNotFound  = errors.New("handler dependencies not found in context")
-	errInvalidHandlerDeps   = errors.New("invalid handler dependencies type")
-	errAccountNotFound      = errors.New("account not found in context")
-	errInvalidAccountType   = errors.New("invalid account type")
-	errInvalidDirection     = errors.New("invalid direction")
-	errNilPositionLog       = errors.New("nil position log from service")
-	errNilBookingLog        = errors.New("nil booking log from service")
-	errNilPosting           = errors.New("nil posting from service")
-	errInvalidStatus        = errors.New("invalid status")
-	errMissingParameter     = errors.New("missing required parameter")
-	errInvalidParameterType = errors.New("invalid parameter type")
+	errHandlerDepsNotFound   = errors.New("handler dependencies not found in context")
+	errInvalidHandlerDeps    = errors.New("invalid handler dependencies type")
+	errAccountNotFound       = errors.New("account not found in context")
+	errInvalidAccountType    = errors.New("invalid account type")
+	errInvalidDirection      = errors.New("invalid direction")
+	errNilPositionLog        = errors.New("nil position log from service")
+	errNilBookingLog         = errors.New("nil booking log from service")
+	errNilPosting            = errors.New("nil posting from service")
+	errInvalidStatus         = errors.New("invalid status")
+	errMissingParameter      = errors.New("missing required parameter")
+	errInvalidParameterType  = errors.New("invalid parameter type")
+	errHandlerNotImplemented = errors.New("handler not implemented")
 )
 
 // CurrentAccountHandlerDeps contains dependencies needed by Current Account saga handlers.
@@ -64,32 +65,58 @@ const (
 	ContextKeyAccount contextKey = "current_account"
 )
 
+// stubNotImplemented returns a stub handler that returns an error indicating the handler is not implemented.
+// This is used for handlers defined in the schema but not yet implemented in this service.
+func stubNotImplemented(handlerName string) saga.Handler {
+	return func(_ *saga.StarlarkContext, _ map[string]any) (any, error) {
+		return nil, fmt.Errorf("%w: %s", errHandlerNotImplemented, handlerName)
+	}
+}
+
 // RegisterCurrentAccountHandlers registers all Current Account-specific step handlers
 // with the given HandlerRegistry. These handlers are used by the Starlark
 // saga runtime to execute withdrawal and deposit operations.
 //
-// Handler naming convention: current_account.<domain>.<action>
-// Examples:
-//   - current_account.position_keeping.initiate_log
-//   - current_account.financial_accounting.post_entries
-//   - current_account.repository.save
+// Handler naming convention matches handlers.yaml schema:
+//   - position_keeping.* for position service handlers
+//   - financial_accounting.* for financial accounting handlers
+//   - current_account.* for domain-specific handlers
 func RegisterCurrentAccountHandlers(registry *saga.HandlerRegistry) error {
 	handlers := []struct {
 		name    string
 		handler saga.Handler
 	}{
-		// Position Keeping handlers
-		{"current_account.position_keeping.initiate_log", currentAccountPositionKeepingInitiateLog},
-		{"current_account.position_keeping.cancel_log", currentAccountPositionKeepingCancelLog},
+		// Position Keeping handlers (global namespace)
+		{"position_keeping.initiate_log", currentAccountPositionKeepingInitiateLog},
+		{"position_keeping.update_log", stubNotImplemented("position_keeping.update_log")},
+		{"position_keeping.cancel_log", currentAccountPositionKeepingCancelLog},
 
-		// Financial Accounting handlers
-		{"current_account.financial_accounting.initiate_booking_log", currentAccountFinAcctInitiateBookingLog},
-		{"current_account.financial_accounting.capture_posting", currentAccountFinAcctCapturePosting},
-		{"current_account.financial_accounting.update_booking_log", currentAccountFinAcctUpdateBookingLog},
-		{"current_account.financial_accounting.compensate_posting", currentAccountFinAcctCompensatePosting},
+		// Financial Accounting handlers (global namespace)
+		{"financial_accounting.post_entries", stubNotImplemented("financial_accounting.post_entries")},
+		{"financial_accounting.reverse_entries", stubNotImplemented("financial_accounting.reverse_entries")},
+		{"financial_accounting.create_booking", stubNotImplemented("financial_accounting.create_booking")},
+		{"financial_accounting.initiate_booking_log", currentAccountFinAcctInitiateBookingLog},
+		{"financial_accounting.capture_posting", currentAccountFinAcctCapturePosting},
+		{"financial_accounting.update_booking_log", currentAccountFinAcctUpdateBookingLog},
+		{"financial_accounting.compensate_posting", currentAccountFinAcctCompensatePosting},
 
-		// Repository handlers
-		{"current_account.repository.save", currentAccountRepositorySave},
+		// Current Account domain handlers
+		{"current_account.save", currentAccountRepositorySave},
+
+		// Lien handlers (stubs - not yet implemented but required by schema)
+		{"current_account.create_lien", stubNotImplemented("current_account.create_lien")},
+		{"current_account.execute_lien", stubNotImplemented("current_account.execute_lien")},
+		{"current_account.terminate_lien", stubNotImplemented("current_account.terminate_lien")},
+
+		// Platform-wide handlers (stubs - defined in schema for other services)
+		{"notification.send", stubNotImplemented("notification.send")},
+		{"payment_order.create_lien", stubNotImplemented("payment_order.create_lien")},
+		{"payment_order.execute_lien", stubNotImplemented("payment_order.execute_lien")},
+		{"payment_order.post_ledger_entries", stubNotImplemented("payment_order.post_ledger_entries")},
+		{"payment_order.send_to_gateway", stubNotImplemented("payment_order.send_to_gateway")},
+		{"payment_order.terminate_lien", stubNotImplemented("payment_order.terminate_lien")},
+		{"repository.save", stubNotImplemented("repository.save")},
+		{"valuation_engine.valuate", stubNotImplemented("valuation_engine.valuate")},
 	}
 
 	for _, h := range handlers {
@@ -170,9 +197,13 @@ func currentAccountPositionKeepingInitiateLog(ctx *saga.StarlarkContext, params 
 	}
 
 	// Extract required parameters
-	accountID, err := requireString(params, "account_id")
-	if err != nil {
-		return nil, wrapHandlerError(handlerName, err)
+	// Accept either position_id (schema primary) or account_id (legacy alias)
+	accountID, ok := params["position_id"].(string)
+	if !ok || accountID == "" {
+		accountID, ok = params["account_id"].(string)
+		if !ok || accountID == "" {
+			return nil, wrapHandlerError(handlerName, fmt.Errorf("%w: position_id or account_id", errMissingParameter))
+		}
 	}
 
 	amount, err := requireDecimal(params, "amount")

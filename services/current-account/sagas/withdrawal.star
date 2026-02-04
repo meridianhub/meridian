@@ -26,77 +26,83 @@
 # Define the withdrawal saga
 withdrawal_saga = saga(name="current_account_withdrawal")
 
-# Extract input data
-account_id = input_data["account_id"]
-account_identification = input_data["account_identification"]
-amount = Decimal(input_data["amount"])
-currency = input_data["currency"]
-transaction_id = input_data["transaction_id"]
-clearing_account_id = input_data.get("clearing_account_id", "")
+# Define the saga execution function (required for conditional logic)
+def execute_withdrawal():
+    # Extract input data
+    account_id = input_data["account_id"]
+    account_identification = input_data["account_identification"]
+    amount = Decimal(input_data["amount"])
+    currency = input_data["currency"]
+    transaction_id = input_data["transaction_id"]
+    clearing_account_id = input_data.get("clearing_account_id", "")
 
-# Step 1: Log position in PositionKeeping service with DEBIT direction
-step(name="log_position")
-log_position_result = position_keeping.initiate_log(
-    account_id=account_identification,
-    amount=amount,
-    currency=currency,
-    direction="DEBIT",
-    transaction_id=transaction_id,
-)
-
-# Step 2: Initiate booking log in FinancialAccounting service
-step(name="initiate_booking_log")
-booking_log_result = financial_accounting.initiate_booking_log(
-    account_id=account_id,
-    currency=currency,
-    transaction_id=transaction_id,
-    transaction_type="WITHDRAWAL",
-)
-
-# Step 3: Capture DEBIT posting to customer account
-step(name="capture_debit_posting")
-debit_result = financial_accounting.capture_posting(
-    booking_log_id=booking_log_result.booking_log_id,
-    account_id=account_id,
-    amount=amount,
-    currency=currency,
-    direction="DEBIT",
-    transaction_id=transaction_id,
-    posting_type="debit",
-)
-
-# Step 4: Capture CREDIT posting to clearing account (if double-entry enabled)
-if clearing_account_id != "":
-    step(name="capture_credit_posting")
-    credit_result = financial_accounting.capture_posting(
-        booking_log_id=booking_log_result.booking_log_id,
-        account_id=clearing_account_id,
+    # Step 1: Log position in PositionKeeping service with DEBIT direction
+    step(name="log_position")
+    log_position_result = position_keeping.initiate_log(
+        position_id=account_identification,
         amount=amount,
         currency=currency,
-        direction="CREDIT",
+        direction="DEBIT",
         transaction_id=transaction_id,
-        posting_type="credit",
     )
 
-# Step 5: Finalize booking log (transition to POSTED)
-step(name="finalize_booking_log")
-finalize_result = financial_accounting.update_booking_log(
-    booking_log_id=booking_log_result.booking_log_id,
-    status="POSTED",
-)
+    # Step 2: Initiate booking log in FinancialAccounting service
+    step(name="initiate_booking_log")
+    booking_log_result = financial_accounting.initiate_booking_log(
+        account_id=account_id,
+        currency=currency,
+        transaction_id=transaction_id,
+        transaction_type="WITHDRAWAL",
+    )
 
-# Step 6: Save account metadata
-step(name="save_account")
-save_result = current_account.save(
-    account_id=account_id,
-    transaction_id=transaction_id,
-)
+    # Step 3: Capture DEBIT posting to customer account
+    step(name="capture_debit_posting")
+    debit_result = financial_accounting.capture_posting(
+        booking_log_id=booking_log_result.booking_log_id,
+        account_id=account_id,
+        amount=amount,
+        currency=currency,
+        direction="DEBIT",
+        transaction_id=transaction_id,
+        posting_type="debit",
+    )
 
-# Output the saga result
-result = {
-    "status": "COMPLETED",
-    "transaction_id": transaction_id,
-    "position_log_id": log_position_result.log_id,
-    "booking_log_id": booking_log_result.booking_log_id,
-    "debit_posting_id": debit_result.posting_id,
-}
+    # Step 4: Capture CREDIT posting to clearing account (if double-entry enabled)
+    credit_result = None
+    if clearing_account_id != "":
+        step(name="capture_credit_posting")
+        credit_result = financial_accounting.capture_posting(
+            booking_log_id=booking_log_result.booking_log_id,
+            account_id=clearing_account_id,
+            amount=amount,
+            currency=currency,
+            direction="CREDIT",
+            transaction_id=transaction_id,
+            posting_type="credit",
+        )
+
+    # Step 5: Finalize booking log (transition to POSTED)
+    step(name="finalize_booking_log")
+    finalize_result = financial_accounting.update_booking_log(
+        booking_log_id=booking_log_result.booking_log_id,
+        status="POSTED",
+    )
+
+    # Step 6: Save account metadata
+    step(name="save_account")
+    save_result = current_account.save(
+        account_id=account_id,
+        transaction_id=transaction_id,
+    )
+
+    # Return the saga result
+    return {
+        "status": "COMPLETED",
+        "transaction_id": transaction_id,
+        "position_log_id": log_position_result.log_id,
+        "booking_log_id": booking_log_result.booking_log_id,
+        "debit_posting_id": debit_result.posting_id,
+    }
+
+# Execute the saga
+result = execute_withdrawal()

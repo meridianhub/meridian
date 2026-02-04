@@ -60,6 +60,21 @@ instructions: |
 
 ---
 
+## Table of Contents
+
+- [Executive Summary](#executive-summary)
+- [BIAN Alignment](#bian-alignment)
+- [Service Boundaries (Canonical Ingestion Contract)](#service-boundaries-canonical-ingestion-contract)
+- [Requirements](#requirements)
+- [Technical Design](#technical-design)
+- [Implementation Tasks](#implementation-tasks)
+- [Success Criteria](#success-criteria)
+- [Appendix A: Dataset Definition Examples](#appendix-a-dataset-definition-examples)
+- [Appendix B: Quality Ladder Resolution](#appendix-b-quality-ladder-resolution)
+- [Appendix C: Comparison with Reference Data Service](#appendix-c-comparison-with-reference-data-service)
+
+---
+
 ## Executive Summary
 
 This PRD defines the requirements for implementing the **Market Information Management** service

@@ -7,6 +7,24 @@
 
 ---
 
+## Table of Contents
+
+- [Executive Summary](#executive-summary)
+- [1. End-to-End Test Coverage Analysis](#1-end-to-end-test-coverage-analysis)
+- [2. Stubbed/Mocked Implementations in Production Code](#2-stubbedmocked-implementations-in-production-code)
+- [3. Production Readiness Issues](#3-production-readiness-issues)
+- [4. Recommended Implementation Plan](#4-recommended-implementation-plan)
+- [5. Test Infrastructure Patterns](#5-test-infrastructure-patterns)
+- [6. Success Criteria](#6-success-criteria)
+- [7. Risk Assessment](#7-risk-assessment)
+- [8. Estimated Effort](#8-estimated-effort)
+- [9. Open Questions](#9-open-questions)
+- [10. References](#10-references)
+- [Appendix A: Starlark Saga Architecture Gaps](#appendix-a-starlark-saga-architecture-gaps)
+- [Relationship to starlark-service-bindings.md PRD](#relationship-to-starlark-service-bindingsmd-prd)
+
+---
+
 ## Executive Summary
 
 Comprehensive codebase audit identified **significant end-to-end test coverage gaps** (only 25% of services have e2e

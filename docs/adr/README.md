@@ -73,6 +73,34 @@ Architectural Decision Records) format.
 <!-- markdownlint-disable-next-line MD013 -->
 | [ADR-0026](0026-canonical-ingestion-contract.md) | Canonical Ingestion Contract | Accepted | 2026-01-17 |
 
+## Architecture Decision Relationships
+
+Key architectural decisions and their dependencies:
+
+```mermaid
+graph LR
+    ADR0001[ADR-0001<br/>Record Decisions] --> ADR0002[ADR-0002<br/>Microservices per BIAN]
+    ADR0002 --> ADR0003[ADR-0003<br/>Database Migrations]
+    ADR0002 --> ADR0015[ADR-0015<br/>Service Directory]
+    ADR0002 --> ADR0010[ADR-0010<br/>gRPC Load Balancing]
+    ADR0003 --> ADR0015
+    ADR0004[ADR-0004<br/>Event Schema Evolution] --> ADR0005[ADR-0005<br/>Adapter Pattern]
+    ADR0013[ADR-0013<br/>Quantity Types] --> ADR0014[ADR-0014<br/>Reference Data]
+    ADR0014 --> ADR0017[ADR-0017<br/>Temporal Quality Ladder]
+    ADR0016[ADR-0016<br/>Tenant ID Strategy] -.influences.-> ADR0003
+
+    style ADR0002 fill:#e1f5ff
+    style ADR0013 fill:#e1f5ff
+    style ADR0017 fill:#fff4e6
+```
+
+**Legend:**
+
+- Solid lines: Direct dependencies
+- Dashed lines: Influences or relates to
+- Blue background: Foundational decisions
+- Orange background: Proposed/experimental
+
 ## Categories
 
 ### Project Structure
