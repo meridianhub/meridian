@@ -292,15 +292,56 @@ func wrapHandler(fullName string, handler saga.Handler, handlerDef *HandlerDef) 
 					// If successful and has compensation handler, capture compensation metadata
 					stepResult.CompensateHandler = handlerDef.Compensate
 
-					// Derive compensation params from the forward step output
+					// Derive compensation params from BOTH forward step output AND input
 					compensateParams := make(map[string]any)
+
+					// 1. Copy ALL fields from output (not just _id fields)
+					//    Compensation handlers need output fields like version, status, etc.
 					if output, ok := result.(map[string]interface{}); ok {
 						for key, value := range output {
-							if key == "id" || (len(key) > 3 && key[len(key)-3:] == "_id") {
-								compensateParams[key] = value
+							compensateParams[key] = value
+						}
+					}
+
+					// 2. Copy commonly-needed input fields to compensation params
+					//    Compensation handlers often need context from the forward step input
+					inputFieldsForCompensation := []string{
+						"transaction_id", "account_id", "position_id", "direction",
+						"amount", "currency", "booking_log_id", "posting_id", "posting_type",
+					}
+					for _, field := range inputFieldsForCompensation {
+						if value, ok := params[field]; ok {
+							compensateParams[field] = value
+						}
+					}
+
+					// 3. Handle field aliases: position_id and account_id are often interchangeable
+					//    If position_id exists but account_id doesn't, copy it as account_id
+					if posID, ok := compensateParams["position_id"]; ok {
+						if _, hasAcctID := compensateParams["account_id"]; !hasAcctID {
+							compensateParams["account_id"] = posID
+						}
+					}
+					// And vice versa
+					if acctID, ok := compensateParams["account_id"]; ok {
+						if _, hasPosID := compensateParams["position_id"]; !hasPosID {
+							compensateParams["position_id"] = acctID
+						}
+					}
+
+					// 4. Invert direction for financial posting compensations
+					//    Compensation postings must use the opposite direction to reverse the original
+					if handlerDef.Compensate == "financial_accounting.compensate_posting" {
+						if direction, ok := compensateParams["direction"].(string); ok {
+							switch direction {
+							case "DEBIT":
+								compensateParams["direction"] = "CREDIT"
+							case "CREDIT":
+								compensateParams["direction"] = "DEBIT"
 							}
 						}
 					}
+
 					stepResult.CompensateParams = compensateParams
 				}
 

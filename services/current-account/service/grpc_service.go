@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"math"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,6 +20,8 @@ import (
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	"github.com/meridianhub/meridian/shared/pkg/saga"
+	"github.com/meridianhub/meridian/shared/pkg/saga/schema"
 	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -234,6 +237,56 @@ func NewServiceWithExistingClients(
 		logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	}
 
+	// Load saga scripts
+	depositScript, err := loadSagaScript("sagas/deposit.star")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load deposit saga script: %w", err)
+	}
+	withdrawalScript, err := loadSagaScript("sagas/withdrawal.star")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load withdrawal saga script: %w", err)
+	}
+
+	// Create saga handler registry
+	handlerRegistry := saga.NewHandlerRegistry()
+	if err := RegisterCurrentAccountHandlers(handlerRegistry); err != nil {
+		return nil, fmt.Errorf("failed to register saga handlers: %w", err)
+	}
+
+	// Load schema registry from handlers.yaml
+	schemaContent, err := loadSagaAsset(filepath.Join("shared", "pkg", "saga", "schema", "handlers.yaml"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read handlers schema: %w", err)
+	}
+	schemaRegistryData := []byte(schemaContent)
+	schemaRegistry := schema.NewRegistry()
+	if err := schemaRegistry.LoadFromYAML(schemaRegistryData); err != nil {
+		return nil, fmt.Errorf("failed to load schema: %w", err)
+	}
+
+	// Build service modules for Starlark
+	serviceModules, err := schema.BuildServiceModules(handlerRegistry, schemaRegistry)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build service modules: %w", err)
+	}
+
+	// Create Starlark saga runtime
+	runtime, err := saga.NewRuntime(logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create saga runtime: %w", err)
+	}
+
+	// Create Starlark saga runner
+	sagaRunner, err := saga.NewStarlarkSagaRunner(saga.StarlarkSagaRunnerConfig{
+		Runtime:        runtime,
+		Registry:       handlerRegistry,
+		ServiceModules: serviceModules,
+		Logger:         logger,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create saga runner: %w", err)
+	}
+
 	// Create deposit orchestrator
 	depositOrchestrator, err := NewDepositOrchestrator(DepositOrchestratorConfig{
 		Logger:               logger,
@@ -243,6 +296,8 @@ func NewServiceWithExistingClients(
 		AccountConfig:        accountConfig,
 		AccountResolver:      accountResolver,
 		FungibilityValidator: fungibilityValidator,
+		SagaRunner:           sagaRunner,
+		DepositScript:        depositScript,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create deposit orchestrator: %w", err)
@@ -257,6 +312,8 @@ func NewServiceWithExistingClients(
 		AccountConfig:        accountConfig,
 		AccountResolver:      accountResolver,
 		FungibilityValidator: fungibilityValidator,
+		SagaRunner:           sagaRunner,
+		WithdrawalScript:     withdrawalScript,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create withdrawal orchestrator: %w", err)
@@ -1964,4 +2021,33 @@ func (s *Service) sendCloseWebhook(tenantID, accountID, reason string, balance *
 			"account_id", accountID,
 			"tenant_id", tenantID)
 	}
+}
+
+// loadSagaScript loads a saga script from the given path relative to the saga asset base directory.
+// For service-specific sagas like "sagas/deposit.star", prepend "services/current-account/".
+func loadSagaScript(relativePath string) (string, error) {
+	return loadSagaAsset(filepath.Join("services", "current-account", relativePath))
+}
+
+// loadSagaAsset loads a saga asset (script or schema) from a configurable base directory.
+// Resolves assets from SAGA_ASSET_DIR environment variable if set, otherwise falls back
+// to the directory containing the executable. This makes asset loading independent of
+// build paths and working directory, supporting containerized deployments.
+func loadSagaAsset(relativePath string) (string, error) {
+	baseDir := os.Getenv("SAGA_ASSET_DIR")
+	if baseDir == "" {
+		// Fallback to executable directory
+		exe, err := os.Executable()
+		if err != nil {
+			return "", fmt.Errorf("failed to resolve saga asset dir: %w", err)
+		}
+		baseDir = filepath.Dir(exe)
+	}
+
+	assetPath := filepath.Join(baseDir, relativePath)
+	content, err := os.ReadFile(assetPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read saga asset %s: %w", assetPath, err)
+	}
+	return string(content), nil
 }

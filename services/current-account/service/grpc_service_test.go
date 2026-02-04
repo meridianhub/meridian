@@ -3,6 +3,9 @@ package service
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -14,6 +17,8 @@ import (
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	"github.com/meridianhub/meridian/shared/pkg/saga"
+	"github.com/meridianhub/meridian/shared/pkg/saga/schema"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/require"
@@ -23,6 +28,59 @@ import (
 	"google.golang.org/protobuf/proto"
 	"gorm.io/gorm"
 )
+
+// testSagaRunner creates a StarlarkSagaRunner for testing with minimal setup.
+// Returns the saga runner and the loaded deposit/withdrawal scripts.
+func testSagaRunner(t *testing.T) (*saga.StarlarkSagaRunner, string, string) {
+	t.Helper()
+
+	// Load saga scripts from relative path
+	_, filename, _, ok := runtime.Caller(0)
+	require.True(t, ok, "failed to get current file path")
+	serviceDir := filepath.Dir(filename)
+
+	depositScriptPath := filepath.Join(serviceDir, "..", "sagas", "deposit.star")
+	depositScriptBytes, err := os.ReadFile(depositScriptPath)
+	require.NoError(t, err, "failed to read deposit script")
+	depositScript := string(depositScriptBytes)
+
+	withdrawalScriptPath := filepath.Join(serviceDir, "..", "sagas", "withdrawal.star")
+	withdrawalScriptBytes, err := os.ReadFile(withdrawalScriptPath)
+	require.NoError(t, err, "failed to read withdrawal script")
+	withdrawalScript := string(withdrawalScriptBytes)
+
+	// Create saga handler registry
+	handlerRegistry := saga.NewHandlerRegistry()
+	err = RegisterCurrentAccountHandlers(handlerRegistry)
+	require.NoError(t, err, "failed to register saga handlers")
+
+	// Load schema registry from handlers.yaml
+	schemaRegistryPath := filepath.Join(serviceDir, "..", "..", "..", "shared", "pkg", "saga", "schema", "handlers.yaml")
+	schemaRegistryData, err := os.ReadFile(schemaRegistryPath)
+	require.NoError(t, err, "failed to read handlers schema")
+
+	schemaRegistry := schema.NewRegistry()
+	err = schemaRegistry.LoadFromYAML(schemaRegistryData)
+	require.NoError(t, err, "failed to load schema")
+
+	// Build service modules
+	serviceModules, err := schema.BuildServiceModules(handlerRegistry, schemaRegistry)
+	require.NoError(t, err, "failed to build service modules")
+
+	// Create Starlark saga runner
+	runtime, err := saga.NewRuntime(testLogger())
+	require.NoError(t, err, "failed to create saga runtime")
+
+	sagaRunner, err := saga.NewStarlarkSagaRunner(saga.StarlarkSagaRunnerConfig{
+		Runtime:        runtime,
+		Registry:       handlerRegistry,
+		ServiceModules: serviceModules,
+		Logger:         testLogger(),
+	})
+	require.NoError(t, err, "failed to create saga runner")
+
+	return sagaRunner, depositScript, withdrawalScript
+}
 
 // injectMandatoryClients sets up mock Position Keeping and Financial Accounting clients with orchestrators.
 // Position Keeping and orchestration are now mandatory for all deposit/withdrawal operations.
@@ -37,12 +95,17 @@ func injectMandatoryClients(t *testing.T, svc *Service, repo *persistence.Reposi
 	svc.posKeepingClient = mockPosKeeping
 	svc.finAcctClient = mockFinAcct
 
-	// Create orchestrators with mocked clients
+	// Create saga runner and load scripts
+	sagaRunner, depositScript, withdrawalScript := testSagaRunner(t)
+
+	// Create orchestrators with mocked clients and saga runner
 	depositOrch, err := NewDepositOrchestrator(DepositOrchestratorConfig{
 		Logger:           testLogger(),
 		Repo:             repo,
 		PosKeepingClient: mockPosKeeping,
 		FinAcctClient:    mockFinAcct,
+		SagaRunner:       sagaRunner,
+		DepositScript:    depositScript,
 	})
 	require.NoError(t, err, "failed to create deposit orchestrator")
 	svc.depositOrchestrator = depositOrch
@@ -52,6 +115,8 @@ func injectMandatoryClients(t *testing.T, svc *Service, repo *persistence.Reposi
 		Repo:             repo,
 		PosKeepingClient: mockPosKeeping,
 		FinAcctClient:    mockFinAcct,
+		SagaRunner:       sagaRunner,
+		WithdrawalScript: withdrawalScript,
 	})
 	require.NoError(t, err, "failed to create withdrawal orchestrator")
 	svc.withdrawalOrchestrator = withdrawalOrch

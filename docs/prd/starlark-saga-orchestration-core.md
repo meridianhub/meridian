@@ -9,6 +9,24 @@
 
 ---
 
+## Table of Contents
+
+- [1. Executive Summary](#1-executive-summary)
+- [2. BIAN Alignment](#2-bian-alignment)
+- [3. Functional Requirements](#3-functional-requirements)
+- [4. CEL Valuation: Context and Boundaries](#4-cel-valuation-context-and-boundaries)
+- [5. Technical Architecture](#5-technical-architecture)
+- [6. Security Constraints](#6-security-constraints)
+- [7. Existing Saga Mapping](#7-existing-saga-mapping)
+- [8. Service Feature Gap Analysis](#8-service-feature-gap-analysis)
+- [9. Parallel Work Streams](#9-parallel-work-streams)
+- [10. Success Criteria](#10-success-criteria)
+- [11. Risks and Mitigations](#11-risks-and-mitigations)
+- [12. Appendix: Why Starlark?](#12-appendix-why-starlark)
+- [13. Links](#13-links)
+
+---
+
 ## 1. Executive Summary
 
 The Starlark Saga Orchestration system migrates hardcoded Go saga logic to
