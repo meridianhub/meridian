@@ -316,20 +316,112 @@ func (o *PaymentOrchestrator) handleStarlarkSagaResult(ctx context.Context, po *
 
 	// Extract outputs from saga execution
 	lienID := ""
+	bucketID := ""
 	gatewayReferenceID := ""
 
 	if lienIDVal, ok := result.Output["lien_id"].(string); ok {
 		lienID = lienIDVal
 	}
+	if bucketIDVal, ok := result.Output["bucket_id"].(string); ok {
+		bucketID = bucketIDVal
+	}
 	if gatewayRefVal, ok := result.Output["gateway_reference_id"].(string); ok {
 		gatewayReferenceID = gatewayRefVal
 	}
 
+	// Reload payment order to get latest state
+	latestPO, err := o.repo.FindByID(ctx, po.ID)
+	if err != nil {
+		o.logger.Error("failed to reload payment order after saga success", "error", err)
+		return
+	}
+
+	// Apply state transitions based on what the saga accomplished
+	// The handlers call external services but don't update PaymentOrder state
+	// This orchestrator method applies domain state transitions and publishes events
+
+	// If lien was created and we're still in INITIATED state, transition to RESERVED
+	if lienID != "" && latestPO.Status == domain.PaymentOrderStatusInitiated {
+		if err := latestPO.Reserve(lienID); err != nil {
+			o.logger.Error("failed to transition to RESERVED after lien creation",
+				"payment_order_id", latestPO.ID.String(),
+				"lien_id", lienID,
+				"error", err)
+			return
+		}
+
+		// Store bucket_id in payment order if provided
+		if bucketID != "" {
+			latestPO.BucketID = bucketID
+		}
+
+		if err := o.repo.Update(ctx, latestPO); err != nil {
+			o.logger.Error("failed to persist RESERVED state",
+				"payment_order_id", latestPO.ID.String(),
+				"error", err)
+			return
+		}
+
+		o.logger.Info("payment order transitioned to RESERVED",
+			"payment_order_id", latestPO.ID.String(),
+			"lien_id", lienID,
+			"bucket_id", bucketID)
+
+		// Publish PaymentOrderReserved event
+		o.publishEvent(ctx, TopicPaymentOrderReserved, latestPO.ID.String(), &eventsv1.PaymentOrderReservedEvent{
+			EventId:         uuid.New().String(),
+			PaymentOrderId:  latestPO.ID.String(),
+			DebtorAccountId: latestPO.DebtorAccountID,
+			LienId:          lienID,
+			Amount:          toMoneyAmount(latestPO.Amount),
+			CorrelationId:   latestPO.CorrelationID,
+			CausationId:     latestPO.ID.String(),
+			Timestamp:       timestamppb.Now(),
+			Version:         int64(latestPO.Version),
+			IdempotencyKey:  latestPO.IdempotencyKey,
+		})
+	}
+
+	// If gateway reference was created and we're in RESERVED state, transition to EXECUTING
+	if gatewayReferenceID != "" && latestPO.Status == domain.PaymentOrderStatusReserved {
+		if err := latestPO.Execute(gatewayReferenceID); err != nil {
+			o.logger.Error("failed to transition to EXECUTING after gateway submission",
+				"payment_order_id", latestPO.ID.String(),
+				"gateway_reference_id", gatewayReferenceID,
+				"error", err)
+			return
+		}
+
+		if err := o.repo.Update(ctx, latestPO); err != nil {
+			o.logger.Error("failed to persist EXECUTING state",
+				"payment_order_id", latestPO.ID.String(),
+				"error", err)
+			return
+		}
+
+		o.logger.Info("payment order transitioned to EXECUTING",
+			"payment_order_id", latestPO.ID.String(),
+			"gateway_reference_id", gatewayReferenceID)
+
+		// Publish PaymentOrderExecuting event
+		o.publishEvent(ctx, TopicPaymentOrderExecuting, latestPO.ID.String(), &eventsv1.PaymentOrderExecutingEvent{
+			EventId:            uuid.New().String(),
+			PaymentOrderId:     latestPO.ID.String(),
+			GatewayReferenceId: gatewayReferenceID,
+			CorrelationId:      latestPO.CorrelationID,
+			CausationId:        latestPO.ID.String(),
+			Timestamp:          timestamppb.Now(),
+			Version:            int64(latestPO.Version),
+			IdempotencyKey:     latestPO.IdempotencyKey,
+		})
+	}
+
 	o.logger.Info("payment saga completed successfully via Starlark",
-		"payment_order_id", po.ID.String(),
+		"payment_order_id", latestPO.ID.String(),
 		"lien_id", lienID,
 		"gateway_reference_id", gatewayReferenceID,
-		"step_count", len(result.StepResults))
+		"step_count", len(result.StepResults),
+		"final_status", latestPO.Status)
 }
 
 // evaluateBucketID evaluates the bucket ID for a payment order.
