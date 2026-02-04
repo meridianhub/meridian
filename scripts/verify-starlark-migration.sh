@@ -38,7 +38,7 @@ echo ""
 
 # 2. No AddStep pattern in production code
 echo "[2/6] Checking for saga.AddStep() pattern in production code..."
-ADDSTEP_MATCHES=$(rg "saga\.AddStep" --type go services/ 2>/dev/null | grep -v "_test.go" | grep -v "mock" | wc -l | tr -d ' ')
+ADDSTEP_MATCHES=$(rg "saga\.AddStep" --type go services/ 2>/dev/null | grep -v "_test.go" | grep -vc "mock")
 
 if [ "$ADDSTEP_MATCHES" -ne 0 ]; then
   echo "  ❌ FAIL: Found saga.AddStep() in production code:"
@@ -60,9 +60,9 @@ for orch in services/current-account/service/*orchestrator.go services/payment-o
     ORCHESTRATORS_CHECKED=$((ORCHESTRATORS_CHECKED + 1))
     if rg -q "StarlarkSagaRunner" "$orch" 2>/dev/null; then
       ORCHESTRATORS_USING_STARLARK=$((ORCHESTRATORS_USING_STARLARK + 1))
-      echo "  ✅ $(basename $orch) uses StarlarkSagaRunner"
+      echo "  ✅ $(basename "$orch") uses StarlarkSagaRunner"
     else
-      echo "  ❌ $(basename $orch) does NOT use StarlarkSagaRunner"
+      echo "  ❌ $(basename "$orch") does NOT use StarlarkSagaRunner"
       FAILED=1
     fi
   fi
@@ -107,7 +107,7 @@ for script in "${SAGA_SCRIPTS[@]}"; do
   if [ -f "$script" ]; then
     # Check if script has content
     if [ -s "$script" ]; then
-      echo "  ✅ $(basename $(dirname $script))/$(basename $script) exists and has content"
+      echo "  ✅ $(basename "$(dirname "$script")")/$(basename "$script") exists and has content"
     else
       echo "  ❌ FAIL: $script is empty"
       FAILED=1
