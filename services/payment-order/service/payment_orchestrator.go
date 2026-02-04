@@ -75,6 +75,7 @@ type PaymentOrchestrator struct {
 	kafkaPublisher            KafkaPublisher
 	lienExecutionRetryConfig  *sharedclients.RetryConfig
 	internalClearingEnabled   bool
+	lockClient                LockClient // Distributed lock client for preventing concurrent lien execution
 }
 
 // PaymentOrchestratorConfig contains dependencies for creating a PaymentOrchestrator
@@ -91,6 +92,7 @@ type PaymentOrchestratorConfig struct {
 	KafkaPublisher            KafkaPublisher
 	LienExecutionRetryConfig  *sharedclients.RetryConfig
 	InternalClearingEnabled   bool
+	LockClient                LockClient // Distributed lock client for preventing concurrent lien execution
 }
 
 // NewPaymentOrchestrator creates a new payment orchestrator with the given dependencies.
@@ -140,6 +142,7 @@ func NewPaymentOrchestrator(cfg PaymentOrchestratorConfig) (*PaymentOrchestrator
 		kafkaPublisher:            cfg.KafkaPublisher,
 		lienExecutionRetryConfig:  cfg.LienExecutionRetryConfig,
 		internalClearingEnabled:   cfg.InternalClearingEnabled,
+		lockClient:                cfg.LockClient,
 	}, nil
 }
 
@@ -1068,8 +1071,11 @@ func (o *PaymentOrchestrator) ExecuteLienWithRetry(parentCtx context.Context, pa
 
 // updateLienExecutionStatus updates the payment order's lien execution status after retry completion.
 // This is called after all retry attempts have finished (success or failure).
-// Uses optimistic locking with retry on version conflict to handle concurrent updates.
+// Uses distributed locking to prevent concurrent updates across service instances, combined with
+// optimistic locking (version conflict retry) for additional safety.
 // Note: Uses a fresh context to ensure the status update completes even if the parent context has timed out.
+//
+//nolint:contextcheck // Intentionally uses fresh context to outlive parent context
 func (o *PaymentOrchestrator) updateLienExecutionStatus(
 	parentCtx context.Context,
 	paymentOrderID uuid.UUID,
@@ -1088,6 +1094,45 @@ func (o *PaymentOrchestrator) updateLienExecutionStatus(
 	}
 	updateCtx, cancel := context.WithTimeout(updateCtx, lienStatusUpdateTimeout)
 	defer cancel()
+
+	// Acquire distributed lock if lock client is configured
+	// This prevents concurrent status updates across multiple service instances
+	var lock Lock
+	if o.lockClient != nil {
+		lockKey := fmt.Sprintf("lien:execution:%s", paymentOrderID.String())
+		lockStart := time.Now()
+
+		var lockErr error
+		//nolint:contextcheck // updateCtx is intentionally fresh to outlive parent context
+		lock, lockErr = o.lockClient.Obtain(updateCtx, lockKey, 30*time.Second)
+
+		// Record lock wait duration
+		poobservability.RecordLienExecutionLockWaitDuration(time.Since(lockStart).Seconds())
+
+		if IsLockNotObtained(lockErr) {
+			// Lock contention - another process is updating this payment order
+			logger.Warn("failed to acquire distributed lock for lien execution status update",
+				"payment_order_id", paymentOrderID,
+				"error", "lock already held by another process")
+			poobservability.RecordLienExecutionLockContention()
+			return
+		} else if lockErr != nil {
+			// Unexpected lock error - log and continue without lock (optimistic locking will protect us)
+			logger.Error("failed to obtain distributed lock for lien execution status update",
+				"payment_order_id", paymentOrderID,
+				"error", lockErr)
+			// Continue without lock - optimistic locking still provides safety
+		} else {
+			// Lock acquired successfully - ensure it's released
+			defer func() {
+				if releaseErr := lock.Release(updateCtx); releaseErr != nil {
+					logger.Error("failed to release distributed lock",
+						"payment_order_id", paymentOrderID,
+						"error", releaseErr)
+				}
+			}()
+		}
+	}
 
 	for updateAttempt := 1; updateAttempt <= lienStatusUpdateMaxRetries; updateAttempt++ {
 		// Apply exponential backoff for retries to reduce contention
