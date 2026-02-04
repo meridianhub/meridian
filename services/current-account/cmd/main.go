@@ -27,11 +27,13 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
+	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/ports"
 	"github.com/sony/gobreaker/v2"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
+	"gorm.io/gorm"
 )
 
 // Build information set via ldflags during compilation
@@ -92,6 +94,7 @@ func run(logger *slog.Logger) error {
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
 	withdrawalRepo := persistence.NewWithdrawalRepository(db)
+	outboxRepo := events.NewPostgresOutboxRepository(db)
 
 	// Create Redis client and idempotency service (optional - graceful degradation)
 	var idempotencyService idempotency.Service
@@ -119,6 +122,8 @@ func run(logger *slog.Logger) error {
 		repo,
 		lienRepo,
 		withdrawalRepo,
+		outboxRepo,
+		db,
 		namespace,
 		logger,
 		tracer,
@@ -266,6 +271,8 @@ func createServiceWithClients(
 	repo *persistence.Repository,
 	lienRepo *persistence.LienRepository,
 	withdrawalRepo *persistence.WithdrawalRepository,
+	outboxRepo events.OutboxRepository,
+	db *gorm.DB,
 	namespace string,
 	logger *slog.Logger,
 	tracer *observability.Tracer,
@@ -429,9 +436,11 @@ func createServiceWithClients(
 		repo,
 		lienRepo,
 		withdrawalRepo,
-		posKeepingClient,   // *poskeepingclient.Client implements service.PositionKeepingClient
-		finAcctClient,      // *finacctclient.Client implements service.FinancialAccountingClient
-		partyClientWrapper, // *PartyClientWrapper implements service.PartyClient
+		outboxRepo,          // Outbox repository for reliable event delivery
+		db,                  // Database connection for transaction management
+		posKeepingClient,    // *poskeepingclient.Client implements service.PositionKeepingClient
+		finAcctClient,       // *finacctclient.Client implements service.FinancialAccountingClient
+		partyClientWrapper,  // *PartyClientWrapper implements service.PartyClient
 		accountConfig,
 		idempotencyService,
 		logger,
