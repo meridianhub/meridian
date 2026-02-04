@@ -34,12 +34,12 @@ deposit_saga = saga(name="current_account_deposit")
 # Define the saga execution function (required for conditional logic)
 def execute_deposit():
     # Extract input data
-        account_id = input_data["account_id"]
-        account_identification = input_data["account_identification"]
-        amount = Decimal(input_data["amount"])
-        currency = input_data["currency"]
-        transaction_id = input_data["transaction_id"]
-        clearing_account_id = input_data.get("clearing_account_id", "")
+    account_id = input_data["account_id"]
+    account_identification = input_data["account_identification"]
+    amount = Decimal(input_data["amount"])
+    currency = input_data["currency"]
+    transaction_id = input_data["transaction_id"]
+    clearing_account_id = input_data.get("clearing_account_id", "")
     
     # Step 1: Log position in PositionKeeping service with CREDIT direction
     step(name="log_position")
