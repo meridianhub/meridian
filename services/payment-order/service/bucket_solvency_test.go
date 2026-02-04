@@ -25,6 +25,8 @@ var errMockInstrumentNotFound = errors.New("instrument not found")
 type MockReferenceDataClient struct {
 	instruments map[string]*InstrumentInfo
 	err         error
+	sagaScript  string // Custom saga script (if empty, uses default)
+	getSagaErr  error  // Custom GetSaga error
 }
 
 func NewMockReferenceDataClient() *MockReferenceDataClient {
@@ -44,9 +46,89 @@ func (m *MockReferenceDataClient) RetrieveInstrument(_ context.Context, code str
 	return info, nil
 }
 
-func (m *MockReferenceDataClient) GetSaga(_ context.Context, _ string, _ int) (*SagaDefinition, error) {
-	// Not implemented for bucket solvency tests
-	return nil, errors.New("GetSaga not implemented in test mock")
+func (m *MockReferenceDataClient) GetSaga(_ context.Context, name string, version int) (*SagaDefinition, error) {
+	if m.getSagaErr != nil {
+		return nil, m.getSagaErr
+	}
+
+	script := m.sagaScript
+	if script == "" {
+		// Default payment_execution saga script
+		script = `# Saga: payment_execution
+# Version: 1.0.0
+
+def payment_execution():
+    ctx = input_data
+
+    # Step 1: Reserve funds with bucket-aware lien
+    step(name="reserve_funds")
+    lien_result = payment_order.create_lien(
+        account_id=ctx.get("debtor_account_id"),
+        amount_cents=ctx.get("amount_cents"),
+        currency=ctx.get("currency"),
+        payment_order_id=ctx.get("payment_order_id"),
+        instrument_code=ctx.get("instrument_code", ""),
+        payment_attributes=ctx.get("payment_attributes", {}),
+    )
+
+    lien_id = lien_result.lien_id
+    bucket_id = lien_result.bucket_id
+
+    # Step 2: Send payment to gateway
+    step(name="send_to_gateway")
+    gateway_result = payment_order.send_to_gateway(
+        payment_order_id=ctx.get("payment_order_id"),
+        debtor_account_id=ctx.get("debtor_account_id"),
+        creditor_reference=ctx.get("creditor_reference"),
+        amount_cents=ctx.get("amount_cents"),
+        currency=ctx.get("currency"),
+        idempotency_key=ctx.get("idempotency_key"),
+    )
+
+    gateway_reference_id = gateway_result.gateway_reference_id
+    gateway_status = gateway_result.gateway_status
+
+    result = {
+        "lien_id": lien_id,
+        "bucket_id": bucket_id,
+        "gateway_reference_id": gateway_reference_id,
+        "gateway_status": gateway_status,
+    }
+
+    if ctx.get("should_post_ledger", False):
+        step(name="post_ledger_entries")
+        ledger_result = payment_order.post_ledger_entries(
+            payment_order_id=ctx.get("payment_order_id"),
+            debtor_account_id=ctx.get("debtor_account_id"),
+            gateway_reference_id=gateway_reference_id,
+            amount_cents=ctx.get("amount_cents"),
+            currency=ctx.get("currency"),
+            idempotency_key=ctx.get("idempotency_key"),
+            internal_clearing_enabled=ctx.get("internal_clearing_enabled", False),
+        )
+        result["booking_log_id"] = ledger_result.booking_log_id
+
+    if ctx.get("should_execute_lien", False):
+        if lien_id:
+            step(name="execute_lien")
+            execution_result = payment_order.execute_lien(
+                lien_id=lien_id,
+            )
+            result["lien_execution_status"] = execution_result.execution_status
+
+    return result
+
+output = payment_execution()
+`
+	}
+
+	return &SagaDefinition{
+		ID:      uuid.New().String(),
+		Name:    name,
+		Version: version,
+		Script:  script,
+		Status:  "ACTIVE",
+	}, nil
 }
 
 func (m *MockReferenceDataClient) Close() error {

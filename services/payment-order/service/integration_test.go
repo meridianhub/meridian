@@ -398,6 +398,129 @@ func (m *mockFinancialAccountingClient) Close() error {
 	return nil
 }
 
+// mockReferenceDataClient implements ReferenceDataClient for integration testing.
+type mockReferenceDataClient struct {
+	mu               sync.RWMutex
+	getSagaCalls     int32
+	failOnGetSaga    bool
+	getSagaErr       error
+	customSagaScript string // Optional: override default script for specific tests
+}
+
+func newMockReferenceDataClient() *mockReferenceDataClient {
+	return &mockReferenceDataClient{}
+}
+
+func (m *mockReferenceDataClient) RetrieveInstrument(_ context.Context, code string) (*InstrumentInfo, error) {
+	// Not used in current tests - return empty for now
+	return &InstrumentInfo{
+		Code:                     code,
+		FungibilityKeyExpression: "",
+	}, nil
+}
+
+func (m *mockReferenceDataClient) GetSaga(_ context.Context, name string, version int) (*SagaDefinition, error) {
+	atomic.AddInt32(&m.getSagaCalls, 1)
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if m.failOnGetSaga {
+		if m.getSagaErr != nil {
+			return nil, m.getSagaErr
+		}
+		return nil, errors.New("mock GetSaga failure")
+	}
+
+	script := m.customSagaScript
+	if script == "" {
+		// Default payment_execution saga script
+		script = `# Saga: payment_execution
+# Version: 1.0.0
+
+def payment_execution():
+    """
+    Main saga entry point.
+    Executes payment order with reserve -> send -> post ledger -> execute lien flow.
+    """
+    ctx = input_data
+
+    # Step 1: Reserve funds with bucket-aware lien
+    step(name="reserve_funds")
+    lien_result = payment_order.create_lien(
+        account_id=ctx.get("debtor_account_id"),
+        amount_cents=ctx.get("amount_cents"),
+        currency=ctx.get("currency"),
+        payment_order_id=ctx.get("payment_order_id"),
+        instrument_code=ctx.get("instrument_code", ""),
+        payment_attributes=ctx.get("payment_attributes", {}),
+    )
+
+    lien_id = lien_result.lien_id
+    bucket_id = lien_result.bucket_id
+
+    # Step 2: Send payment to gateway
+    step(name="send_to_gateway")
+    gateway_result = payment_order.send_to_gateway(
+        payment_order_id=ctx.get("payment_order_id"),
+        debtor_account_id=ctx.get("debtor_account_id"),
+        creditor_reference=ctx.get("creditor_reference"),
+        amount_cents=ctx.get("amount_cents"),
+        currency=ctx.get("currency"),
+        idempotency_key=ctx.get("idempotency_key"),
+    )
+
+    gateway_reference_id = gateway_result.gateway_reference_id
+    gateway_status = gateway_result.gateway_status
+
+    result = {
+        "lien_id": lien_id,
+        "bucket_id": bucket_id,
+        "gateway_reference_id": gateway_reference_id,
+        "gateway_status": gateway_status,
+    }
+
+    # Step 3: Post ledger entries (conditional)
+    if ctx.get("should_post_ledger", False):
+        step(name="post_ledger_entries")
+        ledger_result = payment_order.post_ledger_entries(
+            payment_order_id=ctx.get("payment_order_id"),
+            debtor_account_id=ctx.get("debtor_account_id"),
+            gateway_reference_id=gateway_reference_id,
+            amount_cents=ctx.get("amount_cents"),
+            currency=ctx.get("currency"),
+            idempotency_key=ctx.get("idempotency_key"),
+            internal_clearing_enabled=ctx.get("internal_clearing_enabled", False),
+        )
+        result["booking_log_id"] = ledger_result.booking_log_id
+
+    # Step 4: Execute lien (conditional)
+    if ctx.get("should_execute_lien", False):
+        if lien_id:
+            step(name="execute_lien")
+            execution_result = payment_order.execute_lien(
+                lien_id=lien_id,
+            )
+            result["lien_execution_status"] = execution_result.execution_status
+
+    return result
+
+output = payment_execution()
+`
+	}
+
+	return &SagaDefinition{
+		ID:      uuid.New().String(),
+		Name:    name,
+		Version: version,
+		Script:  script,
+		Status:  "ACTIVE",
+	}, nil
+}
+
+func (m *mockReferenceDataClient) Close() error {
+	return nil
+}
+
 // =============================================================================
 // Helper Functions
 // =============================================================================
@@ -483,6 +606,7 @@ func TestIntegration_HappyPath_Initiate_Reserve_Execute_Complete(t *testing.T) {
 		Repository:                repo,
 		CurrentAccountClient:      mockCA,
 		FinancialAccountingClient: newMockFinancialAccountingClient(),
+		ReferenceDataClient:       newMockReferenceDataClient(),
 		PaymentGateway:            mockGW,
 		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
@@ -557,6 +681,7 @@ func TestIntegration_Idempotency_SameKeyReturnsSameResult(t *testing.T) {
 		Repository:                repo,
 		CurrentAccountClient:      mockCA,
 		FinancialAccountingClient: newMockFinancialAccountingClient(),
+		ReferenceDataClient:       newMockReferenceDataClient(),
 		PaymentGateway:            mockGW,
 		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
@@ -633,6 +758,7 @@ func TestIntegration_DuplicateWebhook_Idempotent(t *testing.T) {
 		Repository:                repo,
 		CurrentAccountClient:      mockCA,
 		FinancialAccountingClient: newMockFinancialAccountingClient(),
+		ReferenceDataClient:       newMockReferenceDataClient(),
 		PaymentGateway:            mockGW,
 		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
@@ -707,6 +833,7 @@ func TestIntegration_InsufficientFunds_SagaFails(t *testing.T) {
 		Repository:                repo,
 		CurrentAccountClient:      mockCA,
 		FinancialAccountingClient: newMockFinancialAccountingClient(),
+		ReferenceDataClient:       newMockReferenceDataClient(),
 		PaymentGateway:            mockGW,
 		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
@@ -751,6 +878,7 @@ func TestIntegration_GatewayTimeout_CompensationReleasesLien(t *testing.T) {
 		Repository:                repo,
 		CurrentAccountClient:      mockCA,
 		FinancialAccountingClient: newMockFinancialAccountingClient(),
+		ReferenceDataClient:       newMockReferenceDataClient(),
 		PaymentGateway:            mockGW,
 		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
@@ -799,6 +927,7 @@ func TestIntegration_GatewayRejects_StatusFailed(t *testing.T) {
 		Repository:                repo,
 		CurrentAccountClient:      mockCA,
 		FinancialAccountingClient: newMockFinancialAccountingClient(),
+		ReferenceDataClient:       newMockReferenceDataClient(),
 		PaymentGateway:            mockGW,
 		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
@@ -845,6 +974,7 @@ func TestIntegration_ConcurrentPayments_SameAccount(t *testing.T) {
 		Repository:                repo,
 		CurrentAccountClient:      mockCA,
 		FinancialAccountingClient: newMockFinancialAccountingClient(),
+		ReferenceDataClient:       newMockReferenceDataClient(),
 		PaymentGateway:            mockGW,
 		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
@@ -982,6 +1112,7 @@ func TestIntegration_PartialFailure_GatewayAcceptsLedgerFails(t *testing.T) {
 		Repository:                repo,
 		CurrentAccountClient:      mockCA,
 		FinancialAccountingClient: newMockFinancialAccountingClient(),
+		ReferenceDataClient:       newMockReferenceDataClient(),
 		PaymentGateway:            mockGW,
 		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
@@ -1040,6 +1171,7 @@ func TestIntegration_MoneyPrecision_ThroughAllTranslations(t *testing.T) {
 		Repository:                repo,
 		CurrentAccountClient:      mockCA,
 		FinancialAccountingClient: newMockFinancialAccountingClient(),
+		ReferenceDataClient:       newMockReferenceDataClient(),
 		PaymentGateway:            mockGW,
 		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
@@ -1132,6 +1264,7 @@ func TestIntegration_InvalidInputs_ValidationErrors(t *testing.T) {
 		Repository:                repo,
 		CurrentAccountClient:      mockCA,
 		FinancialAccountingClient: newMockFinancialAccountingClient(),
+		ReferenceDataClient:       newMockReferenceDataClient(),
 		PaymentGateway:            mockGW,
 		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
@@ -1221,6 +1354,7 @@ func TestIntegration_RetrievePaymentOrder(t *testing.T) {
 		Repository:                repo,
 		CurrentAccountClient:      mockCA,
 		FinancialAccountingClient: newMockFinancialAccountingClient(),
+		ReferenceDataClient:       newMockReferenceDataClient(),
 		PaymentGateway:            mockGW,
 		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
@@ -1270,6 +1404,7 @@ func TestIntegration_CancelPaymentOrder(t *testing.T) {
 		Repository:                repo,
 		CurrentAccountClient:      mockCA,
 		FinancialAccountingClient: newMockFinancialAccountingClient(),
+		ReferenceDataClient:       newMockReferenceDataClient(),
 		PaymentGateway:            mockGW,
 		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
@@ -1341,6 +1476,7 @@ func TestIntegration_ListPaymentOrders_Pagination(t *testing.T) {
 		Repository:                repo,
 		CurrentAccountClient:      mockCA,
 		FinancialAccountingClient: newMockFinancialAccountingClient(),
+		ReferenceDataClient:       newMockReferenceDataClient(),
 		PaymentGateway:            mockGW,
 		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
@@ -1452,6 +1588,7 @@ func TestIntegration_ReversePaymentOrder(t *testing.T) {
 		Repository:                repo,
 		CurrentAccountClient:      mockCA,
 		FinancialAccountingClient: newMockFinancialAccountingClient(),
+		ReferenceDataClient:       newMockReferenceDataClient(),
 		PaymentGateway:            mockGW,
 		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
