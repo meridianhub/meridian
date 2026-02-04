@@ -44,6 +44,11 @@ func (m *MockReferenceDataClient) RetrieveInstrument(_ context.Context, code str
 	return info, nil
 }
 
+func (m *MockReferenceDataClient) GetSaga(_ context.Context, _ string, _ int) (*SagaDefinition, error) {
+	// Not implemented for bucket solvency tests
+	return nil, errors.New("GetSaga not implemented in test mock")
+}
+
 func (m *MockReferenceDataClient) Close() error {
 	return nil
 }
