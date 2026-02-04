@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS event_outbox (
 );
 
 -- Index for efficient polling of pending events by worker
-CREATE INDEX IF NOT EXISTS idx_event_outbox_status ON event_outbox(status) WHERE status = 'PENDING';
+CREATE INDEX IF NOT EXISTS idx_event_outbox_status ON event_outbox(status) WHERE status = 'pending';
 
 -- Index for cleanup of old processed events
 CREATE INDEX IF NOT EXISTS idx_event_outbox_created ON event_outbox(created_at);

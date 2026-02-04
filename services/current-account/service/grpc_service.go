@@ -962,16 +962,31 @@ func (s *Service) ExecuteWithdrawal(ctx context.Context, req *pb.ExecuteWithdraw
 	// Uses transactional outbox pattern to ensure atomicity between status update and event publication.
 	// If the outbox write fails, the withdrawal status update is rolled back, ensuring consistency.
 	if pendingWithdrawal != nil && s.withdrawalRepo != nil {
-		accountUUID, err := uuid.Parse(account.AccountID())
-		if err != nil {
-			s.logger.Error("failed to parse account ID as UUID", "account_id", account.AccountID(), "error", err)
-		} else {
-			if err := s.completeWithdrawalWithOutbox(ctx, pendingWithdrawal, accountUUID); err != nil {
-				// Log warning but don't fail - the withdrawal has already executed
-				// The outbox pattern ensures eventual consistency will be maintained via retry
-				s.logger.Warn("failed to complete withdrawal with outbox",
+		// Use internal UUID from withdrawal (not the business account ID which is like "ACC-xxxx")
+		accountUUID := pendingWithdrawal.AccountID
+		if err := s.completeWithdrawalWithOutbox(ctx, pendingWithdrawal, accountUUID); err != nil {
+			// CRITICAL: Outbox write failed but funds already moved. Must not leave withdrawal PENDING
+			// as that would allow re-execution. Fall back to direct status update without outbox.
+			s.logger.Error("outbox withdrawal completion failed, attempting fallback direct update",
+				"withdrawal_id", pendingWithdrawal.Reference,
+				"account_id", accountUUID,
+				"outbox_error", err)
+
+			// Fallback: Mark withdrawal completed directly (idempotent, safe to retry)
+			if fallbackErr := pendingWithdrawal.Complete(); fallbackErr != nil {
+				s.logger.Error("fallback withdrawal completion also failed - withdrawal stuck in PENDING",
 					"withdrawal_id", pendingWithdrawal.Reference,
-					"error", err)
+					"fallback_error", fallbackErr,
+					"original_error", err)
+				// Don't fail the RPC - funds already moved, but log critical issue
+			} else if fallbackErr := s.withdrawalRepo.Update(ctx, pendingWithdrawal); fallbackErr != nil {
+				s.logger.Error("fallback withdrawal persistence failed - withdrawal stuck in PENDING",
+					"withdrawal_id", pendingWithdrawal.Reference,
+					"fallback_error", fallbackErr,
+					"original_error", err)
+			} else {
+				s.logger.Warn("withdrawal marked completed via fallback (outbox events lost)",
+					"withdrawal_id", pendingWithdrawal.Reference)
 			}
 		}
 	}
