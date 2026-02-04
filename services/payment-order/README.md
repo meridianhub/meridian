@@ -62,6 +62,16 @@ BIAN-compliant payment order service with saga orchestration for distributed tra
 | `/webhook/payment-gateway` | POST | External gateway callbacks |
 | `/health` | GET | Health check |
 
+## Saga Definitions
+
+Payment execution saga is **NOT** stored locally. It is fetched at runtime from the
+reference-data service via `GetSaga()` RPC.
+
+**Canonical source:** `services/reference-data/saga/defaults/payment_execution/v1.0.0.star`
+
+To modify this saga, update the file in reference-data service and run
+`PlatformSync.SyncPlatformDefaults()`.
+
 ## Domain Model
 
 ```mermaid

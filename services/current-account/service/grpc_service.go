@@ -237,12 +237,12 @@ func NewServiceWithExistingClients(
 		logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	}
 
-	// Load saga scripts
-	depositScript, err := loadSagaScript("sagas/deposit.star")
+	// Load saga scripts from reference-data canonical source
+	depositScript, err := loadSagaAsset(filepath.Join("services", "reference-data", "saga", "defaults", "deposit", "v1.0.0.star"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to load deposit saga script: %w", err)
 	}
-	withdrawalScript, err := loadSagaScript("sagas/withdrawal.star")
+	withdrawalScript, err := loadSagaAsset(filepath.Join("services", "reference-data", "saga", "defaults", "withdrawal", "v1.0.0.star"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to load withdrawal saga script: %w", err)
 	}
@@ -2021,12 +2021,6 @@ func (s *Service) sendCloseWebhook(tenantID, accountID, reason string, balance *
 			"account_id", accountID,
 			"tenant_id", tenantID)
 	}
-}
-
-// loadSagaScript loads a saga script from the given path relative to the saga asset base directory.
-// For service-specific sagas like "sagas/deposit.star", prepend "services/current-account/".
-func loadSagaScript(relativePath string) (string, error) {
-	return loadSagaAsset(filepath.Join("services", "current-account", relativePath))
 }
 
 // loadSagaAsset loads a saga asset (script or schema) from a configurable base directory.

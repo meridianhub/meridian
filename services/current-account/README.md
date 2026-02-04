@@ -65,6 +65,19 @@ BIAN-compliant current account facility microservice with lien-based payment res
 | `TerminateLien` | `POST /v1/liens/{id}/terminate` | Release reservation |
 | `RetrieveLien` | `GET /v1/liens/{id}` | Get lien details |
 
+## Saga Definitions
+
+Deposit and withdrawal sagas are **NOT** stored locally. They are fetched at runtime from the
+reference-data service via `GetSaga()` RPC.
+
+**Canonical source:** `services/reference-data/saga/defaults/`
+
+- deposit: `defaults/deposit/v1.0.0.star`
+- withdrawal: `defaults/withdrawal/v1.0.0.star`
+
+To modify these sagas, update the files in reference-data service and run
+`PlatformSync.SyncPlatformDefaults()`.
+
 ## Domain Model
 
 ```mermaid
