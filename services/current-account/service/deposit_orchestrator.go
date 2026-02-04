@@ -176,6 +176,7 @@ func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.Cu
 			"currency":               string(amount.Currency()),
 			"transaction_id":         transactionID,
 			"clearing_account_id":    clearingAccountID,
+			"attributes":             attributes,
 		},
 	}
 

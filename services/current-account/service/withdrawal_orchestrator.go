@@ -178,6 +178,7 @@ func (o *WithdrawalOrchestrator) Orchestrate(ctx context.Context, account domain
 			"currency":               string(amount.Currency()),
 			"transaction_id":         transactionID,
 			"clearing_account_id":    withdrawalClearingAccountID,
+			"attributes":             attributes,
 		},
 	}
 
