@@ -220,6 +220,22 @@ var (
 		},
 		[]string{"clearing_type"},
 	)
+
+	// Distributed lock metrics
+	lienExecutionLockContentions = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "payment_order_lien_execution_lock_contentions_total",
+			Help: "Total number of lien execution lock contentions (lock already held)",
+		},
+	)
+
+	lienExecutionLockWaitDuration = promauto.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "payment_order_lien_execution_lock_wait_seconds",
+			Help:    "Time spent waiting to acquire lien execution lock",
+			Buckets: []float64{.001, .005, .01, .05, .1, .5, 1.0, 5.0},
+		},
+	)
 )
 
 // RecordPaymentOrder records a payment order by status.
@@ -352,4 +368,16 @@ func RecordClearingAccountLookupDuration(duration time.Duration) {
 // RecordClearingAccountLookupError records a clearing account lookup error.
 func RecordClearingAccountLookupError(clearingType string) {
 	clearingAccountLookupErrors.WithLabelValues(clearingType).Inc()
+}
+
+// RecordLienExecutionLockContention records a lock contention event when the distributed
+// lock for lien execution status update is already held by another process.
+func RecordLienExecutionLockContention() {
+	lienExecutionLockContentions.Inc()
+}
+
+// RecordLienExecutionLockWaitDuration records the time spent waiting to acquire
+// the distributed lock for lien execution status updates.
+func RecordLienExecutionLockWaitDuration(seconds float64) {
+	lienExecutionLockWaitDuration.Observe(seconds)
 }
