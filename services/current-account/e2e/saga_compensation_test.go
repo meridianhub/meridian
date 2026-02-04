@@ -419,7 +419,7 @@ func (h PositionKeepingDBHelper) GetLog(t *testing.T, transactionID string) *Pos
 	tenantID, _ := tenant.FromContext(h.ctx)
 	schemaName := tenantID.SchemaName()
 
-	query := fmt.Sprintf(`SELECT * FROM %s.position_log WHERE transaction_id = $1`, pq.QuoteIdentifier(schemaName))
+	query := fmt.Sprintf(`SELECT id, transaction_id, status, cancelled_at FROM %s.position_log WHERE transaction_id = $1`, pq.QuoteIdentifier(schemaName))
 
 	sqlDB, err := h.db.DB()
 	require.NoError(t, err)
@@ -503,7 +503,7 @@ func (h FinancialAccountingDBHelper) GetBookingLog(t *testing.T, transactionID s
 	tenantID, _ := tenant.FromContext(h.ctx)
 	schemaName := tenantID.SchemaName()
 
-	query := fmt.Sprintf(`SELECT * FROM %s.booking_log WHERE transaction_id = $1`, pq.QuoteIdentifier(schemaName))
+	query := fmt.Sprintf(`SELECT id, transaction_id, status, cancelled_at FROM %s.booking_log WHERE transaction_id = $1`, pq.QuoteIdentifier(schemaName))
 
 	sqlDB, err := h.db.DB()
 	require.NoError(t, err)
@@ -1191,9 +1191,27 @@ func (e *E2ESagaExecutor) compensatePaymentStep(execution *SagaExecution, step i
 	case 6: // Finalize booking log -> Cancel
 		_ = e.finAcctSvc.UpdateBookingLog(transactionID, "CANCELLED")
 	case 5: // Credit to-account posting -> Reversal
-		// Create reversal debit
+		// Create reversal debit for the credit posting
+		e.finAcctSvc.mu.Lock()
+		if entries, ok := e.finAcctSvc.glEntries[transactionID]; ok && len(entries) >= 2 {
+			creditEntry := entries[1] // Second entry is the credit to to-account
+			amountDec, _ := decimal.NewFromString(creditEntry.Amount)
+			e.finAcctSvc.mu.Unlock()
+			_, _ = e.finAcctSvc.CapturePosting(transactionID, creditEntry.AccountCode, "DEBIT", amountDec, true)
+		} else {
+			e.finAcctSvc.mu.Unlock()
+		}
 	case 4: // Debit from-account posting -> Reversal
-		// Create reversal credit
+		// Create reversal credit for the debit posting
+		e.finAcctSvc.mu.Lock()
+		if entries, ok := e.finAcctSvc.glEntries[transactionID]; ok && len(entries) >= 1 {
+			debitEntry := entries[0] // First entry is the debit from from-account
+			amountDec, _ := decimal.NewFromString(debitEntry.Amount)
+			e.finAcctSvc.mu.Unlock()
+			_, _ = e.finAcctSvc.CapturePosting(transactionID, debitEntry.AccountCode, "CREDIT", amountDec, true)
+		} else {
+			e.finAcctSvc.mu.Unlock()
+		}
 	case 3: // Initiate booking log -> Cancel
 		_ = e.finAcctSvc.UpdateBookingLog(transactionID, "CANCELLED")
 	case 2: // Log credit position -> Cancel
@@ -1624,7 +1642,7 @@ func TestCompensationTiming_PerfectRollback_E2E(t *testing.T) {
 	initialAccount := testEnv.CurrentAccountDB.GetAccount(t, testEnv.AccountID)
 	initialBalance := initialAccount.Balance
 
-	// Inject failure at step 4 (after several state changes)
+	// Inject failure at step 3 (CapturePosting - after position log and booking log)
 	executor.GetFinancialAccountingService().InjectError("CapturePosting", fmt.Errorf("credit posting failed"))
 
 	transactionID := uuid.New().String()
