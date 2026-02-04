@@ -15,6 +15,21 @@ var (
 
 	// ErrUnhashable is returned when attempting to hash an unhashable type.
 	ErrUnhashable = errors.New("unhashable type")
+
+	// ErrMissingStarlarkContext is returned when StarlarkContext is not found in thread locals.
+	ErrMissingStarlarkContext = errors.New("StarlarkContext not found in thread")
+
+	// ErrInvalidStarlarkContext is returned when StarlarkContext has invalid type.
+	ErrInvalidStarlarkContext = errors.New("invalid StarlarkContext type")
+
+	// ErrMissingClient is returned when a required client is not configured in thread locals.
+	ErrMissingClient = errors.New("required client not configured")
+
+	// ErrInvalidClientType is returned when a client has invalid type.
+	ErrInvalidClientType = errors.New("invalid client type")
+
+	// ErrInvalidParameterType is returned when a parameter has an unexpected type.
+	ErrInvalidParameterType = errors.New("invalid parameter type")
 )
 
 // NewRestrictedBuiltins creates a hardened Starlark environment with whitelisted functions.
@@ -36,7 +51,7 @@ var (
 //
 // BLOCKED: load(), print() (redirected), time.now(), random(), exec(), compile(), open(), http
 //
-//nolint:gocognit // This function deliberately configures many builtins; complexity is unavoidable
+//nolint:gocognit,gocyclo // This function deliberately configures many builtins; complexity is unavoidable
 func NewRestrictedBuiltins(logger *slog.Logger) starlark.StringDict {
 	if logger == nil {
 		logger = slog.Default()
@@ -131,43 +146,237 @@ func NewRestrictedBuiltins(logger *slog.Logger) starlark.StringDict {
 	})
 
 	// cel_eval - evaluate a CEL expression
-	builtins["cel_eval"] = starlark.NewBuiltin("cel_eval", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	builtins["cel_eval"] = starlark.NewBuiltin("cel_eval", func(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 		var expression string
-		if err := starlark.UnpackArgs(b.Name(), args, kwargs, "expression", &expression); err != nil {
+		var inputDict *starlark.Dict
+		if err := starlark.UnpackArgs(b.Name(), args, kwargs, "expression", &expression, "variables?", &inputDict); err != nil {
 			return nil, err
 		}
-		// Placeholder - actual CEL evaluation would happen at runtime
-		return starlark.String(expression), nil
+
+		// Get StarlarkContext from thread local storage
+		ctxVal := thread.Local("saga.StarlarkContext")
+		if ctxVal == nil {
+			return nil, fmt.Errorf("cel_eval: %w", ErrMissingStarlarkContext)
+		}
+		starlarkCtx, ok := ctxVal.(*StarlarkContext)
+		if !ok {
+			return nil, fmt.Errorf("cel_eval: %w", ErrInvalidStarlarkContext)
+		}
+
+		// Create CEL evaluator
+		evaluator, err := NewCELEvaluator()
+		if err != nil {
+			return nil, fmt.Errorf("cel_eval: %w", err)
+		}
+
+		// Build evaluation context with saga metadata
+		variables := map[string]interface{}{
+			"ctx": map[string]interface{}{
+				"saga_execution_id": starlarkCtx.SagaExecutionID.String(),
+				"correlation_id":    starlarkCtx.CorrelationID.String(),
+			},
+		}
+
+		// Add optional input variables if provided
+		if inputDict != nil {
+			inputMap := make(map[string]interface{})
+			for _, item := range inputDict.Items() {
+				key, ok := item[0].(starlark.String)
+				if !ok {
+					return nil, fmt.Errorf("cel_eval: %w: variables keys must be strings, got %s", ErrInvalidParameterType, item[0].Type())
+				}
+				inputMap[string(key)] = convertStarlarkToGo(item[1])
+			}
+			variables["input"] = inputMap
+		}
+
+		// Evaluate expression
+		result, err := evaluator.Eval(expression, variables)
+		if err != nil {
+			return nil, fmt.Errorf("cel_eval: %w", err)
+		}
+
+		return goToStarlark(result), nil
 	})
 
 	// resolve_account - resolve account ID from reference
-	builtins["resolve_account"] = starlark.NewBuiltin("resolve_account", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	builtins["resolve_account"] = starlark.NewBuiltin("resolve_account", func(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 		var reference string
 		if err := starlark.UnpackArgs(b.Name(), args, kwargs, "reference", &reference); err != nil {
 			return nil, err
 		}
-		// Placeholder - actual resolution happens at runtime
-		return starlark.String(reference), nil
+
+		// Get StarlarkContext from thread
+		ctxVal := thread.Local("saga.StarlarkContext")
+		if ctxVal == nil {
+			return nil, fmt.Errorf("resolve_account: %w", ErrMissingStarlarkContext)
+		}
+		starlarkCtx, ok := ctxVal.(*StarlarkContext)
+		if !ok {
+			return nil, fmt.Errorf("resolve_account: %w", ErrInvalidStarlarkContext)
+		}
+
+		// Check lookup cache for deterministic replay (FR-34)
+		cacheKey := "account:" + reference
+		if starlarkCtx.LookupCache != nil {
+			if cached, found := starlarkCtx.LookupCache.Get(cacheKey); found {
+				if accountID, ok := cached.(string); ok {
+					return starlark.String(accountID), nil
+				}
+			}
+		}
+
+		// Get reference-data client from thread
+		clientVal := thread.Local("saga.ReferenceDataClient")
+		if clientVal == nil {
+			return nil, fmt.Errorf("resolve_account: %w", ErrMissingClient)
+		}
+		refDataClient, ok := clientVal.(ReferenceDataClient)
+		if !ok {
+			return nil, fmt.Errorf("resolve_account: %w", ErrInvalidClientType)
+		}
+
+		// Query reference-data service with bi-temporal KnowledgeAt
+		accountID, err := refDataClient.ResolveAccount(starlarkCtx.Context, reference, starlarkCtx.KnowledgeAt)
+		if err != nil {
+			return nil, fmt.Errorf("resolve_account(%q): %w", reference, err)
+		}
+
+		// Cache result for replay
+		if starlarkCtx.LookupCache != nil {
+			starlarkCtx.LookupCache.Set(cacheKey, accountID)
+		}
+
+		return starlark.String(accountID), nil
 	})
 
 	// resolve_instrument - resolve instrument ID from reference
-	builtins["resolve_instrument"] = starlark.NewBuiltin("resolve_instrument", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	builtins["resolve_instrument"] = starlark.NewBuiltin("resolve_instrument", func(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 		var reference string
 		if err := starlark.UnpackArgs(b.Name(), args, kwargs, "reference", &reference); err != nil {
 			return nil, err
 		}
-		// Placeholder - actual resolution happens at runtime
-		return starlark.String(reference), nil
+
+		// Get StarlarkContext from thread
+		ctxVal := thread.Local("saga.StarlarkContext")
+		if ctxVal == nil {
+			return nil, fmt.Errorf("resolve_instrument: %w", ErrMissingStarlarkContext)
+		}
+		starlarkCtx, ok := ctxVal.(*StarlarkContext)
+		if !ok {
+			return nil, fmt.Errorf("resolve_instrument: %w", ErrInvalidStarlarkContext)
+		}
+
+		// Check cache
+		cacheKey := "instrument:" + reference
+		if starlarkCtx.LookupCache != nil {
+			if cached, found := starlarkCtx.LookupCache.Get(cacheKey); found {
+				if instrumentID, ok := cached.(string); ok {
+					return starlark.String(instrumentID), nil
+				}
+			}
+		}
+
+		// Get reference-data client from thread
+		clientVal := thread.Local("saga.ReferenceDataClient")
+		if clientVal == nil {
+			return nil, fmt.Errorf("resolve_instrument: %w", ErrMissingClient)
+		}
+		refDataClient, ok := clientVal.(ReferenceDataClient)
+		if !ok {
+			return nil, fmt.Errorf("resolve_instrument: %w", ErrInvalidClientType)
+		}
+
+		// Query with KnowledgeAt for bi-temporal lookup
+		instrumentID, err := refDataClient.ResolveInstrument(starlarkCtx.Context, reference, starlarkCtx.KnowledgeAt)
+		if err != nil {
+			return nil, fmt.Errorf("resolve_instrument(%q): %w", reference, err)
+		}
+
+		// Cache result
+		if starlarkCtx.LookupCache != nil {
+			starlarkCtx.LookupCache.Set(cacheKey, instrumentID)
+		}
+
+		return starlark.String(instrumentID), nil
 	})
 
 	// invoke_saga - invoke a child saga
-	builtins["invoke_saga"] = starlark.NewBuiltin("invoke_saga", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	builtins["invoke_saga"] = starlark.NewBuiltin("invoke_saga", func(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 		var sagaName string
-		if err := starlark.UnpackArgs(b.Name(), args, kwargs, "saga_name", &sagaName); err != nil {
+		inputDict := starlark.NewDict(0)
+
+		if err := starlark.UnpackArgs(b.Name(), args, kwargs,
+			"saga_name", &sagaName,
+			"input?", &inputDict,
+		); err != nil {
 			return nil, err
 		}
-		// Placeholder - actual invocation happens at runtime
-		return starlark.None, nil
+
+		// Get StarlarkContext
+		ctxVal := thread.Local("saga.StarlarkContext")
+		if ctxVal == nil {
+			return nil, fmt.Errorf("invoke_saga: %w", ErrMissingStarlarkContext)
+		}
+		starlarkCtx, ok := ctxVal.(*StarlarkContext)
+		if !ok {
+			return nil, fmt.Errorf("invoke_saga: %w", ErrInvalidStarlarkContext)
+		}
+
+		// Get Composer from thread
+		composerVal := thread.Local("saga.Composer")
+		if composerVal == nil {
+			return nil, fmt.Errorf("invoke_saga: %w", ErrMissingClient)
+		}
+		composer, ok := composerVal.(*Composer)
+		if !ok {
+			return nil, fmt.Errorf("invoke_saga: %w", ErrInvalidClientType)
+		}
+
+		// Get CallStack for nesting tracking
+		stackVal := thread.Local("saga.CallStack")
+		if stackVal == nil {
+			return nil, fmt.Errorf("invoke_saga: %w", ErrMissingClient)
+		}
+		stack, ok := stackVal.(*CallStack)
+		if !ok {
+			return nil, fmt.Errorf("invoke_saga: %w", ErrInvalidClientType)
+		}
+
+		// Convert Starlark dict to Go map
+		input := make(map[string]interface{})
+		for _, item := range inputDict.Items() {
+			key, ok := item[0].(starlark.String)
+			if !ok {
+				return nil, fmt.Errorf("invoke_saga: %w: input keys must be strings, got %s", ErrInvalidParameterType, item[0].Type())
+			}
+			input[string(key)] = convertStarlarkToGo(item[1])
+		}
+
+		// Invoke child saga with scope inheritance and circular detection
+		result, err := composer.InvokeSaga(
+			starlarkCtx.Context,
+			sagaName,
+			input,
+			starlarkCtx.PartyScope, // Inherit parent scope - child cannot escalate
+			stack,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("invoke_saga(%q): %w", sagaName, err)
+		}
+
+		// Return sagaResultValue from composition.go
+		// goToStarlark handles map[string]interface{} -> *starlark.Dict conversion
+		outputDict, ok := goToStarlark(result.Output).(*starlark.Dict)
+		if !ok {
+			outputDict = starlark.NewDict(0)
+		}
+		return &sagaResultValue{
+			executionID:    result.ExecutionID,
+			status:         result.Status,
+			output:         outputDict,
+			stepsCompleted: result.StepsCompleted,
+		}, nil
 	})
 
 	// fail - explicitly fail the saga
@@ -262,3 +471,52 @@ func (p *postingValue) Truth() starlark.Bool { return starlark.True }
 
 // Hash implements starlark.Value.
 func (p *postingValue) Hash() (uint32, error) { return 0, fmt.Errorf("%w: Posting", ErrUnhashable) }
+
+// convertStarlarkToGo converts a Starlark value to a Go value.
+// This is used when passing input parameters to child sagas.
+func convertStarlarkToGo(v starlark.Value) interface{} {
+	if v == nil {
+		return nil
+	}
+
+	switch val := v.(type) {
+	case starlark.String:
+		return string(val)
+	case starlark.Int:
+		if i64, ok := val.Int64(); ok {
+			// Preserve int vs int64 type: if value fits in int, return int
+			if i := int(i64); int64(i) == i64 {
+				return i
+			}
+			return i64
+		}
+		return val.String()
+	case starlark.Float:
+		return float64(val)
+	case starlark.Bool:
+		return bool(val)
+	case starlark.NoneType:
+		return nil
+	case *starlark.List:
+		result := make([]interface{}, val.Len())
+		for i := 0; i < val.Len(); i++ {
+			result[i] = convertStarlarkToGo(val.Index(i))
+		}
+		return result
+	case *starlark.Dict:
+		result := make(map[string]interface{})
+		for _, item := range val.Items() {
+			if key, ok := item[0].(starlark.String); ok {
+				result[string(key)] = convertStarlarkToGo(item[1])
+			} else {
+				// Log warning - non-string keys are not supported in Go map conversion
+				slog.Warn("convertStarlarkToGo: ignoring non-string dict key",
+					"key_type", item[0].Type(),
+					"key_value", item[0].String())
+			}
+		}
+		return result
+	default:
+		return val.String()
+	}
+}
