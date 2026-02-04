@@ -481,11 +481,11 @@ func createServiceWithClients(
 		repo,
 		lienRepo,
 		withdrawalRepo,
-		outboxRepo,          // Outbox repository for reliable event delivery
-		db,                  // Database connection for transaction management
-		posKeepingClient,    // *poskeepingclient.Client implements service.PositionKeepingClient
-		finAcctClient,       // *finacctclient.Client implements service.FinancialAccountingClient
-		partyClientWrapper,  // *PartyClientWrapper implements service.PartyClient
+		outboxRepo,         // Outbox repository for reliable event delivery
+		db,                 // Database connection for transaction management
+		posKeepingClient,   // *poskeepingclient.Client implements service.PositionKeepingClient
+		finAcctClient,      // *finacctclient.Client implements service.FinancialAccountingClient
+		partyClientWrapper, // *PartyClientWrapper implements service.PartyClient
 		accountConfig,
 		idempotencyService,
 		logger,
