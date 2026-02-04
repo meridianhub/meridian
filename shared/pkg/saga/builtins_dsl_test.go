@@ -71,6 +71,53 @@ func TestCelEvalBuiltin(t *testing.T) {
 		assert.Equal(t, "2", result.String())
 	})
 
+	t.Run("evaluates expression with input variables", func(t *testing.T) {
+		thread := &starlark.Thread{Name: "test"}
+		ctx := &StarlarkContext{
+			Context:         context.Background(),
+			SagaExecutionID: uuid.New(),
+			CorrelationID:   uuid.New(),
+			KnowledgeAt:     time.Now(),
+		}
+		thread.SetLocal("saga.StarlarkContext", ctx)
+
+		builtins := NewRestrictedBuiltins(nil)
+		celEval := builtins["cel_eval"].(*starlark.Builtin)
+
+		// Call cel_eval("input.amount > 100", {"amount": 150})
+		inputDict := starlark.NewDict(1)
+		_ = inputDict.SetKey(starlark.String("amount"), starlark.MakeInt(150))
+		args := starlark.Tuple{starlark.String("input.amount > 100"), inputDict}
+		result, err := celEval.CallInternal(thread, args, nil)
+
+		require.NoError(t, err)
+		assert.Equal(t, "True", result.String())
+	})
+
+	t.Run("rejects non-string keys in variables", func(t *testing.T) {
+		thread := &starlark.Thread{Name: "test"}
+		ctx := &StarlarkContext{
+			Context:         context.Background(),
+			SagaExecutionID: uuid.New(),
+			CorrelationID:   uuid.New(),
+			KnowledgeAt:     time.Now(),
+		}
+		thread.SetLocal("saga.StarlarkContext", ctx)
+
+		builtins := NewRestrictedBuiltins(nil)
+		celEval := builtins["cel_eval"].(*starlark.Builtin)
+
+		// Call cel_eval with non-string key
+		inputDict := starlark.NewDict(1)
+		_ = inputDict.SetKey(starlark.MakeInt(42), starlark.String("value"))
+		args := starlark.Tuple{starlark.String("1 + 1"), inputDict}
+		_, err := celEval.CallInternal(thread, args, nil)
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidParameterType)
+		assert.Contains(t, err.Error(), "variables keys must be strings")
+	})
+
 	t.Run("handles missing context", func(t *testing.T) {
 		thread := &starlark.Thread{Name: "test"}
 		// Don't set StarlarkContext
@@ -247,7 +294,7 @@ func TestConvertStarlarkToGo(t *testing.T) {
 		{
 			name:  "int",
 			input: starlark.MakeInt(42),
-			want:  int64(42),
+			want:  int(42), // Now returns int for values that fit
 		},
 		{
 			name:  "float",
@@ -277,6 +324,34 @@ func TestConvertStarlarkToGo(t *testing.T) {
 			assert.Equal(t, tt.want, result)
 		})
 	}
+
+	// Test round-trip preservation: Go int -> Starlark -> Go should preserve type
+	t.Run("round-trip preserves int type", func(t *testing.T) {
+		originalInt := int(123)
+		starlarkVal := goToStarlark(originalInt)
+		result := convertStarlarkToGo(starlarkVal)
+		assert.Equal(t, originalInt, result)
+		assert.IsType(t, int(0), result, "should preserve int type on round-trip")
+	})
+
+	t.Run("int64 values convert to int when they fit", func(t *testing.T) {
+		// On 64-bit systems, int and int64 have same range, so int64 values
+		// are converted to int when they fit in int (which is always on amd64)
+		originalInt64 := int64(9223372036854775807)
+		starlarkVal := goToStarlark(originalInt64)
+		result := convertStarlarkToGo(starlarkVal)
+		// On 64-bit systems, result will be int (same value, different type)
+		// On 32-bit systems, this would overflow int and remain int64
+		// We verify the numeric value is preserved
+		switch v := result.(type) {
+		case int:
+			assert.Equal(t, int64(v), originalInt64, "numeric value should be preserved")
+		case int64:
+			assert.Equal(t, v, originalInt64, "numeric value should be preserved")
+		default:
+			t.Fatalf("unexpected type: %T", result)
+		}
+	})
 
 	t.Run("list", func(t *testing.T) {
 		input := starlark.NewList([]starlark.Value{

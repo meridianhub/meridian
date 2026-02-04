@@ -27,6 +27,9 @@ var (
 
 	// ErrInvalidClientType is returned when a client has invalid type.
 	ErrInvalidClientType = errors.New("invalid client type")
+
+	// ErrInvalidParameterType is returned when a parameter has an unexpected type.
+	ErrInvalidParameterType = errors.New("invalid parameter type")
 )
 
 // NewRestrictedBuiltins creates a hardened Starlark environment with whitelisted functions.
@@ -145,7 +148,8 @@ func NewRestrictedBuiltins(logger *slog.Logger) starlark.StringDict {
 	// cel_eval - evaluate a CEL expression
 	builtins["cel_eval"] = starlark.NewBuiltin("cel_eval", func(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 		var expression string
-		if err := starlark.UnpackArgs(b.Name(), args, kwargs, "expression", &expression); err != nil {
+		var inputDict *starlark.Dict
+		if err := starlark.UnpackArgs(b.Name(), args, kwargs, "expression", &expression, "variables?", &inputDict); err != nil {
 			return nil, err
 		}
 
@@ -171,6 +175,19 @@ func NewRestrictedBuiltins(logger *slog.Logger) starlark.StringDict {
 				"saga_execution_id": starlarkCtx.SagaExecutionID.String(),
 				"correlation_id":    starlarkCtx.CorrelationID.String(),
 			},
+		}
+
+		// Add optional input variables if provided
+		if inputDict != nil {
+			inputMap := make(map[string]interface{})
+			for _, item := range inputDict.Items() {
+				key, ok := item[0].(starlark.String)
+				if !ok {
+					return nil, fmt.Errorf("cel_eval: %w: variables keys must be strings, got %s", ErrInvalidParameterType, item[0].Type())
+				}
+				inputMap[string(key)] = convertStarlarkToGo(item[1])
+			}
+			variables["input"] = inputMap
 		}
 
 		// Evaluate expression
@@ -329,9 +346,11 @@ func NewRestrictedBuiltins(logger *slog.Logger) starlark.StringDict {
 		// Convert Starlark dict to Go map
 		input := make(map[string]interface{})
 		for _, item := range inputDict.Items() {
-			if key, ok := item[0].(starlark.String); ok {
-				input[string(key)] = convertStarlarkToGo(item[1])
+			key, ok := item[0].(starlark.String)
+			if !ok {
+				return nil, fmt.Errorf("invoke_saga: %w: input keys must be strings, got %s", ErrInvalidParameterType, item[0].Type())
 			}
+			input[string(key)] = convertStarlarkToGo(item[1])
 		}
 
 		// Invoke child saga with scope inheritance and circular detection
@@ -464,8 +483,12 @@ func convertStarlarkToGo(v starlark.Value) interface{} {
 	case starlark.String:
 		return string(val)
 	case starlark.Int:
-		if i, ok := val.Int64(); ok {
-			return i
+		if i64, ok := val.Int64(); ok {
+			// Preserve int vs int64 type: if value fits in int, return int
+			if i := int(i64); int64(i) == i64 {
+				return i
+			}
+			return i64
 		}
 		return val.String()
 	case starlark.Float:
