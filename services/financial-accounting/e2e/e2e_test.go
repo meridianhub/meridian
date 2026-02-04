@@ -254,18 +254,25 @@ func createTestBookingLog(t *testing.T, env *E2ETestEnvironment, status string) 
 }
 
 // createTestPosting creates a ledger posting for double-entry testing
-func createTestPosting(t *testing.T, env *E2ETestEnvironment, bookingLogID uuid.UUID, direction string, amountCents int64) uuid.UUID {
+// If accountID is provided, uses that; otherwise generates a random account ID
+func createTestPosting(t *testing.T, env *E2ETestEnvironment, bookingLogID uuid.UUID, direction string, amountCents int64, accountID ...string) uuid.UUID {
 	t.Helper()
 
 	gbpInstrument := financialaccountingdomain.MustCurrencyToInstrument(financialaccountingdomain.CurrencyGBP)
 	amount := financialaccountingdomain.NewMoney(decimal.NewFromInt(amountCents).Div(decimal.NewFromInt(100)), gbpInstrument)
+
+	// Use provided account ID or generate random one
+	acc := "ACC-" + uuid.New().String()[:8]
+	if len(accountID) > 0 && accountID[0] != "" {
+		acc = accountID[0]
+	}
 
 	posting := &financialaccountingdomain.LedgerPosting{
 		ID:                    uuid.New(),
 		FinancialBookingLogID: bookingLogID,
 		Direction:             financialaccountingdomain.PostingDirection(direction),
 		Amount:                amount,
-		AccountID:             "ACC-" + uuid.New().String()[:8],
+		AccountID:             acc,
 		ValueDate:             time.Now(),
 		Status:                financialaccountingdomain.TransactionStatusPending,
 		CreatedAt:             time.Now(),
@@ -455,13 +462,14 @@ func TestReconciliation_E2E(t *testing.T) {
 	accountID := "ACC-RECON-001"
 
 	// Initialize position-keeping with 1000.00 GBP balance
-	createTestPosition(t, env, accountID, decimal.NewFromInt(1000))
+	initialBalance := decimal.NewFromInt(1000)
+	createTestPosition(t, env, accountID, initialBalance)
 
 	// Execute 10 deposits through financial-accounting (CREDIT to account)
 	for i := 0; i < 10; i++ {
 		bookingLogID := createTestBookingLog(t, env, "PENDING")
-		createTestPosting(t, env, bookingLogID, "CREDIT", 5000) // 50.00 GBP deposit
-		createTestPosting(t, env, bookingLogID, "DEBIT", 5000)  // From cash account
+		createTestPosting(t, env, bookingLogID, "CREDIT", 5000, accountID) // 50.00 GBP deposit to ACC-RECON-001
+		createTestPosting(t, env, bookingLogID, "DEBIT", 5000)             // From cash account (different account)
 
 		// Mark as POSTED
 		bookingLog := &financialaccountingpersistence.FinancialBookingLogEntity{}
@@ -500,16 +508,28 @@ func TestReconciliation_E2E(t *testing.T) {
 	})
 	require.NoError(t, err, "Async posting updates did not complete in time")
 
-	// Calculate balance from financial-accounting (sum of CREDIT - DEBIT for account)
+	// Calculate balance from financial-accounting for ACC-RECON-001
 	var postings []financialaccountingpersistence.LedgerPostingEntity
 	err = env.DB.WithContext(env.Ctx).
-		Joins("JOIN financial_booking_log ON financial_booking_log.id = ledger_posting.financial_booking_log_id").
-		Where("ledger_posting.account_id LIKE ?", "ACC-%").
+		Where("ledger_posting.account_id = ?", accountID).
 		Find(&postings).Error
 	require.NoError(t, err)
 
+	// Calculate ledger net balance (CREDIT - DEBIT)
+	var ledgerNet decimal.Decimal
+	ledgerNet = decimal.Zero
+	for _, p := range postings {
+		amount := decimal.NewFromInt(p.AmountMinorUnits).Div(decimal.NewFromInt(100))
+		switch p.PostingDirection {
+		case "CREDIT":
+			ledgerNet = ledgerNet.Add(amount)
+		case "DEBIT":
+			ledgerNet = ledgerNet.Sub(amount)
+		}
+	}
+
 	// Calculate total position balance (position-keeping is append-only, sum all records)
-	var totalAmount decimal.Decimal
+	var positionTotal decimal.Decimal
 	var amountStrings []string
 	err = env.DB.WithContext(env.Ctx).
 		Model(&struct {
@@ -520,19 +540,35 @@ func TestReconciliation_E2E(t *testing.T) {
 		Pluck("amount", &amountStrings).Error
 	require.NoError(t, err)
 
-	totalAmount = decimal.Zero
+	positionTotal = decimal.Zero
 	for _, amtStr := range amountStrings {
 		amt, err := decimal.NewFromString(amtStr)
 		require.NoError(t, err)
-		totalAmount = totalAmount.Add(amt)
+		positionTotal = positionTotal.Add(amt)
 	}
 
-	// Position should now be 1000.00 (initial) + (10 * 50.00 deposits) = 1500.00 GBP
-	expectedBalance := decimal.NewFromInt(1500)
+	// Expected ledger delta from deposits (10 * 50.00 CREDIT to ACC-RECON-001)
+	expectedLedgerDelta := decimal.NewFromInt(50).Mul(decimal.NewFromInt(10))
 
-	assert.True(t, expectedBalance.Equal(totalAmount),
-		"Reconciliation failed: expected=%s actual=%s diff=%s records=%d",
-		expectedBalance.String(), totalAmount.String(), expectedBalance.Sub(totalAmount).String(), len(amountStrings))
+	// Verify ledger delta matches expected
+	assert.True(t, expectedLedgerDelta.Equal(ledgerNet),
+		"Ledger delta mismatch: expected=%s actual=%s",
+		expectedLedgerDelta.String(), ledgerNet.String())
+
+	// Expected final balance: 1000.00 (initial position) + 500.00 (10 deposits)
+	expectedBalance := initialBalance.Add(expectedLedgerDelta)
+
+	// Verify position total matches expected balance
+	assert.True(t, expectedBalance.Equal(positionTotal),
+		"Position total mismatch: expected=%s actual=%s diff=%s records=%d",
+		expectedBalance.String(), positionTotal.String(), expectedBalance.Sub(positionTotal).String(), len(amountStrings))
+
+	// CRITICAL: Verify ledger balance reconciles with position balance
+	// This is the core reconciliation test - both systems must agree
+	actualLedgerBalance := initialBalance.Add(ledgerNet)
+	assert.True(t, actualLedgerBalance.Equal(positionTotal),
+		"Reconciliation FAILED: ledger=%s position=%s diff=%s",
+		actualLedgerBalance.String(), positionTotal.String(), actualLedgerBalance.Sub(positionTotal).String())
 }
 
 // ============================================================================
