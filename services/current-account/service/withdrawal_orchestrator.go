@@ -156,10 +156,21 @@ func (o *WithdrawalOrchestrator) Orchestrate(ctx context.Context, account domain
 	// Resolve clearing account ID (dynamic resolver preferred, fallback to static config)
 	withdrawalClearingAccountID := o.resolveClearingAccountID(ctx, string(amount.Currency()))
 
+	// Parse correlation ID safely - fallback to generated ID if invalid
+	correlationUUID, parseErr := uuid.Parse(correlationID)
+	if parseErr != nil {
+		correlationUUID = uuid.New()
+		correlationID = correlationUUID.String()
+		o.logger.Warn("invalid correlation ID format; generated new one",
+			"correlation_id", correlationID,
+			"error", parseErr)
+		ctx = observability.WithCorrelationID(ctx, correlationID)
+	}
+
 	// Prepare saga input
 	input := saga.RunnerInput{
 		SagaExecutionID: uuid.New(),
-		CorrelationID:   uuid.MustParse(correlationID),
+		CorrelationID:   correlationUUID,
 		Input: map[string]interface{}{
 			"account_id":             account.AccountID(),
 			"account_identification": account.AccountIdentification(),

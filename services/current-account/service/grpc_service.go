@@ -9,7 +9,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"runtime"
 	"time"
 
 	"github.com/google/uuid"
@@ -255,10 +254,11 @@ func NewServiceWithExistingClients(
 	}
 
 	// Load schema registry from handlers.yaml
-	schemaRegistryData, err := os.ReadFile("../../shared/pkg/saga/schema/handlers.yaml")
+	schemaContent, err := loadSagaAsset(filepath.Join("shared", "pkg", "saga", "schema", "handlers.yaml"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read handlers schema: %w", err)
 	}
+	schemaRegistryData := []byte(schemaContent)
 	schemaRegistry := schema.NewRegistry()
 	if err := schemaRegistry.LoadFromYAML(schemaRegistryData); err != nil {
 		return nil, fmt.Errorf("failed to load schema: %w", err)
@@ -2023,23 +2023,31 @@ func (s *Service) sendCloseWebhook(tenantID, accountID, reason string, balance *
 	}
 }
 
-// loadSagaScript loads a saga script from the given path relative to the service directory.
+// loadSagaScript loads a saga script from the given path relative to the saga asset base directory.
+// For service-specific sagas like "sagas/deposit.star", prepend "services/current-account/".
 func loadSagaScript(relativePath string) (string, error) {
-	// Get the directory where this source file is located
-	_, filename, _, ok := runtime.Caller(0)
-	if !ok {
-		return "", ErrSagaScriptLoadFailed
+	return loadSagaAsset(filepath.Join("services", "current-account", relativePath))
+}
+
+// loadSagaAsset loads a saga asset (script or schema) from a configurable base directory.
+// Resolves assets from SAGA_ASSET_DIR environment variable if set, otherwise falls back
+// to the directory containing the executable. This makes asset loading independent of
+// build paths and working directory, supporting containerized deployments.
+func loadSagaAsset(relativePath string) (string, error) {
+	baseDir := os.Getenv("SAGA_ASSET_DIR")
+	if baseDir == "" {
+		// Fallback to executable directory
+		exe, err := os.Executable()
+		if err != nil {
+			return "", fmt.Errorf("failed to resolve saga asset dir: %w", err)
+		}
+		baseDir = filepath.Dir(exe)
 	}
-	serviceDir := filepath.Dir(filename)
 
-	// Construct the full path to the saga script
-	scriptPath := filepath.Join(serviceDir, "..", relativePath)
-
-	// Read the script file
-	content, err := os.ReadFile(scriptPath)
+	assetPath := filepath.Join(baseDir, relativePath)
+	content, err := os.ReadFile(assetPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to read saga script %s: %w", scriptPath, err)
+		return "", fmt.Errorf("failed to read saga asset %s: %w", assetPath, err)
 	}
-
 	return string(content), nil
 }
