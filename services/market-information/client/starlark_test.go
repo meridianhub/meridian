@@ -184,6 +184,11 @@ func TestGetRateHandler(t *testing.T) {
 
 		// Verify service was called
 		assert.True(t, mockServer.listObservationsCalled)
+
+		// Verify metadata propagation (CodeRabbit suggestion)
+		assert.Equal(t, "test-idempotency-key", mockServer.lastIdempotencyKey, "idempotency key should be propagated")
+		assert.Equal(t, ctx.CorrelationID, mockServer.lastCorrelationID, "correlation ID should be propagated")
+		assert.Equal(t, ctx.KnowledgeAt, mockServer.lastKnowledgeAt, "knowledge_at should be propagated")
 	})
 
 	t.Run("same currency returns rate 1.0", func(t *testing.T) {
@@ -449,8 +454,12 @@ func TestGetRateHandler(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, result)
 
-		// Verify service was called (knowledge_at propagation is tested at client level)
+		// Verify service was called
 		assert.True(t, mockServer.listObservationsCalled)
+
+		// Verify knowledge_at was propagated (CodeRabbit suggestion)
+		assert.Equal(t, knowledgeTime, mockServer.lastKnowledgeAt, "knowledge_at should be propagated for bi-temporal queries")
+		assert.Equal(t, ctx.CorrelationID, mockServer.lastCorrelationID, "correlation ID should be propagated")
 	})
 }
 
