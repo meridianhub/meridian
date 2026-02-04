@@ -237,12 +237,12 @@ func NewServiceWithExistingClients(
 		logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	}
 
-	// Load saga scripts
-	depositScript, err := loadSagaScript("sagas/deposit.star")
+	// Load saga scripts from reference-data canonical source
+	depositScript, err := loadSagaAsset(filepath.Join("services", "reference-data", "saga", "defaults", "deposit", "v1.0.0.star"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to load deposit saga script: %w", err)
 	}
-	withdrawalScript, err := loadSagaScript("sagas/withdrawal.star")
+	withdrawalScript, err := loadSagaAsset(filepath.Join("services", "reference-data", "saga", "defaults", "withdrawal", "v1.0.0.star"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to load withdrawal saga script: %w", err)
 	}
