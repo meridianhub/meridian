@@ -243,10 +243,20 @@ func (o *PaymentOrchestrator) Orchestrate(ctx context.Context, po *domain.Paymen
 		"saga_version", sagaDef.Version,
 		"saga_status", sagaDef.Status)
 
+	// Parse correlation ID - if invalid, generate a new one and log warning
+	correlationID, err := uuid.Parse(po.CorrelationID)
+	if err != nil {
+		o.logger.Warn("invalid correlation_id, generating new one",
+			"payment_order_id", po.ID.String(),
+			"invalid_correlation_id", po.CorrelationID,
+			"error", err)
+		correlationID = uuid.New()
+	}
+
 	// Map PaymentOrder domain object to RunnerInput.Input map
 	runnerInput := saga.RunnerInput{
 		SagaExecutionID: uuid.New(),
-		CorrelationID:   uuid.MustParse(po.CorrelationID),
+		CorrelationID:   correlationID,
 		Input: map[string]interface{}{
 			"payment_order_id":   po.ID.String(),
 			"debtor_account_id":  po.DebtorAccountID,
