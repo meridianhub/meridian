@@ -260,7 +260,7 @@ The engine executes logic in three tiers:
 ```python
 # Starlark strategy loaded from Reference Data
 def valuate_energy(input_quantity, params, knowledge_at):
-    # 1. Fetch market data
+    # 1. Fetch market data (knowledge_at ensures bi-temporal replay)
     spot_price = market_data.get_price("EPEX_SPOT", knowledge_at)
 
     # 2. Get account-specific coefficient
@@ -303,13 +303,46 @@ against strategy definition.
 - Runtime validates output matches declaration
 - Compile-time checks prevent dimension mixing
 
+#### FR-4.1: Output Instrument Validation (The "Chemical Signature")
+
+**Requirement:** The `GetValuedAmountResponse` MUST return the complete **InstrumentAmount** with full asset identity.
+
+**Rationale:** A USD account must never confuse the caller by returning GBP. The response must include:
+
+- `InstrumentCode` (e.g., "USD", "GBP", "KWH")
+- `Version` (for instruments with evolving definitions)
+- `Attributes` (for fungibility metadata, e.g., "vintage", "source")
+
+**Validation:** The Valuation Engine MUST verify that the instrument returned by the Starlark/CEL strategy
+matches the `output_instrument` defined in the `valuation_assignment`.
+
+**Enforcement Point:** This check happens at **activation time** (when a strategy is assigned to an account),
+preventing invalid configurations before they reach production.
+
+**Assertion in Saga:** The calling saga can assert the output instrument matches expectations:
+
+```go
+resp, _ := currentAccount.GetValuedAmount(ctx, kwhInput)
+
+if resp.Output.InstrumentCode != expectedInstrument {
+    return fmt.Errorf("VALUATION_MISMATCH: expected %s but got %s",
+        expectedInstrument, resp.Output.InstrumentCode)
+}
+```
+
 ### FR-5: Valuation Basis (The "Receipt")
 
 **Requirement:** Every valuation result MUST include a **Basis**.
 
 **Audit Trail:** Lists every `MarketPriceObservation.ID` and `Rate` used in the calculation.
 
-**Integrity:** This basis is stored in the `PositionEntry` for future audits and reconciliation.
+**Integrity:** Per ADR-017, the `observation_ids` and rates used in the calculation are stored in the
+`PositionEntry.attributes` JSONB field in Position Keeping. This ensures that even if the Market Information
+service purges old data after 7 years, the **Basis** stored in the ledger acts as a permanent snapshot
+of the evidence used for that valuation.
+
+**Auditability:** Seven years from now, an auditor can examine a single `PositionEntry` and see the complete
+"Receipt" for the valuation without calling any external services.
 
 ### FR-6: Caching Strategy
 
@@ -317,16 +350,51 @@ against strategy definition.
 
 - Compiled CEL expressions
 - Recently used valuation strategies
-- TTL: 5 minutes
+- TTL: 5 minutes (baseline)
 - Invalidated on `logic_hash` change
 
 **Key format:** `strategy:{strategy_id}:{logic_hash}`
+
+**Event-Driven Invalidation (Train Track Precision):**
+
+To achieve faster consistency than the 5-minute TTL, the system SHOULD implement event-driven invalidation:
+
+1. When Reference Data updates a `valuation_strategy`, it publishes a `strategy.updated` Kafka event
+2. Account Services subscribe to this topic and invalidate their L1 cache immediately
+3. New transactions use the updated strategy within milliseconds, not minutes
+
+**Implementation:** This is a P2 enhancement (Stream 8). The 5-minute TTL provides acceptable baseline behavior.
 
 **Why no L2 Redis cache:**
 
 - Bi-temporal queries (`knowledge_at`) make cache hit rate near 0%
 - Account Service already has in-memory cache
 - Operational complexity not justified
+
+### FR-7: Conservation of Dimension (Recursion Prevention)
+
+**Requirement:** The Valuation Engine MUST NOT trigger write operations back to Position Keeping for the same
+asset type being valued.
+
+**Risk:** Without this constraint, a malicious or buggy strategy could create an "Infinite Asset Inflation" loop:
+
+```text
+BAD: Valuation triggers position log → Position log triggers valuation → Loop
+```
+
+**Enforcement:**
+
+1. **Read-Only Contract:** The `GetValuedAmount` RPC is a **stateless inquiry** (pure function).
+   It performs NO writes to Position Keeping, NO writes to Account state.
+2. **Domain Boundary:** Valuation is "Math-as-a-Service" - it calculates, it does not transact.
+3. **Saga Responsibility:** Only the Saga Orchestrator can write to Position Keeping, and only AFTER
+   receiving the valuation response.
+
+**Architectural Safety:** By making valuation a read-only operation, we prevent:
+
+- Recursive valuation loops
+- Non-deterministic execution (valuation affecting its own inputs)
+- Unauthorized state mutations
 
 ## 5. Technical Architecture
 
@@ -391,7 +459,85 @@ shared/pkg/valuation/
     └── type Request, Response, Basis
 ```
 
-### 5.3 Account Service Integration
+### 5.3 The "Passport Pattern" - Statelessness with Audit Integrity
+
+The `GetValuedAmount` RPC is **stateless** (no writes), but the **Basis** (the valuation receipt) must be
+persisted downstream to ensure the ledger is auditable. This creates a **three-layer persistence model**:
+
+#### Layer 1: Account Service (Stateless / Pure Function)
+
+The `GetValuedAmount` RPC performs NO database writes. It is "Math-as-a-Service."
+
+**Why:** If 100,000 meter reads arrive per hour, we don't want 100,000 "Inquiry Writes" to the Account Service
+database. That would destroy TPS.
+
+**Performance Impact:** Stateless operation achieves <5ms p99 latency by eliminating DB write contention.
+
+#### Layer 2: Saga Orchestrator (Checkpoint Persistence)
+
+The Saga DOES persist the result. Per ADR-028 (Durable Execution Engine), the saga saves the response of every
+step into its `saga_step_results` table.
+
+**Audit Value:** If a pod dies and the saga replays, it doesn't re-calculate the value; it pulls the "frozen"
+result from the last checkpoint. This guarantees **deterministic replay** - the same saga execution always sees
+the same valuation, even if market rates have changed since.
+
+**Example:**
+
+```json
+{
+  "step_id": "valuate_energy",
+  "result": {
+    "output": {"amount": "35.00", "instrument": "GBP"},
+    "basis": {
+      "strategy_id": "wholesale-spot-v2",
+      "rates": {"EPEX_SPOT": "0.456"},
+      "observation_ids": ["obs_abc123"],
+      "knowledge_at": "2025-01-15T14:30:00Z"
+    }
+  }
+}
+```
+
+#### Layer 3: Position Keeping (Permanent Audit)
+
+When the transaction finally hits **Position Keeping**, the `ValuationBasis` is stored in the `attributes` JSONB
+of the `PositionEntry`.
+
+**Audit Value:** Seven years from now, an auditor can examine a single row in the ledger and see the complete
+"Receipt" for the valuation without calling any external services. Even if:
+
+- The Market Information service has purged old rate data
+- The Reference Data service has deprecated the strategy
+- The Account Service has been decommissioned
+
+**Example `PositionEntry.attributes`:**
+
+```json
+{
+  "valuation_basis": {
+    "strategy_id": "wholesale-spot-v2",
+    "strategy_version": "1.2.0",
+    "applied_rates": {"EPEX_SPOT": "0.456", "gsp_coefficient": "1.05"},
+    "observation_ids": ["obs_abc123"],
+    "computed_at": "2025-01-15T14:30:15Z",
+    "knowledge_at": "2025-01-15T14:30:00Z",
+    "account_parameters": {"gsp": "P", "tier": "Gold"}
+  }
+}
+```
+
+#### The "Passport Analogy"
+
+The `ValuationBasis` travels through the system like a passport:
+
+1. **Issued** by the Account Service (valuation calculation)
+2. **Stamped** by the Saga Orchestrator (checkpoint persistence)
+3. **Archived** by Position Keeping (permanent ledger entry)
+
+At each layer, the Basis provides **proof of origin** and **proof of calculation** for regulatory audit.
+
+### 5.4 Account Service Integration
 
 ```go
 // services/current-account/internal/service/valuation.go
@@ -442,7 +588,7 @@ func (s *Service) GetValuedAmount(
 }
 ```
 
-### 5.4 Dependency Injection
+### 5.5 Dependency Injection
 
 ```go
 // services/current-account/cmd/current-account-service/main.go
@@ -610,12 +756,14 @@ func main() {
 2. Optimize cache key generation
 3. Add connection pooling for Reference Data client
 4. Tune cache sizes and TTLs
-5. Load testing (target: 500 valuations/second per Account Service instance)
+5. Implement event-driven cache invalidation (Kafka subscriber for `strategy.updated` events)
+6. Load testing (target: 500 valuations/second per Account Service instance)
 
 **Success Criteria:**
 
 - p99 latency < 8ms under normal load
 - Cache hit rate >80% after 5-minute warmup
+- Event-driven invalidation reduces staleness to <100ms (from 5min TTL baseline)
 - No memory leaks in long-running tests
 - Graceful degradation if Market Information is slow
 
