@@ -73,7 +73,7 @@ def execute_withdrawal():
     )
     
     # Step 4: Capture CREDIT posting to clearing account (if double-entry enabled)
-    if clearing_account_id is not None and clearing_account_id.strip() != "":
+    if clearing_account_id != None and clearing_account_id.strip() != "":
         step(name="capture_credit_posting")
         credit_result = financial_accounting.capture_posting(
             booking_log_id=booking_log_result.booking_log_id,
