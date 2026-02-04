@@ -22,14 +22,15 @@ ALTER TABLE "ledger_posting"
 ALTER TABLE "ledger_posting"
     ALTER COLUMN "currency" TYPE character varying(32);
 
--- Backfill dimension_type for existing rows (all are monetary)
-UPDATE "ledger_posting"
-SET "dimension_type" = 'CURRENCY'
-WHERE "dimension_type" IS NULL;
+-- Note: dimension_type backfill happens automatically via DEFAULT 'CURRENCY'
+-- CockroachDB asynchronously backfills the column with the default value
+-- No explicit UPDATE needed (would fail with "column is being backfilled" error)
 
--- Make dimension_type NOT NULL after backfill
-ALTER TABLE "ledger_posting"
-    ALTER COLUMN "dimension_type" SET NOT NULL;
+-- Make dimension_type NOT NULL after backfill completes
+-- This ALTER must be in a separate migration after the backfill completes
+-- See: https://www.cockroachlabs.com/docs/stable/online-schema-changes#handling-not-null-constraints
+-- ALTER TABLE "ledger_posting"
+--     ALTER COLUMN "dimension_type" SET NOT NULL;
 
 -- Add an index on dimension_type for filtering by asset class
 CREATE INDEX IF NOT EXISTS "idx_ledger_posting_dimension_type" ON "ledger_posting" ("dimension_type");
