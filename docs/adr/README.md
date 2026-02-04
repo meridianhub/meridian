@@ -86,6 +86,7 @@ graph LR
     ADR0003 --> ADR0015
     ADR0004[ADR-0004<br/>Event Schema Evolution] --> ADR0005[ADR-0005<br/>Adapter Pattern]
     ADR0013[ADR-0013<br/>Quantity Types] --> ADR0014[ADR-0014<br/>Reference Data]
+    ADR0014 --> ADR0017[ADR-0017<br/>Temporal Quality Ladder]
     ADR0016[ADR-0016<br/>Tenant ID Strategy] -.influences.-> ADR0003
 
     style ADR0002 fill:#e1f5ff
