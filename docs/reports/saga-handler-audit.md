@@ -18,9 +18,9 @@ implementations (`client/starlark.go`). The analysis is based on:
 
 **Findings**:
 
-- **4 services** require saga handler implementation (HIGH/MEDIUM priority)
+- **3 services** require saga handler implementation (HIGH/MEDIUM priority)
 - **3 services** already have handlers implemented (no action needed)
-- **6 services** do not require handlers (infrastructure/orchestrators/workers)
+- **7 services** do not require handlers (infrastructure/orchestrators/workers/deferred)
 
 ---
 
@@ -124,9 +124,11 @@ implementations (`client/starlark.go`). The analysis is based on:
 
 ---
 
-### 4. party (MEDIUM PRIORITY)
+### 4. party (DEFERRED - No Saga Integration Required)
 
-**Status**: Has `client/client.go` but **missing `client/starlark.go`**
+**Status**: Has `client/client.go` but **starlark.go NOT needed**
+
+**Analysis Date**: 2026-02-04
 
 **Evidence**:
 
@@ -134,26 +136,50 @@ implementations (`client/starlark.go`). The analysis is based on:
   - `services/current-account/` (5 files - KYC/party validation during account creation)
   - `services/tenant/service/` (4 files - party client adapter)
   - `services/current-account/cmd/` (2 files - party wrapper)
-- Currently used for **party validation** in current account operations
-- **Future saga use case**: KYC/AML checks in account opening and payment approval sagas
+- **No saga script usage**: Search for `party.` in all `.star` files returned zero results
+- **Pre-saga validation pattern**: Party validation occurs during account creation via direct gRPC calls
+  (see `grpc_service_party_integration_test.go`)
+- **Async verification architecture**: KYC/AML checks handled via `VerificationService` with webhook-based
+  async processing (see `verification_service.go`)
 
-**Category**: `HandlerCategorySettlement`
-**ProducesInstruments**: `[]` (read-only - validates party data, doesn't create instruments)
+**Current Usage Pattern**:
 
-**Handlers to Implement**:
+Party service is called in **two distinct contexts**, neither requiring saga integration:
 
-| Handler Name | gRPC Method | Category | Idempotent | ProducesInstruments |
-|-------------|-------------|----------|------------|-------------------|
-| `party.retrieve` | `RetrieveParty` | Settlement | Yes (with retry) | NO - read-only |
-| `party.retrieve_demographics` | `RetrieveDemographics` | Settlement | Yes (with retry) | NO - read-only |
-| `party.retrieve_bank_relations` | `RetrieveBankRelations` | Settlement | Yes (with retry) | NO - read-only |
+1. **Account Opening (Pre-Saga)**:
+   - Direct gRPC call from `current-account.InitiateCurrentAccount()`
+   - Validates party exists and has ACTIVE status before account creation
+   - Fails fast with InvalidArgument or FailedPrecondition gRPC codes
+   - Happens **before** any saga orchestration begins
 
-**Implementation Notes**:
+2. **KYC/AML Verification (Background Async)**:
+   - Initiated via `VerificationService.InitiateVerification()`
+   - Creates PENDING verification record immediately
+   - External KYC provider processes asynchronously
+   - Results delivered via webhook to `verification_webhook.go`
+   - Publishes `VerificationCompletedEvent` to event stream
+   - **Not in critical path** of payment execution
 
-- Handlers validate party identity and relationships in saga decision points
-- All read-only operations for KYC/AML verification
-- Used in account opening and payment approval workflows
-- No instrument creation - pure validation/reference data
+**Decision Rationale**:
+
+Party operations are **orthogonal to saga orchestration** for these reasons:
+
+1. **Validation is Pre-Saga**: Party checks are gating conditions before saga initiation, not orchestrated steps
+2. **No Compensation Needed**: Party lookups don't create state requiring rollback
+3. **Async Verification Model**: KYC checks use event-driven architecture (webhook → event publisher),
+   not synchronous saga steps
+4. **No Instrument Production**: Party service doesn't create/consume financial instruments
+
+**Future Consideration**:
+
+If payment approval workflows require **synchronous party validation during saga execution**
+(e.g., real-time sanction screening), revisit this decision. Current architecture delegates these checks to:
+
+- Pre-saga validation (account opening)
+- Post-saga compliance monitoring (background workers)
+
+**Category**: N/A (Deferred)
+**ProducesInstruments**: N/A (Deferred)
 
 ---
 
@@ -221,6 +247,21 @@ Not used in transactional saga flows. Read-only lookups happen outside saga exec
 
 ---
 
+### 9. party ✗
+
+**Status**: Has `client/client.go` but **saga handlers not needed**
+
+**Reason**: Party operations occur **outside saga orchestration**:
+
+- **Pre-saga validation**: Party checks are gating conditions during account creation (before saga initiation)
+- **Async verification**: KYC/AML verification uses webhook-based event architecture, not synchronous saga steps
+- **No compensation needed**: Party lookups are read-only and don't create state requiring rollback
+- **No instrument production**: Party service doesn't create/consume financial instruments
+
+See detailed analysis in "Services Requiring client/starlark.go → Section 4. party (DEFERRED)".
+
+---
+
 ## Handler Implementation Priority Matrix
 
 | Service | Priority | Cross-Service Refs | Saga Use Case | Complexity |
@@ -228,9 +269,9 @@ Not used in transactional saga flows. Read-only lookups happen outside saga exec
 | **internal-bank-account** | **HIGH** | 14 | Nostro/vostro account creation in cross-border payments | 5 points |
 | **reference-data** | **HIGH** | 10 | Bucket solvency checks (already used in payment-order) | 3 points |
 | **market-information** | **MEDIUM** | 3 | FX rate lookups in multi-currency transactions | 3 points |
-| **party** | **MEDIUM** | 11 | KYC/AML validation in account opening | 3 points |
+| **party** | **DEFERRED** | 11 | No saga integration needed (pre-saga + async patterns) | N/A |
 
-**Total**: 14 story points across 4 services
+**Total**: 11 story points across 3 services
 
 ---
 
@@ -433,6 +474,7 @@ internal_bank_account.list_accounts(
 **gRPC Method**: `ListInternalBankAccounts`
 
 **Error Cases**:
+
 - Invalid filter values return empty list
 - gRPC errors propagate to saga
 
@@ -554,6 +596,7 @@ reference_data.list_instruments(
 **gRPC Method**: `ListInstruments`
 
 **Error Cases**:
+
 - Invalid filter values return empty list
 - gRPC errors propagate to saga
 
@@ -638,116 +681,13 @@ market_information.list_observations(
 **gRPC Method**: `ListObservations`
 
 **Error Cases**:
+
 - Invalid filter values return empty list
 - gRPC errors propagate to saga
 
 **Idempotency**: Yes - read-only operation with retry
 
 **Category**: `HandlerCategoryValuation`
-
-**ProducesInstruments**: `[]` (read-only)
-
----
-
-### party Handler Specifications
-
-**File**: `services/party/client/starlark.go`
-
-#### Handler: `party.retrieve`
-
-**Purpose**: Validate party identity in saga workflows
-
-**Input Parameters**:
-
-```starlark
-party.retrieve(
-    party_id="party_..."
-)
-```
-
-**Output**:
-
-```starlark
-{
-    "party_id": "party_...",
-    "party_type": "CUSTOMER",
-    "legal_name": "John Doe",
-    "status": "ACTIVE"
-}
-```
-
-**gRPC Method**: `RetrieveParty`
-
----
-
-#### Handler: `party.retrieve_bank_relations`
-
-**Purpose**: Fetch party's bank relationship data for payment authorization
-
-**Input Parameters**:
-
-```starlark
-party.retrieve_bank_relations(
-    party_id="party_..."
-)
-```
-
-**Output**:
-
-```starlark
-{
-    "party_id": "party_...",
-    "primary_account": "acc_...",
-    "relationship_status": "GOOD_STANDING",
-    "credit_limit_cents": 500000
-}
-```
-
-**gRPC Method**: `RetrieveBankRelations`
-
----
-
-#### Handler: `party.retrieve_demographics`
-
-**Purpose**: Fetch party demographic data for KYC/AML compliance checks
-
-**Input Parameters**:
-
-```starlark
-party.retrieve_demographics(
-    party_id="party_..."
-)
-```
-
-**Output**:
-
-```starlark
-{
-    "party_id": "party_...",
-    "date_of_birth": "1990-01-15",
-    "nationality": "US",
-    "residential_address": {
-        "country": "US",
-        "state": "CA",
-        "city": "San Francisco",
-        "postal_code": "94105"
-    },
-    "tax_residency": ["US"],
-    "kyc_status": "VERIFIED",
-    "last_kyc_review": "2025-12-01T00:00:00Z"
-}
-```
-
-**gRPC Method**: `RetrieveDemographics`
-
-**Error Cases**:
-- Party not found returns error
-- Unauthorized access returns permission denied
-- gRPC errors propagate to saga
-
-**Idempotency**: Yes - read-only operation with retry
-
-**Category**: `HandlerCategorySettlement`
 
 **ProducesInstruments**: `[]` (read-only)
 
@@ -762,10 +702,10 @@ Each handler's `ProducesInstruments` metadata enables **Conservation Rule** enfo
 | internal-bank-account | `initiate` | Currencies | Creates Money instruments (nostro/vostro) |
 | reference-data | All | `[]` | Read-only - no instrument creation |
 | market-information | All | `[]` | Read-only - no instrument creation |
-| party | All | `[]` | Read-only - no instrument creation |
 
 **Key Insight**: Only `internal-bank-account.initiate` produces instruments. All other handlers are read-only
-and support saga decision logic without creating/destroying value.
+and support saga decision logic without creating/destroying value. Party service handlers are deferred as
+party operations occur outside saga orchestration (pre-saga validation + async verification).
 
 ---
 
@@ -794,16 +734,16 @@ and do not require idempotency key-based duplicate detection tests.
 
 ---
 
-## Next Steps (Subtasks 19.2-19.5)
+## Next Steps (Subtasks 19.2-19.4)
 
 | Subtask | Service | Story Points | Dependencies |
 |---------|---------|--------------|--------------|
 | **19.2** | internal-bank-account | 5 | None (parallel) |
 | **19.3** | reference-data | 3 | None (parallel) |
 | **19.4** | market-information | 3 | None (parallel) |
-| **19.5** | party | 3 | None (parallel) |
+| **19.5** | party | N/A | Deferred (documented in audit) |
 
-All subtasks can execute **in parallel** after this audit report is reviewed.
+Subtasks 19.2-19.4 can execute **in parallel** after this audit report is reviewed.
 
 ---
 
@@ -863,12 +803,14 @@ services/tenant/cmd/main.go
 ## Conclusion
 
 This audit provides a complete roadmap for saga handler implementation across Meridian's service architecture.
-The four services requiring handlers represent **14 story points** of work that can be parallelized across
-subtasks 19.2-19.5, enabling future saga patterns including:
+The three services requiring handlers represent **11 story points** of work that can be parallelized across
+subtasks 19.2-19.4, enabling future saga patterns including:
 
 1. **Cross-border payments** (internal-bank-account + market-information)
 2. **Bucket-aware solvency** (reference-data - already in use)
-3. **KYC/AML workflows** (party)
+
+The party service (subtask 19.5) has been **deferred** after analysis showing that party operations occur
+outside saga orchestration flows (pre-saga validation during account opening + async KYC verification via webhooks).
 
 All handler specifications include detailed parameter mappings, conservation rule metadata,
 and testing requirements for immediate implementation.
