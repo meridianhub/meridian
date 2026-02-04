@@ -57,13 +57,14 @@ func testWithdrawalOrchestrator(repo *persistence.Repository, posKeeping *mockPo
 // testWithdrawalOrchestratorWithConfig creates a WithdrawalOrchestrator with optional AccountConfig.
 // Panics if orchestrator creation fails (indicates test setup problem).
 func testWithdrawalOrchestratorWithConfig(repo *persistence.Repository, posKeeping *mockPositionKeepingClient, finAcct *mockFinancialAccountingClient, acctConfig *config.AccountConfig) *WithdrawalOrchestrator {
-	// Load withdrawal saga script
+	// Load withdrawal saga script from reference-data canonical source
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
 		panic("failed to get current file path")
 	}
 	serviceDir := filepath.Dir(filename)
-	withdrawalScriptPath := filepath.Join(serviceDir, "..", "sagas", "withdrawal.star")
+	repoRoot := filepath.Join(serviceDir, "..", "..", "..")
+	withdrawalScriptPath := filepath.Join(repoRoot, "services", "reference-data", "saga", "defaults", "withdrawal", "v1.0.0.star")
 	withdrawalScriptBytes, err := os.ReadFile(withdrawalScriptPath)
 	if err != nil {
 		panic("failed to read withdrawal script: " + err.Error())

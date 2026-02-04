@@ -477,13 +477,14 @@ func testDepositOrchestrator(repo *persistence.Repository, posKeeping PositionKe
 // testDepositOrchestratorWithConfig creates a DepositOrchestrator with optional AccountConfig.
 // Panics if orchestrator creation fails (acceptable in test helpers).
 func testDepositOrchestratorWithConfig(repo *persistence.Repository, posKeeping PositionKeepingClient, finAcct FinancialAccountingClient, acctConfig *config.AccountConfig) *DepositOrchestrator {
-	// Load saga script from file
+	// Load saga script from reference-data canonical source
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
 		panic("failed to get current file path")
 	}
 	serviceDir := filepath.Dir(filename)
-	depositScriptPath := filepath.Join(serviceDir, "..", "sagas", "deposit.star")
+	repoRoot := filepath.Join(serviceDir, "..", "..", "..")
+	depositScriptPath := filepath.Join(repoRoot, "services", "reference-data", "saga", "defaults", "deposit", "v1.0.0.star")
 	depositScriptBytes, err := os.ReadFile(depositScriptPath)
 	if err != nil {
 		panic(fmt.Sprintf("failed to read deposit script: %v", err))
