@@ -34,17 +34,18 @@ import (
 func testSagaRunner(t *testing.T) (*saga.StarlarkSagaRunner, string, string) {
 	t.Helper()
 
-	// Load saga scripts from relative path
+	// Load saga scripts from reference-data canonical source
 	_, filename, _, ok := runtime.Caller(0)
 	require.True(t, ok, "failed to get current file path")
 	serviceDir := filepath.Dir(filename)
+	repoRoot := filepath.Join(serviceDir, "..", "..", "..")
 
-	depositScriptPath := filepath.Join(serviceDir, "..", "sagas", "deposit.star")
+	depositScriptPath := filepath.Join(repoRoot, "services", "reference-data", "saga", "defaults", "deposit", "v1.0.0.star")
 	depositScriptBytes, err := os.ReadFile(depositScriptPath)
 	require.NoError(t, err, "failed to read deposit script")
 	depositScript := string(depositScriptBytes)
 
-	withdrawalScriptPath := filepath.Join(serviceDir, "..", "sagas", "withdrawal.star")
+	withdrawalScriptPath := filepath.Join(repoRoot, "services", "reference-data", "saga", "defaults", "withdrawal", "v1.0.0.star")
 	withdrawalScriptBytes, err := os.ReadFile(withdrawalScriptPath)
 	require.NoError(t, err, "failed to read withdrawal script")
 	withdrawalScript := string(withdrawalScriptBytes)
