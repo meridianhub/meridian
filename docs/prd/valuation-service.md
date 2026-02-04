@@ -22,7 +22,7 @@ instructions: |
 # PRD: Account-Scoped Valuation Engine
 
 **Status:** Draft - Revised Architecture
-**Version:** 2.5 (Idempotency, Drift Detection & Architecture Guards)
+**Version:** 2.6 (Ghost Pricing Prevention & Lien Immutability)
 **Task Master Tag:** `valuation-engine`
 **Story Points:** 75 (11 streams)
 **Core ADR:** [ADR-0028: Starlark Saga Orchestration with CEL Valuation](../adr/0028-starlark-saga-cel-valuation.md)
@@ -35,6 +35,7 @@ instructions: |
 - v2.3: Security & resilience (read-only VM, graceful stale, bucket filtering, quality tracking)
 - v2.4: Reservation Ledger pattern, calculation path audit, canonical bucketing library
 - v2.5: Idempotency guards, basis drift detection, architecture enforcement, size limits
+- v2.6: Ghost Pricing prevention (shared valuation logic), lien immutability constraint
 
 ## 1. Executive Summary
 
@@ -292,6 +293,48 @@ guarantee the returned price will be honored in subsequent transactions. It is i
 
 **For transactional flows** (actual withdrawals/deposits), valuation MUST happen atomically within
 `InitiateLien` or `ExecuteDeposit` (see FR-8).
+
+#### Ghost Pricing Prevention (CRITICAL)
+
+**Requirement:** `GetValuedAmount` (inquiry) and `InitiateLien` (transactional) MUST share the **exact same
+private valuation function** within the Account Service.
+
+**Risk:** If the two code paths diverge, the mobile app could show one price while the transaction executes
+at another—destroying customer trust and potentially violating consumer protection regulations.
+
+**Implementation:**
+
+```go
+// services/current-account/internal/service/valuation.go
+
+// valuateInternal is the SINGLE SOURCE OF TRUTH for all valuation
+// Both GetValuedAmount and InitiateLien MUST use this function
+func (s *Service) valuateInternal(
+    ctx context.Context,
+    accountID uuid.UUID,
+    input *quantity.InstrumentAmount,
+    knowledgeAt time.Time,
+    projectedBalance *decimal.Decimal,  // nil for inquiry, populated for transactional
+) (*ValuationResult, error) {
+    // ... shared valuation logic
+}
+
+// GetValuedAmount uses valuateInternal with projectedBalance=nil (inquiry mode)
+func (s *Service) GetValuedAmount(ctx context.Context, req *GetValuedAmountRequest) (*GetValuedAmountResponse, error) {
+    result, err := s.valuateInternal(ctx, req.AccountId, req.Input, req.KnowledgeAt, nil)
+    // ...
+}
+
+// InitiateLien uses valuateInternal with actual projectedBalance (transactional mode)
+func (s *Service) InitiateLien(ctx context.Context, req *InitiateLienRequest) (*InitiateLienResponse, error) {
+    projectedBalance, _ := s.positionClient.GetProjectedBalance(ctx, ...)
+    result, err := s.valuateInternal(ctx, req.AccountId, req.Amount, time.Now(), &projectedBalance)
+    // ...
+}
+```
+
+**Test Requirement:** Integration tests MUST verify that `GetValuedAmount` and `InitiateLien` return
+identical valuations when given the same inputs and projected balance.
 
 **Design Note (Naming):**
 
@@ -700,7 +743,11 @@ const MaxCalculationPathEntries = 20
 
 func (ctx *valuationContext) RecordPath(step string) {
     if len(ctx.calculationPath) >= MaxCalculationPathEntries {
-        // Log warning but don't fail - truncate silently
+        // Set truncation flag for tenant visibility
+        ctx.pathTruncated = true
+        ctx.truncatedSteps = append(ctx.truncatedSteps, step)
+
+        // Log warning for operations team
         ctx.logger.Warn("calculation_path limit reached, truncating",
             "step", step,
             "limit", MaxCalculationPathEntries,
@@ -711,9 +758,51 @@ func (ctx *valuationContext) RecordPath(step string) {
 }
 ```
 
+**Tenant-Visible Warning (Saga Debugger Integration):**
+
+When calculation path is truncated, the `ValuationBasis` MUST include a warning visible in the
+Saga Debugger UI so tenants know their audit trail is incomplete:
+
+```go
+type ValuationBasis struct {
+    // ... existing fields ...
+    CalculationPath []string `json:"calculation_path"`
+
+    // NEW: Truncation warning for tenant visibility
+    Warnings []ValuationWarning `json:"warnings,omitempty"`
+}
+
+type ValuationWarning struct {
+    Code    string `json:"code"`     // "CALCULATION_PATH_TRUNCATED"
+    Message string `json:"message"`  // Human-readable
+    Details any    `json:"details"`  // Additional context
+}
+
+// In engine.go, after valuation completes:
+if ctx.pathTruncated {
+    basis.Warnings = append(basis.Warnings, ValuationWarning{
+        Code:    "CALCULATION_PATH_TRUNCATED",
+        Message: fmt.Sprintf("Audit trail truncated at %d entries. %d steps omitted.",
+            MaxCalculationPathEntries, len(ctx.truncatedSteps)),
+        Details: map[string]any{
+            "truncated_steps": ctx.truncatedSteps,
+            "limit":           MaxCalculationPathEntries,
+        },
+    })
+}
+```
+
+**Saga Debugger Display:**
+
+```text
+⚠️ CALCULATION_PATH_TRUNCATED
+   Audit trail truncated at 20 entries. 3 steps omitted.
+   Omitted: ["tier_check_21", "tier_check_22", "final_markup"]
+```
+
 **Rationale:** BIAN compliance requires audit trails, but audit trails must be bounded to prevent
 storage bloat. 20 entries is sufficient for typical tiered pricing (5-7 tiers) with multiple
-conditional branches.
+conditional branches. Tenants with complex strategies need visibility into truncation.
 
 ### FR-6: Caching Strategy
 
@@ -986,6 +1075,53 @@ locked value, NOT a recalculated value. This protects both:
 
 - **Customer**: Price won't increase between reservation and execution
 - **Merchant**: Tiered discounts can't be gamed by concurrent reservations
+
+#### Lien Immutability Enforcement (Database Level)
+
+**Requirement:** The `liens` table MUST enforce immutability of `valued_amount` once the lien is in
+`ACTIVE` status. This prevents both application bugs and direct database manipulation.
+
+##### Implementation Option A: Trigger-Based Enforcement
+
+```sql
+-- CockroachDB trigger to prevent valued_amount modification on ACTIVE liens
+CREATE FUNCTION prevent_valued_amount_update() RETURNS TRIGGER AS $$
+BEGIN
+    IF OLD.status = 'ACTIVE' AND NEW.valued_amount IS DISTINCT FROM OLD.valued_amount THEN
+        RAISE EXCEPTION 'Cannot modify valued_amount on ACTIVE lien: %', OLD.id;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER lien_valued_amount_immutable
+    BEFORE UPDATE ON liens
+    FOR EACH ROW
+    EXECUTE FUNCTION prevent_valued_amount_update();
+```
+
+##### Implementation Option B: Application-Level Enforcement
+
+If CockroachDB trigger support is limited, enforce via repository layer:
+
+```go
+func (r *LienRepository) Update(ctx context.Context, lien *Lien) error {
+    existing, err := r.FindByID(ctx, lien.ID)
+    if err != nil {
+        return err
+    }
+
+    // CRITICAL: Prevent valued_amount modification on ACTIVE liens
+    if existing.Status == StatusActive && !existing.ValuedAmount.Equal(lien.ValuedAmount) {
+        return fmt.Errorf("LIEN_IMMUTABILITY_VIOLATION: cannot modify valued_amount on ACTIVE lien %s", lien.ID)
+    }
+
+    return r.db.Save(lien)
+}
+```
+
+**Audit Requirement:** Any attempt to modify `valued_amount` on an ACTIVE lien MUST be logged as a
+security event for SOC review.
 
 **CRITICAL Constraint:** The `ExecuteLien` RPC MUST be updated to **forbid amount overrides**. The handler
 MUST strictly use the `valued_amount` stored in the database lien record created by `InitiateLien`. No
