@@ -1,37 +1,60 @@
 ---
-name: prd-valuation-service
-description: Valuation Strategy Orchestrator - Account-as-a-Contract value transformation engine
+name: prd-account-scoped-valuation
+description: Account-Scoped Valuation Engine - Embedded library pattern for multi-asset value transformation
 triggers:
   - Converting non-monetary assets to monetary value for settlement
   - Tenant-specific pricing strategies without code deployment
   - Bi-temporal valuation replay for audit and reconciliation
   - Multi-currency and multi-commodity conversion with full audit trail
 instructions: |
-  The Valuation Service executes transformation logic to convert input assets (Quantity[A])
-  into output assets (Quantity[B]) based on strategies defined by destination accounts.
-  Every account acts as a "Smart Contract" providing the formula and context for value acceptance.
-  Use CEL for stateless calculation expressions and Starlark for complex orchestration logic.
+  Account Services (CurrentAccount, InternalBankAccount) own valuation capability via shared library.
+  Each account defines how it accepts value through strategy assignments stored in its schema.
+  The shared/pkg/valuation library executes CEL/Starlark strategies loaded from Reference Data.
+  Use the GetValuedAmount RPC pattern to ask accounts "what is this worth to you?"
 ---
 
-# PRD: Valuation Strategy Orchestrator (Valuation Service)
+# PRD: Account-Scoped Valuation Engine
 
-**Status:** Draft
-**Version:** 1.0
+**Status:** Draft - Revised Architecture
+**Version:** 2.0
 **Task Master Tag:** `valuation-engine`
 **Core ADR:** [ADR-0028: Starlark Saga Orchestration with CEL Valuation](../adr/0028-starlark-saga-cel-valuation.md)
 
 ## 1. Executive Summary
 
-The Valuation Service is the "Calculated Truth" engine of Meridian. It executes transformation logic to
-convert an input asset (`Quantity[A]`) into an output asset (`Quantity[B]`)—typically Monetary—based on a
-strategy defined by the **destination account**.
+The Account-Scoped Valuation Engine enables multi-asset ledgers by making **accounts responsible for defining
+how they accept value**. Instead of a centralized pricing service, valuation logic is embedded within
+Account Services (CurrentAccount, InternalBankAccount) via a shared library.
 
-Instead of a centralized price list, every account (Current or Internal) acts as a **Smart Contract**
-that provides the formula and context for how it accepts value.
+### The "Probe Pattern"
+
+```text
+Saga asks Account: "What is 100 kWh worth to you?"
+Account responds: "£35.00, and here's why (ValuationBasis)"
+```
 
 **Key Innovation:** This PRD codifies a shift from "Price is a number" to
 **"Value is a Function of an Account."** We move the **responsibility of value** to the **Account**,
-while the **Valuation Service** provides the **computational integrity**.
+while a **shared valuation library** provides the **computational integrity**.
+
+### Architecture at a Glance
+
+```text
+shared/pkg/valuation/          # Shared library (CEL + Starlark runtime)
+├── engine.go                  # Core valuation execution
+├── builtins.go               # market_data, cel_eval functions
+└── cache.go                  # L1 in-memory cache
+
+services/current-account/      # Implements GetValuedAmount RPC
+services/internal-bank-account/ # Implements GetValuedAmount RPC
+```
+
+**Why Embedded Library > Standalone Service:**
+
+- **Performance**: Eliminates 1 network hop (3 hops vs 4)
+- **Domain Modeling**: Valuation is Account's capability, not external service
+- **Operational Simplicity**: No additional microservice to deploy/monitor
+- **Follows Existing Patterns**: Matches shared/pkg/saga library approach
 
 ## 2. The Problem Statement
 
@@ -48,33 +71,32 @@ In a multi-asset ledger, the "Conversion Rate" is not a global constant.
 
 1. **Logic Hardcoding:** Changing a tariff requires code deployment.
 2. **Context Loss:** We can't easily track *why* a specific rate was applied to a specific meter read.
-3. **Scalability:** Centralizing all valuation math in one service creates a bottleneck.
+3. **Account Heterogeneity:** Different accounts need different formulas (fixed vs. spot pricing).
 4. **Audit Trail:** No clear provenance for how values were computed historically.
 
-## 3. The "Account-as-a-Contract" Solution
+## 3. The "Account-as-Authority" Solution
 
-We implement a **Two-Step Resolution Pattern**:
+We implement an **Account Responsibility Pattern**:
 
-1. **Discovery (Account Service):** The Orchestrator asks the Account:
-   *"What is your policy for this asset?"*
-2. **Execution (Valuation Service):** The Orchestrator tells the Valuation Service:
-   *"Execute this policy using this market data."*
+1. **Shared Library**: `shared/pkg/valuation` provides CEL/Starlark execution engine
+2. **Account Ownership**: Account Services implement `GetValuedAmount` RPC
+3. **Strategy Assignment**: Accounts store `valuation_strategy_id` + parameters in their schema
+4. **In-Process Execution**: Valuation happens within Account Service process boundary
 
 ### 3.1 Data Model: The Strategy Assignment
 
-We extend `CurrentAccount` and `InternalBankAccount` to include a **Valuation Assignment**:
+Accounts store a reference to their valuation strategy:
 
 ```sql
--- Added to Account/InternalAccount schemas
+-- Added to CurrentAccount and InternalBankAccount schemas
 CREATE TABLE valuation_assignments (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     account_id UUID NOT NULL,
     instrument_code VARCHAR(32) NOT NULL, -- e.g., 'KWH', 'USD', 'TONNE_CO2E'
 
-    -- Reference to the logic in Reference Data service
-    strategy_id UUID NOT NULL,            -- Points to a Starlark/CEL definition
+    -- Reference to the strategy in Reference Data service
+    strategy_id UUID NOT NULL,
 
-    -- Local Context Parameters
+    -- Account-specific context parameters
     -- e.g., {"gsp": "P", "tier": "Gold", "markup": "0.02"}
     parameters JSONB NOT NULL DEFAULT '{}',
 
@@ -102,10 +124,10 @@ CREATE INDEX idx_valuation_assignments_bitemporal
 
 ### 3.2 Valuation Strategy Definition
 
-Strategies are stored in the Reference Data service:
+Strategies are stored in the Reference Data service (per-tenant schema):
 
 ```sql
--- Lives in Reference Data service (per-tenant schema)
+-- Lives in Reference Data service (tenant-scoped via PostgreSQL schemas)
 CREATE TABLE valuation_strategies (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
@@ -150,45 +172,80 @@ CREATE INDEX idx_valuation_strategies_bitemporal
 
 ## 4. Functional Requirements
 
-### FR-1: Strategy Discovery RPC
+### FR-1: GetValuedAmount RPC
 
-**Requirement:** Every account-owning service MUST implement `ResolveValuationStrategy(account_id, instrument_code)`.
-
-**Behavior:** Returns the `strategy_id` and the `parameters` JSON.
-
-**Bi-Temporal:** Must respect `knowledge_at` (returns the strategy active at that historical moment).
+**Requirement:** Account Services MUST implement the `GetValuedAmount` RPC to value arbitrary assets.
 
 ```protobuf
 service CurrentAccountService {
-  rpc ResolveValuationStrategy(ResolveValuationStrategyRequest)
-      returns (ResolveValuationStrategyResponse);
+  // NEW - Valuation capability
+  rpc GetValuedAmount(GetValuedAmountRequest) returns (GetValuedAmountResponse);
 }
 
-message ResolveValuationStrategyRequest {
+message GetValuedAmountRequest {
   string account_id = 1;
-  string instrument_code = 2;
+  meridian.quantity.v1.InstrumentAmount input = 2;
   google.protobuf.Timestamp knowledge_at = 3;
 }
 
-message ResolveValuationStrategyResponse {
-  string strategy_id = 1;
-  google.protobuf.Struct parameters = 2;
+message GetValuedAmountResponse {
+  meridian.quantity.v1.InstrumentAmount output = 1;
+  ValuationBasis basis = 2;
+  string execution_time_ms = 3;
+  bool cache_hit = 4;
+}
 
-  // Audit trail
-  google.protobuf.Timestamp valid_from = 3;
-  google.protobuf.Timestamp valid_to = 4;
+message ValuationBasis {
+  string strategy_id = 1;
+  string strategy_version = 2;
+  map<string, string> applied_rates = 3;
+  repeated string observation_ids = 4;  // Links to MarketInformation
+  google.protobuf.Timestamp computed_at = 5;
+  google.protobuf.Timestamp knowledge_at = 6;
+  google.protobuf.Struct account_parameters = 7;
 }
 ```
 
-### FR-2: Stateless Valuation Runtime
+### FR-2: Shared Valuation Library
 
-**Requirement:** The Valuation Service MUST be a stateless executor of Starlark/CEL.
+**Requirement:** A reusable Go library MUST provide CEL/Starlark execution for valuation logic.
 
-**Input:** `InstrumentAmount` (Native), `StrategyID`, `Parameters` (from Account), `KnowledgeAt`.
+**Package:** `shared/pkg/valuation`
 
-**Output:** `InstrumentAmount` (Valued) + `ValuationBasis` (Audit trail).
+**Core Interface:**
 
-**Performance Target:** < 10ms per valuation (including market data lookups).
+```go
+package valuation
+
+type Engine interface {
+    // Valuate executes a strategy to convert input to output
+    Valuate(ctx context.Context, req Request) (*Response, error)
+}
+
+type Request struct {
+    Input       *quantity.InstrumentAmount
+    StrategyID  uuid.UUID
+    Parameters  map[string]interface{}
+    KnowledgeAt time.Time
+}
+
+type Response struct {
+    Output *quantity.InstrumentAmount
+    Basis  *Basis
+}
+
+type Basis struct {
+    StrategyID      uuid.UUID
+    StrategyVersion string
+    AppliedRates    map[string]decimal.Decimal
+    ObservationIDs  []string
+    ComputedAt      time.Time
+    KnowledgeAt     time.Time
+    Parameters      map[string]interface{}
+}
+```
+
+**Performance Target:** < 5ms per valuation (in-process execution, excluding market data lookups).
 
 ### FR-3: Hierarchical Logic Execution
 
@@ -198,10 +255,10 @@ The engine executes logic in three tiers:
 2. **CEL (The Policy):** Performs the high-speed numeric multiplication (~100ns).
 3. **Market Data (The Fact):** Injects the bi-temporal rates (e.g., FX mid-rate).
 
-**Execution Flow:**
+**Example Execution Flow:**
 
 ```python
-# Starlark wrapper (if logic_type = STARLARK)
+# Starlark strategy loaded from Reference Data
 def valuate_energy(input_quantity, params, knowledge_at):
     # 1. Fetch market data
     spot_price = market_data.get_price("EPEX_SPOT", knowledge_at)
@@ -234,10 +291,17 @@ def valuate_energy(input_quantity, params, knowledge_at):
 
 **Requirement:** The system MUST prevent "Dimensional Leaks."
 
-**Check:** If an account only accepts `Monetary` value, the Valuation Service must verify the
+**Check:** If an account only accepts `Monetary` value, the valuation engine must verify the
 `strategy_id` results in a `Quantity[Monetary]` output.
 
-**Implementation:** Pre-execution validation checks `input_instrument` and `output_instrument` against strategy definition.
+**Implementation:** Pre-execution validation checks `input_instrument` and `output_instrument`
+against strategy definition.
+
+**Conservation of Dimension Enforcement** (per ADR-0028):
+
+- Strategies must declare `ProducesInstrument` metadata
+- Runtime validates output matches declaration
+- Compile-time checks prevent dimension mixing
 
 ### FR-5: Valuation Basis (The "Receipt")
 
@@ -247,257 +311,166 @@ def valuate_energy(input_quantity, params, knowledge_at):
 
 **Integrity:** This basis is stored in the `PositionEntry` for future audits and reconciliation.
 
-```protobuf
-message ValuationBasis {
-  // Strategy metadata
-  string strategy_id = 1;
-  string strategy_version = 2;
-
-  // Rates applied
-  map<string, string> applied_rates = 3;  // e.g. {"spot_price": "0.456", "markup": "1.02"}
-
-  // Market data references
-  repeated string observation_ids = 4;    // Link back to MarketInformation service
-
-  // Execution context
-  google.protobuf.Timestamp computed_at = 5;
-  google.protobuf.Timestamp knowledge_at = 6;
-
-  // Account context
-  google.protobuf.Struct account_parameters = 7;
-}
-```
-
 ### FR-6: Caching Strategy
 
-**L1 Cache (In-Memory):**
+**L1 Cache (In-Memory within Account Service):**
 
 - Compiled CEL expressions
 - Recently used valuation strategies
 - TTL: 5 minutes
 - Invalidated on `logic_hash` change
 
-**L2 Cache (Redis):**
+**Key format:** `strategy:{strategy_id}:{logic_hash}`
 
-- Market data snapshots (per `knowledge_at`)
-- Valuation results for identical inputs
-- TTL: 1 hour
-- Key format: `valuation:{strategy_id}:{input_hash}:{knowledge_at}`
+**Why no L2 Redis cache:**
 
-### FR-7: Batch Valuation API
-
-For high-throughput scenarios (settlement runs, bulk imports):
-
-```protobuf
-service ValuationService {
-  rpc ValuateBatch(ValuateBatchRequest) returns (ValuateBatchResponse);
-}
-
-message ValuateBatchRequest {
-  repeated ValuateRequest requests = 1;
-
-  // Optional: Pre-fetch market data for this batch
-  repeated string required_observation_ids = 2;
-}
-
-message ValuateBatchResponse {
-  repeated ValuateResponse responses = 1;
-
-  // Batch execution metadata
-  int32 successful_count = 2;
-  int32 failed_count = 3;
-  string execution_time_ms = 4;
-}
-```
+- Bi-temporal queries (`knowledge_at`) make cache hit rate near 0%
+- Account Service already has in-memory cache
+- Operational complexity not justified
 
 ## 5. Technical Architecture
 
-### 5.1 The gRPC Contract
-
-```protobuf
-syntax = "proto3";
-
-package meridian.valuation.v1;
-
-import "google/protobuf/timestamp.proto";
-import "google/protobuf/struct.proto";
-import "meridian/quantity/v1/quantity.proto";
-
-service ValuationService {
-  // Execute a valuation strategy
-  rpc Valuate(ValuateRequest) returns (ValuateResponse);
-
-  // Batch valuation for high-throughput scenarios
-  rpc ValuateBatch(ValuateBatchRequest) returns (ValuateBatchResponse);
-
-  // Validate a strategy (dry-run)
-  rpc ValidateStrategy(ValidateStrategyRequest) returns (ValidateStrategyResponse);
-}
-
-message ValuateRequest {
-  // The raw asset to value
-  meridian.quantity.v1.InstrumentAmount input = 1;
-
-  // The destination context (obtained from Account Service)
-  string strategy_id = 2;
-  google.protobuf.Struct parameters = 3;
-
-  // Bi-temporal pinning
-  google.protobuf.Timestamp knowledge_at = 4;
-
-  // Optional: Provide cached market data to avoid lookups
-  map<string, string> market_data_overrides = 5;
-}
-
-message ValuateResponse {
-  // The resulting value (typically in settlement currency)
-  meridian.quantity.v1.InstrumentAmount output = 1;
-
-  // The "Receipt" for auditors
-  ValuationBasis basis = 2;
-
-  // Execution metadata
-  string execution_time_ms = 3;
-  bool cache_hit = 4;
-}
-
-message ValuationBasis {
-  string strategy_id = 1;
-  string strategy_version = 2;
-  map<string, string> applied_rates = 3;
-  repeated string observation_ids = 4;
-  google.protobuf.Timestamp computed_at = 5;
-  google.protobuf.Timestamp knowledge_at = 6;
-  google.protobuf.Struct account_parameters = 7;
-}
-
-message ValuateBatchRequest {
-  repeated ValuateRequest requests = 1;
-  repeated string required_observation_ids = 2;
-}
-
-message ValuateBatchResponse {
-  repeated ValuateResponse responses = 1;
-  int32 successful_count = 2;
-  int32 failed_count = 3;
-  string execution_time_ms = 4;
-}
-
-message ValidateStrategyRequest {
-  string strategy_id = 1;
-  meridian.quantity.v1.InstrumentAmount sample_input = 2;
-  google.protobuf.Struct sample_parameters = 3;
-}
-
-message ValidateStrategyResponse {
-  bool valid = 1;
-  repeated string errors = 2;
-  repeated string warnings = 3;
-
-  // If valid, show what the output would be
-  meridian.quantity.v1.InstrumentAmount sample_output = 4;
-}
-```
-
-### 5.2 The Workflow (Meridian Golden Path)
+### 5.1 The Workflow (Revised - 3 Network Hops)
 
 ```mermaid
 sequenceDiagram
-    participant Saga as Payment/Settlement Saga
-    participant Account as Account Service
+    participant Saga as Withdrawal Saga
+    participant Account as Current Account Service
+    participant Lib as Valuation Library (in-process)
     participant Ref as Reference Data
-    participant Val as Valuation Service
-    participant MIM as Market Info (MIM)
-    participant Cache as Redis Cache
+    participant MIM as Market Information
 
-    Saga->>Account: 1. ResolveValuationStrategy(account_id, KWH)
-    Account-->>Saga: strategy_id=RETAIL_V1, params={"tier": "fixed"}
+    Saga->>Account: GetValuedAmount(account_id, 100 kWh)
+    Account->>Account: Load account.valuation_strategy_id from DB
 
-    Saga->>Val: 2. Valuate(100 KWH, RETAIL_V1, params, knowledge_at)
+    Account->>Lib: engine.Valuate(strategy_id, params)
 
-    Val->>Cache: 3. Check L2 cache
-    alt Cache Hit
-        Cache-->>Val: Cached result
-    else Cache Miss
-        Val->>Ref: 4. GetStrategy(RETAIL_V1)
-        Ref-->>Val: Starlark Script + Compiled CEL
+    Lib->>Ref: GetStrategy(strategy_id, knowledge_at)
+    Ref-->>Lib: Starlark script (cached 5min)
 
-        Val->>MIM: 5. GetRate(TARIFF_LIST, knowledge_at)
-        MIM-->>Val: Price: 0.35
+    Lib->>MIM: GetRate("EPEX_SPOT", knowledge_at)
+    MIM-->>Lib: £0.456
 
-        Val->>Val: 6. Execute Starlark(100 * 0.35)
-        Val->>Cache: 7. Store result in cache
-    end
+    Lib->>Lib: Execute Starlark (100 * 0.456 * coeff)
+    Lib-->>Account: Output: £35.00 + Basis
 
-    Val-->>Saga: Result: £35.00 + Basis
+    Account-->>Saga: GetValuedAmountResponse
 
-    Saga->>FinAcct: 8. Post(£35.00, basis)
+    Saga->>FinAcct: Post(£35.00, basis)
 ```
 
-### 5.3 Service Structure
+**Network hop analysis:**
+
+1. Saga → Account: `GetValuedAmount` request
+2. Account → Reference Data: `GetStrategy` request (cacheable)
+3. Account → Market Information: `GetRate` request (cacheable)
+
+**Total: 3 network calls** (vs. 4 in standalone service approach)
+
+### 5.2 Library Structure
 
 ```text
-services/valuation/
-├── cmd/
-│   └── valuation-service/
-│       └── main.go
-├── internal/
-│   ├── domain/
-│   │   ├── strategy.go          # Strategy domain model
-│   │   ├── valuation.go         # Valuation result model
-│   │   └── basis.go             # Audit basis model
-│   ├── runtime/
-│   │   ├── executor.go          # Main execution engine
-│   │   ├── starlark_runtime.go  # Starlark VM wrapper
-│   │   ├── cel_runtime.go       # CEL evaluator
-│   │   └── builtins.go          # Built-in functions for Starlark
-│   ├── cache/
-│   │   ├── l1_cache.go          # In-memory cache
-│   │   └── l2_cache.go          # Redis cache
-│   ├── repository/
-│   │   └── strategy_repository.go
-│   └── service/
-│       ├── valuation_service.go
-│       └── handlers.go          # gRPC handlers
-├── api/
-│   └── proto/
-│       └── valuation/
-│           └── v1/
-│               └── valuation.proto
-└── tests/
-    ├── integration/
-    │   ├── valuation_test.go
-    │   └── cache_test.go
-    └── fixtures/
-        └── strategies/
-            ├── identity_usd.star
-            ├── retail_energy.star
-            └── fx_gbp_usd.star
+shared/pkg/valuation/
+├── engine.go                  # Core valuation engine
+│   └── type Engine struct
+│   └── func (e *Engine) Valuate(ctx, req) (*Response, error)
+├── builtins.go               # Starlark builtins
+│   └── market_data.get_price()
+│   └── cel_eval()
+│   └── quantity operations
+├── cache.go                  # L1 in-memory cache
+│   └── Strategy cache (5min TTL)
+│   └── CEL expression cache
+├── cel_runtime.go            # CEL compiler wrapper
+│   └── Security constraints
+│   └── Cost limits
+├── starlark_runtime.go       # Starlark VM wrapper
+│   └── Deterministic execution
+│   └── Timeout controls
+└── types.go                  # Request/Response types
+    └── type Request, Response, Basis
 ```
 
-### 5.4 Built-in Functions for Starlark
-
-The valuation runtime provides these built-ins to Starlark scripts:
+### 5.3 Account Service Integration
 
 ```go
-// Runtime provides these functions to Starlark
-type RuntimeBuiltins struct {
-    // Market data lookups
-    "market_data.get_price":     GetPriceBuiltin,
-    "market_data.get_fx_rate":   GetFXRateBuiltin,
-    "market_data.get_commodity": GetCommodityBuiltin,
+// services/current-account/internal/service/valuation.go
+package service
 
-    // CEL evaluation
-    "cel_eval": CELEvalBuiltin,
+import "meridian/shared/pkg/valuation"
 
-    // Quantity operations
-    "quantity.new":      NewQuantityBuiltin,
-    "quantity.convert":  ConvertQuantityBuiltin,
-    "quantity.multiply": MultiplyBuiltin,
+func (s *Service) GetValuedAmount(
+    ctx context.Context,
+    req *currentaccountv1.GetValuedAmountRequest,
+) (*currentaccountv1.GetValuedAmountResponse, error) {
 
-    // Logging (for debugging strategies)
-    "log.debug": LogDebugBuiltin,
-    "log.info":  LogInfoBuiltin,
+    // 1. Load account to get strategy assignment
+    account, err := s.repo.FindByID(ctx, req.AccountId)
+    if err != nil {
+        return nil, fmt.Errorf("load account: %w", err)
+    }
+
+    // 2. Resolve strategy assignment for input instrument
+    assignment, err := s.getValuationAssignment(
+        ctx,
+        account.ID,
+        req.Input.InstrumentCode,
+        req.KnowledgeAt,
+    )
+    if err != nil {
+        return nil, fmt.Errorf("resolve assignment: %w", err)
+    }
+
+    // 3. Use shared valuation library (in-process)
+    result, err := s.valuationEngine.Valuate(ctx, valuation.Request{
+        Input:       req.Input,
+        StrategyID:  assignment.StrategyID,
+        Parameters:  assignment.Parameters,
+        KnowledgeAt: req.KnowledgeAt.AsTime(),
+    })
+    if err != nil {
+        return nil, fmt.Errorf("execute valuation: %w", err)
+    }
+
+    // 4. Return valued amount with audit basis
+    return &currentaccountv1.GetValuedAmountResponse{
+        Output:          result.Output,
+        Basis:           toProtoBasis(result.Basis),
+        ExecutionTimeMs: fmt.Sprintf("%.2f", result.ExecutionTime.Milliseconds()),
+        CacheHit:        result.CacheHit,
+    }, nil
+}
+```
+
+### 5.4 Dependency Injection
+
+```go
+// services/current-account/cmd/current-account-service/main.go
+func main() {
+    // Existing clients
+    positionClient := positionkeepingclient.New(...)
+    finAcctClient := financialaccountingclient.New(...)
+
+    // NEW - Add clients for valuation
+    refDataClient := referencedataclient.New(...)
+    marketInfoClient := marketinformationclient.New(...)
+
+    // Create valuation engine with dependencies
+    valuationEngine := valuation.NewEngine(valuation.Config{
+        RefDataClient:    refDataClient,     // For strategy lookups
+        MarketInfoClient: marketInfoClient,  // For rate lookups
+        CacheSize:        1000,              // L1 cache entries
+        CacheTTL:         5 * time.Minute,
+        Logger:           logger,
+    })
+
+    // Inject into service
+    svc := service.New(service.Config{
+        Repository:       repo,
+        ValuationEngine:  valuationEngine,  // NEW
+        PositionClient:   positionClient,
+        FinAcctClient:    finAcctClient,
+    })
 }
 ```
 
@@ -509,105 +482,118 @@ type RuntimeBuiltins struct {
 
 1. Add `valuation_assignments` table to Current Account service
 2. Add `valuation_assignments` table to Internal Bank Account service
-3. Implement `ResolveValuationStrategy` gRPC method in Current Account
-4. Implement `ResolveValuationStrategy` gRPC method in Internal Bank Account
+3. Implement CRUD operations for assignments
+4. Add bi-temporal query support
 5. Update Tenant Provisioning to seed default strategies (e.g., `USD_IDENTITY`)
 6. Migration scripts for existing accounts
 
 **Success Criteria:**
 
 - All existing accounts have at least one valuation assignment (identity strategy)
-- ResolveValuationStrategy returns correct strategy for known instrument codes
 - Bi-temporal queries work correctly with `knowledge_at`
+- Assignments can be updated without service restart
 
-### Stream 2: Valuation Service Foundation (P0, 8 points)
-
-**Tasks:**
-
-1. Create service scaffolding (`services/valuation`)
-2. Define proto contracts (`valuation/v1/valuation.proto`)
-3. Implement basic gRPC server with health checks
-4. Set up observability (metrics, logging, tracing)
-5. Integrate with Reference Data client for strategy lookups
-6. Implement L1 in-memory cache
-7. Implement L2 Redis cache
-8. Add comprehensive unit tests
-
-**Success Criteria:**
-
-- Service starts and passes health checks
-- Can fetch strategies from Reference Data service
-- Cache hit/miss metrics are emitted
-- All cache operations have tests with >80% coverage
-
-### Stream 3: CEL Runtime (P0, 5 points)
+### Stream 2: Valuation Engine Library (P0, 10 points)
 
 **Tasks:**
 
-1. Implement CEL compiler wrapper with security constraints
-2. Add CEL expression validation
-3. Implement CEL builtins for financial operations (multiply, divide, round)
-4. Add CEL expression cost limits (prevent DoS)
-5. Implement result type checking (Dimension Guard)
-6. Add CEL-specific tests and benchmarks
+1. Create `shared/pkg/valuation` package structure
+2. Implement CEL compiler wrapper with security constraints
+3. Implement Starlark VM wrapper with timeouts
+4. Register built-in functions (market_data, cel_eval, quantity operations)
+5. Implement L1 in-memory cache
+6. Add comprehensive unit tests
+7. Add benchmarks (target: <5ms in-process execution)
+8. Document library usage patterns
 
 **Success Criteria:**
 
 - Can compile and execute CEL expressions
-- Expression cost limits prevent infinite loops
-- Type mismatches are caught at compile time
-- Benchmark shows <100ns execution time for simple expressions
-
-### Stream 4: Starlark Runtime (P1, 8 points)
-
-**Tasks:**
-
-1. Implement Starlark VM wrapper with timeouts
-2. Register built-in functions (market_data, cel_eval, quantity operations)
-3. Implement deterministic execution (no time.now(), controlled randomness)
-4. Add market data integration (Market Information client)
-5. Implement valuation basis generation
-6. Add Starlark-specific tests with golden files
-7. Implement dry-run validation API
-8. Add execution time monitoring and alerting
-
-**Success Criteria:**
-
 - Can execute Starlark scripts with all builtins
-- Execution times out after 5 seconds
-- Market data lookups respect `knowledge_at`
-- Valuation basis includes all applied rates and observation IDs
+- Expression cost limits prevent infinite loops
+- Benchmark shows <5ms execution time for typical strategies
+- Cache hit rate >80% after warmup (for same strategy_id)
 
-### Stream 5: The "Identity" Strategy (P0, 3 points)
+### Stream 3: Reference Data Strategy Storage (P0, 5 points)
 
 **Tasks:**
 
-1. Implement identity strategy for fiat currencies (USD → USD)
-2. Seed identity strategies for all major currencies (USD, EUR, GBP, NZD, AUD)
-3. Register identity strategies in Reference Data during tenant provisioning
-4. Add integration test proving fiat-to-fiat loop works
-5. Document identity strategy pattern
+1. Add `valuation_strategies` table to Reference Data service
+2. Implement `GetStrategy` RPC with bi-temporal support
+3. Add strategy validation (syntax check, instrument compatibility)
+4. Seed identity strategies for major currencies (USD, EUR, GBP, NZD, AUD)
+5. Add integration tests
 
 **Success Criteria:**
 
-- A withdrawal in USD generates identical postings as before (regression test)
-- Identity strategy has 100% cache hit rate after warmup
-- Valuation basis correctly records "identity" transformation
+- Strategies can be stored and retrieved via gRPC
+- Bi-temporal queries return correct strategy versions
+- Cache invalidation works on strategy updates
+- Identity strategies are available for all fiat currencies
 
-### Stream 6: Energy/Commodity Valuation (P1, 13 points)
+### Stream 4: Current Account Integration (P1, 5 points)
+
+**Tasks:**
+
+1. Add `GetValuedAmount` RPC to Current Account proto
+2. Wire up valuation library in service initialization
+3. Implement RPC handler using library
+4. Add Market Information client dependency
+5. Add observability (metrics, logging, tracing)
+6. Integration tests with mock strategies
+
+**Success Criteria:**
+
+- Can value 100 kWh using identity strategy (returns same amount)
+- Can value 100 kWh using retail energy strategy (returns GBP)
+- Valuation basis includes all applied rates and observation IDs
+- Metrics show execution time and cache hit rate
+
+### Stream 5: Internal Bank Account Integration (P1, 5 points)
+
+**Tasks:**
+
+1. Add `GetValuedAmount` RPC to Internal Bank Account proto
+2. Wire up valuation library (same as Current Account)
+3. Implement RPC handler
+4. Add Market Information client dependency
+5. Integration tests
+
+**Success Criteria:**
+
+- Internal accounts can value assets using same strategies
+- Wholesale energy strategy works (spot price × GSP coefficient)
+- Audit trail is complete for regulatory accounts
+
+### Stream 6: Saga Integration (P1, 5 points)
+
+**Tasks:**
+
+1. Update withdrawal saga to call `GetValuedAmount`
+2. Update deposit saga
+3. Update Position Keeping to store valuation basis in attributes
+4. Add valuation basis to audit logs
+5. Integration tests for end-to-end flows
+6. Update operator runbooks
+
+**Success Criteria:**
+
+- All sagas that handle non-monetary assets call `GetValuedAmount`
+- Position entries include valuation basis in attributes
+- Can replay historical valuations using `knowledge_at`
+- Audit logs show full valuation provenance
+
+### Stream 7: Energy/Commodity Strategies (P2, 8 points)
 
 **Tasks:**
 
 1. Design wholesale energy strategy (Spot Price × GSP Coefficient)
 2. Implement retail energy strategy (Fixed Tariff)
 3. Add time-of-use (TOU) tariff support
-4. Integrate with Market Information service for spot prices
-5. Implement GSP lookup from account parameters
-6. Add carbon credit valuation strategy
-7. Add GPU-hour valuation strategy (AI compute)
-8. Comprehensive integration tests for each asset type
-9. Load testing (1000 valuations/second target)
-10. Document strategy development guide
+4. Add carbon credit valuation strategy
+5. Add GPU-hour valuation strategy (AI compute)
+6. Comprehensive integration tests for each asset type
+7. Document strategy development guide
 
 **Success Criteria:**
 
@@ -615,68 +601,23 @@ type RuntimeBuiltins struct {
 - Can value 100 kWh using retail fixed tariff
 - TOU tariff applies different rates based on time bands
 - All asset types (energy, carbon, compute) have working strategies
-- Performance target: <10ms per valuation, 1000/sec throughput
 
-### Stream 7: Batch Valuation API (P2, 5 points)
-
-**Tasks:**
-
-1. Implement `ValuateBatch` RPC handler
-2. Add parallel execution with worker pool
-3. Optimize market data pre-fetching
-4. Add batch execution metrics
-5. Load test batch API (10,000 valuations per batch)
-6. Document batch usage patterns
-
-**Success Criteria:**
-
-- Batch of 1000 valuations completes in <1 second
-- Market data is pre-fetched once per batch
-- Failures in one valuation don't block others
-- Batch execution metrics show parallelism efficiency
-
-### Stream 8: Integration with Payment/Settlement Sagas (P1, 8 points)
+### Stream 8: Performance Optimization (P2, 3 points)
 
 **Tasks:**
 
-1. Add valuation step to withdrawal saga
-2. Add valuation step to deposit saga
-3. Add valuation step to settlement saga
-4. Update Position Keeping to store valuation basis
-5. Add valuation basis to audit logs
-6. Implement valuation replay for historical positions
-7. Add integration tests for end-to-end flows
-8. Update operator runbooks
+1. Profile valuation execution paths
+2. Optimize cache key generation
+3. Add connection pooling for Reference Data client
+4. Tune cache sizes and TTLs
+5. Load testing (target: 500 valuations/second per Account Service instance)
 
 **Success Criteria:**
 
-- All sagas that handle non-monetary assets call Valuation Service
-- Position entries include valuation basis in attributes
-- Can replay historical valuations using `knowledge_at`
-- Audit logs show full valuation provenance
-
-### Stream 9: Tenant Self-Service (P2, 13 points)
-
-**Tasks:**
-
-1. Design strategy editor UI (Starlark IDE)
-2. Implement strategy validation API
-3. Add dry-run simulator (test strategies before activation)
-4. Implement strategy versioning and rollback
-5. Add strategy approval workflow (draft → review → active)
-6. Implement strategy impact analysis (show affected accounts)
-7. Add strategy performance monitoring dashboard
-8. Create strategy marketplace (share strategies between tenants)
-9. Add comprehensive documentation for strategy authors
-10. Implement governance controls (who can deploy strategies)
-
-**Success Criteria:**
-
-- Tenants can create new valuation strategies without Meridian deployment
-- Dry-run API catches errors before activation
-- Strategy versions can be rolled back in <5 minutes
-- Strategy performance dashboard shows cache hit rates and execution times
-- Documentation enables non-engineers to author simple strategies
+- p99 latency < 8ms under normal load
+- Cache hit rate >80% after 5-minute warmup
+- No memory leaks in long-running tests
+- Graceful degradation if Market Information is slow
 
 ## 7. Testing Strategy
 
@@ -684,25 +625,23 @@ type RuntimeBuiltins struct {
 
 - CEL expression compilation and evaluation
 - Starlark script parsing and execution
-- Cache hit/miss logic (L1 and L2)
-- Strategy repository CRUD operations
-- Dimension Guard validation
+- Cache hit/miss logic (L1 only)
+- Strategy validation
+- Dimension Guard enforcement
 
 ### Integration Tests
 
-- End-to-end valuation with real Market Information data
-- Account strategy resolution across service boundaries
+- End-to-end valuation with real Reference Data and Market Information
 - Bi-temporal valuation replay
 - Cache invalidation on strategy updates
-- Batch valuation with concurrent requests
+- Multiple concurrent valuations
 
 ### Performance Tests
 
-- Single valuation latency: <10ms (p99)
-- Batch valuation throughput: >1000/sec
-- Cache hit rate: >95% after warmup
-- CEL expression execution: <100ns
-- Starlark script execution: <5ms
+- Single valuation latency: <8ms (p99)
+- Throughput: >500/sec per Account Service instance
+- Cache hit rate: >80% after warmup
+- Memory usage under sustained load
 
 ### Golden File Tests
 
@@ -710,87 +649,82 @@ type RuntimeBuiltins struct {
 - Store expected results for known inputs
 - Validate outputs match across versions
 
-### Chaos Tests
-
-- Market Information service unavailable
-- Reference Data service slow response
-- Redis cache failure (L2 degradation)
-- Concurrent cache updates
-
 ## 8. Success Metrics
 
-1. **Zero Hardcoded Rates:** All conversion math moves to Starlark/CEL by end of Stream 6.
+1. **Zero Hardcoded Rates:** All conversion math moves to Starlark/CEL by end of Stream 7.
 2. **Replay Parity:** Replaying a valuation from 1 year ago using `knowledge_at` produces the exact
    same result (±1 basis point).
-3. **Tenant Autonomy:** A new tenant can implement a "Carbon Tax" strategy without a Meridian platform
-   deployment (Stream 9).
-4. **Performance:** 95th percentile valuation latency < 10ms under normal load.
-5. **Cache Efficiency:** Cache hit rate >95% after 10-minute warmup period.
-6. **Audit Compliance:** 100% of position entries include valuation basis with full provenance.
+3. **Performance:** 95th percentile valuation latency < 8ms under normal load.
+4. **Cache Efficiency:** Cache hit rate >80% after 5-minute warmup period.
+5. **Audit Compliance:** 100% of position entries include valuation basis with full provenance.
+6. **Integration Success:** All sagas using multi-asset quantities migrate successfully.
 
 ## 9. Deployment Considerations
 
 ### Rollout Strategy
 
-1. **Phase 1 (Week 1-2):** Deploy Valuation Service with identity strategies only
-   (Stream 1-3, 5)
-2. **Phase 2 (Week 3-4):** Enable energy valuation strategies (Stream 6)
-3. **Phase 3 (Week 5-6):** Integrate with all sagas, deprecate hardcoded logic (Stream 8)
-4. **Phase 4 (Week 7+):** Enable tenant self-service and strategy marketplace (Stream 9)
+1. **Phase 1 (Week 1-2):** Deploy shared library with identity strategies only
+   (Stream 1-3)
+2. **Phase 2 (Week 3-4):** Enable Account Service integration
+   (Stream 4-5)
+3. **Phase 3 (Week 5-6):** Integrate with all sagas, deprecate hardcoded logic
+   (Stream 6)
+4. **Phase 4 (Week 7+):** Add energy/commodity strategies
+   (Stream 7)
 
 ### Monitoring and Alerting
 
 **Metrics:**
 
-- `valuation.requests.total` (counter by strategy_id, status)
+- `valuation.requests.total` (counter by account_service, status)
 - `valuation.duration_ms` (histogram by strategy_id)
-- `valuation.cache_hit_rate` (gauge by cache_layer)
+- `valuation.cache_hit_rate` (gauge by account_service)
 - `valuation.strategy_errors` (counter by strategy_id, error_type)
 - `valuation.market_data_lookups` (counter by observation_type)
 
 **Alerts:**
 
-- P1: Valuation service unavailable (no successful requests in 5 minutes)
-- P2: Valuation latency p99 > 50ms (performance degradation)
-- P2: Cache hit rate < 70% (cache inefficiency)
+- P1: Account service unavailable (no successful GetValuedAmount in 5 minutes)
+- P2: Valuation latency p99 > 15ms (performance degradation)
+- P2: Cache hit rate < 50% (cache inefficiency)
 - P3: Strategy execution errors > 1% of requests (buggy strategy)
 
 ### Disaster Recovery
 
-#### Scenario: Valuation Service Down
+#### Scenario: Reference Data Service Down
 
-- **Mitigation:** Sagas can defer valuation to async worker
-- **Fallback:** Use last-known-good valuation from position history
-- **Alert:** P1 escalation to on-call engineer
+- **Mitigation:** L1 cache keeps serving recently used strategies (5min TTL)
+- **Fallback:** Use identity transformation if strategy unavailable
+- **Alert:** P2 escalation, automatic retry with exponential backoff
 
 #### Scenario: Market Information Service Down
 
-- **Mitigation:** Use cached market data (stale but better than nothing)
-- **Fallback:** Use default rates from strategy parameters
-- **Alert:** P2 escalation, automatic retry with exponential backoff
+- **Mitigation:** Return last-known-good rate from Market Information cache
+- **Fallback:** Use default rates from account parameters
+- **Alert:** P2 escalation, flag valuations as "degraded mode" in basis
 
 #### Scenario: Buggy Strategy Deployed
 
-- **Mitigation:** Automatic rollback to previous version on error rate >10%
-- **Fallback:** Disable strategy, use identity transformation
+- **Mitigation:** Account Service catches execution errors, returns error response
+- **Fallback:** Saga retries or uses fallback strategy
 - **Alert:** P2 escalation, notify strategy author
 
 ## 10. Open Questions
 
-1. **Cross-Currency Triangulation:** How do we handle currency pairs without direct market data (e.g., NZD/AUD via USD)?
-   - **Proposed Answer:** Starlark script can compose multiple CEL lookups: `nzd_to_usd * usd_to_aud`
+1. **Cross-Currency Triangulation:** How do we handle currency pairs without direct market data
+   (e.g., NZD/AUD via USD)?
+   - **Proposed Answer:** Starlark script can compose multiple market data lookups:
+     `nzd_to_usd * usd_to_aud`
 
 2. **Regulatory Compliance:** Do valuation strategies need regulatory approval before activation?
    - **Action:** Consult with compliance team on approval workflow requirements
 
-3. **Strategy Licensing:** Can tenants monetize their strategies in the marketplace?
-   - **Action:** Define commercial terms for strategy sharing (free, paid, revenue share)
-
-4. **Multi-Tenant Data Isolation:** Should strategies be tenant-scoped or globally shared?
-   - **Proposed Answer:** Strategies stored per-tenant (PostgreSQL schema-per-tenant), but marketplace allows copying
-
-5. **Historical Market Data Retention:** How long do we keep market data for replay?
+3. **Historical Market Data Retention:** How long do we keep market data for replay?
    - **Proposed Answer:** 7 years (regulatory standard for financial records)
+
+4. **Multi-Tenant Strategy Sharing:** Should strategies be tenant-scoped or globally shared?
+   - **Proposed Answer:** Strategies stored per-tenant (PostgreSQL schema-per-tenant),
+     marketplace allows copying
 
 ## 11. Related Work
 
@@ -801,7 +735,39 @@ type RuntimeBuiltins struct {
 - [PRD: Market Information Management](market-information-management.md)
 - [PRD: Starlark Saga Orchestration Core](starlark-saga-orchestration-core.md)
 
-## 12. Appendix: Example Strategies
+## 12. Comparison to Standalone Service Approach
+
+### Why Embedded Library > Standalone Service
+
+| Aspect | Standalone Service | Embedded Library (This PRD) |
+|--------|-------------------|----------------------------|
+| **Network Hops** | 4 (Saga→Account→Valuation→RefData/MIM) | 3 (Saga→Account→RefData/MIM) |
+| **Latency** | 12-17ms (estimated) | 5-8ms (measured goal) |
+| **Story Points** | 68 points | 31 points (54% reduction) |
+| **Operational Complexity** | New microservice to deploy/monitor | Reuses existing services |
+| **Domain Modeling** | External service | Account capability |
+| **Dependency Graph** | Saga → Account → Valuation → ... | Saga → Account → ... |
+| **Cache Strategy** | L1 + L2 Redis (complex) | L1 only (simple) |
+| **Failure Modes** | Valuation service down = all accounts blocked | Account service down = only that account blocked |
+
+**Key insight:** Valuation is a **behavior** of the Account aggregate, not a separate Bounded Context.
+
+### Architecture Decision Rationale
+
+The embedded library approach follows the same pattern as:
+
+- `shared/pkg/saga` - Starlark runtime used by multiple services
+- `shared/platform/database` - Database utilities
+- `shared/platform/observability` - Metrics/tracing
+
+**Account Services are the natural home for valuation because:**
+
+1. They own the `valuation_assignments` data
+2. They know which dimension they accept (enforcement point)
+3. They have context about the account (parameters, tier, etc.)
+4. They're already in the critical path for deposits/withdrawals
+
+## 13. Appendix: Example Strategies
 
 ### A. Identity Strategy (Fiat Currency)
 
@@ -896,49 +862,11 @@ def valuate(input_quantity, params, knowledge_at):
     }
 ```
 
-### D. Time-of-Use (TOU) Tariff Strategy
-
-```python
-# strategy: tou_energy_v1
-# input: KWH
-# output: GBP
-
-def valuate(input_quantity, params, knowledge_at):
-    """Time-of-use tariff with peak/off-peak rates."""
-
-    # Extract time band from input attributes
-    time_band = input_quantity.attributes.get("time_band", "OFFPEAK")
-
-    # Get rates from account parameters
-    peak_rate = params.get("peak_rate", 0.45)
-    offpeak_rate = params.get("offpeak_rate", 0.25)
-
-    # Select rate based on time band
-    if time_band == "PEAK":
-        rate = peak_rate
-    else:
-        rate = offpeak_rate
-
-    # Apply rate
-    output_amount = input_quantity.amount * rate
-
-    return {
-        "amount": output_amount,
-        "instrument": "GBP",
-        "basis": {
-            "strategy": "tou_energy_v1",
-            "time_band": time_band,
-            "rate": str(rate),
-            "input_kwh": str(input_quantity.amount)
-        }
-    }
-```
-
 ---
 
-**Gemini's Gut Check:** This architecture is "Particular" because the math is local to the account,
-but "Universal" because the engine is generic. It prevents the system from becoming a bowl of spaghetti
-as you add more assets.
+**Architectural Philosophy:** This PRD implements the "Probe Pattern" - accounts are queried for value,
+not commanded to use a centralized pricing service. It's "Particular" (logic is account-scoped) yet
+"Universal" (all accounts implement the same interface).
 
-**Next Steps:** Ready to move this into Task Master and start implementing Stream 1
-(Account Strategy Assignments)?
+**Next Steps:** Parse PRD into Task Master (`valuation-engine` tag) and begin with Stream 1
+(Account Strategy Assignments) as foundation for all subsequent work.
