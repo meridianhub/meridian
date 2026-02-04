@@ -1,6 +1,6 @@
-h1:/WMEErQUxcWZvk4YFdHSCDwPXwrWdGr9O91KK0J3/wQ=
+h1:jCW5N/dUmwQBsbXNuOnbfNX/jREjA+97MOeg0zAiSWc=
 20251216000001_initial.sql h1:9Pt9iC/k1YkmfjyO/F0ioNbPswzzgCP2aHtFlFHnSMY=
 20251217000001_audit_system.sql h1:YD9HdFm+NRTihCM/PBU7EYEmdttWjvGPCIE408A8HFg=
 20251223000001_fix_audit_schema_compatibility.sql h1:QxqR4DwdQ5cNXHCxTvtHgQmhSnD8xptkoFnxNcZ5ehY=
 20260123000001_bucket_aware_solvency.sql h1:fnEeQa7ezvAKV/Xja8l9/Btz68+e9raPJQIuHoK1bxw=
-20260204000001_create_event_outbox.sql h1:k5fJz94U+qL6Y9woIeF+YyG6pwmCkfjIdd1Ut7NPjC8=
+20260204000001_create_event_outbox.sql h1:mnMtfh12wwmRBBBrw913g5+aWtw82ur9yLpWmAVSsOc=
