@@ -1,0 +1,30 @@
+=== Starlark Migration Verification ===
+
+[1/6] Checking script consolidation...
+  ✅ PASS: No duplicate saga scripts in current-account/sagas/
+  ✅ PASS: No duplicate saga scripts in payment-order/sagas/
+  ✅ PASS: Found 3 canonical saga scripts in reference-data/saga/defaults/
+
+[2/6] Checking for saga.AddStep() pattern in production code...
+  ❌ FAIL: Found saga.AddStep() in production code:
+services/payment-order/service/payment_orchestrator.go:	saga.AddStep("reserve_funds",
+services/payment-order/service/payment_orchestrator.go:	saga.AddStep("send_to_gateway",
+
+[3/6] Checking StarlarkSagaRunner usage in orchestrators...
+  ✅ deposit_orchestrator.go uses StarlarkSagaRunner
+  ✅ withdrawal_orchestrator.go uses StarlarkSagaRunner
+  ❌ payment_orchestrator.go does NOT use StarlarkSagaRunner
+  ❌ FAIL: Only 2 of 3 orchestrators use StarlarkSagaRunner
+
+[4/6] Checking handler implementations for NoOp/stub patterns...
+  ✅ PASS: No NoOp or stub handlers found
+
+[5/6] Verifying canonical saga scripts...
+  ✅ deposit/v1.0.0.star exists and has content
+  ✅ withdrawal/v1.0.0.star exists and has content
+  ✅ payment_execution/v1.0.0.star exists and has content
+
+[6/6] Summary
+  ❌ SOME VERIFICATIONS FAILED
+
+=== MIGRATION STATUS: NOT READY ===
