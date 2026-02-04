@@ -119,15 +119,14 @@ func retrieveInstrumentHandler(client *Client) saga.Handler {
 //
 // The propagation functions (clients.PropagateIdempotencyKey, etc.) add this metadata
 // to the gRPC context's outgoing metadata headers, which downstream services can extract.
-type contextKey string
-
-const correlationIDContextKey contextKey = "x-correlation-id"
-
 func prepareClientContext(ctx *saga.StarlarkContext) context.Context {
 	clientCtx := ctx.Context
 
-	// Add correlation ID to context value so the client's PropagateCorrelationID can extract it
-	clientCtx = context.WithValue(clientCtx, correlationIDContextKey, ctx.CorrelationID.String())
+	// Add correlation ID to context value using string literal key so ExtractCorrelationID can find it.
+	// ExtractCorrelationID in shared/pkg/clients/common.go uses ctx.Value("x-correlation-id") with
+	// string keys, so we must use the same type here despite the linter preference for typed keys.
+	//nolint:revive,staticcheck // SA1029,context-keys-type: string key required for ExtractCorrelationID compatibility
+	clientCtx = context.WithValue(clientCtx, "x-correlation-id", ctx.CorrelationID.String())
 
 	// Propagate idempotency key and knowledge_at timestamp
 	clientCtx = clients.PropagateIdempotencyKey(clientCtx, ctx.IdempotencyKey)
