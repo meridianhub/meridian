@@ -3,6 +3,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -961,12 +962,17 @@ func (s *Service) ExecuteWithdrawal(ctx context.Context, req *pb.ExecuteWithdraw
 	// Uses transactional outbox pattern to ensure atomicity between status update and event publication.
 	// If the outbox write fails, the withdrawal status update is rolled back, ensuring consistency.
 	if pendingWithdrawal != nil && s.withdrawalRepo != nil {
-		if err := s.completeWithdrawalWithOutbox(ctx, pendingWithdrawal, account.AccountID()); err != nil {
-			// Log warning but don't fail - the withdrawal has already executed
-			// The outbox pattern ensures eventual consistency will be maintained via retry
-			s.logger.Warn("failed to complete withdrawal with outbox",
-				"withdrawal_id", pendingWithdrawal.Reference,
-				"error", err)
+		accountUUID, err := uuid.Parse(account.AccountID())
+		if err != nil {
+			s.logger.Error("failed to parse account ID as UUID", "account_id", account.AccountID(), "error", err)
+		} else {
+			if err := s.completeWithdrawalWithOutbox(ctx, pendingWithdrawal, accountUUID); err != nil {
+				// Log warning but don't fail - the withdrawal has already executed
+				// The outbox pattern ensures eventual consistency will be maintained via retry
+				s.logger.Warn("failed to complete withdrawal with outbox",
+					"withdrawal_id", pendingWithdrawal.Reference,
+					"error", err)
+			}
 		}
 	}
 
@@ -1021,16 +1027,17 @@ func (s *Service) completeWithdrawalWithOutbox(ctx context.Context, withdrawal *
 			return fmt.Errorf("failed to persist withdrawal completion: %w", err)
 		}
 
-		// Create WithdrawalStatusUpdatedEvent for publication
-		event := &eventsv1.WithdrawalStatusUpdatedEvent{
-			WithdrawalId: withdrawal.Reference,
-			AccountId:    accountID.String(),
-			Status:       "COMPLETED",
-			UpdatedAt:    timestamppb.Now(),
+		// Create simple event payload (JSON) for publication
+		// TODO: Replace with proper protobuf event definition once WithdrawalStatusUpdatedEvent is defined
+		eventData := map[string]interface{}{
+			"withdrawal_id": withdrawal.Reference,
+			"account_id":    accountID.String(),
+			"status":        "COMPLETED",
+			"updated_at":    time.Now().Format(time.RFC3339),
 		}
 
-		// Marshal event payload
-		eventPayload, err := proto.Marshal(event)
+		// Marshal event payload as JSON
+		eventPayload, err := json.Marshal(eventData)
 		if err != nil {
 			return fmt.Errorf("failed to marshal withdrawal status event: %w", err)
 		}
