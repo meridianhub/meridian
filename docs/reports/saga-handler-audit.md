@@ -433,6 +433,7 @@ internal_bank_account.list_accounts(
 **gRPC Method**: `ListInternalBankAccounts`
 
 **Error Cases**:
+
 - Invalid filter values return empty list
 - gRPC errors propagate to saga
 
@@ -554,6 +555,7 @@ reference_data.list_instruments(
 **gRPC Method**: `ListInstruments`
 
 **Error Cases**:
+
 - Invalid filter values return empty list
 - gRPC errors propagate to saga
 
@@ -638,6 +640,7 @@ market_information.list_observations(
 **gRPC Method**: `ListObservations`
 
 **Error Cases**:
+
 - Invalid filter values return empty list
 - gRPC errors propagate to saga
 
@@ -741,6 +744,7 @@ party.retrieve_demographics(
 **gRPC Method**: `RetrieveDemographics`
 
 **Error Cases**:
+
 - Party not found returns error
 - Unauthorized access returns permission denied
 - gRPC errors propagate to saga
