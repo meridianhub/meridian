@@ -28,6 +28,7 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/events"
+	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/ports"
 	"github.com/sony/gobreaker/v2"
@@ -135,6 +136,40 @@ func run(logger *slog.Logger) error {
 
 	logger.Info("service initialized with external clients")
 
+	// Initialize Kafka producer for outbox worker (optional - graceful degradation)
+	var outboxWorker *events.Worker
+	kafkaBootstrapServers := env.GetEnvOrDefault("KAFKA_BOOTSTRAP_SERVERS", "")
+	if kafkaBootstrapServers != "" {
+		// Initialize Kafka producer
+		kafkaProducer, err := kafka.NewProtoProducer(kafka.ProducerConfig{
+			BootstrapServers: kafkaBootstrapServers,
+			ClientID:         "current-account-outbox-worker",
+			Acks:             "all", // Wait for full replication for reliability
+			Retries:          5,
+			Compression:      "snappy",
+		})
+		if err != nil {
+			logger.Warn("failed to initialize Kafka producer, outbox pattern disabled",
+				"error", err)
+		} else {
+			// Initialize outbox worker
+			outboxWorker = events.NewWorker(
+				outboxRepo,
+				kafkaProducer,
+				events.DefaultWorkerConfig("current-account"),
+				logger.With("component", "outbox_worker"),
+			)
+
+			// Start outbox worker in background
+			outboxWorker.Start(ctx)
+			logger.Info("outbox worker started",
+				"kafka_brokers", kafkaBootstrapServers,
+				"poll_interval", "5s")
+		}
+	} else {
+		logger.Warn("KAFKA_BOOTSTRAP_SERVERS not configured, outbox pattern disabled")
+	}
+
 	// Initialize auth interceptor (optional - based on AUTH_ENABLED)
 	authConfig := bootstrap.DefaultAuthConfig(logger)
 	authInterceptor, err := bootstrap.NewAuthInterceptor(ctx, authConfig)
@@ -194,6 +229,16 @@ func run(logger *slog.Logger) error {
 
 	// Wait for shutdown signal and orchestrate graceful shutdown
 	orchestrator := bootstrap.NewShutdownOrchestrator(grpcServer, logger)
+
+	// Register outbox worker cleanup (if initialized)
+	if outboxWorker != nil {
+		orchestrator.AddCleanup(func() error {
+			logger.Info("stopping outbox worker")
+			outboxWorker.Stop()
+			logger.Info("outbox worker stopped")
+			return nil
+		})
+	}
 
 	// Register cleanup functions (LIFO order - external clients, then Redis, then database)
 	// Register external client cleanup functions first (they get called last in LIFO)
