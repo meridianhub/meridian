@@ -22,9 +22,9 @@ instructions: |
 # PRD: Account-Scoped Valuation Engine
 
 **Status:** Draft - Revised Architecture
-**Version:** 2.4 (Reservation Ledger & Audit Enhancements)
+**Version:** 2.5 (Idempotency, Drift Detection & Architecture Guards)
 **Task Master Tag:** `valuation-engine`
-**Story Points:** 72 (11 streams)
+**Story Points:** 75 (11 streams)
 **Core ADR:** [ADR-0028: Starlark Saga Orchestration with CEL Valuation](../adr/0028-starlark-saga-cel-valuation.md)
 
 **Version History:**
@@ -34,6 +34,7 @@ instructions: |
 - v2.2: Atomic valuation with price lock (TOCTOU elimination)
 - v2.3: Security & resilience (read-only VM, graceful stale, bucket filtering, quality tracking)
 - v2.4: Reservation Ledger pattern, calculation path audit, canonical bucketing library
+- v2.5: Idempotency guards, basis drift detection, architecture enforcement, size limits
 
 ## 1. Executive Summary
 
@@ -218,6 +219,62 @@ CREATE INDEX idx_valuation_strategies_lookup
 CREATE INDEX idx_valuation_strategies_bitemporal
     ON valuation_strategies(name, valid_from, valid_to);
 ```
+
+#### Platform Default Inheritance (The "SYSTEM Strategy" Pattern)
+
+**Requirement:** If a tenant does not define a valuation strategy for a given instrument, they SHOULD
+automatically inherit the `SYSTEM` version of the strategy. This ensures "Motive" or "UN WFP" scenarios
+work out-of-the-box without requiring each tenant to manually configure energy strategies.
+
+**Implementation:**
+
+The `ResolveValuationStrategy` function follows a lookup hierarchy:
+
+```go
+func (s *Service) ResolveValuationStrategy(
+    ctx context.Context,
+    tenantID string,
+    inputInstrument string,
+    outputInstrument string,
+) (*Strategy, error) {
+    // 1. Check tenant-specific strategy (tenant schema)
+    strategy, err := s.repo.FindStrategy(ctx, tenantID, inputInstrument, outputInstrument)
+    if err == nil && strategy != nil {
+        return strategy, nil
+    }
+
+    // 2. Fall back to SYSTEM strategy (platform default)
+    systemStrategy, err := s.repo.FindStrategy(ctx, "SYSTEM", inputInstrument, outputInstrument)
+    if err == nil && systemStrategy != nil {
+        s.logger.Info("using SYSTEM default strategy",
+            "tenant_id", tenantID,
+            "input", inputInstrument,
+            "output", outputInstrument,
+            "strategy_id", systemStrategy.ID,
+        )
+        return systemStrategy, nil
+    }
+
+    // 3. No strategy found
+    return nil, fmt.Errorf("no valuation strategy for %s → %s", inputInstrument, outputInstrument)
+}
+```
+
+**Seeded SYSTEM Strategies:**
+
+| Strategy Name | Input → Output | Description |
+|---------------|----------------|-------------|
+| `SYSTEM_IDENTITY_USD` | USD → USD | 1:1 identity |
+| `SYSTEM_IDENTITY_GBP` | GBP → GBP | 1:1 identity |
+| `SYSTEM_IDENTITY_EUR` | EUR → EUR | 1:1 identity |
+| `SYSTEM_RETAIL_ENERGY` | KWH → GBP | Default retail tariff (£0.35/kWh) |
+| `SYSTEM_CARBON_CREDIT` | TONNE_CO2E → GBP | Default carbon price (£75/tonne) |
+
+**Why This Matters:**
+
+- **Motive scenario:** A mobility-as-a-service provider can onboard without configuring energy valuation
+- **UN WFP scenario:** Humanitarian vouchers work immediately using SYSTEM strategies
+- **Developer experience:** New tenants can start testing without manual strategy configuration
 
 ## 4. Functional Requirements
 
@@ -415,6 +472,72 @@ if resp.Output.InstrumentCode != expectedInstrument {
 }
 ```
 
+#### Runtime Output Instrument Validation (The "Chemical Signature" Check)
+
+**Requirement:** The `ResolveValuationStrategy` call MUST return the `OutputInstrumentCode` as a type-hint.
+The Valuation Engine MUST then wrap the Starlark/CEL execution with a **post-execution type check**:
+
+```text
+Expected: GBP (from strategy definition)
+Starlark returned: USD (from script execution)
+Result: Hard Error (VALUATION_OUTPUT_MISMATCH)
+```
+
+**Why This Matters:**
+
+A strategy bug could accidentally turn an Energy account into a foreign currency account. This runtime
+validation prevents dimension leakage that escapes the activation-time checks.
+
+**Implementation:**
+
+```go
+func (e *Engine) Valuate(ctx context.Context, req Request) (*Response, error) {
+    // 1. Load strategy (includes expected output_instrument)
+    strategy, err := e.refDataClient.GetStrategy(ctx, req.StrategyID)
+    if err != nil {
+        return nil, fmt.Errorf("load strategy: %w", err)
+    }
+
+    // 2. Execute Starlark/CEL
+    result, err := e.executeScript(ctx, strategy.LogicScript, req)
+    if err != nil {
+        return nil, fmt.Errorf("execute script: %w", err)
+    }
+
+    // 3. CRITICAL: Validate output instrument matches declaration
+    if result.Output.InstrumentCode != strategy.OutputInstrument {
+        return nil, &ValuationOutputMismatchError{
+            Expected: strategy.OutputInstrument,
+            Actual:   result.Output.InstrumentCode,
+            Strategy: strategy.ID,
+        }
+    }
+
+    return result, nil
+}
+
+// ValuationOutputMismatchError is a hard failure - strategy bug detected
+type ValuationOutputMismatchError struct {
+    Expected string
+    Actual   string
+    Strategy uuid.UUID
+}
+
+func (e *ValuationOutputMismatchError) Error() string {
+    return fmt.Sprintf("VALUATION_OUTPUT_MISMATCH: strategy %s declared output %s but returned %s",
+        e.Strategy, e.Expected, e.Actual)
+}
+```
+
+**When This Fires:**
+
+- Strategy declares `output_instrument: GBP` but returns `USD` → Hard error
+- Strategy declares `output_instrument: GBP` but returns `KWH` → Hard error (energy can't become monetary)
+- Strategy declares `output_instrument: GBP` and returns `GBP` → Success
+
+**Rationale:** Activation-time validation catches configuration errors. Runtime validation catches
+script bugs. Both layers are required for a robust dimension guard.
+
 ### FR-5: Valuation Basis (The "Receipt")
 
 **Requirement:** Every valuation result MUST include a **Basis**.
@@ -509,6 +632,33 @@ def valuate_tiered(input_quantity, params, knowledge_at):
 **Audit Value:** Auditor sees: "This transaction used tier 2 pricing with premium discount. No weekend
 or time-of-use adjustments applied."
 
+**Size Limit (CRITICAL):**
+
+The `calculation_path` array MUST be limited to **20 entries maximum**. This prevents a complex
+Starlark loop from accidentally creating a 10MB JSON blob inside a ledger entry.
+
+**Implementation:**
+
+```go
+const MaxCalculationPathEntries = 20
+
+func (ctx *valuationContext) RecordPath(step string) {
+    if len(ctx.calculationPath) >= MaxCalculationPathEntries {
+        // Log warning but don't fail - truncate silently
+        ctx.logger.Warn("calculation_path limit reached, truncating",
+            "step", step,
+            "limit", MaxCalculationPathEntries,
+        )
+        return
+    }
+    ctx.calculationPath = append(ctx.calculationPath, step)
+}
+```
+
+**Rationale:** BIAN compliance requires audit trails, but audit trails must be bounded to prevent
+storage bloat. 20 entries is sufficient for typical tiered pricing (5-7 tiers) with multiple
+conditional branches.
+
 ### FR-6: Caching Strategy
 
 **L1 Cache (In-Memory within Account Service):**
@@ -559,6 +709,44 @@ The grace period allows operations teams to restore services without blocking tr
 The `degraded_mode` flag in the basis allows downstream reconciliation to identify and adjust these
 transactions when services are restored.
 
+#### Degraded Mode MUST Propagate to Ledger (CRITICAL)
+
+The `degraded_mode` flag MUST propagate all the way to the `PositionEntry` in the ledger. Auditors need
+to be able to query degraded transactions:
+
+```sql
+-- Find all position entries booked with degraded valuation
+SELECT *
+FROM position_entries
+WHERE attributes->'valuation_basis'->>'degraded_mode' = 'true';
+```
+
+**Implementation in Position Keeping:**
+
+```go
+func (s *Service) Post(ctx context.Context, req *PostRequest) (*PostResponse, error) {
+    entry := &PositionEntry{
+        AccountID:      req.AccountId,
+        Amount:         req.Amount,
+        InstrumentCode: req.InstrumentCode,
+        // Preserve degraded_mode in attributes JSONB
+        Attributes: map[string]interface{}{
+            "valuation_basis": req.Basis,  // Includes degraded_mode flag
+        },
+    }
+    // ...
+}
+```
+
+**Reconciliation Workflow:**
+
+When services are restored after an outage:
+
+1. Query: `SELECT * FROM position_entries WHERE attributes->'valuation_basis'->>'degraded_mode' = 'true'`
+2. For each degraded entry, recalculate valuation with restored rates
+3. If difference > threshold, create adjustment entry
+4. Clear degraded flag (or add `revalued_at` timestamp)
+
 **Why no L2 Redis cache:**
 
 - Bi-temporal queries (`knowledge_at`) make cache hit rate near 0%
@@ -603,6 +791,51 @@ func newValuationBuiltins() starlark.StringDict {
         // ❌ NO position_keeping, NO financial_accounting
     }
 }
+```
+
+#### Architectural Enforcement (CRITICAL)
+
+To prevent a future developer from "helpfully" adding a write handler to the valuation library, the
+separation MUST be enforced at the **Go module level**, not just by convention.
+
+##### Option A: Internal Package Isolation (Recommended)
+
+```text
+shared/pkg/valuation/
+├── internal/
+│   └── builtins/          # Cannot import anything outside shared/pkg/valuation
+│       ├── market_data.go # ✅ Allowed: Reference Data client
+│       ├── cel_eval.go    # ✅ Allowed: CEL runtime
+│       └── quantity.go    # ✅ Allowed: Math operations
+│       # ❌ FORBIDDEN: Cannot import positionkeepingclient
+│       # ❌ FORBIDDEN: Cannot import financialaccountingclient
+└── engine.go
+```
+
+The `internal/builtins` package is physically prevented from importing write-capable clients by Go's
+visibility rules. Any attempt to add `import "meridian/services/position-keeping/client"` will fail
+the build.
+
+##### Option B: Build Tags
+
+```go
+//go:build valuation_readonly
+
+package builtins
+
+// This file only compiles with valuation_readonly tag
+// Production builds enforce this tag, preventing write handlers
+```
+
+**Verification:** CI pipeline MUST include a test that attempts to import write clients from the
+valuation package and verifies the build fails:
+
+```bash
+# ci/verify-valuation-isolation.sh
+if go build -tags=test_write_import ./shared/pkg/valuation/...; then
+    echo "ERROR: Valuation package should not compile with write imports"
+    exit 1
+fi
 ```
 
 **Verification:** Stream 2 MUST include a unit test:
@@ -724,6 +957,47 @@ func (s *Service) ExecuteLien(ctx context.Context, req *ExecuteLienRequest) (*Ex
 
 **Rationale:** Allowing overrides would defeat the price lock guarantee and reintroduce TOCTOU vulnerabilities.
 
+#### Basis Drift Detection
+
+**Requirement:** If `ExecuteLien` is called and the `knowledge_at` time on the original basis is older than
+a configurable threshold (default: 30 days), the system SHOULD emit a `VALUATION_STALE` warning event for
+reconciliation.
+
+**Implementation:**
+
+```go
+const BasisDriftThreshold = 30 * 24 * time.Hour  // 30 days
+
+func (s *Service) ExecuteLien(ctx context.Context, req *ExecuteLienRequest) (*ExecuteLienResponse, error) {
+    lien, err := s.repo.FindLienByID(ctx, req.LienId)
+    // ...
+
+    // Check for basis drift
+    basisAge := time.Since(lien.Basis.KnowledgeAt)
+    if basisAge > BasisDriftThreshold {
+        s.events.Publish(ctx, &events.ValuationStaleEvent{
+            LienID:      lien.ID,
+            BasisAge:    basisAge,
+            KnowledgeAt: lien.Basis.KnowledgeAt,
+            Threshold:   BasisDriftThreshold,
+        })
+        s.logger.Warn("executing lien with stale valuation basis",
+            "lien_id", lien.ID,
+            "basis_age_days", int(basisAge.Hours()/24),
+            "threshold_days", 30,
+        )
+    }
+
+    // Continue with execution using locked value
+    valuedAmount := lien.ValuedAmount
+    return s.positionClient.Post(ctx, valuedAmount, lien.Basis)
+}
+```
+
+**Reconciliation Integration:** The `VALUATION_STALE` event allows downstream reconciliation processes
+to flag these transactions for review. The lien still executes (business continuity), but auditors are
+alerted to potential pricing drift.
+
 #### Idempotency
 
 Retrying `InitiateLien` with same `idempotency_key` returns the existing lien with its original
@@ -767,7 +1041,7 @@ service PositionKeepingService {
 
 message RecordReservationRequest {
   string account_id = 1;
-  string lien_id = 2;  // Links back to CurrentAccount lien
+  string lien_id = 2;  // Links back to CurrentAccount lien (IDEMPOTENCY KEY)
   meridian.quantity.v1.InstrumentAmount reserved_amount = 3;
   string bucket_id = 4;
   google.protobuf.Timestamp knowledge_at = 5;
@@ -776,6 +1050,49 @@ message RecordReservationRequest {
 message ReleaseReservationRequest {
   string lien_id = 1;
   string reason = 2;  // "EXECUTED" or "TERMINATED"
+}
+```
+
+#### Idempotency Requirement (CRITICAL)
+
+The `RecordReservation` RPC MUST be **idempotent based on `lien_id`**. If `InitiateLien` retries (network
+timeout, saga replay), Position Keeping must recognize that the reservation for that `lien_id` already
+exists and return success without double-counting.
+
+**Implementation:**
+
+```go
+func (s *Service) RecordReservation(
+    ctx context.Context,
+    req *RecordReservationRequest,
+) (*RecordReservationResponse, error) {
+    // Check for existing reservation (idempotent check)
+    existing, err := s.repo.FindReservationByLienID(ctx, req.LienId)
+    if err == nil && existing != nil {
+        // Reservation already exists - return success (idempotent)
+        return &RecordReservationResponse{
+            ReservationId: existing.ID,
+            AlreadyExists: true,  // Caller knows this was a retry
+        }, nil
+    }
+    if err != nil && !errors.Is(err, sql.ErrNoRows) {
+        return nil, fmt.Errorf("check existing reservation: %w", err)
+    }
+
+    // Create new reservation
+    reservation := &Reservation{
+        LienID:         req.LienId,
+        AccountID:      req.AccountId,
+        InstrumentCode: req.ReservedAmount.InstrumentCode,
+        BucketID:       req.BucketId,
+        ReservedAmount: req.ReservedAmount.Amount,
+        Status:         "ACTIVE",
+    }
+    if err := s.repo.CreateReservation(ctx, reservation); err != nil {
+        return nil, fmt.Errorf("create reservation: %w", err)
+    }
+
+    return &RecordReservationResponse{ReservationId: reservation.ID}, nil
 }
 ```
 
@@ -1294,7 +1611,7 @@ func main() {
 - Bi-temporal queries work correctly with `knowledge_at`
 - Assignments can be updated without service restart
 
-### Stream 2: Valuation Engine Library (P0, 10 points)
+### Stream 2: Valuation Engine Library (P0, 12 points)
 
 **Tasks:**
 
@@ -1303,11 +1620,15 @@ func main() {
 3. Implement Starlark VM wrapper with timeouts
 4. Register built-in functions (market_data, cel_eval, quantity operations)
 5. **CRITICAL:** Implement separate read-only builtin registry (exclude position_keeping, financial_accounting)
-6. Implement L1 in-memory cache with graceful stale policy (1-hour grace if backend down)
-7. Add comprehensive unit tests
-8. **CRITICAL:** Add security verification test (strategy cannot call write handlers)
-9. Add benchmarks (target: <5ms in-process execution)
-10. Document library usage patterns
+6. **CRITICAL:** Use `internal/builtins` package isolation to enforce read-only at Go module level
+7. Implement L1 in-memory cache with graceful stale policy (1-hour grace if backend down)
+8. Implement `record_path()` builtin with 20-entry size limit
+9. Implement output instrument validation (runtime type check)
+10. Add comprehensive unit tests
+11. **CRITICAL:** Add security verification test (strategy cannot call write handlers)
+12. **CRITICAL:** Add CI verification script that fails if write imports are added
+13. Add benchmarks (target: <5ms in-process execution)
+14. Document library usage patterns
 
 **Success Criteria:**
 
@@ -1318,17 +1639,24 @@ func main() {
 - Cache hit rate >80% after warmup (for same strategy_id)
 - **Security test passes:** Strategy attempting `position_keeping.initiate_log` fails with
   `name 'position_keeping' is not defined`
+- **Architecture test passes:** Build fails if valuation package imports write-capable clients
 - Graceful stale cache activates when Reference Data unavailable (logs warning, continues)
+- Calculation path limited to 20 entries (logs warning on truncation)
+- Output instrument mismatch returns hard error (VALUATION_OUTPUT_MISMATCH)
 
-### Stream 3: Reference Data Strategy Storage (P0, 5 points)
+### Stream 3: Reference Data Strategy Storage (P0, 6 points)
 
 **Tasks:**
 
 1. Add `valuation_strategies` table to Reference Data service
 2. Implement `GetStrategy` RPC with bi-temporal support
-3. Add strategy validation (syntax check, instrument compatibility)
-4. Seed identity strategies for major currencies (USD, EUR, GBP, NZD, AUD)
-5. Add integration tests
+3. Implement `ResolveValuationStrategy` RPC with **Platform Default Inheritance**
+4. Add strategy validation (syntax check, instrument compatibility)
+5. Add `output_instrument` to strategy response (for runtime type validation)
+6. Seed SYSTEM identity strategies for major currencies (USD, EUR, GBP, NZD, AUD)
+7. Seed SYSTEM energy strategy (KWH → GBP, default £0.35/kWh)
+8. Seed SYSTEM carbon strategy (TONNE_CO2E → GBP, default £75/tonne)
+9. Add integration tests for tenant → SYSTEM fallback
 
 **Success Criteria:**
 
@@ -1336,6 +1664,9 @@ func main() {
 - Bi-temporal queries return correct strategy versions
 - Cache invalidation works on strategy updates
 - Identity strategies are available for all fiat currencies
+- **Platform Default Inheritance:** Tenant without KWH strategy gets SYSTEM_RETAIL_ENERGY
+- **Output instrument returned:** GetStrategy response includes `output_instrument` for runtime validation
+- New tenant can valuate KWH without any configuration (uses SYSTEM defaults)
 
 ### Stream 4: Current Account Integration (P1, 10 points)
 
@@ -1368,6 +1699,8 @@ func main() {
 - Concurrent liens on tiered pricing account get correct rates (no drift)
 - `GetValuedAmount` returns `is_estimate=true` (non-binding)
 - Valuation basis includes calculation_path and degraded_mode flag
+- **Basis drift detection:** ExecuteLien emits VALUATION_STALE event if basis > 30 days old
+- **Output instrument validation:** Valuation fails with VALUATION_OUTPUT_MISMATCH if script returns wrong instrument
 - Graceful degradation when Market Information unavailable
 - Metrics show execution time and cache hit rate
 
@@ -1493,22 +1826,25 @@ dependencies. Position Keeping owns reservation data, enabling local-only projec
 
 1. Add `reservations` table to Position Keeping schema (see FR-9 for schema)
 2. Add `RecordReservation` RPC (called by Account Services during InitiateLien)
-3. Add `ReleaseReservation` RPC (called during ExecuteLien/TerminateLien)
-4. Add `GetProjectedBalance` RPC with bucket filtering
-5. Implement projected balance query using local reservations table:
+3. **CRITICAL:** Implement `RecordReservation` idempotency based on `lien_id` (see FR-9)
+4. Add `ReleaseReservation` RPC (called during ExecuteLien/TerminateLien)
+5. Add `GetProjectedBalance` RPC with bucket filtering
+6. Implement projected balance query using local reservations table:
    - `SELECT SUM(amount) FROM position_entries WHERE ... AND bucket_id = ?`
    - `SELECT SUM(reserved_amount) FROM reservations WHERE status = 'ACTIVE' AND bucket_id = ?`
-6. Add indexes: `(account_id, instrument_code, status, bucket_id)` on both tables
-7. **CRITICAL:** Use `shared/pkg/bucketing.CalculateBucketID()` for bucket calculation
-8. Add caching (5-minute TTL, invalidated on writes)
-9. Add integration tests: RecordReservation → GetProjectedBalance → ReleaseReservation lifecycle
-10. Add integration tests with concurrent reservations on same bucket
-11. Add integration tests with concurrent reservations on different buckets (verify isolation)
-12. Performance testing (must complete <10ms for projected balance queries)
+7. Add indexes: `(account_id, instrument_code, status, bucket_id)` on both tables
+8. **CRITICAL:** Use `shared/pkg/bucketing.CalculateBucketID()` for bucket calculation
+9. Add caching (5-minute TTL, invalidated on writes)
+10. Add integration tests: RecordReservation → GetProjectedBalance → ReleaseReservation lifecycle
+11. **CRITICAL:** Add idempotency test: duplicate RecordReservation returns success without double-counting
+12. Add integration tests with concurrent reservations on same bucket
+13. Add integration tests with concurrent reservations on different buckets (verify isolation)
+14. Performance testing (must complete <10ms for projected balance queries)
 
 **Success Criteria:**
 
 - `RecordReservation` creates reservation record in Position Keeping
+- **RecordReservation is idempotent:** Retrying with same `lien_id` returns success, no double-count
 - `ReleaseReservation` marks reservation as EXECUTED or TERMINATED
 - `GetProjectedBalance` returns current balance + active reservations (local query only)
 - **No cross-service JOINs** - Position Keeping doesn't call back to Account Services
@@ -1517,6 +1853,7 @@ dependencies. Position Keeping owns reservation data, enabling local-only projec
 - Performance: <10ms p99 for projected balance queries
 - Concurrency test: 10 parallel reservations on tiered account all get correct rates
 - Isolation test: Solar reservations don't contaminate grid tier calculations
+- Idempotency test: 3 retries of same RecordReservation don't affect ProjectedBalance
 
 ### Stream 11: Shared Bucketing Library (P0, 2 points)
 
