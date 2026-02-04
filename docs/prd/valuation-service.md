@@ -401,14 +401,24 @@ The engine executes logic in three tiers:
 
 ```python
 # Starlark strategy loaded from Reference Data
+# SECURITY: Sandboxed execution - no filesystem, no network, no system calls
+# LIMITS: 5s timeout, 64MB memory, CEL expressions limited to 10,000 cost units
 def valuate_energy(input_quantity, params, knowledge_at):
-    # 1. Fetch market data (knowledge_at ensures bi-temporal replay)
-    spot_price = market_data.get_price("EPEX_SPOT", knowledge_at)
+    # 1. Validate required parameters
+    if "gsp_coefficient" not in params:
+        return {"error": "MISSING_PARAM", "message": "gsp_coefficient required"}
 
-    # 2. Get account-specific coefficient
     gsp_coefficient = params["gsp_coefficient"]
 
-    # 3. Execute CEL calculation
+    # 2. Fetch market data with error handling
+    spot_result = market_data.get_price("EPEX_SPOT", knowledge_at)
+    if spot_result.error:
+        # Return error - saga will handle (retry or use fallback strategy)
+        return {"error": "MARKET_DATA_UNAVAILABLE", "message": spot_result.error}
+
+    spot_price = spot_result.value
+
+    # 3. Execute CEL calculation (cost: 2 units for spot * coeff * markup)
     rate = cel_eval("spot * coeff * markup", {
         "spot": spot_price,
         "coeff": gsp_coefficient,
@@ -428,6 +438,52 @@ def valuate_energy(input_quantity, params, knowledge_at):
         }
     }
 ```
+
+#### CEL Cost Limits
+
+To prevent denial-of-service from runaway expressions, CEL evaluations enforce strict limits:
+
+| Limit | Value | Behavior When Exceeded |
+|-------|-------|------------------------|
+| **Maximum cost** | 10,000 units | `COST_LIMIT_EXCEEDED` error |
+| **Execution timeout** | 100ms | `TIMEOUT_EXCEEDED` error |
+
+**Cost Accounting Rules:**
+
+| Operation | Cost |
+|-----------|------|
+| Arithmetic (+, -, *, /, %) | 1 unit |
+| Comparisons (<, >, ==, !=) | 1 unit |
+| Logical operators (&&, \|\|, !) | 1 unit |
+| Built-in function calls | 10 units |
+| List/map element access | 1 unit per element |
+| String operations | 1 unit per character (max 1000) |
+
+**Example:** A strategy performing `spot * coeff * markup` costs 2 units. A strategy iterating over
+500 market data points with 3 operations each costs ~1,500 units (within limit).
+
+**Error Response:**
+
+```json
+{
+  "error": "COST_LIMIT_EXCEEDED",
+  "message": "CEL expression exceeded 10,000 cost units (actual: 12,345)",
+  "strategy_id": "wholesale-energy-v2"
+}
+```
+
+**Saga Response:** On cost/timeout exceeded, saga should retry with simpler strategy or fail
+gracefully with compensation.
+
+#### Starlark Security Sandbox
+
+Starlark strategies execute in a restricted sandbox:
+
+- **No filesystem access:** `open()`, `read()`, `write()` are undefined
+- **No network access:** `http`, `socket`, `requests` are undefined
+- **No system calls:** `os`, `subprocess`, `exec` are undefined
+- **Execution timeout:** 5 seconds maximum
+- **Memory limit:** 64MB per execution
 
 ### FR-4: Dimension Guard
 
@@ -1140,7 +1196,22 @@ func (s *Service) InitiateLien(ctx context.Context, req *InitiateLienRequest) (*
     })
     if err != nil {
         // CRITICAL: Rollback lien if reservation fails
-        s.repo.DeleteLien(ctx, lien.ID)
+        if delErr := s.repo.DeleteLien(ctx, lien.ID); delErr != nil {
+            // Orphaned lien - requires manual cleanup
+            s.logger.Error("CRITICAL: Failed to rollback lien after RecordReservation failure",
+                "lien_id", lien.ID,
+                "original_error", err,
+                "rollback_error", delErr,
+            )
+            s.metrics.Inc("liens.orphaned.total")
+            // Write to dead-letter queue for async cleanup
+            s.dlq.Publish(ctx, OrphanedLienEvent{
+                LienID:        lien.ID,
+                AccountID:     req.AccountId,
+                OriginalError: err.Error(),
+                RollbackError: delErr.Error(),
+            })
+        }
         return nil, fmt.Errorf("failed to record reservation: %w", err)
     }
 
@@ -1929,6 +2000,65 @@ dependencies. Position Keeping owns reservation data, enabling local-only projec
 4. **Phase 4 (Week 7+):** Add energy/commodity strategies
    (Stream 7)
 
+### Strategy Versioning and Migration
+
+**Version Resolution:**
+
+Account assignments reference strategies by `strategy_id`. When multiple versions exist, the system
+resolves to the **latest non-deprecated version** unless the assignment explicitly pins a version.
+
+| Scenario | Behavior |
+|----------|----------|
+| New strategy version deployed | Existing assignments auto-upgrade to latest |
+| Strategy deprecated (`deprecated_at < now`) | New valuations REJECTED, bi-temporal replay allowed |
+| Assignment pins specific version | Version locked until explicit migration |
+
+**Migration Path:**
+
+1. **Phase 1-2:** All assignments use unpinned references (auto-upgrade)
+2. **Phase 3:** Explicit migration for any pinned assignments via `task-master` task
+3. **Post-Phase 3:** Deprecate old versions, assignments auto-resolve to latest
+
+**What Happens When `logic_hash` Changes:**
+
+When a strategy's logic is updated (new `logic_hash`), the change creates a new version. Existing
+assignments using unpinned references will use the new logic on next valuation. Assignments pinned
+to the old version continue using old logic until explicitly migrated.
+
+**Operational Notifications:**
+
+- `strategy.version.created` event → Slack alert to ops channel
+- `strategy.deprecated` event → P3 alert, 7-day countdown to removal
+- `strategy.removed` event → P2 alert if any assignments still reference it
+
+**Deprecated Strategy Behavior:**
+
+```go
+func (s *Service) GetStrategy(ctx context.Context, id uuid.UUID) (*Strategy, error) {
+    strategy, err := s.repo.FindByID(ctx, id)
+    if err != nil {
+        return nil, err
+    }
+
+    // Reject new valuations using deprecated strategies
+    if strategy.DeprecatedAt != nil && strategy.DeprecatedAt.Before(time.Now()) {
+        return nil, &StrategyDeprecatedError{
+            StrategyID:   id,
+            DeprecatedAt: *strategy.DeprecatedAt,
+            Message:      "Strategy deprecated, migrate to latest version",
+        }
+    }
+
+    return strategy, nil
+}
+```
+
+**Bi-temporal Replay Exception:**
+
+For audit and replay purposes, deprecated strategies remain queryable via `GetStrategy` with
+`knowledge_at` parameter set to a time before `deprecated_at`. This allows historical valuations
+to be reproduced exactly.
+
 ### Monitoring and Alerting
 
 **Metrics:**
@@ -2000,12 +2130,18 @@ dependencies. Position Keeping owns reservation data, enabling local-only projec
 |--------|-------------------|----------------------------|
 | **Network Hops** | 4 (Saga→Account→Valuation→RefData/MIM) | 3 (Saga→Account→RefData/MIM) |
 | **Latency** | 12-17ms (estimated) | 5-8ms (measured goal) |
-| **Story Points** | 68 points | 31 points (54% reduction) |
+| **Story Points** | 68 points | 75 points (+10% for TOCTOU safety) |
 | **Operational Complexity** | New microservice to deploy/monitor | Reuses existing services |
 | **Domain Modeling** | External service | Account capability |
 | **Dependency Graph** | Saga → Account → Valuation → ... | Saga → Account → ... |
 | **Cache Strategy** | L1 + L2 Redis (complex) | L1 only (simple) |
 | **Failure Modes** | Valuation service down = all accounts blocked | Account service down = only that account blocked |
+
+**Story Point Justification:** The embedded approach is 75 points vs 68 for standalone (+10%). The
+additional complexity buys: (1) Atomic valuation with price lock eliminating TOCTOU race conditions
+(v2.2), (2) Reservation Ledger pattern for projected balance without cross-service JOINs (v2.4),
+(3) Graceful degradation and resilience features (v2.3), (4) Architecture guards and idempotency (v2.5).
+These are not optional features—they're required for correctness under concurrent load.
 
 **Key insight:** Valuation is a **behavior** of the Account aggregate, not a separate Bounded Context.
 
