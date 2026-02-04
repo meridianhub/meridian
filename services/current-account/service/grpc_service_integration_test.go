@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 
@@ -18,6 +20,8 @@ import (
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/config"
 	"github.com/meridianhub/meridian/services/current-account/domain"
+	"github.com/meridianhub/meridian/shared/pkg/saga"
+	"github.com/meridianhub/meridian/shared/pkg/saga/schema"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/shopspring/decimal"
@@ -473,12 +477,67 @@ func testDepositOrchestrator(repo *persistence.Repository, posKeeping PositionKe
 // testDepositOrchestratorWithConfig creates a DepositOrchestrator with optional AccountConfig.
 // Panics if orchestrator creation fails (acceptable in test helpers).
 func testDepositOrchestratorWithConfig(repo *persistence.Repository, posKeeping PositionKeepingClient, finAcct FinancialAccountingClient, acctConfig *config.AccountConfig) *DepositOrchestrator {
+	// Load saga script from file
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		panic("failed to get current file path")
+	}
+	serviceDir := filepath.Dir(filename)
+	depositScriptPath := filepath.Join(serviceDir, "..", "sagas", "deposit.star")
+	depositScriptBytes, err := os.ReadFile(depositScriptPath)
+	if err != nil {
+		panic(fmt.Sprintf("failed to read deposit script: %v", err))
+	}
+	depositScript := string(depositScriptBytes)
+
+	// Create saga handler registry
+	handlerRegistry := saga.NewHandlerRegistry()
+	if err := RegisterCurrentAccountHandlers(handlerRegistry); err != nil {
+		panic(fmt.Sprintf("failed to register saga handlers: %v", err))
+	}
+
+	// Load schema registry
+	schemaRegistryPath := filepath.Join(serviceDir, "..", "..", "..", "shared", "pkg", "saga", "schema", "handlers.yaml")
+	schemaRegistryData, err := os.ReadFile(schemaRegistryPath)
+	if err != nil {
+		panic(fmt.Sprintf("failed to read handlers schema: %v", err))
+	}
+
+	schemaRegistry := schema.NewRegistry()
+	if err := schemaRegistry.LoadFromYAML(schemaRegistryData); err != nil {
+		panic(fmt.Sprintf("failed to load schema: %v", err))
+	}
+
+	// Build service modules
+	serviceModules, err := schema.BuildServiceModules(handlerRegistry, schemaRegistry)
+	if err != nil {
+		panic(fmt.Sprintf("failed to build service modules: %v", err))
+	}
+
+	// Create Starlark saga runner
+	runtime, err := saga.NewRuntime(testLogger())
+	if err != nil {
+		panic(fmt.Sprintf("failed to create saga runtime: %v", err))
+	}
+
+	sagaRunner, err := saga.NewStarlarkSagaRunner(saga.StarlarkSagaRunnerConfig{
+		Runtime:        runtime,
+		Registry:       handlerRegistry,
+		ServiceModules: serviceModules,
+		Logger:         testLogger(),
+	})
+	if err != nil {
+		panic(fmt.Sprintf("failed to create saga runner: %v", err))
+	}
+
 	orchestrator, err := NewDepositOrchestrator(DepositOrchestratorConfig{
 		Logger:           testLogger(),
 		Repo:             repo,
 		PosKeepingClient: posKeeping,
 		FinAcctClient:    finAcct,
 		AccountConfig:    acctConfig,
+		SagaRunner:       sagaRunner,
+		DepositScript:    depositScript,
 	})
 	if err != nil {
 		panic(fmt.Sprintf("testDepositOrchestratorWithConfig: %v", err))
