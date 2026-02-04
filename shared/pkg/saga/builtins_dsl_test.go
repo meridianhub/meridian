@@ -370,4 +370,17 @@ func TestConvertStarlarkToGo(t *testing.T) {
 		expected := map[string]interface{}{"key": "value"}
 		assert.Equal(t, expected, result)
 	})
+
+	t.Run("nested dict with non-string keys logs warning", func(t *testing.T) {
+		// Create nested dict with non-string key
+		nestedDict := starlark.NewDict(2)
+		_ = nestedDict.SetKey(starlark.String("valid"), starlark.String("value"))
+		_ = nestedDict.SetKey(starlark.MakeInt(42), starlark.String("invalid"))
+
+		result := convertStarlarkToGo(nestedDict)
+
+		// Should only contain the valid key, non-string key is logged and dropped
+		expected := map[string]interface{}{"valid": "value"}
+		assert.Equal(t, expected, result)
+	})
 }

@@ -508,6 +508,11 @@ func convertStarlarkToGo(v starlark.Value) interface{} {
 		for _, item := range val.Items() {
 			if key, ok := item[0].(starlark.String); ok {
 				result[string(key)] = convertStarlarkToGo(item[1])
+			} else {
+				// Log warning - non-string keys are not supported in Go map conversion
+				slog.Warn("convertStarlarkToGo: ignoring non-string dict key",
+					"key_type", item[0].Type(),
+					"key_value", item[0].String())
 			}
 		}
 		return result
