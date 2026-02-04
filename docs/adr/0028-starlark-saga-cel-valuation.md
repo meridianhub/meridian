@@ -676,6 +676,156 @@ func (r *Runtime) ExecuteDryRun(ctx, sagaName, input) (*ExecutionPlan, error)
 - Returns intended step sequence with parameters
 - Validates attribute references against instrument schema
 
+## Real Service Integration
+
+### Service Binding Architecture
+
+Starlark handlers bridge the dynamic scripting interface with strongly-typed gRPC services. Each service provides
+a `RegisterStarlarkHandlers` function that registers its operations with the saga runtime.
+
+**Pattern**: Service bindings live in `services/{service-name}/client/starlark.go` alongside the gRPC client:
+
+```go
+// services/current-account/client/starlark.go
+func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) error {
+    handlers := map[string]struct {
+        handler  saga.Handler
+        metadata saga.HandlerMetadata
+    }{
+        "current_account.create_lien": {
+            handler: createLienHandler(client),
+            metadata: saga.HandlerMetadata{
+                Category:            saga.HandlerCategorySettlement,
+                ProducesInstruments: []string{"USD", "EUR", "GBP", "NZD"},
+            },
+        },
+    }
+
+    for name, h := range handlers {
+        if err := registry.RegisterWithMetadata(name, h.handler, &h.metadata); err != nil {
+            return fmt.Errorf("failed to register %s: %w", name, err)
+        }
+    }
+    return nil
+}
+
+func createLienHandler(client *Client) saga.Handler {
+    return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
+        // 1. Parse Starlark params (map[string]any)
+        accountID, err := saga.RequireStringParam(params, "account_id")
+        amount, err := saga.RequireDecimalParam(params, "amount")
+
+        // 2. Prepare context with saga metadata (idempotency, tracing)
+        clientCtx := prepareClientContext(ctx)
+
+        // 3. Build gRPC request
+        req := &currentaccountv1.InitiateLienRequest{...}
+
+        // 4. Call REAL gRPC client (not a mock!)
+        resp, err := client.InitiateLien(clientCtx, req)
+
+        // 5. Convert response to Starlark format
+        return map[string]any{
+            "lien_id": resp.GetLien().GetLienId(),
+            "status":  "ACTIVE",
+        }, nil
+    }
+}
+```
+
+### Dependency Injection Over Global Registry
+
+Services explicitly declare their saga handler dependencies during initialization:
+
+**Before (global registry - problematic)**:
+
+```go
+// OLD PATTERN - DEPRECATED
+executor := saga.NewExecutor(saga.ExecutorConfig{
+    Handlers: saga.DefaultRegistry(), // ❌ Global state, hidden dependencies
+})
+```
+
+**After (explicit registration - current)**:
+
+```go
+// NEW PATTERN - RECOMMENDED
+func main() {
+    // Initialize service clients
+    currentAccountClient, cleanup, _ := currentaccountclient.New(...)
+    defer cleanup()
+
+    posKeepingClient, cleanup2, _ := positionkeepingclient.New(...)
+    defer cleanup2()
+
+    // Create handler registry
+    handlerRegistry := saga.NewHandlerRegistry()
+
+    // Explicitly register service bindings
+    currentaccountclient.RegisterStarlarkHandlers(handlerRegistry, currentAccountClient)
+    positionkeepingclient.RegisterStarlarkHandlers(handlerRegistry, posKeepingClient)
+
+    // Create saga runner with explicit dependencies
+    sagaRunner := saga.NewStarlarkSagaRunner(saga.StarlarkSagaRunnerConfig{
+        Handlers: handlerRegistry, // ✅ Explicit dependencies
+        Logger:   logger,
+    })
+}
+```
+
+**Benefits**:
+
+- Clear dependency graph (this service orchestrates these services)
+- Easy to test (inject mock clients)
+- No global state
+- Graceful degradation (warn on missing services, don't fail)
+
+### Conservation of Dimension Rule
+
+The **Conservation of Dimension Rule** enforces type safety for financial instruments at the handler level:
+
+> Handlers must declare `ProducesInstruments` metadata matching the instrument types they actually create
+> in position-keeping. A handler that produces USD positions cannot declare EUR, preventing runtime type mismatches.
+
+**Rationale**: Financial systems must enforce dimensional consistency. Just as you cannot add meters to kilograms
+in physics, you cannot mix currencies or asset types without explicit conversion. This rule catches type errors
+at handler registration time rather than in production.
+
+**Example validation failure**:
+
+```go
+// BAD - Declaration doesn't match implementation
+metadata: saga.HandlerMetadata{
+    ProducesInstruments: []string{"USD"},  // Declared: USD only
+}
+
+// In handler implementation:
+req := &positionkeepingv1.InitiateLogRequest{
+    Currency: "EUR",  // MISMATCH! Creates EUR but declared USD
+}
+
+// Result: Validation error at registration time:
+// "handler current_account.create_lien produced EUR but only declared [USD]"
+```
+
+**Handler categories**:
+
+- `HandlerCategoryIngestion` - Creates positions from external data (meter readings, market prices)
+  - Example: `ProducesInstruments: []string{"KWH", "GAS", "WATER"}`
+- `HandlerCategoryValuation` - Computes derived values (mark-to-market, accruals)
+  - Example: `ProducesInstruments: []string{}` (usually empty, updates existing)
+- `HandlerCategorySettlement` - Executes financial operations (debits, credits, transfers)
+  - Example: `ProducesInstruments: []string{"USD", "EUR", "GBP"}`
+
+The validator enforces:
+
+1. Declared instruments must match what's actually created in position-keeping
+2. No instrument type mismatches between declaration and implementation
+3. Multi-currency handlers must declare all supported currencies upfront
+
+This ensures **financial instrument type safety** at compile time (handler registration), not at runtime when
+data corruption could occur.
+
 ### Positive Consequences
 
 * **Tenant flexibility**: Different posting patterns without code deployment
@@ -705,8 +855,16 @@ func (r *Runtime) ExecuteDryRun(ctx, sagaName, input) (*ExecutionPlan, error)
 
 * [PRD: Starlark Saga Orchestration (Core)](../prd/starlark-saga-orchestration-core.md) - Runtime,
   builtins, party isolation, composition (Streams 1-6)
+* [PRD: Starlark Service Bindings](../prd/starlark-service-bindings.md) - Real service integration via gRPC
 * [PRD: Durable Execution Engine](../prd/durable-execution-engine.md) - Persistence, replay,
   async wait, hot-fixing (Streams 7-9)
+
+### Implementation Guides
+
+* [Adding Starlark Service Bindings](../guides/adding-starlark-service-bindings.md) - Step-by-step guide
+  for implementing service handlers
+* [Starlark Saga Architecture](../architecture/starlark-saga-architecture.md) - Architecture overview and
+  service binding patterns
 
 ### Related ADRs
 
