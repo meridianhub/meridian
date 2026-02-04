@@ -10,14 +10,21 @@ instructions: |
   Account Services (CurrentAccount, InternalBankAccount) own valuation capability via shared library.
   Each account defines how it accepts value through strategy assignments stored in its schema.
   The shared/pkg/valuation library executes CEL/Starlark strategies loaded from Reference Data.
-  Use the GetValuedAmount RPC pattern to ask accounts "what is this worth to you?"
+
+  CRITICAL: Valuation happens ATOMICALLY within transactional operations (InitiateLien, ExecuteDeposit).
+  Use InitiateLien for withdrawals (creates price lock). Use ExecuteDeposit for deposits (atomic valuation).
+  Only use GetValuedAmount for non-binding inquiries (mobile apps, dashboards).
+
+  Price Lock: Liens store valued_amount at creation time. ExecuteLien uses locked value, not recalculated.
+  Concurrency Safety: Valuation queries projected balance (current + active liens) to prevent tiered pricing drift.
 ---
 
 # PRD: Account-Scoped Valuation Engine
 
 **Status:** Draft - Revised Architecture
-**Version:** 2.0
+**Version:** 2.2 (Atomic Valuation with Price Lock)
 **Task Master Tag:** `valuation-engine`
+**Story Points:** 63 (10 streams)
 **Core ADR:** [ADR-0028: Starlark Saga Orchestration with CEL Valuation](../adr/0028-starlark-saga-cel-valuation.md)
 
 ## 1. Executive Summary
@@ -55,6 +62,40 @@ services/internal-bank-account/ # Implements GetValuedAmount RPC
 - **Domain Modeling**: Valuation is Account's capability, not external service
 - **Operational Simplicity**: No additional microservice to deploy/monitor
 - **Follows Existing Patterns**: Matches shared/pkg/saga library approach
+
+### Atomic Valuation with Price Lock (v2.2 Enhancement)
+
+**Critical Innovation:** Valuation happens **atomically within `InitiateLien` and `ExecuteDeposit`** operations,
+not as a separate inquiry step.
+
+**Why This Matters:**
+
+State-dependent pricing (tiered rates, volume discounts) is vulnerable to the "Tiered Valuation Drift" race
+condition:
+
+```text
+BAD: Two sagas query valuation separately → both see same balance → both get cheap rate
+GOOD: Each lien queries projected balance → second sees first's reservation → correct tier
+```
+
+**The Price Lock Guarantee:**
+
+When `InitiateLien` creates a reservation, it stores BOTH:
+
+- `reserved_quantity` (100 kWh)
+- `valued_amount` (£35.00 at T0)
+- `valuation_basis` (audit trail)
+
+Later, when `ExecuteLien` is called, the system uses the **locked value**, not a recalculated value. This
+protects both customer (price won't increase) and merchant (discounts can't be gamed).
+
+**Two-Mode Operation:**
+
+1. **Transactional** (`InitiateLien`, `ExecuteDeposit`): Atomic valuation with price lock
+2. **Inquiry** (`GetValuedAmount`): Non-binding estimate for UX (mobile apps, dashboards)
+
+**Complexity Impact:** +17 points (46 → 63 points) buys elimination of TOCTOU race conditions and guaranteed
+price integrity under concurrent load.
 
 ## 2. The Problem Statement
 
@@ -172,13 +213,24 @@ CREATE INDEX idx_valuation_strategies_bitemporal
 
 ## 4. Functional Requirements
 
-### FR-1: GetValuedAmount RPC
+### FR-1: GetValuedAmount RPC (Inquiry-Only, Non-Binding)
 
-**Requirement:** Account Services MUST implement the `GetValuedAmount` RPC to value arbitrary assets.
+**Requirement:** Account Services MUST implement the `GetValuedAmount` RPC as a **read-only inquiry** for
+non-transactional valuation queries.
+
+**Semantics:** This RPC is **NON-BINDING**. It does not create liens, does not reserve capacity, and does not
+guarantee the returned price will be honored in subsequent transactions. It is intended for:
+
+- Mobile app UX ("What would 100 kWh cost right now?")
+- Dashboard displays ("Current rate for my account")
+- Saga planning (estimate before reservation)
+
+**For transactional flows** (actual withdrawals/deposits), valuation MUST happen atomically within
+`InitiateLien` or `ExecuteDeposit` (see FR-8).
 
 ```protobuf
 service CurrentAccountService {
-  // NEW - Valuation capability
+  // Inquiry-only valuation (non-binding)
   rpc GetValuedAmount(GetValuedAmountRequest) returns (GetValuedAmountResponse);
 }
 
@@ -193,6 +245,9 @@ message GetValuedAmountResponse {
   ValuationBasis basis = 2;
   string execution_time_ms = 3;
   bool cache_hit = 4;
+
+  // WARNING: This value is informational only. Actual transaction may differ.
+  bool is_estimate = 5;  // Always true for this RPC
 }
 
 message ValuationBasis {
@@ -396,22 +451,169 @@ BAD: Valuation triggers position log → Position log triggers valuation → Loo
 - Non-deterministic execution (valuation affecting its own inputs)
 - Unauthorized state mutations
 
+### FR-8: Atomic Valuation in Lien Initiation (Price Lock)
+
+**Requirement:** Account Services MUST perform valuation **atomically** within `InitiateLien` and `ExecuteDeposit`
+operations to prevent race conditions in state-dependent pricing.
+
+#### The "Tiered Valuation Drift" Problem
+
+For state-dependent strategies (tiered pricing, volume discounts, time-of-use), querying valuation separately
+from reservation creates a TOCTOU (Time-of-Check to Time-of-Use) race condition:
+
+```text
+TIME: T0         T1           T2
+      ↓          ↓            ↓
+Saga A: GetValuedAmount(300 kWh) → £60 (tier 1)
+                InitiateLien(300 kWh)
+Saga B:          GetValuedAmount(300 kWh) → £60 (WRONG - should be tier 2)
+                                  InitiateLien(300 kWh)
+
+Result: Both charged at introductory rate when only first 300 should be.
+```
+
+#### The Solution: Valuation-in-Lien
+
+**Transactional Operations** (withdrawals, deposits) MUST calculate valuation atomically:
+
+1. **`InitiateLien`** (withdrawals):
+   - Input: `InstrumentAmount` (any asset class)
+   - Queries Projected Balance (Current + Active Liens) from Position Keeping
+   - Executes valuation strategy using projected state
+   - Creates lien storing BOTH `reserved_quantity` AND `valued_amount`
+   - Returns lien with **price lock**
+
+2. **`ExecuteDeposit`** (inbound assets):
+   - Input: `InstrumentAmount`
+   - Queries Projected Balance
+   - Executes valuation strategy
+   - Posts to Position Keeping with valuation basis
+
+**Updated `InitiateLien` Proto:**
+
+```protobuf
+message InitiateLienRequest {
+  string account_id = 1;
+  meridian.quantity.v1.InstrumentAmount amount = 2;  // Any asset class
+  string payment_order_reference = 3;
+  meridian.common.v1.IdempotencyKey idempotency_key = 4;
+  google.protobuf.Timestamp knowledge_at = 5;
+}
+
+message InitiateLienResponse {
+  string lien_id = 1;
+
+  // The "Price Lock" - guaranteed value at lien creation time
+  meridian.quantity.v1.InstrumentAmount valued_amount = 2;  // e.g., £35.00
+  ValuationBasis basis = 3;
+
+  meridian.common.v1.MoneyAmount new_available_balance = 4;
+}
+```
+
+**Price Lock Guarantee:**
+
+The `valued_amount` in the lien is **immutable**. When `ExecuteLien` is called later, the system uses the
+locked value, NOT a recalculated value. This protects both:
+
+- **Customer**: Price won't increase between reservation and execution
+- **Merchant**: Tiered discounts can't be gamed by concurrent reservations
+
+#### Idempotency
+
+Retrying `InitiateLien` with same `idempotency_key` returns the existing lien with its original
+`valued_amount`. No recalculation.
+
+### FR-9: Projected Balance for State-Dependent Valuation
+
+**Requirement:** Position Keeping MUST provide a `ProjectedBalance` query that includes pending reservations
+(active liens).
+
+**Formula:**
+
+```go
+ProjectedBalance = CurrentBalance + Sum(ActiveLiens)
+```
+
+**Use Case:**
+
+When executing a valuation strategy with state-dependent logic (tiered pricing), the Valuation Engine queries
+`ProjectedBalance` instead of `CurrentBalance` to see capacity already spoken for by concurrent transactions.
+
+**Example:**
+
+```python
+# Starlark strategy using projected balance
+def valuate_tiered(input_quantity, params, knowledge_at):
+    # Get projected balance (includes other active liens)
+    projected = position_keeping.get_projected_balance(
+        account_id=params["account_id"],
+        instrument="KWH",
+        knowledge_at=knowledge_at
+    )
+
+    # Calculate how much of "cheap" tier remains
+    cheap_threshold = 500.0
+    cheap_available = max(0, cheap_threshold - projected.amount)
+
+    # Price accordingly
+    if input_quantity.amount <= cheap_available:
+        rate = 0.20  # All in cheap tier
+    else:
+        # Split across tiers
+        cheap_portion = cheap_available * 0.20
+        expensive_portion = (input_quantity.amount - cheap_available) * 0.35
+        rate = (cheap_portion + expensive_portion) / input_quantity.amount
+
+    return calculate_value(input_quantity, rate)
+```
+
+**Position Keeping API:**
+
+```protobuf
+message GetProjectedBalanceRequest {
+  string account_id = 1;
+  string instrument_code = 2;
+  google.protobuf.Timestamp knowledge_at = 3;
+}
+
+message GetProjectedBalanceResponse {
+  meridian.quantity.v1.InstrumentAmount current_balance = 1;
+  meridian.quantity.v1.InstrumentAmount active_liens_total = 2;
+  meridian.quantity.v1.InstrumentAmount projected_balance = 3;  // current + liens
+}
+```
+
+**Concurrency Safety:**
+
+By using Projected Balance, the second concurrent lien sees the first lien's reservation and calculates
+the correct tier pricing. This eliminates the "Tiered Valuation Drift" bug.
+
 ## 5. Technical Architecture
 
-### 5.1 The Workflow (Revised - 3 Network Hops)
+### 5.1 The Transactional Workflow (Atomic Valuation-in-Lien)
+
+**This is the PRIMARY flow for actual transactions (withdrawals, deposits).** Valuation happens atomically
+within lien/deposit operations to prevent race conditions.
 
 ```mermaid
 sequenceDiagram
     participant Saga as Withdrawal Saga
     participant Account as Current Account Service
     participant Lib as Valuation Library (in-process)
+    participant PosKeep as Position Keeping
     participant Ref as Reference Data
     participant MIM as Market Information
 
-    Saga->>Account: GetValuedAmount(account_id, 100 kWh)
+    Saga->>Account: InitiateLien(account_id, 100 kWh)
     Account->>Account: Load account.valuation_strategy_id from DB
 
-    Account->>Lib: engine.Valuate(strategy_id, params)
+    Note over Account,PosKeep: Get Projected Balance (includes active liens)
+    Account->>PosKeep: GetProjectedBalance(account_id, KWH)
+    PosKeep-->>Account: current=400 kWh, liens=0, projected=400
+
+    Note over Account,Lib: Execute valuation with projected state
+    Account->>Lib: engine.Valuate(strategy_id, projected=400, input=100)
 
     Lib->>Ref: GetStrategy(strategy_id, knowledge_at)
     Ref-->>Lib: Starlark script (cached 5min)
@@ -419,21 +621,65 @@ sequenceDiagram
     Lib->>MIM: GetRate("EPEX_SPOT", knowledge_at)
     MIM-->>Lib: £0.456
 
-    Lib->>Lib: Execute Starlark (100 * 0.456 * coeff)
+    Lib->>Lib: Execute Starlark with tier logic<br/>(remaining cheap tier: 100 kWh)
     Lib-->>Account: Output: £35.00 + Basis
 
-    Account-->>Saga: GetValuedAmountResponse
+    Note over Account: Create Lien with PRICE LOCK
+    Account->>Account: Store lien (100 kWh = £35.00, basis)
 
-    Saga->>FinAcct: Post(£35.00, basis)
+    Account-->>Saga: InitiateLienResponse(lien_id, valued_amount=£35.00)
+
+    Note over Saga: Later in saga flow
+    Saga->>Account: ExecuteLien(lien_id)
+    Account->>PosKeep: Post(100 kWh, £35.00, basis)
 ```
 
 **Network hop analysis:**
 
-1. Saga → Account: `GetValuedAmount` request
-2. Account → Reference Data: `GetStrategy` request (cacheable)
-3. Account → Market Information: `GetRate` request (cacheable)
+1. Saga → Account: `InitiateLien` request
+2. Account → Position Keeping: `GetProjectedBalance` (for tiered pricing)
+3. Account → Reference Data: `GetStrategy` (cached 5min)
+4. Account → Market Information: `GetRate` (cached)
 
-**Total: 3 network calls** (vs. 4 in standalone service approach)
+**Total: 4 network calls** (one more than inquiry-only, but eliminates TOCTOU race)
+
+**Key Difference from Inquiry Flow:**
+
+- **Inquiry (`GetValuedAmount`)**: Returns estimate, no state change, can drift
+- **Transactional (`InitiateLien`)**: Creates price lock, queries projected balance, atomic
+
+### 5.1.1 The Inquiry Workflow (Non-Binding, for UX)
+
+For **non-transactional** queries (mobile app, dashboard), use the inquiry RPC:
+
+```mermaid
+sequenceDiagram
+    participant App as Mobile App
+    participant Account as Current Account Service
+    participant Lib as Valuation Library (in-process)
+    participant Ref as Reference Data
+    participant MIM as Market Information
+
+    App->>Account: GetValuedAmount(account_id, 100 kWh)
+    Account->>Account: Load account.valuation_strategy_id
+
+    Account->>Lib: engine.Valuate(strategy_id, params)
+    Lib->>Ref: GetStrategy(strategy_id)
+    Ref-->>Lib: Starlark script (cached)
+    Lib->>MIM: GetRate("EPEX_SPOT")
+    MIM-->>Lib: £0.456
+    Lib-->>Account: Output: £35.00 + Basis
+
+    Account-->>App: GetValuedAmountResponse(is_estimate=true)
+
+    Note over App: Display "~£35.00" (informational only)
+```
+
+**WARNING:** This value is non-binding. Actual transaction may differ if:
+
+- Balance changes (tier transitions)
+- Market rates update
+- Concurrent transactions reserve capacity
 
 ### 5.2 Library Structure
 
@@ -459,19 +705,26 @@ shared/pkg/valuation/
     └── type Request, Response, Basis
 ```
 
-### 5.3 The "Passport Pattern" - Statelessness with Audit Integrity
+### 5.3 The "Passport Pattern" - Audit Integrity Across Flows
 
-The `GetValuedAmount` RPC is **stateless** (no writes), but the **Basis** (the valuation receipt) must be
-persisted downstream to ensure the ledger is auditable. This creates a **three-layer persistence model**:
+The **Basis** (the valuation receipt) must be persisted to ensure the ledger is auditable. This creates a
+**three-layer persistence model**, with different behavior for inquiry vs transactional flows:
 
-#### Layer 1: Account Service (Stateless / Pure Function)
+#### Layer 1: Account Service
 
-The `GetValuedAmount` RPC performs NO database writes. It is "Math-as-a-Service."
+**Inquiry Flow (`GetValuedAmount`)**: Stateless, NO writes. Pure "Math-as-a-Service."
 
-**Why:** If 100,000 meter reads arrive per hour, we don't want 100,000 "Inquiry Writes" to the Account Service
-database. That would destroy TPS.
+- **Why:** 100,000 inquiries/hour shouldn't write to Account database
+- **Performance:** <5ms p99 by eliminating DB contention
 
-**Performance Impact:** Stateless operation achieves <5ms p99 latency by eliminating DB write contention.
+**Transactional Flow (`InitiateLien`, `ExecuteDeposit`)**: WRITES lien/deposit record with valuation.
+
+- **Why:** Price lock requires persistence
+- **What's Stored:**
+  - `reserved_quantity` / `deposited_quantity`
+  - `valued_amount` (price lock)
+  - `valuation_basis` (audit trail)
+- **Performance:** Acceptable overhead (<10ms) for transactional guarantees
 
 #### Layer 2: Saga Orchestrator (Checkpoint Persistence)
 
@@ -677,57 +930,82 @@ func main() {
 - Cache invalidation works on strategy updates
 - Identity strategies are available for all fiat currencies
 
-### Stream 4: Current Account Integration (P1, 5 points)
+### Stream 4: Current Account Integration (P1, 8 points)
 
 **Tasks:**
 
-1. Add `GetValuedAmount` RPC to Current Account proto
-2. Wire up valuation library in service initialization
-3. Implement RPC handler using library
-4. Add Market Information client dependency
-5. Add observability (metrics, logging, tracing)
-6. Integration tests with mock strategies
+1. Add `GetValuedAmount` RPC to Current Account proto (inquiry-only)
+2. Update `InitiateLien` to accept `InstrumentAmount` (any asset class)
+3. Update `InitiateLien` response to include `valued_amount` and `basis`
+4. Update `ExecuteDeposit` to perform atomic valuation
+5. Wire up valuation library in service initialization
+6. Add Position Keeping client for projected balance queries
+7. Implement valuation in `InitiateLien` handler (price lock)
+8. Implement valuation in `ExecuteDeposit` handler
+9. Implement `GetValuedAmount` handler (inquiry-only, non-binding)
+10. Add Market Information client dependency
+11. Add observability (metrics, logging, tracing)
+12. Integration tests with mock strategies
+13. Concurrency tests (verify tiered pricing with parallel liens)
 
 **Success Criteria:**
 
-- Can value 100 kWh using identity strategy (returns same amount)
-- Can value 100 kWh using retail energy strategy (returns GBP)
+- `InitiateLien` accepts non-monetary assets (kWh, TONNE_CO2E)
+- Lien stores price lock (valued_amount) alongside reserved_quantity
+- Concurrent liens on tiered pricing account get correct rates (no drift)
+- `GetValuedAmount` returns `is_estimate=true` (non-binding)
 - Valuation basis includes all applied rates and observation IDs
 - Metrics show execution time and cache hit rate
 
-### Stream 5: Internal Bank Account Integration (P1, 5 points)
+### Stream 5: Internal Bank Account Integration (P1, 8 points)
 
 **Tasks:**
 
-1. Add `GetValuedAmount` RPC to Internal Bank Account proto
-2. Wire up valuation library (same as Current Account)
-3. Implement RPC handler
-4. Add Market Information client dependency
-5. Integration tests
+1. Add `GetValuedAmount` RPC to Internal Bank Account proto (inquiry-only)
+2. Update `InitiateLien` to accept `InstrumentAmount` (any asset class)
+3. Update `InitiateLien` response to include `valued_amount` and `basis`
+4. Update `ExecuteDeposit` to perform atomic valuation
+5. Wire up valuation library (same as Current Account)
+6. Add Position Keeping client for projected balance queries
+7. Implement valuation in `InitiateLien` handler (price lock)
+8. Implement valuation in `ExecuteDeposit` handler
+9. Implement `GetValuedAmount` handler (inquiry-only, non-binding)
+10. Add Market Information client dependency
+11. Integration tests
+12. Concurrency tests (verify tiered pricing with parallel liens)
 
 **Success Criteria:**
 
 - Internal accounts can value assets using same strategies
 - Wholesale energy strategy works (spot price × GSP coefficient)
+- `InitiateLien` stores price lock for regulatory accounts
+- Concurrent liens handle tiered pricing correctly
 - Audit trail is complete for regulatory accounts
 
-### Stream 6: Saga Integration (P1, 5 points)
+### Stream 6: Saga Integration (P1, 8 points)
 
 **Tasks:**
 
-1. Update withdrawal saga to call `GetValuedAmount`
-2. Update deposit saga
-3. Update Position Keeping to store valuation basis in attributes
-4. Add valuation basis to audit logs
-5. Integration tests for end-to-end flows
-6. Update operator runbooks
+1. Update withdrawal saga to use `InitiateLien` for non-monetary assets (no separate valuation call)
+2. Update saga to extract `valued_amount` from `InitiateLienResponse`
+3. Update saga to pass valuation basis to Position Keeping
+4. Update deposit saga to use atomic valuation in `ExecuteDeposit`
+5. Update Position Keeping to store valuation basis in `PositionEntry.attributes` JSONB
+6. Add valuation basis to audit logs
+7. Update saga replay logic to use checkpointed valuations (deterministic replay)
+8. Integration tests for end-to-end flows with tiered pricing
+9. Chaos tests (pod kills during valuation - verify deterministic replay)
+10. Update operator runbooks
 
 **Success Criteria:**
 
-- All sagas that handle non-monetary assets call `GetValuedAmount`
-- Position entries include valuation basis in attributes
-- Can replay historical valuations using `knowledge_at`
+- Withdrawal sagas use `InitiateLien` (valuation atomic, no separate call)
+- Deposit sagas use atomic valuation in `ExecuteDeposit`
+- Position entries include valuation basis in attributes JSONB
+- Can replay historical valuations using `knowledge_at` (saga checkpoints)
+- Saga replay is deterministic (same valued_amount from checkpoint)
 - Audit logs show full valuation provenance
+- No TOCTOU race conditions under concurrent load
 
 ### Stream 7: Energy/Commodity Strategies (P2, 8 points)
 
@@ -767,6 +1045,44 @@ func main() {
 - No memory leaks in long-running tests
 - Graceful degradation if Market Information is slow
 
+### Stream 9: Lien Schema Enhancement (P0, 3 points)
+
+**Tasks:**
+
+1. Add `valued_amount` field to `liens` table (InstrumentAmount)
+2. Add `valuation_basis` field to `liens` table (JSONB)
+3. Update `InitiateLien` to store valuation in lien record
+4. Update `ExecuteLien` to use stored valued_amount (not recalculate)
+5. Add `idempotency_check` to return existing lien with original valuation
+6. Migration scripts for existing liens (backfill with identity valuation)
+
+**Success Criteria:**
+
+- Liens store both reserved_quantity and valued_amount
+- `ExecuteLien` uses price lock from lien creation time
+- Idempotent retries return same valuation (no recalculation)
+- Lien basis stored in JSONB includes observation_ids, rates, strategy version
+
+### Stream 10: Position Keeping Projected Balance (P0, 5 points)
+
+**Tasks:**
+
+1. Add `GetProjectedBalance` RPC to Position Keeping service
+2. Implement query: `SELECT SUM(amount) FROM position_entries WHERE status IN ('POSTED', 'PENDING')`
+3. Add lien aggregation: `SELECT SUM(reserved_amount) FROM liens WHERE status = 'ACTIVE'`
+4. Return structured response (current, liens, projected)
+5. Add caching (5-minute TTL, invalidated on writes)
+6. Add integration tests with concurrent liens
+7. Performance testing (must complete <10ms for account queries)
+
+**Success Criteria:**
+
+- `GetProjectedBalance` returns current balance + active liens
+- Tiered pricing strategies can query projected balance
+- Second concurrent lien sees first lien's reservation
+- Performance: <10ms p99 for projected balance queries
+- Concurrency test: 10 parallel liens on tiered account all get correct rates
+
 ## 7. Testing Strategy
 
 ### Unit Tests
@@ -782,7 +1098,11 @@ func main() {
 - End-to-end valuation with real Reference Data and Market Information
 - Bi-temporal valuation replay
 - Cache invalidation on strategy updates
-- Multiple concurrent valuations
+- Multiple concurrent valuations (inquiry RPC)
+- **Atomic valuation in liens** - verify price lock persisted
+- **Tiered pricing with concurrent liens** - verify no drift (TOCTOU prevention)
+- **Saga deterministic replay** - verify checkpointed valuation used on replay
+- **Projected balance queries** - verify second lien sees first lien's reservation
 
 ### Performance Tests
 
