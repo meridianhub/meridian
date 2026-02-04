@@ -1734,6 +1734,16 @@ func TestWebhookDelivery_AccountStatusChange_E2E(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
+	// Skip until webhook integration is wired in current-account service.
+	// This test documents the expected webhook behavior:
+	// 1. Configure webhook URL for account
+	// 2. Change account status (ACTIVE -> SUSPENDED -> CLOSED)
+	// 3. Verify webhook POST requests received with correct payload
+	//
+	// To enable: Implement webhook delivery in current-account service for status changes,
+	// then remove this skip and uncomment the test logic below.
+	t.Skip("webhook integration not wired yet; enable once account status changes emit webhooks")
+
 	ctx := context.Background()
 	testEnv := setupE2EEnvironment(t, ctx)
 	defer testEnv.Cleanup()
@@ -1758,18 +1768,12 @@ func TestWebhookDelivery_AccountStatusChange_E2E(t *testing.T) {
 	}))
 	defer mockWebhookServer.Close()
 
-	// Simulate account status changes
-	// Note: This test verifies the webhook infrastructure exists.
-	// In a full implementation, we would:
-	// 1. Configure the webhook URL for the account
-	// 2. Change account status (ACTIVE -> SUSPENDED -> CLOSED)
-	// 3. Verify webhook POST requests received with correct payload
-
-	// For now, verify the test infrastructure is in place
+	// TODO: When webhook integration exists, uncomment and implement:
+	// 1. Configure testEnv.AccountID with mockWebhookServer.URL
+	// 2. Perform account status transitions using current-account APIs
+	// 3. Use await.Until() to wait for webhook deliveries
+	// 4. Assert webhookCalls contains expected payloads
 	t.Logf("Mock webhook server ready at: %s", mockWebhookServer.URL)
-	t.Log("TestWebhookDelivery_AccountStatusChange_E2E: Webhook infrastructure verified")
-
-	// TODO: Implement actual account status change operations once webhook integration is added to current-account service
 }
 
 // ============================================================================
