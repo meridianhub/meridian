@@ -393,6 +393,57 @@ internal_bank_account.get_balance(
 
 ---
 
+#### Handler: `internal_bank_account.list_accounts`
+
+**Purpose**: List internal bank accounts with optional filtering
+
+**Input Parameters**:
+
+```starlark
+internal_bank_account.list_accounts(
+    account_type="NOSTRO",  # Optional filter by type
+    currency="USD",         # Optional filter by currency
+    status="ACTIVE"         # Optional filter by status
+)
+```
+
+**Output**:
+
+```starlark
+{
+    "accounts": [
+        {
+            "account_id": "acc_...",
+            "account_type": "NOSTRO",
+            "currency": "USD",
+            "status": "ACTIVE",
+            "current_balance": "1000.00"
+        },
+        {
+            "account_id": "acc_...",
+            "account_type": "NOSTRO",
+            "currency": "USD",
+            "status": "ACTIVE",
+            "current_balance": "2500.00"
+        }
+    ]
+}
+```
+
+**gRPC Method**: `ListInternalBankAccounts`
+
+**Error Cases**:
+- Invalid filter values return empty list
+- gRPC errors propagate to saga
+
+**Idempotency**: Yes - read-only operation with retry
+
+**Category**: `HandlerCategorySettlement`
+
+**ProducesInstruments**: `[]` (read-only)
+
+---
+
 ### reference-data Handler Specifications
 
 **File**: `services/reference-data/client/starlark.go`
@@ -459,6 +510,61 @@ reference_data.evaluate_instrument(
 
 ---
 
+#### Handler: `reference_data.list_instruments`
+
+**Purpose**: List instruments with optional filtering for bulk operations
+
+**Input Parameters**:
+
+```starlark
+reference_data.list_instruments(
+    instrument_type="VOUCHER",  # Optional filter by type
+    status="ACTIVE",            # Optional filter by status
+    fungibility="NON_FUNGIBLE"  # Optional filter by fungibility
+)
+```
+
+**Output**:
+
+```starlark
+{
+    "instruments": [
+        {
+            "code": "VOUCHER_MEAL",
+            "version": 1,
+            "display_name": "Meal Voucher",
+            "instrument_type": "VOUCHER",
+            "fungibility": "NON_FUNGIBLE",
+            "bucket_expression": "attr.restaurant_type",
+            "status": "ACTIVE"
+        },
+        {
+            "code": "VOUCHER_TRANSPORT",
+            "version": 1,
+            "display_name": "Transport Voucher",
+            "instrument_type": "VOUCHER",
+            "fungibility": "NON_FUNGIBLE",
+            "bucket_expression": "attr.transport_mode",
+            "status": "ACTIVE"
+        }
+    ]
+}
+```
+
+**gRPC Method**: `ListInstruments`
+
+**Error Cases**:
+- Invalid filter values return empty list
+- gRPC errors propagate to saga
+
+**Idempotency**: Yes - read-only operation with retry
+
+**Category**: `HandlerCategoryValuation`
+
+**ProducesInstruments**: `[]` (read-only)
+
+---
+
 ### market-information Handler Specifications
 
 **File**: `services/market-information/client/starlark.go`
@@ -490,6 +596,56 @@ market_information.retrieve_observation(
 ```
 
 **gRPC Method**: `RetrieveObservation`
+
+---
+
+#### Handler: `market_information.list_observations`
+
+**Purpose**: List market observations with filtering for bulk FX rate lookups
+
+**Input Parameters**:
+
+```starlark
+market_information.list_observations(
+    data_set_id="USD_EUR_FX",           # Optional filter by data set
+    data_source_id="ECB",               # Optional filter by data source
+    as_of_time="2026-02-03T10:00:00Z",  # Optional time filter
+    quality_level="ACTUAL"              # Optional quality level filter
+)
+```
+
+**Output**:
+
+```starlark
+{
+    "observations": [
+        {
+            "data_set_id": "USD_EUR_FX",
+            "value": "0.92",
+            "quality_level": "ACTUAL",
+            "observed_at": "2026-02-03T10:00:00Z"
+        },
+        {
+            "data_set_id": "USD_EUR_FX",
+            "value": "0.91",
+            "quality_level": "ACTUAL",
+            "observed_at": "2026-02-03T09:00:00Z"
+        }
+    ]
+}
+```
+
+**gRPC Method**: `ListObservations`
+
+**Error Cases**:
+- Invalid filter values return empty list
+- gRPC errors propagate to saga
+
+**Idempotency**: Yes - read-only operation with retry
+
+**Category**: `HandlerCategoryValuation`
+
+**ProducesInstruments**: `[]` (read-only)
 
 ---
 
@@ -548,6 +704,52 @@ party.retrieve_bank_relations(
 ```
 
 **gRPC Method**: `RetrieveBankRelations`
+
+---
+
+#### Handler: `party.retrieve_demographics`
+
+**Purpose**: Fetch party demographic data for KYC/AML compliance checks
+
+**Input Parameters**:
+
+```starlark
+party.retrieve_demographics(
+    party_id="party_..."
+)
+```
+
+**Output**:
+
+```starlark
+{
+    "party_id": "party_...",
+    "date_of_birth": "1990-01-15",
+    "nationality": "US",
+    "residential_address": {
+        "country": "US",
+        "state": "CA",
+        "city": "San Francisco",
+        "postal_code": "94105"
+    },
+    "tax_residency": ["US"],
+    "kyc_status": "VERIFIED",
+    "last_kyc_review": "2025-12-01T00:00:00Z"
+}
+```
+
+**gRPC Method**: `RetrieveDemographics`
+
+**Error Cases**:
+- Party not found returns error
+- Unauthorized access returns permission denied
+- gRPC errors propagate to saga
+
+**Idempotency**: Yes - read-only operation with retry
+
+**Category**: `HandlerCategorySettlement`
+
+**ProducesInstruments**: `[]` (read-only)
 
 ---
 
