@@ -292,18 +292,18 @@ level=ERROR msg="idempotency key collision detected"
 ```bash
 # 1. Check saga instance state
 psql -d meridian -c "
-  SELECT saga_id, status, current_step_index, replay_count, lease_expires_at
+  SELECT id, status, current_step_index, replay_count, lease_expires_at
   FROM saga_instances
-  WHERE saga_id = 'abc123'
+  WHERE id = 'abc123'
 "
 
 # If replay_count > 5 → saga stuck in retry loop
 
 # 2. Check for concurrent executions
 psql -d meridian -c "
-  SELECT saga_id, pod_id, lease_expires_at
+  SELECT id, pod_id, lease_expires_at
   FROM saga_instances
-  WHERE saga_id = 'abc123'
+  WHERE id = 'abc123'
   ORDER BY lease_expires_at DESC
 "
 
@@ -314,17 +314,41 @@ psql -d meridian -c "
 # Check prepareClientContext in starlark.go
 
 # 4. If saga genuinely stuck, manually advance
+# ⚠️ WARNING: Only perform this in emergencies with proper authorization
+# Take a backup before proceeding:
+pg_dump -d meridian -t saga_instances -t step_results > saga_backup_$(date +%Y%m%d_%H%M%S).sql
+
+# Then run the UPDATE inside a transaction with safety guards:
 psql -d meridian -c "
+  BEGIN;
+  -- Verify saga is actually stuck (high replay count, expired lease)
+  SELECT id, status, current_step_index, replay_count, lease_expires_at
+  FROM saga_instances
+  WHERE id = 'abc123'
+    AND replay_count > 5
+    AND lease_expires_at < NOW()
+  FOR UPDATE;
+
+  -- If above query returns the saga, proceed with manual advance
   UPDATE saga_instances
   SET current_step_index = current_step_index + 1,
-      replay_count = 0
-  WHERE saga_id = 'abc123'
+      replay_count = 0,
+      lease_expires_at = NOW() + INTERVAL '5 minutes'
+  WHERE id = 'abc123'
+    AND replay_count > 5
+    AND lease_expires_at < NOW();
+
+  -- Verify update succeeded
+  SELECT id, current_step_index, replay_count FROM saga_instances WHERE id = 'abc123';
+
+  -- If everything looks correct, commit; otherwise ROLLBACK
+  COMMIT;
 "
 ```
 
 **Prevention:**
 
-- Use saga_id + step_index + retry_count for idempotency keys
+- Use id + step_index + retry_count for idempotency keys
 - Add unique constraint on idempotency_key in step_results table
 - Monitor replay_count and alert when > threshold
 - Implement exponential backoff for retries
@@ -596,7 +620,7 @@ kubectl logs -n production deployment/payment-order | grep "$CORRELATION_ID"
 # Check saga instance state
 kubectl exec -n production deployment/payment-order -- \
   psql -d meridian -c "
-    SELECT saga_id, status, current_step_index, total_steps, replay_count
+    SELECT id, status, current_step_index, total_steps, replay_count
     FROM saga_instances
     WHERE created_at > NOW() - INTERVAL '1 hour'
     ORDER BY created_at DESC
@@ -661,7 +685,7 @@ For inconsistent state:
 ```bash
 # 1. Document current state
 psql -d meridian -c "
-  SELECT * FROM saga_instances WHERE saga_id = 'abc123'
+  SELECT * FROM saga_instances WHERE id = 'abc123'
 " > saga_state.txt
 
 psql -d meridian -c "
@@ -671,7 +695,7 @@ psql -d meridian -c "
 # 2. Manual compensation (if automated failed)
 # Run compensation handlers manually in reverse order
 curl -X POST http://payment-order/debug/compensate \
-  -d '{"saga_id": "abc123", "force": true}'
+  -d '{"id": "abc123", "force": true}'
 
 # 3. Mark saga as manually resolved
 psql -d meridian -c "
@@ -679,7 +703,7 @@ psql -d meridian -c "
   SET status = 'MANUALLY_COMPENSATED',
       resolved_by = 'operator@example.com',
       resolved_at = NOW()
-  WHERE saga_id = 'abc123'
+  WHERE id = 'abc123'
 "
 ```
 

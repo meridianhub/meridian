@@ -87,14 +87,14 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) er
         "service_name.operation": {
             handler:  operationHandler(client),
             metadata: saga.HandlerMetadata{
-                Category:            saga.CategorySettlement, // or CategoryIngestion, CategoryValuation
-                ProducesInstruments: []string{"USD"},          // Currencies or assets this handler produces
+                Category:            saga.HandlerCategorySettlement, // or HandlerCategoryIngestion, HandlerCategoryValuation
+                ProducesInstruments: []string{"USD"},                 // Currencies or assets this handler produces
             },
         },
         "service_name.another_operation": {
             handler: anotherOperationHandler(client),
             metadata: saga.HandlerMetadata{
-                Category:            saga.CategorySettlement,
+                Category:            saga.HandlerCategorySettlement,
                 ProducesInstruments: []string{}, // Empty if operation doesn't produce instruments
             },
         },
