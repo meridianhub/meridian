@@ -2023,12 +2023,6 @@ func (s *Service) sendCloseWebhook(tenantID, accountID, reason string, balance *
 	}
 }
 
-// loadSagaScript loads a saga script from the given path relative to the saga asset base directory.
-// For service-specific sagas like "sagas/deposit.star", prepend "services/current-account/".
-func loadSagaScript(relativePath string) (string, error) {
-	return loadSagaAsset(filepath.Join("services", "current-account", relativePath))
-}
-
 // loadSagaAsset loads a saga asset (script or schema) from a configurable base directory.
 // Resolves assets from SAGA_ASSET_DIR environment variable if set, otherwise falls back
 // to the directory containing the executable. This makes asset loading independent of
