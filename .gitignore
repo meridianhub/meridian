@@ -64,4 +64,4 @@ __pycache__/
 # Local development secrets (generated from .example files)
 deployments/k8s/*/secret.yaml
 deployments/k8s/base/secret.yaml
-.claude/ralph-loop-*.local.md
+*.local.md
