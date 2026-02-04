@@ -1,6 +1,7 @@
 package saga
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -473,7 +474,7 @@ qty = Decimal("10")
 rate = Decimal("0.05")
 result = qty * rate
 `
-	result, err := ValidateDraft(script)
+	result, err := ValidateDraft(script, nil)
 	require.NoError(t, err)
 	assert.False(t, result.HasErrors())
 	assert.Len(t, result.LintIssues, 1)
@@ -487,7 +488,7 @@ qty = Decimal("10")
 rate = Decimal("0.05")
 result = qty * rate
 `
-	err := ValidateActivation(script)
+	err := ValidateActivation(script, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "validation failed")
 }
@@ -499,7 +500,7 @@ def process(input):
     amount = input["amount"]
     return {"account": account, "amount": amount}
 `
-	err := ValidateActivation(script)
+	err := ValidateActivation(script, nil)
 	require.NoError(t, err)
 }
 
@@ -525,4 +526,221 @@ func TestValidationResult_NoIssues(t *testing.T) {
 	result := &ValidationResult{}
 	assert.Equal(t, "No issues found", result.Summary())
 	assert.True(t, result.IsValid())
+}
+
+func TestSemanticLinter_PreCheckWithSchemaRegistry(t *testing.T) {
+	// Load a schema registry with external handler metadata
+	yaml := `
+service: test
+version: "1.0"
+handlers:
+  payment_gateway.send:
+    description: "External gateway call"
+    external: true
+    params:
+      amount:
+        type: Decimal
+        required: true
+  accounting.post:
+    description: "Internal accounting handler"
+    external: false
+    params:
+      entry_id:
+        type: string
+        required: true
+`
+	registry := &testSchemaRegistry{yaml: yaml}
+	linterMeta := registry.BuildLinterMetadata()
+
+	// Convert to HandlerMetadata
+	metadata := make(map[string]HandlerMetadata)
+	for name, meta := range linterMeta {
+		metadata[name] = HandlerMetadata{
+			IsExternal:       meta.IsExternal,
+			RequiresPreCheck: meta.RequiresPreCheck,
+		}
+	}
+
+	tests := []struct {
+		name       string
+		script     string
+		wantIssues int
+	}{
+		{
+			name: "external handler without pre-check triggers error",
+			script: `
+def execute(ctx):
+    result = step(name="send_payment", handler="payment_gateway.send", params={"amount": Decimal("100")})
+    return result
+`,
+			wantIssues: 1,
+		},
+		{
+			name: "external handler with verify_external_state is OK",
+			script: `
+def execute(ctx):
+    verify_external_state(handler="payment_gateway.send", check_fn=check_payment_status)
+    result = step(name="send_payment", handler="payment_gateway.send", params={"amount": Decimal("100")})
+    return result
+`,
+			wantIssues: 0,
+		},
+		{
+			name: "internal handler without pre-check is OK",
+			script: `
+def execute(ctx):
+    result = step(name="post_entries", handler="accounting.post", params={"entry_id": "123"})
+    return result
+`,
+			wantIssues: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			linter := NewSemanticLinter()
+			linter.SetHandlerMetadata(metadata)
+			issues, err := linter.Analyze(tt.script)
+			require.NoError(t, err)
+
+			preCheckIssues := filterByType(issues, LintIssueTypeMissingPreCheck)
+			assert.Len(t, preCheckIssues, tt.wantIssues)
+		})
+	}
+}
+
+func TestValidateDraft_WithSchemaRegistry(t *testing.T) {
+	yaml := `
+service: test
+version: "1.0"
+handlers:
+  payment_gateway.send:
+    description: "External gateway call"
+    external: true
+    params:
+      amount:
+        type: Decimal
+        required: true
+`
+	registry := &testSchemaRegistry{yaml: yaml}
+	linterMeta := registry.BuildLinterMetadata()
+
+	// Convert to HandlerMetadata
+	metadata := make(map[string]HandlerMetadata)
+	for name, meta := range linterMeta {
+		metadata[name] = HandlerMetadata{
+			IsExternal:       meta.IsExternal,
+			RequiresPreCheck: meta.RequiresPreCheck,
+		}
+	}
+
+	script := `
+def execute(ctx):
+    result = step(name="send_payment", handler="payment_gateway.send", params={"amount": Decimal("100")})
+    return result
+`
+
+	result, err := ValidateDraft(script, metadata)
+	require.NoError(t, err)
+	assert.False(t, result.HasErrors(), "draft validation should not have errors")
+	assert.Len(t, result.LintIssues, 1, "should have pre-check lint warning")
+	assert.Equal(t, LintIssueTypeMissingPreCheck, result.LintIssues[0].Type)
+	assert.Equal(t, LintSeverityError, result.LintIssues[0].Severity)
+	assert.False(t, result.IsValid(), "draft with ERROR lint issues should be invalid")
+}
+
+func TestValidateActivation_BlocksExternalWithoutPreCheck(t *testing.T) {
+	yaml := `
+service: test
+version: "1.0"
+handlers:
+  payment_gateway.send:
+    description: "External gateway call"
+    external: true
+    params:
+      amount:
+        type: Decimal
+        required: true
+`
+	registry := &testSchemaRegistry{yaml: yaml}
+	linterMeta := registry.BuildLinterMetadata()
+
+	// Convert to HandlerMetadata
+	metadata := make(map[string]HandlerMetadata)
+	for name, meta := range linterMeta {
+		metadata[name] = HandlerMetadata{
+			IsExternal:       meta.IsExternal,
+			RequiresPreCheck: meta.RequiresPreCheck,
+		}
+	}
+
+	script := `
+def execute(ctx):
+    result = step(name="send_payment", handler="payment_gateway.send", params={"amount": Decimal("100")})
+    return result
+`
+
+	err := ValidateActivation(script, metadata)
+	require.Error(t, err, "activation should be blocked")
+	assert.Contains(t, err.Error(), "validation failed")
+}
+
+func TestValidation_NilSchemaRegistry(t *testing.T) {
+	script := `
+def execute(ctx):
+    result = step(name="send_payment", handler="payment_gateway.send", params={"amount": Decimal("100")})
+    return result
+`
+
+	// Calling with nil metadata should work (no pre-check validation)
+	result, err := ValidateDraft(script, nil)
+	require.NoError(t, err)
+	assert.True(t, result.IsValid(), "validation with nil metadata should pass")
+
+	err = ValidateActivation(script, nil)
+	require.NoError(t, err, "activation with nil metadata should pass")
+}
+
+// testSchemaRegistry is a simple schema registry for testing.
+type testSchemaRegistry struct {
+	yaml string
+}
+
+// BuildLinterMetadata implements the schema registry interface for testing.
+func (r *testSchemaRegistry) BuildLinterMetadata() map[string]struct {
+	IsExternal       bool
+	RequiresPreCheck bool
+} {
+	// Simple YAML parser for testing - only handles external: true
+	result := make(map[string]struct {
+		IsExternal       bool
+		RequiresPreCheck bool
+	})
+
+	lines := strings.Split(r.yaml, "\n")
+	var currentHandler string
+	var isExternal bool
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasSuffix(line, ":") && !strings.HasPrefix(line, "service") &&
+			!strings.HasPrefix(line, "version") && !strings.HasPrefix(line, "handlers") &&
+			!strings.HasPrefix(line, "params") && !strings.HasPrefix(line, "description") {
+			currentHandler = strings.TrimSuffix(line, ":")
+			isExternal = false
+		} else if strings.HasPrefix(line, "external:") && currentHandler != "" {
+			isExternal = strings.Contains(line, "true")
+		} else if currentHandler != "" && (strings.HasPrefix(line, "params:") || line == "") {
+			if isExternal {
+				result[currentHandler] = struct {
+					IsExternal       bool
+					RequiresPreCheck bool
+				}{true, true}
+			}
+			currentHandler = ""
+			isExternal = false
+		}
+	}
+
+	return result
 }

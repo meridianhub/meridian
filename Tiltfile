@@ -163,7 +163,7 @@ spec:
       restartPolicy: Never
       containers:
       - name: migrate
-        image: arigaio/atlas:latest-alpine
+        image: arigaio/atlas:1.0.0-alpine
         command:
         - /bin/sh
         - -c
