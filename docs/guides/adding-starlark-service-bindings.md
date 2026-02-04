@@ -574,10 +574,22 @@ From `services/financial-accounting/client/starlark.go`:
 func capturePostingHandler(client *Client) saga.Handler {
     return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
         // Parse all required params
-        accountID, _ := saga.RequireStringParam(params, "account_id")
-        amount, _ := saga.RequireDecimalParam(params, "amount")
-        currency, _ := saga.RequireStringParam(params, "currency")
-        entryType, _ := saga.RequireStringParam(params, "entry_type")
+        accountID, err := saga.RequireStringParam(params, "account_id")
+        if err != nil {
+            return nil, err
+        }
+        amount, err := saga.RequireDecimalParam(params, "amount")
+        if err != nil {
+            return nil, err
+        }
+        currency, err := saga.RequireStringParam(params, "currency")
+        if err != nil {
+            return nil, err
+        }
+        entryType, err := saga.RequireStringParam(params, "entry_type")
+        if err != nil {
+            return nil, err
+        }
 
         clientCtx := prepareClientContext(ctx)
 
