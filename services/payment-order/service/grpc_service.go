@@ -121,6 +121,11 @@ type ReferenceDataClient interface {
 	// RetrieveInstrument fetches an instrument definition by code.
 	// Returns the fungibility_key_expression needed for bucket evaluation.
 	RetrieveInstrument(ctx context.Context, code string) (*InstrumentInfo, error)
+
+	// GetSaga fetches a saga definition by name and version.
+	// If version is 0, returns the ACTIVE version.
+	GetSaga(ctx context.Context, name string, version int) (*SagaDefinition, error)
+
 	// Close terminates the client connection
 	Close() error
 }
@@ -135,6 +140,20 @@ type InstrumentInfo struct {
 	// FungibilityKeyExpression is the CEL expression for generating bucket keys.
 	// Empty string means fully fungible (no bucketing).
 	FungibilityKeyExpression string
+}
+
+// SagaDefinition represents a saga script definition from reference-data.
+type SagaDefinition struct {
+	// ID is the unique identifier for this saga definition (UUID).
+	ID string
+	// Name is the saga identifier (e.g., "payment_execution").
+	Name string
+	// Version is the saga version number.
+	Version int
+	// Script is the Starlark source code.
+	Script string
+	// Status is the lifecycle status (ACTIVE, DEPRECATED, etc.).
+	Status string
 }
 
 // KafkaPublisher defines the interface for publishing protobuf messages to Kafka.
