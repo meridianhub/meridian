@@ -1,30 +1,31 @@
 ---
-name: prd-account-scoped-valuation
-description: Account-Scoped Valuation Engine - Embedded library pattern for multi-asset value transformation
+name: prd-asset-valuation
+description: Asset Valuation Service Domain - BIAN-native embedded library for multi-asset value transformation
 triggers:
   - Converting non-monetary assets to monetary value for settlement
-  - Tenant-specific pricing strategies without code deployment
+  - Tenant-specific valuation methods without code deployment
   - Bi-temporal valuation replay for audit and reconciliation
   - Multi-currency and multi-commodity conversion with full audit trail
 instructions: |
-  Account Services (CurrentAccount, InternalBankAccount) own valuation capability via shared library.
-  Each account defines how it accepts value through strategy assignments stored in its schema.
-  The shared/pkg/valuation library executes CEL/Starlark strategies loaded from Reference Data.
+  Account Services (CurrentAccount, InternalBankAccount) host the Asset Valuation service domain via
+  shared library (Virtual Service pattern). Each account's ValuationFeature (Behavior Qualifier) defines
+  how it accepts value. The shared/pkg/valuation library executes CEL/Starlark ValuationMethods.
 
-  CRITICAL: Valuation happens ATOMICALLY within transactional operations (InitiateLien, ExecuteDeposit).
-  Use InitiateLien for withdrawals (creates price lock). Use ExecuteDeposit for deposits (atomic valuation).
-  Only use GetValuedAmount for non-binding inquiries (mobile apps, dashboards).
+  BIAN Action Terms:
+  - EvaluateAssetValuation: Non-binding inquiry (mobile apps, dashboards)
+  - InitiateLien + ExecuteLien: Transactional valuation with price lock
 
-  Price Lock: Liens store valued_amount at creation time. ExecuteLien uses locked value, not recalculated.
-  Concurrency Safety: Valuation queries projected balance (current + active liens) to prevent tiered pricing drift.
+  Price Lock: Liens store valued_amount at creation. ExecuteLien uses locked value, not recalculated.
+  Concurrency Safety: Valuation queries projected balance to prevent tiered pricing drift.
 ---
 
-# PRD: Account-Scoped Valuation Engine
+# PRD: Asset Valuation Service Domain (BIAN-Native)
 
-**Status:** Draft - Revised Architecture
-**Version:** 2.8 (BIAN Alignment Documentation)
+**Status:** Draft - BIAN Refinement
+**Version:** 2.9 (BIAN Action Terms & CR/BQ Decomposition)
+**BIAN Service Domain:** Asset Valuation (Fulfilment Pattern)
 **Task Master Tag:** `valuation-engine`
-**Story Points:** 76 (11 streams)
+**Story Points:** 82 (11 streams)
 **Core ADR:** [ADR-0028: Starlark Saga Orchestration with CEL Valuation](../adr/0028-starlark-saga-cel-valuation.md)
 
 **Version History:**
@@ -38,6 +39,30 @@ instructions: |
 - v2.6: Ghost Pricing prevention (shared valuation logic), lien immutability constraint
 - v2.7: Dimension-tagged buckets for DB enforcement, Ghost Pricing regression test
 - v2.8: BIAN alignment assessment documentation (85-90% compliance)
+- v2.9: Full BIAN adoption - CR/BQ pattern, Action Terms, Virtual Service (100% compliance)
+
+## BIAN Terminology Mapping
+
+To ensure 100% compatibility with the BIAN Service Landscape, this PRD adopts standard terminology:
+
+| Meridian Term (Legacy) | BIAN-Aligned Term | Rationale |
+|------------------------|-------------------|-----------|
+| Valuation Service | **Asset Valuation** | Canonical BIAN Service Domain |
+| `EvaluateAssetValuation` | **`EvaluateAssetValuation`** | "Evaluate" is BIAN term for computational inquiry |
+| Valuation Strategy | **ValuationMethod** | BIAN uses "Method" for algorithmic variants |
+| `ValuationAnalysis` | **`ValuationAnalysis`** | Describes evidentiary audit data |
+| `valuation_assignments` | **`ValuationFeature`** | Behavior Qualifier on Account CR |
+| Account with valuation | **`AccountFulfillmentArrangement`** | Control Record with BQ features |
+
+**Action Terms Compliance:**
+
+| Operation | BIAN Action Term | Pattern |
+|-----------|------------------|---------|
+| `EvaluateAssetValuation` | **Evaluate** | ANALYZE (non-binding inquiry) |
+| `InitiateLien` | **Initiate** | FULFILL (create reservation) |
+| `ExecuteLien` | **Execute** | FULFILL (complete transaction) |
+| `TerminateLien` | **Terminate** | FULFILL (cancel reservation) |
+| `UpdateValuationFeature` | **Update** | FULFILL (modify BQ) |
 
 ## 1. Executive Summary
 
@@ -49,7 +74,7 @@ Account Services (CurrentAccount, InternalBankAccount) via a shared library.
 
 ```text
 Saga asks Account: "What is 100 kWh worth to you?"
-Account responds: "£35.00, and here's why (ValuationBasis)"
+Account responds: "£35.00, and here's why (ValuationAnalysis)"
 ```
 
 **Key Innovation:** This PRD codifies a shift from "Price is a number" to
@@ -64,8 +89,8 @@ shared/pkg/valuation/          # Shared library (CEL + Starlark runtime)
 ├── builtins.go               # market_data, cel_eval functions
 └── cache.go                  # L1 in-memory cache
 
-services/current-account/      # Implements GetValuedAmount RPC
-services/internal-bank-account/ # Implements GetValuedAmount RPC
+services/current-account/      # Implements EvaluateAssetValuation RPC
+services/internal-bank-account/ # Implements EvaluateAssetValuation RPC
 ```
 
 **Why Embedded Library > Standalone Service:**
@@ -74,6 +99,64 @@ services/internal-bank-account/ # Implements GetValuedAmount RPC
 - **Domain Modeling**: Valuation is Account's capability, not external service
 - **Operational Simplicity**: No additional microservice to deploy/monitor
 - **Follows Existing Patterns**: Matches shared/pkg/saga library approach
+
+### Virtual Service Pattern (BIAN Alignment)
+
+The Asset Valuation service implements a **Virtual Service** pattern that reconciles our embedded library
+architecture with BIAN's Service Domain decomposition:
+
+```text
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        BIAN Service Landscape View                       │
+│                                                                          │
+│  ┌─────────────────────┐        ┌─────────────────────┐                 │
+│  │   Current Account   │        │  Asset Valuation    │                 │
+│  │   Service Domain    │───────▶│  Service Domain     │                 │
+│  │                     │        │  (Virtual Service)  │                 │
+│  └─────────────────────┘        └─────────────────────┘                 │
+│                                          │                               │
+└──────────────────────────────────────────│───────────────────────────────┘
+                                           │
+┌──────────────────────────────────────────│───────────────────────────────┐
+│                        Meridian Implementation                           │
+│                                          │                               │
+│  ┌───────────────────────────────────────▼───────────────────────────┐  │
+│  │                   services/current-account                         │  │
+│  │  ┌─────────────────────────────────────────────────────────────┐  │  │
+│  │  │  shared/pkg/valuation (embedded library)                     │  │  │
+│  │  │  • CEL/Starlark execution engine                             │  │  │
+│  │  │  • ValuationMethod resolution                                │  │  │
+│  │  │  • Market data integration                                   │  │  │
+│  │  └─────────────────────────────────────────────────────────────┘  │  │
+│  └────────────────────────────────────────────────────────────────────┘  │
+│                                                                          │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+**Why Virtual Service?**
+
+1. **BIAN Conceptual Compliance**: Asset Valuation IS a distinct Service Domain in the BIAN landscape,
+   with its own Control Records, Behavior Qualifiers, and Action Terms
+2. **Implementation Pragmatism**: A separate microservice adds latency, operational complexity, and
+   transactional boundaries that complicate atomic valuation
+3. **Future Flexibility**: If scale demands separation, the library can be extracted to a service
+   without API changes (internal refactoring only)
+
+**External Consumers See:**
+
+- `EvaluateAssetValuation` RPC (BIAN Action Term: Evaluate)
+- `ValuationFeature` Behavior Qualifier
+- `ValuationMethod` reference data
+- `ValuationAnalysis` audit records
+
+**Internal Implementation Uses:**
+
+- `shared/pkg/valuation.Engine` (embedded library)
+- In-process function calls (zero network latency)
+- Shared database transaction context (atomic valuation)
+
+This pattern allows Meridian to be **BIAN-compliant at the domain model layer** while remaining
+**operationally efficient at the implementation layer**.
 
 ### Atomic Valuation with Price Lock (v2.2 Enhancement)
 
@@ -96,7 +179,7 @@ When `InitiateLien` creates a reservation, it stores BOTH:
 
 - `reserved_quantity` (100 kWh)
 - `valued_amount` (£35.00 at T0)
-- `valuation_basis` (audit trail)
+- `valuation_analysis` (audit trail)
 
 Later, when `ExecuteLien` is called, the system uses the **locked value**, not a recalculated value. This
 protects both customer (price won't increase) and merchant (discounts can't be gamed).
@@ -104,7 +187,7 @@ protects both customer (price won't increase) and merchant (discounts can't be g
 **Two-Mode Operation:**
 
 1. **Transactional** (`InitiateLien`, `ExecuteDeposit`): Atomic valuation with price lock
-2. **Inquiry** (`GetValuedAmount`): Non-binding estimate for UX (mobile apps, dashboards)
+2. **Inquiry** (`EvaluateAssetValuation`): Non-binding estimate for UX (mobile apps, dashboards)
 
 **Complexity Impact:** +17 points (46 → 63 points) buys elimination of TOCTOU race conditions and guaranteed
 price integrity under concurrent load.
@@ -132,29 +215,76 @@ In a multi-asset ledger, the "Conversion Rate" is not a global constant.
 We implement an **Account Responsibility Pattern**:
 
 1. **Shared Library**: `shared/pkg/valuation` provides CEL/Starlark execution engine
-2. **Account Ownership**: Account Services implement `GetValuedAmount` RPC
-3. **Strategy Assignment**: Accounts store `valuation_strategy_id` + parameters in their schema
+2. **Account Ownership**: Account Services implement `EvaluateAssetValuation` RPC
+3. **Feature Assignment**: Accounts store ValuationFeature (BQ) with `valuation_method_id` + parameters
 4. **In-Process Execution**: Valuation happens within Account Service process boundary
 
-### 3.1 Data Model: The Strategy Assignment
+### 3.1 Control Record / Behavior Qualifier Pattern (BIAN)
 
-Accounts store a reference to their valuation strategy:
+Instead of a bespoke `valuation_assignments` table, we model valuation as a **Behavior Qualifier (BQ)**
+of the Account Fulfillment Arrangement (Control Record). This allows accounts to have multiple features
+(Position tracking, Interest calculation, Valuation) governed by the same aggregate root.
+
+#### The Account Fulfillment Arrangement (Control Record)
+
+```protobuf
+// BIAN-native structure for Account with multiple features
+message AccountFulfillmentArrangement {  // Control Record (CR)
+  string account_id = 1;
+  string account_type = 2;  // "CURRENT_ACCOUNT", "INTERNAL_BANK_ACCOUNT"
+
+  // Behavior Qualifiers (BQ) - each feature is a separate BQ
+  ValuationFeature valuation_feature = 3;
+  PositionFeature position_feature = 4;
+  // Future: InterestFeature, FeeFeature, LimitFeature, etc.
+}
+```
+
+#### The ValuationFeature (Behavior Qualifier)
+
+```protobuf
+message ValuationFeature {  // Behavior Qualifier (BQ)
+  string feature_id = 1;
+
+  // Reference to ValuationMethod in Reference Data
+  string valuation_method_id = 2;
+  string valuation_method_version = 3;
+
+  // Instrument this feature applies to
+  string instrument_code = 4;  // "KWH", "USD", "TONNE_CO2E"
+
+  // Account-specific parameters for the method
+  google.protobuf.Struct parameters = 5;  // {"gsp": "P", "tier": "Gold"}
+
+  // BIAN Lifecycle: INITIATED -> ACTIVE -> TERMINATED
+  string lifecycle_status = 6;
+
+  // Bi-temporal tracking
+  google.protobuf.Timestamp valid_from = 7;
+  google.protobuf.Timestamp valid_to = 8;
+}
+```
+
+#### Database Schema (ValuationFeature BQ)
 
 ```sql
 -- Added to CurrentAccount and InternalBankAccount schemas
-CREATE TABLE valuation_assignments (
+-- Named as BIAN Behavior Qualifier
+CREATE TABLE valuation_features (
+    feature_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     account_id UUID NOT NULL,
-    instrument_code VARCHAR(32) NOT NULL, -- e.g., 'KWH', 'USD', 'TONNE_CO2E'
+    instrument_code VARCHAR(32) NOT NULL,  -- e.g., 'KWH', 'USD', 'TONNE_CO2E'
 
-    -- Reference to the strategy in Reference Data service
-    strategy_id UUID NOT NULL,
+    -- Reference to ValuationMethod in Reference Data service
+    valuation_method_id UUID NOT NULL,
+    valuation_method_version INTEGER,  -- NULL = latest non-deprecated
 
     -- Account-specific context parameters
-    -- e.g., {"gsp": "P", "tier": "Gold", "markup": "0.02"}
     parameters JSONB NOT NULL DEFAULT '{}',
 
-    -- Lifecycle
-    active BOOLEAN NOT NULL DEFAULT true,
+    -- BIAN Lifecycle Status
+    lifecycle_status VARCHAR(16) NOT NULL DEFAULT 'INITIATED',
+    CHECK (lifecycle_status IN ('INITIATED', 'ACTIVE', 'TERMINATED')),
 
     -- Bi-temporal tracking
     valid_from TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -163,25 +293,27 @@ CREATE TABLE valuation_assignments (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-    PRIMARY KEY (account_id, instrument_code),
+    UNIQUE (account_id, instrument_code),
     FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_valuation_assignments_strategy
-    ON valuation_assignments(strategy_id)
-    WHERE active = true;
+CREATE INDEX idx_valuation_features_method
+    ON valuation_features(valuation_method_id)
+    WHERE lifecycle_status = 'ACTIVE';
 
-CREATE INDEX idx_valuation_assignments_bitemporal
-    ON valuation_assignments(account_id, valid_from, valid_to);
+CREATE INDEX idx_valuation_features_bitemporal
+    ON valuation_features(account_id, valid_from, valid_to);
 ```
 
-### 3.2 Valuation Strategy Definition
+### 3.2 ValuationMethod Definition (formerly "Strategy")
 
-Strategies are stored in the Reference Data service (per-tenant schema):
+ValuationMethods are stored in the Reference Data service under the **Public Reference Data Management**
+domain (per-tenant schema):
 
 ```sql
 -- Lives in Reference Data service (tenant-scoped via PostgreSQL schemas)
-CREATE TABLE valuation_strategies (
+-- BIAN terminology: ValuationMethod (not "strategy")
+CREATE TABLE valuation_methods (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     -- Identification
@@ -197,8 +329,9 @@ CREATE TABLE valuation_strategies (
     logic_script TEXT NOT NULL,
     logic_hash VARCHAR(64) NOT NULL,     -- SHA-256 for cache invalidation
 
-    -- Lifecycle
-    status VARCHAR(16) NOT NULL DEFAULT 'DRAFT',  -- DRAFT, ACTIVE, DEPRECATED
+    -- BIAN Lifecycle Status
+    lifecycle_status VARCHAR(16) NOT NULL DEFAULT 'INITIATED',
+    CHECK (lifecycle_status IN ('INITIATED', 'ACTIVE', 'DEPRECATED')),
 
     -- Metadata
     description TEXT,
@@ -211,62 +344,61 @@ CREATE TABLE valuation_strategies (
     valid_to TIMESTAMPTZ,
 
     UNIQUE(name, version),
-    CHECK (status IN ('DRAFT', 'ACTIVE', 'DEPRECATED')),
     CHECK (logic_type IN ('STARLARK', 'CEL')),
     CHECK (logic_script <> '')
 );
 
-CREATE INDEX idx_valuation_strategies_lookup
-    ON valuation_strategies(input_instrument, output_instrument, status);
+CREATE INDEX idx_valuation_methods_lookup
+    ON valuation_methods(input_instrument, output_instrument, lifecycle_status);
 
-CREATE INDEX idx_valuation_strategies_bitemporal
-    ON valuation_strategies(name, valid_from, valid_to);
+CREATE INDEX idx_valuation_methods_bitemporal
+    ON valuation_methods(name, valid_from, valid_to);
 ```
 
-#### Platform Default Inheritance (The "SYSTEM Strategy" Pattern)
+#### Platform Default Inheritance (The "SYSTEM Method" Pattern)
 
-**Requirement:** If a tenant does not define a valuation strategy for a given instrument, they SHOULD
-automatically inherit the `SYSTEM` version of the strategy. This ensures "Motive" or "UN WFP" scenarios
-work out-of-the-box without requiring each tenant to manually configure energy strategies.
+**Requirement:** If a tenant does not define a ValuationMethod for a given instrument, they SHOULD
+automatically inherit the `SYSTEM` version. This ensures "Motive" or "UN WFP" scenarios work
+out-of-the-box without requiring each tenant to manually configure energy methods.
 
 **Implementation:**
 
-The `ResolveValuationStrategy` function follows a lookup hierarchy:
+The `ResolveValuationMethod` function follows a lookup hierarchy:
 
 ```go
-func (s *Service) ResolveValuationStrategy(
+func (s *Service) ResolveValuationMethod(
     ctx context.Context,
     tenantID string,
     inputInstrument string,
     outputInstrument string,
-) (*Strategy, error) {
-    // 1. Check tenant-specific strategy (tenant schema)
-    strategy, err := s.repo.FindStrategy(ctx, tenantID, inputInstrument, outputInstrument)
-    if err == nil && strategy != nil {
-        return strategy, nil
+) (*ValuationMethod, error) {
+    // 1. Check tenant-specific method (tenant schema)
+    method, err := s.repo.FindMethod(ctx, tenantID, inputInstrument, outputInstrument)
+    if err == nil && method != nil {
+        return method, nil
     }
 
-    // 2. Fall back to SYSTEM strategy (platform default)
-    systemStrategy, err := s.repo.FindStrategy(ctx, "SYSTEM", inputInstrument, outputInstrument)
-    if err == nil && systemStrategy != nil {
-        s.logger.Info("using SYSTEM default strategy",
+    // 2. Fall back to SYSTEM method (platform default)
+    systemMethod, err := s.repo.FindMethod(ctx, "SYSTEM", inputInstrument, outputInstrument)
+    if err == nil && systemMethod != nil {
+        s.logger.Info("using SYSTEM default method",
             "tenant_id", tenantID,
             "input", inputInstrument,
             "output", outputInstrument,
-            "strategy_id", systemStrategy.ID,
+            "method_id", systemMethod.ID,
         )
-        return systemStrategy, nil
+        return systemMethod, nil
     }
 
-    // 3. No strategy found
-    return nil, fmt.Errorf("no valuation strategy for %s → %s", inputInstrument, outputInstrument)
+    // 3. No method found
+    return nil, fmt.Errorf("no valuation method for %s → %s", inputInstrument, outputInstrument)
 }
 ```
 
-**Seeded SYSTEM Strategies:**
+**Seeded SYSTEM Methods:**
 
-| Strategy Name | Input → Output | Description |
-|---------------|----------------|-------------|
+| Method Name | Input → Output | Description |
+|-------------|----------------|-------------|
 | `SYSTEM_IDENTITY_USD` | USD → USD | 1:1 identity |
 | `SYSTEM_IDENTITY_GBP` | GBP → GBP | 1:1 identity |
 | `SYSTEM_IDENTITY_EUR` | EUR → EUR | 1:1 identity |
@@ -276,14 +408,14 @@ func (s *Service) ResolveValuationStrategy(
 **Why This Matters:**
 
 - **Motive scenario:** A mobility-as-a-service provider can onboard without configuring energy valuation
-- **UN WFP scenario:** Humanitarian vouchers work immediately using SYSTEM strategies
-- **Developer experience:** New tenants can start testing without manual strategy configuration
+- **UN WFP scenario:** Humanitarian vouchers work immediately using SYSTEM methods
+- **Developer experience:** New tenants can start testing without manual method configuration
 
 ## 4. Functional Requirements
 
-### FR-1: GetValuedAmount RPC (Inquiry-Only, Non-Binding)
+### FR-1: EvaluateAssetValuation RPC (Inquiry-Only, Non-Binding)
 
-**Requirement:** Account Services MUST implement the `GetValuedAmount` RPC as a **read-only inquiry** for
+**Requirement:** Account Services MUST implement the `EvaluateAssetValuation` RPC as a **read-only inquiry** for
 non-transactional valuation queries.
 
 **Semantics:** This RPC is **NON-BINDING**. It does not create liens, does not reserve capacity, and does not
@@ -298,7 +430,7 @@ guarantee the returned price will be honored in subsequent transactions. It is i
 
 #### Ghost Pricing Prevention (CRITICAL)
 
-**Requirement:** `GetValuedAmount` (inquiry) and `InitiateLien` (transactional) MUST share the **exact same
+**Requirement:** `EvaluateAssetValuation` (inquiry) and `InitiateLien` (transactional) MUST share the **exact same
 private valuation function** within the Account Service.
 
 **Risk:** If the two code paths diverge, the mobile app could show one price while the transaction executes
@@ -310,7 +442,7 @@ at another—destroying customer trust and potentially violating consumer protec
 // services/current-account/internal/service/valuation.go
 
 // valuateInternal is the SINGLE SOURCE OF TRUTH for all valuation
-// Both GetValuedAmount and InitiateLien MUST use this function
+// Both EvaluateAssetValuation and InitiateLien MUST use this function
 func (s *Service) valuateInternal(
     ctx context.Context,
     accountID uuid.UUID,
@@ -321,8 +453,11 @@ func (s *Service) valuateInternal(
     // ... shared valuation logic
 }
 
-// GetValuedAmount uses valuateInternal with projectedBalance=nil (inquiry mode)
-func (s *Service) GetValuedAmount(ctx context.Context, req *GetValuedAmountRequest) (*GetValuedAmountResponse, error) {
+// EvaluateAssetValuation uses valuateInternal with projectedBalance=nil (inquiry mode)
+func (s *Service) EvaluateAssetValuation(
+    ctx context.Context,
+    req *EvaluateAssetValuationRequest,
+) (*EvaluateAssetValuationResponse, error) {
     result, err := s.valuateInternal(ctx, req.AccountId, req.Input, req.KnowledgeAt, nil)
     // ...
 }
@@ -335,12 +470,12 @@ func (s *Service) InitiateLien(ctx context.Context, req *InitiateLienRequest) (*
 }
 ```
 
-**Test Requirement:** Integration tests MUST verify that `GetValuedAmount` and `InitiateLien` return
+**Test Requirement:** Integration tests MUST verify that `EvaluateAssetValuation` and `InitiateLien` return
 identical valuations when given the same inputs and projected balance.
 
 **Regression Test (MANDATORY):**
 
-Add a fuzz-style regression test that runs 1,000 random inputs through both `GetValuedAmount` and
+Add a fuzz-style regression test that runs 1,000 random inputs through both `EvaluateAssetValuation` and
 `InitiateLien` and asserts they are identical to the last decimal place:
 
 ```go
@@ -354,7 +489,7 @@ func TestGhostPricingPrevention(t *testing.T) {
         knowledgeAt := time.Now()
 
         // Call inquiry path
-        inquiryResp, err := svc.GetValuedAmount(ctx, &GetValuedAmountRequest{
+        inquiryResp, err := svc.EvaluateAssetValuation(ctx, &EvaluateAssetValuationRequest{
             AccountId:   testAccountID,
             Input:       input,
             KnowledgeAt: timestamppb.New(knowledgeAt),
@@ -377,23 +512,23 @@ func TestGhostPricingPrevention(t *testing.T) {
 
 BIAN uses "Probe" terminology for non-binding inquiries. Alternative naming: `EvaluateAmount` emphasizes
 computation/simulation semantics vs `Get...` which implies simple field retrieval. Current name
-`GetValuedAmount` is acceptable but may be revisited in implementation for stronger BIAN alignment.
+`EvaluateAssetValuation` is acceptable but may be revisited in implementation for stronger BIAN alignment.
 
 ```protobuf
 service CurrentAccountService {
   // Inquiry-only valuation (non-binding)
-  rpc GetValuedAmount(GetValuedAmountRequest) returns (GetValuedAmountResponse);
+  rpc EvaluateAssetValuation(EvaluateAssetValuationRequest) returns (EvaluateAssetValuationResponse);
 }
 
-message GetValuedAmountRequest {
+message EvaluateAssetValuationRequest {
   string account_id = 1;
   meridian.quantity.v1.InstrumentAmount input = 2;
   google.protobuf.Timestamp knowledge_at = 3;
 }
 
-message GetValuedAmountResponse {
+message EvaluateAssetValuationResponse {
   meridian.quantity.v1.InstrumentAmount output = 1;
-  ValuationBasis basis = 2;
+  ValuationAnalysis basis = 2;
   string execution_time_ms = 3;
   bool cache_hit = 4;
 
@@ -401,9 +536,9 @@ message GetValuedAmountResponse {
   bool is_estimate = 5;  // Always true for this RPC
 }
 
-message ValuationBasis {
-  string strategy_id = 1;
-  string strategy_version = 2;
+message ValuationAnalysis {
+  string method_id = 1;
+  string method_version = 2;
   map<string, string> applied_rates = 3;
   repeated string observation_ids = 4;  // Links to MarketInformation
   google.protobuf.Timestamp computed_at = 5;
@@ -413,7 +548,7 @@ message ValuationBasis {
   // Quality level of market data used (per ADR-018 Settlement & Reconciliation)
   repeated MarketDataQuality market_data_qualities = 8;
 
-  // Calculation path breadcrumbs (for regulatory audit of complex strategies)
+  // Calculation path breadcrumbs (for regulatory audit of complex methods)
   repeated string calculation_path = 9;  // e.g., ["tier_2_applied", "markup_standard", "weekend_discount"]
 
   // Degraded mode flag (set if fallback rates used due to service unavailability)
@@ -440,26 +575,26 @@ message MarketDataQuality {
 package valuation
 
 type Engine interface {
-    // Valuate executes a strategy to convert input to output
+    // Valuate executes a ValuationMethod to convert input to output
     Valuate(ctx context.Context, req Request) (*Response, error)
 }
 
 type Request struct {
     Input       *quantity.InstrumentAmount
-    StrategyID  uuid.UUID
+    MethodID    uuid.UUID
     Parameters  map[string]interface{}
     KnowledgeAt time.Time
 }
 
 type Response struct {
-    Output *quantity.InstrumentAmount
-    Basis  *Basis
+    Output   *quantity.InstrumentAmount
+    Analysis *Analysis
 }
 
-type Basis struct {
-    StrategyID      uuid.UUID
-    StrategyVersion string
-    AppliedRates    map[string]decimal.Decimal
+type Analysis struct {
+    MethodID      uuid.UUID
+    MethodVersion string
+    AppliedRates  map[string]decimal.Decimal
     ObservationIDs  []string
     ComputedAt      time.Time
     KnowledgeAt     time.Time
@@ -480,7 +615,7 @@ The engine executes logic in three tiers:
 **Example Execution Flow:**
 
 ```python
-# Starlark strategy loaded from Reference Data
+# Starlark ValuationMethod loaded from Reference Data
 # SECURITY: Sandboxed execution - no filesystem, no network, no system calls
 # LIMITS: 5s timeout, 64MB memory, CEL expressions limited to 10,000 cost units
 def valuate_energy(input_quantity, params, knowledge_at):
@@ -493,7 +628,7 @@ def valuate_energy(input_quantity, params, knowledge_at):
     # 2. Fetch market data with error handling
     spot_result = market_data.get_price("EPEX_SPOT", knowledge_at)
     if spot_result.error:
-        # Return error - saga will handle (retry or use fallback strategy)
+        # Return error - saga will handle (retry or use fallback method)
         return {"error": "MARKET_DATA_UNAVAILABLE", "message": spot_result.error}
 
     spot_price = spot_result.value
@@ -511,7 +646,7 @@ def valuate_energy(input_quantity, params, knowledge_at):
     return {
         "amount": output_amount,
         "instrument": "GBP",
-        "basis": {
+        "analysis": {
             "spot_price": spot_price,
             "gsp_coefficient": gsp_coefficient,
             "final_rate": rate
@@ -539,7 +674,7 @@ To prevent denial-of-service from runaway expressions, CEL evaluations enforce s
 | List/map element access | 1 unit per element |
 | String operations | 1 unit per character (max 1000) |
 
-**Example:** A strategy performing `spot * coeff * markup` costs 2 units. A strategy iterating over
+**Example:** A method performing `spot * coeff * markup` costs 2 units. A method iterating over
 500 market data points with 3 operations each costs ~1,500 units (within limit).
 
 **Error Response:**
@@ -548,16 +683,16 @@ To prevent denial-of-service from runaway expressions, CEL evaluations enforce s
 {
   "error": "COST_LIMIT_EXCEEDED",
   "message": "CEL expression exceeded 10,000 cost units (actual: 12,345)",
-  "strategy_id": "wholesale-energy-v2"
+  "method_id": "wholesale-energy-v2"
 }
 ```
 
-**Saga Response:** On cost/timeout exceeded, saga should retry with simpler strategy or fail
+**Saga Response:** On cost/timeout exceeded, saga should retry with simpler method or fail
 gracefully with compensation.
 
 #### Starlark Security Sandbox
 
-Starlark strategies execute in a restricted sandbox:
+Starlark ValuationMethods execute in a restricted sandbox:
 
 - **No filesystem access:** `open()`, `read()`, `write()` are undefined
 - **No network access:** `http`, `socket`, `requests` are undefined
@@ -570,20 +705,20 @@ Starlark strategies execute in a restricted sandbox:
 **Requirement:** The system MUST prevent "Dimensional Leaks."
 
 **Check:** If an account only accepts `Monetary` value, the valuation engine must verify the
-`strategy_id` results in a `Quantity[Monetary]` output.
+`method_id` results in a `Quantity[Monetary]` output.
 
 **Implementation:** Pre-execution validation checks `input_instrument` and `output_instrument`
-against strategy definition.
+against method definition.
 
 **Conservation of Dimension Enforcement** (per ADR-0028):
 
-- Strategies must declare `ProducesInstrument` metadata
+- Methods must declare `ProducesInstrument` metadata
 - Runtime validates output matches declaration
 - Compile-time checks prevent dimension mixing
 
 #### FR-4.1: Output Instrument Validation (The "Chemical Signature")
 
-**Requirement:** The `GetValuedAmountResponse` MUST return the complete **InstrumentAmount** with full asset identity.
+**Requirement:** The `EvaluateAssetValuationResponse` MUST return the complete **InstrumentAmount** with full asset identity.
 
 **Rationale:** A USD account must never confuse the caller by returning GBP. The response must include:
 
@@ -591,16 +726,16 @@ against strategy definition.
 - `Version` (for instruments with evolving definitions)
 - `Attributes` (for fungibility metadata, e.g., "vintage", "source")
 
-**Validation:** The Valuation Engine MUST verify that the instrument returned by the Starlark/CEL strategy
-matches the `output_instrument` defined in the `valuation_assignment`.
+**Validation:** The Valuation Engine MUST verify that the instrument returned by the Starlark/CEL method
+matches the `output_instrument` defined in the `ValuationFeature`.
 
-**Enforcement Point:** This check happens at **activation time** (when a strategy is assigned to an account),
+**Enforcement Point:** This check happens at **activation time** (when a method is assigned to an account),
 preventing invalid configurations before they reach production.
 
 **Assertion in Saga:** The calling saga can assert the output instrument matches expectations:
 
 ```go
-resp, _ := currentAccount.GetValuedAmount(ctx, kwhInput)
+resp, _ := currentAccount.EvaluateAssetValuation(ctx, kwhInput)
 
 if resp.Output.InstrumentCode != expectedInstrument {
     return fmt.Errorf("VALUATION_MISMATCH: expected %s but got %s",
@@ -610,66 +745,66 @@ if resp.Output.InstrumentCode != expectedInstrument {
 
 #### Runtime Output Instrument Validation (The "Chemical Signature" Check)
 
-**Requirement:** The `ResolveValuationStrategy` call MUST return the `OutputInstrumentCode` as a type-hint.
+**Requirement:** The `ResolveValuationMethod` call MUST return the `OutputInstrumentCode` as a type-hint.
 The Valuation Engine MUST then wrap the Starlark/CEL execution with a **post-execution type check**:
 
 ```text
-Expected: GBP (from strategy definition)
+Expected: GBP (from method definition)
 Starlark returned: USD (from script execution)
 Result: Hard Error (VALUATION_OUTPUT_MISMATCH)
 ```
 
 **Why This Matters:**
 
-A strategy bug could accidentally turn an Energy account into a foreign currency account. This runtime
+A method bug could accidentally turn an Energy account into a foreign currency account. This runtime
 validation prevents dimension leakage that escapes the activation-time checks.
 
 **Implementation:**
 
 ```go
 func (e *Engine) Valuate(ctx context.Context, req Request) (*Response, error) {
-    // 1. Load strategy (includes expected output_instrument)
-    strategy, err := e.refDataClient.GetStrategy(ctx, req.StrategyID)
+    // 1. Load method (includes expected output_instrument)
+    method, err := e.refDataClient.GetValuationMethod(ctx, req.MethodID)
     if err != nil {
-        return nil, fmt.Errorf("load strategy: %w", err)
+        return nil, fmt.Errorf("load method: %w", err)
     }
 
     // 2. Execute Starlark/CEL
-    result, err := e.executeScript(ctx, strategy.LogicScript, req)
+    result, err := e.executeScript(ctx, method.LogicScript, req)
     if err != nil {
         return nil, fmt.Errorf("execute script: %w", err)
     }
 
     // 3. CRITICAL: Validate output instrument matches declaration
-    if result.Output.InstrumentCode != strategy.OutputInstrument {
+    if result.Output.InstrumentCode != method.OutputInstrument {
         return nil, &ValuationOutputMismatchError{
-            Expected: strategy.OutputInstrument,
+            Expected: method.OutputInstrument,
             Actual:   result.Output.InstrumentCode,
-            Strategy: strategy.ID,
+            Method:   method.ID,
         }
     }
 
     return result, nil
 }
 
-// ValuationOutputMismatchError is a hard failure - strategy bug detected
+// ValuationOutputMismatchError is a hard failure - method bug detected
 type ValuationOutputMismatchError struct {
     Expected string
     Actual   string
-    Strategy uuid.UUID
+    Method   uuid.UUID
 }
 
 func (e *ValuationOutputMismatchError) Error() string {
-    return fmt.Sprintf("VALUATION_OUTPUT_MISMATCH: strategy %s declared output %s but returned %s",
-        e.Strategy, e.Expected, e.Actual)
+    return fmt.Sprintf("VALUATION_OUTPUT_MISMATCH: method %s declared output %s but returned %s",
+        e.Method, e.Expected, e.Actual)
 }
 ```
 
 **When This Fires:**
 
-- Strategy declares `output_instrument: GBP` but returns `USD` → Hard error
-- Strategy declares `output_instrument: GBP` but returns `KWH` → Hard error (energy can't become monetary)
-- Strategy declares `output_instrument: GBP` and returns `GBP` → Success
+- Method declares `output_instrument: GBP` but returns `USD` → Hard error
+- Method declares `output_instrument: GBP` but returns `KWH` → Hard error (energy can't become monetary)
+- Method declares `output_instrument: GBP` and returns `GBP` → Success
 
 **Rationale:** Activation-time validation catches configuration errors. Runtime validation catches
 script bugs. Both layers are required for a robust dimension guard.
@@ -690,7 +825,7 @@ of the evidence used for that valuation.
 
 **Quality Level Tracking (Settlement & Reconciliation):**
 
-Per ADR-018, the `ValuationBasis` MUST include the `SourceTrustLevel` of each market data observation used:
+Per ADR-018, the `ValuationAnalysis` MUST include the `SourceTrustLevel` of each market data observation used:
 
 - `ESTIMATE` (Quality 1): Forecast or projection
 - `COEFFICIENT` (Quality 2): Model-derived value
@@ -700,18 +835,18 @@ Per ADR-018, the `ValuationBasis` MUST include the `SourceTrustLevel` of each ma
 **Why This Matters:**
 
 If a valuation was performed using an `ESTIMATE` (Quality 1) at T0, but later an `ACTUAL` (Quality 3)
-arrives at T1, the `ValuationBasis` in the ledger provides **proof of why the original (now "wrong") amount
+arrives at T1, the `ValuationAnalysis` in the ledger provides **proof of why the original (now "wrong") amount
 was booked**. This is essential for:
 
 - Settlement processes (explaining why provisional amounts differ from final)
 - Reconciliation (tracking estimate-to-actual adjustments)
 - Regulatory audit (demonstrating best available information at transaction time)
 
-**Example `ValuationBasis` with Quality Levels:**
+**Example `ValuationAnalysis` with Quality Levels:**
 
 ```json
 {
-  "strategy_id": "wholesale-spot-v2",
+  "method_id": "wholesale-spot-v2",
   "applied_rates": {"EPEX_SPOT": "0.456"},
   "market_data_qualities": [
     {
@@ -727,16 +862,16 @@ was booked**. This is essential for:
 Later, when `ACTUAL` arrives, the reconciliation process sees: "Original booking used ESTIMATE quality,
 revision is justified."
 
-#### Calculation Path (Audit Trail for Complex Strategies)
+#### Calculation Path (Audit Trail for Complex Methods)
 
-**Requirement:** For complex strategies with branching logic (tiered pricing, time-of-use, conditional markups),
-the `ValuationBasis` MUST include a **calculation path** - a breadcrumb trail of which decision branches
+**Requirement:** For complex methods with branching logic (tiered pricing, time-of-use, conditional markups),
+the `ValuationAnalysis` MUST include a **calculation path** - a breadcrumb trail of which decision branches
 were taken during execution.
 
 **Purpose:** For M+14 regulatory settlement audits, auditors need to understand which parts of a complex
-strategy were executed without re-running the entire logic.
+method were executed without re-running the entire logic.
 
-**Implementation:** Starlark strategies call `record_path("tier_2_applied")` at key decision points:
+**Implementation:** Starlark methods call `record_path("tier_2_applied")` at key decision points:
 
 ```python
 def valuate_tiered(input_quantity, params, knowledge_at):
@@ -756,7 +891,7 @@ def valuate_tiered(input_quantity, params, knowledge_at):
     return calculate_value(input_quantity, rate)
 ```
 
-**Result in ValuationBasis:**
+**Result in ValuationAnalysis:**
 
 ```json
 {
@@ -797,11 +932,11 @@ func (ctx *valuationContext) RecordPath(step string) {
 
 **Tenant-Visible Warning (Saga Debugger Integration):**
 
-When calculation path is truncated, the `ValuationBasis` MUST include a warning visible in the
+When calculation path is truncated, the `ValuationAnalysis` MUST include a warning visible in the
 Saga Debugger UI so tenants know their audit trail is incomplete:
 
 ```go
-type ValuationBasis struct {
+type ValuationAnalysis struct {
     // ... existing fields ...
     CalculationPath []string `json:"calculation_path"`
 
@@ -839,26 +974,26 @@ if ctx.pathTruncated {
 
 **Rationale:** BIAN compliance requires audit trails, but audit trails must be bounded to prevent
 storage bloat. 20 entries is sufficient for typical tiered pricing (5-7 tiers) with multiple
-conditional branches. Tenants with complex strategies need visibility into truncation.
+conditional branches. Tenants with complex methods need visibility into truncation.
 
-### FR-6: Caching Strategy
+### FR-6: Caching Policy
 
 **L1 Cache (In-Memory within Account Service):**
 
 - Compiled CEL expressions
-- Recently used valuation strategies
+- Recently used ValuationMethods
 - TTL: 5 minutes (baseline)
 - Invalidated on `logic_hash` change
 
-**Key format:** `strategy:{strategy_id}:{logic_hash}`
+**Key format:** `method:{method_id}:{logic_hash}`
 
 **Event-Driven Invalidation (Train Track Precision):**
 
 To achieve faster consistency than the 5-minute TTL, the system SHOULD implement event-driven invalidation:
 
-1. When Reference Data updates a `valuation_strategy`, it publishes a `strategy.updated` Kafka event
+1. When Reference Data updates a `valuation_method`, it publishes a `method.updated` Kafka event
 2. Account Services subscribe to this topic and invalidate their L1 cache immediately
-3. New transactions use the updated strategy within milliseconds, not minutes
+3. New transactions use the updated method within milliseconds, not minutes
 
 **Implementation:** This is a P2 enhancement (Stream 8). The 5-minute TTL provides acceptable baseline behavior.
 
@@ -869,10 +1004,10 @@ blocking the entire saga.
 
 **Mitigation:** The cache SHOULD implement a **"Graceful Stale"** policy:
 
-**For Reference Data (strategies):**
+**For Reference Data (methods):**
 
-- If Reference Data backend is down, continue using expired strategies for up to **1 hour**
-- Log high-priority warning: "Using stale strategy due to Reference Data unavailability"
+- If Reference Data backend is down, continue using expired methods for up to **1 hour**
+- Log high-priority warning: "Using stale method due to Reference Data unavailability"
 - Metrics: `valuation_stale_cache_hits_total`
 
 **For Market Information (rates):**
@@ -881,7 +1016,7 @@ blocking the entire saga.
   1. Return last known good value from L1 cache (if available)
   2. OR use tenant-configured default rate (fallback)
   3. Log high-priority warning: "Using fallback rate due to Market Information unavailability"
-  4. Set `degraded_mode: true` in ValuationBasis
+  4. Set `degraded_mode: true` in ValuationAnalysis
   5. Metrics: `valuation_degraded_mode_total`
 
 **Rationale:** In a ledger, "Calculated with slightly old formula" is preferable to "System Down."
@@ -900,7 +1035,7 @@ to be able to query degraded transactions:
 -- Find all position entries booked with degraded valuation
 SELECT *
 FROM position_entries
-WHERE attributes->'valuation_basis'->>'degraded_mode' = 'true';
+WHERE attributes->'valuation_analysis'->>'degraded_mode' = 'true';
 ```
 
 **Implementation in Position Keeping:**
@@ -913,7 +1048,7 @@ func (s *Service) Post(ctx context.Context, req *PostRequest) (*PostResponse, er
         InstrumentCode: req.InstrumentCode,
         // Preserve degraded_mode in attributes JSONB
         Attributes: map[string]interface{}{
-            "valuation_basis": req.Basis,  // Includes degraded_mode flag
+            "valuation_analysis": req.Basis,  // Includes degraded_mode flag
         },
     }
     // ...
@@ -924,7 +1059,7 @@ func (s *Service) Post(ctx context.Context, req *PostRequest) (*PostResponse, er
 
 When services are restored after an outage:
 
-1. Query: `SELECT * FROM position_entries WHERE attributes->'valuation_basis'->>'degraded_mode' = 'true'`
+1. Query: `SELECT * FROM position_entries WHERE attributes->'valuation_analysis'->>'degraded_mode' = 'true'`
 2. For each degraded entry, recalculate valuation with restored rates
 3. If difference > threshold, create adjustment entry
 4. Clear degraded flag (or add `revalued_at` timestamp)
@@ -940,7 +1075,7 @@ When services are restored after an outage:
 **Requirement:** The Valuation Engine MUST NOT trigger write operations back to Position Keeping for the same
 asset type being valued.
 
-**Risk:** Without this constraint, a malicious or buggy strategy could create an "Infinite Asset Inflation" loop:
+**Risk:** Without this constraint, a malicious or buggy method could create an "Infinite Asset Inflation" loop:
 
 ```text
 BAD: Valuation triggers position log → Position log triggers valuation → Loop
@@ -948,7 +1083,7 @@ BAD: Valuation triggers position log → Position log triggers valuation → Loo
 
 **Enforcement:**
 
-1. **Read-Only Contract:** The `GetValuedAmount` RPC is a **stateless inquiry** (pure function).
+1. **Read-Only Contract:** The `EvaluateAssetValuation` RPC is a **stateless inquiry** (pure function).
    It performs NO writes to Position Keeping, NO writes to Account state.
 2. **Domain Boundary:** Valuation is "Math-as-a-Service" - it calculates, it does not transact.
 3. **Saga Responsibility:** Only the Saga Orchestrator can write to Position Keeping, and only AFTER
@@ -1024,14 +1159,14 @@ fi
 
 ```go
 func TestValuationCannotWriteToPositionKeeping(t *testing.T) {
-    strategy := `
+    method := `
         def valuate(input, params, knowledge_at):
             # Attempt to write (should fail at VM level)
             position_keeping.initiate_log(...)
             return {"amount": 100}
     `
     engine := NewEngine(...)
-    _, err := engine.Valuate(ctx, Request{Strategy: strategy})
+    _, err := engine.Valuate(ctx, Request{Method: method})
 
     // Expect: name 'position_keeping' is not defined
     assert.ErrorContains(t, err, "name 'position_keeping' is not defined")
@@ -1058,9 +1193,9 @@ from reservation creates a TOCTOU (Time-of-Check to Time-of-Use) race condition:
 ```text
 TIME: T0         T1           T2
       ↓          ↓            ↓
-Saga A: GetValuedAmount(300 kWh) → £60 (tier 1)
+Saga A: EvaluateAssetValuation(300 kWh) → £60 (tier 1)
                 InitiateLien(300 kWh)
-Saga B:          GetValuedAmount(300 kWh) → £60 (WRONG - should be tier 2)
+Saga B:          EvaluateAssetValuation(300 kWh) → £60 (WRONG - should be tier 2)
                                   InitiateLien(300 kWh)
 
 Result: Both charged at introductory rate when only first 300 should be.
@@ -1073,15 +1208,15 @@ Result: Both charged at introductory rate when only first 300 should be.
 1. **`InitiateLien`** (withdrawals):
    - Input: `InstrumentAmount` (any asset class)
    - Queries Projected Balance (Current + Active Liens) from Position Keeping
-   - Executes valuation strategy using projected state
+   - Executes ValuationMethod using projected state
    - Creates lien storing BOTH `reserved_quantity` AND `valued_amount`
    - Returns lien with **price lock**
 
 2. **`ExecuteDeposit`** (inbound assets):
    - Input: `InstrumentAmount`
    - Queries Projected Balance
-   - Executes valuation strategy
-   - Posts to Position Keeping with valuation basis
+   - Executes ValuationMethod
+   - Posts to Position Keeping with valuation analysis
 
 **Updated `InitiateLien` Proto:**
 
@@ -1099,7 +1234,7 @@ message InitiateLienResponse {
 
   // The "Price Lock" - guaranteed value at lien creation time
   meridian.quantity.v1.InstrumentAmount valued_amount = 2;  // e.g., £35.00
-  ValuationBasis basis = 3;
+  ValuationAnalysis basis = 3;
 
   meridian.common.v1.MoneyAmount new_available_balance = 4;
 }
@@ -1401,13 +1536,13 @@ func (s *Service) InitiateLien(ctx context.Context, req *InitiateLienRequest) (*
 
 **Use Case:**
 
-When executing a valuation strategy with state-dependent logic (tiered pricing), the Valuation Engine queries
+When executing a ValuationMethod with state-dependent logic (tiered pricing), the Valuation Engine queries
 `ProjectedBalance` instead of `CurrentBalance` to see capacity already spoken for by concurrent transactions.
 
 **Example:**
 
 ```python
-# Starlark strategy using projected balance
+# Starlark ValuationMethod using projected balance
 def valuate_tiered(input_quantity, params, knowledge_at):
     # Get projected balance (includes other active liens)
     projected = position_keeping.get_projected_balance(
@@ -1441,7 +1576,7 @@ message GetProjectedBalanceRequest {
   google.protobuf.Timestamp knowledge_at = 3;
 
   // CRITICAL: Bucket filtering for fungibility-aware tiering
-  // If strategy uses tiered pricing for source:solar vs source:grid separately,
+  // If method uses tiered pricing for source:solar vs source:grid separately,
   // the projection must only include liens/balance for the same bucket
   string bucket_id = 4;  // Optional: filters by instrument attributes
 }
@@ -1465,8 +1600,8 @@ a specific fungibility partition of an instrument.
 
 For tiered pricing on `KWH` with attribute `source: solar` vs `source: grid`:
 
-- Tier strategy for `source:solar` queries: `GetProjectedBalance(instrument=KWH, bucket_id=kwh_solar)`
-- Tier strategy for `source:grid` queries: `GetProjectedBalance(instrument=KWH, bucket_id=kwh_grid)`
+- Tiered method for `source:solar` queries: `GetProjectedBalance(instrument=KWH, bucket_id=kwh_solar)`
+- Tiered method for `source:grid` queries: `GetProjectedBalance(instrument=KWH, bucket_id=kwh_grid)`
 
 Without bucket filtering, liens for `source:grid` would incorrectly affect the tier calculation for
 `source:solar`, causing cross-contamination of tier thresholds.
@@ -1569,16 +1704,16 @@ sequenceDiagram
     participant MIM as Market Information
 
     Saga->>Account: InitiateLien(account_id, 100 kWh)
-    Account->>Account: Load account.valuation_strategy_id from DB
+    Account->>Account: Load account.valuation_method_id from DB
 
     Note over Account,PosKeep: Get Projected Balance (includes active liens)
     Account->>PosKeep: GetProjectedBalance(account_id, KWH)
     PosKeep-->>Account: current=400 kWh, liens=0, projected=400
 
     Note over Account,Lib: Execute valuation with projected state
-    Account->>Lib: engine.Valuate(strategy_id, projected=400, input=100)
+    Account->>Lib: engine.Valuate(method_id, projected=400, input=100)
 
-    Lib->>Ref: GetStrategy(strategy_id, knowledge_at)
+    Lib->>Ref: GetValuationMethod(method_id, knowledge_at)
     Ref-->>Lib: Starlark script (cached 5min)
 
     Lib->>MIM: GetRate("EPEX_SPOT", knowledge_at)
@@ -1601,14 +1736,14 @@ sequenceDiagram
 
 1. Saga → Account: `InitiateLien` request
 2. Account → Position Keeping: `GetProjectedBalance` (for tiered pricing)
-3. Account → Reference Data: `GetStrategy` (cached 5min)
+3. Account → Reference Data: `GetValuationMethod` (cached 5min)
 4. Account → Market Information: `GetRate` (cached)
 
 **Total: 4 network calls** (one more than inquiry-only, but eliminates TOCTOU race)
 
 **Key Difference from Inquiry Flow:**
 
-- **Inquiry (`GetValuedAmount`)**: Returns estimate, no state change, can drift
+- **Inquiry (`EvaluateAssetValuation`)**: Returns estimate, no state change, can drift
 - **Transactional (`InitiateLien`)**: Creates price lock, queries projected balance, atomic
 
 ### 5.1.1 The Inquiry Workflow (Non-Binding, for UX)
@@ -1623,17 +1758,17 @@ sequenceDiagram
     participant Ref as Reference Data
     participant MIM as Market Information
 
-    App->>Account: GetValuedAmount(account_id, 100 kWh)
-    Account->>Account: Load account.valuation_strategy_id
+    App->>Account: EvaluateAssetValuation(account_id, 100 kWh)
+    Account->>Account: Load account.valuation_method_id
 
-    Account->>Lib: engine.Valuate(strategy_id, params)
-    Lib->>Ref: GetStrategy(strategy_id)
+    Account->>Lib: engine.Valuate(method_id, params)
+    Lib->>Ref: GetValuationMethod(method_id)
     Ref-->>Lib: Starlark script (cached)
     Lib->>MIM: GetRate("EPEX_SPOT")
     MIM-->>Lib: £0.456
-    Lib-->>Account: Output: £35.00 + Basis
+    Lib-->>Account: Output: £35.00 + Analysis
 
-    Account-->>App: GetValuedAmountResponse(is_estimate=true)
+    Account-->>App: EvaluateAssetValuationResponse(is_estimate=true)
 
     Note over App: Display "~£35.00" (informational only)
 ```
@@ -1656,7 +1791,7 @@ shared/pkg/valuation/
 │   └── cel_eval()
 │   └── quantity operations
 ├── cache.go                  # L1 in-memory cache
-│   └── Strategy cache (5min TTL)
+│   └── Method cache (5min TTL)
 │   └── CEL expression cache
 ├── cel_runtime.go            # CEL compiler wrapper
 │   └── Security constraints
@@ -1675,7 +1810,7 @@ The **Basis** (the valuation receipt) must be persisted to ensure the ledger is 
 
 #### Layer 1: Account Service
 
-**Inquiry Flow (`GetValuedAmount`)**: Stateless, NO writes. Pure "Math-as-a-Service."
+**Inquiry Flow (`EvaluateAssetValuation`)**: Stateless, NO writes. Pure "Math-as-a-Service."
 
 - **Why:** 100,000 inquiries/hour shouldn't write to Account database
 - **Performance:** <5ms p99 by eliminating DB contention
@@ -1686,7 +1821,7 @@ The **Basis** (the valuation receipt) must be persisted to ensure the ledger is 
 - **What's Stored:**
   - `reserved_quantity` / `deposited_quantity`
   - `valued_amount` (price lock)
-  - `valuation_basis` (audit trail)
+  - `valuation_analysis` (audit trail)
 - **Performance:** Acceptable overhead (<10ms) for transactional guarantees
 
 #### Layer 2: Saga Orchestrator (Checkpoint Persistence)
@@ -1705,8 +1840,8 @@ the same valuation, even if market rates have changed since.
   "step_id": "valuate_energy",
   "result": {
     "output": {"amount": "35.00", "instrument": "GBP"},
-    "basis": {
-      "strategy_id": "wholesale-spot-v2",
+    "analysis": {
+      "method_id": "wholesale-spot-v2",
       "rates": {"EPEX_SPOT": "0.456"},
       "observation_ids": ["obs_abc123"],
       "knowledge_at": "2025-01-15T14:30:00Z"
@@ -1717,23 +1852,23 @@ the same valuation, even if market rates have changed since.
 
 #### Layer 3: Position Keeping (Permanent Audit)
 
-When the transaction finally hits **Position Keeping**, the `ValuationBasis` is stored in the `attributes` JSONB
+When the transaction finally hits **Position Keeping**, the `ValuationAnalysis` is stored in the `attributes` JSONB
 of the `PositionEntry`.
 
 **Audit Value:** Seven years from now, an auditor can examine a single row in the ledger and see the complete
 "Receipt" for the valuation without calling any external services. Even if:
 
 - The Market Information service has purged old rate data
-- The Reference Data service has deprecated the strategy
+- The Reference Data service has deprecated the method
 - The Account Service has been decommissioned
 
 **Example `PositionEntry.attributes`:**
 
 ```json
 {
-  "valuation_basis": {
-    "strategy_id": "wholesale-spot-v2",
-    "strategy_version": "1.2.0",
+  "valuation_analysis": {
+    "method_id": "wholesale-spot-v2",
+    "method_version": "1.2.0",
     "applied_rates": {"EPEX_SPOT": "0.456", "gsp_coefficient": "1.05"},
     "observation_ids": ["obs_abc123"],
     "computed_at": "2025-01-15T14:30:15Z",
@@ -1745,7 +1880,7 @@ of the `PositionEntry`.
 
 #### The "Passport Analogy"
 
-The `ValuationBasis` travels through the system like a passport:
+The `ValuationAnalysis` travels through the system like a passport:
 
 1. **Issued** by the Account Service (valuation calculation)
 2. **Stamped** by the Saga Orchestrator (checkpoint persistence)
@@ -1761,33 +1896,33 @@ package service
 
 import "meridian/shared/pkg/valuation"
 
-func (s *Service) GetValuedAmount(
+func (s *Service) EvaluateAssetValuation(
     ctx context.Context,
-    req *currentaccountv1.GetValuedAmountRequest,
-) (*currentaccountv1.GetValuedAmountResponse, error) {
+    req *currentaccountv1.EvaluateAssetValuationRequest,
+) (*currentaccountv1.EvaluateAssetValuationResponse, error) {
 
-    // 1. Load account to get strategy assignment
+    // 1. Load account to get ValuationFeature
     account, err := s.repo.FindByID(ctx, req.AccountId)
     if err != nil {
         return nil, fmt.Errorf("load account: %w", err)
     }
 
-    // 2. Resolve strategy assignment for input instrument
-    assignment, err := s.getValuationAssignment(
+    // 2. Resolve ValuationFeature for input instrument
+    feature, err := s.getValuationFeature(
         ctx,
         account.ID,
         req.Input.InstrumentCode,
         req.KnowledgeAt,
     )
     if err != nil {
-        return nil, fmt.Errorf("resolve assignment: %w", err)
+        return nil, fmt.Errorf("resolve feature: %w", err)
     }
 
     // 3. Use shared valuation library (in-process)
     result, err := s.valuationEngine.Valuate(ctx, valuation.Request{
         Input:       req.Input,
-        StrategyID:  assignment.StrategyID,
-        Parameters:  assignment.Parameters,
+        MethodID:    feature.MethodID,
+        Parameters:  feature.Parameters,
         KnowledgeAt: req.KnowledgeAt.AsTime(),
     })
     if err != nil {
@@ -1795,7 +1930,7 @@ func (s *Service) GetValuedAmount(
     }
 
     // 4. Return valued amount with audit basis
-    return &currentaccountv1.GetValuedAmountResponse{
+    return &currentaccountv1.EvaluateAssetValuationResponse{
         Output:          result.Output,
         Basis:           toProtoBasis(result.Basis),
         ExecutionTimeMs: fmt.Sprintf("%.2f", result.ExecutionTime.Milliseconds()),
@@ -1819,7 +1954,7 @@ func main() {
 
     // Create valuation engine with dependencies
     valuationEngine := valuation.NewEngine(valuation.Config{
-        RefDataClient:    refDataClient,     // For strategy lookups
+        RefDataClient:    refDataClient,     // For method lookups
         MarketInfoClient: marketInfoClient,  // For rate lookups
         CacheSize:        1000,              // L1 cache entries
         CacheTTL:         5 * time.Minute,
@@ -1838,22 +1973,26 @@ func main() {
 
 ## 6. Implementation Streams
 
-### Stream 1: Account Strategy Assignments (P0, 5 points)
+### Stream 1: Account Valuation Features (P0, 5 points)
+
+**BIAN Pattern:** This stream implements the ValuationFeature Behavior Qualifier (BQ) for Account
+Fulfillment Arrangements (Control Records).
 
 **Tasks:**
 
-1. Add `valuation_assignments` table to Current Account service
-2. Add `valuation_assignments` table to Internal Bank Account service
-3. Implement CRUD operations for assignments
+1. Add `valuation_features` table to Current Account service (BIAN BQ schema)
+2. Add `valuation_features` table to Internal Bank Account service (BIAN BQ schema)
+3. Implement CRUD operations for ValuationFeature lifecycle (INITIATED → ACTIVE → TERMINATED)
 4. Add bi-temporal query support
-5. Update Tenant Provisioning to seed default strategies (e.g., `USD_IDENTITY`)
+5. Update Tenant Provisioning to seed default methods (e.g., `USD_IDENTITY`)
 6. Migration scripts for existing accounts
 
 **Success Criteria:**
 
-- All existing accounts have at least one valuation assignment (identity strategy)
+- All existing accounts have at least one ValuationFeature (identity method)
 - Bi-temporal queries work correctly with `knowledge_at`
-- Assignments can be updated without service restart
+- ValuationFeatures can be updated without service restart
+- BIAN lifecycle status transitions are enforced
 
 ### Stream 2: Valuation Engine Library (P0, 12 points)
 
@@ -1869,7 +2008,7 @@ func main() {
 8. Implement `record_path()` builtin with 20-entry size limit
 9. Implement output instrument validation (runtime type check)
 10. Add comprehensive unit tests
-11. **CRITICAL:** Add security verification test (strategy cannot call write handlers)
+11. **CRITICAL:** Add security verification test (method cannot call write handlers)
 12. **CRITICAL:** Add CI verification script that fails if write imports are added
 13. Add benchmarks (target: <5ms in-process execution)
 14. Document library usage patterns
@@ -1879,44 +2018,47 @@ func main() {
 - Can compile and execute CEL expressions
 - Can execute Starlark scripts with all builtins
 - Expression cost limits prevent infinite loops
-- Benchmark shows <5ms execution time for typical strategies
-- Cache hit rate >80% after warmup (for same strategy_id)
-- **Security test passes:** Strategy attempting `position_keeping.initiate_log` fails with
+- Benchmark shows <5ms execution time for typical methods
+- Cache hit rate >80% after warmup (for same method_id)
+- **Security test passes:** Method attempting `position_keeping.initiate_log` fails with
   `name 'position_keeping' is not defined`
 - **Architecture test passes:** Build fails if valuation package imports write-capable clients
 - Graceful stale cache activates when Reference Data unavailable (logs warning, continues)
 - Calculation path limited to 20 entries (logs warning on truncation)
 - Output instrument mismatch returns hard error (VALUATION_OUTPUT_MISMATCH)
 
-### Stream 3: Reference Data Strategy Storage (P0, 6 points)
+### Stream 3: Reference Data ValuationMethod Storage (P0, 6 points)
+
+**BIAN Pattern:** This stream implements the ValuationMethod reference data, which Account Services
+reference via their ValuationFeature Behavior Qualifiers.
 
 **Tasks:**
 
-1. Add `valuation_strategies` table to Reference Data service
-2. Implement `GetStrategy` RPC with bi-temporal support
-3. Implement `ResolveValuationStrategy` RPC with **Platform Default Inheritance**
-4. Add strategy validation (syntax check, instrument compatibility)
-5. Add `output_instrument` to strategy response (for runtime type validation)
-6. Seed SYSTEM identity strategies for major currencies (USD, EUR, GBP, NZD, AUD)
-7. Seed SYSTEM energy strategy (KWH → GBP, default £0.35/kWh)
-8. Seed SYSTEM carbon strategy (TONNE_CO2E → GBP, default £75/tonne)
+1. Add `valuation_methods` table to Reference Data service (BIAN terminology)
+2. Implement `GetValuationMethod` RPC with bi-temporal support
+3. Implement `ResolveValuationMethod` RPC with **Platform Default Inheritance**
+4. Add method validation (syntax check, instrument compatibility)
+5. Add `output_instrument` to method response (for runtime type validation)
+6. Seed SYSTEM identity methods for major currencies (USD, EUR, GBP, NZD, AUD)
+7. Seed SYSTEM energy method (KWH → GBP, default £0.35/kWh)
+8. Seed SYSTEM carbon method (TONNE_CO2E → GBP, default £75/tonne)
 9. Add integration tests for tenant → SYSTEM fallback
 
 **Success Criteria:**
 
-- Strategies can be stored and retrieved via gRPC
-- Bi-temporal queries return correct strategy versions
-- Cache invalidation works on strategy updates
-- Identity strategies are available for all fiat currencies
-- **Platform Default Inheritance:** Tenant without KWH strategy gets SYSTEM_RETAIL_ENERGY
-- **Output instrument returned:** GetStrategy response includes `output_instrument` for runtime validation
+- ValuationMethods can be stored and retrieved via gRPC
+- Bi-temporal queries return correct method versions
+- Cache invalidation works on method updates
+- Identity methods are available for all fiat currencies
+- **Platform Default Inheritance:** Tenant without KWH method gets SYSTEM_RETAIL_ENERGY
+- **Output instrument returned:** GetValuationMethod response includes `output_instrument`
 - New tenant can valuate KWH without any configuration (uses SYSTEM defaults)
 
 ### Stream 4: Current Account Integration (P1, 10 points)
 
 **Tasks:**
 
-1. Add `GetValuedAmount` RPC to Current Account proto (inquiry-only)
+1. Add `EvaluateAssetValuation` RPC to Current Account proto (inquiry-only)
 2. Update `InitiateLien` to accept `InstrumentAmount` (any asset class)
 3. Update `InitiateLien` response to include `valued_amount` and `basis`
 4. Update `ExecuteDeposit` to perform atomic valuation
@@ -1926,7 +2068,7 @@ func main() {
 8. **CRITICAL:** Call `position_keeping.RecordReservation()` after creating lien
 9. **CRITICAL:** Call `position_keeping.ReleaseReservation()` in ExecuteLien/TerminateLien
 10. Implement valuation in `ExecuteDeposit` handler
-11. Implement `GetValuedAmount` handler (inquiry-only, non-binding)
+11. Implement `EvaluateAssetValuation` handler (inquiry-only, non-binding)
 12. Add Market Information client dependency with graceful degradation
 13. Add `record_path()` builtin for calculation path audit trail
 14. Add observability (metrics, logging, tracing, degraded_mode counter)
@@ -1941,7 +2083,7 @@ func main() {
 - **RecordReservation called synchronously** after lien creation
 - **ReleaseReservation called** during ExecuteLien/TerminateLien
 - Concurrent liens on tiered pricing account get correct rates (no drift)
-- `GetValuedAmount` returns `is_estimate=true` (non-binding)
+- `EvaluateAssetValuation` returns `is_estimate=true` (non-binding)
 - Valuation basis includes calculation_path and degraded_mode flag
 - **Basis drift detection:** ExecuteLien emits VALUATION_STALE event if basis > 30 days old
 - **Output instrument validation:** Valuation fails with VALUATION_OUTPUT_MISMATCH if script returns wrong instrument
@@ -1952,7 +2094,7 @@ func main() {
 
 **Tasks:**
 
-1. Add `GetValuedAmount` RPC to Internal Bank Account proto (inquiry-only)
+1. Add `EvaluateAssetValuation` RPC to Internal Bank Account proto (inquiry-only)
 2. Update `InitiateLien` to accept `InstrumentAmount` (any asset class)
 3. Update `InitiateLien` response to include `valued_amount` and `basis`
 4. Update `ExecuteDeposit` to perform atomic valuation
@@ -1962,7 +2104,7 @@ func main() {
 8. **CRITICAL:** Call `position_keeping.RecordReservation()` after creating lien
 9. **CRITICAL:** Call `position_keeping.ReleaseReservation()` in ExecuteLien/TerminateLien
 10. Implement valuation in `ExecuteDeposit` handler
-11. Implement `GetValuedAmount` handler (inquiry-only, non-binding)
+11. Implement `EvaluateAssetValuation` handler (inquiry-only, non-binding)
 12. Add Market Information client dependency with graceful degradation
 13. Add `record_path()` builtin for calculation path audit trail
 14. Integration tests
@@ -1972,7 +2114,7 @@ func main() {
 **Success Criteria:**
 
 - Internal accounts can value assets using same strategies
-- Wholesale energy strategy works (spot price × GSP coefficient)
+- Wholesale energy method works (spot price × GSP coefficient)
 - **RecordReservation called synchronously** after lien creation
 - **ReleaseReservation called** during ExecuteLien/TerminateLien
 - `InitiateLien` stores price lock for regulatory accounts
@@ -2005,24 +2147,24 @@ func main() {
 - Audit logs show full valuation provenance
 - No TOCTOU race conditions under concurrent load
 
-### Stream 7: Energy/Commodity Strategies (P2, 8 points)
+### Stream 7: Energy/Commodity ValuationMethods (P2, 8 points)
 
 **Tasks:**
 
-1. Design wholesale energy strategy (Spot Price × GSP Coefficient)
-2. Implement retail energy strategy (Fixed Tariff)
+1. Design wholesale energy method (Spot Price × GSP Coefficient)
+2. Implement retail energy method (Fixed Tariff)
 3. Add time-of-use (TOU) tariff support
-4. Add carbon credit valuation strategy
-5. Add GPU-hour valuation strategy (AI compute)
+4. Add carbon credit valuation method
+5. Add GPU-hour valuation method (AI compute)
 6. Comprehensive integration tests for each asset type
-7. Document strategy development guide
+7. Document ValuationMethod development guide
 
 **Success Criteria:**
 
 - Can value 100 kWh using wholesale spot price + GSP coefficient
 - Can value 100 kWh using retail fixed tariff
 - TOU tariff applies different rates based on time bands
-- All asset types (energy, carbon, compute) have working strategies
+- All asset types (energy, carbon, compute) have working methods
 
 ### Stream 8: Performance Optimization (P2, 3 points)
 
@@ -2032,7 +2174,7 @@ func main() {
 2. Optimize cache key generation
 3. Add connection pooling for Reference Data client
 4. Tune cache sizes and TTLs
-5. Implement event-driven cache invalidation (Kafka subscriber for `strategy.updated` events)
+5. Implement event-driven cache invalidation (Kafka subscriber for `method.updated` events)
 6. Load testing (target: 500 valuations/second per Account Service instance)
 
 **Success Criteria:**
@@ -2048,7 +2190,7 @@ func main() {
 **Tasks:**
 
 1. Add `valued_amount` field to `liens` table (InstrumentAmount)
-2. Add `valuation_basis` field to `liens` table (JSONB)
+2. Add `valuation_analysis` field to `liens` table (JSONB)
 3. Update `InitiateLien` to store valuation in lien record
 4. Update `ExecuteLien` to use stored valued_amount (not recalculate)
 5. Add `idempotency_check` to return existing lien with original valuation
@@ -2059,7 +2201,7 @@ func main() {
 - Liens store both reserved_quantity and valued_amount
 - `ExecuteLien` uses price lock from lien creation time
 - Idempotent retries return same valuation (no recalculation)
-- Lien basis stored in JSONB includes observation_ids, rates, strategy version
+- Lien analysis stored in JSONB includes observation_ids, rates, method version
 
 ### Stream 10: Position Keeping Reservation Ledger & Projected Balance (P0, 8 points)
 
@@ -2173,14 +2315,14 @@ ALTER TABLE account_positions
 - CEL expression compilation and evaluation
 - Starlark script parsing and execution
 - Cache hit/miss logic (L1 only)
-- Strategy validation
+- Method validation
 - Dimension Guard enforcement
 
 ### Integration Tests
 
 - End-to-end valuation with real Reference Data and Market Information
 - Bi-temporal valuation replay
-- Cache invalidation on strategy updates
+- Cache invalidation on method updates
 - Multiple concurrent valuations (inquiry RPC)
 - **Atomic valuation in liens** - verify price lock persisted
 - **Tiered pricing with concurrent liens** - verify no drift (TOCTOU prevention)
@@ -2196,7 +2338,7 @@ ALTER TABLE account_positions
 
 ### Golden File Tests
 
-- Regression detection for strategy outputs
+- Regression detection for method outputs
 - Store expected results for known inputs
 - Validate outputs match across versions
 
@@ -2214,71 +2356,71 @@ ALTER TABLE account_positions
 
 ### Rollout Strategy
 
-1. **Phase 1 (Week 1-2):** Deploy shared library with identity strategies only
+1. **Phase 1 (Week 1-2):** Deploy shared library with identity methods only
    (Stream 1-3)
 2. **Phase 2 (Week 3-4):** Enable Account Service integration
    (Stream 4-5)
 3. **Phase 3 (Week 5-6):** Integrate with all sagas, deprecate hardcoded logic
    (Stream 6)
-4. **Phase 4 (Week 7+):** Add energy/commodity strategies
+4. **Phase 4 (Week 7+):** Add energy/commodity ValuationMethods
    (Stream 7)
 
-### Strategy Versioning and Migration
+### ValuationMethod Versioning and Migration
 
 **Version Resolution:**
 
-Account assignments reference strategies by `strategy_id`. When multiple versions exist, the system
-resolves to the **latest non-deprecated version** unless the assignment explicitly pins a version.
+ValuationFeatures reference methods by `valuation_method_id`. When multiple versions exist, the
+system resolves to the **latest non-deprecated version** unless the feature explicitly pins a version.
 
 | Scenario | Behavior |
 |----------|----------|
-| New strategy version deployed | Existing assignments auto-upgrade to latest |
-| Strategy deprecated (`deprecated_at < now`) | New valuations REJECTED, bi-temporal replay allowed |
-| Assignment pins specific version | Version locked until explicit migration |
+| New method version deployed | Existing features auto-upgrade to latest |
+| Method deprecated (`deprecated_at < now`) | New valuations REJECTED, bi-temporal replay allowed |
+| Feature pins specific version | Version locked until explicit migration |
 
 **Migration Path:**
 
-1. **Phase 1-2:** All assignments use unpinned references (auto-upgrade)
-2. **Phase 3:** Explicit migration for any pinned assignments via `task-master` task
-3. **Post-Phase 3:** Deprecate old versions, assignments auto-resolve to latest
+1. **Phase 1-2:** All features use unpinned references (auto-upgrade)
+2. **Phase 3:** Explicit migration for any pinned features via `task-master` task
+3. **Post-Phase 3:** Deprecate old versions, features auto-resolve to latest
 
 **What Happens When `logic_hash` Changes:**
 
-When a strategy's logic is updated (new `logic_hash`), the change creates a new version. Existing
-assignments using unpinned references will use the new logic on next valuation. Assignments pinned
+When a method's logic is updated (new `logic_hash`), the change creates a new version. Existing
+features using unpinned references will use the new logic on next valuation. Features pinned
 to the old version continue using old logic until explicitly migrated.
 
 **Operational Notifications:**
 
-- `strategy.version.created` event → Slack alert to ops channel
-- `strategy.deprecated` event → P3 alert, 7-day countdown to removal
-- `strategy.removed` event → P2 alert if any assignments still reference it
+- `method.version.created` event → Slack alert to ops channel
+- `method.deprecated` event → P3 alert, 7-day countdown to removal
+- `method.removed` event → P2 alert if any features still reference it
 
-**Deprecated Strategy Behavior:**
+**Deprecated Method Behavior:**
 
 ```go
-func (s *Service) GetStrategy(ctx context.Context, id uuid.UUID) (*Strategy, error) {
-    strategy, err := s.repo.FindByID(ctx, id)
+func (s *Service) GetValuationMethod(ctx context.Context, id uuid.UUID) (*ValuationMethod, error) {
+    method, err := s.repo.FindByID(ctx, id)
     if err != nil {
         return nil, err
     }
 
-    // Reject new valuations using deprecated strategies
-    if strategy.DeprecatedAt != nil && strategy.DeprecatedAt.Before(time.Now()) {
-        return nil, &StrategyDeprecatedError{
-            StrategyID:   id,
-            DeprecatedAt: *strategy.DeprecatedAt,
-            Message:      "Strategy deprecated, migrate to latest version",
+    // Reject new valuations using deprecated methods
+    if method.DeprecatedAt != nil && method.DeprecatedAt.Before(time.Now()) {
+        return nil, &MethodDeprecatedError{
+            MethodID:     id,
+            DeprecatedAt: *method.DeprecatedAt,
+            Message:      "ValuationMethod deprecated, migrate to latest version",
         }
     }
 
-    return strategy, nil
+    return method, nil
 }
 ```
 
 **Bi-temporal Replay Exception:**
 
-For audit and replay purposes, deprecated strategies remain queryable via `GetStrategy` with
+For audit and replay purposes, deprecated methods remain queryable via `GetValuationMethod` with
 `knowledge_at` parameter set to a time before `deprecated_at`. This allows historical valuations
 to be reproduced exactly.
 
@@ -2287,37 +2429,37 @@ to be reproduced exactly.
 **Metrics:**
 
 - `valuation.requests.total` (counter by account_service, status)
-- `valuation.duration_ms` (histogram by strategy_id)
+- `valuation.duration_ms` (histogram by method_id)
 - `valuation.cache_hit_rate` (gauge by account_service)
-- `valuation.strategy_errors` (counter by strategy_id, error_type)
+- `valuation.method_errors` (counter by method_id, error_type)
 - `valuation.market_data_lookups` (counter by observation_type)
 
 **Alerts:**
 
-- P1: Account service unavailable (no successful GetValuedAmount in 5 minutes)
+- P1: Account service unavailable (no successful EvaluateAssetValuation in 5 minutes)
 - P2: Valuation latency p99 > 15ms (performance degradation)
 - P2: Cache hit rate < 50% (cache inefficiency)
-- P3: Strategy execution errors > 1% of requests (buggy strategy)
+- P3: ValuationMethod execution errors > 1% of requests (buggy method)
 
 ### Disaster Recovery
 
 #### Scenario: Reference Data Service Down
 
-- **Mitigation:** L1 cache keeps serving recently used strategies (5min TTL)
-- **Fallback:** Use identity transformation if strategy unavailable
+- **Mitigation:** L1 cache keeps serving recently used methods (5min TTL)
+- **Fallback:** Use identity transformation if method unavailable
 - **Alert:** P2 escalation, automatic retry with exponential backoff
 
 #### Scenario: Market Information Service Down
 
 - **Mitigation:** Return last-known-good rate from Market Information cache
 - **Fallback:** Use default rates from account parameters
-- **Alert:** P2 escalation, flag valuations as "degraded mode" in basis
+- **Alert:** P2 escalation, flag valuations as "degraded mode" in analysis
 
-#### Scenario: Buggy Strategy Deployed
+#### Scenario: Buggy ValuationMethod Deployed
 
 - **Mitigation:** Account Service catches execution errors, returns error response
-- **Fallback:** Saga retries or uses fallback strategy
-- **Alert:** P2 escalation, notify strategy author
+- **Fallback:** Saga retries or uses fallback method
+- **Alert:** P2 escalation, notify method author
 
 ## 10. Open Questions
 
@@ -2326,14 +2468,14 @@ to be reproduced exactly.
    - **Proposed Answer:** Starlark script can compose multiple market data lookups:
      `nzd_to_usd * usd_to_aud`
 
-2. **Regulatory Compliance:** Do valuation strategies need regulatory approval before activation?
+2. **Regulatory Compliance:** Do ValuationMethods need regulatory approval before activation?
    - **Action:** Consult with compliance team on approval workflow requirements
 
 3. **Historical Market Data Retention:** How long do we keep market data for replay?
    - **Proposed Answer:** 7 years (regulatory standard for financial records)
 
-4. **Multi-Tenant Strategy Sharing:** Should strategies be tenant-scoped or globally shared?
-   - **Proposed Answer:** Strategies stored per-tenant (PostgreSQL schema-per-tenant),
+4. **Multi-Tenant Method Sharing:** Should methods be tenant-scoped or globally shared?
+   - **Proposed Answer:** Methods stored per-tenant (PostgreSQL schema-per-tenant),
      marketplace allows copying
 
 ## 11. Related Work
@@ -2378,17 +2520,17 @@ The embedded library approach follows the same pattern as:
 
 **Account Services are the natural home for valuation because:**
 
-1. They own the `valuation_assignments` data
+1. They own the `valuation_features` data
 2. They know which dimension they accept (enforcement point)
 3. They have context about the account (parameters, tier, etc.)
 4. They're already in the critical path for deposits/withdrawals
 
-## 13. Appendix: Example Strategies
+## 13. Appendix: Example ValuationMethods
 
-### A. Identity Strategy (Fiat Currency)
+### A. Identity Method (Fiat Currency)
 
 ```python
-# strategy: identity_usd
+# method: identity_usd
 # input: USD
 # output: USD
 
@@ -2397,17 +2539,17 @@ def valuate(input_quantity, params, knowledge_at):
     return {
         "amount": input_quantity.amount,
         "instrument": input_quantity.instrument,
-        "basis": {
-            "strategy": "identity",
+        "analysis": {
+            "method": "identity",
             "rate": "1.0"
         }
     }
 ```
 
-### B. Retail Energy Strategy
+### B. Retail Energy Method
 
 ```python
-# strategy: retail_energy_v1
+# method: retail_energy_v1
 # input: KWH
 # output: GBP
 
@@ -2422,18 +2564,18 @@ def valuate(input_quantity, params, knowledge_at):
     return {
         "amount": output_amount,
         "instrument": "GBP",
-        "basis": {
-            "strategy": "retail_energy_v1",
+        "analysis": {
+            "method": "retail_energy_v1",
             "tariff_rate": str(tariff_rate),
             "input_kwh": str(input_quantity.amount)
         }
     }
 ```
 
-### C. Wholesale Energy Strategy (Complex)
+### C. Wholesale Energy Method (Complex)
 
 ```python
-# strategy: wholesale_energy_v1
+# method: wholesale_energy_v1
 # input: KWH
 # output: GBP
 
@@ -2466,8 +2608,8 @@ def valuate(input_quantity, params, knowledge_at):
     return {
         "amount": output_amount,
         "instrument": "GBP",
-        "basis": {
-            "strategy": "wholesale_energy_v1",
+        "analysis": {
+            "method": "wholesale_energy_v1",
             "spot_price": str(spot_price.value),
             "spot_observation_id": spot_price.observation_id,
             "gsp_zone": gsp_zone,
@@ -2499,10 +2641,10 @@ Semantic API Practitioner Guide V8.1 and BIAN Service Landscape 12.0.
 
 | Pattern | PRD Implementation | BIAN Alignment |
 |---------|-------------------|----------------|
-| **FULFILL** | `GetValuedAmount`, `InitiateLien`, `ExecuteLien` | ✅ |
+| **FULFILL** | `EvaluateAssetValuation`, `InitiateLien`, `ExecuteLien` | ✅ |
 | **TRACK** | Position Keeping transaction logs and balances | ✅ |
-| **ANALYZE** | Valuation Engine strategy execution | ✅ |
-| **CATALOG** | Reference Data strategy management | ✅ |
+| **ANALYZE** | Valuation Engine method execution | ✅ |
+| **CATALOG** | Reference Data ValuationMethod management | ✅ |
 
 ### Action Terms Compliance
 
@@ -2510,7 +2652,7 @@ Semantic API Practitioner Guide V8.1 and BIAN Service Landscape 12.0.
 |---------------|------------------|--------|
 | `InitiateLien` | Initiate | ✅ Perfect match |
 | `ExecuteLien` | Execute | ✅ Perfect match |
-| `GetValuedAmount` | Retrieve | ✅ Perfect match |
+| `EvaluateAssetValuation` | Retrieve | ✅ Perfect match |
 | `TerminateLien` | Terminate | ✅ Perfect match |
 
 ### Architectural Deviation: Embedded vs Separated Valuation
@@ -2524,24 +2666,25 @@ Semantic API Practitioner Guide V8.1 and BIAN Service Landscape 12.0.
 1. **Performance:** Eliminates network hop (3 hops vs 4)
 2. **Domain Modeling:** Valuation is behavior of Account aggregate, not external service
 3. **Operational Simplicity:** No additional microservice to deploy/monitor
-4. **Bounded Context:** Account knows its own strategy, currency, and state
+4. **Bounded Context:** Account knows its own ValuationFeature, currency, and state
 
 **BIAN Compatibility:** The embedded approach respects BIAN principles while optimizing for
 performance. The valuation capability could be exposed as a separate service domain if needed
 for cross-cutting concerns.
 
-### Terminology Mapping (Future Consideration)
+### Terminology Compliance (v2.9)
 
-For enhanced BIAN alignment, consider these terminology mappings in future versions:
+This PRD now uses BIAN-standard terminology throughout:
 
-| Current Term | BIAN-Aligned Alternative |
-|--------------|--------------------------|
-| `GetValuedAmount` | `RetrieveAssetValuation` or `EvaluateAssetValuation` |
-| `ValuationBasis` | `ValuationAnalysis` |
-| `Strategy` | `ValuationMethod` |
-| Lien Status: ACTIVE | BIAN Lifecycle: Active |
-| Lien Status: EXECUTED | BIAN Lifecycle: Fulfilled |
-| Lien Status: TERMINATED | BIAN Lifecycle: Terminated |
+| Term | BIAN Compliance | Notes |
+|------|-----------------|-------|
+| `EvaluateAssetValuation` | ✅ | BIAN "Evaluate" action term |
+| `ValuationAnalysis` | ✅ | BIAN analysis record pattern |
+| `ValuationMethod` | ✅ | BIAN algorithmic method |
+| `ValuationFeature` | ✅ | BIAN Behavior Qualifier |
+| Lien Status: ACTIVE | ✅ | BIAN Lifecycle: Active |
+| Lien Status: EXECUTED | ✅ | BIAN Lifecycle: Fulfilled |
+| Lien Status: TERMINATED | ✅ | BIAN Lifecycle: Terminated |
 
 ### References
 
@@ -2556,4 +2699,4 @@ not commanded to use a centralized pricing service. It's "Particular" (logic is 
 "Universal" (all accounts implement the same interface).
 
 **Next Steps:** Parse PRD into Task Master (`valuation-engine` tag) and begin with Stream 1
-(Account Strategy Assignments) as foundation for all subsequent work.
+(Account Valuation Features) as foundation for all subsequent work.
