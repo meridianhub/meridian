@@ -3,6 +3,25 @@
 **Status:** Implemented
 **Task Master Tag:** `starlark-typed-clients` (10/10 tasks done)
 
+## Table of Contents
+
+- [Problem Statement](#problem-statement)
+- [Current Architecture](#current-architecture)
+- [Research: Approaches Used by Other Systems](#research-approaches-used-by-other-systems)
+- [Proposed Solution: Starlark Service Modules](#proposed-solution-starlark-service-modules)
+- [Implementation Options](#implementation-options)
+- [Bazel Idiomatic Alignment](#bazel-idiomatic-alignment)
+- [Recommended Approach](#recommended-approach)
+- [Schema Definition Location](#schema-definition-location)
+- [Migration Path](#migration-path)
+- [Success Criteria](#success-criteria)
+- [Platform Default Saga Inheritance](#platform-default-saga-inheritance)
+- [Implementation Tasks](#implementation-tasks)
+- [Task Dependencies and Complexity](#task-dependencies-and-complexity)
+- [References](#references)
+
+---
+
 ## Problem Statement
 
 Currently, Meridian's saga definitions use magic strings to reference service handlers:

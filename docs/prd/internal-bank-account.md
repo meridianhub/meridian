@@ -43,6 +43,19 @@ instructions: |
 
 ---
 
+## Table of Contents
+
+- [Executive Summary](#executive-summary)
+- [BIAN Alignment](#bian-alignment)
+- [Requirements](#requirements)
+- [Technical Design](#technical-design)
+- [Implementation Tasks](#implementation-tasks)
+- [Success Criteria](#success-criteria)
+- [Appendix A: Use Case Examples](#appendix-a-use-case-examples)
+- [Appendix B: BIAN Semantic API Reference](#appendix-b-bian-semantic-api-reference)
+
+---
+
 ## Executive Summary
 
 This PRD defines the requirements for implementing the **Internal Bank Account** service

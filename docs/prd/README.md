@@ -14,6 +14,16 @@ documents are configured as Claude Code skills that automatically load when rele
 | **In Progress** | Active work ongoing |
 | **Not Started** | PRD exists but no Task Master tasks created |
 
+```mermaid
+stateDiagram-v2
+    [*] --> Not_Started: PRD created
+    Not_Started --> In_Progress: Parse PRD, create tasks
+    In_Progress --> Paused: Some tasks deferred
+    In_Progress --> Implemented: All tasks complete
+    Paused --> In_Progress: Resume work
+    Implemented --> [*]
+```
+
 ### Git-Tracked PRDs (`docs/prd/`)
 
 | PRD | Status | Task Master Tag | Tasks |
@@ -105,6 +115,43 @@ PRDs define the requirements, design, and implementation approach for significan
 - Provide context for AI assistants during development
 - Define Task Master tags for tracking work
 - Link to related ADRs for architectural decisions
+
+## PRD Locations: Strategic vs Tactical
+
+Meridian uses two PRD locations with different purposes:
+
+| Location | Purpose | Version Control | Usage |
+|----------|---------|-----------------|-------|
+| `docs/prd/` | **Strategic PRDs** | Git-tracked | Architectural decisions, feature design, team-reviewed |
+| `../../.taskmaster/docs/` | **Tactical PRDs** | Not tracked | Task Master generation, implementation details, working docs |
+
+### When to Use Each Location
+
+**Strategic PRDs** (`docs/prd/`) - Use for:
+
+- Major architectural changes or system-wide features
+- Cross-service features requiring coordination
+- Decisions requiring team review and consensus
+- Long-term reference documentation
+- Features with significant design complexity
+
+**Examples:** Universal Asset System, Starlark Saga Orchestration, Internal Bank Account Service
+
+**Tactical PRDs** (`.taskmaster/docs/`) - Use for:
+
+- Task breakdown for specific work packages
+- Implementation checklists and tracking
+- Gap analysis (e.g., BIAN alignment, ISO standards)
+- Working documents for active development
+- Feature-specific implementation plans
+
+**Examples:** BIAN Alignment PRD, Multi-Tenancy Phase 2, Technical Debt Remediation
+
+### Migration Path
+
+PRDs often start as tactical documents in `.taskmaster/docs/` for implementation, then graduate
+to strategic PRDs in `docs/prd/` once the feature stabilizes and becomes architectural reference
+material.
 
 ## Categories
 
