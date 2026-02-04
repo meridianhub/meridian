@@ -131,5 +131,5 @@ func TestReferenceDataClientWrapper_GetSaga_NilResponse(t *testing.T) {
 	// Assert
 	require.Error(t, err)
 	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "saga payment_execution v1 not found")
+	assert.Contains(t, err.Error(), "saga not found: payment_execution v1")
 }
