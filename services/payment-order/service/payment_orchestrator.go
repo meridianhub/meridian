@@ -346,6 +346,43 @@ func (o *PaymentOrchestrator) handleStarlarkSagaResult(ctx context.Context, po *
 		return
 	}
 
+	// Validate required outputs based on successful steps
+	// If a step succeeded but its output is missing, fail the payment order
+	createLienSucceeded := false
+	sendToGatewaySucceeded := false
+	for _, step := range result.StepResults {
+		if step.StepName == "reserve_funds" && step.Success {
+			createLienSucceeded = true
+		}
+		if step.StepName == "send_to_gateway" && step.Success {
+			sendToGatewaySucceeded = true
+		}
+	}
+
+	if createLienSucceeded && lienID == "" {
+		o.logger.Error("saga output missing lien_id after successful reserve_funds step",
+			"payment_order_id", latestPO.ID.String(),
+			"output", result.Output)
+		if err := o.failPaymentOrder(ctx, latestPO, "saga output missing lien_id", "SAGA_OUTPUT_INVALID"); err != nil {
+			o.logger.Error("failed to mark payment order as failed after missing lien_id",
+				"payment_order_id", latestPO.ID.String(),
+				"error", err)
+		}
+		return
+	}
+
+	if sendToGatewaySucceeded && gatewayReferenceID == "" {
+		o.logger.Error("saga output missing gateway_reference_id after successful send_to_gateway step",
+			"payment_order_id", latestPO.ID.String(),
+			"output", result.Output)
+		if err := o.failPaymentOrder(ctx, latestPO, "saga output missing gateway_reference_id", "SAGA_OUTPUT_INVALID"); err != nil {
+			o.logger.Error("failed to mark payment order as failed after missing gateway_reference_id",
+				"payment_order_id", latestPO.ID.String(),
+				"error", err)
+		}
+		return
+	}
+
 	// Apply state transitions based on what the saga accomplished
 	// The handlers call external services but don't update PaymentOrder state
 	// This orchestrator method applies domain state transitions and publishes events
