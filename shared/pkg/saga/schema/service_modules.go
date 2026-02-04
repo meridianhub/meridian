@@ -239,7 +239,7 @@ func buildServiceStruct(name string, node *handlerTree, registry *saga.HandlerRe
 // wrapHandler creates a Starlark builtin that wraps a Go Handler.
 // It handles parameter validation against the schema and type conversion.
 //
-//nolint:gocognit // Handler wrapping inherently requires checking multiple conditions
+//nolint:gocognit,gocyclo // Handler wrapping inherently requires checking multiple conditions
 func wrapHandler(fullName string, handler saga.Handler, handlerDef *HandlerDef) *starlark.Builtin {
 	return starlark.NewBuiltin(fullName, func(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 		// Handle positional args (should be empty for handlers) - check first for fast fail
@@ -274,6 +274,40 @@ func wrapHandler(fullName string, handler saga.Handler, handlerDef *HandlerDef) 
 
 		// Call the handler
 		result, err := handler(ctx, params)
+
+		// Always track step results (for both success and failure cases)
+		// Get stepResults slice from thread-local storage
+		if stepResultsVal := thread.Local("saga.StepResults"); stepResultsVal != nil {
+			if stepResults, ok := stepResultsVal.(*[]saga.StepResult); ok {
+				// Build step result
+				stepResult := saga.StepResult{
+					StepName: fullName,
+					Success:  err == nil,
+					Output:   result,
+				}
+
+				if err != nil {
+					stepResult.Error = err.Error()
+				} else if handlerDef.Compensate != "" {
+					// If successful and has compensation handler, capture compensation metadata
+					stepResult.CompensateHandler = handlerDef.Compensate
+
+					// Derive compensation params from the forward step output
+					compensateParams := make(map[string]any)
+					if output, ok := result.(map[string]interface{}); ok {
+						for key, value := range output {
+							if key == "id" || (len(key) > 3 && key[len(key)-3:] == "_id") {
+								compensateParams[key] = value
+							}
+						}
+					}
+					stepResult.CompensateParams = compensateParams
+				}
+
+				*stepResults = append(*stepResults, stepResult)
+			}
+		}
+
 		if err != nil {
 			return nil, err
 		}
