@@ -50,6 +50,7 @@
     "**/node_modules/**",
     "**/.git/**",
     ".taskmaster/**",
+    ".claude/**",
     "docs/architecture/**",
     "docs/adr/**"
   ]
