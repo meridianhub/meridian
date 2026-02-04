@@ -44,7 +44,7 @@ def execute_withdrawal():
     # Step 1: Log position in PositionKeeping service with DEBIT direction
     step(name="log_position")
     log_position_result = position_keeping.initiate_log(
-        account_id=account_identification,
+        position_id=account_identification,
         amount=amount,
         currency=currency,
         direction="DEBIT",
