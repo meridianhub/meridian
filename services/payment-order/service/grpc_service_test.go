@@ -2072,6 +2072,7 @@ func TestSagaOrchestration_HappyPath(t *testing.T) {
 		Repo:                 repo,
 		CurrentAccountClient: caClient,
 		PaymentGateway:       gwMock,
+		ReferenceDataClient:  NewMockReferenceDataClient(),
 	})
 	require.NoError(t, err)
 
@@ -2143,6 +2144,7 @@ func TestSagaOrchestration_LienFailure(t *testing.T) {
 		Repo:                 repo,
 		CurrentAccountClient: caClient,
 		PaymentGateway:       gwMock,
+		ReferenceDataClient:  NewMockReferenceDataClient(),
 	})
 	require.NoError(t, err)
 
@@ -2211,6 +2213,7 @@ func TestSagaOrchestration_GatewayFailure(t *testing.T) {
 		Repo:                 repo,
 		CurrentAccountClient: caClient,
 		PaymentGateway:       gwMock,
+		ReferenceDataClient:  NewMockReferenceDataClient(),
 	})
 	require.NoError(t, err)
 
@@ -2305,6 +2308,7 @@ func TestSagaOrchestration_Timeout(t *testing.T) {
 		Repo:                 repo,
 		CurrentAccountClient: caClient,
 		PaymentGateway:       gwMock,
+		ReferenceDataClient:  NewMockReferenceDataClient(),
 	})
 	require.NoError(t, err)
 
@@ -2467,6 +2471,7 @@ func TestSagaOrchestration_MalformedLienResponse(t *testing.T) {
 		Repo:                 repo,
 		CurrentAccountClient: caClient,
 		PaymentGateway:       gwClient,
+		ReferenceDataClient:  NewMockReferenceDataClient(),
 	})
 	require.NoError(t, err)
 
@@ -2533,6 +2538,7 @@ func TestSagaOrchestration_GatewayPending(t *testing.T) {
 		Repo:                 repo,
 		CurrentAccountClient: caClient,
 		PaymentGateway:       gwClient,
+		ReferenceDataClient:  NewMockReferenceDataClient(),
 	})
 	require.NoError(t, err)
 
