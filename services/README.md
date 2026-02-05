@@ -369,7 +369,8 @@ The Utilization Metering Consumer is a centralized Kafka consumer for platform b
 - **HPA scaling** based on Kafka consumer lag (1-5 replicas)
 - **Tenant-zero isolation** for platform billing data
 
-See [services/utilization-metering-consumer/k8s/README.md](utilization-metering-consumer/k8s/README.md) for deployment details.
+See [services/utilization-metering-consumer/README.md](utilization-metering-consumer/README.md) for full
+documentation and [k8s/README.md](utilization-metering-consumer/k8s/README.md) for deployment details.
 
 ## Service-Owned Client Libraries
 
