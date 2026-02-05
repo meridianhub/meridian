@@ -9,7 +9,8 @@ triggers:
 instructions: |
   Account Services (CurrentAccount, InternalBankAccount) host the Asset Valuation service domain via
   shared library (Virtual Service pattern). Each account's ValuationFeature (Behavior Qualifier) defines
-  how it accepts value. The shared/pkg/valuation library executes CEL/Starlark ValuationMethods.
+  how it accepts value. The shared/pkg/valuation library executes Starlark ValuationMethods that invoke
+  named CEL Policies via run_policy(). Math lives in Policies; Starlark is pure procedure.
 
   BIAN Action Terms:
   - EvaluateAssetValuation: Non-binding inquiry (mobile apps, dashboards)
@@ -22,7 +23,7 @@ instructions: |
 # PRD: Asset Valuation Service Domain (BIAN-Native)
 
 **Status:** Draft - BIAN Refinement
-**Version:** 2.9 (BIAN Action Terms & CR/BQ Decomposition)
+**Version:** 3.0 (Referenced Policies - No Inline Math)
 **BIAN Service Domain:** Asset Valuation (Fulfilment Pattern)
 **Task Master Tag:** `valuation-engine`
 **Story Points:** 82 (11 streams)
@@ -40,6 +41,7 @@ instructions: |
 - v2.7: Dimension-tagged buckets for DB enforcement, Ghost Pricing regression test
 - v2.8: BIAN alignment assessment documentation (85-90% compliance)
 - v2.9: Full BIAN adoption - CR/BQ pattern, Action Terms, Virtual Service (100% compliance)
+- v3.0: Referenced Policies architecture - CEL expressions stored as named Policy objects, `run_policy()` replaces `cel_eval()`
 
 ## BIAN Terminology Mapping
 
@@ -84,10 +86,11 @@ while a **shared valuation library** provides the **computational integrity**.
 ### Architecture at a Glance
 
 ```text
-shared/pkg/valuation/          # Shared library (CEL + Starlark runtime)
+shared/pkg/valuation/          # Shared library (Policy + Starlark runtime)
 ├── engine.go                  # Core valuation execution
-├── builtins.go               # market_data, cel_eval functions
-└── cache.go                  # L1 in-memory cache
+├── builtins.go               # market_data, run_policy functions
+├── policy_runtime.go         # CEL policy executor with cost limits
+└── cache.go                  # L1 in-memory cache (policies + methods)
 
 services/current-account/      # Implements EvaluateAssetValuation RPC
 services/internal-bank-account/ # Implements EvaluateAssetValuation RPC
@@ -124,8 +127,9 @@ architecture with BIAN's Service Domain decomposition:
 │  │                   services/current-account                         │  │
 │  │  ┌─────────────────────────────────────────────────────────────┐  │  │
 │  │  │  shared/pkg/valuation (embedded library)                     │  │  │
-│  │  │  • CEL/Starlark execution engine                             │  │  │
-│  │  │  • ValuationMethod resolution                                │  │  │
+│  │  │  • Starlark procedure execution (no inline math)             │  │  │
+│  │  │  • CEL Policy resolution via run_policy()                    │  │  │
+│  │  │  • ValuationMethod + ValuationPolicy resolution              │  │  │
 │  │  │  • Market data integration                                   │  │  │
 │  │  └─────────────────────────────────────────────────────────────┘  │  │
 │  └────────────────────────────────────────────────────────────────────┘  │
@@ -214,10 +218,11 @@ In a multi-asset ledger, the "Conversion Rate" is not a global constant.
 
 We implement an **Account Responsibility Pattern**:
 
-1. **Shared Library**: `shared/pkg/valuation` provides CEL/Starlark execution engine
+1. **Shared Library**: `shared/pkg/valuation` provides Starlark + CEL Policy execution engine
 2. **Account Ownership**: Account Services implement `EvaluateAssetValuation` RPC
 3. **Feature Assignment**: Accounts store ValuationFeature (BQ) with `valuation_method_id` + parameters
 4. **In-Process Execution**: Valuation happens within Account Service process boundary
+5. **No Inline Math**: Starlark scripts invoke named Policies via `run_policy()` - CEL strings forbidden
 
 ### 3.1 Control Record / Behavior Qualifier Pattern (BIAN)
 
@@ -334,6 +339,7 @@ def resolve_valuation_feature(account_id, input_instrument):
 **Error Handling:**
 
 If no ValuationFeature exists for the input instrument:
+
 - Return `VALUATION_METHOD_NOT_FOUND` error
 - Saga can retry with fallback account or compensate
 
@@ -373,6 +379,7 @@ domain (per-tenant schema):
 ```sql
 -- Lives in Reference Data service (tenant-scoped via PostgreSQL schemas)
 -- BIAN terminology: ValuationMethod (not "strategy")
+-- NOTE: Methods are Starlark-only (procedures). Math lives in Policies.
 CREATE TABLE valuation_methods (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
@@ -384,10 +391,14 @@ CREATE TABLE valuation_methods (
     input_instrument VARCHAR(32) NOT NULL,  -- "KWH"
     output_instrument VARCHAR(32) NOT NULL, -- "GBP"
 
-    -- Logic (Starlark script or CEL expression)
-    logic_type VARCHAR(16) NOT NULL,     -- "STARLARK", "CEL"
+    -- Logic (Starlark script ONLY - no inline math)
+    -- Starlark calls run_policy() for calculations
     logic_script TEXT NOT NULL,
     logic_hash VARCHAR(64) NOT NULL,     -- SHA-256 for cache invalidation
+
+    -- Policy references (policies this method depends on)
+    -- Validated at activation time to ensure all referenced policies exist
+    required_policies TEXT[] NOT NULL DEFAULT '{}',  -- e.g., ['energy_rate_calc', 'vat_rate']
 
     -- BIAN Lifecycle Status
     lifecycle_status VARCHAR(16) NOT NULL DEFAULT 'INITIATED',
@@ -404,7 +415,6 @@ CREATE TABLE valuation_methods (
     valid_to TIMESTAMPTZ,
 
     UNIQUE(name, version),
-    CHECK (logic_type IN ('STARLARK', 'CEL')),
     CHECK (logic_script <> '')
 );
 
@@ -414,6 +424,92 @@ CREATE INDEX idx_valuation_methods_lookup
 CREATE INDEX idx_valuation_methods_bitemporal
     ON valuation_methods(name, valid_from, valid_to);
 ```
+
+### 3.3 ValuationPolicy Definition (Referenced CEL Expressions)
+
+**The "No-Inline-Math" Principle:**
+
+Starlark scripts are **procedures** - they orchestrate data flow, handle branching, and aggregate results.
+They should NOT contain mathematical formulas as inline strings. Instead, all calculations are stored as
+**named, versioned Policy objects** in Reference Data.
+
+**Why This Matters:**
+
+| Concern | Inline CEL (`cel_eval(string)`) | Referenced Policy (`run_policy(name)`) |
+|---------|--------------------------------|----------------------------------------|
+| **Auditability** | Formula buried in Starlark | Formula is first-class entity |
+| **Versioning** | Script version includes math | Math versioned independently |
+| **Testing** | Must execute full Starlark | Can unit-test Policy in isolation |
+| **AI Generation** | AI must embed formulas | AI references existing Policies |
+| **Governance** | Math changes require script update | Finance team can update Policies |
+
+**Policy Table Schema:**
+
+```sql
+-- Lives in Reference Data service (tenant-scoped via PostgreSQL schemas)
+-- CEL expressions as first-class, named, versioned objects
+CREATE TABLE valuation_policies (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    -- Identification
+    name VARCHAR(64) NOT NULL,           -- "energy_rate_calc", "vat_standard", "fx_spread"
+    version INTEGER NOT NULL DEFAULT 1,
+
+    -- CEL Expression (the actual math)
+    cel_expression TEXT NOT NULL,        -- "spot * coefficient * (1 + markup)"
+    cel_hash VARCHAR(64) NOT NULL,       -- SHA-256 for cache invalidation
+
+    -- Input/Output Schema (for validation and documentation)
+    input_schema JSONB NOT NULL,         -- {"spot": "Decimal", "coefficient": "Decimal", ...}
+    output_type VARCHAR(32) NOT NULL,    -- "Decimal", "Boolean", "String"
+
+    -- Cost Analysis (pre-computed at creation time)
+    estimated_cost INTEGER NOT NULL,     -- CEL cost units (must be < 10,000)
+
+    -- BIAN Lifecycle Status
+    lifecycle_status VARCHAR(16) NOT NULL DEFAULT 'INITIATED',
+    CHECK (lifecycle_status IN ('INITIATED', 'ACTIVE', 'DEPRECATED')),
+
+    -- Metadata
+    description TEXT,                    -- Human-readable explanation
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    activated_at TIMESTAMPTZ,
+    deprecated_at TIMESTAMPTZ,
+
+    -- Bi-temporal for replay
+    valid_from TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    valid_to TIMESTAMPTZ,
+
+    UNIQUE(name, version),
+    CHECK (cel_expression <> ''),
+    CHECK (estimated_cost > 0 AND estimated_cost < 10000)
+);
+
+CREATE INDEX idx_valuation_policies_lookup
+    ON valuation_policies(name, lifecycle_status);
+
+CREATE INDEX idx_valuation_policies_bitemporal
+    ON valuation_policies(name, valid_from, valid_to);
+```
+
+**Example Policies:**
+
+| Policy Name | CEL Expression | Description |
+|-------------|----------------|-------------|
+| `energy_rate_calc` | `spot * coefficient * (1 + markup)` | Standard energy pricing |
+| `vat_standard` | `amount * 0.20` | UK VAT at 20% |
+| `vat_reduced` | `amount * 0.05` | UK reduced VAT at 5% |
+| `fx_spread` | `mid_rate * (1 + spread_bps / 10000)` | FX with basis point spread |
+| `tiered_rate_lookup` | `balance < tier_1 ? rate_1 : (balance < tier_2 ? rate_2 : rate_3)` | Tiered pricing |
+
+**SYSTEM Policies (Platform Defaults):**
+
+| Policy Name | CEL Expression | Use Case |
+|-------------|----------------|----------|
+| `SYSTEM_IDENTITY` | `amount` | 1:1 passthrough |
+| `SYSTEM_FIXED_RATE` | `amount * rate` | Simple multiplication |
+| `SYSTEM_UK_VAT_STANDARD` | `amount * 0.20` | UK VAT 20% |
+| `SYSTEM_UK_VAT_REDUCED` | `amount * 0.05` | UK VAT 5% |
 
 #### Platform Default Inheritance (The "SYSTEM Method" Pattern)
 
@@ -625,7 +721,7 @@ message MarketDataQuality {
 
 ### FR-2: Shared Valuation Library
 
-**Requirement:** A reusable Go library MUST provide CEL/Starlark execution for valuation logic.
+**Requirement:** A reusable Go library MUST provide Starlark procedure execution with referenced CEL Policy evaluation.
 
 **Package:** `shared/pkg/valuation`
 
@@ -668,16 +764,27 @@ type Analysis struct {
 
 The engine executes logic in three tiers:
 
-1. **Starlark (The Procedure):** Aggregates data, handles rounding logic and branching.
-2. **CEL (The Policy):** Performs the high-speed numeric multiplication (~100ns).
+1. **Starlark (The Procedure):** Aggregates data, handles rounding logic and branching. **No inline math.**
+2. **CEL Policy (The Math):** Named, versioned expressions invoked via `run_policy()` (~100ns).
 3. **Market Data (The Fact):** Injects the bi-temporal rates (e.g., FX mid-rate).
+
+**The "No-Inline-Math" Rule:**
+
+Starlark scripts MUST NOT contain CEL expression strings. All mathematical calculations MUST be
+delegated to named Policies via `run_policy()`. This ensures:
+
+- **Auditability:** Every formula is a first-class, versioned object
+- **Testability:** Policies can be unit-tested in isolation
+- **Governance:** Finance teams can update Policies without touching Starlark
+- **AI Safety:** AI generates procedure flow, not formula strings
 
 **Example Execution Flow:**
 
 ```python
 # Starlark ValuationMethod loaded from Reference Data
 # SECURITY: Sandboxed execution - no filesystem, no network, no system calls
-# LIMITS: 5s timeout, 64MB memory, CEL expressions limited to 10,000 cost units
+# LIMITS: 5s timeout, 64MB memory, Policies limited to 10,000 cost units each
+# CONSTRAINT: No inline math - all calculations via run_policy()
 def valuate_energy(input_quantity, params, knowledge_at):
     # 1. Validate required parameters
     if "gsp_coefficient" not in params:
@@ -693,20 +800,23 @@ def valuate_energy(input_quantity, params, knowledge_at):
 
     spot_price = spot_result.value
 
-    # 3. Execute CEL calculation (cost: 2 units for spot * coeff * markup)
-    rate = cel_eval("spot * coeff * markup", {
+    # 3. Execute NAMED POLICY for calculation (NOT inline CEL string)
+    # Policy "energy_rate_calc" is stored in valuation_policies table
+    # Policy CEL: "spot * coefficient * (1 + markup)"
+    rate = run_policy("energy_rate_calc", {
         "spot": spot_price,
-        "coeff": gsp_coefficient,
-        "markup": 1.02  # 2% markup
+        "coefficient": gsp_coefficient,
+        "markup": Decimal("0.02")  # 2% markup
     })
 
-    # 4. Apply to quantity
+    # 4. Apply to quantity (simple multiplication is allowed in Starlark)
     output_amount = input_quantity.amount * rate
 
     return {
         "amount": output_amount,
         "instrument": "GBP",
         "analysis": {
+            "policy_used": "energy_rate_calc",
             "spot_price": spot_price,
             "gsp_coefficient": gsp_coefficient,
             "final_rate": rate
@@ -714,14 +824,28 @@ def valuate_energy(input_quantity, params, knowledge_at):
     }
 ```
 
-#### CEL Cost Limits
+**Anti-Pattern (FORBIDDEN):**
 
-To prevent denial-of-service from runaway expressions, CEL evaluations enforce strict limits:
+```python
+# ❌ WRONG - Inline CEL expression string
+rate = cel_eval("spot * coeff * markup", {...})
 
-| Limit | Value | Behavior When Exceeded |
-|-------|-------|------------------------|
-| **Maximum cost** | 10,000 units | `COST_LIMIT_EXCEEDED` error |
-| **Execution timeout** | 100ms | `TIMEOUT_EXCEEDED` error |
+# ❌ WRONG - Math in Starlark
+rate = spot_price * gsp_coefficient * Decimal("1.02")
+
+# ✅ CORRECT - Named policy reference
+rate = run_policy("energy_rate_calc", {...})
+```
+
+#### Policy Cost Limits
+
+To prevent denial-of-service from runaway expressions, **Policy cost is validated at creation time**,
+not just at runtime. This is a key benefit of the Referenced Policies architecture.
+
+| Limit | Value | When Enforced |
+|-------|-------|---------------|
+| **Maximum cost** | 10,000 units | **Policy creation** (rejected if exceeded) |
+| **Execution timeout** | 100ms | Runtime (per `run_policy()` call) |
 
 **Cost Accounting Rules:**
 
@@ -734,21 +858,44 @@ To prevent denial-of-service from runaway expressions, CEL evaluations enforce s
 | List/map element access | 1 unit per element |
 | String operations | 1 unit per character (max 1000) |
 
-**Example:** A method performing `spot * coeff * markup` costs 2 units. A method iterating over
-500 market data points with 3 operations each costs ~1,500 units (within limit).
+**Example:** A policy performing `spot * coefficient * (1 + markup)` costs 4 units.
 
-**Error Response:**
+**Creation-Time Validation:**
+
+When a Policy is created or updated, the system:
+
+1. Parses the CEL expression
+2. Computes the estimated cost
+3. **Rejects** the policy if cost exceeds 10,000 units
+4. Stores `estimated_cost` in the policy record
 
 ```json
 {
-  "error": "COST_LIMIT_EXCEEDED",
-  "message": "CEL expression exceeded 10,000 cost units (actual: 12,345)",
-  "method_id": "wholesale-energy-v2"
+  "error": "POLICY_COST_EXCEEDED",
+  "message": "Policy 'complex_pricing' exceeds cost limit (estimated: 12,345, max: 10,000)",
+  "policy_name": "complex_pricing"
 }
 ```
 
-**Saga Response:** On cost/timeout exceeded, saga should retry with simpler method or fail
-gracefully with compensation.
+**Why Creation-Time Validation Matters:**
+
+- **No runtime surprises:** Policies that pass validation are guaranteed to execute
+- **Fast feedback:** Authors learn immediately if expression is too complex
+- **Governance:** Finance team can review cost before deployment
+- **Cache-friendly:** Cost is known, enabling efficient execution planning
+
+**Runtime Enforcement:**
+
+Even with creation-time validation, runtime still enforces limits to handle edge cases
+(e.g., large input arrays):
+
+```json
+{
+  "error": "POLICY_TIMEOUT_EXCEEDED",
+  "message": "Policy 'tiered_rate_lookup' exceeded 100ms timeout",
+  "policy_name": "tiered_rate_lookup"
+}
+```
 
 #### Starlark Security Sandbox
 
@@ -786,7 +933,7 @@ against method definition.
 - `Version` (for instruments with evolving definitions)
 - `Attributes` (for fungibility metadata, e.g., "vintage", "source")
 
-**Validation:** The Valuation Engine MUST verify that the instrument returned by the Starlark/CEL method
+**Validation:** The Valuation Engine MUST verify that the instrument returned by the Starlark method
 matches the `output_instrument` defined in the `ValuationFeature`.
 
 **Enforcement Point:** This check happens at **activation time** (when a method is assigned to an account),
@@ -806,7 +953,7 @@ if resp.Output.InstrumentCode != expectedInstrument {
 #### Runtime Output Instrument Validation (The "Chemical Signature" Check)
 
 **Requirement:** The `ResolveValuationMethod` call MUST return the `OutputInstrumentCode` as a type-hint.
-The Valuation Engine MUST then wrap the Starlark/CEL execution with a **post-execution type check**:
+The Valuation Engine MUST then wrap the Starlark execution with a **post-execution type check**:
 
 ```text
 Expected: GBP (from method definition)
@@ -829,7 +976,7 @@ func (e *Engine) Valuate(ctx context.Context, req Request) (*Response, error) {
         return nil, fmt.Errorf("load method: %w", err)
     }
 
-    // 2. Execute Starlark/CEL
+    // 2. Execute Starlark (which calls run_policy() for math)
     result, err := e.executeScript(ctx, method.LogicScript, req)
     if err != nil {
         return nil, fmt.Errorf("execute script: %w", err)
@@ -1235,8 +1382,10 @@ BAD: Valuation triggers position log → Position log triggers valuation → Loo
 func newValuationBuiltins() starlark.StringDict {
     return starlark.StringDict{
         "market_data":    builtinMarketData,     // ✅ Read-only
-        "cel_eval":       builtinCelEval,        // ✅ Pure computation
+        "run_policy":     builtinRunPolicy,      // ✅ Named policy execution (NEW)
         "quantity":       builtinQuantity,       // ✅ Math operations
+        "Decimal":        builtinDecimal,        // ✅ Financial precision
+        // ❌ NO cel_eval - inline CEL strings forbidden
         // ❌ NO position_keeping, NO financial_accounting
     }
 }
@@ -1254,10 +1403,13 @@ shared/pkg/valuation/
 ├── internal/
 │   └── builtins/          # Cannot import anything outside shared/pkg/valuation
 │       ├── market_data.go # ✅ Allowed: Reference Data client
-│       ├── cel_eval.go    # ✅ Allowed: CEL runtime
-│       └── quantity.go    # ✅ Allowed: Math operations
+│       ├── run_policy.go  # ✅ Allowed: Policy runtime (NEW)
+│       ├── quantity.go    # ✅ Allowed: Math operations
+│       └── decimal.go     # ✅ Allowed: Financial precision
+│       # ❌ FORBIDDEN: No cel_eval.go - inline CEL strings not allowed
 │       # ❌ FORBIDDEN: Cannot import positionkeepingclient
 │       # ❌ FORBIDDEN: Cannot import financialaccountingclient
+├── policy_runtime.go      # CEL policy executor (NEW)
 └── engine.go
 ```
 
@@ -1920,19 +2072,42 @@ shared/pkg/valuation/
 │   └── func (e *Engine) Valuate(ctx, req) (*Response, error)
 ├── builtins.go               # Starlark builtins
 │   └── market_data.get_price()
-│   └── cel_eval()
+│   └── run_policy()          # ✅ Named policy invocation (NEW)
 │   └── quantity operations
+│   # ❌ NO cel_eval() - inline CEL strings forbidden
 ├── cache.go                  # L1 in-memory cache
 │   └── Method cache (5min TTL)
-│   └── CEL expression cache
-├── cel_runtime.go            # CEL compiler wrapper
-│   └── Security constraints
-│   └── Cost limits
+│   └── Policy cache (5min TTL)
+├── policy_runtime.go         # CEL policy executor (NEW)
+│   └── Compile & cache policies
+│   └── Cost validation
+│   └── Input schema validation
 ├── starlark_runtime.go       # Starlark VM wrapper
 │   └── Deterministic execution
 │   └── Timeout controls
+│   └── No-inline-math enforcement
 └── types.go                  # Request/Response types
-    └── type Request, Response, Basis
+    └── type Request, Response, Analysis
+```
+
+**No-Inline-Math Enforcement:**
+
+The Starlark runtime performs static analysis on loaded scripts to reject any that:
+
+1. Import or reference `cel_eval` (function does not exist)
+2. Contain CEL-like expression strings (heuristic detection)
+
+```go
+// starlark_runtime.go
+func (r *StarlarkRuntime) ValidateScript(script string) error {
+    // Reject if script references removed cel_eval builtin
+    if strings.Contains(script, "cel_eval") {
+        return &NoInlineMathError{
+            Message: "cel_eval() is forbidden - use run_policy() instead",
+        }
+    }
+    return nil
+}
 ```
 
 ### 5.3 The "Passport Pattern" - Audit Integrity Across Flows
@@ -2126,32 +2301,40 @@ Fulfillment Arrangements (Control Records).
 - ValuationFeatures can be updated without service restart
 - BIAN lifecycle status transitions are enforced
 
-### Stream 2: Valuation Engine Library (P0, 12 points)
+### Stream 2: Valuation Engine Library (P0, 15 points)
+
+**Architecture:** Referenced Policies - Starlark calls `run_policy()` for all calculations.
 
 **Tasks:**
 
 1. Create `shared/pkg/valuation` package structure
-2. Implement CEL compiler wrapper with security constraints
-3. Implement Starlark VM wrapper with timeouts
-4. Register built-in functions (market_data, cel_eval, quantity operations)
-5. **CRITICAL:** Implement separate read-only builtin registry (exclude position_keeping, financial_accounting)
-6. **CRITICAL:** Use `internal/builtins` package isolation to enforce read-only at Go module level
-7. Implement L1 in-memory cache with graceful stale policy (1-hour grace if backend down)
-8. Implement `record_path()` builtin with 20-entry size limit
-9. Implement output instrument validation (runtime type check)
-10. Add comprehensive unit tests
-11. **CRITICAL:** Add security verification test (method cannot call write handlers)
-12. **CRITICAL:** Add CI verification script that fails if write imports are added
-13. Add benchmarks (target: <5ms in-process execution)
-14. Document library usage patterns
+2. Implement Policy runtime (CEL compiler wrapper) with security constraints
+3. Implement `run_policy()` builtin that resolves and executes named Policies
+4. Implement Starlark VM wrapper with timeouts
+5. Register built-in functions: `market_data`, `run_policy()`, `quantity`, `Decimal`
+6. **CRITICAL:** NO `cel_eval()` builtin - inline CEL strings forbidden
+7. **CRITICAL:** Implement No-Inline-Math enforcement (reject scripts containing `cel_eval`)
+8. **CRITICAL:** Implement separate read-only builtin registry (exclude position_keeping, financial_accounting)
+9. **CRITICAL:** Use `internal/builtins` package isolation to enforce read-only at Go module level
+10. Implement L1 in-memory cache with graceful stale policy (1-hour grace if backend down)
+11. Implement Policy cache (compiled CEL programs)
+12. Implement `record_path()` builtin with 20-entry size limit
+13. Implement output instrument validation (runtime type check)
+14. Add comprehensive unit tests
+15. **CRITICAL:** Add security verification test (method cannot call write handlers)
+16. **CRITICAL:** Add No-Inline-Math verification test (script with `cel_eval` is rejected)
+17. **CRITICAL:** Add CI verification script that fails if write imports are added
+18. Add benchmarks (target: <5ms in-process execution)
+19. Document library usage patterns
 
 **Success Criteria:**
 
-- Can compile and execute CEL expressions
-- Can execute Starlark scripts with all builtins
-- Expression cost limits prevent infinite loops
+- Can execute Starlark scripts that call `run_policy()` for calculations
+- Can resolve and execute named Policies from Reference Data
+- Policy cost validation happens at policy creation (not just runtime)
 - Benchmark shows <5ms execution time for typical methods
-- Cache hit rate >80% after warmup (for same method_id)
+- Cache hit rate >80% after warmup (for same method_id and policy_name)
+- **No-Inline-Math test passes:** Script with `cel_eval("...")` fails with clear error
 - **Security test passes:** Method attempting `position_keeping.initiate_log` fails with
   `name 'position_keeping' is not defined`
 - **Architecture test passes:** Build fails if valuation package imports write-capable clients
@@ -2159,31 +2342,46 @@ Fulfillment Arrangements (Control Records).
 - Calculation path limited to 20 entries (logs warning on truncation)
 - Output instrument mismatch returns hard error (VALUATION_OUTPUT_MISMATCH)
 
-### Stream 3: Reference Data ValuationMethod Storage (P0, 6 points)
+### Stream 3: Reference Data ValuationMethod & Policy Storage (P0, 10 points)
 
-**BIAN Pattern:** This stream implements the ValuationMethod reference data, which Account Services
-reference via their ValuationFeature Behavior Qualifiers.
+**BIAN Pattern:** This stream implements ValuationMethod and ValuationPolicy reference data.
+Methods are Starlark procedures; Policies are named CEL expressions.
 
 **Tasks:**
 
-1. Add `valuation_methods` table to Reference Data service (BIAN terminology)
-2. Implement `GetValuationMethod` RPC with bi-temporal support
-3. Implement `ResolveValuationMethod` RPC with **Platform Default Inheritance**
-4. Add method validation (syntax check, instrument compatibility)
-5. Add `output_instrument` to method response (for runtime type validation)
-6. Seed SYSTEM identity methods for major currencies (USD, EUR, GBP, NZD, AUD)
-7. Seed SYSTEM energy method (KWH → GBP, default £0.35/kWh)
-8. Seed SYSTEM carbon method (TONNE_CO2E → GBP, default £75/tonne)
-9. Add integration tests for tenant → SYSTEM fallback
+1. Add `valuation_methods` table to Reference Data service (Starlark only, no CEL type)
+2. Add `valuation_policies` table to Reference Data service (CEL expressions)
+3. Implement `GetValuationMethod` RPC with bi-temporal support
+4. Implement `GetValuationPolicy` RPC with bi-temporal support
+5. Implement `ResolveValuationMethod` RPC with **Platform Default Inheritance**
+6. Implement `ResolveValuationPolicy` RPC with **Platform Default Inheritance**
+7. Add method validation (Starlark syntax check, instrument compatibility)
+8. Add **Policy validation at creation time:**
+   - Parse CEL expression
+   - Compute estimated cost (reject if > 10,000)
+   - Validate input schema
+   - Store `estimated_cost` in policy record
+9. Add Policy dry-run endpoint: `DryRunPolicy(policy_name, sample_inputs) → result`
+10. Add `output_instrument` to method response (for runtime type validation)
+11. Add `required_policies` validation: Method cannot activate if referenced Policies don't exist
+12. Seed SYSTEM identity methods for major currencies (USD, EUR, GBP, NZD, AUD)
+13. Seed SYSTEM energy method (KWH → GBP, using `SYSTEM_ENERGY_RATE_CALC` policy)
+14. Seed SYSTEM carbon method (TONNE_CO2E → GBP, using `SYSTEM_CARBON_RATE` policy)
+15. Seed SYSTEM Policies: `SYSTEM_IDENTITY`, `SYSTEM_FIXED_RATE`, `SYSTEM_UK_VAT_STANDARD`
+16. Add integration tests for tenant → SYSTEM fallback (both methods and policies)
 
 **Success Criteria:**
 
-- ValuationMethods can be stored and retrieved via gRPC
-- Bi-temporal queries return correct method versions
-- Cache invalidation works on method updates
+- ValuationMethods can be stored and retrieved via gRPC (Starlark only)
+- ValuationPolicies can be stored and retrieved via gRPC (CEL only)
+- **Policy cost validated at creation:** Policy with cost > 10,000 is rejected
+- **Policy dry-run works:** Can test Policy with sample inputs before deployment
+- Bi-temporal queries return correct method and policy versions
+- Cache invalidation works on method and policy updates
 - Identity methods are available for all fiat currencies
 - **Platform Default Inheritance:** Tenant without KWH method gets SYSTEM_RETAIL_ENERGY
 - **Output instrument returned:** GetValuationMethod response includes `output_instrument`
+- **Required policies validated:** Method activation fails if referenced Policies missing
 - New tenant can valuate KWH without any configuration (uses SYSTEM defaults)
 
 ### Stream 4: Current Account Integration (P1, 10 points)
@@ -2444,10 +2642,13 @@ ALTER TABLE account_positions
 
 ### Unit Tests
 
-- CEL expression compilation and evaluation
+- Policy compilation and evaluation (CEL)
+- Policy cost estimation (reject > 10,000)
 - Starlark script parsing and execution
-- Cache hit/miss logic (L1 only)
-- Method validation
+- `run_policy()` builtin resolution and invocation
+- No-Inline-Math enforcement (`cel_eval` rejection)
+- Cache hit/miss logic (L1 only - methods and policies)
+- Method validation (including `required_policies` check)
 - Dimension Guard enforcement
 
 ### Integration Tests
@@ -2476,7 +2677,7 @@ ALTER TABLE account_positions
 
 ## 8. Success Metrics
 
-1. **Zero Hardcoded Rates:** All conversion math moves to Starlark/CEL by end of Stream 7.
+1. **Zero Hardcoded Rates:** All conversion math moves to named Policies by end of Stream 7.
 2. **Replay Parity:** Replaying a valuation from 1 year ago using `knowledge_at` produces the exact
    same result (±1 basis point).
 3. **Performance:** 95th percentile valuation latency < 8ms under normal load.
@@ -2659,20 +2860,29 @@ The embedded library approach follows the same pattern as:
 
 ## 13. Appendix: Example ValuationMethods
 
+**Note:** All examples use `run_policy()` for calculations. No inline math or `cel_eval()`.
+
 ### A. Identity Method (Fiat Currency)
 
 ```python
 # method: identity_usd
 # input: USD
 # output: USD
+# required_policies: ["SYSTEM_IDENTITY"]
 
 def valuate(input_quantity, params, knowledge_at):
-    """Identity transformation - 1:1 conversion."""
+    """Identity transformation - 1:1 conversion using SYSTEM_IDENTITY policy."""
+    # Policy "SYSTEM_IDENTITY" CEL: "amount"
+    output_amount = run_policy("SYSTEM_IDENTITY", {
+        "amount": input_quantity.amount
+    })
+
     return {
-        "amount": input_quantity.amount,
+        "amount": output_amount,
         "instrument": input_quantity.instrument,
         "analysis": {
             "method": "identity",
+            "policy_used": "SYSTEM_IDENTITY",
             "rate": "1.0"
         }
     }
@@ -2684,20 +2894,25 @@ def valuate(input_quantity, params, knowledge_at):
 # method: retail_energy_v1
 # input: KWH
 # output: GBP
+# required_policies: ["retail_tariff_calc"]
 
 def valuate(input_quantity, params, knowledge_at):
-    """Fixed tariff pricing for retail energy."""
+    """Fixed tariff pricing for retail energy using named policy."""
     # Get tariff from account parameters
-    tariff_rate = params.get("tariff_rate", 0.35)  # Default £0.35/kWh
+    tariff_rate = params.get("tariff_rate", Decimal("0.35"))  # Default £0.35/kWh
 
-    # Apply tariff
-    output_amount = input_quantity.amount * tariff_rate
+    # Policy "retail_tariff_calc" CEL: "quantity * rate"
+    output_amount = run_policy("retail_tariff_calc", {
+        "quantity": input_quantity.amount,
+        "rate": tariff_rate
+    })
 
     return {
         "amount": output_amount,
         "instrument": "GBP",
         "analysis": {
             "method": "retail_energy_v1",
+            "policy_used": "retail_tariff_calc",
             "tariff_rate": str(tariff_rate),
             "input_kwh": str(input_quantity.amount)
         }
@@ -2710,9 +2925,10 @@ def valuate(input_quantity, params, knowledge_at):
 # method: wholesale_energy_v1
 # input: KWH
 # output: GBP
+# required_policies: ["energy_rate_calc"]
 
 def valuate(input_quantity, params, knowledge_at):
-    """Spot price + GSP coefficient for wholesale energy."""
+    """Spot price + GSP coefficient for wholesale energy using named policy."""
 
     # 1. Get spot price from market data
     spot_price = market_data.get_price(
@@ -2722,26 +2938,32 @@ def valuate(input_quantity, params, knowledge_at):
 
     # 2. Get GSP coefficient from account parameters
     gsp_zone = params.get("gsp_zone", "_P")
-    gsp_coefficient = params.get("gsp_coefficient", 1.0)
+    gsp_coefficient = params.get("gsp_coefficient", Decimal("1.0"))
 
     # 3. Apply markup (if any)
-    markup = params.get("markup", 1.0)
+    markup = params.get("markup", Decimal("0.02"))  # 2% markup
 
-    # 4. Calculate using CEL for precision
-    final_rate = cel_eval("spot * coeff * markup", {
+    # 4. Calculate using NAMED POLICY (NOT inline CEL)
+    # Policy "energy_rate_calc" CEL: "spot * coefficient * (1 + markup)"
+    final_rate = run_policy("energy_rate_calc", {
         "spot": spot_price.value,
-        "coeff": gsp_coefficient,
+        "coefficient": gsp_coefficient,
         "markup": markup
     })
 
-    # 5. Apply to quantity
-    output_amount = input_quantity.amount * final_rate
+    # 5. Apply rate to quantity using NAMED POLICY
+    # Policy "SYSTEM_FIXED_RATE" CEL: "amount * rate"
+    output_amount = run_policy("SYSTEM_FIXED_RATE", {
+        "amount": input_quantity.amount,
+        "rate": final_rate
+    })
 
     return {
         "amount": output_amount,
         "instrument": "GBP",
         "analysis": {
             "method": "wholesale_energy_v1",
+            "policies_used": ["energy_rate_calc", "SYSTEM_FIXED_RATE"],
             "spot_price": str(spot_price.value),
             "spot_observation_id": spot_price.observation_id,
             "gsp_zone": gsp_zone,
@@ -2750,6 +2972,25 @@ def valuate(input_quantity, params, knowledge_at):
             "final_rate": str(final_rate)
         }
     }
+```
+
+### D. Anti-Pattern Examples (FORBIDDEN)
+
+```python
+# ❌ WRONG: Inline CEL expression string
+final_rate = cel_eval("spot * coeff * markup", {...})
+
+# ❌ WRONG: Math directly in Starlark
+output_amount = input_quantity.amount * tariff_rate
+
+# ❌ WRONG: Complex formula in Starlark
+vat_amount = base_amount * Decimal("0.20")
+total = base_amount + vat_amount
+
+# ✅ CORRECT: All math via named policies
+final_rate = run_policy("energy_rate_calc", {...})
+output_amount = run_policy("SYSTEM_FIXED_RATE", {"amount": qty, "rate": final_rate})
+vat_amount = run_policy("SYSTEM_UK_VAT_STANDARD", {"amount": base_amount})
 ```
 
 ---
@@ -2804,7 +3045,7 @@ Semantic API Practitioner Guide V8.1 and BIAN Service Landscape 12.0.
 performance. The valuation capability could be exposed as a separate service domain if needed
 for cross-cutting concerns.
 
-### Terminology Compliance (v2.9)
+### Terminology Compliance (v3.0)
 
 This PRD now uses BIAN-standard terminology throughout:
 
