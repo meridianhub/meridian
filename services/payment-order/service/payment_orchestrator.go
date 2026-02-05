@@ -308,11 +308,53 @@ func (o *PaymentOrchestrator) handleStarlarkSagaResult(ctx context.Context, po *
 			}
 		}
 
+		// Extract partial outputs from successful steps before failure
+		// This is important for tracking which resources were created (e.g., lien_id)
+		// so they can be properly cleaned up during compensation
+		//
+		// When a saga fails, result.Output is nil because the script never returns.
+		// But successful steps have their outputs in result.StepResults.
+		// We reconstruct relevant outputs from completed steps.
+		lienID := ""
+		for _, step := range result.StepResults {
+			if !step.Success {
+				continue
+			}
+			// Check if this step returned a lien_id
+			if stepOutput, ok := step.Output.(map[string]any); ok {
+				if lienIDVal, ok := stepOutput["lien_id"].(string); ok && lienIDVal != "" {
+					lienID = lienIDVal
+					break
+				}
+			}
+		}
+
 		// Reload payment order to get latest state
 		latestPO, err := o.repo.FindByID(ctx, po.ID)
 		if err != nil {
 			o.logger.Error("failed to reload payment order for failure handling", "error", err)
 			return
+		}
+
+		// If lien was created before failure, transition to RESERVED state first
+		// This ensures the lien_id is persisted for cleanup
+		if lienID != "" && latestPO.Status == domain.PaymentOrderStatusInitiated {
+			if err := latestPO.Reserve(lienID); err != nil {
+				o.logger.Warn("failed to transition to RESERVED during failure handling",
+					"payment_order_id", latestPO.ID.String(),
+					"lien_id", lienID,
+					"error", err)
+			} else {
+				if err := o.repo.Update(ctx, latestPO); err != nil {
+					o.logger.Error("failed to persist RESERVED state during failure handling",
+						"payment_order_id", latestPO.ID.String(),
+						"error", err)
+				} else {
+					o.logger.Info("persisted lien_id before marking payment as failed",
+						"payment_order_id", latestPO.ID.String(),
+						"lien_id", lienID)
+				}
+			}
 		}
 
 		// Mark as failed
