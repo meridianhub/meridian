@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -2348,7 +2349,11 @@ func TestSagaOrchestration_Timeout(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, domain.PaymentOrderStatusFailed, po.Status)
-	assert.Contains(t, po.FailureReason, "context deadline exceeded")
+	// Starlark returns "script execution timeout" instead of "context deadline exceeded"
+	assert.True(t,
+		strings.Contains(po.FailureReason, "context deadline exceeded") ||
+			strings.Contains(po.FailureReason, "script execution timeout"),
+		"FailureReason should contain timeout error, got: %s", po.FailureReason)
 	assert.Equal(t, "SAGA_FAILED", po.ErrorCode)
 	assert.NotNil(t, po.FailedAt)
 }
