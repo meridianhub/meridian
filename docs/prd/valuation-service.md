@@ -305,6 +305,66 @@ CREATE INDEX idx_valuation_features_bitemporal
     ON valuation_features(account_id, valid_from, valid_to);
 ```
 
+#### Multi-Asset Acceptance Pattern
+
+An account may accept multiple input asset types, each with a dedicated ValuationMethod.
+The `valuation_features` table enforces **one method per (account, input_instrument) pair**:
+
+| CO₂ Account Feature | Input Instrument | Method | Output |
+|---------------------|------------------|--------|--------|
+| Feature 1 | `KWH` | `kwh_to_co2_uk_grid` | TONNE_CO2E |
+| Feature 2 | `NATURAL_GAS_THERM` | `therm_to_co2_combustion` | TONNE_CO2E |
+| Feature 3 | `GBP` | `gbp_to_co2_market_purchase` | TONNE_CO2E |
+| Feature 4 | `DIESEL_LITRE` | `diesel_to_co2_mobile_combustion` | TONNE_CO2E |
+
+**Resolution Logic:**
+
+```python
+def resolve_valuation_feature(account_id, input_instrument):
+    """Find the method that handles this input → account's native instrument."""
+    return db.query("""
+        SELECT vf.* FROM valuation_features vf
+        JOIN valuation_methods vm ON vf.valuation_method_id = vm.id
+        WHERE vf.account_id = ?
+          AND vf.instrument_code = ?  -- Input instrument
+          AND vf.lifecycle_status = 'ACTIVE'
+    """, account_id, input_instrument)
+```
+
+**Error Handling:**
+
+If no ValuationFeature exists for the input instrument:
+- Return `VALUATION_METHOD_NOT_FOUND` error
+- Saga can retry with fallback account or compensate
+
+**Visual Example:**
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         CO₂ Account (TONNE_CO2E)                            │
+│                                                                             │
+│  ValuationFeatures:                                                         │
+│  ┌─────────────┬────────────────────────────┬─────────────────────────────┐│
+│  │ Input       │ Method                     │ Logic                       ││
+│  ├─────────────┼────────────────────────────┼─────────────────────────────┤│
+│  │ KWH         │ kwh_to_co2_uk_grid         │ Grid carbon intensity ×     ││
+│  │             │                            │ half-hourly settlement      ││
+│  ├─────────────┼────────────────────────────┼─────────────────────────────┤│
+│  │ THERM       │ therm_to_co2_combustion    │ Fixed combustion factor     ││
+│  │             │                            │ (2.04 kg/therm)             ││
+│  ├─────────────┼────────────────────────────┼─────────────────────────────┤│
+│  │ GBP         │ gbp_to_co2_market          │ Market price lookup         ││
+│  │             │                            │ (£75/tonne)                 ││
+│  ├─────────────┼────────────────────────────┼─────────────────────────────┤│
+│  │ DIESEL_L    │ diesel_to_co2_mobile       │ Fuel density × emission     ││
+│  │             │                            │ factor (2.68 kg/L)          ││
+│  └─────────────┴────────────────────────────┴─────────────────────────────┘│
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+This aligns with BIAN's **Financial Instrument Valuation** pattern: *"A wide range of valuation
+approaches can be applied to a range of different instrument/asset types."*
+
 ### 3.2 ValuationMethod Definition (formerly "Strategy")
 
 ValuationMethods are stored in the Reference Data service under the **Public Reference Data Management**
@@ -808,6 +868,78 @@ func (e *ValuationOutputMismatchError) Error() string {
 
 **Rationale:** Activation-time validation catches configuration errors. Runtime validation catches
 script bugs. Both layers are required for a robust dimension guard.
+
+#### Account Native Instrument Validation
+
+**Requirement:** When assigning a ValuationFeature to an account, the system MUST validate that the
+method's `output_instrument` matches the account's `native_instrument`.
+
+**Why This Matters:**
+
+A CO₂ account (native_instrument: TONNE_CO2E) should never be assigned a `kwh_to_gbp` method that
+outputs GBP. This validation prevents configuration errors at **feature assignment time**.
+
+**Implementation:**
+
+```go
+// In CreateValuationFeature / UpdateValuationFeature
+func (s *Service) CreateValuationFeature(
+    ctx context.Context,
+    req *CreateValuationFeatureRequest,
+) (*ValuationFeature, error) {
+    // 1. Load the method to get its output_instrument
+    method, err := s.refDataClient.GetValuationMethod(ctx, req.MethodID)
+    if err != nil {
+        return nil, fmt.Errorf("load method: %w", err)
+    }
+
+    // 2. Load the account to get its native_instrument
+    account, err := s.repo.FindByID(ctx, req.AccountID)
+    if err != nil {
+        return nil, fmt.Errorf("load account: %w", err)
+    }
+
+    // 3. CRITICAL: Validate method output matches account native instrument
+    if method.OutputInstrument != account.NativeInstrument {
+        return nil, &MethodOutputMismatchError{
+            MethodID:          method.ID,
+            MethodOutput:      method.OutputInstrument,
+            AccountID:         account.ID,
+            AccountNative:     account.NativeInstrument,
+        }
+    }
+
+    // 4. Create the feature
+    return s.repo.CreateFeature(ctx, req)
+}
+
+// MethodOutputMismatchError prevents invalid feature assignments
+type MethodOutputMismatchError struct {
+    MethodID      uuid.UUID
+    MethodOutput  string
+    AccountID     uuid.UUID
+    AccountNative string
+}
+
+func (e *MethodOutputMismatchError) Error() string {
+    return fmt.Sprintf(
+        "METHOD_OUTPUT_MISMATCH: method %s produces %s but account %s holds %s",
+        e.MethodID, e.MethodOutput, e.AccountID, e.AccountNative)
+}
+```
+
+**When This Fires:**
+
+- CO₂ account assigned `kwh_to_gbp` method → Hard error (outputs GBP, account holds TONNE_CO2E)
+- CO₂ account assigned `kwh_to_co2` method → Success (outputs TONNE_CO2E, account holds TONNE_CO2E)
+- GBP account assigned `kwh_to_gbp` method → Success (outputs GBP, account holds GBP)
+
+**Validation Layers Summary:**
+
+| Layer | When | What | Error Code |
+|-------|------|------|------------|
+| Feature Assignment | CreateValuationFeature | Method output vs account native | `METHOD_OUTPUT_MISMATCH` |
+| Runtime Execution | Valuate() | Script result vs method declaration | `VALUATION_OUTPUT_MISMATCH` |
 
 ### FR-5: Valuation Basis (The "Receipt")
 
