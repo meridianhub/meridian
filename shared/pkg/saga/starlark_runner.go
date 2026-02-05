@@ -229,9 +229,20 @@ func (r *StarlarkSagaRunner) ExecuteSaga(ctx context.Context, sagaName string, s
 		"step_count", len(stepResults),
 		"success", true)
 
+	// Extract the "output" global variable if present (common pattern in saga scripts)
+	// Otherwise fall back to using all globals as the output
+	outputMap := result.Globals
+	if outputValue, ok := result.Globals["output"]; ok {
+		// result.Globals values are already Go types (converted from Starlark)
+		// Try to use it as a map directly
+		if outputAsMap, ok := outputValue.(map[string]interface{}); ok {
+			outputMap = outputAsMap
+		}
+	}
+
 	return &RunnerOutput{
 		Success:     true,
-		Output:      result.Globals,
+		Output:      outputMap,
 		StepResults: stepResults,
 	}, nil
 }
@@ -318,12 +329,24 @@ func (r *StarlarkSagaRunner) buildInvokeHandlerShim(starlarkCtx *StarlarkContext
 			return nil, err
 		}
 
-		*stepResults = append(*stepResults, StepResult{
+		// Create step result with compensation metadata
+		stepResult := StepResult{
 			StepName: handlerName,
 			Success:  true,
 			Output:   result,
 			Duration: duration,
-		})
+		}
+
+		// Add compensation handler if known
+		// This is a backward-compatibility mapping for invoke_handler.
+		// Typed service modules should define compensation in handlers.yaml schema instead.
+		compensateHandler := getCompensationHandler(handlerName)
+		if compensateHandler != "" {
+			stepResult.CompensateHandler = compensateHandler
+			stepResult.CompensateParams = deriveCompensationParams(stepResult)
+		}
+
+		*stepResults = append(*stepResults, stepResult)
 
 		// Convert result to Starlark value
 		return goToStarlark(result), nil
@@ -341,6 +364,21 @@ func (r *StarlarkSagaRunner) WithLogger(logger *slog.Logger) *StarlarkSagaRunner
 		serviceModules: r.serviceModules,
 		logger:         logger,
 	}
+}
+
+// getCompensationHandler returns the compensation handler name for a given forward handler.
+// This is a backward-compatibility mapping for invoke_handler API.
+// Typed service modules should define compensation in handlers.yaml schema instead.
+func getCompensationHandler(forwardHandler string) string {
+	// Map forward handlers to their compensation handlers
+	compensationMap := map[string]string{
+		"payment_order.create_lien": "payment_order.terminate_lien",
+		// payment_order.send_to_gateway has no compensation (idempotent gateway calls)
+		// payment_order.post_ledger_entries has no compensation (immutable ledger)
+		// payment_order.execute_lien has no compensation (final settlement)
+	}
+
+	return compensationMap[forwardHandler]
 }
 
 // deriveCompensationParams extracts relevant fields from a forward step's output
