@@ -20,6 +20,7 @@ import (
 	poobservability "github.com/meridianhub/meridian/services/payment-order/observability"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/proto/mappers"
+	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/genproto/googleapis/type/money"
@@ -68,7 +69,7 @@ type PaymentOrchestrator struct {
 	paymentGateway            gateway.PaymentGateway
 	financialAccountingClient FinancialAccountingClient
 	internalBankAccountClient InternalBankAccountClient // Optional - for internal clearing
-	referenceDataClient       ReferenceDataClient       // Optional - for bucket-aware solvency
+	referenceDataClient       ReferenceDataClient       // Optional - for bucket-aware solvency and GetSaga()
 	bucketEvaluator           *BucketEvaluator          // Cached CEL evaluator for bucket IDs
 	accountResolver           *AccountResolver          // Optional - resolves clearing accounts dynamically
 	gatewayAccountConfig      *config.GatewayAccountConfig
@@ -76,6 +77,10 @@ type PaymentOrchestrator struct {
 	lienExecutionRetryConfig  *sharedclients.RetryConfig
 	internalClearingEnabled   bool
 	lockClient                LockClient // Distributed lock client for preventing concurrent lien execution
+
+	// Starlark saga execution fields
+	starlarkRunner  *saga.StarlarkSagaRunner // Executes saga scripts
+	handlerRegistry *saga.HandlerRegistry    // Registry of payment-order handlers
 }
 
 // PaymentOrchestratorConfig contains dependencies for creating a PaymentOrchestrator
@@ -128,7 +133,39 @@ func NewPaymentOrchestrator(cfg PaymentOrchestratorConfig) (*PaymentOrchestrator
 		return nil, fmt.Errorf("failed to create bucket evaluator: %w", err)
 	}
 
-	return &PaymentOrchestrator{
+	// Create handler registry and register payment-order handlers
+	handlerRegistry := saga.NewHandlerRegistry()
+	handlerDeps := &PaymentOrderHandlerDeps{
+		CurrentAccountClient:      cfg.CurrentAccountClient,
+		PaymentGateway:            cfg.PaymentGateway,
+		FinancialAccountingClient: cfg.FinancialAccountingClient,
+		ReferenceDataClient:       cfg.ReferenceDataClient,
+		BucketEvaluator:           bucketEvaluator,
+		LienExecutionRetryConfig:  cfg.LienExecutionRetryConfig,
+		Logger:                    cfg.Logger,
+		Orchestrator:              nil, // Will be set after orchestrator creation
+	}
+
+	if err := RegisterPaymentOrderHandlers(handlerRegistry, handlerDeps); err != nil {
+		return nil, fmt.Errorf("failed to register payment order handlers: %w", err)
+	}
+
+	// Create Starlark runtime and runner
+	runtime, err := saga.NewRuntime(cfg.Logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create starlark runtime: %w", err)
+	}
+
+	starlarkRunner, err := saga.NewStarlarkSagaRunner(saga.StarlarkSagaRunnerConfig{
+		Runtime:  runtime,
+		Registry: handlerRegistry,
+		Logger:   cfg.Logger,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create starlark saga runner: %w", err)
+	}
+
+	orchestrator := &PaymentOrchestrator{
 		logger:                    cfg.Logger,
 		repo:                      cfg.Repo,
 		currentAccountClient:      cfg.CurrentAccountClient,
@@ -143,16 +180,21 @@ func NewPaymentOrchestrator(cfg PaymentOrchestratorConfig) (*PaymentOrchestrator
 		lienExecutionRetryConfig:  cfg.LienExecutionRetryConfig,
 		internalClearingEnabled:   cfg.InternalClearingEnabled,
 		lockClient:                cfg.LockClient,
-	}, nil
+		starlarkRunner:            starlarkRunner,
+		handlerRegistry:           handlerRegistry,
+	}
+
+	// Set orchestrator reference in handler deps for PostLedgerEntries callback
+	handlerDeps.Orchestrator = orchestrator
+
+	return orchestrator, nil
 }
 
-// Orchestrate executes the payment saga with compensation on failure.
-// The saga steps (reserve_funds, send_to_gateway) are executed strictly sequentially by
-// the SagaOrchestrator - there is no concurrent step execution. The same PaymentOrder
-// pointer is safely shared across steps since only one step runs at a time.
-// Compensation is also sequential, running in reverse order (LIFO) on failure.
+// Orchestrate executes the payment saga using Starlark script execution.
+// The saga script is fetched from reference-data service and executed via StarlarkSagaRunner.
+// Compensation is handled automatically by the Starlark runtime on failure.
 func (o *PaymentOrchestrator) Orchestrate(ctx context.Context, po *domain.PaymentOrder) {
-	o.logger.Info("starting payment saga",
+	o.logger.Info("starting payment saga with Starlark execution",
 		"payment_order_id", po.ID.String(),
 		"correlation_id", po.CorrelationID)
 
@@ -169,278 +211,123 @@ func (o *PaymentOrchestrator) Orchestrate(ctx context.Context, po *domain.Paymen
 		return
 	}
 
-	// Create saga orchestrator and track lien state for compensation
-	saga := sharedclients.NewSagaOrchestrator(o.logger)
-	var lienID string
-
-	// Add saga steps
-	o.addReserveFundsStep(saga, po, &lienID)
-	o.addSendToGatewayStep(saga, po)
-
-	// Execute saga
-	result := saga.Execute(ctx)
-	o.handleSagaResult(ctx, po, result)
-}
-
-// addReserveFundsStep adds the reserve_funds saga step that creates a lien to reserve funds.
-func (o *PaymentOrchestrator) addReserveFundsStep(saga *sharedclients.SagaOrchestrator, po *domain.PaymentOrder, lienID *string) {
-	saga.AddStep("reserve_funds",
-		// Action: Create lien to reserve funds
-		func(stepCtx context.Context) error {
-			// Check context cancellation early to avoid unnecessary work
-			if err := stepCtx.Err(); err != nil {
-				return fmt.Errorf("context cancelled before reserve_funds: %w", err)
-			}
-
-			o.logger.Info("executing reserve_funds step",
-				"payment_order_id", po.ID.String(),
-				"debtor_account_id", po.DebtorAccountID,
-				"instrument_code", po.InstrumentCode)
-
-			// Evaluate bucket ID for bucket-aware solvency validation
-			bucketID, err := o.evaluateBucketID(stepCtx, po)
-			if err != nil {
-				return fmt.Errorf("failed to evaluate bucket ID: %w", err)
-			}
-
-			// Store the computed bucket ID in the payment order
-			if bucketID != "" {
-				po.BucketID = bucketID
-			}
-
-			// Create InitiateLien request with optional bucket_id
-			lienRequest := &currentaccountv1.InitiateLienRequest{
-				AccountId:             po.DebtorAccountID,
-				Amount:                toMoneyAmount(po.Amount),
-				PaymentOrderReference: po.ID.String(),
-			}
-			if bucketID != "" {
-				lienRequest.BucketId = bucketID
-				o.logger.Info("requesting bucket-scoped lien",
-					"payment_order_id", po.ID.String(),
-					"bucket_id", bucketID)
-			}
-
-			resp, err := o.currentAccountClient.InitiateLien(stepCtx, lienRequest)
-			if err != nil {
-				return fmt.Errorf("failed to reserve funds: %w", err)
-			}
-
-			// Defensive check: ensure response is well-formed to avoid panics
-			if resp == nil || resp.Lien == nil || resp.Lien.LienId == "" {
-				return ErrMalformedLienResponse
-			}
-
-			*lienID = resp.Lien.LienId
-
-			// Update payment order with lien ID and transition to RESERVED
-			if err := po.Reserve(*lienID); err != nil {
-				return fmt.Errorf("failed to transition to RESERVED: %w", err)
-			}
-
-			if err := o.repo.Update(stepCtx, po); err != nil {
-				return fmt.Errorf("failed to update payment order: %w", err)
-			}
-
-			o.logger.Info("reserve_funds step completed",
-				"payment_order_id", po.ID.String(),
-				"lien_id", *lienID,
-				"bucket_id", bucketID)
-
-			// Publish PaymentOrderReserved event
-			o.publishEvent(stepCtx, TopicPaymentOrderReserved, po.ID.String(), &eventsv1.PaymentOrderReservedEvent{
-				EventId:         uuid.New().String(),
-				PaymentOrderId:  po.ID.String(),
-				DebtorAccountId: po.DebtorAccountID,
-				LienId:          *lienID,
-				Amount:          toMoneyAmount(po.Amount),
-				CorrelationId:   po.CorrelationID,
-				CausationId:     po.ID.String(),
-				Timestamp:       timestamppb.Now(),
-				Version:         int64(po.Version),
-				IdempotencyKey:  po.IdempotencyKey,
-			})
-
-			return nil
-		},
-		// Compensate: Release lien
-		func(stepCtx context.Context) error {
-			if *lienID == "" {
-				o.logger.Warn("no lien to release in compensation")
-				return nil
-			}
-
-			o.logger.Info("compensating reserve_funds step",
-				"payment_order_id", po.ID.String(),
-				"lien_id", *lienID)
-
-			_, err := o.currentAccountClient.TerminateLien(stepCtx, &currentaccountv1.TerminateLienRequest{
-				LienId: *lienID,
-				Reason: fmt.Sprintf("Payment order %s saga compensation", po.ID.String()),
-			})
-			if err != nil {
-				o.logger.Error("failed to release lien in compensation",
-					"error", err,
-					"lien_id", *lienID)
-				return err
-			}
-
-			o.logger.Info("reserve_funds compensation completed",
-				"lien_id", *lienID)
-
-			return nil
-		},
-	)
-}
-
-// evaluateBucketID evaluates the bucket ID for a payment order based on instrument fungibility rules.
-// Returns empty string and no error if:
-// - InstrumentCode is empty (no instrument specified)
-// - ReferenceDataClient is nil (bucket evaluation not enabled)
-// - Instrument lookup fails (graceful degradation)
-// - Instrument has no fungibility_key_expression (fully fungible)
-// - CEL evaluation fails (graceful degradation)
-// This method never returns an error - it always gracefully degrades to the default bucket.
-func (o *PaymentOrchestrator) evaluateBucketID(ctx context.Context, po *domain.PaymentOrder) (string, error) {
-	// Skip if no instrument code specified
-	if po.InstrumentCode == "" {
-		return "", nil
-	}
-
-	// Skip if reference data client not configured
+	// Check if reference data client is available for GetSaga
 	if o.referenceDataClient == nil {
-		o.logger.Debug("bucket evaluation skipped - reference data client not configured",
-			"payment_order_id", po.ID.String(),
-			"instrument_code", po.InstrumentCode)
-		return "", nil
-	}
-
-	// Fetch instrument definition
-	instrument, err := o.referenceDataClient.RetrieveInstrument(ctx, po.InstrumentCode)
-	if err != nil {
-		// Log but don't fail - use default bucket
-		o.logger.Warn("failed to retrieve instrument for bucket evaluation, using default bucket",
-			"payment_order_id", po.ID.String(),
-			"instrument_code", po.InstrumentCode,
-			"error", err)
-		return "", nil
-	}
-
-	// Check if instrument has fungibility expression
-	if instrument.FungibilityKeyExpression == "" {
-		o.logger.Debug("instrument has no fungibility expression, using default bucket",
-			"payment_order_id", po.ID.String(),
-			"instrument_code", po.InstrumentCode)
-		return "", nil
-	}
-
-	// Evaluate the bucket ID using cached evaluator
-	// On evaluation failure, gracefully degrade to default bucket (consistent with instrument lookup)
-	bucketID, err := o.bucketEvaluator.Evaluate(ctx, instrument.FungibilityKeyExpression, BucketEvalContext{
-		InstrumentCode: po.InstrumentCode,
-		Attributes:     po.PaymentAttributes,
-	})
-	if err != nil {
-		o.logger.Warn("failed to evaluate bucket ID, using default bucket",
-			"payment_order_id", po.ID.String(),
-			"instrument_code", po.InstrumentCode,
-			"expression", instrument.FungibilityKeyExpression,
-			"error", err)
-		return "", nil
-	}
-
-	o.logger.Info("evaluated bucket ID for payment order",
-		"payment_order_id", po.ID.String(),
-		"instrument_code", po.InstrumentCode,
-		"bucket_id", bucketID)
-
-	return bucketID, nil
-}
-
-// addSendToGatewayStep adds the send_to_gateway saga step that sends payment to the external gateway.
-func (o *PaymentOrchestrator) addSendToGatewayStep(saga *sharedclients.SagaOrchestrator, po *domain.PaymentOrder) {
-	saga.AddStep("send_to_gateway",
-		// Action: Send payment to gateway
-		func(stepCtx context.Context) error {
-			// Check context cancellation early to avoid unnecessary work
-			if err := stepCtx.Err(); err != nil {
-				return fmt.Errorf("context cancelled before send_to_gateway: %w", err)
-			}
-
-			o.logger.Info("executing send_to_gateway step",
-				"payment_order_id", po.ID.String())
-
-			resp, err := o.paymentGateway.SendPayment(stepCtx, gateway.PaymentRequest{
-				PaymentOrderID:    po.ID,
-				DebtorAccountID:   po.DebtorAccountID,
-				CreditorReference: po.CreditorReference,
-				Amount:            po.Amount,
-				IdempotencyKey:    po.IdempotencyKey,
-			})
-			if err != nil {
-				return fmt.Errorf("failed to send payment to gateway: %w", err)
-			}
-
-			return o.processGatewayResponse(stepCtx, po, resp)
-		},
-		// Compensate: No-op (lien will be released by reserve_funds compensation)
-		func(_ context.Context) error {
-			o.logger.Info("send_to_gateway compensation (no-op - lien released by reserve_funds compensation)",
-				"payment_order_id", po.ID.String())
-			return nil
-		},
-	)
-}
-
-// processGatewayResponse handles the gateway response and transitions payment order state.
-func (o *PaymentOrchestrator) processGatewayResponse(ctx context.Context, po *domain.PaymentOrder, resp gateway.PaymentResponse) error {
-	switch resp.Status {
-	case gateway.StatusAccepted, gateway.StatusPending:
-		// Transition to EXECUTING
-		if err := po.Execute(resp.GatewayReferenceID); err != nil {
-			return fmt.Errorf("failed to transition to EXECUTING: %w", err)
+		o.logger.Error("reference data client not configured - cannot fetch saga script",
+			"payment_order_id", po.ID.String())
+		if err := o.failPaymentOrder(ctx, po, "reference data client not configured", "INTERNAL_ERROR"); err != nil {
+			o.logger.Error("failed to mark payment order as failed",
+				"payment_order_id", po.ID.String(),
+				"error", err)
 		}
-
-		if err := o.repo.Update(ctx, po); err != nil {
-			return fmt.Errorf("failed to update payment order: %w", err)
-		}
-
-		o.logger.Info("send_to_gateway step completed",
-			"payment_order_id", po.ID.String(),
-			"gateway_reference_id", resp.GatewayReferenceID,
-			"gateway_status", resp.Status)
-
-		// Publish PaymentOrderExecuting event
-		o.publishEvent(ctx, TopicPaymentOrderExecuting, po.ID.String(), &eventsv1.PaymentOrderExecutingEvent{
-			EventId:            uuid.New().String(),
-			PaymentOrderId:     po.ID.String(),
-			GatewayReferenceId: resp.GatewayReferenceID,
-			CorrelationId:      po.CorrelationID,
-			CausationId:        po.ID.String(),
-			Timestamp:          timestamppb.Now(),
-			Version:            int64(po.Version),
-			IdempotencyKey:     po.IdempotencyKey,
-		})
-
-		return nil
-
-	case gateway.StatusRejected:
-		return fmt.Errorf("%w: %s", ErrPaymentRejected, resp.Message)
-
-	default:
-		return fmt.Errorf("%w: %s", ErrUnexpectedGatewayStatus, resp.Status)
+		return
 	}
+
+	// Fetch saga script from reference-data service
+	sagaDef, err := o.referenceDataClient.GetSaga(ctx, "payment_execution", 0) // 0 = fetch ACTIVE version
+	if err != nil {
+		o.logger.Error("failed to fetch saga definition from reference-data",
+			"payment_order_id", po.ID.String(),
+			"saga_name", "payment_execution",
+			"error", err)
+		if err := o.failPaymentOrder(ctx, po, fmt.Sprintf("failed to fetch saga: %v", err), "INTERNAL_ERROR"); err != nil {
+			o.logger.Error("failed to mark payment order as failed",
+				"payment_order_id", po.ID.String(),
+				"error", err)
+		}
+		return
+	}
+
+	o.logger.Info("fetched saga definition from reference-data",
+		"saga_name", sagaDef.Name,
+		"saga_version", sagaDef.Version,
+		"saga_status", sagaDef.Status)
+
+	// Parse correlation ID - if invalid, generate a new one and log warning
+	correlationID, err := uuid.Parse(po.CorrelationID)
+	if err != nil {
+		o.logger.Warn("invalid correlation_id, generating new one",
+			"payment_order_id", po.ID.String(),
+			"invalid_correlation_id", po.CorrelationID,
+			"error", err)
+		correlationID = uuid.New()
+	}
+
+	// Map PaymentOrder domain object to RunnerInput.Input map
+	runnerInput := saga.RunnerInput{
+		SagaExecutionID: uuid.New(),
+		CorrelationID:   correlationID,
+		Input: map[string]interface{}{
+			"payment_order_id":   po.ID.String(),
+			"debtor_account_id":  po.DebtorAccountID,
+			"creditor_reference": po.CreditorReference,
+			"amount_cents":       domain.ToMinorUnits(po.Amount),
+			"currency":           domain.CurrencyCode(po.Amount),
+			"idempotency_key":    po.IdempotencyKey,
+			"instrument_code":    po.InstrumentCode,
+			"payment_attributes": po.PaymentAttributes,
+		},
+	}
+
+	// Execute saga via StarlarkSagaRunner
+	result, err := o.starlarkRunner.ExecuteSaga(ctx, "payment_execution", sagaDef.Script, runnerInput)
+	if err != nil {
+		o.logger.Error("starlark saga runner returned error",
+			"payment_order_id", po.ID.String(),
+			"error", err)
+		if err := o.failPaymentOrder(ctx, po, fmt.Sprintf("saga execution error: %v", err), "SAGA_FAILED"); err != nil {
+			o.logger.Error("failed to mark payment order as failed",
+				"payment_order_id", po.ID.String(),
+				"error", err)
+		}
+		return
+	}
+
+	// Handle saga result
+	o.handleStarlarkSagaResult(ctx, po, result)
 }
 
-// handleSagaResult processes the saga execution result and handles failure scenarios.
-func (o *PaymentOrchestrator) handleSagaResult(ctx context.Context, po *domain.PaymentOrder, result sharedclients.SagaResult) {
+// handleStarlarkSagaResult processes the result from StarlarkSagaRunner execution.
+// On failure, it logs failed steps and marks the payment order as failed.
+// On success, it extracts outputs (lien_id, gateway_reference_id) and logs completion.
+func (o *PaymentOrchestrator) handleStarlarkSagaResult(ctx context.Context, po *domain.PaymentOrder, result *saga.RunnerOutput) {
 	if !result.Success {
-		o.logger.Error("payment saga failed",
+		o.logger.Error("payment saga failed in Starlark execution",
 			"payment_order_id", po.ID.String(),
-			"failed_step", result.FailedStep,
 			"error", result.Error,
-			"completed_steps", result.CompletedSteps,
-			"compensated_steps", result.CompensatedSteps)
+			"step_count", len(result.StepResults))
+
+		// Log failed steps for debugging
+		for _, step := range result.StepResults {
+			if !step.Success {
+				o.logger.Error("saga step failed",
+					"payment_order_id", po.ID.String(),
+					"step_name", step.StepName,
+					"error", step.Error,
+					"duration", step.Duration)
+			}
+		}
+
+		// Extract partial outputs from successful steps before failure
+		// This is important for tracking which resources were created (e.g., lien_id)
+		// so they can be properly cleaned up during compensation
+		//
+		// When a saga fails, result.Output is nil because the script never returns.
+		// But successful steps have their outputs in result.StepResults.
+		// We reconstruct relevant outputs from completed steps.
+		lienID := ""
+		for _, step := range result.StepResults {
+			if !step.Success {
+				continue
+			}
+			// Check if this step returned a lien_id
+			if stepOutput, ok := step.Output.(map[string]any); ok {
+				if lienIDVal, ok := stepOutput["lien_id"].(string); ok && lienIDVal != "" {
+					lienID = lienIDVal
+					break
+				}
+			}
+		}
 
 		// Reload payment order to get latest state
 		latestPO, err := o.repo.FindByID(ctx, po.ID)
@@ -449,8 +336,29 @@ func (o *PaymentOrchestrator) handleSagaResult(ctx context.Context, po *domain.P
 			return
 		}
 
-		// Async path: log and swallow error - best effort failure handling
-		if err := o.failPaymentOrder(ctx, latestPO, result.Error.Error(), "SAGA_FAILED"); err != nil {
+		// If lien was created before failure, transition to RESERVED state first
+		// This ensures the lien_id is persisted for cleanup
+		if lienID != "" && latestPO.Status == domain.PaymentOrderStatusInitiated {
+			if err := latestPO.Reserve(lienID); err != nil {
+				o.logger.Warn("failed to transition to RESERVED during failure handling",
+					"payment_order_id", latestPO.ID.String(),
+					"lien_id", lienID,
+					"error", err)
+			} else {
+				if err := o.repo.Update(ctx, latestPO); err != nil {
+					o.logger.Error("failed to persist RESERVED state during failure handling",
+						"payment_order_id", latestPO.ID.String(),
+						"error", err)
+				} else {
+					o.logger.Info("persisted lien_id before marking payment as failed",
+						"payment_order_id", latestPO.ID.String(),
+						"lien_id", lienID)
+				}
+			}
+		}
+
+		// Mark as failed
+		if err := o.failPaymentOrder(ctx, latestPO, result.Error, "SAGA_FAILED"); err != nil {
 			o.logger.Error("failed to mark payment order as failed after saga failure",
 				"payment_order_id", po.ID.String(),
 				"error", err)
@@ -458,12 +366,174 @@ func (o *PaymentOrchestrator) handleSagaResult(ctx context.Context, po *domain.P
 		return
 	}
 
-	o.logger.Info("payment saga completed successfully",
-		"payment_order_id", po.ID.String(),
-		"completed_steps", result.CompletedSteps)
+	// Extract outputs from saga execution
+	lienID := ""
+	bucketID := ""
+	gatewayReferenceID := ""
 
-	// Note: The payment is now in EXECUTING state, awaiting async gateway callback
-	// via UpdatePaymentOrder to transition to COMPLETED or FAILED
+	if lienIDVal, ok := result.Output["lien_id"].(string); ok {
+		lienID = lienIDVal
+	}
+	if bucketIDVal, ok := result.Output["bucket_id"].(string); ok {
+		bucketID = bucketIDVal
+	}
+	if gatewayRefVal, ok := result.Output["gateway_reference_id"].(string); ok {
+		gatewayReferenceID = gatewayRefVal
+	}
+
+	// Reload payment order to get latest state
+	latestPO, err := o.repo.FindByID(ctx, po.ID)
+	if err != nil {
+		o.logger.Error("failed to reload payment order after saga success", "error", err)
+		return
+	}
+
+	// Validate required outputs based on successful steps
+	// If a step succeeded but its output is missing, fail the payment order
+	// Note: StepName contains the handler name (e.g., "payment_order.create_lien"),
+	// not the step() name from the Starlark script (e.g., "reserve_funds")
+	createLienSucceeded := false
+	sendToGatewaySucceeded := false
+	for _, step := range result.StepResults {
+		if step.StepName == "payment_order.create_lien" && step.Success {
+			createLienSucceeded = true
+		}
+		if step.StepName == "payment_order.send_to_gateway" && step.Success {
+			sendToGatewaySucceeded = true
+		}
+	}
+
+	if createLienSucceeded && lienID == "" {
+		o.logger.Error("saga output missing lien_id after successful create_lien handler",
+			"payment_order_id", latestPO.ID.String(),
+			"output", result.Output)
+		if err := o.failPaymentOrder(ctx, latestPO, "saga output missing lien_id", "SAGA_OUTPUT_INVALID"); err != nil {
+			o.logger.Error("failed to mark payment order as failed after missing lien_id",
+				"payment_order_id", latestPO.ID.String(),
+				"error", err)
+		}
+		return
+	}
+
+	if sendToGatewaySucceeded && gatewayReferenceID == "" {
+		o.logger.Error("saga output missing gateway_reference_id after successful send_to_gateway handler",
+			"payment_order_id", latestPO.ID.String(),
+			"output", result.Output)
+		if err := o.failPaymentOrder(ctx, latestPO, "saga output missing gateway_reference_id", "SAGA_OUTPUT_INVALID"); err != nil {
+			o.logger.Error("failed to mark payment order as failed after missing gateway_reference_id",
+				"payment_order_id", latestPO.ID.String(),
+				"error", err)
+		}
+		return
+	}
+
+	// Apply state transitions based on what the saga accomplished
+	// The handlers call external services but don't update PaymentOrder state
+	// This orchestrator method applies domain state transitions and publishes events
+
+	// If lien was created and we're still in INITIATED state, transition to RESERVED
+	if lienID != "" && latestPO.Status == domain.PaymentOrderStatusInitiated {
+		if err := latestPO.Reserve(lienID); err != nil {
+			o.logger.Error("failed to transition to RESERVED after lien creation",
+				"payment_order_id", latestPO.ID.String(),
+				"lien_id", lienID,
+				"error", err)
+			return
+		}
+
+		// Store bucket_id in payment order if provided
+		if bucketID != "" {
+			latestPO.BucketID = bucketID
+		}
+
+		if err := o.repo.Update(ctx, latestPO); err != nil {
+			o.logger.Error("failed to persist RESERVED state",
+				"payment_order_id", latestPO.ID.String(),
+				"error", err)
+			return
+		}
+
+		o.logger.Info("payment order transitioned to RESERVED",
+			"payment_order_id", latestPO.ID.String(),
+			"lien_id", lienID,
+			"bucket_id", bucketID)
+
+		// Publish PaymentOrderReserved event
+		o.publishEvent(ctx, TopicPaymentOrderReserved, latestPO.ID.String(), &eventsv1.PaymentOrderReservedEvent{
+			EventId:         uuid.New().String(),
+			PaymentOrderId:  latestPO.ID.String(),
+			DebtorAccountId: latestPO.DebtorAccountID,
+			LienId:          lienID,
+			Amount:          toMoneyAmount(latestPO.Amount),
+			CorrelationId:   latestPO.CorrelationID,
+			CausationId:     latestPO.ID.String(),
+			Timestamp:       timestamppb.Now(),
+			Version:         int64(latestPO.Version),
+			IdempotencyKey:  latestPO.IdempotencyKey,
+		})
+	}
+
+	// If gateway reference was created and we're in RESERVED state, transition to EXECUTING
+	if gatewayReferenceID != "" && latestPO.Status == domain.PaymentOrderStatusReserved {
+		if err := latestPO.Execute(gatewayReferenceID); err != nil {
+			o.logger.Error("failed to transition to EXECUTING after gateway submission",
+				"payment_order_id", latestPO.ID.String(),
+				"gateway_reference_id", gatewayReferenceID,
+				"error", err)
+			return
+		}
+
+		if err := o.repo.Update(ctx, latestPO); err != nil {
+			o.logger.Error("failed to persist EXECUTING state",
+				"payment_order_id", latestPO.ID.String(),
+				"error", err)
+			return
+		}
+
+		o.logger.Info("payment order transitioned to EXECUTING",
+			"payment_order_id", latestPO.ID.String(),
+			"gateway_reference_id", gatewayReferenceID)
+
+		// Publish PaymentOrderExecuting event
+		o.publishEvent(ctx, TopicPaymentOrderExecuting, latestPO.ID.String(), &eventsv1.PaymentOrderExecutingEvent{
+			EventId:            uuid.New().String(),
+			PaymentOrderId:     latestPO.ID.String(),
+			GatewayReferenceId: gatewayReferenceID,
+			CorrelationId:      latestPO.CorrelationID,
+			CausationId:        latestPO.ID.String(),
+			Timestamp:          timestamppb.Now(),
+			Version:            int64(latestPO.Version),
+			IdempotencyKey:     latestPO.IdempotencyKey,
+		})
+	}
+
+	o.logger.Info("payment saga completed successfully via Starlark",
+		"payment_order_id", latestPO.ID.String(),
+		"lien_id", lienID,
+		"gateway_reference_id", gatewayReferenceID,
+		"step_count", len(result.StepResults),
+		"final_status", latestPO.Status)
+}
+
+// evaluateBucketID evaluates the bucket ID for a payment order.
+// This is a convenience wrapper around evaluateBucketIDForHandler for backward compatibility
+// with tests and any other callers that work with PaymentOrder domain objects.
+func (o *PaymentOrchestrator) evaluateBucketID(ctx context.Context, po *domain.PaymentOrder) (string, error) {
+	// Create minimal deps for bucket evaluation - only requires ReferenceDataClient and BucketEvaluator
+	deps := &PaymentOrderHandlerDeps{
+		ReferenceDataClient: o.referenceDataClient,
+		BucketEvaluator:     o.bucketEvaluator,
+		Logger:              o.logger,
+	}
+
+	return evaluateBucketIDForHandler(
+		ctx,
+		deps,
+		po.InstrumentCode,
+		po.PaymentAttributes,
+		po.ID.String(),
+		o.logger,
+	)
 }
 
 // failPaymentOrder handles payment order failure with proper state transition and event publishing.

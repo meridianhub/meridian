@@ -3,6 +3,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -23,6 +24,7 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"github.com/meridianhub/meridian/shared/pkg/saga/schema"
 	"github.com/meridianhub/meridian/shared/platform/auth"
+	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/genproto/googleapis/type/money"
@@ -30,6 +32,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"gorm.io/gorm"
 )
 
 // Sentinel errors are defined in errors.go for better organization.
@@ -138,6 +141,8 @@ type Service struct {
 	repo                   *persistence.Repository
 	lienRepo               *persistence.LienRepository
 	withdrawalRepo         *persistence.WithdrawalRepository
+	outboxRepo             events.OutboxRepository // Outbox repository for reliable event delivery
+	db                     *gorm.DB                // Database connection for transaction management
 	posKeepingClient       PositionKeepingClient
 	finAcctClient          FinancialAccountingClient
 	partyClient            PartyClient
@@ -218,6 +223,8 @@ func NewServiceWithExistingClients(
 	repo *persistence.Repository,
 	lienRepo *persistence.LienRepository,
 	withdrawalRepo *persistence.WithdrawalRepository,
+	outboxRepo events.OutboxRepository, // Outbox repository for reliable event delivery
+	db *gorm.DB, // Database connection for transaction management
 	posKeepingClient PositionKeepingClient,
 	finAcctClient FinancialAccountingClient,
 	partyClient PartyClient,
@@ -323,6 +330,8 @@ func NewServiceWithExistingClients(
 		repo:                   repo,
 		lienRepo:               lienRepo,
 		withdrawalRepo:         withdrawalRepo,
+		outboxRepo:             outboxRepo,
+		db:                     db,
 		posKeepingClient:       posKeepingClient,
 		finAcctClient:          finAcctClient,
 		partyClient:            partyClient,
@@ -950,22 +959,34 @@ func (s *Service) ExecuteWithdrawal(ctx context.Context, req *pb.ExecuteWithdraw
 	}
 
 	// Mark pending withdrawal as completed (if executing a pending withdrawal)
-	// TODO(tm:tech-debt-cleanup.33): This represents an eventual consistency tradeoff - if the
-	// status update fails after funds transfer, the withdrawal record remains in PENDING status
-	// even though the transfer completed. Consider implementing the Outbox Pattern to ensure
-	// atomicity between the funds transfer and status update.
+	// Uses transactional outbox pattern to ensure atomicity between status update and event publication.
+	// If the outbox write fails, the withdrawal status update is rolled back, ensuring consistency.
 	if pendingWithdrawal != nil && s.withdrawalRepo != nil {
-		if err := pendingWithdrawal.Complete(); err != nil {
-			// Log warning but don't fail - the withdrawal has already executed
-			s.logger.Warn("failed to transition withdrawal to completed status",
+		// Use internal UUID from withdrawal (not the business account ID which is like "ACC-xxxx")
+		accountUUID := pendingWithdrawal.AccountID
+		if err := s.completeWithdrawalWithOutbox(ctx, pendingWithdrawal, accountUUID); err != nil {
+			// CRITICAL: Outbox write failed but funds already moved. Must not leave withdrawal PENDING
+			// as that would allow re-execution. Fall back to direct status update without outbox.
+			s.logger.Error("outbox withdrawal completion failed, attempting fallback direct update",
 				"withdrawal_id", pendingWithdrawal.Reference,
-				"error", err)
-		} else {
-			if err := s.withdrawalRepo.Update(ctx, pendingWithdrawal); err != nil {
-				// Log warning but don't fail - the withdrawal has already executed
-				s.logger.Warn("failed to persist withdrawal completion",
+				"account_id", accountUUID,
+				"outbox_error", err)
+
+			// Fallback: Mark withdrawal completed directly (idempotent, safe to retry)
+			if fallbackErr := pendingWithdrawal.Complete(); fallbackErr != nil {
+				s.logger.Error("fallback withdrawal completion also failed - withdrawal stuck in PENDING",
 					"withdrawal_id", pendingWithdrawal.Reference,
-					"error", err)
+					"fallback_error", fallbackErr,
+					"original_error", err)
+				// Don't fail the RPC - funds already moved, but log critical issue
+			} else if fallbackErr := s.withdrawalRepo.Update(ctx, pendingWithdrawal); fallbackErr != nil {
+				s.logger.Error("fallback withdrawal persistence failed - withdrawal stuck in PENDING",
+					"withdrawal_id", pendingWithdrawal.Reference,
+					"fallback_error", fallbackErr,
+					"original_error", err)
+			} else {
+				s.logger.Warn("withdrawal marked completed via fallback (outbox events lost)",
+					"withdrawal_id", pendingWithdrawal.Reference)
 			}
 		}
 	}
@@ -991,6 +1012,73 @@ func (s *Service) ExecuteWithdrawal(ctx context.Context, req *pb.ExecuteWithdraw
 	}
 
 	return resp, nil
+}
+
+// completeWithdrawalWithOutbox atomically updates withdrawal status and writes status change event to outbox.
+// This ensures that the withdrawal status update and event publication happen in the same transaction,
+// providing at-least-once delivery guarantees for withdrawal completion events.
+func (s *Service) completeWithdrawalWithOutbox(ctx context.Context, withdrawal *domain.Withdrawal, accountID uuid.UUID) error {
+	// If outbox repo is not configured, fall back to direct update (graceful degradation)
+	if s.outboxRepo == nil || s.db == nil {
+		if err := withdrawal.Complete(); err != nil {
+			return fmt.Errorf("failed to transition withdrawal to completed status: %w", err)
+		}
+		if err := s.withdrawalRepo.Update(ctx, withdrawal); err != nil {
+			return fmt.Errorf("failed to persist withdrawal completion: %w", err)
+		}
+		return nil
+	}
+
+	// Use transaction to ensure atomicity between withdrawal update and outbox entry
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		// Update withdrawal status within transaction
+		if err := withdrawal.Complete(); err != nil {
+			return fmt.Errorf("failed to transition withdrawal to completed status: %w", err)
+		}
+
+		// Save withdrawal state using transactional repository
+		withdrawalRepoTx := s.withdrawalRepo.WithTx(tx)
+		if err := withdrawalRepoTx.Update(ctx, withdrawal); err != nil {
+			return fmt.Errorf("failed to persist withdrawal completion: %w", err)
+		}
+
+		// Create simple event payload (JSON) for publication
+		// TODO: Replace with proper protobuf event definition once WithdrawalStatusUpdatedEvent is defined
+		eventData := map[string]interface{}{
+			"withdrawal_id": withdrawal.Reference,
+			"account_id":    accountID.String(),
+			"status":        "COMPLETED",
+			"updated_at":    time.Now().Format(time.RFC3339),
+		}
+
+		// Marshal event payload as JSON
+		eventPayload, err := json.Marshal(eventData)
+		if err != nil {
+			return fmt.Errorf("failed to marshal withdrawal status event: %w", err)
+		}
+
+		// Create outbox entry within the same transaction
+		outboxEntry := &events.EventOutbox{
+			ID:            uuid.New(),
+			EventType:     "WithdrawalStatusUpdated",
+			AggregateID:   withdrawal.Reference,
+			AggregateType: "Withdrawal",
+			EventPayload:  eventPayload,
+			Status:        events.StatusPending,
+			Topic:         "current-account.withdrawal.status",
+			PartitionKey:  accountID.String(),
+			CreatedAt:     time.Now(),
+			RetryCount:    0,
+			ServiceName:   "current-account",
+		}
+
+		// Insert outbox entry within the transaction
+		if err := s.outboxRepo.Insert(ctx, tx, outboxEntry); err != nil {
+			return fmt.Errorf("failed to create outbox entry: %w", err)
+		}
+
+		return nil
+	})
 }
 
 // InitiateWithdrawal creates a pending withdrawal for validation before execution.
