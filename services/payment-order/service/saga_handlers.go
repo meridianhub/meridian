@@ -483,7 +483,12 @@ func evaluateBucketIDForHandler(
 	// Fetch instrument definition
 	instrument, err := deps.ReferenceDataClient.RetrieveInstrument(ctx, instrumentCode)
 	if err != nil {
-		return "", fmt.Errorf("failed to retrieve instrument: %w", err)
+		// Gracefully degrade if instrument not found or lookup fails
+		logger.Debug("failed to retrieve instrument, using default bucket",
+			"payment_order_id", paymentOrderID,
+			"instrument_code", instrumentCode,
+			"error", err)
+		return "", nil
 	}
 
 	// Check if instrument has fungibility expression
@@ -507,7 +512,13 @@ func evaluateBucketIDForHandler(
 		Attributes:     paymentAttributes,
 	})
 	if err != nil {
-		return "", fmt.Errorf("bucket evaluation failed: %w", err)
+		// Gracefully degrade to default bucket on CEL evaluation failures
+		// (e.g., missing required attributes, invalid expressions)
+		logger.Warn("bucket evaluation failed, using default bucket",
+			"payment_order_id", paymentOrderID,
+			"instrument_code", instrumentCode,
+			"error", err)
+		return "", nil
 	}
 
 	logger.Info("evaluated bucket ID",
