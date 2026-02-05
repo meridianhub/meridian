@@ -39,6 +39,7 @@ result = payment_order.create_lien(...)  # ❌ Typo: should be position_keeping.
 ```
 
 **Consequences:**
+
 - Production saga failures
 - Customer-facing errors
 - Platform team investigating tenant scripts
@@ -111,7 +112,121 @@ The schema (`handlers.yaml`) is the single source of truth. Mocks are generated 
 
 ---
 
-## What Gets Validated
+## Existing Validation Infrastructure
+
+**This PRD builds on existing validation.** We already have substantial static analysis in place.
+
+### What Already Exists
+
+**Location:** `shared/pkg/saga/validator.go` and `shared/pkg/saga/linter.go`
+
+#### 1. Static Validation (`ValidateSagaScript`)
+
+```go
+// shared/pkg/saga/validator.go:84-127
+func ValidateSagaScript(script string) error
+```
+
+**Checks:**
+- ✅ Script size (max 64KB)
+- ✅ Syntax parsing (catches Python syntax errors like `is not None`)
+- ✅ Blocked functions (`load`, `exec`, `compile`, `open`, `eval`, `setattr`)
+- ✅ Loop nesting depth (max 3 levels)
+- ✅ Security violations via AST walking
+
+#### 2. Semantic Linting (`SemanticLinter`)
+
+```go
+// shared/pkg/saga/linter.go:97-onwards
+type SemanticLinter struct
+```
+
+**Checks:**
+- ✅ Decimal arithmetic (should use CEL instead)
+- ✅ Magic numbers (hardcoded numeric literals)
+- ✅ Nested conditionals (excessive if/else nesting)
+- ✅ Hardcoded codes (instrument/account codes should be parameterized)
+- ✅ Missing pre-checks (external steps need `verify_external_state`)
+
+#### 3. Visibility Validation (`visibility_validator.go`)
+
+- ✅ Party scope validation (tenant isolation)
+- ✅ Prevents scripts from accessing data outside their party scope
+
+### What's Missing: Runtime Validation
+
+**Current gap:** Static checks can't catch:
+- Undefined handler calls (typos in module/handler names)
+- Missing required parameters
+- Logic errors that cause script failure
+- Runaway scripts (badly-written loops)
+
+**This PRD fills the gap:** Execute scripts with mocks to catch runtime errors.
+
+---
+
+## How Dry-Run Extends Existing Validation
+
+```text
+┌─────────────────────────────────────────────────────────┐
+│ Layer 1: Static Validation (EXISTING)                  │
+│ shared/pkg/saga/validator.go                           │
+│ • Syntax, security, blocked functions, loop depth      │
+└────────────────┬────────────────────────────────────────┘
+                 ↓ Pass
+┌─────────────────────────────────────────────────────────┐
+│ Layer 2: Semantic Linting (EXISTING)                   │
+│ shared/pkg/saga/linter.go                              │
+│ • Decimal math, magic numbers, hardcoded codes         │
+└────────────────┬────────────────────────────────────────┘
+                 ↓ Pass
+┌─────────────────────────────────────────────────────────┐
+│ Layer 3: Dry-Run Validation (NEW - THIS PRD)          │
+│ • Execute with auto-generated mocks                    │
+│ • Catch undefined handlers, missing params, timeouts  │
+│ • Provide complexity metrics                           │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Integration Point
+
+```go
+// shared/pkg/saga/validator.go (NEW function to add)
+func ValidateWithDryRun(script string, mockRegistry *MockRegistry) (*ValidationResult, error) {
+    result := &ValidationResult{}
+
+    // 1. EXISTING: Static validation
+    if err := ValidateSagaScript(script); err != nil {
+        result.Errors = append(result.Errors, err)
+        return result, nil  // Don't continue if syntax fails
+    }
+
+    // 2. EXISTING: Semantic linting
+    linter := NewSemanticLinter()
+    lintIssues, err := linter.Analyze(script)
+    if err != nil {
+        result.Errors = append(result.Errors, err)
+    }
+    result.LintIssues = lintIssues
+
+    // 3. NEW: Dry-run execution with mocks
+    dryRunReport, err := ExecuteDryRun(script, mockRegistry)
+    if err != nil {
+        result.Errors = append(result.Errors, err)
+    } else {
+        result.ComplexityMetrics = dryRunReport.Metrics
+    }
+
+    return result, nil
+}
+```
+
+**Key insight:** We extend `ValidationResult` (already exists at line 12-38 in `validator.go`) with
+dry-run findings and complexity metrics. No need to reinvent the validation pipeline.
+
+---
+
+## What Gets Validated (By Dry-Run)
 
 ### 1. Handler Existence
 
@@ -187,6 +302,7 @@ Complexity Score: 6/10 (Medium)
 ```
 
 **Use cases:**
+
 - Capacity planning (estimate load per saga execution)
 - Identify overly complex scripts (suggest refactoring)
 - SLA estimation (95th percentile execution time)
@@ -201,23 +317,36 @@ Complexity Score: 6/10 (Medium)
 
 **Goal:** Auto-generate mocks from `handlers.yaml`
 
+**Builds on:**
+- `shared/pkg/saga/schema/` - Handler schema definitions (already exists)
+- `shared/pkg/saga/starlark_runner.go:33-38` - `HandlerRegistry` pattern to mirror
+
 **Tasks:**
-1. Parse `handlers.yaml` schema
+
+1. Parse `handlers.yaml` schema (leverage existing `schema` package)
 2. Generate mock function for each handler:
+
    ```go
+   // NEW: shared/pkg/saga/mock_registry.go
+   type MockRegistry struct {
+       mocks map[string]HandlerFunc  // mirrors HandlerRegistry
+   }
+
    // Auto-generated mock
    func MockPositionKeepingInitiateLog(params map[string]any) (map[string]any, error) {
        // Validate required params against schema
-       // Return empty map (success)
+       // Return type-correct response from schema
        return map[string]any{"log_id": "MOCK-001", "status": "INITIATED"}, nil
    }
    ```
-3. Build MockRegistry (parallel to HandlerRegistry)
+
+3. Build MockRegistry (parallel to existing `HandlerRegistry`)
 
 **Acceptance criteria:**
-- Every handler in schema has a mock
-- Mocks validate required parameters
-- Mocks return type-correct responses
+
+- Every handler in `handlers.yaml` has a mock
+- Mocks validate required parameters using existing schema types
+- Mocks return type-correct responses (strings, Decimals, enums)
 
 ---
 
@@ -225,20 +354,33 @@ Complexity Score: 6/10 (Medium)
 
 **Goal:** Execute scripts with mocks safely
 
+**Builds on:**
+- `shared/pkg/saga/runtime.go:124-249` - `ExecuteSaga` pattern (already has timeout, sandboxing)
+- `shared/pkg/saga/starlark_runner.go:141-248` - `StarlarkSagaRunner` execution logic
+- Service module injection already implemented (lines 179-182)
+
 **Tasks:**
+
 1. Extend `shared/pkg/saga/runtime.go`:
+
    ```go
-   func (r *Runtime) DryRunWithMocks(script string, mockRegistry *MockRegistry) (*DryRunReport, error)
+   // NEW: Add dry-run method to existing Runtime struct
+   func (r *Runtime) DryRunWithMocks(script string, mockRegistry *MockRegistry) (*DryRunReport, error) {
+       // Reuse existing ExecuteSagaWithInput but with mockRegistry instead of real handlers
+       // Timeout, sandboxing, context cancellation already implemented
+   }
    ```
-2. Inject mocks as Starlark globals (position_keeping, financial_accounting, etc.)
-3. Execute script in sandboxed thread (timeout enforced)
+
+2. Inject mocks as Starlark globals (mirrors existing service module injection pattern)
+3. Execute script in sandboxed thread (reuse existing timeout logic - lines 140-142)
 4. Capture execution trace (handler calls, errors, metrics)
 
 **Acceptance criteria:**
+
 - Scripts execute with mocks
-- Timeouts enforced (5s default)
+- Timeouts enforced (reuse existing `DefaultTimeout = 5s` from line 18)
 - Errors captured and reported
-- No access to real services
+- No access to real services (mocks only)
 
 ---
 
@@ -246,8 +388,31 @@ Complexity Score: 6/10 (Medium)
 
 **Goal:** Human-readable reports, deployment blocking
 
+**Builds on:**
+- `shared/pkg/saga/validator.go:12-59` - `ValidationResult` struct (already exists)
+- `ValidateActivation()` at line 386 - Strict enforcement pattern
+
 **Tasks:**
-1. Generate validation report:
+
+1. Extend `ValidationResult` struct with complexity metrics:
+
+   ```go
+   // shared/pkg/saga/validator.go (extend existing struct)
+   type ValidationResult struct {
+       Errors       []error       // Already exists
+       LintIssues   []LintIssue   // Already exists
+       ComplexityMetrics *ComplexityMetrics  // NEW
+   }
+
+   type ComplexityMetrics struct {
+       HandlerCalls    int
+       Operations      int
+       ComplexityScore int  // 1-10 scale
+   }
+   ```
+
+2. Generate validation report:
+
    ```text
    ✅ withdrawal.star - Validation Passed
 
@@ -262,10 +427,12 @@ Complexity Score: 6/10 (Medium)
 
    Recommendation: Safe to activate
    ```
+
 2. Integrate with Reference Data service `ActivateSaga` RPC
 3. Block activation if validation fails
 
 **Acceptance criteria:**
+
 - Clear error messages with line numbers
 - Complexity metrics included
 - Failed scripts rejected at upload
@@ -277,11 +444,13 @@ Complexity Score: 6/10 (Medium)
 **Goal:** Local validation for rapid iteration
 
 **Tasks:**
+
 1. CLI command: `meridian-cli saga validate withdrawal.star --dry-run`
 2. Show validation report in terminal
 3. Exit code 0 (pass) or 1 (fail) for CI/CD integration
 
 **Acceptance criteria:**
+
 - Developers can validate locally before upload
 - Fast feedback (<2 seconds for typical saga)
 - Works offline (uses local handlers.yaml)
@@ -356,11 +525,13 @@ func (s *Service) ActivateSaga(ctx context.Context, req *ActivateSagaRequest) er
 ### 1. What mock responses should return?
 
 **Option A:** Empty success responses
+
 ```python
 # Mock returns: {"log_id": "MOCK-001", "status": "INITIATED"}
 ```
 
 **Option B:** Schema-defined examples
+
 ```yaml
 # handlers.yaml
 position_keeping.initiate_log:
