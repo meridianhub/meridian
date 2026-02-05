@@ -1064,6 +1064,7 @@ func TestIntegration_NetworkTimeout_DuringExecutePhase(t *testing.T) {
 		Repository:                repo,
 		CurrentAccountClient:      mockCA,
 		FinancialAccountingClient: newMockFinancialAccountingClient(),
+		ReferenceDataClient:       newMockReferenceDataClient(),
 		PaymentGateway:            mockGW,
 		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
@@ -1398,16 +1399,18 @@ func TestIntegration_RetrievePaymentOrder(t *testing.T) {
 }
 
 // TestIntegration_CancelPaymentOrder tests the CancelPaymentOrder RPC.
+// Note: With Starlark sagas, state transitions happen after saga completion,
+// so the payment order goes directly to EXECUTING state. This test verifies
+// that cancellation is not allowed in EXECUTING state.
 func TestIntegration_CancelPaymentOrder(t *testing.T) {
 	// Setup
 	db, ctx, cleanup := setupIntegrationTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewPaymentOrderRepository(db)
-	// Use a client that doesn't auto-proceed through saga
 	mockCA := newMockCurrentAccountClient()
 	mockGW := newMockPaymentGateway()
-	mockGW.delayResponse = 30 * time.Second // Long delay to keep in INITIATED state
+	// No delay - let saga complete normally
 	logger := integrationTestLogger()
 
 	svc, err := NewServiceWithConfig(Config{
@@ -1430,44 +1433,24 @@ func TestIntegration_CancelPaymentOrder(t *testing.T) {
 	require.NoError(t, err)
 	poID := createResp.PaymentOrder.PaymentOrderId
 
-	// Wait for saga to get to RESERVED state (when lien is created)
-	var po *domain.PaymentOrder
-	err = await.New().
-		AtMost(2 * time.Second).
-		PollInterval(50 * time.Millisecond).
-		Until(func() bool {
-			var findErr error
-			po, findErr = repo.FindByID(ctx, uuid.MustParse(poID))
-			if findErr != nil {
-				return false
-			}
-			// Wait until we're in a state with a lien (RESERVED or later)
-			return po.Status == domain.PaymentOrderStatusReserved ||
-				po.Status == domain.PaymentOrderStatusExecuting
-		})
-	require.NoError(t, err, "Should reach RESERVED state")
+	// Wait for saga to complete - should reach EXECUTING state
+	po := waitForSagaCompletion(ctx, t, repo, uuid.MustParse(poID))
+	require.Equal(t, domain.PaymentOrderStatusExecuting, po.Status, "Should reach EXECUTING state")
+	require.NotEmpty(t, po.LienID, "Lien should be created")
+	require.NotEmpty(t, po.GatewayReferenceID, "Gateway reference should be set")
 
-	// Only test cancellation if we're in a cancellable state
-	if po.CanCancel() {
-		cancelResp, err := svc.CancelPaymentOrder(ctx, &pb.CancelPaymentOrderRequest{
-			PaymentOrderId:     poID,
-			CancellationReason: "User requested cancellation",
-			CancelledBy:        "test-user",
-		})
-		require.NoError(t, err)
-		assert.Equal(t, pb.PaymentOrderStatus_PAYMENT_ORDER_STATUS_CANCELLED, cancelResp.PaymentOrder.Status)
+	// Verify that cancellation is NOT allowed in EXECUTING state
+	assert.False(t, po.CanCancel(), "Should not be able to cancel in EXECUTING state")
 
-		// Verify lien was released if one was created
-		if po.LienID != "" {
-			err = await.New().
-				AtMost(1 * time.Second).
-				PollInterval(20 * time.Millisecond).
-				Until(func() bool {
-					return atomic.LoadInt32(&mockCA.terminateLienCalls) >= 1
-				})
-			require.NoError(t, err, "Lien should be released on cancellation")
-		}
-	}
+	// Attempt cancellation should fail
+	_, err = svc.CancelPaymentOrder(ctx, &pb.CancelPaymentOrderRequest{
+		PaymentOrderId:     poID,
+		CancellationReason: "User requested cancellation",
+		CancelledBy:        "test-user",
+	})
+	require.Error(t, err, "Cancellation should fail for EXECUTING payments")
+	st, _ := status.FromError(err)
+	assert.Equal(t, codes.FailedPrecondition, st.Code(), "Should return FailedPrecondition error")
 }
 
 // TestIntegration_ListPaymentOrders_Pagination tests the ListPaymentOrders RPC
