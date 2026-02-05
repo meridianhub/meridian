@@ -15,6 +15,7 @@ Each skill document includes:
 - **[tilt.md](tilt.md)** - Fast Kubernetes development with Tilt and live reload
 - **[docker.md](docker.md)** - Docker configuration and multi-stage builds
 - **[schema-evolution.md](schema-evolution.md)** - Protobuf schema evolution with buf breaking change detection
+- **[starlark-saga.md](starlark-saga.md)** - Generate Starlark saga scripts following Meridian conventions
 
 ### Deployment
 
