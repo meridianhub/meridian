@@ -19,7 +19,6 @@ Generate type-safe Starlark saga scripts for Meridian's distributed transaction 
 **Related:**
 
 - **[Starlark Style Guide](../guides/starlark-style-guide.md)** - Comprehensive syntax and conventions
-- **[Starlark Patterns](../starlark-patterns.md)** - Common workflows without while loops
 
 ---
 
@@ -584,7 +583,6 @@ return {
 ## Further Reading
 
 - **[Starlark Style Guide](../guides/starlark-style-guide.md)** - Comprehensive syntax and conventions
-- **[Starlark Patterns](../starlark-patterns.md)** - Workflow patterns without while loops
 - **[Saga Service Catalog](../saga-service-catalog.md)** - Service module documentation
 - **[handlers.yaml](../saga-handlers.schema.json)** - Available handlers schema
-- **[ADR-045: Starlark Saga Orchestration](../adr/045-starlark-saga-orchestration.md)** - Architecture decision
+- **[ADR-0028: Starlark Saga & CEL Valuation](../adr/0028-starlark-saga-cel-valuation.md)** - Architecture decision

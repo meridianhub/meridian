@@ -4,8 +4,6 @@
 
 **Audience:** Developers and AI assistants generating Starlark code.
 
-**Related:** [`../starlark-patterns.md`](../starlark-patterns.md) - Common workflow patterns without while loops.
-
 ---
 
 ## Table of Contents
@@ -102,8 +100,6 @@ for attempt in range(max_retries):
     if try_operation():
         break  # Early exit on success
 ```
-
-**See:** [`../starlark-patterns.md`](../starlark-patterns.md) for comprehensive patterns.
 
 ### String Formatting
 
@@ -863,7 +859,6 @@ Before committing a Starlark saga script:
 
 ## Further Reading
 
-- **[Starlark Patterns](../starlark-patterns.md)** - Common workflows without while loops
 - **[Saga Handlers Schema](../saga-handlers.schema.json)** - Available service modules and handlers
 - **[Saga Service Catalog](../saga-service-catalog.md)** - Service module documentation
-- **[ADR-045: Starlark Saga Orchestration](../adr/045-starlark-saga-orchestration.md)** - Architecture decision
+- **[ADR-0028: Starlark Saga & CEL Valuation](../adr/0028-starlark-saga-cel-valuation.md)** - Architecture decision
