@@ -1,0 +1,791 @@
+# PRD: Starlark Testing & Validation Framework
+
+**Status:** Draft
+**Author:** Platform Team
+**Date:** 2026-02-05
+**Related:** Valuation Service (PR #742), Saga Orchestration
+
+---
+
+## Executive Summary
+
+As Meridian expands Starlark usage from saga orchestration (current) to valuation
+strategies (PR #742) and beyond, we need a comprehensive testing framework enabling:
+
+1. **Compile-time validation** - Beyond syntax checking to type safety
+2. **Runtime behavior testing** - Happy path & unhappy path verification
+3. **Tenant self-service testing** - Users write tests for their own scripts
+
+**Business value:**
+
+- Tenants deploy scripts confidently without platform team intervention
+- Platform guarantees script quality before deployment
+- Regulatory compliance (testable, auditable transformations)
+
+---
+
+## Problem Statement
+
+### Current Gaps
+
+**1. Validation is syntax-only:**
+
+```python
+# ✅ Compiles
+result = position_keeping.nonexistent_handler(...)
+
+# ❌ Fails at runtime (handler doesn't exist)
+```
+
+**2. No test framework for script authors:**
+
+- Developers test via Go integration tests
+- Tenants have no way to test their scripts
+- No assertion library for Starlark
+
+**3. Behavior verification requires manual execution:**
+
+- No automated happy/unhappy path testing
+- No regression detection
+- No performance benchmarking
+
+### Why This Matters Now
+
+**Valuation use case (PR #742):**
+
+```python
+# Tenant-written valuation strategy
+def valuate(input_quantity, params, knowledge_at):
+    spot_price = market_data.get_price("EPEX_SPOT_GBP", knowledge_at)
+
+    # What if spot_price is None?
+    # What if params missing required keys?
+    # How to test different market conditions?
+
+    final_rate = cel_eval("spot * coeff * markup", {...})
+    return {"amount": input_quantity.amount * final_rate, ...}
+```
+
+**Without testing framework:**
+
+- Tenant deploys script
+- Production hits edge case
+- Valuation fails, breaking settlement
+- Platform team investigates (slow feedback loop)
+
+**With testing framework:**
+
+- Tenant writes tests locally
+- Platform validates before deployment
+- Edge cases caught pre-production
+- Tenant iterates rapidly
+
+---
+
+## Proposed Solution
+
+### Three-Tier Validation
+
+```text
+┌──────────────────────────────────────────────────────────┐
+│ Tier 1: Compile-Time Validation (Pre-Deployment)        │
+│ • Syntax checking (already exists)                       │
+│ • Type checking against handlers.yaml schema            │
+│ • Service module existence validation                    │
+│ • Required parameter validation                          │
+│ • Return type validation                                 │
+└──────────────────────────────────────────────────────────┘
+                           ↓
+┌──────────────────────────────────────────────────────────┐
+│ Tier 2: Static Analysis (Pre-Deployment)                │
+│ • Unused variables detection                             │
+│ • Unreachable code detection                             │
+│ • Complexity metrics (cyclomatic complexity)             │
+│ • Step coverage (are all steps reachable?)              │
+│ • Compensation coverage (every step has compensation?)   │
+└──────────────────────────────────────────────────────────┘
+                           ↓
+┌──────────────────────────────────────────────────────────┐
+│ Tier 3: Runtime Testing (Tenant-Written)                │
+│ • Unit tests with mocked service modules                 │
+│ • Integration tests with real services                   │
+│ • Property-based testing (QuickCheck style)              │
+│ • Performance benchmarks                                 │
+└──────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Tier 1: Compile-Time Validation
+
+### Type Checking Against Schema
+
+**Goal:** Catch errors before script executes.
+
+**Implementation:**
+
+```go
+// shared/pkg/saga/validator.go
+type ScriptValidator struct {
+    schemaRegistry *schema.Registry
+}
+
+func (v *ScriptValidator) Validate(script string) (*ValidationReport, error) {
+    // 1. Parse Starlark AST
+    file, err := syntax.Parse("script.star", script, 0)
+    if err != nil {
+        return nil, err // Syntax error
+    }
+
+    // 2. Walk AST, find service module calls
+    calls := extractServiceCalls(file)
+
+    // 3. Validate each call against handlers.yaml
+    var errors []ValidationError
+    for _, call := range calls {
+        handler := v.schemaRegistry.GetHandler(call.Module, call.Handler)
+        if handler == nil {
+            errors = append(errors, ValidationError{
+                Line: call.Line,
+                Message: fmt.Sprintf("undefined handler: %s.%s", call.Module, call.Handler),
+            })
+            continue
+        }
+
+        // Check required parameters
+        for _, param := range handler.Params {
+            if param.Required && !call.HasParam(param.Name) {
+                errors = append(errors, ValidationError{
+                    Line: call.Line,
+                    Message: fmt.Sprintf("missing required parameter: %s", param.Name),
+                })
+            }
+        }
+
+        // Check parameter types (where statically determinable)
+        for paramName, paramValue := range call.Params {
+            expectedType := handler.Params[paramName].Type
+            actualType := inferType(paramValue)
+            if actualType != nil && actualType != expectedType {
+                errors = append(errors, ValidationError{
+                    Line: call.Line,
+                    Message: fmt.Sprintf("type mismatch: %s expected %s, got %s",
+                        paramName, expectedType, actualType),
+                })
+            }
+        }
+    }
+
+    return &ValidationReport{Errors: errors}, nil
+}
+```
+
+**CLI usage:**
+
+```bash
+# Validate saga script
+meridian-cli saga validate withdrawal.star
+
+# Output:
+# ✅ Syntax: OK
+# ✅ Type checking: OK
+# ✅ Service modules: OK
+# ⚠️  Warnings:
+#   - Line 42: Unused variable 'temp_result'
+#   - Line 89: Unreachable code after fail()
+```
+
+---
+
+## Tier 2: Static Analysis
+
+### Linting Rules
+
+**Goal:** Catch code smells and anti-patterns.
+
+**Implemented checks:**
+
+1. **Unused variables**
+
+   ```python
+   # ❌ LINT ERROR
+   temp = Decimal("100")
+   amount = Decimal("200")  # 'temp' never used
+   ```
+
+2. **Unreachable code**
+
+   ```python
+   # ❌ LINT ERROR
+   fail("Critical error")
+   log("This never executes")  # Unreachable
+   ```
+
+3. **Missing step() calls**
+
+   ```python
+   # ❌ LINT WARNING
+   result = position_keeping.initiate_log(...)  # No step() before handler
+   ```
+
+4. **Compensation coverage**
+
+   ```python
+   # ✅ GOOD - Handler has compensation defined
+   step(name="log_position")
+   result = position_keeping.initiate_log(...)  # Compensation: cancel_log
+
+   # ⚠️  WARNING - Handler has no compensation
+   step(name="send_email")
+   send_notification.email(...)  # No compensation handler in schema
+   ```
+
+5. **Cyclomatic complexity**
+
+   ```python
+   # ⚠️  COMPLEXITY WARNING: Cyclomatic complexity = 15 (threshold: 10)
+   # Consider refactoring into smaller functions
+   def execute_complex_saga():
+       if condition1:
+           if condition2:
+               for item in items:
+                   if item.valid:
+                       ...  # Deep nesting
+   ```
+
+---
+
+## Tier 3: Runtime Testing Framework
+
+### Test DSL for Starlark Scripts
+
+**Goal:** Tenants write tests alongside their scripts.
+
+**Example test file:**
+
+```python
+# withdrawal_test.star - Tests for withdrawal.star
+
+# Import testing framework
+test = require("meridian.testing")
+
+# Test: Successful withdrawal
+@test.case("successful_withdrawal")
+def test_successful_withdrawal():
+    # Arrange: Mock input
+    input_data = {
+        "account_id": "ACC-001",
+        "amount": "100.50",
+        "currency": "GBP",
+    }
+
+    # Arrange: Mock service responses
+    test.mock("position_keeping.initiate_log", returns={
+        "log_id": "LOG-001",
+        "status": "INITIATED",
+    })
+
+    test.mock("financial_accounting.capture_posting", returns={
+        "posting_id": "POST-001",
+        "status": "POSTED",
+    })
+
+    # Act: Execute saga
+    result = execute_saga("withdrawal", input_data)
+
+    # Assert: Verify result
+    test.assert_equal(result["status"], "COMPLETED")
+    test.assert_not_nil(result["transaction_id"])
+
+    # Assert: Verify service calls
+    test.assert_called("position_keeping.initiate_log", {
+        "position_id": "ACC-001",
+        "amount": Decimal("100.50"),
+        "direction": "DEBIT",
+    })
+
+# Test: Insufficient balance
+@test.case("insufficient_balance")
+def test_insufficient_balance():
+    input_data = {"account_id": "ACC-002", "amount": "1000000.00"}
+
+    # Mock balance check failure
+    test.mock("position_keeping.get_balance", returns={
+        "balance": Decimal("100.00"),
+    })
+
+    # Act & Assert: Saga should fail
+    test.assert_fails(
+        lambda: execute_saga("withdrawal", input_data),
+        message_contains="Insufficient balance"
+    )
+
+# Test: Invalid amount
+@test.case("negative_amount")
+def test_negative_amount():
+    input_data = {"account_id": "ACC-003", "amount": "-50.00"}
+
+    # Should fail before any service calls
+    test.assert_fails(
+        lambda: execute_saga("withdrawal", input_data),
+        message_contains="Amount must be positive"
+    )
+
+    # Verify no service calls made
+    test.assert_not_called("position_keeping.initiate_log")
+
+# Run all tests
+test.run_all()
+```
+
+**CLI execution:**
+
+```bash
+# Run tests
+meridian-cli saga test withdrawal.star --test-file withdrawal_test.star
+
+# Output:
+# Running tests for withdrawal.star...
+#
+# ✅ test_successful_withdrawal (42ms)
+# ✅ test_insufficient_balance (18ms)
+# ✅ test_negative_amount (5ms)
+#
+# 3 passed, 0 failed (65ms total)
+# Coverage: 87% of saga steps executed in tests
+```
+
+---
+
+### Testing Framework API
+
+**Core functions:**
+
+```python
+# Test definition
+@test.case(name)              # Decorator to define test case
+test.run_all()                # Execute all test cases
+
+# Assertions
+test.assert_equal(a, b)       # Assert equality
+test.assert_not_equal(a, b)   # Assert inequality
+test.assert_true(condition)   # Assert truthy
+test.assert_false(condition)  # Assert falsy
+test.assert_nil(value)        # Assert None/null
+test.assert_not_nil(value)    # Assert not None
+test.assert_fails(func, message_contains="...")  # Assert raises error
+
+# Mocking
+test.mock(handler, returns={...})  # Mock service module handler
+test.assert_called(handler, params={...})  # Assert handler was called
+test.assert_not_called(handler)    # Assert handler was not called
+test.assert_call_count(handler, n) # Assert call count
+
+# Test execution
+execute_saga(name, input_data)     # Execute saga in test environment
+
+# Property-based testing
+test.property(gen, func)          # QuickCheck-style property testing
+```
+
+---
+
+### Property-Based Testing
+
+**Goal:** Generate many test cases automatically.
+
+**Example:**
+
+```python
+# Property: Withdrawal + deposit = original balance
+@test.property(
+    generators={
+        "account_id": test.gen_uuid(),
+        "amount": test.gen_decimal(min=0.01, max=1000.00),
+    }
+)
+def prop_withdrawal_deposit_inverse(account_id, amount):
+    # Setup: Initial balance
+    initial_balance = Decimal("1000.00")
+    test.mock("position_keeping.get_balance", returns={"balance": initial_balance})
+
+    # Withdraw
+    withdraw_result = execute_saga("withdrawal", {
+        "account_id": account_id,
+        "amount": str(amount),
+    })
+
+    # Deposit same amount
+    deposit_result = execute_saga("deposit", {
+        "account_id": account_id,
+        "amount": str(amount),
+    })
+
+    # Property: Final balance = initial balance
+    final_balance = test.get_mock_result("position_keeping.get_balance")["balance"]
+    test.assert_equal(final_balance, initial_balance)
+
+# Runs 100 random test cases
+test.run_property(prop_withdrawal_deposit_inverse, iterations=100)
+```
+
+---
+
+### Integration Testing with Real Services
+
+**Goal:** Test against actual services (not mocks).
+
+**Example:**
+
+```python
+# withdrawal_integration_test.star
+
+test = require("meridian.testing")
+test.integration_mode()  # Use real services
+
+@test.case("integration_successful_withdrawal")
+def test_integration_withdrawal():
+    # Setup: Create real test account
+    account_id = test.create_test_account({
+        "balance": Decimal("1000.00"),
+        "currency": "GBP",
+    })
+
+    # Act: Execute saga against real services
+    result = execute_saga("withdrawal", {
+        "account_id": account_id,
+        "amount": "100.50",
+    })
+
+    # Assert: Check real database state
+    balance = test.query_balance(account_id)
+    test.assert_equal(balance, Decimal("899.50"))
+
+    # Cleanup: Delete test account
+    test.cleanup_test_account(account_id)
+
+test.run_all()
+```
+
+**Benefits:**
+
+- Catches integration issues mocks would miss
+- Validates schema compatibility
+- Tests actual compensation flows
+
+**Tradeoffs:**
+
+- Slower (real database/service calls)
+- Requires test environment setup
+- Needs cleanup logic
+
+---
+
+## Implementation Roadmap
+
+### Phase 1: Compile-Time Validation (2 weeks, 8 SP)
+
+**Goal:** Type checking against handlers.yaml
+
+**Tasks:**
+
+1. AST parser for Starlark scripts
+2. Service call extractor
+3. Schema validator
+4. CLI command: `meridian-cli saga validate`
+
+**Acceptance criteria:**
+
+- Detects undefined handlers
+- Detects missing required parameters
+- Detects type mismatches (where statically determinable)
+
+---
+
+### Phase 2: Static Analysis (1 week, 5 SP)
+
+**Goal:** Linting and code quality
+
+**Tasks:**
+
+1. Unused variable detection
+2. Unreachable code detection
+3. Cyclomatic complexity metrics
+4. Compensation coverage analysis
+5. CLI command: `meridian-cli saga lint`
+
+**Acceptance criteria:**
+
+- Produces actionable warnings
+- Configurable severity levels
+- Integrates with CI/CD
+
+---
+
+### Phase 3: Testing DSL (3 weeks, 13 SP)
+
+**Goal:** Tenant-writable unit tests
+
+**Tasks:**
+
+1. Test framework built-ins (assertions, mocking)
+2. Test execution engine
+3. Coverage reporting
+4. CLI command: `meridian-cli saga test`
+
+**Acceptance criteria:**
+
+- Tenants can write test files
+- Mocks service module handlers
+- Reports coverage metrics
+
+---
+
+### Phase 4: Integration Testing (2 weeks, 8 SP)
+
+**Goal:** Test against real services
+
+**Tasks:**
+
+1. Test environment provisioning
+2. Test data fixtures
+3. Cleanup automation
+4. Performance benchmarking
+
+**Acceptance criteria:**
+
+- Tests run against test cluster
+- Automatic cleanup after test run
+- Performance regression detection
+
+---
+
+### Phase 5: Property-Based Testing (1 week, 5 SP)
+
+**Goal:** Generative testing
+
+**Tasks:**
+
+1. Value generators (UUID, Decimal, etc.)
+2. Property test executor
+3. Shrinking (minimal failing case)
+
+**Acceptance criteria:**
+
+- 100+ random test cases per property
+- Shrinks to minimal failure
+- Integrates with unit testing
+
+---
+
+## Alternative: Python-Style `doctest`
+
+**Concept:** Embed tests in script comments.
+
+**Example:**
+
+```python
+# withdrawal.star
+
+def calculate_fee(amount):
+    """Calculate withdrawal fee.
+
+    >>> calculate_fee(Decimal("100.00"))
+    Decimal("1.00")
+
+    >>> calculate_fee(Decimal("0.50"))
+    Decimal("0.01")
+    """
+    return amount * Decimal("0.01")
+
+# meridian-cli saga doctest withdrawal.star
+# ✅ All doctests passed
+```
+
+**Pros:**
+
+- Documentation and tests in one place
+- Low friction (no separate test files)
+
+**Cons:**
+
+- Limited assertions
+- No mocking support
+- Not suitable for integration tests
+
+**Recommendation:** Support doctests for simple functions, full testing DSL for sagas.
+
+---
+
+## Open Questions
+
+### 1. Where do tests live?
+
+#### Option A: Co-located with scripts
+
+```text
+reference-data/saga/defaults/withdrawal/
+├── v1.0.0.star
+└── v1.0.0_test.star
+```
+
+**Pros:** Easy to find, versioned together
+**Cons:** Test files deployed to production?
+
+#### Option B: Separate test directory
+
+```text
+reference-data/saga/defaults/withdrawal/
+└── v1.0.0.star
+
+reference-data/saga/tests/withdrawal/
+└── v1.0.0_test.star
+```
+
+**Pros:** Clean separation
+**Cons:** Harder to keep in sync
+
+**Recommendation:** Option A with `.star_test` extension (excluded from production).
+
+---
+
+### 2. How to test CEL expressions?
+
+CEL expressions are embedded in Starlark scripts:
+
+```python
+rate = cel_eval("spot * coefficient * markup", {
+    "spot": Decimal("50.00"),
+    "coefficient": Decimal("1.02"),
+    "markup": Decimal("1.05")
+})
+```
+
+**Testing approach:**
+
+```python
+# Test CEL expression directly
+@test.case("cel_expression_pricing")
+def test_cel_pricing():
+    result = cel_eval("spot * coefficient * markup", {
+        "spot": Decimal("50.00"),
+        "coefficient": Decimal("1.02"),
+        "markup": Decimal("1.05")
+    })
+
+    test.assert_equal(result, Decimal("53.55"))
+```
+
+**Alternative:** Extract CEL expressions to reference data, test separately.
+
+---
+
+### 3. How to test bi-temporal behavior?
+
+Sagas use `knowledge_at` for deterministic lookups:
+
+```python
+price = market_data.get_price("EPEX_SPOT_GBP", knowledge_at)
+```
+
+**Testing approach:**
+
+```python
+# Mock with specific knowledge_at
+@test.case("price_lookup_at_timestamp")
+def test_price_lookup():
+    test.set_knowledge_at("2026-02-05T10:00:00Z")
+
+    test.mock("market_data.get_price", returns={
+        "value": Decimal("50.00"),
+        "timestamp": "2026-02-05T09:59:00Z",  # Before knowledge_at
+    })
+
+    result = execute_saga("valuation", {...})
+    test.assert_equal(result["price"], Decimal("50.00"))
+```
+
+---
+
+## Success Metrics
+
+1. **95% of saga scripts have tests** before production deployment
+2. **Zero undefined handler errors** in production (caught by validation)
+3. **80% code coverage** across saga test suites
+4. **10x faster tenant iteration** (local testing vs production debugging)
+5. **100% compensation coverage** (every step has compensation path tested)
+
+---
+
+## Risks & Mitigation
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|------------|--------|------------|
+| Test framework too complex | Medium | High | Start simple (assertions + mocks), iterate |
+| Tenants don't write tests | High | High | Make testing part of deployment gate |
+| Mocks diverge from reality | Medium | High | Integration tests catch divergence |
+| Performance overhead | Low | Medium | Profile, optimize test execution |
+
+---
+
+## Future Enhancements
+
+1. **Mutation testing** - Verify tests catch bugs
+2. **Fuzz testing** - Random input generation
+3. **Visual coverage reports** - HTML coverage viewer
+4. **Test marketplace** - Share test suites across tenants
+5. **AI test generation** - LLM generates tests from script
+
+---
+
+## Related Work
+
+- **Python `unittest`** - Assertion library inspiration
+- **Go `testing`** - Table-driven test pattern
+- **Rust QuickCheck** - Property-based testing
+- **Starlark test framework** (Bazel) - Limited, no mocking
+
+---
+
+## Questions for Review
+
+1. Should tests be mandatory for saga deployment?
+2. What's the right balance between unit tests (fast) and integration tests (realistic)?
+3. Should we support Python-style `doctest` for simple functions?
+4. How to prevent test flakiness in distributed saga testing?
+5. Should tenants be able to test against production data (read-only snapshots)?
+
+---
+
+## Appendix: Example Validation Report
+
+```bash
+$ meridian-cli saga validate withdrawal.star
+
+Validation Report for withdrawal.star
+=====================================
+
+✅ Syntax: OK
+
+✅ Type Checking: OK
+
+✅ Service Modules:
+  • position_keeping.initiate_log ✓
+  • financial_accounting.capture_posting ✓
+  • current_account.save ✓
+
+⚠️  Warnings (3):
+  • Line 42: Unused variable 'temp_result'
+  • Line 76: Consider using '!= None' instead of '!= None' (style)
+  • Line 89: Step 'capture_credit_posting' has no compensation handler
+
+❌ Errors (1):
+  • Line 102: Missing required parameter 'currency' in position_keeping.initiate_log()
+
+Static Analysis:
+  • Cyclomatic Complexity: 8 (threshold: 10) ✓
+  • Compensation Coverage: 83% (5/6 steps) ⚠️
+  • Reachable Steps: 100% (6/6) ✓
+
+Recommendation: Fix errors before deployment. Address warnings for production readiness.
+```
