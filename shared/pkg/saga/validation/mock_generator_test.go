@@ -59,7 +59,8 @@ func TestGenerateMockForSimpleHandler(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
-	resultMap := result.(map[string]any)
+	resultMap, ok := result.(map[string]any)
+	require.True(t, ok, "Expected result to be map[string]any, got %T", result)
 
 	// Verify all return fields present
 	assert.Contains(t, resultMap, "log_id")
@@ -128,7 +129,8 @@ func TestGenerateMockForEnumField(t *testing.T) {
 	result, err := mockHandler(ctx, params)
 	require.NoError(t, err)
 
-	resultMap := result.(map[string]any)
+	resultMap, ok := result.(map[string]any)
+	require.True(t, ok, "Expected result to be map[string]any, got %T", result)
 	// Direction should be echoed
 	assert.Equal(t, "DEBIT", resultMap["direction"])
 }
@@ -152,7 +154,8 @@ func TestGenerateMockForArrayField(t *testing.T) {
 	result, err := mockHandler(ctx, params)
 	require.NoError(t, err)
 
-	resultMap := result.(map[string]any)
+	resultMap, ok := result.(map[string]any)
+	require.True(t, ok, "Expected result to be map[string]any, got %T", result)
 
 	// Verify posting_ids is an array (empty for mocks)
 	postingIDs, ok := resultMap["posting_ids"].([]any)
@@ -180,7 +183,8 @@ func TestGenerateMockForMapField(t *testing.T) {
 	result, err := mockHandler(ctx, params)
 	require.NoError(t, err)
 
-	resultMap := result.(map[string]any)
+	resultMap, ok := result.(map[string]any)
+	require.True(t, ok, "Expected result to be map[string]any, got %T", result)
 
 	// Verify entity is echoed as map
 	entity, ok := resultMap["entity"].(map[string]any)
@@ -188,8 +192,8 @@ func TestGenerateMockForMapField(t *testing.T) {
 	assert.Equal(t, "123", entity["id"])
 }
 
-// TestGenerateMockForInt64Field verifies int64 fields return 1000
-func TestGenerateMockForInt64Field(t *testing.T) {
+// TestGenerateMockForHandlerWithInt64Params verifies mock handles int64 params
+func TestGenerateMockForHandlerWithInt64Params(t *testing.T) {
 	registry := schema.NewRegistry()
 	err := registry.LoadFromFile("../schema/handlers.yaml")
 	require.NoError(t, err)
@@ -210,7 +214,8 @@ func TestGenerateMockForInt64Field(t *testing.T) {
 	result, err := mockHandler(ctx, params)
 	require.NoError(t, err)
 
-	resultMap := result.(map[string]any)
+	resultMap, ok := result.(map[string]any)
+	require.True(t, ok, "Expected result to be map[string]any, got %T", result)
 
 	// Verify string fields are present
 	assert.NotEmpty(t, resultMap["lien_id"])
