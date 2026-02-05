@@ -390,19 +390,21 @@ func (o *PaymentOrchestrator) handleStarlarkSagaResult(ctx context.Context, po *
 
 	// Validate required outputs based on successful steps
 	// If a step succeeded but its output is missing, fail the payment order
+	// Note: StepName contains the handler name (e.g., "payment_order.create_lien"),
+	// not the step() name from the Starlark script (e.g., "reserve_funds")
 	createLienSucceeded := false
 	sendToGatewaySucceeded := false
 	for _, step := range result.StepResults {
-		if step.StepName == "reserve_funds" && step.Success {
+		if step.StepName == "payment_order.create_lien" && step.Success {
 			createLienSucceeded = true
 		}
-		if step.StepName == "send_to_gateway" && step.Success {
+		if step.StepName == "payment_order.send_to_gateway" && step.Success {
 			sendToGatewaySucceeded = true
 		}
 	}
 
 	if createLienSucceeded && lienID == "" {
-		o.logger.Error("saga output missing lien_id after successful reserve_funds step",
+		o.logger.Error("saga output missing lien_id after successful create_lien handler",
 			"payment_order_id", latestPO.ID.String(),
 			"output", result.Output)
 		if err := o.failPaymentOrder(ctx, latestPO, "saga output missing lien_id", "SAGA_OUTPUT_INVALID"); err != nil {
@@ -414,7 +416,7 @@ func (o *PaymentOrchestrator) handleStarlarkSagaResult(ctx context.Context, po *
 	}
 
 	if sendToGatewaySucceeded && gatewayReferenceID == "" {
-		o.logger.Error("saga output missing gateway_reference_id after successful send_to_gateway step",
+		o.logger.Error("saga output missing gateway_reference_id after successful send_to_gateway handler",
 			"payment_order_id", latestPO.ID.String(),
 			"output", result.Output)
 		if err := o.failPaymentOrder(ctx, latestPO, "saga output missing gateway_reference_id", "SAGA_OUTPUT_INVALID"); err != nil {
