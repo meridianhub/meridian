@@ -384,6 +384,13 @@ func goToStarlark(v interface{}) starlark.Value {
 			list[i] = goToStarlark(elem)
 		}
 		return starlark.NewList(list)
+	case map[string]string:
+		// Handle map[string]string (e.g., PaymentAttributes)
+		dict := starlark.NewDict(len(val))
+		for k, v := range val {
+			_ = dict.SetKey(starlark.String(k), starlark.String(v))
+		}
+		return dict
 	case map[string]interface{}:
 		dict := starlark.NewDict(len(val))
 		for k, v := range val {

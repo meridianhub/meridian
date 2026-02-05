@@ -229,9 +229,20 @@ func (r *StarlarkSagaRunner) ExecuteSaga(ctx context.Context, sagaName string, s
 		"step_count", len(stepResults),
 		"success", true)
 
+	// Extract the "output" global variable if present (common pattern in saga scripts)
+	// Otherwise fall back to using all globals as the output
+	outputMap := result.Globals
+	if outputValue, ok := result.Globals["output"]; ok {
+		// result.Globals values are already Go types (converted from Starlark)
+		// Try to use it as a map directly
+		if outputAsMap, ok := outputValue.(map[string]interface{}); ok {
+			outputMap = outputAsMap
+		}
+	}
+
 	return &RunnerOutput{
 		Success:     true,
-		Output:      result.Globals,
+		Output:      outputMap,
 		StepResults: stepResults,
 	}, nil
 }
