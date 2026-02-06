@@ -29,7 +29,7 @@ GOMOD=$(GOCMD) mod
 GOGET=$(GOCMD) get
 GOFMT=$(GOCMD) fmt
 
-.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-openapi proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt validate-semconv migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-status-all migrate-lint-all migrate-hash-all migrate-apply-orgs migrate-status-orgs docs generate-saga-docs
+.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-openapi proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt validate-semconv validate-sagas migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-status-all migrate-lint-all migrate-hash-all migrate-apply-orgs migrate-status-orgs docs generate-saga-docs
 
 # Default target
 all: help
@@ -43,6 +43,7 @@ help:
 	@echo "  make test              - Run tests with coverage"
 	@echo "  make lint              - Run golangci-lint, validate Tiltfile, and validate semconv versions"
 	@echo "  make validate-tilt     - Validate Tiltfile configuration"
+	@echo "  make validate-sagas    - Validate all saga scripts in the codebase"
 	@echo "  make fmt               - Format Go code"
 	@echo "  make clean             - Remove build artifacts"
 	@echo "  make proto             - Generate code from all protobuf versions (includes OpenAPI)"
@@ -108,6 +109,34 @@ coverage: test
 	@$(GOCMD) tool cover -html=$(COVERAGE_DIR)/coverage.out -o $(COVERAGE_DIR)/coverage.html
 	@echo "Opening coverage report..."
 	@open $(COVERAGE_DIR)/coverage.html 2>/dev/null || xdg-open $(COVERAGE_DIR)/coverage.html 2>/dev/null || echo "Please open $(COVERAGE_DIR)/coverage.html manually"
+
+## validate-sagas: Validate all saga scripts in the codebase
+validate-sagas:
+	@echo "Discovering and validating all saga scripts..."
+	@SCRIPT_COUNT=0; \
+	FAILED_COUNT=0; \
+	PROJECT_ROOT=$$(pwd); \
+	for SCRIPT in $$(find services -type f -name "*.star" \( -path "*/sagas/*" -o -path "*/saga/defaults/*" \) 2>/dev/null | sort); do \
+		SCRIPT_COUNT=$$((SCRIPT_COUNT + 1)); \
+		echo "Validating: $$SCRIPT"; \
+		SCRIPT_ABS="$$PROJECT_ROOT/$$SCRIPT"; \
+		if ! $(GOTEST) -run TestValidateSagaScript_ProductionScript ./shared/pkg/saga -args -script="$$SCRIPT_ABS"; then \
+			FAILED_COUNT=$$((FAILED_COUNT + 1)); \
+		fi; \
+	done; \
+	echo ""; \
+	if [ $$SCRIPT_COUNT -eq 0 ]; then \
+		echo "ℹ️  No saga scripts found in services/ directories"; \
+		echo "This is expected if no .star files exist yet in sagas/ or saga/defaults/ paths"; \
+	else \
+		echo "Validated $$SCRIPT_COUNT script(s)"; \
+		if [ $$FAILED_COUNT -gt 0 ]; then \
+			echo "❌ $$FAILED_COUNT script(s) failed validation"; \
+			exit 1; \
+		else \
+			echo "✅ All scripts passed validation"; \
+		fi; \
+	fi
 
 ## lint: Run golangci-lint and validate Tiltfile
 lint: validate-tilt validate-semconv
