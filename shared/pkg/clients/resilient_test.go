@@ -3,6 +3,8 @@ package clients
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -308,6 +310,86 @@ func TestResilientClientAccessors(t *testing.T) {
 	t.Run("Logger returns non-nil", func(t *testing.T) {
 		if client.Logger() == nil {
 			t.Error("expected non-nil logger")
+		}
+	})
+}
+
+func TestNewResilientClient_WithExplicitLogger(t *testing.T) {
+	t.Run("uses provided logger when non-nil", func(t *testing.T) {
+		logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+		config := ResilientClientConfig{
+			CircuitBreakerName: "explicit-logger-test",
+			Logger:             logger,
+		}
+		client := NewResilientClient(config)
+
+		if client.Logger() != logger {
+			t.Error("expected client to use the provided logger")
+		}
+	})
+}
+
+func TestNewResilientClient_ZeroValueConfig(t *testing.T) {
+	t.Run("applies all defaults for zero-value config", func(t *testing.T) {
+		config := ResilientClientConfig{}
+		client := NewResilientClient(config)
+
+		if client == nil {
+			t.Fatal("expected non-nil client")
+		}
+		if client.CircuitBreaker() == nil {
+			t.Error("expected non-nil circuit breaker")
+		}
+		if client.Logger() == nil {
+			t.Error("expected non-nil logger")
+		}
+
+		rc := client.RetryConfig()
+		if rc.MaxRetries != 3 {
+			t.Errorf("expected default MaxRetries=3, got %d", rc.MaxRetries)
+		}
+		if rc.Multiplier != 2.0 {
+			t.Errorf("expected default Multiplier=2.0, got %f", rc.Multiplier)
+		}
+		if rc.RandomizationFactor != 0.5 {
+			t.Errorf("expected default RandomizationFactor=0.5, got %f", rc.RandomizationFactor)
+		}
+	})
+}
+
+func TestExecuteWithResilience_CircuitBreakerOpen(t *testing.T) {
+	t.Run("logs warning when circuit breaker is open", func(t *testing.T) {
+		config := ResilientClientConfig{
+			CircuitBreakerName:     "open-cb-test",
+			CircuitBreakerTimeout:  30 * time.Second,
+			CircuitBreakerInterval: 60 * time.Second,
+			MaxRequests:            1,
+			FailureThreshold:       3,
+			MaxRetries:             0,
+			InitialInterval:        1 * time.Millisecond,
+		}
+		client := NewResilientClient(config)
+		ctx := context.Background()
+
+		// Trip the circuit breaker with consecutive failures
+		for i := 0; i < 5; i++ {
+			_, _ = ExecuteWithResilienceNoRetry(ctx, client, "trip-op", func() (string, error) {
+				return "", errTestFailure
+			})
+		}
+
+		// Verify circuit is open
+		if client.CircuitBreaker().State() != gobreaker.StateOpen {
+			t.Fatalf("expected circuit breaker to be open, got state %v", client.CircuitBreaker().State())
+		}
+
+		// Execute against open circuit - should hit the ErrOpenState/ErrTooManyRequests warning path
+		_, err := ExecuteWithResilience(ctx, client, "open-circuit-op", func() (string, error) {
+			return "should not execute", nil
+		})
+
+		if err == nil {
+			t.Fatal("expected error when circuit breaker is open")
 		}
 	})
 }
