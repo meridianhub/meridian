@@ -1,0 +1,154 @@
+name: Saga Script Validation
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - 'services/**/sagas/**/*.star'
+      - 'services/reference-data/saga/defaults/**/*.star'
+      - 'shared/pkg/saga/schema/handlers.yaml'
+      - 'shared/pkg/saga/validator.go'
+      - 'shared/pkg/saga/starlark_runner.go'
+      - 'shared/pkg/saga/schema/**/*.go'
+      - 'services/reference-data/saga/reference_validator.go'
+      - '.github/workflows/saga-validation.yml'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  validate-saga-scripts:
+    name: Validate All Saga Scripts
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.7'
+          cache: true
+
+      - name: Set up buf
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate protobuf files
+        run: buf generate
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Discover and validate all saga scripts
+        run: |
+          # Create output directory for validation reports
+          mkdir -p validation-reports
+
+          # Discover all .star files in saga directories
+          SCRIPT_PATHS=$(find services -type f -name "*.star" \( \
+            -path "*/sagas/*" -o \
+            -path "*/saga/defaults/*" \
+          \) 2>/dev/null | sort)
+
+          # Check if any scripts were found
+          if [ -z "$SCRIPT_PATHS" ]; then
+            echo "ℹ️ No saga scripts found in services/ directories"
+            echo "This is expected if no .star files exist yet in sagas/ or saga/defaults/ paths"
+            echo "Validation will run automatically when saga scripts are added"
+            exit 0
+          fi
+
+          TOTAL_SCRIPTS=$(echo "$SCRIPT_PATHS" | wc -l | tr -d ' ')
+          echo "Found $TOTAL_SCRIPTS saga script(s) to validate"
+          echo ""
+
+          # Track validation results
+          FAILED_COUNT=0
+          PASSED_COUNT=0
+
+          # Get absolute path to project root
+          PROJECT_ROOT=$(pwd)
+
+          # Validate each script
+          for SCRIPT in $SCRIPT_PATHS; do
+            echo "Validating: $SCRIPT"
+            SCRIPT_ABS="$PROJECT_ROOT/$SCRIPT"
+
+            # Create unique log filename by replacing / with _ to avoid collisions
+            UNIQUE_LOG=$(echo "$SCRIPT" | tr '/' '_')
+
+            # Run validation test (calls ValidateSagaScript)
+            if go test -v -run TestValidateSagaScript_ProductionScript \
+                ./shared/pkg/saga \
+                -args -script="$SCRIPT_ABS" > "validation-reports/$UNIQUE_LOG.log" 2>&1; then
+              echo "  ✅ PASSED"
+              PASSED_COUNT=$((PASSED_COUNT + 1))
+            else
+              echo "  ❌ FAILED"
+              cat "validation-reports/$UNIQUE_LOG.log"
+              FAILED_COUNT=$((FAILED_COUNT + 1))
+            fi
+            echo ""
+          done
+
+          # Generate summary report
+          echo "# Saga Validation Report" > validation-reports/summary.md
+          echo "" >> validation-reports/summary.md
+          echo "- **Total Scripts**: $TOTAL_SCRIPTS" >> validation-reports/summary.md
+          echo "- **Passed**: $PASSED_COUNT" >> validation-reports/summary.md
+          echo "- **Failed**: $FAILED_COUNT" >> validation-reports/summary.md
+          echo "" >> validation-reports/summary.md
+
+          if [ $FAILED_COUNT -gt 0 ]; then
+            echo "## Failed Scripts" >> validation-reports/summary.md
+            echo "" >> validation-reports/summary.md
+            for SCRIPT in $SCRIPT_PATHS; do
+              UNIQUE_LOG=$(echo "$SCRIPT" | tr '/' '_')
+              LOGFILE="validation-reports/$UNIQUE_LOG.log"
+              if [ -f "$LOGFILE" ] && grep -q "FAIL" "$LOGFILE"; then
+                echo "- \`$SCRIPT\`" >> validation-reports/summary.md
+              fi
+            done
+          fi
+
+          # Display summary
+          cat validation-reports/summary.md
+
+          # Fail build if any scripts failed validation
+          if [ $FAILED_COUNT -gt 0 ]; then
+            echo ""
+            echo "::error::$FAILED_COUNT saga script(s) failed validation"
+            exit 1
+          fi
+
+          echo ""
+          echo "✅ All $TOTAL_SCRIPTS saga script(s) validated successfully"
+
+      - name: Upload validation report
+        uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: saga-validation-report
+          path: validation-reports/
+          retention-days: 30
+
+      - name: Comment PR with validation results
+        uses: actions/github-script@v8
+        if: failure() && github.event_name == 'pull_request'
+        with:
+          script: |
+            const fs = require('fs');
+            const summary = fs.readFileSync('validation-reports/summary.md', 'utf8');
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## ❌ Saga Validation Failed\n\n${summary}\n\nPlease fix the validation errors before merging.`
+            });

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/meridianhub/meridian/services/current-account/observability"
 )
 
 // Notifier errors.
@@ -268,12 +269,18 @@ func (n *HTTPNotifier) NotifyAccountClosed(ctx context.Context, tenantID, accoun
 }
 
 // sendWebhook sends a webhook with retry logic.
+// Records metrics for monitoring webhook delivery health.
 func (n *HTTPNotifier) sendWebhook(ctx context.Context, payload Payload) error {
+	start := time.Now()
+	eventType := mapEventType(payload.EventType)
+
 	webhookURL, err := n.getWebhookURL(ctx, payload)
 	if err != nil {
+		observability.RecordWebhookDeliveryAttempt(eventType, observability.WebhookStatusFailed)
 		return err
 	}
 	if webhookURL == "" {
+		observability.RecordWebhookDeliveryAttempt(eventType, observability.WebhookStatusSkipped)
 		return nil // No webhook configured, skip silently
 	}
 
@@ -283,16 +290,36 @@ func (n *HTTPNotifier) sendWebhook(ctx context.Context, payload Payload) error {
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		n.logger.Error("failed to serialize webhook payload", "event_id", payload.EventID, "error", err)
+		observability.RecordWebhookDeliveryAttempt(eventType, observability.WebhookStatusFailed)
 		return fmt.Errorf("failed to serialize payload: %w", err)
 	}
 
 	lastErr := n.executeWithRetries(ctx, webhookURL, payloadBytes, record, payload)
+
+	// Record delivery duration regardless of outcome
+	observability.RecordWebhookDeliveryDuration(eventType, time.Since(start))
+
 	if lastErr == nil {
+		observability.RecordWebhookDeliveryAttempt(eventType, observability.WebhookStatusSuccess)
 		return nil
 	}
 
+	observability.RecordWebhookDeliveryAttempt(eventType, observability.WebhookStatusFailed)
+	observability.RecordWebhookDeliveryExhausted(eventType)
 	n.markDeliveryFailed(ctx, record, payload, lastErr)
 	return fmt.Errorf("%w: %w", ErrWebhookDeliveryFailed, lastErr)
+}
+
+// mapEventType maps webhook EventType to metric label.
+func mapEventType(eventType EventType) string {
+	switch eventType {
+	case EventTypeAccountFrozen:
+		return observability.WebhookEventAccountFrozen
+	case EventTypeAccountClosed:
+		return observability.WebhookEventAccountClosed
+	default:
+		return string(eventType)
+	}
 }
 
 // getWebhookURL retrieves the webhook URL for the tenant.
@@ -355,7 +382,7 @@ func (n *HTTPNotifier) executeWithRetries(
 	var lastErr error
 
 	for attempt := 0; attempt <= n.maxRetries; attempt++ {
-		if err := n.waitForRetry(ctx, attempt, payload.EventID); err != nil {
+		if err := n.waitForRetry(ctx, attempt, payload.EventID, payload.EventType); err != nil {
 			return err
 		}
 
@@ -378,10 +405,14 @@ func (n *HTTPNotifier) executeWithRetries(
 }
 
 // waitForRetry waits before a retry attempt (skips for first attempt).
-func (n *HTTPNotifier) waitForRetry(ctx context.Context, attempt int, eventID string) error {
+// Records retry metrics for monitoring.
+func (n *HTTPNotifier) waitForRetry(ctx context.Context, attempt int, eventID string, eventType EventType) error {
 	if attempt == 0 {
 		return nil
 	}
+
+	// Record retry attempt metric
+	observability.RecordWebhookDeliveryRetry(mapEventType(eventType))
 
 	delayIdx := attempt - 1
 	if delayIdx >= len(n.retryDelays) {

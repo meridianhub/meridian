@@ -128,6 +128,7 @@ func ValidateSagaScript(script string) error
 ```
 
 **Checks:**
+
 - ✅ Script size (max 64KB)
 - ✅ Syntax parsing (catches Python syntax errors like `is not None`)
 - ✅ Blocked functions (`load`, `exec`, `compile`, `open`, `eval`, `setattr`)
@@ -142,6 +143,7 @@ type SemanticLinter struct
 ```
 
 **Checks:**
+
 - ✅ Decimal arithmetic (should use CEL instead)
 - ✅ Magic numbers (hardcoded numeric literals)
 - ✅ Nested conditionals (excessive if/else nesting)
@@ -156,6 +158,7 @@ type SemanticLinter struct
 ### What's Missing: Runtime Validation
 
 **Current gap:** Static checks can't catch:
+
 - Undefined handler calls (typos in module/handler names)
 - Missing required parameters
 - Logic errors that cause script failure
@@ -318,6 +321,7 @@ Complexity Score: 6/10 (Medium)
 **Goal:** Auto-generate mocks from `handlers.yaml`
 
 **Builds on:**
+
 - `shared/pkg/saga/schema/` - Handler schema definitions (already exists)
 - `shared/pkg/saga/starlark_runner.go:33-38` - `HandlerRegistry` pattern to mirror
 
@@ -355,6 +359,7 @@ Complexity Score: 6/10 (Medium)
 **Goal:** Execute scripts with mocks safely
 
 **Builds on:**
+
 - `shared/pkg/saga/runtime.go:124-249` - `ExecuteSaga` pattern (already has timeout, sandboxing)
 - `shared/pkg/saga/starlark_runner.go:141-248` - `StarlarkSagaRunner` execution logic
 - Service module injection already implemented (lines 179-182)
@@ -389,6 +394,7 @@ Complexity Score: 6/10 (Medium)
 **Goal:** Human-readable reports, deployment blocking
 
 **Builds on:**
+
 - `shared/pkg/saga/validator.go:12-59` - `ValidationResult` struct (already exists)
 - `ValidateActivation()` at line 386 - Strict enforcement pattern
 
@@ -428,8 +434,8 @@ Complexity Score: 6/10 (Medium)
    Recommendation: Safe to activate
    ```
 
-2. Integrate with Reference Data service `ActivateSaga` RPC
-3. Block activation if validation fails
+3. Integrate with Reference Data service `ActivateSaga` RPC
+4. Block activation if validation fails
 
 **Acceptance criteria:**
 

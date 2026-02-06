@@ -146,6 +146,40 @@ var (
 		},
 		[]string{"clearing_type"},
 	)
+
+	// Webhook delivery metrics - tracks delivery attempts and failures for regulatory notifications
+	webhookDeliveryAttempts = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "current_account_webhook_delivery_attempts_total",
+			Help: "Total number of webhook delivery attempts by event type and status",
+		},
+		[]string{"event_type", "status"},
+	)
+
+	webhookDeliveryDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "current_account_webhook_delivery_duration_seconds",
+			Help:    "Time spent delivering webhooks by event type",
+			Buckets: []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0},
+		},
+		[]string{"event_type"},
+	)
+
+	webhookDeliveryRetries = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "current_account_webhook_delivery_retries_total",
+			Help: "Total number of webhook delivery retries by event type",
+		},
+		[]string{"event_type"},
+	)
+
+	webhookDeliveryExhausted = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "current_account_webhook_delivery_exhausted_total",
+			Help: "Total number of webhook deliveries that failed after all retries (regulatory compliance risk)",
+		},
+		[]string{"event_type"},
+	)
 )
 
 // RecordOperationDuration records the duration of a current account operation
@@ -253,4 +287,47 @@ func RecordClearingAccountLookupDuration(duration time.Duration) {
 // RecordClearingAccountLookupError records a clearing account lookup error
 func RecordClearingAccountLookupError(clearingType string) {
 	clearingAccountLookupErrors.WithLabelValues(clearingType).Inc()
+}
+
+// Webhook delivery status constants for bounded cardinality.
+const (
+	WebhookStatusSuccess = "success"
+	WebhookStatusFailed  = "failed"
+	WebhookStatusSkipped = "skipped"
+)
+
+// Webhook event type constants for bounded cardinality.
+const (
+	WebhookEventAccountFrozen = "account_frozen"
+	WebhookEventAccountClosed = "account_closed"
+)
+
+// RecordWebhookDeliveryAttempt records a webhook delivery attempt.
+// eventType should be one of the WebhookEvent* constants.
+// status should be one of the WebhookStatus* constants.
+func RecordWebhookDeliveryAttempt(eventType, status string) {
+	webhookDeliveryAttempts.WithLabelValues(eventType, status).Inc()
+}
+
+// RecordWebhookDeliveryDuration records the duration of a webhook delivery attempt.
+func RecordWebhookDeliveryDuration(eventType string, duration time.Duration) {
+	webhookDeliveryDuration.WithLabelValues(eventType).Observe(duration.Seconds())
+}
+
+// RecordWebhookDeliveryRetry records a webhook delivery retry attempt.
+func RecordWebhookDeliveryRetry(eventType string) {
+	webhookDeliveryRetries.WithLabelValues(eventType).Inc()
+}
+
+// RecordWebhookDeliveryExhausted records when webhook delivery retries are exhausted.
+// This indicates a regulatory compliance risk - freeze/close notifications not delivered.
+//
+// ALERTING: This metric MUST have a Prometheus alert configured:
+//
+//	alert: WebhookDeliveryExhausted
+//	expr: increase(current_account_webhook_delivery_exhausted_total[5m]) > 0
+//	severity: critical
+//	runbook: docs/runbooks/webhook-delivery-failure.md
+func RecordWebhookDeliveryExhausted(eventType string) {
+	webhookDeliveryExhausted.WithLabelValues(eventType).Inc()
 }

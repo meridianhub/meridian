@@ -188,6 +188,15 @@ service SagaRegistryService {
     };
   }
 
+  // ValidateSaga validates saga script syntax and execution without deployment.
+  // Uses dry-run execution to check for runtime errors, type mismatches, and complexity.
+  rpc ValidateSaga(ValidateSagaRequest) returns (ValidateSagaResponse) {
+    option (google.api.http) = {
+      post: "/v1/sagas/validate"
+      body: "*"
+    };
+  }
+
   // AnalyzeDeprecationImpact finds all sagas that reference a given instrument.
   // Used to understand the impact before deprecating an instrument.
   rpc AnalyzeDeprecationImpact(AnalyzeDeprecationImpactRequest) returns (AnalyzeDeprecationImpactResponse) {
@@ -386,4 +395,90 @@ message AnalyzeDeprecationImpactResponse {
 
   // total_count is the total number of affected sagas.
   int32 total_count = 2;
+}
+
+// ValidateSagaRequest contains the saga script to validate.
+message ValidateSagaRequest {
+  // saga_name is the saga identifier for logging (required).
+  string saga_name = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 64
+  }];
+
+  // script is the Starlark source code to validate (required).
+  string script = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 65536
+  }];
+
+  // version is the saga version for logging (optional).
+  string version = 3;
+
+  // block_on_failure indicates if validation failures should block deployment.
+  // When true, critical errors prevent saga activation.
+  bool block_on_failure = 4;
+}
+
+// ValidateSagaResponse contains the validation results.
+message ValidateSagaResponse {
+  // success is true if the script executed without errors.
+  bool success = 1;
+
+  // errors contains validation errors with line/column info.
+  repeated ValidationError errors = 2;
+
+  // metrics provides complexity analysis.
+  ComplexityMetrics metrics = 3;
+
+  // formatted_report is a human-readable summary for CLI consumption.
+  string formatted_report = 4;
+}
+
+// ValidationError represents a single validation error.
+message ValidationError {
+  // line is the source line number (1-indexed, 0 if unknown).
+  int32 line = 1;
+
+  // column is the source column number (1-indexed, 0 if unknown).
+  int32 column = 2;
+
+  // message is the human-readable error description.
+  string message = 3;
+
+  // category classifies the error type.
+  ErrorCategory category = 4;
+
+  // suggestion provides a hint for fixing the error (optional).
+  string suggestion = 5;
+}
+
+// ErrorCategory classifies validation errors by root cause.
+enum ErrorCategory {
+  // ERROR_CATEGORY_UNSPECIFIED means the category is unknown.
+  ERROR_CATEGORY_UNSPECIFIED = 0;
+  // ERROR_CATEGORY_SYNTAX indicates a Starlark parse error (invalid syntax).
+  ERROR_CATEGORY_SYNTAX = 1;
+  // ERROR_CATEGORY_UNDEFINED_HANDLER indicates a handler is not found in the schema registry.
+  ERROR_CATEGORY_UNDEFINED_HANDLER = 2;
+  // ERROR_CATEGORY_TYPE_MISMATCH indicates wrong parameter types (caught by CoerceParams).
+  ERROR_CATEGORY_TYPE_MISMATCH = 3;
+  // ERROR_CATEGORY_RUNTIME indicates a script runtime error (calls fail() or raises exception).
+  ERROR_CATEGORY_RUNTIME = 4;
+  // ERROR_CATEGORY_TIMEOUT indicates execution exceeded the timeout limit.
+  ERROR_CATEGORY_TIMEOUT = 5;
+}
+
+// ComplexityMetrics provides execution complexity analysis.
+message ComplexityMetrics {
+  // handler_call_count is the number of handler calls executed.
+  int32 handler_call_count = 1;
+
+  // operation_count is the total Starlark operations (loops, conditionals, assignments).
+  int32 operation_count = 2;
+
+  // estimated_duration_ms is the projected execution time.
+  int32 estimated_duration_ms = 3;
+
+  // complexity_score is a 0-10 scale complexity rating.
+  int32 complexity_score = 4;
 }

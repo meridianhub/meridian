@@ -236,6 +236,50 @@ var (
 			Buckets: []float64{.001, .005, .01, .05, .1, .5, 1.0, 5.0},
 		},
 	)
+
+	// Bucket evaluation metrics - tracks CEL expression evaluation for non-fungible instruments
+	// Note: instrument_code is intentionally excluded to prevent cardinality explosion
+	// in multi-tenant environments where tenants can define custom instruments (ADR-0014).
+	// Instrument details are preserved in structured logs for debugging.
+	bucketEvaluationFailures = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "payment_order_bucket_evaluation_failures_total",
+			Help: "Total number of bucket ID evaluation failures by error type",
+		},
+		[]string{"error_type"},
+	)
+
+	bucketEvaluationDuration = promauto.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "payment_order_bucket_evaluation_duration_seconds",
+			Help:    "Time spent evaluating bucket ID via CEL expression",
+			Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5},
+		},
+	)
+
+	bucketEvaluationsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "payment_order_bucket_evaluations_total",
+			Help: "Total number of bucket ID evaluations by result status",
+		},
+		[]string{"status"},
+	)
+
+	// Lien execution retry metrics - tracks retry behavior and exhaustion
+	lienExecutionRetries = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "payment_order_lien_execution_retries_total",
+			Help: "Total number of lien execution retry attempts by outcome",
+		},
+		[]string{"outcome"},
+	)
+
+	lienExecutionRetriesExhausted = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "payment_order_lien_execution_retries_exhausted_total",
+			Help: "Total number of payment orders where lien execution retries were exhausted",
+		},
+	)
 )
 
 // RecordPaymentOrder records a payment order by status.
@@ -380,4 +424,58 @@ func RecordLienExecutionLockContention() {
 // the distributed lock for lien execution status updates.
 func RecordLienExecutionLockWaitDuration(seconds float64) {
 	lienExecutionLockWaitDuration.Observe(seconds)
+}
+
+// Bucket evaluation error type constants for bounded cardinality.
+const (
+	BucketEvalErrNoClient        = "no_client"
+	BucketEvalErrNoEvaluator     = "no_evaluator"
+	BucketEvalErrInstrumentFetch = "instrument_fetch"
+	BucketEvalErrCELEvaluation   = "cel_evaluation"
+)
+
+// Bucket evaluation status constants.
+const (
+	BucketEvalStatusSuccess  = "success"
+	BucketEvalStatusSkipped  = "skipped"
+	BucketEvalStatusFallback = "fallback"
+)
+
+// RecordBucketEvaluationFailure records a bucket evaluation failure.
+// errorType should be one of the BucketEvalErr* constants to ensure bounded cardinality.
+// Note: instrumentCode is intentionally not included as a metric label to prevent
+// cardinality explosion; use structured logging for instrument-specific debugging.
+func RecordBucketEvaluationFailure(errorType string) {
+	bucketEvaluationFailures.WithLabelValues(errorType).Inc()
+}
+
+// RecordBucketEvaluationDuration records the duration of a bucket ID evaluation.
+func RecordBucketEvaluationDuration(duration time.Duration) {
+	bucketEvaluationDuration.Observe(duration.Seconds())
+}
+
+// RecordBucketEvaluation records the outcome of a bucket evaluation attempt.
+// status should be one of the BucketEvalStatus* constants.
+func RecordBucketEvaluation(status string) {
+	bucketEvaluationsTotal.WithLabelValues(status).Inc()
+}
+
+// Lien execution retry outcome constants for bounded cardinality.
+const (
+	LienRetryOutcomeAttempt   = "attempt"
+	LienRetryOutcomeSuccess   = "success"
+	LienRetryOutcomeFailed    = "failed"
+	LienRetryOutcomeExhausted = "exhausted"
+)
+
+// RecordLienExecutionRetry records a lien execution retry attempt.
+// outcome should be one of the LienRetryOutcome* constants.
+func RecordLienExecutionRetry(outcome string) {
+	lienExecutionRetries.WithLabelValues(outcome).Inc()
+}
+
+// RecordLienExecutionRetriesExhausted records when lien execution retries are exhausted.
+// This indicates the payment order may require manual reconciliation.
+func RecordLienExecutionRetriesExhausted() {
+	lienExecutionRetriesExhausted.Inc()
 }

@@ -220,6 +220,89 @@ func TestPaymentOrdersInFlight(t *testing.T) {
 	DecPaymentOrdersInFlight()
 }
 
+// Tests for bucket evaluation metrics (production readiness monitoring)
+
+func TestRecordBucketEvaluationFailure(t *testing.T) {
+	bucketEvaluationFailures.Reset()
+
+	RecordBucketEvaluationFailure(BucketEvalErrCELEvaluation)
+
+	count := testutil.CollectAndCount(bucketEvaluationFailures)
+	if count == 0 {
+		t.Error("Expected bucket evaluation failure metric to be recorded")
+	}
+}
+
+func TestRecordBucketEvaluationDuration(t *testing.T) {
+	// Note: Histograms don't have Reset(), but we can verify recording doesn't panic
+	RecordBucketEvaluationDuration(50 * time.Millisecond)
+
+	count := testutil.CollectAndCount(bucketEvaluationDuration)
+	if count == 0 {
+		t.Error("Expected bucket evaluation duration metric to be recorded")
+	}
+}
+
+func TestRecordBucketEvaluation(t *testing.T) {
+	bucketEvaluationsTotal.Reset()
+
+	RecordBucketEvaluation(BucketEvalStatusSuccess)
+	RecordBucketEvaluation(BucketEvalStatusFallback)
+	RecordBucketEvaluation(BucketEvalStatusSkipped)
+
+	count := testutil.CollectAndCount(bucketEvaluationsTotal)
+	if count == 0 {
+		t.Error("Expected bucket evaluation total metric to be recorded")
+	}
+}
+
+func TestBucketEvaluationErrorTypes(t *testing.T) {
+	bucketEvaluationFailures.Reset()
+
+	// Test all error type constants are valid
+	errorTypes := []string{
+		BucketEvalErrNoClient,
+		BucketEvalErrNoEvaluator,
+		BucketEvalErrInstrumentFetch,
+		BucketEvalErrCELEvaluation,
+	}
+
+	for _, errType := range errorTypes {
+		RecordBucketEvaluationFailure(errType)
+	}
+
+	count := testutil.CollectAndCount(bucketEvaluationFailures)
+	if count != len(errorTypes) {
+		t.Errorf("Expected %d bucket evaluation failure metrics, got count result", len(errorTypes))
+	}
+}
+
+// Tests for lien execution retry metrics (production readiness monitoring)
+
+func TestRecordLienExecutionRetry(t *testing.T) {
+	lienExecutionRetries.Reset()
+
+	RecordLienExecutionRetry(LienRetryOutcomeAttempt)
+	RecordLienExecutionRetry(LienRetryOutcomeFailed)
+	RecordLienExecutionRetry(LienRetryOutcomeSuccess)
+	RecordLienExecutionRetry(LienRetryOutcomeExhausted)
+
+	count := testutil.CollectAndCount(lienExecutionRetries)
+	if count == 0 {
+		t.Error("Expected lien execution retry metric to be recorded")
+	}
+}
+
+func TestRecordLienExecutionRetriesExhausted(t *testing.T) {
+	// Note: prometheus.Counter doesn't have Reset(), but we can verify recording doesn't panic
+	RecordLienExecutionRetriesExhausted()
+
+	count := testutil.CollectAndCount(lienExecutionRetriesExhausted)
+	if count == 0 {
+		t.Error("Expected lien execution retries exhausted metric to be recorded")
+	}
+}
+
 func TestMetricsLabels(t *testing.T) {
 	tests := []struct {
 		name       string

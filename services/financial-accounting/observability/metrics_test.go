@@ -241,3 +241,59 @@ func TestOperationNameConstants(t *testing.T) {
 		assert.NotEmpty(t, op, "operation name constant should not be empty")
 	}
 }
+
+// Tests for NoOp fallback metrics (production readiness monitoring)
+
+func TestSetNoopIdempotencyActive(t *testing.T) {
+	// Test setting active
+	SetNoopIdempotencyActive(true)
+	value := testutil.ToFloat64(noopIdempotencyActive)
+	assert.Equal(t, float64(1), value, "NoOp idempotency gauge should be 1 when active")
+
+	// Test setting inactive
+	SetNoopIdempotencyActive(false)
+	value = testutil.ToFloat64(noopIdempotencyActive)
+	assert.Equal(t, float64(0), value, "NoOp idempotency gauge should be 0 when inactive")
+}
+
+func TestSetNoopEventPublisherActive(t *testing.T) {
+	// Test setting active
+	SetNoopEventPublisherActive(true)
+	value := testutil.ToFloat64(noopEventPublisherActive)
+	assert.Equal(t, float64(1), value, "NoOp event publisher gauge should be 1 when active")
+
+	// Test setting inactive
+	SetNoopEventPublisherActive(false)
+	value = testutil.ToFloat64(noopEventPublisherActive)
+	assert.Equal(t, float64(0), value, "NoOp event publisher gauge should be 0 when inactive")
+}
+
+func TestRecordServiceDegradation(t *testing.T) {
+	serviceDegradationEvents.Reset()
+
+	// Record degradation events
+	RecordServiceDegradation(ComponentIdempotency, DegradationReasonStartupFallback)
+	RecordServiceDegradation(ComponentEventPublisher, DegradationReasonUnavailable)
+	RecordServiceDegradation(ComponentRedis, DegradationReasonConnectionFailed)
+
+	// Verify counter was incremented
+	count := testutil.CollectAndCount(serviceDegradationEvents)
+	if count == 0 {
+		t.Error("Expected service degradation events metric to be recorded")
+	}
+}
+
+func TestServiceComponentConstants(t *testing.T) {
+	// Verify component constants are properly defined
+	assert.Equal(t, "idempotency", ComponentIdempotency)
+	assert.Equal(t, "event_publisher", ComponentEventPublisher)
+	assert.Equal(t, "kafka_producer", ComponentKafkaProducer)
+	assert.Equal(t, "redis", ComponentRedis)
+}
+
+func TestDegradationReasonConstants(t *testing.T) {
+	// Verify degradation reason constants are properly defined
+	assert.Equal(t, "unavailable", DegradationReasonUnavailable)
+	assert.Equal(t, "connection_failed", DegradationReasonConnectionFailed)
+	assert.Equal(t, "startup_fallback", DegradationReasonStartupFallback)
+}
