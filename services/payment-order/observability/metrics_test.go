@@ -225,7 +225,7 @@ func TestPaymentOrdersInFlight(t *testing.T) {
 func TestRecordBucketEvaluationFailure(t *testing.T) {
 	bucketEvaluationFailures.Reset()
 
-	RecordBucketEvaluationFailure("ENERGY_KWH", BucketEvalErrCELEvaluation)
+	RecordBucketEvaluationFailure(BucketEvalErrCELEvaluation)
 
 	count := testutil.CollectAndCount(bucketEvaluationFailures)
 	if count == 0 {
@@ -268,7 +268,7 @@ func TestBucketEvaluationErrorTypes(t *testing.T) {
 	}
 
 	for _, errType := range errorTypes {
-		RecordBucketEvaluationFailure("TEST_INSTRUMENT", errType)
+		RecordBucketEvaluationFailure(errType)
 	}
 
 	count := testutil.CollectAndCount(bucketEvaluationFailures)

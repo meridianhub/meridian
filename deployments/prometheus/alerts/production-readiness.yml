@@ -59,11 +59,12 @@ groups:
       # =============================================================================
 
       # Webhook delivery failures - regulatory compliance risk
+      # Note: Excludes status="skipped" from denominator since skipped webhooks (no config) aren't failures
       - alert: WebhookDeliveryFailureRateHigh
         expr: |
           (
             rate(current_account_webhook_delivery_attempts_total{status="failed"}[5m])
-            / clamp_min(rate(current_account_webhook_delivery_attempts_total[5m]), 0.0001)
+            / clamp_min(rate(current_account_webhook_delivery_attempts_total{status!="skipped"}[5m]), 0.0001)
           ) > 0.05
         for: 5m
         labels:
@@ -230,12 +231,13 @@ groups:
       # =============================================================================
 
       # Overall silent failure budget consumption
+      # Uses dedicated exhaustion counters for consistency with alerting rules
       - record: production_readiness:silent_failure_rate:5m
         expr: |
           (
             rate(payment_order_bucket_evaluation_failures_total[5m]) +
             rate(current_account_webhook_delivery_attempts_total{status="failed"}[5m]) +
-            rate(payment_order_lien_execution_retries_total{outcome="exhausted"}[5m])
+            rate(payment_order_lien_execution_retries_exhausted_total[5m])
           )
 
       # NoOp services running (should be 0 in production)

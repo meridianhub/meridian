@@ -489,7 +489,7 @@ func evaluateBucketIDForHandler(
 	if deps.ReferenceDataClient == nil {
 		logger.Debug("bucket evaluation skipped - reference data client not configured",
 			"payment_order_id", paymentOrderID)
-		poobservability.RecordBucketEvaluationFailure(instrumentCode, poobservability.BucketEvalErrNoClient)
+		poobservability.RecordBucketEvaluationFailure(poobservability.BucketEvalErrNoClient)
 		poobservability.RecordBucketEvaluation(poobservability.BucketEvalStatusFallback)
 		return "", nil
 	}
@@ -502,7 +502,7 @@ func evaluateBucketIDForHandler(
 			"payment_order_id", paymentOrderID,
 			"instrument_code", instrumentCode,
 			"error", err)
-		poobservability.RecordBucketEvaluationFailure(instrumentCode, poobservability.BucketEvalErrInstrumentFetch)
+		poobservability.RecordBucketEvaluationFailure(poobservability.BucketEvalErrInstrumentFetch)
 		poobservability.RecordBucketEvaluation(poobservability.BucketEvalStatusFallback)
 		return "", nil
 	}
@@ -520,7 +520,7 @@ func evaluateBucketIDForHandler(
 	if deps.BucketEvaluator == nil {
 		logger.Debug("bucket evaluation skipped - bucket evaluator not configured",
 			"payment_order_id", paymentOrderID)
-		poobservability.RecordBucketEvaluationFailure(instrumentCode, poobservability.BucketEvalErrNoEvaluator)
+		poobservability.RecordBucketEvaluationFailure(poobservability.BucketEvalErrNoEvaluator)
 		poobservability.RecordBucketEvaluation(poobservability.BucketEvalStatusFallback)
 		return "", nil
 	}
@@ -541,7 +541,7 @@ func evaluateBucketIDForHandler(
 			"payment_order_id", paymentOrderID,
 			"instrument_code", instrumentCode,
 			"error", err)
-		poobservability.RecordBucketEvaluationFailure(instrumentCode, poobservability.BucketEvalErrCELEvaluation)
+		poobservability.RecordBucketEvaluationFailure(poobservability.BucketEvalErrCELEvaluation)
 		poobservability.RecordBucketEvaluation(poobservability.BucketEvalStatusFallback)
 		return "", nil
 	}
