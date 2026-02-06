@@ -209,24 +209,20 @@ SERVICES=(
   "gateway"
   "internal-bank-account"
   "market-information"
-  "reference-data"
-  "audit-worker"
   "utilization-metering-consumer"
 )
 
-for svc in "${SERVICES[@]}"; do
-  DOCKERFILE="services/${svc}/cmd/Dockerfile"
-  # audit-worker has Dockerfile at services/audit-worker/ (no cmd/ subdirectory)
-  if [ "$svc" = "audit-worker" ]; then
-    DOCKERFILE="services/audit-worker/Dockerfile"
-  fi
+# Note: reference-data is a library embedded in other services, not a standalone deployment.
+# Note: audit-worker does not have a Dockerfile yet -- build via a root-level Dockerfile
+# or add one before deploying.
 
+for svc in "${SERVICES[@]}"; do
   docker build \
     --build-arg VERSION="${VERSION}" \
     --build-arg COMMIT="${COMMIT}" \
     --build-arg BUILD_DATE="${BUILD_DATE}" \
     -t "${REGISTRY}/${svc}:${VERSION}" \
-    -f "${DOCKERFILE}" .
+    -f "services/${svc}/cmd/Dockerfile" .
 
   docker push "${REGISTRY}/${svc}:${VERSION}"
 done
@@ -411,7 +407,9 @@ kubectl wait --for=condition=Available deployment/tenant -n production --timeout
 
 1. **Tenant** -- Manages multi-tenant isolation, provisions schemas for other services
 2. **Party** -- Party reference data directory (Tenant optionally calls Party to register org parties)
-3. **Reference Data** -- Instrument definitions (Tenant seeds system instruments during provisioning)
+3. **Reference Data** -- Instrument definitions (Tenant seeds system instruments during provisioning).
+   Note: Reference Data does not yet have a standalone `main.go` or Dockerfile. Its handlers are
+   currently embedded in other services. Deploy when a standalone entry point is added.
 
 ```bash
 # Verify Tier 1 health
