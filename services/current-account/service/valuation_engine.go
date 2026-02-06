@@ -80,13 +80,13 @@ var (
 
 // Valuation operation status constants for metrics
 const (
-	opStatusValuationEngineNil    = "valuation_engine_nil"
-	opStatusNoValuationFeature    = "no_valuation_feature"
-	opStatusValuationFailed       = "valuation_failed"
-	opStatusInvalidInputAmount    = "invalid_input_amount"
-	opStatusFeatureNotActive      = "feature_not_active"
-	opStatusInputInstrumentEmpty  = "input_instrument_empty"
-	opStatusInputAmountNonPostive = "input_amount_non_positive"
+	opStatusValuationEngineNil     = "valuation_engine_nil"
+	opStatusNoValuationFeature     = "no_valuation_feature"
+	opStatusValuationFailed        = "valuation_failed"
+	opStatusInvalidInputAmount     = "invalid_input_amount"
+	opStatusFeatureNotActive       = "feature_not_active"
+	opStatusInputInstrumentEmpty   = "input_instrument_empty"
+	opStatusInputAmountNonPositive = "input_amount_non_positive"
 )
 
 // valuateInternalResult contains the result of an internal valuation operation.
@@ -163,7 +163,14 @@ func (s *Service) valuateInternal(ctx context.Context, accountID string, inputAm
 	// Convert parameters to proto Struct for analysis
 	var accountParams *structpb.Struct
 	if feature.Parameters != nil {
-		accountParams, _ = structpb.NewStruct(feature.Parameters)
+		accountParams, err = structpb.NewStruct(feature.Parameters)
+		if err != nil {
+			s.logger.Warn("failed to convert valuation feature parameters to proto struct",
+				"account_id", accountID,
+				"feature_id", feature.ID,
+				"error", err)
+			// Continue without account parameters rather than failing the valuation
+		}
 	}
 
 	// If a valuation engine is configured, delegate to it
@@ -297,7 +304,7 @@ func (s *Service) EvaluateAssetValuation(ctx context.Context, req *pb.EvaluateAs
 	}
 
 	if !inputAmount.IsPositive() {
-		operationStatus = opStatusInputAmountNonPostive
+		operationStatus = opStatusInputAmountNonPositive
 		return nil, status.Error(codes.InvalidArgument, "input amount must be positive")
 	}
 
