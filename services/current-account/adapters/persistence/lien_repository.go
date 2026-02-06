@@ -382,18 +382,20 @@ func toLienDomain(entity *LienEntity) (*domain.Lien, error) {
 		UpdatedAt:             entity.UpdatedAt,
 	}
 
-	// Unmarshal valuation fields from JSONB (nil-safe)
+	// Unmarshal valuation fields from JSONB (nil-safe, fail-fast on corruption)
 	if entity.ReservedQuantity != nil {
 		var rq domain.InstrumentAmount
-		if err := json.Unmarshal(entity.ReservedQuantity, &rq); err == nil {
-			lien.ReservedQuantity = &rq
+		if err := json.Unmarshal(entity.ReservedQuantity, &rq); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal reserved_quantity: %w", err)
 		}
+		lien.ReservedQuantity = &rq
 	}
 	if entity.ValuedAmount != nil {
 		var va domain.InstrumentAmount
-		if err := json.Unmarshal(entity.ValuedAmount, &va); err == nil {
-			lien.ValuedAmount = &va
+		if err := json.Unmarshal(entity.ValuedAmount, &va); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal valued_amount: %w", err)
 		}
+		lien.ValuedAmount = &va
 	}
 	if entity.ValuationAnalysis != nil {
 		lien.ValuationAnalysis = json.RawMessage(entity.ValuationAnalysis)

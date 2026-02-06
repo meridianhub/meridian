@@ -157,6 +157,12 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		// Convert valued output to domain Money for lien amount (the actual reservation)
 		// The valued amount is in the account's native instrument (currency)
 		valuedCents := valuationResult.OutputAmount.Mul(decimal.NewFromInt(100)).RoundBank(0)
+		maxInt64 := decimal.NewFromInt(math.MaxInt64)
+		minInt64 := decimal.NewFromInt(math.MinInt64)
+		if valuedCents.GreaterThan(maxInt64) || valuedCents.LessThan(minInt64) {
+			operationStatus = opStatusInvalidAmount
+			return nil, status.Error(codes.InvalidArgument, ErrAmountOverflow.Error())
+		}
 		lienAmount, err = domain.NewMoney(valuationResult.OutputCode, valuedCents.IntPart())
 		if err != nil {
 			operationStatus = opStatusInvalidAmount

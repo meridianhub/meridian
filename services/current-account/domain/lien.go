@@ -11,12 +11,13 @@ import (
 
 // Lien domain errors
 var (
-	ErrLienNotActive         = errors.New("lien is not in active status")
-	ErrInvalidLienTransition = errors.New("invalid lien status transition")
-	ErrLienExpired           = errors.New("lien has expired")
-	ErrInvalidLienAmount     = errors.New("lien amount must be positive")
-	ErrLienAlreadyExists     = errors.New("lien already exists for this idempotency key")
-	ErrValuedAmountImmutable = errors.New("valued_amount cannot be modified on an active lien")
+	ErrLienNotActive           = errors.New("lien is not in active status")
+	ErrInvalidLienTransition   = errors.New("invalid lien status transition")
+	ErrLienExpired             = errors.New("lien has expired")
+	ErrInvalidLienAmount       = errors.New("lien amount must be positive")
+	ErrLienAlreadyExists       = errors.New("lien already exists for this idempotency key")
+	ErrValuedAmountImmutable   = errors.New("valued_amount cannot be modified on an active lien")
+	ErrInvalidInstrumentAmount = errors.New("instrument amount must be positive with instrument code")
 )
 
 // InstrumentAmount represents a quantity of a specific instrument for domain-level valuation tracking.
@@ -108,6 +109,12 @@ func NewValuedLien(
 	valuedAmount *InstrumentAmount,
 	analysisJSON json.RawMessage,
 ) (*Lien, error) {
+	if reservedQuantity == nil || reservedQuantity.InstrumentCode == "" || reservedQuantity.Amount.Sign() <= 0 {
+		return nil, ErrInvalidInstrumentAmount
+	}
+	if valuedAmount == nil || valuedAmount.InstrumentCode == "" || valuedAmount.Amount.Sign() <= 0 {
+		return nil, ErrInvalidInstrumentAmount
+	}
 	lien, err := NewLien(accountID, amount, bucketID, paymentOrderReference, expiresAt)
 	if err != nil {
 		return nil, err
