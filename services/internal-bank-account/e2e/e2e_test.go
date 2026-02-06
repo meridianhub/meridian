@@ -778,9 +778,9 @@ func TestE2E_AccountLifecycle(t *testing.T) {
 
 		err := tc.db.Raw(fmt.Sprintf(
 			`SELECT from_status, to_status, reason
-			 FROM %q.internal_bank_account_status_history
+			 FROM %s.internal_bank_account_status_history
 			 WHERE account_id = ?
-			 ORDER BY changed_at ASC`, schemaName), accountID).Scan(&history).Error
+			 ORDER BY changed_at ASC`, pq.QuoteIdentifier(schemaName)), accountID).Scan(&history).Error
 		require.NoError(t, err)
 
 		require.Len(t, history, 3)

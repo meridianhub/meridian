@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lib/pq"
 	auditv1 "github.com/meridianhub/meridian/api/proto/meridian/audit/v1"
 	"github.com/meridianhub/meridian/internal/audit-consumer/adapters/persistence"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -126,10 +127,10 @@ func (infra *testInfra) cleanup() {
 func createTenantSchema(t *testing.T, db *gorm.DB, tenantID tenant.TenantID) {
 	t.Helper()
 
-	schemaName := tenantID.SchemaName()
+	quotedSchema := pq.QuoteIdentifier(tenantID.SchemaName())
 
 	// Create schema
-	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", schemaName)).Error
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", quotedSchema)).Error
 	require.NoError(t, err)
 
 	// Create audit_log table
@@ -152,7 +153,7 @@ func createTenantSchema(t *testing.T, db *gorm.DB, tenantID tenant.TenantID) {
 			causation_id VARCHAR(100),
 			idempotency_key VARCHAR(100)
 		)
-	`, schemaName)
+	`, quotedSchema)
 
 	err = db.Exec(createTableSQL).Error
 	require.NoError(t, err)
@@ -160,7 +161,7 @@ func createTenantSchema(t *testing.T, db *gorm.DB, tenantID tenant.TenantID) {
 	// Create index on event_id
 	err = db.Exec(fmt.Sprintf(
 		"CREATE INDEX IF NOT EXISTS idx_audit_log_event_id ON %s.audit_log(event_id)",
-		schemaName,
+		quotedSchema,
 	)).Error
 	require.NoError(t, err)
 }
@@ -170,8 +171,8 @@ func getAuditLogCount(t *testing.T, db *gorm.DB, tenantID tenant.TenantID) int64
 	t.Helper()
 
 	var count int64
-	schemaName := tenantID.SchemaName()
-	err := db.Raw(fmt.Sprintf("SELECT COUNT(*) FROM %s.audit_log", schemaName)).Scan(&count).Error
+	quotedSchema := pq.QuoteIdentifier(tenantID.SchemaName())
+	err := db.Raw(fmt.Sprintf("SELECT COUNT(*) FROM %s.audit_log", quotedSchema)).Scan(&count).Error
 	require.NoError(t, err)
 
 	return count
@@ -182,9 +183,9 @@ func getAuditLogByEventID(t *testing.T, db *gorm.DB, tenantID tenant.TenantID, e
 	t.Helper()
 
 	var auditLog map[string]interface{}
-	schemaName := tenantID.SchemaName()
+	quotedSchema := pq.QuoteIdentifier(tenantID.SchemaName())
 	err := db.Raw(
-		fmt.Sprintf("SELECT * FROM %s.audit_log WHERE event_id = ?", schemaName),
+		fmt.Sprintf("SELECT * FROM %s.audit_log WHERE event_id = ?", quotedSchema),
 		eventID,
 	).Scan(&auditLog).Error
 	require.NoError(t, err)
@@ -323,10 +324,11 @@ func TestMultiServiceMultiTenantWrites(t *testing.T) {
 	t.Run("verify_tenant_isolation_across_services", func(t *testing.T) {
 		// Verify tenant A cannot see tenant B's events in any service
 		var eventIDs []string
+		quotedSchemaA := pq.QuoteIdentifier(tenantA.SchemaName())
 
 		// Check current-account for tenant A
 		err := infra.currentAccount.db.Raw(
-			fmt.Sprintf("SELECT event_id FROM %s.audit_log", tenantA.SchemaName()),
+			fmt.Sprintf("SELECT event_id FROM %s.audit_log", quotedSchemaA),
 		).Scan(&eventIDs).Error
 		require.NoError(t, err)
 		assert.Contains(t, eventIDs, "evt_ca_ta_001")
@@ -335,7 +337,7 @@ func TestMultiServiceMultiTenantWrites(t *testing.T) {
 		// Check financial-accounting for tenant A
 		eventIDs = nil
 		err = infra.financialAccounting.db.Raw(
-			fmt.Sprintf("SELECT event_id FROM %s.audit_log", tenantA.SchemaName()),
+			fmt.Sprintf("SELECT event_id FROM %s.audit_log", quotedSchemaA),
 		).Scan(&eventIDs).Error
 		require.NoError(t, err)
 		assert.Contains(t, eventIDs, "evt_fa_ta_001")
@@ -344,7 +346,7 @@ func TestMultiServiceMultiTenantWrites(t *testing.T) {
 		// Check position-keeping for tenant A
 		eventIDs = nil
 		err = infra.positionKeeping.db.Raw(
-			fmt.Sprintf("SELECT event_id FROM %s.audit_log", tenantA.SchemaName()),
+			fmt.Sprintf("SELECT event_id FROM %s.audit_log", quotedSchemaA),
 		).Scan(&eventIDs).Error
 		require.NoError(t, err)
 		assert.Contains(t, eventIDs, "evt_pk_ta_001")
@@ -602,7 +604,7 @@ func TestAuditTrailCompleteness(t *testing.T) {
 		} {
 			var rows []map[string]interface{}
 			err := svc.db.Raw(
-				fmt.Sprintf("SELECT event_id, table_name, transaction_id FROM %s.audit_log", tenantID.SchemaName()),
+				fmt.Sprintf("SELECT event_id, table_name, transaction_id FROM %s.audit_log", pq.QuoteIdentifier(tenantID.SchemaName())),
 			).Scan(&rows).Error
 			require.NoError(t, err)
 

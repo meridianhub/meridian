@@ -36,7 +36,7 @@ var contractFiles = []contractFile{
 		expectedSHA256: "3046fdf5ea38a47e7f20c72d5e727c3e4c74919a3f3618cd863778e84f6465c6",
 	},
 	{
-		path:           "pkg/platform/quantity/interfaces.go",
+		path:           "shared/platform/quantity/interfaces.go",
 		expectedSHA256: "b570315b92b2301f4220df29084dc0c22eaf10d0529a253407a74ec2de9061f6",
 	},
 }

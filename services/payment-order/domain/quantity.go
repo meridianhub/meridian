@@ -7,8 +7,8 @@ package domain
 import (
 	"errors"
 
-	"github.com/meridianhub/meridian/pkg/platform/quantity"
-	"github.com/meridianhub/meridian/pkg/platform/quantity/currency"
+	"github.com/meridianhub/meridian/shared/platform/quantity"
+	"github.com/meridianhub/meridian/shared/platform/quantity/currency"
 	"github.com/shopspring/decimal"
 )
 

@@ -27,6 +27,10 @@ func FromContext(ctx context.Context) (TenantID, bool) {
 // MustFromContext extracts the tenant ID from the context.
 // Panics if the tenant context is missing - this is a fail-fast strategy for
 // catching programming errors where tenant context propagation was not set up correctly.
+//
+// Deprecated: Use RequireFromContext in request handler paths (HTTP/gRPC) where
+// returning an error is preferable to panicking. MustFromContext is still appropriate
+// for init/startup code where a missing tenant context indicates a fatal configuration error.
 func MustFromContext(ctx context.Context) TenantID {
 	t, ok := FromContext(ctx)
 	if !ok {

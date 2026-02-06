@@ -23,6 +23,15 @@ func AppendOutgoingMetadata(ctx context.Context, key, value string) context.Cont
 }
 
 func TestPropagateIdempotencyKey(t *testing.T) {
+	t.Run("handles nil context gracefully", func(t *testing.T) {
+		// Should not panic - using nil to test nil-safety explicitly
+		//nolint:staticcheck // Testing nil context handling explicitly
+		ctx := PropagateIdempotencyKey(nil, "test-key")
+		assert.NotNil(t, ctx, "should return a valid context from nil")
+		retrieved := ExtractIdempotencyKey(ctx)
+		assert.Equal(t, "test-key", retrieved, "should store key even when starting from nil context")
+	})
+
 	t.Run("stores key successfully", func(t *testing.T) {
 		ctx := context.Background()
 		key := "test-key-123"

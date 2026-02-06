@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/lib/pq"
+
 	"github.com/google/uuid"
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
@@ -409,11 +411,11 @@ func setupIntegrationTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	// Create the tenant schema for tests
 	tid := tenant.TenantID(integrationTestTenantID)
 	schemaName := tid.SchemaName()
-	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create the current_accounts table in the tenant schema
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.current_accounts (
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.current_accounts (
 		id UUID PRIMARY KEY,
 		account_number VARCHAR(255) NOT NULL UNIQUE,
 		party_id UUID NOT NULL,
@@ -425,11 +427,11 @@ func setupIntegrationTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 		version INT NOT NULL DEFAULT 1,
 		created_by VARCHAR(255),
 		updated_by VARCHAR(255)
-	)`, schemaName)).Error
+	)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Set default search_path to include tenant schema
-	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName)).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create context with tenant

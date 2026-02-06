@@ -14,7 +14,7 @@ package domain
 import (
 	"strings"
 
-	"github.com/meridianhub/meridian/pkg/platform/quantity"
+	"github.com/meridianhub/meridian/shared/platform/quantity"
 )
 
 // System tenant instrument definitions for utilization metering.

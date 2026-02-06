@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/meridianhub/meridian/pkg/platform/quantity"
+	"github.com/meridianhub/meridian/shared/platform/quantity"
 )
 
 // Tests use production instruments from instruments.go directly to ensure they stay in sync.

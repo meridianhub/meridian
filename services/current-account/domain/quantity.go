@@ -10,7 +10,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/meridianhub/meridian/pkg/platform/quantity"
+	"github.com/meridianhub/meridian/shared/platform/quantity"
 	"github.com/shopspring/decimal"
 )
 

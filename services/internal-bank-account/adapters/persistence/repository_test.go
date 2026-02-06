@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/lib/pq"
+
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/internal-bank-account/domain"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -26,11 +28,11 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	// Create the tenant schema for tests
 	tid := tenant.TenantID(testTenantID)
 	schemaName := tid.SchemaName()
-	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create the internal_bank_account table in the tenant schema
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.internal_bank_account (
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.internal_bank_account (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 		created_by VARCHAR(100) NOT NULL,
@@ -50,11 +52,11 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 		correspondent_external_ref VARCHAR(100),
 		attributes JSONB NOT NULL DEFAULT '{}',
 		version BIGINT NOT NULL DEFAULT 1
-	)`, schemaName)).Error
+	)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create the status history table
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.internal_bank_account_status_history (
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.internal_bank_account_status_history (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		account_id VARCHAR(100) NOT NULL,
 		from_status VARCHAR(20) NOT NULL,
@@ -62,15 +64,15 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 		reason TEXT,
 		changed_by VARCHAR(100) NOT NULL,
 		changed_at TIMESTAMPTZ NOT NULL DEFAULT now()
-	)`, schemaName)).Error
+	)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create index on account_code
-	err = db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_account_code ON %q.internal_bank_account (account_code)`, schemaName)).Error
+	err = db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_account_code ON %s.internal_bank_account (account_code)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Set default search_path to include tenant schema
-	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName)).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create context with tenant
@@ -331,10 +333,10 @@ func TestTenantIsolation(t *testing.T) {
 
 	for _, tid := range []tenant.TenantID{tenant1, tenant2} {
 		schemaName := tid.SchemaName()
-		err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
+		err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
 		require.NoError(t, err)
 
-		err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.internal_bank_account (
+		err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.internal_bank_account (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 			created_by VARCHAR(100) NOT NULL,
@@ -354,7 +356,7 @@ func TestTenantIsolation(t *testing.T) {
 			correspondent_external_ref VARCHAR(100),
 			attributes JSONB NOT NULL DEFAULT '{}',
 			version BIGINT NOT NULL DEFAULT 1
-		)`, schemaName)).Error
+		)`, pq.QuoteIdentifier(schemaName))).Error
 		require.NoError(t, err)
 	}
 

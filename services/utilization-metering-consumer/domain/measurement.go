@@ -4,7 +4,7 @@ package domain
 import (
 	"time"
 
-	"github.com/meridianhub/meridian/pkg/platform/quantity"
+	"github.com/meridianhub/meridian/shared/platform/quantity"
 )
 
 // UtilizationMeasurement represents a single utilization measurement derived from an audit event.
