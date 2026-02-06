@@ -44,6 +44,7 @@ const (
 type Service struct {
 	pb.UnimplementedInternalBankAccountServiceServer
 	repo                  domain.Repository
+	valuationFeatureRepo  *persistence.ValuationFeatureRepository
 	positionKeepingClient PositionKeepingClient
 	referenceDataClient   ReferenceDataClient
 	logger                *slog.Logger
@@ -87,6 +88,20 @@ func NewServiceWithClients(
 		referenceDataClient:   refDataClient,
 		logger:                logger,
 		tracer:                tracer,
+	}, nil
+}
+
+// NewServiceWithValuationFeatures creates a new service with valuation feature support.
+// This constructor is used when the service needs to manage valuation features
+// for internal bank accounts.
+func NewServiceWithValuationFeatures(repo domain.Repository, valuationFeatureRepo *persistence.ValuationFeatureRepository) (*Service, error) {
+	if repo == nil {
+		return nil, ErrRepositoryNil
+	}
+	return &Service{
+		repo:                 repo,
+		valuationFeatureRepo: valuationFeatureRepo,
+		logger:               slog.New(slog.NewJSONHandler(os.Stdout, nil)),
 	}, nil
 }
 

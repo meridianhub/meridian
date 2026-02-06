@@ -1,4 +1,5 @@
-h1:giPEeLxYxtlSjID7cSpUC0g/s61sqYazaWWxQxPu9A8=
+h1:J5gH3Yr2Od51pm2Fy651n+PQaT7HwiK7qUd9tCHJI/E=
 20260112000001_initial.sql h1:DGFY67QMovT7UV5WkUEOrSZE7dLYIppV90Ix2x+qMls=
 20260116000001_add_clearing_purpose_column.sql h1:DHT3cTeEUEWjJEysajU7QV4uy5D+7N4nuygKLsjrzn8=
-20260116000002_backfill_clearing_purpose.sql h1:JDWPfRDQLAb4Kdf2nQry9UylsRj2GN8f2OjwBAivP24=
+20260116000002_backfill_clearing_purpose.sql h1:hvClf5iYdeyiKLCN3tg5l86OKAOMF7Lby+Bi+0Lyrls=
+20260206000001_create_valuation_features.sql h1:sYLQ60lFlttH+fIvVFFFNfyBQL0ZFXb8gm0mJg7jWlE=
