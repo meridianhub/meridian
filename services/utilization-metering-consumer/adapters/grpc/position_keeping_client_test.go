@@ -11,7 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
-	auditdomain "github.com/meridianhub/meridian/internal/audit-consumer/domain"
+	auditdomain "github.com/meridianhub/meridian/services/audit-worker/domain"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"

@@ -1,5 +1,5 @@
-// Package messaging provides Kafka consumer adapters for audit event processing.
-package messaging
+// Package kafka provides Kafka consumer adapters for audit event processing.
+package kafka
 
 import (
 	"context"
@@ -11,10 +11,10 @@ import (
 	"time"
 
 	auditv1 "github.com/meridianhub/meridian/api/proto/meridian/audit/v1"
-	"github.com/meridianhub/meridian/internal/audit-consumer/domain"
-	"github.com/meridianhub/meridian/internal/audit-consumer/observability"
+	"github.com/meridianhub/meridian/services/audit-worker/domain"
+	"github.com/meridianhub/meridian/services/audit-worker/observability"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
-	"github.com/meridianhub/meridian/shared/platform/kafka"
+	platformkafka "github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/protobuf/proto"
 	"gorm.io/gorm"
@@ -52,12 +52,12 @@ var (
 // kept for reference and potential future use in multi-tenant deployments requiring
 // stronger schema isolation.
 //
-// Current production path: Kafka → handleAuditEvent() → Direct DB write (tenant_id column)
-// Alternative path: Kafka → TenantAuditWriter → DB write (search_path schema isolation)
+// Current production path: Kafka -> handleAuditEvent() -> Direct DB write (tenant_id column)
+// Alternative path: Kafka -> TenantAuditWriter -> DB write (search_path schema isolation)
 type AuditConsumer struct {
-	consumer    *kafka.ProtoConsumer
+	consumer    *platformkafka.ProtoConsumer
 	db          *gorm.DB
-	dlqProducer *kafka.DLQProducer
+	dlqProducer *platformkafka.DLQProducer
 	mu          sync.RWMutex
 	running     bool
 }
@@ -120,7 +120,7 @@ func NewAuditConsumer(config ConsumerConfig) (*AuditConsumer, error) {
 	}
 
 	// Create producer for DLQ
-	producer, err := kafka.NewProtoProducer(kafka.ProducerConfig{
+	producer, err := platformkafka.NewProtoProducer(platformkafka.ProducerConfig{
 		BootstrapServers: config.BootstrapServers,
 		ClientID:         config.ClientID + "-dlq",
 	})
@@ -131,7 +131,7 @@ func NewAuditConsumer(config ConsumerConfig) (*AuditConsumer, error) {
 	// Create DLQ configuration (used by both DLQProducer and ProtoConsumer)
 	// Safe conversion: validated above
 	maxRetries32 := int32(config.MaxRetries)
-	dlqConfig := kafka.DLQConfig{
+	dlqConfig := platformkafka.DLQConfig{
 		DLQTopicSuffix:    ".dlq",
 		MaxRetries:        maxRetries32,
 		RetryBackoffMs:    1000,
@@ -140,7 +140,7 @@ func NewAuditConsumer(config ConsumerConfig) (*AuditConsumer, error) {
 	}
 
 	// Create DLQ producer wrapper
-	dlqProducer, err := kafka.NewDLQProducer(producer, dlqConfig)
+	dlqProducer, err := platformkafka.NewDLQProducer(producer, dlqConfig)
 	if err != nil {
 		producer.Close()
 		return nil, fmt.Errorf("failed to create DLQ producer: %w", err)
@@ -162,8 +162,8 @@ func NewAuditConsumer(config ConsumerConfig) (*AuditConsumer, error) {
 	}
 
 	// Create the Kafka consumer with DLQ support
-	consumer, err := kafka.NewProtoConsumer(
-		kafka.ConsumerConfig{
+	consumer, err := platformkafka.NewProtoConsumer(
+		platformkafka.ConsumerConfig{
 			BootstrapServers: config.BootstrapServers,
 			GroupID:          config.GroupID,
 			ClientID:         config.ClientID,

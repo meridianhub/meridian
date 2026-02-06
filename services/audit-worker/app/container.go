@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/meridianhub/meridian/internal/audit-consumer/adapters/messaging"
-	"github.com/meridianhub/meridian/internal/audit-consumer/observability"
+	kafkaadapter "github.com/meridianhub/meridian/services/audit-worker/adapters/kafka"
+	"github.com/meridianhub/meridian/services/audit-worker/observability"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -23,7 +23,7 @@ type Container struct {
 	dbWrapper *dbWrapper
 
 	// Audit consumer
-	AuditConsumer *messaging.AuditConsumer
+	AuditConsumer *kafkaadapter.AuditConsumer
 
 	// Observability
 	HealthChecker *observability.HealthChecker
@@ -123,7 +123,7 @@ func (c *Container) initializeDatabase(ctx context.Context) error {
 // initializeAuditConsumer initializes the Kafka audit consumer for single-topic consumption.
 func (c *Container) initializeAuditConsumer() error {
 	// Create audit consumer configuration
-	consumerConfig := messaging.ConsumerConfig{
+	consumerConfig := kafkaadapter.ConsumerConfig{
 		BootstrapServers: c.Config.Kafka.BootstrapServers,
 		Topic:            c.Config.Kafka.Topic,
 		GroupID:          c.Config.Kafka.GroupID,
@@ -133,7 +133,7 @@ func (c *Container) initializeAuditConsumer() error {
 		MaxRetries:       c.Config.Kafka.MaxRetries,
 	}
 
-	consumer, err := messaging.NewAuditConsumer(consumerConfig)
+	consumer, err := kafkaadapter.NewAuditConsumer(consumerConfig)
 	if err != nil {
 		return fmt.Errorf("failed to create audit consumer: %w", err)
 	}

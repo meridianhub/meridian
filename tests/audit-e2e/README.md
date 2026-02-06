@@ -251,4 +251,4 @@ Potential additions to E2E suite:
 - [Audit Consumer README](../../cmd/audit-consumer/README.md) - Deployment and configuration
 - [Audit Writer Integration Tests][writer-tests] - Unit-level integration tests
 
-[writer-tests]: ../../internal/audit-consumer/adapters/persistence/tenant_audit_writer_integration_test.go
+[writer-tests]: ../../services/audit-worker/adapters/persistence/tenant_audit_writer_integration_test.go

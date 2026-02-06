@@ -14,7 +14,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/meridianhub/meridian/internal/audit-consumer/app"
+	"github.com/meridianhub/meridian/services/audit-worker/app"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/prometheus/client_golang/prometheus/promhttp"

@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	auditdomain "github.com/meridianhub/meridian/internal/audit-consumer/domain"
+	auditdomain "github.com/meridianhub/meridian/services/audit-worker/domain"
 	"github.com/meridianhub/meridian/services/utilization-metering-consumer/adapters/grpc"
 	"github.com/meridianhub/meridian/services/utilization-metering-consumer/adapters/messaging"
 	"github.com/meridianhub/meridian/services/utilization-metering-consumer/app"

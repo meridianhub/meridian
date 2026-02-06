@@ -96,7 +96,7 @@ they know the operation cannot fail (e.g., with compile-time constants).
 | # | File | Line | Function | Notes |
 |---|------|------|----------|-------|
 | 14 | `shared/domain/money/money.go` | 111 | `MustNew` | For tests/compile-time constants |
-| 15 | `internal/audit-consumer/domain/measurement.go` | 48 | `MustPeriod` | For tests/initialization |
+| 15 | `services/audit-worker/domain/measurement.go` | 48 | `MustPeriod` | For tests/initialization |
 | 16 | `shared/platform/tenant/context.go` | 33 | `MustFromContext` | Programming error detection |
 | 17 | `shared/platform/tenant/tenant_id.go` | 32 | `MustNewTenantID` | For compile-time constants |
 | 18 | `shared/platform/db/gorm_tenant_scope.go` | 81 | `MustWithGormTenantScope` | After middleware validation |

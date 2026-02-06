@@ -1,4 +1,4 @@
-// Package observability provides Prometheus metrics and health monitoring for the audit-consumer service.
+// Package observability provides Prometheus metrics and health monitoring for the audit-worker service.
 // This service is deployed once per service (e.g., current-account, financial-accounting) and consumes
 // audit events from a single Kafka topic, writing them to tenant-scoped audit_log tables.
 //
