@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"time"
 
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
@@ -45,6 +46,8 @@ func NewRegistryHandler(registry Registry, validator *ReferenceValidator, dryRun
 }
 
 // CreateSagaDraft creates a new saga definition in DRAFT status.
+// If a DryRunValidator is configured, the script is validated before persistence.
+// Invalid scripts are rejected with INVALID_ARGUMENT status.
 func (h *RegistryHandler) CreateSagaDraft(
 	ctx context.Context,
 	req *sagav1.CreateSagaDraftRequest,
@@ -69,6 +72,39 @@ func (h *RegistryHandler) CreateSagaDraft(
 		Description:             req.Description,
 	}
 
+	// Mandatory dry-run validation: reject invalid scripts before persistence
+	if h.dryRunValidator != nil && req.Script != "" {
+		dryRunResult, err := h.dryRunValidator.Validate(ctx, req.Script)
+		if err != nil {
+			h.logger.Error("dry-run validation error during draft creation",
+				"saga_name", req.Name,
+				"error", err)
+			return nil, status.Errorf(codes.Internal, "validation error: %v", err)
+		}
+
+		if !dryRunResult.Success {
+			formatter := &validation.HumanReadableFormatter{}
+			errMsg := formatter.Format(dryRunResult)
+
+			h.logger.Warn("saga script validation failed",
+				"saga_name", req.Name,
+				"version", version,
+				"error_count", len(dryRunResult.Errors))
+
+			return nil, status.Errorf(codes.InvalidArgument,
+				"saga script validation failed:\n%s", errMsg)
+		}
+
+		// Store validation metadata on the definition
+		now := time.Now()
+		complexityScore := calculateComplexityScore(dryRunResult.Metrics.HandlerCallCount)
+		handlerCallCount := dryRunResult.Metrics.HandlerCallCount
+		def.ValidationStatus = "PASSED"
+		def.ComplexityScore = &complexityScore
+		def.HandlerCallCount = &handlerCallCount
+		def.ValidatedAt = &now
+	}
+
 	if err := h.registry.CreateDraft(ctx, def); err != nil {
 		return nil, h.mapDomainError(err, "CreateSagaDraft", req.Name)
 	}
@@ -78,12 +114,12 @@ func (h *RegistryHandler) CreateSagaDraft(
 		"version", def.Version,
 		"id", def.ID)
 
-	// Perform initial validation (non-blocking)
+	// Perform reference validation (non-blocking)
 	var validationResult *sagav1.ValidationResult
 	if h.validator != nil {
 		result, err := h.validator.ValidateDraft(ctx, def.ID, def.Script)
 		if err != nil {
-			h.logger.Warn("validation failed during draft creation",
+			h.logger.Warn("reference validation failed during draft creation",
 				"saga_id", def.ID,
 				"error", err)
 		} else {

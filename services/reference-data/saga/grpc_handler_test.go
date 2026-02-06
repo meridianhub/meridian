@@ -8,6 +8,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	sagav1 "github.com/meridianhub/meridian/api/proto/meridian/saga/v1"
+	"github.com/meridianhub/meridian/shared/pkg/saga/schema"
+	"github.com/meridianhub/meridian/shared/pkg/saga/validation"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -86,6 +88,10 @@ func setupTestPostgres(t *testing.T) (*pgxpool.Pool, tenant.TenantID, func()) {
 			platform_ref uuid NULL,
 			override_reason text NULL,
 			platform_version_at_override varchar(16) NULL,
+			validation_status text NOT NULL DEFAULT 'UNVALIDATED',
+			complexity_score integer NULL,
+			handler_call_count integer NULL,
+			validated_at timestamptz NULL,
 			PRIMARY KEY (id),
 			CONSTRAINT uq_saga_definition_name_version UNIQUE (name, version),
 			CONSTRAINT fk_saga_definition_platform_ref
@@ -628,5 +634,244 @@ func TestRegistryHandler_TenantOverride(t *testing.T) {
 		st, ok := status.FromError(err)
 		require.True(t, ok)
 		assert.Equal(t, codes.PermissionDenied, st.Code())
+	})
+}
+
+// setupTestDryRunValidator creates a DryRunValidator for testing with common handlers.
+func setupTestDryRunValidator(t *testing.T) *validation.DryRunValidator {
+	t.Helper()
+
+	schemaRegistry := schema.NewRegistry()
+	schemaYAML := `
+service: test
+version: 1.0
+handlers:
+  test_service.test_method:
+    description: Test method
+    params: {}
+    returns:
+      result:
+        type: string
+      error:
+        type: string
+  payment.create_lien:
+    description: Create payment lien
+    params:
+      amount:
+        type: string
+        required: true
+      customer_id:
+        type: string
+        required: true
+    returns:
+      lien_id:
+        type: string
+      error:
+        type: string
+`
+	require.NoError(t, schemaRegistry.LoadFromYAML([]byte(schemaYAML)))
+
+	validator, err := validation.NewMockValidatorForTesting(schemaRegistry)
+	require.NoError(t, err)
+	return validator
+}
+
+func TestRegistryHandler_CreateSagaDraft_WithDryRunValidation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	pool, tenantID, cleanup := setupTestPostgres(t)
+	defer cleanup()
+
+	dryRunValidator := setupTestDryRunValidator(t)
+	registry := NewPostgresRegistry(pool, nil)
+	handler := NewRegistryHandler(registry, nil, dryRunValidator, nil)
+
+	ctx := tenant.WithTenant(context.Background(), tenantID)
+
+	t.Run("valid script registers successfully with validation metadata", func(t *testing.T) {
+		req := &sagav1.CreateSagaDraftRequest{
+			Name:        "validated_saga",
+			Script:      `result = test_service.test_method()`,
+			DisplayName: "Validated Saga",
+		}
+
+		resp, err := handler.CreateSagaDraft(ctx, req)
+		require.NoError(t, err)
+		require.NotNil(t, resp.Saga)
+
+		assert.Equal(t, "validated_saga", resp.Saga.Name)
+		assert.Equal(t, sagav1.SagaStatus_SAGA_STATUS_DRAFT, resp.Saga.Status)
+
+		// Verify validation metadata was stored by re-fetching from DB
+		fetched, err := registry.GetByID(ctx, uuid.MustParse(resp.Saga.Id))
+		require.NoError(t, err)
+
+		assert.Equal(t, "PASSED", fetched.ValidationStatus)
+		require.NotNil(t, fetched.ComplexityScore, "complexity score should be stored")
+		assert.GreaterOrEqual(t, *fetched.ComplexityScore, 0)
+		require.NotNil(t, fetched.HandlerCallCount, "handler call count should be stored")
+		assert.Equal(t, 1, *fetched.HandlerCallCount)
+		require.NotNil(t, fetched.ValidatedAt, "validated_at should be stored")
+		assert.WithinDuration(t, time.Now(), *fetched.ValidatedAt, 5*time.Second)
+	})
+
+	t.Run("invalid script rejected with INVALID_ARGUMENT", func(t *testing.T) {
+		req := &sagav1.CreateSagaDraftRequest{
+			Name:   "invalid_saga",
+			Script: `result = test_service.test_method(  # Missing closing paren`,
+		}
+
+		_, err := handler.CreateSagaDraft(ctx, req)
+		require.Error(t, err)
+
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.InvalidArgument, st.Code())
+		assert.Contains(t, st.Message(), "saga script validation failed")
+	})
+
+	t.Run("runtime error in script rejected", func(t *testing.T) {
+		req := &sagav1.CreateSagaDraftRequest{
+			Name:   "runtime_error_saga",
+			Script: `fail("intentional failure")`,
+		}
+
+		_, err := handler.CreateSagaDraft(ctx, req)
+		require.Error(t, err)
+
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.InvalidArgument, st.Code())
+		assert.Contains(t, st.Message(), "saga script validation failed")
+	})
+
+	t.Run("undefined handler in script rejected", func(t *testing.T) {
+		req := &sagav1.CreateSagaDraftRequest{
+			Name:   "undefined_handler_saga",
+			Script: `result = nonexistent_service.some_method()`,
+		}
+
+		_, err := handler.CreateSagaDraft(ctx, req)
+		require.Error(t, err)
+
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.InvalidArgument, st.Code())
+	})
+
+	t.Run("invalid script not persisted to database", func(t *testing.T) {
+		req := &sagav1.CreateSagaDraftRequest{
+			Name:   "should_not_persist",
+			Script: `fail("should not be saved")`,
+		}
+
+		_, err := handler.CreateSagaDraft(ctx, req)
+		require.Error(t, err)
+
+		// Verify it was NOT persisted
+		_, getErr := registry.GetDefinition(ctx, "should_not_persist", 1)
+		assert.ErrorIs(t, getErr, ErrNotFound)
+	})
+
+	t.Run("multiple handler calls stores correct metrics", func(t *testing.T) {
+		req := &sagav1.CreateSagaDraftRequest{
+			Name: "multi_handler_saga",
+			Script: `
+lien_result = payment.create_lien(amount="100.00", customer_id="cust_123")
+result = test_service.test_method()
+verify = test_service.test_method()
+`,
+		}
+
+		resp, err := handler.CreateSagaDraft(ctx, req)
+		require.NoError(t, err)
+
+		fetched, err := registry.GetByID(ctx, uuid.MustParse(resp.Saga.Id))
+		require.NoError(t, err)
+
+		assert.Equal(t, "PASSED", fetched.ValidationStatus)
+		require.NotNil(t, fetched.HandlerCallCount)
+		assert.Equal(t, 3, *fetched.HandlerCallCount)
+		require.NotNil(t, fetched.ComplexityScore)
+		assert.Equal(t, 1, *fetched.ComplexityScore) // 3/2 = 1
+	})
+}
+
+func TestRegistryHandler_CreateSagaDraft_WithoutDryRunValidator(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	pool, tenantID, cleanup := setupTestPostgres(t)
+	defer cleanup()
+
+	registry := NewPostgresRegistry(pool, nil)
+	// Handler without dryRunValidator - backward compatible
+	handler := NewRegistryHandler(registry, nil, nil, nil)
+
+	ctx := tenant.WithTenant(context.Background(), tenantID)
+
+	t.Run("creates draft without validation when validator not configured", func(t *testing.T) {
+		req := &sagav1.CreateSagaDraftRequest{
+			Name:   "no_validation_saga",
+			Script: `fail("this would fail validation but no validator configured")`,
+		}
+
+		resp, err := handler.CreateSagaDraft(ctx, req)
+		require.NoError(t, err)
+		require.NotNil(t, resp.Saga)
+		assert.Equal(t, "no_validation_saga", resp.Saga.Name)
+
+		// Validation metadata should be default/empty
+		fetched, err := registry.GetByID(ctx, uuid.MustParse(resp.Saga.Id))
+		require.NoError(t, err)
+		assert.Equal(t, "UNVALIDATED", fetched.ValidationStatus)
+		assert.Nil(t, fetched.ComplexityScore)
+		assert.Nil(t, fetched.HandlerCallCount)
+		assert.Nil(t, fetched.ValidatedAt)
+	})
+}
+
+func TestRegistryHandler_ExistingTests_StillPass_WithValidator(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	pool, tenantID, cleanup := setupTestPostgres(t)
+	defer cleanup()
+
+	dryRunValidator := setupTestDryRunValidator(t)
+	registry := NewPostgresRegistry(pool, nil)
+	handler := NewRegistryHandler(registry, nil, dryRunValidator, nil)
+
+	ctx := tenant.WithTenant(context.Background(), tenantID)
+
+	t.Run("full lifecycle works with validation enabled", func(t *testing.T) {
+		// Create - valid script passes validation
+		createResp, err := handler.CreateSagaDraft(ctx, &sagav1.CreateSagaDraftRequest{
+			Name:        "lifecycle_validated",
+			Script:      `test_service.test_method()`,
+			DisplayName: "Lifecycle with validation",
+		})
+		require.NoError(t, err)
+		assert.Equal(t, sagav1.SagaStatus_SAGA_STATUS_DRAFT, createResp.Saga.Status)
+
+		sagaID := createResp.Saga.Id
+
+		// Activate
+		activateResp, err := handler.ActivateSaga(ctx, &sagav1.ActivateSagaRequest{
+			Id: sagaID,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, sagav1.SagaStatus_SAGA_STATUS_ACTIVE, activateResp.Saga.Status)
+
+		// Deprecate
+		deprecateResp, err := handler.DeprecateSaga(ctx, &sagav1.DeprecateSagaRequest{
+			Id: sagaID,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, sagav1.SagaStatus_SAGA_STATUS_DEPRECATED, deprecateResp.Saga.Status)
 	})
 }

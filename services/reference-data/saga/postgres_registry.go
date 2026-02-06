@@ -121,7 +121,8 @@ func (r *PostgresRegistry) GetByID(ctx context.Context, id uuid.UUID) (*Definiti
 				sd.preconditions_expression, sd.display_name, sd.description,
 				sd.created_at, sd.updated_at, sd.activated_at, sd.deprecated_at, sd.successor_id,
 				sd.platform_ref, sd.override_reason, sd.platform_version_at_override,
-				psd.script IS NOT NULL AND (sd.script IS NULL OR sd.script = '') AS used_platform_fallback
+				psd.script IS NOT NULL AND (sd.script IS NULL OR sd.script = '') AS used_platform_fallback,
+				sd.validation_status, sd.complexity_score, sd.handler_call_count, sd.validated_at
 			FROM saga_definition sd
 			LEFT JOIN public.platform_saga_definition psd ON sd.platform_ref = psd.id
 			WHERE sd.id = $1`
@@ -158,7 +159,8 @@ func (r *PostgresRegistry) GetDefinition(ctx context.Context, name string, versi
 				sd.preconditions_expression, sd.display_name, sd.description,
 				sd.created_at, sd.updated_at, sd.activated_at, sd.deprecated_at, sd.successor_id,
 				sd.platform_ref, sd.override_reason, sd.platform_version_at_override,
-				psd.script IS NOT NULL AND (sd.script IS NULL OR sd.script = '') AS used_platform_fallback
+				psd.script IS NOT NULL AND (sd.script IS NULL OR sd.script = '') AS used_platform_fallback,
+				sd.validation_status, sd.complexity_score, sd.handler_call_count, sd.validated_at
 			FROM saga_definition sd
 			LEFT JOIN public.platform_saga_definition psd ON sd.platform_ref = psd.id
 			WHERE sd.name = $1 AND sd.version = $2`
@@ -201,7 +203,8 @@ func (r *PostgresRegistry) GetActive(ctx context.Context, name string) (*Definit
 				sd.preconditions_expression, sd.display_name, sd.description,
 				sd.created_at, sd.updated_at, sd.activated_at, sd.deprecated_at, sd.successor_id,
 				sd.platform_ref, sd.override_reason, sd.platform_version_at_override,
-				psd.script IS NOT NULL AND (sd.script IS NULL OR sd.script = '') AS used_platform_fallback
+				psd.script IS NOT NULL AND (sd.script IS NULL OR sd.script = '') AS used_platform_fallback,
+				sd.validation_status, sd.complexity_score, sd.handler_call_count, sd.validated_at
 			FROM saga_definition sd
 			LEFT JOIN public.platform_saga_definition psd ON sd.platform_ref = psd.id
 			WHERE sd.name = $1 AND sd.status = 'ACTIVE' AND sd.is_system = FALSE
@@ -237,7 +240,8 @@ func (r *PostgresRegistry) GetActive(ctx context.Context, name string) (*Definit
 				sd.preconditions_expression, sd.display_name, sd.description,
 				sd.created_at, sd.updated_at, sd.activated_at, sd.deprecated_at, sd.successor_id,
 				sd.platform_ref, sd.override_reason, sd.platform_version_at_override,
-				psd.script IS NOT NULL AND (sd.script IS NULL OR sd.script = '') AS used_platform_fallback
+				psd.script IS NOT NULL AND (sd.script IS NULL OR sd.script = '') AS used_platform_fallback,
+				sd.validation_status, sd.complexity_score, sd.handler_call_count, sd.validated_at
 			FROM saga_definition sd
 			LEFT JOIN public.platform_saga_definition psd ON sd.platform_ref = psd.id
 			WHERE sd.name = $1 AND sd.status = 'ACTIVE' AND sd.is_system = TRUE
@@ -280,7 +284,8 @@ func (r *PostgresRegistry) ListByStatus(ctx context.Context, status Status) ([]*
 				sd.preconditions_expression, sd.display_name, sd.description,
 				sd.created_at, sd.updated_at, sd.activated_at, sd.deprecated_at, sd.successor_id,
 				sd.platform_ref, sd.override_reason, sd.platform_version_at_override,
-				psd.script IS NOT NULL AND (sd.script IS NULL OR sd.script = '') AS used_platform_fallback
+				psd.script IS NOT NULL AND (sd.script IS NULL OR sd.script = '') AS used_platform_fallback,
+				sd.validation_status, sd.complexity_score, sd.handler_call_count, sd.validated_at
 			FROM saga_definition sd
 			LEFT JOIN public.platform_saga_definition psd ON sd.platform_ref = psd.id
 			WHERE sd.status = $1
@@ -371,12 +376,14 @@ func (r *PostgresRegistry) CreateDraft(ctx context.Context, def *Definition) err
 				id, name, version, script, status, is_system,
 				preconditions_expression, display_name, description,
 				platform_ref, override_reason, platform_version_at_override,
-				created_at, updated_at
+				created_at, updated_at,
+				validation_status, complexity_score, handler_call_count, validated_at
 			) VALUES (
 				$1, $2, $3, $4, $5, $6,
 				$7, $8, $9,
 				$10, $11, $12,
-				$13, $14
+				$13, $14,
+				$15, $16, $17, $18
 			)`
 
 		// Handle script: if platform_ref is set and no script, pass NULL
@@ -387,11 +394,18 @@ func (r *PostgresRegistry) CreateDraft(ctx context.Context, def *Definition) err
 			scriptValue = def.Script
 		}
 
+		// Default validation_status to UNVALIDATED if not set
+		validationStatus := def.ValidationStatus
+		if validationStatus == "" {
+			validationStatus = "UNVALIDATED"
+		}
+
 		_, err := tx.Exec(ctx, query,
 			def.ID, def.Name, def.Version, scriptValue, string(def.Status), def.IsSystem,
 			nullString(def.PreconditionsExpression), nullString(def.DisplayName), nullString(def.Description),
 			def.PlatformRef, nullString(def.OverrideReason), nullString(def.PlatformVersionAtOverride),
 			def.CreatedAt, def.UpdatedAt,
+			validationStatus, def.ComplexityScore, def.HandlerCallCount, def.ValidatedAt,
 		)
 		if err != nil {
 			var pgErr *pgconn.PgError
@@ -594,6 +608,8 @@ func (r *PostgresRegistry) scanDefinitionWithFallback(row pgx.Row) (*Definition,
 	var platformRef *uuid.UUID
 	var overrideReason, platformVersionAtOverride sql.NullString
 	var usedPlatformFallback sql.NullBool
+	var validationStatus sql.NullString
+	var complexityScore, handlerCallCount sql.NullInt64
 
 	err := row.Scan(
 		&def.ID, &def.Name, &def.Version,
@@ -604,6 +620,7 @@ func (r *PostgresRegistry) scanDefinitionWithFallback(row pgx.Row) (*Definition,
 		&def.CreatedAt, &def.UpdatedAt, &def.ActivatedAt, &def.DeprecatedAt, &successorID,
 		&platformRef, &overrideReason, &platformVersionAtOverride,
 		&usedPlatformFallback,
+		&validationStatus, &complexityScore, &handlerCallCount, &def.ValidatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -635,6 +652,17 @@ func (r *PostgresRegistry) scanDefinitionWithFallback(row pgx.Row) (*Definition,
 	if platformVersionAtOverride.Valid {
 		def.PlatformVersionAtOverride = platformVersionAtOverride.String
 	}
+	if validationStatus.Valid {
+		def.ValidationStatus = validationStatus.String
+	}
+	if complexityScore.Valid {
+		v := int(complexityScore.Int64)
+		def.ComplexityScore = &v
+	}
+	if handlerCallCount.Valid {
+		v := int(handlerCallCount.Int64)
+		def.HandlerCallCount = &v
+	}
 
 	return &def, nil
 }
@@ -650,6 +678,8 @@ func (r *PostgresRegistry) scanDefinitionWithFallbackFromRows(rows pgx.Rows) (*D
 	var platformRef *uuid.UUID
 	var overrideReason, platformVersionAtOverride sql.NullString
 	var usedPlatformFallback sql.NullBool
+	var validationStatus sql.NullString
+	var complexityScore, handlerCallCount sql.NullInt64
 
 	err := rows.Scan(
 		&def.ID, &def.Name, &def.Version,
@@ -660,6 +690,7 @@ func (r *PostgresRegistry) scanDefinitionWithFallbackFromRows(rows pgx.Rows) (*D
 		&def.CreatedAt, &def.UpdatedAt, &def.ActivatedAt, &def.DeprecatedAt, &successorID,
 		&platformRef, &overrideReason, &platformVersionAtOverride,
 		&usedPlatformFallback,
+		&validationStatus, &complexityScore, &handlerCallCount, &def.ValidatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -689,6 +720,17 @@ func (r *PostgresRegistry) scanDefinitionWithFallbackFromRows(rows pgx.Rows) (*D
 	}
 	if platformVersionAtOverride.Valid {
 		def.PlatformVersionAtOverride = platformVersionAtOverride.String
+	}
+	if validationStatus.Valid {
+		def.ValidationStatus = validationStatus.String
+	}
+	if complexityScore.Valid {
+		v := int(complexityScore.Int64)
+		def.ComplexityScore = &v
+	}
+	if handlerCallCount.Valid {
+		v := int(handlerCallCount.Int64)
+		def.HandlerCallCount = &v
 	}
 
 	return &def, nil

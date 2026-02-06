@@ -72,6 +72,10 @@ Architectural Decision Records) format.
 | [ADR-0025](0025-clearing-purpose-specialization.md) | Clearing Purpose Specialization | Accepted | 2026-01-16 |
 <!-- markdownlint-disable-next-line MD013 -->
 | [ADR-0026](0026-canonical-ingestion-contract.md) | Canonical Ingestion Contract | Accepted | 2026-01-17 |
+<!-- markdownlint-disable-next-line MD013 -->
+| [ADR-0027](0027-market-information-management.md) | Market Information Management Service Architecture | Accepted | 2026-01-19 |
+<!-- markdownlint-disable-next-line MD013 -->
+| [ADR-0028](0028-starlark-saga-cel-valuation.md) | Starlark Saga Orchestration with CEL Valuation | Accepted | 2025-01-20 |
 
 ## Architecture Decision Relationships
 
