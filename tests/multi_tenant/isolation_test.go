@@ -614,7 +614,7 @@ func TestMissingOrganizationContext(t *testing.T) {
 	t.Run("must_from_context_panics", func(t *testing.T) {
 		ctx := context.Background()
 		assert.Panics(t, func() {
-			_ = tenant.MustFromContext(ctx)
+			_ = tenant.MustFromContext(ctx) //nolint:staticcheck // intentionally testing deprecated function's panic behavior
 		}, "MustFromContext should panic when organization is missing")
 	})
 }
