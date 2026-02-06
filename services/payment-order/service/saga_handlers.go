@@ -12,6 +12,7 @@ import (
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
+	poobservability "github.com/meridianhub/meridian/services/payment-order/observability"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
@@ -324,6 +325,7 @@ func postLedgerEntriesHandler(deps *PaymentOrderHandlerDeps, logger *slog.Logger
 
 // executeLienHandler creates a handler for the payment_order.execute_lien step.
 // This handler includes retry logic with exponential backoff.
+// Records metrics for monitoring lien execution health and retry exhaustion.
 func executeLienHandler(deps *PaymentOrderHandlerDeps, logger *slog.Logger) saga.Handler {
 	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 		const handlerName = "payment_order.execute_lien"
@@ -360,6 +362,7 @@ func executeLienHandler(deps *PaymentOrderHandlerDeps, logger *slog.Logger) saga
 
 		err = sharedclients.Retry(ctx.Context, *retryConfig, func() error {
 			attempts++
+			poobservability.RecordLienExecutionRetry(poobservability.LienRetryOutcomeAttempt)
 			logger.Info("attempting lien execution", "attempt", attempts, "lien_id", lienID)
 
 			_, execErr := deps.CurrentAccountClient.ExecuteLien(ctx.Context, &currentaccountv1.ExecuteLienRequest{
@@ -367,6 +370,7 @@ func executeLienHandler(deps *PaymentOrderHandlerDeps, logger *slog.Logger) saga
 			})
 			if execErr != nil {
 				lastErr = execErr
+				poobservability.RecordLienExecutionRetry(poobservability.LienRetryOutcomeFailed)
 				logger.Warn("lien execution attempt failed",
 					"attempt", attempts,
 					"lien_id", lienID,
@@ -389,6 +393,9 @@ func executeLienHandler(deps *PaymentOrderHandlerDeps, logger *slog.Logger) saga
 		}
 
 		if err != nil {
+			// Record retry exhaustion metric - indicates payment may require manual reconciliation
+			poobservability.RecordLienExecutionRetry(poobservability.LienRetryOutcomeExhausted)
+			poobservability.RecordLienExecutionRetriesExhausted()
 			logger.Error("lien execution failed after retries",
 				"saga_execution_id", ctx.SagaExecutionID,
 				"lien_id", lienID,
@@ -400,6 +407,7 @@ func executeLienHandler(deps *PaymentOrderHandlerDeps, logger *slog.Logger) saga
 			}, wrapHandlerError(handlerName, fmt.Errorf("lien execution failed after %d attempts: %w", attempts, err))
 		}
 
+		poobservability.RecordLienExecutionRetry(poobservability.LienRetryOutcomeSuccess)
 		logger.Info("lien executed successfully",
 			"saga_execution_id", ctx.SagaExecutionID,
 			"lien_id", lienID,
@@ -460,6 +468,7 @@ func terminateLienHandler(deps *PaymentOrderHandlerDeps, logger *slog.Logger) sa
 
 // evaluateBucketIDForHandler evaluates the bucket ID for bucket-aware solvency.
 // Returns empty string if bucket evaluation is not applicable or fails gracefully.
+// Records metrics for monitoring bucket evaluation health.
 func evaluateBucketIDForHandler(
 	ctx context.Context,
 	deps *PaymentOrderHandlerDeps,
@@ -468,8 +477,11 @@ func evaluateBucketIDForHandler(
 	paymentOrderID string,
 	logger *slog.Logger,
 ) (string, error) {
+	start := time.Now()
+
 	// Skip if no instrument code
 	if instrumentCode == "" {
+		poobservability.RecordBucketEvaluation(poobservability.BucketEvalStatusSkipped)
 		return "", nil
 	}
 
@@ -477,6 +489,8 @@ func evaluateBucketIDForHandler(
 	if deps.ReferenceDataClient == nil {
 		logger.Debug("bucket evaluation skipped - reference data client not configured",
 			"payment_order_id", paymentOrderID)
+		poobservability.RecordBucketEvaluationFailure(instrumentCode, poobservability.BucketEvalErrNoClient)
+		poobservability.RecordBucketEvaluation(poobservability.BucketEvalStatusFallback)
 		return "", nil
 	}
 
@@ -488,6 +502,8 @@ func evaluateBucketIDForHandler(
 			"payment_order_id", paymentOrderID,
 			"instrument_code", instrumentCode,
 			"error", err)
+		poobservability.RecordBucketEvaluationFailure(instrumentCode, poobservability.BucketEvalErrInstrumentFetch)
+		poobservability.RecordBucketEvaluation(poobservability.BucketEvalStatusFallback)
 		return "", nil
 	}
 
@@ -496,6 +512,7 @@ func evaluateBucketIDForHandler(
 		logger.Debug("instrument has no fungibility expression, using default bucket",
 			"payment_order_id", paymentOrderID,
 			"instrument_code", instrumentCode)
+		poobservability.RecordBucketEvaluation(poobservability.BucketEvalStatusSkipped)
 		return "", nil
 	}
 
@@ -503,6 +520,8 @@ func evaluateBucketIDForHandler(
 	if deps.BucketEvaluator == nil {
 		logger.Debug("bucket evaluation skipped - bucket evaluator not configured",
 			"payment_order_id", paymentOrderID)
+		poobservability.RecordBucketEvaluationFailure(instrumentCode, poobservability.BucketEvalErrNoEvaluator)
+		poobservability.RecordBucketEvaluation(poobservability.BucketEvalStatusFallback)
 		return "", nil
 	}
 
@@ -511,6 +530,10 @@ func evaluateBucketIDForHandler(
 		InstrumentCode: instrumentCode,
 		Attributes:     paymentAttributes,
 	})
+
+	// Record duration for successful or failed evaluations (not skipped)
+	poobservability.RecordBucketEvaluationDuration(time.Since(start))
+
 	if err != nil {
 		// Gracefully degrade to default bucket on CEL evaluation failures
 		// (e.g., missing required attributes, invalid expressions)
@@ -518,6 +541,8 @@ func evaluateBucketIDForHandler(
 			"payment_order_id", paymentOrderID,
 			"instrument_code", instrumentCode,
 			"error", err)
+		poobservability.RecordBucketEvaluationFailure(instrumentCode, poobservability.BucketEvalErrCELEvaluation)
+		poobservability.RecordBucketEvaluation(poobservability.BucketEvalStatusFallback)
 		return "", nil
 	}
 
@@ -525,6 +550,7 @@ func evaluateBucketIDForHandler(
 		"payment_order_id", paymentOrderID,
 		"instrument_code", instrumentCode,
 		"bucket_id", bucketID)
+	poobservability.RecordBucketEvaluation(poobservability.BucketEvalStatusSuccess)
 
 	return bucketID, nil
 }

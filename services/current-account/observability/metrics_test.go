@@ -185,6 +185,79 @@ func TestCircuitBreakerStateConstants(t *testing.T) {
 	}
 }
 
+// Tests for webhook delivery metrics (production readiness monitoring)
+
+func TestRecordWebhookDeliveryAttempt(t *testing.T) {
+	webhookDeliveryAttempts.Reset()
+
+	RecordWebhookDeliveryAttempt(WebhookEventAccountFrozen, WebhookStatusSuccess)
+	RecordWebhookDeliveryAttempt(WebhookEventAccountClosed, WebhookStatusFailed)
+	RecordWebhookDeliveryAttempt(WebhookEventAccountFrozen, WebhookStatusSkipped)
+
+	count := testutil.CollectAndCount(webhookDeliveryAttempts)
+	if count == 0 {
+		t.Error("Expected webhook delivery attempt metric to be recorded")
+	}
+}
+
+func TestRecordWebhookDeliveryDuration(t *testing.T) {
+	webhookDeliveryDuration.Reset()
+
+	RecordWebhookDeliveryDuration(WebhookEventAccountFrozen, 500*time.Millisecond)
+	RecordWebhookDeliveryDuration(WebhookEventAccountClosed, 2*time.Second)
+
+	count := testutil.CollectAndCount(webhookDeliveryDuration)
+	if count == 0 {
+		t.Error("Expected webhook delivery duration metric to be recorded")
+	}
+}
+
+func TestRecordWebhookDeliveryRetry(t *testing.T) {
+	webhookDeliveryRetries.Reset()
+
+	RecordWebhookDeliveryRetry(WebhookEventAccountFrozen)
+	RecordWebhookDeliveryRetry(WebhookEventAccountClosed)
+
+	count := testutil.CollectAndCount(webhookDeliveryRetries)
+	if count == 0 {
+		t.Error("Expected webhook delivery retry metric to be recorded")
+	}
+}
+
+func TestRecordWebhookDeliveryExhausted(t *testing.T) {
+	webhookDeliveryExhausted.Reset()
+
+	RecordWebhookDeliveryExhausted(WebhookEventAccountFrozen)
+
+	count := testutil.CollectAndCount(webhookDeliveryExhausted)
+	if count == 0 {
+		t.Error("Expected webhook delivery exhausted metric to be recorded")
+	}
+}
+
+func TestWebhookEventTypeConstants(t *testing.T) {
+	// Verify webhook event type constants are properly defined
+	if WebhookEventAccountFrozen != "account_frozen" {
+		t.Errorf("WebhookEventAccountFrozen should be 'account_frozen', got '%s'", WebhookEventAccountFrozen)
+	}
+	if WebhookEventAccountClosed != "account_closed" {
+		t.Errorf("WebhookEventAccountClosed should be 'account_closed', got '%s'", WebhookEventAccountClosed)
+	}
+}
+
+func TestWebhookStatusConstants(t *testing.T) {
+	// Verify webhook status constants are properly defined
+	if WebhookStatusSuccess != "success" {
+		t.Errorf("WebhookStatusSuccess should be 'success', got '%s'", WebhookStatusSuccess)
+	}
+	if WebhookStatusFailed != "failed" {
+		t.Errorf("WebhookStatusFailed should be 'failed', got '%s'", WebhookStatusFailed)
+	}
+	if WebhookStatusSkipped != "skipped" {
+		t.Errorf("WebhookStatusSkipped should be 'skipped', got '%s'", WebhookStatusSkipped)
+	}
+}
+
 func TestMetricsLabels(t *testing.T) {
 	tests := []struct {
 		name       string

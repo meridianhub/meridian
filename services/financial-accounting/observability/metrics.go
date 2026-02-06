@@ -194,6 +194,32 @@ var (
 		},
 		[]string{"instrument_code", "operation"},
 	)
+
+	// NoOp fallback metrics - indicates degraded service functionality
+	// These metrics track when the service is running with fallback implementations
+	// instead of production-ready dependencies (Redis for idempotency, Kafka for events)
+	noopIdempotencyActive = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "financial_accounting_noop_idempotency_active",
+			Help: "1 if NoOp idempotency service is active (production risk), 0 otherwise",
+		},
+	)
+
+	noopEventPublisherActive = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "financial_accounting_noop_event_publisher_active",
+			Help: "1 if NoOp event publisher is active (production risk), 0 otherwise",
+		},
+	)
+
+	// Service degradation counter - tracks transitions to degraded mode
+	serviceDegradationEvents = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "financial_accounting_service_degradation_events_total",
+			Help: "Total number of service degradation events by component",
+		},
+		[]string{"component", "reason"},
+	)
 )
 
 // RecordOperationDuration records the duration of a financial accounting operation.
@@ -334,4 +360,60 @@ func RecordClearingAccountLookupError(clearingType string) {
 // RecordResolverFallback records when the posting service falls back to static clearing account.
 func RecordResolverFallback(instrumentCode, operation string) {
 	resolverFallbackTotal.WithLabelValues(instrumentCode, operation).Inc()
+}
+
+// Service component constants for degradation metrics.
+const (
+	ComponentIdempotency    = "idempotency"
+	ComponentEventPublisher = "event_publisher"
+	ComponentKafkaProducer  = "kafka_producer"
+	ComponentRedis          = "redis"
+)
+
+// Degradation reason constants.
+const (
+	DegradationReasonUnavailable      = "unavailable"
+	DegradationReasonConnectionFailed = "connection_failed"
+	DegradationReasonStartupFallback  = "startup_fallback"
+)
+
+// SetNoopIdempotencyActive sets the gauge indicating whether NoOp idempotency is active.
+// This metric MUST trigger a critical alert in production environments.
+//
+// ALERTING: This metric MUST have a Prometheus alert configured:
+//
+//	alert: NoopIdempotencyActiveInProduction
+//	expr: financial_accounting_noop_idempotency_active == 1 AND environment == "production"
+//	severity: critical
+//	runbook: docs/runbooks/noop-fallback-active.md
+func SetNoopIdempotencyActive(active bool) {
+	if active {
+		noopIdempotencyActive.Set(1)
+	} else {
+		noopIdempotencyActive.Set(0)
+	}
+}
+
+// SetNoopEventPublisherActive sets the gauge indicating whether NoOp event publisher is active.
+// This metric MUST trigger a critical alert in production environments.
+//
+// ALERTING: This metric MUST have a Prometheus alert configured:
+//
+//	alert: NoopEventPublisherActiveInProduction
+//	expr: financial_accounting_noop_event_publisher_active == 1 AND environment == "production"
+//	severity: critical
+//	runbook: docs/runbooks/noop-fallback-active.md
+func SetNoopEventPublisherActive(active bool) {
+	if active {
+		noopEventPublisherActive.Set(1)
+	} else {
+		noopEventPublisherActive.Set(0)
+	}
+}
+
+// RecordServiceDegradation records a service degradation event.
+// component should be one of the Component* constants.
+// reason should be one of the DegradationReason* constants.
+func RecordServiceDegradation(component, reason string) {
+	serviceDegradationEvents.WithLabelValues(component, reason).Inc()
 }
