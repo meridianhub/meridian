@@ -69,7 +69,7 @@ func setupLifecycleIntegrationTest(t *testing.T) (*Service, *gorm.DB, context.Co
 	// Create the party_reference table (BQ: Reference) - matches migration schema
 	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.party_reference (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-		party_id UUID NOT NULL REFERENCES %[1]q.party(id) ON DELETE CASCADE,
+		party_id UUID NOT NULL REFERENCES %[1]s.party(id) ON DELETE CASCADE,
 		reference_type VARCHAR(50) NOT NULL,
 		reference_value VARCHAR(255) NOT NULL,
 		issuing_authority VARCHAR(100),
@@ -95,7 +95,7 @@ func setupLifecycleIntegrationTest(t *testing.T) (*Service, *gorm.DB, context.Co
 	// Create the party_association table (BQ: Associations) - singular to match migration
 	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.party_association (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-		party_id UUID NOT NULL REFERENCES %[1]q.party(id) ON DELETE CASCADE,
+		party_id UUID NOT NULL REFERENCES %[1]s.party(id) ON DELETE CASCADE,
 		related_party_id UUID NOT NULL,
 		relationship_type VARCHAR(50) NOT NULL,
 		created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
@@ -107,7 +107,7 @@ func setupLifecycleIntegrationTest(t *testing.T) (*Service, *gorm.DB, context.Co
 	// Create the party_demographic table (BQ: Demographics) - singular to match migration
 	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.party_demographic (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-		party_id UUID NOT NULL REFERENCES %[1]q.party(id) ON DELETE CASCADE,
+		party_id UUID NOT NULL REFERENCES %[1]s.party(id) ON DELETE CASCADE,
 		socio_economic_data JSONB,
 		employment_history JSONB,
 		income_level VARCHAR(50),
@@ -133,7 +133,7 @@ func setupLifecycleIntegrationTest(t *testing.T) (*Service, *gorm.DB, context.Co
 	// Create the party_bank_relation table (BQ: BankRelations) - singular to match migration
 	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.party_bank_relation (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-		party_id UUID NOT NULL REFERENCES %[1]q.party(id) ON DELETE CASCADE,
+		party_id UUID NOT NULL REFERENCES %[1]s.party(id) ON DELETE CASCADE,
 		account_officer_id VARCHAR(100),
 		relationship_manager_id VARCHAR(100),
 		assigned_branch VARCHAR(100),

@@ -511,7 +511,7 @@ func TestSchemaIsolation(t *testing.T) {
 		FROM information_schema.tables
 		WHERE table_schema = ?
 		AND table_name IN ('financial_booking_log', 'ledger_posting')
-	`, pq.QuoteIdentifier(schemaName)).Scan(&tableCount).Error
+	`, schemaName).Scan(&tableCount).Error
 
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), tableCount, "Both tables should exist in tenant schema")
