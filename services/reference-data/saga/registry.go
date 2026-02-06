@@ -151,6 +151,19 @@ type Definition struct {
 	// the platform definition (true) or the tenant's own script (false).
 	// This is populated during query resolution, not stored in the database.
 	UsedPlatformFallback bool
+
+	// ValidationStatus records the result of dry-run validation at draft creation.
+	// Values: "PASSED", "FAILED", "UNVALIDATED" (legacy rows or validator not configured).
+	ValidationStatus string
+
+	// ComplexityScore is the 0-10 complexity score from dry-run validation metrics.
+	ComplexityScore *int
+
+	// HandlerCallCount is the number of handler calls detected during dry-run validation.
+	HandlerCallCount *int
+
+	// ValidatedAt is when the script was last validated via dry-run.
+	ValidatedAt *time.Time
 }
 
 // Validator validates saga definitions before activation.
