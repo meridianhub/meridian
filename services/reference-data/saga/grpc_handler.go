@@ -489,6 +489,9 @@ func (h *RegistryHandler) ValidateSaga(
 		return nil, status.Errorf(codes.Internal, "validation error: %v", err)
 	}
 
+	// Record validation metrics
+	validation.RecordValidation(req.SagaName, result)
+
 	// Log validation attempt
 	h.logger.Info("saga script validated",
 		"saga_name", req.SagaName,
