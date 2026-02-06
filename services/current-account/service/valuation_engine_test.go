@@ -146,9 +146,13 @@ func createTestAccountForValuation(t *testing.T, _ context.Context, db *gorm.DB,
 	id := uuid.New()
 	partyID := uuid.New()
 
+	ident := accountID
+	if len(ident) > 8 {
+		ident = ident[:8]
+	}
 	err := db.Exec(fmt.Sprintf(`INSERT INTO %q.account (id, account_id, account_identification, party_id, currency, status)
 		VALUES (?, ?, ?, ?, ?, 'ACTIVE')`, schemaName),
-		id, accountID, "GB29NWBK"+accountID[:8], partyID, currency).Error
+		id, accountID, "GB29NWBK"+ident, partyID, currency).Error
 	require.NoError(t, err)
 	return id
 }
