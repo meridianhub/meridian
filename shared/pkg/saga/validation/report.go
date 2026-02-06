@@ -144,8 +144,22 @@ func (f *JSONFormatter) Format(result *ValidationResult) string {
 	// Marshal to JSON with indentation
 	data, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
-		// Fallback to simple error JSON
-		return fmt.Sprintf(`{"success": false, "errors": [{"message": "Failed to format report: %s"}]}`, err.Error())
+		// Fallback to simple error JSON using proper marshaling to avoid escaping issues
+		fallback := JSONReport{
+			Success: false,
+			Errors: []JSONError{
+				{
+					Message:  fmt.Sprintf("Failed to format report: %s", err.Error()),
+					Category: "INTERNAL_ERROR",
+				},
+			},
+		}
+		// If this also fails, return a minimal hardcoded fallback
+		fallbackData, fallbackErr := json.Marshal(fallback)
+		if fallbackErr != nil {
+			return `{"success":false,"errors":[{"message":"Report formatting failed","category":"INTERNAL_ERROR"}]}`
+		}
+		return string(fallbackData)
 	}
 
 	return string(data)

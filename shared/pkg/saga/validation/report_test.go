@@ -2,6 +2,7 @@ package validation
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -206,7 +207,8 @@ func TestHumanReadableFormatter_ComplexityLabels(t *testing.T) {
 
 			// Verify score calculation
 			if tc.handlerCount > 0 {
-				assert.Contains(t, output, string(rune('0'+expectedComplexity)), "should show correct score")
+				expectedScoreStr := fmt.Sprintf("Complexity: %d/10", expectedComplexity)
+				assert.Contains(t, output, expectedScoreStr, "should show correct score")
 			}
 		})
 	}
