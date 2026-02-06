@@ -1,0 +1,261 @@
+# Production Readiness Alert Rules
+#
+# These alerts monitor silent failures and degraded service states that could
+# impact production reliability and regulatory compliance.
+#
+# Categories:
+# 1. Bucket Evaluation Failures (payment-order)
+# 2. Webhook Delivery Failures (current-account) - Regulatory compliance risk
+# 3. NoOp Fallback Detection (financial-accounting) - Development mode in production
+# 4. Lien Execution Retry Exhaustion (payment-order) - Payment stuck risk
+
+groups:
+  - name: production_readiness_silent_failures
+    interval: 30s
+    rules:
+      # =============================================================================
+      # BUCKET EVALUATION ALERTS
+      # =============================================================================
+
+      # High bucket evaluation failure rate - may indicate reference-data service issues
+      - alert: BucketEvaluationFailureRateHigh
+        expr: |
+          (
+            sum(rate(payment_order_bucket_evaluation_failures_total[5m]))
+            / clamp_min(sum(rate(payment_order_bucket_evaluations_total[5m])), 0.0001)
+          ) > 0.10
+        for: 5m
+        labels:
+          severity: warning
+          service: payment-order
+          category: silent_failure
+        annotations:
+          summary: "High bucket evaluation failure rate"
+          description: |
+            Bucket evaluation is failing at {{ $value | humanizePercentage }}.
+            This may indicate reference-data service unavailability or invalid CEL expressions.
+            Payments will continue with default bucket (graceful degradation), but bucket-aware solvency validation is compromised.
+          runbook_url: "https://docs.meridian.io/runbooks/bucket-evaluation-failure"
+
+      # Sustained bucket evaluation failures - degraded solvency validation
+      - alert: BucketEvaluationFailuresSustained
+        expr: |
+          sum(increase(payment_order_bucket_evaluation_failures_total[15m])) > 50
+        for: 10m
+        labels:
+          severity: critical
+          service: payment-order
+          category: silent_failure
+        annotations:
+          summary: "Sustained bucket evaluation failures detected"
+          description: |
+            More than 50 bucket evaluation failures in the last 15 minutes.
+            Bucket-aware solvency validation is severely degraded.
+          runbook_url: "https://docs.meridian.io/runbooks/bucket-evaluation-failure"
+
+      # =============================================================================
+      # WEBHOOK DELIVERY ALERTS (Regulatory Compliance)
+      # =============================================================================
+
+      # Webhook delivery failures - regulatory compliance risk
+      # Note: Excludes status="skipped" from denominator since skipped webhooks (no config) aren't failures
+      - alert: WebhookDeliveryFailureRateHigh
+        expr: |
+          (
+            sum by (event_type) (rate(current_account_webhook_delivery_attempts_total{status="failed"}[5m]))
+            / clamp_min(sum by (event_type) (rate(current_account_webhook_delivery_attempts_total{status!="skipped"}[5m])), 0.0001)
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          service: current-account
+          category: regulatory_compliance
+        annotations:
+          summary: "High webhook delivery failure rate for {{ $labels.event_type }}"
+          description: |
+            Webhook delivery failure rate is {{ $value | humanizePercentage }} for event type {{ $labels.event_type }}.
+            REGULATORY COMPLIANCE RISK: Account freeze/close notifications may not be delivered to tenants.
+            Immediate investigation required.
+          runbook_url: "https://docs.meridian.io/runbooks/webhook-delivery-failure"
+
+      # Webhook delivery exhausted - critical regulatory alert
+      - alert: WebhookDeliveryExhausted
+        expr: |
+          increase(current_account_webhook_delivery_exhausted_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          service: current-account
+          category: regulatory_compliance
+        annotations:
+          summary: "Webhook delivery failed after all retries for {{ $labels.event_type }}"
+          description: |
+            {{ $value }} webhook deliveries have exhausted all retries for {{ $labels.event_type }} events.
+            REGULATORY COMPLIANCE RISK: Tenants have not received required notifications.
+            Manual notification may be required.
+          runbook_url: "https://docs.meridian.io/runbooks/webhook-delivery-failure"
+
+      # High webhook retry rate - indicates endpoint instability
+      - alert: WebhookDeliveryHighRetryRate
+        expr: |
+          rate(current_account_webhook_delivery_retries_total[5m]) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+          service: current-account
+          category: reliability
+        annotations:
+          summary: "High webhook delivery retry rate"
+          description: |
+            Webhook deliveries are retrying at {{ $value }} retries/second for {{ $labels.event_type }}.
+            This may indicate tenant webhook endpoint instability or network issues.
+          runbook_url: "https://docs.meridian.io/runbooks/webhook-delivery-failure"
+
+      # =============================================================================
+      # NOOP FALLBACK ALERTS (Development Mode in Production)
+      # =============================================================================
+
+      # NoOp idempotency service active - CRITICAL in production
+      - alert: NoopIdempotencyActiveInProduction
+        expr: |
+          financial_accounting_noop_idempotency_active == 1
+        for: 1m
+        labels:
+          severity: critical
+          service: financial-accounting
+          category: production_safety
+        annotations:
+          summary: "NoOp idempotency service active - DUPLICATE TRANSACTION RISK"
+          description: |
+            The financial-accounting service is running with a NoOp idempotency service.
+            CRITICAL: Duplicate transactions cannot be detected. This mode should NEVER run in production.
+            Immediate investigation of Redis connectivity required.
+          runbook_url: "https://docs.meridian.io/runbooks/noop-fallback-active"
+
+      # NoOp event publisher active - CRITICAL in production
+      - alert: NoopEventPublisherActiveInProduction
+        expr: |
+          financial_accounting_noop_event_publisher_active == 1
+        for: 1m
+        labels:
+          severity: critical
+          service: financial-accounting
+          category: production_safety
+        annotations:
+          summary: "NoOp event publisher active - EVENT DELIVERY DISABLED"
+          description: |
+            The financial-accounting service is running with a NoOp event publisher.
+            CRITICAL: Downstream services will not receive transaction events.
+            This mode should NEVER run in production.
+            Immediate investigation of Kafka connectivity required.
+          runbook_url: "https://docs.meridian.io/runbooks/noop-fallback-active"
+
+      # Service degradation events - warning for any component
+      - alert: ServiceDegradationDetected
+        expr: |
+          increase(financial_accounting_service_degradation_events_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          service: financial-accounting
+          category: reliability
+        annotations:
+          summary: "Service degradation detected in {{ $labels.component }}"
+          description: |
+            Financial accounting service has degraded functionality in {{ $labels.component }}.
+            Reason: {{ $labels.reason }}. This may indicate infrastructure issues.
+          runbook_url: "https://docs.meridian.io/runbooks/service-degradation"
+
+      # =============================================================================
+      # LIEN EXECUTION RETRY ALERTS
+      # =============================================================================
+
+      # Lien execution retries exhausted - payment stuck risk
+      - alert: LienExecutionRetriesExhausted
+        expr: |
+          increase(payment_order_lien_execution_retries_exhausted_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          service: payment-order
+          category: payment_integrity
+        annotations:
+          summary: "Lien execution retries exhausted - payments may be stuck"
+          description: |
+            {{ $value }} payment orders have exhausted all lien execution retry attempts.
+            CRITICAL: These payments may be stuck in PENDING state requiring manual reconciliation.
+            Check current-account service health and database connectivity.
+          runbook_url: "https://docs.meridian.io/runbooks/lien-execution-failure"
+
+      # High lien execution failure rate
+      - alert: LienExecutionFailureRateHigh
+        expr: |
+          (
+            sum(rate(payment_order_lien_execution_retries_total{outcome="failed"}[5m]))
+            / clamp_min(sum(rate(payment_order_lien_execution_retries_total{outcome="attempt"}[5m])), 0.0001)
+          ) > 0.20
+        for: 5m
+        labels:
+          severity: warning
+          service: payment-order
+          category: reliability
+        annotations:
+          summary: "High lien execution failure rate"
+          description: |
+            Lien execution is failing at {{ $value | humanizePercentage }} of attempts.
+            This may indicate current-account service issues or database contention.
+          runbook_url: "https://docs.meridian.io/runbooks/lien-execution-failure"
+
+      # Lien execution status update exhausted - reconciliation needed
+      - alert: LienExecutionStatusUpdateExhausted
+        expr: |
+          increase(payment_order_lien_execution_status_update_exhausted_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          service: payment-order
+          category: payment_integrity
+        annotations:
+          summary: "Lien execution status update failed - reconciliation needed"
+          description: |
+            {{ $value }} lien execution status updates failed after all retries due to version conflicts.
+            Payment orders may be stuck in PENDING state. Check idx_payment_orders_lien_execution partial index for affected records.
+          runbook_url: "https://docs.meridian.io/runbooks/lien-execution-failure"
+
+  - name: production_readiness_slo
+    interval: 60s
+    rules:
+      # =============================================================================
+      # SERVICE LEVEL OBJECTIVES
+      # =============================================================================
+
+      # Overall silent failure budget consumption
+      # Uses dedicated exhaustion counters for consistency with alerting rules
+      - record: production_readiness:silent_failure_rate:5m
+        expr: |
+          (
+            sum(rate(payment_order_bucket_evaluation_failures_total[5m])) +
+            sum(rate(current_account_webhook_delivery_attempts_total{status="failed"}[5m])) +
+            sum(rate(payment_order_lien_execution_retries_exhausted_total[5m]))
+          )
+
+      # NoOp services running (should be 0 in production)
+      - record: production_readiness:noop_services_active
+        expr: |
+          financial_accounting_noop_idempotency_active +
+          financial_accounting_noop_event_publisher_active
+
+      # Alert if any NoOp services are running
+      - alert: ProductionReadinessCompromised
+        expr: |
+          production_readiness:noop_services_active > 0
+        for: 1m
+        labels:
+          severity: critical
+          category: production_safety
+        annotations:
+          summary: "Production readiness compromised - {{ $value }} NoOp services active"
+          description: |
+            Production readiness is compromised with {{ $value }} NoOp fallback services active.
+            This represents a critical production safety risk. Immediate remediation required.
+          runbook_url: "https://docs.meridian.io/runbooks/production-readiness-compromised"
