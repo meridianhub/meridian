@@ -20,7 +20,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-      issues: read
+      issues: write
       id-token: write
       actions: read
       checks: read
@@ -166,28 +166,87 @@ jobs:
 
             The icon determines the GitHub action. Don't use `REQUEST_CHANGES` for 🟡 items.
 
-            ## How to Post Inline Comments
+            ## Comment Management Strategy
 
-            ## Reading Existing Comments (Do This First)
+            ### Single Summary Comment
 
-            Before posting your review, check for existing feedback to avoid duplicates and understand context:
+            Maintain ONE summary comment per PR, updated in place on each
+            review. This keeps the timeline clean (same pattern as
+            CodeRabbit). Each push updates the existing comment rather
+            than posting a new one.
 
-            **Step 1: Read existing inline comments (CodeRabbit, previous Claude reviews, etc.)**
+            **Step 1: Find existing summary comment**
             ```bash
-            gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments \
-              --jq '.[] | {author: .user.login, path, line, body: .body[0:300], created: .created_at}'
+            EXISTING_ID=$(gh api \
+              repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
+              --jq '[.[] | select(.body | contains("<!-- claude-code-review -->"))] | last | .id')
             ```
 
-            **Step 2: Read PR conversation comments**
+            **Step 2: Build summary content**
+
+            Always start with `<!-- claude-code-review -->` marker.
+            Structure:
+
+            ```markdown
+            <!-- claude-code-review -->
+            ## Claude Code Review
+
+            **Commit**: `<sha>` | **CI**: passing/running/failing
+
+            ### Summary
+            [Concise review - what's good, what needs attention]
+
+            ### Findings
+            | Severity | Location | Description | Status |
+            |----------|----------|-------------|--------|
+            | 🔴 | `file.go:42` | Description | Open |
+            | 🟡 | `file.go:88` | Description | Open |
+
+            ### Previously Flagged
+            | Severity | Location | Description | Status |
+            |----------|----------|-------------|--------|
+            | 🟡 | `old.go:10` | Earlier finding | ✅ Resolved |
+            ```
+
+            **Step 3: Create or update**
+
+            If `EXISTING_ID` is not empty (update existing):
+            ```bash
+            gh api \
+              repos/${{ github.repository }}/issues/comments/${EXISTING_ID} \
+              -X PATCH -f body="<content>"
+            ```
+
+            If empty (first review, create new):
+            ```bash
+            gh pr comment ${{ github.event.pull_request.number }} \
+              --body "<content>"
+            ```
+
+            **Rules:**
+            - First review: create the summary comment
+            - Subsequent reviews: update the same comment in place
+            - Move resolved findings to "Previously Flagged" with ✅
+            - Always show the latest commit SHA reviewed
+
+            ### Reading Existing Comments (Before Posting)
+
+            Check for existing feedback to avoid duplicates:
+
+            **Inline comments (CodeRabbit, previous reviews):**
+            ```bash
+            gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments \
+              --jq '.[] | {author: .user.login, path, line, body: .body[0:300]}'
+            ```
+
+            **PR conversation comments:**
             ```bash
             gh pr view ${{ github.event.pull_request.number }} --comments
             ```
 
-            **How to use this context:**
-            - **Don't duplicate**: If CodeRabbit or a previous review already flagged an issue, don't repeat it
-            - **Acknowledge fixes**: If the author addressed feedback in subsequent commits, note it positively
-            - **Build on discussions**: Reference ongoing conversations where relevant
-            - **Disagree respectfully**: If you disagree with previous feedback, explain why with evidence
+            - **Don't duplicate** existing feedback
+            - **Acknowledge fixes** from subsequent commits
+            - **Build on** ongoing conversations
 
             ---
 
@@ -200,15 +259,15 @@ jobs:
 
             **Step 2: Submit a review with inline comments using the reviews endpoint**
 
-            All inline comments MUST be submitted as part of a review (not standalone). Use this pattern:
+            All inline comments MUST be submitted as part of a review
+            (not standalone). Keep the review body minimal - the detailed
+            summary lives in the summary comment above.
 
             ```bash
             gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews \
               --method POST \
               -f event="COMMENT" \
-              -f body="## Review Summary
-
-            Found 2 suggestions for improvement (non-blocking)." \
+              -f body="See summary comment for full review. 2 inline suggestions below." \
               --raw-field comments='[
                 {
                   "path": "services/foo/handler.go",
@@ -291,7 +350,7 @@ jobs:
                   }
                 }
               }
-            }' --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false) | select(.comments.nodes[0].author.login == "claude") | {id, path, line, body: .comments.nodes[0].body[0:200]}'
+            }' --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false) | select(.comments.nodes[0].author.login == "claude[bot]") | {id, path, line, body: .comments.nodes[0].body[0:200]}'
             ```
 
             **Step 2: For each unresolved thread, evaluate whether the concern is addressed**
