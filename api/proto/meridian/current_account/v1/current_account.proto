@@ -874,6 +874,184 @@ message ControlCurrentAccountResponse {
   google.protobuf.Timestamp action_timestamp = 2 [(buf.validate.field).required = true];
 }
 
+// ValuationFeatureLifecycleStatus defines the lifecycle state of a valuation feature
+enum ValuationFeatureLifecycleStatus {
+  // VALUATION_FEATURE_LIFECYCLE_STATUS_UNSPECIFIED is the default value
+  VALUATION_FEATURE_LIFECYCLE_STATUS_UNSPECIFIED = 0;
+  // VALUATION_FEATURE_LIFECYCLE_STATUS_INITIATED means feature is created but not yet active
+  VALUATION_FEATURE_LIFECYCLE_STATUS_INITIATED = 1;
+  // VALUATION_FEATURE_LIFECYCLE_STATUS_ACTIVE means feature is active and can be used for valuation
+  VALUATION_FEATURE_LIFECYCLE_STATUS_ACTIVE = 2;
+  // VALUATION_FEATURE_LIFECYCLE_STATUS_TERMINATED means feature is no longer active (terminal state)
+  VALUATION_FEATURE_LIFECYCLE_STATUS_TERMINATED = 3;
+}
+
+// ValuationFeatureAction defines the control operations for valuation features
+enum ValuationFeatureAction {
+  // VALUATION_FEATURE_ACTION_UNSPECIFIED is the default value
+  VALUATION_FEATURE_ACTION_UNSPECIFIED = 0;
+  // VALUATION_FEATURE_ACTION_ACTIVATE transitions from INITIATED to ACTIVE
+  VALUATION_FEATURE_ACTION_ACTIVATE = 1;
+  // VALUATION_FEATURE_ACTION_TERMINATE transitions from ACTIVE to TERMINATED
+  VALUATION_FEATURE_ACTION_TERMINATE = 2;
+}
+
+// ValuationFeature represents a valuation method assignment for an account.
+// It maps an input instrument (e.g., USD) to the account's native instrument (e.g., GBP)
+// using a specific valuation method from the Valuation Engine Service.
+message ValuationFeature {
+  // id is the unique identifier for this valuation feature
+  string id = 1;
+
+  // account_id is the account this feature belongs to
+  string account_id = 2;
+
+  // instrument_code is the input instrument to be valued (e.g., "USD", "EUR", "kWh")
+  string instrument_code = 3;
+
+  // valuation_method_id references the valuation method in Valuation Engine Service
+  string valuation_method_id = 4;
+
+  // valuation_method_version is the specific version of the method
+  int32 valuation_method_version = 5;
+
+  // parameters contains method-specific configuration (JSON object)
+  string parameters = 6;
+
+  // lifecycle_status is the current state of this feature
+  ValuationFeatureLifecycleStatus lifecycle_status = 7;
+
+  // valid_from is the bi-temporal validity start timestamp
+  google.protobuf.Timestamp valid_from = 8;
+
+  // valid_to is the bi-temporal validity end timestamp
+  google.protobuf.Timestamp valid_to = 9;
+
+  // created_at is when this feature was created
+  google.protobuf.Timestamp created_at = 10;
+
+  // created_by is the user who created this feature
+  string created_by = 11;
+
+  // updated_at is when this feature was last updated
+  google.protobuf.Timestamp updated_at = 12;
+
+  // updated_by is the user who last updated this feature
+  string updated_by = 13;
+
+  // version is used for optimistic locking
+  int32 version = 14;
+}
+
+// Request to create a valuation feature for an account
+message CreateValuationFeatureRequest {
+  // account_id is the account to add the valuation feature to (required)
+  string account_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // instrument_code is the input instrument to be valued (required)
+  // Example: "USD" for a GBP account would create a USD→GBP valuation feature
+  string instrument_code = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 32
+  }];
+
+  // valuation_method_id references the valuation method in Valuation Engine Service (required)
+  // The method's output_instrument MUST match the account's native instrument (currency)
+  string valuation_method_id = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // valuation_method_version is the specific version of the method (required)
+  int32 valuation_method_version = 4 [(buf.validate.field).int32 = {gte: 1}];
+
+  // parameters contains method-specific configuration as JSON string (optional)
+  string parameters = 5;
+
+  // output_instrument is the expected output instrument of the valuation method (required)
+  // This MUST match the account's native instrument (currency)
+  // Used for validation - will return FAILED_PRECONDITION if mismatch
+  string output_instrument = 6 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 32
+  }];
+}
+
+// Response for creating a valuation feature
+message CreateValuationFeatureResponse {
+  // feature is the created valuation feature
+  ValuationFeature feature = 1;
+}
+
+// Request to update a valuation feature lifecycle status
+message UpdateValuationFeatureRequest {
+  // feature_id is the valuation feature to update (required)
+  string feature_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // action is the lifecycle transition to perform (required)
+  ValuationFeatureAction action = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+// Response for updating a valuation feature
+message UpdateValuationFeatureResponse {
+  // feature is the updated valuation feature
+  ValuationFeature feature = 1;
+}
+
+// Request to get a valuation feature
+// Supports two modes:
+// 1. By feature_id: Direct lookup
+// 2. By account_id + instrument_code + knowledge_at: Bi-temporal query
+message GetValuationFeatureRequest {
+  // feature_id for direct lookup (optional, mutually exclusive with account lookup)
+  string feature_id = 1;
+
+  // account_id for bi-temporal lookup (optional, requires instrument_code)
+  string account_id = 2;
+
+  // instrument_code for bi-temporal lookup (optional, requires account_id)
+  string instrument_code = 3;
+
+  // knowledge_at is the point-in-time for bi-temporal query (optional, defaults to now)
+  // Used with account_id + instrument_code to find the valid feature at that time
+  google.protobuf.Timestamp knowledge_at = 4;
+}
+
+// Response for getting a valuation feature
+message GetValuationFeatureResponse {
+  // feature is the requested valuation feature
+  ValuationFeature feature = 1;
+}
+
+// Request to list valuation features for an account
+message ListValuationFeaturesRequest {
+  // account_id to list features for (required)
+  string account_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // lifecycle_status to filter by (optional, returns all if not specified)
+  ValuationFeatureLifecycleStatus lifecycle_status = 2;
+}
+
+// Response for listing valuation features
+message ListValuationFeaturesResponse {
+  // features is the list of valuation features for the account
+  repeated ValuationFeature features = 1;
+}
+
 // CurrentAccountService provides BIAN-compliant current account operations.
 //
 // Design Notes:
@@ -1048,6 +1226,69 @@ service CurrentAccountService {
           description: "Control action executed successfully"
         }
       }
+    };
+  }
+
+  // CreateValuationFeature adds a valuation method assignment to an account.
+  // The valuation feature maps an input instrument to the account's native instrument.
+  // CRITICAL: The method's output_instrument MUST match the account's native instrument (currency).
+  // Returns FAILED_PRECONDITION if there's a mismatch (MethodOutputMismatchError).
+  rpc CreateValuationFeature(CreateValuationFeatureRequest) returns (CreateValuationFeatureResponse) {
+    option (google.api.http) = {
+      post: "/v1/current-accounts/{account_id}/valuation-features"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Create a valuation feature for an account"
+      description: "Adds a valuation method assignment to map an input instrument to the account's native currency"
+      responses: {
+        key: "201"
+        value: {
+          description: "Valuation feature created successfully"
+        }
+      }
+    };
+  }
+
+  // UpdateValuationFeature performs lifecycle transitions on a valuation feature.
+  // Supports ACTIVATE (INITIATED → ACTIVE) and TERMINATE (ACTIVE → TERMINATED) actions.
+  rpc UpdateValuationFeature(UpdateValuationFeatureRequest) returns (UpdateValuationFeatureResponse) {
+    option (google.api.http) = {
+      post: "/v1/valuation-features/{feature_id}/control"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Update valuation feature lifecycle status"
+      description: "Performs lifecycle transitions (activate/terminate) on a valuation feature"
+    };
+  }
+
+  // GetValuationFeature retrieves a valuation feature by ID or by account+instrument with bi-temporal query.
+  // Supports two query modes:
+  // 1. By feature_id: Direct lookup
+  // 2. By account_id + instrument_code + knowledge_at: Find the valid feature at a specific time
+  rpc GetValuationFeature(GetValuationFeatureRequest) returns (GetValuationFeatureResponse) {
+    option (google.api.http) = {
+      get: "/v1/valuation-features/{feature_id}"
+      additional_bindings: {
+        get: "/v1/current-accounts/{account_id}/valuation-features/lookup"
+      }
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get a valuation feature"
+      description: "Retrieves a valuation feature by ID or by account+instrument with optional bi-temporal query"
+    };
+  }
+
+  // ListValuationFeatures retrieves all valuation features for an account.
+  // Optionally filters by lifecycle status.
+  rpc ListValuationFeatures(ListValuationFeaturesRequest) returns (ListValuationFeaturesResponse) {
+    option (google.api.http) = {
+      get: "/v1/current-accounts/{account_id}/valuation-features"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "List valuation features for an account"
+      description: "Retrieves all valuation features for an account with optional status filter"
     };
   }
 }

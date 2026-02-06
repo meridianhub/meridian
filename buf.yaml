@@ -35,4 +35,7 @@ breaking:
     # Changes: currency → instrument_code, MoneyAmount → InstrumentAmount
     # All consumers updated in this PR - see services/current-account/service/lien_service.go
     - api/proto/meridian/position_keeping/v1/position_keeping.proto
+    # Intentional breaking change: ValuationFeature extraction (valuation-engine task 12)
+    # Types moved from current_account.proto to shared valuation_feature/v1/ package
+    - api/proto/meridian/current_account/v1/current_account.proto
   ignore_unstable_packages: true
