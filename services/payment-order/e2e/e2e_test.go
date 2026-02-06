@@ -131,8 +131,10 @@ func setupE2E(t *testing.T, opts ...e2eOption) *E2ETestEnvironment {
 		sagaTimeout = cfg.sagaTimeout
 	}
 
+	repo := persistence.NewPaymentOrderRepository(db)
+
 	svc, err := service.NewServiceWithConfig(service.Config{
-		Repository:                persistence.NewPaymentOrderRepository(db),
+		Repository:                repo,
 		CurrentAccountClient:      caClient,
 		FinancialAccountingClient: faClient,
 		ReferenceDataClient:       newMockReferenceDataClient(),
@@ -143,8 +145,6 @@ func setupE2E(t *testing.T, opts ...e2eOption) *E2ETestEnvironment {
 		SagaTimeout:               sagaTimeout,
 	})
 	require.NoError(t, err)
-
-	repo := persistence.NewPaymentOrderRepository(db)
 
 	return &E2ETestEnvironment{
 		DB:                        db,
