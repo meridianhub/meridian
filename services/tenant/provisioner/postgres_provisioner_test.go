@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lib/pq"
 	"github.com/meridianhub/meridian/services/tenant/observability"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -745,15 +746,17 @@ func TestPostgresProvisioner_ProvisionSchemas_SchemaIsolation(t *testing.T) {
 	require.NoError(t, err)
 
 	// Insert data into tenant1's schema
-	tc.db.Exec(fmt.Sprintf(`INSERT INTO %s.isolated_data (value) VALUES ('tenant1_data')`, tenant1.SchemaName()))
+	quotedSchema1 := pq.QuoteIdentifier(tenant1.SchemaName())
+	quotedSchema2 := pq.QuoteIdentifier(tenant2.SchemaName())
+	tc.db.Exec(fmt.Sprintf(`INSERT INTO %s.isolated_data (value) VALUES ('tenant1_data')`, quotedSchema1))
 
 	// Insert different data into tenant2's schema
-	tc.db.Exec(fmt.Sprintf(`INSERT INTO %s.isolated_data (value) VALUES ('tenant2_data')`, tenant2.SchemaName()))
+	tc.db.Exec(fmt.Sprintf(`INSERT INTO %s.isolated_data (value) VALUES ('tenant2_data')`, quotedSchema2))
 
 	// Verify isolation - each tenant should only see their own data
 	var count1, count2 int64
-	tc.db.Raw(fmt.Sprintf(`SELECT COUNT(*) FROM %s.isolated_data WHERE value = 'tenant1_data'`, tenant1.SchemaName())).Scan(&count1)
-	tc.db.Raw(fmt.Sprintf(`SELECT COUNT(*) FROM %s.isolated_data WHERE value = 'tenant1_data'`, tenant2.SchemaName())).Scan(&count2)
+	tc.db.Raw(fmt.Sprintf(`SELECT COUNT(*) FROM %s.isolated_data WHERE value = 'tenant1_data'`, quotedSchema1)).Scan(&count1)
+	tc.db.Raw(fmt.Sprintf(`SELECT COUNT(*) FROM %s.isolated_data WHERE value = 'tenant1_data'`, quotedSchema2)).Scan(&count2)
 
 	assert.Equal(t, int64(1), count1, "tenant1 should have their data")
 	assert.Equal(t, int64(0), count2, "tenant2 should not see tenant1's data")

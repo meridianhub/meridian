@@ -197,6 +197,9 @@ func (s *Service) UpdateValuationFeature(ctx context.Context, req *pb.UpdateValu
 	case pb.ValuationFeatureAction_VALUATION_FEATURE_ACTION_UNSPECIFIED:
 		operationStatus = opStatusInvalidFeatureAction
 		return nil, status.Error(codes.InvalidArgument, "action must be specified")
+	default:
+		operationStatus = opStatusInvalidFeatureAction
+		return nil, status.Errorf(codes.InvalidArgument, "unsupported action: %v", req.Action)
 	}
 
 	// Save changes
@@ -341,7 +344,11 @@ func (s *Service) ListValuationFeatures(ctx context.Context, req *pb.ListValuati
 func (s *Service) domainToProtoValuationFeature(f *domain.ValuationFeature) *pb.ValuationFeature {
 	var parametersJSON string
 	if f.Parameters != nil {
-		if jsonBytes, err := json.Marshal(f.Parameters); err == nil {
+		jsonBytes, err := json.Marshal(f.Parameters)
+		if err != nil {
+			s.logger.Warn("failed to marshal valuation feature parameters",
+				"feature_id", f.ID, "error", err)
+		} else {
 			parametersJSON = string(jsonBytes)
 		}
 	}

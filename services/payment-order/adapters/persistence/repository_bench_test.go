@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lib/pq"
+
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -36,13 +38,13 @@ func setupBenchDB(b *testing.B) (*gorm.DB, context.Context, func()) {
 	// Create tenant schema
 	tid := tenant.TenantID(testTenantID)
 	schemaName := tid.SchemaName()
-	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
 	if err != nil {
 		b.Fatalf("setupBenchDB: failed to create tenant schema: %v", err)
 	}
 
 	// Create payment_orders table in tenant schema
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.payment_orders (
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.payment_orders (
 		id UUID PRIMARY KEY,
 		debtor_account_id VARCHAR(255) NOT NULL,
 		creditor_reference VARCHAR(255) NOT NULL,
@@ -71,13 +73,13 @@ func setupBenchDB(b *testing.B) (*gorm.DB, context.Context, func()) {
 		failed_at TIMESTAMP WITH TIME ZONE,
 		cancelled_at TIMESTAMP WITH TIME ZONE,
 		reversed_at TIMESTAMP WITH TIME ZONE
-	)`, schemaName)).Error
+	)`, pq.QuoteIdentifier(schemaName))).Error
 	if err != nil {
 		b.Fatalf("setupBenchDB: failed to create payment_orders table: %v", err)
 	}
 
 	// Set search_path to tenant schema
-	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName)).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
 	if err != nil {
 		b.Fatalf("setupBenchDB: failed to set search_path: %v", err)
 	}

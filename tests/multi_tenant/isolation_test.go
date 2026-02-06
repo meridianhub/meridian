@@ -77,7 +77,7 @@ func setupPostgresWithOrgSchemas(ctx context.Context, t *testing.T, orgs ...stri
 		quotedSchema := pq.QuoteIdentifier(schemaName)
 
 		_, err = pool.ExecContext(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", quotedSchema))
-		require.NoError(t, err, "failed to create schema %s", schemaName)
+		require.NoError(t, err, "failed to create schema %s", pq.QuoteIdentifier(schemaName))
 
 		// Create accounts table in org schema
 		_, err = pool.ExecContext(ctx, fmt.Sprintf(`
@@ -89,7 +89,7 @@ func setupPostgresWithOrgSchemas(ctx context.Context, t *testing.T, orgs ...stri
 				created_at TIMESTAMP NOT NULL DEFAULT NOW()
 			)
 		`, quotedSchema))
-		require.NoError(t, err, "failed to create accounts table in schema %s", schemaName)
+		require.NoError(t, err, "failed to create accounts table in schema %s", pq.QuoteIdentifier(schemaName))
 	}
 
 	t.Cleanup(func() {
