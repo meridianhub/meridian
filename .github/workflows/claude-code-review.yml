@@ -350,7 +350,7 @@ jobs:
                   }
                 }
               }
-            }' --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false) | select(.comments.nodes[0].author.login == "claude") | {id, path, line, body: .comments.nodes[0].body[0:200]}'
+            }' --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false) | select(.comments.nodes[0].author.login == "claude[bot]") | {id, path, line, body: .comments.nodes[0].body[0:200]}'
             ```
 
             **Step 2: For each unresolved thread, evaluate whether the concern is addressed**
