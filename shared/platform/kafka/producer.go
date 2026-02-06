@@ -233,10 +233,8 @@ func (p *ProtoProducer) ProduceRecord(ctx context.Context, record *kgo.Record) e
 // - key: Partition key as string (empty key will be null in Kafka)
 // - msg: Protocol Buffer message to serialize and send (must not be nil)
 //
-// Panics if the tenant context is missing - this is a fail-fast strategy to prevent
-// events without tenant attribution from being published.
-//
 // Returns an error if:
+// - tenant context is missing (tenant.ErrMissingTenantContext)
 // - topic is empty
 // - msg is nil
 // - protobuf marshaling fails
@@ -244,8 +242,11 @@ func (p *ProtoProducer) ProduceRecord(ctx context.Context, record *kgo.Record) e
 // - delivery confirmation indicates failure
 // - context is cancelled before delivery confirmation
 func (p *ProtoProducer) PublishWithTenant(ctx context.Context, topic string, key string, msg proto.Message) error {
-	// Extract tenant from context - panic if missing (fail-fast)
-	orgID := tenant.MustFromContext(ctx)
+	// Extract tenant from context - return error if missing
+	orgID, err := tenant.RequireFromContext(ctx)
+	if err != nil {
+		return fmt.Errorf("cannot publish without tenant context: %w", err)
+	}
 
 	if topic == "" {
 		return ErrEmptyTopic
