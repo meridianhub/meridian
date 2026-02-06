@@ -311,6 +311,26 @@ func TestEvaluateAssetValuation_NoValuationFeature(t *testing.T) {
 	assert.Contains(t, st.Message(), "no active valuation feature")
 }
 
+func TestEvaluateAssetValuation_InvalidInput_MissingAccountID(t *testing.T) {
+	svc, ctx, cleanup := setupValuationEngineTest(t)
+	defer cleanup()
+
+	_, err := svc.EvaluateAssetValuation(ctx, &pb.EvaluateAssetValuationRequest{
+		AccountId: "",
+		Input: &quantityv1.InstrumentAmount{
+			Amount:         "100.00",
+			InstrumentCode: "USD",
+			Version:        1,
+		},
+	})
+
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+	assert.Contains(t, st.Message(), "account_id is required")
+}
+
 func TestEvaluateAssetValuation_InvalidInput_MissingInput(t *testing.T) {
 	svc, ctx, cleanup := setupValuationEngineTest(t)
 	defer cleanup()
@@ -478,7 +498,7 @@ func TestEvaluateAssetValuation_EngineError(t *testing.T) {
 	st, ok := status.FromError(err)
 	require.True(t, ok)
 	assert.Equal(t, codes.Internal, st.Code())
-	assert.Contains(t, st.Message(), "valuation failed")
+	assert.Contains(t, st.Message(), "valuation engine failed")
 }
 
 // --- Ghost Pricing Prevention Test ---

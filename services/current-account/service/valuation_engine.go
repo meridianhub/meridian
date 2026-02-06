@@ -185,7 +185,7 @@ func (s *Service) valuateInternal(ctx context.Context, accountID string, inputAm
 			KnowledgeAt:   knowledgeAt,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("valuation engine failed: %w", err)
+			return nil, fmt.Errorf("%w: %w", ErrValuationEngineFailed, err)
 		}
 
 		executionMs := time.Since(start).Milliseconds()
@@ -283,6 +283,10 @@ func (s *Service) EvaluateAssetValuation(ctx context.Context, req *pb.EvaluateAs
 	}
 
 	// Validate input
+	if req.AccountId == "" {
+		operationStatus = opStatusMissingAccountID
+		return nil, status.Error(codes.InvalidArgument, "account_id is required")
+	}
 	if req.Input == nil {
 		operationStatus = opStatusInvalidRequest
 		return nil, status.Error(codes.InvalidArgument, "input amount is required")
@@ -331,6 +335,9 @@ func (s *Service) EvaluateAssetValuation(ctx context.Context, req *pb.EvaluateAs
 		case errors.Is(err, ErrValuationRepoNotConfigured):
 			operationStatus = opStatusValuationFeatureRepoNil
 			return nil, status.Errorf(codes.FailedPrecondition, "%v", err)
+		case errors.Is(err, ErrValuationEngineFailed):
+			operationStatus = opStatusValuationFailed
+			return nil, status.Errorf(codes.Internal, "%v", err)
 		default:
 			operationStatus = opStatusValuationFailed
 			return nil, status.Errorf(codes.Internal, "valuation failed: %v", err)
