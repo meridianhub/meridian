@@ -91,18 +91,18 @@ func DefaultPolicies() []SystemPolicy {
 			Description:   "Identity policy - returns amount unchanged",
 		},
 		{
-			Name:          "SYSTEM_FIXED_RATE",
-			CelExpression: "amount",
-			OutputType:    "string",
+			Name:          "SYSTEM_POSITIVE_AMOUNT",
+			CelExpression: "parse_int(amount) > 0",
+			OutputType:    "bool",
 			EstimatedCost: 2,
-			Description:   "Fixed rate policy - multiplies amount by rate parameter",
+			Description:   "Validates that the amount is a positive integer",
 		},
 		{
-			Name:          "SYSTEM_UK_VAT_STANDARD",
-			CelExpression: "amount",
-			OutputType:    "string",
-			EstimatedCost: 2,
-			Description:   "UK VAT standard rate policy - applies 20% VAT",
+			Name:          "SYSTEM_AMOUNT_UNDER_LIMIT",
+			CelExpression: "parse_int(amount) > 0 && parse_int(amount) < 1000000",
+			OutputType:    "bool",
+			EstimatedCost: 3,
+			Description:   "Validates amount is positive and under 1,000,000",
 		},
 	}
 }

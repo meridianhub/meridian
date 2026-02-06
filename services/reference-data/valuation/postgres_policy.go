@@ -122,7 +122,7 @@ func (r *PostgresPolicyRepository) Create(ctx context.Context, p *Policy) error 
 
 		_, err := tx.Exec(ctx, query,
 			p.ID, p.Name, p.Version, p.CelExpression, p.CelHash,
-			p.InputSchema, nullString(p.OutputType), p.EstimatedCost, string(p.LifecycleStatus),
+			p.InputSchema, p.OutputType, p.EstimatedCost, string(p.LifecycleStatus),
 			p.IsSystem, nullString(p.Description), p.CreatedAt, p.ValidFrom,
 		)
 		if err != nil {
