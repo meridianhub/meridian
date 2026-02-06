@@ -44,11 +44,6 @@ FORBIDDEN_PATTERNS=(
     "gorm.io/gorm.*Create"
     "gorm.io/gorm.*Update"
     "gorm.io/gorm.*Delete"
-
-    # HTTP mutation clients
-    "net/http.*Post"
-    "net/http.*Put"
-    "net/http.*Delete"
 )
 
 # ALLOWED IMPORTS
@@ -101,6 +96,9 @@ DANGEROUS_FUNCTIONS=(
     "\\.Delete\\("
     "\\.Save\\("
     "\\.Exec\\("
+    "http\\.Post\\("
+    "http\\.Put\\("
+    "http\\.Delete\\("
 )
 
 for file in "$BUILTINS_DIR"/*.go; do

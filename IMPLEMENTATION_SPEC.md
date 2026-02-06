@@ -332,8 +332,8 @@ var (
 
 ## References
 
-- ADR: `/Users/ben/dev/github.com/meridianhub/meridian/worktree/valuation-engine/3--create-valuation-library/docs/adr/0028-starlark-saga-cel-valuation.md`
-- PRD: `/Users/ben/dev/github.com/meridianhub/meridian/worktree/valuation-engine/3--create-valuation-library/docs/prd/valuation-service.md`
+- ADR: `docs/adr/0028-starlark-saga-cel-valuation.md`
+- PRD: `docs/prd/valuation-service.md`
 - CEL Compiler: `services/reference-data/cel/compiler.go`
 - Starlark Runner: `shared/pkg/saga/starlark_runner.go`
 - Saga Models: `shared/pkg/saga/models.go`

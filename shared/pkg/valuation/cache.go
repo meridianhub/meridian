@@ -86,10 +86,13 @@ func (c *inMemoryCache) GetMethod(methodID string, version *int) (*Method, error
 	}
 
 	// Check if expired
-	if time.Now().After(entry.expiresAt) {
-		// Entry expired - remove it
+	now := time.Now()
+	if now.After(entry.expiresAt) {
+		// Entry expired - remove it (re-check under write lock to avoid deleting a refreshed entry)
 		c.methodsLock.Lock()
-		delete(c.methods, key)
+		if cur, ok := c.methods[key]; ok && now.After(cur.expiresAt) {
+			delete(c.methods, key)
+		}
 		c.methodsLock.Unlock()
 		return nil, nil //nolint:nilnil // expired entry treated as cache miss
 	}
@@ -135,10 +138,13 @@ func (c *inMemoryCache) GetPolicy(policyName string, version *int) (CompiledPoli
 	}
 
 	// Check if expired
-	if time.Now().After(entry.expiresAt) {
-		// Entry expired - remove it
+	now := time.Now()
+	if now.After(entry.expiresAt) {
+		// Entry expired - remove it (re-check under write lock to avoid deleting a refreshed entry)
 		c.policiesLock.Lock()
-		delete(c.policies, key)
+		if cur, ok := c.policies[key]; ok && now.After(cur.expiresAt) {
+			delete(c.policies, key)
+		}
 		c.policiesLock.Unlock()
 		return nil, nil //nolint:nilnil // expired entry treated as cache miss
 	}

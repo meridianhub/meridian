@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/meridianhub/meridian/shared/pkg/valuation/internal/builtins"
 	"github.com/shopspring/decimal"
 	"go.starlark.net/starlark"
 	"go.starlark.net/syntax"
@@ -89,6 +90,22 @@ func (r *defaultStarlarkRuntime) Execute(ctx context.Context, script string, req
 	// Store context for timeout checking
 	thread.SetLocal("ctx", ctx)
 
+	// Start goroutine to enforce timeout by calling thread.Cancel()
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-ctx.Done():
+			thread.Cancel("execution timeout")
+		case <-done:
+			// Execution completed
+		}
+	}()
+
+	// Set maximum execution steps (5 million steps ≈ 5s on typical hardware)
+	const maxSteps = 5_000_000
+	thread.SetMaxExecutionSteps(maxSteps)
+
 	// Build predeclared variables
 	predeclared := starlark.StringDict{
 		"ctx": r.toStarlarkValue(scriptCtx),
@@ -117,7 +134,38 @@ func (r *defaultStarlarkRuntime) Execute(ctx context.Context, script string, req
 	}
 
 	// Convert result to Response
-	return r.parseResult(resultVal, req)
+	resp, err := r.parseResult(resultVal, req)
+	if err != nil {
+		return nil, err
+	}
+
+	// Extract path entries recorded by record_path() and populate Analysis
+	if analysis := r.extractPathEntries(thread); analysis != nil {
+		resp.Analysis = analysis
+	}
+
+	return resp, nil
+}
+
+// extractPathEntries extracts path entries from thread-local storage.
+func (r *defaultStarlarkRuntime) extractPathEntries(thread *starlark.Thread) *Analysis {
+	entries, ok := thread.Local("valuation.path_entries").([]builtins.PathEntry)
+	if !ok || len(entries) == 0 {
+		return nil
+	}
+
+	analysis := &Analysis{}
+	for _, entry := range entries {
+		var data map[string]interface{}
+		if entry.Data != nil {
+			if m, ok := r.toGoValue(entry.Data).(map[string]interface{}); ok {
+				data = m
+			}
+		}
+		analysis.AddPathEntry(entry.Description, data)
+	}
+
+	return analysis
 }
 
 // buildScriptContext creates the context object available in Starlark as 'ctx'.
