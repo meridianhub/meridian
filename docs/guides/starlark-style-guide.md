@@ -857,8 +857,54 @@ Before committing a Starlark saga script:
 
 ---
 
+## Validation
+
+All saga scripts are validated before deployment. Run validation locally to catch errors early:
+
+```bash
+# Validate before committing
+meridian-cli saga validate my_saga.star
+
+# JSON output for CI integration
+meridian-cli saga validate --json my_saga.star
+```
+
+### What Validation Catches
+
+```python
+# SYNTAX - Parse errors caught immediately
+if value is not None:  # "got is, want ':'" error
+    process(value)
+
+# UNDEFINED_HANDLER - Unknown handler references
+result = position_keeping.initiate_logg(...)  # Typo: "logg" vs "log"
+
+# TYPE_MISMATCH - Wrong parameter types
+position_keeping.initiate_log(
+    amount="100.50",  # Should be Decimal("100.50")
+)
+
+# RUNTIME - Script logic errors
+fail("Amount must be positive")  # Caught during dry-run
+```
+
+### Passing Validation
+
+Scripts that follow this style guide will pass validation. The key rules:
+
+1. Use `==` / `!=` instead of `is` / `is not`
+2. Use `Decimal()` for all monetary amounts
+3. Only call handlers defined in `handlers.yaml`
+4. Match parameter types to the schema exactly
+5. Keep complexity score below 7 (check with `--json` output)
+
+For detailed validation documentation, see the [Saga Validation Guide](saga-validation.md).
+
+---
+
 ## Further Reading
 
+- **[Saga Validation Guide](saga-validation.md)** - Validation workflow, error interpretation, and monitoring
 - **[Saga Handlers Schema](../saga-handlers.schema.json)** - Available service modules and handlers
 - **[Saga Service Catalog](../saga-service-catalog.md)** - Service module documentation
 - **[ADR-0028: Starlark Saga & CEL Valuation](../adr/0028-starlark-saga-cel-valuation.md)** - Architecture decision

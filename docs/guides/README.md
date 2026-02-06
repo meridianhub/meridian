@@ -12,6 +12,9 @@ This directory contains how-to guides and usage documentation for Meridian devel
 | [Testcontainers Usage](testcontainers-usage.md) | PostgreSQL testcontainers for integration testing |
 | [Financial Accounting Proto](financial-accounting-proto.md) | Protocol buffer schemas for Financial Accounting service |
 | [Coupling Analysis](coupling-analysis.md) | Analyzing service coupling using dependency graphs |
+| [Saga Validation](saga-validation.md) | Automatic validation workflow, error interpretation, and troubleshooting |
+| [Starlark Style Guide](starlark-style-guide.md) | Writing conventions and syntax for Starlark saga scripts |
+| [Starlark Built-ins Reference](starlark-built-ins-reference.md) | Available functions, types, and DSL built-ins |
 
 ## Documentation Organization
 

@@ -19,6 +19,8 @@ scenarios.
   restoration, and business continuity
 - **[saga-failure-recovery.md](saga-failure-recovery.md)** - Recovering from failed saga executions,
   compensation, and rollback
+- **[saga-validation-failure.md](saga-validation-failure.md)** - Responding to saga validation failures
+  in upload, activation, and CI pipelines
 
 ### Operations & Troubleshooting
 
