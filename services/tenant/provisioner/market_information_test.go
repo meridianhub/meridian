@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lib/pq"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -155,7 +156,7 @@ INSERT INTO "dataset_definition" (
 	// Verify system datasets are present
 	expectedDatasets := []string{"CARBON_PRICE", "ENERGY_SPOT", "ENERGY_TARIFF", "FX_RATE", "WEATHER_TEMP"}
 	var actualDatasets []string
-	err = tc.db.Raw("SELECT code FROM " + schemaName + ".dataset_definition WHERE status = 'ACTIVE' ORDER BY code").Scan(&actualDatasets).Error
+	err = tc.db.Raw("SELECT code FROM " + pq.QuoteIdentifier(schemaName) + ".dataset_definition WHERE status = 'ACTIVE' ORDER BY code").Scan(&actualDatasets).Error
 	require.NoError(t, err)
 	assert.ElementsMatch(t, expectedDatasets, actualDatasets,
 		"Expected system datasets should be seeded")
@@ -163,7 +164,7 @@ INSERT INTO "dataset_definition" (
 	// Verify system data sources are present
 	expectedSources := []string{"ECB_DAILY", "INTERNAL_ADMIN", "SYSTEM_DEFAULT"}
 	var actualSources []string
-	err = tc.db.Raw("SELECT code FROM " + schemaName + ".data_source ORDER BY code").Scan(&actualSources).Error
+	err = tc.db.Raw("SELECT code FROM " + pq.QuoteIdentifier(schemaName) + ".data_source ORDER BY code").Scan(&actualSources).Error
 	require.NoError(t, err)
 	assert.ElementsMatch(t, expectedSources, actualSources,
 		"Expected system data sources should be seeded")

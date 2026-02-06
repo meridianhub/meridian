@@ -178,7 +178,7 @@ func createTenantSchema(t *testing.T, db *serviceDB, tenantID tenant.TenantID) {
 	// Create schema
 	_, err := db.pool.Exec(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s",
 		pq.QuoteIdentifier(schemaName)))
-	require.NoError(t, err, "failed to create schema %s", schemaName)
+	require.NoError(t, err, "failed to create schema %s", pq.QuoteIdentifier(schemaName))
 }
 
 // setupCurrentAccountSchema applies Current Account service schema.

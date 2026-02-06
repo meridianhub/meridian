@@ -191,16 +191,15 @@ func TestProtoProducer_PublishWithTenant_MissingContext(t *testing.T) {
 	}
 	defer producer.Close()
 
-	// Test that missing tenant context causes panic (fail-fast)
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("PublishWithTenant did not panic for context without tenant")
-		}
-	}()
-
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// This should panic because tenant context is missing
-	_ = producer.PublishWithTenant(ctx, "test-topic", "test-key", timestamppb.Now())
+	// Missing tenant context should return an error wrapping ErrMissingTenantContext
+	err = producer.PublishWithTenant(ctx, "test-topic", "test-key", timestamppb.Now())
+	if err == nil {
+		t.Error("PublishWithTenant should return error for context without tenant")
+	}
+	if !errors.Is(err, tenant.ErrMissingTenantContext) {
+		t.Errorf("PublishWithTenant error = %v, want wrapped tenant.ErrMissingTenantContext", err)
+	}
 }

@@ -1,0 +1,159 @@
+package service
+
+import (
+	"log/slog"
+	"time"
+
+	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
+	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
+	"github.com/meridianhub/meridian/services/current-account/domain"
+	"google.golang.org/genproto/googleapis/type/money"
+	"google.golang.org/protobuf/types/known/timestamppb"
+)
+
+// Currency code constants
+const (
+	currencyGBP = "GBP"
+	currencyUSD = "USD"
+	currencyEUR = "EUR"
+)
+
+func toProtoFacility(account domain.CurrentAccount) *pb.CurrentAccountFacility {
+	return &pb.CurrentAccountFacility{
+		AccountId:             account.AccountID(),
+		AccountIdentification: account.AccountIdentification(),
+		AccountStatus:         mapStatusToProto(account.Status()),
+		BaseCurrency:          mapCurrencyToProto(string(account.Balance().Currency())),
+		CreatedAt:             timestamppb.New(account.CreatedAt()),
+		UpdatedAt:             timestamppb.New(account.UpdatedAt()),
+		// #nosec G115 - Version is bounded by database constraints
+		Version: int32(account.Version()),
+		CurrentBalance: &pb.AccountBalance{
+			CurrentBalance:   toMoneyAmount(account.Balance()),
+			AvailableBalance: toMoneyAmount(account.AvailableBalance()),
+			LastUpdated:      timestamppb.New(account.BalanceUpdatedAt()),
+		},
+		OverdraftLimit: &pb.OverdraftConfiguration{
+			OverdraftLimit: toMoneyAmount(account.OverdraftLimit()),
+			InterestRate:   account.OverdraftRate(),
+			IsEnabled:      account.OverdraftEnabled(),
+			LastUpdated:    timestamppb.New(time.Now()),
+		},
+	}
+}
+
+// safeMinorUnits converts Money to minor units (cents) with overflow protection.
+// Returns 0 if overflow occurs (should not happen in practice for valid accounts).
+// Used for logging and metrics where returning an error is not practical.
+func safeMinorUnits(m domain.Money) int64 {
+	cents, err := m.ToMinorUnits()
+	if err != nil {
+		// This should never happen in practice - int64 max is ~92 quadrillion cents
+		// Log the anomaly for visibility, then return 0 rather than panicking
+		slog.Error("amount overflow in metrics conversion",
+			"currency", m.Currency(),
+			"error", err)
+		return 0
+	}
+	return cents
+}
+
+func toMoneyAmount(m domain.Money) *commonpb.MoneyAmount {
+	amountCents := safeMinorUnits(m)
+	units := amountCents / 100
+	remainder := amountCents % 100
+
+	// Convert remainder to nanos (9 digits, but we only use 8 for cents precision)
+	// Per google.type.Money spec: nanos MUST share the sign of units
+	// - Positive amounts: both units and nanos are positive or zero
+	// - Negative amounts: both units and nanos are negative or zero
+	// Example: -£1.23 = Units=-1, Nanos=-230000000
+	// #nosec G115 - remainder is always -99 to 99, multiplication result fits in int32
+	nanos := int32(remainder * 10000000)
+
+	return &commonpb.MoneyAmount{
+		Amount: &money.Money{
+			CurrencyCode: string(m.Currency()),
+			Units:        units,
+			Nanos:        nanos,
+		},
+	}
+}
+
+// toProtoWithdrawal converts a domain Withdrawal to a proto Withdrawal.
+// Note: accountID is the business account ID (e.g., "ACC-xxx") which is passed separately
+// since the domain withdrawal only stores the internal UUID.
+func toProtoWithdrawal(w *domain.Withdrawal, accountID string) *pb.Withdrawal {
+	return &pb.Withdrawal{
+		WithdrawalId: w.Reference, // Reference is the business ID (e.g., "WTH-xxx")
+		AccountId:    accountID,
+		Amount:       toMoneyAmount(w.Amount),
+		Status:       mapWithdrawalStatusToProto(w.Status),
+		Reference:    w.Reference,
+		CreatedAt:    timestamppb.New(w.CreatedAt),
+		UpdatedAt:    timestamppb.New(w.UpdatedAt),
+	}
+}
+
+// mapWithdrawalStatusToProto converts domain WithdrawalStatus to proto WithdrawalStatus
+func mapWithdrawalStatusToProto(status domain.WithdrawalStatus) pb.WithdrawalStatus {
+	switch status {
+	case domain.WithdrawalStatusPending:
+		return pb.WithdrawalStatus_WITHDRAWAL_STATUS_INITIATED
+	case domain.WithdrawalStatusCompleted:
+		return pb.WithdrawalStatus_WITHDRAWAL_STATUS_COMPLETED
+	case domain.WithdrawalStatusFailed:
+		return pb.WithdrawalStatus_WITHDRAWAL_STATUS_FAILED
+	case domain.WithdrawalStatusCancelled:
+		return pb.WithdrawalStatus_WITHDRAWAL_STATUS_CANCELLED
+	default:
+		return pb.WithdrawalStatus_WITHDRAWAL_STATUS_UNSPECIFIED
+	}
+}
+
+func mapStatusToProto(status domain.AccountStatus) pb.AccountStatus {
+	switch status {
+	case domain.AccountStatusActive:
+		return pb.AccountStatus_ACCOUNT_STATUS_ACTIVE
+	case domain.AccountStatusFrozen:
+		return pb.AccountStatus_ACCOUNT_STATUS_FROZEN
+	case domain.AccountStatusClosed:
+		return pb.AccountStatus_ACCOUNT_STATUS_CLOSED
+	default:
+		return pb.AccountStatus_ACCOUNT_STATUS_UNSPECIFIED
+	}
+}
+
+func mapCurrencyToProto(currency string) commonpb.Currency {
+	switch currency {
+	case currencyGBP:
+		return commonpb.Currency_CURRENCY_GBP
+	case currencyUSD:
+		return commonpb.Currency_CURRENCY_USD
+	case currencyEUR:
+		return commonpb.Currency_CURRENCY_EUR
+	default:
+		return commonpb.Currency_CURRENCY_UNSPECIFIED
+	}
+}
+
+func mapCurrency(currency commonpb.Currency) string {
+	switch currency {
+	case commonpb.Currency_CURRENCY_GBP:
+		return currencyGBP
+	case commonpb.Currency_CURRENCY_USD:
+		return currencyUSD
+	case commonpb.Currency_CURRENCY_EUR:
+		return currencyEUR
+	case commonpb.Currency_CURRENCY_UNSPECIFIED,
+		commonpb.Currency_CURRENCY_JPY,
+		commonpb.Currency_CURRENCY_CHF,
+		commonpb.Currency_CURRENCY_CAD,
+		commonpb.Currency_CURRENCY_AUD:
+		// Return empty string for unsupported currencies
+		// Caller should validate and return error
+		return ""
+	default:
+		return ""
+	}
+}

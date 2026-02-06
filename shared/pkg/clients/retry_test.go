@@ -103,6 +103,58 @@ func TestIsRetryable(t *testing.T) {
 			err:      status.Error(codes.PermissionDenied, "permission denied"),
 			expected: false,
 		},
+		{
+			name:     "unauthenticated error",
+			err:      status.Error(codes.Unauthenticated, "unauthenticated"),
+			expected: false,
+		},
+		{
+			name:     "failed precondition error",
+			err:      status.Error(codes.FailedPrecondition, "failed precondition"),
+			expected: false,
+		},
+		{
+			name:     "aborted error",
+			err:      status.Error(codes.Aborted, "aborted"),
+			expected: false,
+		},
+		{
+			name:     "out of range error",
+			err:      status.Error(codes.OutOfRange, "out of range"),
+			expected: false,
+		},
+		{
+			name:     "unimplemented error",
+			err:      status.Error(codes.Unimplemented, "unimplemented"),
+			expected: false,
+		},
+		{
+			name:     "data loss error",
+			err:      status.Error(codes.DataLoss, "data loss"),
+			expected: false,
+		},
+		{
+			name:     "ok status is not retryable",
+			err:      status.Error(codes.OK, "ok"),
+			expected: false,
+		},
+		{
+			name:     "canceled gRPC status is not retryable",
+			err:      status.Error(codes.Canceled, "canceled"),
+			expected: false,
+		},
+		{
+			name:     "unknown gRPC status is not retryable",
+			err:      status.Error(codes.Unknown, "unknown"),
+			expected: false,
+		},
+
+		// Edge case: undefined gRPC code hits default case
+		{
+			name:     "undefined gRPC code is not retryable",
+			err:      status.Error(codes.Code(99), "undefined code"),
+			expected: false,
+		},
 
 		// Context errors (never retry)
 		{

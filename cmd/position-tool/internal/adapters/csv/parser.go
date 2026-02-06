@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/meridianhub/meridian/pkg/platform/quantity"
+	"github.com/meridianhub/meridian/shared/platform/quantity"
 )
 
 // Mandatory columns required in every import CSV file.

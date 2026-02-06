@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lib/pq"
+
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -27,11 +29,11 @@ func setupLienTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	// Create the tenant schema for tests
 	tid := tenant.TenantID(testTenantID)
 	schemaName := tid.SchemaName()
-	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create the lien table in the tenant schema (matches LienEntity.TableName() = "lien")
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.lien (
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.lien (
 		id UUID PRIMARY KEY,
 		account_id UUID NOT NULL,
 		amount_cents BIGINT NOT NULL,
@@ -44,12 +46,12 @@ func setupLienTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
 		updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
 		version INT NOT NULL DEFAULT 1
-	)`, schemaName)).Error
+	)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Set default search_path to include tenant schema so Create/Update work in the tenant schema
 	// This ensures consistency - all operations use the tenant schema
-	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName)).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create context with tenant
@@ -648,11 +650,11 @@ func setupMultiTenantLienTestDB(t *testing.T, tenantIDs ...string) (*gorm.DB, ma
 		schemaName := tid.SchemaName()
 
 		// Create the tenant schema
-		err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
+		err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
 		require.NoError(t, err)
 
 		// Create the lien table in the tenant schema (matches LienEntity.TableName() = "lien")
-		err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.lien (
+		err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.lien (
 			id UUID PRIMARY KEY,
 			account_id UUID NOT NULL,
 			amount_cents BIGINT NOT NULL,
@@ -665,7 +667,7 @@ func setupMultiTenantLienTestDB(t *testing.T, tenantIDs ...string) (*gorm.DB, ma
 			created_at TIMESTAMP WITH TIME ZONE NOT NULL,
 			updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
 			version INT NOT NULL DEFAULT 1
-		)`, schemaName)).Error
+		)`, pq.QuoteIdentifier(schemaName))).Error
 		require.NoError(t, err)
 
 		// Create context with tenant

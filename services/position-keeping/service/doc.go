@@ -11,7 +11,7 @@
 //   - Service (service.go): Implements gRPC service interface and orchestrates operations
 //   - Domain Integration: Uses domain.FinancialPositionLogRepository for persistence
 //   - Event Publishing: Uses domain.EventPublisher for async event notifications
-//   - Idempotency: Leverages pkg/platform/idempotency for exactly-once semantics
+//   - Idempotency: Leverages shared/platform/idempotency for exactly-once semantics
 //
 // # Dependencies
 //

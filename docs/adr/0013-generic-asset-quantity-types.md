@@ -600,7 +600,7 @@ New instruments within a dimension (USD, EUR, KWH, GPU-HR, RICE-KG) are just
 ### Package Structure
 
 ```
-pkg/platform/quantity/
+shared/platform/quantity/
 ├── quantity.go       // Quantity[D] generic type and operations
 ├── dimension.go      // Monetary{}, Commodity{} empty structs
 ├── instrument.go     // FinancialInstrument struct
