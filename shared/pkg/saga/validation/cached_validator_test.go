@@ -34,11 +34,12 @@ handlers:
 	require.NoError(t, err)
 
 	// Create cached validator with short TTL for testing
-	cached := NewCachedValidator(CachedValidatorConfig{
+	cached, err := NewCachedValidator(CachedValidatorConfig{
 		Validator: validator,
 		TTL:       time.Minute,
 		MaxSize:   100,
 	})
+	require.NoError(t, err)
 
 	ctx := context.Background()
 	script := `result = test.echo(message="hello")`
@@ -82,11 +83,12 @@ handlers:
 	validator, err := NewMockValidatorForTesting(schemaReg)
 	require.NoError(t, err)
 
-	cached := NewCachedValidator(CachedValidatorConfig{
+	cached, err := NewCachedValidator(CachedValidatorConfig{
 		Validator: validator,
 		TTL:       time.Minute,
 		MaxSize:   100,
 	})
+	require.NoError(t, err)
 
 	ctx := context.Background()
 	script1 := `result = test.handler1()`
@@ -122,11 +124,12 @@ handlers:
 	validator, err := NewMockValidatorForTesting(schemaReg)
 	require.NoError(t, err)
 
-	cached := NewCachedValidator(CachedValidatorConfig{
+	cached, err := NewCachedValidator(CachedValidatorConfig{
 		Validator: validator,
 		TTL:       time.Minute,
 		MaxSize:   100,
 	})
+	require.NoError(t, err)
 
 	ctx := context.Background()
 
@@ -159,11 +162,12 @@ handlers:
 	validator, err := NewMockValidatorForTesting(schemaReg)
 	require.NoError(t, err)
 
-	cached := NewCachedValidator(CachedValidatorConfig{
+	cached, err := NewCachedValidator(CachedValidatorConfig{
 		Validator: validator,
 		TTL:       time.Minute,
 		MaxSize:   100,
 	})
+	require.NoError(t, err)
 
 	ctx := context.Background()
 	script := `result = test.handler()`
@@ -196,9 +200,10 @@ handlers:
 	require.NoError(t, err)
 
 	// Create with zero values - should use defaults
-	cached := NewCachedValidator(CachedValidatorConfig{
+	cached, err := NewCachedValidator(CachedValidatorConfig{
 		Validator: validator,
 	})
+	require.NoError(t, err)
 
 	// Should work with default TTL and MaxSize
 	ctx := context.Background()
@@ -210,14 +215,23 @@ handlers:
 	assert.Equal(t, 1, cached.CacheSize())
 }
 
+func TestCachedValidator_NilValidator(t *testing.T) {
+	_, err := NewCachedValidator(CachedValidatorConfig{
+		Validator: nil,
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrValidatorRequired)
+}
+
 func TestCachedValidator_UnderlyingValidator(t *testing.T) {
 	schemaReg := schema.NewRegistry()
 	validator, err := NewMockValidatorForTesting(schemaReg)
 	require.NoError(t, err)
 
-	cached := NewCachedValidator(CachedValidatorConfig{
+	cached, err := NewCachedValidator(CachedValidatorConfig{
 		Validator: validator,
 	})
+	require.NoError(t, err)
 
 	// Should return the same validator
 	assert.Equal(t, validator, cached.UnderlyingValidator())
@@ -228,9 +242,10 @@ func TestCachedValidator_Cache(t *testing.T) {
 	validator, err := NewMockValidatorForTesting(schemaReg)
 	require.NoError(t, err)
 
-	cached := NewCachedValidator(CachedValidatorConfig{
+	cached, err := NewCachedValidator(CachedValidatorConfig{
 		Validator: validator,
 	})
+	require.NoError(t, err)
 
 	// Should return non-nil cache
 	assert.NotNil(t, cached.Cache())
@@ -253,11 +268,12 @@ handlers:
 	validator, err := NewMockValidatorForTesting(schemaReg)
 	require.NoError(t, err)
 
-	cached := NewCachedValidator(CachedValidatorConfig{
+	cached, err := NewCachedValidator(CachedValidatorConfig{
 		Validator: validator,
 		TTL:       50 * time.Millisecond,
 		MaxSize:   100,
 	})
+	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

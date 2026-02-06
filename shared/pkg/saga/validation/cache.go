@@ -73,6 +73,7 @@ func (c *Cache) Get(script string) (*ValidationResult, bool) {
 	if c.ttl > 0 && time.Since(entry.CachedAt) > c.ttl {
 		// Entry expired - remove it
 		c.removeEntryWithEviction(hashStr, entry, "ttl")
+		RecordCacheSize(len(c.cache))
 		RecordCacheMiss()
 		return nil, false
 	}

@@ -2,8 +2,12 @@ package validation
 
 import (
 	"context"
+	"errors"
 	"time"
 )
+
+// ErrValidatorRequired is returned when NewCachedValidator is called with a nil Validator.
+var ErrValidatorRequired = errors.New("validator is required")
 
 // CachedValidator wraps a DryRunValidator with a caching layer.
 // It caches successful validation results by script content hash,
@@ -36,9 +40,14 @@ const DefaultCacheTTL = time.Hour
 const DefaultCacheMaxSize = 1000
 
 // NewCachedValidator creates a new CachedValidator wrapping the given validator.
+// Returns ErrValidatorRequired if cfg.Validator is nil.
 // If cfg.TTL is 0, DefaultCacheTTL (1 hour) is used.
 // If cfg.MaxSize is 0, DefaultCacheMaxSize (1000) is used.
-func NewCachedValidator(cfg CachedValidatorConfig) *CachedValidator {
+func NewCachedValidator(cfg CachedValidatorConfig) (*CachedValidator, error) {
+	if cfg.Validator == nil {
+		return nil, ErrValidatorRequired
+	}
+
 	ttl := cfg.TTL
 	if ttl == 0 {
 		ttl = DefaultCacheTTL
@@ -52,7 +61,7 @@ func NewCachedValidator(cfg CachedValidatorConfig) *CachedValidator {
 	return &CachedValidator{
 		validator: cfg.Validator,
 		cache:     NewCache(ttl, maxSize),
-	}
+	}, nil
 }
 
 // Validate validates a Starlark script, using cached results when available.
