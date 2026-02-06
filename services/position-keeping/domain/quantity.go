@@ -1,4 +1,4 @@
-// Package domain re-exports quantity types from pkg/platform/quantity for position-keeping service.
+// Package domain re-exports quantity types from shared/platform/quantity for position-keeping service.
 //
 // This module provides the Universal Asset System quantity types which support both
 // monetary (Money) and commodity (Asset) quantities with compile-time type safety.
@@ -8,8 +8,8 @@
 package domain
 
 import (
-	"github.com/meridianhub/meridian/pkg/platform/quantity"
 	"github.com/meridianhub/meridian/shared/domain/money"
+	"github.com/meridianhub/meridian/shared/platform/quantity"
 	"github.com/shopspring/decimal"
 )
 

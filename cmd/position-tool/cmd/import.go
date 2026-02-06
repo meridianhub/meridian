@@ -18,8 +18,8 @@ import (
 	"github.com/meridianhub/meridian/cmd/position-tool/internal/checkpoint"
 	"github.com/meridianhub/meridian/cmd/position-tool/internal/infra"
 	"github.com/meridianhub/meridian/cmd/position-tool/internal/validation"
-	"github.com/meridianhub/meridian/pkg/platform/quantity"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
+	"github.com/meridianhub/meridian/shared/platform/quantity"
 )
 
 // Import command errors.

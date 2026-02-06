@@ -201,10 +201,10 @@ message AttributeHint {
 
 ### Immutable Go Interfaces
 
-These interfaces are defined in **Step 0** and placed in `pkg/platform/quantity/interfaces.go`.
+These interfaces are defined in **Step 0** and placed in `shared/platform/quantity/interfaces.go`.
 All stream implementations **MUST** implement these interfaces exactly.
 
-#### `pkg/platform/quantity/interfaces.go`
+#### `shared/platform/quantity/interfaces.go`
 
 ```go
 package quantity
@@ -920,20 +920,20 @@ The existing `shared/domain/money` package is re-exported by all services. Migra
 ```text
 BEFORE                              AFTER
 ──────                              ─────
-shared/domain/money/                pkg/platform/quantity/
+shared/domain/money/                shared/platform/quantity/
 ├── money.go (Money struct)         ├── quantity.go (Quantity[D])
 ├── currency.go                     ├── dimension.go (Monetary, Commodity)
 └── errors.go                       ├── instrument.go (Instrument)
                                     └── currency/ (predefined fiat)
 
 services/*/domain/money.go          services/*/domain/quantity.go
-└── re-exports shared/domain/money  └── re-exports pkg/platform/quantity
+└── re-exports shared/domain/money  └── re-exports shared/platform/quantity
 ```
 
 **Migration sequence:**
 
-1. Stream A creates `pkg/platform/quantity` (new, no breaking changes)
-2. Per-service streams (I.1-I.4) migrate from `shared/domain/money` → `pkg/platform/quantity`
+1. Stream A creates `shared/platform/quantity` (new, no breaking changes)
+2. Per-service streams (I.1-I.4) migrate from `shared/domain/money` → `shared/platform/quantity`
 3. After all services migrated, deprecate `shared/domain/money`
 
 ---
@@ -953,7 +953,7 @@ before any stream begins** - it establishes the immutable contracts that all str
 
 1. Create `proto/quantity/v1/quantity.proto` (from Zero-State Contract section)
 2. Create `proto/reference_data/v1/instrument.proto` (from Zero-State Contract section)
-3. Create `pkg/platform/quantity/interfaces.go` (from Zero-State Contract section)
+3. Create `shared/platform/quantity/interfaces.go` (from Zero-State Contract section)
 4. Run `buf generate` to create Go stubs
 5. Commit all files with message: `feat: lock zero-state contracts for sprint`
 6. Calculate SHA256 checksums for contract verification in Stream J
@@ -1044,7 +1044,7 @@ the other on SQL query performance. This prevents context-switching overhead.
 
 ## Stream A: Core Types Package
 
-**Location:** `pkg/platform/quantity/`
+**Location:** `shared/platform/quantity/`
 **Dependencies:** None (foundational)
 
 ### Deliverables
@@ -1230,7 +1230,7 @@ the other on SQL query performance. This prevents context-switching overhead.
 
 ## Stream B: Currency Definitions
 
-**Location:** `pkg/platform/quantity/currency/`
+**Location:** `shared/platform/quantity/currency/`
 **Dependencies:** Stream A (Instrument type)
 
 ### Deliverables
@@ -1262,7 +1262,7 @@ the other on SQL query performance. This prevents context-switching overhead.
 
 ## Stream C: Rate Type
 
-**Location:** `pkg/platform/quantity/`
+**Location:** `shared/platform/quantity/`
 **Dependencies:** Stream A (Quantity, Instrument types)
 
 > **Scope boundary**: This stream covers the Rate data structure and basic conversion math only.
@@ -3199,7 +3199,7 @@ Position Keeping is the **primary consumer** of multi-asset quantities. Changes 
 
 | Layer | Files | Changes |
 |-------|-------|---------|
-| Domain | `domain/money.go` | Replace with `domain/quantity.go` re-exporting `pkg/platform/quantity` |
+| Domain | `domain/money.go` | Replace with `domain/quantity.go` re-exporting `shared/platform/quantity` |
 | Domain | `domain/measurement.go` | Use `Quantity[D]` instead of `Money` |
 | Domain | `domain/events.go` | Update event payloads to use `InstrumentAmount` |
 | Adapter | `adapters/grpc/*.go` | Add CEL validation, `ParseQuantity` bridge |
@@ -3774,9 +3774,9 @@ This service already tracks non-fiat measurements - **native fit for `Quantity[C
 
 | Stream | Can Start After | Developers | Service |
 |--------|-----------------|------------|---------|
-| A: Core Types | Immediately | 2 | `pkg/platform/quantity` |
-| B: Currency | A | 1 | `pkg/platform/quantity/currency` |
-| C: Rate Type | A | 1 | `pkg/platform/quantity` |
+| A: Core Types | Immediately | 2 | `shared/platform/quantity` |
+| B: Currency | A | 1 | `shared/platform/quantity/currency` |
+| C: Rate Type | A | 1 | `shared/platform/quantity` |
 | D: Protobuf | Immediately (from ADR spec) | 1 | `proto/platform/v1` |
 | E: DB Schema | Immediately (from ADR spec) | 1 | `services/reference-data` |
 | F: Reference Data Service | A + E | 2 | `services/reference-data` |
@@ -3811,7 +3811,7 @@ Assign one person as **Integration Coordinator** with responsibilities:
 - Own cross-stream interface contracts (proto definitions, Go interfaces)
 - Run integration smoke tests on each dependency resolution (not just unit tests)
 - Triage integration failures with priority over feature work
-- Approve any changes to shared contracts (proto, `pkg/platform/quantity`)
+- Approve any changes to shared contracts (proto, `shared/platform/quantity`)
 
 ### Dependency-Based Integration Gates
 
@@ -3828,7 +3828,7 @@ Integration validation occurs at dependency boundaries, not calendar dates:
 ### Interface Contract Rules
 
 1. **Proto definitions are immutable after Contract Freeze** - use `reserved` fields, not modifications
-2. **Go interfaces in `pkg/platform/quantity` require coordinator approval** to change
+2. **Go interfaces in `shared/platform/quantity` require coordinator approval** to change
 3. **Database schemas require migration compatibility** - no breaking changes to existing columns
 4. **Cache key formats are contracts** - changes require cache flush coordination
 
@@ -3871,7 +3871,7 @@ If API Layer gate shows >2x expected integration complexity:
 | Cache miss strategy | Prefetch on startup; cache miss = singleflight fallback (one request fetches, others wait) |
 | Read-side coalescing | Trigger compaction when bucket exceeds 100 rows |
 | Integration strategy | Per-service streams (I.1-I.4) for parallel execution |
-| Shared package | New `pkg/platform/quantity`; deprecate `shared/domain/money` after migration |
+| Shared package | New `shared/platform/quantity`; deprecate `shared/domain/money` after migration |
 
 ---
 

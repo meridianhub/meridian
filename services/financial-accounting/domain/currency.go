@@ -5,8 +5,8 @@
 package domain
 
 import (
-	"github.com/meridianhub/meridian/pkg/platform/quantity"
 	"github.com/meridianhub/meridian/shared/domain/money"
+	"github.com/meridianhub/meridian/shared/platform/quantity"
 )
 
 // Currency is an alias for the shared money.Currency type.

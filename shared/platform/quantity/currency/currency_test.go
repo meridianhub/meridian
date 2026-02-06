@@ -7,8 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/meridianhub/meridian/pkg/platform/quantity"
-	"github.com/meridianhub/meridian/pkg/platform/quantity/currency"
+	"github.com/meridianhub/meridian/shared/platform/quantity"
+	"github.com/meridianhub/meridian/shared/platform/quantity/currency"
 )
 
 func TestInstrumentConstants(t *testing.T) {

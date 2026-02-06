@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/meridianhub/meridian/pkg/platform/quantity"
+	"github.com/meridianhub/meridian/shared/platform/quantity"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
