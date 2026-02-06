@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/meridianhub/meridian/pkg/platform/quantity"
+	"github.com/meridianhub/meridian/shared/platform/quantity"
 )
 
 func TestMonetary_String(t *testing.T) {

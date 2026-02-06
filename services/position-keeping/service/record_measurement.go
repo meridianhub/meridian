@@ -14,10 +14,10 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
-	"github.com/meridianhub/meridian/pkg/platform/quantity"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/audit"
+	"github.com/meridianhub/meridian/shared/platform/quantity"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 

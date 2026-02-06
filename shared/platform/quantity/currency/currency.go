@@ -24,7 +24,7 @@ package currency
 import (
 	"github.com/shopspring/decimal"
 
-	"github.com/meridianhub/meridian/pkg/platform/quantity"
+	"github.com/meridianhub/meridian/shared/platform/quantity"
 )
 
 // Currency instruments for major fiat currencies.
