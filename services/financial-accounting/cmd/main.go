@@ -261,9 +261,13 @@ func run(logger *slog.Logger) error {
 			"environment", os.Getenv("ENVIRONMENT"))
 		idempotencySvc = newNoopIdempotencyService()
 		usingNoopIdempotency = true
+		// Record degradation metrics
+		serviceobs.SetNoopIdempotencyActive(true)
+		serviceobs.RecordServiceDegradation(serviceobs.ComponentIdempotency, serviceobs.DegradationReasonStartupFallback)
 	} else {
 		redisSvc = idempotency.NewRedisService(redisClient)
 		idempotencySvc = redisSvc
+		serviceobs.SetNoopIdempotencyActive(false)
 		logger.Info("idempotency service initialized with Redis")
 		defer func() {
 			if err := redisClient.Close(); err != nil {
@@ -306,7 +310,10 @@ func run(logger *slog.Logger) error {
 	if usingNoopEventPublisher {
 		logger.Warn("using noop event publisher - DEVELOPMENT ONLY",
 			"environment", os.Getenv("ENVIRONMENT"))
+		serviceobs.SetNoopEventPublisherActive(true)
+		serviceobs.RecordServiceDegradation(serviceobs.ComponentEventPublisher, serviceobs.DegradationReasonStartupFallback)
 	} else {
+		serviceobs.SetNoopEventPublisherActive(false)
 		logger.Info("event publisher initialized (noop mode for direct publishing, outbox handles primary events)")
 	}
 
