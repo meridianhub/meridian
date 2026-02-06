@@ -63,11 +63,7 @@ func RecordValidation(sagaName string, result *ValidationResult) {
 		validationErrorsTotal.WithLabelValues(sagaName, string(err.Category)).Inc()
 	}
 
-	score := result.Metrics.HandlerCallCount / 2
-	if score > 10 {
-		score = 10
-	}
-	complexityScore.WithLabelValues(sagaName).Observe(float64(score))
+	complexityScore.WithLabelValues(sagaName).Observe(float64(calculateComplexityScore(result.Metrics.HandlerCallCount)))
 
 	handlerCallCount.WithLabelValues(sagaName).Observe(float64(result.Metrics.HandlerCallCount))
 }
