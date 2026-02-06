@@ -37,6 +37,9 @@ const (
 
 	// CategoryRuntime indicates a script runtime error (calls fail() or raises exception).
 	CategoryRuntime ErrorCategory = "RUNTIME"
+
+	// CategoryTimeout indicates a validation timeout (execution exceeded time limit).
+	CategoryTimeout ErrorCategory = "TIMEOUT"
 )
 
 // ValidationError represents a single error found during validation.

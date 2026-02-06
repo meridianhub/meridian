@@ -740,6 +740,8 @@ func (h *RegistryHandler) errorCategoryToProto(cat validation.ErrorCategory) sag
 		return sagav1.ErrorCategory_ERROR_CATEGORY_TYPE_MISMATCH
 	case validation.CategoryRuntime:
 		return sagav1.ErrorCategory_ERROR_CATEGORY_RUNTIME
+	case validation.CategoryTimeout:
+		return sagav1.ErrorCategory_ERROR_CATEGORY_TIMEOUT
 	default:
 		return sagav1.ErrorCategory_ERROR_CATEGORY_UNSPECIFIED
 	}
