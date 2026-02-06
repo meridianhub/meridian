@@ -240,6 +240,10 @@ func setupTenantSchemaForSeeder(t *testing.T, pool *pgxpool.Pool, ctx context.Co
 			platform_ref uuid NULL REFERENCES public.platform_saga_definition(id) ON DELETE SET NULL,
 			override_reason text NULL,
 			platform_version_at_override varchar(16) NULL,
+			validation_status text NOT NULL DEFAULT 'UNVALIDATED',
+			complexity_score integer NULL,
+			handler_call_count integer NULL,
+			validated_at timestamptz NULL,
 			PRIMARY KEY (id),
 			CONSTRAINT uq_saga_definition_name_version UNIQUE (name, version),
 			CONSTRAINT chk_saga_definition_script_source
