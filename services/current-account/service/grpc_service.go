@@ -141,8 +141,9 @@ type Service struct {
 	repo                   *persistence.Repository
 	lienRepo               *persistence.LienRepository
 	withdrawalRepo         *persistence.WithdrawalRepository
-	outboxRepo             events.OutboxRepository // Outbox repository for reliable event delivery
-	db                     *gorm.DB                // Database connection for transaction management
+	valuationFeatureRepo   *persistence.ValuationFeatureRepository // ValuationFeature repository for valuation method assignments
+	outboxRepo             events.OutboxRepository                 // Outbox repository for reliable event delivery
+	db                     *gorm.DB                                // Database connection for transaction management
 	posKeepingClient       PositionKeepingClient
 	finAcctClient          FinancialAccountingClient
 	partyClient            PartyClient
@@ -158,9 +159,10 @@ type Service struct {
 
 // Config contains configuration for creating a new Service with external clients
 type Config struct {
-	Repository           *persistence.Repository
-	LienRepository       *persistence.LienRepository
-	WithdrawalRepository *persistence.WithdrawalRepository
+	Repository                 *persistence.Repository
+	LienRepository             *persistence.LienRepository
+	WithdrawalRepository       *persistence.WithdrawalRepository
+	ValuationFeatureRepository *persistence.ValuationFeatureRepository
 	// Namespace is the Kubernetes namespace for service discovery (e.g., "default")
 	Namespace string
 	// PositionKeepingServiceName is the Kubernetes service name (e.g., "position-keeping")
@@ -205,6 +207,20 @@ func NewServiceWithIdempotency(repo *persistence.Repository, lienRepo *persisten
 		lienRepo:           lienRepo,
 		idempotencyService: idempotencyService,
 		logger:             slog.New(slog.NewJSONHandler(os.Stdout, nil)),
+	}, nil
+}
+
+// NewServiceWithValuationFeatures creates a new current account service with valuation feature support.
+// This is primarily used for testing valuation feature operations.
+// Returns an error if repository is nil.
+func NewServiceWithValuationFeatures(repo *persistence.Repository, valuationFeatureRepo *persistence.ValuationFeatureRepository) (*Service, error) {
+	if repo == nil {
+		return nil, ErrRepositoryNil
+	}
+	return &Service{
+		repo:                 repo,
+		valuationFeatureRepo: valuationFeatureRepo,
+		logger:               slog.New(slog.NewJSONHandler(os.Stdout, nil)),
 	}, nil
 }
 
