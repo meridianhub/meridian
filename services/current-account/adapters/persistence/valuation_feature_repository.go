@@ -37,17 +37,53 @@ func (r *ValuationFeatureRepository) WithTx(tx *gorm.DB) *ValuationFeatureReposi
 	return &ValuationFeatureRepository{db: tx}
 }
 
+// withTenantScope returns a GORM DB instance scoped to the tenant from context.
+// The system is always multi-tenant - tenant context is ALWAYS required.
+// This sets the PostgreSQL search_path to the tenant's schema (org_<tenant_id>).
+//
+// This must be called within a transaction for the search_path setting to work correctly.
+func (r *ValuationFeatureRepository) withTenantScope(ctx context.Context, tx *gorm.DB) (*gorm.DB, error) {
+	return db.WithGormTenantScope(ctx, tx)
+}
+
 // withTenantTransaction executes the given function with tenant scoping in a transaction.
 // The system is always multi-tenant - tenant context is ALWAYS required.
 // This wraps the function in a transaction and sets the search_path to the tenant's schema.
+//
+// If already in a transaction (via WithTx), it uses the existing transaction directly
+// with tenant scope set. This avoids creating unnecessary savepoints in GORM v1.31+.
 func (r *ValuationFeatureRepository) withTenantTransaction(ctx context.Context, fn func(tx *gorm.DB) error) error {
+	if r.isInTransaction() {
+		// Already in a transaction (via WithTx) - use it directly with tenant scope
+		tx, err := r.withTenantScope(ctx, r.db.WithContext(ctx))
+		if err != nil {
+			return err
+		}
+		return fn(tx)
+	}
 	return db.WithGormTenantTransaction(ctx, r.db, fn)
+}
+
+// isInTransaction checks if the repository's db connection is already within a transaction.
+// This is used to avoid creating nested transactions when the caller has already established one.
+func (r *ValuationFeatureRepository) isInTransaction() bool {
+	// Guard against uninitialized Statement (can happen if no query has been executed yet)
+	if r.db.Statement == nil || r.db.Statement.ConnPool == nil {
+		return false
+	}
+	// GORM sets ConnPool to a transaction object when in transaction mode.
+	// In a transaction, Statement.ConnPool will be of type *sql.Tx (or GORM's tx wrapper).
+	committer, ok := r.db.Statement.ConnPool.(gorm.TxCommitter)
+	return ok && committer != nil
 }
 
 // Create inserts a new valuation feature.
 // In multi-org mode, this operation is scoped to the organization from context.
 func (r *ValuationFeatureRepository) Create(ctx context.Context, feature *domain.ValuationFeature) error {
-	entity := toValuationFeatureEntity(feature)
+	entity, err := toValuationFeatureEntity(feature)
+	if err != nil {
+		return fmt.Errorf("%w: %w", domain.ErrInvalidValuationFeatureParameters, err)
+	}
 	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		return tx.Create(entity).Error
 	})
@@ -176,10 +212,13 @@ func (r *ValuationFeatureRepository) FindByMethodID(ctx context.Context, methodI
 // Update updates an existing valuation feature with optimistic locking.
 // In multi-org mode, this operation is scoped to the organization from context.
 func (r *ValuationFeatureRepository) Update(ctx context.Context, feature *domain.ValuationFeature) error {
-	entity := toValuationFeatureEntity(feature)
+	entity, err := toValuationFeatureEntity(feature)
+	if err != nil {
+		return fmt.Errorf("%w: %w", domain.ErrInvalidValuationFeatureParameters, err)
+	}
 	var rowsAffected int64
 
-	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+	err = r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		// Optimistic locking: use WHERE clause with version check
 		result := tx.Model(&ValuationFeatureEntity{}).
 			Where("id = ? AND version = ?", entity.ID, feature.Version).
@@ -237,12 +276,16 @@ func (r *ValuationFeatureRepository) FindByIDForUpdate(ctx context.Context, id u
 	return toValuationFeatureDomain(&entity)
 }
 
-// toValuationFeatureEntity converts domain model to database entity
-func toValuationFeatureEntity(feature *domain.ValuationFeature) *ValuationFeatureEntity {
+// toValuationFeatureEntity converts domain model to database entity.
+// Returns an error if parameter marshaling fails (e.g., unsupported types, cyclic structures).
+func toValuationFeatureEntity(feature *domain.ValuationFeature) (*ValuationFeatureEntity, error) {
 	var parametersJSON []byte
+	var err error
 	if feature.Parameters != nil {
-		// Ignore error - if JSON marshaling fails, we store nil
-		parametersJSON, _ = json.Marshal(feature.Parameters)
+		parametersJSON, err = json.Marshal(feature.Parameters)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal parameters: %w", err)
+		}
 	}
 
 	return &ValuationFeatureEntity{
@@ -260,7 +303,7 @@ func toValuationFeatureEntity(feature *domain.ValuationFeature) *ValuationFeatur
 		UpdatedAt:              feature.UpdatedAt,
 		UpdatedBy:              feature.UpdatedBy,
 		Version:                feature.Version,
-	}
+	}, nil
 }
 
 // toValuationFeatureDomain converts database entity to domain model
