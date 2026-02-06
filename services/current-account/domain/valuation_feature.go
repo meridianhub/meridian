@@ -4,20 +4,20 @@ import (
 	vf "github.com/meridianhub/meridian/shared/pkg/valuationfeature"
 )
 
-// Type aliases re-exporting shared valuationfeature types.
-// This maintains backwards compatibility for code within the current-account service
-// that references domain.ValuationFeature and related types.
-
+// ValuationFeature re-exports the shared valuation feature domain type.
 type ValuationFeature = vf.ValuationFeature
+
+// ValuationFeatureLifecycleStatus re-exports the shared lifecycle status type.
 type ValuationFeatureLifecycleStatus = vf.LifecycleStatus
 
+// Lifecycle status constants for valuation features.
 const (
 	ValuationFeatureLifecycleStatusInitiated  = vf.LifecycleStatusInitiated
 	ValuationFeatureLifecycleStatusActive     = vf.LifecycleStatusActive
 	ValuationFeatureLifecycleStatusTerminated = vf.LifecycleStatusTerminated
 )
 
-// Error aliases
+// Valuation feature domain error aliases.
 var (
 	ErrInvalidValuationFeatureTransition = vf.ErrInvalidLifecycleTransition
 	ErrValuationFeatureNotActive         = vf.ErrNotActive
