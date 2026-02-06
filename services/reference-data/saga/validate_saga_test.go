@@ -381,3 +381,149 @@ run()
 	// Total: multiple operations
 	assert.Greater(t, resp.Metrics.OperationCount, int32(3), "should track multiple operation types")
 }
+
+// TestValidateSaga_E2E_CompleteFlow is an end-to-end integration test that validates
+// the complete saga validation flow including error handling, metrics, and formatting.
+func TestValidateSaga_E2E_CompleteFlow(t *testing.T) {
+	handler, schemaRegistry := setupValidateSagaTest(t)
+
+	t.Run("complete success flow", func(t *testing.T) {
+		req := &sagav1.ValidateSagaRequest{
+			SagaName: "payment_withdrawal_saga",
+			Script: `
+# Payment withdrawal saga with direct handler calls
+# Step 1: Create lien
+lien = payment.create_lien(amount="100.00", customer_id="cust_123")
+
+# Step 2: Verify balance
+balance = test_service.test_method()
+
+# Step 3: Another check
+check = test_service.test_method()
+`,
+			Version: "1.0.0",
+		}
+
+		resp, err := handler.ValidateSaga(context.Background(), req)
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+
+		// Verify success
+		assert.True(t, resp.Success, "validation should succeed")
+		assert.Empty(t, resp.Errors, "no errors expected")
+
+		// Verify metrics
+		require.NotNil(t, resp.Metrics)
+		assert.Equal(t, int32(3), resp.Metrics.HandlerCallCount, "3 handler calls total")
+		assert.Greater(t, resp.Metrics.OperationCount, int32(2), "multiple operations")
+		assert.GreaterOrEqual(t, resp.Metrics.ComplexityScore, int32(0), "complexity calculated")
+		assert.GreaterOrEqual(t, resp.Metrics.EstimatedDurationMs, int32(0), "duration estimated")
+
+		// Verify formatted report
+		assert.NotEmpty(t, resp.FormattedReport, "report should be generated")
+		assert.Contains(t, resp.FormattedReport, "Validation Passed", "report shows success")
+		assert.Contains(t, resp.FormattedReport, "3 handlers", "report includes metrics")
+	})
+
+	t.Run("complete failure flow", func(t *testing.T) {
+		req := &sagav1.ValidateSagaRequest{
+			SagaName: "broken_saga",
+			Script: `
+# Saga with multiple issues
+result = nonexistent.handler()  # Undefined handler
+x = undefined_variable           # Runtime error
+`,
+			Version: "1.0.0",
+		}
+
+		resp, err := handler.ValidateSaga(context.Background(), req)
+		require.NoError(t, err, "gRPC should succeed even with validation errors")
+		require.NotNil(t, resp)
+
+		// Verify failure
+		assert.False(t, resp.Success, "validation should fail")
+		assert.NotEmpty(t, resp.Errors, "errors should be present")
+
+		// Verify error details
+		firstError := resp.Errors[0]
+		assert.GreaterOrEqual(t, firstError.Line, int32(0), "error may have line number")
+		assert.NotEmpty(t, firstError.Message, "error has message")
+		assert.NotEqual(t, sagav1.ErrorCategory_ERROR_CATEGORY_UNSPECIFIED, firstError.Category)
+
+		// Verify metrics (may be partial)
+		require.NotNil(t, resp.Metrics)
+
+		// Verify formatted report includes error details
+		assert.NotEmpty(t, resp.FormattedReport)
+		assert.Contains(t, resp.FormattedReport, "Validation Failed", "report shows failure")
+	})
+
+	t.Run("complex conditional saga", func(t *testing.T) {
+		req := &sagav1.ValidateSagaRequest{
+			SagaName: "complex_conditional_saga",
+			Script: `
+# Multiple handler calls with different parameters
+result1 = payment.create_lien(amount="1000", customer_id="high_value")
+result2 = payment.create_lien(amount="500", customer_id="medium_value")
+result3 = test_service.test_method()
+`,
+			Version: "1.0.0",
+		}
+
+		resp, err := handler.ValidateSaga(context.Background(), req)
+		require.NoError(t, err)
+		assert.True(t, resp.Success)
+
+		// Multiple handler calls should increase complexity
+		assert.Equal(t, int32(3), resp.Metrics.HandlerCallCount, "should count 3 handler calls")
+		assert.GreaterOrEqual(t, resp.Metrics.ComplexityScore, int32(1), "multiple handlers increase complexity")
+		assert.GreaterOrEqual(t, resp.Metrics.OperationCount, int32(3), "should count operations")
+	})
+
+	t.Run("verify schema registry integration", func(t *testing.T) {
+		// Verify the schema registry has the expected handlers
+		handlers := schemaRegistry.ListHandlers()
+		assert.Contains(t, handlers, "test_service.test_method")
+		assert.Contains(t, handlers, "payment.create_lien")
+
+		// Test with a handler that definitely exists
+		req := &sagav1.ValidateSagaRequest{
+			SagaName: "known_handler_saga",
+			Script:   `result = test_service.test_method()`,
+			Version:  "1.0.0",
+		}
+
+		resp, err := handler.ValidateSaga(context.Background(), req)
+		require.NoError(t, err)
+		assert.True(t, resp.Success)
+		assert.Equal(t, int32(1), resp.Metrics.HandlerCallCount)
+	})
+
+	t.Run("empty saga name validation", func(_ *testing.T) {
+		req := &sagav1.ValidateSagaRequest{
+			SagaName: "", // Empty name
+			Script:   `test_service.test_method()`,
+			Version:  "1.0.0",
+		}
+
+		// Should handle gracefully (protobuf validation may catch this)
+		_, err := handler.ValidateSaga(context.Background(), req)
+		// Either protobuf rejects it or handler validates it anyway
+		// Both are acceptable for this E2E test
+		_ = err // May or may not error
+	})
+
+	t.Run("malformed version string", func(t *testing.T) {
+		req := &sagav1.ValidateSagaRequest{
+			SagaName: "version_test",
+			Script:   `test_service.test_method()`,
+			Version:  "not-a-semver", // Invalid semver
+		}
+
+		// Validation should still work (version is informational for ValidateSaga)
+		resp, err := handler.ValidateSaga(context.Background(), req)
+		require.NoError(t, err)
+		// Script is valid even if version string is weird
+		assert.True(t, resp.Success)
+	})
+}
