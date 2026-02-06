@@ -102,11 +102,16 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /readyz", s.handleReady)
 
 	// API routes - with auth and tenant middleware chain
-	apiMux := http.NewServeMux()
-	apiMux.HandleFunc("/", s.handleAPI)
+	// Create proxy handler if backends are configured, otherwise use placeholder
+	var apiHandler http.Handler
+	if len(s.config.Backends) > 0 {
+		apiHandler = NewProxyHandler(s.config.Backends)
+	} else {
+		apiHandler = http.HandlerFunc(s.handleAPI)
+	}
 
-	// Build middleware chain: auth → tenant → tenant_authz → handler
-	handler := http.StripPrefix("/api", apiMux)
+	// Build middleware chain: auth → tenant → tenant_authz → proxy
+	handler := http.StripPrefix("/api", apiHandler)
 
 	// Layer 3 (innermost): Tenant authorization (verify JWT tenant matches subdomain)
 	if s.tenantAuthzMiddleware != nil {
