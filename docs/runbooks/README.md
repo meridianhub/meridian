@@ -6,6 +6,11 @@ scenarios.
 
 ## Available Runbooks
 
+### Deployment
+
+- **[production-deployment.md](production-deployment.md)** - Production deployment guide covering
+  infrastructure prerequisites, service startup order, health verification, and rollback
+
 ### Emergency Response
 
 - **[incident-response.md](incident-response.md)** - General incident response procedures, escalation
