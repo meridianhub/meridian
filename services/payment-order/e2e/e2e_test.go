@@ -988,7 +988,8 @@ func TestConcurrentPayments_E2E_SagaIsolation(t *testing.T) {
 	// Wait for all sagas to reach terminal state
 	for i := 0; i < numPayments; i++ {
 		if results[i] != nil {
-			poID, _ := uuid.Parse(results[i].PaymentOrder.PaymentOrderId)
+			poID, parseErr := uuid.Parse(results[i].PaymentOrder.PaymentOrderId)
+			require.NoError(t, parseErr, "Failed to parse payment order ID")
 			po := waitForSagaTerminal(ctx, t, env.Repo, poID)
 			assert.Equal(t, domain.PaymentOrderStatusExecuting, po.Status,
 				"Each concurrent payment should reach EXECUTING state")
@@ -1113,7 +1114,8 @@ func TestPaymentSaga_E2E_Reversal(t *testing.T) {
 	initiateResp, err := env.Service.InitiatePaymentOrder(ctx, req)
 	require.NoError(t, err)
 
-	poID, _ := uuid.Parse(initiateResp.PaymentOrder.PaymentOrderId)
+	poID, err := uuid.Parse(initiateResp.PaymentOrder.PaymentOrderId)
+	require.NoError(t, err)
 	po := waitForSagaTerminal(ctx, t, env.Repo, poID)
 	require.Equal(t, domain.PaymentOrderStatusExecuting, po.Status)
 
