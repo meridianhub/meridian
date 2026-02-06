@@ -7,11 +7,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/meridianhub/meridian/shared/platform/db"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const testTenantID = "test_tenant"
@@ -325,6 +327,83 @@ func TestRepository_FindByIDForUpdate(t *testing.T) {
 	locked, err := repo.FindByIDForUpdate(ctx, feature.ID)
 	require.NoError(t, err)
 	assert.Equal(t, feature.ID, locked.ID)
+}
+
+func TestRepository_FindByIDForUpdate_ConcurrentBlocking(t *testing.T) {
+	rawDB, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(rawDB)
+	accountID := uuid.New()
+	methodID := uuid.New()
+
+	// Create feature
+	feature, err := NewValuationFeature(accountID, "USD", methodID, 1, nil, "creator")
+	require.NoError(t, err)
+	require.NoError(t, repo.Create(ctx, feature))
+
+	// Goroutine 1: hold FOR UPDATE lock, update version while holding it
+	lockAcquired := make(chan struct{})
+	canRelease := make(chan struct{})
+	g1Done := make(chan struct{})
+
+	go func() {
+		defer close(g1Done)
+		txRepo := NewRepository(rawDB)
+		_ = db.WithGormTenantTransaction(ctx, rawDB, func(tx *gorm.DB) error {
+			withinTx := txRepo.WithTx(tx)
+			// Acquire pessimistic lock within this transaction
+			var entity Entity
+			result := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("id = ?", feature.ID).
+				First(&entity)
+			require.NoError(t, result.Error)
+
+			// Signal that lock is held
+			close(lockAcquired)
+
+			// Hold the lock until main goroutine says release
+			<-canRelease
+
+			// Update version while we hold the lock
+			locked, err := toDomain(&entity)
+			require.NoError(t, err)
+			require.NoError(t, locked.Activate("user1"))
+			require.NoError(t, withinTx.Update(ctx, locked))
+			return nil
+		})
+	}()
+
+	// Wait for goroutine 1 to acquire the lock
+	<-lockAcquired
+
+	// Goroutine 2: attempt to get lock - should block until g1 releases
+	g2Done := make(chan int)
+	go func() {
+		f, err := repo.FindByIDForUpdate(ctx, feature.ID)
+		require.NoError(t, err)
+		g2Done <- f.Version
+	}()
+
+	// Verify g2 is still blocked (hasn't returned yet)
+	select {
+	case <-g2Done:
+		t.Fatal("goroutine 2 acquired the lock while goroutine 1 still held it")
+	case <-time.After(200 * time.Millisecond):
+		// Expected: g2 is blocked
+	}
+
+	// Release the lock from g1
+	close(canRelease)
+	<-g1Done
+
+	// g2 should now complete and see the updated version
+	select {
+	case version := <-g2Done:
+		assert.Equal(t, 2, version, "goroutine 2 should see version 2 after g1 committed")
+	case <-time.After(5 * time.Second):
+		t.Fatal("goroutine 2 did not complete after lock was released")
+	}
 }
 
 func TestRepository_UniqueConstraint(t *testing.T) {
