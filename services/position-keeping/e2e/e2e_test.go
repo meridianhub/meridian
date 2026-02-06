@@ -52,7 +52,7 @@ func setupTenantSchema(t *testing.T, db *gorm.DB, tenantID string) context.Conte
 
 	// Create tenant schema
 	_, err = sqlDB.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName)))
-	require.NoError(t, err, "Failed to create tenant schema %s", pq.QuoteIdentifier(schemaName))
+	require.NoError(t, err, "Failed to create tenant schema %s", schemaName)
 
 	// Apply position-keeping schema
 	applyPositionKeepingSchema(t, db, schemaName)

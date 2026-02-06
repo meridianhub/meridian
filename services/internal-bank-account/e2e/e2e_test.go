@@ -125,7 +125,7 @@ func setupTenantSchema(t *testing.T, tc *e2eTestContext, tenantID string) contex
 
 	// Create the tenant schema
 	_, err := tc.pool.Exec(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName)))
-	require.NoError(t, err, "Failed to create tenant schema %s", pq.QuoteIdentifier(schemaName))
+	require.NoError(t, err, "Failed to create tenant schema %s", schemaName)
 
 	// Apply internal_bank_account schema
 	applyInternalBankAccountSchema(t, tc.pool, schemaName)
@@ -154,7 +154,7 @@ func setupTenantWithSchemas(t *testing.T, pool *pgxpool.Pool, tenantID string) c
 
 	// Create the tenant schema
 	_, err := pool.Exec(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName)))
-	require.NoError(t, err, "Failed to create tenant schema %s", pq.QuoteIdentifier(schemaName))
+	require.NoError(t, err, "Failed to create tenant schema %s", schemaName)
 
 	// Apply internal-bank-account schema
 	applyInternalBankAccountSchema(t, pool, schemaName)

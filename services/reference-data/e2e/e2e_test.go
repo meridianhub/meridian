@@ -84,7 +84,7 @@ func setupTenantWithBothSchemas(t *testing.T, pool *pgxpool.Pool, tenantID strin
 
 	// Create the tenant schema
 	_, err := pool.Exec(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName)))
-	require.NoError(t, err, "Failed to create tenant schema %s", pq.QuoteIdentifier(schemaName))
+	require.NoError(t, err, "Failed to create tenant schema %s", schemaName)
 
 	// Apply reference-data schema
 	applyReferenceDataSchema(t, pool, schemaName)

@@ -333,7 +333,7 @@ func TestEndToEnd_ExpiredReferenceUpdate(t *testing.T) {
 	err = db.Raw(fmt.Sprintf(`
 		SELECT is_active FROM %s.party_reference
 		WHERE party_id = ? AND government_id = 'OLD-PASSPORT-999'
-	`, tenant.TenantID(testTenantID).SchemaName()), party.PartyId).Scan(&oldRefActive).Error
+	`, pq.QuoteIdentifier(tenant.TenantID(testTenantID).SchemaName())), party.PartyId).Scan(&oldRefActive).Error
 	require.NoError(t, err)
 	assert.False(t, oldRefActive, "Old reference should be archived (is_active=false)")
 
@@ -379,7 +379,7 @@ func TestEndToEnd_BankRelationsWithControlParty(t *testing.T) {
 	err = db.Raw(fmt.Sprintf(`
 		SELECT COUNT(*) FROM %s.audit_outbox
 		WHERE table_name = 'party' AND record_id = ? AND operation = 'UPDATE'
-	`, tenant.TenantID(testTenantID).SchemaName()), party.PartyId).Scan(&outboxCount).Error
+	`, pq.QuoteIdentifier(tenant.TenantID(testTenantID).SchemaName())), party.PartyId).Scan(&outboxCount).Error
 	require.NoError(t, err)
 	assert.Greater(t, outboxCount, int64(0), "Audit outbox should contain event for party status change")
 }
@@ -530,7 +530,7 @@ func TestEventOrdering_UpdateThenControl(t *testing.T) {
 		SELECT id, created_at, operation FROM %s.audit_outbox
 		WHERE table_name = 'party' AND record_id = ?
 		ORDER BY created_at ASC
-	`, tenant.TenantID(testTenantID).SchemaName()), party.PartyId).Scan(&events).Error
+	`, pq.QuoteIdentifier(tenant.TenantID(testTenantID).SchemaName())), party.PartyId).Scan(&events).Error
 	require.NoError(t, err)
 
 	// Should have at least 2 events (initial register + update + control)
@@ -789,7 +789,7 @@ func TestWorkflow_UpdateDemographicsIdempotency(t *testing.T) {
 	var demoCount int64
 	err := db.Raw(fmt.Sprintf(`
 		SELECT COUNT(*) FROM %s.party_demographic WHERE party_id = ?
-	`, tenant.TenantID(testTenantID).SchemaName()), party.PartyId).Scan(&demoCount).Error
+	`, pq.QuoteIdentifier(tenant.TenantID(testTenantID).SchemaName())), party.PartyId).Scan(&demoCount).Error
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), demoCount, "Should have exactly 1 demographics record")
 
