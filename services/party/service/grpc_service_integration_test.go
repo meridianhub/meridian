@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/lib/pq"
+
 	"github.com/google/uuid"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	"github.com/meridianhub/meridian/services/party/adapters/persistence"
@@ -35,11 +37,11 @@ func setupIntegrationTest(t *testing.T) (*Service, *gorm.DB, context.Context, fu
 	// Create the tenant schema for tests
 	tid := tenant.TenantID(testTenantID)
 	schemaName := tid.SchemaName()
-	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create the party table in the tenant schema (note: singular 'party' to match entity)
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.party (
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.party (
 		id UUID PRIMARY KEY,
 		party_type VARCHAR(20) NOT NULL,
 		legal_name VARCHAR(255) NOT NULL,
@@ -54,11 +56,11 @@ func setupIntegrationTest(t *testing.T) (*Service, *gorm.DB, context.Context, fu
 		created_by VARCHAR(255),
 		updated_by VARCHAR(255),
 		UNIQUE(external_reference, external_reference_type)
-	)`, schemaName)).Error
+	)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create the audit_outbox table in the tenant schema (required for audit hooks)
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.audit_outbox (
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.audit_outbox (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		table_name VARCHAR(100) NOT NULL,
 		operation VARCHAR(10) NOT NULL,
@@ -73,11 +75,11 @@ func setupIntegrationTest(t *testing.T) (*Service, *gorm.DB, context.Context, fu
 		transaction_id VARCHAR(100),
 		client_ip VARCHAR(45),
 		user_agent TEXT
-	)`, schemaName)).Error
+	)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Set default search_path to include tenant schema so Create/Update work in the tenant schema
-	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName)).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create context with tenant

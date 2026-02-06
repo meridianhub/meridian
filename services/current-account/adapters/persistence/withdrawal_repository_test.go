@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lib/pq"
+
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -26,11 +28,11 @@ func setupWithdrawalTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	// Create the tenant schema for tests
 	tid := tenant.TenantID(withdrawalTestTenantID)
 	schemaName := tid.SchemaName()
-	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create the withdrawal table in the tenant schema
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.withdrawal (
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.withdrawal (
 		id UUID PRIMARY KEY,
 		account_id UUID NOT NULL,
 		amount_cents BIGINT NOT NULL CHECK (amount_cents > 0),
@@ -40,16 +42,16 @@ func setupWithdrawalTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
 		updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
 		version BIGINT NOT NULL DEFAULT 1
-	)`, schemaName)).Error
+	)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create index for efficient account + status queries
 	err = db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_withdrawal_account_status
-		ON %q.withdrawal (account_id, status)`, schemaName)).Error
+		ON %s.withdrawal (account_id, status)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Set default search_path to include tenant schema
-	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName)).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create context with tenant
@@ -84,9 +86,9 @@ func createTestWithdrawalWithTimestamp(t *testing.T, accountID uuid.UUID, amount
 // This helper reduces duplication in tests that need multiple tenant schemas.
 func createWithdrawalTableInSchema(t *testing.T, db *gorm.DB, schemaName string) {
 	t.Helper()
-	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.withdrawal (
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.withdrawal (
 		id UUID PRIMARY KEY,
 		account_id UUID NOT NULL,
 		amount_cents BIGINT NOT NULL CHECK (amount_cents > 0),
@@ -96,7 +98,7 @@ func createWithdrawalTableInSchema(t *testing.T, db *gorm.DB, schemaName string)
 		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
 		updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
 		version BIGINT NOT NULL DEFAULT 1
-	)`, schemaName)).Error
+	)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 }
 
@@ -477,7 +479,7 @@ func TestWithdrawalRepository_WithTx(t *testing.T) {
 	// Set search_path for the transaction
 	tid := tenant.TenantID(withdrawalTestTenantID)
 	schemaName := tid.SchemaName()
-	err := tx.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName)).Error
+	err := tx.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Use WithTx to create repository scoped to transaction

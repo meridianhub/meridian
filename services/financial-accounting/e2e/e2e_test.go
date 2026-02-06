@@ -99,7 +99,7 @@ func setupMultiServiceTenantSchema(t *testing.T, db *gorm.DB, tenantID tenant.Te
 
 	// Create tenant schema
 	_, err = sqlDB.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName)))
-	require.NoError(t, err, "Failed to create tenant schema %s", schemaName)
+	require.NoError(t, err, "Failed to create tenant schema %s", pq.QuoteIdentifier(schemaName))
 
 	// Apply schemas for both services
 	applyFinancialAccountingSchema(t, db, schemaName)

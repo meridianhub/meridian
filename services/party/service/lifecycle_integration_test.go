@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lib/pq"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -42,11 +44,11 @@ func setupLifecycleIntegrationTest(t *testing.T) (*Service, *gorm.DB, context.Co
 	// Create the tenant schema for tests
 	tid := tenant.TenantID(testTenantID)
 	schemaName := tid.SchemaName()
-	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create the party table
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.party (
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.party (
 		id UUID PRIMARY KEY,
 		party_type VARCHAR(20) NOT NULL,
 		legal_name VARCHAR(255) NOT NULL,
@@ -61,11 +63,11 @@ func setupLifecycleIntegrationTest(t *testing.T) (*Service, *gorm.DB, context.Co
 		created_by VARCHAR(255),
 		updated_by VARCHAR(255),
 		UNIQUE(external_reference, external_reference_type)
-	)`, schemaName)).Error
+	)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create the party_reference table (BQ: Reference) - matches migration schema
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.party_reference (
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.party_reference (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		party_id UUID NOT NULL REFERENCES %[1]q.party(id) ON DELETE CASCADE,
 		reference_type VARCHAR(50) NOT NULL,
@@ -74,24 +76,24 @@ func setupLifecycleIntegrationTest(t *testing.T) (*Service, *gorm.DB, context.Co
 		issue_date DATE,
 		expiry_date DATE,
 		created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
-	)`, schemaName)).Error
+	)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create indexes matching migration
 	err = db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_party_reference_party_id
-		ON %q.party_reference(party_id)`, schemaName)).Error
+		ON %s.party_reference(party_id)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	err = db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_party_reference_type_value
-		ON %q.party_reference(reference_type, reference_value)`, schemaName)).Error
+		ON %s.party_reference(reference_type, reference_value)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	err = db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_party_reference_expiry_date
-		ON %q.party_reference(expiry_date) WHERE expiry_date IS NOT NULL`, schemaName)).Error
+		ON %s.party_reference(expiry_date) WHERE expiry_date IS NOT NULL`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create the party_association table (BQ: Associations) - singular to match migration
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.party_association (
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.party_association (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		party_id UUID NOT NULL REFERENCES %[1]q.party(id) ON DELETE CASCADE,
 		related_party_id UUID NOT NULL,
@@ -99,11 +101,11 @@ func setupLifecycleIntegrationTest(t *testing.T) (*Service, *gorm.DB, context.Co
 		created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
 		updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
 		UNIQUE(party_id, related_party_id, relationship_type)
-	)`, schemaName)).Error
+	)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create the party_demographic table (BQ: Demographics) - singular to match migration
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.party_demographic (
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.party_demographic (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		party_id UUID NOT NULL REFERENCES %[1]q.party(id) ON DELETE CASCADE,
 		socio_economic_data JSONB,
@@ -112,24 +114,24 @@ func setupLifecycleIntegrationTest(t *testing.T) (*Service, *gorm.DB, context.Co
 		education_level VARCHAR(50),
 		updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
 		CONSTRAINT uq_party_demographic_party_id UNIQUE(party_id)
-	)`, schemaName)).Error
+	)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create indexes matching migration
 	err = db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_party_demographic_party_id
-		ON %q.party_demographic(party_id)`, schemaName)).Error
+		ON %s.party_demographic(party_id)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	err = db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_party_demographic_socio_economic
-		ON %q.party_demographic USING GIN(socio_economic_data)`, schemaName)).Error
+		ON %s.party_demographic USING GIN(socio_economic_data)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	err = db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_party_demographic_employment
-		ON %q.party_demographic USING GIN(employment_history)`, schemaName)).Error
+		ON %s.party_demographic USING GIN(employment_history)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create the party_bank_relation table (BQ: BankRelations) - singular to match migration
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.party_bank_relation (
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.party_bank_relation (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		party_id UUID NOT NULL REFERENCES %[1]q.party(id) ON DELETE CASCADE,
 		account_officer_id VARCHAR(100),
@@ -138,24 +140,24 @@ func setupLifecycleIntegrationTest(t *testing.T) (*Service, *gorm.DB, context.Co
 		relationship_start_date DATE,
 		updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
 		CONSTRAINT uq_party_bank_relation_party_id UNIQUE(party_id)
-	)`, schemaName)).Error
+	)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create indexes matching migration
 	err = db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_party_bank_relation_party_id
-		ON %q.party_bank_relation(party_id)`, schemaName)).Error
+		ON %s.party_bank_relation(party_id)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	err = db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_party_bank_relation_account_officer
-		ON %q.party_bank_relation(account_officer_id) WHERE account_officer_id IS NOT NULL`, schemaName)).Error
+		ON %s.party_bank_relation(account_officer_id) WHERE account_officer_id IS NOT NULL`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	err = db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_party_bank_relation_relationship_manager
-		ON %q.party_bank_relation(relationship_manager_id) WHERE relationship_manager_id IS NOT NULL`, schemaName)).Error
+		ON %s.party_bank_relation(relationship_manager_id) WHERE relationship_manager_id IS NOT NULL`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create the audit_outbox table for event publishing
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.audit_outbox (
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.audit_outbox (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		table_name VARCHAR(100) NOT NULL,
 		operation VARCHAR(10) NOT NULL,
@@ -170,11 +172,11 @@ func setupLifecycleIntegrationTest(t *testing.T) (*Service, *gorm.DB, context.Co
 		transaction_id VARCHAR(100),
 		client_ip VARCHAR(45),
 		user_agent TEXT
-	)`, schemaName)).Error
+	)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Set default search_path to include tenant schema
-	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName)).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create context with tenant
@@ -329,7 +331,7 @@ func TestEndToEnd_ExpiredReferenceUpdate(t *testing.T) {
 	// Verify old reference is archived (is_active = false)
 	var oldRefActive bool
 	err = db.Raw(fmt.Sprintf(`
-		SELECT is_active FROM %q.party_reference
+		SELECT is_active FROM %s.party_reference
 		WHERE party_id = ? AND government_id = 'OLD-PASSPORT-999'
 	`, tenant.TenantID(testTenantID).SchemaName()), party.PartyId).Scan(&oldRefActive).Error
 	require.NoError(t, err)
@@ -375,7 +377,7 @@ func TestEndToEnd_BankRelationsWithControlParty(t *testing.T) {
 	// Verify event published to audit_outbox (for future Kafka publishing)
 	var outboxCount int64
 	err = db.Raw(fmt.Sprintf(`
-		SELECT COUNT(*) FROM %q.audit_outbox
+		SELECT COUNT(*) FROM %s.audit_outbox
 		WHERE table_name = 'party' AND record_id = ? AND operation = 'UPDATE'
 	`, tenant.TenantID(testTenantID).SchemaName()), party.PartyId).Scan(&outboxCount).Error
 	require.NoError(t, err)
@@ -525,7 +527,7 @@ func TestEventOrdering_UpdateThenControl(t *testing.T) {
 	}
 	var events []outboxEvent
 	err = db.Raw(fmt.Sprintf(`
-		SELECT id, created_at, operation FROM %q.audit_outbox
+		SELECT id, created_at, operation FROM %s.audit_outbox
 		WHERE table_name = 'party' AND record_id = ?
 		ORDER BY created_at ASC
 	`, tenant.TenantID(testTenantID).SchemaName()), party.PartyId).Scan(&events).Error
@@ -786,7 +788,7 @@ func TestWorkflow_UpdateDemographicsIdempotency(t *testing.T) {
 	// Verify only ONE demographics record exists (UNIQUE constraint on party_id)
 	var demoCount int64
 	err := db.Raw(fmt.Sprintf(`
-		SELECT COUNT(*) FROM %q.party_demographic WHERE party_id = ?
+		SELECT COUNT(*) FROM %s.party_demographic WHERE party_id = ?
 	`, tenant.TenantID(testTenantID).SchemaName()), party.PartyId).Scan(&demoCount).Error
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), demoCount, "Should have exactly 1 demographics record")

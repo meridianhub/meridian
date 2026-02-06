@@ -125,7 +125,7 @@ func setupTenantSchema(t *testing.T, tc *e2eTestContext, tenantID string) contex
 
 	// Create the tenant schema
 	_, err := tc.pool.Exec(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName)))
-	require.NoError(t, err, "Failed to create tenant schema %s", schemaName)
+	require.NoError(t, err, "Failed to create tenant schema %s", pq.QuoteIdentifier(schemaName))
 
 	// Apply internal_bank_account schema
 	applyInternalBankAccountSchema(t, tc.pool, schemaName)
@@ -154,7 +154,7 @@ func setupTenantWithSchemas(t *testing.T, pool *pgxpool.Pool, tenantID string) c
 
 	// Create the tenant schema
 	_, err := pool.Exec(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName)))
-	require.NoError(t, err, "Failed to create tenant schema %s", schemaName)
+	require.NoError(t, err, "Failed to create tenant schema %s", pq.QuoteIdentifier(schemaName))
 
 	// Apply internal-bank-account schema
 	applyInternalBankAccountSchema(t, pool, schemaName)
@@ -778,9 +778,9 @@ func TestE2E_AccountLifecycle(t *testing.T) {
 
 		err := tc.db.Raw(fmt.Sprintf(
 			`SELECT from_status, to_status, reason
-			 FROM %q.internal_bank_account_status_history
+			 FROM %s.internal_bank_account_status_history
 			 WHERE account_id = ?
-			 ORDER BY changed_at ASC`, schemaName), accountID).Scan(&history).Error
+			 ORDER BY changed_at ASC`, pq.QuoteIdentifier(schemaName)), accountID).Scan(&history).Error
 		require.NoError(t, err)
 
 		require.Len(t, history, 3)

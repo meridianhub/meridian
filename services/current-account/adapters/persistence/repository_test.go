@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lib/pq"
+
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/shared/platform/auth"
@@ -27,11 +29,11 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	// Create the tenant schema for tests
 	tid := tenant.TenantID(repoTestTenantID)
 	schemaName := tid.SchemaName()
-	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create the accounts table in the tenant schema (matching CurrentAccountEntity.TableName())
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.accounts (
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.accounts (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		account_id VARCHAR(100) NOT NULL UNIQUE,
 		account_identification VARCHAR(34) NOT NULL UNIQUE,
@@ -52,11 +54,11 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 		updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
 		updated_by VARCHAR(100) NOT NULL DEFAULT 'test',
 		deleted_at TIMESTAMP WITH TIME ZONE
-	)`, schemaName)).Error
+	)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Set default search_path to include tenant schema so Create/Update work in the tenant schema
-	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName)).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create context with tenant

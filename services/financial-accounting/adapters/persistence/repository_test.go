@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lib/pq"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
@@ -32,11 +34,11 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	// Create the tenant schema for tests
 	tid := tenant.TenantID(testTenantID)
 	schemaName := tid.SchemaName()
-	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create tables in tenant schema (singular to match production migration)
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.financial_booking_log (
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.financial_booking_log (
 		id UUID PRIMARY KEY,
 		financial_account_type VARCHAR(50) NOT NULL,
 		product_service_reference VARCHAR(255) NOT NULL,
@@ -51,10 +53,10 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 		updated_by VARCHAR(255),
 		version BIGINT NOT NULL DEFAULT 1,
 		deleted_at TIMESTAMP WITH TIME ZONE
-	)`, schemaName)).Error
+	)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.ledger_posting (
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.ledger_posting (
 		id UUID PRIMARY KEY,
 		financial_booking_log_id UUID NOT NULL,
 		posting_direction VARCHAR(10) NOT NULL,
@@ -74,14 +76,14 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 		created_by VARCHAR(255),
 		updated_by VARCHAR(255),
 		deleted_at TIMESTAMP WITH TIME ZONE
-	)`, schemaName)).Error
+	)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create audit_outbox table for GORM hooks
 	// Note: Uses TEXT instead of JSONB for old_values/new_values for compatibility with
 	// the shared audit infrastructure which writes empty strings when values are nil.
 	// record_id is VARCHAR(50) to match the shared AuditOutbox which uses string IDs.
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.audit_outbox (
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.audit_outbox (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		table_name VARCHAR(100) NOT NULL,
 		operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
@@ -96,27 +98,28 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 		transaction_id VARCHAR(100),
 		client_ip VARCHAR(45),
 		user_agent TEXT
-	)`, schemaName)).Error
+	)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create FK constraint (ignore if already exists)
+	qs := pq.QuoteIdentifier(schemaName)
 	err = db.Exec(fmt.Sprintf(`
-		ALTER TABLE %q.ledger_posting
+		ALTER TABLE %s.ledger_posting
 		ADD CONSTRAINT IF NOT EXISTS fk_ledger_posting_booking_log
 		FOREIGN KEY (financial_booking_log_id)
-		REFERENCES %q.financial_booking_log(id)
+		REFERENCES %s.financial_booking_log(id)
 		ON DELETE RESTRICT
-	`, schemaName, schemaName)).Error
+	`, qs, qs)).Error
 	if err != nil {
 		// PostgreSQL before 9.6 doesn't support IF NOT EXISTS for constraints
 		// Try without it and ignore duplicate constraint errors
 		err = db.Exec(fmt.Sprintf(`
-			ALTER TABLE %q.ledger_posting
+			ALTER TABLE %s.ledger_posting
 			ADD CONSTRAINT fk_ledger_posting_booking_log
 			FOREIGN KEY (financial_booking_log_id)
-			REFERENCES %q.financial_booking_log(id)
+			REFERENCES %s.financial_booking_log(id)
 			ON DELETE RESTRICT
-		`, schemaName, schemaName)).Error
+		`, qs, qs)).Error
 		// Ignore duplicate constraint errors (SQLSTATE 42710)
 		if err != nil {
 			var pgErr *pgconn.PgError
@@ -127,7 +130,7 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	}
 
 	// Set default search_path to include tenant schema
-	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName)).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create context with tenant
@@ -508,7 +511,7 @@ func TestSchemaIsolation(t *testing.T) {
 		FROM information_schema.tables
 		WHERE table_schema = ?
 		AND table_name IN ('financial_booking_log', 'ledger_posting')
-	`, schemaName).Scan(&tableCount).Error
+	`, pq.QuoteIdentifier(schemaName)).Scan(&tableCount).Error
 
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), tableCount, "Both tables should exist in tenant schema")
@@ -542,11 +545,11 @@ func TestForeignKeyOnDeleteRestrict(t *testing.T) {
 
 	// Insert directly to tenant schema
 	err := db.Exec(fmt.Sprintf(`
-		INSERT INTO %q.financial_booking_log
+		INSERT INTO %s.financial_booking_log
 		(id, financial_account_type, product_service_reference, business_unit_reference,
 		 chart_of_accounts_rules, base_currency, status, idempotency_key, created_at, updated_at, version)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, schemaName),
+	`, pq.QuoteIdentifier(schemaName)),
 		bookingLog.ID, bookingLog.FinancialAccountType, bookingLog.ProductServiceReference,
 		bookingLog.BusinessUnitReference, bookingLog.ChartOfAccountsRules, bookingLog.BaseCurrency,
 		bookingLog.Status, bookingLog.IdempotencyKey, bookingLog.CreatedAt, bookingLog.UpdatedAt, bookingLog.Version).Error
@@ -554,7 +557,7 @@ func TestForeignKeyOnDeleteRestrict(t *testing.T) {
 
 	// Verify booking log was inserted
 	var bookingLogCount int64
-	err = db.Raw(fmt.Sprintf("SELECT COUNT(*) FROM %q.financial_booking_log WHERE id = ?", schemaName), bookingLogID).Scan(&bookingLogCount).Error
+	err = db.Raw(fmt.Sprintf("SELECT COUNT(*) FROM %s.financial_booking_log WHERE id = ?", pq.QuoteIdentifier(schemaName)), bookingLogID).Scan(&bookingLogCount).Error
 	require.NoError(t, err)
 	require.Equal(t, int64(1), bookingLogCount, "Booking log should be inserted")
 
@@ -580,13 +583,13 @@ func TestForeignKeyOnDeleteRestrict(t *testing.T) {
 
 	// Verify posting was saved
 	var postingCount int64
-	err = db.Raw(fmt.Sprintf("SELECT COUNT(*) FROM %q.ledger_posting WHERE financial_booking_log_id = ?", schemaName), bookingLogID).Scan(&postingCount).Error
+	err = db.Raw(fmt.Sprintf("SELECT COUNT(*) FROM %s.ledger_posting WHERE financial_booking_log_id = ?", pq.QuoteIdentifier(schemaName)), bookingLogID).Scan(&postingCount).Error
 	require.NoError(t, err)
 	require.Equal(t, int64(1), postingCount, "Posting should be saved before testing FK constraint")
 
 	// Try to hard delete booking log while posting still references it
 	// Use explicit schema-qualified DELETE to bypass soft delete and trigger FK constraint
-	err = db.Exec(fmt.Sprintf("DELETE FROM %q.financial_booking_log WHERE id = ?", schemaName), bookingLogID).Error
+	err = db.Exec(fmt.Sprintf("DELETE FROM %s.financial_booking_log WHERE id = ?", pq.QuoteIdentifier(schemaName)), bookingLogID).Error
 
 	// Should fail due to ON DELETE RESTRICT (SQLSTATE 23503)
 	require.Error(t, err)
@@ -612,11 +615,11 @@ func setupTestDBWithAudit(t *testing.T) (*gorm.DB, context.Context, func()) {
 	// Create the tenant schema for tests
 	tid := tenant.TenantID(testTenantID)
 	schemaName := tid.SchemaName()
-	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create tables in tenant schema
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.financial_booking_log (
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.financial_booking_log (
 		id UUID PRIMARY KEY,
 		financial_account_type VARCHAR(50) NOT NULL,
 		product_service_reference VARCHAR(255) NOT NULL,
@@ -631,10 +634,10 @@ func setupTestDBWithAudit(t *testing.T) (*gorm.DB, context.Context, func()) {
 		updated_by VARCHAR(255),
 		version BIGINT NOT NULL DEFAULT 1,
 		deleted_at TIMESTAMP WITH TIME ZONE
-	)`, schemaName)).Error
+	)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.ledger_posting (
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.ledger_posting (
 		id UUID PRIMARY KEY,
 		financial_booking_log_id UUID NOT NULL,
 		posting_direction VARCHAR(10) NOT NULL,
@@ -654,7 +657,7 @@ func setupTestDBWithAudit(t *testing.T) (*gorm.DB, context.Context, func()) {
 		created_by VARCHAR(255),
 		updated_by VARCHAR(255),
 		deleted_at TIMESTAMP WITH TIME ZONE
-	)`, schemaName)).Error
+	)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create audit tables
@@ -662,7 +665,7 @@ func setupTestDBWithAudit(t *testing.T) (*gorm.DB, context.Context, func()) {
 	// the shared audit infrastructure which writes empty strings when values are nil.
 	// This matches the tenant service test pattern.
 	// record_id is VARCHAR(50) to match the shared AuditOutbox which uses string IDs.
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.audit_outbox (
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.audit_outbox (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		table_name VARCHAR(100) NOT NULL,
 		operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
@@ -677,10 +680,10 @@ func setupTestDBWithAudit(t *testing.T) (*gorm.DB, context.Context, func()) {
 		transaction_id VARCHAR(100),
 		client_ip VARCHAR(45),
 		user_agent TEXT
-	)`, schemaName)).Error
+	)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.audit_log (
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.audit_log (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		table_name VARCHAR(100) NOT NULL,
 		operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
@@ -692,11 +695,11 @@ func setupTestDBWithAudit(t *testing.T) (*gorm.DB, context.Context, func()) {
 		transaction_id VARCHAR(100),
 		client_ip VARCHAR(45),
 		user_agent TEXT
-	)`, schemaName)).Error
+	)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Set default search_path to include tenant schema
-	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName)).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create context with tenant

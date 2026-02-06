@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lib/pq"
 	auditv1 "github.com/meridianhub/meridian/api/proto/meridian/audit/v1"
 	"github.com/meridianhub/meridian/internal/audit-consumer/adapters/persistence"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -50,10 +51,10 @@ func setupTestDB(t *testing.T) (*gorm.DB, func()) {
 func createTenantSchema(t *testing.T, db *gorm.DB, tenantID tenant.TenantID) {
 	t.Helper()
 
-	schemaName := tenantID.SchemaName()
+	quotedSchema := pq.QuoteIdentifier(tenantID.SchemaName())
 
 	// Create schema
-	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", schemaName)).Error
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", quotedSchema)).Error
 	require.NoError(t, err)
 
 	// Create audit_log table in tenant schema
@@ -77,7 +78,7 @@ func createTenantSchema(t *testing.T, db *gorm.DB, tenantID tenant.TenantID) {
 			causation_id VARCHAR(100),
 			idempotency_key VARCHAR(100)
 		)
-	`, schemaName)
+	`, quotedSchema)
 
 	err = db.Exec(createTableSQL).Error
 	require.NoError(t, err)
@@ -85,7 +86,7 @@ func createTenantSchema(t *testing.T, db *gorm.DB, tenantID tenant.TenantID) {
 	// Create index on event_id for idempotency
 	err = db.Exec(fmt.Sprintf(
 		"CREATE INDEX IF NOT EXISTS idx_audit_log_event_id ON %s.audit_log(event_id)",
-		schemaName,
+		quotedSchema,
 	)).Error
 	require.NoError(t, err)
 }
@@ -94,8 +95,8 @@ func createTenantSchema(t *testing.T, db *gorm.DB, tenantID tenant.TenantID) {
 func dropTenantSchema(t *testing.T, db *gorm.DB, tenantID tenant.TenantID) {
 	t.Helper()
 
-	schemaName := tenantID.SchemaName()
-	err := db.Exec(fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", schemaName)).Error
+	quotedSchema := pq.QuoteIdentifier(tenantID.SchemaName())
+	err := db.Exec(fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", quotedSchema)).Error
 	require.NoError(t, err)
 }
 
@@ -104,8 +105,8 @@ func getAuditLogCount(t *testing.T, db *gorm.DB, tenantID tenant.TenantID) int64
 	t.Helper()
 
 	var count int64
-	schemaName := tenantID.SchemaName()
-	err := db.Raw(fmt.Sprintf("SELECT COUNT(*) FROM %s.audit_log", schemaName)).Scan(&count).Error
+	quotedSchema := pq.QuoteIdentifier(tenantID.SchemaName())
+	err := db.Raw(fmt.Sprintf("SELECT COUNT(*) FROM %s.audit_log", quotedSchema)).Scan(&count).Error
 	require.NoError(t, err)
 
 	return count
@@ -168,7 +169,7 @@ func TestTenantAuditWriter_Integration_WriteSingleTenantSchema(t *testing.T) {
 
 	// Verify: Read back the audit log entry
 	var auditLog map[string]interface{}
-	err = db.Raw(fmt.Sprintf("SELECT * FROM %s.audit_log WHERE event_id = ?", tenantID.SchemaName()), event.EventId).
+	err = db.Raw(fmt.Sprintf("SELECT * FROM %s.audit_log WHERE event_id = ?", pq.QuoteIdentifier(tenantID.SchemaName())), event.EventId).
 		Scan(&auditLog).Error
 	require.NoError(t, err)
 
@@ -240,7 +241,7 @@ func TestTenantAuditWriter_Integration_MultipleTenantSchemas(t *testing.T) {
 
 	// Verify: Tenant isolation - event IDs don't cross tenant boundaries
 	var tenant1Events []string
-	err = db.Raw(fmt.Sprintf("SELECT event_id FROM %s.audit_log", tenant1.SchemaName())).
+	err = db.Raw(fmt.Sprintf("SELECT event_id FROM %s.audit_log", pq.QuoteIdentifier(tenant1.SchemaName()))).
 		Scan(&tenant1Events).Error
 	require.NoError(t, err)
 	assert.Contains(t, tenant1Events, event1.EventId)
