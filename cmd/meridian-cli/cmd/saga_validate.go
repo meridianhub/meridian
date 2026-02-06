@@ -29,6 +29,10 @@ The script is executed in a sandboxed runtime with mock handlers
 generated from the handler schema (handlers.yaml). This provides
 fast local feedback before deployment.
 
+Exit Codes:
+  0 - Script is valid
+  1 - Validation failed (syntax error, undefined handler, etc.)
+
 Examples:
   meridian-cli saga validate withdrawal.star
   meridian-cli saga validate --json payment.star
@@ -39,7 +43,6 @@ Examples:
 
 func init() {
 	validateCmd.Flags().BoolVar(&jsonOutput, "json", false, "Output validation report as JSON")
-	validateCmd.Flags().BoolVar(&jsonOutput, "dry-run", false, "Synonym for validate (compatibility)")
 	validateCmd.Flags().StringVar(&handlersPath, "handlers", "", "Path to handlers.yaml (default: embedded schema)")
 
 	sagaCmd.AddCommand(validateCmd)

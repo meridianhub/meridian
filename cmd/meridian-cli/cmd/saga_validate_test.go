@@ -138,9 +138,11 @@ r2 = position_keeping.initiate_log(
 func TestRunValidateCommand_RelativePath(t *testing.T) {
 	handlersPath := handlersYAMLPath(t)
 
-	// Create script in temp dir and use relative path
-	dir := t.TempDir()
-	scriptPath := filepath.Join(dir, "test.star")
+	// Create script in the current working directory to test relative path resolution
+	wd, err := os.Getwd()
+	require.NoError(t, err)
+
+	scriptPath := filepath.Join(wd, "test_relative.star")
 	require.NoError(t, os.WriteFile(scriptPath, []byte(`
 result = position_keeping.initiate_log(
     position_id="POS-001",
@@ -148,8 +150,10 @@ result = position_keeping.initiate_log(
     amount=Decimal("100.00"),
 )
 `), 0o644))
+	t.Cleanup(func() { os.Remove(scriptPath) })
 
-	result, err := runValidateLogic(scriptPath, handlersPath)
+	// Use relative path (just the filename since we're in wd)
+	result, err := runValidateLogic("test_relative.star", handlersPath)
 	require.NoError(t, err)
 	assert.True(t, result.Success)
 }
