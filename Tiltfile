@@ -358,7 +358,7 @@ docker_build(
 
     # Rebuild binary on changes (fast incremental builds)
     run(
-      'cd /app && go build -o audit-worker ./services/audit-worker',
+      'cd /app && go build -o audit-worker ./services/audit-worker/cmd',
       trigger=['./services', './shared'],
     ),
 

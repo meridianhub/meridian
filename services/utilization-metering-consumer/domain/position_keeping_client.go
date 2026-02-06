@@ -4,7 +4,7 @@ package domain
 import (
 	"context"
 
-	auditdomain "github.com/meridianhub/meridian/internal/audit-consumer/domain"
+	auditdomain "github.com/meridianhub/meridian/services/audit-worker/domain"
 )
 
 // PositionKeepingClient defines the interface for communicating with the Position Keeping service.

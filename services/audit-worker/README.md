@@ -81,11 +81,25 @@ reference and monitoring strategy.
 | `PORT` | `8080` | HTTP server port |
 | `DATABASE_URL` | (local dev default) | PostgreSQL connection string |
 
+## Directory Structure
+
+```text
+services/audit-worker/
+├── cmd/                    # Entry point (main.go)
+├── domain/                 # Domain models (Measurement, AuditOperation, Transformer)
+├── adapters/
+│   ├── kafka/              # Kafka consumer adapter (AuditConsumer)
+│   └── persistence/        # Database adapter (TenantAuditWriter)
+├── app/                    # Configuration and dependency injection (Container)
+├── observability/          # Metrics and health checks
+└── README.md
+```
+
 ## Development
 
 ```bash
 # Run locally
-go run ./services/audit-worker
+go run ./services/audit-worker/cmd
 
 # Run tests
 go test ./services/audit-worker/...

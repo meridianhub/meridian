@@ -1,4 +1,4 @@
-// Package app provides application configuration and dependency injection for the audit-consumer service.
+// Package app provides application configuration and dependency injection for the audit-worker service.
 package app
 
 import (
@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// Config holds all configuration for the audit-consumer service.
+// Config holds all configuration for the audit-worker service.
 type Config struct {
 	Service  ServiceConfig
 	Database DatabaseConfig

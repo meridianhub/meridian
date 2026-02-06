@@ -1,4 +1,4 @@
-package messaging
+package kafka
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"time"
 
 	auditv1 "github.com/meridianhub/meridian/api/proto/meridian/audit/v1"
-	"github.com/meridianhub/meridian/internal/audit-consumer/domain"
+	"github.com/meridianhub/meridian/services/audit-worker/domain"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

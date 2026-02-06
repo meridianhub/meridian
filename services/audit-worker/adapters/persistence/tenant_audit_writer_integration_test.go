@@ -12,7 +12,7 @@ import (
 
 	"github.com/lib/pq"
 	auditv1 "github.com/meridianhub/meridian/api/proto/meridian/audit/v1"
-	"github.com/meridianhub/meridian/internal/audit-consumer/adapters/persistence"
+	"github.com/meridianhub/meridian/services/audit-worker/adapters/persistence"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -405,6 +405,6 @@ func TestTenantAuditWriter_Integration_ConnectionPooling(t *testing.T) {
 	assert.GreaterOrEqual(t, stats.OpenConnections, 1, "should have open connections")
 	assert.LessOrEqual(t, stats.OpenConnections, stats.MaxOpenConnections, "should not exceed max connections")
 
-	// Connection pool is shared across all tenant schemas
+	// Connection pool is shared across all tenant schemas (same database)
 	// This is the PostgreSQL search_path pattern (per ADR-0002)
 }
