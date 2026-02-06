@@ -80,15 +80,18 @@ jobs:
             echo "Validating: $SCRIPT"
             SCRIPT_ABS="$PROJECT_ROOT/$SCRIPT"
 
+            # Create unique log filename by replacing / with _ to avoid collisions
+            UNIQUE_LOG=$(echo "$SCRIPT" | tr '/' '_')
+
             # Run validation test (calls ValidateSagaScript)
             if go test -v -run TestValidateSagaScript_ProductionScript \
                 ./shared/pkg/saga \
-                -args -script="$SCRIPT_ABS" > "validation-reports/$(basename $SCRIPT).log" 2>&1; then
+                -args -script="$SCRIPT_ABS" > "validation-reports/$UNIQUE_LOG.log" 2>&1; then
               echo "  ✅ PASSED"
               PASSED_COUNT=$((PASSED_COUNT + 1))
             else
               echo "  ❌ FAILED"
-              cat "validation-reports/$(basename $SCRIPT).log"
+              cat "validation-reports/$UNIQUE_LOG.log"
               FAILED_COUNT=$((FAILED_COUNT + 1))
             fi
             echo ""
@@ -106,7 +109,8 @@ jobs:
             echo "## Failed Scripts" >> validation-reports/summary.md
             echo "" >> validation-reports/summary.md
             for SCRIPT in $SCRIPT_PATHS; do
-              LOGFILE="validation-reports/$(basename $SCRIPT).log"
+              UNIQUE_LOG=$(echo "$SCRIPT" | tr '/' '_')
+              LOGFILE="validation-reports/$UNIQUE_LOG.log"
               if [ -f "$LOGFILE" ] && grep -q "FAIL" "$LOGFILE"; then
                 echo "- \`$SCRIPT\`" >> validation-reports/summary.md
               fi
@@ -135,7 +139,7 @@ jobs:
           retention-days: 30
 
       - name: Comment PR with validation results
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         if: failure() && github.event_name == 'pull_request'
         with:
           script: |
