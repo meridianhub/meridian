@@ -133,6 +133,7 @@ type Service struct {
 	posKeepingClient       PositionKeepingClient
 	finAcctClient          FinancialAccountingClient
 	partyClient            PartyClient
+	valuationEngine        ValuationEngine // Optional: executes valuation method logic
 	accountConfig          *config.AccountConfig
 	idempotencyService     idempotency.Service
 	eventPublisher         AccountEventPublisher // Optional: publishes lifecycle events to Kafka
