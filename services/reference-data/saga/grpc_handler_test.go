@@ -113,7 +113,7 @@ func TestRegistryHandler_CreateSagaDraft(t *testing.T) {
 	defer cleanup()
 
 	registry := NewPostgresRegistry(pool, nil)
-	handler := NewRegistryHandler(registry, nil, nil)
+	handler := NewRegistryHandler(registry, nil, nil, nil)
 
 	ctx := tenant.WithTenant(context.Background(), tenantID)
 
@@ -174,7 +174,7 @@ func TestRegistryHandler_UpdateSagaDefinition(t *testing.T) {
 	defer cleanup()
 
 	registry := NewPostgresRegistry(pool, nil)
-	handler := NewRegistryHandler(registry, nil, nil)
+	handler := NewRegistryHandler(registry, nil, nil, nil)
 
 	ctx := tenant.WithTenant(context.Background(), tenantID)
 
@@ -242,7 +242,7 @@ func TestRegistryHandler_ActivateSaga(t *testing.T) {
 	defer cleanup()
 
 	registry := NewPostgresRegistry(pool, nil)
-	handler := NewRegistryHandler(registry, nil, nil)
+	handler := NewRegistryHandler(registry, nil, nil, nil)
 
 	ctx := tenant.WithTenant(context.Background(), tenantID)
 
@@ -291,7 +291,7 @@ func TestRegistryHandler_DeprecateSaga(t *testing.T) {
 	defer cleanup()
 
 	registry := NewPostgresRegistry(pool, nil)
-	handler := NewRegistryHandler(registry, nil, nil)
+	handler := NewRegistryHandler(registry, nil, nil, nil)
 
 	ctx := tenant.WithTenant(context.Background(), tenantID)
 
@@ -349,7 +349,7 @@ func TestRegistryHandler_GetSaga(t *testing.T) {
 	defer cleanup()
 
 	registry := NewPostgresRegistry(pool, nil)
-	handler := NewRegistryHandler(registry, nil, nil)
+	handler := NewRegistryHandler(registry, nil, nil, nil)
 
 	ctx := tenant.WithTenant(context.Background(), tenantID)
 
@@ -404,7 +404,7 @@ func TestRegistryHandler_GetActiveSaga(t *testing.T) {
 	defer cleanup()
 
 	registry := NewPostgresRegistry(pool, nil)
-	handler := NewRegistryHandler(registry, nil, nil)
+	handler := NewRegistryHandler(registry, nil, nil, nil)
 
 	ctx := tenant.WithTenant(context.Background(), tenantID)
 
@@ -454,7 +454,7 @@ func TestRegistryHandler_ListSagas(t *testing.T) {
 	defer cleanup()
 
 	registry := NewPostgresRegistry(pool, nil)
-	handler := NewRegistryHandler(registry, nil, nil)
+	handler := NewRegistryHandler(registry, nil, nil, nil)
 
 	ctx := tenant.WithTenant(context.Background(), tenantID)
 
@@ -513,7 +513,7 @@ func TestRegistryHandler_SagaLifecycle(t *testing.T) {
 	defer cleanup()
 
 	registry := NewPostgresRegistry(pool, nil)
-	handler := NewRegistryHandler(registry, nil, nil)
+	handler := NewRegistryHandler(registry, nil, nil, nil)
 
 	ctx := tenant.WithTenant(context.Background(), tenantID)
 
@@ -585,7 +585,7 @@ func TestRegistryHandler_TenantOverride(t *testing.T) {
 	require.NoError(t, err)
 
 	registry := NewPostgresRegistry(pool, nil)
-	handler := NewRegistryHandler(registry, nil, nil)
+	handler := NewRegistryHandler(registry, nil, nil, nil)
 
 	t.Run("tenant override takes precedence over system saga", func(t *testing.T) {
 		// Create and activate a tenant override

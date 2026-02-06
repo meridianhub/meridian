@@ -15,6 +15,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	sagav1 "github.com/meridianhub/meridian/api/proto/meridian/saga/v1"
+	"github.com/meridianhub/meridian/shared/pkg/saga/validation"
 )
 
 // RegistryHandler implements the SagaRegistryService gRPC service.
@@ -22,21 +23,24 @@ import (
 // creating drafts, updating definitions, activation, and deprecation.
 type RegistryHandler struct {
 	sagav1.UnimplementedSagaRegistryServiceServer
-	registry  Registry
-	validator *ReferenceValidator
-	logger    *slog.Logger
+	registry        Registry
+	validator       *ReferenceValidator
+	dryRunValidator *validation.DryRunValidator
+	logger          *slog.Logger
 }
 
 // NewRegistryHandler creates a new saga registry gRPC handler.
 // The validator is optional - if nil, ValidateSagaDraft will return empty results.
-func NewRegistryHandler(registry Registry, validator *ReferenceValidator, logger *slog.Logger) *RegistryHandler {
+// The dryRunValidator is optional - if nil, ValidateSaga will return an error.
+func NewRegistryHandler(registry Registry, validator *ReferenceValidator, dryRunValidator *validation.DryRunValidator, logger *slog.Logger) *RegistryHandler {
 	if logger == nil {
 		logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	}
 	return &RegistryHandler{
-		registry:  registry,
-		validator: validator,
-		logger:    logger,
+		registry:        registry,
+		validator:       validator,
+		dryRunValidator: dryRunValidator,
+		logger:          logger,
 	}
 }
 
@@ -428,6 +432,67 @@ func (h *RegistryHandler) paginate(defs []*Definition, offset, pageSize int) ([]
 	return defs[offset:end], nextToken
 }
 
+// ValidateSaga validates a saga script using dry-run execution.
+// This validates script syntax, handler existence, type correctness, and runtime behavior.
+func (h *RegistryHandler) ValidateSaga(
+	ctx context.Context,
+	req *sagav1.ValidateSagaRequest,
+) (*sagav1.ValidateSagaResponse, error) {
+	// Return error if validator not configured
+	if h.dryRunValidator == nil {
+		return nil, status.Error(codes.FailedPrecondition, "dry-run validator not configured")
+	}
+
+	// Validate the script using DryRunValidator
+	result, err := h.dryRunValidator.Validate(ctx, req.Script)
+	if err != nil {
+		h.logger.Error("validation failed",
+			"saga_name", req.SagaName,
+			"version", req.Version,
+			"error", err)
+		return nil, status.Errorf(codes.Internal, "validation error: %v", err)
+	}
+
+	// Log validation attempt
+	h.logger.Info("saga script validated",
+		"saga_name", req.SagaName,
+		"version", req.Version,
+		"success", result.Success,
+		"error_count", len(result.Errors),
+		"handler_count", result.Metrics.HandlerCallCount)
+
+	// Convert ValidationResult to protobuf response
+	response := &sagav1.ValidateSagaResponse{
+		Success: result.Success,
+		Errors:  make([]*sagav1.ValidationError, 0, len(result.Errors)),
+		Metrics: &sagav1.ComplexityMetrics{
+			HandlerCallCount:    int32(result.Metrics.HandlerCallCount),
+			OperationCount:      int32(result.Metrics.OperationCount),
+			EstimatedDurationMs: int32(result.Metrics.EstimatedDuration.Milliseconds()),
+			ComplexityScore:     int32(calculateComplexityScore(result.Metrics.HandlerCallCount)),
+		},
+	}
+
+	// Convert errors
+	for _, err := range result.Errors {
+		response.Errors = append(response.Errors, &sagav1.ValidationError{
+			Line:       int32(err.Line),
+			Column:     int32(err.Column),
+			Message:    err.Message,
+			Category:   h.errorCategoryToProto(err.Category),
+			Suggestion: "", // Could enhance with handler suggestions later
+		})
+	}
+
+	// Generate formatted report using HumanReadableFormatter
+	formatter := &validation.HumanReadableFormatter{
+		AvailableHandlers: []string{}, // Could inject from schema registry
+	}
+	response.FormattedReport = formatter.Format(result)
+
+	return response, nil
+}
+
 // ValidateSagaDraft validates a saga script without activating it.
 func (h *RegistryHandler) ValidateSagaDraft(
 	ctx context.Context,
@@ -662,4 +727,30 @@ func (h *RegistryHandler) validationResultToProto(result *ValidationResult) *sag
 	}
 
 	return proto
+}
+
+// errorCategoryToProto converts validation.ErrorCategory to proto ErrorCategory.
+func (h *RegistryHandler) errorCategoryToProto(cat validation.ErrorCategory) sagav1.ErrorCategory {
+	switch cat {
+	case validation.CategorySyntax:
+		return sagav1.ErrorCategory_ERROR_CATEGORY_SYNTAX
+	case validation.CategoryUndefinedHandler:
+		return sagav1.ErrorCategory_ERROR_CATEGORY_UNDEFINED_HANDLER
+	case validation.CategoryTypeMismatch:
+		return sagav1.ErrorCategory_ERROR_CATEGORY_TYPE_MISMATCH
+	case validation.CategoryRuntime:
+		return sagav1.ErrorCategory_ERROR_CATEGORY_RUNTIME
+	default:
+		return sagav1.ErrorCategory_ERROR_CATEGORY_UNSPECIFIED
+	}
+}
+
+// calculateComplexityScore calculates a 0-10 complexity score based on handler call count.
+// Formula: min(10, HandlerCallCount / 2)
+func calculateComplexityScore(handlerCallCount int) int {
+	score := handlerCallCount / 2
+	if score > 10 {
+		return 10
+	}
+	return score
 }
