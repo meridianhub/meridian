@@ -68,13 +68,17 @@ func setupControlTestDB(t *testing.T) (*persistence.Repository, *persistence.Lie
 		account_id UUID NOT NULL,
 		amount_cents BIGINT NOT NULL,
 		currency VARCHAR(3) NOT NULL,
+		bucket_id VARCHAR(255) NOT NULL DEFAULT '',
 		status VARCHAR(20) NOT NULL,
 		payment_order_reference VARCHAR(255) NOT NULL UNIQUE,
 		termination_reason TEXT,
 		expires_at TIMESTAMP WITH TIME ZONE,
 		created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
 		updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-		version BIGINT NOT NULL DEFAULT 1
+		version BIGINT NOT NULL DEFAULT 1,
+		reserved_quantity JSONB,
+		valued_amount JSONB,
+		valuation_analysis JSONB
 	)`
 	testdb.CreateTable(t, tc.DB, tc.Tenant, lienDDL)
 

@@ -12,6 +12,7 @@ import (
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
+	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
@@ -21,6 +22,7 @@ import (
 	"github.com/shopspring/decimal"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"gorm.io/gorm"
@@ -78,7 +80,11 @@ const (
 	opStatusUpdateFailed          = "update_failed"
 )
 
-// InitiateLien creates a fund reservation on an account
+// InitiateLien creates a fund reservation on an account.
+// Supports two modes:
+//  1. Legacy (MoneyAmount): Same-currency lien, no valuation needed.
+//  2. Multi-asset (InstrumentAmount input): Atomic valuation using valuateInternal(),
+//     producing a price-locked valued_amount and full audit trail.
 func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest) (*pb.InitiateLienResponse, error) {
 	start := time.Now()
 	operationStatus := operationStatusSuccess
@@ -100,11 +106,70 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		return idempotentResp, nil
 	}
 
-	// Convert and validate amount first (before transaction)
-	lienAmount, err := s.protoToMoney(req.Amount)
-	if err != nil {
-		operationStatus = opStatusInvalidAmount
-		return nil, status.Errorf(codes.InvalidArgument, "invalid amount: %v", err)
+	// Determine mode: multi-asset (input) or legacy (amount)
+	useValuation := req.Input != nil && req.Input.Amount != "" && req.Input.InstrumentCode != ""
+
+	var lienAmount domain.Money
+	var valuationResult *valuateInternalResult
+
+	if useValuation {
+		// Multi-asset mode: parse input and run atomic valuation
+		inputAmount, err := decimal.NewFromString(req.Input.Amount)
+		if err != nil {
+			operationStatus = opStatusInvalidInputAmount
+			return nil, status.Errorf(codes.InvalidArgument, "invalid input amount: %v", err)
+		}
+		if !inputAmount.IsPositive() {
+			operationStatus = opStatusInputAmountNonPositive
+			return nil, status.Error(codes.InvalidArgument, "input amount must be positive")
+		}
+
+		knowledgeAt := time.Now()
+		if req.KnowledgeAt != nil {
+			knowledgeAt = req.KnowledgeAt.AsTime()
+		}
+
+		// Run shared valuation function (same logic as EvaluateAssetValuation - Ghost Pricing prevention)
+		valuationResult, err = s.valuateInternal(ctx, req.AccountId, inputAmount, req.Input.InstrumentCode, knowledgeAt)
+		if err != nil {
+			switch {
+			case errors.Is(err, ErrValuationAccountNotFound):
+				operationStatus = opStatusAccountNotFound
+				return nil, status.Errorf(codes.NotFound, "%v", err)
+			case errors.Is(err, ErrNoActiveValuationFeature):
+				operationStatus = opStatusNoValuationFeature
+				return nil, status.Errorf(codes.FailedPrecondition, "%v", err)
+			case errors.Is(err, ErrValuationFeatureNotActive):
+				operationStatus = opStatusFeatureNotActive
+				return nil, status.Errorf(codes.FailedPrecondition, "%v", err)
+			case errors.Is(err, ErrValuationRepoNotConfigured):
+				operationStatus = opStatusValuationFeatureRepoNil
+				return nil, status.Errorf(codes.FailedPrecondition, "%v", err)
+			case errors.Is(err, ErrValuationEngineFailed):
+				operationStatus = opStatusValuationFailed
+				return nil, status.Errorf(codes.Internal, "%v", err)
+			default:
+				operationStatus = opStatusValuationFailed
+				return nil, status.Errorf(codes.Internal, "valuation failed: %v", err)
+			}
+		}
+
+		// Convert valued output to domain Money for lien amount (the actual reservation)
+		// The valued amount is in the account's native instrument (currency)
+		valuedCents := valuationResult.OutputAmount.Mul(decimal.NewFromInt(100)).RoundBank(0)
+		lienAmount, err = domain.NewMoney(valuationResult.OutputCode, valuedCents.IntPart())
+		if err != nil {
+			operationStatus = opStatusInvalidAmount
+			return nil, status.Errorf(codes.Internal, "failed to create valued amount: %v", err)
+		}
+	} else {
+		// Legacy mode: convert and validate MoneyAmount
+		var err error
+		lienAmount, err = s.protoToMoney(req.Amount)
+		if err != nil {
+			operationStatus = opStatusInvalidAmount
+			return nil, status.Errorf(codes.InvalidArgument, "invalid amount: %v", err)
+		}
 	}
 
 	if !lienAmount.IsPositive() {
@@ -114,15 +179,6 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 
 	// Prefetch account and balance from Position Keeping BEFORE entering transaction
 	// to avoid holding database locks during external service calls (deadlock prevention).
-	// We'll re-validate sufficient funds inside the transaction with fresh lien totals.
-	//
-	// RACE WINDOW NOTE: There's a small window between prefetch and transaction lock where
-	// the balance could change. However, this is acceptable because:
-	// 1. Position Keeping's ExecuteDebit operation will atomically verify and debit funds
-	// 2. Liens are reservations - actual fund movement happens only on ExecuteLien
-	// 3. The alternative (external calls inside transaction) risks deadlocks
-	// 4. False rejections are recoverable (retry), false acceptances fail at execution time
-	// Verify account exists before prefetching balance from Position Keeping
 	if _, err := s.repo.FindByID(ctx, req.AccountId); err != nil {
 		if errors.Is(err, persistence.ErrAccountNotFound) {
 			operationStatus = opStatusAccountNotFound
@@ -132,14 +188,8 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
 	}
 
-	// Get bucket_id from request (may be empty for non-bucket-scoped liens)
 	bucketID := req.BucketId
 
-	// Prefetch balance from Position Keeping.
-	// Note: Currently Position Keeping returns total balance regardless of bucket.
-	// Bucket-aware balance tracking will be added in future iterations when Position Keeping
-	// supports bucket-scoped balance queries. For now, we validate against total balance
-	// but scope lien reservations to buckets.
 	prefetchedBalanceCents, err := s.getAccountBalanceCents(ctx, req.AccountId)
 	if err != nil {
 		operationStatus = opStatusRetrieveFailed
@@ -151,8 +201,6 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 	}
 
 	// Use a transaction with pessimistic locking to prevent race conditions.
-	// Without FOR UPDATE, concurrent InitiateLien calls could both check available
-	// balance, see sufficient funds, and both create liens - resulting in over-reservation.
 	var lien *domain.Lien
 	var account *domain.CurrentAccount
 	var availableBalance int64
@@ -161,7 +209,6 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		txRepo := s.repo.WithTx(tx)
 		txLienRepo := s.lienRepo.WithTx(tx)
 
-		// Retrieve account with FOR UPDATE lock to prevent concurrent modifications
 		var txErr error
 		accountResult, txErr := txRepo.FindByIDForUpdate(ctx, req.AccountId)
 		if txErr != nil {
@@ -169,7 +216,6 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		}
 		account = &accountResult
 
-		// Validate account is active
 		if account.Status() != domain.AccountStatusActive {
 			return errTxAccountNotActive
 		}
@@ -179,10 +225,7 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 			return errTxCurrencyMismatch
 		}
 
-		// Calculate available balance using pre-fetched balance (no external call inside tx).
-		// When bucket_id is provided, sum only liens scoped to that bucket for solvency validation.
-		// This ensures liens within a bucket don't exceed the bucket's share of funds, providing
-		// partial isolation even though Position Keeping doesn't yet support bucket-scoped balances.
+		// Calculate available balance
 		var activeLiensTotal int64
 		if bucketID != "" {
 			activeLiensTotal, err = txLienRepo.SumActiveAmountByAccountIDAndBucket(ctx, account.ID(), bucketID)
@@ -193,11 +236,8 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 			return fmt.Errorf("%w: %v", errTxSumLiensFailed, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
 
-		// Available = Pre-fetched Balance - Active Liens (scoped to bucket if bucket_id provided)
-		// Balance was fetched from Position Keeping before entering transaction.
 		availableBalance = prefetchedBalanceCents - activeLiensTotal
 
-		// Check sufficient funds
 		lienCents, err := lienAmount.ToMinorUnits()
 		if err != nil {
 			return fmt.Errorf("%w: %v", errTxDomainError, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
@@ -206,14 +246,26 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 			return errTxInsufficientFunds
 		}
 
-		// Create lien domain object with bucket awareness
-		// bucket_id was extracted from request before entering transaction
-		lien, err = domain.NewLien(account.ID(), lienAmount, bucketID, req.PaymentOrderReference, nil)
+		// Create lien domain object
+		if useValuation {
+			// Multi-asset: create valued lien with price lock
+			reservedQty := &domain.InstrumentAmount{
+				Amount:         decimal.RequireFromString(req.Input.Amount),
+				InstrumentCode: req.Input.InstrumentCode,
+			}
+			valuedAmt := &domain.InstrumentAmount{
+				Amount:         valuationResult.OutputAmount,
+				InstrumentCode: valuationResult.OutputCode,
+			}
+			analysisJSONB, _ := protojson.Marshal(valuationResult.Analysis) //nolint:errcheck // best-effort serialization for audit trail
+			lien, err = domain.NewValuedLien(account.ID(), lienAmount, bucketID, req.PaymentOrderReference, nil, reservedQty, valuedAmt, analysisJSONB)
+		} else {
+			lien, err = domain.NewLien(account.ID(), lienAmount, bucketID, req.PaymentOrderReference, nil)
+		}
 		if err != nil {
 			return fmt.Errorf("%w: %v", errTxDomainError, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
 
-		// Persist lien (within the transaction)
 		if err := txLienRepo.Create(ctx, lien); err != nil {
 			return fmt.Errorf("%w: %v", errTxSaveLien, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
@@ -221,7 +273,6 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		return nil
 	})
 
-	// Handle transaction errors with appropriate status codes
 	if txErr != nil {
 		switch {
 		case errors.Is(txErr, persistence.ErrAccountNotFound):
@@ -252,21 +303,32 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		"lien_id", lien.ID.String(),
 		"account_id", account.AccountID(),
 		"amount_cents", safeMinorUnits(lienAmount),
+		"has_valuation", lien.HasValuation(),
 		"payment_order_ref", req.PaymentOrderReference)
 
 	// Calculate new available balance after this lien
-	// ToMinorUnitsUnchecked is safe here: amount was validated in transaction above (line 151)
 	newAvailableBalance := availableBalance - lienAmount.ToMinorUnitsUnchecked()
 	availableMoney, err := domain.NewMoney(string(account.Balance().Currency()), newAvailableBalance)
 	if err != nil {
-		// This should never happen if validation passed - log and return without available balance
 		s.logger.Error("failed to create available balance money", "error", err)
 	}
 
-	return &pb.InitiateLienResponse{
+	resp := &pb.InitiateLienResponse{
 		Lien:             toLienProto(lien),
 		AvailableBalance: toMoneyAmount(availableMoney),
-	}, nil
+	}
+
+	// Add valuation fields to response when atomic valuation was performed
+	if useValuation && valuationResult != nil {
+		resp.ValuedAmount = &quantityv1.InstrumentAmount{
+			Amount:         valuationResult.OutputAmount.String(),
+			InstrumentCode: valuationResult.OutputCode,
+			Version:        1,
+		}
+		resp.Basis = valuationResult.Analysis
+	}
+
+	return resp, nil
 }
 
 // ExecuteLien converts a reservation to an actual debit atomically with Redis idempotency
@@ -771,7 +833,7 @@ func (s *Service) protoToMoney(amount *commonpb.MoneyAmount) (domain.Money, erro
 
 // toLienProto converts a domain Lien to proto Lien
 func toLienProto(lien *domain.Lien) *pb.Lien {
-	return &pb.Lien{
+	pbLien := &pb.Lien{
 		LienId:                lien.ID.String(),
 		AccountId:             lien.AccountID.String(),
 		Amount:                toMoneyAmount(lien.Amount),
@@ -781,6 +843,24 @@ func toLienProto(lien *domain.Lien) *pb.Lien {
 		UpdatedAt:             timestamppb.New(lien.UpdatedAt),
 		BucketId:              lien.BucketID,
 	}
+
+	// Add valuation fields if present
+	if lien.ReservedQuantity != nil && !lien.ReservedQuantity.IsZero() {
+		pbLien.ReservedQuantity = &quantityv1.InstrumentAmount{
+			Amount:         lien.ReservedQuantity.Amount.String(),
+			InstrumentCode: lien.ReservedQuantity.InstrumentCode,
+			Version:        1,
+		}
+	}
+	if lien.ValuedAmount != nil && !lien.ValuedAmount.IsZero() {
+		pbLien.ValuedAmount = &quantityv1.InstrumentAmount{
+			Amount:         lien.ValuedAmount.Amount.String(),
+			InstrumentCode: lien.ValuedAmount.InstrumentCode,
+			Version:        1,
+		}
+	}
+
+	return pbLien
 }
 
 // mapLienStatusToProto maps domain LienStatus to proto LienStatus
@@ -856,10 +936,32 @@ func (s *Service) checkLienIdempotency(ctx context.Context, paymentOrderRef stri
 	}
 	// Calculate available balance scoped to the lien's bucket (if any)
 	availableMoney := s.calculateAvailableBalanceByBucket(ctx, existingLien.AccountID, existingLien.BucketID, account.Balance())
-	return &pb.InitiateLienResponse{
+	resp := &pb.InitiateLienResponse{
 		Lien:             toLienProto(existingLien),
 		AvailableBalance: toMoneyAmount(availableMoney),
-	}, true, nil
+	}
+
+	// Reconstruct valuation fields for price lock preservation on idempotent retry
+	if existingLien.HasValuation() {
+		if existingLien.ValuedAmount != nil {
+			resp.ValuedAmount = &quantityv1.InstrumentAmount{
+				Amount:         existingLien.ValuedAmount.Amount.String(),
+				InstrumentCode: existingLien.ValuedAmount.InstrumentCode,
+				Version:        1,
+			}
+		}
+		if existingLien.ValuationAnalysis != nil {
+			var analysis pb.ValuationAnalysis
+			if err := protojson.Unmarshal(existingLien.ValuationAnalysis, &analysis); err == nil {
+				resp.Basis = &analysis
+			} else {
+				s.logger.Warn("failed to unmarshal valuation analysis for idempotent response",
+					"lien_id", existingLien.ID.String(), "error", err)
+			}
+		}
+	}
+
+	return resp, true, nil
 }
 
 // hydrateAccountWithBalance returns a new CurrentAccount with balance populated from Position Keeping.

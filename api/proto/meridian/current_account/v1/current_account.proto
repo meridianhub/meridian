@@ -301,6 +301,15 @@ message Lien {
   // For Phase 1, this is stored for future bucket-aware position tracking.
   // Empty string represents the default bucket.
   string bucket_id = 8 [(buf.validate.field).string = {max_len: 255}];
+
+  // reserved_quantity is the original input amount before valuation (e.g., 100 kWh).
+  // Only present for multi-asset liens that went through atomic valuation.
+  meridian.quantity.v1.InstrumentAmount reserved_quantity = 9;
+
+  // valued_amount is the price-locked valuation result in the account's native instrument.
+  // This is the amount actually reserved against the account balance (e.g., 35.00 GBP).
+  // Only present for multi-asset liens that went through atomic valuation.
+  meridian.quantity.v1.InstrumentAmount valued_amount = 10;
 }
 
 // Request to initiate a new current account
@@ -633,6 +642,9 @@ message RetrieveCurrentAccountResponse {
 
 // Request to initiate a lien (reserve funds) on an account
 // BQ: Initiate - Creates a new fund reservation
+// Supports both legacy MoneyAmount (currency-only) and multi-asset InstrumentAmount.
+// When input (InstrumentAmount) is provided, atomic valuation is performed using
+// the account's valuation features to produce a valued_amount (price lock).
 message InitiateLienRequest {
   // account_id is the account to place the lien on
   string account_id = 1 [(buf.validate.field).string = {
@@ -641,8 +653,10 @@ message InitiateLienRequest {
     pattern: "^[a-zA-Z0-9_-]+$"
   }];
 
-  // amount is the amount to reserve
-  meridian.common.v1.MoneyAmount amount = 2 [(buf.validate.field).required = true];
+  // amount is the amount to reserve (legacy, currency-only).
+  // Use this for same-currency liens (e.g., GBP lien on GBP account).
+  // Mutually exclusive with input - if both provided, input takes precedence.
+  meridian.common.v1.MoneyAmount amount = 2;
 
   // payment_order_reference identifies the Payment Order creating this lien
   // Forward slash allowed for hierarchical Payment Order references
@@ -659,6 +673,16 @@ message InitiateLienRequest {
   // For Phase 1, this is optional - if not provided, defaults to empty string (default bucket).
   // Future phases will support CEL expressions to compute bucket_id from transaction attributes.
   string bucket_id = 5 [(buf.validate.field).string = {max_len: 255}];
+
+  // input is the multi-asset amount to reserve (e.g., 100 kWh, 50 USD).
+  // When provided, atomic valuation is performed: the input instrument is converted
+  // to the account's native instrument using the configured ValuationFeature.
+  // The resulting valued_amount becomes the price lock for this lien.
+  meridian.quantity.v1.InstrumentAmount input = 6;
+
+  // knowledge_at is the point-in-time for bi-temporal data resolution (optional, defaults to now).
+  // Controls which valuation feature and market data are used for the price lock.
+  google.protobuf.Timestamp knowledge_at = 7;
 }
 
 // Response for initiating a lien
@@ -668,6 +692,15 @@ message InitiateLienResponse {
 
   // available_balance is the updated available balance after reservation
   meridian.common.v1.MoneyAmount available_balance = 2 [(buf.validate.field).required = true];
+
+  // valued_amount is the price-locked valuation result in the account's native instrument.
+  // Only present when the request used InstrumentAmount input (multi-asset valuation).
+  // For same-currency liens (legacy MoneyAmount), this field is not set.
+  meridian.quantity.v1.InstrumentAmount valued_amount = 3;
+
+  // basis provides full transparency into the valuation computation.
+  // Only present when atomic valuation was performed (input field was provided).
+  ValuationAnalysis basis = 4;
 }
 
 // Request to execute a lien (convert reservation to actual debit)

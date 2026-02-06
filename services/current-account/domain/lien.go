@@ -1,10 +1,12 @@
 package domain
 
 import (
+	"encoding/json"
 	"errors"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 )
 
 // Lien domain errors
@@ -14,7 +16,19 @@ var (
 	ErrLienExpired           = errors.New("lien has expired")
 	ErrInvalidLienAmount     = errors.New("lien amount must be positive")
 	ErrLienAlreadyExists     = errors.New("lien already exists for this idempotency key")
+	ErrValuedAmountImmutable = errors.New("valued_amount cannot be modified on an active lien")
 )
+
+// InstrumentAmount represents a quantity of a specific instrument for domain-level valuation tracking.
+type InstrumentAmount struct {
+	Amount         decimal.Decimal `json:"amount"`
+	InstrumentCode string          `json:"instrument_code"`
+}
+
+// IsZero returns true if the instrument amount has not been set.
+func (ia InstrumentAmount) IsZero() bool {
+	return ia.Amount.IsZero() && ia.InstrumentCode == ""
+}
 
 // LienStatus represents the lifecycle state of a lien
 type LienStatus string
@@ -45,6 +59,16 @@ type Lien struct {
 	Version               int
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
+	// ReservedQuantity stores the original input before valuation (e.g., 100 kWh).
+	// Only set for multi-asset liens that went through atomic valuation.
+	ReservedQuantity *InstrumentAmount
+	// ValuedAmount stores the price-locked valuation result in the account's native instrument.
+	// This is the amount actually reserved against the account balance (e.g., 35.00 GBP).
+	// IMMUTABLE once the lien is ACTIVE - cannot be modified to prevent Ghost Pricing.
+	ValuedAmount *InstrumentAmount
+	// ValuationAnalysis stores the full audit trail of the valuation computation as JSON.
+	// Contains method_id, version, applied_rates, observation_ids, etc.
+	ValuationAnalysis json.RawMessage
 }
 
 // NewLien creates a new lien in ACTIVE status.
@@ -68,6 +92,35 @@ func NewLien(accountID uuid.UUID, amount Money, bucketID string, paymentOrderRef
 		CreatedAt:             now,
 		UpdatedAt:             now,
 	}, nil
+}
+
+// NewValuedLien creates a new lien in ACTIVE status with atomic valuation data (price lock).
+// The reservedQuantity is the original input (e.g., 100 kWh), valuedAmount is the
+// price-locked conversion (e.g., 35.00 GBP), and analysisJSON is the full audit trail.
+// The lien's Amount is set to the valued amount (the actual reservation against balance).
+func NewValuedLien(
+	accountID uuid.UUID,
+	amount Money,
+	bucketID string,
+	paymentOrderReference string,
+	expiresAt *time.Time,
+	reservedQuantity *InstrumentAmount,
+	valuedAmount *InstrumentAmount,
+	analysisJSON json.RawMessage,
+) (*Lien, error) {
+	lien, err := NewLien(accountID, amount, bucketID, paymentOrderReference, expiresAt)
+	if err != nil {
+		return nil, err
+	}
+	lien.ReservedQuantity = reservedQuantity
+	lien.ValuedAmount = valuedAmount
+	lien.ValuationAnalysis = analysisJSON
+	return lien, nil
+}
+
+// HasValuation returns true if this lien was created through atomic valuation.
+func (l *Lien) HasValuation() bool {
+	return l.ValuedAmount != nil && !l.ValuedAmount.IsZero()
 }
 
 // Execute transitions the lien to EXECUTED status (terminal state)

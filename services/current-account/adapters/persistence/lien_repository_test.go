@@ -43,6 +43,9 @@ func setupLienTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 		payment_order_reference VARCHAR(255) NOT NULL UNIQUE,
 		termination_reason TEXT,
 		expires_at TIMESTAMP WITH TIME ZONE,
+		reserved_quantity JSONB,
+		valued_amount JSONB,
+		valuation_analysis JSONB,
 		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
 		updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
 		version INT NOT NULL DEFAULT 1
@@ -666,7 +669,10 @@ func setupMultiTenantLienTestDB(t *testing.T, tenantIDs ...string) (*gorm.DB, ma
 			expires_at TIMESTAMP WITH TIME ZONE,
 			created_at TIMESTAMP WITH TIME ZONE NOT NULL,
 			updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
-			version INT NOT NULL DEFAULT 1
+			version INT NOT NULL DEFAULT 1,
+			reserved_quantity JSONB,
+			valued_amount JSONB,
+			valuation_analysis JSONB
 		)`, pq.QuoteIdentifier(schemaName))).Error
 		require.NoError(t, err)
 
