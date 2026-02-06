@@ -21,8 +21,8 @@ groups:
       - alert: BucketEvaluationFailureRateHigh
         expr: |
           (
-            rate(payment_order_bucket_evaluation_failures_total[5m])
-            / clamp_min(rate(payment_order_bucket_evaluations_total[5m]), 0.0001)
+            sum(rate(payment_order_bucket_evaluation_failures_total[5m]))
+            / clamp_min(sum(rate(payment_order_bucket_evaluations_total[5m])), 0.0001)
           ) > 0.10
         for: 5m
         labels:
@@ -30,9 +30,9 @@ groups:
           service: payment-order
           category: silent_failure
         annotations:
-          summary: "High bucket evaluation failure rate ({{ $labels.instrument_code }})"
+          summary: "High bucket evaluation failure rate"
           description: |
-            Bucket evaluation is failing at {{ $value | humanizePercentage }} for instrument {{ $labels.instrument_code }}.
+            Bucket evaluation is failing at {{ $value | humanizePercentage }}.
             This may indicate reference-data service unavailability or invalid CEL expressions.
             Payments will continue with default bucket (graceful degradation), but bucket-aware solvency validation is compromised.
           runbook_url: "https://docs.meridian.io/runbooks/bucket-evaluation-failure"
@@ -40,7 +40,7 @@ groups:
       # Sustained bucket evaluation failures - degraded solvency validation
       - alert: BucketEvaluationFailuresSustained
         expr: |
-          increase(payment_order_bucket_evaluation_failures_total[15m]) > 50
+          sum(increase(payment_order_bucket_evaluation_failures_total[15m])) > 50
         for: 10m
         labels:
           severity: critical
@@ -50,7 +50,6 @@ groups:
           summary: "Sustained bucket evaluation failures detected"
           description: |
             More than 50 bucket evaluation failures in the last 15 minutes.
-            Error type: {{ $labels.error_type }}, Instrument: {{ $labels.instrument_code }}.
             Bucket-aware solvency validation is severely degraded.
           runbook_url: "https://docs.meridian.io/runbooks/bucket-evaluation-failure"
 
@@ -63,8 +62,8 @@ groups:
       - alert: WebhookDeliveryFailureRateHigh
         expr: |
           (
-            rate(current_account_webhook_delivery_attempts_total{status="failed"}[5m])
-            / clamp_min(rate(current_account_webhook_delivery_attempts_total{status!="skipped"}[5m]), 0.0001)
+            sum by (event_type) (rate(current_account_webhook_delivery_attempts_total{status="failed"}[5m]))
+            / clamp_min(sum by (event_type) (rate(current_account_webhook_delivery_attempts_total{status!="skipped"}[5m])), 0.0001)
           ) > 0.05
         for: 5m
         labels:
@@ -192,8 +191,8 @@ groups:
       - alert: LienExecutionFailureRateHigh
         expr: |
           (
-            rate(payment_order_lien_execution_retries_total{outcome="failed"}[5m])
-            / clamp_min(rate(payment_order_lien_execution_retries_total{outcome="attempt"}[5m]), 0.0001)
+            sum(rate(payment_order_lien_execution_retries_total{outcome="failed"}[5m]))
+            / clamp_min(sum(rate(payment_order_lien_execution_retries_total{outcome="attempt"}[5m])), 0.0001)
           ) > 0.20
         for: 5m
         labels:
@@ -235,9 +234,9 @@ groups:
       - record: production_readiness:silent_failure_rate:5m
         expr: |
           (
-            rate(payment_order_bucket_evaluation_failures_total[5m]) +
-            rate(current_account_webhook_delivery_attempts_total{status="failed"}[5m]) +
-            rate(payment_order_lien_execution_retries_exhausted_total[5m])
+            sum(rate(payment_order_bucket_evaluation_failures_total[5m])) +
+            sum(rate(current_account_webhook_delivery_attempts_total{status="failed"}[5m])) +
+            sum(rate(payment_order_lien_execution_retries_exhausted_total[5m]))
           )
 
       # NoOp services running (should be 0 in production)
