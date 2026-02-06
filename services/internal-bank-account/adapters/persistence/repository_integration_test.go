@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lib/pq"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/meridianhub/meridian/services/internal-bank-account/domain"
@@ -122,12 +124,12 @@ func loadInternalBankAccountSchema(t *testing.T, pool *pgxpool.Pool) {
 
 	// Create tenant schema
 	schemaName := defaultTestTenantID.SchemaName()
-	_, err := pool.Exec(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName))
+	_, err := pool.Exec(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName)))
 	require.NoError(t, err, "Failed to create tenant schema")
 
 	// Create internal_bank_account table in tenant schema (matches migration 20260112000001_initial.sql)
 	_, err = pool.Exec(ctx, fmt.Sprintf(`
-		CREATE TABLE IF NOT EXISTS %q.internal_bank_account (`, schemaName)+`
+		CREATE TABLE IF NOT EXISTS %s.internal_bank_account (`, pq.QuoteIdentifier(schemaName))+`
 			id uuid NOT NULL DEFAULT gen_random_uuid(),
 			created_at timestamptz NOT NULL DEFAULT now(),
 			created_by character varying(100) NOT NULL,
@@ -164,23 +166,24 @@ func loadInternalBankAccountSchema(t *testing.T, pool *pgxpool.Pool) {
 
 	// Create unique constraint on account_id
 	_, err = pool.Exec(ctx, fmt.Sprintf(`
-		CREATE UNIQUE INDEX IF NOT EXISTS idx_internal_bank_account_account_id ON %q.internal_bank_account (account_id)
-	`, schemaName))
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_internal_bank_account_account_id ON %s.internal_bank_account (account_id)
+	`, pq.QuoteIdentifier(schemaName)))
 	require.NoError(t, err, "Failed to create account_id unique index")
 
 	// Create indexes for query optimization
+	quotedSchema := pq.QuoteIdentifier(schemaName)
 	_, err = pool.Exec(ctx, fmt.Sprintf(`
-		CREATE INDEX IF NOT EXISTS idx_internal_bank_account_type ON %q.internal_bank_account (account_type);
-		CREATE INDEX IF NOT EXISTS idx_internal_bank_account_instrument ON %q.internal_bank_account (instrument_code);
-		CREATE INDEX IF NOT EXISTS idx_internal_bank_account_status ON %q.internal_bank_account (status);
-		CREATE INDEX IF NOT EXISTS idx_internal_bank_account_code ON %q.internal_bank_account (account_code);
-		CREATE INDEX IF NOT EXISTS idx_internal_bank_account_deleted_at ON %q.internal_bank_account (deleted_at)
-	`, schemaName, schemaName, schemaName, schemaName, schemaName))
+		CREATE INDEX IF NOT EXISTS idx_internal_bank_account_type ON %s.internal_bank_account (account_type);
+		CREATE INDEX IF NOT EXISTS idx_internal_bank_account_instrument ON %s.internal_bank_account (instrument_code);
+		CREATE INDEX IF NOT EXISTS idx_internal_bank_account_status ON %s.internal_bank_account (status);
+		CREATE INDEX IF NOT EXISTS idx_internal_bank_account_code ON %s.internal_bank_account (account_code);
+		CREATE INDEX IF NOT EXISTS idx_internal_bank_account_deleted_at ON %s.internal_bank_account (deleted_at)
+	`, quotedSchema, quotedSchema, quotedSchema, quotedSchema, quotedSchema))
 	require.NoError(t, err, "Failed to create indexes")
 
 	// Create status history table in tenant schema
 	_, err = pool.Exec(ctx, fmt.Sprintf(`
-		CREATE TABLE IF NOT EXISTS %q.internal_bank_account_status_history (
+		CREATE TABLE IF NOT EXISTS %s.internal_bank_account_status_history (
 			id uuid NOT NULL DEFAULT gen_random_uuid(),
 			account_id character varying(100) NOT NULL,
 			from_status character varying(20) NOT NULL,
@@ -192,19 +195,19 @@ func loadInternalBankAccountSchema(t *testing.T, pool *pgxpool.Pool) {
 			CONSTRAINT chk_from_status CHECK (from_status IN ('ACTIVE', 'SUSPENDED', 'CLOSED')),
 			CONSTRAINT chk_to_status CHECK (to_status IN ('ACTIVE', 'SUSPENDED', 'CLOSED')),
 			CONSTRAINT fk_status_history_account FOREIGN KEY (account_id)
-				REFERENCES %q.internal_bank_account (account_id)
+				REFERENCES %s.internal_bank_account (account_id)
 				ON UPDATE NO ACTION ON DELETE RESTRICT
 		)
-	`, schemaName, schemaName))
+	`, quotedSchema, quotedSchema))
 	require.NoError(t, err, "Failed to create status_history table")
 
 	// Create status history indexes
 	_, err = pool.Exec(ctx, fmt.Sprintf(`
 		CREATE INDEX IF NOT EXISTS idx_status_history_account_changed
-			ON %q.internal_bank_account_status_history (account_id, changed_at DESC);
+			ON %s.internal_bank_account_status_history (account_id, changed_at DESC);
 		CREATE INDEX IF NOT EXISTS idx_status_history_changed_at
-			ON %q.internal_bank_account_status_history (changed_at)
-	`, schemaName, schemaName))
+			ON %s.internal_bank_account_status_history (changed_at)
+	`, quotedSchema, quotedSchema))
 	require.NoError(t, err, "Failed to create status history indexes")
 }
 
@@ -483,7 +486,7 @@ func TestIntegration_StatusHistory(t *testing.T) {
 	// Verify using direct query with schema-qualified table name
 	schemaName := defaultTestTenantID.SchemaName()
 	var count int64
-	err = tc.db.Raw(fmt.Sprintf(`SELECT COUNT(*) FROM %q.internal_bank_account_status_history WHERE account_id = ?`, schemaName), account.AccountID()).Scan(&count).Error
+	err = tc.db.Raw(fmt.Sprintf(`SELECT COUNT(*) FROM %s.internal_bank_account_status_history WHERE account_id = ?`, pq.QuoteIdentifier(schemaName)), account.AccountID()).Scan(&count).Error
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), count)
 
@@ -491,7 +494,7 @@ func TestIntegration_StatusHistory(t *testing.T) {
 	err = tc.repo.RecordStatusChange(ctx, account.AccountID(), "SUSPENDED", "ACTIVE", "Reactivation")
 	require.NoError(t, err)
 
-	err = tc.db.Raw(fmt.Sprintf(`SELECT COUNT(*) FROM %q.internal_bank_account_status_history WHERE account_id = ?`, schemaName), account.AccountID()).Scan(&count).Error
+	err = tc.db.Raw(fmt.Sprintf(`SELECT COUNT(*) FROM %s.internal_bank_account_status_history WHERE account_id = ?`, pq.QuoteIdentifier(schemaName)), account.AccountID()).Scan(&count).Error
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), count)
 
@@ -500,7 +503,7 @@ func TestIntegration_StatusHistory(t *testing.T) {
 		ToStatus string
 	}
 	var history []historyRow
-	err = tc.db.Raw(fmt.Sprintf(`SELECT to_status FROM %q.internal_bank_account_status_history WHERE account_id = ? ORDER BY changed_at DESC`, schemaName), account.AccountID()).Scan(&history).Error
+	err = tc.db.Raw(fmt.Sprintf(`SELECT to_status FROM %s.internal_bank_account_status_history WHERE account_id = ? ORDER BY changed_at DESC`, pq.QuoteIdentifier(schemaName)), account.AccountID()).Scan(&history).Error
 	require.NoError(t, err)
 	require.Len(t, history, 2)
 	assert.Equal(t, "ACTIVE", history[0].ToStatus)
@@ -612,7 +615,7 @@ func TestIntegration_SoftDelete(t *testing.T) {
 	// Verify deleted_at is set in database using raw query with schema-qualified table
 	schemaName := defaultTestTenantID.SchemaName()
 	var deletedAt *time.Time
-	err = tc.db.Raw(fmt.Sprintf(`SELECT deleted_at FROM %q.internal_bank_account WHERE id = ?`, schemaName), account.ID()).Scan(&deletedAt).Error
+	err = tc.db.Raw(fmt.Sprintf(`SELECT deleted_at FROM %s.internal_bank_account WHERE id = ?`, pq.QuoteIdentifier(schemaName)), account.ID()).Scan(&deletedAt).Error
 	require.NoError(t, err)
 	assert.NotNil(t, deletedAt)
 }
@@ -775,12 +778,12 @@ func setupMultiTenantContainer(t *testing.T, tenants ...tenant.TenantID) *testCo
 	for _, tenantID := range tenants {
 		schemaName := tenantID.SchemaName()
 
-		_, err := pool.Exec(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName))
+		_, err := pool.Exec(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName)))
 		require.NoError(t, err, "Failed to create schema for tenant %s", tenantID)
 
 		// Create internal_bank_account table in tenant schema
 		_, err = pool.Exec(ctx, fmt.Sprintf(`
-			CREATE TABLE IF NOT EXISTS %q.internal_bank_account (
+			CREATE TABLE IF NOT EXISTS %s.internal_bank_account (
 				id uuid NOT NULL DEFAULT gen_random_uuid(),
 				created_at timestamptz NOT NULL DEFAULT now(),
 				created_by character varying(100) NOT NULL,
@@ -801,18 +804,19 @@ func setupMultiTenantContainer(t *testing.T, tenants ...tenant.TenantID) *testCo
 				version bigint NOT NULL DEFAULT 1,
 				PRIMARY KEY (id)
 			)
-		`, schemaName))
+		`, pq.QuoteIdentifier(schemaName)))
 		require.NoError(t, err, "Failed to create table for tenant %s", tenantID)
 
 		// Create unique index on account_id
+		qs := pq.QuoteIdentifier(schemaName)
 		_, err = pool.Exec(ctx, fmt.Sprintf(
-			`CREATE UNIQUE INDEX IF NOT EXISTS idx_%s_account_id ON %q.internal_bank_account (account_id)`,
-			string(tenantID), schemaName))
+			`CREATE UNIQUE INDEX IF NOT EXISTS idx_%s_account_id ON %s.internal_bank_account (account_id)`,
+			string(tenantID), qs))
 		require.NoError(t, err, "Failed to create account_id index for tenant %s", tenantID)
 
 		// Create status_history table
 		_, err = pool.Exec(ctx, fmt.Sprintf(`
-			CREATE TABLE IF NOT EXISTS %q.internal_bank_account_status_history (
+			CREATE TABLE IF NOT EXISTS %s.internal_bank_account_status_history (
 				id uuid NOT NULL DEFAULT gen_random_uuid(),
 				account_id character varying(100) NOT NULL,
 				from_status character varying(20) NOT NULL,
@@ -822,10 +826,10 @@ func setupMultiTenantContainer(t *testing.T, tenants ...tenant.TenantID) *testCo
 				changed_at timestamptz NOT NULL DEFAULT now(),
 				PRIMARY KEY (id),
 				CONSTRAINT fk_status_history_account_%s FOREIGN KEY (account_id)
-					REFERENCES %q.internal_bank_account (account_id)
+					REFERENCES %s.internal_bank_account (account_id)
 					ON UPDATE NO ACTION ON DELETE RESTRICT
 			)
-		`, schemaName, string(tenantID), schemaName))
+		`, qs, string(tenantID), qs))
 		require.NoError(t, err, "Failed to create status_history table for tenant %s", tenantID)
 	}
 
@@ -1075,12 +1079,12 @@ func TestIntegration_MultiTenant_StatusHistoryIsolation(t *testing.T) {
 	// Query status history directly to verify isolation
 	// Each tenant's status_history should only contain their own records
 	var countA int64
-	err = tc.db.Raw(fmt.Sprintf(`SELECT COUNT(*) FROM %q.internal_bank_account_status_history WHERE account_id = ?`, tenantA.SchemaName()), "IBA-HIST-A").Scan(&countA).Error
+	err = tc.db.Raw(fmt.Sprintf(`SELECT COUNT(*) FROM %s.internal_bank_account_status_history WHERE account_id = ?`, pq.QuoteIdentifier(tenantA.SchemaName())), "IBA-HIST-A").Scan(&countA).Error
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), countA, "Tenant A should have 1 status history record")
 
 	var countB int64
-	err = tc.db.Raw(fmt.Sprintf(`SELECT COUNT(*) FROM %q.internal_bank_account_status_history WHERE account_id = ?`, tenantB.SchemaName()), "IBA-HIST-A").Scan(&countB).Error
+	err = tc.db.Raw(fmt.Sprintf(`SELECT COUNT(*) FROM %s.internal_bank_account_status_history WHERE account_id = ?`, pq.QuoteIdentifier(tenantB.SchemaName())), "IBA-HIST-A").Scan(&countB).Error
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), countB, "Tenant B should have 1 status history record")
 }
@@ -1211,14 +1215,14 @@ func loadBenchSchema(b *testing.B, pool *pgxpool.Pool) {
 	schemaName := tenant.TenantID("bench_tenant").SchemaName()
 
 	// Create schema
-	_, err := pool.Exec(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName))
+	_, err := pool.Exec(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName)))
 	if err != nil {
 		b.Fatalf("Failed to create schema: %v", err)
 	}
 
 	// Create internal_bank_account table
 	_, err = pool.Exec(ctx, fmt.Sprintf(`
-		CREATE TABLE IF NOT EXISTS %q.internal_bank_account (
+		CREATE TABLE IF NOT EXISTS %s.internal_bank_account (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 			created_by VARCHAR(100) NOT NULL,
@@ -1238,20 +1242,20 @@ func loadBenchSchema(b *testing.B, pool *pgxpool.Pool) {
 			attributes JSONB NOT NULL DEFAULT '{}',
 			version BIGINT NOT NULL DEFAULT 1
 		)
-	`, schemaName))
+	`, pq.QuoteIdentifier(schemaName)))
 	if err != nil {
 		b.Fatalf("Failed to create internal_bank_account table: %v", err)
 	}
 
 	// Create indexes
-	_, err = pool.Exec(ctx, fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_bench_account_code ON %q.internal_bank_account (account_code)`, schemaName))
+	_, err = pool.Exec(ctx, fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_bench_account_code ON %s.internal_bank_account (account_code)`, pq.QuoteIdentifier(schemaName)))
 	if err != nil {
 		b.Fatalf("Failed to create account_code index: %v", err)
 	}
 
 	// Create status history table
 	_, err = pool.Exec(ctx, fmt.Sprintf(`
-		CREATE TABLE IF NOT EXISTS %q.internal_bank_account_status_history (
+		CREATE TABLE IF NOT EXISTS %s.internal_bank_account_status_history (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 			created_by VARCHAR(100) NOT NULL,
@@ -1260,7 +1264,7 @@ func loadBenchSchema(b *testing.B, pool *pgxpool.Pool) {
 			new_status VARCHAR(20) NOT NULL,
 			reason TEXT
 		)
-	`, schemaName))
+	`, pq.QuoteIdentifier(schemaName)))
 	if err != nil {
 		b.Fatalf("Failed to create status_history table: %v", err)
 	}

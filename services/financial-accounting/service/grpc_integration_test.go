@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lib/pq"
+
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
@@ -71,11 +73,11 @@ func setupIntegrationTest(t *testing.T) (*testServer, context.Context) {
 	// Create tenant schema
 	tid := tenant.TenantID(testTenantID)
 	schemaName := tid.SchemaName()
-	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create tables in tenant schema (singular names to match production)
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.financial_booking_log (
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.financial_booking_log (
 		id UUID PRIMARY KEY,
 		financial_account_type TEXT NOT NULL,
 		product_service_reference TEXT NOT NULL,
@@ -90,12 +92,12 @@ func setupIntegrationTest(t *testing.T) (*testServer, context.Context) {
 		updated_by VARCHAR(255),
 		version INT NOT NULL DEFAULT 1,
 		deleted_at TIMESTAMP
-	)`, schemaName)).Error
+	)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.ledger_posting (
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.ledger_posting (
 		id UUID PRIMARY KEY,
-		financial_booking_log_id UUID NOT NULL REFERENCES %q.financial_booking_log(id) ON DELETE RESTRICT,
+		financial_booking_log_id UUID NOT NULL REFERENCES %s.financial_booking_log(id) ON DELETE RESTRICT,
 		posting_direction TEXT NOT NULL,
 		amount_cents BIGINT NOT NULL,
 		currency VARCHAR(32) NOT NULL,
@@ -120,7 +122,7 @@ func setupIntegrationTest(t *testing.T) (*testServer, context.Context) {
 	// Note: Uses TEXT instead of JSONB for old_values/new_values for compatibility with
 	// the shared audit infrastructure which writes empty strings when values are nil.
 	// record_id is VARCHAR(50) to match the shared AuditOutbox which uses string IDs.
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.audit_outbox (
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.audit_outbox (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		table_name VARCHAR(100) NOT NULL,
 		operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
@@ -135,11 +137,11 @@ func setupIntegrationTest(t *testing.T) (*testServer, context.Context) {
 		transaction_id VARCHAR(100),
 		client_ip VARCHAR(45),
 		user_agent TEXT
-	)`, schemaName)).Error
+	)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Set search_path to tenant schema
-	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName)).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create context with tenant

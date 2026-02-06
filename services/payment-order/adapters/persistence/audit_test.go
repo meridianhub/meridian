@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lib/pq"
+
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
 	"github.com/meridianhub/meridian/shared/platform/audit"
@@ -25,11 +27,11 @@ func setupTestDBWithAudit(t *testing.T) (*gorm.DB, context.Context, func()) {
 	// Create tenant schema
 	tid := tenant.TenantID(testTenantID)
 	schemaName := tid.SchemaName()
-	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create payment_order table in tenant schema (singular per entity TableName())
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.payment_order (
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.payment_order (
 		id UUID PRIMARY KEY,
 		debtor_account_id VARCHAR(255) NOT NULL,
 		creditor_reference VARCHAR(255) NOT NULL,
@@ -59,14 +61,14 @@ func setupTestDBWithAudit(t *testing.T) (*gorm.DB, context.Context, func()) {
 		failed_at TIMESTAMP WITH TIME ZONE,
 		cancelled_at TIMESTAMP WITH TIME ZONE,
 		reversed_at TIMESTAMP WITH TIME ZONE
-	)`, schemaName)).Error
+	)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create audit_outbox table in tenant schema
 	// Note: record_id is VARCHAR(50) to match the shared audit.AuditOutbox struct
 	// which uses string to support both UUID and string IDs.
 	// old_values/new_values use TEXT to handle empty strings (JSONB rejects empty string).
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.audit_outbox (
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.audit_outbox (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		table_name VARCHAR(100) NOT NULL,
 		operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
@@ -81,15 +83,15 @@ func setupTestDBWithAudit(t *testing.T) (*gorm.DB, context.Context, func()) {
 		transaction_id VARCHAR(100),
 		client_ip VARCHAR(45),
 		user_agent TEXT
-	)`, schemaName)).Error
+	)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create indexes for audit_outbox
-	err = db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_audit_outbox_status_created ON %q.audit_outbox(status, created_at)`, schemaName)).Error
+	err = db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_audit_outbox_status_created ON %s.audit_outbox(status, created_at)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Set search_path to tenant schema
-	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName)).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create context with tenant

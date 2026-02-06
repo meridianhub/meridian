@@ -339,7 +339,7 @@ func (infra *e2eTestInfra) createTenantSchema(ctx context.Context, t *testing.T,
 
 	// Create schema
 	_, err := infra.pool.ExecContext(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", quotedSchema))
-	require.NoError(t, err, "failed to create schema %s", schemaName)
+	require.NoError(t, err, "failed to create schema %s", pq.QuoteIdentifier(schemaName))
 
 	// Create parties table
 	_, err = infra.pool.ExecContext(ctx, fmt.Sprintf(`
@@ -356,14 +356,14 @@ func (infra *e2eTestInfra) createTenantSchema(ctx context.Context, t *testing.T,
 			version INTEGER NOT NULL DEFAULT 1
 		)
 	`, quotedSchema))
-	require.NoError(t, err, "failed to create parties table in schema %s", schemaName)
+	require.NoError(t, err, "failed to create parties table in schema %s", pq.QuoteIdentifier(schemaName))
 
 	// Create unique index for external reference
 	_, err = infra.pool.ExecContext(ctx, fmt.Sprintf(`
 		CREATE UNIQUE INDEX IF NOT EXISTS idx_parties_ext_ref ON %s.parties (external_reference, external_reference_type)
 		WHERE external_reference IS NOT NULL
 	`, quotedSchema))
-	require.NoError(t, err, "failed to create unique index in schema %s", schemaName)
+	require.NoError(t, err, "failed to create unique index in schema %s", pq.QuoteIdentifier(schemaName))
 }
 
 // uniqueTenantID generates a unique tenant ID for test isolation

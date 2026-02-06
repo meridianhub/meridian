@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/domain"
@@ -78,11 +79,12 @@ func setupControlTestDB(t *testing.T) (*persistence.Repository, *persistence.Lie
 	testdb.CreateTable(t, tc.DB, tc.Tenant, lienDDL)
 
 	// Create index on status for operational queries
-	err := tc.DB.Exec(fmt.Sprintf("CREATE INDEX IF NOT EXISTS idx_account_status ON %s.account(status)", tc.Tenant.SchemaName())).Error
+	quotedSchema := pq.QuoteIdentifier(tc.Tenant.SchemaName())
+	err := tc.DB.Exec(fmt.Sprintf("CREATE INDEX IF NOT EXISTS idx_account_status ON %s.account(status)", quotedSchema)).Error
 	require.NoError(t, err)
 
 	// Create GIN index on status_history for audit queries
-	err = tc.DB.Exec(fmt.Sprintf("CREATE INDEX IF NOT EXISTS idx_account_status_history ON %s.account USING GIN(status_history)", tc.Tenant.SchemaName())).Error
+	err = tc.DB.Exec(fmt.Sprintf("CREATE INDEX IF NOT EXISTS idx_account_status_history ON %s.account USING GIN(status_history)", quotedSchema)).Error
 	require.NoError(t, err)
 
 	repo := persistence.NewRepository(tc.DB)

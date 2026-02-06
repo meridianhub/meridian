@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lib/pq"
+
 	"github.com/google/uuid"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
@@ -131,13 +133,13 @@ func setupTestContainer(t *testing.T) *testContainer {
 	// Create the tenant schema for tests
 	tid := tenant.TenantID(benchTenantID)
 	schemaName := tid.SchemaName()
-	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
 	if err != nil {
 		t.Fatalf("Failed to create schema: %v", err)
 	}
 
 	// Create the internal_bank_account table in the tenant schema
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.internal_bank_account (
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.internal_bank_account (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 		created_by VARCHAR(100) NOT NULL,
@@ -157,13 +159,13 @@ func setupTestContainer(t *testing.T) *testContainer {
 		attributes JSONB NOT NULL DEFAULT '{}',
 		version BIGINT NOT NULL DEFAULT 1,
 		clearing_purpose VARCHAR(32) NULL
-	)`, schemaName)).Error
+	)`, pq.QuoteIdentifier(schemaName))).Error
 	if err != nil {
 		t.Fatalf("Failed to create internal_bank_account table: %v", err)
 	}
 
 	// Create the status history table
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.internal_bank_account_status_history (
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.internal_bank_account_status_history (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		account_id VARCHAR(100) NOT NULL,
 		from_status VARCHAR(20) NOT NULL,
@@ -171,34 +173,34 @@ func setupTestContainer(t *testing.T) *testContainer {
 		reason TEXT,
 		changed_by VARCHAR(100) NOT NULL,
 		changed_at TIMESTAMPTZ NOT NULL DEFAULT now()
-	)`, schemaName)).Error
+	)`, pq.QuoteIdentifier(schemaName))).Error
 	if err != nil {
 		t.Fatalf("Failed to create status_history table: %v", err)
 	}
 
 	// Create indexes
-	err = db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_account_code ON %q.internal_bank_account (account_code)`, schemaName)).Error
+	err = db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_account_code ON %s.internal_bank_account (account_code)`, pq.QuoteIdentifier(schemaName))).Error
 	if err != nil {
 		t.Fatalf("Failed to create account_code index: %v", err)
 	}
 
-	err = db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_account_type ON %q.internal_bank_account (account_type)`, schemaName)).Error
+	err = db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_account_type ON %s.internal_bank_account (account_type)`, pq.QuoteIdentifier(schemaName))).Error
 	if err != nil {
 		t.Fatalf("Failed to create account_type index: %v", err)
 	}
 
-	err = db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_instrument_code ON %q.internal_bank_account (instrument_code)`, schemaName)).Error
+	err = db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_instrument_code ON %s.internal_bank_account (instrument_code)`, pq.QuoteIdentifier(schemaName))).Error
 	if err != nil {
 		t.Fatalf("Failed to create instrument_code index: %v", err)
 	}
 
-	err = db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_status ON %q.internal_bank_account (status)`, schemaName)).Error
+	err = db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_status ON %s.internal_bank_account (status)`, pq.QuoteIdentifier(schemaName))).Error
 	if err != nil {
 		t.Fatalf("Failed to create status index: %v", err)
 	}
 
 	// Set default search_path to include tenant schema
-	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName)).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
 	if err != nil {
 		t.Fatalf("Failed to set search_path: %v", err)
 	}
