@@ -2,6 +2,7 @@
 package service
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -245,27 +246,51 @@ func currentAccountPositionKeepingInitiateLog(ctx *saga.StarlarkContext, params 
 		idempKeyPrefix = sagaTypeWithdrawal
 	}
 
+	// Extract optional valuation_analysis parameter
+	var attributes map[string]string
+	if valuationAnalysis, ok := params["valuation_analysis"]; ok && valuationAnalysis != nil {
+		// Marshal valuation_analysis to JSON for storage in attributes
+		bytes, marshalErr := json.Marshal(valuationAnalysis)
+		if marshalErr != nil {
+			deps.Logger.Warn("failed to marshal valuation_analysis",
+				"error", marshalErr,
+				"transaction_id", transactionID)
+		} else {
+			attributes = map[string]string{
+				"valuation_analysis": string(bytes),
+			}
+			deps.Logger.Debug("including valuation_analysis in position attributes",
+				"transaction_id", transactionID,
+				"analysis_size", len(bytes))
+		}
+	}
+
 	deps.Logger.Info("executing position_keeping.initiate_log",
 		"account_id", accountID,
 		"transaction_id", transactionID,
-		"direction", direction)
+		"direction", direction,
+		"has_valuation_analysis", attributes != nil)
 
 	// Create proto amount
 	protoAmount := decimalToMoneyAmount(amount, currency)
 
+	// Build transaction log entry
+	initialEntry := &positionkeepingv1.TransactionLogEntry{
+		EntryId:       uuid.New().String(),
+		TransactionId: transactionID,
+		AccountId:     accountID,
+		Amount:        protoAmount,
+		Direction:     pbDirection,
+		Timestamp:     timestamppb.Now(),
+		Description:   description,
+		Attributes:    attributes,
+	}
+
 	// Call Position Keeping service
 	resp, err := deps.PosKeepingClient.InitiateFinancialPositionLog(ctx,
 		&positionkeepingv1.InitiateFinancialPositionLogRequest{
-			AccountId: accountID,
-			InitialEntry: &positionkeepingv1.TransactionLogEntry{
-				EntryId:       uuid.New().String(),
-				TransactionId: transactionID,
-				AccountId:     accountID,
-				Amount:        protoAmount,
-				Direction:     pbDirection,
-				Timestamp:     timestamppb.Now(),
-				Description:   description,
-			},
+			AccountId:    accountID,
+			InitialEntry: initialEntry,
 			IdempotencyKey: &commonpb.IdempotencyKey{
 				Key: fmt.Sprintf("%s-%s-%s", idempKeyPrefix, accountID, transactionID),
 			},
