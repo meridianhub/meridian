@@ -770,6 +770,38 @@ service PositionKeepingService {
       }
     };
   }
+
+  // RecordReservation creates a reservation linked to a lien for projected balance calculations.
+  // Idempotent by lien_id - duplicate calls return the existing reservation.
+  rpc RecordReservation(RecordReservationRequest) returns (RecordReservationResponse) {
+    option (google.api.http) = {
+      post: "/v1/reservations"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      responses: {
+        key: "201"
+        value: {
+          description: "Reservation recorded successfully"
+        }
+      }
+    };
+  }
+
+  // ReleaseReservation transitions a reservation to EXECUTED or TERMINATED.
+  rpc ReleaseReservation(ReleaseReservationRequest) returns (ReleaseReservationResponse) {
+    option (google.api.http) = {
+      post: "/v1/reservations/{lien_id}/release"
+      body: "*"
+    };
+  }
+
+  // GetProjectedBalance calculates the projected balance accounting for active reservations.
+  rpc GetProjectedBalance(GetProjectedBalanceRequest) returns (GetProjectedBalanceResponse) {
+    option (google.api.http) = {
+      get: "/v1/accounts/{account_id}/projected-balance/{instrument_code}"
+    };
+  }
 }
 
 // UpdatePositionRequest is reserved for future use.
@@ -830,4 +862,142 @@ message MergePositionsRequest {
 // Currently blocked - positions use append-only write semantics.
 message MergePositionsResponse {
   // This response is never returned - the RPC always returns UNIMPLEMENTED.
+}
+
+// ReservationStatus represents the lifecycle state of a reservation.
+enum ReservationStatus {
+  // RESERVATION_STATUS_UNSPECIFIED is the default unset value.
+  RESERVATION_STATUS_UNSPECIFIED = 0;
+  // RESERVATION_STATUS_ACTIVE indicates the reservation is currently held.
+  RESERVATION_STATUS_ACTIVE = 1;
+  // RESERVATION_STATUS_EXECUTED indicates the reservation was fulfilled.
+  RESERVATION_STATUS_EXECUTED = 2;
+  // RESERVATION_STATUS_TERMINATED indicates the reservation was cancelled.
+  RESERVATION_STATUS_TERMINATED = 3;
+}
+
+// RecordReservationRequest creates a reservation linked to a lien.
+message RecordReservationRequest {
+  // account_id is the account that holds the reserved position.
+  string account_id = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+      pattern: "^[a-zA-Z0-9_-]+$"
+    }
+  ];
+
+  // lien_id is the unique identifier of the lien this reservation is for.
+  // Used as the idempotency key - duplicate lien_ids return the existing reservation.
+  string lien_id = 2 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.uuid = true
+  ];
+
+  // instrument_code identifies the asset being reserved.
+  string instrument_code = 3 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 32
+      pattern: "^[A-Z][A-Z0-9_]*$"
+    }
+  ];
+
+  // reserved_amount is the quantity being reserved.
+  string reserved_amount = 4 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 50
+      pattern: "^-?\\d+(\\.\\d+)?$"
+    }
+  ];
+
+  // bucket_id is the fungibility bucket for this reservation.
+  string bucket_id = 5 [(buf.validate.field).string.max_len = 256];
+
+  // knowledge_at is the timestamp when this reservation became known.
+  google.protobuf.Timestamp knowledge_at = 6;
+}
+
+// RecordReservationResponse returns the result of creating a reservation.
+message RecordReservationResponse {
+  // reservation_id is the unique identifier for the created reservation (same as lien_id).
+  string reservation_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // already_exists indicates this reservation was already recorded (idempotent return).
+  bool already_exists = 2;
+}
+
+// ReleaseReservationRequest releases a reservation by transitioning its status.
+message ReleaseReservationRequest {
+  // lien_id is the unique identifier of the lien whose reservation to release.
+  string lien_id = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.uuid = true
+  ];
+
+  // reason indicates why the reservation is being released.
+  ReservationStatus reason = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    in: [2, 3] /* Only EXECUTED or TERMINATED */
+  }];
+}
+
+// ReleaseReservationResponse returns the result of releasing a reservation.
+message ReleaseReservationResponse {
+  // released indicates whether the reservation was successfully released.
+  bool released = 1;
+}
+
+// GetProjectedBalanceRequest retrieves a projected balance accounting for active reservations.
+message GetProjectedBalanceRequest {
+  // account_id is the account to calculate the projected balance for.
+  string account_id = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+      pattern: "^[a-zA-Z0-9_-]+$"
+    }
+  ];
+
+  // instrument_code identifies the asset to calculate the projected balance for.
+  string instrument_code = 2 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 32
+      pattern: "^[A-Z][A-Z0-9_]*$"
+    }
+  ];
+
+  // bucket_id filters the balance to a specific fungibility bucket (optional).
+  string bucket_id = 3 [(buf.validate.field).string.max_len = 256];
+
+  // knowledge_at is the point-in-time for the balance query (optional, defaults to now).
+  google.protobuf.Timestamp knowledge_at = 4;
+}
+
+// GetProjectedBalanceResponse returns the projected balance with reservation breakdown.
+message GetProjectedBalanceResponse {
+  // current_balance is the sum of all position entries matching the filter.
+  string current_balance = 1;
+
+  // active_reservations_total is the sum of all active reservation amounts.
+  string active_reservations_total = 2;
+
+  // projected_balance is current_balance minus active_reservations_total.
+  string projected_balance = 3;
+
+  // bucket_id is the bucket that was filtered (empty if no filter applied).
+  string bucket_id = 4;
+
+  // instrument_code is the instrument that was queried.
+  string instrument_code = 5;
+
+  // as_of is the timestamp when this balance was calculated.
+  google.protobuf.Timestamp as_of = 6;
 }
