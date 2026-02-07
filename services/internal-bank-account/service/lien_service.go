@@ -119,6 +119,10 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 			operationStatus = operationStatusFailed
 			return nil, precisionErr
 		}
+		if !inputAmount.Equal(inputAmount.Truncate(precision)) {
+			operationStatus = opStatusInvalidInputAmount
+			return nil, status.Errorf(codes.InvalidArgument, "input amount has more than %d decimal places for instrument %s", precision, nativeInstrument)
+		}
 		amountCents := inputAmount.Shift(precision).IntPart()
 
 		lien, err = domain.NewLien(account.ID(), amountCents, nativeInstrument, req.BucketId, req.PaymentOrderReference, expiresAt)
@@ -157,6 +161,10 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		if precisionErr != nil {
 			operationStatus = operationStatusFailed
 			return nil, precisionErr
+		}
+		if !result.OutputAmount.Equal(result.OutputAmount.Truncate(precision)) {
+			operationStatus = opStatusValuationFailed
+			return nil, status.Errorf(codes.Internal, "valued amount has more than %d decimal places for instrument %s", precision, nativeInstrument)
 		}
 		amountCents := result.OutputAmount.Shift(precision).IntPart()
 

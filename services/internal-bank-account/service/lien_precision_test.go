@@ -310,6 +310,35 @@ func TestDomainToProtoLien_FallbackWithoutClient(t *testing.T) {
 	assert.Equal(t, "100.5", protoLien.Amount.Amount)
 }
 
+// --- Precision truncation validation tests ---
+
+func TestPrecisionValidation_ExcessDecimalPlaces(t *testing.T) {
+	tests := []struct {
+		name      string
+		amount    string
+		precision int32
+		valid     bool
+	}{
+		{"GBP exact 2dp", "100.50", 2, true},
+		{"GBP whole amount", "100", 2, true},
+		{"GBP excess 3dp", "100.555", 2, false},
+		{"JPY exact 0dp", "1000", 0, true},
+		{"JPY has decimals", "1000.5", 0, false},
+		{"BHD exact 3dp", "100.125", 3, true},
+		{"BHD excess 4dp", "100.1234", 3, false},
+		{"BTC exact 8dp", "1.23456789", 8, true},
+		{"BTC excess 9dp", "1.234567891", 8, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			amount, _ := decimal.NewFromString(tt.amount)
+			isValid := amount.Equal(amount.Truncate(tt.precision))
+			assert.Equal(t, tt.valid, isValid)
+		})
+	}
+}
+
 // --- Roundtrip tests: major -> minor -> major ---
 
 func TestPrecisionRoundtrip(t *testing.T) {
