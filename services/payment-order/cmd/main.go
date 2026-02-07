@@ -216,10 +216,9 @@ func run(logger *slog.Logger) error {
 	logger.Info("Starlark handler registry initialized",
 		"registered_handlers", len(handlerRegistry.List()))
 
-	// Note: handlerRegistry is available for use with StarlarkRunner when
+	// handlerRegistry is available for use with StarlarkRunner when
 	// payment execution sagas are migrated from Go orchestrators to Starlark.
-	// See task 13 in saga-script-versioning for migration details.
-	_ = handlerRegistry // TODO: Wire to StarlarkRunner when saga migration completes
+	_ = handlerRegistry
 
 	// Create payment order service
 	paymentOrderService, err := service.NewServiceWithConfig(service.Config{

@@ -281,9 +281,8 @@ func (w *Worker) calculateAdaptiveInterval(processedCount int) time.Duration {
 // resetStuckEntries resets entries that have been in 'processing' state for too long.
 // This handles cases where the worker crashed or was killed while processing.
 //
-// TODO(tm:75-async-audit.19): Consider using updated_at (processing start) instead of created_at
-// for more accurate stuck entry detection. Requires schema migration to add updated_at column.
-// See: CodeRabbit suggestion on PR #425
+// Consider using updated_at (processing start) instead of created_at for more accurate stuck
+// entry detection. Requires schema migration to add updated_at column.
 func (w *Worker) resetStuckEntries(ctx context.Context) error {
 	stuckThreshold := time.Now().Add(-defaultProcessingAge)
 
