@@ -94,6 +94,28 @@ func (m *mockPositionKeepingClient) GetAccountBalances(ctx context.Context, req 
 	}, nil
 }
 
+// GetAccountBalance returns mock balance data for a single balance type.
+func (m *mockPositionKeepingClient) GetAccountBalance(ctx context.Context, req *positionkeepingv1.GetAccountBalanceRequest) (*positionkeepingv1.GetAccountBalanceResponse, error) {
+	if m.latency > 0 {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(m.latency):
+		}
+	}
+
+	return &positionkeepingv1.GetAccountBalanceResponse{
+		AccountId:   req.AccountId,
+		BalanceType: req.BalanceType,
+		Amount: &quantityv1.InstrumentAmount{
+			Amount:         "10000.00",
+			InstrumentCode: req.InstrumentCode,
+			Version:        1,
+		},
+		AsOf: timestamppb.Now(),
+	}, nil
+}
+
 // Close implements the PositionKeepingClient interface.
 func (m *mockPositionKeepingClient) Close() error {
 	return nil

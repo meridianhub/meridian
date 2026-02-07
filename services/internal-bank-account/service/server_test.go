@@ -89,8 +89,10 @@ func (m *mockRepository) ExistsByCode(_ context.Context, accountCode string) (bo
 
 // mockPositionKeepingClient implements PositionKeepingClient for testing.
 type mockPositionKeepingClient struct {
-	balances []*positionkeepingv1.BalanceEntry
-	err      error
+	balances       []*positionkeepingv1.BalanceEntry
+	err            error
+	singleBalance  *quantityv1.InstrumentAmount
+	singleBalError error
 }
 
 func (m *mockPositionKeepingClient) GetAccountBalances(_ context.Context, req *positionkeepingv1.GetAccountBalancesRequest) (*positionkeepingv1.GetAccountBalancesResponse, error) {
@@ -101,6 +103,25 @@ func (m *mockPositionKeepingClient) GetAccountBalances(_ context.Context, req *p
 		AccountId: req.AccountId,
 		Balances:  m.balances,
 		AsOf:      timestamppb.Now(), // Provide timestamp for balance calculation time
+	}, nil
+}
+
+func (m *mockPositionKeepingClient) GetAccountBalance(_ context.Context, req *positionkeepingv1.GetAccountBalanceRequest) (*positionkeepingv1.GetAccountBalanceResponse, error) {
+	if m.singleBalError != nil {
+		return nil, m.singleBalError
+	}
+	if m.singleBalance != nil {
+		return &positionkeepingv1.GetAccountBalanceResponse{
+			AccountId: req.AccountId,
+			Amount:    m.singleBalance,
+		}, nil
+	}
+	return &positionkeepingv1.GetAccountBalanceResponse{
+		AccountId: req.AccountId,
+		Amount: &quantityv1.InstrumentAmount{
+			InstrumentCode: req.InstrumentCode,
+			Amount:         "0",
+		},
 	}, nil
 }
 

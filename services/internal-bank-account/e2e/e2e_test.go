@@ -605,6 +605,18 @@ func (m *mockPositionKeepingClient) SetBalance(accountID, instrumentCode string,
 	}
 }
 
+func (m *mockPositionKeepingClient) GetAccountBalance(ctx context.Context, req *positionkeepingv1.GetAccountBalanceRequest) (*positionkeepingv1.GetAccountBalanceResponse, error) {
+	return &positionkeepingv1.GetAccountBalanceResponse{
+		AccountId:   req.AccountId,
+		BalanceType: req.BalanceType,
+		Amount: &quantitypb.InstrumentAmount{
+			Amount:         "0",
+			InstrumentCode: req.InstrumentCode,
+		},
+		AsOf: timestamppb.Now(),
+	}, nil
+}
+
 func (m *mockPositionKeepingClient) Close() error {
 	return nil
 }

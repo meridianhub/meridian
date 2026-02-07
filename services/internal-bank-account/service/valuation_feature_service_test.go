@@ -466,12 +466,9 @@ func TestListValuationFeatures_AccountNotFound(t *testing.T) {
 	assert.Nil(t, resp)
 	st, ok := status.FromError(err)
 	require.True(t, ok)
-	// The persistence layer returns its own ErrAccountNotFound which is a different
-	// error instance from domain.ErrAccountNotFound. The findAccountByID helper in
-	// server.go checks errors.Is(err, domain.ErrAccountNotFound) which does not match,
-	// so it falls through to codes.Internal. This is consistent with the existing
-	// IBA service behavior for real database lookups.
-	assert.Equal(t, codes.Internal, st.Code())
+	// findAccountByID checks both domain.ErrAccountNotFound and persistence.ErrAccountNotFound,
+	// so a non-existent account correctly returns NotFound.
+	assert.Equal(t, codes.NotFound, st.Code())
 }
 
 func TestValuationFeatureRepoNil(t *testing.T) {

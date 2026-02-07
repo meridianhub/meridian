@@ -4,6 +4,7 @@ package meridian.internal_bank_account.v1;
 
 import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
+import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 import "meridian/common/v1/types.proto";
 import "meridian/quantity/v1/quantity.proto";
@@ -682,6 +683,123 @@ message ListValuationFeaturesResponse {
 }
 
 // ========================================
+// Valuation Analysis Messages
+// ========================================
+
+// ValuationWarning represents a warning generated during valuation execution.
+// Warnings indicate degraded conditions that did not prevent computation
+// but may affect result confidence.
+message ValuationWarning {
+  // code is a machine-readable warning code (e.g., "STALE_MARKET_DATA", "MISSING_POLICY")
+  string code = 1;
+
+  // message is a human-readable description of the warning
+  string message = 2;
+
+  // severity indicates the warning impact: "INFO", "WARNING", "DEGRADED"
+  string severity = 3;
+}
+
+// MarketDataQuality describes the quality assessment of market data used in valuation.
+message MarketDataQuality {
+  // source identifies where the market data came from (e.g., "live_feed", "cache", "fallback")
+  string source = 1;
+
+  // quality_level indicates data quality: "ACTUAL", "ESTIMATE", "STALE", "FALLBACK"
+  string quality_level = 2;
+
+  // observed_at is when the market data was observed
+  google.protobuf.Timestamp observed_at = 3;
+
+  // staleness_seconds indicates how old the data is relative to valuation time
+  int64 staleness_seconds = 4;
+}
+
+// ValuationAnalysis provides transparency into how a valuation was computed.
+// Returned with both inquiry (EvaluateAssetValuation) and binding operations
+// to enable audit trails and Ghost Pricing prevention.
+message ValuationAnalysis {
+  // method_id is the valuation method used
+  string method_id = 1;
+
+  // method_version is the specific version of the method
+  string method_version = 2;
+
+  // applied_rates contains the rates/factors applied during valuation
+  // Key: rate name (e.g., "fx_rate", "spread"), Value: rate value as string
+  map<string, string> applied_rates = 3;
+
+  // observation_ids references the market data observations used
+  repeated string observation_ids = 4;
+
+  // computed_at is when the valuation was computed
+  google.protobuf.Timestamp computed_at = 5;
+
+  // knowledge_at is the point-in-time used for bi-temporal data resolution
+  google.protobuf.Timestamp knowledge_at = 6;
+
+  // account_parameters contains the account-specific valuation parameters (from ValuationFeature)
+  google.protobuf.Struct account_parameters = 7;
+
+  // market_data_qualities describes the quality of each market data source used
+  repeated MarketDataQuality market_data_qualities = 8;
+
+  // calculation_path describes the sequence of operations performed
+  repeated string calculation_path = 9;
+
+  // degraded_mode indicates whether the valuation ran in degraded mode
+  // (e.g., using stale cache data because live market data was unavailable)
+  bool degraded_mode = 10;
+
+  // warnings contains any warnings generated during valuation
+  repeated ValuationWarning warnings = 11;
+}
+
+// ========================================
+// Asset Valuation Messages
+// ========================================
+
+// Request to evaluate an asset valuation (inquiry-only, non-binding).
+// Returns the valuation result without creating any financial commitment.
+// CRITICAL: Uses the same valuateInternal() logic as any binding operation to prevent Ghost Pricing.
+message EvaluateAssetValuationRequest {
+  // account_id is the account to evaluate valuation for (required)
+  string account_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // input is the amount and instrument to be valued (required)
+  // Example: { amount: "100.00", instrument_code: "USD" } for a GBP account
+  meridian.quantity.v1.InstrumentAmount input = 2 [(buf.validate.field).required = true];
+
+  // knowledge_at is the point-in-time for bi-temporal data resolution (optional, defaults to now)
+  // Controls which valuation feature and market data are used
+  google.protobuf.Timestamp knowledge_at = 3;
+}
+
+// Response for evaluating an asset valuation (inquiry-only).
+message EvaluateAssetValuationResponse {
+  // output is the valued amount in the account's native instrument
+  // Example: { amount: "79.50", instrument_code: "GBP" } for USD->GBP conversion
+  meridian.quantity.v1.InstrumentAmount output = 1;
+
+  // basis provides full transparency into the valuation computation
+  ValuationAnalysis basis = 2;
+
+  // execution_time_ms is how long the valuation took to compute
+  string execution_time_ms = 3;
+
+  // cache_hit indicates whether the result was served from cache
+  bool cache_hit = 4;
+
+  // is_estimate indicates this is a non-binding inquiry result
+  // Always true for EvaluateAssetValuation responses
+  bool is_estimate = 5;
+}
+
+// ========================================
 // Service Definition
 // ========================================
 
@@ -811,6 +929,21 @@ service InternalBankAccountService {
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get a valuation feature"
       description: "Retrieves a valuation feature by ID or by account+instrument with optional bi-temporal query"
+    };
+  }
+
+  // EvaluateAssetValuation performs an inquiry-only (non-binding) valuation.
+  // Returns the estimated valued amount without creating any financial commitment.
+  // CRITICAL: Uses the same valuateInternal() logic as binding operations to prevent Ghost Pricing -
+  // ensuring inquiry and binding always produce identical results for identical inputs.
+  rpc EvaluateAssetValuation(EvaluateAssetValuationRequest) returns (EvaluateAssetValuationResponse) {
+    option (google.api.http) = {
+      post: "/v1/internal-bank-accounts/{account_id}/evaluate-valuation"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Evaluate asset valuation (inquiry-only)"
+      description: "Performs a non-binding valuation using the same logic as binding operations to prevent Ghost Pricing"
     };
   }
 
