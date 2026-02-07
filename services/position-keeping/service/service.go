@@ -58,6 +58,10 @@ type PositionKeepingService struct {
 	// Both this flag and accountValidator must be set for validation to occur.
 	// Defaults to false for backwards compatibility.
 	accountValidationEnabled bool
+	// reservationRepo is OPTIONAL - if nil, reservation RPCs return FailedPrecondition.
+	reservationRepo domain.ReservationRepository
+	// positionRepo is OPTIONAL - if nil, projected balance RPCs return FailedPrecondition.
+	positionRepo domain.PositionRepository
 }
 
 // Option configures optional dependencies for PositionKeepingService.
@@ -107,6 +111,22 @@ func WithAccountValidator(validator AccountValidator) Option {
 func WithAccountValidationEnabled(enabled bool) Option {
 	return func(s *PositionKeepingService) {
 		s.accountValidationEnabled = enabled
+	}
+}
+
+// WithReservationRepository sets the reservation repository for reservation RPCs.
+// If not set, RecordReservation, ReleaseReservation, and GetProjectedBalance return FailedPrecondition.
+func WithReservationRepository(repo domain.ReservationRepository) Option {
+	return func(s *PositionKeepingService) {
+		s.reservationRepo = repo
+	}
+}
+
+// WithPositionRepository sets the position repository for projected balance queries.
+// If not set, GetProjectedBalance returns FailedPrecondition.
+func WithPositionRepository(repo domain.PositionRepository) Option {
+	return func(s *PositionKeepingService) {
+		s.positionRepo = repo
 	}
 }
 

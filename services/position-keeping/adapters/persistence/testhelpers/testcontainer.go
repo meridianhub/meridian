@@ -37,10 +37,11 @@ import (
 // TestContainer holds the test database container, connection pool, and repository instance.
 // It provides a complete testing environment with proper cleanup.
 type TestContainer struct {
-	container    *postgres.PostgresContainer
-	Pool         *pgxpool.Pool
-	Repo         *persistence.PostgresRepository
-	PositionRepo *persistence.PositionRepository
+	container       *postgres.PostgresContainer
+	Pool            *pgxpool.Pool
+	Repo            *persistence.PostgresRepository
+	PositionRepo    *persistence.PositionRepository
+	ReservationRepo *persistence.ReservationRepository
 }
 
 // SetupTestContainer creates a PostgreSQL testcontainer with the position_keeping schema loaded.
@@ -102,12 +103,14 @@ func SetupTestContainer(t *testing.T) *TestContainer {
 	// Create repositories
 	repo := persistence.NewPostgresRepository(pool)
 	positionRepo := persistence.NewPositionRepository(pool)
+	reservationRepo := persistence.NewReservationRepository(pool)
 
 	return &TestContainer{
-		container:    pgContainer,
-		Pool:         pool,
-		Repo:         repo,
-		PositionRepo: positionRepo,
+		container:       pgContainer,
+		Pool:            pool,
+		Repo:            repo,
+		PositionRepo:    positionRepo,
+		ReservationRepo: reservationRepo,
 	}
 }
 
@@ -334,4 +337,32 @@ func loadSchema(t *testing.T, pool *pgxpool.Pool) {
 			EXECUTE FUNCTION position_keeping.positions_append_only()
 	`)
 	require.NoError(t, err, "Failed to create append-only trigger")
+
+	// Create reservation table (matches production migration 20260207000001_reservations.sql)
+	_, err = pool.Exec(ctx, `
+		CREATE TABLE position_keeping.reservation (
+			lien_id uuid NOT NULL,
+			account_id character varying(255) NOT NULL,
+			instrument_code character varying(32) NOT NULL,
+			bucket_id character varying(256) NOT NULL DEFAULT '',
+			reserved_amount decimal(38, 18) NOT NULL,
+			status character varying(16) NOT NULL DEFAULT 'ACTIVE',
+			created_at timestamptz NOT NULL DEFAULT now(),
+			executed_at timestamptz NULL,
+			terminated_at timestamptz NULL,
+			PRIMARY KEY (lien_id),
+			CONSTRAINT chk_reservation_status CHECK (status IN ('ACTIVE', 'EXECUTED', 'TERMINATED'))
+		)
+	`)
+	require.NoError(t, err, "Failed to create reservation table")
+
+	// Create reservation indexes
+	_, err = pool.Exec(ctx, `
+		CREATE INDEX idx_reservation_projected_balance
+			ON position_keeping.reservation (account_id, instrument_code, status, bucket_id);
+		CREATE INDEX idx_reservation_active
+			ON position_keeping.reservation (account_id, instrument_code, bucket_id)
+			WHERE status = 'ACTIVE';
+	`)
+	require.NoError(t, err, "Failed to create reservation indexes")
 }
