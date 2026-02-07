@@ -80,11 +80,14 @@ type mockPositionKeepingClient struct {
 	lastReleasedLienID       string
 	lastReleaseReason        positionkeepingv1.ReservationStatus
 	failOnReleaseReservation bool
+	// Initiate request capture (for valuation_analysis tests)
+	lastInitiateRequest *positionkeepingv1.InitiateFinancialPositionLogRequest
 }
 
-func (m *mockPositionKeepingClient) InitiateFinancialPositionLog(_ context.Context, _ *positionkeepingv1.InitiateFinancialPositionLogRequest) (*positionkeepingv1.InitiateFinancialPositionLogResponse, error) {
+func (m *mockPositionKeepingClient) InitiateFinancialPositionLog(_ context.Context, req *positionkeepingv1.InitiateFinancialPositionLogRequest) (*positionkeepingv1.InitiateFinancialPositionLogResponse, error) {
 	m.mu.Lock()
 	m.initiateCalls++
+	m.lastInitiateRequest = req
 	failOnInitiate := m.failOnInitiate
 	initiateError := m.initiateError
 	m.mu.Unlock()
