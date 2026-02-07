@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strconv"
 	"strings"
 	"time"
 
@@ -81,16 +80,7 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 	if err == nil {
 		// Lien already exists - return it for idempotency
 		operationStatus = opStatusLienAlreadyExists
-		resp := &pb.InitiateLienResponse{
-			Lien: s.domainToProtoLien(existingLien),
-		}
-		if existingLien.HasValuation() {
-			resp.ValuedAmount = &quantityv1.InstrumentAmount{
-				Amount:         existingLien.ValuedAmount.Amount.String(),
-				InstrumentCode: existingLien.ValuedAmount.InstrumentCode,
-			}
-		}
-		return resp, nil
+		return s.buildInitiateLienResponse(existingLien), nil
 	}
 	if !errors.Is(err, persistence.ErrLienNotFound) {
 		operationStatus = operationStatusFailed
@@ -154,9 +144,10 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 			}
 		}
 
-		// Build valued lien
+		// Build valued lien: convert output amount to minor units.
+		// TODO: Use instrument precision from reference data instead of hardcoded 2.
 		amountCents := result.OutputAmount.Shift(2).IntPart()
-		if amountCents <= 0 {
+		if amountCents == 0 {
 			amountCents = result.OutputAmount.IntPart()
 		}
 
@@ -195,9 +186,7 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 				operationStatus = opStatusLienCreateFailed
 				return nil, status.Errorf(codes.Internal, "lien creation race condition: %v", err)
 			}
-			return &pb.InitiateLienResponse{
-				Lien: s.domainToProtoLien(existingLien),
-			}, nil
+			return s.buildInitiateLienResponse(existingLien), nil
 		}
 		operationStatus = opStatusLienCreateFailed
 		return nil, status.Errorf(codes.Internal, "failed to create lien: %v", err)
@@ -210,23 +199,7 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		"currency", lien.Currency,
 		"has_valuation", lien.HasValuation())
 
-	resp := &pb.InitiateLienResponse{
-		Lien: s.domainToProtoLien(lien),
-	}
-	if lien.HasValuation() {
-		resp.ValuedAmount = &quantityv1.InstrumentAmount{
-			Amount:         lien.ValuedAmount.Amount.String(),
-			InstrumentCode: lien.ValuedAmount.InstrumentCode,
-		}
-		if lien.ValuationAnalysis != nil {
-			var analysis pb.ValuationAnalysis
-			if err := json.Unmarshal(lien.ValuationAnalysis, &analysis); err == nil {
-				resp.Basis = &analysis
-			}
-		}
-	}
-
-	return resp, nil
+	return s.buildInitiateLienResponse(lien), nil
 }
 
 // ExecuteLien converts a lien reservation to an actual debit.
@@ -276,6 +249,13 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 		}
 		operationStatus = operationStatusFailed
 		return nil, status.Errorf(codes.Internal, "failed to lock lien: %v", err)
+	}
+
+	// Re-check after lock: another request may have executed between read and lock
+	if lien.Status == domain.LienStatusExecuted {
+		return &pb.ExecuteLienResponse{
+			Lien: s.domainToProtoLien(lien),
+		}, nil
 	}
 
 	// Execute the domain transition
@@ -360,6 +340,13 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 		return nil, status.Errorf(codes.Internal, "failed to lock lien: %v", err)
 	}
 
+	// Re-check after lock: another request may have terminated between read and lock
+	if lien.Status == domain.LienStatusTerminated {
+		return &pb.TerminateLienResponse{
+			Lien: s.domainToProtoLien(lien),
+		}, nil
+	}
+
 	// Terminate the domain transition
 	if err := lien.Terminate(req.Reason); err != nil {
 		if errors.Is(err, domain.ErrLienNotActive) {
@@ -424,13 +411,38 @@ func (s *Service) RetrieveLien(ctx context.Context, req *pb.RetrieveLienRequest)
 	}, nil
 }
 
+// buildInitiateLienResponse constructs a consistent InitiateLienResponse
+// including valuation fields when present.
+func (s *Service) buildInitiateLienResponse(lien *domain.Lien) *pb.InitiateLienResponse {
+	resp := &pb.InitiateLienResponse{
+		Lien: s.domainToProtoLien(lien),
+	}
+	if lien.HasValuation() {
+		resp.ValuedAmount = &quantityv1.InstrumentAmount{
+			Amount:         lien.ValuedAmount.Amount.String(),
+			InstrumentCode: lien.ValuedAmount.InstrumentCode,
+		}
+		if lien.ValuationAnalysis != nil {
+			var analysis pb.ValuationAnalysis
+			if err := json.Unmarshal(lien.ValuationAnalysis, &analysis); err == nil {
+				resp.Basis = &analysis
+			}
+		}
+	}
+	return resp
+}
+
 // domainToProtoLien converts a domain Lien to proto Lien.
+// AmountCents is stored as minor units (e.g. 10000 = 100.00 GBP).
+// TODO: Use instrument precision from reference data instead of hardcoded 2.
 func (s *Service) domainToProtoLien(lien *domain.Lien) *pb.Lien {
+	displayAmount := decimal.NewFromInt(lien.AmountCents).Shift(-2).String()
+
 	protoLien := &pb.Lien{
 		LienId:    lien.ID.String(),
 		AccountId: lien.AccountID.String(),
 		Amount: &quantityv1.InstrumentAmount{
-			Amount:         strconv.FormatInt(lien.AmountCents, 10),
+			Amount:         displayAmount,
 			InstrumentCode: lien.Currency,
 		},
 		Status:                mapLienStatusToProto(lien.Status),

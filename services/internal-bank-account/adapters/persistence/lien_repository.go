@@ -41,7 +41,10 @@ func (r *LienRepository) withTenantTransaction(ctx context.Context, fn func(tx *
 
 // Create inserts a new lien.
 func (r *LienRepository) Create(ctx context.Context, lien *domain.Lien) error {
-	entity := toLienEntity(lien)
+	entity, err := toLienEntity(lien)
+	if err != nil {
+		return fmt.Errorf("failed to convert lien to entity: %w", err)
+	}
 	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		return tx.Create(entity).Error
 	})
@@ -152,10 +155,13 @@ func (r *LienRepository) FindByPaymentOrderReference(ctx context.Context, refere
 
 // Update updates an existing lien with optimistic locking.
 func (r *LienRepository) Update(ctx context.Context, lien *domain.Lien) error {
-	entity := toLienEntity(lien)
+	entity, err := toLienEntity(lien)
+	if err != nil {
+		return fmt.Errorf("failed to convert lien to entity: %w", err)
+	}
 	var rowsAffected int64
 
-	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+	err = r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		result := tx.Model(&LienEntity{}).
 			Where("id = ? AND version = ?", entity.ID, lien.Version).
 			Updates(map[string]interface{}{
@@ -228,7 +234,7 @@ func (r *LienRepository) SumActiveAmountByAccountIDAndBucket(ctx context.Context
 }
 
 // toLienEntity converts domain model to database entity.
-func toLienEntity(lien *domain.Lien) *LienEntity {
+func toLienEntity(lien *domain.Lien) (*LienEntity, error) {
 	entity := &LienEntity{
 		ID:                    lien.ID,
 		AccountID:             lien.AccountID,
@@ -245,20 +251,24 @@ func toLienEntity(lien *domain.Lien) *LienEntity {
 	}
 
 	if lien.ReservedQuantity != nil {
-		if data, err := json.Marshal(lien.ReservedQuantity); err == nil {
-			entity.ReservedQuantity = JSONBMap(data)
+		data, err := json.Marshal(lien.ReservedQuantity)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal reserved_quantity: %w", err)
 		}
+		entity.ReservedQuantity = JSONBMap(data)
 	}
 	if lien.ValuedAmount != nil {
-		if data, err := json.Marshal(lien.ValuedAmount); err == nil {
-			entity.ValuedAmount = JSONBMap(data)
+		data, err := json.Marshal(lien.ValuedAmount)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal valued_amount: %w", err)
 		}
+		entity.ValuedAmount = JSONBMap(data)
 	}
 	if lien.ValuationAnalysis != nil {
 		entity.ValuationAnalysis = JSONBMap(lien.ValuationAnalysis)
 	}
 
-	return entity
+	return entity, nil
 }
 
 // toLienDomain converts database entity to domain model.
