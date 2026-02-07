@@ -282,6 +282,20 @@ message InternalBankAccountFacility {
   ClearingPurpose clearing_purpose = 12;
 }
 
+// LienStatus defines the lifecycle state of a fund reservation (lien).
+// A lien is a hold placed on funds to reserve them for a pending payment.
+// Invariant: Available Balance = Current Balance - Sum(Active Liens)
+enum LienStatus {
+  // LIEN_STATUS_UNSPECIFIED is the default value and should not be used.
+  LIEN_STATUS_UNSPECIFIED = 0;
+  // LIEN_STATUS_ACTIVE means the funds are currently reserved.
+  LIEN_STATUS_ACTIVE = 1;
+  // LIEN_STATUS_EXECUTED means the lien was converted to an actual debit (terminal).
+  LIEN_STATUS_EXECUTED = 2;
+  // LIEN_STATUS_TERMINATED means the lien was released without execution (terminal).
+  LIEN_STATUS_TERMINATED = 3;
+}
+
 // ========================================
 // Request/Response Messages
 // ========================================
@@ -800,6 +814,173 @@ message EvaluateAssetValuationResponse {
 }
 
 // ========================================
+// Lien Messages
+// ========================================
+
+// Lien represents a fund reservation (hold) on an internal bank account.
+// Used by Payment Order to reserve funds before executing payments.
+// Invariant: Available Balance = Current Balance - Sum(Active Liens)
+//
+// Multi-asset support: IBA liens use InstrumentAmount natively. When the input
+// instrument differs from the account's native instrument, atomic valuation is
+// performed to produce a price-locked valued_amount.
+message Lien {
+  // lien_id is the unique identifier for this lien.
+  string lien_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // account_id is the account this lien belongs to.
+  string account_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // amount is the reserved amount in the account's native instrument.
+  meridian.quantity.v1.InstrumentAmount amount = 3 [(buf.validate.field).required = true];
+
+  // status is the current lien lifecycle state.
+  LienStatus status = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // payment_order_reference is the Payment Order that created this lien.
+  string payment_order_reference = 5 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+    pattern: "^[a-zA-Z0-9_/-]+$"
+  }];
+
+  // created_at is when the lien was created.
+  google.protobuf.Timestamp created_at = 6 [(buf.validate.field).required = true];
+
+  // updated_at is when the lien was last modified.
+  google.protobuf.Timestamp updated_at = 7 [(buf.validate.field).required = true];
+
+  // bucket_id is the fungibility key for bucket-aware reservations.
+  // Empty string represents the default bucket.
+  string bucket_id = 8 [(buf.validate.field).string = {max_len: 255}];
+
+  // reserved_quantity is the original input amount before valuation (e.g., 100 kWh).
+  // Only present for liens that went through atomic valuation.
+  meridian.quantity.v1.InstrumentAmount reserved_quantity = 9;
+
+  // valued_amount is the price-locked valuation result in the account's native instrument.
+  // Only present for liens that went through atomic valuation.
+  meridian.quantity.v1.InstrumentAmount valued_amount = 10;
+
+  // termination_reason explains why the lien was terminated (only set when TERMINATED).
+  string termination_reason = 11;
+
+  // expires_at is the optional expiration time for automatic termination.
+  google.protobuf.Timestamp expires_at = 12;
+
+  // version is used for optimistic locking.
+  int32 version = 13 [(buf.validate.field).int32 = {gte: 0}];
+}
+
+// InitiateLienRequest creates a new lien on an internal bank account.
+// Supports multi-asset input with atomic valuation (price lock).
+message InitiateLienRequest {
+  // account_id is the account to place the lien on.
+  string account_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // input is the amount to reserve. For same-instrument liens, use the account's
+  // native instrument. For cross-instrument liens (e.g., kWh on GBP account),
+  // atomic valuation is performed using the configured ValuationFeature.
+  meridian.quantity.v1.InstrumentAmount input = 2 [(buf.validate.field).required = true];
+
+  // payment_order_reference identifies the Payment Order creating this lien.
+  string payment_order_reference = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+    pattern: "^[a-zA-Z0-9_/-]+$"
+  }];
+
+  // bucket_id is the fungibility key for bucket-aware reservations (optional).
+  string bucket_id = 4 [(buf.validate.field).string = {max_len: 255}];
+
+  // knowledge_at is the point-in-time for bi-temporal data resolution (optional, defaults to now).
+  google.protobuf.Timestamp knowledge_at = 5;
+
+  // expires_at is the optional expiration time for automatic termination of stale liens.
+  google.protobuf.Timestamp expires_at = 6;
+}
+
+// InitiateLienResponse returns the created lien.
+message InitiateLienResponse {
+  // lien is the created lien with ACTIVE status.
+  Lien lien = 1 [(buf.validate.field).required = true];
+
+  // valued_amount is the price-locked valuation result in the account's native instrument.
+  // Only present when the input instrument differs from the account's native instrument.
+  meridian.quantity.v1.InstrumentAmount valued_amount = 2;
+
+  // basis provides full transparency into the valuation computation.
+  // Only present when atomic valuation was performed.
+  ValuationAnalysis basis = 3;
+}
+
+// ExecuteLienRequest converts a lien reservation to an actual debit.
+message ExecuteLienRequest {
+  // lien_id is the lien to execute.
+  string lien_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+}
+
+// ExecuteLienResponse returns the executed lien.
+message ExecuteLienResponse {
+  // lien is the executed lien with EXECUTED status.
+  Lien lien = 1 [(buf.validate.field).required = true];
+}
+
+// TerminateLienRequest releases the reservation without executing.
+message TerminateLienRequest {
+  // lien_id is the lien to terminate.
+  string lien_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // reason is an optional explanation for termination (for audit trail).
+  string reason = 2 [(buf.validate.field).string = {max_len: 500}];
+}
+
+// TerminateLienResponse returns the terminated lien.
+message TerminateLienResponse {
+  // lien is the terminated lien with TERMINATED status.
+  Lien lien = 1 [(buf.validate.field).required = true];
+}
+
+// RetrieveLienRequest fetches a lien by ID.
+message RetrieveLienRequest {
+  // lien_id is the lien to retrieve.
+  string lien_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+}
+
+// RetrieveLienResponse returns the requested lien.
+message RetrieveLienResponse {
+  // lien is the requested lien.
+  Lien lien = 1 [(buf.validate.field).required = true];
+}
+
+// ========================================
 // Service Definition
 // ========================================
 
@@ -956,6 +1137,51 @@ service InternalBankAccountService {
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "List valuation features for an internal bank account"
       description: "Retrieves all valuation features for an account with optional status filter"
+    };
+  }
+
+  // InitiateLien creates a new fund reservation on an internal bank account.
+  // Supports multi-asset input with atomic valuation for cross-instrument liens.
+  // CRITICAL: Uses valuateInternal() shared with EvaluateAssetValuation to prevent Ghost Pricing.
+  rpc InitiateLien(InitiateLienRequest) returns (InitiateLienResponse) {
+    option (google.api.http) = {
+      post: "/v1/internal-bank-accounts/{account_id}/liens"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Create a fund reservation (lien) on an internal bank account"
+      description: "Reserves funds with optional multi-asset valuation. Uses the same pricing logic as inquiry to prevent Ghost Pricing."
+      responses: {
+        key: "201"
+        value: {
+          description: "Lien created successfully"
+        }
+      }
+    };
+  }
+
+  // ExecuteLien converts a lien reservation to an actual debit.
+  // Transitions lien from ACTIVE to EXECUTED (terminal, idempotent).
+  rpc ExecuteLien(ExecuteLienRequest) returns (ExecuteLienResponse) {
+    option (google.api.http) = {
+      post: "/v1/liens/{lien_id}/execute"
+      body: "*"
+    };
+  }
+
+  // TerminateLien releases reserved funds without executing.
+  // Transitions lien from ACTIVE to TERMINATED (terminal, idempotent).
+  rpc TerminateLien(TerminateLienRequest) returns (TerminateLienResponse) {
+    option (google.api.http) = {
+      post: "/v1/liens/{lien_id}/terminate"
+      body: "*"
+    };
+  }
+
+  // RetrieveLien fetches a lien by ID.
+  rpc RetrieveLien(RetrieveLienRequest) returns (RetrieveLienResponse) {
+    option (google.api.http) = {
+      get: "/v1/liens/{lien_id}"
     };
   }
 }

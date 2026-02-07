@@ -45,6 +45,7 @@ type Service struct {
 	pb.UnimplementedInternalBankAccountServiceServer
 	repo                  domain.Repository
 	valuationFeatureRepo  *persistence.ValuationFeatureRepository
+	lienRepo              *persistence.LienRepository
 	positionKeepingClient PositionKeepingClient
 	referenceDataClient   ReferenceDataClient
 	valuationEngine       ValuationEngine // Optional: executes valuation method logic
@@ -104,6 +105,59 @@ func NewServiceWithValuationFeatures(repo domain.Repository, valuationFeatureRep
 		valuationFeatureRepo: valuationFeatureRepo,
 		logger:               slog.New(slog.NewJSONHandler(os.Stdout, nil)),
 	}, nil
+}
+
+// Option configures optional Service dependencies.
+type Option func(*Service)
+
+// WithLienRepo sets the lien repository.
+func WithLienRepo(lienRepo *persistence.LienRepository) Option {
+	return func(s *Service) {
+		s.lienRepo = lienRepo
+	}
+}
+
+// WithValuationEngine sets the valuation engine.
+func WithValuationEngine(engine ValuationEngine) Option {
+	return func(s *Service) {
+		s.valuationEngine = engine
+	}
+}
+
+// WithValuationFeatureRepo sets the valuation feature repository.
+func WithValuationFeatureRepo(repo *persistence.ValuationFeatureRepository) Option {
+	return func(s *Service) {
+		s.valuationFeatureRepo = repo
+	}
+}
+
+// NewServiceFull creates a service with all dependencies using functional options.
+func NewServiceFull(
+	repo domain.Repository,
+	posKeepingClient PositionKeepingClient,
+	refDataClient ReferenceDataClient,
+	logger *slog.Logger,
+	tracer *observability.Tracer,
+	opts ...Option,
+) (*Service, error) {
+	if repo == nil {
+		return nil, ErrRepositoryNil
+	}
+	if logger == nil {
+		logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	}
+
+	svc := &Service{
+		repo:                  repo,
+		positionKeepingClient: posKeepingClient,
+		referenceDataClient:   refDataClient,
+		logger:                logger,
+		tracer:                tracer,
+	}
+	for _, opt := range opts {
+		opt(svc)
+	}
+	return svc, nil
 }
 
 // InitiateInternalBankAccount creates a new internal bank account.
