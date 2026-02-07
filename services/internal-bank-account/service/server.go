@@ -47,6 +47,7 @@ type Service struct {
 	valuationFeatureRepo  *persistence.ValuationFeatureRepository
 	positionKeepingClient PositionKeepingClient
 	referenceDataClient   ReferenceDataClient
+	valuationEngine       ValuationEngine // Optional: executes valuation method logic
 	logger                *slog.Logger
 	tracer                *observability.Tracer
 }
@@ -623,7 +624,7 @@ func (s *Service) findAccountByID(ctx context.Context, accountID string) (domain
 	if id, err := uuid.Parse(accountID); err == nil {
 		account, err := s.repo.FindByID(ctx, id)
 		if err != nil {
-			if errors.Is(err, domain.ErrAccountNotFound) {
+			if errors.Is(err, domain.ErrAccountNotFound) || errors.Is(err, persistence.ErrAccountNotFound) {
 				return domain.InternalBankAccount{}, status.Errorf(codes.NotFound, "account not found: %s", accountID)
 			}
 			return domain.InternalBankAccount{}, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
@@ -634,7 +635,7 @@ func (s *Service) findAccountByID(ctx context.Context, accountID string) (domain
 	// Try to find by account code
 	account, err := s.repo.FindByCode(ctx, accountID)
 	if err != nil {
-		if errors.Is(err, domain.ErrAccountNotFound) {
+		if errors.Is(err, domain.ErrAccountNotFound) || errors.Is(err, persistence.ErrAccountNotFound) {
 			return domain.InternalBankAccount{}, status.Errorf(codes.NotFound, "account not found: %s", accountID)
 		}
 		return domain.InternalBankAccount{}, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)

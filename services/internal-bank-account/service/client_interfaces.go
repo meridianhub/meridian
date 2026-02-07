@@ -61,6 +61,17 @@ type PositionKeepingClient interface {
 	//   - InvalidArgument error if account_id format is invalid
 	GetAccountBalances(ctx context.Context, req *positionkeepingv1.GetAccountBalancesRequest) (*positionkeepingv1.GetAccountBalancesResponse, error)
 
+	// GetAccountBalance retrieves a specific balance type for an account by instrument.
+	//
+	// Used by the valuation engine to query the current balance for an account's native instrument.
+	// Returns the balance amount as InstrumentAmount with the requested balance type.
+	//
+	// Returns:
+	//   - GetAccountBalanceResponse with the balance amount on success
+	//   - NotFound error if no position exists for the account/instrument combination
+	//   - InvalidArgument error if account_id format is invalid
+	GetAccountBalance(ctx context.Context, req *positionkeepingv1.GetAccountBalanceRequest) (*positionkeepingv1.GetAccountBalanceResponse, error)
+
 	// Close terminates the client connection gracefully.
 	// Should be called during service shutdown to release gRPC resources.
 	Close() error

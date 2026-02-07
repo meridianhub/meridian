@@ -244,6 +244,55 @@ func (c *PositionKeepingGRPCClient) handleGetAccountBalancesError(err error, acc
 	}
 }
 
+// GetAccountBalance retrieves a specific balance type for an account by instrument.
+//
+// Used by the valuation engine to query the current balance for an account's native instrument.
+// Includes the same retry logic as GetAccountBalances.
+func (c *PositionKeepingGRPCClient) GetAccountBalance(ctx context.Context, req *positionkeepingv1.GetAccountBalanceRequest) (*positionkeepingv1.GetAccountBalanceResponse, error) {
+	// Apply timeout
+	ctx, cancel := sharedclients.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	// Propagate context metadata
+	ctx = sharedclients.PropagateCorrelationID(ctx)
+	ctx = sharedclients.PropagateOrganization(ctx)
+
+	var lastErr error
+	var resp *positionkeepingv1.GetAccountBalanceResponse
+
+	startTime := time.Now()
+
+	err := sharedclients.Retry(ctx, c.retryConfig, func() error {
+		var err error
+		resp, err = c.client.GetAccountBalance(ctx, req)
+		if err != nil {
+			lastErr = err
+			c.handleGetAccountBalancesError(err, req.AccountId)
+			return err
+		}
+		return nil
+	})
+
+	duration := time.Since(startTime)
+
+	if err != nil {
+		observability.RecordOperationDuration("get_account_balance", "error", duration)
+		if lastErr != nil {
+			return nil, lastErr
+		}
+		return nil, err
+	}
+
+	observability.RecordOperationDuration("get_account_balance", "success", duration)
+	c.logger.Debug("retrieved account balance from Position Keeping",
+		"account_id", req.AccountId,
+		"instrument_code", req.InstrumentCode,
+		"duration_seconds", duration.Seconds(),
+	)
+
+	return resp, nil
+}
+
 // Close releases the gRPC client connection.
 func (c *PositionKeepingGRPCClient) Close() error {
 	if c.conn != nil {
