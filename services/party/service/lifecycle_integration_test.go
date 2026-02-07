@@ -26,7 +26,6 @@ import (
 	"github.com/meridianhub/meridian/services/party/adapters/persistence"
 	"github.com/meridianhub/meridian/shared/platform/audit"
 
-	// "github.com/meridianhub/meridian/shared/platform/await" // TODO: Use in future Kafka tests
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 )
