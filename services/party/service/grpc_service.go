@@ -719,7 +719,10 @@ func (s *Service) ExchangeDemographics(ctx context.Context, req *pb.ExchangeDemo
 			"party_id", req.PartyId,
 			"environment", os.Getenv("ENVIRONMENT"))
 
-		// TODO: Integrate with external KYC/AML provider (Task 5 - Option 2)
+		// Stub: returns VERIFIED for all parties. Real KYC/AML integration requires
+		// an external provider (e.g., Onfido, Jumio). The VerificationService handles
+		// async webhook-based verification separately; this endpoint is a synchronous
+		// BIAN ExchangeDemographics operation that will delegate to the provider adapter.
 		verificationStatus := "VERIFIED"
 
 		return &pb.ExchangeDemographicsResponse{
@@ -729,8 +732,9 @@ func (s *Service) ExchangeDemographics(ctx context.Context, req *pb.ExchangeDemo
 		}, nil
 	}
 
-	// Default behavior for non-production environments without explicit flag
-	// TODO: Integrate with external KYC/AML provider (Task 5 - Option 2)
+	// Default behavior for non-production environments without explicit flag.
+	// Stub: returns VERIFIED for all parties. See KYC_STUB_ENABLED block above
+	// for context on the planned external provider integration.
 	verificationStatus := "VERIFIED"
 	s.logger.Info("demographics verified", "party_id", req.PartyId)
 
