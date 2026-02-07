@@ -249,6 +249,101 @@ func TestPostgresRegistry_ListActive(t *testing.T) {
 	})
 }
 
+func TestPostgresRegistry_ListByStatus(t *testing.T) {
+	reg, pool := setupTestRegistry(t)
+	ctx := setupTenantContext(t, pool, "test-tenant-liststatus")
+
+	// Seed a system instrument (ACTIVE)
+	seedSystemInstrument(t, pool, ctx, "USD")
+
+	// Create DRAFT instruments
+	draft1 := &registry.InstrumentDefinition{
+		Code:      "DRAFT1",
+		Version:   1,
+		Dimension: registry.DimensionMonetary,
+		Precision: 2,
+	}
+	require.NoError(t, reg.CreateDraft(ctx, draft1))
+
+	draft2 := &registry.InstrumentDefinition{
+		Code:      "DRAFT2",
+		Version:   1,
+		Dimension: registry.DimensionEnergy,
+		Precision: 3,
+	}
+	require.NoError(t, reg.CreateDraft(ctx, draft2))
+
+	// Create and activate a tenant instrument
+	active := &registry.InstrumentDefinition{
+		Code:      "TENANTACTIVE",
+		Version:   1,
+		Dimension: registry.DimensionQuantity,
+		Precision: 0,
+	}
+	require.NoError(t, reg.CreateDraft(ctx, active))
+	require.NoError(t, reg.ActivateInstrument(ctx, "TENANTACTIVE", 1))
+
+	// Create and deprecate an instrument
+	dep := &registry.InstrumentDefinition{
+		Code:      "DEPRECATED1",
+		Version:   1,
+		Dimension: registry.DimensionMonetary,
+		Precision: 2,
+	}
+	require.NoError(t, reg.CreateDraft(ctx, dep))
+	require.NoError(t, reg.ActivateInstrument(ctx, "DEPRECATED1", 1))
+	require.NoError(t, reg.DeprecateInstrument(ctx, "DEPRECATED1", 1, nil))
+
+	t.Run("returns only DRAFT instruments", func(t *testing.T) {
+		results, err := reg.ListByStatus(ctx, registry.StatusDraft)
+		require.NoError(t, err)
+
+		codes := make(map[string]bool)
+		for _, r := range results {
+			codes[r.Code] = true
+			assert.Equal(t, registry.StatusDraft, r.Status)
+		}
+		assert.True(t, codes["DRAFT1"])
+		assert.True(t, codes["DRAFT2"])
+		assert.Len(t, results, 2)
+	})
+
+	t.Run("returns only ACTIVE instruments", func(t *testing.T) {
+		results, err := reg.ListByStatus(ctx, registry.StatusActive)
+		require.NoError(t, err)
+
+		codes := make(map[string]bool)
+		for _, r := range results {
+			codes[r.Code] = true
+			assert.Equal(t, registry.StatusActive, r.Status)
+		}
+		assert.True(t, codes["USD"])
+		assert.True(t, codes["TENANTACTIVE"])
+		assert.Len(t, results, 2)
+	})
+
+	t.Run("returns only DEPRECATED instruments", func(t *testing.T) {
+		results, err := reg.ListByStatus(ctx, registry.StatusDeprecated)
+		require.NoError(t, err)
+
+		codes := make(map[string]bool)
+		for _, r := range results {
+			codes[r.Code] = true
+			assert.Equal(t, registry.StatusDeprecated, r.Status)
+		}
+		assert.True(t, codes["DEPRECATED1"])
+		assert.Len(t, results, 1)
+	})
+
+	t.Run("returns all instruments when status is empty", func(t *testing.T) {
+		results, err := reg.ListByStatus(ctx, "")
+		require.NoError(t, err)
+
+		// Should include: USD (system), DRAFT1, DRAFT2, TENANTACTIVE, DEPRECATED1
+		assert.Len(t, results, 5)
+	})
+}
+
 func TestPostgresRegistry_SystemInstrumentProtection(t *testing.T) {
 	reg, pool := setupTestRegistry(t)
 	ctx := setupTenantContext(t, pool, "test-tenant-5")

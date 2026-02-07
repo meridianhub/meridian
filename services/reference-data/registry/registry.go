@@ -188,6 +188,11 @@ type InstrumentRegistry interface {
 	// copied there during tenant provisioning.
 	ListActive(ctx context.Context) ([]*InstrumentDefinition, error)
 
+	// ListByStatus retrieves all instruments with the specified status.
+	// Returns both system instruments (is_system=true) and tenant-specific instruments.
+	// If status is empty, returns all instruments regardless of status.
+	ListByStatus(ctx context.Context, status Status) ([]*InstrumentDefinition, error)
+
 	// CreateDraft creates a new instrument definition in DRAFT status.
 	// Returns ErrSystemInstrumentReadOnly if is_system=true is attempted.
 	// Returns ErrInvalidCEL if any CEL expression fails compilation.

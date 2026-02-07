@@ -27,15 +27,16 @@ var (
 
 // mockRegistry is a test double for the InstrumentRegistry interface.
 type mockRegistry struct {
-	definitions    map[string]*registry.InstrumentDefinition
-	createDraftErr error
-	updateDefErr   error
-	getDefErr      error
-	activateErr    error
-	deprecateErr   error
-	listActiveErr  error
-	validateResult registry.ValidationResult
-	validateErr    error
+	definitions     map[string]*registry.InstrumentDefinition
+	createDraftErr  error
+	updateDefErr    error
+	getDefErr       error
+	activateErr     error
+	deprecateErr    error
+	listActiveErr   error
+	listByStatusErr error
+	validateResult  registry.ValidationResult
+	validateErr     error
 }
 
 func newMockRegistry() *mockRegistry {
@@ -79,6 +80,19 @@ func (m *mockRegistry) ListActive(_ context.Context) ([]*registry.InstrumentDefi
 	var result []*registry.InstrumentDefinition
 	for _, def := range m.definitions {
 		if def.Status == registry.StatusActive {
+			result = append(result, def)
+		}
+	}
+	return result, nil
+}
+
+func (m *mockRegistry) ListByStatus(_ context.Context, status registry.Status) ([]*registry.InstrumentDefinition, error) {
+	if m.listByStatusErr != nil {
+		return nil, m.listByStatusErr
+	}
+	var result []*registry.InstrumentDefinition
+	for _, def := range m.definitions {
+		if status == "" || def.Status == status {
 			result = append(result, def)
 		}
 	}
@@ -413,7 +427,7 @@ func TestListInstruments(t *testing.T) {
 	compiler, err := refcel.NewCompiler()
 	require.NoError(t, err)
 
-	t.Run("list all active", func(t *testing.T) {
+	t.Run("list all without status filter", func(t *testing.T) {
 		reg := newMockRegistry()
 		reg.definitions["USD:1"] = &registry.InstrumentDefinition{
 			ID:        uuid.New(),
@@ -433,7 +447,7 @@ func TestListInstruments(t *testing.T) {
 			ID:        uuid.New(),
 			Code:      "DRAFT",
 			Version:   1,
-			Status:    registry.StatusDraft, // Not active
+			Status:    registry.StatusDraft,
 			CreatedAt: time.Now(),
 		}
 		svc, _ := NewService(reg, compiler, nil)
@@ -441,12 +455,72 @@ func TestListInstruments(t *testing.T) {
 		resp, err := svc.ListInstruments(context.Background(), &pb.ListInstrumentsRequest{})
 
 		require.NoError(t, err)
+		assert.Len(t, resp.Instruments, 3) // All instruments returned when no status filter
+	})
+
+	t.Run("list only active with status filter", func(t *testing.T) {
+		reg := newMockRegistry()
+		reg.definitions["USD:1"] = &registry.InstrumentDefinition{
+			ID:        uuid.New(),
+			Code:      "USD",
+			Version:   1,
+			Status:    registry.StatusActive,
+			CreatedAt: time.Now(),
+		}
+		reg.definitions["DRAFT:1"] = &registry.InstrumentDefinition{
+			ID:        uuid.New(),
+			Code:      "DRAFT",
+			Version:   1,
+			Status:    registry.StatusDraft,
+			CreatedAt: time.Now(),
+		}
+		svc, _ := NewService(reg, compiler, nil)
+
+		resp, err := svc.ListInstruments(context.Background(), &pb.ListInstrumentsRequest{
+			StatusFilter: pb.InstrumentStatus_INSTRUMENT_STATUS_ACTIVE,
+		})
+
+		require.NoError(t, err)
+		assert.Len(t, resp.Instruments, 1)
+		assert.Equal(t, "USD", resp.Instruments[0].Code)
+	})
+
+	t.Run("list draft instruments with status filter", func(t *testing.T) {
+		reg := newMockRegistry()
+		reg.definitions["USD:1"] = &registry.InstrumentDefinition{
+			ID:        uuid.New(),
+			Code:      "USD",
+			Version:   1,
+			Status:    registry.StatusActive,
+			CreatedAt: time.Now(),
+		}
+		reg.definitions["DRAFT1:1"] = &registry.InstrumentDefinition{
+			ID:        uuid.New(),
+			Code:      "DRAFT1",
+			Version:   1,
+			Status:    registry.StatusDraft,
+			CreatedAt: time.Now(),
+		}
+		reg.definitions["DRAFT2:1"] = &registry.InstrumentDefinition{
+			ID:        uuid.New(),
+			Code:      "DRAFT2",
+			Version:   1,
+			Status:    registry.StatusDraft,
+			CreatedAt: time.Now(),
+		}
+		svc, _ := NewService(reg, compiler, nil)
+
+		resp, err := svc.ListInstruments(context.Background(), &pb.ListInstrumentsRequest{
+			StatusFilter: pb.InstrumentStatus_INSTRUMENT_STATUS_DRAFT,
+		})
+
+		require.NoError(t, err)
 		assert.Len(t, resp.Instruments, 2)
 	})
 
 	t.Run("error from registry", func(t *testing.T) {
 		reg := newMockRegistry()
-		reg.listActiveErr = errMockDatabase
+		reg.listByStatusErr = errMockDatabase
 		svc, _ := NewService(reg, compiler, nil)
 
 		_, err := svc.ListInstruments(context.Background(), &pb.ListInstrumentsRequest{})
