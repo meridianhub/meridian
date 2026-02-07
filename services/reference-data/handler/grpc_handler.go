@@ -154,8 +154,8 @@ func (s *Service) ListInstruments(ctx context.Context, req *pb.ListInstrumentsRe
 		return nil, status.Errorf(codes.InvalidArgument, "invalid page token: %v", err)
 	}
 
-	// TODO(universal-asset-system.13): Add ListAll/ListByStatus to InstrumentRegistry
-	// Currently registry only supports ListActive, so non-ACTIVE filters return empty.
+	// Registry only supports ListActive; non-ACTIVE status filters return empty results.
+	// Add ListAll/ListByStatus to InstrumentRegistry to support full status filtering.
 	defs, err := s.registry.ListActive(ctx)
 	if err != nil {
 		s.logger.Error("failed to list instruments", "error", err)

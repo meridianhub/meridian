@@ -127,8 +127,8 @@ func run(logger *slog.Logger) error {
 	logger.Info("dependency container initialized")
 
 	// Initialize and start event outbox worker (if Kafka enabled)
-	// TODO(tm:bian-alignment.14): Make worker config values (batch_size, poll_interval, max_retries)
-	// configurable via environment variables for production tuning.
+	// Worker config values (batch_size, poll_interval, max_retries) could be made configurable
+	// via environment variables for production tuning.
 	var outboxWorker *events.Worker
 	var workerCancel context.CancelFunc
 	if container.KafkaProducer() != nil {
@@ -450,8 +450,8 @@ func run(logger *slog.Logger) error {
 	// Graceful shutdown
 	logger.Info("shutting down servers...")
 
-	// Shutdown outbox worker before stopping servers
-	// TODO(tm:bian-alignment.14): Add a shutdown timeout mechanism to prevent indefinite blocking
+	// Shutdown outbox worker before stopping servers.
+	// Consider adding a shutdown timeout to prevent indefinite blocking
 	// if the worker fails to stop gracefully (e.g., Kafka broker unreachable).
 	if outboxWorker != nil {
 		logger.Info("stopping event outbox worker...")

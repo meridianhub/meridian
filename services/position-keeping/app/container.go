@@ -328,8 +328,8 @@ func (c *Container) initializeRepositories() {
 // 2. When Kafka is disabled, events remain in the outbox until Kafka becomes available
 // 3. This enables graceful degradation - the system continues operating without message broker
 func (c *Container) initializeOutboxRepository() {
-	// TODO(tm:bian-alignment.14): Consider exposing outbox depth as a health check metric
-	// to alert operators when the outbox is backing up (e.g., Kafka unavailable).
+	// Consider exposing outbox depth as a health check metric to alert operators
+	// when the outbox is backing up (e.g., Kafka unavailable).
 	c.OutboxRepository = events.NewPgxOutboxRepository(c.DBPool)
 	c.Logger.Info("event outbox repository initialized")
 }

@@ -62,9 +62,8 @@ func NewProxyHandler(backends []BackendRoute) *ProxyHandler {
 
 		proxy := httputil.NewSingleHostReverseProxy(target)
 
-		// TODO(8-multi-tenancy.89): Add configurable timeout settings for production resilience
-		// Consider: ResponseHeaderTimeout, IdleConnTimeout, MaxIdleConnsPerHost
-		// See: https://github.com/meridianhub/meridian/pull/439#discussion_r1901972279
+		// Consider adding configurable timeout settings for production resilience:
+		// ResponseHeaderTimeout, IdleConnTimeout, MaxIdleConnsPerHost
 
 		// Configure the proxy director to add X-Forwarded-Host and identity headers.
 		// Connect protocol headers (Content-Type, Connect-Protocol-Version, Connect-Timeout-Ms)
