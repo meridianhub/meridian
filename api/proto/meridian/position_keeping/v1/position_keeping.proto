@@ -905,13 +905,13 @@ message RecordReservationRequest {
     }
   ];
 
-  // reserved_amount is the quantity being reserved.
+  // reserved_amount is the quantity being reserved. Must be positive.
   string reserved_amount = 4 [
     (buf.validate.field).required = true,
     (buf.validate.field).string = {
       min_len: 1
       max_len: 50
-      pattern: "^-?\\d+(\\.\\d+)?$"
+      pattern: "^\\d+(\\.\\d+)?$"
     }
   ];
 

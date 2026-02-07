@@ -44,6 +44,7 @@ var (
 	ErrInvalidReservationState = errors.New("invalid reservation status transition")
 	ErrEmptyLienID             = errors.New("lien_id cannot be empty")
 	ErrZeroReservedAmount      = errors.New("reserved_amount must be non-zero")
+	ErrNilReservation          = errors.New("reservation is nil")
 )
 
 // Reservation represents a lien-based reservation against an account's position.

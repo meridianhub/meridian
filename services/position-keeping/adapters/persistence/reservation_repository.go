@@ -46,7 +46,7 @@ func (r *ReservationRepository) setSearchPath(ctx context.Context, tx pgx.Tx) er
 // Returns domain.ErrConflict if a reservation with the same lien_id already exists.
 func (r *ReservationRepository) Create(ctx context.Context, reservation *domain.Reservation) error {
 	if reservation == nil {
-		return fmt.Errorf("create reservation: %w", domain.ErrReservationNotFound)
+		return fmt.Errorf("create reservation: %w", domain.ErrNilReservation)
 	}
 
 	tx, err := r.pool.Begin(ctx)
@@ -169,6 +169,8 @@ func (r *ReservationRepository) UpdateStatus(ctx context.Context, lienID uuid.UU
 	case domain.ReservationStatusTerminated:
 		query = `UPDATE reservation SET status = $1, terminated_at = $2 WHERE lien_id = $3 AND status = 'ACTIVE'`
 		args = []any{newStatus.String(), now, lienID}
+	default:
+		return domain.ErrInvalidReservationState
 	}
 
 	result, err := tx.Exec(ctx, query, args...)

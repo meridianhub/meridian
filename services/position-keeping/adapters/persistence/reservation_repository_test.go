@@ -85,10 +85,11 @@ func TestReservationRepository_UpdateStatus(t *testing.T) {
 
 	t.Run("transitions active to executed", func(t *testing.T) {
 		lienID := uuid.New()
-		r, _ := domain.NewReservation(lienID, "ACC-001", "GBP", "", decimal.NewFromInt(100))
+		r, err := domain.NewReservation(lienID, "ACC-001", "GBP", "", decimal.NewFromInt(100))
+		require.NoError(t, err)
 		require.NoError(t, tc.ReservationRepo.Create(ctx, r))
 
-		err := tc.ReservationRepo.UpdateStatus(ctx, lienID, domain.ReservationStatusExecuted)
+		err = tc.ReservationRepo.UpdateStatus(ctx, lienID, domain.ReservationStatusExecuted)
 		require.NoError(t, err)
 
 		found, err := tc.ReservationRepo.FindByLienID(ctx, lienID)
@@ -100,10 +101,11 @@ func TestReservationRepository_UpdateStatus(t *testing.T) {
 
 	t.Run("transitions active to terminated", func(t *testing.T) {
 		lienID := uuid.New()
-		r, _ := domain.NewReservation(lienID, "ACC-001", "GBP", "", decimal.NewFromInt(100))
+		r, err := domain.NewReservation(lienID, "ACC-001", "GBP", "", decimal.NewFromInt(100))
+		require.NoError(t, err)
 		require.NoError(t, tc.ReservationRepo.Create(ctx, r))
 
-		err := tc.ReservationRepo.UpdateStatus(ctx, lienID, domain.ReservationStatusTerminated)
+		err = tc.ReservationRepo.UpdateStatus(ctx, lienID, domain.ReservationStatusTerminated)
 		require.NoError(t, err)
 
 		found, err := tc.ReservationRepo.FindByLienID(ctx, lienID)
@@ -115,11 +117,12 @@ func TestReservationRepository_UpdateStatus(t *testing.T) {
 
 	t.Run("returns already final for executed reservation", func(t *testing.T) {
 		lienID := uuid.New()
-		r, _ := domain.NewReservation(lienID, "ACC-001", "GBP", "", decimal.NewFromInt(100))
+		r, err := domain.NewReservation(lienID, "ACC-001", "GBP", "", decimal.NewFromInt(100))
+		require.NoError(t, err)
 		require.NoError(t, tc.ReservationRepo.Create(ctx, r))
 		require.NoError(t, tc.ReservationRepo.UpdateStatus(ctx, lienID, domain.ReservationStatusExecuted))
 
-		err := tc.ReservationRepo.UpdateStatus(ctx, lienID, domain.ReservationStatusTerminated)
+		err = tc.ReservationRepo.UpdateStatus(ctx, lienID, domain.ReservationStatusTerminated)
 		assert.ErrorIs(t, err, domain.ErrReservationAlreadyFinal)
 	})
 
@@ -150,13 +153,15 @@ func TestReservationRepository_SumActiveReservations(t *testing.T) {
 
 		// Create 3 active reservations
 		for i := 0; i < 3; i++ {
-			r, _ := domain.NewReservation(uuid.New(), accountID, "GBP", "bucket-1", decimal.NewFromInt(100))
+			r, err := domain.NewReservation(uuid.New(), accountID, "GBP", "bucket-1", decimal.NewFromInt(100))
+			require.NoError(t, err)
 			require.NoError(t, tc.ReservationRepo.Create(ctx, r))
 		}
 
 		// Create 1 executed reservation
 		executedLienID := uuid.New()
-		r, _ := domain.NewReservation(executedLienID, accountID, "GBP", "bucket-1", decimal.NewFromInt(50))
+		r, err := domain.NewReservation(executedLienID, accountID, "GBP", "bucket-1", decimal.NewFromInt(50))
+		require.NoError(t, err)
 		require.NoError(t, tc.ReservationRepo.Create(ctx, r))
 		require.NoError(t, tc.ReservationRepo.UpdateStatus(ctx, executedLienID, domain.ReservationStatusExecuted))
 
@@ -170,11 +175,13 @@ func TestReservationRepository_SumActiveReservations(t *testing.T) {
 		accountID := "ACC-BUCKET-" + uuid.New().String()[:8]
 
 		// Create reservation in bucket-1
-		r1, _ := domain.NewReservation(uuid.New(), accountID, "GBP", "bucket-1", decimal.NewFromInt(100))
+		r1, err := domain.NewReservation(uuid.New(), accountID, "GBP", "bucket-1", decimal.NewFromInt(100))
+		require.NoError(t, err)
 		require.NoError(t, tc.ReservationRepo.Create(ctx, r1))
 
 		// Create reservation in bucket-2
-		r2, _ := domain.NewReservation(uuid.New(), accountID, "GBP", "bucket-2", decimal.NewFromInt(200))
+		r2, err := domain.NewReservation(uuid.New(), accountID, "GBP", "bucket-2", decimal.NewFromInt(200))
+		require.NoError(t, err)
 		require.NoError(t, tc.ReservationRepo.Create(ctx, r2))
 
 		// Sum for bucket-1 only
@@ -191,10 +198,12 @@ func TestReservationRepository_SumActiveReservations(t *testing.T) {
 	t.Run("isolates by instrument_code", func(t *testing.T) {
 		accountID := "ACC-INST-" + uuid.New().String()[:8]
 
-		r1, _ := domain.NewReservation(uuid.New(), accountID, "GBP", "", decimal.NewFromInt(100))
+		r1, err := domain.NewReservation(uuid.New(), accountID, "GBP", "", decimal.NewFromInt(100))
+		require.NoError(t, err)
 		require.NoError(t, tc.ReservationRepo.Create(ctx, r1))
 
-		r2, _ := domain.NewReservation(uuid.New(), accountID, "USD", "", decimal.NewFromInt(200))
+		r2, err := domain.NewReservation(uuid.New(), accountID, "USD", "", decimal.NewFromInt(200))
+		require.NoError(t, err)
 		require.NoError(t, tc.ReservationRepo.Create(ctx, r2))
 
 		gbpTotal, err := tc.ReservationRepo.SumActiveReservations(ctx, accountID, "GBP", "")
@@ -221,14 +230,17 @@ func TestReservationLifecycle_Integration(t *testing.T) {
 	accountID := "ACC-LIFECYCLE-" + uuid.New().String()[:8]
 
 	// Step 1: Insert some position entries
-	pos1, _ := domain.NewPosition(accountID, "GBP", "default", decimal.NewFromInt(1000), "Monetary", nil, uuid.Nil, "system")
+	pos1, err := domain.NewPosition(accountID, "GBP", "default", decimal.NewFromInt(1000), "Monetary", nil, uuid.Nil, "system")
+	require.NoError(t, err)
 	require.NoError(t, tc.PositionRepo.Insert(ctx, pos1))
 
 	// Step 2: Create reservations
 	lien1 := uuid.New()
 	lien2 := uuid.New()
-	r1, _ := domain.NewReservation(lien1, accountID, "GBP", "default", decimal.NewFromInt(200))
-	r2, _ := domain.NewReservation(lien2, accountID, "GBP", "default", decimal.NewFromInt(300))
+	r1, err := domain.NewReservation(lien1, accountID, "GBP", "default", decimal.NewFromInt(200))
+	require.NoError(t, err)
+	r2, err := domain.NewReservation(lien2, accountID, "GBP", "default", decimal.NewFromInt(300))
+	require.NoError(t, err)
 	require.NoError(t, tc.ReservationRepo.Create(ctx, r1))
 	require.NoError(t, tc.ReservationRepo.Create(ctx, r2))
 
