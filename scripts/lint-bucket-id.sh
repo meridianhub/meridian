@@ -43,7 +43,7 @@ done < <(grep -rn \
     --exclude-dir='.git' \
     --exclude='*_test.go' \
     --exclude='*.pb.go' \
-    -E 'fmt\.Sprintf\(\s*"(monetary|commodity|currency|energy|compute|carbon|data|volume|mass|count)_' \
+    -Ei 'fmt\.Sprintf\(\s*"(monetary|commodity|currency|energy|compute|carbon|data|volume|mass|count)_' \
     "$REPO_ROOT" | grep -v 'shared/pkg/bucketing/' || true)
 
 # Pattern 2: String concatenation building bucket ID patterns
@@ -80,7 +80,7 @@ done < <(grep -rn \
     --exclude-dir='.git' \
     --exclude='*_test.go' \
     --exclude='*.pb.go' \
-    -E '[Bb]ucket[_]?[Ii][Dd].*[:=].*"(currency|energy|compute|carbon|data|volume|mass|count)_' \
+    -Ei '[Bb]ucket[_]?[Ii][Dd].*[:=].*"(currency|energy|compute|carbon|data|volume|mass|count)_' \
     "$REPO_ROOT" | grep -v 'shared/pkg/bucketing/' || true)
 
 if [ "$VIOLATIONS" -gt 0 ]; then
