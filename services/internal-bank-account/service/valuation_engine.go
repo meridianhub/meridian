@@ -194,6 +194,9 @@ func (s *Service) valuateInternal(ctx context.Context, accountID string, inputAm
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrValuationEngineFailed, err)
 		}
+		if result == nil {
+			return nil, fmt.Errorf("%w: nil result", ErrValuationEngineFailed)
+		}
 
 		executionMs := time.Since(start).Milliseconds()
 
