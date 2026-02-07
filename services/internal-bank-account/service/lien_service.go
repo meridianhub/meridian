@@ -113,11 +113,13 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 	var lien *domain.Lien
 
 	if req.Input.InstrumentCode == nativeInstrument {
-		// Same-instrument lien: no valuation needed
-		// Convert decimal amount to cents (minor units)
-		amountCents := inputAmount.Shift(2).IntPart() // Assume 2 decimal places for native instrument
-		if amountCents <= 0 {
-			// For instruments with no decimal places, use the raw amount
+		// Same-instrument lien: no valuation needed.
+		// Store the amount in minor units (cents). For fiat currencies this is
+		// amount * 100; for non-decimal instruments (kWh, GPU_HOUR) the raw
+		// integer part is used (the proto contract sends whole units).
+		amountCents := inputAmount.Shift(2).IntPart()
+		if amountCents == 0 {
+			// Non-decimal instrument — use integer part directly
 			amountCents = inputAmount.IntPart()
 		}
 
@@ -247,7 +249,7 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 		return nil, status.Errorf(codes.InvalidArgument, "invalid lien_id: %v", err)
 	}
 
-	// Read-only idempotency check: if already executed, return directly
+	// Read-only idempotency check: if already executed, return without lock
 	lien, err := s.lienRepo.FindByID(ctx, lienID)
 	if err != nil {
 		if errors.Is(err, persistence.ErrLienNotFound) {
@@ -263,6 +265,17 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 		return &pb.ExecuteLienResponse{
 			Lien: s.domainToProtoLien(lien),
 		}, nil
+	}
+
+	// Acquire pessimistic lock for mutation
+	lien, err = s.lienRepo.FindByIDForUpdate(ctx, lienID)
+	if err != nil {
+		if errors.Is(err, persistence.ErrLienNotFound) {
+			operationStatus = opStatusLienNotFound
+			return nil, status.Errorf(codes.NotFound, "lien not found: %s", req.LienId)
+		}
+		operationStatus = operationStatusFailed
+		return nil, status.Errorf(codes.Internal, "failed to lock lien: %v", err)
 	}
 
 	// Execute the domain transition
@@ -318,7 +331,7 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 		return nil, status.Errorf(codes.InvalidArgument, "invalid lien_id: %v", err)
 	}
 
-	// Read-only idempotency check
+	// Read-only idempotency check: if already terminated, return without lock
 	lien, err := s.lienRepo.FindByID(ctx, lienID)
 	if err != nil {
 		if errors.Is(err, persistence.ErrLienNotFound) {
@@ -336,7 +349,18 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 		}, nil
 	}
 
-	// Execute the domain transition
+	// Acquire pessimistic lock for mutation
+	lien, err = s.lienRepo.FindByIDForUpdate(ctx, lienID)
+	if err != nil {
+		if errors.Is(err, persistence.ErrLienNotFound) {
+			operationStatus = opStatusLienNotFound
+			return nil, status.Errorf(codes.NotFound, "lien not found: %s", req.LienId)
+		}
+		operationStatus = operationStatusFailed
+		return nil, status.Errorf(codes.Internal, "failed to lock lien: %v", err)
+	}
+
+	// Terminate the domain transition
 	if err := lien.Terminate(req.Reason); err != nil {
 		if errors.Is(err, domain.ErrLienNotActive) {
 			operationStatus = opStatusLienNotActive
