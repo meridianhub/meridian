@@ -75,6 +75,11 @@ type mockPositionKeepingClient struct {
 	lastRequestedInstrumentCode string           // Track last requested instrument code
 	requireInstrumentCode       bool             // If true, return error when instrument_code is missing
 	returnInstrumentCode        string           // Override the instrument code in response (for testing mismatches)
+	// ReleaseReservation tracking
+	releaseReservationCalls  int
+	lastReleasedLienID       string
+	lastReleaseReason        positionkeepingv1.ReservationStatus
+	failOnReleaseReservation bool
 }
 
 func (m *mockPositionKeepingClient) InitiateFinancialPositionLog(_ context.Context, _ *positionkeepingv1.InitiateFinancialPositionLogRequest) (*positionkeepingv1.InitiateFinancialPositionLogResponse, error) {
@@ -222,6 +227,22 @@ func (m *mockPositionKeepingClient) GetAccountBalances(_ context.Context, req *p
 	return &positionkeepingv1.GetAccountBalancesResponse{
 		AccountId: req.AccountId,
 		Balances:  []*positionkeepingv1.BalanceEntry{},
+	}, nil
+}
+
+func (m *mockPositionKeepingClient) ReleaseReservation(_ context.Context, req *positionkeepingv1.ReleaseReservationRequest) (*positionkeepingv1.ReleaseReservationResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.releaseReservationCalls++
+	m.lastReleasedLienID = req.GetLienId()
+	m.lastReleaseReason = req.GetReason()
+
+	if m.failOnReleaseReservation {
+		return nil, status.Error(codes.Internal, "mock release reservation failure")
+	}
+
+	return &positionkeepingv1.ReleaseReservationResponse{
+		Released: true,
 	}, nil
 }
 

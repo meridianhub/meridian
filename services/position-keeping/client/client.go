@@ -399,6 +399,30 @@ func (c *Client) GetAccountBalances(ctx context.Context, req *positionkeepingv1.
 	return resp, nil
 }
 
+// ReleaseReservation transitions a reservation to EXECUTED or TERMINATED status.
+// This is idempotent (releasing an already-released reservation returns success),
+// so it uses circuit breaker with retry.
+func (c *Client) ReleaseReservation(ctx context.Context, req *positionkeepingv1.ReleaseReservationRequest) (*positionkeepingv1.ReleaseReservationResponse, error) {
+	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	ctx = clients.PropagateCorrelationID(ctx)
+	ctx = clients.PropagateOrganization(ctx)
+
+	if c.resilient != nil {
+		return clients.ExecuteWithResilience(ctx, c.resilient, "ReleaseReservation", func() (*positionkeepingv1.ReleaseReservationResponse, error) {
+			return c.positionKeeping.ReleaseReservation(ctx, req)
+		})
+	}
+
+	resp, err := c.positionKeeping.ReleaseReservation(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to release reservation: %w", err)
+	}
+
+	return resp, nil
+}
+
 // Close terminates the gRPC connection gracefully.
 func (c *Client) Close() error {
 	if c.conn != nil {

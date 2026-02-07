@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
+	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/domain"
@@ -1774,6 +1775,225 @@ func TestInitiateLien_AtomicValuation_LegacyModeStillWorks(t *testing.T) {
 	require.Nil(t, resp.Lien.ValuedAmount, "legacy lien should not have valued_amount")
 	require.Nil(t, resp.ValuedAmount, "legacy response should not have valued_amount")
 	require.Nil(t, resp.Basis, "legacy response should not have basis")
+}
+
+// ============================================================================
+// ExecuteLien & TerminateLien - ReleaseReservation Tests
+// ============================================================================
+
+func TestExecuteLien_CallsReleaseReservation_WithExecutedReason(t *testing.T) {
+	db, ctx, cleanup := setupLienTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	lienRepo := persistence.NewLienRepository(db)
+	svc := mustNewServiceWithPositionKeeping(t, repo, lienRepo, map[string]int64{
+		"ACC-RELEASE-001": 100000, // £1000
+	})
+
+	// Create account with £1000 balance
+	account := createTestAccountWithBalance(t, ctx, repo, "ACC-RELEASE-001", 100000)
+
+	// Create lien for £500
+	lienAmount, err := domain.NewMoney("GBP", 50000)
+	require.NoError(t, err)
+	lien, err := domain.NewLien(account.ID(), lienAmount, "", "PO-RELEASE-001", nil)
+	require.NoError(t, err)
+	require.NoError(t, lienRepo.Create(ctx, lien))
+
+	// Execute the lien
+	resp, err := svc.ExecuteLien(ctx, &pb.ExecuteLienRequest{LienId: lien.ID.String()})
+	require.NoError(t, err)
+	require.Equal(t, pb.LienStatus_LIEN_STATUS_EXECUTED, resp.Lien.Status)
+
+	// Assert ReleaseReservation was called with EXECUTED reason
+	mockPK := svc.posKeepingClient.(*mockPositionKeepingClient)
+	mockPK.mu.Lock()
+	defer mockPK.mu.Unlock()
+	require.Equal(t, 1, mockPK.releaseReservationCalls, "ReleaseReservation should be called once")
+	require.Equal(t, lien.ID.String(), mockPK.lastReleasedLienID, "should release the correct lien ID")
+	require.Equal(t, positionkeepingv1.ReservationStatus_RESERVATION_STATUS_EXECUTED, mockPK.lastReleaseReason,
+		"reason should be EXECUTED")
+}
+
+func TestTerminateLien_CallsReleaseReservation_WithTerminatedReason(t *testing.T) {
+	db, ctx, cleanup := setupLienTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	lienRepo := persistence.NewLienRepository(db)
+	svc := mustNewServiceWithPositionKeeping(t, repo, lienRepo, map[string]int64{
+		"ACC-RELEASE-002": 100000, // £1000
+	})
+
+	// Create account with £1000 balance
+	account := createTestAccountWithBalance(t, ctx, repo, "ACC-RELEASE-002", 100000)
+
+	// Create lien for £500
+	lienAmount, err := domain.NewMoney("GBP", 50000)
+	require.NoError(t, err)
+	lien, err := domain.NewLien(account.ID(), lienAmount, "", "PO-RELEASE-002", nil)
+	require.NoError(t, err)
+	require.NoError(t, lienRepo.Create(ctx, lien))
+
+	// Terminate the lien
+	resp, err := svc.TerminateLien(ctx, &pb.TerminateLienRequest{
+		LienId: lien.ID.String(),
+		Reason: "Payment cancelled",
+	})
+	require.NoError(t, err)
+	require.Equal(t, pb.LienStatus_LIEN_STATUS_TERMINATED, resp.Lien.Status)
+
+	// Assert ReleaseReservation was called with TERMINATED reason
+	mockPK := svc.posKeepingClient.(*mockPositionKeepingClient)
+	mockPK.mu.Lock()
+	defer mockPK.mu.Unlock()
+	require.Equal(t, 1, mockPK.releaseReservationCalls, "ReleaseReservation should be called once")
+	require.Equal(t, lien.ID.String(), mockPK.lastReleasedLienID, "should release the correct lien ID")
+	require.Equal(t, positionkeepingv1.ReservationStatus_RESERVATION_STATUS_TERMINATED, mockPK.lastReleaseReason,
+		"reason should be TERMINATED")
+}
+
+func TestExecuteLien_ReleaseReservationFailure_DoesNotFailLienExecution(t *testing.T) {
+	db, ctx, cleanup := setupLienTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	lienRepo := persistence.NewLienRepository(db)
+	svc := mustNewServiceWithPositionKeeping(t, repo, lienRepo, map[string]int64{
+		"ACC-RELEASE-003": 100000, // £1000
+	})
+
+	// Configure mock to fail on ReleaseReservation
+	mockPK := svc.posKeepingClient.(*mockPositionKeepingClient)
+	mockPK.mu.Lock()
+	mockPK.failOnReleaseReservation = true
+	mockPK.mu.Unlock()
+
+	// Create account with £1000 balance
+	account := createTestAccountWithBalance(t, ctx, repo, "ACC-RELEASE-003", 100000)
+
+	// Create lien for £500
+	lienAmount, err := domain.NewMoney("GBP", 50000)
+	require.NoError(t, err)
+	lien, err := domain.NewLien(account.ID(), lienAmount, "", "PO-RELEASE-003", nil)
+	require.NoError(t, err)
+	require.NoError(t, lienRepo.Create(ctx, lien))
+
+	// Execute the lien - should succeed even though ReleaseReservation fails
+	resp, err := svc.ExecuteLien(ctx, &pb.ExecuteLienRequest{LienId: lien.ID.String()})
+	require.NoError(t, err, "ExecuteLien should succeed even when ReleaseReservation fails (best-effort)")
+	require.Equal(t, pb.LienStatus_LIEN_STATUS_EXECUTED, resp.Lien.Status)
+	require.NotEmpty(t, resp.TransactionId)
+
+	// Verify ReleaseReservation was attempted
+	mockPK.mu.Lock()
+	defer mockPK.mu.Unlock()
+	require.Equal(t, 1, mockPK.releaseReservationCalls, "ReleaseReservation should still be attempted")
+}
+
+func TestTerminateLien_ReleaseReservationFailure_DoesNotFailTermination(t *testing.T) {
+	db, ctx, cleanup := setupLienTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	lienRepo := persistence.NewLienRepository(db)
+	svc := mustNewServiceWithPositionKeeping(t, repo, lienRepo, map[string]int64{
+		"ACC-RELEASE-004": 100000, // £1000
+	})
+
+	// Configure mock to fail on ReleaseReservation
+	mockPK := svc.posKeepingClient.(*mockPositionKeepingClient)
+	mockPK.mu.Lock()
+	mockPK.failOnReleaseReservation = true
+	mockPK.mu.Unlock()
+
+	// Create account with £1000 balance
+	account := createTestAccountWithBalance(t, ctx, repo, "ACC-RELEASE-004", 100000)
+
+	// Create lien for £500
+	lienAmount, err := domain.NewMoney("GBP", 50000)
+	require.NoError(t, err)
+	lien, err := domain.NewLien(account.ID(), lienAmount, "", "PO-RELEASE-004", nil)
+	require.NoError(t, err)
+	require.NoError(t, lienRepo.Create(ctx, lien))
+
+	// Terminate the lien - should succeed even though ReleaseReservation fails
+	resp, err := svc.TerminateLien(ctx, &pb.TerminateLienRequest{
+		LienId: lien.ID.String(),
+		Reason: "Payment cancelled",
+	})
+	require.NoError(t, err, "TerminateLien should succeed even when ReleaseReservation fails (best-effort)")
+	require.Equal(t, pb.LienStatus_LIEN_STATUS_TERMINATED, resp.Lien.Status)
+
+	// Verify ReleaseReservation was attempted
+	mockPK.mu.Lock()
+	defer mockPK.mu.Unlock()
+	require.Equal(t, 1, mockPK.releaseReservationCalls, "ReleaseReservation should still be attempted")
+}
+
+// ============================================================================
+// ExecuteLien - Price Lock Immutability Tests
+// ============================================================================
+
+func TestExecuteLien_UsesStoredPriceLock_NoRecalculation(t *testing.T) {
+	db, ctx, cleanup := setupLienTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	lienRepo := persistence.NewLienRepository(db)
+	svc := mustNewServiceWithPositionKeeping(t, repo, lienRepo, map[string]int64{
+		"ACC-PRICELOCK-001": 100000, // £1000
+	})
+
+	// Track if valuation engine is called during ExecuteLien.
+	// Inject a mock engine that would fail if called (proving it's never invoked).
+	callCount := 0
+	svc.valuationEngine = &mockValuationEngine{
+		evaluateFn: func(_ context.Context, _ ValuationParams) (*ValuationResult, error) {
+			callCount++
+			return &ValuationResult{
+				OutputAmount: decimal.NewFromFloat(999.99),
+				OutputCode:   "GBP",
+			}, nil
+		},
+	}
+
+	// Create account with £1000 balance
+	account := createTestAccountWithBalance(t, ctx, repo, "ACC-PRICELOCK-001", 100000)
+
+	// Create a valued lien (simulates what InitiateLien would produce for multi-asset)
+	// The valued_amount is the price lock - it was set at InitiateLien time.
+	lienAmount, err := domain.NewMoney("GBP", 50000) // £500 - the valued amount
+	require.NoError(t, err)
+	reservedQty := &domain.InstrumentAmount{
+		Amount:         decimal.NewFromFloat(100.0),
+		InstrumentCode: "kWh",
+	}
+	valuedAmt := &domain.InstrumentAmount{
+		Amount:         decimal.NewFromFloat(500.0),
+		InstrumentCode: "GBP",
+	}
+	lien, err := domain.NewValuedLien(account.ID(), lienAmount, "", "PO-PRICELOCK-001", nil, reservedQty, valuedAmt, nil)
+	require.NoError(t, err)
+	require.NoError(t, lienRepo.Create(ctx, lien))
+
+	// Execute the lien - should NOT call valuation engine (price lock is immutable)
+	execResp, err := svc.ExecuteLien(ctx, &pb.ExecuteLienRequest{
+		LienId: lien.ID.String(),
+	})
+	require.NoError(t, err)
+	require.Equal(t, pb.LienStatus_LIEN_STATUS_EXECUTED, execResp.Lien.Status)
+	require.Equal(t, 0, callCount, "valuation engine should NOT be called during ExecuteLien - price lock is immutable")
+
+	// Verify the lien used the original £500 price lock (not recalculated)
+	require.Equal(t, "GBP", execResp.Lien.Amount.Amount.CurrencyCode)
+	require.Equal(t, int64(500), execResp.Lien.Amount.Amount.Units)
+
+	// Verify the reserved quantity is preserved
+	require.NotNil(t, execResp.Lien.ReservedQuantity)
+	require.Equal(t, "kWh", execResp.Lien.ReservedQuantity.InstrumentCode)
+	require.Equal(t, "100", execResp.Lien.ReservedQuantity.Amount)
 }
 
 func TestInitiateLien_AtomicValuation_ValuationImmutable(t *testing.T) {
