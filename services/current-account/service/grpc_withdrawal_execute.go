@@ -403,7 +403,7 @@ func (s *Service) completeWithdrawalWithOutbox(ctx context.Context, withdrawal *
 			CorrelationId: uuid.New().String(),
 			CausationId:   withdrawal.Reference,
 			Timestamp:     timestamppb.New(now),
-			Version:       1,
+			Version:       int64(withdrawal.Version),
 		}
 
 		// Marshal event payload as protobuf
