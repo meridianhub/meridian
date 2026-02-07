@@ -40,7 +40,8 @@ var (
 
 // defaultStarlarkRuntime implements StarlarkRuntime.
 type defaultStarlarkRuntime struct {
-	timeout time.Duration
+	timeout  time.Duration
+	builtins starlark.StringDict
 }
 
 // StarlarkRuntimeConfig holds configuration for creating a StarlarkRuntime.
@@ -48,6 +49,11 @@ type StarlarkRuntimeConfig struct {
 	// Timeout is the maximum execution time for a script.
 	// If zero, DefaultStarlarkTimeout (5s) is used.
 	Timeout time.Duration
+
+	// PolicyRuntime provides CEL evaluation for run_policy builtin.
+	// When set, valuation scripts can delegate mathematical calculations to CEL
+	// via run_policy(expression="...", variables={...}).
+	PolicyRuntime PolicyRuntime
 }
 
 // NewStarlarkRuntime creates a new StarlarkRuntime with security constraints.
@@ -57,8 +63,22 @@ func NewStarlarkRuntime(cfg StarlarkRuntimeConfig) StarlarkRuntime {
 		timeout = DefaultStarlarkTimeout
 	}
 
+	// Build builtins registry with optional CEL policy evaluator
+	registry := builtins.NewRegistry()
+	if cfg.PolicyRuntime != nil {
+		registry.EvalPolicy = func(ctx context.Context, expression string, variables map[string]interface{}) (interface{}, error) {
+			compiled, err := cfg.PolicyRuntime.CompilePolicy(expression)
+			if err != nil {
+				return nil, err
+			}
+			result, _, err := cfg.PolicyRuntime.EvaluatePolicy(ctx, compiled, variables)
+			return result, err
+		}
+	}
+
 	return &defaultStarlarkRuntime{
-		timeout: timeout,
+		timeout:  timeout,
+		builtins: registry.CreateBuiltins(),
 	}
 }
 
@@ -106,10 +126,12 @@ func (r *defaultStarlarkRuntime) Execute(ctx context.Context, script string, req
 	const maxSteps = 5_000_000
 	thread.SetMaxExecutionSteps(maxSteps)
 
-	// Build predeclared variables
-	predeclared := starlark.StringDict{
-		"ctx": r.toStarlarkValue(scriptCtx),
+	// Build predeclared variables: builtins + script context
+	predeclared := make(starlark.StringDict, len(r.builtins)+1)
+	for name, val := range r.builtins {
+		predeclared[name] = val
 	}
+	predeclared["ctx"] = r.toStarlarkValue(scriptCtx)
 
 	// Parse and execute script using the non-deprecated API
 	globals, err := starlark.ExecFileOptions(&syntax.FileOptions{}, thread, "valuation.star", script, predeclared)
