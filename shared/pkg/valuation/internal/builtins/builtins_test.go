@@ -1,6 +1,8 @@
 package builtins_test
 
 import (
+	"context"
+	"fmt"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -26,6 +28,22 @@ func TestRegistry_CreateBuiltins(t *testing.T) {
 
 	_, ok = dict["record_path"]
 	assert.True(t, ok, "record_path builtin should be present")
+
+	// run_policy should NOT be present without PolicyEvaluator
+	_, ok = dict["run_policy"]
+	assert.False(t, ok, "run_policy should not be present without PolicyEvaluator")
+}
+
+func TestRegistry_CreateBuiltins_WithPolicyEvaluator(t *testing.T) {
+	registry := builtins.NewRegistry()
+	registry.EvalPolicy = func(_ context.Context, _ string, _ map[string]interface{}) (interface{}, error) {
+		return 0.0, nil
+	}
+
+	dict := registry.CreateBuiltins()
+
+	_, ok := dict["run_policy"]
+	assert.True(t, ok, "run_policy should be present when PolicyEvaluator is set")
 }
 
 func TestDecimal_Builtin(t *testing.T) {
@@ -133,4 +151,80 @@ func TestRecordPath_Builtin(t *testing.T) {
 
 	// In the real implementation, this would append to analysis.CalculationPath
 	// For now, just verify the function is callable
+}
+
+func TestRunPolicy_Builtin(t *testing.T) {
+	registry := builtins.NewRegistry()
+	registry.EvalPolicy = func(_ context.Context, expression string, variables map[string]interface{}) (interface{}, error) {
+		// Simulate CEL evaluation for "amount * rate"
+		if expression == "amount * rate" {
+			amount, _ := variables["amount"].(float64)
+			rate, _ := variables["rate"].(float64)
+			return amount * rate, nil
+		}
+		return nil, fmt.Errorf("unknown expression: %s", expression)
+	}
+
+	dict := registry.CreateBuiltins()
+	runPolicyFn := dict["run_policy"]
+	require.NotNil(t, runPolicyFn)
+
+	thread := &starlark.Thread{Name: "test"}
+
+	// Build variables dict
+	varsDict := &starlark.Dict{}
+	require.NoError(t, varsDict.SetKey(starlark.String("amount"), starlark.Float(100.0)))
+	require.NoError(t, varsDict.SetKey(starlark.String("rate"), starlark.Float(0.35)))
+
+	kwargs := []starlark.Tuple{
+		{starlark.String("expression"), starlark.String("amount * rate")},
+		{starlark.String("variables"), varsDict},
+	}
+
+	result, err := starlark.Call(thread, runPolicyFn, nil, kwargs)
+	require.NoError(t, err)
+
+	// Result should be a float
+	floatVal, ok := result.(starlark.Float)
+	require.True(t, ok, "run_policy should return a float, got %T", result)
+	assert.InDelta(t, 35.0, float64(floatVal), 0.001)
+}
+
+func TestRunPolicy_Builtin_MissingExpression(t *testing.T) {
+	registry := builtins.NewRegistry()
+	registry.EvalPolicy = func(_ context.Context, _ string, _ map[string]interface{}) (interface{}, error) {
+		return nil, nil
+	}
+
+	dict := registry.CreateBuiltins()
+	runPolicyFn := dict["run_policy"]
+	require.NotNil(t, runPolicyFn)
+
+	thread := &starlark.Thread{Name: "test"}
+
+	// Call without required expression kwarg
+	_, err := starlark.Call(thread, runPolicyFn, nil, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "expression")
+}
+
+func TestRunPolicy_Builtin_EvalError(t *testing.T) {
+	registry := builtins.NewRegistry()
+	registry.EvalPolicy = func(_ context.Context, _ string, _ map[string]interface{}) (interface{}, error) {
+		return nil, fmt.Errorf("CEL compilation failed: undefined variable")
+	}
+
+	dict := registry.CreateBuiltins()
+	runPolicyFn := dict["run_policy"]
+	require.NotNil(t, runPolicyFn)
+
+	thread := &starlark.Thread{Name: "test"}
+
+	kwargs := []starlark.Tuple{
+		{starlark.String("expression"), starlark.String("bad_var * 2")},
+	}
+
+	_, err := starlark.Call(thread, runPolicyFn, nil, kwargs)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "run_policy")
 }

@@ -15,19 +15,27 @@ import (
 )
 
 func TestStarlarkRuntime_Execute_Success(t *testing.T) {
+	// Create PolicyRuntime so run_policy builtin is available
+	policyRuntime, err := valuation.NewPolicyRuntime()
+	require.NoError(t, err)
+
 	runtime := valuation.NewStarlarkRuntime(valuation.StarlarkRuntimeConfig{
-		Timeout: 5 * time.Second,
+		Timeout:       5 * time.Second,
+		PolicyRuntime: policyRuntime,
 	})
 
 	script := `
-# Simple valuation script
+# Valuation script using CEL for calculations (no inline arithmetic)
 def valuate(ctx):
     # Access input quantity
     amount = ctx["amount"]
     rate = ctx["rate"]
 
-    # Calculate valued amount
-    valued = amount * rate
+    # Delegate calculation to CEL via run_policy
+    valued = run_policy(
+        expression="amount * rate",
+        variables={"amount": amount, "rate": rate},
+    )
 
     return {
         "valued_amount": valued,
