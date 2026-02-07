@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -11,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
+	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
@@ -20,6 +20,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	"gorm.io/gorm"
 )
 
@@ -392,17 +393,21 @@ func (s *Service) completeWithdrawalWithOutbox(ctx context.Context, withdrawal *
 			return fmt.Errorf("failed to persist withdrawal completion: %w", err)
 		}
 
-		// Create simple event payload (JSON) for publication
-		// TODO: Replace with proper protobuf event definition once WithdrawalStatusUpdatedEvent is defined
-		eventData := map[string]interface{}{
-			"withdrawal_id": withdrawal.Reference,
-			"account_id":    accountID.String(),
-			"status":        "COMPLETED",
-			"updated_at":    time.Now().Format(time.RFC3339),
+		// Create typed protobuf event for publication
+		now := time.Now().UTC()
+		event := &eventsv1.WithdrawalStatusUpdatedEvent{
+			EventId:       uuid.New().String(),
+			WithdrawalId:  withdrawal.Reference,
+			AccountId:     accountID.String(),
+			Status:        "COMPLETED",
+			CorrelationId: uuid.New().String(),
+			CausationId:   uuid.New().String(),
+			Timestamp:     timestamppb.New(now),
+			Version:       1,
 		}
 
-		// Marshal event payload as JSON
-		eventPayload, err := json.Marshal(eventData)
+		// Marshal event payload as protobuf
+		eventPayload, err := proto.Marshal(event)
 		if err != nil {
 			return fmt.Errorf("failed to marshal withdrawal status event: %w", err)
 		}

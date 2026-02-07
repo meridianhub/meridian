@@ -246,10 +246,9 @@ func (r *AccountResolver) queryInternalBankAccount(ctx context.Context, clearing
 	}
 
 	// Use the first active clearing account found.
-	// TODO(future): When the Internal Bank Account API supports clearing purpose filtering,
-	// use clearingType to select deposit-specific vs withdrawal-specific accounts.
-	// The current implementation returns the same account for both, which is acceptable
-	// for initial deployment where a single clearing account handles all operations.
+	// The Internal Bank Account API does not currently support clearing purpose filtering,
+	// so a single clearing account handles both deposit and withdrawal operations.
+	// This is acceptable for initial deployment.
 	account := resp.Facilities[0]
 	return account.AccountId, nil
 }
