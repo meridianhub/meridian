@@ -252,17 +252,17 @@ func currentAccountPositionKeepingInitiateLog(ctx *saga.StarlarkContext, params 
 		// Marshal valuation_analysis to JSON for storage in attributes
 		bytes, marshalErr := json.Marshal(valuationAnalysis)
 		if marshalErr != nil {
-			deps.Logger.Warn("failed to marshal valuation_analysis",
+			deps.Logger.Error("failed to marshal valuation_analysis",
 				"error", marshalErr,
 				"transaction_id", transactionID)
-		} else {
-			attributes = map[string]string{
-				"valuation_analysis": string(bytes),
-			}
-			deps.Logger.Debug("including valuation_analysis in position attributes",
-				"transaction_id", transactionID,
-				"analysis_size", len(bytes))
+			return nil, fmt.Errorf("invalid valuation_analysis: %w", marshalErr)
 		}
+		attributes = map[string]string{
+			"valuation_analysis": string(bytes),
+		}
+		deps.Logger.Debug("including valuation_analysis in position attributes",
+			"transaction_id", transactionID,
+			"analysis_size", len(bytes))
 	}
 
 	deps.Logger.Info("executing position_keeping.initiate_log",

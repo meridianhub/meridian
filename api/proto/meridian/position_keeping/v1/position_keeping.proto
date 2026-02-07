@@ -108,7 +108,7 @@ message TransactionLogEntry {
 
   // attributes stores flexible metadata for the transaction (e.g., valuation_analysis for audit trails).
   // Optional field for storing JSON-serialized data like valuation method details, degraded mode flags, etc.
-  map<string, string> attributes = 9;
+  map<string, string> attributes = 9 [(buf.validate.field).map.max_pairs = 50];
 }
 
 // TransactionLineage captures the relationship between transactions.

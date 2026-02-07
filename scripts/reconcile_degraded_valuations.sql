@@ -36,8 +36,9 @@ WHERE
     AND (p.attributes->>'valuation_analysis')::jsonb->>'degraded_mode' = 'true'
 ORDER BY p.created_at DESC;
 
--- Summary statistics for degraded valuations
+-- Summary statistics for degraded valuations (grouped by instrument to avoid mixing currencies/units)
 SELECT
+    p.instrument_code,
     COUNT(*) AS total_degraded_entries,
     COUNT(DISTINCT p.account_id) AS affected_accounts,
     MIN(p.created_at) AS oldest_degraded_entry,
@@ -46,10 +47,13 @@ SELECT
 FROM positions p
 WHERE
     p.attributes ? 'valuation_analysis'
-    AND (p.attributes->>'valuation_analysis')::jsonb->>'degraded_mode' = 'true';
+    AND (p.attributes->>'valuation_analysis')::jsonb->>'degraded_mode' = 'true'
+GROUP BY p.instrument_code
+ORDER BY p.instrument_code;
 
--- Breakdown by method_id to identify which valuation methods are most affected
+-- Breakdown by method_id and instrument to identify which valuation methods are most affected
 SELECT
+    p.instrument_code,
     (p.attributes->>'valuation_analysis')::jsonb->>'method_id' AS method_id,
     COUNT(*) AS entry_count,
     COUNT(DISTINCT p.account_id) AS account_count,
@@ -58,5 +62,5 @@ FROM positions p
 WHERE
     p.attributes ? 'valuation_analysis'
     AND (p.attributes->>'valuation_analysis')::jsonb->>'degraded_mode' = 'true'
-GROUP BY method_id
-ORDER BY entry_count DESC;
+GROUP BY p.instrument_code, method_id
+ORDER BY p.instrument_code, entry_count DESC;
