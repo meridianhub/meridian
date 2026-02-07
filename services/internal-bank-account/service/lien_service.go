@@ -82,7 +82,11 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 	// Check idempotency: if a lien already exists for this payment order reference, return it
 	existingLien, err := s.lienRepo.FindByPaymentOrderReference(ctx, req.PaymentOrderReference)
 	if err == nil {
-		// Lien already exists - return it for idempotency
+		if existingLien.AccountID != account.ID() {
+			operationStatus = opStatusInvalidRequest
+			return nil, status.Errorf(codes.InvalidArgument,
+				"payment_order_reference already used for a different account")
+		}
 		operationStatus = opStatusLienAlreadyExists
 		return s.buildInitiateLienResponse(existingLien), nil
 	}
