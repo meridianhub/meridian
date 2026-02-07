@@ -27,6 +27,10 @@ handlers:
         values: [DEBIT, CREDIT]
         required: true
         description: "Direction of the transaction"
+      valuation_analysis:
+        type: struct
+        required: false
+        description: "Optional valuation analysis metadata (from atomic valuation) - stored in position attributes for audit trail"
     returns:
       log_id:
         type: string
