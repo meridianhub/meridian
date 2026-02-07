@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
 	sagav1 "github.com/meridianhub/meridian/api/proto/meridian/saga/v1"
 	"github.com/meridianhub/meridian/services/payment-order/service"
 	"google.golang.org/grpc"
@@ -15,21 +16,23 @@ var (
 	// ErrSagaNotFound is returned when a saga definition is not found.
 	ErrSagaNotFound = errors.New("saga not found")
 
-	// ErrRetrieveInstrumentNotImplemented is returned when RetrieveInstrument is called.
-	ErrRetrieveInstrumentNotImplemented = errors.New("RetrieveInstrument not yet implemented")
+	// ErrInstrumentNotFound is returned when an instrument is not found.
+	ErrInstrumentNotFound = errors.New("instrument not found")
 )
 
 // ReferenceDataClientWrapper wraps the gRPC client for the reference-data service.
 type ReferenceDataClientWrapper struct {
-	conn       *grpc.ClientConn
-	sagaClient sagav1.SagaRegistryServiceClient
+	conn             *grpc.ClientConn
+	sagaClient       sagav1.SagaRegistryServiceClient
+	instrumentClient referencedatav1.ReferenceDataServiceClient
 }
 
 // NewReferenceDataClient creates a new reference-data client wrapper.
 func NewReferenceDataClient(conn *grpc.ClientConn) *ReferenceDataClientWrapper {
 	return &ReferenceDataClientWrapper{
-		conn:       conn,
-		sagaClient: sagav1.NewSagaRegistryServiceClient(conn),
+		conn:             conn,
+		sagaClient:       sagav1.NewSagaRegistryServiceClient(conn),
+		instrumentClient: referencedatav1.NewReferenceDataServiceClient(conn),
 	}
 }
 
@@ -60,11 +63,26 @@ func (c *ReferenceDataClientWrapper) GetSaga(ctx context.Context, name string, v
 	}, nil
 }
 
-// RetrieveInstrument fetches an instrument definition by code.
-// This method is not yet implemented - placeholder for future implementation.
-func (c *ReferenceDataClientWrapper) RetrieveInstrument(_ context.Context, _ string) (*service.InstrumentInfo, error) {
-	// TODO: Implement instrument retrieval when reference-data service exposes this RPC
-	return nil, ErrRetrieveInstrumentNotImplemented
+// RetrieveInstrument fetches an instrument definition by code from the reference-data service.
+// Passes version=0 to retrieve the latest ACTIVE version.
+func (c *ReferenceDataClientWrapper) RetrieveInstrument(ctx context.Context, code string) (*service.InstrumentInfo, error) {
+	resp, err := c.instrumentClient.RetrieveInstrument(ctx, &referencedatav1.RetrieveInstrumentRequest{
+		Code:    code,
+		Version: 0, // 0 = latest ACTIVE version
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve instrument %s: %w", code, err)
+	}
+
+	if resp.Instrument == nil {
+		return nil, fmt.Errorf("%w: %s", ErrInstrumentNotFound, code)
+	}
+
+	return &service.InstrumentInfo{
+		Code:                     resp.Instrument.Code,
+		Version:                  resp.Instrument.Version,
+		FungibilityKeyExpression: resp.Instrument.FungibilityKeyExpression,
+	}, nil
 }
 
 // Close terminates the gRPC connection.
