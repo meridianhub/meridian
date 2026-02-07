@@ -145,24 +145,20 @@ func (s *Service) RetrieveInstrument(ctx context.Context, req *pb.RetrieveInstru
 }
 
 // ListInstruments returns instruments matching the filter criteria with cursor-based pagination.
-// NOTE: The underlying registry only supports ListActive. Filtering by
-// DRAFT or DEPRECATED status will return empty results. This is a known
-// limitation that should be addressed by extending InstrumentRegistry.
 func (s *Service) ListInstruments(ctx context.Context, req *pb.ListInstrumentsRequest) (*pb.ListInstrumentsResponse, error) {
 	cursorTime, cursorID, err := parseCursorToken(req.PageToken)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid page token: %v", err)
 	}
 
-	// Registry only supports ListActive; non-ACTIVE status filters return empty results.
-	// Add ListAll/ListByStatus to InstrumentRegistry to support full status filtering.
-	defs, err := s.registry.ListActive(ctx)
+	domainStatus := protoStatusToDomain(req.StatusFilter)
+	defs, err := s.registry.ListByStatus(ctx, domainStatus)
 	if err != nil {
 		s.logger.Error("failed to list instruments", "error", err)
 		return nil, status.Errorf(codes.Internal, "failed to list instruments: %v", err)
 	}
 
-	filtered := filterByStatus(defs, req.StatusFilter)
+	filtered := defs
 	sortByCreatedAtDesc(filtered)
 	filtered = applyCursorFilter(filtered, cursorTime, cursorID)
 	pageSize := normalizePageSize(int(req.PageSize))
@@ -177,21 +173,6 @@ func (s *Service) ListInstruments(ctx context.Context, req *pb.ListInstrumentsRe
 		Instruments:   instruments,
 		NextPageToken: generateNextPageToken(filtered, hasMore),
 	}, nil
-}
-
-// filterByStatus filters instruments by the requested status, returning all if unspecified.
-func filterByStatus(defs []*registry.InstrumentDefinition, statusFilter pb.InstrumentStatus) []*registry.InstrumentDefinition {
-	if statusFilter == pb.InstrumentStatus_INSTRUMENT_STATUS_UNSPECIFIED {
-		return defs
-	}
-	domainStatus := protoStatusToDomain(statusFilter)
-	var filtered []*registry.InstrumentDefinition
-	for _, def := range defs {
-		if def.Status == domainStatus {
-			filtered = append(filtered, def)
-		}
-	}
-	return filtered
 }
 
 // sortByCreatedAtDesc sorts instruments by CreatedAt DESC, ID DESC.
