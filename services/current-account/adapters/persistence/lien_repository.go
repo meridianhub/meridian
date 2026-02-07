@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -327,7 +328,7 @@ func (r *LienRepository) SumActiveAmountByAccountIDAndBucket(ctx context.Context
 func toLienEntity(lien *domain.Lien) *LienEntity {
 	// ToMinorUnitsUnchecked is safe here: domain layer validates amounts before persistence,
 	// so overflow (>92 quadrillion cents) cannot occur for valid liens
-	return &LienEntity{
+	entity := &LienEntity{
 		ID:                    lien.ID,
 		AccountID:             lien.AccountID,
 		AmountCents:           lien.Amount.ToMinorUnitsUnchecked(),
@@ -341,6 +342,23 @@ func toLienEntity(lien *domain.Lien) *LienEntity {
 		UpdatedAt:             lien.UpdatedAt,
 		Version:               lien.Version,
 	}
+
+	// Marshal valuation fields to JSONB (nil-safe)
+	if lien.ReservedQuantity != nil {
+		if data, err := json.Marshal(lien.ReservedQuantity); err == nil {
+			entity.ReservedQuantity = JSONBMap(data)
+		}
+	}
+	if lien.ValuedAmount != nil {
+		if data, err := json.Marshal(lien.ValuedAmount); err == nil {
+			entity.ValuedAmount = JSONBMap(data)
+		}
+	}
+	if lien.ValuationAnalysis != nil {
+		entity.ValuationAnalysis = JSONBMap(lien.ValuationAnalysis)
+	}
+
+	return entity
 }
 
 // toLienDomain converts database entity to domain model
@@ -350,7 +368,7 @@ func toLienDomain(entity *LienEntity) (*domain.Lien, error) {
 		return nil, fmt.Errorf("failed to create lien amount from database: %w", err)
 	}
 
-	return &domain.Lien{
+	lien := &domain.Lien{
 		ID:                    entity.ID,
 		AccountID:             entity.AccountID,
 		Amount:                amount,
@@ -362,5 +380,26 @@ func toLienDomain(entity *LienEntity) (*domain.Lien, error) {
 		Version:               entity.Version,
 		CreatedAt:             entity.CreatedAt,
 		UpdatedAt:             entity.UpdatedAt,
-	}, nil
+	}
+
+	// Unmarshal valuation fields from JSONB (nil-safe, fail-fast on corruption)
+	if entity.ReservedQuantity != nil {
+		var rq domain.InstrumentAmount
+		if err := json.Unmarshal(entity.ReservedQuantity, &rq); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal reserved_quantity: %w", err)
+		}
+		lien.ReservedQuantity = &rq
+	}
+	if entity.ValuedAmount != nil {
+		var va domain.InstrumentAmount
+		if err := json.Unmarshal(entity.ValuedAmount, &va); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal valued_amount: %w", err)
+		}
+		lien.ValuedAmount = &va
+	}
+	if entity.ValuationAnalysis != nil {
+		lien.ValuationAnalysis = json.RawMessage(entity.ValuationAnalysis)
+	}
+
+	return lien, nil
 }

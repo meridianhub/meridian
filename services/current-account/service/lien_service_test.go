@@ -12,11 +12,13 @@ import (
 	"github.com/google/uuid"
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
+	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
+	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/grpc/codes"
@@ -67,6 +69,9 @@ func setupLienTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 		payment_order_reference VARCHAR(255) NOT NULL UNIQUE,
 		termination_reason TEXT,
 		expires_at TIMESTAMP WITH TIME ZONE,
+		reserved_quantity JSONB,
+		valued_amount JSONB,
+		valuation_analysis JSONB,
 		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
 		updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
 		version INT NOT NULL DEFAULT 1
@@ -1393,4 +1398,440 @@ func TestGetActiveAmountBlocks_MapsAmountCorrectly(t *testing.T) {
 	require.Equal(t, int64(123), block.Amount.Amount.Units, "should map to £123")
 	require.Equal(t, int32(450000000), block.Amount.Amount.Nanos, "should map to .45")
 	require.Equal(t, "Payment Order: PO-AMOUNT-TEST", block.Purpose)
+}
+
+// ============================================================================
+// Atomic Valuation in InitiateLien Tests
+// ============================================================================
+
+// setupAtomicValuationLienTest creates a test environment with lien repo, valuation feature repo,
+// mock valuation engine, and mock position keeping client for testing atomic valuation in InitiateLien.
+func setupAtomicValuationLienTest(t *testing.T, engine ValuationEngine, accountBalances map[string]int64) (*Service, context.Context, func()) {
+	t.Helper()
+	db, cleanup := testdb.SetupPostgres(t, nil)
+
+	tid := tenant.TenantID(lienSvcTestTenantID)
+	schemaName := tid.SchemaName()
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
+	require.NoError(t, err)
+
+	// Create account table (uses "account" table name like valuation engine tests)
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.account (
+		id UUID PRIMARY KEY,
+		account_id VARCHAR(100) NOT NULL UNIQUE,
+		account_identification VARCHAR(34) NOT NULL UNIQUE,
+		party_id UUID NOT NULL,
+		balance BIGINT NOT NULL DEFAULT 0,
+		available_balance BIGINT NOT NULL DEFAULT 0,
+		currency VARCHAR(3) NOT NULL DEFAULT 'GBP',
+		status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+		overdraft_limit BIGINT NOT NULL DEFAULT 0,
+		overdraft_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+		overdraft_rate NUMERIC(5,4) NOT NULL DEFAULT 0,
+		balance_updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+		created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+		created_by VARCHAR(100) NOT NULL DEFAULT 'system',
+		updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+		updated_by VARCHAR(100) NOT NULL DEFAULT 'system',
+		deleted_at TIMESTAMP WITH TIME ZONE,
+		opened_at TIMESTAMP WITH TIME ZONE,
+		closed_at TIMESTAMP WITH TIME ZONE,
+		freeze_reason TEXT,
+		version BIGINT NOT NULL DEFAULT 1
+	)`, pq.QuoteIdentifier(schemaName))).Error
+	require.NoError(t, err)
+
+	// Create lien table
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.lien (
+		id UUID PRIMARY KEY,
+		account_id UUID NOT NULL,
+		amount_cents BIGINT NOT NULL,
+		currency VARCHAR(3) NOT NULL,
+		bucket_id VARCHAR(255) NOT NULL DEFAULT '',
+		status VARCHAR(20) NOT NULL,
+		payment_order_reference VARCHAR(255) NOT NULL UNIQUE,
+		termination_reason TEXT,
+		expires_at TIMESTAMP WITH TIME ZONE,
+		reserved_quantity JSONB,
+		valued_amount JSONB,
+		valuation_analysis JSONB,
+		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		version INT NOT NULL DEFAULT 1
+	)`, pq.QuoteIdentifier(schemaName))).Error
+	require.NoError(t, err)
+
+	// Create valuation_features table
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.valuation_features (
+		id UUID PRIMARY KEY,
+		account_id UUID NOT NULL,
+		instrument_code VARCHAR(32) NOT NULL,
+		valuation_method_id UUID NOT NULL,
+		valuation_method_version INT NOT NULL,
+		parameters JSONB,
+		lifecycle_status VARCHAR(16) NOT NULL,
+		valid_from TIMESTAMP WITH TIME ZONE NOT NULL,
+		valid_to TIMESTAMP WITH TIME ZONE NOT NULL,
+		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		created_by VARCHAR(100) NOT NULL,
+		updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		updated_by VARCHAR(100) NOT NULL,
+		version INT NOT NULL DEFAULT 1,
+		CONSTRAINT chk_valuation_feature_lifecycle_status CHECK (lifecycle_status IN ('INITIATED','ACTIVE','TERMINATED'))
+	)`, pq.QuoteIdentifier(schemaName))).Error
+	require.NoError(t, err)
+
+	// Create unique index for active features
+	err = db.Exec(fmt.Sprintf(`CREATE UNIQUE INDEX IF NOT EXISTS idx_valuation_feature_account_instrument_active
+		ON %s.valuation_features (account_id, instrument_code)
+		WHERE lifecycle_status = 'ACTIVE' AND valid_to = '9999-12-31 23:59:59+00'`, pq.QuoteIdentifier(schemaName))).Error
+	require.NoError(t, err)
+
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
+	require.NoError(t, err)
+
+	ctx := tenant.WithTenant(context.Background(), tid)
+
+	repo := persistence.NewRepository(db)
+	lienRepo := persistence.NewLienRepository(db)
+	valuationFeatureRepo := persistence.NewValuationFeatureRepository(db)
+
+	svc, err := NewService(repo, lienRepo)
+	require.NoError(t, err)
+
+	// Inject valuation feature repo and engine
+	svc.valuationFeatureRepo = valuationFeatureRepo
+	if engine != nil {
+		svc.valuationEngine = engine
+	}
+
+	// Inject position keeping mock
+	if accountBalances == nil {
+		accountBalances = make(map[string]int64)
+	}
+	mockPosKeeping := &mockPositionKeepingClient{accountBalances: accountBalances}
+	svc.posKeepingClient = mockPosKeeping
+
+	return svc, ctx, cleanup
+}
+
+func TestInitiateLien_AtomicValuation_Success(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	// Mock engine: 100 kWh * 0.15 GBP/kWh = 15.00 GBP
+	engine := &mockValuationEngine{
+		evaluateFn: func(_ context.Context, params ValuationParams) (*ValuationResult, error) {
+			return &ValuationResult{
+				OutputAmount:    params.InputAmount.Mul(decimal.NewFromFloat(0.15)),
+				OutputCode:      params.OutputCode,
+				AppliedRates:    map[string]string{"energy_rate": "0.15"},
+				ObservationIDs:  []string{"obs-energy-001"},
+				ComputedAt:      time.Now(),
+				CalculationPath: []string{"lookup_rate", "apply_energy_rate"},
+			}, nil
+		},
+	}
+
+	svc, ctx, cleanup := setupAtomicValuationLienTest(t, engine, map[string]int64{
+		"ACC-VALUED-001": 500000, // £5000
+	})
+	defer cleanup()
+
+	tid := tenant.TenantID(lienSvcTestTenantID)
+	schemaName := tid.SchemaName()
+
+	// Create account and valuation feature
+	accountUUID := createTestAccountForValuation(t, ctx, svc.repo.DB(), schemaName, "ACC-VALUED-001", "GBP")
+	createTestValuationFeature(t, ctx, svc.repo.DB(), schemaName, accountUUID, "kWh")
+
+	// Initiate lien with multi-asset input
+	resp, err := svc.InitiateLien(ctx, &pb.InitiateLienRequest{
+		AccountId: "ACC-VALUED-001",
+		Input: &quantityv1.InstrumentAmount{
+			Amount:         "100.00",
+			InstrumentCode: "kWh",
+			Version:        1,
+		},
+		PaymentOrderReference: "PO-VALUED-001",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.NotNil(t, resp.Lien)
+	require.Equal(t, pb.LienStatus_LIEN_STATUS_ACTIVE, resp.Lien.Status)
+
+	// Verify lien amount is the valued amount (100 * 0.15 = 15.00 GBP = 1500 cents)
+	require.Equal(t, "GBP", resp.Lien.Amount.Amount.CurrencyCode)
+	require.Equal(t, int64(15), resp.Lien.Amount.Amount.Units)
+
+	// Verify reserved quantity on the lien
+	require.NotNil(t, resp.Lien.ReservedQuantity, "reserved_quantity should be set on lien")
+	require.Equal(t, "100", resp.Lien.ReservedQuantity.Amount)
+	require.Equal(t, "kWh", resp.Lien.ReservedQuantity.InstrumentCode)
+
+	// Verify valued amount on the lien
+	require.NotNil(t, resp.Lien.ValuedAmount, "valued_amount should be set on lien")
+	require.Equal(t, "GBP", resp.Lien.ValuedAmount.InstrumentCode)
+
+	// Verify top-level response fields
+	require.NotNil(t, resp.ValuedAmount, "response valued_amount should be set")
+	require.Equal(t, "GBP", resp.ValuedAmount.InstrumentCode)
+
+	require.NotNil(t, resp.Basis, "response basis should be set")
+	require.Equal(t, "0.15", resp.Basis.AppliedRates["energy_rate"])
+	require.Contains(t, resp.Basis.ObservationIds, "obs-energy-001")
+}
+
+func TestInitiateLien_AtomicValuation_NoValuationFeature(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	engine := &mockValuationEngine{}
+
+	svc, ctx, cleanup := setupAtomicValuationLienTest(t, engine, map[string]int64{
+		"ACC-NOFEAT-001": 500000,
+	})
+	defer cleanup()
+
+	tid := tenant.TenantID(lienSvcTestTenantID)
+	schemaName := tid.SchemaName()
+
+	// Create account WITHOUT valuation feature
+	createTestAccountForValuation(t, ctx, svc.repo.DB(), schemaName, "ACC-NOFEAT-001", "GBP")
+
+	// Attempt InitiateLien with multi-asset input
+	_, err := svc.InitiateLien(ctx, &pb.InitiateLienRequest{
+		AccountId: "ACC-NOFEAT-001",
+		Input: &quantityv1.InstrumentAmount{
+			Amount:         "100.00",
+			InstrumentCode: "kWh",
+			Version:        1,
+		},
+		PaymentOrderReference: "PO-NOFEAT-001",
+	})
+
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	require.Equal(t, codes.FailedPrecondition, st.Code())
+}
+
+func TestInitiateLien_AtomicValuation_IdempotencyReturnsPriceLock(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	// Mock engine: 50 USD * 0.80 = 40.00 GBP
+	engine := &mockValuationEngine{
+		evaluateFn: func(_ context.Context, params ValuationParams) (*ValuationResult, error) {
+			return &ValuationResult{
+				OutputAmount:    params.InputAmount.Mul(decimal.NewFromFloat(0.80)),
+				OutputCode:      params.OutputCode,
+				AppliedRates:    map[string]string{"fx_rate": "0.80"},
+				ObservationIDs:  []string{"obs-fx-001"},
+				ComputedAt:      time.Now(),
+				CalculationPath: []string{"lookup_fx", "apply_rate"},
+			}, nil
+		},
+	}
+
+	svc, ctx, cleanup := setupAtomicValuationLienTest(t, engine, map[string]int64{
+		"ACC-IDEMP-001": 500000, // £5000
+	})
+	defer cleanup()
+
+	tid := tenant.TenantID(lienSvcTestTenantID)
+	schemaName := tid.SchemaName()
+
+	// Create account and valuation feature
+	accountUUID := createTestAccountForValuation(t, ctx, svc.repo.DB(), schemaName, "ACC-IDEMP-001", "GBP")
+	createTestValuationFeature(t, ctx, svc.repo.DB(), schemaName, accountUUID, "USD")
+
+	// First call: creates the lien
+	req := &pb.InitiateLienRequest{
+		AccountId: "ACC-IDEMP-001",
+		Input: &quantityv1.InstrumentAmount{
+			Amount:         "50.00",
+			InstrumentCode: "USD",
+			Version:        1,
+		},
+		PaymentOrderReference: "PO-IDEMP-001",
+	}
+
+	resp1, err := svc.InitiateLien(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp1.ValuedAmount)
+	require.NotNil(t, resp1.Basis)
+
+	// Second call (idempotent retry): should return same price lock
+	resp2, err := svc.InitiateLien(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp2)
+
+	// Verify same lien is returned
+	require.Equal(t, resp1.Lien.LienId, resp2.Lien.LienId, "idempotent retry should return same lien")
+
+	// Verify price lock is preserved (valued_amount on response)
+	require.NotNil(t, resp2.ValuedAmount, "idempotent response should include valued_amount")
+	require.Equal(t, resp1.ValuedAmount.Amount, resp2.ValuedAmount.Amount, "price lock should be identical")
+	require.Equal(t, resp1.ValuedAmount.InstrumentCode, resp2.ValuedAmount.InstrumentCode)
+
+	// Verify basis is preserved
+	require.NotNil(t, resp2.Basis, "idempotent response should include basis")
+	require.Equal(t, resp1.Basis.AppliedRates["fx_rate"], resp2.Basis.AppliedRates["fx_rate"])
+
+	// Verify lien proto fields preserved
+	require.NotNil(t, resp2.Lien.ReservedQuantity)
+	require.Equal(t, "50", resp2.Lien.ReservedQuantity.Amount)
+	require.Equal(t, "USD", resp2.Lien.ReservedQuantity.InstrumentCode)
+}
+
+func TestInitiateLien_AtomicValuation_InsufficientFunds(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	// Mock engine: 1000 kWh * 10.00 GBP/kWh = 10000.00 GBP (exceeds balance)
+	engine := &mockValuationEngine{
+		evaluateFn: func(_ context.Context, params ValuationParams) (*ValuationResult, error) {
+			return &ValuationResult{
+				OutputAmount:    params.InputAmount.Mul(decimal.NewFromFloat(10.00)),
+				OutputCode:      params.OutputCode,
+				AppliedRates:    map[string]string{"energy_rate": "10.00"},
+				ObservationIDs:  []string{"obs-energy-002"},
+				ComputedAt:      time.Now(),
+				CalculationPath: []string{"lookup_rate"},
+			}, nil
+		},
+	}
+
+	svc, ctx, cleanup := setupAtomicValuationLienTest(t, engine, map[string]int64{
+		"ACC-INSUF-001": 100000, // £1000 (valued amount will be £10000)
+	})
+	defer cleanup()
+
+	tid := tenant.TenantID(lienSvcTestTenantID)
+	schemaName := tid.SchemaName()
+
+	accountUUID := createTestAccountForValuation(t, ctx, svc.repo.DB(), schemaName, "ACC-INSUF-001", "GBP")
+	createTestValuationFeature(t, ctx, svc.repo.DB(), schemaName, accountUUID, "kWh")
+
+	_, err := svc.InitiateLien(ctx, &pb.InitiateLienRequest{
+		AccountId: "ACC-INSUF-001",
+		Input: &quantityv1.InstrumentAmount{
+			Amount:         "1000.00",
+			InstrumentCode: "kWh",
+			Version:        1,
+		},
+		PaymentOrderReference: "PO-INSUF-001",
+	})
+
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	require.Equal(t, codes.FailedPrecondition, st.Code())
+	require.Contains(t, st.Message(), "insufficient available balance")
+}
+
+func TestInitiateLien_AtomicValuation_LegacyModeStillWorks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	// Even with valuation engine configured, legacy MoneyAmount mode should still work
+	engine := &mockValuationEngine{}
+	svc, ctx, cleanup := setupAtomicValuationLienTest(t, engine, map[string]int64{
+		"ACC-LEGACY-001": 500000,
+	})
+	defer cleanup()
+
+	tid := tenant.TenantID(lienSvcTestTenantID)
+	schemaName := tid.SchemaName()
+	createTestAccountForValuation(t, ctx, svc.repo.DB(), schemaName, "ACC-LEGACY-001", "GBP")
+
+	// Legacy mode: use MoneyAmount, no Input field
+	resp, err := svc.InitiateLien(ctx, &pb.InitiateLienRequest{
+		AccountId: "ACC-LEGACY-001",
+		Amount: &commonpb.MoneyAmount{
+			Amount: &money.Money{
+				CurrencyCode: "GBP",
+				Units:        100,
+				Nanos:        0,
+			},
+		},
+		PaymentOrderReference: "PO-LEGACY-001",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp.Lien)
+	require.Equal(t, pb.LienStatus_LIEN_STATUS_ACTIVE, resp.Lien.Status)
+
+	// Legacy mode should NOT have valuation fields
+	require.Nil(t, resp.Lien.ReservedQuantity, "legacy lien should not have reserved_quantity")
+	require.Nil(t, resp.Lien.ValuedAmount, "legacy lien should not have valued_amount")
+	require.Nil(t, resp.ValuedAmount, "legacy response should not have valued_amount")
+	require.Nil(t, resp.Basis, "legacy response should not have basis")
+}
+
+func TestInitiateLien_AtomicValuation_ValuationImmutable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	// Create a valued lien and verify that termination does not change valuation fields
+	engine := &mockValuationEngine{
+		evaluateFn: func(_ context.Context, params ValuationParams) (*ValuationResult, error) {
+			return &ValuationResult{
+				OutputAmount:    params.InputAmount.Mul(decimal.NewFromFloat(0.50)),
+				OutputCode:      params.OutputCode,
+				AppliedRates:    map[string]string{"rate": "0.50"},
+				ObservationIDs:  []string{"obs-001"},
+				ComputedAt:      time.Now(),
+				CalculationPath: []string{"apply"},
+			}, nil
+		},
+	}
+
+	svc, ctx, cleanup := setupAtomicValuationLienTest(t, engine, map[string]int64{
+		"ACC-IMMUT-001": 500000,
+	})
+	defer cleanup()
+
+	tid := tenant.TenantID(lienSvcTestTenantID)
+	schemaName := tid.SchemaName()
+	accountUUID := createTestAccountForValuation(t, ctx, svc.repo.DB(), schemaName, "ACC-IMMUT-001", "GBP")
+	createTestValuationFeature(t, ctx, svc.repo.DB(), schemaName, accountUUID, "UNIT")
+
+	// Create valued lien
+	initResp, err := svc.InitiateLien(ctx, &pb.InitiateLienRequest{
+		AccountId: "ACC-IMMUT-001",
+		Input: &quantityv1.InstrumentAmount{
+			Amount:         "200.00",
+			InstrumentCode: "UNIT",
+			Version:        1,
+		},
+		PaymentOrderReference: "PO-IMMUT-001",
+	})
+	require.NoError(t, err)
+	lienID := initResp.Lien.LienId
+
+	// Terminate the lien
+	_, err = svc.TerminateLien(ctx, &pb.TerminateLienRequest{
+		LienId: lienID,
+		Reason: "test termination",
+	})
+	require.NoError(t, err)
+
+	// Retrieve and verify valuation fields are still intact
+	retrieveResp, err := svc.RetrieveLien(ctx, &pb.RetrieveLienRequest{LienId: lienID})
+	require.NoError(t, err)
+	require.Equal(t, pb.LienStatus_LIEN_STATUS_TERMINATED, retrieveResp.Lien.Status)
+	require.NotNil(t, retrieveResp.Lien.ReservedQuantity, "valuation fields should survive termination")
+	require.Equal(t, "200", retrieveResp.Lien.ReservedQuantity.Amount)
+	require.Equal(t, "UNIT", retrieveResp.Lien.ReservedQuantity.InstrumentCode)
+	require.NotNil(t, retrieveResp.Lien.ValuedAmount)
+	require.Equal(t, "GBP", retrieveResp.Lien.ValuedAmount.InstrumentCode)
 }

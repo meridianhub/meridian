@@ -1,10 +1,17 @@
 package persistence
 
 import (
+	"database/sql/driver"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// ErrUnsupportedJSONBType is returned when Scan receives an unexpected type.
+var ErrUnsupportedJSONBType = errors.New("unsupported type for JSONBMap")
 
 // LienEntity represents the database persistence model for liens
 // Optimized for database concerns: audit fields, indexes, constraints
@@ -35,10 +42,48 @@ type LienEntity struct {
 	// Optional expiration time for automatic termination of stale liens
 	ExpiresAt *time.Time `gorm:"index:idx_lien_expires_at"`
 
+	// Valuation fields for atomic price lock (nullable for backward compatibility)
+	// ReservedQuantity stores the original input before valuation (e.g., 100 kWh)
+	ReservedQuantity JSONBMap `gorm:"column:reserved_quantity;type:jsonb"`
+	// ValuedAmount stores the price-locked valuation result (e.g., 35.00 GBP)
+	ValuedAmount JSONBMap `gorm:"column:valued_amount;type:jsonb"`
+	// ValuationAnalysis stores the full valuation audit trail
+	ValuationAnalysis JSONBMap `gorm:"column:valuation_analysis;type:jsonb"`
+
 	// Audit fields
 	CreatedAt time.Time `gorm:"not null"`
 	UpdatedAt time.Time `gorm:"not null"`
 	Version   int       `gorm:"not null;default:1"`
+}
+
+// JSONBMap represents a JSONB column that can be null.
+// It implements the driver.Valuer and sql.Scanner interfaces for GORM.
+type JSONBMap json.RawMessage
+
+// Value implements driver.Valuer for database writes.
+// Returns nil for SQL NULL per driver.Valuer contract.
+func (j JSONBMap) Value() (driver.Value, error) {
+	if j == nil {
+		return nil, nil //nolint:nilnil // driver.Valuer requires nil,nil for SQL NULL
+	}
+	return []byte(j), nil
+}
+
+// Scan implements sql.Scanner for database reads.
+func (j *JSONBMap) Scan(value interface{}) error {
+	if value == nil {
+		*j = nil
+		return nil
+	}
+	switch v := value.(type) {
+	case []byte:
+		*j = JSONBMap(v)
+	case string:
+		*j = JSONBMap(v)
+	default:
+		return fmt.Errorf("%w: %T", ErrUnsupportedJSONBType, value)
+	}
+	return nil
 }
 
 // TableName overrides the default table name.
