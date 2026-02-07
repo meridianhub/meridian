@@ -13,7 +13,6 @@ import (
 
 // Test end-to-end compensation flow with typed service modules
 func TestCompensation_EndToEnd_WithServiceModules(t *testing.T) {
-	t.Skip("TODO: Debug handler execution in test environment - handlers not being called during Starlark execution")
 	ctx := context.Background()
 
 	// Track handler execution order
@@ -137,19 +136,20 @@ handlers:
 	})
 	require.NoError(t, err)
 
-	// Define a saga script that uses typed service modules and fails at the third step
+	// Define a saga script that uses typed service modules and fails at the third step.
+	// Handler calls must be at the top level because the Starlark runtime uses ExecFile,
+	// which executes top-level statements (it does not call a "saga" function).
 	script := `
-def saga(input):
-    # Step 1: Create resource
-    res1 = test_service.create_resource(name="my-resource")
+# Step 1: Create resource
+res1 = test_service.create_resource(name="my-resource")
 
-    # Step 2: Allocate quota
-    res2 = test_service.allocate_quota(amount="100")
+# Step 2: Allocate quota
+res2 = test_service.allocate_quota(amount="100")
 
-    # Step 3: This will fail, triggering compensation
-    res3 = test_service.failing_step()
+# Step 3: This will fail, triggering compensation
+res3 = test_service.failing_step()
 
-    return {"final_status": "SUCCESS"}
+final_status = "SUCCESS"
 `
 
 	// Execute saga
@@ -174,20 +174,25 @@ def saga(input):
 	}
 	assert.Equal(t, expectedLog, executionLog)
 
-	// Verify step results captured compensation metadata
-	require.Len(t, output.StepResults, 2) // Only successful steps are recorded
+	// Verify step results captured compensation metadata.
+	// Service modules track all steps including failures via thread-local saga.StepResults.
+	require.Len(t, output.StepResults, 3)
 	assert.Equal(t, "test_service.create_resource", output.StepResults[0].StepName)
+	assert.True(t, output.StepResults[0].Success)
 	assert.Equal(t, "test_service.delete_resource", output.StepResults[0].CompensateHandler)
 	assert.Equal(t, "res-123", output.StepResults[0].CompensateParams["resource_id"])
 
 	assert.Equal(t, "test_service.allocate_quota", output.StepResults[1].StepName)
+	assert.True(t, output.StepResults[1].Success)
 	assert.Equal(t, "test_service.release_quota", output.StepResults[1].CompensateHandler)
 	assert.Equal(t, "alloc-456", output.StepResults[1].CompensateParams["allocation_id"])
+
+	assert.Equal(t, "test_service.failing_step", output.StepResults[2].StepName)
+	assert.False(t, output.StepResults[2].Success)
 }
 
 // Test compensation with successful saga (no compensation should execute)
 func TestCompensation_SuccessfulSaga_NoCompensation(t *testing.T) {
-	t.Skip("TODO: Debug handler execution in test environment - handlers not being called during Starlark execution")
 	ctx := context.Background()
 	var executionLog []string
 
@@ -241,10 +246,12 @@ handlers:
 	})
 	require.NoError(t, err)
 
+	// Handler calls must be at the top level (ExecFile does not call a function).
+	// Service module results are structs, so use dot notation (result.id, not result["id"]).
 	script := `
-def saga(input):
-    result = test.forward()
-    return {"status": "SUCCESS", "id": result["id"]}
+result = test.forward()
+status = "SUCCESS"
+id = result.id
 `
 
 	output, err := runner.ExecuteSaga(ctx, "test_saga", script, saga.RunnerInput{
