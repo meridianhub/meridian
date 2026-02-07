@@ -55,6 +55,10 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		operationStatus = opStatusInvalidRequest
 		return nil, status.Error(codes.InvalidArgument, "input instrument_code is required")
 	}
+	if strings.TrimSpace(req.PaymentOrderReference) == "" {
+		operationStatus = opStatusInvalidRequest
+		return nil, status.Error(codes.InvalidArgument, "payment_order_reference is required")
+	}
 
 	inputAmount, err := decimal.NewFromString(req.Input.Amount)
 	if err != nil {
@@ -162,7 +166,12 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 
 		var analysisJSON json.RawMessage
 		if result.Analysis != nil {
-			analysisJSON, _ = json.Marshal(result.Analysis)
+			data, marshalErr := json.Marshal(result.Analysis)
+			if marshalErr != nil {
+				s.logger.Warn("failed to marshal valuation analysis", "error", marshalErr)
+			} else {
+				analysisJSON = data
+			}
 		}
 
 		lien, err = domain.NewValuedLien(
