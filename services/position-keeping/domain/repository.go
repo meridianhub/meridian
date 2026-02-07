@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 )
 
 var (
@@ -164,4 +165,24 @@ type PositionRepository interface {
 	//
 	// Use case: Drill-down from aggregated view to individual position records.
 	GetBucketDetails(ctx context.Context, accountID, instrumentCode, bucketKey string, limit, offset int) ([]*Position, error)
+}
+
+// ReservationRepository defines the contract for persisting and querying reservations.
+type ReservationRepository interface {
+	// Create persists a new Reservation.
+	// Returns ErrConflict if a reservation with the same lien_id already exists.
+	Create(ctx context.Context, reservation *Reservation) error
+
+	// FindByLienID retrieves a Reservation by its lien_id.
+	// Returns ErrReservationNotFound if not found.
+	FindByLienID(ctx context.Context, lienID uuid.UUID) (*Reservation, error)
+
+	// UpdateStatus transitions a reservation's status and sets the appropriate timestamp.
+	// Returns ErrReservationNotFound if not found.
+	UpdateStatus(ctx context.Context, lienID uuid.UUID, newStatus ReservationStatus) error
+
+	// SumActiveReservations returns the total reserved amount for active reservations
+	// matching the given account, instrument, and optional bucket filter.
+	// Returns zero if no active reservations exist.
+	SumActiveReservations(ctx context.Context, accountID, instrumentCode, bucketID string) (decimal.Decimal, error)
 }
