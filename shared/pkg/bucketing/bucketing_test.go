@@ -113,6 +113,34 @@ func TestCalculateBucketID_SingleAttribute(t *testing.T) {
 	assert.Equal(t, "count_rice_grade=A", id)
 }
 
+func TestCalculateBucketID_PanicsOnUnderscoreInAttributeValue(t *testing.T) {
+	assert.Panics(t, func() {
+		attrs := map[string]string{"source": "uk_south"}
+		bucketing.CalculateBucketID("KWH", "ENERGY", attrs)
+	})
+}
+
+func TestCalculateBucketID_PanicsOnUnderscoreInAttributeKey(t *testing.T) {
+	assert.Panics(t, func() {
+		attrs := map[string]string{"source_type": "solar"}
+		bucketing.CalculateBucketID("KWH", "ENERGY", attrs)
+	})
+}
+
+func TestCalculateBucketID_PanicsOnEmptyAttributeKey(t *testing.T) {
+	assert.Panics(t, func() {
+		attrs := map[string]string{"": "solar"}
+		bucketing.CalculateBucketID("KWH", "ENERGY", attrs)
+	})
+}
+
+func TestCalculateBucketID_PanicsOnEqualsInAttributeKey(t *testing.T) {
+	assert.Panics(t, func() {
+		attrs := map[string]string{"k=v": "solar"}
+		bucketing.CalculateBucketID("KWH", "ENERGY", attrs)
+	})
+}
+
 func TestGetDimension(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -129,6 +157,7 @@ func TestGetDimension(t *testing.T) {
 		{"STORAGE_GB is DATA", "STORAGE_GB", "DATA"},
 		{"BANDWIDTH_GB is DATA", "BANDWIDTH_GB", "DATA"},
 		{"CARBON_CREDIT is CARBON", "CARBON_CREDIT", "CARBON"},
+		{"CARBON_TONNES is CARBON", "CARBON_TONNES", "CARBON"},
 		{"WATER_LITRE is VOLUME", "WATER_LITRE", "VOLUME"}, //nolint:misspell // British spelling matches domain convention
 		{"unknown returns empty", "UNKNOWN_INSTRUMENT", ""},
 	}
@@ -178,6 +207,9 @@ func TestValidateBucketID(t *testing.T) {
 		{"empty string", "", true},
 		{"no underscore", "currencygbp", true},
 		{"single segment", "currency", true},
+		{"empty dimension", "_gbp", true},
+		{"empty instrument code", "currency_", true},
+		{"empty attribute key", "energy_kwh_=solar", true},
 	}
 
 	for _, tc := range tests {
@@ -213,6 +245,21 @@ func TestParseBucketID_Invalid(t *testing.T) {
 	require.Error(t, err)
 
 	_, err = bucketing.ParseBucketID("single")
+	require.Error(t, err)
+}
+
+func TestParseBucketID_EmptyDimension(t *testing.T) {
+	_, err := bucketing.ParseBucketID("_gbp")
+	require.Error(t, err)
+}
+
+func TestParseBucketID_EmptyInstrumentCode(t *testing.T) {
+	_, err := bucketing.ParseBucketID("currency_")
+	require.Error(t, err)
+}
+
+func TestParseBucketID_EmptyAttributeKey(t *testing.T) {
+	_, err := bucketing.ParseBucketID("energy_kwh_=solar")
 	require.Error(t, err)
 }
 

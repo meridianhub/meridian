@@ -21,9 +21,10 @@ import (
 
 // Errors for bucket ID operations.
 var (
-	ErrEmptyBucketID = errors.New("bucket ID cannot be empty")
-	ErrInvalidFormat = errors.New("bucket ID must contain at least dimension and instrument code separated by underscore")
-	ErrMalformedAttr = errors.New("bucket ID contains malformed attribute (missing '=')")
+	ErrEmptyBucketID    = errors.New("bucket ID cannot be empty")
+	ErrInvalidFormat    = errors.New("bucket ID must contain at least dimension and instrument code separated by underscore")
+	ErrMalformedAttr    = errors.New("bucket ID contains malformed attribute (missing '=')")
+	ErrInvalidAttribute = errors.New("attribute key or value must not contain underscores")
 )
 
 // BucketIDParts contains the parsed components of a bucket ID.
@@ -68,11 +69,11 @@ var (
 		"CARBON_CREDIT": "CARBON",
 		"CARBON_TONNE":  "CARBON",
 
+		// Carbon -> CARBON (continued)
+		"CARBON_TONNES": "CARBON",
+
 		// Volume -> VOLUME
 		"WATER_LITRE": "VOLUME", //nolint:misspell // British spelling matches domain convention
-
-		// Mass -> MASS
-		"CARBON_TONNES": "CARBON",
 	}
 )
 
@@ -83,6 +84,11 @@ var (
 // - Dimension and instrument code are lowercased
 // - Attributes are sorted alphabetically by key for determinism
 // - Attribute values are included as-is (case preserved)
+// - Attribute keys and values must not contain underscores (use hyphens instead)
+//
+// Panics if an attribute key or value contains an underscore, as this would
+// produce a bucket ID that cannot be parsed back. Use hyphens instead of
+// underscores in attribute values (e.g., "uk-south" not "uk_south").
 func CalculateBucketID(instrumentCode, dimension string, attributes map[string]string) string {
 	if instrumentCode == "" || dimension == "" {
 		return ""
@@ -101,12 +107,22 @@ func CalculateBucketID(instrumentCode, dimension string, attributes map[string]s
 		sort.Strings(keys)
 
 		for _, k := range keys {
-			parts = append(parts, fmt.Sprintf("%s=%s", k, attributes[k]))
+			v := attributes[k]
+			if strings.Contains(k, "_") || strings.Contains(v, "_") {
+				panic(fmt.Sprintf("bucketing: %v: key=%q value=%q", ErrInvalidAttribute, k, v))
+			}
+			if strings.Contains(k, "=") || k == "" {
+				panic(fmt.Sprintf("bucketing: attribute key must be non-empty and not contain '=': key=%q", k))
+			}
+			parts = append(parts, fmt.Sprintf("%s=%s", k, v))
 		}
 	}
 
 	return strings.Join(parts, "_")
 }
+
+// MustCalculateBucketID is an alias for CalculateBucketID for clarity that it panics on invalid input.
+var MustCalculateBucketID = CalculateBucketID
 
 // GetDimension returns the dimension for a known instrument code.
 // Returns empty string if the instrument code is not registered.
@@ -187,11 +203,15 @@ func ParseBucketID(bucketID string) (BucketIDParts, error) {
 		attrs = make(map[string]string, len(segments)-firstAttrIdx)
 		for _, seg := range segments[firstAttrIdx:] {
 			eqIdx := strings.Index(seg, "=")
-			if eqIdx < 0 {
+			if eqIdx <= 0 {
 				return BucketIDParts{}, fmt.Errorf("%w: segment %q", ErrMalformedAttr, seg)
 			}
 			attrs[seg[:eqIdx]] = seg[eqIdx+1:]
 		}
+	}
+
+	if dimension == "" || instrumentCode == "" {
+		return BucketIDParts{}, ErrInvalidFormat
 	}
 
 	return BucketIDParts{
