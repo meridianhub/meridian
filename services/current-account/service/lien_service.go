@@ -3,6 +3,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -54,6 +55,10 @@ var (
 
 // Default termination reason when none provided
 const defaultTerminationReason = "Terminated via API"
+
+// basisDriftThreshold is the age beyond which a lien's valuation basis is considered stale.
+// If the basis knowledgeAt is older than this, a VALUATION_STALE warning is logged.
+const basisDriftThreshold = 30 * 24 * time.Hour // 30 days
 
 // Lien operation status constants for metrics
 const (
@@ -586,7 +591,18 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 		"lien_id", lien.ID.String(),
 		"account_id", account.AccountID(),
 		"amount_cents", safeMinorUnits(lien.Amount),
+		"has_valuation", lien.HasValuation(),
 		"transaction_id", transactionID)
+
+	// Basis drift detection: warn if the valuation basis is stale.
+	// This does NOT block execution - the price lock is always used.
+	if lien.HasValuation() && lien.ValuationAnalysis != nil {
+		s.checkBasisDrift(lien)
+	}
+
+	// Release the Position Keeping reservation (best-effort).
+	// The lien execution succeeded, so the reservation should transition to EXECUTED.
+	s.releaseReservation(ctx, lien.ID.String(), positionkeepingv1.ReservationStatus_RESERVATION_STATUS_EXECUTED)
 
 	// Calculate available balance scoped to the lien's bucket (if any)
 	availableMoney := s.calculateAvailableBalanceByBucket(ctx, lien.AccountID, lien.BucketID, account.Balance())
@@ -750,6 +766,10 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 			"lien_id", lien.ID.String(),
 			"reason", reason)
 	}
+
+	// Release the Position Keeping reservation (best-effort).
+	// The lien termination succeeded, so the reservation should transition to TERMINATED.
+	s.releaseReservation(ctx, lien.ID.String(), positionkeepingv1.ReservationStatus_RESERVATION_STATUS_TERMINATED)
 
 	// Calculate new available balance (funds released)
 	account, err := s.repo.FindByUUID(ctx, lien.AccountID)
@@ -1166,6 +1186,73 @@ func (s *Service) calculateAvailableBalanceByBucket(ctx context.Context, account
 		return currentBalance // Best effort
 	}
 	return availableMoney
+}
+
+// releaseReservation calls Position Keeping to release the reservation associated with a lien.
+// This is best-effort: failures are logged but do not fail the lien operation, because the
+// lien state transition has already been committed to the database.
+func (s *Service) releaseReservation(ctx context.Context, lienID string, reason positionkeepingv1.ReservationStatus) {
+	if s.posKeepingClient == nil {
+		return
+	}
+
+	releaseCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	_, err := s.posKeepingClient.ReleaseReservation(releaseCtx, &positionkeepingv1.ReleaseReservationRequest{
+		LienId: lienID,
+		Reason: reason,
+	})
+	if err != nil {
+		// Best-effort: log and continue. The reservation will remain ACTIVE in Position Keeping
+		// but the lien is already in its terminal state. A background reconciliation process
+		// can clean up orphaned reservations.
+		s.logger.Warn("failed to release Position Keeping reservation (best-effort)",
+			"lien_id", lienID,
+			"reason", reason.String(),
+			"error", err)
+	} else {
+		s.logger.Info("released Position Keeping reservation",
+			"lien_id", lienID,
+			"reason", reason.String())
+	}
+}
+
+// checkBasisDrift checks if a valued lien's valuation basis is stale and logs a warning.
+// This detects situations where the price lock was computed long ago and the underlying
+// rate may have changed significantly. The execution still proceeds with the price lock.
+func (s *Service) checkBasisDrift(lien *domain.Lien) {
+	if lien.ValuationAnalysis == nil {
+		return
+	}
+
+	// Parse the knowledgeAt from the valuation analysis JSON.
+	// The analysis contains a "knowledge_at" field from the valuation computation.
+	var analysis struct {
+		KnowledgeAt string `json:"knowledgeAt"`
+	}
+	if err := json.Unmarshal(lien.ValuationAnalysis, &analysis); err != nil {
+		// Cannot parse - skip drift detection
+		return
+	}
+
+	if analysis.KnowledgeAt == "" {
+		return
+	}
+
+	knowledgeAt, err := time.Parse(time.RFC3339, analysis.KnowledgeAt)
+	if err != nil {
+		return
+	}
+
+	basisAge := time.Since(knowledgeAt)
+	if basisAge > basisDriftThreshold {
+		s.logger.Warn("VALUATION_STALE: lien valuation basis exceeds drift threshold",
+			"lien_id", lien.ID.String(),
+			"knowledge_at", knowledgeAt.Format(time.RFC3339),
+			"basis_age_days", int(basisAge.Hours()/24),
+			"threshold_days", int(basisDriftThreshold.Hours()/24))
+	}
 }
 
 // GetActiveAmountBlocks retrieves active fund reservations for Position Keeping.
