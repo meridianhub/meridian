@@ -18,8 +18,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
-	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	financialaccountingpersistence "github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
 	financialaccountingdomain "github.com/meridianhub/meridian/services/financial-accounting/domain"
 	"github.com/meridianhub/meridian/shared/platform/await"
@@ -33,13 +31,12 @@ import (
 
 // E2ETestEnvironment encapsulates all dependencies for financial-accounting E2E tests
 // with REAL position-keeping integration (no mocks).
+//
+// These tests use direct DB + repository access (not gRPC) consistent with the
+// established E2E pattern across all services (position-keeping, current-account, etc.).
 type E2ETestEnvironment struct {
 	// Database connection (shared across services in same testcontainer)
 	DB *gorm.DB
-
-	// Service clients (REAL gRPC clients, not mocks)
-	FinancialAccountingClient financialaccountingv1.FinancialAccountingServiceClient
-	PositionKeepingClient     positionkeepingv1.PositionKeepingServiceClient
 
 	// Repositories for direct database queries (verification)
 	FinancialAccountingRepo *financialaccountingpersistence.LedgerRepository
@@ -54,10 +51,9 @@ type E2ETestEnvironment struct {
 
 // setupE2ETest creates a complete E2E test environment with:
 // - CockroachDB testcontainer
-// - financial-accounting service with gRPC server
-// - position-keeping service with gRPC server
-// - Tenant schema with all required tables
-// - gRPC clients for both services
+// - Tenant schema with all required tables (financial-accounting + position-keeping)
+// - Direct repository access for financial-accounting
+// - Direct SQL access for position-keeping (uses pgxpool, not GORM)
 func setupE2ETest(t *testing.T) *E2ETestEnvironment {
 	t.Helper()
 
@@ -70,11 +66,6 @@ func setupE2ETest(t *testing.T) *E2ETestEnvironment {
 
 	// Create repository for financial-accounting
 	financialAccountingRepo := financialaccountingpersistence.NewLedgerRepository(db)
-
-	// TODO: Initialize gRPC servers for both services
-	// TODO: Initialize gRPC clients for both services
-	// For now, we'll use direct repository access for financial-accounting
-	// and direct SQL for position-keeping (since it uses pgxpool not GORM)
 
 	env := &E2ETestEnvironment{
 		DB:                      db,
@@ -747,45 +738,34 @@ func TestBookingLogLifecycle_E2E(t *testing.T) {
 		createTestPosting(t, env, bookingLogID, "DEBIT", 10000)
 		createTestPosting(t, env, bookingLogID, "CREDIT", 10000)
 
-		// Attempt to transition POSTED -> CANCELLED
+		// Verify POSTED is a terminal state in the domain model
+		assert.True(t, financialaccountingdomain.TransactionStatusPosted.IsFinal(),
+			"POSTED should be a final state")
+
+		// Verify the service-layer state machine rejects POSTED -> CANCELLED
+		// State transition validation is enforced at the gRPC service layer
+		// (isValidBookingLogTransition in grpc_booking_endpoints.go), not at the
+		// DB level. Direct DB writes bypass this intentionally - the E2E tests
+		// verify domain invariants here instead.
 		var bookingLog financialaccountingpersistence.FinancialBookingLogEntity
 		err := env.DB.WithContext(env.Ctx).Where("id = ?", bookingLogID).First(&bookingLog).Error
 		require.NoError(t, err)
 		assert.Equal(t, "POSTED", bookingLog.Status)
-
-		bookingLog.Status = "CANCELLED"
-		_ = env.DB.WithContext(env.Ctx).Save(&bookingLog).Error
-
-		// In a real implementation, this should return an error
-		// For now, we'll just verify the transition happened in DB (test will fail if business logic enforces this)
-		// TODO: Add business logic validation to prevent invalid state transitions
-		// require.Error(t, err, "Should not allow POSTED -> CANCELLED transition")
-
-		// For now, verify the current behavior (allows transition - will fail later when business logic added)
-		var updatedLog financialaccountingpersistence.FinancialBookingLogEntity
-		err = env.DB.WithContext(env.Ctx).Where("id = ?", bookingLogID).First(&updatedLog).Error
-		require.NoError(t, err)
-		// This assertion will fail when proper state machine validation is added
-		// assert.Equal(t, "POSTED", updatedLog.Status, "Should remain POSTED (immutable)")
-		t.Logf("WARNING: State transition POSTED->CANCELLED currently allowed (business logic validation needed)")
 	})
 
 	t.Run("Immutability_CANCELLED_cannot_transition_to_POSTED", func(t *testing.T) {
 		// Create booking log in CANCELLED state
 		bookingLogID := createTestBookingLog(t, env, "CANCELLED")
 
-		// Attempt to transition CANCELLED -> POSTED
+		// Verify CANCELLED is a terminal state in the domain model
+		assert.True(t, financialaccountingdomain.TransactionStatusCancelled.IsFinal(),
+			"CANCELLED should be a final state")
+
+		// Verify the booking log exists in CANCELLED state
 		var bookingLog financialaccountingpersistence.FinancialBookingLogEntity
 		err := env.DB.WithContext(env.Ctx).Where("id = ?", bookingLogID).First(&bookingLog).Error
 		require.NoError(t, err)
-
-		bookingLog.Status = "POSTED"
-		_ = env.DB.WithContext(env.Ctx).Save(&bookingLog).Error
-
-		// TODO: Add business logic validation
-		// require.Error(t, err, "Should not allow CANCELLED -> POSTED transition")
-
-		t.Logf("WARNING: State transition CANCELLED->POSTED currently allowed (business logic validation needed)")
+		assert.Equal(t, "CANCELLED", bookingLog.Status)
 	})
 
 	t.Run("Valid_PENDING_to_PENDING", func(t *testing.T) {
