@@ -100,9 +100,6 @@ func setupE2EEnvironment(t *testing.T, _ context.Context) *E2ETestEnvironment {
 	env.FinancialAccountingDB = FinancialAccountingDBHelper{db: db, ctx: tenantCtx}
 	env.CurrentAccountDB = CurrentAccountDBHelper{db: db, ctx: tenantCtx}
 
-	// TODO: Initialize service clients (for now, we'll use direct DB access)
-	// In a full E2E test, these would be real gRPC clients
-
 	return env
 }
 

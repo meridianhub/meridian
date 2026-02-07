@@ -165,14 +165,6 @@ func TestInitiateLogHandler_Success(t *testing.T) {
 	// Verify mock server was called
 	assert.True(t, mockServer.initiateCalled)
 
-	// TODO: Metadata propagation tests are currently disabled because the Client methods
-	// (InitiateFinancialPositionLog etc.) manipulate the context and metadata propagation
-	// is complex to test with mock servers. These work in real integration tests.
-	// For now, we verify the handler calls the right method with the right params.
-	// assert.Equal(t, idempotencyKey, mockServer.lastIdempotencyKey)
-	// assert.Equal(t, correlationID, mockServer.lastCorrelationID)
-	// assert.WithinDuration(t, knowledgeAt, mockServer.lastKnowledgeAt, time.Second)
-
 	// Verify result structure
 	resultMap, ok := result.(map[string]any)
 	require.True(t, ok)
@@ -248,8 +240,6 @@ func TestUpdateLogHandler_Success(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.True(t, mockServer.updateCalled)
-	// Metadata propagation tested in integration tests
-	// assert.Equal(t, "test-key", mockServer.lastIdempotencyKey)
 
 	resultMap, ok := result.(map[string]any)
 	require.True(t, ok)
