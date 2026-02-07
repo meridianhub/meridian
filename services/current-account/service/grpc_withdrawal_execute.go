@@ -401,7 +401,7 @@ func (s *Service) completeWithdrawalWithOutbox(ctx context.Context, withdrawal *
 			AccountId:     accountID.String(),
 			Status:        "COMPLETED",
 			CorrelationId: uuid.New().String(),
-			CausationId:   uuid.New().String(),
+			CausationId:   withdrawal.Reference,
 			Timestamp:     timestamppb.New(now),
 			Version:       1,
 		}
