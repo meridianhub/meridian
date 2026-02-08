@@ -75,10 +75,10 @@ func setupStarlarkMockServer(t *testing.T, mockServer *mockMarketInformationServ
 	server := grpc.NewServer()
 	marketinformationv1.RegisterMarketInformationServiceServer(server, mockServer)
 
+	serveDone := make(chan struct{})
 	go func() {
-		if err := server.Serve(listener); err != nil {
-			t.Logf("Server error: %v", err)
-		}
+		defer close(serveDone)
+		_ = server.Serve(listener)
 	}()
 
 	// Create client connection
@@ -99,7 +99,8 @@ func setupStarlarkMockServer(t *testing.T, mockServer *mockMarketInformationServ
 
 	cleanup := func() {
 		conn.Close()
-		server.Stop()
+		server.GracefulStop()
+		<-serveDone
 		listener.Close()
 	}
 

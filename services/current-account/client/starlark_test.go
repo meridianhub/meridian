@@ -139,10 +139,10 @@ func setupMockServer(t *testing.T, mockServer *mockCurrentAccountServer) (*Clien
 	server := grpc.NewServer()
 	currentaccountv1.RegisterCurrentAccountServiceServer(server, mockServer)
 
+	serveDone := make(chan struct{})
 	go func() {
-		if err := server.Serve(listener); err != nil {
-			t.Logf("Server error: %v", err)
-		}
+		defer close(serveDone)
+		_ = server.Serve(listener)
 	}()
 
 	// Create client connection
@@ -163,7 +163,8 @@ func setupMockServer(t *testing.T, mockServer *mockCurrentAccountServer) (*Clien
 
 	cleanup := func() {
 		conn.Close()
-		server.Stop()
+		server.GracefulStop()
+		<-serveDone
 		listener.Close()
 	}
 
