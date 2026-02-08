@@ -14,7 +14,7 @@ triggers:
   - Planning the CFO Glass Box dashboard
 instructions: |
   This PRD defines the Control Plane for operating Meridian commercially.
-  Two execution paths: First Client Sprint (42 points) and Full SaaS (89 points).
+  Two execution paths: First Client (42 points) and Full SaaS (89 points).
   Core insight: the Manifest is the product. AI is one way to generate it.
   The ApplyManifest orchestrator is itself a Starlark Saga (recursive elegance).
   Staff identity is separate from Party (customers with ledger positions).
@@ -25,7 +25,7 @@ instructions: |
 
 > **Status**: Not Started
 > **Task Master Tag**: `control-plane`
-> **Complexity**: 42 (First Client Sprint) / 89 (Full SaaS)
+> **Complexity**: 42 (First Client) / 89 (Full SaaS)
 > **Last Updated**: 2026-02-08
 
 ---
@@ -38,7 +38,7 @@ financial operations platform.
 
 This PRD defines two paths:
 
-1. **First Client Sprint (42 points)** - Minimum viable path to demo
+1. **First Client (42 points)** - Minimum viable path to demo
    a paying client
 2. **Full SaaS Build (89 points)** - Complete self-service platform
 
@@ -72,37 +72,37 @@ The Control Plane extends it for commercial operation, not replaces it.
 
 ---
 
-## First Client Sprint (4 Weeks, 42 Points)
+## First Client (42 Points)
 
 This is the "behind-the-curtain" sequence to demo a paying client.
 
 ```mermaid
 graph TD
-    subgraph W1["Week 1: Foundation"]
+    subgraph P1["Phase 1: Foundation"]
         A1[Manifest Schema]
         A2[Staff Registry]
         A3[API Key Persistence]
     end
 
-    subgraph W2["Week 2: Compiler"]
+    subgraph P2["Phase 2: Compiler"]
         B1[ApplyManifest Orchestrator]
         B2[Idempotent Execution]
     end
 
-    subgraph W3["Week 3: Glass Box"]
+    subgraph P3["Phase 3: Glass Box"]
         C1[Causation Visualizer]
         C2[Multi-Asset Balance Sheet]
         C3[CFO View]
     end
 
-    subgraph W4["Week 4: Cash Rail"]
+    subgraph P4["Phase 4: Cash Rail"]
         D1[Stripe Webhooks]
         D2["Payment -> Position Saga"]
     end
 
-    W1 --> W2
-    W2 --> W3
-    W2 --> W4
+    P1 --> P2
+    P2 --> P3
+    P2 --> P4
 ```
 
 ---
@@ -773,7 +773,7 @@ messages by design**.
 
 ## Dependencies and Sequencing
 
-### First Client Sprint (42 Points)
+### First Client (42 Points)
 
 ```mermaid
 graph LR
@@ -797,7 +797,7 @@ graph LR
 
 ### Full SaaS Build (89 Points)
 
-After First Client Sprint:
+After First Client milestone:
 
 - WS-6: Billing Service (21)
 - WS-7: Admin Console (21)
@@ -806,34 +806,34 @@ After First Client Sprint:
 
 ---
 
-## Implementation Timeline
+## Implementation Phases
 
-### First Client Sprint (Weeks 1-4)
+### First Client
 
-| Week | Focus | Deliverables |
-|------|-------|--------------|
-| **1** | Foundation | Manifest JSON Schema, staff/api_keys tables, Gateway API key validation |
-| **2** | Compiler | ApplyManifest orchestrator, idempotent execution, manifest versioning |
-| **3** | Glass Box | Causation tree visualizer, multi-asset balance sheet, drill-down UI |
-| **4** | Cash Rail | Stripe webhooks, payment->ledger saga, reconciliation report |
+| Phase | Focus | Deliverables |
+|-------|-------|--------------|
+| **Foundation** | WS-1, WS-2 | Manifest JSON Schema, staff/api_keys tables, Gateway API key validation |
+| **Compiler** | WS-3 | ApplyManifest orchestrator, idempotent execution, manifest versioning |
+| **Glass Box** | WS-4 | Causation tree visualizer, multi-asset balance sheet, drill-down UI |
+| **Cash Rail** | WS-5 | Stripe webhooks, payment->ledger saga, reconciliation report |
 
 **Demo Milestone**: Show client their business model as JSON, apply it,
 show the CFO balance sheet, process a Stripe payment, click to show the
 audit trail.
 
-### Full SaaS (Weeks 5-16)
+### Full SaaS
 
-| Phase | Weeks | Work Streams |
-|-------|-------|--------------|
-| **Revenue Engine** | 5-8 | WS-6: Billing Service |
-| **Operator Experience** | 9-12 | WS-7: Admin Console |
-| **Customer Experience** | 13-16 | WS-8: Onboarding, WS-9: AI Engine |
+| Phase | Work Streams |
+|-------|--------------|
+| **Revenue Engine** | WS-6: Billing Service |
+| **Operator Experience** | WS-7: Admin Console |
+| **Customer Experience** | WS-8: Onboarding, WS-9: AI Engine |
 
 ---
 
 ## Success Metrics
 
-### First Client Sprint
+### First Client
 
 | Metric | Target |
 |--------|--------|
