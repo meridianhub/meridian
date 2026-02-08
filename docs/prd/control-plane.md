@@ -14,7 +14,7 @@ triggers:
   - Planning the CFO Glass Box dashboard
 instructions: |
   This PRD defines the Control Plane for operating Meridian commercially.
-  Two execution paths: First Client (42 points) and Full SaaS (89 points).
+  Two execution paths: First Client (43 points) and Full SaaS (90 points).
   Core insight: the Manifest is the product. AI is one way to generate it.
   The ApplyManifest orchestrator is itself a Starlark Saga (recursive elegance).
   Staff identity is separate from Party (customers with ledger positions).
@@ -25,7 +25,7 @@ instructions: |
 
 > **Status**: Not Started
 > **Task Master Tag**: `control-plane`
-> **Complexity**: 42 (First Client) / 89 (Full SaaS)
+> **Complexity**: 43 (First Client) / 90 (Full SaaS)
 > **Last Updated**: 2026-02-08
 
 ---
@@ -38,9 +38,9 @@ financial operations platform.
 
 This PRD defines two paths:
 
-1. **First Client (42 points)** - Minimum viable path to demo
+1. **First Client (43 points)** - Minimum viable path to demo
    a paying client
-2. **Full SaaS Build (89 points)** - Complete self-service platform
+2. **Full SaaS Build (90 points)** - Complete self-service platform
 
 The key insight: **the Manifest is the product, not a feature**. The JSON
 schema that defines a business model is the core primitive. AI is just one
@@ -72,7 +72,7 @@ The Control Plane extends it for commercial operation, not replaces it.
 
 ---
 
-## First Client (42 Points)
+## First Client (43 Points)
 
 This is the "behind-the-curtain" sequence to demo a paying client.
 
@@ -109,7 +109,7 @@ graph TD
 
 ## Work Streams (Resequenced)
 
-### WS-1: Meridian Manifest Schema (Complexity: 8) P0
+### WS-1: Meridian Manifest Schema (Complexity: 9) P0
 
 **Objective**: Define the declarative business model specification -
 the **"Administrative Control Record"**.
@@ -126,6 +126,7 @@ and workflows.
 | **1.2** | `cp.manifest.validator` | Validate manifest against schema (structure check) | 2 |
 | **1.3** | `cp.manifest.dryrun` | Dry-run validation using existing service mocks | 2 |
 | **1.4** | `cp.manifest.examples` | Reference manifests for common industries | 1 |
+| **1.5** | `cp.manifest.proto-sync` | CI check: Manifest schema fields stay in sync with core Protos (instrument.proto, saga_registry.proto) | 1 |
 
 #### Meridian Manifest Schema v1
 
@@ -313,7 +314,10 @@ members:
 #### Data Model
 
 ```sql
--- Platform database (not tenant-scoped)
+-- Lives in meridian_platform database, public schema.
+-- Distinct from org_{id} tenant schemas (ADR-0016).
+-- Tenant Zero hosts shared auth records, maintaining the
+-- "Everything is a Tenant" invariant.
 CREATE TABLE platform.staff_users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES platform.tenants(id),
@@ -332,7 +336,7 @@ CREATE TABLE platform.api_keys (
     tenant_id UUID NOT NULL REFERENCES platform.tenants(id),
     staff_user_id UUID REFERENCES platform.staff_users(id),
     key_prefix VARCHAR(12) NOT NULL,
-    key_hash BYTEA NOT NULL,
+    key_hash BYTEA NOT NULL, -- SHA-256 (fast; keys are high-entropy)
     name VARCHAR(255),
     scopes TEXT[] NOT NULL DEFAULT '{}',
     rate_limit_rps INTEGER DEFAULT 100,
@@ -355,7 +359,9 @@ CREATE INDEX idx_api_keys_prefix
 - `auth_provider_id`: Auth0/Clerk user ID
 - `staff_user_id`: nullable for service keys
 - `key_prefix`: e.g., "pk_live_abc1"
-- `key_hash`: argon2id hash
+- `key_hash`: SHA-256 hash (not argon2id -- API keys are
+  high-entropy machine-generated strings validated on every request;
+  SHA-256 keeps the Gateway hot path fast)
 - `scopes`: e.g., `["read:positions", "write:transactions"]`
 
 #### Acceptance Criteria
@@ -393,6 +399,11 @@ calls to existing services:
 
 This is elegantly recursive: the system that runs sagas is configured
 by a saga.
+
+> **Bootstrap**: The `ApplyManifest` saga must be seeded as a
+> **System Saga** (`is_system=true`) during Tenant Service
+> provisioning. This resolves the bootstrap paradox: the compiler
+> must exist before the first tenant tries to configure their economy.
 
 ```python
 # sagas/apply_manifest.star
@@ -444,7 +455,7 @@ def execute(ctx, manifest):
 
 | Task | ID | Description | Complexity |
 |------|-----|-------------|------------|
-| **3.1** | `cp.engine.differ` | Compute diff between current state and desired Manifest | 3 |
+| **3.1** | `cp.engine.differ` | Compute diff between current state and desired Manifest; reject deletions of resources with live balances | 3 |
 | **3.2** | `cp.engine.planner` | Generate ordered list of gRPC calls from diff | 3 |
 | **3.3** | `cp.engine.executor` | Execute plan with rollback on failure | 3 |
 | **3.4** | `cp.engine.status` | Track apply status: pending, applying, applied, failed | 2 |
@@ -505,6 +516,8 @@ Apply(Manifest_v1) -> State_A  (rollback to v1)
 - [ ] Failed applies leave system in consistent state
 - [ ] Manifest history is auditable (who, when, diff)
 - [ ] Breaking changes require explicit confirmation
+- [ ] Differ rejects deletion of resources with live balances
+  (e.g., removing an AccountType that holds positions)
 
 ---
 
@@ -651,6 +664,8 @@ def execute(ctx, event):
 
 - [ ] Stripe webhooks are verified (signature check)
 - [ ] Payment creates double-entry in ledger
+- [ ] `causation_id` on position entries contains the Stripe Charge ID
+  (e.g., `ch_12345`) for O(1) reconciliation joins
 - [ ] Daily reconciliation catches discrepancies
 - [ ] Webhook failures are retried with idempotency
 
@@ -773,7 +788,7 @@ messages by design**.
 
 ## Dependencies and Sequencing
 
-### First Client (42 Points)
+### First Client (43 Points)
 
 ```mermaid
 graph LR
@@ -785,17 +800,17 @@ graph LR
 
 | Order | Task Master ID | Work Stream | Points |
 |:------|:---------------|:------------|:-------|
-| 1 | `cp.manifest.*` | WS-1: Manifest Schema | 8 |
+| 1 | `cp.manifest.*` | WS-1: Manifest Schema | 9 |
 | 2 | `cp.auth.*` | WS-2: Staff Identity | 8 |
 | 3 | `cp.engine.*` | WS-3: Apply Orchestrator | 13 |
 | 4 | `ui.causation.*`, `ui.balance.*` | WS-4: CFO Glass Box | 8 |
 | 5 | `cp.stripe.*` | WS-5: Stripe Cash-In | 5 |
-| | | **Total** | **42** |
+| | | **Total** | **43** |
 
-> **Note:** Adjusted to 42 after detailed task breakdown (original
-> estimate was 34).
+> **Note:** Adjusted to 43 after detailed task breakdown (original
+> estimate was 34). Includes proto-sync CI check (+1).
 
-### Full SaaS Build (89 Points)
+### Full SaaS Build (90 Points)
 
 After First Client milestone:
 
