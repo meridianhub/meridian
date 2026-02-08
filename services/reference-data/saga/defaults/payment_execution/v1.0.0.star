@@ -60,6 +60,8 @@ def payment_execution():
     # Store lien results in context for subsequent steps
     lien_id = lien_result.lien_id
     bucket_id = lien_result.bucket_id
+    # Extract valuation_analysis if present (atomic valuation audit trail)
+    valuation_analysis = lien_result.get("valuation_analysis")
 
     # Step 2: Send payment to gateway
     step(name="send_to_gateway")
@@ -88,16 +90,24 @@ def payment_execution():
     # This step is called after the gateway confirms the payment via webhook
     if ctx.get("should_post_ledger", False):
         step(name="post_ledger_entries")
-        ledger_result = payment_order.post_ledger_entries(
-            payment_order_id=ctx.get("payment_order_id"),
-            debtor_account_id=ctx.get("debtor_account_id"),
-            gateway_reference_id=gateway_reference_id,
-            amount_cents=ctx.get("amount_cents"),
-            currency=ctx.get("currency"),
-            idempotency_key=ctx.get("idempotency_key"),
-            internal_clearing_enabled=ctx.get("internal_clearing_enabled", False),
-        )
+        ledger_params = {
+            "payment_order_id": ctx.get("payment_order_id"),
+            "debtor_account_id": ctx.get("debtor_account_id"),
+            "gateway_reference_id": gateway_reference_id,
+            "amount_cents": ctx.get("amount_cents"),
+            "currency": ctx.get("currency"),
+            "idempotency_key": ctx.get("idempotency_key"),
+            "internal_clearing_enabled": ctx.get("internal_clearing_enabled", False),
+        }
+        # Forward valuation_analysis for position keeping audit trail
+        if valuation_analysis:
+            ledger_params["valuation_analysis"] = valuation_analysis
+        ledger_result = payment_order.post_ledger_entries(**ledger_params)
         result["booking_log_id"] = ledger_result.booking_log_id
+
+    # Include valuation_analysis in saga output for audit trail
+    if valuation_analysis:
+        result["valuation_analysis"] = valuation_analysis
 
     # Step 4: Execute lien (conditional - triggered by webhook after ledger posted)
     # This converts the reservation to an actual debit
