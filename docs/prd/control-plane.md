@@ -647,7 +647,7 @@ func (h *StripeWebhookHandler) HandlePaymentIntentSucceeded(
 # sagas/stripe_payment_received.star
 def execute(ctx, event):
     # Record revenue position (tenant-zero ledger)
-    ctx.position_keeping.record_transaction(
+    nostro_result = ctx.position_keeping.record_transaction(
         account_id = "stripe_nostro",
         instrument = event.currency.upper(),
         quantity = event.amount / 100,
@@ -655,8 +655,8 @@ def execute(ctx, event):
         causation_id = event.causation_id,
     )
 
-    # Credit customer's prepaid balance
-    ctx.position_keeping.record_transaction(
+    # Credit customer's prepaid balance (primary posting)
+    prepaid_result = ctx.position_keeping.record_transaction(
         account_id = event.party_id + "_prepaid",
         instrument = event.currency.upper(),
         quantity = event.amount / 100,
@@ -664,7 +664,12 @@ def execute(ctx, event):
         causation_id = event.causation_id,
     )
 
-    return {"status": "completed", "position_ids": [...]}
+    return {
+        "status": "completed",
+        "posting_id": prepaid_result.posting_id,
+        "position_log_id": prepaid_result.position_log_id,
+        "booking_log_id": prepaid_result.booking_log_id,
+    }
 ```
 
 #### Acceptance Criteria
