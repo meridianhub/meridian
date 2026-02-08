@@ -178,11 +178,11 @@ and workflows.
 
 | Task | ID | Description | Complexity |
 |------|-----|-------------|------------|
-| **1.1** | `cp.manifest.schema` | Define JSON Schema for complete tenant configuration | 3 |
-| **1.2** | `cp.manifest.validator` | Validate manifest against schema (structure check) | 2 |
+| **1.1** | `cp.manifest.proto` | Define Manifest as Protobuf (`api/proto/control_plane/v1/manifest.proto`); auto-generate JSON Schema via `protoc-gen-jsonschema` | 3 |
+| **1.2** | `cp.manifest.validator` | Validate manifest against generated schema (structure check) | 2 |
 | **1.3** | `cp.manifest.dryrun` | Dry-run validation using existing service mocks | 2 |
 | **1.4** | `cp.manifest.examples` | Reference manifests for common industries | 1 |
-| **1.5** | `cp.manifest.proto-sync` | CI check: Manifest schema fields stay in sync with core Protos (instrument.proto, saga_registry.proto) | 1 |
+| **1.5** | `cp.manifest.ci-schema` | CI step: regenerate JSON Schema from proto, fail if output differs (guarantees no manual drift) | 1 |
 
 #### Meridian Manifest Schema v1
 
@@ -437,8 +437,8 @@ CREATE TABLE staff_users (
 
 CREATE TABLE api_keys (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    staff_user_id UUID REFERENCES staff_users(id),
-    key_prefix VARCHAR(20) NOT NULL,
+    staff_user_id UUID REFERENCES staff_users(id) ON DELETE CASCADE,
+    key_prefix VARCHAR(100) NOT NULL, -- pk_{slug}_{8} → up to ~74 chars
     key_hash BYTEA NOT NULL, -- SHA-256 (fast; keys are high-entropy)
     name VARCHAR(255),
     scopes TEXT[] NOT NULL DEFAULT '{}',
@@ -509,10 +509,12 @@ calls to existing services:
 This is elegantly recursive: the system that runs sagas is configured
 by a saga.
 
-> **Bootstrap**: The `ApplyManifest` saga must be seeded as a
-> **System Saga** (`is_system=true`) during Tenant Service
-> provisioning. This resolves the bootstrap paradox: the compiler
-> must exist before the first tenant tries to configure their economy.
+> **Bootstrap**: On startup, the Control Plane service upserts the
+> `ApplyManifest` script into `public.platform_saga_definition` in
+> Reference Data. New tenants inherit it automatically via the
+> platform default fallback mechanism (ADR-0028). This avoids coupling
+> the Tenant Service (infrastructure) to Control Plane application
+> logic — the Tenant Service never needs to know the script contents.
 
 ```python
 # sagas/apply_manifest.star
