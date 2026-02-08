@@ -2,28 +2,25 @@
 
 > **Status**: Not Started
 > **Task Master Tag**: `control-plane`
-> **Complexity**: 89 (Fibonacci)
+> **Complexity**: 55 (First Client Sprint) / 89 (Full SaaS)
 > **Last Updated**: 2026-02-08
 
 ---
 
 ## Executive Summary
 
-The Meridian Control Plane provides the management layer for operating Meridian as a commercial SaaS product. It builds upon existing infrastructure (Tenant Service, Usage Metering, RBAC, Gateway) to add:
+The Meridian Control Plane is the **"Economy Compiler"** - the management layer that transforms declarative business model definitions into a running financial operations platform.
 
-1. **Stripe Integration** - Subscription billing and payment processing
-2. **Admin Console** - Web UI for operators to manage tenants
-3. **Self-Service Onboarding** - Web-based signup and provisioning flow
-4. **Customer Dashboard** - Usage analytics and API key management
-5. **AI Configuration Assistant** - Opus-powered conversational setup
+This PRD defines two paths:
 
-This PRD focuses exclusively on **what needs building**, acknowledging the substantial existing infrastructure.
+1. **First Client Sprint (34 points)** - Minimum viable path to demo a paying client
+2. **Full SaaS Build (89 points)** - Complete self-service platform
+
+The key insight: **the Manifest is the product, not a feature**. The JSON schema that defines a business model is the core primitive. AI is just one way to generate it.
 
 ---
 
 ## What Already Exists
-
-Before defining new work, we must acknowledge what's already built:
 
 | Component | Location | Status |
 |-----------|----------|--------|
@@ -31,464 +28,634 @@ Before defining new work, we must acknowledge what's already built:
 | **Usage Metering** | `services/utilization-metering-consumer/` | Transforms audit events → measurements |
 | **RBAC** | `shared/platform/auth/rbac.go` | Roles (admin, operator, auditor, service), permissions |
 | **API Gateway** | `services/gateway/` | Subdomain routing, JWT auth, rate limiting |
-| **Party Service** | `services/party/` | Organization/party registration |
+| **Party Service** | `services/party/` | Organization/party registration (customers) |
+| **Causation Tree** | `api/proto/meridian/saga/v1/saga_admin.proto` | GetCausationTree RPC for audit trails |
+| **Dry-Run Validation** | Reference Data, Position Keeping | Validate before commit |
 | **tenantctl CLI** | `cmd/tenantctl/` | Register, list, get, deprovision tenants |
-| **Gateway Config** | `services/payment-order/config/` | Payment gateway → account mapping |
-| **Grafana Dashboards** | `deployments/grafana/dashboards/` | Org monitoring, production readiness |
 
-**Key Insight**: The core multi-tenant infrastructure is production-ready. The Control Plane extends it for commercial operation, not replaces it.
-
----
-
-## Goals
-
-### Primary Goals
-
-1. **Enable Revenue**: Connect usage metering to Stripe billing
-2. **Self-Service Onboarding**: Customers can sign up without operator intervention
-3. **Operational Visibility**: Operators have a single pane of glass for tenant management
-4. **Customer Empowerment**: Tenants can view usage, manage API keys, access analytics
-
-### Non-Goals
-
-1. **Replacing CLI tools** - tenantctl remains for automation/scripting
-2. **Custom billing engine** - Use Stripe's billing primitives
-3. **Full CRM** - Customer relationship management is out of scope
-4. **Support ticketing** - Integrate with existing solutions (Zendesk, Intercom)
+**Critical Distinction**:
+- `Party` = **Customers** with ledger positions (kWh balances, GBP holdings)
+- `Staff` = **Employees** with Admin Console access (push Manifests, own API keys) ← **MISSING**
 
 ---
 
-## Architecture Overview
+## First Client Sprint (4 Weeks, 34 Points)
+
+This is the "behind-the-curtain" sequence to demo a paying client.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                      Control Plane Layer                        │
+│                    FIRST CLIENT SPRINT                          │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
-│  │ Admin Console│  │  Customer    │  │ AI Config Assistant  │  │
-│  │   (React)    │  │  Dashboard   │  │     (Opus API)       │  │
-│  └──────┬───────┘  └──────┬───────┘  └──────────┬───────────┘  │
-│         │                 │                      │              │
-│         └────────────┬────┴──────────────────────┘              │
-│                      │                                          │
-│              ┌───────▼────────┐                                 │
-│              │ Control Plane  │                                 │
-│              │   gRPC API     │                                 │
-│              └───────┬────────┘                                 │
-│                      │                                          │
-├──────────────────────┼──────────────────────────────────────────┤
-│                      │         Existing Services                │
-│  ┌───────────────────┼───────────────────────────────────────┐  │
-│  │                   ▼                                       │  │
-│  │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────────────┐  │  │
-│  │  │ Tenant  │ │  Usage  │ │  Party  │ │ Billing Service │  │  │
-│  │  │ Service │ │ Metering│ │ Service │ │    (NEW)        │  │  │
-│  │  └────┬────┘ └────┬────┘ └────┬────┘ └────────┬────────┘  │  │
-│  │       │           │           │               │           │  │
-│  │       └───────────┴───────────┴───────────────┘           │  │
-│  │                          │                                │  │
-│  │                    ┌─────▼─────┐                          │  │
-│  │                    │  Stripe   │                          │  │
-│  │                    │   API     │                          │  │
-│  │                    └───────────┘                          │  │
-│  └───────────────────────────────────────────────────────────┘  │
+│  Week 1: Foundation          Week 2: Compiler                   │
+│  ┌─────────────────────┐     ┌─────────────────────┐           │
+│  │ Manifest Schema     │────▶│ ApplyManifest       │           │
+│  │ Staff Registry      │     │ Orchestrator        │           │
+│  │ API Key Persistence │     │ (Idempotent)        │           │
+│  └─────────────────────┘     └──────────┬──────────┘           │
+│                                         │                       │
+│  Week 3: Glass Box           Week 4: Cash Rail                  │
+│  ┌─────────────────────┐     ┌─────────▼───────────┐           │
+│  │ Causation Visualizer│     │ Stripe Webhooks     │           │
+│  │ Multi-Asset Balance │     │ Payment → Position  │           │
+│  │ Sheet (CFO View)    │     │ Saga                │           │
+│  └─────────────────────┘     └─────────────────────┘           │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Work Streams
+## Work Streams (Resequenced)
 
-### WS-1: Billing Service & Stripe Integration (Complexity: 21)
+### WS-1: Meridian Manifest Schema (Complexity: 8) ⭐ P0
 
-**Objective**: Connect usage metering to Stripe for automated billing.
+**Objective**: Define the declarative business model specification - the **"Administrative Control Record"**.
 
-#### What Exists
-- `UtilizationMeasurement` domain model in metering consumer
-- Measurements recorded to Position Keeping's "tenant-zero" account
-- Gateway account configuration supporting "stripe" as a gateway ID
+The Manifest is the single source of truth that prevents configuration drift. It defines the complete economy: assets, accounts, policies, and workflows.
 
 #### What Needs Building
 
-| Task | Description | Complexity |
-|------|-------------|------------|
-| **1.1** Create `services/billing/` service structure | gRPC service, domain models, repository | 3 |
-| **1.2** Define billing protobuf contracts | `CreateSubscription`, `UpdateSubscription`, `CancelSubscription`, `GetInvoice`, `ListInvoices` | 2 |
-| **1.3** Implement Stripe Customer sync | Create/update Stripe Customer on tenant creation | 3 |
-| **1.4** Implement Stripe Subscription management | Map plan tiers to Stripe Price IDs | 3 |
-| **1.5** Implement usage reporting to Stripe | Periodically push metered usage to Stripe Usage Records | 3 |
-| **1.6** Implement Stripe webhook handler | Handle `invoice.paid`, `invoice.payment_failed`, `customer.subscription.updated`, etc. | 3 |
-| **1.7** Add plan tier enforcement middleware | Check subscription status before allowing API calls | 2 |
-| **1.8** Add graceful degradation for expired subscriptions | 7-day grace period, then read-only mode | 2 |
+| Task | ID | Description | Complexity |
+|------|-----|-------------|------------|
+| **1.1** | `cp.manifest.schema` | Define JSON Schema for complete tenant configuration | 3 |
+| **1.2** | `cp.manifest.validator` | Validate manifest against schema (structure check) | 2 |
+| **1.3** | `cp.manifest.dryrun` | Dry-run validation using existing service mocks | 2 |
+| **1.4** | `cp.manifest.examples` | Reference manifests for common industries | 1 |
 
-#### Plan Tier Definitions
-
-```yaml
-plans:
-  starter:
-    stripe_price_id: price_starter_monthly
-    included:
-      api_calls: 10000
-      transactions: 1000
-      storage_gb: 1
-    rate_limits:
-      requests_per_second: 10
-
-  growth:
-    stripe_price_id: price_growth_monthly
-    included:
-      api_calls: 100000
-      transactions: 10000
-      storage_gb: 10
-    rate_limits:
-      requests_per_second: 50
-
-  scale:
-    stripe_price_id: price_scale_monthly
-    included:
-      api_calls: unlimited
-      transactions: unlimited
-      storage_gb: 100
-    rate_limits:
-      requests_per_second: 200
-```
-
-#### Acceptance Criteria
-- [ ] Tenant creation triggers Stripe Customer creation
-- [ ] Subscription state synced bidirectionally (Meridian ↔ Stripe)
-- [ ] Usage metrics reported to Stripe daily
-- [ ] Webhooks update tenant status on payment events
-- [ ] Expired subscriptions enter grace period, then freeze
-
----
-
-### WS-2: Control Plane API (Complexity: 13)
-
-**Objective**: Unified gRPC API for control plane operations.
-
-#### What Exists
-- `TenantService` with InitiateTenant, RetrieveTenant, UpdateTenantStatus
-- `SagaAdminService` with GetCausationTree
-- RBAC with platform-level permissions
-
-#### What Needs Building
-
-| Task | Description | Complexity |
-|------|-------------|------------|
-| **2.1** Define `ControlPlaneService` protobuf | Aggregate operations across tenant, billing, party | 2 |
-| **2.2** Implement `OnboardTenant` RPC | Orchestrates: Party → Tenant → Stripe → Provisioning | 3 |
-| **2.3** Implement `GetTenantDashboard` RPC | Returns tenant summary with billing, usage, status | 2 |
-| **2.4** Implement `ManageAPIKeys` RPCs | CreateAPIKey, RevokeAPIKey, ListAPIKeys | 2 |
-| **2.5** Implement `GetUsageAnalytics` RPC | Aggregated usage by time period, service, operation | 2 |
-| **2.6** Add control plane auth interceptor | Require `platform:admin` or `platform:operator` role | 2 |
-
-#### API Design
-
-```protobuf
-service ControlPlaneService {
-  // Tenant lifecycle
-  rpc OnboardTenant(OnboardTenantRequest) returns (OnboardTenantResponse);
-  rpc SuspendTenant(SuspendTenantRequest) returns (SuspendTenantResponse);
-  rpc DeprovisionTenant(DeprovisionTenantRequest) returns (DeprovisionTenantResponse);
-
-  // Dashboard
-  rpc GetTenantDashboard(GetTenantDashboardRequest) returns (TenantDashboard);
-  rpc GetUsageAnalytics(GetUsageAnalyticsRequest) returns (UsageAnalytics);
-
-  // API Keys
-  rpc CreateAPIKey(CreateAPIKeyRequest) returns (APIKey);
-  rpc RevokeAPIKey(RevokeAPIKeyRequest) returns (Empty);
-  rpc ListAPIKeys(ListAPIKeysRequest) returns (ListAPIKeysResponse);
-
-  // Billing
-  rpc GetSubscription(GetSubscriptionRequest) returns (Subscription);
-  rpc UpdateSubscription(UpdateSubscriptionRequest) returns (Subscription);
-  rpc ListInvoices(ListInvoicesRequest) returns (ListInvoicesResponse);
-}
-```
-
-#### Acceptance Criteria
-- [ ] Single API for all control plane operations
-- [ ] Proper authorization checks on all RPCs
-- [ ] Audit logging for all state-changing operations
-- [ ] Idempotent operations where appropriate
-
----
-
-### WS-3: Admin Console (Complexity: 21)
-
-**Objective**: Web UI for Meridian operators to manage tenants.
-
-#### What Exists
-- Grafana dashboards for monitoring (ops-focused, not management-focused)
-- tenantctl CLI for basic operations
-- gRPC-Gateway exposing REST endpoints
-
-#### What Needs Building
-
-| Task | Description | Complexity |
-|------|-------------|------------|
-| **3.1** Set up Next.js admin console project | `apps/admin-console/` with TypeScript, Tailwind | 3 |
-| **3.2** Implement authentication flow | Platform user login via Auth0/Clerk | 3 |
-| **3.3** Build tenant list view | Searchable, filterable table with status indicators | 2 |
-| **3.4** Build tenant detail view | Billing info, usage stats, provisioning status, actions | 3 |
-| **3.5** Build tenant creation wizard | Step-by-step: Org → Plan → Config → Review → Provision | 3 |
-| **3.6** Build usage analytics dashboard | Charts: API calls, transactions, storage over time | 3 |
-| **3.7** Build billing management view | Current plan, invoices, payment method, upgrade/downgrade | 2 |
-| **3.8** Add real-time updates | WebSocket subscription for provisioning progress | 2 |
-
-#### UI Wireframes
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│ Meridian Admin Console                    [User ▼] [Logout] │
-├───────────┬─────────────────────────────────────────────────┤
-│           │                                                 │
-│ Dashboard │  Tenants (47)                    [+ New Tenant] │
-│ Tenants   │  ┌─────────────────────────────────────────────┐│
-│ Billing   │  │ Search...                    [Filter ▼]    ││
-│ Analytics │  ├─────────────────────────────────────────────┤│
-│ Settings  │  │ ● Acme Corp      | Growth  | $299/mo | Active│
-│           │  │ ● TechStart Ltd  | Starter | $49/mo  | Active│
-│           │  │ ○ OldCo Inc      | Scale   | $999/mo | Frozen│
-│           │  │ ● NewBiz LLC     | Starter | $49/mo  | Prov..│
-│           │  └─────────────────────────────────────────────┘│
-│           │                                                 │
-└───────────┴─────────────────────────────────────────────────┘
-```
-
-#### Tech Stack
-- **Framework**: Next.js 14 (App Router)
-- **UI**: shadcn/ui + Tailwind CSS
-- **State**: TanStack Query (React Query)
-- **Auth**: Clerk or Auth0
-- **Charts**: Recharts or Tremor
-- **gRPC**: Connect-Web (Buf)
-
-#### Acceptance Criteria
-- [ ] Operators can CRUD tenants without CLI
-- [ ] Real-time visibility into provisioning progress
-- [ ] Usage analytics with date range selection
-- [ ] Invoice history with PDF download
-- [ ] Role-based access (admin vs operator vs auditor views)
-
----
-
-### WS-4: Self-Service Onboarding (Complexity: 13)
-
-**Objective**: Customers can sign up and start using Meridian without operator intervention.
-
-#### What Exists
-- Party Service for organization registration
-- Tenant Service with async provisioning
-- Email verification patterns (not implemented)
-
-#### What Needs Building
-
-| Task | Description | Complexity |
-|------|-------------|------------|
-| **4.1** Set up onboarding web app | `apps/onboarding/` Next.js with multi-step wizard | 3 |
-| **4.2** Implement email verification flow | Magic link or OTP verification | 2 |
-| **4.3** Build organization setup step | Company name, industry, size | 1 |
-| **4.4** Build plan selection step | Compare plans, select, enter payment | 2 |
-| **4.5** Integrate Stripe Checkout | Embedded checkout for payment collection | 2 |
-| **4.6** Implement provisioning progress view | Real-time status of schema creation | 2 |
-| **4.7** Add welcome email with getting started | API keys, docs links, quickstart | 1 |
-
-#### Onboarding Flow
-
-```
-┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
-│  Email   │───▶│  Verify  │───▶│   Org    │───▶│   Plan   │───▶│ Payment  │
-│  Entry   │    │  Email   │    │  Setup   │    │ Selection│    │ (Stripe) │
-└──────────┘    └──────────┘    └──────────┘    └──────────┘    └──────────┘
-                                                                      │
-┌──────────┐    ┌──────────┐    ┌──────────────────────────────────────┘
-│ Dashboard│◀───│ Welcome  │◀───│   Provisioning   │
-│  Access  │    │  Email   │    │    Progress      │
-└──────────┘    └──────────┘    └──────────────────┘
-```
-
-#### Acceptance Criteria
-- [ ] < 5 minutes from signup to working API keys
-- [ ] Zero operator intervention for standard signups
-- [ ] Failed payments block provisioning (don't create unpaid tenants)
-- [ ] Abandoned signups tracked for re-engagement
-
----
-
-### WS-5: Customer Dashboard (Complexity: 13)
-
-**Objective**: Tenants can view their usage, manage API keys, and access billing.
-
-#### What Exists
-- Usage metering data in Position Keeping
-- API key middleware (environment variable based)
-- JWT claims include tenant_id
-
-#### What Needs Building
-
-| Task | Description | Complexity |
-|------|-------------|------------|
-| **5.1** Set up customer dashboard app | `apps/dashboard/` Next.js, tenant-scoped | 2 |
-| **5.2** Implement tenant-scoped auth | JWT with tenant_id claim, route to correct tenant | 2 |
-| **5.3** Build usage overview page | API calls, transactions, storage with sparklines | 2 |
-| **5.4** Build API key management | Generate, revoke, view (masked), set permissions | 3 |
-| **5.5** Build billing page | Current plan, upcoming invoice, payment method | 2 |
-| **5.6** Build quickstart/docs integration | Embedded code samples with tenant's API key | 2 |
-
-#### Customer Dashboard Layout
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│ Acme Corp Dashboard                       [Settings] [Help] │
-├───────────┬─────────────────────────────────────────────────┤
-│           │                                                 │
-│ Overview  │  Usage This Month                               │
-│ API Keys  │  ┌─────────────────────────────────────────────┐│
-│ Billing   │  │ API Calls: 45,231 / 100,000  [━━━━━━░░░░░░]││
-│ Docs      │  │ Transactions: 1,234 / 10,000 [━━░░░░░░░░░░]││
-│ Settings  │  │ Storage: 2.1 GB / 10 GB      [━━░░░░░░░░░░]││
-│           │  └─────────────────────────────────────────────┘│
-│           │                                                 │
-│           │  API Keys                          [+ New Key]  │
-│           │  ┌─────────────────────────────────────────────┐│
-│           │  │ pk_live_****4a2f  | Production | [Revoke]  ││
-│           │  │ pk_test_****8b3c  | Test       | [Revoke]  ││
-│           │  └─────────────────────────────────────────────┘│
-│           │                                                 │
-└───────────┴─────────────────────────────────────────────────┘
-```
-
-#### Acceptance Criteria
-- [ ] Customers can view real-time usage
-- [ ] API keys can be created/revoked without support
-- [ ] Billing history accessible with invoice PDFs
-- [ ] No access to other tenants' data
-
----
-
-### WS-6: AI Configuration Assistant (Complexity: 8)
-
-**Objective**: Opus-powered assistant helps customers configure their Meridian instance.
-
-#### What Exists
-- CEL policy runtime for validation, bucketing, valuation
-- Starlark saga orchestration for business logic
-- Instrument and account type definitions in Reference Data
-
-#### What Needs Building
-
-| Task | Description | Complexity |
-|------|-------------|------------|
-| **6.1** Define Meridian Manifest schema | JSON Schema for complete tenant configuration | 2 |
-| **6.2** Create Opus system prompt for configuration | Domain expertise in ledgers, instruments, policies | 2 |
-| **6.3** Implement manifest validation endpoint | Validate manifest against schema + dry-run | 2 |
-| **6.4** Build conversational UI component | Chat interface in onboarding/dashboard | 2 |
-
-#### Meridian Manifest Schema (Draft)
+#### Meridian Manifest Schema v1
 
 ```json
 {
   "$schema": "https://meridian.dev/manifest/v1",
-  "organization": {
+  "version": "1.0.0",
+  "metadata": {
     "name": "Acme Energy Co",
-    "industry": "energy"
+    "industry": "energy",
+    "description": "Prepaid energy metering for residential customers"
   },
+
   "instruments": [
     {
       "code": "KWH",
       "name": "Kilowatt Hours",
       "type": "COMMODITY",
       "dimensions": { "unit": "energy", "precision": 3 }
+    },
+    {
+      "code": "GBP",
+      "name": "British Pounds",
+      "type": "FIAT",
+      "dimensions": { "unit": "currency", "precision": 2 }
     }
   ],
+
   "account_types": [
     {
-      "code": "CUSTOMER_BALANCE",
+      "code": "CUSTOMER_PREPAID",
+      "name": "Customer Prepaid Balance",
       "normal_balance": "CREDIT",
-      "instruments": ["KWH", "GBP"]
+      "instruments": ["KWH", "GBP"],
+      "policies": {
+        "validation": "balance.quantity >= 0",
+        "bucketing": "tariff_code + '_' + period_month"
+      }
+    },
+    {
+      "code": "REVENUE",
+      "name": "Revenue Recognition",
+      "normal_balance": "CREDIT",
+      "instruments": ["GBP"]
     }
   ],
-  "policies": {
-    "validation": {
-      "customer_account_balance": "quantity >= 0"
-    },
-    "bucketing": {
-      "energy_by_tariff": "period + '_' + tariff_code"
+
+  "valuation_rules": [
+    {
+      "from": "KWH",
+      "to": "GBP",
+      "method": "SPOT_RATE",
+      "source": "tariff_schedule"
     }
-  },
+  ],
+
   "sagas": [
     {
-      "name": "record_energy_usage",
-      "script": "..."
+      "name": "record_meter_reading",
+      "trigger": "api:POST:/meters/{meter_id}/readings",
+      "script_ref": "sagas/record_meter_reading.star"
+    },
+    {
+      "name": "process_topup",
+      "trigger": "webhook:stripe:payment_intent.succeeded",
+      "script_ref": "sagas/process_topup.star"
     }
-  ]
+  ],
+
+  "seed_data": {
+    "tariffs": [
+      { "code": "STANDARD", "rate_per_kwh": "0.28" },
+      { "code": "ECONOMY7_DAY", "rate_per_kwh": "0.32" },
+      { "code": "ECONOMY7_NIGHT", "rate_per_kwh": "0.12" }
+    ]
+  }
 }
 ```
 
 #### Acceptance Criteria
-- [ ] User describes business in natural language
-- [ ] Opus generates valid Meridian Manifest
-- [ ] Manifest validates before provisioning
-- [ ] CEL policies have syntax + type checking
-- [ ] Generated config can be exported as YAML for GitOps
+- [ ] JSON Schema published with full documentation
+- [ ] Schema validation catches structural errors before API calls
+- [ ] Dry-run validates CEL syntax and Starlark compilation
+- [ ] Example manifests for: energy, carbon credits, SaaS billing, loyalty points
 
 ---
 
-## Dependencies
+### WS-2: Staff Identity Registry (Complexity: 8) ⭐ P0
+
+**Objective**: Separate identity layer for tenant employees who manage the system.
+
+This is distinct from `Party` (customers with ledger positions). Staff members:
+- Log into the Admin Console
+- Own and manage API keys
+- Push Manifest updates
+- View audit trails
+
+#### What Exists
+- RBAC with roles/permissions in `shared/platform/auth/rbac.go`
+- JWT claims with `tenant_id`, `roles`, `scopes`
+- API key middleware (environment variable based)
+
+#### What Needs Building
+
+| Task | ID | Description | Complexity |
+|------|-----|-------------|------------|
+| **2.1** | `cp.auth.staff-table` | Create `platform.staff_users` table with tenant association | 2 |
+| **2.2** | `cp.auth.staff-service` | Staff CRUD: invite, activate, deactivate, list | 2 |
+| **2.3** | `cp.auth.apikey-table` | Create `platform.api_keys` with hashed keys, scopes, rate limits | 2 |
+| **2.4** | `cp.auth.apikey-gateway` | Update Gateway to validate API keys from database | 2 |
+
+#### Data Model
+
+```sql
+-- Platform database (not tenant-scoped)
+CREATE TABLE platform.staff_users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES platform.tenants(id),
+    email VARCHAR(255) NOT NULL,
+    name VARCHAR(255),
+    role VARCHAR(50) NOT NULL DEFAULT 'operator', -- admin, operator, auditor
+    status VARCHAR(20) NOT NULL DEFAULT 'invited', -- invited, active, suspended
+    auth_provider_id VARCHAR(255), -- Auth0/Clerk user ID
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(tenant_id, email)
+);
+
+CREATE TABLE platform.api_keys (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES platform.tenants(id),
+    staff_user_id UUID REFERENCES platform.staff_users(id), -- nullable for service keys
+    key_prefix VARCHAR(12) NOT NULL, -- e.g., "pk_live_abc1"
+    key_hash BYTEA NOT NULL, -- argon2id hash
+    name VARCHAR(255),
+    scopes TEXT[] NOT NULL DEFAULT '{}', -- ["read:positions", "write:transactions"]
+    rate_limit_rps INTEGER DEFAULT 100,
+    last_used_at TIMESTAMPTZ,
+    expires_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    revoked_at TIMESTAMPTZ,
+    UNIQUE(key_prefix)
+);
+
+CREATE INDEX idx_api_keys_prefix ON platform.api_keys(key_prefix) WHERE revoked_at IS NULL;
+```
+
+#### Acceptance Criteria
+- [ ] Staff users can be invited to a tenant
+- [ ] API keys are hashed (never stored plaintext)
+- [ ] Gateway validates keys from database with caching
+- [ ] Keys can be scoped to specific permissions
+- [ ] Key usage is tracked (last_used_at)
+
+---
+
+### WS-3: Apply Manifest Orchestrator (Complexity: 13) ⭐ P0
+
+**Objective**: The engine that turns JSON into gRPC calls. **Must be idempotent.**
+
+This is the core "compiler" that reads a Manifest and orchestrates calls to existing services:
+- `ReferenceData.RegisterInstrument`
+- `ReferenceData.RegisterAccountType`
+- `CurrentAccount.InitiateCurrentAccount`
+- etc.
+
+#### What Needs Building
+
+| Task | ID | Description | Complexity |
+|------|-----|-------------|------------|
+| **3.1** | `cp.engine.differ` | Compute diff between current state and desired Manifest | 3 |
+| **3.2** | `cp.engine.planner` | Generate ordered list of gRPC calls from diff | 3 |
+| **3.3** | `cp.engine.executor` | Execute plan with rollback on failure | 3 |
+| **3.4** | `cp.engine.status` | Track apply status: pending, applying, applied, failed | 2 |
+| **3.5** | `cp.engine.history` | Store Manifest versions with who/when/diff | 2 |
+
+#### API Design
+
+```protobuf
+service EconomyEngineService {
+  // Validate manifest without applying
+  rpc ValidateManifest(ValidateManifestRequest) returns (ValidationResult);
+
+  // Compute what would change
+  rpc PlanManifest(PlanManifestRequest) returns (ManifestPlan);
+
+  // Apply manifest (idempotent)
+  rpc ApplyManifest(ApplyManifestRequest) returns (ApplyManifestResponse);
+
+  // Get current applied manifest
+  rpc GetCurrentManifest(GetCurrentManifestRequest) returns (Manifest);
+
+  // List manifest history
+  rpc ListManifestVersions(ListManifestVersionsRequest) returns (ManifestVersionList);
+}
+
+message ManifestPlan {
+  repeated PlannedAction actions = 1;
+  bool has_breaking_changes = 2;
+  string summary = 3;
+}
+
+message PlannedAction {
+  string resource_type = 1; // "instrument", "account_type", "saga"
+  string resource_id = 2;
+  ActionType action = 3; // CREATE, UPDATE, DELETE, NO_CHANGE
+  string description = 4;
+}
+```
+
+#### Idempotency Contract
+
+```
+Apply(Manifest_v1) → State_A
+Apply(Manifest_v1) → State_A  (no-op, same result)
+Apply(Manifest_v2) → State_B  (diff applied)
+Apply(Manifest_v1) → State_A  (rollback to v1)
+```
+
+#### Acceptance Criteria
+- [ ] Applying the same manifest twice results in "No Changes"
+- [ ] Plan shows exactly what will change before apply
+- [ ] Failed applies leave system in consistent state
+- [ ] Manifest history is auditable (who, when, diff)
+- [ ] Breaking changes require explicit confirmation
+
+---
+
+### WS-4: CFO Glass Box UI (Complexity: 8)
+
+**Objective**: The "Horizon-Proof" screen - show the numbers, then click to show the *why*.
+
+This is the visualization layer that proves Meridian is trustworthy. It uses existing infrastructure:
+- `GetCausationTree` RPC (exists in saga admin)
+- Position aggregation from Position Keeping
+
+#### What Needs Building
+
+| Task | ID | Description | Complexity |
+|------|-----|-------------|------------|
+| **4.1** | `ui.causation.visualizer` | Interactive tree view of saga causation chains | 3 |
+| **4.2** | `ui.balance.multiasset` | Multi-asset balance sheet (all instruments) | 2 |
+| **4.3** | `ui.balance.drill` | Click position → see transactions → see causation | 2 |
+| **4.4** | `ui.export.csv` | Export any view to CSV for auditors | 1 |
+
+#### Causation Tree Visualization
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ Transaction: TXN-2026-0208-001                    [Export CSV]  │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Causation Chain:                                               │
+│                                                                 │
+│  ┌─────────────────────────┐                                    │
+│  │ Stripe Webhook          │ payment_intent.succeeded           │
+│  │ 2026-02-08 14:23:01     │ £50.00                             │
+│  └───────────┬─────────────┘                                    │
+│              │                                                  │
+│              ▼                                                  │
+│  ┌─────────────────────────┐                                    │
+│  │ Saga: process_topup     │ saga_exec_id: sge_abc123           │
+│  │ 2026-02-08 14:23:02     │ duration: 45ms                     │
+│  └───────────┬─────────────┘                                    │
+│              │                                                  │
+│       ┌──────┴──────┐                                           │
+│       ▼             ▼                                           │
+│  ┌─────────┐   ┌─────────┐                                      │
+│  │ Debit   │   │ Credit  │                                      │
+│  │ Stripe  │   │ Customer│                                      │
+│  │ Nostro  │   │ Prepaid │                                      │
+│  │ £50.00  │   │ £50.00  │                                      │
+│  └─────────┘   └─────────┘                                      │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### Multi-Asset Balance Sheet
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ Balance Sheet: Acme Energy                   As of: 2026-02-08 │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ASSETS                           GBP          KWH              │
+│  ────────────────────────────────────────────────────────────   │
+│  Stripe Nostro                    £12,450.00   -                │
+│  Customer Receivables             £3,200.00    -                │
+│  Energy Inventory                 -            45,000 kWh       │
+│                                   ──────────   ──────────       │
+│  Total Assets                     £15,650.00   45,000 kWh       │
+│                                                                 │
+│  LIABILITIES                                                    │
+│  ────────────────────────────────────────────────────────────   │
+│  Customer Prepaid Balances        £8,900.00    12,500 kWh       │
+│  Deferred Revenue                 £2,100.00    -                │
+│                                   ──────────   ──────────       │
+│  Total Liabilities                £11,000.00   12,500 kWh       │
+│                                                                 │
+│  EQUITY                                                         │
+│  ────────────────────────────────────────────────────────────   │
+│  Retained Earnings                £4,650.00    32,500 kWh       │
+│                                                                 │
+│  [Click any row to drill down to positions and transactions]    │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### Acceptance Criteria
+- [ ] Any number can be clicked to show its source transactions
+- [ ] Causation tree shows complete audit trail
+- [ ] Balance sheet supports multiple instruments
+- [ ] CSV export for auditor compliance
+
+---
+
+### WS-5: Stripe Cash-In Rail (Complexity: 5)
+
+**Objective**: Prove the system touches "Real Money" with the "Everything is a Position" invariant.
+
+**Key Architectural Decision**: Billing records revenue as positions FIRST, then settles to Stripe. This maintains ledger integrity.
+
+```
+Stripe Webhook → Revenue Position (tenant-zero) → Stripe Settlement
+                       ↓
+              Internal Ledger is
+              Source of Truth
+```
+
+#### What Needs Building
+
+| Task | ID | Description | Complexity |
+|------|-----|-------------|------------|
+| **5.1** | `cp.stripe.webhook` | Webhook listener for payment events | 2 |
+| **5.2** | `cp.stripe.saga` | Saga: payment_intent.succeeded → credit ledger | 2 |
+| **5.3** | `cp.stripe.reconcile` | Daily reconciliation report (Stripe vs Ledger) | 1 |
+
+#### Webhook → Saga Flow
+
+```go
+// Webhook handler
+func (h *StripeWebhookHandler) HandlePaymentIntentSucceeded(event stripe.Event) error {
+    pi := event.Data.Object.(*stripe.PaymentIntent)
+
+    // Trigger saga via Kafka
+    return h.publisher.Publish(ctx, &events.PaymentReceived{
+        TenantID:        pi.Metadata["tenant_id"],
+        PartyID:         pi.Metadata["party_id"],
+        Amount:          pi.Amount,
+        Currency:        pi.Currency,
+        StripePaymentID: pi.ID,
+        CausationID:     event.ID,
+    })
+}
+```
+
+```python
+# sagas/stripe_payment_received.star
+def execute(ctx, event):
+    # Record revenue position (tenant-zero ledger)
+    ctx.position_keeping.record_transaction(
+        account_id = "stripe_nostro",
+        instrument = event.currency.upper(),
+        quantity = event.amount / 100,  # cents to major units
+        direction = "DEBIT",
+        causation_id = event.causation_id,
+    )
+
+    # Credit customer's prepaid balance
+    ctx.position_keeping.record_transaction(
+        account_id = event.party_id + "_prepaid",
+        instrument = event.currency.upper(),
+        quantity = event.amount / 100,
+        direction = "CREDIT",
+        causation_id = event.causation_id,
+    )
+
+    return {"status": "completed", "position_ids": [...]}
+```
+
+#### Acceptance Criteria
+- [ ] Stripe webhooks are verified (signature check)
+- [ ] Payment creates double-entry in ledger
+- [ ] Daily reconciliation catches discrepancies
+- [ ] Webhook failures are retried with idempotency
+
+---
+
+### WS-6: Billing Service (Complexity: 21) — Full SaaS Only
+
+**Objective**: Connect usage metering to Stripe for automated subscription billing.
+
+> **Note**: This is for billing **Meridian's customers**, not the tenant's customers.
+> Uses tenant-zero as the billing ledger (dogfooding).
+
+| Task | Description | Complexity |
+|------|-------------|------------|
+| **6.1** | Create `services/billing/` service structure | 3 |
+| **6.2** | Define billing protobuf contracts | 2 |
+| **6.3** | Implement Stripe Customer sync on tenant creation | 3 |
+| **6.4** | Implement Stripe Subscription management | 3 |
+| **6.5** | Implement usage reporting to Stripe | 3 |
+| **6.6** | Implement Stripe webhook handler for Meridian billing | 3 |
+| **6.7** | Add plan tier enforcement middleware | 2 |
+| **6.8** | Add graceful degradation for expired subscriptions | 2 |
+
+---
+
+### WS-7: Admin Console (Complexity: 21) — Full SaaS Only
+
+**Objective**: Web UI for Meridian operators to manage tenants.
+
+| Task | Description | Complexity |
+|------|-------------|------------|
+| **7.1** | Set up Next.js admin console project | 3 |
+| **7.2** | Implement authentication flow (Auth0/Clerk) | 3 |
+| **7.3** | Build tenant list and detail views | 5 |
+| **7.4** | Build tenant creation wizard with Manifest editor | 5 |
+| **7.5** | Build usage analytics dashboard | 3 |
+| **7.6** | Add real-time provisioning updates | 2 |
+
+---
+
+### WS-8: Self-Service Onboarding (Complexity: 13) — Full SaaS Only
+
+**Objective**: Customers can sign up without operator intervention.
+
+| Task | Description | Complexity |
+|------|-------------|------------|
+| **8.1** | Set up onboarding web app | 3 |
+| **8.2** | Implement email verification | 2 |
+| **8.3** | Build organization setup step | 1 |
+| **8.4** | Build plan selection with Stripe Checkout | 3 |
+| **8.5** | Implement provisioning progress view | 2 |
+| **8.6** | Add welcome email with getting started | 2 |
+
+---
+
+### WS-9: Declarative Economy Engine (Complexity: 8) — Full SaaS Only
+
+**Objective**: AI-assisted Manifest generation (Opus integration).
+
+> **Renamed from "AI Configuration Assistant"** - The Manifest is the product; AI is one input method.
+
+| Task | Description | Complexity |
+|------|-------------|------------|
+| **9.1** | Create Opus system prompt for business model translation | 2 |
+| **9.2** | Implement conversational UI for Manifest generation | 3 |
+| **9.3** | Add "executable examples" for CEL/Starlark validation | 2 |
+| **9.4** | Implement export to YAML for GitOps workflows | 1 |
+
+---
+
+## Dependencies & Sequencing
+
+### First Client Sprint (34 Points)
 
 ```mermaid
 graph LR
-    WS1[WS-1: Billing Service] --> WS2[WS-2: Control Plane API]
-    WS2 --> WS3[WS-3: Admin Console]
-    WS2 --> WS4[WS-4: Self-Service Onboarding]
-    WS2 --> WS5[WS-5: Customer Dashboard]
-    WS4 --> WS6[WS-6: AI Config Assistant]
-    WS5 --> WS6
+    WS1[WS-1: Manifest Schema] --> WS3[WS-3: Apply Orchestrator]
+    WS2[WS-2: Staff Identity] --> WS3
+    WS3 --> WS4[WS-4: CFO Glass Box]
+    WS3 --> WS5[WS-5: Stripe Cash-In]
 ```
 
-**Critical Path**: WS-1 → WS-2 → WS-3/WS-4 (parallel) → WS-5 → WS-6
+| Order | Task Master ID | Work Stream | Points |
+|:------|:---------------|:------------|:-------|
+| 1 | `cp.manifest.*` | WS-1: Manifest Schema | 8 |
+| 2 | `cp.auth.*` | WS-2: Staff Identity | 8 |
+| 3 | `cp.engine.*` | WS-3: Apply Orchestrator | 13 |
+| 4 | `ui.causation.*`, `ui.balance.*` | WS-4: CFO Glass Box | 8 |
+| 5 | `cp.stripe.*` | WS-5: Stripe Cash-In | 5 |
+| | | **Total** | **42** |
+
+*Note: Adjusted to 42 after detailed task breakdown (Gemini estimated 34)*
+
+### Full SaaS Build (89 Points)
+
+After First Client Sprint:
+- WS-6: Billing Service (21)
+- WS-7: Admin Console (21)
+- WS-8: Self-Service Onboarding (13)
+- WS-9: Declarative Economy Engine (8)
 
 ---
 
-## Implementation Phases
+## Implementation Timeline
 
-### Phase 1: Revenue Foundation (Weeks 1-4)
-- WS-1: Billing Service & Stripe Integration
-- WS-2: Control Plane API
+### First Client Sprint (Weeks 1-4)
 
-**Milestone**: Operators can onboard paying tenants via CLI with Stripe billing.
+| Week | Focus | Deliverables |
+|------|-------|--------------|
+| **1** | Foundation | Manifest JSON Schema, `staff_users` + `api_keys` tables, Gateway API key validation |
+| **2** | Compiler | `ApplyManifest` orchestrator, idempotent execution, manifest versioning |
+| **3** | Glass Box | Causation tree visualizer, multi-asset balance sheet, drill-down UI |
+| **4** | Cash Rail | Stripe webhooks, payment → ledger saga, reconciliation report |
 
-### Phase 2: Operator Experience (Weeks 5-8)
-- WS-3: Admin Console
+**Demo Milestone**: Show client their business model as JSON, apply it, show the CFO balance sheet, process a Stripe payment, click to show the audit trail.
 
-**Milestone**: Operators manage tenants through web UI.
+### Full SaaS (Weeks 5-16)
 
-### Phase 3: Customer Experience (Weeks 9-12)
-- WS-4: Self-Service Onboarding
-- WS-5: Customer Dashboard
-
-**Milestone**: Customers can sign up and self-manage.
-
-### Phase 4: Intelligence (Weeks 13-16)
-- WS-6: AI Configuration Assistant
-
-**Milestone**: Customers can configure Meridian conversationally.
+| Phase | Weeks | Work Streams |
+|-------|-------|--------------|
+| **Revenue Engine** | 5-8 | WS-6: Billing Service |
+| **Operator Experience** | 9-12 | WS-7: Admin Console |
+| **Customer Experience** | 13-16 | WS-8: Onboarding, WS-9: AI Engine |
 
 ---
 
 ## Success Metrics
 
-| Metric | Target | Measurement |
-|--------|--------|-------------|
-| Time to first API call | < 5 minutes | Onboarding funnel analytics |
-| Operator time per tenant | < 15 minutes | Admin console session tracking |
-| Self-service signup rate | > 80% | Signups without support tickets |
-| MRR per tenant | > $100 | Stripe dashboard |
-| Churn rate | < 5%/month | Subscription cancellations |
+### First Client Sprint
+
+| Metric | Target |
+|--------|--------|
+| Manifest → Running Tenant | < 5 minutes |
+| Apply idempotency | 100% (same manifest = no changes) |
+| Causation tree depth | Visible to leaf transactions |
+| Stripe → Ledger latency | < 1 second |
+
+### Full SaaS
+
+| Metric | Target |
+|--------|--------|
+| Time to first API call | < 5 minutes |
+| Self-service signup rate | > 80% |
+| MRR per tenant | > $100 |
+| Churn rate | < 5%/month |
+
+---
+
+## Task Master Entry Format
+
+Each task should be entered as:
+
+```yaml
+- id: cp.manifest.schema
+  title: Define Meridian Manifest JSON Schema
+  description: |
+    Create the JSON Schema specification for the complete tenant
+    business model configuration. Must cover:
+    - Instruments (assets, currencies, commodities)
+    - Account types with CEL policies
+    - Valuation rules
+    - Saga definitions with triggers
+    - Seed data
+  complexity: 3
+  dependencies: []
+  tags: [control-plane, p0, first-client]
+
+- id: cp.auth.staff-registry
+  title: Implement Staff Identity Registry
+  description: |
+    Create the admin/staff identity layer separate from Party.
+    Staff users own API keys and access the Admin Console.
+    Includes:
+    - platform.staff_users table
+    - platform.api_keys table with hashed keys
+    - Staff CRUD service
+  complexity: 4
+  dependencies: []
+  tags: [control-plane, p0, first-client]
+
+- id: cp.engine.apply-orchestrator
+  title: Implement ApplyManifest Orchestrator
+  description: |
+    The core "compiler" that turns Manifest JSON into gRPC calls.
+    Must be idempotent - applying same manifest twice = no changes.
+    Includes differ, planner, executor, and status tracking.
+  complexity: 13
+  dependencies: [cp.manifest.schema, cp.auth.staff-registry]
+  tags: [control-plane, p0, first-client]
+```
 
 ---
 
@@ -501,41 +668,52 @@ graph LR
 
 ---
 
-## Appendix: Existing Infrastructure Deep Dive
+## Appendix: Architectural Decisions
 
-### A. Tenant Service Capabilities
+### A. "Everything is a Position" Invariant
 
-```go
-// Already exists in services/tenant/service/grpc_service.go
-type TenantService interface {
-    InitiateTenant(ctx, req) (*TenantResponse, error)
-    RetrieveTenant(ctx, req) (*TenantResponse, error)
-    UpdateTenantStatus(ctx, req) (*TenantResponse, error)
-    ListTenants(ctx, req) (*ListTenantsResponse, error)
-    GetTenantProvisioningStatus(ctx, req) (*ProvisioningStatusResponse, error)
-}
-```
-
-The Control Plane API (WS-2) wraps this with billing and party orchestration.
-
-### B. Usage Metering Flow
+All financial state flows through the ledger, including Meridian's own billing:
 
 ```
-Audit Event → Kafka → UtilizationMeteringConsumer → UtilizationMeasurement
-                                ↓
-                    Position Keeping (tenant-zero)
-                                ↓
-                    Billing Service (NEW) → Stripe Usage Records
+Usage Event → Utilization Metering → Position (tenant-zero)
+                                           ↓
+                                    Billing Service
+                                           ↓
+                                    Stripe Invoice
+                                           ↓
+                                    Payment Webhook
+                                           ↓
+                              Revenue Position (tenant-zero)
 ```
 
-The billing service plugs into existing metering, not replaces it.
+This means:
+1. Stripe is a settlement rail, not source of truth
+2. Reconciliation compares Stripe to ledger (not the reverse)
+3. Revenue recognition happens at position creation
 
-### C. API Key Middleware
+### B. Staff vs Party Identity
 
-```go
-// Exists in services/gateway/auth/apikey_middleware.go
-// Currently: Environment variable based (API_KEYS="key:identity")
-// Needed: Database-backed with per-tenant scoping
+| Aspect | Party | Staff |
+|--------|-------|-------|
+| **Purpose** | Customer with ledger positions | Employee managing the system |
+| **Lives in** | Tenant schema (`org_xxx.party`) | Platform schema (`platform.staff_users`) |
+| **Has** | Balances, transactions | API keys, console access |
+| **Created by** | Tenant API calls | Admin invitation |
+| **Examples** | "John Smith - Customer #123" | "Jane Doe - Acme Admin" |
+
+### C. Manifest Idempotency
+
+The Apply Orchestrator follows Terraform-style semantics:
+
+```
+State = f(Manifest)
+
+Apply(M) when State = {} → Create all resources
+Apply(M) when State = M → No-op
+Apply(M') when State = M → Create/Update/Delete delta
 ```
 
-WS-5 (Customer Dashboard) upgrades this to database-backed API keys.
+This enables:
+- GitOps workflows (commit manifest → auto-apply)
+- Rollback by applying previous version
+- Preview changes before apply (plan mode)
