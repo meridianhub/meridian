@@ -120,35 +120,83 @@ jobs:
 
             Before deciding your review outcome, check whether other
             bots (CodeRabbit, etc.) have unresolved review threads on
-            this PR. If they do, you MUST NOT approve - use `COMMENT`
-            instead so the author addresses that feedback first.
+            this PR.
+
+            **Step 1: Find unresolved bot threads**
 
             ```bash
-            BOT_THREADS=$(gh api graphql -f query='
+            gh api graphql -f query='
             query {
               repository(owner: "${{ github.repository_owner }}", name: "${{ github.event.repository.name }}") {
                 pullRequest(number: ${{ github.event.pull_request.number }}) {
                   reviewThreads(first: 100) {
                     nodes {
+                      id
                       isResolved
-                      comments(first: 1) {
+                      path
+                      line
+                      comments(first: 5) {
                         nodes {
                           author { login }
+                          body
                         }
                       }
                     }
                   }
                 }
               }
-            }' --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false) | select(.comments.nodes[0].author.login != "claude[bot]") | select(.comments.nodes[0].author.login | test("\\[bot\\]$|coderabbitai"))] | length')
+            }' --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false) | select(.comments.nodes[0].author.login != "claude[bot]") | select(.comments.nodes[0].author.login | test("\\[bot\\]$|coderabbitai")) | {id, path, line, author: .comments.nodes[0].author.login, body: .comments.nodes[0].body[0:300]}'
             ```
 
-            - If `BOT_THREADS` > 0: Other bots have unresolved
-              comments. Downgrade your review to `COMMENT` and note
-              which bot(s) have unresolved threads the author should
-              address.
-            - If `BOT_THREADS` == 0: Proceed with your normal review
-              outcome (may approve if no issues found).
+            **Step 2: Evaluate each unresolved bot thread**
+
+            For each thread, read the bot's concern and check the
+            current code. Form your own opinion:
+
+            - **Already addressed**: The code already handles the
+              concern, or a later commit fixed it.
+            - **Valid concern**: The bot raised a real issue the author
+              should fix.
+            - **Disagree**: The bot's suggestion is incorrect,
+              inapplicable, or based on a misunderstanding.
+
+            **Step 3: Engage with threads you have an opinion on**
+
+            If you believe a bot thread is already addressed or the bot
+            is wrong, **reply directly on that thread** to move the
+            conversation forward. Tag the bot so it can re-evaluate:
+
+            ```bash
+            gh api graphql -f query='
+            mutation {
+              addPullRequestReviewThreadReply(input: {
+                pullRequestReviewThreadId: "PRRT_xxx",
+                body: "@coderabbitai This appears to be addressed in Section 12.1 which specifies these as prerequisites. The RPCs are documented as extensions to be built during implementation streams 4, 6, and 9."
+              }) {
+                comment { id }
+              }
+            }'
+            ```
+
+            **Reply guidelines:**
+            - Be specific: reference the file, line, section, or
+              commit that addresses the concern
+            - Tag the bot (`@coderabbitai`) so it can re-evaluate
+            - Keep it factual and concise
+            - If you genuinely agree with the bot, say so and note it
+              as a finding in your summary
+
+            **Step 4: Decide review outcome**
+
+            - If unresolved bot threads remain (whether you replied or
+              not): use `COMMENT`, not `APPROVE`. Note in your summary
+              which threads are pending and what you replied.
+            - If no unresolved bot threads: proceed with your normal
+              review outcome.
+
+            The goal is to **help the conversation converge**, not just
+            rigidly block. Your replies give the author and bots the
+            context they need to resolve threads faster.
 
             ## Review Outcomes (Three States)
 
@@ -158,7 +206,7 @@ jobs:
             |-------|--------------|-------------|
             | 🔴 **Blocking** | `REQUEST_CHANGES` | Critical issues that MUST be fixed before merge: security vulnerabilities, bugs, data loss risks, correctness problems |
             | 🟡 **Suggestions** | `COMMENT` | Improvements that SHOULD be addressed but don't block merge: code quality, edge cases, performance, style with objective benefit |
-            | 🟢 **Approve** | `APPROVE` | Ready to merge as-is, possibly with minor informational notes. **Only if no unresolved bot threads exist** (see Bot Comment Gate above). |
+            | 🟢 **Approve** | `APPROVE` | Ready to merge as-is, possibly with minor informational notes. **Only if no unresolved bot threads remain** (see Bot Comment Gate above). |
 
             **Decision criteria:**
             - **🔴 Blocking (REQUEST_CHANGES)**: Would this cause a bug, security issue, data loss, or break functionality? Use sparingly - this blocks the merge.
