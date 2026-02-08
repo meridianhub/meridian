@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/internal_bank_account/v1"
 	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
+	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
 	"github.com/meridianhub/meridian/services/internal-bank-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/internal-bank-account/domain"
 	ibaobservability "github.com/meridianhub/meridian/services/internal-bank-account/observability"
@@ -88,7 +89,7 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 				"payment_order_reference already used for a different account")
 		}
 		operationStatus = opStatusLienAlreadyExists
-		return s.buildInitiateLienResponse(existingLien), nil
+		return s.buildInitiateLienResponse(ctx, existingLien), nil
 	}
 	if !errors.Is(err, persistence.ErrLienNotFound) {
 		operationStatus = operationStatusFailed
@@ -112,14 +113,17 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 
 	if req.Input.InstrumentCode == nativeInstrument {
 		// Same-instrument lien: no valuation needed.
-		// Store the amount in minor units (cents). For fiat currencies this is
-		// amount * 100; for non-decimal instruments (kWh, GPU_HOUR) the raw
-		// integer part is used (the proto contract sends whole units).
-		amountCents := inputAmount.Shift(2).IntPart()
-		if amountCents == 0 {
-			// Non-decimal instrument — use integer part directly
-			amountCents = inputAmount.IntPart()
+		// Store the amount in minor units using instrument precision from reference data.
+		precision, precisionErr := s.getInstrumentPrecision(ctx, nativeInstrument)
+		if precisionErr != nil {
+			operationStatus = operationStatusFailed
+			return nil, precisionErr
 		}
+		if !inputAmount.Equal(inputAmount.Truncate(precision)) {
+			operationStatus = opStatusInvalidInputAmount
+			return nil, status.Errorf(codes.InvalidArgument, "input amount has more than %d decimal places for instrument %s", precision, nativeInstrument)
+		}
+		amountCents := inputAmount.Shift(precision).IntPart()
 
 		lien, err = domain.NewLien(account.ID(), amountCents, nativeInstrument, req.BucketId, req.PaymentOrderReference, expiresAt)
 		if err != nil {
@@ -152,12 +156,17 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 			}
 		}
 
-		// Build valued lien: convert output amount to minor units.
-		// TODO: Use instrument precision from reference data instead of hardcoded 2.
-		amountCents := result.OutputAmount.Shift(2).IntPart()
-		if amountCents == 0 {
-			amountCents = result.OutputAmount.IntPart()
+		// Build valued lien: convert output amount to minor units using instrument precision.
+		precision, precisionErr := s.getInstrumentPrecision(ctx, nativeInstrument)
+		if precisionErr != nil {
+			operationStatus = operationStatusFailed
+			return nil, precisionErr
 		}
+		if !result.OutputAmount.Equal(result.OutputAmount.Truncate(precision)) {
+			operationStatus = opStatusValuationFailed
+			return nil, status.Errorf(codes.Internal, "valued amount has more than %d decimal places for instrument %s", precision, nativeInstrument)
+		}
+		amountCents := result.OutputAmount.Shift(precision).IntPart()
 
 		reservedQuantity := &domain.InstrumentAmount{
 			Amount:         inputAmount,
@@ -199,7 +208,7 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 				operationStatus = opStatusLienCreateFailed
 				return nil, status.Errorf(codes.Internal, "lien creation race condition: %v", err)
 			}
-			return s.buildInitiateLienResponse(existingLien), nil
+			return s.buildInitiateLienResponse(ctx, existingLien), nil
 		}
 		operationStatus = opStatusLienCreateFailed
 		return nil, status.Errorf(codes.Internal, "failed to create lien: %v", err)
@@ -212,7 +221,7 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		"currency", lien.Currency,
 		"has_valuation", lien.HasValuation())
 
-	return s.buildInitiateLienResponse(lien), nil
+	return s.buildInitiateLienResponse(ctx, lien), nil
 }
 
 // ExecuteLien converts a lien reservation to an actual debit.
@@ -249,7 +258,7 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 	if lien.Status == domain.LienStatusExecuted {
 		// Idempotent: already executed
 		return &pb.ExecuteLienResponse{
-			Lien: s.domainToProtoLien(lien),
+			Lien: s.domainToProtoLien(ctx, lien),
 		}, nil
 	}
 
@@ -267,7 +276,7 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 	// Re-check after lock: another request may have executed between read and lock
 	if lien.Status == domain.LienStatusExecuted {
 		return &pb.ExecuteLienResponse{
-			Lien: s.domainToProtoLien(lien),
+			Lien: s.domainToProtoLien(ctx, lien),
 		}, nil
 	}
 
@@ -300,7 +309,7 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 		"account_id", lien.AccountID)
 
 	return &pb.ExecuteLienResponse{
-		Lien: s.domainToProtoLien(lien),
+		Lien: s.domainToProtoLien(ctx, lien),
 	}, nil
 }
 
@@ -338,7 +347,7 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 	if lien.Status == domain.LienStatusTerminated {
 		// Idempotent: already terminated
 		return &pb.TerminateLienResponse{
-			Lien: s.domainToProtoLien(lien),
+			Lien: s.domainToProtoLien(ctx, lien),
 		}, nil
 	}
 
@@ -356,7 +365,7 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 	// Re-check after lock: another request may have terminated between read and lock
 	if lien.Status == domain.LienStatusTerminated {
 		return &pb.TerminateLienResponse{
-			Lien: s.domainToProtoLien(lien),
+			Lien: s.domainToProtoLien(ctx, lien),
 		}, nil
 	}
 
@@ -386,7 +395,7 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 		"reason", req.Reason)
 
 	return &pb.TerminateLienResponse{
-		Lien: s.domainToProtoLien(lien),
+		Lien: s.domainToProtoLien(ctx, lien),
 	}, nil
 }
 
@@ -420,15 +429,15 @@ func (s *Service) RetrieveLien(ctx context.Context, req *pb.RetrieveLienRequest)
 	}
 
 	return &pb.RetrieveLienResponse{
-		Lien: s.domainToProtoLien(lien),
+		Lien: s.domainToProtoLien(ctx, lien),
 	}, nil
 }
 
 // buildInitiateLienResponse constructs a consistent InitiateLienResponse
 // including valuation fields when present.
-func (s *Service) buildInitiateLienResponse(lien *domain.Lien) *pb.InitiateLienResponse {
+func (s *Service) buildInitiateLienResponse(ctx context.Context, lien *domain.Lien) *pb.InitiateLienResponse {
 	resp := &pb.InitiateLienResponse{
-		Lien: s.domainToProtoLien(lien),
+		Lien: s.domainToProtoLien(ctx, lien),
 	}
 	if lien.HasValuation() {
 		resp.ValuedAmount = &quantityv1.InstrumentAmount{
@@ -447,9 +456,16 @@ func (s *Service) buildInitiateLienResponse(lien *domain.Lien) *pb.InitiateLienR
 
 // domainToProtoLien converts a domain Lien to proto Lien.
 // AmountCents is stored as minor units (e.g. 10000 = 100.00 GBP).
-// TODO: Use instrument precision from reference data instead of hardcoded 2.
-func (s *Service) domainToProtoLien(lien *domain.Lien) *pb.Lien {
-	displayAmount := decimal.NewFromInt(lien.AmountCents).Shift(-2).String()
+// Uses instrument precision from reference data; falls back to 2 on lookup failure.
+func (s *Service) domainToProtoLien(ctx context.Context, lien *domain.Lien) *pb.Lien {
+	precision := int32(2) // default fallback for reads
+	if looked, err := s.getInstrumentPrecision(ctx, lien.Currency); err == nil {
+		precision = looked
+	} else {
+		s.logger.Warn("precision lookup failed for lien display, falling back to 2",
+			"currency", lien.Currency, "lien_id", lien.ID, "error", err)
+	}
+	displayAmount := decimal.NewFromInt(lien.AmountCents).Shift(-precision).String()
 
 	protoLien := &pb.Lien{
 		LienId:    lien.ID.String(),
@@ -500,6 +516,45 @@ func mapLienStatusToProto(status domain.LienStatus) pb.LienStatus {
 	default:
 		return pb.LienStatus_LIEN_STATUS_UNSPECIFIED
 	}
+}
+
+// defaultPrecision is the fallback decimal precision used when the reference data client
+// is not configured. This matches the ISO 4217 standard for most fiat currencies.
+const defaultPrecision = 2
+
+// getInstrumentPrecision retrieves the decimal precision for an instrument from reference data.
+// Returns a gRPC-compatible error if the lookup fails and the reference data client is configured.
+// Falls back to defaultPrecision (2) when the reference data client is not wired.
+func (s *Service) getInstrumentPrecision(ctx context.Context, instrumentCode string) (int32, error) {
+	if s.referenceDataClient == nil {
+		return defaultPrecision, nil
+	}
+
+	refCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	resp, err := s.referenceDataClient.RetrieveInstrument(refCtx, &referencedatav1.RetrieveInstrumentRequest{
+		Code: instrumentCode,
+	})
+	if err != nil {
+		return 0, status.Errorf(codes.Internal, "failed to retrieve instrument precision for %s: %v", instrumentCode, err)
+	}
+	if resp.Instrument == nil {
+		return 0, status.Errorf(codes.Internal, "reference data returned nil instrument for %s", instrumentCode)
+	}
+	return resp.Instrument.GetPrecision(), nil
+}
+
+// toMinorUnits converts a major-unit decimal amount to minor units (integer) using the given precision.
+// For example, with precision=2: 100.50 -> 10050; with precision=0 (JPY): 1000 -> 1000.
+func toMinorUnits(amount decimal.Decimal, precision int32) int64 {
+	return amount.Shift(precision).IntPart()
+}
+
+// toMajorUnits converts a minor-unit integer to a major-unit decimal string using the given precision.
+// For example, with precision=2: 10050 -> "100.5"; with precision=0 (JPY): 1000 -> "1000".
+func toMajorUnits(amountCents int64, precision int32) string {
+	return decimal.NewFromInt(amountCents).Shift(-precision).String()
 }
 
 // isDuplicatePaymentOrderRef checks if the error indicates a unique constraint violation
