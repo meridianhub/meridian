@@ -76,26 +76,33 @@ The Control Plane extends it for commercial operation, not replaces it.
 
 This is the "behind-the-curtain" sequence to demo a paying client.
 
-```text
-+---------------------------------------------------------------------+
-|                    FIRST CLIENT SPRINT                               |
-+---------------------------------------------------------------------+
-|                                                                     |
-|  Week 1: Foundation          Week 2: Compiler                       |
-|  +---------------------+     +---------------------+               |
-|  | Manifest Schema     |---->| ApplyManifest       |               |
-|  | Staff Registry      |     | Orchestrator        |               |
-|  | API Key Persistence |     | (Idempotent)        |               |
-|  +---------------------+     +----------+----------+               |
-|                                         |                           |
-|  Week 3: Glass Box           Week 4: Cash Rail                      |
-|  +---------------------+     +---------v-----------+               |
-|  | Causation Visualizer|     | Stripe Webhooks     |               |
-|  | Multi-Asset Balance |     | Payment -> Position |               |
-|  | Sheet (CFO View)    |     | Saga                |               |
-|  +---------------------+     +---------------------+               |
-|                                                                     |
-+---------------------------------------------------------------------+
+```mermaid
+graph TD
+    subgraph W1["Week 1: Foundation"]
+        A1[Manifest Schema]
+        A2[Staff Registry]
+        A3[API Key Persistence]
+    end
+
+    subgraph W2["Week 2: Compiler"]
+        B1[ApplyManifest Orchestrator]
+        B2[Idempotent Execution]
+    end
+
+    subgraph W3["Week 3: Glass Box"]
+        C1[Causation Visualizer]
+        C2[Multi-Asset Balance Sheet]
+        C3[CFO View]
+    end
+
+    subgraph W4["Week 4: Cash Rail"]
+        D1[Stripe Webhooks]
+        D2["Payment -> Position Saga"]
+    end
+
+    W1 --> W2
+    W2 --> W3
+    W2 --> W4
 ```
 
 ---
@@ -204,23 +211,17 @@ The Starlark and CEL runtimes already produce **structured, actionable
 error messages** at compilation time. This is the key to the AI-native
 feedback loop:
 
-```text
-User/AI generates Manifest
-        |
-   ValidateManifest()
-        |
-   +----------------------------+----------------------------+
-   | Starlark Compiler          | CEL Type Checker           |
-   | - Syntax errors            | - Type mismatches          |
-   | - Undefined symbols        | - Missing fields           |
-   | - Import failures          | - Invalid operators        |
-   +----------------------------+----------------------------+
-        |
-   Structured Error Response (machine-readable)
-        |
-   Feed back to AI / Display to user
-        |
-   Iterate until valid
+```mermaid
+flowchart TD
+    A["User/AI generates Manifest"] --> B["ValidateManifest()"]
+    B --> C{"Starlark Compiler\n- Syntax errors\n- Undefined symbols\n- Import failures"}
+    B --> D{"CEL Type Checker\n- Type mismatches\n- Missing fields\n- Invalid operators"}
+    C --> E["Structured Error Response\n(machine-readable)"]
+    D --> E
+    E --> F["Feed back to AI /\nDisplay to user"]
+    F --> G{Valid?}
+    G -- No --> A
+    G -- Yes --> H["Manifest Ready"]
 ```
 
 **Example Validation Response** (what we already get):
@@ -529,66 +530,40 @@ It uses existing infrastructure:
 
 #### Causation Tree Visualization
 
-```text
-+---------------------------------------------------------------------+
-| Transaction: TXN-2026-0208-001                       [Export CSV]    |
-+---------------------------------------------------------------------+
-|                                                                     |
-|  Causation Chain:                                                   |
-|                                                                     |
-|  +-------------------------+                                        |
-|  | Stripe Webhook          | payment_intent.succeeded               |
-|  | 2026-02-08 14:23:01     | GBP 50.00                              |
-|  +-----------+-------------+                                        |
-|              |                                                      |
-|              v                                                      |
-|  +-------------------------+                                        |
-|  | Saga: process_topup     | saga_exec_id: sge_abc123               |
-|  | 2026-02-08 14:23:02     | duration: 45ms                         |
-|  +-----------+-------------+                                        |
-|              |                                                      |
-|       +------+------+                                               |
-|       v             v                                               |
-|  +---------+   +---------+                                          |
-|  | Debit   |   | Credit  |                                          |
-|  | Stripe  |   | Customer|                                          |
-|  | Nostro  |   | Prepaid |                                          |
-|  | GBP50   |   | GBP50   |                                          |
-|  +---------+   +---------+                                          |
-|                                                                     |
-+---------------------------------------------------------------------+
+```mermaid
+graph TD
+    A["Stripe Webhook\npayment_intent.succeeded\n2026-02-08 14:23:01\nGBP 50.00"]
+    B["Saga: process_topup\nsaga_exec_id: sge_abc123\n2026-02-08 14:23:02\nduration: 45ms"]
+    C["Debit\nStripe Nostro\nGBP 50.00"]
+    D["Credit\nCustomer Prepaid\nGBP 50.00"]
+
+    A --> B
+    B --> C
+    B --> D
 ```
 
 #### Multi-Asset Balance Sheet
 
-```text
-+---------------------------------------------------------------------+
-| Balance Sheet: Acme Energy                   As of: 2026-02-08      |
-+---------------------------------------------------------------------+
-|                                                                     |
-|  ASSETS                           GBP          KWH                  |
-|  ----------------------------------------------------------------   |
-|  Stripe Nostro                    12,450.00    -                     |
-|  Customer Receivables             3,200.00     -                     |
-|  Energy Inventory                 -            45,000 kWh            |
-|                                   ----------   ----------            |
-|  Total Assets                     15,650.00    45,000 kWh            |
-|                                                                     |
-|  LIABILITIES                                                        |
-|  ----------------------------------------------------------------   |
-|  Customer Prepaid Balances        8,900.00     12,500 kWh            |
-|  Deferred Revenue                 2,100.00     -                     |
-|                                   ----------   ----------            |
-|  Total Liabilities                11,000.00    12,500 kWh            |
-|                                                                     |
-|  EQUITY                                                             |
-|  ----------------------------------------------------------------   |
-|  Retained Earnings                4,650.00     32,500 kWh            |
-|                                                                     |
-|  [Click any row to drill down to positions and transactions]        |
-|                                                                     |
-+---------------------------------------------------------------------+
-```
+> **Balance Sheet: Acme Energy** -- As of: 2026-02-08
+
+| **ASSETS** | **GBP** | **KWH** |
+|---|---:|---:|
+| Stripe Nostro | 12,450.00 | - |
+| Customer Receivables | 3,200.00 | - |
+| Energy Inventory | - | 45,000 kWh |
+| **Total Assets** | **15,650.00** | **45,000 kWh** |
+
+| **LIABILITIES** | **GBP** | **KWH** |
+|---|---:|---:|
+| Customer Prepaid Balances | 8,900.00 | 12,500 kWh |
+| Deferred Revenue | 2,100.00 | - |
+| **Total Liabilities** | **11,000.00** | **12,500 kWh** |
+
+| **EQUITY** | **GBP** | **KWH** |
+|---|---:|---:|
+| Retained Earnings | 4,650.00 | 32,500 kWh |
+
+*Click any row to drill down to positions and transactions.*
 
 #### Acceptance Criteria
 
@@ -607,11 +582,11 @@ It uses existing infrastructure:
 **Key Architectural Decision**: Billing records revenue as positions
 FIRST, then settles to Stripe. This maintains ledger integrity.
 
-```text
-Stripe Webhook -> Revenue Position (tenant-zero) -> Stripe Settlement
-                       |
-              Internal Ledger is
-              Source of Truth
+```mermaid
+flowchart LR
+    A[Stripe Webhook] --> B[Revenue Position\ntenant-zero]
+    B --> C[Stripe Settlement]
+    B -. "Internal Ledger is\nSource of Truth" .-> B
 ```
 
 #### What Needs Building
@@ -722,11 +697,12 @@ subscription billing.
 
 **Objective**: Customers can sign up without operator intervention.
 
-```text
-+----------+    +----------+    +----------+    +----------+    +----------+
-|  Email   |--->|  Verify  |--->|   Org    |--->|   Plan   |--->| Payment  |
-|  Signup  |    |  Email   |    |  Setup   |    | Selection|    |  Setup   |
-+----------+    +----------+    +----------+    +----------+    +----------+
+```mermaid
+flowchart LR
+    A[Email Signup] --> B[Verify Email]
+    B --> C[Org Setup]
+    C --> D[Plan Selection]
+    D --> E[Payment Setup]
 ```
 
 | Task | Description | Complexity |
@@ -752,39 +728,21 @@ subscription billing.
 The system is **AI-native by design** because the compiler feedback
 loop is already structured for machine consumption:
 
-```text
-+---------------------------------------------------------------------+
-|                    OPUS GENERATION LOOP                              |
-+---------------------------------------------------------------------+
-|                                                                     |
-|  User: "I run a prepaid energy company with day/night tariffs"      |
-|                          |                                          |
-|  +----------------------------------------------------------+      |
-|  | Opus generates Manifest v1                                |      |
-|  | (instruments: KWH, GBP; policies: balance >= 0)           |      |
-|  +----------------------------+-----------------------------+      |
-|                               |                                     |
-|  +----------------------------v-----------------------------+      |
-|  | ValidateManifest() -> Starlark/CEL Compiler               |      |
-|  | Error: "undefined field 'quanity' on Balance"             |      |
-|  | Suggestion: "Did you mean 'quantity'?"                    |      |
-|  +----------------------------+-----------------------------+      |
-|                               |                                     |
-|  +----------------------------v-----------------------------+      |
-|  | Opus receives structured error, auto-corrects             |      |
-|  | Generates Manifest v2 with fix                            |      |
-|  +----------------------------+-----------------------------+      |
-|                               |                                     |
-|  +----------------------------v-----------------------------+      |
-|  | ValidateManifest() -> Valid                               |      |
-|  | PlanManifest() -> "Will create 2 instruments, 3 accounts" |      |
-|  +----------------------------+-----------------------------+      |
-|                               |                                     |
-|  User: "Looks good, apply it"                                       |
-|                               |                                     |
-|  ApplyManifest() -> Running tenant in < 5 minutes                   |
-|                                                                     |
-+---------------------------------------------------------------------+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Opus
+    participant Compiler as ValidateManifest()
+    participant Engine as ApplyManifest()
+
+    User->>Opus: "I run a prepaid energy company<br/>with day/night tariffs"
+    Opus->>Compiler: Manifest v1 (KWH, GBP, balance >= 0)
+    Compiler-->>Opus: Error: undefined field 'quanity'<br/>Suggestion: Did you mean 'quantity'?
+    Opus->>Compiler: Manifest v2 (auto-corrected)
+    Compiler-->>Opus: Valid
+    Compiler-->>User: PlanManifest: 2 instruments, 3 accounts
+    User->>Engine: "Looks good, apply it"
+    Engine-->>User: Running tenant in < 5 minutes
 ```
 
 **Key Insight**: We don't need to build "AI validation" - the compiler
@@ -962,16 +920,14 @@ Each task should be entered as:
 All financial state flows through the ledger, including Meridian's own
 billing:
 
-```text
-Usage Event -> Utilization Metering -> Position (tenant-zero)
-                                             |
-                                      Billing Service
-                                             |
-                                      Stripe Invoice
-                                             |
-                                      Payment Webhook
-                                             |
-                                Revenue Position (tenant-zero)
+```mermaid
+flowchart TD
+    A[Usage Event] --> B[Utilization Metering]
+    B --> C["Position (tenant-zero)"]
+    C --> D[Billing Service]
+    D --> E[Stripe Invoice]
+    E --> F[Payment Webhook]
+    F --> G["Revenue Position (tenant-zero)"]
 ```
 
 This means:
