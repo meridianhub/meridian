@@ -72,6 +72,60 @@ The Control Plane extends it for commercial operation, not replaces it.
 
 ---
 
+## Service Architecture: New `services/control-plane/`
+
+The Control Plane is a **new service**, not an extension of the
+existing tenant service. The boundary is Infrastructure vs Product:
+
+| Concern | `services/tenant/` | `services/control-plane/` |
+|---------|-------------------|--------------------------|
+| **Role** | Infrastructure provisioning | Business operation |
+| **Analogy** | Terraform (create infrastructure) | Application (use infrastructure) |
+| **Operations** | `CREATE SCHEMA`, seed migrations, deprovision | Manifest compile, staff CRUD, billing |
+| **Privilege** | High (DDL, schema creation) | Normal (DML, gRPC calls) |
+| **Triggered by** | Platform operator / provisioning pipeline | Tenant staff / API keys / webhooks |
+
+### Control Plane Responsibilities
+
+```mermaid
+graph TD
+    subgraph "services/control-plane/"
+        CP1["ValidateAPIKey RPC\n(called by Gateway)"]
+        CP2["ApplyManifest Compiler\n(Manifest → gRPC calls)"]
+        CP3["Stripe Webhook Handler\n(payment → saga trigger)"]
+        CP4["Admin API\n(CFO Glass Box backend)"]
+        CP5["Staff CRUD\n(invite, activate, deactivate)"]
+    end
+
+    GW[Gateway] -->|key validation| CP1
+    CLI["meridian-cli"] -->|apply manifest| CP2
+    Stripe[Stripe] -->|webhooks| CP3
+    UI["Admin Console"] -->|dashboard queries| CP4
+    UI -->|user management| CP5
+
+    CP2 -->|gRPC| RD[reference-data]
+    CP2 -->|gRPC| IBA[internal-bank-account]
+    CP2 -->|gRPC| PK[position-keeping]
+    CP3 -->|Kafka| SAGA[Saga Engine]
+```
+
+### What Stays in Existing Services
+
+- **`services/gateway/`**: Continues to handle routing, JWT auth.
+  Calls control-plane's `ValidateAPIKey` RPC for database-backed
+  key validation (replacing env-var keys).
+- **`services/tenant/`**: Continues to own schema provisioning
+  and lifecycle. Control-plane calls tenant service to resolve
+  slugs, not the other way around.
+- **`services/payment-order/`**: Existing webhook handler remains
+  for tenant-facing payment flows. Control-plane handles
+  Meridian's own Stripe integration (billing, cash-in rail).
+- **`services/reference-data/`**: Continues to own saga definitions,
+  instruments, handler schemas. Control-plane reads these via gRPC
+  during manifest compilation.
+
+---
+
 ## First Client (43 Points)
 
 This is the "behind-the-curtain" sequence to demo a paying client.
@@ -110,6 +164,8 @@ graph TD
 ## Work Streams (Resequenced)
 
 ### WS-1: Meridian Manifest Schema (Complexity: 9) P0
+
+**Service**: `services/control-plane/`
 
 **Objective**: Define the declarative business model specification -
 the **"Administrative Control Record"**.
@@ -304,6 +360,9 @@ required for iteration.
 
 ### WS-2: Staff Identity Registry (Complexity: 8) P0
 
+**Service**: `services/control-plane/` + `services/gateway/`
+(key validation RPC)
+
 **Objective**: Separate identity layer for tenant employees who manage
 the system.
 
@@ -423,6 +482,8 @@ CREATE INDEX idx_api_keys_prefix
 ---
 
 ### WS-3: Apply Manifest Orchestrator (Complexity: 13) P0
+
+**Service**: `services/control-plane/`
 
 **Objective**: The engine that turns JSON into gRPC calls.
 **Must be idempotent.**
@@ -571,6 +632,9 @@ Apply(Manifest_v1) -> State_A  (rollback to v1)
 
 ### WS-4: CFO Glass Box UI (Complexity: 8)
 
+**Service**: `services/control-plane/` (Admin API backend) +
+frontend TBD
+
 **Objective**: The "Horizon-Proof" screen - show the numbers, then
 click to show the *why*.
 
@@ -636,6 +700,9 @@ graph TD
 ---
 
 ### WS-5: Stripe Cash-In Rail (Complexity: 5)
+
+**Service**: `services/control-plane/` (Meridian's own Stripe
+integration, not tenant payment flows in `services/payment-order/`)
 
 **Objective**: Prove the system touches "Real Money" with the
 "Everything is a Position" invariant.
