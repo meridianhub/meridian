@@ -24,8 +24,8 @@ instructions: |
   - RetrieveReconciliationDispute: Query dispute state and resolution
 
   Settlement runs are scheduled (D+1, D+5, M+3, M+14) but can also be triggered on-demand.
-  Reconciliation publishes events for downstream action, never mutates historical records.
-  Payment Order subscribes to ReconciliationRunCompleted events to create adjustments.
+  Reconciliation publishes events for monitoring/alerting, never mutates historical records.
+  Adjustment booking is orchestrated via reconciliation_adjustment Starlark saga (ADR-028).
 ---
 
 # PRD: Account Reconciliation Service Domain (BIAN-Native)
@@ -104,7 +104,7 @@ for a specific asset type and settlement period.
 | Position Keeping | Retrieve | Current measurements for snapshot capture |
 | Financial Accounting | Retrieve | GL entries for balance assertion verification |
 | Current Account | Evaluate | Variance valuation via EvaluateAssetValuation |
-| Payment Order | Event-driven | Publish `ReconciliationRunCompleted` for adjustment creation |
+| Saga Runtime | invoke_saga | Trigger `reconciliation_adjustment.star` for adjustment booking |
 | Reference Data | Retrieve | Settlement rules, tolerances, calendars |
 
 ### Reconciliation Scope
@@ -139,16 +139,18 @@ Reconciliation is inherently cross-cutting. It must:
 | Read/write settlement snapshots | Own database | Local |
 | Read GL entries for balance verification | Financial Accounting | gRPC Retrieve |
 | Request variance valuation | Current Account | gRPC EvaluateAssetValuation |
-| Signal adjustment needed | Payment Order | Kafka event (event-driven) |
+| Trigger adjustment saga | Saga Runtime | invoke_saga (Starlark) |
 | Read asset settlement rules | Reference Data | gRPC Retrieve |
 | Request position lock | Position Keeping | gRPC Control |
 | Publish reconciliation events | Kafka | Async event |
 
-**Event-driven principle:** This service does NOT directly call Payment
-Order to create adjustments. It publishes `ReconciliationRunCompleted`
-events with variance details. Payment Order subscribes and creates
-adjustment payments autonomously. This respects BIAN's single-responsibility
-principle -- each service manages its own asset lifecycle.
+**Saga-driven adjustments:** This service does NOT directly call Payment
+Order to create adjustments. Instead, it triggers a
+`reconciliation_adjustment` Starlark saga (per ADR-028) that
+orchestrates the adjustment booking. This keeps the adjustment
+**policy** (which GL accounts to hit, whether to apply tax logic)
+inside Reference Data as a tenant-configurable saga definition, rather
+than hardcoded in Payment Order.
 
 Embedding this in Financial Accounting creates a circular dependency
 (FA calls PK, PK publishes events to FA, FA calls PK again for reconciliation).
@@ -221,7 +223,7 @@ The reconciliation service provides the **detective control** that catches these
 | **Settlement Snapshots** | Point-in-time capture of measurement state for each position |
 | **Variance Detection** | Compare snapshots against current positions, compute deltas |
 | **Variance Valuation** | Price the delta using the tariff at the original period |
-| **Adjustment Signaling** | Publish variance events consumed by Payment Order for adjustment creation |
+| **Adjustment Orchestration** | Trigger `reconciliation_adjustment` Starlark saga for variance adjustment booking |
 | **Settlement Finality** | Request position locking in Position Keeping after final run |
 | **Dispute Management** | Handle corrections for locked (finalized) positions |
 | **Run Scheduling** | Cron-based execution of settlement runs per asset type |
@@ -235,7 +237,7 @@ The reconciliation service provides the **detective control** that catches these
 | GL Entries / Ledger Postings | Financial Accounting | gRPC Retrieve |
 | Position Locking (`locked_at`) | Position Keeping | gRPC Control |
 | Valuation / Pricing | Current Account (embedded library) | gRPC EvaluateAssetValuation |
-| Payment Execution | Payment Order | Event-driven (subscribes to our events) |
+| Payment Execution | Payment Order | Via `reconciliation_adjustment.star` saga |
 | Asset Settlement Rules | Reference Data | gRPC Retrieve |
 | Measurement Ingestion | Position Keeping | N/A (upstream of this service) |
 
@@ -257,8 +259,12 @@ flowchart LR
         CA["Current Account :50057"]
     end
 
+    subgraph Saga["Saga Runtime"]
+        SagaRunner["Starlark Runner"]
+        SagaDef["reconciliation_adjustment.star"]
+    end
+
     subgraph Downstream["Event Consumers"]
-        PO["Payment Order :50054"]
         Alerting["Alerting / Monitoring"]
     end
 
@@ -275,8 +281,9 @@ flowchart LR
     Engine -->|"Control: RequestPositionLock (gRPC)"| PK
     Engine -->|"Store snapshots, variances"| DB
     Engine -->|"Publish events"| Kafka
+    Engine -->|"invoke_saga"| SagaRunner
+    SagaRunner -->|"Execute"| SagaDef
 
-    Kafka -.->|"ReconciliationRunCompleted"| PO
     Kafka -.->|"VarianceDetected"| Alerting
 
     DisputeMgr -->|"Store disputes"| DB
@@ -292,7 +299,6 @@ flowchart LR
 // Represents a single reconciliation cycle for a specific asset type and period.
 type SettlementRun struct {
     ID              uuid.UUID
-    TenantID        uuid.UUID
     AssetCode       string              // "ELEC_HH_KWH", "GBP", "GPU_HOUR"
     Scope           ReconciliationScope // POSITION_LEDGER, CROSS_ACCOUNT, NOSTRO_VOSTRO
     RunType         SettlementRunType   // "D+1", "D+5", "M+3", "M+14", "FINAL", "ON_DEMAND"
@@ -386,6 +392,9 @@ type Variance struct {
     SourceCurrent     string
     QualityCurrent    int
 
+    // Denormalized from snapshot for reporting (avoids join on large datasets)
+    Attributes        map[string]string // Fungibility context (peak/off-peak, vintage, region)
+
     // Delta
     QuantityDelta     decimal.Decimal   // Current - Settled
     ValueDelta        decimal.Decimal   // Priced variance in settlement currency
@@ -423,7 +432,6 @@ const (
 // Dispute represents a correction request for a locked (finalized) position.
 type Dispute struct {
     ID                    uuid.UUID
-    TenantID              uuid.UUID
     AccountID             uuid.UUID
     AssetCode             string
     PeriodStart           time.Time
@@ -462,7 +470,6 @@ type DisputeResolution struct {
 // BalanceAssertion verifies system-wide debit/credit balance for an instrument.
 type BalanceAssertion struct {
     ID              uuid.UUID
-    TenantID        uuid.UUID
     InstrumentCode  string          // "GBP", "KWH"
     AssertionTime   time.Time       // Point-in-time for the assertion
     TotalDebits     decimal.Decimal
@@ -523,8 +530,10 @@ value for the adjustment.
 
 #### Step 4: Complete (VALUING to COMPLETED)
 
-Publish `ReconciliationCompleted` event with summary. Downstream consumers
-(Payment Order) can create adjustment entries.
+Publish `ReconciliationRunCompleted` event for monitoring/alerting. For each
+material variance, trigger the `reconciliation_adjustment` Starlark saga
+(fetched from Reference Data) to orchestrate adjustment booking via
+Payment Order.
 
 #### Step 5: Finalize (COMPLETED to FINALIZED, final runs only)
 
@@ -660,11 +669,15 @@ message BalanceAssertionResponse {
 
 ### 7.1 Migrations
 
+Per ADR-0016 (Tenant ID Naming Strategy), Meridian uses **schema-per-tenant**
+isolation. Tables use unqualified names and contain no `tenant_id` column.
+Tenant routing is handled at the connection level via
+`SET LOCAL search_path TO org_{tenant_id}, public`.
+
 ```sql
 -- Settlement Runs (Control Records)
 CREATE TABLE settlement_runs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL,
     asset_code VARCHAR(32) NOT NULL,
     scope VARCHAR(20) NOT NULL DEFAULT 'POSITION_LEDGER',
     run_type VARCHAR(20) NOT NULL,
@@ -691,15 +704,14 @@ CREATE TABLE settlement_runs (
     ))
 );
 
-CREATE INDEX idx_settlement_runs_tenant ON settlement_runs(tenant_id);
 CREATE INDEX idx_settlement_runs_asset_period
-    ON settlement_runs(tenant_id, asset_code, period_start, period_end);
+    ON settlement_runs(asset_code, period_start, period_end);
 CREATE INDEX idx_settlement_runs_status ON settlement_runs(status)
     WHERE status NOT IN ('COMPLETED', 'FINALIZED');
 
 -- Prevent duplicate runs for the same settlement period (excludes FAILED for retries)
 CREATE UNIQUE INDEX idx_settlement_runs_unique_period
-    ON settlement_runs(tenant_id, asset_code, run_type, period_start, period_end)
+    ON settlement_runs(asset_code, run_type, period_start, period_end)
     WHERE status != 'FAILED';
 
 -- Settlement Snapshots (Behavior Qualifier)
@@ -734,6 +746,7 @@ CREATE TABLE variances (
     asset_code VARCHAR(32) NOT NULL,
     period_start TIMESTAMPTZ NOT NULL,
     period_end TIMESTAMPTZ NOT NULL,
+    attributes JSONB NOT NULL DEFAULT '{}',
     quantity_settled DECIMAL(38, 18) NOT NULL,
     source_at_settle VARCHAR(50) NOT NULL,
     quality_at_settle INTEGER NOT NULL,
@@ -759,7 +772,6 @@ CREATE INDEX idx_variances_account ON variances(account_id, asset_code);
 -- Disputes (Behavior Qualifier)
 CREATE TABLE disputes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL,
     account_id UUID NOT NULL,
     asset_code VARCHAR(32) NOT NULL,
     period_start TIMESTAMPTZ NOT NULL,
@@ -781,14 +793,12 @@ CREATE TABLE disputes (
     ))
 );
 
-CREATE INDEX idx_disputes_tenant ON disputes(tenant_id);
 CREATE INDEX idx_disputes_status ON disputes(status)
     WHERE status NOT IN ('CLOSED', 'REJECTED');
 
 -- Balance Assertions
 CREATE TABLE balance_assertions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL,
     instrument_code VARCHAR(32) NOT NULL,
     assertion_time TIMESTAMPTZ NOT NULL,
     total_debits DECIMAL(38, 18) NOT NULL,
@@ -801,8 +811,8 @@ CREATE TABLE balance_assertions (
     CONSTRAINT valid_assertion_status CHECK (status IN ('BALANCED', 'IMBALANCED'))
 );
 
-CREATE INDEX idx_balance_assertions_tenant
-    ON balance_assertions(tenant_id, instrument_code, assertion_time);
+CREATE INDEX idx_balance_assertions_instrument
+    ON balance_assertions(instrument_code, assertion_time);
 ```
 
 ## 8. Event Contracts
@@ -812,7 +822,7 @@ Published to Kafka per ADR-0004:
 | Event | Trigger | Key Payload Fields | Consumers |
 |-------|---------|-------------------|-----------|
 | `ReconciliationRunStarted` | Run begins | run_id, asset_code, period | Monitoring |
-| `ReconciliationRunCompleted` | Run finishes | run_id, variance_count, total_variance | Payment Order, Alerting |
+| `ReconciliationRunCompleted` | Run finishes | run_id, variance_count, total_variance | Alerting, Audit |
 | `VarianceDetected` | Single variance found | variance_id, account_id, delta, value | Alerting |
 | `PositionLockRequested` | Final settlement | run_id, period, asset_code | Position Keeping |
 | `DisputeCreated` | Locked position receives new data | dispute_id, account_id | Alerting, Audit |
@@ -977,6 +987,66 @@ Add reconciliation handlers to `handlers.yaml` for saga integration:
         description: "Status (PENDING_REVIEW)"
 ```
 
+## 10.1 Adjustment Saga Definition
+
+Per ADR-028, adjustment booking is orchestrated via a Starlark saga
+stored in Reference Data. This keeps the adjustment **policy**
+(GL account mapping, tax treatment, approval thresholds) configurable
+per tenant without code changes.
+
+```python
+# reconciliation_adjustment/v1.0.0.star (stored in Reference Data)
+# Triggered by Reconciliation Service after variance valuation.
+
+def reconciliation_adjustment(ctx):
+    """Book a financial adjustment for a reconciliation variance."""
+
+    # Step 1: Create adjustment booking log
+    booking = step("initiate_booking",
+        financial_accounting.initiate_booking_log(
+            account_id = ctx.input["account_id"],
+            currency = ctx.input["currency"],
+            transaction_id = ctx.input["variance_id"],
+            transaction_type = "RECONCILIATION_ADJUSTMENT",
+        ))
+
+    # Step 2: Post debit entry (correction)
+    step("post_debit",
+        financial_accounting.capture_posting(
+            booking_log_id = booking["booking_log_id"],
+            account_id = ctx.input["account_id"],
+            amount = ctx.input["value_delta"],
+            currency = ctx.input["currency"],
+            direction = ctx.input["direction"],
+            transaction_id = ctx.input["variance_id"],
+            posting_type = "reconciliation_debit",
+        ))
+
+    # Step 3: Post credit entry (offset)
+    step("post_credit",
+        financial_accounting.capture_posting(
+            booking_log_id = booking["booking_log_id"],
+            account_id = ctx.input["offset_account_id"],
+            amount = ctx.input["value_delta"],
+            currency = ctx.input["currency"],
+            direction = opposite(ctx.input["direction"]),
+            transaction_id = ctx.input["variance_id"],
+            posting_type = "reconciliation_credit",
+        ))
+
+    # Step 4: Finalize booking
+    step("finalize",
+        financial_accounting.update_booking_log(
+            booking_log_id = booking["booking_log_id"],
+            status = "POSTED",
+        ))
+```
+
+The saga definition is fetched from Reference Data at runtime via
+`GetSaga(ctx, "reconciliation_adjustment", version)` and executed
+by the Starlark runner with compensation handled automatically
+(reversing captured postings on failure).
+
 ## 11. Implementation Streams
 
 ### Stream Breakdown
@@ -985,8 +1055,8 @@ Add reconciliation handlers to `handlers.yaml` for saga integration:
 |---|--------|--------|-------------|-------------|
 | 1 | Service scaffold | 3 | None | cmd, config, healthcheck, k8s manifests |
 | 2 | Domain model + migrations | 5 | Stream 1 | Entities, repositories, initial schema |
-| 3 | Proto + gRPC service | 5 | Stream 2 | Proto definitions, service stubs, client library |
-| 4 | Settlement snapshot capture | 8 | Stream 3 | Query PK for measurements, create snapshots |
+| 3 | Proto + gRPC service | 5 | Stream 2 | Proto definitions, service stubs, client library, Starlark handler bindings (`client/starlark.go`) |
+| 4 | Settlement snapshot capture | 8 | Stream 3 | Query PK for measurements (cursor-paginated), create snapshots in chunks |
 | 5 | Variance detection + valuation | 8 | Stream 4 | Compare snapshots to current, price deltas |
 | 6 | Settlement finality + position locking | 5 | Stream 5 | Request PK to lock positions, finalize runs |
 | 7 | Dispute workflow | 8 | Stream 3 | Create/resolve disputes, publish events |
@@ -1033,11 +1103,14 @@ within the window. Must respect the Delta Engine's supersession logic
 (ADR-0017) so the reconciliation service sees the same "current truth"
 as the quality ladder.
 
-**BatchGetCurrentMeasurements:** Accepts a list of
-`(account_id, asset_code, period_start, period_end)` keys. Returns
-measurements for all keys in a single round-trip. Required to avoid
-N+1 query patterns during snapshot capture of large settlement runs
-(17,520+ positions).
+**BatchGetCurrentMeasurements:** Accepts `asset_code`,
+`period_start`, `period_end`, `page_size` (default 500, max 1000),
+and `page_token` (cursor). Returns measurements page-by-page with a
+`next_page_token` for iteration. Cursor-based pagination is required
+because annual M+14 runs (17,520+ positions) can exceed gRPC message
+size limits and cause OOM in the consumer. The snapshot capture step
+(Step 1) iterates using the cursor to safely backfill
+`settlement_snapshots` without holding the full dataset in memory.
 
 **RequestPositionLock:** Accepts `run_id`, `asset_code`,
 `period_start`, `period_end`. Sets `locked_at` on all matching
@@ -1045,6 +1118,15 @@ positions. Must be idempotent (re-locking an already-locked position
 is a no-op). Returns count of positions locked. After locking, any
 new measurements for these positions should route to the dispute
 workflow via `MeasurementSuperseded` event.
+
+**Conflict with in-flight operations:** `RequestPositionLock` must
+check the Position Keeping outbox for pending or processing operations
+(e.g., a Wash & Reload saga) targeting the same time window. If
+in-flight operations exist, the lock request must fail with
+`FAILED_PRECONDITION` and a diagnostic message listing the conflicting
+operation IDs. Locking a position while a valid correction saga is
+in flight would create a false dispute. The reconciliation service
+should retry the lock after a configurable backoff (default 30s).
 
 **GetPositionSummary:** Accepts `instrument_code` and optional
 `tenant_id`. Returns aggregated `total_debits` and `total_credits`
@@ -1159,8 +1241,15 @@ endpoint, validate `tenant_id` claim matches request context.
 | Initiate on-demand run | Service account, Tenant admin |
 | View reconciliation results | Tenant admin, Auditor |
 | Resolve dispute | Tenant admin (with audit trail) |
-| Execute balance assertion | Service account, System admin |
+| Execute balance assertion (`POSITION_LEDGER`) | Service account, Tenant admin |
+| Execute balance assertion (`CROSS_ACCOUNT`) | Service account, System admin, Auditor |
 | Lock positions (finalize) | Settlement service account only |
+
+**CROSS_ACCOUNT restriction:** `ScopeCrossAccount` balance assertions
+may aggregate data across parties within a tenant. Per the Party
+isolation model, a standard Tenant Admin should not run system-wide
+assertions if they aggregate positions across parties they do not own.
+Restrict `CROSS_ACCOUNT` scope to `SYSTEM` or `AUDITOR` roles.
 
 ### 16.3 Rate Limiting
 
