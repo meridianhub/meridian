@@ -60,8 +60,9 @@ def payment_execution():
     # Store lien results in context for subsequent steps
     lien_id = lien_result.lien_id
     bucket_id = lien_result.bucket_id
-    # Extract valuation_analysis if present (atomic valuation audit trail)
-    valuation_analysis = lien_result.get("valuation_analysis")
+    # Extract valuation_analysis if present (atomic valuation audit trail).
+    # Handler results are Starlark structs, so use getattr for optional fields.
+    valuation_analysis = getattr(lien_result, "valuation_analysis", None)
 
     # Step 2: Send payment to gateway
     step(name="send_to_gateway")

@@ -155,7 +155,7 @@ func createLienHandler(client *Client) saga.Handler {
 
 		// Add valuation_analysis if basis is present (atomic valuation flow)
 		if basis := resp.GetBasis(); basis != nil {
-			result["valuation_analysis"] = convertValuationAnalysisToMap(basis)
+			result["valuation_analysis"] = ConvertValuationAnalysisToMap(basis)
 		}
 
 		return result, nil
@@ -360,10 +360,13 @@ func convertMoneyToDecimal(m *money.Money) decimal.Decimal {
 	return units.Add(nanos)
 }
 
-// convertValuationAnalysisToMap converts a proto ValuationAnalysis to a Starlark-compatible map.
+// ConvertValuationAnalysisToMap converts a proto ValuationAnalysis to a Starlark-compatible map.
 // This preserves the full audit trail from atomic valuation so saga scripts can forward it
 // to downstream services (e.g., Position Keeping for ledger attribution).
-func convertValuationAnalysisToMap(va *currentaccountv1.ValuationAnalysis) map[string]any {
+//
+// Exported so that other service handlers (e.g., payment-order) that call InitiateLien
+// can also expose valuation_analysis in their saga results.
+func ConvertValuationAnalysisToMap(va *currentaccountv1.ValuationAnalysis) map[string]any {
 	result := map[string]any{
 		"method_id":        va.GetMethodId(),
 		"method_version":   va.GetMethodVersion(),
