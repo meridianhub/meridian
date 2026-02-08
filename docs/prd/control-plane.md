@@ -540,7 +540,7 @@ def execute(ctx, manifest):
         ctx.reference_data.register_valuation_rule(
             from_instrument = rule["from"],
             to_instrument = rule["to"],
-            method = rule.method,
+            method = rule["method"],
         )
 
     # Phase 4: Saga Definitions
@@ -548,7 +548,7 @@ def execute(ctx, manifest):
         ctx.saga_registry.register_saga(
             name = saga.name,
             trigger = saga.trigger,
-            script_ref = saga.script_ref,
+            script = saga.script,
         )
 
     return {"status": "applied", "version": manifest.version}
