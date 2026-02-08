@@ -221,6 +221,8 @@ User/AI generates Manifest
 
 **Why This Matters**: The validation layer speaks the same language as the AI. When Opus generates a Manifest with a typo, the compiler tells it exactly what's wrong and how to fix it. No human in the loop required for iteration.
 
+> **Implementation Note**: The validator MUST return `available_fields` on every undefined field error. This "Reflection API" is what allows an LLM to self-correct without needing a huge context window or multiple documentation lookups.
+
 #### Acceptance Criteria
 - [ ] JSON Schema published with full documentation
 - [ ] Schema validation catches structural errors before API calls
@@ -309,6 +311,59 @@ This is the core "compiler" that reads a Manifest and orchestrates calls to exis
 - `ReferenceData.RegisterAccountType`
 - `CurrentAccount.InitiateCurrentAccount`
 - etc.
+
+#### Critical Requirement: ApplyManifest IS a Durable Saga
+
+> **Risk**: Since Meridian is a distributed system, `ApplyManifest` could fail halfway (e.g., Reference Data succeeds, but Current Account times out).
+>
+> **Solution**: The ApplyManifest orchestrator **must be implemented as a Starlark Saga itself**. It uses the very engine it is configuring to ensure the configuration is atomic.
+
+This is elegantly recursive: the system that runs sagas is configured by a saga.
+
+```python
+# sagas/apply_manifest.star
+def execute(ctx, manifest):
+    """Apply a Manifest atomically using durable execution."""
+
+    # Phase 1: Instruments (no dependencies)
+    for instrument in manifest.instruments:
+        ctx.reference_data.register_instrument(
+            code = instrument.code,
+            name = instrument.name,
+            instrument_type = instrument.type,
+        )
+
+    # Phase 2: Account Types (depend on instruments)
+    for account_type in manifest.account_types:
+        ctx.reference_data.register_account_type(
+            code = account_type.code,
+            normal_balance = account_type.normal_balance,
+            allowed_instruments = account_type.instruments,
+        )
+
+    # Phase 3: Valuation Rules
+    for rule in manifest.valuation_rules:
+        ctx.reference_data.register_valuation_rule(
+            from_instrument = rule["from"],
+            to_instrument = rule["to"],
+            method = rule.method,
+        )
+
+    # Phase 4: Saga Definitions
+    for saga in manifest.sagas:
+        ctx.saga_registry.register_saga(
+            name = saga.name,
+            trigger = saga.trigger,
+            script_ref = saga.script_ref,
+        )
+
+    return {"status": "applied", "version": manifest.version}
+```
+
+**Why This Matters**:
+- If the saga fails at Phase 2, Phase 1 changes are already committed
+- On retry, the differ sees Phase 1 resources exist → skips them
+- Idempotency is achieved through the saga's durable execution model
 
 #### What Needs Building
 
