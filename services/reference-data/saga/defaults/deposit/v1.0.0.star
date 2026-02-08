@@ -42,9 +42,6 @@ def execute_deposit():
     clearing_account_id = input_data.get("clearing_account_id", "")
     
     # Step 1: Log position in PositionKeeping service with CREDIT direction
-    # TODO: When lien-based deposit is implemented, pass valuation_analysis from lien result:
-    # if valuation_analysis:
-    #     log_position_params["valuation_analysis"] = valuation_analysis
     step(name="log_position")
     log_position_result = position_keeping.initiate_log(
         position_id=account_identification,
