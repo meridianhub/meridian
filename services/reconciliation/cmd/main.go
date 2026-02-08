@@ -144,6 +144,15 @@ func run(logger *slog.Logger) error {
 		ReadHeaderTimeout: 10 * time.Second,
 		WriteTimeout:      30 * time.Second,
 	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+			logger.Error("HTTP server shutdown error", "error", err)
+		} else {
+			logger.Info("HTTP server stopped")
+		}
+	}()
 
 	go func() {
 		logger.Info("starting HTTP server for health and metrics",
@@ -169,13 +178,6 @@ func run(logger *slog.Logger) error {
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.Server.GracefulShutdownTimeout)
 	defer cancel()
-
-	// Shutdown HTTP server
-	if err := httpServer.Shutdown(shutdownCtx); err != nil {
-		logger.Error("HTTP server shutdown error", "error", err)
-	} else {
-		logger.Info("HTTP server stopped")
-	}
 
 	// Gracefully stop gRPC server
 	stopped := make(chan struct{})
@@ -232,6 +234,8 @@ func parseLogLevel(levelStr string) slog.Level {
 	switch strings.ToLower(levelStr) {
 	case "debug":
 		return slog.LevelDebug
+	case "info":
+		return slog.LevelInfo
 	case "warn", "warning":
 		return slog.LevelWarn
 	case "error":

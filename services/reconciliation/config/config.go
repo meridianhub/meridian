@@ -2,6 +2,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -95,11 +96,12 @@ type SchedulerConfig struct {
 
 // Validation errors.
 var (
-	ErrEmptyPort           = fmt.Errorf("server port must not be empty")
-	ErrEmptyDatabaseURL    = fmt.Errorf("database URL must not be empty")
-	ErrInvalidMaxOpenConns = fmt.Errorf("database max open connections must be at least 1")
-	ErrInvalidMaxIdleConns = fmt.Errorf("database max idle connections must be non-negative")
-	ErrInvalidMetricsPort  = fmt.Errorf("metrics port must not be empty")
+	ErrEmptyPort           = errors.New("server port must not be empty")
+	ErrEmptyDatabaseURL    = errors.New("database URL must not be empty")
+	ErrInvalidMaxOpenConns = errors.New("database max open connections must be at least 1")
+	ErrInvalidMaxIdleConns = errors.New("database max idle connections must be non-negative")
+	ErrInvalidMetricsPort  = errors.New("metrics port must not be empty")
+	ErrInvalidPortNumber   = errors.New("port must be a valid number")
 )
 
 // LoadConfig loads configuration from environment variables with defaults.
@@ -185,6 +187,9 @@ func (c *Config) Validate() error {
 	if c.Server.Port == "" {
 		return ErrEmptyPort
 	}
+	if _, err := strconv.Atoi(c.Server.Port); err != nil {
+		return fmt.Errorf("server %w: %w", ErrInvalidPortNumber, err)
+	}
 	if c.Database.URL == "" {
 		return ErrEmptyDatabaseURL
 	}
@@ -196,6 +201,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Observability.MetricsPort == "" {
 		return ErrInvalidMetricsPort
+	}
+	if _, err := strconv.Atoi(c.Observability.MetricsPort); err != nil {
+		return fmt.Errorf("metrics %w: %w", ErrInvalidPortNumber, err)
 	}
 	return nil
 }

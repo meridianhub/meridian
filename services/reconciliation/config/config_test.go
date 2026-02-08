@@ -99,6 +99,28 @@ func TestValidate_EmptyMetricsPort(t *testing.T) {
 	assert.ErrorIs(t, err, ErrInvalidMetricsPort)
 }
 
+func TestValidate_InvalidServerPort(t *testing.T) {
+	cfg := &Config{
+		Server:        ServerConfig{Port: "abc"},
+		Database:      DatabaseConfig{URL: "postgres://...", MaxOpenConns: 25, MaxIdleConns: 5},
+		Observability: ObservabilityConfig{MetricsPort: "9090"},
+	}
+
+	err := cfg.Validate()
+	assert.ErrorIs(t, err, ErrInvalidPortNumber)
+}
+
+func TestValidate_InvalidMetricsPort(t *testing.T) {
+	cfg := &Config{
+		Server:        ServerConfig{Port: "50060"},
+		Database:      DatabaseConfig{URL: "postgres://...", MaxOpenConns: 25, MaxIdleConns: 5},
+		Observability: ObservabilityConfig{MetricsPort: "abc"},
+	}
+
+	err := cfg.Validate()
+	assert.ErrorIs(t, err, ErrInvalidPortNumber)
+}
+
 func TestValidate_Success(t *testing.T) {
 	cfg := &Config{
 		Server:        ServerConfig{Port: "50060"},
