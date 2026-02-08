@@ -12,14 +12,20 @@ instructions: |
   inherently cross-cutting: it reads from Position Keeping (measurements), Financial Accounting
   (snapshots, GL entries), Valuation Engine (variance pricing), and writes to Payment Order (adjustments).
 
-  BIAN Action Terms:
+  BIAN Action Terms (CR = AccountReconciliationProcedure):
   - InitiateAccountReconciliation: Start a new reconciliation run for a settlement period
   - ExecuteAccountReconciliation: Execute variance detection and generate adjustment entries
   - RetrieveAccountReconciliation: Query reconciliation results, variances, and run status
   - ControlAccountReconciliation: Lock positions for final settlement
 
+  BIAN Action Terms (BQ = ReconciliationDispute):
+  - InitiateReconciliationDispute: Create a new dispute for a locked position
+  - ControlReconciliationDispute: Approve, reject, or close a dispute
+  - RetrieveReconciliationDispute: Query dispute state and resolution
+
   Settlement runs are scheduled (D+1, D+5, M+3, M+14) but can also be triggered on-demand.
-  Reconciliation creates adjustment entries, never mutates historical records.
+  Reconciliation publishes events for downstream action, never mutates historical records.
+  Payment Order subscribes to ReconciliationRunCompleted events to create adjustments.
 ---
 
 # PRD: Account Reconciliation Service Domain (BIAN-Native)
@@ -52,8 +58,67 @@ instructions: |
 | `ExecuteAccountReconciliation` | **Execute** | FULFILL (run variance detection) |
 | `RetrieveAccountReconciliation` | **Retrieve** | INQUIRE (query results) |
 | `ControlAccountReconciliation` | **Control** | FULFILL (lock for finality) |
-| `RequestReconciliationDispute` | **Request** | FULFILL (create dispute) |
-| `UpdateReconciliationDispute` | **Update** | FULFILL (resolve dispute) |
+| `InitiateReconciliationDispute` | **Initiate** | FULFILL (create new dispute arrangement) |
+| `ControlReconciliationDispute` | **Control** | FULFILL (approve/reject/close dispute) |
+| `RetrieveReconciliationDispute` | **Retrieve** | INQUIRE (query dispute state) |
+
+## BIAN Design Elements
+
+### Control Record
+
+The **AccountReconciliationProcedure** is the Control Record (CR) for this
+service domain. It represents a single reconciliation lifecycle instance
+for a specific asset type and settlement period.
+
+### Generic Artifacts
+
+| Artifact | BIAN Type | Description |
+|----------|-----------|-------------|
+| ReconciliationSchedule | Configuration | Cron-based run schedule per asset type |
+| ReconciliationResult | Output | Detected variance with quantity and value delta |
+| ReconciliationAdjustment | Output | Financial correction generated from a variance |
+| SettlementCapture | Working Data | Point-in-time snapshot of measurement state |
+
+### Behavior Qualifiers
+
+| BQ | Lifecycle | Description |
+|----|-----------|-------------|
+| SettlementCapture | Write-once | Frozen measurement state at settlement time |
+| ReconciliationResult | DETECTED → VALUED → ADJUSTED | Variance through pricing to correction |
+| ReconciliationDispute | PENDING_REVIEW → INVESTIGATING → APPROVED/REJECTED → CLOSED | Post-finality correction |
+| BalanceAssertion | One-shot | Cross-account debit/credit verification |
+
+### Reference Data Dependencies
+
+| Reference Data | Source Service | Usage |
+|----------------|---------------|-------|
+| AssetSettlementRules | Reference Data | Backfill window, schedule, finality run per asset |
+| SettlementCalendar | Reference Data | Business day calendar for run scheduling |
+| ReconciliationTolerances | Reference Data | Materiality thresholds per asset/tenant |
+| SourceAuthority | Reference Data (Asset Directory) | Quality rankings for variance classification |
+
+### First-Order Service Domain Connections
+
+| Connected Service Domain | Direction | Interaction |
+|--------------------------|-----------|-------------|
+| Position Keeping | Retrieve | Current measurements for snapshot capture |
+| Financial Accounting | Retrieve | GL entries for balance assertion verification |
+| Current Account | Evaluate | Variance valuation via EvaluateAssetValuation |
+| Payment Order | Event-driven | Publish `ReconciliationRunCompleted` for adjustment creation |
+| Reference Data | Retrieve | Settlement rules, tolerances, calendars |
+
+### Reconciliation Scope
+
+Each AccountReconciliationProcedure operates within a defined scope:
+
+| Scope | Description | Example |
+|-------|-------------|---------|
+| `POSITION_LEDGER` | Compare position measurements against settlement snapshots | Energy D+5 run |
+| `CROSS_ACCOUNT` | Verify system-wide debit/credit balance per instrument | End-of-day GBP assertion |
+| `NOSTRO_VOSTRO` | Reconcile internal records against external counterparty | Bank statement matching |
+
+The scope determines which data sources are queried and which
+variance classification rules apply.
 
 ## 1. Executive Summary
 
@@ -68,15 +133,22 @@ This is the service that answers: **"We settled on 10 kWh, but the meter says 12
 
 Reconciliation is inherently cross-cutting. It must:
 
-| Interaction | Service | Direction |
-|-------------|---------|-----------|
-| Read current measurements | Position Keeping | gRPC query |
+| Interaction | Service | Pattern |
+|-------------|---------|---------|
+| Read current measurements | Position Keeping | gRPC Retrieve |
 | Read/write settlement snapshots | Own database | Local |
-| Read GL entries for balance verification | Financial Accounting | gRPC query |
-| Request variance valuation | Valuation Engine (via Account) | gRPC query |
-| Create adjustment payments | Payment Order | gRPC/event |
-| Read asset settlement rules | Reference Data | gRPC query |
-| Publish reconciliation events | Kafka | Async |
+| Read GL entries for balance verification | Financial Accounting | gRPC Retrieve |
+| Request variance valuation | Current Account | gRPC EvaluateAssetValuation |
+| Signal adjustment needed | Payment Order | Kafka event (event-driven) |
+| Read asset settlement rules | Reference Data | gRPC Retrieve |
+| Request position lock | Position Keeping | gRPC Control |
+| Publish reconciliation events | Kafka | Async event |
+
+**Event-driven principle:** This service does NOT directly call Payment
+Order to create adjustments. It publishes `ReconciliationRunCompleted`
+events with variance details. Payment Order subscribes and creates
+adjustment payments autonomously. This respects BIAN's single-responsibility
+principle -- each service manages its own asset lifecycle.
 
 Embedding this in Financial Accounting creates a circular dependency
 (FA calls PK, PK publishes events to FA, FA calls PK again for reconciliation).
@@ -149,7 +221,7 @@ The reconciliation service provides the **detective control** that catches these
 | **Settlement Snapshots** | Point-in-time capture of measurement state for each position |
 | **Variance Detection** | Compare snapshots against current positions, compute deltas |
 | **Variance Valuation** | Price the delta using the tariff at the original period |
-| **Adjustment Generation** | Create adjustment entries that feed into Payment Order |
+| **Adjustment Signaling** | Publish variance events consumed by Payment Order for adjustment creation |
 | **Settlement Finality** | Request position locking in Position Keeping after final run |
 | **Dispute Management** | Handle corrections for locked (finalized) positions |
 | **Run Scheduling** | Cron-based execution of settlement runs per asset type |
@@ -159,12 +231,12 @@ The reconciliation service provides the **detective control** that catches these
 
 | Capability | Owned By | Interaction Pattern |
 |------------|----------|---------------------|
-| Measurements / Quality Ladder | Position Keeping | gRPC read |
-| GL Entries / Ledger Postings | Financial Accounting | gRPC read |
-| Position Locking (`locked_at`) | Position Keeping | gRPC request (Control operation) |
-| Valuation / Pricing | Valuation Engine (embedded in Account services) | gRPC EvaluateAssetValuation |
-| Payment Execution | Payment Order | gRPC / Kafka event |
-| Asset Settlement Rules | Reference Data | gRPC read |
+| Measurements / Quality Ladder | Position Keeping | gRPC Retrieve |
+| GL Entries / Ledger Postings | Financial Accounting | gRPC Retrieve |
+| Position Locking (`locked_at`) | Position Keeping | gRPC Control |
+| Valuation / Pricing | Current Account (embedded library) | gRPC EvaluateAssetValuation |
+| Payment Execution | Payment Order | Event-driven (subscribes to our events) |
+| Asset Settlement Rules | Reference Data | gRPC Retrieve |
 | Measurement Ingestion | Position Keeping | N/A (upstream of this service) |
 
 ### 3.3 Service Interaction Diagram
@@ -178,15 +250,16 @@ flowchart LR
         DisputeMgr["Dispute Manager"]
     end
 
-    subgraph Upstream["Data Sources"]
+    subgraph Upstream["Data Sources (gRPC Retrieve)"]
         PK["Position Keeping :50053"]
         FA["Financial Accounting :50052"]
         RD["Reference Data :50051"]
+        CA["Current Account :50057"]
     end
 
-    subgraph Downstream["Action Targets"]
+    subgraph Downstream["Event Consumers"]
         PO["Payment Order :50054"]
-        CA["Current Account :50057"]
+        Alerting["Alerting / Monitoring"]
     end
 
     subgraph Infra["Infrastructure"]
@@ -195,17 +268,19 @@ flowchart LR
     end
 
     Scheduler -->|"Trigger run"| Engine
-    Engine -->|"GetCurrentMeasurements (gRPC)"| PK
-    Engine -->|"GetLedgerEntries (gRPC)"| FA
-    Engine -->|"GetSettlementRules (gRPC)"| RD
+    Engine -->|"Retrieve measurements (gRPC)"| PK
+    Engine -->|"Retrieve GL entries (gRPC)"| FA
+    Engine -->|"Retrieve settlement rules (gRPC)"| RD
     Engine -->|"EvaluateAssetValuation (gRPC)"| CA
-    Engine -->|"RequestPositionLock (gRPC)"| PK
-    Engine -->|"CreateAdjustmentPayment"| PO
+    Engine -->|"Control: RequestPositionLock (gRPC)"| PK
     Engine -->|"Store snapshots, variances"| DB
     Engine -->|"Publish events"| Kafka
 
+    Kafka -.->|"ReconciliationRunCompleted"| PO
+    Kafka -.->|"VarianceDetected"| Alerting
+
     DisputeMgr -->|"Store disputes"| DB
-    DisputeMgr -->|"DisputeCreated event"| Kafka
+    DisputeMgr -->|"Publish DisputeCreated"| Kafka
 ```
 
 ## 4. Domain Model
@@ -218,10 +293,11 @@ flowchart LR
 type SettlementRun struct {
     ID              uuid.UUID
     TenantID        uuid.UUID
-    AssetCode       string            // "ELEC_HH_KWH", "GBP", "GPU_HOUR"
-    RunType         SettlementRunType // "D+1", "D+5", "M+3", "M+14", "FINAL", "ON_DEMAND"
-    PeriodStart     time.Time         // Start of settlement window
-    PeriodEnd       time.Time         // End of settlement window
+    AssetCode       string              // "ELEC_HH_KWH", "GBP", "GPU_HOUR"
+    Scope           ReconciliationScope // POSITION_LEDGER, CROSS_ACCOUNT, NOSTRO_VOSTRO
+    RunType         SettlementRunType   // "D+1", "D+5", "M+3", "M+14", "FINAL", "ON_DEMAND"
+    PeriodStart     time.Time           // Start of settlement window
+    PeriodEnd       time.Time           // End of settlement window
     Status          RunStatus
     SnapshotCount   int               // Number of positions captured
     VarianceCount   int               // Number of variances detected
@@ -243,6 +319,17 @@ const (
     RunStatusCompleted  RunStatus = "COMPLETED"    // All variances detected and valued
     RunStatusFailed     RunStatus = "FAILED"       // Error during processing
     RunStatusFinalized  RunStatus = "FINALIZED"    // Positions locked (final settlement only)
+)
+
+type ReconciliationScope string
+
+const (
+    // ScopePositionLedger compares position measurements against settlement snapshots.
+    ScopePositionLedger ReconciliationScope = "POSITION_LEDGER"
+    // ScopeCrossAccount verifies system-wide debit/credit balance per instrument.
+    ScopeCrossAccount   ReconciliationScope = "CROSS_ACCOUNT"
+    // ScopeNostroVostro reconciles internal records against external counterparty.
+    ScopeNostroVostro   ReconciliationScope = "NOSTRO_VOSTRO"
 )
 ```
 
@@ -474,21 +561,21 @@ syntax = "proto3";
 package meridian.reconciliation.v1;
 
 service AccountReconciliationService {
-  // Settlement Run lifecycle
+  // AccountReconciliationProcedure (CR) lifecycle
   rpc InitiateAccountReconciliation(InitiateRequest) returns (InitiateResponse);
   rpc ExecuteAccountReconciliation(ExecuteRequest) returns (ExecuteResponse);
   rpc RetrieveAccountReconciliation(RetrieveRequest) returns (RetrieveResponse);
   rpc ControlAccountReconciliation(ControlRequest) returns (ControlResponse);
 
-  // Variance queries
-  rpc ListVariances(ListVariancesRequest) returns (ListVariancesResponse);
+  // ReconciliationResult (BQ) queries
+  rpc ListReconciliationResults(ListResultsRequest) returns (ListResultsResponse);
 
-  // Dispute workflow
-  rpc RequestReconciliationDispute(DisputeRequest) returns (DisputeResponse);
-  rpc UpdateReconciliationDispute(UpdateDisputeRequest) returns (UpdateDisputeResponse);
+  // ReconciliationDispute (BQ) lifecycle
+  rpc InitiateReconciliationDispute(InitiateDisputeRequest) returns (InitiateDisputeResponse);
+  rpc ControlReconciliationDispute(ControlDisputeRequest) returns (ControlDisputeResponse);
   rpc RetrieveReconciliationDispute(RetrieveDisputeRequest) returns (RetrieveDisputeResponse);
 
-  // Balance assertions
+  // BalanceAssertion (BQ)
   rpc ExecuteBalanceAssertion(BalanceAssertionRequest) returns (BalanceAssertionResponse);
 }
 ```
@@ -498,9 +585,10 @@ service AccountReconciliationService {
 ```protobuf
 message InitiateRequest {
   string asset_code = 1;        // "ELEC_HH_KWH"
-  string run_type = 2;          // "D+1", "M+14", "ON_DEMAND"
-  google.protobuf.Timestamp period_start = 3;
-  google.protobuf.Timestamp period_end = 4;
+  string scope = 2;             // "POSITION_LEDGER", "CROSS_ACCOUNT", "NOSTRO_VOSTRO"
+  string run_type = 3;          // "D+1", "M+14", "ON_DEMAND"
+  google.protobuf.Timestamp period_start = 4;
+  google.protobuf.Timestamp period_end = 5;
 }
 
 message RetrieveResponse {
@@ -550,6 +638,7 @@ CREATE TABLE settlement_runs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL,
     asset_code VARCHAR(32) NOT NULL,
+    scope VARCHAR(20) NOT NULL DEFAULT 'POSITION_LEDGER',
     run_type VARCHAR(20) NOT NULL,
     period_start TIMESTAMPTZ NOT NULL,
     period_end TIMESTAMPTZ NOT NULL,
@@ -565,6 +654,9 @@ CREATE TABLE settlement_runs (
     version INTEGER NOT NULL DEFAULT 1,
 
     CONSTRAINT valid_period CHECK (period_end > period_start),
+    CONSTRAINT valid_scope CHECK (scope IN (
+        'POSITION_LEDGER', 'CROSS_ACCOUNT', 'NOSTRO_VOSTRO'
+    )),
     CONSTRAINT valid_status CHECK (status IN (
         'PENDING', 'CAPTURING', 'RECONCILING', 'VALUING',
         'COMPLETED', 'FAILED', 'FINALIZED'
@@ -736,8 +828,8 @@ Add reconciliation handlers to `handlers.yaml` for saga integration:
         type: string
         description: "Status of the run (PENDING)"
 
-  reconciliation.create_dispute:
-    description: "Create a dispute for a locked position"
+  reconciliation.initiate_dispute:
+    description: "Initiate a dispute for a locked position"
     params:
       account_id:
         type: string
@@ -940,7 +1032,33 @@ These extensions should be implemented as part of Stream 4 and 6.
 | 3 | Should reconciliation results be exposed through Gateway to external consumers? | Stream 3 scope | Stream 3 start |
 | 4 | How do we handle reconciliation for cross-tenant transfers (e.g., inter-company energy settlement)? | Architecture | Phase 2 |
 
-## 19. Success Criteria
+## 19. BIAN Glossary
+
+Canonical mapping between Meridian implementation terms and BIAN standard
+terminology. Code comments and API documentation should prefer BIAN terms
+where practical.
+
+| Meridian Implementation | BIAN Standard Term | Notes |
+|------------------------|--------------------|-------|
+| `SettlementRun` | `AccountReconciliationProcedure` | Control Record (CR) |
+| `SettlementSnapshot` | `SettlementCapture` | Behavior Qualifier (BQ) - working data |
+| `Variance` | `ReconciliationResult` | BQ - detected difference |
+| `Dispute` | `ReconciliationDispute` | BQ - post-finality correction |
+| `BalanceAssertion` | `BalanceAssertion` | BQ - cross-account verification |
+| `ReconciliationScope` | `ReconciliationScope` | Attribute on CR |
+| Settlement run scheduler | `ReconciliationSchedule` | Generic Artifact (configuration) |
+| Adjustment event | `ReconciliationAdjustment` | Generic Artifact (output) |
+| `RunStatus.CAPTURING` | Initiate phase | CR lifecycle |
+| `RunStatus.RECONCILING` | Execute phase | CR lifecycle |
+| `RunStatus.COMPLETED` | Complete phase | CR lifecycle |
+| `RunStatus.FINALIZED` | Control phase | CR lifecycle (finality lock) |
+
+**Why dual naming:** Go structs use Meridian terms for readability (`SettlementRun`
+is clearer than `AccountReconciliationProcedure` in code). Proto APIs and
+documentation use BIAN terms for interoperability. The glossary ensures
+consistent translation between the two.
+
+## 20. Success Criteria
 
 | Criteria | Measurement |
 |----------|-------------|
