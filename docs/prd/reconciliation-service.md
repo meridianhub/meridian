@@ -33,7 +33,7 @@ instructions: |
 **Status:** Draft
 **Version:** 1.0
 **BIAN Service Domain:** Account Reconciliation (Fulfilment Pattern)
-**Story Points:** 55 (estimated, 8 streams)
+**Story Points:** 55 (estimated, 10 streams)
 **Core ADRs:**
 
 - [ADR-0017: Temporal Quality Ladder](../adr/0017-temporal-quality-ladder.md)
@@ -302,6 +302,7 @@ type SettlementRun struct {
     SnapshotCount   int               // Number of positions captured
     VarianceCount   int               // Number of variances detected
     TotalVariance   decimal.Decimal   // Net variance value (settlement currency)
+    Currency        string            // Settlement currency (e.g., "GBP", "USD")
     StartedAt       time.Time
     CompletedAt     *time.Time
     Error           *string           // If FAILED, the error message
@@ -531,7 +532,21 @@ For the final settlement run (e.g., M+14 for energy), request Position Keeping
 to lock all positions in the window. After locking, any new data for these
 positions routes to the dispute workflow.
 
-### 5.3 Scheduling
+### 5.3 Failure Handling and Retry Policy
+
+- **Max Retries:** 3 attempts with exponential backoff (5min, 15min, 1hr)
+- **Partial Data Cleanup:** Failed runs in CAPTURING state delete
+  captured snapshots before retry. Failed runs in RECONCILING or VALUING
+  state retain partial results for diagnostic inspection.
+- **Circuit Breaker:** After 3 consecutive failures for the same asset
+  type, mark the run as FAILED (no automatic retry) and trigger a
+  `ReconciliationFailure` alert for operator intervention.
+- **Idempotency:** Each retry reuses the same `run_id` to prevent
+  duplicate snapshot creation. The unique constraint on
+  `(tenant_id, asset_code, run_type, period_start, period_end)` prevents
+  concurrent duplicate runs.
+
+### 5.4 Scheduling
 
 Settlement runs are scheduled based on asset-specific rules stored in Reference Data:
 
@@ -614,6 +629,19 @@ message VarianceDetail {
   string status = 10;
 }
 
+message ListResultsRequest {
+  string run_id = 1;
+  string account_id = 2;          // Optional filter
+  int32 page_size = 3;            // Max results per page (default 100, max 1000)
+  string page_token = 4;          // Cursor for pagination
+}
+
+message ListResultsResponse {
+  repeated VarianceDetail variances = 1;
+  string next_page_token = 2;     // Empty when no more results
+  int32 total_count = 3;          // Total matching variances
+}
+
 message BalanceAssertionRequest {
   string instrument_code = 1;   // "GBP", "KWH"
   google.protobuf.Timestamp as_of = 2;
@@ -668,6 +696,11 @@ CREATE INDEX idx_settlement_runs_asset_period
     ON settlement_runs(tenant_id, asset_code, period_start, period_end);
 CREATE INDEX idx_settlement_runs_status ON settlement_runs(status)
     WHERE status NOT IN ('COMPLETED', 'FINALIZED');
+
+-- Prevent duplicate runs for the same settlement period (excludes FAILED for retries)
+CREATE UNIQUE INDEX idx_settlement_runs_unique_period
+    ON settlement_runs(tenant_id, asset_code, run_type, period_start, period_end)
+    WHERE status != 'FAILED';
 
 -- Settlement Snapshots (Behavior Qualifier)
 CREATE TABLE settlement_snapshots (
@@ -788,6 +821,95 @@ Published to Kafka per ADR-0004:
 
 **Kafka Topic:** `reconciliation.events.v1`
 
+### 8.1 Event Schema Definitions
+
+All events share a common envelope and are defined as Protobuf messages
+registered in the schema registry.
+
+```protobuf
+// Common envelope for all reconciliation events
+message ReconciliationEventEnvelope {
+  string event_id = 1;             // UUID, unique per event
+  string event_type = 2;           // e.g., "ReconciliationRunCompleted"
+  int32 event_version = 3;         // Schema version (starts at 1)
+  string tenant_id = 4;
+  string run_id = 5;
+  google.protobuf.Timestamp timestamp = 6;
+  oneof payload {
+    ReconciliationRunStartedEvent run_started = 10;
+    ReconciliationRunCompletedEvent run_completed = 11;
+    VarianceDetectedEvent variance_detected = 12;
+    PositionLockRequestedEvent position_lock_requested = 13;
+    DisputeCreatedEvent dispute_created = 14;
+    DisputeResolvedEvent dispute_resolved = 15;
+    BalanceImbalanceDetectedEvent balance_imbalance = 16;
+  }
+}
+
+message ReconciliationRunStartedEvent {
+  string asset_code = 1;
+  string run_type = 2;
+  google.protobuf.Timestamp period_start = 3;
+  google.protobuf.Timestamp period_end = 4;
+}
+
+message ReconciliationRunCompletedEvent {
+  string asset_code = 1;
+  string run_type = 2;
+  int32 variance_count = 3;
+  string total_variance = 4;       // Decimal as string
+  string currency = 5;
+  repeated VarianceSummary variances = 6;
+}
+
+message VarianceDetectedEvent {
+  string variance_id = 1;
+  string account_id = 2;
+  string asset_code = 3;
+  string quantity_delta = 4;
+  string value_delta = 5;
+  string currency = 6;
+  string variance_reason = 7;
+}
+
+message PositionLockRequestedEvent {
+  string asset_code = 1;
+  google.protobuf.Timestamp period_start = 2;
+  google.protobuf.Timestamp period_end = 3;
+}
+
+message DisputeCreatedEvent {
+  string dispute_id = 1;
+  string account_id = 2;
+  string asset_code = 3;
+  string quantity_difference = 4;
+  string reason = 5;
+}
+
+message DisputeResolvedEvent {
+  string dispute_id = 1;
+  string resolution_type = 2;      // "ADJUST", "REJECT", "EXTEND_WINDOW"
+  string adjustment_id = 3;        // Set if resolution_type == "ADJUST"
+}
+
+message BalanceImbalanceDetectedEvent {
+  string instrument_code = 1;
+  string total_debits = 2;
+  string total_credits = 3;
+  string imbalance = 4;
+}
+```
+
+### 8.2 Partition Strategy and Retention
+
+| Concern | Strategy |
+|---------|----------|
+| **Partition Key** | `tenant_id` for cross-tenant isolation; `account_id` appended for `VarianceDetected` events to ensure per-account ordering |
+| **Retention** | 30 days default; 90 days for audit-sensitive tenants (configurable) |
+| **Compaction** | Disabled (events are immutable, not key-value updates) |
+| **Compatibility** | Backward-compatible evolution via Protobuf Schema Registry; bump `event_version` field for breaking changes |
+| **Topic Versioning** | Major schema breaks create new topic (`reconciliation.events.v2`); consumers migrate with parallel consumption during transition |
+
 ## 9. Consumed Events
 
 | Event | Source | Action |
@@ -892,16 +1014,46 @@ graph TD
 
 ## 12. Position Keeping API Extensions Required
 
-The reconciliation service needs to read from Position Keeping. Some RPCs may not exist yet:
+The reconciliation service requires RPCs from Position Keeping that may
+not yet exist. These must be implemented before the dependent streams
+can proceed.
 
-| RPC | Purpose | Exists? |
-|-----|---------|---------|
-| `GetCurrentMeasurements(account_id, asset_code, period)` | Fetch current (non-superseded) measurements for a position window | Needs verification |
-| `BatchGetCurrentMeasurements(keys[])` | Batch version for reconciliation runs (avoid N+1) | Likely new |
-| `RequestPositionLock(run_id, period, asset_code)` | Lock positions after final settlement | Likely new |
-| `GetPositionSummary(instrument_code)` | Aggregate debits/credits for balance assertion | Likely new |
+| RPC | Purpose | Needed By | Exists? |
+|-----|---------|-----------|---------|
+| `GetCurrentMeasurements` | Fetch current (non-superseded) measurements for a position window | Stream 4 | Needs verification |
+| `BatchGetCurrentMeasurements` | Batch version for reconciliation runs (avoid N+1 queries) | Stream 4 | Likely new |
+| `RequestPositionLock` | Lock positions after final settlement (set `locked_at`) | Stream 6 | Likely new |
+| `GetPositionSummary` | Aggregate debits/credits per instrument for balance assertion | Stream 9 | Likely new |
 
-These extensions should be implemented as part of Stream 4 and 6.
+### 12.1 RPC Specifications
+
+**GetCurrentMeasurements:** Accepts `account_id`, `asset_code`,
+`period_start`, `period_end`. Returns all non-superseded measurements
+within the window. Must respect the Delta Engine's supersession logic
+(ADR-0017) so the reconciliation service sees the same "current truth"
+as the quality ladder.
+
+**BatchGetCurrentMeasurements:** Accepts a list of
+`(account_id, asset_code, period_start, period_end)` keys. Returns
+measurements for all keys in a single round-trip. Required to avoid
+N+1 query patterns during snapshot capture of large settlement runs
+(17,520+ positions).
+
+**RequestPositionLock:** Accepts `run_id`, `asset_code`,
+`period_start`, `period_end`. Sets `locked_at` on all matching
+positions. Must be idempotent (re-locking an already-locked position
+is a no-op). Returns count of positions locked. After locking, any
+new measurements for these positions should route to the dispute
+workflow via `MeasurementSuperseded` event.
+
+**GetPositionSummary:** Accepts `instrument_code` and optional
+`tenant_id`. Returns aggregated `total_debits` and `total_credits`
+for balance assertion. Must be consistent (read from a snapshot or
+use serializable isolation) to avoid phantom reads during assertion.
+
+These extensions are a prerequisite for Streams 4, 6, and 9. They
+should be tracked as a separate Position Keeping task and coordinated
+with the reconciliation implementation schedule.
 
 ## 13. Configuration
 
@@ -950,7 +1102,7 @@ These extensions should be implemented as part of Stream 4 and 6.
 | HighVarianceRate | >10% of positions have variances | Warning |
 | BalanceImbalance | Any instrument has non-zero imbalance | Critical |
 | DisputeBacklog | >50 pending disputes per tenant | Warning |
-| ReconciliationFailure | 3 consecutive run failures | Critical |
+| ReconciliationFailure | 3 consecutive run failures for same asset type | Critical |
 
 ## 15. Testing Strategy
 
@@ -975,13 +1127,32 @@ These extensions should be implemented as part of Stream 4 and 6.
 
 ### Performance Tests
 
-- Reconciliation run with 17,520 snapshots (1 year of half-hourly data)
-- Batch measurement fetch from Position Keeping
-- Concurrent settlement runs for different asset types
+| Test Scenario | Target | Notes |
+|---------------|--------|-------|
+| Snapshot capture (17,520 positions) | Complete within 10 minutes | 1 year of half-hourly energy data |
+| Variance detection + valuation (10,000 variances) | Complete within 20 minutes | Includes valuation round-trips |
+| End-to-end D+1 run | PENDING to COMPLETED within 1 hour | Per success criteria SLA |
+| Concurrent runs (5 asset types) | No degradation vs single run | Parallel runs for different asset types |
+| Balance assertion (100,000 positions) | Complete within 5 minutes | System-wide debit/credit check |
+| Batch measurement fetch (10,000 keys) | Response within 30 seconds | Tests PK BatchGetCurrentMeasurements |
 
 ## 16. Security Considerations
 
-### Authorization
+### 16.1 Authentication
+
+| Actor Type | Mechanism | Details |
+|------------|-----------|---------|
+| Service-to-service | mTLS | Mutual TLS with certificates issued by internal CA. All gRPC calls between Reconciliation and upstream services (PK, FA, CA, RD) use mTLS. |
+| Scheduled runs | Service account JWT | Settlement scheduler authenticates with short-lived JWT (15min TTL) signed by the platform identity provider. Required claims: `sub` (service name), `tenant_id` (for tenant-scoped runs), `scope` (reconciliation:execute). |
+| Tenant admin | OIDC | Federated via platform identity provider. Required scopes: `reconciliation:read` (view results), `reconciliation:write` (initiate runs, resolve disputes). |
+| Auditor | OIDC | Read-only access. Required scope: `reconciliation:read`. |
+| System admin | OIDC | Platform-wide access. Required scope: `reconciliation:admin`. |
+
+Token validation follows the platform-standard middleware: extract
+JWT from `Authorization` header, verify signature against JWKS
+endpoint, validate `tenant_id` claim matches request context.
+
+### 16.2 Authorization
 
 | Operation | Allowed Actors |
 |-----------|---------------|
@@ -991,13 +1162,20 @@ These extensions should be implemented as part of Stream 4 and 6.
 | Execute balance assertion | Service account, System admin |
 | Lock positions (finalize) | Settlement service account only |
 
-### Rate Limiting
+### 16.3 Rate Limiting
 
 | Operation | Limit | Rationale |
 |-----------|-------|-----------|
 | On-demand reconciliation runs | 10/hour/tenant | Prevent abuse of compute-heavy operation |
 | Dispute creation | 100/hour/tenant | Prevent dispute flooding |
 | Balance assertions | 60/hour/tenant | Expensive cross-service query |
+
+**Enforcement:** Rate limits are enforced at the application layer
+using a Redis-backed token bucket (per-tenant counters with TTL-based
+expiry). For single-instance deployments, an in-memory fallback is
+used. Redis key schema: `ratelimit:{tenant_id}:{operation}` with TTL
+matching the limit window (1 hour). An API gateway (e.g., Envoy) may
+enforce coarse ingress limits as an additional layer.
 
 ## 17. Migration Path
 
@@ -1025,12 +1203,16 @@ These extensions should be implemented as part of Stream 4 and 6.
 
 ## 18. Open Questions
 
-| # | Question | Impact | Decision Needed By |
-|---|----------|--------|-------------------|
-| 1 | Should balance assertions run per-tenant or platform-wide? | Stream 9 scope | Stream 9 start |
-| 2 | Do we need a dedicated Dispute Resolution UI or is CLI sufficient for MVP? | Stream 7 scope | Phase 3 |
-| 3 | Should reconciliation results be exposed through Gateway to external consumers? | Stream 3 scope | Stream 3 start |
-| 4 | How do we handle reconciliation for cross-tenant transfers (e.g., inter-company energy settlement)? | Architecture | Phase 2 |
+| # | Question | Impact | Decision Needed By | Blocker? |
+|---|----------|--------|-------------------|----------|
+| 1 | Should balance assertions run per-tenant or platform-wide? | Data model (tenant scoping), authorization, query complexity for Stream 9 | PRD review | Yes - affects schema design |
+| 2 | Do we need a dedicated Dispute Resolution UI or is CLI sufficient for MVP? | Stream 7 scope | Phase 3 | No |
+| 3 | Should reconciliation results be exposed through Gateway to external consumers? | API surface, security boundaries, authentication model for Stream 3 | PRD review | Yes - affects proto design |
+| 4 | How do we handle reconciliation for cross-tenant transfers (e.g., inter-company energy settlement)? | Multi-tenant settlement assumptions, data isolation model | PRD review | Yes - affects data model |
+
+**Note:** Q1, Q3, and Q4 have architectural implications that should
+be resolved during PRD review before implementation begins. Deferring
+these to stream start risks rework in the domain model or API surface.
 
 ## 19. BIAN Glossary
 
