@@ -6,6 +6,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"time"
 
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
@@ -13,6 +14,7 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"github.com/shopspring/decimal"
 	"google.golang.org/genproto/googleapis/type/money"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // RegisterStarlarkHandlers registers all Starlark service bindings for Current Account.
@@ -143,13 +145,20 @@ func createLienHandler(client *Client) saga.Handler {
 		// 5. Convert response to Starlark format (map[string]any)
 		lien := resp.GetLien()
 		lienAmount := lien.GetAmount().GetAmount()
-		return map[string]any{
+		result := map[string]any{
 			"lien_id":    lien.GetLienId(),
 			"account_id": lien.GetAccountId(),
 			"amount":     convertMoneyToDecimal(lienAmount),
 			"currency":   lienAmount.GetCurrencyCode(),
 			"status":     "ACTIVE",
-		}, nil
+		}
+
+		// Add valuation_analysis if basis is present (atomic valuation flow)
+		if basis := resp.GetBasis(); basis != nil {
+			result["valuation_analysis"] = ConvertValuationAnalysisToMap(basis)
+		}
+
+		return result, nil
 	}
 }
 
@@ -349,4 +358,78 @@ func convertMoneyToDecimal(m *money.Money) decimal.Decimal {
 	units := decimal.NewFromInt(m.Units)
 	nanos := decimal.NewFromInt(int64(m.Nanos)).Div(decimal.NewFromInt(1_000_000_000))
 	return units.Add(nanos)
+}
+
+// ConvertValuationAnalysisToMap converts a proto ValuationAnalysis to a Starlark-compatible map.
+// This preserves the full audit trail from atomic valuation so saga scripts can forward it
+// to downstream services (e.g., Position Keeping for ledger attribution).
+//
+// Exported so that other service handlers (e.g., payment-order) that call InitiateLien
+// can also expose valuation_analysis in their saga results.
+func ConvertValuationAnalysisToMap(va *currentaccountv1.ValuationAnalysis) map[string]any {
+	result := map[string]any{
+		"method_id":        va.GetMethodId(),
+		"method_version":   va.GetMethodVersion(),
+		"calculation_path": va.GetCalculationPath(),
+		"degraded_mode":    va.GetDegradedMode(),
+	}
+
+	// Convert applied_rates map[string]string to map[string]any for Starlark compatibility
+	if rates := va.GetAppliedRates(); len(rates) > 0 {
+		ratesMap := make(map[string]any, len(rates))
+		for k, v := range rates {
+			ratesMap[k] = v
+		}
+		result["applied_rates"] = ratesMap
+	}
+
+	// Convert observation_ids
+	if ids := va.GetObservationIds(); len(ids) > 0 {
+		result["observation_ids"] = ids
+	}
+
+	// Convert timestamps to RFC3339 strings
+	if ts := va.GetComputedAt(); ts != nil {
+		result["computed_at"] = formatTimestamp(ts)
+	}
+	if ts := va.GetKnowledgeAt(); ts != nil {
+		result["knowledge_at"] = formatTimestamp(ts)
+	}
+
+	// Convert market_data_qualities
+	if qualities := va.GetMarketDataQualities(); len(qualities) > 0 {
+		qualityMaps := make([]map[string]any, 0, len(qualities))
+		for _, q := range qualities {
+			qm := map[string]any{
+				"source":            q.GetSource(),
+				"quality_level":     q.GetQualityLevel(),
+				"staleness_seconds": q.GetStalenessSeconds(),
+			}
+			if ts := q.GetObservedAt(); ts != nil {
+				qm["observed_at"] = formatTimestamp(ts)
+			}
+			qualityMaps = append(qualityMaps, qm)
+		}
+		result["market_data_qualities"] = qualityMaps
+	}
+
+	// Convert warnings
+	if warnings := va.GetWarnings(); len(warnings) > 0 {
+		warningMaps := make([]map[string]any, 0, len(warnings))
+		for _, w := range warnings {
+			warningMaps = append(warningMaps, map[string]any{
+				"code":     w.GetCode(),
+				"message":  w.GetMessage(),
+				"severity": w.GetSeverity(),
+			})
+		}
+		result["warnings"] = warningMaps
+	}
+
+	return result
+}
+
+// formatTimestamp converts a protobuf Timestamp to RFC3339 string.
+func formatTimestamp(ts *timestamppb.Timestamp) string {
+	return ts.AsTime().UTC().Format(time.RFC3339)
 }
