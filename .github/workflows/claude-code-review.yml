@@ -219,7 +219,7 @@ jobs:
             ```bash
             EXISTING_ID=$(gh api \
               repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
-              --jq '[.[] | select(.user.login == "claude[bot]") | select(.body | contains("## Claude Code Review"))] | last | .id')
+              --jq '[.[] | select(.user.login == "claude[bot]") | select(.body | contains("## Claude Code Review"))] | last | .id // empty')
             ```
 
             **Step 2: Build summary content**
