@@ -187,12 +187,12 @@ and workflows.
     {
       "name": "record_meter_reading",
       "trigger": "api:POST:/meters/{meter_id}/readings",
-      "script_ref": "sagas/record_meter_reading.star"
+      "script": "def execute(ctx, event):\n    ..."
     },
     {
       "name": "process_topup",
       "trigger": "webhook:stripe:payment_intent.succeeded",
-      "script_ref": "sagas/process_topup.star"
+      "script": "def execute(ctx, event):\n    ..."
     }
   ],
 
@@ -205,6 +205,25 @@ and workflows.
   }
 }
 ```
+
+#### Design Decision: Inline Scripts (Wire Format)
+
+The Manifest wire format requires `script` and `validation_expression`
+as **inline strings**, not file references.
+
+**Rationale**:
+
+1. **Atomicity**: The Manifest is a complete snapshot of the economy.
+   External file references break the guarantee that "this JSON is the
+   complete truth."
+2. **AI Compatibility**: LLMs generate a single cohesive JSON object
+   more reliably than coordinating multi-file output.
+
+**Developer Workflow**: The `meridian-cli apply` command includes a
+**hydrator** that reads `script_ref: "file.star"` from local
+developer-friendly YAML/JSON and injects file contents as inline
+`script` strings before sending to the API. Developers get file-based
+IDE support; the system gets atomic wire format.
 
 #### AI-Native Validation Feedback (Already Exists)
 
@@ -242,8 +261,8 @@ flowchart TD
       ]
     },
     {
-      "location": "sagas[0].script_ref",
-      "expression": "sagas/record_meter_reading.star",
+      "location": "sagas[0].script",
+      "expression": "def execute(ctx, event): ...",
       "error_type": "STARLARK_COMPILE_ERROR",
       "message": "undefined: ctx.position_keepng",
       "line": 12,
@@ -306,21 +325,47 @@ members:
 
 | Task | ID | Description | Complexity |
 |------|-----|-------------|------------|
-| **2.1** | `cp.auth.staff-table` | Create `platform.staff_users` table with tenant association | 2 |
+| **2.1** | `cp.auth.staff-table` | Create `staff_users` table in tenant schema (`org_{id}`) | 2 |
 | **2.2** | `cp.auth.staff-service` | Staff CRUD: invite, activate, deactivate, list | 2 |
-| **2.3** | `cp.auth.apikey-table` | Create `platform.api_keys` with hashed keys, scopes, rate limits | 2 |
-| **2.4** | `cp.auth.apikey-gateway` | Update Gateway to validate API keys from database | 2 |
+| **2.3** | `cp.auth.apikey-table` | Create `api_keys` in tenant schema with prefixed keys and hashed storage | 2 |
+| **2.4** | `cp.auth.apikey-gateway` | Update Gateway to route API keys by prefix to correct tenant schema | 2 |
+
+#### Design Decision: Tenant-Scoped Staff (ADR-0016 Alignment)
+
+Staff and API key data live in tenant schemas (`org_{id}`), not a
+shared platform schema. This maintains strict data isolation consistent
+with the schema-per-tenant architecture (ADR-0016).
+
+**Gateway Routing via Prefixed Keys**: API keys embed a routable
+tenant slug: `pk_{tenant_slug}_{entropy}` (e.g., `pk_motive_a8b9c...`).
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Gateway
+    participant Cache
+    participant TenantDB as org_{id}.api_keys
+
+    Client->>Gateway: Authorization: pk_motive_a8b9c...
+    Gateway->>Gateway: Parse prefix → slug "motive"
+    Gateway->>Cache: Resolve slug → tenant_id
+    Cache-->>Gateway: tenant_id = "motive"
+    Gateway->>TenantDB: SELECT key_hash FROM org_motive.api_keys<br/>WHERE key_prefix = 'pk_motive_a8b9'
+    TenantDB-->>Gateway: key_hash (SHA-256)
+    Gateway->>Gateway: Verify SHA-256(full_key) = key_hash
+    Gateway-->>Client: 200 OK (tenant context set)
+```
+
+This achieves O(1) routing without a centralized secrets table.
 
 #### Data Model
 
 ```sql
--- Lives in meridian_platform database, public schema.
--- Distinct from org_{id} tenant schemas (ADR-0016).
--- Tenant Zero hosts shared auth records, maintaining the
--- "Everything is a Tenant" invariant.
-CREATE TABLE platform.staff_users (
+-- Lives in tenant schema (org_{id}), not shared platform schema.
+-- Maintains strict data isolation per ADR-0016.
+-- Gateway routes to correct schema via prefixed API keys.
+CREATE TABLE staff_users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL REFERENCES platform.tenants(id),
     email VARCHAR(255) NOT NULL,
     name VARCHAR(255),
     role VARCHAR(50) NOT NULL DEFAULT 'operator',
@@ -328,14 +373,13 @@ CREATE TABLE platform.staff_users (
     auth_provider_id VARCHAR(255),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(tenant_id, email)
+    UNIQUE(email)
 );
 
-CREATE TABLE platform.api_keys (
+CREATE TABLE api_keys (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL REFERENCES platform.tenants(id),
-    staff_user_id UUID REFERENCES platform.staff_users(id),
-    key_prefix VARCHAR(12) NOT NULL,
+    staff_user_id UUID REFERENCES staff_users(id),
+    key_prefix VARCHAR(20) NOT NULL,
     key_hash BYTEA NOT NULL, -- SHA-256 (fast; keys are high-entropy)
     name VARCHAR(255),
     scopes TEXT[] NOT NULL DEFAULT '{}',
@@ -348,7 +392,7 @@ CREATE TABLE platform.api_keys (
 );
 
 CREATE INDEX idx_api_keys_prefix
-    ON platform.api_keys(key_prefix)
+    ON api_keys(key_prefix)
     WHERE revoked_at IS NULL;
 ```
 
@@ -358,7 +402,8 @@ CREATE INDEX idx_api_keys_prefix
 - `status`: invited, active, suspended
 - `auth_provider_id`: Auth0/Clerk user ID
 - `staff_user_id`: nullable for service keys
-- `key_prefix`: e.g., "pk_live_abc1"
+- `key_prefix`: structured as `pk_{tenant_slug}_{first8}` for
+  Gateway routing (e.g., `pk_motive_a8b9c123`)
 - `key_hash`: SHA-256 hash (not argon2id -- API keys are
   high-entropy machine-generated strings validated on every request;
   SHA-256 keeps the Gateway hot path fast)
@@ -368,9 +413,12 @@ CREATE INDEX idx_api_keys_prefix
 
 - [ ] Staff users can be invited to a tenant
 - [ ] API keys are hashed (never stored plaintext)
+- [ ] API key format enforces routable prefix: `pk_{slug}_{entropy}`
+- [ ] Gateway parses key prefix, resolves tenant, queries tenant schema
 - [ ] Gateway validates keys from database with caching
 - [ ] Keys can be scoped to specific permissions
 - [ ] Key usage is tracked (last_used_at)
+- [ ] No staff or key data in shared/platform schema
 
 ---
 
@@ -597,7 +645,7 @@ FIRST, then settles to Stripe. This maintains ledger integrity.
 
 ```mermaid
 flowchart LR
-    A[Stripe Webhook] --> B[Revenue Position\ntenant-zero]
+    A[Stripe Webhook] --> B[Revenue Position\nmeridian-ops tenant]
     B --> C[Stripe Settlement]
     B -. "Internal Ledger is\nSource of Truth" .-> B
 ```
@@ -619,14 +667,18 @@ func (h *StripeWebhookHandler) HandlePaymentIntentSucceeded(
 ) error {
     pi := event.Data.Object.(*stripe.PaymentIntent)
 
-    // Trigger saga via Kafka
+    // Trigger saga via Kafka.
+    // StripeChargeID flows through as external_reference_id on position
+    // entries for O(1) reconciliation. CausationID remains a UUIDv5
+    // (deterministic from saga_instance_id + step_index) per existing
+    // saga architecture.
     return h.publisher.Publish(ctx, &events.PaymentReceived{
         TenantID:        pi.Metadata["tenant_id"],
         PartyID:         pi.Metadata["party_id"],
         Amount:          pi.Amount,
         Currency:        pi.Currency,
         StripePaymentID: pi.ID,
-        CausationID:     event.ID,
+        ExternalRef:     pi.LatestCharge.ID, // ch_12345
     })
 }
 ```
@@ -634,13 +686,13 @@ func (h *StripeWebhookHandler) HandlePaymentIntentSucceeded(
 ```python
 # sagas/stripe_payment_received.star
 def execute(ctx, event):
-    # Record revenue position (tenant-zero ledger)
+    # Record revenue position (nostro account)
     nostro_result = ctx.position_keeping.record_transaction(
         account_id = "stripe_nostro",
         instrument = event.currency.upper(),
         quantity = event.amount / 100,
         direction = "DEBIT",
-        causation_id = event.causation_id,
+        external_reference_id = event.external_ref,  # ch_12345
     )
 
     # Credit customer's prepaid balance (primary posting)
@@ -649,7 +701,7 @@ def execute(ctx, event):
         instrument = event.currency.upper(),
         quantity = event.amount / 100,
         direction = "CREDIT",
-        causation_id = event.causation_id,
+        external_reference_id = event.external_ref,  # ch_12345
     )
 
     return {
@@ -664,8 +716,9 @@ def execute(ctx, event):
 
 - [ ] Stripe webhooks are verified (signature check)
 - [ ] Payment creates double-entry in ledger
-- [ ] `causation_id` on position entries contains the Stripe Charge ID
-  (e.g., `ch_12345`) for O(1) reconciliation joins
+- [ ] `external_reference_id` on position entries contains the Stripe
+  Charge ID (e.g., `ch_12345`) for O(1) reconciliation joins.
+  `causation_id` remains a UUIDv5 for internal saga causation trees
 - [ ] Daily reconciliation catches discrepancies
 - [ ] Webhook failures are retried with idempotency
 
@@ -677,8 +730,8 @@ def execute(ctx, event):
 subscription billing.
 
 > **Note**: This is for billing **Meridian's customers**, not the
-> tenant's customers. Uses tenant-zero as the billing ledger
-> (dogfooding).
+> tenant's customers. Uses a dedicated `meridian-ops` tenant as the
+> billing ledger (dogfooding).
 
 | Task | Description | Complexity |
 |------|-------------|------------|
@@ -893,8 +946,8 @@ Each task should be entered as:
     Create the admin/staff identity layer separate from Party.
     Staff users own API keys and access the Admin Console.
     Includes:
-    - platform.staff_users table
-    - platform.api_keys table with hashed keys
+    - staff_users table (tenant schema, org_{id})
+    - api_keys table with hashed keys and prefixed routing
     - Staff CRUD service
   complexity: 4
   dependencies: []
@@ -938,11 +991,11 @@ billing:
 ```mermaid
 flowchart TD
     A[Usage Event] --> B[Utilization Metering]
-    B --> C["Position (tenant-zero)"]
+    B --> C["Position (meridian-ops tenant)"]
     C --> D[Billing Service]
     D --> E[Stripe Invoice]
     E --> F[Payment Webhook]
-    F --> G["Revenue Position (tenant-zero)"]
+    F --> G["Revenue Position (meridian-ops tenant)"]
 ```
 
 This means:
@@ -956,7 +1009,7 @@ This means:
 | Aspect | Party | Staff |
 |--------|-------|-------|
 | **Purpose** | Customer with ledger positions | Employee managing the system |
-| **Lives in** | Tenant schema (`org_xxx.party`) | Platform schema (`platform.staff_users`) |
+| **Lives in** | Tenant schema (`org_xxx.party`) | Tenant schema (`org_xxx.staff_users`) |
 | **Has** | Balances, transactions | API keys, console access |
 | **Created by** | Tenant API calls | Admin invitation |
 | **Examples** | "John Smith - Customer #123" | "Jane Doe - Acme Admin" |
