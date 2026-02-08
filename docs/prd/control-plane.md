@@ -14,7 +14,7 @@ triggers:
   - Planning the CFO Glass Box dashboard
 instructions: |
   This PRD defines the Control Plane for operating Meridian commercially.
-  Two execution paths: First Client (43 points) and Full SaaS (90 points).
+  Two execution paths: First Client (43 points) and Full SaaS (106 points).
   Core insight: the Manifest is the product. AI is one way to generate it.
   The ApplyManifest orchestrator is itself a Starlark Saga (recursive elegance).
   Staff identity is separate from Party (customers with ledger positions).
@@ -25,7 +25,7 @@ instructions: |
 
 > **Status**: Not Started
 > **Task Master Tag**: `control-plane`
-> **Complexity**: 43 (First Client) / 90 (Full SaaS)
+> **Complexity**: 43 (First Client) / 106 (Full SaaS)
 > **Last Updated**: 2026-02-08
 
 ---
@@ -40,7 +40,7 @@ This PRD defines two paths:
 
 1. **First Client (43 points)** - Minimum viable path to demo
    a paying client
-2. **Full SaaS Build (90 points)** - Complete self-service platform
+2. **Full SaaS Build (106 points)** - Complete self-service platform
 
 The key insight: **the Manifest is the product, not a feature**. The JSON
 schema that defines a business model is the core primitive. AI is just one
@@ -615,7 +615,7 @@ flowchart LR
 ```go
 // Webhook handler
 func (h *StripeWebhookHandler) HandlePaymentIntentSucceeded(
-    event stripe.Event,
+    ctx context.Context, event stripe.Event,
 ) error {
     pi := event.Data.Object.(*stripe.PaymentIntent)
 
@@ -810,7 +810,7 @@ graph LR
 > **Note:** Adjusted to 43 after detailed task breakdown (original
 > estimate was 34). Includes proto-sync CI check (+1).
 
-### Full SaaS Build (90 Points)
+### Full SaaS Build (106 Points)
 
 After First Client milestone:
 
