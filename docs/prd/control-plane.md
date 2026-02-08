@@ -162,10 +162,71 @@ The Manifest is the single source of truth that prevents configuration drift. It
 }
 ```
 
+#### AI-Native Validation Feedback (Already Exists)
+
+The Starlark and CEL runtimes already produce **structured, actionable error messages** at compilation time. This is the key to the AI-native feedback loop:
+
+```
+User/AI generates Manifest
+        ↓
+   ValidateManifest()
+        ↓
+   ┌────────────────────────────────────────────────────────┐
+   │ Starlark Compiler    │ CEL Type Checker               │
+   │ - Syntax errors      │ - Type mismatches              │
+   │ - Undefined symbols  │ - Missing fields               │
+   │ - Import failures    │ - Invalid operators            │
+   └────────────────────────────────────────────────────────┘
+        ↓
+   Structured Error Response (machine-readable)
+        ↓
+   Feed back to AI / Display to user
+        ↓
+   Iterate until valid
+```
+
+**Example Validation Response** (what we already get):
+
+```json
+{
+  "valid": false,
+  "errors": [
+    {
+      "location": "policies.validation.customer_account_balance",
+      "expression": "balance.quanity >= 0",
+      "error_type": "CEL_UNDEFINED_FIELD",
+      "message": "undefined field 'quanity' on type 'Balance'",
+      "suggestion": "Did you mean 'quantity'?",
+      "available_fields": ["quantity", "instrument", "bucket_id", "as_of"]
+    },
+    {
+      "location": "sagas[0].script_ref",
+      "expression": "sagas/record_meter_reading.star",
+      "error_type": "STARLARK_COMPILE_ERROR",
+      "message": "undefined: ctx.position_keepng",
+      "line": 12,
+      "column": 5,
+      "suggestion": "Did you mean 'ctx.position_keeping'?"
+    }
+  ],
+  "warnings": [
+    {
+      "location": "instruments[0]",
+      "message": "Instrument 'KWH' has no valuation rule to base currency",
+      "severity": "WARN"
+    }
+  ]
+}
+```
+
+**Why This Matters**: The validation layer speaks the same language as the AI. When Opus generates a Manifest with a typo, the compiler tells it exactly what's wrong and how to fix it. No human in the loop required for iteration.
+
 #### Acceptance Criteria
 - [ ] JSON Schema published with full documentation
 - [ ] Schema validation catches structural errors before API calls
 - [ ] Dry-run validates CEL syntax and Starlark compilation
+- [ ] **Validation errors include `suggestion` field for AI feedback loop**
+- [ ] **Error responses are JSON-structured, not just strings**
 - [ ] Example manifests for: energy, carbon credits, SaaS billing, loyalty points
 
 ---
@@ -527,12 +588,64 @@ def execute(ctx, event):
 
 > **Renamed from "AI Configuration Assistant"** - The Manifest is the product; AI is one input method.
 
+#### AI-Native Architecture (Leverage Existing Compiler)
+
+The system is **AI-native by design** because the compiler feedback loop is already structured for machine consumption:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    OPUS GENERATION LOOP                         │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  User: "I run a prepaid energy company with day/night tariffs" │
+│                          ↓                                      │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │ Opus generates Manifest v1                                │  │
+│  │ (instruments: KWH, GBP; policies: balance >= 0)          │  │
+│  └────────────────────────┬─────────────────────────────────┘  │
+│                           ↓                                     │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │ ValidateManifest() → Starlark/CEL Compiler               │  │
+│  │ Error: "undefined field 'quanity' on Balance"            │  │
+│  │ Suggestion: "Did you mean 'quantity'?"                   │  │
+│  └────────────────────────┬─────────────────────────────────┘  │
+│                           ↓                                     │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │ Opus receives structured error, auto-corrects            │  │
+│  │ Generates Manifest v2 with fix                           │  │
+│  └────────────────────────┬─────────────────────────────────┘  │
+│                           ↓                                     │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │ ValidateManifest() → ✓ Valid                             │  │
+│  │ PlanManifest() → "Will create 2 instruments, 3 accounts" │  │
+│  └────────────────────────┬─────────────────────────────────┘  │
+│                           ↓                                     │
+│  User: "Looks good, apply it"                                  │
+│                           ↓                                     │
+│  ApplyManifest() → Running tenant in < 5 minutes               │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Key Insight**: We don't need to build "AI validation" - the compiler IS the validator. Opus just needs to:
+1. Generate JSON that conforms to the schema
+2. Read structured errors from the compiler
+3. Self-correct until valid
+
+This is why Starlark and CEL were chosen: **they have excellent error messages by design**.
+
 | Task | Description | Complexity |
 |------|-------------|------------|
-| **9.1** | Create Opus system prompt for business model translation | 2 |
-| **9.2** | Implement conversational UI for Manifest generation | 3 |
-| **9.3** | Add "executable examples" for CEL/Starlark validation | 2 |
+| **9.1** | Create Opus system prompt with schema + error handling instructions | 2 |
+| **9.2** | Implement conversational UI with validate-on-change | 3 |
+| **9.3** | Add "executable examples" corpus for few-shot learning | 2 |
 | **9.4** | Implement export to YAML for GitOps workflows | 1 |
+
+#### Acceptance Criteria
+- [ ] Opus can self-correct from compiler errors without human help
+- [ ] < 3 iterations from natural language to valid Manifest (p95)
+- [ ] Generated CEL/Starlark passes type checking on first valid attempt
+- [ ] User can export to YAML and apply via `git push`
 
 ---
 
@@ -717,3 +830,48 @@ This enables:
 - GitOps workflows (commit manifest → auto-apply)
 - Rollback by applying previous version
 - Preview changes before apply (plan mode)
+
+### D. AI-Native by Design
+
+Meridian's technology choices were made with AI-assisted configuration in mind:
+
+| Choice | Why AI-Native |
+|--------|---------------|
+| **Starlark** | Hermetic, deterministic, excellent error messages with line/column info |
+| **CEL** | Strongly typed with inference, "Did you mean X?" suggestions built-in |
+| **JSON Schema** | LLMs are pre-trained on JSON, schema provides guardrails |
+| **Structured Errors** | Machine-readable errors can feed directly back to LLM context |
+| **Dry-Run Validation** | Test without side effects, iterate until correct |
+
+**The Compiler as AI Pair Programmer**:
+
+Traditional systems require humans to interpret error messages and fix code. Meridian's compiler produces errors that are:
+
+1. **Specific**: "Line 12, column 5: undefined 'ctx.position_keepng'"
+2. **Actionable**: "Did you mean 'ctx.position_keeping'?"
+3. **Contextual**: "Available fields: quantity, instrument, bucket_id, as_of"
+4. **Structured**: JSON format, not prose
+
+This means an LLM can:
+1. Generate a Manifest
+2. Receive structured validation errors
+3. Self-correct without human interpretation
+4. Iterate until valid
+
+**Existing Infrastructure That Enables This**:
+
+```go
+// Already in shared/pkg/valuation/engine.go
+type ValidationError struct {
+    Location    string   `json:"location"`
+    Expression  string   `json:"expression"`
+    ErrorType   string   `json:"error_type"`
+    Message     string   `json:"message"`
+    Suggestion  string   `json:"suggestion,omitempty"`
+    LineNumber  int      `json:"line,omitempty"`
+    Column      int      `json:"column,omitempty"`
+    Available   []string `json:"available_fields,omitempty"`
+}
+```
+
+This is not "adding AI" - this is exposing existing compiler intelligence to external consumers (including AI).
