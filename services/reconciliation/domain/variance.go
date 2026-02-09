@@ -34,6 +34,12 @@ type Variance struct {
 	// VarianceAmount is the difference (actual - expected).
 	VarianceAmount decimal.Decimal
 
+	// ValueDelta is the monetary impact of the variance in settlement currency.
+	ValueDelta decimal.Decimal
+
+	// Currency is the settlement currency for the value delta.
+	Currency string
+
 	// Reason classifies the type of discrepancy.
 	Reason VarianceReason
 
@@ -90,7 +96,7 @@ func NewVariance(
 		ActualAmount:   actualAmount,
 		VarianceAmount: actualAmount.Sub(expectedAmount),
 		Reason:         reason,
-		Status:         VarianceStatusOpen,
+		Status:         VarianceStatusDetected,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}, nil

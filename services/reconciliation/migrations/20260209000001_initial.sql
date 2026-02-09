@@ -79,6 +79,8 @@ CREATE TABLE "variance" (
   "expected_amount" decimal(38, 18) NOT NULL,
   "actual_amount" decimal(38, 18) NOT NULL,
   "variance_amount" decimal(38, 18) NOT NULL,
+  "value_delta" decimal(38, 18) NOT NULL DEFAULT 0,
+  "currency" character varying(10) NOT NULL DEFAULT '',
   "reason" character varying(30) NOT NULL,
   "status" character varying(20) NOT NULL DEFAULT 'OPEN',
   "resolution_note" text NULL,
@@ -100,10 +102,10 @@ CREATE INDEX "idx_variance_status" ON "variance" ("status");
 
 ALTER TABLE "variance"
   ADD CONSTRAINT "chk_variance_reason"
-  CHECK ("reason" IN ('AMOUNT_MISMATCH', 'MISSING_ENTRY', 'DUPLICATE_ENTRY', 'TIMING_DIFFERENCE', 'CURRENCY_MISMATCH', 'DIRECTION_ERROR', 'OTHER'));
+  CHECK ("reason" IN ('AMOUNT_MISMATCH', 'MISSING_ENTRY', 'DUPLICATE_ENTRY', 'TIMING_DIFFERENCE', 'CURRENCY_MISMATCH', 'DIRECTION_ERROR', 'QUALITY_UPGRADE', 'EXTERNAL_MISMATCH', 'CORRECTION_APPLIED', 'OTHER'));
 ALTER TABLE "variance"
   ADD CONSTRAINT "chk_variance_status"
-  CHECK ("status" IN ('OPEN', 'INVESTIGATING', 'DISPUTED', 'RESOLVED', 'ACCEPTED'));
+  CHECK ("status" IN ('DETECTED', 'VALUED', 'OPEN', 'INVESTIGATING', 'DISPUTED', 'RESOLVED', 'ACCEPTED'));
 
 -- Create "dispute" table (BQ - Business Query)
 CREATE TABLE "dispute" (

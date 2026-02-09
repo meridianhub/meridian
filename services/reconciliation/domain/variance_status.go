@@ -5,6 +5,8 @@ type VarianceStatus string
 
 // Supported variance statuses.
 const (
+	VarianceStatusDetected      VarianceStatus = "DETECTED"
+	VarianceStatusValued        VarianceStatus = "VALUED"
 	VarianceStatusOpen          VarianceStatus = "OPEN"
 	VarianceStatusInvestigating VarianceStatus = "INVESTIGATING"
 	VarianceStatusDisputed      VarianceStatus = "DISPUTED"
@@ -15,7 +17,8 @@ const (
 // IsValid checks if the variance status is a recognized value.
 func (s VarianceStatus) IsValid() bool {
 	switch s {
-	case VarianceStatusOpen, VarianceStatusInvestigating,
+	case VarianceStatusDetected, VarianceStatusValued,
+		VarianceStatusOpen, VarianceStatusInvestigating,
 		VarianceStatusDisputed, VarianceStatusResolved,
 		VarianceStatusAccepted:
 		return true
@@ -40,6 +43,8 @@ func (s VarianceStatus) CanTransitionTo(target VarianceStatus) bool {
 	}
 
 	validTransitions := map[VarianceStatus][]VarianceStatus{
+		VarianceStatusDetected:      {VarianceStatusValued, VarianceStatusOpen, VarianceStatusResolved, VarianceStatusAccepted},
+		VarianceStatusValued:        {VarianceStatusOpen, VarianceStatusInvestigating, VarianceStatusDisputed, VarianceStatusResolved, VarianceStatusAccepted},
 		VarianceStatusOpen:          {VarianceStatusInvestigating, VarianceStatusDisputed, VarianceStatusResolved, VarianceStatusAccepted},
 		VarianceStatusInvestigating: {VarianceStatusDisputed, VarianceStatusResolved, VarianceStatusAccepted},
 		VarianceStatusDisputed:      {VarianceStatusInvestigating, VarianceStatusResolved, VarianceStatusAccepted},
