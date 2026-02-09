@@ -388,7 +388,7 @@ rpc ImportNodes(stream ReferenceDataNode) returns (ImportNodesResponse);
 | RD-5 | Create gRPC handler with node CRUD operations | 3 | RD-3 |
 | RD-6 | Add hierarchy traversal RPCs (children, ancestors, subtree) | 3 | RD-5 |
 | RD-7 | Implement streaming bulk import for seeding | 3 | RD-5 |
-| RD-8 | Add tenant isolation (reuse existing rate limiting middleware) | 2 | RD-5 |
+| RD-8 | Add tenant isolation (reuse existing rate-limiting middleware) | 2 | RD-5 |
 | RD-9 | Integrate with existing Redis cache tier for hot-path lookups | 2 | RD-5 |
 | RD-10 | Integration tests: hierarchy + bi-temporal queries on CockroachDB | 3 | RD-4, RD-6 |
 
@@ -485,12 +485,14 @@ def compute_forecast(ctx):
     return points
 ```
 
-**Starlark guarantees** (inherited from existing platform):
+**Starlark safety properties** (inherited from existing platform):
 
 - No `while` loops (only `for` over finite iterables)
 - No recursion
-- All programs guaranteed to terminate
-- Deterministic execution time
+- Execution bounded by configured timeout (`context.WithTimeout` +
+  `thread.Cancel`); programs terminate within the timeout window
+- Near-deterministic execution time (bounded by timeout, subject to
+  goroutine scheduling)
 
 #### Built-in Algorithm Templates
 

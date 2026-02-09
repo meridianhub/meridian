@@ -244,6 +244,11 @@ CREATE TABLE party_payment_methods (
 CREATE INDEX idx_party_payment_methods_party
     ON party_payment_methods(party_id) WHERE status = 'ACTIVE';
 
+-- Prevent duplicate payment methods from webhook retries
+CREATE UNIQUE INDEX idx_party_payment_methods_provider_method
+    ON party_payment_methods(provider, provider_method_id)
+    WHERE status = 'ACTIVE';
+
 -- Enforce single default per party
 CREATE UNIQUE INDEX idx_party_payment_methods_default
     ON party_payment_methods(party_id)
@@ -332,7 +337,7 @@ Manifest schema. This PRD defines its structure:
       "provider": "stripe_connect",
       "mode": "standard",
       "account_id": "acct_1234567890",
-      "webhook_endpoint_secret": "whsec_...",
+      "webhook_endpoint_secret": "whsec_...",  // stored in secret manager, not plaintext
       "platform_fee": {
         "type": "percentage",
         "value": "2.5"
@@ -509,22 +514,31 @@ func (a *StripeWebhookAdapter) ParseWebhook(
         return nil, fmt.Errorf("stripe signature: %w", err)
     }
 
+    // Unmarshal from event.Data.Raw for type safety (not event.Data.Object
+    // which requires unchecked type assertions that panic on nil fields).
+    var pi stripe.PaymentIntent
+    if err := json.Unmarshal(event.Data.Raw, &pi); err != nil {
+        return nil, fmt.Errorf("unmarshal payment intent: %w", err)
+    }
+
     switch event.Type {
     case "payment_intent.succeeded":
-        pi := event.Data.Object
         return &WebhookRequest{
-            GatewayReferenceID: pi["id"].(string),
-            PaymentOrderID:     pi["metadata"].(map[string]any)["payment_order_id"].(string),
+            GatewayReferenceID: pi.ID,
+            PaymentOrderID:     pi.Metadata["payment_order_id"],
             Status:             "SETTLED",
             Timestamp:          time.Unix(event.Created, 0),
         }, nil
     case "payment_intent.payment_failed":
-        pi := event.Data.Object
+        var msg string
+        if pi.LastPaymentError != nil {
+            msg = pi.LastPaymentError.Message
+        }
         return &WebhookRequest{
-            GatewayReferenceID: pi["id"].(string),
-            PaymentOrderID:     pi["metadata"].(map[string]any)["payment_order_id"].(string),
+            GatewayReferenceID: pi.ID,
+            PaymentOrderID:     pi.Metadata["payment_order_id"],
             Status:             "REJECTED",
-            Message:            pi["last_payment_error"].(map[string]any)["message"].(string),
+            Message:            msg,
             Timestamp:          time.Unix(event.Created, 0),
         }, nil
     default:
