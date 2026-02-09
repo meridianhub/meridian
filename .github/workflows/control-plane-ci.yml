@@ -50,10 +50,17 @@ jobs:
         run: buf generate
 
       - name: Install protoc-gen-jsonschema
-        run: go install github.com/chrusty/protoc-gen-jsonschema/cmd/protoc-gen-jsonschema@latest
+        run: |
+          go install github.com/chrusty/protoc-gen-jsonschema/cmd/protoc-gen-jsonschema@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
       - name: Generate JSON Schema from manifest proto
-        run: make proto-jsonschema
+        run: |
+          buf generate --template buf.gen.jsonschema.yaml --path api/proto/meridian/control_plane/v1/manifest.proto
+          mkdir -p api/jsonschema
+          cp api/jsonschema/meridian.control_plane.v1/Manifest.json api/jsonschema/manifest.v1.schema.json
+          rm -rf api/jsonschema/meridian.control_plane.v1
+          echo "JSON Schema generated: api/jsonschema/manifest.v1.schema.json"
 
   schema-sync-check:
     name: Schema Sync Check
@@ -76,7 +83,9 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install protoc-gen-jsonschema
-        run: go install github.com/chrusty/protoc-gen-jsonschema/cmd/protoc-gen-jsonschema@latest
+        run: |
+          go install github.com/chrusty/protoc-gen-jsonschema/cmd/protoc-gen-jsonschema@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
       - name: Validate JSON Schema is in sync with proto
         run: make validate-manifest-jsonschema
@@ -199,8 +208,6 @@ jobs:
         run: go mod download
 
       - name: Run integration tests
-        run: |
-          go test -race -v -count=1 -run "Integration" ./services/control-plane/... 2>&1 || {
-            echo "No integration tests found or all passed"
-          }
+        run: go test -race -v -count=1 -run "Integration" ./services/control-plane/...
+        continue-on-error: true  # No integration tests exist yet; remove when added
         timeout-minutes: 10
