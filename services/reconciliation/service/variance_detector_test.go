@@ -201,7 +201,7 @@ func TestDetectVariances_SubsequentRun_DetectsDelta(t *testing.T) {
 	snapRepo := &mockSnapshotRepo{}
 	varianceRepo := &mockVarianceRepoFull{}
 
-	// Create a previous completed run
+	// Create a previous completed run with an earlier CreatedAt
 	prevRun, _ := domain.NewSettlementRun(
 		"ACC-001",
 		domain.ReconciliationScopeAccount,
@@ -226,23 +226,35 @@ func TestDetectVariances_SubsequentRun_DetectsDelta(t *testing.T) {
 	currRun := newRunningTestRun(t)
 	_ = runRepo.Create(context.Background(), currRun)
 
-	// Current run's snapshots (different actual)
+	// Current run's snapshots (different actual balance from previous)
 	currSnap, _ := domain.NewSettlementSnapshot(
 		currRun.RunID, "ACC-001", "GBP",
 		decimal.NewFromFloat(1000.00),
-		decimal.NewFromFloat(1050.00), // delta of 50
+		decimal.NewFromFloat(1050.00), // delta of 50 vs previous run's actual
 		"pk", nil,
 	)
 
-	// Return snapshots based on RunID
+	// Store both snapshots - FindByRunID filters by RunID
 	snapRepo.snapshots = []*domain.SettlementSnapshot{currSnap, prevSnap}
 
 	detector := NewVarianceDetector(runRepo, snapRepo, varianceRepo)
 	variances, err := detector.DetectVariances(context.Background(), currRun.RunID)
 	require.NoError(t, err)
 
-	// Should detect variance from the delta between runs
-	assert.NotEmpty(t, variances)
+	// Should detect exactly 1 variance from the cross-run delta
+	require.Len(t, variances, 1)
+
+	v := variances[0]
+	assert.Equal(t, currRun.RunID, v.RunID)
+	assert.Equal(t, "ACC-001", v.AccountID)
+	assert.Equal(t, "GBP", v.InstrumentCode)
+	// Cross-run comparison: expected = previous actual (1000), actual = current actual (1050)
+	assert.True(t, decimal.NewFromFloat(1000.00).Equal(v.ExpectedAmount),
+		"expected amount should be previous run's actual balance, got %s", v.ExpectedAmount)
+	assert.True(t, decimal.NewFromFloat(1050.00).Equal(v.ActualAmount),
+		"actual amount should be current run's actual balance, got %s", v.ActualAmount)
+	assert.True(t, decimal.NewFromFloat(50.00).Equal(v.VarianceAmount),
+		"variance amount should be delta between runs (50), got %s", v.VarianceAmount)
 }
 
 func TestDetectVariances_RunNotRunning(t *testing.T) {
