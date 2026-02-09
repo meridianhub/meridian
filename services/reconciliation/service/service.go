@@ -172,6 +172,9 @@ func (s *AccountReconciliationService) AssertBalance(
 }
 
 // extractCallerRole reads the caller's role from gRPC metadata.
+// TODO: Replace with validated role from auth interceptor/gateway. Currently
+// trusts client-supplied metadata which is acceptable for internal service-to-service
+// calls but must be secured before external exposure.
 func extractCallerRole(ctx context.Context) CallerRole {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {

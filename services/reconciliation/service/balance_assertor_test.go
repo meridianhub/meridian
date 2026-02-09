@@ -319,7 +319,8 @@ func TestExecuteBalanceAssertion_CrossAccountAuthorization(t *testing.T) {
 
 func TestExecuteBalanceAssertion_NostroVostroUnimplemented(t *testing.T) {
 	repo := newMockAssertionRepo()
-	assertor := NewBalanceAssertor(repo, nil, nil, nil, nil, testLogger())
+	pkClient := &mockPKClient{} // not used; scope check returns before PK call
+	assertor := NewBalanceAssertor(repo, nil, pkClient, nil, nil, testLogger())
 
 	_, err := assertor.ExecuteBalanceAssertion(context.Background(), AssertBalanceRequest{
 		AccountID:       "ACC-001",

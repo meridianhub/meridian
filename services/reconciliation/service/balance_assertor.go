@@ -56,6 +56,8 @@ type BalanceAssertor struct {
 }
 
 // NewBalanceAssertor creates a new BalanceAssertor.
+// assertionRepo and pkClient are required; nil values will panic.
+// trendRepo, faClient, and publisher are optional (nil-guarded at call sites).
 func NewBalanceAssertor(
 	assertionRepo domain.BalanceAssertionRepository,
 	trendRepo domain.ImbalanceTrendRepository,
@@ -64,6 +66,15 @@ func NewBalanceAssertor(
 	publisher ImbalanceEventPublisher,
 	logger *slog.Logger,
 ) *BalanceAssertor {
+	if assertionRepo == nil {
+		panic("balance assertor: assertionRepo is required")
+	}
+	if pkClient == nil {
+		panic("balance assertor: pkClient is required")
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &BalanceAssertor{
 		assertionRepo: assertionRepo,
 		trendRepo:     trendRepo,
@@ -127,7 +138,9 @@ func (ba *BalanceAssertor) ExecuteBalanceAssertion(ctx context.Context, req Asse
 		return &AssertBalanceResult{Assertion: assertion}, fmt.Errorf("querying position keeping: %w", err)
 	}
 
-	// Calculate imbalance: total_debits - total_credits
+	// Calculate imbalance: total_debits - total_credits.
+	// The assertion validates ledger equilibrium (debits == credits), not a user-supplied
+	// expected balance. ExpectedBalance is stored for audit trail context only.
 	imbalanceAmount := summary.TotalDebits.Sub(summary.TotalCredits)
 	actualBalance := summary.TotalCredits.Sub(summary.TotalDebits) // net balance
 
