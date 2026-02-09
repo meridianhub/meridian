@@ -20,6 +20,7 @@ func TestGetEmbeddedScripts(t *testing.T) {
 		"deposit/v1.0.0.star",
 		"withdrawal/v1.0.0.star",
 		"payment_execution/v1.0.0.star",
+		"reconciliation_adjustment/v1.0.0.star",
 	}
 
 	for _, expected := range expectedVersioned {
@@ -33,6 +34,7 @@ func TestGetEmbeddedScripts(t *testing.T) {
 		"withdrawal.star",
 		"deposit.star",
 		"payment_execution.star",
+		"reconciliation_adjustment.star",
 	}
 
 	for _, expected := range expectedFlat {
@@ -46,7 +48,7 @@ func TestPlatformDefaults(t *testing.T) {
 	defaults, err := PlatformDefaults()
 	require.NoError(t, err)
 
-	assert.Len(t, defaults, 3)
+	assert.Len(t, defaults, 4)
 
 	// Verify each default has required fields
 	for _, meta := range defaults {
@@ -64,6 +66,7 @@ func TestPlatformDefaults(t *testing.T) {
 	assert.Contains(t, names, "current_account_withdrawal")
 	assert.Contains(t, names, "current_account_deposit")
 	assert.Contains(t, names, "payment_execution")
+	assert.Contains(t, names, "reconciliation_adjustment")
 }
 
 func TestSeeder_SeedTenant(t *testing.T) {
@@ -93,7 +96,7 @@ func TestSeeder_SeedTenant(t *testing.T) {
 		var count int
 		err = pool.QueryRow(ctx, "SELECT COUNT(*) FROM "+schemaName+".saga_definition WHERE is_system = true").Scan(&count)
 		require.NoError(t, err)
-		assert.Equal(t, 3, count, "expected 3 system sagas")
+		assert.Equal(t, 4, count, "expected 4 system sagas")
 
 		// Verify each saga has platform_ref and no script
 		rows, err := pool.Query(ctx, `
@@ -145,7 +148,7 @@ func TestSeeder_SeedTenant(t *testing.T) {
 		var count int
 		err = pool.QueryRow(ctx, "SELECT COUNT(*) FROM "+schemaName+".saga_definition WHERE is_system = true").Scan(&count)
 		require.NoError(t, err)
-		assert.Equal(t, 3, count, "idempotent seed should not create duplicates")
+		assert.Equal(t, 4, count, "idempotent seed should not create duplicates")
 	})
 
 	t.Run("deterministic UUIDs", func(t *testing.T) {
@@ -168,6 +171,7 @@ func TestSeeder_SeedTenant(t *testing.T) {
 			uuid.NewSHA1(uuid.NameSpaceDNS, []byte("saga.meridian.current_account_deposit")),
 			uuid.NewSHA1(uuid.NameSpaceDNS, []byte("saga.meridian.current_account_withdrawal")),
 			uuid.NewSHA1(uuid.NameSpaceDNS, []byte("saga.meridian.payment_execution")),
+			uuid.NewSHA1(uuid.NameSpaceDNS, []byte("saga.meridian.reconciliation_adjustment")),
 		}
 
 		assert.Equal(t, expectedIDs, ids, "UUIDs should be deterministic")
