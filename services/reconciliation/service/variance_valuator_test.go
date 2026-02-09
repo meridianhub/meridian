@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,11 +20,11 @@ import (
 type mockValuationEngine struct {
 	responses map[uuid.UUID]*valuation.Response
 	err       error
-	calls     int
+	calls     atomic.Int32
 }
 
 func (m *mockValuationEngine) Valuate(_ context.Context, req *valuation.Request) (*valuation.Response, error) {
-	m.calls++
+	m.calls.Add(1)
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -110,7 +111,7 @@ func TestValueVariances_SuccessfulValuation(t *testing.T) {
 	err := valuator.ValueVariances(context.Background(), run.RunID)
 	require.NoError(t, err)
 
-	assert.Equal(t, 2, engine.calls)
+	assert.Equal(t, int32(2), engine.calls.Load())
 
 	// Verify variances were updated to VALUED
 	for _, v := range varianceRepo.variances {
@@ -171,7 +172,7 @@ func TestValueVariances_NoDetectedVariances(t *testing.T) {
 	require.NoError(t, err)
 
 	// Engine should not have been called
-	assert.Equal(t, 0, engine.calls)
+	assert.Equal(t, int32(0), engine.calls.Load())
 }
 
 func TestValueVariances_ValuationEngineError(t *testing.T) {
@@ -288,7 +289,7 @@ func TestValueVariances_ConcurrentValuation(t *testing.T) {
 	err := valuator.ValueVariances(context.Background(), run.RunID)
 	require.NoError(t, err)
 
-	assert.Equal(t, 20, engine.calls)
+	assert.Equal(t, int32(20), engine.calls.Load())
 
 	// All should be valued
 	for _, v := range varianceRepo.variances {
