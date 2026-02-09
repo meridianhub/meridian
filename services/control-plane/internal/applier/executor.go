@@ -173,12 +173,17 @@ func (e *ManifestExecutor) Apply(ctx context.Context, input *ApplyManifestInput)
 		"correlation_id", correlationID,
 	)
 
-	// Execute the saga
+	// Execute the saga with tenant-scoped party context.
+	// The control plane is a SYSTEM actor applying a manifest for a specific tenant.
 	runnerInput := saga.RunnerInput{
 		SagaExecutionID: executionID,
 		CorrelationID:   correlationID,
-		KnowledgeAt:     time.Now(),
-		Input:           sagaInput,
+		PartyScope: &saga.PartyScope{
+			PartyType: "SYSTEM",
+			TenantID:  input.TenantID,
+		},
+		KnowledgeAt: time.Now(),
+		Input:       sagaInput,
 	}
 
 	output, err := e.runner.ExecuteSaga(ctx, "apply_manifest", script, runnerInput)
@@ -200,9 +205,10 @@ func (e *ManifestExecutor) Apply(ctx context.Context, input *ApplyManifestInput)
 		}, fmt.Errorf("%w: %s", ErrSagaFailed, output.Error)
 	}
 
-	// Mark job as applied
+	// Mark job as applied - propagate error so callers know about inconsistent state
 	if err := e.jobRepo.MarkApplied(ctx, job.ID); err != nil {
 		logger.Error("failed to mark job applied", "error", err)
+		return nil, fmt.Errorf("saga succeeded but job tracking failed: %w", err)
 	}
 
 	logger.Info("manifest application completed",
