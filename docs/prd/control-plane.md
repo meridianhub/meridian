@@ -346,6 +346,23 @@ required for iteration.
 > an LLM to self-correct without needing a huge context window or
 > multiple documentation lookups.
 
+#### Design Decision: Code is Immutable Primary Key
+
+Resource `code` fields (e.g., `"CUSTOMER_PREPAID"`, `"KWH"`) are
+**immutable identifiers** used as primary keys by downstream services.
+The Differ interprets a code change as DELETE old + CREATE new, which
+the live-balance safety check would reject.
+
+**Rename strategy**: Codes cannot be renamed once created. Only
+display `name` fields can change. This is deliberate — account codes
+appear in audit trails, position entries, and external integrations.
+Renaming them would break referential integrity across services.
+
+If a tenant genuinely needs a new code, the migration path is:
+1. Create new resource with new code
+2. Migrate positions/balances via a dedicated saga
+3. Deprecate (not delete) the old resource
+
 #### Acceptance Criteria
 
 - [ ] JSON Schema published with full documentation
@@ -355,6 +372,10 @@ required for iteration.
 - [ ] Error responses are JSON-structured, not just strings
 - [ ] Example manifests for: energy, carbon credits, SaaS billing,
   loyalty points
+- [ ] Validator rejects code changes on existing resources (codes are
+  immutable, only display names are mutable)
+- [ ] Manifest payload size validated against gRPC message limits
+  (default 4MB). CLI warns on large manifests
 
 ---
 
@@ -416,6 +437,15 @@ sequenceDiagram
 ```
 
 This achieves O(1) routing without a centralized secrets table.
+
+**Human Login Routing**: API keys self-route via prefix, but human
+login via Auth0/Keycloak only provides an email — no tenant context.
+The Admin Console URL must include the tenant slug to force routing
+context before authentication begins:
+`console.meridian.com/{slug}/login`. The Control Plane resolves the
+slug to a tenant ID, then queries `org_{id}.staff_users` to verify
+the user's role and status. This avoids scanning all tenant schemas
+and avoids a global staff index.
 
 #### Data Model
 
@@ -515,6 +545,17 @@ by a saga.
 > platform default fallback mechanism (ADR-0028). This avoids coupling
 > the Tenant Service (infrastructure) to Control Plane application
 > logic — the Tenant Service never needs to know the script contents.
+>
+> **Cross-tenant execution**: ApplyManifest resolves the saga
+> definition from the platform default (not the target tenant's local
+> definitions) but executes all handler calls within the target
+> tenant's data scope (`SET LOCAL search_path TO org_{id}, public`).
+> This means a freshly-provisioned tenant with zero local saga
+> definitions can still have its manifest applied.
+>
+> **Required test**: "Apply manifest to a tenant that has 0 local
+> saga definitions" — validates the platform default fallback path
+> end-to-end.
 
 ```python
 # sagas/apply_manifest.star
@@ -584,7 +625,10 @@ service EconomyEngineService {
   rpc PlanManifest(PlanManifestRequest)
       returns (ManifestPlan);
 
-  // Apply manifest (idempotent)
+  // Apply manifest (idempotent).
+  // For manifests exceeding gRPC size limits, the CLI uploads to
+  // blob storage (S3/MinIO) and passes a manifest_ref URI instead
+  // of the full JSON body.
   rpc ApplyManifest(ApplyManifestRequest)
       returns (ApplyManifestResponse);
 
@@ -619,6 +663,20 @@ Apply(Manifest_v1) -> State_A  (no-op, same result)
 Apply(Manifest_v2) -> State_B  (diff applied)
 Apply(Manifest_v1) -> State_A  (rollback to v1)
 ```
+
+#### Differ Strategy: Last-Applied Manifest
+
+The Differ computes changes by comparing `Last Applied Manifest` vs
+`New Manifest` (not `Current DB State` vs `New Manifest`). This
+follows the Kubernetes `last-applied-configuration` pattern:
+
+- The Control Plane stores each successfully applied manifest as a
+  versioned snapshot (task 3.5 `cp.engine.history`)
+- Diffing two JSON documents is deterministic and testable
+- Diffing DB state is fragile (state drifts from manual changes,
+  migrations, etc.)
+- If DB state has drifted from the last-applied manifest, `PlanManifest`
+  surfaces the drift as warnings before applying
 
 #### Acceptance Criteria
 
@@ -781,10 +839,26 @@ def execute(ctx, event):
     }
 ```
 
+#### Preflight: meridian-ops Tenant
+
+The Control Plane **must not** process Stripe webhooks or record
+billing positions until the `meridian-ops` tenant exists with the
+required internal accounts (`stripe_nostro`, `revenue`). On startup,
+the Control Plane verifies this precondition and panics if unmet.
+
+The seeding sequence:
+1. Tenant Service provisions `meridian-ops` schema
+2. Internal Bank Account Service seeds nostro/revenue accounts
+   (via existing post-provisioning hook)
+3. Control Plane startup verifies accounts exist
+4. Stripe webhook processing enabled
+
 #### Acceptance Criteria
 
 - [ ] Stripe webhooks are verified (signature check)
 - [ ] Payment creates double-entry in ledger
+- [ ] Control Plane startup panics if `meridian-ops` tenant or
+  required internal accounts do not exist
 - [ ] `external_reference_id` on position entries contains the Stripe
   Charge ID (e.g., `ch_12345`) for O(1) reconciliation joins.
   `causation_id` remains a UUIDv5 for internal saga causation trees
