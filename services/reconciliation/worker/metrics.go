@@ -7,9 +7,10 @@ import (
 
 // SchedulerMetrics provides Prometheus metrics for the settlement scheduler.
 type SchedulerMetrics struct {
-	runsTriggered   *prometheus.CounterVec
-	errorsTotal     *prometheus.CounterVec
-	refreshDuration prometheus.Histogram
+	runsTriggered    *prometheus.CounterVec
+	errorsTotal      *prometheus.CounterVec
+	refreshDuration  prometheus.Histogram
+	catchUpTriggered prometheus.Counter
 }
 
 // NewSchedulerMetrics creates a new metrics collector with default registrations.
@@ -40,6 +41,14 @@ func NewSchedulerMetrics() *SchedulerMetrics {
 				Name:      "schedule_refresh_duration_seconds",
 				Help:      "Duration of schedule refresh operations from Reference Data.",
 				Buckets:   prometheus.DefBuckets,
+			},
+		),
+		catchUpTriggered: promauto.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: "meridian",
+				Subsystem: "reconciliation",
+				Name:      "scheduler_catchup_windows_triggered_total",
+				Help:      "Total number of missed settlement windows caught up on startup.",
 			},
 		),
 	}
@@ -77,6 +86,14 @@ func NewSchedulerMetricsWithRegistry(reg prometheus.Registerer) *SchedulerMetric
 				Buckets:   prometheus.DefBuckets,
 			},
 		),
+		catchUpTriggered: factory.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: "meridian",
+				Subsystem: "reconciliation",
+				Name:      "scheduler_catchup_windows_triggered_total",
+				Help:      "Total number of missed settlement windows caught up on startup.",
+			},
+		),
 	}
 }
 
@@ -93,4 +110,9 @@ func (m *SchedulerMetrics) RecordError(errorType string) {
 // ObserveRefreshDuration records the duration of a schedule refresh operation.
 func (m *SchedulerMetrics) ObserveRefreshDuration(seconds float64) {
 	m.refreshDuration.Observe(seconds)
+}
+
+// RecordCatchUp increments the catch-up counter by the given count.
+func (m *SchedulerMetrics) RecordCatchUp(count int) {
+	m.catchUpTriggered.Add(float64(count))
 }
