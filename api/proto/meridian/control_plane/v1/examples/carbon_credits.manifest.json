@@ -1,0 +1,130 @@
+{
+  "version": "1.0",
+  "metadata": {
+    "name": "Carbon Credit Registry",
+    "industry": "carbon",
+    "description": "Manifest for carbon credit trading and retirement, supporting verified emission reductions (VERs) and certified emission reductions (CERs) with full provenance tracking."
+  },
+  "instruments": [
+    {
+      "code": "USD",
+      "name": "United States Dollar",
+      "type": "INSTRUMENT_TYPE_FIAT",
+      "dimensions": {
+        "unit": "USD",
+        "precision": 2
+      }
+    },
+    {
+      "code": "EUR",
+      "name": "Euro",
+      "type": "INSTRUMENT_TYPE_FIAT",
+      "dimensions": {
+        "unit": "EUR",
+        "precision": 2
+      }
+    },
+    {
+      "code": "TONNE_CO2E",
+      "name": "Tonne of CO2 Equivalent",
+      "type": "INSTRUMENT_TYPE_COMMODITY",
+      "dimensions": {
+        "unit": "tCO2e",
+        "precision": 3
+      }
+    },
+    {
+      "code": "VER",
+      "name": "Verified Emission Reduction",
+      "type": "INSTRUMENT_TYPE_VOUCHER",
+      "dimensions": {
+        "unit": "VER",
+        "precision": 0
+      }
+    },
+    {
+      "code": "CER",
+      "name": "Certified Emission Reduction",
+      "type": "INSTRUMENT_TYPE_VOUCHER",
+      "dimensions": {
+        "unit": "CER",
+        "precision": 0
+      }
+    }
+  ],
+  "accountTypes": [
+    {
+      "code": "CASH",
+      "name": "Cash Account",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": ["USD", "EUR"],
+      "policies": {
+        "validation": "amount > 0",
+        "bucketing": ""
+      }
+    },
+    {
+      "code": "CARBON_INVENTORY",
+      "name": "Carbon Credit Inventory",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": ["TONNE_CO2E", "VER", "CER"],
+      "policies": {
+        "validation": "amount > 0",
+        "bucketing": "instrument_code + ':' + attributes.vintage_year + ':' + attributes.project_id"
+      }
+    },
+    {
+      "code": "RETIREMENT",
+      "name": "Retirement Account",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": ["TONNE_CO2E", "VER", "CER"],
+      "policies": {
+        "validation": "amount > 0",
+        "bucketing": "instrument_code + ':' + attributes.vintage_year + ':' + attributes.retirement_reason"
+      }
+    }
+  ],
+  "valuationRules": [
+    {
+      "fromInstrument": "VER",
+      "toInstrument": "USD",
+      "method": "VALUATION_METHOD_SPOT_RATE",
+      "source": "verra_registry"
+    },
+    {
+      "fromInstrument": "CER",
+      "toInstrument": "USD",
+      "method": "VALUATION_METHOD_SPOT_RATE",
+      "source": "gold_standard_registry"
+    },
+    {
+      "fromInstrument": "TONNE_CO2E",
+      "toInstrument": "USD",
+      "method": "VALUATION_METHOD_SPOT_RATE",
+      "source": "eu_ets_spot"
+    },
+    {
+      "fromInstrument": "EUR",
+      "toInstrument": "USD",
+      "method": "VALUATION_METHOD_SPOT_RATE",
+      "source": "ecb_fx_daily"
+    }
+  ],
+  "sagas": [
+    {
+      "name": "purchase_carbon_credits",
+      "trigger": "api:/v1/carbon/purchases",
+      "script": "def execute(ctx):\n    purchase = ctx.input\n    \n    # Reserve funds for the purchase\n    lien = current_account.initiate_lien(\n        account_id=purchase.buyer_cash_account,\n        instrument_code=purchase.credit_type,\n        amount=purchase.quantity,\n        payment_order_reference=\"carbon-purchase:\" + purchase.order_id,\n    )\n    \n    # Credit carbon inventory to the buyer\n    position_keeping.initiate_log(\n        account_id=purchase.buyer_inventory_account,\n        amount=purchase.quantity,\n        instrument_code=purchase.credit_type,\n        direction=\"CREDIT\",\n        attributes={\n            \"vintage_year\": purchase.vintage_year,\n            \"project_id\": purchase.project_id,\n        },\n    )\n    \n    # Execute the payment\n    current_account.execute_lien(lien_id=lien.lien_id)\n    \n    return {\"status\": \"purchased\", \"order_id\": purchase.order_id}\n"
+    },
+    {
+      "name": "retire_carbon_credits",
+      "trigger": "api:/v1/carbon/retirements",
+      "script": "def execute(ctx):\n    retirement = ctx.input\n    \n    # Debit from inventory\n    position_keeping.initiate_log(\n        account_id=retirement.inventory_account,\n        amount=retirement.quantity,\n        instrument_code=retirement.credit_type,\n        direction=\"DEBIT\",\n        attributes={\n            \"vintage_year\": retirement.vintage_year,\n            \"project_id\": retirement.project_id,\n        },\n    )\n    \n    # Credit to retirement account (permanent, non-reversible)\n    position_keeping.initiate_log(\n        account_id=retirement.retirement_account,\n        amount=retirement.quantity,\n        instrument_code=retirement.credit_type,\n        direction=\"CREDIT\",\n        attributes={\n            \"vintage_year\": retirement.vintage_year,\n            \"retirement_reason\": retirement.reason,\n        },\n    )\n    \n    return {\"status\": \"retired\", \"retirement_id\": retirement.retirement_id}\n"
+    }
+  ],
+  "seedData": {
+    "registries": ["verra", "gold_standard", "eu_ets"],
+    "credit_types": ["VER", "CER", "TONNE_CO2E"],
+    "vintage_years": ["2020", "2021", "2022", "2023", "2024", "2025"]
+  }
+}
