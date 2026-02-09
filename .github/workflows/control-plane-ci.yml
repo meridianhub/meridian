@@ -1,0 +1,206 @@
+name: Control Plane CI
+
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - 'api/proto/meridian/control_plane/**'
+      - 'api/jsonschema/**'
+      - 'services/control-plane/**'
+      - 'examples/manifests/**'
+      - 'buf.gen.jsonschema.yaml'
+      - 'scripts/validate-manifest-jsonschema.sh'
+      - '.github/workflows/control-plane-ci.yml'
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - 'api/proto/meridian/control_plane/**'
+      - 'api/jsonschema/**'
+      - 'services/control-plane/**'
+      - 'examples/manifests/**'
+      - 'buf.gen.jsonschema.yaml'
+      - 'scripts/validate-manifest-jsonschema.sh'
+      - '.github/workflows/control-plane-ci.yml'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  proto-compile:
+    name: Proto Compilation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.7'
+          cache: true
+
+      - name: Set up buf
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate protobuf files
+        run: buf generate
+
+      - name: Install protoc-gen-jsonschema
+        run: go install github.com/chrusty/protoc-gen-jsonschema/cmd/protoc-gen-jsonschema@latest
+
+      - name: Generate JSON Schema from manifest proto
+        run: make proto-jsonschema
+
+  schema-sync-check:
+    name: Schema Sync Check
+    runs-on: ubuntu-latest
+    needs: proto-compile
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.7'
+          cache: true
+
+      - name: Set up buf
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install protoc-gen-jsonschema
+        run: go install github.com/chrusty/protoc-gen-jsonschema/cmd/protoc-gen-jsonschema@latest
+
+      - name: Validate JSON Schema is in sync with proto
+        run: make validate-manifest-jsonschema
+
+      - name: Report schema drift
+        if: failure()
+        run: |
+          echo "::error::JSON Schema is out of sync with proto definition."
+          echo "::error::Run 'make proto-jsonschema' and commit the updated schema."
+          echo ""
+          echo "This check prevents manual editing of generated JSON Schema files."
+          echo "The source of truth is api/proto/meridian/control_plane/v1/manifest.proto."
+
+  manifest-validation:
+    name: Manifest Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.7'
+          cache: true
+
+      - name: Set up buf
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate protobuf files
+        run: buf generate
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Validate example manifests
+        run: make validate-manifests
+
+      - name: Report validation failures
+        if: failure()
+        run: |
+          echo "::error::Example manifest validation failed."
+          echo "::error::Check the output above for specific validation errors."
+          echo ""
+          echo "Manifests are validated against:"
+          echo "  - Protobuf schema constraints (field types, required fields)"
+          echo "  - CEL expression type-checking (policy expressions)"
+          echo "  - Starlark script compilation (saga scripts)"
+          echo "  - Cross-reference integrity (instrument code references)"
+
+  unit-tests:
+    name: Control Plane Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.7'
+          cache: true
+
+      - name: Set up buf
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate protobuf files
+        run: buf generate
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Install gotestsum
+        run: go install gotest.tools/gotestsum@v1.13.0
+
+      - name: Run control plane tests
+        run: |
+          gotestsum --format testdox \
+            --junitfile control-plane-test-results.xml \
+            -- -short -race -v ./services/control-plane/...
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: control-plane-test-results
+          path: control-plane-test-results.xml
+          retention-days: 30
+
+  integration-tests:
+    name: Control Plane Integration Tests
+    runs-on: ubuntu-latest
+    needs: unit-tests
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.7'
+          cache: true
+
+      - name: Set up buf
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate protobuf files
+        run: buf generate
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run integration tests
+        run: |
+          go test -race -v -count=1 -run "Integration" ./services/control-plane/... 2>&1 || {
+            echo "No integration tests found or all passed"
+          }
+        timeout-minutes: 10

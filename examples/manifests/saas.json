@@ -1,0 +1,84 @@
+{
+  "version": "1.0",
+  "metadata": {
+    "name": "CloudCompute Billing",
+    "industry": "technology",
+    "description": "SaaS platform with GPU compute and storage billing"
+  },
+  "instruments": [
+    {
+      "code": "USD",
+      "name": "United States Dollar",
+      "type": "INSTRUMENT_TYPE_FIAT",
+      "dimensions": {
+        "unit": "USD",
+        "precision": 2
+      }
+    },
+    {
+      "code": "GPU_HOUR",
+      "name": "GPU Compute Hour",
+      "type": "INSTRUMENT_TYPE_COMMODITY",
+      "dimensions": {
+        "unit": "GPU_HOUR",
+        "precision": 6
+      }
+    },
+    {
+      "code": "STORAGE_GB",
+      "name": "Storage Gigabyte Month",
+      "type": "INSTRUMENT_TYPE_COMMODITY",
+      "dimensions": {
+        "unit": "GB_MONTH",
+        "precision": 4
+      }
+    }
+  ],
+  "accountTypes": [
+    {
+      "code": "COMPUTE_USAGE",
+      "name": "Compute Usage Account",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": ["GPU_HOUR"],
+      "policies": {
+        "validation": "amount > 0"
+      }
+    },
+    {
+      "code": "STORAGE_USAGE",
+      "name": "Storage Usage Account",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": ["STORAGE_GB"]
+    },
+    {
+      "code": "BILLING",
+      "name": "Customer Billing Account",
+      "normalBalance": "NORMAL_BALANCE_CREDIT",
+      "allowedInstruments": ["USD"],
+      "policies": {
+        "validation": "amount > 0 && amount <= 1000000"
+      }
+    }
+  ],
+  "valuationRules": [
+    {
+      "fromInstrument": "GPU_HOUR",
+      "toInstrument": "USD",
+      "method": "VALUATION_METHOD_FIXED",
+      "source": "pricing_schedule"
+    },
+    {
+      "fromInstrument": "STORAGE_GB",
+      "toInstrument": "USD",
+      "method": "VALUATION_METHOD_FIXED",
+      "source": "pricing_schedule"
+    }
+  ],
+  "sagas": [
+    {
+      "name": "process_compute_billing",
+      "trigger": "scheduled:hourly_compute_billing",
+      "script": "def execute(ctx):\n    usage = ctx\n    hours = Decimal(str(usage.get('gpu_hours', '0')))\n    position_keeping.initiate_log(amount=hours, direction='DEBIT')\n"
+    }
+  ]
+}
