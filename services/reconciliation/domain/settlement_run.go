@@ -154,7 +154,11 @@ func (r *SettlementRun) Finalize() error {
 	}
 	now := time.Now().UTC()
 	r.Status = RunStatusFinalized
-	r.CompletedAt = &now
+	// Preserve original CompletedAt from the COMPLETED transition;
+	// only set if not already present (defensive).
+	if r.CompletedAt == nil {
+		r.CompletedAt = &now
+	}
 	r.UpdatedAt = now
 	r.Version++
 	return nil

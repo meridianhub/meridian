@@ -48,7 +48,7 @@ type PositionLockRequest struct {
 type PositionLockRequestedEvent struct {
 	RunID       string `json:"run_id"`
 	AccountID   string `json:"account_id"`
-	AssetCode   string `json:"asset_code"`
+	Scope       string `json:"scope"`
 	PeriodStart string `json:"period_start"`
 	PeriodEnd   string `json:"period_end"`
 	Status      string `json:"status"`
@@ -181,7 +181,7 @@ func (f *SettlementFinalizer) FinalizeSettlement(ctx context.Context, runID uuid
 		event := PositionLockRequestedEvent{
 			RunID:       runID.String(),
 			AccountID:   run.AccountID,
-			AssetCode:   run.AccountID,
+			Scope:       run.Scope.String(),
 			PeriodStart: run.PeriodStart.Format(time.RFC3339),
 			PeriodEnd:   run.PeriodEnd.Format(time.RFC3339),
 			Status:      "LOCKED",
