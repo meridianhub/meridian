@@ -1,0 +1,61 @@
+{
+  "version": "1.0",
+  "metadata": {
+    "name": "Green Credits Platform",
+    "industry": "carbon",
+    "description": "Carbon offset tracking and trading platform"
+  },
+  "instruments": [
+    {
+      "code": "USD",
+      "name": "United States Dollar",
+      "type": "INSTRUMENT_TYPE_FIAT",
+      "dimensions": {
+        "unit": "USD",
+        "precision": 2
+      }
+    },
+    {
+      "code": "VCU",
+      "name": "Verified Carbon Unit",
+      "type": "INSTRUMENT_TYPE_COMMODITY",
+      "dimensions": {
+        "unit": "TONNE_CO2E",
+        "precision": 4
+      }
+    }
+  ],
+  "accountTypes": [
+    {
+      "code": "CARBON_REGISTRY",
+      "name": "Carbon Registry Account",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": ["VCU"],
+      "policies": {
+        "validation": "amount > 0",
+        "bucketing": "instrument_code + ':' + attributes.vintage_year"
+      }
+    },
+    {
+      "code": "TREASURY",
+      "name": "Treasury Account",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": ["USD"]
+    }
+  ],
+  "valuationRules": [
+    {
+      "fromInstrument": "VCU",
+      "toInstrument": "USD",
+      "method": "VALUATION_METHOD_SPOT_RATE",
+      "source": "verra_market"
+    }
+  ],
+  "sagas": [
+    {
+      "name": "retire_carbon_credits",
+      "trigger": "api:/v1/carbon/retire",
+      "script": "def execute(ctx):\n    retirement = ctx\n    amount = Decimal(str(retirement.get('tonnes', '0')))\n    position_keeping.initiate_log(amount=amount, direction='CREDIT')\n"
+    }
+  ]
+}

@@ -93,6 +93,23 @@ if [ -n "$STAGED_PROTO_FILES" ]; then
         echo -e "${YELLOW}⚠${NC}  Skipping buf breaking check (develop branch not found locally)"
         echo -e "${YELLOW}   Run: git fetch origin develop:develop${NC}"
     fi
+
+    # Regenerate JSON Schema if manifest proto changed
+    MANIFEST_PROTO_CHANGED=$(echo "$STAGED_PROTO_FILES" | grep 'control_plane/v1/manifest.proto' || true)
+    if [ -n "$MANIFEST_PROTO_CHANGED" ]; then
+        echo -e "${YELLOW}→${NC} Manifest proto changed, regenerating JSON Schema..."
+        if command -v protoc-gen-jsonschema &> /dev/null || [ -f "$(go env GOPATH)/bin/protoc-gen-jsonschema" ]; then
+            if make proto-jsonschema > /dev/null 2>&1; then
+                git add api/jsonschema/manifest.v1.schema.json
+                echo -e "${GREEN}✓${NC} JSON Schema regenerated and staged"
+            else
+                echo -e "${YELLOW}⚠${NC}  JSON Schema regeneration failed (will be caught by CI)"
+            fi
+        else
+            echo -e "${YELLOW}⚠${NC}  protoc-gen-jsonschema not installed, skipping JSON Schema regeneration"
+            echo -e "${YELLOW}   Install: go install github.com/chrusty/protoc-gen-jsonschema/cmd/protoc-gen-jsonschema@latest${NC}"
+        fi
+    fi
 fi
 
 # ============================================================================
