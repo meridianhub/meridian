@@ -9,6 +9,7 @@ require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/alicebob/miniredis/v2 v2.36.1
 	github.com/bits-and-blooms/bloom/v3 v3.7.1
+	github.com/bsm/redislock v0.9.4
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.8.0
@@ -36,6 +37,7 @@ require (
 	go.opentelemetry.io/otel/sdk v1.40.0
 	go.opentelemetry.io/otel/trace v1.40.0
 	go.starlark.net v0.0.0-20260102030733-3fee463870c9
+	github.com/robfig/cron/v3 v3.0.1
 	go.uber.org/goleak v1.3.0
 	google.golang.org/genproto v0.0.0-20251111163417-95abcf5c77ba
 	google.golang.org/grpc v1.78.0
@@ -49,7 +51,6 @@ require (
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bits-and-blooms/bitset v1.24.2 // indirect
-	github.com/bsm/redislock v0.9.4 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/mdelapenya/tlscert v0.2.0 // indirect

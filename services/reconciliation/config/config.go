@@ -92,6 +92,14 @@ type ServiceURLsConfig struct {
 type SchedulerConfig struct {
 	// Enabled indicates if the settlement scheduler is enabled.
 	Enabled bool
+	// PollInterval is how often to refresh settlement schedules from Reference Data.
+	PollInterval time.Duration
+	// ShutdownTimeout is the maximum time to wait for in-flight jobs on shutdown.
+	ShutdownTimeout time.Duration
+	// LeaderLockTTL is the TTL for the Redis leader election lock.
+	LeaderLockTTL time.Duration
+	// LeaderRenewInterval is how often to renew the leader lock.
+	LeaderRenewInterval time.Duration
 }
 
 // Validation errors.
@@ -178,7 +186,11 @@ func loadServiceURLsConfig() ServiceURLsConfig {
 
 func loadSchedulerConfig() SchedulerConfig {
 	return SchedulerConfig{
-		Enabled: env.GetEnvAsBool("SETTLEMENT_SCHEDULER_ENABLED", false),
+		Enabled:             env.GetEnvAsBool("SETTLEMENT_SCHEDULER_ENABLED", false),
+		PollInterval:        env.GetEnvAsDuration("SCHEDULER_POLL_INTERVAL", 1*time.Hour),
+		ShutdownTimeout:     env.GetEnvAsDuration("SCHEDULER_SHUTDOWN_TIMEOUT", 30*time.Second),
+		LeaderLockTTL:       env.GetEnvAsDuration("SCHEDULER_LEADER_LOCK_TTL", 30*time.Second),
+		LeaderRenewInterval: env.GetEnvAsDuration("SCHEDULER_LEADER_RENEW_INTERVAL", 10*time.Second),
 	}
 }
 
