@@ -129,12 +129,25 @@ var (
 
 	// ErrSagaFailed is returned when the saga execution fails.
 	ErrSagaFailed = errors.New("saga execution failed")
+
+	// ErrNilInput is returned when the apply manifest input is nil.
+	ErrNilInput = errors.New("apply manifest: input is nil")
+
+	// ErrMissingTenantID is returned when tenant_id is empty.
+	ErrMissingTenantID = errors.New("apply manifest: tenant_id is required")
 )
 
 // Apply executes the apply_manifest saga for a tenant.
 // It resolves the saga script using platform default fallback (ADR-0028),
 // constructs the input, and runs the saga with automatic compensation.
 func (e *ManifestExecutor) Apply(ctx context.Context, input *ApplyManifestInput) (*ApplyManifestResult, error) {
+	if input == nil {
+		return nil, ErrNilInput
+	}
+	if input.TenantID == "" {
+		return nil, ErrMissingTenantID
+	}
+
 	logger := e.logger.With(
 		"manifest_version", input.ManifestVersion,
 		"tenant_id", input.TenantID,
