@@ -29,13 +29,28 @@ func (t *ImbalanceTrend) IsPersistent() bool {
 	return t.ConsecutiveDays >= PersistentImbalanceThreshold
 }
 
-// RecordImbalance increments the trend for a new day of imbalance.
+// RecordImbalance records a new imbalance detection. The consecutive day count
+// only increments if the last detection was on a different calendar day (UTC),
+// preventing multiple assertions on the same day from inflating the count.
 func (t *ImbalanceTrend) RecordImbalance(amount decimal.Decimal, assertionID uuid.UUID) {
-	t.ConsecutiveDays++
+	now := time.Now().UTC()
+
+	// Only increment consecutive days if this is a new calendar day
+	if t.LastDetectedAt.IsZero() || !sameUTCDay(t.LastDetectedAt, now) {
+		t.ConsecutiveDays++
+	}
+
 	t.LastImbalanceAmount = amount
 	t.LastAssertionID = assertionID
-	t.LastDetectedAt = time.Now().UTC()
+	t.LastDetectedAt = now
 	t.ResolvedAt = nil
+}
+
+// sameUTCDay returns true if both timestamps fall on the same UTC calendar day.
+func sameUTCDay(a, b time.Time) bool {
+	ay, am, ad := a.UTC().Date()
+	by, bm, bd := b.UTC().Date()
+	return ay == by && am == bm && ad == bd
 }
 
 // Resolve marks the trend as resolved when balance is restored.

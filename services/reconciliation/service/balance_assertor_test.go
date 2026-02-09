@@ -373,24 +373,52 @@ func TestExecuteBalanceAssertion_TrendTracking(t *testing.T) {
 
 	assertor := NewBalanceAssertor(newMockAssertionRepo(), trendRepo, imbalancedPK, nil, publisher, testLogger())
 
-	// Simulate 3 consecutive days of imbalance
-	for i := 0; i < 3; i++ {
-		result, err := assertor.ExecuteBalanceAssertion(context.Background(), AssertBalanceRequest{
-			AccountID:       "ACC-001",
-			InstrumentCode:  "GBP",
-			Expression:      "total_debits == total_credits",
-			ExpectedBalance: decimal.Zero,
-			Scope:           domain.AssertionScopePositionLedger,
-			CallerRole:      CallerRoleTenantAdmin,
-		})
+	// First assertion creates trend with 1 consecutive day
+	result, err := assertor.ExecuteBalanceAssertion(context.Background(), AssertBalanceRequest{
+		AccountID:       "ACC-001",
+		InstrumentCode:  "GBP",
+		Expression:      "total_debits == total_credits",
+		ExpectedBalance: decimal.Zero,
+		Scope:           domain.AssertionScopePositionLedger,
+		CallerRole:      CallerRoleTenantAdmin,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, domain.AssertionStatusFailed, result.Assertion.Status)
 
-		require.NoError(t, err)
-		assert.Equal(t, domain.AssertionStatusFailed, result.Assertion.Status)
-	}
-
-	// Verify trend is now persistent (3 consecutive days)
+	// Trend should exist with 1 day (same-day calls don't increment)
 	trend := trendRepo.trends["GBP"]
 	require.NotNil(t, trend)
+	assert.Equal(t, 1, trend.ConsecutiveDays)
+
+	// Simulate multi-day persistence by backdating the last detection
+	trend.LastDetectedAt = trend.LastDetectedAt.AddDate(0, 0, -1)
+
+	// Second assertion (now appears to be next day) increments to 2
+	_, err = assertor.ExecuteBalanceAssertion(context.Background(), AssertBalanceRequest{
+		AccountID:       "ACC-001",
+		InstrumentCode:  "GBP",
+		Expression:      "total_debits == total_credits",
+		ExpectedBalance: decimal.Zero,
+		Scope:           domain.AssertionScopePositionLedger,
+		CallerRole:      CallerRoleTenantAdmin,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 2, trend.ConsecutiveDays)
+	assert.False(t, trend.IsPersistent())
+
+	// Backdate again
+	trend.LastDetectedAt = trend.LastDetectedAt.AddDate(0, 0, -1)
+
+	// Third assertion reaches threshold
+	_, err = assertor.ExecuteBalanceAssertion(context.Background(), AssertBalanceRequest{
+		AccountID:       "ACC-001",
+		InstrumentCode:  "GBP",
+		Expression:      "total_debits == total_credits",
+		ExpectedBalance: decimal.Zero,
+		Scope:           domain.AssertionScopePositionLedger,
+		CallerRole:      CallerRoleTenantAdmin,
+	})
+	require.NoError(t, err)
 	assert.Equal(t, 3, trend.ConsecutiveDays)
 	assert.True(t, trend.IsPersistent())
 
@@ -399,6 +427,38 @@ func TestExecuteBalanceAssertion_TrendTracking(t *testing.T) {
 	lastEvent := publisher.events[len(publisher.events)-1]
 	assert.True(t, lastEvent.IsPersistent)
 	assert.Equal(t, 3, lastEvent.ConsecutiveDays)
+}
+
+func TestExecuteBalanceAssertion_SameDayDoesNotIncrementTrend(t *testing.T) {
+	trendRepo := newMockTrendRepo()
+
+	imbalancedPK := &mockPKClient{
+		summary: &PositionSummary{
+			InstrumentCode: "GBP",
+			TotalDebits:    decimal.NewFromFloat(50000.00),
+			TotalCredits:   decimal.NewFromFloat(49000.00),
+		},
+	}
+
+	assertor := NewBalanceAssertor(newMockAssertionRepo(), trendRepo, imbalancedPK, nil, nil, testLogger())
+
+	// Run multiple assertions on the same day
+	for i := 0; i < 5; i++ {
+		_, err := assertor.ExecuteBalanceAssertion(context.Background(), AssertBalanceRequest{
+			AccountID:       "ACC-001",
+			InstrumentCode:  "GBP",
+			Expression:      "total_debits == total_credits",
+			ExpectedBalance: decimal.Zero,
+			Scope:           domain.AssertionScopePositionLedger,
+			CallerRole:      CallerRoleTenantAdmin,
+		})
+		require.NoError(t, err)
+	}
+
+	// Should only count as 1 consecutive day despite 5 assertions
+	trend := trendRepo.trends["GBP"]
+	require.NotNil(t, trend)
+	assert.Equal(t, 1, trend.ConsecutiveDays)
 }
 
 func TestExecuteBalanceAssertion_TrendResolution(t *testing.T) {
@@ -656,6 +716,12 @@ func TestImbalanceTrend_RecordAndResolve(t *testing.T) {
 	assert.Equal(t, 1, trend.ConsecutiveDays)
 	assert.Equal(t, assertionID, trend.LastAssertionID)
 	assert.Nil(t, trend.ResolvedAt)
+
+	// Same day call should not increment
+	assertionID2 := uuid.New()
+	trend.RecordImbalance(decimal.NewFromFloat(600), assertionID2)
+	assert.Equal(t, 1, trend.ConsecutiveDays, "same-day call should not increment")
+	assert.Equal(t, assertionID2, trend.LastAssertionID)
 
 	trend.Resolve()
 	assert.Equal(t, 0, trend.ConsecutiveDays)

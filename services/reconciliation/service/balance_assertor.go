@@ -75,6 +75,8 @@ func NewBalanceAssertor(
 }
 
 // ExecuteBalanceAssertion performs a balance assertion check.
+// On PK client failure, it returns BOTH a result (with FAILED assertion) and an error.
+// This allows callers to access the persisted assertion even when PK is unreachable.
 func (ba *BalanceAssertor) ExecuteBalanceAssertion(ctx context.Context, req AssertBalanceRequest) (*AssertBalanceResult, error) {
 	// Validate scope
 	if !req.Scope.IsValid() {
@@ -258,7 +260,10 @@ func (ba *BalanceAssertor) resolveTrend(ctx context.Context, instrumentCode stri
 
 	trend, err := ba.trendRepo.FindByInstrumentCode(ctx, instrumentCode)
 	if err != nil {
-		return // No active trend, nothing to resolve
+		if !errors.Is(err, domain.ErrNotFound) {
+			ba.logger.Error("failed to find imbalance trend for resolution", "error", err, "instrument_code", instrumentCode)
+		}
+		return
 	}
 
 	trend.Resolve()
@@ -293,7 +298,7 @@ func (ba *BalanceAssertor) enrichWithDiagnostics(ctx context.Context, assertion 
 // getTrendDays safely extracts consecutive days from a trend that may be nil.
 func (ba *BalanceAssertor) getTrendDays(trend *domain.ImbalanceTrend) int {
 	if trend == nil {
-		return 1
+		return 0
 	}
 	return trend.ConsecutiveDays
 }
