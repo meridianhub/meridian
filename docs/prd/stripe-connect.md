@@ -420,6 +420,13 @@ handler (`adapters/http/webhook_handler.go`) uses generic HMAC
 signature validation. The `GatewayAccountConfig` maps gateway IDs
 to contra-accounts.
 
+This follows [ADR-0005: Adapter Pattern](../adr/0005-adapter-pattern-layer-translation.md)
+(Hexagonal Architecture / Ports & Adapters): the domain defines a
+`PaymentGateway` port (interface), and Stripe becomes a concrete
+adapter in `adapters/gateway/`. [ADR-0015](../adr/0015-standard-service-directory-structure.md)
+designates `adapters/gateway/` as the standard location for external
+API integrations.
+
 #### Stripe Gateway Adapter
 
 ```go
