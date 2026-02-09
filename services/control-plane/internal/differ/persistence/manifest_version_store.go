@@ -11,7 +11,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/lib/pq"
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	"github.com/meridianhub/meridian/services/control-plane/internal/differ"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -117,7 +116,7 @@ func (s *PostgresManifestVersionStore) setSearchPath(ctx context.Context, tx pgx
 		return nil
 	}
 
-	schemaName := pq.QuoteIdentifier(tenantID.SchemaName())
+	schemaName := pgx.Identifier{tenantID.SchemaName()}.Sanitize()
 	query := fmt.Sprintf("SET LOCAL search_path TO %s, public", schemaName)
 	_, err := tx.Exec(ctx, query)
 	if err != nil {
