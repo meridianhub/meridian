@@ -190,8 +190,9 @@ func TestValueVariances_ValuationEngineError(t *testing.T) {
 
 	valuator := NewVarianceValuator(engine, refData, varianceRepo, runRepo)
 	err := valuator.ValueVariances(context.Background(), run.RunID)
-	// Should not fail entirely - individual valuation errors are non-fatal
-	require.NoError(t, err)
+	// When all variances fail valuation, the method returns an error
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrAllValuationsFailed)
 
 	// Variance should remain in DETECTED state since valuation failed
 	assert.Equal(t, domain.VarianceStatusDetected, varianceRepo.variances[0].Status)
@@ -212,8 +213,9 @@ func TestValueVariances_ReferenceDataError(t *testing.T) {
 
 	valuator := NewVarianceValuator(engine, refData, varianceRepo, runRepo)
 	err := valuator.ValueVariances(context.Background(), run.RunID)
-	// Non-fatal: should handle gracefully
-	require.NoError(t, err)
+	// When all variances fail valuation, the method returns an error
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrAllValuationsFailed)
 }
 
 func TestValueVariances_ThresholdError_StillValues(t *testing.T) {

@@ -136,6 +136,18 @@ func (v *Variance) Resolve(note string, resolvedBy string) error {
 	return nil
 }
 
+// Value transitions the variance to VALUED after valuation engine processing.
+func (v *Variance) Value(valueDelta decimal.Decimal, currency string) error {
+	if !v.Status.CanTransitionTo(VarianceStatusValued) {
+		return ErrInvalidStatusTransition
+	}
+	v.Status = VarianceStatusValued
+	v.ValueDelta = valueDelta
+	v.Currency = currency
+	v.UpdatedAt = time.Now().UTC()
+	return nil
+}
+
 // Accept transitions the variance to ACCEPTED (accepted as a known difference).
 func (v *Variance) Accept(note string, acceptedBy string) error {
 	if !v.Status.CanTransitionTo(VarianceStatusAccepted) {

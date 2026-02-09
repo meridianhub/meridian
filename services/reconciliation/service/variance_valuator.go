@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -13,6 +14,9 @@ import (
 	"github.com/shopspring/decimal"
 	"golang.org/x/sync/errgroup"
 )
+
+// ErrAllValuationsFailed is returned when every variance in a run fails valuation.
+var ErrAllValuationsFailed = errors.New("all variance valuations failed")
 
 const (
 	// defaultValuationConcurrency limits concurrent in-process valuation calls.
@@ -103,6 +107,7 @@ func (vv *VarianceValuator) ValueVariances(ctx context.Context, runID uuid.UUID)
 	var (
 		mu          sync.Mutex
 		valuedCount int
+		failedCount int
 		totalValue  decimal.Decimal
 	)
 
@@ -115,7 +120,9 @@ func (vv *VarianceValuator) ValueVariances(ctx context.Context, runID uuid.UUID)
 					"variance_id", v.VarianceID,
 					"error", err,
 				)
-				// Non-fatal: continue valuing other variances
+				mu.Lock()
+				failedCount++
+				mu.Unlock()
 				return nil
 			}
 
@@ -134,6 +141,10 @@ func (vv *VarianceValuator) ValueVariances(ctx context.Context, runID uuid.UUID)
 
 	if err := g.Wait(); err != nil {
 		return fmt.Errorf("variance valuation failed: %w", err)
+	}
+
+	if failedCount > 0 && valuedCount == 0 {
+		return fmt.Errorf("%d variances: %w", failedCount, ErrAllValuationsFailed)
 	}
 
 	// Update run summary
@@ -195,23 +206,21 @@ func (vv *VarianceValuator) valueVariance(ctx context.Context, v *domain.Varianc
 			"error", err,
 		)
 	} else if valueDelta.Abs().LessThan(threshold) {
-		// Below materiality: auto-accept
+		// Below materiality: auto-accept via domain transition
 		v.ValueDelta = valueDelta
 		v.Currency = resp.ValuedAmount.InstrumentCode
-		now := time.Now().UTC()
-		v.Status = domain.VarianceStatusAccepted
-		v.ResolutionNote = fmt.Sprintf("auto-accepted: value delta %s below materiality threshold %s",
+		note := fmt.Sprintf("auto-accepted: value delta %s below materiality threshold %s",
 			valueDelta.Abs().String(), threshold.String())
-		v.ResolvedAt = &now
-		v.UpdatedAt = now
+		if err := v.Accept(note, "system:materiality-filter"); err != nil {
+			return nil, decimal.Zero, fmt.Errorf("failed to auto-accept variance: %w", err)
+		}
 		return v, valueDelta, nil
 	}
 
-	// Above materiality: mark as VALUED
-	v.ValueDelta = valueDelta
-	v.Currency = resp.ValuedAmount.InstrumentCode
-	v.Status = domain.VarianceStatusValued
-	v.UpdatedAt = time.Now().UTC()
+	// Above materiality: mark as VALUED via domain transition
+	if err := v.Value(valueDelta, resp.ValuedAmount.InstrumentCode); err != nil {
+		return nil, decimal.Zero, fmt.Errorf("failed to transition variance to VALUED: %w", err)
+	}
 
 	return v, valueDelta, nil
 }
