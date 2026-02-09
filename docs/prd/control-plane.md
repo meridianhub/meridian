@@ -252,6 +252,8 @@ and workflows.
     }
   ],
 
+  "payment_rails": [],
+
   "seed_data": {
     "tariffs": [
       { "code": "STANDARD", "rate_per_kwh": "0.28" },
@@ -359,6 +361,7 @@ appear in audit trails, position entries, and external integrations.
 Renaming them would break referential integrity across services.
 
 If a tenant genuinely needs a new code, the migration path is:
+
 1. Create new resource with new code
 2. Migrate positions/balances via a dedicated saga
 3. Deprecate (not delete) the old resource
@@ -847,6 +850,7 @@ required internal accounts (`stripe_nostro`, `revenue`). On startup,
 the Control Plane verifies this precondition and panics if unmet.
 
 The seeding sequence:
+
 1. Tenant Service provisions `meridian-ops` schema
 2. Internal Bank Account Service seeds nostro/revenue accounts
    (via existing post-provisioning hook)
@@ -864,6 +868,40 @@ The seeding sequence:
   `causation_id` remains a UUIDv5 for internal saga causation trees
 - [ ] Daily reconciliation catches discrepancies
 - [ ] Webhook failures are retried with idempotency
+- [ ] Stripe saga uses event ID as correlation ID; saga engine's
+  deterministic idempotency keys (`saga_{id}_step_{idx}`) guarantee
+  exactly-once execution per step on replay
+
+#### Future: Tenant Payment Rails (Closed Loop)
+
+WS-5 covers **Meridian's own** Stripe cash-in. The full end-to-end
+vision is a closed payment loop for tenants:
+
+```mermaid
+graph LR
+    A["Tenant's Customer"] -->|pays via Stripe Connect| B[Stripe]
+    B -->|webhook| C["Tenant Ledger\n(position-keeping)"]
+    C -->|settlement snapshots| D["Reconciliation Service"]
+    D -->|variance detection| E["Settlement Finality"]
+    E -->|adjustment sagas| C
+```
+
+This requires:
+
+1. **Manifest declares payment rails**: `"payment_rails"` field
+   (reserved, not yet implemented) specifying Stripe Connect mode
+2. **Tenant Stripe Connect onboarding**: Store tenant's Connected
+   Account ID during manifest apply or separate onboarding flow
+3. **Party records include Stripe Customer IDs**: Party service
+   extensible attributes already support this
+4. **Reconciliation closes the loop**: `reconciliation-service`
+   TM tag (55 points, 10 tasks) covers settlement snapshots,
+   variance detection, dispute workflows, and settlement finality
+
+> **Scope**: Tenant payment rails are a separate PRD (estimated
+> 13+ points for Connect onboarding, customer payment methods,
+> multi-party settlement). This PRD reserves the Manifest field
+> and documents the integration points.
 
 ---
 
