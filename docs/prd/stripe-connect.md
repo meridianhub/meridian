@@ -107,6 +107,44 @@ Data PRD is incomplete without settlement actuation.
 
 ---
 
+## Decision: Single-Provider Focus (Phase 1)
+
+While the Payment Order service maintains a **gateway-agnostic data
+model** (`gateway_reference_id`, generic `WebhookRequest`), this PRD
+exclusively implements the **Stripe Connect** adapter.
+
+**Rationale:**
+
+1. **Platform Semantics:** Meridian is B2B2C (Platform > Tenant >
+   Customer). Abstracting multi-party settlement (KYC, splits,
+   payouts) across vendors is exponentially harder than abstracting
+   simple direct payments. Stripe Connect and Adyen for Platforms
+   have fundamentally different onboarding, split, and payout APIs.
+   A generic "Platform Payment Interface" would cost months of
+   abstraction work with zero feature delivery.
+2. **Implementation Velocity:** Stripe Connect's
+   `application_fee_amount` and `on_behalf_of` semantics align
+   directly with Meridian's revenue model and tenant isolation.
+3. **Compliance:** Offloading sub-tenant KYC to Stripe allows
+   Meridian to remain a technology provider rather than a regulated
+   payment facilitator.
+
+### Principle: Opinionated Rails, Agnostic Data
+
+| Layer | Strategy | Example |
+|-------|----------|---------|
+| Proto / Database | **Generic column names** | `gateway_reference_id` not `stripe_payment_intent_id` |
+| Manifest Config | **Stripe-specific structure** | `"provider": "stripe_connect"` with Stripe-specific fields |
+| Service Logic | **Single adapter, no factory** | Instantiate `StripeGatewayAdapter` directly; no multi-provider dispatch |
+| Party Storage | **Generic table, Stripe validation** | `provider_customer_id VARCHAR(255)` validated as `cus_*` in service layer |
+
+If a future tenant needs Adyen, the architectural path is clear:
+implement `AdyenGatewayAdapter`, add `"provider": "adyen_platforms"`
+to the Manifest schema, and register the adapter in
+`GatewayAccountConfig`. The data model requires zero migration.
+
+---
+
 ## Existing Infrastructure Inventory
 
 Before detailing work streams, here is what already exists and what
@@ -146,15 +184,13 @@ modifying the gateway-agnostic abstractions.
 
 The Party service currently has no extensible attribute system. The
 `externalReference` field is singular and typed (COMPANIES_HOUSE,
-LEI, NATIONAL_ID, TAX_ID). Storing a Stripe Customer ID requires
-either:
+LEI, NATIONAL_ID, TAX_ID) and unsuitable for payment provider tokens.
 
-1. **Extensible attributes** (recommended) - a JSONB `attributes`
-   column for arbitrary key-value pairs
-2. **New ExternalReferenceType** - add `STRIPE_CUSTOMER` to the enum
-
-This PRD recommends option 1 as it serves multiple future use cases
-beyond Stripe.
+This PRD adds a dedicated `party_payment_methods` table (WS-1) with
+**generic column names** (`provider`, `provider_customer_id`,
+`provider_method_id`) but **Stripe-specific validation** in the
+service layer (checking `cus_*` and `pm_*` prefixes). No JSONB
+extensible attribute system or enum modification needed.
 
 ---
 
@@ -200,6 +236,7 @@ CREATE TABLE party_payment_methods (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     version INTEGER NOT NULL DEFAULT 1,
 
+    -- Phase 1: Stripe only. Add providers here as adapters are built.
     CONSTRAINT valid_provider CHECK (provider IN ('STRIPE')),
     CONSTRAINT valid_status CHECK (status IN ('ACTIVE', 'EXPIRED', 'REMOVED'))
 );
