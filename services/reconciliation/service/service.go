@@ -1,16 +1,22 @@
 // Package service implements the gRPC AccountReconciliationService.
 //
-// Dispute RPCs are implemented in dispute_handler.go. Other RPCs currently
-// return UNIMPLEMENTED status and will be added in subsequent tasks.
+// Dispute RPCs are implemented in dispute_handler.go. The AssertBalance RPC
+// is implemented with cross-account balance assertion logic. Other RPCs
+// currently return UNIMPLEMENTED status and will be added in subsequent tasks.
 package service
 
 import (
 	"context"
+	"errors"
 
+	"github.com/google/uuid"
 	reconciliationv1 "github.com/meridianhub/meridian/api/proto/meridian/reconciliation/v1"
 	"github.com/meridianhub/meridian/services/reconciliation/domain"
+	"github.com/shopspring/decimal"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // AccountReconciliationService implements the gRPC service for reconciliation operations.
@@ -21,6 +27,7 @@ type AccountReconciliationService struct {
 	varianceRepo   VarianceFinder
 	sagaRuntime    SagaRuntime
 	eventPublisher EventPublisher
+	assertor       *BalanceAssertor
 }
 
 // Option configures the AccountReconciliationService.
@@ -54,7 +61,15 @@ func WithEventPublisher(pub EventPublisher) Option {
 	}
 }
 
+// WithBalanceAssertor sets the balance assertor for the service.
+func WithBalanceAssertor(assertor *BalanceAssertor) Option {
+	return func(s *AccountReconciliationService) {
+		s.assertor = assertor
+	}
+}
+
 // NewAccountReconciliationService creates a new AccountReconciliationService.
+// The assertor is optional; if nil, AssertBalance returns UNIMPLEMENTED.
 func NewAccountReconciliationService(opts ...Option) *AccountReconciliationService {
 	svc := &AccountReconciliationService{}
 	for _, opt := range opts {
@@ -105,8 +120,131 @@ func (s *AccountReconciliationService) ListReconciliationResults(
 
 // AssertBalance evaluates a balance assertion against current positions.
 func (s *AccountReconciliationService) AssertBalance(
-	_ context.Context,
-	_ *reconciliationv1.AssertBalanceRequest,
+	ctx context.Context,
+	req *reconciliationv1.AssertBalanceRequest,
 ) (*reconciliationv1.AssertBalanceResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "AssertBalance not yet implemented")
+	if s.assertor == nil {
+		return nil, status.Error(codes.Unimplemented, "AssertBalance not yet implemented")
+	}
+
+	expectedBalance, err := decimal.NewFromString(req.GetExpectedBalance())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid expected_balance: %v", err)
+	}
+
+	var runID *uuid.UUID
+	if req.GetRunId() != "" {
+		parsed, err := uuid.Parse(req.GetRunId())
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid run_id: %v", err)
+		}
+		runID = &parsed
+	}
+
+	// Extract caller role from gRPC metadata
+	callerRole := extractCallerRole(ctx)
+
+	// Determine scope from expression or default
+	scope := inferScope(req.GetExpression(), req.GetAccountId())
+
+	result, err := s.assertor.ExecuteBalanceAssertion(ctx, AssertBalanceRequest{
+		AccountID:       req.GetAccountId(),
+		InstrumentCode:  req.GetInstrumentCode(),
+		Expression:      req.GetExpression(),
+		ExpectedBalance: expectedBalance,
+		RunID:           runID,
+		Scope:           scope,
+		CallerRole:      callerRole,
+	})
+	if err != nil {
+		if errors.Is(err, domain.ErrUnauthorized) {
+			return nil, status.Error(codes.PermissionDenied, err.Error())
+		}
+		if errors.Is(err, domain.ErrUnimplemented) {
+			return nil, status.Error(codes.Unimplemented, "NOSTRO_VOSTRO scope not yet implemented")
+		}
+		return nil, status.Error(codes.Internal, "balance assertion failed")
+	}
+
+	return &reconciliationv1.AssertBalanceResponse{
+		Assertion: toProtoAssertionDetail(result.Assertion),
+	}, nil
+}
+
+// extractCallerRole reads the caller's role from gRPC metadata.
+func extractCallerRole(ctx context.Context) CallerRole {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return CallerRoleTenantAdmin
+	}
+
+	roles := md.Get("x-meridian-role")
+	if len(roles) == 0 {
+		return CallerRoleTenantAdmin
+	}
+
+	switch roles[0] {
+	case "SYSTEM":
+		return CallerRoleSystem
+	case "AUDITOR":
+		return CallerRoleAuditor
+	default:
+		return CallerRoleTenantAdmin
+	}
+}
+
+// inferScope determines the assertion scope from the expression and account ID.
+func inferScope(expression, accountID string) domain.AssertionScope {
+	// If the expression mentions cross-account or the account is a system marker
+	if accountID == "SYSTEM" || accountID == "*" {
+		return domain.AssertionScopeCrossAccount
+	}
+	_ = expression // Expression-based scope inference can be added later
+	return domain.AssertionScopePositionLedger
+}
+
+// toProtoAssertionDetail converts a domain BalanceAssertion to proto.
+func toProtoAssertionDetail(a *domain.BalanceAssertion) *reconciliationv1.BalanceAssertionDetail {
+	if a == nil {
+		return nil
+	}
+
+	detail := &reconciliationv1.BalanceAssertionDetail{
+		AssertionId:     a.AssertionID.String(),
+		AccountId:       a.AccountID,
+		InstrumentCode:  a.InstrumentCode,
+		Expression:      a.Expression,
+		ExpectedBalance: a.ExpectedBalance.String(),
+		ActualBalance:   a.ActualBalance.String(),
+		Status:          toProtoAssertionStatus(a.Status),
+		FailureReason:   a.FailureReason,
+		OverrideReason:  a.OverrideReason,
+		CreatedAt:       timestamppb.New(a.CreatedAt),
+	}
+
+	if a.RunID != nil {
+		detail.RunId = a.RunID.String()
+	}
+
+	if !a.AssertedAt.IsZero() {
+		detail.AssertedAt = timestamppb.New(a.AssertedAt)
+	}
+
+	return detail
+}
+
+// toProtoAssertionStatus converts domain AssertionStatus to proto enum.
+func toProtoAssertionStatus(s domain.AssertionStatus) reconciliationv1.AssertionStatus {
+	switch s {
+	case domain.AssertionStatusPending:
+		return reconciliationv1.AssertionStatus_ASSERTION_STATUS_PENDING
+	case domain.AssertionStatusPassed:
+		return reconciliationv1.AssertionStatus_ASSERTION_STATUS_PASSED
+	case domain.AssertionStatusFailed:
+		return reconciliationv1.AssertionStatus_ASSERTION_STATUS_FAILED
+	case domain.AssertionStatusOverride:
+		return reconciliationv1.AssertionStatus_ASSERTION_STATUS_OVERRIDE
+	default:
+		return reconciliationv1.AssertionStatus_ASSERTION_STATUS_UNSPECIFIED
+	}
 }

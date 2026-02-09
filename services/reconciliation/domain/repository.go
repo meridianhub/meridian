@@ -141,9 +141,20 @@ type BalanceAssertionRepository interface {
 
 // AssertionFilter defines filtering and pagination for balance assertions.
 type AssertionFilter struct {
-	RunID     *uuid.UUID
-	AccountID *string
-	Status    *AssertionStatus
-	Limit     int
-	Offset    int
+	RunID          *uuid.UUID
+	AccountID      *string
+	InstrumentCode *string
+	Status         *AssertionStatus
+	Limit          int
+	Offset         int
+}
+
+// ImbalanceTrendRepository defines the contract for persisting imbalance trends.
+type ImbalanceTrendRepository interface {
+	// Upsert creates or updates an imbalance trend for an instrument code.
+	Upsert(ctx context.Context, trend *ImbalanceTrend) error
+
+	// FindByInstrumentCode retrieves the active (unresolved) trend for an instrument.
+	// Returns ErrNotFound if no active trend exists.
+	FindByInstrumentCode(ctx context.Context, instrumentCode string) (*ImbalanceTrend, error)
 }
