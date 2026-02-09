@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/reconciliation/domain"
-	"github.com/shopspring/decimal"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -120,7 +119,7 @@ func (sc *SnapshotCapturer) CaptureSnapshots(ctx context.Context, runID uuid.UUI
 }
 
 // capturePositions handles the paginated fetch-and-store loop.
-func (sc *SnapshotCapturer) capturePositions(ctx context.Context, run *domain.SettlementRun) error {
+func (sc *SnapshotCapturer) capturePositions(ctx context.Context, run *domain.SettlementRun) (retErr error) {
 	// Idempotent cleanup: remove any snapshots from a previous failed attempt
 	if err := sc.snapRepo.DeleteByRunID(ctx, run.RunID); err != nil {
 		return fmt.Errorf("failed to clean up existing snapshots: %w", err)
@@ -128,6 +127,18 @@ func (sc *SnapshotCapturer) capturePositions(ctx context.Context, run *domain.Se
 
 	g, gCtx := errgroup.WithContext(ctx)
 	g.SetLimit(maxConcurrentInserts)
+
+	// Always wait for in-flight goroutines before returning, to avoid leaking
+	// goroutines when the pagination loop exits early on error.
+	defer func() {
+		if waitErr := g.Wait(); waitErr != nil {
+			if retErr != nil {
+				retErr = fmt.Errorf("%w; additionally batch insert failed: %w", retErr, waitErr)
+			} else {
+				retErr = fmt.Errorf("batch insert failed: %w", waitErr)
+			}
+		}
+	}()
 
 	pageToken := ""
 	totalCaptured := 0
@@ -176,10 +187,6 @@ func (sc *SnapshotCapturer) capturePositions(ctx context.Context, run *domain.Se
 		}
 	}
 
-	if err := g.Wait(); err != nil {
-		return fmt.Errorf("batch insert failed: %w", err)
-	}
-
 	slog.InfoContext(ctx, "all snapshots captured",
 		"run_id", run.RunID,
 		"total_snapshots", totalCaptured,
@@ -191,15 +198,15 @@ func (sc *SnapshotCapturer) capturePositions(ctx context.Context, run *domain.Se
 func (sc *SnapshotCapturer) transformToSnapshots(run *domain.SettlementRun, records []PositionRecord) ([]*domain.SettlementSnapshot, error) {
 	snapshots := make([]*domain.SettlementSnapshot, 0, len(records))
 	for _, rec := range records {
-		// For the capture phase, expected balance comes from PK.
-		// Actual balance will be filled during the reconciliation phase.
-		// During capture, we store both as the PK balance (no variance yet).
+		// During capture, both expected and actual are set to the PK balance
+		// so that variance is zero. The actual balance will be overwritten
+		// during the reconciliation phase when the second source is compared.
 		snap, err := domain.NewSettlementSnapshot(
 			run.RunID,
 			rec.AccountID,
 			rec.InstrumentCode,
-			rec.Balance,  // expected balance from PK
-			decimal.Zero, // actual balance - populated during reconciliation
+			rec.Balance, // expected balance from PK
+			rec.Balance, // actual balance - same as expected until reconciliation
 			rec.SourceSystem,
 			rec.Attributes,
 		)

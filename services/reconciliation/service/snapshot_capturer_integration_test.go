@@ -226,6 +226,10 @@ func entityToRun(e *settlementRunEntity) *domain.SettlementRun {
 	if e.FailureReason != nil {
 		failureReason = *e.FailureReason
 	}
+	var attrs map[string]string
+	if e.Attributes != nil {
+		_ = json.Unmarshal([]byte(*e.Attributes), &attrs)
+	}
 	return &domain.SettlementRun{
 		RunID:          e.RunID,
 		AccountID:      e.AccountID,
@@ -238,6 +242,7 @@ func entityToRun(e *settlementRunEntity) *domain.SettlementRun {
 		CompletedAt:    e.CompletedAt,
 		VarianceCount:  e.VarianceCount,
 		FailureReason:  failureReason,
+		Attributes:     attrs,
 		CreatedAt:      e.CreatedAt,
 		UpdatedAt:      e.UpdatedAt,
 		Version:        e.Version,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
@@ -42,21 +43,43 @@ func (p *PKPositionProvider) FetchPositions(ctx context.Context, accountID strin
 	records := make([]PositionRecord, 0, len(resp.GetLogs()))
 	for _, log := range resp.GetLogs() {
 		balance := decimal.Zero
+		instrumentCode := ""
 		for _, entry := range log.GetTransactionLogEntries() {
 			amount, err := moneyToDecimal(entry.GetAmount().GetAmount())
 			if err != nil {
+				slog.WarnContext(ctx, "skipping entry with invalid amount",
+					"log_id", log.GetLogId(),
+					"error", err,
+				)
 				continue
 			}
-			if entry.GetDirection() == commonv1.PostingDirection_POSTING_DIRECTION_CREDIT {
-				balance = balance.Add(amount)
-			} else {
-				balance = balance.Sub(amount)
+
+			// Extract currency code from the first entry that has one.
+			if instrumentCode == "" {
+				if m := entry.GetAmount().GetAmount(); m != nil {
+					instrumentCode = m.GetCurrencyCode()
+				}
 			}
+
+			switch entry.GetDirection() {
+			case commonv1.PostingDirection_POSTING_DIRECTION_CREDIT:
+				balance = balance.Add(amount)
+			case commonv1.PostingDirection_POSTING_DIRECTION_DEBIT:
+				balance = balance.Sub(amount)
+			case commonv1.PostingDirection_POSTING_DIRECTION_UNSPECIFIED:
+				slog.WarnContext(ctx, "skipping entry with unspecified direction",
+					"log_id", log.GetLogId(),
+				)
+			}
+		}
+
+		if instrumentCode == "" {
+			instrumentCode = "UNKNOWN"
 		}
 
 		records = append(records, PositionRecord{
 			AccountID:      log.GetAccountId(),
-			InstrumentCode: "DEFAULT",
+			InstrumentCode: instrumentCode,
 			Balance:        balance,
 			SourceSystem:   "position-keeping",
 			Attributes:     map[string]string{"log_id": log.GetLogId()},
