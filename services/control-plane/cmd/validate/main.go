@@ -49,7 +49,15 @@ func main() {
 	for _, file := range files {
 		result, validErr := validateFile(v, file)
 		if validErr != nil {
-			fmt.Fprintf(os.Stderr, "FAIL %s: %v\n", file, validErr)
+			if *jsonOutput {
+				out, _ := json.MarshalIndent(map[string]any{
+					"file":  file,
+					"error": validErr.Error(),
+				}, "", "  ")
+				fmt.Println(string(out))
+			} else {
+				fmt.Fprintf(os.Stderr, "FAIL %s: %v\n", file, validErr)
+			}
 			hasFailures = true
 			continue
 		}
