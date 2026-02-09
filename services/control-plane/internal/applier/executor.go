@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 )
@@ -256,7 +257,10 @@ func (e *ManifestExecutor) resolveSagaScript(ctx context.Context) (string, error
 		"apply_manifest",
 	).Scan(&script)
 	if err != nil {
-		return "", fmt.Errorf("%w: %w", ErrSagaNotFound, err)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrSagaNotFound
+		}
+		return "", fmt.Errorf("query platform saga definition: %w", err)
 	}
 
 	return script, nil
