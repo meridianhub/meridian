@@ -3,11 +3,13 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/robfig/cron/v3"
 )
 
@@ -70,18 +72,31 @@ type SchedulerConfig struct {
 	PollInterval time.Duration
 	// ShutdownTimeout is the maximum time to wait for in-flight jobs.
 	ShutdownTimeout time.Duration
+	// MaxCatchUpAge is the oldest missed window that will be caught up.
+	// Windows older than this are recorded as MISSED but not executed.
+	// Defaults to 24 hours if zero.
+	MaxCatchUpAge time.Duration
 }
+
+// NowFunc returns the current time. Replaceable for testing.
+var NowFunc = func() time.Time { return time.Now().UTC() }
 
 // SettlementScheduler is a background worker that triggers reconciliation runs
 // based on cron schedules from Reference Data. It uses leader election to ensure
 // only one instance runs scheduled jobs across the cluster.
+//
+// The scheduler persists execution records to the database so that:
+//   - Operators can audit which runs were triggered, completed, or missed.
+//   - On startup, missed settlement windows are detected and caught up.
+//   - The unique constraint on settlement_run prevents duplicate runs at the DB level.
 type SettlementScheduler struct {
-	refDataClient ReferenceDataClient
-	reconClient   ReconciliationClient
-	leader        LeaderElector
-	config        SchedulerConfig
-	logger        *slog.Logger
-	metrics       *SchedulerMetrics
+	refDataClient  ReferenceDataClient
+	reconClient    ReconciliationClient
+	leader         LeaderElector
+	executionStore ExecutionStore
+	config         SchedulerConfig
+	logger         *slog.Logger
+	metrics        *SchedulerMetrics
 
 	cron     *cron.Cron
 	done     chan struct{}
@@ -93,6 +108,7 @@ type SettlementScheduler struct {
 }
 
 // NewSettlementScheduler creates a new settlement scheduler.
+// The executionStore parameter is optional; if nil, audit trail and catch-up are disabled.
 func NewSettlementScheduler(
 	refDataClient ReferenceDataClient,
 	reconClient ReconciliationClient,
@@ -100,6 +116,7 @@ func NewSettlementScheduler(
 	config SchedulerConfig,
 	logger *slog.Logger,
 	metrics *SchedulerMetrics,
+	opts ...SchedulerOption,
 ) (*SettlementScheduler, error) {
 	if refDataClient == nil {
 		return nil, ErrNilRefDataClient
@@ -122,6 +139,9 @@ func NewSettlementScheduler(
 	if metrics == nil {
 		metrics = NewSchedulerMetrics()
 	}
+	if config.MaxCatchUpAge <= 0 {
+		config.MaxCatchUpAge = 24 * time.Hour
+	}
 
 	cronRunner := cron.New(
 		cron.WithLocation(time.UTC),
@@ -130,7 +150,7 @@ func NewSettlementScheduler(
 		)),
 	)
 
-	return &SettlementScheduler{
+	s := &SettlementScheduler{
 		refDataClient: refDataClient,
 		reconClient:   reconClient,
 		leader:        leader,
@@ -140,11 +160,28 @@ func NewSettlementScheduler(
 		cron:          cronRunner,
 		done:          make(chan struct{}),
 		entryIDs:      make(map[string]cron.EntryID),
-	}, nil
+	}
+
+	for _, opt := range opts {
+		opt(s)
+	}
+
+	return s, nil
+}
+
+// SchedulerOption configures optional scheduler dependencies.
+type SchedulerOption func(*SettlementScheduler)
+
+// WithExecutionStore sets the execution store for audit trail and catch-up.
+func WithExecutionStore(store ExecutionStore) SchedulerOption {
+	return func(s *SettlementScheduler) {
+		s.executionStore = store
+	}
 }
 
 // Start begins the scheduler loop. It loads schedules from Reference Data,
-// registers cron jobs, and periodically refreshes the schedule list.
+// runs catch-up for any missed windows, registers cron jobs, and periodically
+// refreshes the schedule list.
 // This method blocks until the context is cancelled or Stop() is called.
 func (s *SettlementScheduler) Start(ctx context.Context) error {
 	s.mu.Lock()
@@ -157,12 +194,19 @@ func (s *SettlementScheduler) Start(ctx context.Context) error {
 
 	s.logger.Info("settlement scheduler starting",
 		"poll_interval", s.config.PollInterval,
-		"shutdown_timeout", s.config.ShutdownTimeout)
+		"shutdown_timeout", s.config.ShutdownTimeout,
+		"max_catchup_age", s.config.MaxCatchUpAge,
+		"audit_enabled", s.executionStore != nil)
 
 	// Load initial schedules
 	if err := s.refreshSchedules(ctx); err != nil {
 		s.logger.Error("failed to load initial schedules", "error", err)
 		// Continue running - will retry on next poll interval
+	}
+
+	// Run catch-up for missed windows before starting cron
+	if s.executionStore != nil {
+		s.catchUpMissedWindows(ctx)
 	}
 
 	// Start the cron runner
@@ -355,15 +399,33 @@ func (s *SettlementScheduler) executeJob(schedule SettlementSchedule) {
 	}
 
 	// Calculate period window using aligned boundaries
-	now := time.Now().UTC()
+	now := NowFunc()
 	periodStart, periodEnd := CalculatePeriod(now, schedule.SettlementType, schedule.PeriodOffset)
+
+	s.triggerReconciliation(ctx, schedule, periodStart, periodEnd, now, "cron")
+}
+
+// triggerReconciliation initiates a reconciliation run and records the execution audit trail.
+// The scheduledAt parameter is the expected fire time (used for the audit trail's ScheduledAt
+// field so that catch-up runs record the original scheduled time, not the current time).
+// The source parameter identifies the trigger origin ("cron" or "catch-up").
+func (s *SettlementScheduler) triggerReconciliation(ctx context.Context, schedule SettlementSchedule, periodStart, periodEnd, scheduledAt time.Time, source string) {
+	initiatedBy := "settlement-scheduler"
+	if source == "catch-up" {
+		initiatedBy = "settlement-scheduler-catchup"
+	}
+
+	// Record execution start in audit trail
+	execID := uuid.New()
+	s.recordExecutionStart(ctx, execID, schedule.ScheduleID, scheduledAt)
 
 	s.logger.Info("executing scheduled reconciliation",
 		"schedule_id", schedule.ScheduleID,
 		"account_id", schedule.AccountID,
 		"asset_type", schedule.AssetType,
 		"period_start", periodStart,
-		"period_end", periodEnd)
+		"period_end", periodEnd,
+		"source", source)
 
 	runID, err := s.reconClient.InitiateReconciliation(ctx, InitiateRequest{
 		AccountID:      schedule.AccountID,
@@ -371,9 +433,21 @@ func (s *SettlementScheduler) executeJob(schedule SettlementSchedule) {
 		SettlementType: schedule.SettlementType,
 		PeriodStart:    periodStart,
 		PeriodEnd:      periodEnd,
-		InitiatedBy:    "settlement-scheduler",
+		InitiatedBy:    initiatedBy,
 	})
+
+	// Update audit trail with result
+	s.recordExecutionResult(ctx, execID, schedule.ScheduleID, runID, err)
+
 	if err != nil {
+		if errors.Is(err, ErrRunAlreadyExists) {
+			s.logger.Info("reconciliation run already exists, skipping",
+				"schedule_id", schedule.ScheduleID,
+				"account_id", schedule.AccountID,
+				"period_start", periodStart,
+				"period_end", periodEnd)
+			return
+		}
 		s.logger.Error("failed to initiate reconciliation",
 			"schedule_id", schedule.ScheduleID,
 			"account_id", schedule.AccountID,
@@ -387,9 +461,198 @@ func (s *SettlementScheduler) executeJob(schedule SettlementSchedule) {
 		"run_id", runID,
 		"account_id", schedule.AccountID,
 		"period_start", periodStart,
-		"period_end", periodEnd)
+		"period_end", periodEnd,
+		"source", source)
 
 	s.metrics.RecordRunTriggered(schedule.AssetType)
+}
+
+// recordExecutionStart records the start of a scheduler execution in the audit trail.
+func (s *SettlementScheduler) recordExecutionStart(ctx context.Context, execID uuid.UUID, scheduleID string, scheduledAt time.Time) {
+	if s.executionStore == nil {
+		return
+	}
+	exec := SchedulerExecution{
+		ID:           execID,
+		ScheduleName: scheduleID,
+		ScheduledAt:  scheduledAt,
+		Status:       ExecutionStatusTriggered,
+	}
+	if err := s.executionStore.RecordExecution(ctx, exec); err != nil {
+		s.logger.Error("failed to record execution start",
+			"schedule_id", scheduleID,
+			"error", err)
+	}
+}
+
+// recordExecutionResult updates the audit trail with the result of a reconciliation attempt.
+func (s *SettlementScheduler) recordExecutionResult(ctx context.Context, execID uuid.UUID, scheduleID string, runID string, reconErr error) {
+	if s.executionStore == nil {
+		return
+	}
+	if reconErr != nil {
+		errMsg := reconErr.Error()
+		status := ExecutionStatusFailed
+		if errors.Is(reconErr, ErrRunAlreadyExists) {
+			status = ExecutionStatusSkipped
+		}
+		if updateErr := s.executionStore.UpdateExecution(ctx, execID, status, nil, &errMsg); updateErr != nil {
+			s.logger.Error("failed to record execution failure",
+				"schedule_id", scheduleID,
+				"error", updateErr)
+		}
+		return
+	}
+	parsedRunID, parseErr := uuid.Parse(runID)
+	var runIDPtr *uuid.UUID
+	if parseErr == nil {
+		runIDPtr = &parsedRunID
+	}
+	if updateErr := s.executionStore.UpdateExecution(ctx, execID, ExecutionStatusCompleted, runIDPtr, nil); updateErr != nil {
+		s.logger.Error("failed to record execution completion",
+			"schedule_id", scheduleID,
+			"error", updateErr)
+	}
+}
+
+// catchUpMissedWindows detects settlement windows that were missed during downtime
+// and triggers them. It compares the current time against the last recorded execution
+// for each schedule, using the cron expression to determine expected fire times.
+func (s *SettlementScheduler) catchUpMissedWindows(ctx context.Context) {
+	// Only the leader should run catch-up to avoid duplicate triggers across replicas
+	leaderCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	isLeader, err := s.leader.TryAcquire(leaderCtx)
+	if err != nil {
+		s.logger.Error("catch-up: leader election check failed", "error", err)
+		return
+	}
+	if !isLeader {
+		s.logger.Debug("catch-up: not the leader, skipping")
+		return
+	}
+
+	s.mu.Lock()
+	scheduleIDs := make([]string, 0, len(s.entryIDs))
+	for id := range s.entryIDs {
+		scheduleIDs = append(scheduleIDs, id)
+	}
+	s.mu.Unlock()
+
+	if len(scheduleIDs) == 0 {
+		return
+	}
+
+	// Get schedule details
+	schedules, err := s.refDataClient.ListSettlementSchedules(ctx)
+	if err != nil {
+		s.logger.Error("catch-up: failed to list schedules", "error", err)
+		return
+	}
+
+	scheduleMap := make(map[string]SettlementSchedule, len(schedules))
+	for _, sched := range schedules {
+		scheduleMap[sched.ScheduleID] = sched
+	}
+
+	now := NowFunc()
+	cutoff := now.Add(-s.config.MaxCatchUpAge)
+	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+
+	var caught int
+	for _, schedID := range scheduleIDs {
+		sched, ok := scheduleMap[schedID]
+		if !ok {
+			continue
+		}
+		caught += s.catchUpSchedule(ctx, sched, cutoff, now, parser)
+	}
+
+	if caught > 0 {
+		s.logger.Info("catch-up complete", "windows_triggered", caught)
+		s.metrics.RecordCatchUp(caught)
+	}
+}
+
+// catchUpSchedule processes catch-up for a single schedule, returning the number
+// of missed windows triggered. Windows older than cutoff are recorded as MISSED
+// in the audit trail but not executed.
+func (s *SettlementScheduler) catchUpSchedule(ctx context.Context, sched SettlementSchedule, cutoff, now time.Time, parser cron.Parser) int {
+	lastExec, err := s.executionStore.LastExecution(ctx, sched.ScheduleID)
+	if err != nil && !errors.Is(err, ErrNoExecution) {
+		s.logger.Error("catch-up: failed to query last execution",
+			"schedule_id", sched.ScheduleID,
+			"error", err)
+		return 0
+	}
+
+	// Parse the cron expression to find expected fire times
+	cronSched, err := parser.Parse(sched.CronExpression)
+	if err != nil {
+		s.logger.Error("catch-up: invalid cron expression",
+			"schedule_id", sched.ScheduleID,
+			"cron", sched.CronExpression,
+			"error", err)
+		return 0
+	}
+
+	// Record MISSED entries for windows between lastExec and cutoff
+	if lastExec != nil && lastExec.ScheduledAt.Before(cutoff) {
+		missed := cronSched.Next(lastExec.ScheduledAt)
+		for !missed.After(cutoff) {
+			s.recordExecutionMissed(ctx, sched.ScheduleID, missed)
+			missed = cronSched.Next(missed)
+		}
+	}
+
+	// Determine the reference point for catch-up (trigger windows from cutoff onward)
+	since := cutoff
+	if lastExec != nil && lastExec.ScheduledAt.After(cutoff) {
+		since = lastExec.ScheduledAt
+	}
+
+	// Walk forward from `since` through expected fire times until `now`
+	var triggered int
+	nextFire := cronSched.Next(since)
+	for !nextFire.After(now) {
+		periodStart, periodEnd := CalculatePeriod(nextFire, sched.SettlementType, sched.PeriodOffset)
+
+		s.logger.Info("catch-up: triggering missed window",
+			"schedule_id", sched.ScheduleID,
+			"expected_fire", nextFire,
+			"period_start", periodStart,
+			"period_end", periodEnd)
+
+		s.triggerReconciliation(ctx, sched, periodStart, periodEnd, nextFire, "catch-up")
+		triggered++
+
+		nextFire = cronSched.Next(nextFire)
+	}
+	return triggered
+}
+
+// recordExecutionMissed records a window that was missed beyond MaxCatchUpAge
+// without executing it.
+func (s *SettlementScheduler) recordExecutionMissed(ctx context.Context, scheduleID string, scheduledAt time.Time) {
+	if s.executionStore == nil {
+		return
+	}
+	exec := SchedulerExecution{
+		ID:           uuid.New(),
+		ScheduleName: scheduleID,
+		ScheduledAt:  scheduledAt,
+		Status:       ExecutionStatusMissed,
+	}
+	if err := s.executionStore.RecordExecution(ctx, exec); err != nil {
+		s.logger.Error("failed to record missed execution",
+			"schedule_id", scheduleID,
+			"scheduled_at", scheduledAt,
+			"error", err)
+		return
+	}
+	s.logger.Info("catch-up: recorded missed window (beyond MaxCatchUpAge)",
+		"schedule_id", scheduleID,
+		"scheduled_at", scheduledAt)
 }
 
 // ScheduleCount returns the number of currently registered schedules.
