@@ -14,6 +14,7 @@ func TestSettlementType_IsValid(t *testing.T) {
 		{"valid on demand", SettlementTypeOnDemand, true},
 		{"valid end of day", SettlementTypeEndOfDay, true},
 		{"valid real time", SettlementTypeRealTime, true},
+		{"valid final", SettlementTypeFinal, true},
 		{"invalid", SettlementType("INVALID"), false},
 		{"empty", SettlementType(""), false},
 	}
