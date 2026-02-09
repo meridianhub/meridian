@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: reconciliation-config
+  labels:
+    app: reconciliation
+    component: microservice
+data:
+  # Logging configuration
+  LOG_LEVEL: "info"
+
+  # Database connection pool settings
+  DB_MAX_OPEN_CONNS: "25"
+  DB_MAX_IDLE_CONNS: "5"
+  DB_CONN_MAX_LIFETIME: "5m"
+  DB_CONN_MAX_IDLE_TIME: "10m"
+
+  # gRPC server configuration
+  GRPC_PORT: "50060"
+
+  # Metrics configuration
+  METRICS_PORT: "9090"
+
+  # Upstream service URLs
+  POSITION_KEEPING_URL: "position-keeping:50053"
+  FINANCIAL_ACCOUNTING_URL: "financial-accounting:50052"
+  CURRENT_ACCOUNT_URL: "current-account:50051"
+  REFERENCE_DATA_URL: "reference-data:50059"
+  PAYMENT_ORDER_URL: "payment-order:50054"
+
+  # Settlement scheduler
+  SETTLEMENT_SCHEDULER_ENABLED: "false"
+
+  # OpenTelemetry configuration
+  OTEL_SERVICE_NAME: "reconciliation-service"
+  OTEL_SAMPLING_RATE: "0.1"
