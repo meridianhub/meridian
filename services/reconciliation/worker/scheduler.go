@@ -520,7 +520,9 @@ func (s *SettlementScheduler) recordExecutionResult(ctx context.Context, execID 
 // for each schedule, using the cron expression to determine expected fire times.
 func (s *SettlementScheduler) catchUpMissedWindows(ctx context.Context) {
 	// Only the leader should run catch-up to avoid duplicate triggers across replicas
-	isLeader, err := s.leader.TryAcquire(ctx)
+	leaderCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	isLeader, err := s.leader.TryAcquire(leaderCtx)
 	if err != nil {
 		s.logger.Error("catch-up: leader election check failed", "error", err)
 		return
@@ -646,6 +648,7 @@ func (s *SettlementScheduler) recordExecutionMissed(ctx context.Context, schedul
 			"schedule_id", scheduleID,
 			"scheduled_at", scheduledAt,
 			"error", err)
+		return
 	}
 	s.logger.Info("catch-up: recorded missed window (beyond MaxCatchUpAge)",
 		"schedule_id", scheduleID,
