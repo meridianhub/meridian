@@ -132,7 +132,7 @@ Before detailing work streams, here is what already exists and what this PRD bui
 
 | Component | Status | Key Capabilities |
 |-----------|--------|------------------|
-| `utilization-metering-consumer` | Implemented | Consumes `AuditEvent` from 6 Kafka topics (`{schema}.audit.events`), transforms to `UtilizationMeasurement`, sends to Position Keeping for tenant-zero billing |
+| `utilization-metering-consumer` | Implemented | Consumes `AuditEvent` from 6+ Kafka topics (`{schema}.audit.events`), transforms to `UtilizationMeasurement`, sends to Position Keeping for tenant-zero billing. **WS-1 adds MDS output alongside PK** for time-of-use pricing analytics |
 | Market Information Management | Implemented (17/18 tasks) | Bi-temporal observations, quality ladder (ESTIMATE/PROVISIONAL/ACTUAL/REVISED), CEL validation, resolution keys, data sources with trust levels, batch ingestion, Kafka event publishing (`ObservationRecorded`) |
 | Reference Data (Instrument Registry) | Implemented | Instrument definitions, CEL validation expressions, fungibility keys, lifecycle management (DRAFT/ACTIVE/DEPRECATED), tiered caching |
 | Starlark Runtime | Implemented | `shared/pkg/saga/starlark_runner.go`, service module injection from `handlers.yaml`, compensation support, bounded execution |
@@ -174,16 +174,37 @@ how Market Information manages both DataSetDefinitions and DataSources.
 
 ### WS-1: Utilization Metering Extension (P0)
 
-**Objective:** Extend `utilization-metering-consumer` to publish aggregated usage patterns as market data observations.
+**Objective:** Extend `utilization-metering-consumer` to publish
+aggregated platform usage as market data observations alongside its
+existing Position Keeping output, demonstrating the MDS pipeline that
+tenants will independently use for their own asset tracking.
+
+#### Two Separate Data Flows
+
+This PRD enables tenants to track **their own assets** (kWh, GPU-hours,
+carbon credits) using MDS observations, forward curves, and dynamic
+pricing. The UMC extension is Meridian dogfooding that same
+infrastructure for its own platform usage analytics.
+
+| Concern | Data Flow | Owner |
+|---------|-----------|-------|
+| **Platform billing** (existing) | Audit events → UMC → tenant-zero PK | Meridian — tracks how much each tenant uses the platform |
+| **Platform pricing analytics** (new, WS-1) | Audit events → UMC → MDS observations | Meridian — feeds forward curves for dynamic platform pricing |
+| **Tenant asset tracking** (new, tenant-driven) | Tenant's own events → Tenant's own MDS | Tenant — tracks their own customers' usage for their own pricing |
+
+Tenant-zero Position Keeping **stays** — it accumulates billable
+positions for platform billing. The MDS output is additive: it gives
+Meridian's pricing engine the same quality-ladder observations and
+forward curve infrastructure that tenants get for their own data.
 
 #### Current State
 
 The `utilization-metering-consumer` currently:
 
-- Consumes `AuditEvent` protobuf messages from Kafka (topics:
-  `current-account.audit.events`, `payment-order.audit.events`,
+- Consumes `AuditEvent` protobuf messages from Kafka (6+ service audit
+  topics: `current-account.audit.events`, `payment-order.audit.events`,
   `position-keeping.audit.events`, `financial-accounting.audit.events`,
-  `party.audit.events`, `tenant.audit.events`)
+  `party.audit.events`, `tenant.audit.events`, and any new services)
 - Transforms audit events into `UtilizationMeasurement` via `AuditEventTransformer`
 - Sends measurements to Position Keeping service for tenant-zero billing via gRPC
 - Tracks instruments: TRANSACTION, API_CALL, STORAGE_GB, COMPUTE_HOUR, NETWORK_GB
@@ -194,8 +215,45 @@ The consumer will additionally:
 
 - Publish usage aggregates to Market Information Management service via the existing `RecordObservationBatch` RPC
 - Support configurable aggregation windows (hourly, daily)
-- Enable per-tenant market data isolation via dataset scoping
+- Enable per-tenant usage visibility via dataset scoping
 - Track usage by hierarchical reference data keys (when WS-2 is available)
+- Tenant-zero PK output continues unchanged (platform billing)
+
+```mermaid
+flowchart LR
+    subgraph Kafka["Kafka"]
+        T1["current-account<br/>.audit.events"]
+        T2["payment-order<br/>.audit.events"]
+        T3["...other service<br/>audit topics"]
+    end
+
+    subgraph UMC["Utilization Metering Consumer"]
+        Consumer["Multi-Topic<br/>Consumer"]
+        Transformer["Event<br/>Transformer"]
+        Aggregator["Aggregation<br/>Buffer"]
+    end
+
+    subgraph PK["Position Keeping"]
+        TenantZero["Tenant-Zero<br/>Billing Positions"]
+    end
+
+    subgraph MDS["Market Data"]
+        Observations["Platform Usage<br/>Observations"]
+    end
+
+    subgraph FC["Forward Curves"]
+        Pricing["Dynamic Platform<br/>Pricing (WS-3)"]
+    end
+
+    T1 --> Consumer
+    T2 --> Consumer
+    T3 --> Consumer
+    Consumer --> Transformer
+    Transformer -->|"RecordMeasurement<br/>(existing)"| TenantZero
+    Transformer --> Aggregator
+    Aggregator -->|"RecordObservationBatch<br/>(new)"| Observations
+    Observations --> Pricing
+```
 
 #### Key Changes
 
@@ -211,6 +269,7 @@ The consumer will additionally:
 ```go
 // MarketDataPublisher publishes aggregated utilization data to Market Information Service.
 // Lives alongside the existing PositionKeepingClient - both receive transformed measurements.
+// This is Meridian dogfooding the same MDS infrastructure that tenants use for their own data.
 type MarketDataPublisher struct {
     misClient  marketinformationv1.MarketInformationServiceClient
     windowSize time.Duration // e.g., 1 hour
@@ -244,6 +303,24 @@ The publisher uses the existing `RecordObservationBatch` RPC with:
 - `resolution_key`: Hierarchical key computed from tenant + resource context
 - `observed_at`: Window midpoint
 - `valid_from` / `valid_to`: Window boundaries
+
+#### Tenant Asset Tracking (Independent)
+
+Tenants use the **same MDS infrastructure** to track their own
+customers' assets — but via their own data ingestion, not the UMC.
+A tenant data flow looks like:
+
+```text
+Tenant's own systems → RecordObservationBatch (tenant's MDS schema)
+                        → Forward curves (tenant's Starlark strategies)
+                        → CEL pricing rules (forward_price())
+                        → Billing cycle (Stripe Connect PRD WS-4)
+```
+
+This is entirely separate from Meridian's platform billing. The
+reference data hierarchy (WS-2), forecasting service (WS-3), and
+forward curve consumption (WS-4) all operate within the tenant's
+own schema boundary (ADR-0016).
 
 #### Tasks
 
@@ -717,10 +794,12 @@ gantt
 
 ### Minimum Viable Product (P0 Complete)
 
-1. Usage data from `utilization-metering-consumer` flows to Market Data Service as `UTILIZATION_*` observations
+1. Platform usage from `utilization-metering-consumer` flows to MDS as
+   `UTILIZATION_*` observations (alongside existing tenant-zero PK)
 2. Tenants can define hierarchical reference data (e.g., region > zone > rack)
 3. Reference data supports bi-temporal queries (as-at, history)
 4. Market data observations correlate with reference data resolution keys
+5. Tenants can independently ingest their own asset usage data via `RecordObservationBatch`
 
 ### Full Feature Set (P1 Complete)
 

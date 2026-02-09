@@ -1128,20 +1128,25 @@ gantt
 ## Connection to Market Data & Dynamic Pricing PRD
 
 The Market Data PRD stops at "Price Signals" (forward curves
-delivered to customers via CEL expressions). This PRD closes the
-loop:
+delivered via CEL expressions). This PRD closes the loop. The same
+infrastructure operates at two levels:
+
+**Platform level:** Meridian uses UMC + MDS + forward curves for
+time-of-use pricing of its own platform (charging tenants based on
+when and how much they use Meridian services).
+
+**Tenant level:** Tenants use the same MDS + forward curve
+infrastructure for their own customers' assets (kWh, GPU-hours, etc.)
+with their own data ingestion and pricing strategies.
 
 ```text
 Market Data PRD                    This PRD
 ==============                     ========
 
-Usage Event                        |
+Usage Data                         |
   |                                |
   v                                |
-Utilization Metering (WS-1)        |
-  |                                |
-  v                                |
-Market Information Service         |
+MDS Observations (WS-1)           |
   |                                |
   v                                |
 Forecasting Service (WS-3)         |
