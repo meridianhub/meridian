@@ -29,5 +29,18 @@ CREATE INDEX "idx_scheduler_execution_name_at"
 
 -- 2. Unique constraint on settlement_run to prevent duplicate runs
 -- Defense in depth beyond application-level checks.
+--
+-- Clean up any pre-existing duplicate (account_id, period_start, period_end) rows
+-- before creating the unique index. Keep the earliest row per combination.
+-- This is a forward-only migration: if rollback is needed, drop the index:
+--   DROP INDEX IF EXISTS "idx_settlement_run_account_period";
+-- Deleted rows can be recovered from database backups if necessary.
+DELETE FROM "settlement_run"
+WHERE "id" NOT IN (
+  SELECT MIN("id")
+  FROM "settlement_run"
+  GROUP BY "account_id", "period_start", "period_end"
+);
+
 CREATE UNIQUE INDEX "idx_settlement_run_account_period"
   ON "settlement_run" ("account_id", "period_start", "period_end");

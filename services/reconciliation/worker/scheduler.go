@@ -518,6 +518,17 @@ func (s *SettlementScheduler) recordExecutionResult(ctx context.Context, execID 
 // and triggers them. It compares the current time against the last recorded execution
 // for each schedule, using the cron expression to determine expected fire times.
 func (s *SettlementScheduler) catchUpMissedWindows(ctx context.Context) {
+	// Only the leader should run catch-up to avoid duplicate triggers across replicas
+	isLeader, err := s.leader.TryAcquire(ctx)
+	if err != nil {
+		s.logger.Error("catch-up: leader election check failed", "error", err)
+		return
+	}
+	if !isLeader {
+		s.logger.Debug("catch-up: not the leader, skipping")
+		return
+	}
+
 	s.mu.Lock()
 	scheduleIDs := make([]string, 0, len(s.entryIDs))
 	for id := range s.entryIDs {
@@ -551,61 +562,60 @@ func (s *SettlementScheduler) catchUpMissedWindows(ctx context.Context) {
 		if !ok {
 			continue
 		}
-
-		lastExec, err := s.executionStore.LastExecution(ctx, schedID)
-		if err != nil && !errors.Is(err, ErrNoExecution) {
-			s.logger.Error("catch-up: failed to query last execution",
-				"schedule_id", schedID,
-				"error", err)
-			continue
-		}
-
-		// Determine the reference point for catch-up
-		var since time.Time
-		if lastExec != nil {
-			since = lastExec.ScheduledAt
-		} else {
-			// No prior execution - use cutoff as starting point
-			since = cutoff
-		}
-
-		// If the reference is older than the cutoff, use the cutoff
-		if since.Before(cutoff) {
-			since = cutoff
-		}
-
-		// Parse the cron expression to find expected fire times
-		cronSched, err := parser.Parse(sched.CronExpression)
-		if err != nil {
-			s.logger.Error("catch-up: invalid cron expression",
-				"schedule_id", schedID,
-				"cron", sched.CronExpression,
-				"error", err)
-			continue
-		}
-
-		// Walk forward from `since` through expected fire times until `now`
-		nextFire := cronSched.Next(since)
-		for !nextFire.After(now) {
-			periodStart, periodEnd := CalculatePeriod(nextFire, sched.SettlementType, sched.PeriodOffset)
-
-			s.logger.Info("catch-up: triggering missed window",
-				"schedule_id", schedID,
-				"expected_fire", nextFire,
-				"period_start", periodStart,
-				"period_end", periodEnd)
-
-			s.triggerReconciliation(ctx, sched, periodStart, periodEnd, "catch-up")
-			caught++
-
-			nextFire = cronSched.Next(nextFire)
-		}
+		caught += s.catchUpSchedule(ctx, sched, cutoff, now, parser)
 	}
 
 	if caught > 0 {
 		s.logger.Info("catch-up complete", "windows_triggered", caught)
 		s.metrics.RecordCatchUp(caught)
 	}
+}
+
+// catchUpSchedule processes catch-up for a single schedule, returning the number
+// of missed windows triggered.
+func (s *SettlementScheduler) catchUpSchedule(ctx context.Context, sched SettlementSchedule, cutoff, now time.Time, parser cron.Parser) int {
+	lastExec, err := s.executionStore.LastExecution(ctx, sched.ScheduleID)
+	if err != nil && !errors.Is(err, ErrNoExecution) {
+		s.logger.Error("catch-up: failed to query last execution",
+			"schedule_id", sched.ScheduleID,
+			"error", err)
+		return 0
+	}
+
+	// Determine the reference point for catch-up
+	since := cutoff
+	if lastExec != nil && lastExec.ScheduledAt.After(cutoff) {
+		since = lastExec.ScheduledAt
+	}
+
+	// Parse the cron expression to find expected fire times
+	cronSched, err := parser.Parse(sched.CronExpression)
+	if err != nil {
+		s.logger.Error("catch-up: invalid cron expression",
+			"schedule_id", sched.ScheduleID,
+			"cron", sched.CronExpression,
+			"error", err)
+		return 0
+	}
+
+	// Walk forward from `since` through expected fire times until `now`
+	var triggered int
+	nextFire := cronSched.Next(since)
+	for !nextFire.After(now) {
+		periodStart, periodEnd := CalculatePeriod(nextFire, sched.SettlementType, sched.PeriodOffset)
+
+		s.logger.Info("catch-up: triggering missed window",
+			"schedule_id", sched.ScheduleID,
+			"expected_fire", nextFire,
+			"period_start", periodStart,
+			"period_end", periodEnd)
+
+		s.triggerReconciliation(ctx, sched, periodStart, periodEnd, "catch-up")
+		triggered++
+
+		nextFire = cronSched.Next(nextFire)
+	}
+	return triggered
 }
 
 // ScheduleCount returns the number of currently registered schedules.
