@@ -568,3 +568,144 @@ handlers:
       execution_status:
         type: string
         description: "Status of the lien execution (EXECUTED)"
+
+  # Account Reconciliation Service
+  reconciliation.initiate_run:
+    description: "Initiate a new settlement reconciliation run"
+    params:
+      account_id:
+        type: string
+        required: true
+        description: "Account identifier to reconcile"
+      scope:
+        type: enum
+        values: [ACCOUNT, INSTRUMENT, PORTFOLIO, FULL]
+        required: false
+        description: "Reconciliation scope (default: ACCOUNT)"
+      settlement_type:
+        type: enum
+        values: [DAILY, WEEKLY, MONTHLY, ON_DEMAND, END_OF_DAY, REAL_TIME]
+        required: false
+        description: "Settlement cycle type"
+      initiated_by:
+        type: string
+        required: true
+        description: "User or system starting the run"
+    returns:
+      run_id:
+        type: string
+        description: "Generated settlement run identifier (UUID)"
+      status:
+        type: string
+        description: "Status of the run (PENDING)"
+    compensate: reconciliation.cancel_run
+
+  reconciliation.execute_run:
+    description: "Trigger execution of a pending settlement run"
+    params:
+      run_id:
+        type: string
+        required: true
+        description: "Identifier of the settlement run to execute"
+    returns:
+      run_id:
+        type: string
+        description: "Echo of the input run ID"
+      status:
+        type: string
+        description: "Status of the run (RUNNING)"
+
+  reconciliation.retrieve_run:
+    description: "Retrieve a settlement run summary"
+    params:
+      run_id:
+        type: string
+        required: true
+        description: "Identifier of the settlement run to retrieve"
+    returns:
+      run_id:
+        type: string
+        description: "Echo of the input run ID"
+      status:
+        type: string
+        description: "Current status of the run"
+      variance_count:
+        type: int64
+        description: "Number of variances detected"
+
+  reconciliation.cancel_run:
+    description: "Cancel a settlement run (compensation handler)"
+    params:
+      run_id:
+        type: string
+        required: true
+        description: "Identifier of the settlement run to cancel"
+      reason:
+        type: string
+        required: false
+        description: "Reason for cancellation"
+    returns:
+      run_id:
+        type: string
+        description: "Echo of the input run ID"
+      status:
+        type: string
+        description: "Status of the run (CANCELLED)"
+
+  reconciliation.assert_balance:
+    description: "Evaluate a balance assertion against current positions"
+    params:
+      account_id:
+        type: string
+        required: true
+        description: "Account identifier to assert"
+      instrument_code:
+        type: string
+        required: true
+        description: "Asset type to assert (e.g., GBP, KWH)"
+      expression:
+        type: string
+        required: true
+        description: "Assertion rule (CEL expression)"
+      expected_balance:
+        type: string
+        required: true
+        description: "Expected balance as decimal string"
+    returns:
+      assertion_id:
+        type: string
+        description: "Generated assertion identifier (UUID)"
+      status:
+        type: string
+        description: "Assertion result (PASSED, FAILED)"
+
+  reconciliation.initiate_dispute:
+    description: "Raise a formal dispute against a detected variance"
+    params:
+      variance_id:
+        type: string
+        required: true
+        description: "Identifier of the variance being disputed"
+      run_id:
+        type: string
+        required: true
+        description: "Identifier of the settlement run"
+      account_id:
+        type: string
+        required: true
+        description: "Account identifier"
+      reason:
+        type: string
+        required: true
+        description: "Reason for the dispute"
+      raised_by:
+        type: string
+        required: true
+        description: "User or system raising the dispute"
+    returns:
+      dispute_id:
+        type: string
+        description: "Generated dispute identifier (UUID)"
+      status:
+        type: string
+        description: "Status of the dispute (OPEN)"

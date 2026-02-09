@@ -1,0 +1,846 @@
+syntax = "proto3";
+
+package meridian.reconciliation.v1;
+
+import "buf/validate/validate.proto";
+import "google/api/annotations.proto";
+import "google/protobuf/timestamp.proto";
+import "meridian/common/v1/types.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
+
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/reconciliation/v1;reconciliationv1";
+
+// OpenAPI specification metadata for Account Reconciliation Service
+option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+  info: {
+    title: "Meridian Account Reconciliation Service API"
+    version: "1.0"
+    description: "BIAN-compliant account reconciliation operations for settlement runs, "
+                 "variance detection, balance assertions, and dispute management."
+    contact: {
+      name: "Meridian API Team"
+      url: "https://github.com/meridianhub/meridian"
+    }
+    license: {
+      name: "Apache 2.0"
+      url: "https://www.apache.org/licenses/LICENSE-2.0"
+    }
+  }
+  schemes: HTTPS
+  consumes: "application/json"
+  produces: "application/json"
+  security_definitions: {
+    security: {
+      key: "Bearer"
+      value: {
+        type: TYPE_API_KEY
+        in: IN_HEADER
+        name: "Authorization"
+        description: "Bearer token authentication"
+      }
+    }
+  }
+  security: {
+    security_requirement: {
+      key: "Bearer"
+      value: {}
+    }
+  }
+};
+
+// ReconciliationScope defines what is being reconciled.
+enum ReconciliationScope {
+  // RECONCILIATION_SCOPE_UNSPECIFIED means the scope is unknown.
+  RECONCILIATION_SCOPE_UNSPECIFIED = 0;
+  // RECONCILIATION_SCOPE_ACCOUNT reconciles a single account.
+  RECONCILIATION_SCOPE_ACCOUNT = 1;
+  // RECONCILIATION_SCOPE_INSTRUMENT reconciles by instrument/asset type.
+  RECONCILIATION_SCOPE_INSTRUMENT = 2;
+  // RECONCILIATION_SCOPE_PORTFOLIO reconciles an entire portfolio.
+  RECONCILIATION_SCOPE_PORTFOLIO = 3;
+  // RECONCILIATION_SCOPE_FULL performs a full system reconciliation.
+  RECONCILIATION_SCOPE_FULL = 4;
+}
+
+// SettlementType defines the type of settlement being performed.
+enum SettlementType {
+  // SETTLEMENT_TYPE_UNSPECIFIED means the settlement type is unknown.
+  SETTLEMENT_TYPE_UNSPECIFIED = 0;
+  // SETTLEMENT_TYPE_DAILY is a daily settlement cycle.
+  SETTLEMENT_TYPE_DAILY = 1;
+  // SETTLEMENT_TYPE_WEEKLY is a weekly settlement cycle.
+  SETTLEMENT_TYPE_WEEKLY = 2;
+  // SETTLEMENT_TYPE_MONTHLY is a monthly settlement cycle.
+  SETTLEMENT_TYPE_MONTHLY = 3;
+  // SETTLEMENT_TYPE_ON_DEMAND is an ad-hoc settlement run.
+  SETTLEMENT_TYPE_ON_DEMAND = 4;
+  // SETTLEMENT_TYPE_END_OF_DAY is an end-of-day settlement.
+  SETTLEMENT_TYPE_END_OF_DAY = 5;
+  // SETTLEMENT_TYPE_REAL_TIME is a real-time settlement.
+  SETTLEMENT_TYPE_REAL_TIME = 6;
+}
+
+// RunStatus represents the current state of a settlement run.
+enum RunStatus {
+  // RUN_STATUS_UNSPECIFIED means the status is unknown.
+  RUN_STATUS_UNSPECIFIED = 0;
+  // RUN_STATUS_PENDING means the run has been created but not started.
+  RUN_STATUS_PENDING = 1;
+  // RUN_STATUS_RUNNING means the run is actively executing.
+  RUN_STATUS_RUNNING = 2;
+  // RUN_STATUS_COMPLETED means the run finished successfully.
+  RUN_STATUS_COMPLETED = 3;
+  // RUN_STATUS_FAILED means the run encountered an error.
+  RUN_STATUS_FAILED = 4;
+  // RUN_STATUS_CANCELLED means the run was cancelled.
+  RUN_STATUS_CANCELLED = 5;
+}
+
+// VarianceStatus represents the resolution state of a variance.
+enum VarianceStatus {
+  // VARIANCE_STATUS_UNSPECIFIED means the status is unknown.
+  VARIANCE_STATUS_UNSPECIFIED = 0;
+  // VARIANCE_STATUS_OPEN means the variance is newly detected.
+  VARIANCE_STATUS_OPEN = 1;
+  // VARIANCE_STATUS_INVESTIGATING means the variance is under investigation.
+  VARIANCE_STATUS_INVESTIGATING = 2;
+  // VARIANCE_STATUS_DISPUTED means a formal dispute has been raised.
+  VARIANCE_STATUS_DISPUTED = 3;
+  // VARIANCE_STATUS_RESOLVED means the variance has been resolved.
+  VARIANCE_STATUS_RESOLVED = 4;
+  // VARIANCE_STATUS_ACCEPTED means the variance is accepted as known.
+  VARIANCE_STATUS_ACCEPTED = 5;
+}
+
+// VarianceReason classifies the type of discrepancy.
+enum VarianceReason {
+  // VARIANCE_REASON_UNSPECIFIED means the reason is unknown.
+  VARIANCE_REASON_UNSPECIFIED = 0;
+  // VARIANCE_REASON_AMOUNT_MISMATCH means the amounts do not match.
+  VARIANCE_REASON_AMOUNT_MISMATCH = 1;
+  // VARIANCE_REASON_MISSING_ENTRY means a transaction is missing.
+  VARIANCE_REASON_MISSING_ENTRY = 2;
+  // VARIANCE_REASON_DUPLICATE_ENTRY means a duplicate transaction exists.
+  VARIANCE_REASON_DUPLICATE_ENTRY = 3;
+  // VARIANCE_REASON_TIMING_DIFFERENCE means transactions settled at different times.
+  VARIANCE_REASON_TIMING_DIFFERENCE = 4;
+  // VARIANCE_REASON_CURRENCY_MISMATCH means currencies do not match.
+  VARIANCE_REASON_CURRENCY_MISMATCH = 5;
+  // VARIANCE_REASON_DIRECTION_ERROR means debit/credit direction is incorrect.
+  VARIANCE_REASON_DIRECTION_ERROR = 6;
+  // VARIANCE_REASON_OTHER means an unclassified discrepancy.
+  VARIANCE_REASON_OTHER = 7;
+}
+
+// DisputeStatus represents the state of a formal dispute.
+enum DisputeStatus {
+  // DISPUTE_STATUS_UNSPECIFIED means the status is unknown.
+  DISPUTE_STATUS_UNSPECIFIED = 0;
+  // DISPUTE_STATUS_OPEN means the dispute has been raised.
+  DISPUTE_STATUS_OPEN = 1;
+  // DISPUTE_STATUS_UNDER_REVIEW means the dispute is being reviewed.
+  DISPUTE_STATUS_UNDER_REVIEW = 2;
+  // DISPUTE_STATUS_ESCALATED means the dispute has been escalated.
+  DISPUTE_STATUS_ESCALATED = 3;
+  // DISPUTE_STATUS_RESOLVED means the dispute has been resolved.
+  DISPUTE_STATUS_RESOLVED = 4;
+  // DISPUTE_STATUS_REJECTED means the dispute was rejected.
+  DISPUTE_STATUS_REJECTED = 5;
+}
+
+// AssertionStatus represents the result of a balance assertion.
+enum AssertionStatus {
+  // ASSERTION_STATUS_UNSPECIFIED means the status is unknown.
+  ASSERTION_STATUS_UNSPECIFIED = 0;
+  // ASSERTION_STATUS_PENDING means the assertion has not been evaluated.
+  ASSERTION_STATUS_PENDING = 1;
+  // ASSERTION_STATUS_PASSED means the assertion passed.
+  ASSERTION_STATUS_PASSED = 2;
+  // ASSERTION_STATUS_FAILED means the assertion failed.
+  ASSERTION_STATUS_FAILED = 3;
+  // ASSERTION_STATUS_OVERRIDE means a failed assertion was manually overridden.
+  ASSERTION_STATUS_OVERRIDE = 4;
+}
+
+// ControlAction defines the control actions available for settlement runs.
+enum ControlAction {
+  // CONTROL_ACTION_UNSPECIFIED means the action is unknown.
+  CONTROL_ACTION_UNSPECIFIED = 0;
+  // CONTROL_ACTION_CANCEL cancels a running or pending settlement run.
+  CONTROL_ACTION_CANCEL = 1;
+  // CONTROL_ACTION_PAUSE pauses a running settlement run.
+  CONTROL_ACTION_PAUSE = 2;
+  // CONTROL_ACTION_RESUME resumes a paused settlement run.
+  CONTROL_ACTION_RESUME = 3;
+}
+
+// DisputeControlAction defines the control actions for disputes.
+enum DisputeControlAction {
+  // DISPUTE_CONTROL_ACTION_UNSPECIFIED means the action is unknown.
+  DISPUTE_CONTROL_ACTION_UNSPECIFIED = 0;
+  // DISPUTE_CONTROL_ACTION_ESCALATE escalates a dispute.
+  DISPUTE_CONTROL_ACTION_ESCALATE = 1;
+  // DISPUTE_CONTROL_ACTION_RESOLVE resolves a dispute.
+  DISPUTE_CONTROL_ACTION_RESOLVE = 2;
+  // DISPUTE_CONTROL_ACTION_REJECT rejects a dispute.
+  DISPUTE_CONTROL_ACTION_REJECT = 3;
+}
+
+// SettlementRunSummary provides summary information about a settlement run.
+// Used in Retrieve responses - does NOT include detailed variance lists.
+message SettlementRunSummary {
+  // run_id is the unique identifier for this settlement run.
+  string run_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // account_id identifies the primary account being reconciled.
+  string account_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // scope defines what is being reconciled.
+  ReconciliationScope scope = 3 [(buf.validate.field).enum.defined_only = true];
+
+  // settlement_type defines the type of settlement.
+  SettlementType settlement_type = 4 [(buf.validate.field).enum.defined_only = true];
+
+  // status is the current state of the run.
+  RunStatus status = 5 [(buf.validate.field).enum.defined_only = true];
+
+  // period_start is the beginning of the reconciliation period.
+  google.protobuf.Timestamp period_start = 6 [(buf.validate.field).required = true];
+
+  // period_end is the end of the reconciliation period.
+  google.protobuf.Timestamp period_end = 7 [(buf.validate.field).required = true];
+
+  // initiated_by is the user or system that started the run.
+  string initiated_by = 8 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // completed_at is when the run finished (empty if still in progress).
+  google.protobuf.Timestamp completed_at = 9;
+
+  // variance_count is the number of variances detected.
+  int32 variance_count = 10 [(buf.validate.field).int32.gte = 0];
+
+  // total_variance is the sum of absolute variance amounts as a decimal string.
+  string total_variance = 11 [(buf.validate.field).string = {
+    max_len: 50
+    pattern: "^-?\\d+(\\.\\d+)?$"
+  }];
+
+  // snapshot_count is the number of balance snapshots captured.
+  int32 snapshot_count = 12 [(buf.validate.field).int32.gte = 0];
+
+  // failure_reason records why the run failed (empty if not failed).
+  string failure_reason = 13 [(buf.validate.field).string.max_len = 1000];
+
+  // attributes stores flexible metadata.
+  map<string, string> attributes = 14;
+
+  // created_at is when this record was created.
+  google.protobuf.Timestamp created_at = 15 [(buf.validate.field).required = true];
+
+  // updated_at is when this record was last updated.
+  google.protobuf.Timestamp updated_at = 16 [(buf.validate.field).required = true];
+
+  // version is used for optimistic concurrency control.
+  int64 version = 17 [(buf.validate.field).int64.gte = 0];
+}
+
+// VarianceDetail provides detailed information about a single variance.
+message VarianceDetail {
+  // variance_id is the unique identifier for this variance.
+  string variance_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // run_id references the settlement run that detected this variance.
+  string run_id = 2 [(buf.validate.field).string.uuid = true];
+
+  // snapshot_id references the snapshot where the variance was found.
+  string snapshot_id = 3 [(buf.validate.field).string.uuid = true];
+
+  // account_id identifies the account with the discrepancy.
+  string account_id = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // instrument_code identifies the asset type.
+  string instrument_code = 5 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 32
+    pattern: "^[A-Z][A-Z0-9_]*$"
+  }];
+
+  // expected_amount is the expected balance as a decimal string.
+  string expected_amount = 6 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 50
+    pattern: "^-?\\d+(\\.\\d+)?$"
+  }];
+
+  // actual_amount is the actual balance as a decimal string.
+  string actual_amount = 7 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 50
+    pattern: "^-?\\d+(\\.\\d+)?$"
+  }];
+
+  // variance_amount is the difference (actual - expected) as a decimal string.
+  string variance_amount = 8 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 50
+    pattern: "^-?\\d+(\\.\\d+)?$"
+  }];
+
+  // reason classifies the type of discrepancy.
+  VarianceReason reason = 9 [(buf.validate.field).enum.defined_only = true];
+
+  // status is the resolution state.
+  VarianceStatus status = 10 [(buf.validate.field).enum.defined_only = true];
+
+  // resolution_note records how the variance was resolved.
+  string resolution_note = 11 [(buf.validate.field).string.max_len = 1000];
+
+  // resolved_by records who resolved the variance.
+  string resolved_by = 12 [(buf.validate.field).string.max_len = 255];
+
+  // resolved_at records when the variance was resolved.
+  google.protobuf.Timestamp resolved_at = 13;
+
+  // attributes stores flexible metadata.
+  map<string, string> attributes = 14;
+
+  // created_at is when this variance was detected.
+  google.protobuf.Timestamp created_at = 15 [(buf.validate.field).required = true];
+
+  // updated_at is when this record was last updated.
+  google.protobuf.Timestamp updated_at = 16 [(buf.validate.field).required = true];
+}
+
+// DisputeDetail provides information about a formal dispute.
+message DisputeDetail {
+  // dispute_id is the unique identifier for this dispute.
+  string dispute_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // variance_id references the variance being disputed.
+  string variance_id = 2 [(buf.validate.field).string.uuid = true];
+
+  // run_id references the settlement run.
+  string run_id = 3 [(buf.validate.field).string.uuid = true];
+
+  // account_id identifies the account.
+  string account_id = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // status is the current state of the dispute.
+  DisputeStatus status = 5 [(buf.validate.field).enum.defined_only = true];
+
+  // reason describes why the variance is being disputed.
+  string reason = 6 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 1000
+  }];
+
+  // resolution records how the dispute was resolved.
+  string resolution = 7 [(buf.validate.field).string.max_len = 1000];
+
+  // raised_by records who raised the dispute.
+  string raised_by = 8 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // resolved_by records who resolved the dispute.
+  string resolved_by = 9 [(buf.validate.field).string.max_len = 255];
+
+  // resolved_at records when the dispute was resolved.
+  google.protobuf.Timestamp resolved_at = 10;
+
+  // attributes stores flexible metadata.
+  map<string, string> attributes = 11;
+
+  // created_at is when this dispute was raised.
+  google.protobuf.Timestamp created_at = 12 [(buf.validate.field).required = true];
+
+  // updated_at is when this record was last updated.
+  google.protobuf.Timestamp updated_at = 13 [(buf.validate.field).required = true];
+}
+
+// BalanceAssertionDetail provides information about a balance assertion.
+message BalanceAssertionDetail {
+  // assertion_id is the unique identifier for this assertion.
+  string assertion_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // run_id references the settlement run (optional, can be standalone).
+  string run_id = 2 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
+
+  // account_id identifies the primary account being asserted.
+  string account_id = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // instrument_code identifies the asset type being asserted.
+  string instrument_code = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 32
+    pattern: "^[A-Z][A-Z0-9_]*$"
+  }];
+
+  // expression is the assertion rule (e.g., a CEL expression).
+  string expression = 5 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 1000
+  }];
+
+  // expected_balance is the expected balance value as a decimal string.
+  string expected_balance = 6 [(buf.validate.field).string = {
+    max_len: 50
+    pattern: "^-?\\d+(\\.\\d+)?$"
+  }];
+
+  // actual_balance is the computed actual balance as a decimal string.
+  string actual_balance = 7 [(buf.validate.field).string = {
+    max_len: 50
+    pattern: "^-?\\d+(\\.\\d+)?$"
+  }];
+
+  // status is the assertion result.
+  AssertionStatus status = 8 [(buf.validate.field).enum.defined_only = true];
+
+  // failure_reason records why the assertion failed (if applicable).
+  string failure_reason = 9 [(buf.validate.field).string.max_len = 1000];
+
+  // override_reason records why a failed assertion was overridden.
+  string override_reason = 10 [(buf.validate.field).string.max_len = 1000];
+
+  // asserted_at is when the assertion was evaluated.
+  google.protobuf.Timestamp asserted_at = 11;
+
+  // created_at is when this record was created.
+  google.protobuf.Timestamp created_at = 12 [(buf.validate.field).required = true];
+}
+
+// --- Initiate: Start a new settlement run ---
+
+// InitiateAccountReconciliationRequest starts a new settlement run.
+message InitiateAccountReconciliationRequest {
+  // account_id identifies the primary account to reconcile.
+  string account_id = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+      pattern: "^[a-zA-Z0-9_-]+$"
+    }
+  ];
+
+  // scope defines what is being reconciled.
+  ReconciliationScope scope = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // settlement_type defines the type of settlement.
+  SettlementType settlement_type = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // period_start is the beginning of the reconciliation period.
+  google.protobuf.Timestamp period_start = 4 [(buf.validate.field).required = true];
+
+  // period_end is the end of the reconciliation period.
+  google.protobuf.Timestamp period_end = 5 [(buf.validate.field).required = true];
+
+  // initiated_by is the user or system starting the run.
+  string initiated_by = 6 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
+  ];
+
+  // instrument_code filters reconciliation to a specific instrument (optional).
+  string instrument_code = 7 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string = {
+      max_len: 32
+      pattern: "^[A-Z][A-Z0-9_]*$"
+    }
+  ];
+
+  // attributes stores flexible metadata for this run.
+  map<string, string> attributes = 8 [(buf.validate.field).map.max_pairs = 50];
+
+  // idempotency_key ensures exactly-once processing.
+  meridian.common.v1.IdempotencyKey idempotency_key = 9;
+}
+
+// InitiateAccountReconciliationResponse returns the created settlement run.
+message InitiateAccountReconciliationResponse {
+  // run is the created settlement run summary.
+  SettlementRunSummary run = 1 [(buf.validate.field).required = true];
+}
+
+// --- Execute: Trigger execution of a pending settlement run ---
+
+// ExecuteAccountReconciliationRequest triggers a pending settlement run.
+message ExecuteAccountReconciliationRequest {
+  // run_id is the identifier of the settlement run to execute.
+  string run_id = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.uuid = true
+  ];
+}
+
+// ExecuteAccountReconciliationResponse returns the run after execution begins.
+message ExecuteAccountReconciliationResponse {
+  // run is the settlement run summary after execution started.
+  SettlementRunSummary run = 1 [(buf.validate.field).required = true];
+}
+
+// --- Retrieve: Get summary of a settlement run ---
+
+// RetrieveAccountReconciliationRequest retrieves a settlement run summary.
+message RetrieveAccountReconciliationRequest {
+  // run_id is the identifier of the settlement run to retrieve.
+  string run_id = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.uuid = true
+  ];
+}
+
+// RetrieveAccountReconciliationResponse returns summary data only.
+// For detailed variance lists, use ListReconciliationResults with pagination.
+message RetrieveAccountReconciliationResponse {
+  // run is the settlement run summary.
+  SettlementRunSummary run = 1 [(buf.validate.field).required = true];
+}
+
+// --- Control: Cancel, pause, or resume a settlement run ---
+
+// ControlAccountReconciliationRequest controls a settlement run lifecycle.
+message ControlAccountReconciliationRequest {
+  // run_id is the identifier of the settlement run to control.
+  string run_id = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.uuid = true
+  ];
+
+  // action is the control action to perform.
+  ControlAction action = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // reason provides context for the control action.
+  string reason = 3 [(buf.validate.field).string.max_len = 500];
+}
+
+// ControlAccountReconciliationResponse returns the run after the control action.
+message ControlAccountReconciliationResponse {
+  // run is the settlement run summary after the control action.
+  SettlementRunSummary run = 1 [(buf.validate.field).required = true];
+}
+
+// --- ListReconciliationResults: Paginated variance list ---
+
+// ListReconciliationResultsRequest retrieves detailed variance results with pagination.
+message ListReconciliationResultsRequest {
+  // run_id is the identifier of the settlement run to list results for.
+  string run_id = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.uuid = true
+  ];
+
+  // page_size is the maximum number of results to return (default: 50, max: 1000).
+  int32 page_size = 2 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 1000
+  }];
+
+  // page_token is an opaque cursor for fetching the next page.
+  string page_token = 3;
+
+  // filter_status filters results by variance status (optional).
+  VarianceStatus filter_status = 4;
+
+  // filter_reason filters results by variance reason (optional).
+  VarianceReason filter_reason = 5;
+}
+
+// ListReconciliationResultsResponse returns paginated variance details.
+message ListReconciliationResultsResponse {
+  // variances are the matching variance details.
+  repeated VarianceDetail variances = 1;
+
+  // next_page_token is the cursor for fetching the next page (empty if last page).
+  string next_page_token = 2;
+
+  // total_count is the total number of variances for this run (-1 if unknown).
+  int64 total_count = 3;
+}
+
+// --- Balance Assertion ---
+
+// AssertBalanceRequest evaluates a balance assertion.
+message AssertBalanceRequest {
+  // account_id identifies the account to assert.
+  string account_id = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+      pattern: "^[a-zA-Z0-9_-]+$"
+    }
+  ];
+
+  // instrument_code identifies the asset type to assert.
+  string instrument_code = 2 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 32
+      pattern: "^[A-Z][A-Z0-9_]*$"
+    }
+  ];
+
+  // expression is the assertion rule (e.g., a CEL expression).
+  string expression = 3 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 1000
+    }
+  ];
+
+  // expected_balance is the expected balance value as a decimal string.
+  string expected_balance = 4 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 50
+      pattern: "^-?\\d+(\\.\\d+)?$"
+    }
+  ];
+
+  // run_id links the assertion to a settlement run (optional).
+  string run_id = 5 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
+
+  // idempotency_key ensures exactly-once processing.
+  meridian.common.v1.IdempotencyKey idempotency_key = 6;
+}
+
+// AssertBalanceResponse returns the assertion result.
+message AssertBalanceResponse {
+  // assertion is the evaluated balance assertion.
+  BalanceAssertionDetail assertion = 1 [(buf.validate.field).required = true];
+}
+
+// --- Dispute Management ---
+
+// InitiateDisputeRequest raises a formal dispute against a variance.
+message InitiateDisputeRequest {
+  // variance_id references the variance being disputed.
+  string variance_id = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.uuid = true
+  ];
+
+  // run_id references the settlement run.
+  string run_id = 2 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.uuid = true
+  ];
+
+  // account_id identifies the account.
+  string account_id = 3 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+      pattern: "^[a-zA-Z0-9_-]+$"
+    }
+  ];
+
+  // reason describes why the variance is being disputed.
+  string reason = 4 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 1000
+    }
+  ];
+
+  // raised_by identifies who is raising the dispute.
+  string raised_by = 5 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
+  ];
+
+  // attributes stores flexible metadata.
+  map<string, string> attributes = 6 [(buf.validate.field).map.max_pairs = 50];
+
+  // idempotency_key ensures exactly-once processing.
+  meridian.common.v1.IdempotencyKey idempotency_key = 7;
+}
+
+// InitiateDisputeResponse returns the created dispute.
+message InitiateDisputeResponse {
+  // dispute is the created dispute.
+  DisputeDetail dispute = 1 [(buf.validate.field).required = true];
+}
+
+// ControlDisputeRequest controls a dispute lifecycle.
+message ControlDisputeRequest {
+  // dispute_id is the identifier of the dispute to control.
+  string dispute_id = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.uuid = true
+  ];
+
+  // action is the control action to perform.
+  DisputeControlAction action = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // resolution provides details for resolve/reject actions.
+  string resolution = 3 [(buf.validate.field).string.max_len = 1000];
+
+  // resolved_by identifies who is resolving/rejecting the dispute.
+  string resolved_by = 4 [(buf.validate.field).string.max_len = 255];
+}
+
+// ControlDisputeResponse returns the dispute after the control action.
+message ControlDisputeResponse {
+  // dispute is the dispute after the control action.
+  DisputeDetail dispute = 1 [(buf.validate.field).required = true];
+}
+
+// RetrieveDisputeRequest retrieves a dispute by ID.
+message RetrieveDisputeRequest {
+  // dispute_id is the identifier of the dispute to retrieve.
+  string dispute_id = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.uuid = true
+  ];
+}
+
+// RetrieveDisputeResponse returns the requested dispute.
+message RetrieveDisputeResponse {
+  // dispute is the requested dispute.
+  DisputeDetail dispute = 1 [(buf.validate.field).required = true];
+}
+
+// AccountReconciliationService provides BIAN-compliant reconciliation operations.
+service AccountReconciliationService {
+  // InitiateAccountReconciliation creates a new settlement run.
+  rpc InitiateAccountReconciliation(InitiateAccountReconciliationRequest) returns (InitiateAccountReconciliationResponse) {
+    option (google.api.http) = {
+      post: "/v1/reconciliation/runs"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      responses: {
+        key: "201"
+        value: {
+          description: "Settlement run created successfully"
+        }
+      }
+    };
+  }
+
+  // ExecuteAccountReconciliation triggers execution of a pending settlement run.
+  rpc ExecuteAccountReconciliation(ExecuteAccountReconciliationRequest) returns (ExecuteAccountReconciliationResponse) {
+    option (google.api.http) = {
+      post: "/v1/reconciliation/runs/{run_id}/execute"
+      body: "*"
+    };
+  }
+
+  // RetrieveAccountReconciliation retrieves a settlement run summary.
+  rpc RetrieveAccountReconciliation(RetrieveAccountReconciliationRequest) returns (RetrieveAccountReconciliationResponse) {
+    option (google.api.http) = {
+      get: "/v1/reconciliation/runs/{run_id}"
+    };
+  }
+
+  // ControlAccountReconciliation controls a settlement run (cancel, pause, resume).
+  rpc ControlAccountReconciliation(ControlAccountReconciliationRequest) returns (ControlAccountReconciliationResponse) {
+    option (google.api.http) = {
+      post: "/v1/reconciliation/runs/{run_id}/control"
+      body: "*"
+    };
+  }
+
+  // ListReconciliationResults returns paginated variance details for a run.
+  rpc ListReconciliationResults(ListReconciliationResultsRequest) returns (ListReconciliationResultsResponse) {
+    option (google.api.http) = {
+      get: "/v1/reconciliation/runs/{run_id}/results"
+    };
+  }
+
+  // AssertBalance evaluates a balance assertion against current positions.
+  rpc AssertBalance(AssertBalanceRequest) returns (AssertBalanceResponse) {
+    option (google.api.http) = {
+      post: "/v1/reconciliation/assertions"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      responses: {
+        key: "201"
+        value: {
+          description: "Balance assertion evaluated successfully"
+        }
+      }
+    };
+  }
+
+  // InitiateDispute raises a formal dispute against a variance.
+  rpc InitiateDispute(InitiateDisputeRequest) returns (InitiateDisputeResponse) {
+    option (google.api.http) = {
+      post: "/v1/reconciliation/disputes"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      responses: {
+        key: "201"
+        value: {
+          description: "Dispute created successfully"
+        }
+      }
+    };
+  }
+
+  // ControlDispute controls a dispute lifecycle (escalate, resolve, reject).
+  rpc ControlDispute(ControlDisputeRequest) returns (ControlDisputeResponse) {
+    option (google.api.http) = {
+      post: "/v1/reconciliation/disputes/{dispute_id}/control"
+      body: "*"
+    };
+  }
+
+  // RetrieveDispute retrieves a dispute by ID.
+  rpc RetrieveDispute(RetrieveDisputeRequest) returns (RetrieveDisputeResponse) {
+    option (google.api.http) = {
+      get: "/v1/reconciliation/disputes/{dispute_id}"
+    };
+  }
+}

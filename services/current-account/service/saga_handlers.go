@@ -118,6 +118,14 @@ func RegisterCurrentAccountHandlers(registry *saga.HandlerRegistry) error {
 		{"payment_order.terminate_lien", stubNotImplemented("payment_order.terminate_lien")},
 		{"repository.save", stubNotImplemented("repository.save")},
 		{"valuation_engine.valuate", stubNotImplemented("valuation_engine.valuate")},
+
+		// Reconciliation handlers (stubs - defined in schema for reconciliation service)
+		{"reconciliation.initiate_run", stubNotImplemented("reconciliation.initiate_run")},
+		{"reconciliation.execute_run", stubNotImplemented("reconciliation.execute_run")},
+		{"reconciliation.retrieve_run", stubNotImplemented("reconciliation.retrieve_run")},
+		{"reconciliation.cancel_run", stubNotImplemented("reconciliation.cancel_run")},
+		{"reconciliation.assert_balance", stubNotImplemented("reconciliation.assert_balance")},
+		{"reconciliation.initiate_dispute", stubNotImplemented("reconciliation.initiate_dispute")},
 	}
 
 	for _, h := range handlers {
