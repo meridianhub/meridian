@@ -55,6 +55,11 @@ type SettlementSnapshotRepository interface {
 	// DeleteByRunID removes all snapshots for a given settlement run.
 	// Used for idempotent cleanup before retrying a failed capture.
 	DeleteByRunID(ctx context.Context, runID uuid.UUID) error
+
+	// MarkRunSnapshotsFinal updates all snapshots for a run to include
+	// settlement_type=FINAL in their attributes, indicating they belong
+	// to a finalized settlement period.
+	MarkRunSnapshotsFinal(ctx context.Context, runID uuid.UUID) error
 }
 
 // VarianceRepository defines the contract for persisting and retrieving variances.
