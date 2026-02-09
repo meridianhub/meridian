@@ -41,19 +41,33 @@ if [ ! -f "${SCHEMA_FILE}" ]; then
     exit 1
 fi
 
-# Generate into a temp directory
+# Generate into a temp directory to avoid leaving artifacts in the project
 TEMP_DIR=$(mktemp -d)
 trap 'rm -rf "${TEMP_DIR}"' EXIT
+
+# Create a temporary buf.gen template that outputs to the temp directory
+cat > "${TEMP_DIR}/buf.gen.jsonschema.yaml" <<TMPL
+version: v2
+plugins:
+  - local: protoc-gen-jsonschema
+    out: ${TEMP_DIR}/out
+    opt:
+      - all_fields_required
+      - enforce_oneof
+      - json_fieldnames
+      - prefix_schema_files_with_package
+      - disallow_additional_properties
+TMPL
 
 cd "${PROJECT_ROOT}"
 
 buf generate \
-    --template buf.gen.jsonschema.yaml \
+    --template "${TEMP_DIR}/buf.gen.jsonschema.yaml" \
     --path "${PROTO_FILE}" \
     2>/dev/null
 
 # The generator creates files in a subdirectory
-GENERATED_FILE="${PROJECT_ROOT}/api/jsonschema/meridian.control_plane.v1/Manifest.json"
+GENERATED_FILE="${TEMP_DIR}/out/meridian.control_plane.v1/Manifest.json"
 
 if [ ! -f "${GENERATED_FILE}" ]; then
     echo "ERROR: JSON Schema generation produced no output."
@@ -63,7 +77,6 @@ fi
 # Compare
 if diff -q "${SCHEMA_FILE}" "${GENERATED_FILE}" > /dev/null 2>&1; then
     echo "JSON Schema is in sync with proto definition."
-    rm -rf "${PROJECT_ROOT}/api/jsonschema/meridian.control_plane.v1"
     exit 0
 else
     echo "ERROR: JSON Schema is out of sync with proto definition."
@@ -75,6 +88,5 @@ else
     echo ""
     echo "Diff:"
     diff "${SCHEMA_FILE}" "${GENERATED_FILE}" || true
-    rm -rf "${PROJECT_ROOT}/api/jsonschema/meridian.control_plane.v1"
     exit 1
 fi
