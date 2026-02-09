@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package meridian.control_plane.v1;
+
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1;controlplanev1";
+
+// AuthService provides authentication operations for the Control Plane.
+// The Gateway calls ValidateAPIKey to verify API keys against tenant schemas.
+service AuthService {
+  // ValidateAPIKey verifies an API key by prefix and plaintext value.
+  // The gateway extracts the tenant slug from the key prefix (pk_{slug}_{entropy}),
+  // resolves the tenant, and calls this RPC which queries the tenant's api_key table.
+  rpc ValidateAPIKey(ValidateAPIKeyRequest) returns (ValidateAPIKeyResponse);
+}
+
+// ValidateAPIKeyRequest contains the API key components for validation.
+message ValidateAPIKeyRequest {
+  // key_prefix is the routing prefix extracted from the API key (e.g., "pk_acme_abc12345").
+  string key_prefix = 1;
+
+  // plaintext_key is the full API key for hash verification.
+  string plaintext_key = 2;
+}
+
+// ValidateAPIKeyResponse contains the validation result and associated metadata.
+message ValidateAPIKeyResponse {
+  // valid indicates whether the API key passed validation.
+  bool valid = 1;
+
+  // tenant_id is the resolved tenant identifier (populated when valid=true).
+  string tenant_id = 2;
+
+  // identity is the display name or email of the staff user owning this key.
+  string identity = 3;
+
+  // scopes contains the permission scopes granted to this key.
+  repeated string scopes = 4;
+
+  // rate_limit_rps is the per-key rate limit in requests per second.
+  int32 rate_limit_rps = 5;
+}
