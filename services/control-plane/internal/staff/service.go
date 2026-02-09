@@ -384,6 +384,71 @@ func (s *Service) ValidateAPIKey(ctx context.Context, keyPrefix, plaintextKey st
 	return user, nil
 }
 
+// APIKeyValidation holds the full result of validating an API key,
+// including key metadata needed by the gateway.
+type APIKeyValidation struct {
+	User         *User
+	Scopes       []string
+	RateLimitRPS int
+}
+
+// ValidateAPIKeyFull verifies an API key and returns the full validation result
+// including scopes and rate limit. Used by the AuthService gRPC handler.
+func (s *Service) ValidateAPIKeyFull(ctx context.Context, keyPrefix, plaintextKey string) (*APIKeyValidation, error) {
+	var result *APIKeyValidation
+
+	err := db.WithGormTenantTransaction(ctx, s.gormDB, func(tx *gorm.DB) error {
+		var keyEntity APIKeyEntity
+		if err := tx.Where("key_prefix = ? AND revoked_at IS NULL", keyPrefix).First(&keyEntity).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrAPIKeyNotFound
+			}
+			return err
+		}
+
+		// Check expiry
+		if keyEntity.ExpiresAt != nil && keyEntity.ExpiresAt.Before(time.Now()) {
+			return ErrAPIKeyExpired
+		}
+
+		// Constant-time hash comparison
+		expectedHash := sha256.Sum256([]byte(plaintextKey))
+		if subtle.ConstantTimeCompare(keyEntity.KeyHash, expectedHash[:]) != 1 {
+			return ErrInvalidAPIKey
+		}
+
+		// Update last_used_at
+		now := time.Now()
+		tx.Model(&APIKeyEntity{}).
+			Where("id = ?", keyEntity.ID).
+			Update("last_used_at", now)
+
+		// Load staff user
+		var staffEntity UserEntity
+		if err := tx.Where("id = ?", keyEntity.StaffUserID).First(&staffEntity).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrStaffNotFound
+			}
+			return err
+		}
+
+		if staffEntity.Status == StatusSuspended {
+			return ErrStaffSuspended
+		}
+
+		result = &APIKeyValidation{
+			User:         entityToUser(&staffEntity),
+			Scopes:       []string(keyEntity.Scopes),
+			RateLimitRPS: keyEntity.RateLimitRPS,
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 // MapRoleToAuth converts a staff role string to the shared auth.Role type.
 func MapRoleToAuth(staffRole string) (auth.Role, error) {
 	switch staffRole {
