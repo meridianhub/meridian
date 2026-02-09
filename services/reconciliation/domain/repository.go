@@ -76,6 +76,10 @@ type VarianceRepository interface {
 	// Returns ErrNotFound if the variance doesn't exist.
 	Update(ctx context.Context, variance *Variance) error
 
+	// DeleteByRunID removes all variances for a given settlement run.
+	// Used for idempotent cleanup before retrying variance detection.
+	DeleteByRunID(ctx context.Context, runID uuid.UUID) error
+
 	// List retrieves variances matching the given filter.
 	List(ctx context.Context, filter VarianceFilter) ([]*Variance, error)
 }

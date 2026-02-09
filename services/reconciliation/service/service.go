@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	reconciliationv1 "github.com/meridianhub/meridian/api/proto/meridian/reconciliation/v1"
 	"github.com/meridianhub/meridian/services/reconciliation/domain"
+	"github.com/meridianhub/meridian/shared/pkg/valuation"
 	"github.com/shopspring/decimal"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -23,11 +24,14 @@ import (
 type AccountReconciliationService struct {
 	reconciliationv1.UnimplementedAccountReconciliationServiceServer
 
-	disputeRepo    domain.DisputeRepository
-	varianceRepo   VarianceFinder
-	sagaRuntime    SagaRuntime
-	eventPublisher EventPublisher
-	assertor       *BalanceAssertor
+	disputeRepo     domain.DisputeRepository
+	varianceRepo    VarianceFinder
+	sagaRuntime     SagaRuntime
+	eventPublisher  EventPublisher
+	assertor        *BalanceAssertor
+	policyRuntime   valuation.PolicyRuntime
+	starlarkRuntime valuation.StarlarkRuntime
+	valuationCache  valuation.Cache
 }
 
 // Option configures the AccountReconciliationService.
@@ -65,6 +69,27 @@ func WithEventPublisher(pub EventPublisher) Option {
 func WithBalanceAssertor(assertor *BalanceAssertor) Option {
 	return func(s *AccountReconciliationService) {
 		s.assertor = assertor
+	}
+}
+
+// WithPolicyRuntime sets the CEL policy runtime for valuation.
+func WithPolicyRuntime(rt valuation.PolicyRuntime) Option {
+	return func(s *AccountReconciliationService) {
+		s.policyRuntime = rt
+	}
+}
+
+// WithStarlarkRuntime sets the Starlark runtime for valuation.
+func WithStarlarkRuntime(rt valuation.StarlarkRuntime) Option {
+	return func(s *AccountReconciliationService) {
+		s.starlarkRuntime = rt
+	}
+}
+
+// WithValuationCache sets the L1 cache for the valuation engine.
+func WithValuationCache(c valuation.Cache) Option {
+	return func(s *AccountReconciliationService) {
+		s.valuationCache = c
 	}
 }
 

@@ -88,7 +88,7 @@ func TestNewVariance(t *testing.T) {
 				assert.NotEqual(t, uuid.Nil, v.VarianceID)
 				assert.Equal(t, runID, v.RunID)
 				assert.Equal(t, snapshotID, v.SnapshotID)
-				assert.Equal(t, domain.VarianceStatusOpen, v.Status)
+				assert.Equal(t, domain.VarianceStatusDetected, v.Status)
 
 				expectedVariance := tt.actual.Sub(tt.expected)
 				assert.True(t, expectedVariance.Equal(v.VarianceAmount))
@@ -99,12 +99,13 @@ func TestNewVariance(t *testing.T) {
 
 func TestVariance_Lifecycle(t *testing.T) {
 	v := newTestVariance(t)
+	assert.Equal(t, domain.VarianceStatusDetected, v.Status)
 
-	// Investigate
+	// Transition through valuation flow: DETECTED -> OPEN -> INVESTIGATING -> RESOLVED
+	v.Status = domain.VarianceStatusOpen
 	require.NoError(t, v.Investigate())
 	assert.Equal(t, domain.VarianceStatusInvestigating, v.Status)
 
-	// Resolve
 	require.NoError(t, v.Resolve("Manual correction applied", "admin"))
 	assert.Equal(t, domain.VarianceStatusResolved, v.Status)
 	assert.Equal(t, "Manual correction applied", v.ResolutionNote)
@@ -114,6 +115,7 @@ func TestVariance_Lifecycle(t *testing.T) {
 
 func TestVariance_DisputeLifecycle(t *testing.T) {
 	v := newTestVariance(t)
+	v.Status = domain.VarianceStatusOpen
 
 	require.NoError(t, v.Dispute())
 	assert.Equal(t, domain.VarianceStatusDisputed, v.Status)
@@ -127,8 +129,15 @@ func TestVariance_DisputeLifecycle(t *testing.T) {
 }
 
 func TestVariance_InvalidTransitions(t *testing.T) {
+	t.Run("cannot investigate from detected", func(t *testing.T) {
+		v := newTestVariance(t)
+		err := v.Investigate()
+		assert.ErrorIs(t, err, domain.ErrInvalidStatusTransition)
+	})
+
 	t.Run("cannot investigate from resolved", func(t *testing.T) {
 		v := newTestVariance(t)
+		v.Status = domain.VarianceStatusOpen
 		require.NoError(t, v.Resolve("done", "admin"))
 		err := v.Investigate()
 		assert.ErrorIs(t, err, domain.ErrInvalidStatusTransition)
@@ -136,6 +145,7 @@ func TestVariance_InvalidTransitions(t *testing.T) {
 
 	t.Run("cannot dispute from accepted", func(t *testing.T) {
 		v := newTestVariance(t)
+		v.Status = domain.VarianceStatusOpen
 		require.NoError(t, v.Accept("accepted", "admin"))
 		err := v.Dispute()
 		assert.ErrorIs(t, err, domain.ErrInvalidStatusTransition)
