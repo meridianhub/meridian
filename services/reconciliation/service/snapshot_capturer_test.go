@@ -114,10 +114,16 @@ func (m *mockSnapshotRepo) FindByID(_ context.Context, _ uuid.UUID) (*domain.Set
 	return nil, domain.ErrNotFound
 }
 
-func (m *mockSnapshotRepo) FindByRunID(_ context.Context, _ uuid.UUID) ([]*domain.SettlementSnapshot, error) {
+func (m *mockSnapshotRepo) FindByRunID(_ context.Context, runID uuid.UUID) ([]*domain.SettlementSnapshot, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.snapshots, nil
+	var result []*domain.SettlementSnapshot
+	for _, s := range m.snapshots {
+		if s.RunID == runID {
+			result = append(result, s)
+		}
+	}
+	return result, nil
 }
 
 func (m *mockSnapshotRepo) DeleteByRunID(_ context.Context, runID uuid.UUID) error {

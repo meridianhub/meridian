@@ -82,7 +82,7 @@ CREATE TABLE "variance" (
   "value_delta" decimal(38, 18) NOT NULL DEFAULT 0,
   "currency" character varying(10) NOT NULL DEFAULT '',
   "reason" character varying(30) NOT NULL,
-  "status" character varying(20) NOT NULL DEFAULT 'OPEN',
+  "status" character varying(20) NOT NULL DEFAULT 'DETECTED',
   "resolution_note" text NULL,
   "resolved_by" character varying(100) NULL,
   "resolved_at" timestamptz NULL,

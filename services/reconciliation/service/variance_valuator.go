@@ -145,10 +145,7 @@ func (vv *VarianceValuator) ValueVariances(ctx context.Context, runID uuid.UUID)
 	run.UpdatedAt = time.Now().UTC()
 	run.Version++
 	if err := vv.runRepo.Update(ctx, run); err != nil {
-		slog.WarnContext(ctx, "failed to update run variance summary",
-			"run_id", runID,
-			"error", err,
-		)
+		return fmt.Errorf("failed to update run variance summary: %w", err)
 	}
 
 	slog.InfoContext(ctx, "variance valuation completed",
@@ -178,7 +175,7 @@ func (vv *VarianceValuator) valueVariance(ctx context.Context, v *domain.Varianc
 			Attributes:     v.Attributes,
 		},
 		AccountID:   uuidFromString(v.AccountID),
-		PartyID:     uuid.New(), // Party context from run
+		PartyID:     uuidFromString(v.AccountID), // TODO: resolve from tenant/party context when available
 		KnowledgeAt: v.CreatedAt,
 	}
 
@@ -189,11 +186,12 @@ func (vv *VarianceValuator) valueVariance(ctx context.Context, v *domain.Varianc
 
 	valueDelta := resp.ValuedAmount.Amount
 
-	// Check materiality threshold
-	threshold, err := vv.refData.GetMaterialityThreshold(ctx, v.InstrumentCode)
+	// Check materiality threshold in the settlement currency (output instrument)
+	settlementCurrency := resp.ValuedAmount.InstrumentCode
+	threshold, err := vv.refData.GetMaterialityThreshold(ctx, settlementCurrency)
 	if err != nil {
 		slog.WarnContext(ctx, "failed to get materiality threshold, skipping filter",
-			"instrument_code", v.InstrumentCode,
+			"settlement_currency", settlementCurrency,
 			"error", err,
 		)
 	} else if valueDelta.Abs().LessThan(threshold) {

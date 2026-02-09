@@ -102,8 +102,8 @@ func TestValueVariances_SuccessfulValuation(t *testing.T) {
 	engine := &mockValuationEngine{}
 	refData := &mockRefData{
 		thresholds: map[string]decimal.Decimal{
+			// Threshold keyed by settlement currency (engine returns GBP for all)
 			"GBP": decimal.NewFromFloat(0.01),
-			"KWH": decimal.NewFromFloat(0.01),
 		},
 	}
 

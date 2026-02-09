@@ -193,7 +193,12 @@ func (vd *VarianceDetector) compareSnapshots(
 					snap.ActualBalance,
 					domain.VarianceReasonMissingEntry,
 				)
-				if err == nil {
+				if err != nil {
+					slog.Warn("failed to create variance for new entry",
+						"snapshot_id", snap.SnapshotID,
+						"error", err,
+					)
+				} else {
 					variances = append(variances, v)
 				}
 			}
@@ -213,7 +218,12 @@ func (vd *VarianceDetector) compareSnapshots(
 				snap.ActualBalance,
 				reason,
 			)
-			if err == nil {
+			if err != nil {
+				slog.Warn("failed to create variance for delta",
+					"snapshot_id", snap.SnapshotID,
+					"error", err,
+				)
+			} else {
 				variances = append(variances, v)
 			}
 		}
@@ -234,7 +244,12 @@ func (vd *VarianceDetector) compareSnapshots(
 				decimal.Zero,
 				domain.VarianceReasonMissingEntry,
 			)
-			if err == nil {
+			if err != nil {
+				slog.Warn("failed to create variance for missing entry",
+					"snapshot_id", prevSnap.SnapshotID,
+					"error", err,
+				)
+			} else {
 				variances = append(variances, v)
 			}
 		}
