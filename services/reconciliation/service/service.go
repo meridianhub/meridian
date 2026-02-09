@@ -163,6 +163,11 @@ func (s *AccountReconciliationService) AssertBalance(
 		if errors.Is(err, domain.ErrUnimplemented) {
 			return nil, status.Error(codes.Unimplemented, "NOSTRO_VOSTRO scope not yet implemented")
 		}
+		if errors.Is(err, domain.ErrEmptyAccountID) ||
+			errors.Is(err, domain.ErrEmptyInstrumentCode) ||
+			errors.Is(err, domain.ErrEmptyAssertionExpression) {
+			return nil, status.Error(codes.InvalidArgument, err.Error())
+		}
 		return nil, status.Error(codes.Internal, "balance assertion failed")
 	}
 
