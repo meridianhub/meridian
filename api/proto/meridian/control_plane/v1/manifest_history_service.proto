@@ -118,10 +118,10 @@ message ManifestVersion {
   ApplyStatus apply_status = 6;
 
   // apply_job_id references the job that applied this manifest.
-  string apply_job_id = 7;
+  optional string apply_job_id = 7;
 
   // diff_summary is a human-readable summary of changes from the previous version.
-  string diff_summary = 8;
+  optional string diff_summary = 8;
 
   // created_at is when this record was created.
   google.protobuf.Timestamp created_at = 9;

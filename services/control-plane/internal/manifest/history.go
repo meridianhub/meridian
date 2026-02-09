@@ -190,10 +190,11 @@ func EntityToProto(entity *VersionEntity) (*controlplanev1.ManifestVersion, erro
 	}
 
 	if entity.ApplyJobID != nil {
-		mv.ApplyJobId = entity.ApplyJobID.String()
+		jobIDStr := entity.ApplyJobID.String()
+		mv.ApplyJobId = &jobIDStr
 	}
 	if entity.DiffSummary != nil {
-		mv.DiffSummary = *entity.DiffSummary
+		mv.DiffSummary = entity.DiffSummary
 	}
 
 	return mv, nil
@@ -255,12 +256,12 @@ func diffManifests(prev, next *controlplanev1.Manifest) string {
 	// Compare instruments
 	prevInstruments := instrumentMap(prev.GetInstruments())
 	nextInstruments := instrumentMap(next.GetInstruments())
-	diffCodedItems("Instrument", prevInstruments, nextInstruments, &changes)
+	diffItems("Instrument", prevInstruments, nextInstruments, &changes)
 
 	// Compare account types
 	prevAccounts := accountTypeMap(prev.GetAccountTypes())
 	nextAccounts := accountTypeMap(next.GetAccountTypes())
-	diffCodedItems("Account type", prevAccounts, nextAccounts, &changes)
+	diffItems("Account type", prevAccounts, nextAccounts, &changes)
 
 	// Compare valuation rules
 	prevRuleCount := len(prev.GetValuationRules())
@@ -272,7 +273,7 @@ func diffManifests(prev, next *controlplanev1.Manifest) string {
 	// Compare sagas
 	prevSagas := sagaMap(prev.GetSagas())
 	nextSagas := sagaMap(next.GetSagas())
-	diffNamedItems("Saga", prevSagas, nextSagas, &changes)
+	diffItems("Saga", prevSagas, nextSagas, &changes)
 
 	// Compare version
 	if prev.GetVersion() != next.GetVersion() {
@@ -311,54 +312,26 @@ func sagaMap(sagas []*controlplanev1.SagaDefinition) map[string]string {
 	return m
 }
 
-func diffCodedItems(itemType string, prev, next map[string]string, changes *[]string) {
-	// Find added items
+func diffItems(itemType string, prev, next map[string]string, changes *[]string) {
 	var added []string
-	for code := range next {
-		if _, exists := prev[code]; !exists {
-			added = append(added, code)
+	for key := range next {
+		if _, exists := prev[key]; !exists {
+			added = append(added, key)
 		}
 	}
 	sort.Strings(added)
-	for _, code := range added {
-		*changes = append(*changes, fmt.Sprintf("%s added: %s", itemType, code))
+	for _, key := range added {
+		*changes = append(*changes, fmt.Sprintf("%s added: %s", itemType, key))
 	}
 
-	// Find removed items
 	var removed []string
-	for code := range prev {
-		if _, exists := next[code]; !exists {
-			removed = append(removed, code)
+	for key := range prev {
+		if _, exists := next[key]; !exists {
+			removed = append(removed, key)
 		}
 	}
 	sort.Strings(removed)
-	for _, code := range removed {
-		*changes = append(*changes, fmt.Sprintf("%s removed: %s", itemType, code))
-	}
-}
-
-func diffNamedItems(itemType string, prev, next map[string]string, changes *[]string) {
-	// Find added items
-	var added []string
-	for name := range next {
-		if _, exists := prev[name]; !exists {
-			added = append(added, name)
-		}
-	}
-	sort.Strings(added)
-	for _, name := range added {
-		*changes = append(*changes, fmt.Sprintf("%s added: %s", itemType, name))
-	}
-
-	// Find removed items
-	var removed []string
-	for name := range prev {
-		if _, exists := next[name]; !exists {
-			removed = append(removed, name)
-		}
-	}
-	sort.Strings(removed)
-	for _, name := range removed {
-		*changes = append(*changes, fmt.Sprintf("%s removed: %s", itemType, name))
+	for _, key := range removed {
+		*changes = append(*changes, fmt.Sprintf("%s removed: %s", itemType, key))
 	}
 }

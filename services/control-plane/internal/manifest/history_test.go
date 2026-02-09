@@ -187,7 +187,8 @@ func TestEntityToProto(t *testing.T) {
 	assert.Equal(t, "1.0", proto.Version)
 	assert.Equal(t, "admin@meridian.io", proto.AppliedBy)
 	assert.Equal(t, controlplanev1.ApplyStatus_APPLY_STATUS_APPLIED, proto.ApplyStatus)
-	assert.Equal(t, "Instrument added: GBP", proto.DiffSummary)
+	require.NotNil(t, proto.DiffSummary)
+	assert.Equal(t, "Instrument added: GBP", *proto.DiffSummary)
 	assert.NotNil(t, proto.Manifest)
 	assert.Equal(t, "1.0", proto.Manifest.Version)
 }
