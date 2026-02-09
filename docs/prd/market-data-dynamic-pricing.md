@@ -279,6 +279,14 @@ The Hierarchical Node Registry must be:
 5. **Colocated** - Lives within the Reference Data service boundary, sharing
    infrastructure (database schema, caching, rate limiting) but maintaining
    a separate domain aggregate
+6. **Immutable when active** - Like instruments, active nodes cannot change
+   attributes that affect their `resolutionKey`. Moving a rack from Zone A
+   to Zone B requires terminating the old node (`valid_to = NOW()`) and
+   creating a new node under the new parent. This follows the existing
+   `enforce_instrument_lifecycle()` pattern in Reference Data and prevents
+   historical data orphaning. The `UpdateNode` RPC enforces: only
+   non-key-affecting attributes (e.g., `gpu_count`, `cooling`) are mutable
+   on active nodes; `nodeType`, `parentID`, and identity fields are frozen
 
 #### Data Model
 
@@ -720,6 +728,10 @@ gantt
 4. External forecasts can be ingested and blended with internal predictions
 5. Forecast vs actual accuracy is tracked for model improvement
 6. Actuals automatically supersede forecasts via the existing quality ladder
+7. **Shadow billing support**: Forward curves + valuation produce ESTIMATE
+   quality positions that the Stripe Connect PRD's shadow billing mode
+   can render as draft invoices, letting tenants preview "What would I
+   have charged?" before enabling payment rails
 
 ---
 

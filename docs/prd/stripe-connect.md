@@ -43,8 +43,8 @@ instructions: |
 **Status:** Draft
 **Version:** 1.0
 **Task Master Tag:** `stripe-connect`
-**Estimated Complexity:** 55 story points (6 work streams)
-**Critical Path:** 34 points
+**Estimated Complexity:** 82 story points (6 work streams)
+**Critical Path:** 37 points
 **Last Updated:** 2026-02-09
 
 **Dependencies:**
@@ -619,26 +619,92 @@ This is the **"Closer"** - the component that bridges dynamic pricing
 | Periodic | Charge on schedule (monthly, weekly) | Subscription billing |
 | Event | Charge on specific event | Pay-per-use models |
 
+#### Billing Run Idempotency
+
+The billing scheduler uses the existing Redis-backed
+`idempotencyService` with **deterministic keys** to prevent
+double-billing on scheduler crash/restart:
+
+```text
+billing_run_{tenant_id}_{cycle_start}_{cycle_end}
+
+Example: billing_run_acme_2026-01-01_2026-02-01
+```
+
+Even if the scheduler fires 10 times for the same period, only one
+billing run executes. The idempotency key is derived from the billing
+period, not a random UUID.
+
+#### Invoice Record
+
+Before initiating a Payment Order, the billing saga generates a
+persistent **Invoice** that freezes the billable state. This serves
+as the customer-facing "bill of sale" and is distinct from the
+Payment Order (which is the request to move money).
+
+```sql
+-- New table in tenant schema (org_{id})
+CREATE TABLE invoices (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    billing_run_id UUID NOT NULL,
+    party_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    invoice_number VARCHAR(50) NOT NULL,   -- e.g., "INV-2026-01-0042"
+    period_start TIMESTAMPTZ NOT NULL,
+    period_end TIMESTAMPTZ NOT NULL,
+    line_items JSONB NOT NULL DEFAULT '[]', -- position entries with valuation
+    subtotal_cents BIGINT NOT NULL,
+    currency VARCHAR(10) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
+    payment_order_id UUID,                 -- linked after collection
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT valid_status CHECK (
+        status IN ('DRAFT', 'ISSUED', 'PAID', 'VOID', 'OVERDUE')
+    )
+);
+```
+
+Each `line_item` carries the `ValuationAnalysis` from the lien,
+linking the physics (kWh usage, GPU-hours) to the monetary charge.
+This analysis is also passed to the Stripe PaymentIntent `metadata`
+field so the Stripe charge is traceable to specific usage.
+
+#### FX Conversion
+
+When a tenant's usage is tracked in one instrument (e.g., kWh) but
+billed in another (e.g., GBP), the existing **atomic valuation**
+handles conversion at lien creation time. The lien's `ValuedAmount`
+is immutable once ACTIVE, which locks the exchange rate. The
+`ValuationAnalysis` JSON captures the rate used, providing an
+audit trail. No additional FX work is needed beyond what the
+valuation engine already provides.
+
 #### Billing Cycle Flow
 
 ```mermaid
 sequenceDiagram
     participant Sched as Billing Scheduler
     participant PK as Position Keeping
+    participant INV as Invoice Store
     participant Party as Party Service
     participant PO as Payment Order
     participant Stripe
 
+    Sched->>Sched: Check idempotency key (billing_run_{tenant}_{period})
     Sched->>PK: GetAccountBalance(customer_account)
     PK-->>Sched: balance = -500.00 GBP
 
     alt Balance below threshold
+        Sched->>INV: CreateInvoice(party, period, line_items + valuation)
+        INV-->>Sched: invoice_id, invoice_number
         Sched->>Party: GetDefaultPaymentMethod(party_id)
         Party-->>Sched: {provider: STRIPE, cus_xxx, pm_xxx}
-        Sched->>PO: InitiatePaymentOrder(amount: 500, method: pm_xxx)
-        PO->>Stripe: PaymentIntent.create(500 GBP, pm_xxx)
+        Sched->>PO: InitiatePaymentOrder(amount: 500, invoice_id)
+        PO->>Stripe: PaymentIntent.create(500 GBP, metadata: {invoice_id})
         Stripe-->>PO: Succeeded
         PO->>PK: Double-entry (debit nostro, credit customer)
+        INV->>INV: invoice.status = PAID
         Note over PK: Customer balance returns to 0
     end
 ```
@@ -647,11 +713,12 @@ sequenceDiagram
 
 ```python
 # invoice_collection/v1.0.0.star
-# Billing cycle saga - collects payment for outstanding balance.
+# Billing cycle saga - generates invoice, then collects payment.
 # Triggered by: billing scheduler or manual collection request.
+# In shadow mode, steps 3-6 are skipped (invoice created as DRAFT).
 
 def invoice_collection(ctx):
-    """Collect payment for a customer's outstanding balance."""
+    """Generate invoice and collect payment for outstanding balance."""
 
     # Step 1: Get payment method
     payment_method = step("get_payment_method",
@@ -659,7 +726,26 @@ def invoice_collection(ctx):
             party_id = ctx.input["party_id"],
         ))
 
-    # Step 2: Reserve funds on customer account
+    # Step 2: Create invoice (freezes billable state)
+    invoice = step("create_invoice",
+        billing.create_invoice(
+            party_id = ctx.input["party_id"],
+            account_id = ctx.input["customer_account_id"],
+            billing_run_id = ctx.input["billing_run_id"],
+            period_start = ctx.input["period_start"],
+            period_end = ctx.input["period_end"],
+            amount_cents = ctx.input["amount_cents"],
+            currency = ctx.input["currency"],
+        ))
+
+    # Shadow mode: stop here (invoice created as DRAFT for preview)
+    if ctx.input.get("shadow", False):
+        return {
+            "status": "shadow",
+            "invoice_id": invoice["invoice_id"],
+        }
+
+    # Step 3: Reserve funds on customer account
     lien = step("create_lien",
         payment_order.create_lien(
             account_id = ctx.input["customer_account_id"],
@@ -668,7 +754,7 @@ def invoice_collection(ctx):
             payment_order_id = ctx.input["payment_order_id"],
         ))
 
-    # Step 3: Charge via Stripe
+    # Step 4: Charge via Stripe
     gateway = step("charge_external",
         payment_order.send_to_gateway(
             payment_order_id = ctx.input["payment_order_id"],
@@ -679,7 +765,7 @@ def invoice_collection(ctx):
             idempotency_key = ctx.input["idempotency_key"],
         ))
 
-    # Step 4: Post ledger entries (settles internal balance)
+    # Step 5: Post ledger entries (settles internal balance)
     ledger = step("post_ledger",
         payment_order.post_ledger_entries(
             payment_order_id = ctx.input["payment_order_id"],
@@ -690,7 +776,7 @@ def invoice_collection(ctx):
             idempotency_key = ctx.input["idempotency_key"] + "_ledger",
         ))
 
-    # Step 5: Execute lien
+    # Step 6: Execute lien
     step("execute_lien",
         payment_order.execute_lien(
             lien_id = lien["lien_id"],
@@ -698,6 +784,7 @@ def invoice_collection(ctx):
 
     return {
         "status": "collected",
+        "invoice_id": invoice["invoice_id"],
         "gateway_reference_id": gateway["gateway_reference_id"],
         "booking_log_id": ledger["booking_log_id"],
     }
@@ -721,20 +808,76 @@ def invoice_collection(ctx):
 }
 ```
 
+#### Dunning Saga (Payment Failure Escalation)
+
+When a Stripe charge fails (insufficient funds, expired card), the
+system must not silently continue providing service. The dunning
+saga escalates through levels using the existing Current Account
+`CONTROL_ACTION_FREEZE` mechanism:
+
+```text
+Charge fails
+  |
+  v
+Level 1: Retry after 24h + send notification.payment_failed event
+  |
+  v (still failing)
+Level 2: Retry after 72h + send notification.payment_overdue event
+  |
+  v (still failing)
+Level 3: Retry after 168h (7 days)
+  |
+  v (still failing)
+Level 4: current_account.control(FREEZE) + invoice.status = OVERDUE
+         Account frozen; no new usage positions accepted
+  |
+  v (payment method updated or manual resolution)
+Unfreeeze: current_account.control(UNFREEZE) + retry charge
+```
+
+The dunning level is tracked on the `BillingRun` entity. Each retry
+uses the same deterministic idempotency key with a level suffix:
+`billing_run_{tenant}_{period}_retry_{level}`.
+
+#### Shadow Billing (Simulation Mode)
+
+Tenants can enable shadow billing to preview charges without
+collecting payment. The billing saga runs identically except:
+
+1. Invoice created with `status = DRAFT` (not ISSUED)
+2. Position entries posted at `ESTIMATE` quality (quality ladder)
+3. Stripe charge step **skipped**
+4. Invoice `line_items` include full `ValuationAnalysis`
+
+This allows tenants to see "What would I have charged?" on a
+dashboard before enabling the payment rails. Enabled via Manifest:
+
+```json
+{
+  "billing": {
+    "mode": "periodic",
+    "shadow": true
+  }
+}
+```
+
+When `shadow = false` (or absent), the full collection saga runs.
+
 #### Tasks
 
 | ID | Task | Complexity | Dependencies |
 |----|------|------------|--------------|
-| BC-1 | Design billing cycle domain model (BillingRun, BillingItem) | 2 | - |
-| BC-2 | Implement billing scheduler (cron-based, reads from Manifest config) | 3 | BC-1 |
+| BC-1 | Design billing cycle domain model (BillingRun, BillingItem, Invoice) | 3 | - |
+| BC-2 | Implement billing scheduler with deterministic idempotency keys | 3 | BC-1 |
 | BC-3 | Implement balance query aggregation (batch customer balances from Position Keeping) | 3 | BC-1 |
-| BC-4 | Create `invoice_collection` Starlark saga definition | 2 | WS-3, WS-1 |
-| BC-5 | Implement retry policy with exponential backoff for failed charges | 2 | BC-4 |
+| BC-4 | Create `invoice_collection` Starlark saga definition (with invoice creation step) | 3 | WS-3, WS-1 |
+| BC-5 | Implement dunning saga (retry escalation, account freeze on exhaustion) | 3 | BC-4 |
 | BC-6 | Add billing run status tracking and Prometheus metrics | 2 | BC-2 |
-| BC-7 | Integration tests: end-to-end billing cycle | 3 | BC-4 |
+| BC-7 | Implement shadow billing mode (skip charge, ESTIMATE quality postings) | 2 | BC-4 |
+| BC-8 | Integration tests: end-to-end billing cycle (happy path + dunning + shadow) | 3 | BC-5, BC-7 |
 
-**WS-4 Complexity:** 17 (reduced from initial estimate; reuses
-existing payment saga infrastructure)
+**WS-4 Complexity:** 22 (increased from 17; adds invoice record,
+dunning orchestration, and shadow billing)
 
 ---
 
@@ -859,13 +1002,14 @@ gantt
     SG-7 Integration Tests        :sg7, after sg2, 3
 
     section WS-4 Billing Cycle
-    BC-1 Domain Model             :bc1, 0, 2
-    BC-2 Scheduler                :bc2, after bc1, 3
+    BC-1 Domain Model + Invoice   :bc1, 0, 3
+    BC-2 Scheduler + Idempotency  :bc2, after bc1, 3
     BC-3 Balance Query            :bc3, after bc1, 3
-    BC-4 Collection Saga          :crit, bc4, after bc2, 2
-    BC-5 Retry Policy             :bc5, after bc4, 2
+    BC-4 Collection Saga          :crit, bc4, after bc2, 3
+    BC-5 Dunning Saga             :bc5, after bc4, 3
     BC-6 Metrics                  :bc6, after bc2, 2
-    BC-7 Integration Tests        :bc7, after bc4, 3
+    BC-7 Shadow Billing           :bc7, after bc4, 2
+    BC-8 Integration Tests        :bc8, after bc5, 3
 
     section WS-5 Reconciliation
     SR-1 Balance TX Client        :sr1, after sg1, 2
@@ -878,16 +1022,16 @@ gantt
 ### Critical Path Analysis
 
 **Longest dependency chain:** PM-1 > PM-2 > PM-3 > PM-4 > (gate)
-> BC-4 > BC-7
+> BC-4 > BC-5 > BC-8
 
 | Segment | Tasks | Complexity |
 |---------|-------|------------|
 | Payment Methods | PM-1 > PM-2 > PM-3 > PM-4 | 10 |
 | Gateway Adapter (parallel) | SG-1 > SG-2 > SG-4 | 6 |
 | Onboarding (parallel) | CO-1 > CO-2 > CO-6 | 7 |
-| Billing Cycle | BC-1 > BC-2 > BC-4 > BC-7 | 10 |
+| Billing Cycle | BC-1 > BC-2 > BC-4 > BC-5 > BC-8 | 15 |
 | Reconciliation (parallel) | SR-1 > SR-2 > SR-5 | 8 |
-| **Critical Path Total** | | **34** |
+| **Critical Path Total** | | **37** |
 
 ### Parallelisation Opportunities
 
@@ -907,11 +1051,11 @@ gantt
 | WS-1: Party Payment Method Registry | 13 | P0 |
 | WS-2: Stripe Connect Onboarding | 14 | P0 |
 | WS-3: Stripe Payment Gateway Adapter | 16 | P0 |
-| WS-4: Billing Cycle Orchestration | 17 | P1 |
+| WS-4: Billing Cycle Orchestration | 22 | P1 |
 | WS-5: Stripe Settlement Reconciliation | 11 | P1 |
 | WS-6: Multi-Party Settlement | 6 | P2 |
-| **Total** | **77** | |
-| **Critical Path** | **34** | |
+| **Total** | **82** | |
+| **Critical Path** | **37** | |
 
 ---
 
@@ -934,15 +1078,21 @@ gantt
 ### Full Feature Set (P1 Complete)
 
 1. Automated billing cycles collect outstanding balances on
-   schedule
-2. **End-to-end flow**: Usage Event > Metering > Valuation >
-   Forward Curve Pricing > Balance Accumulation > Invoice
-   Collection > Stripe Charge > Ledger Settlement
-3. Stripe settlement reports feed into reconciliation service
+   schedule with deterministic idempotency keys (no double-billing)
+2. **Invoice artifact**: Each billing run generates a persistent
+   invoice with line items and `ValuationAnalysis`, answering
+   "Why was I charged X?"
+3. **End-to-end flow**: Usage Event > Metering > Valuation >
+   Forward Curve Pricing > Balance Accumulation > Invoice >
+   Stripe Charge > Ledger Settlement
+4. **Dunning management**: Failed charges escalate through retry
+   levels with notifications, culminating in account freeze
+5. Stripe settlement reports feed into reconciliation service
    as NOSTRO_VOSTRO data source
-4. Variance detection catches failed charges, disputes, refunds,
+6. Variance detection catches failed charges, disputes, refunds,
    and fee discrepancies
-5. Failed payment retries follow configurable exponential backoff
+7. **Shadow billing**: Tenants can preview charges without
+   collecting payment (DRAFT invoices, ESTIMATE quality postings)
 
 ### Complete Platform (P2 Complete)
 
