@@ -219,9 +219,10 @@ func (e *ManifestExecutor) Apply(ctx context.Context, input *ApplyManifestInput)
 	}, nil
 }
 
-// resolveSagaScript resolves the apply_manifest saga script.
-// Per ADR-0028, it first checks for a tenant-specific override,
-// then falls back to the platform default in public.platform_saga_definition.
+// resolveSagaScript resolves the apply_manifest saga script from the platform default table.
+// Per ADR-0028, the control plane uses the platform default directly from
+// public.platform_saga_definition. Tenant-specific saga overrides are resolved
+// by the Reference Data service's saga registry (GetActive), not here.
 func (e *ManifestExecutor) resolveSagaScript(ctx context.Context) (string, error) {
 	// Query platform default (applies to all tenants including those with 0 local saga definitions)
 	var script string
@@ -304,8 +305,11 @@ func (e *ManifestExecutor) buildSagaInput(input *ApplyManifestInput) map[string]
 	return sagaInput
 }
 
-// parseManifestVersion converts a version string to an integer.
-// Handles both numeric ("42") and semver ("1.2.3") formats.
+// parseManifestVersion extracts the leading numeric portion of a version string.
+// For numeric strings ("42"), returns the number directly.
+// For semver-like strings ("1.2.3"), returns only the major version (1).
+// Returns 1 as default for empty or non-numeric strings.
+// The full version string is preserved separately in ApplyManifestResult.Version.
 func parseManifestVersion(version string) int {
 	n := 0
 	for _, c := range version {

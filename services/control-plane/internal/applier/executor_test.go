@@ -310,19 +310,25 @@ func TestApplyManifestSaga_ZeroLocalSagaDefinitions(t *testing.T) {
 		assert.True(t, step.Success, "step %s must succeed", step.StepName)
 	}
 
-	// Step 9: Verify compensation metadata is set for compensable steps
-	// register_instrument steps should have compensation handler
+	// Step 9: Verify compensation metadata is set for compensable steps.
+	// StepResult.StepName is the handler qualified name (e.g., "reference_data.register_instrument"),
+	// not the Starlark step() name (e.g., "register_instrument_USD"). This is because typed
+	// service modules record the handler name in the step result.
+	var compensationCount int
 	for _, step := range output.StepResults {
 		switch step.StepName {
 		case "reference_data.register_instrument":
 			assert.Equal(t, "reference_data.delete_instrument", step.CompensateHandler,
 				"register_instrument must have delete_instrument compensation")
 			assert.NotEmpty(t, step.CompensateParams, "compensation params must be derived")
+			compensationCount++
 		case "reference_data.register_account_type":
 			assert.Equal(t, "reference_data.delete_account_type", step.CompensateHandler,
 				"register_account_type must have delete_account_type compensation")
+			compensationCount++
 		}
 	}
+	assert.Equal(t, 3, compensationCount, "must find compensation metadata for 2 instruments + 1 account type")
 }
 
 // embeddedHandlersYAML reads the handlers.yaml from the applier package.
