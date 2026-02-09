@@ -1,0 +1,706 @@
+package differ
+
+import (
+	"context"
+	"fmt"
+	"testing"
+
+	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// testManifest returns a fully populated manifest for testing.
+func testManifest() *controlplanev1.Manifest {
+	return &controlplanev1.Manifest{
+		Version: "1.0",
+		Metadata: &controlplanev1.ManifestMetadata{
+			Name:     "Test Manifest",
+			Industry: "energy",
+		},
+		Instruments: []*controlplanev1.InstrumentDefinition{
+			{
+				Code: "GBP",
+				Name: "British Pound Sterling",
+				Type: controlplanev1.InstrumentType_INSTRUMENT_TYPE_FIAT,
+				Dimensions: &controlplanev1.InstrumentDimensions{
+					Unit:      "GBP",
+					Precision: 2,
+				},
+			},
+			{
+				Code: "KWH",
+				Name: "Kilowatt Hour",
+				Type: controlplanev1.InstrumentType_INSTRUMENT_TYPE_COMMODITY,
+				Dimensions: &controlplanev1.InstrumentDimensions{
+					Unit:      "kWh",
+					Precision: 3,
+				},
+			},
+		},
+		AccountTypes: []*controlplanev1.AccountTypeDefinition{
+			{
+				Code:               "SETTLEMENT",
+				Name:               "Settlement Account",
+				NormalBalance:      controlplanev1.NormalBalance_NORMAL_BALANCE_DEBIT,
+				AllowedInstruments: []string{"GBP"},
+				Policies: &controlplanev1.AccountTypePolicies{
+					Validation: "amount > 0",
+				},
+			},
+		},
+		ValuationRules: []*controlplanev1.ValuationRule{
+			{
+				FromInstrument: "KWH",
+				ToInstrument:   "GBP",
+				Method:         controlplanev1.ValuationMethod_VALUATION_METHOD_SPOT_RATE,
+				Source:         "nordpool_spot",
+			},
+		},
+		Sagas: []*controlplanev1.SagaDefinition{
+			{
+				Name:    "process_settlement",
+				Trigger: "api:/v1/settlements",
+				Script:  "def execute(ctx):\n    return {\"status\": \"ok\"}\n",
+			},
+		},
+	}
+}
+
+func TestDiff_NilLastApplied_AllCreates(t *testing.T) {
+	d := New(nil, nil)
+	manifest := testManifest()
+
+	plan, err := d.Diff(context.Background(), nil, manifest)
+	require.NoError(t, err)
+
+	creates := filterActions(plan.Actions, ActionCreate)
+	assert.Len(t, creates, 5, "expected 5 creates: 2 instruments + 1 account type + 1 valuation rule + 1 saga")
+
+	noChanges := filterActions(plan.Actions, ActionNoChange)
+	assert.Empty(t, noChanges)
+
+	deletes := filterActions(plan.Actions, ActionDelete)
+	assert.Empty(t, deletes)
+}
+
+func TestDiff_NilNewManifest_ReturnsError(t *testing.T) {
+	d := New(nil, nil)
+	_, err := d.Diff(context.Background(), testManifest(), nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "new manifest cannot be nil")
+}
+
+func TestDiff_IdenticalManifests_AllNoChange(t *testing.T) {
+	d := New(nil, nil)
+	manifest := testManifest()
+
+	plan, err := d.Diff(context.Background(), manifest, manifest)
+	require.NoError(t, err)
+
+	noChanges := filterActions(plan.Actions, ActionNoChange)
+	assert.Len(t, noChanges, 5, "expected all 5 resources as NO_CHANGE")
+
+	creates := filterActions(plan.Actions, ActionCreate)
+	assert.Empty(t, creates)
+
+	assert.False(t, plan.HasBreakingChanges)
+}
+
+func TestDiff_AddedInstrument_Create(t *testing.T) {
+	d := New(nil, nil)
+	oldManifest := testManifest()
+
+	newManifest := testManifest()
+	newManifest.Instruments = append(newManifest.Instruments, &controlplanev1.InstrumentDefinition{
+		Code: "EUR",
+		Name: "Euro",
+		Type: controlplanev1.InstrumentType_INSTRUMENT_TYPE_FIAT,
+		Dimensions: &controlplanev1.InstrumentDimensions{
+			Unit:      "EUR",
+			Precision: 2,
+		},
+	})
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	creates := filterActions(plan.Actions, ActionCreate)
+	assert.Len(t, creates, 1)
+	assert.Equal(t, "EUR", creates[0].ResourceCode)
+	assert.Equal(t, ResourceInstrument, creates[0].ResourceType)
+}
+
+func TestDiff_RemovedInstrument_Delete(t *testing.T) {
+	d := New(nil, nil)
+	oldManifest := testManifest()
+
+	newManifest := testManifest()
+	newManifest.Instruments = newManifest.Instruments[:1] // keep only GBP, remove KWH
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	deletes := filterActions(plan.Actions, ActionDelete)
+	assert.Len(t, deletes, 1)
+	assert.Equal(t, "KWH", deletes[0].ResourceCode)
+	assert.True(t, deletes[0].Breaking)
+	assert.True(t, plan.HasBreakingChanges)
+}
+
+func TestDiff_ModifiedInstrument_Update(t *testing.T) {
+	d := New(nil, nil)
+	oldManifest := testManifest()
+
+	newManifest := testManifest()
+	newManifest.Instruments[0].Name = "GBP (Updated)"
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	updates := filterActions(plan.Actions, ActionUpdate)
+	assert.Len(t, updates, 1)
+	assert.Equal(t, "GBP", updates[0].ResourceCode)
+	assert.Contains(t, updates[0].Description, "name:")
+}
+
+func TestDiff_ModifiedInstrumentType_DescribesChange(t *testing.T) {
+	d := New(nil, nil)
+	oldManifest := testManifest()
+
+	newManifest := testManifest()
+	newManifest.Instruments[1].Type = controlplanev1.InstrumentType_INSTRUMENT_TYPE_VOUCHER
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	updates := filterActions(plan.Actions, ActionUpdate)
+	assert.Len(t, updates, 1)
+	assert.Equal(t, "KWH", updates[0].ResourceCode)
+	assert.Contains(t, updates[0].Description, "type:")
+}
+
+func TestDiff_ModifiedAccountType_Update(t *testing.T) {
+	d := New(nil, nil)
+	oldManifest := testManifest()
+
+	newManifest := testManifest()
+	newManifest.AccountTypes[0].Policies.Validation = "amount > 0 && amount < 1000000"
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	updates := filterActionsByResource(plan.Actions, ActionUpdate, ResourceAccountType)
+	assert.Len(t, updates, 1)
+	assert.Equal(t, "SETTLEMENT", updates[0].ResourceCode)
+	assert.Contains(t, updates[0].Description, "policies changed")
+}
+
+func TestDiff_ModifiedAccountTypeName_DescribesChange(t *testing.T) {
+	d := New(nil, nil)
+	oldManifest := testManifest()
+
+	newManifest := testManifest()
+	newManifest.AccountTypes[0].Name = "Updated Settlement Account"
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	updates := filterActionsByResource(plan.Actions, ActionUpdate, ResourceAccountType)
+	assert.Len(t, updates, 1)
+	assert.Contains(t, updates[0].Description, "name:")
+}
+
+func TestDiff_ModifiedSaga_Update(t *testing.T) {
+	d := New(nil, nil)
+	oldManifest := testManifest()
+
+	newManifest := testManifest()
+	newManifest.Sagas[0].Script = "def execute(ctx):\n    return {\"status\": \"updated\"}\n"
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	updates := filterActionsByResource(plan.Actions, ActionUpdate, ResourceSaga)
+	assert.Len(t, updates, 1)
+	assert.Equal(t, "process_settlement", updates[0].ResourceCode)
+	assert.Contains(t, updates[0].Description, "script changed")
+}
+
+func TestDiff_ModifiedSagaTrigger_DescribesChange(t *testing.T) {
+	d := New(nil, nil)
+	oldManifest := testManifest()
+
+	newManifest := testManifest()
+	newManifest.Sagas[0].Trigger = "api:/v2/settlements"
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	updates := filterActionsByResource(plan.Actions, ActionUpdate, ResourceSaga)
+	assert.Len(t, updates, 1)
+	assert.Contains(t, updates[0].Description, "trigger:")
+}
+
+func TestDiff_AddedSaga_Create(t *testing.T) {
+	d := New(nil, nil)
+	oldManifest := testManifest()
+
+	newManifest := testManifest()
+	newManifest.Sagas = append(newManifest.Sagas, &controlplanev1.SagaDefinition{
+		Name:    "daily_reconciliation",
+		Trigger: "scheduled:daily_at_0200",
+		Script:  "def execute(ctx):\n    return {}\n",
+	})
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	creates := filterActionsByResource(plan.Actions, ActionCreate, ResourceSaga)
+	assert.Len(t, creates, 1)
+	assert.Equal(t, "daily_reconciliation", creates[0].ResourceCode)
+	assert.Contains(t, creates[0].Description, "trigger: scheduled:")
+}
+
+func TestDiff_RemovedSaga_Delete(t *testing.T) {
+	d := New(nil, nil)
+	oldManifest := testManifest()
+
+	newManifest := testManifest()
+	newManifest.Sagas = nil
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	deletes := filterActionsByResource(plan.Actions, ActionDelete, ResourceSaga)
+	assert.Len(t, deletes, 1)
+	assert.Equal(t, "process_settlement", deletes[0].ResourceCode)
+	assert.True(t, deletes[0].Breaking)
+}
+
+func TestDiff_RemovedAccountType_Delete(t *testing.T) {
+	d := New(nil, nil)
+	oldManifest := testManifest()
+
+	newManifest := testManifest()
+	newManifest.AccountTypes = nil
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	deletes := filterActionsByResource(plan.Actions, ActionDelete, ResourceAccountType)
+	assert.Len(t, deletes, 1)
+	assert.Equal(t, "SETTLEMENT", deletes[0].ResourceCode)
+}
+
+func TestDiff_ValuationRuleAdded(t *testing.T) {
+	d := New(nil, nil)
+	oldManifest := testManifest()
+
+	newManifest := testManifest()
+	newManifest.ValuationRules = append(newManifest.ValuationRules, &controlplanev1.ValuationRule{
+		FromInstrument: "EUR",
+		ToInstrument:   "GBP",
+		Method:         controlplanev1.ValuationMethod_VALUATION_METHOD_SPOT_RATE,
+		Source:         "ecb_fx_daily",
+	})
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	creates := filterActionsByResource(plan.Actions, ActionCreate, ResourceValuationRule)
+	assert.Len(t, creates, 1)
+	assert.Equal(t, "EUR->GBP", creates[0].ResourceCode)
+}
+
+func TestDiff_ValuationRuleModified(t *testing.T) {
+	d := New(nil, nil)
+	oldManifest := testManifest()
+
+	newManifest := testManifest()
+	newManifest.ValuationRules[0].Method = controlplanev1.ValuationMethod_VALUATION_METHOD_FIXED
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	updates := filterActionsByResource(plan.Actions, ActionUpdate, ResourceValuationRule)
+	assert.Len(t, updates, 1)
+	assert.Equal(t, "KWH->GBP", updates[0].ResourceCode)
+}
+
+func TestDiff_ValuationRuleRemoved(t *testing.T) {
+	d := New(nil, nil)
+	oldManifest := testManifest()
+
+	newManifest := testManifest()
+	newManifest.ValuationRules = nil
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	deletes := filterActionsByResource(plan.Actions, ActionDelete, ResourceValuationRule)
+	assert.Len(t, deletes, 1)
+	assert.Equal(t, "KWH->GBP", deletes[0].ResourceCode)
+}
+
+func TestDiff_MultipleChanges_MixedActions(t *testing.T) {
+	d := New(nil, nil)
+	oldManifest := testManifest()
+
+	newManifest := testManifest()
+	// Remove KWH instrument
+	newManifest.Instruments = newManifest.Instruments[:1]
+	// Add EUR instrument
+	newManifest.Instruments = append(newManifest.Instruments, &controlplanev1.InstrumentDefinition{
+		Code: "EUR",
+		Name: "Euro",
+		Type: controlplanev1.InstrumentType_INSTRUMENT_TYPE_FIAT,
+		Dimensions: &controlplanev1.InstrumentDimensions{
+			Unit:      "EUR",
+			Precision: 2,
+		},
+	})
+	// Modify settlement account type
+	newManifest.AccountTypes[0].Name = "Updated Settlement"
+	// Add new saga
+	newManifest.Sagas = append(newManifest.Sagas, &controlplanev1.SagaDefinition{
+		Name:    "new_workflow",
+		Trigger: "api:/v1/workflows",
+		Script:  "def execute(ctx):\n    pass\n",
+	})
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	creates := filterActions(plan.Actions, ActionCreate)
+	updates := filterActions(plan.Actions, ActionUpdate)
+	deletes := filterActions(plan.Actions, ActionDelete)
+	noChanges := filterActions(plan.Actions, ActionNoChange)
+
+	assert.Len(t, creates, 2, "EUR instrument + new_workflow saga")
+	assert.Len(t, updates, 1, "modified SETTLEMENT account type")
+	assert.Len(t, deletes, 1, "removed KWH instrument")
+	assert.Len(t, noChanges, 3, "GBP unchanged, valuation rule unchanged, process_settlement saga unchanged")
+
+	assert.True(t, plan.HasBreakingChanges, "should be breaking due to DELETE")
+}
+
+func TestDiff_EmptyManifests_NoActions(t *testing.T) {
+	d := New(nil, nil)
+	empty := &controlplanev1.Manifest{
+		Version:  "1.0",
+		Metadata: &controlplanev1.ManifestMetadata{Name: "Empty"},
+	}
+
+	plan, err := d.Diff(context.Background(), empty, empty)
+	require.NoError(t, err)
+	assert.Empty(t, plan.Actions)
+	assert.False(t, plan.HasBreakingChanges)
+}
+
+func TestDiff_SafetyChecker_BlocksDeletion(t *testing.T) {
+	checker := &mockSafetyChecker{
+		accountBlocked: map[string]*BlockedDeletion{
+			"SETTLEMENT": {
+				ResourceType: ResourceAccountType,
+				ResourceCode: "SETTLEMENT",
+				Reason:       "1,234 accounts with non-zero balances exist",
+			},
+		},
+	}
+	d := New(checker, nil)
+	oldManifest := testManifest()
+
+	newManifest := testManifest()
+	newManifest.AccountTypes = nil
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	assert.True(t, plan.HasBlockedDeletions())
+	assert.Len(t, plan.BlockedDeletions, 1)
+	assert.Equal(t, "SETTLEMENT", plan.BlockedDeletions[0].ResourceCode)
+	assert.Contains(t, plan.BlockedDeletions[0].Reason, "1,234 accounts")
+}
+
+func TestDiff_SafetyChecker_BlocksInstrumentDeletion(t *testing.T) {
+	checker := &mockSafetyChecker{
+		instrumentBlocked: map[string]*BlockedDeletion{
+			"KWH": {
+				ResourceType: ResourceInstrument,
+				ResourceCode: "KWH",
+				Reason:       "referenced by 3 active valuation rules",
+			},
+		},
+	}
+	d := New(checker, nil)
+	oldManifest := testManifest()
+
+	newManifest := testManifest()
+	newManifest.Instruments = newManifest.Instruments[:1] // remove KWH
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	assert.True(t, plan.HasBlockedDeletions())
+	assert.Len(t, plan.BlockedDeletions, 1)
+	assert.Contains(t, plan.BlockedDeletions[0].Reason, "3 active valuation rules")
+}
+
+func TestDiff_SafetyChecker_BlocksSagaDeletion(t *testing.T) {
+	checker := &mockSafetyChecker{
+		sagaBlocked: map[string]*BlockedDeletion{
+			"process_settlement": {
+				ResourceType: ResourceSaga,
+				ResourceCode: "process_settlement",
+				Reason:       "5 pending/running saga instances",
+			},
+		},
+	}
+	d := New(checker, nil)
+	oldManifest := testManifest()
+
+	newManifest := testManifest()
+	newManifest.Sagas = nil
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	assert.True(t, plan.HasBlockedDeletions())
+	assert.Len(t, plan.BlockedDeletions, 1)
+	assert.Contains(t, plan.BlockedDeletions[0].Reason, "5 pending/running")
+}
+
+func TestDiff_SafetyChecker_AllowsDeletionWhenNothingBlocked(t *testing.T) {
+	checker := &mockSafetyChecker{} // no blocked resources
+	d := New(checker, nil)
+	oldManifest := testManifest()
+
+	newManifest := testManifest()
+	newManifest.AccountTypes = nil
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	assert.False(t, plan.HasBlockedDeletions())
+	assert.Empty(t, plan.BlockedDeletions)
+}
+
+func TestDiff_SafetyChecker_ErrorPropagates(t *testing.T) {
+	checker := &mockSafetyChecker{
+		err: fmt.Errorf("connection refused"),
+	}
+	d := New(checker, nil)
+	oldManifest := testManifest()
+
+	newManifest := testManifest()
+	newManifest.AccountTypes = nil
+
+	_, err := d.Diff(context.Background(), oldManifest, newManifest)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "connection refused")
+}
+
+func TestDiff_DriftDetector_WarningsIncluded(t *testing.T) {
+	detector := &mockDriftDetector{
+		warnings: []DriftWarning{
+			{
+				ResourceType: ResourceInstrument,
+				ResourceCode: "GBP",
+				Description:  "precision manually changed from 2 to 4 in database",
+			},
+		},
+	}
+	d := New(nil, detector)
+	manifest := testManifest()
+
+	plan, err := d.Diff(context.Background(), manifest, manifest)
+	require.NoError(t, err)
+
+	assert.Len(t, plan.DriftWarnings, 1)
+	assert.Equal(t, "GBP", plan.DriftWarnings[0].ResourceCode)
+	assert.Contains(t, plan.DriftWarnings[0].Description, "precision manually changed")
+}
+
+func TestDiff_DriftDetector_NotCalledWhenNoLastApplied(t *testing.T) {
+	detector := &mockDriftDetector{
+		called: false,
+	}
+	d := New(nil, detector)
+
+	plan, err := d.Diff(context.Background(), nil, testManifest())
+	require.NoError(t, err)
+
+	assert.False(t, detector.called, "drift detector should not be called when no last-applied manifest")
+	assert.Empty(t, plan.DriftWarnings)
+}
+
+func TestDiff_DriftDetector_ErrorPropagates(t *testing.T) {
+	detector := &mockDriftDetector{
+		err: fmt.Errorf("database unreachable"),
+	}
+	d := New(nil, detector)
+	manifest := testManifest()
+
+	_, err := d.Diff(context.Background(), manifest, manifest)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "database unreachable")
+}
+
+func TestDiff_DeterministicOrdering(t *testing.T) {
+	d := New(nil, nil)
+
+	plan, err := d.Diff(context.Background(), nil, testManifest())
+	require.NoError(t, err)
+
+	// Verify actions are sorted by resource type then code
+	for i := 1; i < len(plan.Actions); i++ {
+		prev := plan.Actions[i-1]
+		curr := plan.Actions[i]
+		if prev.ResourceType == curr.ResourceType {
+			assert.LessOrEqual(t, prev.ResourceCode, curr.ResourceCode,
+				"actions within same resource type should be sorted by code")
+		}
+	}
+}
+
+func TestDiffPlan_Summary(t *testing.T) {
+	plan := &DiffPlan{
+		Actions: []PlannedAction{
+			{Action: ActionCreate},
+			{Action: ActionCreate},
+			{Action: ActionUpdate},
+			{Action: ActionNoChange},
+			{Action: ActionNoChange},
+			{Action: ActionNoChange},
+		},
+	}
+
+	summary := plan.Summary()
+	assert.Equal(t, "2 to create, 1 to update, 0 to delete, 3 no-change", summary)
+}
+
+func TestDiffPlan_BlockedDeletionErrors(t *testing.T) {
+	plan := &DiffPlan{
+		BlockedDeletions: []BlockedDeletion{
+			{
+				ResourceType: ResourceAccountType,
+				ResourceCode: "CUSTOMER_PREPAID",
+				Reason:       "1,234 accounts with balances exist",
+			},
+			{
+				ResourceType: ResourceInstrument,
+				ResourceCode: "KWH",
+				Reason:       "referenced by active valuation rules",
+			},
+		},
+	}
+
+	errors := plan.BlockedDeletionErrors()
+	assert.Len(t, errors, 2)
+	assert.Equal(t, "Cannot delete account_type CUSTOMER_PREPAID: 1,234 accounts with balances exist", errors[0])
+	assert.Equal(t, "Cannot delete instrument KWH: referenced by active valuation rules", errors[1])
+}
+
+func TestDiff_BreakingChangeFlagging(t *testing.T) {
+	d := New(nil, nil)
+	oldManifest := testManifest()
+
+	newManifest := testManifest()
+	newManifest.Instruments = newManifest.Instruments[:1] // remove KWH
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	assert.True(t, plan.HasBreakingChanges)
+
+	for _, action := range plan.Actions {
+		if action.Action == ActionDelete {
+			assert.True(t, action.Breaking, "DELETE actions should be flagged as breaking")
+		}
+		if action.Action == ActionNoChange || action.Action == ActionCreate {
+			assert.False(t, action.Breaking, "non-DELETE actions should not be breaking")
+		}
+	}
+}
+
+func TestValRuleKey(t *testing.T) {
+	assert.Equal(t, "KWH->GBP", valRuleKey("KWH", "GBP"))
+	assert.Equal(t, "EUR->GBP", valRuleKey("eur", "gbp"))
+	assert.Equal(t, "A->B", valRuleKey("a", "B"))
+}
+
+// --- Mock implementations ---
+
+type mockSafetyChecker struct {
+	accountBlocked    map[string]*BlockedDeletion
+	instrumentBlocked map[string]*BlockedDeletion
+	sagaBlocked       map[string]*BlockedDeletion
+	err               error
+}
+
+func (m *mockSafetyChecker) CheckAccountTypeDeletion(_ context.Context, code string) (*BlockedDeletion, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	if m.accountBlocked != nil {
+		return m.accountBlocked[code], nil
+	}
+	return nil, nil
+}
+
+func (m *mockSafetyChecker) CheckInstrumentDeletion(_ context.Context, code string) (*BlockedDeletion, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	if m.instrumentBlocked != nil {
+		return m.instrumentBlocked[code], nil
+	}
+	return nil, nil
+}
+
+func (m *mockSafetyChecker) CheckSagaDeletion(_ context.Context, name string) (*BlockedDeletion, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	if m.sagaBlocked != nil {
+		return m.sagaBlocked[name], nil
+	}
+	return nil, nil
+}
+
+type mockDriftDetector struct {
+	warnings []DriftWarning
+	err      error
+	called   bool
+}
+
+func (m *mockDriftDetector) DetectDrift(_ context.Context, _ *controlplanev1.Manifest) ([]DriftWarning, error) {
+	m.called = true
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.warnings, nil
+}
+
+// --- Test helpers ---
+
+func filterActions(actions []PlannedAction, actionType ActionType) []PlannedAction {
+	var result []PlannedAction
+	for _, a := range actions {
+		if a.Action == actionType {
+			result = append(result, a)
+		}
+	}
+	return result
+}
+
+func filterActionsByResource(actions []PlannedAction, actionType ActionType, resourceType ResourceType) []PlannedAction {
+	var result []PlannedAction
+	for _, a := range actions {
+		if a.Action == actionType && a.ResourceType == resourceType {
+			result = append(result, a)
+		}
+	}
+	return result
+}
