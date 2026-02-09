@@ -138,6 +138,13 @@ func (r *SettlementRun) Fail(reason string) error {
 	return nil
 }
 
+// SetVarianceCount updates the variance count on a running settlement run.
+func (r *SettlementRun) SetVarianceCount(count int) {
+	r.VarianceCount = count
+	r.UpdatedAt = time.Now().UTC()
+	r.Version++
+}
+
 // Cancel transitions the run to CANCELLED.
 func (r *SettlementRun) Cancel() error {
 	if !r.Status.CanTransitionTo(RunStatusCancelled) {

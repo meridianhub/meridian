@@ -152,9 +152,7 @@ func (vv *VarianceValuator) ValueVariances(ctx context.Context, runID uuid.UUID)
 	if err != nil {
 		return fmt.Errorf("failed to find run for summary update: %w", err)
 	}
-	run.VarianceCount = valuedCount
-	run.UpdatedAt = time.Now().UTC()
-	run.Version++
+	run.SetVarianceCount(valuedCount)
 	if err := vv.runRepo.Update(ctx, run); err != nil {
 		return fmt.Errorf("failed to update run variance summary: %w", err)
 	}
