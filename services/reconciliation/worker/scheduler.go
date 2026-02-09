@@ -402,13 +402,14 @@ func (s *SettlementScheduler) executeJob(schedule SettlementSchedule) {
 	now := NowFunc()
 	periodStart, periodEnd := CalculatePeriod(now, schedule.SettlementType, schedule.PeriodOffset)
 
-	s.triggerReconciliation(ctx, schedule, periodStart, periodEnd, "cron")
+	s.triggerReconciliation(ctx, schedule, periodStart, periodEnd, now, "cron")
 }
 
 // triggerReconciliation initiates a reconciliation run and records the execution audit trail.
+// The scheduledAt parameter is the expected fire time (used for the audit trail's ScheduledAt
+// field so that catch-up runs record the original scheduled time, not the current time).
 // The source parameter identifies the trigger origin ("cron" or "catch-up").
-func (s *SettlementScheduler) triggerReconciliation(ctx context.Context, schedule SettlementSchedule, periodStart, periodEnd time.Time, source string) {
-	now := NowFunc()
+func (s *SettlementScheduler) triggerReconciliation(ctx context.Context, schedule SettlementSchedule, periodStart, periodEnd, scheduledAt time.Time, source string) {
 	initiatedBy := "settlement-scheduler"
 	if source == "catch-up" {
 		initiatedBy = "settlement-scheduler-catchup"
@@ -416,7 +417,7 @@ func (s *SettlementScheduler) triggerReconciliation(ctx context.Context, schedul
 
 	// Record execution start in audit trail
 	execID := uuid.New()
-	s.recordExecutionStart(ctx, execID, schedule.ScheduleID, now)
+	s.recordExecutionStart(ctx, execID, schedule.ScheduleID, scheduledAt)
 
 	s.logger.Info("executing scheduled reconciliation",
 		"schedule_id", schedule.ScheduleID,
@@ -467,14 +468,14 @@ func (s *SettlementScheduler) triggerReconciliation(ctx context.Context, schedul
 }
 
 // recordExecutionStart records the start of a scheduler execution in the audit trail.
-func (s *SettlementScheduler) recordExecutionStart(ctx context.Context, execID uuid.UUID, scheduleID string, now time.Time) {
+func (s *SettlementScheduler) recordExecutionStart(ctx context.Context, execID uuid.UUID, scheduleID string, scheduledAt time.Time) {
 	if s.executionStore == nil {
 		return
 	}
 	exec := SchedulerExecution{
 		ID:           execID,
 		ScheduleName: scheduleID,
-		ScheduledAt:  now,
+		ScheduledAt:  scheduledAt,
 		Status:       ExecutionStatusTriggered,
 	}
 	if err := s.executionStore.RecordExecution(ctx, exec); err != nil {
@@ -620,7 +621,7 @@ func (s *SettlementScheduler) catchUpSchedule(ctx context.Context, sched Settlem
 			"period_start", periodStart,
 			"period_end", periodEnd)
 
-		s.triggerReconciliation(ctx, sched, periodStart, periodEnd, "catch-up")
+		s.triggerReconciliation(ctx, sched, periodStart, periodEnd, nextFire, "catch-up")
 		triggered++
 
 		nextFire = cronSched.Next(nextFire)
