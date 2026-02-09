@@ -264,6 +264,10 @@ func (s *SettlementScheduler) refreshSchedules(ctx context.Context) error {
 		currentSchedules[sched.ScheduleID] = sched
 	}
 
+	// Synchronize access to entryIDs map
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	// Remove schedules that no longer exist
 	for id, entryID := range s.entryIDs {
 		if _, exists := currentSchedules[id]; !exists {
@@ -390,5 +394,7 @@ func (s *SettlementScheduler) executeJob(schedule SettlementSchedule) {
 
 // ScheduleCount returns the number of currently registered schedules.
 func (s *SettlementScheduler) ScheduleCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return len(s.entryIDs)
 }
