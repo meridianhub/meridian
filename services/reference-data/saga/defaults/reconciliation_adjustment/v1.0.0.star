@@ -16,11 +16,13 @@
 #   4. finalize: Finalize the booking log and mark the variance as resolved
 #
 # Compensation Order (LIFO - Last In, First Out):
-#   On failure, completed steps are compensated in reverse:
-#   - finalize compensation: revert booking log to PENDING
-#   - post_credit compensation: reverse the credit posting
-#   - post_debit compensation: reverse the debit posting
-#   - initiate_booking compensation: cancel the booking log
+#   On failure, completed steps are compensated in reverse using
+#   reversal entries (not state rollbacks), consistent with the
+#   platform's immutable ledger pattern:
+#   - finalize compensation: create a reversal booking log entry
+#   - post_credit compensation: post a reversal DEBIT entry
+#   - post_debit compensation: post a reversal CREDIT entry
+#   - initiate_booking compensation: mark booking log as CANCELLED
 #
 # Input data (provided via input_data dictionary):
 #   - variance_id: string - The variance being adjusted

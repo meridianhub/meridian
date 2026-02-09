@@ -33,10 +33,12 @@ groups:
             pending operations in the settlement period.
           runbook_url: "docs/runbooks/settlement-lock-failure.md"
 
-      # Settlement run overdue - no completion in 2 hours
+      # Settlement run overdue - stuck in RUNNING state for 2 hours
+      # Uses the `for` clause to detect how long the condition has been continuously true.
+      # The run_status gauge holds state codes (0-4), not timestamps.
       - alert: SettlementRunOverdue
-        expr: meridian_reconciliation_run_status == 1 and (time() - meridian_reconciliation_run_status) > 7200
-        for: 5m
+        expr: meridian_reconciliation_run_status == 1
+        for: 2h
         labels:
           severity: warning
           priority: P3
@@ -50,10 +52,12 @@ groups:
           runbook_url: "docs/runbooks/settlement-run-overdue.md"
 
       # High variance rate - more than 10% positions with variances
+      # sum() aggregates across the `reason` label on variances to produce a
+      # single-series result, matching the label-less snapshots counter.
       - alert: HighVarianceRate
         expr: >-
-          rate(meridian_reconciliation_variances_detected_total[1h])
-          / on() rate(meridian_reconciliation_snapshots_created_total[1h]) > 0.1
+          sum(rate(meridian_reconciliation_variances_detected_total[1h]))
+          / rate(meridian_reconciliation_snapshots_created_total[1h]) > 0.1
         for: 15m
         labels:
           severity: warning

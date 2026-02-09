@@ -19,6 +19,17 @@ func TestRecordSnapshotsCreated(t *testing.T) {
 	RecordSnapshotsCreated(42)
 	newCount := testutil.ToFloat64(SnapshotsCreatedTotal)
 	assert.Equal(t, initial+42, newCount, "snapshot counter should increment by 42")
+
+	// Negative count should be ignored (not panic)
+	before := testutil.ToFloat64(SnapshotsCreatedTotal)
+	RecordSnapshotsCreated(-1)
+	after := testutil.ToFloat64(SnapshotsCreatedTotal)
+	assert.Equal(t, before, after, "negative count should not change counter")
+
+	// Zero count should be ignored
+	RecordSnapshotsCreated(0)
+	afterZero := testutil.ToFloat64(SnapshotsCreatedTotal)
+	assert.Equal(t, before, afterZero, "zero count should not change counter")
 }
 
 func TestRecordVarianceDetected(t *testing.T) {

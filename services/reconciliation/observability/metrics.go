@@ -216,7 +216,11 @@ func RecordRunDuration(runType, assetCode string, duration time.Duration) {
 }
 
 // RecordSnapshotsCreated increments the snapshot counter by the given count.
+// count must be non-negative; negative values are ignored.
 func RecordSnapshotsCreated(count int) {
+	if count <= 0 {
+		return
+	}
 	SnapshotsCreatedTotal.Add(float64(count))
 }
 
