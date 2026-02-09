@@ -13,6 +13,7 @@ func TestRunStatus_IsValid(t *testing.T) {
 		{"valid completed", RunStatusCompleted, true},
 		{"valid failed", RunStatusFailed, true},
 		{"valid cancelled", RunStatusCancelled, true},
+		{"valid finalized", RunStatusFinalized, true},
 		{"invalid status", RunStatus("INVALID"), false},
 		{"empty status", RunStatus(""), false},
 	}
@@ -34,7 +35,8 @@ func TestRunStatus_IsFinal(t *testing.T) {
 	}{
 		{"pending not final", RunStatusPending, false},
 		{"running not final", RunStatusRunning, false},
-		{"completed is final", RunStatusCompleted, true},
+		{"completed not final", RunStatusCompleted, false},
+		{"finalized is final", RunStatusFinalized, true},
 		{"failed is final", RunStatusFailed, true},
 		{"cancelled is final", RunStatusCancelled, true},
 	}
@@ -71,8 +73,15 @@ func TestRunStatus_CanTransitionTo(t *testing.T) {
 		// Invalid transitions from RUNNING
 		{"running to pending", RunStatusRunning, RunStatusPending, false},
 
+		// Valid transitions from COMPLETED
+		{"completed to finalized", RunStatusCompleted, RunStatusFinalized, true},
+
+		// Invalid transitions from COMPLETED
+		{"completed to pending", RunStatusCompleted, RunStatusPending, false},
+		{"completed to running", RunStatusCompleted, RunStatusRunning, false},
+
 		// Final states cannot transition
-		{"completed cannot transition", RunStatusCompleted, RunStatusPending, false},
+		{"finalized cannot transition", RunStatusFinalized, RunStatusPending, false},
 		{"failed cannot transition", RunStatusFailed, RunStatusPending, false},
 		{"cancelled cannot transition", RunStatusCancelled, RunStatusPending, false},
 	}
@@ -98,6 +107,7 @@ func TestRunStatus_String(t *testing.T) {
 		{"completed", RunStatusCompleted, "COMPLETED"},
 		{"failed", RunStatusFailed, "FAILED"},
 		{"cancelled", RunStatusCancelled, "CANCELLED"},
+		{"finalized", RunStatusFinalized, "FINALIZED"},
 	}
 
 	for _, tt := range tests {

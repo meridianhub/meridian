@@ -83,6 +83,9 @@ func NewProxyHandler(backends []BackendRoute) *ProxyHandler {
 			req.Header.Del(HeaderAuthMethod)
 			req.Header.Del(HeaderAuthRoles)
 
+			// SECURITY: Strip X-API-Key header to prevent credential leakage to backends.
+			req.Header.Del(auth.APIKeyHeader)
+
 			// Add identity headers if the request was authenticated
 			addIdentityHeaders(req)
 		}
@@ -173,8 +176,12 @@ func addIdentityHeaders(req *http.Request) {
 	if identity := auth.GetAPIKeyIdentity(ctx); identity != "" {
 		req.Header.Set(HeaderUserID, identity)
 		req.Header.Set(HeaderAuthMethod, AuthMethodAPIKey)
-		// Note: API keys don't have tenant ID in the current implementation
-		// Tenant context may be resolved separately by TenantResolverMiddleware
+
+		// For RPC-validated API keys, tenant ID is available in context
+		if tenantID, ok := auth.GetTenantIDFromContext(ctx); ok && tenantID != "" {
+			req.Header.Set(HeaderTenantID, tenantID)
+		}
+
 		return
 	}
 
