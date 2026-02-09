@@ -377,7 +377,10 @@ message BalanceAssertionDetail {
   string assertion_id = 1 [(buf.validate.field).string.uuid = true];
 
   // run_id references the settlement run (optional, can be standalone).
-  string run_id = 2;
+  string run_id = 2 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
 
   // account_id identifies the primary account being asserted.
   string account_id = 3 [(buf.validate.field).string = {
@@ -632,7 +635,10 @@ message AssertBalanceRequest {
   ];
 
   // run_id links the assertion to a settlement run (optional).
-  string run_id = 5 [(buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE];
+  string run_id = 5 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
 
   // idempotency_key ensures exactly-once processing.
   meridian.common.v1.IdempotencyKey idempotency_key = 6;

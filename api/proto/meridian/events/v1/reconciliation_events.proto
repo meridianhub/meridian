@@ -286,7 +286,7 @@ message BalanceImbalanceDetectedEvent {
     max_len: 1000
   }];
 
-  // severity indicates the alert level (always P1 for balance imbalances).
+  // severity indicates the alert level (P1=critical imbalance, P2=threshold warning, P3=informational drift).
   string severity = 8 [(buf.validate.field).string = {
     in: ["P1", "P2", "P3"]
   }];

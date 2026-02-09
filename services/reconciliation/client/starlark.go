@@ -106,12 +106,6 @@ func initiateRunHandler(client *Client) saga.Handler {
 			req.SettlementType = st
 		}
 
-		if ps, ok := params["period_start"]; ok {
-			if ts, ok := ps.(string); ok {
-				_ = ts // Period parsing would be added with business logic
-			}
-		}
-
 		resp, err := client.InitiateAccountReconciliation(clientCtx, req)
 		if err != nil {
 			return nil, fmt.Errorf("reconciliation.initiate_run: %w", err)
