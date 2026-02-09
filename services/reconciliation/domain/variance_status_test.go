@@ -8,6 +8,8 @@ func TestVarianceStatus_IsValid(t *testing.T) {
 		status VarianceStatus
 		want   bool
 	}{
+		{"valid detected", VarianceStatusDetected, true},
+		{"valid valued", VarianceStatusValued, true},
 		{"valid open", VarianceStatusOpen, true},
 		{"valid investigating", VarianceStatusInvestigating, true},
 		{"valid disputed", VarianceStatusDisputed, true},
@@ -32,6 +34,8 @@ func TestVarianceStatus_IsFinal(t *testing.T) {
 		status VarianceStatus
 		want   bool
 	}{
+		{"detected not final", VarianceStatusDetected, false},
+		{"valued not final", VarianceStatusValued, false},
 		{"open not final", VarianceStatusOpen, false},
 		{"investigating not final", VarianceStatusInvestigating, false},
 		{"disputed not final", VarianceStatusDisputed, false},
@@ -55,6 +59,21 @@ func TestVarianceStatus_CanTransitionTo(t *testing.T) {
 		target  VarianceStatus
 		want    bool
 	}{
+		// From DETECTED
+		{"detected to valued", VarianceStatusDetected, VarianceStatusValued, true},
+		{"detected to open", VarianceStatusDetected, VarianceStatusOpen, true},
+		{"detected to resolved", VarianceStatusDetected, VarianceStatusResolved, true},
+		{"detected to accepted", VarianceStatusDetected, VarianceStatusAccepted, true},
+		{"detected to investigating", VarianceStatusDetected, VarianceStatusInvestigating, false},
+
+		// From VALUED
+		{"valued to open", VarianceStatusValued, VarianceStatusOpen, true},
+		{"valued to investigating", VarianceStatusValued, VarianceStatusInvestigating, true},
+		{"valued to disputed", VarianceStatusValued, VarianceStatusDisputed, true},
+		{"valued to resolved", VarianceStatusValued, VarianceStatusResolved, true},
+		{"valued to accepted", VarianceStatusValued, VarianceStatusAccepted, true},
+		{"valued to detected", VarianceStatusValued, VarianceStatusDetected, false},
+
 		// From OPEN
 		{"open to investigating", VarianceStatusOpen, VarianceStatusInvestigating, true},
 		{"open to disputed", VarianceStatusOpen, VarianceStatusDisputed, true},
@@ -94,6 +113,8 @@ func TestParseVarianceStatus(t *testing.T) {
 		input    string
 		expected VarianceStatus
 	}{
+		{"valid detected", "DETECTED", VarianceStatusDetected},
+		{"valid valued", "VALUED", VarianceStatusValued},
 		{"valid open", "OPEN", VarianceStatusOpen},
 		{"valid investigating", "INVESTIGATING", VarianceStatusInvestigating},
 		{"valid disputed", "DISPUTED", VarianceStatusDisputed},

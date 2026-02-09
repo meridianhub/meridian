@@ -78,8 +78,26 @@ func (m *mockRunRepo) Update(_ context.Context, run *domain.SettlementRun) error
 	return nil
 }
 
-func (m *mockRunRepo) List(_ context.Context, _ domain.RunFilter) ([]*domain.SettlementRun, error) {
-	return nil, nil
+func (m *mockRunRepo) List(_ context.Context, filter domain.RunFilter) ([]*domain.SettlementRun, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make([]*domain.SettlementRun, 0, len(m.runs))
+	for _, run := range m.runs {
+		if filter.AccountID != nil && run.AccountID != *filter.AccountID {
+			continue
+		}
+		if filter.Status != nil && run.Status != *filter.Status {
+			continue
+		}
+		if filter.ToDate != nil && !run.CreatedAt.Before(*filter.ToDate) {
+			continue
+		}
+		result = append(result, run)
+	}
+	if filter.Limit > 0 && len(result) > filter.Limit {
+		result = result[:filter.Limit]
+	}
+	return result, nil
 }
 
 // --- Mock SettlementSnapshotRepository ---
@@ -114,10 +132,16 @@ func (m *mockSnapshotRepo) FindByID(_ context.Context, _ uuid.UUID) (*domain.Set
 	return nil, domain.ErrNotFound
 }
 
-func (m *mockSnapshotRepo) FindByRunID(_ context.Context, _ uuid.UUID) ([]*domain.SettlementSnapshot, error) {
+func (m *mockSnapshotRepo) FindByRunID(_ context.Context, runID uuid.UUID) ([]*domain.SettlementSnapshot, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.snapshots, nil
+	var result []*domain.SettlementSnapshot
+	for _, s := range m.snapshots {
+		if s.RunID == runID {
+			result = append(result, s)
+		}
+	}
+	return result, nil
 }
 
 func (m *mockSnapshotRepo) DeleteByRunID(_ context.Context, runID uuid.UUID) error {

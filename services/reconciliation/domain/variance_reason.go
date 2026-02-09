@@ -5,13 +5,16 @@ type VarianceReason string
 
 // Supported variance reasons.
 const (
-	VarianceReasonAmountMismatch   VarianceReason = "AMOUNT_MISMATCH"
-	VarianceReasonMissingEntry     VarianceReason = "MISSING_ENTRY"
-	VarianceReasonDuplicateEntry   VarianceReason = "DUPLICATE_ENTRY"
-	VarianceReasonTimingDifference VarianceReason = "TIMING_DIFFERENCE"
-	VarianceReasonCurrencyMismatch VarianceReason = "CURRENCY_MISMATCH"
-	VarianceReasonDirectionError   VarianceReason = "DIRECTION_ERROR"
-	VarianceReasonOther            VarianceReason = "OTHER"
+	VarianceReasonAmountMismatch    VarianceReason = "AMOUNT_MISMATCH"
+	VarianceReasonMissingEntry      VarianceReason = "MISSING_ENTRY"
+	VarianceReasonDuplicateEntry    VarianceReason = "DUPLICATE_ENTRY"
+	VarianceReasonTimingDifference  VarianceReason = "TIMING_DIFFERENCE"
+	VarianceReasonCurrencyMismatch  VarianceReason = "CURRENCY_MISMATCH"
+	VarianceReasonDirectionError    VarianceReason = "DIRECTION_ERROR"
+	VarianceReasonQualityUpgrade    VarianceReason = "QUALITY_UPGRADE"
+	VarianceReasonExternalMismatch  VarianceReason = "EXTERNAL_MISMATCH"
+	VarianceReasonCorrectionApplied VarianceReason = "CORRECTION_APPLIED"
+	VarianceReasonOther             VarianceReason = "OTHER"
 )
 
 // IsValid checks if the variance reason is a recognized value.
@@ -20,7 +23,8 @@ func (r VarianceReason) IsValid() bool {
 	case VarianceReasonAmountMismatch, VarianceReasonMissingEntry,
 		VarianceReasonDuplicateEntry, VarianceReasonTimingDifference,
 		VarianceReasonCurrencyMismatch, VarianceReasonDirectionError,
-		VarianceReasonOther:
+		VarianceReasonQualityUpgrade, VarianceReasonExternalMismatch,
+		VarianceReasonCorrectionApplied, VarianceReasonOther:
 		return true
 	}
 	return false

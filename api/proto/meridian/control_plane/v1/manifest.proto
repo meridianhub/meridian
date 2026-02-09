@@ -1,0 +1,279 @@
+syntax = "proto3";
+
+package meridian.control_plane.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/struct.proto";
+
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1;controlplanev1";
+
+// ========================================
+// Manifest Root
+// ========================================
+
+// Manifest is the atomic configuration snapshot for a Meridian tenant.
+// It declares the complete business model: instruments, account types,
+// valuation rules, and saga workflows. A manifest is self-contained
+// with no external dependencies - all scripts are inline strings and
+// all references resolve within the manifest itself.
+//
+// Codes (instrument codes, account type codes) are immutable primary keys.
+// To change a code, delete the old definition and create a new one.
+message Manifest {
+  // version is the manifest schema version (e.g., "1.0").
+  // Used for forward-compatible parsing of manifest files.
+  string version = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 20
+    pattern: "^[0-9]+\\.[0-9]+$"
+  }];
+
+  // metadata contains identifying information about this manifest.
+  ManifestMetadata metadata = 2 [(buf.validate.field).required = true];
+
+  // instruments defines the asset types available to this tenant.
+  repeated InstrumentDefinition instruments = 3;
+
+  // account_types defines the account classifications available to this tenant.
+  repeated AccountTypeDefinition account_types = 4;
+
+  // valuation_rules defines how instruments are converted between each other.
+  repeated ValuationRule valuation_rules = 5;
+
+  // sagas defines the workflow definitions available to this tenant.
+  repeated SagaDefinition sagas = 6;
+
+  // seed_data contains tenant-specific reference data (e.g., default parties,
+  // initial chart of accounts, industry-specific lookups).
+  // Uses google.protobuf.Struct for flexible JSONB representation.
+  google.protobuf.Struct seed_data = 7;
+}
+
+// ========================================
+// Manifest Metadata
+// ========================================
+
+// ManifestMetadata contains identifying information about a manifest.
+message ManifestMetadata {
+  // name is the human-readable name for this manifest (e.g., "Acme Energy Trading").
+  string name = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // industry describes the target industry vertical (e.g., "energy", "banking", "carbon").
+  string industry = 2 [(buf.validate.field).string.max_len = 100];
+
+  // description provides additional context about this manifest's purpose.
+  string description = 3 [(buf.validate.field).string.max_len = 2048];
+}
+
+// ========================================
+// Instrument Definitions
+// ========================================
+
+// InstrumentType classifies the broad category of an instrument.
+enum InstrumentType {
+  // INSTRUMENT_TYPE_UNSPECIFIED means the type is unknown.
+  INSTRUMENT_TYPE_UNSPECIFIED = 0;
+  // INSTRUMENT_TYPE_FIAT represents government-issued currencies (USD, EUR, GBP).
+  INSTRUMENT_TYPE_FIAT = 1;
+  // INSTRUMENT_TYPE_COMMODITY represents physical or virtual commodities (kWh, TONNE_CO2E, GPU_HOUR).
+  INSTRUMENT_TYPE_COMMODITY = 2;
+  // INSTRUMENT_TYPE_VOUCHER represents digital vouchers or tokens (loyalty points, aid vouchers).
+  INSTRUMENT_TYPE_VOUCHER = 3;
+}
+
+// InstrumentDimensions describes the unit and precision of an instrument's quantities.
+message InstrumentDimensions {
+  // unit is the display unit for this instrument (e.g., "GBP", "kWh", "TONNE_CO2E").
+  string unit = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 32
+  }];
+
+  // precision is the number of decimal places for this instrument (0-18).
+  int32 precision = 2 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 18
+  }];
+}
+
+// InstrumentDefinition declares an asset type within the manifest.
+// The code field is the immutable primary key - to change a code,
+// delete the old definition and create a new one.
+message InstrumentDefinition {
+  // code is the unique, immutable identifier for this instrument (e.g., "GBP", "KWH", "CARBON_CREDIT").
+  // Must be uppercase alphanumeric with underscores, 1-50 characters.
+  string code = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 50
+    pattern: "^[A-Z0-9_]{1,50}$"
+  }];
+
+  // name is the human-readable display name (e.g., "British Pound Sterling").
+  string name = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // type classifies the broad category of this instrument.
+  InstrumentType type = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // dimensions describes the unit and precision of this instrument's quantities.
+  InstrumentDimensions dimensions = 4 [(buf.validate.field).required = true];
+}
+
+// ========================================
+// Account Type Definitions
+// ========================================
+
+// NormalBalance defines the natural balance direction for an account type.
+enum NormalBalance {
+  // NORMAL_BALANCE_UNSPECIFIED means the balance direction is unknown.
+  NORMAL_BALANCE_UNSPECIFIED = 0;
+  // NORMAL_BALANCE_DEBIT means the account naturally holds a debit balance (assets, expenses).
+  NORMAL_BALANCE_DEBIT = 1;
+  // NORMAL_BALANCE_CREDIT means the account naturally holds a credit balance (liabilities, equity, revenue).
+  NORMAL_BALANCE_CREDIT = 2;
+}
+
+// AccountTypePolicies contains CEL expressions that govern account behavior.
+// CEL syntax validation is deferred to the runtime validator - the manifest
+// only stores the expression strings.
+message AccountTypePolicies {
+  // validation is a CEL expression evaluated before allowing transactions on this account type.
+  // Example: "amount > 0 && amount <= 1000000"
+  // Empty string means no additional validation beyond standard checks.
+  string validation = 1 [(buf.validate.field).string.max_len = 4096];
+
+  // bucketing is a CEL expression that determines how amounts are grouped into fungibility buckets.
+  // Example: "instrument_code + ':' + attributes.batch_id"
+  // Empty string means all amounts are fully fungible (single default bucket).
+  string bucketing = 2 [(buf.validate.field).string.max_len = 4096];
+}
+
+// AccountTypeDefinition declares an account classification within the manifest.
+// The code field is the immutable primary key - to change a code,
+// delete the old definition and create a new one.
+message AccountTypeDefinition {
+  // code is the unique, immutable identifier for this account type (e.g., "CURRENT", "SAVINGS", "CARBON_INVENTORY").
+  // Must be uppercase alphanumeric with underscores, 1-50 characters.
+  string code = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 50
+    pattern: "^[A-Z0-9_]{1,50}$"
+  }];
+
+  // name is the human-readable display name (e.g., "Current Account").
+  string name = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // normal_balance defines the natural balance direction for this account type.
+  NormalBalance normal_balance = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // allowed_instruments lists the instrument codes that this account type can hold.
+  // Each value must match a code from the manifest's instruments list.
+  // Empty list means all instruments defined in the manifest are allowed.
+  repeated string allowed_instruments = 4 [(buf.validate.field).repeated = {
+    items: {
+      string: {
+        min_len: 1
+        max_len: 50
+        pattern: "^[A-Z0-9_]{1,50}$"
+      }
+    }
+  }];
+
+  // policies contains CEL expressions governing this account type's behavior.
+  AccountTypePolicies policies = 5;
+}
+
+// ========================================
+// Valuation Rules
+// ========================================
+
+// ValuationMethod defines how instrument conversion rates are determined.
+enum ValuationMethod {
+  // VALUATION_METHOD_UNSPECIFIED means the method is unknown.
+  VALUATION_METHOD_UNSPECIFIED = 0;
+  // VALUATION_METHOD_SPOT_RATE uses real-time market rates from an external feed.
+  VALUATION_METHOD_SPOT_RATE = 1;
+  // VALUATION_METHOD_FIXED uses a fixed, administratively-set conversion rate.
+  VALUATION_METHOD_FIXED = 2;
+}
+
+// ValuationRule defines how one instrument is converted to another.
+// Used for cross-instrument transactions (e.g., kWh to GBP, USD to EUR).
+message ValuationRule {
+  // from_instrument is the source instrument code for conversion.
+  // Must match a code from the manifest's instruments list.
+  string from_instrument = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 50
+    pattern: "^[A-Z0-9_]{1,50}$"
+  }];
+
+  // to_instrument is the target instrument code for conversion.
+  // Must match a code from the manifest's instruments list.
+  string to_instrument = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 50
+    pattern: "^[A-Z0-9_]{1,50}$"
+  }];
+
+  // method defines how the conversion rate is determined.
+  ValuationMethod method = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // source identifies the rate source for this rule.
+  // For SPOT_RATE: the feed identifier (e.g., "ecb_fx_daily", "nordpool_spot").
+  // For FIXED: a description of who sets the rate (e.g., "admin_override", "contract_rate").
+  string source = 4 [(buf.validate.field).string.max_len = 255];
+}
+
+// ========================================
+// Saga Definitions
+// ========================================
+
+// SagaDefinition declares a workflow within the manifest.
+// Sagas are triggered by API calls, webhooks, or scheduled events,
+// and contain inline Starlark scripts that orchestrate service interactions.
+message SagaDefinition {
+  // name is the unique identifier for this saga (e.g., "process_energy_settlement").
+  // Must be lowercase alphanumeric with underscores.
+  string name = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 64
+    pattern: "^[a-z][a-z0-9_]*$"
+  }];
+
+  // trigger defines what initiates this saga.
+  // Supported prefixes:
+  //   "api:" - triggered by an API call (e.g., "api:/v1/settlements")
+  //   "webhook:" - triggered by an external webhook (e.g., "webhook:stripe_payment")
+  //   "scheduled:" - triggered on a schedule (e.g., "scheduled:daily_reconciliation")
+  string trigger = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+    pattern: "^(api:|webhook:|scheduled:).+$"
+  }];
+
+  // script is the inline Starlark source code defining the saga workflow.
+  // Must not be empty - all saga logic is defined inline in the manifest.
+  // Starlark guarantees termination (no while loops, no recursion).
+  string script = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 65536
+  }];
+}

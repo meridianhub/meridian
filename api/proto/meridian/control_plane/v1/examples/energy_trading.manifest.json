@@ -1,0 +1,114 @@
+{
+  "version": "1.0",
+  "metadata": {
+    "name": "Nordic Energy Trading",
+    "industry": "energy",
+    "description": "Manifest for energy trading operations supporting electricity spot market trading, carbon credit management, and cross-currency settlement."
+  },
+  "instruments": [
+    {
+      "code": "GBP",
+      "name": "British Pound Sterling",
+      "type": "INSTRUMENT_TYPE_FIAT",
+      "dimensions": {
+        "unit": "GBP",
+        "precision": 2
+      }
+    },
+    {
+      "code": "EUR",
+      "name": "Euro",
+      "type": "INSTRUMENT_TYPE_FIAT",
+      "dimensions": {
+        "unit": "EUR",
+        "precision": 2
+      }
+    },
+    {
+      "code": "KWH",
+      "name": "Kilowatt Hour",
+      "type": "INSTRUMENT_TYPE_COMMODITY",
+      "dimensions": {
+        "unit": "kWh",
+        "precision": 3
+      }
+    },
+    {
+      "code": "MWH",
+      "name": "Megawatt Hour",
+      "type": "INSTRUMENT_TYPE_COMMODITY",
+      "dimensions": {
+        "unit": "MWh",
+        "precision": 3
+      }
+    }
+  ],
+  "accountTypes": [
+    {
+      "code": "SETTLEMENT",
+      "name": "Settlement Account",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": ["GBP", "EUR"],
+      "policies": {
+        "validation": "amount > 0",
+        "bucketing": ""
+      }
+    },
+    {
+      "code": "ENERGY_INVENTORY",
+      "name": "Energy Inventory Account",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": ["KWH", "MWH"],
+      "policies": {
+        "validation": "amount > 0",
+        "bucketing": "instrument_code + ':' + attributes.delivery_period"
+      }
+    },
+    {
+      "code": "REVENUE",
+      "name": "Revenue Account",
+      "normalBalance": "NORMAL_BALANCE_CREDIT",
+      "allowedInstruments": ["GBP", "EUR"],
+      "policies": {
+        "validation": "",
+        "bucketing": ""
+      }
+    }
+  ],
+  "valuationRules": [
+    {
+      "fromInstrument": "KWH",
+      "toInstrument": "GBP",
+      "method": "VALUATION_METHOD_SPOT_RATE",
+      "source": "nordpool_spot"
+    },
+    {
+      "fromInstrument": "MWH",
+      "toInstrument": "GBP",
+      "method": "VALUATION_METHOD_SPOT_RATE",
+      "source": "nordpool_spot"
+    },
+    {
+      "fromInstrument": "EUR",
+      "toInstrument": "GBP",
+      "method": "VALUATION_METHOD_SPOT_RATE",
+      "source": "ecb_fx_daily"
+    }
+  ],
+  "sagas": [
+    {
+      "name": "process_energy_settlement",
+      "trigger": "api:/v1/energy/settlements",
+      "script": "def execute(ctx):\n    # Validate the settlement request\n    meter_data = ctx.input\n    \n    # Record energy delivery in inventory\n    position_keeping.initiate_log(\n        account_id=meter_data.supplier_account,\n        amount=meter_data.quantity,\n        instrument_code=\"KWH\",\n        direction=\"CREDIT\",\n    )\n    \n    # Value the energy in settlement currency\n    valuation = current_account.evaluate_asset_valuation(\n        account_id=meter_data.buyer_account,\n        instrument_code=\"KWH\",\n        amount=meter_data.quantity,\n    )\n    \n    # Debit the buyer\n    current_account.execute_withdrawal(\n        account_id=meter_data.buyer_account,\n        amount=valuation.output.amount,\n        instrument_code=valuation.output.instrument_code,\n        reference=\"energy-settlement:\" + meter_data.settlement_id,\n    )\n    \n    # Credit the supplier\n    current_account.execute_deposit(\n        account_id=meter_data.supplier_account,\n        amount=valuation.output.amount,\n        instrument_code=valuation.output.instrument_code,\n        reference=\"energy-settlement:\" + meter_data.settlement_id,\n    )\n    \n    return {\"status\": \"settled\", \"settlement_id\": meter_data.settlement_id}\n"
+    },
+    {
+      "name": "daily_energy_reconciliation",
+      "trigger": "scheduled:daily_reconciliation",
+      "script": "def execute(ctx):\n    # Reconcile metered vs settled energy quantities\n    accounts = position_keeping.list_accounts(\n        account_type=\"ENERGY_INVENTORY\",\n    )\n    \n    for account in accounts:\n        position_keeping.assert_balance(\n            account_id=account.account_id,\n            instrument_code=\"KWH\",\n        )\n    \n    return {\"status\": \"reconciled\", \"accounts_checked\": len(accounts)}\n"
+    }
+  ],
+  "seedData": {
+    "delivery_periods": ["HH01", "HH02", "HH03", "HH04", "HH05", "HH06", "HH07", "HH08", "HH09", "HH10", "HH11", "HH12", "HH13", "HH14", "HH15", "HH16", "HH17", "HH18", "HH19", "HH20", "HH21", "HH22", "HH23", "HH24", "HH25", "HH26", "HH27", "HH28", "HH29", "HH30", "HH31", "HH32", "HH33", "HH34", "HH35", "HH36", "HH37", "HH38", "HH39", "HH40", "HH41", "HH42", "HH43", "HH44", "HH45", "HH46", "HH47", "HH48"],
+    "default_market": "nordpool"
+  }
+}
