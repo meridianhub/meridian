@@ -75,7 +75,6 @@ func NewBalanceAssertion(
 		Expression:      expression,
 		ExpectedBalance: expectedBalance,
 		Status:          AssertionStatusPending,
-		AssertedAt:      now,
 		CreatedAt:       now,
 	}, nil
 }
@@ -87,6 +86,7 @@ func (a *BalanceAssertion) Pass(actualBalance decimal.Decimal) error {
 	}
 	a.Status = AssertionStatusPassed
 	a.ActualBalance = actualBalance
+	a.AssertedAt = time.Now().UTC()
 	return nil
 }
 
@@ -97,6 +97,17 @@ func (a *BalanceAssertion) Fail(actualBalance decimal.Decimal, reason string) er
 	}
 	a.Status = AssertionStatusFailed
 	a.ActualBalance = actualBalance
+	a.FailureReason = reason
+	a.AssertedAt = time.Now().UTC()
+	return nil
+}
+
+// Override marks a failed assertion as overridden by an operator.
+func (a *BalanceAssertion) Override(reason string) error {
+	if !a.Status.CanTransitionTo(AssertionStatusOverride) {
+		return ErrInvalidStatusTransition
+	}
+	a.Status = AssertionStatusOverride
 	a.FailureReason = reason
 	return nil
 }

@@ -28,17 +28,14 @@ func (s AssertionStatus) String() string {
 
 // IsFinal checks if the status is a terminal state.
 func (s AssertionStatus) IsFinal() bool {
-	return s == AssertionStatusPassed || s == AssertionStatusFailed || s == AssertionStatusOverride
+	return s == AssertionStatusPassed || s == AssertionStatusOverride
 }
 
 // CanTransitionTo checks if a transition to the target status is valid.
 func (s AssertionStatus) CanTransitionTo(target AssertionStatus) bool {
-	if s.IsFinal() {
-		return false
-	}
-
 	validTransitions := map[AssertionStatus][]AssertionStatus{
 		AssertionStatusPending: {AssertionStatusPassed, AssertionStatusFailed},
+		AssertionStatusFailed:  {AssertionStatusOverride},
 	}
 
 	allowed, exists := validTransitions[s]

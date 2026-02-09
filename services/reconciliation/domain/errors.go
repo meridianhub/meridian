@@ -33,4 +33,6 @@ var (
 	ErrEmptyVarianceID = errors.New("variance ID is required")
 	// ErrEmptyAssertionExpression is returned when the assertion expression is missing.
 	ErrEmptyAssertionExpression = errors.New("assertion expression is required")
+	// ErrEmptyInitiatedBy is returned when initiated by is empty.
+	ErrEmptyInitiatedBy = errors.New("initiated by cannot be empty")
 )

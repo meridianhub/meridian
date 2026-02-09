@@ -90,36 +90,54 @@ func TestNewBalanceAssertion(t *testing.T) {
 				assert.Equal(t, tt.instrumentCode, a.InstrumentCode)
 				assert.Equal(t, tt.expression, a.Expression)
 				assert.Equal(t, domain.AssertionStatusPending, a.Status)
+				assert.True(t, a.AssertedAt.IsZero(), "AssertedAt should be zero until evaluation")
 			}
 		})
 	}
 }
 
 func TestBalanceAssertion_Pass(t *testing.T) {
-	runID := uuid.New()
-	a, err := domain.NewBalanceAssertion(
-		&runID, "ACC-001", "GBP",
-		"balance == 10000", decimal.NewFromFloat(10000.00),
-	)
-	require.NoError(t, err)
+	a := newTestAssertion(t)
 
 	require.NoError(t, a.Pass(decimal.NewFromFloat(10000.00)))
 	assert.Equal(t, domain.AssertionStatusPassed, a.Status)
 	assert.True(t, decimal.NewFromFloat(10000.00).Equal(a.ActualBalance))
+	assert.False(t, a.AssertedAt.IsZero(), "AssertedAt should be set after Pass")
 }
 
 func TestBalanceAssertion_Fail(t *testing.T) {
-	runID := uuid.New()
-	a, err := domain.NewBalanceAssertion(
-		&runID, "ACC-001", "GBP",
-		"balance == 10000", decimal.NewFromFloat(10000.00),
-	)
-	require.NoError(t, err)
+	a := newTestAssertion(t)
 
 	require.NoError(t, a.Fail(decimal.NewFromFloat(9500.00), "Balance mismatch: expected 10000, got 9500"))
 	assert.Equal(t, domain.AssertionStatusFailed, a.Status)
 	assert.True(t, decimal.NewFromFloat(9500.00).Equal(a.ActualBalance))
 	assert.Equal(t, "Balance mismatch: expected 10000, got 9500", a.FailureReason)
+	assert.False(t, a.AssertedAt.IsZero(), "AssertedAt should be set after Fail")
+}
+
+func TestBalanceAssertion_Override(t *testing.T) {
+	a := newTestAssertion(t)
+
+	require.NoError(t, a.Fail(decimal.NewFromFloat(9500.00), "mismatch"))
+	require.NoError(t, a.Override("approved by manager"))
+
+	assert.Equal(t, domain.AssertionStatusOverride, a.Status)
+	assert.Equal(t, "approved by manager", a.FailureReason)
+}
+
+func TestBalanceAssertion_OverrideFromNonFailed(t *testing.T) {
+	t.Run("cannot override from pending", func(t *testing.T) {
+		a := newTestAssertion(t)
+		err := a.Override("reason")
+		assert.ErrorIs(t, err, domain.ErrInvalidStatusTransition)
+	})
+
+	t.Run("cannot override from passed", func(t *testing.T) {
+		a := newTestAssertion(t)
+		require.NoError(t, a.Pass(decimal.NewFromFloat(10000.00)))
+		err := a.Override("reason")
+		assert.ErrorIs(t, err, domain.ErrInvalidStatusTransition)
+	})
 }
 
 func TestBalanceAssertion_InvalidTransitions(t *testing.T) {

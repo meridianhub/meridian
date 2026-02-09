@@ -79,6 +79,9 @@ func NewSettlementRun(
 	if !periodStart.Before(periodEnd) {
 		return nil, ErrInvalidPeriod
 	}
+	if initiatedBy == "" {
+		return nil, ErrEmptyInitiatedBy
+	}
 
 	now := time.Now().UTC()
 	return &SettlementRun{

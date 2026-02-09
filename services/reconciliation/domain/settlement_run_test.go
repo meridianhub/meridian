@@ -85,6 +85,16 @@ func TestNewSettlementRun(t *testing.T) {
 			initiatedBy:    "system",
 			wantErr:        domain.ErrInvalidPeriod,
 		},
+		{
+			name:           "empty initiated by",
+			accountID:      "ACC-001",
+			scope:          domain.ReconciliationScopeAccount,
+			settlementType: domain.SettlementTypeDaily,
+			periodStart:    periodStart,
+			periodEnd:      periodEnd,
+			initiatedBy:    "",
+			wantErr:        domain.ErrEmptyInitiatedBy,
+		},
 	}
 
 	for _, tt := range tests {

@@ -127,6 +127,10 @@ type BalanceAssertionRepository interface {
 	// FindByRunID retrieves all assertions for a settlement run.
 	FindByRunID(ctx context.Context, runID uuid.UUID) ([]*BalanceAssertion, error)
 
+	// Update updates an existing BalanceAssertion.
+	// Returns ErrNotFound if the assertion doesn't exist.
+	Update(ctx context.Context, assertion *BalanceAssertion) error
+
 	// List retrieves assertions matching the given filter.
 	List(ctx context.Context, filter AssertionFilter) ([]*BalanceAssertion, error)
 }

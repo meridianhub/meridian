@@ -33,7 +33,7 @@ func TestAssertionStatus_IsFinal(t *testing.T) {
 	}{
 		{"pending not final", AssertionStatusPending, false},
 		{"passed is final", AssertionStatusPassed, true},
-		{"failed is final", AssertionStatusFailed, true},
+		{"failed not final", AssertionStatusFailed, false},
 		{"override is final", AssertionStatusOverride, true},
 	}
 
@@ -58,9 +58,12 @@ func TestAssertionStatus_CanTransitionTo(t *testing.T) {
 		{"pending to failed", AssertionStatusPending, AssertionStatusFailed, true},
 		{"pending to override not allowed", AssertionStatusPending, AssertionStatusOverride, false},
 
+		// From FAILED
+		{"failed to override", AssertionStatusFailed, AssertionStatusOverride, true},
+		{"failed to passed not allowed", AssertionStatusFailed, AssertionStatusPassed, false},
+
 		// Final states
 		{"passed cannot transition", AssertionStatusPassed, AssertionStatusPending, false},
-		{"failed cannot transition", AssertionStatusFailed, AssertionStatusPending, false},
 		{"override cannot transition", AssertionStatusOverride, AssertionStatusPending, false},
 	}
 
