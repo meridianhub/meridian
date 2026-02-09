@@ -1,0 +1,143 @@
+{
+  "version": "1.0",
+  "metadata": {
+    "name": "AI Cloud Billing",
+    "industry": "saas",
+    "description": "Manifest for AI cloud compute billing supporting GPU-hour metering, multi-currency settlement, and usage-based subscription management."
+  },
+  "instruments": [
+    {
+      "code": "USD",
+      "name": "United States Dollar",
+      "type": "INSTRUMENT_TYPE_FIAT",
+      "dimensions": {
+        "unit": "USD",
+        "precision": 2
+      }
+    },
+    {
+      "code": "GPU_HOUR",
+      "name": "GPU Compute Hour",
+      "type": "INSTRUMENT_TYPE_COMMODITY",
+      "dimensions": {
+        "unit": "GPU-hr",
+        "precision": 6
+      }
+    },
+    {
+      "code": "API_CALL",
+      "name": "API Call Unit",
+      "type": "INSTRUMENT_TYPE_COMMODITY",
+      "dimensions": {
+        "unit": "calls",
+        "precision": 0
+      }
+    },
+    {
+      "code": "STORAGE_GB",
+      "name": "Storage Gigabyte-Month",
+      "type": "INSTRUMENT_TYPE_COMMODITY",
+      "dimensions": {
+        "unit": "GB-mo",
+        "precision": 3
+      }
+    },
+    {
+      "code": "CREDIT",
+      "name": "Platform Credit",
+      "type": "INSTRUMENT_TYPE_VOUCHER",
+      "dimensions": {
+        "unit": "credits",
+        "precision": 2
+      }
+    }
+  ],
+  "accountTypes": [
+    {
+      "code": "BILLING",
+      "name": "Billing Account",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": ["USD"],
+      "policies": {
+        "validation": "",
+        "bucketing": ""
+      }
+    },
+    {
+      "code": "USAGE",
+      "name": "Usage Metering Account",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": ["GPU_HOUR", "API_CALL", "STORAGE_GB"],
+      "policies": {
+        "validation": "amount > 0",
+        "bucketing": "instrument_code + ':' + attributes.billing_period"
+      }
+    },
+    {
+      "code": "CREDIT_BALANCE",
+      "name": "Credit Balance Account",
+      "normalBalance": "NORMAL_BALANCE_CREDIT",
+      "allowedInstruments": ["CREDIT"],
+      "policies": {
+        "validation": "amount > 0",
+        "bucketing": ""
+      }
+    },
+    {
+      "code": "REVENUE",
+      "name": "Revenue Account",
+      "normalBalance": "NORMAL_BALANCE_CREDIT",
+      "allowedInstruments": ["USD"],
+      "policies": {
+        "validation": "",
+        "bucketing": ""
+      }
+    }
+  ],
+  "valuationRules": [
+    {
+      "fromInstrument": "GPU_HOUR",
+      "toInstrument": "USD",
+      "method": "VALUATION_METHOD_FIXED",
+      "source": "pricing_table_v2"
+    },
+    {
+      "fromInstrument": "API_CALL",
+      "toInstrument": "USD",
+      "method": "VALUATION_METHOD_FIXED",
+      "source": "pricing_table_v2"
+    },
+    {
+      "fromInstrument": "STORAGE_GB",
+      "toInstrument": "USD",
+      "method": "VALUATION_METHOD_FIXED",
+      "source": "pricing_table_v2"
+    },
+    {
+      "fromInstrument": "CREDIT",
+      "toInstrument": "USD",
+      "method": "VALUATION_METHOD_FIXED",
+      "source": "credit_exchange_rate"
+    }
+  ],
+  "sagas": [
+    {
+      "name": "record_gpu_usage",
+      "trigger": "webhook:gpu_meter_event",
+      "script": "def execute(ctx):\n    event = ctx.input\n    \n    # Record usage in metering account\n    position_keeping.initiate_log(\n        account_id=event.usage_account,\n        amount=event.gpu_hours,\n        instrument_code=\"GPU_HOUR\",\n        direction=\"DEBIT\",\n        attributes={\n            \"billing_period\": event.billing_period,\n            \"gpu_type\": event.gpu_type,\n            \"job_id\": event.job_id,\n        },\n    )\n    \n    return {\"status\": \"recorded\", \"job_id\": event.job_id}\n"
+    },
+    {
+      "name": "generate_monthly_invoice",
+      "trigger": "scheduled:monthly_billing",
+      "script": "def execute(ctx):\n    billing_period = ctx.input.billing_period\n    \n    # Get all usage accounts for this period\n    accounts = position_keeping.list_accounts(\n        account_type=\"USAGE\",\n    )\n    \n    for account in accounts:\n        # Calculate total usage cost\n        for instrument in [\"GPU_HOUR\", \"API_CALL\", \"STORAGE_GB\"]:\n            balance = position_keeping.retrieve_balance(\n                account_id=account.account_id,\n                instrument_code=instrument,\n            )\n            \n            if balance.amount > 0:\n                # Value usage in USD\n                valuation = current_account.evaluate_asset_valuation(\n                    account_id=account.billing_account_id,\n                    instrument_code=instrument,\n                    amount=balance.amount,\n                )\n                \n                # Charge billing account\n                current_account.execute_withdrawal(\n                    account_id=account.billing_account_id,\n                    amount=valuation.output.amount,\n                    instrument_code=\"USD\",\n                    reference=\"invoice:\" + billing_period + \":\" + instrument,\n                )\n    \n    return {\"status\": \"invoiced\", \"billing_period\": billing_period}\n"
+    }
+  ],
+  "seedData": {
+    "gpu_types": ["A100", "H100", "H200"],
+    "pricing_tiers": {
+      "free": {"gpu_hours": 10, "api_calls": 1000, "storage_gb": 5},
+      "starter": {"gpu_hours": 100, "api_calls": 100000, "storage_gb": 100},
+      "enterprise": {"gpu_hours": 10000, "api_calls": 10000000, "storage_gb": 10000}
+    }
+  }
+}

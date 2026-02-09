@@ -29,7 +29,7 @@ GOMOD=$(GOCMD) mod
 GOGET=$(GOCMD) get
 GOFMT=$(GOCMD) fmt
 
-.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-openapi proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt validate-semconv validate-sagas migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-status-all migrate-lint-all migrate-hash-all migrate-apply-orgs migrate-status-orgs docs generate-saga-docs
+.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-openapi proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt validate-semconv validate-sagas proto-jsonschema validate-manifest-jsonschema migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-status-all migrate-lint-all migrate-hash-all migrate-apply-orgs migrate-status-orgs docs generate-saga-docs
 
 # Default target
 all: help
@@ -56,6 +56,8 @@ help:
 	@echo "  make proto-deps-update - Update buf.lock with latest dependencies"
 	@echo "  make proto-deps-graph  - Display dependency graph"
 	@echo "  make proto-plugins-info - Display current protoc plugin versions"
+	@echo "  make proto-jsonschema  - Generate JSON Schema from manifest proto"
+	@echo "  make validate-manifest-jsonschema - Validate JSON Schema is in sync with proto"
 	@echo "  make docker            - Build Docker images"
 	@echo "  make deploy-local      - Deploy to local Kubernetes using Tilt"
 	@echo "  make coverage          - Generate and open HTML coverage report"
@@ -288,6 +290,22 @@ proto-plugins-info:
 	@echo "  2. Update versions in buf.gen.yaml"
 	@echo "  3. Run 'make proto' to test generation"
 	@echo "  4. Commit buf.gen.yaml with updated versions"
+
+## proto-jsonschema: Generate JSON Schema from manifest protobuf definition
+proto-jsonschema:
+	@echo "Generating JSON Schema from manifest proto..."
+	@which protoc-gen-jsonschema > /dev/null 2>&1 || \
+		([ -f "$$(go env GOPATH)/bin/protoc-gen-jsonschema" ] && export PATH="$$PATH:$$(go env GOPATH)/bin") || \
+		(echo "protoc-gen-jsonschema not installed. Run: go install github.com/chrusty/protoc-gen-jsonschema/cmd/protoc-gen-jsonschema@latest"; exit 1)
+	@export PATH="$$PATH:$$(go env GOPATH)/bin" && \
+		$(BUF) generate --template buf.gen.jsonschema.yaml --path api/proto/meridian/control_plane/v1/manifest.proto
+	@cp api/jsonschema/meridian.control_plane.v1/Manifest.json api/jsonschema/manifest.v1.schema.json
+	@rm -rf api/jsonschema/meridian.control_plane.v1
+	@echo "JSON Schema generated: api/jsonschema/manifest.v1.schema.json"
+
+## validate-manifest-jsonschema: Validate JSON Schema is in sync with manifest proto
+validate-manifest-jsonschema:
+	@./scripts/validate-manifest-jsonschema.sh
 
 ## migrate-diff-all: Generate migrations for all schemas
 migrate-diff-all: migrate-diff-current migrate-diff-position
