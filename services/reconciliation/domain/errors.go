@@ -35,4 +35,8 @@ var (
 	ErrEmptyAssertionExpression = errors.New("assertion expression is required")
 	// ErrEmptyInitiatedBy is returned when initiated by is empty.
 	ErrEmptyInitiatedBy = errors.New("initiated by cannot be empty")
+	// ErrUnauthorized is returned when the caller lacks required authorization.
+	ErrUnauthorized = errors.New("unauthorized: insufficient permissions")
+	// ErrUnimplemented is returned for features not yet implemented.
+	ErrUnimplemented = errors.New("not implemented")
 )
