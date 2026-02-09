@@ -18,15 +18,19 @@ import (
 //
 // Authentication flow:
 // 1. Check for X-API-Key header - if present, validate API key
+//   - For pk_{slug}_{...} format: validate via Control Plane RPC (with caching)
+//   - For legacy format: validate via env-var-based map lookup
+//
 // 2. If no API key, check for Authorization: Bearer header - if present, validate JWT
 // 3. If neither is present, return 401 Unauthorized
 //
 // On successful authentication:
 // - For JWT: User ID, tenant ID, roles, scopes are injected into context
-// - For API key: API key identity is injected into context
+// - For API key: API key identity, tenant ID, scopes are injected into context
 type CombinedAuthMiddleware struct {
 	jwtMiddleware    *JWTMiddleware
 	apiKeyMiddleware *APIKeyMiddleware
+	rpcValidator     *RPCAPIKeyValidator
 	logger           *slog.Logger
 }
 
@@ -36,8 +40,12 @@ type CombinedAuthConfig struct {
 	JWTValidator JWTValidator
 
 	// APIKeyConfig is the configuration for API key authentication.
-	// If APIKeys is nil or empty, API key authentication is disabled.
+	// If APIKeys is nil or empty, legacy API key authentication is disabled.
 	APIKeyConfig APIKeyConfig
+
+	// RPCValidator is the optional RPC-based API key validator for pk_{slug}_{...} keys.
+	// When set, prefixed API keys are validated via the Control Plane service.
+	RPCValidator *RPCAPIKeyValidator
 
 	// Logger for authentication events.
 	Logger *slog.Logger
@@ -71,6 +79,7 @@ func NewCombinedAuthMiddleware(config CombinedAuthConfig) (*CombinedAuthMiddlewa
 	return &CombinedAuthMiddleware{
 		jwtMiddleware:    jwtMiddleware,
 		apiKeyMiddleware: apiKeyMiddleware,
+		rpcValidator:     config.RPCValidator,
 		logger:           config.Logger,
 	}, nil
 }
@@ -81,15 +90,36 @@ func (m *CombinedAuthMiddleware) Close() {
 	if m.apiKeyMiddleware != nil {
 		m.apiKeyMiddleware.Close()
 	}
+	if m.rpcValidator != nil {
+		m.rpcValidator.Close()
+	}
 }
 
 // Handler returns an http.Handler that performs combined authentication.
 // It first checks for API key, then JWT. If neither is valid, returns 401.
 func (m *CombinedAuthMiddleware) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Try API key authentication first (if configured)
-		if m.apiKeyMiddleware != nil && r.Header.Get(APIKeyHeader) != "" {
-			m.handleAPIKeyAuth(w, r, next)
+		apiKey := r.Header.Get(APIKeyHeader)
+
+		// Try API key authentication first (if any API key mechanism is configured)
+		if apiKey != "" {
+			// Try RPC validation for pk_{slug}_{...} format keys
+			if m.rpcValidator != nil && strings.HasPrefix(apiKey, "pk_") {
+				m.handleRPCAPIKeyAuth(w, r, next, apiKey)
+				return
+			}
+
+			// Fall back to legacy env-var-based API key validation
+			if m.apiKeyMiddleware != nil {
+				m.handleLegacyAPIKeyAuth(w, r, next)
+				return
+			}
+
+			// API key provided but no validator configured
+			m.logger.Debug("API key provided but no validator configured",
+				slog.String("path", r.URL.Path),
+			)
+			writeUnauthorized(w, "invalid API key")
 			return
 		}
 
@@ -107,11 +137,55 @@ func (m *CombinedAuthMiddleware) Handler(next http.Handler) http.Handler {
 	})
 }
 
-// handleAPIKeyAuth handles API key authentication with tenant context injection.
-func (m *CombinedAuthMiddleware) handleAPIKeyAuth(w http.ResponseWriter, r *http.Request, next http.Handler) {
-	// Create a wrapper handler that will be called if API key auth succeeds
+// handleRPCAPIKeyAuth validates a pk_{slug}_{...} API key via the Control Plane RPC.
+func (m *CombinedAuthMiddleware) handleRPCAPIKeyAuth(w http.ResponseWriter, r *http.Request, next http.Handler, apiKey string) {
+	result, err := m.rpcValidator.Validate(r.Context(), apiKey)
+	if err != nil {
+		m.logger.Warn("RPC API key validation error",
+			slog.String("error", err.Error()),
+			slog.String("path", r.URL.Path),
+		)
+		writeUnauthorized(w, "invalid API key")
+		return
+	}
+
+	if result == nil || !result.Valid {
+		m.logger.Debug("RPC API key validation failed",
+			slog.String("path", r.URL.Path),
+		)
+		writeUnauthorized(w, "invalid API key")
+		return
+	}
+
+	// Check per-key rate limit using the rate_limit_rps from the validation result
+	_, keyPrefix, _ := ParsePrefixedKey(apiKey)
+	if !m.rpcValidator.AllowRequest(keyPrefix, result.RateLimitRPS) {
+		m.logger.Warn("rate limit exceeded",
+			slog.String("identity", result.Identity),
+			slog.String("path", r.URL.Path),
+		)
+		writeJSONError(w, "rate limit exceeded", http.StatusTooManyRequests)
+		return
+	}
+
+	// Inject identity, tenant, and scopes into context
+	ctx := context.WithValue(r.Context(), APIKeyIdentityKey, result.Identity)
+	if result.TenantID != "" {
+		ctx = context.WithValue(ctx, TenantIDContextKey, result.TenantID)
+		if tenantID, err := tenant.NewTenantID(result.TenantID); err == nil {
+			ctx = tenant.WithTenant(ctx, tenantID)
+		}
+	}
+	if len(result.Scopes) > 0 {
+		ctx = context.WithValue(ctx, ScopesContextKey, result.Scopes)
+	}
+
+	next.ServeHTTP(w, r.WithContext(ctx))
+}
+
+// handleLegacyAPIKeyAuth handles legacy env-var-based API key authentication.
+func (m *CombinedAuthMiddleware) handleLegacyAPIKeyAuth(w http.ResponseWriter, r *http.Request, next http.Handler) {
 	wrapper := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// API key auth succeeded - call next handler
 		next.ServeHTTP(w, r)
 	})
 

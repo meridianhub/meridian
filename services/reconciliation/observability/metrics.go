@@ -40,4 +40,26 @@ var (
 		},
 		[]string{"instrument_code"},
 	)
+
+	// SettlementFinalityTotal counts the total number of settlement finality operations by result.
+	SettlementFinalityTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "meridian",
+			Subsystem: "reconciliation",
+			Name:      "settlement_finality_total",
+			Help:      "Total number of settlement finality operations, labeled by result status.",
+		},
+		[]string{"status"},
+	)
+
+	// PositionLockAttemptTotal counts position lock attempts by outcome.
+	PositionLockAttemptTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "meridian",
+			Subsystem: "reconciliation",
+			Name:      "position_lock_attempt_total",
+			Help:      "Total number of position lock attempts, labeled by outcome.",
+		},
+		[]string{"outcome"},
+	)
 )

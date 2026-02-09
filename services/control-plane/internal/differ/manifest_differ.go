@@ -1,0 +1,406 @@
+package differ
+
+import (
+	"context"
+	"fmt"
+	"sort"
+	"strings"
+
+	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
+	"google.golang.org/protobuf/proto"
+)
+
+// ManifestDiffer compares a last-applied manifest against a new manifest
+// to produce a plan of CREATE/UPDATE/DELETE/NO_CHANGE actions.
+//
+// It follows Kubernetes apply semantics:
+//   - Codes are immutable primary keys (like metadata.name in k8s)
+//   - Resources present in new but not in last-applied -> CREATE
+//   - Resources present in both with field changes -> UPDATE
+//   - Resources present in last-applied but not in new -> DELETE (with safety checks)
+//   - Resources identical in both -> NO_CHANGE
+type ManifestDiffer struct {
+	safety SafetyChecker
+	drift  DriftDetector
+}
+
+// New creates a ManifestDiffer with the given safety checker and drift detector.
+func New(safety SafetyChecker, drift DriftDetector) *ManifestDiffer {
+	if safety == nil {
+		safety = &NoOpSafetyChecker{}
+	}
+	if drift == nil {
+		drift = &NoOpDriftDetector{}
+	}
+	return &ManifestDiffer{
+		safety: safety,
+		drift:  drift,
+	}
+}
+
+// Diff compares lastApplied against newManifest and returns a plan.
+// If lastApplied is nil, all resources in newManifest are treated as CREATE.
+func (d *ManifestDiffer) Diff(ctx context.Context, lastApplied, newManifest *controlplanev1.Manifest) (*DiffPlan, error) {
+	if newManifest == nil {
+		return nil, ErrNilManifest
+	}
+
+	plan := &DiffPlan{}
+
+	// Diff each resource type independently
+	d.diffInstruments(lastApplied, newManifest, plan)
+	d.diffAccountTypes(lastApplied, newManifest, plan)
+	d.diffValuationRules(lastApplied, newManifest, plan)
+	d.diffSagas(lastApplied, newManifest, plan)
+
+	// Run safety checks on all DELETE actions
+	if err := d.runSafetyChecks(ctx, plan); err != nil {
+		return nil, fmt.Errorf("safety check failed: %w", err)
+	}
+
+	// Flag breaking changes
+	for i := range plan.Actions {
+		if plan.Actions[i].Action == ActionDelete {
+			plan.Actions[i].Breaking = true
+			plan.HasBreakingChanges = true
+		}
+	}
+
+	// Detect drift if we have a last-applied manifest
+	if lastApplied != nil {
+		warnings, err := d.drift.DetectDrift(ctx, lastApplied)
+		if err != nil {
+			return nil, fmt.Errorf("drift detection failed: %w", err)
+		}
+		plan.DriftWarnings = warnings
+	}
+
+	// Sort actions for deterministic output
+	sort.Slice(plan.Actions, func(i, j int) bool {
+		if plan.Actions[i].ResourceType != plan.Actions[j].ResourceType {
+			return plan.Actions[i].ResourceType < plan.Actions[j].ResourceType
+		}
+		return plan.Actions[i].ResourceCode < plan.Actions[j].ResourceCode
+	})
+
+	return plan, nil
+}
+
+func (d *ManifestDiffer) diffInstruments(lastApplied, newManifest *controlplanev1.Manifest, plan *DiffPlan) {
+	oldMap := instrumentMap(getInstruments(lastApplied))
+	newMap := instrumentMap(newManifest.GetInstruments())
+
+	for code, updated := range newMap {
+		prev, exists := oldMap[code]
+		if !exists {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceInstrument,
+				ResourceCode: code,
+				Action:       ActionCreate,
+				Description:  fmt.Sprintf("Create instrument %s (%s)", code, updated.GetName()),
+			})
+			continue
+		}
+		if !proto.Equal(prev, updated) {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceInstrument,
+				ResourceCode: code,
+				Action:       ActionUpdate,
+				Description:  describeInstrumentChanges(code, prev, updated),
+			})
+		} else {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceInstrument,
+				ResourceCode: code,
+				Action:       ActionNoChange,
+				Description:  fmt.Sprintf("Instrument %s unchanged", code),
+			})
+		}
+	}
+
+	for code := range oldMap {
+		if _, exists := newMap[code]; !exists {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceInstrument,
+				ResourceCode: code,
+				Action:       ActionDelete,
+				Description:  fmt.Sprintf("Delete instrument %s", code),
+			})
+		}
+	}
+}
+
+func (d *ManifestDiffer) diffAccountTypes(lastApplied, newManifest *controlplanev1.Manifest, plan *DiffPlan) {
+	oldMap := accountTypeMap(getAccountTypes(lastApplied))
+	newMap := accountTypeMap(newManifest.GetAccountTypes())
+
+	for code, updated := range newMap {
+		prev, exists := oldMap[code]
+		if !exists {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceAccountType,
+				ResourceCode: code,
+				Action:       ActionCreate,
+				Description:  fmt.Sprintf("Create account type %s (%s)", code, updated.GetName()),
+			})
+			continue
+		}
+		if !proto.Equal(prev, updated) {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceAccountType,
+				ResourceCode: code,
+				Action:       ActionUpdate,
+				Description:  describeAccountTypeChanges(code, prev, updated),
+			})
+		} else {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceAccountType,
+				ResourceCode: code,
+				Action:       ActionNoChange,
+				Description:  fmt.Sprintf("Account type %s unchanged", code),
+			})
+		}
+	}
+
+	for code := range oldMap {
+		if _, exists := newMap[code]; !exists {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceAccountType,
+				ResourceCode: code,
+				Action:       ActionDelete,
+				Description:  fmt.Sprintf("Delete account type %s", code),
+			})
+		}
+	}
+}
+
+func (d *ManifestDiffer) diffValuationRules(lastApplied, newManifest *controlplanev1.Manifest, plan *DiffPlan) {
+	oldMap := valuationRuleMap(getValuationRules(lastApplied))
+	newMap := valuationRuleMap(newManifest.GetValuationRules())
+
+	for key, updated := range newMap {
+		prev, exists := oldMap[key]
+		if !exists {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceValuationRule,
+				ResourceCode: key,
+				Action:       ActionCreate,
+				Description:  fmt.Sprintf("Create valuation rule %s", key),
+			})
+			continue
+		}
+		if !proto.Equal(prev, updated) {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceValuationRule,
+				ResourceCode: key,
+				Action:       ActionUpdate,
+				Description:  fmt.Sprintf("Update valuation rule %s", key),
+			})
+		} else {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceValuationRule,
+				ResourceCode: key,
+				Action:       ActionNoChange,
+				Description:  fmt.Sprintf("Valuation rule %s unchanged", key),
+			})
+		}
+	}
+
+	for key := range oldMap {
+		if _, exists := newMap[key]; !exists {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceValuationRule,
+				ResourceCode: key,
+				Action:       ActionDelete,
+				Description:  fmt.Sprintf("Delete valuation rule %s", key),
+			})
+		}
+	}
+}
+
+func (d *ManifestDiffer) diffSagas(lastApplied, newManifest *controlplanev1.Manifest, plan *DiffPlan) {
+	oldMap := sagaMap(getSagas(lastApplied))
+	newMap := sagaMap(newManifest.GetSagas())
+
+	for name, updated := range newMap {
+		prev, exists := oldMap[name]
+		if !exists {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceSaga,
+				ResourceCode: name,
+				Action:       ActionCreate,
+				Description:  fmt.Sprintf("Create saga %s (trigger: %s)", name, updated.GetTrigger()),
+			})
+			continue
+		}
+		if !proto.Equal(prev, updated) {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceSaga,
+				ResourceCode: name,
+				Action:       ActionUpdate,
+				Description:  describeSagaChanges(name, prev, updated),
+			})
+		} else {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceSaga,
+				ResourceCode: name,
+				Action:       ActionNoChange,
+				Description:  fmt.Sprintf("Saga %s unchanged", name),
+			})
+		}
+	}
+
+	for name := range oldMap {
+		if _, exists := newMap[name]; !exists {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceSaga,
+				ResourceCode: name,
+				Action:       ActionDelete,
+				Description:  fmt.Sprintf("Delete saga %s", name),
+			})
+		}
+	}
+}
+
+func (d *ManifestDiffer) runSafetyChecks(ctx context.Context, plan *DiffPlan) error {
+	for _, action := range plan.Actions {
+		if action.Action != ActionDelete {
+			continue
+		}
+		var blocked *BlockedDeletion
+		var err error
+
+		switch action.ResourceType {
+		case ResourceAccountType:
+			blocked, err = d.safety.CheckAccountTypeDeletion(ctx, action.ResourceCode)
+		case ResourceInstrument:
+			blocked, err = d.safety.CheckInstrumentDeletion(ctx, action.ResourceCode)
+		case ResourceSaga:
+			blocked, err = d.safety.CheckSagaDeletion(ctx, action.ResourceCode)
+		case ResourceValuationRule:
+			// Valuation rules have no downstream dependencies to check
+		}
+
+		if err != nil {
+			return fmt.Errorf("safety check for %s %s: %w", action.ResourceType, action.ResourceCode, err)
+		}
+		if blocked != nil {
+			plan.BlockedDeletions = append(plan.BlockedDeletions, *blocked)
+		}
+	}
+	return nil
+}
+
+// Helper functions to safely extract slices from possibly-nil manifests.
+
+func getInstruments(m *controlplanev1.Manifest) []*controlplanev1.InstrumentDefinition {
+	if m == nil {
+		return nil
+	}
+	return m.GetInstruments()
+}
+
+func getAccountTypes(m *controlplanev1.Manifest) []*controlplanev1.AccountTypeDefinition {
+	if m == nil {
+		return nil
+	}
+	return m.GetAccountTypes()
+}
+
+func getValuationRules(m *controlplanev1.Manifest) []*controlplanev1.ValuationRule {
+	if m == nil {
+		return nil
+	}
+	return m.GetValuationRules()
+}
+
+func getSagas(m *controlplanev1.Manifest) []*controlplanev1.SagaDefinition {
+	if m == nil {
+		return nil
+	}
+	return m.GetSagas()
+}
+
+// Map-building helpers keyed by stable identifiers.
+
+func instrumentMap(instruments []*controlplanev1.InstrumentDefinition) map[string]*controlplanev1.InstrumentDefinition {
+	m := make(map[string]*controlplanev1.InstrumentDefinition, len(instruments))
+	for _, inst := range instruments {
+		m[inst.GetCode()] = inst
+	}
+	return m
+}
+
+func accountTypeMap(types []*controlplanev1.AccountTypeDefinition) map[string]*controlplanev1.AccountTypeDefinition {
+	m := make(map[string]*controlplanev1.AccountTypeDefinition, len(types))
+	for _, at := range types {
+		m[at.GetCode()] = at
+	}
+	return m
+}
+
+func valuationRuleMap(rules []*controlplanev1.ValuationRule) map[string]*controlplanev1.ValuationRule {
+	m := make(map[string]*controlplanev1.ValuationRule, len(rules))
+	for _, r := range rules {
+		m[valRuleKey(r.GetFromInstrument(), r.GetToInstrument())] = r
+	}
+	return m
+}
+
+func sagaMap(sagas []*controlplanev1.SagaDefinition) map[string]*controlplanev1.SagaDefinition {
+	m := make(map[string]*controlplanev1.SagaDefinition, len(sagas))
+	for _, s := range sagas {
+		m[s.GetName()] = s
+	}
+	return m
+}
+
+// Change description helpers.
+
+func describeInstrumentChanges(code string, prev, updated *controlplanev1.InstrumentDefinition) string {
+	var changes []string
+	if prev.GetName() != updated.GetName() {
+		changes = append(changes, fmt.Sprintf("name: %q -> %q", prev.GetName(), updated.GetName()))
+	}
+	if prev.GetType() != updated.GetType() {
+		changes = append(changes, fmt.Sprintf("type: %s -> %s", prev.GetType(), updated.GetType()))
+	}
+	if !proto.Equal(prev.GetDimensions(), updated.GetDimensions()) {
+		changes = append(changes, "dimensions changed")
+	}
+	if len(changes) == 0 {
+		return fmt.Sprintf("Update instrument %s", code)
+	}
+	return fmt.Sprintf("Update instrument %s (%s)", code, strings.Join(changes, "; "))
+}
+
+func describeAccountTypeChanges(code string, prev, updated *controlplanev1.AccountTypeDefinition) string {
+	var changes []string
+	if prev.GetName() != updated.GetName() {
+		changes = append(changes, fmt.Sprintf("name: %q -> %q", prev.GetName(), updated.GetName()))
+	}
+	if prev.GetNormalBalance() != updated.GetNormalBalance() {
+		changes = append(changes, fmt.Sprintf("normal_balance: %s -> %s", prev.GetNormalBalance(), updated.GetNormalBalance()))
+	}
+	if !proto.Equal(prev.GetPolicies(), updated.GetPolicies()) {
+		changes = append(changes, "policies changed")
+	}
+	if len(changes) == 0 {
+		return fmt.Sprintf("Update account type %s", code)
+	}
+	return fmt.Sprintf("Update account type %s (%s)", code, strings.Join(changes, "; "))
+}
+
+func describeSagaChanges(name string, prev, updated *controlplanev1.SagaDefinition) string {
+	var changes []string
+	if prev.GetTrigger() != updated.GetTrigger() {
+		changes = append(changes, fmt.Sprintf("trigger: %q -> %q", prev.GetTrigger(), updated.GetTrigger()))
+	}
+	if prev.GetScript() != updated.GetScript() {
+		changes = append(changes, "script changed")
+	}
+	if len(changes) == 0 {
+		return fmt.Sprintf("Update saga %s", name)
+	}
+	return fmt.Sprintf("Update saga %s (%s)", name, strings.Join(changes, "; "))
+}
