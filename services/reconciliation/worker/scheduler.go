@@ -572,7 +572,8 @@ func (s *SettlementScheduler) catchUpMissedWindows(ctx context.Context) {
 }
 
 // catchUpSchedule processes catch-up for a single schedule, returning the number
-// of missed windows triggered.
+// of missed windows triggered. Windows older than cutoff are recorded as MISSED
+// in the audit trail but not executed.
 func (s *SettlementScheduler) catchUpSchedule(ctx context.Context, sched SettlementSchedule, cutoff, now time.Time, parser cron.Parser) int {
 	lastExec, err := s.executionStore.LastExecution(ctx, sched.ScheduleID)
 	if err != nil && !errors.Is(err, ErrNoExecution) {
@@ -580,12 +581,6 @@ func (s *SettlementScheduler) catchUpSchedule(ctx context.Context, sched Settlem
 			"schedule_id", sched.ScheduleID,
 			"error", err)
 		return 0
-	}
-
-	// Determine the reference point for catch-up
-	since := cutoff
-	if lastExec != nil && lastExec.ScheduledAt.After(cutoff) {
-		since = lastExec.ScheduledAt
 	}
 
 	// Parse the cron expression to find expected fire times
@@ -596,6 +591,21 @@ func (s *SettlementScheduler) catchUpSchedule(ctx context.Context, sched Settlem
 			"cron", sched.CronExpression,
 			"error", err)
 		return 0
+	}
+
+	// Record MISSED entries for windows between lastExec and cutoff
+	if lastExec != nil && lastExec.ScheduledAt.Before(cutoff) {
+		missed := cronSched.Next(lastExec.ScheduledAt)
+		for !missed.After(cutoff) {
+			s.recordExecutionMissed(ctx, sched.ScheduleID, missed)
+			missed = cronSched.Next(missed)
+		}
+	}
+
+	// Determine the reference point for catch-up (trigger windows from cutoff onward)
+	since := cutoff
+	if lastExec != nil && lastExec.ScheduledAt.After(cutoff) {
+		since = lastExec.ScheduledAt
 	}
 
 	// Walk forward from `since` through expected fire times until `now`
@@ -616,6 +626,29 @@ func (s *SettlementScheduler) catchUpSchedule(ctx context.Context, sched Settlem
 		nextFire = cronSched.Next(nextFire)
 	}
 	return triggered
+}
+
+// recordExecutionMissed records a window that was missed beyond MaxCatchUpAge
+// without executing it.
+func (s *SettlementScheduler) recordExecutionMissed(ctx context.Context, scheduleID string, scheduledAt time.Time) {
+	if s.executionStore == nil {
+		return
+	}
+	exec := SchedulerExecution{
+		ID:           uuid.New(),
+		ScheduleName: scheduleID,
+		ScheduledAt:  scheduledAt,
+		Status:       ExecutionStatusMissed,
+	}
+	if err := s.executionStore.RecordExecution(ctx, exec); err != nil {
+		s.logger.Error("failed to record missed execution",
+			"schedule_id", scheduleID,
+			"scheduled_at", scheduledAt,
+			"error", err)
+	}
+	s.logger.Info("catch-up: recorded missed window (beyond MaxCatchUpAge)",
+		"schedule_id", scheduleID,
+		"scheduled_at", scheduledAt)
 }
 
 // ScheduleCount returns the number of currently registered schedules.

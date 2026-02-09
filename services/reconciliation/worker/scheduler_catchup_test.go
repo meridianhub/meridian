@@ -304,6 +304,84 @@ func TestSettlementScheduler_CatchUp_NoPriorExecution(t *testing.T) {
 	<-errCh
 }
 
+func TestSettlementScheduler_CatchUp_RecordsMissedBeyondMaxAge(t *testing.T) {
+	// Windows older than MaxCatchUpAge should be recorded as MISSED, not triggered.
+	fixedNow := time.Date(2026, 2, 9, 14, 0, 0, 0, time.UTC)
+	origNow := NowFunc
+	NowFunc = func() time.Time { return fixedNow }
+	defer func() { NowFunc = origNow }()
+
+	store := newInMemoryExecutionStore()
+
+	// Last execution was 5 days ago; MaxCatchUpAge will be 2 days.
+	// Windows between 5d ago and 2d ago should be MISSED; windows within 2d should trigger.
+	fiveDaysAgo := fixedNow.Add(-5 * 24 * time.Hour)
+	store.RecordExecution(context.Background(), SchedulerExecution{
+		ID:           uuid.New(),
+		ScheduleName: "sched-1",
+		ScheduledAt:  fiveDaysAgo,
+		Status:       ExecutionStatusCompleted,
+	})
+
+	refData := &mockRefDataClient{
+		schedules: []SettlementSchedule{
+			{
+				ScheduleID:     "sched-1",
+				AssetType:      "GBP",
+				AccountID:      "acc-1",
+				CronExpression: "0 2 * * *", // 2 AM daily
+				SettlementType: "DAILY",
+				Scope:          "ACCOUNT",
+			},
+		},
+	}
+	recon := &mockReconClient{runID: uuid.New().String()}
+	leader := &mockLeaderElector{leader: true}
+	metrics := NewSchedulerMetricsWithRegistry(prometheus.NewRegistry())
+
+	cfg := defaultConfig()
+	cfg.MaxCatchUpAge = 48 * time.Hour // Only catch up last 2 days
+
+	scheduler, err := NewSettlementScheduler(
+		refData, recon, leader, cfg,
+		testLogger(), metrics,
+		WithExecutionStore(store),
+	)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- scheduler.Start(ctx)
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Check audit trail for MISSED entries
+	execs := store.getExecutions()
+	var missedCount int
+	var triggeredCount int
+	for _, e := range execs {
+		if e.ScheduleName != "sched-1" {
+			continue
+		}
+		if e.Status == ExecutionStatusMissed {
+			missedCount++
+		}
+		if e.Status == ExecutionStatusTriggered || e.Status == ExecutionStatusCompleted {
+			triggeredCount++
+		}
+	}
+
+	// Between 5d ago and 2d ago at 2AM daily: Feb 5, Feb 6, Feb 7 = 3 MISSED
+	assert.Equal(t, 3, missedCount, "should record 3 MISSED windows beyond MaxCatchUpAge")
+	// Within 2d: Feb 8 02:00 and Feb 9 02:00 = 2 triggered
+	assert.GreaterOrEqual(t, triggeredCount, 1, "should trigger windows within MaxCatchUpAge")
+
+	cancel()
+	<-errCh
+}
+
 func TestSettlementScheduler_CatchUp_SkippedWhenNoStore(t *testing.T) {
 	refData := &mockRefDataClient{
 		schedules: []SettlementSchedule{
