@@ -1,0 +1,115 @@
+groups:
+  - name: reconciliation_alerts
+    rules:
+      # P1/Critical: Balance imbalance detected - ledger integrity violation
+      - alert: BalanceImbalanceDetected
+        expr: meridian_reconciliation_balance_imbalance_amount != 0
+        for: 1m
+        labels:
+          severity: critical
+          priority: P1
+          service: reconciliation
+        annotations:
+          summary: "Ledger balance imbalance detected for {{ $labels.instrument_code }}"
+          description: >-
+            A non-zero balance imbalance of {{ $value }} has been detected for instrument
+            {{ $labels.instrument_code }}. This indicates a ledger integrity violation
+            that requires immediate investigation. Debits and credits do not balance.
+          runbook_url: "docs/runbooks/balance-imbalance.md"
+
+      # P2/Warning: Settlement lock failures
+      - alert: SettlementLockFailure
+        expr: increase(meridian_reconciliation_position_lock_attempt_total{outcome="FAILED"}[5m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          priority: P2
+          service: reconciliation
+        annotations:
+          summary: "Settlement position lock failure detected"
+          description: >-
+            Position lock attempts are failing. This may indicate in-flight operations
+            preventing settlement finalization. Check Position Keeping service for
+            pending operations in the settlement period.
+          runbook_url: "docs/runbooks/settlement-lock-failure.md"
+
+      # Settlement run overdue - no completion in 2 hours
+      - alert: SettlementRunOverdue
+        expr: meridian_reconciliation_run_status == 1 and (time() - meridian_reconciliation_run_status) > 7200
+        for: 5m
+        labels:
+          severity: warning
+          priority: P3
+          service: reconciliation
+        annotations:
+          summary: "Settlement run has been running for over 2 hours"
+          description: >-
+            A reconciliation run has been in RUNNING state for more than 2 hours
+            without completion. This may indicate a stuck process or performance
+            degradation in upstream services.
+          runbook_url: "docs/runbooks/settlement-run-overdue.md"
+
+      # High variance rate - more than 10% positions with variances
+      - alert: HighVarianceRate
+        expr: >-
+          rate(meridian_reconciliation_variances_detected_total[1h])
+          / on() rate(meridian_reconciliation_snapshots_created_total[1h]) > 0.1
+        for: 15m
+        labels:
+          severity: warning
+          priority: P3
+          service: reconciliation
+        annotations:
+          summary: "High variance rate detected in reconciliation runs"
+          description: >-
+            More than 10% of positions are showing variances. Current rate: {{ $value | humanizePercentage }}.
+            This may indicate systematic data quality issues or upstream service problems.
+          runbook_url: "docs/runbooks/high-variance-rate.md"
+
+      # Dispute backlog - more than 50 pending disputes
+      - alert: DisputeBacklog
+        expr: meridian_reconciliation_disputes_pending_total > 50
+        for: 30m
+        labels:
+          severity: warning
+          priority: P3
+          service: reconciliation
+        annotations:
+          summary: "Dispute backlog exceeds threshold"
+          description: >-
+            There are {{ $value }} pending disputes, exceeding the threshold of 50.
+            This may indicate insufficient dispute resolution capacity or a
+            systematic issue generating excessive disputes.
+          runbook_url: "docs/runbooks/dispute-backlog.md"
+
+      # Reconciliation failure - 3 consecutive failures
+      - alert: ReconciliationFailure
+        expr: meridian_reconciliation_consecutive_failures >= 3
+        for: 0m
+        labels:
+          severity: critical
+          priority: P2
+          service: reconciliation
+        annotations:
+          summary: "Reconciliation has failed 3 or more consecutive times"
+          description: >-
+            The reconciliation service has experienced {{ $value }} consecutive
+            run failures. This indicates a persistent issue that requires
+            immediate investigation.
+          runbook_url: "docs/runbooks/reconciliation-failure.md"
+
+      # Circuit breaker open for upstream service
+      - alert: UpstreamCircuitBreakerOpen
+        expr: meridian_reconciliation_circuit_breaker_state == 2
+        for: 2m
+        labels:
+          severity: warning
+          priority: P3
+          service: reconciliation
+        annotations:
+          summary: "Circuit breaker open for {{ $labels.service }}"
+          description: >-
+            The circuit breaker for upstream service {{ $labels.service }} is in
+            open state, indicating repeated failures. Reconciliation operations
+            depending on this service will fail fast until the circuit recovers.
+          runbook_url: "docs/runbooks/circuit-breaker-open.md"
