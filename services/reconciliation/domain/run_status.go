@@ -8,6 +8,7 @@ const (
 	RunStatusPending   RunStatus = "PENDING"
 	RunStatusRunning   RunStatus = "RUNNING"
 	RunStatusCompleted RunStatus = "COMPLETED"
+	RunStatusFinalized RunStatus = "FINALIZED"
 	RunStatusFailed    RunStatus = "FAILED"
 	RunStatusCancelled RunStatus = "CANCELLED"
 )
@@ -16,7 +17,7 @@ const (
 func (s RunStatus) IsValid() bool {
 	switch s {
 	case RunStatusPending, RunStatusRunning, RunStatusCompleted,
-		RunStatusFailed, RunStatusCancelled:
+		RunStatusFinalized, RunStatusFailed, RunStatusCancelled:
 		return true
 	}
 	return false
@@ -29,7 +30,7 @@ func (s RunStatus) String() string {
 
 // IsFinal checks if the status is a terminal state.
 func (s RunStatus) IsFinal() bool {
-	return s == RunStatusCompleted || s == RunStatusFailed || s == RunStatusCancelled
+	return s == RunStatusFinalized || s == RunStatusFailed || s == RunStatusCancelled
 }
 
 // CanTransitionTo checks if a transition to the target status is valid.
@@ -39,8 +40,9 @@ func (s RunStatus) CanTransitionTo(target RunStatus) bool {
 	}
 
 	validTransitions := map[RunStatus][]RunStatus{
-		RunStatusPending: {RunStatusRunning, RunStatusCancelled},
-		RunStatusRunning: {RunStatusCompleted, RunStatusFailed, RunStatusCancelled},
+		RunStatusPending:   {RunStatusRunning, RunStatusCancelled},
+		RunStatusRunning:   {RunStatusCompleted, RunStatusFailed, RunStatusCancelled},
+		RunStatusCompleted: {RunStatusFinalized},
 	}
 
 	allowed, exists := validTransitions[s]

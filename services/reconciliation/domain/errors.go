@@ -39,4 +39,10 @@ var (
 	ErrUnauthorized = errors.New("unauthorized: insufficient permissions")
 	// ErrUnimplemented is returned for features not yet implemented.
 	ErrUnimplemented = errors.New("not implemented")
+	// ErrNotFinalSettlement is returned when attempting to finalize a non-FINAL settlement type.
+	ErrNotFinalSettlement = errors.New("only FINAL settlement type runs can be finalized")
+	// ErrRunNotCompleted is returned when attempting to finalize a run that is not completed.
+	ErrRunNotCompleted = errors.New("settlement run must be in COMPLETED state to finalize")
+	// ErrPositionLockFailed is returned when the position lock request to PK fails after retries.
+	ErrPositionLockFailed = errors.New("failed to acquire position lock")
 )

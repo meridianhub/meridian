@@ -154,6 +154,10 @@ func (m *mockSnapshotRepo) DeleteByRunID(_ context.Context, runID uuid.UUID) err
 	return nil
 }
 
+func (m *mockSnapshotRepo) MarkRunSnapshotsFinal(_ context.Context, _ uuid.UUID) error {
+	return nil
+}
+
 func (m *mockSnapshotRepo) snapshotCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()

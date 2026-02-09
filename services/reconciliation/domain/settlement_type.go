@@ -11,13 +11,15 @@ const (
 	SettlementTypeOnDemand SettlementType = "ON_DEMAND"
 	SettlementTypeEndOfDay SettlementType = "END_OF_DAY"
 	SettlementTypeRealTime SettlementType = "REAL_TIME"
+	SettlementTypeFinal    SettlementType = "FINAL"
 )
 
 // IsValid checks if the settlement type is a recognized value.
 func (s SettlementType) IsValid() bool {
 	switch s {
 	case SettlementTypeDaily, SettlementTypeWeekly, SettlementTypeMonthly,
-		SettlementTypeOnDemand, SettlementTypeEndOfDay, SettlementTypeRealTime:
+		SettlementTypeOnDemand, SettlementTypeEndOfDay, SettlementTypeRealTime,
+		SettlementTypeFinal:
 		return true
 	}
 	return false

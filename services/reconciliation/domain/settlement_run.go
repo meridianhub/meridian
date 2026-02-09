@@ -145,6 +145,30 @@ func (r *SettlementRun) SetVarianceCount(count int) {
 	r.Version++
 }
 
+// Finalize transitions the run from COMPLETED to FINALIZED.
+// This indicates that position locks have been acquired and the settlement
+// period is sealed for further modifications.
+func (r *SettlementRun) Finalize() error {
+	if !r.Status.CanTransitionTo(RunStatusFinalized) {
+		return ErrInvalidStatusTransition
+	}
+	now := time.Now().UTC()
+	r.Status = RunStatusFinalized
+	// Preserve original CompletedAt from the COMPLETED transition;
+	// only set if not already present (defensive).
+	if r.CompletedAt == nil {
+		r.CompletedAt = &now
+	}
+	r.UpdatedAt = now
+	r.Version++
+	return nil
+}
+
+// IsFinalSettlement returns true if this run's type qualifies for finalization.
+func (r *SettlementRun) IsFinalSettlement() bool {
+	return r.SettlementType == SettlementTypeFinal
+}
+
 // Cancel transitions the run to CANCELLED.
 func (r *SettlementRun) Cancel() error {
 	if !r.Status.CanTransitionTo(RunStatusCancelled) {

@@ -184,6 +184,17 @@ func (r *gormSnapshotRepo) DeleteByRunID(_ context.Context, runID uuid.UUID) err
 	return r.db.Where("run_id = ?", dbRunID).Delete(&settlementSnapshotEntity{}).Error
 }
 
+func (r *gormSnapshotRepo) MarkRunSnapshotsFinal(_ context.Context, runID uuid.UUID) error {
+	dbRunID, err := r.runRepo.getDBRunID(runID)
+	if err != nil {
+		return err
+	}
+	return r.db.Model(&settlementSnapshotEntity{}).
+		Where("run_id = ?", dbRunID).
+		Update("attributes", gorm.Expr(`COALESCE(attributes, '{}'::jsonb) || '{"settlement_type":"FINAL"}'::jsonb`)).
+		Error
+}
+
 // --- Entity mappers ---
 
 func runToEntity(run *domain.SettlementRun) settlementRunEntity {
