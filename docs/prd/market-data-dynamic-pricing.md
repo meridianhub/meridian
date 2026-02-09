@@ -148,8 +148,8 @@ message UtilizationAggregate {
 
 #### Tasks
 
-| ID | Task | Points | Dependencies |
-|----|------|--------|--------------|
+| ID | Task | Complexity | Dependencies |
+|----|------|------------|--------------|
 | UM-1 | Add `MarketDataPublisher` interface to metering consumer | 3 | - |
 | UM-2 | Implement aggregation window configuration (hourly/daily) | 2 | UM-1 |
 | UM-3 | Add hierarchical resolution key parsing | 2 | UM-1 |
@@ -158,7 +158,7 @@ message UtilizationAggregate {
 | UM-6 | Add quality ladder support (estimate → actual → verified) | 2 | UM-4 |
 | UM-7 | Integration tests: metering → market data flow | 3 | UM-1, UM-4 |
 
-**WS-1 Total:** 18 points
+**WS-1 Complexity:** 18
 
 ---
 
@@ -281,8 +281,8 @@ service ReferenceDataService {
 
 #### Tasks
 
-| ID | Task | Points | Dependencies |
-|----|------|--------|--------------|
+| ID | Task | Complexity | Dependencies |
+|----|------|------------|--------------|
 | RD-1 | Design reference data schema with bi-temporal support | 3 | - |
 | RD-2 | Implement `ReferenceDataNode` entity and repository | 5 | RD-1 |
 | RD-3 | Add hierarchical resolution key computation | 2 | RD-2 |
@@ -293,7 +293,7 @@ service ReferenceDataService {
 | RD-8 | Add tenant isolation and authorization | 2 | RD-5 |
 | RD-9 | Integration tests: hierarchy + bi-temporal queries | 3 | RD-4, RD-6 |
 
-**WS-2 Total:** 29 points
+**WS-2 Complexity:** 29
 
 ---
 
@@ -485,8 +485,8 @@ message ValidationError {
 
 #### Tasks
 
-| ID | Task | Points | Dependencies |
-|----|------|--------|--------------|
+| ID | Task | Complexity | Dependencies |
+|----|------|------------|--------------|
 | FS-1 | Design Forecasting Service domain model | 3 | - |
 | FS-2 | Implement `ForecastingStrategy` entity and repository | 5 | FS-1 |
 | FS-3 | Create Starlark execution sandbox with context injection | 5 | FS-2 |
@@ -500,7 +500,7 @@ message ValidationError {
 | FS-11 | Publish forward curves to Market Data Service | 3 | FS-7 |
 | FS-12 | Integration tests: end-to-end forecasting flow | 5 | FS-7, FS-11 |
 
-**WS-3 Total:** 48 points
+**WS-3 Complexity:** 48
 
 ---
 
@@ -551,8 +551,8 @@ avg_forward_price("gsp:exeter", now(), now() + duration("24h"))
 
 #### Tasks
 
-| ID | Task | Points | Dependencies |
-|----|------|--------|--------------|
+| ID | Task | Complexity | Dependencies |
+|----|------|------------|--------------|
 | FC-1 | Add `FORWARD_PRICE` observation type to Market Data Service | 2 | WS-3 |
 | FC-2 | Implement `GetForwardCurve` RPC | 3 | FC-1 |
 | FC-3 | Create CEL extension functions for forward curve access | 5 | FC-2 |
@@ -560,58 +560,141 @@ avg_forward_price("gsp:exeter", now(), now() + duration("24h"))
 | FC-5 | Documentation: using forward curves in pricing rules | 2 | FC-3 |
 | FC-6 | Integration tests: CEL + forward curves | 3 | FC-3 |
 
-**WS-4 Total:** 18 points
+**WS-4 Complexity:** 18
 
 ---
 
-## Implementation Sequence
+## Critical Path
 
-### Phase 1: Foundation (Weeks 1-3)
+```
+                                    ┌─────────────────────────────────────────┐
+                                    │           CRITICAL PATH                 │
+                                    └─────────────────────────────────────────┘
 
-Focus: Enable usage data to flow into market data system.
+    ┌───────┐     ┌───────┐     ┌───────┐
+    │ UM-1  │────▶│ UM-2  │────▶│ UM-3  │
+    │  (3)  │     │  (2)  │     │  (2)  │
+    └───────┘     └───────┘     └───┬───┘
+                                    │
+    ┌───────┐     ┌───────┐         │      ┌───────┐
+    │ UM-4  │────▶│ UM-5  │─────────┼─────▶│ UM-7  │
+    │  (3)  │     │  (3)  │         │      │  (3)  │
+    └───┬───┘     └───────┘         │      └───┬───┘
+        │                           │          │
+        ▼                           │          │
+    ┌───────┐                       │          │
+    │ UM-6  │                       │          │
+    │  (2)  │                       │          │
+    └───────┘                       │          │
+                                    │          │
+    ┌───────┐     ┌───────┐     ┌───┴───┐     │
+    │ RD-1  │────▶│ RD-2  │────▶│ RD-3  │     │
+    │  (3)  │     │  (5)  │     │  (2)  │     │
+    └───────┘     └───┬───┘     └───────┘     │
+                      │                        │
+              ┌───────┼───────┐                │
+              ▼       ▼       ▼                │
+          ┌───────┐┌───────┐┌───────┐         │
+          │ RD-4  ││ RD-5  ││ RD-8  │         │
+          │  (5)  ││  (3)  ││  (2)  │         │
+          └───┬───┘└───┬───┘└───────┘         │
+              │        │                       │
+              │    ┌───┴───┐                   │
+              │    ▼       ▼                   │
+              │┌───────┐┌───────┐              │
+              ││ RD-6  ││ RD-7  │              │
+              ││  (3)  ││  (3)  │              │
+              │└───┬───┘└───────┘              │
+              │    │                           │
+              └────┼───────────────────────────┤
+                   ▼                           │
+              ┌───────┐                        │
+              │ RD-9  │                        │
+              │  (3)  │                        │
+              └───┬───┘                        │
+                  │                            │
+                  ▼                            ▼
+    ┌───────┐ ┌───────┐     ┌───────┐     ┌───────┐
+    │ FS-1  │─│ FS-2  │────▶│ FS-3  │────▶│ FS-7  │◀────── CRITICAL PATH GATE
+    │  (3)  │ │  (5)  │     │  (5)  │     │  (5)  │        (requires WS-1 + WS-2)
+    └───────┘ └───┬───┘     └───┬───┘     └───┬───┘
+                  │             │             │
+                  ▼             ▼             ├─────────┬─────────┐
+              ┌───────┐     ┌───────┐         ▼         ▼         ▼
+              │ FS-6  │     │ FS-4  │     ┌───────┐ ┌───────┐ ┌───────┐
+              │  (3)  │     │  (5)  │     │ FS-8  │ │ FS-10 │ │ FS-11 │
+              └───┬───┘     └───────┘     │  (3)  │ │  (5)  │ │  (3)  │
+                  │             │         └───────┘ └───────┘ └───┬───┘
+                  ▼             ▼                                 │
+              ┌───────┐     ┌───────┐                             │
+              │ FS-9  │     │ FS-5  │                             │
+              │  (3)  │     │  (3)  │                             │
+              └───────┘     └───────┘                             │
+                                                                  │
+                                                                  ▼
+                                                              ┌───────┐
+                                                              │ FC-1  │
+                                                              │  (2)  │
+                                                              └───┬───┘
+                                                                  │
+                                                                  ▼
+                                                              ┌───────┐
+                                                              │ FC-2  │
+                                                              │  (3)  │
+                                                              └───┬───┘
+                                                                  │
+                                                          ┌───────┴───────┐
+                                                          ▼               ▼
+                                                      ┌───────┐       ┌───────┐
+                                                      │ FC-3  │       │ FC-5  │
+                                                      │  (5)  │       │  (2)  │
+                                                      └───┬───┘       └───────┘
+                                                          │
+                                                  ┌───────┴───────┐
+                                                  ▼               ▼
+                                              ┌───────┐       ┌───────┐
+                                              │ FC-4  │       │ FC-6  │
+                                              │  (3)  │       │  (3)  │
+                                              └───────┘       └───────┘
+                                                          │
+                                                          ▼
+                                                      ┌───────┐
+                                                      │ FS-12 │  ◀── FINAL INTEGRATION
+                                                      │  (5)  │
+                                                      └───────┘
+```
 
-| Week | Work Stream | Tasks | Points |
-|------|-------------|-------|--------|
-| 1 | WS-1 | UM-1, UM-2, UM-3, UM-4 | 10 |
-| 2 | WS-1, WS-2 | UM-5, UM-6, UM-7, RD-1, RD-2 | 13 |
-| 3 | WS-2 | RD-3, RD-4, RD-5, RD-6 | 13 |
+### Critical Path Analysis
 
-**Phase 1 Total:** 36 points
+**Longest Path (Critical):** FS-1 → FS-2 → FS-3 → FS-7 → FS-11 → FC-1 → FC-2 → FC-3 → FC-6 → FS-12
 
-### Phase 2: Forecasting Core (Weeks 4-6)
+| Segment | Tasks | Complexity |
+|---------|-------|------------|
+| Foundation Gate | RD-1 → RD-2 → RD-4 + RD-5 → RD-6 → RD-9 | 19 |
+| Metering Path | UM-1 → UM-2 → UM-3 + UM-4 → UM-5 → UM-7 | 13 |
+| Forecasting Core | FS-1 → FS-2 → FS-3 → FS-7 | 18 |
+| Curve Consumption | FS-11 → FC-1 → FC-2 → FC-3 → FS-12 | 18 |
+| **Critical Path Total** | | **68** |
 
-Focus: Build the Forecasting Service with Starlark algorithms.
+### Parallelization Opportunities
 
-| Week | Work Stream | Tasks | Points |
-|------|-------------|-------|--------|
-| 4 | WS-2, WS-3 | RD-7, RD-8, RD-9, FS-1, FS-2 | 16 |
-| 5 | WS-3 | FS-3, FS-4, FS-5 | 13 |
-| 6 | WS-3 | FS-6, FS-7, FS-8 | 11 |
-
-**Phase 2 Total:** 40 points
-
-### Phase 3: Integration (Weeks 7-8)
-
-Focus: Complete forecasting capabilities and enable consumption.
-
-| Week | Work Stream | Tasks | Points |
-|------|-------------|-------|--------|
-| 7 | WS-3, WS-4 | FS-9, FS-10, FS-11, FC-1, FC-2 | 16 |
-| 8 | WS-3, WS-4 | FS-12, FC-3, FC-4, FC-5, FC-6 | 18 |
-
-**Phase 3 Total:** 34 points
+| Parallel Track | Tasks | Complexity |
+|----------------|-------|------------|
+| Metering + Reference Data | UM-* ∥ RD-* | Both complete before FS-7 |
+| Algorithm Templates | FS-4, FS-5 | Can proceed after FS-3, not blocking |
+| External Ingestion | FS-9 | Can proceed after FS-6, not blocking |
+| Accuracy Tracking | FS-10 | Can proceed after FS-7, not blocking |
 
 ---
 
-## Total Effort
-
-| Work Stream | Points | Priority |
-|-------------|--------|----------|
+| Work Stream | Complexity | Priority |
+|-------------|------------|----------|
 | WS-1: Utilization Metering Extension | 18 | P0 |
 | WS-2: Hierarchical Reference Data | 29 | P0 |
 | WS-3: Forecasting Service | 48 | P1 |
 | WS-4: Forward Curve Consumption | 18 | P1 |
 | **Total** | **113** | |
+| **Critical Path** | **68** | |
 
 ---
 
@@ -653,6 +736,60 @@ Focus: Complete forecasting capabilities and enable consumption.
 | Kafka infrastructure | Implemented | Used by metering consumer |
 | Starlark runtime | Available | go.starlark.net library |
 | CEL runtime | Implemented | Used across multiple services |
+
+---
+
+## BIAN Alignment
+
+This PRD aligns with BIAN's architectural patterns for financial services interoperability.
+
+### Service Domain Mapping
+
+| PRD Component | BIAN Service Domain | Alignment |
+|---------------|---------------------|-----------|
+| Market Data Service | Market Information Management | Consolidates market info from multiple sources |
+| Forecasting Service | Market Analysis + Financial Market Research | Analytical functions with reference data |
+| Reference Data Service | Public Reference Data Management | Hierarchical structured access to reference data |
+| Position Keeping | Position Keeping | Already implemented BIAN pattern |
+
+### Control Record Patterns
+
+| PRD Entity | BIAN Control Record | Asset Type |
+|------------|---------------------|------------|
+| `UtilizationAggregate` | Financial Market Information Administrative Plan | Financial Market Information |
+| `ForecastingStrategy` | Market Analysis Administrative Plan | Capacity to Perform |
+| `ReferenceDataNode` | Reference Data Directory Entry | Reference Information |
+| `ForwardCurve` | Financial Market Information | Derived Market Information |
+
+### Service Operation Alignment
+
+| PRD Operation | BIAN Service Operation | Pattern |
+|---------------|------------------------|---------|
+| `GetForwardCurve` | Retrieve | Request a report/constructed extract |
+| `PublishMarketData` | Market Data Switch Operation | Real-time market information dissemination |
+| `ComputeForwardCurve` | Administer (Functional Pattern) | Administrative processing |
+
+### Behavioral Qualifiers
+
+The PRD implements BIAN behavioral qualifiers:
+
+| Qualifier | Implementation |
+|-----------|----------------|
+| **Routine** | Scheduled forecast computation via cron |
+| **Reporting** | Forward curve publication to Market Data Service |
+| **Improvement** | Forecast vs actual accuracy tracking for model tuning |
+| **Consolidation** | Aggregating usage data from utilization-metering-consumer |
+
+### Compliance Summary
+
+| BIAN Principle | Compliance | Evidence |
+|----------------|------------|----------|
+| Service Domain Encapsulation | ✅ Excellent | Each service manages complete lifecycle |
+| Asset Type Management | ✅ Excellent | Clear asset types with proper control records |
+| Bi-Temporal Support | ✅ Exceeds | Full transaction-time and valid-time tracking |
+| External Integration | ✅ Excellent | External forecast ingestion + market data feeds |
+| Hierarchical Reference Data | ✅ Excellent | Structured resolution keys with parent-child relationships |
+| Service Operation Patterns | ✅ Good | Maps to Retrieve, Administer, and real-time operations |
 
 ---
 
