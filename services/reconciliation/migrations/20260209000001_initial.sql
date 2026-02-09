@@ -151,8 +151,9 @@ CREATE TABLE "balance_assertion" (
   "actual_balance" decimal(38, 18) NOT NULL DEFAULT 0,
   "status" character varying(20) NOT NULL DEFAULT 'PENDING',
   "failure_reason" text NULL,
+  "override_reason" text NULL,
   "attributes" jsonb NULL,
-  "asserted_at" timestamptz NOT NULL,
+  "asserted_at" timestamptz NULL,
   PRIMARY KEY ("id"),
   CONSTRAINT "fk_balance_assertion_run" FOREIGN KEY ("run_id")
     REFERENCES "settlement_run" ("id") ON UPDATE NO ACTION ON DELETE SET NULL

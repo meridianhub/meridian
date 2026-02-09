@@ -122,7 +122,8 @@ func TestBalanceAssertion_Override(t *testing.T) {
 	require.NoError(t, a.Override("approved by manager"))
 
 	assert.Equal(t, domain.AssertionStatusOverride, a.Status)
-	assert.Equal(t, "approved by manager", a.FailureReason)
+	assert.Equal(t, "mismatch", a.FailureReason, "original failure reason should be preserved")
+	assert.Equal(t, "approved by manager", a.OverrideReason)
 }
 
 func TestBalanceAssertion_OverrideFromNonFailed(t *testing.T) {

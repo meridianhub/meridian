@@ -38,6 +38,9 @@ type BalanceAssertion struct {
 	// FailureReason records why the assertion failed (if applicable).
 	FailureReason string
 
+	// OverrideReason records why a failed assertion was overridden.
+	OverrideReason string
+
 	// Attributes stores flexible metadata.
 	Attributes map[string]string
 
@@ -103,11 +106,13 @@ func (a *BalanceAssertion) Fail(actualBalance decimal.Decimal, reason string) er
 }
 
 // Override marks a failed assertion as overridden by an operator.
+// The original FailureReason is preserved; the override justification
+// is stored in OverrideReason.
 func (a *BalanceAssertion) Override(reason string) error {
 	if !a.Status.CanTransitionTo(AssertionStatusOverride) {
 		return ErrInvalidStatusTransition
 	}
 	a.Status = AssertionStatusOverride
-	a.FailureReason = reason
+	a.OverrideReason = reason
 	return nil
 }
