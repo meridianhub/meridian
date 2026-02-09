@@ -439,6 +439,41 @@ func TestSettlementScheduler_ExecuteJobAsLeader(t *testing.T) {
 	assert.True(t, requests[0].PeriodStart.Before(requests[0].PeriodEnd))
 }
 
+func TestSettlementScheduler_ExecuteJobUsesAlignedPeriod(t *testing.T) {
+	refData := &mockRefDataClient{
+		schedules: []SettlementSchedule{
+			{
+				ScheduleID:     "sched-1",
+				AssetType:      "GBP",
+				AccountID:      "acc-1",
+				CronExpression: "* * * * *",
+				SettlementType: "DAILY",
+				Scope:          "ACCOUNT",
+				// No PeriodOffset: should use aligned midnight boundaries
+			},
+		},
+	}
+	recon := &mockReconClient{runID: "run-123"}
+	leader := &mockLeaderElector{leader: true}
+	metrics := testMetrics(t)
+
+	scheduler, err := NewSettlementScheduler(refData, recon, leader, defaultConfig(), testLogger(), metrics)
+	require.NoError(t, err)
+
+	sched := refData.schedules[0]
+	scheduler.executeJob(sched)
+
+	requests := recon.getRequests()
+	require.Len(t, requests, 1)
+
+	// With DAILY and no offset, CalculatePeriod should produce midnight-aligned boundaries
+	assert.True(t, requests[0].PeriodStart.Before(requests[0].PeriodEnd))
+	assert.Equal(t, 0, requests[0].PeriodStart.Hour(), "period start should be at midnight")
+	assert.Equal(t, 0, requests[0].PeriodStart.Minute(), "period start should be at midnight")
+	assert.Equal(t, 0, requests[0].PeriodEnd.Hour(), "period end should be at midnight")
+	assert.Equal(t, 0, requests[0].PeriodEnd.Minute(), "period end should be at midnight")
+}
+
 func TestSettlementScheduler_SkipsJobWhenNotLeader(t *testing.T) {
 	refData := &mockRefDataClient{
 		schedules: []SettlementSchedule{

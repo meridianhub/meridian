@@ -350,10 +350,9 @@ func (s *SettlementScheduler) executeJob(schedule SettlementSchedule) {
 		return
 	}
 
-	// Calculate period window
+	// Calculate period window using aligned boundaries
 	now := time.Now().UTC()
-	periodEnd := now
-	periodStart := now.Add(-schedule.PeriodOffset)
+	periodStart, periodEnd := CalculatePeriod(now, schedule.SettlementType, schedule.PeriodOffset)
 
 	s.logger.Info("executing scheduled reconciliation",
 		"schedule_id", schedule.ScheduleID,
