@@ -249,9 +249,9 @@ func (e *ManifestExecutor) resolveSagaScript(ctx context.Context) (string, error
 		`SELECT script FROM public.platform_saga_definition
 		 WHERE name = $1 AND status = 'ACTIVE'
 		 ORDER BY
-			split_part(version, '.', 1)::int DESC,
-			split_part(version, '.', 2)::int DESC,
-			split_part(version, '.', 3)::int DESC
+			COALESCE(NULLIF(split_part(version, '.', 1), '')::int, 0) DESC,
+			COALESCE(NULLIF(split_part(version, '.', 2), '')::int, 0) DESC,
+			COALESCE(NULLIF(split_part(version, '.', 3), '')::int, 0) DESC
 		 LIMIT 1`,
 		"apply_manifest",
 	).Scan(&script)
