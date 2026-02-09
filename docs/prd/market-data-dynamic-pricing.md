@@ -637,7 +637,7 @@ type ValidationError struct {
 | FS-6 | Create gRPC service with strategy CRUD RPCs | 3 | FS-2 |
 | FS-7 | Implement `ComputeForwardCurve` RPC (reads MDS + reference data, runs Starlark, publishes to MDS) | 5 | FS-3, WS-1, WS-2 |
 | FS-8 | Add scheduled computation via cron with configurable per-strategy schedules | 3 | FS-7 |
-| FS-9 | External forecast ingestion via dedicated `IngestExternalForecast` RPC | 3 | FS-6 |
+| FS-9 | External forecast ingestion via `RecordObservationBatch` with source registration and quality enforcement | 3 | FS-6 |
 | FS-10 | Implement forecast vs actual accuracy tracking (compare ESTIMATE vs ACTUAL observations) | 5 | FS-7 |
 | FS-11 | Publish forward curves to MDS via `RecordObservationBatch` with ESTIMATE quality | 3 | FS-7 |
 | FS-12 | Integration tests: end-to-end forecasting flow with CockroachDB testcontainers | 5 | FS-7, FS-11 |

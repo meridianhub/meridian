@@ -479,9 +479,14 @@ func (s *StripeGatewayAdapter) SendPayment(
         return nil, fmt.Errorf("stripe payment intent: %w", err)
     }
 
+    var chargeID string
+    if pi.LatestCharge != nil {
+        chargeID = pi.LatestCharge.ID
+    }
+
     return &GatewayPaymentResponse{
         GatewayReferenceID: pi.ID,                // pi_xxx
-        ChargeID:           pi.LatestCharge.ID,    // ch_xxx
+        ChargeID:           chargeID,              // ch_xxx (empty if no charge yet)
         Status:             mapStripeStatus(pi.Status),
     }, nil
 }
@@ -853,7 +858,7 @@ Level 4: current_account.control(FREEZE) + invoice.status = OVERDUE
          Account frozen; no new usage positions accepted
   |
   v (payment method updated or manual resolution)
-Unfreeeze: current_account.control(UNFREEZE) + retry charge
+Unfreeze: current_account.control(UNFREEZE) + retry charge
 ```
 
 The dunning level is tracked on the `BillingRun` entity. Each retry
