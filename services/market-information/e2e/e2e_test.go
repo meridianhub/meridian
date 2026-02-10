@@ -1092,6 +1092,437 @@ func TestE2E_AsyncOperationsWithAwait(t *testing.T) {
 }
 
 // ============================================================================
+// E2E Test: UTILIZATION_* Dataset Definitions
+// ============================================================================
+
+// utilizationDatasetCodes lists all expected UTILIZATION_* dataset codes.
+var utilizationDatasetCodes = []string{
+	"UTILIZATION_TRANSACTION",
+	"UTILIZATION_API_CALL",
+	"UTILIZATION_STORAGE_GB",
+	"UTILIZATION_COMPUTE_HOUR",
+	"UTILIZATION_NETWORK_GB",
+}
+
+// utilizationDatasetExpectation defines expected properties for each utilization dataset.
+type utilizationDatasetExpectation struct {
+	code                    string
+	name                    string
+	validationExpression    string
+	resolutionKeyExpression string
+	dataCategory            string
+}
+
+var utilizationExpectations = []utilizationDatasetExpectation{
+	{
+		code:                    "UTILIZATION_TRANSACTION",
+		name:                    "Platform Transaction Usage",
+		validationExpression:    "numeric_value >= 0 && numeric_value < 1000000000000",
+		resolutionKeyExpression: `^tenant/[^/]+/transaction/[^/]+$`,
+		dataCategory:            "UTILIZATION",
+	},
+	{
+		code:                    "UTILIZATION_API_CALL",
+		name:                    "Platform API Call Usage",
+		validationExpression:    "numeric_value >= 0 && numeric_value < 1000000000000",
+		resolutionKeyExpression: `^tenant/[^/]+/api/[^/]+/[^/]+$`,
+		dataCategory:            "UTILIZATION",
+	},
+	{
+		code:                    "UTILIZATION_STORAGE_GB",
+		name:                    "Platform Storage Usage",
+		validationExpression:    "numeric_value >= 0 && numeric_value < 1000000000000",
+		resolutionKeyExpression: `^tenant/[^/]+/storage/[^/]+$`,
+		dataCategory:            "UTILIZATION",
+	},
+	{
+		code:                    "UTILIZATION_COMPUTE_HOUR",
+		name:                    "Platform Compute Usage",
+		validationExpression:    "numeric_value >= 0 && numeric_value < 1000000000000",
+		resolutionKeyExpression: `^tenant/[^/]+/compute/[^/]+$`,
+		dataCategory:            "UTILIZATION",
+	},
+	{
+		code:                    "UTILIZATION_NETWORK_GB",
+		name:                    "Platform Network Usage",
+		validationExpression:    "numeric_value >= 0 && numeric_value < 1000000000000",
+		resolutionKeyExpression: `^tenant/[^/]+/network/[^/]+$`,
+		dataCategory:            "UTILIZATION",
+	},
+}
+
+// seedUtilizationData seeds the UTILIZATION_* dataset definitions and PLATFORM_AUDIT_EVENTS
+// data source, simulating the 20260210000004_seed_utilization_datasets.sql migration.
+func seedUtilizationData(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	ctx := context.Background()
+
+	// Seed PLATFORM_AUDIT_EVENTS data source
+	_, err := pool.Exec(ctx, `
+		INSERT INTO data_source (id, code, name, description, trust_level, created_by, updated_by)
+		VALUES (gen_random_uuid(), 'PLATFORM_AUDIT_EVENTS', 'Platform Audit Events',
+			'Internal platform audit event stream for utilization metrics', 100, 'SYSTEM', 'SYSTEM')
+	`)
+	require.NoError(t, err, "Failed to seed PLATFORM_AUDIT_EVENTS data source")
+
+	// Seed UTILIZATION_* dataset definitions
+	utilizationDefs := []struct {
+		code, name, desc, resKeyExpr string
+	}{
+		{
+			"UTILIZATION_TRANSACTION", "Platform Transaction Usage",
+			"Tracks transaction counts per tenant and transaction type",
+			`^tenant/[^/]+/transaction/[^/]+$`,
+		},
+		{
+			"UTILIZATION_API_CALL", "Platform API Call Usage",
+			"Tracks API call counts per tenant, service, and endpoint",
+			`^tenant/[^/]+/api/[^/]+/[^/]+$`,
+		},
+		{
+			"UTILIZATION_STORAGE_GB", "Platform Storage Usage",
+			"Tracks storage consumption in gigabytes per tenant and storage class",
+			`^tenant/[^/]+/storage/[^/]+$`,
+		},
+		{
+			"UTILIZATION_COMPUTE_HOUR", "Platform Compute Usage",
+			"Tracks compute consumption in hours per tenant and compute resource type",
+			`^tenant/[^/]+/compute/[^/]+$`,
+		},
+		{
+			"UTILIZATION_NETWORK_GB", "Platform Network Usage",
+			"Tracks network transfer in gigabytes per tenant and network interface",
+			`^tenant/[^/]+/network/[^/]+$`,
+		},
+	}
+
+	for _, d := range utilizationDefs {
+		_, err := pool.Exec(ctx, `
+			INSERT INTO dataset_definition (
+				id, code, version, name, description, data_category,
+				validation_expression, resolution_key_expression, error_message_expression,
+				status, created_by, updated_by, activated_at
+			) VALUES (
+				gen_random_uuid(), $1, 1, $2, $3, 'UTILIZATION',
+				'numeric_value >= 0 && numeric_value < 1000000000000', $4,
+				'"Invalid utilization value: must be non-negative and less than 1 trillion"',
+				'ACTIVE', 'SYSTEM', 'SYSTEM', now()
+			)`, d.code, d.name, d.desc, d.resKeyExpr)
+		require.NoError(t, err, "Failed to seed dataset definition: %s", d.code)
+	}
+}
+
+// TestE2E_UtilizationDatasetDefinitions tests the UTILIZATION_* dataset definitions
+// seeded by migration, verifying retrieval, properties, and data category.
+func TestE2E_UtilizationDatasetDefinitions(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	tc := setupE2ETestPool(t)
+	ctx := setupTenantContext(t, "e2e_utilization_tenant")
+
+	// Seed utilization data (simulates migration)
+	seedUtilizationData(t, tc.pool)
+
+	t.Run("1. All UTILIZATION_* datasets are retrievable", func(t *testing.T) {
+		for _, expected := range utilizationExpectations {
+			dataset, err := tc.repos.DataSet.FindByCode(ctx, expected.code)
+			require.NoError(t, err, "Failed to retrieve dataset: %s", expected.code)
+
+			assert.Equal(t, expected.code, dataset.Code())
+			assert.Equal(t, expected.name, dataset.Name())
+			assert.Equal(t, domain.DataSetStatusActive, dataset.Status())
+			assert.NotNil(t, dataset.ActivatedAt(), "Dataset %s should be activated", expected.code)
+		}
+	})
+
+	t.Run("2. Datasets have correct validation expressions", func(t *testing.T) {
+		for _, expected := range utilizationExpectations {
+			dataset, err := tc.repos.DataSet.FindByCode(ctx, expected.code)
+			require.NoError(t, err)
+
+			assert.Equal(t, expected.validationExpression, dataset.ValidationExpression(),
+				"Validation expression mismatch for %s", expected.code)
+		}
+	})
+
+	t.Run("3. Datasets have correct resolution key patterns", func(t *testing.T) {
+		for _, expected := range utilizationExpectations {
+			dataset, err := tc.repos.DataSet.FindByCode(ctx, expected.code)
+			require.NoError(t, err)
+
+			assert.Equal(t, expected.resolutionKeyExpression, dataset.ResolutionKeyExpression(),
+				"Resolution key expression mismatch for %s", expected.code)
+		}
+	})
+
+	t.Run("4. Datasets have UTILIZATION data category", func(t *testing.T) {
+		for _, expected := range utilizationExpectations {
+			dataset, err := tc.repos.DataSet.FindByCode(ctx, expected.code)
+			require.NoError(t, err)
+
+			assert.Equal(t, domain.DataCategoryUtilization, dataset.DataCategory(),
+				"Data category mismatch for %s", expected.code)
+		}
+	})
+
+	t.Run("5. ListDataSets returns all utilization datasets", func(t *testing.T) {
+		utilizationCategory := domain.DataCategoryUtilization
+		filters := domain.DataSetFilters{
+			Category: &utilizationCategory,
+			Limit:    100,
+		}
+
+		datasets, _, err := tc.repos.DataSet.List(ctx, filters)
+		require.NoError(t, err)
+
+		assert.Len(t, datasets, 5,
+			"Expected 5 UTILIZATION datasets, got %d", len(datasets))
+
+		// Verify all expected codes are present
+		foundCodes := make(map[string]bool)
+		for _, ds := range datasets {
+			foundCodes[ds.Code()] = true
+		}
+		for _, code := range utilizationDatasetCodes {
+			assert.True(t, foundCodes[code], "Expected dataset %s in list results", code)
+		}
+	})
+}
+
+// TestE2E_PlatformAuditEventsDataSource tests the PLATFORM_AUDIT_EVENTS data source
+// seeded by migration, verifying trust level and properties.
+func TestE2E_PlatformAuditEventsDataSource(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	tc := setupE2ETestPool(t)
+	ctx := setupTenantContext(t, "e2e_audit_events_tenant")
+
+	// Seed utilization data (includes PLATFORM_AUDIT_EVENTS)
+	seedUtilizationData(t, tc.pool)
+
+	t.Run("1. PLATFORM_AUDIT_EVENTS data source exists", func(t *testing.T) {
+		source, err := tc.repos.Source.FindByCode(ctx, "PLATFORM_AUDIT_EVENTS")
+		require.NoError(t, err, "PLATFORM_AUDIT_EVENTS data source should exist")
+
+		assert.Equal(t, "PLATFORM_AUDIT_EVENTS", source.Code())
+		assert.Equal(t, "Platform Audit Events", source.Name())
+	})
+
+	t.Run("2. PLATFORM_AUDIT_EVENTS has maximum trust level", func(t *testing.T) {
+		source, err := tc.repos.Source.FindByCode(ctx, "PLATFORM_AUDIT_EVENTS")
+		require.NoError(t, err)
+
+		assert.Equal(t, 100, source.TrustLevel(),
+			"PLATFORM_AUDIT_EVENTS should have trust level 100 (INTERNAL/highest)")
+	})
+}
+
+// TestE2E_UtilizationObservationRecording tests recording observations
+// against utilization datasets with proper resolution keys.
+func TestE2E_UtilizationObservationRecording(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	tc := setupE2ETestPool(t)
+	ctx := setupTenantContext(t, "e2e_utilization_obs_tenant")
+
+	// Seed utilization data
+	seedUtilizationData(t, tc.pool)
+
+	t.Run("1. Record transaction utilization observation", func(t *testing.T) {
+		source, err := tc.repos.Source.FindByCode(ctx, "PLATFORM_AUDIT_EVENTS")
+		require.NoError(t, err)
+
+		now := time.Now().UTC()
+		obs := createTestObservation(t, ctx, tc.repos,
+			"UTILIZATION_TRANSACTION",
+			source.ID(),
+			"tenant/acme-corp/transaction/payment",
+			decimal.NewFromInt(42),
+			now, now, now.Add(time.Hour),
+			domain.QualityLevelActual,
+			source.TrustLevel(),
+		)
+
+		assert.Equal(t, "tenant/acme-corp/transaction/payment", obs.ResolutionKey())
+		assert.True(t, decimal.NewFromInt(42).Equal(obs.Value()))
+	})
+
+	t.Run("2. Record API call utilization observation", func(t *testing.T) {
+		source, err := tc.repos.Source.FindByCode(ctx, "PLATFORM_AUDIT_EVENTS")
+		require.NoError(t, err)
+
+		now := time.Now().UTC()
+		obs := createTestObservation(t, ctx, tc.repos,
+			"UTILIZATION_API_CALL",
+			source.ID(),
+			"tenant/acme-corp/api/market-info/list-datasets",
+			decimal.NewFromInt(1500),
+			now, now, now.Add(time.Hour),
+			domain.QualityLevelActual,
+			source.TrustLevel(),
+		)
+
+		assert.Equal(t, "tenant/acme-corp/api/market-info/list-datasets", obs.ResolutionKey())
+	})
+
+	t.Run("3. Record storage utilization observation", func(t *testing.T) {
+		source, err := tc.repos.Source.FindByCode(ctx, "PLATFORM_AUDIT_EVENTS")
+		require.NoError(t, err)
+
+		now := time.Now().UTC()
+		obs := createTestObservation(t, ctx, tc.repos,
+			"UTILIZATION_STORAGE_GB",
+			source.ID(),
+			"tenant/acme-corp/storage/hot-tier",
+			decimal.NewFromFloat(256.75),
+			now, now, now.Add(time.Hour),
+			domain.QualityLevelActual,
+			source.TrustLevel(),
+		)
+
+		assert.True(t, decimal.NewFromFloat(256.75).Equal(obs.Value()))
+	})
+
+	t.Run("4. Record compute utilization observation", func(t *testing.T) {
+		source, err := tc.repos.Source.FindByCode(ctx, "PLATFORM_AUDIT_EVENTS")
+		require.NoError(t, err)
+
+		now := time.Now().UTC()
+		obs := createTestObservation(t, ctx, tc.repos,
+			"UTILIZATION_COMPUTE_HOUR",
+			source.ID(),
+			"tenant/acme-corp/compute/gpu-v100",
+			decimal.NewFromFloat(8.5),
+			now, now, now.Add(time.Hour),
+			domain.QualityLevelActual,
+			source.TrustLevel(),
+		)
+
+		assert.True(t, decimal.NewFromFloat(8.5).Equal(obs.Value()))
+	})
+
+	t.Run("5. Record network utilization observation", func(t *testing.T) {
+		source, err := tc.repos.Source.FindByCode(ctx, "PLATFORM_AUDIT_EVENTS")
+		require.NoError(t, err)
+
+		now := time.Now().UTC()
+		obs := createTestObservation(t, ctx, tc.repos,
+			"UTILIZATION_NETWORK_GB",
+			source.ID(),
+			"tenant/acme-corp/network/egress",
+			decimal.NewFromFloat(12.3),
+			now, now, now.Add(time.Hour),
+			domain.QualityLevelActual,
+			source.TrustLevel(),
+		)
+
+		assert.True(t, decimal.NewFromFloat(12.3).Equal(obs.Value()))
+	})
+
+	t.Run("6. Query utilization observations by dataset", func(t *testing.T) {
+		query := domain.ObservationQuery{
+			DataSetCode: "UTILIZATION_TRANSACTION",
+		}
+
+		observations, _, err := tc.repos.Observation.Query(ctx, query)
+		require.NoError(t, err)
+
+		assert.Len(t, observations, 1)
+		assert.Equal(t, "tenant/acme-corp/transaction/payment", observations[0].ResolutionKey())
+	})
+
+	t.Run("7. Query utilization observations by resolution key", func(t *testing.T) {
+		resKey := "tenant/acme-corp/api/market-info/list-datasets"
+		query := domain.ObservationQuery{
+			DataSetCode:   "UTILIZATION_API_CALL",
+			ResolutionKey: &resKey,
+		}
+
+		observations, _, err := tc.repos.Observation.Query(ctx, query)
+		require.NoError(t, err)
+
+		assert.Len(t, observations, 1)
+		assert.True(t, decimal.NewFromInt(1500).Equal(observations[0].Value()))
+	})
+}
+
+// TestE2E_UtilizationMultiTenantIsolation verifies that utilization observations
+// from one tenant are not visible to another tenant.
+func TestE2E_UtilizationMultiTenantIsolation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	tc := setupE2ETestPool(t)
+
+	ctxTenantA := setupTenantContext(t, "utilization_tenant_a")
+	ctxTenantB := setupTenantContext(t, "utilization_tenant_b")
+
+	// Seed utilization data
+	seedUtilizationData(t, tc.pool)
+
+	t.Run("Tenant A records utilization observation", func(t *testing.T) {
+		source, err := tc.repos.Source.FindByCode(ctxTenantA, "PLATFORM_AUDIT_EVENTS")
+		require.NoError(t, err)
+
+		now := time.Now().UTC()
+		createTestObservation(t, ctxTenantA, tc.repos,
+			"UTILIZATION_TRANSACTION",
+			source.ID(),
+			"tenant/tenant-a/transaction/payment",
+			decimal.NewFromInt(100),
+			now, now, now.Add(time.Hour),
+			domain.QualityLevelActual,
+			source.TrustLevel(),
+		)
+	})
+
+	t.Run("Tenant B records utilization observation", func(t *testing.T) {
+		source, err := tc.repos.Source.FindByCode(ctxTenantB, "PLATFORM_AUDIT_EVENTS")
+		require.NoError(t, err)
+
+		now := time.Now().UTC()
+		createTestObservation(t, ctxTenantB, tc.repos,
+			"UTILIZATION_TRANSACTION",
+			source.ID(),
+			"tenant/tenant-b/transaction/payment",
+			decimal.NewFromInt(200),
+			now, now, now.Add(time.Hour),
+			domain.QualityLevelActual,
+			source.TrustLevel(),
+		)
+	})
+
+	t.Run("Each tenant sees only their utilization data by resolution key", func(t *testing.T) {
+		resKeyA := "tenant/tenant-a/transaction/payment"
+		queryA := domain.ObservationQuery{
+			DataSetCode:   "UTILIZATION_TRANSACTION",
+			ResolutionKey: &resKeyA,
+		}
+		obsA, _, err := tc.repos.Observation.Query(ctxTenantA, queryA)
+		require.NoError(t, err)
+		assert.Len(t, obsA, 1)
+		assert.True(t, decimal.NewFromInt(100).Equal(obsA[0].Value()))
+
+		resKeyB := "tenant/tenant-b/transaction/payment"
+		queryB := domain.ObservationQuery{
+			DataSetCode:   "UTILIZATION_TRANSACTION",
+			ResolutionKey: &resKeyB,
+		}
+		obsB, _, err := tc.repos.Observation.Query(ctxTenantB, queryB)
+		require.NoError(t, err)
+		assert.Len(t, obsB, 1)
+		assert.True(t, decimal.NewFromInt(200).Equal(obsB[0].Value()))
+	})
+}
+
+// ============================================================================
 // Helper Functions
 // ============================================================================
 
