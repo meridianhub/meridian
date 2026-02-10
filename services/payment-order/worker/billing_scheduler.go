@@ -134,6 +134,7 @@ func (s *BillingScheduler) Start(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		s.logger.Info("billing scheduler stopping: context cancelled")
+		s.stopCron() //nolint:contextcheck // stopCron manages its own shutdown context via cron.Stop()
 	case <-s.done:
 		s.logger.Info("billing scheduler stopping: explicit shutdown")
 	}
@@ -160,6 +161,11 @@ func (s *BillingScheduler) Stop() {
 		}
 	}
 
+	s.stopCron()
+}
+
+// stopCron stops the cron runner and waits for in-flight jobs to complete.
+func (s *BillingScheduler) stopCron() {
 	cronCtx := s.cron.Stop()
 
 	waitDone := make(chan struct{})
