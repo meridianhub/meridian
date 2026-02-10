@@ -572,6 +572,63 @@ func TestExecuteStrategy_EmptyScript(t *testing.T) {
 	require.ErrorIs(t, err, ErrScriptRequired)
 }
 
+func TestExecuteStrategy_InvalidHorizon(t *testing.T) {
+	mis := &mockMISClient{observations: map[string][]Observation{}}
+	ref := &mockRefDataClient{nodes: map[string]*ReferenceData{}}
+	runner := newTestRunner(t, mis, ref)
+
+	_, err := runner.ExecuteStrategy(context.Background(), StrategyInput{
+		Script:            "def compute_forecast(ctx): return []",
+		InputDatasetCodes: []string{},
+		OutputDatasetCode: "TEST",
+		HorizonHours:      0,
+		GranularityHours:  1,
+		Now:               baseTime(),
+	})
+
+	require.ErrorIs(t, err, ErrInvalidInput)
+	assert.Contains(t, err.Error(), "horizon_hours")
+}
+
+func TestExecuteStrategy_InvalidGranularity(t *testing.T) {
+	mis := &mockMISClient{observations: map[string][]Observation{}}
+	ref := &mockRefDataClient{nodes: map[string]*ReferenceData{}}
+	runner := newTestRunner(t, mis, ref)
+
+	_, err := runner.ExecuteStrategy(context.Background(), StrategyInput{
+		Script:            "def compute_forecast(ctx): return []",
+		InputDatasetCodes: []string{},
+		OutputDatasetCode: "TEST",
+		HorizonHours:      24,
+		GranularityHours:  0,
+		Now:               baseTime(),
+	})
+
+	require.ErrorIs(t, err, ErrInvalidInput)
+	assert.Contains(t, err.Error(), "granularity_hours")
+}
+
+func TestExecuteStrategy_PartialRefDataConfig(t *testing.T) {
+	mis := &mockMISClient{observations: map[string][]Observation{}}
+	ref := &mockRefDataClient{nodes: map[string]*ReferenceData{}}
+	runner := newTestRunner(t, mis, ref)
+
+	// ResolutionKey set but TenantID empty
+	_, err := runner.ExecuteStrategy(context.Background(), StrategyInput{
+		Script:            "def compute_forecast(ctx): return []",
+		InputDatasetCodes: []string{},
+		OutputDatasetCode: "TEST",
+		ResolutionKey:     "region:us-east-1",
+		TenantID:          "",
+		HorizonHours:      1,
+		GranularityHours:  1,
+		Now:               baseTime(),
+	})
+
+	require.ErrorIs(t, err, ErrInvalidInput)
+	assert.Contains(t, err.Error(), "resolution_key and tenant_id must both be set")
+}
+
 // --- Validation tests ---
 
 func TestValidateForecastPoints_OutOfRange(t *testing.T) {

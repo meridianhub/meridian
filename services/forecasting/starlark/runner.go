@@ -35,6 +35,7 @@ var (
 	ErrNonMonotonic        = errors.New("forecast point timestamps must be monotonically increasing")
 	ErrGranularityMismatch = errors.New("forecast point timestamp is not aligned to granularity")
 	ErrValidation          = errors.New("script validation error")
+	ErrInvalidInput        = errors.New("invalid strategy input")
 )
 
 // MISClient abstracts the Market Information Service for observation queries.
@@ -171,6 +172,13 @@ func (r *ForecastRunner) ExecuteStrategy(ctx context.Context, input StrategyInpu
 		now = time.Now()
 	}
 
+	if input.HorizonHours <= 0 {
+		return nil, fmt.Errorf("%w: horizon_hours must be > 0", ErrInvalidInput)
+	}
+	if input.GranularityHours <= 0 {
+		return nil, fmt.Errorf("%w: granularity_hours must be > 0", ErrInvalidInput)
+	}
+
 	horizon := time.Duration(input.HorizonHours) * time.Hour
 	granularity := time.Duration(input.GranularityHours) * time.Hour
 
@@ -189,6 +197,9 @@ func (r *ForecastRunner) ExecuteStrategy(ctx context.Context, input StrategyInpu
 
 	// Step 2: Fetch reference data node if resolution key specified
 	var refData *ReferenceData
+	if (input.ResolutionKey == "") != (input.TenantID == "") {
+		return nil, fmt.Errorf("%w: resolution_key and tenant_id must both be set or both be empty", ErrInvalidInput)
+	}
 	if input.ResolutionKey != "" && input.TenantID != "" {
 		refData, err = r.refData.GetNodeByResolutionKey(ctx, input.TenantID, input.ResolutionKey)
 		if err != nil {
