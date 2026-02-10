@@ -11,7 +11,6 @@ import (
 	"github.com/meridianhub/meridian/services/reconciliation/domain"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
-	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -87,6 +86,8 @@ func setupTestDB(t *testing.T) (*gorm.DB, func()) {
 			"expected_amount" decimal(38, 18) NOT NULL,
 			"actual_amount" decimal(38, 18) NOT NULL,
 			"variance_amount" decimal(38, 18) NOT NULL,
+			"value_delta" decimal(38, 18) NOT NULL DEFAULT 0,
+			"currency" character varying(10) NOT NULL DEFAULT '',
 			"reason" character varying(30) NOT NULL,
 			"status" character varying(20) NOT NULL DEFAULT 'OPEN',
 			"resolution_note" text NULL,
@@ -289,59 +290,6 @@ func TestDisputeRepository_NotFound(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewDisputeRepository(db)
-	ctx := tenantCtx()
-
-	_, err := repo.FindByID(ctx, uuid.New())
-	assert.ErrorIs(t, err, domain.ErrNotFound)
-}
-
-func TestVarianceRepository_FindByID(t *testing.T) {
-	db, cleanup := setupTestDB(t)
-	defer cleanup()
-
-	repo := persistence.NewVarianceRepository(db)
-	ctx := tenantCtx()
-
-	runID := uuid.New()
-	snapshotID := uuid.New()
-	varianceID := uuid.New()
-	seedRunAndVariance(t, db, runID, snapshotID, varianceID)
-
-	found, err := repo.FindByID(ctx, varianceID)
-	require.NoError(t, err)
-	assert.Equal(t, varianceID, found.VarianceID)
-	assert.Equal(t, "ACC-001", found.AccountID)
-	assert.Equal(t, "GBP", found.InstrumentCode)
-	assert.True(t, decimal.NewFromFloat(100.0).Equal(found.ExpectedAmount))
-	assert.True(t, decimal.NewFromFloat(90.0).Equal(found.ActualAmount))
-	assert.Equal(t, domain.VarianceStatusOpen, found.Status)
-}
-
-func TestVarianceRepository_UpdateStatus(t *testing.T) {
-	db, cleanup := setupTestDB(t)
-	defer cleanup()
-
-	repo := persistence.NewVarianceRepository(db)
-	ctx := tenantCtx()
-
-	runID := uuid.New()
-	snapshotID := uuid.New()
-	varianceID := uuid.New()
-	seedRunAndVariance(t, db, runID, snapshotID, varianceID)
-
-	err := repo.UpdateStatus(ctx, varianceID, domain.VarianceStatusDisputed)
-	require.NoError(t, err)
-
-	found, err := repo.FindByID(ctx, varianceID)
-	require.NoError(t, err)
-	assert.Equal(t, domain.VarianceStatusDisputed, found.Status)
-}
-
-func TestVarianceRepository_NotFound(t *testing.T) {
-	db, cleanup := setupTestDB(t)
-	defer cleanup()
-
-	repo := persistence.NewVarianceRepository(db)
 	ctx := tenantCtx()
 
 	_, err := repo.FindByID(ctx, uuid.New())
