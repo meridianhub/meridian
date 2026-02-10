@@ -923,6 +923,306 @@ func TestValidateStarlark_EmptyScript(t *testing.T) {
 	}
 }
 
+// validPaymentRails returns a valid PaymentRails for testing.
+func validPaymentRails() *controlplanev1.PaymentRails {
+	return &controlplanev1.PaymentRails{
+		Provider:              "stripe_connect",
+		Mode:                  controlplanev1.ConnectMode_CONNECT_MODE_STANDARD,
+		AccountId:             "acct_1234567890abcdef",
+		WebhookEndpointSecret: "sm://stripe/webhook_secret",
+		PlatformFee: &controlplanev1.PlatformFee{
+			Type:  controlplanev1.PlatformFeeType_PLATFORM_FEE_TYPE_PERCENTAGE,
+			Value: "2.5",
+		},
+		PayoutSchedule:   controlplanev1.PayoutSchedule_PAYOUT_SCHEDULE_DAILY,
+		SupportedMethods: []string{"card", "sepa_debit"},
+	}
+}
+
+func TestValidatePaymentRails_Valid(t *testing.T) {
+	v, err := New()
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	m := validManifest()
+	m.PaymentRails = []*controlplanev1.PaymentRails{validPaymentRails()}
+
+	result := v.Validate(m, nil)
+	if !result.Valid {
+		t.Errorf("expected valid manifest with payment_rails, got errors: %v", result.Errors)
+	}
+}
+
+func TestValidatePaymentRails_InvalidProvider(t *testing.T) {
+	v, err := New()
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	m := validManifest()
+	rail := validPaymentRails()
+	rail.Provider = "paypal"
+	m.PaymentRails = []*controlplanev1.PaymentRails{rail}
+
+	result := v.Validate(m, nil)
+	if result.Valid {
+		t.Error("expected invalid manifest for unsupported provider")
+	}
+
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == "INVALID_PAYMENT_PROVIDER" {
+			found = true
+			if !strings.Contains(e.Message, "paypal") {
+				t.Errorf("expected error message to contain 'paypal', got: %s", e.Message)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected INVALID_PAYMENT_PROVIDER error, got: %v", result.Errors)
+	}
+}
+
+func TestValidatePaymentRails_InvalidAccountIDFormat(t *testing.T) {
+	v, err := New()
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	tests := []struct {
+		name      string
+		accountID string
+	}{
+		{"missing_prefix", "1234567890abcdef12"},
+		{"wrong_prefix", "cust_1234567890abcdef"},
+		{"too_short", "acct_abc"},
+		{"special_chars", "acct_1234567890abcdef!"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := validManifest()
+			rail := validPaymentRails()
+			rail.AccountId = tt.accountID
+			m.PaymentRails = []*controlplanev1.PaymentRails{rail}
+
+			result := v.Validate(m, nil)
+
+			found := false
+			for _, e := range result.Errors {
+				if e.Code == "INVALID_ACCOUNT_ID_FORMAT" {
+					found = true
+					break
+				}
+			}
+			// Proto validation or our custom validation should catch this
+			if !found {
+				// Check for proto validation catching it instead
+				protoFound := false
+				for _, e := range result.Errors {
+					if e.Code == "PROTO_VALIDATION" && strings.Contains(e.Path, "account_id") {
+						protoFound = true
+						break
+					}
+				}
+				if !protoFound {
+					t.Errorf("expected INVALID_ACCOUNT_ID_FORMAT or PROTO_VALIDATION error for account_id %q, got: %v", tt.accountID, result.Errors)
+				}
+			}
+		})
+	}
+}
+
+func TestValidatePaymentRails_InvalidPlatformFeeValue_NonDecimal(t *testing.T) {
+	v, err := New()
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	m := validManifest()
+	rail := validPaymentRails()
+	rail.PlatformFee.Value = "not-a-number"
+	m.PaymentRails = []*controlplanev1.PaymentRails{rail}
+
+	result := v.Validate(m, nil)
+	if result.Valid {
+		t.Error("expected invalid manifest for non-decimal platform fee")
+	}
+
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == "INVALID_PLATFORM_FEE_VALUE" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected INVALID_PLATFORM_FEE_VALUE error, got: %v", result.Errors)
+	}
+}
+
+func TestValidatePaymentRails_InvalidPlatformFeeValue_Negative(t *testing.T) {
+	v, err := New()
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	m := validManifest()
+	rail := validPaymentRails()
+	rail.PlatformFee.Value = "-1.5"
+	m.PaymentRails = []*controlplanev1.PaymentRails{rail}
+
+	result := v.Validate(m, nil)
+	if result.Valid {
+		t.Error("expected invalid manifest for negative platform fee")
+	}
+
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == "INVALID_PLATFORM_FEE_VALUE" {
+			found = true
+			if !strings.Contains(e.Message, "greater than 0") {
+				t.Errorf("expected message about positive value, got: %s", e.Message)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected INVALID_PLATFORM_FEE_VALUE error, got: %v", result.Errors)
+	}
+}
+
+func TestValidatePaymentRails_InvalidPlatformFeeValue_Zero(t *testing.T) {
+	v, err := New()
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	m := validManifest()
+	rail := validPaymentRails()
+	rail.PlatformFee.Value = "0"
+	m.PaymentRails = []*controlplanev1.PaymentRails{rail}
+
+	result := v.Validate(m, nil)
+	if result.Valid {
+		t.Error("expected invalid manifest for zero platform fee")
+	}
+
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == "INVALID_PLATFORM_FEE_VALUE" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected INVALID_PLATFORM_FEE_VALUE error, got: %v", result.Errors)
+	}
+}
+
+func TestValidatePaymentRails_UnknownPaymentMethod(t *testing.T) {
+	v, err := New()
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	m := validManifest()
+	rail := validPaymentRails()
+	rail.SupportedMethods = []string{"card", "crypto_wallet"}
+	m.PaymentRails = []*controlplanev1.PaymentRails{rail}
+
+	result := v.Validate(m, nil)
+	// Unknown methods produce warnings, not errors
+	if !result.Valid {
+		t.Errorf("expected valid manifest (unknown methods are warnings), got errors: %v", result.Errors)
+	}
+
+	found := false
+	for _, w := range result.Warnings {
+		if w.Code == "UNKNOWN_PAYMENT_METHOD" && strings.Contains(w.Message, "crypto_wallet") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected UNKNOWN_PAYMENT_METHOD warning for 'crypto_wallet', got warnings: %v", result.Warnings)
+	}
+}
+
+func TestValidatePaymentRails_MissingRequiredFields(t *testing.T) {
+	v, err := New()
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	m := validManifest()
+	// Empty PaymentRails should fail proto validation
+	m.PaymentRails = []*controlplanev1.PaymentRails{{}}
+
+	result := v.Validate(m, nil)
+	if result.Valid {
+		t.Error("expected invalid manifest for empty payment_rails entry")
+	}
+	if len(result.Errors) == 0 {
+		t.Error("expected at least one error for missing required fields")
+	}
+}
+
+func TestValidatePaymentRails_ValidFlatFee(t *testing.T) {
+	v, err := New()
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	m := validManifest()
+	rail := validPaymentRails()
+	rail.PlatformFee = &controlplanev1.PlatformFee{
+		Type:  controlplanev1.PlatformFeeType_PLATFORM_FEE_TYPE_FLAT,
+		Value: "0.30",
+	}
+	m.PaymentRails = []*controlplanev1.PaymentRails{rail}
+
+	result := v.Validate(m, nil)
+	if !result.Valid {
+		t.Errorf("expected valid manifest with flat fee, got errors: %v", result.Errors)
+	}
+}
+
+func TestValidatePaymentRails_MultipleRails(t *testing.T) {
+	v, err := New()
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	m := validManifest()
+	rail1 := validPaymentRails()
+	rail2 := validPaymentRails()
+	rail2.AccountId = "acct_abcdefghijklmnop"
+	rail2.Mode = controlplanev1.ConnectMode_CONNECT_MODE_EXPRESS
+	m.PaymentRails = []*controlplanev1.PaymentRails{rail1, rail2}
+
+	result := v.Validate(m, nil)
+	if !result.Valid {
+		t.Errorf("expected valid manifest with multiple payment rails, got errors: %v", result.Errors)
+	}
+}
+
+func TestValidatePaymentRails_NoPaymentRails(t *testing.T) {
+	v, err := New()
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	m := validManifest()
+	// No payment_rails field set - should be valid
+	result := v.Validate(m, nil)
+	if !result.Valid {
+		t.Errorf("expected valid manifest without payment_rails, got errors: %v", result.Errors)
+	}
+}
+
 func TestValidateImmutability_AddNewInstrument(t *testing.T) {
 	v, err := New()
 	if err != nil {
