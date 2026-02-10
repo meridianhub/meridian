@@ -69,6 +69,10 @@ func (c PlatformFeeConfig) CalculateFee(amountMinor int64) (int64, error) {
 		return 0, nil
 	}
 
+	if err := c.Validate(); err != nil {
+		return 0, err
+	}
+
 	var fee int64
 
 	switch c.Type {
