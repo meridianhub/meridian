@@ -65,7 +65,7 @@ func (m *mockBillingRepo) FindBillingRunByID(_ context.Context, id uuid.UUID) (*
 	return run, nil
 }
 
-func (m *mockBillingRepo) FindBillingRunByTenantAndPeriod(_ context.Context, tenantID string, _, _ interface{}) (*domain.BillingRun, error) {
+func (m *mockBillingRepo) FindBillingRunByTenantAndPeriod(_ context.Context, tenantID string, _, _ time.Time) (*domain.BillingRun, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, run := range m.runs {

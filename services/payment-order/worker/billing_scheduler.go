@@ -248,7 +248,7 @@ func (s *BillingScheduler) executeBillingRun(ctx context.Context) {
 		return
 	}
 
-	s.metrics.RecordBillingRun(string(domain.BillingRunStatusInitiated))
+	s.metrics.RecordBillingRun(string(domain.BillingRunStatusProcessing))
 
 	// Mark complete (invoice generation will be handled by subtask 9.3)
 	if err := run.Complete(); err != nil {
