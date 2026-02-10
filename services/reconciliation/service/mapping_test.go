@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/base64"
 	"testing"
 	"time"
 
@@ -136,6 +137,11 @@ func TestToProtoRunStatus(t *testing.T) {
 			want:   reconciliationv1.RunStatus_RUN_STATUS_CANCELLED,
 		},
 		{
+			name:   "finalized maps to completed",
+			domain: domain.RunStatusFinalized,
+			want:   reconciliationv1.RunStatus_RUN_STATUS_COMPLETED,
+		},
+		{
 			name:   "unknown status returns unspecified",
 			domain: domain.RunStatus("UNKNOWN"),
 			want:   reconciliationv1.RunStatus_RUN_STATUS_UNSPECIFIED,
@@ -228,6 +234,11 @@ func TestToProtoSettlementType(t *testing.T) {
 			want:   reconciliationv1.SettlementType_SETTLEMENT_TYPE_REAL_TIME,
 		},
 		{
+			name:   "final maps to on demand",
+			domain: domain.SettlementTypeFinal,
+			want:   reconciliationv1.SettlementType_SETTLEMENT_TYPE_ON_DEMAND,
+		},
+		{
 			name:   "unknown returns unspecified",
 			domain: domain.SettlementType("UNKNOWN"),
 			want:   reconciliationv1.SettlementType_SETTLEMENT_TYPE_UNSPECIFIED,
@@ -284,6 +295,21 @@ func TestToProtoVarianceReason(t *testing.T) {
 			want:   reconciliationv1.VarianceReason_VARIANCE_REASON_OTHER,
 		},
 		{
+			name:   "quality upgrade maps to other",
+			domain: domain.VarianceReasonQualityUpgrade,
+			want:   reconciliationv1.VarianceReason_VARIANCE_REASON_OTHER,
+		},
+		{
+			name:   "external mismatch maps to other",
+			domain: domain.VarianceReasonExternalMismatch,
+			want:   reconciliationv1.VarianceReason_VARIANCE_REASON_OTHER,
+		},
+		{
+			name:   "correction applied maps to other",
+			domain: domain.VarianceReasonCorrectionApplied,
+			want:   reconciliationv1.VarianceReason_VARIANCE_REASON_OTHER,
+		},
+		{
 			name:   "unknown returns unspecified",
 			domain: domain.VarianceReason("UNKNOWN"),
 			want:   reconciliationv1.VarianceReason_VARIANCE_REASON_UNSPECIFIED,
@@ -328,6 +354,16 @@ func TestToProtoVarianceStatus(t *testing.T) {
 			name:   "accepted",
 			domain: domain.VarianceStatusAccepted,
 			want:   reconciliationv1.VarianceStatus_VARIANCE_STATUS_ACCEPTED,
+		},
+		{
+			name:   "detected maps to open",
+			domain: domain.VarianceStatusDetected,
+			want:   reconciliationv1.VarianceStatus_VARIANCE_STATUS_OPEN,
+		},
+		{
+			name:   "valued maps to open",
+			domain: domain.VarianceStatusValued,
+			want:   reconciliationv1.VarianceStatus_VARIANCE_STATUS_OPEN,
 		},
 		{
 			name:   "unknown returns unspecified",
@@ -532,5 +568,11 @@ func TestDecodeCursorInvalid(t *testing.T) {
 func TestDecodeCursorInvalidContent(t *testing.T) {
 	// Valid base64 but not a number
 	_, err := decodeCursor("aGVsbG8=") // "hello" in base64
+	assert.Error(t, err)
+}
+
+func TestDecodeCursorNegativeOffset(t *testing.T) {
+	encoded := base64.StdEncoding.EncodeToString([]byte("-5"))
+	_, err := decodeCursor(encoded)
 	assert.Error(t, err)
 }

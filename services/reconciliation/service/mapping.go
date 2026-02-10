@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -9,6 +10,8 @@ import (
 	"github.com/meridianhub/meridian/services/reconciliation/domain"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
+
+var errNegativeCursorOffset = errors.New("invalid cursor: negative offset")
 
 // toDomainReconciliationScope converts a proto ReconciliationScope to domain.
 // UNSPECIFIED defaults to ACCOUNT.
@@ -225,6 +228,10 @@ func decodeCursor(token string) (int, error) {
 	offset, err := strconv.Atoi(string(data))
 	if err != nil {
 		return 0, fmt.Errorf("invalid cursor content: %w", err)
+	}
+
+	if offset < 0 {
+		return 0, errNegativeCursorOffset
 	}
 
 	return offset, nil
