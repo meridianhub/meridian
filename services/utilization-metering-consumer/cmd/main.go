@@ -29,6 +29,7 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/meridianhub/meridian/shared/platform/ports"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	grpclib "google.golang.org/grpc"
 )
 
 // Build information set via ldflags during compilation
@@ -193,6 +194,7 @@ func run(logger *slog.Logger) error {
 	// Initialize MDS publisher (optional, controlled by feature flag)
 	var consumerOpts []messaging.AuditConsumerOption
 	var mdPublisher *mds.MarketDataPublisher
+	var mdsConn *grpclib.ClientConn
 
 	if config.EnableMDSOutput && config.MDSServiceAddr != "" {
 		logger.Info("initializing MDS publisher",
@@ -200,7 +202,7 @@ func run(logger *slog.Logger) error {
 			"aggregation_window", config.MDSAggregationWindow,
 			"flush_interval", config.MDSFlushInterval)
 
-		mdPublisher, err = initMDSPublisher(config, logger)
+		mdPublisher, mdsConn, err = initMDSPublisher(config, logger)
 		if err != nil {
 			logger.Error("failed to initialize MDS publisher, continuing without MDS output",
 				"error", err)
@@ -308,11 +310,16 @@ func run(logger *slog.Logger) error {
 	consumer.Stop()
 	logger.Info("kafka consumer stopped")
 
-	// Flush pending MDS aggregations before shutting down
+	// Flush pending MDS aggregations and close gRPC connection
 	if mdPublisher != nil {
 		logger.Info("flushing MDS publisher...")
 		mdPublisher.Stop()
 		logger.Info("MDS publisher stopped")
+	}
+	if mdsConn != nil {
+		if err := mdsConn.Close(); err != nil {
+			logger.Error("failed to close MDS gRPC connection", "error", err)
+		}
 	}
 
 	// Shutdown HTTP server
@@ -325,8 +332,9 @@ func run(logger *slog.Logger) error {
 	return nil
 }
 
-// initMDSPublisher creates and returns a MarketDataPublisher connected to the MDS gRPC service.
-func initMDSPublisher(config *app.Config, logger *slog.Logger) (*mds.MarketDataPublisher, error) {
+// initMDSPublisher creates and returns a MarketDataPublisher and its underlying gRPC connection.
+// The caller is responsible for closing the connection after stopping the publisher.
+func initMDSPublisher(config *app.Config, logger *slog.Logger) (*mds.MarketDataPublisher, *grpclib.ClientConn, error) {
 	// Parse port from MDS service address
 	var mdsPort int
 	if lastColon := strings.LastIndex(config.MDSServiceAddr, ":"); lastColon != -1 {
@@ -349,7 +357,7 @@ func initMDSPublisher(config *app.Config, logger *slog.Logger) (*mds.MarketDataP
 		Port:        mdsPort,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to create MDS gRPC connection: %w", err)
+		return nil, nil, fmt.Errorf("failed to create MDS gRPC connection: %w", err)
 	}
 
 	mdsClient := marketinformationv1.NewMarketInformationServiceClient(conn)
@@ -361,8 +369,8 @@ func initMDSPublisher(config *app.Config, logger *slog.Logger) (*mds.MarketDataP
 	})
 	if err != nil {
 		_ = conn.Close()
-		return nil, fmt.Errorf("failed to create MDS publisher: %w", err)
+		return nil, nil, fmt.Errorf("failed to create MDS publisher: %w", err)
 	}
 
-	return publisher, nil
+	return publisher, conn, nil
 }

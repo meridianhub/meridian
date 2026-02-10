@@ -679,7 +679,7 @@ func TestAuditConsumer_DualOutput_BothReceiveCalls(t *testing.T) {
 	assert.Equal(t, "00000000-0000-0000-0000-000000000000", mdsMeasurements[0].TenantID)
 }
 
-func TestAuditConsumer_DualOutput_PKFailurePreventsOnlMDSCall(t *testing.T) {
+func TestAuditConsumer_DualOutput_PKFailurePreventsOnlyMDSCall(t *testing.T) {
 	transformer := newTestTransformer()
 
 	mockPK := newMockPositionKeepingClient()
