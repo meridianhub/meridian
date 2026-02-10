@@ -206,7 +206,6 @@ func run(logger *slog.Logger) error {
 				"error", err)
 		} else {
 			consumerOpts = append(consumerOpts, messaging.WithMDSPublisher(mdPublisher))
-			defer mdPublisher.Stop()
 		}
 	} else {
 		logger.Info("MDS output disabled",
