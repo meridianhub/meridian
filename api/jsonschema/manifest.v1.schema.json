@@ -58,6 +58,14 @@
                     "additionalProperties": true,
                     "type": "object",
                     "description": "seed_data contains tenant-specific reference data (e.g., default parties, initial chart of accounts, industry-specific lookups). Uses google.protobuf.Struct for flexible JSONB representation."
+                },
+                "paymentRails": {
+                    "items": {
+                        "$ref": "#/definitions/meridian.control_plane.v1.PaymentRails"
+                    },
+                    "additionalProperties": false,
+                    "type": "array",
+                    "description": "payment_rails defines external payment provider integrations for this tenant."
                 }
             },
             "additionalProperties": false,
@@ -258,6 +266,122 @@
             "type": "object",
             "title": "========================================\n Saga Definitions\n ========================================",
             "description": "======================================== Saga Definitions ========================================  SagaDefinition declares a workflow within the manifest. Sagas are triggered by API calls, webhooks, or scheduled events, and contain inline Starlark scripts that orchestrate service interactions."
+        },
+        "meridian.control_plane.v1.PlatformFee": {
+            "required": [
+                "type",
+                "value"
+            ],
+            "properties": {
+                "type": {
+                    "enum": [
+                        "PLATFORM_FEE_TYPE_UNSPECIFIED",
+                        0,
+                        "PLATFORM_FEE_TYPE_PERCENTAGE",
+                        1,
+                        "PLATFORM_FEE_TYPE_FLAT",
+                        2
+                    ],
+                    "oneOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "integer"
+                        }
+                    ],
+                    "description": "PlatformFeeType defines how the platform fee is calculated."
+                },
+                "value": {
+                    "type": "string",
+                    "description": "value is the fee amount as a decimal string. For PERCENTAGE: \"2.5\" means 2.5%. For FLAT: \"0.30\" means 0.30 in the transaction currency. Must be a valid positive decimal value."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "Platform Fee",
+            "description": "PlatformFee defines the fee structure for payment rail transactions."
+        },
+        "meridian.control_plane.v1.PaymentRails": {
+            "required": [
+                "provider",
+                "mode",
+                "accountId",
+                "webhookEndpointSecret",
+                "platformFee",
+                "payoutSchedule",
+                "supportedMethods"
+            ],
+            "properties": {
+                "provider": {
+                    "type": "string",
+                    "description": "provider identifies the payment provider (e.g., \"stripe_connect\")."
+                },
+                "mode": {
+                    "enum": [
+                        "CONNECT_MODE_UNSPECIFIED",
+                        0,
+                        "CONNECT_MODE_STANDARD",
+                        1,
+                        "CONNECT_MODE_EXPRESS",
+                        2
+                    ],
+                    "oneOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "integer"
+                        }
+                    ],
+                    "description": "ConnectMode defines the Stripe Connect account type."
+                },
+                "accountId": {
+                    "type": "string",
+                    "description": "account_id is the Stripe Connect account identifier (format: acct_xxx)."
+                },
+                "webhookEndpointSecret": {
+                    "type": "string",
+                    "description": "webhook_endpoint_secret is a reference to the webhook signing secret stored in a secret manager. Never contains the plaintext secret."
+                },
+                "platformFee": {
+                    "$ref": "#/definitions/meridian.control_plane.v1.PlatformFee",
+                    "additionalProperties": false,
+                    "description": "platform_fee defines the fee structure for transactions on this rail."
+                },
+                "payoutSchedule": {
+                    "enum": [
+                        "PAYOUT_SCHEDULE_UNSPECIFIED",
+                        0,
+                        "PAYOUT_SCHEDULE_DAILY",
+                        1,
+                        "PAYOUT_SCHEDULE_WEEKLY",
+                        2,
+                        "PAYOUT_SCHEDULE_MONTHLY",
+                        3
+                    ],
+                    "oneOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "integer"
+                        }
+                    ],
+                    "description": "PayoutSchedule defines when connected account payouts are initiated."
+                },
+                "supportedMethods": {
+                    "items": {
+                        "type": "string"
+                    },
+                    "type": "array",
+                    "description": "supported_methods lists the payment methods enabled on this rail (e.g., \"card\", \"sepa_debit\", \"bank_account\")."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "========================================\n Payment Rails\n ========================================",
+            "description": "======================================== Payment Rails ========================================  PaymentRails defines an external payment provider integration. Currently supports Stripe Connect for payment processing."
         },
         "meridian.control_plane.v1.ValuationRule": {
             "required": [
