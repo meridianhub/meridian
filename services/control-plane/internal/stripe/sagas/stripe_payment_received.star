@@ -42,7 +42,7 @@ def execute_stripe_payment_received():
 
     # Convert from cents to major currency unit (e.g., pence to pounds)
     # Stripe amounts are in the smallest currency unit
-    amount = str(amount_cents) + "/100"
+    amount = Decimal(str(amount_cents)) / Decimal("100")
 
     # Derive account identifiers
     nostro_account = "stripe_nostro"
