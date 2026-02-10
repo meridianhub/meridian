@@ -251,7 +251,7 @@ def compute_forecast(ctx):
 	// 100 * 0.85 = 85
 	expectedValue := decimal.NewFromFloat(85)
 	assert.True(t, points[0].Value.Equal(expectedValue), "expected %s, got %s", expectedValue, points[0].Value)
-	assert.Equal(t, "\"capacity_adjusted\"", points[0].Metadata["source"])
+	assert.Equal(t, "capacity_adjusted", points[0].Metadata["source"])
 }
 
 // --- Builtin tests ---

@@ -460,7 +460,10 @@ func extractPointValue(dict *starlarklib.Dict) (decimal.Decimal, error) {
 	case starlarklib.Float:
 		return decimal.NewFromFloat(float64(v)), nil
 	case starlarklib.Int:
-		i64, _ := v.Int64()
+		i64, ok := v.Int64()
+		if !ok {
+			return decimal.Zero, fmt.Errorf("%w: integer value too large for decimal conversion", ErrInvalidReturnType)
+		}
 		return decimal.NewFromInt(i64), nil
 	default:
 		return decimal.Zero, fmt.Errorf("%w: value must be Decimal, string, float, or int; got %s", ErrInvalidReturnType, valVal.Type())
@@ -489,7 +492,12 @@ func extractPointMetadata(dict *starlarklib.Dict) (map[string]string, error) {
 		if !ok {
 			continue
 		}
-		result[string(k)] = item[1].String()
+		// Use type assertion to get the raw string value, avoiding Starlark repr quotes.
+		if sv, ok := item[1].(starlarklib.String); ok {
+			result[string(k)] = string(sv)
+		} else {
+			result[string(k)] = item[1].String()
+		}
 	}
 	return result, nil
 }
