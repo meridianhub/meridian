@@ -2,6 +2,7 @@ package persistence_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 
@@ -27,13 +28,14 @@ func setupTestDB(t *testing.T) (*gorm.DB, func()) {
 	// Create tenant schema and tables
 	tid := tenant.TenantID("test-tenant-01")
 	schemaName := tid.SchemaName()
+	quoted := fmt.Sprintf("%q", schemaName)
 
-	err := db.Exec("CREATE SCHEMA IF NOT EXISTS " + schemaName).Error
+	err := db.Exec("CREATE SCHEMA IF NOT EXISTS " + quoted).Error
 	require.NoError(t, err)
 
 	// Run migrations in the tenant schema
 	migrationSQL := `
-		SET search_path TO ` + schemaName + `, public;
+		SET search_path TO ` + quoted + `, public;
 
 		CREATE TABLE IF NOT EXISTS "settlement_run" (
 			"id" uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -132,25 +134,25 @@ func seedRunAndVariance(t *testing.T, db *gorm.DB, runID, snapshotID, varianceID
 	t.Helper()
 	ctx := tenantCtx()
 	tid := tenant.TenantID("test-tenant-01")
-	schemaName := tid.SchemaName()
+	quoted := fmt.Sprintf("%q", tid.SchemaName())
 
 	// Insert settlement_run
 	err := db.WithContext(ctx).Exec(
-		`INSERT INTO "`+schemaName+`"."settlement_run" (run_id, account_id, scope, settlement_type, period_start, period_end, initiated_by) VALUES (?, 'ACC-001', 'ACCOUNT', 'DAILY', NOW() - INTERVAL '1 day', NOW(), 'system')`,
+		fmt.Sprintf(`INSERT INTO %s."settlement_run" (run_id, account_id, scope, settlement_type, period_start, period_end, initiated_by) VALUES (?, 'ACC-001', 'ACCOUNT', 'DAILY', NOW() - INTERVAL '1 day', NOW(), 'system')`, quoted),
 		runID,
 	).Error
 	require.NoError(t, err)
 
 	// Insert settlement_snapshot
 	err = db.WithContext(ctx).Exec(
-		`INSERT INTO "`+schemaName+`"."settlement_snapshot" (snapshot_id, run_id, account_id, instrument_code, expected_balance, actual_balance, variance_amount, source_system, captured_at) SELECT ?, sr.id, 'ACC-001', 'GBP', 100.00, 90.00, -10.00, 'test', NOW() FROM "`+schemaName+`"."settlement_run" sr WHERE sr.run_id = ?`,
+		fmt.Sprintf(`INSERT INTO %s."settlement_snapshot" (snapshot_id, run_id, account_id, instrument_code, expected_balance, actual_balance, variance_amount, source_system, captured_at) SELECT ?, sr.id, 'ACC-001', 'GBP', 100.00, 90.00, -10.00, 'test', NOW() FROM %s."settlement_run" sr WHERE sr.run_id = ?`, quoted, quoted),
 		snapshotID, runID,
 	).Error
 	require.NoError(t, err)
 
 	// Insert variance
 	err = db.WithContext(ctx).Exec(
-		`INSERT INTO "`+schemaName+`"."variance" (variance_id, run_id, snapshot_id, account_id, instrument_code, expected_amount, actual_amount, variance_amount, reason) SELECT ?, sr.id, ss.id, 'ACC-001', 'GBP', 100.00, 90.00, -10.00, 'AMOUNT_MISMATCH' FROM "`+schemaName+`"."settlement_run" sr JOIN "`+schemaName+`"."settlement_snapshot" ss ON ss.run_id = sr.id WHERE sr.run_id = ? AND ss.snapshot_id = ?`,
+		fmt.Sprintf(`INSERT INTO %s."variance" (variance_id, run_id, snapshot_id, account_id, instrument_code, expected_amount, actual_amount, variance_amount, reason) SELECT ?, sr.id, ss.id, 'ACC-001', 'GBP', 100.00, 90.00, -10.00, 'AMOUNT_MISMATCH' FROM %s."settlement_run" sr JOIN %s."settlement_snapshot" ss ON ss.run_id = sr.id WHERE sr.run_id = ? AND ss.snapshot_id = ?`, quoted, quoted, quoted),
 		varianceID, runID, snapshotID,
 	).Error
 	require.NoError(t, err)
