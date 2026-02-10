@@ -17,11 +17,11 @@ var (
 	ErrNilLedgerSource        = errors.New("ledger source cannot be nil")
 )
 
-// VarianceThresholdGBP is the absolute variance threshold in GBP.
-var VarianceThresholdGBP = decimal.NewFromInt(10)
+// varianceThresholdGBP is the absolute variance threshold in GBP.
+var varianceThresholdGBP = decimal.NewFromInt(10) //nolint:gochecknoglobals // configurable threshold
 
-// VarianceThresholdPercent is the relative variance threshold as a percentage of daily volume.
-var VarianceThresholdPercent = decimal.NewFromFloat(0.01) // 1%
+// varianceThresholdPercent is the relative variance threshold as a percentage of daily volume.
+var varianceThresholdPercent = decimal.NewFromFloat(0.01) // 1% //nolint:gochecknoglobals // configurable threshold
 
 // ChargeSource provides Stripe charge data for reconciliation.
 type ChargeSource interface {
@@ -191,22 +191,22 @@ func checkVarianceThresholds(varianceCents, stripeTotalCents int64) (bool, strin
 	exceedsThreshold := false
 	var alertMessage string
 
-	if varianceDecimal.GreaterThan(VarianceThresholdGBP) {
+	if varianceDecimal.GreaterThan(varianceThresholdGBP) {
 		exceedsThreshold = true
 		alertMessage = fmt.Sprintf("absolute variance %s GBP exceeds threshold of %s GBP",
-			varianceDecimal.StringFixed(2), VarianceThresholdGBP.StringFixed(2))
+			varianceDecimal.StringFixed(2), varianceThresholdGBP.StringFixed(2))
 	}
 
 	if stripeTotal.GreaterThan(decimal.Zero) {
 		pct := varianceDecimal.Div(stripeTotal)
-		if pct.GreaterThan(VarianceThresholdPercent) {
+		if pct.GreaterThan(varianceThresholdPercent) {
 			exceedsThreshold = true
 			pctStr := pct.Mul(decimal.NewFromInt(100)).StringFixed(2)
 			if alertMessage != "" {
 				alertMessage += "; "
 			}
 			alertMessage += fmt.Sprintf("relative variance %s%% exceeds threshold of %s%%",
-				pctStr, VarianceThresholdPercent.Mul(decimal.NewFromInt(100)).StringFixed(2))
+				pctStr, varianceThresholdPercent.Mul(decimal.NewFromInt(100)).StringFixed(2))
 		}
 	}
 

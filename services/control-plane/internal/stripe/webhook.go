@@ -294,6 +294,16 @@ func (h *WebhookHandler) handleChargeRefunded(ctx context.Context, w http.Respon
 		return
 	}
 
+	if partyID == "" {
+		h.logger.Warn("missing party_id for refund, acknowledging without processing",
+			"charge_id", charge.ID,
+			"event_id", event.ID,
+			"tenant_id", tenantID,
+		)
+		h.writeSuccessResponse(w, "refund acknowledged without party context")
+		return
+	}
+
 	paymentEvent := &PaymentEvent{
 		EventID:         uuid.New().String(),
 		StripeEventID:   event.ID,
