@@ -47,7 +47,7 @@ CREATE TABLE "invoice" (
   PRIMARY KEY ("id")
 );
 
--- Unique invoice numbers per billing run
+-- Unique invoice numbers (invoice_number includes tenant context to prevent cross-tenant collisions)
 CREATE UNIQUE INDEX "idx_invoice_number" ON "invoice" ("invoice_number");
 
 -- Find invoices by billing run

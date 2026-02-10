@@ -49,6 +49,10 @@ type BillingScheduler struct {
 	logger  *slog.Logger
 	metrics *BillingMetrics
 
+	// Optional components for invoice generation and payment initiation.
+	invoiceGenerator *InvoiceGenerator
+	paymentInitiator *PaymentInitiator
+
 	cron    *cron.Cron
 	done    chan struct{}
 	wg      sync.WaitGroup
@@ -101,6 +105,20 @@ func NewBillingScheduler(
 		cron:    cronRunner,
 		done:    make(chan struct{}),
 	}, nil
+}
+
+// WithInvoiceGenerator sets the invoice generator for the scheduler.
+// When set, billing runs will generate invoices from position-keeping data.
+func (s *BillingScheduler) WithInvoiceGenerator(gen *InvoiceGenerator) *BillingScheduler {
+	s.invoiceGenerator = gen
+	return s
+}
+
+// WithPaymentInitiator sets the payment initiator for the scheduler.
+// When set, billing runs will initiate payment sagas for generated invoices.
+func (s *BillingScheduler) WithPaymentInitiator(init *PaymentInitiator) *BillingScheduler {
+	s.paymentInitiator = init
+	return s
 }
 
 // Start begins the billing scheduler. It registers the cron job and blocks
@@ -256,7 +274,12 @@ func (s *BillingScheduler) executeBillingRun(ctx context.Context) {
 
 	s.metrics.RecordBillingRun(string(domain.BillingRunStatusProcessing))
 
-	// Mark complete (invoice generation will be handled by subtask 9.3)
+	// Generate invoices and initiate payments
+	if err := s.processInvoices(ctx, run); err != nil {
+		return
+	}
+
+	// Mark complete
 	if err := run.Complete(); err != nil {
 		s.logger.Error("failed to complete billing run", "error", err)
 		return
@@ -274,6 +297,41 @@ func (s *BillingScheduler) executeBillingRun(ctx context.Context) {
 		"billing_run_id", run.ID,
 		"duration", elapsed,
 		"shadow_mode", s.config.ShadowMode)
+}
+
+// processInvoices generates invoices and initiates payments for a billing run.
+// Returns an error if the billing run should be marked as failed.
+func (s *BillingScheduler) processInvoices(ctx context.Context, run *domain.BillingRun) error {
+	if s.invoiceGenerator == nil {
+		return nil
+	}
+
+	invoices, err := s.invoiceGenerator.GenerateInvoices(ctx, run)
+	if err != nil {
+		s.logger.Error("invoice generation failed", "error", err)
+		if failErr := run.Fail("invoice generation failed: " + err.Error()); failErr == nil {
+			_ = s.repo.UpdateBillingRun(ctx, run)
+		}
+		s.metrics.RecordError("invoice_generation")
+		s.metrics.RecordBillingRun(string(domain.BillingRunStatusFailed))
+		return err
+	}
+
+	if s.paymentInitiator == nil || len(invoices) == 0 {
+		return nil
+	}
+
+	if err := s.paymentInitiator.InitiatePayments(ctx, run, invoices, s.config.ShadowMode); err != nil {
+		s.logger.Error("payment initiation failed", "error", err)
+		if failErr := run.Fail("payment initiation failed: " + err.Error()); failErr == nil {
+			_ = s.repo.UpdateBillingRun(ctx, run)
+		}
+		s.metrics.RecordError("payment_initiation")
+		s.metrics.RecordBillingRun(string(domain.BillingRunStatusFailed))
+		return err
+	}
+
+	return nil
 }
 
 // checkIdempotency checks Redis for an existing billing run key.
