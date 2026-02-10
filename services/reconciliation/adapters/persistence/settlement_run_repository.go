@@ -73,6 +73,9 @@ func (r *SettlementRunRepository) isInTransaction() bool {
 // Create persists a new SettlementRun.
 func (r *SettlementRunRepository) Create(ctx context.Context, run *domain.SettlementRun) error {
 	entity := toSettlementRunEntity(run)
+	if entity.Version == 0 {
+		entity.Version = 1
+	}
 	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		return tx.Create(entity).Error
 	})
@@ -176,8 +179,12 @@ func (r *SettlementRunRepository) List(ctx context.Context, filter domain.RunFil
 		}
 		query = query.Limit(limit)
 
-		if filter.Offset > 0 {
-			query = query.Offset(filter.Offset)
+		offset := filter.Offset
+		if offset < 0 {
+			offset = 0
+		}
+		if offset > 0 {
+			query = query.Offset(offset)
 		}
 
 		return query.Order("created_at DESC").Find(&entities).Error
