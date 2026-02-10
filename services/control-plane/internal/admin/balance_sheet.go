@@ -233,13 +233,19 @@ func (s *BalanceSheetService) ExportBalanceSheetCSV(ctx context.Context, tenantI
 			}
 		}
 
-		// Write section totals
-		for instrument, total := range section.Totals {
+		// Write section totals in sorted instrument order for deterministic output.
+		instruments := make([]string, 0, len(section.Totals))
+		for instrument := range section.Totals {
+			instruments = append(instruments, instrument)
+		}
+		sort.Strings(instruments)
+
+		for _, instrument := range instruments {
 			if err := w.Write([]string{
 				string(section.Classification),
 				"TOTAL",
 				instrument,
-				total.String(),
+				section.Totals[instrument].String(),
 				"",
 				"",
 			}); err != nil {
