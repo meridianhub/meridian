@@ -119,8 +119,11 @@ func (r *PostgresRepository) Update(ctx context.Context, n *Node) error {
 		if result.RowsAffected() == 0 {
 			// Distinguish between not found and version conflict
 			_, lookupErr := r.getByIDTx(ctx, tx, n.ID)
-			if errors.Is(lookupErr, ErrNotFound) {
-				return ErrNotFound
+			if lookupErr != nil {
+				if errors.Is(lookupErr, ErrNotFound) {
+					return ErrNotFound
+				}
+				return lookupErr
 			}
 			return ErrOptimisticLock
 		}
@@ -628,7 +631,14 @@ func (r *PostgresRepository) BulkCreate(ctx context.Context, nodes []*Node) erro
 // bulkCreateNode validates, computes resolution key, and inserts a single node during bulk create.
 func (r *PostgresRepository) bulkCreateNode(ctx context.Context, tx pgx.Tx, n *Node, batchIDs map[uuid.UUID]*Node) error {
 	if n.ParentID != nil {
-		if _, inBatch := batchIDs[*n.ParentID]; !inBatch {
+		if parentNode, inBatch := batchIDs[*n.ParentID]; inBatch {
+			if parentNode.TenantID != n.TenantID {
+				return ErrCrossTenantParent
+			}
+			if !parentNode.IsActive() {
+				return ErrParentNotActive
+			}
+		} else {
 			if err := r.validateParent(ctx, tx, n); err != nil {
 				return err
 			}
