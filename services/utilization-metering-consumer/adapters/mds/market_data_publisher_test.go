@@ -819,6 +819,50 @@ func TestMarketDataPublisher_StopIsIdempotent(t *testing.T) {
 	pub.Stop()
 }
 
+// --- Partial failure handling ---
+
+func TestMarketDataPublisher_PartialFailureRequeuesFailedOnly(t *testing.T) {
+	mock := newMockMDSClient()
+
+	// Configure mock to return partial failure: first observation succeeds, second fails
+	mock.batchResponses = []*marketinformationv1.RecordObservationBatchResponse{
+		{
+			Results: []*marketinformationv1.BatchObservationResult{
+				{Success: true, Index: 0},
+				{Success: false, Index: 1, ErrorMessage: "dataset not found"},
+			},
+			TotalCount:   2,
+			SuccessCount: 1,
+			FailureCount: 1,
+		},
+	}
+
+	cfg := DefaultConfig()
+	cfg.FlushInterval = 10 * time.Minute // Manual flush via Stop
+	cfg.WindowSize = 1 * time.Hour
+
+	pub, err := NewMarketDataPublisher(mock, cfg)
+	require.NoError(t, err)
+
+	// Publish two measurements with different resolution keys to create two windows
+	ts := time.Date(2025, 1, 1, 10, 30, 0, 0, time.UTC)
+	pub.Publish(testMeasurement("tenant-1", "svc-a", "Op", 5, ts))
+	pub.Publish(testMeasurement("tenant-2", "svc-b", "Op", 3, ts))
+
+	assert.Equal(t, 2, pub.BufferSize())
+
+	// Stop triggers flush
+	pub.Stop()
+
+	// Verify the batch was sent
+	calls := mock.getBatchCalls()
+	require.Len(t, calls, 1)
+	require.Len(t, calls[0].Observations, 2)
+
+	// The failed window (index 1) should be restored to the buffer
+	assert.Equal(t, 1, pub.BufferSize(), "failed observation should be re-queued")
+}
+
 // --- Config normalization ---
 
 func TestNewMarketDataPublisher_ConfigNormalization(t *testing.T) {

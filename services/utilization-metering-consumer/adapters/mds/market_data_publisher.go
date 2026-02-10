@@ -380,7 +380,7 @@ func (p *MarketDataPublisher) flush() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	_, err := p.cb.Execute(ctx, func() (any, error) {
+	respAny, err := p.cb.Execute(ctx, func() (any, error) {
 		return p.mdsClient.RecordObservationBatch(ctx, req)
 	})
 
@@ -400,9 +400,39 @@ func (p *MarketDataPublisher) flush() {
 		return
 	}
 
-	mdsObservationsPublishedTotal.Add(float64(len(observations)))
+	// Handle partial failures: the RPC supports partial success where
+	// individual observations may fail while others succeed.
+	successCount := len(observations)
+	resp, _ := respAny.(*marketinformationv1.RecordObservationBatchResponse)
+	if resp != nil && len(resp.Results) > 0 {
+		var failed []*UtilizationWindow
+		successCount = 0
+		for _, r := range resp.Results {
+			if r.Success {
+				successCount++
+				continue
+			}
+			idx := int(r.Index)
+			if idx >= 0 && idx < len(windows) {
+				failed = append(failed, windows[idx])
+				p.logger.Warn("observation failed in batch",
+					"index", idx,
+					"resolution_key", windows[idx].ResolutionKey,
+					"error", r.ErrorMessage,
+				)
+			}
+		}
+		if len(failed) > 0 {
+			mdsPublishErrorsTotal.WithLabelValues("partial_failure").Inc()
+			p.buffer.Restore(failed)
+			mdsBufferSize.Set(float64(p.buffer.Size()))
+		}
+	}
+
+	mdsObservationsPublishedTotal.Add(float64(successCount))
 	p.logger.Info("published observations to MDS",
-		"observation_count", len(observations),
+		"observation_count", successCount,
+		"total_in_batch", len(observations),
 		"duration_seconds", duration,
 	)
 }
