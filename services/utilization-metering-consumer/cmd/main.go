@@ -15,11 +15,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	marketinformationv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
 	auditdomain "github.com/meridianhub/meridian/services/audit-worker/domain"
 	"github.com/meridianhub/meridian/services/utilization-metering-consumer/adapters/grpc"
+	"github.com/meridianhub/meridian/services/utilization-metering-consumer/adapters/mds"
 	"github.com/meridianhub/meridian/services/utilization-metering-consumer/adapters/messaging"
 	"github.com/meridianhub/meridian/services/utilization-metering-consumer/app"
 	"github.com/meridianhub/meridian/services/utilization-metering-consumer/domain"
+	platformgrpc "github.com/meridianhub/meridian/shared/pkg/grpc"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
@@ -123,7 +126,9 @@ func run(logger *slog.Logger) error {
 		"consumer_group_id", config.ConsumerGroupID,
 		"audit_topics", config.AuditTopics,
 		"position_keeping_endpoint", config.PositionKeepingEndpoint,
-		"tenant_zero_id", config.TenantZeroID)
+		"tenant_zero_id", config.TenantZeroID,
+		"enable_mds_output", config.EnableMDSOutput,
+		"mds_service_addr", config.MDSServiceAddr)
 
 	// Create readiness tracker
 	var (
@@ -185,6 +190,30 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 
+	// Initialize MDS publisher (optional, controlled by feature flag)
+	var consumerOpts []messaging.AuditConsumerOption
+	var mdPublisher *mds.MarketDataPublisher
+
+	if config.EnableMDSOutput && config.MDSServiceAddr != "" {
+		logger.Info("initializing MDS publisher",
+			"mds_service_addr", config.MDSServiceAddr,
+			"aggregation_window", config.MDSAggregationWindow,
+			"flush_interval", config.MDSFlushInterval)
+
+		mdPublisher, err = initMDSPublisher(config, logger)
+		if err != nil {
+			logger.Error("failed to initialize MDS publisher, continuing without MDS output",
+				"error", err)
+		} else {
+			consumerOpts = append(consumerOpts, messaging.WithMDSPublisher(mdPublisher))
+			defer mdPublisher.Stop()
+		}
+	} else {
+		logger.Info("MDS output disabled",
+			"enable_mds_output", config.EnableMDSOutput,
+			"mds_service_addr", config.MDSServiceAddr)
+	}
+
 	// Parse tenant zero ID
 	tenantZeroID, err := uuid.Parse(config.TenantZeroID)
 	if err != nil {
@@ -223,7 +252,7 @@ func run(logger *slog.Logger) error {
 		EnableAutoCommit: false, // Manual commit for at-least-once semantics
 	}
 
-	consumer, err := messaging.NewAuditConsumer(kafkaConfig, transformer, pkClient)
+	consumer, err := messaging.NewAuditConsumer(kafkaConfig, transformer, pkClient, consumerOpts...)
 	if err != nil {
 		return fmt.Errorf("failed to create audit consumer: %w", err)
 	}
@@ -280,6 +309,13 @@ func run(logger *slog.Logger) error {
 	consumer.Stop()
 	logger.Info("kafka consumer stopped")
 
+	// Flush pending MDS aggregations before shutting down
+	if mdPublisher != nil {
+		logger.Info("flushing MDS publisher...")
+		mdPublisher.Stop()
+		logger.Info("MDS publisher stopped")
+	}
+
 	// Shutdown HTTP server
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		logger.Error("HTTP server shutdown error", "error", err)
@@ -288,4 +324,46 @@ func run(logger *slog.Logger) error {
 	}
 
 	return nil
+}
+
+// initMDSPublisher creates and returns a MarketDataPublisher connected to the MDS gRPC service.
+func initMDSPublisher(config *app.Config, logger *slog.Logger) (*mds.MarketDataPublisher, error) {
+	// Parse port from MDS service address
+	var mdsPort int
+	if lastColon := strings.LastIndex(config.MDSServiceAddr, ":"); lastColon != -1 {
+		if _, err := fmt.Sscanf(config.MDSServiceAddr[lastColon:], ":%d", &mdsPort); err != nil || mdsPort == 0 {
+			mdsPort = ports.MarketInformation
+		}
+	} else {
+		mdsPort = ports.MarketInformation
+	}
+
+	// Extract service name from address (everything before the last colon)
+	mdsServiceName := config.MDSServiceAddr
+	if lastColon := strings.LastIndex(mdsServiceName, ":"); lastColon != -1 {
+		mdsServiceName = mdsServiceName[:lastColon]
+	}
+
+	conn, err := platformgrpc.NewClient(context.Background(), platformgrpc.ClientConfig{
+		ServiceName: mdsServiceName,
+		Namespace:   env.GetEnvOrDefault("K8S_NAMESPACE", "default"),
+		Port:        mdsPort,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create MDS gRPC connection: %w", err)
+	}
+
+	mdsClient := marketinformationv1.NewMarketInformationServiceClient(conn)
+
+	publisher, err := mds.NewMarketDataPublisher(mdsClient, mds.Config{
+		WindowSize:    config.MDSAggregationWindow,
+		FlushInterval: config.MDSFlushInterval,
+		Logger:        logger,
+	})
+	if err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("failed to create MDS publisher: %w", err)
+	}
+
+	return publisher, nil
 }

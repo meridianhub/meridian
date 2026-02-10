@@ -3,6 +3,7 @@ package messaging
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -73,6 +74,40 @@ func (m *mockPositionKeepingClient) getMeasurements() []*auditdomain.Measurement
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	result := make([]*auditdomain.Measurement, len(m.measurements))
+	copy(result, m.measurements)
+	return result
+}
+
+// mockUtilizationPublisher implements domain.UtilizationPublisher for testing
+type mockUtilizationPublisher struct {
+	mu           sync.Mutex
+	measurements []*domain.UtilizationMeasurement
+	publishFunc  func(m *domain.UtilizationMeasurement)
+}
+
+func newMockUtilizationPublisher() *mockUtilizationPublisher {
+	return &mockUtilizationPublisher{
+		measurements: make([]*domain.UtilizationMeasurement, 0),
+	}
+}
+
+func (m *mockUtilizationPublisher) Publish(measurement *domain.UtilizationMeasurement) {
+	m.mu.Lock()
+	m.measurements = append(m.measurements, measurement)
+	m.mu.Unlock()
+	if m.publishFunc != nil {
+		m.publishFunc(measurement)
+	}
+}
+
+func (m *mockUtilizationPublisher) Stop() {
+	// No-op for testing
+}
+
+func (m *mockUtilizationPublisher) getMeasurements() []*domain.UtilizationMeasurement {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make([]*domain.UtilizationMeasurement, len(m.measurements))
 	copy(result, m.measurements)
 	return result
 }
@@ -160,6 +195,30 @@ func TestNewAuditConsumer(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNewAuditConsumer_WithMDSPublisher(t *testing.T) {
+	transformer := newTestTransformer()
+	mockPK := newMockPositionKeepingClient()
+	mockMDS := newMockUtilizationPublisher()
+
+	consumer, err := NewAuditConsumer(
+		kafka.ConsumerConfig{
+			BootstrapServers: "localhost:9092",
+			GroupID:          "test-group",
+		},
+		transformer,
+		mockPK,
+		WithMDSPublisher(mockMDS),
+	)
+	if err != nil {
+		t.Skip("Kafka not available, skipping integration test")
+	}
+	defer func() {
+		_ = consumer.Close()
+	}()
+
+	assert.NotNil(t, consumer.mdPublisher, "MDS publisher should be set via option")
 }
 
 func TestAuditConsumer_handleAuditEvent_ValidEvent(t *testing.T) {
@@ -554,4 +613,268 @@ func TestProtoValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+// --- Dual-output integration tests ---
+
+func TestAuditConsumer_DualOutput_BothReceiveCalls(t *testing.T) {
+	transformer := newTestTransformer()
+	mockPK := newMockPositionKeepingClient()
+	mockMDS := newMockUtilizationPublisher()
+
+	consumer, err := NewAuditConsumer(
+		kafka.ConsumerConfig{
+			BootstrapServers: "localhost:9092",
+			GroupID:          "test-group",
+		},
+		transformer,
+		mockPK,
+		WithMDSPublisher(mockMDS),
+	)
+	if err != nil {
+		t.Skip("Kafka not available, skipping integration test")
+	}
+	defer func() {
+		_ = consumer.Close()
+	}()
+
+	event := &auditv1.AuditEvent{
+		EventId:       "550e8400-e29b-41d4-a716-446655440020",
+		SchemaName:    "current_account",
+		TableName:     "current_account",
+		Operation:     auditv1.AuditOperation_AUDIT_OPERATION_INSERT,
+		RecordId:      "rec-dual-1",
+		ChangedBy:     "test-user",
+		CorrelationId: "corr-dual-1",
+		Timestamp:     timestamppb.Now(),
+		Metadata: map[string]string{
+			"tenant_id": "00000000-0000-0000-0000-000000000000",
+		},
+	}
+
+	ctx := context.Background()
+	err = consumer.handleAuditEvent(ctx, event)
+	require.NoError(t, err)
+
+	// Verify PK received the measurement
+	err = await.New().AtMost(1 * time.Second).Until(func() bool {
+		return len(mockPK.getMeasurements()) > 0
+	})
+	require.NoError(t, err, "PK should receive measurement")
+
+	pkMeasurements := mockPK.getMeasurements()
+	require.Len(t, pkMeasurements, 1)
+	assert.Equal(t, "MERIDIAN-CURRENT-ACCOUNT-OPS", pkMeasurements[0].AssetCode)
+
+	// Verify MDS received the measurement
+	err = await.New().AtMost(1 * time.Second).Until(func() bool {
+		return len(mockMDS.getMeasurements()) > 0
+	})
+	require.NoError(t, err, "MDS should receive measurement")
+
+	mdsMeasurements := mockMDS.getMeasurements()
+	require.Len(t, mdsMeasurements, 1)
+	assert.Equal(t, "current_account", mdsMeasurements[0].ServiceName)
+	assert.Equal(t, "INSERT", mdsMeasurements[0].OperationType)
+	assert.Equal(t, "00000000-0000-0000-0000-000000000000", mdsMeasurements[0].TenantID)
+}
+
+func TestAuditConsumer_DualOutput_PKFailurePreventsOnlMDSCall(t *testing.T) {
+	transformer := newTestTransformer()
+
+	mockPK := newMockPositionKeepingClient()
+	mockPK.recordMeasurementFunc = func(_ context.Context, _ *auditdomain.Measurement) error {
+		return errPKUnavailable
+	}
+
+	mockMDS := newMockUtilizationPublisher()
+
+	consumer, err := NewAuditConsumer(
+		kafka.ConsumerConfig{
+			BootstrapServers: "localhost:9092",
+			GroupID:          "test-group",
+		},
+		transformer,
+		mockPK,
+		WithMDSPublisher(mockMDS),
+	)
+	if err != nil {
+		t.Skip("Kafka not available, skipping integration test")
+	}
+	defer func() {
+		_ = consumer.Close()
+	}()
+
+	event := &auditv1.AuditEvent{
+		EventId:       "550e8400-e29b-41d4-a716-446655440021",
+		SchemaName:    "current_account",
+		TableName:     "current_account",
+		Operation:     auditv1.AuditOperation_AUDIT_OPERATION_INSERT,
+		RecordId:      "rec-pk-fail",
+		ChangedBy:     "test-user",
+		CorrelationId: "corr-pk-fail",
+		Timestamp:     timestamppb.Now(),
+		Metadata: map[string]string{
+			"tenant_id": "00000000-0000-0000-0000-000000000000",
+		},
+	}
+
+	ctx := context.Background()
+	err = consumer.handleAuditEvent(ctx, event)
+
+	require.Error(t, err, "PK failure should short-circuit")
+	assert.Contains(t, err.Error(), "failed to record measurement")
+
+	// MDS should NOT receive the measurement since PK failed first
+	assert.Empty(t, mockMDS.getMeasurements(), "MDS should not receive measurement when PK fails")
+}
+
+func TestAuditConsumer_DualOutput_MDSFailureDoesNotBlockPK(t *testing.T) {
+	transformer := newTestTransformer()
+	mockPK := newMockPositionKeepingClient()
+
+	mockMDS := newMockUtilizationPublisher()
+	mockMDS.publishFunc = func(_ *domain.UtilizationMeasurement) {
+		panic("MDS publisher panicked")
+	}
+
+	consumer, err := NewAuditConsumer(
+		kafka.ConsumerConfig{
+			BootstrapServers: "localhost:9092",
+			GroupID:          "test-group",
+		},
+		transformer,
+		mockPK,
+		WithMDSPublisher(mockMDS),
+	)
+	if err != nil {
+		t.Skip("Kafka not available, skipping integration test")
+	}
+	defer func() {
+		_ = consumer.Close()
+	}()
+
+	event := &auditv1.AuditEvent{
+		EventId:       "550e8400-e29b-41d4-a716-446655440022",
+		SchemaName:    "current_account",
+		TableName:     "current_account",
+		Operation:     auditv1.AuditOperation_AUDIT_OPERATION_INSERT,
+		RecordId:      "rec-mds-fail",
+		ChangedBy:     "test-user",
+		CorrelationId: "corr-mds-fail",
+		Timestamp:     timestamppb.Now(),
+		Metadata: map[string]string{
+			"tenant_id": "00000000-0000-0000-0000-000000000000",
+		},
+	}
+
+	ctx := context.Background()
+	err = consumer.handleAuditEvent(ctx, event)
+
+	// Should succeed - MDS panic should NOT block the handler
+	require.NoError(t, err, "MDS failure should not block PK path")
+
+	// PK should still have received the measurement
+	err = await.New().AtMost(1 * time.Second).Until(func() bool {
+		return len(mockPK.getMeasurements()) > 0
+	})
+	require.NoError(t, err, "PK should receive measurement despite MDS failure")
+	assert.Len(t, mockPK.getMeasurements(), 1)
+}
+
+func TestAuditConsumer_DualOutput_WithoutMDSPublisher(t *testing.T) {
+	transformer := newTestTransformer()
+	mockPK := newMockPositionKeepingClient()
+
+	// No MDS publisher option - backward compatible
+	consumer, err := NewAuditConsumer(
+		kafka.ConsumerConfig{
+			BootstrapServers: "localhost:9092",
+			GroupID:          "test-group",
+		},
+		transformer,
+		mockPK,
+	)
+	if err != nil {
+		t.Skip("Kafka not available, skipping integration test")
+	}
+	defer func() {
+		_ = consumer.Close()
+	}()
+
+	event := &auditv1.AuditEvent{
+		EventId:       "550e8400-e29b-41d4-a716-446655440023",
+		SchemaName:    "current_account",
+		TableName:     "current_account",
+		Operation:     auditv1.AuditOperation_AUDIT_OPERATION_INSERT,
+		RecordId:      "rec-no-mds",
+		ChangedBy:     "test-user",
+		CorrelationId: "corr-no-mds",
+		Timestamp:     timestamppb.Now(),
+		Metadata: map[string]string{
+			"tenant_id": "00000000-0000-0000-0000-000000000000",
+		},
+	}
+
+	ctx := context.Background()
+	err = consumer.handleAuditEvent(ctx, event)
+
+	require.NoError(t, err, "Should work fine without MDS publisher")
+
+	// PK should still receive measurement
+	err = await.New().AtMost(1 * time.Second).Until(func() bool {
+		return len(mockPK.getMeasurements()) > 0
+	})
+	require.NoError(t, err)
+	assert.Len(t, mockPK.getMeasurements(), 1)
+}
+
+func TestAuditConsumer_DualOutput_MultipleEvents(t *testing.T) {
+	transformer := newTestTransformer()
+	mockPK := newMockPositionKeepingClient()
+	mockMDS := newMockUtilizationPublisher()
+
+	consumer, err := NewAuditConsumer(
+		kafka.ConsumerConfig{
+			BootstrapServers: "localhost:9092",
+			GroupID:          "test-group",
+		},
+		transformer,
+		mockPK,
+		WithMDSPublisher(mockMDS),
+	)
+	if err != nil {
+		t.Skip("Kafka not available, skipping integration test")
+	}
+	defer func() {
+		_ = consumer.Close()
+	}()
+
+	eventCount := 10
+	ctx := context.Background()
+
+	for i := range eventCount {
+		event := &auditv1.AuditEvent{
+			EventId:       uuid.New().String(),
+			SchemaName:    "current_account",
+			TableName:     "current_account",
+			Operation:     auditv1.AuditOperation_AUDIT_OPERATION_INSERT,
+			RecordId:      fmt.Sprintf("rec-multi-%d", i),
+			ChangedBy:     "test-user",
+			CorrelationId: fmt.Sprintf("corr-multi-%d", i),
+			Timestamp:     timestamppb.Now(),
+			Metadata: map[string]string{
+				"tenant_id": "00000000-0000-0000-0000-000000000000",
+			},
+		}
+		err = consumer.handleAuditEvent(ctx, event)
+		require.NoError(t, err, "Event %d should succeed", i)
+	}
+
+	// Both outputs should receive all events
+	err = await.New().AtMost(2 * time.Second).Until(func() bool {
+		return len(mockPK.getMeasurements()) == eventCount &&
+			len(mockMDS.getMeasurements()) == eventCount
+	})
+	require.NoError(t, err, "Both PK and MDS should receive all %d events", eventCount)
 }
