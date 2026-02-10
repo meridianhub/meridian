@@ -163,11 +163,23 @@ var zeroDecimalCurrencies = map[string]bool{
 	"UGX": true, "VND": true, "VUV": true, "XAF": true, "XOF": true, "XPF": true,
 }
 
+// threeDecimalCurrencies lists Stripe currencies that use 3 decimal places.
+// See: https://docs.stripe.com/currencies#three-decimal
+var threeDecimalCurrencies = map[string]bool{
+	"BHD": true, "JOD": true, "KWD": true, "OMR": true, "TND": true,
+}
+
 // amountToDecimal converts a Stripe amount to decimal based on currency.
-// Zero-decimal currencies (JPY, KRW, etc.) are not divided by 100.
+// Zero-decimal currencies (JPY, KRW, etc.) are not divided.
+// Three-decimal currencies (BHD, JOD, etc.) are divided by 1000.
+// All others are divided by 100.
 func amountToDecimal(amount int64, currency string) decimal.Decimal {
-	if zeroDecimalCurrencies[strings.ToUpper(currency)] {
+	cur := strings.ToUpper(currency)
+	if zeroDecimalCurrencies[cur] {
 		return decimal.NewFromInt(amount)
+	}
+	if threeDecimalCurrencies[cur] {
+		return decimal.NewFromInt(amount).Div(decimal.NewFromInt(1000))
 	}
 	return decimal.NewFromInt(amount).Div(decimal.NewFromInt(100))
 }

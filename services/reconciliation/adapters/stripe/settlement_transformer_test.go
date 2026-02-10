@@ -339,8 +339,32 @@ func TestAmountToDecimal(t *testing.T) {
 		}
 	})
 
+	t.Run("three-decimal currency divides by 1000", func(t *testing.T) {
+		tests := []struct {
+			amount   int64
+			currency string
+			expected string
+		}{
+			{3590, "BHD", "3.59"},
+			{10000, "JOD", "10"},
+			{500, "KWD", "0.5"},
+			{1, "OMR", "0.001"},
+			{-2500, "TND", "-2.5"},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.currency+"_"+tt.expected, func(t *testing.T) {
+				result := amountToDecimal(tt.amount, tt.currency)
+				assert.Equal(t, tt.expected, result.String())
+			})
+		}
+	})
+
 	t.Run("case insensitive currency check", func(t *testing.T) {
 		result := amountToDecimal(1000, "jpy")
 		assert.Equal(t, "1000", result.String())
+
+		result = amountToDecimal(3590, "bhd")
+		assert.Equal(t, "3.59", result.String())
 	})
 }
