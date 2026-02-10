@@ -4,6 +4,7 @@ package meridian.control_plane.v1;
 
 import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
+import "google/protobuf/timestamp.proto";
 import "meridian/saga/v1/saga_admin.proto";
 
 option go_package = "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1;controlplanev1";
@@ -109,4 +110,195 @@ message GetCausationTreeForEventResponse {
 
   // saga_id is the root saga that was found for this event.
   string saga_id = 4;
+}
+
+// =============================================================================
+// Balance Sheet Service
+// =============================================================================
+
+// BalanceSheetClassification categorizes balance sheet line items.
+enum BalanceSheetClassification {
+  // BALANCE_SHEET_CLASSIFICATION_UNSPECIFIED is the default value.
+  BALANCE_SHEET_CLASSIFICATION_UNSPECIFIED = 0;
+  // BALANCE_SHEET_CLASSIFICATION_ASSETS represents asset accounts (normal debit balance).
+  BALANCE_SHEET_CLASSIFICATION_ASSETS = 1;
+  // BALANCE_SHEET_CLASSIFICATION_LIABILITIES represents liability accounts (normal credit balance).
+  BALANCE_SHEET_CLASSIFICATION_LIABILITIES = 2;
+  // BALANCE_SHEET_CLASSIFICATION_EQUITY represents equity accounts (normal credit balance).
+  BALANCE_SHEET_CLASSIFICATION_EQUITY = 3;
+}
+
+// NormalBalanceDirection indicates the normal balance direction for an account type.
+enum NormalBalanceDirection {
+  // NORMAL_BALANCE_DIRECTION_UNSPECIFIED is the default value.
+  NORMAL_BALANCE_DIRECTION_UNSPECIFIED = 0;
+  // NORMAL_BALANCE_DIRECTION_DEBIT indicates accounts that normally carry a debit balance.
+  NORMAL_BALANCE_DIRECTION_DEBIT = 1;
+  // NORMAL_BALANCE_DIRECTION_CREDIT indicates accounts that normally carry a credit balance.
+  NORMAL_BALANCE_DIRECTION_CREDIT = 2;
+}
+
+// BalanceSheetService provides CFO Glass Box balance sheet views.
+// It aggregates positions across multiple instruments with classification
+// into ASSETS, LIABILITIES, and EQUITY sections, enabling drill-down
+// to causation trees for full auditability.
+service BalanceSheetService {
+  // GetBalanceSheet returns a multi-asset balance sheet for a tenant,
+  // grouped by classification with totals per instrument.
+  rpc GetBalanceSheet(GetBalanceSheetRequest) returns (GetBalanceSheetResponse) {
+    option (google.api.http) = {
+      get: "/admin/balance-sheet/{tenant_id}"
+    };
+  }
+
+  // GetPositionDetails returns drill-down details for a specific account type
+  // and instrument, including individual positions with causation IDs.
+  rpc GetPositionDetails(GetPositionDetailsRequest) returns (GetPositionDetailsResponse) {
+    option (google.api.http) = {
+      get: "/admin/balance-sheet/{tenant_id}/details/{account_type}/{instrument}"
+    };
+  }
+
+  // ExportBalanceSheetCSV exports the balance sheet as CSV with metadata.
+  rpc ExportBalanceSheetCSV(ExportBalanceSheetCSVRequest) returns (ExportBalanceSheetCSVResponse) {
+    option (google.api.http) = {
+      get: "/admin/balance-sheet/{tenant_id}/export"
+    };
+  }
+}
+
+// GetBalanceSheetRequest requests a balance sheet for a tenant.
+message GetBalanceSheetRequest {
+  // tenant_id identifies the tenant.
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // as_of is an optional point-in-time for the balance sheet (defaults to now).
+  google.protobuf.Timestamp as_of = 2;
+}
+
+// GetBalanceSheetResponse returns the complete balance sheet.
+message GetBalanceSheetResponse {
+  // tenant_id is the tenant this balance sheet belongs to.
+  string tenant_id = 1;
+
+  // as_of is the timestamp when this balance sheet was calculated.
+  google.protobuf.Timestamp as_of = 2;
+
+  // sections contains the balance sheet sections (ASSETS, LIABILITIES, EQUITY).
+  repeated BalanceSheetSection sections = 3;
+}
+
+// BalanceSheetSection represents a classified section of the balance sheet.
+message BalanceSheetSection {
+  // classification is the section type (ASSETS, LIABILITIES, or EQUITY).
+  BalanceSheetClassification classification = 1;
+
+  // line_items contains individual account type balances within this section.
+  repeated BalanceSheetLineItem line_items = 2;
+
+  // totals contains the total balance per instrument for this section.
+  map<string, string> totals = 3;
+}
+
+// BalanceSheetLineItem represents a single line on the balance sheet.
+message BalanceSheetLineItem {
+  // account_type is the account type identifier (e.g., "STRIPE_NOSTRO", "ENERGY_INVENTORY").
+  string account_type = 1;
+
+  // instrument is the instrument code (e.g., "GBP", "KWH").
+  string instrument = 2;
+
+  // quantity is the balance amount as a string decimal.
+  string quantity = 3;
+
+  // normal_balance is the normal balance direction for this account type.
+  NormalBalanceDirection normal_balance = 4;
+
+  // account_count is the number of individual accounts contributing to this line item.
+  int32 account_count = 5;
+}
+
+// GetPositionDetailsRequest requests drill-down details for a position.
+message GetPositionDetailsRequest {
+  // tenant_id identifies the tenant.
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // account_type is the account type to drill into (e.g., "STRIPE_NOSTRO").
+  string account_type = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // instrument is the instrument code to filter by (e.g., "GBP").
+  string instrument = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 32
+  }];
+
+  // as_of is an optional point-in-time for the drill-down (defaults to now).
+  // Should match the as_of used in GetBalanceSheet for consistent results.
+  google.protobuf.Timestamp as_of = 4;
+}
+
+// GetPositionDetailsResponse returns individual positions for drill-down.
+message GetPositionDetailsResponse {
+  // tenant_id is the tenant this data belongs to.
+  string tenant_id = 1;
+
+  // account_type is the account type queried.
+  string account_type = 2;
+
+  // instrument is the instrument queried.
+  string instrument = 3;
+
+  // positions contains individual position records.
+  repeated PositionDetail positions = 4;
+
+  // total is the aggregate total for this account type and instrument.
+  string total = 5;
+}
+
+// PositionDetail represents an individual position with causation link.
+message PositionDetail {
+  // account_id is the individual account identifier.
+  string account_id = 1;
+
+  // quantity is the position balance as a string decimal.
+  string quantity = 2;
+
+  // log_id is the financial position log ID for causation tree lookup.
+  string log_id = 3;
+
+  // last_updated is when this position was last modified.
+  google.protobuf.Timestamp last_updated = 4;
+}
+
+// ExportBalanceSheetCSVRequest requests a CSV export of the balance sheet.
+message ExportBalanceSheetCSVRequest {
+  // tenant_id identifies the tenant.
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // as_of is an optional point-in-time for the balance sheet (defaults to now).
+  google.protobuf.Timestamp as_of = 2;
+}
+
+// ExportBalanceSheetCSVResponse returns the CSV content.
+message ExportBalanceSheetCSVResponse {
+  // csv_content is the complete CSV file content as a string.
+  string csv_content = 1;
+
+  // generated_at is the timestamp when the export was generated.
+  google.protobuf.Timestamp generated_at = 2;
+
+  // tenant_id is the tenant this export belongs to.
+  string tenant_id = 3;
 }
