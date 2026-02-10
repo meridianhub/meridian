@@ -174,16 +174,35 @@ type Repository interface {
 	// Returns ErrCrossTenantParent if the parent belongs to a different tenant.
 	Create(ctx context.Context, node *Node) error
 
+	// Update modifies non-key attributes of a node (attributes, valid_to).
+	// Identity fields (tenant_id, node_type, parent_id, resolution_key) are immutable.
+	// Uses optimistic locking via version column.
+	// Returns ErrNotFound if the node does not exist.
+	// Returns ErrOptimisticLock if the version has changed since the node was read.
+	Update(ctx context.Context, node *Node) error
+
 	// GetByID retrieves a node by its UUID.
 	// Returns ErrNotFound if the node does not exist.
 	GetByID(ctx context.Context, id uuid.UUID) (*Node, error)
 
-	// GetByResolutionKey retrieves the active node matching the resolution key.
-	// Returns ErrNotFound if no active node matches.
-	GetByResolutionKey(ctx context.Context, tenantID, resolutionKey string) (*Node, error)
+	// GetAsAt retrieves the version of a node that was valid at the given time.
+	// Looks up all versions sharing the same tenant_id and resolution_key lineage
+	// where valid_from <= asAt AND (valid_to IS NULL OR valid_to > asAt).
+	// Returns ErrNotFound if no version was valid at the given time.
+	GetAsAt(ctx context.Context, tenantID string, id uuid.UUID, asAt time.Time) (*Node, error)
 
-	// ListChildren returns all active child nodes of the given parent.
-	ListChildren(ctx context.Context, tenantID string, parentID uuid.UUID) ([]*Node, error)
+	// GetHistory returns all temporal versions of a node (active and superseded),
+	// ordered by valid_from descending (newest first).
+	GetHistory(ctx context.Context, tenantID string, id uuid.UUID) ([]*Node, error)
+
+	// GetByResolutionKey retrieves the node matching the resolution key at the given time.
+	// If asAt is zero, retrieves the active node (valid_to IS NULL).
+	// Returns ErrNotFound if no matching node exists.
+	GetByResolutionKey(ctx context.Context, tenantID, resolutionKey string, asAt time.Time) (*Node, error)
+
+	// GetChildren returns child nodes of the given parent.
+	// If activeOnly is true, only returns active nodes (valid_to IS NULL).
+	GetChildren(ctx context.Context, tenantID string, parentID uuid.UUID, activeOnly bool) ([]*Node, error)
 
 	// ListByType returns all active nodes of the given type within a tenant.
 	ListByType(ctx context.Context, tenantID, nodeType string) ([]*Node, error)
@@ -197,11 +216,22 @@ type Repository interface {
 	Supersede(ctx context.Context, nodeID uuid.UUID, newNode *Node) error
 
 	// GetAncestors returns the chain of ancestors from the immediate parent to root.
+	// Uses a recursive CTE for efficient traversal.
 	// Returns empty slice for root nodes.
 	// Returns ErrMaxDepthExceeded if the chain exceeds MaxHierarchyDepth.
 	GetAncestors(ctx context.Context, nodeID uuid.UUID) ([]*Node, error)
 
+	// GetSubtree returns all descendants of a root node up to maxDepth levels.
+	// The root node itself is included at depth 0.
+	// Uses a recursive CTE with depth limit for efficient traversal.
+	GetSubtree(ctx context.Context, tenantID string, rootID uuid.UUID, maxDepth int) ([]*Node, error)
+
 	// GetAtTime retrieves the node state that was valid at the given effective time.
 	// Uses bi-temporal query: valid_from <= asOf < valid_to (or valid_to IS NULL).
 	GetAtTime(ctx context.Context, tenantID, resolutionKey string, asOf time.Time) (*Node, error)
+
+	// BulkCreate inserts multiple nodes in a single transaction.
+	// Resolution keys are computed automatically for each node.
+	// The nodes should be ordered such that parents appear before children.
+	BulkCreate(ctx context.Context, nodes []*Node) error
 }
