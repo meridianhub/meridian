@@ -403,3 +403,62 @@ func TestExtractInstrument(t *testing.T) {
 	emptyLog := makeLog("test_CASH_001", "log-2", "GBP")
 	assert.Equal(t, "UNKNOWN", extractInstrument(emptyLog))
 }
+
+// paginatedMockPKClient returns logs across multiple pages to test pagination.
+type paginatedMockPKClient struct {
+	// pages maps page token -> (logs, nextPageToken). Empty string key is the first page.
+	pages map[string]struct {
+		logs      []*positionkeepingv1.FinancialPositionLog
+		nextToken string
+	}
+}
+
+func (m *paginatedMockPKClient) ListFinancialPositionLogs(_ context.Context, req *positionkeepingv1.ListFinancialPositionLogsRequest) (*positionkeepingv1.ListFinancialPositionLogsResponse, error) {
+	pageToken := req.GetPagination().GetPageToken()
+	page := m.pages[pageToken]
+	return &positionkeepingv1.ListFinancialPositionLogsResponse{
+		Logs: page.logs,
+		Pagination: &commonv1.PaginationResponse{
+			NextPageToken: page.nextToken,
+		},
+	}, nil
+}
+
+func (m *paginatedMockPKClient) GetAccountBalance(_ context.Context, _ *positionkeepingv1.GetAccountBalanceRequest) (*positionkeepingv1.GetAccountBalanceResponse, error) {
+	return nil, nil
+}
+
+func TestGetBalanceSheet_Pagination(t *testing.T) {
+	page1Logs := []*positionkeepingv1.FinancialPositionLog{
+		makeLog("acme_CASH_001", "log-1", "GBP",
+			txnEntry{units: 1000, nanos: 0, direction: "DEBIT"},
+		),
+	}
+	page2Logs := []*positionkeepingv1.FinancialPositionLog{
+		makeLog("acme_CASH_002", "log-2", "GBP",
+			txnEntry{units: 2000, nanos: 0, direction: "DEBIT"},
+		),
+	}
+
+	client := &paginatedMockPKClient{
+		pages: map[string]struct {
+			logs      []*positionkeepingv1.FinancialPositionLog
+			nextToken string
+		}{
+			"":      {logs: page1Logs, nextToken: "page2"},
+			"page2": {logs: page2Logs, nextToken: ""},
+		},
+	}
+
+	svc := NewBalanceSheetService(client, nil)
+	bs, err := svc.GetBalanceSheet(context.Background(), "acme", time.Now())
+	require.NoError(t, err)
+
+	// Should have aggregated logs from both pages
+	assetsSection := bs.Sections[0]
+	require.Len(t, assetsSection.LineItems, 1)
+	assert.Equal(t, "CASH", assetsSection.LineItems[0].AccountType)
+	assert.True(t, assetsSection.LineItems[0].Quantity.Equal(decimal.NewFromInt(3000)),
+		"expected 3000 (1000+2000 from two pages), got %s", assetsSection.LineItems[0].Quantity)
+	assert.Equal(t, int32(2), assetsSection.LineItems[0].AccountCount)
+}

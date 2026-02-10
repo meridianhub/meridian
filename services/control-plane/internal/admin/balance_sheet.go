@@ -262,16 +262,36 @@ func (s *BalanceSheetService) ExportBalanceSheetCSV(ctx context.Context, tenantI
 	return buf.String(), nil
 }
 
-// fetchPositionLogs retrieves all position logs for a tenant from position-keeping.
+// fetchPositionLogs retrieves all position logs for a tenant from position-keeping,
+// handling cursor-based pagination to collect all pages.
 func (s *BalanceSheetService) fetchPositionLogs(ctx context.Context, tenantID string) ([]*positionkeepingv1.FinancialPositionLog, error) {
-	resp, err := s.pkClient.ListFinancialPositionLogs(ctx, &positionkeepingv1.ListFinancialPositionLogsRequest{
-		AccountId: tenantID,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("list position logs: %w", err)
+	var allLogs []*positionkeepingv1.FinancialPositionLog
+	var pageToken string
+
+	for {
+		req := &positionkeepingv1.ListFinancialPositionLogsRequest{
+			AccountId: tenantID,
+		}
+		if pageToken != "" {
+			req.Pagination = &commonv1.Pagination{
+				PageToken: pageToken,
+			}
+		}
+
+		resp, err := s.pkClient.ListFinancialPositionLogs(ctx, req)
+		if err != nil {
+			return nil, fmt.Errorf("list position logs: %w", err)
+		}
+
+		allLogs = append(allLogs, resp.GetLogs()...)
+
+		pageToken = resp.GetPagination().GetNextPageToken()
+		if pageToken == "" {
+			break
+		}
 	}
 
-	return resp.GetLogs(), nil
+	return allLogs, nil
 }
 
 // aggregateAndClassify groups position logs by account type and instrument,
