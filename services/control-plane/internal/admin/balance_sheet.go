@@ -119,7 +119,8 @@ func (s *BalanceSheetService) GetBalanceSheet(ctx context.Context, tenantID stri
 		"as_of", asOf,
 	)
 
-	if asOf.IsZero() {
+	// A nil proto Timestamp converts to Unix epoch (1970-01-01), not Go's zero time.
+	if asOf.IsZero() || asOf.Unix() == 0 {
 		asOf = time.Now().UTC()
 	}
 
@@ -201,7 +202,7 @@ func (s *BalanceSheetService) ExportBalanceSheetCSV(ctx context.Context, tenantI
 	if err := w.Write([]string{"# Balance Sheet Export"}); err != nil {
 		return "", fmt.Errorf("write metadata: %w", err)
 	}
-	if err := w.Write([]string{"# Tenant", bs.TenantID}); err != nil {
+	if err := w.Write([]string{"# Tenant", sanitizeCSVCell(bs.TenantID)}); err != nil {
 		return "", fmt.Errorf("write tenant: %w", err)
 	}
 	if err := w.Write([]string{"# Generated At", bs.AsOf.Format(time.RFC3339)}); err != nil {
@@ -295,6 +296,18 @@ func (s *BalanceSheetService) fetchPositionLogs(ctx context.Context, tenantID st
 		if pageToken == "" {
 			break
 		}
+	}
+
+	// The API's date_range filter uses date-only granularity, so apply client-side
+	// timestamp filtering for point-in-time accuracy.
+	if !asOf.IsZero() {
+		filtered := allLogs[:0]
+		for _, log := range allLogs {
+			if !log.GetCreatedAt().AsTime().After(asOf) {
+				filtered = append(filtered, log)
+			}
+		}
+		allLogs = filtered
 	}
 
 	return allLogs, nil
