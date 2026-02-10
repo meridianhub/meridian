@@ -320,8 +320,53 @@ Update `cmd/main.go` to:
 1. Unit tests for each wired handler (mock repositories)
 2. Integration tests for persistence repositories (CockroachDB
    testcontainers)
-3. Update e2e tests to use gRPC transport instead of direct service
-   calls
+
+### Phase 5: Migrate E2E Tests to gRPC Transport - 5 SP
+
+This phase addresses the root cause that triggered this PRD: the
+e2e test suite (PR #846) bypasses gRPC transport entirely, calling
+the service layer directly. Once handlers are wired, the e2e tests
+must be migrated to exercise the full gRPC stack.
+
+**Current state** (`tests/reconciliation-e2e/`):
+
+- 25 tests across 5 files call service-layer methods directly
+  (e.g., `infra.capturer.CaptureSnapshots()`,
+  `infra.grpcService.InitiateDispute()`)
+- The `e2eTestInfra` struct instantiates service components
+  in-process without gRPC transport
+- Dispute tests already use gRPC (via `infra.grpcService`) but
+  settlement lifecycle tests do not
+
+**What needs to change**:
+
+1. Update `e2eTestInfra` to start an in-process gRPC server with
+   `AccountReconciliationService` registered (using
+   `bufconn` or `grpc.NewServer()` with a test listener)
+2. Create a gRPC client connected to the test server
+3. Migrate settlement lifecycle tests to use gRPC client:
+   - `TestSettlement_FullLifecycle` -> call
+     `InitiateAccountReconciliation`, `ExecuteAccountReconciliation`,
+     `RetrieveAccountReconciliation`
+   - `TestSettlement_CancelRun` -> call
+     `ControlAccountReconciliation` with CANCEL
+   - `TestSettlement_ListVariances` -> call
+     `ListReconciliationResults`
+4. Migrate snapshot/variance tests to use Execute RPC instead
+   of direct capturer/detector calls
+5. Verify proto request/response mapping round-trips correctly
+6. Keep existing direct service-layer tests as a fallback
+   regression suite (rename with `_direct` suffix) or remove
+   if redundant
+
+**Acceptance criteria**:
+
+- All 25 e2e tests pass through gRPC transport
+- No test calls service-layer methods directly for operations
+  that have a corresponding gRPC handler
+- Proto enum mapping is validated end-to-end
+- Error codes (NotFound, InvalidArgument, PermissionDenied)
+  are verified at the gRPC level
 
 ## Total Scope Assessment
 
@@ -330,14 +375,16 @@ Update `cmd/main.go` to:
 | Phase 1: Persistence | 8 | PR #1 |
 | Phase 2: Wire handlers | 8 | PR #2 |
 | Phase 3: Main wiring | 3 | PR #2 (same) |
-| Phase 4: Tests | 5 | PR #3 |
-| **Total** | **24** | **3 PRs** |
+| Phase 4: Unit + integration tests | 5 | PR #2 (same) |
+| Phase 5: E2E migration to gRPC | 5 | PR #3 |
+| **Total** | **29** | **3 PRs** |
 
 **Recommended PR strategy**: 3 PRs for manageable review units:
 
 - PR 1 (8 SP): Persistence repositories with integration tests
-- PR 2 (11 SP): Handler wiring + main.go + unit tests
-- PR 3 (5 SP): e2e test migration to gRPC transport
+- PR 2 (16 SP): Handler wiring + main.go + unit/integration tests
+- PR 3 (5 SP): Migrate e2e tests to gRPC transport (closes the
+  loop from PR #846)
 
 ## Design Decisions
 
