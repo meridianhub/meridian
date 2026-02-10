@@ -36,6 +36,7 @@ var (
 	ErrTenantContextRequired = errors.New("tenant context required")
 	ErrObservationNotFound   = errors.New("forward curve observation not found")
 	ErrUnexpectedResultType  = errors.New("unexpected result type from singleflight")
+	ErrNilSource             = errors.New("source must not be nil")
 )
 
 // Prometheus metrics for forward curve cache.
@@ -175,8 +176,12 @@ func WithL2Prefix(prefix string) Option {
 }
 
 // NewForwardCurveCache creates a new tiered forward curve cache.
-// If l2 is nil, L2 caching is disabled (L1 -> L3 only).
+// Source must not be nil. If l2 is nil, L2 caching is disabled (L1 -> L3 only).
 func NewForwardCurveCache(source Source, l2 L2Client, opts ...Option) (*ForwardCurveCache, error) {
+	if source == nil {
+		return nil, ErrNilSource
+	}
+
 	l1, err := lru.New[l1Key, *l1Entry](DefaultL1Size)
 	if err != nil {
 		return nil, fmt.Errorf("create L1 cache: %w", err)
@@ -308,10 +313,13 @@ func (c *ForwardCurveCache) GetRange(ctx context.Context, resolutionKey string, 
 		}
 
 		// Try L1
-		if entry, found := c.l1.Get(key); found && time.Now().Before(entry.expiresAt) {
-			obsByEpoch[hourEpoch] = entry.obs
-			current = current.Add(time.Hour)
-			continue
+		if entry, found := c.l1.Get(key); found {
+			if time.Now().Before(entry.expiresAt) {
+				obsByEpoch[hourEpoch] = entry.obs
+				current = current.Add(time.Hour)
+				continue
+			}
+			c.l1.Remove(key)
 		}
 
 		// Try L2
