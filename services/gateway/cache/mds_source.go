@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -77,7 +78,12 @@ func (s *MDSSource) GetForwardPriceRange(ctx context.Context, resolutionKey stri
 	for _, proto := range resp.Observations {
 		obs, err := protoToObservation(proto)
 		if err != nil {
-			continue // skip malformed observations
+			slog.Warn("skipping malformed observation",
+				"dataset_code", s.datasetCode,
+				"observation_id", proto.GetId(),
+				"error", err,
+			)
+			continue
 		}
 		obs.Unit = s.unit
 		observations = append(observations, obs)

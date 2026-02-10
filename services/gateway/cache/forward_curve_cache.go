@@ -138,12 +138,17 @@ type ForwardCurveCache struct {
 type Option func(*ForwardCurveCache)
 
 // WithL1Size sets the maximum number of entries in the L1 cache.
+// Size must be positive; non-positive values are ignored.
 func WithL1Size(size int) Option {
 	return func(c *ForwardCurveCache) {
-		newL1, err := lru.New[l1Key, *l1Entry](size)
-		if err == nil {
-			c.l1 = newL1
+		if size <= 0 {
+			return
 		}
+		newL1, err := lru.New[l1Key, *l1Entry](size)
+		if err != nil {
+			return
+		}
+		c.l1 = newL1
 	}
 }
 
@@ -273,13 +278,12 @@ func (c *ForwardCurveCache) Get(ctx context.Context, resolutionKey string, ts ti
 
 // GetRange retrieves multiple forward curve observations in a time range.
 // Tries L1/L2 for each hourly bucket, falls back to L3 for misses.
+// Results are returned in chronological order by ValidFrom.
 func (c *ForwardCurveCache) GetRange(ctx context.Context, resolutionKey string, start, end time.Time) ([]*Observation, error) {
 	tenantID, ok := tenant.FromContext(ctx)
 	if !ok {
 		return nil, ErrTenantContextRequired
 	}
-
-	var observations []*Observation
 
 	// Iterate over hourly buckets
 	current := start.Truncate(time.Hour)
@@ -288,11 +292,15 @@ func (c *ForwardCurveCache) GetRange(ctx context.Context, resolutionKey string, 
 		endTrunc = endTrunc.Add(time.Hour)
 	}
 
+	// Collect hourly epochs in order and observations by epoch
+	var hours []int64
+	obsByEpoch := make(map[int64]*Observation)
 	var missStart *time.Time
 	var missEnd *time.Time
 
 	for !current.After(endTrunc) {
 		hourEpoch := current.Unix()
+		hours = append(hours, hourEpoch)
 		key := l1Key{
 			TenantID:      string(tenantID),
 			ResolutionKey: resolutionKey,
@@ -301,7 +309,7 @@ func (c *ForwardCurveCache) GetRange(ctx context.Context, resolutionKey string, 
 
 		// Try L1
 		if entry, found := c.l1.Get(key); found && time.Now().Before(entry.expiresAt) {
-			observations = append(observations, entry.obs)
+			obsByEpoch[hourEpoch] = entry.obs
 			current = current.Add(time.Hour)
 			continue
 		}
@@ -310,7 +318,7 @@ func (c *ForwardCurveCache) GetRange(ctx context.Context, resolutionKey string, 
 		obs := c.getFromL2(ctx, string(tenantID), resolutionKey, hourEpoch)
 		if obs != nil {
 			c.putL1(key, obs)
-			observations = append(observations, obs)
+			obsByEpoch[hourEpoch] = obs
 			current = current.Add(time.Hour)
 			continue
 		}
@@ -332,7 +340,7 @@ func (c *ForwardCurveCache) GetRange(ctx context.Context, resolutionKey string, 
 			return nil, err
 		}
 
-		// Populate caches and merge results
+		// Populate caches and index by epoch
 		for _, obs := range rangeObs {
 			hourEpoch := truncateToHour(obs.ValidFrom)
 			key := l1Key{
@@ -342,6 +350,14 @@ func (c *ForwardCurveCache) GetRange(ctx context.Context, resolutionKey string, 
 			}
 			c.putL1(key, obs)
 			c.putL2(ctx, string(tenantID), resolutionKey, hourEpoch, obs)
+			obsByEpoch[hourEpoch] = obs
+		}
+	}
+
+	// Assemble results in chronological order
+	observations := make([]*Observation, 0, len(obsByEpoch))
+	for _, epoch := range hours {
+		if obs, ok := obsByEpoch[epoch]; ok {
 			observations = append(observations, obs)
 		}
 	}

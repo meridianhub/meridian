@@ -252,13 +252,56 @@ func TestAvgForwardPrice_StartAfterEnd(t *testing.T) {
 }
 
 func TestForwardCurveLib_LibraryName(t *testing.T) {
-	lib := &forwardCurveLibrary{}
+	lib := &ForwardCurveLibrary{}
 	assert.Equal(t, "meridian.ForwardCurve", lib.LibraryName())
 }
 
 func TestForwardCurveLib_ProgramOptions(t *testing.T) {
-	lib := &forwardCurveLibrary{}
+	lib := &ForwardCurveLibrary{}
 	assert.Nil(t, lib.ProgramOptions())
+}
+
+func TestSetContext_UpdatesTenantContext(t *testing.T) {
+	source := newStubSource()
+	ts := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	source.addObs("ELEC_PEAK", ts, "45.50")
+
+	cache, err := gatewaycache.NewForwardCurveCache(source, nil)
+	require.NoError(t, err)
+
+	// Create library with initial context
+	initialCtx := tenantCtx(t)
+	lib := NewForwardCurveLibrary(initialCtx, cache)
+
+	env, err := cel.NewEnv(
+		cel.Variable("timestamp", cel.TimestampType),
+		lib.EnvOption(),
+	)
+	require.NoError(t, err)
+
+	ast, issues := env.Compile(`forward_price("ELEC_PEAK", timestamp)`)
+	require.Nil(t, issues)
+
+	prg, err := env.Program(ast)
+	require.NoError(t, err)
+
+	// Evaluate with initial context
+	out, _, err := prg.Eval(map[string]interface{}{
+		"timestamp": ts,
+	})
+	require.NoError(t, err)
+	assert.InDelta(t, 45.50, out.Value().(float64), 0.001)
+
+	// Update context to a different tenant and reuse the same program
+	newCtx := tenant.WithTenant(context.Background(), "other-tenant")
+	lib.SetContext(newCtx)
+
+	// Same program, different tenant context - should still work
+	out, _, err = prg.Eval(map[string]interface{}{
+		"timestamp": ts,
+	})
+	require.NoError(t, err)
+	assert.InDelta(t, 45.50, out.Value().(float64), 0.001)
 }
 
 func TestForwardPrice_WithMockedCache(t *testing.T) {
