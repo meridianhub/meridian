@@ -130,9 +130,12 @@ func (r *SettlementRunRepository) Update(ctx context.Context, run *domain.Settle
 	if rowsAffected == 0 {
 		// Determine if the run doesn't exist or the version conflicted
 		var count int64
-		_ = r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		countErr := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 			return tx.Model(&SettlementRunEntity{}).Where("run_id = ?", entity.RunID).Count(&count).Error
 		})
+		if countErr != nil {
+			return countErr
+		}
 		if count == 0 {
 			return domain.ErrNotFound
 		}
