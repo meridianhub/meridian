@@ -63,11 +63,12 @@ func (t *SettlementTransformer) transformOne(
 	accountID string,
 	bt *stripego.BalanceTransaction,
 ) (*domain.SettlementSnapshot, error) {
-	// Stripe amounts are in the smallest currency unit (cents).
-	// Convert to decimal for the domain model.
-	netAmount := centsToDecimal(bt.Net)
+	// Stripe amounts are in the smallest currency unit (cents for most currencies).
+	// Zero-decimal currencies (JPY, KRW, etc.) are not divided by 100.
+	currency := strings.ToUpper(string(bt.Currency))
+	netAmount := amountToDecimal(bt.Net, currency)
 
-	instrumentCode := strings.ToUpper(string(bt.Currency))
+	instrumentCode := currency
 	settlementDate := time.Unix(bt.AvailableOn, 0).UTC()
 
 	attrs := map[string]string{
@@ -75,8 +76,8 @@ func (t *SettlementTransformer) transformOne(
 		"stripe_type":           string(bt.Type),
 		"settlement_type":       string(mapTransactionType(bt.Type)),
 		"settlement_date":       settlementDate.Format(time.RFC3339),
-		"gross_amount":          centsToDecimal(bt.Amount).String(),
-		"fee_amount":            centsToDecimal(bt.Fee).String(),
+		"gross_amount":          amountToDecimal(bt.Amount, currency).String(),
+		"fee_amount":            amountToDecimal(bt.Fee, currency).String(),
 		"net_amount":            netAmount.String(),
 		"source_system":         SourceSystemStripe,
 		"data_source_type":      "NOSTRO_VOSTRO",
@@ -154,7 +155,19 @@ func mapTransactionType(stripeType stripego.BalanceTransactionType) SettlementTr
 	}
 }
 
-// centsToDecimal converts an amount in smallest currency unit (cents) to decimal.
-func centsToDecimal(cents int64) decimal.Decimal {
-	return decimal.NewFromInt(cents).Div(decimal.NewFromInt(100))
+// zeroDecimalCurrencies lists Stripe currencies that do not use subunits.
+// See: https://docs.stripe.com/currencies#zero-decimal
+var zeroDecimalCurrencies = map[string]bool{
+	"BIF": true, "CLP": true, "DJF": true, "GNF": true, "JPY": true,
+	"KMF": true, "KRW": true, "MGA": true, "PYG": true, "RWF": true,
+	"UGX": true, "VND": true, "VUV": true, "XAF": true, "XOF": true, "XPF": true,
+}
+
+// amountToDecimal converts a Stripe amount to decimal based on currency.
+// Zero-decimal currencies (JPY, KRW, etc.) are not divided by 100.
+func amountToDecimal(amount int64, currency string) decimal.Decimal {
+	if zeroDecimalCurrencies[strings.ToUpper(currency)] {
+		return decimal.NewFromInt(amount)
+	}
+	return decimal.NewFromInt(amount).Div(decimal.NewFromInt(100))
 }

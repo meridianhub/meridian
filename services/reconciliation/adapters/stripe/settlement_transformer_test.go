@@ -222,6 +222,31 @@ func TestSettlementTransformer_TransformToSnapshots(t *testing.T) {
 		assert.False(t, hasSourceID)
 	})
 
+	t.Run("zero-decimal currency JPY amounts are not divided by 100", func(t *testing.T) {
+		transactions := []*stripego.BalanceTransaction{
+			{
+				ID:          "txn_jpy_001",
+				Amount:      1000, // 1000 JPY (NOT 10.00 JPY)
+				Net:         970,  // 970 JPY
+				Fee:         30,   // 30 JPY
+				Currency:    "jpy",
+				Type:        stripego.BalanceTransactionTypeCharge,
+				AvailableOn: time.Now().Unix(),
+			},
+		}
+
+		snapshots, err := transformer.TransformToSnapshots(runID, accountID, transactions)
+		require.NoError(t, err)
+		require.Len(t, snapshots, 1)
+
+		snap := snapshots[0]
+		assert.Equal(t, "JPY", snap.InstrumentCode)
+		assert.True(t, decimal.NewFromInt(970).Equal(snap.ActualBalance), "expected 970 JPY, got %s", snap.ActualBalance)
+		assert.Equal(t, "1000", snap.Attributes["gross_amount"])
+		assert.Equal(t, "30", snap.Attributes["fee_amount"])
+		assert.Equal(t, "970", snap.Attributes["net_amount"])
+	})
+
 	t.Run("empty description is omitted", func(t *testing.T) {
 		transactions := []*stripego.BalanceTransaction{
 			{ID: "txn_nodesc", Amount: 100, Net: 100, Currency: "gbp", Type: stripego.BalanceTransactionTypeCharge, AvailableOn: time.Now().Unix()},
@@ -270,24 +295,52 @@ func TestMapTransactionType(t *testing.T) {
 	}
 }
 
-func TestCentsToDecimal(t *testing.T) {
-	tests := []struct {
-		cents    int64
-		expected string
-	}{
-		{1000, "10"},
-		{999, "9.99"},
-		{1, "0.01"},
-		{0, "0"},
-		{-500, "-5"},
-		{-1, "-0.01"},
-		{100050, "1000.5"},
-	}
+func TestAmountToDecimal(t *testing.T) {
+	t.Run("standard currency divides by 100", func(t *testing.T) {
+		tests := []struct {
+			amount   int64
+			expected string
+		}{
+			{1000, "10"},
+			{999, "9.99"},
+			{1, "0.01"},
+			{0, "0"},
+			{-500, "-5"},
+			{-1, "-0.01"},
+			{100050, "1000.5"},
+		}
 
-	for _, tt := range tests {
-		t.Run(tt.expected, func(t *testing.T) {
-			result := centsToDecimal(tt.cents)
-			assert.Equal(t, tt.expected, result.String())
-		})
-	}
+		for _, tt := range tests {
+			t.Run(tt.expected, func(t *testing.T) {
+				result := amountToDecimal(tt.amount, "GBP")
+				assert.Equal(t, tt.expected, result.String())
+			})
+		}
+	})
+
+	t.Run("zero-decimal currency does not divide", func(t *testing.T) {
+		tests := []struct {
+			amount   int64
+			currency string
+			expected string
+		}{
+			{1000, "JPY", "1000"},
+			{500, "KRW", "500"},
+			{1, "VND", "1"},
+			{0, "BIF", "0"},
+			{-200, "XAF", "-200"},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.currency+"_"+tt.expected, func(t *testing.T) {
+				result := amountToDecimal(tt.amount, tt.currency)
+				assert.Equal(t, tt.expected, result.String())
+			})
+		}
+	})
+
+	t.Run("case insensitive currency check", func(t *testing.T) {
+		result := amountToDecimal(1000, "jpy")
+		assert.Equal(t, "1000", result.String())
+	})
 }
