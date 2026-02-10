@@ -227,6 +227,32 @@ func TestClientFactory_CircuitBreaker_TripsOnRepeatedFailures(t *testing.T) {
 	assert.ErrorIs(t, err, ErrCircuitOpen)
 }
 
+func TestClientFactory_CircuitBreaker_TenantNotFoundDoesNotTrip(t *testing.T) {
+	// ErrTenantConfigNotFound is a business error, not infrastructure failure.
+	// It should NOT trip the circuit breaker.
+	provider := newMockProvider(map[string]TenantConfig{})
+	// Provider returns ErrTenantConfigNotFound for unknown tenants (default behavior)
+
+	cfg := testConfig()
+	cfg.MaxRetries = 0
+	cfg.CircuitBreakerFailureThreshold = 3
+
+	factory, err := NewClientFactory(cfg, provider, nil)
+	require.NoError(t, err)
+
+	// Request config for many nonexistent tenants
+	for i := 0; i < 10; i++ {
+		ctx := tenantCtx("nonexistent")
+		_, err := factory.NewClient(ctx)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrTenantConfigNotFound)
+	}
+
+	// Circuit should still be closed
+	assert.Equal(t, gobreaker.StateClosed, factory.CircuitBreakerState(),
+		"tenant-not-found errors should not trip the circuit breaker")
+}
+
 func TestClientFactory_ContextCancellation(t *testing.T) {
 	provider := newMockProvider(map[string]TenantConfig{})
 	provider.setError(errors.New("slow provider"))

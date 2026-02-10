@@ -98,6 +98,14 @@ func NewClientFactory(cfg Config, provider TenantConfigProvider, logger *slog.Lo
 		MaxRequests: cfg.CircuitBreakerMaxRequests,
 		Interval:    cfg.CircuitBreakerInterval,
 		Timeout:     cfg.CircuitBreakerTimeout,
+		IsSuccessful: func(err error) bool {
+			if err == nil {
+				return true
+			}
+			// Tenant-not-found is a business logic error, not an infrastructure failure.
+			// Don't let missing tenant configs trip the breaker for other tenants.
+			return errors.Is(err, ErrTenantConfigNotFound)
+		},
 		ReadyToTrip: func(counts gobreaker.Counts) bool {
 			return counts.ConsecutiveFailures >= cfg.CircuitBreakerFailureThreshold
 		},
@@ -212,6 +220,7 @@ func (f *ClientFactory) fetchWithResilience(ctx context.Context, tenantID string
 			return f.configProvider.GetTenantConfig(tenantID)
 		})
 		if err != nil {
+			// Circuit breaker open - don't retry
 			if errors.Is(err, gobreaker.ErrOpenState) || errors.Is(err, gobreaker.ErrTooManyRequests) {
 				f.logger.Warn("stripe config circuit breaker open",
 					"tenant_id", tenantID,
@@ -220,17 +229,18 @@ func (f *ClientFactory) fetchWithResilience(ctx context.Context, tenantID string
 				return backoff.Permanent(fmt.Errorf("%w: %v", ErrCircuitOpen, err)) //nolint:errorlint // second error is context-only
 			}
 
+			// Business logic errors - don't retry or log as infrastructure failure
+			if errors.Is(err, ErrTenantConfigNotFound) {
+				return backoff.Permanent(err)
+			}
+
+			// Infrastructure failure - check retry budget
 			if attempt >= maxAttempts {
 				f.logger.Error("stripe config fetch failed after max retries",
 					"tenant_id", tenantID,
 					"attempts", attempt,
 					"error", err,
 				)
-				return backoff.Permanent(err)
-			}
-
-			// Don't retry config-not-found errors
-			if errors.Is(err, ErrTenantConfigNotFound) {
 				return backoff.Permanent(err)
 			}
 
