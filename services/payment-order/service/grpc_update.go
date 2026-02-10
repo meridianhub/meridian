@@ -142,6 +142,19 @@ func (s *Service) UpdatePaymentOrder(ctx context.Context, req *pb.UpdatePaymentO
 		}
 		response = &pb.UpdatePaymentOrderResponse{PaymentOrder: toProto(po)}
 
+	case pb.GatewayStatus_GATEWAY_STATUS_REFUNDED:
+		s.logger.Info("refund webhook received, acknowledgment only",
+			"payment_order_id", po.ID,
+			"gateway_reference_id", req.GatewayReferenceId)
+		response = &pb.UpdatePaymentOrderResponse{PaymentOrder: toProto(po)}
+
+	case pb.GatewayStatus_GATEWAY_STATUS_DISPUTED:
+		s.logger.Warn("dispute webhook received, acknowledgment only",
+			"payment_order_id", po.ID,
+			"gateway_reference_id", req.GatewayReferenceId,
+			"gateway_message", req.GatewayMessage)
+		response = &pb.UpdatePaymentOrderResponse{PaymentOrder: toProto(po)}
+
 	case pb.GatewayStatus_GATEWAY_STATUS_UNSPECIFIED:
 		operationStatus = opStatusError
 		s.storeIdempotencyFailure(ctx, idempKey, "gateway status is required")

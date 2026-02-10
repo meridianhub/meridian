@@ -117,6 +117,10 @@ enum GatewayStatus {
   GATEWAY_STATUS_REJECTED = 2;
   // GATEWAY_STATUS_PENDING means the gateway is still processing the payment.
   GATEWAY_STATUS_PENDING = 3;
+  // GATEWAY_STATUS_REFUNDED means the gateway has confirmed a refund was processed.
+  GATEWAY_STATUS_REFUNDED = 4;
+  // GATEWAY_STATUS_DISPUTED means the payment is under dispute (chargeback).
+  GATEWAY_STATUS_DISPUTED = 5;
 }
 
 // LienExecutionStatus tracks the status of lien execution for completed payment orders.

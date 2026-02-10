@@ -323,6 +323,12 @@ func TestMapGatewayStatus(t *testing.T) {
 		{"Pending", "Pending", pb.GatewayStatus_GATEWAY_STATUS_PENDING, false},
 		{"PENDING", "PENDING", pb.GatewayStatus_GATEWAY_STATUS_PENDING, false},
 		{"pending", "pending", pb.GatewayStatus_GATEWAY_STATUS_PENDING, false},
+		{"Refunded", "Refunded", pb.GatewayStatus_GATEWAY_STATUS_REFUNDED, false},
+		{"REFUNDED", "REFUNDED", pb.GatewayStatus_GATEWAY_STATUS_REFUNDED, false},
+		{"refunded", "refunded", pb.GatewayStatus_GATEWAY_STATUS_REFUNDED, false},
+		{"Disputed", "Disputed", pb.GatewayStatus_GATEWAY_STATUS_DISPUTED, false},
+		{"DISPUTED", "DISPUTED", pb.GatewayStatus_GATEWAY_STATUS_DISPUTED, false},
+		{"disputed", "disputed", pb.GatewayStatus_GATEWAY_STATUS_DISPUTED, false},
 		{"unknown_status", "Unknown", pb.GatewayStatus_GATEWAY_STATUS_UNSPECIFIED, true},
 		{"empty_status", "", pb.GatewayStatus_GATEWAY_STATUS_UNSPECIFIED, true},
 	}
