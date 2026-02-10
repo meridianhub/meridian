@@ -47,6 +47,9 @@ message Manifest {
   // initial chart of accounts, industry-specific lookups).
   // Uses google.protobuf.Struct for flexible JSONB representation.
   google.protobuf.Struct seed_data = 7;
+
+  // payment_rails defines external payment provider integrations for this tenant.
+  repeated PaymentRails payment_rails = 8;
 }
 
 // ========================================
@@ -275,5 +278,112 @@ message SagaDefinition {
   string script = 3 [(buf.validate.field).string = {
     min_len: 1
     max_len: 65536
+  }];
+}
+
+// ========================================
+// Payment Rails
+// ========================================
+
+// PlatformFeeType defines how the platform fee is calculated.
+enum PlatformFeeType {
+  // PLATFORM_FEE_TYPE_UNSPECIFIED means the fee type is unknown.
+  PLATFORM_FEE_TYPE_UNSPECIFIED = 0;
+  // PLATFORM_FEE_TYPE_PERCENTAGE calculates the fee as a percentage of the transaction amount.
+  PLATFORM_FEE_TYPE_PERCENTAGE = 1;
+  // PLATFORM_FEE_TYPE_FLAT applies a fixed fee amount per transaction.
+  PLATFORM_FEE_TYPE_FLAT = 2;
+}
+
+// PayoutSchedule defines when connected account payouts are initiated.
+enum PayoutSchedule {
+  // PAYOUT_SCHEDULE_UNSPECIFIED means the schedule is unknown.
+  PAYOUT_SCHEDULE_UNSPECIFIED = 0;
+  // PAYOUT_SCHEDULE_DAILY initiates payouts once per day.
+  PAYOUT_SCHEDULE_DAILY = 1;
+  // PAYOUT_SCHEDULE_WEEKLY initiates payouts once per week.
+  PAYOUT_SCHEDULE_WEEKLY = 2;
+  // PAYOUT_SCHEDULE_MONTHLY initiates payouts once per month.
+  PAYOUT_SCHEDULE_MONTHLY = 3;
+}
+
+// ConnectMode defines the Stripe Connect account type.
+enum ConnectMode {
+  // CONNECT_MODE_UNSPECIFIED means the mode is unknown.
+  CONNECT_MODE_UNSPECIFIED = 0;
+  // CONNECT_MODE_STANDARD uses standard Stripe Connect accounts.
+  CONNECT_MODE_STANDARD = 1;
+  // CONNECT_MODE_EXPRESS uses express Stripe Connect accounts.
+  CONNECT_MODE_EXPRESS = 2;
+}
+
+// PlatformFee defines the fee structure for payment rail transactions.
+message PlatformFee {
+  // type defines whether the fee is a percentage or flat amount.
+  PlatformFeeType type = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // value is the fee amount as a decimal string.
+  // For PERCENTAGE: "2.5" means 2.5%.
+  // For FLAT: "0.30" means 0.30 in the transaction currency.
+  // Must be a valid positive decimal value.
+  string value = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 32
+  }];
+}
+
+// PaymentRails defines an external payment provider integration.
+// Currently supports Stripe Connect for payment processing.
+message PaymentRails {
+  // provider identifies the payment provider (e.g., "stripe_connect").
+  string provider = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 64
+  }];
+
+  // mode defines the Stripe Connect account type (standard or express).
+  ConnectMode mode = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // account_id is the Stripe Connect account identifier (format: acct_xxx).
+  string account_id = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+    pattern: "^acct_[A-Za-z0-9]{16,}$"
+  }];
+
+  // webhook_endpoint_secret is a reference to the webhook signing secret
+  // stored in a secret manager (e.g., "sm://stripe/webhook_secret").
+  // Never contains the plaintext secret.
+  string webhook_endpoint_secret = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 512
+  }];
+
+  // platform_fee defines the fee structure for transactions on this rail.
+  PlatformFee platform_fee = 5 [(buf.validate.field).required = true];
+
+  // payout_schedule defines when connected account payouts are initiated.
+  PayoutSchedule payout_schedule = 6 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // supported_methods lists the payment methods enabled on this rail
+  // (e.g., "card", "sepa_debit", "bank_account").
+  repeated string supported_methods = 7 [(buf.validate.field).repeated = {
+    min_items: 1
+    items: {
+      string: {
+        min_len: 1
+        max_len: 64
+        pattern: "^[a-z][a-z0-9_]*$"
+      }
+    }
   }];
 }
