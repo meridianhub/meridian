@@ -1,0 +1,19 @@
+# Port Configuration: See shared/platform/ports/ports.go for canonical port assignments.
+# This service uses ports.Forecasting (50061) for gRPC.
+apiVersion: v1
+kind: Service
+metadata:
+  name: forecasting
+  labels:
+    app: forecasting
+    component: microservice
+spec:
+  type: ClusterIP
+  clusterIP: None  # Headless service for gRPC client-side load balancing
+  ports:
+  - name: grpc
+    port: 50061
+    targetPort: grpc
+    protocol: TCP
+  selector:
+    app: forecasting
