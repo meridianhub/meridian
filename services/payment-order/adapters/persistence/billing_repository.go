@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
@@ -210,7 +209,20 @@ func isDuplicateKeyError(err error) bool {
 	}
 	errStr := err.Error()
 	// CockroachDB / PostgreSQL duplicate key patterns
-	return strings.Contains(errStr, "duplicate key") || strings.Contains(errStr, "SQLSTATE 23505")
+	return contains(errStr, "duplicate key") || contains(errStr, "SQLSTATE 23505")
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && searchString(s, substr)
+}
+
+func searchString(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }
 
 func billingRunToEntity(run *domain.BillingRun) *BillingRunEntity {
