@@ -17,6 +17,7 @@ require (
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/client_model v0.6.2
 	github.com/redis/go-redis/v9 v9.17.3
+	github.com/robfig/cron/v3 v3.0.1
 	github.com/samber/lo v1.52.0
 	github.com/samber/mo v1.16.0
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
@@ -37,7 +38,6 @@ require (
 	go.opentelemetry.io/otel/sdk v1.40.0
 	go.opentelemetry.io/otel/trace v1.40.0
 	go.starlark.net v0.0.0-20260102030733-3fee463870c9
-	github.com/robfig/cron/v3 v3.0.1
 	go.uber.org/goleak v1.3.0
 	google.golang.org/genproto v0.0.0-20251111163417-95abcf5c77ba
 	google.golang.org/grpc v1.78.0
@@ -60,6 +60,7 @@ require (
 	github.com/prometheus/procfs v0.16.1 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
+	github.com/stripe/stripe-go/v82 v82.5.1 // indirect
 	github.com/twmb/franz-go/pkg/kmsg v1.12.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.40.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
