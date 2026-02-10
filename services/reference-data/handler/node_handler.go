@@ -156,7 +156,7 @@ func (s *NodeService) UpdateNode(ctx context.Context, req *pb.UpdateNodeRequest)
 	// Verify version for optimistic locking
 	if existing.Version != req.Version {
 		nodeOpsTotal.WithLabelValues("update", "error").Inc()
-		return nil, status.Errorf(codes.Aborted, "optimistic lock failure: expected version %d, got %d", req.Version, existing.Version)
+		return nil, status.Errorf(codes.Aborted, "optimistic lock failure: client sent version %d, but current version is %d", req.Version, existing.Version)
 	}
 
 	// Apply updates
@@ -540,7 +540,11 @@ func domainNodeToProto(n *node.Node) *pb.ReferenceDataNode {
 
 	if n.Attributes != nil {
 		attrs, err := mapToStruct(n.Attributes)
-		if err == nil {
+		if err != nil {
+			slog.Warn("failed to convert node attributes to proto",
+				"node_id", n.ID,
+				"error", err)
+		} else {
 			proto.Attributes = attrs
 		}
 	}

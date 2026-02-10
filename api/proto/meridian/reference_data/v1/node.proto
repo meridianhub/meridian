@@ -200,7 +200,8 @@ message GetSubtreeRequest {
   // root_id is the UUID of the subtree root node.
   string root_id = 1 [(buf.validate.field).string.uuid = true];
 
-  // max_depth limits the depth of traversal (0 = root only, default 10).
+  // max_depth limits the depth of traversal. Defaults to 10 if not set (0).
+  // Set to 1 for root + direct children only, 2 for two levels, etc.
   int32 max_depth = 2 [(buf.validate.field).int32 = {
     gte: 0
     lte: 20
