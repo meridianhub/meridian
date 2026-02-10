@@ -290,12 +290,9 @@ func (c *ForwardCurveCache) GetRange(ctx context.Context, resolutionKey string, 
 		return nil, ErrTenantContextRequired
 	}
 
-	// Iterate over hourly buckets
+	// Iterate over hourly buckets (inclusive of the hour containing end)
 	current := start.Truncate(time.Hour)
 	endTrunc := end.Truncate(time.Hour)
-	if end.After(endTrunc) {
-		endTrunc = endTrunc.Add(time.Hour)
-	}
 
 	// Collect hourly epochs in order and observations by epoch
 	var hours []int64
