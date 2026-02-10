@@ -72,7 +72,7 @@ func TestProtoToObservation_NoAttributes(t *testing.T) {
 }
 
 func TestNewMDSSource(t *testing.T) {
-	// Just verify construction works
-	source := NewMDSSource(nil, "ELEC_FORWARD")
+	source := NewMDSSource(nil, "ELEC_FORWARD", "GBP/kWh")
 	assert.Equal(t, "ELEC_FORWARD", source.datasetCode)
+	assert.Equal(t, "GBP/kWh", source.unit)
 }

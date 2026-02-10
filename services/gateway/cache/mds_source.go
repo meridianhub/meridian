@@ -14,17 +14,23 @@ import (
 
 // MDSSource implements Source by querying the Market Data Service via gRPC.
 // It queries ESTIMATE quality forward curve observations using the ListObservations API.
+//
+// The unit field is set from the DataSetDefinition at construction time, since
+// the MarketPriceObservation proto does not carry unit information directly.
 type MDSSource struct {
 	client      *miclient.Client
 	datasetCode string
+	unit        string
 }
 
 // NewMDSSource creates a new MDSSource that queries forward curve observations
 // from the given MDS client for the specified dataset code.
-func NewMDSSource(client *miclient.Client, datasetCode string) *MDSSource {
+// The unit parameter should come from the DataSetDefinition.unit field.
+func NewMDSSource(client *miclient.Client, datasetCode string, unit string) *MDSSource {
 	return &MDSSource{
 		client:      client,
 		datasetCode: datasetCode,
+		unit:        unit,
 	}
 }
 
@@ -45,7 +51,12 @@ func (s *MDSSource) GetForwardPrice(ctx context.Context, resolutionKey string, t
 		return nil, ErrObservationNotFound
 	}
 
-	return protoToObservation(resp.Observations[0])
+	obs, err := protoToObservation(resp.Observations[0])
+	if err != nil {
+		return nil, err
+	}
+	obs.Unit = s.unit
+	return obs, nil
 }
 
 // GetForwardPriceRange queries MDS for ESTIMATE quality observations in a time range.
@@ -68,6 +79,7 @@ func (s *MDSSource) GetForwardPriceRange(ctx context.Context, resolutionKey stri
 		if err != nil {
 			continue // skip malformed observations
 		}
+		obs.Unit = s.unit
 		observations = append(observations, obs)
 	}
 
