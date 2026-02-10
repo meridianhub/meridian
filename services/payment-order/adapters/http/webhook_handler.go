@@ -196,7 +196,13 @@ func (h *WebhookHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		idempotencyKey = h.generateIdempotencyKey(webhookReq)
 	}
 
-	// Build UpdatePaymentOrder request
+	h.processWebhookRequest(ctx, w, webhookReq, gatewayStatus, idempotencyKey)
+}
+
+// processWebhookRequest builds and sends the UpdatePaymentOrder request.
+// This method is shared between the generic webhook handler and gateway-specific
+// handlers (e.g., Stripe) that translate their events into WebhookRequest.
+func (h *WebhookHandler) processWebhookRequest(ctx context.Context, w http.ResponseWriter, webhookReq WebhookRequest, gatewayStatus pb.GatewayStatus, idempotencyKey string) {
 	updateReq := &pb.UpdatePaymentOrderRequest{
 		GatewayReferenceId: webhookReq.GatewayReferenceID,
 		PaymentOrderId:     webhookReq.PaymentOrderID,
@@ -213,18 +219,15 @@ func (h *WebhookHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		"status", webhookReq.Status,
 		"idempotency_key", idempotencyKey)
 
-	// Call UpdatePaymentOrder
 	resp, err := h.paymentOrderService.UpdatePaymentOrder(ctx, updateReq)
 	if err != nil {
 		h.logger.Error("failed to update payment order",
 			"error", err,
 			"gateway_reference_id", webhookReq.GatewayReferenceID)
-		// Return 500 to trigger webhook retry
 		h.writeErrorResponse(w, http.StatusInternalServerError, ErrPaymentOrderService.Error())
 		return
 	}
 
-	// Log success with payment order details if available
 	if resp != nil && resp.PaymentOrder != nil {
 		h.logger.Info("webhook processed successfully",
 			"payment_order_id", resp.PaymentOrder.PaymentOrderId,
@@ -274,6 +277,10 @@ func mapGatewayStatus(status string) (pb.GatewayStatus, error) {
 		return pb.GatewayStatus_GATEWAY_STATUS_REJECTED, nil
 	case "PENDING":
 		return pb.GatewayStatus_GATEWAY_STATUS_PENDING, nil
+	case "REFUNDED":
+		return pb.GatewayStatus_GATEWAY_STATUS_REFUNDED, nil
+	case "DISPUTED":
+		return pb.GatewayStatus_GATEWAY_STATUS_DISPUTED, nil
 	default:
 		return pb.GatewayStatus_GATEWAY_STATUS_UNSPECIFIED, ErrInvalidGatewayStatus
 	}
