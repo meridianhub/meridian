@@ -447,3 +447,81 @@ background work.
   implement 5 handlers, add mapping helpers
 - `services/reconciliation/cmd/main.go` - Wire everything together,
   register gRPC service
+
+## Appendix: Cross-Service Unimplemented RPC Audit
+
+A scan of all services identified additional unimplemented gRPC
+handlers beyond the reconciliation service. These are documented
+here for visibility and future planning. They are **out of scope**
+for this PRD but represent the full picture of gRPC wiring gaps
+across Meridian.
+
+### current-account: Withdrawal Persistence Missing
+
+3 handlers return `codes.Unimplemented` when
+`withdrawalRepo == nil`:
+
+- **UpdateWithdrawal** (`grpc_withdrawal_manage.go:173`) -
+  "withdrawal persistence not configured"
+- **RetrieveWithdrawal** (`grpc_withdrawal_manage.go:262`) -
+  Returns empty list for account queries but errors on direct
+  withdrawal-by-ID lookup
+- **ExecuteWithdrawal** (`grpc_withdrawal_execute.go:54`) -
+  Direct withdrawal by account_id/amount works; by withdrawal_id
+  fails
+
+**Root cause**: `WithdrawalRepository` domain interface exists but
+no persistence adapter is implemented. Service is registered in
+`cmd/main.go` and gracefully degrades for account-based operations.
+
+**Severity**: Medium - Withdrawal-by-ID operations fail in
+production.
+
+### internal-bank-account: Position Keeping Client Not Wired
+
+- **RetrieveBalances** (`service/server.go:596`) - Returns
+  `codes.Unimplemented` when `positionKeepingClient == nil`:
+  "position keeping service not configured"
+
+**Root cause**: Position Keeping client interface exists but is not
+wired in `cmd/main.go`. Balance operations require PK as source of
+truth.
+
+**Severity**: Medium - Balance retrieval non-functional without
+PK integration.
+
+### party: KYC/AML Provider Missing
+
+- **ExchangeDemographics** (`grpc_service.go:712`) - Returns
+  `codes.Unimplemented` in production mode without external
+  provider: "KYC/AML verification not implemented - cannot operate
+  in production without external provider integration"
+  - Development mode: Returns VERIFIED (stub)
+  - `KYC_STUB_ENABLED=true`: Returns VERIFIED (stub)
+  - Production without flag: Returns Unimplemented
+
+**Root cause**: External KYC provider integration (Onfido, Jumio,
+etc.) not implemented. Intentional production guard.
+
+**Severity**: Medium - By design; requires vendor selection.
+
+### Services With Proto Definitions But No Deployment
+
+The following services have proto-defined RPCs but no `cmd/main.go`
+(no deployable binary). These may be planned future services or
+library/support code:
+
+<!-- markdownlint-disable MD013 -->
+
+| Service | Proto | Status |
+|---------|-------|--------|
+| control-plane (AuthService) | `control_plane/v1/auth.proto` | Validation utility only (`cmd/validate/`) |
+| control-plane (ManifestHistoryService) | `control_plane/v1/manifest_history_service.proto` | No server binary |
+| reference-data (ReferenceDataService) | `reference_data/v1/instrument.proto` | Library service, handler exists |
+| saga (SagaAdminService) | `saga/v1/saga_admin.proto` | No server binary |
+| saga (SagaRegistryService) | `saga/v1/saga_registry.proto` | No server binary |
+
+<!-- markdownlint-enable MD013 -->
+
+**Severity**: Low - These services are either not yet deployed or
+serve as libraries consumed by other services.
