@@ -8,12 +8,14 @@ package validator
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
 	"buf.build/go/protovalidate"
 	"github.com/google/cel-go/cel"
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
+	"github.com/shopspring/decimal"
 	"go.starlark.net/starlark"
 	"go.starlark.net/syntax"
 )
@@ -206,7 +208,10 @@ func (v *ManifestValidator) Validate(
 	// 5. Cross-reference validation
 	v.validateCrossReferences(manifest, result)
 
-	// 6. Immutability checks
+	// 6. Payment rails validation
+	v.validatePaymentRails(manifest, result)
+
+	// 7. Immutability checks
 	if previousManifest != nil {
 		v.validateImmutability(manifest, previousManifest, result)
 	}
@@ -500,6 +505,107 @@ func (v *ManifestValidator) validateCrossReferences(
 			fmt.Sprintf("valuation_rules[%d].to_instrument", i),
 			result,
 		)
+	}
+}
+
+// accountIDPattern matches valid Stripe Connect account IDs (acct_ followed by 16+ alphanumeric chars).
+var accountIDPattern = regexp.MustCompile(`^acct_[A-Za-z0-9]{16,}$`)
+
+// allowedProviders is the set of supported payment rail providers.
+var allowedProviders = map[string]bool{
+	"stripe_connect": true,
+}
+
+// allowedPaymentMethods is the set of supported payment methods.
+var allowedPaymentMethods = map[string]bool{
+	"card":         true,
+	"sepa_debit":   true,
+	"bank_account": true,
+}
+
+// validatePaymentRails validates all payment rail configurations in the manifest.
+func (v *ManifestValidator) validatePaymentRails(
+	manifest *controlplanev1.Manifest,
+	result *ValidationResult,
+) {
+	for i, rail := range manifest.GetPaymentRails() {
+		basePath := fmt.Sprintf("payment_rails[%d]", i)
+
+		// Validate provider
+		if rail.GetProvider() != "" && !allowedProviders[rail.GetProvider()] {
+			providerList := mapKeys(allowedProviders)
+			addError(result, ValidationError{
+				Severity:        SeverityError,
+				Path:            basePath + ".provider",
+				Code:            "INVALID_PAYMENT_PROVIDER",
+				Message:         fmt.Sprintf("unsupported payment provider %q", rail.GetProvider()),
+				AvailableFields: providerList,
+			})
+		}
+
+		// Validate account_id format
+		if rail.GetAccountId() != "" && !accountIDPattern.MatchString(rail.GetAccountId()) {
+			addError(result, ValidationError{
+				Severity: SeverityError,
+				Path:     basePath + ".account_id",
+				Code:     "INVALID_ACCOUNT_ID_FORMAT",
+				Message:  fmt.Sprintf("account_id %q does not match expected format acct_[A-Za-z0-9]{16,}", rail.GetAccountId()),
+			})
+		}
+
+		// Validate platform_fee
+		if fee := rail.GetPlatformFee(); fee != nil {
+			v.validatePlatformFee(fee, basePath+".platform_fee", result)
+		}
+
+		// Validate supported_methods contain only known values
+		for j, method := range rail.GetSupportedMethods() {
+			if !allowedPaymentMethods[method] {
+				methodList := mapKeys(allowedPaymentMethods)
+				ve := ValidationError{
+					Severity:        SeverityWarning,
+					Path:            fmt.Sprintf("%s.supported_methods[%d]", basePath, j),
+					Code:            "UNKNOWN_PAYMENT_METHOD",
+					Message:         fmt.Sprintf("payment method %q is not a recognized method", method),
+					AvailableFields: methodList,
+				}
+				if suggestion := findClosestMatch(method, methodList); suggestion != "" {
+					ve.Suggestion = fmt.Sprintf("Did you mean %q?", suggestion)
+				}
+				addError(result, ve)
+			}
+		}
+	}
+}
+
+// validatePlatformFee validates the platform fee value is a valid positive decimal.
+func (v *ManifestValidator) validatePlatformFee(
+	fee *controlplanev1.PlatformFee,
+	basePath string,
+	result *ValidationResult,
+) {
+	if fee.GetValue() == "" {
+		return
+	}
+
+	d, err := decimal.NewFromString(fee.GetValue())
+	if err != nil {
+		addError(result, ValidationError{
+			Severity: SeverityError,
+			Path:     basePath + ".value",
+			Code:     "INVALID_PLATFORM_FEE_VALUE",
+			Message:  fmt.Sprintf("platform_fee.value %q is not a valid decimal", fee.GetValue()),
+		})
+		return
+	}
+
+	if d.LessThanOrEqual(decimal.Zero) {
+		addError(result, ValidationError{
+			Severity: SeverityError,
+			Path:     basePath + ".value",
+			Code:     "INVALID_PLATFORM_FEE_VALUE",
+			Message:  fmt.Sprintf("platform_fee.value must be greater than 0, got %s", fee.GetValue()),
+		})
 	}
 }
 

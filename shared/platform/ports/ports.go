@@ -112,6 +112,12 @@ const (
 	// Protocol: gRPC (internal)
 	// Visibility: Cluster-internal only
 	Reconciliation = 50060
+
+	// Forecasting is the gRPC port for the Forecasting service.
+	// Manages forecasting strategies that generate forward curves from market data.
+	// Protocol: gRPC (internal)
+	// Visibility: Cluster-internal only
+	Forecasting = 50061
 )
 
 // HTTP service ports (various protocols).

@@ -541,7 +541,7 @@ func protoStatusToDomain(status pb.DataSetStatus) (domain.DataSetStatus, error) 
 }
 
 // domainCategoryToProto converts domain DataCategory to proto DataCategory.
-// Note: The domain uses a simplified two-value category system (PRICING/CONTEXTUAL)
+// Note: The domain uses a simplified category system (PRICING/CONTEXTUAL/UTILIZATION)
 // while proto has more granular categories. We map PRICING to FX_RATE as default.
 func domainCategoryToProto(category domain.DataCategory) pb.DataCategory {
 	switch category {
@@ -550,6 +550,9 @@ func domainCategoryToProto(category domain.DataCategory) pb.DataCategory {
 		return pb.DataCategory_DATA_CATEGORY_FX_RATE
 	case domain.DataCategoryContextual:
 		// CONTEXTUAL maps to INDEX_VALUE as a reasonable default for reference data
+		return pb.DataCategory_DATA_CATEGORY_INDEX_VALUE
+	case domain.DataCategoryUtilization:
+		// UTILIZATION maps to INDEX_VALUE as the closest proto analog for measurement data
 		return pb.DataCategory_DATA_CATEGORY_INDEX_VALUE
 	default:
 		return pb.DataCategory_DATA_CATEGORY_UNSPECIFIED

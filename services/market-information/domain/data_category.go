@@ -14,12 +14,17 @@ const (
 	// DataCategoryContextual indicates the dataset contains contextual/reference data.
 	// Contextual data provides supporting information for pricing data.
 	DataCategoryContextual DataCategory = "CONTEXTUAL"
+
+	// DataCategoryUtilization indicates the dataset contains platform utilization metrics.
+	// Utilization data tracks resource consumption (transactions, API calls, storage, compute, network).
+	DataCategoryUtilization DataCategory = "UTILIZATION"
 )
 
 // validDataCategories contains all valid data categories for efficient lookup.
 var validDataCategories = map[DataCategory]bool{
-	DataCategoryPricing:    true,
-	DataCategoryContextual: true,
+	DataCategoryPricing:     true,
+	DataCategoryContextual:  true,
+	DataCategoryUtilization: true,
 }
 
 // IsValid returns true if the data category is a recognized valid type.
