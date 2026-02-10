@@ -189,6 +189,7 @@ func unsetPartyDefault(tx *gorm.DB, partyID uuid.UUID, excludeID uuid.UUID) erro
 
 	return query.Updates(map[string]interface{}{
 		"is_default": false,
+		"version":    gorm.Expr("version + 1"),
 		"updated_at": time.Now(),
 	}).Error
 }
