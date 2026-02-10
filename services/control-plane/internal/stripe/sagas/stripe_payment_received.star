@@ -76,7 +76,6 @@ def execute_stripe_payment_received():
         "status": "completed",
         "tenant_id": tenant_id,
         "party_id": party_id,
-        "nostro_log_id": debit_result["log_id"],
         "prepaid_log_id": credit_result["log_id"],
         "amount_cents": amount_cents,
         "currency": currency,

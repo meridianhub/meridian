@@ -218,7 +218,7 @@ func TestHandleWebhook_PaymentIntentSucceeded(t *testing.T) {
 	assert.Equal(t, "meridian-ops", evt.TenantID)
 	assert.Equal(t, "party-abc", evt.PartyID)
 	assert.Equal(t, int64(10000), evt.AmountCents)
-	assert.Equal(t, "gbp", evt.Currency)
+	assert.Equal(t, "GBP", evt.Currency)
 	assert.Equal(t, "pi_test_123", evt.PaymentIntentID)
 	assert.Equal(t, "ch_test_charge_123", evt.ChargeID)
 	assert.NotEmpty(t, evt.IdempotencyKey)

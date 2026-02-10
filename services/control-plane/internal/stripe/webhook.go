@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -30,6 +31,7 @@ var (
 	ErrUnsupportedEvent   = errors.New("unsupported event type")
 	ErrPayloadTooLarge    = errors.New("request body exceeds maximum size")
 	ErrPublishFailed      = errors.New("failed to publish payment event")
+	ErrMissingChargeID    = errors.New("missing charge ID on succeeded payment intent")
 )
 
 // StripeSignatureHeader is the HTTP header containing the Stripe webhook signature.
@@ -200,8 +202,17 @@ func (h *WebhookHandler) handlePaymentIntentSucceeded(ctx context.Context, w htt
 		return
 	}
 
-	// Extract charge ID from the latest charge
+	// Extract charge ID from the latest charge - required for reconciliation
 	chargeID := extractChargeID(&pi)
+	if chargeID == "" {
+		h.logger.Error("missing charge ID on succeeded payment intent",
+			"payment_intent_id", pi.ID,
+			"event_id", event.ID,
+		)
+		// Return 500 to trigger Stripe retry - charge may populate on re-delivery
+		h.writeErrorResponse(w, http.StatusInternalServerError, ErrMissingChargeID.Error())
+		return
+	}
 
 	paymentEvent := &PaymentEvent{
 		EventID:         uuid.New().String(),
@@ -210,7 +221,7 @@ func (h *WebhookHandler) handlePaymentIntentSucceeded(ctx context.Context, w htt
 		TenantID:        tenantID,
 		PartyID:         partyID,
 		AmountCents:     pi.Amount,
-		Currency:        string(pi.Currency),
+		Currency:        strings.ToUpper(string(pi.Currency)),
 		ChargeID:        chargeID,
 		PaymentIntentID: pi.ID,
 		Timestamp:       time.Unix(event.Created, 0),
@@ -311,7 +322,7 @@ func (h *WebhookHandler) handleChargeRefunded(ctx context.Context, w http.Respon
 		TenantID:        tenantID,
 		PartyID:         partyID,
 		AmountCents:     charge.AmountRefunded,
-		Currency:        string(charge.Currency),
+		Currency:        strings.ToUpper(string(charge.Currency)),
 		ChargeID:        charge.ID,
 		PaymentIntentID: "",
 		Timestamp:       time.Unix(event.Created, 0),

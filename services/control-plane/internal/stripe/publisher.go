@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -35,7 +36,8 @@ type KafkaPublisherConfig struct {
 
 // NewKafkaPublisher creates a new Kafka-based EventPublisher.
 func NewKafkaPublisher(cfg KafkaPublisherConfig) (*KafkaPublisher, error) {
-	if cfg.BootstrapServers == "" {
+	brokers := splitBrokers(cfg.BootstrapServers)
+	if len(brokers) == 0 {
 		return nil, ErrEmptyBootstrapServers
 	}
 	if cfg.Topic == "" {
@@ -43,7 +45,7 @@ func NewKafkaPublisher(cfg KafkaPublisherConfig) (*KafkaPublisher, error) {
 	}
 
 	opts := []kgo.Opt{
-		kgo.SeedBrokers(cfg.BootstrapServers),
+		kgo.SeedBrokers(brokers...),
 		kgo.RequiredAcks(kgo.AllISRAcks()),
 		kgo.RecordRetries(3),
 		kgo.ProducerLinger(10 * time.Millisecond),
@@ -95,4 +97,18 @@ func (p *KafkaPublisher) PublishPaymentEvent(ctx context.Context, event *Payment
 // Close closes the Kafka producer.
 func (p *KafkaPublisher) Close() {
 	p.client.Close()
+}
+
+// splitBrokers splits a comma-separated broker string into individual addresses,
+// trimming whitespace and filtering empty entries.
+func splitBrokers(s string) []string {
+	parts := strings.Split(s, ",")
+	brokers := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			brokers = append(brokers, p)
+		}
+	}
+	return brokers
 }
