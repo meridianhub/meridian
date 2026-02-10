@@ -1,0 +1,109 @@
+# Port Configuration: See shared/platform/ports/ports.go for canonical port assignments.
+# This service uses ports.Forecasting (50061) for gRPC.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: forecasting
+  labels:
+    app: forecasting
+    component: microservice
+    tier: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: forecasting
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: forecasting
+        component: microservice
+        tier: backend
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: forecasting
+        image: forecasting:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: grpc
+          containerPort: 50061
+          protocol: TCP
+        envFrom:
+        - configMapRef:
+            name: forecasting-config
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: forecasting-db
+              key: DATABASE_URL
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+        livenessProbe:
+          grpc:
+            port: 50061
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 3
+        readinessProbe:
+          grpc:
+            port: 50061
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 3
+        startupProbe:
+          grpc:
+            port: 50061
+          initialDelaySeconds: 0
+          periodSeconds: 2
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 30
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 65532
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      terminationGracePeriodSeconds: 30
