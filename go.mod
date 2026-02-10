@@ -24,6 +24,7 @@ require (
 	github.com/sony/gobreaker/v2 v2.4.0
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
+	github.com/stripe/stripe-go/v82 v82.5.1
 	github.com/testcontainers/testcontainers-go v0.40.0
 	github.com/testcontainers/testcontainers-go/modules/cockroachdb v0.40.0
 	github.com/testcontainers/testcontainers-go/modules/kafka v0.40.0
