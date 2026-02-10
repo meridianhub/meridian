@@ -559,6 +559,60 @@ message AccountTransactionFailedEvent {
   map<string, string> metadata = 12;
 }
 
+// WithdrawalStatusUpdatedEvent represents a status change for a withdrawal
+// on a current account. Published when a withdrawal transitions to a new
+// status (e.g., COMPLETED) via the outbox pattern for reliable delivery.
+message WithdrawalStatusUpdatedEvent {
+  // event_id uniquely identifies this event instance
+  string event_id = 1 [(buf.validate.field).string = {
+    uuid: true
+  }];
+
+  // withdrawal_id identifies the withdrawal being updated
+  string withdrawal_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // account_id identifies the account associated with the withdrawal
+  string account_id = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // status is the new withdrawal status
+  string status = 4 [(buf.validate.field).string = {
+    in: ["INITIATED", "PENDING", "COMPLETED", "FAILED", "CANCELLED"]
+  }];
+
+  // correlation_id links related events across services
+  string correlation_id = 5 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // causation_id identifies the event or command that caused this event
+  string causation_id = 6 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // timestamp when the event was created
+  google.protobuf.Timestamp timestamp = 7 [(buf.validate.field).required = true];
+
+  // version is the aggregate version for optimistic locking
+  int64 version = 8 [(buf.validate.field).int64 = {gte: 1}];
+
+  // idempotency_key for deduplication (optional)
+  string idempotency_key = 9 [(buf.validate.field).string = {
+    max_len: 255
+  }];
+
+  // metadata for tracing and debugging
+  map<string, string> metadata = 10;
+}
+
 // OverdraftConfiguredEvent represents configuration or update of overdraft
 // facility for an account. Published when overdraft limits are set or changed.
 message OverdraftConfiguredEvent {

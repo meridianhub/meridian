@@ -105,6 +105,19 @@ const (
 	// Protocol: gRPC (internal)
 	// Visibility: Cluster-internal only
 	ReferenceData = 50059
+
+	// Reconciliation is the gRPC port for the Account Reconciliation service.
+	// BIAN Service Domain: Account Reconciliation
+	// Manages reconciliation of account positions across services.
+	// Protocol: gRPC (internal)
+	// Visibility: Cluster-internal only
+	Reconciliation = 50060
+
+	// Forecasting is the gRPC port for the Forecasting service.
+	// Manages forecasting strategies that generate forward curves from market data.
+	// Protocol: gRPC (internal)
+	// Visibility: Cluster-internal only
+	Forecasting = 50061
 )
 
 // HTTP service ports (various protocols).

@@ -42,6 +42,12 @@ func TestPlatformHandlersSchema(t *testing.T) {
 		"payment_order.send_to_gateway",
 		"payment_order.post_ledger_entries",
 		"payment_order.execute_lien",
+		"reconciliation.initiate_run",
+		"reconciliation.execute_run",
+		"reconciliation.retrieve_run",
+		"reconciliation.cancel_run",
+		"reconciliation.assert_balance",
+		"reconciliation.initiate_dispute",
 	}
 
 	assert.Len(t, schema.Handlers, len(expectedHandlers),
@@ -102,7 +108,7 @@ func TestRegistryLoadPlatformHandlers(t *testing.T) {
 	require.NoError(t, err)
 
 	handlers := registry.ListHandlers()
-	assert.Len(t, handlers, 22, "registry should contain all 22 platform handlers")
+	assert.Len(t, handlers, 28, "registry should contain all 28 platform handlers")
 
 	// Verify we can get each handler
 	for _, name := range handlers {

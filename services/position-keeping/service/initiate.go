@@ -288,9 +288,9 @@ func protoLineageToDomain(proto *positionkeepingv1.TransactionLineage) (*domain.
 // checkIdempotencyAndAcquireLock checks for completed operations and acquires a pending lock.
 // Returns the idempotency key (if provided), cached response (if exists), and any error.
 //
-// TODO(tm:position-keeping-balance.5): This function should be updated to handle StatusPending,
-// StatusFailed, and transient errors consistently with checkMigrationIdempotencyAndAcquireLock.
-// See initiate_migration.go for the improved pattern.
+// This function should be updated to handle StatusPending, StatusFailed, and transient errors
+// consistently with checkMigrationIdempotencyAndAcquireLock. See initiate_migration.go for the
+// improved pattern.
 func (s *PositionKeepingService) checkIdempotencyAndAcquireLock(
 	ctx context.Context,
 	req *positionkeepingv1.InitiateFinancialPositionLogRequest,

@@ -1,0 +1,437 @@
+{
+    "$schema": "http://json-schema.org/draft-04/schema#",
+    "$ref": "#/definitions/Manifest",
+    "definitions": {
+        "Manifest": {
+            "required": [
+                "version",
+                "metadata",
+                "instruments",
+                "accountTypes",
+                "valuationRules",
+                "sagas",
+                "seedData",
+                "paymentRails"
+            ],
+            "properties": {
+                "version": {
+                    "type": "string",
+                    "description": "version is the manifest schema version (e.g., \"1.0\"). Used for forward-compatible parsing of manifest files."
+                },
+                "metadata": {
+                    "$ref": "#/definitions/meridian.control_plane.v1.ManifestMetadata",
+                    "additionalProperties": false,
+                    "description": "metadata contains identifying information about this manifest."
+                },
+                "instruments": {
+                    "items": {
+                        "$ref": "#/definitions/meridian.control_plane.v1.InstrumentDefinition"
+                    },
+                    "additionalProperties": false,
+                    "type": "array",
+                    "description": "instruments defines the asset types available to this tenant."
+                },
+                "accountTypes": {
+                    "items": {
+                        "$ref": "#/definitions/meridian.control_plane.v1.AccountTypeDefinition"
+                    },
+                    "additionalProperties": false,
+                    "type": "array",
+                    "description": "account_types defines the account classifications available to this tenant."
+                },
+                "valuationRules": {
+                    "items": {
+                        "$ref": "#/definitions/meridian.control_plane.v1.ValuationRule"
+                    },
+                    "additionalProperties": false,
+                    "type": "array",
+                    "description": "valuation_rules defines how instruments are converted between each other."
+                },
+                "sagas": {
+                    "items": {
+                        "$ref": "#/definitions/meridian.control_plane.v1.SagaDefinition"
+                    },
+                    "additionalProperties": false,
+                    "type": "array",
+                    "description": "sagas defines the workflow definitions available to this tenant."
+                },
+                "seedData": {
+                    "additionalProperties": true,
+                    "type": "object",
+                    "description": "seed_data contains tenant-specific reference data (e.g., default parties, initial chart of accounts, industry-specific lookups). Uses google.protobuf.Struct for flexible JSONB representation."
+                },
+                "paymentRails": {
+                    "items": {
+                        "$ref": "#/definitions/meridian.control_plane.v1.PaymentRails"
+                    },
+                    "additionalProperties": false,
+                    "type": "array",
+                    "description": "payment_rails defines external payment provider integrations for this tenant."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "========================================\n Manifest Root\n ========================================",
+            "description": "======================================== Manifest Root ========================================  Manifest is the atomic configuration snapshot for a Meridian tenant. It declares the complete business model: instruments, account types, valuation rules, and saga workflows. A manifest is self-contained with no external dependencies - all scripts are inline strings and all references resolve within the manifest itself. Codes (instrument codes, account type codes) are immutable primary keys. To change a code, delete the old definition and create a new one."
+        },
+        "meridian.control_plane.v1.AccountTypeDefinition": {
+            "required": [
+                "code",
+                "name",
+                "normalBalance",
+                "allowedInstruments",
+                "policies"
+            ],
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "description": "code is the unique, immutable identifier for this account type (e.g., \"CURRENT\", \"SAVINGS\", \"CARBON_INVENTORY\"). Must be uppercase alphanumeric with underscores, 1-50 characters."
+                },
+                "name": {
+                    "type": "string",
+                    "description": "name is the human-readable display name (e.g., \"Current Account\")."
+                },
+                "normalBalance": {
+                    "enum": [
+                        "NORMAL_BALANCE_UNSPECIFIED",
+                        0,
+                        "NORMAL_BALANCE_DEBIT",
+                        1,
+                        "NORMAL_BALANCE_CREDIT",
+                        2
+                    ],
+                    "oneOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "integer"
+                        }
+                    ],
+                    "title": "========================================\n Account Type Definitions\n ========================================",
+                    "description": "======================================== Account Type Definitions ========================================  NormalBalance defines the natural balance direction for an account type."
+                },
+                "allowedInstruments": {
+                    "items": {
+                        "type": "string"
+                    },
+                    "type": "array",
+                    "description": "allowed_instruments lists the instrument codes that this account type can hold. Each value must match a code from the manifest's instruments list. Empty list means all instruments defined in the manifest are allowed."
+                },
+                "policies": {
+                    "$ref": "#/definitions/meridian.control_plane.v1.AccountTypePolicies",
+                    "additionalProperties": false,
+                    "description": "policies contains CEL expressions governing this account type's behavior."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "Account Type Definition",
+            "description": "AccountTypeDefinition declares an account classification within the manifest. The code field is the immutable primary key - to change a code, delete the old definition and create a new one."
+        },
+        "meridian.control_plane.v1.AccountTypePolicies": {
+            "required": [
+                "validation",
+                "bucketing"
+            ],
+            "properties": {
+                "validation": {
+                    "type": "string",
+                    "description": "validation is a CEL expression evaluated before allowing transactions on this account type. Example: \"amount \u003e 0 \u0026\u0026 amount \u003c= 1000000\" Empty string means no additional validation beyond standard checks."
+                },
+                "bucketing": {
+                    "type": "string",
+                    "description": "bucketing is a CEL expression that determines how amounts are grouped into fungibility buckets. Example: \"instrument_code + ':' + attributes.batch_id\" Empty string means all amounts are fully fungible (single default bucket)."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "Account Type Policies",
+            "description": "AccountTypePolicies contains CEL expressions that govern account behavior. CEL syntax validation is deferred to the runtime validator - the manifest only stores the expression strings."
+        },
+        "meridian.control_plane.v1.InstrumentDefinition": {
+            "required": [
+                "code",
+                "name",
+                "type",
+                "dimensions"
+            ],
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "description": "code is the unique, immutable identifier for this instrument (e.g., \"GBP\", \"KWH\", \"CARBON_CREDIT\"). Must be uppercase alphanumeric with underscores, 1-50 characters."
+                },
+                "name": {
+                    "type": "string",
+                    "description": "name is the human-readable display name (e.g., \"British Pound Sterling\")."
+                },
+                "type": {
+                    "enum": [
+                        "INSTRUMENT_TYPE_UNSPECIFIED",
+                        0,
+                        "INSTRUMENT_TYPE_FIAT",
+                        1,
+                        "INSTRUMENT_TYPE_COMMODITY",
+                        2,
+                        "INSTRUMENT_TYPE_VOUCHER",
+                        3
+                    ],
+                    "oneOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "integer"
+                        }
+                    ],
+                    "title": "========================================\n Instrument Definitions\n ========================================",
+                    "description": "======================================== Instrument Definitions ========================================  InstrumentType classifies the broad category of an instrument."
+                },
+                "dimensions": {
+                    "$ref": "#/definitions/meridian.control_plane.v1.InstrumentDimensions",
+                    "additionalProperties": false,
+                    "description": "dimensions describes the unit and precision of this instrument's quantities."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "Instrument Definition",
+            "description": "InstrumentDefinition declares an asset type within the manifest. The code field is the immutable primary key - to change a code, delete the old definition and create a new one."
+        },
+        "meridian.control_plane.v1.InstrumentDimensions": {
+            "required": [
+                "unit",
+                "precision"
+            ],
+            "properties": {
+                "unit": {
+                    "type": "string",
+                    "description": "unit is the display unit for this instrument (e.g., \"GBP\", \"kWh\", \"TONNE_CO2E\")."
+                },
+                "precision": {
+                    "type": "integer",
+                    "description": "precision is the number of decimal places for this instrument (0-18)."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "Instrument Dimensions",
+            "description": "InstrumentDimensions describes the unit and precision of an instrument's quantities."
+        },
+        "meridian.control_plane.v1.ManifestMetadata": {
+            "required": [
+                "name",
+                "industry",
+                "description"
+            ],
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "name is the human-readable name for this manifest (e.g., \"Acme Energy Trading\")."
+                },
+                "industry": {
+                    "type": "string",
+                    "description": "industry describes the target industry vertical (e.g., \"energy\", \"banking\", \"carbon\")."
+                },
+                "description": {
+                    "type": "string",
+                    "description": "description provides additional context about this manifest's purpose."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "========================================\n Manifest Metadata\n ========================================",
+            "description": "======================================== Manifest Metadata ========================================  ManifestMetadata contains identifying information about a manifest."
+        },
+        "meridian.control_plane.v1.PaymentRails": {
+            "required": [
+                "provider",
+                "mode",
+                "accountId",
+                "webhookEndpointSecret",
+                "platformFee",
+                "payoutSchedule",
+                "supportedMethods"
+            ],
+            "properties": {
+                "provider": {
+                    "type": "string",
+                    "description": "provider identifies the payment provider (e.g., \"stripe_connect\")."
+                },
+                "mode": {
+                    "enum": [
+                        "CONNECT_MODE_UNSPECIFIED",
+                        0,
+                        "CONNECT_MODE_STANDARD",
+                        1,
+                        "CONNECT_MODE_EXPRESS",
+                        2
+                    ],
+                    "oneOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "integer"
+                        }
+                    ],
+                    "title": "Connect Mode",
+                    "description": "ConnectMode defines the Stripe Connect account type."
+                },
+                "accountId": {
+                    "type": "string",
+                    "description": "account_id is the Stripe Connect account identifier (format: acct_xxx)."
+                },
+                "webhookEndpointSecret": {
+                    "type": "string",
+                    "description": "webhook_endpoint_secret is a reference to the webhook signing secret stored in a secret manager (e.g., \"sm://stripe/webhook_secret\"). Never contains the plaintext secret."
+                },
+                "platformFee": {
+                    "$ref": "#/definitions/meridian.control_plane.v1.PlatformFee",
+                    "additionalProperties": false,
+                    "description": "platform_fee defines the fee structure for transactions on this rail."
+                },
+                "payoutSchedule": {
+                    "enum": [
+                        "PAYOUT_SCHEDULE_UNSPECIFIED",
+                        0,
+                        "PAYOUT_SCHEDULE_DAILY",
+                        1,
+                        "PAYOUT_SCHEDULE_WEEKLY",
+                        2,
+                        "PAYOUT_SCHEDULE_MONTHLY",
+                        3
+                    ],
+                    "oneOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "integer"
+                        }
+                    ],
+                    "title": "Payout Schedule",
+                    "description": "PayoutSchedule defines when connected account payouts are initiated."
+                },
+                "supportedMethods": {
+                    "items": {
+                        "type": "string"
+                    },
+                    "type": "array",
+                    "description": "supported_methods lists the payment methods enabled on this rail (e.g., \"card\", \"sepa_debit\", \"bank_account\")."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "Payment Rails",
+            "description": "PaymentRails defines an external payment provider integration. Currently supports Stripe Connect for payment processing."
+        },
+        "meridian.control_plane.v1.PlatformFee": {
+            "required": [
+                "type",
+                "value"
+            ],
+            "properties": {
+                "type": {
+                    "enum": [
+                        "PLATFORM_FEE_TYPE_UNSPECIFIED",
+                        0,
+                        "PLATFORM_FEE_TYPE_PERCENTAGE",
+                        1,
+                        "PLATFORM_FEE_TYPE_FLAT",
+                        2
+                    ],
+                    "oneOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "integer"
+                        }
+                    ],
+                    "title": "========================================\n Payment Rails\n ========================================",
+                    "description": "======================================== Payment Rails ========================================  PlatformFeeType defines how the platform fee is calculated."
+                },
+                "value": {
+                    "type": "string",
+                    "description": "value is the fee amount as a decimal string. For PERCENTAGE: \"2.5\" means 2.5%. For FLAT: \"0.30\" means 0.30 in the transaction currency. Must be a valid positive decimal value."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "Platform Fee",
+            "description": "PlatformFee defines the fee structure for payment rail transactions."
+        },
+        "meridian.control_plane.v1.SagaDefinition": {
+            "required": [
+                "name",
+                "trigger",
+                "script"
+            ],
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "name is the unique identifier for this saga (e.g., \"process_energy_settlement\"). Must be lowercase alphanumeric with underscores."
+                },
+                "trigger": {
+                    "type": "string",
+                    "description": "trigger defines what initiates this saga. Supported prefixes:   \"api:\" - triggered by an API call (e.g., \"api:/v1/settlements\")   \"webhook:\" - triggered by an external webhook (e.g., \"webhook:stripe_payment\")   \"scheduled:\" - triggered on a schedule (e.g., \"scheduled:daily_reconciliation\")"
+                },
+                "script": {
+                    "type": "string",
+                    "description": "script is the inline Starlark source code defining the saga workflow. Must not be empty - all saga logic is defined inline in the manifest. Starlark guarantees termination (no while loops, no recursion)."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "========================================\n Saga Definitions\n ========================================",
+            "description": "======================================== Saga Definitions ========================================  SagaDefinition declares a workflow within the manifest. Sagas are triggered by API calls, webhooks, or scheduled events, and contain inline Starlark scripts that orchestrate service interactions."
+        },
+        "meridian.control_plane.v1.ValuationRule": {
+            "required": [
+                "fromInstrument",
+                "toInstrument",
+                "method",
+                "source"
+            ],
+            "properties": {
+                "fromInstrument": {
+                    "type": "string",
+                    "description": "from_instrument is the source instrument code for conversion. Must match a code from the manifest's instruments list."
+                },
+                "toInstrument": {
+                    "type": "string",
+                    "description": "to_instrument is the target instrument code for conversion. Must match a code from the manifest's instruments list."
+                },
+                "method": {
+                    "enum": [
+                        "VALUATION_METHOD_UNSPECIFIED",
+                        0,
+                        "VALUATION_METHOD_SPOT_RATE",
+                        1,
+                        "VALUATION_METHOD_FIXED",
+                        2
+                    ],
+                    "oneOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "integer"
+                        }
+                    ],
+                    "title": "========================================\n Valuation Rules\n ========================================",
+                    "description": "======================================== Valuation Rules ========================================  ValuationMethod defines how instrument conversion rates are determined."
+                },
+                "source": {
+                    "type": "string",
+                    "description": "source identifies the rate source for this rule. For SPOT_RATE: the feed identifier (e.g., \"ecb_fx_daily\", \"nordpool_spot\"). For FIXED: a description of who sets the rate (e.g., \"admin_override\", \"contract_rate\")."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "Valuation Rule",
+            "description": "ValuationRule defines how one instrument is converted to another. Used for cross-instrument transactions (e.g., kWh to GBP, USD to EUR)."
+        }
+    }
+}

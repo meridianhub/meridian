@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
+	currentaccountclient "github.com/meridianhub/meridian/services/current-account/client"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
 	poobservability "github.com/meridianhub/meridian/services/payment-order/observability"
@@ -194,11 +195,18 @@ func createPaymentOrderLienHandler(deps *PaymentOrderHandlerDeps, logger *slog.L
 			"bucket_id", bucketID,
 		)
 
-		return map[string]any{
+		result := map[string]any{
 			"lien_id":   resp.Lien.LienId,
 			"bucket_id": bucketID,
 			"status":    "ACTIVE",
-		}, nil
+		}
+
+		// Forward valuation_analysis if basis is present (atomic valuation audit trail)
+		if basis := resp.GetBasis(); basis != nil {
+			result["valuation_analysis"] = currentaccountclient.ConvertValuationAnalysisToMap(basis)
+		}
+
+		return result, nil
 	}
 }
 

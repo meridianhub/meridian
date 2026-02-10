@@ -1,0 +1,13 @@
+version: v2
+plugins:
+  # JSON Schema generator for Manifest proto
+  # Generates JSON Schema from protobuf definitions for validation tooling.
+  # Usage: buf generate --template buf.gen.jsonschema.yaml --path api/proto/meridian/control_plane/v1/manifest.proto
+  - local: protoc-gen-jsonschema
+    out: api/jsonschema
+    opt:
+      - all_fields_required
+      - enforce_oneof
+      - json_fieldnames
+      - prefix_schema_files_with_package
+      - disallow_additional_properties

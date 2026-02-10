@@ -1,0 +1,898 @@
+// Package validator provides manifest validation for the control plane.
+// It performs structural schema validation, CEL type-checking for policy
+// expressions, Starlark compilation for saga scripts, cross-reference
+// validation, and immutability checks. All errors are structured with
+// location paths and suggestions for AI-friendly feedback loops.
+package validator
+
+import (
+	"errors"
+	"fmt"
+	"regexp"
+	"sort"
+	"strings"
+
+	"buf.build/go/protovalidate"
+	"github.com/google/cel-go/cel"
+	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
+	"github.com/shopspring/decimal"
+	"go.starlark.net/starlark"
+	"go.starlark.net/syntax"
+)
+
+// Known service bindings available on the saga context object.
+// These are the service modules that Starlark scripts can call via ctx.<service>.
+var knownServiceBindings = []string{
+	"position_keeping",
+	"financial_accounting",
+	"current_account",
+	"valuation_engine",
+	"repository",
+	"notification",
+	"payment_order",
+	"reconciliation",
+	"reference_data",
+}
+
+// Known top-level Starlark builtins provided by the saga runtime.
+var knownStarlarkBuiltins = []string{
+	"input_data",
+	"invoke_handler",
+	"party_scope",
+	"Decimal",
+	"print",
+	"len",
+	"range",
+	"str",
+	"int",
+	"float",
+	"bool",
+	"list",
+	"dict",
+	"tuple",
+	"type",
+	"True",
+	"False",
+	"None",
+	"hasattr",
+	"getattr",
+	"enumerate",
+	"zip",
+	"sorted",
+	"reversed",
+	"min",
+	"max",
+	"any",
+	"all",
+	"hash",
+	"repr",
+	"fail",
+}
+
+// ErrUnhashable is returned when hashing a starlark module is attempted.
+var ErrUnhashable = errors.New("unhashable: module")
+
+// CEL Balance type fields available in account type policy expressions.
+var celBalanceFields = []string{
+	"quantity",
+	"instrument",
+	"bucket_id",
+	"as_of",
+	"amount",
+}
+
+// Severity indicates the severity of a validation finding.
+type Severity string
+
+const (
+	// SeverityError blocks manifest activation.
+	SeverityError Severity = "error"
+	// SeverityWarning allows activation but should be reviewed.
+	SeverityWarning Severity = "warning"
+)
+
+// ValidationError represents a single validation finding with structured
+// location information and optional suggestions for AI feedback.
+type ValidationError struct {
+	// Severity indicates whether this blocks activation.
+	Severity Severity `json:"severity"`
+
+	// Path is the location within the manifest (e.g., "instruments[0].code").
+	Path string `json:"path"`
+
+	// Code is a machine-readable error code (e.g., "CEL_TYPE_ERROR").
+	Code string `json:"code"`
+
+	// Message is a human-readable description of the issue.
+	Message string `json:"message"`
+
+	// Line is the source line number (for script errors).
+	Line int `json:"line,omitempty"`
+
+	// Column is the source column number (for script errors).
+	Column int `json:"column,omitempty"`
+
+	// Suggestion is a "Did you mean...?" hint for typos.
+	Suggestion string `json:"suggestion,omitempty"`
+
+	// AvailableFields lists valid field names when an unknown field is referenced.
+	AvailableFields []string `json:"available_fields,omitempty"`
+}
+
+// Error implements the error interface.
+func (e ValidationError) Error() string {
+	msg := fmt.Sprintf("[%s] %s: %s", e.Severity, e.Path, e.Message)
+	if e.Suggestion != "" {
+		msg += fmt.Sprintf(" (suggestion: %s)", e.Suggestion)
+	}
+	return msg
+}
+
+// ValidationResult contains the outcome of manifest validation.
+type ValidationResult struct {
+	// Valid is true when there are no errors (warnings are allowed).
+	Valid bool `json:"valid"`
+
+	// Errors contains all error-severity findings.
+	Errors []ValidationError `json:"errors"`
+
+	// Warnings contains all warning-severity findings.
+	Warnings []ValidationError `json:"warnings"`
+}
+
+// ManifestValidator validates Meridian manifests.
+type ManifestValidator struct {
+	protoValidator protovalidate.Validator
+	celEnv         *cel.Env
+	bucketCelEnv   *cel.Env
+}
+
+// New creates a new ManifestValidator.
+func New() (*ManifestValidator, error) {
+	pv, err := protovalidate.New()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create proto validator: %w", err)
+	}
+
+	// CEL environment for account type validation policies.
+	// These expressions operate on balance state.
+	// Use DynType for numeric fields to allow both int and double literals
+	// (e.g., "amount > 0" and "amount > 0.0" both work).
+	celEnv, err := cel.NewEnv(
+		cel.Variable("quantity", cel.DynType),
+		cel.Variable("instrument", cel.StringType),
+		cel.Variable("bucket_id", cel.StringType),
+		cel.Variable("as_of", cel.TimestampType),
+		cel.Variable("amount", cel.DynType),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create CEL environment: %w", err)
+	}
+
+	// CEL environment for bucketing expressions.
+	bucketCelEnv, err := cel.NewEnv(
+		cel.Variable("instrument_code", cel.StringType),
+		cel.Variable("attributes", cel.MapType(cel.StringType, cel.StringType)),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create bucket CEL environment: %w", err)
+	}
+
+	return &ManifestValidator{
+		protoValidator: pv,
+		celEnv:         celEnv,
+		bucketCelEnv:   bucketCelEnv,
+	}, nil
+}
+
+// Validate performs full validation of a manifest.
+// If previousManifest is non-nil, immutability checks are also performed.
+func (v *ManifestValidator) Validate(
+	manifest *controlplanev1.Manifest,
+	previousManifest *controlplanev1.Manifest,
+) *ValidationResult {
+	result := &ValidationResult{Valid: true}
+
+	// 1. Structural validation (protobuf constraints)
+	v.validateStructural(manifest, result)
+
+	// 2. Duplicate code detection
+	v.validateDuplicates(manifest, result)
+
+	// 3. CEL expression validation
+	v.validateCELExpressions(manifest, result)
+
+	// 4. Starlark script compilation
+	v.validateStarlarkScripts(manifest, result)
+
+	// 5. Cross-reference validation
+	v.validateCrossReferences(manifest, result)
+
+	// 6. Payment rails validation
+	v.validatePaymentRails(manifest, result)
+
+	// 7. Immutability checks
+	if previousManifest != nil {
+		v.validateImmutability(manifest, previousManifest, result)
+	}
+
+	// Set valid flag based on error count
+	result.Valid = len(result.Errors) == 0
+
+	return result
+}
+
+// validateStructural uses protovalidate to check protobuf constraints.
+func (v *ManifestValidator) validateStructural(
+	manifest *controlplanev1.Manifest,
+	result *ValidationResult,
+) {
+	err := v.protoValidator.Validate(manifest)
+	if err == nil {
+		return
+	}
+
+	var valErr *protovalidate.ValidationError
+	if errors.As(err, &valErr) {
+		for _, violation := range valErr.Violations {
+			path := buildFieldPath(violation)
+			message := ""
+			if violation.Proto != nil {
+				message = violation.Proto.GetMessage()
+			}
+			if message == "" {
+				message = violation.String()
+			}
+			addError(result, ValidationError{
+				Severity: SeverityError,
+				Path:     path,
+				Code:     "PROTO_VALIDATION",
+				Message:  message,
+			})
+		}
+	} else {
+		addError(result, ValidationError{
+			Severity: SeverityError,
+			Path:     "",
+			Code:     "PROTO_VALIDATION",
+			Message:  err.Error(),
+		})
+	}
+}
+
+// validateDuplicates checks for duplicate codes within the manifest.
+func (v *ManifestValidator) validateDuplicates(
+	manifest *controlplanev1.Manifest,
+	result *ValidationResult,
+) {
+	// Check duplicate instrument codes
+	instrumentCodes := make(map[string]int)
+	for i, inst := range manifest.GetInstruments() {
+		if prev, exists := instrumentCodes[inst.GetCode()]; exists {
+			addError(result, ValidationError{
+				Severity: SeverityError,
+				Path:     fmt.Sprintf("instruments[%d].code", i),
+				Code:     "DUPLICATE_CODE",
+				Message:  fmt.Sprintf("duplicate instrument code %q (first defined at instruments[%d])", inst.GetCode(), prev),
+			})
+		} else {
+			instrumentCodes[inst.GetCode()] = i
+		}
+	}
+
+	// Check duplicate account type codes
+	accountTypeCodes := make(map[string]int)
+	for i, acct := range manifest.GetAccountTypes() {
+		if prev, exists := accountTypeCodes[acct.GetCode()]; exists {
+			addError(result, ValidationError{
+				Severity: SeverityError,
+				Path:     fmt.Sprintf("account_types[%d].code", i),
+				Code:     "DUPLICATE_CODE",
+				Message:  fmt.Sprintf("duplicate account type code %q (first defined at account_types[%d])", acct.GetCode(), prev),
+			})
+		} else {
+			accountTypeCodes[acct.GetCode()] = i
+		}
+	}
+
+	// Check duplicate saga names
+	sagaNames := make(map[string]int)
+	for i, saga := range manifest.GetSagas() {
+		if prev, exists := sagaNames[saga.GetName()]; exists {
+			addError(result, ValidationError{
+				Severity: SeverityError,
+				Path:     fmt.Sprintf("sagas[%d].name", i),
+				Code:     "DUPLICATE_NAME",
+				Message:  fmt.Sprintf("duplicate saga name %q (first defined at sagas[%d])", saga.GetName(), prev),
+			})
+		} else {
+			sagaNames[saga.GetName()] = i
+		}
+	}
+}
+
+// validateCELExpressions type-checks CEL expressions in account type policies.
+func (v *ManifestValidator) validateCELExpressions(
+	manifest *controlplanev1.Manifest,
+	result *ValidationResult,
+) {
+	for i, acctType := range manifest.GetAccountTypes() {
+		policies := acctType.GetPolicies()
+		if policies == nil {
+			continue
+		}
+
+		// Validate validation expression
+		if expr := policies.GetValidation(); expr != "" {
+			v.validateCELExpression(
+				expr,
+				fmt.Sprintf("account_types[%d].policies.validation", i),
+				v.celEnv,
+				celBalanceFields,
+				result,
+			)
+		}
+
+		// Validate bucketing expression
+		if expr := policies.GetBucketing(); expr != "" {
+			v.validateCELExpression(
+				expr,
+				fmt.Sprintf("account_types[%d].policies.bucketing", i),
+				v.bucketCelEnv,
+				[]string{"instrument_code", "attributes"},
+				result,
+			)
+		}
+	}
+}
+
+// validateCELExpression compiles a single CEL expression and produces structured errors.
+func (v *ManifestValidator) validateCELExpression(
+	expression string,
+	path string,
+	env *cel.Env,
+	availableFields []string,
+	result *ValidationResult,
+) {
+	// Check length constraint
+	if len(expression) > 4096 {
+		addError(result, ValidationError{
+			Severity: SeverityError,
+			Path:     path,
+			Code:     "CEL_EXPRESSION_TOO_LONG",
+			Message:  fmt.Sprintf("CEL expression exceeds maximum length of 4096 bytes (got %d)", len(expression)),
+		})
+		return
+	}
+
+	_, issues := env.Compile(expression)
+	if issues == nil || issues.Err() == nil {
+		return
+	}
+
+	errMsg := issues.Err().Error()
+
+	// Check for undeclared reference errors to provide field suggestions
+	if strings.Contains(errMsg, "undeclared reference") {
+		// Extract the undeclared field name from the error
+		undeclaredField := extractUndeclaredReference(errMsg)
+		suggestion := ""
+		if undeclaredField != "" {
+			suggestion = findClosestMatch(undeclaredField, availableFields)
+			if suggestion != "" {
+				suggestion = fmt.Sprintf("Did you mean %q?", suggestion)
+			}
+		}
+
+		addError(result, ValidationError{
+			Severity:        SeverityError,
+			Path:            path,
+			Code:            "CEL_UNDECLARED_REFERENCE",
+			Message:         errMsg,
+			Suggestion:      suggestion,
+			AvailableFields: availableFields,
+		})
+		return
+	}
+
+	addError(result, ValidationError{
+		Severity: SeverityError,
+		Path:     path,
+		Code:     "CEL_COMPILATION_ERROR",
+		Message:  errMsg,
+	})
+}
+
+// validateStarlarkScripts compiles each saga's Starlark script.
+func (v *ManifestValidator) validateStarlarkScripts(
+	manifest *controlplanev1.Manifest,
+	result *ValidationResult,
+) {
+	for i, saga := range manifest.GetSagas() {
+		script := saga.GetScript()
+		if script == "" {
+			continue
+		}
+		v.validateSingleStarlarkScript(saga, script, fmt.Sprintf("sagas[%d].script", i), result)
+	}
+}
+
+// validateSingleStarlarkScript compiles and validates one Starlark script.
+func (v *ManifestValidator) validateSingleStarlarkScript(
+	saga *controlplanev1.SagaDefinition,
+	script string,
+	path string,
+	result *ValidationResult,
+) {
+	if len(script) > 65536 {
+		addError(result, ValidationError{
+			Severity: SeverityError,
+			Path:     path,
+			Code:     "STARLARK_SCRIPT_TOO_LARGE",
+			Message:  fmt.Sprintf("Starlark script exceeds maximum size of 65536 bytes (got %d)", len(script)),
+		})
+		return
+	}
+
+	fileOpts := &syntax.FileOptions{}
+	_, parseErr := fileOpts.Parse(saga.GetName()+".star", script, 0)
+	if parseErr != nil {
+		addError(result, parseStarlarkError(parseErr, path))
+		return
+	}
+
+	predeclared := buildStarlarkPredeclared()
+	thread := &starlark.Thread{
+		Name:  saga.GetName(),
+		Print: func(_ *starlark.Thread, _ string) {},
+	}
+
+	_, execErr := starlark.ExecFileOptions(fileOpts, thread, saga.GetName()+".star", script, predeclared)
+	if execErr != nil {
+		ve := parseStarlarkError(execErr, path)
+		addStarlarkUndefinedSuggestion(execErr, &ve)
+		addError(result, ve)
+	}
+}
+
+// addStarlarkUndefinedSuggestion enriches a validation error with a "Did you mean?" suggestion
+// when the Starlark error is about an undefined name.
+func addStarlarkUndefinedSuggestion(execErr error, ve *ValidationError) {
+	if !strings.Contains(execErr.Error(), "undefined") {
+		return
+	}
+	undefinedName := extractUndefinedStarlarkName(execErr.Error())
+	if undefinedName == "" {
+		return
+	}
+	allNames := make([]string, 0, len(knownServiceBindings)+len(knownStarlarkBuiltins))
+	allNames = append(allNames, knownServiceBindings...)
+	allNames = append(allNames, knownStarlarkBuiltins...)
+	if suggestion := findClosestMatch(undefinedName, allNames); suggestion != "" {
+		ve.Suggestion = fmt.Sprintf("Did you mean %q?", suggestion)
+	}
+}
+
+// validateCrossReferences checks that all references between manifest sections are valid.
+func (v *ManifestValidator) validateCrossReferences(
+	manifest *controlplanev1.Manifest,
+	result *ValidationResult,
+) {
+	instrumentCodes := make(map[string]bool)
+	for _, inst := range manifest.GetInstruments() {
+		instrumentCodes[inst.GetCode()] = true
+	}
+	codeList := mapKeys(instrumentCodes)
+
+	for i, acctType := range manifest.GetAccountTypes() {
+		for j, instrCode := range acctType.GetAllowedInstruments() {
+			checkInstrumentRef(
+				instrCode, instrumentCodes, codeList,
+				fmt.Sprintf("account_types[%d].allowed_instruments[%d]", i, j),
+				result,
+			)
+		}
+	}
+
+	for i, rule := range manifest.GetValuationRules() {
+		checkInstrumentRef(
+			rule.GetFromInstrument(), instrumentCodes, codeList,
+			fmt.Sprintf("valuation_rules[%d].from_instrument", i),
+			result,
+		)
+		checkInstrumentRef(
+			rule.GetToInstrument(), instrumentCodes, codeList,
+			fmt.Sprintf("valuation_rules[%d].to_instrument", i),
+			result,
+		)
+	}
+}
+
+// accountIDPattern matches valid Stripe Connect account IDs (acct_ followed by 16+ alphanumeric chars).
+var accountIDPattern = regexp.MustCompile(`^acct_[A-Za-z0-9]{16,}$`)
+
+// allowedProviders is the set of supported payment rail providers.
+var allowedProviders = map[string]bool{
+	"stripe_connect": true,
+}
+
+// allowedPaymentMethods is the set of supported payment methods.
+var allowedPaymentMethods = map[string]bool{
+	"card":         true,
+	"sepa_debit":   true,
+	"bank_account": true,
+}
+
+// validatePaymentRails validates all payment rail configurations in the manifest.
+func (v *ManifestValidator) validatePaymentRails(
+	manifest *controlplanev1.Manifest,
+	result *ValidationResult,
+) {
+	for i, rail := range manifest.GetPaymentRails() {
+		basePath := fmt.Sprintf("payment_rails[%d]", i)
+
+		// Validate provider
+		if rail.GetProvider() != "" && !allowedProviders[rail.GetProvider()] {
+			providerList := mapKeys(allowedProviders)
+			addError(result, ValidationError{
+				Severity:        SeverityError,
+				Path:            basePath + ".provider",
+				Code:            "INVALID_PAYMENT_PROVIDER",
+				Message:         fmt.Sprintf("unsupported payment provider %q", rail.GetProvider()),
+				AvailableFields: providerList,
+			})
+		}
+
+		// Validate account_id format
+		if rail.GetAccountId() != "" && !accountIDPattern.MatchString(rail.GetAccountId()) {
+			addError(result, ValidationError{
+				Severity: SeverityError,
+				Path:     basePath + ".account_id",
+				Code:     "INVALID_ACCOUNT_ID_FORMAT",
+				Message:  fmt.Sprintf("account_id %q does not match expected format acct_[A-Za-z0-9]{16,}", rail.GetAccountId()),
+			})
+		}
+
+		// Validate platform_fee
+		if fee := rail.GetPlatformFee(); fee != nil {
+			v.validatePlatformFee(fee, basePath+".platform_fee", result)
+		}
+
+		// Validate supported_methods contain only known values
+		for j, method := range rail.GetSupportedMethods() {
+			if !allowedPaymentMethods[method] {
+				methodList := mapKeys(allowedPaymentMethods)
+				ve := ValidationError{
+					Severity:        SeverityWarning,
+					Path:            fmt.Sprintf("%s.supported_methods[%d]", basePath, j),
+					Code:            "UNKNOWN_PAYMENT_METHOD",
+					Message:         fmt.Sprintf("payment method %q is not a recognized method", method),
+					AvailableFields: methodList,
+				}
+				if suggestion := findClosestMatch(method, methodList); suggestion != "" {
+					ve.Suggestion = fmt.Sprintf("Did you mean %q?", suggestion)
+				}
+				addError(result, ve)
+			}
+		}
+	}
+}
+
+// validatePlatformFee validates the platform fee value is a valid positive decimal.
+func (v *ManifestValidator) validatePlatformFee(
+	fee *controlplanev1.PlatformFee,
+	basePath string,
+	result *ValidationResult,
+) {
+	if fee.GetValue() == "" {
+		return
+	}
+
+	d, err := decimal.NewFromString(fee.GetValue())
+	if err != nil {
+		addError(result, ValidationError{
+			Severity: SeverityError,
+			Path:     basePath + ".value",
+			Code:     "INVALID_PLATFORM_FEE_VALUE",
+			Message:  fmt.Sprintf("platform_fee.value %q is not a valid decimal", fee.GetValue()),
+		})
+		return
+	}
+
+	if d.LessThanOrEqual(decimal.Zero) {
+		addError(result, ValidationError{
+			Severity: SeverityError,
+			Path:     basePath + ".value",
+			Code:     "INVALID_PLATFORM_FEE_VALUE",
+			Message:  fmt.Sprintf("platform_fee.value must be greater than 0, got %s", fee.GetValue()),
+		})
+	}
+}
+
+// checkInstrumentRef validates that a referenced instrument code exists in the manifest.
+func checkInstrumentRef(
+	code string,
+	validCodes map[string]bool,
+	codeList []string,
+	path string,
+	result *ValidationResult,
+) {
+	if validCodes[code] {
+		return
+	}
+	ve := ValidationError{
+		Severity:        SeverityError,
+		Path:            path,
+		Code:            "UNDEFINED_INSTRUMENT_REFERENCE",
+		Message:         fmt.Sprintf("instrument code %q is not defined in instruments[]", code),
+		AvailableFields: codeList,
+	}
+	if suggestion := findClosestMatch(code, codeList); suggestion != "" {
+		ve.Suggestion = fmt.Sprintf("Did you mean %q?", suggestion)
+	}
+	addError(result, ve)
+}
+
+// validateImmutability checks that immutable code fields have not been changed.
+func (v *ManifestValidator) validateImmutability(
+	current *controlplanev1.Manifest,
+	previous *controlplanev1.Manifest,
+	result *ValidationResult,
+) {
+	// Build maps of previous codes by index position to detect renames
+	prevInstrumentsByIdx := make(map[int]string)
+	for i, inst := range previous.GetInstruments() {
+		prevInstrumentsByIdx[i] = inst.GetCode()
+	}
+
+	prevAccountTypesByIdx := make(map[int]string)
+	for i, acct := range previous.GetAccountTypes() {
+		prevAccountTypesByIdx[i] = acct.GetCode()
+	}
+
+	// Build lookup maps for previous codes
+	prevInstruments := make(map[string]bool)
+	for _, inst := range previous.GetInstruments() {
+		prevInstruments[inst.GetCode()] = true
+	}
+	prevAccountTypes := make(map[string]bool)
+	for _, acct := range previous.GetAccountTypes() {
+		prevAccountTypes[acct.GetCode()] = true
+	}
+
+	// Check instruments: detect code changes at same index position
+	for i, inst := range current.GetInstruments() {
+		if prevCode, existed := prevInstrumentsByIdx[i]; existed {
+			if inst.GetCode() != prevCode {
+				addError(result, ValidationError{
+					Severity: SeverityError,
+					Path:     fmt.Sprintf("instruments[%d].code", i),
+					Code:     "IMMUTABLE_FIELD_CHANGED",
+					Message:  fmt.Sprintf("instrument code changed from %q to %q; codes are immutable primary keys", prevCode, inst.GetCode()),
+				})
+			}
+		}
+	}
+
+	// Check account types: detect code changes at same index position
+	for i, acct := range current.GetAccountTypes() {
+		if prevCode, existed := prevAccountTypesByIdx[i]; existed {
+			if acct.GetCode() != prevCode {
+				addError(result, ValidationError{
+					Severity: SeverityError,
+					Path:     fmt.Sprintf("account_types[%d].code", i),
+					Code:     "IMMUTABLE_FIELD_CHANGED",
+					Message:  fmt.Sprintf("account type code changed from %q to %q; codes are immutable primary keys", prevCode, acct.GetCode()),
+				})
+			}
+		}
+	}
+}
+
+// buildStarlarkPredeclared creates the predeclared dictionary for Starlark compilation.
+// This includes service modules as simple struct values and known builtins.
+func buildStarlarkPredeclared() starlark.StringDict {
+	predeclared := make(starlark.StringDict)
+
+	// Add service modules as empty structs (enough for compilation checking)
+	for _, svc := range knownServiceBindings {
+		predeclared[svc] = &starlarkModule{name: svc}
+	}
+
+	// Add common builtins
+	predeclared["input_data"] = starlark.NewDict(0)
+	predeclared["invoke_handler"] = starlark.NewBuiltin("invoke_handler",
+		func(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, _ []starlark.Tuple) (starlark.Value, error) {
+			return starlark.None, nil
+		})
+	predeclared["party_scope"] = starlark.NewDict(0)
+	predeclared["Decimal"] = starlark.NewBuiltin("Decimal",
+		func(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, _ []starlark.Tuple) (starlark.Value, error) {
+			return starlark.String("0"), nil
+		})
+
+	return predeclared
+}
+
+// starlarkModule is a simple stub module for compilation checking.
+// It accepts any attribute access, returning another module or a no-op function.
+type starlarkModule struct {
+	name string
+}
+
+func (m *starlarkModule) String() string        { return m.name }
+func (m *starlarkModule) Type() string          { return "module" }
+func (m *starlarkModule) Freeze()               {}
+func (m *starlarkModule) Truth() starlark.Bool  { return true }
+func (m *starlarkModule) Hash() (uint32, error) { return 0, ErrUnhashable }
+
+func (m *starlarkModule) Attr(name string) (starlark.Value, error) {
+	// Return a callable for any attribute access (simulates service methods)
+	return starlark.NewBuiltin(m.name+"."+name,
+		func(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, _ []starlark.Tuple) (starlark.Value, error) {
+			return starlark.NewDict(0), nil
+		}), nil
+}
+
+func (m *starlarkModule) AttrNames() []string {
+	return nil
+}
+
+// buildFieldPath extracts a dotted field path from a protovalidate Violation.
+func buildFieldPath(violation *protovalidate.Violation) string {
+	if violation.Proto == nil || violation.Proto.GetField() == nil {
+		return ""
+	}
+	elements := violation.Proto.GetField().GetElements()
+	if len(elements) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(elements))
+	for _, elem := range elements {
+		parts = append(parts, elem.GetFieldName())
+	}
+	return strings.Join(parts, ".")
+}
+
+// addError appends a validation error to the result in the appropriate list.
+func addError(result *ValidationResult, ve ValidationError) {
+	if ve.Severity == SeverityWarning {
+		result.Warnings = append(result.Warnings, ve)
+	} else {
+		result.Errors = append(result.Errors, ve)
+	}
+}
+
+// parseStarlarkError converts a Starlark error into a structured ValidationError.
+func parseStarlarkError(err error, basePath string) ValidationError {
+	ve := ValidationError{
+		Severity: SeverityError,
+		Path:     basePath,
+		Code:     "STARLARK_COMPILATION_ERROR",
+		Message:  err.Error(),
+	}
+
+	// Try to extract line/column from Starlark error format "file:line:col: message"
+	errStr := err.Error()
+	parts := strings.SplitN(errStr, ":", 4)
+	if len(parts) >= 3 {
+		var line, col int
+		if _, scanErr := fmt.Sscanf(parts[1], "%d", &line); scanErr == nil {
+			ve.Line = line
+		}
+		if _, scanErr := fmt.Sscanf(parts[2], "%d", &col); scanErr == nil {
+			ve.Column = col
+		}
+	}
+
+	// Detect syntax errors vs execution errors
+	if strings.Contains(errStr, "syntax") || strings.Contains(errStr, "got ") {
+		ve.Code = "STARLARK_SYNTAX_ERROR"
+	}
+
+	return ve
+}
+
+// extractUndeclaredReference extracts the field name from a CEL undeclared reference error.
+// Example: "undeclared reference to 'quanity'" -> "quanity"
+func extractUndeclaredReference(errMsg string) string {
+	const prefix = "undeclared reference to '"
+	idx := strings.Index(errMsg, prefix)
+	if idx < 0 {
+		return ""
+	}
+	rest := errMsg[idx+len(prefix):]
+	endIdx := strings.Index(rest, "'")
+	if endIdx < 0 {
+		return ""
+	}
+	return rest[:endIdx]
+}
+
+// extractUndefinedStarlarkName extracts the name from a Starlark "undefined: X" error.
+func extractUndefinedStarlarkName(errMsg string) string {
+	const marker = "undefined: "
+	idx := strings.Index(errMsg, marker)
+	if idx < 0 {
+		return ""
+	}
+	rest := errMsg[idx+len(marker):]
+	// The name goes until the end of the line or end of string
+	endIdx := strings.IndexAny(rest, " \n\t")
+	if endIdx < 0 {
+		return rest
+	}
+	return rest[:endIdx]
+}
+
+// findClosestMatch finds the closest string in candidates to the target using
+// Levenshtein distance. Returns empty string if no candidate is close enough.
+func findClosestMatch(target string, candidates []string) string {
+	if len(candidates) == 0 || target == "" {
+		return ""
+	}
+
+	bestMatch := ""
+	bestDist := len(target)/2 + 1 // Threshold: must be within half the target length
+
+	for _, candidate := range candidates {
+		dist := levenshteinDistance(strings.ToLower(target), strings.ToLower(candidate))
+		if dist < bestDist {
+			bestDist = dist
+			bestMatch = candidate
+		}
+	}
+
+	return bestMatch
+}
+
+// levenshteinDistance computes the edit distance between two strings.
+func levenshteinDistance(a, b string) int {
+	la := len(a)
+	lb := len(b)
+
+	if la > lb {
+		a, b = b, a
+		la, lb = lb, la
+	}
+
+	prev := make([]int, la+1)
+	curr := make([]int, la+1)
+
+	for i := 0; i <= la; i++ {
+		prev[i] = i
+	}
+
+	for j := 1; j <= lb; j++ {
+		curr[0] = j
+		for i := 1; i <= la; i++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			del := prev[i] + 1
+			ins := curr[i-1] + 1
+			sub := prev[i-1] + cost
+			curr[i] = del
+			if ins < curr[i] {
+				curr[i] = ins
+			}
+			if sub < curr[i] {
+				curr[i] = sub
+			}
+		}
+		prev, curr = curr, prev
+	}
+
+	return prev[la]
+}
+
+// mapKeys returns the sorted keys of a map[string]bool.
+func mapKeys(m map[string]bool) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}

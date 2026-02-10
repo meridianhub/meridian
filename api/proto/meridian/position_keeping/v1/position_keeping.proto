@@ -105,6 +105,10 @@ message TransactionLogEntry {
     max_len: 255
     pattern: "^[a-zA-Z0-9_/-]*$"
   }];
+
+  // attributes stores flexible metadata for the transaction (e.g., valuation_analysis for audit trails).
+  // Optional field for storing JSON-serialized data like valuation method details, degraded mode flags, etc.
+  map<string, string> attributes = 9;
 }
 
 // TransactionLineage captures the relationship between transactions.

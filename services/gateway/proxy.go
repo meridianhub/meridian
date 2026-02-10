@@ -62,9 +62,8 @@ func NewProxyHandler(backends []BackendRoute) *ProxyHandler {
 
 		proxy := httputil.NewSingleHostReverseProxy(target)
 
-		// TODO(8-multi-tenancy.89): Add configurable timeout settings for production resilience
-		// Consider: ResponseHeaderTimeout, IdleConnTimeout, MaxIdleConnsPerHost
-		// See: https://github.com/meridianhub/meridian/pull/439#discussion_r1901972279
+		// Consider adding configurable timeout settings for production resilience:
+		// ResponseHeaderTimeout, IdleConnTimeout, MaxIdleConnsPerHost
 
 		// Configure the proxy director to add X-Forwarded-Host and identity headers.
 		// Connect protocol headers (Content-Type, Connect-Protocol-Version, Connect-Timeout-Ms)
@@ -83,6 +82,9 @@ func NewProxyHandler(backends []BackendRoute) *ProxyHandler {
 			req.Header.Del(HeaderTenantID)
 			req.Header.Del(HeaderAuthMethod)
 			req.Header.Del(HeaderAuthRoles)
+
+			// SECURITY: Strip X-API-Key header to prevent credential leakage to backends.
+			req.Header.Del(auth.APIKeyHeader)
 
 			// Add identity headers if the request was authenticated
 			addIdentityHeaders(req)
@@ -174,8 +176,12 @@ func addIdentityHeaders(req *http.Request) {
 	if identity := auth.GetAPIKeyIdentity(ctx); identity != "" {
 		req.Header.Set(HeaderUserID, identity)
 		req.Header.Set(HeaderAuthMethod, AuthMethodAPIKey)
-		// Note: API keys don't have tenant ID in the current implementation
-		// Tenant context may be resolved separately by TenantResolverMiddleware
+
+		// For RPC-validated API keys, tenant ID is available in context
+		if tenantID, ok := auth.GetTenantIDFromContext(ctx); ok && tenantID != "" {
+			req.Header.Set(HeaderTenantID, tenantID)
+		}
+
 		return
 	}
 

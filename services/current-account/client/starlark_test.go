@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/test/bufconn"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // mockCurrentAccountServer implements the CurrentAccountServiceServer interface for testing
@@ -37,6 +38,9 @@ type mockCurrentAccountServer struct {
 	// Control response behavior
 	shouldError  bool
 	errorMessage string
+
+	// Optional valuation basis to return with InitiateLien
+	initiateLienBasis *currentaccountv1.ValuationAnalysis
 }
 
 func (m *mockCurrentAccountServer) InitiateLien(ctx context.Context, req *currentaccountv1.InitiateLienRequest) (*currentaccountv1.InitiateLienResponse, error) {
@@ -67,6 +71,7 @@ func (m *mockCurrentAccountServer) InitiateLien(ctx context.Context, req *curren
 			Amount:    req.GetAmount(),
 			Status:    currentaccountv1.LienStatus_LIEN_STATUS_ACTIVE,
 		},
+		Basis: m.initiateLienBasis,
 	}, nil
 }
 
@@ -139,10 +144,10 @@ func setupMockServer(t *testing.T, mockServer *mockCurrentAccountServer) (*Clien
 	server := grpc.NewServer()
 	currentaccountv1.RegisterCurrentAccountServiceServer(server, mockServer)
 
+	serveDone := make(chan struct{})
 	go func() {
-		if err := server.Serve(listener); err != nil {
-			t.Logf("Server error: %v", err)
-		}
+		defer close(serveDone)
+		_ = server.Serve(listener)
 	}()
 
 	// Create client connection
@@ -163,7 +168,8 @@ func setupMockServer(t *testing.T, mockServer *mockCurrentAccountServer) (*Clien
 
 	cleanup := func() {
 		conn.Close()
-		server.Stop()
+		server.GracefulStop()
+		<-serveDone
 		listener.Close()
 	}
 
@@ -303,6 +309,151 @@ func TestCreateLienHandler(t *testing.T) {
 		_, err := handler(ctx, params)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "insufficient funds")
+	})
+
+	t.Run("exposes valuation_analysis when basis is present", func(t *testing.T) {
+		computedAt := timestamppb.New(time.Date(2026, 2, 8, 12, 0, 0, 0, time.UTC))
+		knowledgeAt := timestamppb.New(time.Date(2026, 2, 8, 11, 59, 0, 0, time.UTC))
+		observedAt := timestamppb.New(time.Date(2026, 2, 8, 11, 58, 0, 0, time.UTC))
+
+		mockServer := &mockCurrentAccountServer{
+			initiateLienBasis: &currentaccountv1.ValuationAnalysis{
+				MethodId:      "fx_spot",
+				MethodVersion: "1.2.0",
+				AppliedRates: map[string]string{
+					"fx_rate": "1.2750",
+					"spread":  "0.0025",
+				},
+				ObservationIds:  []string{"obs-001", "obs-002"},
+				ComputedAt:      computedAt,
+				KnowledgeAt:     knowledgeAt,
+				CalculationPath: []string{"lookup_rate", "apply_spread", "convert"},
+				DegradedMode:    true,
+				MarketDataQualities: []*currentaccountv1.MarketDataQuality{
+					{
+						Source:           "live_feed",
+						QualityLevel:     "ACTUAL",
+						ObservedAt:       observedAt,
+						StalenessSeconds: 5,
+					},
+				},
+				Warnings: []*currentaccountv1.ValuationWarning{
+					{
+						Code:     "STALE_MARKET_DATA",
+						Message:  "Market data is 5 seconds old",
+						Severity: "WARNING",
+					},
+				},
+			},
+		}
+		client, cleanup := setupMockServer(t, mockServer)
+		defer cleanup()
+
+		handler := createLienHandler(client)
+		ctx := &saga.StarlarkContext{
+			Context:        context.Background(),
+			IdempotencyKey: "test-key",
+			KnowledgeAt:    time.Now(),
+			CorrelationID:  uuid.New(),
+		}
+
+		params := map[string]any{
+			"account_id": "acc-123",
+			"amount":     decimal.NewFromFloat(100.50),
+			"currency":   "USD",
+		}
+
+		result, err := handler(ctx, params)
+		require.NoError(t, err)
+
+		resultMap, ok := result.(map[string]any)
+		require.True(t, ok)
+
+		// Verify standard fields are still present
+		assert.Equal(t, "test-lien-id", resultMap["lien_id"])
+		assert.Equal(t, "acc-123", resultMap["account_id"])
+		assert.Equal(t, "ACTIVE", resultMap["status"])
+
+		// Verify valuation_analysis is present
+		vaRaw, exists := resultMap["valuation_analysis"]
+		require.True(t, exists, "valuation_analysis should be present when basis is set")
+
+		va, ok := vaRaw.(map[string]any)
+		require.True(t, ok, "valuation_analysis should be a map")
+
+		assert.Equal(t, "fx_spot", va["method_id"])
+		assert.Equal(t, "1.2.0", va["method_version"])
+		assert.Equal(t, true, va["degraded_mode"])
+		assert.Equal(t, "2026-02-08T12:00:00Z", va["computed_at"])
+		assert.Equal(t, "2026-02-08T11:59:00Z", va["knowledge_at"])
+
+		// Verify applied_rates
+		rates, ok := va["applied_rates"].(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, "1.2750", rates["fx_rate"])
+		assert.Equal(t, "0.0025", rates["spread"])
+
+		// Verify observation_ids
+		obsIDs, ok := va["observation_ids"].([]string)
+		require.True(t, ok)
+		assert.Equal(t, []string{"obs-001", "obs-002"}, obsIDs)
+
+		// Verify calculation_path
+		calcPath, ok := va["calculation_path"].([]string)
+		require.True(t, ok)
+		assert.Equal(t, []string{"lookup_rate", "apply_spread", "convert"}, calcPath)
+
+		// Verify market_data_qualities
+		qualitiesRaw, ok := va["market_data_qualities"].([]map[string]any)
+		require.True(t, ok)
+		require.Len(t, qualitiesRaw, 1)
+		assert.Equal(t, "live_feed", qualitiesRaw[0]["source"])
+		assert.Equal(t, "ACTUAL", qualitiesRaw[0]["quality_level"])
+		assert.Equal(t, int64(5), qualitiesRaw[0]["staleness_seconds"])
+		assert.Equal(t, "2026-02-08T11:58:00Z", qualitiesRaw[0]["observed_at"])
+
+		// Verify warnings
+		warningsRaw, ok := va["warnings"].([]map[string]any)
+		require.True(t, ok)
+		require.Len(t, warningsRaw, 1)
+		assert.Equal(t, "STALE_MARKET_DATA", warningsRaw[0]["code"])
+		assert.Equal(t, "Market data is 5 seconds old", warningsRaw[0]["message"])
+		assert.Equal(t, "WARNING", warningsRaw[0]["severity"])
+	})
+
+	t.Run("backward compatibility - no valuation_analysis when basis is nil", func(t *testing.T) {
+		// Default mock (no initiateLienBasis set) returns nil Basis
+		mockServer := &mockCurrentAccountServer{}
+		client, cleanup := setupMockServer(t, mockServer)
+		defer cleanup()
+
+		handler := createLienHandler(client)
+		ctx := &saga.StarlarkContext{
+			Context:        context.Background(),
+			IdempotencyKey: "test-key",
+			KnowledgeAt:    time.Now(),
+			CorrelationID:  uuid.New(),
+		}
+
+		params := map[string]any{
+			"account_id": "acc-123",
+			"amount":     decimal.NewFromFloat(100.50),
+			"currency":   "USD",
+		}
+
+		result, err := handler(ctx, params)
+		require.NoError(t, err)
+
+		resultMap, ok := result.(map[string]any)
+		require.True(t, ok)
+
+		// Standard fields present
+		assert.Equal(t, "test-lien-id", resultMap["lien_id"])
+		assert.Equal(t, "ACTIVE", resultMap["status"])
+
+		// valuation_analysis should NOT be present
+		_, exists := resultMap["valuation_analysis"]
+		assert.False(t, exists, "valuation_analysis should not be present when basis is nil")
 	})
 }
 

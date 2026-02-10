@@ -1,0 +1,305 @@
+syntax = "proto3";
+
+package meridian.events.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/events/v1;eventsv1";
+
+// ReconciliationRunStartedEvent is published when a settlement run begins execution.
+message ReconciliationRunStartedEvent {
+  // run_id uniquely identifies the settlement run.
+  string run_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // account_id identifies the primary account being reconciled.
+  string account_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // scope defines what is being reconciled (ACCOUNT, INSTRUMENT, PORTFOLIO, FULL).
+  string scope = 3 [(buf.validate.field).string = {
+    in: ["ACCOUNT", "INSTRUMENT", "PORTFOLIO", "FULL"]
+  }];
+
+  // settlement_type defines the settlement cycle (DAILY, WEEKLY, etc.).
+  string settlement_type = 4 [(buf.validate.field).string = {
+    in: ["DAILY", "WEEKLY", "MONTHLY", "ON_DEMAND", "END_OF_DAY", "REAL_TIME"]
+  }];
+
+  // period_start is the beginning of the reconciliation period.
+  google.protobuf.Timestamp period_start = 5 [(buf.validate.field).required = true];
+
+  // period_end is the end of the reconciliation period.
+  google.protobuf.Timestamp period_end = 6 [(buf.validate.field).required = true];
+
+  // initiated_by is the user or system that started the run.
+  string initiated_by = 7 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // correlation_id links related events across services.
+  string correlation_id = 8 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // timestamp when the event was created.
+  google.protobuf.Timestamp timestamp = 9 [(buf.validate.field).required = true];
+}
+
+// ReconciliationRunCompletedEvent is published when a settlement run finishes.
+message ReconciliationRunCompletedEvent {
+  // run_id uniquely identifies the settlement run.
+  string run_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // account_id identifies the primary account that was reconciled.
+  string account_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // status is the final status (COMPLETED, FAILED, CANCELLED).
+  string status = 3 [(buf.validate.field).string = {
+    in: ["COMPLETED", "FAILED", "CANCELLED"]
+  }];
+
+  // variance_count is the number of variances detected.
+  int32 variance_count = 4 [(buf.validate.field).int32.gte = 0];
+
+  // snapshot_count is the number of snapshots captured.
+  int32 snapshot_count = 5 [(buf.validate.field).int32.gte = 0];
+
+  // total_variance is the sum of absolute variance amounts as a decimal string.
+  string total_variance = 6 [(buf.validate.field).string = {
+    max_len: 50
+  }];
+
+  // failure_reason records why the run failed (empty if not failed).
+  string failure_reason = 7 [(buf.validate.field).string.max_len = 1000];
+
+  // correlation_id links related events across services.
+  string correlation_id = 8 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // timestamp when the event was created.
+  google.protobuf.Timestamp timestamp = 9 [(buf.validate.field).required = true];
+}
+
+// VarianceDetectedEvent is published when a variance is detected during reconciliation.
+message VarianceDetectedEvent {
+  // variance_id uniquely identifies the variance.
+  string variance_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // run_id references the settlement run.
+  string run_id = 2 [(buf.validate.field).string.uuid = true];
+
+  // account_id identifies the account with the discrepancy.
+  string account_id = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // instrument_code identifies the asset type.
+  string instrument_code = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 32
+  }];
+
+  // expected_amount as a decimal string.
+  string expected_amount = 5;
+
+  // actual_amount as a decimal string.
+  string actual_amount = 6;
+
+  // variance_amount as a decimal string.
+  string variance_amount = 7;
+
+  // reason classifies the discrepancy (AMOUNT_MISMATCH, MISSING_ENTRY, etc.).
+  string reason = 8 [(buf.validate.field).string = {
+    in: [
+      "AMOUNT_MISMATCH",
+      "MISSING_ENTRY",
+      "DUPLICATE_ENTRY",
+      "TIMING_DIFFERENCE",
+      "CURRENCY_MISMATCH",
+      "DIRECTION_ERROR",
+      "OTHER"
+    ]
+  }];
+
+  // correlation_id links related events across services.
+  string correlation_id = 9 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // timestamp when the event was created.
+  google.protobuf.Timestamp timestamp = 10 [(buf.validate.field).required = true];
+}
+
+// PositionLockRequestedEvent is published when reconciliation needs to lock positions
+// for a consistent snapshot. This is consumed by Position Keeping to pause writes.
+message PositionLockRequestedEvent {
+  // run_id references the settlement run requesting the lock.
+  string run_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // account_id identifies the account to lock.
+  string account_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // instrument_code is the instrument to lock (optional, empty for all instruments).
+  string instrument_code = 3 [(buf.validate.field).string.max_len = 32];
+
+  // lock_duration_seconds is the maximum time to hold the lock.
+  int32 lock_duration_seconds = 4 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 300
+  }];
+
+  // correlation_id links related events across services.
+  string correlation_id = 5 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // timestamp when the event was created.
+  google.protobuf.Timestamp timestamp = 6 [(buf.validate.field).required = true];
+}
+
+// DisputeCreatedEvent is published when a formal dispute is raised.
+message DisputeCreatedEvent {
+  // dispute_id uniquely identifies the dispute.
+  string dispute_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // variance_id references the variance being disputed.
+  string variance_id = 2 [(buf.validate.field).string.uuid = true];
+
+  // run_id references the settlement run.
+  string run_id = 3 [(buf.validate.field).string.uuid = true];
+
+  // account_id identifies the account.
+  string account_id = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // reason describes why the variance is being disputed.
+  string reason = 5 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 1000
+  }];
+
+  // raised_by identifies who raised the dispute.
+  string raised_by = 6 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // correlation_id links related events across services.
+  string correlation_id = 7 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // timestamp when the event was created.
+  google.protobuf.Timestamp timestamp = 8 [(buf.validate.field).required = true];
+}
+
+// DisputeResolvedEvent is published when a dispute is resolved or rejected.
+message DisputeResolvedEvent {
+  // dispute_id uniquely identifies the dispute.
+  string dispute_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // variance_id references the variance that was disputed.
+  string variance_id = 2 [(buf.validate.field).string.uuid = true];
+
+  // account_id identifies the account.
+  string account_id = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // outcome indicates the resolution (RESOLVED or REJECTED).
+  string outcome = 4 [(buf.validate.field).string = {
+    in: ["RESOLVED", "REJECTED"]
+  }];
+
+  // resolution describes the resolution details.
+  string resolution = 5 [(buf.validate.field).string.max_len = 1000];
+
+  // resolved_by identifies who resolved the dispute.
+  string resolved_by = 6 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // correlation_id links related events across services.
+  string correlation_id = 7 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // timestamp when the event was created.
+  google.protobuf.Timestamp timestamp = 8 [(buf.validate.field).required = true];
+}
+
+// BalanceImbalanceDetectedEvent is published when a balance assertion fails.
+// This is a P1 alert event that requires immediate attention.
+message BalanceImbalanceDetectedEvent {
+  // assertion_id uniquely identifies the assertion that failed.
+  string assertion_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // account_id identifies the account with the imbalance.
+  string account_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // instrument_code identifies the asset type.
+  string instrument_code = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 32
+  }];
+
+  // expected_balance as a decimal string.
+  string expected_balance = 4;
+
+  // actual_balance as a decimal string.
+  string actual_balance = 5;
+
+  // expression is the assertion rule that failed.
+  string expression = 6 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 1000
+  }];
+
+  // failure_reason explains why the assertion failed.
+  string failure_reason = 7 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 1000
+  }];
+
+  // severity indicates the alert level (P1=critical imbalance, P2=threshold warning, P3=informational drift).
+  string severity = 8 [(buf.validate.field).string = {
+    in: ["P1", "P2", "P3"]
+  }];
+
+  // run_id references the settlement run (optional, empty for standalone assertions).
+  string run_id = 9;
+
+  // correlation_id links related events across services.
+  string correlation_id = 10 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // timestamp when the event was created.
+  google.protobuf.Timestamp timestamp = 11 [(buf.validate.field).required = true];
+}

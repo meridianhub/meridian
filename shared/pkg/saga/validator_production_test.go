@@ -28,10 +28,4 @@ func TestValidateSagaScript_ProductionScript(t *testing.T) {
 	// Validate syntax and static analysis
 	err = saga.ValidateSagaScript(script)
 	assert.NoError(t, err, "Script validation failed for %s", *scriptPath)
-
-	// TODO: In Task 25-28, add dry-run execution validation here:
-	// validator := saga.NewDryRunValidator(handlerRegistry, schemaRegistry)
-	// result, err := validator.Validate(script)
-	// require.NoError(t, err)
-	// assert.True(t, result.Success, "Dry-run validation failed")
 }

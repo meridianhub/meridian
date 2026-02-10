@@ -1,0 +1,128 @@
+syntax = "proto3";
+
+package meridian.control_plane.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "meridian/control_plane/v1/manifest.proto";
+
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1;controlplanev1";
+
+// ========================================
+// Manifest History Service
+// ========================================
+
+// ManifestHistoryService provides version history and rollback capabilities
+// for tenant manifests. Every manifest change is stored as an immutable snapshot
+// with a forward-only audit trail.
+service ManifestHistoryService {
+  // GetCurrentManifest retrieves the most recently applied manifest for the tenant.
+  rpc GetCurrentManifest(GetCurrentManifestRequest) returns (GetCurrentManifestResponse);
+
+  // GetManifestVersion retrieves a specific manifest version by its version string.
+  rpc GetManifestVersion(GetManifestVersionRequest) returns (GetManifestVersionResponse);
+
+  // ListManifestVersions returns a paginated list of manifest versions, ordered
+  // by applied_at descending (most recent first).
+  rpc ListManifestVersions(ListManifestVersionsRequest) returns (ListManifestVersionsResponse);
+}
+
+// ========================================
+// Request/Response Messages
+// ========================================
+
+// GetCurrentManifestRequest requests the most recently applied manifest.
+// Tenant context is derived from the request metadata (x-tenant-id header).
+message GetCurrentManifestRequest {}
+
+// GetCurrentManifestResponse contains the most recently applied manifest version.
+message GetCurrentManifestResponse {
+  // version is the current manifest version record.
+  ManifestVersion version = 1;
+}
+
+// GetManifestVersionRequest requests a specific manifest version.
+message GetManifestVersionRequest {
+  // version is the manifest version string to retrieve (e.g., "1.0").
+  string version = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 50
+  }];
+}
+
+// GetManifestVersionResponse contains the requested manifest version.
+message GetManifestVersionResponse {
+  // version is the requested manifest version record.
+  ManifestVersion version = 1;
+}
+
+// ListManifestVersionsRequest requests a paginated list of manifest versions.
+message ListManifestVersionsRequest {
+  // limit is the maximum number of versions to return (1-100, default 20).
+  int32 limit = 1 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 100
+  }];
+
+  // offset is the number of versions to skip for pagination.
+  int32 offset = 2 [(buf.validate.field).int32.gte = 0];
+}
+
+// ListManifestVersionsResponse contains a paginated list of manifest versions.
+message ListManifestVersionsResponse {
+  // versions is the list of manifest version records.
+  repeated ManifestVersion versions = 1;
+
+  // total_count is the total number of manifest versions available.
+  int32 total_count = 2;
+}
+
+// ========================================
+// Domain Messages
+// ========================================
+
+// ApplyStatus represents the outcome of applying a manifest version.
+enum ApplyStatus {
+  // APPLY_STATUS_UNSPECIFIED is the default zero value.
+  APPLY_STATUS_UNSPECIFIED = 0;
+
+  // APPLY_STATUS_APPLIED indicates the manifest was successfully applied.
+  APPLY_STATUS_APPLIED = 1;
+
+  // APPLY_STATUS_FAILED indicates the manifest application failed.
+  APPLY_STATUS_FAILED = 2;
+
+  // APPLY_STATUS_ROLLED_BACK indicates this version was rolled back to a previous state.
+  APPLY_STATUS_ROLLED_BACK = 3;
+}
+
+// ManifestVersion represents a stored manifest snapshot with audit metadata.
+// Each version is an immutable record in the forward-only audit trail.
+message ManifestVersion {
+  // id is the unique identifier for this manifest version record.
+  string id = 1;
+
+  // version is the manifest schema version (e.g., "1.0").
+  string version = 2;
+
+  // manifest is the complete manifest snapshot at this version.
+  Manifest manifest = 3;
+
+  // applied_at is when this manifest version was applied.
+  google.protobuf.Timestamp applied_at = 4;
+
+  // applied_by identifies who applied this manifest version.
+  string applied_by = 5;
+
+  // apply_status indicates the outcome of applying this manifest.
+  ApplyStatus apply_status = 6;
+
+  // apply_job_id references the job that applied this manifest.
+  optional string apply_job_id = 7;
+
+  // diff_summary is a human-readable summary of changes from the previous version.
+  optional string diff_summary = 8;
+
+  // created_at is when this record was created.
+  google.protobuf.Timestamp created_at = 9;
+}

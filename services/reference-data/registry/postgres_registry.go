@@ -219,6 +219,58 @@ func (r *PostgresRegistry) ListActive(ctx context.Context) ([]*InstrumentDefinit
 	return result, nil
 }
 
+// ListByStatus retrieves all instruments with the specified status.
+// If status is empty, returns all instruments regardless of status.
+func (r *PostgresRegistry) ListByStatus(ctx context.Context, status Status) ([]*InstrumentDefinition, error) {
+	var result []*InstrumentDefinition
+
+	err := r.withReadTransaction(ctx, func(tx pgx.Tx) error {
+		var query string
+		var args []any
+
+		if status == "" {
+			query = `
+				SELECT id, code, version, dimension, precision, status, is_system,
+					validation_expression, fungibility_key_expression, error_message_expression,
+					attribute_schema, display_name, description,
+					created_at, updated_at, activated_at, deprecated_at, successor_id
+				FROM instrument_definition
+				ORDER BY code, version DESC`
+		} else {
+			query = `
+				SELECT id, code, version, dimension, precision, status, is_system,
+					validation_expression, fungibility_key_expression, error_message_expression,
+					attribute_schema, display_name, description,
+					created_at, updated_at, activated_at, deprecated_at, successor_id
+				FROM instrument_definition
+				WHERE status = $1
+				ORDER BY code, version DESC`
+			args = append(args, string(status))
+		}
+
+		rows, err := tx.Query(ctx, query, args...)
+		if err != nil {
+			return fmt.Errorf("failed to query instruments by status: %w", err)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			def, err := r.scanInstrumentDefinitionFromRows(rows)
+			if err != nil {
+				return err
+			}
+			result = append(result, def)
+		}
+
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
 // CreateDraft creates a new instrument definition in DRAFT status.
 func (r *PostgresRegistry) CreateDraft(ctx context.Context, def *InstrumentDefinition) error {
 	// Reject system instrument creation

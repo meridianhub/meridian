@@ -94,10 +94,10 @@ func setupTestClient(t *testing.T) (*Client, *mockInternalBankAccountServer, fun
 	srv := grpc.NewServer()
 	internalbankaccountv1.RegisterInternalBankAccountServiceServer(srv, mock)
 
+	serveDone := make(chan struct{})
 	go func() {
-		if err := srv.Serve(listener); err != nil {
-			t.Logf("Server error: %v", err)
-		}
+		defer close(serveDone)
+		_ = srv.Serve(listener)
 	}()
 
 	// Create client connection using bufconn
@@ -118,7 +118,8 @@ func setupTestClient(t *testing.T) (*Client, *mockInternalBankAccountServer, fun
 
 	fullCleanup := func() {
 		conn.Close()
-		srv.Stop()
+		srv.GracefulStop()
+		<-serveDone
 		listener.Close()
 	}
 

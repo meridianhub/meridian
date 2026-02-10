@@ -1,0 +1,209 @@
+# Control Plane Manifest Handler Schemas
+# These schemas define the type signatures for apply_manifest saga handlers.
+
+service: control_plane
+version: "1.0"
+
+handlers:
+  # Reference Data - Instrument Management
+  reference_data.register_instrument:
+    description: "Register a new instrument definition in Reference Data service"
+    params:
+      instrument_code:
+        type: string
+        required: true
+        description: "Unique instrument code (e.g., USD, KWH)"
+      display_name:
+        type: string
+        required: false
+        description: "Human-readable instrument name"
+      dimension:
+        type: string
+        required: false
+        description: "Physical dimension (CURRENCY, ENERGY, etc.)"
+      decimal_places:
+        type: int64
+        required: false
+        description: "Decimal precision (0-18)"
+      description:
+        type: string
+        required: false
+        description: "Instrument description"
+    returns:
+      instrument_code:
+        type: string
+        description: "The registered instrument code"
+      status:
+        type: string
+        description: "Registration status (REGISTERED)"
+    compensate: reference_data.delete_instrument
+
+  reference_data.delete_instrument:
+    description: "Delete an instrument (compensation for register)"
+    params:
+      instrument_code:
+        type: string
+        required: true
+        description: "Instrument code to delete"
+    returns:
+      instrument_code:
+        type: string
+        description: "The deleted instrument code"
+      status:
+        type: string
+        description: "Deletion status (DELETED)"
+
+  # Reference Data - Account Type Management
+  reference_data.register_account_type:
+    description: "Register a new account type definition in Reference Data service"
+    params:
+      account_type_code:
+        type: string
+        required: true
+        description: "Unique account type code"
+      display_name:
+        type: string
+        required: false
+        description: "Human-readable account type name"
+      description:
+        type: string
+        required: false
+        description: "Account type description"
+      instrument_code:
+        type: string
+        required: true
+        description: "Default instrument code for this account type"
+    returns:
+      account_type_code:
+        type: string
+        description: "The registered account type code"
+      status:
+        type: string
+        description: "Registration status (REGISTERED)"
+    compensate: reference_data.delete_account_type
+
+  reference_data.delete_account_type:
+    description: "Delete an account type (compensation for register)"
+    params:
+      account_type_code:
+        type: string
+        required: true
+        description: "Account type code to delete"
+    returns:
+      account_type_code:
+        type: string
+        description: "The deleted account type code"
+      status:
+        type: string
+        description: "Deletion status (DELETED)"
+
+  # Reference Data - Valuation Rules
+  reference_data.register_valuation_rule:
+    description: "Register a valuation rule for cross-instrument conversion"
+    params:
+      from_instrument:
+        type: string
+        required: true
+        description: "Source instrument code"
+      to_instrument:
+        type: string
+        required: true
+        description: "Target instrument code"
+      rule_type:
+        type: string
+        required: false
+        description: "Rule type (FIXED_RATE, MARKET, etc.)"
+      expression:
+        type: string
+        required: false
+        description: "CEL expression for valuation computation"
+      description:
+        type: string
+        required: false
+        description: "Rule description"
+    returns:
+      from_instrument:
+        type: string
+        description: "Source instrument code"
+      to_instrument:
+        type: string
+        description: "Target instrument code"
+      status:
+        type: string
+        description: "Registration status (REGISTERED)"
+
+  # Reference Data - Saga Definition
+  reference_data.register_saga_definition:
+    description: "Register a saga definition in the saga registry"
+    params:
+      saga_name:
+        type: string
+        required: true
+        description: "Saga identifier name"
+      display_name:
+        type: string
+        required: false
+        description: "Human-readable saga name"
+      description:
+        type: string
+        required: false
+        description: "Saga description"
+      script:
+        type: string
+        required: false
+        description: "Starlark script content"
+      version:
+        type: string
+        required: false
+        description: "Saga version (semver format)"
+    returns:
+      saga_name:
+        type: string
+        description: "The registered saga name"
+      status:
+        type: string
+        description: "Registration status (REGISTERED)"
+
+  # Internal Bank Account - Account Provisioning
+  internal_bank_account.initiate:
+    description: "Initiate a new internal bank account"
+    params:
+      account_code:
+        type: string
+        required: true
+        description: "Business-friendly account code"
+      name:
+        type: string
+        required: true
+        description: "Human-readable account name"
+      account_type:
+        type: string
+        required: true
+        description: "Account type (CLEARING, NOSTRO, etc.)"
+      instrument_code:
+        type: string
+        required: true
+        description: "Instrument code (e.g., USD, KWH)"
+      description:
+        type: string
+        required: false
+        description: "Account description"
+    returns:
+      account_id:
+        type: string
+        description: "Generated account identifier"
+      account_code:
+        type: string
+        description: "Echo of account code"
+      name:
+        type: string
+        description: "Echo of account name"
+      account_type:
+        type: string
+        description: "Echo of account type"
+      status:
+        type: string
+        description: "Account status (ACTIVE)"
+      instrument_code:
+        type: string
+        description: "Echo of instrument code"

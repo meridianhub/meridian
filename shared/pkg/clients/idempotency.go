@@ -89,10 +89,5 @@ func ApplyIdempotencyKey(ctx context.Context, _ interface{}) context.Context {
 	// Apply to gRPC metadata header
 	ctx = metadata.AppendToOutgoingContext(ctx, "x-idempotency-key", key)
 
-	// TODO: Future enhancement - Apply to protobuf field if message supports it
-	// This would require reflection to detect and set the IdempotencyKey field
-	// on proto messages that have it. For now, we focus on metadata propagation
-	// which works universally across all gRPC calls.
-
 	return ctx
 }

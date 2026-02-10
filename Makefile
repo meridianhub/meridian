@@ -29,7 +29,7 @@ GOMOD=$(GOCMD) mod
 GOGET=$(GOCMD) get
 GOFMT=$(GOCMD) fmt
 
-.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-openapi proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt validate-semconv validate-sagas migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-status-all migrate-lint-all migrate-hash-all migrate-apply-orgs migrate-status-orgs docs generate-saga-docs
+.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-openapi proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt validate-semconv validate-sagas proto-jsonschema validate-manifest-jsonschema validate-manifests control-plane-ci test-control-plane migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-status-all migrate-lint-all migrate-hash-all migrate-apply-orgs migrate-status-orgs docs generate-saga-docs
 
 # Default target
 all: help
@@ -56,6 +56,11 @@ help:
 	@echo "  make proto-deps-update - Update buf.lock with latest dependencies"
 	@echo "  make proto-deps-graph  - Display dependency graph"
 	@echo "  make proto-plugins-info - Display current protoc plugin versions"
+	@echo "  make proto-jsonschema  - Generate JSON Schema from manifest proto"
+	@echo "  make validate-manifest-jsonschema - Validate JSON Schema is in sync with proto"
+	@echo "  make validate-manifests - Validate example manifests against schema"
+	@echo "  make control-plane-ci  - Run full control plane CI pipeline"
+	@echo "  make test-control-plane - Run control plane unit tests"
 	@echo "  make docker            - Build Docker images"
 	@echo "  make deploy-local      - Deploy to local Kubernetes using Tilt"
 	@echo "  make coverage          - Generate and open HTML coverage report"
@@ -289,6 +294,22 @@ proto-plugins-info:
 	@echo "  3. Run 'make proto' to test generation"
 	@echo "  4. Commit buf.gen.yaml with updated versions"
 
+## proto-jsonschema: Generate JSON Schema from manifest protobuf definition
+proto-jsonschema:
+	@echo "Generating JSON Schema from manifest proto..."
+	@which protoc-gen-jsonschema > /dev/null 2>&1 || \
+		([ -f "$$(go env GOPATH)/bin/protoc-gen-jsonschema" ] && export PATH="$$PATH:$$(go env GOPATH)/bin") || \
+		(echo "protoc-gen-jsonschema not installed. Run: go install github.com/chrusty/protoc-gen-jsonschema/cmd/protoc-gen-jsonschema@latest"; exit 1)
+	@export PATH="$$PATH:$$(go env GOPATH)/bin" && \
+		$(BUF) generate --template buf.gen.jsonschema.yaml --path api/proto/meridian/control_plane/v1/manifest.proto
+	@cp api/jsonschema/meridian.control_plane.v1/Manifest.json api/jsonschema/manifest.v1.schema.json
+	@rm -rf api/jsonschema/meridian.control_plane.v1
+	@echo "JSON Schema generated: api/jsonschema/manifest.v1.schema.json"
+
+## validate-manifest-jsonschema: Validate JSON Schema is in sync with manifest proto
+validate-manifest-jsonschema:
+	@./scripts/validate-manifest-jsonschema.sh
+
 ## migrate-diff-all: Generate migrations for all schemas
 migrate-diff-all: migrate-diff-current migrate-diff-position
 	@echo "All schema migrations generated."
@@ -418,3 +439,19 @@ generate-saga-docs:
 	@echo "Generating saga handler documentation..."
 	@go run tools/saga-doc-gen/main.go tools/saga-doc-gen/generator.go -schema-dir=shared/pkg/saga/schema -output-dir=docs
 	@echo "Documentation generated successfully"
+
+## validate-manifests: Validate example manifests against protobuf schema, CEL, and Starlark
+validate-manifests:
+	@echo "Validating example manifests..."
+	@$(GOCMD) run ./services/control-plane/cmd/validate/ -manifest='examples/manifests/*.json'
+	@echo "All example manifests validated successfully"
+
+## test-control-plane: Run control plane service unit tests
+test-control-plane:
+	@echo "Running control plane tests..."
+	@$(GOTEST) -v -short -race ./services/control-plane/...
+	@echo "Control plane tests passed"
+
+## control-plane-ci: Run full control plane CI pipeline (schema sync + validation + tests)
+control-plane-ci: validate-manifest-jsonschema validate-manifests test-control-plane
+	@echo "Control plane CI pipeline passed"

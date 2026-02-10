@@ -1,0 +1,85 @@
+{
+  "version": "1.0",
+  "metadata": {
+    "name": "Acme Energy Trading",
+    "industry": "energy",
+    "description": "Energy trading and settlement platform with kWh and carbon credit support"
+  },
+  "instruments": [
+    {
+      "code": "GBP",
+      "name": "British Pound Sterling",
+      "type": "INSTRUMENT_TYPE_FIAT",
+      "dimensions": {
+        "unit": "GBP",
+        "precision": 2
+      }
+    },
+    {
+      "code": "KWH",
+      "name": "Kilowatt Hour",
+      "type": "INSTRUMENT_TYPE_COMMODITY",
+      "dimensions": {
+        "unit": "kWh",
+        "precision": 3
+      }
+    },
+    {
+      "code": "CARBON_CREDIT",
+      "name": "Carbon Credit",
+      "type": "INSTRUMENT_TYPE_COMMODITY",
+      "dimensions": {
+        "unit": "TONNE_CO2E",
+        "precision": 4
+      }
+    }
+  ],
+  "accountTypes": [
+    {
+      "code": "ENERGY_TRADING",
+      "name": "Energy Trading Account",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": ["GBP", "KWH"],
+      "policies": {
+        "validation": "amount > 0"
+      }
+    },
+    {
+      "code": "CARBON_INVENTORY",
+      "name": "Carbon Credit Inventory",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": ["CARBON_CREDIT"],
+      "policies": {
+        "validation": "amount > 0",
+        "bucketing": "instrument_code + ':' + attributes.batch_id"
+      }
+    },
+    {
+      "code": "SETTLEMENT",
+      "name": "Settlement Account",
+      "normalBalance": "NORMAL_BALANCE_CREDIT",
+      "allowedInstruments": ["GBP"]
+    }
+  ],
+  "valuationRules": [
+    {
+      "fromInstrument": "KWH",
+      "toInstrument": "GBP",
+      "method": "VALUATION_METHOD_SPOT_RATE",
+      "source": "nordpool_spot"
+    },
+    {
+      "fromInstrument": "CARBON_CREDIT",
+      "toInstrument": "GBP",
+      "method": "VALUATION_METHOD_SPOT_RATE",
+      "source": "ice_eua"
+    }
+  ],
+  "sagas": [
+    {
+      "name": "process_energy_settlement",
+      "trigger": "api:/v1/energy/settlements",
+      "script": "def execute(ctx):\n    settlement = ctx\n    amount = Decimal(str(settlement.get('amount', '0')))\n    position_keeping.initiate_log(amount=amount, direction='DEBIT')\n"
+    }
+  ]
+}

@@ -76,6 +76,13 @@ type PositionKeepingClient interface {
 	// Supports both currency and non-currency instruments.
 	GetAccountBalances(ctx context.Context, req *positionkeepingv1.GetAccountBalancesRequest) (*positionkeepingv1.GetAccountBalancesResponse, error)
 
+	// ReleaseReservation transitions a reservation to EXECUTED or TERMINATED status.
+	//
+	// Called after ExecuteLien (reason=EXECUTED) or TerminateLien (reason=TERMINATED) to release
+	// the Position Keeping reservation that was created during InitiateLien.
+	// Best-effort: failures are logged but do not fail the lien operation.
+	ReleaseReservation(ctx context.Context, req *positionkeepingv1.ReleaseReservationRequest) (*positionkeepingv1.ReleaseReservationResponse, error)
+
 	// Close terminates the client connection gracefully
 	Close() error
 }
