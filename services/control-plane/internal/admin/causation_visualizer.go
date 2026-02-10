@@ -16,14 +16,10 @@ import (
 )
 
 var (
-	// ErrPositionNotFound is returned when a financial position log cannot be found.
-	ErrPositionNotFound = errors.New("financial position log not found")
-	// ErrTransactionNotFound is returned when a transaction cannot be found.
-	ErrTransactionNotFound = errors.New("transaction not found")
-	// ErrEventNotFound is returned when an event cannot be found.
-	ErrEventNotFound = errors.New("event not found")
 	// ErrNoSagaFound is returned when no saga can be traced for the given entity.
 	ErrNoSagaFound = errors.New("no saga found for the given entity")
+	// ErrCausationChainTooDeep is returned when the saga parent chain exceeds MaxCausationTreeDepth.
+	ErrCausationChainTooDeep = errors.New("causation chain exceeds maximum depth")
 )
 
 // PositionInfo contains metadata about a traced position.
@@ -192,8 +188,9 @@ func (v *CausationVisualizer) findSagaViaPositionLineage(ctx context.Context, po
 	// Look for saga_instances whose correlation_id matches any transaction_id
 	// in the position log's entries, or whose step results reference the position.
 	query := `
-		SELECT si.id, ''
+		SELECT si.id, COALESCE(fpl.account_id, '')
 		FROM saga_instances si
+		LEFT JOIN financial_position_logs fpl ON fpl.log_id = $1
 		WHERE si.id = (
 			SELECT ssr.saga_instance_id
 			FROM saga_step_results ssr
@@ -293,7 +290,7 @@ func (v *CausationVisualizer) findSagaViaOutbox(ctx context.Context, eventID uui
 	var tableExists bool
 	checkQuery := `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'event_outbox')`
 	if err := v.db.WithContext(ctx).Raw(checkQuery).Row().Scan(&tableExists); err != nil {
-		return uuid.Nil, ErrNoSagaFound
+		return uuid.Nil, fmt.Errorf("check event_outbox table existence: %w", err)
 	}
 	if !tableExists {
 		return uuid.Nil, ErrNoSagaFound
@@ -351,8 +348,14 @@ func (v *CausationVisualizer) findRootSaga(ctx context.Context, sagaID uuid.UUID
 	err := v.db.WithContext(ctx).Raw(query, sagaID, saga.MaxCausationTreeDepth).Row().Scan(&rootID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			// If no parent found, the saga itself is the root
-			return sagaID, nil
+			// No row with parent_saga_id IS NULL found. This means either:
+			// 1. The saga chain exceeds MaxCausationTreeDepth
+			// 2. The saga_id doesn't exist in the database
+			v.logger.Warn("root saga not found",
+				"saga_id", sagaID,
+				"max_depth", saga.MaxCausationTreeDepth,
+			)
+			return uuid.Nil, fmt.Errorf("%w: saga %s (limit %d)", ErrCausationChainTooDeep, sagaID, saga.MaxCausationTreeDepth)
 		}
 		return uuid.Nil, fmt.Errorf("find root saga failed: %w", err)
 	}

@@ -58,8 +58,6 @@ func TestPositionInfo_Fields(t *testing.T) {
 }
 
 func TestErrorSentinels(t *testing.T) {
-	assert.EqualError(t, ErrPositionNotFound, "financial position log not found")
-	assert.EqualError(t, ErrTransactionNotFound, "transaction not found")
-	assert.EqualError(t, ErrEventNotFound, "event not found")
 	assert.EqualError(t, ErrNoSagaFound, "no saga found for the given entity")
+	assert.EqualError(t, ErrCausationChainTooDeep, "causation chain exceeds maximum depth")
 }

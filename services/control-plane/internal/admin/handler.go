@@ -109,14 +109,10 @@ func (h *Handler) GetCausationTreeForEvent(
 // mapError converts domain errors to gRPC status errors.
 func (h *Handler) mapError(err error, entityType string, entityID uuid.UUID) error {
 	switch {
-	case errors.Is(err, ErrPositionNotFound):
-		return status.Errorf(codes.NotFound, "position not found: %s", entityID)
-	case errors.Is(err, ErrTransactionNotFound):
-		return status.Errorf(codes.NotFound, "transaction not found: %s", entityID)
-	case errors.Is(err, ErrEventNotFound):
-		return status.Errorf(codes.NotFound, "event not found: %s", entityID)
 	case errors.Is(err, ErrNoSagaFound):
 		return status.Errorf(codes.NotFound, "no saga found for %s: %s", entityType, entityID)
+	case errors.Is(err, ErrCausationChainTooDeep):
+		return status.Errorf(codes.NotFound, "causation chain too deep for %s: %s", entityType, entityID)
 	case errors.Is(err, saga.ErrSagaNotFound):
 		return status.Errorf(codes.NotFound, "saga not found for %s: %s", entityType, entityID)
 	default:

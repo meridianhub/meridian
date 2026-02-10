@@ -59,7 +59,6 @@ func exportJSON(w io.Writer, tree *saga.CausationTreeNode, depth int) error {
 
 func exportCSV(w io.Writer, tree *saga.CausationTreeNode) error {
 	writer := csv.NewWriter(w)
-	defer writer.Flush()
 
 	// Write header
 	header := []string{
@@ -72,14 +71,21 @@ func exportCSV(w io.Writer, tree *saga.CausationTreeNode) error {
 	}
 
 	// Flatten tree into rows
-	flattenTree(writer, tree, "", 0)
+	if err := flattenTree(writer, tree, "", 0); err != nil {
+		return err
+	}
+
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		return fmt.Errorf("flush CSV: %w", err)
+	}
 
 	return nil
 }
 
-func flattenTree(w *csv.Writer, node *saga.CausationTreeNode, parentSagaID string, depth int) {
+func flattenTree(w *csv.Writer, node *saga.CausationTreeNode, parentSagaID string, depth int) error {
 	if node == nil {
-		return
+		return nil
 	}
 
 	knowledgeAt := ""
@@ -95,7 +101,7 @@ func flattenTree(w *csv.Writer, node *saga.CausationTreeNode, parentSagaID strin
 
 	if len(node.Steps) == 0 {
 		// Saga with no steps - write a single row
-		_ = w.Write([]string{
+		if err := w.Write([]string{
 			fmt.Sprintf("%d", depth),
 			node.SagaID.String(),
 			node.SagaName,
@@ -105,8 +111,10 @@ func flattenTree(w *csv.Writer, node *saga.CausationTreeNode, parentSagaID strin
 			failedStep,
 			knowledgeAt,
 			parentSagaID,
-		})
-		return
+		}); err != nil {
+			return fmt.Errorf("write CSV row: %w", err)
+		}
+		return nil
 	}
 
 	for _, step := range node.Steps {
@@ -120,7 +128,7 @@ func flattenTree(w *csv.Writer, node *saga.CausationTreeNode, parentSagaID strin
 			stepError = *step.Error
 		}
 
-		_ = w.Write([]string{
+		if err := w.Write([]string{
 			fmt.Sprintf("%d", depth),
 			node.SagaID.String(),
 			node.SagaName,
@@ -133,11 +141,17 @@ func flattenTree(w *csv.Writer, node *saga.CausationTreeNode, parentSagaID strin
 			failedStep,
 			knowledgeAt,
 			parentSagaID,
-		})
+		}); err != nil {
+			return fmt.Errorf("write CSV row: %w", err)
+		}
 
 		// Recurse into child sagas
 		for _, child := range step.ChildSagas {
-			flattenTree(w, child, node.SagaID.String(), depth+1)
+			if err := flattenTree(w, child, node.SagaID.String(), depth+1); err != nil {
+				return err
+			}
 		}
 	}
+
+	return nil
 }

@@ -71,24 +71,14 @@ func TestHandler_MapError_NotFound(t *testing.T) {
 		contains string
 	}{
 		{
-			name:     "position not found",
-			err:      ErrPositionNotFound,
-			contains: "position not found",
-		},
-		{
-			name:     "transaction not found",
-			err:      ErrTransactionNotFound,
-			contains: "transaction not found",
-		},
-		{
-			name:     "event not found",
-			err:      ErrEventNotFound,
-			contains: "event not found",
-		},
-		{
 			name:     "no saga found",
 			err:      ErrNoSagaFound,
 			contains: "no saga found",
+		},
+		{
+			name:     "causation chain too deep",
+			err:      ErrCausationChainTooDeep,
+			contains: "causation chain too deep",
 		},
 	}
 
