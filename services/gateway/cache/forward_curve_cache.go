@@ -295,8 +295,8 @@ func (c *ForwardCurveCache) GetRange(ctx context.Context, resolutionKey string, 
 	// Collect hourly epochs in order and observations by epoch
 	var hours []int64
 	obsByEpoch := make(map[int64]*Observation)
-	var missStart *time.Time
-	var missEnd *time.Time
+	var missStart, missEnd time.Time
+	var haveMiss bool
 
 	for !current.After(endTrunc) {
 		hourEpoch := current.Unix()
@@ -324,18 +324,18 @@ func (c *ForwardCurveCache) GetRange(ctx context.Context, resolutionKey string, 
 		}
 
 		// Track the range of cache misses
-		t := current
-		if missStart == nil {
-			missStart = &t
+		if !haveMiss {
+			missStart = current
+			haveMiss = true
 		}
-		missEnd = &t
+		missEnd = current
 
 		current = current.Add(time.Hour)
 	}
 
 	// If we had cache misses, bulk-query the source
-	if missStart != nil {
-		rangeObs, err := c.source.GetForwardPriceRange(ctx, resolutionKey, *missStart, missEnd.Add(time.Hour))
+	if haveMiss {
+		rangeObs, err := c.source.GetForwardPriceRange(ctx, resolutionKey, missStart, missEnd.Add(time.Hour))
 		if err != nil {
 			return nil, err
 		}
@@ -452,7 +452,7 @@ func (c *ForwardCurveCache) l2Key(tenantID, resolutionKey string, hourEpoch int6
 
 // jitteredL1TTL returns the base L1 TTL plus random jitter.
 func (c *ForwardCurveCache) jitteredL1TTL() time.Duration {
-	if c.l1Jitter == 0 {
+	if c.l1Jitter <= 0 {
 		return c.l1TTL
 	}
 	jitterRange := int64(c.l1Jitter) * 2
