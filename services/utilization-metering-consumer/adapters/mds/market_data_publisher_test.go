@@ -719,3 +719,115 @@ func TestObservationTimestamps(t *testing.T) {
 	assert.Equal(t, timestamppb.New(windowStart), obs.ValidFrom)
 	assert.Equal(t, timestamppb.New(windowEnd), obs.ValidTo)
 }
+
+// --- Restore tests ---
+
+func TestAggregationBuffer_RestoreOnEmpty(t *testing.T) {
+	buf := NewAggregationBuffer(1 * time.Hour)
+
+	windowStart := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	windows := []*UtilizationWindow{
+		{
+			ResolutionKey:    "tenant-1/svc/Op",
+			InstrumentCode:   "TRANSACTION",
+			WindowStart:      windowStart,
+			WindowEnd:        windowStart.Add(1 * time.Hour),
+			TotalUnits:       decimal.NewFromInt(10),
+			PeakUnits:        decimal.NewFromInt(5),
+			AvgUnits:         decimal.NewFromInt(5),
+			ObservationCount: 2,
+		},
+	}
+
+	buf.Restore(windows)
+
+	snap := buf.Snapshot()
+	require.Len(t, snap, 1)
+	assert.True(t, snap[0].TotalUnits.Equal(decimal.NewFromInt(10)))
+	assert.Equal(t, int64(2), snap[0].ObservationCount)
+}
+
+func TestAggregationBuffer_RestoreMergesWithExisting(t *testing.T) {
+	buf := NewAggregationBuffer(1 * time.Hour)
+
+	ts := time.Date(2025, 1, 1, 10, 30, 0, 0, time.UTC)
+	buf.Add(testMeasurement("tenant-1", "svc", "Op", 3, ts))
+
+	// Simulate failed flush: restore windows with same key
+	windowStart := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	buf.Restore([]*UtilizationWindow{
+		{
+			ResolutionKey:    "tenant-1/svc/Op",
+			InstrumentCode:   "TRANSACTION",
+			WindowStart:      windowStart,
+			WindowEnd:        windowStart.Add(1 * time.Hour),
+			TotalUnits:       decimal.NewFromInt(7),
+			PeakUnits:        decimal.NewFromInt(7),
+			AvgUnits:         decimal.NewFromInt(7),
+			ObservationCount: 1,
+		},
+	})
+
+	snap := buf.Snapshot()
+	require.Len(t, snap, 1)
+	// 3 (existing) + 7 (restored) = 10
+	assert.True(t, snap[0].TotalUnits.Equal(decimal.NewFromInt(10)))
+	// peak: max(3, 7) = 7
+	assert.True(t, snap[0].PeakUnits.Equal(decimal.NewFromInt(7)))
+	// count: 1 + 1 = 2
+	assert.Equal(t, int64(2), snap[0].ObservationCount)
+}
+
+func TestMarketDataPublisher_FlushFailureRequeuesData(t *testing.T) {
+	mock := newMockMDSClient()
+	mock.batchErr = status.Errorf(codes.Internal, "internal error")
+
+	cfg := DefaultConfig()
+	cfg.FlushInterval = 50 * time.Millisecond
+
+	pub, err := NewMarketDataPublisher(mock, cfg)
+	require.NoError(t, err)
+	defer pub.Stop()
+
+	ts := time.Date(2025, 1, 1, 10, 30, 0, 0, time.UTC)
+	pub.Publish(testMeasurement("tenant-1", "svc", "Op", 5, ts))
+
+	// Data should be re-queued on failure, so multiple flush attempts should occur
+	// for the same single measurement (proving it was restored after each failure)
+	err = await.New().
+		AtMost(3 * time.Second).
+		PollInterval(50 * time.Millisecond).
+		Until(func() bool {
+			return mock.callCount.Load() >= 3
+		})
+	require.NoError(t, err, "expected multiple flush attempts due to restore-on-failure")
+}
+
+// --- Idempotent Stop ---
+
+func TestMarketDataPublisher_StopIsIdempotent(t *testing.T) {
+	mock := newMockMDSClient()
+	cfg := DefaultConfig()
+	cfg.FlushInterval = 10 * time.Minute
+
+	pub, err := NewMarketDataPublisher(mock, cfg)
+	require.NoError(t, err)
+
+	// Multiple Stop calls should not panic
+	pub.Stop()
+	pub.Stop()
+	pub.Stop()
+}
+
+// --- Config normalization ---
+
+func TestNewMarketDataPublisher_ConfigNormalization(t *testing.T) {
+	mock := newMockMDSClient()
+
+	// Zero config should use defaults, not panic
+	cfg := Config{}
+	pub, err := NewMarketDataPublisher(mock, cfg)
+	require.NoError(t, err)
+	require.NotNil(t, pub)
+	pub.Stop()
+}

@@ -221,6 +221,30 @@ func (b *AggregationBuffer) Drain() []*UtilizationWindow {
 	return result
 }
 
+// Restore merges windows back into the buffer, combining with any existing windows.
+// Used to re-queue windows on publish failure to avoid data loss.
+func (b *AggregationBuffer) Restore(windows []*UtilizationWindow) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	for _, w := range windows {
+		key := b.windowKey(w.ResolutionKey, w.WindowStart)
+		existing, exists := b.windows[key]
+		if !exists {
+			cp := *w
+			b.windows[key] = &cp
+			continue
+		}
+		// Merge: add totals, keep max peak, sum observation counts
+		existing.TotalUnits = existing.TotalUnits.Add(w.TotalUnits)
+		existing.ObservationCount += w.ObservationCount
+		if w.PeakUnits.GreaterThan(existing.PeakUnits) {
+			existing.PeakUnits = w.PeakUnits
+		}
+		existing.recalculateAvg()
+	}
+}
+
 // Size returns the number of windows currently in the buffer.
 func (b *AggregationBuffer) Size() int {
 	b.mu.Lock()
@@ -236,8 +260,9 @@ type MarketDataPublisher struct {
 	config    Config
 	logger    *slog.Logger
 
-	stopCh chan struct{}
-	done   chan struct{}
+	stopCh   chan struct{}
+	done     chan struct{}
+	stopOnce sync.Once
 }
 
 // NewMarketDataPublisher creates a new publisher that periodically flushes aggregated
@@ -250,6 +275,20 @@ func NewMarketDataPublisher(
 		return nil, ErrNilMDSClient
 	}
 
+	// Normalize config with defaults for zero/invalid values
+	defaults := DefaultConfig()
+	if config.WindowSize <= 0 {
+		config.WindowSize = defaults.WindowSize
+	}
+	if config.FlushInterval <= 0 {
+		config.FlushInterval = defaults.FlushInterval
+	}
+	if config.SourceCode == "" {
+		config.SourceCode = defaults.SourceCode
+	}
+	if config.CircuitBreakerConsecutiveFailures == 0 {
+		config.CircuitBreakerConsecutiveFailures = defaults.CircuitBreakerConsecutiveFailures
+	}
 	if config.Logger == nil {
 		config.Logger = slog.Default()
 	}
@@ -292,8 +331,11 @@ func (p *MarketDataPublisher) IsCircuitBreakerOpen() bool {
 }
 
 // Stop gracefully stops the publisher, flushing any remaining buffered data.
+// Safe to call multiple times.
 func (p *MarketDataPublisher) Stop() {
-	close(p.stopCh)
+	p.stopOnce.Do(func() {
+		close(p.stopCh)
+	})
 	<-p.done
 }
 
@@ -316,6 +358,7 @@ func (p *MarketDataPublisher) flushLoop() {
 }
 
 // flush drains the buffer and publishes all windows to MDS.
+// On failure, windows are restored to the buffer to avoid data loss.
 func (p *MarketDataPublisher) flush() {
 	windows := p.buffer.Drain()
 	if len(windows) == 0 {
@@ -351,6 +394,9 @@ func (p *MarketDataPublisher) flush() {
 			"duration_seconds", duration,
 		)
 		mdsPublishErrorsTotal.WithLabelValues(classifyError(err)).Inc()
+		// Re-queue windows to avoid data loss
+		p.buffer.Restore(windows)
+		mdsBufferSize.Set(float64(p.buffer.Size()))
 		return
 	}
 
