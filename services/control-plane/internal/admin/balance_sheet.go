@@ -125,7 +125,7 @@ func (s *BalanceSheetService) GetBalanceSheet(ctx context.Context, tenantID stri
 
 	// Fetch all position logs for the tenant via position-keeping service.
 	// The tenant_id is used as an account_id prefix filter.
-	logs, err := s.fetchPositionLogs(ctx, tenantID)
+	logs, err := s.fetchPositionLogs(ctx, tenantID, asOf)
 	if err != nil {
 		return nil, fmt.Errorf("fetch position logs: %w", err)
 	}
@@ -148,7 +148,7 @@ func (s *BalanceSheetService) GetPositionDetails(ctx context.Context, tenantID, 
 		"instrument", instrument,
 	)
 
-	logs, err := s.fetchPositionLogs(ctx, tenantID)
+	logs, err := s.fetchPositionLogs(ctx, tenantID, time.Time{})
 	if err != nil {
 		return nil, fmt.Errorf("fetch position logs: %w", err)
 	}
@@ -222,11 +222,11 @@ func (s *BalanceSheetService) ExportBalanceSheetCSV(ctx context.Context, tenantI
 	for _, section := range bs.Sections {
 		for _, item := range section.LineItems {
 			if err := w.Write([]string{
-				string(section.Classification),
-				item.AccountType,
-				item.Instrument,
+				sanitizeCSVCell(string(section.Classification)),
+				sanitizeCSVCell(item.AccountType),
+				sanitizeCSVCell(item.Instrument),
 				item.Quantity.String(),
-				string(item.NormalBalance),
+				sanitizeCSVCell(string(item.NormalBalance)),
 				fmt.Sprintf("%d", item.AccountCount),
 			}); err != nil {
 				return "", fmt.Errorf("write line item: %w", err)
@@ -242,9 +242,9 @@ func (s *BalanceSheetService) ExportBalanceSheetCSV(ctx context.Context, tenantI
 
 		for _, instrument := range instruments {
 			if err := w.Write([]string{
-				string(section.Classification),
+				sanitizeCSVCell(string(section.Classification)),
 				"TOTAL",
-				instrument,
+				sanitizeCSVCell(instrument),
 				section.Totals[instrument].String(),
 				"",
 				"",
@@ -263,14 +263,20 @@ func (s *BalanceSheetService) ExportBalanceSheetCSV(ctx context.Context, tenantI
 }
 
 // fetchPositionLogs retrieves all position logs for a tenant from position-keeping,
-// handling cursor-based pagination to collect all pages.
-func (s *BalanceSheetService) fetchPositionLogs(ctx context.Context, tenantID string) ([]*positionkeepingv1.FinancialPositionLog, error) {
+// handling cursor-based pagination to collect all pages. When asOf is non-zero,
+// a date_range filter is applied so only logs up to that date are returned.
+func (s *BalanceSheetService) fetchPositionLogs(ctx context.Context, tenantID string, asOf time.Time) ([]*positionkeepingv1.FinancialPositionLog, error) {
 	var allLogs []*positionkeepingv1.FinancialPositionLog
 	var pageToken string
 
 	for {
 		req := &positionkeepingv1.ListFinancialPositionLogsRequest{
 			AccountId: tenantID,
+		}
+		if !asOf.IsZero() {
+			req.DateRange = &commonv1.DateRange{
+				EndDate: asOf.Format("2006-01-02"),
+			}
 		}
 		if pageToken != "" {
 			req.Pagination = &commonv1.Pagination{
@@ -497,6 +503,20 @@ func classifyNormalBalance(accountType string) NormalBalance {
 
 	// Default: debit-normal (assets, expenses, etc.)
 	return NormalBalanceDebit
+}
+
+// sanitizeCSVCell prevents CSV injection by escaping cells that begin with
+// formula-triggering characters (=, +, -, @).
+func sanitizeCSVCell(v string) string {
+	if len(v) == 0 {
+		return v
+	}
+	switch v[0] {
+	case '=', '+', '-', '@':
+		return "'" + v
+	default:
+		return v
+	}
 }
 
 // classifyAccount determines the balance sheet classification for an account type.
