@@ -10,7 +10,8 @@
                 "accountTypes",
                 "valuationRules",
                 "sagas",
-                "seedData"
+                "seedData",
+                "paymentRails"
             ],
             "properties": {
                 "version": {
@@ -242,66 +243,6 @@
             "title": "========================================\n Manifest Metadata\n ========================================",
             "description": "======================================== Manifest Metadata ========================================  ManifestMetadata contains identifying information about a manifest."
         },
-        "meridian.control_plane.v1.SagaDefinition": {
-            "required": [
-                "name",
-                "trigger",
-                "script"
-            ],
-            "properties": {
-                "name": {
-                    "type": "string",
-                    "description": "name is the unique identifier for this saga (e.g., \"process_energy_settlement\"). Must be lowercase alphanumeric with underscores."
-                },
-                "trigger": {
-                    "type": "string",
-                    "description": "trigger defines what initiates this saga. Supported prefixes:   \"api:\" - triggered by an API call (e.g., \"api:/v1/settlements\")   \"webhook:\" - triggered by an external webhook (e.g., \"webhook:stripe_payment\")   \"scheduled:\" - triggered on a schedule (e.g., \"scheduled:daily_reconciliation\")"
-                },
-                "script": {
-                    "type": "string",
-                    "description": "script is the inline Starlark source code defining the saga workflow. Must not be empty - all saga logic is defined inline in the manifest. Starlark guarantees termination (no while loops, no recursion)."
-                }
-            },
-            "additionalProperties": false,
-            "type": "object",
-            "title": "========================================\n Saga Definitions\n ========================================",
-            "description": "======================================== Saga Definitions ========================================  SagaDefinition declares a workflow within the manifest. Sagas are triggered by API calls, webhooks, or scheduled events, and contain inline Starlark scripts that orchestrate service interactions."
-        },
-        "meridian.control_plane.v1.PlatformFee": {
-            "required": [
-                "type",
-                "value"
-            ],
-            "properties": {
-                "type": {
-                    "enum": [
-                        "PLATFORM_FEE_TYPE_UNSPECIFIED",
-                        0,
-                        "PLATFORM_FEE_TYPE_PERCENTAGE",
-                        1,
-                        "PLATFORM_FEE_TYPE_FLAT",
-                        2
-                    ],
-                    "oneOf": [
-                        {
-                            "type": "string"
-                        },
-                        {
-                            "type": "integer"
-                        }
-                    ],
-                    "description": "PlatformFeeType defines how the platform fee is calculated."
-                },
-                "value": {
-                    "type": "string",
-                    "description": "value is the fee amount as a decimal string. For PERCENTAGE: \"2.5\" means 2.5%. For FLAT: \"0.30\" means 0.30 in the transaction currency. Must be a valid positive decimal value."
-                }
-            },
-            "additionalProperties": false,
-            "type": "object",
-            "title": "Platform Fee",
-            "description": "PlatformFee defines the fee structure for payment rail transactions."
-        },
         "meridian.control_plane.v1.PaymentRails": {
             "required": [
                 "provider",
@@ -334,6 +275,7 @@
                             "type": "integer"
                         }
                     ],
+                    "title": "Connect Mode",
                     "description": "ConnectMode defines the Stripe Connect account type."
                 },
                 "accountId": {
@@ -342,7 +284,7 @@
                 },
                 "webhookEndpointSecret": {
                     "type": "string",
-                    "description": "webhook_endpoint_secret is a reference to the webhook signing secret stored in a secret manager. Never contains the plaintext secret."
+                    "description": "webhook_endpoint_secret is a reference to the webhook signing secret stored in a secret manager (e.g., \"sm://stripe/webhook_secret\"). Never contains the plaintext secret."
                 },
                 "platformFee": {
                     "$ref": "#/definitions/meridian.control_plane.v1.PlatformFee",
@@ -368,6 +310,7 @@
                             "type": "integer"
                         }
                     ],
+                    "title": "Payout Schedule",
                     "description": "PayoutSchedule defines when connected account payouts are initiated."
                 },
                 "supportedMethods": {
@@ -380,8 +323,69 @@
             },
             "additionalProperties": false,
             "type": "object",
-            "title": "========================================\n Payment Rails\n ========================================",
-            "description": "======================================== Payment Rails ========================================  PaymentRails defines an external payment provider integration. Currently supports Stripe Connect for payment processing."
+            "title": "Payment Rails",
+            "description": "PaymentRails defines an external payment provider integration. Currently supports Stripe Connect for payment processing."
+        },
+        "meridian.control_plane.v1.PlatformFee": {
+            "required": [
+                "type",
+                "value"
+            ],
+            "properties": {
+                "type": {
+                    "enum": [
+                        "PLATFORM_FEE_TYPE_UNSPECIFIED",
+                        0,
+                        "PLATFORM_FEE_TYPE_PERCENTAGE",
+                        1,
+                        "PLATFORM_FEE_TYPE_FLAT",
+                        2
+                    ],
+                    "oneOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "integer"
+                        }
+                    ],
+                    "title": "========================================\n Payment Rails\n ========================================",
+                    "description": "======================================== Payment Rails ========================================  PlatformFeeType defines how the platform fee is calculated."
+                },
+                "value": {
+                    "type": "string",
+                    "description": "value is the fee amount as a decimal string. For PERCENTAGE: \"2.5\" means 2.5%. For FLAT: \"0.30\" means 0.30 in the transaction currency. Must be a valid positive decimal value."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "Platform Fee",
+            "description": "PlatformFee defines the fee structure for payment rail transactions."
+        },
+        "meridian.control_plane.v1.SagaDefinition": {
+            "required": [
+                "name",
+                "trigger",
+                "script"
+            ],
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "name is the unique identifier for this saga (e.g., \"process_energy_settlement\"). Must be lowercase alphanumeric with underscores."
+                },
+                "trigger": {
+                    "type": "string",
+                    "description": "trigger defines what initiates this saga. Supported prefixes:   \"api:\" - triggered by an API call (e.g., \"api:/v1/settlements\")   \"webhook:\" - triggered by an external webhook (e.g., \"webhook:stripe_payment\")   \"scheduled:\" - triggered on a schedule (e.g., \"scheduled:daily_reconciliation\")"
+                },
+                "script": {
+                    "type": "string",
+                    "description": "script is the inline Starlark source code defining the saga workflow. Must not be empty - all saga logic is defined inline in the manifest. Starlark guarantees termination (no while loops, no recursion)."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "========================================\n Saga Definitions\n ========================================",
+            "description": "======================================== Saga Definitions ========================================  SagaDefinition declares a workflow within the manifest. Sagas are triggered by API calls, webhooks, or scheduled events, and contain inline Starlark scripts that orchestrate service interactions."
         },
         "meridian.control_plane.v1.ValuationRule": {
             "required": [
