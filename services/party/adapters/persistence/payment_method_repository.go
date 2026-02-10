@@ -127,6 +127,31 @@ func (r *PaymentMethodRepository) FindByID(ctx context.Context, id uuid.UUID) (*
 	return pm, nil
 }
 
+// FindByProviderMethod retrieves an active payment method by provider and provider method ID.
+// This is used during webhook processing when Stripe sends events referencing a method ID.
+// Returns ErrPaymentMethodNotFound if no active method matches.
+func (r *PaymentMethodRepository) FindByProviderMethod(ctx context.Context, provider domain.PaymentProvider, providerMethodID string) (*domain.PaymentMethod, error) {
+	var pm *domain.PaymentMethod
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		var entity PaymentMethodEntity
+		result := tx.Where("provider = ? AND provider_method_id = ? AND status = ?",
+			string(provider), providerMethodID, "ACTIVE").
+			First(&entity)
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return ErrPaymentMethodNotFound
+		}
+		if result.Error != nil {
+			return result.Error
+		}
+		pm = paymentMethodToDomain(&entity)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return pm, nil
+}
+
 // ListActiveByParty returns all active payment methods for a party.
 func (r *PaymentMethodRepository) ListActiveByParty(ctx context.Context, partyID uuid.UUID) ([]*domain.PaymentMethod, error) {
 	var methods []*domain.PaymentMethod
