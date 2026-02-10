@@ -230,6 +230,21 @@ sequenceDiagram
     P-->>C: status=APPROVED/REJECTED
 ```
 
+#### Webhook Implementation Concerns
+
+The webhook handler (KYC-003) must address:
+
+- **Signature verification**: Validate webhook authenticity using
+  `KYC_WEBHOOK_SECRET` (HMAC-SHA256 or provider-specific scheme)
+- **Idempotency**: Detect and ignore duplicate webhook deliveries using
+  the provider's event ID as deduplication key
+- **Correlation**: Map webhook payload `check_id` back to the party
+  record using the `verification_id` stored during initiation
+- **Timeout handling**: Background job to poll for stuck verifications
+  that never received a webhook (configurable timeout, e.g., 24 hours)
+- **Out-of-order delivery**: Use status FSM to handle webhooks arriving
+  in unexpected order (e.g., ignore "in_progress" after "completed")
+
 ### Handler Refactoring
 
 The `ExchangeDemographics` handler needs to be refactored to use the `Provider`
@@ -290,13 +305,16 @@ KYC_BASE_URL: "https://api.onfido.com/v3.6"  # Provider API base URL
 | KYC-006 | Write unit tests with recorded HTTP responses | 2 |
 | KYC-007 | Write integration tests (mock provider with async mode) | 1 |
 
-### Total: 5 Story Points
+### Story Point Summary
 
-Excluding vendor selection decision, counting only tasks KYC-002 through
-KYC-005 as the core implementation.
+| Scope | Tasks | Story Points |
+|-------|-------|-------------|
+| Core implementation | KYC-002 through KYC-005 | 5 |
+| Test coverage | KYC-006 through KYC-007 | 3 |
+| **Grand total** | | **8** |
 
-Note: KYC-006 and KYC-007 add 3 SP for test coverage. KYC-001 is a decision
-gate that must be resolved before implementation.
+KYC-001 (vendor selection) is a decision gate with no story points that must
+be resolved before implementation begins.
 
 ---
 

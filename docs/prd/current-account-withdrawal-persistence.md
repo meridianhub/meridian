@@ -69,10 +69,16 @@ The repository is passed to `createServiceWithClients` (line 125) and then to
 withdrawalRepo *persistence.WithdrawalRepository
 ```
 
-**The nil guard pattern** exists because the handlers were written defensively before the
-persistence adapter was implemented. The adapter now exists at
-`services/current-account/adapters/persistence/withdrawal_repository.go` with full CRUD
-operations:
+**The nil guards are dead code.** Since `withdrawalRepo` is unconditionally
+initialized in `cmd/main.go:97` and always passed to the Service constructor,
+the `withdrawalRepo == nil` checks in the three handlers will never execute in
+normal operation. These guards were written defensively before the persistence
+adapter was implemented but are now obsolete. They should be removed as part
+of this work.
+
+The adapter exists at
+`services/current-account/adapters/persistence/withdrawal_repository.go` with
+full CRUD operations:
 
 - `Create(ctx, withdrawal)` - Insert new withdrawal
 - `FindByID(ctx, id)` - Lookup by UUID
@@ -80,12 +86,17 @@ operations:
 - `Update(ctx, withdrawal)` - Optimistic locking update
 - `List(ctx, accountID, pagination)` - Paginated list by account
 
-The entity is defined at `services/current-account/adapters/persistence/withdrawal_entity.go` with table name `withdrawal`.
+The entity is defined at
+`services/current-account/adapters/persistence/withdrawal_entity.go` with table
+name `withdrawal`.
 
-**What is missing:** The database migration that creates the `withdrawal` table. Without
-this migration, the repository exists in Go code but has no backing table, so the
-`WithdrawalRepository` would fail at runtime with SQL errors rather than the graceful
-nil-guard degradation.
+**What is missing:** The database migration that creates the `withdrawal` table.
+The repository Go code is wired and non-nil, but without the backing table,
+withdrawal operations would fail with SQL errors at runtime. The implementation
+should:
+
+1. Create the `withdrawal` table migration
+2. Remove the now-obsolete nil guards from the three handlers
 
 ---
 
@@ -150,7 +161,7 @@ CREATE TABLE withdrawal (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     version BIGINT NOT NULL DEFAULT 1,
-    CONSTRAINT idx_withdrawal_reference UNIQUE (reference)
+    CONSTRAINT uq_withdrawal_reference UNIQUE (reference)
 );
 
 CREATE INDEX idx_withdrawal_account_status ON withdrawal(account_id, status);
@@ -188,8 +199,9 @@ The `WithdrawalRepository` follows this pattern identically.
 | Task ID | Description | Story Points |
 |---------|-------------|-------------|
 | CAW-001 | Create database migration for `withdrawal` table | 1 |
-| CAW-002 | Write integration tests for `WithdrawalRepository` (CockroachDB testcontainers) | 2 |
-| CAW-003 | Verify all 3 handlers work end-to-end through gRPC transport | 1 |
+| CAW-002 | Remove obsolete nil guards from 3 handlers | 1 |
+| CAW-003 | Write integration tests for `WithdrawalRepository` (CockroachDB) | 2 |
+| CAW-004 | Verify all 3 handlers work end-to-end through gRPC transport | 1 |
 
 ### Total: 3 Story Points
 
@@ -235,16 +247,18 @@ already exists. The gap is the database migration and test coverage.
 ## Rollout Plan
 
 1. **Migration**: Apply `withdrawal` table migration (safe, additive schema change)
-2. **Deploy**: No code changes needed; existing code already wires the repository
-3. **Verify**: Run gRPC calls against each handler to confirm Unimplemented is gone
-4. **Monitor**: Check Prometheus metrics for `execute_withdrawal`,
+2. **Code**: Remove obsolete nil guards from 3 handlers
+3. **Deploy**: Deploy updated service with migration
+4. **Verify**: Run gRPC calls against each handler to confirm Unimplemented is gone
+5. **Monitor**: Check Prometheus metrics for `execute_withdrawal`,
    `update_withdrawal`, `retrieve_withdrawal` operation durations
 
 ---
 
 ## Risk Assessment
 
-- **Low risk**: The Go code already exists and is wired. The only gap is the database migration.
+- **Low risk**: Repository code already exists and is wired. The gaps are the
+  database migration and removing dead-code nil guards.
 - **No breaking changes**: Adding a table is an additive operation.
 - **Graceful degradation preserved**: If migration is not applied, the nil guard behavior continues (no worse than today).
 
