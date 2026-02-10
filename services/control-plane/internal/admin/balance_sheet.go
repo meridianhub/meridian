@@ -142,14 +142,21 @@ func (s *BalanceSheetService) GetBalanceSheet(ctx context.Context, tenantID stri
 }
 
 // GetPositionDetails returns drill-down details for a specific account type and instrument.
-func (s *BalanceSheetService) GetPositionDetails(ctx context.Context, tenantID, accountType, instrument string) (*PositionDetailsResult, error) {
+// When asOf is non-zero, only positions as of that time are included, consistent with GetBalanceSheet.
+func (s *BalanceSheetService) GetPositionDetails(ctx context.Context, tenantID, accountType, instrument string, asOf time.Time) (*PositionDetailsResult, error) {
 	s.logger.Debug("fetching position details",
 		"tenant_id", tenantID,
 		"account_type", accountType,
 		"instrument", instrument,
+		"as_of", asOf,
 	)
 
-	logs, err := s.fetchPositionLogs(ctx, tenantID, time.Time{})
+	// A nil proto Timestamp converts to Unix epoch (1970-01-01), not Go's zero time.
+	if asOf.IsZero() || asOf.Unix() == 0 {
+		asOf = time.Now().UTC()
+	}
+
+	logs, err := s.fetchPositionLogs(ctx, tenantID, asOf)
 	if err != nil {
 		return nil, fmt.Errorf("fetch position logs: %w", err)
 	}
@@ -303,7 +310,7 @@ func (s *BalanceSheetService) fetchPositionLogs(ctx context.Context, tenantID st
 	if !asOf.IsZero() {
 		filtered := allLogs[:0]
 		for _, log := range allLogs {
-			if !log.GetCreatedAt().AsTime().After(asOf) {
+			if !log.GetUpdatedAt().AsTime().After(asOf) {
 				filtered = append(filtered, log)
 			}
 		}

@@ -69,7 +69,9 @@ func (h *BalanceSheetHandler) GetPositionDetails(
 		return nil, status.Errorf(codes.InvalidArgument, "instrument is required")
 	}
 
-	result, err := h.service.GetPositionDetails(ctx, tenantID, req.GetAccountType(), req.GetInstrument())
+	asOf := req.GetAsOf().AsTime()
+
+	result, err := h.service.GetPositionDetails(ctx, tenantID, req.GetAccountType(), req.GetInstrument(), asOf)
 	if err != nil {
 		h.logger.Error("failed to get position details",
 			"tenant_id", tenantID,

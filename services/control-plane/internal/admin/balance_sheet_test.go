@@ -248,7 +248,7 @@ func TestGetPositionDetails_FiltersByAccountTypeAndInstrument(t *testing.T) {
 	client := &mockPKClient{logs: logs}
 	svc := NewBalanceSheetService(client, nil)
 
-	result, err := svc.GetPositionDetails(context.Background(), "tenant", "CASH", "GBP")
+	result, err := svc.GetPositionDetails(context.Background(), "tenant", "CASH", "GBP", time.Now().UTC())
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -268,7 +268,7 @@ func TestGetPositionDetails_NoMatches(t *testing.T) {
 	client := &mockPKClient{logs: logs}
 	svc := NewBalanceSheetService(client, nil)
 
-	result, err := svc.GetPositionDetails(context.Background(), "tenant", "NONEXISTENT", "GBP")
+	result, err := svc.GetPositionDetails(context.Background(), "tenant", "NONEXISTENT", "GBP", time.Now().UTC())
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Empty(t, result.Positions)

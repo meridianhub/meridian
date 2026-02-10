@@ -240,6 +240,10 @@ message GetPositionDetailsRequest {
     min_len: 1
     max_len: 32
   }];
+
+  // as_of is an optional point-in-time for the drill-down (defaults to now).
+  // Should match the as_of used in GetBalanceSheet for consistent results.
+  google.protobuf.Timestamp as_of = 4;
 }
 
 // GetPositionDetailsResponse returns individual positions for drill-down.
