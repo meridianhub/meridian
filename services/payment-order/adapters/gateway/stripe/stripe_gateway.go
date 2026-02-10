@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/shopspring/decimal"
 	stripego "github.com/stripe/stripe-go/v82"
 
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
@@ -62,9 +61,9 @@ type PaymentIntentCreator interface {
 
 // GatewayAdapterConfig holds configuration for the Stripe gateway adapter.
 type GatewayAdapterConfig struct {
-	// PlatformFeePercent is the percentage of each payment collected as platform fee.
-	// e.g., 2.5 means 2.5%. Set to zero to disable platform fees.
-	PlatformFeePercent decimal.Decimal
+	// PlatformFee configures the platform fee calculation.
+	// If nil or zero, no platform fee is applied.
+	PlatformFee *PlatformFeeConfig
 }
 
 // stripeAccountKey is the context key for the Stripe Connected Account ID.
@@ -129,11 +128,16 @@ func (a *GatewayAdapter) SendPayment(ctx context.Context, req gateway.PaymentReq
 		},
 	}
 
-	// Set platform fee if configured
-	if a.config.PlatformFeePercent.IsPositive() {
-		feeAmount := calculatePlatformFee(amountMinor, a.config.PlatformFeePercent)
-		if feeAmount > 0 {
-			params.ApplicationFeeAmount = stripego.Int64(feeAmount)
+	// Calculate and set platform fee if configured
+	var platformFeeAmount int64
+	if a.config.PlatformFee != nil && !a.config.PlatformFee.IsZero() {
+		var err error
+		platformFeeAmount, err = a.config.PlatformFee.CalculateFee(amountMinor)
+		if err != nil {
+			return gateway.PaymentResponse{}, fmt.Errorf("platform fee calculation failed: %w", err)
+		}
+		if platformFeeAmount > 0 {
+			params.ApplicationFeeAmount = stripego.Int64(platformFeeAmount)
 		}
 	}
 
@@ -177,6 +181,7 @@ func (a *GatewayAdapter) SendPayment(ctx context.Context, req gateway.PaymentReq
 		GatewayReferenceID: pi.ID,
 		Status:             status,
 		Message:            string(pi.Status),
+		PlatformFeeAmount:  platformFeeAmount,
 	}, nil
 }
 
@@ -240,14 +245,6 @@ func (a *GatewayAdapter) handleError(err error, currency string, duration time.D
 		"message", stripeErr.Msg,
 	)
 	return gateway.PaymentResponse{}, fmt.Errorf("stripe error (%s): %w", stripeErr.Type, err)
-}
-
-// calculatePlatformFee calculates the platform fee in minor units.
-// fee = amount * percentage / 100, truncated to integer (floor).
-func calculatePlatformFee(amountMinor int64, feePercent decimal.Decimal) int64 {
-	amount := decimal.NewFromInt(amountMinor)
-	fee := amount.Mul(feePercent).Div(decimal.NewFromInt(100))
-	return fee.IntPart()
 }
 
 // mapPaymentIntentStatus maps a Stripe PaymentIntent status to a gateway.Status.
