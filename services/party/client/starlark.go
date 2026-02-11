@@ -58,6 +58,10 @@ func getDefaultPaymentMethodHandler(client *Client) saga.Handler {
 			return nil, err
 		}
 
+		if err := ctx.ValidatePartyAccessFromString(partyID); err != nil {
+			return nil, fmt.Errorf("party.get_default_payment_method: %w", err)
+		}
+
 		clientCtx := preparePartyClientContext(ctx)
 
 		resp, err := client.GetDefaultPaymentMethod(clientCtx, &partyv1.GetDefaultPaymentMethodRequest{

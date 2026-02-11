@@ -151,3 +151,33 @@ func TestGetDefaultPaymentMethodHandler_NotFound(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "party.get_default_payment_method")
 }
+
+func TestGetDefaultPaymentMethodHandler_PartyScopeViolation(t *testing.T) {
+	client := &Client{party: &mockPartyServiceClient{}}
+	registry := saga.NewHandlerRegistry()
+	err := RegisterStarlarkHandlers(registry, client)
+	require.NoError(t, err)
+
+	handler, err := registry.Get("party.get_default_payment_method")
+	require.NoError(t, err)
+
+	ownPartyID := uuid.New()
+	foreignPartyID := uuid.New()
+
+	ctx := &saga.StarlarkContext{
+		Context:         context.Background(),
+		SagaExecutionID: uuid.New(),
+		CorrelationID:   uuid.New(),
+		Logger:          slog.Default(),
+		PartyScope: &saga.PartyScope{
+			PartyID:        ownPartyID,
+			VisibleParties: []uuid.UUID{ownPartyID},
+		},
+	}
+
+	_, err = handler(ctx, map[string]any{
+		"party_id": foreignPartyID.String(),
+	})
+
+	assert.ErrorIs(t, err, saga.ErrPartyScopeViolation)
+}
