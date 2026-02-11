@@ -94,8 +94,10 @@ Three services independently implement the same scheduler skeleton:
 | DB execution audit trail | No | Yes | No |
 | Missed-window catch-up on startup | No | Yes | No |
 
-This is approximately 1,200 lines of duplicated lifecycle code across the
-three services, with subtle divergences in shutdown ordering and error handling
+A fourth worker, `DunningWorker` (PR #889), uses a Redis ZSET polling loop
+instead of cron but re-implements the same lifecycle boilerplate. This brings
+the total to approximately 1,500 lines of duplicated lifecycle code across
+four workers, with subtle divergences in shutdown ordering and error handling
 that create maintenance risk.
 
 ### Missing Resilience in Forecasting and Billing
@@ -157,7 +159,9 @@ mechanics are identical.
 ```text
 shared/platform/
 ├── scheduler/
-│   ├── scheduler.go          # Core lifecycle: Start/Stop, poll loop, job tracking
+│   ├── lifecycle.go          # WorkerLifecycle: Start/Stop, WaitGroup, mutex state
+│   ├── lifecycle_test.go
+│   ├── scheduler.go          # Cron scheduler: lifecycle + robfig/cron + poll loop
 │   ├── scheduler_test.go
 │   ├── execution_store.go    # DB-backed execution audit trail (interface + CockroachDB impl)
 │   ├── execution_store_test.go
@@ -171,10 +175,39 @@ shared/platform/
     └── config.go             # TTL, renewal, key prefix configuration
 ```
 
+### Layered Abstraction: WorkerLifecycle vs Scheduler
+
+The lifecycle boilerplate (`Start`, `Stop`, `WaitGroup`, `sync.Mutex` state,
+graceful shutdown with timeout, health check) is identical across all four
+worker implementations. However, the **trigger mechanism** differs
+fundamentally:
+
+- **Cron Schedulers** (forecasting, reconciliation, billing) are
+  **time-driven**: "It is 12:00, fire this job."
+- **Queue Processors** (dunning) are **score-driven**: "Give me the next
+  item where score < now."
+
+Forcing ZSET logic into `ScheduleProvider` (which requires a `CronExpr`)
+would create a leaky abstraction. Instead, the package exposes two layers:
+
+```text
+┌─────────────────────────────────────────────┐
+│            WorkerLifecycle                  │
+│  Start/Stop, WG tracking, mutex state,      │
+│  graceful shutdown, health check            │
+├──────────────────────┬──────────────────────┤
+│   CronScheduler      │   (future workers)   │
+│   + robfig/cron      │   + redis.ZRange      │
+│   + ScheduleProvider │   + domain-specific   │
+│   + Executor         │     polling           │
+│   + catch-up         │                       │
+└──────────────────────┴──────────────────────┘
+```
+
 ### Core Abstraction
 
-The scheduler package defines the lifecycle; services provide the domain logic
-via interfaces:
+The scheduler package defines the cron-specific layer; services provide the
+domain logic via interfaces:
 
 ```go
 // ScheduleProvider loads the current set of schedules from the domain's
@@ -369,6 +402,18 @@ with background renewal goroutines.
 3. Add catch-up for missed billing cycles
 4. Redis idempotency keys become defence-in-depth alongside DB tracking
 
+### Phase 5: Migrate Dunning Worker
+
+PR #889 introduces `DunningWorker` in `payment-order/worker/dunning_worker.go`
+with the same lifecycle boilerplate (ticker loop, `running`/`mu`/`wg` state,
+graceful shutdown). The dunning worker uses Redis ZSET-scored delayed jobs
+(`ZRangeByScore`) rather than cron expressions, so it does **not** use
+`ScheduleProvider` or `Executor`. Instead it embeds `WorkerLifecycle` directly.
+
+1. Refactor `dunning_worker.go` to embed `scheduler.WorkerLifecycle`
+2. Replace dunning's Redis locking with `shared/platform/redislock`
+3. Lifecycle tests reuse shared `WorkerLifecycle` test helpers
+
 ## Complexity Estimate
 
 | Phase | Description | Points | Parallelisable |
@@ -379,9 +424,12 @@ with background renewal goroutines.
 | 2 | Migrate forecasting scheduler | 3 | After 1a, 1b, 1c |
 | 3 | Migrate reconciliation scheduler | 3 | After 1a, 1b, 1c |
 | 4 | Migrate billing scheduler | 3 | After 1a, 1b, 1c |
-| **Total** | | **22** | Critical path: 13 |
+| 5 | Migrate dunning worker | 2 | After 1a, 1b |
+| **Total** | | **24** | Critical path: 13 |
 
-Phases 2, 3, 4 can run in parallel once Phase 1 is complete.
+Phases 2, 3, 4, 5 can run in parallel once their Phase 1 dependencies
+are complete. Phase 5 does not depend on 1c (no execution store or
+catch-up needed for queue processing).
 
 ## Testing Strategy
 
@@ -408,9 +456,14 @@ Phases 2, 3, 4 can run in parallel once Phase 1 is complete.
 
 ## Success Criteria
 
-1. All three schedulers use `shared/platform/scheduler` - no service-local scheduler lifecycle code
-2. All scheduled workloads have DB-backed execution tracking with operator-visible audit trail
-3. All schedulers detect and handle missed windows on startup
-4. Single `shared/platform/redislock` package replaces both leader election and per-resource locking implementations
-5. Existing test suites pass after migration; new tests cover catch-up and execution tracking for forecasting and billing
-6. Net reduction of at least 500 lines of duplicated code
+1. All three cron schedulers use `shared/platform/scheduler` - no service-local
+   scheduler lifecycle code
+2. Dunning worker embeds `WorkerLifecycle` from the same package
+3. All cron-scheduled workloads have DB-backed execution tracking with
+   operator-visible audit trail
+4. All cron schedulers detect and handle missed windows on startup
+5. Single `shared/platform/redislock` package replaces all Redis lock
+   implementations (leader election, per-resource leasing, dunning locking)
+6. Existing test suites pass after migration; new tests cover catch-up and
+   execution tracking for forecasting and billing
+7. Net reduction of at least 600 lines of duplicated code
