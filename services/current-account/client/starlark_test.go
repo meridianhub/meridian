@@ -714,6 +714,11 @@ func TestLienLifecycle(t *testing.T) {
 }
 
 func TestControlHandler(t *testing.T) {
+	// Use deterministic UUIDs for account IDs (ValidatePartyAccessFromString requires UUID format)
+	freezeAccountID := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("freeze-test")).String()
+	unfreezeAccountID := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("unfreeze-test")).String()
+	closeAccountID := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("close-test")).String()
+
 	t.Run("freeze action maps correctly", func(t *testing.T) {
 		mockServer := &mockCurrentAccountServer{}
 		client, cleanup := setupMockServer(t, mockServer)
@@ -728,7 +733,7 @@ func TestControlHandler(t *testing.T) {
 		}
 
 		params := map[string]any{
-			"account_id": "acc-123",
+			"account_id": freezeAccountID,
 			"action":     "FREEZE",
 			"reason":     "Dunning level 3 reached: overdue payment",
 		}
@@ -739,7 +744,7 @@ func TestControlHandler(t *testing.T) {
 
 		resultMap, ok := result.(map[string]any)
 		require.True(t, ok)
-		assert.Equal(t, "acc-123", resultMap["account_id"])
+		assert.Equal(t, freezeAccountID, resultMap["account_id"])
 		assert.Equal(t, "FROZEN", resultMap["new_status"])
 		assert.NotEmpty(t, resultMap["action_timestamp"])
 	})
@@ -758,7 +763,7 @@ func TestControlHandler(t *testing.T) {
 		}
 
 		params := map[string]any{
-			"account_id": "acc-456",
+			"account_id": unfreezeAccountID,
 			"action":     "UNFREEZE",
 			"reason":     "Payment method updated, retrying billing",
 		}
@@ -768,7 +773,7 @@ func TestControlHandler(t *testing.T) {
 
 		resultMap, ok := result.(map[string]any)
 		require.True(t, ok)
-		assert.Equal(t, "acc-456", resultMap["account_id"])
+		assert.Equal(t, unfreezeAccountID, resultMap["account_id"])
 		assert.Equal(t, "ACTIVE", resultMap["new_status"])
 	})
 
@@ -786,7 +791,7 @@ func TestControlHandler(t *testing.T) {
 		}
 
 		params := map[string]any{
-			"account_id": "acc-789",
+			"account_id": closeAccountID,
 			"action":     "CLOSE",
 			"reason":     "Account closure requested by party",
 		}
@@ -796,7 +801,7 @@ func TestControlHandler(t *testing.T) {
 
 		resultMap, ok := result.(map[string]any)
 		require.True(t, ok)
-		assert.Equal(t, "acc-789", resultMap["account_id"])
+		assert.Equal(t, closeAccountID, resultMap["account_id"])
 		assert.Equal(t, "CLOSED", resultMap["new_status"])
 	})
 
@@ -814,7 +819,7 @@ func TestControlHandler(t *testing.T) {
 		}
 
 		params := map[string]any{
-			"account_id": "acc-123",
+			"account_id": freezeAccountID,
 			"action":     "SUSPEND",
 			"reason":     "invalid action test",
 		}
@@ -839,7 +844,7 @@ func TestControlHandler(t *testing.T) {
 		}
 
 		params := map[string]any{
-			"account_id": "acc-123",
+			"account_id": freezeAccountID,
 			"reason":     "missing action",
 		}
 
@@ -865,7 +870,7 @@ func TestControlHandler(t *testing.T) {
 		}
 
 		params := map[string]any{
-			"account_id": "acc-123",
+			"account_id": freezeAccountID,
 			"action":     "FREEZE",
 			"reason":     "error propagation test",
 		}
