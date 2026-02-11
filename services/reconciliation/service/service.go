@@ -163,10 +163,70 @@ func (s *AccountReconciliationService) RetrieveAccountReconciliation(
 
 // ControlAccountReconciliation controls a settlement run (cancel, pause, resume).
 func (s *AccountReconciliationService) ControlAccountReconciliation(
-	_ context.Context,
-	_ *reconciliationv1.ControlAccountReconciliationRequest,
+	ctx context.Context,
+	req *reconciliationv1.ControlAccountReconciliationRequest,
 ) (*reconciliationv1.ControlAccountReconciliationResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "ControlAccountReconciliation not yet implemented")
+	if s.runRepo == nil {
+		return nil, status.Error(codes.Unimplemented, "ControlAccountReconciliation not yet implemented")
+	}
+
+	runIDStr := req.GetRunId()
+	if runIDStr == "" {
+		return nil, status.Error(codes.InvalidArgument, "run_id is required")
+	}
+
+	runID, err := uuid.Parse(runIDStr)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid run_id: %v", err)
+	}
+
+	action := req.GetAction()
+	if action == reconciliationv1.ControlAction_CONTROL_ACTION_UNSPECIFIED {
+		return nil, status.Error(codes.InvalidArgument, "action is required and must not be UNSPECIFIED")
+	}
+
+	run, err := s.runRepo.FindByID(ctx, runID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, status.Errorf(codes.NotFound, "settlement run not found: %s", runID)
+		}
+		slog.ErrorContext(ctx, "failed to retrieve settlement run", "run_id", runID, "error", err)
+		return nil, status.Error(codes.Internal, "failed to retrieve settlement run")
+	}
+
+	switch action { //nolint:exhaustive // UNSPECIFIED is handled above
+	case reconciliationv1.ControlAction_CONTROL_ACTION_CANCEL:
+		statusBefore := run.Status
+		if err := run.Cancel(); err != nil {
+			if errors.Is(err, domain.ErrInvalidStatusTransition) {
+				return nil, status.Errorf(codes.FailedPrecondition, "cannot cancel run in %s state", run.Status)
+			}
+			return nil, status.Error(codes.Internal, "failed to cancel settlement run")
+		}
+		if err := s.runRepo.Update(ctx, run); err != nil {
+			slog.ErrorContext(ctx, "failed to persist cancelled run", "run_id", runID, "error", err)
+			return nil, status.Error(codes.Internal, "failed to persist settlement run")
+		}
+		slog.InfoContext(ctx, "settlement run cancelled",
+			"run_id", runID,
+			"action", action.String(),
+			"status_before", statusBefore.String(),
+			"status_after", run.Status.String(),
+		)
+
+	case reconciliationv1.ControlAction_CONTROL_ACTION_PAUSE:
+		return nil, status.Error(codes.Unimplemented, "PAUSE action not yet supported")
+
+	case reconciliationv1.ControlAction_CONTROL_ACTION_RESUME:
+		return nil, status.Error(codes.Unimplemented, "RESUME action not yet supported")
+
+	default:
+		return nil, status.Errorf(codes.InvalidArgument, "unknown control action: %v", action)
+	}
+
+	return &reconciliationv1.ControlAccountReconciliationResponse{
+		Run: toProtoRunSummary(run),
+	}, nil
 }
 
 // ListReconciliationResults returns paginated variance details for a run.
