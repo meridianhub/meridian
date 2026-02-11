@@ -34,6 +34,7 @@ func TestPlatformHandlersSchema(t *testing.T) {
 		"current_account.execute_lien",
 		"current_account.terminate_lien",
 		"current_account.save",
+		"current_account.control",
 		"valuation_engine.valuate",
 		"repository.save",
 		"notification.send",
@@ -109,7 +110,7 @@ func TestRegistryLoadPlatformHandlers(t *testing.T) {
 	require.NoError(t, err)
 
 	handlers := registry.ListHandlers()
-	assert.Len(t, handlers, 29, "registry should contain all 29 platform handlers")
+	assert.Len(t, handlers, 30, "registry should contain all 30 platform handlers")
 
 	// Verify we can get each handler
 	for _, name := range handlers {
