@@ -38,6 +38,8 @@ stateDiagram-v2
 | [Starlark Saga Orchestration (Core)](starlark-saga-orchestration-core.md) | `starlark-saga-orchestration` | 24/24 done |
 | [Starlark Typed Service Clients](starlark-typed-service-clients.md) | `starlark-typed-clients` | 10/10 done |
 | [Universal Asset System](universal-asset-system.md) | `universal-asset-system` | 36/36 done |
+| [Starlark Service Bindings](starlark-service-bindings.md) | N/A (tracked across other tags) | Implemented 2026-02-04 |
+| [Starlark Testing Framework](starlark-testing-framework.md) | N/A (tracked across other tags) | Implemented 2026-02-06 |
 | [Valuation Service](valuation-service.md) | `valuation-engine` | 14/14 done |
 
 #### Paused (Deferred Items Remain)
@@ -51,6 +53,7 @@ stateDiagram-v2
 | PRD | Task Master Tag | Tasks |
 |-----|-----------------|-------|
 | [Market Data & Dynamic Pricing](market-data-dynamic-pricing.md) | `market-data-dynamic-pricing` | 10/12 done, 1 in-progress, 1 pending |
+| [Reconciliation gRPC Wiring](reconciliation-grpc-wiring.md) | `reconciliation-service` (tasks 17-23) | 0/7 done (wiring phase) |
 | [Reconciliation Service](reconciliation-service.md) | `reconciliation-service` | 16/24 done, 3 in-progress, 1 review, 4 pending |
 | [Stripe Connect](stripe-connect.md) | `stripe-connect` | 9/12 done, 1 in-progress, 2 pending |
 
@@ -62,9 +65,6 @@ stateDiagram-v2
 | [Internal Bank Account - Position Keeping Client](internal-bank-account-position-keeping-client.md) | Wire Position Keeping gRPC client in internal-bank-account service |
 | [Meridian Edge](meridian-edge.md) | Embedded modular monolith for IoT devices and browser (WASM) |
 | [Party KYC/AML Provider Integration](party-kyc-aml-provider-integration.md) | External KYC/AML provider adapter for production party onboarding |
-| [Reconciliation gRPC Wiring](reconciliation-grpc-wiring.md) | Wire 5 unimplemented reconciliation service RPCs to service layer |
-| [Starlark Service Bindings](starlark-service-bindings.md) | Service binding layer for Starlark saga scripts |
-| [Starlark Testing Framework](starlark-testing-framework.md) | Auto-validate Starlark scripts at upload time with dry-run mocks |
 
 ### Task Master PRDs (`.taskmaster/docs/`)
 

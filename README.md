@@ -214,14 +214,16 @@ Reference specifications: [BIAN Service Landscape 13.0.0](https://github.com/bia
 [svc-recon]: services/reconciliation/
 [svc-rd]: services/reference-data/
 [svc-tenant]: services/tenant/
+[svc-cp]: services/control-plane/
+[svc-forecasting]: services/forecasting/
 
 ### Infrastructure Services
 
 | Service | Purpose |
 |---------|---------|
 | [**Tenant**][svc-tenant] | Multi-tenant platform management with schema-per-tenant isolation |
-| **ControlPlane** | SaaS operations layer for manifest management and Stripe billing |
-| **Forecasting** | Built-in forecasting algorithms and validation framework |
+| [**ControlPlane**][svc-cp] | SaaS operations layer for manifest management and Stripe billing |
+| [**Forecasting**][svc-forecasting] | Forward curve computation and scheduled forecast execution |
 | **Gateway** | API gateway for external access |
 | **audit-worker** | Processes audit log outbox entries |
 | **utilization-metering-consumer** | Usage metering for billing |
