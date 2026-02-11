@@ -62,6 +62,10 @@ func (m *mockStrategyRepo) ListByTenant(ctx context.Context, tenantID string, fi
 	return nil, "", nil
 }
 
+func (m *mockStrategyRepo) ListAllActive(_ context.Context) ([]domain.ForecastingStrategy, error) {
+	return nil, nil
+}
+
 // mockMISClient implements starlark.MISClient for the ForecastRunner.
 type mockMISClient struct {
 	fetchFn func(ctx context.Context, datasetCode string, before time.Time) ([]starlark.Observation, error)
