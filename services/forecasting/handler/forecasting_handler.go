@@ -1,0 +1,257 @@
+// Package handler implements gRPC service handlers for the Forecasting service.
+package handler
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"time"
+
+	"github.com/google/uuid"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	forecastingv1 "github.com/meridianhub/meridian/api/proto/meridian/forecasting/v1"
+	marketinformationv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
+	"github.com/meridianhub/meridian/services/forecasting/domain"
+	"github.com/meridianhub/meridian/services/forecasting/starlark"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
+)
+
+// maxBatchSize is the maximum number of observations per MDS batch publish.
+const maxBatchSize = 1000
+
+// Service construction errors.
+var (
+	ErrRepoRequired   = errors.New("strategy repository is required")
+	ErrRunnerRequired = errors.New("forecast runner is required")
+	ErrMDSRequired    = errors.New("MDS publisher is required")
+	ErrBatchPublish   = errors.New("batch publish failed")
+)
+
+// MDSPublisher abstracts the Market Data Service for publishing observations.
+type MDSPublisher interface {
+	RecordObservationBatch(
+		ctx context.Context,
+		observations []*marketinformationv1.BatchObservationEntry,
+	) (*marketinformationv1.RecordObservationBatchResponse, error)
+}
+
+// Service implements the ForecastingService gRPC service.
+type Service struct {
+	forecastingv1.UnimplementedForecastingServiceServer
+	repo   domain.StrategyRepository
+	runner *starlark.ForecastRunner
+	mds    MDSPublisher
+	logger *slog.Logger
+}
+
+// NewService creates a new forecasting service handler.
+func NewService(
+	repo domain.StrategyRepository,
+	runner *starlark.ForecastRunner,
+	mds MDSPublisher,
+	logger *slog.Logger,
+) (*Service, error) {
+	if repo == nil {
+		return nil, ErrRepoRequired
+	}
+	if runner == nil {
+		return nil, ErrRunnerRequired
+	}
+	if mds == nil {
+		return nil, ErrMDSRequired
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	return &Service{
+		repo:   repo,
+		runner: runner,
+		mds:    mds,
+		logger: logger,
+	}, nil
+}
+
+// ComputeForwardCurve executes a forecasting strategy and publishes results to MDS.
+func (s *Service) ComputeForwardCurve(ctx context.Context, req *forecastingv1.ComputeForwardCurveRequest) (*forecastingv1.ComputeForwardCurveResponse, error) {
+	// Parse strategy ID
+	strategyID, err := uuid.Parse(req.GetStrategyId())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid strategy_id: %v", err)
+	}
+
+	// Extract tenant from context
+	tenantID, err := tenant.RequireFromContext(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "tenant context required")
+	}
+
+	// Step 1: Fetch strategy and validate ACTIVE status
+	strategy, err := s.repo.FindByID(ctx, strategyID)
+	if err != nil {
+		return nil, s.mapDomainError(err, strategyID)
+	}
+
+	if strategy.Status() != domain.StrategyStatusActive {
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"strategy %s is in %s status, must be ACTIVE", strategyID, strategy.Status())
+	}
+
+	// Determine execution time
+	now := time.Now().UTC()
+	if req.GetExecutionTime() != nil {
+		now = req.GetExecutionTime().AsTime()
+	}
+
+	s.logger.Info("computing forward curve",
+		"strategy_id", strategyID,
+		"strategy_name", strategy.Name(),
+		"strategy_version", strategy.Version(),
+		"tenant_id", string(tenantID),
+		"execution_time", now,
+	)
+
+	// Step 2-4: Execute Starlark strategy (runner handles observation fetching, ref data, and execution)
+	computeStart := time.Now()
+	input := starlark.StrategyInput{
+		Script:            strategy.StarlarkCode(),
+		InputDatasetCodes: strategy.InputDatasetCodes(),
+		OutputDatasetCode: strategy.OutputDatasetCode(),
+		HorizonHours:      strategy.HorizonHours(),
+		GranularityHours:  strategy.GranularityHours(),
+		Now:               now,
+	}
+	// Only set ResolutionKey and TenantID together (runner validates both-or-neither)
+	if strategy.ReferenceDataResolutionKey() != "" {
+		input.ResolutionKey = strategy.ReferenceDataResolutionKey()
+		input.TenantID = string(tenantID)
+	}
+
+	points, err := s.runner.ExecuteStrategy(ctx, input)
+	if err != nil {
+		s.logger.Error("starlark execution failed",
+			"strategy_id", strategyID,
+			"error", err,
+		)
+		return nil, status.Errorf(codes.Internal, "starlark execution failed: %v", err)
+	}
+	computeDuration := time.Since(computeStart)
+
+	s.logger.Info("starlark execution completed",
+		"strategy_id", strategyID,
+		"point_count", len(points),
+		"computation_ms", computeDuration.Milliseconds(),
+	)
+
+	// Step 5: Publish forecast points to MDS as ESTIMATE quality
+	publishStart := time.Now()
+	if err := s.publishToMDS(ctx, strategy, points, now); err != nil {
+		s.logger.Error("MDS publish failed",
+			"strategy_id", strategyID,
+			"error", err,
+		)
+		return nil, status.Errorf(codes.Internal, "failed to publish forecast points to MDS: %v", err)
+	}
+	publishDuration := time.Since(publishStart)
+
+	s.logger.Info("forecast points published to MDS",
+		"strategy_id", strategyID,
+		"point_count", len(points),
+		"publish_ms", publishDuration.Milliseconds(),
+	)
+
+	// Build response
+	horizon := time.Duration(strategy.HorizonHours()) * time.Hour
+	granularity := time.Duration(strategy.GranularityHours()) * time.Hour
+
+	protoPoints := make([]*forecastingv1.ForecastPointProto, len(points))
+	for i, p := range points {
+		protoPoints[i] = &forecastingv1.ForecastPointProto{
+			Timestamp: timestamppb.New(p.Timestamp),
+			Value:     p.Value.String(),
+			Metadata:  p.Metadata,
+		}
+	}
+
+	return &forecastingv1.ComputeForwardCurveResponse{
+		StrategyId:          strategyID.String(),
+		StrategyVersion:     strategy.Version(),
+		OutputDatasetCode:   strategy.OutputDatasetCode(),
+		PointCount:          int32(len(points)),
+		Horizon:             durationpb.New(horizon),
+		Granularity:         durationpb.New(granularity),
+		ExecutionTime:       timestamppb.New(now),
+		ComputationDuration: durationpb.New(computeDuration),
+		ForecastPoints:      protoPoints,
+	}, nil
+}
+
+// publishToMDS publishes forecast points to the Market Data Service as ESTIMATE quality observations.
+// Points are batched to respect the MDS batch size limit of 1000.
+func (s *Service) publishToMDS(
+	ctx context.Context,
+	strategy domain.ForecastingStrategy,
+	points []starlark.ForecastPoint,
+	executionTime time.Time,
+) error {
+	if len(points) == 0 {
+		return nil
+	}
+
+	// Build all observation entries
+	entries := make([]*marketinformationv1.BatchObservationEntry, len(points))
+	for i, p := range points {
+		entries[i] = &marketinformationv1.BatchObservationEntry{
+			DatasetCode: strategy.OutputDatasetCode(),
+			ObservedAt:  timestamppb.New(executionTime),
+			ValidFrom:   timestamppb.New(p.Timestamp),
+			Value:       p.Value.String(),
+			Quality:     marketinformationv1.QualityLevel_QUALITY_LEVEL_ESTIMATE,
+			SourceCode:  "FORECASTING",
+			ClientReference: fmt.Sprintf("forecast:%s:v%d:%s",
+				strategy.ID(), strategy.Version(), p.Timestamp.Format(time.RFC3339)),
+		}
+	}
+
+	// Publish in batches
+	for start := 0; start < len(entries); start += maxBatchSize {
+		end := start + maxBatchSize
+		if end > len(entries) {
+			end = len(entries)
+		}
+
+		batch := entries[start:end]
+		resp, err := s.mds.RecordObservationBatch(ctx, batch)
+		if err != nil {
+			return fmt.Errorf("batch publish (offset %d): %w", start, err)
+		}
+
+		if resp.GetFailureCount() > 0 {
+			return fmt.Errorf("%w: offset %d, %d of %d observations failed",
+				ErrBatchPublish, start, resp.GetFailureCount(), resp.GetTotalCount())
+		}
+	}
+
+	return nil
+}
+
+// mapDomainError converts domain errors to gRPC status errors.
+func (s *Service) mapDomainError(err error, strategyID uuid.UUID) error {
+	switch {
+	case errors.Is(err, domain.ErrStrategyNotFound):
+		return status.Errorf(codes.NotFound, "strategy %s not found", strategyID)
+	case errors.Is(err, domain.ErrVersionMismatch):
+		return status.Errorf(codes.Aborted, "strategy %s was modified concurrently", strategyID)
+	default:
+		s.logger.Error("internal error",
+			"strategy_id", strategyID,
+			"error", err,
+		)
+		return status.Errorf(codes.Internal, "internal error: %v", err)
+	}
+}

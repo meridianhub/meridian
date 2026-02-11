@@ -1,0 +1,80 @@
+syntax = "proto3";
+
+package meridian.forecasting.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/forecasting/v1;forecastingv1";
+
+// ForecastingService provides operations for managing and executing forecasting
+// strategies that generate forward curves from market data observations.
+service ForecastingService {
+  // ComputeForwardCurve executes a forecasting strategy to generate a forward curve.
+  //
+  // The RPC orchestrates:
+  //   1. Strategy retrieval and ACTIVE status validation
+  //   2. Historical observation fetching from Market Data Service
+  //   3. Reference data resolution (if configured)
+  //   4. Starlark strategy execution
+  //   5. Forecast point publishing to MDS as ESTIMATE quality observations
+  //
+  // Returns FAILED_PRECONDITION if the strategy is not in ACTIVE status.
+  // Returns NOT_FOUND if the strategy does not exist.
+  // Returns INTERNAL if the Starlark script fails during execution.
+  rpc ComputeForwardCurve(ComputeForwardCurveRequest) returns (ComputeForwardCurveResponse);
+}
+
+// ComputeForwardCurveRequest triggers execution of a forecasting strategy.
+message ComputeForwardCurveRequest {
+  // strategy_id is the UUID of the forecasting strategy to execute.
+  string strategy_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // execution_time overrides the current time for the forecast computation.
+  // If not set, the server uses the current time.
+  // Useful for backtesting and deterministic testing.
+  google.protobuf.Timestamp execution_time = 2;
+}
+
+// ComputeForwardCurveResponse contains the result of a forward curve computation.
+message ComputeForwardCurveResponse {
+  // strategy_id is the UUID of the executed strategy.
+  string strategy_id = 1;
+
+  // strategy_version is the version of the strategy that was executed.
+  int64 strategy_version = 2;
+
+  // output_dataset_code is the MDS dataset where forecast points were published.
+  string output_dataset_code = 3;
+
+  // point_count is the number of forecast points generated and published.
+  int32 point_count = 4;
+
+  // horizon is the forecast window duration.
+  google.protobuf.Duration horizon = 5;
+
+  // granularity is the spacing between forecast points.
+  google.protobuf.Duration granularity = 6;
+
+  // execution_time is the timestamp used as the start of the forecast window.
+  google.protobuf.Timestamp execution_time = 7;
+
+  // computation_duration is how long the Starlark execution took.
+  google.protobuf.Duration computation_duration = 8;
+
+  // forecast_points contains the generated forecast data.
+  repeated ForecastPointProto forecast_points = 9;
+}
+
+// ForecastPointProto represents a single point in the generated forward curve.
+message ForecastPointProto {
+  // timestamp is when this forecast value applies.
+  google.protobuf.Timestamp timestamp = 1;
+
+  // value is the forecasted value as a decimal string.
+  string value = 2;
+
+  // metadata contains additional key-value pairs from the Starlark script.
+  map<string, string> metadata = 3;
+}
