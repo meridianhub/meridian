@@ -1,8 +1,8 @@
 # seasonal_decomposition.star - Seasonal decomposition forecast template.
 #
-# Decomposes historical observations into hour-of-day and day-of-week patterns
-# using medians for outlier robustness. Projects the seasonal pattern across
-# the forecast horizon.
+# Decomposes historical observations into hour-of-day patterns using medians
+# for outlier robustness. Projects the seasonal pattern across the forecast
+# horizon.
 #
 # ForecastContext builtins used: group_by_hour, avg, add_seconds
 #

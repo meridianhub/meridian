@@ -223,6 +223,7 @@ func ValidateWithExecution(script string) Result {
 		"enumerate", "zip", "sorted", "reversed",
 		"min", "max", "abs", "any", "all",
 		"hasattr", "getattr", "dir", "type", "repr", "hash",
+		"print",
 	} {
 		if val, ok := starlarklib.Universe[name]; ok {
 			predeclared[name] = val

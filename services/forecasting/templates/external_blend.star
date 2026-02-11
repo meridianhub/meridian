@@ -32,13 +32,19 @@ def compute_forecast(ctx):
         internal_obs = obs_dict[dataset_keys[0]]
         external_obs = obs_dict[dataset_keys[1]]
 
-        # Determine internal weight from reference data
+        # Return empty if both datasets are empty
+        if len(internal_obs) == 0 and len(external_obs) == 0:
+            return []
+
+        # Determine internal weight from reference data, clamp to [0, 1]
         ref = ctx["reference_data"]
         internal_weight = 0.7
         if ref != None:
             attrs = ref["attributes"]
             if "internal_weight" in attrs:
                 internal_weight = float(attrs["internal_weight"])
+        if internal_weight < 0.0 or internal_weight > 1.0:
+            internal_weight = 0.7
 
         external_weight = 1.0 - internal_weight
 
@@ -54,6 +60,16 @@ def compute_forecast(ctx):
             external_avg = float(str(avg(external_values)))
         else:
             external_avg = 0.0
+
+        # Renormalize weights based on data availability
+        if len(internal_obs) == 0:
+            internal_weight = 0.0
+        if len(external_obs) == 0:
+            external_weight = 0.0
+        total_weight = internal_weight + external_weight
+        if total_weight > 0.0:
+            internal_weight = internal_weight / total_weight
+            external_weight = external_weight / total_weight
 
         forecast_value = internal_avg * internal_weight + external_avg * external_weight
 

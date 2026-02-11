@@ -42,14 +42,13 @@ def compute_forecast(ctx):
         return []
 
     obs = obs_dict[dataset_keys[0]]
+    if len(obs) == 0:
+        return []
 
     # Compute average utilization from historical data
     # avg() returns a Decimal; convert via str() for float arithmetic
-    if len(obs) > 0:
-        values = [float(o["value"]) for o in obs]
-        avg_utilization = float(str(avg(values)))
-    else:
-        avg_utilization = 0.0
+    values = [float(o["value"]) for o in obs]
+    avg_utilization = float(str(avg(values)))
 
     utilization_ratio = avg_utilization / capacity
 
