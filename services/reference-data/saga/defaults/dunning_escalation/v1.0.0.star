@@ -38,7 +38,7 @@ def dunning_escalation():
 
     # Validate required fields before any side effects
     missing = []
-    for key in ["dunning_level", "account_id", "party_id", "amount_cents", "currency"]:
+    for key in ["billing_run_id", "dunning_level", "account_id", "party_id", "amount_cents", "currency"]:
         if ctx.get(key) == None:
             missing.append(key)
     if missing:

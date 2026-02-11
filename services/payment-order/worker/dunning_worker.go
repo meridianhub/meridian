@@ -221,6 +221,11 @@ func (w *DunningWorker) processRetry(ctx context.Context, billingRunID uuid.UUID
 	// Load billing run from database
 	run, err := w.repo.FindBillingRunByID(ctx, billingRunID)
 	if err != nil {
+		if errors.Is(err, persistence.ErrBillingRunNotFound) {
+			w.logger.Info("billing run not found, dropping retry",
+				"billing_run_id", billingRunID)
+			return true
+		}
 		w.logger.Error("failed to load billing run for dunning",
 			"billing_run_id", billingRunID,
 			"error", err)
