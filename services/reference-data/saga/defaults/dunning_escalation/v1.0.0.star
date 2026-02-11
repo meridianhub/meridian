@@ -94,10 +94,11 @@ def dunning_escalation():
 
         # Step 2: Freeze the account at max dunning level
         step(name="freeze_account")
+        invoice_ref = " for invoice " + invoice_number if invoice_number else ""
         freeze_result = current_account.control(
             account_id=account_id,
             action="FREEZE",
-            reason="Dunning level 3 reached: payment overdue for invoice " + invoice_number + " (" + str(amount_cents) + " " + currency + ")",
+            reason="Dunning level 3 reached: payment overdue" + invoice_ref + " (" + str(amount_cents) + " " + currency + ")",
         )
         result["action_taken"] = "account_frozen"
         result["new_account_status"] = freeze_result.new_status
