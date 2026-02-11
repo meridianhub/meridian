@@ -45,8 +45,8 @@ const (
 type AccountReconciliationService struct {
 	reconciliationv1.UnimplementedAccountReconciliationServiceServer
 
-	disputeRepo      domain.DisputeRepository
 	runRepo          domain.SettlementRunRepository
+	disputeRepo      domain.DisputeRepository
 	varianceRepo     VarianceFinder
 	sagaRuntime      SagaRuntime
 	eventPublisher   EventPublisher
@@ -54,6 +54,7 @@ type AccountReconciliationService struct {
 	policyRuntime    valuation.PolicyRuntime
 	starlarkRuntime  valuation.StarlarkRuntime
 	valuationCache   valuation.Cache
+	logger           *slog.Logger
 	snapshotCapturer SnapshotCapturerFunc
 	varianceDetector VarianceDetectorFunc
 	varianceValuator VarianceValuatorFunc
@@ -125,6 +126,13 @@ func WithValuationCache(c valuation.Cache) Option {
 	}
 }
 
+// WithLogger sets the structured logger.
+func WithLogger(l *slog.Logger) Option {
+	return func(s *AccountReconciliationService) {
+		s.logger = l
+	}
+}
+
 // WithSnapshotCapturer sets the snapshot capture function for the reconciliation pipeline.
 func WithSnapshotCapturer(fn SnapshotCapturerFunc) Option {
 	return func(s *AccountReconciliationService) {
@@ -153,15 +161,100 @@ func NewAccountReconciliationService(opts ...Option) *AccountReconciliationServi
 	for _, opt := range opts {
 		opt(svc)
 	}
+	if svc.logger == nil {
+		svc.logger = slog.Default()
+	}
 	return svc
 }
 
 // InitiateAccountReconciliation creates a new settlement run.
 func (s *AccountReconciliationService) InitiateAccountReconciliation(
-	_ context.Context,
-	_ *reconciliationv1.InitiateAccountReconciliationRequest,
+	ctx context.Context,
+	req *reconciliationv1.InitiateAccountReconciliationRequest,
 ) (*reconciliationv1.InitiateAccountReconciliationResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "InitiateAccountReconciliation not yet implemented")
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "request is required")
+	}
+	if s.runRepo == nil {
+		return nil, status.Error(codes.FailedPrecondition, "settlement run repository not configured")
+	}
+
+	accountID := req.GetAccountId()
+	if accountID == "" {
+		return nil, status.Error(codes.InvalidArgument, "account_id is required")
+	}
+
+	scope := req.GetScope()
+	if scope == reconciliationv1.ReconciliationScope_RECONCILIATION_SCOPE_UNSPECIFIED {
+		return nil, status.Error(codes.InvalidArgument, "scope must not be UNSPECIFIED")
+	}
+
+	settlementType := req.GetSettlementType()
+	if settlementType == reconciliationv1.SettlementType_SETTLEMENT_TYPE_UNSPECIFIED {
+		return nil, status.Error(codes.InvalidArgument, "settlement_type must not be UNSPECIFIED")
+	}
+
+	periodStartPb := req.GetPeriodStart()
+	if periodStartPb == nil {
+		return nil, status.Error(codes.InvalidArgument, "period_start is required")
+	}
+	if err := periodStartPb.CheckValid(); err != nil {
+		return nil, status.Error(codes.InvalidArgument, "period_start is invalid")
+	}
+	periodStart := periodStartPb.AsTime()
+
+	periodEndPb := req.GetPeriodEnd()
+	if periodEndPb == nil {
+		return nil, status.Error(codes.InvalidArgument, "period_end is required")
+	}
+	if err := periodEndPb.CheckValid(); err != nil {
+		return nil, status.Error(codes.InvalidArgument, "period_end is invalid")
+	}
+	periodEnd := periodEndPb.AsTime()
+
+	if !periodStart.Before(periodEnd) {
+		return nil, status.Error(codes.InvalidArgument, "period_end must be after period_start")
+	}
+
+	initiatedBy := req.GetInitiatedBy()
+	if initiatedBy == "" {
+		return nil, status.Error(codes.InvalidArgument, "initiated_by is required")
+	}
+
+	domainScope := toDomainReconciliationScope(scope)
+	domainType := toDomainSettlementType(settlementType)
+
+	run, err := domain.NewSettlementRun(accountID, domainScope, domainType, periodStart, periodEnd, initiatedBy)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid settlement run: %v", err)
+	}
+
+	if err := s.runRepo.Create(ctx, run); err != nil {
+		if errors.Is(err, domain.ErrConflict) {
+			return nil, status.Error(codes.AlreadyExists, "settlement run already exists")
+		}
+		if errors.Is(err, context.Canceled) {
+			return nil, status.Error(codes.Canceled, "request canceled")
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, status.Error(codes.DeadlineExceeded, "deadline exceeded")
+		}
+		s.logger.Error("failed to create settlement run",
+			slog.String("account_id", accountID),
+			slog.String("error", err.Error()),
+		)
+		return nil, status.Error(codes.Internal, "failed to create settlement run")
+	}
+
+	s.logger.Info("settlement run created",
+		slog.String("run_id", run.RunID.String()),
+		slog.String("account_id", accountID),
+		slog.String("scope", string(domainScope)),
+	)
+
+	return &reconciliationv1.InitiateAccountReconciliationResponse{
+		Run: toProtoRunSummary(run),
+	}, nil
 }
 
 // ExecuteAccountReconciliation triggers execution of a pending settlement run.
@@ -335,10 +428,70 @@ func (s *AccountReconciliationService) RetrieveAccountReconciliation(
 
 // ControlAccountReconciliation controls a settlement run (cancel, pause, resume).
 func (s *AccountReconciliationService) ControlAccountReconciliation(
-	_ context.Context,
-	_ *reconciliationv1.ControlAccountReconciliationRequest,
+	ctx context.Context,
+	req *reconciliationv1.ControlAccountReconciliationRequest,
 ) (*reconciliationv1.ControlAccountReconciliationResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "ControlAccountReconciliation not yet implemented")
+	if s.runRepo == nil {
+		return nil, status.Error(codes.Unimplemented, "ControlAccountReconciliation not yet implemented")
+	}
+
+	runIDStr := req.GetRunId()
+	if runIDStr == "" {
+		return nil, status.Error(codes.InvalidArgument, "run_id is required")
+	}
+
+	runID, err := uuid.Parse(runIDStr)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid run_id: %v", err)
+	}
+
+	action := req.GetAction()
+	if action == reconciliationv1.ControlAction_CONTROL_ACTION_UNSPECIFIED {
+		return nil, status.Error(codes.InvalidArgument, "action is required and must not be UNSPECIFIED")
+	}
+
+	run, err := s.runRepo.FindByID(ctx, runID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, status.Errorf(codes.NotFound, "settlement run not found: %s", runID)
+		}
+		slog.ErrorContext(ctx, "failed to retrieve settlement run", "run_id", runID, "error", err)
+		return nil, status.Error(codes.Internal, "failed to retrieve settlement run")
+	}
+
+	switch action { //nolint:exhaustive // UNSPECIFIED is handled above
+	case reconciliationv1.ControlAction_CONTROL_ACTION_CANCEL:
+		statusBefore := run.Status
+		if err := run.Cancel(); err != nil {
+			if errors.Is(err, domain.ErrInvalidStatusTransition) {
+				return nil, status.Errorf(codes.FailedPrecondition, "cannot cancel run in %s state", run.Status)
+			}
+			return nil, status.Error(codes.Internal, "failed to cancel settlement run")
+		}
+		if err := s.runRepo.Update(ctx, run); err != nil {
+			slog.ErrorContext(ctx, "failed to persist cancelled run", "run_id", runID, "error", err)
+			return nil, status.Error(codes.Internal, "failed to persist settlement run")
+		}
+		slog.InfoContext(ctx, "settlement run cancelled",
+			"run_id", runID,
+			"action", action.String(),
+			"status_before", statusBefore.String(),
+			"status_after", run.Status.String(),
+		)
+
+	case reconciliationv1.ControlAction_CONTROL_ACTION_PAUSE:
+		return nil, status.Error(codes.Unimplemented, "PAUSE action not yet supported")
+
+	case reconciliationv1.ControlAction_CONTROL_ACTION_RESUME:
+		return nil, status.Error(codes.Unimplemented, "RESUME action not yet supported")
+
+	default:
+		return nil, status.Errorf(codes.InvalidArgument, "unknown control action: %v", action)
+	}
+
+	return &reconciliationv1.ControlAccountReconciliationResponse{
+		Run: toProtoRunSummary(run),
+	}, nil
 }
 
 // ListReconciliationResults returns paginated variance details for a run.

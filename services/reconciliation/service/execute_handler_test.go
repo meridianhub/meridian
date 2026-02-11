@@ -93,21 +93,6 @@ func (m *testRunRepo) getFailureReason(runID uuid.UUID) string {
 	return run.FailureReason
 }
 
-func newPendingRun(t *testing.T) *domain.SettlementRun {
-	t.Helper()
-	now := time.Now().UTC()
-	run, err := domain.NewSettlementRun(
-		"ACC-001",
-		domain.ReconciliationScopeAccount,
-		domain.SettlementTypeDaily,
-		now.Add(-24*time.Hour),
-		now,
-		"test-operator",
-	)
-	require.NoError(t, err)
-	return run
-}
-
 func noopCapturer(_ context.Context, _ uuid.UUID) error { return nil }
 func noopDetector(_ context.Context, _ uuid.UUID) ([]*domain.Variance, error) {
 	return nil, nil

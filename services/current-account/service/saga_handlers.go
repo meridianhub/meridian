@@ -126,6 +126,9 @@ func RegisterCurrentAccountHandlers(registry *saga.HandlerRegistry) error {
 		{"reconciliation.cancel_run", stubNotImplemented("reconciliation.cancel_run")},
 		{"reconciliation.assert_balance", stubNotImplemented("reconciliation.assert_balance")},
 		{"reconciliation.initiate_dispute", stubNotImplemented("reconciliation.initiate_dispute")},
+
+		// Party handlers (stubs - defined in schema for party service)
+		{"party.get_default_payment_method", stubNotImplemented("party.get_default_payment_method")},
 	}
 
 	for _, h := range handlers {
