@@ -154,11 +154,17 @@ func (s *AccountReconciliationService) InitiateAccountReconciliation(
 	if periodStartPb == nil {
 		return nil, status.Error(codes.InvalidArgument, "period_start is required")
 	}
+	if err := periodStartPb.CheckValid(); err != nil {
+		return nil, status.Error(codes.InvalidArgument, "period_start is invalid")
+	}
 	periodStart := periodStartPb.AsTime()
 
 	periodEndPb := req.GetPeriodEnd()
 	if periodEndPb == nil {
 		return nil, status.Error(codes.InvalidArgument, "period_end is required")
+	}
+	if err := periodEndPb.CheckValid(); err != nil {
+		return nil, status.Error(codes.InvalidArgument, "period_end is invalid")
 	}
 	periodEnd := periodEndPb.AsTime()
 
@@ -182,6 +188,12 @@ func (s *AccountReconciliationService) InitiateAccountReconciliation(
 	if err := s.runRepo.Create(ctx, run); err != nil {
 		if errors.Is(err, domain.ErrConflict) {
 			return nil, status.Error(codes.AlreadyExists, "settlement run already exists")
+		}
+		if errors.Is(err, context.Canceled) {
+			return nil, status.Error(codes.Canceled, "request canceled")
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, status.Error(codes.DeadlineExceeded, "deadline exceeded")
 		}
 		s.logger.Error("failed to create settlement run",
 			slog.String("account_id", accountID),

@@ -466,3 +466,67 @@ func TestInitiateAccountReconciliation_InternalError(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, codes.Internal, st.Code())
 }
+
+func TestInitiateAccountReconciliation_ContextCanceled(t *testing.T) {
+	repo := newInitiateRunRepoMock()
+	repo.createErr = context.Canceled
+	svc := NewAccountReconciliationService(WithRunRepository(repo))
+	ctx := context.Background()
+
+	req := validInitiateRequest()
+
+	_, err := svc.InitiateAccountReconciliation(ctx, req)
+	require.Error(t, err)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Canceled, st.Code())
+}
+
+func TestInitiateAccountReconciliation_DeadlineExceeded(t *testing.T) {
+	repo := newInitiateRunRepoMock()
+	repo.createErr = context.DeadlineExceeded
+	svc := NewAccountReconciliationService(WithRunRepository(repo))
+	ctx := context.Background()
+
+	req := validInitiateRequest()
+
+	_, err := svc.InitiateAccountReconciliation(ctx, req)
+	require.Error(t, err)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.DeadlineExceeded, st.Code())
+}
+
+func TestInitiateAccountReconciliation_InvalidTimestamp(t *testing.T) {
+	repo := newInitiateRunRepoMock()
+	svc := NewAccountReconciliationService(WithRunRepository(repo))
+	ctx := context.Background()
+
+	t.Run("invalid period_start", func(t *testing.T) {
+		req := validInitiateRequest()
+		req.PeriodStart = &timestamppb.Timestamp{Seconds: -62135596801} // before 0001-01-01
+
+		_, err := svc.InitiateAccountReconciliation(ctx, req)
+		require.Error(t, err)
+
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.InvalidArgument, st.Code())
+		assert.Contains(t, st.Message(), "period_start")
+	})
+
+	t.Run("invalid period_end", func(t *testing.T) {
+		req := validInitiateRequest()
+		req.PeriodEnd = &timestamppb.Timestamp{Seconds: 253402300800} // after 9999-12-31
+
+		_, err := svc.InitiateAccountReconciliation(ctx, req)
+		require.Error(t, err)
+
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.InvalidArgument, st.Code())
+		assert.Contains(t, st.Message(), "period_end")
+	})
+}
