@@ -21,6 +21,7 @@ func TestGetEmbeddedScripts(t *testing.T) {
 		"withdrawal/v1.0.0.star",
 		"payment_execution/v1.0.0.star",
 		"reconciliation_adjustment/v1.0.0.star",
+		"stripe_payment/v1.0.0.star",
 	}
 
 	for _, expected := range expectedVersioned {
@@ -35,6 +36,7 @@ func TestGetEmbeddedScripts(t *testing.T) {
 		"deposit.star",
 		"payment_execution.star",
 		"reconciliation_adjustment.star",
+		"stripe_payment.star",
 	}
 
 	for _, expected := range expectedFlat {
@@ -48,7 +50,7 @@ func TestPlatformDefaults(t *testing.T) {
 	defaults, err := PlatformDefaults()
 	require.NoError(t, err)
 
-	assert.Len(t, defaults, 4)
+	assert.Len(t, defaults, 5)
 
 	// Verify each default has required fields
 	for _, meta := range defaults {
@@ -67,6 +69,7 @@ func TestPlatformDefaults(t *testing.T) {
 	assert.Contains(t, names, "current_account_deposit")
 	assert.Contains(t, names, "payment_execution")
 	assert.Contains(t, names, "reconciliation_adjustment")
+	assert.Contains(t, names, "stripe_payment")
 }
 
 func TestSeeder_SeedTenant(t *testing.T) {
@@ -96,7 +99,7 @@ func TestSeeder_SeedTenant(t *testing.T) {
 		var count int
 		err = pool.QueryRow(ctx, "SELECT COUNT(*) FROM "+schemaName+".saga_definition WHERE is_system = true").Scan(&count)
 		require.NoError(t, err)
-		assert.Equal(t, 4, count, "expected 4 system sagas")
+		assert.Equal(t, 5, count, "expected 5 system sagas")
 
 		// Verify each saga has platform_ref and no script
 		rows, err := pool.Query(ctx, `
@@ -144,11 +147,11 @@ func TestSeeder_SeedTenant(t *testing.T) {
 		err := seeder.SeedTenant(ctx, tenantID)
 		require.NoError(t, err)
 
-		// Count should still be 3
+		// Count should still be 5
 		var count int
 		err = pool.QueryRow(ctx, "SELECT COUNT(*) FROM "+schemaName+".saga_definition WHERE is_system = true").Scan(&count)
 		require.NoError(t, err)
-		assert.Equal(t, 4, count, "idempotent seed should not create duplicates")
+		assert.Equal(t, 5, count, "idempotent seed should not create duplicates")
 	})
 
 	t.Run("deterministic UUIDs", func(t *testing.T) {
@@ -172,6 +175,7 @@ func TestSeeder_SeedTenant(t *testing.T) {
 			uuid.NewSHA1(uuid.NameSpaceDNS, []byte("saga.meridian.current_account_withdrawal")),
 			uuid.NewSHA1(uuid.NameSpaceDNS, []byte("saga.meridian.payment_execution")),
 			uuid.NewSHA1(uuid.NameSpaceDNS, []byte("saga.meridian.reconciliation_adjustment")),
+			uuid.NewSHA1(uuid.NameSpaceDNS, []byte("saga.meridian.stripe_payment")),
 		}
 
 		assert.Equal(t, expectedIDs, ids, "UUIDs should be deterministic")
