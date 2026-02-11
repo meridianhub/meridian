@@ -576,7 +576,7 @@ Create a multi-stage Docker build.
 
 ```dockerfile
 # Stage 1: Build
-FROM golang:1.25.7-bookworm AS builder
+FROM golang:1.26.0-bookworm AS builder
 
 ARG VERSION=dev
 ARG COMMIT=unknown
