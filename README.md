@@ -187,7 +187,7 @@ This implementation includes the following BIAN service domains:
 | [**Party**][svc-party] | Party Reference Data Directory | Customer and party reference data management | Yes | [OAS3][bian-party] |
 | [**PaymentOrder**][svc-po] | Payment Order | Payment initiation, saga orchestration, and settlement | No | [OAS3][bian-po] |
 | [**PositionKeeping**][svc-pk] | Position Keeping | Pre-ledger transaction log and position tracking | Yes | [OAS3][bian-pk] |
-| [**Reconciliation**][svc-recon] | Account Reconciliation | Settlement lifecycle, variance detection, and dispute management | Yes | - |
+| [**Reconciliation**][svc-recon] | Account Reconciliation | Settlement lifecycle, variance detection, and dispute management | Yes | [OAS3][bian-recon] |
 | [**ReferenceData**][svc-rd] | Financial Instrument Reference Data Management | Tenant-defined instrument catalog with CEL validation | Yes | [OAS3][bian-rd] |
 
 Each service domain follows BIAN's control record pattern with behavior qualifiers for operations.
@@ -210,6 +210,7 @@ Reference specifications: [BIAN Service Landscape 13.0.0](https://github.com/bia
 [svc-party]: services/party/
 [svc-po]: services/payment-order/
 [svc-pk]: services/position-keeping/
+[bian-recon]: https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/AccountReconciliation.yaml
 [svc-recon]: services/reconciliation/
 [svc-rd]: services/reference-data/
 [svc-tenant]: services/tenant/
