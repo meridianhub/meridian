@@ -180,7 +180,7 @@ func TestE2E_SeededSagasAreActive(t *testing.T) {
 		count++
 	}
 	require.NoError(t, rows.Err())
-	assert.Equal(t, 5, count, "should have 5 seeded sagas")
+	assert.Equal(t, 7, count, "should have 7 seeded sagas")
 }
 
 // TestE2E_ReseedingDoesNotDuplicate verifies ON CONFLICT idempotency.

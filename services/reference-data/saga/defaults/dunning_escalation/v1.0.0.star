@@ -1,0 +1,102 @@
+# Saga: dunning_escalation
+# Version: 1.0.0
+# Previous: none
+# Changed: Initial implementation of dunning escalation saga
+# Author: Platform Team
+# Date: 2026-02-11
+#
+# Dunning Escalation saga for handling payment failures through progressive
+# dunning levels. When a billing run payment fails, this saga escalates
+# through notification and account freeze stages.
+#
+# Dunning levels:
+#   0 -> 1: Send payment failure notification, schedule retry in 24h
+#   1 -> 2: Send second notice, schedule retry in 72h
+#   2 -> 3: Send final warning, schedule retry in 168h (7 days)
+#   3:      Freeze the account, send freeze notification
+#
+# Steps:
+#   1. check_dunning_level - Evaluate current level and determine action
+#   2. send_notification   - Notify party of payment failure/escalation
+#   3. freeze_account      - Freeze account at max dunning level (level 3)
+#
+# Input parameters (from input_data dict):
+#   - billing_run_id: string (required) - billing run that failed
+#   - account_id: string (required) - debtor account
+#   - party_id: string (required) - party to notify
+#   - dunning_level: int (required) - current dunning level (0-2 pre-escalation)
+#   - amount_cents: int64 (required) - outstanding amount
+#   - currency: string (required) - currency code
+#   - invoice_number: string (optional) - invoice reference for notifications
+
+def dunning_escalation():
+    """
+    Main saga entry point.
+    Escalates dunning level and takes appropriate action.
+    """
+
+    ctx = input_data
+
+    current_level = ctx.get("dunning_level", 0)
+    new_level = current_level + 1
+    account_id = ctx.get("account_id")
+    party_id = ctx.get("party_id")
+    amount_cents = ctx.get("amount_cents")
+    currency = ctx.get("currency")
+    invoice_number = ctx.get("invoice_number", "")
+
+    result = {
+        "previous_level": current_level,
+        "new_level": new_level,
+        "account_id": account_id,
+        "action_taken": "none",
+    }
+
+    # Step 1: Send notification based on escalation level
+    if new_level == 1:
+        step(name="send_first_notice")
+        notification.send(
+            type="EMAIL",
+            recipient=party_id,
+        )
+        result["action_taken"] = "first_notice_sent"
+
+    elif new_level == 2:
+        step(name="send_second_notice")
+        notification.send(
+            type="EMAIL",
+            recipient=party_id,
+        )
+        result["action_taken"] = "second_notice_sent"
+
+    elif new_level == 3:
+        step(name="send_final_warning")
+        notification.send(
+            type="EMAIL",
+            recipient=party_id,
+        )
+        result["action_taken"] = "final_warning_sent"
+
+    elif new_level >= 4:
+        # Step 2: Freeze the account at max dunning level
+        step(name="freeze_account")
+        freeze_result = current_account.control(
+            account_id=account_id,
+            action="FREEZE",
+            reason="Dunning level 3 reached: payment overdue for invoice " + invoice_number + " (" + str(amount_cents) + " " + currency + ")",
+        )
+        result["action_taken"] = "account_frozen"
+        result["new_account_status"] = freeze_result.new_status
+        result["freeze_timestamp"] = freeze_result.action_timestamp
+
+        # Send freeze notification
+        step(name="send_freeze_notice")
+        notification.send(
+            type="EMAIL",
+            recipient=party_id,
+        )
+
+    return result
+
+# Execute the saga
+output = dunning_escalation()

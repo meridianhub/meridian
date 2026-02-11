@@ -46,6 +46,7 @@ type BillingRun struct {
 	Status        BillingRunStatus
 	DunningLevel  int
 	FailureReason string
+	LastRetryAt   *time.Time
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }
@@ -108,6 +109,48 @@ func (b *BillingRun) Fail(reason string) error {
 // IsTerminal returns true if the billing run is in a terminal state.
 func (b *BillingRun) IsTerminal() bool {
 	return b.Status == BillingRunStatusCompleted || b.Status == BillingRunStatusFailed
+}
+
+// MaxDunningLevel is the highest dunning level before account freeze.
+const MaxDunningLevel = 3
+
+// DunningBackoffDurations maps dunning levels to retry delay durations.
+// Level 0->1: 24h, Level 1->2: 72h, Level 2->3: 168h (7 days).
+var DunningBackoffDurations = map[int]time.Duration{
+	0: 24 * time.Hour,
+	1: 72 * time.Hour,
+	2: 168 * time.Hour,
+}
+
+// EscalateDunning increments the dunning level and records the retry timestamp.
+// Can only be called on FAILED billing runs that haven't reached the maximum level.
+func (b *BillingRun) EscalateDunning() error {
+	if b.Status != BillingRunStatusFailed {
+		return ErrInvalidBillingRunTransition
+	}
+	if b.DunningLevel > MaxDunningLevel {
+		return ErrBillingRunTerminal
+	}
+	now := time.Now()
+	b.DunningLevel++
+	b.LastRetryAt = &now
+	b.UpdatedAt = now
+	return nil
+}
+
+// NeedsFreezing returns true if the billing run has exceeded the maximum dunning level.
+func (b *BillingRun) NeedsFreezing() bool {
+	return b.DunningLevel >= MaxDunningLevel
+}
+
+// DunningRetryDelay returns the backoff duration for the current dunning level.
+// Returns zero duration if the level exceeds the configured backoffs.
+func (b *BillingRun) DunningRetryDelay() time.Duration {
+	delay, ok := DunningBackoffDurations[b.DunningLevel]
+	if !ok {
+		return 0
+	}
+	return delay
 }
 
 // BillingRunIdempotencyKey generates a deterministic idempotency key for a billing run.

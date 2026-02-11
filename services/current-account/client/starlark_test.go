@@ -30,10 +30,11 @@ type mockCurrentAccountServer struct {
 	lastKnowledgeAt    time.Time
 	lastCorrelationID  uuid.UUID
 
-	initiateLienCalled  bool
-	executeLienCalled   bool
-	terminateLienCalled bool
-	updateAccountCalled bool
+	initiateLienCalled   bool
+	executeLienCalled    bool
+	terminateLienCalled  bool
+	updateAccountCalled  bool
+	controlAccountCalled bool
 
 	// Control response behavior
 	shouldError  bool
@@ -134,6 +135,33 @@ func (m *mockCurrentAccountServer) UpdateCurrentAccount(_ context.Context, req *
 	}, nil
 }
 
+func (m *mockCurrentAccountServer) ControlCurrentAccount(_ context.Context, req *currentaccountv1.ControlCurrentAccountRequest) (*currentaccountv1.ControlCurrentAccountResponse, error) {
+	m.controlAccountCalled = true
+
+	if m.shouldError {
+		return nil, fmt.Errorf("%s", m.errorMessage)
+	}
+
+	// Determine resulting status based on action
+	var newStatus currentaccountv1.AccountStatus
+	switch req.ControlAction {
+	case currentaccountv1.ControlAction_CONTROL_ACTION_FREEZE:
+		newStatus = currentaccountv1.AccountStatus_ACCOUNT_STATUS_FROZEN
+	case currentaccountv1.ControlAction_CONTROL_ACTION_UNFREEZE:
+		newStatus = currentaccountv1.AccountStatus_ACCOUNT_STATUS_ACTIVE
+	case currentaccountv1.ControlAction_CONTROL_ACTION_CLOSE:
+		newStatus = currentaccountv1.AccountStatus_ACCOUNT_STATUS_CLOSED
+	}
+
+	return &currentaccountv1.ControlCurrentAccountResponse{
+		Facility: &currentaccountv1.CurrentAccountFacility{
+			AccountId:     req.AccountId,
+			AccountStatus: newStatus,
+		},
+		ActionTimestamp: timestamppb.Now(),
+	}, nil
+}
+
 // setupMockServer creates a mock gRPC server and client for testing
 func setupMockServer(t *testing.T, mockServer *mockCurrentAccountServer) (*Client, func()) {
 	// Create in-memory listener
@@ -192,6 +220,7 @@ func TestRegisterStarlarkHandlers(t *testing.T) {
 			"current_account.execute_lien",
 			"current_account.terminate_lien",
 			"current_account.save",
+			"current_account.control",
 		}
 
 		for _, name := range handlers {
