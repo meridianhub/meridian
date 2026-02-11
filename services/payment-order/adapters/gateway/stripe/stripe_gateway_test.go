@@ -65,9 +65,7 @@ func TestStripeGatewayAdapter_SendPayment_Success(t *testing.T) {
 		},
 	}
 
-	adapter := NewGatewayAdapter(mock, GatewayAdapterConfig{
-		PlatformFeePercent: decimal.Zero,
-	}, slog.Default())
+	adapter := NewGatewayAdapter(mock, GatewayAdapterConfig{}, slog.Default())
 
 	ctx := tenantContext("tenant_a")
 	ctx = WithStripeAccount(ctx, "acct_tenant_a")
@@ -75,6 +73,7 @@ func TestStripeGatewayAdapter_SendPayment_Success(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "pi_test_success", resp.GatewayReferenceID)
 	assert.Equal(t, gateway.StatusAccepted, resp.Status)
+	assert.Equal(t, int64(0), resp.PlatformFeeAmount)
 }
 
 func TestStripeGatewayAdapter_SendPayment_WithPlatformFee(t *testing.T) {
@@ -93,7 +92,10 @@ func TestStripeGatewayAdapter_SendPayment_WithPlatformFee(t *testing.T) {
 	}
 
 	adapter := NewGatewayAdapter(mock, GatewayAdapterConfig{
-		PlatformFeePercent: decimal.NewFromFloat(2.5),
+		PlatformFee: &PlatformFeeConfig{
+			Type:  PlatformFeeTypePercentage,
+			Value: decimal.NewFromFloat(2.5),
+		},
 	}, slog.Default())
 
 	ctx := tenantContext("tenant_a")
@@ -102,6 +104,37 @@ func TestStripeGatewayAdapter_SendPayment_WithPlatformFee(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "pi_with_fee", resp.GatewayReferenceID)
 	assert.Equal(t, gateway.StatusAccepted, resp.Status)
+	assert.Equal(t, int64(250), resp.PlatformFeeAmount)
+}
+
+func TestStripeGatewayAdapter_SendPayment_WithFlatFee(t *testing.T) {
+	mock := &mockPaymentIntentCreator{
+		createFn: func(_ context.Context, params *stripego.PaymentIntentCreateParams) (*stripego.PaymentIntent, error) {
+			assert.Equal(t, int64(10000), *params.Amount)
+			// Flat fee of 150 cents
+			require.NotNil(t, params.ApplicationFeeAmount)
+			assert.Equal(t, int64(150), *params.ApplicationFeeAmount)
+
+			return &stripego.PaymentIntent{
+				ID:     "pi_flat_fee",
+				Status: stripego.PaymentIntentStatusSucceeded,
+			}, nil
+		},
+	}
+
+	adapter := NewGatewayAdapter(mock, GatewayAdapterConfig{
+		PlatformFee: &PlatformFeeConfig{
+			Type:  PlatformFeeTypeFlat,
+			Value: decimal.NewFromInt(150),
+		},
+	}, slog.Default())
+
+	ctx := tenantContext("tenant_a")
+	ctx = WithStripeAccount(ctx, "acct_tenant_a")
+	resp, err := adapter.SendPayment(ctx, testGatewayRequest())
+	require.NoError(t, err)
+	assert.Equal(t, "pi_flat_fee", resp.GatewayReferenceID)
+	assert.Equal(t, int64(150), resp.PlatformFeeAmount)
 }
 
 func TestStripeGatewayAdapter_SendPayment_ZeroPlatformFee_OmitsApplicationFee(t *testing.T) {
@@ -116,15 +149,14 @@ func TestStripeGatewayAdapter_SendPayment_ZeroPlatformFee_OmitsApplicationFee(t 
 		},
 	}
 
-	adapter := NewGatewayAdapter(mock, GatewayAdapterConfig{
-		PlatformFeePercent: decimal.Zero,
-	}, slog.Default())
+	adapter := NewGatewayAdapter(mock, GatewayAdapterConfig{}, slog.Default())
 
 	ctx := tenantContext("tenant_a")
 	ctx = WithStripeAccount(ctx, "acct_tenant_a")
 	resp, err := adapter.SendPayment(ctx, testGatewayRequest())
 	require.NoError(t, err)
 	assert.Equal(t, "pi_no_fee", resp.GatewayReferenceID)
+	assert.Equal(t, int64(0), resp.PlatformFeeAmount)
 }
 
 func TestStripeGatewayAdapter_SendPayment_StatusMapping(t *testing.T) {

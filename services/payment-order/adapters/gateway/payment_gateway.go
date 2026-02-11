@@ -36,6 +36,9 @@ type PaymentResponse struct {
 	GatewayReferenceID string
 	Status             Status
 	Message            string
+	// PlatformFeeAmount is the platform fee in minor units charged on this payment.
+	// Zero if no platform fee was applied.
+	PlatformFeeAmount int64
 }
 
 // PaymentGateway defines the port interface for external payment gateway interactions.
