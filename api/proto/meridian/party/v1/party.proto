@@ -632,6 +632,189 @@ message RetrieveBankRelationsResponse {
   google.protobuf.Timestamp updated_at = 5;
 }
 
+// --- Business Qualifier: PaymentMethods ---
+
+// PaymentMethodProvider defines supported external payment providers.
+enum PaymentMethodProvider {
+  // PAYMENT_METHOD_PROVIDER_UNSPECIFIED means the provider is unknown.
+  PAYMENT_METHOD_PROVIDER_UNSPECIFIED = 0;
+  // PAYMENT_METHOD_PROVIDER_STRIPE is the Stripe payment provider.
+  PAYMENT_METHOD_PROVIDER_STRIPE = 1;
+}
+
+// PaymentMethodType defines the type of payment method.
+enum PaymentMethodType {
+  // PAYMENT_METHOD_TYPE_UNSPECIFIED means the type is unknown.
+  PAYMENT_METHOD_TYPE_UNSPECIFIED = 0;
+  // PAYMENT_METHOD_TYPE_CARD is a credit or debit card.
+  PAYMENT_METHOD_TYPE_CARD = 1;
+  // PAYMENT_METHOD_TYPE_BANK_ACCOUNT is a bank account (ACH, wire).
+  PAYMENT_METHOD_TYPE_BANK_ACCOUNT = 2;
+  // PAYMENT_METHOD_TYPE_SEPA is a SEPA direct debit mandate.
+  PAYMENT_METHOD_TYPE_SEPA = 3;
+}
+
+// PaymentMethodStatus defines the lifecycle state of a payment method.
+enum PaymentMethodStatus {
+  // PAYMENT_METHOD_STATUS_UNSPECIFIED means the status is unknown.
+  PAYMENT_METHOD_STATUS_UNSPECIFIED = 0;
+  // PAYMENT_METHOD_STATUS_ACTIVE means the payment method is usable.
+  PAYMENT_METHOD_STATUS_ACTIVE = 1;
+  // PAYMENT_METHOD_STATUS_EXPIRED means the payment method has expired.
+  PAYMENT_METHOD_STATUS_EXPIRED = 2;
+  // PAYMENT_METHOD_STATUS_REMOVED means the payment method has been soft-deleted.
+  PAYMENT_METHOD_STATUS_REMOVED = 3;
+}
+
+// PartyPaymentMethod represents a tokenized payment method linked to a party.
+message PartyPaymentMethod {
+  // id is the unique identifier for this payment method.
+  string id = 1;
+
+  // party_id is the party this payment method belongs to.
+  string party_id = 2;
+
+  // provider is the external payment provider.
+  PaymentMethodProvider provider = 3;
+
+  // provider_customer_id is the provider's customer token (e.g., cus_xxx).
+  string provider_customer_id = 4;
+
+  // provider_method_id is the provider's payment method token (e.g., pm_xxx).
+  string provider_method_id = 5;
+
+  // method_type is the type of payment method.
+  PaymentMethodType method_type = 6;
+
+  // is_default indicates whether this is the party's default payment method.
+  bool is_default = 7;
+
+  // metadata contains non-sensitive display information (last4, brand, etc.).
+  map<string, string> metadata = 8;
+
+  // status is the current lifecycle state.
+  PaymentMethodStatus status = 9;
+
+  // version is for optimistic locking.
+  int64 version = 10;
+
+  // created_at is when the payment method was created.
+  google.protobuf.Timestamp created_at = 11;
+
+  // updated_at is when the payment method was last updated.
+  google.protobuf.Timestamp updated_at = 12;
+}
+
+// AddPaymentMethodRequest is the request to add a payment method to a party.
+message AddPaymentMethodRequest {
+  // party_id is the party to add the payment method to.
+  string party_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // provider is the external payment provider.
+  PaymentMethodProvider provider = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // provider_customer_id is the provider's customer token (e.g., cus_xxx).
+  string provider_customer_id = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // provider_method_id is the provider's payment method token (e.g., pm_xxx).
+  string provider_method_id = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // method_type is the type of payment method.
+  PaymentMethodType method_type = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // is_default indicates whether this should be the party's default payment method.
+  bool is_default = 6;
+
+  // metadata contains non-sensitive display information (last4, brand, etc.).
+  map<string, string> metadata = 7;
+}
+
+// RemovePaymentMethodRequest is the request to remove (soft-delete) a payment method.
+message RemovePaymentMethodRequest {
+  // id is the unique identifier of the payment method to remove.
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // version is for optimistic locking.
+  int64 version = 2 [(buf.validate.field).int64 = {gte: 1}];
+}
+
+// RemovePaymentMethodResponse is the response after removing a payment method.
+message RemovePaymentMethodResponse {}
+
+// SetDefaultPaymentMethodRequest is the request to set a payment method as default.
+message SetDefaultPaymentMethodRequest {
+  // id is the unique identifier of the payment method to set as default.
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+}
+
+// ListPaymentMethodsRequest is the request to list payment methods for a party.
+message ListPaymentMethodsRequest {
+  // party_id is the party whose payment methods to list.
+  string party_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+}
+
+// ListPaymentMethodsResponse is the response containing payment methods.
+message ListPaymentMethodsResponse {
+  // payment_methods is the list of active payment methods.
+  repeated PartyPaymentMethod payment_methods = 1;
+}
+
+// GetDefaultPaymentMethodRequest is the request to get the default payment method for a party.
+message GetDefaultPaymentMethodRequest {
+  // party_id is the party whose default payment method to retrieve.
+  string party_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+}
+
+// AddPaymentMethodResponse is the response after adding a payment method.
+message AddPaymentMethodResponse {
+  // payment_method is the newly created payment method.
+  PartyPaymentMethod payment_method = 1 [(buf.validate.field).required = true];
+}
+
+// SetDefaultPaymentMethodResponse is the response after setting the default payment method.
+message SetDefaultPaymentMethodResponse {
+  // payment_method is the payment method that was set as default.
+  PartyPaymentMethod payment_method = 1 [(buf.validate.field).required = true];
+}
+
+// GetDefaultPaymentMethodResponse is the response containing the default payment method.
+message GetDefaultPaymentMethodResponse {
+  // payment_method is the default payment method.
+  PartyPaymentMethod payment_method = 1 [(buf.validate.field).required = true];
+}
+
 // PartyService provides BIAN-compliant party reference data management.
 //
 // Design Notes:
@@ -767,6 +950,53 @@ service PartyService {
   rpc RetrieveBankRelations(RetrieveBankRelationsRequest) returns (RetrieveBankRelationsResponse) {
     option (google.api.http) = {
       get: "/v1/parties/{party_id}/bank-relations"
+    };
+  }
+
+  // --- Business Qualifier: PaymentMethods Operations ---
+
+  // AddPaymentMethod registers a tokenized payment method for a party.
+  rpc AddPaymentMethod(AddPaymentMethodRequest) returns (AddPaymentMethodResponse) {
+    option (google.api.http) = {
+      post: "/v1/parties/{party_id}/payment-methods"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      responses: {
+        key: "201"
+        value: {
+          description: "Payment method added successfully"
+        }
+      }
+    };
+  }
+
+  // RemovePaymentMethod soft-deletes a payment method.
+  rpc RemovePaymentMethod(RemovePaymentMethodRequest) returns (RemovePaymentMethodResponse) {
+    option (google.api.http) = {
+      delete: "/v1/payment-methods/{id}"
+    };
+  }
+
+  // SetDefaultPaymentMethod sets a payment method as the party's default.
+  rpc SetDefaultPaymentMethod(SetDefaultPaymentMethodRequest) returns (SetDefaultPaymentMethodResponse) {
+    option (google.api.http) = {
+      post: "/v1/payment-methods/{id}/default"
+      body: "*"
+    };
+  }
+
+  // ListPaymentMethods returns all active payment methods for a party.
+  rpc ListPaymentMethods(ListPaymentMethodsRequest) returns (ListPaymentMethodsResponse) {
+    option (google.api.http) = {
+      get: "/v1/parties/{party_id}/payment-methods"
+    };
+  }
+
+  // GetDefaultPaymentMethod returns the default payment method for a party.
+  rpc GetDefaultPaymentMethod(GetDefaultPaymentMethodRequest) returns (GetDefaultPaymentMethodResponse) {
+    option (google.api.http) = {
+      get: "/v1/parties/{party_id}/payment-methods/default"
     };
   }
 }
