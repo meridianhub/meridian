@@ -139,7 +139,7 @@ mechanics are identical.
 | Missed-window catch-up for all schedulers | On startup, detect and optionally re-execute missed windows |
 | Unified distributed locking | Single Redis lock abstraction replaces both `leader.go` and `lease_manager.go` |
 | Multi-tenant schedule isolation | Per-tenant execution tracking, per-tenant catch-up |
-| Zero behaviour change for existing services | Migration is a pure refactor - no observable change in scheduling semantics |
+| Preserve scheduling semantics | Reconciliation: pure refactor with no observable change. Forecasting and billing: existing scheduling preserved, with execution tracking and catch-up added as new resilience capabilities |
 
 ## Non-Goals
 
@@ -189,7 +189,7 @@ type Schedule struct {
     ID string
     // CronExpr is the cron expression (5-field standard format).
     CronExpr string
-    // TenantID scopes execution tracking and locking. Empty for global schedules.
+    // TenantID scopes execution tracking and locking (required).
     TenantID string
     // Metadata carries domain-specific data passed to the executor.
     Metadata any
@@ -247,14 +247,18 @@ TRIGGERED ──> COMPLETED   (happy path)
 MISSED                    (window detected during catch-up but beyond MaxCatchUpAge)
 ```
 
-**Schema** (per-tenant, in tenant schema):
+**Schema** (per-tenant, in tenant schema via `setSearchPath()`):
+
+Tenant isolation uses CockroachDB schema-per-tenant, consistent with the
+existing reconciliation implementation. Each tenant's connection sets
+`search_path` at acquisition time, so no `tenant_id` column is needed in
+the table itself.
 
 ```sql
 CREATE TABLE scheduler_execution (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     scheduler_name  VARCHAR(100) NOT NULL,  -- e.g. 'forecasting', 'billing', 'settlement'
     schedule_id     VARCHAR(200) NOT NULL,  -- domain-specific schedule identifier
-    tenant_id       VARCHAR(100) NOT NULL,
     scheduled_at    TIMESTAMPTZ NOT NULL,   -- expected cron fire time
     executed_at     TIMESTAMPTZ,            -- actual execution time (NULL for MISSED)
     completed_at    TIMESTAMPTZ,            -- when execution finished
@@ -268,12 +272,12 @@ CREATE TABLE scheduler_execution (
 );
 
 CREATE INDEX idx_sched_exec_lookup
-    ON scheduler_execution (scheduler_name, schedule_id, tenant_id, scheduled_at DESC);
+    ON scheduler_execution (scheduler_name, schedule_id, scheduled_at DESC);
 ```
 
 This generalises the reconciliation service's existing `scheduler_execution`
-table, adding `scheduler_name` and `tenant_id` columns so multiple schedulers
-can share the same table within a tenant schema.
+table, adding `scheduler_name` so multiple schedulers (forecasting, billing,
+settlement) can share the same table within a tenant schema.
 
 ### Catch-Up on Startup
 
@@ -281,13 +285,22 @@ When a scheduler starts, it:
 
 1. Queries `ListSchedules()` to get all active schedules
 2. For each schedule, queries `LastExecution()` from the DB
-3. Walks the cron expression forward from `last_execution.scheduled_at` to `now`
-4. For each missed window:
-   - If within `MaxCatchUpAge`: execute via `Executor` (records as TRIGGERED -> COMPLETED/FAILED)
-   - If beyond `MaxCatchUpAge`: record as MISSED (audit trail only, no execution)
+3. Determines the catch-up start point:
+   - If `LastExecution()` returns a result: start from
+     `last_execution.scheduled_at`
+   - If no prior execution exists (new schedule or first deployment):
+     start from `now() - MaxCatchUpAge`
+4. Walks the cron expression forward from the start point to `now`
+5. For each missed window:
+   - If within `MaxCatchUpAge`: execute via `Executor`
+     (records as TRIGGERED -> COMPLETED/FAILED)
+   - If beyond `MaxCatchUpAge`: record as MISSED
+     (audit trail only, no execution)
 
-This is the exact pattern already proven in the reconciliation scheduler,
-generalised for any domain.
+The `now() - MaxCatchUpAge` fallback for new schedules prevents unbounded
+catch-up storms while still recovering recent missed windows. This is the
+exact pattern already proven in the reconciliation scheduler, generalised
+for any domain.
 
 ### Distributed Locking
 
@@ -376,8 +389,11 @@ Phases 2, 3, 4 can run in parallel once Phase 1 is complete.
   lifecycle, catch-up logic, and locking behaviour in isolation
 - **Integration tests**: CockroachDB testcontainers for execution store,
   miniredis for distributed locking
-- **Migration tests**: Each service migration must pass existing test suites
-  unchanged (zero behaviour change guarantee)
+- **Migration tests**:
+  - Reconciliation (Phase 3): existing test suites must pass unchanged
+    (pure refactor, no new behaviour)
+  - Forecasting and billing (Phases 2, 4): existing tests must pass, plus
+    new tests verifying catch-up behaviour and DB-backed execution tracking
 - **Multi-pod simulation**: Start 2 scheduler instances with shared Redis,
   verify only one executes per schedule (same pattern as existing forecasting tests)
 
@@ -396,5 +412,5 @@ Phases 2, 3, 4 can run in parallel once Phase 1 is complete.
 2. All scheduled workloads have DB-backed execution tracking with operator-visible audit trail
 3. All schedulers detect and handle missed windows on startup
 4. Single `shared/platform/redislock` package replaces both leader election and per-resource locking implementations
-5. Existing test suites pass without modification after migration
+5. Existing test suites pass after migration; new tests cover catch-up and execution tracking for forecasting and billing
 6. Net reduction of at least 500 lines of duplicated code
