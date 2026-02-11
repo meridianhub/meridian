@@ -12,11 +12,17 @@ import (
 	"strings"
 	"time"
 
+	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
+	reconciliationv1 "github.com/meridianhub/meridian/api/proto/meridian/reconciliation/v1"
+	"github.com/meridianhub/meridian/services/reconciliation/adapters/persistence"
 	"github.com/meridianhub/meridian/services/reconciliation/config"
 	"github.com/meridianhub/meridian/services/reconciliation/observability"
+	"github.com/meridianhub/meridian/services/reconciliation/service"
 	"github.com/meridianhub/meridian/shared/pkg/health"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 )
@@ -90,6 +96,69 @@ func run(logger *slog.Logger) error {
 
 	logger.Info("database connection established")
 
+	// Instantiate persistence repositories
+	runRepo := persistence.NewSettlementRunRepository(db)
+	snapshotRepo := persistence.NewSettlementSnapshotRepository(db)
+	varianceRepo := persistence.NewVarianceRepository(db)
+	disputeRepo := persistence.NewDisputeRepository(db)
+
+	// Build service options with repositories (always available)
+	serviceOpts := []service.Option{
+		service.WithSettlementRunRepository(runRepo),
+		service.WithDisputeRepository(disputeRepo),
+		service.WithVarianceRepository(varianceRepo),
+		service.WithVarianceListRepository(varianceRepo),
+		service.WithLogger(logger),
+	}
+
+	// Wire SnapshotCapturer if Position Keeping URL is configured
+	var pkConn *grpc.ClientConn
+	if cfg.Services.PositionKeepingURL != "" {
+		var connErr error
+		pkConn, connErr = grpc.NewClient(
+			cfg.Services.PositionKeepingURL,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+		)
+		if connErr != nil {
+			return fmt.Errorf("failed to create position keeping client at %s: %w",
+				cfg.Services.PositionKeepingURL, connErr)
+		}
+
+		pkClient := positionkeepingv1.NewPositionKeepingServiceClient(pkConn)
+		provider := service.NewPKPositionProvider(pkClient)
+		capturer := service.NewSnapshotCapturer(provider, runRepo, snapshotRepo)
+		serviceOpts = append(serviceOpts,
+			service.WithSnapshotCapturer(capturer.CaptureSnapshots),
+		)
+
+		logger.Info("snapshot capturer configured",
+			"position_keeping_url", cfg.Services.PositionKeepingURL)
+	} else {
+		logger.Warn("snapshot capturer not configured: POSITION_KEEPING_URL not set")
+	}
+	defer func() {
+		if pkConn != nil {
+			if err := pkConn.Close(); err != nil {
+				logger.Error("failed to close position keeping connection", "error", err)
+			}
+		}
+	}()
+
+	// Wire VarianceDetector (depends on repos only, always available)
+	detector := service.NewVarianceDetector(runRepo, snapshotRepo, varianceRepo)
+	serviceOpts = append(serviceOpts,
+		service.WithVarianceDetector(detector.DetectVariances),
+	)
+
+	// VarianceValuator requires valuation engine + reference data provider (not yet available)
+	// BalanceAssertor requires assertion repo + PK client (not yet available)
+	// Both will return UNIMPLEMENTED until their dependencies are wired in future tasks
+	logger.Warn("variance valuator not configured: valuation engine not yet available")
+	logger.Warn("balance assertor not configured: assertion repository not yet available")
+
+	// Create AccountReconciliationService
+	reconciliationSvc := service.NewAccountReconciliationService(serviceOpts...)
+
 	// Initialize auth interceptor
 	authConfig := bootstrap.DefaultAuthConfig(logger)
 	authInterceptor, err := bootstrap.NewAuthInterceptor(ctx, authConfig)
@@ -102,6 +171,9 @@ func run(logger *slog.Logger) error {
 		WithAuthInterceptor(authInterceptor).
 		Build()
 
+	// Register AccountReconciliationService
+	reconciliationv1.RegisterAccountReconciliationServiceServer(grpcServer, reconciliationSvc)
+
 	// Register health check service
 	healthAggregator := health.NewAggregator([]health.Checker{
 		observability.NewDatabaseChecker(db),
@@ -113,7 +185,7 @@ func run(logger *slog.Logger) error {
 	reflection.Register(grpcServer)
 
 	logger.Info("gRPC services registered",
-		"services", []string{"Health", "Reflection"})
+		"services", []string{"AccountReconciliationService", "Health", "Reflection"})
 
 	// Create gRPC listener
 	grpcAddress := fmt.Sprintf(":%s", cfg.Server.Port)
