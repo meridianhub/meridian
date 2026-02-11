@@ -254,6 +254,29 @@ func (c *Client) RetrieveParty(ctx context.Context, req *partyv1.RetrievePartyRe
 	return resp, nil
 }
 
+// GetDefaultPaymentMethod retrieves the default payment method for a party.
+// This is an idempotent read operation, so it uses circuit breaker with retry.
+func (c *Client) GetDefaultPaymentMethod(ctx context.Context, req *partyv1.GetDefaultPaymentMethodRequest) (*partyv1.GetDefaultPaymentMethodResponse, error) {
+	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	ctx = clients.PropagateCorrelationID(ctx)
+	ctx = clients.PropagateOrganization(ctx)
+
+	if c.resilient != nil {
+		return clients.ExecuteWithResilience(ctx, c.resilient, "GetDefaultPaymentMethod", func() (*partyv1.GetDefaultPaymentMethodResponse, error) {
+			return c.party.GetDefaultPaymentMethod(ctx, req)
+		})
+	}
+
+	resp, err := c.party.GetDefaultPaymentMethod(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get default payment method: %w", err)
+	}
+
+	return resp, nil
+}
+
 // Close terminates the gRPC connection gracefully.
 func (c *Client) Close() error {
 	if c.conn != nil {
