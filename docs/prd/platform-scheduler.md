@@ -18,6 +18,64 @@ This PRD defines a shared `platform/scheduler` package that extracts the
 common patterns into a single, well-tested abstraction, and establishes
 DB-backed execution awareness as the baseline for all scheduled work.
 
+## BIAN Alignment
+
+BIAN explicitly favours **distributed choreography over centralised
+orchestration**. Each Service Domain manages its own scheduling as an
+autonomous capability. Creating a central scheduling service that "wakes up"
+other services would violate BIAN's principles of Service Domain encapsulation
+and loose coupling.
+
+This PRD follows BIAN's prescribed pattern: extract **shared scheduling
+infrastructure** (a library) while preserving each Service Domain's autonomy
+over its own scheduled work.
+
+### BIAN Terminology Mapping
+
+| Meridian Concept | BIAN Concept | Reference |
+|-----------------|--------------|-----------|
+| Shared scheduler library | Scheduling Infrastructure (reusable capability) | Service Domain autonomy principle |
+| `ScheduleProvider` | PROCESS functional pattern (schedule loading) | Practitioner Guide V8.1 |
+| `Executor` | Work Step execution (domain-specific task) | Behaviour Qualifier: Task/Workstep |
+| `Schedule` | Task Definition within a Service Domain | Task Management capability |
+| Execution audit trail | Work Step status tracking (TRIGGERED/COMPLETED/FAILED) | PROCESS pattern state management |
+| Catch-up on startup | Missed window detection (operational resilience) | Workflow Management capability |
+| Redis distributed lock | First-order Service Domain coordination | Distributed coordination model |
+| Dynamic schedule reload | Behaviour Qualifier refinement at runtime | Runtime task management |
+
+### BIAN Design Principle: Distributed, Not Central
+
+```text
+BIAN-Compliant (this PRD):
+
+  shared/platform/scheduler  ← infrastructure library, not a service
+         │
+    ┌────┼────────────┬──────────────┐
+    │                 │              │
+    ▼                 ▼              ▼
+ Billing SD      Settlement SD   Forecasting SD
+ (autonomous)    (autonomous)    (autonomous)
+ - Own schedules - Own schedules - Own schedules
+ - Own executor  - Own executor  - Own executor
+ - Own lifecycle - Own lifecycle - Own lifecycle
+
+
+BIAN-Violating (rejected):
+
+  Central Scheduling Service  ← violates SD autonomy
+         │
+    ┌────┼────────────┬──────────────┐
+    │                 │              │
+    ▼                 ▼              ▼
+ Billing SD      Settlement SD   Forecasting SD
+ (dependent)     (dependent)     (dependent)
+```
+
+Each Service Domain retains full ownership of what it schedules, when, and
+how it handles execution results. The shared package provides the mechanical
+infrastructure (cron lifecycle, locking, audit trail) without imposing
+cross-domain coordination.
+
 ## Problem Statement
 
 ### Duplication
@@ -88,7 +146,9 @@ mechanics are identical.
 - Replacing `robfig/cron/v3` with a different scheduling library
 - Adding a scheduler UI or API (schedules are defined in service code or config)
 - Event-driven scheduling via Kafka (CockroachDB has no LISTEN/NOTIFY; polling remains the pattern)
-- Central scheduler service (each service owns its scheduling; the shared package is a library)
+- Central scheduler service - BIAN explicitly requires Service Domain autonomy
+  over scheduling; the shared package is infrastructure, not a service
+- Cross-domain schedule coordination (each Service Domain reacts to business events, not scheduler commands)
 
 ## Architecture
 
