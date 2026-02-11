@@ -48,6 +48,11 @@ def dunning_escalation():
         }
 
     current_level = ctx["dunning_level"]
+    if current_level < 0 or current_level > 2:
+        return {
+            "action_taken": "invalid_input",
+            "invalid_dunning_level": current_level,
+        }
     new_level = current_level + 1
     account_id = ctx["account_id"]
     party_id = ctx["party_id"]
