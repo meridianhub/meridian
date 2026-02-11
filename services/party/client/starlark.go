@@ -43,10 +43,10 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) er
 //   - party_id (string): Party identifier (UUID)
 //
 // Returns a map containing:
-//   - provider: Payment provider (e.g., "stripe")
+//   - provider: Payment provider enum string (e.g., "PAYMENT_METHOD_PROVIDER_STRIPE")
 //   - provider_customer_id: Provider-assigned customer identifier
 //   - provider_method_id: Provider-assigned payment method identifier
-//   - method_type: Payment method type (e.g., "card", "bank_account")
+//   - method_type: Payment method type enum string (e.g., "PAYMENT_METHOD_TYPE_CARD")
 func getDefaultPaymentMethodHandler(client *Client) saga.Handler {
 	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 		partyID, err := saga.RequireStringParam(params, "party_id")

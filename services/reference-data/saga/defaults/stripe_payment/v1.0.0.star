@@ -54,7 +54,7 @@ def stripe_payment():
 
     # Build payment_attributes by merging resolved payment method details
     # with any additional attributes provided in the input
-    payment_attrs = dict(ctx.get("payment_attributes", {}))
+    payment_attrs = dict(ctx.get("payment_attributes") or {})
     payment_attrs["provider"] = pm_result.provider
     payment_attrs["provider_customer_id"] = pm_result.provider_customer_id
     payment_attrs["provider_method_id"] = pm_result.provider_method_id
