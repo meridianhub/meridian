@@ -36,12 +36,23 @@ def dunning_escalation():
 
     ctx = input_data
 
-    current_level = ctx.get("dunning_level", 0)
+    # Validate required fields before any side effects
+    missing = []
+    for key in ["dunning_level", "account_id", "party_id", "amount_cents", "currency"]:
+        if ctx.get(key) == None:
+            missing.append(key)
+    if missing:
+        return {
+            "action_taken": "invalid_input",
+            "missing_fields": missing,
+        }
+
+    current_level = ctx["dunning_level"]
     new_level = current_level + 1
-    account_id = ctx.get("account_id")
-    party_id = ctx.get("party_id")
-    amount_cents = ctx.get("amount_cents")
-    currency = ctx.get("currency")
+    account_id = ctx["account_id"]
+    party_id = ctx["party_id"]
+    amount_cents = ctx["amount_cents"]
+    currency = ctx["currency"]
     invoice_number = ctx.get("invoice_number", "")
 
     result = {
