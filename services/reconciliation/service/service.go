@@ -191,7 +191,12 @@ func (s *AccountReconciliationService) ListReconciliationResults(
 		return nil, status.Error(codes.Unimplemented, "ListReconciliationResults not yet implemented")
 	}
 
-	runID, err := uuid.Parse(req.GetRunId())
+	runIDStr := req.GetRunId()
+	if runIDStr == "" {
+		return nil, status.Error(codes.InvalidArgument, "run_id is required")
+	}
+
+	runID, err := uuid.Parse(runIDStr)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid run_id: %v", err)
 	}

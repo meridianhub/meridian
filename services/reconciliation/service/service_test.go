@@ -264,6 +264,26 @@ func TestListReconciliationResults_InvalidRunID(t *testing.T) {
 	assert.Equal(t, codes.InvalidArgument, st.Code())
 }
 
+func TestListReconciliationResults_EmptyRunID(t *testing.T) {
+	mock := &mockVarianceLister{
+		listFn: func(_ context.Context, _ domain.VarianceFilter) ([]*domain.Variance, error) {
+			t.Fatal("should not be called with empty run_id")
+			return nil, nil
+		},
+	}
+
+	svc := NewAccountReconciliationService(WithVarianceListRepository(mock))
+	_, err := svc.ListReconciliationResults(context.Background(), &reconciliationv1.ListReconciliationResultsRequest{
+		RunId: "",
+	})
+
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+	assert.Contains(t, st.Message(), "run_id is required")
+}
+
 func TestListReconciliationResults_DefaultPageSize(t *testing.T) {
 	runID := uuid.New()
 
