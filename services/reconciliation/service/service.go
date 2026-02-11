@@ -8,6 +8,7 @@ package service
 import (
 	"context"
 	"errors"
+	"log/slog"
 
 	"github.com/google/uuid"
 	reconciliationv1 "github.com/meridianhub/meridian/api/proto/meridian/reconciliation/v1"
@@ -24,6 +25,7 @@ import (
 type AccountReconciliationService struct {
 	reconciliationv1.UnimplementedAccountReconciliationServiceServer
 
+	runRepo         domain.SettlementRunRepository
 	disputeRepo     domain.DisputeRepository
 	varianceRepo    VarianceFinder
 	sagaRuntime     SagaRuntime
@@ -32,6 +34,7 @@ type AccountReconciliationService struct {
 	policyRuntime   valuation.PolicyRuntime
 	starlarkRuntime valuation.StarlarkRuntime
 	valuationCache  valuation.Cache
+	logger          *slog.Logger
 }
 
 // Option configures the AccountReconciliationService.
@@ -93,6 +96,20 @@ func WithValuationCache(c valuation.Cache) Option {
 	}
 }
 
+// WithRunRepository sets the settlement run repository.
+func WithRunRepository(repo domain.SettlementRunRepository) Option {
+	return func(s *AccountReconciliationService) {
+		s.runRepo = repo
+	}
+}
+
+// WithLogger sets the structured logger.
+func WithLogger(l *slog.Logger) Option {
+	return func(s *AccountReconciliationService) {
+		s.logger = l
+	}
+}
+
 // NewAccountReconciliationService creates a new AccountReconciliationService.
 // The assertor is optional; if nil, AssertBalance returns UNIMPLEMENTED.
 func NewAccountReconciliationService(opts ...Option) *AccountReconciliationService {
@@ -100,15 +117,81 @@ func NewAccountReconciliationService(opts ...Option) *AccountReconciliationServi
 	for _, opt := range opts {
 		opt(svc)
 	}
+	if svc.logger == nil {
+		svc.logger = slog.Default()
+	}
 	return svc
 }
 
 // InitiateAccountReconciliation creates a new settlement run.
 func (s *AccountReconciliationService) InitiateAccountReconciliation(
-	_ context.Context,
-	_ *reconciliationv1.InitiateAccountReconciliationRequest,
+	ctx context.Context,
+	req *reconciliationv1.InitiateAccountReconciliationRequest,
 ) (*reconciliationv1.InitiateAccountReconciliationResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "InitiateAccountReconciliation not yet implemented")
+	accountID := req.GetAccountId()
+	if accountID == "" {
+		return nil, status.Error(codes.InvalidArgument, "account_id is required")
+	}
+
+	scope := req.GetScope()
+	if scope == reconciliationv1.ReconciliationScope_RECONCILIATION_SCOPE_UNSPECIFIED {
+		return nil, status.Error(codes.InvalidArgument, "scope must not be UNSPECIFIED")
+	}
+
+	settlementType := req.GetSettlementType()
+	if settlementType == reconciliationv1.SettlementType_SETTLEMENT_TYPE_UNSPECIFIED {
+		return nil, status.Error(codes.InvalidArgument, "settlement_type must not be UNSPECIFIED")
+	}
+
+	periodStartPb := req.GetPeriodStart()
+	if periodStartPb == nil {
+		return nil, status.Error(codes.InvalidArgument, "period_start is required")
+	}
+	periodStart := periodStartPb.AsTime()
+
+	periodEndPb := req.GetPeriodEnd()
+	if periodEndPb == nil {
+		return nil, status.Error(codes.InvalidArgument, "period_end is required")
+	}
+	periodEnd := periodEndPb.AsTime()
+
+	if !periodStart.Before(periodEnd) {
+		return nil, status.Error(codes.InvalidArgument, "period_end must be after period_start")
+	}
+
+	initiatedBy := req.GetInitiatedBy()
+	if initiatedBy == "" {
+		return nil, status.Error(codes.InvalidArgument, "initiated_by is required")
+	}
+
+	domainScope := toDomainReconciliationScope(scope)
+	domainType := toDomainSettlementType(settlementType)
+
+	run, err := domain.NewSettlementRun(accountID, domainScope, domainType, periodStart, periodEnd, initiatedBy)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid settlement run: %v", err)
+	}
+
+	if err := s.runRepo.Create(ctx, run); err != nil {
+		if errors.Is(err, domain.ErrConflict) {
+			return nil, status.Error(codes.AlreadyExists, "settlement run already exists")
+		}
+		s.logger.Error("failed to create settlement run",
+			slog.String("account_id", accountID),
+			slog.String("error", err.Error()),
+		)
+		return nil, status.Error(codes.Internal, "failed to create settlement run")
+	}
+
+	s.logger.Info("settlement run created",
+		slog.String("run_id", run.RunID.String()),
+		slog.String("account_id", accountID),
+		slog.String("scope", string(domainScope)),
+	)
+
+	return &reconciliationv1.InitiateAccountReconciliationResponse{
+		Run: toProtoRunSummary(run),
+	}, nil
 }
 
 // ExecuteAccountReconciliation triggers execution of a pending settlement run.
