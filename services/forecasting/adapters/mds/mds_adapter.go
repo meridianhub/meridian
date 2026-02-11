@@ -4,6 +4,8 @@ package mds
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -13,6 +15,10 @@ import (
 	misclient "github.com/meridianhub/meridian/services/market-information/client"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
+
+// ErrObservationPageLimitExceeded indicates the maximum pagination depth was reached
+// while more observations remain, which could silently degrade forecast accuracy.
+var ErrObservationPageLimitExceeded = errors.New("observation page limit exceeded")
 
 // MISAdapter wraps the Market Information Service client to implement
 // the starlark.MISClient interface for fetching historical observations.
@@ -48,7 +54,8 @@ func (a *MISAdapter) FetchObservations(ctx context.Context, datasetCode string, 
 		for _, obs := range resp.GetObservations() {
 			val, err := decimal.NewFromString(obs.GetValue())
 			if err != nil {
-				continue
+				return nil, fmt.Errorf("invalid decimal value %q for dataset %s at %s: %w",
+					obs.GetValue(), datasetCode, obs.GetValidFrom().AsTime(), err)
 			}
 			observations = append(observations, starlark.Observation{
 				Timestamp: obs.GetValidFrom().AsTime(),
@@ -61,6 +68,11 @@ func (a *MISAdapter) FetchObservations(ctx context.Context, datasetCode string, 
 		if pageToken == "" {
 			break
 		}
+	}
+
+	if pageToken != "" {
+		return nil, fmt.Errorf("%w: fetched %d observations across %d pages for dataset %s",
+			ErrObservationPageLimitExceeded, len(observations), maxObservationPages, datasetCode)
 	}
 
 	return observations, nil
