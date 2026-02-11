@@ -163,7 +163,7 @@ func validInitiateRequest() *reconciliationv1.InitiateAccountReconciliationReque
 
 func TestInitiateAccountReconciliation_Success(t *testing.T) {
 	repo := newInitiateRunRepoMock()
-	svc := NewAccountReconciliationService(WithRunRepository(repo))
+	svc := NewAccountReconciliationService(WithSettlementRunRepository(repo))
 	ctx := context.Background()
 
 	req := validInitiateRequest()
@@ -193,7 +193,7 @@ func TestInitiateAccountReconciliation_Success(t *testing.T) {
 
 func TestInitiateAccountReconciliation_MissingAccountID(t *testing.T) {
 	repo := newInitiateRunRepoMock()
-	svc := NewAccountReconciliationService(WithRunRepository(repo))
+	svc := NewAccountReconciliationService(WithSettlementRunRepository(repo))
 	ctx := context.Background()
 
 	req := validInitiateRequest()
@@ -210,7 +210,7 @@ func TestInitiateAccountReconciliation_MissingAccountID(t *testing.T) {
 
 func TestInitiateAccountReconciliation_InvalidScope(t *testing.T) {
 	repo := newInitiateRunRepoMock()
-	svc := NewAccountReconciliationService(WithRunRepository(repo))
+	svc := NewAccountReconciliationService(WithSettlementRunRepository(repo))
 	ctx := context.Background()
 
 	req := validInitiateRequest()
@@ -227,7 +227,7 @@ func TestInitiateAccountReconciliation_InvalidScope(t *testing.T) {
 
 func TestInitiateAccountReconciliation_InvalidSettlementType(t *testing.T) {
 	repo := newInitiateRunRepoMock()
-	svc := NewAccountReconciliationService(WithRunRepository(repo))
+	svc := NewAccountReconciliationService(WithSettlementRunRepository(repo))
 	ctx := context.Background()
 
 	req := validInitiateRequest()
@@ -244,7 +244,7 @@ func TestInitiateAccountReconciliation_InvalidSettlementType(t *testing.T) {
 
 func TestInitiateAccountReconciliation_InvalidDates(t *testing.T) {
 	repo := newInitiateRunRepoMock()
-	svc := NewAccountReconciliationService(WithRunRepository(repo))
+	svc := NewAccountReconciliationService(WithSettlementRunRepository(repo))
 	ctx := context.Background()
 
 	now := time.Now().UTC()
@@ -305,7 +305,7 @@ func TestInitiateAccountReconciliation_InvalidDates(t *testing.T) {
 
 func TestInitiateAccountReconciliation_NilRequest(t *testing.T) {
 	repo := newInitiateRunRepoMock()
-	svc := NewAccountReconciliationService(WithRunRepository(repo))
+	svc := NewAccountReconciliationService(WithSettlementRunRepository(repo))
 	ctx := context.Background()
 
 	_, err := svc.InitiateAccountReconciliation(ctx, nil)
@@ -334,7 +334,7 @@ func TestInitiateAccountReconciliation_MissingRunRepo(t *testing.T) {
 
 func TestInitiateAccountReconciliation_EmptyInitiatedBy(t *testing.T) {
 	repo := newInitiateRunRepoMock()
-	svc := NewAccountReconciliationService(WithRunRepository(repo))
+	svc := NewAccountReconciliationService(WithSettlementRunRepository(repo))
 	ctx := context.Background()
 
 	req := validInitiateRequest()
@@ -399,7 +399,7 @@ func TestInitiateAccountReconciliation_EnumMapping(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := newInitiateRunRepoMock()
-			svc := NewAccountReconciliationService(WithRunRepository(repo))
+			svc := NewAccountReconciliationService(WithSettlementRunRepository(repo))
 
 			req := validInitiateRequest()
 			req.Scope = tt.scope
@@ -417,7 +417,7 @@ func TestInitiateAccountReconciliation_EnumMapping(t *testing.T) {
 
 func TestInitiateAccountReconciliation_TimestampConversion(t *testing.T) {
 	repo := newInitiateRunRepoMock()
-	svc := NewAccountReconciliationService(WithRunRepository(repo))
+	svc := NewAccountReconciliationService(WithSettlementRunRepository(repo))
 	ctx := context.Background()
 
 	periodStart := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -438,7 +438,7 @@ func TestInitiateAccountReconciliation_TimestampConversion(t *testing.T) {
 func TestInitiateAccountReconciliation_Conflict(t *testing.T) {
 	repo := newInitiateRunRepoMock()
 	repo.createErr = domain.ErrConflict
-	svc := NewAccountReconciliationService(WithRunRepository(repo))
+	svc := NewAccountReconciliationService(WithSettlementRunRepository(repo))
 	ctx := context.Background()
 
 	req := validInitiateRequest()
@@ -454,7 +454,7 @@ func TestInitiateAccountReconciliation_Conflict(t *testing.T) {
 func TestInitiateAccountReconciliation_InternalError(t *testing.T) {
 	repo := newInitiateRunRepoMock()
 	repo.createErr = errors.New("database connection failed")
-	svc := NewAccountReconciliationService(WithRunRepository(repo))
+	svc := NewAccountReconciliationService(WithSettlementRunRepository(repo))
 	ctx := context.Background()
 
 	req := validInitiateRequest()
@@ -470,7 +470,7 @@ func TestInitiateAccountReconciliation_InternalError(t *testing.T) {
 func TestInitiateAccountReconciliation_ContextCanceled(t *testing.T) {
 	repo := newInitiateRunRepoMock()
 	repo.createErr = context.Canceled
-	svc := NewAccountReconciliationService(WithRunRepository(repo))
+	svc := NewAccountReconciliationService(WithSettlementRunRepository(repo))
 	ctx := context.Background()
 
 	req := validInitiateRequest()
@@ -486,7 +486,7 @@ func TestInitiateAccountReconciliation_ContextCanceled(t *testing.T) {
 func TestInitiateAccountReconciliation_DeadlineExceeded(t *testing.T) {
 	repo := newInitiateRunRepoMock()
 	repo.createErr = context.DeadlineExceeded
-	svc := NewAccountReconciliationService(WithRunRepository(repo))
+	svc := NewAccountReconciliationService(WithSettlementRunRepository(repo))
 	ctx := context.Background()
 
 	req := validInitiateRequest()
@@ -501,7 +501,7 @@ func TestInitiateAccountReconciliation_DeadlineExceeded(t *testing.T) {
 
 func TestInitiateAccountReconciliation_InvalidTimestamp(t *testing.T) {
 	repo := newInitiateRunRepoMock()
-	svc := NewAccountReconciliationService(WithRunRepository(repo))
+	svc := NewAccountReconciliationService(WithSettlementRunRepository(repo))
 	ctx := context.Background()
 
 	t.Run("invalid period_start", func(t *testing.T) {

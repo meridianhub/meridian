@@ -27,7 +27,6 @@ type AccountReconciliationService struct {
 
 	runRepo         domain.SettlementRunRepository
 	disputeRepo     domain.DisputeRepository
-	runRepo         domain.SettlementRunRepository
 	varianceRepo    VarianceFinder
 	sagaRuntime     SagaRuntime
 	eventPublisher  EventPublisher
@@ -101,13 +100,6 @@ func WithStarlarkRuntime(rt valuation.StarlarkRuntime) Option {
 func WithValuationCache(c valuation.Cache) Option {
 	return func(s *AccountReconciliationService) {
 		s.valuationCache = c
-	}
-}
-
-// WithRunRepository sets the settlement run repository.
-func WithRunRepository(repo domain.SettlementRunRepository) Option {
-	return func(s *AccountReconciliationService) {
-		s.runRepo = repo
 	}
 }
 
