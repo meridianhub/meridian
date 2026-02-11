@@ -5,6 +5,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -16,6 +17,9 @@ import (
 	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
+
+// ErrInvalidControlAction is returned when an unsupported control action is provided.
+var ErrInvalidControlAction = errors.New("current_account.control: invalid action, must be FREEZE, UNFREEZE, or CLOSE")
 
 // RegisterStarlarkHandlers registers all Starlark service bindings for Current Account.
 // These handlers adapt the Starlark interface (map[string]any) to gRPC client calls.
@@ -354,7 +358,7 @@ func controlHandler(client *Client) saga.Handler {
 		case "CLOSE":
 			controlAction = currentaccountv1.ControlAction_CONTROL_ACTION_CLOSE
 		default:
-			return nil, fmt.Errorf("current_account.control: invalid action %q, must be FREEZE, UNFREEZE, or CLOSE", action)
+			return nil, fmt.Errorf("%w: %q", ErrInvalidControlAction, action)
 		}
 
 		clientCtx := prepareClientContext(ctx)

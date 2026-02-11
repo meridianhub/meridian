@@ -151,6 +151,8 @@ func (m *mockCurrentAccountServer) ControlCurrentAccount(_ context.Context, req 
 		newStatus = currentaccountv1.AccountStatus_ACCOUNT_STATUS_ACTIVE
 	case currentaccountv1.ControlAction_CONTROL_ACTION_CLOSE:
 		newStatus = currentaccountv1.AccountStatus_ACCOUNT_STATUS_CLOSED
+	case currentaccountv1.ControlAction_CONTROL_ACTION_UNSPECIFIED:
+		newStatus = currentaccountv1.AccountStatus_ACCOUNT_STATUS_UNSPECIFIED
 	}
 
 	return &currentaccountv1.ControlCurrentAccountResponse{

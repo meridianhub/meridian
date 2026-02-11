@@ -2,8 +2,10 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"sync"
 	"time"
 
@@ -12,6 +14,15 @@ import (
 	"github.com/meridianhub/meridian/services/payment-order/domain"
 	"github.com/redis/go-redis/v9"
 )
+
+// Dunning worker errors.
+var (
+	ErrNilDunningCallback = errors.New("dunning callback is required")
+	ErrDunningKeyTooShort = errors.New("dunning retry key too short")
+)
+
+// dunningRetryZSet is the Redis sorted set key for dunning retry scheduling.
+const dunningRetryZSet = "dunning:retries"
 
 // DunningWorkerConfig holds configuration for the dunning retry worker.
 type DunningWorkerConfig struct {
@@ -25,10 +36,9 @@ type DunningWorkerConfig struct {
 // The callback receives the billing run and should trigger the appropriate saga.
 type DunningCallback func(ctx context.Context, run *domain.BillingRun) error
 
-// DunningWorker polls Redis for due dunning retry keys and triggers escalation.
-// It uses Redis TTL-based scheduling: when a billing run fails, a key is set
-// with a TTL equal to the backoff duration. The worker polls for expired keys
-// to trigger the next escalation step.
+// DunningWorker polls a Redis sorted set for due dunning retries and triggers
+// escalation. It uses ZADD to schedule retries with the due timestamp as score
+// and ZRANGEBYSCORE to find items whose due time has passed.
 type DunningWorker struct {
 	repo     persistence.BillingRepository
 	redis    *redis.Client
@@ -62,7 +72,7 @@ func NewDunningWorker(
 		return nil, ErrNilBillingLogger
 	}
 	if callback == nil {
-		return nil, fmt.Errorf("dunning callback is required")
+		return nil, ErrNilDunningCallback
 	}
 	if config.PollInterval == 0 {
 		config.PollInterval = 60 * time.Second
@@ -136,11 +146,15 @@ func (w *DunningWorker) Stop() {
 	}
 }
 
-// ScheduleDunningRetry sets a Redis key with TTL for the backoff duration.
-// When the key expires, the worker will detect this and trigger escalation.
+// ScheduleDunningRetry adds a billing run to the sorted set with a score
+// equal to the Unix timestamp when the retry becomes due.
 func (w *DunningWorker) ScheduleDunningRetry(ctx context.Context, billingRunID uuid.UUID, delay time.Duration) error {
-	key := dunningRetryKey(billingRunID)
-	err := w.redis.Set(ctx, key, "pending", delay).Err()
+	dueAt := NowFunc().Add(delay)
+	member := redis.Z{
+		Score:  float64(dueAt.Unix()),
+		Member: billingRunID.String(),
+	}
+	err := w.redis.ZAdd(ctx, dunningRetryZSet, member).Err()
 	if err != nil {
 		return fmt.Errorf("failed to schedule dunning retry: %w", err)
 	}
@@ -148,47 +162,47 @@ func (w *DunningWorker) ScheduleDunningRetry(ctx context.Context, billingRunID u
 	w.logger.Info("dunning retry scheduled",
 		"billing_run_id", billingRunID,
 		"delay", delay,
-		"key", key)
+		"due_at", dueAt)
 
 	return nil
 }
 
-// processDueRetries scans for billing runs due for dunning escalation.
-// A billing run is due when its Redis retry key has expired (TTL elapsed).
+// processDueRetries queries the sorted set for all members whose score (due
+// timestamp) is at or before the current time, processes each one, and removes
+// it from the set.
 func (w *DunningWorker) processDueRetries(ctx context.Context) {
-	// Use SCAN to find all dunning retry keys
-	var cursor uint64
+	now := NowFunc()
+	maxScore := strconv.FormatInt(now.Unix(), 10)
+
+	// Fetch billing run IDs that are due
+	members, err := w.redis.ZRangeByScore(ctx, dunningRetryZSet, &redis.ZRangeBy{
+		Min:   "-inf",
+		Max:   maxScore,
+		Count: 100,
+	}).Result()
+	if err != nil {
+		w.logger.Error("failed to query dunning retries", "error", err)
+		return
+	}
+
+	if len(members) == 0 {
+		return
+	}
+
 	var processed int
-
-	for {
-		keys, nextCursor, err := w.redis.Scan(ctx, cursor, "dunning:retry:*", 100).Result()
-		if err != nil {
-			w.logger.Error("failed to scan dunning retry keys", "error", err)
-			return
+	for _, member := range members {
+		billingRunID, parseErr := uuid.Parse(member)
+		if parseErr != nil {
+			w.logger.Error("invalid billing run ID in dunning set", "member", member, "error", parseErr)
+			w.redis.ZRem(ctx, dunningRetryZSet, member)
+			continue
 		}
 
-		for _, key := range keys {
-			// Check if the key is still pending (exists means not yet due)
-			// Actually, for TTL-based scheduling, we use a different pattern:
-			// We store a "ready" marker. The scheduler sets a separate delay key.
-			// When processing, we check for "ready" keys.
-			val, err := w.redis.Get(ctx, key).Result()
-			if err != nil {
-				continue // Key expired or error
-			}
+		w.processRetry(ctx, billingRunID)
+		processed++
 
-			if val != "ready" {
-				continue // Not yet due
-			}
-
-			w.processRetryKey(ctx, key)
-			processed++
-		}
-
-		cursor = nextCursor
-		if cursor == 0 {
-			break
-		}
+		// Remove processed member from the set
+		w.redis.ZRem(ctx, dunningRetryZSet, member)
 	}
 
 	if processed > 0 {
@@ -196,16 +210,8 @@ func (w *DunningWorker) processDueRetries(ctx context.Context) {
 	}
 }
 
-// processRetryKey handles a single due dunning retry.
-func (w *DunningWorker) processRetryKey(ctx context.Context, key string) {
-	// Extract billing run ID from key: "dunning:retry:{billing_run_id}"
-	billingRunID, err := parseDunningRetryKey(key)
-	if err != nil {
-		w.logger.Error("invalid dunning retry key", "key", key, "error", err)
-		w.redis.Del(ctx, key)
-		return
-	}
-
+// processRetry handles a single due dunning retry.
+func (w *DunningWorker) processRetry(ctx context.Context, billingRunID uuid.UUID) {
 	w.wg.Add(1)
 	defer w.wg.Done()
 
@@ -223,7 +229,6 @@ func (w *DunningWorker) processRetryKey(ctx context.Context, key string) {
 		w.logger.Info("billing run no longer failed, skipping dunning",
 			"billing_run_id", billingRunID,
 			"status", run.Status)
-		w.redis.Del(ctx, key)
 		return
 	}
 
@@ -240,32 +245,13 @@ func (w *DunningWorker) processRetryKey(ctx context.Context, key string) {
 		return
 	}
 
-	// Clean up the retry key
-	w.redis.Del(ctx, key)
-
 	w.logger.Info("dunning escalation triggered",
 		"billing_run_id", billingRunID,
 		"dunning_level", run.DunningLevel)
 }
 
-// MarkRetryReady transitions a retry key from pending to ready.
-// Called by a separate delayed process or when the TTL expires.
-// For the initial implementation, callers set keys directly as "ready" with delay.
-func (w *DunningWorker) MarkRetryReady(ctx context.Context, billingRunID uuid.UUID) error {
-	key := dunningRetryKey(billingRunID)
-	return w.redis.Set(ctx, key, "ready", 0).Err()
-}
-
-// dunningRetryKey generates the Redis key for a dunning retry.
-func dunningRetryKey(billingRunID uuid.UUID) string {
-	return fmt.Sprintf("dunning:retry:%s", billingRunID.String())
-}
-
-// parseDunningRetryKey extracts the billing run ID from a Redis key.
-func parseDunningRetryKey(key string) (uuid.UUID, error) {
-	const prefix = "dunning:retry:"
-	if len(key) <= len(prefix) {
-		return uuid.Nil, fmt.Errorf("key too short: %s", key)
-	}
-	return uuid.Parse(key[len(prefix):])
+// CancelDunningRetry removes a billing run from the retry set.
+// Called when a billing run is resolved (e.g., manual payment succeeds).
+func (w *DunningWorker) CancelDunningRetry(ctx context.Context, billingRunID uuid.UUID) error {
+	return w.redis.ZRem(ctx, dunningRetryZSet, billingRunID.String()).Err()
 }
