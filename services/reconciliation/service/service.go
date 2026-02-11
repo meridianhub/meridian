@@ -27,6 +27,7 @@ type AccountReconciliationService struct {
 
 	runRepo         domain.SettlementRunRepository
 	disputeRepo     domain.DisputeRepository
+	runRepo         domain.SettlementRunRepository
 	varianceRepo    VarianceFinder
 	sagaRuntime     SagaRuntime
 	eventPublisher  EventPublisher
@@ -44,6 +45,13 @@ type Option func(*AccountReconciliationService)
 func WithDisputeRepository(repo domain.DisputeRepository) Option {
 	return func(s *AccountReconciliationService) {
 		s.disputeRepo = repo
+	}
+}
+
+// WithSettlementRunRepository sets the settlement run repository.
+func WithSettlementRunRepository(repo domain.SettlementRunRepository) Option {
+	return func(s *AccountReconciliationService) {
+		s.runRepo = repo
 	}
 }
 
@@ -223,10 +231,35 @@ func (s *AccountReconciliationService) ExecuteAccountReconciliation(
 
 // RetrieveAccountReconciliation retrieves a settlement run summary.
 func (s *AccountReconciliationService) RetrieveAccountReconciliation(
-	_ context.Context,
-	_ *reconciliationv1.RetrieveAccountReconciliationRequest,
+	ctx context.Context,
+	req *reconciliationv1.RetrieveAccountReconciliationRequest,
 ) (*reconciliationv1.RetrieveAccountReconciliationResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "RetrieveAccountReconciliation not yet implemented")
+	if s.runRepo == nil {
+		return nil, status.Error(codes.Unimplemented, "RetrieveAccountReconciliation not yet implemented")
+	}
+
+	runIDStr := req.GetRunId()
+	if runIDStr == "" {
+		return nil, status.Error(codes.InvalidArgument, "run_id is required")
+	}
+
+	runID, err := uuid.Parse(runIDStr)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid run_id: %v", err)
+	}
+
+	run, err := s.runRepo.FindByID(ctx, runID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, status.Errorf(codes.NotFound, "settlement run not found: %s", runID)
+		}
+		slog.ErrorContext(ctx, "failed to retrieve settlement run", "run_id", runID, "error", err)
+		return nil, status.Error(codes.Internal, "failed to retrieve settlement run")
+	}
+
+	return &reconciliationv1.RetrieveAccountReconciliationResponse{
+		Run: toProtoRunSummary(run),
+	}, nil
 }
 
 // ControlAccountReconciliation controls a settlement run (cancel, pause, resume).
