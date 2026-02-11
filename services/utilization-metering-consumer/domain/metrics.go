@@ -91,6 +91,31 @@ var (
 		},
 		[]string{"service"},
 	)
+
+	// mdsPublishTotal counts MDS publish attempts by status.
+	// Labels: status ("success", "error")
+	mdsPublishTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "meridian",
+			Subsystem: "utilization_metering",
+			Name:      "mds_publish_total",
+			Help:      "Total number of MDS publish attempts by status",
+		},
+		[]string{"status"},
+	)
+
+	// dualOutputLatency tracks per-output latency in the fan-out path.
+	// Labels: output ("pk", "mds")
+	dualOutputLatency = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "meridian",
+			Subsystem: "utilization_metering",
+			Name:      "dual_output_latency_seconds",
+			Help:      "Per-output latency in the dual-output fan-out path",
+			Buckets:   []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10},
+		},
+		[]string{"output"},
+	)
 )
 
 // SetServiceName sets the service name for metrics (used for logging context).
@@ -151,4 +176,17 @@ func RecordKafkaConsumerLag(topic, partition string, lag float64) {
 // durationSeconds: processing duration in seconds
 func RecordEventProcessingDuration(service string, durationSeconds float64) {
 	eventProcessingDuration.WithLabelValues(service).Observe(durationSeconds)
+}
+
+// RecordMDSPublish increments the MDS publish counter.
+// status: "success" or "error"
+func RecordMDSPublish(status string) {
+	mdsPublishTotal.WithLabelValues(status).Inc()
+}
+
+// RecordDualOutputLatency observes per-output latency in the fan-out path.
+// output: "pk" or "mds"
+// durationSeconds: latency in seconds
+func RecordDualOutputLatency(output string, durationSeconds float64) {
+	dualOutputLatency.WithLabelValues(output).Observe(durationSeconds)
 }

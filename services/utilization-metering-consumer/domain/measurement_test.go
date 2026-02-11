@@ -4,6 +4,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	auditdomain "github.com/meridianhub/meridian/services/audit-worker/domain"
+	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -410,4 +413,66 @@ func TestUtilizationMeasurement_InstrumentPrecision(t *testing.T) {
 	assert.Equal(t, 0, apiCallInstrument.Precision)     // Whole API calls (COUNT)
 	assert.Equal(t, 6, storageGBInstrument.Precision)   // Six decimal places for storage (DATA)
 	assert.Equal(t, 6, computeHourInstrument.Precision) // Six decimal places for compute time (COMPUTE)
+}
+
+// =============================================================================
+// MeasurementToUtilization conversion tests
+// =============================================================================
+
+func TestMeasurementToUtilization(t *testing.T) {
+	accountID := uuid.MustParse("00000000-0000-0000-0000-000000000000")
+	measurementID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	now := time.Now()
+
+	m := &auditdomain.Measurement{
+		ID:        measurementID,
+		AccountID: accountID,
+		AssetCode: "MERIDIAN-CURRENT-ACCOUNT-OPS",
+		Quantity:  decimal.NewFromInt(1),
+		Period: auditdomain.Period{
+			Start: now,
+			End:   now,
+		},
+		Attributes: map[string]string{
+			"service":   "current_account",
+			"operation": "INSERT",
+		},
+		Source:       "AUDIT_STREAM",
+		QualityScore: 80,
+	}
+
+	result := MeasurementToUtilization(m)
+
+	assert.Equal(t, accountID.String(), result.TenantID)
+	assert.Equal(t, "current_account", result.ServiceName)
+	assert.Equal(t, "INSERT", result.OperationType)
+	assert.Equal(t, now, result.Timestamp)
+	assert.Equal(t, measurementID.String(), result.CorrelationID)
+	// Default instrument for "operation" unit type
+	assert.Equal(t, "OPERATION", result.Amount.GetInstrument().Code)
+	assert.Equal(t, "1", result.Amount.GetAmount().String())
+}
+
+func TestMeasurementToUtilization_WithUnitAttribute(t *testing.T) {
+	m := &auditdomain.Measurement{
+		ID:        uuid.New(),
+		AccountID: uuid.New(),
+		AssetCode: "MERIDIAN-API-CALL",
+		Quantity:  decimal.NewFromInt(5),
+		Period: auditdomain.Period{
+			Start: time.Now(),
+			End:   time.Now(),
+		},
+		Attributes: map[string]string{
+			"service":   "payment_order",
+			"operation": "ProcessPayment",
+			"unit":      "api_call",
+		},
+		Source: "AUDIT_STREAM",
+	}
+
+	result := MeasurementToUtilization(m)
+
+	assert.Equal(t, "API_CALL", result.Amount.GetInstrument().Code)
+	assert.Equal(t, "5", result.Amount.GetAmount().String())
 }

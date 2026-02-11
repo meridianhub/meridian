@@ -33,6 +33,7 @@ type AuditConsumer struct {
 	consumer    *kafka.ProtoConsumer
 	transformer *auditdomain.AuditEventTransformer
 	pkClient    domain.PositionKeepingClient
+	mdPublisher domain.UtilizationPublisher
 	validator   protovalidate.Validator
 	logger      *slog.Logger
 }
@@ -40,18 +41,20 @@ type AuditConsumer struct {
 // NewAuditConsumer creates a new Kafka consumer for AuditEvent messages.
 // It connects to Kafka using the provided configuration and sets up a handler
 // that transforms audit events into utilization measurements and sends them
-// to the Position Keeping service.
+// to the Position Keeping service and optionally to MDS.
 //
 // Parameters:
 // - config: Kafka consumer configuration (bootstrap servers, group ID, etc.)
 // - transformer: Service that transforms audit events into utilization measurements
 // - pkClient: Client for communicating with Position Keeping service
+// - opts: Optional configuration (e.g., WithMDSPublisher)
 //
 // Returns an error if the consumer cannot be initialized or if dependencies are nil.
 func NewAuditConsumer(
 	config kafka.ConsumerConfig,
 	transformer *auditdomain.AuditEventTransformer,
 	pkClient domain.PositionKeepingClient,
+	opts ...AuditConsumerOption,
 ) (*AuditConsumer, error) {
 	if transformer == nil {
 		return nil, ErrNilTransformer
@@ -72,6 +75,10 @@ func NewAuditConsumer(
 		pkClient:    pkClient,
 		validator:   validator,
 		logger:      logger,
+	}
+
+	for _, opt := range opts {
+		opt(ac)
 	}
 
 	// Message factory creates new AuditEvent instances for deserialization
@@ -97,9 +104,21 @@ func NewAuditConsumer(
 	return ac, nil
 }
 
+// AuditConsumerOption configures optional behavior of the AuditConsumer.
+type AuditConsumerOption func(*AuditConsumer)
+
+// WithMDSPublisher sets the MDS publisher for dual-output fan-out.
+// When set, transformed measurements are also published to MDS asynchronously.
+// MDS failures are logged but do not block the PK path.
+func WithMDSPublisher(pub domain.UtilizationPublisher) AuditConsumerOption {
+	return func(ac *AuditConsumer) {
+		ac.mdPublisher = pub
+	}
+}
+
 // handleAuditEvent processes a single AuditEvent by transforming it into
 // a utilization measurement and sending it to the Position Keeping service
-// for tenant-zero billing.
+// for tenant-zero billing, and optionally to MDS for aggregation.
 func (ac *AuditConsumer) handleAuditEvent(ctx context.Context, event *auditv1.AuditEvent) error {
 	// Start timing for processing duration metric
 	startTime := time.Now()
@@ -137,14 +156,24 @@ func (ac *AuditConsumer) handleAuditEvent(ctx context.Context, event *auditv1.Au
 		return nil
 	}
 
-	// Send measurement to Position Keeping service
+	// Send measurement to Position Keeping service (synchronous, failure short-circuits)
+	pkStart := time.Now()
 	if err := ac.pkClient.RecordMeasurement(ctx, measurement); err != nil {
 		domain.RecordPositionKeepingAPIError("record_measurement_failed")
+		domain.RecordDualOutputLatency("pk", time.Since(pkStart).Seconds())
 		return fmt.Errorf("failed to record measurement for event %s: %w", event.EventId, err)
 	}
+	domain.RecordDualOutputLatency("pk", time.Since(pkStart).Seconds())
 
 	// Record successful measurement metric
 	domain.RecordMeasurementRecorded(event.SchemaName, measurement.AssetCode)
+
+	// Fan out to MDS (async buffer, failure does not block)
+	if ac.mdPublisher != nil {
+		mdsStart := time.Now()
+		ac.publishToMDS(measurement)
+		domain.RecordDualOutputLatency("mds", time.Since(mdsStart).Seconds())
+	}
 
 	// Record processing duration metric
 	duration := time.Since(startTime).Seconds()
@@ -155,9 +184,27 @@ func (ac *AuditConsumer) handleAuditEvent(ctx context.Context, event *auditv1.Au
 		"account_id", measurement.AccountID,
 		"asset_code", measurement.AssetCode,
 		"service", event.SchemaName,
-		"quantity", measurement.Quantity)
+		"quantity", measurement.Quantity,
+		"mds_enabled", ac.mdPublisher != nil)
 
 	return nil
+}
+
+// publishToMDS converts the measurement and publishes it to MDS via the buffer.
+// Errors are logged but do not propagate (eventual consistency for MDS).
+func (ac *AuditConsumer) publishToMDS(measurement *auditdomain.Measurement) {
+	defer func() {
+		if r := recover(); r != nil {
+			ac.logger.Error("panic in MDS publish",
+				"error", r,
+				"measurement_id", measurement.ID)
+			domain.RecordMDSPublish("error")
+		}
+	}()
+
+	utilMeasurement := domain.MeasurementToUtilization(measurement)
+	ac.mdPublisher.Publish(utilMeasurement)
+	domain.RecordMDSPublish("success")
 }
 
 // Start begins consuming AuditEvent messages from the specified topics.
@@ -171,6 +218,7 @@ func (ac *AuditConsumer) handleAuditEvent(ctx context.Context, event *auditv1.Au
 // - Validate using protovalidate
 // - Transform to utilization measurements
 // - Send to Position Keeping service
+// - Optionally buffer to MDS publisher
 // - Commit offsets after successful processing
 //
 // Parameters:
@@ -178,7 +226,7 @@ func (ac *AuditConsumer) handleAuditEvent(ctx context.Context, event *auditv1.Au
 //
 // Returns an error if subscription fails. Call Stop() to gracefully shutdown consumption.
 func (ac *AuditConsumer) Start(topics []string) error {
-	ac.logger.Info("starting audit consumer", "topics", topics)
+	ac.logger.Info("starting audit consumer", "topics", topics, "mds_enabled", ac.mdPublisher != nil)
 	if err := ac.consumer.Subscribe(topics); err != nil {
 		return fmt.Errorf("failed to subscribe to topics: %w", err)
 	}

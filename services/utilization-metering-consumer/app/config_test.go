@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"testing"
+	"time"
 )
 
 func TestLoadConfig_Success(t *testing.T) {
@@ -279,5 +280,98 @@ func TestLoadConfig_DefaultConsumerGroupID(t *testing.T) {
 
 	if config.ConsumerGroupID != "utilization-metering-consumer" {
 		t.Errorf("Expected ConsumerGroupID to be 'utilization-metering-consumer' (default), got '%s'", config.ConsumerGroupID)
+	}
+}
+
+func TestLoadConfig_MDSDefaults(t *testing.T) {
+	// Set required environment variables
+	envVars := map[string]string{
+		"KAFKA_BOOTSTRAP_SERVERS":   "kafka:9092",
+		"POSITION_KEEPING_ENDPOINT": "position-keeping:50051",
+		"TENANT_ZERO_ID":            "00000000-0000-0000-0000-000000000000",
+	}
+
+	backup := make(map[string]string)
+	for key, value := range envVars {
+		backup[key] = os.Getenv(key)
+		os.Setenv(key, value)
+	}
+	// Clear MDS-related vars to test defaults
+	mdsKeys := []string{"ENABLE_MDS_OUTPUT", "MDS_SERVICE_ADDR", "MDS_AGGREGATION_WINDOW", "MDS_FLUSH_INTERVAL"}
+	for _, key := range mdsKeys {
+		backup[key] = os.Getenv(key)
+		os.Unsetenv(key)
+	}
+	defer func() {
+		for key, value := range backup {
+			if value == "" {
+				os.Unsetenv(key)
+			} else {
+				os.Setenv(key, value)
+			}
+		}
+	}()
+
+	config, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() failed: %v", err)
+	}
+
+	if !config.EnableMDSOutput {
+		t.Error("Expected EnableMDSOutput to default to true")
+	}
+	if config.MDSServiceAddr != "" {
+		t.Errorf("Expected MDSServiceAddr to be empty by default, got '%s'", config.MDSServiceAddr)
+	}
+	if config.MDSAggregationWindow != 1*time.Hour {
+		t.Errorf("Expected MDSAggregationWindow to default to 1h, got %v", config.MDSAggregationWindow)
+	}
+	if config.MDSFlushInterval != 5*time.Minute {
+		t.Errorf("Expected MDSFlushInterval to default to 5m, got %v", config.MDSFlushInterval)
+	}
+}
+
+func TestLoadConfig_MDSCustomValues(t *testing.T) {
+	envVars := map[string]string{
+		"KAFKA_BOOTSTRAP_SERVERS":   "kafka:9092",
+		"POSITION_KEEPING_ENDPOINT": "position-keeping:50051",
+		"TENANT_ZERO_ID":            "00000000-0000-0000-0000-000000000000",
+		"ENABLE_MDS_OUTPUT":         "false",
+		"MDS_SERVICE_ADDR":          "market-information:50058",
+		"MDS_AGGREGATION_WINDOW":    "30m",
+		"MDS_FLUSH_INTERVAL":        "2m",
+	}
+
+	backup := make(map[string]string)
+	for key, value := range envVars {
+		backup[key] = os.Getenv(key)
+		os.Setenv(key, value)
+	}
+	defer func() {
+		for key, value := range backup {
+			if value == "" {
+				os.Unsetenv(key)
+			} else {
+				os.Setenv(key, value)
+			}
+		}
+	}()
+
+	config, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() failed: %v", err)
+	}
+
+	if config.EnableMDSOutput {
+		t.Error("Expected EnableMDSOutput to be false")
+	}
+	if config.MDSServiceAddr != "market-information:50058" {
+		t.Errorf("Expected MDSServiceAddr to be 'market-information:50058', got '%s'", config.MDSServiceAddr)
+	}
+	if config.MDSAggregationWindow != 30*time.Minute {
+		t.Errorf("Expected MDSAggregationWindow to be 30m, got %v", config.MDSAggregationWindow)
+	}
+	if config.MDSFlushInterval != 2*time.Minute {
+		t.Errorf("Expected MDSFlushInterval to be 2m, got %v", config.MDSFlushInterval)
 	}
 }
