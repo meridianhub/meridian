@@ -26,6 +26,8 @@ def compute_forecast(ctx):
         return []
 
     attrs = ref["attributes"]
+    if "capacity" not in attrs:
+        return []
     capacity = float(attrs["capacity"])
     if capacity <= 0:
         return []
