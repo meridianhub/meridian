@@ -198,11 +198,11 @@ func (w *DunningWorker) processDueRetries(ctx context.Context) {
 			continue
 		}
 
-		w.processRetry(ctx, billingRunID)
-		processed++
-
-		// Remove processed member from the set
-		w.redis.ZRem(ctx, dunningRetryZSet, member)
+		if w.processRetry(ctx, billingRunID) {
+			// Only remove on success; transient failures retain the member for next poll
+			w.redis.ZRem(ctx, dunningRetryZSet, member)
+			processed++
+		}
 	}
 
 	if processed > 0 {
@@ -210,8 +210,11 @@ func (w *DunningWorker) processDueRetries(ctx context.Context) {
 	}
 }
 
-// processRetry handles a single due dunning retry.
-func (w *DunningWorker) processRetry(ctx context.Context, billingRunID uuid.UUID) {
+// processRetry handles a single due dunning retry. Returns true if the retry
+// was handled (success or permanently resolved) and the ZSET member should be
+// removed. Returns false on transient errors so the member is retained for the
+// next poll cycle.
+func (w *DunningWorker) processRetry(ctx context.Context, billingRunID uuid.UUID) bool {
 	w.wg.Add(1)
 	defer w.wg.Done()
 
@@ -221,15 +224,15 @@ func (w *DunningWorker) processRetry(ctx context.Context, billingRunID uuid.UUID
 		w.logger.Error("failed to load billing run for dunning",
 			"billing_run_id", billingRunID,
 			"error", err)
-		return
+		return false
 	}
 
-	// Verify billing run is still in FAILED state
+	// Billing run resolved externally — remove from retry set
 	if run.Status != domain.BillingRunStatusFailed {
 		w.logger.Info("billing run no longer failed, skipping dunning",
 			"billing_run_id", billingRunID,
 			"status", run.Status)
-		return
+		return true
 	}
 
 	// Call the dunning callback (triggers dunning_escalation saga)
@@ -242,12 +245,13 @@ func (w *DunningWorker) processRetry(ctx context.Context, billingRunID uuid.UUID
 			"billing_run_id", billingRunID,
 			"error", err)
 		w.metrics.RecordError("dunning_callback")
-		return
+		return false
 	}
 
 	w.logger.Info("dunning escalation triggered",
 		"billing_run_id", billingRunID,
 		"dunning_level", run.DunningLevel)
+	return true
 }
 
 // CancelDunningRetry removes a billing run from the retry set.

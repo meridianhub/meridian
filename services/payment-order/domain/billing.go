@@ -128,7 +128,7 @@ func (b *BillingRun) EscalateDunning() error {
 	if b.Status != BillingRunStatusFailed {
 		return ErrInvalidBillingRunTransition
 	}
-	if b.DunningLevel > MaxDunningLevel {
+	if b.DunningLevel >= MaxDunningLevel {
 		return ErrBillingRunTerminal
 	}
 	now := time.Now()

@@ -12,8 +12,7 @@
 # Dunning levels:
 #   0 -> 1: Send payment failure notification, schedule retry in 24h
 #   1 -> 2: Send second notice, schedule retry in 72h
-#   2 -> 3: Send final warning, schedule retry in 168h (7 days)
-#   3:      Freeze the account, send freeze notification
+#   2 -> 3: Send final warning, freeze the account, send freeze notification
 #
 # Steps:
 #   1. check_dunning_level - Evaluate current level and determine action
@@ -69,15 +68,14 @@ def dunning_escalation():
         )
         result["action_taken"] = "second_notice_sent"
 
-    elif new_level == 3:
+    elif new_level >= 3:
+        # At max dunning level: send final warning, freeze the account, notify
         step(name="send_final_warning")
         notification.send(
             type="EMAIL",
             recipient=party_id,
         )
-        result["action_taken"] = "final_warning_sent"
 
-    elif new_level >= 4:
         # Step 2: Freeze the account at max dunning level
         step(name="freeze_account")
         freeze_result = current_account.control(

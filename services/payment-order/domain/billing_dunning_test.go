@@ -21,13 +21,13 @@ func TestBillingRun_EscalateDunning(t *testing.T) {
 		assert.NotNil(t, run.LastRetryAt)
 	})
 
-	t.Run("escalates through all levels", func(t *testing.T) {
+	t.Run("escalates through all levels below max", func(t *testing.T) {
 		run := &BillingRun{
 			Status:       BillingRunStatusFailed,
 			DunningLevel: 0,
 		}
 
-		for expectedLevel := 1; expectedLevel <= MaxDunningLevel; expectedLevel++ {
+		for expectedLevel := 1; expectedLevel < MaxDunningLevel; expectedLevel++ {
 			err := run.EscalateDunning()
 			require.NoError(t, err)
 			assert.Equal(t, expectedLevel, run.DunningLevel)
@@ -42,6 +42,16 @@ func TestBillingRun_EscalateDunning(t *testing.T) {
 
 		err := run.EscalateDunning()
 		assert.ErrorIs(t, err, ErrInvalidBillingRunTransition)
+	})
+
+	t.Run("rejects escalation at exactly max level", func(t *testing.T) {
+		run := &BillingRun{
+			Status:       BillingRunStatusFailed,
+			DunningLevel: MaxDunningLevel,
+		}
+
+		err := run.EscalateDunning()
+		assert.ErrorIs(t, err, ErrBillingRunTerminal)
 	})
 
 	t.Run("rejects escalation beyond max level", func(t *testing.T) {
