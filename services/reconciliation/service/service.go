@@ -31,8 +31,15 @@ type VarianceDetectorFunc func(ctx context.Context, runID uuid.UUID) ([]*domain.
 // VarianceValuatorFunc values detected variances using the valuation engine.
 type VarianceValuatorFunc func(ctx context.Context, runID uuid.UUID) error
 
-// pipelineTimeout is the maximum time allowed for the background reconciliation pipeline.
-const pipelineTimeout = 15 * time.Minute
+const (
+	// pipelineTimeout is the maximum time allowed for the background reconciliation pipeline.
+	pipelineTimeout = 15 * time.Minute
+
+	// persistTimeout is the maximum time allowed for persisting state transitions
+	// after the pipeline completes or fails. Uses a fresh context so that state
+	// transitions succeed even if the pipeline context has expired.
+	persistTimeout = 30 * time.Second
+)
 
 // AccountReconciliationService implements the gRPC service for reconciliation operations.
 type AccountReconciliationService struct {
@@ -253,8 +260,11 @@ func (s *AccountReconciliationService) executePipeline(ctx context.Context, runI
 		return
 	}
 
-	// Pipeline succeeded: transition to COMPLETED
-	run, err := s.runRepo.FindByID(ctx, runID)
+	// Pipeline succeeded: transition to COMPLETED.
+	// Use a fresh context so persistence succeeds even if the pipeline context has expired.
+	persistCtx, persistCancel := context.WithTimeout(context.Background(), persistTimeout) //nolint:contextcheck
+	defer persistCancel()
+	run, err := s.runRepo.FindByID(persistCtx, runID) //nolint:contextcheck
 	if err != nil {
 		slog.Error("failed to retrieve run for completion", "run_id", runID, "error", err)
 		return
@@ -263,7 +273,7 @@ func (s *AccountReconciliationService) executePipeline(ctx context.Context, runI
 		slog.Error("failed to transition run to COMPLETED", "run_id", runID, "error", err)
 		return
 	}
-	if err := s.runRepo.Update(ctx, run); err != nil {
+	if err := s.runRepo.Update(persistCtx, run); err != nil { //nolint:contextcheck
 		slog.Error("failed to persist COMPLETED state", "run_id", runID, "error", err)
 		return
 	}
@@ -272,8 +282,11 @@ func (s *AccountReconciliationService) executePipeline(ctx context.Context, runI
 }
 
 // failRun transitions a settlement run to FAILED with the given error message.
-func (s *AccountReconciliationService) failRun(ctx context.Context, runID uuid.UUID, errMsg string) {
-	run, err := s.runRepo.FindByID(ctx, runID)
+// It uses a fresh context so persistence succeeds even if the pipeline context has expired.
+func (s *AccountReconciliationService) failRun(_ context.Context, runID uuid.UUID, errMsg string) {
+	persistCtx, persistCancel := context.WithTimeout(context.Background(), persistTimeout) //nolint:contextcheck
+	defer persistCancel()
+	run, err := s.runRepo.FindByID(persistCtx, runID) //nolint:contextcheck
 	if err != nil {
 		slog.Error("failed to retrieve run for failure transition", "run_id", runID, "error", err)
 		return
@@ -282,7 +295,7 @@ func (s *AccountReconciliationService) failRun(ctx context.Context, runID uuid.U
 		slog.Error("failed to transition run to FAILED", "run_id", runID, "error", err)
 		return
 	}
-	if err := s.runRepo.Update(ctx, run); err != nil {
+	if err := s.runRepo.Update(persistCtx, run); err != nil { //nolint:contextcheck
 		slog.Error("failed to persist FAILED state", "run_id", runID, "error", err)
 	}
 }
