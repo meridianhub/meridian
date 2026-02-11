@@ -107,6 +107,52 @@ func toProtoSettlementType(s domain.SettlementType) reconciliationv1.SettlementT
 	return reconciliationv1.SettlementType_SETTLEMENT_TYPE_UNSPECIFIED
 }
 
+// toDomainVarianceStatus converts a proto VarianceStatus to domain.
+// UNSPECIFIED returns nil (no filter).
+func toDomainVarianceStatus(s reconciliationv1.VarianceStatus) *domain.VarianceStatus {
+	var status domain.VarianceStatus
+	switch s {
+	case reconciliationv1.VarianceStatus_VARIANCE_STATUS_OPEN:
+		status = domain.VarianceStatusOpen
+	case reconciliationv1.VarianceStatus_VARIANCE_STATUS_INVESTIGATING:
+		status = domain.VarianceStatusInvestigating
+	case reconciliationv1.VarianceStatus_VARIANCE_STATUS_DISPUTED:
+		status = domain.VarianceStatusDisputed
+	case reconciliationv1.VarianceStatus_VARIANCE_STATUS_RESOLVED:
+		status = domain.VarianceStatusResolved
+	case reconciliationv1.VarianceStatus_VARIANCE_STATUS_ACCEPTED:
+		status = domain.VarianceStatusAccepted
+	case reconciliationv1.VarianceStatus_VARIANCE_STATUS_UNSPECIFIED:
+		return nil
+	}
+	return &status
+}
+
+// toDomainVarianceReason converts a proto VarianceReason to domain.
+// UNSPECIFIED returns nil (no filter).
+func toDomainVarianceReason(s reconciliationv1.VarianceReason) *domain.VarianceReason {
+	var reason domain.VarianceReason
+	switch s {
+	case reconciliationv1.VarianceReason_VARIANCE_REASON_AMOUNT_MISMATCH:
+		reason = domain.VarianceReasonAmountMismatch
+	case reconciliationv1.VarianceReason_VARIANCE_REASON_MISSING_ENTRY:
+		reason = domain.VarianceReasonMissingEntry
+	case reconciliationv1.VarianceReason_VARIANCE_REASON_DUPLICATE_ENTRY:
+		reason = domain.VarianceReasonDuplicateEntry
+	case reconciliationv1.VarianceReason_VARIANCE_REASON_TIMING_DIFFERENCE:
+		reason = domain.VarianceReasonTimingDifference
+	case reconciliationv1.VarianceReason_VARIANCE_REASON_CURRENCY_MISMATCH:
+		reason = domain.VarianceReasonCurrencyMismatch
+	case reconciliationv1.VarianceReason_VARIANCE_REASON_DIRECTION_ERROR:
+		reason = domain.VarianceReasonDirectionError
+	case reconciliationv1.VarianceReason_VARIANCE_REASON_OTHER:
+		reason = domain.VarianceReasonOther
+	case reconciliationv1.VarianceReason_VARIANCE_REASON_UNSPECIFIED:
+		return nil
+	}
+	return &reason
+}
+
 // toProtoVarianceReason converts a domain VarianceReason to proto.
 func toProtoVarianceReason(r domain.VarianceReason) reconciliationv1.VarianceReason {
 	switch r {

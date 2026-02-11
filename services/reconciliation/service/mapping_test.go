@@ -253,6 +253,121 @@ func TestToProtoSettlementType(t *testing.T) {
 	}
 }
 
+func TestToDomainVarianceStatus(t *testing.T) {
+	tests := []struct {
+		name  string
+		proto reconciliationv1.VarianceStatus
+		want  *domain.VarianceStatus
+	}{
+		{
+			name:  "open",
+			proto: reconciliationv1.VarianceStatus_VARIANCE_STATUS_OPEN,
+			want:  ptr(domain.VarianceStatusOpen),
+		},
+		{
+			name:  "investigating",
+			proto: reconciliationv1.VarianceStatus_VARIANCE_STATUS_INVESTIGATING,
+			want:  ptr(domain.VarianceStatusInvestigating),
+		},
+		{
+			name:  "disputed",
+			proto: reconciliationv1.VarianceStatus_VARIANCE_STATUS_DISPUTED,
+			want:  ptr(domain.VarianceStatusDisputed),
+		},
+		{
+			name:  "resolved",
+			proto: reconciliationv1.VarianceStatus_VARIANCE_STATUS_RESOLVED,
+			want:  ptr(domain.VarianceStatusResolved),
+		},
+		{
+			name:  "accepted",
+			proto: reconciliationv1.VarianceStatus_VARIANCE_STATUS_ACCEPTED,
+			want:  ptr(domain.VarianceStatusAccepted),
+		},
+		{
+			name:  "unspecified returns nil",
+			proto: reconciliationv1.VarianceStatus_VARIANCE_STATUS_UNSPECIFIED,
+			want:  nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := toDomainVarianceStatus(tt.proto)
+			if tt.want == nil {
+				assert.Nil(t, got)
+			} else {
+				require.NotNil(t, got)
+				assert.Equal(t, *tt.want, *got)
+			}
+		})
+	}
+}
+
+func TestToDomainVarianceReason(t *testing.T) {
+	tests := []struct {
+		name  string
+		proto reconciliationv1.VarianceReason
+		want  *domain.VarianceReason
+	}{
+		{
+			name:  "amount mismatch",
+			proto: reconciliationv1.VarianceReason_VARIANCE_REASON_AMOUNT_MISMATCH,
+			want:  ptrR(domain.VarianceReasonAmountMismatch),
+		},
+		{
+			name:  "missing entry",
+			proto: reconciliationv1.VarianceReason_VARIANCE_REASON_MISSING_ENTRY,
+			want:  ptrR(domain.VarianceReasonMissingEntry),
+		},
+		{
+			name:  "duplicate entry",
+			proto: reconciliationv1.VarianceReason_VARIANCE_REASON_DUPLICATE_ENTRY,
+			want:  ptrR(domain.VarianceReasonDuplicateEntry),
+		},
+		{
+			name:  "timing difference",
+			proto: reconciliationv1.VarianceReason_VARIANCE_REASON_TIMING_DIFFERENCE,
+			want:  ptrR(domain.VarianceReasonTimingDifference),
+		},
+		{
+			name:  "currency mismatch",
+			proto: reconciliationv1.VarianceReason_VARIANCE_REASON_CURRENCY_MISMATCH,
+			want:  ptrR(domain.VarianceReasonCurrencyMismatch),
+		},
+		{
+			name:  "direction error",
+			proto: reconciliationv1.VarianceReason_VARIANCE_REASON_DIRECTION_ERROR,
+			want:  ptrR(domain.VarianceReasonDirectionError),
+		},
+		{
+			name:  "other",
+			proto: reconciliationv1.VarianceReason_VARIANCE_REASON_OTHER,
+			want:  ptrR(domain.VarianceReasonOther),
+		},
+		{
+			name:  "unspecified returns nil",
+			proto: reconciliationv1.VarianceReason_VARIANCE_REASON_UNSPECIFIED,
+			want:  nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := toDomainVarianceReason(tt.proto)
+			if tt.want == nil {
+				assert.Nil(t, got)
+			} else {
+				require.NotNil(t, got)
+				assert.Equal(t, *tt.want, *got)
+			}
+		})
+	}
+}
+
+func ptr(s domain.VarianceStatus) *domain.VarianceStatus  { return &s }
+func ptrR(r domain.VarianceReason) *domain.VarianceReason { return &r }
+
 func TestToProtoVarianceReason(t *testing.T) {
 	tests := []struct {
 		name   string
