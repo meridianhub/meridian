@@ -14,7 +14,12 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	forecastingv1 "github.com/meridianhub/meridian/api/proto/meridian/forecasting/v1"
+	"github.com/meridianhub/meridian/services/forecasting/adapters/mds"
 	"github.com/meridianhub/meridian/services/forecasting/adapters/persistence"
+	"github.com/meridianhub/meridian/services/forecasting/handler"
+	"github.com/meridianhub/meridian/services/forecasting/starlark"
+	misclient "github.com/meridianhub/meridian/services/market-information/client"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
@@ -82,8 +87,41 @@ func run(logger *slog.Logger) error {
 	logger.Info("database connection established", "url", dbURL)
 
 	// Create repository
-	_ = persistence.NewStrategyRepository(dbPool)
+	repo := persistence.NewStrategyRepository(dbPool)
 	logger.Info("strategy repository initialized")
+
+	// Initialize MDS client for observation fetching and publishing
+	mdsTarget := env.GetEnvOrDefault("MDS_TARGET", "market-information:50051")
+	mdsClient, mdsCleanup, err := misclient.New(ctx, misclient.Config{
+		Target: mdsTarget,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create MDS client: %w", err)
+	}
+	defer func() { _ = mdsCleanup() }()
+	logger.Info("MDS client initialized", "target", mdsTarget)
+
+	// Create adapters
+	misAdapter := mds.NewMISAdapter(mdsClient)
+	mdsPublisher := mds.NewPublisherAdapter(mdsClient)
+	refDataClient := &mds.NoOpRefDataClient{}
+
+	// Create Starlark forecast runner
+	runner, err := starlark.NewForecastRunner(starlark.ForecastRunnerConfig{
+		MISClient: misAdapter,
+		RefData:   refDataClient,
+		Logger:    logger,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create forecast runner: %w", err)
+	}
+
+	// Create forecasting service handler
+	forecastingSvc, err := handler.NewService(repo, runner, mdsPublisher, logger)
+	if err != nil {
+		return fmt.Errorf("failed to create forecasting service: %w", err)
+	}
+	logger.Info("forecasting service handler initialized")
 
 	// Initialize auth interceptor
 	authConfig := bootstrap.DefaultAuthConfig(logger)
@@ -96,6 +134,9 @@ func run(logger *slog.Logger) error {
 	grpcServer := bootstrap.NewGrpcServerBuilder(tracer, logger).
 		WithAuthInterceptor(authInterceptor).
 		Build()
+
+	// Register forecasting gRPC service
+	forecastingv1.RegisterForecastingServiceServer(grpcServer, forecastingSvc)
 
 	// Register health check service
 	healthServer := health.NewServer()
