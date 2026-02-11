@@ -107,6 +107,29 @@ func TestGetDefaultPaymentMethodHandler_MissingPartyID(t *testing.T) {
 	assert.ErrorIs(t, err, saga.ErrMissingParam)
 }
 
+func TestGetDefaultPaymentMethodHandler_NilPaymentMethod(t *testing.T) {
+	mock := &mockPartyServiceClient{
+		getDefaultPMResp: &partyv1.GetDefaultPaymentMethodResponse{
+			PaymentMethod: nil,
+		},
+	}
+
+	client := &Client{party: mock}
+	registry := saga.NewHandlerRegistry()
+	err := RegisterStarlarkHandlers(registry, client)
+	require.NoError(t, err)
+
+	handler, err := registry.Get("party.get_default_payment_method")
+	require.NoError(t, err)
+
+	ctx := newTestStarlarkContext()
+	_, err = handler(ctx, map[string]any{
+		"party_id": uuid.New().String(),
+	})
+
+	assert.ErrorIs(t, err, errMissingPaymentMethod)
+}
+
 func TestGetDefaultPaymentMethodHandler_NotFound(t *testing.T) {
 	mock := &mockPartyServiceClient{
 		getDefaultPMErr: status.Errorf(codes.NotFound, "no default payment method"),

@@ -5,12 +5,16 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	"github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 )
+
+// errMissingPaymentMethod is returned when the gRPC response contains no payment method.
+var errMissingPaymentMethod = errors.New("missing payment method in response")
 
 // RegisterStarlarkHandlers registers all Starlark service bindings for the Party service.
 // These handlers adapt the Starlark interface (map[string]any) to gRPC client calls.
@@ -64,6 +68,9 @@ func getDefaultPaymentMethodHandler(client *Client) saga.Handler {
 		}
 
 		pm := resp.GetPaymentMethod()
+		if pm == nil {
+			return nil, fmt.Errorf("party.get_default_payment_method: %w: party_id %s", errMissingPaymentMethod, partyID)
+		}
 		return map[string]any{
 			"provider":             pm.GetProvider().String(),
 			"provider_customer_id": pm.GetProviderCustomerId(),
