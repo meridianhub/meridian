@@ -803,7 +803,373 @@ Use `shared/platform/organization` context patterns for tenant isolation.
 
 ### Audit Logging
 
-Follow [ADR-009](../adr/0009-application-level-audit-logging.md) for application-level audit logging using `shared/platform/audit`.
+Follow [ADR-009](../adr/0009-application-level-audit-logging.md) for application-level
+audit logging using `shared/platform/audit`.
+
+---
+
+## Task 14: Starlark & CEL Integration (Conditional)
+
+**Applies when**: The service has tenant-definable business logic (pricing rules,
+validation policies, workflow orchestration, conditional routing).
+
+**Decision framework**: If a tenant might reasonably want to customise behaviour
+without redeploying, the service needs Starlark, CEL, or both.
+
+### When to Use What
+
+| Mechanism | Use Case | Execution | Examples |
+|-----------|----------|-----------|---------|
+| **CEL** | Validation rules, conditional expressions, pricing formulas | < 10ms, no loops, pure functions | `amount > 0 && amount <= account.credit_limit` |
+| **Starlark** | Multi-step workflows, orchestration, compensation logic | < 5s, finite loops only, deterministic | Saga scripts, settlement flows |
+| **Both** | Starlark for workflow, CEL for hot-path decisions within it | Starlark calls `cel_eval()` inline | Saga with conditional pricing |
+
+### Existing Patterns as Reference
+
+Meridian has two established Starlark/CEL integration patterns. Each service context
+gets a **different set of built-ins** based on its security requirements:
+
+#### Saga Pattern (Payment Order, Current Account)
+
+**Built-ins available:**
+
+- `Decimal()`, `posting()`, `saga()`, `step()` - Core DSL
+- `resolve_account()`, `resolve_instrument()` - Reference data lookups
+- `invoke_saga()` - Child saga invocation with scope inheritance
+- `cel_eval()` - Inline CEL evaluation
+- `log()`, `fail()` - Observability and control flow
+- Service modules (auto-generated from `handlers.yaml`)
+
+**Blocked:** `load()`, `time.now()`, `random()`, `exec()`, `open()`, `http`
+
+**Reference**: `shared/pkg/saga/builtins.go`
+
+#### Valuation Pattern (Valuation Engine)
+
+**Built-ins available:**
+
+- `Decimal()`, `cel_eval()` - Financial calculations
+- Market data lookups - Read-only price/rate access
+- Mathematical functions - No side effects
+
+**Not available:** `posting()`, `resolve_account()`, `invoke_saga()` - Valuation
+scripts must not mutate ledger state or invoke workflows.
+
+**Reference**: `services/valuation/` and valuation PRD
+
+#### Choosing Built-ins for a New Service
+
+When adding Starlark support to a new service, explicitly decide which built-ins
+to expose. The principle is **least privilege by default**:
+
+```go
+// In your service's handler registration
+func RegisterHandlers(registry *saga.HandlerRegistry) {
+    // Only expose what this service context needs
+    registry.RegisterBuiltin("Decimal", saga.DecimalBuiltin)
+    registry.RegisterBuiltin("cel_eval", saga.CELEvalBuiltin)
+
+    // Service-specific handlers from handlers.yaml
+    registry.RegisterServiceModule("my_service", myHandlers)
+
+    // DO NOT register invoke_saga if this context shouldn't
+    // orchestrate workflows
+    // DO NOT register posting() if this context shouldn't
+    // write to the ledger
+}
+```
+
+**Security checklist for new Starlark contexts:**
+
+- [ ] Can scripts in this context mutate ledger state? If no, omit `posting()`
+- [ ] Can scripts orchestrate child workflows? If no, omit `invoke_saga()`
+- [ ] Can scripts resolve accounts/instruments? If no, omit `resolve_*`
+- [ ] Does the Conservation of Dimension rule apply? (Physics instruments
+  cannot produce themselves - `shared/pkg/saga/handlers.go`)
+- [ ] Are scripts tenant-scoped via `PartyScope`?
+
+### Adding Service Bindings (handlers.yaml)
+
+If your service exposes handlers callable from Starlark scripts:
+
+1. Add handler definitions to `shared/pkg/saga/schema/handlers.yaml`
+2. Implement handler functions following the pattern in
+   `docs/guides/adding-starlark-service-bindings.md`
+3. Register handlers with the saga engine
+4. Auto-generated service modules provide type-safe Starlark clients
+
+**Handler definition example:**
+
+```yaml
+handlers:
+  {service}.{operation}:
+    description: "What this handler does"
+    category: ingestion | valuation | settlement
+    params:
+      account_id:
+        type: string
+        required: true
+      amount:
+        type: Decimal
+        required: true
+    compensate: {service}.{reverse_operation}
+```
+
+**Handler categories determine security boundaries:**
+
+- **ingestion** - Imports external data (read-write to own tables only)
+- **valuation** - Computes derived values (read-only, no side effects)
+- **settlement** - Executes financial operations (full ledger access)
+
+---
+
+## Task 15: Control Plane Manifest Registration
+
+**Applies when**: The service is tenant-configurable and needs to be provisioned
+as part of the manifest apply workflow.
+
+The control plane uses a Kubernetes-style **declare-diff-plan-apply** pipeline.
+When a tenant applies a manifest, the control plane:
+
+1. **Validates** the manifest (proto constraints, CEL compilation, Starlark syntax)
+2. **Diffs** against last-applied manifest
+3. **Plans** an ordered sequence of gRPC calls
+4. **Applies** each call in phase order with idempotency keys
+
+### What to Add
+
+#### Step 15.1: Manifest Proto
+
+Add your service's configuration to `api/proto/meridian/control_plane/v1/manifest.proto`:
+
+```protobuf
+// Add message for your service's configuration
+message {Service}Config {
+  // Define tenant-configurable fields
+  repeated {Service}Rule rules = 1;
+  // CEL expressions, Starlark scripts, thresholds, etc.
+}
+
+// Add field to Manifest message
+message Manifest {
+  // ... existing fields ...
+  {Service}Config {service}_config = N;  // Next available field number
+}
+```
+
+#### Step 15.2: Validator
+
+Extend `services/control-plane/internal/validator/manifest_validator.go`:
+
+```go
+func (v *ManifestValidator) validate{Service}(
+    manifest *controlplanev1.Manifest,
+    result *ValidationResult,
+) {
+    cfg := manifest.Get{Service}Config()
+    if cfg == nil {
+        return  // Optional section, skip if absent
+    }
+    // Validate CEL expressions compile
+    // Validate Starlark scripts parse
+    // Check references to instruments/account types exist in manifest
+}
+```
+
+#### Step 15.3: Differ
+
+Add resource type and diff method to
+`services/control-plane/internal/differ/manifest_differ.go`:
+
+```go
+const Resource{Service}Config differ.ResourceType = "{service}_config"
+
+func (d *ManifestDiffer) diff{Service}(
+    lastApplied, newManifest *controlplanev1.Manifest,
+    plan *DiffPlan,
+) {
+    // Compare old vs new config, emit CREATE/UPDATE/DELETE actions
+}
+```
+
+#### Step 15.4: Planner
+
+Map to execution phases in
+`services/control-plane/internal/planner/types.go`:
+
+```go
+// Add phase constant - order determines execution sequence
+// Phases 1-5 are: Instruments, AccountTypes, ValuationRules, Sagas, SeedData
+const Phase{Service} Phase = N  // Choose based on dependencies
+
+// Add gRPC method mappings
+const Method{Service}Configure GRPCMethod = (
+    "meridian.{service}.v1.{Service}Service/Configure"
+)
+```
+
+**Phase ordering rule**: If your service depends on instruments or account types
+existing first, use a phase number > 3.
+
+### Checklist
+
+- [ ] Proto: Add config message to `manifest.proto`
+- [ ] Validator: Add `validate{Service}()` method
+- [ ] Differ: Add resource type constant and `diff{Service}()` method
+- [ ] Planner: Add phase constant, gRPC method mapping, wire into
+  `phaseForResource()` and `grpcMethodMap`
+- [ ] Tests: Unit tests for validator, differ, planner with new resource type
+- [ ] Service: Implement the `Configure` RPC that the applier will call
+
+**Reference files:**
+
+- `services/control-plane/internal/validator/manifest_validator.go`
+- `services/control-plane/internal/differ/manifest_differ.go`
+- `services/control-plane/internal/planner/types.go`
+- `services/control-plane/internal/planner/manifest_planner.go`
+
+---
+
+## Task 16: End-to-End Test Blueprint
+
+**Applies to**: All new services. E2E tests verify cross-service state consistency
+and are required before a service is considered production-ready.
+
+### Test Architecture
+
+Meridian e2e tests use **database-per-service testcontainers** to verify state
+changes across bounded contexts. Each service gets its own CockroachDB instance,
+matching the production database-per-service architecture.
+
+### Required: Cross-Service E2E Test
+
+**Location**: `tests/{service}-e2e/`
+
+Create an e2e test that exercises the service's interactions with its
+dependencies using real gRPC calls where possible.
+
+**Infrastructure setup pattern:**
+
+```go
+type e2eTestInfra struct {
+    {service}DB          *gorm.DB
+    // Add a database for each service this service interacts with
+    positionKeepingDB    *gorm.DB
+    financialAccountingDB *gorm.DB
+    // gRPC servers for real inter-service calls
+    {service}Server      *grpc.Server
+}
+
+func setupE2EInfra(t *testing.T) *e2eTestInfra {
+    infra := &e2eTestInfra{}
+
+    // Each service gets its own CockroachDB testcontainer
+    infra.{service}DB, _ = testdb.SetupCockroachDB(t, nil)
+    infra.positionKeepingDB, _ = testdb.SetupCockroachDB(t, nil)
+
+    return infra
+}
+```
+
+**Reference**: `tests/clearinge2e/` (deposit/withdrawal flows across 4 services)
+
+### Preferred: Real gRPC Between Services
+
+Where feasible, prefer standing up real gRPC servers in tests rather than only
+verifying database state. This catches serialisation issues, interceptor bugs,
+and context propagation failures that database-only tests miss.
+
+```go
+func setupGRPCServer(t *testing.T, db *gorm.DB) (
+    *grpc.Server, string, // addr
+) {
+    repo := persistence.NewRepository(db)
+    svc, _ := service.NewService(repo, slog.Default())
+
+    lis, _ := net.Listen("tcp", "localhost:0")
+    srv := grpc.NewServer(
+        // Use the same interceptors as production
+        grpc.ChainUnaryInterceptor(
+            tenant.UnaryServerInterceptor(),
+            observability.UnaryServerInterceptor(tracer),
+        ),
+    )
+    pb.Register{Service}Server(srv, svc)
+    go srv.Serve(lis)
+
+    t.Cleanup(func() { srv.GracefulStop() })
+    return srv, lis.Addr().String()
+}
+```
+
+**Use real gRPC calls for:**
+
+- Inter-service calls (service A calling service B)
+- Tenant context propagation (verify interceptors work end-to-end)
+- Error code mapping (gRPC status codes)
+- Idempotency key propagation
+
+**Use direct database verification for:**
+
+- Final state assertions (query each service's DB independently)
+- Balanced ledger checks (sum across databases = 0)
+- Audit trail verification (events in correct service DB)
+
+### Multi-Tenant Isolation Test
+
+Every e2e suite must verify tenant isolation:
+
+```go
+func TestTenantIsolation(t *testing.T) {
+    infra := setupE2EInfra(t)
+
+    // Create schemas for two tenants in each service DB
+    ctxA, tenantA := setupTestTenant(t, infra, "tenant_a")
+    ctxB, tenantB := setupTestTenant(t, infra, "tenant_b")
+
+    // Create data as tenant A
+    createEntity(t, ctxA, infra.{service}DB, tenantA.SchemaName(), ...)
+
+    // Verify tenant B cannot see tenant A's data
+    entities := listEntities(t, ctxB, infra.{service}DB, tenantB.SchemaName())
+    assert.Empty(t, entities, "tenant B must not see tenant A data")
+}
+```
+
+### Test Coverage Requirements
+
+| Category | Required | Pattern |
+|----------|----------|---------|
+| Happy path flow | Yes | Full request-to-state-change cycle via gRPC |
+| Error conditions | Yes | Validation failures, not found, version conflicts |
+| Multi-tenant isolation | Yes | Two tenants, verify data isolation |
+| Balanced ledger (if applicable) | Yes | Sum of debits = sum of credits across services |
+| Compensation (if saga-backed) | Yes | Force failure mid-flow, verify clean reversal |
+| Idempotency | Yes | Same request twice produces same result once |
+| Concurrent access | Recommended | Optimistic locking, parallel writes |
+
+### Build Tags and Running
+
+```go
+//go:build integration
+
+package {service}e2e
+```
+
+```bash
+# Run service e2e tests
+go test -v -tags=integration ./tests/{service}-e2e/... -timeout 10m
+
+# Run all e2e tests
+go test -v -tags=integration ./tests/... -timeout 15m
+```
+
+**Reference test suites:**
+
+- `tests/clearinge2e/` - Cross-service clearing flows (4 databases, deposit/withdrawal)
+- `tests/audit-e2e/` - Multi-service audit writes with tenant isolation
+- `tests/reconciliation-e2e/` - Settlement lifecycle with variance detection
+- `services/current-account/e2e/` - Saga compensation with multi-schema DB
 
 ---
 
@@ -811,8 +1177,12 @@ Follow [ADR-009](../adr/0009-application-level-audit-logging.md) for application
 
 This checklist can be used to generate Task Master tasks:
 
-1. Each numbered task (1-13) becomes a Task Master task
-2. Dependencies follow the logical order:
+1. Tasks 1-13 are the core service scaffold (always required)
+2. Tasks 14-16 are conditional based on service characteristics:
+   - Task 14 (Starlark/CEL): When service has tenant-definable logic
+   - Task 15 (Control Plane): When service is manifest-provisioned
+   - Task 16 (E2E Tests): Always required for production readiness
+3. Dependencies follow the logical order:
    - Task 2 depends on Task 1 (domain needs proto types)
    - Task 3 depends on Task 2 (persistence needs domain)
    - Task 5 depends on Task 4 (database setup needs atlas config)
@@ -820,8 +1190,11 @@ This checklist can be used to generate Task Master tasks:
    - Task 7 depends on Tasks 2, 3 (service needs domain and persistence)
    - Tasks 9-12 depend on Task 7 (deployment needs service)
    - Task 13 depends on all previous tasks
+   - Task 14 depends on Tasks 1, 7 (needs proto and service handler)
+   - Task 15 depends on Tasks 1, 7, 11 (needs proto, service, and k8s)
+   - Task 16 depends on all previous tasks
 
-3. To generate tasks for a new service:
+4. To generate tasks for a new service:
 
 ```bash
 # Copy this file, replace {service} with actual service name
@@ -839,6 +1212,7 @@ task-master parse-prd docs/guides/new-{service}-service-checklist.md
 - [ADR-005: Adapter Pattern Layer Translation](../adr/0005-adapter-pattern-layer-translation.md)
 - [ADR-006: Tilt Local Development](../adr/0006-tilt-local-development.md)
 - [ADR-015: Standard Service Directory Structure](../adr/0015-standard-service-directory-structure.md)
+- [Adding Starlark Service Bindings](adding-starlark-service-bindings.md)
 - [Circuit Breaker Usage Guide](circuit-breaker-usage.md)
 - [Testcontainers Usage Guide](testcontainers-usage.md)
 - [Database-Per-Service Migration Runbook](../runbooks/database-per-service-migration.md)
