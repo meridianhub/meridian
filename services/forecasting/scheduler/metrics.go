@@ -7,6 +7,9 @@ import (
 )
 
 // Metrics provides Prometheus metrics for the forecasting scheduler.
+// WARNING: executionsTotal and executionDuration use tenant_id and strategy_id
+// labels which can produce high cardinality. This is an accepted operational
+// constraint for per-strategy observability. Monitor cardinality in production.
 type Metrics struct {
 	executionsTotal       *prometheus.CounterVec
 	executionDuration     *prometheus.HistogramVec

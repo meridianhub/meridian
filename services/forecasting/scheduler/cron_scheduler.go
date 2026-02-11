@@ -133,6 +133,7 @@ func (s *CronScheduler) Start(ctx context.Context) error { //nolint:contextcheck
 		return ErrSchedulerRunning
 	}
 	s.running = true
+	s.stopped = false
 	s.mu.Unlock()
 
 	s.logger.Info("cron scheduler starting", "poll_interval", s.config.PollInterval)

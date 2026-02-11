@@ -53,6 +53,9 @@ func NewLeaseManager(
 	if config.RenewInterval == 0 {
 		config.RenewInterval = 30 * time.Second
 	}
+	if config.RenewInterval >= config.LockTTL {
+		config.RenewInterval = config.LockTTL / 2
+	}
 
 	return &LeaseManager{
 		client:     redislock.New(redisClient),
