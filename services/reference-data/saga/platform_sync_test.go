@@ -1255,6 +1255,7 @@ func TestPlatformSync_EmbeddedMetadataHeaders(t *testing.T) {
 		"deposit/v1.0.0.star",
 		"withdrawal/v1.0.0.star",
 		"payment_execution/v1.0.0.star",
+		"stripe_payment/v1.0.0.star",
 	}
 
 	for _, key := range versionedKeys {

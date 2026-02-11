@@ -569,6 +569,28 @@ handlers:
         type: string
         description: "Status of the lien execution (EXECUTED)"
 
+  # Party Service
+  party.get_default_payment_method:
+    description: "Retrieve the default payment method for a party"
+    params:
+      party_id:
+        type: string
+        required: true
+        description: "Party identifier (UUID)"
+    returns:
+      provider:
+        type: string
+        description: "Payment provider (e.g., stripe)"
+      provider_customer_id:
+        type: string
+        description: "Provider-assigned customer identifier"
+      provider_method_id:
+        type: string
+        description: "Provider-assigned payment method identifier"
+      method_type:
+        type: string
+        description: "Payment method type (e.g., card, bank_account, sepa)"
+
   # Account Reconciliation Service
   reconciliation.initiate_run:
     description: "Initiate a new settlement reconciliation run"
