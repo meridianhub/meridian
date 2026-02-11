@@ -124,6 +124,8 @@ func toDomainVarianceStatus(s reconciliationv1.VarianceStatus) *domain.VarianceS
 		status = domain.VarianceStatusAccepted
 	case reconciliationv1.VarianceStatus_VARIANCE_STATUS_UNSPECIFIED:
 		return nil
+	default:
+		return nil
 	}
 	return &status
 }
@@ -148,6 +150,8 @@ func toDomainVarianceReason(s reconciliationv1.VarianceReason) *domain.VarianceR
 	case reconciliationv1.VarianceReason_VARIANCE_REASON_OTHER:
 		reason = domain.VarianceReasonOther
 	case reconciliationv1.VarianceReason_VARIANCE_REASON_UNSPECIFIED:
+		return nil
+	default:
 		return nil
 	}
 	return &reason
