@@ -953,7 +953,8 @@ message {Service}Config {
 // Add field to Manifest message
 message Manifest {
   // ... existing fields ...
-  {Service}Config {service}_config = N;  // Next available field number
+  // Check current highest field number in manifest.proto and use next
+  {Service}Config {service}_config = N;
 }
 ```
 
@@ -999,8 +1000,13 @@ Map to execution phases in
 
 ```go
 // Add phase constant - order determines execution sequence
-// Phases 1-5 are: Instruments, AccountTypes, ValuationRules, Sagas, SeedData
-const Phase{Service} Phase = N  // Choose based on dependencies
+// Existing phases (from planner/types.go):
+//   PhaseInstruments    Phase = 1
+//   PhaseAccountTypes   Phase = 2
+//   PhaseValuationRules Phase = 3
+//   PhaseSagas          Phase = 4
+//   PhaseSeedData       Phase = 5
+const Phase{Service} Phase = 6  // Next available; adjust based on dependencies
 
 // Add gRPC method mappings
 const Method{Service}Configure GRPCMethod = (
@@ -1008,8 +1014,9 @@ const Method{Service}Configure GRPCMethod = (
 )
 ```
 
-**Phase ordering rule**: If your service depends on instruments or account types
-existing first, use a phase number > 3.
+**Phase ordering rule**: Phases execute in numeric order. If your service depends
+on instruments (phase 1) or account types (phase 2), use a higher phase number.
+Most new services slot in at phase 6+.
 
 ### Checklist
 
@@ -1043,7 +1050,16 @@ matching the production database-per-service architecture.
 
 ### Required: Cross-Service E2E Test
 
-**Location**: `tests/{service}-e2e/`
+**Location**: Two patterns exist depending on scope:
+
+- `tests/{service}-e2e/` - Cross-service tests (multiple service databases,
+  verifies interactions between bounded contexts)
+- `services/{service}/e2e/` - Service-scoped tests (single service, verifies
+  internal saga compensation and schema isolation)
+
+Use `tests/` for new services that interact with other services. Use
+`services/{service}/e2e/` when testing complex internal flows (e.g., saga
+compensation) that don't require standing up other services.
 
 Create an e2e test that exercises the service's interactions with its
 dependencies using real gRPC calls where possible.
@@ -1064,8 +1080,12 @@ func setupE2EInfra(t *testing.T) *e2eTestInfra {
     infra := &e2eTestInfra{}
 
     // Each service gets its own CockroachDB testcontainer
-    infra.{service}DB, _ = testdb.SetupCockroachDB(t, nil)
-    infra.positionKeepingDB, _ = testdb.SetupCockroachDB(t, nil)
+    // Always capture and defer the cleanup function
+    var cleanup func()
+    infra.{service}DB, cleanup = testdb.SetupCockroachDB(t, nil)
+    t.Cleanup(cleanup)
+    infra.positionKeepingDB, cleanup = testdb.SetupCockroachDB(t, nil)
+    t.Cleanup(cleanup)
 
     return infra
 }
@@ -1192,7 +1212,7 @@ This checklist can be used to generate Task Master tasks:
    - Task 13 depends on all previous tasks
    - Task 14 depends on Tasks 1, 7 (needs proto and service handler)
    - Task 15 depends on Tasks 1, 7, 11 (needs proto, service, and k8s)
-   - Task 16 depends on all previous tasks
+   - Task 16 depends on Tasks 1-13, plus 14 and/or 15 if applicable
 
 4. To generate tasks for a new service:
 
