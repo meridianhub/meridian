@@ -318,7 +318,7 @@ func TestInitiateAccountReconciliation_NilRequest(t *testing.T) {
 }
 
 func TestInitiateAccountReconciliation_MissingRunRepo(t *testing.T) {
-	svc := NewAccountReconciliationService() // no WithRunRepository
+	svc := NewAccountReconciliationService() // no WithSettlementRunRepository
 	ctx := context.Background()
 
 	req := validInitiateRequest()
