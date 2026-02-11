@@ -247,6 +247,74 @@ func TestFindByID_NotFound(t *testing.T) {
 	assert.ErrorIs(t, err, ErrPaymentMethodNotFound)
 }
 
+func TestFindByProviderMethod(t *testing.T) {
+	db, ctx, cleanup := setupPaymentMethodTestDB(t)
+	defer cleanup()
+
+	partyID := createPaymentTestParty(t, db)
+	repo := NewPaymentMethodRepository(db)
+
+	pm, err := domain.NewPaymentMethod(
+		partyID,
+		domain.PaymentProviderStripe,
+		"cus_1234567890ab",
+		"pm_lookup1234567",
+		domain.PaymentMethodTypeCard,
+		false,
+		nil,
+	)
+	require.NoError(t, err)
+	err = repo.Create(ctx, pm)
+	require.NoError(t, err)
+
+	// Find by provider and method ID
+	found, err := repo.FindByProviderMethod(ctx, domain.PaymentProviderStripe, "pm_lookup1234567")
+	require.NoError(t, err)
+	assert.Equal(t, pm.ID(), found.ID())
+	assert.Equal(t, "pm_lookup1234567", found.ProviderMethodID())
+}
+
+func TestFindByProviderMethod_NotFound(t *testing.T) {
+	db, ctx, cleanup := setupPaymentMethodTestDB(t)
+	defer cleanup()
+
+	repo := NewPaymentMethodRepository(db)
+
+	_, err := repo.FindByProviderMethod(ctx, domain.PaymentProviderStripe, "pm_nonexistent99")
+	assert.ErrorIs(t, err, ErrPaymentMethodNotFound)
+}
+
+func TestFindByProviderMethod_IgnoresRemovedMethods(t *testing.T) {
+	db, ctx, cleanup := setupPaymentMethodTestDB(t)
+	defer cleanup()
+
+	partyID := createPaymentTestParty(t, db)
+	repo := NewPaymentMethodRepository(db)
+
+	pm, err := domain.NewPaymentMethod(
+		partyID,
+		domain.PaymentProviderStripe,
+		"cus_1234567890ab",
+		"pm_removed123456",
+		domain.PaymentMethodTypeCard,
+		false,
+		nil,
+	)
+	require.NoError(t, err)
+	err = repo.Create(ctx, pm)
+	require.NoError(t, err)
+
+	// Remove the method
+	err = pm.Remove()
+	require.NoError(t, err)
+	err = repo.Update(ctx, pm)
+	require.NoError(t, err)
+
+	// Should not find removed method
+	_, err = repo.FindByProviderMethod(ctx, domain.PaymentProviderStripe, "pm_removed123456")
+	assert.ErrorIs(t, err, ErrPaymentMethodNotFound)
+}
+
 func TestListActiveByParty(t *testing.T) {
 	db, ctx, cleanup := setupPaymentMethodTestDB(t)
 	defer cleanup()
