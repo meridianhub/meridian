@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 	reconciliationv1 "github.com/meridianhub/meridian/api/proto/meridian/reconciliation/v1"
@@ -21,10 +22,29 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+// SnapshotCapturerFunc captures point-in-time position snapshots for a settlement run.
+type SnapshotCapturerFunc func(ctx context.Context, runID uuid.UUID) error
+
+// VarianceDetectorFunc detects variances by comparing snapshots for a settlement run.
+type VarianceDetectorFunc func(ctx context.Context, runID uuid.UUID) ([]*domain.Variance, error)
+
+// VarianceValuatorFunc values detected variances using the valuation engine.
+type VarianceValuatorFunc func(ctx context.Context, runID uuid.UUID) error
+
 // VarianceLister retrieves paginated variance lists.
 type VarianceLister interface {
 	List(ctx context.Context, filter domain.VarianceFilter) ([]*domain.Variance, error)
 }
+
+const (
+	// pipelineTimeout is the maximum time allowed for the background reconciliation pipeline.
+	pipelineTimeout = 15 * time.Minute
+
+	// persistTimeout is the maximum time allowed for persisting state transitions
+	// after the pipeline completes or fails. Uses a fresh context so that state
+	// transitions succeed even if the pipeline context has expired.
+	persistTimeout = 30 * time.Second
+)
 
 // AccountReconciliationService implements the gRPC service for reconciliation operations.
 type AccountReconciliationService struct {
@@ -41,6 +61,9 @@ type AccountReconciliationService struct {
 	starlarkRuntime  valuation.StarlarkRuntime
 	valuationCache   valuation.Cache
 	logger           *slog.Logger
+	snapshotCapturer SnapshotCapturerFunc
+	varianceDetector VarianceDetectorFunc
+	varianceValuator VarianceValuatorFunc
 }
 
 // Option configures the AccountReconciliationService.
@@ -120,6 +143,27 @@ func WithValuationCache(c valuation.Cache) Option {
 func WithLogger(l *slog.Logger) Option {
 	return func(s *AccountReconciliationService) {
 		s.logger = l
+	}
+}
+
+// WithSnapshotCapturer sets the snapshot capture function for the reconciliation pipeline.
+func WithSnapshotCapturer(fn SnapshotCapturerFunc) Option {
+	return func(s *AccountReconciliationService) {
+		s.snapshotCapturer = fn
+	}
+}
+
+// WithVarianceDetector sets the variance detection function for the reconciliation pipeline.
+func WithVarianceDetector(fn VarianceDetectorFunc) Option {
+	return func(s *AccountReconciliationService) {
+		s.varianceDetector = fn
+	}
+}
+
+// WithVarianceValuator sets the variance valuation function for the reconciliation pipeline.
+func WithVarianceValuator(fn VarianceValuatorFunc) Option {
+	return func(s *AccountReconciliationService) {
+		s.varianceValuator = fn
 	}
 }
 
@@ -227,11 +271,139 @@ func (s *AccountReconciliationService) InitiateAccountReconciliation(
 }
 
 // ExecuteAccountReconciliation triggers execution of a pending settlement run.
+//
+// The handler validates the request, transitions the run to RUNNING, returns
+// immediately, and spawns a background goroutine to execute the reconciliation
+// pipeline (capture -> detect -> value). Clients poll via RetrieveAccountReconciliation.
+//
+//nolint:contextcheck // Intentionally uses background context for async pipeline that outlives the RPC
 func (s *AccountReconciliationService) ExecuteAccountReconciliation(
-	_ context.Context,
-	_ *reconciliationv1.ExecuteAccountReconciliationRequest,
+	ctx context.Context,
+	req *reconciliationv1.ExecuteAccountReconciliationRequest,
 ) (*reconciliationv1.ExecuteAccountReconciliationResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "ExecuteAccountReconciliation not yet implemented")
+	if s.runRepo == nil || s.snapshotCapturer == nil || s.varianceDetector == nil || s.varianceValuator == nil {
+		return nil, status.Error(codes.Unimplemented, "ExecuteAccountReconciliation not yet implemented")
+	}
+
+	runIDStr := req.GetRunId()
+	if runIDStr == "" {
+		return nil, status.Error(codes.InvalidArgument, "run_id is required")
+	}
+
+	runID, err := uuid.Parse(runIDStr)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid run_id: %v", err)
+	}
+
+	run, err := s.runRepo.FindByID(ctx, runID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, status.Errorf(codes.NotFound, "settlement run not found: %s", runID)
+		}
+		slog.ErrorContext(ctx, "failed to retrieve settlement run", "run_id", runID, "error", err)
+		return nil, status.Error(codes.Internal, "failed to retrieve settlement run")
+	}
+
+	if run.Status != domain.RunStatusPending {
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"settlement run %s is not in PENDING state (current: %s)", runID, run.Status)
+	}
+
+	if err := run.Start(); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to start settlement run: %v", err)
+	}
+	if err := s.runRepo.Update(ctx, run); err != nil {
+		slog.ErrorContext(ctx, "failed to persist RUNNING state", "run_id", runID, "error", err)
+		return nil, status.Error(codes.Internal, "failed to update settlement run")
+	}
+
+	// Spawn background goroutine with a detached context so it continues
+	// after the RPC returns. The RPC context must not be used here.
+	pipelineCtx, pipelineCancel := context.WithTimeout(context.Background(), pipelineTimeout) //nolint:contextcheck // Intentionally detached: pipeline must outlive the RPC context
+	go func() {
+		defer pipelineCancel()
+		s.executePipeline(pipelineCtx, runID)
+	}()
+
+	return &reconciliationv1.ExecuteAccountReconciliationResponse{
+		Run: toProtoRunSummary(run),
+	}, nil
+}
+
+// executePipeline runs the reconciliation pipeline in the background.
+// The caller is responsible for providing a detached context with timeout.
+func (s *AccountReconciliationService) executePipeline(ctx context.Context, runID uuid.UUID) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("reconciliation pipeline panicked",
+				"run_id", runID,
+				"panic", r,
+			)
+			s.failRun(ctx, runID, "pipeline panicked")
+		}
+	}()
+
+	slog.Info("reconciliation pipeline started", "run_id", runID)
+
+	// Step 1: Capture snapshots
+	if err := s.snapshotCapturer(ctx, runID); err != nil {
+		slog.Error("snapshot capture failed", "run_id", runID, "error", err)
+		s.failRun(ctx, runID, err.Error())
+		return
+	}
+
+	// Step 2: Detect variances
+	if _, err := s.varianceDetector(ctx, runID); err != nil {
+		slog.Error("variance detection failed", "run_id", runID, "error", err)
+		s.failRun(ctx, runID, err.Error())
+		return
+	}
+
+	// Step 3: Value variances
+	if err := s.varianceValuator(ctx, runID); err != nil {
+		slog.Error("variance valuation failed", "run_id", runID, "error", err)
+		s.failRun(ctx, runID, err.Error())
+		return
+	}
+
+	// Pipeline succeeded: transition to COMPLETED.
+	// Use a fresh context so persistence succeeds even if the pipeline context has expired.
+	persistCtx, persistCancel := context.WithTimeout(context.Background(), persistTimeout) //nolint:contextcheck
+	defer persistCancel()
+	run, err := s.runRepo.FindByID(persistCtx, runID) //nolint:contextcheck
+	if err != nil {
+		slog.Error("failed to retrieve run for completion", "run_id", runID, "error", err)
+		return
+	}
+	if err := run.Complete(run.VarianceCount); err != nil {
+		slog.Error("failed to transition run to COMPLETED", "run_id", runID, "error", err)
+		return
+	}
+	if err := s.runRepo.Update(persistCtx, run); err != nil { //nolint:contextcheck
+		slog.Error("failed to persist COMPLETED state", "run_id", runID, "error", err)
+		return
+	}
+
+	slog.Info("reconciliation pipeline completed", "run_id", runID)
+}
+
+// failRun transitions a settlement run to FAILED with the given error message.
+// It uses a fresh context so persistence succeeds even if the pipeline context has expired.
+func (s *AccountReconciliationService) failRun(_ context.Context, runID uuid.UUID, errMsg string) {
+	persistCtx, persistCancel := context.WithTimeout(context.Background(), persistTimeout) //nolint:contextcheck
+	defer persistCancel()
+	run, err := s.runRepo.FindByID(persistCtx, runID) //nolint:contextcheck
+	if err != nil {
+		slog.Error("failed to retrieve run for failure transition", "run_id", runID, "error", err)
+		return
+	}
+	if err := run.Fail(errMsg); err != nil {
+		slog.Error("failed to transition run to FAILED", "run_id", runID, "error", err)
+		return
+	}
+	if err := s.runRepo.Update(persistCtx, run); err != nil { //nolint:contextcheck
+		slog.Error("failed to persist FAILED state", "run_id", runID, "error", err)
+	}
 }
 
 // RetrieveAccountReconciliation retrieves a settlement run summary.
