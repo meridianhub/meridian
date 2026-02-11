@@ -25,28 +25,42 @@ func NewMISAdapter(client *misclient.Client) *MISAdapter {
 	return &MISAdapter{client: client}
 }
 
-// FetchObservations retrieves historical observations for a dataset code from MDS.
-func (a *MISAdapter) FetchObservations(ctx context.Context, datasetCode string, before time.Time) ([]starlark.Observation, error) {
-	resp, err := a.client.ListObservations(ctx, &marketinformationv1.ListObservationsRequest{
-		DatasetCode: datasetCode,
-		ObservedTo:  timestamppb.New(before),
-		PageSize:    1000,
-	})
-	if err != nil {
-		return nil, err
-	}
+// maxObservationPages bounds the number of pagination requests to prevent runaway fetching.
+const maxObservationPages = 100
 
-	observations := make([]starlark.Observation, 0, len(resp.GetObservations()))
-	for _, obs := range resp.GetObservations() {
-		val, err := decimal.NewFromString(obs.GetValue())
-		if err != nil {
-			continue
-		}
-		observations = append(observations, starlark.Observation{
-			Timestamp: obs.GetValidFrom().AsTime(),
-			Value:     val,
-			Quality:   qualityToString(obs.GetQuality()),
+// FetchObservations retrieves historical observations for a dataset code from MDS.
+// It paginates through all available results up to maxObservationPages.
+func (a *MISAdapter) FetchObservations(ctx context.Context, datasetCode string, before time.Time) ([]starlark.Observation, error) {
+	var observations []starlark.Observation
+	var pageToken string
+
+	for page := 0; page < maxObservationPages; page++ {
+		resp, err := a.client.ListObservations(ctx, &marketinformationv1.ListObservationsRequest{
+			DatasetCode: datasetCode,
+			ObservedTo:  timestamppb.New(before),
+			PageSize:    1000,
+			PageToken:   pageToken,
 		})
+		if err != nil {
+			return nil, err
+		}
+
+		for _, obs := range resp.GetObservations() {
+			val, err := decimal.NewFromString(obs.GetValue())
+			if err != nil {
+				continue
+			}
+			observations = append(observations, starlark.Observation{
+				Timestamp: obs.GetValidFrom().AsTime(),
+				Value:     val,
+				Quality:   qualityToString(obs.GetQuality()),
+			})
+		}
+
+		pageToken = resp.GetNextPageToken()
+		if pageToken == "" {
+			break
+		}
 	}
 
 	return observations, nil
