@@ -31,6 +31,11 @@ type VarianceDetectorFunc func(ctx context.Context, runID uuid.UUID) ([]*domain.
 // VarianceValuatorFunc values detected variances using the valuation engine.
 type VarianceValuatorFunc func(ctx context.Context, runID uuid.UUID) error
 
+// VarianceLister retrieves paginated variance lists.
+type VarianceLister interface {
+	List(ctx context.Context, filter domain.VarianceFilter) ([]*domain.Variance, error)
+}
+
 const (
 	// pipelineTimeout is the maximum time allowed for the background reconciliation pipeline.
 	pipelineTimeout = 15 * time.Minute
@@ -48,6 +53,7 @@ type AccountReconciliationService struct {
 	runRepo          domain.SettlementRunRepository
 	disputeRepo      domain.DisputeRepository
 	varianceRepo     VarianceFinder
+	varianceListRepo VarianceLister
 	sagaRuntime      SagaRuntime
 	eventPublisher   EventPublisher
 	assertor         *BalanceAssertor
@@ -81,6 +87,13 @@ func WithSettlementRunRepository(repo domain.SettlementRunRepository) Option {
 func WithVarianceRepository(repo VarianceFinder) Option {
 	return func(s *AccountReconciliationService) {
 		s.varianceRepo = repo
+	}
+}
+
+// WithVarianceListRepository sets the variance lister for paginated queries.
+func WithVarianceListRepository(repo VarianceLister) Option {
+	return func(s *AccountReconciliationService) {
+		s.varianceListRepo = repo
 	}
 }
 
@@ -496,10 +509,69 @@ func (s *AccountReconciliationService) ControlAccountReconciliation(
 
 // ListReconciliationResults returns paginated variance details for a run.
 func (s *AccountReconciliationService) ListReconciliationResults(
-	_ context.Context,
-	_ *reconciliationv1.ListReconciliationResultsRequest,
+	ctx context.Context,
+	req *reconciliationv1.ListReconciliationResultsRequest,
 ) (*reconciliationv1.ListReconciliationResultsResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "ListReconciliationResults not yet implemented")
+	if s.varianceListRepo == nil {
+		return nil, status.Error(codes.Unimplemented, "ListReconciliationResults not yet implemented")
+	}
+
+	runIDStr := req.GetRunId()
+	if runIDStr == "" {
+		return nil, status.Error(codes.InvalidArgument, "run_id is required")
+	}
+
+	runID, err := uuid.Parse(runIDStr)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid run_id: %v", err)
+	}
+
+	pageSize := int(req.GetPageSize())
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	if pageSize > 1000 {
+		pageSize = 1000
+	}
+
+	offset, err := decodeCursor(req.GetPageToken())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid page_token: %v", err)
+	}
+
+	filter := domain.VarianceFilter{
+		RunID:  &runID,
+		Status: toDomainVarianceStatus(req.GetFilterStatus()),
+		Reason: toDomainVarianceReason(req.GetFilterReason()),
+		Limit:  pageSize + 1,
+		Offset: offset,
+	}
+
+	variances, err := s.varianceListRepo.List(ctx, filter)
+	if err != nil {
+		s.logger.Error("failed to list variances",
+			slog.String("run_id", runID.String()),
+			slog.String("error", err.Error()),
+		)
+		return nil, status.Error(codes.Internal, "failed to list variances")
+	}
+
+	var nextPageToken string
+	if len(variances) > pageSize {
+		variances = variances[:pageSize]
+		nextPageToken = encodeCursor(offset + pageSize)
+	}
+
+	details := make([]*reconciliationv1.VarianceDetail, len(variances))
+	for i, v := range variances {
+		details[i] = toProtoVarianceDetail(v)
+	}
+
+	return &reconciliationv1.ListReconciliationResultsResponse{
+		Variances:     details,
+		NextPageToken: nextPageToken,
+		TotalCount:    -1,
+	}, nil
 }
 
 // AssertBalance evaluates a balance assertion against current positions.
