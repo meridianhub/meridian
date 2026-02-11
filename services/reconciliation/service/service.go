@@ -128,6 +128,13 @@ func (s *AccountReconciliationService) InitiateAccountReconciliation(
 	ctx context.Context,
 	req *reconciliationv1.InitiateAccountReconciliationRequest,
 ) (*reconciliationv1.InitiateAccountReconciliationResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "request is required")
+	}
+	if s.runRepo == nil {
+		return nil, status.Error(codes.FailedPrecondition, "settlement run repository not configured")
+	}
+
 	accountID := req.GetAccountId()
 	if accountID == "" {
 		return nil, status.Error(codes.InvalidArgument, "account_id is required")

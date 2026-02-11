@@ -303,6 +303,35 @@ func TestInitiateAccountReconciliation_InvalidDates(t *testing.T) {
 	})
 }
 
+func TestInitiateAccountReconciliation_NilRequest(t *testing.T) {
+	repo := newInitiateRunRepoMock()
+	svc := NewAccountReconciliationService(WithRunRepository(repo))
+	ctx := context.Background()
+
+	_, err := svc.InitiateAccountReconciliation(ctx, nil)
+	require.Error(t, err)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+	assert.Contains(t, st.Message(), "request is required")
+}
+
+func TestInitiateAccountReconciliation_MissingRunRepo(t *testing.T) {
+	svc := NewAccountReconciliationService() // no WithRunRepository
+	ctx := context.Background()
+
+	req := validInitiateRequest()
+
+	_, err := svc.InitiateAccountReconciliation(ctx, req)
+	require.Error(t, err)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.FailedPrecondition, st.Code())
+	assert.Contains(t, st.Message(), "repository not configured")
+}
+
 func TestInitiateAccountReconciliation_EmptyInitiatedBy(t *testing.T) {
 	repo := newInitiateRunRepoMock()
 	svc := NewAccountReconciliationService(WithRunRepository(repo))
