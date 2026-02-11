@@ -47,6 +47,8 @@ def compute_forecast(ctx):
 
     now = ctx["now"]
     granularity = int(ctx["granularity_seconds"])
+    if granularity <= 0:
+        return []
     horizon = int(ctx["horizon_seconds"])
     num_points = horizon // granularity
 
