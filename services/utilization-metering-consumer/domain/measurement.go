@@ -4,6 +4,7 @@ package domain
 import (
 	"time"
 
+	auditdomain "github.com/meridianhub/meridian/services/audit-worker/domain"
 	"github.com/meridianhub/meridian/shared/platform/quantity"
 )
 
@@ -30,4 +31,29 @@ type UtilizationMeasurement struct {
 
 	// CorrelationID links the measurement back to the original audit event
 	CorrelationID string
+}
+
+// MeasurementToUtilization converts an auditdomain.Measurement to a UtilizationMeasurement
+// for the MDS publishing path. The conversion maps:
+//   - AccountID.String() -> TenantID
+//   - Attributes["service"] -> ServiceName
+//   - Attributes["operation"] -> OperationType
+//   - Quantity + instrument lookup -> Amount
+//   - Period.Start -> Timestamp
+//   - ID.String() -> CorrelationID
+func MeasurementToUtilization(m *auditdomain.Measurement) *UtilizationMeasurement {
+	unitAttr := "operation"
+	if attr, ok := m.Attributes["unit"]; ok {
+		unitAttr = attr
+	}
+	instrument := InstrumentForMeasurementType(unitAttr)
+
+	return &UtilizationMeasurement{
+		TenantID:      m.AccountID.String(),
+		ServiceName:   m.Attributes["service"],
+		OperationType: m.Attributes["operation"],
+		Amount:        quantity.NewAsset(m.Quantity, instrument),
+		Timestamp:     m.Period.Start,
+		CorrelationID: m.ID.String(),
+	}
 }

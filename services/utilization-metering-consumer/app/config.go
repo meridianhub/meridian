@@ -4,6 +4,7 @@ package app
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/shared/platform/env"
@@ -37,6 +38,12 @@ type Config struct {
 
 	// HTTP server configuration
 	HTTPPort string // HTTP port for health checks and metrics (default: "8080")
+
+	// MDS (Market Data Service) configuration
+	EnableMDSOutput      bool          // Feature flag for MDS output (default: true)
+	MDSServiceAddr       string        // gRPC address for Market Data Service (e.g., "market-information:50058")
+	MDSAggregationWindow time.Duration // Aggregation window size (default: 1h)
+	MDSFlushInterval     time.Duration // Flush interval for buffered observations (default: 5m)
 }
 
 // LoadConfig loads configuration from environment variables.
@@ -60,6 +67,10 @@ func LoadConfig() (*Config, error) {
 		TenantZeroID:            env.GetEnvOrDefault("TENANT_ZERO_ID", ""),
 		TenantAccountMapping:    env.GetEnvOrDefault("TENANT_ACCOUNT_MAPPING", ""),
 		HTTPPort:                env.GetEnvOrDefault("HTTP_PORT", "8080"),
+		EnableMDSOutput:         env.GetEnvAsBool("ENABLE_MDS_OUTPUT", true),
+		MDSServiceAddr:          env.GetEnvOrDefault("MDS_SERVICE_ADDR", ""),
+		MDSAggregationWindow:    env.GetEnvAsDuration("MDS_AGGREGATION_WINDOW", 1*time.Hour),
+		MDSFlushInterval:        env.GetEnvAsDuration("MDS_FLUSH_INTERVAL", 5*time.Minute),
 	}
 
 	// Validate required configuration
