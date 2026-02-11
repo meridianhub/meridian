@@ -30,6 +30,10 @@ type StrategyRepository interface {
 	// ListByTenant returns strategies for a tenant matching the filter criteria.
 	// Returns the strategies, a next page token (empty if no more results), and any error.
 	ListByTenant(ctx context.Context, tenantID string, filters StrategyFilters) ([]ForecastingStrategy, string, error)
+
+	// ListAllActive returns all strategies with ACTIVE status across all tenants.
+	// Used by the cron scheduler to load strategies for scheduled execution.
+	ListAllActive(ctx context.Context) ([]ForecastingStrategy, error)
 }
 
 // StrategyFilters specifies criteria for listing forecasting strategies.

@@ -257,6 +257,40 @@ func (r *StrategyRepository) ListByTenant(ctx context.Context, tenantID string, 
 	return results, nextPageToken, nil
 }
 
+// ListAllActive returns all strategies with ACTIVE status across all tenants.
+func (r *StrategyRepository) ListAllActive(ctx context.Context) ([]domain.ForecastingStrategy, error) {
+	query := `
+		SELECT id, tenant_id, name, description, starlark_code,
+			horizon_hours, granularity_hours, schedule,
+			input_dataset_codes, output_dataset_code,
+			reference_data_resolution_key,
+			status, version, created_at, updated_at
+		FROM forecasting_strategy
+		WHERE status = 'ACTIVE'
+		ORDER BY tenant_id, name`
+
+	rows, err := r.pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list all active strategies: %w", err)
+	}
+	defer rows.Close()
+
+	var results []domain.ForecastingStrategy
+	for rows.Next() {
+		entity, err := r.scanStrategyFromRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, EntityToStrategy(entity))
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating active strategies: %w", err)
+	}
+
+	return results, nil
+}
+
 func (r *StrategyRepository) scanStrategy(ctx context.Context, query string, args ...interface{}) (ForecastingStrategyEntity, error) {
 	var entity ForecastingStrategyEntity
 
