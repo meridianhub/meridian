@@ -76,6 +76,7 @@ type Repository interface {
 type Service struct {
 	pb.UnimplementedPartyServiceServer
 	repo   Repository
+	pmRepo PaymentMethodRepository
 	logger *slog.Logger
 }
 
@@ -93,6 +94,13 @@ func NewService(repo Repository, logger *slog.Logger) (*Service, error) {
 		repo:   repo,
 		logger: logger,
 	}, nil
+}
+
+// WithPaymentMethodRepository sets the payment method repository on the service.
+// When set, payment method gRPC operations are enabled.
+func (s *Service) WithPaymentMethodRepository(pmRepo PaymentMethodRepository) *Service {
+	s.pmRepo = pmRepo
+	return s
 }
 
 // RegisterParty creates a new party in the reference data directory
