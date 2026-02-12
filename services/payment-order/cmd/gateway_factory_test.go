@@ -12,9 +12,8 @@ import (
 )
 
 func TestCreatePaymentGateway_DefaultMock(t *testing.T) {
-	// No env vars set - should default to mock
+	// No PAYMENT_GATEWAY_PROVIDER set - defaults to "mock"
 	t.Setenv("PAYMENT_GATEWAY_PROVIDER", "")
-	t.Setenv("PAYMENT_GATEWAY_URL", "")
 	t.Setenv("STRIPE_API_KEY", "")
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -63,5 +62,17 @@ func TestCreatePaymentGateway_StripeMissingAPIKey(t *testing.T) {
 	gw, err := createPaymentGateway(logger)
 
 	assert.ErrorIs(t, err, ErrMissingStripeAPIKey)
+	assert.Nil(t, gw)
+}
+
+func TestCreatePaymentGateway_UnsupportedProvider(t *testing.T) {
+	t.Setenv("PAYMENT_GATEWAY_PROVIDER", "paypal")
+	t.Setenv("STRIPE_API_KEY", "")
+
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+
+	gw, err := createPaymentGateway(logger)
+
+	assert.ErrorIs(t, err, ErrUnsupportedGatewayProvider)
 	assert.Nil(t, gw)
 }

@@ -53,6 +53,9 @@ var ErrMissingHMACSecret = errors.New("WEBHOOK_HMAC_SECRET environment variable 
 // ErrMissingStripeAPIKey is returned when STRIPE_API_KEY is not set but the Stripe provider is selected.
 var ErrMissingStripeAPIKey = errors.New("STRIPE_API_KEY is required when PAYMENT_GATEWAY_PROVIDER is \"stripe\"")
 
+// ErrUnsupportedGatewayProvider is returned when PAYMENT_GATEWAY_PROVIDER has an unknown value.
+var ErrUnsupportedGatewayProvider = errors.New("unsupported PAYMENT_GATEWAY_PROVIDER value")
+
 func main() {
 	// Initialize structured logging with configurable log level
 	// Note: bootstrap.NewLogger hardcodes INFO level, so we create logger manually for LOG_LEVEL support
@@ -559,18 +562,9 @@ func createInternalBankAccountClient(namespace string, logger *slog.Logger, trac
 // Environment variables:
 //   - PAYMENT_GATEWAY_PROVIDER: Gateway provider ("stripe" or "mock", default: "mock")
 //   - STRIPE_API_KEY: Platform Stripe API key (required when provider is "stripe")
-//   - PAYMENT_GATEWAY_URL: Legacy URL-based gateway selection (used as fallback hint)
 func createPaymentGateway(logger *slog.Logger) (gateway.PaymentGateway, error) {
-	provider := env.GetEnvOrDefault("PAYMENT_GATEWAY_PROVIDER", "")
+	provider := env.GetEnvOrDefault("PAYMENT_GATEWAY_PROVIDER", gateway.ProviderMock)
 	stripeAPIKey := env.GetEnvOrDefault("STRIPE_API_KEY", "")
-
-	// If no explicit provider set, fall back to legacy PAYMENT_GATEWAY_URL behavior
-	if provider == "" {
-		gatewayURL := env.GetEnvOrDefault("PAYMENT_GATEWAY_URL", "")
-		if gatewayURL == "" {
-			provider = gateway.ProviderMock
-		}
-	}
 
 	var baseGateway gateway.PaymentGateway
 
@@ -587,14 +581,17 @@ func createPaymentGateway(logger *slog.Logger) (gateway.PaymentGateway, error) {
 		)
 		logger.Info("using stripe payment gateway")
 
-	default:
-		logger.Warn("using mock payment gateway", "provider", provider)
+	case gateway.ProviderMock:
+		logger.Warn("using mock payment gateway")
 		baseGateway = gateway.New(gateway.Config{
 			UseMock: true,
 			MockConfig: gateway.MockGatewayConfig{
 				DeterministicFailures: true,
 			},
 		})
+
+	default:
+		return nil, fmt.Errorf("%w: %q (valid: %q, %q)", ErrUnsupportedGatewayProvider, provider, gateway.ProviderStripe, gateway.ProviderMock)
 	}
 
 	// Configure resilience settings from environment

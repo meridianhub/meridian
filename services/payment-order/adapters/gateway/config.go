@@ -53,8 +53,8 @@ func DefaultConfig() Config {
 // Otherwise, returns a MockGateway with default config as a fallback
 // until the real gateway implementation is added.
 //
-// For provider-based instantiation (e.g., Stripe), use NewStripeGateway
-// from the cmd package or construct the adapter directly.
+// For provider-based instantiation (e.g., Stripe), construct the adapter
+// directly in the service entry point (cmd/main.go) to avoid import cycles.
 func New(config Config) PaymentGateway {
 	if config.UseMock {
 		return NewMockGateway(config.MockConfig)
