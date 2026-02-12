@@ -34,9 +34,13 @@ stateDiagram-v2
 | [Durable Execution Engine](durable-execution-engine.md) | `starlark-saga-orchestration` | 24/24 done |
 | [Internal Bank Account](internal-bank-account.md) | `internal-bank-account` | 33/33 done |
 | [Market Information Management](market-information-management.md) | `market-information-management` | 17/18 done, 1 cancelled |
+| [Market Data & Dynamic Pricing](market-data-dynamic-pricing.md) | `market-data-dynamic-pricing` | 12/12 done |
 | [Production Readiness Review](production-readiness-review.md) | `production-readiness` | 10/10 done |
+| [Reconciliation Service](reconciliation-service.md) | `reconciliation-service-completed-2026-02-12` | 24/24 done |
+| [Reconciliation gRPC Wiring](reconciliation-grpc-wiring.md) | `reconciliation-service-completed-2026-02-12` (tasks 17-23) | Included in reconciliation-service completion |
 | [Starlark Saga Orchestration (Core)](starlark-saga-orchestration-core.md) | `starlark-saga-orchestration` | 24/24 done |
 | [Starlark Typed Service Clients](starlark-typed-service-clients.md) | `starlark-typed-clients` | 10/10 done |
+| [Stripe Connect](stripe-connect.md) | `stripe-connect` | 12/12 done |
 | [Universal Asset System](universal-asset-system.md) | `universal-asset-system` | 36/36 done |
 | [Starlark Service Bindings](starlark-service-bindings.md) | N/A (tracked across other tags) | Implemented 2026-02-04 |
 | [Starlark Testing Framework](starlark-testing-framework.md) | N/A (tracked across other tags) | Implemented 2026-02-06 |
@@ -52,19 +56,28 @@ stateDiagram-v2
 
 | PRD | Task Master Tag | Tasks |
 |-----|-----------------|-------|
-| [Market Data & Dynamic Pricing](market-data-dynamic-pricing.md) | `market-data-dynamic-pricing` | 10/12 done, 1 in-progress, 1 pending |
-| [Reconciliation gRPC Wiring](reconciliation-grpc-wiring.md) | `reconciliation-service` (tasks 17-23) | 0/7 done (wiring phase) |
-| [Reconciliation Service](reconciliation-service.md) | `reconciliation-service` | 16/24 done, 3 in-progress, 1 review, 4 pending |
-| [Stripe Connect](stripe-connect.md) | `stripe-connect` | 9/12 done, 1 in-progress, 2 pending |
+| [Platform Scheduler](platform-scheduler.md) | `platform-scheduler` | 3/10 done, 1 review, 6 pending |
+
+#### Near Completion
+
+| PRD | Task Master Tag | Tasks | Remaining |
+|-----|-----------------|-------|-----------|
+| [Stripe Connect Wiring](stripe-connect.md) | `stripe-connect-wiring` | 9/10 done | Task 10: E2E integration test (in-progress) |
+| [Reconciliation Phase 2](reconciliation-service.md) | `reconciliation-service-phase2` | 9/10 done | Task 10: E2E test suite (review) |
+
+#### Planned (Task Master Tags Created)
+
+| PRD | Task Master Tag | Description |
+|-----|-----------------|-------------|
+| [Current Account Withdrawal Persistence](current-account-withdrawal-persistence.md) | `account-service-wiring` | Wire withdrawal-by-ID gRPC handlers in current-account service |
+| [Internal Bank Account - Position Keeping Client](internal-bank-account-position-keeping-client.md) | `account-service-wiring` | Wire Position Keeping gRPC client in internal-bank-account service |
+| [Party KYC/AML Provider Integration](party-kyc-aml-provider-integration.md) | `party-kyc-aml` | External KYC/AML provider adapter for production party onboarding |
 
 #### Not Started
 
 | PRD | Description |
 |-----|-------------|
-| [Current Account Withdrawal Persistence](current-account-withdrawal-persistence.md) | Wire withdrawal-by-ID gRPC handlers in current-account service |
-| [Internal Bank Account - Position Keeping Client](internal-bank-account-position-keeping-client.md) | Wire Position Keeping gRPC client in internal-bank-account service |
 | [Meridian Edge](meridian-edge.md) | Embedded modular monolith for IoT devices and browser (WASM) |
-| [Party KYC/AML Provider Integration](party-kyc-aml-provider-integration.md) | External KYC/AML provider adapter for production party onboarding |
 
 ### Task Master PRDs (`.taskmaster/docs/`)
 
