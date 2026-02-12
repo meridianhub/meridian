@@ -88,6 +88,8 @@ db_urls = {
   'party': os.getenv('PARTY_DATABASE_URL', 'postgres://meridian_party_user@cockroachdb:26257/meridian_party?sslmode=disable'),
   'internal_bank_account': os.getenv('INTERNAL_BANK_ACCOUNT_DATABASE_URL', 'postgres://meridian_internal_bank_account_user@cockroachdb:26257/meridian_internal_bank_account?sslmode=disable'),
   'market_information': os.getenv('MARKET_INFORMATION_DATABASE_URL', 'postgres://meridian_market_information_user@cockroachdb:26257/meridian_market_information?sslmode=disable'),
+  'reconciliation': os.getenv('RECONCILIATION_DATABASE_URL', 'postgres://meridian_reconciliation_user@cockroachdb:26257/meridian_reconciliation?sslmode=disable'),
+  'forecasting': os.getenv('FORECASTING_DATABASE_URL', 'postgres://meridian_forecasting_user@cockroachdb:26257/meridian_forecasting?sslmode=disable'),
 }
 
 # NOTE: Migrations now run as Kubernetes Jobs inside the cluster
@@ -474,6 +476,8 @@ k8s_resource(
 #   - Tenant:               50056
 #   - InternalBankAccount:  50057
 #   - MarketInformation:    50058
+#   - Reconciliation:       50060
+#   - Forecasting:          50061
 #   - Gateway (HTTP):       8080
 #   - HTTPHealth:           8081
 #   - HTTPMetrics:          9090
@@ -532,6 +536,20 @@ grpc_microservice(
     'market-information',
     grpc_port=50058,  # ports.MarketInformation
     resource_deps=['cockroachdb', 'migrate-market-information'],
+)
+
+# Reconciliation Service - gRPC microservice for reconciliation processes and settlement
+grpc_microservice(
+    'reconciliation',
+    grpc_port=50060,  # ports.Reconciliation
+    resource_deps=['cockroachdb', 'migrate-reconciliation', 'position-keeping', 'current-account'],
+)
+
+# Forecasting Service - gRPC microservice for forecasting strategies and forward curves
+grpc_microservice(
+    'forecasting',
+    grpc_port=50061,  # ports.Forecasting
+    resource_deps=['cockroachdb', 'migrate-forecasting', 'market-information'],
 )
 
 # =============================================================================
@@ -752,6 +770,20 @@ migration_job(
   resource_deps=['init-database'],  # Independent database, only needs init to complete
 )
 
+migration_job(
+  'migrate-reconciliation',
+  'reconciliation',
+  'reconciliation',
+  resource_deps=['init-database'],  # Independent database, only needs init to complete
+)
+
+migration_job(
+  'migrate-forecasting',
+  'forecasting',
+  'forecasting',
+  resource_deps=['init-database'],  # Independent database, only needs init to complete
+)
+
 # Kafka cluster health check - runs automatically after kafka-cluster is ready
 local_resource(
   'kafka-health',
@@ -813,6 +845,8 @@ Microservices:
   • Tenant                 → localhost:50056 (gRPC)
   • Internal-Bank-Account  → localhost:50057 (gRPC)
   • Market-Information     → localhost:50058 (gRPC)
+  • Reconciliation         → localhost:50060 (gRPC)
+  • Forecasting            → localhost:50061 (gRPC)
 
 Gateway:
   • HTTP Gateway           → localhost:8090 (subdomain routing)
@@ -851,12 +885,14 @@ Database Architecture (database-per-service):
     - meridian_party
     - meridian_internal_bank_account
     - meridian_market_information
+    - meridian_reconciliation
+    - meridian_forecasting
   • Within each database: org schemas for multi-tenant isolation
   • Tables use singular, unqualified names (search_path routing)
   • See ADR-0003 for architecture details
 
 Database Migrations:
-  • Migrations run automatically on startup (8 resources):
+  • Migrations run automatically on startup (10 resources):
     1. current_account → meridian_current_account (account, lien, audit tables)
     2. financial_accounting → meridian_financial_accounting (ledger, booking)
     3. position_keeping → meridian_position_keeping (positions, transactions)
@@ -865,7 +901,9 @@ Database Migrations:
     6. tenant → meridian_platform (tenant registry)
     7. internal_bank_account → meridian_internal_bank_account (internal accounts)
     8. market_information → meridian_market_information (price benchmarks, market data)
-  • Parallel execution: current_account + financial_accounting + party + tenant + internal_bank_account + market_information
+    9. reconciliation → meridian_reconciliation (reconciliation processes)
+    10. forecasting → meridian_forecasting (forecasting strategies)
+  • Parallel execution: current_account + financial_accounting + party + tenant + internal_bank_account + market_information + reconciliation + forecasting
   • Sequential dependencies:
     - position_keeping waits for current_account (Account FK)
     - payment_order waits for current_account (Account FK)
@@ -878,6 +916,8 @@ Database Migrations:
     - tilt trigger migrate-tenant
     - tilt trigger migrate-internal-bank-account
     - tilt trigger migrate-market-information
+    - tilt trigger migrate-reconciliation
+    - tilt trigger migrate-forecasting
 
 Testing Kafka Failover:
   kubectl delete pod kafka-1  # Kill broker
