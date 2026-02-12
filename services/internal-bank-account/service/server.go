@@ -14,6 +14,7 @@ import (
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/internal_bank_account/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
+	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
 	"github.com/meridianhub/meridian/services/internal-bank-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/internal-bank-account/domain"
@@ -577,6 +578,11 @@ func (s *Service) GetBalance(ctx context.Context, req *pb.GetBalanceRequest) (*p
 		ibaobservability.RecordOperationDuration("get_balance", operationStatus, time.Since(start))
 	}()
 
+	if req.AccountId == "" {
+		operationStatus = operationStatusFailed
+		return nil, status.Error(codes.InvalidArgument, "account_id is required")
+	}
+
 	// Validate account exists and is active
 	account, err := s.findAccountByID(ctx, req.AccountId)
 	if err != nil {
@@ -621,30 +627,26 @@ func (s *Service) GetBalance(ctx context.Context, req *pb.GetBalanceRequest) (*p
 	// Record successful balance query duration (target <50ms p99)
 	ibaobservability.RecordBalanceQueryDuration(operationStatusSuccess, pkDuration)
 
+	// Resolve as_of: use Position Keeping's timestamp, fall back to current time
+	asOf := balanceResp.GetAsOf()
+	if asOf == nil {
+		asOf = timestamppb.Now()
+	}
+
 	// Find the current balance from the response.
-	// AsOf reflects the timestamp from Position Keeping when the balance was calculated.
-	var currentBalanceResp *pb.GetBalanceResponse
+	var currentBalance *quantityv1.InstrumentAmount
 	for _, entry := range balanceResp.GetBalances() {
 		if entry.GetBalanceType() == positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT {
-			currentBalanceResp = &pb.GetBalanceResponse{
-				AccountId:      req.AccountId,
-				CurrentBalance: entry.GetAmount(),
-				AsOf:           balanceResp.GetAsOf(), // Use Position Keeping's as_of timestamp
-			}
+			currentBalance = entry.GetAmount()
 			break
 		}
 	}
 
-	if currentBalanceResp == nil {
-		// No current balance found - return zero balance with current time
-		return &pb.GetBalanceResponse{
-			AccountId:      req.AccountId,
-			CurrentBalance: nil,
-			AsOf:           timestamppb.Now(),
-		}, nil
-	}
-
-	return currentBalanceResp, nil
+	return &pb.GetBalanceResponse{
+		AccountId:      req.AccountId,
+		CurrentBalance: currentBalance,
+		AsOf:           asOf,
+	}, nil
 }
 
 // mapPositionKeepingErrorToGRPC maps Position Keeping service errors to appropriate gRPC status codes.
