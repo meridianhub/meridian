@@ -50,6 +50,18 @@ func TestNewStripeEventProcessor(t *testing.T) {
 func TestStripeEventProcessor_PreProcess(t *testing.T) {
 	ctx := context.Background()
 
+	t.Run("empty event ID is a no-op", func(t *testing.T) {
+		proc, client, _ := setupTestEventProcessor(t)
+
+		err := proc.PreProcess(ctx, "")
+		assert.NoError(t, err)
+
+		// Verify no key was set in Redis
+		keys, err := client.Keys(ctx, processedWebhookKeyPrefix+"*").Result()
+		require.NoError(t, err)
+		assert.Empty(t, keys)
+	})
+
 	t.Run("new event is accepted", func(t *testing.T) {
 		proc, client, _ := setupTestEventProcessor(t)
 

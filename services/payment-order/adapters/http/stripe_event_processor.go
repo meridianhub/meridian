@@ -71,6 +71,11 @@ func NewStripeEventProcessor(cfg StripeEventProcessorConfig) (*StripeEventProces
 // On Redis failure, returns nil to allow processing to continue
 // (the downstream UpdatePaymentOrder has its own idempotency layer).
 func (p *StripeEventProcessor) PreProcess(ctx context.Context, eventID string) error {
+	if eventID == "" {
+		p.logger.Warn("cannot preprocess stripe event: empty event ID")
+		return nil
+	}
+
 	key := processedWebhookKeyPrefix + eventID
 
 	// SET NX - only sets if key does not exist, returns true if set (new event)
