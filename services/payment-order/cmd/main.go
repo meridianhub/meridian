@@ -344,6 +344,12 @@ func run(logger *slog.Logger) error {
 		logger.Info("billing workers disabled (BILLING_ENABLED=false)")
 	}
 
+	// Create saga execution repository for audit logging
+	sagaExecutionRepo := persistence.NewSagaExecutionRepository(db)
+
+	logger.Info("saga orchestration configuration",
+		"saga_orchestration_enabled", svcConfig.SagaOrchestrationEnabled)
+
 	// Create payment order service
 	paymentOrderService, err := service.NewServiceWithConfig(service.Config{
 		Repository:                repo,
@@ -359,6 +365,8 @@ func run(logger *slog.Logger) error {
 		Tracer:                    tracer,
 		InternalClearingEnabled:   internalClearingEnabled,
 		HandlerRegistry:           handlerRegistry,
+		SagaExecutionLogger:       sagaExecutionRepo,
+		SagaOrchestrationEnabled:  svcConfig.SagaOrchestrationEnabled,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create payment order service: %w", err)

@@ -41,6 +41,12 @@ type ServiceConfig struct {
 	// DunningPollInterval is how often the dunning worker polls for overdue
 	// billing runs. Default: 5m.
 	DunningPollInterval time.Duration
+
+	// SagaOrchestrationEnabled controls whether payment orders are orchestrated
+	// via Starlark saga scripts. When false (default), the existing Go-based
+	// orchestration is used. When true, the orchestrator loads and executes
+	// saga scripts from reference-data service.
+	SagaOrchestrationEnabled bool
 }
 
 // Configuration validation errors.
@@ -54,13 +60,14 @@ var (
 // a populated ServiceConfig. It does NOT validate — call Validate separately.
 func LoadServiceConfig() ServiceConfig {
 	return ServiceConfig{
-		PaymentGatewayProvider: env.GetEnvOrDefault("PAYMENT_GATEWAY_PROVIDER", gateway.ProviderMock),
-		StripeAPIKey:           env.GetEnvOrDefault("STRIPE_API_KEY", ""),
-		StripeWebhookSecret:    env.GetEnvOrDefault("STRIPE_WEBHOOK_SECRET", ""),
-		BillingEnabled:         env.GetEnvAsBool("BILLING_ENABLED", false),
-		BillingCronSchedule:    env.GetEnvOrDefault("BILLING_CRON_SCHEDULE", "0 0 * * *"),
-		BillingShadowMode:      env.GetEnvAsBool("BILLING_SHADOW_MODE", false),
-		DunningPollInterval:    env.GetEnvAsDuration("DUNNING_POLL_INTERVAL", 5*time.Minute),
+		PaymentGatewayProvider:   env.GetEnvOrDefault("PAYMENT_GATEWAY_PROVIDER", gateway.ProviderMock),
+		StripeAPIKey:             env.GetEnvOrDefault("STRIPE_API_KEY", ""),
+		StripeWebhookSecret:      env.GetEnvOrDefault("STRIPE_WEBHOOK_SECRET", ""),
+		BillingEnabled:           env.GetEnvAsBool("BILLING_ENABLED", false),
+		BillingCronSchedule:      env.GetEnvOrDefault("BILLING_CRON_SCHEDULE", "0 0 * * *"),
+		BillingShadowMode:        env.GetEnvAsBool("BILLING_SHADOW_MODE", false),
+		DunningPollInterval:      env.GetEnvAsDuration("DUNNING_POLL_INTERVAL", 5*time.Minute),
+		SagaOrchestrationEnabled: env.GetEnvAsBool("USE_SAGA_ORCHESTRATION", false),
 	}
 }
 
@@ -94,6 +101,7 @@ func (c ServiceConfig) LogValues(logger *slog.Logger) {
 		"billing_cron_schedule", c.BillingCronSchedule,
 		"billing_shadow_mode", c.BillingShadowMode,
 		"dunning_poll_interval", c.DunningPollInterval,
+		"saga_orchestration_enabled", c.SagaOrchestrationEnabled,
 	)
 }
 

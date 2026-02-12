@@ -10,6 +10,7 @@ import (
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
 	"github.com/meridianhub/meridian/services/payment-order/config"
+	"github.com/meridianhub/meridian/services/payment-order/domain"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"google.golang.org/protobuf/proto"
@@ -72,8 +73,10 @@ type PaymentOrchestrator struct {
 	lockClient                LockClient // Distributed lock client for preventing concurrent lien execution
 
 	// Starlark saga execution fields
-	starlarkRunner  *saga.StarlarkSagaRunner // Executes saga scripts
-	handlerRegistry *saga.HandlerRegistry    // Registry of payment-order handlers
+	starlarkRunner           *saga.StarlarkSagaRunner // Executes saga scripts
+	handlerRegistry          *saga.HandlerRegistry    // Registry of payment-order handlers
+	sagaExecutionLogger      domain.SagaExecutionLogger
+	sagaOrchestrationEnabled bool // Feature flag: when true, use Starlark saga orchestration
 }
 
 // PaymentOrchestratorConfig contains dependencies for creating a PaymentOrchestrator
@@ -98,6 +101,14 @@ type PaymentOrchestratorConfig struct {
 	// uses it for the StarlarkSagaRunner, giving saga scripts access to all handlers.
 	// When nil, a new empty registry is created (backward compatible).
 	HandlerRegistry *saga.HandlerRegistry
+
+	// SagaExecutionLogger persists saga execution records for audit. Optional.
+	SagaExecutionLogger domain.SagaExecutionLogger
+
+	// SagaOrchestrationEnabled controls whether the Starlark saga orchestration
+	// path is used. When false, a stub error is returned to callers of
+	// ExecutePaymentSaga, and Orchestrate uses the existing Go-based flow.
+	SagaOrchestrationEnabled bool
 }
 
 // NewPaymentOrchestrator creates a new payment orchestrator with the given dependencies.
@@ -188,6 +199,8 @@ func NewPaymentOrchestrator(cfg PaymentOrchestratorConfig) (*PaymentOrchestrator
 		lockClient:                cfg.LockClient,
 		starlarkRunner:            starlarkRunner,
 		handlerRegistry:           handlerRegistry,
+		sagaExecutionLogger:       cfg.SagaExecutionLogger,
+		sagaOrchestrationEnabled:  cfg.SagaOrchestrationEnabled,
 	}
 
 	// Set orchestrator reference in handler deps for PostLedgerEntries callback

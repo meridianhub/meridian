@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
@@ -12,25 +14,72 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+// ErrSagaOrchestrationDisabled is returned when ExecutePaymentSaga is called
+// but USE_SAGA_ORCHESTRATION is not enabled.
+var ErrSagaOrchestrationDisabled = errors.New("saga orchestration is not enabled")
+
 // Orchestrate executes the payment saga using Starlark script execution.
 // The saga script is fetched from reference-data service and executed via StarlarkSagaRunner.
 // Compensation is handled automatically by the Starlark runtime on failure.
+//
+// When sagaOrchestrationEnabled is false, this method logs a warning and marks the
+// payment order as failed because the Go-based orchestration was removed in favour of
+// Starlark. Enable USE_SAGA_ORCHESTRATION=true to use Starlark saga execution.
 func (o *PaymentOrchestrator) Orchestrate(ctx context.Context, po *domain.PaymentOrder) {
-	o.logger.Info("starting payment saga with Starlark execution",
+	if !o.sagaOrchestrationEnabled {
+		o.logger.Warn("saga orchestration disabled, payment order will not be processed",
+			"payment_order_id", po.ID.String(),
+			"hint", "set USE_SAGA_ORCHESTRATION=true to enable Starlark saga execution")
+		if err := o.failPaymentOrder(ctx, po, "saga orchestration is disabled (USE_SAGA_ORCHESTRATION=false)", "SAGA_DISABLED"); err != nil {
+			o.logger.Error("failed to mark payment order as failed",
+				"payment_order_id", po.ID.String(),
+				"error", err)
+		}
+		return
+	}
+
+	output, err := o.ExecutePaymentSaga(ctx, po.ID, "payment_execution", po)
+	if err != nil {
+		o.logger.Error("ExecutePaymentSaga returned error",
+			"payment_order_id", po.ID.String(),
+			"error", err)
+		return
+	}
+
+	o.logger.Info("Orchestrate completed via ExecutePaymentSaga",
 		"payment_order_id", po.ID.String(),
+		"success", output.Success)
+}
+
+// ExecutePaymentSaga loads a saga definition, executes it via StarlarkSagaRunner,
+// persists the execution record, and handles the result. This is the primary
+// integration point between the payment orchestrator and the saga engine.
+//
+// Flow: load saga -> build input -> execute via sagaRunner.Run() -> persist execution -> return output
+func (o *PaymentOrchestrator) ExecutePaymentSaga(ctx context.Context, paymentOrderID uuid.UUID, sagaName string, po *domain.PaymentOrder) (*saga.RunnerOutput, error) {
+	if !o.sagaOrchestrationEnabled {
+		return nil, ErrSagaOrchestrationDisabled
+	}
+
+	startTime := time.Now()
+	executionID := uuid.New()
+
+	o.logger.Info("starting payment saga execution",
+		"payment_order_id", paymentOrderID.String(),
+		"saga_name", sagaName,
+		"execution_id", executionID.String(),
 		"correlation_id", po.CorrelationID)
 
 	// Check if all dependencies are available
 	if o.currentAccountClient == nil || o.paymentGateway == nil {
 		o.logger.Error("saga dependencies not configured",
 			"payment_order_id", po.ID.String())
-		// Async path: log and swallow error - best effort failure handling
 		if err := o.failPaymentOrder(ctx, po, "service configuration error", "INTERNAL_ERROR"); err != nil {
 			o.logger.Error("failed to mark payment order as failed",
 				"payment_order_id", po.ID.String(),
 				"error", err)
 		}
-		return
+		return nil, fmt.Errorf("saga dependencies not configured")
 	}
 
 	// Check if reference data client is available for GetSaga
@@ -42,22 +91,22 @@ func (o *PaymentOrchestrator) Orchestrate(ctx context.Context, po *domain.Paymen
 				"payment_order_id", po.ID.String(),
 				"error", err)
 		}
-		return
+		return nil, fmt.Errorf("reference data client not configured")
 	}
 
 	// Fetch saga script from reference-data service
-	sagaDef, err := o.referenceDataClient.GetSaga(ctx, "payment_execution", 0) // 0 = fetch ACTIVE version
+	sagaDef, err := o.referenceDataClient.GetSaga(ctx, sagaName, 0) // 0 = fetch ACTIVE version
 	if err != nil {
 		o.logger.Error("failed to fetch saga definition from reference-data",
 			"payment_order_id", po.ID.String(),
-			"saga_name", "payment_execution",
+			"saga_name", sagaName,
 			"error", err)
 		if err := o.failPaymentOrder(ctx, po, fmt.Sprintf("failed to fetch saga: %v", err), "INTERNAL_ERROR"); err != nil {
 			o.logger.Error("failed to mark payment order as failed",
 				"payment_order_id", po.ID.String(),
 				"error", err)
 		}
-		return
+		return nil, fmt.Errorf("failed to fetch saga definition: %w", err)
 	}
 
 	o.logger.Info("fetched saga definition from reference-data",
@@ -75,38 +124,112 @@ func (o *PaymentOrchestrator) Orchestrate(ctx context.Context, po *domain.Paymen
 		correlationID = uuid.New()
 	}
 
-	// Map PaymentOrder domain object to RunnerInput.Input map
-	runnerInput := saga.RunnerInput{
-		SagaExecutionID: uuid.New(),
-		CorrelationID:   correlationID,
-		Input: map[string]interface{}{
-			"payment_order_id":   po.ID.String(),
-			"debtor_account_id":  po.DebtorAccountID,
-			"creditor_reference": po.CreditorReference,
-			"amount_cents":       domain.ToMinorUnits(po.Amount),
-			"currency":           domain.CurrencyCode(po.Amount),
-			"idempotency_key":    po.IdempotencyKey,
-			"instrument_code":    po.InstrumentCode,
-			"payment_attributes": po.PaymentAttributes,
-		},
+	// Build saga input from payment order
+	sagaInput := map[string]interface{}{
+		"payment_order_id":   po.ID.String(),
+		"debtor_account_id":  po.DebtorAccountID,
+		"creditor_reference": po.CreditorReference,
+		"amount_cents":       domain.ToMinorUnits(po.Amount),
+		"currency":           domain.CurrencyCode(po.Amount),
+		"idempotency_key":    po.IdempotencyKey,
+		"instrument_code":    po.InstrumentCode,
+		"payment_attributes": po.PaymentAttributes,
 	}
 
+	runnerInput := saga.RunnerInput{
+		SagaExecutionID: executionID,
+		CorrelationID:   correlationID,
+		Input:           sagaInput,
+	}
+
+	// Persist initial execution record (RUNNING)
+	o.logSagaExecution(ctx, &domain.SagaExecution{
+		ID:             executionID,
+		PaymentOrderID: paymentOrderID,
+		SagaName:       sagaName,
+		SagaVersion:    sagaDef.Version,
+		Status:         domain.SagaExecutionStatusRunning,
+		CorrelationID:  correlationID.String(),
+		Input:          sagaInput,
+		StartedAt:      startTime,
+	})
+
 	// Execute saga via StarlarkSagaRunner
-	result, err := o.starlarkRunner.ExecuteSaga(ctx, "payment_execution", sagaDef.Script, runnerInput)
+	result, err := o.starlarkRunner.ExecuteSaga(ctx, sagaName, sagaDef.Script, runnerInput)
+	durationMs := time.Since(startTime).Milliseconds()
+
 	if err != nil {
 		o.logger.Error("starlark saga runner returned error",
 			"payment_order_id", po.ID.String(),
-			"error", err)
+			"execution_id", executionID.String(),
+			"error", err,
+			"duration_ms", durationMs)
+
+		now := time.Now()
+		o.logSagaExecution(ctx, &domain.SagaExecution{
+			ID:             executionID,
+			PaymentOrderID: paymentOrderID,
+			SagaName:       sagaName,
+			SagaVersion:    sagaDef.Version,
+			Status:         domain.SagaExecutionStatusFailed,
+			CorrelationID:  correlationID.String(),
+			Input:          sagaInput,
+			ErrorMessage:   err.Error(),
+			DurationMs:     durationMs,
+			StartedAt:      startTime,
+			CompletedAt:    &now,
+		})
+
 		if err := o.failPaymentOrder(ctx, po, fmt.Sprintf("saga execution error: %v", err), "SAGA_FAILED"); err != nil {
 			o.logger.Error("failed to mark payment order as failed",
 				"payment_order_id", po.ID.String(),
 				"error", err)
 		}
-		return
+		return nil, fmt.Errorf("saga execution failed: %w", err)
 	}
 
-	// Handle saga result
+	// Persist completed execution record
+	now := time.Now()
+	execStatus := domain.SagaExecutionStatusCompleted
+	errorMsg := ""
+	if !result.Success {
+		execStatus = domain.SagaExecutionStatusFailed
+		errorMsg = result.Error
+	}
+	o.logSagaExecution(ctx, &domain.SagaExecution{
+		ID:             executionID,
+		PaymentOrderID: paymentOrderID,
+		SagaName:       sagaName,
+		SagaVersion:    sagaDef.Version,
+		Status:         execStatus,
+		CorrelationID:  correlationID.String(),
+		Input:          sagaInput,
+		Output:         result.Output,
+		ErrorMessage:   errorMsg,
+		StepCount:      len(result.StepResults),
+		DurationMs:     durationMs,
+		StartedAt:      startTime,
+		CompletedAt:    &now,
+	})
+
+	// Handle saga result (state transitions, events)
 	o.handleStarlarkSagaResult(ctx, po, result)
+
+	return result, nil
+}
+
+// logSagaExecution persists a saga execution record if the logger is configured.
+func (o *PaymentOrchestrator) logSagaExecution(ctx context.Context, execution *domain.SagaExecution) {
+	if o.sagaExecutionLogger == nil {
+		return
+	}
+	if err := o.sagaExecutionLogger.PersistExecution(ctx, execution); err != nil {
+		o.logger.Error("failed to persist saga execution record",
+			"execution_id", execution.ID.String(),
+			"payment_order_id", execution.PaymentOrderID.String(),
+			"status", execution.Status,
+			"error", err)
+	}
 }
 
 // handleStarlarkSagaResult processes the result from StarlarkSagaRunner execution.
