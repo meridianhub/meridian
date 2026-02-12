@@ -14,7 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
-	"github.com/meridianhub/meridian/cmd/position-tool/internal/adapters/csv"
+	csvadapter "github.com/meridianhub/meridian/cmd/position-tool/internal/adapters/csv"
 	"github.com/meridianhub/meridian/cmd/position-tool/internal/checkpoint"
 	"github.com/meridianhub/meridian/cmd/position-tool/internal/infra"
 	"github.com/meridianhub/meridian/cmd/position-tool/internal/validation"
@@ -277,7 +277,7 @@ func executeDryRun(ctx context.Context, cfg *importConfig, cp *checkpoint.Checkp
 	registry := &instrumentCheckerRegistry{checker: instrumentChecker}
 
 	// Create CSV parser
-	csvParser := csv.NewParser(registry)
+	csvParser := csvadapter.NewParser(registry)
 
 	// Set up validation pipeline (minimal for dry-run - no DB lookups needed)
 	duplicateChecker := validation.NewDuplicateChecker(validation.DefaultBloomFilterConfig(), nil)
@@ -293,12 +293,12 @@ func executeDryRun(ctx context.Context, cfg *importConfig, cp *checkpoint.Checkp
 	defer func() { _ = pipeline.Close() }()
 
 	// Parse and validate CSV
-	parseConfig := csv.ParseConfig{
+	parseConfig := csvadapter.ParseConfig{
 		BatchSize:     cfg.BatchSize,
 		SkipEmptyRows: true,
 	}
 
-	parseResult, err := csvParser.Parse(ctx, file, parseConfig, func(batch csv.RowBatch) error {
+	parseResult, err := csvParser.Parse(ctx, file, parseConfig, func(batch csvadapter.RowBatch) error {
 		// Validate each row in the batch
 		for _, csvRow := range batch.Rows {
 			validationRow := csvRowToValidationRow(&csvRow)
@@ -344,7 +344,7 @@ type importProcessor struct {
 
 // processRow handles validation and insertion of a single CSV row.
 // Returns an error only for fatal errors that should stop processing.
-func (p *importProcessor) processRow(ctx context.Context, csvRow *csv.ImportRow) error {
+func (p *importProcessor) processRow(ctx context.Context, csvRow *csvadapter.ImportRow) error {
 	// Skip rows before the resume point
 	if p.cp.ProcessedRows > 0 && csvRow.LineNumber <= p.cp.LastProcessedLine {
 		return nil
@@ -380,7 +380,7 @@ func (p *importProcessor) processRow(ctx context.Context, csvRow *csv.ImportRow)
 
 // tryComputeBucketKey evaluates the CEL expression to generate the bucket key.
 // Returns (bucketKey, true) on success, or ("", false) if evaluation fails.
-func (p *importProcessor) tryComputeBucketKey(csvRow *csv.ImportRow, fungibilityExpr string) (string, bool) {
+func (p *importProcessor) tryComputeBucketKey(csvRow *csvadapter.ImportRow, fungibilityExpr string) (string, bool) {
 	if fungibilityExpr == "" {
 		return "", true
 	}
@@ -396,7 +396,7 @@ func (p *importProcessor) tryComputeBucketKey(csvRow *csv.ImportRow, fungibility
 
 // createAndInsertPosition creates a domain.Position and adds it to the batch inserter.
 // Returns an error only for fatal errors that should stop processing.
-func (p *importProcessor) createAndInsertPosition(ctx context.Context, csvRow *csv.ImportRow, bucketKey string) error {
+func (p *importProcessor) createAndInsertPosition(ctx context.Context, csvRow *csvadapter.ImportRow, bucketKey string) error {
 	amount, err := decimal.NewFromString(csvRow.Amount)
 	if err != nil {
 		p.recordValidationFailure()
@@ -436,7 +436,7 @@ func (p *importProcessor) recordValidationFailure() {
 
 // processBatch handles a batch of CSV rows during import.
 // Returns context.Canceled if the context is cancelled, nil otherwise.
-func (p *importProcessor) processBatch(ctx context.Context, batch csv.RowBatch, checkpointMgr *checkpoint.PostgresManager) error {
+func (p *importProcessor) processBatch(ctx context.Context, batch csvadapter.RowBatch, checkpointMgr *checkpoint.PostgresManager) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -461,7 +461,7 @@ func (p *importProcessor) processBatch(ctx context.Context, batch csv.RowBatch, 
 type importDependencies struct {
 	file              *os.File
 	instrumentChecker *validation.InstrumentChecker
-	csvParser         *csv.Parser
+	csvParser         *csvadapter.Parser
 	celEval           *infra.CELEvaluator
 	pipeline          *validation.Pipeline
 	batchInserter     *infra.BatchInserter
@@ -500,7 +500,7 @@ func initImportDependencies(ctx context.Context, cfg *importConfig, pool *pgxpoo
 		return nil, fmt.Errorf("failed to create instrument checker: %w", err)
 	}
 
-	deps.csvParser = csv.NewParser(&instrumentCheckerRegistry{checker: deps.instrumentChecker})
+	deps.csvParser = csvadapter.NewParser(&instrumentCheckerRegistry{checker: deps.instrumentChecker})
 
 	deps.celEval, err = infra.NewCELEvaluatorDefault()
 	if err != nil {
@@ -555,7 +555,7 @@ func handleImportInterrupt(_ context.Context, deps *importDependencies, cp *chec
 }
 
 // finalizeImport flushes remaining positions and marks checkpoint complete.
-func finalizeImport(ctx context.Context, deps *importDependencies, cp *checkpoint.Checkpoint, checkpointMgr *checkpoint.PostgresManager, result *importResult, parseResult *csv.ParseResult, logger *slog.Logger) (*importResult, error) {
+func finalizeImport(ctx context.Context, deps *importDependencies, cp *checkpoint.Checkpoint, checkpointMgr *checkpoint.PostgresManager, result *importResult, parseResult *csvadapter.ParseResult, logger *slog.Logger) (*importResult, error) {
 	if flushErr := deps.batchInserter.Flush(ctx); flushErr != nil {
 		if markErr := checkpointMgr.Fail(ctx, cp, flushErr); markErr != nil {
 			logger.Warn("failed to mark checkpoint as failed", "error", markErr)
@@ -590,7 +590,7 @@ func executeLiveImport(ctx context.Context, cfg *importConfig, cp *checkpoint.Ch
 		fungibilityExprs: make(map[string]string),
 	}
 
-	parseResult, parseErr := deps.csvParser.Parse(ctx, deps.file, csv.ParseConfig{BatchSize: cfg.BatchSize, SkipEmptyRows: true}, func(batch csv.RowBatch) error {
+	parseResult, parseErr := deps.csvParser.Parse(ctx, deps.file, csvadapter.ParseConfig{BatchSize: cfg.BatchSize, SkipEmptyRows: true}, func(batch csvadapter.RowBatch) error {
 		return proc.processBatch(ctx, batch, checkpointMgr)
 	})
 
@@ -598,7 +598,7 @@ func executeLiveImport(ctx context.Context, cfg *importConfig, cp *checkpoint.Ch
 }
 
 // handleParseResult handles the outcome of CSV parsing and returns the final result.
-func handleParseResult(ctx context.Context, deps *importDependencies, cp *checkpoint.Checkpoint, checkpointMgr *checkpoint.PostgresManager, result *importResult, parseResult *csv.ParseResult, parseErr error, logger *slog.Logger) (*importResult, error) {
+func handleParseResult(ctx context.Context, deps *importDependencies, cp *checkpoint.Checkpoint, checkpointMgr *checkpoint.PostgresManager, result *importResult, parseResult *csvadapter.ParseResult, parseErr error, logger *slog.Logger) (*importResult, error) {
 	if errors.Is(parseErr, context.Canceled) {
 		return handleImportInterrupt(ctx, deps, cp, checkpointMgr, result, logger), nil
 	}
@@ -612,7 +612,7 @@ func handleParseResult(ctx context.Context, deps *importDependencies, cp *checkp
 }
 
 // csvRowToValidationRow converts a CSV row to a validation row.
-func csvRowToValidationRow(csvRow *csv.ImportRow) *validation.ImportRow {
+func csvRowToValidationRow(csvRow *csvadapter.ImportRow) *validation.ImportRow {
 	return &validation.ImportRow{
 		LineNumber:     csvRow.LineNumber,
 		AccountID:      csvRow.AccountID,

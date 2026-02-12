@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
-	"github.com/meridianhub/meridian/cmd/market-data-tool/internal/adapters/csv"
+	csvadapter "github.com/meridianhub/meridian/cmd/market-data-tool/internal/adapters/csv"
 	"github.com/meridianhub/meridian/cmd/market-data-tool/internal/checkpoint"
 	"github.com/meridianhub/meridian/cmd/market-data-tool/internal/infra"
 	"github.com/meridianhub/meridian/cmd/market-data-tool/internal/validation"
@@ -340,15 +340,15 @@ func executeDryRun(
 	})
 
 	// Create CSV parser
-	csvParser := csv.NewParser(dataset)
+	csvParser := csvadapter.NewParser(dataset)
 
 	// Parse and validate CSV
-	parseConfig := csv.ParseConfig{
+	parseConfig := csvadapter.ParseConfig{
 		BatchSize:     cfg.BatchSize,
 		SkipEmptyRows: true,
 	}
 
-	parseResult, err := csvParser.Parse(ctx, file, parseConfig, func(batch csv.RowBatch) error {
+	parseResult, err := csvParser.Parse(ctx, file, parseConfig, func(batch csvadapter.RowBatch) error {
 		// Validate each row in the batch
 		for _, csvRow := range batch.Rows {
 			validationRow := csvRowToValidationRow(&csvRow, cfg.Dataset)
@@ -424,15 +424,15 @@ func executeLiveImport(
 	})
 
 	// Create CSV parser
-	csvParser := csv.NewParser(dataset)
+	csvParser := csvadapter.NewParser(dataset)
 
 	// Process import
-	parseConfig := csv.ParseConfig{
+	parseConfig := csvadapter.ParseConfig{
 		BatchSize:     cfg.BatchSize,
 		SkipEmptyRows: true,
 	}
 
-	parseResult, parseErr := csvParser.Parse(ctx, file, parseConfig, func(batch csv.RowBatch) error {
+	parseResult, parseErr := csvParser.Parse(ctx, file, parseConfig, func(batch csvadapter.RowBatch) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -545,7 +545,7 @@ func handleImportInterrupt(
 }
 
 // csvRowToValidationRow converts a CSV row to a validation row.
-func csvRowToValidationRow(csvRow *csv.ObservationRow, datasetCode string) *validation.ObservationRow {
+func csvRowToValidationRow(csvRow *csvadapter.ObservationRow, datasetCode string) *validation.ObservationRow {
 	return &validation.ObservationRow{
 		LineNumber:   csvRow.LineNumber,
 		DatasetCode:  datasetCode,
@@ -559,7 +559,7 @@ func csvRowToValidationRow(csvRow *csv.ObservationRow, datasetCode string) *vali
 }
 
 // csvRowToObservation converts a CSV row to a gRPC observation entry.
-func csvRowToObservation(csvRow *csv.ObservationRow, datasetCode, sourceCode string) *infra.ObservationEntry {
+func csvRowToObservation(csvRow *csvadapter.ObservationRow, datasetCode, sourceCode string) *infra.ObservationEntry {
 	return &infra.ObservationEntry{
 		DatasetCode:     datasetCode,
 		ObservedAt:      csvRow.ObservedAt,

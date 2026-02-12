@@ -215,7 +215,7 @@ func BenchmarkNewTransactionRejected(b *testing.B) {
 
 // BenchmarkEventTypeSwitch benchmarks a typical event type switch operation.
 func BenchmarkEventTypeSwitch(b *testing.B) {
-	events := []domain.DomainEvent{}
+	events := make([]domain.DomainEvent, 0, 3)
 
 	// Create mix of events
 	money, _ := domain.NewMoney(decimal.NewFromInt(100), domain.CurrencyGBP)

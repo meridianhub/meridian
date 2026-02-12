@@ -294,7 +294,7 @@ func createServiceWithClients(
 	tracer *observability.Tracer,
 ) (*service.Service, *serviceClients, error) {
 	// Track cleanup functions for graceful shutdown
-	var cleanupFuncs []func()
+	cleanupFuncs := make([]func(), 0, 1)
 
 	// Create Position Keeping client using service-owned client package
 	// The client has built-in resilience patterns (circuit breaker + retry)

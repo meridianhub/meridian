@@ -69,9 +69,8 @@ func NewTenantClient(ctx context.Context, cfg Config) (*TenantClient, error) {
 
 	if cfg.ServiceURL != "" {
 		// Direct connection for local development or custom endpoints
-		opts := []grpc.DialOption{
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-		}
+		opts := make([]grpc.DialOption, 0, 1+len(cfg.DialOptions))
+		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		opts = append(opts, cfg.DialOptions...)
 		conn, err = grpc.NewClient(cfg.ServiceURL, opts...)
 		if err != nil {

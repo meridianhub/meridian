@@ -232,7 +232,7 @@ These services are not part of the BIAN standard but provide platform infrastruc
 
 ## Technology Stack
 
-- **Language**: Go 1.25+
+- **Language**: Go 1.26+
 - **API Protocol**: Protocol Buffers 3 + gRPC
 - **API Tooling**: buf CLI for linting and code generation
 - **Database**: CockroachDB or YugabyteDB (distributed SQL)
@@ -261,7 +261,7 @@ for single-broker Kafka configuration.
 
 ## Quick Start
 
-**Prerequisites**: Go 1.25+, Docker, kubectl, kind, tilt ([see detailed
+**Prerequisites**: Go 1.26+, Docker, kubectl, kind, tilt ([see detailed
 setup](CONTRIBUTING.md#development-environment-setup))
 
 ```bash

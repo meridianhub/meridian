@@ -161,7 +161,7 @@ func TestBuildPayload_WithMetadata(t *testing.T) {
 		if len(block.Fields) > 0 {
 			foundMetadata = true
 			// Check metadata fields are present
-			var fieldTexts []string
+			fieldTexts := make([]string, 0, len(block.Fields))
 			for _, field := range block.Fields {
 				fieldTexts = append(fieldTexts, field.Text)
 			}
