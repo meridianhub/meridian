@@ -40,7 +40,13 @@ import (
 	currentaccountclient "github.com/meridianhub/meridian/services/current-account/client"
 	financialaccountingclient "github.com/meridianhub/meridian/services/financial-accounting/client"
 	internalbankaccountclient "github.com/meridianhub/meridian/services/internal-bank-account/client"
+	partyclient "github.com/meridianhub/meridian/services/party/client"
 	positionkeepingclient "github.com/meridianhub/meridian/services/position-keeping/client"
+
+	// Reference data client for saga definitions and instrument lookups
+	poclients "github.com/meridianhub/meridian/services/payment-order/adapters/clients"
+	referencedataclient "github.com/meridianhub/meridian/services/reference-data/client"
+
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 )
 
@@ -230,12 +236,52 @@ func run(logger *slog.Logger) error {
 		}
 	}
 
+	// Create Party client for Starlark handlers (party.get_default_payment_method).
+	partyClient, partyCleanup, err := partyclient.New(partyclient.Config{
+		ServiceName: partyclient.ServiceName,
+		Namespace:   namespace,
+		Port:        ports.Party,
+		Timeout:     defaults.DefaultRPCTimeout,
+		Tracer:      tracer,
+	})
+	if err != nil {
+		logger.Warn("party client unavailable, Starlark party handlers not registered",
+			"error", err)
+	} else {
+		defer partyCleanup()
+		if err := partyclient.RegisterStarlarkHandlers(handlerRegistry, partyClient); err != nil {
+			logger.Warn("failed to register party handlers", "error", err)
+		}
+	}
+
+	// Create Reference Data client for saga definitions and instrument lookups.
+	// Uses the shared gRPC connection via ReferenceDataClientWrapper which implements
+	// service.ReferenceDataClient (GetSaga + RetrieveInstrument).
+	refDataClient, refDataCleanup, err := referencedataclient.New(ctx, referencedataclient.Config{
+		ServiceName: referencedataclient.ServiceName,
+		Namespace:   namespace,
+		Port:        ports.ReferenceData,
+		Timeout:     defaults.DefaultRPCTimeout,
+		Tracer:      tracer,
+	})
+	var referenceDataClient service.ReferenceDataClient
+	if err != nil {
+		logger.Warn("reference-data client unavailable, saga definitions will not be fetched",
+			"error", err)
+	} else {
+		defer func() {
+			if err := refDataCleanup(); err != nil {
+				logger.Error("failed to close reference-data client", "error", err)
+			}
+		}()
+		// Wrap the reference-data client to implement service.ReferenceDataClient interface
+		referenceDataClient = poclients.NewReferenceDataClient(refDataClient.Conn())
+		// Register reference-data Starlark handlers if needed in the future
+		logger.Info("reference-data client connected", "port", ports.ReferenceData)
+	}
+
 	logger.Info("Starlark handler registry initialized",
 		"registered_handlers", len(handlerRegistry.List()))
-
-	// handlerRegistry is available for use with StarlarkRunner when
-	// payment execution sagas are migrated from Go orchestrators to Starlark.
-	_ = handlerRegistry
 
 	// Start billing background workers (feature-flagged)
 	billingEnabled := env.GetEnvAsBool("BILLING_ENABLED", false)
@@ -304,6 +350,7 @@ func run(logger *slog.Logger) error {
 		CurrentAccountClient:      currentAccountClient,
 		FinancialAccountingClient: financialAccountingClient,
 		InternalBankAccountClient: internalBankAccountClient, // May be nil if internal clearing disabled
+		ReferenceDataClient:       referenceDataClient,       // May be nil if reference-data unavailable
 		PaymentGateway:            paymentGateway,
 		GatewayAccountConfig:      gatewayAccountConfig,
 		KafkaPublisher:            kafkaProducer,
@@ -311,6 +358,7 @@ func run(logger *slog.Logger) error {
 		Logger:                    logger,
 		Tracer:                    tracer,
 		InternalClearingEnabled:   internalClearingEnabled,
+		HandlerRegistry:           handlerRegistry,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create payment order service: %w", err)
