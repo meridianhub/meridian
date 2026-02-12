@@ -624,6 +624,7 @@ func TestIntegration_HappyPath_Initiate_Reserve_Execute_Complete(t *testing.T) {
 		KafkaPublisher:            nil, // Optional for tests
 		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    logger,
+		SagaOrchestrationEnabled:  true,
 		SagaTimeout:               30 * time.Second,
 	})
 	require.NoError(t, err)
@@ -699,6 +700,7 @@ func TestIntegration_Idempotency_SameKeyReturnsSameResult(t *testing.T) {
 		KafkaPublisher:            nil, // Optional for tests
 		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    logger,
+		SagaOrchestrationEnabled:  true,
 	})
 	require.NoError(t, err)
 
@@ -776,6 +778,7 @@ func TestIntegration_DuplicateWebhook_Idempotent(t *testing.T) {
 		KafkaPublisher:            nil, // Optional for tests
 		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    logger,
+		SagaOrchestrationEnabled:  true,
 	})
 	require.NoError(t, err)
 
@@ -851,6 +854,7 @@ func TestIntegration_InsufficientFunds_SagaFails(t *testing.T) {
 		KafkaPublisher:            nil, // Optional for tests
 		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    logger,
+		SagaOrchestrationEnabled:  true,
 	})
 	require.NoError(t, err)
 
@@ -896,6 +900,7 @@ func TestIntegration_GatewayTimeout_CompensationReleasesLien(t *testing.T) {
 		KafkaPublisher:            nil, // Optional for tests
 		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    logger,
+		SagaOrchestrationEnabled:  true,
 	})
 	require.NoError(t, err)
 
@@ -945,6 +950,7 @@ func TestIntegration_GatewayRejects_StatusFailed(t *testing.T) {
 		KafkaPublisher:            nil, // Optional for tests
 		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    logger,
+		SagaOrchestrationEnabled:  true,
 	})
 	require.NoError(t, err)
 
@@ -992,6 +998,7 @@ func TestIntegration_ConcurrentPayments_SameAccount(t *testing.T) {
 		KafkaPublisher:            nil, // Optional for tests
 		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    logger,
+		SagaOrchestrationEnabled:  true,
 	})
 	require.NoError(t, err)
 
@@ -1072,6 +1079,7 @@ func TestIntegration_NetworkTimeout_DuringExecutePhase(t *testing.T) {
 		KafkaPublisher:            nil, // Optional for tests
 		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    logger,
+		SagaOrchestrationEnabled:  true,
 		SagaTimeout:               3 * time.Second, // Short timeout for test
 	})
 	require.NoError(t, err)
@@ -1131,6 +1139,7 @@ func TestIntegration_PartialFailure_GatewayAcceptsLedgerFails(t *testing.T) {
 		KafkaPublisher:            nil, // Optional for tests
 		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    logger,
+		SagaOrchestrationEnabled:  true,
 	})
 	require.NoError(t, err)
 
@@ -1190,6 +1199,7 @@ func TestIntegration_MoneyPrecision_ThroughAllTranslations(t *testing.T) {
 		KafkaPublisher:            nil, // Optional for tests
 		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    logger,
+		SagaOrchestrationEnabled:  true,
 	})
 	require.NoError(t, err)
 
@@ -1283,6 +1293,7 @@ func TestIntegration_InvalidInputs_ValidationErrors(t *testing.T) {
 		KafkaPublisher:            nil, // Optional for tests
 		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    logger,
+		SagaOrchestrationEnabled:  true,
 	})
 	require.NoError(t, err)
 
@@ -1373,6 +1384,7 @@ func TestIntegration_RetrievePaymentOrder(t *testing.T) {
 		KafkaPublisher:            nil, // Optional for tests
 		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    logger,
+		SagaOrchestrationEnabled:  true,
 	})
 	require.NoError(t, err)
 
@@ -1425,6 +1437,7 @@ func TestIntegration_CancelPaymentOrder(t *testing.T) {
 		KafkaPublisher:            nil, // Optional for tests
 		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    logger,
+		SagaOrchestrationEnabled:  true,
 	})
 	require.NoError(t, err)
 
@@ -1477,6 +1490,7 @@ func TestIntegration_ListPaymentOrders_Pagination(t *testing.T) {
 		KafkaPublisher:            nil, // Optional for tests
 		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    logger,
+		SagaOrchestrationEnabled:  true,
 	})
 	require.NoError(t, err)
 
@@ -1589,6 +1603,7 @@ func TestIntegration_ReversePaymentOrder(t *testing.T) {
 		KafkaPublisher:            nil, // Optional for tests
 		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    logger,
+		SagaOrchestrationEnabled:  true,
 	})
 	require.NoError(t, err)
 

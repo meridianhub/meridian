@@ -2069,11 +2069,12 @@ func TestSagaOrchestration_HappyPath(t *testing.T) {
 
 	// Create orchestrator with all dependencies
 	orchestrator, err := NewPaymentOrchestrator(PaymentOrchestratorConfig{
-		Logger:               slog.New(slog.NewJSONHandler(io.Discard, nil)),
-		Repo:                 repo,
-		CurrentAccountClient: caClient,
-		PaymentGateway:       gwMock,
-		ReferenceDataClient:  NewMockReferenceDataClient(),
+		Logger:                   slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		Repo:                     repo,
+		CurrentAccountClient:     caClient,
+		PaymentGateway:           gwMock,
+		ReferenceDataClient:      NewMockReferenceDataClient(),
+		SagaOrchestrationEnabled: true,
 	})
 	require.NoError(t, err)
 
@@ -2141,11 +2142,12 @@ func TestSagaOrchestration_LienFailure(t *testing.T) {
 
 	// Create orchestrator with dependencies
 	orchestrator, err := NewPaymentOrchestrator(PaymentOrchestratorConfig{
-		Logger:               slog.New(slog.NewJSONHandler(io.Discard, nil)),
-		Repo:                 repo,
-		CurrentAccountClient: caClient,
-		PaymentGateway:       gwMock,
-		ReferenceDataClient:  NewMockReferenceDataClient(),
+		Logger:                   slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		Repo:                     repo,
+		CurrentAccountClient:     caClient,
+		PaymentGateway:           gwMock,
+		ReferenceDataClient:      NewMockReferenceDataClient(),
+		SagaOrchestrationEnabled: true,
 	})
 	require.NoError(t, err)
 
@@ -2210,11 +2212,12 @@ func TestSagaOrchestration_GatewayFailure(t *testing.T) {
 
 	// Create orchestrator with dependencies
 	orchestrator, err := NewPaymentOrchestrator(PaymentOrchestratorConfig{
-		Logger:               slog.New(slog.NewJSONHandler(io.Discard, nil)),
-		Repo:                 repo,
-		CurrentAccountClient: caClient,
-		PaymentGateway:       gwMock,
-		ReferenceDataClient:  NewMockReferenceDataClient(),
+		Logger:                   slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		Repo:                     repo,
+		CurrentAccountClient:     caClient,
+		PaymentGateway:           gwMock,
+		ReferenceDataClient:      NewMockReferenceDataClient(),
+		SagaOrchestrationEnabled: true,
 	})
 	require.NoError(t, err)
 
@@ -2305,11 +2308,12 @@ func TestSagaOrchestration_Timeout(t *testing.T) {
 
 	// Create orchestrator with dependencies
 	orchestrator, err := NewPaymentOrchestrator(PaymentOrchestratorConfig{
-		Logger:               slog.New(slog.NewJSONHandler(io.Discard, nil)),
-		Repo:                 repo,
-		CurrentAccountClient: caClient,
-		PaymentGateway:       gwMock,
-		ReferenceDataClient:  NewMockReferenceDataClient(),
+		Logger:                   slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		Repo:                     repo,
+		CurrentAccountClient:     caClient,
+		PaymentGateway:           gwMock,
+		ReferenceDataClient:      NewMockReferenceDataClient(),
+		SagaOrchestrationEnabled: true,
 	})
 	require.NoError(t, err)
 
@@ -2472,11 +2476,12 @@ func TestSagaOrchestration_MalformedLienResponse(t *testing.T) {
 
 	// Create orchestrator with dependencies
 	orchestrator, err := NewPaymentOrchestrator(PaymentOrchestratorConfig{
-		Logger:               slog.New(slog.NewJSONHandler(io.Discard, nil)),
-		Repo:                 repo,
-		CurrentAccountClient: caClient,
-		PaymentGateway:       gwClient,
-		ReferenceDataClient:  NewMockReferenceDataClient(),
+		Logger:                   slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		Repo:                     repo,
+		CurrentAccountClient:     caClient,
+		PaymentGateway:           gwClient,
+		ReferenceDataClient:      NewMockReferenceDataClient(),
+		SagaOrchestrationEnabled: true,
 	})
 	require.NoError(t, err)
 
@@ -2539,11 +2544,12 @@ func TestSagaOrchestration_GatewayPending(t *testing.T) {
 
 	// Create orchestrator with dependencies
 	orchestrator, err := NewPaymentOrchestrator(PaymentOrchestratorConfig{
-		Logger:               slog.New(slog.NewJSONHandler(io.Discard, nil)),
-		Repo:                 repo,
-		CurrentAccountClient: caClient,
-		PaymentGateway:       gwClient,
-		ReferenceDataClient:  NewMockReferenceDataClient(),
+		Logger:                   slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		Repo:                     repo,
+		CurrentAccountClient:     caClient,
+		PaymentGateway:           gwClient,
+		ReferenceDataClient:      NewMockReferenceDataClient(),
+		SagaOrchestrationEnabled: true,
 	})
 	require.NoError(t, err)
 

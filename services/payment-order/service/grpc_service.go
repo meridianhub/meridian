@@ -16,6 +16,7 @@ import (
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
 	"github.com/meridianhub/meridian/services/payment-order/config"
+	"github.com/meridianhub/meridian/services/payment-order/domain"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
@@ -258,6 +259,15 @@ type Config struct {
 	// registers its internal payment_order.* handlers on this registry so saga scripts
 	// have access to all registered handlers. When nil, a new empty registry is created.
 	HandlerRegistry *saga.HandlerRegistry
+
+	// SagaExecutionLogger persists saga execution records for audit. Optional.
+	SagaExecutionLogger domain.SagaExecutionLogger
+
+	// SagaOrchestrationEnabled controls whether the Starlark saga orchestration
+	// path is used. When false (default), the orchestrator marks payment orders
+	// as failed since Go-based orchestration was removed. Set
+	// USE_SAGA_ORCHESTRATION=true to enable.
+	SagaOrchestrationEnabled bool
 }
 
 // NewService creates a new payment order service with minimal dependencies.
@@ -364,6 +374,8 @@ func NewServiceWithConfig(cfg Config) (*Service, error) {
 		LienExecutionRetryConfig:  cfg.LienExecutionRetryConfig,
 		InternalClearingEnabled:   cfg.InternalClearingEnabled,
 		HandlerRegistry:           cfg.HandlerRegistry,
+		SagaExecutionLogger:       cfg.SagaExecutionLogger,
+		SagaOrchestrationEnabled:  cfg.SagaOrchestrationEnabled,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create payment orchestrator: %w", err)
