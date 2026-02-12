@@ -271,9 +271,9 @@ func TestDunningWorker_ScheduleAndProcess(t *testing.T) {
 		repo.runs[billingRunID] = run
 		repo.mu.Unlock()
 
-		callbackCalled := false
+		var callbackCalled atomic.Bool
 		callback := func(_ context.Context, _ *domain.BillingRun) error {
-			callbackCalled = true
+			callbackCalled.Store(true)
 			return nil
 		}
 
@@ -298,7 +298,7 @@ func TestDunningWorker_ScheduleAndProcess(t *testing.T) {
 		time.Sleep(200 * time.Millisecond)
 		w.Stop()
 
-		assert.False(t, callbackCalled, "callback should not be called for non-failed billing run")
+		assert.False(t, callbackCalled.Load(), "callback should not be called for non-failed billing run")
 	})
 
 	t.Run("drops billing run not found", func(t *testing.T) {

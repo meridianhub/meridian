@@ -124,8 +124,8 @@ func (w *DunningWorker) Start(ctx context.Context) error {
 // Stop signals the dunning worker to shut down gracefully and waits for
 // in-flight work to complete up to the configured shutdown timeout.
 func (w *DunningWorker) Stop() {
-	w.lock.ReleaseAll(context.Background())
 	w.lifecycle.Stop(w.config.ShutdownTimeout)
+	w.lock.ReleaseAll(context.Background())
 }
 
 // pollLoop runs the ticker-based polling loop. It blocks until the context
