@@ -43,9 +43,9 @@ type ServiceConfig struct {
 	DunningPollInterval time.Duration
 
 	// SagaOrchestrationEnabled controls whether payment orders are orchestrated
-	// via Starlark saga scripts. When false (default), the existing Go-based
-	// orchestration is used. When true, the orchestrator loads and executes
-	// saga scripts from reference-data service.
+	// via Starlark saga scripts. When false (default), saga orchestration is
+	// disabled and payment orchestration fails fast. When true, the orchestrator
+	// loads and executes saga scripts from reference-data service.
 	SagaOrchestrationEnabled bool
 }
 

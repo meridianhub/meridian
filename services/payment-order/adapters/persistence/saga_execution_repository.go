@@ -44,12 +44,27 @@ func NewSagaExecutionRepository(db *gorm.DB) *SagaExecutionRepository {
 
 // PersistExecution creates or updates a saga execution record.
 func (r *SagaExecutionRepository) PersistExecution(ctx context.Context, execution *domain.SagaExecution) error {
-	inputJSON, err := json.Marshal(execution.Input)
+	if execution == nil {
+		return fmt.Errorf("nil saga execution")
+	}
+
+	// Normalize nil maps to empty objects so json.Marshal produces "{}" not "null",
+	// which would violate the NOT NULL JSONB column constraints.
+	input := execution.Input
+	if input == nil {
+		input = map[string]any{}
+	}
+	output := execution.Output
+	if output == nil {
+		output = map[string]any{}
+	}
+
+	inputJSON, err := json.Marshal(input)
 	if err != nil {
 		return fmt.Errorf("failed to marshal saga execution input: %w", err)
 	}
 
-	outputJSON, err := json.Marshal(execution.Output)
+	outputJSON, err := json.Marshal(output)
 	if err != nil {
 		return fmt.Errorf("failed to marshal saga execution output: %w", err)
 	}
