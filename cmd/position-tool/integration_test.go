@@ -24,6 +24,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/meridianhub/meridian/cmd/position-tool/internal/checkpoint"
 	"github.com/meridianhub/meridian/services/position-keeping/adapters/persistence"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
 	"github.com/shopspring/decimal"
@@ -789,4 +790,222 @@ func TestIntegration_BatchInsertPerformance(t *testing.T) {
 	// Verify all inserted
 	totalCount := countAllPositions(t, tc.pool)
 	assert.Equal(t, int64(batchSize), totalCount)
+}
+
+// setupTestContainerWithoutTrigger creates an isolated PostgreSQL container with the
+// import_manifest schema but WITHOUT the updated_at trigger.
+// This simulates CockroachDB behavior where PL/pgSQL triggers are not available,
+// and verifies that the application layer correctly manages updated_at.
+func setupTestContainerWithoutTrigger(t *testing.T) *testContainer {
+	t.Helper()
+	ctx := context.Background()
+
+	pgContainer, err := postgres.Run(ctx,
+		"postgres:16-alpine",
+		postgres.WithDatabase("test_position_tool"),
+		postgres.WithUsername("test"),
+		postgres.WithPassword("test"),
+		testcontainers.WithWaitStrategy(
+			wait.ForAll(
+				wait.ForLog("database system is ready to accept connections").WithOccurrence(2),
+				wait.ForListeningPort("5432/tcp"),
+			).WithDeadline(60*time.Second)),
+	)
+	require.NoError(t, err, "failed to start PostgreSQL container")
+
+	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
+	require.NoError(t, err, "failed to get connection string")
+
+	poolConfig, err := pgxpool.ParseConfig(connStr)
+	require.NoError(t, err, "failed to parse pool config")
+	poolConfig.MaxConns = 10
+
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
+	require.NoError(t, err, "failed to create connection pool")
+
+	// Create import_manifest table WITHOUT the updated_at trigger
+	_, err = pool.Exec(ctx, `
+		CREATE TABLE "import_manifest" (
+			"id" uuid NOT NULL DEFAULT gen_random_uuid(),
+			"tenant_id" text NOT NULL,
+			"source_file" text NOT NULL,
+			"file_checksum" text NOT NULL,
+			"total_rows" integer NULL,
+			"processed_rows" integer NOT NULL DEFAULT 0,
+			"success_count" integer NULL,
+			"failure_count" integer NULL,
+			"status" text NOT NULL DEFAULT 'RUNNING',
+			"rollback_sql" text NULL,
+			"created_at" timestamptz NOT NULL DEFAULT now(),
+			"updated_at" timestamptz NOT NULL DEFAULT now(),
+			PRIMARY KEY ("id")
+		)
+	`)
+	require.NoError(t, err, "failed to create import_manifest table")
+
+	_, err = pool.Exec(ctx, `
+		ALTER TABLE "import_manifest"
+			ADD CONSTRAINT "chk_import_manifest_status"
+			CHECK ("status" IN ('RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED'));
+		ALTER TABLE "import_manifest"
+			ADD CONSTRAINT "uq_import_manifest_tenant_file_checksum"
+			UNIQUE ("tenant_id", "source_file", "file_checksum");
+	`)
+	require.NoError(t, err, "failed to add import_manifest constraints")
+
+	return &testContainer{
+		container: pgContainer,
+		pool:      pool,
+		connStr:   connStr,
+	}
+}
+
+// getManifestUpdatedAt retrieves the updated_at timestamp for a manifest by ID.
+func getManifestUpdatedAt(ctx context.Context, t *testing.T, pool *pgxpool.Pool, id uuid.UUID) time.Time {
+	t.Helper()
+	var updatedAt time.Time
+	err := pool.QueryRow(ctx,
+		"SELECT updated_at FROM import_manifest WHERE id = $1", id,
+	).Scan(&updatedAt)
+	require.NoError(t, err, "failed to get updated_at")
+	return updatedAt
+}
+
+// setManifestUpdatedAtToKnownPast sets updated_at to a known past timestamp
+// using raw SQL (bypassing the application layer). This avoids clock skew
+// issues between Go's time.Now() and PostgreSQL's NOW() by establishing
+// a baseline that is guaranteed to be in the past relative to any future
+// NOW() call.
+func setManifestUpdatedAtToKnownPast(ctx context.Context, t *testing.T, pool *pgxpool.Pool, id uuid.UUID) time.Time {
+	t.Helper()
+	pastTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	_, err := pool.Exec(ctx,
+		"UPDATE import_manifest SET updated_at = $2 WHERE id = $1",
+		id, pastTime,
+	)
+	require.NoError(t, err, "failed to set updated_at to known past")
+	return pastTime
+}
+
+// TestIntegration_UpdatedAtManagement verifies that the application layer explicitly
+// sets updated_at = NOW() on all UPDATE operations, without relying on a database trigger.
+// This simulates CockroachDB behavior where PL/pgSQL triggers are not available.
+func TestIntegration_UpdatedAtManagement(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	tc := setupTestContainerWithoutTrigger(t)
+	defer tc.cleanup(t)
+
+	ctx := context.Background()
+
+	mgr, err := checkpoint.NewManager(tc.pool)
+	require.NoError(t, err)
+
+	// Create a temp file for checksum calculation
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "test_updated_at.csv")
+	require.NoError(t, os.WriteFile(testFile, []byte("header\nrow1\nrow2\n"), 0o644))
+
+	t.Run("Complete updates updated_at", func(t *testing.T) {
+		cp, err := mgr.StartImport(ctx, "tenant-complete", testFile)
+		require.NoError(t, err)
+
+		baseline := setManifestUpdatedAtToKnownPast(ctx, t, tc.pool, cp.ManifestID)
+
+		cp.SetTotalRows(10)
+		cp.IncrementSuccess(10)
+		require.NoError(t, mgr.Complete(ctx, cp))
+
+		finalUpdatedAt := getManifestUpdatedAt(ctx, t, tc.pool, cp.ManifestID)
+		assert.True(t, finalUpdatedAt.After(baseline),
+			"updated_at should advance after Complete: baseline=%v, final=%v", baseline, finalUpdatedAt)
+	})
+
+	t.Run("Fail updates updated_at", func(t *testing.T) {
+		testFile2 := filepath.Join(tmpDir, "test_fail.csv")
+		require.NoError(t, os.WriteFile(testFile2, []byte("fail test data\n"), 0o644))
+
+		cp, err := mgr.StartImport(ctx, "tenant-fail", testFile2)
+		require.NoError(t, err)
+
+		baseline := setManifestUpdatedAtToKnownPast(ctx, t, tc.pool, cp.ManifestID)
+
+		require.NoError(t, mgr.Fail(ctx, cp, fmt.Errorf("test failure")))
+
+		finalUpdatedAt := getManifestUpdatedAt(ctx, t, tc.pool, cp.ManifestID)
+		assert.True(t, finalUpdatedAt.After(baseline),
+			"updated_at should advance after Fail: baseline=%v, final=%v", baseline, finalUpdatedAt)
+	})
+
+	t.Run("Cancel updates updated_at", func(t *testing.T) {
+		testFile3 := filepath.Join(tmpDir, "test_cancel.csv")
+		require.NoError(t, os.WriteFile(testFile3, []byte("cancel test data\n"), 0o644))
+
+		cp, err := mgr.StartImport(ctx, "tenant-cancel", testFile3)
+		require.NoError(t, err)
+
+		baseline := setManifestUpdatedAtToKnownPast(ctx, t, tc.pool, cp.ManifestID)
+
+		require.NoError(t, mgr.Cancel(ctx, cp))
+
+		finalUpdatedAt := getManifestUpdatedAt(ctx, t, tc.pool, cp.ManifestID)
+		assert.True(t, finalUpdatedAt.After(baseline),
+			"updated_at should advance after Cancel: baseline=%v, final=%v", baseline, finalUpdatedAt)
+	})
+
+	t.Run("UpdateProgress updates updated_at", func(t *testing.T) {
+		testFile4 := filepath.Join(tmpDir, "test_progress.csv")
+		require.NoError(t, os.WriteFile(testFile4, []byte("progress test data\n"), 0o644))
+
+		cp, err := mgr.StartImport(ctx, "tenant-progress", testFile4)
+		require.NoError(t, err)
+
+		baseline := setManifestUpdatedAtToKnownPast(ctx, t, tc.pool, cp.ManifestID)
+
+		cp.SetTotalRows(100)
+		cp.IncrementSuccess(50)
+		require.NoError(t, mgr.UpdateProgress(ctx, cp))
+
+		finalUpdatedAt := getManifestUpdatedAt(ctx, t, tc.pool, cp.ManifestID)
+		assert.True(t, finalUpdatedAt.After(baseline),
+			"updated_at should advance after UpdateProgress: baseline=%v, final=%v", baseline, finalUpdatedAt)
+	})
+
+	t.Run("updated_at monotonically increases across operations", func(t *testing.T) {
+		testFile5 := filepath.Join(tmpDir, "test_monotonic.csv")
+		require.NoError(t, os.WriteFile(testFile5, []byte("monotonic test data\n"), 0o644))
+
+		cp, err := mgr.StartImport(ctx, "tenant-monotonic", testFile5)
+		require.NoError(t, err)
+
+		// Set baseline to known past so all NOW() calls are after it
+		setManifestUpdatedAtToKnownPast(ctx, t, tc.pool, cp.ManifestID)
+
+		// First progress update - sets updated_at to NOW()
+		cp.IncrementSuccess(10)
+		require.NoError(t, mgr.UpdateProgress(ctx, cp))
+		t1 := getManifestUpdatedAt(ctx, t, tc.pool, cp.ManifestID)
+
+		// Use pg_sleep to guarantee PG clock advances between operations
+		_, err = tc.pool.Exec(ctx, "SELECT pg_sleep(0.02)")
+		require.NoError(t, err)
+
+		// Second progress update
+		cp.IncrementSuccess(10)
+		require.NoError(t, mgr.UpdateProgress(ctx, cp))
+		t2 := getManifestUpdatedAt(ctx, t, tc.pool, cp.ManifestID)
+
+		_, err = tc.pool.Exec(ctx, "SELECT pg_sleep(0.02)")
+		require.NoError(t, err)
+
+		// Complete
+		cp.SetTotalRows(20)
+		require.NoError(t, mgr.Complete(ctx, cp))
+		t3 := getManifestUpdatedAt(ctx, t, tc.pool, cp.ManifestID)
+
+		assert.True(t, t2.After(t1), "t2 should be after t1")
+		assert.True(t, t3.After(t2), "t3 should be after t2")
+	})
 }
