@@ -150,10 +150,20 @@ func run(logger *slog.Logger) error {
 		service.WithVarianceDetector(detector.DetectVariances),
 	)
 
-	// VarianceValuator requires valuation engine + reference data provider (not yet available)
+	// Wire VarianceValuator with stub engine (temporary until valuation service ready)
+	// TODO: Replace stub engine with shared/pkg/valuation concrete Engine when available
+	// TODO: Replace stub ref data with gRPC client to Reference Data service
+	stubEngine := service.NewStubValuationEngine()
+	stubRefData := service.NewStubReferenceDataProvider()
+	valuator := service.NewVarianceValuator(stubEngine, stubRefData, varianceRepo, runRepo)
+	serviceOpts = append(serviceOpts,
+		service.WithVarianceValuator(valuator.ValueVariances),
+	)
+	logger.Info("variance valuator configured (using stub engine)",
+		"note", "identity valuation until shared/pkg/valuation implementation available")
+
 	// BalanceAssertor requires assertion repo + PK client (not yet available)
-	// Both will return UNIMPLEMENTED until their dependencies are wired in future tasks
-	logger.Warn("variance valuator not configured: valuation engine not yet available")
+	// Will return UNIMPLEMENTED until its dependencies are wired in future tasks
 	logger.Warn("balance assertor not configured: assertion repository not yet available")
 
 	// Create AccountReconciliationService
