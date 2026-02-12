@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,7 +18,9 @@ import (
 )
 
 // mockSettlementRunRepo implements domain.SettlementRunRepository for testing.
+// It is thread-safe to support tests that exercise async pipeline goroutines.
 type mockSettlementRunRepo struct {
+	mu   sync.RWMutex
 	runs map[uuid.UUID]*domain.SettlementRun
 	err  error // injected error for testing
 }
@@ -27,11 +30,15 @@ func newMockSettlementRunRepo() *mockSettlementRunRepo {
 }
 
 func (m *mockSettlementRunRepo) Create(_ context.Context, run *domain.SettlementRun) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.runs[run.RunID] = run
 	return nil
 }
 
 func (m *mockSettlementRunRepo) FindByID(_ context.Context, runID uuid.UUID) (*domain.SettlementRun, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -39,10 +46,15 @@ func (m *mockSettlementRunRepo) FindByID(_ context.Context, runID uuid.UUID) (*d
 	if !ok {
 		return nil, domain.ErrNotFound
 	}
-	return run, nil
+	// Return a copy to match real DB behavior and avoid data races
+	// when background goroutines (e.g. resumePipeline) modify the returned object.
+	cp := *run
+	return &cp, nil
 }
 
 func (m *mockSettlementRunRepo) Update(_ context.Context, run *domain.SettlementRun) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if _, ok := m.runs[run.RunID]; !ok {
 		return domain.ErrNotFound
 	}
@@ -51,11 +63,20 @@ func (m *mockSettlementRunRepo) Update(_ context.Context, run *domain.Settlement
 }
 
 func (m *mockSettlementRunRepo) List(_ context.Context, _ domain.RunFilter) ([]*domain.SettlementRun, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	result := make([]*domain.SettlementRun, 0, len(m.runs))
 	for _, r := range m.runs {
 		result = append(result, r)
 	}
 	return result, nil
+}
+
+// getRun safely retrieves a run from the mock for test assertions.
+func (m *mockSettlementRunRepo) getRun(runID uuid.UUID) *domain.SettlementRun {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.runs[runID]
 }
 
 func TestRetrieveAccountReconciliation_Success(t *testing.T) {

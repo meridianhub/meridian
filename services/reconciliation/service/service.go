@@ -538,11 +538,11 @@ func phaseIndex(phase domain.ReconciliationPhase) int {
 // resumePipeline re-launches the pipeline from the run's checkpoint.
 //
 //nolint:contextcheck // Intentionally uses background context for async pipeline that outlives the RPC
-func (s *AccountReconciliationService) resumePipeline(run *domain.SettlementRun) {
+func (s *AccountReconciliationService) resumePipeline(runID uuid.UUID) {
 	pipelineCtx, pipelineCancel := context.WithTimeout(context.Background(), pipelineTimeout) //nolint:contextcheck
 	go func() {
 		defer pipelineCancel()
-		s.executePipeline(pipelineCtx, run.RunID)
+		s.executePipeline(pipelineCtx, runID)
 	}()
 }
 
@@ -666,14 +666,21 @@ func (s *AccountReconciliationService) ControlAccountReconciliation(
 			slog.ErrorContext(ctx, "failed to persist resumed run", "run_id", runID, "error", err)
 			return nil, status.Error(codes.Internal, "failed to persist settlement run")
 		}
+		// Capture the response before launching the pipeline goroutine to avoid
+		// a data race between the background goroutine writing to the run and the
+		// response reading it.
+		resp := &reconciliationv1.ControlAccountReconciliationResponse{
+			Run: toProtoRunSummary(run),
+		}
 		// Re-launch the pipeline from the checkpoint
-		s.resumePipeline(run)
+		s.resumePipeline(run.RunID)
 		slog.InfoContext(ctx, "settlement run resumed",
 			"run_id", runID,
 			"action", action.String(),
 			"status_before", statusBefore.String(),
 			"status_after", run.Status.String(),
 		)
+		return resp, nil
 
 	default:
 		return nil, status.Errorf(codes.InvalidArgument, "unknown control action: %v", action)
