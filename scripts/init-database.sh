@@ -26,7 +26,6 @@ DATABASES=(
   "meridian_party:meridian_party_user"
   "meridian_internal_bank_account:meridian_internal_bank_account_user"
   "meridian_market_information:meridian_market_information_user"
-  "meridian_reference_data:meridian_reference_data_user"
   "meridian_reconciliation:meridian_reconciliation_user"
   "meridian_forecasting:meridian_forecasting_user"
 )
