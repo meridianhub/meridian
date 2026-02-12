@@ -113,6 +113,21 @@ func (m *MockPositionRepository) GetBucketDetails(ctx context.Context, accountID
 	return args.Get(0).([]*domain.Position), args.Error(1)
 }
 
+func (m *MockPositionRepository) SoftDelete(ctx context.Context, id uuid.UUID) error {
+	args := m.Called(ctx, id)
+	return args.Error(0)
+}
+
+func (m *MockPositionRepository) SoftDeleteBatch(ctx context.Context, ids []uuid.UUID) error {
+	args := m.Called(ctx, ids)
+	return args.Error(0)
+}
+
+func (m *MockPositionRepository) UpdateAttributes(ctx context.Context, id uuid.UUID, attributes map[string]string) error {
+	args := m.Called(ctx, id, attributes)
+	return args.Error(0)
+}
+
 func newServiceWithReservation(t *testing.T, reservationRepo domain.ReservationRepository, positionRepo domain.PositionRepository) *service.PositionKeepingService {
 	t.Helper()
 	repo := new(MockRepository)

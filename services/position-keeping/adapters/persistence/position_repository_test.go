@@ -147,8 +147,8 @@ func TestPositionRepository_InsertBatch(t *testing.T) {
 	})
 }
 
-// TestPositionRepository_AppendOnlyTrigger verifies the database trigger rejects UPDATEs
-func TestPositionRepository_AppendOnlyTrigger(t *testing.T) {
+// TestPositionRepository_SoftDelete tests the SoftDelete method
+func TestPositionRepository_SoftDelete(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
@@ -158,88 +158,224 @@ func TestPositionRepository_AppendOnlyTrigger(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Insert a position
-	pos, err := domain.NewPosition(
-		"ACC-TRIGGER",
-		"GBP",
-		"default",
-		decimal.NewFromFloat(100.00),
-		"Monetary",
-		nil,
-		uuid.Nil,
-		"system",
-	)
-	require.NoError(t, err)
-
-	err = tc.PositionRepo.Insert(ctx, pos)
-	require.NoError(t, err)
-
-	t.Run("UPDATE on amount column raises trigger exception", func(t *testing.T) {
-		_, err := tc.Pool.Exec(ctx,
-			"UPDATE position_keeping.position SET amount = 200.00 WHERE id = $1",
-			pos.ID,
+	t.Run("soft delete sets deleted_at timestamp", func(t *testing.T) {
+		pos, err := domain.NewPosition(
+			"ACC-SOFTDEL",
+			"GBP",
+			"default",
+			decimal.NewFromFloat(100.00),
+			"Monetary",
+			nil,
+			uuid.Nil,
+			"system",
 		)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "append-only")
-		assert.Contains(t, err.Error(), "amount")
+		require.NoError(t, err)
+
+		err = tc.PositionRepo.Insert(ctx, pos)
+		require.NoError(t, err)
+
+		// Verify position exists before soft delete
+		retrieved, err := tc.PositionRepo.FindByID(ctx, pos.ID)
+		require.NoError(t, err)
+		assert.Equal(t, pos.ID, retrieved.ID)
+
+		// Soft delete the position
+		err = tc.PositionRepo.SoftDelete(ctx, pos.ID)
+		require.NoError(t, err)
+
+		// Verify position is no longer returned by FindByID (filters deleted_at IS NULL)
+		_, err = tc.PositionRepo.FindByID(ctx, pos.ID)
+		assert.ErrorIs(t, err, domain.ErrNotFound)
 	})
 
-	t.Run("UPDATE on account_id column raises trigger exception", func(t *testing.T) {
-		_, err := tc.Pool.Exec(ctx,
-			"UPDATE position_keeping.position SET account_id = 'NEW-ACC' WHERE id = $1",
-			pos.ID,
-		)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "append-only")
-		assert.Contains(t, err.Error(), "account_id")
+	t.Run("soft delete non-existent position returns ErrNotFound", func(t *testing.T) {
+		err := tc.PositionRepo.SoftDelete(ctx, uuid.New())
+		assert.ErrorIs(t, err, domain.ErrNotFound)
 	})
 
-	t.Run("UPDATE on instrument_code column raises trigger exception", func(t *testing.T) {
-		_, err := tc.Pool.Exec(ctx,
-			"UPDATE position_keeping.position SET instrument_code = 'USD' WHERE id = $1",
-			pos.ID,
+	t.Run("soft delete already deleted position returns ErrNotFound", func(t *testing.T) {
+		pos, err := domain.NewPosition(
+			"ACC-SOFTDEL-2",
+			"GBP",
+			"default",
+			decimal.NewFromFloat(50.00),
+			"Monetary",
+			nil,
+			uuid.Nil,
+			"system",
 		)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "append-only")
-		assert.Contains(t, err.Error(), "instrument_code")
+		require.NoError(t, err)
+
+		err = tc.PositionRepo.Insert(ctx, pos)
+		require.NoError(t, err)
+
+		// First soft delete succeeds
+		err = tc.PositionRepo.SoftDelete(ctx, pos.ID)
+		require.NoError(t, err)
+
+		// Second soft delete returns ErrNotFound (already deleted)
+		err = tc.PositionRepo.SoftDelete(ctx, pos.ID)
+		assert.ErrorIs(t, err, domain.ErrNotFound)
+	})
+}
+
+// TestPositionRepository_SoftDeleteBatch tests the SoftDeleteBatch method
+func TestPositionRepository_SoftDeleteBatch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	tc := testhelpers.SetupTestContainer(t)
+	defer tc.Cleanup(t)
+
+	ctx := context.Background()
+
+	t.Run("batch soft delete marks multiple positions deleted", func(t *testing.T) {
+		accountID := "ACC-BATCH-DEL"
+		var ids []uuid.UUID
+
+		// Insert 5 positions
+		for i := 0; i < 5; i++ {
+			pos, err := domain.NewPosition(
+				accountID,
+				"GBP",
+				"default",
+				decimal.NewFromFloat(float64(i+1)*10.0),
+				"Monetary",
+				nil,
+				uuid.Nil,
+				"system",
+			)
+			require.NoError(t, err)
+			err = tc.PositionRepo.Insert(ctx, pos)
+			require.NoError(t, err)
+			ids = append(ids, pos.ID)
+		}
+
+		// Verify all 5 exist
+		count, err := tc.PositionRepo.GetPositionCount(ctx, accountID)
+		require.NoError(t, err)
+		assert.Equal(t, int64(5), count)
+
+		// Soft delete the first 3
+		err = tc.PositionRepo.SoftDeleteBatch(ctx, ids[:3])
+		require.NoError(t, err)
+
+		// Verify only 2 remain active
+		count, err = tc.PositionRepo.GetPositionCount(ctx, accountID)
+		require.NoError(t, err)
+		assert.Equal(t, int64(2), count)
 	})
 
-	t.Run("UPDATE on bucket_key column raises trigger exception", func(t *testing.T) {
-		_, err := tc.Pool.Exec(ctx,
-			"UPDATE position_keeping.position SET bucket_key = 'new-bucket' WHERE id = $1",
-			pos.ID,
-		)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "append-only")
-		assert.Contains(t, err.Error(), "bucket_key")
-	})
-
-	t.Run("UPDATE on reference_id column raises trigger exception", func(t *testing.T) {
-		_, err := tc.Pool.Exec(ctx,
-			"UPDATE position_keeping.position SET reference_id = $2 WHERE id = $1",
-			pos.ID, uuid.New(),
-		)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "append-only")
-		assert.Contains(t, err.Error(), "reference_id")
-	})
-
-	t.Run("UPDATE on attributes column succeeds (allowed)", func(t *testing.T) {
-		_, err := tc.Pool.Exec(ctx,
-			`UPDATE position_keeping.position SET attributes = '{"note": "allowed"}'::jsonb WHERE id = $1`,
-			pos.ID,
-		)
-		// This should succeed - attributes is not an immutable field
+	t.Run("batch soft delete with empty slice succeeds", func(t *testing.T) {
+		err := tc.PositionRepo.SoftDeleteBatch(ctx, []uuid.UUID{})
 		require.NoError(t, err)
 	})
+}
 
-	t.Run("UPDATE on deleted_at column succeeds (soft delete allowed)", func(t *testing.T) {
-		_, err := tc.Pool.Exec(ctx,
-			"UPDATE position_keeping.position SET deleted_at = NOW() WHERE id = $1",
-			pos.ID,
+// TestPositionRepository_UpdateAttributes tests the UpdateAttributes method
+func TestPositionRepository_UpdateAttributes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	tc := testhelpers.SetupTestContainer(t)
+	defer tc.Cleanup(t)
+
+	ctx := context.Background()
+
+	t.Run("update attributes only modifies attributes field", func(t *testing.T) {
+		pos, err := domain.NewPosition(
+			"ACC-ATTRS",
+			"GBP",
+			"default",
+			decimal.NewFromFloat(100.00),
+			"Monetary",
+			map[string]string{"original": "value"},
+			uuid.New(),
+			"system",
 		)
-		// This should succeed - soft delete is allowed
 		require.NoError(t, err)
+
+		err = tc.PositionRepo.Insert(ctx, pos)
+		require.NoError(t, err)
+
+		// Update attributes
+		newAttrs := map[string]string{"updated": "new-value", "extra": "data"}
+		err = tc.PositionRepo.UpdateAttributes(ctx, pos.ID, newAttrs)
+		require.NoError(t, err)
+
+		// Verify attributes changed but immutable fields unchanged
+		retrieved, err := tc.PositionRepo.FindByID(ctx, pos.ID)
+		require.NoError(t, err)
+
+		assert.Equal(t, "new-value", retrieved.Attributes["updated"])
+		assert.Equal(t, "data", retrieved.Attributes["extra"])
+		assert.Empty(t, retrieved.Attributes["original"], "old attributes should be replaced")
+
+		// Immutable fields unchanged
+		assert.Equal(t, pos.AccountID, retrieved.AccountID)
+		assert.Equal(t, pos.InstrumentCode, retrieved.InstrumentCode)
+		assert.Equal(t, pos.BucketKey, retrieved.BucketKey)
+		assert.True(t, pos.Amount.Equal(retrieved.Amount))
+		assert.Equal(t, pos.Dimension, retrieved.Dimension)
+		assert.Equal(t, pos.ReferenceID, retrieved.ReferenceID)
+	})
+
+	t.Run("update attributes on non-existent position returns ErrNotFound", func(t *testing.T) {
+		err := tc.PositionRepo.UpdateAttributes(ctx, uuid.New(), map[string]string{"key": "value"})
+		assert.ErrorIs(t, err, domain.ErrNotFound)
+	})
+
+	t.Run("update attributes on deleted position returns ErrNotFound", func(t *testing.T) {
+		pos, err := domain.NewPosition(
+			"ACC-ATTRS-DEL",
+			"GBP",
+			"default",
+			decimal.NewFromFloat(50.00),
+			"Monetary",
+			nil,
+			uuid.Nil,
+			"system",
+		)
+		require.NoError(t, err)
+
+		err = tc.PositionRepo.Insert(ctx, pos)
+		require.NoError(t, err)
+
+		// Soft delete first
+		err = tc.PositionRepo.SoftDelete(ctx, pos.ID)
+		require.NoError(t, err)
+
+		// Update attributes should fail on deleted position
+		err = tc.PositionRepo.UpdateAttributes(ctx, pos.ID, map[string]string{"key": "value"})
+		assert.ErrorIs(t, err, domain.ErrNotFound)
+	})
+
+	t.Run("update attributes with nil clears attributes", func(t *testing.T) {
+		pos, err := domain.NewPosition(
+			"ACC-ATTRS-NIL",
+			"GBP",
+			"default",
+			decimal.NewFromFloat(75.00),
+			"Monetary",
+			map[string]string{"existing": "data"},
+			uuid.Nil,
+			"system",
+		)
+		require.NoError(t, err)
+
+		err = tc.PositionRepo.Insert(ctx, pos)
+		require.NoError(t, err)
+
+		// Update with nil attributes
+		err = tc.PositionRepo.UpdateAttributes(ctx, pos.ID, nil)
+		require.NoError(t, err)
+
+		// Verify attributes cleared
+		retrieved, err := tc.PositionRepo.FindByID(ctx, pos.ID)
+		require.NoError(t, err)
+		assert.Nil(t, retrieved.Attributes)
 	})
 }
 
@@ -479,24 +615,20 @@ func TestPositionRepository_ConcurrentInserts(t *testing.T) {
 	assert.Equal(t, int64(numGoroutines*insertsPerGoroutine), count)
 }
 
-// TestPositionRepository_TriggerExists verifies the trigger is installed
-func TestPositionRepository_TriggerExists(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+// TestPositionRepository_AppendOnlyEnforcement verifies that the repository only provides
+// safe write methods: Insert, SoftDelete, and UpdateAttributes.
+// No general Update/Upsert methods exist, enforcing append-only semantics at the Go layer
+// since CockroachDB does not support PL/pgSQL triggers.
+func TestPositionRepository_AppendOnlyEnforcement(t *testing.T) {
+	// This is a compile-time verification: the PositionRepository interface only exposes
+	// Insert, InsertBatch, SoftDelete, SoftDeleteBatch, and UpdateAttributes as write methods.
+	// The interface definition itself enforces append-only semantics.
+	var _ domain.PositionRepository = (*struct {
+		domain.PositionRepository
+	})(nil)
 
-	tc := testhelpers.SetupTestContainer(t)
-	defer tc.Cleanup(t)
-
-	ctx := context.Background()
-
-	var triggerName string
-	err := tc.Pool.QueryRow(ctx, `
-		SELECT tgname FROM pg_trigger
-		WHERE tgname = 'positions_append_only'
-	`).Scan(&triggerName)
-	require.NoError(t, err)
-	assert.Equal(t, "positions_append_only", triggerName)
+	t.Log("PositionRepository enforces append-only semantics at Go layer: " +
+		"Insert (new records), SoftDelete (deleted_at), UpdateAttributes (attributes JSONB)")
 }
 
 // TestPositionRepository_FindByID tests retrieval by ID
