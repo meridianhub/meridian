@@ -5,67 +5,56 @@ import (
 	"os"
 	"testing"
 
+	"github.com/meridianhub/meridian/services/payment-order/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestCreatePaymentGateway_DefaultMock(t *testing.T) {
-	// No PAYMENT_GATEWAY_PROVIDER set - defaults to "mock"
-	t.Setenv("PAYMENT_GATEWAY_PROVIDER", "")
-	t.Setenv("STRIPE_API_KEY", "")
-
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	cfg := config.ServiceConfig{
+		PaymentGatewayProvider: config.ProviderMock,
+	}
 
-	gw, err := createPaymentGateway(logger)
+	gw, err := createPaymentGateway(cfg, logger)
 
 	require.NoError(t, err)
 	assert.NotNil(t, gw)
 }
 
 func TestCreatePaymentGateway_ExplicitMock(t *testing.T) {
-	t.Setenv("PAYMENT_GATEWAY_PROVIDER", "mock")
-	t.Setenv("STRIPE_API_KEY", "")
-
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	cfg := config.ServiceConfig{
+		PaymentGatewayProvider: config.ProviderMock,
+	}
 
-	gw, err := createPaymentGateway(logger)
+	gw, err := createPaymentGateway(cfg, logger)
 
 	require.NoError(t, err)
 	assert.NotNil(t, gw)
 }
 
 func TestCreatePaymentGateway_StripeProvider(t *testing.T) {
-	t.Setenv("PAYMENT_GATEWAY_PROVIDER", "stripe")
-	t.Setenv("STRIPE_API_KEY", "sk_test_fake_key_for_unit_test")
-
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	cfg := config.ServiceConfig{
+		PaymentGatewayProvider: config.ProviderStripe,
+		StripeAPIKey:           "sk_test_fake_key_for_unit_test",
+	}
 
-	gw, err := createPaymentGateway(logger)
+	gw, err := createPaymentGateway(cfg, logger)
 
 	require.NoError(t, err)
 	assert.NotNil(t, gw)
 }
 
-func TestCreatePaymentGateway_StripeMissingAPIKey(t *testing.T) {
-	t.Setenv("PAYMENT_GATEWAY_PROVIDER", "stripe")
-	t.Setenv("STRIPE_API_KEY", "")
-
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-
-	gw, err := createPaymentGateway(logger)
-
-	assert.ErrorIs(t, err, ErrMissingStripeAPIKey)
-	assert.Nil(t, gw)
-}
-
 func TestCreatePaymentGateway_UnsupportedProvider(t *testing.T) {
-	t.Setenv("PAYMENT_GATEWAY_PROVIDER", "paypal")
-	t.Setenv("STRIPE_API_KEY", "")
-
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	cfg := config.ServiceConfig{
+		PaymentGatewayProvider: "paypal",
+	}
 
-	gw, err := createPaymentGateway(logger)
+	gw, err := createPaymentGateway(cfg, logger)
 
-	assert.ErrorIs(t, err, ErrUnsupportedGatewayProvider)
+	assert.ErrorIs(t, err, config.ErrInvalidGatewayProvider)
 	assert.Nil(t, gw)
 }
