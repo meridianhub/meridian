@@ -85,7 +85,7 @@ func run(logger *slog.Logger) error {
 	if err := dbPool.Ping(ctx); err != nil {
 		return fmt.Errorf("failed to ping database: %w", err)
 	}
-	logger.Info("database connection established", "url", dbURL)
+	logger.Info("database connection established")
 
 	// Initialize CEL compiler for instrument validation expressions
 	compiler, err := refcel.NewCompiler()
@@ -137,6 +137,7 @@ func run(logger *slog.Logger) error {
 
 	// Register health check service
 	healthServer := health.NewServer()
+	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
 	healthServer.SetServingStatus("reference-data", grpc_health_v1.HealthCheckResponse_SERVING)
 	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
 
