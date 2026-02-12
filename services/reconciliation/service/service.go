@@ -414,6 +414,10 @@ func (s *AccountReconciliationService) executePipeline(ctx context.Context, runI
 		}
 	}
 
+	// NOTE: PhaseBalanceAssertion is defined in the domain model but the pipeline step
+	// is not yet implemented. When the balance assertion step is added, insert it here
+	// before the completion block, following the same checkpoint/pause pattern above.
+
 	// Pipeline succeeded: transition to COMPLETED.
 	// Use a fresh context so persistence succeeds even if the pipeline context has expired.
 	completeCtx, completeCancel := context.WithTimeout(context.Background(), persistTimeout) //nolint:contextcheck
@@ -516,6 +520,8 @@ func getCheckpointPhase(run *domain.SettlementRun) *domain.ReconciliationPhase {
 }
 
 // phaseIndex returns the ordinal position of a phase in the pipeline.
+// PhaseBalanceAssertion (index 3) is reserved for future use; the pipeline
+// currently completes after PhaseVarianceValuation (index 2).
 func phaseIndex(phase domain.ReconciliationPhase) int {
 	switch phase {
 	case domain.PhaseSnapshotCapture:
