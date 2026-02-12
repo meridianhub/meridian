@@ -214,9 +214,14 @@ func TestControlAccountReconciliation_ResumePaused(t *testing.T) {
 	require.NotNil(t, resp.GetRun())
 	assert.Equal(t, reconciliationv1.RunStatus_RUN_STATUS_RUNNING, resp.GetRun().GetStatus())
 
-	// Verify persisted (use thread-safe accessor since resume spawns a background goroutine)
+	// Verify persisted (use thread-safe accessor since resume spawns a background goroutine).
+	// The background goroutine may complete before we read, so both RUNNING and COMPLETED
+	// are valid post-resume states.
 	updated := repo.getRun(run.RunID)
-	assert.Equal(t, domain.RunStatusRunning, updated.Status)
+	assert.Contains(t,
+		[]domain.RunStatus{domain.RunStatusRunning, domain.RunStatusCompleted},
+		updated.Status,
+		"expected RUNNING or COMPLETED after resume, got %s", updated.Status)
 }
 
 func TestControlAccountReconciliation_ResumeRunning(t *testing.T) {
