@@ -25,8 +25,9 @@ ALTER TABLE dataset_definition
   ADD CONSTRAINT chk_dataset_definition_access_level
   CHECK (access_level IN ('PUBLIC', 'PRIVATE', 'RESTRICTED'));
 
--- Index for finding shared datasets
-CREATE INDEX idx_dataset_definition_is_shared ON dataset_definition (is_shared) WHERE is_shared = TRUE;
+-- NOTE: Partial index on is_shared is created in a separate migration
+-- (20260119000003) because CockroachDB cannot create a partial index on a
+-- column added in the same transaction (column is not yet "public").
 
 --------------------------------------------------------------------------------
 -- Section 2: Create tenant_data_entitlements table
