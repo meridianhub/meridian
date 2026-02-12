@@ -17,14 +17,17 @@ type Config struct {
 }
 
 func (c Config) withDefaults() Config {
-	if c.LockTTL == 0 {
+	if c.LockTTL <= 0 {
 		c.LockTTL = 5 * time.Minute
 	}
-	if c.RenewEvery == 0 {
+	if c.RenewEvery <= 0 {
 		c.RenewEvery = 30 * time.Second
 	}
 	if c.RenewEvery >= c.LockTTL {
 		c.RenewEvery = c.LockTTL / 2
+	}
+	if c.RenewEvery <= 0 {
+		c.RenewEvery = time.Second
 	}
 	return c
 }

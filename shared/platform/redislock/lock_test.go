@@ -351,3 +351,14 @@ func TestConfig_RenewClamping(t *testing.T) {
 
 	assert.Equal(t, 5*time.Second, c.RenewEvery) // clamped to TTL/2
 }
+
+func TestConfig_NegativeDurations(t *testing.T) {
+	c := Config{
+		KeyPrefix:  "test",
+		LockTTL:    -1 * time.Second,
+		RenewEvery: -1 * time.Second,
+	}.withDefaults()
+
+	assert.Equal(t, 5*time.Minute, c.LockTTL)
+	assert.Equal(t, 30*time.Second, c.RenewEvery)
+}

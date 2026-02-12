@@ -84,16 +84,21 @@ func (l *Lock) Acquire(ctx context.Context, tenantID, resourceID string) (bool, 
 	l.logger.Debug("lock acquired", "key", key)
 
 	release := func() {
-		l.release(ctx, key)
+		if ctx.Err() != nil {
+			l.releaseByInstance(context.Background(), key, al) //nolint:contextcheck // fallback when parent cancelled
+		} else {
+			l.releaseByInstance(ctx, key, al)
+		}
 	}
 	return true, release, nil
 }
 
-// release releases a single lock by key.
-func (l *Lock) release(ctx context.Context, key string) {
+// releaseByInstance releases a lock only if the stored instance matches expected.
+// This prevents a stale release closure from dropping a newer lock for the same key.
+func (l *Lock) releaseByInstance(ctx context.Context, key string, expected *activeLock) {
 	l.mu.Lock()
 	al, ok := l.locks[key]
-	if !ok {
+	if !ok || al != expected {
 		l.mu.Unlock()
 		return
 	}
@@ -193,9 +198,15 @@ func (l *Leader) TryAcquire(ctx context.Context) (bool, error) {
 	if l.lock != nil {
 		err := l.lock.Refresh(ctx, l.config.LockTTL, nil)
 		if err == nil {
+			l.isLeader = true
+			if l.cancel == nil {
+				l.startRenewal(ctx)
+			}
 			return true, nil
 		}
 		l.logger.Warn("leader lock refresh failed, attempting re-acquire", "error", err)
+		l.isLeader = false
+		l.lock = nil
 		l.stopRenewal()
 	}
 
