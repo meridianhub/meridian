@@ -53,7 +53,7 @@ func (c *GrpcPositionKeepingClient) GetPositionSummary(ctx context.Context, acco
 
 				amount, err := moneyToDecimal(m)
 				if err != nil {
-					continue
+					return nil, fmt.Errorf("converting amount for entry in log %s: %w", log.GetLogId(), err)
 				}
 
 				switch entry.GetDirection() {
