@@ -61,6 +61,8 @@ func (c *GrpcPositionKeepingClient) GetPositionSummary(ctx context.Context, acco
 					totalDebits = totalDebits.Add(amount)
 				case commonv1.PostingDirection_POSTING_DIRECTION_CREDIT:
 					totalCredits = totalCredits.Add(amount)
+				case commonv1.PostingDirection_POSTING_DIRECTION_UNSPECIFIED:
+					// Skip entries with unspecified direction
 				}
 			}
 		}
