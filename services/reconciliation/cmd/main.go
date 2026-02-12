@@ -12,15 +12,19 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	reconciliationv1 "github.com/meridianhub/meridian/api/proto/meridian/reconciliation/v1"
+	"github.com/meridianhub/meridian/services/reconciliation/adapters/messaging"
 	"github.com/meridianhub/meridian/services/reconciliation/adapters/persistence"
 	"github.com/meridianhub/meridian/services/reconciliation/config"
 	"github.com/meridianhub/meridian/services/reconciliation/observability"
 	"github.com/meridianhub/meridian/services/reconciliation/service"
+	"github.com/meridianhub/meridian/services/reconciliation/worker"
 	"github.com/meridianhub/meridian/shared/pkg/health"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -96,6 +100,25 @@ func run(logger *slog.Logger) error {
 
 	logger.Info("database connection established")
 
+	// Wire event publisher based on Kafka configuration
+	var eventPublisher service.EventPublisher
+	if cfg.Kafka.Enabled {
+		kafkaPub, kafkaErr := messaging.NewKafkaPublisher(cfg.Kafka.Brokers, logger)
+		if kafkaErr != nil {
+			return fmt.Errorf("failed to create kafka publisher: %w", kafkaErr)
+		}
+		eventPublisher = kafkaPub
+		logger.Info("kafka publisher configured", "brokers", cfg.Kafka.Brokers)
+	} else {
+		eventPublisher = messaging.NewNoopPublisher(logger)
+		logger.Info("noop publisher configured (kafka disabled)")
+	}
+	defer func() {
+		if closer, ok := eventPublisher.(interface{ Close() }); ok {
+			closer.Close()
+		}
+	}()
+
 	// Instantiate persistence repositories
 	runRepo := persistence.NewSettlementRunRepository(db)
 	snapshotRepo := persistence.NewSettlementSnapshotRepository(db)
@@ -108,6 +131,7 @@ func run(logger *slog.Logger) error {
 		service.WithDisputeRepository(disputeRepo),
 		service.WithVarianceRepository(varianceRepo),
 		service.WithVarianceListRepository(varianceRepo),
+		service.WithEventPublisher(eventPublisher),
 		service.WithLogger(logger),
 	}
 
@@ -150,14 +174,56 @@ func run(logger *slog.Logger) error {
 		service.WithVarianceDetector(detector.DetectVariances),
 	)
 
-	// VarianceValuator requires valuation engine + reference data provider (not yet available)
+	// Wire VarianceValuator with stub engine (temporary until valuation service ready)
+	// TODO: Replace stub engine with shared/pkg/valuation concrete Engine when available
+	// TODO: Replace stub ref data with gRPC client to Reference Data service
+	stubEngine := service.NewStubValuationEngine()
+	stubRefData := service.NewStubReferenceDataProvider()
+	valuator := service.NewVarianceValuator(stubEngine, stubRefData, varianceRepo, runRepo)
+	serviceOpts = append(serviceOpts,
+		service.WithVarianceValuator(valuator.ValueVariances),
+	)
+	logger.Info("variance valuator configured (using stub engine)",
+		"note", "identity valuation until shared/pkg/valuation implementation available")
+
 	// BalanceAssertor requires assertion repo + PK client (not yet available)
-	// Both will return UNIMPLEMENTED until their dependencies are wired in future tasks
-	logger.Warn("variance valuator not configured: valuation engine not yet available")
+	// Will return UNIMPLEMENTED until its dependencies are wired in future tasks
 	logger.Warn("balance assertor not configured: assertion repository not yet available")
 
 	// Create AccountReconciliationService
 	reconciliationSvc := service.NewAccountReconciliationService(serviceOpts...)
+
+	// Initialize Redis client (optional, needed for scheduler leader election)
+	var redisClient *redis.Client
+	if cfg.Redis.Enabled && cfg.Redis.URL != "" {
+		redisCfg := bootstrap.RedisConfig{
+			URL:    cfg.Redis.URL,
+			Logger: logger,
+		}
+		var redisErr error
+		redisClient, redisErr = bootstrap.NewRedisClient(ctx, redisCfg)
+		if redisErr != nil {
+			logger.Warn("Redis connection failed, scheduler and Redis health check disabled",
+				"error", redisErr)
+		} else {
+			logger.Info("Redis client connected")
+		}
+	}
+	defer func() {
+		if redisClient != nil {
+			if err := redisClient.Close(); err != nil {
+				logger.Error("failed to close Redis client", "error", err)
+			}
+		}
+	}()
+
+	// Wire settlement scheduler (optional, depends on Redis + config)
+	var scheduler *worker.SettlementScheduler
+	if cfg.Scheduler.Enabled {
+		scheduler = wireScheduler(ctx, cfg, redisClient, logger)
+	} else {
+		logger.Info("settlement scheduler disabled")
+	}
 
 	// Initialize auth interceptor
 	authConfig := bootstrap.DefaultAuthConfig(logger)
@@ -174,10 +240,14 @@ func run(logger *slog.Logger) error {
 	// Register AccountReconciliationService
 	reconciliationv1.RegisterAccountReconciliationServiceServer(grpcServer, reconciliationSvc)
 
-	// Register health check service
-	healthAggregator := health.NewAggregator([]health.Checker{
+	// Register health check service with available checkers
+	healthCheckers := []health.Checker{
 		observability.NewDatabaseChecker(db),
-	})
+	}
+	if redisClient != nil {
+		healthCheckers = append(healthCheckers, observability.NewRedisChecker(redisClient))
+	}
+	healthAggregator := health.NewAggregator(healthCheckers)
 	healthServer := newHealthServer(healthAggregator, logger)
 	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
 
@@ -202,6 +272,17 @@ func run(logger *slog.Logger) error {
 			serverErrors <- err
 		}
 	}()
+
+	// Start settlement scheduler in background (after gRPC server is listening)
+	schedulerCtx, schedulerCancel := context.WithCancel(context.Background())
+	defer schedulerCancel()
+	if scheduler != nil {
+		go func() {
+			if err := scheduler.Start(schedulerCtx); err != nil {
+				logger.Error("scheduler stopped with error", "error", err)
+			}
+		}()
+	}
 
 	// Start HTTP server for metrics and health endpoints
 	httpMux := http.NewServeMux()
@@ -248,6 +329,14 @@ func run(logger *slog.Logger) error {
 	// Graceful shutdown
 	logger.Info("shutting down servers...")
 
+	// Stop scheduler first (it makes gRPC calls to self)
+	if scheduler != nil {
+		logger.Info("stopping settlement scheduler...")
+		schedulerCancel()
+		scheduler.Stop()
+		logger.Info("settlement scheduler stopped")
+	}
+
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.Server.GracefulShutdownTimeout)
 	defer cancel()
 
@@ -267,6 +356,83 @@ func run(logger *slog.Logger) error {
 	}
 
 	return nil
+}
+
+// wireScheduler creates and configures the SettlementScheduler with all its dependencies.
+// Returns nil if any required dependency is not available.
+func wireScheduler(ctx context.Context, cfg *config.Config, redisClient *redis.Client, logger *slog.Logger) *worker.SettlementScheduler {
+	if redisClient == nil {
+		logger.Warn("scheduler disabled: Redis not configured (required for leader election)")
+		return nil
+	}
+
+	// Create leader elector
+	leaderElector := worker.NewRedisLeaderElector(
+		redisClient,
+		worker.RedisLeaderConfig{
+			LockTTL:       cfg.Scheduler.LeaderLockTTL,
+			RenewInterval: cfg.Scheduler.LeaderRenewInterval,
+		},
+		logger,
+	)
+
+	// Create execution store (requires pgxpool for direct pgx queries)
+	pool, err := pgxpool.New(ctx, cfg.Database.URL)
+	if err != nil {
+		logger.Warn("scheduler disabled: failed to create pgx pool for execution store",
+			"error", err)
+		return nil
+	}
+	executionStore := worker.NewPgExecutionStore(pool)
+
+	// Create Reference Data client (stub until proto available)
+	refDataClient := worker.NewStubReferenceDataClient(logger)
+
+	// Create reconciliation self-client (loopback to this service)
+	reconConn, err := grpc.NewClient(
+		fmt.Sprintf("localhost:%s", cfg.Server.Port),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		logger.Warn("scheduler disabled: failed to create reconciliation self-client",
+			"error", err)
+		pool.Close()
+		return nil
+	}
+	reconGrpcClient := reconciliationv1.NewAccountReconciliationServiceClient(reconConn)
+	reconClient := worker.NewGrpcReconciliationClient(reconGrpcClient)
+
+	// Create scheduler
+	schedulerCfg := worker.SchedulerConfig{
+		PollInterval:    cfg.Scheduler.PollInterval,
+		ShutdownTimeout: cfg.Scheduler.ShutdownTimeout,
+	}
+
+	scheduler, err := worker.NewSettlementScheduler(
+		refDataClient,
+		reconClient,
+		leaderElector,
+		schedulerCfg,
+		logger,
+		nil, // metrics - use default
+		worker.WithExecutionStore(executionStore),
+	)
+	if err != nil {
+		logger.Warn("scheduler disabled: failed to create scheduler",
+			"error", err)
+		pool.Close()
+		if closeErr := reconConn.Close(); closeErr != nil {
+			logger.Error("failed to close reconciliation connection", "error", closeErr)
+		}
+		return nil
+	}
+
+	logger.Info("settlement scheduler configured",
+		"poll_interval", cfg.Scheduler.PollInterval,
+		"leader_lock_ttl", cfg.Scheduler.LeaderLockTTL,
+		"shutdown_timeout", cfg.Scheduler.ShutdownTimeout)
+
+	return scheduler
 }
 
 // healthServer implements the gRPC health checking protocol.

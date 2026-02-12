@@ -24,7 +24,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"github.com/meridianhub/meridian/cmd/market-data-tool/internal/adapters/csv"
+	csvadapter "github.com/meridianhub/meridian/cmd/market-data-tool/internal/adapters/csv"
 	"github.com/meridianhub/meridian/cmd/market-data-tool/internal/infra"
 	"github.com/meridianhub/meridian/cmd/market-data-tool/internal/validation"
 	"github.com/meridianhub/meridian/shared/platform/await"
@@ -122,10 +122,10 @@ func TestCSVParser_Integration(t *testing.T) {
 			Code: "USD_EUR_FX",
 		}
 
-		parser := csv.NewParser(dataset)
-		var rows []csv.ObservationRow
+		parser := csvadapter.NewParser(dataset)
+		var rows []csvadapter.ObservationRow
 
-		result, err := parser.Parse(context.Background(), strings.NewReader(csvData), csv.DefaultParseConfig(), func(batch csv.RowBatch) error {
+		result, err := parser.Parse(context.Background(), strings.NewReader(csvData), csvadapter.DefaultParseConfig(), func(batch csvadapter.RowBatch) error {
 			rows = append(rows, batch.Rows...)
 			return nil
 		})
@@ -152,18 +152,18 @@ func TestCSVParser_Integration(t *testing.T) {
 		csvData := strings.Join(lines, "\n")
 
 		dataset := &infra.DataSetDefinition{Code: "TEST"}
-		parser := csv.NewParser(dataset)
+		parser := csvadapter.NewParser(dataset)
 
 		var batchCount int
 		var totalRows int
 
-		config := csv.ParseConfig{
+		config := csvadapter.ParseConfig{
 			BatchSize:        100,
 			SkipEmptyRows:    true,
 			TimestampFormats: []string{time.RFC3339},
 		}
 
-		result, err := parser.Parse(context.Background(), strings.NewReader(csvData), config, func(batch csv.RowBatch) error {
+		result, err := parser.Parse(context.Background(), strings.NewReader(csvData), config, func(batch csvadapter.RowBatch) error {
 			batchCount++
 			totalRows += len(batch.Rows)
 			return nil
@@ -362,14 +362,14 @@ func TestEndToEnd_ImportWorkflow(t *testing.T) {
 		defer file.Close()
 
 		dataset := &infra.DataSetDefinition{Code: "USD_EUR_FX"}
-		parser := csv.NewParser(dataset)
+		parser := csvadapter.NewParser(dataset)
 
 		// Create validation pipeline
 		pipeline := validation.NewPipeline(validation.PipelineConfig{})
 
 		// Process rows
 		var validCount, errorCount int
-		parseResult, err := parser.Parse(tc.ctx, file, csv.DefaultParseConfig(), func(batch csv.RowBatch) error {
+		parseResult, err := parser.Parse(tc.ctx, file, csvadapter.DefaultParseConfig(), func(batch csvadapter.RowBatch) error {
 			for _, csvRow := range batch.Rows {
 				row := &validation.ObservationRow{
 					LineNumber:   csvRow.LineNumber,

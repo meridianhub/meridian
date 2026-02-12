@@ -16,6 +16,7 @@ import (
 	reconciliationv1 "github.com/meridianhub/meridian/api/proto/meridian/reconciliation/v1"
 	"github.com/meridianhub/meridian/services/reconciliation/domain"
 	"github.com/meridianhub/meridian/shared/pkg/valuation"
+	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/shopspring/decimal"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -816,11 +817,41 @@ func (s *AccountReconciliationService) AssertBalance(
 	}, nil
 }
 
-// extractCallerRole reads the caller's role from gRPC metadata.
-// TODO: Replace with validated role from auth interceptor/gateway. Currently
-// trusts client-supplied metadata which is acceptable for internal service-to-service
-// calls but must be secured before external exposure.
+// extractCallerRole determines the caller's role from validated JWT claims.
+// When auth is enabled, the auth interceptor validates the JWT and stores claims
+// in context. This function extracts the role from those validated claims.
+// When auth is disabled (development mode), no claims are present in context,
+// so it falls back to reading the role from gRPC metadata headers.
 func extractCallerRole(ctx context.Context) CallerRole {
+	// Primary: extract role from validated JWT claims (production path)
+	if claims, ok := auth.GetClaimsFromContext(ctx); ok {
+		return mapClaimsToCallerRole(claims)
+	}
+
+	// Fallback: no JWT claims in context means auth is disabled (development mode).
+	// Trust metadata-based role extraction for local development and testing.
+	return extractCallerRoleFromMetadata(ctx)
+}
+
+// mapClaimsToCallerRole maps validated JWT claims to a CallerRole.
+// The role hierarchy uses auth.Role constants from the RBAC system:
+//   - auth.RoleService ("service") -> CallerRoleSystem (service-to-service calls)
+//   - auth.RoleAdmin ("admin") -> CallerRoleSystem (admin has full access)
+//   - auth.RoleAuditor ("auditor") -> CallerRoleAuditor (read-only audit access)
+//   - All others -> CallerRoleTenantAdmin (default tenant-scoped access)
+func mapClaimsToCallerRole(claims *auth.Claims) CallerRole {
+	if claims.HasRole(auth.RoleService.String()) || claims.HasRole(auth.RoleAdmin.String()) {
+		return CallerRoleSystem
+	}
+	if claims.HasRole(auth.RoleAuditor.String()) {
+		return CallerRoleAuditor
+	}
+	return CallerRoleTenantAdmin
+}
+
+// extractCallerRoleFromMetadata reads the caller's role from gRPC metadata.
+// This is only used when auth is disabled (AUTH_ENABLED=false) for development.
+func extractCallerRoleFromMetadata(ctx context.Context) CallerRole {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		return CallerRoleTenantAdmin

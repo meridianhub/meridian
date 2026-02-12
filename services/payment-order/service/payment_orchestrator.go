@@ -91,6 +91,13 @@ type PaymentOrchestratorConfig struct {
 	LienExecutionRetryConfig  *sharedclients.RetryConfig
 	InternalClearingEnabled   bool
 	LockClient                LockClient // Distributed lock client for preventing concurrent lien execution
+
+	// HandlerRegistry is an optional external handler registry with cross-service handlers
+	// (e.g., party.get_default_payment_method, current_account.*). When provided, the
+	// orchestrator registers its internal payment_order.* handlers on this registry and
+	// uses it for the StarlarkSagaRunner, giving saga scripts access to all handlers.
+	// When nil, a new empty registry is created (backward compatible).
+	HandlerRegistry *saga.HandlerRegistry
 }
 
 // NewPaymentOrchestrator creates a new payment orchestrator with the given dependencies.
@@ -126,8 +133,14 @@ func NewPaymentOrchestrator(cfg PaymentOrchestratorConfig) (*PaymentOrchestrator
 		return nil, fmt.Errorf("failed to create bucket evaluator: %w", err)
 	}
 
-	// Create handler registry and register payment-order handlers
-	handlerRegistry := saga.NewHandlerRegistry()
+	// Use external handler registry if provided (contains cross-service handlers),
+	// otherwise create a new empty one.
+	handlerRegistry := cfg.HandlerRegistry
+	if handlerRegistry == nil {
+		handlerRegistry = saga.NewHandlerRegistry()
+	}
+
+	// Register payment-order-specific handlers on the registry
 	handlerDeps := &PaymentOrderHandlerDeps{
 		CurrentAccountClient:      cfg.CurrentAccountClient,
 		PaymentGateway:            cfg.PaymentGateway,

@@ -10,7 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/meridianhub/meridian/cmd/market-data-tool/internal/adapters/csv"
+	csvadapter "github.com/meridianhub/meridian/cmd/market-data-tool/internal/adapters/csv"
 	"github.com/meridianhub/meridian/cmd/market-data-tool/internal/infra"
 	"github.com/meridianhub/meridian/cmd/market-data-tool/internal/validation"
 )
@@ -189,15 +189,15 @@ func executeValidation(ctx context.Context, cfg *validateConfig) (*validateResul
 	})
 
 	// Create CSV parser
-	csvParser := csv.NewParser(dataset)
+	csvParser := csvadapter.NewParser(dataset)
 
 	// Parse and validate CSV
-	parseConfig := csv.ParseConfig{
+	parseConfig := csvadapter.ParseConfig{
 		BatchSize:     500,
 		SkipEmptyRows: true,
 	}
 
-	parseResult, err := csvParser.Parse(ctx, file, parseConfig, func(batch csv.RowBatch) error {
+	parseResult, err := csvParser.Parse(ctx, file, parseConfig, func(batch csvadapter.RowBatch) error {
 		for _, csvRow := range batch.Rows {
 			validationRow := csvRowToValidationRow(&csvRow, cfg.Dataset)
 			rowErr := pipeline.ValidateRow(ctx, validationRow)

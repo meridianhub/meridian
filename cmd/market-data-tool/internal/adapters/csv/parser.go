@@ -1,10 +1,10 @@
-// Package csv provides CSV parsing for market data observation imports.
+// Package csvadapter provides CSV parsing for market data observation imports.
 //
 // The parser handles:
 //   - Required columns: observed_at, quality_level, value
 //   - Optional temporal bounds: valid_from, valid_to
 //   - Dynamic attribute extraction based on dataset attribute_schema
-package csv
+package csvadapter
 
 import (
 	"bufio"

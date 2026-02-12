@@ -15,6 +15,7 @@ import (
 
 	stripego "github.com/stripe/stripe-go/v82"
 
+	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
 	stripegateway "github.com/meridianhub/meridian/services/payment-order/adapters/gateway/stripe"
@@ -33,6 +34,8 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/ports"
 	"github.com/redis/go-redis/v9"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 
@@ -40,7 +43,13 @@ import (
 	currentaccountclient "github.com/meridianhub/meridian/services/current-account/client"
 	financialaccountingclient "github.com/meridianhub/meridian/services/financial-accounting/client"
 	internalbankaccountclient "github.com/meridianhub/meridian/services/internal-bank-account/client"
+	partyclient "github.com/meridianhub/meridian/services/party/client"
 	positionkeepingclient "github.com/meridianhub/meridian/services/position-keeping/client"
+
+	// Reference data client for saga definitions and instrument lookups
+	poclients "github.com/meridianhub/meridian/services/payment-order/adapters/clients"
+	referencedataclient "github.com/meridianhub/meridian/services/reference-data/client"
+
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 )
 
@@ -53,12 +62,6 @@ var (
 
 // ErrMissingHMACSecret is returned when the WEBHOOK_HMAC_SECRET environment variable is not set.
 var ErrMissingHMACSecret = errors.New("WEBHOOK_HMAC_SECRET environment variable is required")
-
-// ErrMissingStripeAPIKey is returned when STRIPE_API_KEY is not set but the Stripe provider is selected.
-var ErrMissingStripeAPIKey = errors.New("STRIPE_API_KEY is required when PAYMENT_GATEWAY_PROVIDER is \"stripe\"")
-
-// ErrUnsupportedGatewayProvider is returned when PAYMENT_GATEWAY_PROVIDER has an unknown value.
-var ErrUnsupportedGatewayProvider = errors.New("unsupported PAYMENT_GATEWAY_PROVIDER value")
 
 func main() {
 	// Initialize structured logging with configurable log level
@@ -85,6 +88,13 @@ func main() {
 
 func run(logger *slog.Logger) error {
 	ctx := context.Background()
+
+	// Load and validate service configuration early (fail fast).
+	svcConfig := config.LoadServiceConfig()
+	if err := svcConfig.Validate(); err != nil {
+		return fmt.Errorf("invalid service configuration: %w", err)
+	}
+	svcConfig.LogValues(logger)
 
 	// Initialize OpenTelemetry tracer
 	tracer, err := bootstrap.NewTracer(ctx, bootstrap.TracerConfig{
@@ -143,7 +153,7 @@ func run(logger *slog.Logger) error {
 	}
 
 	// Create payment gateway
-	paymentGateway, err := createPaymentGateway(logger)
+	paymentGateway, err := createPaymentGateway(svcConfig, logger)
 	if err != nil {
 		return fmt.Errorf("failed to create payment gateway: %w", err)
 	}
@@ -230,26 +240,62 @@ func run(logger *slog.Logger) error {
 		}
 	}
 
+	// Create Party client for Starlark handlers (party.get_default_payment_method).
+	partyClient, partyCleanup, err := partyclient.New(partyclient.Config{
+		ServiceName: partyclient.ServiceName,
+		Namespace:   namespace,
+		Port:        ports.Party,
+		Timeout:     defaults.DefaultRPCTimeout,
+		Tracer:      tracer,
+	})
+	if err != nil {
+		logger.Warn("party client unavailable, Starlark party handlers not registered",
+			"error", err)
+	} else {
+		defer partyCleanup()
+		if err := partyclient.RegisterStarlarkHandlers(handlerRegistry, partyClient); err != nil {
+			logger.Warn("failed to register party handlers", "error", err)
+		}
+	}
+
+	// Create Reference Data client for saga definitions and instrument lookups.
+	// Uses the shared gRPC connection via ReferenceDataClientWrapper which implements
+	// service.ReferenceDataClient (GetSaga + RetrieveInstrument).
+	refDataClient, refDataCleanup, err := referencedataclient.New(ctx, referencedataclient.Config{
+		ServiceName: referencedataclient.ServiceName,
+		Namespace:   namespace,
+		Port:        ports.ReferenceData,
+		Timeout:     defaults.DefaultRPCTimeout,
+		Tracer:      tracer,
+	})
+	var referenceDataClient service.ReferenceDataClient
+	if err != nil {
+		logger.Warn("reference-data client unavailable, saga definitions will not be fetched",
+			"error", err)
+	} else {
+		defer func() {
+			if err := refDataCleanup(); err != nil {
+				logger.Error("failed to close reference-data client", "error", err)
+			}
+		}()
+		// Wrap the reference-data client to implement service.ReferenceDataClient interface
+		referenceDataClient = poclients.NewReferenceDataClient(refDataClient.Conn())
+		// Register reference-data Starlark handlers if needed in the future
+		logger.Info("reference-data client connected", "port", ports.ReferenceData)
+	}
+
 	logger.Info("Starlark handler registry initialized",
 		"registered_handlers", len(handlerRegistry.List()))
 
-	// handlerRegistry is available for use with StarlarkRunner when
-	// payment execution sagas are migrated from Go orchestrators to Starlark.
-	_ = handlerRegistry
-
 	// Start billing background workers (feature-flagged)
-	billingEnabled := env.GetEnvAsBool("BILLING_ENABLED", false)
 	var billingScheduler *worker.BillingScheduler
 	var dunningWorker *worker.DunningWorker
 
-	if billingEnabled {
+	if svcConfig.BillingEnabled {
 		billingRepo := persistence.NewBillingRepository(db)
 		billingMetrics := worker.NewBillingMetrics()
 
 		tenantID := env.GetEnvOrDefault("BILLING_TENANT_ID", "default")
-		cronSchedule := env.GetEnvOrDefault("BILLING_CRON_SCHEDULE", "0 0 * * *")
-		shadowMode := env.GetEnvAsBool("BILLING_SHADOW_MODE", false)
-		pollInterval := env.GetEnvAsDuration("DUNNING_POLL_INTERVAL", 5*time.Minute)
 
 		var err error
 		billingScheduler, err = worker.NewBillingScheduler(
@@ -257,8 +303,8 @@ func run(logger *slog.Logger) error {
 			redisClient,
 			worker.BillingSchedulerConfig{
 				TenantID:       tenantID,
-				CronExpression: cronSchedule,
-				ShadowMode:     shadowMode,
+				CronExpression: svcConfig.BillingCronSchedule,
+				ShadowMode:     svcConfig.BillingShadowMode,
 			},
 			logger,
 			billingMetrics,
@@ -279,7 +325,7 @@ func run(logger *slog.Logger) error {
 			billingRepo,
 			redisClient,
 			worker.DunningWorkerConfig{
-				PollInterval: pollInterval,
+				PollInterval: svcConfig.DunningPollInterval,
 			},
 			dunningCallback,
 			logger,
@@ -290,9 +336,9 @@ func run(logger *slog.Logger) error {
 		}
 
 		logger.Info("billing workers configured",
-			"cron_schedule", cronSchedule,
-			"shadow_mode", shadowMode,
-			"dunning_poll_interval", pollInterval,
+			"cron_schedule", svcConfig.BillingCronSchedule,
+			"shadow_mode", svcConfig.BillingShadowMode,
+			"dunning_poll_interval", svcConfig.DunningPollInterval,
 			"tenant_id", tenantID)
 	} else {
 		logger.Info("billing workers disabled (BILLING_ENABLED=false)")
@@ -304,6 +350,7 @@ func run(logger *slog.Logger) error {
 		CurrentAccountClient:      currentAccountClient,
 		FinancialAccountingClient: financialAccountingClient,
 		InternalBankAccountClient: internalBankAccountClient, // May be nil if internal clearing disabled
+		ReferenceDataClient:       referenceDataClient,       // May be nil if reference-data unavailable
 		PaymentGateway:            paymentGateway,
 		GatewayAccountConfig:      gatewayAccountConfig,
 		KafkaPublisher:            kafkaProducer,
@@ -311,6 +358,7 @@ func run(logger *slog.Logger) error {
 		Logger:                    logger,
 		Tracer:                    tracer,
 		InternalClearingEnabled:   internalClearingEnabled,
+		HandlerRegistry:           handlerRegistry,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create payment order service: %w", err)
@@ -354,7 +402,7 @@ func run(logger *slog.Logger) error {
 	}
 
 	// Create Stripe webhook handler (optional - only if STRIPE_API_KEY is configured)
-	stripeWebhookHandler, err := createStripeWebhookHandler(webhookHandler, logger)
+	stripeWebhookHandler, err := createStripeWebhookHandler(svcConfig, webhookHandler, logger)
 	if err != nil {
 		return fmt.Errorf("failed to create stripe webhook handler: %w", err)
 	}
@@ -406,7 +454,7 @@ func run(logger *slog.Logger) error {
 	workerCtx, workerCancel := context.WithCancel(ctx)
 	defer workerCancel()
 	var billingWg sync.WaitGroup
-	if billingEnabled && billingScheduler != nil && dunningWorker != nil {
+	if svcConfig.BillingEnabled && billingScheduler != nil && dunningWorker != nil {
 		billingWg.Add(2)
 		go func() {
 			defer billingWg.Done()
@@ -448,7 +496,7 @@ func run(logger *slog.Logger) error {
 	// Stop billing workers and wait for goroutines to exit before database close.
 	// Cancel the worker context first to unblock Start() select loops, then
 	// call Stop() to signal internal shutdown channels and drain in-flight work.
-	if billingEnabled && billingScheduler != nil && dunningWorker != nil {
+	if svcConfig.BillingEnabled && billingScheduler != nil && dunningWorker != nil {
 		logger.Info("stopping billing workers...")
 		workerCancel()
 		billingScheduler.Stop()
@@ -665,22 +713,14 @@ func createInternalBankAccountClient(namespace string, logger *slog.Logger, trac
 
 // createPaymentGateway creates the payment gateway client with resilience patterns.
 // The gateway is wrapped with circuit breaker, rate limiting, and retry logic.
-//
-// Environment variables:
-//   - PAYMENT_GATEWAY_PROVIDER: Gateway provider ("stripe" or "mock", default: "mock")
-//   - STRIPE_API_KEY: Platform Stripe API key (required when provider is "stripe")
-func createPaymentGateway(logger *slog.Logger) (gateway.PaymentGateway, error) {
-	provider := env.GetEnvOrDefault("PAYMENT_GATEWAY_PROVIDER", gateway.ProviderMock)
-	stripeAPIKey := env.GetEnvOrDefault("STRIPE_API_KEY", "")
-
+// Provider selection and API key validation are handled by ServiceConfig.Validate,
+// so this function assumes the config is already validated.
+func createPaymentGateway(svcConfig config.ServiceConfig, logger *slog.Logger) (gateway.PaymentGateway, error) {
 	var baseGateway gateway.PaymentGateway
 
-	switch provider {
+	switch svcConfig.PaymentGatewayProvider {
 	case gateway.ProviderStripe:
-		if stripeAPIKey == "" {
-			return nil, ErrMissingStripeAPIKey
-		}
-		client := stripego.NewClient(stripeAPIKey)
+		client := stripego.NewClient(svcConfig.StripeAPIKey)
 		baseGateway = stripegateway.NewGatewayAdapter(
 			client.V1PaymentIntents,
 			stripegateway.GatewayAdapterConfig{},
@@ -698,7 +738,7 @@ func createPaymentGateway(logger *slog.Logger) (gateway.PaymentGateway, error) {
 		})
 
 	default:
-		return nil, fmt.Errorf("%w: %q (valid: %q, %q)", ErrUnsupportedGatewayProvider, provider, gateway.ProviderStripe, gateway.ProviderMock)
+		return nil, fmt.Errorf("%w: %q (valid: %q, %q)", config.ErrInvalidGatewayProvider, svcConfig.PaymentGatewayProvider, gateway.ProviderStripe, gateway.ProviderMock)
 	}
 
 	// Configure resilience settings from environment
@@ -812,25 +852,21 @@ func createGatewayAccountConfig(logger *slog.Logger) (*config.GatewayAccountConf
 	return cfg, nil
 }
 
-// createStripeWebhookHandler creates the StripeWebhookHandler if STRIPE_API_KEY is configured.
-// Returns nil (no error) when Stripe is not configured, making the handler optional.
-func createStripeWebhookHandler(webhookHandler *webhookhttp.WebhookHandler, logger *slog.Logger) (*webhookhttp.StripeWebhookHandler, error) {
-	stripeAPIKey := env.GetEnvOrDefault("STRIPE_API_KEY", "")
-	if stripeAPIKey == "" {
-		logger.Info("STRIPE_API_KEY not set, Stripe webhook handler disabled")
+// createStripeWebhookHandler creates the StripeWebhookHandler if Stripe provider is configured.
+// Returns nil (no error) when Stripe is not the active provider, making the handler optional.
+func createStripeWebhookHandler(svcConfig config.ServiceConfig, webhookHandler *webhookhttp.WebhookHandler, logger *slog.Logger) (*webhookhttp.StripeWebhookHandler, error) {
+	if svcConfig.StripeAPIKey == "" {
+		logger.Info("Stripe API key not set, Stripe webhook handler disabled")
 		return nil, nil //nolint:nilnil // nil handler is intentional: ServerConfig treats nil as "feature disabled"
 	}
 
-	stripeWebhookSecret := env.GetEnvOrDefault("STRIPE_WEBHOOK_SECRET", "")
-
-	// Use env-based tenant config provider as a stub until Task 6 implements
-	// the real TenantConfigProvider backed by control-plane gRPC.
-	provider := &envTenantConfigProvider{
-		webhookSecret: stripeWebhookSecret,
+	provider, err := createTenantConfigProvider(logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create tenant config provider: %w", err)
 	}
 
 	cfg := stripegateway.DefaultConfig()
-	cfg.APIKey = stripeAPIKey
+	cfg.APIKey = svcConfig.StripeAPIKey
 
 	clientFactory, err := stripegateway.NewClientFactory(cfg, provider, logger)
 	if err != nil {
@@ -850,9 +886,54 @@ func createStripeWebhookHandler(webhookHandler *webhookhttp.WebhookHandler, logg
 	return handler, nil
 }
 
-// envTenantConfigProvider is a stub TenantConfigProvider that returns a global
-// webhook secret from environment variables. This will be replaced by a real
-// implementation in Task 6 that fetches per-tenant config from the control plane.
+// createTenantConfigProvider creates the appropriate TenantConfigProvider.
+// If CONTROL_PLANE_ADDR is set, creates a ManifestTenantConfigProvider that
+// queries the control-plane ManifestHistoryService for per-tenant Stripe config.
+// Otherwise, falls back to the env-based stub provider.
+func createTenantConfigProvider(logger *slog.Logger) (stripegateway.TenantConfigProvider, error) {
+	controlPlaneAddr := env.GetEnvOrDefault("CONTROL_PLANE_ADDR", "")
+	if controlPlaneAddr != "" {
+		return createManifestTenantConfigProvider(controlPlaneAddr, logger)
+	}
+
+	logger.Warn("CONTROL_PLANE_ADDR not set, using env-based tenant config provider (single-tenant fallback)")
+	stripeWebhookSecret := env.GetEnvOrDefault("STRIPE_WEBHOOK_SECRET", "")
+	return &envTenantConfigProvider{
+		webhookSecret: stripeWebhookSecret,
+	}, nil
+}
+
+// createManifestTenantConfigProvider creates a ManifestTenantConfigProvider
+// backed by the control-plane ManifestHistoryService gRPC endpoint.
+func createManifestTenantConfigProvider(addr string, logger *slog.Logger) (*stripegateway.ManifestTenantConfigProvider, error) {
+	conn, err := grpc.NewClient(addr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to control-plane at %s: %w", addr, err)
+	}
+
+	client := controlplanev1.NewManifestHistoryServiceClient(conn)
+	cacheTTL := env.GetEnvAsDuration("TENANT_CONFIG_CACHE_TTL", 5*time.Minute)
+
+	provider, err := stripegateway.NewManifestTenantConfigProvider(stripegateway.ManifestTenantConfigProviderConfig{
+		Client:   client,
+		Logger:   logger,
+		CacheTTL: cacheTTL,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create manifest tenant config provider: %w", err)
+	}
+
+	logger.Info("tenant config provider backed by control-plane manifest",
+		"control_plane_addr", addr,
+		"cache_ttl", cacheTTL)
+
+	return provider, nil
+}
+
+// envTenantConfigProvider is a fallback TenantConfigProvider that returns a global
+// webhook secret from environment variables. Used when CONTROL_PLANE_ADDR is not set.
 type envTenantConfigProvider struct {
 	webhookSecret string
 }
@@ -862,7 +943,7 @@ func (p *envTenantConfigProvider) GetTenantConfig(_ string) (stripegateway.Tenan
 		return stripegateway.TenantConfig{}, stripegateway.ErrTenantConfigNotFound
 	}
 	return stripegateway.TenantConfig{
-		ConnectedAccountID:    "platform", // Placeholder until per-tenant config
+		ConnectedAccountID:    "platform", // Placeholder for single-tenant fallback
 		WebhookEndpointSecret: p.webhookSecret,
 	}, nil
 }
