@@ -133,10 +133,9 @@ func setupE2E(t *testing.T, opts ...e2eOption) *E2ETestEnvironment {
 
 	repo := persistence.NewPaymentOrderRepository(db)
 
-	// Auto-wire saga execution logger when saga orchestration is enabled
-	// and no explicit logger was provided via options.
-	sagaExecLogger := cfg.sagaExecutionLogger
-	if cfg.sagaOrchestrationEnabled && sagaExecLogger == nil {
+	// Auto-wire saga execution logger when saga orchestration is enabled.
+	var sagaExecLogger domain.SagaExecutionLogger
+	if cfg.sagaOrchestrationEnabled {
 		sagaExecLogger = persistence.NewSagaExecutionRepository(db)
 	}
 
@@ -176,7 +175,6 @@ type e2eConfig struct {
 	insufficientFunds        bool
 	sagaTimeout              time.Duration
 	sagaOrchestrationEnabled bool
-	sagaExecutionLogger      domain.SagaExecutionLogger
 }
 
 type e2eOption func(*e2eConfig)
@@ -209,12 +207,6 @@ func withSagaTimeout(d time.Duration) e2eOption {
 func withSagaOrchestration() e2eOption {
 	return func(c *e2eConfig) {
 		c.sagaOrchestrationEnabled = true
-	}
-}
-
-func withSagaExecutionLogger(logger domain.SagaExecutionLogger) e2eOption {
-	return func(c *e2eConfig) {
-		c.sagaExecutionLogger = logger
 	}
 }
 
