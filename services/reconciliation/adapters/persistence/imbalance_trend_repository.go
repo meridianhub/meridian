@@ -116,12 +116,15 @@ func (r *ImbalanceTrendRepository) FindByInstrumentCode(ctx context.Context, ins
 // toImbalanceTrendEntity converts a domain ImbalanceTrend to a persistence entity.
 func toImbalanceTrendEntity(t *domain.ImbalanceTrend) *ImbalanceTrendEntity {
 	entity := &ImbalanceTrendEntity{
-		TrendID:             t.TrendID,
-		InstrumentCode:      t.InstrumentCode,
-		FirstDetectedAt:     t.FirstDetectedAt,
-		LastDetectedAt:      t.LastDetectedAt,
-		ConsecutiveDays:     t.ConsecutiveDays,
-		TotalOccurrences:    t.ConsecutiveDays, // Map from domain field
+		TrendID:         t.TrendID,
+		InstrumentCode:  t.InstrumentCode,
+		FirstDetectedAt: t.FirstDetectedAt,
+		LastDetectedAt:  t.LastDetectedAt,
+		ConsecutiveDays: t.ConsecutiveDays,
+		// TotalOccurrences is not tracked in the domain model yet;
+		// the DB column defaults to 0 and will be populated when
+		// the domain model adds cumulative occurrence tracking.
+		TotalOccurrences:    0,
 		LastImbalanceAmount: t.LastImbalanceAmount,
 		ResolvedAt:          t.ResolvedAt,
 		UpdatedAt:           time.Now().UTC(),
