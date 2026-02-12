@@ -326,6 +326,126 @@ func TestBalanceService_GetBalance_HandlesPositionKeepingRateLimiting(t *testing
 	assert.Equal(t, codes.Unavailable, st.Code())
 }
 
+func TestBalanceService_GetBalance_HandlesPositionKeepingNotFound(t *testing.T) {
+	repo := newMockRepository()
+	posClient := &mockPositionKeepingClient{
+		err: status.Error(codes.NotFound, "position not found"),
+	}
+	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+		AccountCode:     "CLR-001",
+		Name:            "USD Clearing Account",
+		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
+		InstrumentCode:  "USD",
+	})
+	require.NoError(t, err)
+
+	// NotFound from Position Keeping maps to Internal (indicates data inconsistency)
+	_, err = svc.GetBalance(ctx, &pb.GetBalanceRequest{
+		AccountId: createResp.Facility.AccountCode,
+	})
+	assert.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Internal, st.Code())
+	assert.Contains(t, st.Message(), "balance not found in position keeping")
+}
+
+func TestBalanceService_GetBalance_HandlesPositionKeepingUnavailable(t *testing.T) {
+	repo := newMockRepository()
+	posClient := &mockPositionKeepingClient{
+		err: status.Error(codes.Unavailable, "service temporarily unavailable"),
+	}
+	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+		AccountCode:     "CLR-001",
+		Name:            "USD Clearing Account",
+		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
+		InstrumentCode:  "USD",
+	})
+	require.NoError(t, err)
+
+	// Unavailable passes through as Unavailable
+	_, err = svc.GetBalance(ctx, &pb.GetBalanceRequest{
+		AccountId: createResp.Facility.AccountCode,
+	})
+	assert.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Unavailable, st.Code())
+	assert.Contains(t, st.Message(), "position keeping service unavailable")
+}
+
+func TestBalanceService_GetBalance_HandlesPositionKeepingInternal(t *testing.T) {
+	repo := newMockRepository()
+	posClient := &mockPositionKeepingClient{
+		err: status.Error(codes.Internal, "internal server error"),
+	}
+	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+		AccountCode:     "CLR-001",
+		Name:            "USD Clearing Account",
+		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
+		InstrumentCode:  "USD",
+	})
+	require.NoError(t, err)
+
+	// Internal from Position Keeping maps to Internal (default case)
+	_, err = svc.GetBalance(ctx, &pb.GetBalanceRequest{
+		AccountId: createResp.Facility.AccountCode,
+	})
+	assert.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Internal, st.Code())
+	assert.Contains(t, st.Message(), "failed to retrieve balance")
+}
+
+func TestBalanceService_GetBalance_HandlesPositionKeepingInvalidArgument(t *testing.T) {
+	repo := newMockRepository()
+	posClient := &mockPositionKeepingClient{
+		err: status.Error(codes.InvalidArgument, "invalid account_id format"),
+	}
+	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+		AccountCode:     "CLR-001",
+		Name:            "USD Clearing Account",
+		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
+		InstrumentCode:  "USD",
+	})
+	require.NoError(t, err)
+
+	// InvalidArgument from Position Keeping maps to Internal (indicates a bug in our request)
+	_, err = svc.GetBalance(ctx, &pb.GetBalanceRequest{
+		AccountId: createResp.Facility.AccountCode,
+	})
+	assert.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Internal, st.Code())
+	assert.Contains(t, st.Message(), "invalid request to position keeping")
+}
+
 func TestBalanceService_RequiresPositionKeepingClient(t *testing.T) {
 	// Service without Position Keeping client should return Unimplemented for balance queries
 	repo := newMockRepository()
