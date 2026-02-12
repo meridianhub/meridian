@@ -15,6 +15,7 @@ import (
 
 	stripego "github.com/stripe/stripe-go/v82"
 
+	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
 	stripegateway "github.com/meridianhub/meridian/services/payment-order/adapters/gateway/stripe"
@@ -33,6 +34,8 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/ports"
 	"github.com/redis/go-redis/v9"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 
@@ -869,12 +872,9 @@ func createStripeWebhookHandler(webhookHandler *webhookhttp.WebhookHandler, logg
 		return nil, nil //nolint:nilnil // nil handler is intentional: ServerConfig treats nil as "feature disabled"
 	}
 
-	stripeWebhookSecret := env.GetEnvOrDefault("STRIPE_WEBHOOK_SECRET", "")
-
-	// Use env-based tenant config provider as a stub until Task 6 implements
-	// the real TenantConfigProvider backed by control-plane gRPC.
-	provider := &envTenantConfigProvider{
-		webhookSecret: stripeWebhookSecret,
+	provider, err := createTenantConfigProvider(logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create tenant config provider: %w", err)
 	}
 
 	cfg := stripegateway.DefaultConfig()
@@ -898,9 +898,54 @@ func createStripeWebhookHandler(webhookHandler *webhookhttp.WebhookHandler, logg
 	return handler, nil
 }
 
-// envTenantConfigProvider is a stub TenantConfigProvider that returns a global
-// webhook secret from environment variables. This will be replaced by a real
-// implementation in Task 6 that fetches per-tenant config from the control plane.
+// createTenantConfigProvider creates the appropriate TenantConfigProvider.
+// If CONTROL_PLANE_ADDR is set, creates a ManifestTenantConfigProvider that
+// queries the control-plane ManifestHistoryService for per-tenant Stripe config.
+// Otherwise, falls back to the env-based stub provider.
+func createTenantConfigProvider(logger *slog.Logger) (stripegateway.TenantConfigProvider, error) {
+	controlPlaneAddr := env.GetEnvOrDefault("CONTROL_PLANE_ADDR", "")
+	if controlPlaneAddr != "" {
+		return createManifestTenantConfigProvider(controlPlaneAddr, logger)
+	}
+
+	logger.Warn("CONTROL_PLANE_ADDR not set, using env-based tenant config provider (single-tenant fallback)")
+	stripeWebhookSecret := env.GetEnvOrDefault("STRIPE_WEBHOOK_SECRET", "")
+	return &envTenantConfigProvider{
+		webhookSecret: stripeWebhookSecret,
+	}, nil
+}
+
+// createManifestTenantConfigProvider creates a ManifestTenantConfigProvider
+// backed by the control-plane ManifestHistoryService gRPC endpoint.
+func createManifestTenantConfigProvider(addr string, logger *slog.Logger) (*stripegateway.ManifestTenantConfigProvider, error) {
+	conn, err := grpc.NewClient(addr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to control-plane at %s: %w", addr, err)
+	}
+
+	client := controlplanev1.NewManifestHistoryServiceClient(conn)
+	cacheTTL := env.GetEnvAsDuration("TENANT_CONFIG_CACHE_TTL", 5*time.Minute)
+
+	provider, err := stripegateway.NewManifestTenantConfigProvider(stripegateway.ManifestTenantConfigProviderConfig{
+		Client:   client,
+		Logger:   logger,
+		CacheTTL: cacheTTL,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create manifest tenant config provider: %w", err)
+	}
+
+	logger.Info("tenant config provider backed by control-plane manifest",
+		"control_plane_addr", addr,
+		"cache_ttl", cacheTTL)
+
+	return provider, nil
+}
+
+// envTenantConfigProvider is a fallback TenantConfigProvider that returns a global
+// webhook secret from environment variables. Used when CONTROL_PLANE_ADDR is not set.
 type envTenantConfigProvider struct {
 	webhookSecret string
 }
@@ -910,7 +955,7 @@ func (p *envTenantConfigProvider) GetTenantConfig(_ string) (stripegateway.Tenan
 		return stripegateway.TenantConfig{}, stripegateway.ErrTenantConfigNotFound
 	}
 	return stripegateway.TenantConfig{
-		ConnectedAccountID:    "platform", // Placeholder until per-tenant config
+		ConnectedAccountID:    "platform", // Placeholder for single-tenant fallback
 		WebhookEndpointSecret: p.webhookSecret,
 	}, nil
 }
