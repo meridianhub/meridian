@@ -191,6 +191,9 @@ func TestDunningWorker_ScheduleAndProcess(t *testing.T) {
 	logger := dunningTestLogger()
 	metrics := dunningTestMetrics(t)
 
+	const testTenantID = "tenant_1"
+	zsetKey := dunningRetryZSetPrefix + testTenantID
+
 	t.Run("schedules and processes retry", func(t *testing.T) {
 		repo := newMockBillingRepo()
 
@@ -198,7 +201,7 @@ func TestDunningWorker_ScheduleAndProcess(t *testing.T) {
 		billingRunID := uuid.New()
 		run := &domain.BillingRun{
 			ID:           billingRunID,
-			TenantID:     "tenant-1",
+			TenantID:     testTenantID,
 			Status:       domain.BillingRunStatusFailed,
 			DunningLevel: 1,
 			CycleStart:   time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
@@ -226,7 +229,7 @@ func TestDunningWorker_ScheduleAndProcess(t *testing.T) {
 		NowFunc = func() time.Time { return time.Now().UTC() }
 		defer func() { NowFunc = originalNowFunc }()
 
-		err = w.ScheduleDunningRetry(context.Background(), billingRunID, -1*time.Minute)
+		err = w.ScheduleDunningRetry(context.Background(), testTenantID, billingRunID, -1*time.Minute)
 		require.NoError(t, err)
 
 		// Start the worker
@@ -248,7 +251,7 @@ func TestDunningWorker_ScheduleAndProcess(t *testing.T) {
 		w.Stop()
 
 		// Verify the retry was removed from the ZSET
-		members, err := client.ZRangeByScore(context.Background(), dunningRetryZSet, &redis.ZRangeBy{
+		members, err := client.ZRangeByScore(context.Background(), zsetKey, &redis.ZRangeBy{
 			Min: "-inf",
 			Max: "+inf",
 		}).Result()
@@ -262,7 +265,7 @@ func TestDunningWorker_ScheduleAndProcess(t *testing.T) {
 		billingRunID := uuid.New()
 		run := &domain.BillingRun{
 			ID:         billingRunID,
-			TenantID:   "tenant-1",
+			TenantID:   testTenantID,
 			Status:     domain.BillingRunStatusCompleted, // Not failed
 			CycleStart: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 			CycleEnd:   time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC),
@@ -284,10 +287,10 @@ func TestDunningWorker_ScheduleAndProcess(t *testing.T) {
 		require.NoError(t, err)
 
 		// Clean ZSET from previous test
-		client.Del(context.Background(), dunningRetryZSet)
+		client.Del(context.Background(), zsetKey)
 
 		// Schedule in the past
-		err = w.ScheduleDunningRetry(context.Background(), billingRunID, -1*time.Minute)
+		err = w.ScheduleDunningRetry(context.Background(), testTenantID, billingRunID, -1*time.Minute)
 		require.NoError(t, err)
 
 		go func() {
@@ -313,9 +316,9 @@ func TestDunningWorker_ScheduleAndProcess(t *testing.T) {
 		require.NoError(t, err)
 
 		// Clean ZSET
-		client.Del(context.Background(), dunningRetryZSet)
+		client.Del(context.Background(), zsetKey)
 
-		err = w.ScheduleDunningRetry(context.Background(), billingRunID, -1*time.Minute)
+		err = w.ScheduleDunningRetry(context.Background(), testTenantID, billingRunID, -1*time.Minute)
 		require.NoError(t, err)
 
 		go func() {
@@ -326,7 +329,7 @@ func TestDunningWorker_ScheduleAndProcess(t *testing.T) {
 		w.Stop()
 
 		// Verify the retry was removed from the ZSET (dropped)
-		members, err := client.ZRangeByScore(context.Background(), dunningRetryZSet, &redis.ZRangeBy{
+		members, err := client.ZRangeByScore(context.Background(), zsetKey, &redis.ZRangeBy{
 			Min: "-inf",
 			Max: "+inf",
 		}).Result()
@@ -340,7 +343,7 @@ func TestDunningWorker_ScheduleAndProcess(t *testing.T) {
 		billingRunID := uuid.New()
 		run := &domain.BillingRun{
 			ID:           billingRunID,
-			TenantID:     "tenant-1",
+			TenantID:     testTenantID,
 			Status:       domain.BillingRunStatusFailed,
 			DunningLevel: 1,
 			CycleStart:   time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
@@ -361,9 +364,9 @@ func TestDunningWorker_ScheduleAndProcess(t *testing.T) {
 		require.NoError(t, err)
 
 		// Clean ZSET
-		client.Del(context.Background(), dunningRetryZSet)
+		client.Del(context.Background(), zsetKey)
 
-		err = w.ScheduleDunningRetry(context.Background(), billingRunID, -1*time.Minute)
+		err = w.ScheduleDunningRetry(context.Background(), testTenantID, billingRunID, -1*time.Minute)
 		require.NoError(t, err)
 
 		go func() {
@@ -374,9 +377,22 @@ func TestDunningWorker_ScheduleAndProcess(t *testing.T) {
 		w.Stop()
 
 		// Verify the retry is still in the ZSET
-		count, err := client.ZCard(context.Background(), dunningRetryZSet).Result()
+		count, err := client.ZCard(context.Background(), zsetKey).Result()
 		require.NoError(t, err)
 		assert.Equal(t, int64(1), count, "failed retry should be retained in ZSET")
+	})
+
+	t.Run("rejects empty tenant ID", func(t *testing.T) {
+		repo := newMockBillingRepo()
+
+		w, err := NewDunningWorker(repo, client, DunningWorkerConfig{
+			PollInterval:    50 * time.Millisecond,
+			ShutdownTimeout: 2 * time.Second,
+		}, noopCallback, logger, metrics)
+		require.NoError(t, err)
+
+		err = w.ScheduleDunningRetry(context.Background(), "", uuid.New(), time.Hour)
+		assert.ErrorIs(t, err, ErrDunningMissingTenant)
 	})
 
 	// Clean up ZSET for other tests
@@ -389,6 +405,9 @@ func TestDunningWorker_CancelRetry(t *testing.T) {
 	repo := newMockBillingRepo()
 	metrics := dunningTestMetrics(t)
 
+	const testTenantID = "tenant_1"
+	zsetKey := dunningRetryZSetPrefix + testTenantID
+
 	w, err := NewDunningWorker(repo, client, DunningWorkerConfig{
 		PollInterval:    50 * time.Millisecond,
 		ShutdownTimeout: 2 * time.Second,
@@ -399,22 +418,27 @@ func TestDunningWorker_CancelRetry(t *testing.T) {
 	billingRunID := uuid.New()
 
 	// Schedule a retry
-	err = w.ScheduleDunningRetry(ctx, billingRunID, time.Hour)
+	err = w.ScheduleDunningRetry(ctx, testTenantID, billingRunID, time.Hour)
 	require.NoError(t, err)
 
 	// Verify it's in the ZSET
-	count, err := client.ZCard(ctx, dunningRetryZSet).Result()
+	count, err := client.ZCard(ctx, zsetKey).Result()
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), count)
 
 	// Cancel it
-	err = w.CancelDunningRetry(ctx, billingRunID)
+	err = w.CancelDunningRetry(ctx, testTenantID, billingRunID)
 	require.NoError(t, err)
 
 	// Verify it's gone
-	count, err = client.ZCard(ctx, dunningRetryZSet).Result()
+	count, err = client.ZCard(ctx, zsetKey).Result()
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), count)
+
+	t.Run("rejects empty tenant ID", func(t *testing.T) {
+		err := w.CancelDunningRetry(ctx, "", uuid.New())
+		assert.ErrorIs(t, err, ErrDunningMissingTenant)
+	})
 }
 
 func TestDunningWorker_PerItemLocking(t *testing.T) {
@@ -423,10 +447,12 @@ func TestDunningWorker_PerItemLocking(t *testing.T) {
 	repo := newMockBillingRepo()
 	metrics := dunningTestMetrics(t)
 
+	const testTenantID = "tenant_1"
+
 	billingRunID := uuid.New()
 	run := &domain.BillingRun{
 		ID:           billingRunID,
-		TenantID:     "tenant-1",
+		TenantID:     testTenantID,
 		Status:       domain.BillingRunStatusFailed,
 		DunningLevel: 1,
 		CycleStart:   time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
@@ -458,7 +484,7 @@ func TestDunningWorker_PerItemLocking(t *testing.T) {
 	ctx := context.Background()
 
 	// Schedule retry in the past
-	err = w1.ScheduleDunningRetry(ctx, billingRunID, -1*time.Minute)
+	err = w1.ScheduleDunningRetry(ctx, testTenantID, billingRunID, -1*time.Minute)
 	require.NoError(t, err)
 
 	// Both workers try to process - only one should succeed due to locking
@@ -479,10 +505,12 @@ func TestDunningWorker_GracefulShutdownWaitsForInFlight(t *testing.T) {
 	repo := newMockBillingRepo()
 	metrics := dunningTestMetrics(t)
 
+	const testTenantID = "tenant_1"
+
 	billingRunID := uuid.New()
 	run := &domain.BillingRun{
 		ID:           billingRunID,
-		TenantID:     "tenant-1",
+		TenantID:     testTenantID,
 		Status:       domain.BillingRunStatusFailed,
 		DunningLevel: 1,
 		CycleStart:   time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
@@ -506,7 +534,7 @@ func TestDunningWorker_GracefulShutdownWaitsForInFlight(t *testing.T) {
 	require.NoError(t, err)
 
 	// Schedule retry in the past
-	err = w.ScheduleDunningRetry(context.Background(), billingRunID, -1*time.Minute)
+	err = w.ScheduleDunningRetry(context.Background(), testTenantID, billingRunID, -1*time.Minute)
 	require.NoError(t, err)
 
 	go func() {
@@ -528,6 +556,9 @@ func TestDunningWorker_InvalidMemberInZSET(t *testing.T) {
 	repo := newMockBillingRepo()
 	metrics := dunningTestMetrics(t)
 
+	const testTenantID = "tenant_1"
+	zsetKey := dunningRetryZSetPrefix + testTenantID
+
 	w, err := NewDunningWorker(repo, client, DunningWorkerConfig{
 		PollInterval:    50 * time.Millisecond,
 		ShutdownTimeout: 2 * time.Second,
@@ -536,8 +567,8 @@ func TestDunningWorker_InvalidMemberInZSET(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Add an invalid UUID to the ZSET
-	client.ZAdd(ctx, dunningRetryZSet, redis.Z{
+	// Add an invalid UUID to the tenant-scoped ZSET
+	client.ZAdd(ctx, zsetKey, redis.Z{
 		Score:  float64(time.Now().Add(-1 * time.Minute).Unix()),
 		Member: "not-a-uuid",
 	})
@@ -550,7 +581,7 @@ func TestDunningWorker_InvalidMemberInZSET(t *testing.T) {
 	w.Stop()
 
 	// Invalid member should be removed
-	members, err := client.ZRangeByScore(ctx, dunningRetryZSet, &redis.ZRangeBy{
+	members, err := client.ZRangeByScore(ctx, zsetKey, &redis.ZRangeBy{
 		Min: "-inf",
 		Max: "+inf",
 	}).Result()
@@ -565,6 +596,9 @@ func TestDunningWorker_RepoErrorRetainsRetry(t *testing.T) {
 	repo.findErr = errors.New("database unavailable")
 	metrics := dunningTestMetrics(t)
 
+	const testTenantID = "tenant_1"
+	zsetKey := dunningRetryZSetPrefix + testTenantID
+
 	w, err := NewDunningWorker(repo, client, DunningWorkerConfig{
 		PollInterval:    50 * time.Millisecond,
 		ShutdownTimeout: 2 * time.Second,
@@ -575,9 +609,9 @@ func TestDunningWorker_RepoErrorRetainsRetry(t *testing.T) {
 	billingRunID := uuid.New()
 
 	// Clean ZSET
-	client.Del(ctx, dunningRetryZSet)
+	client.Del(ctx, zsetKey)
 
-	err = w.ScheduleDunningRetry(ctx, billingRunID, -1*time.Minute)
+	err = w.ScheduleDunningRetry(ctx, testTenantID, billingRunID, -1*time.Minute)
 	require.NoError(t, err)
 
 	go func() {
@@ -588,7 +622,184 @@ func TestDunningWorker_RepoErrorRetainsRetry(t *testing.T) {
 	w.Stop()
 
 	// Retry should still be in the ZSET
-	count, err := client.ZCard(ctx, dunningRetryZSet).Result()
+	count, err := client.ZCard(ctx, zsetKey).Result()
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), count, "retry should be retained when repo returns error")
+}
+
+func TestDunningWorker_TenantIsolation(t *testing.T) {
+	mr, client := setupDunningMiniredis(t)
+	logger := dunningTestLogger()
+	metrics := dunningTestMetrics(t)
+
+	const tenantA = "tenant_alpha"
+	const tenantB = "tenant_beta"
+
+	repo := newMockBillingRepo()
+
+	// Create billing runs for two different tenants
+	runA := &domain.BillingRun{
+		ID:           uuid.New(),
+		TenantID:     tenantA,
+		Status:       domain.BillingRunStatusFailed,
+		DunningLevel: 1,
+		CycleStart:   time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		CycleEnd:     time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC),
+	}
+	runB := &domain.BillingRun{
+		ID:           uuid.New(),
+		TenantID:     tenantB,
+		Status:       domain.BillingRunStatusFailed,
+		DunningLevel: 1,
+		CycleStart:   time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		CycleEnd:     time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC),
+	}
+	repo.mu.Lock()
+	repo.runs[runA.ID] = runA
+	repo.runs[runB.ID] = runB
+	repo.mu.Unlock()
+
+	w, err := NewDunningWorker(repo, client, DunningWorkerConfig{
+		PollInterval:    50 * time.Millisecond,
+		ShutdownTimeout: 2 * time.Second,
+	}, noopCallback, logger, metrics)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Schedule retries for both tenants
+	err = w.ScheduleDunningRetry(ctx, tenantA, runA.ID, time.Hour)
+	require.NoError(t, err)
+	err = w.ScheduleDunningRetry(ctx, tenantB, runB.ID, time.Hour)
+	require.NoError(t, err)
+
+	// Verify each tenant's ZSET contains only their own billing run
+	keyA := dunningRetryZSetPrefix + tenantA
+	keyB := dunningRetryZSetPrefix + tenantB
+
+	membersA, err := client.ZRangeByScore(ctx, keyA, &redis.ZRangeBy{
+		Min: "-inf",
+		Max: "+inf",
+	}).Result()
+	require.NoError(t, err)
+	assert.Len(t, membersA, 1)
+	assert.Equal(t, runA.ID.String(), membersA[0])
+
+	membersB, err := client.ZRangeByScore(ctx, keyB, &redis.ZRangeBy{
+		Min: "-inf",
+		Max: "+inf",
+	}).Result()
+	require.NoError(t, err)
+	assert.Len(t, membersB, 1)
+	assert.Equal(t, runB.ID.String(), membersB[0])
+
+	// Cancel tenant A's retry and verify tenant B is unaffected
+	err = w.CancelDunningRetry(ctx, tenantA, runA.ID)
+	require.NoError(t, err)
+
+	countA, err := client.ZCard(ctx, keyA).Result()
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), countA, "tenant A's ZSET should be empty after cancel")
+
+	countB, err := client.ZCard(ctx, keyB).Result()
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), countB, "tenant B's ZSET should be unaffected by tenant A's cancel")
+
+	mr.FlushAll()
+}
+
+func TestDunningWorker_TenantIsolation_Processing(t *testing.T) {
+	_, client := setupDunningMiniredis(t)
+	logger := dunningTestLogger()
+	metrics := dunningTestMetrics(t)
+
+	const tenantA = "tenant_alpha"
+	const tenantB = "tenant_beta"
+
+	repo := newMockBillingRepo()
+
+	runA := &domain.BillingRun{
+		ID:           uuid.New(),
+		TenantID:     tenantA,
+		Status:       domain.BillingRunStatusFailed,
+		DunningLevel: 1,
+		CycleStart:   time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		CycleEnd:     time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC),
+	}
+	runB := &domain.BillingRun{
+		ID:           uuid.New(),
+		TenantID:     tenantB,
+		Status:       domain.BillingRunStatusFailed,
+		DunningLevel: 1,
+		CycleStart:   time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		CycleEnd:     time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC),
+	}
+	repo.mu.Lock()
+	repo.runs[runA.ID] = runA
+	repo.runs[runB.ID] = runB
+	repo.mu.Unlock()
+
+	// Track which billing run IDs get processed using atomic counters
+	var processedA atomic.Bool
+	var processedB atomic.Bool
+	callback := func(_ context.Context, r *domain.BillingRun) error {
+		if r.ID == runA.ID {
+			processedA.Store(true)
+		}
+		if r.ID == runB.ID {
+			processedB.Store(true)
+		}
+		return nil
+	}
+
+	w, err := NewDunningWorker(repo, client, DunningWorkerConfig{
+		PollInterval:    50 * time.Millisecond,
+		ShutdownTimeout: 2 * time.Second,
+	}, callback, logger, metrics)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Schedule both in the past so they're immediately due
+	originalNowFunc := NowFunc
+	NowFunc = func() time.Time { return time.Now().UTC() }
+	defer func() { NowFunc = originalNowFunc }()
+
+	err = w.ScheduleDunningRetry(ctx, tenantA, runA.ID, -1*time.Minute)
+	require.NoError(t, err)
+	err = w.ScheduleDunningRetry(ctx, tenantB, runB.ID, -1*time.Minute)
+	require.NoError(t, err)
+
+	// Start worker and let it process
+	go func() {
+		_ = w.Start(context.Background())
+	}()
+
+	// Wait for both to be processed
+	deadline := time.After(5 * time.Second)
+	for !processedA.Load() || !processedB.Load() {
+		select {
+		case <-deadline:
+			t.Fatalf("expected both tenants processed, got A=%v B=%v", processedA.Load(), processedB.Load())
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	w.Stop()
+
+	// Both billing runs should have been processed
+	assert.True(t, processedA.Load(), "tenant A's billing run should have been processed")
+	assert.True(t, processedB.Load(), "tenant B's billing run should have been processed")
+
+	// Both tenant ZSETs should be empty
+	keyA := dunningRetryZSetPrefix + tenantA
+	keyB := dunningRetryZSetPrefix + tenantB
+	countA, err := client.ZCard(ctx, keyA).Result()
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), countA)
+
+	countB, err := client.ZCard(ctx, keyB).Result()
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), countB)
 }

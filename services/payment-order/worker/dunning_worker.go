@@ -18,12 +18,14 @@ import (
 
 // Dunning worker errors.
 var (
-	ErrNilDunningCallback = errors.New("dunning callback is required")
-	ErrDunningKeyTooShort = errors.New("dunning retry key too short")
+	ErrNilDunningCallback   = errors.New("dunning callback is required")
+	ErrDunningKeyTooShort   = errors.New("dunning retry key too short")
+	ErrDunningMissingTenant = errors.New("tenant ID is required for dunning retry")
 )
 
-// dunningRetryZSet is the Redis sorted set key for dunning retry scheduling.
-const dunningRetryZSet = "dunning:retries"
+// dunningRetryZSetPrefix is the Redis sorted set key prefix for dunning retry scheduling.
+// The full key is "dunning:retries:{tenantID}" for tenant isolation.
+const dunningRetryZSetPrefix = "dunning:retries:"
 
 // DunningWorkerConfig holds configuration for the dunning retry worker.
 type DunningWorkerConfig struct {
@@ -145,42 +147,75 @@ func (w *DunningWorker) pollLoop(ctx context.Context) error {
 	}
 }
 
-// ScheduleDunningRetry adds a billing run to the sorted set with a score
-// equal to the Unix timestamp when the retry becomes due.
-func (w *DunningWorker) ScheduleDunningRetry(ctx context.Context, billingRunID uuid.UUID, delay time.Duration) error {
+// ScheduleDunningRetry adds a billing run to the tenant-scoped sorted set with
+// a score equal to the Unix timestamp when the retry becomes due.
+func (w *DunningWorker) ScheduleDunningRetry(ctx context.Context, tenantID string, billingRunID uuid.UUID, delay time.Duration) error {
+	if tenantID == "" {
+		return ErrDunningMissingTenant
+	}
 	dueAt := NowFunc().Add(delay)
 	member := redis.Z{
 		Score:  float64(dueAt.Unix()),
 		Member: billingRunID.String(),
 	}
-	err := w.redis.ZAdd(ctx, dunningRetryZSet, member).Err()
+	key := dunningRetryZSetPrefix + tenantID
+	err := w.redis.ZAdd(ctx, key, member).Err()
 	if err != nil {
 		return fmt.Errorf("failed to schedule dunning retry: %w", err)
 	}
 
 	w.logger.Info("dunning retry scheduled",
 		"billing_run_id", billingRunID,
+		"tenant_id", tenantID,
 		"delay", delay,
 		"due_at", dueAt)
 
 	return nil
 }
 
-// processDueRetries queries the sorted set for all members whose score (due
-// timestamp) is at or before the current time, processes each one, and removes
-// it from the set.
+// processDueRetries scans for all tenant-scoped dunning ZSET keys and processes
+// due retries from each. Uses SCAN to discover keys matching "dunning:retries:*".
 func (w *DunningWorker) processDueRetries(ctx context.Context) {
+	// Discover all tenant-scoped dunning keys
+	keys, err := w.scanDunningKeys(ctx)
+	if err != nil {
+		w.logger.Error("failed to scan dunning retry keys", "error", err)
+		return
+	}
+
+	for _, key := range keys {
+		w.processDueRetriesForKey(ctx, key)
+	}
+}
+
+// scanDunningKeys returns all Redis keys matching the dunning retry ZSET pattern.
+func (w *DunningWorker) scanDunningKeys(ctx context.Context) ([]string, error) {
+	var allKeys []string
+	pattern := dunningRetryZSetPrefix + "*"
+	iter := w.redis.Scan(ctx, 0, pattern, 100).Iterator()
+	for iter.Next(ctx) {
+		allKeys = append(allKeys, iter.Val())
+	}
+	if err := iter.Err(); err != nil {
+		return nil, fmt.Errorf("failed to scan dunning keys: %w", err)
+	}
+	return allKeys, nil
+}
+
+// processDueRetriesForKey queries a single tenant's sorted set for all members
+// whose score (due timestamp) is at or before the current time, processes each
+// one, and removes it from the set.
+func (w *DunningWorker) processDueRetriesForKey(ctx context.Context, key string) {
 	now := NowFunc()
 	maxScore := strconv.FormatInt(now.Unix(), 10)
 
-	// Fetch billing run IDs that are due
-	members, err := w.redis.ZRangeByScore(ctx, dunningRetryZSet, &redis.ZRangeBy{
+	members, err := w.redis.ZRangeByScore(ctx, key, &redis.ZRangeBy{
 		Min:   "-inf",
 		Max:   maxScore,
 		Count: 100,
 	}).Result()
 	if err != nil {
-		w.logger.Error("failed to query dunning retries", "error", err)
+		w.logger.Error("failed to query dunning retries", "key", key, "error", err)
 		return
 	}
 
@@ -192,20 +227,19 @@ func (w *DunningWorker) processDueRetries(ctx context.Context) {
 	for _, member := range members {
 		billingRunID, parseErr := uuid.Parse(member)
 		if parseErr != nil {
-			w.logger.Error("invalid billing run ID in dunning set", "member", member, "error", parseErr)
-			w.redis.ZRem(ctx, dunningRetryZSet, member)
+			w.logger.Error("invalid billing run ID in dunning set", "key", key, "member", member, "error", parseErr)
+			w.redis.ZRem(ctx, key, member)
 			continue
 		}
 
 		if w.processRetry(ctx, billingRunID) {
-			// Only remove on success; transient failures retain the member for next poll
-			w.redis.ZRem(ctx, dunningRetryZSet, member)
+			w.redis.ZRem(ctx, key, member)
 			processed++
 		}
 	}
 
 	if processed > 0 {
-		w.logger.Info("processed dunning retries", "count", processed)
+		w.logger.Info("processed dunning retries", "key", key, "count", processed)
 	}
 }
 
@@ -283,8 +317,12 @@ func (w *DunningWorker) executeRetry(ctx context.Context, billingRunID uuid.UUID
 	return true
 }
 
-// CancelDunningRetry removes a billing run from the retry set.
+// CancelDunningRetry removes a billing run from the tenant-scoped retry set.
 // Called when a billing run is resolved (e.g., manual payment succeeds).
-func (w *DunningWorker) CancelDunningRetry(ctx context.Context, billingRunID uuid.UUID) error {
-	return w.redis.ZRem(ctx, dunningRetryZSet, billingRunID.String()).Err()
+func (w *DunningWorker) CancelDunningRetry(ctx context.Context, tenantID string, billingRunID uuid.UUID) error {
+	if tenantID == "" {
+		return ErrDunningMissingTenant
+	}
+	key := dunningRetryZSetPrefix + tenantID
+	return w.redis.ZRem(ctx, key, billingRunID.String()).Err()
 }
