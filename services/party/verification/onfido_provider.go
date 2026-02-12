@@ -372,11 +372,14 @@ func (p *OnfidoProvider) handleResponse(resp *http.Response, result interface{})
 // If the name contains no space, the entire name is used as the first name
 // and the last name defaults to "-" (Onfido requires a last name).
 func splitName(fullName string) (string, string) {
-	parts := strings.SplitN(fullName, " ", 2)
+	parts := strings.Fields(fullName)
+	if len(parts) == 0 {
+		return "-", "-"
+	}
 	if len(parts) == 1 {
 		return parts[0], "-"
 	}
-	return parts[0], parts[1]
+	return parts[0], strings.Join(parts[1:], " ")
 }
 
 // mapOnfidoCheckStatus maps Onfido check status and result to our domain types.
