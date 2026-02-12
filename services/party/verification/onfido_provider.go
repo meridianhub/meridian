@@ -155,7 +155,7 @@ func (p *OnfidoProvider) VerifyIdentity(ctx context.Context, party *domain.Party
 func (p *OnfidoProvider) CheckSanctions(ctx context.Context, party *domain.Party) (SanctionsResult, error) {
 	p.logger.Info("initiating sanctions screening",
 		slog.String("party_id", party.ID().String()),
-		slog.String("party_name", party.LegalName()),
+		slog.String("party_type", string(party.PartyType())),
 	)
 
 	// Create applicant
