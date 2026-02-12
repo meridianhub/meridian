@@ -124,6 +124,8 @@ func run(logger *slog.Logger) error {
 	snapshotRepo := persistence.NewSettlementSnapshotRepository(db)
 	varianceRepo := persistence.NewVarianceRepository(db)
 	disputeRepo := persistence.NewDisputeRepository(db)
+	assertionRepo := persistence.NewBalanceAssertionRepository(db)
+	trendRepo := persistence.NewImbalanceTrendRepository(db)
 
 	// Build service options with repositories (always available)
 	serviceOpts := []service.Option{
@@ -157,8 +159,17 @@ func run(logger *slog.Logger) error {
 
 		logger.Info("snapshot capturer configured",
 			"position_keeping_url", cfg.Services.PositionKeepingURL)
+
+		// Wire BalanceAssertor (requires PK client for position summaries)
+		balancePKClient := service.NewGrpcPositionKeepingClient(pkClient)
+		assertor := service.NewBalanceAssertor(assertionRepo, trendRepo, balancePKClient, nil, nil, logger)
+		serviceOpts = append(serviceOpts,
+			service.WithBalanceAssertor(assertor),
+		)
+		logger.Info("balance assertor configured")
 	} else {
 		logger.Warn("snapshot capturer not configured: POSITION_KEEPING_URL not set")
+		logger.Warn("balance assertor not configured: position keeping client unavailable")
 	}
 	defer func() {
 		if pkConn != nil {
@@ -185,10 +196,6 @@ func run(logger *slog.Logger) error {
 	)
 	logger.Info("variance valuator configured (using stub engine)",
 		"note", "identity valuation until shared/pkg/valuation implementation available")
-
-	// BalanceAssertor requires assertion repo + PK client (not yet available)
-	// Will return UNIMPLEMENTED until its dependencies are wired in future tasks
-	logger.Warn("balance assertor not configured: assertion repository not yet available")
 
 	// Create AccountReconciliationService
 	reconciliationSvc := service.NewAccountReconciliationService(serviceOpts...)
