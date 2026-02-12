@@ -510,12 +510,9 @@ func (s *AccountReconciliationService) checkPause(pauseCh chan struct{}) bool {
 }
 
 // getCheckpointPhase returns the last completed pipeline phase for the run.
-// If no phase has been recorded yet, defaults to SNAPSHOT_CAPTURE.
-func getCheckpointPhase(run *domain.SettlementRun) domain.ReconciliationPhase {
-	if run.LastCompletedPhase != nil {
-		return *run.LastCompletedPhase
-	}
-	return domain.PhaseSnapshotCapture
+// Returns nil if no phase has been completed yet.
+func getCheckpointPhase(run *domain.SettlementRun) *domain.ReconciliationPhase {
+	return run.LastCompletedPhase
 }
 
 // phaseIndex returns the ordinal position of a phase in the pipeline.
@@ -645,12 +642,16 @@ func (s *AccountReconciliationService) ControlAccountReconciliation(
 			return nil, status.Error(codes.Internal, "failed to persist settlement run")
 		}
 		s.signalPause(runID)
+		checkpointStr := "<none>"
+		if checkpoint != nil {
+			checkpointStr = string(*checkpoint)
+		}
 		slog.InfoContext(ctx, "settlement run paused",
 			"run_id", runID,
 			"action", action.String(),
 			"status_before", statusBefore.String(),
 			"status_after", run.Status.String(),
-			"checkpoint", string(checkpoint),
+			"checkpoint", checkpointStr,
 		)
 
 	case reconciliationv1.ControlAction_CONTROL_ACTION_RESUME:

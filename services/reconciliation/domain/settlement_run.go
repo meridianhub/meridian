@@ -198,12 +198,13 @@ func (r *SettlementRun) Cancel() error {
 }
 
 // Pause transitions the run to PAUSED and records the last completed phase as a checkpoint.
-func (r *SettlementRun) Pause(checkpoint ReconciliationPhase) error {
+// checkpoint may be nil if no phases have completed yet.
+func (r *SettlementRun) Pause(checkpoint *ReconciliationPhase) error {
 	if !r.Status.CanTransitionTo(RunStatusPaused) {
 		return ErrInvalidStatusTransition
 	}
 	r.Status = RunStatusPaused
-	r.LastCompletedPhase = &checkpoint
+	r.LastCompletedPhase = checkpoint
 	r.UpdatedAt = time.Now().UTC()
 	r.Version++
 	return nil

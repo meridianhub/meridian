@@ -131,10 +131,10 @@ func TestControlAccountReconciliation_PauseRunning(t *testing.T) {
 	assert.Equal(t, reconciliationv1.RunStatus_RUN_STATUS_PAUSED, resp.GetRun().GetStatus())
 	assert.Equal(t, run.RunID.String(), resp.GetRun().GetRunId())
 
-	// Verify persisted
-	updated := repo.runs[run.RunID]
+	// Verify persisted - no phases completed yet so checkpoint is nil
+	updated := repo.getRun(run.RunID)
 	assert.Equal(t, domain.RunStatusPaused, updated.Status)
-	require.NotNil(t, updated.LastCompletedPhase)
+	assert.Nil(t, updated.LastCompletedPhase)
 }
 
 func TestControlAccountReconciliation_PauseCompleted(t *testing.T) {
@@ -187,7 +187,7 @@ func newPausedRun(t *testing.T) *domain.SettlementRun {
 	t.Helper()
 	run := newRunningRun(t)
 	phase := domain.PhaseSnapshotCapture
-	err := run.Pause(phase)
+	err := run.Pause(&phase)
 	require.NoError(t, err)
 	return run
 }
