@@ -21,10 +21,25 @@ var (
 	ErrAlreadyStopped = errors.New("worker has been stopped")
 )
 
+// noCopy may be added to structs which must not be copied after first use.
+// See https://golang.org/issues/8005#issuecomment-190753527 for details.
+// This is detected by go vet -copylocks.
+type noCopy struct{}
+
+func (*noCopy) Lock()   {}
+func (*noCopy) Unlock() {}
+
 // WorkerLifecycle provides start/stop lifecycle management, WaitGroup tracking
 // for in-flight work, and graceful shutdown with timeout. It is designed to be
 // embedded in concrete worker implementations.
+//
+// WorkerLifecycle must not be copied after first use because it contains
+// sync primitives (sync.Mutex, sync.WaitGroup). Always use a pointer.
+//
+// The zero value is safe to use; fields are lazily initialized on first method
+// call. However, using NewWorkerLifecycle is preferred to supply a logger.
 type WorkerLifecycle struct {
+	noCopy  noCopy //nolint:unused // Detected by go vet -copylocks
 	mu      sync.Mutex
 	wg      sync.WaitGroup
 	running bool
@@ -32,6 +47,17 @@ type WorkerLifecycle struct {
 	done    chan struct{}
 	cancel  context.CancelFunc
 	logger  *slog.Logger
+}
+
+// initLocked lazily initializes fields that require non-zero values.
+// Must be called while w.mu is held.
+func (w *WorkerLifecycle) initLocked() {
+	if w.done == nil {
+		w.done = make(chan struct{})
+	}
+	if w.logger == nil {
+		w.logger = slog.Default()
+	}
 }
 
 // NewWorkerLifecycle creates a new WorkerLifecycle.
@@ -53,6 +79,7 @@ func NewWorkerLifecycle(logger *slog.Logger) *WorkerLifecycle {
 // Returns ErrAlreadyStopped if the lifecycle has been stopped (lifecycles are single-use).
 func (w *WorkerLifecycle) Start(ctx context.Context, workFunc func(context.Context) error) error {
 	w.mu.Lock()
+	w.initLocked()
 	if w.stopped {
 		w.mu.Unlock()
 		return ErrAlreadyStopped
@@ -75,6 +102,7 @@ func (w *WorkerLifecycle) Start(ctx context.Context, workFunc func(context.Conte
 // Safe to call multiple times and concurrently.
 func (w *WorkerLifecycle) Stop(timeout time.Duration) {
 	w.mu.Lock()
+	w.initLocked()
 	if w.stopped {
 		w.mu.Unlock()
 		return
@@ -121,7 +149,11 @@ func (w *WorkerLifecycle) ExecuteGuarded(fn func()) {
 // Done returns a channel that is closed when Stop is called.
 // This can be used in select statements to detect shutdown.
 func (w *WorkerLifecycle) Done() <-chan struct{} {
-	return w.done
+	w.mu.Lock()
+	w.initLocked()
+	ch := w.done
+	w.mu.Unlock()
+	return ch
 }
 
 // IsRunning returns true if the lifecycle has been started and not stopped.

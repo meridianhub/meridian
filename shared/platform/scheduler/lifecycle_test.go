@@ -330,3 +330,42 @@ func TestWorkerLifecycle_NilLogger(t *testing.T) {
 	lc := NewWorkerLifecycle(nil)
 	assert.NotNil(t, lc)
 }
+
+func TestWorkerLifecycle_ZeroValue_SafeToUse(t *testing.T) {
+	// Zero value should be safe - fields lazily initialized
+	var lc WorkerLifecycle
+
+	assert.False(t, lc.IsRunning(), "zero value should not be running")
+
+	// Done should return a valid channel (not nil)
+	done := lc.Done()
+	assert.NotNil(t, done, "Done should return non-nil channel on zero value")
+
+	// Stop on zero value should not panic
+	lc.Stop(time.Second)
+
+	// Start on stopped zero value should return ErrAlreadyStopped
+	err := lc.Start(context.Background(), func(_ context.Context) error {
+		return nil
+	})
+	require.ErrorIs(t, err, ErrAlreadyStopped)
+}
+
+func TestWorkerLifecycle_ZeroValue_StartAndStop(t *testing.T) {
+	var lc WorkerLifecycle
+
+	started := make(chan struct{})
+	go func() {
+		_ = lc.Start(context.Background(), func(ctx context.Context) error {
+			close(started)
+			<-ctx.Done()
+			return nil
+		})
+	}()
+
+	<-started
+	assert.True(t, lc.IsRunning())
+
+	lc.Stop(time.Second)
+	assert.False(t, lc.IsRunning())
+}
