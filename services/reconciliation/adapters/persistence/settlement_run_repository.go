@@ -16,22 +16,23 @@ var _ domain.SettlementRunRepository = (*SettlementRunRepository)(nil)
 
 // SettlementRunEntity is the GORM entity for the settlement_run table.
 type SettlementRunEntity struct {
-	ID             uuid.UUID  `gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
-	CreatedAt      time.Time  `gorm:"not null;default:now()"`
-	UpdatedAt      time.Time  `gorm:"not null;default:now()"`
-	RunID          uuid.UUID  `gorm:"column:run_id;uniqueIndex:idx_sr_run_id;type:uuid;not null"`
-	AccountID      string     `gorm:"column:account_id;index:idx_sr_account_id;size:34;not null"`
-	Scope          string     `gorm:"column:scope;size:20;not null;default:ACCOUNT"`
-	SettlementType string     `gorm:"column:settlement_type;size:20;not null;default:DAILY"`
-	Status         string     `gorm:"column:status;index:idx_sr_status;size:20;not null;default:PENDING"`
-	PeriodStart    time.Time  `gorm:"column:period_start;not null"`
-	PeriodEnd      time.Time  `gorm:"column:period_end;not null"`
-	InitiatedBy    string     `gorm:"column:initiated_by;size:100;not null"`
-	CompletedAt    *time.Time `gorm:"column:completed_at"`
-	VarianceCount  int        `gorm:"column:variance_count;not null;default:0"`
-	FailureReason  *string    `gorm:"column:failure_reason;type:text"`
-	Attributes     JSONMap    `gorm:"column:attributes;type:jsonb"`
-	Version        int64      `gorm:"column:version;not null;default:1"`
+	ID                 uuid.UUID  `gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
+	CreatedAt          time.Time  `gorm:"not null;default:now()"`
+	UpdatedAt          time.Time  `gorm:"not null;default:now()"`
+	RunID              uuid.UUID  `gorm:"column:run_id;uniqueIndex:idx_sr_run_id;type:uuid;not null"`
+	AccountID          string     `gorm:"column:account_id;index:idx_sr_account_id;size:34;not null"`
+	Scope              string     `gorm:"column:scope;size:20;not null;default:ACCOUNT"`
+	SettlementType     string     `gorm:"column:settlement_type;size:20;not null;default:DAILY"`
+	Status             string     `gorm:"column:status;index:idx_sr_status;size:20;not null;default:PENDING"`
+	PeriodStart        time.Time  `gorm:"column:period_start;not null"`
+	PeriodEnd          time.Time  `gorm:"column:period_end;not null"`
+	InitiatedBy        string     `gorm:"column:initiated_by;size:100;not null"`
+	CompletedAt        *time.Time `gorm:"column:completed_at"`
+	VarianceCount      int        `gorm:"column:variance_count;not null;default:0"`
+	FailureReason      *string    `gorm:"column:failure_reason;type:text"`
+	Attributes         JSONMap    `gorm:"column:attributes;type:jsonb"`
+	LastCompletedPhase *string    `gorm:"column:last_completed_phase;size:30"`
+	Version            int64      `gorm:"column:version;not null;default:1"`
 }
 
 // TableName returns the table name for the settlement run entity.
@@ -113,13 +114,14 @@ func (r *SettlementRunRepository) Update(ctx context.Context, run *domain.Settle
 		result := tx.Model(&SettlementRunEntity{}).
 			Where("run_id = ? AND version = ?", entity.RunID, entity.Version-1).
 			Updates(map[string]interface{}{
-				"status":         entity.Status,
-				"completed_at":   entity.CompletedAt,
-				"variance_count": entity.VarianceCount,
-				"failure_reason": entity.FailureReason,
-				"attributes":     entity.Attributes,
-				"version":        entity.Version,
-				"updated_at":     time.Now().UTC(),
+				"status":               entity.Status,
+				"completed_at":         entity.CompletedAt,
+				"variance_count":       entity.VarianceCount,
+				"failure_reason":       entity.FailureReason,
+				"last_completed_phase": entity.LastCompletedPhase,
+				"attributes":           entity.Attributes,
+				"version":              entity.Version,
+				"updated_at":           time.Now().UTC(),
 			})
 		if result.Error != nil {
 			return result.Error
@@ -217,6 +219,10 @@ func toSettlementRunEntity(r *domain.SettlementRun) *SettlementRunEntity {
 	if r.FailureReason != "" {
 		entity.FailureReason = &r.FailureReason
 	}
+	if r.LastCompletedPhase != nil {
+		s := string(*r.LastCompletedPhase)
+		entity.LastCompletedPhase = &s
+	}
 	if r.Attributes != nil {
 		entity.Attributes = JSONMap(r.Attributes)
 	}
@@ -244,6 +250,10 @@ func toSettlementRunDomain(e *SettlementRunEntity) *domain.SettlementRun {
 
 	if e.FailureReason != nil {
 		run.FailureReason = *e.FailureReason
+	}
+	if e.LastCompletedPhase != nil {
+		phase := domain.ReconciliationPhase(*e.LastCompletedPhase)
+		run.LastCompletedPhase = &phase
 	}
 	if e.Attributes != nil {
 		run.Attributes = map[string]string(e.Attributes)

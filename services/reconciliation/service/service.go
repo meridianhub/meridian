@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -65,6 +66,10 @@ type AccountReconciliationService struct {
 	snapshotCapturer SnapshotCapturerFunc
 	varianceDetector VarianceDetectorFunc
 	varianceValuator VarianceValuatorFunc
+
+	// pauseMu protects pauseSignals map.
+	pauseMu      sync.Mutex
+	pauseSignals map[uuid.UUID]chan struct{}
 }
 
 // Option configures the AccountReconciliationService.
@@ -171,7 +176,9 @@ func WithVarianceValuator(fn VarianceValuatorFunc) Option {
 // NewAccountReconciliationService creates a new AccountReconciliationService.
 // The assertor is optional; if nil, AssertBalance returns UNIMPLEMENTED.
 func NewAccountReconciliationService(opts ...Option) *AccountReconciliationService {
-	svc := &AccountReconciliationService{}
+	svc := &AccountReconciliationService{
+		pauseSignals: make(map[uuid.UUID]chan struct{}),
+	}
 	for _, opt := range opts {
 		opt(svc)
 	}
@@ -333,7 +340,12 @@ func (s *AccountReconciliationService) ExecuteAccountReconciliation(
 
 // executePipeline runs the reconciliation pipeline in the background.
 // The caller is responsible for providing a detached context with timeout.
+// The pipeline supports checkpointing: on resume from a PAUSED state, phases
+// that completed before the pause are skipped based on LastCompletedPhase.
 func (s *AccountReconciliationService) executePipeline(ctx context.Context, runID uuid.UUID) {
+	pauseCh := s.registerPauseSignal(runID)
+	defer s.removePauseSignal(runID)
+
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Error("reconciliation pipeline panicked",
@@ -346,32 +358,71 @@ func (s *AccountReconciliationService) executePipeline(ctx context.Context, runI
 
 	slog.Info("reconciliation pipeline started", "run_id", runID)
 
-	// Step 1: Capture snapshots
-	if err := s.snapshotCapturer(ctx, runID); err != nil {
-		slog.Error("snapshot capture failed", "run_id", runID, "error", err)
-		s.failRun(ctx, runID, err.Error())
+	// Determine the starting phase by checking the run's checkpoint.
+	startIndex := 0
+	persistCtx, persistCancel := context.WithTimeout(context.Background(), persistTimeout) //nolint:contextcheck
+	run, err := s.runRepo.FindByID(persistCtx, runID)                                      //nolint:contextcheck
+	persistCancel()
+	if err != nil {
+		slog.Error("failed to retrieve run for pipeline start", "run_id", runID, "error", err)
+		s.failRun(ctx, runID, "failed to retrieve run for pipeline start: "+err.Error())
 		return
+	}
+	if run.LastCompletedPhase != nil {
+		startIndex = phaseIndex(*run.LastCompletedPhase) + 1
+	}
+
+	// Step 1: Capture snapshots
+	if startIndex <= phaseIndex(domain.PhaseSnapshotCapture) {
+		if err := s.snapshotCapturer(ctx, runID); err != nil {
+			slog.Error("snapshot capture failed", "run_id", runID, "error", err)
+			s.failRun(ctx, runID, err.Error())
+			return
+		}
+		s.updateCheckpoint(ctx, runID, domain.PhaseSnapshotCapture)
+		if s.checkPause(pauseCh) {
+			slog.Info("pipeline paused after snapshot capture", "run_id", runID)
+			return
+		}
 	}
 
 	// Step 2: Detect variances
-	if _, err := s.varianceDetector(ctx, runID); err != nil {
-		slog.Error("variance detection failed", "run_id", runID, "error", err)
-		s.failRun(ctx, runID, err.Error())
-		return
+	if startIndex <= phaseIndex(domain.PhaseVarianceDetection) {
+		if _, err := s.varianceDetector(ctx, runID); err != nil {
+			slog.Error("variance detection failed", "run_id", runID, "error", err)
+			s.failRun(ctx, runID, err.Error())
+			return
+		}
+		s.updateCheckpoint(ctx, runID, domain.PhaseVarianceDetection)
+		if s.checkPause(pauseCh) {
+			slog.Info("pipeline paused after variance detection", "run_id", runID)
+			return
+		}
 	}
 
 	// Step 3: Value variances
-	if err := s.varianceValuator(ctx, runID); err != nil {
-		slog.Error("variance valuation failed", "run_id", runID, "error", err)
-		s.failRun(ctx, runID, err.Error())
-		return
+	if startIndex <= phaseIndex(domain.PhaseVarianceValuation) {
+		if err := s.varianceValuator(ctx, runID); err != nil {
+			slog.Error("variance valuation failed", "run_id", runID, "error", err)
+			s.failRun(ctx, runID, err.Error())
+			return
+		}
+		s.updateCheckpoint(ctx, runID, domain.PhaseVarianceValuation)
+		if s.checkPause(pauseCh) {
+			slog.Info("pipeline paused after variance valuation", "run_id", runID)
+			return
+		}
 	}
+
+	// NOTE: PhaseBalanceAssertion is defined in the domain model but the pipeline step
+	// is not yet implemented. When the balance assertion step is added, insert it here
+	// before the completion block, following the same checkpoint/pause pattern above.
 
 	// Pipeline succeeded: transition to COMPLETED.
 	// Use a fresh context so persistence succeeds even if the pipeline context has expired.
-	persistCtx, persistCancel := context.WithTimeout(context.Background(), persistTimeout) //nolint:contextcheck
-	defer persistCancel()
-	run, err := s.runRepo.FindByID(persistCtx, runID) //nolint:contextcheck
+	completeCtx, completeCancel := context.WithTimeout(context.Background(), persistTimeout) //nolint:contextcheck
+	defer completeCancel()
+	run, err = s.runRepo.FindByID(completeCtx, runID) //nolint:contextcheck
 	if err != nil {
 		slog.Error("failed to retrieve run for completion", "run_id", runID, "error", err)
 		return
@@ -380,12 +431,28 @@ func (s *AccountReconciliationService) executePipeline(ctx context.Context, runI
 		slog.Error("failed to transition run to COMPLETED", "run_id", runID, "error", err)
 		return
 	}
-	if err := s.runRepo.Update(persistCtx, run); err != nil { //nolint:contextcheck
+	if err := s.runRepo.Update(completeCtx, run); err != nil { //nolint:contextcheck
 		slog.Error("failed to persist COMPLETED state", "run_id", runID, "error", err)
 		return
 	}
 
 	slog.Info("reconciliation pipeline completed", "run_id", runID)
+}
+
+// updateCheckpoint persists the last completed phase on the settlement run.
+// It uses a fresh context so persistence succeeds even if the pipeline context has expired.
+func (s *AccountReconciliationService) updateCheckpoint(_ context.Context, runID uuid.UUID, phase domain.ReconciliationPhase) {
+	persistCtx, persistCancel := context.WithTimeout(context.Background(), persistTimeout) //nolint:contextcheck
+	defer persistCancel()
+	run, err := s.runRepo.FindByID(persistCtx, runID) //nolint:contextcheck
+	if err != nil {
+		slog.Error("failed to retrieve run for checkpoint", "run_id", runID, "error", err)
+		return
+	}
+	run.SetCheckpoint(phase)
+	if err := s.runRepo.Update(persistCtx, run); err != nil { //nolint:contextcheck
+		slog.Error("failed to persist checkpoint", "run_id", runID, "phase", string(phase), "error", err)
+	}
 }
 
 // failRun transitions a settlement run to FAILED with the given error message.
@@ -405,6 +472,80 @@ func (s *AccountReconciliationService) failRun(_ context.Context, runID uuid.UUI
 	if err := s.runRepo.Update(persistCtx, run); err != nil { //nolint:contextcheck
 		slog.Error("failed to persist FAILED state", "run_id", runID, "error", err)
 	}
+}
+
+// registerPauseSignal creates a pause signal channel for a run and returns it.
+func (s *AccountReconciliationService) registerPauseSignal(runID uuid.UUID) chan struct{} {
+	s.pauseMu.Lock()
+	defer s.pauseMu.Unlock()
+	ch := make(chan struct{}, 1)
+	s.pauseSignals[runID] = ch
+	return ch
+}
+
+// signalPause sends a pause signal to the pipeline goroutine for a run.
+func (s *AccountReconciliationService) signalPause(runID uuid.UUID) {
+	s.pauseMu.Lock()
+	defer s.pauseMu.Unlock()
+	if ch, ok := s.pauseSignals[runID]; ok {
+		select {
+		case ch <- struct{}{}:
+		default:
+			// Already signaled
+		}
+	}
+}
+
+// removePauseSignal cleans up the pause signal channel for a run.
+func (s *AccountReconciliationService) removePauseSignal(runID uuid.UUID) {
+	s.pauseMu.Lock()
+	defer s.pauseMu.Unlock()
+	delete(s.pauseSignals, runID)
+}
+
+// checkPause returns true if a pause signal has been received for this run.
+func (s *AccountReconciliationService) checkPause(pauseCh chan struct{}) bool {
+	select {
+	case <-pauseCh:
+		return true
+	default:
+		return false
+	}
+}
+
+// getCheckpointPhase returns the last completed pipeline phase for the run.
+// Returns nil if no phase has been completed yet.
+func getCheckpointPhase(run *domain.SettlementRun) *domain.ReconciliationPhase {
+	return run.LastCompletedPhase
+}
+
+// phaseIndex returns the ordinal position of a phase in the pipeline.
+// PhaseBalanceAssertion (index 3) is reserved for future use; the pipeline
+// currently completes after PhaseVarianceValuation (index 2).
+func phaseIndex(phase domain.ReconciliationPhase) int {
+	switch phase {
+	case domain.PhaseSnapshotCapture:
+		return 0
+	case domain.PhaseVarianceDetection:
+		return 1
+	case domain.PhaseVarianceValuation:
+		return 2
+	case domain.PhaseBalanceAssertion:
+		return 3
+	default:
+		return -1
+	}
+}
+
+// resumePipeline re-launches the pipeline from the run's checkpoint.
+//
+//nolint:contextcheck // Intentionally uses background context for async pipeline that outlives the RPC
+func (s *AccountReconciliationService) resumePipeline(runID uuid.UUID) {
+	pipelineCtx, pipelineCancel := context.WithTimeout(context.Background(), pipelineTimeout) //nolint:contextcheck
+	go func() {
+		defer pipelineCancel()
+		s.executePipeline(pipelineCtx, runID)
+	}()
 }
 
 // RetrieveAccountReconciliation retrieves a settlement run summary.
@@ -494,10 +635,58 @@ func (s *AccountReconciliationService) ControlAccountReconciliation(
 		)
 
 	case reconciliationv1.ControlAction_CONTROL_ACTION_PAUSE:
-		return nil, status.Error(codes.Unimplemented, "PAUSE action not yet supported")
+		checkpoint := getCheckpointPhase(run)
+		statusBefore := run.Status
+		if err := run.Pause(checkpoint); err != nil {
+			if errors.Is(err, domain.ErrInvalidStatusTransition) {
+				return nil, status.Errorf(codes.FailedPrecondition, "cannot pause run in %s state", run.Status)
+			}
+			return nil, status.Error(codes.Internal, "failed to pause settlement run")
+		}
+		if err := s.runRepo.Update(ctx, run); err != nil {
+			slog.ErrorContext(ctx, "failed to persist paused run", "run_id", runID, "error", err)
+			return nil, status.Error(codes.Internal, "failed to persist settlement run")
+		}
+		s.signalPause(runID)
+		checkpointStr := "<none>"
+		if checkpoint != nil {
+			checkpointStr = string(*checkpoint)
+		}
+		slog.InfoContext(ctx, "settlement run paused",
+			"run_id", runID,
+			"action", action.String(),
+			"status_before", statusBefore.String(),
+			"status_after", run.Status.String(),
+			"checkpoint", checkpointStr,
+		)
 
 	case reconciliationv1.ControlAction_CONTROL_ACTION_RESUME:
-		return nil, status.Error(codes.Unimplemented, "RESUME action not yet supported")
+		statusBefore := run.Status
+		if err := run.Resume(); err != nil {
+			if errors.Is(err, domain.ErrInvalidStatusTransition) {
+				return nil, status.Errorf(codes.FailedPrecondition, "cannot resume run in %s state", run.Status)
+			}
+			return nil, status.Error(codes.Internal, "failed to resume settlement run")
+		}
+		if err := s.runRepo.Update(ctx, run); err != nil {
+			slog.ErrorContext(ctx, "failed to persist resumed run", "run_id", runID, "error", err)
+			return nil, status.Error(codes.Internal, "failed to persist settlement run")
+		}
+		// Capture the response before launching the pipeline goroutine to avoid
+		// a data race between the background goroutine writing to the run and the
+		// response reading it.
+		resp := &reconciliationv1.ControlAccountReconciliationResponse{
+			Run: toProtoRunSummary(run),
+		}
+		// Re-launch the pipeline from the checkpoint
+		s.resumePipeline(run.RunID)
+		slog.InfoContext(ctx, "settlement run resumed",
+			"run_id", runID,
+			"action", action.String(),
+			"status_before", statusBefore.String(),
+			"status_after", run.Status.String(),
+		)
+		return resp, nil
 
 	default:
 		return nil, status.Errorf(codes.InvalidArgument, "unknown control action: %v", action)

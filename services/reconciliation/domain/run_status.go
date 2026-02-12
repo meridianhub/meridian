@@ -7,6 +7,7 @@ type RunStatus string
 const (
 	RunStatusPending   RunStatus = "PENDING"
 	RunStatusRunning   RunStatus = "RUNNING"
+	RunStatusPaused    RunStatus = "PAUSED"
 	RunStatusCompleted RunStatus = "COMPLETED"
 	RunStatusFinalized RunStatus = "FINALIZED"
 	RunStatusFailed    RunStatus = "FAILED"
@@ -16,7 +17,7 @@ const (
 // IsValid checks if the run status is a recognized value.
 func (s RunStatus) IsValid() bool {
 	switch s {
-	case RunStatusPending, RunStatusRunning, RunStatusCompleted,
+	case RunStatusPending, RunStatusRunning, RunStatusPaused, RunStatusCompleted,
 		RunStatusFinalized, RunStatusFailed, RunStatusCancelled:
 		return true
 	}
@@ -41,7 +42,8 @@ func (s RunStatus) CanTransitionTo(target RunStatus) bool {
 
 	validTransitions := map[RunStatus][]RunStatus{
 		RunStatusPending:   {RunStatusRunning, RunStatusCancelled},
-		RunStatusRunning:   {RunStatusCompleted, RunStatusFailed, RunStatusCancelled},
+		RunStatusRunning:   {RunStatusCompleted, RunStatusFailed, RunStatusCancelled, RunStatusPaused},
+		RunStatusPaused:    {RunStatusRunning, RunStatusCancelled},
 		RunStatusCompleted: {RunStatusFinalized},
 	}
 

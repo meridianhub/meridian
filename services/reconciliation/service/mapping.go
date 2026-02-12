@@ -60,6 +60,8 @@ func toProtoRunStatus(s domain.RunStatus) reconciliationv1.RunStatus {
 		return reconciliationv1.RunStatus_RUN_STATUS_PENDING
 	case domain.RunStatusRunning:
 		return reconciliationv1.RunStatus_RUN_STATUS_RUNNING
+	case domain.RunStatusPaused:
+		return reconciliationv1.RunStatus_RUN_STATUS_PAUSED
 	case domain.RunStatusCompleted, domain.RunStatusFinalized:
 		return reconciliationv1.RunStatus_RUN_STATUS_COMPLETED
 	case domain.RunStatusFailed:
