@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/robfig/cron/v3"
 )
 
@@ -250,6 +251,13 @@ func (s *CronScheduler) executeJob(schedule Schedule) {
 	s.lifecycle.ExecuteGuarded(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), s.config.ExecutionTimeout)
 		defer cancel()
+
+		// Propagate tenant context so ExecutionStore can scope to the correct schema
+		if schedule.TenantID != "" {
+			if tid, err := tenant.NewTenantID(schedule.TenantID); err == nil {
+				ctx = tenant.WithTenant(ctx, tid)
+			}
+		}
 
 		// Acquire distributed lock
 		if s.lock != nil {
