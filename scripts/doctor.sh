@@ -102,6 +102,13 @@ case "$PKG_MANAGER" in
         ;;
 esac
 
+# Ensure GOPATH/bin is in PATH so go-installed tools take precedence over system versions.
+# This matters when e.g. golangci-lint is installed both via brew and go install - the
+# go-installed version is typically newer and built with the current Go toolchain.
+if command -v go &> /dev/null; then
+    export PATH="$(go env GOPATH)/bin:$PATH"
+fi
+
 # Helper function to get tool version
 get_version() {
     local cmd=$1
