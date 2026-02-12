@@ -209,6 +209,13 @@ func (r *SettlementRun) Pause(checkpoint ReconciliationPhase) error {
 	return nil
 }
 
+// SetCheckpoint records the last completed pipeline phase on a running settlement run.
+func (r *SettlementRun) SetCheckpoint(phase ReconciliationPhase) {
+	r.LastCompletedPhase = &phase
+	r.UpdatedAt = time.Now().UTC()
+	r.Version++
+}
+
 // Resume transitions the run from PAUSED back to RUNNING.
 // The LastCompletedPhase is preserved so the pipeline can skip already-completed phases.
 func (r *SettlementRun) Resume() error {

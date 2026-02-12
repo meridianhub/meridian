@@ -215,6 +215,22 @@ func TestSettlementRun_MultiplePauseResumeCycles(t *testing.T) {
 	assert.Equal(t, domain.RunStatusCompleted, run.Status)
 }
 
+func TestSettlementRun_SetCheckpoint(t *testing.T) {
+	run := newTestRun(t)
+	require.NoError(t, run.Start())
+
+	versionBefore := run.Version
+	run.SetCheckpoint(domain.PhaseVarianceDetection)
+
+	require.NotNil(t, run.LastCompletedPhase)
+	assert.Equal(t, domain.PhaseVarianceDetection, *run.LastCompletedPhase)
+	assert.Equal(t, versionBefore+1, run.Version)
+
+	// Overwrite with a later phase
+	run.SetCheckpoint(domain.PhaseVarianceValuation)
+	assert.Equal(t, domain.PhaseVarianceValuation, *run.LastCompletedPhase)
+}
+
 func TestSettlementRun_CancelFromPaused(t *testing.T) {
 	run := newTestRun(t)
 	require.NoError(t, run.Start())

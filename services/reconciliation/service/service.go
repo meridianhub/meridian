@@ -365,6 +365,7 @@ func (s *AccountReconciliationService) executePipeline(ctx context.Context, runI
 	persistCancel()
 	if err != nil {
 		slog.Error("failed to retrieve run for pipeline start", "run_id", runID, "error", err)
+		s.failRun(ctx, runID, "failed to retrieve run for pipeline start: "+err.Error())
 		return
 	}
 	if run.LastCompletedPhase != nil {
@@ -444,9 +445,7 @@ func (s *AccountReconciliationService) updateCheckpoint(_ context.Context, runID
 		slog.Error("failed to retrieve run for checkpoint", "run_id", runID, "error", err)
 		return
 	}
-	run.LastCompletedPhase = &phase
-	run.UpdatedAt = time.Now().UTC()
-	run.Version++
+	run.SetCheckpoint(phase)
 	if err := s.runRepo.Update(persistCtx, run); err != nil { //nolint:contextcheck
 		slog.Error("failed to persist checkpoint", "run_id", runID, "phase", string(phase), "error", err)
 	}
@@ -510,10 +509,9 @@ func (s *AccountReconciliationService) checkPause(pauseCh chan struct{}) bool {
 	}
 }
 
-// getCurrentPhase determines the current/last completed phase of a running settlement run
-// based on the LastCompletedPhase field. If no phase has been recorded, returns
-// SNAPSHOT_CAPTURE as the initial phase.
-func getCurrentPhase(run *domain.SettlementRun) domain.ReconciliationPhase {
+// getCheckpointPhase returns the last completed pipeline phase for the run.
+// If no phase has been recorded yet, defaults to SNAPSHOT_CAPTURE.
+func getCheckpointPhase(run *domain.SettlementRun) domain.ReconciliationPhase {
 	if run.LastCompletedPhase != nil {
 		return *run.LastCompletedPhase
 	}
@@ -634,7 +632,7 @@ func (s *AccountReconciliationService) ControlAccountReconciliation(
 		)
 
 	case reconciliationv1.ControlAction_CONTROL_ACTION_PAUSE:
-		checkpoint := getCurrentPhase(run)
+		checkpoint := getCheckpointPhase(run)
 		statusBefore := run.Status
 		if err := run.Pause(checkpoint); err != nil {
 			if errors.Is(err, domain.ErrInvalidStatusTransition) {
