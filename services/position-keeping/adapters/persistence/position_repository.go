@@ -526,11 +526,127 @@ func (r *PositionRepository) BeginTx(ctx context.Context) (pgx.Tx, error) {
 	return tx, nil
 }
 
+// SoftDelete marks a position as deleted by setting deleted_at = NOW().
+// This is an allowed UPDATE operation on the append-only position table
+// since deleted_at is explicitly excluded from immutable field enforcement.
+// Returns domain.ErrNotFound if the position doesn't exist or is already deleted.
+func (r *PositionRepository) SoftDelete(ctx context.Context, id uuid.UUID) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	if err := r.setSearchPath(ctx, tx); err != nil {
+		return err
+	}
+
+	result, err := tx.Exec(ctx,
+		"UPDATE position SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL",
+		id,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to soft delete position: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return domain.ErrNotFound
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
+}
+
+// SoftDeleteBatch marks multiple positions as deleted atomically.
+// This is an allowed UPDATE operation on the append-only position table.
+// Positions that are already deleted or don't exist are silently skipped.
+func (r *PositionRepository) SoftDeleteBatch(ctx context.Context, ids []uuid.UUID) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	if err := r.setSearchPath(ctx, tx); err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(ctx,
+		"UPDATE position SET deleted_at = NOW() WHERE id = ANY($1) AND deleted_at IS NULL",
+		ids,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to soft delete positions: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
+}
+
+// UpdateAttributes updates only the attributes JSONB field for a position.
+// This is an allowed UPDATE operation on the append-only position table
+// since attributes is explicitly excluded from immutable field enforcement.
+// Returns domain.ErrNotFound if the position doesn't exist or is deleted.
+func (r *PositionRepository) UpdateAttributes(ctx context.Context, id uuid.UUID, attributes map[string]string) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	if err := r.setSearchPath(ctx, tx); err != nil {
+		return err
+	}
+
+	var attributesJSON []byte
+	if attributes != nil {
+		attributesJSON, err = json.Marshal(attributes)
+		if err != nil {
+			return fmt.Errorf("failed to marshal attributes: %w", err)
+		}
+	}
+
+	result, err := tx.Exec(ctx,
+		"UPDATE position SET attributes = $1 WHERE id = $2 AND deleted_at IS NULL",
+		attributesJSON, id,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update attributes: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return domain.ErrNotFound
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
+}
+
 // Ensure PositionRepository implements the interface at compile time
 var _ domain.PositionRepository = (*PositionRepository)(nil)
 
-// NOTE: No Update(), Upsert(), or Merge() methods are implemented.
+// NOTE: No general Update(), Upsert(), or Merge() methods are implemented.
 // This is intentional - the repository enforces append-only semantics.
+// Only SoftDelete (deleted_at) and UpdateAttributes (attributes) are allowed.
 // Position consolidation is handled at read time via GetAggregatedPosition().
 
 // GetPositionCount returns the count of positions matching the criteria.

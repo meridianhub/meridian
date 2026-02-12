@@ -165,6 +165,20 @@ type PositionRepository interface {
 	//
 	// Use case: Drill-down from aggregated view to individual position records.
 	GetBucketDetails(ctx context.Context, accountID, instrumentCode, bucketKey string, limit, offset int) ([]*Position, error)
+
+	// SoftDelete marks a position as deleted by setting deleted_at = NOW().
+	// This is an allowed UPDATE operation on the append-only position table.
+	// Returns ErrNotFound if the position doesn't exist.
+	SoftDelete(ctx context.Context, id uuid.UUID) error
+
+	// SoftDeleteBatch marks multiple positions as deleted atomically.
+	// This is an allowed UPDATE operation on the append-only position table.
+	SoftDeleteBatch(ctx context.Context, ids []uuid.UUID) error
+
+	// UpdateAttributes updates only the attributes JSONB field for a position.
+	// This is an allowed UPDATE operation on the append-only position table.
+	// Returns ErrNotFound if the position doesn't exist.
+	UpdateAttributes(ctx context.Context, id uuid.UUID, attributes map[string]string) error
 }
 
 // ReservationRepository defines the contract for persisting and querying reservations.
