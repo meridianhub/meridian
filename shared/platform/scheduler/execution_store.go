@@ -103,7 +103,7 @@ func (s *PgExecutionStore) UpdateExecution(ctx context.Context, id uuid.UUID, st
 
 	var query string
 	var args []any
-	switch status {
+	switch status { //nolint:exhaustive // Only COMPLETED needs special handling; all others use the default path
 	case ExecutionStatusCompleted:
 		query = `
 			UPDATE scheduler_execution

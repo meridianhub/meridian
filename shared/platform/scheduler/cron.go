@@ -125,7 +125,7 @@ func NewCronScheduler(
 // CronSchedulerOption configures optional CronScheduler dependencies.
 type CronSchedulerOption func(*CronScheduler)
 
-// WithExecutionStore sets the execution store for audit trail.
+// WithCronExecutionStore sets the execution store for audit trail.
 func WithCronExecutionStore(store ExecutionStore) CronSchedulerOption {
 	return func(s *CronScheduler) {
 		s.store = store
@@ -214,7 +214,7 @@ func (s *CronScheduler) refreshSchedules(ctx context.Context) error {
 			continue
 		}
 
-		entryID, err := s.addSchedule(sched)
+		entryID, err := s.addSchedule(sched) //nolint:contextcheck // cron.AddFunc takes func() with no context
 		if err != nil {
 			s.logger.Error("failed to add schedule",
 				"schedule_id", sched.ID,
