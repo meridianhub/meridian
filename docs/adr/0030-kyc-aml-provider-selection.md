@@ -27,7 +27,7 @@ Meridian requires an external KYC/AML provider to perform identity verification,
 
 The selection must balance several competing concerns:
 
-* **Regulatory coverage**: UK and EU compliance (AML5D, GDPR, PSD2) is the immediate priority, with global expansion planned
+* **Regulatory coverage**: UK and EU compliance (AMLD5, GDPR, PSD2) is the immediate priority, with global expansion planned
 * **Integration quality**: RESTful APIs, sandbox environments, and webhook support reduce development effort
 * **Sanctions screening**: Must support real-time screening against global sanctions lists (OFAC, EU, UN, HMT)
 * **Cost predictability**: Per-check pricing aligns with Meridian's multi-tenant billing model
@@ -75,11 +75,11 @@ Chosen option: **Onfido**, because it provides the strongest combination of API 
 |-----------|--------|-------|--------|---------|
 | **API style** | RESTful, well-documented | RESTful, more complex | RESTful | RESTful |
 | **Sandbox environment** | Yes, full-featured | Yes | Yes | Limited |
-| **Webhook support** | Yes, HMAC-signed | Yes, HMAC-signed | Yes | Yes |
+| **Webhook support** | Yes, HMAC-SHA256 signed | Yes, IP allowlisting (no HMAC) | Yes | Yes |
 | **Sanctions screening** | Integrated (OFAC, EU, UN, HMT) | Via partner (ComplyAdvantage) | Integrated | Limited |
 | **PEP screening** | Integrated | Via partner | Integrated | Limited |
-| **UK/EU compliance** | Strong (FCA-regulated clients, GDPR) | Good (EU presence) | Growing (less established in UK) | Limited UK presence |
-| **AML5D coverage** | Yes | Yes | Partial | Partial |
+| **UK/EU compliance** | Strong (ETSI-certified, client base in regulated sectors, GDPR) | Good (EU presence) | Growing (London office, less established in UK) | Limited UK presence |
+| **AMLD5 coverage** | Yes | Yes | Partial | Partial |
 | **Go SDK** | No (community clients available) | No | No | No |
 | **Pricing model** | Per-check | Per-check | Tiered/volume | Per-check |
 | **Relative cost** | Higher | Higher | Lower | Lower |
@@ -97,7 +97,7 @@ UK-headquartered identity verification platform with integrated sanctions screen
 * Good, because sandbox environment supports full verification flow testing
 * Good, because HMAC-signed webhooks align with ADR-021 webhook handler design
 * Good, because integrated sanctions screening eliminates need for a separate AML provider
-* Good, because UK headquarters and FCA-regulated client base demonstrate strong UK/EU compliance
+* Good, because UK headquarters, ETSI TS 119 461 certification, and client base in regulated sectors demonstrate strong UK/EU compliance posture
 * Good, because per-check pricing maps to Meridian's multi-tenant cost allocation
 * Bad, because per-check cost is higher than volume-based alternatives
 * Bad, because no official Go SDK requires building an HTTP client wrapper
@@ -121,7 +121,7 @@ All-in-one compliance platform offering KYC, AML, and fraud prevention in a sing
 * Good, because volume-based pricing is more cost-effective at scale
 * Good, because flexible workflow builder allows custom verification flows
 * Bad, because less established in UK market compared to Onfido
-* Bad, because AML5D coverage is partial, requiring validation for specific jurisdictions
+* Bad, because AMLD5 coverage is partial, requiring validation for specific jurisdictions
 * Bad, because newer platform with less track record in regulated financial services
 
 ### Sardine
