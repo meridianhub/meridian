@@ -68,31 +68,5 @@ CREATE INDEX idx_entitlements_expires_at
   ON tenant_data_entitlements(expires_at)
   WHERE expires_at IS NOT NULL AND is_active = TRUE;
 
---------------------------------------------------------------------------------
--- Section 3: Mark ECB datasets as shared/public (forward-looking)
---------------------------------------------------------------------------------
-
--- This UPDATE is idempotent and forward-looking: it will mark ECB datasets as shared
--- when they are created by the ECB adapter worker. Until then, this safely matches
--- zero rows since seed data uses 'FX_RATE' (a generic test dataset), not ECB-specific codes.
---
--- When the ECB adapter creates datasets (e.g., ECB_DAILY_FX), re-running this migration
--- or creating a new migration with the same logic will enable multi-tenant sharing.
---
--- Explicit list of ECB foreign exchange datasets to mark as shared:
---   - ECB_DAILY_FX: Daily ECB foreign exchange reference rates (created by ECB adapter)
---
--- Using explicit IN clause rather than LIKE pattern for predictability.
--- If additional ECB datasets need to be shared, add them here explicitly.
-UPDATE dataset_definition
-SET
-  is_shared = TRUE,
-  access_level = 'PUBLIC',
-  updated_at = NOW(),
-  updated_by = 'MIGRATION'
-WHERE code IN ('ECB_DAILY_FX')
-  AND status = 'ACTIVE'
-  AND deleted_at IS NULL;
-
--- Note: No need to populate tenant_data_entitlements for PUBLIC datasets.
--- PUBLIC datasets skip entitlement checks and allow access to all tenants.
+-- NOTE: ECB dataset seed update moved to 20260119000004 because CockroachDB
+-- cannot reference columns added by ALTER TABLE in the same transaction.
