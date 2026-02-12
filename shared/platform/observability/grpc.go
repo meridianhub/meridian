@@ -13,7 +13,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
-	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.39.0"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -86,8 +86,8 @@ func (t *Tracer) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 		ctx, span := t.Start(ctx, info.FullMethod,
 			trace.WithSpanKind(trace.SpanKindServer),
 			trace.WithAttributes(
-				semconv.RPCSystemKey.String("grpc"),
-				semconv.RPCServiceKey.String(service),
+				semconv.RPCSystemNameKey.String("grpc"),
+				attribute.String("rpc.service", service),
 				semconv.RPCMethodKey.String(method),
 			),
 		)
@@ -154,8 +154,8 @@ func (t *Tracer) StreamServerInterceptor() grpc.StreamServerInterceptor {
 		ctx, span := t.Start(ctx, info.FullMethod,
 			trace.WithSpanKind(trace.SpanKindServer),
 			trace.WithAttributes(
-				semconv.RPCSystemKey.String("grpc"),
-				semconv.RPCServiceKey.String(service),
+				semconv.RPCSystemNameKey.String("grpc"),
+				attribute.String("rpc.service", service),
 				semconv.RPCMethodKey.String(method),
 				attribute.Bool("rpc.stream", true),
 			),
@@ -267,8 +267,8 @@ func (t *Tracer) UnaryClientInterceptor() grpc.UnaryClientInterceptor {
 		ctx, span := t.Start(ctx, method,
 			trace.WithSpanKind(trace.SpanKindClient),
 			trace.WithAttributes(
-				semconv.RPCSystemKey.String("grpc"),
-				semconv.RPCServiceKey.String(service),
+				semconv.RPCSystemNameKey.String("grpc"),
+				attribute.String("rpc.service", service),
 				semconv.RPCMethodKey.String(methodName),
 			),
 		)
@@ -330,8 +330,8 @@ func (t *Tracer) StreamClientInterceptor() grpc.StreamClientInterceptor {
 		ctx, span := t.Start(ctx, method,
 			trace.WithSpanKind(trace.SpanKindClient),
 			trace.WithAttributes(
-				semconv.RPCSystemKey.String("grpc"),
-				semconv.RPCServiceKey.String(service),
+				semconv.RPCSystemNameKey.String("grpc"),
+				attribute.String("rpc.service", service),
 				semconv.RPCMethodKey.String(methodName),
 				attribute.Bool("rpc.stream", true),
 			),
