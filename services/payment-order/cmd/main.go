@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	stripego "github.com/stripe/stripe-go/v82"
+
 	pb "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
 	stripegateway "github.com/meridianhub/meridian/services/payment-order/adapters/gateway/stripe"
@@ -51,6 +53,12 @@ var (
 
 // ErrMissingHMACSecret is returned when the WEBHOOK_HMAC_SECRET environment variable is not set.
 var ErrMissingHMACSecret = errors.New("WEBHOOK_HMAC_SECRET environment variable is required")
+
+// ErrMissingStripeAPIKey is returned when STRIPE_API_KEY is not set but the Stripe provider is selected.
+var ErrMissingStripeAPIKey = errors.New("STRIPE_API_KEY is required when PAYMENT_GATEWAY_PROVIDER is \"stripe\"")
+
+// ErrUnsupportedGatewayProvider is returned when PAYMENT_GATEWAY_PROVIDER has an unknown value.
+var ErrUnsupportedGatewayProvider = errors.New("unsupported PAYMENT_GATEWAY_PROVIDER value")
 
 func main() {
 	// Initialize structured logging with configurable log level
@@ -135,7 +143,11 @@ func run(logger *slog.Logger) error {
 	}
 
 	// Create payment gateway
-	paymentGateway := createPaymentGateway(logger)
+	paymentGateway, err := createPaymentGateway(logger)
+	if err != nil {
+		return fmt.Errorf("failed to create payment gateway: %w", err)
+	}
+	logger.Info("payment gateway initialized")
 
 	// Load gateway account configuration
 	gatewayAccountConfig, err := createGatewayAccountConfig(logger)
@@ -653,20 +665,40 @@ func createInternalBankAccountClient(namespace string, logger *slog.Logger, trac
 
 // createPaymentGateway creates the payment gateway client with resilience patterns.
 // The gateway is wrapped with circuit breaker, rate limiting, and retry logic.
-func createPaymentGateway(logger *slog.Logger) gateway.PaymentGateway {
-	gatewayURL := env.GetEnvOrDefault("PAYMENT_GATEWAY_URL", "")
+//
+// Environment variables:
+//   - PAYMENT_GATEWAY_PROVIDER: Gateway provider ("stripe" or "mock", default: "mock")
+//   - STRIPE_API_KEY: Platform Stripe API key (required when provider is "stripe")
+func createPaymentGateway(logger *slog.Logger) (gateway.PaymentGateway, error) {
+	provider := env.GetEnvOrDefault("PAYMENT_GATEWAY_PROVIDER", gateway.ProviderMock)
+	stripeAPIKey := env.GetEnvOrDefault("STRIPE_API_KEY", "")
 
 	var baseGateway gateway.PaymentGateway
-	if gatewayURL == "" {
-		logger.Warn("PAYMENT_GATEWAY_URL not set, using mock gateway")
-		baseGateway = gateway.New(gateway.Config{UseMock: true})
-	} else {
-		// Note: MaxRetries is 0 because the ResilientPaymentGateway wrapper handles retries.
-		// Setting retries on both layers would create nested retry behavior (3x3 = 9 attempts).
+
+	switch provider {
+	case gateway.ProviderStripe:
+		if stripeAPIKey == "" {
+			return nil, ErrMissingStripeAPIKey
+		}
+		client := stripego.NewClient(stripeAPIKey)
+		baseGateway = stripegateway.NewGatewayAdapter(
+			client.V1PaymentIntents,
+			stripegateway.GatewayAdapterConfig{},
+			logger,
+		)
+		logger.Info("using stripe payment gateway")
+
+	case gateway.ProviderMock:
+		logger.Warn("using mock payment gateway")
 		baseGateway = gateway.New(gateway.Config{
-			Timeout:    defaults.DefaultRPCTimeout,
-			MaxRetries: 0,
+			UseMock: true,
+			MockConfig: gateway.MockGatewayConfig{
+				DeterministicFailures: true,
+			},
 		})
+
+	default:
+		return nil, fmt.Errorf("%w: %q (valid: %q, %q)", ErrUnsupportedGatewayProvider, provider, gateway.ProviderStripe, gateway.ProviderMock)
 	}
 
 	// Configure resilience settings from environment
@@ -700,7 +732,7 @@ func createPaymentGateway(logger *slog.Logger) gateway.PaymentGateway {
 		"max_retries", resilientConfig.MaxRetries,
 	)
 
-	return gateway.NewResilientPaymentGateway(baseGateway, resilientConfig)
+	return gateway.NewResilientPaymentGateway(baseGateway, resilientConfig), nil
 }
 
 // createKafkaProducer creates the Kafka producer.
