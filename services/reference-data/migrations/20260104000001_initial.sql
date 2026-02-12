@@ -69,64 +69,7 @@ CREATE INDEX "idx_instrument_definition_status" ON "instrument_definition" ("sta
 -- Index for temporal queries
 CREATE INDEX "idx_instrument_definition_created_at" ON "instrument_definition" ("created_at");
 
--- Trigger function to enforce instrument lifecycle rules
--- Immutable fields cannot be changed once instrument is ACTIVE or DEPRECATED
--- Status transitions are strictly controlled
-CREATE OR REPLACE FUNCTION "enforce_instrument_lifecycle"()
-RETURNS TRIGGER AS $$
-BEGIN
-  -- Always update updated_at on any change
-  NEW."updated_at" = NOW();
-
-  -- Allow all edits when status is DRAFT
-  IF OLD."status" = 'DRAFT' THEN
-    -- If transitioning from DRAFT to ACTIVE, set activated_at
-    IF NEW."status" = 'ACTIVE' THEN
-      NEW."activated_at" = NOW();
-    -- If transitioning from DRAFT to DEPRECATED, set deprecated_at
-    ELSIF NEW."status" = 'DEPRECATED' THEN
-      NEW."deprecated_at" = NOW();
-    END IF;
-    RETURN NEW;
-  END IF;
-
-  -- For ACTIVE or DEPRECATED instruments, certain fields become immutable
-  IF OLD."status" IN ('ACTIVE', 'DEPRECATED') THEN
-    -- Prevent changes to immutable fields (validation rules that affect ledger integrity)
-    IF OLD."validation_expression" IS DISTINCT FROM NEW."validation_expression" THEN
-      RAISE EXCEPTION 'Cannot modify validation_expression for % instrument', OLD."status";
-    END IF;
-    IF OLD."fungibility_key_expression" IS DISTINCT FROM NEW."fungibility_key_expression" THEN
-      RAISE EXCEPTION 'Cannot modify fungibility_key_expression for % instrument', OLD."status";
-    END IF;
-    IF OLD."error_message_expression" IS DISTINCT FROM NEW."error_message_expression" THEN
-      RAISE EXCEPTION 'Cannot modify error_message_expression for % instrument', OLD."status";
-    END IF;
-  END IF;
-
-  -- Prevent invalid status transitions
-  IF OLD."status" = 'ACTIVE' THEN
-    IF NEW."status" = 'DRAFT' THEN
-      RAISE EXCEPTION 'Cannot transition from ACTIVE back to DRAFT';
-    END IF;
-    -- Allow ACTIVE to DEPRECATED, set deprecated_at
-    IF NEW."status" = 'DEPRECATED' THEN
-      NEW."deprecated_at" = NOW();
-    END IF;
-  END IF;
-
-  IF OLD."status" = 'DEPRECATED' THEN
-    IF NEW."status" IN ('DRAFT', 'ACTIVE') THEN
-      RAISE EXCEPTION 'Cannot transition from DEPRECATED to %', NEW."status";
-    END IF;
-  END IF;
-
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
--- Create trigger to enforce lifecycle rules on UPDATE
-CREATE TRIGGER "trg_enforce_instrument_lifecycle"
-  BEFORE UPDATE ON "instrument_definition"
-  FOR EACH ROW
-  EXECUTE FUNCTION "enforce_instrument_lifecycle"();
+-- NOTE: Instrument lifecycle enforcement (immutable fields, status transitions,
+-- timestamp management) is handled at the application layer in the instrument
+-- definition service. CockroachDB does not support PL/pgSQL triggers in
+-- user-defined functions. CHECK constraints above provide database-level safety.
