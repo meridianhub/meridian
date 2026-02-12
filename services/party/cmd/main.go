@@ -75,14 +75,16 @@ func run(logger *slog.Logger) error {
 
 	logger.Info("database connection established")
 
-	// Create repository
+	// Create repositories
 	repo := persistence.NewRepository(db)
+	pmRepo := persistence.NewPaymentMethodRepository(db)
 
 	// Create party service
 	partyService, err := service.NewService(repo, logger)
 	if err != nil {
 		return fmt.Errorf("failed to create party service: %w", err)
 	}
+	partyService.WithPaymentMethodRepository(pmRepo)
 
 	logger.Info("party service initialized")
 
