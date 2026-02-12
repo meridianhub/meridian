@@ -22,6 +22,8 @@ func TestGetEmbeddedScripts(t *testing.T) {
 		"payment_execution/v1.0.0.star",
 		"reconciliation_adjustment/v1.0.0.star",
 		"stripe_payment/v1.0.0.star",
+		"dunning_escalation/v1.0.0.star",
+		"dunning_unfreeze/v1.0.0.star",
 	}
 
 	for _, expected := range expectedVersioned {
@@ -37,6 +39,8 @@ func TestGetEmbeddedScripts(t *testing.T) {
 		"payment_execution.star",
 		"reconciliation_adjustment.star",
 		"stripe_payment.star",
+		"dunning_escalation.star",
+		"dunning_unfreeze.star",
 	}
 
 	for _, expected := range expectedFlat {
@@ -50,7 +54,7 @@ func TestPlatformDefaults(t *testing.T) {
 	defaults, err := PlatformDefaults()
 	require.NoError(t, err)
 
-	assert.Len(t, defaults, 5)
+	assert.Len(t, defaults, 7)
 
 	// Verify each default has required fields
 	for _, meta := range defaults {
@@ -70,6 +74,8 @@ func TestPlatformDefaults(t *testing.T) {
 	assert.Contains(t, names, "payment_execution")
 	assert.Contains(t, names, "reconciliation_adjustment")
 	assert.Contains(t, names, "stripe_payment")
+	assert.Contains(t, names, "dunning_escalation")
+	assert.Contains(t, names, "dunning_unfreeze")
 }
 
 func TestSeeder_SeedTenant(t *testing.T) {
@@ -99,7 +105,7 @@ func TestSeeder_SeedTenant(t *testing.T) {
 		var count int
 		err = pool.QueryRow(ctx, "SELECT COUNT(*) FROM "+schemaName+".saga_definition WHERE is_system = true").Scan(&count)
 		require.NoError(t, err)
-		assert.Equal(t, 5, count, "expected 5 system sagas")
+		assert.Equal(t, 7, count, "expected 7 system sagas")
 
 		// Verify each saga has platform_ref and no script
 		rows, err := pool.Query(ctx, `
@@ -151,7 +157,7 @@ func TestSeeder_SeedTenant(t *testing.T) {
 		var count int
 		err = pool.QueryRow(ctx, "SELECT COUNT(*) FROM "+schemaName+".saga_definition WHERE is_system = true").Scan(&count)
 		require.NoError(t, err)
-		assert.Equal(t, 5, count, "idempotent seed should not create duplicates")
+		assert.Equal(t, 7, count, "idempotent seed should not create duplicates")
 	})
 
 	t.Run("deterministic UUIDs", func(t *testing.T) {

@@ -8,15 +8,16 @@ import (
 
 // BillingRunEntity represents the database persistence model for billing runs.
 type BillingRunEntity struct {
-	ID            uuid.UUID `gorm:"primaryKey"`
-	TenantID      string    `gorm:"not null;size:255"`
-	CycleStart    time.Time `gorm:"not null"`
-	CycleEnd      time.Time `gorm:"not null"`
-	Status        string    `gorm:"not null;size:20"`
-	DunningLevel  int       `gorm:"not null;default:0"`
-	FailureReason *string   `gorm:"size:1000"`
-	CreatedAt     time.Time `gorm:"not null"`
-	UpdatedAt     time.Time `gorm:"not null"`
+	ID            uuid.UUID  `gorm:"primaryKey"`
+	TenantID      string     `gorm:"not null;size:255"`
+	CycleStart    time.Time  `gorm:"not null"`
+	CycleEnd      time.Time  `gorm:"not null"`
+	Status        string     `gorm:"not null;size:20"`
+	DunningLevel  int        `gorm:"not null;default:0"`
+	FailureReason *string    `gorm:"size:1000"`
+	LastRetryAt   *time.Time `gorm:""`
+	CreatedAt     time.Time  `gorm:"not null"`
+	UpdatedAt     time.Time  `gorm:"not null"`
 }
 
 // TableName overrides the default table name.

@@ -5,6 +5,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -16,6 +17,9 @@ import (
 	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
+
+// ErrInvalidControlAction is returned when an unsupported control action is provided.
+var ErrInvalidControlAction = errors.New("current_account.control: invalid action, must be FREEZE, UNFREEZE, or CLOSE")
 
 // RegisterStarlarkHandlers registers all Starlark service bindings for Current Account.
 // These handlers adapt the Starlark interface (map[string]any) to gRPC client calls.
@@ -65,6 +69,14 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) er
 			metadata: saga.HandlerMetadata{
 				Category: saga.HandlerCategorySettlement,
 				// Save is persistence only, doesn't produce instruments
+				ProducesInstruments: []string{},
+			},
+		},
+		"current_account.control": {
+			handler: controlHandler(client),
+			metadata: saga.HandlerMetadata{
+				Category: saga.HandlerCategorySettlement,
+				// Control actions (freeze/unfreeze/close) don't produce instruments
 				ProducesInstruments: []string{},
 			},
 		},
@@ -299,6 +311,87 @@ func saveHandler(client *Client) saga.Handler {
 			"account_id": facility.GetAccountId(),
 			"status":     "SAVED",
 		}, nil
+	}
+}
+
+// controlHandler performs lifecycle control actions (FREEZE, UNFREEZE, CLOSE) on an account.
+// Used by dunning sagas to freeze accounts after payment failures and unfreeze on resolution.
+//
+// Parameters:
+//   - account_id (string): The account identifier to control
+//   - action (string): The control action - "FREEZE", "UNFREEZE", or "CLOSE"
+//   - reason (string): Explanation for the action (min 10 chars for FREEZE/CLOSE)
+//
+// Returns a map containing:
+//   - account_id: The account identifier
+//   - new_status: The account status after the action
+//   - action_timestamp: ISO 8601 timestamp of the action
+func controlHandler(client *Client) saga.Handler {
+	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
+		accountID, err := saga.RequireStringParam(params, "account_id")
+		if err != nil {
+			return nil, err
+		}
+
+		action, err := saga.RequireStringParam(params, "action")
+		if err != nil {
+			return nil, err
+		}
+
+		reason, err := saga.RequireStringParam(params, "reason")
+		if err != nil {
+			return nil, err
+		}
+
+		// Validate party scope (tenant isolation)
+		if err := ctx.ValidatePartyAccessFromString(accountID); err != nil {
+			return nil, fmt.Errorf("current_account.control: %w", err)
+		}
+
+		// Map string action to proto enum
+		var controlAction currentaccountv1.ControlAction
+		switch action {
+		case "FREEZE":
+			controlAction = currentaccountv1.ControlAction_CONTROL_ACTION_FREEZE
+		case "UNFREEZE":
+			controlAction = currentaccountv1.ControlAction_CONTROL_ACTION_UNFREEZE
+		case "CLOSE":
+			controlAction = currentaccountv1.ControlAction_CONTROL_ACTION_CLOSE
+		default:
+			return nil, fmt.Errorf("%w: %q", ErrInvalidControlAction, action)
+		}
+
+		clientCtx := prepareClientContext(ctx)
+
+		resp, err := client.ControlCurrentAccount(clientCtx, &currentaccountv1.ControlCurrentAccountRequest{
+			AccountId:     accountID,
+			ControlAction: controlAction,
+			Reason:        reason,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("current_account.control: %w", err)
+		}
+
+		facility := resp.GetFacility()
+		actionTS := resp.GetActionTimestamp()
+
+		// Map proto status to string
+		newStatus := facility.GetAccountStatus().String()
+		// Strip the "ACCOUNT_STATUS_" prefix for a cleaner Starlark result
+		if len(newStatus) > len("ACCOUNT_STATUS_") {
+			newStatus = newStatus[len("ACCOUNT_STATUS_"):]
+		}
+
+		result := map[string]any{
+			"account_id": facility.GetAccountId(),
+			"new_status": newStatus,
+		}
+
+		if actionTS != nil {
+			result["action_timestamp"] = formatTimestamp(actionTS)
+		}
+
+		return result, nil
 	}
 }
 

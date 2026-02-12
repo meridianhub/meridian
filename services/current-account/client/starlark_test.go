@@ -30,10 +30,11 @@ type mockCurrentAccountServer struct {
 	lastKnowledgeAt    time.Time
 	lastCorrelationID  uuid.UUID
 
-	initiateLienCalled  bool
-	executeLienCalled   bool
-	terminateLienCalled bool
-	updateAccountCalled bool
+	initiateLienCalled   bool
+	executeLienCalled    bool
+	terminateLienCalled  bool
+	updateAccountCalled  bool
+	controlAccountCalled bool
 
 	// Control response behavior
 	shouldError  bool
@@ -134,6 +135,35 @@ func (m *mockCurrentAccountServer) UpdateCurrentAccount(_ context.Context, req *
 	}, nil
 }
 
+func (m *mockCurrentAccountServer) ControlCurrentAccount(_ context.Context, req *currentaccountv1.ControlCurrentAccountRequest) (*currentaccountv1.ControlCurrentAccountResponse, error) {
+	m.controlAccountCalled = true
+
+	if m.shouldError {
+		return nil, fmt.Errorf("%s", m.errorMessage)
+	}
+
+	// Determine resulting status based on action
+	var newStatus currentaccountv1.AccountStatus
+	switch req.ControlAction {
+	case currentaccountv1.ControlAction_CONTROL_ACTION_FREEZE:
+		newStatus = currentaccountv1.AccountStatus_ACCOUNT_STATUS_FROZEN
+	case currentaccountv1.ControlAction_CONTROL_ACTION_UNFREEZE:
+		newStatus = currentaccountv1.AccountStatus_ACCOUNT_STATUS_ACTIVE
+	case currentaccountv1.ControlAction_CONTROL_ACTION_CLOSE:
+		newStatus = currentaccountv1.AccountStatus_ACCOUNT_STATUS_CLOSED
+	case currentaccountv1.ControlAction_CONTROL_ACTION_UNSPECIFIED:
+		newStatus = currentaccountv1.AccountStatus_ACCOUNT_STATUS_UNSPECIFIED
+	}
+
+	return &currentaccountv1.ControlCurrentAccountResponse{
+		Facility: &currentaccountv1.CurrentAccountFacility{
+			AccountId:     req.AccountId,
+			AccountStatus: newStatus,
+		},
+		ActionTimestamp: timestamppb.Now(),
+	}, nil
+}
+
 // setupMockServer creates a mock gRPC server and client for testing
 func setupMockServer(t *testing.T, mockServer *mockCurrentAccountServer) (*Client, func()) {
 	// Create in-memory listener
@@ -192,6 +222,7 @@ func TestRegisterStarlarkHandlers(t *testing.T) {
 			"current_account.execute_lien",
 			"current_account.terminate_lien",
 			"current_account.save",
+			"current_account.control",
 		}
 
 		for _, name := range handlers {
@@ -679,5 +710,173 @@ func TestLienLifecycle(t *testing.T) {
 		require.NoError(t, err)
 		terminateMap := terminateResult.(map[string]any)
 		assert.Equal(t, "TERMINATED", terminateMap["status"])
+	})
+}
+
+func TestControlHandler(t *testing.T) {
+	// Use deterministic UUIDs for account IDs (ValidatePartyAccessFromString requires UUID format)
+	freezeAccountID := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("freeze-test")).String()
+	unfreezeAccountID := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("unfreeze-test")).String()
+	closeAccountID := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("close-test")).String()
+
+	t.Run("freeze action maps correctly", func(t *testing.T) {
+		mockServer := &mockCurrentAccountServer{}
+		client, cleanup := setupMockServer(t, mockServer)
+		defer cleanup()
+
+		handler := controlHandler(client)
+		ctx := &saga.StarlarkContext{
+			Context:        context.Background(),
+			IdempotencyKey: "test-key",
+			KnowledgeAt:    time.Now(),
+			CorrelationID:  uuid.New(),
+		}
+
+		params := map[string]any{
+			"account_id": freezeAccountID,
+			"action":     "FREEZE",
+			"reason":     "Dunning level 3 reached: overdue payment",
+		}
+
+		result, err := handler(ctx, params)
+		require.NoError(t, err)
+		assert.True(t, mockServer.controlAccountCalled)
+
+		resultMap, ok := result.(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, freezeAccountID, resultMap["account_id"])
+		assert.Equal(t, "FROZEN", resultMap["new_status"])
+		assert.NotEmpty(t, resultMap["action_timestamp"])
+	})
+
+	t.Run("unfreeze action maps correctly", func(t *testing.T) {
+		mockServer := &mockCurrentAccountServer{}
+		client, cleanup := setupMockServer(t, mockServer)
+		defer cleanup()
+
+		handler := controlHandler(client)
+		ctx := &saga.StarlarkContext{
+			Context:        context.Background(),
+			IdempotencyKey: "test-key",
+			KnowledgeAt:    time.Now(),
+			CorrelationID:  uuid.New(),
+		}
+
+		params := map[string]any{
+			"account_id": unfreezeAccountID,
+			"action":     "UNFREEZE",
+			"reason":     "Payment method updated, retrying billing",
+		}
+
+		result, err := handler(ctx, params)
+		require.NoError(t, err)
+
+		resultMap, ok := result.(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, unfreezeAccountID, resultMap["account_id"])
+		assert.Equal(t, "ACTIVE", resultMap["new_status"])
+	})
+
+	t.Run("close action maps correctly", func(t *testing.T) {
+		mockServer := &mockCurrentAccountServer{}
+		client, cleanup := setupMockServer(t, mockServer)
+		defer cleanup()
+
+		handler := controlHandler(client)
+		ctx := &saga.StarlarkContext{
+			Context:        context.Background(),
+			IdempotencyKey: "test-key",
+			KnowledgeAt:    time.Now(),
+			CorrelationID:  uuid.New(),
+		}
+
+		params := map[string]any{
+			"account_id": closeAccountID,
+			"action":     "CLOSE",
+			"reason":     "Account closure requested by party",
+		}
+
+		result, err := handler(ctx, params)
+		require.NoError(t, err)
+
+		resultMap, ok := result.(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, closeAccountID, resultMap["account_id"])
+		assert.Equal(t, "CLOSED", resultMap["new_status"])
+	})
+
+	t.Run("invalid action returns sentinel error", func(t *testing.T) {
+		mockServer := &mockCurrentAccountServer{}
+		client, cleanup := setupMockServer(t, mockServer)
+		defer cleanup()
+
+		handler := controlHandler(client)
+		ctx := &saga.StarlarkContext{
+			Context:        context.Background(),
+			IdempotencyKey: "test-key",
+			KnowledgeAt:    time.Now(),
+			CorrelationID:  uuid.New(),
+		}
+
+		params := map[string]any{
+			"account_id": freezeAccountID,
+			"action":     "SUSPEND",
+			"reason":     "invalid action test",
+		}
+
+		_, err := handler(ctx, params)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidControlAction)
+		assert.Contains(t, err.Error(), "SUSPEND")
+	})
+
+	t.Run("missing action parameter", func(t *testing.T) {
+		mockServer := &mockCurrentAccountServer{}
+		client, cleanup := setupMockServer(t, mockServer)
+		defer cleanup()
+
+		handler := controlHandler(client)
+		ctx := &saga.StarlarkContext{
+			Context:        context.Background(),
+			IdempotencyKey: "test-key",
+			KnowledgeAt:    time.Now(),
+			CorrelationID:  uuid.New(),
+		}
+
+		params := map[string]any{
+			"account_id": freezeAccountID,
+			"reason":     "missing action",
+		}
+
+		_, err := handler(ctx, params)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "action")
+	})
+
+	t.Run("gRPC error is propagated", func(t *testing.T) {
+		mockServer := &mockCurrentAccountServer{
+			shouldError:  true,
+			errorMessage: "account not found",
+		}
+		client, cleanup := setupMockServer(t, mockServer)
+		defer cleanup()
+
+		handler := controlHandler(client)
+		ctx := &saga.StarlarkContext{
+			Context:        context.Background(),
+			IdempotencyKey: "test-key",
+			KnowledgeAt:    time.Now(),
+			CorrelationID:  uuid.New(),
+		}
+
+		params := map[string]any{
+			"account_id": freezeAccountID,
+			"action":     "FREEZE",
+			"reason":     "error propagation test",
+		}
+
+		_, err := handler(ctx, params)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "account not found")
 	})
 }

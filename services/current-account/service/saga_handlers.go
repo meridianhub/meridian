@@ -104,6 +104,9 @@ func RegisterCurrentAccountHandlers(registry *saga.HandlerRegistry) error {
 		// Current Account domain handlers
 		{"current_account.save", currentAccountRepositorySave},
 
+		// Control handler (stub - implemented in client package for cross-service use)
+		{"current_account.control", stubNotImplemented("current_account.control")},
+
 		// Lien handlers (stubs - not yet implemented but required by schema)
 		{"current_account.create_lien", stubNotImplemented("current_account.create_lien")},
 		{"current_account.execute_lien", stubNotImplemented("current_account.execute_lien")},

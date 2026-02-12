@@ -76,7 +76,7 @@ func PlatformDefaults() ([]Metadata, error) {
 
 // sagaNameFromDir converts a directory name to the full saga name.
 // For current account sagas, the convention is to prefix with "current_account_".
-// payment_execution is used as-is since it's not an account-specific saga.
+// Other sagas (payment_execution, dunning_escalation, etc.) use the directory name as-is.
 func sagaNameFromDir(dirName string) string {
 	switch dirName {
 	case "deposit":

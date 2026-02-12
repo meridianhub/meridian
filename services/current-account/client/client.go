@@ -446,6 +446,35 @@ func (c *Client) GetActiveAmountBlocks(ctx context.Context, req *currentaccountv
 	return resp, nil
 }
 
+// ControlCurrentAccount performs lifecycle state transitions on an account.
+// Used by dunning sagas to freeze/unfreeze accounts.
+// This is a non-idempotent operation, so it uses circuit breaker without retry.
+func (c *Client) ControlCurrentAccount(ctx context.Context, req *currentaccountv1.ControlCurrentAccountRequest) (*currentaccountv1.ControlCurrentAccountResponse, error) {
+	if err := validation.ValidateAccountID(req.GetAccountId()); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid account_id format: %v", err)
+	}
+
+	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	ctx = clients.PropagateCorrelationID(ctx)
+	ctx = clients.PropagateOrganization(ctx)
+
+	// Use resilience patterns if configured (no retry for non-idempotent operations)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilienceNoRetry(ctx, c.resilient, "ControlCurrentAccount", func() (*currentaccountv1.ControlCurrentAccountResponse, error) {
+			return c.currentAccount.ControlCurrentAccount(ctx, req)
+		})
+	}
+
+	resp, err := c.currentAccount.ControlCurrentAccount(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to control current account: %w", err)
+	}
+
+	return resp, nil
+}
+
 // Close terminates the gRPC connection gracefully.
 func (c *Client) Close() error {
 	if c.conn != nil {

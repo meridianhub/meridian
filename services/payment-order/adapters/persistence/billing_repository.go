@@ -111,6 +111,7 @@ func (r *BillingRepositoryImpl) UpdateBillingRun(ctx context.Context, run *domai
 			"status":         entity.Status,
 			"dunning_level":  entity.DunningLevel,
 			"failure_reason": entity.FailureReason,
+			"last_retry_at":  entity.LastRetryAt,
 			"updated_at":     entity.UpdatedAt,
 		})
 		if result.Error != nil {
@@ -222,6 +223,7 @@ func billingRunToEntity(run *domain.BillingRun) *BillingRunEntity {
 		CycleEnd:     run.CycleEnd,
 		Status:       string(run.Status),
 		DunningLevel: run.DunningLevel,
+		LastRetryAt:  run.LastRetryAt,
 		CreatedAt:    run.CreatedAt,
 		UpdatedAt:    run.UpdatedAt,
 	}
@@ -239,6 +241,7 @@ func billingRunToDomain(entity *BillingRunEntity) *domain.BillingRun {
 		CycleEnd:     entity.CycleEnd,
 		Status:       domain.BillingRunStatus(entity.Status),
 		DunningLevel: entity.DunningLevel,
+		LastRetryAt:  entity.LastRetryAt,
 		CreatedAt:    entity.CreatedAt,
 		UpdatedAt:    entity.UpdatedAt,
 	}
