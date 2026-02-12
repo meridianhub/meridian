@@ -14,16 +14,27 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// ErrSagaOrchestrationDisabled is returned when ExecutePaymentSaga is called
-// but USE_SAGA_ORCHESTRATION is not enabled.
-var ErrSagaOrchestrationDisabled = errors.New("saga orchestration is not enabled")
+// Saga orchestration errors.
+var (
+	// ErrSagaOrchestrationDisabled is returned when ExecutePaymentSaga is called
+	// but USE_SAGA_ORCHESTRATION is not enabled.
+	ErrSagaOrchestrationDisabled = errors.New("saga orchestration is not enabled")
+
+	// ErrSagaDepsNotConfigured is returned when required saga dependencies
+	// (CurrentAccountClient, PaymentGateway) are nil at execution time.
+	ErrSagaDepsNotConfigured = errors.New("saga dependencies not configured")
+
+	// ErrRefDataClientNotConfigured is returned when the reference data client
+	// is nil and a saga definition cannot be fetched.
+	ErrRefDataClientNotConfigured = errors.New("reference data client not configured")
+)
 
 // Orchestrate executes the payment saga using Starlark script execution.
 // The saga script is fetched from reference-data service and executed via StarlarkSagaRunner.
 // Compensation is handled automatically by the Starlark runtime on failure.
 //
 // When sagaOrchestrationEnabled is false, this method logs a warning and marks the
-// payment order as failed because the Go-based orchestration was removed in favour of
+// payment order as failed because the Go-based orchestration was removed in favor of
 // Starlark. Enable USE_SAGA_ORCHESTRATION=true to use Starlark saga execution.
 func (o *PaymentOrchestrator) Orchestrate(ctx context.Context, po *domain.PaymentOrder) {
 	if !o.sagaOrchestrationEnabled {
@@ -79,7 +90,7 @@ func (o *PaymentOrchestrator) ExecutePaymentSaga(ctx context.Context, paymentOrd
 				"payment_order_id", po.ID.String(),
 				"error", err)
 		}
-		return nil, fmt.Errorf("saga dependencies not configured")
+		return nil, ErrSagaDepsNotConfigured
 	}
 
 	// Check if reference data client is available for GetSaga
@@ -91,7 +102,7 @@ func (o *PaymentOrchestrator) ExecutePaymentSaga(ctx context.Context, paymentOrd
 				"payment_order_id", po.ID.String(),
 				"error", err)
 		}
-		return nil, fmt.Errorf("reference data client not configured")
+		return nil, ErrRefDataClientNotConfigured
 	}
 
 	// Fetch saga script from reference-data service

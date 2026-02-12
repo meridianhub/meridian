@@ -3,6 +3,7 @@ package persistence
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -10,6 +11,9 @@ import (
 	"github.com/meridianhub/meridian/services/payment-order/domain"
 	"gorm.io/gorm"
 )
+
+// ErrNilSagaExecution is returned when PersistExecution is called with a nil execution.
+var ErrNilSagaExecution = errors.New("nil saga execution")
 
 // sagaExecutionEntity is the GORM entity for the saga_executions table.
 type sagaExecutionEntity struct {
@@ -45,7 +49,7 @@ func NewSagaExecutionRepository(db *gorm.DB) *SagaExecutionRepository {
 // PersistExecution creates or updates a saga execution record.
 func (r *SagaExecutionRepository) PersistExecution(ctx context.Context, execution *domain.SagaExecution) error {
 	if execution == nil {
-		return fmt.Errorf("nil saga execution")
+		return ErrNilSagaExecution
 	}
 
 	// Normalize nil maps to empty objects so json.Marshal produces "{}" not "null",

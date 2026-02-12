@@ -168,8 +168,7 @@ func TestExecutePaymentSaga_NilReferenceDataClient(t *testing.T) {
 	output, err := orchestrator.ExecutePaymentSaga(context.Background(), po.ID, "payment_execution", po)
 
 	assert.Nil(t, output)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "reference data client not configured")
+	assert.ErrorIs(t, err, ErrRefDataClientNotConfigured)
 }
 
 // TestExecutePaymentSaga_PersistsExecutionOnFailure verifies that when the saga
