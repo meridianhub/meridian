@@ -121,6 +121,10 @@ func TestMigrationsMatchEntities(t *testing.T) {
 		testLienEntity(t, gormDB)
 	})
 
+	t.Run("CurrentAccount/WithdrawalEntity", func(t *testing.T) {
+		testWithdrawalEntity(t, gormDB)
+	})
+
 	t.Run("PaymentOrder/PaymentOrderEntity", func(t *testing.T) {
 		testPaymentOrderEntity(t, gormDB)
 	})
@@ -339,6 +343,163 @@ func testLienEntity(t *testing.T, db *gorm.DB) {
 		Version:               1,
 	}
 	err = db.Create(orphanLien).Error
+	assert.Error(t, err, "Expected error for FK constraint violation")
+}
+
+// testWithdrawalEntity tests that WithdrawalEntity works with the migrated schema
+func testWithdrawalEntity(t *testing.T, db *gorm.DB) {
+	t.Helper()
+
+	// Create an account (withdrawals have FK to accounts)
+	accountID := uuid.New()
+	partyID := uuid.New()
+	now := time.Now()
+	account := &capersistence.CurrentAccountEntity{
+		ID:                    accountID,
+		AccountID:             "ACC-WD-001",
+		AccountIdentification: "GB82WEST12345698765499",
+		AccountType:           "current",
+		Currency:              "GBP",
+		Status:                "active",
+		PartyID:               partyID,
+		OverdraftLimit:        5000,
+		CreatedAt:             now,
+		UpdatedAt:             now,
+		CreatedBy:             "system",
+		UpdatedBy:             "system",
+	}
+	err := db.Create(account).Error
+	require.NoError(t, err, "Failed to create test account for withdrawal test")
+
+	// Create a withdrawal
+	entity := &capersistence.WithdrawalEntity{
+		ID:          uuid.New(),
+		AccountID:   accountID,
+		AmountCents: 10000,
+		Currency:    "GBP",
+		Status:      "PENDING",
+		Reference:   "WD-SCHEMA-TEST-001",
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+		Version:     1,
+	}
+
+	// Create - will fail if columns don't match
+	err = db.Create(entity).Error
+	if err != nil {
+		t.Fatalf("Failed to create WithdrawalEntity - schema mismatch detected: %v", err)
+	}
+
+	// Read back - will fail if columns don't match
+	var retrieved capersistence.WithdrawalEntity
+	err = db.First(&retrieved, "id = ?", entity.ID).Error
+	if err != nil {
+		t.Fatalf("Failed to read WithdrawalEntity - schema mismatch detected: %v", err)
+	}
+
+	// Verify data integrity
+	assert.Equal(t, entity.AccountID, retrieved.AccountID)
+	assert.Equal(t, entity.AmountCents, retrieved.AmountCents)
+	assert.Equal(t, entity.Currency, retrieved.Currency)
+	assert.Equal(t, entity.Status, retrieved.Status)
+	assert.Equal(t, entity.Reference, retrieved.Reference)
+	assert.Equal(t, int64(1), retrieved.Version)
+
+	// Update - verify status transitions work (PENDING -> COMPLETED)
+	retrieved.Status = "COMPLETED"
+	retrieved.UpdatedAt = time.Now()
+	err = db.Save(&retrieved).Error
+	if err != nil {
+		t.Fatalf("Failed to update WithdrawalEntity - schema mismatch detected: %v", err)
+	}
+
+	// Verify update persisted
+	var updated capersistence.WithdrawalEntity
+	err = db.First(&updated, "id = ?", entity.ID).Error
+	require.NoError(t, err)
+	assert.Equal(t, "COMPLETED", updated.Status)
+
+	// Test FAILED and CANCELLED status transitions
+	for _, tc := range []struct {
+		status    string
+		reference string
+	}{
+		{"FAILED", "WD-SCHEMA-TEST-FAIL"},
+		{"CANCELLED", "WD-SCHEMA-TEST-CANCEL"},
+	} {
+		wd := &capersistence.WithdrawalEntity{
+			ID:          uuid.New(),
+			AccountID:   accountID,
+			AmountCents: 5000,
+			Currency:    "GBP",
+			Status:      tc.status,
+			Reference:   tc.reference,
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+			Version:     1,
+		}
+		err = db.Create(wd).Error
+		assert.NoError(t, err, "Status %s should be accepted by check constraint", tc.status)
+	}
+
+	// Constraint validation: amount_cents must be > 0
+	invalidAmountWd := &capersistence.WithdrawalEntity{
+		ID:          uuid.New(),
+		AccountID:   accountID,
+		AmountCents: 0, // Invalid: must be > 0
+		Currency:    "GBP",
+		Status:      "PENDING",
+		Reference:   "WD-SCHEMA-TEST-002",
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+		Version:     1,
+	}
+	err = db.Create(invalidAmountWd).Error
+	assert.Error(t, err, "Expected error for amount_cents <= 0 constraint violation")
+
+	// Constraint validation: invalid status rejected
+	invalidStatusWd := &capersistence.WithdrawalEntity{
+		ID:          uuid.New(),
+		AccountID:   accountID,
+		AmountCents: 5000,
+		Currency:    "GBP",
+		Status:      "INVALID_STATUS",
+		Reference:   "WD-SCHEMA-TEST-003",
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+		Version:     1,
+	}
+	err = db.Create(invalidStatusWd).Error
+	assert.Error(t, err, "Expected error for invalid status constraint violation")
+
+	// Constraint validation: unique reference
+	duplicateWd := &capersistence.WithdrawalEntity{
+		ID:          uuid.New(),
+		AccountID:   accountID,
+		AmountCents: 5000,
+		Currency:    "GBP",
+		Status:      "PENDING",
+		Reference:   "WD-SCHEMA-TEST-001", // Duplicate of first withdrawal
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+		Version:     1,
+	}
+	err = db.Create(duplicateWd).Error
+	assert.Error(t, err, "Expected error for duplicate reference")
+
+	// Constraint validation: FK to non-existent account
+	orphanWd := &capersistence.WithdrawalEntity{
+		ID:          uuid.New(),
+		AccountID:   uuid.New(), // Non-existent account
+		AmountCents: 5000,
+		Currency:    "GBP",
+		Status:      "PENDING",
+		Reference:   "WD-SCHEMA-TEST-004",
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+		Version:     1,
+	}
+	err = db.Create(orphanWd).Error
 	assert.Error(t, err, "Expected error for FK constraint violation")
 }
 
