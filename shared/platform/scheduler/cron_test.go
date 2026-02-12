@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/meridianhub/meridian/shared/platform/scheduler"
+	"github.com/robfig/cron/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -141,6 +142,14 @@ func (s *stubExecutionStore) getExecutions() []scheduler.Execution {
 	return result
 }
 
+// secondsCron returns a cron.Cron with seconds-level parser for fast tests.
+func secondsCron() *cron.Cron {
+	return cron.New(
+		cron.WithLocation(time.UTC),
+		cron.WithSeconds(),
+	)
+}
+
 // --- Tests ---
 
 func TestCronScheduler_StartAndStop(t *testing.T) {
@@ -155,6 +164,7 @@ func TestCronScheduler_StartAndStop(t *testing.T) {
 			ShutdownTimeout: time.Second,
 		},
 		slog.Default(),
+		scheduler.WithCronRunner(secondsCron()),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -179,8 +189,8 @@ func TestCronScheduler_StartAndStop(t *testing.T) {
 func TestCronScheduler_LoadsSchedulesOnStart(t *testing.T) {
 	provider := &stubProvider{
 		schedules: []scheduler.Schedule{
-			{ID: "sched-1", CronExpr: "0 2 * * *", TenantID: "tenant1"},
-			{ID: "sched-2", CronExpr: "30 * * * *", TenantID: "tenant2"},
+			{ID: "sched-1", CronExpr: "0 0 2 * * *", TenantID: "tenant1"},
+			{ID: "sched-2", CronExpr: "0 30 * * * *", TenantID: "tenant2"},
 		},
 	}
 	executor := &stubExecutor{}
@@ -193,6 +203,7 @@ func TestCronScheduler_LoadsSchedulesOnStart(t *testing.T) {
 			ShutdownTimeout: time.Second,
 		},
 		slog.Default(),
+		scheduler.WithCronRunner(secondsCron()),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -214,8 +225,8 @@ func TestCronScheduler_LoadsSchedulesOnStart(t *testing.T) {
 func TestCronScheduler_RemovesStaleSchedules(t *testing.T) {
 	provider := &stubProvider{
 		schedules: []scheduler.Schedule{
-			{ID: "sched-1", CronExpr: "0 2 * * *"},
-			{ID: "sched-2", CronExpr: "30 * * * *"},
+			{ID: "sched-1", CronExpr: "0 0 2 * * *"},
+			{ID: "sched-2", CronExpr: "0 30 * * * *"},
 		},
 	}
 	executor := &stubExecutor{}
@@ -228,6 +239,7 @@ func TestCronScheduler_RemovesStaleSchedules(t *testing.T) {
 			ShutdownTimeout: time.Second,
 		},
 		slog.Default(),
+		scheduler.WithCronRunner(secondsCron()),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -243,7 +255,7 @@ func TestCronScheduler_RemovesStaleSchedules(t *testing.T) {
 
 	// Remove one schedule
 	provider.setSchedules([]scheduler.Schedule{
-		{ID: "sched-1", CronExpr: "0 2 * * *"},
+		{ID: "sched-1", CronExpr: "0 0 2 * * *"},
 	})
 
 	// Wait for refresh to pick up change
@@ -259,14 +271,9 @@ func TestCronScheduler_RemovesStaleSchedules(t *testing.T) {
 }
 
 func TestCronScheduler_ExecutesJobOnCronFire(t *testing.T) {
-	// Use "* * * * *" (every minute) - robfig/cron fires immediately-ish on next tick
-	// To make it fire quickly, we use a per-second cron expression if available,
-	// but standard 5-field cron only goes to minute. Instead we verify via the
-	// executor being called.
-
 	provider := &stubProvider{
 		schedules: []scheduler.Schedule{
-			{ID: "fast-sched", CronExpr: "* * * * *", TenantID: "tenant1", Metadata: "test-data"},
+			{ID: "fast-sched", CronExpr: "*/1 * * * * *", TenantID: "tenant1", Metadata: "test-data"},
 		},
 	}
 	executeCh := make(chan struct{}, 10)
@@ -282,6 +289,7 @@ func TestCronScheduler_ExecutesJobOnCronFire(t *testing.T) {
 			ExecutionTimeout: 5 * time.Second,
 		},
 		slog.Default(),
+		scheduler.WithCronRunner(secondsCron()),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -295,11 +303,11 @@ func TestCronScheduler_ExecutesJobOnCronFire(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Wait for the cron job to fire (up to ~65 seconds for minute-level cron)
+	// Wait for the cron job to fire (seconds-level, should be fast)
 	select {
 	case <-executeCh:
 		// Job fired
-	case <-time.After(70 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("cron job did not fire within timeout")
 	}
 
@@ -316,7 +324,7 @@ func TestCronScheduler_ExecutesJobOnCronFire(t *testing.T) {
 func TestCronScheduler_SkipsWhenLockNotAcquired(t *testing.T) {
 	provider := &stubProvider{
 		schedules: []scheduler.Schedule{
-			{ID: "locked-sched", CronExpr: "* * * * *", TenantID: "tenant1"},
+			{ID: "locked-sched", CronExpr: "*/1 * * * * *", TenantID: "tenant1"},
 		},
 	}
 	executor := &stubExecutor{executeCh: make(chan struct{}, 10)}
@@ -332,6 +340,7 @@ func TestCronScheduler_SkipsWhenLockNotAcquired(t *testing.T) {
 		},
 		slog.Default(),
 		scheduler.WithCronExecutionStore(store),
+		scheduler.WithCronRunner(secondsCron()),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -339,8 +348,8 @@ func TestCronScheduler_SkipsWhenLockNotAcquired(t *testing.T) {
 		_ = s.Start(ctx)
 	}()
 
-	// Wait for the cron to fire
-	err := await.New().AtMost(70 * time.Second).PollInterval(500 * time.Millisecond).Until(func() bool {
+	// Wait for the cron to fire and record a SKIPPED execution
+	err := await.New().AtMost(5 * time.Second).PollInterval(100 * time.Millisecond).Until(func() bool {
 		execs := store.getExecutions()
 		for _, e := range execs {
 			if e.Status == scheduler.ExecutionStatusSkipped {
@@ -361,7 +370,7 @@ func TestCronScheduler_SkipsWhenLockNotAcquired(t *testing.T) {
 func TestCronScheduler_RecordsExecutionAuditTrail(t *testing.T) {
 	provider := &stubProvider{
 		schedules: []scheduler.Schedule{
-			{ID: "audit-sched", CronExpr: "* * * * *", TenantID: "tenant1"},
+			{ID: "audit-sched", CronExpr: "*/1 * * * * *", TenantID: "tenant1"},
 		},
 	}
 	executeCh := make(chan struct{}, 10)
@@ -378,6 +387,7 @@ func TestCronScheduler_RecordsExecutionAuditTrail(t *testing.T) {
 		},
 		slog.Default(),
 		scheduler.WithCronExecutionStore(store),
+		scheduler.WithCronRunner(secondsCron()),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -388,7 +398,7 @@ func TestCronScheduler_RecordsExecutionAuditTrail(t *testing.T) {
 	// Wait for execution
 	select {
 	case <-executeCh:
-	case <-time.After(70 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("cron job did not fire")
 	}
 
@@ -426,7 +436,7 @@ func TestCronScheduler_RecordsExecutionAuditTrail(t *testing.T) {
 func TestCronScheduler_RecordsFailedExecution(t *testing.T) {
 	provider := &stubProvider{
 		schedules: []scheduler.Schedule{
-			{ID: "fail-sched", CronExpr: "* * * * *", TenantID: "tenant1"},
+			{ID: "fail-sched", CronExpr: "*/1 * * * * *", TenantID: "tenant1"},
 		},
 	}
 	executeCh := make(chan struct{}, 10)
@@ -446,6 +456,7 @@ func TestCronScheduler_RecordsFailedExecution(t *testing.T) {
 		},
 		slog.Default(),
 		scheduler.WithCronExecutionStore(store),
+		scheduler.WithCronRunner(secondsCron()),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -455,7 +466,7 @@ func TestCronScheduler_RecordsFailedExecution(t *testing.T) {
 
 	select {
 	case <-executeCh:
-	case <-time.After(70 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("cron job did not fire")
 	}
 
@@ -491,7 +502,7 @@ func TestCronScheduler_InvalidCronExpression(t *testing.T) {
 	provider := &stubProvider{
 		schedules: []scheduler.Schedule{
 			{ID: "bad-cron", CronExpr: "not-a-cron"},
-			{ID: "good-cron", CronExpr: "0 2 * * *"},
+			{ID: "good-cron", CronExpr: "0 0 2 * * *"},
 		},
 	}
 	executor := &stubExecutor{}
@@ -504,6 +515,7 @@ func TestCronScheduler_InvalidCronExpression(t *testing.T) {
 			ShutdownTimeout: time.Second,
 		},
 		slog.Default(),
+		scheduler.WithCronRunner(secondsCron()),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -526,7 +538,7 @@ func TestCronScheduler_InvalidCronExpression(t *testing.T) {
 func TestCronScheduler_NilLock_ExecutesWithoutLocking(t *testing.T) {
 	provider := &stubProvider{
 		schedules: []scheduler.Schedule{
-			{ID: "no-lock-sched", CronExpr: "* * * * *", TenantID: "tenant1"},
+			{ID: "no-lock-sched", CronExpr: "*/1 * * * * *", TenantID: "tenant1"},
 		},
 	}
 	executeCh := make(chan struct{}, 10)
@@ -540,6 +552,7 @@ func TestCronScheduler_NilLock_ExecutesWithoutLocking(t *testing.T) {
 			ShutdownTimeout: time.Second,
 		},
 		slog.Default(),
+		scheduler.WithCronRunner(secondsCron()),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -550,7 +563,7 @@ func TestCronScheduler_NilLock_ExecutesWithoutLocking(t *testing.T) {
 	select {
 	case <-executeCh:
 		// Executed without lock
-	case <-time.After(70 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("cron job did not fire")
 	}
 
@@ -574,6 +587,7 @@ func TestCronScheduler_ProviderError_ContinuesRunning(t *testing.T) {
 			ShutdownTimeout: time.Second,
 		},
 		slog.Default(),
+		scheduler.WithCronRunner(secondsCron()),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -588,6 +602,14 @@ func TestCronScheduler_ProviderError_ContinuesRunning(t *testing.T) {
 	// Scheduler should still be running despite provider errors
 	assert.Equal(t, 0, s.ScheduleCount())
 
+	// Verify Start has not exited early
+	select {
+	case err := <-errCh:
+		t.Fatalf("scheduler exited early: %v", err)
+	default:
+		// Still running - expected
+	}
+
 	cancel()
 	s.Stop()
 }
@@ -595,7 +617,7 @@ func TestCronScheduler_ProviderError_ContinuesRunning(t *testing.T) {
 func TestCronScheduler_LockError_SkipsExecution(t *testing.T) {
 	provider := &stubProvider{
 		schedules: []scheduler.Schedule{
-			{ID: "lock-err-sched", CronExpr: "* * * * *"},
+			{ID: "lock-err-sched", CronExpr: "*/1 * * * * *"},
 		},
 	}
 	executor := &stubExecutor{}
@@ -609,6 +631,7 @@ func TestCronScheduler_LockError_SkipsExecution(t *testing.T) {
 			ShutdownTimeout: time.Second,
 		},
 		slog.Default(),
+		scheduler.WithCronRunner(secondsCron()),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -616,18 +639,70 @@ func TestCronScheduler_LockError_SkipsExecution(t *testing.T) {
 		_ = s.Start(ctx)
 	}()
 
-	// Wait for cron to fire (up to ~65s for minute-level)
-	err := await.New().AtMost(70 * time.Second).PollInterval(time.Second).Until(func() bool {
-		// The cron should have fired at least once, but executor should not have been called
+	// Wait for schedule to be loaded and cron to fire at least once
+	err := await.New().AtMost(5 * time.Second).PollInterval(100 * time.Millisecond).Until(func() bool {
 		return s.ScheduleCount() == 1
 	})
 	require.NoError(t, err)
 
-	// Give time for cron to fire
-	time.Sleep(65 * time.Second)
+	// Give time for cron to fire (seconds-level, fast)
+	time.Sleep(2 * time.Second)
 
-	// Executor should not have been called
+	// Executor should not have been called (lock error prevents execution)
 	assert.Equal(t, int32(0), executor.callCount.Load())
+
+	cancel()
+	s.Stop()
+}
+
+func TestCronScheduler_UpdatesChangedSchedules(t *testing.T) {
+	provider := &stubProvider{
+		schedules: []scheduler.Schedule{
+			{ID: "sched-1", CronExpr: "0 0 2 * * *", TenantID: "tenant1"},
+		},
+	}
+	executeCh := make(chan struct{}, 10)
+	executor := &stubExecutor{executeCh: executeCh}
+
+	s := scheduler.NewCronScheduler(
+		provider, executor, nil,
+		scheduler.CronSchedulerConfig{
+			Name:            "test-scheduler",
+			RefreshInterval: 200 * time.Millisecond,
+			ShutdownTimeout: time.Second,
+		},
+		slog.Default(),
+		scheduler.WithCronRunner(secondsCron()),
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		_ = s.Start(ctx)
+	}()
+
+	// Wait for initial load
+	err := await.New().AtMost(2 * time.Second).PollInterval(50 * time.Millisecond).Until(func() bool {
+		return s.ScheduleCount() == 1
+	})
+	require.NoError(t, err)
+
+	// Update the schedule to fire every second
+	provider.setSchedules([]scheduler.Schedule{
+		{ID: "sched-1", CronExpr: "*/1 * * * * *", TenantID: "tenant2"},
+	})
+
+	// Wait for cron to fire with the updated schedule
+	select {
+	case <-executeCh:
+		// Updated schedule fired
+	case <-time.After(5 * time.Second):
+		t.Fatal("updated schedule did not fire")
+	}
+
+	calls := executor.getCalls()
+	require.GreaterOrEqual(t, len(calls), 1)
+	assert.Equal(t, "sched-1", calls[0].ID)
+	assert.Equal(t, "tenant2", calls[0].TenantID)
 
 	cancel()
 	s.Stop()

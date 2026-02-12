@@ -3,6 +3,7 @@ package scheduler_test
 import (
 	"context"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -14,9 +15,23 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/cockroachdb"
 )
 
-// setupTestCockroachDB creates a CockroachDB testcontainer with the scheduler_execution table.
-func setupTestCockroachDB(t *testing.T) *pgxpool.Pool {
-	t.Helper()
+var testPool *pgxpool.Pool
+
+func TestMain(m *testing.M) {
+	// Check for -test.short before flag.Parse (which happens inside m.Run).
+	// We skip container setup entirely in short mode since only integration tests need it.
+	short := false
+	for _, arg := range os.Args {
+		if arg == "-test.short" || arg == "--test.short" ||
+			arg == "-test.short=true" || arg == "--test.short=true" {
+			short = true
+			break
+		}
+	}
+
+	if short {
+		os.Exit(m.Run())
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
@@ -28,32 +43,46 @@ func setupTestCockroachDB(t *testing.T) *pgxpool.Pool {
 		cockroachdb.WithInsecure(),
 	)
 	if err != nil {
-		t.Fatalf("Failed to start CockroachDB container: %v", err)
+		fmt.Fprintf(os.Stderr, "Failed to start CockroachDB container: %v\n", err)
+		os.Exit(1)
 	}
-
-	t.Cleanup(func() {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cleanupCancel()
-		_ = crdbContainer.Terminate(cleanupCtx)
-	})
 
 	connConfig, err := crdbContainer.ConnectionConfig(ctx)
 	if err != nil {
-		t.Fatalf("Failed to get connection config: %v", err)
+		fmt.Fprintf(os.Stderr, "Failed to get connection config: %v\n", err)
+		_ = crdbContainer.Terminate(ctx)
+		os.Exit(1)
 	}
 
-	pool, err := pgxpool.New(ctx, connConfig.ConnString())
+	testPool, err = pgxpool.New(ctx, connConfig.ConnString())
 	if err != nil {
-		t.Fatalf("Failed to create connection pool: %v", err)
+		fmt.Fprintf(os.Stderr, "Failed to create connection pool: %v\n", err)
+		_ = crdbContainer.Terminate(ctx)
+		os.Exit(1)
 	}
 
-	t.Cleanup(func() {
-		pool.Close()
-	})
+	code := m.Run()
 
-	// Create the scheduler_execution table
+	testPool.Close()
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cleanupCancel()
+	_ = crdbContainer.Terminate(cleanupCtx)
+	os.Exit(code)
+}
+
+// setupTestTable creates the scheduler_execution table and registers a cleanup
+// that truncates it after the test for isolation.
+func setupTestTable(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+
+	if testPool == nil {
+		t.Skip("testPool not initialized (short mode?)")
+	}
+
+	ctx := context.Background()
+
 	createTableSQL := `
-		CREATE TABLE scheduler_execution (
+		CREATE TABLE IF NOT EXISTS scheduler_execution (
 			id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			scheduler_name  VARCHAR(100) NOT NULL,
 			schedule_id     VARCHAR(200) NOT NULL,
@@ -67,14 +96,18 @@ func setupTestCockroachDB(t *testing.T) *pgxpool.Pool {
 			CONSTRAINT chk_scheduler_execution_status
 				CHECK (status IN ('TRIGGERED', 'COMPLETED', 'FAILED', 'MISSED', 'SKIPPED'))
 		);
-		CREATE INDEX idx_scheduler_execution_scheduler_schedule ON scheduler_execution (scheduler_name, schedule_id, scheduled_at DESC);
+		CREATE INDEX IF NOT EXISTS idx_scheduler_execution_scheduler_schedule ON scheduler_execution (scheduler_name, schedule_id, scheduled_at DESC);
 	`
-	_, err = pool.Exec(ctx, createTableSQL)
+	_, err := testPool.Exec(ctx, createTableSQL)
 	if err != nil {
 		t.Fatalf("Failed to create scheduler_execution table: %v", err)
 	}
 
-	return pool
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), "TRUNCATE TABLE scheduler_execution")
+	})
+
+	return testPool
 }
 
 func TestIntegration_PgExecutionStore_RecordAndRetrieve(t *testing.T) {
@@ -82,7 +115,7 @@ func TestIntegration_PgExecutionStore_RecordAndRetrieve(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 
-	pool := setupTestCockroachDB(t)
+	pool := setupTestTable(t)
 	store := scheduler.NewPgExecutionStore(pool)
 	ctx := context.Background()
 
@@ -117,7 +150,7 @@ func TestIntegration_PgExecutionStore_UpdateToCompleted(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 
-	pool := setupTestCockroachDB(t)
+	pool := setupTestTable(t)
 	store := scheduler.NewPgExecutionStore(pool)
 	ctx := context.Background()
 
@@ -156,7 +189,7 @@ func TestIntegration_PgExecutionStore_UpdateToFailed(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 
-	pool := setupTestCockroachDB(t)
+	pool := setupTestTable(t)
 	store := scheduler.NewPgExecutionStore(pool)
 	ctx := context.Background()
 
@@ -194,7 +227,7 @@ func TestIntegration_PgExecutionStore_LastExecution_ReturnsLatest(t *testing.T) 
 		t.Skip("skipping integration test in short mode")
 	}
 
-	pool := setupTestCockroachDB(t)
+	pool := setupTestTable(t)
 	store := scheduler.NewPgExecutionStore(pool)
 	ctx := context.Background()
 
@@ -232,7 +265,7 @@ func TestIntegration_PgExecutionStore_LastExecution_NoRecord(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 
-	pool := setupTestCockroachDB(t)
+	pool := setupTestTable(t)
 	store := scheduler.NewPgExecutionStore(pool)
 	ctx := context.Background()
 
@@ -246,7 +279,7 @@ func TestIntegration_PgExecutionStore_IsolatesBySchedulerAndScheduleID(t *testin
 		t.Skip("skipping integration test in short mode")
 	}
 
-	pool := setupTestCockroachDB(t)
+	pool := setupTestTable(t)
 	store := scheduler.NewPgExecutionStore(pool)
 	ctx := context.Background()
 
@@ -292,7 +325,7 @@ func TestIntegration_PgExecutionStore_UpdateNonExistentRow(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 
-	pool := setupTestCockroachDB(t)
+	pool := setupTestTable(t)
 	store := scheduler.NewPgExecutionStore(pool)
 	ctx := context.Background()
 
@@ -305,7 +338,7 @@ func TestIntegration_PgExecutionStore_StatusConstraint(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 
-	pool := setupTestCockroachDB(t)
+	pool := setupTestTable(t)
 	ctx := context.Background()
 
 	// Try to insert an invalid status directly
@@ -322,7 +355,7 @@ func TestIntegration_PgExecutionStore_AllValidStatuses(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 
-	pool := setupTestCockroachDB(t)
+	pool := setupTestTable(t)
 	store := scheduler.NewPgExecutionStore(pool)
 	ctx := context.Background()
 

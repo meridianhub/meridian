@@ -78,9 +78,10 @@ type CronScheduler struct {
 	config    CronSchedulerConfig
 	logger    *slog.Logger
 
-	cron     *cron.Cron
-	mu       sync.Mutex
-	entryIDs map[string]cron.EntryID
+	cron      *cron.Cron
+	mu        sync.Mutex
+	entryIDs  map[string]cron.EntryID
+	schedules map[string]Schedule
 }
 
 // NewCronScheduler creates a new CronScheduler. The store parameter is optional;
@@ -114,6 +115,7 @@ func NewCronScheduler(
 		logger:    logger.With("component", config.Name),
 		cron:      cronRunner,
 		entryIDs:  make(map[string]cron.EntryID),
+		schedules: make(map[string]Schedule),
 	}
 
 	for _, opt := range opts {
@@ -130,6 +132,14 @@ type CronSchedulerOption func(*CronScheduler)
 func WithCronExecutionStore(store ExecutionStore) CronSchedulerOption {
 	return func(s *CronScheduler) {
 		s.store = store
+	}
+}
+
+// WithCronRunner replaces the default cron runner (e.g. to inject a
+// seconds-level parser for faster tests).
+func WithCronRunner(c *cron.Cron) CronSchedulerOption {
+	return func(s *CronScheduler) {
+		s.cron = c
 	}
 }
 
@@ -205,14 +215,25 @@ func (s *CronScheduler) refreshSchedules(ctx context.Context) error {
 		if _, exists := currentSchedules[id]; !exists {
 			s.cron.Remove(entryID)
 			delete(s.entryIDs, id)
+			delete(s.schedules, id)
 			s.logger.Info("removed schedule", "schedule_id", id)
 		}
 	}
 
-	// Add new schedules
+	// Add or update schedules
 	for _, sched := range schedules {
-		if _, exists := s.entryIDs[sched.ID]; exists {
-			continue
+		if prev, exists := s.schedules[sched.ID]; exists {
+			if !scheduleChanged(prev, sched) {
+				continue
+			}
+			// Re-register: remove old entry then fall through to add
+			s.cron.Remove(s.entryIDs[sched.ID])
+			delete(s.entryIDs, sched.ID)
+			delete(s.schedules, sched.ID)
+			s.logger.Info("schedule changed, re-registering",
+				"schedule_id", sched.ID,
+				"old_cron_expr", prev.CronExpr,
+				"new_cron_expr", sched.CronExpr)
 		}
 
 		entryID, err := s.addSchedule(sched) //nolint:contextcheck // cron.AddFunc takes func() with no context
@@ -225,6 +246,7 @@ func (s *CronScheduler) refreshSchedules(ctx context.Context) error {
 		}
 
 		s.entryIDs[sched.ID] = entryID
+		s.schedules[sched.ID] = sched
 		s.logger.Info("registered schedule",
 			"schedule_id", sched.ID,
 			"cron_expr", sched.CronExpr,
@@ -368,6 +390,11 @@ func (s *CronScheduler) recordExecution(ctx context.Context, schedule Schedule, 
 			"status", status,
 			"error", err)
 	}
+}
+
+// scheduleChanged returns true if any relevant field differs between two schedules.
+func scheduleChanged(a, b Schedule) bool {
+	return a.CronExpr != b.CronExpr || a.TenantID != b.TenantID
 }
 
 func strPtr(s string) *string {
