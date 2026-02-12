@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1"
@@ -384,14 +385,18 @@ func run(logger *slog.Logger) error {
 	// Start billing workers in background (if enabled)
 	workerCtx, workerCancel := context.WithCancel(ctx)
 	defer workerCancel()
+	var billingWg sync.WaitGroup
 	if billingEnabled && billingScheduler != nil && dunningWorker != nil {
+		billingWg.Add(2)
 		go func() {
+			defer billingWg.Done()
 			if err := billingScheduler.Start(workerCtx); err != nil {
 				logger.Error("billing scheduler error", "error", err)
 			}
 		}()
 
 		go func() {
+			defer billingWg.Done()
 			if err := dunningWorker.Start(workerCtx); err != nil {
 				logger.Error("dunning worker error", "error", err)
 			}
@@ -420,12 +425,15 @@ func run(logger *slog.Logger) error {
 	// Close database connection during shutdown
 	defer bootstrap.CloseDatabase(db, logger)
 
-	// Stop billing workers first (they may be mid-operation)
-	// workerCancel() is deferred above; calling Stop() signals internal shutdown channels
+	// Stop billing workers and wait for goroutines to exit before database close.
+	// Cancel the worker context first to unblock Start() select loops, then
+	// call Stop() to signal internal shutdown channels and drain in-flight work.
 	if billingEnabled && billingScheduler != nil && dunningWorker != nil {
 		logger.Info("stopping billing workers...")
+		workerCancel()
 		billingScheduler.Stop()
 		dunningWorker.Stop()
+		billingWg.Wait()
 		logger.Info("billing workers stopped")
 	}
 
