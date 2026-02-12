@@ -143,6 +143,7 @@ func setupE2E(t *testing.T, opts ...e2eOption) *E2ETestEnvironment {
 		IdempotencyService:        newMockIdempotencyService(),
 		Logger:                    logger,
 		SagaTimeout:               sagaTimeout,
+		SagaOrchestrationEnabled:  cfg.sagaOrchestrationEnabled,
 	})
 	require.NoError(t, err)
 
@@ -161,11 +162,12 @@ func setupE2E(t *testing.T, opts ...e2eOption) *E2ETestEnvironment {
 
 // e2eConfig holds configuration options for E2E test setup.
 type e2eConfig struct {
-	gatewayApprove    bool
-	gatewayReject     bool
-	gatewayDelay      time.Duration
-	insufficientFunds bool
-	sagaTimeout       time.Duration
+	gatewayApprove           bool
+	gatewayReject            bool
+	gatewayDelay             time.Duration
+	insufficientFunds        bool
+	sagaTimeout              time.Duration
+	sagaOrchestrationEnabled bool
 }
 
 type e2eOption func(*e2eConfig)
@@ -192,6 +194,12 @@ func withInsufficientFunds() e2eOption {
 func withSagaTimeout(d time.Duration) e2eOption {
 	return func(c *e2eConfig) {
 		c.sagaTimeout = d
+	}
+}
+
+func withSagaOrchestration() e2eOption {
+	return func(c *e2eConfig) {
+		c.sagaOrchestrationEnabled = true
 	}
 }
 
@@ -416,6 +424,25 @@ func applyPaymentOrderSchema(t *testing.T, db *gorm.DB, schemaName string) {
 			client_ip VARCHAR(45),
 			user_agent TEXT
 		)`, auditTable))
+
+	// Create saga_executions table for saga audit trail
+	sagaExecTable := fmt.Sprintf("%s.saga_executions", pq.QuoteIdentifier(schemaName))
+	_, _ = sqlDB.Exec(fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS %s (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			payment_order_id UUID NOT NULL,
+			saga_name VARCHAR(128) NOT NULL,
+			saga_version INT NOT NULL DEFAULT 0,
+			status VARCHAR(32) NOT NULL DEFAULT 'RUNNING',
+			correlation_id VARCHAR(128) NOT NULL DEFAULT '',
+			input JSONB NOT NULL DEFAULT '{}',
+			output JSONB NOT NULL DEFAULT '{}',
+			error_message TEXT NOT NULL DEFAULT '',
+			step_count INT NOT NULL DEFAULT 0,
+			duration_ms BIGINT NOT NULL DEFAULT 0,
+			started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			completed_at TIMESTAMPTZ
+		)`, sagaExecTable))
 }
 
 // ============================================================================
