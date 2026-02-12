@@ -414,6 +414,40 @@ graceful shutdown). The dunning worker uses Redis ZSET-scored delayed jobs
 2. Replace dunning's Redis locking with `shared/platform/redislock`
 3. Lifecycle tests reuse shared `WorkerLifecycle` test helpers
 
+### Phase 6: Wire Forecasting Scheduled Execution
+
+The forecasting service (PR #888) has `CronScheduler` and `LeaseManager`
+code but they are not integrated into the service's `main.go`. On-demand
+`ComputeForwardCurve` works, but scheduled execution does not run.
+
+After Phase 2 replaces the local scheduler code with the shared package,
+this phase wires it into the forecasting service:
+
+1. Add Redis client initialisation to `forecasting/cmd/main.go`
+   (`REDIS_URL` env var)
+2. Create executor adapter wrapping `handler.Service.ComputeForwardCurve`
+   to implement the shared `Executor` interface
+3. Instantiate the shared scheduler with `ScheduleProvider` (backed by
+   `StrategyRepository.ListAllActive`) and the executor adapter
+4. Start the scheduler in a background goroutine with graceful shutdown
+   integration
+5. Add `REDIS_URL` and scheduler configuration to
+   `forecasting/k8s/configmap.yaml`
+
+### Phase 7: Update New Service Checklist
+
+Document the shared scheduler as the standard approach for any service
+that needs scheduled work:
+
+1. Update `docs/` new service checklist (or create if it does not exist)
+   to include: "If your service needs a cron scheduler, use
+   `shared/platform/scheduler`; if it needs a polling worker, embed
+   `scheduler.WorkerLifecycle`"
+2. Add usage examples showing how to implement `ScheduleProvider` and
+   `Executor` for a new service
+3. Reference `shared/platform/redislock` as the standard for distributed
+   locking (no service-local `bsm/redislock` wrappers)
+
 ## Complexity Estimate
 
 | Phase | Description | Points | Parallelisable |
@@ -425,11 +459,15 @@ graceful shutdown). The dunning worker uses Redis ZSET-scored delayed jobs
 | 3 | Migrate reconciliation scheduler | 3 | After 1a, 1b, 1c |
 | 4 | Migrate billing scheduler | 3 | After 1a, 1b, 1c |
 | 5 | Migrate dunning worker | 2 | After 1a, 1b |
-| **Total** | | **24** | Critical path: 13 |
+| 6 | Wire forecasting scheduled execution | 3 | After 2 |
+| 7 | Update new service checklist | 1 | After 1a, 1b |
+| **Total** | | **28** | Critical path: 16 |
 
 Phases 2, 3, 4, 5 can run in parallel once their Phase 1 dependencies
 are complete. Phase 5 does not depend on 1c (no execution store or
-catch-up needed for queue processing).
+catch-up needed for queue processing). Phase 6 follows Phase 2
+(forecasting migration). Phase 7 can start once the shared packages
+exist.
 
 ## Testing Strategy
 
