@@ -10,6 +10,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
@@ -17,7 +19,9 @@ import (
 	webhookhttp "github.com/meridianhub/meridian/services/payment-order/adapters/http"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
 	"github.com/meridianhub/meridian/services/payment-order/config"
+	"github.com/meridianhub/meridian/services/payment-order/domain"
 	"github.com/meridianhub/meridian/services/payment-order/service"
+	"github.com/meridianhub/meridian/services/payment-order/worker"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
@@ -221,6 +225,67 @@ func run(logger *slog.Logger) error {
 	// payment execution sagas are migrated from Go orchestrators to Starlark.
 	_ = handlerRegistry
 
+	// Start billing background workers (feature-flagged)
+	billingEnabled := env.GetEnvAsBool("BILLING_ENABLED", false)
+	var billingScheduler *worker.BillingScheduler
+	var dunningWorker *worker.DunningWorker
+
+	if billingEnabled {
+		billingRepo := persistence.NewBillingRepository(db)
+		billingMetrics := worker.NewBillingMetrics()
+
+		tenantID := env.GetEnvOrDefault("BILLING_TENANT_ID", "default")
+		cronSchedule := env.GetEnvOrDefault("BILLING_CRON_SCHEDULE", "0 0 * * *")
+		shadowMode := env.GetEnvAsBool("BILLING_SHADOW_MODE", false)
+		pollInterval := env.GetEnvAsDuration("DUNNING_POLL_INTERVAL", 5*time.Minute)
+
+		var err error
+		billingScheduler, err = worker.NewBillingScheduler(
+			billingRepo,
+			redisClient,
+			worker.BillingSchedulerConfig{
+				TenantID:       tenantID,
+				CronExpression: cronSchedule,
+				ShadowMode:     shadowMode,
+			},
+			logger,
+			billingMetrics,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to create billing scheduler: %w", err)
+		}
+
+		// DunningCallback is a no-op for now; saga runner integration comes in Task 5
+		dunningCallback := func(_ context.Context, run *domain.BillingRun) error {
+			logger.Info("dunning escalation triggered (no-op: saga runner not wired)",
+				"billing_run_id", run.ID,
+				"dunning_level", run.DunningLevel)
+			return nil
+		}
+
+		dunningWorker, err = worker.NewDunningWorker(
+			billingRepo,
+			redisClient,
+			worker.DunningWorkerConfig{
+				PollInterval: pollInterval,
+			},
+			dunningCallback,
+			logger,
+			billingMetrics,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to create dunning worker: %w", err)
+		}
+
+		logger.Info("billing workers configured",
+			"cron_schedule", cronSchedule,
+			"shadow_mode", shadowMode,
+			"dunning_poll_interval", pollInterval,
+			"tenant_id", tenantID)
+	} else {
+		logger.Info("billing workers disabled (BILLING_ENABLED=false)")
+	}
+
 	// Create payment order service
 	paymentOrderService, err := service.NewServiceWithConfig(service.Config{
 		Repository:                repo,
@@ -325,6 +390,29 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 
+	// Start billing workers in background (if enabled)
+	workerCtx, workerCancel := context.WithCancel(ctx)
+	defer workerCancel()
+	var billingWg sync.WaitGroup
+	if billingEnabled && billingScheduler != nil && dunningWorker != nil {
+		billingWg.Add(2)
+		go func() {
+			defer billingWg.Done()
+			if err := billingScheduler.Start(workerCtx); err != nil {
+				logger.Error("billing scheduler error", "error", err)
+			}
+		}()
+
+		go func() {
+			defer billingWg.Done()
+			if err := dunningWorker.Start(workerCtx); err != nil {
+				logger.Error("dunning worker error", "error", err)
+			}
+		}()
+
+		logger.Info("billing workers started")
+	}
+
 	// Wait for interrupt signal or server error
 	sigChan, signalCleanup := bootstrap.SignalHandler()
 	defer signalCleanup()
@@ -345,7 +433,19 @@ func run(logger *slog.Logger) error {
 	// Close database connection during shutdown
 	defer bootstrap.CloseDatabase(db, logger)
 
-	// Shutdown HTTP server first (stop accepting new webhooks)
+	// Stop billing workers and wait for goroutines to exit before database close.
+	// Cancel the worker context first to unblock Start() select loops, then
+	// call Stop() to signal internal shutdown channels and drain in-flight work.
+	if billingEnabled && billingScheduler != nil && dunningWorker != nil {
+		logger.Info("stopping billing workers...")
+		workerCancel()
+		billingScheduler.Stop()
+		dunningWorker.Stop()
+		billingWg.Wait()
+		logger.Info("billing workers stopped")
+	}
+
+	// Shutdown HTTP server (stop accepting new webhooks)
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		logger.Error("failed to shutdown HTTP server", "error", err)
 	}
