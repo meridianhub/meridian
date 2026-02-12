@@ -28,6 +28,9 @@ const (
 // ErrNoExecution is returned when no execution record exists for a schedule.
 var ErrNoExecution = errors.New("no execution record found")
 
+// ErrExecutionNotFound is returned when UpdateExecution targets a non-existent row.
+var ErrExecutionNotFound = errors.New("execution not found")
+
 // Execution represents a row in the scheduler_execution table.
 type Execution struct {
 	ID            uuid.UUID
@@ -64,13 +67,13 @@ func NewPgExecutionStore(pool *pgxpool.Pool) *PgExecutionStore {
 
 // RecordExecution inserts a new execution record into the database.
 func (s *PgExecutionStore) RecordExecution(ctx context.Context, exec Execution) error {
-	conn, err := s.pool.Acquire(ctx)
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("acquire connection: %w", err)
+		return fmt.Errorf("begin transaction: %w", err)
 	}
-	defer conn.Release()
+	defer func() { _ = tx.Rollback(ctx) }()
 
-	if err := s.setSearchPath(ctx, conn); err != nil {
+	if err := s.setSearchPath(ctx, tx); err != nil {
 		return err
 	}
 
@@ -78,24 +81,28 @@ func (s *PgExecutionStore) RecordExecution(ctx context.Context, exec Execution) 
 		INSERT INTO scheduler_execution (id, scheduler_name, schedule_id, scheduled_at, executed_at, completed_at, status, result_ref, error_message)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
 
-	_, err = conn.Exec(ctx, query,
+	_, err = tx.Exec(ctx, query,
 		exec.ID, exec.SchedulerName, exec.ScheduleID, exec.ScheduledAt,
 		exec.ExecutedAt, exec.CompletedAt, string(exec.Status), exec.ResultRef, exec.ErrorMessage)
 	if err != nil {
 		return fmt.Errorf("insert execution: %w", err)
 	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
 	return nil
 }
 
 // UpdateExecution updates the status and related fields of an execution record.
+// Returns ErrExecutionNotFound if no row matches the given id.
 func (s *PgExecutionStore) UpdateExecution(ctx context.Context, id uuid.UUID, status ExecutionStatus, resultRef *string, errMsg *string) error {
-	conn, err := s.pool.Acquire(ctx)
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("acquire connection: %w", err)
+		return fmt.Errorf("begin transaction: %w", err)
 	}
-	defer conn.Release()
+	defer func() { _ = tx.Rollback(ctx) }()
 
-	if err := s.setSearchPath(ctx, conn); err != nil {
+	if err := s.setSearchPath(ctx, tx); err != nil {
 		return err
 	}
 
@@ -118,9 +125,15 @@ func (s *PgExecutionStore) UpdateExecution(ctx context.Context, id uuid.UUID, st
 		args = []any{id, string(status), now, resultRef, errMsg}
 	}
 
-	_, err = conn.Exec(ctx, query, args...)
+	result, err := tx.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("update execution: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return ErrExecutionNotFound
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
 	}
 	return nil
 }
@@ -128,13 +141,13 @@ func (s *PgExecutionStore) UpdateExecution(ctx context.Context, id uuid.UUID, st
 // LastExecution returns the most recent execution for a scheduler+schedule combination.
 // Returns ErrNoExecution if no execution record exists.
 func (s *PgExecutionStore) LastExecution(ctx context.Context, schedulerName, scheduleID string) (*Execution, error) {
-	conn, err := s.pool.Acquire(ctx)
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("acquire connection: %w", err)
+		return nil, fmt.Errorf("begin transaction: %w", err)
 	}
-	defer conn.Release()
+	defer func() { _ = tx.Rollback(ctx) }()
 
-	if err := s.setSearchPath(ctx, conn); err != nil {
+	if err := s.setSearchPath(ctx, tx); err != nil {
 		return nil, err
 	}
 
@@ -146,7 +159,7 @@ func (s *PgExecutionStore) LastExecution(ctx context.Context, schedulerName, sch
 		ORDER BY scheduled_at DESC
 		LIMIT 1`
 
-	row := conn.QueryRow(ctx, query, schedulerName, scheduleID)
+	row := tx.QueryRow(ctx, query, schedulerName, scheduleID)
 
 	var exec Execution
 	var status string
@@ -162,17 +175,22 @@ func (s *PgExecutionStore) LastExecution(ctx context.Context, schedulerName, sch
 		return nil, fmt.Errorf("scan execution: %w", err)
 	}
 	exec.Status = ExecutionStatus(status)
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit transaction: %w", err)
+	}
 	return &exec, nil
 }
 
-// setSearchPath sets the tenant schema on the connection if present in context.
-func (s *PgExecutionStore) setSearchPath(ctx context.Context, conn *pgxpool.Conn) error {
+// setSearchPath sets the tenant schema on the transaction if present in context.
+// Must be called within an explicit transaction for SET LOCAL to take effect.
+func (s *PgExecutionStore) setSearchPath(ctx context.Context, tx pgx.Tx) error {
 	tenantID, ok := tenant.FromContext(ctx)
 	if !ok {
 		return nil
 	}
 	schemaName := pq.QuoteIdentifier(tenantID.SchemaName())
-	_, err := conn.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", schemaName))
+	_, err := tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", schemaName))
 	if err != nil {
 		return fmt.Errorf("set tenant schema: %w", err)
 	}

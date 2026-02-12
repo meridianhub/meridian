@@ -287,6 +287,19 @@ func TestIntegration_PgExecutionStore_IsolatesBySchedulerAndScheduleID(t *testin
 	assert.Equal(t, scheduler.ExecutionStatusFailed, lastB.Status)
 }
 
+func TestIntegration_PgExecutionStore_UpdateNonExistentRow(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	pool := setupTestCockroachDB(t)
+	store := scheduler.NewPgExecutionStore(pool)
+	ctx := context.Background()
+
+	err := store.UpdateExecution(ctx, uuid.New(), scheduler.ExecutionStatusCompleted, nil, nil)
+	assert.ErrorIs(t, err, scheduler.ErrExecutionNotFound)
+}
+
 func TestIntegration_PgExecutionStore_StatusConstraint(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
