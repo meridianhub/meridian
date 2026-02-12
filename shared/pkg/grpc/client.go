@@ -109,7 +109,8 @@ func NewClient(ctx context.Context, cfg ClientConfig) (*grpc.ClientConn, error) 
 	)
 
 	// Default dial options for production use
-	opts := []grpc.DialOption{
+	opts := make([]grpc.DialOption, 0, 3+len(cfg.DialOptions))
+	opts = append(opts,
 		// Use insecure credentials (TLS handled at service mesh level or via mTLS)
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 
@@ -122,7 +123,7 @@ func NewClient(ctx context.Context, cfg ClientConfig) (*grpc.ClientConn, error) 
 			Timeout:             3 * time.Second,  // Wait 3s for ping ack
 			PermitWithoutStream: true,             // Allow pings when no active streams
 		}),
-	}
+	)
 
 	// Append user-provided options (allows overriding defaults)
 	opts = append(opts, cfg.DialOptions...)

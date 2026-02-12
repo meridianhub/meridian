@@ -1,4 +1,4 @@
-package csv
+package csvadapter
 
 import (
 	"context"

@@ -1,6 +1,6 @@
-// Package csv provides CSV parsing capabilities for the position-tool bulk import.
+// Package csvadapter provides CSV parsing capabilities for the position-tool bulk import.
 // It implements schema-driven column mapping based on instrument definitions.
-package csv
+package csvadapter
 
 import (
 	"regexp"

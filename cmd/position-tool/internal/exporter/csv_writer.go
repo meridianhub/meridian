@@ -104,14 +104,15 @@ func (w *CSVWriter) buildHeaders() []string {
 	// Fixed columns
 	// Note: bucket_key is NOT exported - it is computed from attributes using
 	// the instrument's fungibility key expression (CEL) during import.
-	headers := []string{
+	headers := make([]string, 0, 6+len(w.attributeKeys))
+	headers = append(headers,
 		"account_id",
 		"instrument_code",
 		"amount",
 		"dimension",
 		"created_at",
 		"reference_id",
-	}
+	)
 
 	// Dynamic attribute columns with "attr_" prefix
 	for _, key := range w.attributeKeys {
@@ -124,14 +125,15 @@ func (w *CSVWriter) buildHeaders() []string {
 // buildRecord converts a PositionRow to a CSV record.
 func (w *CSVWriter) buildRecord(pos PositionRow) []string {
 	// Fixed columns (bucket_key excluded - computed from attributes during import)
-	record := []string{
+	record := make([]string, 0, 6+len(w.attributeKeys))
+	record = append(record,
 		pos.AccountID,
 		pos.InstrumentCode,
 		pos.Amount.String(),
 		pos.Dimension,
 		pos.CreatedAt.Format(time.RFC3339),
 		formatUUID(pos.ReferenceID),
-	}
+	)
 
 	// Dynamic attribute columns (in the same order as headers)
 	for _, key := range w.attributeKeys {
