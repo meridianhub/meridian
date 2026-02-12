@@ -126,6 +126,13 @@ func TestBalanceAssertion_Override(t *testing.T) {
 	assert.Equal(t, "approved by manager", a.OverrideReason)
 }
 
+func TestBalanceAssertion_OverrideEmptyReason(t *testing.T) {
+	a := newTestAssertion(t)
+	require.NoError(t, a.Fail(decimal.NewFromFloat(9500.00), "mismatch"))
+	err := a.Override("")
+	assert.ErrorIs(t, err, domain.ErrEmptyOverrideReason)
+}
+
 func TestBalanceAssertion_OverrideFromNonFailed(t *testing.T) {
 	t.Run("cannot override from pending", func(t *testing.T) {
 		a := newTestAssertion(t)
