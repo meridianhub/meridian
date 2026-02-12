@@ -6,11 +6,13 @@ package reconciliatione2e
 import (
 	"context"
 	"log/slog"
+	"net"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	reconciliationv1 "github.com/meridianhub/meridian/api/proto/meridian/reconciliation/v1"
 	"github.com/meridianhub/meridian/services/reconciliation/adapters/persistence"
 	"github.com/meridianhub/meridian/services/reconciliation/domain"
 	"github.com/meridianhub/meridian/services/reconciliation/service"
@@ -20,6 +22,9 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/test/bufconn"
 	"gorm.io/gorm"
 )
 
@@ -32,6 +37,9 @@ type e2eTestInfra struct {
 	db      *gorm.DB
 	cleanup func()
 	ctx     context.Context // tenant-scoped context
+
+	// gRPC transport (bufconn)
+	grpcClient reconciliationv1.AccountReconciliationServiceClient
 
 	// Repositories
 	runRepo       domain.SettlementRunRepository
@@ -146,14 +154,45 @@ func setupE2EInfra(t *testing.T) *e2eTestInfra {
 	)
 
 	infra.grpcService = service.NewAccountReconciliationService(
+		service.WithSettlementRunRepository(infra.runRepo),
 		service.WithDisputeRepository(infra.disputeRepo),
 		service.WithVarianceRepository(infra.varianceFetch),
+		service.WithVarianceListRepository(infra.varianceFetch),
 		service.WithSagaRuntime(infra.mockSagaRT),
 		service.WithEventPublisher(infra.mockPublisher),
 		service.WithBalanceAssertor(infra.assertor),
+		service.WithSnapshotCapturer(infra.capturer.CaptureSnapshots),
+		service.WithVarianceDetector(infra.detector.DetectVariances),
+		service.WithVarianceValuator(infra.valuator.ValueVariances),
+		service.WithLogger(logger),
 	)
 
+	// Start in-process gRPC server via bufconn
+	listener := bufconn.Listen(1024 * 1024)
+	grpcServer := grpc.NewServer()
+	reconciliationv1.RegisterAccountReconciliationServiceServer(grpcServer, infra.grpcService)
+
+	serveDone := make(chan struct{})
+	go func() {
+		defer close(serveDone)
+		_ = grpcServer.Serve(listener)
+	}()
+
+	conn, err := grpc.NewClient(
+		"passthrough:///bufnet",
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
+			return listener.Dial()
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	require.NoError(t, err)
+	infra.grpcClient = reconciliationv1.NewAccountReconciliationServiceClient(conn)
+
 	t.Cleanup(func() {
+		conn.Close()
+		grpcServer.GracefulStop()
+		<-serveDone
+		listener.Close()
 		cleanup()
 	})
 

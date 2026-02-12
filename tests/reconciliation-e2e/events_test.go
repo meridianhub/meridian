@@ -71,7 +71,7 @@ func TestEvents_DisputeCreatedAndResolved(t *testing.T) {
 	infra.mockPublisher.reset()
 
 	// Create dispute
-	initiateResp, err := infra.grpcService.InitiateDispute(ctx, &reconciliationv1.InitiateDisputeRequest{
+	initiateResp, err := infra.grpcClient.InitiateDispute(ctx, &reconciliationv1.InitiateDisputeRequest{
 		VarianceId: variance.VarianceID.String(),
 		RunId:      run.RunID.String(),
 		AccountId:  "ACC-EVT-2",
@@ -89,7 +89,7 @@ func TestEvents_DisputeCreatedAndResolved(t *testing.T) {
 	assert.Equal(t, "Event test dispute", createdEvent.Reason)
 
 	// Resolve dispute
-	_, err = infra.grpcService.ControlDispute(ctx, &reconciliationv1.ControlDisputeRequest{
+	_, err = infra.grpcClient.ControlDispute(ctx, &reconciliationv1.ControlDisputeRequest{
 		DisputeId:  initiateResp.Dispute.DisputeId,
 		Action:     reconciliationv1.DisputeControlAction_DISPUTE_CONTROL_ACTION_RESOLVE,
 		Resolution: "Fixed",
@@ -204,7 +204,7 @@ func TestCrossService_EndToEndWithDisputeAndAssertion(t *testing.T) {
 	require.NoError(t, err)
 
 	// Phase 2: Raise and resolve a dispute on the variance
-	initiateResp, err := infra.grpcService.InitiateDispute(ctx, &reconciliationv1.InitiateDisputeRequest{
+	initiateResp, err := infra.grpcClient.InitiateDispute(ctx, &reconciliationv1.InitiateDisputeRequest{
 		VarianceId: variance.VarianceID.String(),
 		RunId:      run.RunID.String(),
 		AccountId:  "ACC-XSVC",
@@ -213,7 +213,7 @@ func TestCrossService_EndToEndWithDisputeAndAssertion(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = infra.grpcService.ControlDispute(ctx, &reconciliationv1.ControlDisputeRequest{
+	_, err = infra.grpcClient.ControlDispute(ctx, &reconciliationv1.ControlDisputeRequest{
 		DisputeId:  initiateResp.Dispute.DisputeId,
 		Action:     reconciliationv1.DisputeControlAction_DISPUTE_CONTROL_ACTION_RESOLVE,
 		Resolution: "Counterparty confirmed correction",

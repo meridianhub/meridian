@@ -38,7 +38,7 @@ func TestDisputeWorkflow_FullLifecycle(t *testing.T) {
 		domain.VarianceReasonAmountMismatch)
 
 	// Step 1: Initiate dispute via gRPC service
-	initiateResp, err := infra.grpcService.InitiateDispute(ctx, &reconciliationv1.InitiateDisputeRequest{
+	initiateResp, err := infra.grpcClient.InitiateDispute(ctx, &reconciliationv1.InitiateDisputeRequest{
 		VarianceId: variance.VarianceID.String(),
 		RunId:      run.RunID.String(),
 		AccountId:  "ACC-DISP",
@@ -57,7 +57,7 @@ func TestDisputeWorkflow_FullLifecycle(t *testing.T) {
 	assert.Len(t, createdEvents, 1)
 
 	// Step 2: Escalate the dispute
-	escalateResp, err := infra.grpcService.ControlDispute(ctx, &reconciliationv1.ControlDisputeRequest{
+	escalateResp, err := infra.grpcClient.ControlDispute(ctx, &reconciliationv1.ControlDisputeRequest{
 		DisputeId: disputeID,
 		Action:    reconciliationv1.DisputeControlAction_DISPUTE_CONTROL_ACTION_ESCALATE,
 	})
@@ -65,7 +65,7 @@ func TestDisputeWorkflow_FullLifecycle(t *testing.T) {
 	assert.Equal(t, reconciliationv1.DisputeStatus_DISPUTE_STATUS_ESCALATED, escalateResp.Dispute.Status)
 
 	// Step 3: Resolve the dispute (requires admin or operator role)
-	resolveResp, err := infra.grpcService.ControlDispute(ctx, &reconciliationv1.ControlDisputeRequest{
+	resolveResp, err := infra.grpcClient.ControlDispute(ctx, &reconciliationv1.ControlDisputeRequest{
 		DisputeId:  disputeID,
 		Action:     reconciliationv1.DisputeControlAction_DISPUTE_CONTROL_ACTION_RESOLVE,
 		Resolution: "Amount corrected after investigation",
@@ -86,7 +86,7 @@ func TestDisputeWorkflow_FullLifecycle(t *testing.T) {
 	assert.Equal(t, "reconciliation_adjustment", sagaCalls[0].Name)
 
 	// Step 4: Retrieve the dispute to verify final state
-	retrieveResp, err := infra.grpcService.RetrieveDispute(ctx, &reconciliationv1.RetrieveDisputeRequest{
+	retrieveResp, err := infra.grpcClient.RetrieveDispute(ctx, &reconciliationv1.RetrieveDisputeRequest{
 		DisputeId: disputeID,
 	})
 	require.NoError(t, err)
@@ -116,7 +116,7 @@ func TestDisputeWorkflow_Rejection(t *testing.T) {
 		domain.VarianceReasonAmountMismatch)
 
 	// Initiate dispute
-	initiateResp, err := infra.grpcService.InitiateDispute(ctx, &reconciliationv1.InitiateDisputeRequest{
+	initiateResp, err := infra.grpcClient.InitiateDispute(ctx, &reconciliationv1.InitiateDisputeRequest{
 		VarianceId: variance.VarianceID.String(),
 		RunId:      run.RunID.String(),
 		AccountId:  "ACC-REJ",
@@ -126,7 +126,7 @@ func TestDisputeWorkflow_Rejection(t *testing.T) {
 	require.NoError(t, err)
 
 	// Reject the dispute
-	rejectResp, err := infra.grpcService.ControlDispute(ctx, &reconciliationv1.ControlDisputeRequest{
+	rejectResp, err := infra.grpcClient.ControlDispute(ctx, &reconciliationv1.ControlDisputeRequest{
 		DisputeId:  initiateResp.Dispute.DisputeId,
 		Action:     reconciliationv1.DisputeControlAction_DISPUTE_CONTROL_ACTION_REJECT,
 		Resolution: "Variance confirmed as correct",
@@ -163,7 +163,7 @@ func TestDisputeWorkflow_InvalidTransitions(t *testing.T) {
 		domain.VarianceReasonAmountMismatch)
 
 	// Create and resolve a dispute
-	initiateResp, err := infra.grpcService.InitiateDispute(ctx, &reconciliationv1.InitiateDisputeRequest{
+	initiateResp, err := infra.grpcClient.InitiateDispute(ctx, &reconciliationv1.InitiateDisputeRequest{
 		VarianceId: variance.VarianceID.String(),
 		RunId:      run.RunID.String(),
 		AccountId:  "ACC-INV",
@@ -173,7 +173,7 @@ func TestDisputeWorkflow_InvalidTransitions(t *testing.T) {
 	require.NoError(t, err)
 
 	// Resolve it
-	_, err = infra.grpcService.ControlDispute(ctx, &reconciliationv1.ControlDisputeRequest{
+	_, err = infra.grpcClient.ControlDispute(ctx, &reconciliationv1.ControlDisputeRequest{
 		DisputeId:  initiateResp.Dispute.DisputeId,
 		Action:     reconciliationv1.DisputeControlAction_DISPUTE_CONTROL_ACTION_RESOLVE,
 		Resolution: "Resolved",
@@ -182,7 +182,7 @@ func TestDisputeWorkflow_InvalidTransitions(t *testing.T) {
 	require.NoError(t, err)
 
 	// Try to escalate a resolved dispute - should fail
-	_, err = infra.grpcService.ControlDispute(ctx, &reconciliationv1.ControlDisputeRequest{
+	_, err = infra.grpcClient.ControlDispute(ctx, &reconciliationv1.ControlDisputeRequest{
 		DisputeId: initiateResp.Dispute.DisputeId,
 		Action:    reconciliationv1.DisputeControlAction_DISPUTE_CONTROL_ACTION_ESCALATE,
 	})
@@ -195,7 +195,7 @@ func TestDisputeWorkflow_NotFoundVariance(t *testing.T) {
 	infra := setupE2EInfra(t)
 	ctx := contextWithAdminClaims(infra.tenantCtx())
 
-	_, err := infra.grpcService.InitiateDispute(ctx, &reconciliationv1.InitiateDisputeRequest{
+	_, err := infra.grpcClient.InitiateDispute(ctx, &reconciliationv1.InitiateDisputeRequest{
 		VarianceId: uuid.New().String(),
 		RunId:      uuid.New().String(),
 		AccountId:  "ACC-NF",
@@ -210,7 +210,7 @@ func TestDisputeWorkflow_RetrieveNotFound(t *testing.T) {
 	infra := setupE2EInfra(t)
 	ctx := contextWithAdminClaims(infra.tenantCtx())
 
-	_, err := infra.grpcService.RetrieveDispute(ctx, &reconciliationv1.RetrieveDisputeRequest{
+	_, err := infra.grpcClient.RetrieveDispute(ctx, &reconciliationv1.RetrieveDisputeRequest{
 		DisputeId: uuid.New().String(),
 	})
 	require.Error(t, err, "should fail for non-existent dispute")
