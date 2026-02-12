@@ -785,7 +785,7 @@ else
 
     if [ "$FIX_MODE" = false ]; then
         echo "To automatically fix issues, run:"
-        echo -e "  ${BLUE}$0 --fix${NC}"
+        echo -e "  ${BLUE}${MERIDIAN_CMD:-$0} --fix${NC}"
         echo ""
     else
         echo "Some issues could not be fixed automatically."
