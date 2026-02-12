@@ -4,6 +4,7 @@
 package reconciliatione2e
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
@@ -246,10 +247,18 @@ func TestGRPCError_RetrieveDisputeNotFound(t *testing.T) {
 func TestGRPCError_ListVariancesInvalidPageToken(t *testing.T) {
 	infra := setupE2EInfra(t)
 	ctx := infra.tenantCtx()
+	periodStart, periodEnd := defaultPeriod()
+
+	// Seed a real run so the request reaches page-token validation
+	run := createSettlementRun(t, ctx, infra, "ACC-PAGETOKEN",
+		domain.ReconciliationScopeAccount, domain.SettlementTypeDaily,
+		periodStart, periodEnd, "e2e-test")
+	require.NoError(t, run.Start())
+	require.NoError(t, infra.runRepo.Update(ctx, run))
 
 	_, err := infra.grpcClient.ListReconciliationResults(ctx,
 		&reconciliationv1.ListReconciliationResultsRequest{
-			RunId:     uuid.New().String(),
+			RunId:     run.RunID.String(),
 			PageToken: "not-valid-base64!!!",
 		})
 	require.Error(t, err)
@@ -279,7 +288,7 @@ func TestEnumRoundTrip_ReconciliationScope(t *testing.T) {
 		t.Run(scope.String(), func(t *testing.T) {
 			resp, err := infra.grpcClient.InitiateAccountReconciliation(ctx,
 				&reconciliationv1.InitiateAccountReconciliationRequest{
-					AccountId:      "ACC-SCOPE-" + scope.String(),
+					AccountId:      fmt.Sprintf("ACC-SCOPE-%d", scope),
 					Scope:          scope,
 					SettlementType: reconciliationv1.SettlementType_SETTLEMENT_TYPE_DAILY,
 					PeriodStart:    timestamppb.New(periodStart),
@@ -311,7 +320,7 @@ func TestEnumRoundTrip_SettlementType(t *testing.T) {
 		t.Run(st.String(), func(t *testing.T) {
 			resp, err := infra.grpcClient.InitiateAccountReconciliation(ctx,
 				&reconciliationv1.InitiateAccountReconciliationRequest{
-					AccountId:      "ACC-TYPE-" + st.String(),
+					AccountId:      fmt.Sprintf("ACC-TYPE-%d", st),
 					Scope:          reconciliationv1.ReconciliationScope_RECONCILIATION_SCOPE_ACCOUNT,
 					SettlementType: st,
 					PeriodStart:    timestamppb.New(periodStart),
