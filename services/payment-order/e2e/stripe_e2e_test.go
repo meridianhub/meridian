@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -69,15 +70,16 @@ func setupStripeE2E(t *testing.T, opts ...e2eOption) *stripeE2EEnv {
 	redisClient := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = redisClient.Close() })
 
-	// Ensure saga orchestration is enabled (prepend so caller opts can override)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	// Ensure saga orchestration is enabled (prepend so caller opts can override).
+	// setupE2E auto-wires a SagaExecutionRepository when saga orchestration is enabled.
 	opts = append([]e2eOption{withSagaOrchestration()}, opts...)
 
 	// Create base environment with saga orchestration enabled
 	baseEnv := setupE2E(t, opts...)
 
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
-
-	// Create saga execution repository
+	// Create saga execution repository for direct DB queries in tests
 	sagaExecRepo := persistence.NewSagaExecutionRepository(baseEnv.DB)
 
 	// Build the Stripe webhook handler chain:
@@ -471,17 +473,64 @@ func TestStripeE2E_SagaExecutionPersisted(t *testing.T) {
 	assert.Equal(t, domain.PaymentOrderStatusExecuting, po.Status,
 		"Payment should reach EXECUTING after saga")
 
-	// Verify saga execution was persisted to the database
-	// The orchestrator logs RUNNING → COMPLETED records via SagaExecutionLogger
-	// When configured with a SagaExecutionRepository, these go to CockroachDB.
-	// The base E2E environment may or may not wire in SagaExecutionLogger;
-	// this test verifies the saga executed successfully via service state.
+	// Verify saga side-effects via service state
 	assert.NotEmpty(t, po.LienID, "Saga should have reserved funds (lien)")
 	assert.NotEmpty(t, po.GatewayReferenceID, "Saga should have sent to gateway")
 	assert.Equal(t, int32(1), atomic.LoadInt32(&env.CurrentAccountClient.initiateLienCalls),
 		"Saga should call InitiateLien once")
 	assert.Equal(t, int32(1), atomic.LoadInt32(&env.PaymentGateway.sendPaymentCalls),
 		"Saga should call SendPayment once")
+
+	// Verify saga execution was persisted to the saga_executions table in CockroachDB.
+	// The orchestrator logs RUNNING → COMPLETED records via SagaExecutionLogger,
+	// which is wired to a SagaExecutionRepository backed by the real DB.
+	sqlDB, dbErr := env.DB.DB()
+	require.NoError(t, dbErr)
+
+	type sagaRow struct {
+		SagaName       string
+		Status         string
+		PaymentOrderID string
+	}
+
+	var rows []sagaRow
+	queryErr := await.New().
+		AtMost(5 * time.Second).
+		PollInterval(100 * time.Millisecond).
+		UntilNoError(func() error {
+			rows = nil
+			sqlRows, err := sqlDB.QueryContext(ctx,
+				"SELECT saga_name, status, payment_order_id::TEXT FROM saga_executions WHERE payment_order_id = $1 ORDER BY started_at",
+				poID,
+			)
+			if err != nil {
+				return err
+			}
+			defer sqlRows.Close()
+			for sqlRows.Next() {
+				var r sagaRow
+				if err := sqlRows.Scan(&r.SagaName, &r.Status, &r.PaymentOrderID); err != nil {
+					return err
+				}
+				rows = append(rows, r)
+			}
+			if len(rows) < 2 {
+				return fmt.Errorf("expected at least 2 saga_execution rows (RUNNING + COMPLETED), got %d", len(rows))
+			}
+			return sqlRows.Err()
+		})
+	require.NoError(t, queryErr, "saga_executions rows should be persisted to CockroachDB")
+
+	// First record should be RUNNING
+	assert.Equal(t, "payment_execution", rows[0].SagaName)
+	assert.Equal(t, "RUNNING", rows[0].Status)
+	assert.Equal(t, poID.String(), rows[0].PaymentOrderID)
+
+	// Last record should be COMPLETED
+	last := rows[len(rows)-1]
+	assert.Equal(t, "payment_execution", last.SagaName)
+	assert.Equal(t, "COMPLETED", last.Status)
+	assert.Equal(t, poID.String(), last.PaymentOrderID)
 }
 
 // ============================================================================

@@ -133,6 +133,13 @@ func setupE2E(t *testing.T, opts ...e2eOption) *E2ETestEnvironment {
 
 	repo := persistence.NewPaymentOrderRepository(db)
 
+	// Auto-wire saga execution logger when saga orchestration is enabled
+	// and no explicit logger was provided via options.
+	sagaExecLogger := cfg.sagaExecutionLogger
+	if cfg.sagaOrchestrationEnabled && sagaExecLogger == nil {
+		sagaExecLogger = persistence.NewSagaExecutionRepository(db)
+	}
+
 	svc, err := service.NewServiceWithConfig(service.Config{
 		Repository:                repo,
 		CurrentAccountClient:      caClient,
@@ -144,6 +151,7 @@ func setupE2E(t *testing.T, opts ...e2eOption) *E2ETestEnvironment {
 		Logger:                    logger,
 		SagaTimeout:               sagaTimeout,
 		SagaOrchestrationEnabled:  cfg.sagaOrchestrationEnabled,
+		SagaExecutionLogger:       sagaExecLogger,
 	})
 	require.NoError(t, err)
 
@@ -168,6 +176,7 @@ type e2eConfig struct {
 	insufficientFunds        bool
 	sagaTimeout              time.Duration
 	sagaOrchestrationEnabled bool
+	sagaExecutionLogger      domain.SagaExecutionLogger
 }
 
 type e2eOption func(*e2eConfig)
@@ -200,6 +209,12 @@ func withSagaTimeout(d time.Duration) e2eOption {
 func withSagaOrchestration() e2eOption {
 	return func(c *e2eConfig) {
 		c.sagaOrchestrationEnabled = true
+	}
+}
+
+func withSagaExecutionLogger(logger domain.SagaExecutionLogger) e2eOption {
+	return func(c *e2eConfig) {
+		c.sagaExecutionLogger = logger
 	}
 }
 
@@ -427,7 +442,7 @@ func applyPaymentOrderSchema(t *testing.T, db *gorm.DB, schemaName string) {
 
 	// Create saga_executions table for saga audit trail
 	sagaExecTable := fmt.Sprintf("%s.saga_executions", pq.QuoteIdentifier(schemaName))
-	_, _ = sqlDB.Exec(fmt.Sprintf(`
+	_, err = sqlDB.Exec(fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS %s (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			payment_order_id UUID NOT NULL,
@@ -443,6 +458,7 @@ func applyPaymentOrderSchema(t *testing.T, db *gorm.DB, schemaName string) {
 			started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 			completed_at TIMESTAMPTZ
 		)`, sagaExecTable))
+	require.NoError(t, err)
 }
 
 // ============================================================================
