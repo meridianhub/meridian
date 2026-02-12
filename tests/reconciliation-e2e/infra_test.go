@@ -80,6 +80,13 @@ func setupE2EInfra(t *testing.T) *e2eTestInfra {
 	infra.db = db
 	infra.cleanup = cleanup
 
+	// Limit the connection pool to 1 so all operations (including concurrent
+	// errgroup goroutines) share the same connection with search_path set.
+	// Without this, new pool connections would miss the tenant search_path.
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+
 	// Set up tenant schema and apply migrations
 	tc := testdb.SetupTenantSchema(t, db, "e2e_recon_tenant")
 	t.Cleanup(tc.Cleanup)
@@ -221,6 +228,7 @@ func applyMigrations(t *testing.T, db *gorm.DB, _ tenant.TenantID) {
 			completed_at timestamptz NULL,
 			variance_count integer NOT NULL DEFAULT 0,
 			failure_reason text NULL,
+			last_completed_phase character varying(30) NULL,
 			attributes jsonb NULL,
 			version bigint NOT NULL DEFAULT 1,
 			PRIMARY KEY (id)
