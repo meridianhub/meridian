@@ -394,11 +394,7 @@ func TestStripeE2E_WebhookIdempotency(t *testing.T) {
 		})
 	require.NoError(t, err)
 
-	// Record call counts after first webhook
-	lienExecCallsAfterFirst := atomic.LoadInt32(&env.CurrentAccountClient.executeLienCalls)
-	bookingLogCallsAfterFirst := atomic.LoadInt32(&env.FinancialAccountingClient.initiateBookingLogCalls)
-
-	// Wait for async lien execution to settle
+	// Wait for async lien execution to settle before recording baseline
 	err = await.New().
 		AtMost(5 * time.Second).
 		PollInterval(50 * time.Millisecond).
@@ -406,7 +402,10 @@ func TestStripeE2E_WebhookIdempotency(t *testing.T) {
 			return atomic.LoadInt32(&env.CurrentAccountClient.executeLienCalls) >= 1
 		})
 	require.NoError(t, err)
-	lienExecCallsAfterFirst = atomic.LoadInt32(&env.CurrentAccountClient.executeLienCalls)
+
+	// Record call counts after first webhook has fully settled
+	lienExecCallsAfterFirst := atomic.LoadInt32(&env.CurrentAccountClient.executeLienCalls)
+	bookingLogCallsAfterFirst := atomic.LoadInt32(&env.FinancialAccountingClient.initiateBookingLogCalls)
 
 	// Step 3: Replay the SAME event (same event ID, new signature)
 	payload2 := buildStripePayload(t, eventID, "payment_intent.succeeded", map[string]any{
@@ -431,7 +430,7 @@ func TestStripeE2E_WebhookIdempotency(t *testing.T) {
 
 	// Step 5: Verify no additional service calls were made
 	// Give a short window for any potential async processing
-	err = await.New().
+	_ = await.New().
 		AtMost(500 * time.Millisecond).
 		PollInterval(50 * time.Millisecond).
 		Until(func() bool {
