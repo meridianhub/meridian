@@ -408,7 +408,7 @@ func TestStripeWebhookHandler_FailedPaymentTriggersDunning(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rr.Code)
 
 	// Verify dunning was scheduled in the ZSET
-	members, err := redisClient.ZRangeByScore(ctx, dunningRetryZSet, &redis.ZRangeBy{
+	members, err := redisClient.ZRangeByScore(ctx, dunningRetryZSetPrefix+"test-tenant", &redis.ZRangeBy{
 		Min: "-inf",
 		Max: "+inf",
 	}).Result()
@@ -441,7 +441,7 @@ func TestStripeWebhookHandler_SucceededPaymentDoesNotTriggerDunning(t *testing.T
 	assert.Equal(t, http.StatusOK, rr.Code)
 
 	// Verify dunning was NOT scheduled
-	count, err := redisClient.ZCard(ctx, dunningRetryZSet).Result()
+	count, err := redisClient.ZCard(ctx, dunningRetryZSetPrefix+"test-tenant").Result()
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), count)
 }
@@ -474,7 +474,7 @@ func TestStripeWebhookHandler_RefundedDoesNotTriggerDunning(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rr.Code)
 
 	// Verify dunning was NOT scheduled for refunds
-	count, err := redisClient.ZCard(ctx, dunningRetryZSet).Result()
+	count, err := redisClient.ZCard(ctx, dunningRetryZSetPrefix+"test-tenant").Result()
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), count)
 }

@@ -186,9 +186,10 @@ func (h *StripeWebhookHandler) HandleStripeWebhook(w http.ResponseWriter, r *htt
 
 	// Schedule dunning for failed payments (fire-and-forget, does not affect response)
 	if h.eventProcessor != nil && parsed.Status == "REJECTED" && parsed.PaymentOrderID != "" {
-		if dunningErr := h.eventProcessor.ScheduleDunning(ctx, parsed.PaymentOrderID); dunningErr != nil {
+		if dunningErr := h.eventProcessor.ScheduleDunning(ctx, tenantID.String(), parsed.PaymentOrderID); dunningErr != nil {
 			h.logger.Error("failed to schedule dunning for failed payment",
 				"payment_order_id", parsed.PaymentOrderID,
+				"tenant_id", tenantID.String(),
 				"event_id", parsed.EventID,
 				"error", dunningErr)
 		}
