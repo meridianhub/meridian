@@ -326,6 +326,126 @@ func TestBalanceService_GetBalance_HandlesPositionKeepingRateLimiting(t *testing
 	assert.Equal(t, codes.Unavailable, st.Code())
 }
 
+func TestBalanceService_GetBalance_HandlesPositionKeepingNotFound(t *testing.T) {
+	repo := newMockRepository()
+	posClient := &mockPositionKeepingClient{
+		err: status.Error(codes.NotFound, "position not found"),
+	}
+	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+		AccountCode:     "CLR-001",
+		Name:            "USD Clearing Account",
+		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
+		InstrumentCode:  "USD",
+	})
+	require.NoError(t, err)
+
+	// NotFound from Position Keeping maps to Internal (indicates data inconsistency)
+	_, err = svc.GetBalance(ctx, &pb.GetBalanceRequest{
+		AccountId: createResp.Facility.AccountCode,
+	})
+	assert.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Internal, st.Code())
+	assert.Contains(t, st.Message(), "balance not found in position keeping")
+}
+
+func TestBalanceService_GetBalance_HandlesPositionKeepingUnavailable(t *testing.T) {
+	repo := newMockRepository()
+	posClient := &mockPositionKeepingClient{
+		err: status.Error(codes.Unavailable, "service temporarily unavailable"),
+	}
+	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+		AccountCode:     "CLR-001",
+		Name:            "USD Clearing Account",
+		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
+		InstrumentCode:  "USD",
+	})
+	require.NoError(t, err)
+
+	// Unavailable passes through as Unavailable
+	_, err = svc.GetBalance(ctx, &pb.GetBalanceRequest{
+		AccountId: createResp.Facility.AccountCode,
+	})
+	assert.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Unavailable, st.Code())
+	assert.Contains(t, st.Message(), "position keeping service unavailable")
+}
+
+func TestBalanceService_GetBalance_HandlesPositionKeepingInternal(t *testing.T) {
+	repo := newMockRepository()
+	posClient := &mockPositionKeepingClient{
+		err: status.Error(codes.Internal, "internal server error"),
+	}
+	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+		AccountCode:     "CLR-001",
+		Name:            "USD Clearing Account",
+		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
+		InstrumentCode:  "USD",
+	})
+	require.NoError(t, err)
+
+	// Internal from Position Keeping maps to Internal (default case)
+	_, err = svc.GetBalance(ctx, &pb.GetBalanceRequest{
+		AccountId: createResp.Facility.AccountCode,
+	})
+	assert.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Internal, st.Code())
+	assert.Contains(t, st.Message(), "failed to retrieve balance")
+}
+
+func TestBalanceService_GetBalance_HandlesPositionKeepingInvalidArgument(t *testing.T) {
+	repo := newMockRepository()
+	posClient := &mockPositionKeepingClient{
+		err: status.Error(codes.InvalidArgument, "invalid account_id format"),
+	}
+	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+		AccountCode:     "CLR-001",
+		Name:            "USD Clearing Account",
+		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
+		InstrumentCode:  "USD",
+	})
+	require.NoError(t, err)
+
+	// InvalidArgument from Position Keeping maps to Internal (indicates a bug in our request)
+	_, err = svc.GetBalance(ctx, &pb.GetBalanceRequest{
+		AccountId: createResp.Facility.AccountCode,
+	})
+	assert.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Internal, st.Code())
+	assert.Contains(t, st.Message(), "invalid request to position keeping")
+}
+
 func TestBalanceService_RequiresPositionKeepingClient(t *testing.T) {
 	// Service without Position Keeping client should return Unimplemented for balance queries
 	repo := newMockRepository()
@@ -457,6 +577,108 @@ func TestBalanceService_MultipleBalanceTypes(t *testing.T) {
 
 	// Should return the CURRENT balance (12500.00), not opening or available
 	assert.Equal(t, "12500.00", balanceResp.CurrentBalance.Amount)
+}
+
+func TestBalanceService_GetBalance_EmptyAccountIdReturnsInvalidArgument(t *testing.T) {
+	repo := newMockRepository()
+	posClient := &mockPositionKeepingClient{}
+	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	for _, accountID := range []string{"", "   ", "\t"} {
+		_, err = svc.GetBalance(ctx, &pb.GetBalanceRequest{
+			AccountId: accountID,
+		})
+		assert.Error(t, err)
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.InvalidArgument, st.Code())
+		assert.Contains(t, st.Message(), "account_id is required")
+	}
+}
+
+func TestBalanceService_GetBalance_MissingCurrentBalanceReturnsNilBalance(t *testing.T) {
+	// Position Keeping returns balances but none is BALANCE_TYPE_CURRENT
+	repo := newMockRepository()
+	posClient := &mockPositionKeepingClient{
+		balances: []*positionkeepingv1.BalanceEntry{
+			{
+				BalanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_AVAILABLE,
+				Amount: &quantityv1.InstrumentAmount{
+					InstrumentCode: "USD",
+					Amount:         "5000.00",
+				},
+			},
+		},
+	}
+	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+		AccountCode:     "CLR-USD-NOCUR",
+		Name:            "No Current Balance Account",
+		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
+		InstrumentCode:  "USD",
+	})
+	require.NoError(t, err)
+
+	balanceResp, err := svc.GetBalance(ctx, &pb.GetBalanceRequest{
+		AccountId: createResp.Facility.AccountCode,
+	})
+	require.NoError(t, err)
+
+	// When no CURRENT balance exists, response should have nil current_balance
+	assert.Nil(t, balanceResp.CurrentBalance)
+	// as_of should still be populated
+	assert.NotNil(t, balanceResp.AsOf)
+	assert.Equal(t, createResp.Facility.AccountCode, balanceResp.AccountId)
+}
+
+func TestBalanceService_GetBalance_NilAsOfTimestampReturnsFallback(t *testing.T) {
+	// Position Keeping returns a CURRENT balance but no as_of timestamp
+	repo := newMockRepository()
+	posClient := &mockPositionKeepingClient{
+		balances: []*positionkeepingv1.BalanceEntry{
+			{
+				BalanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
+				Amount: &quantityv1.InstrumentAmount{
+					InstrumentCode: "USD",
+					Amount:         "7500.00",
+				},
+			},
+		},
+		asOfSet: true,
+		asOf:    nil, // Explicitly no as_of from Position Keeping
+	}
+	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+		AccountCode:     "CLR-USD-NOASOF",
+		Name:            "No AsOf Account",
+		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
+		InstrumentCode:  "USD",
+	})
+	require.NoError(t, err)
+
+	balanceResp, err := svc.GetBalance(ctx, &pb.GetBalanceRequest{
+		AccountId: createResp.Facility.AccountCode,
+	})
+	require.NoError(t, err)
+
+	// Balance should be present
+	assert.NotNil(t, balanceResp.CurrentBalance)
+	assert.Equal(t, "7500.00", balanceResp.CurrentBalance.Amount)
+	// as_of should be populated with a fallback timestamp even when PK returns nil
+	assert.NotNil(t, balanceResp.AsOf)
 }
 
 // ============================================================================

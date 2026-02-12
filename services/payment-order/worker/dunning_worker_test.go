@@ -248,15 +248,27 @@ func TestDunningWorker_ScheduleAndProcess(t *testing.T) {
 			}
 		}
 
-		w.Stop()
+		// Wait for the ZREM to complete (happens after callback in the same poll cycle).
+		// Poll before calling Stop() to avoid context cancellation racing with ZREM.
+		zsetDeadline := time.After(5 * time.Second)
+		for {
+			members, zErr := client.ZRangeByScore(context.Background(), zsetKey, &redis.ZRangeBy{
+				Min: "-inf",
+				Max: "+inf",
+			}).Result()
+			require.NoError(t, zErr)
+			if len(members) == 0 {
+				break
+			}
+			select {
+			case <-zsetDeadline:
+				t.Fatalf("ZSET not drained within timeout, remaining: %v", members)
+			default:
+				time.Sleep(10 * time.Millisecond)
+			}
+		}
 
-		// Verify the retry was removed from the ZSET
-		members, err := client.ZRangeByScore(context.Background(), zsetKey, &redis.ZRangeBy{
-			Min: "-inf",
-			Max: "+inf",
-		}).Result()
-		require.NoError(t, err)
-		assert.Empty(t, members, "processed retry should be removed from ZSET")
+		w.Stop()
 	})
 
 	t.Run("skips billing run that is no longer failed", func(t *testing.T) {
