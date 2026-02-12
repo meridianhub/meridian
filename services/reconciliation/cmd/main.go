@@ -14,6 +14,7 @@ import (
 
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	reconciliationv1 "github.com/meridianhub/meridian/api/proto/meridian/reconciliation/v1"
+	"github.com/meridianhub/meridian/services/reconciliation/adapters/messaging"
 	"github.com/meridianhub/meridian/services/reconciliation/adapters/persistence"
 	"github.com/meridianhub/meridian/services/reconciliation/config"
 	"github.com/meridianhub/meridian/services/reconciliation/observability"
@@ -96,6 +97,25 @@ func run(logger *slog.Logger) error {
 
 	logger.Info("database connection established")
 
+	// Wire event publisher based on Kafka configuration
+	var eventPublisher service.EventPublisher
+	if cfg.Kafka.Enabled {
+		kafkaPub, kafkaErr := messaging.NewKafkaPublisher(cfg.Kafka.Brokers, logger)
+		if kafkaErr != nil {
+			return fmt.Errorf("failed to create kafka publisher: %w", kafkaErr)
+		}
+		eventPublisher = kafkaPub
+		logger.Info("kafka publisher configured", "brokers", cfg.Kafka.Brokers)
+	} else {
+		eventPublisher = messaging.NewNoopPublisher(logger)
+		logger.Info("noop publisher configured (kafka disabled)")
+	}
+	defer func() {
+		if closer, ok := eventPublisher.(interface{ Close() }); ok {
+			closer.Close()
+		}
+	}()
+
 	// Instantiate persistence repositories
 	runRepo := persistence.NewSettlementRunRepository(db)
 	snapshotRepo := persistence.NewSettlementSnapshotRepository(db)
@@ -108,6 +128,7 @@ func run(logger *slog.Logger) error {
 		service.WithDisputeRepository(disputeRepo),
 		service.WithVarianceRepository(varianceRepo),
 		service.WithVarianceListRepository(varianceRepo),
+		service.WithEventPublisher(eventPublisher),
 		service.WithLogger(logger),
 	}
 

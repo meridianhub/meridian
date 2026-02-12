@@ -10,6 +10,7 @@ import (
 	"time"
 
 	reconciliationv1 "github.com/meridianhub/meridian/api/proto/meridian/reconciliation/v1"
+	"github.com/meridianhub/meridian/services/reconciliation/adapters/messaging"
 	"github.com/meridianhub/meridian/services/reconciliation/adapters/persistence"
 	"github.com/meridianhub/meridian/services/reconciliation/service"
 	"github.com/meridianhub/meridian/shared/pkg/health"
@@ -146,12 +147,16 @@ func startTestGRPCServer(t *testing.T, db *gorm.DB, logger *slog.Logger) (string
 	// Wire VarianceDetector (repos only, always available)
 	detector := service.NewVarianceDetector(runRepo, snapshotRepo, varianceRepo)
 
+	// Wire NoopPublisher (Kafka disabled in tests)
+	publisher := messaging.NewNoopPublisher(logger)
+
 	// Create service with all available options
 	svc := service.NewAccountReconciliationService(
 		service.WithSettlementRunRepository(runRepo),
 		service.WithDisputeRepository(disputeRepo),
 		service.WithVarianceRepository(varianceRepo),
 		service.WithVarianceListRepository(varianceRepo),
+		service.WithEventPublisher(publisher),
 		service.WithVarianceDetector(detector.DetectVariances),
 		service.WithLogger(logger),
 	)
@@ -356,6 +361,69 @@ func TestMainWiring_AssertBalanceRegression(t *testing.T) {
 	require.Error(t, err)
 	// Should fail validation, not be unimplemented
 	assert.Contains(t, err.Error(), "scope")
+}
+
+func TestMainWiring_NoopPublisherWiredWhenKafkaDisabled(t *testing.T) {
+	db, cleanup := setupIntegrationDB(t)
+	defer cleanup()
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	// Wire NoopPublisher (simulates Kafka disabled)
+	publisher := messaging.NewNoopPublisher(logger)
+
+	runRepo := persistence.NewSettlementRunRepository(db)
+	disputeRepo := persistence.NewDisputeRepository(db)
+	varianceRepo := persistence.NewVarianceRepository(db)
+
+	// Create service with publisher wired
+	svc := service.NewAccountReconciliationService(
+		service.WithSettlementRunRepository(runRepo),
+		service.WithDisputeRepository(disputeRepo),
+		service.WithVarianceRepository(varianceRepo),
+		service.WithVarianceListRepository(varianceRepo),
+		service.WithEventPublisher(publisher),
+		service.WithLogger(logger),
+	)
+
+	grpcServer := grpc.NewServer()
+	reconciliationv1.RegisterAccountReconciliationServiceServer(grpcServer, svc)
+
+	lis, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "localhost:0")
+	require.NoError(t, err)
+	go func() {
+		_ = grpcServer.Serve(lis)
+	}()
+	defer grpcServer.GracefulStop()
+
+	conn, err := grpc.NewClient(lis.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	defer conn.Close()
+
+	client := reconciliationv1.NewAccountReconciliationServiceClient(conn)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// InitiateAccountReconciliation should work with publisher wired
+	// (returns validation error, not unimplemented)
+	_, err = client.InitiateAccountReconciliation(ctx, &reconciliationv1.InitiateAccountReconciliationRequest{
+		AccountId: "ACC-001",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "scope")
+	assert.NotContains(t, err.Error(), "Unimplemented")
+}
+
+func TestNoopPublisher_ImplementsEventPublisher(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	publisher := messaging.NewNoopPublisher(logger)
+
+	// Verify NoopPublisher satisfies the EventPublisher interface
+	var _ service.EventPublisher = publisher
+
+	// Verify Publish returns no error
+	err := publisher.Publish(context.Background(), "test.topic", map[string]string{"key": "value"})
+	assert.NoError(t, err)
 }
 
 func TestParseLogLevel(t *testing.T) {
