@@ -17,7 +17,8 @@ const (
 // implementation (to be added). The mock gateway does not use these values.
 type Config struct {
 	// Provider selects the gateway implementation: "stripe" or "mock".
-	// Empty defaults to mock.
+	// Empty defaults to mock. Note: New() does not use Provider; it is
+	// consumed by the service entry point factory (cmd/main.go).
 	Provider string
 	// StripeAPIKey is the platform-level Stripe API key.
 	// Required when Provider is "stripe".

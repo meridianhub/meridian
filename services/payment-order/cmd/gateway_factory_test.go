@@ -7,8 +7,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	stripegateway "github.com/meridianhub/meridian/services/payment-order/adapters/gateway/stripe"
 )
 
 func TestCreatePaymentGateway_DefaultMock(t *testing.T) {
@@ -46,11 +44,6 @@ func TestCreatePaymentGateway_StripeProvider(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.NotNil(t, gw)
-
-	// The resilient gateway wraps the actual gateway, so we can't directly
-	// type-assert to StripeGatewayAdapter. Instead, verify the factory
-	// didn't error, which confirms the Stripe path was taken.
-	_ = stripegateway.GatewayAdapter{} // Compile-time import verification
 }
 
 func TestCreatePaymentGateway_StripeMissingAPIKey(t *testing.T) {
