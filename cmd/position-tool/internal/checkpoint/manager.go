@@ -68,7 +68,8 @@ const (
 			processed_rows = $4,
 			success_count = $5,
 			failure_count = $6,
-			rollback_sql = $7
+			rollback_sql = $7,
+			updated_at = NOW()
 		WHERE id = $1
 	`
 )
@@ -268,7 +269,8 @@ func (m *PostgresManager) UpdateProgress(ctx context.Context, checkpoint *Checkp
 			processed_rows = $3,
 			success_count = $4,
 			failure_count = $5,
-			rollback_sql = $6
+			rollback_sql = $6,
+			updated_at = NOW()
 		WHERE id = $1
 	`
 
@@ -495,7 +497,8 @@ func (m *PostgresManager) Rollback(ctx context.Context, checkpoint *Checkpoint) 
 	updateQuery := `
 		UPDATE import_manifest
 		SET status = 'CANCELLED',
-			rollback_sql = NULL
+			rollback_sql = NULL,
+			updated_at = NOW()
 		WHERE id = $1
 	`
 	if _, err := tx.Exec(ctx, updateQuery, checkpoint.ManifestID); err != nil {
