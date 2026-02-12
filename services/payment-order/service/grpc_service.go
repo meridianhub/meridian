@@ -18,6 +18,7 @@ import (
 	"github.com/meridianhub/meridian/services/payment-order/config"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"google.golang.org/protobuf/proto"
@@ -251,6 +252,12 @@ type Config struct {
 	// InternalClearingEnabled enables internal clearing operations (default: false).
 	// When enabled, the service uses InternalBankAccountClient for clearing account resolution.
 	InternalClearingEnabled bool
+
+	// HandlerRegistry is an optional external handler registry with cross-service Starlark
+	// handlers (e.g., party.get_default_payment_method). When provided, the orchestrator
+	// registers its internal payment_order.* handlers on this registry so saga scripts
+	// have access to all registered handlers. When nil, a new empty registry is created.
+	HandlerRegistry *saga.HandlerRegistry
 }
 
 // NewService creates a new payment order service with minimal dependencies.
@@ -356,6 +363,7 @@ func NewServiceWithConfig(cfg Config) (*Service, error) {
 		KafkaPublisher:            cfg.KafkaPublisher,
 		LienExecutionRetryConfig:  cfg.LienExecutionRetryConfig,
 		InternalClearingEnabled:   cfg.InternalClearingEnabled,
+		HandlerRegistry:           cfg.HandlerRegistry,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create payment orchestrator: %w", err)
