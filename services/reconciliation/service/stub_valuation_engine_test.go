@@ -137,7 +137,7 @@ func TestStubValuationEngine_IntegrationWithVarianceValuator(t *testing.T) {
 	assert.Equal(t, "GBP", varianceRepo.variances[0].Currency)
 }
 
-func TestStubValuationEngine_MaterialityAutoAccept(t *testing.T) {
+func TestVarianceValuator_MaterialityAutoAccept(t *testing.T) {
 	runRepo := newMockRunRepo()
 	varianceRepo := &mockVarianceRepoFull{}
 
