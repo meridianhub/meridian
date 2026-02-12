@@ -94,6 +94,8 @@ enum RunStatus {
   RUN_STATUS_FAILED = 4;
   // RUN_STATUS_CANCELLED means the run was cancelled.
   RUN_STATUS_CANCELLED = 5;
+  // RUN_STATUS_PAUSED means the run has been paused and can be resumed.
+  RUN_STATUS_PAUSED = 6;
 }
 
 // VarianceStatus represents the resolution state of a variance.

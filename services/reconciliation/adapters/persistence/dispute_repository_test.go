@@ -51,6 +51,7 @@ func setupTestDB(t *testing.T) (*gorm.DB, func()) {
 			"completed_at" timestamptz NULL,
 			"variance_count" integer NOT NULL DEFAULT 0,
 			"failure_reason" text NULL,
+			"last_completed_phase" character varying(30) NULL,
 			"attributes" jsonb NULL,
 			"version" bigint NOT NULL DEFAULT 1,
 			PRIMARY KEY ("id")

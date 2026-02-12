@@ -163,6 +163,68 @@ func TestSettlementRun_CancelLifecycle(t *testing.T) {
 	assert.Equal(t, int64(2), run.Version)
 }
 
+func TestSettlementRun_PauseResumeLifecycle(t *testing.T) {
+	run := newTestRun(t)
+	require.NoError(t, run.Start())
+	assert.Equal(t, domain.RunStatusRunning, run.Status)
+	versionAfterStart := run.Version
+
+	// Pause
+	phase := domain.PhaseVarianceDetection
+	require.NoError(t, run.Pause(phase))
+	assert.Equal(t, domain.RunStatusPaused, run.Status)
+	require.NotNil(t, run.LastCompletedPhase)
+	assert.Equal(t, domain.PhaseVarianceDetection, *run.LastCompletedPhase)
+	assert.Equal(t, versionAfterStart+1, run.Version)
+
+	// Resume
+	versionAfterPause := run.Version
+	require.NoError(t, run.Resume())
+	assert.Equal(t, domain.RunStatusRunning, run.Status)
+	// LastCompletedPhase should be preserved for pipeline checkpoint
+	require.NotNil(t, run.LastCompletedPhase)
+	assert.Equal(t, domain.PhaseVarianceDetection, *run.LastCompletedPhase)
+	assert.Equal(t, versionAfterPause+1, run.Version)
+
+	// Can complete after resume
+	require.NoError(t, run.Complete(2))
+	assert.Equal(t, domain.RunStatusCompleted, run.Status)
+	assert.Equal(t, 2, run.VarianceCount)
+}
+
+func TestSettlementRun_MultiplePauseResumeCycles(t *testing.T) {
+	run := newTestRun(t)
+	require.NoError(t, run.Start())
+
+	// Cycle 1: pause at SNAPSHOT_CAPTURE, resume
+	require.NoError(t, run.Pause(domain.PhaseSnapshotCapture))
+	assert.Equal(t, domain.RunStatusPaused, run.Status)
+	require.NoError(t, run.Resume())
+	assert.Equal(t, domain.RunStatusRunning, run.Status)
+
+	// Cycle 2: pause at VARIANCE_VALUATION, resume
+	require.NoError(t, run.Pause(domain.PhaseVarianceValuation))
+	assert.Equal(t, domain.RunStatusPaused, run.Status)
+	require.NotNil(t, run.LastCompletedPhase)
+	assert.Equal(t, domain.PhaseVarianceValuation, *run.LastCompletedPhase)
+	require.NoError(t, run.Resume())
+	assert.Equal(t, domain.RunStatusRunning, run.Status)
+
+	// Can still complete
+	require.NoError(t, run.Complete(0))
+	assert.Equal(t, domain.RunStatusCompleted, run.Status)
+}
+
+func TestSettlementRun_CancelFromPaused(t *testing.T) {
+	run := newTestRun(t)
+	require.NoError(t, run.Start())
+	require.NoError(t, run.Pause(domain.PhaseSnapshotCapture))
+
+	require.NoError(t, run.Cancel())
+	assert.Equal(t, domain.RunStatusCancelled, run.Status)
+	assert.NotNil(t, run.CompletedAt)
+}
+
 func TestSettlementRun_InvalidTransitions(t *testing.T) {
 	t.Run("cannot complete from pending", func(t *testing.T) {
 		run := newTestRun(t)
@@ -189,6 +251,33 @@ func TestSettlementRun_InvalidTransitions(t *testing.T) {
 		require.NoError(t, run.Start())
 		require.NoError(t, run.Complete(0))
 		err := run.Cancel()
+		assert.ErrorIs(t, err, domain.ErrInvalidStatusTransition)
+	})
+
+	t.Run("cannot pause from pending", func(t *testing.T) {
+		run := newTestRun(t)
+		err := run.Pause(domain.PhaseSnapshotCapture)
+		assert.ErrorIs(t, err, domain.ErrInvalidStatusTransition)
+	})
+
+	t.Run("cannot pause from completed", func(t *testing.T) {
+		run := newTestRun(t)
+		require.NoError(t, run.Start())
+		require.NoError(t, run.Complete(0))
+		err := run.Pause(domain.PhaseBalanceAssertion)
+		assert.ErrorIs(t, err, domain.ErrInvalidStatusTransition)
+	})
+
+	t.Run("cannot resume from running", func(t *testing.T) {
+		run := newTestRun(t)
+		require.NoError(t, run.Start())
+		err := run.Resume()
+		assert.ErrorIs(t, err, domain.ErrInvalidStatusTransition)
+	})
+
+	t.Run("cannot resume from pending", func(t *testing.T) {
+		run := newTestRun(t)
+		err := run.Resume()
 		assert.ErrorIs(t, err, domain.ErrInvalidStatusTransition)
 	})
 }

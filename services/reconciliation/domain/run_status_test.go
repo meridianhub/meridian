@@ -12,6 +12,7 @@ func TestRunStatus_IsValid(t *testing.T) {
 		{"valid running", RunStatusRunning, true},
 		{"valid completed", RunStatusCompleted, true},
 		{"valid failed", RunStatusFailed, true},
+		{"valid paused", RunStatusPaused, true},
 		{"valid cancelled", RunStatusCancelled, true},
 		{"valid finalized", RunStatusFinalized, true},
 		{"invalid status", RunStatus("INVALID"), false},
@@ -35,6 +36,7 @@ func TestRunStatus_IsFinal(t *testing.T) {
 	}{
 		{"pending not final", RunStatusPending, false},
 		{"running not final", RunStatusRunning, false},
+		{"paused not final", RunStatusPaused, false},
 		{"completed not final", RunStatusCompleted, false},
 		{"finalized is final", RunStatusFinalized, true},
 		{"failed is final", RunStatusFailed, true},
@@ -70,8 +72,20 @@ func TestRunStatus_CanTransitionTo(t *testing.T) {
 		{"running to failed", RunStatusRunning, RunStatusFailed, true},
 		{"running to cancelled", RunStatusRunning, RunStatusCancelled, true},
 
+		// Valid transitions from RUNNING (pause)
+		{"running to paused", RunStatusRunning, RunStatusPaused, true},
+
 		// Invalid transitions from RUNNING
 		{"running to pending", RunStatusRunning, RunStatusPending, false},
+
+		// Valid transitions from PAUSED
+		{"paused to running", RunStatusPaused, RunStatusRunning, true},
+		{"paused to cancelled", RunStatusPaused, RunStatusCancelled, true},
+
+		// Invalid transitions from PAUSED
+		{"paused to completed", RunStatusPaused, RunStatusCompleted, false},
+		{"paused to pending", RunStatusPaused, RunStatusPending, false},
+		{"paused to failed", RunStatusPaused, RunStatusFailed, false},
 
 		// Valid transitions from COMPLETED
 		{"completed to finalized", RunStatusCompleted, RunStatusFinalized, true},
@@ -104,6 +118,7 @@ func TestRunStatus_String(t *testing.T) {
 	}{
 		{"pending", RunStatusPending, "PENDING"},
 		{"running", RunStatusRunning, "RUNNING"},
+		{"paused", RunStatusPaused, "PAUSED"},
 		{"completed", RunStatusCompleted, "COMPLETED"},
 		{"failed", RunStatusFailed, "FAILED"},
 		{"cancelled", RunStatusCancelled, "CANCELLED"},
@@ -127,6 +142,7 @@ func TestParseRunStatus(t *testing.T) {
 	}{
 		{"valid pending", "PENDING", RunStatusPending},
 		{"valid running", "RUNNING", RunStatusRunning},
+		{"valid paused", "PAUSED", RunStatusPaused},
 		{"valid completed", "COMPLETED", RunStatusCompleted},
 		{"invalid defaults to pending", "INVALID", RunStatusPending},
 		{"empty defaults to pending", "", RunStatusPending},

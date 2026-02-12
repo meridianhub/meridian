@@ -6,6 +6,17 @@ import (
 	"github.com/google/uuid"
 )
 
+// ReconciliationPhase represents a phase in the reconciliation pipeline.
+type ReconciliationPhase string
+
+// Reconciliation pipeline phases in execution order.
+const (
+	PhaseSnapshotCapture   ReconciliationPhase = "SNAPSHOT_CAPTURE"
+	PhaseVarianceDetection ReconciliationPhase = "VARIANCE_DETECTION"
+	PhaseVarianceValuation ReconciliationPhase = "VARIANCE_VALUATION"
+	PhaseBalanceAssertion  ReconciliationPhase = "BALANCE_ASSERTION"
+)
+
 // SettlementRun is the Command Record (CR) that orchestrates a reconciliation run.
 // It captures the scope, type, period, and outcome of a reconciliation process.
 //
@@ -44,6 +55,10 @@ type SettlementRun struct {
 
 	// FailureReason records why the run failed (empty if not failed).
 	FailureReason string
+
+	// LastCompletedPhase records the last pipeline phase that completed before a pause.
+	// nil when the run has not been paused or no phases have completed.
+	LastCompletedPhase *ReconciliationPhase
 
 	// Attributes stores flexible metadata for this run.
 	Attributes map[string]string
@@ -178,6 +193,30 @@ func (r *SettlementRun) Cancel() error {
 	r.Status = RunStatusCancelled
 	r.CompletedAt = &now
 	r.UpdatedAt = now
+	r.Version++
+	return nil
+}
+
+// Pause transitions the run to PAUSED and records the last completed phase as a checkpoint.
+func (r *SettlementRun) Pause(checkpoint ReconciliationPhase) error {
+	if !r.Status.CanTransitionTo(RunStatusPaused) {
+		return ErrInvalidStatusTransition
+	}
+	r.Status = RunStatusPaused
+	r.LastCompletedPhase = &checkpoint
+	r.UpdatedAt = time.Now().UTC()
+	r.Version++
+	return nil
+}
+
+// Resume transitions the run from PAUSED back to RUNNING.
+// The LastCompletedPhase is preserved so the pipeline can skip already-completed phases.
+func (r *SettlementRun) Resume() error {
+	if r.Status != RunStatusPaused {
+		return ErrInvalidStatusTransition
+	}
+	r.Status = RunStatusRunning
+	r.UpdatedAt = time.Now().UTC()
 	r.Version++
 	return nil
 }
