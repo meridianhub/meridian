@@ -79,7 +79,7 @@ func (l *Lock) Acquire(ctx context.Context, tenantID, resourceID string) (bool, 
 	l.locks[key] = al
 	l.mu.Unlock()
 
-	go l.renewLoop(renewCtx, key, lock)
+	go l.renewLoop(renewCtx, key, al)
 
 	l.logger.Debug("lock acquired", "key", key)
 
@@ -139,7 +139,7 @@ func (l *Lock) HeldCount() int {
 }
 
 // renewLoop periodically refreshes a lock until the context is cancelled.
-func (l *Lock) renewLoop(ctx context.Context, key string, lock *redislock.Lock) {
+func (l *Lock) renewLoop(ctx context.Context, key string, al *activeLock) {
 	ticker := time.NewTicker(l.config.RenewEvery)
 	defer ticker.Stop()
 
@@ -148,13 +148,15 @@ func (l *Lock) renewLoop(ctx context.Context, key string, lock *redislock.Lock) 
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := lock.Refresh(ctx, l.config.LockTTL, nil); err != nil {
+			if err := al.lock.Refresh(ctx, l.config.LockTTL, nil); err != nil {
 				if ctx.Err() != nil {
 					return
 				}
 				l.logger.Error("lock renewal failed", "key", key, "error", err)
 				l.mu.Lock()
-				delete(l.locks, key)
+				if l.locks[key] == al {
+					delete(l.locks, key)
+				}
 				l.mu.Unlock()
 				return
 			}
