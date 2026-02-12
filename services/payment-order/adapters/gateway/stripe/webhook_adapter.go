@@ -30,6 +30,8 @@ const (
 // payment-order domain. The http package converts this to WebhookRequest
 // for processing through the existing pipeline.
 type ParsedWebhookEvent struct {
+	// EventID is the Stripe event ID (e.g., "evt_1234"), used for idempotency.
+	EventID            string
 	GatewayReferenceID string
 	PaymentOrderID     string
 	Status             string
@@ -91,6 +93,7 @@ func (a *WebhookAdapter) parsePaymentIntentSucceeded(event *stripego.Event) (Par
 	}
 
 	return ParsedWebhookEvent{
+		EventID:            event.ID,
 		GatewayReferenceID: pi.ID,
 		PaymentOrderID:     pi.Metadata["payment_order_id"],
 		Status:             "SETTLED",
@@ -110,6 +113,7 @@ func (a *WebhookAdapter) parsePaymentIntentFailed(event *stripego.Event) (Parsed
 	}
 
 	return ParsedWebhookEvent{
+		EventID:            event.ID,
 		GatewayReferenceID: pi.ID,
 		PaymentOrderID:     pi.Metadata["payment_order_id"],
 		Status:             "REJECTED",
@@ -127,6 +131,7 @@ func (a *WebhookAdapter) parseChargeRefunded(event *stripego.Event) (ParsedWebho
 	paymentOrderID := extractPaymentOrderID(&charge)
 
 	return ParsedWebhookEvent{
+		EventID:            event.ID,
 		GatewayReferenceID: charge.ID,
 		PaymentOrderID:     paymentOrderID,
 		Status:             "REFUNDED",
@@ -160,6 +165,7 @@ func (a *WebhookAdapter) parseChargeDisputed(event *stripego.Event) (ParsedWebho
 	}
 
 	return ParsedWebhookEvent{
+		EventID:            event.ID,
 		GatewayReferenceID: dispute.Charge.ID,
 		PaymentOrderID:     paymentOrderID,
 		Status:             "DISPUTED",

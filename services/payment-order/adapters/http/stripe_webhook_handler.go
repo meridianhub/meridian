@@ -27,6 +27,7 @@ const StripeWebhookMaxBodySize = 512 * 1024
 type StripeWebhookHandler struct {
 	clientFactory  *stripe.ClientFactory
 	webhookHandler *WebhookHandler
+	eventProcessor *StripeEventProcessor
 	logger         *slog.Logger
 }
 
@@ -34,6 +35,9 @@ type StripeWebhookHandler struct {
 type StripeWebhookHandlerConfig struct {
 	ClientFactory  *stripe.ClientFactory
 	WebhookHandler *WebhookHandler
+	// EventProcessor is optional. When set, provides Stripe event ID-based
+	// idempotency and dunning scheduling for failed payments.
+	EventProcessor *StripeEventProcessor
 	Logger         *slog.Logger
 }
 
@@ -52,6 +56,7 @@ func NewStripeWebhookHandler(cfg StripeWebhookHandlerConfig) (*StripeWebhookHand
 	return &StripeWebhookHandler{
 		clientFactory:  cfg.ClientFactory,
 		webhookHandler: cfg.WebhookHandler,
+		eventProcessor: cfg.EventProcessor,
 		logger:         logger,
 	}, nil
 }
@@ -134,6 +139,19 @@ func (h *StripeWebhookHandler) HandleStripeWebhook(w http.ResponseWriter, r *htt
 		return
 	}
 
+	// Check Stripe event-level idempotency via event processor (if configured)
+	if h.eventProcessor != nil && parsed.EventID != "" {
+		if err := h.eventProcessor.PreProcess(ctx, parsed.EventID); err != nil {
+			if errors.Is(err, ErrEventAlreadyProcessed) {
+				h.writeSuccessResponse(w, "event already processed")
+				return
+			}
+			// PreProcess logs the error internally and returns nil on Redis failure,
+			// so a non-nil, non-duplicate error is unexpected. Log and continue.
+			h.logger.Warn("unexpected event processor error", "error", err)
+		}
+	}
+
 	// Convert ParsedWebhookEvent to WebhookRequest
 	webhookReq := WebhookRequest{
 		GatewayReferenceID: parsed.GatewayReferenceID,
@@ -157,6 +175,7 @@ func (h *StripeWebhookHandler) HandleStripeWebhook(w http.ResponseWriter, r *htt
 	idempotencyKey := h.webhookHandler.generateIdempotencyKey(webhookReq)
 
 	h.logger.Info("processing stripe webhook",
+		"event_id", parsed.EventID,
 		"gateway_reference_id", webhookReq.GatewayReferenceID,
 		"payment_order_id", webhookReq.PaymentOrderID,
 		"status", webhookReq.Status,
@@ -164,6 +183,16 @@ func (h *StripeWebhookHandler) HandleStripeWebhook(w http.ResponseWriter, r *htt
 	)
 
 	h.webhookHandler.processWebhookRequest(ctx, w, webhookReq, gatewayStatus, idempotencyKey)
+
+	// Schedule dunning for failed payments (fire-and-forget, does not affect response)
+	if h.eventProcessor != nil && parsed.Status == "REJECTED" && parsed.PaymentOrderID != "" {
+		if dunningErr := h.eventProcessor.ScheduleDunning(ctx, parsed.PaymentOrderID); dunningErr != nil {
+			h.logger.Error("failed to schedule dunning for failed payment",
+				"payment_order_id", parsed.PaymentOrderID,
+				"event_id", parsed.EventID,
+				"error", dunningErr)
+		}
+	}
 }
 
 func (h *StripeWebhookHandler) writeSuccessResponse(w http.ResponseWriter, message string) {
