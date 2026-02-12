@@ -67,7 +67,7 @@ type ClientConfig struct {
 //	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 //	defer cancel()
 //
-//	conn, err := grpc.NewClient(ctx, grpc.ClientConfig{
+//	conn, err := NewClient(ctx, ClientConfig{
 //	    ServiceName: "financial-accounting",
 //	    Namespace:   "default",
 //	    Port:        50052,

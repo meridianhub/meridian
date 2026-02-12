@@ -344,6 +344,12 @@ func run(logger *slog.Logger) error {
 		logger.Info("billing workers disabled (BILLING_ENABLED=false)")
 	}
 
+	// Create saga execution repository for audit logging
+	sagaExecutionRepo := persistence.NewSagaExecutionRepository(db)
+
+	logger.Info("saga orchestration configuration",
+		"saga_orchestration_enabled", svcConfig.SagaOrchestrationEnabled)
+
 	// Create payment order service
 	paymentOrderService, err := service.NewServiceWithConfig(service.Config{
 		Repository:                repo,
@@ -359,6 +365,8 @@ func run(logger *slog.Logger) error {
 		Tracer:                    tracer,
 		InternalClearingEnabled:   internalClearingEnabled,
 		HandlerRegistry:           handlerRegistry,
+		SagaExecutionLogger:       sagaExecutionRepo,
+		SagaOrchestrationEnabled:  svcConfig.SagaOrchestrationEnabled,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create payment order service: %w", err)
@@ -401,8 +409,17 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("failed to create webhook handler: %w", err)
 	}
 
+	// Create Stripe event processor for webhook idempotency and dunning
+	eventProcessor, err := webhookhttp.NewStripeEventProcessor(webhookhttp.StripeEventProcessorConfig{
+		RedisClient: redisClient,
+		Logger:      logger,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create stripe event processor: %w", err)
+	}
+
 	// Create Stripe webhook handler (optional - only if STRIPE_API_KEY is configured)
-	stripeWebhookHandler, err := createStripeWebhookHandler(svcConfig, webhookHandler, logger)
+	stripeWebhookHandler, err := createStripeWebhookHandler(svcConfig, webhookHandler, eventProcessor, logger)
 	if err != nil {
 		return fmt.Errorf("failed to create stripe webhook handler: %w", err)
 	}
@@ -854,7 +871,7 @@ func createGatewayAccountConfig(logger *slog.Logger) (*config.GatewayAccountConf
 
 // createStripeWebhookHandler creates the StripeWebhookHandler if Stripe provider is configured.
 // Returns nil (no error) when Stripe is not the active provider, making the handler optional.
-func createStripeWebhookHandler(svcConfig config.ServiceConfig, webhookHandler *webhookhttp.WebhookHandler, logger *slog.Logger) (*webhookhttp.StripeWebhookHandler, error) {
+func createStripeWebhookHandler(svcConfig config.ServiceConfig, webhookHandler *webhookhttp.WebhookHandler, eventProcessor *webhookhttp.StripeEventProcessor, logger *slog.Logger) (*webhookhttp.StripeWebhookHandler, error) {
 	if svcConfig.StripeAPIKey == "" {
 		logger.Info("Stripe API key not set, Stripe webhook handler disabled")
 		return nil, nil //nolint:nilnil // nil handler is intentional: ServerConfig treats nil as "feature disabled"
@@ -876,6 +893,7 @@ func createStripeWebhookHandler(svcConfig config.ServiceConfig, webhookHandler *
 	handler, err := webhookhttp.NewStripeWebhookHandler(webhookhttp.StripeWebhookHandlerConfig{
 		ClientFactory:  clientFactory,
 		WebhookHandler: webhookHandler,
+		EventProcessor: eventProcessor,
 		Logger:         logger,
 	})
 	if err != nil {

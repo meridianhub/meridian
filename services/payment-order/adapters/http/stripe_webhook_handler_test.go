@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stripe/stripe-go/v82/webhook"
@@ -250,4 +252,229 @@ func TestStripeWebhookHandler_MethodNotAllowed(t *testing.T) {
 	handler.HandleStripeWebhook(rr, req)
 
 	assert.Equal(t, http.StatusMethodNotAllowed, rr.Code)
+}
+
+// setupStripeWebhookHandlerWithProcessor creates a handler with the event processor wired in.
+func setupStripeWebhookHandlerWithProcessor(t *testing.T) (*StripeWebhookHandler, *mockPaymentOrderService, *redis.Client, *miniredis.Miniredis) {
+	t.Helper()
+
+	mr := miniredis.RunT(t)
+	redisClient := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = redisClient.Close() })
+
+	eventProcessor, err := NewStripeEventProcessor(StripeEventProcessorConfig{
+		RedisClient: redisClient,
+	})
+	require.NoError(t, err)
+
+	mockSvc := &mockPaymentOrderService{
+		updateFunc: func(_ context.Context, _ *pb.UpdatePaymentOrderRequest) (*pb.UpdatePaymentOrderResponse, error) {
+			return &pb.UpdatePaymentOrderResponse{
+				PaymentOrder: &pb.PaymentOrder{
+					PaymentOrderId: "test-order",
+					Status:         pb.PaymentOrderStatus_PAYMENT_ORDER_STATUS_COMPLETED,
+				},
+			}, nil
+		},
+	}
+
+	webhookHandler, err := NewWebhookHandler(WebhookHandlerConfig{
+		PaymentOrderService: mockSvc,
+		HMACSecret:          []byte("generic-secret"),
+	})
+	require.NoError(t, err)
+
+	provider := &testConfigProvider{
+		configs: map[string]stripe.TenantConfig{
+			"test-tenant": {
+				ConnectedAccountID:    "acct_test_123",
+				WebhookEndpointSecret: testStripeWebhookSecret,
+			},
+		},
+	}
+
+	factory, err := stripe.NewClientFactory(testStripeConfig(), provider, nil)
+	require.NoError(t, err)
+
+	stripeHandler, err := NewStripeWebhookHandler(StripeWebhookHandlerConfig{
+		ClientFactory:  factory,
+		WebhookHandler: webhookHandler,
+		EventProcessor: eventProcessor,
+	})
+	require.NoError(t, err)
+
+	return stripeHandler, mockSvc, redisClient, mr
+}
+
+func TestStripeWebhookHandler_EventProcessorIdempotency(t *testing.T) {
+	handler, mockSvc, redisClient, _ := setupStripeWebhookHandlerWithProcessor(t)
+	ctx := context.Background()
+
+	callCount := 0
+	mockSvc.updateFunc = func(_ context.Context, _ *pb.UpdatePaymentOrderRequest) (*pb.UpdatePaymentOrderResponse, error) {
+		callCount++
+		return &pb.UpdatePaymentOrderResponse{
+			PaymentOrder: &pb.PaymentOrder{
+				PaymentOrderId: "po-idem",
+				Status:         pb.PaymentOrderStatus_PAYMENT_ORDER_STATUS_COMPLETED,
+			},
+		}, nil
+	}
+
+	payload := buildTestStripePayload(t, "evt_idem_test", "payment_intent.succeeded", map[string]any{
+		"id":       "pi_idem_123",
+		"object":   "payment_intent",
+		"amount":   1000,
+		"currency": "usd",
+		"metadata": map[string]string{"payment_order_id": "po-idem"},
+		"status":   "succeeded",
+	})
+	sig := signTestPayload(t, payload, testStripeWebhookSecret)
+
+	// First request should be processed
+	tenantCtx := tenant.WithTenant(context.Background(), "test-tenant")
+	req1 := httptest.NewRequest(http.MethodPost, "/webhook/stripe", bytes.NewReader(payload)).WithContext(tenantCtx)
+	req1.Header.Set("Stripe-Signature", sig)
+	rr1 := httptest.NewRecorder()
+	handler.HandleStripeWebhook(rr1, req1)
+
+	assert.Equal(t, http.StatusOK, rr1.Code)
+	assert.Equal(t, 1, callCount)
+
+	// Verify Redis key was set
+	exists, err := redisClient.Exists(ctx, processedWebhookKeyPrefix+"evt_idem_test").Result()
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), exists)
+
+	// Second request with same event ID should be deduplicated
+	// Need to re-sign because Stripe checks timestamp freshness
+	payload2 := buildTestStripePayload(t, "evt_idem_test", "payment_intent.succeeded", map[string]any{
+		"id":       "pi_idem_123",
+		"object":   "payment_intent",
+		"amount":   1000,
+		"currency": "usd",
+		"metadata": map[string]string{"payment_order_id": "po-idem"},
+		"status":   "succeeded",
+	})
+	sig2 := signTestPayload(t, payload2, testStripeWebhookSecret)
+	req2 := httptest.NewRequest(http.MethodPost, "/webhook/stripe", bytes.NewReader(payload2)).WithContext(tenantCtx)
+	req2.Header.Set("Stripe-Signature", sig2)
+	rr2 := httptest.NewRecorder()
+	handler.HandleStripeWebhook(rr2, req2)
+
+	assert.Equal(t, http.StatusOK, rr2.Code)
+	// Service should NOT be called again (deduplicated by event processor)
+	assert.Equal(t, 1, callCount)
+
+	// Verify response indicates already processed
+	var resp WebhookResponse
+	err = json.Unmarshal(rr2.Body.Bytes(), &resp)
+	require.NoError(t, err)
+	assert.True(t, resp.Acknowledged)
+	assert.Equal(t, "event already processed", resp.Message)
+}
+
+func TestStripeWebhookHandler_FailedPaymentTriggersDunning(t *testing.T) {
+	handler, mockSvc, redisClient, _ := setupStripeWebhookHandlerWithProcessor(t)
+	ctx := context.Background()
+
+	mockSvc.updateFunc = func(_ context.Context, _ *pb.UpdatePaymentOrderRequest) (*pb.UpdatePaymentOrderResponse, error) {
+		return &pb.UpdatePaymentOrderResponse{
+			PaymentOrder: &pb.PaymentOrder{
+				PaymentOrderId: "po-failed",
+				Status:         pb.PaymentOrderStatus_PAYMENT_ORDER_STATUS_FAILED,
+			},
+		}, nil
+	}
+
+	payload := buildTestStripePayload(t, "evt_fail_dun", "payment_intent.payment_failed", map[string]any{
+		"id":                 "pi_fail_456",
+		"object":             "payment_intent",
+		"amount":             2000,
+		"currency":           "gbp",
+		"metadata":           map[string]string{"payment_order_id": "po-failed"},
+		"status":             "requires_payment_method",
+		"last_payment_error": map[string]any{"message": "card declined"},
+	})
+	sig := signTestPayload(t, payload, testStripeWebhookSecret)
+
+	tenantCtx := tenant.WithTenant(context.Background(), "test-tenant")
+	req := httptest.NewRequest(http.MethodPost, "/webhook/stripe", bytes.NewReader(payload)).WithContext(tenantCtx)
+	req.Header.Set("Stripe-Signature", sig)
+
+	rr := httptest.NewRecorder()
+	handler.HandleStripeWebhook(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	// Verify dunning was scheduled in the ZSET
+	members, err := redisClient.ZRangeByScore(ctx, dunningRetryZSet, &redis.ZRangeBy{
+		Min: "-inf",
+		Max: "+inf",
+	}).Result()
+	require.NoError(t, err)
+	assert.Len(t, members, 1)
+	assert.Equal(t, "stripe:po-failed", members[0])
+}
+
+func TestStripeWebhookHandler_SucceededPaymentDoesNotTriggerDunning(t *testing.T) {
+	handler, _, redisClient, _ := setupStripeWebhookHandlerWithProcessor(t)
+	ctx := context.Background()
+
+	payload := buildTestStripePayload(t, "evt_succ_no_dun", "payment_intent.succeeded", map[string]any{
+		"id":       "pi_succ_789",
+		"object":   "payment_intent",
+		"amount":   3000,
+		"currency": "gbp",
+		"metadata": map[string]string{"payment_order_id": "po-success"},
+		"status":   "succeeded",
+	})
+	sig := signTestPayload(t, payload, testStripeWebhookSecret)
+
+	tenantCtx := tenant.WithTenant(context.Background(), "test-tenant")
+	req := httptest.NewRequest(http.MethodPost, "/webhook/stripe", bytes.NewReader(payload)).WithContext(tenantCtx)
+	req.Header.Set("Stripe-Signature", sig)
+
+	rr := httptest.NewRecorder()
+	handler.HandleStripeWebhook(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	// Verify dunning was NOT scheduled
+	count, err := redisClient.ZCard(ctx, dunningRetryZSet).Result()
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), count)
+}
+
+func TestStripeWebhookHandler_RefundedDoesNotTriggerDunning(t *testing.T) {
+	handler, _, redisClient, _ := setupStripeWebhookHandlerWithProcessor(t)
+	ctx := context.Background()
+
+	payload := buildTestStripePayload(t, "evt_refund_no_dun", "charge.refunded", map[string]any{
+		"id":       "ch_refund_101",
+		"object":   "charge",
+		"amount":   4000,
+		"currency": "gbp",
+		"metadata": map[string]string{"payment_order_id": "po-refunded"},
+		"payment_intent": map[string]any{
+			"id":       "pi_refund_101",
+			"object":   "payment_intent",
+			"metadata": map[string]string{"payment_order_id": "po-refunded"},
+		},
+	})
+	sig := signTestPayload(t, payload, testStripeWebhookSecret)
+
+	tenantCtx := tenant.WithTenant(context.Background(), "test-tenant")
+	req := httptest.NewRequest(http.MethodPost, "/webhook/stripe", bytes.NewReader(payload)).WithContext(tenantCtx)
+	req.Header.Set("Stripe-Signature", sig)
+
+	rr := httptest.NewRecorder()
+	handler.HandleStripeWebhook(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	// Verify dunning was NOT scheduled for refunds
+	count, err := redisClient.ZCard(ctx, dunningRetryZSet).Result()
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), count)
 }

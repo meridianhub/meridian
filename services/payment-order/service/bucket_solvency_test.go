@@ -339,6 +339,7 @@ func TestPaymentOrchestrator_Orchestrate_PassesBucketIDToLien(t *testing.T) {
 			MaxRetries:      1,
 			InitialInterval: 1 * time.Millisecond,
 		},
+		SagaOrchestrationEnabled: true,
 	})
 	require.NoError(t, err)
 
@@ -422,6 +423,7 @@ func TestPaymentOrchestrator_Orchestrate_NoBucketIDForFullyFungible(t *testing.T
 			MaxRetries:      1,
 			InitialInterval: 1 * time.Millisecond,
 		},
+		SagaOrchestrationEnabled: true,
 	})
 	require.NoError(t, err)
 
@@ -503,6 +505,7 @@ func TestPaymentOrchestrator_Orchestrate_UpdatesPaymentOrderWithBucketID(t *test
 			MaxRetries:      1,
 			InitialInterval: 1 * time.Millisecond,
 		},
+		SagaOrchestrationEnabled: true,
 	})
 	require.NoError(t, err)
 

@@ -120,67 +120,11 @@ CREATE INDEX "idx_dataset_definition_created_at" ON "dataset_definition" ("creat
 -- Soft-delete support: index for finding non-deleted records
 CREATE INDEX "idx_dataset_definition_deleted_at" ON "dataset_definition" ("deleted_at");
 
--- Trigger function to enforce dataset lifecycle rules
--- Immutable fields cannot be changed once dataset is ACTIVE or DEPRECATED
--- Status transitions are strictly controlled
-CREATE OR REPLACE FUNCTION "enforce_dataset_lifecycle"()
-RETURNS TRIGGER AS $$
-BEGIN
-  -- Always update updated_at on any change
-  NEW."updated_at" = NOW();
-
-  -- Allow all edits when status is DRAFT
-  IF OLD."status" = 'DRAFT' THEN
-    -- If transitioning from DRAFT to ACTIVE, set activated_at
-    IF NEW."status" = 'ACTIVE' THEN
-      NEW."activated_at" = NOW();
-    -- If transitioning from DRAFT to DEPRECATED, set deprecated_at
-    ELSIF NEW."status" = 'DEPRECATED' THEN
-      NEW."deprecated_at" = NOW();
-    END IF;
-    RETURN NEW;
-  END IF;
-
-  -- For ACTIVE or DEPRECATED datasets, certain fields become immutable
-  IF OLD."status" IN ('ACTIVE', 'DEPRECATED') THEN
-    -- Prevent changes to immutable fields (validation rules that affect data integrity)
-    IF OLD."validation_expression" IS DISTINCT FROM NEW."validation_expression" THEN
-      RAISE EXCEPTION 'Cannot modify validation_expression for % dataset', OLD."status";
-    END IF;
-    IF OLD."resolution_key_expression" IS DISTINCT FROM NEW."resolution_key_expression" THEN
-      RAISE EXCEPTION 'Cannot modify resolution_key_expression for % dataset', OLD."status";
-    END IF;
-    IF OLD."error_message_expression" IS DISTINCT FROM NEW."error_message_expression" THEN
-      RAISE EXCEPTION 'Cannot modify error_message_expression for % dataset', OLD."status";
-    END IF;
-  END IF;
-
-  -- Prevent invalid status transitions
-  IF OLD."status" = 'ACTIVE' THEN
-    IF NEW."status" = 'DRAFT' THEN
-      RAISE EXCEPTION 'Cannot transition from ACTIVE back to DRAFT';
-    END IF;
-    -- Allow ACTIVE to DEPRECATED, set deprecated_at
-    IF NEW."status" = 'DEPRECATED' THEN
-      NEW."deprecated_at" = NOW();
-    END IF;
-  END IF;
-
-  IF OLD."status" = 'DEPRECATED' THEN
-    IF NEW."status" IN ('DRAFT', 'ACTIVE') THEN
-      RAISE EXCEPTION 'Cannot transition from DEPRECATED to %', NEW."status";
-    END IF;
-  END IF;
-
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
--- Create trigger to enforce lifecycle rules on UPDATE
-CREATE TRIGGER "trg_enforce_dataset_lifecycle"
-  BEFORE UPDATE ON "dataset_definition"
-  FOR EACH ROW
-  EXECUTE FUNCTION "enforce_dataset_lifecycle"();
+-- NOTE: Dataset lifecycle enforcement (immutable fields, status transitions,
+-- timestamp management) is handled at the application layer in
+-- domain/dataset_status.go and service/dataset_service.go.
+-- CockroachDB does not support PL/pgSQL triggers in user-defined functions.
+-- CHECK constraints above provide the database-level safety net.
 
 --------------------------------------------------------------------------------
 -- Section 3: Market Price Observation Table

@@ -6,12 +6,13 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
+	"github.com/meridianhub/meridian/shared/platform/redislock"
+	"github.com/meridianhub/meridian/shared/platform/scheduler"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -30,6 +31,9 @@ type DunningWorkerConfig struct {
 	PollInterval time.Duration
 	// MaxDunningLevel is the level at which accounts should be frozen.
 	MaxDunningLevel int
+	// ShutdownTimeout is the maximum time to wait for in-flight work during shutdown.
+	// Default: 30 seconds.
+	ShutdownTimeout time.Duration
 }
 
 // DunningCallback is called when a dunning escalation is due.
@@ -39,18 +43,19 @@ type DunningCallback func(ctx context.Context, run *domain.BillingRun) error
 // DunningWorker polls a Redis sorted set for due dunning retries and triggers
 // escalation. It uses ZADD to schedule retries with the due timestamp as score
 // and ZRANGEBYSCORE to find items whose due time has passed.
+//
+// Lifecycle management is delegated to scheduler.WorkerLifecycle.
+// Per-item distributed locking uses redislock.Lock to prevent duplicate
+// processing across replicas.
 type DunningWorker struct {
-	repo     persistence.BillingRepository
-	redis    *redis.Client
-	config   DunningWorkerConfig
-	callback DunningCallback
-	logger   *slog.Logger
-	metrics  *BillingMetrics
-
-	done    chan struct{}
-	wg      sync.WaitGroup
-	mu      sync.Mutex
-	running bool
+	lifecycle *scheduler.WorkerLifecycle
+	repo      persistence.BillingRepository
+	redis     *redis.Client
+	lock      *redislock.Lock
+	config    DunningWorkerConfig
+	callback  DunningCallback
+	logger    *slog.Logger
+	metrics   *BillingMetrics
 }
 
 // NewDunningWorker creates a new dunning retry worker.
@@ -80,35 +85,52 @@ func NewDunningWorker(
 	if config.MaxDunningLevel == 0 {
 		config.MaxDunningLevel = domain.MaxDunningLevel
 	}
+	if config.ShutdownTimeout == 0 {
+		config.ShutdownTimeout = 30 * time.Second
+	}
 	if metrics == nil {
 		metrics = NewBillingMetrics()
 	}
 
+	workerLogger := logger.With("component", "dunning_worker")
+
 	return &DunningWorker{
-		repo:     repo,
-		redis:    redisClient,
+		lifecycle: scheduler.NewWorkerLifecycle(workerLogger),
+		repo:      repo,
+		redis:     redisClient,
+		lock: redislock.NewLock(redisClient, redislock.Config{
+			KeyPrefix:  "dunning:lock",
+			LockTTL:    30 * time.Second,
+			RenewEvery: 10 * time.Second,
+		}, workerLogger),
 		config:   config,
 		callback: callback,
-		logger:   logger.With("component", "dunning_worker"),
+		logger:   workerLogger,
 		metrics:  metrics,
-		done:     make(chan struct{}),
 	}, nil
 }
 
 // Start begins the dunning worker polling loop.
 func (w *DunningWorker) Start(ctx context.Context) error {
-	w.mu.Lock()
-	if w.running {
-		w.mu.Unlock()
-		return ErrSchedulerRunning
-	}
-	w.running = true
-	w.mu.Unlock()
-
 	w.logger.Info("dunning worker starting",
 		"poll_interval", w.config.PollInterval,
 		"max_dunning_level", w.config.MaxDunningLevel)
 
+	return w.lifecycle.Start(ctx, func(ctx context.Context) error {
+		return w.pollLoop(ctx)
+	})
+}
+
+// Stop signals the dunning worker to shut down gracefully and waits for
+// in-flight work to complete up to the configured shutdown timeout.
+func (w *DunningWorker) Stop() {
+	w.lifecycle.Stop(w.config.ShutdownTimeout)
+	w.lock.ReleaseAll(context.Background())
+}
+
+// pollLoop runs the ticker-based polling loop. It blocks until the context
+// is cancelled (via lifecycle.Stop).
+func (w *DunningWorker) pollLoop(ctx context.Context) error {
 	ticker := time.NewTicker(w.config.PollInterval)
 	defer ticker.Stop()
 
@@ -116,33 +138,10 @@ func (w *DunningWorker) Start(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			w.logger.Info("dunning worker stopping: context cancelled")
-			w.mu.Lock()
-			w.running = false
-			w.mu.Unlock()
-			w.wg.Wait()
-			return nil
-		case <-w.done:
-			w.logger.Info("dunning worker stopping: explicit shutdown")
-			w.mu.Lock()
-			w.running = false
-			w.mu.Unlock()
-			w.wg.Wait()
 			return nil
 		case <-ticker.C:
 			w.processDueRetries(ctx)
 		}
-	}
-}
-
-// Stop signals the dunning worker to shut down gracefully.
-func (w *DunningWorker) Stop() {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	select {
-	case <-w.done:
-	default:
-		close(w.done)
 	}
 }
 
@@ -214,10 +213,35 @@ func (w *DunningWorker) processDueRetries(ctx context.Context) {
 // was handled (success or permanently resolved) and the ZSET member should be
 // removed. Returns false on transient errors so the member is retained for the
 // next poll cycle.
+//
+// Uses redislock.Lock for per-item locking to prevent duplicate processing
+// across replicas. Uses lifecycle.ExecuteGuarded to track in-flight work
+// for graceful shutdown.
 func (w *DunningWorker) processRetry(ctx context.Context, billingRunID uuid.UUID) bool {
-	w.wg.Add(1)
-	defer w.wg.Done()
+	// Acquire a per-item lock to prevent duplicate processing across replicas.
+	acquired, release, err := w.lock.Acquire(ctx, "dunning", billingRunID.String())
+	if err != nil {
+		w.logger.Error("failed to acquire dunning lock",
+			"billing_run_id", billingRunID,
+			"error", err)
+		return false
+	}
+	if !acquired {
+		w.logger.Debug("dunning retry already being processed by another replica",
+			"billing_run_id", billingRunID)
+		return false
+	}
+	defer release()
 
+	var result bool
+	w.lifecycle.ExecuteGuarded(func() {
+		result = w.executeRetry(ctx, billingRunID)
+	})
+	return result
+}
+
+// executeRetry performs the actual retry logic for a single billing run.
+func (w *DunningWorker) executeRetry(ctx context.Context, billingRunID uuid.UUID) bool {
 	// Load billing run from database
 	run, err := w.repo.FindBillingRunByID(ctx, billingRunID)
 	if err != nil {
