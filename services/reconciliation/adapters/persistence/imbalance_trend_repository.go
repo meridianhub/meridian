@@ -78,11 +78,9 @@ func (r *ImbalanceTrendRepository) Upsert(ctx context.Context, trend *domain.Imb
 			DoUpdates: clause.AssignmentColumns([]string{
 				"last_detected_at",
 				"consecutive_days",
-				"total_occurrences",
 				"last_imbalance_amount",
 				"last_assertion_id",
 				"resolved_at",
-				"metadata",
 				"updated_at",
 			}),
 		}).Create(entity).Error
