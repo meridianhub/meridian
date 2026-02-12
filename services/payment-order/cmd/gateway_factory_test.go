@@ -62,7 +62,6 @@ func TestCreatePaymentGateway_StripeMissingAPIKey(t *testing.T) {
 
 	gw, err := createPaymentGateway(logger)
 
-	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrMissingStripeAPIKey)
 	assert.Nil(t, gw)
-	assert.Contains(t, err.Error(), "STRIPE_API_KEY is required")
 }

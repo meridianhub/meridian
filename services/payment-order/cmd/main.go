@@ -50,6 +50,9 @@ var (
 // ErrMissingHMACSecret is returned when the WEBHOOK_HMAC_SECRET environment variable is not set.
 var ErrMissingHMACSecret = errors.New("WEBHOOK_HMAC_SECRET environment variable is required")
 
+// ErrMissingStripeAPIKey is returned when STRIPE_API_KEY is not set but the Stripe provider is selected.
+var ErrMissingStripeAPIKey = errors.New("STRIPE_API_KEY is required when PAYMENT_GATEWAY_PROVIDER is \"stripe\"")
+
 func main() {
 	// Initialize structured logging with configurable log level
 	// Note: bootstrap.NewLogger hardcodes INFO level, so we create logger manually for LOG_LEVEL support
@@ -574,7 +577,7 @@ func createPaymentGateway(logger *slog.Logger) (gateway.PaymentGateway, error) {
 	switch provider {
 	case gateway.ProviderStripe:
 		if stripeAPIKey == "" {
-			return nil, fmt.Errorf("STRIPE_API_KEY is required when PAYMENT_GATEWAY_PROVIDER is %q", gateway.ProviderStripe)
+			return nil, ErrMissingStripeAPIKey
 		}
 		client := stripego.NewClient(stripeAPIKey)
 		baseGateway = stripegateway.NewGatewayAdapter(
