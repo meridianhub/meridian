@@ -7,13 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
 	"github.com/meridianhub/meridian/shared/platform/env"
-)
-
-// PaymentGatewayProvider values.
-const (
-	ProviderStripe = "stripe"
-	ProviderMock   = "mock"
 )
 
 // ServiceConfig holds all payment-order service configuration loaded from
@@ -59,7 +54,7 @@ var (
 // a populated ServiceConfig. It does NOT validate — call Validate separately.
 func LoadServiceConfig() ServiceConfig {
 	return ServiceConfig{
-		PaymentGatewayProvider: env.GetEnvOrDefault("PAYMENT_GATEWAY_PROVIDER", ProviderMock),
+		PaymentGatewayProvider: env.GetEnvOrDefault("PAYMENT_GATEWAY_PROVIDER", gateway.ProviderMock),
 		StripeAPIKey:           env.GetEnvOrDefault("STRIPE_API_KEY", ""),
 		StripeWebhookSecret:    env.GetEnvOrDefault("STRIPE_WEBHOOK_SECRET", ""),
 		BillingEnabled:         env.GetEnvAsBool("BILLING_ENABLED", false),
@@ -73,17 +68,17 @@ func LoadServiceConfig() ServiceConfig {
 // an error for the first violated constraint.
 func (c ServiceConfig) Validate() error {
 	switch c.PaymentGatewayProvider {
-	case ProviderStripe:
+	case gateway.ProviderStripe:
 		if c.StripeAPIKey == "" {
 			return ErrMissingStripeAPIKey
 		}
 		if c.StripeWebhookSecret == "" {
 			return ErrMissingStripeWebhookSecret
 		}
-	case ProviderMock:
+	case gateway.ProviderMock:
 		// No additional requirements.
 	default:
-		return fmt.Errorf("%w: %q (valid: %q, %q)", ErrInvalidGatewayProvider, c.PaymentGatewayProvider, ProviderStripe, ProviderMock)
+		return fmt.Errorf("%w: %q (valid: %q, %q)", ErrInvalidGatewayProvider, c.PaymentGatewayProvider, gateway.ProviderStripe, gateway.ProviderMock)
 	}
 	return nil
 }

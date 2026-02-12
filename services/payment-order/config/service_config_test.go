@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -14,14 +15,14 @@ import (
 
 func TestValidate_MockProviderDefaults(t *testing.T) {
 	cfg := ServiceConfig{
-		PaymentGatewayProvider: ProviderMock,
+		PaymentGatewayProvider: gateway.ProviderMock,
 	}
 	assert.NoError(t, cfg.Validate())
 }
 
 func TestValidate_StripeProviderValid(t *testing.T) {
 	cfg := ServiceConfig{
-		PaymentGatewayProvider: ProviderStripe,
+		PaymentGatewayProvider: gateway.ProviderStripe,
 		StripeAPIKey:           "sk_test_abc123",
 		StripeWebhookSecret:    "whsec_test_abc123",
 	}
@@ -30,7 +31,7 @@ func TestValidate_StripeProviderValid(t *testing.T) {
 
 func TestValidate_StripeMissingAPIKey(t *testing.T) {
 	cfg := ServiceConfig{
-		PaymentGatewayProvider: ProviderStripe,
+		PaymentGatewayProvider: gateway.ProviderStripe,
 		StripeAPIKey:           "",
 		StripeWebhookSecret:    "whsec_test_abc123",
 	}
@@ -41,7 +42,7 @@ func TestValidate_StripeMissingAPIKey(t *testing.T) {
 
 func TestValidate_StripeMissingWebhookSecret(t *testing.T) {
 	cfg := ServiceConfig{
-		PaymentGatewayProvider: ProviderStripe,
+		PaymentGatewayProvider: gateway.ProviderStripe,
 		StripeAPIKey:           "sk_test_abc123",
 		StripeWebhookSecret:    "",
 	}
@@ -85,7 +86,7 @@ func TestLoadServiceConfig_Defaults(t *testing.T) {
 
 	cfg := LoadServiceConfig()
 
-	assert.Equal(t, ProviderMock, cfg.PaymentGatewayProvider)
+	assert.Equal(t, gateway.ProviderMock, cfg.PaymentGatewayProvider)
 	assert.Empty(t, cfg.StripeAPIKey)
 	assert.Empty(t, cfg.StripeWebhookSecret)
 	assert.False(t, cfg.BillingEnabled)
@@ -105,7 +106,7 @@ func TestLoadServiceConfig_StripeFromEnv(t *testing.T) {
 
 	cfg := LoadServiceConfig()
 
-	assert.Equal(t, ProviderStripe, cfg.PaymentGatewayProvider)
+	assert.Equal(t, gateway.ProviderStripe, cfg.PaymentGatewayProvider)
 	assert.Equal(t, "sk_live_key123", cfg.StripeAPIKey)
 	assert.Equal(t, "whsec_secret456", cfg.StripeWebhookSecret)
 	assert.True(t, cfg.BillingEnabled)
@@ -159,7 +160,7 @@ func TestLogValues_RedactsSensitiveValues(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(&buf, nil))
 
 	cfg := ServiceConfig{
-		PaymentGatewayProvider: ProviderStripe,
+		PaymentGatewayProvider: gateway.ProviderStripe,
 		StripeAPIKey:           "sk_live_realkey123456",
 		StripeWebhookSecret:    "whsec_realsecret7890",
 		BillingEnabled:         true,

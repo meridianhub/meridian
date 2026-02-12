@@ -667,7 +667,7 @@ func createPaymentGateway(svcConfig config.ServiceConfig, logger *slog.Logger) (
 	var baseGateway gateway.PaymentGateway
 
 	switch svcConfig.PaymentGatewayProvider {
-	case config.ProviderStripe:
+	case gateway.ProviderStripe:
 		client := stripego.NewClient(svcConfig.StripeAPIKey)
 		baseGateway = stripegateway.NewGatewayAdapter(
 			client.V1PaymentIntents,
@@ -676,7 +676,7 @@ func createPaymentGateway(svcConfig config.ServiceConfig, logger *slog.Logger) (
 		)
 		logger.Info("using stripe payment gateway")
 
-	case config.ProviderMock:
+	case gateway.ProviderMock:
 		logger.Warn("using mock payment gateway")
 		baseGateway = gateway.New(gateway.Config{
 			UseMock: true,
@@ -686,7 +686,7 @@ func createPaymentGateway(svcConfig config.ServiceConfig, logger *slog.Logger) (
 		})
 
 	default:
-		return nil, fmt.Errorf("%w: %q (valid: %q, %q)", config.ErrInvalidGatewayProvider, svcConfig.PaymentGatewayProvider, config.ProviderStripe, config.ProviderMock)
+		return nil, fmt.Errorf("%w: %q (valid: %q, %q)", config.ErrInvalidGatewayProvider, svcConfig.PaymentGatewayProvider, gateway.ProviderStripe, gateway.ProviderMock)
 	}
 
 	// Configure resilience settings from environment

@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
 	"github.com/meridianhub/meridian/services/payment-order/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -13,7 +14,7 @@ import (
 func TestCreatePaymentGateway_DefaultMock(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	cfg := config.ServiceConfig{
-		PaymentGatewayProvider: config.ProviderMock,
+		PaymentGatewayProvider: gateway.ProviderMock,
 	}
 
 	gw, err := createPaymentGateway(cfg, logger)
@@ -25,7 +26,7 @@ func TestCreatePaymentGateway_DefaultMock(t *testing.T) {
 func TestCreatePaymentGateway_ExplicitMock(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	cfg := config.ServiceConfig{
-		PaymentGatewayProvider: config.ProviderMock,
+		PaymentGatewayProvider: gateway.ProviderMock,
 	}
 
 	gw, err := createPaymentGateway(cfg, logger)
@@ -37,7 +38,7 @@ func TestCreatePaymentGateway_ExplicitMock(t *testing.T) {
 func TestCreatePaymentGateway_StripeProvider(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	cfg := config.ServiceConfig{
-		PaymentGatewayProvider: config.ProviderStripe,
+		PaymentGatewayProvider: gateway.ProviderStripe,
 		StripeAPIKey:           "sk_test_fake_key_for_unit_test",
 	}
 
