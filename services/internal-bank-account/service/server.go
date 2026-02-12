@@ -578,7 +578,7 @@ func (s *Service) GetBalance(ctx context.Context, req *pb.GetBalanceRequest) (*p
 		ibaobservability.RecordOperationDuration("get_balance", operationStatus, time.Since(start))
 	}()
 
-	if req.AccountId == "" {
+	if strings.TrimSpace(req.AccountId) == "" {
 		operationStatus = operationStatusFailed
 		return nil, status.Error(codes.InvalidArgument, "account_id is required")
 	}

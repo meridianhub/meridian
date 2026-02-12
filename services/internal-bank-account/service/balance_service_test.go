@@ -467,14 +467,16 @@ func TestBalanceService_GetBalance_EmptyAccountIdReturnsInvalidArgument(t *testi
 
 	ctx := context.Background()
 
-	_, err = svc.GetBalance(ctx, &pb.GetBalanceRequest{
-		AccountId: "",
-	})
-	assert.Error(t, err)
-	st, ok := status.FromError(err)
-	require.True(t, ok)
-	assert.Equal(t, codes.InvalidArgument, st.Code())
-	assert.Contains(t, st.Message(), "account_id is required")
+	for _, accountID := range []string{"", "   ", "\t"} {
+		_, err = svc.GetBalance(ctx, &pb.GetBalanceRequest{
+			AccountId: accountID,
+		})
+		assert.Error(t, err)
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.InvalidArgument, st.Code())
+		assert.Contains(t, st.Message(), "account_id is required")
+	}
 }
 
 func TestBalanceService_GetBalance_MissingCurrentBalanceReturnsNilBalance(t *testing.T) {
