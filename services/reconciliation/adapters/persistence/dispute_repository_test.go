@@ -117,6 +117,32 @@ func setupTestDB(t *testing.T) (*gorm.DB, func()) {
 		);
 		CREATE UNIQUE INDEX IF NOT EXISTS "idx_d_disp_id" ON "dispute" ("dispute_id");
 
+		CREATE TABLE IF NOT EXISTS "balance_assertion" (
+			"id" uuid NOT NULL DEFAULT gen_random_uuid(),
+			"created_at" timestamptz NOT NULL DEFAULT now(),
+			"updated_at" timestamptz NOT NULL DEFAULT now(),
+			"assertion_id" uuid NOT NULL,
+			"run_id" uuid NULL,
+			"account_id" character varying(34) NOT NULL,
+			"instrument_code" character varying(20) NOT NULL,
+			"expression" text NOT NULL,
+			"expected_balance" decimal(38, 18) NOT NULL,
+			"actual_balance" decimal(38, 18) NOT NULL DEFAULT 0,
+			"status" character varying(20) NOT NULL DEFAULT 'PENDING',
+			"failure_reason" text NULL,
+			"override_reason" text NULL,
+			"attributes" jsonb NULL,
+			"metadata" jsonb NULL,
+			"asserted_at" timestamptz NULL,
+			"version" bigint NOT NULL DEFAULT 1,
+			PRIMARY KEY ("id")
+		);
+		CREATE UNIQUE INDEX IF NOT EXISTS "idx_ba_assertion_id" ON "balance_assertion" ("assertion_id");
+		CREATE INDEX IF NOT EXISTS "idx_ba_run_id" ON "balance_assertion" ("run_id");
+		CREATE INDEX IF NOT EXISTS "idx_ba_account_id" ON "balance_assertion" ("account_id");
+		CREATE INDEX IF NOT EXISTS "idx_ba_instrument_code" ON "balance_assertion" ("instrument_code");
+		CREATE INDEX IF NOT EXISTS "idx_ba_status" ON "balance_assertion" ("status");
+
 		SET search_path TO public;
 	`
 	err = db.Exec(migrationSQL).Error

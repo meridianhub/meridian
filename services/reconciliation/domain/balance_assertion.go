@@ -44,11 +44,20 @@ type BalanceAssertion struct {
 	// Attributes stores flexible metadata.
 	Attributes map[string]string
 
+	// Metadata stores additional structured metadata.
+	Metadata map[string]string
+
 	// AssertedAt is when the assertion was evaluated.
 	AssertedAt time.Time
 
 	// CreatedAt is when this record was created.
 	CreatedAt time.Time
+
+	// UpdatedAt is when this record was last updated.
+	UpdatedAt time.Time
+
+	// Version is used for optimistic locking.
+	Version int64
 }
 
 // NewBalanceAssertion creates a new BalanceAssertion with validation.
@@ -79,6 +88,8 @@ func NewBalanceAssertion(
 		ExpectedBalance: expectedBalance,
 		Status:          AssertionStatusPending,
 		CreatedAt:       now,
+		UpdatedAt:       now,
+		Version:         1,
 	}, nil
 }
 
@@ -87,9 +98,12 @@ func (a *BalanceAssertion) Pass(actualBalance decimal.Decimal) error {
 	if !a.Status.CanTransitionTo(AssertionStatusPassed) {
 		return ErrInvalidStatusTransition
 	}
+	now := time.Now().UTC()
 	a.Status = AssertionStatusPassed
 	a.ActualBalance = actualBalance
-	a.AssertedAt = time.Now().UTC()
+	a.AssertedAt = now
+	a.UpdatedAt = now
+	a.Version++
 	return nil
 }
 
@@ -98,10 +112,13 @@ func (a *BalanceAssertion) Fail(actualBalance decimal.Decimal, reason string) er
 	if !a.Status.CanTransitionTo(AssertionStatusFailed) {
 		return ErrInvalidStatusTransition
 	}
+	now := time.Now().UTC()
 	a.Status = AssertionStatusFailed
 	a.ActualBalance = actualBalance
 	a.FailureReason = reason
-	a.AssertedAt = time.Now().UTC()
+	a.AssertedAt = now
+	a.UpdatedAt = now
+	a.Version++
 	return nil
 }
 
@@ -114,5 +131,7 @@ func (a *BalanceAssertion) Override(reason string) error {
 	}
 	a.Status = AssertionStatusOverride
 	a.OverrideReason = reason
+	a.UpdatedAt = time.Now().UTC()
+	a.Version++
 	return nil
 }
