@@ -151,11 +151,11 @@ func TestStripeEventProcessor_ScheduleDunning(t *testing.T) {
 		assert.Equal(t, int64(0), count)
 	})
 
-	t.Run("empty tenant ID is a no-op", func(t *testing.T) {
+	t.Run("empty tenant ID returns error", func(t *testing.T) {
 		proc, _, _ := setupTestEventProcessor(t)
 
 		err := proc.ScheduleDunning(ctx, "", "po-123")
-		assert.NoError(t, err)
+		assert.ErrorIs(t, err, ErrDunningMissingTenant)
 	})
 
 	t.Run("multiple dunning entries are independent", func(t *testing.T) {

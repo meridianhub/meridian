@@ -14,6 +14,7 @@ import (
 var (
 	ErrNilRedisClient        = errors.New("redis client cannot be nil")
 	ErrEventAlreadyProcessed = errors.New("stripe event already processed")
+	ErrDunningMissingTenant  = errors.New("tenant ID is required for dunning scheduling")
 )
 
 // Stripe event processor constants.
@@ -109,8 +110,9 @@ func (p *StripeEventProcessor) ScheduleDunning(ctx context.Context, tenantID, pa
 		return nil
 	}
 	if tenantID == "" {
-		p.logger.Warn("cannot schedule dunning: empty tenant ID")
-		return nil
+		p.logger.Error("cannot schedule dunning: empty tenant ID",
+			"payment_order_id", paymentOrderID)
+		return ErrDunningMissingTenant
 	}
 
 	dueAt := time.Now().Add(defaultDunningDelay)
