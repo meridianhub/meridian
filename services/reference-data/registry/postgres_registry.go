@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -399,7 +398,6 @@ func (r *PostgresRegistry) UpdateDefinition(ctx context.Context, code string, ve
 // ActivateInstrument transitions an instrument from DRAFT to ACTIVE.
 func (r *PostgresRegistry) ActivateInstrument(ctx context.Context, code string, version int) error {
 	return r.withWriteTransaction(ctx, func(tx pgx.Tx) error {
-		// Check current state
 		var isSystem bool
 		var currentStatus string
 
@@ -416,11 +414,10 @@ func (r *PostgresRegistry) ActivateInstrument(ctx context.Context, code string, 
 			return ErrSystemInstrumentReadOnly
 		}
 
-		if currentStatus != string(StatusDraft) {
+		if err := ValidateStatusTransition(Status(currentStatus), StatusActive); err != nil {
 			return ErrNotDraft
 		}
 
-		// Transition to ACTIVE
 		now := time.Now()
 		updateQuery := `
 			UPDATE instrument_definition SET
@@ -439,16 +436,21 @@ func (r *PostgresRegistry) ActivateInstrument(ctx context.Context, code string, 
 }
 
 // DeprecateInstrument transitions an instrument from ACTIVE to DEPRECATED.
-// If successorID is provided, the database trigger validates that the successor exists,
-// is ACTIVE, and has the same dimension as the deprecated instrument.
+// Successor validation is enforced at the Go application layer (CockroachDB does not support PL/pgSQL triggers):
+// the successor must exist, be ACTIVE, have the same dimension, and not be self-referential.
+// Successor ID is write-once: once set, it cannot be changed.
 func (r *PostgresRegistry) DeprecateInstrument(ctx context.Context, code string, version int, successorID *uuid.UUID) error {
 	return r.withWriteTransaction(ctx, func(tx pgx.Tx) error {
-		// Check current state
+		var instrumentID uuid.UUID
 		var isSystem bool
 		var currentStatus string
+		var currentDimension string
+		var existingSuccessorID *uuid.UUID
 
-		checkQuery := `SELECT is_system, status FROM instrument_definition WHERE code = $1 AND version = $2`
-		err := tx.QueryRow(ctx, checkQuery, code, version).Scan(&isSystem, &currentStatus)
+		checkQuery := `SELECT id, is_system, status, dimension, successor_id
+			FROM instrument_definition WHERE code = $1 AND version = $2`
+		err := tx.QueryRow(ctx, checkQuery, code, version).Scan(
+			&instrumentID, &isSystem, &currentStatus, &currentDimension, &existingSuccessorID)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrNotFound
@@ -460,11 +462,22 @@ func (r *PostgresRegistry) DeprecateInstrument(ctx context.Context, code string,
 			return ErrSystemInstrumentReadOnly
 		}
 
-		if currentStatus != string(StatusActive) {
+		if err := ValidateStatusTransition(Status(currentStatus), StatusDeprecated); err != nil {
 			return ErrNotActive
 		}
 
-		// Transition to DEPRECATED with optional successor
+		// Enforce write-once semantics for successor_id
+		if existingSuccessorID != nil && successorID != nil && *existingSuccessorID != *successorID {
+			return ErrSuccessorWriteOnce
+		}
+
+		// Validate successor if provided
+		if successorID != nil {
+			if err := r.validateSuccessor(ctx, tx, instrumentID, *successorID, currentDimension); err != nil {
+				return err
+			}
+		}
+
 		now := time.Now()
 		updateQuery := `
 			UPDATE instrument_definition SET
@@ -476,28 +489,41 @@ func (r *PostgresRegistry) DeprecateInstrument(ctx context.Context, code string,
 
 		_, err = tx.Exec(ctx, updateQuery, now, code, version, successorID)
 		if err != nil {
-			// Check if the error is from the successor validation trigger
-			var pgErr *pgconn.PgError
-			if errors.As(err, &pgErr) && pgErr.Code == "P0001" { // raise_exception
-				// Map specific trigger errors based on error message
-				msg := pgErr.Message
-				msgLower := strings.ToLower(msg)
-				switch {
-				case strings.Contains(msgLower, "successor"):
-					return ErrSuccessorInvalid
-				case strings.Contains(msgLower, "cannot transition"):
-					return ErrInvalidStateTransition
-				case strings.Contains(msgLower, "cannot modify"):
-					return ErrInvalidStatus
-				default:
-					return fmt.Errorf("%w: %s", ErrInvalidStatus, msg)
-				}
-			}
 			return fmt.Errorf("failed to deprecate instrument: %w", err)
 		}
 
 		return nil
 	})
+}
+
+// validateSuccessor checks that a proposed successor instrument is valid.
+// It must exist, be ACTIVE, have the same dimension, and not be the instrument itself.
+func (r *PostgresRegistry) validateSuccessor(ctx context.Context, tx pgx.Tx, instrumentID, successorID uuid.UUID, requiredDimension string) error {
+	// Cannot designate self as successor
+	if successorID == instrumentID {
+		return ErrSuccessorInvalid
+	}
+
+	var successorStatus string
+	var successorDimension string
+	query := `SELECT status, dimension FROM instrument_definition WHERE id = $1`
+	err := tx.QueryRow(ctx, query, successorID).Scan(&successorStatus, &successorDimension)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrSuccessorInvalid
+		}
+		return fmt.Errorf("failed to query successor instrument: %w", err)
+	}
+
+	if successorStatus != string(StatusActive) {
+		return ErrSuccessorInvalid
+	}
+
+	if successorDimension != requiredDimension {
+		return ErrSuccessorInvalid
+	}
+
+	return nil
 }
 
 // ValidateAttributes executes the CEL validation expression against the provided attributes.
