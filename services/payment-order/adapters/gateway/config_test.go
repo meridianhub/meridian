@@ -29,6 +29,7 @@ func TestNew_WithMock(t *testing.T) {
 	gw := gateway.New(config)
 
 	assert.NotNil(t, gw)
+	assert.IsType(t, &gateway.MockGateway{}, gw)
 }
 
 func TestNew_WithoutMock(t *testing.T) {
@@ -40,6 +41,11 @@ func TestNew_WithoutMock(t *testing.T) {
 
 	// Should return a fallback gateway (mock for now until real implementation)
 	assert.NotNil(t, gw)
+}
+
+func TestProviderConstants(t *testing.T) {
+	assert.Equal(t, "stripe", gateway.ProviderStripe)
+	assert.Equal(t, "mock", gateway.ProviderMock)
 }
 
 func TestDefaultMockGatewayConfig(t *testing.T) {

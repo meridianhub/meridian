@@ -6,10 +6,22 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 )
 
+// Provider constants for gateway selection.
+const (
+	ProviderStripe = "stripe"
+	ProviderMock   = "mock"
+)
+
 // Config holds configuration for payment gateway connections.
 // Note: Timeout, MaxRetries, and RetryBackoff are defined for the real gateway
 // implementation (to be added). The mock gateway does not use these values.
 type Config struct {
+	// Provider selects the gateway implementation: "stripe" or "mock".
+	// Empty defaults to mock.
+	Provider string
+	// StripeAPIKey is the platform-level Stripe API key.
+	// Required when Provider is "stripe".
+	StripeAPIKey string
 	// Timeout is the maximum duration to wait for a gateway response.
 	// Used by real gateway implementation (not mock).
 	Timeout time.Duration
@@ -40,6 +52,9 @@ func DefaultConfig() Config {
 // If UseMock is true, returns a MockGateway with the provided MockConfig.
 // Otherwise, returns a MockGateway with default config as a fallback
 // until the real gateway implementation is added.
+//
+// For provider-based instantiation (e.g., Stripe), use NewStripeGateway
+// from the cmd package or construct the adapter directly.
 func New(config Config) PaymentGateway {
 	if config.UseMock {
 		return NewMockGateway(config.MockConfig)
