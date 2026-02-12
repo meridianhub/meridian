@@ -265,3 +265,48 @@ func TestRemovePaymentMethod_Integration(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, listResp.PaymentMethods)
 }
+
+// TestSetDefaultPaymentMethod_Integration verifies switching the default payment method.
+func TestSetDefaultPaymentMethod_Integration(t *testing.T) {
+	svc, _, ctx, cleanup := setupPaymentMethodIntegrationTest(t)
+	defer cleanup()
+
+	partyID := registerPartyForPM(t, svc, ctx)
+
+	// Add first payment method as default
+	first, err := svc.AddPaymentMethod(ctx, &pb.AddPaymentMethodRequest{
+		PartyId:            partyID,
+		Provider:           pb.PaymentMethodProvider_PAYMENT_METHOD_PROVIDER_STRIPE,
+		ProviderCustomerId: "cus_defaulttest12",
+		ProviderMethodId:   "pm_defaultfirst12",
+		MethodType:         pb.PaymentMethodType_PAYMENT_METHOD_TYPE_CARD,
+		IsDefault:          true,
+	})
+	require.NoError(t, err)
+	assert.True(t, first.PaymentMethod.IsDefault)
+
+	// Add second payment method (not default)
+	second, err := svc.AddPaymentMethod(ctx, &pb.AddPaymentMethodRequest{
+		PartyId:            partyID,
+		Provider:           pb.PaymentMethodProvider_PAYMENT_METHOD_PROVIDER_STRIPE,
+		ProviderCustomerId: "cus_defaulttest12",
+		ProviderMethodId:   "pm_defaultsecnd1",
+		MethodType:         pb.PaymentMethodType_PAYMENT_METHOD_TYPE_BANK_ACCOUNT,
+	})
+	require.NoError(t, err)
+	assert.False(t, second.PaymentMethod.IsDefault)
+
+	// Switch default to second
+	setResp, err := svc.SetDefaultPaymentMethod(ctx, &pb.SetDefaultPaymentMethodRequest{
+		Id: second.PaymentMethod.Id,
+	})
+	require.NoError(t, err)
+	assert.True(t, setResp.PaymentMethod.IsDefault)
+
+	// Verify new default
+	defaultResp, err := svc.GetDefaultPaymentMethod(ctx, &pb.GetDefaultPaymentMethodRequest{
+		PartyId: partyID,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, second.PaymentMethod.Id, defaultResp.PaymentMethod.Id)
+}
