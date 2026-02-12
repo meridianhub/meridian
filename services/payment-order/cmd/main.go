@@ -13,6 +13,7 @@ import (
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
+	stripegateway "github.com/meridianhub/meridian/services/payment-order/adapters/gateway/stripe"
 	webhookhttp "github.com/meridianhub/meridian/services/payment-order/adapters/http"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
 	"github.com/meridianhub/meridian/services/payment-order/config"
@@ -275,14 +276,21 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("failed to create webhook handler: %w", err)
 	}
 
+	// Create Stripe webhook handler (optional - only if STRIPE_API_KEY is configured)
+	stripeWebhookHandler, err := createStripeWebhookHandler(webhookHandler, logger)
+	if err != nil {
+		return fmt.Errorf("failed to create stripe webhook handler: %w", err)
+	}
+
 	// Create HTTP server
 	httpPort := env.GetEnvAsInt("HTTP_PORT", ports.Gateway)
 	httpServer, err := webhookhttp.NewServer(webhookhttp.ServerConfig{
-		Port:               httpPort,
-		WebhookHandler:     webhookHandler,
-		Logger:             logger,
-		RateLimitPerSecond: env.GetEnvAsFloat("HTTP_RATE_LIMIT_PER_SECOND", 100),
-		RateLimitBurst:     env.GetEnvAsInt("HTTP_RATE_LIMIT_BURST", 200),
+		Port:                 httpPort,
+		WebhookHandler:       webhookHandler,
+		StripeWebhookHandler: stripeWebhookHandler,
+		Logger:               logger,
+		RateLimitPerSecond:   env.GetEnvAsFloat("HTTP_RATE_LIMIT_PER_SECOND", 100),
+		RateLimitBurst:       env.GetEnvAsInt("HTTP_RATE_LIMIT_BURST", 200),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create HTTP server: %w", err)
@@ -670,6 +678,61 @@ func createGatewayAccountConfig(logger *slog.Logger) (*config.GatewayAccountConf
 		"gateway_count", len(cfg.Mappings))
 
 	return cfg, nil
+}
+
+// createStripeWebhookHandler creates the StripeWebhookHandler if STRIPE_API_KEY is configured.
+// Returns nil (no error) when Stripe is not configured, making the handler optional.
+func createStripeWebhookHandler(webhookHandler *webhookhttp.WebhookHandler, logger *slog.Logger) (*webhookhttp.StripeWebhookHandler, error) {
+	stripeAPIKey := env.GetEnvOrDefault("STRIPE_API_KEY", "")
+	if stripeAPIKey == "" {
+		logger.Info("STRIPE_API_KEY not set, Stripe webhook handler disabled")
+		return nil, nil //nolint:nilnil // nil handler is intentional: ServerConfig treats nil as "feature disabled"
+	}
+
+	stripeWebhookSecret := env.GetEnvOrDefault("STRIPE_WEBHOOK_SECRET", "")
+
+	// Use env-based tenant config provider as a stub until Task 6 implements
+	// the real TenantConfigProvider backed by control-plane gRPC.
+	provider := &envTenantConfigProvider{
+		webhookSecret: stripeWebhookSecret,
+	}
+
+	cfg := stripegateway.DefaultConfig()
+	cfg.APIKey = stripeAPIKey
+
+	clientFactory, err := stripegateway.NewClientFactory(cfg, provider, logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stripe client factory: %w", err)
+	}
+
+	handler, err := webhookhttp.NewStripeWebhookHandler(webhookhttp.StripeWebhookHandlerConfig{
+		ClientFactory:  clientFactory,
+		WebhookHandler: webhookHandler,
+		Logger:         logger,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stripe webhook handler: %w", err)
+	}
+
+	logger.Info("stripe webhook handler enabled", "route", "/webhook/stripe")
+	return handler, nil
+}
+
+// envTenantConfigProvider is a stub TenantConfigProvider that returns a global
+// webhook secret from environment variables. This will be replaced by a real
+// implementation in Task 6 that fetches per-tenant config from the control plane.
+type envTenantConfigProvider struct {
+	webhookSecret string
+}
+
+func (p *envTenantConfigProvider) GetTenantConfig(_ string) (stripegateway.TenantConfig, error) {
+	if p.webhookSecret == "" {
+		return stripegateway.TenantConfig{}, stripegateway.ErrTenantConfigNotFound
+	}
+	return stripegateway.TenantConfig{
+		ConnectedAccountID:    "platform", // Placeholder until per-tenant config
+		WebhookEndpointSecret: p.webhookSecret,
+	}, nil
 }
 
 // parseLogLevel converts a string log level to slog.Level.
