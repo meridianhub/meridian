@@ -57,12 +57,6 @@ var (
 // ErrMissingHMACSecret is returned when the WEBHOOK_HMAC_SECRET environment variable is not set.
 var ErrMissingHMACSecret = errors.New("WEBHOOK_HMAC_SECRET environment variable is required")
 
-// ErrMissingStripeAPIKey is returned when STRIPE_API_KEY is not set but the Stripe provider is selected.
-var ErrMissingStripeAPIKey = errors.New("STRIPE_API_KEY is required when PAYMENT_GATEWAY_PROVIDER is \"stripe\"")
-
-// ErrUnsupportedGatewayProvider is returned when PAYMENT_GATEWAY_PROVIDER has an unknown value.
-var ErrUnsupportedGatewayProvider = errors.New("unsupported PAYMENT_GATEWAY_PROVIDER value")
-
 func main() {
 	// Initialize structured logging with configurable log level
 	// Note: bootstrap.NewLogger hardcodes INFO level, so we create logger manually for LOG_LEVEL support
@@ -88,6 +82,13 @@ func main() {
 
 func run(logger *slog.Logger) error {
 	ctx := context.Background()
+
+	// Load and validate service configuration early (fail fast).
+	svcConfig := config.LoadServiceConfig()
+	if err := svcConfig.Validate(); err != nil {
+		return fmt.Errorf("invalid service configuration: %w", err)
+	}
+	svcConfig.LogValues(logger)
 
 	// Initialize OpenTelemetry tracer
 	tracer, err := bootstrap.NewTracer(ctx, bootstrap.TracerConfig{
@@ -146,7 +147,7 @@ func run(logger *slog.Logger) error {
 	}
 
 	// Create payment gateway
-	paymentGateway, err := createPaymentGateway(logger)
+	paymentGateway, err := createPaymentGateway(svcConfig, logger)
 	if err != nil {
 		return fmt.Errorf("failed to create payment gateway: %w", err)
 	}
@@ -241,18 +242,14 @@ func run(logger *slog.Logger) error {
 	_ = handlerRegistry
 
 	// Start billing background workers (feature-flagged)
-	billingEnabled := env.GetEnvAsBool("BILLING_ENABLED", false)
 	var billingScheduler *worker.BillingScheduler
 	var dunningWorker *worker.DunningWorker
 
-	if billingEnabled {
+	if svcConfig.BillingEnabled {
 		billingRepo := persistence.NewBillingRepository(db)
 		billingMetrics := worker.NewBillingMetrics()
 
 		tenantID := env.GetEnvOrDefault("BILLING_TENANT_ID", "default")
-		cronSchedule := env.GetEnvOrDefault("BILLING_CRON_SCHEDULE", "0 0 * * *")
-		shadowMode := env.GetEnvAsBool("BILLING_SHADOW_MODE", false)
-		pollInterval := env.GetEnvAsDuration("DUNNING_POLL_INTERVAL", 5*time.Minute)
 
 		var err error
 		billingScheduler, err = worker.NewBillingScheduler(
@@ -260,8 +257,8 @@ func run(logger *slog.Logger) error {
 			redisClient,
 			worker.BillingSchedulerConfig{
 				TenantID:       tenantID,
-				CronExpression: cronSchedule,
-				ShadowMode:     shadowMode,
+				CronExpression: svcConfig.BillingCronSchedule,
+				ShadowMode:     svcConfig.BillingShadowMode,
 			},
 			logger,
 			billingMetrics,
@@ -282,7 +279,7 @@ func run(logger *slog.Logger) error {
 			billingRepo,
 			redisClient,
 			worker.DunningWorkerConfig{
-				PollInterval: pollInterval,
+				PollInterval: svcConfig.DunningPollInterval,
 			},
 			dunningCallback,
 			logger,
@@ -293,9 +290,9 @@ func run(logger *slog.Logger) error {
 		}
 
 		logger.Info("billing workers configured",
-			"cron_schedule", cronSchedule,
-			"shadow_mode", shadowMode,
-			"dunning_poll_interval", pollInterval,
+			"cron_schedule", svcConfig.BillingCronSchedule,
+			"shadow_mode", svcConfig.BillingShadowMode,
+			"dunning_poll_interval", svcConfig.DunningPollInterval,
 			"tenant_id", tenantID)
 	} else {
 		logger.Info("billing workers disabled (BILLING_ENABLED=false)")
@@ -357,7 +354,7 @@ func run(logger *slog.Logger) error {
 	}
 
 	// Create Stripe webhook handler (optional - only if STRIPE_API_KEY is configured)
-	stripeWebhookHandler, err := createStripeWebhookHandler(webhookHandler, logger)
+	stripeWebhookHandler, err := createStripeWebhookHandler(svcConfig, webhookHandler, logger)
 	if err != nil {
 		return fmt.Errorf("failed to create stripe webhook handler: %w", err)
 	}
@@ -409,7 +406,7 @@ func run(logger *slog.Logger) error {
 	workerCtx, workerCancel := context.WithCancel(ctx)
 	defer workerCancel()
 	var billingWg sync.WaitGroup
-	if billingEnabled && billingScheduler != nil && dunningWorker != nil {
+	if svcConfig.BillingEnabled && billingScheduler != nil && dunningWorker != nil {
 		billingWg.Add(2)
 		go func() {
 			defer billingWg.Done()
@@ -451,7 +448,7 @@ func run(logger *slog.Logger) error {
 	// Stop billing workers and wait for goroutines to exit before database close.
 	// Cancel the worker context first to unblock Start() select loops, then
 	// call Stop() to signal internal shutdown channels and drain in-flight work.
-	if billingEnabled && billingScheduler != nil && dunningWorker != nil {
+	if svcConfig.BillingEnabled && billingScheduler != nil && dunningWorker != nil {
 		logger.Info("stopping billing workers...")
 		workerCancel()
 		billingScheduler.Stop()
@@ -668,22 +665,14 @@ func createInternalBankAccountClient(namespace string, logger *slog.Logger, trac
 
 // createPaymentGateway creates the payment gateway client with resilience patterns.
 // The gateway is wrapped with circuit breaker, rate limiting, and retry logic.
-//
-// Environment variables:
-//   - PAYMENT_GATEWAY_PROVIDER: Gateway provider ("stripe" or "mock", default: "mock")
-//   - STRIPE_API_KEY: Platform Stripe API key (required when provider is "stripe")
-func createPaymentGateway(logger *slog.Logger) (gateway.PaymentGateway, error) {
-	provider := env.GetEnvOrDefault("PAYMENT_GATEWAY_PROVIDER", gateway.ProviderMock)
-	stripeAPIKey := env.GetEnvOrDefault("STRIPE_API_KEY", "")
-
+// Provider selection and API key validation are handled by ServiceConfig.Validate,
+// so this function assumes the config is already validated.
+func createPaymentGateway(svcConfig config.ServiceConfig, logger *slog.Logger) (gateway.PaymentGateway, error) {
 	var baseGateway gateway.PaymentGateway
 
-	switch provider {
+	switch svcConfig.PaymentGatewayProvider {
 	case gateway.ProviderStripe:
-		if stripeAPIKey == "" {
-			return nil, ErrMissingStripeAPIKey
-		}
-		client := stripego.NewClient(stripeAPIKey)
+		client := stripego.NewClient(svcConfig.StripeAPIKey)
 		baseGateway = stripegateway.NewGatewayAdapter(
 			client.V1PaymentIntents,
 			stripegateway.GatewayAdapterConfig{},
@@ -701,7 +690,7 @@ func createPaymentGateway(logger *slog.Logger) (gateway.PaymentGateway, error) {
 		})
 
 	default:
-		return nil, fmt.Errorf("%w: %q (valid: %q, %q)", ErrUnsupportedGatewayProvider, provider, gateway.ProviderStripe, gateway.ProviderMock)
+		return nil, fmt.Errorf("%w: %q (valid: %q, %q)", config.ErrInvalidGatewayProvider, svcConfig.PaymentGatewayProvider, gateway.ProviderStripe, gateway.ProviderMock)
 	}
 
 	// Configure resilience settings from environment
@@ -815,12 +804,11 @@ func createGatewayAccountConfig(logger *slog.Logger) (*config.GatewayAccountConf
 	return cfg, nil
 }
 
-// createStripeWebhookHandler creates the StripeWebhookHandler if STRIPE_API_KEY is configured.
-// Returns nil (no error) when Stripe is not configured, making the handler optional.
-func createStripeWebhookHandler(webhookHandler *webhookhttp.WebhookHandler, logger *slog.Logger) (*webhookhttp.StripeWebhookHandler, error) {
-	stripeAPIKey := env.GetEnvOrDefault("STRIPE_API_KEY", "")
-	if stripeAPIKey == "" {
-		logger.Info("STRIPE_API_KEY not set, Stripe webhook handler disabled")
+// createStripeWebhookHandler creates the StripeWebhookHandler if Stripe provider is configured.
+// Returns nil (no error) when Stripe is not the active provider, making the handler optional.
+func createStripeWebhookHandler(svcConfig config.ServiceConfig, webhookHandler *webhookhttp.WebhookHandler, logger *slog.Logger) (*webhookhttp.StripeWebhookHandler, error) {
+	if svcConfig.StripeAPIKey == "" {
+		logger.Info("Stripe API key not set, Stripe webhook handler disabled")
 		return nil, nil //nolint:nilnil // nil handler is intentional: ServerConfig treats nil as "feature disabled"
 	}
 
@@ -830,7 +818,7 @@ func createStripeWebhookHandler(webhookHandler *webhookhttp.WebhookHandler, logg
 	}
 
 	cfg := stripegateway.DefaultConfig()
-	cfg.APIKey = stripeAPIKey
+	cfg.APIKey = svcConfig.StripeAPIKey
 
 	clientFactory, err := stripegateway.NewClientFactory(cfg, provider, logger)
 	if err != nil {
