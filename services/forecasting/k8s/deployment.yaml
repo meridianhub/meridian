@@ -106,4 +106,4 @@ spec:
       volumes:
       - name: tmp
         emptyDir: {}
-      terminationGracePeriodSeconds: 30
+      terminationGracePeriodSeconds: 60
