@@ -340,6 +340,12 @@ and `currency` filters.
 > **Alternative:** A new dedicated handler
 > `current_account.resolve_scoped_account(party_id, org_id, currency)`
 > could provide a more explicit API. Decision deferred to implementation.
+>
+> **Implementation notes:** Whichever approach is chosen, ensure:
+> (a) a builtin helper constructs references to avoid manual string
+> concatenation in sagas, (b) malformed references produce clear
+> errors, and (c) existing single-segment references continue to
+> work (backward compatibility).
 
 ### Example: Dividend Distribution Saga
 
@@ -397,7 +403,10 @@ def distribute_yield(ctx):
 
 - [ ] DB Migration 1a: Add `org_party_id` to `account` table.
 - [ ] DB Migration 1b: Add indexes for org-scoped queries (separate file).
-- [ ] DB Migration 2a: Add `org_party_id` to `internal_bank_account` table.
+- [ ] DB Migration 2a: Add `org_party_id` to `internal_bank_account`
+  table.
+- [ ] DB Migration 2b: Add indexes for org-scoped queries on
+  `internal_bank_account` (separate file).
 - [ ] DB Migration 3a: Add `metadata`, `status`, `effective_from`,
   `effective_to` to `party_association`.
 - [ ] DB Migration 3b: Add constraints and indexes for party
