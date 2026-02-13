@@ -39,8 +39,8 @@ flowchart LR
             AW["audit-worker<br/>:8080"]
             UMC["utilization-metering<br/>-consumer :8080"]
             DB[("CockroachDB<br/>:26257")]
-            Kafka@{ shape: das, label: "Kafka :9092" }
-            Redis@{ shape: das, label: "Redis :6379" }
+            Kafka["Kafka<br/>:9092"]
+            Redis["Redis<br/>:6379"]
         end
     end
 
