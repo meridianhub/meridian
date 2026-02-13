@@ -625,7 +625,7 @@ architecture).
 > `audit_outbox`) follow a common schema and are omitted; see
 > [Async Audit System](#async-audit-system).
 
-### Core Transaction Engine (30 tables)
+### Core Transaction Engine (26 tables)
 
 ```mermaid
 erDiagram
@@ -633,7 +633,6 @@ erDiagram
     %% TENANT MANAGEMENT SERVICE
     %% DB: meridian_tenant
     %% ════════════════════════════════════
-   direction LR
     tenant {
         varchar id PK "slug e.g. acme_bank"
         varchar display_name
@@ -877,15 +876,6 @@ erDiagram
         varchar status
     }
 
-    saga_execution {
-        uuid id PK
-        varchar saga_definition_name "ref RD saga"
-        int saga_definition_version
-        varchar current_step
-        varchar status
-        jsonb context_data
-    }
-
     billing_run ||--o{ invoice : "generates"
     invoice ||--o{ dunning : "escalates"
 
@@ -939,16 +929,6 @@ erDiagram
         text validation_expression "CEL"
     }
 
-    saga_definition {
-        uuid id PK
-        varchar name
-        int version
-        text script "Starlark"
-        varchar status "DRAFT|ACTIVE|DEPRECATED"
-        text preconditions_expression "CEL"
-        uuid successor_id "self-ref FK"
-    }
-
     valuation_method {
         uuid id PK
         varchar name
@@ -958,26 +938,6 @@ erDiagram
         text logic_script "Starlark"
         varchar lifecycle_status "INITIATED|ACTIVE|DEPRECATED"
     }
-
-    valuation_policy {
-        uuid id PK
-        varchar name
-        int version
-        text cel_expression "CEL"
-        varchar output_type
-        varchar lifecycle_status "INITIATED|ACTIVE|DEPRECATED"
-    }
-
-    reference_data_node {
-        uuid id PK
-        varchar code
-        uuid parent_id "self-ref FK"
-        varchar node_type
-        jsonb attributes
-    }
-
-    saga_definition }o--o| saga_definition : "successor"
-    reference_data_node }o--o| reference_data_node : "parent"
 
     %% ════════════════════════════════════════════════
     %% CROSS-SERVICE DOMAIN RELATIONSHIPS (Core)
@@ -995,16 +955,15 @@ erDiagram
     instrument_definition ||..o{ internal_bank_account : "denominated"
     valuation_method ||..o{ ca_valuation_features : "applied"
     valuation_method ||..o{ iba_valuation_features : "applied"
-    saga_definition ||..o{ saga_execution : "defines"
     tenant ||..o{ billing_run : "billed"
 ```
 
 Tenant Management (3), Party (6), Current Account (4),
-Financial Accounting (2), Position Keeping (5), Payment Order (5),
-Internal Bank Account (3), Reference Data (5). These services form
+Financial Accounting (2), Position Keeping (5), Payment Order (4),
+Internal Bank Account (3), Reference Data (2). These services form
 the densely interconnected transaction processing core.
 
-### Market Data, Reconciliation & Operations (13 tables)
+### Market Data, Reconciliation & Operations (17 tables)
 
 ```mermaid
 erDiagram
@@ -1154,17 +1113,63 @@ erDiagram
     staff_user ||--o{ api_key : "has"
     manifest_version ||--o{ manifest_apply_job : "tracked-by"
 
+    %% ════════════════════════════════════
+    %% REFERENCE DATA (supplementary tables)
+    %% Not connected to core transaction graph
+    %% ════════════════════════════════════
+
+    saga_definition {
+        uuid id PK
+        varchar name
+        int version
+        text script "Starlark"
+        varchar status "DRAFT|ACTIVE|DEPRECATED"
+        text preconditions_expression "CEL"
+        uuid successor_id "self-ref FK"
+    }
+
+    saga_execution {
+        uuid id PK
+        varchar saga_definition_name "ref RD saga"
+        int saga_definition_version
+        varchar current_step
+        varchar status
+        jsonb context_data
+    }
+
+    valuation_policy {
+        uuid id PK
+        varchar name
+        int version
+        text cel_expression "CEL"
+        varchar output_type
+        varchar lifecycle_status "INITIATED|ACTIVE|DEPRECATED"
+    }
+
+    reference_data_node {
+        uuid id PK
+        varchar code
+        uuid parent_id "self-ref FK"
+        varchar node_type
+        jsonb attributes
+    }
+
+    saga_definition }o--o| saga_definition : "successor"
+    reference_data_node }o--o| reference_data_node : "parent"
+
     %% ════════════════════════════════════════════════
     %% CROSS-SERVICE RELATIONSHIPS (within this group)
     %% ════════════════════════════════════════════════
 
     dataset_definition ||..o{ forecasting_strategy : "feeds"
+    saga_definition ||..o{ saga_execution : "defines"
 ```
 
 Market Information (3), Reconciliation (5), Forecasting (1),
-Control Plane (4). These services connect to the core engine
-through thin references (`account_id`, `instrument_code`,
-`tenant_id`) annotated as `ref Core:` in column comments.
+Control Plane (4), Reference Data supplementary (4). These
+services connect to the core engine through thin references
+(`account_id`, `instrument_code`, `tenant_id`) annotated as
+`ref Core:` in column comments.
 
 **Cross-Service Reference Patterns:**
 
