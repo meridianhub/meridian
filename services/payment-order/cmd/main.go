@@ -15,6 +15,7 @@ import (
 
 	stripego "github.com/stripe/stripe-go/v82"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
@@ -33,6 +34,8 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/ports"
+	"github.com/meridianhub/meridian/shared/platform/redislock"
+	"github.com/meridianhub/meridian/shared/platform/scheduler"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -288,7 +291,7 @@ func run(logger *slog.Logger) error {
 		"registered_handlers", len(handlerRegistry.List()))
 
 	// Start billing background workers (feature-flagged)
-	var billingScheduler *worker.BillingScheduler
+	var billingCronScheduler *scheduler.CronScheduler
 	var dunningWorker *worker.DunningWorker
 
 	if svcConfig.BillingEnabled {
@@ -297,21 +300,58 @@ func run(logger *slog.Logger) error {
 
 		tenantID := env.GetEnvOrDefault("BILLING_TENANT_ID", "default")
 
-		var err error
-		billingScheduler, err = worker.NewBillingScheduler(
+		// Create pgxpool connection for scheduler execution store (audit trail)
+		databaseURL := env.GetEnvOrDefault("DATABASE_URL", "postgres://meridian_user@localhost:26257/meridian?sslmode=disable")
+		pgxPool, err := pgxpool.New(ctx, databaseURL)
+		if err != nil {
+			return fmt.Errorf("failed to create pgxpool for scheduler execution store: %w", err)
+		}
+		defer pgxPool.Close()
+
+		execStore, err := scheduler.NewPgExecutionStore(pgxPool)
+		if err != nil {
+			logger.Warn("scheduler_execution table not found, audit trail disabled", "error", err)
+		}
+
+		// Create distributed lock for billing scheduler
+		billingLock := redislock.NewLock(redisClient, redislock.Config{
+			KeyPrefix:  "meridian:billing:scheduler",
+			LockTTL:    5 * time.Minute,
+			RenewEvery: 30 * time.Second,
+		}, logger)
+
+		// Create billing executor adapter (preserves shadow mode and Redis idempotency)
+		billingExecutor := worker.NewBillingExecutor(
 			billingRepo,
 			redisClient,
-			worker.BillingSchedulerConfig{
-				TenantID:       tenantID,
-				CronExpression: svcConfig.BillingCronSchedule,
-				ShadowMode:     svcConfig.BillingShadowMode,
+			billingMetrics,
+			worker.BillingExecutorConfig{ShadowMode: svcConfig.BillingShadowMode},
+			logger,
+		)
+
+		// Create schedule provider (static single-tenant schedule)
+		billingProvider := worker.NewBillingScheduleProvider(tenantID, svcConfig.BillingCronSchedule)
+
+		// Build CronScheduler with optional execution store
+		cronOpts := []scheduler.CronSchedulerOption{}
+		if execStore != nil {
+			cronOpts = append(cronOpts, scheduler.WithCronExecutionStore(execStore))
+		}
+
+		billingCronScheduler = scheduler.NewCronScheduler(
+			billingProvider,
+			billingExecutor,
+			billingLock,
+			scheduler.CronSchedulerConfig{
+				Name:             "billing-scheduler",
+				RefreshInterval:  60 * time.Second,
+				ShutdownTimeout:  30 * time.Second,
+				ExecutionTimeout: 10 * time.Minute,
+				MaxCatchUpAge:    time.Hour,
 			},
 			logger,
-			billingMetrics,
+			cronOpts...,
 		)
-		if err != nil {
-			return fmt.Errorf("failed to create billing scheduler: %w", err)
-		}
 
 		// DunningCallback is a no-op for now; saga runner integration comes in Task 5
 		dunningCallback := func(_ context.Context, run *domain.BillingRun) error {
@@ -471,11 +511,11 @@ func run(logger *slog.Logger) error {
 	workerCtx, workerCancel := context.WithCancel(ctx)
 	defer workerCancel()
 	var billingWg sync.WaitGroup
-	if svcConfig.BillingEnabled && billingScheduler != nil && dunningWorker != nil {
+	if svcConfig.BillingEnabled && billingCronScheduler != nil && dunningWorker != nil {
 		billingWg.Add(2)
 		go func() {
 			defer billingWg.Done()
-			if err := billingScheduler.Start(workerCtx); err != nil {
+			if err := billingCronScheduler.Start(workerCtx); err != nil {
 				logger.Error("billing scheduler error", "error", err)
 			}
 		}()
@@ -513,10 +553,10 @@ func run(logger *slog.Logger) error {
 	// Stop billing workers and wait for goroutines to exit before database close.
 	// Cancel the worker context first to unblock Start() select loops, then
 	// call Stop() to signal internal shutdown channels and drain in-flight work.
-	if svcConfig.BillingEnabled && billingScheduler != nil && dunningWorker != nil {
+	if svcConfig.BillingEnabled && billingCronScheduler != nil && dunningWorker != nil {
 		logger.Info("stopping billing workers...")
 		workerCancel()
-		billingScheduler.Stop()
+		billingCronScheduler.Stop()
 		dunningWorker.Stop()
 		billingWg.Wait()
 		logger.Info("billing workers stopped")
