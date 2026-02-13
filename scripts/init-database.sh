@@ -55,6 +55,22 @@ fi
 
 echo "✓ $POD_NAME is ready"
 
+# Wait for SQL port to accept connections (pod Ready != SQL ready)
+SQL_TIMEOUT="${SQL_TIMEOUT:-$TIMEOUT}"
+echo "Waiting for SQL port to accept connections (timeout: ${SQL_TIMEOUT}s)..."
+for i in $(seq 1 "$SQL_TIMEOUT"); do
+  if kubectl exec "$POD_NAME" -n "$NAMESPACE" -- \
+    cockroach sql --insecure -e "SELECT 1;" &>/dev/null; then
+    echo "✓ SQL port is accepting connections"
+    break
+  fi
+  if [ "$i" -eq "$SQL_TIMEOUT" ]; then
+    echo "ERROR: SQL port did not become ready within ${SQL_TIMEOUT}s"
+    exit 1
+  fi
+  sleep 1
+done
+
 # Create databases and users with restricted access
 FAILED=0
 for ENTRY in "${DATABASES[@]}"; do

@@ -1,4 +1,4 @@
-h1:QJ2b6FxLJmoE5P9J7aJt0Tkrq35StF8P5lKL5rlNeHs=
+h1:QOZAABKyNdRRzWZ49U0PFVw7Tps4up80ovJv9RmT7Dg=
 20251216000001_initial.sql h1:4EgK5DDjh15OYo42dfUlBrTzhBlS4CJb8JntemJZxhU=
 20251217000001_audit_system.sql h1:f4dmYIvuu7PO3v7Vhcpb05RNo+EQEakHJ0mMv2tbZ6I=
 20251223000001_event_outbox.sql h1:NgNG789HKYeLuHhlb96LuVXEv2L4m/tRUfk03kZOXj4=
@@ -8,5 +8,5 @@ h1:QJ2b6FxLJmoE5P9J7aJt0Tkrq35StF8P5lKL5rlNeHs=
 20260105000001_measurement_bucket_id.sql h1:7bjByaHcJ6YEiPe37oq4U8bcJGhD/j6+jgcRHpbHNTA=
 20260105000002_positions_append_only.sql h1:MidtRAkkNMPYJ+Nj3qkqf8TirH6lwyjmxV16e8LqeTM=
 20260105000003_rebucketing_audit_log.sql h1:8sX9nNzhkm39LZZJ+SpGczdz59sP2EVehLKiHFU765A=
-20260105000004_import_manifest.sql h1:LAxAXwZgNoGtAhJzl7KYkHF/6K1pVY9fLSzd7bvNp6Q=
-20260207000001_reservations.sql h1:WqCeC3OwofKNttN3jVQPDKPonOzAGlHkzrkdltD0c34=
+20260105000004_import_manifest.sql h1:vR5JflRDd06KXU2dDTOcSoJR/ebjHazNs+veRA8C2EA=
+20260207000001_reservations.sql h1:7cxZtdmNaGYYX2GeHvwbZ3KMQe90NX0seBrrtD+BUaI=

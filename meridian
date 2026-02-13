@@ -160,7 +160,7 @@ cmd_horizon() {
 
 cmd_doctor() {
     if [ -f "${SCRIPTS_DIR}/doctor.sh" ]; then
-        exec "${SCRIPTS_DIR}/doctor.sh" "$@"
+        MERIDIAN_CMD="./meridian doctor" exec "${SCRIPTS_DIR}/doctor.sh" "$@"
     else
         echo -e "${RED}✗${NC} Doctor script not found: ${SCRIPTS_DIR}/doctor.sh"
         exit 1

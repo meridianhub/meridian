@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -537,15 +536,41 @@ func (r *PostgresRegistry) ActivateSaga(ctx context.Context, id uuid.UUID) error
 	})
 }
 
+// validateSagaSuccessor checks that the successor exists, is ACTIVE,
+// has the same name as the source saga, and is not self-referential.
+func validateSagaSuccessor(ctx context.Context, tx pgx.Tx, sagaID uuid.UUID, sagaName string, successorID uuid.UUID) error {
+	if successorID == sagaID {
+		return ErrSuccessorInvalid
+	}
+
+	var successorStatus, successorName string
+	err := tx.QueryRow(ctx,
+		`SELECT status, name FROM saga_definition WHERE id = $1`, successorID,
+	).Scan(&successorStatus, &successorName)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrSuccessorInvalid
+		}
+		return fmt.Errorf("failed to validate successor: %w", err)
+	}
+
+	if successorStatus != string(StatusActive) || successorName != sagaName {
+		return ErrSuccessorInvalid
+	}
+	return nil
+}
+
 // DeprecateSaga transitions a saga from ACTIVE to DEPRECATED.
+// If successorID is provided, validates that the successor exists, is ACTIVE,
+// has the same name, and is not a self-reference.
 func (r *PostgresRegistry) DeprecateSaga(ctx context.Context, id uuid.UUID, successorID *uuid.UUID) error {
 	return r.withWriteTransaction(ctx, func(tx pgx.Tx) error {
-		// Check current state
 		var isSystem bool
 		var currentStatus string
+		var sagaName string
 
-		checkQuery := `SELECT is_system, status FROM saga_definition WHERE id = $1`
-		err := tx.QueryRow(ctx, checkQuery, id).Scan(&isSystem, &currentStatus)
+		checkQuery := `SELECT is_system, status, name FROM saga_definition WHERE id = $1`
+		err := tx.QueryRow(ctx, checkQuery, id).Scan(&isSystem, &currentStatus, &sagaName)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrNotFound
@@ -556,12 +581,16 @@ func (r *PostgresRegistry) DeprecateSaga(ctx context.Context, id uuid.UUID, succ
 		if isSystem {
 			return ErrSystemSagaReadOnly
 		}
-
 		if currentStatus != string(StatusActive) {
 			return ErrNotActive
 		}
 
-		// Transition to DEPRECATED with optional successor and record timestamp
+		if successorID != nil {
+			if err := validateSagaSuccessor(ctx, tx, id, sagaName, *successorID); err != nil {
+				return err
+			}
+		}
+
 		updateQuery := `
 			UPDATE saga_definition SET
 				status = 'DEPRECATED',
@@ -572,22 +601,6 @@ func (r *PostgresRegistry) DeprecateSaga(ctx context.Context, id uuid.UUID, succ
 
 		_, err = tx.Exec(ctx, updateQuery, id, successorID)
 		if err != nil {
-			// Check if the error is from the successor validation trigger
-			var pgErr *pgconn.PgError
-			if errors.As(err, &pgErr) && pgErr.Code == "P0001" { // raise_exception
-				msg := pgErr.Message
-				msgLower := strings.ToLower(msg)
-				switch {
-				case strings.Contains(msgLower, "successor"):
-					return ErrSuccessorInvalid
-				case strings.Contains(msgLower, "cannot transition"):
-					return ErrInvalidStateTransition
-				case strings.Contains(msgLower, "cannot modify"):
-					return ErrInvalidStatus
-				default:
-					return fmt.Errorf("%w: %s", ErrInvalidStatus, msg)
-				}
-			}
 			return fmt.Errorf("failed to deprecate saga: %w", err)
 		}
 

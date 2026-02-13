@@ -15,9 +15,8 @@ ALTER TABLE "payment_order" ADD COLUMN "payment_attributes" jsonb NULL;
 -- Empty/NULL means default fungibility (all quantities are fungible)
 ALTER TABLE "payment_order" ADD COLUMN "bucket_id" character varying(255) NULL;
 
--- Index for querying by bucket_id (useful for analytics and debugging)
-CREATE INDEX "idx_payment_order_bucket_id" ON "payment_order" ("bucket_id")
-WHERE bucket_id IS NOT NULL;
+-- NOTE: Partial index on bucket_id deferred to 20260123000002 because CockroachDB
+-- cannot create a partial index on a column added in the same transaction.
 
 -- Comments for documentation
 COMMENT ON COLUMN "payment_order"."instrument_code" IS 'Payment instrument code (e.g., RICE-v1, USD). Used to look up fungibility rules from reference-data.';
