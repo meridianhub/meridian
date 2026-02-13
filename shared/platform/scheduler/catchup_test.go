@@ -78,14 +78,15 @@ func TestCatchUp_NoPriorExecution_CatchesUpFromMaxAge(t *testing.T) {
 		scheduler.WithCronExecutionStore(store),
 	)
 
+	// Capture now before starting the scheduler to avoid race at cron boundaries.
+	now := time.Now().UTC()
+	expected := expectedWindowCount(t, cronExpr, now.Add(-maxCatchUpAge), now)
+	require.Greater(t, expected, 0, "should have at least one expected window")
+
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		_ = s.Start(ctx)
 	}()
-
-	now := time.Now().UTC()
-	expected := expectedWindowCount(t, cronExpr, now.Add(-maxCatchUpAge), now)
-	require.Greater(t, expected, 0, "should have at least one expected window")
 
 	err := await.New().AtMost(5 * time.Second).PollInterval(50 * time.Millisecond).Until(func() bool {
 		return executor.callCount.Load() >= int32(expected)
