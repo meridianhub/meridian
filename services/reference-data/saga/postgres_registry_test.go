@@ -696,53 +696,23 @@ func TestPostgresRegistry_ImmutableScriptOnActive(t *testing.T) {
 	require.NoError(t, reg.CreateDraft(ctx, def))
 	require.NoError(t, reg.ActivateSaga(ctx, def.ID))
 
+	// Go-layer enforcement: UpdateDefinition rejects non-DRAFT sagas,
+	// preventing script/preconditions modification on ACTIVE sagas.
+	// (CockroachDB does not support PL/pgSQL triggers for DB-level enforcement.)
+
 	t.Run("script cannot be modified on ACTIVE saga", func(t *testing.T) {
-		tenantID, _ := tenant.FromContext(ctx)
-		schemaName := tenantID.SchemaName()
-
-		tx, err := pool.Begin(ctx)
-		require.NoError(t, err)
-
-		_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
-		require.NoError(t, err)
-
-		_, err = tx.Exec(ctx, `UPDATE saga_definition SET script = 'modified' WHERE id = $1`, def.ID)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Cannot modify script")
-
-		_ = tx.Rollback(ctx)
+		updates := &saga.Definition{
+			Script: "def posting_rules(ctx): return modified",
+		}
+		err := reg.UpdateDefinition(ctx, def.ID, updates)
+		require.ErrorIs(t, err, saga.ErrNotDraft)
 	})
 
 	t.Run("preconditions cannot be modified on ACTIVE saga", func(t *testing.T) {
-		tenantID, _ := tenant.FromContext(ctx)
-		schemaName := tenantID.SchemaName()
-
-		tx, err := pool.Begin(ctx)
-		require.NoError(t, err)
-
-		_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
-		require.NoError(t, err)
-
-		_, err = tx.Exec(ctx, `UPDATE saga_definition SET preconditions_expression = 'false' WHERE id = $1`, def.ID)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Cannot modify preconditions_expression")
-
-		_ = tx.Rollback(ctx)
-	})
-
-	t.Run("display_name can be modified on ACTIVE saga", func(t *testing.T) {
-		tenantID, _ := tenant.FromContext(ctx)
-		schemaName := tenantID.SchemaName()
-
-		tx, err := pool.Begin(ctx)
-		require.NoError(t, err)
-
-		_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
-		require.NoError(t, err)
-
-		_, err = tx.Exec(ctx, `UPDATE saga_definition SET display_name = 'New Name' WHERE id = $1`, def.ID)
-		require.NoError(t, err)
-
-		require.NoError(t, tx.Commit(ctx))
+		updates := &saga.Definition{
+			PreconditionsExpression: "false",
+		}
+		err := reg.UpdateDefinition(ctx, def.ID, updates)
+		require.ErrorIs(t, err, saga.ErrNotDraft)
 	})
 }
