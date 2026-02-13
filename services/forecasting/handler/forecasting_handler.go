@@ -26,10 +26,12 @@ const maxBatchSize = 1000
 
 // Service construction errors.
 var (
-	ErrRepoRequired   = errors.New("strategy repository is required")
-	ErrRunnerRequired = errors.New("forecast runner is required")
-	ErrMDSRequired    = errors.New("MDS publisher is required")
-	ErrBatchPublish   = errors.New("batch publish failed")
+	ErrRepoRequired     = errors.New("strategy repository is required")
+	ErrRunnerRequired   = errors.New("forecast runner is required")
+	ErrMDSRequired      = errors.New("MDS publisher is required")
+	ErrBatchPublish     = errors.New("batch publish failed")
+	ErrNotActive        = errors.New("strategy is not in ACTIVE status")
+	ErrTenantIDRequired = errors.New("tenant context is required")
 )
 
 // MDSPublisher abstracts the Market Data Service for publishing observations.
@@ -238,6 +240,64 @@ func (s *Service) publishToMDS(
 	}
 
 	return nil
+}
+
+// ScheduledExecutionResult holds the outcome of a scheduled forecast execution.
+type ScheduledExecutionResult struct {
+	PointCount      int32
+	StrategyVersion int64
+}
+
+// ComputeForwardCurveInternal executes a forecasting strategy by ID for the
+// cron scheduler. Unlike the gRPC method, it extracts the tenant from context
+// (set by the scheduler) and returns a simpler result type.
+func (s *Service) ComputeForwardCurveInternal(ctx context.Context, strategyID uuid.UUID) (*ScheduledExecutionResult, error) {
+	strategy, err := s.repo.FindByID(ctx, strategyID)
+	if err != nil {
+		return nil, fmt.Errorf("find strategy %s: %w", strategyID, err)
+	}
+
+	if strategy.Status() != domain.StrategyStatusActive {
+		return nil, fmt.Errorf("strategy %s is %s: %w", strategyID, strategy.Status(), ErrNotActive)
+	}
+
+	now := time.Now().UTC()
+
+	s.logger.Info("executing scheduled forecast",
+		"strategy_id", strategyID,
+		"strategy_name", strategy.Name(),
+		"strategy_version", strategy.Version())
+
+	input := starlark.StrategyInput{
+		Script:            strategy.StarlarkCode(),
+		InputDatasetCodes: strategy.InputDatasetCodes(),
+		OutputDatasetCode: strategy.OutputDatasetCode(),
+		HorizonHours:      strategy.HorizonHours(),
+		GranularityHours:  strategy.GranularityHours(),
+		Now:               now,
+	}
+	if strategy.ReferenceDataResolutionKey() != "" {
+		input.ResolutionKey = strategy.ReferenceDataResolutionKey()
+		tenantID, ok := tenant.FromContext(ctx)
+		if !ok {
+			return nil, fmt.Errorf("strategy %s requires reference data: %w", strategyID, ErrTenantIDRequired)
+		}
+		input.TenantID = string(tenantID)
+	}
+
+	points, err := s.runner.ExecuteStrategy(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("starlark execution: %w", err)
+	}
+
+	if err := s.publishToMDS(ctx, strategy, points, now); err != nil {
+		return nil, fmt.Errorf("publish to MDS: %w", err)
+	}
+
+	return &ScheduledExecutionResult{
+		PointCount:      int32(len(points)),
+		StrategyVersion: strategy.Version(),
+	}, nil
 }
 
 // mapDomainError converts domain errors to gRPC status errors.
