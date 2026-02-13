@@ -56,6 +56,15 @@ BIAN-compliant current account facility microservice with lien-based payment res
 | `ExecuteDeposit` | `POST /v1/current-accounts/{id}/deposits` | Deposit funds |
 | `RetrieveCurrentAccount` | `GET /v1/current-accounts/{id}` | Get account details |
 
+### Withdrawal Operations
+
+| Method | HTTP | Purpose |
+|--------|------|---------|
+| `InitiateWithdrawal` | `POST /v1/current-accounts/{id}/withdrawals:initiate` | Validate and create pending withdrawal |
+| `ExecuteWithdrawal` | `POST /v1/current-accounts/{id}/withdrawals:execute` | Execute pending or direct withdrawal |
+| `UpdateWithdrawal` | `PATCH /v1/withdrawals/{id}` | Retrieve and validate pending withdrawal |
+| `RetrieveWithdrawal` | `GET /v1/withdrawals/{id}` or `GET /v1/current-accounts/{id}/withdrawals` | Get withdrawal or list by account |
+
 ### Lien Operations (Fund Reservation)
 
 | Method | HTTP | Purpose |
@@ -110,6 +119,17 @@ classDiagram
         CLOSED
     }
 
+    class Withdrawal {
+        +UUID ID
+        +UUID AccountID
+        +Money Amount
+        +WithdrawalStatus Status
+        +string Reference
+        +int Version
+        +Time CreatedAt
+        +Time UpdatedAt
+    }
+
     class LienStatus {
         <<enumeration>>
         ACTIVE
@@ -117,9 +137,19 @@ classDiagram
         TERMINATED
     }
 
+    class WithdrawalStatus {
+        <<enumeration>>
+        PENDING
+        COMPLETED
+        FAILED
+        CANCELLED
+    }
+
     CurrentAccount "1" --> "*" Lien : has
+    CurrentAccount "1" --> "*" Withdrawal : has
     CurrentAccount --> AccountStatus
     Lien --> LienStatus
+    Withdrawal --> WithdrawalStatus
 ```
 
 **Field Notes:**
@@ -145,6 +175,114 @@ stateDiagram-v2
 - **ACTIVE**: Funds reserved, reduces AvailableBalance
 - **EXECUTED**: Terminal state, funds withdrawn from Balance
 - **TERMINATED**: Terminal state, AvailableBalance restored
+
+## Withdrawal Operations
+
+The service supports a two-phase withdrawal pattern as well as direct withdrawals.
+
+### InitiateWithdrawal
+
+Creates a pending withdrawal in INITIATED status. Validates the account is active, currency
+matches, and amount is positive. Warns (but does not reject) if the requested amount exceeds
+the current available balance, since balance may change before execution.
+
+A `reference` can be provided for idempotency. If omitted, one is auto-generated in the
+format `WTH-{uuid[:8]}`.
+
+### ExecuteWithdrawal
+
+Supports two modes:
+
+**1. Execute pending withdrawal** -- provide `withdrawal_id`:
+
+Looks up a previously initiated withdrawal, verifies it is in PENDING status, and executes
+the withdrawal saga. On success, the withdrawal transitions to COMPLETED via the transactional
+outbox pattern (atomically updating status and publishing a `WithdrawalStatusUpdated` event).
+
+**2. Direct withdrawal** -- provide `account_id` and `amount`:
+
+Executes a withdrawal immediately without prior initiation. Requires both fields.
+
+Both modes:
+- Validate the account is ACTIVE (rejects FROZEN or CLOSED)
+- Validate currency matches the account currency
+- Check sufficient funds via `PrepareForDebit` (considers overdraft if enabled)
+- Execute the withdrawal saga (Position Keeping DEBIT, Financial Accounting double-entry,
+  account metadata save)
+- Support Redis-based idempotency via `idempotency_key`
+
+### UpdateWithdrawal
+
+Retrieves a pending withdrawal and performs validation. Field updates (amount, description,
+reference) are not yet supported -- the domain model treats these as immutable after creation.
+If update fields are provided, the response includes warning messages indicating the fields
+were not modified.
+
+Only withdrawals in PENDING status can be queried via this method. Attempting to update
+a non-pending withdrawal returns `FailedPrecondition`.
+
+### RetrieveWithdrawal
+
+Supports two query modes:
+
+**1. Single lookup** -- provide `withdrawal_id`:
+
+Returns the withdrawal matching the given reference.
+
+**2. List by account** -- provide `account_id`:
+
+Returns a paginated list of withdrawals for the account (default page size: 50). Uses
+offset-based pagination via `page_token` (the token is the numeric offset). Results are
+ordered by `created_at DESC`.
+
+At least one of `withdrawal_id` or `account_id` is required.
+
+### Withdrawal Lifecycle
+
+```mermaid
+stateDiagram-v2
+    PENDING : PENDING (initiated)
+    COMPLETED : COMPLETED (executed)
+    FAILED : FAILED (error)
+    CANCELLED : CANCELLED (aborted)
+
+    PENDING --> COMPLETED : ExecuteWithdrawal succeeds
+    PENDING --> FAILED : ExecuteWithdrawal fails
+    PENDING --> CANCELLED : Cancellation
+```
+
+- **PENDING**: Withdrawal initiated, awaiting execution
+- **COMPLETED**: Terminal state, funds withdrawn via saga
+- **FAILED**: Terminal state, saga or validation failure
+- **CANCELLED**: Terminal state, withdrawal aborted before execution
+
+All terminal transitions are idempotent (calling `Complete()` on an already-completed
+withdrawal is a no-op).
+
+### Withdrawal Saga
+
+The withdrawal saga executes three steps sequentially via Starlark:
+
+1. **log_position**: DEBIT entry in Position Keeping (source of truth for balance)
+2. **post_ledger**: Booking log and dual ledger postings in Financial Accounting
+   (customer account DEBIT, clearing account CREDIT)
+3. **save_account**: Persist account metadata (status, version)
+
+Compensation runs in LIFO order on failure. The saga definition is fetched at runtime from
+the reference-data service (`defaults/withdrawal/v1.0.0.star`).
+
+### Withdrawal Events
+
+When a pending withdrawal is executed successfully, a `WithdrawalStatusUpdated` event is
+published via the transactional outbox pattern:
+
+| Event | Kafka Topic | Trigger |
+|-------|-------------|---------|
+| WithdrawalStatusUpdated | `current-account.withdrawal.status` | Pending withdrawal executed |
+
+The outbox write happens atomically with the withdrawal status update in a single database
+transaction, providing at-least-once delivery guarantees. If the outbox write fails, the
+service falls back to a direct status update without event publication.
 
 ## Service Dependencies
 
@@ -181,12 +319,36 @@ erDiagram
         timestamptz expires_at "nullable"
     }
 
+    withdrawal {
+        uuid id PK
+        uuid account_id FK
+        bigint amount_cents "positive (CHECK)"
+        varchar(3) currency
+        varchar(20) status "PENDING, COMPLETED, FAILED, CANCELLED"
+        varchar(255) reference UK "idempotency key"
+        bigint version "optimistic lock, default 1"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
     accounts ||--o{ liens : "has"
+    accounts ||--o{ withdrawal : "has"
 ```
 
 > **Note:** Balance columns (`balance`, `available_balance`, `balance_updated_at`) were removed
 > in migration `20260108000001_remove_balance_columns.sql`. Balance is now computed by Position
 > Keeping service.
+
+The `withdrawal` table was added in migration `20251231000002_create_withdrawal_table.sql`.
+Key design decisions:
+- **Optimistic locking**: `version` column incremented on each update, prevents concurrent
+  modification
+- **Idempotency**: `reference` column has a unique index, preventing duplicate withdrawals
+  with the same reference
+- **Tenant isolation**: Uses schema-per-tenant pattern (table exists within the tenant's
+  database schema)
+- **Indexes**: Composite `(account_id, status)` for filtered queries, `created_at DESC` for
+  time-ordered listing, unique `reference` for idempotency lookups
 
 ## Configuration
 
@@ -209,10 +371,14 @@ erDiagram
 | `ExecuteLien` | Lien ID (path param) | No-op if already EXECUTED |
 | `TerminateLien` | Lien ID (path param) | No-op if already TERMINATED |
 | `ExecuteDeposit` | `IdempotencyKey` header | Returns existing result if key matches |
+| `InitiateWithdrawal` | `reference` field | Returns existing withdrawal if reference matches |
+| `ExecuteWithdrawal` | `IdempotencyKey` field | Returns cached result from Redis if key matches |
 
 **Retry Guidance:**
 
 - Always include `IdempotencyKey` header for `ExecuteDeposit` to prevent duplicate credits
+- Always include `idempotency_key` for `ExecuteWithdrawal` to prevent duplicate debits
+- `InitiateWithdrawal` uses `reference` as natural idempotency key (unique constraint in DB)
 - `InitiateLien` uses `PaymentOrderReference` as natural idempotency key (unique per payment)
 - Terminal state transitions (EXECUTED, TERMINATED) are no-ops on retry
 - Use exponential backoff: 100ms → 200ms → 400ms (max 3 retries)
