@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -94,11 +95,24 @@ func run(logger *slog.Logger) error {
 	}
 	partyService.WithPaymentMethodRepository(pmRepo)
 
-	// Load verification config (graceful - service runs without KYC)
+	// Load verification config with environment-aware validation.
+	// Production: fail fast if config is missing or invalid.
+	// Development: allow service to start without provider (warn and continue).
+	environment := env.GetEnvOrDefault("ENVIRONMENT", "development")
+	isProduction := environment == "production" || environment == "prod"
+
 	verificationCfg, err := config.LoadVerificationConfig()
 	if err != nil {
+		if isProduction {
+			return fmt.Errorf("verification config required in production: %w", err)
+		}
 		logger.Warn("verification config not loaded - KYC provider disabled", "error", err)
 		verificationCfg = nil
+	}
+	if verificationCfg != nil {
+		if err := verificationCfg.ValidateForEnvironment(environment); err != nil {
+			return fmt.Errorf("verification config invalid for environment %q: %w", environment, err)
+		}
 	}
 
 	// Create verification provider and service when configured
@@ -198,10 +212,7 @@ func run(logger *slog.Logger) error {
 		}
 
 		httpMux.HandleFunc("/webhooks/verification/", webhookHandler.HandleWebhook)
-		httpMux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("OK"))
-		})
+		httpMux.HandleFunc("/health", newHTTPHealthHandler(verificationCfg))
 
 		httpPort := env.GetEnvOrDefault("HTTP_PORT", "8081")
 		httpServer := &http.Server{
@@ -262,5 +273,32 @@ func parseLogLevel(levelStr string) slog.Level {
 		return slog.LevelError
 	default:
 		return slog.LevelInfo
+	}
+}
+
+// httpHealthResponse is the JSON structure returned by the HTTP health endpoint.
+type httpHealthResponse struct {
+	Status               string `json:"status"`
+	Timestamp            string `json:"timestamp"`
+	VerificationEnabled  bool   `json:"verification_enabled"`
+	VerificationProvider string `json:"verification_provider,omitempty"`
+}
+
+// newHTTPHealthHandler returns an HTTP handler that reports service health
+// including verification provider status.
+func newHTTPHealthHandler(verificationCfg *config.VerificationConfig) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		resp := httpHealthResponse{
+			Status:    "ok",
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		}
+		if verificationCfg != nil {
+			resp.VerificationEnabled = true
+			resp.VerificationProvider = verificationCfg.Provider
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(resp)
 	}
 }

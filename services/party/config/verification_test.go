@@ -263,3 +263,87 @@ func TestVerificationConfig_SupportedProviders(t *testing.T) {
 	assert.Contains(t, SupportedProviders, "onfido")
 	assert.Len(t, SupportedProviders, 3)
 }
+
+func TestVerificationConfig_ValidateForEnvironment_ProductionRejectsMock(t *testing.T) {
+	cfg := &VerificationConfig{
+		Provider: "mock",
+	}
+
+	err := cfg.ValidateForEnvironment("production")
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrMockProviderInProduction)
+}
+
+func TestVerificationConfig_ValidateForEnvironment_ProductionRejectsHTTPWebhook(t *testing.T) {
+	cfg := &VerificationConfig{
+		Provider:       "jumio",
+		WebhookSecret:  "a]strongsecretthatis32charslong!!", // 32+ chars
+		WebhookURL:     "http://api.example.com/webhooks",   // HTTP, not HTTPS
+		ProviderConfig: map[string]string{"api_key": "key", "api_secret": "secret"},
+	}
+
+	err := cfg.ValidateForEnvironment("production")
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrWebhookHTTPSRequired)
+}
+
+func TestVerificationConfig_ValidateForEnvironment_ProductionRejectsWeakSecret(t *testing.T) {
+	cfg := &VerificationConfig{
+		Provider:       "jumio",
+		WebhookSecret:  "short-secret", // < 32 chars
+		WebhookURL:     "https://api.example.com/webhooks",
+		ProviderConfig: map[string]string{"api_key": "key", "api_secret": "secret"},
+	}
+
+	err := cfg.ValidateForEnvironment("production")
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrWebhookSecretTooShort)
+}
+
+func TestVerificationConfig_ValidateForEnvironment_DevelopmentAllowsMock(t *testing.T) {
+	cfg := &VerificationConfig{
+		Provider: "mock",
+	}
+
+	err := cfg.ValidateForEnvironment("development")
+
+	assert.NoError(t, err)
+}
+
+func TestVerificationConfig_ValidateForEnvironment_ProductionAcceptsValidConfig(t *testing.T) {
+	cfg := &VerificationConfig{
+		Provider:       "jumio",
+		WebhookSecret:  "a-very-strong-secret-that-is-at-least-32-characters-long",
+		WebhookURL:     "https://api.example.com/webhooks/verification",
+		ProviderConfig: map[string]string{"api_key": "key", "api_secret": "secret"},
+	}
+
+	err := cfg.ValidateForEnvironment("production")
+
+	assert.NoError(t, err)
+}
+
+func TestVerificationConfig_ValidateForEnvironment_ProdShorthandAlsoEnforces(t *testing.T) {
+	cfg := &VerificationConfig{
+		Provider: "mock",
+	}
+
+	err := cfg.ValidateForEnvironment("prod")
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrMockProviderInProduction)
+}
+
+func TestVerificationConfig_ValidateForEnvironment_RunsBaseValidateFirst(t *testing.T) {
+	cfg := &VerificationConfig{
+		Provider: "", // empty - should fail base Validate()
+	}
+
+	err := cfg.ValidateForEnvironment("production")
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrEmptyProvider)
+}
