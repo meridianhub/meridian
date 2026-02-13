@@ -3,16 +3,23 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/google/uuid"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
+	httpAdapter "github.com/meridianhub/meridian/services/party/adapters/http"
 	"github.com/meridianhub/meridian/services/party/adapters/persistence"
+	"github.com/meridianhub/meridian/services/party/config"
 	"github.com/meridianhub/meridian/services/party/service"
+	"github.com/meridianhub/meridian/services/party/verification"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
@@ -86,6 +93,38 @@ func run(logger *slog.Logger) error {
 	}
 	partyService.WithPaymentMethodRepository(pmRepo)
 
+	// Load verification config (graceful - service runs without KYC)
+	verificationCfg, err := config.LoadVerificationConfig()
+	if err != nil {
+		logger.Warn("verification config not loaded - KYC provider disabled", "error", err)
+		verificationCfg = nil
+	}
+
+	// Create verification provider and service when configured
+	var provider verification.Provider
+	var verificationSvc *service.VerificationService
+	if verificationCfg != nil {
+		provider, err = verification.NewProvider(verificationCfg)
+		if err != nil {
+			return fmt.Errorf("failed to create verification provider: %w", err)
+		}
+		logger.Info("verification provider initialized", "provider", verificationCfg.Provider)
+
+		partyService.WithVerificationProvider(provider)
+
+		verificationRepo := persistence.NewVerificationRepository(db)
+		verificationSvc, err = service.NewVerificationService(
+			&partyRepoAdapter{repo: repo},
+			verificationRepo,
+			provider,
+			nil, // eventPublisher - not yet wired
+			logger,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to create verification service: %w", err)
+		}
+	}
+
 	logger.Info("party service initialized")
 
 	// Initialize auth interceptor (optional - based on AUTH_ENABLED)
@@ -139,12 +178,76 @@ func run(logger *slog.Logger) error {
 
 	// Wait for shutdown signal and orchestrate graceful shutdown
 	orchestrator := bootstrap.NewShutdownOrchestrator(grpcServer, logger)
+
+	// Start HTTP server for webhooks when verification is configured
+	if verificationSvc != nil && verificationCfg != nil {
+		httpMux := http.NewServeMux()
+
+		webhookHandler, err := httpAdapter.NewVerificationWebhookHandler(
+			httpAdapter.VerificationWebhookHandlerConfig{
+				VerificationService: verificationSvc,
+				HMACSecrets: map[string][]byte{
+					"default": []byte(verificationCfg.WebhookSecret),
+				},
+				Logger: logger,
+			},
+		)
+		if err != nil {
+			return fmt.Errorf("failed to create webhook handler: %w", err)
+		}
+
+		httpMux.HandleFunc("/webhooks/verification/", webhookHandler.HandleWebhook)
+		httpMux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("OK"))
+		})
+
+		httpPort := env.GetEnvOrDefault("HTTP_PORT", "8081")
+		httpServer := &http.Server{
+			Addr:              ":" + httpPort,
+			Handler:           httpMux,
+			ReadHeaderTimeout: 10 * time.Second,
+		}
+
+		go func() {
+			logger.Info("starting HTTP server for webhooks", "port", httpPort)
+			if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				logger.Error("HTTP server error", "error", err)
+			}
+		}()
+
+		orchestrator.AddCleanup(func() error {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			return httpServer.Shutdown(shutdownCtx)
+		})
+	}
+
 	orchestrator.AddCleanup(func() error {
 		bootstrap.CloseDatabase(db, logger)
 		return nil
 	})
 
 	return orchestrator.Wait(serverErrors)
+}
+
+// partyRepoAdapter adapts persistence.Repository to satisfy
+// service.PartyRepository interface for the VerificationService.
+type partyRepoAdapter struct {
+	repo *persistence.Repository
+}
+
+func (a *partyRepoAdapter) FindByID(ctx context.Context, partyID uuid.UUID) (*interface{}, error) {
+	party, err := a.repo.FindByID(ctx, partyID)
+	if err != nil {
+		return nil, err
+	}
+	var i interface{} = party
+	return &i, nil
+}
+
+func (a *partyRepoAdapter) ExistsByID(ctx context.Context, partyID uuid.UUID) (bool, error) {
+	return a.repo.ExistsByID(ctx, partyID)
 }
 
 // parseLogLevel converts a string log level to slog.Level.
