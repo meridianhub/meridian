@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	pb "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	"github.com/meridianhub/meridian/services/party/adapters/persistence"
 	"github.com/meridianhub/meridian/services/party/domain"
+	"github.com/meridianhub/meridian/services/party/verification"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
@@ -628,5 +630,214 @@ func TestDomainToProto(t *testing.T) {
 		assert.Empty(t, protoParty.ExternalReference)
 		assert.Equal(t, pb.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_UNSPECIFIED, protoParty.ExternalReferenceType)
 		assert.Equal(t, int32(1), protoParty.Version)
+	})
+}
+
+// errorProvider implements verification.Provider and always returns errors
+type errorProvider struct{}
+
+func (e *errorProvider) VerifyIdentity(_ context.Context, _ *domain.Party) (verification.Result, error) {
+	return verification.Result{}, fmt.Errorf("provider unavailable")
+}
+
+func (e *errorProvider) CheckSanctions(_ context.Context, _ *domain.Party) (verification.SanctionsResult, error) {
+	return verification.SanctionsResult{}, fmt.Errorf("sanctions service unavailable")
+}
+
+func (e *errorProvider) GetVerificationStatus(_ context.Context, _ string) (verification.Result, error) {
+	return verification.Result{}, fmt.Errorf("provider unavailable")
+}
+
+// sanctionsErrorProvider approves identity but fails sanctions screening
+type sanctionsErrorProvider struct {
+	*verification.MockProvider
+}
+
+func (p *sanctionsErrorProvider) CheckSanctions(_ context.Context, _ *domain.Party) (verification.SanctionsResult, error) {
+	return verification.SanctionsResult{}, fmt.Errorf("sanctions service unavailable")
+}
+
+func TestExchangeDemographics(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("provider approved returns APPROVED status", func(t *testing.T) {
+		mock := newMockRepository()
+		svc := newTestService(mock)
+
+		party, err := domain.NewParty(domain.PartyTypePerson, "Alice Smith")
+		require.NoError(t, err)
+		mock.parties[party.ID()] = party
+
+		mockProvider := verification.NewMockProvider().WithAlwaysApprove(true)
+		svc.WithVerificationProvider(mockProvider)
+
+		resp, err := svc.ExchangeDemographics(ctx, &pb.ExchangeDemographicsRequest{
+			PartyId: party.ID().String(),
+		})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+
+		assert.Equal(t, party.ID().String(), resp.PartyId)
+		assert.Equal(t, "APPROVED", resp.VerificationStatus)
+		assert.NotNil(t, resp.VerificationTimestamp)
+	})
+
+	t.Run("provider rejected returns REJECTED status", func(t *testing.T) {
+		mock := newMockRepository()
+		svc := newTestService(mock)
+
+		party, err := domain.NewParty(domain.PartyTypePerson, "Bob Jones")
+		require.NoError(t, err)
+		mock.parties[party.ID()] = party
+
+		mockProvider := verification.NewMockProvider().WithAlwaysApprove(false)
+		svc.WithVerificationProvider(mockProvider)
+
+		resp, err := svc.ExchangeDemographics(ctx, &pb.ExchangeDemographicsRequest{
+			PartyId: party.ID().String(),
+		})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+
+		// Sanctions match overrides to MANUAL_REVIEW when AlwaysApprove=false
+		assert.Equal(t, "MANUAL_REVIEW", resp.VerificationStatus)
+	})
+
+	t.Run("sanctions match overrides status to MANUAL_REVIEW", func(t *testing.T) {
+		mock := newMockRepository()
+		svc := newTestService(mock)
+
+		party, err := domain.NewParty(domain.PartyTypePerson, "Charlie Brown")
+		require.NoError(t, err)
+		mock.parties[party.ID()] = party
+
+		// AlwaysApprove=false causes CheckSanctions to return MATCH
+		mockProvider := verification.NewMockProvider().WithAlwaysApprove(false)
+		svc.WithVerificationProvider(mockProvider)
+
+		resp, err := svc.ExchangeDemographics(ctx, &pb.ExchangeDemographicsRequest{
+			PartyId: party.ID().String(),
+		})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+
+		assert.Equal(t, "MANUAL_REVIEW", resp.VerificationStatus)
+	})
+
+	t.Run("no provider in production returns Unimplemented", func(t *testing.T) {
+		mock := newMockRepository()
+		svc := newTestService(mock)
+
+		party, err := domain.NewParty(domain.PartyTypePerson, "Dave Wilson")
+		require.NoError(t, err)
+		mock.parties[party.ID()] = party
+
+		// No provider configured
+		t.Setenv("ENVIRONMENT", "production")
+
+		resp, err := svc.ExchangeDemographics(ctx, &pb.ExchangeDemographicsRequest{
+			PartyId: party.ID().String(),
+		})
+		assert.Nil(t, resp)
+		assert.Error(t, err)
+
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.Unimplemented, st.Code())
+	})
+
+	t.Run("no provider in dev returns stub VERIFIED", func(t *testing.T) {
+		mock := newMockRepository()
+		svc := newTestService(mock)
+
+		party, err := domain.NewParty(domain.PartyTypePerson, "Eve Davis")
+		require.NoError(t, err)
+		mock.parties[party.ID()] = party
+
+		// No provider configured, not production
+		t.Setenv("ENVIRONMENT", "development")
+
+		resp, err := svc.ExchangeDemographics(ctx, &pb.ExchangeDemographicsRequest{
+			PartyId: party.ID().String(),
+		})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+
+		assert.Equal(t, party.ID().String(), resp.PartyId)
+		assert.Equal(t, "VERIFIED", resp.VerificationStatus)
+		assert.NotNil(t, resp.VerificationTimestamp)
+	})
+
+	t.Run("provider error returns Internal", func(t *testing.T) {
+		mock := newMockRepository()
+		svc := newTestService(mock)
+
+		party, err := domain.NewParty(domain.PartyTypePerson, "Frank Miller")
+		require.NoError(t, err)
+		mock.parties[party.ID()] = party
+
+		svc.WithVerificationProvider(&errorProvider{})
+
+		resp, err := svc.ExchangeDemographics(ctx, &pb.ExchangeDemographicsRequest{
+			PartyId: party.ID().String(),
+		})
+		assert.Nil(t, resp)
+		assert.Error(t, err)
+
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.Internal, st.Code())
+	})
+
+	t.Run("sanctions error warns but does not fail", func(t *testing.T) {
+		mock := newMockRepository()
+		svc := newTestService(mock)
+
+		party, err := domain.NewParty(domain.PartyTypePerson, "Grace Lee")
+		require.NoError(t, err)
+		mock.parties[party.ID()] = party
+
+		svc.WithVerificationProvider(&sanctionsErrorProvider{
+			MockProvider: verification.NewMockProvider().WithAlwaysApprove(true),
+		})
+
+		resp, err := svc.ExchangeDemographics(ctx, &pb.ExchangeDemographicsRequest{
+			PartyId: party.ID().String(),
+		})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+
+		// Identity verification approved, sanctions error does not override
+		assert.Equal(t, "APPROVED", resp.VerificationStatus)
+	})
+
+	t.Run("invalid party ID returns InvalidArgument", func(t *testing.T) {
+		mock := newMockRepository()
+		svc := newTestService(mock)
+
+		resp, err := svc.ExchangeDemographics(ctx, &pb.ExchangeDemographicsRequest{
+			PartyId: "not-a-uuid",
+		})
+		assert.Nil(t, resp)
+		assert.Error(t, err)
+
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.InvalidArgument, st.Code())
+	})
+
+	t.Run("non-existent party returns NotFound", func(t *testing.T) {
+		mock := newMockRepository()
+		svc := newTestService(mock)
+
+		resp, err := svc.ExchangeDemographics(ctx, &pb.ExchangeDemographicsRequest{
+			PartyId: uuid.New().String(),
+		})
+		assert.Nil(t, resp)
+		assert.Error(t, err)
+
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.NotFound, st.Code())
 	})
 }
