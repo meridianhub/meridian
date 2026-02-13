@@ -71,7 +71,7 @@ CREATE_RESP=$(grpcurl -plaintext -d "{
   \"instrument_code\": \"GBP\",
   \"clearing_purpose\": \"CLEARING_PURPOSE_GENERAL\",
   \"idempotency_key\": {\"key\": \"${IDEMPOTENCY_KEY}\"}
-}" "$IBA_ADDR" meridian.internal_bank_account.v1.InternalBankAccountService/InitiateInternalBankAccount 2>&1)
+}" "$IBA_ADDR" meridian.internal_bank_account.v1.InternalBankAccountService/InitiateInternalBankAccount 2>&1) || true
 
 ACCOUNT_ID=$(echo "$CREATE_RESP" | grep -o '"accountId":[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"accountId":[[:space:]]*"\([^"]*\)".*/\1/')
 
@@ -88,9 +88,8 @@ log_info "Created account: ${ACCOUNT_ID}"
 log_info "Calling GetBalance for account ${ACCOUNT_ID}..."
 
 BALANCE_RESP=$(grpcurl -plaintext -d "{\"account_id\": \"${ACCOUNT_ID}\"}" \
-    "$IBA_ADDR" meridian.internal_bank_account.v1.InternalBankAccountService/GetBalance 2>&1)
-
-BALANCE_EXIT=$?
+    "$IBA_ADDR" meridian.internal_bank_account.v1.InternalBankAccountService/GetBalance 2>&1) || BALANCE_EXIT=$?
+BALANCE_EXIT=${BALANCE_EXIT:-0}
 
 if [ "$BALANCE_EXIT" -ne 0 ]; then
     log_error "GetBalance call failed (exit code: ${BALANCE_EXIT}). Response:"
