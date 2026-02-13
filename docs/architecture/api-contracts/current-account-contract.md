@@ -675,7 +675,7 @@ These invariants MUST hold at all times across all operations:
 All update operations use optimistic locking via the `version` field:
 
 ```sql
-UPDATE current_account_facility
+UPDATE account
 SET
   account_status = $1,
   updated_at = NOW(),
