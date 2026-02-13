@@ -1065,6 +1065,269 @@ func TestExecuteWithdrawal_AmountOverflow(t *testing.T) {
 }
 
 // =============================================================================
+// Direct Withdrawal Mode Regression Tests
+// =============================================================================
+//
+// These tests verify the direct withdrawal mode (account_id + amount, no withdrawal_id)
+// continues to work correctly after nil guard removal (task 2). Direct mode bypasses
+// the withdrawal repository and creates a withdrawal without persistence.
+
+// TestDirectWithdrawal_SucceedsWithAccountIDAndAmount verifies the happy path for
+// direct withdrawal mode: provide account_id + amount, receive successful response.
+func TestDirectWithdrawal_SucceedsWithAccountIDAndAmount(t *testing.T) {
+	db, ctx, cleanup := setupIntegrationTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	_ = createTestAccountWithBalance(t, ctx, repo, "ACC-DIRECT-001", 100000) // £1000
+
+	// Configure Position Keeping mock with post-withdrawal balance
+	mockPosKeeping := &mockPositionKeepingClient{
+		accountBalances: map[string]int64{
+			"ACC-DIRECT-001": 75000, // £750 post-withdrawal
+		},
+	}
+	mockFinAcct := &mockFinancialAccountingClient{}
+
+	svc := &Service{
+		repo:                   repo,
+		posKeepingClient:       mockPosKeeping,
+		finAcctClient:          mockFinAcct,
+		logger:                 testLogger(),
+		withdrawalOrchestrator: testWithdrawalOrchestrator(repo, mockPosKeeping, mockFinAcct),
+	}
+
+	// Execute direct withdrawal of £250
+	req := createTestWithdrawalRequest("ACC-DIRECT-001", 250, 0)
+	resp, err := svc.ExecuteWithdrawal(ctx, req)
+
+	// Verify success
+	require.NoError(t, err, "Direct withdrawal should succeed")
+	assert.Equal(t, "ACC-DIRECT-001", resp.AccountId)
+	assert.NotEmpty(t, resp.TransactionId, "Transaction ID should be generated")
+	assert.Equal(t, pb.WithdrawalStatus_WITHDRAWAL_STATUS_COMPLETED, resp.Status)
+
+	// Verify balance from Position Keeping
+	assert.NotNil(t, resp.NewBalance)
+	assert.Equal(t, int64(750), resp.NewBalance.Amount.Units)
+	assert.Equal(t, int32(0), resp.NewBalance.Amount.Nanos)
+
+	// Verify saga orchestration ran
+	assert.Equal(t, 1, mockPosKeeping.initiateCalls, "PositionKeeping should be called once")
+	assert.Equal(t, 1, mockFinAcct.captureCalls, "FinancialAccounting should be called once")
+
+	// Verify no compensation
+	assert.Equal(t, 0, mockPosKeeping.compensateCalls, "No compensation on success")
+	assert.Equal(t, 0, mockFinAcct.compensateCalls, "No compensation on success")
+}
+
+// TestDirectWithdrawal_NoWithdrawalRecordCreated verifies that direct withdrawal mode
+// does NOT create a withdrawal record in the database. This is the key behavioral
+// difference from the pending withdrawal flow (InitiateWithdrawal -> ExecuteWithdrawal).
+func TestDirectWithdrawal_NoWithdrawalRecordCreated(t *testing.T) {
+	db, ctx, cleanup := setupIntegrationTestDB(t)
+	defer cleanup()
+
+	// Create withdrawal table so we can verify no records were inserted
+	err := db.AutoMigrate(&persistence.WithdrawalEntity{})
+	require.NoError(t, err, "failed to create withdrawal table")
+
+	repo := persistence.NewRepository(db)
+	withdrawalRepo := persistence.NewWithdrawalRepository(db)
+	_ = createTestAccountWithBalance(t, ctx, repo, "ACC-DIRECT-002", 100000) // £1000
+
+	mockPosKeeping := &mockPositionKeepingClient{
+		accountBalances: map[string]int64{
+			"ACC-DIRECT-002": 90000, // £900 post-withdrawal
+		},
+	}
+	mockFinAcct := &mockFinancialAccountingClient{}
+
+	svc := &Service{
+		repo:                   repo,
+		withdrawalRepo:         withdrawalRepo,
+		posKeepingClient:       mockPosKeeping,
+		finAcctClient:          mockFinAcct,
+		logger:                 testLogger(),
+		withdrawalOrchestrator: testWithdrawalOrchestrator(repo, mockPosKeeping, mockFinAcct),
+	}
+
+	// Execute direct withdrawal of £100
+	req := createTestWithdrawalRequest("ACC-DIRECT-002", 100, 0)
+	resp, err := svc.ExecuteWithdrawal(ctx, req)
+
+	require.NoError(t, err, "Direct withdrawal should succeed")
+	assert.Equal(t, pb.WithdrawalStatus_WITHDRAWAL_STATUS_COMPLETED, resp.Status)
+
+	// Verify no withdrawal record was created in the database.
+	// Direct mode skips persistence because pendingWithdrawal is nil.
+	account, err := repo.FindByID(ctx, "ACC-DIRECT-002")
+	require.NoError(t, err)
+
+	withdrawals, err := withdrawalRepo.List(ctx, account.ID(), persistence.PaginationParams{Limit: 10, Offset: 0})
+	require.NoError(t, err, "Listing withdrawals should not error")
+	assert.Empty(t, withdrawals, "Direct withdrawal should NOT create a withdrawal record in the database")
+}
+
+// TestDirectWithdrawal_BalanceDecreased verifies that the account balance reported by
+// Position Keeping reflects the withdrawal. Since Position Keeping is the authoritative
+// balance source, we verify the response balance matches the mock's post-withdrawal value.
+func TestDirectWithdrawal_BalanceDecreased(t *testing.T) {
+	db, ctx, cleanup := setupIntegrationTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	_ = createTestAccountWithBalance(t, ctx, repo, "ACC-DIRECT-003", 50000) // £500
+
+	// Post-withdrawal balance: £500 - £123.45 = £376.55 (37655 cents)
+	mockPosKeeping := &mockPositionKeepingClient{
+		accountBalances: map[string]int64{
+			"ACC-DIRECT-003": 37655,
+		},
+	}
+	mockFinAcct := &mockFinancialAccountingClient{}
+
+	svc := &Service{
+		repo:                   repo,
+		posKeepingClient:       mockPosKeeping,
+		finAcctClient:          mockFinAcct,
+		logger:                 testLogger(),
+		withdrawalOrchestrator: testWithdrawalOrchestrator(repo, mockPosKeeping, mockFinAcct),
+	}
+
+	// Withdraw £123.45
+	req := createTestWithdrawalRequest("ACC-DIRECT-003", 123, 450000000)
+	resp, err := svc.ExecuteWithdrawal(ctx, req)
+
+	require.NoError(t, err, "Direct withdrawal should succeed")
+
+	// Verify balance reflects post-withdrawal amount from Position Keeping
+	require.NotNil(t, resp.NewBalance)
+	assert.Equal(t, int64(376), resp.NewBalance.Amount.Units, "Balance units should reflect withdrawal")
+	assert.Equal(t, int32(550000000), resp.NewBalance.Amount.Nanos, "Balance nanos should reflect withdrawal")
+
+	// Verify available balance is also populated
+	require.NotNil(t, resp.AvailableBalance)
+	assert.Equal(t, int64(376), resp.AvailableBalance.Amount.Units)
+}
+
+// TestDirectWithdrawal_InvalidAmount_ZeroReturnsError verifies that a direct withdrawal
+// with zero amount returns InvalidArgument error.
+func TestDirectWithdrawal_InvalidAmount_ZeroReturnsError(t *testing.T) {
+	db, ctx, cleanup := setupIntegrationTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	_ = createTestAccountWithBalance(t, ctx, repo, "ACC-DIRECT-004", 100000)
+
+	svc := mustNewService(t, repo, nil)
+
+	req := createTestWithdrawalRequest("ACC-DIRECT-004", 0, 0)
+	resp, err := svc.ExecuteWithdrawal(ctx, req)
+
+	require.Error(t, err, "Zero amount should be rejected")
+	assert.Nil(t, resp)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok, "Expected gRPC status error")
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+}
+
+// TestDirectWithdrawal_InvalidAmount_NegativeReturnsError verifies that a direct withdrawal
+// with negative amount returns InvalidArgument error.
+func TestDirectWithdrawal_InvalidAmount_NegativeReturnsError(t *testing.T) {
+	db, ctx, cleanup := setupIntegrationTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	_ = createTestAccountWithBalance(t, ctx, repo, "ACC-DIRECT-005", 100000)
+
+	svc := mustNewService(t, repo, nil)
+
+	req := createTestWithdrawalRequest("ACC-DIRECT-005", -50, 0)
+	resp, err := svc.ExecuteWithdrawal(ctx, req)
+
+	require.Error(t, err, "Negative amount should be rejected")
+	assert.Nil(t, resp)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok, "Expected gRPC status error")
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+}
+
+// TestDirectWithdrawal_InvalidAmount_NilAmountReturnsError verifies that a direct withdrawal
+// with nil amount returns InvalidArgument error.
+func TestDirectWithdrawal_InvalidAmount_NilAmountReturnsError(t *testing.T) {
+	db, ctx, cleanup := setupIntegrationTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	_ = createTestAccountWithBalance(t, ctx, repo, "ACC-DIRECT-006", 100000)
+
+	svc := mustNewService(t, repo, nil)
+
+	req := &pb.ExecuteWithdrawalRequest{
+		AccountId: "ACC-DIRECT-006",
+		// Amount is nil
+	}
+	resp, err := svc.ExecuteWithdrawal(ctx, req)
+
+	require.Error(t, err, "Nil amount should be rejected")
+	assert.Nil(t, resp)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok, "Expected gRPC status error")
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+	assert.Contains(t, st.Message(), "amount")
+}
+
+// TestDirectWithdrawal_NonExistentAccountReturnsError verifies that a direct withdrawal
+// targeting a non-existent account returns NotFound error.
+func TestDirectWithdrawal_NonExistentAccountReturnsError(t *testing.T) {
+	db, ctx, cleanup := setupIntegrationTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	svc := mustNewService(t, repo, nil)
+
+	req := createTestWithdrawalRequest("ACC-DIRECT-NONEXISTENT", 100, 0)
+	resp, err := svc.ExecuteWithdrawal(ctx, req)
+
+	require.Error(t, err, "Non-existent account should return error")
+	assert.Nil(t, resp)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok, "Expected gRPC status error")
+	assert.Equal(t, codes.NotFound, st.Code())
+}
+
+// TestDirectWithdrawal_MissingAccountIDReturnsError verifies that a direct withdrawal
+// without account_id (and without withdrawal_id) returns InvalidArgument error.
+func TestDirectWithdrawal_MissingAccountIDReturnsError(t *testing.T) {
+	db, ctx, cleanup := setupIntegrationTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	svc := mustNewService(t, repo, nil)
+
+	req := &pb.ExecuteWithdrawalRequest{
+		// AccountId is empty, WithdrawalId is empty -> direct mode with missing account_id
+		Amount: &commonpb.MoneyAmount{
+			Amount: &money.Money{CurrencyCode: "GBP", Units: 100, Nanos: 0},
+		},
+	}
+	resp, err := svc.ExecuteWithdrawal(ctx, req)
+
+	require.Error(t, err, "Missing account_id should return error")
+	assert.Nil(t, resp)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok, "Expected gRPC status error")
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+	assert.Contains(t, st.Message(), "account_id")
+}
+
+// =============================================================================
 // Helper Notes
 // =============================================================================
 
