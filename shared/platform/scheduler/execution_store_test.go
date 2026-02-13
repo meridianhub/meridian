@@ -110,13 +110,57 @@ func setupTestTable(t *testing.T) *pgxpool.Pool {
 	return testPool
 }
 
+func TestIntegration_PgExecutionStore_ValidatesTable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	pool := setupTestTable(t)
+	store, err := scheduler.NewPgExecutionStore(pool)
+	require.NoError(t, err)
+	require.NotNil(t, store)
+}
+
+func TestIntegration_PgExecutionStore_FailsWithoutTable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	if testPool == nil {
+		t.Skip("testPool not initialized (short mode?)")
+	}
+
+	// Use a separate schema that has no tables to avoid interfering with other tests.
+	ctx := context.Background()
+	_, err := testPool.Exec(ctx, "CREATE SCHEMA IF NOT EXISTS empty_schema")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), "DROP SCHEMA empty_schema CASCADE")
+	})
+
+	// Create a pool connected to the empty schema via search_path.
+	connCfg, err := pgxpool.ParseConfig(testPool.Config().ConnString())
+	require.NoError(t, err)
+	connCfg.ConnConfig.RuntimeParams["search_path"] = "empty_schema"
+
+	emptyPool, err := pgxpool.NewWithConfig(ctx, connCfg)
+	require.NoError(t, err)
+	defer emptyPool.Close()
+
+	store, err := scheduler.NewPgExecutionStore(emptyPool)
+	require.Error(t, err)
+	assert.Nil(t, store)
+	assert.Contains(t, err.Error(), "scheduler_execution table not found")
+}
+
 func TestIntegration_PgExecutionStore_RecordAndRetrieve(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
 
 	pool := setupTestTable(t)
-	store := scheduler.NewPgExecutionStore(pool)
+	store, err := scheduler.NewPgExecutionStore(pool)
+	require.NoError(t, err)
 	ctx := context.Background()
 
 	execID := uuid.New()
@@ -133,7 +177,7 @@ func TestIntegration_PgExecutionStore_RecordAndRetrieve(t *testing.T) {
 		Status:        scheduler.ExecutionStatusTriggered,
 	}
 
-	err := store.RecordExecution(ctx, exec)
+	err = store.RecordExecution(ctx, exec)
 	require.NoError(t, err)
 
 	last, err := store.LastExecution(ctx, schedulerName, scheduleID)
@@ -151,7 +195,8 @@ func TestIntegration_PgExecutionStore_UpdateToCompleted(t *testing.T) {
 	}
 
 	pool := setupTestTable(t)
-	store := scheduler.NewPgExecutionStore(pool)
+	store, err := scheduler.NewPgExecutionStore(pool)
+	require.NoError(t, err)
 	ctx := context.Background()
 
 	execID := uuid.New()
@@ -168,7 +213,7 @@ func TestIntegration_PgExecutionStore_UpdateToCompleted(t *testing.T) {
 		Status:        scheduler.ExecutionStatusTriggered,
 	}
 
-	err := store.RecordExecution(ctx, exec)
+	err = store.RecordExecution(ctx, exec)
 	require.NoError(t, err)
 
 	resultRef := "run-123"
@@ -190,7 +235,8 @@ func TestIntegration_PgExecutionStore_UpdateToFailed(t *testing.T) {
 	}
 
 	pool := setupTestTable(t)
-	store := scheduler.NewPgExecutionStore(pool)
+	store, err := scheduler.NewPgExecutionStore(pool)
+	require.NoError(t, err)
 	ctx := context.Background()
 
 	execID := uuid.New()
@@ -207,7 +253,7 @@ func TestIntegration_PgExecutionStore_UpdateToFailed(t *testing.T) {
 		Status:        scheduler.ExecutionStatusTriggered,
 	}
 
-	err := store.RecordExecution(ctx, exec)
+	err = store.RecordExecution(ctx, exec)
 	require.NoError(t, err)
 
 	errMsg := "gRPC unavailable"
@@ -228,7 +274,8 @@ func TestIntegration_PgExecutionStore_LastExecution_ReturnsLatest(t *testing.T) 
 	}
 
 	pool := setupTestTable(t)
-	store := scheduler.NewPgExecutionStore(pool)
+	store, err := scheduler.NewPgExecutionStore(pool)
+	require.NoError(t, err)
 	ctx := context.Background()
 
 	schedulerName := "test-scheduler"
@@ -241,7 +288,7 @@ func TestIntegration_PgExecutionStore_LastExecution_ReturnsLatest(t *testing.T) 
 		ScheduledAt:   time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Microsecond),
 		Status:        scheduler.ExecutionStatusCompleted,
 	}
-	err := store.RecordExecution(ctx, older)
+	err = store.RecordExecution(ctx, older)
 	require.NoError(t, err)
 
 	recent := scheduler.Execution{
@@ -266,7 +313,8 @@ func TestIntegration_PgExecutionStore_LastExecution_NoRecord(t *testing.T) {
 	}
 
 	pool := setupTestTable(t)
-	store := scheduler.NewPgExecutionStore(pool)
+	store, err := scheduler.NewPgExecutionStore(pool)
+	require.NoError(t, err)
 	ctx := context.Background()
 
 	last, err := store.LastExecution(ctx, "nonexistent", "nonexistent")
@@ -280,7 +328,8 @@ func TestIntegration_PgExecutionStore_IsolatesBySchedulerAndScheduleID(t *testin
 	}
 
 	pool := setupTestTable(t)
-	store := scheduler.NewPgExecutionStore(pool)
+	store, err := scheduler.NewPgExecutionStore(pool)
+	require.NoError(t, err)
 	ctx := context.Background()
 
 	now := time.Now().UTC().Truncate(time.Microsecond)
@@ -293,7 +342,7 @@ func TestIntegration_PgExecutionStore_IsolatesBySchedulerAndScheduleID(t *testin
 		ScheduledAt:   now,
 		Status:        scheduler.ExecutionStatusCompleted,
 	}
-	err := store.RecordExecution(ctx, execA)
+	err = store.RecordExecution(ctx, execA)
 	require.NoError(t, err)
 
 	// Insert for scheduler-B, sched-1
@@ -326,10 +375,11 @@ func TestIntegration_PgExecutionStore_UpdateNonExistentRow(t *testing.T) {
 	}
 
 	pool := setupTestTable(t)
-	store := scheduler.NewPgExecutionStore(pool)
+	store, err := scheduler.NewPgExecutionStore(pool)
+	require.NoError(t, err)
 	ctx := context.Background()
 
-	err := store.UpdateExecution(ctx, uuid.New(), scheduler.ExecutionStatusCompleted, nil, nil)
+	err = store.UpdateExecution(ctx, uuid.New(), scheduler.ExecutionStatusCompleted, nil, nil)
 	assert.ErrorIs(t, err, scheduler.ErrExecutionNotFound)
 }
 
@@ -356,7 +406,8 @@ func TestIntegration_PgExecutionStore_AllValidStatuses(t *testing.T) {
 	}
 
 	pool := setupTestTable(t)
-	store := scheduler.NewPgExecutionStore(pool)
+	store, err := scheduler.NewPgExecutionStore(pool)
+	require.NoError(t, err)
 	ctx := context.Background()
 
 	statuses := []scheduler.ExecutionStatus{

@@ -60,9 +60,18 @@ type PgExecutionStore struct {
 	pool *pgxpool.Pool
 }
 
-// NewPgExecutionStore creates a new PgExecutionStore.
-func NewPgExecutionStore(pool *pgxpool.Pool) *PgExecutionStore {
-	return &PgExecutionStore{pool: pool}
+// NewPgExecutionStore creates a new PgExecutionStore and validates the schema.
+// Returns an error if the scheduler_execution table does not exist.
+func NewPgExecutionStore(pool *pgxpool.Pool) (*PgExecutionStore, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := pool.Exec(ctx, "SELECT 1 FROM scheduler_execution LIMIT 0")
+	if err != nil {
+		return nil, fmt.Errorf("scheduler_execution table not found - ensure the migration has been applied: %w", err)
+	}
+
+	return &PgExecutionStore{pool: pool}, nil
 }
 
 // RecordExecution inserts a new execution record into the database.
