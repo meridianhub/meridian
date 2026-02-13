@@ -13,6 +13,7 @@ import (
 	pb "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	"github.com/meridianhub/meridian/services/party/adapters/persistence"
 	"github.com/meridianhub/meridian/services/party/domain"
+	"github.com/meridianhub/meridian/services/party/verification"
 	"github.com/meridianhub/meridian/shared/platform/auth"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -75,9 +76,10 @@ type Repository interface {
 // Service implements the PartyService gRPC service
 type Service struct {
 	pb.UnimplementedPartyServiceServer
-	repo   Repository
-	pmRepo PaymentMethodRepository
-	logger *slog.Logger
+	repo                 Repository
+	pmRepo               PaymentMethodRepository
+	verificationProvider verification.Provider
+	logger               *slog.Logger
 }
 
 // NewService creates a new party service
@@ -100,6 +102,13 @@ func NewService(repo Repository, logger *slog.Logger) (*Service, error) {
 // When set, payment method gRPC operations are enabled.
 func (s *Service) WithPaymentMethodRepository(pmRepo PaymentMethodRepository) *Service {
 	s.pmRepo = pmRepo
+	return s
+}
+
+// WithVerificationProvider sets the KYC/AML verification provider on the service.
+// When set, ExchangeDemographics delegates to the real provider instead of returning a stub.
+func (s *Service) WithVerificationProvider(provider verification.Provider) *Service {
+	s.verificationProvider = provider
 	return s
 }
 
@@ -707,48 +716,74 @@ func (s *Service) ExchangeDemographics(ctx context.Context, req *pb.ExchangeDemo
 		return nil, status.Errorf(codes.InvalidArgument, "invalid party ID format: %v", err)
 	}
 
-	// Verify party exists
-	if _, err := s.repo.FindByID(ctx, partyID); err != nil {
+	// Retrieve party for verification
+	party, err := s.repo.FindByID(ctx, partyID)
+	if err != nil {
 		if errors.Is(err, persistence.ErrPartyNotFound) {
 			return nil, status.Errorf(codes.NotFound, "party not found: %s", req.PartyId)
 		}
 		return nil, status.Errorf(codes.Internal, "failed to retrieve party: %v", err)
 	}
 
-	// Production safety check - prevent stub KYC usage in production
-	if os.Getenv("ENVIRONMENT") == "production" && os.Getenv("KYC_STUB_ENABLED") != "true" {
-		return nil, status.Error(codes.Unimplemented,
-			"KYC/AML verification not implemented - cannot operate in production without external provider integration")
+	// If no verification provider is configured, fall back to stub behavior
+	if s.verificationProvider == nil {
+		return s.exchangeDemographicsStub(req.PartyId)
 	}
 
-	// Check if stub KYC is explicitly enabled
-	if os.Getenv("KYC_STUB_ENABLED") == "true" {
-		s.logger.Warn("Using stubbed KYC verification - DEVELOPMENT ONLY",
+	// Delegate to the real verification provider
+	result, err := s.verificationProvider.VerifyIdentity(ctx, party)
+	if err != nil {
+		s.logger.Error("verification provider error",
 			"party_id", req.PartyId,
-			"environment", os.Getenv("ENVIRONMENT"))
-
-		// Stub: returns VERIFIED for all parties. Real KYC/AML integration requires
-		// an external provider (e.g., Onfido, Jumio). The VerificationService handles
-		// async webhook-based verification separately; this endpoint is a synchronous
-		// BIAN ExchangeDemographics operation that will delegate to the provider adapter.
-		verificationStatus := "VERIFIED"
-
-		return &pb.ExchangeDemographicsResponse{
-			PartyId:               req.PartyId,
-			VerificationStatus:    verificationStatus,
-			VerificationTimestamp: timestamppb.Now(),
-		}, nil
+			"error", err)
+		return nil, status.Errorf(codes.Internal, "verification failed: %v", err)
 	}
 
-	// Default behavior for non-production environments without explicit flag.
-	// Stub: returns VERIFIED for all parties. See KYC_STUB_ENABLED block above
-	// for context on the planned external provider integration.
-	verificationStatus := "VERIFIED"
-	s.logger.Info("demographics verified", "party_id", req.PartyId)
+	verificationStatus := string(result.Status)
+
+	s.logger.Info("identity verification completed",
+		"party_id", req.PartyId,
+		"verification_id", result.VerificationID,
+		"status", verificationStatus,
+		"risk_score", result.RiskScore)
+
+	// Sanctions screening - errors warn but do not fail the request
+	sanctionsResult, err := s.verificationProvider.CheckSanctions(ctx, party)
+	if err != nil {
+		s.logger.Warn("sanctions screening failed, proceeding with identity result",
+			"party_id", req.PartyId,
+			"error", err)
+	} else if sanctionsResult.Status == verification.SanctionsStatusMatch {
+		verificationStatus = string(verification.StatusManualReview)
+		s.logger.Warn("sanctions match found, overriding status to MANUAL_REVIEW",
+			"party_id", req.PartyId,
+			"screening_id", sanctionsResult.ScreeningID,
+			"match_count", len(sanctionsResult.Matches))
+	}
 
 	return &pb.ExchangeDemographicsResponse{
 		PartyId:               req.PartyId,
 		VerificationStatus:    verificationStatus,
+		VerificationTimestamp: timestamppb.Now(),
+	}, nil
+}
+
+// exchangeDemographicsStub returns a stub response when no verification provider is configured.
+// In production, this returns Unimplemented to prevent operating without a real provider.
+// In development/test environments, it returns a stub VERIFIED response.
+func (s *Service) exchangeDemographicsStub(partyID string) (*pb.ExchangeDemographicsResponse, error) {
+	if os.Getenv("ENVIRONMENT") == "production" {
+		return nil, status.Error(codes.Unimplemented,
+			"KYC/AML verification not implemented - no verification provider configured")
+	}
+
+	s.logger.Warn("using stub KYC verification - no provider configured",
+		"party_id", partyID,
+		"environment", os.Getenv("ENVIRONMENT"))
+
+	return &pb.ExchangeDemographicsResponse{
+		PartyId:               partyID,
+		VerificationStatus:    "VERIFIED",
 		VerificationTimestamp: timestamppb.Now(),
 	}, nil
 }

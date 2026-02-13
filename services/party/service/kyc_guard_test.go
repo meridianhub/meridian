@@ -98,42 +98,24 @@ func TestExchangeDemographics_ProductionSafety(t *testing.T) {
 	tests := []struct {
 		name            string
 		environment     string
-		kycStubEnabled  string
 		expectError     bool
 		expectErrorCode codes.Code
 	}{
 		{
-			name:            "production without flag should reject",
+			name:            "production without provider should reject",
 			environment:     "production",
-			kycStubEnabled:  "",
 			expectError:     true,
 			expectErrorCode: codes.Unimplemented,
 		},
 		{
-			name:            "production with explicit flag should allow with warning",
-			environment:     "production",
-			kycStubEnabled:  "true",
-			expectError:     false,
-			expectErrorCode: codes.OK,
-		},
-		{
-			name:            "development without flag should allow",
+			name:            "development without provider should return stub",
 			environment:     "development",
-			kycStubEnabled:  "",
 			expectError:     false,
 			expectErrorCode: codes.OK,
 		},
 		{
-			name:            "development with flag should allow with warning",
-			environment:     "development",
-			kycStubEnabled:  "true",
-			expectError:     false,
-			expectErrorCode: codes.OK,
-		},
-		{
-			name:            "staging without flag should allow",
+			name:            "staging without provider should return stub",
 			environment:     "staging",
-			kycStubEnabled:  "",
 			expectError:     false,
 			expectErrorCode: codes.OK,
 		},
@@ -145,17 +127,11 @@ func TestExchangeDemographics_ProductionSafety(t *testing.T) {
 			svc, _, ctx, cleanup := setupKYCTest(t)
 			defer cleanup()
 
-			// Set environment variables
-			if tt.environment != "" {
-				os.Setenv("ENVIRONMENT", tt.environment)
-				defer os.Unsetenv("ENVIRONMENT")
-			}
-			if tt.kycStubEnabled != "" {
-				os.Setenv("KYC_STUB_ENABLED", tt.kycStubEnabled)
-				defer os.Unsetenv("KYC_STUB_ENABLED")
-			} else {
-				os.Unsetenv("KYC_STUB_ENABLED")
-			}
+			// Set environment variable
+			os.Setenv("ENVIRONMENT", tt.environment)
+			defer os.Unsetenv("ENVIRONMENT")
+
+			// No verification provider configured - tests stub fallback behavior
 
 			// Create test party using RegisterParty
 			registerReq := &pb.RegisterPartyRequest{
@@ -196,19 +172,16 @@ func TestExchangeDemographics_ErrorMessages(t *testing.T) {
 	tests := []struct {
 		name              string
 		environment       string
-		kycStubEnabled    string
 		expectedInMessage string
 	}{
 		{
-			name:              "production error should be clear",
+			name:              "production error should mention no provider",
 			environment:       "production",
-			kycStubEnabled:    "",
-			expectedInMessage: "cannot operate in production without external provider integration",
+			expectedInMessage: "no verification provider configured",
 		},
 		{
 			name:              "production error should mention KYC/AML",
 			environment:       "production",
-			kycStubEnabled:    "",
 			expectedInMessage: "KYC/AML verification not implemented",
 		},
 	}
@@ -222,12 +195,7 @@ func TestExchangeDemographics_ErrorMessages(t *testing.T) {
 			os.Setenv("ENVIRONMENT", tt.environment)
 			defer os.Unsetenv("ENVIRONMENT")
 
-			if tt.kycStubEnabled != "" {
-				os.Setenv("KYC_STUB_ENABLED", tt.kycStubEnabled)
-				defer os.Unsetenv("KYC_STUB_ENABLED")
-			} else {
-				os.Unsetenv("KYC_STUB_ENABLED")
-			}
+			// No verification provider configured
 
 			// Create test party
 			registerReq := &pb.RegisterPartyRequest{
