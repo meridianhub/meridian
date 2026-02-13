@@ -25,17 +25,21 @@ flowchart LR
         end
 
         subgraph Services["Domain Services"]
-            CA["CurrentAccount<br/>:50057"]
+            CA["CurrentAccount<br/>:50051"]
             PK["PositionKeeping<br/>:50053"]
             FA["FinancialAccounting<br/>:50052"]
             Party["Party<br/>:50055"]
             PO["PaymentOrder<br/>:50054, :8080"]
             RD["ReferenceData<br/>:50051"]
             MI["MarketInformation<br/>:50058"]
+            IBA["InternalBankAccount<br/>:50057"]
+            Recon["Reconciliation<br/>:50060"]
+            FC["Forecasting<br/>:50061"]
         end
 
         subgraph Infrastructure["Infrastructure"]
             Tenant["Tenant<br/>:50056"]
+            CP["ControlPlane"]
             AW["audit-worker<br/>:8080"]
             UMC["utilization-metering<br/>-consumer :8080"]
             DB[("CockroachDB<br/>:26257")]
@@ -51,6 +55,8 @@ flowchart LR
     GW -->|"Proxy (gRPC)"| PO
     GW -->|"Proxy (gRPC)"| Party
     GW -->|"Proxy (gRPC)"| MI
+    GW -->|"Proxy (gRPC)"| IBA
+    GW -->|"Proxy (gRPC)"| Recon
     PayGW -->|"HTTP Webhook"| PO
 
     %% Admin tool connections
@@ -64,6 +70,11 @@ flowchart LR
     Tenant -.->|"RegisterParty (gRPC, optional)"| Party
     Tenant -->|"Seed instruments"| RD
     PK -.->|"GetInstrument (gRPC)"| RD
+    IBA -->|"GetBalance (gRPC)"| PK
+    Recon -->|"Query positions (gRPC)"| PK
+    Recon -->|"Query ledger (gRPC)"| FA
+    Recon -->|"Query accounts (gRPC)"| CA
+    FC -->|"GetMarketData (gRPC)"| MI
 
     %% Kafka event streaming
     PK -->|"Publish Events"| Kafka
@@ -82,6 +93,10 @@ flowchart LR
     Tenant -->|"SQL"| DB
     RD -->|"SQL"| DB
     MI -->|"SQL"| DB
+    IBA -->|"SQL"| DB
+    Recon -->|"SQL"| DB
+    FC -->|"SQL"| DB
+    CP -->|"SQL"| DB
     GW -->|"SQL (tenant lookup)"| DB
 
     %% Redis (optional caching/idempotency)
@@ -101,9 +116,9 @@ flowchart LR
     classDef external fill:#ff9800,stroke:#e65100,color:#fff
     classDef admin fill:#9c27b0,stroke:#6a1b9a,color:#fff
 
-    class CA,PK,FA,Party,PO,RD,MI service
+    class CA,PK,FA,Party,PO,RD,MI,IBA,Recon,FC service
     class GW edge
-    class Tenant,AW,UMC,DB,Kafka,Redis storage
+    class Tenant,CP,AW,UMC,DB,Kafka,Redis storage
     class User,PayGW,AuthProvider external
     class TenantCtl admin
 ```
@@ -134,6 +149,11 @@ All inter-service communication uses gRPC with Protocol Buffers:
 | Tenant | Party | `RegisterParty()` | Register org party (optional) |
 | Tenant | ReferenceData | SQL seed | Seed system instruments during provisioning |
 | PositionKeeping | ReferenceData | `GetInstrument()` | Retrieve instrument definitions |
+| InternalBankAccount | PositionKeeping | `GetBalance()` | Query balance for internal accounts |
+| Reconciliation | PositionKeeping | Query positions | Compare position data across services |
+| Reconciliation | FinancialAccounting | Query ledger | Compare ledger entries across services |
+| Reconciliation | CurrentAccount | Query accounts | Compare account state across services |
+| Forecasting | MarketInformation | `GetMarketData()` | Retrieve market data for forecast models |
 | UtilizationMeteringConsumer | PositionKeeping | `RecordMeasurement()` | Record billing measurements to tenant-zero |
 
 **Note:** CurrentAccount uses a `ValidateParty()` client wrapper that calls `RetrieveParty()` and
@@ -232,14 +252,17 @@ Redis provides optional distributed idempotency for exactly-once semantics:
 | Service | gRPC Port | HTTP Port | Metrics Port |
 |---------|-----------|-----------|--------------|
 | Gateway | - | 8080 | 8080 |
-| CurrentAccount | 50057 | - | 9090 |
-| PositionKeeping | 50053 | - | 9090 |
+| CurrentAccount | 50051 | - | 9090 |
 | FinancialAccounting | 50052 | - | 9090 |
-| Party | 50055 | - | 9090 |
+| PositionKeeping | 50053 | - | 9090 |
 | PaymentOrder | 50054 | 8080 | 9090 |
-| ReferenceData | 50051 | - | 9090 |
-| MarketInformation | 50058 | - | 8082 |
+| Party | 50055 | - | 9090 |
 | Tenant | 50056 | - | 9090 |
+| InternalBankAccount | 50057 | - | 9090 |
+| MarketInformation | 50058 | - | 8082 |
+| Reconciliation | 50060 | - | 9090 |
+| Forecasting | 50061 | - | 9090 |
+| ControlPlane | - | - | - |
 | audit-worker | - | 8080 | 8080 |
 | utilization-metering-consumer | - | 8080 | 8080 |
 
@@ -372,6 +395,63 @@ The Utilization Metering Consumer is a centralized Kafka consumer for platform b
 See [services/utilization-metering-consumer/README.md](utilization-metering-consumer/README.md) for full
 documentation and [k8s/README.md](utilization-metering-consumer/k8s/README.md) for deployment details.
 
+### Internal Bank Account Service
+
+The Internal Bank Account service manages non-customer accounts used for internal accounting
+and correspondent banking operations.
+
+**Responsibilities:**
+
+- **Counterparty Accounts**: Nostro/vostro accounts for correspondent banking
+- **Operational Accounts**: Clearing, suspense, holding, revenue, expense accounts
+- **Multi-Asset Support**: Fiat, energy, carbon credits, compute hours
+- **Balance Delegation**: Balances queried from Position Keeping (not stored locally)
+
+**Account Types:** CLEARING, NOSTRO, VOSTRO, HOLDING, SUSPENSE, REVENUE, EXPENSE, INVENTORY
+
+See [services/internal-bank-account/README.md](internal-bank-account/README.md) for full documentation.
+
+### Reconciliation Service
+
+The Reconciliation service verifies consistency across Position Keeping, Financial Accounting,
+and Current Account services by matching positions and identifying discrepancies.
+
+**Responsibilities:**
+
+- **Position Matching**: Compare positions across upstream services
+- **Discrepancy Tracking**: Identify and track variances for resolution
+- **Settlement Scheduling**: Automated periodic reconciliation runs
+
+See [services/reconciliation/README.md](reconciliation/README.md) for full documentation.
+
+### Forecasting Service
+
+The Forecasting service generates forward curves and forecasts using configurable Starlark-based
+strategies with market data from the Market Information service.
+
+**Responsibilities:**
+
+- **Strategy Management**: DRAFT/ACTIVE/DEPRECATED lifecycle for forecast strategies
+- **Starlark Execution**: Sandboxed script execution with built-in math functions
+- **Scheduled Runs**: Cron-based execution with lease management for distributed safety
+- **Template Library**: Pre-built strategies (moving average, linear regression, etc.)
+
+See [services/forecasting/README.md](forecasting/README.md) for full documentation.
+
+### Control Plane Service
+
+The Control Plane manages tenant provisioning workflows, manifest-based configuration,
+Stripe billing integration, and administrative operations.
+
+**Responsibilities:**
+
+- **Manifest Management**: Declarative tenant configuration with diff/apply workflow
+- **Stripe Integration**: Payment processing, webhook handling, reconciliation
+- **Admin Operations**: Balance sheet queries, causation tree visualization, CSV exports
+- **Staff Identity**: Internal operator authentication and authorization
+
+See [services/control-plane/README.md](control-plane/README.md) for full documentation.
+
 ## Service-Owned Client Libraries
 
 Each service exports a client library for other services to use. This follows the idiomatic Go pattern
@@ -457,11 +537,14 @@ When `Resilience` is configured, clients automatically include:
 
 | Service | Import Path | Default Port |
 |---------|-------------|--------------|
-| Party | `services/party/client` | 50055 |
-| PositionKeeping | `services/position-keeping/client` | 50053 |
+| CurrentAccount | `services/current-account/client` | 50051 |
 | FinancialAccounting | `services/financial-accounting/client` | 50052 |
-| CurrentAccount | `services/current-account/client` | 50057 |
+| PositionKeeping | `services/position-keeping/client` | 50053 |
+| Party | `services/party/client` | 50055 |
 | Tenant | `services/tenant/client` | 50056 |
+| InternalBankAccount | `services/internal-bank-account/client` | 50057 |
+| MarketInformation | `services/market-information/client` | 50058 |
+| Reconciliation | `services/reconciliation/client` | 50060 |
 | ReferenceData | `services/reference-data/client` | 50051 |
 
 ## Service Directory Structure
