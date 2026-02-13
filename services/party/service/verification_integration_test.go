@@ -114,10 +114,6 @@ func setupIntegrationTest(t *testing.T) (*integrationTestEnv, func()) {
 	)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
-	// Set search_path
-	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
-	require.NoError(t, err)
-
 	ctx := tenant.WithTenant(context.Background(), tid)
 
 	// Create repositories
@@ -153,6 +149,7 @@ func setupIntegrationTest(t *testing.T) (*integrationTestEnv, func()) {
 	env := &integrationTestEnv{
 		db:               db,
 		ctx:              ctx,
+		schemaName:       schemaName,
 		partyRepo:        partyRepo,
 		verificationRepo: verificationRepo,
 		provider:         provider,
@@ -168,6 +165,7 @@ func setupIntegrationTest(t *testing.T) (*integrationTestEnv, func()) {
 type integrationTestEnv struct {
 	db               *gorm.DB
 	ctx              context.Context
+	schemaName       string
 	partyRepo        *persistence.Repository
 	verificationRepo *persistence.VerificationRepository
 	provider         *verification.MockProvider
@@ -178,15 +176,16 @@ type integrationTestEnv struct {
 }
 
 // createParty inserts a test party directly into the database and returns its ID.
+// Uses schema-qualified table name to avoid reliance on session-scoped search_path.
 func (e *integrationTestEnv) createParty(t *testing.T) uuid.UUID {
 	t.Helper()
 	partyID := uuid.New()
 	now := time.Now()
 
-	err := e.db.Exec(`
-		INSERT INTO party (id, party_type, legal_name, status, version, created_at, updated_at, created_by, updated_by)
+	err := e.db.Exec(fmt.Sprintf(`
+		INSERT INTO %s.party (id, party_type, legal_name, status, version, created_at, updated_at, created_by, updated_by)
 		VALUES (?, 'PERSON', 'Integration Test Person', 'ACTIVE', 1, ?, ?, 'system', 'system')
-	`, partyID, now, now).Error
+	`, pq.QuoteIdentifier(e.schemaName)), partyID, now, now).Error
 	require.NoError(t, err)
 
 	return partyID
