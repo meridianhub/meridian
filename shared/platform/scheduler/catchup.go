@@ -134,6 +134,12 @@ func (s *CronScheduler) catchUpSchedule(ctx context.Context, sched Schedule, now
 
 // executeCatchUpWindow executes a single missed window, acquiring the per-schedule
 // distributed lock (like normal executeJob) to prevent duplicates.
+//
+// Unlike executeJob, this does not use lifecycle.ExecuteGuarded because catch-up
+// runs synchronously inside Start() before cron.Start(). The Start goroutine
+// itself blocks until catch-up completes or the context is cancelled, so the
+// lifecycle already knows work is in progress. Context cancellation (from Stop)
+// is checked between iterations in catchUpSchedule.
 func (s *CronScheduler) executeCatchUpWindow(ctx context.Context, sched Schedule, scheduledAt time.Time) {
 	// Acquire per-schedule lock (consistent with normal executeJob).
 	if s.lock != nil {
