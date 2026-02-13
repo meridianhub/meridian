@@ -630,7 +630,7 @@ erDiagram
     %% TENANT MANAGEMENT SERVICE
     %% DB: meridian_tenant
     %% ════════════════════════════════════
-
+   direction LR
     tenant {
         varchar id PK "slug e.g. acme_bank"
         varchar display_name
