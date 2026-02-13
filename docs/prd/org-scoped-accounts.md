@@ -37,6 +37,9 @@ instructions: |
 
 ## Table of Contents
 
+- [Business Context](#business-context)
+- [Regulatory Framework](#regulatory-framework)
+
 - [Executive Summary](#executive-summary)
 - [Problem Statement](#problem-statement)
 - [Proposed Solution](#proposed-solution)
@@ -49,6 +52,119 @@ instructions: |
 - [Success Criteria](#success-criteria)
 - [Appendix A: Use Case Examples](#appendix-a-use-case-examples)
 - [Appendix B: Alternative Approaches Considered](#appendix-b-alternative-approaches-considered)
+
+---
+
+## Business Context
+
+### What We Are Building
+
+A **parimutuel (tote) sports betting platform** with **syndicate pooling** capabilities, using Meridian as the ledger/treasury backend.
+
+| Aspect | Description |
+|--------|-------------|
+| **Betting type** | Parimutuel/tote (pool betting) — odds determined by distribution of bets, not fixed by bookmaker |
+| **Event type** | Sports events — outcomes determined by real-world results, not random number generation |
+| **Group betting** | Syndicates pool funds, share entries, split winnings proportionally |
+| **Payment model** | Stripe holds reserve funds until settlement; platform takes percentage fee |
+| **Settlement** | Automated via Meridian sagas when sports results arrive via Market Data Service |
+
+### Revenue Model
+
+- **Platform commission** — percentage deducted from each pool before distribution
+- **Syndicate management fees** — optional value-add services
+
+### What We Are NOT
+
+| Not This | Because |
+|----------|---------|
+| Casino | No RNG-based games |
+| Fixed-odds bookmaker | We don't set odds or take position risk |
+| Lottery | Outcomes from sports results, not random draws |
+| Betting intermediary | We operate the pool directly, not facilitating peer-to-peer bets |
+
+---
+
+## Regulatory Framework
+
+### UK Gambling Act 2005 Classification
+
+Under **Section 12 of the Gambling Act 2005**, this platform is classified as **pool betting**:
+
+> *"Betting is pool betting if made on terms that all or part of winnings shall be determined by reference to the aggregate of stakes paid... [and] shall be divided among the winners"*
+
+### Required Licence
+
+**Remote Pool Betting Operating Licence** from the UK Gambling Commission.
+
+| Fee Category | GGY Threshold | Application Fee | Annual Fee |
+|--------------|---------------|-----------------|------------|
+| F1 | < £1.5 million | £938 | £2,406 |
+| G1 | £1.5m – £3m | £1,414 | £16,053 |
+| G2 | £3m – £7.5m | £1,414 | £19,054 |
+
+The F1 tier provides a viable runway to test and grow the business.
+
+### Pool Betting Model Classification
+
+Per UKGC guidance, we are **Model B — Actual Co-mingling**:
+
+> *"The customer's funds would be directly entered into the Pool, thereby affecting the Pool dividend. The licensed operator and the Pool would each be required to hold a pool betting operating licence."*
+
+We operate the pool directly:
+- Accept customer funds into the pool
+- Calculate dividends based on aggregate stakes
+- Take commission from the pool
+- Settle automatically via Meridian
+
+### Syndicate Design: Staying Within Pool Betting
+
+**Critical Design Constraint:** Syndicates must be structured as **collective entries into the platform's pool**, NOT as bets between syndicate members.
+
+```
+✅ CORRECT: Pool Betting Model
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Member    │────▶│  Syndicate  │────▶│  PLATFORM   │
+│  (Alice)    │     │ (Lucky 7)   │     │    POOL     │
+└─────────────┘     └─────────────┘     └─────────────┘
+     │                    │                    │
+     │ Contribution       │ Entry Purchase     │ Payout
+     ▼                    ▼                    ▼
+  Internal            Syndicate            Winning
+  Transfer            bets INTO            syndicates
+                      the pool             paid FROM pool
+
+✗ AVOID: Intermediary Model (triggers additional licence)
+┌─────────────┐            ┌─────────────┐
+│   Member    │◀──────────▶│   Member    │
+│  (Alice)    │   Bet      │   (Bob)     │
+└─────────────┘  between   └─────────────┘
+                 members
+```
+
+**How Meridian's org-scoped accounts support this:**
+
+1. **Members contribute TO their syndicate** — internal transfer, not a bet
+2. **Syndicates purchase entries FROM the platform pool** — the betting relationship
+3. **Platform pays winning syndicates** — pool to syndicate
+4. **Syndicates distribute to members** — internal distribution, not winnings from member-to-member bets
+
+The betting relationship is always **Syndicate ↔ Platform Pool**, never **Member ↔ Member**.
+
+### Compliance Requirements
+
+Once licensed, the platform must implement:
+
+| Requirement | Meridian Support |
+|-------------|------------------|
+| **AML/KYC** | Party service stores verification status; Stripe handles identity |
+| **Responsible Gambling** | Account limits via CEL policies; self-exclusion via account status |
+| **Fair & Transparent** | Bi-temporal audit trail; Market Data Service for verifiable results |
+| **Protect Vulnerable** | Spending limits; cooling-off periods via saga rules |
+
+### Recommended Next Step
+
+Before committing to licence application, contact the Gambling Commission at info@gamblingcommission.gov.uk with the exact model description. Key question: *"Does our parimutuel sports platform with syndicate pooling require just a Remote Pool Betting licence, or also a Remote Betting Intermediary licence?"*
 
 ---
 
