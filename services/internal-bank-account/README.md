@@ -112,7 +112,9 @@ resp, err := client.ControlInternalBankAccount(ctx, req)
 
 #### GetBalance
 
-Queries account balance from Position Keeping service.
+Queries the current balance for an internal account by proxying to the
+Position Keeping service, which is the single source of truth for all
+balance data.
 
 ```go
 req := &iba.GetBalanceRequest{
@@ -124,6 +126,64 @@ resp, err := client.GetBalance(ctx, req)
 // resp.CurrentBalance.InstrumentCode = "USD"
 // resp.AsOf = timestamp from Position Keeping
 ```
+
+**Prerequisites:**
+
+- Position Keeping service must be deployed and reachable
+- Account must be in `ACTIVE` status (suspended/closed accounts return `FailedPrecondition`)
+- A position record must exist in Position Keeping for the account/instrument combination
+
+**Behavior:**
+
+- Returns `BALANCE_TYPE_CURRENT` from the Position Keeping response
+- O(1) query: Position Keeping maintains pre-computed running balance totals
+- 5-second timeout on the Position Keeping call (`context.WithTimeout`)
+- Response includes `as_of` timestamp from Position Keeping (falls back to current time if absent)
+
+**Error Scenarios:**
+
+| gRPC Code | Condition | Description |
+|-----------|-----------|-------------|
+| `Unimplemented` | Position Keeping client not configured | Service constructed without PK client (e.g., `NewService` instead of `NewServiceWithClients`) |
+| `FailedPrecondition` | Account not active | Account is suspended or closed |
+| `NotFound` | Account does not exist | Account ID/code not found in local database |
+| `Internal` | Position not found in PK | PK returned NotFound (position record missing) |
+| `Unavailable` | PK service unreachable | PK unavailable, deadline exceeded, or resource exhausted |
+| `Internal` | PK invalid argument | Request to PK was malformed (indicates a code defect) |
+| `InvalidArgument` | Empty account_id | Request missing required `account_id` field |
+
+**Monitoring:**
+
+| Metric | Description |
+|--------|-------------|
+| `internal_bank_account_operation_duration_seconds{operation="get_balance"}` | Total GetBalance RPC duration |
+| `internal_bank_account_balance_query_duration_seconds{status}` | Duration of the PK call specifically (target p99 < 50ms) |
+| `internal_bank_account_errors_total{category="position_keeping"}` | PK-related error counter |
+
+The health check endpoint (`grpc.health.v1.Health/Check`) reports PK
+connectivity as a degraded (not critical) dependency. The service
+continues serving non-balance operations even when PK is unreachable.
+
+**Local Development (grpcurl):**
+
+```bash
+# Query balance for an account
+grpcurl -plaintext -d '{"account_id": "<account-id>"}' \
+  localhost:50057 meridian.internal_bank_account.v1.InternalBankAccountService/GetBalance
+
+# Check health (includes PK connectivity status)
+grpcurl -plaintext -d '{"service": "internal-bank-account"}' \
+  localhost:50057 grpc.health.v1.Health/Check
+```
+
+**Production Deployment:**
+
+| Attribute | Value |
+|-----------|-------|
+| Service name | `internal-bank-account` |
+| gRPC port | `50057` |
+| Health endpoint | `grpc.health.v1.Health/Check` (service: `internal-bank-account`) |
+| PK dependency | `position-keeping:50053` |
 
 ## Domain Model
 
