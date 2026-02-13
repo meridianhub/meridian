@@ -2,12 +2,19 @@ package verification
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/party/adapters/persistence"
+)
+
+// TimeoutHandler constructor errors
+var (
+	ErrTimeoutRepoNil = errors.New("verification repository is required")
+	ErrTimeoutProvNil = errors.New("provider is required")
 )
 
 // TimeoutVerificationRepository defines the repository operations needed by the timeout handler.
@@ -42,7 +49,15 @@ type TimeoutHandler struct {
 }
 
 // NewTimeoutHandler creates a new TimeoutHandler with the given configuration.
-func NewTimeoutHandler(cfg TimeoutHandlerConfig) *TimeoutHandler {
+// Returns an error if required dependencies (VerificationRepo, Provider) are nil.
+func NewTimeoutHandler(cfg TimeoutHandlerConfig) (*TimeoutHandler, error) {
+	if cfg.VerificationRepo == nil {
+		return nil, ErrTimeoutRepoNil
+	}
+	if cfg.Provider == nil {
+		return nil, ErrTimeoutProvNil
+	}
+
 	timeout := cfg.Timeout
 	if timeout == 0 {
 		timeout = 24 * time.Hour
@@ -62,7 +77,7 @@ func NewTimeoutHandler(cfg TimeoutHandlerConfig) *TimeoutHandler {
 		timeout:      timeout,
 		pollInterval: pollInterval,
 		logger:       logger,
-	}
+	}, nil
 }
 
 // Run starts the timeout handler loop. It blocks until ctx is cancelled.
@@ -144,10 +159,8 @@ func (h *TimeoutHandler) resolveVerification(ctx context.Context, v persistence.
 	if result.Status != StatusPending {
 		// Provider has a terminal status - use it
 		status = string(result.Status)
-		if result.RiskScore != 0 {
-			rs := result.RiskScore
-			riskScore = &rs
-		}
+		rs := result.RiskScore
+		riskScore = &rs
 		if result.Reason != "" {
 			r := result.Reason
 			reason = &r

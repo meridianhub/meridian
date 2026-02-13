@@ -148,13 +148,14 @@ func TestTimeoutHandler_DetectsTimedOutVerifications(t *testing.T) {
 		},
 	}
 
-	handler := NewTimeoutHandler(TimeoutHandlerConfig{
+	handler, err := NewTimeoutHandler(TimeoutHandlerConfig{
 		VerificationRepo: repo,
 		Provider:         provider,
 		Timeout:          24 * time.Hour,
 		PollInterval:     50 * time.Millisecond,
 		Logger:           newTestLogger(),
 	})
+	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -214,13 +215,14 @@ func TestTimeoutHandler_ProviderReturnsApproved(t *testing.T) {
 		},
 	}
 
-	handler := NewTimeoutHandler(TimeoutHandlerConfig{
+	handler, err := NewTimeoutHandler(TimeoutHandlerConfig{
 		VerificationRepo: repo,
 		Provider:         provider,
 		Timeout:          24 * time.Hour,
 		PollInterval:     50 * time.Millisecond,
 		Logger:           newTestLogger(),
 	})
+	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -272,13 +274,14 @@ func TestTimeoutHandler_ProviderReturnsRejected(t *testing.T) {
 		},
 	}
 
-	handler := NewTimeoutHandler(TimeoutHandlerConfig{
+	handler, err := NewTimeoutHandler(TimeoutHandlerConfig{
 		VerificationRepo: repo,
 		Provider:         provider,
 		Timeout:          24 * time.Hour,
 		PollInterval:     50 * time.Millisecond,
 		Logger:           newTestLogger(),
 	})
+	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -319,13 +322,14 @@ func TestTimeoutHandler_IgnoresCompletedVerifications(t *testing.T) {
 		statuses: make(map[string]Result),
 	}
 
-	handler := NewTimeoutHandler(TimeoutHandlerConfig{
+	handler, err := NewTimeoutHandler(TimeoutHandlerConfig{
 		VerificationRepo: repo,
 		Provider:         provider,
 		Timeout:          24 * time.Hour,
 		PollInterval:     50 * time.Millisecond,
 		Logger:           newTestLogger(),
 	})
+	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -356,13 +360,14 @@ func TestTimeoutHandler_RespectsContextCancellation(t *testing.T) {
 		statuses: make(map[string]Result),
 	}
 
-	handler := NewTimeoutHandler(TimeoutHandlerConfig{
+	handler, err := NewTimeoutHandler(TimeoutHandlerConfig{
 		VerificationRepo: repo,
 		Provider:         provider,
 		Timeout:          24 * time.Hour,
 		PollInterval:     1 * time.Hour, // Long poll interval
 		Logger:           newTestLogger(),
 	})
+	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -424,13 +429,14 @@ func TestTimeoutHandler_HandlesProviderErrorsGracefully(t *testing.T) {
 		fallback:  provider,
 	}
 
-	handler := NewTimeoutHandler(TimeoutHandlerConfig{
+	handler, err := NewTimeoutHandler(TimeoutHandlerConfig{
 		VerificationRepo: repo,
 		Provider:         errProvider,
 		Timeout:          24 * time.Hour,
 		PollInterval:     50 * time.Millisecond,
 		Logger:           newTestLogger(),
 	})
+	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -502,13 +508,14 @@ func TestTimeoutHandler_ProviderReturnsManualReview(t *testing.T) {
 		},
 	}
 
-	handler := NewTimeoutHandler(TimeoutHandlerConfig{
+	handler, err := NewTimeoutHandler(TimeoutHandlerConfig{
 		VerificationRepo: repo,
 		Provider:         provider,
 		Timeout:          24 * time.Hour,
 		PollInterval:     50 * time.Millisecond,
 		Logger:           newTestLogger(),
 	})
+	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})

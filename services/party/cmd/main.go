@@ -118,6 +118,7 @@ func run(logger *slog.Logger) error {
 	// Create verification provider and service when configured
 	var provider verification.Provider
 	var verificationSvc *service.VerificationService
+	var verificationRepo *persistence.VerificationRepository
 	if verificationCfg != nil {
 		provider, err = verification.NewProvider(verificationCfg)
 		if err != nil {
@@ -127,7 +128,7 @@ func run(logger *slog.Logger) error {
 
 		partyService.WithVerificationProvider(provider)
 
-		verificationRepo := persistence.NewVerificationRepository(db)
+		verificationRepo = persistence.NewVerificationRepository(db)
 		verificationSvc, err = service.NewVerificationService(
 			&partyRepoAdapter{repo: repo},
 			verificationRepo,
@@ -196,13 +197,16 @@ func run(logger *slog.Logger) error {
 
 	// Start timeout handler and HTTP server when verification is configured
 	if verificationSvc != nil && verificationCfg != nil {
-		verificationRepo := persistence.NewVerificationRepository(db)
 		timeoutCtx, timeoutCancel := context.WithCancel(context.Background())
-		timeoutHandler := verification.NewTimeoutHandler(verification.TimeoutHandlerConfig{
+		timeoutHandler, err := verification.NewTimeoutHandler(verification.TimeoutHandlerConfig{
 			VerificationRepo: verificationRepo,
 			Provider:         provider,
 			Logger:           logger,
 		})
+		if err != nil {
+			timeoutCancel()
+			return fmt.Errorf("failed to create timeout handler: %w", err)
+		}
 		go timeoutHandler.Run(timeoutCtx)
 
 		orchestrator.AddCleanup(func() error {
