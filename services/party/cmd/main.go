@@ -168,7 +168,7 @@ func run(logger *slog.Logger) error {
 	}
 
 	// Start gRPC server in background
-	serverErrors := make(chan error, 1)
+	serverErrors := make(chan error, 2)
 	go func() {
 		logger.Info("starting gRPC server", "address", address)
 		if err := grpcServer.Serve(listener); err != nil {
@@ -212,7 +212,8 @@ func run(logger *slog.Logger) error {
 		go func() {
 			logger.Info("starting HTTP server for webhooks", "port", httpPort)
 			if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				logger.Error("HTTP server error", "error", err)
+				logger.Error("HTTP server failed", "error", err)
+				serverErrors <- fmt.Errorf("HTTP server error: %w", err)
 			}
 		}()
 
