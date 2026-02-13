@@ -76,6 +76,8 @@ Architectural Decision Records) format.
 | [ADR-0027](0027-market-information-management.md) | Market Information Management Service Architecture | Accepted | 2026-01-19 |
 <!-- markdownlint-disable-next-line MD013 -->
 | [ADR-0028](0028-starlark-saga-cel-valuation.md) | Starlark Saga Orchestration with CEL Valuation | Accepted | 2025-01-20 |
+<!-- markdownlint-disable-next-line MD013 -->
+| [ADR-0031](0031-getbalance-nil-guard-retention.md) | Retain Nil Guard on PositionKeepingClient in GetBalance | Accepted | 2026-02-13 |
 
 ## Architecture Decision Relationships
 
