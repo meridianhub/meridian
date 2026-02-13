@@ -612,17 +612,20 @@ This creates: `meridian`, `post_office`, `motive`, `un_wfp`
 
 ## Data Model
 
-Entity relationship diagram showing all database tables across services.
-Solid lines (`--`) are intra-service foreign key constraints; dotted lines
-(`..`) are cross-service logical references (no FK due to
-database-per-service architecture).
+Entity relationship diagrams showing all database tables across services,
+split into two diagrams by connectivity. Solid lines (`--`) are
+intra-service foreign key constraints; dotted lines (`..`) are
+cross-service logical references (no FK due to database-per-service
+architecture).
 
 > **Naming:** Tables with identical names across services (e.g., `lien`,
 > `valuation_features`) are prefixed with service abbreviations (`ca_`,
 > `iba_`) for diagram clarity only -- actual DB table names are unprefixed.
-> Shared infrastructure tables (`event_outbox`, `audit_log`, `audit_outbox`)
-> follow a common schema and are omitted; see
+> Shared infrastructure tables (`event_outbox`, `audit_log`,
+> `audit_outbox`) follow a common schema and are omitted; see
 > [Async Audit System](#async-audit-system).
+
+### Core Transaction Engine (30 tables)
 
 ```mermaid
 erDiagram
@@ -976,6 +979,35 @@ erDiagram
     saga_definition }o--o| saga_definition : "successor"
     reference_data_node }o--o| reference_data_node : "parent"
 
+    %% ════════════════════════════════════════════════
+    %% CROSS-SERVICE DOMAIN RELATIONSHIPS (Core)
+    %% Dotted lines = logical references (no FK)
+    %% ════════════════════════════════════════════════
+
+    party ||..o{ account : "owns"
+    tenant }o..o| party : "represented-by"
+    account ||..o{ financial_position_log : "positions"
+    account ||..o{ payment_order : "debtor"
+    ca_lien ||..o| payment_order : "reserves"
+    financial_booking_log ||..o| payment_order : "books"
+    internal_bank_account ||..o{ ledger_posting : "posted-to"
+    instrument_definition ||..o{ financial_position_log : "denominated"
+    instrument_definition ||..o{ internal_bank_account : "denominated"
+    valuation_method ||..o{ ca_valuation_features : "applied"
+    valuation_method ||..o{ iba_valuation_features : "applied"
+    saga_definition ||..o{ saga_execution : "defines"
+    tenant ||..o{ billing_run : "billed"
+```
+
+Tenant Management (3), Party (6), Current Account (4),
+Financial Accounting (2), Position Keeping (5), Payment Order (5),
+Internal Bank Account (3), Reference Data (5). These services form
+the densely interconnected transaction processing core.
+
+### Market Data, Reconciliation & Operations (13 tables)
+
+```mermaid
+erDiagram
     %% ════════════════════════════════════
     %% MARKET INFORMATION SERVICE
     %% DB: meridian_market_information
@@ -1021,7 +1053,7 @@ erDiagram
     settlement_run {
         uuid id PK
         uuid run_id UK
-        varchar account_id "ref PK position"
+        varchar account_id "ref Core: account"
         varchar scope "ACCOUNT|INSTRUMENT|PORTFOLIO"
         varchar settlement_type "DAILY|WEEKLY|MONTHLY"
         varchar status "PENDING|RUNNING|COMPLETED|FAILED"
@@ -1032,7 +1064,7 @@ erDiagram
         uuid snapshot_id UK
         uuid run_id FK
         varchar account_id
-        varchar instrument_code "ref RD instrument"
+        varchar instrument_code "ref Core: instrument"
         decimal expected_balance
         decimal actual_balance
         decimal variance_amount
@@ -1060,7 +1092,7 @@ erDiagram
         uuid assertion_id UK
         uuid run_id FK
         varchar account_id
-        varchar instrument_code "ref RD instrument"
+        varchar instrument_code "ref Core: instrument"
         text expression "CEL"
         varchar status "PENDING|PASSED|FAILED|OVERRIDE"
     }
@@ -1078,7 +1110,7 @@ erDiagram
 
     forecasting_strategy {
         uuid id PK
-        varchar tenant_id "ref Tenant"
+        varchar tenant_id "ref Core: tenant"
         varchar name
         text starlark_code "Starlark"
         int horizon_hours "1-168"
@@ -1123,27 +1155,16 @@ erDiagram
     manifest_version ||--o{ manifest_apply_job : "tracked-by"
 
     %% ════════════════════════════════════════════════
-    %% CROSS-SERVICE DOMAIN RELATIONSHIPS
-    %% Dotted lines = logical references (no FK)
-    %% Separate databases per BIAN domain (ADR-002)
+    %% CROSS-SERVICE RELATIONSHIPS (within this group)
     %% ════════════════════════════════════════════════
 
-    party ||..o{ account : "owns"
-    tenant }o..o| party : "represented-by"
-    account ||..o{ financial_position_log : "positions"
-    account ||..o{ payment_order : "debtor"
-    ca_lien ||..o| payment_order : "reserves"
-    financial_booking_log ||..o| payment_order : "books"
-    internal_bank_account ||..o{ ledger_posting : "posted-to"
-    instrument_definition ||..o{ financial_position_log : "denominated"
-    instrument_definition ||..o{ internal_bank_account : "denominated"
-    valuation_method ||..o{ ca_valuation_features : "applied"
-    valuation_method ||..o{ iba_valuation_features : "applied"
-    saga_definition ||..o{ saga_execution : "defines"
     dataset_definition ||..o{ forecasting_strategy : "feeds"
-    tenant ||..o{ billing_run : "billed"
-    tenant ||..o{ forecasting_strategy : "owns"
 ```
+
+Market Information (3), Reconciliation (5), Forecasting (1),
+Control Plane (4). These services connect to the core engine
+through thin references (`account_id`, `instrument_code`,
+`tenant_id`) annotated as `ref Core:` in column comments.
 
 **Cross-Service Reference Patterns:**
 
