@@ -26,11 +26,12 @@ const maxBatchSize = 1000
 
 // Service construction errors.
 var (
-	ErrRepoRequired   = errors.New("strategy repository is required")
-	ErrRunnerRequired = errors.New("forecast runner is required")
-	ErrMDSRequired    = errors.New("MDS publisher is required")
-	ErrBatchPublish   = errors.New("batch publish failed")
-	ErrNotActive      = errors.New("strategy is not in ACTIVE status")
+	ErrRepoRequired     = errors.New("strategy repository is required")
+	ErrRunnerRequired   = errors.New("forecast runner is required")
+	ErrMDSRequired      = errors.New("MDS publisher is required")
+	ErrBatchPublish     = errors.New("batch publish failed")
+	ErrNotActive        = errors.New("strategy is not in ACTIVE status")
+	ErrTenantIDRequired = errors.New("tenant context is required")
 )
 
 // MDSPublisher abstracts the Market Data Service for publishing observations.
@@ -277,7 +278,10 @@ func (s *Service) ComputeForwardCurveInternal(ctx context.Context, strategyID uu
 	}
 	if strategy.ReferenceDataResolutionKey() != "" {
 		input.ResolutionKey = strategy.ReferenceDataResolutionKey()
-		tenantID, _ := tenant.FromContext(ctx)
+		tenantID, ok := tenant.FromContext(ctx)
+		if !ok {
+			return nil, fmt.Errorf("strategy %s requires reference data: %w", strategyID, ErrTenantIDRequired)
+		}
 		input.TenantID = string(tenantID)
 	}
 

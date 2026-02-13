@@ -159,7 +159,12 @@ func run(logger *slog.Logger) error {
 	)
 
 	// Create shared cron scheduler
-	refreshInterval, _ := time.ParseDuration(env.GetEnvOrDefault("SCHEDULER_REFRESH_INTERVAL", "60s"))
+	refreshIntervalStr := env.GetEnvOrDefault("SCHEDULER_REFRESH_INTERVAL", "60s")
+	refreshInterval, err := time.ParseDuration(refreshIntervalStr)
+	if err != nil {
+		logger.Warn("invalid SCHEDULER_REFRESH_INTERVAL, using default 60s", "value", refreshIntervalStr, "error", err)
+		refreshInterval = 60 * time.Second
+	}
 	cronSchedulerOpts := []scheduler.CronSchedulerOption{}
 	if execStore != nil {
 		cronSchedulerOpts = append(cronSchedulerOpts, scheduler.WithCronExecutionStore(execStore))
