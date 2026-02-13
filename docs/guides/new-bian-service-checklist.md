@@ -777,6 +777,192 @@ go test ./services/{service}/... -v -count=1
 
 ## Additional Considerations
 
+### Scheduler Integration (Optional)
+
+**Applies when**: The service runs periodic background work (cron-based scheduling, polling
+workers, retry loops, or any recurring task).
+
+**Packages**: `shared/platform/scheduler`, `shared/platform/redislock`
+
+#### Option A: Cron Scheduler (time-based recurring jobs)
+
+Use `scheduler.CronScheduler` when the service needs to execute jobs on a cron schedule
+(e.g., reconciliation runs, forecast generation, billing cycles).
+
+**1. Add `scheduler_execution` migration**
+
+Copy the schema from an existing service migration. Use the shared column names exactly:
+
+```sql
+-- Reference: services/forecasting/migrations/20260213000001_scheduler_execution.sql
+CREATE TABLE "scheduler_execution" (
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "scheduler_name" character varying(100) NOT NULL,
+    "schedule_id" character varying(200) NOT NULL,
+    "scheduled_at" timestamptz NOT NULL,
+    "executed_at" timestamptz NULL,
+    "completed_at" timestamptz NULL,
+    "status" character varying(20) NOT NULL DEFAULT 'TRIGGERED',
+    "result_ref" character varying(200) NULL,
+    "error_message" text NULL,
+    "created_at" timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY ("id")
+);
+
+ALTER TABLE "scheduler_execution"
+    ADD CONSTRAINT "chk_scheduler_execution_status"
+    CHECK ("status" IN ('TRIGGERED', 'COMPLETED', 'FAILED', 'MISSED', 'SKIPPED'));
+
+CREATE INDEX "idx_scheduler_execution_name_schedule"
+    ON "scheduler_execution" ("scheduler_name", "schedule_id");
+CREATE INDEX "idx_scheduler_execution_scheduled_at"
+    ON "scheduler_execution" ("scheduled_at" DESC);
+CREATE INDEX "idx_scheduler_execution_status"
+    ON "scheduler_execution" ("status");
+CREATE INDEX "idx_scheduler_execution_name_at"
+    ON "scheduler_execution" ("scheduler_name", "scheduled_at" DESC);
+```
+
+**2. Implement `scheduler.ScheduleProvider`**
+
+```go
+type ScheduleProvider interface {
+    ListSchedules(ctx context.Context) ([]scheduler.Schedule, error)
+}
+```
+
+Returns the active schedules for this service. Each `Schedule` has `ID`, `CronExpr`,
+`TenantID`, and optional `Metadata`.
+
+**3. Implement `scheduler.Executor`**
+
+```go
+type Executor interface {
+    Execute(ctx context.Context, schedule scheduler.Schedule) error
+}
+```
+
+Runs the business logic when a schedule fires.
+
+**4. Wire in `cmd/main.go`**
+
+```go
+import (
+    "github.com/meridianhub/meridian/shared/platform/redislock"
+    "github.com/meridianhub/meridian/shared/platform/scheduler"
+)
+
+// Create execution store (returns error if table missing — handle it)
+execStore, err := scheduler.NewPgExecutionStore(pool)
+if err != nil {
+    return fmt.Errorf("scheduler execution store: %w", err)
+}
+
+// Create distributed lock
+lock := redislock.NewLock(redisClient, redislock.Config{
+    KeyPrefix: "{service}-scheduler",
+}, logger)
+
+// Create and start scheduler
+cronScheduler := scheduler.NewCronScheduler(
+    provider,
+    executor,
+    lock,
+    scheduler.CronSchedulerConfig{
+        Name:             "{service}-scheduler",
+        RefreshInterval:  60 * time.Second,
+        ShutdownTimeout:  30 * time.Second,
+        ExecutionTimeout: 5 * time.Minute,
+        MaxCatchUpAge:    time.Hour,
+    },
+    logger,
+    scheduler.WithCronExecutionStore(execStore),
+)
+
+go func() {
+    if err := cronScheduler.Start(ctx); err != nil {
+        logger.Error("scheduler failed", "error", err)
+    }
+}()
+// In shutdown: cronScheduler.Stop()
+```
+
+**5. Add `'redis'` to Tiltfile `resource_deps`**
+
+```python
+k8s_resource(
+    '{service}',
+    port_forwards=['50055:50055'],
+    resource_deps=['cockroachdb', 'redis'],
+    labels=['services'],
+)
+```
+
+**Reference services**: `services/reconciliation/`, `services/forecasting/`,
+`services/payment-order/worker/billing_scheduler.go`
+
+#### Option B: Polling Worker (non-cron background work)
+
+Use `scheduler.WorkerLifecycle` for workers that poll for work on a fixed interval rather
+than running on a cron schedule (e.g., retry queues, orphan detection, outbox processing).
+
+```go
+import (
+    "github.com/meridianhub/meridian/shared/platform/redislock"
+    "github.com/meridianhub/meridian/shared/platform/scheduler"
+)
+
+type MyWorker struct {
+    lifecycle *scheduler.WorkerLifecycle
+    lock      *redislock.Lock
+    // ... other dependencies
+}
+
+func NewMyWorker(redisClient *redis.Client, logger *slog.Logger) *MyWorker {
+    return &MyWorker{
+        lifecycle: scheduler.NewWorkerLifecycle(logger),
+        lock: redislock.NewLock(redisClient, redislock.Config{
+            KeyPrefix: "{service}-worker",
+        }, logger),
+    }
+}
+
+func (w *MyWorker) Start(ctx context.Context) error {
+    return w.lifecycle.Start(ctx, func(ctx context.Context) error {
+        ticker := time.NewTicker(pollInterval)
+        defer ticker.Stop()
+        for {
+            select {
+            case <-ctx.Done():
+                return nil
+            case <-ticker.C:
+                w.processWork(ctx)
+            }
+        }
+    })
+}
+
+func (w *MyWorker) Stop() {
+    w.lifecycle.Stop(30 * time.Second)
+    w.lock.ReleaseAll(context.Background())
+}
+```
+
+**Reference**: `services/payment-order/worker/dunning_worker.go`
+
+#### Redis Key Naming Convention (tenant isolation)
+
+All Redis keys MUST be scoped by tenant to ensure data isolation:
+
+| Key Type | Format | Example |
+|----------|--------|---------|
+| Distributed lock | `{prefix}:{tenantID}:{resourceID}` | `billing-scheduler:tenant_abc:sched_001` |
+| Sorted set | `{purpose}:{tenantID}` | `dunning:retries:tenant_abc` |
+
+Never use global (non-tenant-scoped) Redis keys.
+
+---
+
 ### Inter-Service Clients (Optional)
 
 **Location**: `services/{service}/client/`
