@@ -28,6 +28,7 @@ DATABASES=(
   "meridian_market_information:meridian_market_information_user"
   "meridian_reconciliation:meridian_reconciliation_user"
   "meridian_forecasting:meridian_forecasting_user"
+  "meridian_reference_data:meridian_reference_data_user"
 )
 
 echo "Initializing CockroachDB databases..."

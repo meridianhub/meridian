@@ -90,6 +90,7 @@ db_urls = {
   'market_information': os.getenv('MARKET_INFORMATION_DATABASE_URL', 'postgres://meridian_market_information_user@cockroachdb:26257/meridian_market_information?sslmode=disable'),
   'reconciliation': os.getenv('RECONCILIATION_DATABASE_URL', 'postgres://meridian_reconciliation_user@cockroachdb:26257/meridian_reconciliation?sslmode=disable'),
   'forecasting': os.getenv('FORECASTING_DATABASE_URL', 'postgres://meridian_forecasting_user@cockroachdb:26257/meridian_forecasting?sslmode=disable'),
+  'reference_data': os.getenv('REFERENCE_DATA_DATABASE_URL', 'postgres://meridian_reference_data_user@cockroachdb:26257/meridian_reference_data?sslmode=disable'),
 }
 
 # NOTE: Migrations now run as Kubernetes Jobs inside the cluster
@@ -552,6 +553,13 @@ grpc_microservice(
     resource_deps=['cockroachdb', 'migrate-forecasting', 'market-information'],
 )
 
+# Reference Data Service - gRPC microservice for instrument definitions, nodes, and saga definitions
+grpc_microservice(
+    'reference-data',
+    grpc_port=50059,  # ports.ReferenceData
+    resource_deps=['cockroachdb', 'migrate-reference-data'],
+)
+
 # =============================================================================
 # Gateway Service
 # =============================================================================
@@ -784,6 +792,13 @@ migration_job(
   resource_deps=['init-database'],  # Independent database, only needs init to complete
 )
 
+migration_job(
+  'migrate-reference-data',
+  'reference-data',
+  'reference_data',
+  resource_deps=['init-database'],  # Independent database, only needs init to complete
+)
+
 # Kafka cluster health check - runs automatically after kafka-cluster is ready
 local_resource(
   'kafka-health',
@@ -887,12 +902,13 @@ Database Architecture (database-per-service):
     - meridian_market_information
     - meridian_reconciliation
     - meridian_forecasting
+    - meridian_reference_data
   • Within each database: org schemas for multi-tenant isolation
   • Tables use singular, unqualified names (search_path routing)
   • See ADR-0003 for architecture details
 
 Database Migrations:
-  • Migrations run automatically on startup (10 resources):
+  • Migrations run automatically on startup (11 resources):
     1. current_account → meridian_current_account (account, lien, audit tables)
     2. financial_accounting → meridian_financial_accounting (ledger, booking)
     3. position_keeping → meridian_position_keeping (positions, transactions)
@@ -903,7 +919,8 @@ Database Migrations:
     8. market_information → meridian_market_information (price benchmarks, market data)
     9. reconciliation → meridian_reconciliation (reconciliation processes)
     10. forecasting → meridian_forecasting (forecasting strategies)
-  • Parallel execution: current_account + financial_accounting + party + tenant + internal_bank_account + market_information + reconciliation + forecasting
+    11. reference_data → meridian_reference_data (instrument definitions, nodes, saga definitions)
+  • Parallel execution: current_account + financial_accounting + party + tenant + internal_bank_account + market_information + reconciliation + forecasting + reference_data
   • Sequential dependencies:
     - position_keeping waits for current_account (Account FK)
     - payment_order waits for current_account (Account FK)
@@ -918,6 +935,7 @@ Database Migrations:
     - tilt trigger migrate-market-information
     - tilt trigger migrate-reconciliation
     - tilt trigger migrate-forecasting
+    - tilt trigger migrate-reference-data
 
 Testing Kafka Failover:
   kubectl delete pod kafka-1  # Kill broker
