@@ -18,6 +18,7 @@ import (
 	httpAdapter "github.com/meridianhub/meridian/services/party/adapters/http"
 	"github.com/meridianhub/meridian/services/party/adapters/persistence"
 	"github.com/meridianhub/meridian/services/party/config"
+	"github.com/meridianhub/meridian/services/party/domain"
 	"github.com/meridianhub/meridian/services/party/service"
 	"github.com/meridianhub/meridian/services/party/verification"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
@@ -207,6 +208,9 @@ func run(logger *slog.Logger) error {
 			Addr:              ":" + httpPort,
 			Handler:           httpMux,
 			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       30 * time.Second,
+			WriteTimeout:      30 * time.Second,
+			IdleTimeout:       120 * time.Second,
 		}
 
 		go func() {
@@ -238,13 +242,8 @@ type partyRepoAdapter struct {
 	repo *persistence.Repository
 }
 
-func (a *partyRepoAdapter) FindByID(ctx context.Context, partyID uuid.UUID) (*interface{}, error) {
-	party, err := a.repo.FindByID(ctx, partyID)
-	if err != nil {
-		return nil, err
-	}
-	var i interface{} = party
-	return &i, nil
+func (a *partyRepoAdapter) FindByID(ctx context.Context, partyID uuid.UUID) (*domain.Party, error) {
+	return a.repo.FindByID(ctx, partyID)
 }
 
 func (a *partyRepoAdapter) ExistsByID(ctx context.Context, partyID uuid.UUID) (bool, error) {
