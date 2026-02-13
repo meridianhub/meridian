@@ -9,10 +9,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
+	"github.com/meridianhub/meridian/shared/platform/scheduler"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -137,7 +140,7 @@ func (m *mockBillingRepo) getFirstRun() *domain.BillingRun {
 	return nil
 }
 
-// --- Tests ---
+// --- Test helpers ---
 
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
@@ -149,32 +152,189 @@ func testMetrics(t *testing.T) *BillingMetrics {
 	return NewBillingMetricsWithRegistry(reg)
 }
 
-func TestNewBillingScheduler(t *testing.T) {
-	repo := newMockBillingRepo()
-	logger := testLogger()
-	metrics := testMetrics(t)
+func setupMiniredis(t *testing.T) *redis.Client {
+	t.Helper()
+	mr := miniredis.RunT(t)
+	return redis.NewClient(&redis.Options{Addr: mr.Addr()})
+}
 
-	t.Run("rejects nil repository", func(t *testing.T) {
-		_, err := NewBillingScheduler(nil, nil, BillingSchedulerConfig{}, logger, metrics)
-		assert.ErrorIs(t, err, ErrNilBillingRepo)
+// --- BillingScheduleProvider Tests ---
+
+func TestBillingScheduleProvider(t *testing.T) {
+	t.Run("returns single schedule for tenant", func(t *testing.T) {
+		provider := NewBillingScheduleProvider("tenant-1", "0 2 1 * *")
+		schedules, err := provider.ListSchedules(context.Background())
+		require.NoError(t, err)
+		require.Len(t, schedules, 1)
+
+		sched := schedules[0]
+		assert.Equal(t, "billing:tenant-1", sched.ID)
+		assert.Equal(t, "0 2 1 * *", sched.CronExpr)
+		assert.Equal(t, "tenant-1", sched.TenantID)
 	})
 
-	t.Run("rejects nil redis client", func(t *testing.T) {
-		_, err := NewBillingScheduler(repo, nil, BillingSchedulerConfig{TenantID: "t1"}, logger, metrics)
-		assert.ErrorIs(t, err, ErrNilRedisClient)
-	})
-
-	t.Run("rejects empty tenant ID", func(t *testing.T) {
-		// We need a real redis.Client type for the type check, but we can test nil
-		_, err := NewBillingScheduler(repo, nil, BillingSchedulerConfig{}, logger, metrics)
-		assert.Error(t, err)
-	})
-
-	t.Run("rejects invalid cron expression", func(_ *testing.T) {
-		// Need a non-nil redis client - we'll test this via integration tests
-		// For now, the cron validation happens after the redis nil check
+	t.Run("schedule is deterministic", func(t *testing.T) {
+		provider := NewBillingScheduleProvider("abc", "0 0 * * *")
+		s1, _ := provider.ListSchedules(context.Background())
+		s2, _ := provider.ListSchedules(context.Background())
+		assert.Equal(t, s1, s2)
 	})
 }
+
+// --- BillingExecutor Tests ---
+
+func TestBillingExecutorExecute(t *testing.T) {
+	t.Run("creates billing run on execution", func(t *testing.T) {
+		repo := newMockBillingRepo()
+		redisClient := setupMiniredis(t)
+		logger := testLogger()
+		metrics := testMetrics(t)
+
+		// Pin NowFunc for deterministic billing period
+		origNow := NowFunc
+		NowFunc = func() time.Time {
+			return time.Date(2026, 3, 1, 2, 0, 0, 0, time.UTC)
+		}
+		defer func() { NowFunc = origNow }()
+
+		executor := NewBillingExecutor(repo, redisClient, metrics, BillingExecutorConfig{}, logger)
+
+		schedule := scheduler.Schedule{
+			ID:       "billing:tenant-1",
+			CronExpr: "0 2 1 * *",
+			TenantID: "tenant-1",
+		}
+
+		err := executor.Execute(context.Background(), schedule)
+		require.NoError(t, err)
+
+		assert.Equal(t, 1, repo.getRunCount())
+		run := repo.getFirstRun()
+		require.NotNil(t, run)
+		assert.Equal(t, "tenant-1", run.TenantID)
+		assert.Equal(t, domain.BillingRunStatusCompleted, run.Status)
+	})
+
+	t.Run("skips duplicate via Redis idempotency", func(t *testing.T) {
+		repo := newMockBillingRepo()
+		redisClient := setupMiniredis(t)
+		logger := testLogger()
+		metrics := testMetrics(t)
+
+		origNow := NowFunc
+		NowFunc = func() time.Time {
+			return time.Date(2026, 3, 1, 2, 0, 0, 0, time.UTC)
+		}
+		defer func() { NowFunc = origNow }()
+
+		executor := NewBillingExecutor(repo, redisClient, metrics, BillingExecutorConfig{}, logger)
+
+		schedule := scheduler.Schedule{
+			ID:       "billing:tenant-dup",
+			CronExpr: "0 2 1 * *",
+			TenantID: "tenant-dup",
+		}
+
+		// First execution
+		err := executor.Execute(context.Background(), schedule)
+		require.NoError(t, err)
+		assert.Equal(t, 1, repo.getRunCount())
+
+		// Second execution should be skipped (Redis idempotency)
+		err = executor.Execute(context.Background(), schedule)
+		require.NoError(t, err)
+		assert.Equal(t, 1, repo.getRunCount(), "should not create a second billing run")
+	})
+
+	t.Run("skips duplicate via database", func(t *testing.T) {
+		repo := newMockBillingRepo()
+		redisClient := setupMiniredis(t)
+		logger := testLogger()
+		metrics := testMetrics(t)
+
+		origNow := NowFunc
+		NowFunc = func() time.Time {
+			return time.Date(2026, 4, 1, 2, 0, 0, 0, time.UTC)
+		}
+		defer func() { NowFunc = origNow }()
+
+		executor := NewBillingExecutor(repo, redisClient, metrics, BillingExecutorConfig{}, logger)
+
+		schedule := scheduler.Schedule{
+			ID:       "billing:tenant-dbdup",
+			CronExpr: "0 2 1 * *",
+			TenantID: "tenant-dbdup",
+		}
+
+		// Pre-populate the DB with a billing run for the same period
+		start := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+		end := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+		run, _ := domain.NewBillingRun("tenant-dbdup", start, end)
+		_ = repo.CreateBillingRun(context.Background(), run)
+		assert.Equal(t, 1, repo.getRunCount())
+
+		// Execution should detect DB duplicate and skip gracefully
+		err := executor.Execute(context.Background(), schedule)
+		require.NoError(t, err)
+		assert.Equal(t, 1, repo.getRunCount(), "should not create a second billing run")
+	})
+
+	t.Run("shadow mode does not initiate payments", func(t *testing.T) {
+		repo := newMockBillingRepo()
+		redisClient := setupMiniredis(t)
+		logger := testLogger()
+		metrics := testMetrics(t)
+
+		origNow := NowFunc
+		NowFunc = func() time.Time {
+			return time.Date(2026, 5, 1, 2, 0, 0, 0, time.UTC)
+		}
+		defer func() { NowFunc = origNow }()
+
+		executor := NewBillingExecutor(repo, redisClient, metrics, BillingExecutorConfig{ShadowMode: true}, logger)
+
+		schedule := scheduler.Schedule{
+			ID:       "billing:tenant-shadow",
+			CronExpr: "0 2 1 * *",
+			TenantID: "tenant-shadow",
+		}
+
+		err := executor.Execute(context.Background(), schedule)
+		require.NoError(t, err)
+
+		run := repo.getFirstRun()
+		require.NotNil(t, run)
+		assert.Equal(t, domain.BillingRunStatusCompleted, run.Status)
+	})
+
+	t.Run("returns error on repo failure", func(t *testing.T) {
+		repo := newMockBillingRepo()
+		repo.createErr = errors.New("database connection lost")
+		redisClient := setupMiniredis(t)
+		logger := testLogger()
+		metrics := testMetrics(t)
+
+		origNow := NowFunc
+		NowFunc = func() time.Time {
+			return time.Date(2026, 6, 1, 2, 0, 0, 0, time.UTC)
+		}
+		defer func() { NowFunc = origNow }()
+
+		executor := NewBillingExecutor(repo, redisClient, metrics, BillingExecutorConfig{}, logger)
+
+		schedule := scheduler.Schedule{
+			ID:       "billing:tenant-err",
+			CronExpr: "0 2 1 * *",
+			TenantID: "tenant-err",
+		}
+
+		err := executor.Execute(context.Background(), schedule)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "persist billing run")
+	})
+}
+
+// --- calculateBillingPeriod Tests ---
 
 func TestCalculateBillingPeriod(t *testing.T) {
 	t.Run("February run covers January", func(t *testing.T) {
@@ -208,6 +368,8 @@ func TestCalculateBillingPeriod(t *testing.T) {
 	})
 }
 
+// --- Idempotency Key Tests ---
+
 func TestIdempotencyKeyDeterminism(t *testing.T) {
 	tenantID := "tenant-abc"
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -222,9 +384,9 @@ func TestIdempotencyKeyDeterminism(t *testing.T) {
 	assert.Contains(t, key1, "2026-02-01")
 }
 
+// --- Duplicate Skip Tests ---
+
 func TestBillingSchedulerDuplicateSkip(t *testing.T) {
-	// This tests the database-level idempotency (duplicate billing run detection).
-	// The scheduler should gracefully handle duplicate billing runs.
 	repo := newMockBillingRepo()
 
 	tenantID := "tenant-dup-test"
@@ -246,6 +408,8 @@ func TestBillingSchedulerDuplicateSkip(t *testing.T) {
 	assert.Equal(t, 1, repo.getRunCount())
 }
 
+// --- Shadow Mode Config Tests ---
+
 func TestBillingSchedulerShadowMode(t *testing.T) {
 	t.Run("shadow mode config is preserved", func(t *testing.T) {
 		config := BillingSchedulerConfig{
@@ -257,15 +421,7 @@ func TestBillingSchedulerShadowMode(t *testing.T) {
 	})
 }
 
-func TestBillingSchedulerStartStop(t *testing.T) {
-	// This test verifies the start/stop lifecycle without a real Redis connection.
-	// Full integration tests use miniredis or testcontainers.
-	t.Run("cannot start twice", func(t *testing.T) {
-		// We can't easily test this without a Redis client,
-		// but we verify the error sentinel exists.
-		assert.Equal(t, "scheduler is already running", ErrSchedulerRunning.Error())
-	})
-}
+// --- Billing Run Creation Tests ---
 
 func TestBillingRunCreation(t *testing.T) {
 	repo := newMockBillingRepo()
@@ -289,6 +445,8 @@ func TestBillingRunCreation(t *testing.T) {
 		assert.Equal(t, domain.BillingRunStatusInitiated, found.Status)
 	})
 }
+
+// --- Billing Run Failure Tests ---
 
 func TestBillingRunFailure(t *testing.T) {
 	repo := newMockBillingRepo()
