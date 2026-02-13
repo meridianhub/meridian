@@ -1522,7 +1522,7 @@ the other on SQL query performance. This prevents context-switching overhead.
        ON instrument_definitions(tenant_id, code, version);
 
    -- LIFECYCLE AND IMMUTABILITY ENFORCEMENT
-   -- CockroachDB does not support PL/pgSQL triggers in UDFs.
+   -- CockroachDB does not support PL/pgSQL triggers.
    -- Enforce lifecycle rules at the Go application layer (repository/service).
    --
    -- Rules enforced by InstrumentDefinitionRepository.Update():
