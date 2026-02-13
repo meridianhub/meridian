@@ -99,19 +99,34 @@ func TestCatchUp_NoPriorExecution_CatchesUpFromMaxAge(t *testing.T) {
 }
 
 func TestCatchUp_RecentExecution_NoCatchUpNeeded(t *testing.T) {
-	// Schedule runs every 10 minutes. Last execution was 2 minutes ago.
-	// No catch-up windows should exist.
+	// Schedule runs every 10 minutes. Seed the last execution at the most recent
+	// cron window so there are zero missed windows between seed and now.
 	cronExpr := "0 */10 * * * *"
 	now := time.Now().UTC()
+
+	// Find the most recent cron window at or before now.
+	sched, err := secondsParser.Parse(cronExpr)
+	require.NoError(t, err)
+	// Walk backwards: find the window just before now by checking next-after(now - 10m).
+	recentWindow := sched.Next(now.Add(-10 * time.Minute))
+	// If recentWindow is after now, step back one more interval.
+	if recentWindow.After(now) {
+		recentWindow = sched.Next(now.Add(-20 * time.Minute))
+	}
 
 	store := &stubExecutionStore{}
 	recentExec := scheduler.Execution{
 		SchedulerName: "test-scheduler",
 		ScheduleID:    "sched-1",
-		ScheduledAt:   now.Add(-2 * time.Minute),
+		ScheduledAt:   recentWindow,
 		Status:        scheduler.ExecutionStatusCompleted,
 	}
 	_ = store.RecordExecution(context.Background(), recentExec)
+
+	// Verify our assumption: no cron windows between recentWindow and now.
+	nextAfterSeed := sched.Next(recentWindow)
+	require.True(t, nextAfterSeed.After(now),
+		"seed should be the most recent window; next window %v should be after now %v", nextAfterSeed, now)
 
 	provider := &stubProvider{
 		schedules: []scheduler.Schedule{
@@ -136,7 +151,7 @@ func TestCatchUp_RecentExecution_NoCatchUpNeeded(t *testing.T) {
 		_ = s.Start(ctx)
 	}()
 
-	err := await.New().AtMost(2 * time.Second).PollInterval(50 * time.Millisecond).Until(func() bool {
+	err = await.New().AtMost(2 * time.Second).PollInterval(50 * time.Millisecond).Until(func() bool {
 		return s.ScheduleCount() == 1
 	})
 	require.NoError(t, err)
