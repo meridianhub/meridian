@@ -3,7 +3,7 @@
 **Status**: Draft
 **Created**: 2026-01-28
 **Author**: Production Readiness Audit
-**Related PRDs**: [Starlark Service Bindings](./starlark-service-bindings.md)
+**Related PRDs**: [Starlark Service Bindings](./008-starlark-service-bindings.md)
 
 ---
 
@@ -1064,7 +1064,7 @@ while the bug ships to production.
 
 ## 10. References
 
-- [Starlark Service Bindings PRD](./starlark-service-bindings.md) - Covers Starlark saga e2e testing
+- [Starlark Service Bindings PRD](./008-starlark-service-bindings.md) - Covers Starlark saga e2e testing
 - [CLAUDE.md Testing Guidelines](../../CLAUDE.md#testing-guidelines) - Use `await` instead of `time.Sleep`
 - [ADR 0028: Starlark Saga CEL Valuation](../adr/0028-starlark-saga-cel-valuation.md)
 - Existing E2E Tests:
@@ -1118,4 +1118,4 @@ The typed service client infrastructure is **85% architecturally built but never
 **starlark-service-bindings.md** focuses on **testing** the typed service infrastructure (assumes it works).
 
 **This appendix** documents **architectural gaps** that must be fixed first. Both are needed: fix architecture
-(Task Master tasks above), then test it works (starlark-service-bindings.md).
+(Task Master tasks above), then test it works (008-starlark-service-bindings.md).

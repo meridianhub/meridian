@@ -123,7 +123,7 @@ kubectl logs -n production deployment/current-account | grep "saga failed"
 ```sql
 -- Verify account balance hasn't changed
 SELECT account_id, balance_cents, version, updated_at
-FROM current_accounts
+FROM account
 WHERE account_id = 'ACC-123';
 
 -- Check recent transactions

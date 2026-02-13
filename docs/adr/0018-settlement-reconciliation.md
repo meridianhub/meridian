@@ -390,9 +390,10 @@ After final settlement (e.g., M+14 for UK energy), positions are locked:
 
 ```go
 func (s *SettlementService) FinalizeRun(ctx context.Context, run string, cutoff time.Time) error {
+    // CockroachDB does not support TSTZRANGE; use explicit start/end column comparisons
     return s.db.Model(&Measurement{}).
         Where("settlement_run = ? AND locked_at IS NULL", run).
-        Where("period && tstzrange(?, ?)", cutoff.AddDate(0, -14, 0), cutoff).
+        Where("period_start < ? AND period_end > ?", cutoff, cutoff.AddDate(0, -14, 0)).
         Update("locked_at", time.Now()).Error
 }
 ```

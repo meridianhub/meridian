@@ -1522,42 +1522,17 @@ the other on SQL query performance. This prevents context-switching overhead.
        ON instrument_definitions(tenant_id, code, version);
 
    -- LIFECYCLE AND IMMUTABILITY ENFORCEMENT
+   -- CockroachDB does not support PL/pgSQL triggers.
+   -- Enforce lifecycle rules at the Go application layer (repository/service).
+   --
+   -- Rules enforced by InstrumentDefinitionRepository.Update():
    -- DRAFT: Free editing, no transactions allowed
+   --   - When activating (DRAFT -> ACTIVE), set activated_at = NOW()
    -- ACTIVE: Expressions locked, transactions allowed
+   --   - Reject updates to fungibility_key_expression or validation_expression
+   --   - Reject revert to DRAFT (would orphan bucket calculations)
+   --   - Allow ACTIVE -> DEPRECATED (soft deprecation)
    -- DEPRECATED: Read-only, no new transactions
-   CREATE OR REPLACE FUNCTION enforce_instrument_lifecycle()
-   RETURNS TRIGGER AS $$
-   BEGIN
-       -- DRAFT instruments can be freely edited
-       IF OLD.status = 'DRAFT' THEN
-           -- When activating, record the timestamp
-           IF NEW.status = 'ACTIVE' THEN
-               NEW.activated_at := NOW();
-           END IF;
-           RETURN NEW;
-       END IF;
-
-       -- ACTIVE/DEPRECATED instruments: expressions are immutable
-       IF OLD.fungibility_key_expression IS DISTINCT FROM NEW.fungibility_key_expression THEN
-           RAISE EXCEPTION 'Cannot update fungibility_key_expression. Create Version N+1 instead.';
-       END IF;
-       IF OLD.validation_expression IS DISTINCT FROM NEW.validation_expression THEN
-           RAISE EXCEPTION 'Cannot update validation_expression. Create Version N+1 instead.';
-       END IF;
-
-       -- Prevent reverting ACTIVE to DRAFT (would orphan bucket calculations)
-       IF OLD.status = 'ACTIVE' AND NEW.status = 'DRAFT' THEN
-           RAISE EXCEPTION 'Cannot revert ACTIVE instrument to DRAFT. Create Version N+1 instead.';
-       END IF;
-
-       -- Allow ACTIVE -> DEPRECATED (soft deprecation)
-       RETURN NEW;
-   END;
-   $$ LANGUAGE plpgsql;
-
-   CREATE TRIGGER enforce_instrument_lifecycle
-       BEFORE UPDATE ON instrument_definitions
-       FOR EACH ROW EXECUTE FUNCTION enforce_instrument_lifecycle();
    ```
 
    > **Two CEL expressions per instrument**:
@@ -1582,11 +1557,15 @@ the other on SQL query performance. This prevents context-switching overhead.
 2. **Position table columns** (added by Stream I.1 migration)
 
    ```sql
-   -- Position Keeping adds columns for multi-asset support
+   -- Migration 1: Add columns
    ALTER TABLE positions ADD COLUMN bucket_id VARCHAR(256);
    ALTER TABLE positions ADD COLUMN dimension VARCHAR(32) NOT NULL DEFAULT 'Monetary';
    ALTER TABLE positions ADD COLUMN attributes JSONB;
+   ```
 
+   ```sql
+   -- Migration 2 (separate file): Add index after columns are public
+   -- CockroachDB requires columns to be committed before referencing in indexes
    CREATE INDEX idx_positions_bucket ON positions(tenant_id, instrument_code, bucket_id);
    ```
 
@@ -3524,15 +3503,11 @@ Position Keeping is the **primary consumer** of multi-asset quantities. Changes 
 
 - [ ] `PositionRepository.Insert()` is the ONLY write method; no `Update()` or `Upsert()` exists
 - [ ] Service layer has no `MergeOnWrite` option or similar configuration
-- [ ] Database trigger on `positions` table rejects UPDATE on `amount` column:
+- [ ] Application-layer enforcement rejects UPDATE on `amount` column:
 
-  ```sql
-  CREATE TRIGGER positions_append_only
-  BEFORE UPDATE ON positions
-  FOR EACH ROW
-  WHEN (OLD.amount IS DISTINCT FROM NEW.amount)
-  EXECUTE FUNCTION reject_position_update();
-  ```
+  > **CockroachDB note:** PL/pgSQL triggers are not supported. Append-only enforcement
+  > is implemented in `PositionRepository` which has no `Update()` method, and validated
+  > via code review checklist.
 
 - [ ] Code review checklist includes "No UPDATE on positions table" verification
 
