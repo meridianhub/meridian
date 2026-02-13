@@ -194,8 +194,21 @@ func run(logger *slog.Logger) error {
 	// Wait for shutdown signal and orchestrate graceful shutdown
 	orchestrator := bootstrap.NewShutdownOrchestrator(grpcServer, logger)
 
-	// Start HTTP server for webhooks when verification is configured
+	// Start timeout handler and HTTP server when verification is configured
 	if verificationSvc != nil && verificationCfg != nil {
+		verificationRepo := persistence.NewVerificationRepository(db)
+		timeoutCtx, timeoutCancel := context.WithCancel(context.Background())
+		timeoutHandler := verification.NewTimeoutHandler(verification.TimeoutHandlerConfig{
+			VerificationRepo: verificationRepo,
+			Provider:         provider,
+			Logger:           logger,
+		})
+		go timeoutHandler.Run(timeoutCtx)
+
+		orchestrator.AddCleanup(func() error {
+			timeoutCancel()
+			return nil
+		})
 		httpMux := http.NewServeMux()
 
 		webhookHandler, err := httpAdapter.NewVerificationWebhookHandler(
