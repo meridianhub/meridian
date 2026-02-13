@@ -37,20 +37,8 @@ CREATE INDEX "idx_import_manifest_tenant_status" ON "import_manifest" ("tenant_i
 -- Index for querying by created_at (audit/history queries)
 CREATE INDEX "idx_import_manifest_created_at" ON "import_manifest" ("created_at");
 
--- Trigger function to automatically update updated_at timestamp
-CREATE OR REPLACE FUNCTION "update_import_manifest_timestamp"()
-RETURNS TRIGGER AS $$
-BEGIN
-  NEW."updated_at" = NOW();
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
--- Create trigger to update updated_at on every UPDATE
-CREATE TRIGGER "trg_import_manifest_updated_at"
-  BEFORE UPDATE ON "import_manifest"
-  FOR EACH ROW
-  EXECUTE FUNCTION "update_import_manifest_timestamp"();
+-- NOTE: updated_at timestamp management is handled at the application layer.
+-- CockroachDB does not support PL/pgSQL triggers in user-defined functions.
 
 -- Add comments documenting the table and columns
 COMMENT ON TABLE "import_manifest" IS 'Tracks bulk import operations including progress, status, and rollback information for data recovery.';

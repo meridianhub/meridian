@@ -162,25 +162,8 @@ func TestMigration_AppliesCleanly(t *testing.T) {
 		assert.Contains(t, columns, expected, "missing column: %s", expected)
 	}
 
-	// Verify trigger function exists
-	var triggerFuncName string
-	err = tc.pool.QueryRow(ctx, `
-		SELECT routine_name
-		FROM information_schema.routines
-		WHERE routine_name = 'enforce_instrument_lifecycle'
-	`).Scan(&triggerFuncName)
-	require.NoError(t, err)
-	assert.Equal(t, "enforce_instrument_lifecycle", triggerFuncName)
-
-	// Verify trigger exists
-	var triggerName string
-	err = tc.pool.QueryRow(ctx, `
-		SELECT trigger_name
-		FROM information_schema.triggers
-		WHERE trigger_name = 'trg_enforce_instrument_lifecycle'
-	`).Scan(&triggerName)
-	require.NoError(t, err)
-	assert.Equal(t, "trg_enforce_instrument_lifecycle", triggerName)
+	// NOTE: Lifecycle triggers removed for CockroachDB compatibility.
+	// Enforcement now handled at Go application layer.
 }
 
 func TestMigration_UniqueConstraint(t *testing.T) {
@@ -427,220 +410,17 @@ func TestMigration_LifecycleTrigger_DraftAllowsEdits(t *testing.T) {
 	}
 }
 
-func TestMigration_LifecycleTrigger_ActiveBlocksExpressionChanges(t *testing.T) {
+// NOTE: TestMigration_LifecycleTrigger_ActiveBlocksExpressionChanges removed.
+// Expression immutability is now enforced at the Go application layer.
+
+// NOTE: TestMigration_LifecycleTrigger_StatusTransitions removed.
+// Status transition enforcement is now handled at the Go application layer.
+
+func TestMigration_TimestampDefaults(t *testing.T) {
 	tc := setupTestContainer(t)
 	defer tc.cleanup(t)
 
 	ctx := context.Background()
-
-	// Insert ACTIVE instruments for testing immutable fields
-	blockedExpressions := []struct {
-		name       string
-		column     string
-		initialVal string
-		newVal     string
-	}{
-		{
-			name:       "validation_expression",
-			column:     "validation_expression",
-			initialVal: "original_validation",
-			newVal:     "modified_validation",
-		},
-		{
-			name:       "fungibility_key_expression",
-			column:     "fungibility_key_expression",
-			initialVal: "original_fungibility",
-			newVal:     "modified_fungibility",
-		},
-		{
-			name:       "error_message_expression",
-			column:     "error_message_expression",
-			initialVal: "original_error",
-			newVal:     "modified_error",
-		},
-	}
-
-	for i, tt := range blockedExpressions {
-		t.Run("ACTIVE blocks "+tt.name, func(t *testing.T) {
-			// Insert ACTIVE instrument
-			id := uuid.New()
-			code := "ACTIVE_BLOCKED_" + string(rune('A'+i))
-			_, err := tc.pool.Exec(ctx, `
-				INSERT INTO instrument_definition (id, code, version, dimension, precision, status, validation_expression, fungibility_key_expression, error_message_expression, activated_at)
-				VALUES ($1, $2, 1, 'MONETARY', 2, 'ACTIVE', $3, $4, $5, NOW())
-			`, id, code, "orig_val", "orig_fung", "orig_err")
-			require.NoError(t, err)
-
-			// Attempt to modify expression - should fail
-			_, err = tc.pool.Exec(ctx, `UPDATE instrument_definition SET `+tt.column+` = $1 WHERE id = $2`, tt.newVal, id)
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "Cannot modify "+tt.column)
-		})
-	}
-
-	// Test that non-expression fields CAN be modified on ACTIVE instruments
-	t.Run("ACTIVE allows non-expression edits", func(t *testing.T) {
-		id := insertInstrument(ctx, t, tc.pool, "ACTIVE_EDITABLE", 1, "MONETARY", 2, "DRAFT")
-
-		// Activate the instrument
-		_, err := tc.pool.Exec(ctx, `UPDATE instrument_definition SET status = 'ACTIVE' WHERE id = $1`, id)
-		require.NoError(t, err)
-
-		// These should succeed
-		_, err = tc.pool.Exec(ctx, `UPDATE instrument_definition SET display_name = 'Updated' WHERE id = $1`, id)
-		require.NoError(t, err)
-
-		_, err = tc.pool.Exec(ctx, `UPDATE instrument_definition SET description = 'Updated description' WHERE id = $1`, id)
-		require.NoError(t, err)
-	})
-}
-
-func TestMigration_LifecycleTrigger_StatusTransitions(t *testing.T) {
-	tc := setupTestContainer(t)
-	defer tc.cleanup(t)
-
-	ctx := context.Background()
-
-	t.Run("DRAFT to ACTIVE allowed", func(t *testing.T) {
-		id := insertInstrument(ctx, t, tc.pool, "DRAFT_TO_ACTIVE", 1, "MONETARY", 2, "DRAFT")
-
-		_, err := tc.pool.Exec(ctx, `UPDATE instrument_definition SET status = 'ACTIVE' WHERE id = $1`, id)
-		require.NoError(t, err)
-
-		var status string
-		err = tc.pool.QueryRow(ctx, `SELECT status FROM instrument_definition WHERE id = $1`, id).Scan(&status)
-		require.NoError(t, err)
-		assert.Equal(t, "ACTIVE", status)
-	})
-
-	t.Run("DRAFT to DEPRECATED allowed", func(t *testing.T) {
-		id := insertInstrument(ctx, t, tc.pool, "DRAFT_TO_DEPRECATED", 1, "MONETARY", 2, "DRAFT")
-
-		_, err := tc.pool.Exec(ctx, `UPDATE instrument_definition SET status = 'DEPRECATED' WHERE id = $1`, id)
-		require.NoError(t, err)
-
-		var status string
-		err = tc.pool.QueryRow(ctx, `SELECT status FROM instrument_definition WHERE id = $1`, id).Scan(&status)
-		require.NoError(t, err)
-		assert.Equal(t, "DEPRECATED", status)
-	})
-
-	t.Run("ACTIVE to DEPRECATED allowed", func(t *testing.T) {
-		id := insertInstrument(ctx, t, tc.pool, "ACTIVE_TO_DEPRECATED", 1, "MONETARY", 2, "DRAFT")
-
-		// First activate
-		_, err := tc.pool.Exec(ctx, `UPDATE instrument_definition SET status = 'ACTIVE' WHERE id = $1`, id)
-		require.NoError(t, err)
-
-		// Then deprecate
-		_, err = tc.pool.Exec(ctx, `UPDATE instrument_definition SET status = 'DEPRECATED' WHERE id = $1`, id)
-		require.NoError(t, err)
-
-		var status string
-		err = tc.pool.QueryRow(ctx, `SELECT status FROM instrument_definition WHERE id = $1`, id).Scan(&status)
-		require.NoError(t, err)
-		assert.Equal(t, "DEPRECATED", status)
-	})
-
-	t.Run("ACTIVE to DRAFT blocked", func(t *testing.T) {
-		id := insertInstrument(ctx, t, tc.pool, "ACTIVE_TO_DRAFT", 1, "MONETARY", 2, "DRAFT")
-
-		// Activate
-		_, err := tc.pool.Exec(ctx, `UPDATE instrument_definition SET status = 'ACTIVE' WHERE id = $1`, id)
-		require.NoError(t, err)
-
-		// Attempt to go back to DRAFT - should fail
-		_, err = tc.pool.Exec(ctx, `UPDATE instrument_definition SET status = 'DRAFT' WHERE id = $1`, id)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "Cannot transition from ACTIVE back to DRAFT")
-	})
-
-	t.Run("DEPRECATED to DRAFT blocked", func(t *testing.T) {
-		id := insertInstrument(ctx, t, tc.pool, "DEPRECATED_TO_DRAFT", 1, "MONETARY", 2, "DRAFT")
-
-		// Activate then deprecate
-		_, err := tc.pool.Exec(ctx, `UPDATE instrument_definition SET status = 'ACTIVE' WHERE id = $1`, id)
-		require.NoError(t, err)
-		_, err = tc.pool.Exec(ctx, `UPDATE instrument_definition SET status = 'DEPRECATED' WHERE id = $1`, id)
-		require.NoError(t, err)
-
-		// Attempt to go back to DRAFT - should fail
-		_, err = tc.pool.Exec(ctx, `UPDATE instrument_definition SET status = 'DRAFT' WHERE id = $1`, id)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "Cannot transition from DEPRECATED")
-	})
-
-	t.Run("DEPRECATED to ACTIVE blocked", func(t *testing.T) {
-		id := insertInstrument(ctx, t, tc.pool, "DEPRECATED_TO_ACTIVE", 1, "MONETARY", 2, "DRAFT")
-
-		// Activate then deprecate
-		_, err := tc.pool.Exec(ctx, `UPDATE instrument_definition SET status = 'ACTIVE' WHERE id = $1`, id)
-		require.NoError(t, err)
-		_, err = tc.pool.Exec(ctx, `UPDATE instrument_definition SET status = 'DEPRECATED' WHERE id = $1`, id)
-		require.NoError(t, err)
-
-		// Attempt to go to ACTIVE - should fail
-		_, err = tc.pool.Exec(ctx, `UPDATE instrument_definition SET status = 'ACTIVE' WHERE id = $1`, id)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "Cannot transition from DEPRECATED")
-	})
-}
-
-func TestMigration_LifecycleTrigger_TimestampPopulation(t *testing.T) {
-	tc := setupTestContainer(t)
-	defer tc.cleanup(t)
-
-	ctx := context.Background()
-
-	t.Run("activated_at populated on DRAFT to ACTIVE transition", func(t *testing.T) {
-		id := insertInstrument(ctx, t, tc.pool, "ACTIVATION_TIMESTAMP", 1, "MONETARY", 2, "DRAFT")
-
-		// Verify activated_at is NULL initially
-		var activatedAt *time.Time
-		err := tc.pool.QueryRow(ctx, `SELECT activated_at FROM instrument_definition WHERE id = $1`, id).Scan(&activatedAt)
-		require.NoError(t, err)
-		assert.Nil(t, activatedAt)
-
-		// Capture time before activation
-		beforeActivation := time.Now().Add(-1 * time.Second)
-
-		// Activate
-		_, err = tc.pool.Exec(ctx, `UPDATE instrument_definition SET status = 'ACTIVE' WHERE id = $1`, id)
-		require.NoError(t, err)
-
-		// Verify activated_at is now set
-		err = tc.pool.QueryRow(ctx, `SELECT activated_at FROM instrument_definition WHERE id = $1`, id).Scan(&activatedAt)
-		require.NoError(t, err)
-		require.NotNil(t, activatedAt)
-		assert.True(t, activatedAt.After(beforeActivation), "activated_at should be after the activation request")
-	})
-
-	t.Run("deprecated_at populated on ACTIVE to DEPRECATED transition", func(t *testing.T) {
-		id := insertInstrument(ctx, t, tc.pool, "DEPRECATION_TIMESTAMP", 1, "MONETARY", 2, "DRAFT")
-
-		// Activate first
-		_, err := tc.pool.Exec(ctx, `UPDATE instrument_definition SET status = 'ACTIVE' WHERE id = $1`, id)
-		require.NoError(t, err)
-
-		// Verify deprecated_at is NULL
-		var deprecatedAt *time.Time
-		err = tc.pool.QueryRow(ctx, `SELECT deprecated_at FROM instrument_definition WHERE id = $1`, id).Scan(&deprecatedAt)
-		require.NoError(t, err)
-		assert.Nil(t, deprecatedAt)
-
-		// Capture time before deprecation
-		beforeDeprecation := time.Now().Add(-1 * time.Second)
-
-		// Deprecate
-		_, err = tc.pool.Exec(ctx, `UPDATE instrument_definition SET status = 'DEPRECATED' WHERE id = $1`, id)
-		require.NoError(t, err)
-
-		// Verify deprecated_at is now set
-		err = tc.pool.QueryRow(ctx, `SELECT deprecated_at FROM instrument_definition WHERE id = $1`, id).Scan(&deprecatedAt)
-		require.NoError(t, err)
-		require.NotNil(t, deprecatedAt)
-		assert.True(t, deprecatedAt.After(beforeDeprecation), "deprecated_at should be after the deprecation request")
-	})
 
 	t.Run("created_at defaults to now on insert", func(t *testing.T) {
 		beforeInsert := time.Now().Add(-1 * time.Second)
@@ -653,50 +433,8 @@ func TestMigration_LifecycleTrigger_TimestampPopulation(t *testing.T) {
 		assert.True(t, createdAt.After(beforeInsert), "created_at should be after the insert request")
 	})
 
-	t.Run("deprecated_at populated on DRAFT to DEPRECATED transition", func(t *testing.T) {
-		id := insertInstrument(ctx, t, tc.pool, "DRAFT_DEPRECATION", 1, "MONETARY", 2, "DRAFT")
-
-		// Verify deprecated_at is NULL initially
-		var deprecatedAt *time.Time
-		err := tc.pool.QueryRow(ctx, `SELECT deprecated_at FROM instrument_definition WHERE id = $1`, id).Scan(&deprecatedAt)
-		require.NoError(t, err)
-		assert.Nil(t, deprecatedAt)
-
-		// Capture time before deprecation
-		beforeDeprecation := time.Now().Add(-1 * time.Second)
-
-		// Deprecate directly from DRAFT
-		_, err = tc.pool.Exec(ctx, `UPDATE instrument_definition SET status = 'DEPRECATED' WHERE id = $1`, id)
-		require.NoError(t, err)
-
-		// Verify deprecated_at is now set
-		err = tc.pool.QueryRow(ctx, `SELECT deprecated_at FROM instrument_definition WHERE id = $1`, id).Scan(&deprecatedAt)
-		require.NoError(t, err)
-		require.NotNil(t, deprecatedAt)
-		assert.True(t, deprecatedAt.After(beforeDeprecation), "deprecated_at should be after the deprecation request")
-	})
-
-	t.Run("updated_at populated on any update", func(t *testing.T) {
-		id := insertInstrument(ctx, t, tc.pool, "UPDATED_TIMESTAMP", 1, "MONETARY", 2, "DRAFT")
-
-		// Get initial updated_at
-		var initialUpdatedAt time.Time
-		err := tc.pool.QueryRow(ctx, `SELECT updated_at FROM instrument_definition WHERE id = $1`, id).Scan(&initialUpdatedAt)
-		require.NoError(t, err)
-
-		// Wait a tiny bit to ensure time difference
-		time.Sleep(10 * time.Millisecond)
-
-		// Update display_name
-		_, err = tc.pool.Exec(ctx, `UPDATE instrument_definition SET display_name = 'Updated Name' WHERE id = $1`, id)
-		require.NoError(t, err)
-
-		// Verify updated_at changed
-		var newUpdatedAt time.Time
-		err = tc.pool.QueryRow(ctx, `SELECT updated_at FROM instrument_definition WHERE id = $1`, id).Scan(&newUpdatedAt)
-		require.NoError(t, err)
-		assert.True(t, newUpdatedAt.After(initialUpdatedAt), "updated_at should be after the initial value")
-	})
+	// NOTE: activated_at, deprecated_at, and updated_at timestamp management
+	// is now handled at the Go application layer, not by database triggers.
 }
 
 func TestMigration_Indexes(t *testing.T) {
@@ -877,33 +615,8 @@ func TestMigration_SchemaIsolation(t *testing.T) {
 		}
 	})
 
-	t.Run("trigger functions work independently per tenant", func(t *testing.T) {
-		// Activate instrument in tenant_alpha
-		_, err := tc.pool.Exec(ctx, `SET search_path TO tenant_alpha`)
-		require.NoError(t, err)
-
-		var id uuid.UUID
-		err = tc.pool.QueryRow(ctx, `SELECT id FROM instrument_definition WHERE code = 'SHARED_CODE'`).Scan(&id)
-		require.NoError(t, err)
-
-		_, err = tc.pool.Exec(ctx, `UPDATE instrument_definition SET status = 'ACTIVE' WHERE id = $1`, id)
-		require.NoError(t, err)
-
-		// Verify activated_at was set in tenant_alpha
-		var activatedAt *time.Time
-		err = tc.pool.QueryRow(ctx, `SELECT activated_at FROM instrument_definition WHERE id = $1`, id).Scan(&activatedAt)
-		require.NoError(t, err)
-		require.NotNil(t, activatedAt)
-
-		// Verify tenant_beta's instrument is still DRAFT
-		_, err = tc.pool.Exec(ctx, `SET search_path TO tenant_beta`)
-		require.NoError(t, err)
-
-		var status string
-		err = tc.pool.QueryRow(ctx, `SELECT status FROM instrument_definition WHERE code = 'SHARED_CODE'`).Scan(&status)
-		require.NoError(t, err)
-		assert.Equal(t, "DRAFT", status, "tenant_beta instrument should still be DRAFT")
-	})
+	// NOTE: "trigger functions work independently per tenant" subtest removed.
+	// Lifecycle enforcement is now at the Go application layer.
 }
 
 // TestMigration_IdempotencyCheck verifies that the migration can be run multiple times safely

@@ -35,7 +35,7 @@ ARG TARGETARCH
 RUN CGO_ENABLED=1 GOOS=linux GOARCH=${TARGETARCH} go build \
     -ldflags="-X main.Version=${VERSION} -X main.Commit=${COMMIT} -X main.BuildDate=${BUILD_DATE}" \
     -o audit-worker \
-    ./services/audit-worker
+    ./services/audit-worker/cmd
 
 # Switch to non-root user
 USER nonroot:nonroot

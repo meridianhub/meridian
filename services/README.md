@@ -25,22 +25,26 @@ flowchart LR
         end
 
         subgraph Services["Domain Services"]
-            CA["CurrentAccount<br/>:50057"]
+            CA["CurrentAccount<br/>:50051"]
             PK["PositionKeeping<br/>:50053"]
             FA["FinancialAccounting<br/>:50052"]
             Party["Party<br/>:50055"]
             PO["PaymentOrder<br/>:50054, :8080"]
             RD["ReferenceData<br/>:50051"]
             MI["MarketInformation<br/>:50058"]
+            IBA["InternalBankAccount<br/>:50057"]
+            Recon["Reconciliation<br/>:50060"]
+            FC["Forecasting<br/>:50061"]
         end
 
         subgraph Infrastructure["Infrastructure"]
             Tenant["Tenant<br/>:50056"]
+            CP["ControlPlane"]
             AW["audit-worker<br/>:8080"]
             UMC["utilization-metering<br/>-consumer :8080"]
             DB[("CockroachDB<br/>:26257")]
-            Kafka@{ shape: das, label: "Kafka :9092" }
-            Redis@{ shape: das, label: "Redis :6379" }
+            Kafka["Kafka<br/>:9092"]
+            Redis["Redis<br/>:6379"]
         end
     end
 
@@ -51,6 +55,8 @@ flowchart LR
     GW -->|"Proxy (gRPC)"| PO
     GW -->|"Proxy (gRPC)"| Party
     GW -->|"Proxy (gRPC)"| MI
+    GW -->|"Proxy (gRPC)"| IBA
+    GW -->|"Proxy (gRPC)"| Recon
     PayGW -->|"HTTP Webhook"| PO
 
     %% Admin tool connections
@@ -64,6 +70,11 @@ flowchart LR
     Tenant -.->|"RegisterParty (gRPC, optional)"| Party
     Tenant -->|"Seed instruments"| RD
     PK -.->|"GetInstrument (gRPC)"| RD
+    IBA -->|"GetBalance (gRPC)"| PK
+    Recon -->|"Query positions (gRPC)"| PK
+    Recon -->|"Query ledger (gRPC)"| FA
+    Recon -->|"Query accounts (gRPC)"| CA
+    FC -->|"GetMarketData (gRPC)"| MI
 
     %% Kafka event streaming
     PK -->|"Publish Events"| Kafka
@@ -82,6 +93,10 @@ flowchart LR
     Tenant -->|"SQL"| DB
     RD -->|"SQL"| DB
     MI -->|"SQL"| DB
+    IBA -->|"SQL"| DB
+    Recon -->|"SQL"| DB
+    FC -->|"SQL"| DB
+    CP -->|"SQL"| DB
     GW -->|"SQL (tenant lookup)"| DB
 
     %% Redis (optional caching/idempotency)
@@ -101,9 +116,9 @@ flowchart LR
     classDef external fill:#ff9800,stroke:#e65100,color:#fff
     classDef admin fill:#9c27b0,stroke:#6a1b9a,color:#fff
 
-    class CA,PK,FA,Party,PO,RD,MI service
+    class CA,PK,FA,Party,PO,RD,MI,IBA,Recon,FC service
     class GW edge
-    class Tenant,AW,UMC,DB,Kafka,Redis storage
+    class Tenant,CP,AW,UMC,DB,Kafka,Redis storage
     class User,PayGW,AuthProvider external
     class TenantCtl admin
 ```
@@ -134,6 +149,11 @@ All inter-service communication uses gRPC with Protocol Buffers:
 | Tenant | Party | `RegisterParty()` | Register org party (optional) |
 | Tenant | ReferenceData | SQL seed | Seed system instruments during provisioning |
 | PositionKeeping | ReferenceData | `GetInstrument()` | Retrieve instrument definitions |
+| InternalBankAccount | PositionKeeping | `GetBalance()` | Query balance for internal accounts |
+| Reconciliation | PositionKeeping | Query positions | Compare position data across services |
+| Reconciliation | FinancialAccounting | Query ledger | Compare ledger entries across services |
+| Reconciliation | CurrentAccount | Query accounts | Compare account state across services |
+| Forecasting | MarketInformation | `GetMarketData()` | Retrieve market data for forecast models |
 | UtilizationMeteringConsumer | PositionKeeping | `RecordMeasurement()` | Record billing measurements to tenant-zero |
 
 **Note:** CurrentAccount uses a `ValidateParty()` client wrapper that calls `RetrieveParty()` and
@@ -232,14 +252,17 @@ Redis provides optional distributed idempotency for exactly-once semantics:
 | Service | gRPC Port | HTTP Port | Metrics Port |
 |---------|-----------|-----------|--------------|
 | Gateway | - | 8080 | 8080 |
-| CurrentAccount | 50057 | - | 9090 |
-| PositionKeeping | 50053 | - | 9090 |
+| CurrentAccount | 50051 | - | 9090 |
 | FinancialAccounting | 50052 | - | 9090 |
-| Party | 50055 | - | 9090 |
+| PositionKeeping | 50053 | - | 9090 |
 | PaymentOrder | 50054 | 8080 | 9090 |
-| ReferenceData | 50051 | - | 9090 |
-| MarketInformation | 50058 | - | 8082 |
+| Party | 50055 | - | 9090 |
 | Tenant | 50056 | - | 9090 |
+| InternalBankAccount | 50057 | - | 9090 |
+| MarketInformation | 50058 | - | 8082 |
+| Reconciliation | 50060 | - | 9090 |
+| Forecasting | 50061 | - | 9090 |
+| ControlPlane | - | - | - |
 | audit-worker | - | 8080 | 8080 |
 | utilization-metering-consumer | - | 8080 | 8080 |
 
@@ -372,6 +395,63 @@ The Utilization Metering Consumer is a centralized Kafka consumer for platform b
 See [services/utilization-metering-consumer/README.md](utilization-metering-consumer/README.md) for full
 documentation and [k8s/README.md](utilization-metering-consumer/k8s/README.md) for deployment details.
 
+### Internal Bank Account Service
+
+The Internal Bank Account service manages non-customer accounts used for internal accounting
+and correspondent banking operations.
+
+**Responsibilities:**
+
+- **Counterparty Accounts**: Nostro/vostro accounts for correspondent banking
+- **Operational Accounts**: Clearing, suspense, holding, revenue, expense accounts
+- **Multi-Asset Support**: Fiat, energy, carbon credits, compute hours
+- **Balance Delegation**: Balances queried from Position Keeping (not stored locally)
+
+**Account Types:** CLEARING, NOSTRO, VOSTRO, HOLDING, SUSPENSE, REVENUE, EXPENSE, INVENTORY
+
+See [services/internal-bank-account/README.md](internal-bank-account/README.md) for full documentation.
+
+### Reconciliation Service
+
+The Reconciliation service verifies consistency across Position Keeping, Financial Accounting,
+and Current Account services by matching positions and identifying discrepancies.
+
+**Responsibilities:**
+
+- **Position Matching**: Compare positions across upstream services
+- **Discrepancy Tracking**: Identify and track variances for resolution
+- **Settlement Scheduling**: Automated periodic reconciliation runs
+
+See [services/reconciliation/README.md](reconciliation/README.md) for full documentation.
+
+### Forecasting Service
+
+The Forecasting service generates forward curves and forecasts using configurable Starlark-based
+strategies with market data from the Market Information service.
+
+**Responsibilities:**
+
+- **Strategy Management**: DRAFT/ACTIVE/DEPRECATED lifecycle for forecast strategies
+- **Starlark Execution**: Sandboxed script execution with built-in math functions
+- **Scheduled Runs**: Cron-based execution with lease management for distributed safety
+- **Template Library**: Pre-built strategies (moving average, linear regression, etc.)
+
+See [services/forecasting/README.md](forecasting/README.md) for full documentation.
+
+### Control Plane Service
+
+The Control Plane manages tenant provisioning workflows, manifest-based configuration,
+Stripe billing integration, and administrative operations.
+
+**Responsibilities:**
+
+- **Manifest Management**: Declarative tenant configuration with diff/apply workflow
+- **Stripe Integration**: Payment processing, webhook handling, reconciliation
+- **Admin Operations**: Balance sheet queries, causation tree visualization, CSV exports
+- **Staff Identity**: Internal operator authentication and authorization
+
+See [services/control-plane/README.md](control-plane/README.md) for full documentation.
+
 ## Service-Owned Client Libraries
 
 Each service exports a client library for other services to use. This follows the idiomatic Go pattern
@@ -457,11 +537,14 @@ When `Resilience` is configured, clients automatically include:
 
 | Service | Import Path | Default Port |
 |---------|-------------|--------------|
-| Party | `services/party/client` | 50055 |
-| PositionKeeping | `services/position-keeping/client` | 50053 |
+| CurrentAccount | `services/current-account/client` | 50051 |
 | FinancialAccounting | `services/financial-accounting/client` | 50052 |
-| CurrentAccount | `services/current-account/client` | 50057 |
+| PositionKeeping | `services/position-keeping/client` | 50053 |
+| Party | `services/party/client` | 50055 |
 | Tenant | `services/tenant/client` | 50056 |
+| InternalBankAccount | `services/internal-bank-account/client` | 50057 |
+| MarketInformation | `services/market-information/client` | 50058 |
+| Reconciliation | `services/reconciliation/client` | 50060 |
 | ReferenceData | `services/reference-data/client` | 50051 |
 
 ## Service Directory Structure
@@ -526,6 +609,589 @@ The `scripts/demo-provision-organizations.sh` script provisions demo tenants for
 ```
 
 This creates: `meridian`, `post_office`, `motive`, `un_wfp`
+
+## Data Model
+
+Entity relationship diagrams showing all database tables across services,
+split into two diagrams by connectivity. Solid lines (`--`) are
+intra-service foreign key constraints; dotted lines (`..`) are
+cross-service logical references (no FK due to database-per-service
+architecture).
+
+> **Naming:** Tables with identical names across services (e.g., `lien`,
+> `valuation_features`) are prefixed with service abbreviations (`ca_`,
+> `iba_`) for diagram clarity only -- actual DB table names are unprefixed.
+> Shared infrastructure tables (`event_outbox`, `audit_log`,
+> `audit_outbox`) follow a common schema and are omitted; see
+> [Async Audit System](#async-audit-system).
+
+### Core Transaction Engine (26 tables)
+
+```mermaid
+erDiagram
+    %% ════════════════════════════════════
+    %% TENANT MANAGEMENT SERVICE
+    %% DB: meridian_tenant
+    %% ════════════════════════════════════
+    tenant {
+        varchar id PK "slug e.g. acme_bank"
+        varchar display_name
+        varchar settlement_asset "default instrument"
+        varchar slug UK "URL-safe"
+        varchar party_id "ref Party"
+        varchar status "provisioning|active|suspended"
+    }
+
+    tenant_provisioning {
+        varchar tenant_id PK "FK tenant"
+        varchar state "pending|in_progress|active|failed"
+        jsonb service_schemas "per-service status"
+    }
+
+    tenant_provisioning_status {
+        serial id PK
+        varchar tenant_id FK
+        varchar service_name
+        varchar status "pending|completed|failed"
+    }
+
+    tenant ||--|| tenant_provisioning : "tracked-by"
+    tenant ||--o{ tenant_provisioning_status : "provisions"
+
+    %% ════════════════════════════════════
+    %% PARTY SERVICE
+    %% DB: meridian_party (org_{tenant} schema)
+    %% ════════════════════════════════════
+
+    party {
+        uuid id PK
+        varchar party_type "INDIVIDUAL|ORGANIZATION"
+        varchar legal_name
+        varchar status "ACTIVE|INACTIVE"
+        varchar external_reference UK
+    }
+
+    party_association {
+        uuid id PK
+        uuid party_id FK
+        varchar association_type
+        varchar associated_party_reference
+    }
+
+    party_address {
+        uuid id PK
+        uuid party_id FK
+        varchar address_type
+    }
+
+    party_qualification {
+        uuid id PK
+        uuid party_id FK
+        varchar qualification_type
+        varchar qualification_value
+    }
+
+    party_verification {
+        uuid id PK
+        uuid party_id FK
+        varchar verification_type
+        varchar status "PENDING|VERIFIED|FAILED|EXPIRED"
+    }
+
+    party_payment_method {
+        uuid id PK
+        uuid party_id FK
+        varchar method_type "BANK_TRANSFER|CARD|DIRECT_DEBIT"
+        varchar status "ACTIVE|SUSPENDED|REMOVED"
+    }
+
+    party ||--o{ party_association : "has"
+    party ||--o{ party_address : "has"
+    party ||--o{ party_qualification : "has"
+    party ||--o{ party_verification : "has"
+    party ||--o{ party_payment_method : "has"
+
+    %% ════════════════════════════════════
+    %% CURRENT ACCOUNT SERVICE
+    %% DB: meridian_current_account (org_{tenant} schema)
+    %% ════════════════════════════════════
+
+    account {
+        uuid id PK
+        varchar account_id UK "unique slug"
+        varchar account_identification UK "IBAN"
+        uuid party_id "ref Party"
+        varchar account_type
+        varchar currency "3-char ISO"
+        varchar status "active|disabled|pending|closed"
+    }
+
+    ca_lien {
+        uuid id PK
+        uuid account_id FK
+        bigint amount_cents
+        varchar currency
+        varchar status "ACTIVE|EXECUTED|TERMINATED"
+        varchar payment_order_reference UK "ref PO"
+    }
+
+    withdrawal {
+        uuid id PK
+        uuid account_id FK
+        bigint amount_cents
+        varchar currency
+        varchar status
+    }
+
+    ca_valuation_features {
+        uuid id PK
+        uuid account_id FK
+        varchar instrument_code "ref RD instrument"
+        uuid valuation_method_id "ref RD method"
+        varchar lifecycle_status "INITIATED|ACTIVE|TERMINATED"
+    }
+
+    account ||--o{ ca_lien : "holds"
+    account ||--o{ withdrawal : "has"
+    account ||--o{ ca_valuation_features : "valued-by"
+
+    %% ════════════════════════════════════
+    %% FINANCIAL ACCOUNTING SERVICE
+    %% DB: meridian_financial_accounting (org_{tenant} schema)
+    %% ════════════════════════════════════
+
+    financial_booking_log {
+        uuid id PK
+        varchar financial_account_type
+        varchar base_currency
+        varchar status
+        varchar idempotency_key UK
+    }
+
+    ledger_posting {
+        uuid id PK
+        uuid financial_booking_log_id FK
+        varchar posting_direction "DEBIT|CREDIT"
+        bigint amount_cents
+        varchar currency
+        varchar account_id "ref IBA"
+        varchar correlation_id
+    }
+
+    financial_booking_log ||--o{ ledger_posting : "has"
+
+    %% ════════════════════════════════════
+    %% POSITION KEEPING SERVICE
+    %% DB: meridian_position_keeping (org_{tenant} schema)
+    %% ════════════════════════════════════
+
+    financial_position_log {
+        uuid id PK
+        uuid log_id UK
+        varchar account_id "ref CurrentAccount"
+        varchar current_status "PENDING|POSTED|RECONCILED"
+        varchar instrument_code "ref RD instrument"
+        varchar bucket_id "bucketing key"
+        varchar dimension "Monetary|Energy|Compute|Carbon"
+        decimal opening_balance_amount
+    }
+
+    transaction_log_entry {
+        uuid id PK
+        uuid entry_id UK
+        uuid financial_position_log_id FK
+        uuid transaction_id
+        varchar account_id "ref CurrentAccount"
+        bigint amount_cents
+        varchar direction "DEBIT|CREDIT"
+    }
+
+    transaction_lineage {
+        uuid id PK
+        uuid financial_position_log_id FK "unique"
+        uuid transaction_id
+        uuid parent_transaction_id
+        varchar transaction_type
+    }
+
+    audit_trail_entry {
+        uuid id PK
+        uuid audit_id UK
+        uuid financial_position_log_id FK
+        varchar user_id
+        varchar action
+    }
+
+    measurement {
+        uuid id PK
+        uuid financial_position_log_id FK
+        timestamptz observation_at
+        int quality "1-EST 2-COEFF 3-ACT 4-REV"
+        decimal amount
+    }
+
+    financial_position_log ||--o{ transaction_log_entry : "records"
+    financial_position_log ||--o| transaction_lineage : "traced-by"
+    financial_position_log ||--o{ audit_trail_entry : "audited-by"
+    financial_position_log ||--o{ measurement : "measured-by"
+
+    %% ════════════════════════════════════
+    %% PAYMENT ORDER SERVICE
+    %% DB: meridian_payment_order (org_{tenant} schema)
+    %% ════════════════════════════════════
+
+    payment_order {
+        uuid id PK
+        varchar debtor_account_id "ref CurrentAccount"
+        bigint amount_cents
+        varchar currency
+        varchar status "INITIATED|RESERVED|COMPLETED|FAILED"
+        varchar lien_id "ref CA lien"
+        varchar ledger_booking_id "ref FA booking"
+        varchar idempotency_key UK
+    }
+
+    billing_run {
+        uuid id PK
+        varchar tenant_id "ref Tenant"
+        timestamptz cycle_start
+        timestamptz cycle_end
+        varchar status "INITIATED|PROCESSING|COMPLETED"
+    }
+
+    invoice {
+        uuid id PK
+        uuid billing_run_id FK
+        varchar party_id "ref Party"
+        varchar account_id "ref CurrentAccount"
+        varchar invoice_number UK
+        varchar status "DRAFT|ISSUED|PAID|VOID|OVERDUE"
+        uuid payment_order_id "ref PaymentOrder"
+    }
+
+    dunning {
+        uuid id PK
+        uuid invoice_id FK
+        int dunning_level
+        varchar status
+    }
+
+    billing_run ||--o{ invoice : "generates"
+    invoice ||--o{ dunning : "escalates"
+
+    %% ════════════════════════════════════
+    %% INTERNAL BANK ACCOUNT SERVICE
+    %% DB: meridian_iba (org_{tenant} schema)
+    %% ════════════════════════════════════
+
+    internal_bank_account {
+        uuid id PK
+        varchar account_id UK
+        varchar account_code
+        varchar name
+        varchar account_type "CLEARING|NOSTRO|VOSTRO|HOLDING"
+        varchar instrument_code "ref RD instrument"
+        varchar dimension "CURRENCY|ENERGY|CARBON|COMPUTE"
+        varchar status "ACTIVE|SUSPENDED|CLOSED"
+    }
+
+    iba_lien {
+        uuid id PK
+        uuid account_id FK
+        bigint amount_cents
+        varchar currency
+        varchar status "ACTIVE|EXECUTED|TERMINATED"
+    }
+
+    iba_valuation_features {
+        uuid id PK
+        uuid account_id FK
+        varchar instrument_code "ref RD instrument"
+        uuid valuation_method_id "ref RD method"
+        varchar lifecycle_status "INITIATED|ACTIVE|TERMINATED"
+    }
+
+    internal_bank_account ||--o{ iba_lien : "holds"
+    internal_bank_account ||--o{ iba_valuation_features : "valued-by"
+
+    %% ════════════════════════════════════
+    %% REFERENCE DATA SERVICE (Central Registry)
+    %% DB: meridian_reference_data (org_{tenant} schema)
+    %% ════════════════════════════════════
+
+    instrument_definition {
+        uuid id PK
+        varchar code "GBP KWH TONNE_CO2E GPU_HR"
+        int version
+        varchar dimension "MONETARY|ENERGY|COMPUTE|CARBON"
+        int precision "0-18 decimal places"
+        varchar status "DRAFT|ACTIVE|DEPRECATED"
+        text validation_expression "CEL"
+    }
+
+    valuation_method {
+        uuid id PK
+        varchar name
+        int version
+        varchar input_instrument "ref instrument"
+        varchar output_instrument "ref instrument"
+        text logic_script "Starlark"
+        varchar lifecycle_status "INITIATED|ACTIVE|DEPRECATED"
+    }
+
+    %% ════════════════════════════════════════════════
+    %% CROSS-SERVICE DOMAIN RELATIONSHIPS (Core)
+    %% Dotted lines = logical references (no FK)
+    %% ════════════════════════════════════════════════
+
+    party ||..o{ account : "owns"
+    tenant }o..o| party : "represented-by"
+    account ||..o{ financial_position_log : "positions"
+    account ||..o{ payment_order : "debtor"
+    ca_lien ||..o| payment_order : "reserves"
+    financial_booking_log ||..o| payment_order : "books"
+    internal_bank_account ||..o{ ledger_posting : "posted-to"
+    instrument_definition ||..o{ financial_position_log : "denominated"
+    instrument_definition ||..o{ internal_bank_account : "denominated"
+    valuation_method ||..o{ ca_valuation_features : "applied"
+    valuation_method ||..o{ iba_valuation_features : "applied"
+    tenant ||..o{ billing_run : "billed"
+```
+
+Tenant Management (3), Party (6), Current Account (4),
+Financial Accounting (2), Position Keeping (5), Payment Order (4),
+Internal Bank Account (3), Reference Data (2). These services form
+the densely interconnected transaction processing core.
+
+### Market Data, Reconciliation & Operations (17 tables)
+
+```mermaid
+erDiagram
+    %% ════════════════════════════════════
+    %% MARKET INFORMATION SERVICE
+    %% DB: meridian_market_information
+    %% ════════════════════════════════════
+
+    data_source {
+        uuid id PK
+        varchar code UK "ECB_DAILY etc"
+        varchar name
+        int trust_level "0-100"
+    }
+
+    dataset_definition {
+        uuid id PK
+        varchar code "FX_RATE ENERGY_SPOT"
+        int version
+        varchar data_category
+        varchar status "DRAFT|ACTIVE|DEPRECATED"
+        text validation_expression "CEL"
+    }
+
+    market_price_observation {
+        uuid id PK
+        uuid dataset_definition_id FK
+        uuid data_source_id FK
+        varchar resolution_key "e.g. EUR-USD"
+        timestamptz observed_at "event time"
+        timestamptz created_at "knowledge time"
+        int quality "1-EST 2-ACT 3-VER"
+        numeric numeric_value
+        uuid superseded_by "self-ref"
+    }
+
+    dataset_definition ||--o{ market_price_observation : "has"
+    data_source ||--o{ market_price_observation : "provides"
+    market_price_observation }o--o| market_price_observation : "supersedes"
+
+    %% ════════════════════════════════════
+    %% RECONCILIATION SERVICE
+    %% DB: meridian_reconciliation (org_{tenant} schema)
+    %% ════════════════════════════════════
+
+    settlement_run {
+        uuid id PK
+        uuid run_id UK
+        varchar account_id "ref Core: account"
+        varchar scope "ACCOUNT|INSTRUMENT|PORTFOLIO"
+        varchar settlement_type "DAILY|WEEKLY|MONTHLY"
+        varchar status "PENDING|RUNNING|COMPLETED|FAILED"
+    }
+
+    settlement_snapshot {
+        uuid id PK
+        uuid snapshot_id UK
+        uuid run_id FK
+        varchar account_id
+        varchar instrument_code "ref Core: instrument"
+        decimal expected_balance
+        decimal actual_balance
+        decimal variance_amount
+    }
+
+    variance {
+        uuid id PK
+        uuid variance_id UK
+        uuid run_id FK
+        uuid snapshot_id FK
+        varchar reason "AMOUNT_MISMATCH|TIMING_DIFF"
+        varchar status "DETECTED|OPEN|RESOLVED"
+    }
+
+    dispute {
+        uuid id PK
+        uuid dispute_id UK
+        uuid variance_id FK
+        uuid run_id FK
+        varchar status "OPEN|UNDER_REVIEW|RESOLVED"
+    }
+
+    balance_assertion {
+        uuid id PK
+        uuid assertion_id UK
+        uuid run_id FK
+        varchar account_id
+        varchar instrument_code "ref Core: instrument"
+        text expression "CEL"
+        varchar status "PENDING|PASSED|FAILED|OVERRIDE"
+    }
+
+    settlement_run ||--o{ settlement_snapshot : "captures"
+    settlement_run ||--o{ variance : "detects"
+    settlement_snapshot ||--o{ variance : "has"
+    variance ||--o{ dispute : "raises"
+    settlement_run ||--o{ balance_assertion : "asserts"
+
+    %% ════════════════════════════════════
+    %% FORECASTING SERVICE
+    %% DB: meridian_forecasting
+    %% ════════════════════════════════════
+
+    forecasting_strategy {
+        uuid id PK
+        varchar tenant_id "ref Core: tenant"
+        varchar name
+        text starlark_code "Starlark"
+        int horizon_hours "1-168"
+        varchar schedule "cron expression"
+        varchar output_dataset_code "ref MI dataset"
+        varchar status "DRAFT|ACTIVE|DEPRECATED"
+    }
+
+    %% ════════════════════════════════════
+    %% CONTROL PLANE SERVICE
+    %% DB: meridian_control_plane (org_{tenant} schema)
+    %% ════════════════════════════════════
+
+    staff_user {
+        uuid id PK
+        varchar email UK
+        varchar role "admin|operator|auditor"
+        varchar status "invited|active|suspended"
+    }
+
+    api_key {
+        uuid id PK
+        uuid staff_user_id FK
+        varchar key_prefix UK "pk_slug_entropy"
+        bytea key_hash "SHA-256"
+        int rate_limit_rps "default 100"
+    }
+
+    manifest_version {
+        uuid id PK
+        int version
+        varchar config_hash
+    }
+
+    manifest_apply_job {
+        uuid id PK
+        uuid manifest_version_id FK
+        varchar status "PENDING|APPLYING|APPLIED|FAILED"
+    }
+
+    staff_user ||--o{ api_key : "has"
+    manifest_version ||--o{ manifest_apply_job : "tracked-by"
+
+    %% ════════════════════════════════════
+    %% REFERENCE DATA (supplementary tables)
+    %% Not connected to core transaction graph
+    %% ════════════════════════════════════
+
+    saga_definition {
+        uuid id PK
+        varchar name
+        int version
+        text script "Starlark"
+        varchar status "DRAFT|ACTIVE|DEPRECATED"
+        text preconditions_expression "CEL"
+        uuid successor_id "self-ref FK"
+    }
+
+    saga_execution {
+        uuid id PK
+        varchar saga_definition_name "ref RD saga"
+        int saga_definition_version
+        varchar current_step
+        varchar status
+        jsonb context_data
+    }
+
+    valuation_policy {
+        uuid id PK
+        varchar name
+        int version
+        text cel_expression "CEL"
+        varchar output_type
+        varchar lifecycle_status "INITIATED|ACTIVE|DEPRECATED"
+    }
+
+    reference_data_node {
+        uuid id PK
+        varchar code
+        uuid parent_id "self-ref FK"
+        varchar node_type
+        jsonb attributes
+    }
+
+    saga_definition }o--o| saga_definition : "successor"
+    reference_data_node }o--o| reference_data_node : "parent"
+
+    %% ════════════════════════════════════════════════
+    %% CROSS-SERVICE RELATIONSHIPS (within this group)
+    %% ════════════════════════════════════════════════
+
+    dataset_definition ||..o{ forecasting_strategy : "feeds"
+    saga_definition ||..o{ saga_execution : "defines"
+```
+
+Market Information (3), Reconciliation (5), Forecasting (1),
+Control Plane (4), Reference Data supplementary (4). These
+services connect to the core engine through thin references
+(`account_id`, `instrument_code`, `tenant_id`) annotated as
+`ref Core:` in column comments.
+
+**Cross-Service Reference Patterns:**
+
+| Reference Column | Used In | Target |
+| ----------------------- | --------------------------------- | ---------- |
+| `party_id` | account, invoice, tenant | Party |
+| `account_id` | position_log, txn_entry, PO, recon | CA / IBA |
+| `instrument_code` | position_log, IBA, recon, val feat | Ref Data |
+| `valuation_method_id` | ca/iba valuation_features | Ref Data |
+| `saga_definition_name` | saga_execution | Ref Data |
+| `dataset_code` | forecasting_strategy (in + out) | Market Info |
+| `tenant_id` | billing_run, forecasting_strategy | Tenant Mgmt |
+| `payment_order_ref` | ca_lien | Payment Ord |
+| `ledger_booking_id` | payment_order | Fin Acct |
+
+**Shared Infrastructure Tables** (omitted from diagram, present in most services):
+
+| Table            | Pattern | Purpose                            |
+| ---------------- | ------- | ---------------------------------- |
+| `event_outbox`   | Outbox  | Transactional event publishing     |
+| `audit_log`      | Audit   | Permanent change history           |
+| `audit_outbox`   | Audit   | Fallback queue (Kafka unavailable) |
 
 ## References
 
