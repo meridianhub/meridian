@@ -245,7 +245,7 @@ INVALID_ARGUMENT: validation failed: attribute 'tou_period' is required
 
 * [ADR-0005 Adapter Pattern Layer Translation](0005-adapter-pattern-layer-translation.md) -
   Establishes the Port/Adapter pattern this decision extends
-* [PRD: Market Information Management](../prd/market-information-management.md) -
+* [PRD: Market Information Management](../prd/004-market-information-management.md) -
   Service Boundaries section defines the specific application
 * [BIAN Semantic API Practitioner Guide V8.1](https://bian.org/wp-content/uploads/2024/12/BIAN-Semantic-API-Pactitioner-Guide-V8.1-FINAL.pdf) -
   Service Domain encapsulation principle

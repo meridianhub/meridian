@@ -461,4 +461,4 @@ services/utilization-metering-consumer/
 - [Kubernetes Deployment Guide](k8s/README.md)
 - [Position Keeping Service](../position-keeping/README.md)
 - [ADR-0009: Application-Level Audit Logging](../../docs/adr/0009-application-level-audit-logging.md)
-- [Universal Asset System](../../docs/prd/universal-asset-system.md)
+- [Universal Asset System](../../docs/prd/001-universal-asset-system.md)

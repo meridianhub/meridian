@@ -3,7 +3,7 @@
 **Status:** Implemented
 **Version:** 1.1
 **Task Master Tag:** `starlark-saga-orchestration` (24/24 tasks done)
-**Companion PRD:** [Starlark Saga Orchestration (Core)](./starlark-saga-orchestration-core.md)
+**Companion PRD:** [Starlark Saga Orchestration (Core)](./006-starlark-saga-orchestration-core.md)
 
 ---
 
@@ -60,7 +60,7 @@ This PRD covers:
 - **Migration Stream 9**: Migrating existing Go sagas to Starlark
 
 For core Starlark runtime, reference validation, party isolation, and saga composition,
-see the [Starlark Saga Orchestration (Core) PRD](./starlark-saga-orchestration-core.md).
+see the [Starlark Saga Orchestration (Core) PRD](./006-starlark-saga-orchestration-core.md).
 
 ---
 
@@ -1532,7 +1532,8 @@ graph TD
 
 ## 9. Links
 
-- [Starlark Saga Orchestration (Core) PRD](./starlark-saga-orchestration-core.md) - Companion PRD for runtime and core features
+- [Starlark Saga Orchestration (Core) PRD](./006-starlark-saga-orchestration-core.md) -
+  Companion PRD for runtime and core features
 - [ADR-028: Starlark Saga Orchestration with CEL Valuation](../adr/0028-starlark-saga-cel-valuation.md)
 - [ADR-014: Financial Instrument Reference Data](../adr/0014-financial-instrument-reference-data.md)
 - [go.starlark.net](https://pkg.go.dev/go.starlark.net/starlark) - Starlark Go implementation

@@ -49,11 +49,11 @@ instructions: |
 
 **Dependencies:**
 
-- [Control Plane PRD](control-plane.md) (Manifest schema,
+- [Control Plane PRD](014-control-plane.md) (Manifest schema,
   `payment_rails` field, `services/control-plane/`)
-- [Reconciliation Service PRD](reconciliation-service.md)
+- [Reconciliation Service PRD](013-reconciliation-service.md)
   (settlement snapshots, variance detection, finality)
-- [Market Data & Dynamic Pricing PRD](market-data-dynamic-pricing.md)
+- [Market Data & Dynamic Pricing PRD](016-market-data-dynamic-pricing.md)
   (forward curves, pricing signals)
 
 ---

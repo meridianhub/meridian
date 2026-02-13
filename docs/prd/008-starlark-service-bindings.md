@@ -2,7 +2,7 @@
 
 **Status:** IMPLEMENTED (2026-02-04)
 **Implementation Tag:** saga-script-versioning
-**Related PRDs:** [Starlark Typed Service Clients](./starlark-typed-service-clients.md)
+**Related PRDs:** [Starlark Typed Service Clients](./007-starlark-typed-service-clients.md)
 
 ## Table of Contents
 
@@ -1409,7 +1409,7 @@ Create a dedicated **"Saga Causation Safety"** PRD that:
 ### Prerequisites
 
 - ✅ All service clients exist and are functional (already done)
-- ✅ Starlark typed service modules completed ([PRD](./starlark-typed-service-clients.md))
+- ✅ Starlark typed service modules completed ([PRD](./007-starlark-typed-service-clients.md))
 - ✅ Saga executor framework stable
 
 ### Blocking
@@ -1441,7 +1441,7 @@ Create a dedicated **"Saga Causation Safety"** PRD that:
   - [ADR-025: Service Client Patterns](../adr/025-service-client-patterns.md) (if exists)
 
 - **Related PRDs:**
-  - [Starlark Typed Service Clients](./starlark-typed-service-clients.md) - Predecessor work
+  - [Starlark Typed Service Clients](./007-starlark-typed-service-clients.md) - Predecessor work
 
 - **Related Issues:**
   - GitHub Issue tracking handler migration (TBD)
