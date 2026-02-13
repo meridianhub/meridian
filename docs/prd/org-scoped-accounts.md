@@ -103,6 +103,8 @@ Under **Section 12 of the Gambling Act 2005**, this platform is classified as **
 | G1 | £1.5m – £3m | £1,414 | £16,053 |
 | G2 | £3m – £7.5m | £1,414 | £19,054 |
 
+**Personal Management Licences (PMLs):** £370 per key staff member. Required for specified management roles (financial planning, compliance, IT security).
+
 The F1 tier provides a viable runway to test and grow the business.
 
 ### Pool Betting Model Classification
