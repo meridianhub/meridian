@@ -182,7 +182,7 @@ The service supports a two-phase withdrawal pattern as well as direct withdrawal
 
 ### InitiateWithdrawal
 
-Creates a pending withdrawal in INITIATED status. Validates the account is active, currency
+Creates a pending withdrawal in PENDING status. Validates the account is active, currency
 matches, and amount is positive. Warns (but does not reject) if the requested amount exceeds
 the current available balance, since balance may change before execution.
 
@@ -204,6 +204,7 @@ outbox pattern (atomically updating status and publishing a `WithdrawalStatusUpd
 Executes a withdrawal immediately without prior initiation. Requires both fields.
 
 Both modes:
+
 - Validate the account is ACTIVE (rejects FROZEN or CLOSED)
 - Validate currency matches the account currency
 - Check sufficient funds via `PrepareForDebit` (considers overdraft if enabled)
@@ -227,7 +228,8 @@ Supports two query modes:
 
 **1. Single lookup** -- provide `withdrawal_id`:
 
-Returns the withdrawal matching the given reference.
+Returns the withdrawal matching the given ID. Internally, `withdrawal_id` maps to the
+withdrawal's `reference` field for lookup.
 
 **2. List by account** -- provide `account_id`:
 
@@ -341,6 +343,7 @@ erDiagram
 
 The `withdrawal` table was added in migration `20251231000002_create_withdrawal_table.sql`.
 Key design decisions:
+
 - **Optimistic locking**: `version` column incremented on each update, prevents concurrent
   modification
 - **Idempotency**: `reference` column has a unique index, preventing duplicate withdrawals
@@ -372,11 +375,11 @@ Key design decisions:
 | `TerminateLien` | Lien ID (path param) | No-op if already TERMINATED |
 | `ExecuteDeposit` | `IdempotencyKey` header | Returns existing result if key matches |
 | `InitiateWithdrawal` | `reference` field | Returns existing withdrawal if reference matches |
-| `ExecuteWithdrawal` | `IdempotencyKey` field | Returns cached result from Redis if key matches |
+| `ExecuteWithdrawal` | `idempotency_key` field | Returns cached result from Redis if key matches |
 
 **Retry Guidance:**
 
-- Always include `IdempotencyKey` header for `ExecuteDeposit` to prevent duplicate credits
+- Always include `idempotency_key` for `ExecuteDeposit` to prevent duplicate credits
 - Always include `idempotency_key` for `ExecuteWithdrawal` to prevent duplicate debits
 - `InitiateWithdrawal` uses `reference` as natural idempotency key (unique constraint in DB)
 - `InitiateLien` uses `PaymentOrderReference` as natural idempotency key (unique per payment)
