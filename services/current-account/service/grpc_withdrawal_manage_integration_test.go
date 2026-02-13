@@ -105,9 +105,12 @@ func TestUpdateWithdrawal_Integration_ValidationWarningsForUnsupportedFields(t *
 	assert.Equal(t, "WTH-UPD-002", resp.Withdrawal.WithdrawalId)
 	assert.False(t, resp.ValidationPassed, "Validation should fail due to unsupported field warnings")
 	assert.Len(t, resp.ValidationMessages, 3, "Should have 3 warnings: amount, description, reference")
-	assert.Contains(t, resp.ValidationMessages[0], "amount updates are not yet supported")
-	assert.Contains(t, resp.ValidationMessages[1], "description updates are not yet supported")
-	assert.Contains(t, resp.ValidationMessages[2], "reference updates are not yet supported")
+	// Use order-insensitive assertions: handler builds messages sequentially but
+	// asserting against the joined slice avoids coupling to insertion order.
+	allWarnings := fmt.Sprint(resp.ValidationMessages)
+	assert.Contains(t, allWarnings, "amount updates are not yet supported")
+	assert.Contains(t, allWarnings, "description updates are not yet supported")
+	assert.Contains(t, allWarnings, "reference updates are not yet supported")
 }
 
 // TestUpdateWithdrawal_Integration_CannotUpdateNonPendingWithdrawal verifies that
