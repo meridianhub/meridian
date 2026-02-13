@@ -120,15 +120,17 @@ func TestStripeEventProcessor_PreProcess(t *testing.T) {
 
 func TestStripeEventProcessor_ScheduleDunning(t *testing.T) {
 	ctx := context.Background()
+	const testTenantID = "test_tenant"
+	zsetKey := dunningRetryZSetPrefix + testTenantID
 
 	t.Run("schedules dunning for payment order", func(t *testing.T) {
 		proc, client, _ := setupTestEventProcessor(t)
 
-		err := proc.ScheduleDunning(ctx, "po-123")
+		err := proc.ScheduleDunning(ctx, testTenantID, "po-123")
 		assert.NoError(t, err)
 
-		// Verify the entry was added to the ZSET
-		members, err := client.ZRangeByScore(ctx, dunningRetryZSet, &redis.ZRangeBy{
+		// Verify the entry was added to the tenant-scoped ZSET
+		members, err := client.ZRangeByScore(ctx, zsetKey, &redis.ZRangeBy{
 			Min: "-inf",
 			Max: "+inf",
 		}).Result()
@@ -140,25 +142,32 @@ func TestStripeEventProcessor_ScheduleDunning(t *testing.T) {
 	t.Run("empty payment order ID is a no-op", func(t *testing.T) {
 		proc, client, _ := setupTestEventProcessor(t)
 
-		err := proc.ScheduleDunning(ctx, "")
+		err := proc.ScheduleDunning(ctx, testTenantID, "")
 		assert.NoError(t, err)
 
 		// Verify nothing was added to the ZSET
-		count, err := client.ZCard(ctx, dunningRetryZSet).Result()
+		count, err := client.ZCard(ctx, zsetKey).Result()
 		require.NoError(t, err)
 		assert.Equal(t, int64(0), count)
+	})
+
+	t.Run("empty tenant ID returns error", func(t *testing.T) {
+		proc, _, _ := setupTestEventProcessor(t)
+
+		err := proc.ScheduleDunning(ctx, "", "po-123")
+		assert.ErrorIs(t, err, ErrDunningMissingTenant)
 	})
 
 	t.Run("multiple dunning entries are independent", func(t *testing.T) {
 		proc, client, _ := setupTestEventProcessor(t)
 
-		err := proc.ScheduleDunning(ctx, "po-aaa")
+		err := proc.ScheduleDunning(ctx, testTenantID, "po-aaa")
 		assert.NoError(t, err)
 
-		err = proc.ScheduleDunning(ctx, "po-bbb")
+		err = proc.ScheduleDunning(ctx, testTenantID, "po-bbb")
 		assert.NoError(t, err)
 
-		count, err := client.ZCard(ctx, dunningRetryZSet).Result()
+		count, err := client.ZCard(ctx, zsetKey).Result()
 		require.NoError(t, err)
 		assert.Equal(t, int64(2), count)
 	})
@@ -168,7 +177,39 @@ func TestStripeEventProcessor_ScheduleDunning(t *testing.T) {
 
 		mr.Close()
 
-		err := proc.ScheduleDunning(ctx, "po-fail")
+		err := proc.ScheduleDunning(ctx, testTenantID, "po-fail")
 		assert.Error(t, err)
+	})
+
+	t.Run("tenant isolation between tenants", func(t *testing.T) {
+		proc, client, _ := setupTestEventProcessor(t)
+
+		const tenantA = "tenant_a"
+		const tenantB = "tenant_b"
+
+		err := proc.ScheduleDunning(ctx, tenantA, "po-a1")
+		assert.NoError(t, err)
+		err = proc.ScheduleDunning(ctx, tenantB, "po-b1")
+		assert.NoError(t, err)
+
+		// Verify tenant A's key only has tenant A's entry
+		keyA := dunningRetryZSetPrefix + tenantA
+		membersA, err := client.ZRangeByScore(ctx, keyA, &redis.ZRangeBy{
+			Min: "-inf",
+			Max: "+inf",
+		}).Result()
+		require.NoError(t, err)
+		assert.Len(t, membersA, 1)
+		assert.Equal(t, "stripe:po-a1", membersA[0])
+
+		// Verify tenant B's key only has tenant B's entry
+		keyB := dunningRetryZSetPrefix + tenantB
+		membersB, err := client.ZRangeByScore(ctx, keyB, &redis.ZRangeBy{
+			Min: "-inf",
+			Max: "+inf",
+		}).Result()
+		require.NoError(t, err)
+		assert.Len(t, membersB, 1)
+		assert.Equal(t, "stripe:po-b1", membersB[0])
 	})
 }

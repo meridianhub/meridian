@@ -26,21 +26,22 @@ import (
 type gormRunRepository struct{ db *gorm.DB }
 
 type settlementRunEntity struct {
-	ID             uuid.UUID  `gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
-	CreatedAt      time.Time  `gorm:"not null;default:now()"`
-	UpdatedAt      time.Time  `gorm:"not null;default:now()"`
-	RunID          uuid.UUID  `gorm:"column:run_id;uniqueIndex;type:uuid;not null"`
-	AccountID      string     `gorm:"column:account_id;size:34;not null"`
-	Scope          string     `gorm:"column:scope;size:20;not null"`
-	SettlementType string     `gorm:"column:settlement_type;size:20;not null"`
-	Status         string     `gorm:"column:status;size:20;not null;default:PENDING"`
-	PeriodStart    time.Time  `gorm:"column:period_start;not null"`
-	PeriodEnd      time.Time  `gorm:"column:period_end;not null"`
-	InitiatedBy    string     `gorm:"column:initiated_by;size:100;not null"`
-	CompletedAt    *time.Time `gorm:"column:completed_at"`
-	VarianceCount  int        `gorm:"column:variance_count;not null;default:0"`
-	FailureReason  string     `gorm:"column:failure_reason"`
-	Version        int64      `gorm:"column:version;not null;default:1"`
+	ID                 uuid.UUID  `gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
+	CreatedAt          time.Time  `gorm:"not null;default:now()"`
+	UpdatedAt          time.Time  `gorm:"not null;default:now()"`
+	RunID              uuid.UUID  `gorm:"column:run_id;uniqueIndex;type:uuid;not null"`
+	AccountID          string     `gorm:"column:account_id;size:34;not null"`
+	Scope              string     `gorm:"column:scope;size:20;not null"`
+	SettlementType     string     `gorm:"column:settlement_type;size:20;not null"`
+	Status             string     `gorm:"column:status;size:20;not null;default:PENDING"`
+	PeriodStart        time.Time  `gorm:"column:period_start;not null"`
+	PeriodEnd          time.Time  `gorm:"column:period_end;not null"`
+	InitiatedBy        string     `gorm:"column:initiated_by;size:100;not null"`
+	CompletedAt        *time.Time `gorm:"column:completed_at"`
+	VarianceCount      int        `gorm:"column:variance_count;not null;default:0"`
+	FailureReason      string     `gorm:"column:failure_reason"`
+	LastCompletedPhase *string    `gorm:"column:last_completed_phase;size:30"`
+	Version            int64      `gorm:"column:version;not null;default:1"`
 }
 
 func (settlementRunEntity) TableName() string { return "settlement_run" }
@@ -71,12 +72,13 @@ func (r *gormRunRepository) Update(_ context.Context, run *domain.SettlementRun)
 	result := r.db.Model(&settlementRunEntity{}).
 		Where("run_id = ? AND version = ?", entity.RunID, entity.Version-1).
 		Updates(map[string]interface{}{
-			"status":         entity.Status,
-			"completed_at":   entity.CompletedAt,
-			"variance_count": entity.VarianceCount,
-			"failure_reason": entity.FailureReason,
-			"version":        entity.Version,
-			"updated_at":     time.Now().UTC(),
+			"status":               entity.Status,
+			"completed_at":         entity.CompletedAt,
+			"variance_count":       entity.VarianceCount,
+			"failure_reason":       entity.FailureReason,
+			"last_completed_phase": entity.LastCompletedPhase,
+			"version":              entity.Version,
+			"updated_at":           time.Now().UTC(),
 		})
 	if result.Error != nil {
 		return result.Error
@@ -118,7 +120,7 @@ func (r *gormRunRepository) List(_ context.Context, filter domain.RunFilter) ([]
 }
 
 func toRunEntity(run *domain.SettlementRun) *settlementRunEntity {
-	return &settlementRunEntity{
+	e := &settlementRunEntity{
 		RunID:          run.RunID,
 		AccountID:      run.AccountID,
 		Scope:          string(run.Scope),
@@ -134,10 +136,15 @@ func toRunEntity(run *domain.SettlementRun) *settlementRunEntity {
 		CreatedAt:      run.CreatedAt,
 		UpdatedAt:      run.UpdatedAt,
 	}
+	if run.LastCompletedPhase != nil {
+		s := string(*run.LastCompletedPhase)
+		e.LastCompletedPhase = &s
+	}
+	return e
 }
 
 func toRunDomain(e *settlementRunEntity) *domain.SettlementRun {
-	return &domain.SettlementRun{
+	run := &domain.SettlementRun{
 		RunID:          e.RunID,
 		AccountID:      e.AccountID,
 		Scope:          domain.ReconciliationScope(e.Scope),
@@ -153,6 +160,11 @@ func toRunDomain(e *settlementRunEntity) *domain.SettlementRun {
 		CreatedAt:      e.CreatedAt,
 		UpdatedAt:      e.UpdatedAt,
 	}
+	if e.LastCompletedPhase != nil {
+		phase := domain.ReconciliationPhase(*e.LastCompletedPhase)
+		run.LastCompletedPhase = &phase
+	}
+	return run
 }
 
 // --- Settlement Snapshot Repository ---

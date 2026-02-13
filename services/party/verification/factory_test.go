@@ -63,7 +63,7 @@ func TestNewProvider_JumioProvider_NotImplemented(t *testing.T) {
 	assert.ErrorIs(t, err, ErrUnsupportedProvider)
 }
 
-func TestNewProvider_OnfidoProvider_NotImplemented(t *testing.T) {
+func TestNewProvider_OnfidoProvider(t *testing.T) {
 	cfg := &config.VerificationConfig{
 		Provider:       "onfido",
 		WebhookSecret:  "secret",
@@ -73,8 +73,11 @@ func TestNewProvider_OnfidoProvider_NotImplemented(t *testing.T) {
 
 	provider, err := NewProvider(cfg)
 
-	assert.Nil(t, provider)
-	assert.ErrorIs(t, err, ErrUnsupportedProvider)
+	require.NoError(t, err)
+	require.NotNil(t, provider)
+
+	_, ok := provider.(*OnfidoProvider)
+	assert.True(t, ok, "expected *OnfidoProvider type")
 }
 
 func TestNewProvider_UnknownProvider(t *testing.T) {
@@ -171,7 +174,7 @@ func TestNewProviderWithOptions_RespectsAsyncMode(t *testing.T) {
 }
 
 func TestNewProviderWithOptions_NonMockProvider_ReturnsError(t *testing.T) {
-	testCases := []string{"jumio", "onfido", "unknown"}
+	testCases := []string{"jumio", "unknown"}
 
 	for _, providerName := range testCases {
 		t.Run(providerName, func(t *testing.T) {
@@ -188,4 +191,21 @@ func TestNewProviderWithOptions_NonMockProvider_ReturnsError(t *testing.T) {
 			assert.ErrorIs(t, err, ErrUnsupportedProvider)
 		})
 	}
+}
+
+func TestNewProviderWithOptions_OnfidoProvider(t *testing.T) {
+	cfg := &config.VerificationConfig{
+		Provider:       "onfido",
+		WebhookSecret:  "secret",
+		WebhookURL:     "https://example.com/webhook",
+		ProviderConfig: map[string]string{"api_key": "key", "api_secret": "secret"},
+	}
+
+	provider, err := NewProviderWithOptions(cfg, DefaultProviderOptions())
+
+	require.NoError(t, err)
+	require.NotNil(t, provider)
+
+	_, ok := provider.(*OnfidoProvider)
+	assert.True(t, ok, "expected *OnfidoProvider type")
 }

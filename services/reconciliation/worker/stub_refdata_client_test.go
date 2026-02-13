@@ -10,9 +10,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func newTestLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+}
+
 func TestStubReferenceDataClient_ReturnsEmptyList(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	client := NewStubReferenceDataClient(logger)
+	client := NewStubReferenceDataClient(newTestLogger())
 
 	schedules, err := client.ListSettlementSchedules(context.Background())
 	require.NoError(t, err)
@@ -20,7 +23,6 @@ func TestStubReferenceDataClient_ReturnsEmptyList(t *testing.T) {
 }
 
 func TestStubReferenceDataClient_ImplementsInterface(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	var client ReferenceDataClient = NewStubReferenceDataClient(logger)
+	var client ReferenceDataClient = NewStubReferenceDataClient(newTestLogger())
 	assert.NotNil(t, client)
 }

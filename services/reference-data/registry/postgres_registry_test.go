@@ -879,29 +879,163 @@ func TestPostgresRegistry_SuccessorWriteOnce(t *testing.T) {
 	require.NoError(t, reg.CreateDraft(ctx, successor1))
 	require.NoError(t, reg.ActivateInstrument(ctx, "WRITEONCE_NEW1", 1))
 
-	successor2 := &registry.InstrumentDefinition{
-		Code:      "WRITEONCE_NEW2",
+	t.Run("deprecate with successor succeeds first time", func(t *testing.T) {
+		err := reg.DeprecateInstrument(ctx, "WRITEONCE_OLD", 1, &successor1.ID)
+		require.NoError(t, err)
+
+		result, err := reg.GetDefinition(ctx, "WRITEONCE_OLD", 1)
+		require.NoError(t, err)
+		assert.Equal(t, successor1.ID, *result.SuccessorID)
+	})
+
+	t.Run("deprecate already deprecated instrument fails", func(t *testing.T) {
+		// The instrument is already DEPRECATED, so trying to deprecate again
+		// should fail with ErrNotActive (state machine rejects DEPRECATED->DEPRECATED)
+		successor2 := &registry.InstrumentDefinition{
+			Code:      "WRITEONCE_NEW2",
+			Version:   1,
+			Dimension: registry.DimensionMonetary,
+			Precision: 2,
+		}
+		require.NoError(t, reg.CreateDraft(ctx, successor2))
+		require.NoError(t, reg.ActivateInstrument(ctx, "WRITEONCE_NEW2", 1))
+
+		err := reg.DeprecateInstrument(ctx, "WRITEONCE_OLD", 1, &successor2.ID)
+		require.ErrorIs(t, err, registry.ErrNotActive)
+	})
+}
+
+func TestPostgresRegistry_StatusStateMachine(t *testing.T) {
+	t.Run("valid transitions", func(t *testing.T) {
+		assert.NoError(t, registry.ValidateStatusTransition(registry.StatusDraft, registry.StatusActive))
+		assert.NoError(t, registry.ValidateStatusTransition(registry.StatusActive, registry.StatusDeprecated))
+	})
+
+	t.Run("invalid transitions", func(t *testing.T) {
+		// ACTIVE -> DRAFT
+		err := registry.ValidateStatusTransition(registry.StatusActive, registry.StatusDraft)
+		require.ErrorIs(t, err, registry.ErrInvalidStateTransition)
+
+		// DEPRECATED -> DRAFT
+		err = registry.ValidateStatusTransition(registry.StatusDeprecated, registry.StatusDraft)
+		require.ErrorIs(t, err, registry.ErrInvalidStateTransition)
+
+		// DEPRECATED -> ACTIVE
+		err = registry.ValidateStatusTransition(registry.StatusDeprecated, registry.StatusActive)
+		require.ErrorIs(t, err, registry.ErrInvalidStateTransition)
+
+		// DRAFT -> DEPRECATED (not allowed for instrument definitions)
+		err = registry.ValidateStatusTransition(registry.StatusDraft, registry.StatusDeprecated)
+		require.ErrorIs(t, err, registry.ErrInvalidStateTransition)
+
+		// Same status
+		err = registry.ValidateStatusTransition(registry.StatusActive, registry.StatusActive)
+		require.ErrorIs(t, err, registry.ErrInvalidStateTransition)
+	})
+
+	t.Run("IsValid", func(t *testing.T) {
+		assert.True(t, registry.StatusDraft.IsValid())
+		assert.True(t, registry.StatusActive.IsValid())
+		assert.True(t, registry.StatusDeprecated.IsValid())
+		assert.False(t, registry.Status("UNKNOWN").IsValid())
+	})
+
+	t.Run("CanTransitionTo", func(t *testing.T) {
+		assert.True(t, registry.StatusDraft.CanTransitionTo(registry.StatusActive))
+		assert.True(t, registry.StatusActive.CanTransitionTo(registry.StatusDeprecated))
+		assert.False(t, registry.StatusActive.CanTransitionTo(registry.StatusDraft))
+		assert.False(t, registry.StatusDeprecated.CanTransitionTo(registry.StatusActive))
+		assert.False(t, registry.StatusDraft.CanTransitionTo(registry.StatusDraft))
+	})
+}
+
+func TestPostgresRegistry_DeprecatedIsTerminal(t *testing.T) {
+	reg, pool := setupTestRegistry(t)
+	ctx := setupTenantContext(t, pool, "test-tenant-terminal")
+
+	// Create, activate, deprecate
+	def := &registry.InstrumentDefinition{
+		Code:      "TERMINAL1",
 		Version:   1,
 		Dimension: registry.DimensionMonetary,
 		Precision: 2,
 	}
-	require.NoError(t, reg.CreateDraft(ctx, successor2))
-	require.NoError(t, reg.ActivateInstrument(ctx, "WRITEONCE_NEW2", 1))
+	require.NoError(t, reg.CreateDraft(ctx, def))
+	require.NoError(t, reg.ActivateInstrument(ctx, "TERMINAL1", 1))
+	require.NoError(t, reg.DeprecateInstrument(ctx, "TERMINAL1", 1, nil))
 
-	t.Run("cannot change successor_id once set", func(t *testing.T) {
-		// Deprecate with first successor
-		err := reg.DeprecateInstrument(ctx, "WRITEONCE_OLD", 1, &successor1.ID)
-		require.NoError(t, err)
+	t.Run("cannot activate deprecated instrument", func(t *testing.T) {
+		err := reg.ActivateInstrument(ctx, "TERMINAL1", 1)
+		require.ErrorIs(t, err, registry.ErrNotDraft)
+	})
 
-		// Verify successor was set
-		result, err := reg.GetDefinition(ctx, "WRITEONCE_OLD", 1)
-		require.NoError(t, err)
-		assert.Equal(t, successor1.ID, *result.SuccessorID)
-
-		// Write-once is architecturally enforced: DeprecateInstrument requires
-		// status=ACTIVE, and after deprecation the status is DEPRECATED, so a
-		// second call to DeprecateInstrument will fail with ErrNotActive.
-		err = reg.DeprecateInstrument(ctx, "WRITEONCE_OLD", 1, &successor2.ID)
+	t.Run("cannot deprecate already deprecated instrument", func(t *testing.T) {
+		err := reg.DeprecateInstrument(ctx, "TERMINAL1", 1, nil)
 		require.ErrorIs(t, err, registry.ErrNotActive)
+	})
+
+	t.Run("cannot update deprecated instrument", func(t *testing.T) {
+		updates := &registry.InstrumentDefinition{
+			DisplayName: "Should fail",
+		}
+		err := reg.UpdateDefinition(ctx, "TERMINAL1", 1, updates)
+		require.ErrorIs(t, err, registry.ErrNotDraft)
+	})
+}
+
+func TestPostgresRegistry_UpdatedAtManagement(t *testing.T) {
+	reg, pool := setupTestRegistry(t)
+	ctx := setupTenantContext(t, pool, "test-tenant-timestamps")
+
+	def := &registry.InstrumentDefinition{
+		Code:      "TIMESTAMP1",
+		Version:   1,
+		Dimension: registry.DimensionMonetary,
+		Precision: 2,
+	}
+	require.NoError(t, reg.CreateDraft(ctx, def))
+
+	t.Run("updated_at advances on update", func(t *testing.T) {
+		original, err := reg.GetDefinition(ctx, "TIMESTAMP1", 1)
+		require.NoError(t, err)
+
+		time.Sleep(10 * time.Millisecond)
+
+		updates := &registry.InstrumentDefinition{
+			DisplayName: "Updated Name",
+		}
+		require.NoError(t, reg.UpdateDefinition(ctx, "TIMESTAMP1", 1, updates))
+
+		updated, err := reg.GetDefinition(ctx, "TIMESTAMP1", 1)
+		require.NoError(t, err)
+		assert.True(t, updated.UpdatedAt.After(original.UpdatedAt))
+	})
+
+	t.Run("updated_at advances on activation", func(t *testing.T) {
+		before, err := reg.GetDefinition(ctx, "TIMESTAMP1", 1)
+		require.NoError(t, err)
+
+		time.Sleep(10 * time.Millisecond)
+
+		require.NoError(t, reg.ActivateInstrument(ctx, "TIMESTAMP1", 1))
+
+		after, err := reg.GetDefinition(ctx, "TIMESTAMP1", 1)
+		require.NoError(t, err)
+		assert.True(t, after.UpdatedAt.After(before.UpdatedAt))
+		assert.NotNil(t, after.ActivatedAt)
+	})
+
+	t.Run("updated_at advances on deprecation", func(t *testing.T) {
+		before, err := reg.GetDefinition(ctx, "TIMESTAMP1", 1)
+		require.NoError(t, err)
+
+		time.Sleep(10 * time.Millisecond)
+
+		require.NoError(t, reg.DeprecateInstrument(ctx, "TIMESTAMP1", 1, nil))
+
+		after, err := reg.GetDefinition(ctx, "TIMESTAMP1", 1)
+		require.NoError(t, err)
+		assert.True(t, after.UpdatedAt.After(before.UpdatedAt))
+		assert.NotNil(t, after.DeprecatedAt)
 	})
 }

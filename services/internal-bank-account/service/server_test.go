@@ -91,6 +91,8 @@ func (m *mockRepository) ExistsByCode(_ context.Context, accountCode string) (bo
 type mockPositionKeepingClient struct {
 	balances       []*positionkeepingv1.BalanceEntry
 	err            error
+	asOf           *timestamppb.Timestamp // optional override; nil means omit as_of from response
+	asOfSet        bool                   // true when asOf was explicitly set (even to nil)
 	singleBalance  *quantityv1.InstrumentAmount
 	singleBalError error
 }
@@ -99,10 +101,14 @@ func (m *mockPositionKeepingClient) GetAccountBalances(_ context.Context, req *p
 	if m.err != nil {
 		return nil, m.err
 	}
+	asOf := timestamppb.Now()
+	if m.asOfSet {
+		asOf = m.asOf
+	}
 	return &positionkeepingv1.GetAccountBalancesResponse{
 		AccountId: req.AccountId,
 		Balances:  m.balances,
-		AsOf:      timestamppb.Now(), // Provide timestamp for balance calculation time
+		AsOf:      asOf,
 	}, nil
 }
 

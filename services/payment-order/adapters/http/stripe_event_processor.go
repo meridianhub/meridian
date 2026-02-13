@@ -14,6 +14,7 @@ import (
 var (
 	ErrNilRedisClient        = errors.New("redis client cannot be nil")
 	ErrEventAlreadyProcessed = errors.New("stripe event already processed")
+	ErrDunningMissingTenant  = errors.New("tenant ID is required for dunning scheduling")
 )
 
 // Stripe event processor constants.
@@ -24,9 +25,10 @@ const (
 	// processedWebhookTTL is how long processed event IDs are retained in Redis (48 hours).
 	processedWebhookTTL = 48 * time.Hour
 
-	// dunningRetryZSet is the Redis sorted set key for dunning retry scheduling.
-	// This matches the key used by DunningWorker.
-	dunningRetryZSet = "dunning:retries"
+	// dunningRetryZSetPrefix is the Redis sorted set key prefix for dunning retry scheduling.
+	// The full key is "dunning:retries:{tenantID}" for tenant isolation.
+	// This matches the key pattern used by DunningWorker.
+	dunningRetryZSetPrefix = "dunning:retries:"
 
 	// defaultDunningDelay is the default delay before the first dunning retry.
 	defaultDunningDelay = 24 * time.Hour
@@ -99,13 +101,18 @@ func (p *StripeEventProcessor) PreProcess(ctx context.Context, eventID string) e
 	return nil
 }
 
-// ScheduleDunning adds a payment order to the dunning retry sorted set.
+// ScheduleDunning adds a payment order to the tenant-scoped dunning retry sorted set.
 // Called when a payment_intent.payment_failed event is received.
 // The dunning worker will pick up the entry and trigger escalation.
-func (p *StripeEventProcessor) ScheduleDunning(ctx context.Context, paymentOrderID string) error {
+func (p *StripeEventProcessor) ScheduleDunning(ctx context.Context, tenantID, paymentOrderID string) error {
 	if paymentOrderID == "" {
 		p.logger.Warn("cannot schedule dunning: empty payment order ID")
 		return nil
+	}
+	if tenantID == "" {
+		p.logger.Error("cannot schedule dunning: empty tenant ID",
+			"payment_order_id", paymentOrderID)
+		return ErrDunningMissingTenant
 	}
 
 	dueAt := time.Now().Add(defaultDunningDelay)
@@ -114,16 +121,19 @@ func (p *StripeEventProcessor) ScheduleDunning(ctx context.Context, paymentOrder
 		Member: fmt.Sprintf("stripe:%s", paymentOrderID),
 	}
 
-	err := p.redis.ZAdd(ctx, dunningRetryZSet, member).Err()
+	key := dunningRetryZSetPrefix + tenantID
+	err := p.redis.ZAdd(ctx, key, member).Err()
 	if err != nil {
 		p.logger.Error("failed to schedule dunning retry",
 			"payment_order_id", paymentOrderID,
+			"tenant_id", tenantID,
 			"error", err)
 		return fmt.Errorf("failed to schedule dunning retry: %w", err)
 	}
 
 	p.logger.Info("dunning retry scheduled for failed stripe payment",
 		"payment_order_id", paymentOrderID,
+		"tenant_id", tenantID,
 		"due_at", dueAt)
 
 	return nil

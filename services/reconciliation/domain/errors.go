@@ -45,4 +45,6 @@ var (
 	ErrRunNotCompleted = errors.New("settlement run must be in COMPLETED state to finalize")
 	// ErrPositionLockFailed is returned when the position lock request to PK fails after retries.
 	ErrPositionLockFailed = errors.New("failed to acquire position lock")
+	// ErrEmptyOverrideReason is returned when override reason is empty.
+	ErrEmptyOverrideReason = errors.New("override reason cannot be empty")
 )
