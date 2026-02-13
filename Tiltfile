@@ -477,6 +477,7 @@ k8s_resource(
 #   - Tenant:               50056
 #   - InternalBankAccount:  50057
 #   - MarketInformation:    50058
+#   - ReferenceData:        50059
 #   - Reconciliation:       50060
 #   - Forecasting:          50061
 #   - Gateway (HTTP):       8080
@@ -860,6 +861,7 @@ Microservices:
   • Tenant                 → localhost:50056 (gRPC)
   • Internal-Bank-Account  → localhost:50057 (gRPC)
   • Market-Information     → localhost:50058 (gRPC)
+  • Reference-Data         → localhost:50059 (gRPC)
   • Reconciliation         → localhost:50060 (gRPC)
   • Forecasting            → localhost:50061 (gRPC)
 
