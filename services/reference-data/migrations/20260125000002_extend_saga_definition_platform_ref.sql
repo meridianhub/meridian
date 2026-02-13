@@ -29,11 +29,6 @@ ALTER TABLE "saga_definition"
   ADD CONSTRAINT "chk_saga_definition_platform_or_custom"
   CHECK (NOT ("platform_ref" IS NOT NULL AND "script" != ''));
 
--- Add index for efficient lookups of sagas by platform reference
--- Used for: "Which tenant sagas reference this platform saga?"
-CREATE INDEX "idx_saga_definition_platform_ref" ON "saga_definition" ("platform_ref")
-  WHERE "platform_ref" IS NOT NULL;
-
 -- Comment on new columns for clarity
 COMMENT ON COLUMN "saga_definition"."platform_ref" IS
   'Optional FK to public.platform_saga_definition. When set, this saga inherits its script from the platform template.';
