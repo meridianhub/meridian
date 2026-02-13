@@ -534,3 +534,19 @@ func TestTimeoutHandler_ProviderReturnsManualReview(t *testing.T) {
 	assert.NotNil(t, updated[0].Reason)
 	assert.Equal(t, "Needs human review", *updated[0].Reason)
 }
+
+func TestTimeoutHandler_NilRepoReturnsError(t *testing.T) {
+	_, err := NewTimeoutHandler(TimeoutHandlerConfig{
+		VerificationRepo: nil,
+		Provider:         &statusCheckProvider{},
+	})
+	assert.ErrorIs(t, err, ErrTimeoutRepoNil)
+}
+
+func TestTimeoutHandler_NilProviderReturnsError(t *testing.T) {
+	_, err := NewTimeoutHandler(TimeoutHandlerConfig{
+		VerificationRepo: &mockTimeoutRepo{},
+		Provider:         nil,
+	})
+	assert.ErrorIs(t, err, ErrTimeoutProvNil)
+}
