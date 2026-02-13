@@ -5,9 +5,7 @@
 -- NULL means no retry has been attempted yet.
 ALTER TABLE "billing_run" ADD COLUMN "last_retry_at" timestamptz NULL;
 
--- Index for finding billing runs that need dunning retry.
--- Queries: "find FAILED runs with dunning_level < 4 ordered by last retry time"
-CREATE INDEX "idx_billing_run_dunning" ON "billing_run" ("status", "dunning_level", "last_retry_at")
-    WHERE status = 'FAILED' AND dunning_level < 4;
+-- NOTE: Partial index for dunning retry deferred to 20260211000002 because CockroachDB
+-- cannot create a partial index referencing a column added in the same transaction.
 
 COMMENT ON COLUMN "billing_run"."last_retry_at" IS 'Timestamp of the last dunning retry attempt. NULL if no retry has been scheduled.';

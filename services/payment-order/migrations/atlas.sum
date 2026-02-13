@@ -1,9 +1,11 @@
-h1:1Cby4ckMRNWlbfAfl+0V34EiQN3B7N4vNhMA78X3cIE=
+h1:HFE24LTI0kOGzbVg1A+ilfa4ru+fq2AtBA8s/vqhETk=
 20251216000001_initial.sql h1:9Pt9iC/k1YkmfjyO/F0ioNbPswzzgCP2aHtFlFHnSMY=
 20251217000001_audit_system.sql h1:YD9HdFm+NRTihCM/PBU7EYEmdttWjvGPCIE408A8HFg=
 20251223000001_fix_audit_schema_compatibility.sql h1:QxqR4DwdQ5cNXHCxTvtHgQmhSnD8xptkoFnxNcZ5ehY=
-20260123000001_bucket_aware_solvency.sql h1:fnEeQa7ezvAKV/Xja8l9/Btz68+e9raPJQIuHoK1bxw=
-20260204000001_create_event_outbox.sql h1:QvPBgr/Z0FpRT7kR0huU7R4GYD7xzpBxlT4rdjS2c/g=
-20260210000001_billing.sql h1:E/Bg1NLhonN7hCHEL5fyrAYMmfoBQRTKzlvCSiB9kTA=
-20260211000001_billing_dunning.sql h1:nxy+LNCaGfAqsXSlugNsl9pVctGJ7XukG2+RXB2Xe9Y=
-20260212000001_saga_executions.sql h1:k7h82QCBS/M8a//FAdgB/nZzHC4L3Ybww5Cq/XPWEmY=
+20260123000001_bucket_aware_solvency.sql h1:2Slt0dGRQKsnjjjlVqufz0aWyyUWJXR0btVhrx15wko=
+20260123000002_bucket_id_index.sql h1:8/dW/zb6NiouuwULdPAHB383i/RzV8p+nZwR669bSuk=
+20260204000001_create_event_outbox.sql h1:tgMtW+VU1/HNy4rCIrfi34TtVNFtj4yHCzsdN/xkB9c=
+20260210000001_billing.sql h1:4AAk7TRw3oRH9ESxaYrYlpQ9YrjC+Cz5BNF+NoW2sAo=
+20260211000001_billing_dunning.sql h1:TlBoH4yyVk2eJ5fDxNxUx2qDBoANkiP6SBIFDAu6nkE=
+20260211000002_billing_dunning_index.sql h1:6cHeAxZHCdmKuN463rzokl10thO8ZRhmYU532Hvn+8U=
+20260212000001_saga_executions.sql h1:5lIitWin7Ka3BcEuTwD1gmOGD1/x/IrmhmM9gJoRtj0=
