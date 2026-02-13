@@ -33,7 +33,7 @@ instructions: |
 
 **Related PRDs:**
 
-- [Reconciliation gRPC Wiring](reconciliation-grpc-wiring.md) -
+- [Reconciliation gRPC Wiring](017-reconciliation-grpc-wiring.md) -
   Appendix: Cross-Service Unimplemented RPC Audit (source of this work)
 
 ---

@@ -853,10 +853,10 @@ data corruption could occur.
 
 ### Implementation PRDs (Parallel Work Streams)
 
-* [PRD: Starlark Saga Orchestration (Core)](../prd/starlark-saga-orchestration-core.md) - Runtime,
+* [PRD: Starlark Saga Orchestration (Core)](../prd/006-starlark-saga-orchestration-core.md) - Runtime,
   builtins, party isolation, composition (Streams 1-6)
-* [PRD: Starlark Service Bindings](../prd/starlark-service-bindings.md) - Real service integration via gRPC
-* [PRD: Durable Execution Engine](../prd/durable-execution-engine.md) - Persistence, replay,
+* [PRD: Starlark Service Bindings](../prd/008-starlark-service-bindings.md) - Real service integration via gRPC
+* [PRD: Durable Execution Engine](../prd/005-durable-execution-engine.md) - Persistence, replay,
   async wait, hot-fixing (Streams 7-9)
 
 ### Implementation Guides

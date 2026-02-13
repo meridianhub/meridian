@@ -30,54 +30,54 @@ stateDiagram-v2
 
 | PRD | Task Master Tag | Tasks |
 |-----|-----------------|-------|
-| [Codebase Health Audit](codebase-health-audit.md) | `codebase-health-audit` | 22/22 done |
-| [Durable Execution Engine](durable-execution-engine.md) | `starlark-saga-orchestration` | 24/24 done |
-| [Internal Bank Account](internal-bank-account.md) | `internal-bank-account` | 33/33 done |
-| [Market Information Management](market-information-management.md) | `market-information-management` | 17/18 done, 1 cancelled |
-| [Market Data & Dynamic Pricing](market-data-dynamic-pricing.md) | `market-data-dynamic-pricing` | 12/12 done |
-| [Production Readiness Review](production-readiness-review.md) | `production-readiness` | 10/10 done |
-| [Reconciliation Service](reconciliation-service.md) | `reconciliation-service-completed-2026-02-12` | 24/24 done |
-| [Reconciliation gRPC Wiring](reconciliation-grpc-wiring.md) | `reconciliation-service-completed-2026-02-12` (tasks 17-23) | Included in reconciliation-service completion |
-| [Starlark Saga Orchestration (Core)](starlark-saga-orchestration-core.md) | `starlark-saga-orchestration` | 24/24 done |
-| [Starlark Typed Service Clients](starlark-typed-service-clients.md) | `starlark-typed-clients` | 10/10 done |
-| [Stripe Connect](stripe-connect.md) | `stripe-connect` | 12/12 done |
-| [Universal Asset System](universal-asset-system.md) | `universal-asset-system` | 36/36 done |
-| [Starlark Service Bindings](starlark-service-bindings.md) | N/A (tracked across other tags) | Implemented 2026-02-04 |
-| [Starlark Testing Framework](starlark-testing-framework.md) | N/A (tracked across other tags) | Implemented 2026-02-06 |
-| [Valuation Service](valuation-service.md) | `valuation-engine` | 14/14 done |
+| [Codebase Health Audit](012-codebase-health-audit.md) | `codebase-health-audit` | 22/22 done |
+| [Durable Execution Engine](005-durable-execution-engine.md) | `starlark-saga-orchestration` | 24/24 done |
+| [Internal Bank Account](002-internal-bank-account.md) | `internal-bank-account` | 33/33 done |
+| [Market Information Management](004-market-information-management.md) | `market-information-management` | 17/18 done, 1 cancelled |
+| [Market Data & Dynamic Pricing](016-market-data-dynamic-pricing.md) | `market-data-dynamic-pricing` | 12/12 done |
+| [Production Readiness Review](009-production-readiness-review.md) | `production-readiness` | 10/10 done |
+| [Reconciliation Service](013-reconciliation-service.md) | `reconciliation-service-completed-2026-02-12` | 24/24 done |
+| [Reconciliation gRPC Wiring](017-reconciliation-grpc-wiring.md) | `reconciliation-service-completed-2026-02-12` (tasks 17-23) | Included in reconciliation-service completion |
+| [Starlark Saga Orchestration (Core)](006-starlark-saga-orchestration-core.md) | `starlark-saga-orchestration` | 24/24 done |
+| [Starlark Typed Service Clients](007-starlark-typed-service-clients.md) | `starlark-typed-clients` | 10/10 done |
+| [Stripe Connect](015-stripe-connect.md) | `stripe-connect` | 12/12 done |
+| [Universal Asset System](001-universal-asset-system.md) | `universal-asset-system` | 36/36 done |
+| [Starlark Service Bindings](008-starlark-service-bindings.md) | N/A (tracked across other tags) | Implemented 2026-02-04 |
+| [Starlark Testing Framework](010-starlark-testing-framework.md) | N/A (tracked across other tags) | Implemented 2026-02-06 |
+| [Valuation Service](011-valuation-service.md) | `valuation-engine` | 14/14 done |
 
 #### Paused (Deferred Items Remain)
 
 | PRD | Task Master Tag | Tasks | Deferred |
 |-----|-----------------|-------|----------|
-| [Control Plane](control-plane.md) | `control-plane-completed-2026-02-10` | 12/13 done | 1 deferred |
+| [Control Plane](014-control-plane.md) | `control-plane-completed-2026-02-10` | 12/13 done | 1 deferred |
 
 #### In Progress
 
 | PRD | Task Master Tag | Tasks |
 |-----|-----------------|-------|
-| [Platform Scheduler](platform-scheduler.md) | `platform-scheduler` | 3/10 done, 1 review, 6 pending |
+| [Platform Scheduler](021-platform-scheduler.md) | `platform-scheduler` | 3/10 done, 1 review, 6 pending |
 
 #### Near Completion
 
 | PRD | Task Master Tag | Tasks | Remaining |
 |-----|-----------------|-------|-----------|
-| [Stripe Connect Wiring](stripe-connect.md) | `stripe-connect-wiring` | 9/10 done | Task 10: E2E integration test (in-progress) |
-| [Reconciliation Phase 2](reconciliation-service.md) | `reconciliation-service-phase2` | 9/10 done | Task 10: E2E test suite (review) |
+| [Stripe Connect Wiring](015-stripe-connect.md) | `stripe-connect-wiring` | 9/10 done | Task 10: E2E integration test (in-progress) |
+| [Reconciliation Phase 2](013-reconciliation-service.md) | `reconciliation-service-phase2` | 9/10 done | Task 10: E2E test suite (review) |
 
 #### Planned (Task Master Tags Created)
 
 | PRD | Task Master Tag | Description |
 |-----|-----------------|-------------|
-| [Current Account Withdrawal Persistence](current-account-withdrawal-persistence.md) | `account-service-wiring` | Wire withdrawal-by-ID gRPC handlers in current-account service |
-| [Internal Bank Account - Position Keeping Client](internal-bank-account-position-keeping-client.md) | `account-service-wiring` | Wire Position Keeping gRPC client in internal-bank-account service |
-| [Party KYC/AML Provider Integration](party-kyc-aml-provider-integration.md) | `party-kyc-aml` | External KYC/AML provider adapter for production party onboarding |
+| [Current Account Withdrawal Persistence](018-current-account-withdrawal-persistence.md) | `account-service-wiring` | Wire withdrawal-by-ID gRPC handlers in current-account service |
+| [Internal Bank Account - Position Keeping Client](019-internal-bank-account-position-keeping-client.md) | `account-service-wiring` | Wire Position Keeping gRPC client in internal-bank-account service |
+| [Party KYC/AML Provider Integration](020-party-kyc-aml-provider-integration.md) | `party-kyc-aml` | External KYC/AML provider adapter for production party onboarding |
 
 #### Not Started
 
 | PRD | Description |
 |-----|-------------|
-| [Meridian Edge](meridian-edge.md) | Embedded modular monolith for IoT devices and browser (WASM) |
+| [Meridian Edge](003-meridian-edge.md) | Embedded modular monolith for IoT devices and browser (WASM) |
 
 ### Task Master PRDs (`.taskmaster/docs/`)
 
@@ -194,44 +194,44 @@ material.
 
 ### Core Platform
 
-- [Universal Asset System](universal-asset-system.md) - Multi-asset support with dimensional safety
-- [Internal Bank Account](internal-bank-account.md) - BIAN service for clearing, nostro/vostro accounts
-- [Market Information Management](market-information-management.md) - BIAN service for market data and pricing
-- [Starlark Typed Service Clients](starlark-typed-service-clients.md) - Type-safe service handlers for saga orchestration
-- [Valuation Service](valuation-service.md) - BIAN-native multi-asset valuation engine
+- [Universal Asset System](001-universal-asset-system.md) - Multi-asset support with dimensional safety
+- [Internal Bank Account](002-internal-bank-account.md) - BIAN service for clearing, nostro/vostro accounts
+- [Market Information Management](004-market-information-management.md) - BIAN service for market data and pricing
+- [Starlark Typed Service Clients](007-starlark-typed-service-clients.md) - Type-safe service handlers for saga orchestration
+- [Valuation Service](011-valuation-service.md) - BIAN-native multi-asset valuation engine
 
 ### Execution Engine
 
-- [Starlark Saga Orchestration (Core)](starlark-saga-orchestration-core.md) - Runtime-configurable saga definitions
-- [Durable Execution Engine](durable-execution-engine.md) - Resilience layer for saga execution
-- [Starlark Service Bindings](starlark-service-bindings.md) - Service binding layer for Starlark saga scripts
-- [Starlark Testing Framework](starlark-testing-framework.md) - Auto-validate Starlark scripts at upload time
+- [Starlark Saga Orchestration (Core)](006-starlark-saga-orchestration-core.md) - Runtime-configurable saga definitions
+- [Durable Execution Engine](005-durable-execution-engine.md) - Resilience layer for saga execution
+- [Starlark Service Bindings](008-starlark-service-bindings.md) - Service binding layer for Starlark saga scripts
+- [Starlark Testing Framework](010-starlark-testing-framework.md) - Auto-validate Starlark scripts at upload time
 
 ### Settlement & Reconciliation
 
-- [Reconciliation Service](reconciliation-service.md) - BIAN-native settlement lifecycle and variance detection
-- [Stripe Connect](stripe-connect.md) - Payment-reconciliation-settlement loop with Stripe
-- [Reconciliation gRPC Wiring](reconciliation-grpc-wiring.md) - Wire reconciliation RPCs to service layer
+- [Reconciliation Service](013-reconciliation-service.md) - BIAN-native settlement lifecycle and variance detection
+- [Stripe Connect](015-stripe-connect.md) - Payment-reconciliation-settlement loop with Stripe
+- [Reconciliation gRPC Wiring](017-reconciliation-grpc-wiring.md) - Wire reconciliation RPCs to service layer
 
 ### Market Data & Pricing
 
-- [Market Data & Dynamic Pricing](market-data-dynamic-pricing.md) - Hierarchical reference data and Starlark-based forecasting
+- [Market Data & Dynamic Pricing](016-market-data-dynamic-pricing.md) - Hierarchical reference data and Starlark-based forecasting
 
 ### Operations & SaaS
 
-- [Control Plane](control-plane.md) - SaaS operations layer for manifest management
-- [Codebase Health Audit](codebase-health-audit.md) - Remediation for documentation, CI/CD, and code hygiene
-- [Production Readiness Review](production-readiness-review.md) - Audit and remediation for production gaps
+- [Control Plane](014-control-plane.md) - SaaS operations layer for manifest management
+- [Codebase Health Audit](012-codebase-health-audit.md) - Remediation for documentation, CI/CD, and code hygiene
+- [Production Readiness Review](009-production-readiness-review.md) - Audit and remediation for production gaps
 
 ### Service Wiring (Micro-PRDs)
 
-- [Current Account Withdrawal Persistence](current-account-withdrawal-persistence.md) - Wire withdrawal-by-ID gRPC handlers
-- [IBA - Position Keeping Client](internal-bank-account-position-keeping-client.md) - Wire PK gRPC client in IBA service
-- [Party KYC/AML Provider Integration](party-kyc-aml-provider-integration.md) - External KYC/AML provider adapter
+- [Current Account Withdrawal Persistence](018-current-account-withdrawal-persistence.md) - Wire withdrawal-by-ID gRPC handlers
+- [IBA - Position Keeping Client](019-internal-bank-account-position-keeping-client.md) - Wire PK gRPC client in IBA service
+- [Party KYC/AML Provider Integration](020-party-kyc-aml-provider-integration.md) - External KYC/AML provider adapter
 
 ### Deployment Targets
 
-- [Meridian Edge](meridian-edge.md) - Embedded modular monolith for IoT devices and browser (WASM)
+- [Meridian Edge](003-meridian-edge.md) - Embedded modular monolith for IoT devices and browser (WASM)
 
 ## How PRD Skills Work
 
@@ -257,7 +257,7 @@ Claude Code loads PRDs when:
 
 ## Creating New PRDs
 
-1. Create a new markdown file with descriptive name (e.g., `feature-name.md`)
+1. Create a new markdown file with the next available 3-digit prefix (e.g., `022-feature-name.md`)
 2. Add YAML frontmatter with:
    - `name`: Unique identifier (e.g., `prd-feature-name`)
    - `description`: One-line summary

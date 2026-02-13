@@ -2800,9 +2800,9 @@ to be reproduced exactly.
 - [ADR-0028: Starlark Saga Orchestration with CEL Valuation](../adr/0028-starlark-saga-cel-valuation.md)
 - [ADR-0013: Generic Asset Quantity Types](../adr/0013-generic-asset-quantity-types.md)
 - [ADR-0014: Financial Instrument Reference Data](../adr/0014-financial-instrument-reference-data.md)
-- [PRD: Universal Asset System](universal-asset-system.md)
-- [PRD: Market Information Management](market-information-management.md)
-- [PRD: Starlark Saga Orchestration Core](starlark-saga-orchestration-core.md)
+- [PRD: Universal Asset System](001-universal-asset-system.md)
+- [PRD: Market Information Management](004-market-information-management.md)
+- [PRD: Starlark Saga Orchestration Core](006-starlark-saga-orchestration-core.md)
 
 ## 12. Comparison to Standalone Service Approach
 

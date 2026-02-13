@@ -5,7 +5,7 @@
 **Author:** Architecture Team
 **Task Master Tag:** `starlark-saga-orchestration` (24/24 tasks done)
 **ADR Reference:** [ADR-028](../adr/0028-starlark-saga-cel-valuation.md)
-**Companion PRD:** [Durable Execution Engine](./durable-execution-engine.md)
+**Companion PRD:** [Durable Execution Engine](./005-durable-execution-engine.md)
 
 ---
 
@@ -2095,7 +2095,7 @@ For tenant communication:
 
 - [ADR-028: Starlark Saga Orchestration with CEL Valuation](../adr/0028-starlark-saga-cel-valuation.md)
 - [ADR-014: Financial Instrument Reference Data](../adr/0014-financial-instrument-reference-data.md)
-- [Companion PRD: Durable Execution Engine](./durable-execution-engine.md) - Streams 7-9
+- [Companion PRD: Durable Execution Engine](./005-durable-execution-engine.md) - Streams 7-9
 - [go.starlark.net](https://pkg.go.dev/go.starlark.net/starlark) - Starlark Go implementation
 - [Starlark Language Spec](https://github.com/bazelbuild/starlark/blob/master/spec.md)
 - [google/cel-go](https://github.com/google/cel-go) - CEL Go implementation

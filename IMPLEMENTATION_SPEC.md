@@ -333,7 +333,7 @@ var (
 ## References
 
 - ADR: `docs/adr/0028-starlark-saga-cel-valuation.md`
-- PRD: `docs/prd/valuation-service.md`
+- PRD: `docs/prd/011-valuation-service.md`
 - CEL Compiler: `services/reference-data/cel/compiler.go`
 - Starlark Runner: `shared/pkg/saga/starlark_runner.go`
 - Saga Models: `shared/pkg/saga/models.go`

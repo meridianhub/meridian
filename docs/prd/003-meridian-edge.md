@@ -441,7 +441,7 @@ defers valuation until time sync is restored. Measurements are tagged as "pendin
   Service boundaries that we're collapsing
 - [ADR-0005: Adapter Pattern for Layer Translation](../adr/0005-adapter-pattern-layer-translation.md) -
   The pattern that enables this swap
-- [Universal Asset System PRD](universal-asset-system.md) - Multi-asset support that Edge inherits
+- [Universal Asset System PRD](001-universal-asset-system.md) - Multi-asset support that Edge inherits
 
 ## 12. Conclusion
 
