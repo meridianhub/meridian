@@ -815,6 +815,16 @@ local_resource(
   trigger_mode=TRIGGER_MODE_MANUAL,  # Can be re-run manually via 'tilt trigger keycloak-setup'
 )
 
+# GetBalance smoke test - manual trigger for verifying balance query flow
+local_resource(
+  'smoke-test-get-balance',
+  cmd='./scripts/smoke-test-get-balance.sh',
+  resource_deps=['internal-bank-account', 'position-keeping'],
+  labels=['test'],
+  auto_init=False,  # Run manually with 'tilt trigger smoke-test-get-balance'
+  trigger_mode=TRIGGER_MODE_MANUAL,
+)
+
 # =============================================================================
 # UI Configuration
 # =============================================================================

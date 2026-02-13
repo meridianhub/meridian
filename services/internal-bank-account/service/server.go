@@ -596,7 +596,12 @@ func (s *Service) GetBalance(ctx context.Context, req *pb.GetBalanceRequest) (*p
 		return nil, status.Errorf(codes.FailedPrecondition, "account not active: %s", string(account.Status()))
 	}
 
-	// Position Keeping client must be configured for balance queries
+	// Position Keeping client must be configured for balance queries.
+	// Decision: KEEP this nil guard (see ADR-0031). Rationale:
+	//   - Provides explicit error message instead of nil pointer panic
+	//   - Supports constructors that omit PK client (NewService, NewServiceWithValuationFeatures)
+	//   - Zero performance cost (single pointer comparison)
+	//   - Future refactoring may make PK optional for other balance sources
 	if s.positionKeepingClient == nil {
 		operationStatus = operationStatusFailed
 		return nil, status.Error(codes.Unimplemented, "position keeping service not configured")
