@@ -48,6 +48,10 @@ type CronSchedulerConfig struct {
 	ShutdownTimeout time.Duration
 	// ExecutionTimeout is the maximum time a single job execution can take.
 	ExecutionTimeout time.Duration
+	// MaxCatchUpAge is the maximum age of missed cron windows to re-execute on startup.
+	// Windows older than this are recorded as MISSED but not executed.
+	// Default: 1 hour.
+	MaxCatchUpAge time.Duration
 }
 
 func (c CronSchedulerConfig) withDefaults() CronSchedulerConfig {
@@ -62,6 +66,9 @@ func (c CronSchedulerConfig) withDefaults() CronSchedulerConfig {
 	}
 	if c.ExecutionTimeout <= 0 {
 		c.ExecutionTimeout = 5 * time.Minute
+	}
+	if c.MaxCatchUpAge <= 0 {
+		c.MaxCatchUpAge = time.Hour
 	}
 	return c
 }
@@ -79,6 +86,7 @@ type CronScheduler struct {
 	logger    *slog.Logger
 
 	cron      *cron.Cron
+	parser    cron.Parser
 	mu        sync.Mutex
 	entryIDs  map[string]cron.EntryID
 	schedules map[string]Schedule
@@ -99,11 +107,11 @@ func NewCronScheduler(
 		logger = slog.Default()
 	}
 
+	defaultParser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+
 	cronRunner := cron.New(
 		cron.WithLocation(time.UTC),
-		cron.WithParser(cron.NewParser(
-			cron.Minute|cron.Hour|cron.Dom|cron.Month|cron.Dow,
-		)),
+		cron.WithParser(defaultParser),
 	)
 
 	s := &CronScheduler{
@@ -114,6 +122,7 @@ func NewCronScheduler(
 		config:    config,
 		logger:    logger.With("component", config.Name),
 		cron:      cronRunner,
+		parser:    defaultParser,
 		entryIDs:  make(map[string]cron.EntryID),
 		schedules: make(map[string]Schedule),
 	}
@@ -136,10 +145,20 @@ func WithCronExecutionStore(store ExecutionStore) CronSchedulerOption {
 }
 
 // WithCronRunner replaces the default cron runner (e.g. to inject a
-// seconds-level parser for faster tests).
+// seconds-level parser for faster tests). When using a custom runner with a
+// different parser, also use WithCronParser so that catch-up logic can parse
+// cron expressions consistently.
 func WithCronRunner(c *cron.Cron) CronSchedulerOption {
 	return func(s *CronScheduler) {
 		s.cron = c
+	}
+}
+
+// WithCronParser overrides the cron expression parser used by catch-up logic.
+// This must match the parser configured on the cron runner.
+func WithCronParser(p cron.Parser) CronSchedulerOption {
+	return func(s *CronScheduler) {
+		s.parser = p
 	}
 }
 
@@ -155,6 +174,9 @@ func (s *CronScheduler) Start(ctx context.Context) error {
 		if err := s.refreshSchedules(workCtx); err != nil {
 			s.logger.Error("failed to load initial schedules", "error", err)
 		}
+
+		// Run catch-up for missed windows before starting live cron
+		s.runCatchUp(workCtx)
 
 		s.cron.Start()
 		defer func() {
