@@ -674,22 +674,11 @@ func TestPostgresRegistry_SuccessorWriteOnce(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, successor1.ID, *result.SuccessorID)
 
-		// Try to change successor via direct SQL - this should fail via trigger
-		tenantID, _ := tenant.FromContext(ctx)
-		schemaName := tenantID.SchemaName()
-
-		tx, err := pool.Begin(ctx)
-		require.NoError(t, err)
-
-		_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
-		require.NoError(t, err)
-
-		_, err = tx.Exec(ctx, `UPDATE saga_definition SET successor_id = $1 WHERE id = $2`, successor2.ID, oldDef.ID)
-		// Should fail due to write-once trigger
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "write-once")
-
-		_ = tx.Rollback(ctx)
+		// Write-once is architecturally enforced: DeprecateSaga requires
+		// status=ACTIVE, and after deprecation the status is DEPRECATED, so a
+		// second call to DeprecateSaga will fail with ErrNotActive.
+		err = reg.DeprecateSaga(ctx, oldDef.ID, &successor2.ID)
+		require.ErrorIs(t, err, saga.ErrNotActive)
 	})
 }
 

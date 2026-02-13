@@ -177,25 +177,8 @@ func TestSagaMigration_AppliesCleanly(t *testing.T) {
 		assert.Contains(t, columns, expected, "missing column: %s", expected)
 	}
 
-	// Verify trigger function exists
-	var triggerFuncName string
-	err = tc.pool.QueryRow(ctx, `
-		SELECT routine_name
-		FROM information_schema.routines
-		WHERE routine_name = 'enforce_saga_lifecycle'
-	`).Scan(&triggerFuncName)
-	require.NoError(t, err)
-	assert.Equal(t, "enforce_saga_lifecycle", triggerFuncName)
-
-	// Verify trigger exists
-	var triggerName string
-	err = tc.pool.QueryRow(ctx, `
-		SELECT trigger_name
-		FROM information_schema.triggers
-		WHERE trigger_name = 'trg_enforce_saga_lifecycle'
-	`).Scan(&triggerName)
-	require.NoError(t, err)
-	assert.Equal(t, "trg_enforce_saga_lifecycle", triggerName)
+	// NOTE: Lifecycle triggers removed for CockroachDB compatibility.
+	// Enforcement now handled at Go application layer.
 }
 
 func TestSagaMigration_ReferenceTableAppliesCleanly(t *testing.T) {
@@ -473,206 +456,17 @@ func TestSagaMigration_LifecycleTrigger_DraftAllowsEdits(t *testing.T) {
 	}
 }
 
-func TestSagaMigration_LifecycleTrigger_ActiveBlocksScriptChanges(t *testing.T) {
+// NOTE: TestSagaMigration_LifecycleTrigger_ActiveBlocksScriptChanges removed.
+// Script immutability is now enforced at the Go application layer.
+
+// NOTE: TestSagaMigration_LifecycleTrigger_StatusTransitions removed.
+// Status transition enforcement is now handled at the Go application layer.
+
+func TestSagaMigration_TimestampDefaults(t *testing.T) {
 	tc := setupSagaTestContainer(t)
 	defer tc.cleanup(t)
 
 	ctx := context.Background()
-
-	// Insert ACTIVE sagas for testing immutable fields
-	blockedFields := []struct {
-		name       string
-		column     string
-		initialVal string
-		newVal     string
-	}{
-		{
-			name:       "script",
-			column:     "script",
-			initialVal: "original_script",
-			newVal:     "modified_script",
-		},
-		{
-			name:       "preconditions_expression",
-			column:     "preconditions_expression",
-			initialVal: "original_precondition",
-			newVal:     "modified_precondition",
-		},
-	}
-
-	for i, tt := range blockedFields {
-		t.Run("ACTIVE blocks "+tt.name, func(t *testing.T) {
-			// Insert ACTIVE saga
-			id := uuid.New()
-			name := "ACTIVE_BLOCKED_" + string(rune('A'+i))
-			_, err := tc.pool.Exec(ctx, `
-				INSERT INTO saga_definition (id, name, version, script, status, preconditions_expression, activated_at)
-				VALUES ($1, $2, 1, $3, 'ACTIVE', $4, NOW())
-			`, id, name, "orig_script", "orig_precond")
-			require.NoError(t, err)
-
-			// Attempt to modify field - should fail
-			_, err = tc.pool.Exec(ctx, `UPDATE saga_definition SET `+tt.column+` = $1 WHERE id = $2`, tt.newVal, id)
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "Cannot modify "+tt.column)
-		})
-	}
-
-	// Test that non-script fields CAN be modified on ACTIVE sagas
-	t.Run("ACTIVE allows non-script edits", func(t *testing.T) {
-		id := insertSaga(ctx, t, tc.pool, "ACTIVE_EDITABLE", 1, "def posting_rules(ctx): pass", "DRAFT")
-
-		// Activate the saga
-		_, err := tc.pool.Exec(ctx, `UPDATE saga_definition SET status = 'ACTIVE' WHERE id = $1`, id)
-		require.NoError(t, err)
-
-		// These should succeed
-		_, err = tc.pool.Exec(ctx, `UPDATE saga_definition SET display_name = 'Updated' WHERE id = $1`, id)
-		require.NoError(t, err)
-
-		_, err = tc.pool.Exec(ctx, `UPDATE saga_definition SET description = 'Updated description' WHERE id = $1`, id)
-		require.NoError(t, err)
-	})
-}
-
-func TestSagaMigration_LifecycleTrigger_StatusTransitions(t *testing.T) {
-	tc := setupSagaTestContainer(t)
-	defer tc.cleanup(t)
-
-	ctx := context.Background()
-
-	t.Run("DRAFT to ACTIVE allowed", func(t *testing.T) {
-		id := insertSaga(ctx, t, tc.pool, "DRAFT_TO_ACTIVE", 1, "def posting_rules(ctx): pass", "DRAFT")
-
-		_, err := tc.pool.Exec(ctx, `UPDATE saga_definition SET status = 'ACTIVE' WHERE id = $1`, id)
-		require.NoError(t, err)
-
-		var status string
-		err = tc.pool.QueryRow(ctx, `SELECT status FROM saga_definition WHERE id = $1`, id).Scan(&status)
-		require.NoError(t, err)
-		assert.Equal(t, "ACTIVE", status)
-	})
-
-	t.Run("DRAFT to DEPRECATED allowed", func(t *testing.T) {
-		id := insertSaga(ctx, t, tc.pool, "DRAFT_TO_DEPRECATED", 1, "def posting_rules(ctx): pass", "DRAFT")
-
-		_, err := tc.pool.Exec(ctx, `UPDATE saga_definition SET status = 'DEPRECATED' WHERE id = $1`, id)
-		require.NoError(t, err)
-
-		var status string
-		err = tc.pool.QueryRow(ctx, `SELECT status FROM saga_definition WHERE id = $1`, id).Scan(&status)
-		require.NoError(t, err)
-		assert.Equal(t, "DEPRECATED", status)
-	})
-
-	t.Run("ACTIVE to DEPRECATED allowed", func(t *testing.T) {
-		id := insertSaga(ctx, t, tc.pool, "ACTIVE_TO_DEPRECATED", 1, "def posting_rules(ctx): pass", "DRAFT")
-
-		// First activate
-		_, err := tc.pool.Exec(ctx, `UPDATE saga_definition SET status = 'ACTIVE' WHERE id = $1`, id)
-		require.NoError(t, err)
-
-		// Then deprecate
-		_, err = tc.pool.Exec(ctx, `UPDATE saga_definition SET status = 'DEPRECATED' WHERE id = $1`, id)
-		require.NoError(t, err)
-
-		var status string
-		err = tc.pool.QueryRow(ctx, `SELECT status FROM saga_definition WHERE id = $1`, id).Scan(&status)
-		require.NoError(t, err)
-		assert.Equal(t, "DEPRECATED", status)
-	})
-
-	t.Run("ACTIVE to DRAFT blocked", func(t *testing.T) {
-		id := insertSaga(ctx, t, tc.pool, "ACTIVE_TO_DRAFT", 1, "def posting_rules(ctx): pass", "DRAFT")
-
-		// Activate
-		_, err := tc.pool.Exec(ctx, `UPDATE saga_definition SET status = 'ACTIVE' WHERE id = $1`, id)
-		require.NoError(t, err)
-
-		// Attempt to go back to DRAFT - should fail
-		_, err = tc.pool.Exec(ctx, `UPDATE saga_definition SET status = 'DRAFT' WHERE id = $1`, id)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "Cannot transition from ACTIVE back to DRAFT")
-	})
-
-	t.Run("DEPRECATED to DRAFT blocked", func(t *testing.T) {
-		id := insertSaga(ctx, t, tc.pool, "DEPRECATED_TO_DRAFT", 1, "def posting_rules(ctx): pass", "DRAFT")
-
-		// Activate then deprecate
-		_, err := tc.pool.Exec(ctx, `UPDATE saga_definition SET status = 'ACTIVE' WHERE id = $1`, id)
-		require.NoError(t, err)
-		_, err = tc.pool.Exec(ctx, `UPDATE saga_definition SET status = 'DEPRECATED' WHERE id = $1`, id)
-		require.NoError(t, err)
-
-		// Attempt to go back to DRAFT - should fail
-		_, err = tc.pool.Exec(ctx, `UPDATE saga_definition SET status = 'DRAFT' WHERE id = $1`, id)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "Cannot transition from DEPRECATED")
-	})
-
-	t.Run("DEPRECATED to ACTIVE blocked", func(t *testing.T) {
-		id := insertSaga(ctx, t, tc.pool, "DEPRECATED_TO_ACTIVE", 1, "def posting_rules(ctx): pass", "DRAFT")
-
-		// Activate then deprecate
-		_, err := tc.pool.Exec(ctx, `UPDATE saga_definition SET status = 'ACTIVE' WHERE id = $1`, id)
-		require.NoError(t, err)
-		_, err = tc.pool.Exec(ctx, `UPDATE saga_definition SET status = 'DEPRECATED' WHERE id = $1`, id)
-		require.NoError(t, err)
-
-		// Attempt to go to ACTIVE - should fail
-		_, err = tc.pool.Exec(ctx, `UPDATE saga_definition SET status = 'ACTIVE' WHERE id = $1`, id)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "Cannot transition from DEPRECATED")
-	})
-}
-
-func TestSagaMigration_LifecycleTrigger_TimestampPopulation(t *testing.T) {
-	tc := setupSagaTestContainer(t)
-	defer tc.cleanup(t)
-
-	ctx := context.Background()
-
-	t.Run("activated_at populated on DRAFT to ACTIVE transition", func(t *testing.T) {
-		id := insertSaga(ctx, t, tc.pool, "ACTIVATION_TIMESTAMP", 1, "def posting_rules(ctx): pass", "DRAFT")
-
-		// Verify activated_at is NULL initially
-		var activatedAt *time.Time
-		err := tc.pool.QueryRow(ctx, `SELECT activated_at FROM saga_definition WHERE id = $1`, id).Scan(&activatedAt)
-		require.NoError(t, err)
-		assert.Nil(t, activatedAt)
-
-		// Activate
-		_, err = tc.pool.Exec(ctx, `UPDATE saga_definition SET status = 'ACTIVE' WHERE id = $1`, id)
-		require.NoError(t, err)
-
-		// Verify activated_at is now set (non-nil is sufficient - clock sync issues with containers)
-		err = tc.pool.QueryRow(ctx, `SELECT activated_at FROM saga_definition WHERE id = $1`, id).Scan(&activatedAt)
-		require.NoError(t, err)
-		require.NotNil(t, activatedAt, "activated_at should be populated after activation")
-	})
-
-	t.Run("deprecated_at populated on ACTIVE to DEPRECATED transition", func(t *testing.T) {
-		id := insertSaga(ctx, t, tc.pool, "DEPRECATION_TIMESTAMP", 1, "def posting_rules(ctx): pass", "DRAFT")
-
-		// Activate first
-		_, err := tc.pool.Exec(ctx, `UPDATE saga_definition SET status = 'ACTIVE' WHERE id = $1`, id)
-		require.NoError(t, err)
-
-		// Verify deprecated_at is NULL
-		var deprecatedAt *time.Time
-		err = tc.pool.QueryRow(ctx, `SELECT deprecated_at FROM saga_definition WHERE id = $1`, id).Scan(&deprecatedAt)
-		require.NoError(t, err)
-		assert.Nil(t, deprecatedAt)
-
-		// Deprecate
-		_, err = tc.pool.Exec(ctx, `UPDATE saga_definition SET status = 'DEPRECATED' WHERE id = $1`, id)
-		require.NoError(t, err)
-
-		// Verify deprecated_at is now set (non-nil is sufficient - clock sync issues with containers)
-		err = tc.pool.QueryRow(ctx, `SELECT deprecated_at FROM saga_definition WHERE id = $1`, id).Scan(&deprecatedAt)
-		require.NoError(t, err)
-		require.NotNil(t, deprecatedAt, "deprecated_at should be populated after deprecation")
-	})
 
 	t.Run("created_at defaults to now on insert", func(t *testing.T) {
 		id := insertSaga(ctx, t, tc.pool, "CREATED_TIMESTAMP", 1, "def posting_rules(ctx): pass", "DRAFT")
@@ -680,121 +474,11 @@ func TestSagaMigration_LifecycleTrigger_TimestampPopulation(t *testing.T) {
 		var createdAt time.Time
 		err := tc.pool.QueryRow(ctx, `SELECT created_at FROM saga_definition WHERE id = $1`, id).Scan(&createdAt)
 		require.NoError(t, err)
-		// Verify created_at is non-zero (populated by default)
 		assert.False(t, createdAt.IsZero(), "created_at should be populated on insert")
 	})
 
-	t.Run("updated_at populated on any update", func(t *testing.T) {
-		id := insertSaga(ctx, t, tc.pool, "UPDATED_TIMESTAMP", 1, "def posting_rules(ctx): pass", "DRAFT")
-
-		// Get initial updated_at
-		var initialUpdatedAt time.Time
-		err := tc.pool.QueryRow(ctx, `SELECT updated_at FROM saga_definition WHERE id = $1`, id).Scan(&initialUpdatedAt)
-		require.NoError(t, err)
-
-		// Wait a tiny bit to ensure time difference
-		time.Sleep(10 * time.Millisecond)
-
-		// Update display_name
-		_, err = tc.pool.Exec(ctx, `UPDATE saga_definition SET display_name = 'Updated Name' WHERE id = $1`, id)
-		require.NoError(t, err)
-
-		// Verify updated_at changed
-		var newUpdatedAt time.Time
-		err = tc.pool.QueryRow(ctx, `SELECT updated_at FROM saga_definition WHERE id = $1`, id).Scan(&newUpdatedAt)
-		require.NoError(t, err)
-		assert.True(t, newUpdatedAt.After(initialUpdatedAt), "updated_at should be after the initial value")
-	})
-}
-
-func TestSagaMigration_SuccessorValidation(t *testing.T) {
-	tc := setupSagaTestContainer(t)
-	defer tc.cleanup(t)
-
-	ctx := context.Background()
-
-	t.Run("successor must be ACTIVE", func(t *testing.T) {
-		// Create successor saga and activate it
-		successorID := insertSaga(ctx, t, tc.pool, "withdrawal", 2, "def posting_rules(ctx): pass", "DRAFT")
-		_, err := tc.pool.Exec(ctx, `UPDATE saga_definition SET status = 'ACTIVE' WHERE id = $1`, successorID)
-		require.NoError(t, err)
-
-		// Create and activate original saga
-		originalID := insertSaga(ctx, t, tc.pool, "withdrawal", 1, "def posting_rules(ctx): pass", "DRAFT")
-		_, err = tc.pool.Exec(ctx, `UPDATE saga_definition SET status = 'ACTIVE' WHERE id = $1`, originalID)
-		require.NoError(t, err)
-
-		// Deprecate with valid successor - should work
-		_, err = tc.pool.Exec(ctx, `UPDATE saga_definition SET status = 'DEPRECATED', successor_id = $1 WHERE id = $2`, successorID, originalID)
-		require.NoError(t, err)
-	})
-
-	t.Run("successor must exist", func(t *testing.T) {
-		// Create and activate a saga
-		id := insertSaga(ctx, t, tc.pool, "nonexistent_successor", 1, "def posting_rules(ctx): pass", "DRAFT")
-		_, err := tc.pool.Exec(ctx, `UPDATE saga_definition SET status = 'ACTIVE' WHERE id = $1`, id)
-		require.NoError(t, err)
-
-		// Attempt to deprecate with non-existent successor
-		fakeSuccessorID := uuid.New()
-		_, err = tc.pool.Exec(ctx, `UPDATE saga_definition SET status = 'DEPRECATED', successor_id = $1 WHERE id = $2`, fakeSuccessorID, id)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "Successor saga does not exist")
-	})
-
-	t.Run("successor cannot be self", func(t *testing.T) {
-		// Create and activate a saga
-		id := insertSaga(ctx, t, tc.pool, "self_successor", 1, "def posting_rules(ctx): pass", "DRAFT")
-		_, err := tc.pool.Exec(ctx, `UPDATE saga_definition SET status = 'ACTIVE' WHERE id = $1`, id)
-		require.NoError(t, err)
-
-		// Attempt to deprecate with self as successor
-		_, err = tc.pool.Exec(ctx, `UPDATE saga_definition SET status = 'DEPRECATED', successor_id = $1 WHERE id = $1`, id)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "cannot designate itself as its own successor")
-	})
-
-	t.Run("successor must have same name", func(t *testing.T) {
-		// Create and activate a "different_name" saga
-		differentNameID := insertSaga(ctx, t, tc.pool, "different_name", 1, "def posting_rules(ctx): pass", "DRAFT")
-		_, err := tc.pool.Exec(ctx, `UPDATE saga_definition SET status = 'ACTIVE' WHERE id = $1`, differentNameID)
-		require.NoError(t, err)
-
-		// Create and activate original saga with different name
-		originalID := insertSaga(ctx, t, tc.pool, "original_name", 1, "def posting_rules(ctx): pass", "DRAFT")
-		_, err = tc.pool.Exec(ctx, `UPDATE saga_definition SET status = 'ACTIVE' WHERE id = $1`, originalID)
-		require.NoError(t, err)
-
-		// Attempt to deprecate with successor of different name - should fail
-		_, err = tc.pool.Exec(ctx, `UPDATE saga_definition SET status = 'DEPRECATED', successor_id = $1 WHERE id = $2`, differentNameID, originalID)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "Successor saga name")
-	})
-
-	t.Run("successor_id is write-once", func(t *testing.T) {
-		// Create two potential successors
-		successor1ID := insertSaga(ctx, t, tc.pool, "write_once_test", 2, "def posting_rules(ctx): pass", "DRAFT")
-		_, err := tc.pool.Exec(ctx, `UPDATE saga_definition SET status = 'ACTIVE' WHERE id = $1`, successor1ID)
-		require.NoError(t, err)
-
-		successor2ID := insertSaga(ctx, t, tc.pool, "write_once_test", 3, "def posting_rules(ctx): pass", "DRAFT")
-		_, err = tc.pool.Exec(ctx, `UPDATE saga_definition SET status = 'ACTIVE' WHERE id = $1`, successor2ID)
-		require.NoError(t, err)
-
-		// Create and activate original saga
-		originalID := insertSaga(ctx, t, tc.pool, "write_once_test", 1, "def posting_rules(ctx): pass", "DRAFT")
-		_, err = tc.pool.Exec(ctx, `UPDATE saga_definition SET status = 'ACTIVE' WHERE id = $1`, originalID)
-		require.NoError(t, err)
-
-		// Set successor first time - should work
-		_, err = tc.pool.Exec(ctx, `UPDATE saga_definition SET status = 'DEPRECATED', successor_id = $1 WHERE id = $2`, successor1ID, originalID)
-		require.NoError(t, err)
-
-		// Attempt to change successor - should fail
-		_, err = tc.pool.Exec(ctx, `UPDATE saga_definition SET successor_id = $1 WHERE id = $2`, successor2ID, originalID)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "write-once")
-	})
+	// NOTE: activated_at, deprecated_at, updated_at, successor validation, and
+	// write-once semantics are now handled at the Go application layer.
 }
 
 func TestSagaMigration_Indexes(t *testing.T) {
@@ -930,33 +614,8 @@ func TestSagaMigration_SchemaIsolation(t *testing.T) {
 		}
 	})
 
-	t.Run("trigger functions work independently per tenant", func(t *testing.T) {
-		// Activate saga in tenant_alpha
-		_, err := tc.pool.Exec(ctx, `SET search_path TO tenant_alpha`)
-		require.NoError(t, err)
-
-		var id uuid.UUID
-		err = tc.pool.QueryRow(ctx, `SELECT id FROM saga_definition WHERE name = 'SHARED_NAME'`).Scan(&id)
-		require.NoError(t, err)
-
-		_, err = tc.pool.Exec(ctx, `UPDATE saga_definition SET status = 'ACTIVE' WHERE id = $1`, id)
-		require.NoError(t, err)
-
-		// Verify activated_at was set in tenant_alpha
-		var activatedAt *time.Time
-		err = tc.pool.QueryRow(ctx, `SELECT activated_at FROM saga_definition WHERE id = $1`, id).Scan(&activatedAt)
-		require.NoError(t, err)
-		require.NotNil(t, activatedAt)
-
-		// Verify tenant_beta's saga is still DRAFT
-		_, err = tc.pool.Exec(ctx, `SET search_path TO tenant_beta`)
-		require.NoError(t, err)
-
-		var status string
-		err = tc.pool.QueryRow(ctx, `SELECT status FROM saga_definition WHERE name = 'SHARED_NAME'`).Scan(&status)
-		require.NoError(t, err)
-		assert.Equal(t, "DRAFT", status, "tenant_beta saga should still be DRAFT")
-	})
+	// NOTE: "trigger functions work independently per tenant" subtest removed.
+	// Lifecycle enforcement is now at the Go application layer.
 }
 
 func TestSagaMigration_PlatformRefExtension_ColumnsExist(t *testing.T) {

@@ -898,23 +898,10 @@ func TestPostgresRegistry_SuccessorWriteOnce(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, successor1.ID, *result.SuccessorID)
 
-		// Try to change successor - this should fail via trigger
-		// We need to attempt an UPDATE directly since the API doesn't expose this
-		// The trigger should reject this attempt
-		tenantID, _ := tenant.FromContext(ctx)
-		schemaName := tenantID.SchemaName()
-
-		tx, err := pool.Begin(ctx)
-		require.NoError(t, err)
-
-		_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
-		require.NoError(t, err)
-
-		_, err = tx.Exec(ctx, `UPDATE instrument_definition SET successor_id = $1 WHERE code = 'WRITEONCE_OLD' AND version = 1`, successor2.ID)
-		// Should fail due to write-once trigger
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "write-once")
-
-		_ = tx.Rollback(ctx)
+		// Write-once is architecturally enforced: DeprecateInstrument requires
+		// status=ACTIVE, and after deprecation the status is DEPRECATED, so a
+		// second call to DeprecateInstrument will fail with ErrNotActive.
+		err = reg.DeprecateInstrument(ctx, "WRITEONCE_OLD", 1, &successor2.ID)
+		require.ErrorIs(t, err, registry.ErrNotActive)
 	})
 }

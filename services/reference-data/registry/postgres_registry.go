@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -438,17 +437,42 @@ func (r *PostgresRegistry) ActivateInstrument(ctx context.Context, code string, 
 	})
 }
 
+// validateInstrumentSuccessor checks that the successor exists, is ACTIVE,
+// has the same dimension as the source instrument, and is not self-referential.
+func validateInstrumentSuccessor(ctx context.Context, tx pgx.Tx, instrumentID uuid.UUID, dimension string, successorID uuid.UUID) error {
+	if successorID == instrumentID {
+		return ErrSuccessorInvalid
+	}
+
+	var successorStatus, successorDimension string
+	err := tx.QueryRow(ctx,
+		`SELECT status, dimension FROM instrument_definition WHERE id = $1`, successorID,
+	).Scan(&successorStatus, &successorDimension)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrSuccessorInvalid
+		}
+		return fmt.Errorf("failed to validate successor: %w", err)
+	}
+
+	if successorStatus != string(StatusActive) || successorDimension != dimension {
+		return ErrSuccessorInvalid
+	}
+	return nil
+}
+
 // DeprecateInstrument transitions an instrument from ACTIVE to DEPRECATED.
-// If successorID is provided, the database trigger validates that the successor exists,
-// is ACTIVE, and has the same dimension as the deprecated instrument.
+// If successorID is provided, validates that the successor exists, is ACTIVE,
+// has the same dimension, and is not a self-reference.
 func (r *PostgresRegistry) DeprecateInstrument(ctx context.Context, code string, version int, successorID *uuid.UUID) error {
 	return r.withWriteTransaction(ctx, func(tx pgx.Tx) error {
-		// Check current state
+		var instrumentID uuid.UUID
 		var isSystem bool
 		var currentStatus string
+		var dimension string
 
-		checkQuery := `SELECT is_system, status FROM instrument_definition WHERE code = $1 AND version = $2`
-		err := tx.QueryRow(ctx, checkQuery, code, version).Scan(&isSystem, &currentStatus)
+		checkQuery := `SELECT id, is_system, status, dimension FROM instrument_definition WHERE code = $1 AND version = $2`
+		err := tx.QueryRow(ctx, checkQuery, code, version).Scan(&instrumentID, &isSystem, &currentStatus, &dimension)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrNotFound
@@ -459,12 +483,16 @@ func (r *PostgresRegistry) DeprecateInstrument(ctx context.Context, code string,
 		if isSystem {
 			return ErrSystemInstrumentReadOnly
 		}
-
 		if currentStatus != string(StatusActive) {
 			return ErrNotActive
 		}
 
-		// Transition to DEPRECATED with optional successor
+		if successorID != nil {
+			if err := validateInstrumentSuccessor(ctx, tx, instrumentID, dimension, *successorID); err != nil {
+				return err
+			}
+		}
+
 		now := time.Now()
 		updateQuery := `
 			UPDATE instrument_definition SET
@@ -476,23 +504,6 @@ func (r *PostgresRegistry) DeprecateInstrument(ctx context.Context, code string,
 
 		_, err = tx.Exec(ctx, updateQuery, now, code, version, successorID)
 		if err != nil {
-			// Check if the error is from the successor validation trigger
-			var pgErr *pgconn.PgError
-			if errors.As(err, &pgErr) && pgErr.Code == "P0001" { // raise_exception
-				// Map specific trigger errors based on error message
-				msg := pgErr.Message
-				msgLower := strings.ToLower(msg)
-				switch {
-				case strings.Contains(msgLower, "successor"):
-					return ErrSuccessorInvalid
-				case strings.Contains(msgLower, "cannot transition"):
-					return ErrInvalidStateTransition
-				case strings.Contains(msgLower, "cannot modify"):
-					return ErrInvalidStatus
-				default:
-					return fmt.Errorf("%w: %s", ErrInvalidStatus, msg)
-				}
-			}
 			return fmt.Errorf("failed to deprecate instrument: %w", err)
 		}
 
