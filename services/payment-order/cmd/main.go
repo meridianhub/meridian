@@ -320,7 +320,9 @@ func run(logger *slog.Logger) error {
 			RenewEvery: 30 * time.Second,
 		}, logger)
 
-		// Create billing executor adapter (preserves shadow mode and Redis idempotency)
+		// Create billing executor adapter (preserves shadow mode and Redis idempotency).
+		// InvoiceGenerator and PaymentInitiator are nil until the position-keeping
+		// client and saga runner are wired (same as pre-migration behavior).
 		billingExecutor := worker.NewBillingExecutor(
 			billingRepo,
 			redisClient,
@@ -328,6 +330,8 @@ func run(logger *slog.Logger) error {
 			worker.BillingExecutorConfig{ShadowMode: svcConfig.BillingShadowMode},
 			logger,
 		)
+		// TODO: Wire once position-keeping client is available:
+		// billingExecutor.WithInvoiceGenerator(invoiceGen).WithPaymentInitiator(paymentInit)
 
 		// Create schedule provider (static single-tenant schedule)
 		billingProvider := worker.NewBillingScheduleProvider(tenantID, svcConfig.BillingCronSchedule)

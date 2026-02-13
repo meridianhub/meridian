@@ -176,8 +176,12 @@ func (e *BillingExecutor) Execute(ctx context.Context, schedule scheduler.Schedu
 }
 
 // processInvoices generates invoices and initiates payments for a billing run.
+// When invoiceGenerator is nil, the billing run completes without invoice generation.
+// This is the expected state until the position-keeping client is wired.
 func (e *BillingExecutor) processInvoices(ctx context.Context, run *domain.BillingRun) error {
 	if e.invoiceGenerator == nil {
+		e.logger.Debug("invoice generator not configured, skipping invoice generation",
+			"billing_run_id", run.ID)
 		return nil
 	}
 
