@@ -154,7 +154,7 @@ func (c *VerificationConfig) ValidateForEnvironment(environment string) error {
 		if c.IsMock() {
 			return ErrMockProviderInProduction
 		}
-		if !strings.HasPrefix(c.WebhookURL, "https://") {
+		if !strings.HasPrefix(strings.ToLower(c.WebhookURL), "https://") {
 			return ErrWebhookHTTPSRequired
 		}
 		if len(c.WebhookSecret) < 32 {
