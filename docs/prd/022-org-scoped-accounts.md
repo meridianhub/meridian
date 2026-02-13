@@ -32,8 +32,8 @@ instructions: |
 
 **Related PRDs:**
 
-- [Internal Bank Account](./internal-bank-account.md)
-- [Starlark Saga Orchestration](./starlark-saga-orchestration-core.md)
+- [Internal Bank Account](./002-internal-bank-account.md)
+- [Starlark Saga Orchestration](./006-starlark-saga-orchestration-core.md)
 
 ---
 
