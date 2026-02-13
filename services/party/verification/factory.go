@@ -3,6 +3,7 @@ package verification
 
 import (
 	"errors"
+	"log/slog"
 	"strings"
 
 	"github.com/meridianhub/meridian/services/party/config"
@@ -18,10 +19,10 @@ var (
 //
 // Currently supported providers:
 //   - "mock": Returns a MockProvider for testing and development
+//   - "onfido": Onfido identity verification
 //
 // Future providers (stubs, not yet implemented):
 //   - "jumio": Jumio identity verification
-//   - "onfido": Onfido identity verification
 //
 // Returns ErrUnsupportedProvider for any unrecognized provider name.
 // The MockProvider is configured with AlwaysApprove=true by default.
@@ -38,8 +39,7 @@ func NewProvider(cfg *config.VerificationConfig) (Provider, error) {
 		// Jumio provider not yet implemented
 		return nil, ErrUnsupportedProvider
 	case "onfido":
-		// Onfido provider not yet implemented
-		return nil, ErrUnsupportedProvider
+		return NewOnfidoProvider(cfg, slog.Default())
 	default:
 		return nil, ErrUnsupportedProvider
 	}
@@ -77,7 +77,7 @@ func NewProviderWithOptions(cfg *config.VerificationConfig, opts ProviderOptions
 	case "jumio":
 		return nil, ErrUnsupportedProvider
 	case "onfido":
-		return nil, ErrUnsupportedProvider
+		return NewOnfidoProvider(cfg, slog.Default())
 	default:
 		return nil, ErrUnsupportedProvider
 	}
