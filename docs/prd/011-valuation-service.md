@@ -1539,7 +1539,7 @@ locked value, NOT a recalculated value. This protects both:
 
 ##### Implementation: Application-Level Enforcement
 
-> **CockroachDB note:** PL/pgSQL triggers are not supported in CockroachDB UDFs.
+> **CockroachDB note:** CockroachDB does not support PL/pgSQL triggers.
 > Lifecycle enforcement must be at the Go application layer.
 
 Enforce via repository layer:
