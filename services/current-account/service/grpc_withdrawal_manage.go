@@ -167,12 +167,6 @@ func (s *Service) UpdateWithdrawal(ctx context.Context, req *pb.UpdateWithdrawal
 		return nil, status.Error(codes.InvalidArgument, "withdrawal_id is required")
 	}
 
-	// Check if withdrawal repository is configured
-	if s.withdrawalRepo == nil {
-		operationStatus = opStatusNotImplemented
-		return nil, status.Error(codes.Unimplemented, "withdrawal persistence not configured")
-	}
-
 	// Lookup withdrawal by reference
 	withdrawal, err := s.withdrawalRepo.FindByReference(ctx, req.WithdrawalId)
 	if err != nil {
@@ -251,34 +245,6 @@ func (s *Service) RetrieveWithdrawal(ctx context.Context, req *pb.RetrieveWithdr
 	if req.WithdrawalId == "" && req.AccountId == "" {
 		operationStatus = opStatusMissingIdentifier
 		return nil, status.Error(codes.InvalidArgument, "either withdrawal_id or account_id is required")
-	}
-
-	// Check if withdrawal repository is configured
-	if s.withdrawalRepo == nil {
-		// For backward compatibility, return empty list when listing by account ID
-		// but error when looking up by withdrawal ID
-		if req.WithdrawalId != "" {
-			operationStatus = opStatusNotImplemented
-			return nil, status.Error(codes.Unimplemented, "withdrawal persistence not configured")
-		}
-		// Validate account exists before returning empty list
-		_, err := s.repo.FindByID(ctx, req.AccountId)
-		if err != nil {
-			if errors.Is(err, persistence.ErrAccountNotFound) {
-				operationStatus = opStatusAccountNotFound
-				return nil, status.Errorf(codes.NotFound, "account not found: %s", req.AccountId)
-			}
-			operationStatus = opStatusRetrieveFailed
-			return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
-		}
-		// Return empty list for account queries when repo not configured
-		return &pb.RetrieveWithdrawalResponse{
-			Withdrawals: []*pb.Withdrawal{},
-			Pagination: &commonpb.PaginationResponse{
-				NextPageToken: "",
-				TotalCount:    0,
-			},
-		}, nil
 	}
 
 	// Single withdrawal lookup by ID

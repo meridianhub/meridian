@@ -610,10 +610,15 @@ func TestRetrieveWithdrawal_ByAccountID(t *testing.T) {
 	db, ctx, cleanup := setupIntegrationTestDB(t)
 	defer cleanup()
 
+	// Create withdrawal table (withdrawalRepo is unconditionally initialized in production)
+	err := db.AutoMigrate(&persistence.WithdrawalEntity{})
+	require.NoError(t, err, "failed to create withdrawal table")
+
 	repo := persistence.NewRepository(db)
 	_ = createTestAccountWithBalance(t, ctx, repo, "ACC-RET-WTH-001", 100000)
 
 	svc := mustNewService(t, repo, nil)
+	svc.withdrawalRepo = persistence.NewWithdrawalRepository(db)
 
 	req := &pb.RetrieveWithdrawalRequest{
 		AccountId: "ACC-RET-WTH-001",
@@ -623,7 +628,6 @@ func TestRetrieveWithdrawal_ByAccountID(t *testing.T) {
 
 	require.NoError(t, err, "RetrieveWithdrawal should succeed")
 	require.NotNil(t, resp.Withdrawals)
-	// Currently returns empty list as persistence is not implemented
 	assert.Equal(t, int64(0), resp.Pagination.TotalCount)
 }
 

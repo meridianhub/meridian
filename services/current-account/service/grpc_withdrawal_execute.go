@@ -49,11 +49,6 @@ func (s *Service) ExecuteWithdrawal(ctx context.Context, req *pb.ExecuteWithdraw
 
 	if req.WithdrawalId != "" {
 		// Look up pending withdrawal by reference
-		if s.withdrawalRepo == nil {
-			operationStatus = opStatusNotImplemented
-			return nil, status.Error(codes.Unimplemented, "withdrawal persistence not configured")
-		}
-
 		var err error
 		pendingWithdrawal, err = s.withdrawalRepo.FindByReference(ctx, req.WithdrawalId)
 		if err != nil {
