@@ -254,10 +254,9 @@ WHERE status = 'ACTIVE';
 // api/proto/meridian/party/v1/party.proto
 
 enum RelationshipType {
-  // ... existing types (0-5)
+  // ... existing types (0-5, includes BENEFICIAL_OWNER at 5)
   RELATIONSHIP_TYPE_SYNDICATE_PARTICIPANT = 6; // BIAN: Participant
   RELATIONSHIP_TYPE_SYNDICATE_HOST = 7;        // BIAN: Lead/Arranger
-  RELATIONSHIP_TYPE_BENEFICIAL_OWNER = 8;
 }
 
 message PartyAssociation {
@@ -275,10 +274,9 @@ message PartyAssociation {
 }
 ```
 
-> **Note:** `BENEFICIAL_OWNER` (value 8) replaces the existing
-> domain-level `RelationshipTypeBeneficialOwner` which currently
-> exists in Go but was not in the proto enum. This promotes it
-> to a first-class proto value.
+> **Note:** `BENEFICIAL_OWNER` already exists at value 5 in the
+> current proto. Only `SYNDICATE_PARTICIPANT` (6) and
+> `SYNDICATE_HOST` (7) are new additions.
 
 ---
 
