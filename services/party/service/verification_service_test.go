@@ -21,7 +21,7 @@ var errKafkaUnavailable = errors.New("kafka unavailable")
 // mockPartyRepository implements PartyRepository for testing
 type mockPartyRepository struct {
 	existsByIDFn func(ctx context.Context, partyID uuid.UUID) (bool, error)
-	findByIDFn   func(ctx context.Context, partyID uuid.UUID) (*interface{}, error)
+	findByIDFn   func(ctx context.Context, partyID uuid.UUID) (*domain.Party, error)
 }
 
 func (m *mockPartyRepository) ExistsByID(ctx context.Context, partyID uuid.UUID) (bool, error) {
@@ -31,7 +31,7 @@ func (m *mockPartyRepository) ExistsByID(ctx context.Context, partyID uuid.UUID)
 	return true, nil
 }
 
-func (m *mockPartyRepository) FindByID(ctx context.Context, partyID uuid.UUID) (*interface{}, error) {
+func (m *mockPartyRepository) FindByID(ctx context.Context, partyID uuid.UUID) (*domain.Party, error) {
 	if m.findByIDFn != nil {
 		return m.findByIDFn(ctx, partyID)
 	}
