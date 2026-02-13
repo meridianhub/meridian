@@ -12,19 +12,24 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	forecastingv1 "github.com/meridianhub/meridian/api/proto/meridian/forecasting/v1"
 	"github.com/meridianhub/meridian/services/forecasting/adapters/mds"
 	"github.com/meridianhub/meridian/services/forecasting/adapters/persistence"
 	"github.com/meridianhub/meridian/services/forecasting/handler"
+	forecastscheduler "github.com/meridianhub/meridian/services/forecasting/scheduler"
 	"github.com/meridianhub/meridian/services/forecasting/starlark"
 	misclient "github.com/meridianhub/meridian/services/market-information/client"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/ports"
+	"github.com/meridianhub/meridian/shared/platform/redislock"
+	"github.com/meridianhub/meridian/shared/platform/scheduler"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -123,6 +128,57 @@ func run(logger *slog.Logger) error {
 	}
 	logger.Info("forecasting service handler initialized")
 
+	// Initialize Redis client for distributed locking
+	redisAddr := env.GetEnvOrDefault("REDIS_ADDR", "localhost:6379")
+	redisClient := redis.NewClient(&redis.Options{
+		Addr: redisAddr,
+	})
+	defer redisClient.Close()
+	logger.Info("redis client initialized", "addr", redisAddr)
+
+	// Create distributed lock for scheduler deduplication
+	distLock := redislock.NewLock(redisClient, redislock.Config{
+		KeyPrefix:  "meridian:forecasting:strategy",
+		LockTTL:    5 * time.Minute,
+		RenewEvery: 30 * time.Second,
+	}, logger)
+
+	// Create execution store for audit trail
+	execStore, err := scheduler.NewPgExecutionStore(dbPool)
+	if err != nil {
+		logger.Warn("scheduler execution store unavailable, audit trail disabled", "error", err)
+		execStore = nil
+	}
+
+	// Create scheduler adapters
+	schedProvider := forecastscheduler.NewForecastScheduleProvider(repo)
+	schedMetrics := forecastscheduler.NewMetrics()
+	schedExecutor := forecastscheduler.NewForecastScheduleExecutor(
+		forecastingSvc.ComputeForwardCurveInternal,
+		schedMetrics,
+	)
+
+	// Create shared cron scheduler
+	refreshInterval, _ := time.ParseDuration(env.GetEnvOrDefault("SCHEDULER_REFRESH_INTERVAL", "60s"))
+	cronSchedulerOpts := []scheduler.CronSchedulerOption{}
+	if execStore != nil {
+		cronSchedulerOpts = append(cronSchedulerOpts, scheduler.WithCronExecutionStore(execStore))
+	}
+	cronScheduler := scheduler.NewCronScheduler(
+		schedProvider,
+		schedExecutor,
+		distLock,
+		scheduler.CronSchedulerConfig{
+			Name:             "forecasting",
+			RefreshInterval:  refreshInterval,
+			ShutdownTimeout:  5 * time.Minute,
+			ExecutionTimeout: 10 * time.Minute,
+			MaxCatchUpAge:    time.Hour,
+		},
+		logger,
+		cronSchedulerOpts...,
+	)
+
 	// Initialize auth interceptor
 	authConfig := bootstrap.DefaultAuthConfig(logger)
 	authInterceptor, err := bootstrap.NewAuthInterceptor(ctx, authConfig)
@@ -159,11 +215,21 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("failed to listen on %s: %w", address, err)
 	}
 
-	serverErrors := make(chan error, 2)
+	serverErrors := make(chan error, 3)
 	go func() {
 		logger.Info("starting gRPC server", "address", address)
 		if err := grpcServer.Serve(listener); err != nil {
 			serverErrors <- err
+		}
+	}()
+
+	// Start cron scheduler in background
+	schedulerCtx, schedulerCancel := context.WithCancel(context.Background())
+	go func() {
+		logger.Info("starting forecasting cron scheduler")
+		if err := cronScheduler.Start(schedulerCtx); err != nil {
+			logger.Error("cron scheduler error", "error", err)
+			serverErrors <- fmt.Errorf("cron scheduler error: %w", err)
 		}
 	}()
 
@@ -190,6 +256,14 @@ func run(logger *slog.Logger) error {
 
 	// Wait for shutdown
 	orchestrator := bootstrap.NewShutdownOrchestrator(grpcServer, logger)
+
+	orchestrator.AddCleanup(func() error {
+		// Stop cron scheduler
+		schedulerCancel()
+		cronScheduler.Stop()
+		logger.Info("cron scheduler stopped")
+		return nil
+	})
 
 	orchestrator.AddCleanup(func() error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), defaults.DefaultGracefulShutdown)
