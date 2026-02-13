@@ -6,7 +6,7 @@
 ALTER TABLE "scheduler_execution" RENAME COLUMN "schedule_name" TO "scheduler_name";
 
 -- 2. Add schedule_id column (the shared store separates scheduler name from schedule ID)
-ALTER TABLE "scheduler_execution" ADD COLUMN "schedule_id" VARCHAR(200) NOT NULL DEFAULT '';
+ALTER TABLE "scheduler_execution" ADD COLUMN "schedule_id" VARCHAR(200);
 
 -- 3. Add completed_at column
 ALTER TABLE "scheduler_execution" ADD COLUMN "completed_at" TIMESTAMPTZ NULL;
@@ -27,7 +27,10 @@ ALTER TABLE "scheduler_execution" DROP COLUMN "run_id";
 UPDATE "scheduler_execution"
 SET "schedule_id" = "scheduler_name",
     "scheduler_name" = 'reconciliation'
-WHERE "scheduler_name" != '';
+WHERE "scheduler_name" IS NOT NULL AND "scheduler_name" != '';
+
+-- Enforce NOT NULL after backfill (fails fast if any rows have empty schedule_id)
+ALTER TABLE "scheduler_execution" ALTER COLUMN "schedule_id" SET NOT NULL;
 
 -- 6. Drop old indexes that reference renamed columns and recreate
 DROP INDEX IF EXISTS "idx_scheduler_execution_schedule_name";
