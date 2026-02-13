@@ -1537,28 +1537,12 @@ locked value, NOT a recalculated value. This protects both:
 **Requirement:** The `liens` table MUST enforce immutability of `valued_amount` once the lien is in
 `ACTIVE` status. This prevents both application bugs and direct database manipulation.
 
-##### Implementation Option A: Trigger-Based Enforcement
+##### Implementation: Application-Level Enforcement
 
-```sql
--- CockroachDB trigger to prevent valued_amount modification on ACTIVE liens
-CREATE FUNCTION prevent_valued_amount_update() RETURNS TRIGGER AS $$
-BEGIN
-    IF OLD.status = 'ACTIVE' AND NEW.valued_amount IS DISTINCT FROM OLD.valued_amount THEN
-        RAISE EXCEPTION 'Cannot modify valued_amount on ACTIVE lien: %', OLD.id;
-    END IF;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
+> **CockroachDB note:** PL/pgSQL triggers are not supported in CockroachDB UDFs.
+> Lifecycle enforcement must be at the Go application layer.
 
-CREATE TRIGGER lien_valued_amount_immutable
-    BEFORE UPDATE ON liens
-    FOR EACH ROW
-    EXECUTE FUNCTION prevent_valued_amount_update();
-```
-
-##### Implementation Option B: Application-Level Enforcement
-
-If CockroachDB trigger support is limited, enforce via repository layer:
+Enforce via repository layer:
 
 ```go
 func (r *LienRepository) Update(ctx context.Context, lien *Lien) error {
