@@ -551,7 +551,7 @@ grpc_microservice(
 grpc_microservice(
     'forecasting',
     grpc_port=50061,  # ports.Forecasting
-    resource_deps=['cockroachdb', 'migrate-forecasting', 'market-information'],
+    resource_deps=['cockroachdb', 'migrate-forecasting', 'market-information', 'redis'],
 )
 
 # Reference Data Service - gRPC microservice for instrument definitions, nodes, and saga definitions

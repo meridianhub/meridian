@@ -1149,11 +1149,11 @@ Each task should be entered as:
 
 ## Related Documents
 
-- [durable-execution-engine.md](durable-execution-engine.md) -
+- [durable-execution-engine.md](005-durable-execution-engine.md) -
   Durable execution engine for saga orchestration
-- [starlark-saga-orchestration-core.md](starlark-saga-orchestration-core.md) -
+- [starlark-saga-orchestration-core.md](006-starlark-saga-orchestration-core.md) -
   Starlark saga orchestration core
-- [starlark-service-bindings.md](starlark-service-bindings.md) -
+- [starlark-service-bindings.md](008-starlark-service-bindings.md) -
   Service bindings for Starlark sagas
 - ADR-0016: Tenant ID Naming Strategy
 - ADR-0028: Starlark Saga and CEL Valuation

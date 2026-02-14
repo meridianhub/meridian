@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/party/adapters/persistence"
+	"github.com/meridianhub/meridian/services/party/domain"
 	"github.com/meridianhub/meridian/services/party/verification"
 )
 
@@ -54,7 +55,7 @@ type VerificationService struct {
 
 // PartyRepository defines the interface for party lookup operations
 type PartyRepository interface {
-	FindByID(ctx context.Context, partyID uuid.UUID) (*interface{}, error)
+	FindByID(ctx context.Context, partyID uuid.UUID) (*domain.Party, error)
 	ExistsByID(ctx context.Context, partyID uuid.UUID) (bool, error)
 }
 

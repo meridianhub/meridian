@@ -845,40 +845,19 @@ isolation would cause unacceptable contention.
 **Strategy: Position Key Hash with Unique Constraint**
 
 ```sql
--- Helper function for deterministic JSONB hashing (sorted keys)
-CREATE OR REPLACE FUNCTION canonicalize_jsonb(j JSONB) RETURNS TEXT AS $$
-DECLARE
-    result TEXT := '{';
-    key TEXT;
-    val JSONB;
-    first BOOLEAN := TRUE;
-BEGIN
-    FOR key, val IN SELECT * FROM jsonb_each(j) ORDER BY 1
-    LOOP
-        IF NOT first THEN
-            result := result || ',';
-        END IF;
-        result := result || '"' || key || '":' || val::text;
-        first := FALSE;
-    END LOOP;
-    RETURN result || '}';
-END;
-$$ LANGUAGE plpgsql IMMUTABLE;
+-- CockroachDB does not support PL/pgSQL in UDFs, so canonicalize_jsonb()
+-- is implemented at the Go application layer. The position_key_hash column
+-- is computed by the repository on INSERT rather than via GENERATED ALWAYS AS.
 
--- Add position key hash for optimistic concurrency
--- Uses canonicalize_jsonb() for deterministic attribute ordering
--- Uses explicit period_start/period_end columns for CockroachDB compatibility
-ALTER TABLE measurements ADD COLUMN position_key_hash BYTEA GENERATED ALWAYS AS (
-    sha256(
-        account_id::text || '|' ||
-        asset_code || '|' ||
-        canonicalize_jsonb(COALESCE(attributes, '{}'::jsonb)) || '|' ||
-        period_start::text || '|' ||
-        period_end::text
-    )
-) STORED;
+-- Migration 1: Add hash column (application-computed, not generated)
+ALTER TABLE measurements ADD COLUMN position_key_hash BYTEA;
+-- The hash is: sha256(account_id || '|' || asset_code || '|' ||
+--   canonicalize_jsonb(attributes) || '|' || period_start || '|' || period_end)
+-- Computed by MeasurementRepository.Insert() in Go.
+```
 
--- Partial unique index on non-superseded measurements
+```sql
+-- Migration 2 (separate file): Add unique index after column is public
 CREATE UNIQUE INDEX idx_measurements_position_unique
     ON measurements(position_key_hash)
     WHERE superseded_by IS NULL;

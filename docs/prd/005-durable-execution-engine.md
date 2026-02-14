@@ -3,7 +3,7 @@
 **Status:** Implemented
 **Version:** 1.1
 **Task Master Tag:** `starlark-saga-orchestration` (24/24 tasks done)
-**Companion PRD:** [Starlark Saga Orchestration (Core)](./starlark-saga-orchestration-core.md)
+**Companion PRD:** [Starlark Saga Orchestration (Core)](./006-starlark-saga-orchestration-core.md)
 
 ---
 
@@ -60,7 +60,7 @@ This PRD covers:
 - **Migration Stream 9**: Migrating existing Go sagas to Starlark
 
 For core Starlark runtime, reference validation, party isolation, and saga composition,
-see the [Starlark Saga Orchestration (Core) PRD](./starlark-saga-orchestration-core.md).
+see the [Starlark Saga Orchestration (Core) PRD](./006-starlark-saga-orchestration-core.md).
 
 ---
 
@@ -234,10 +234,10 @@ def pay_external(ctx):
   pods immediately when a peer pod terminates, triggering an instant orphan scan
 - **Performance gap**: 5-minute lease expiry is too slow for high-volume energy/wealth
   transactions where bills must resume within seconds of pod crash
-- **Implementation options**:
-  - PostgreSQL `LISTEN/NOTIFY` on lease expiry
+- **Implementation options** (CockroachDB has no LISTEN/NOTIFY):
   - NATS subject for pod health events
   - Kubernetes pod termination webhook
+  - Kafka topic for lease expiry signals
 - **Fallback**: Background orphan scan at lease expiry interval (existing mechanism)
 - **Latency target**: Resume orphaned saga within 10 seconds of pod crash (vs. 5 minutes passive)
 
@@ -1308,7 +1308,7 @@ graph TD
 | **SAGA-045** | Implement replay execution (skip completed steps) | P0 | SAGA-042 | TBD |
 | **SAGA-046** | Add lease renewal background worker | P1 | SAGA-043 | TBD |
 | **SAGA-058** | Implement `ctx.new_uuid()` deterministic UUID generator (Version 5 UUIDs, FR-26 seed reset) | P0 | SAGA-003 | TBD |
-| **SAGA-061** | Implement reactive orphan wake-up via LISTEN/NOTIFY (FR-23) | P1 | SAGA-044 | TBD |
+| **SAGA-061** | Implement reactive orphan wake-up via NATS/Kafka (FR-23) | P1 | SAGA-044 | TBD |
 | **SAGA-062** | Add `correlation_id` propagation to saga lifecycle (FR-24) | P0 | SAGA-041 | TBD |
 | **SAGA-063** | Implement `ctx.emit_progress()` builtin with Kafka publisher (FR-25) | P1 | SAGA-003 | TBD |
 | **SAGA-074** | Implement outbox pattern for domain events (transactional event publishing) | P1 | SAGA-042, SAGA-063 | TBD |
@@ -1471,7 +1471,7 @@ graph TD
 | ID | Criterion | Test Method |
 |----|-----------|-------------|
 | **AC-PO-01** | Orphaned saga resumes within 10 seconds of pod crash (reactive wake-up) | Integration test: kill pod mid-saga, measure time to resume on new pod |
-| **AC-PO-02** | Fallback orphan scan still works when reactive signal unavailable | Integration test: disable LISTEN/NOTIFY, verify 5-minute scan detects orphan |
+| **AC-PO-02** | Fallback orphan scan still works when reactive signal unavailable | Integration test: disable reactive signal (NATS/Kafka), verify 5-minute scan detects orphan |
 | **AC-PO-03** | `correlation_id` propagated to all downstream events | Integration test: trigger saga, verify `ObservationRecorded`, `PostingCreated` have same `correlation_id` |
 | **AC-PO-04** | "Unified Position View" query returns all entries for `correlation_id` | Query test: `WHERE correlation_id = X` returns Retail + Wholesale + Tax entries |
 | **AC-PO-05** | `ctx.emit_progress()` publishes to Kafka topic | Integration test: emit progress, verify message on `saga.progress.{tenant_id}` |
@@ -1532,7 +1532,8 @@ graph TD
 
 ## 9. Links
 
-- [Starlark Saga Orchestration (Core) PRD](./starlark-saga-orchestration-core.md) - Companion PRD for runtime and core features
+- [Starlark Saga Orchestration (Core) PRD](./006-starlark-saga-orchestration-core.md) -
+  Companion PRD for runtime and core features
 - [ADR-028: Starlark Saga Orchestration with CEL Valuation](../adr/0028-starlark-saga-cel-valuation.md)
 - [ADR-014: Financial Instrument Reference Data](../adr/0014-financial-instrument-reference-data.md)
 - [go.starlark.net](https://pkg.go.dev/go.starlark.net/starlark) - Starlark Go implementation

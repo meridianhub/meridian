@@ -285,16 +285,12 @@ CREATE INDEX idx_observation_resolution_bitemporal
 - Quality descending ensures higher quality returned first
 - Observed/created descending for recency within same quality
 
-#### Dataset Lifecycle Trigger
+#### Dataset Lifecycle Enforcement
 
-```sql
-CREATE TRIGGER trg_enforce_dataset_lifecycle
-  BEFORE UPDATE ON dataset_definition
-  FOR EACH ROW
-  EXECUTE FUNCTION enforce_dataset_lifecycle();
-```
+> **CockroachDB note:** PL/pgSQL triggers are not supported. Lifecycle enforcement
+> is implemented at the Go application layer (DatasetDefinitionRepository).
 
-The trigger:
+The repository enforces:
 - Prevents modification of CEL expressions once dataset is ACTIVE
 - Enforces valid status transitions (DRAFT → ACTIVE → DEPRECATED)
 - Sets lifecycle timestamps automatically

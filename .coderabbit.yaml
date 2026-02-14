@@ -1,5 +1,5 @@
 # CodeRabbit Configuration
-# Enable auto-reviews for PRs targeting the develop branch
+# Enable auto-reviews and auto-approval for PRs targeting the develop branch
 
 reviews:
   # Enable reviews for PRs targeting develop branch (in addition to default branch)
@@ -20,8 +20,8 @@ reviews:
   # Optional: Show review status in PR comments
   review_status: true
 
-  # Optional: Request changes for high severity issues
-  request_changes_workflow: false
+  # Auto-approve PRs once all CodeRabbit comments are resolved and pre-merge checks pass
+  request_changes_workflow: true
 
   # Optional: Auto-approve PRs that pass all checks
   auto_review:

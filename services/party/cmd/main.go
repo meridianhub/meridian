@@ -3,16 +3,25 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/google/uuid"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
+	httpAdapter "github.com/meridianhub/meridian/services/party/adapters/http"
 	"github.com/meridianhub/meridian/services/party/adapters/persistence"
+	"github.com/meridianhub/meridian/services/party/config"
+	"github.com/meridianhub/meridian/services/party/domain"
 	"github.com/meridianhub/meridian/services/party/service"
+	"github.com/meridianhub/meridian/services/party/verification"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
@@ -86,6 +95,51 @@ func run(logger *slog.Logger) error {
 	}
 	partyService.WithPaymentMethodRepository(pmRepo)
 
+	// Load verification config with environment-aware validation.
+	// Production: fail fast if config is missing or invalid.
+	// Development: allow service to start without provider (warn and continue).
+	environment := env.GetEnvOrDefault("ENVIRONMENT", "development")
+	isProduction := environment == "production" || environment == "prod"
+
+	verificationCfg, err := config.LoadVerificationConfig()
+	if err != nil {
+		if isProduction {
+			return fmt.Errorf("verification config required in production: %w", err)
+		}
+		logger.Warn("verification config not loaded - KYC provider disabled", "error", err)
+		verificationCfg = nil
+	}
+	if verificationCfg != nil {
+		if err := verificationCfg.ValidateForEnvironment(environment); err != nil {
+			return fmt.Errorf("verification config invalid for environment %q: %w", environment, err)
+		}
+	}
+
+	// Create verification provider and service when configured
+	var provider verification.Provider
+	var verificationSvc *service.VerificationService
+	if verificationCfg != nil {
+		provider, err = verification.NewProvider(verificationCfg)
+		if err != nil {
+			return fmt.Errorf("failed to create verification provider: %w", err)
+		}
+		logger.Info("verification provider initialized", "provider", verificationCfg.Provider)
+
+		partyService.WithVerificationProvider(provider)
+
+		verificationRepo := persistence.NewVerificationRepository(db)
+		verificationSvc, err = service.NewVerificationService(
+			&partyRepoAdapter{repo: repo},
+			verificationRepo,
+			provider,
+			nil, // eventPublisher - not yet wired
+			logger,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to create verification service: %w", err)
+		}
+	}
+
 	logger.Info("party service initialized")
 
 	// Initialize auth interceptor (optional - based on AUTH_ENABLED)
@@ -129,7 +183,7 @@ func run(logger *slog.Logger) error {
 	}
 
 	// Start gRPC server in background
-	serverErrors := make(chan error, 1)
+	serverErrors := make(chan error, 2)
 	go func() {
 		logger.Info("starting gRPC server", "address", address)
 		if err := grpcServer.Serve(listener); err != nil {
@@ -139,12 +193,72 @@ func run(logger *slog.Logger) error {
 
 	// Wait for shutdown signal and orchestrate graceful shutdown
 	orchestrator := bootstrap.NewShutdownOrchestrator(grpcServer, logger)
+
+	// Start HTTP server for webhooks when verification is configured
+	if verificationSvc != nil && verificationCfg != nil {
+		httpMux := http.NewServeMux()
+
+		webhookHandler, err := httpAdapter.NewVerificationWebhookHandler(
+			httpAdapter.VerificationWebhookHandlerConfig{
+				VerificationService: verificationSvc,
+				HMACSecrets: map[string][]byte{
+					"default": []byte(verificationCfg.WebhookSecret),
+				},
+				Logger: logger,
+			},
+		)
+		if err != nil {
+			return fmt.Errorf("failed to create webhook handler: %w", err)
+		}
+
+		httpMux.HandleFunc("/webhooks/verification/", webhookHandler.HandleWebhook)
+		httpMux.HandleFunc("/health", newHTTPHealthHandler(verificationCfg))
+
+		httpPort := env.GetEnvOrDefault("HTTP_PORT", "8081")
+		httpServer := &http.Server{
+			Addr:              ":" + httpPort,
+			Handler:           httpMux,
+			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       30 * time.Second,
+			WriteTimeout:      30 * time.Second,
+			IdleTimeout:       120 * time.Second,
+		}
+
+		go func() {
+			logger.Info("starting HTTP server for webhooks", "port", httpPort)
+			if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				logger.Error("HTTP server failed", "error", err)
+				serverErrors <- fmt.Errorf("HTTP server error: %w", err)
+			}
+		}()
+
+		orchestrator.AddCleanup(func() error {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			return httpServer.Shutdown(shutdownCtx)
+		})
+	}
+
 	orchestrator.AddCleanup(func() error {
 		bootstrap.CloseDatabase(db, logger)
 		return nil
 	})
 
 	return orchestrator.Wait(serverErrors)
+}
+
+// partyRepoAdapter adapts persistence.Repository to satisfy
+// service.PartyRepository interface for the VerificationService.
+type partyRepoAdapter struct {
+	repo *persistence.Repository
+}
+
+func (a *partyRepoAdapter) FindByID(ctx context.Context, partyID uuid.UUID) (*domain.Party, error) {
+	return a.repo.FindByID(ctx, partyID)
+}
+
+func (a *partyRepoAdapter) ExistsByID(ctx context.Context, partyID uuid.UUID) (bool, error) {
+	return a.repo.ExistsByID(ctx, partyID)
 }
 
 // parseLogLevel converts a string log level to slog.Level.
@@ -159,5 +273,32 @@ func parseLogLevel(levelStr string) slog.Level {
 		return slog.LevelError
 	default:
 		return slog.LevelInfo
+	}
+}
+
+// httpHealthResponse is the JSON structure returned by the HTTP health endpoint.
+type httpHealthResponse struct {
+	Status               string `json:"status"`
+	Timestamp            string `json:"timestamp"`
+	VerificationEnabled  bool   `json:"verification_enabled"`
+	VerificationProvider string `json:"verification_provider,omitempty"`
+}
+
+// newHTTPHealthHandler returns an HTTP handler that reports service health
+// including verification provider status.
+func newHTTPHealthHandler(verificationCfg *config.VerificationConfig) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		resp := httpHealthResponse{
+			Status:    "ok",
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		}
+		if verificationCfg != nil {
+			resp.VerificationEnabled = true
+			resp.VerificationProvider = verificationCfg.Provider
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(resp)
 	}
 }

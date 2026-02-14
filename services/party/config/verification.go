@@ -45,6 +45,9 @@ var (
 	ErrEmptyWebhookURLForNonMock    = errors.New("webhook URL is required for non-mock providers")
 	ErrMissingProviderAPIKey        = errors.New("api_key is required in provider config")
 	ErrMissingProviderAPISecret     = errors.New("api_secret is required in provider config")
+	ErrMockProviderInProduction     = errors.New("mock provider not allowed in production")
+	ErrWebhookHTTPSRequired         = errors.New("webhook URL must use HTTPS in production")
+	ErrWebhookSecretTooShort        = errors.New("webhook secret must be at least 32 characters in production")
 )
 
 // SupportedProviders lists all supported verification provider names.
@@ -135,6 +138,31 @@ func (c *VerificationConfig) isSupportedProvider() bool {
 		}
 	}
 	return false
+}
+
+// ValidateForEnvironment validates the configuration with additional
+// constraints based on the deployment environment. In production:
+//   - Mock provider is not allowed
+//   - Webhook URL must use HTTPS
+//   - Webhook secret must be at least 32 characters
+func (c *VerificationConfig) ValidateForEnvironment(environment string) error {
+	if err := c.Validate(); err != nil {
+		return err
+	}
+
+	if strings.ToLower(environment) == "production" || strings.ToLower(environment) == "prod" {
+		if c.IsMock() {
+			return ErrMockProviderInProduction
+		}
+		if !strings.HasPrefix(strings.ToLower(c.WebhookURL), "https://") {
+			return ErrWebhookHTTPSRequired
+		}
+		if len(c.WebhookSecret) < 32 {
+			return ErrWebhookSecretTooShort
+		}
+	}
+
+	return nil
 }
 
 // IsMock returns true if the mock provider is configured.

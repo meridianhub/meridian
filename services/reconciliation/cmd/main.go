@@ -23,6 +23,8 @@ import (
 	"github.com/meridianhub/meridian/services/reconciliation/worker"
 	"github.com/meridianhub/meridian/shared/pkg/health"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
+	"github.com/meridianhub/meridian/shared/platform/redislock"
+	"github.com/meridianhub/meridian/shared/platform/scheduler"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
@@ -225,9 +227,9 @@ func run(logger *slog.Logger) error {
 	}()
 
 	// Wire settlement scheduler (optional, depends on Redis + config)
-	var scheduler *worker.SettlementScheduler
+	var cronScheduler *scheduler.CronScheduler
 	if cfg.Scheduler.Enabled {
-		scheduler = wireScheduler(ctx, cfg, redisClient, logger)
+		cronScheduler = wireScheduler(ctx, cfg, redisClient, logger)
 	} else {
 		logger.Info("settlement scheduler disabled")
 	}
@@ -283,9 +285,9 @@ func run(logger *slog.Logger) error {
 	// Start settlement scheduler in background (after gRPC server is listening)
 	schedulerCtx, schedulerCancel := context.WithCancel(context.Background())
 	defer schedulerCancel()
-	if scheduler != nil {
+	if cronScheduler != nil {
 		go func() {
-			if err := scheduler.Start(schedulerCtx); err != nil {
+			if err := cronScheduler.Start(schedulerCtx); err != nil {
 				logger.Error("scheduler stopped with error", "error", err)
 			}
 		}()
@@ -337,10 +339,10 @@ func run(logger *slog.Logger) error {
 	logger.Info("shutting down servers...")
 
 	// Stop scheduler first (it makes gRPC calls to self)
-	if scheduler != nil {
+	if cronScheduler != nil {
 		logger.Info("stopping settlement scheduler...")
 		schedulerCancel()
-		scheduler.Stop()
+		cronScheduler.Stop()
 		logger.Info("settlement scheduler stopped")
 	}
 
@@ -365,23 +367,20 @@ func run(logger *slog.Logger) error {
 	return nil
 }
 
-// wireScheduler creates and configures the SettlementScheduler with all its dependencies.
+// wireScheduler creates and configures the CronScheduler with all its dependencies.
 // Returns nil if any required dependency is not available.
-func wireScheduler(ctx context.Context, cfg *config.Config, redisClient *redis.Client, logger *slog.Logger) *worker.SettlementScheduler {
+func wireScheduler(ctx context.Context, cfg *config.Config, redisClient *redis.Client, logger *slog.Logger) *scheduler.CronScheduler {
 	if redisClient == nil {
-		logger.Warn("scheduler disabled: Redis not configured (required for leader election)")
+		logger.Warn("scheduler disabled: Redis not configured (required for distributed locking)")
 		return nil
 	}
 
-	// Create leader elector
-	leaderElector := worker.NewRedisLeaderElector(
-		redisClient,
-		worker.RedisLeaderConfig{
-			LockTTL:       cfg.Scheduler.LeaderLockTTL,
-			RenewInterval: cfg.Scheduler.LeaderRenewInterval,
-		},
-		logger,
-	)
+	// Create distributed lock (replaces custom RedisLeaderElector)
+	distLock := redislock.NewLock(redisClient, redislock.Config{
+		KeyPrefix:  "meridian:reconciliation:scheduler",
+		LockTTL:    cfg.Scheduler.LeaderLockTTL,
+		RenewEvery: cfg.Scheduler.LeaderRenewInterval,
+	}, logger)
 
 	// Create execution store (requires pgxpool for direct pgx queries)
 	pool, err := pgxpool.New(ctx, cfg.Database.URL)
@@ -390,7 +389,13 @@ func wireScheduler(ctx context.Context, cfg *config.Config, redisClient *redis.C
 			"error", err)
 		return nil
 	}
-	executionStore := worker.NewPgExecutionStore(pool)
+	executionStore, err := scheduler.NewPgExecutionStore(pool) //nolint:contextcheck // NewPgExecutionStore creates its own context for schema validation
+	if err != nil {
+		logger.Warn("scheduler disabled: execution store validation failed",
+			"error", err)
+		pool.Close()
+		return nil
+	}
 
 	// Create Reference Data client (stub until proto available)
 	refDataClient := worker.NewStubReferenceDataClient(logger)
@@ -409,37 +414,32 @@ func wireScheduler(ctx context.Context, cfg *config.Config, redisClient *redis.C
 	reconGrpcClient := reconciliationv1.NewAccountReconciliationServiceClient(reconConn)
 	reconClient := worker.NewGrpcReconciliationClient(reconGrpcClient)
 
-	// Create scheduler
-	schedulerCfg := worker.SchedulerConfig{
-		PollInterval:    cfg.Scheduler.PollInterval,
-		ShutdownTimeout: cfg.Scheduler.ShutdownTimeout,
-	}
+	// Create adapter types
+	provider := worker.NewSettlementScheduleProvider(refDataClient)
+	executor := worker.NewSettlementExecutor(reconClient, nil, logger)
 
-	scheduler, err := worker.NewSettlementScheduler(
-		refDataClient,
-		reconClient,
-		leaderElector,
-		schedulerCfg,
+	// Create shared cron scheduler
+	cronScheduler := scheduler.NewCronScheduler(
+		provider,
+		executor,
+		distLock,
+		scheduler.CronSchedulerConfig{
+			Name:             "reconciliation",
+			RefreshInterval:  cfg.Scheduler.PollInterval,
+			ShutdownTimeout:  cfg.Scheduler.ShutdownTimeout,
+			ExecutionTimeout: 10 * time.Minute,
+			MaxCatchUpAge:    24 * time.Hour,
+		},
 		logger,
-		nil, // metrics - use default
-		worker.WithExecutionStore(executionStore),
+		scheduler.WithCronExecutionStore(executionStore),
 	)
-	if err != nil {
-		logger.Warn("scheduler disabled: failed to create scheduler",
-			"error", err)
-		pool.Close()
-		if closeErr := reconConn.Close(); closeErr != nil {
-			logger.Error("failed to close reconciliation connection", "error", closeErr)
-		}
-		return nil
-	}
 
 	logger.Info("settlement scheduler configured",
 		"poll_interval", cfg.Scheduler.PollInterval,
 		"leader_lock_ttl", cfg.Scheduler.LeaderLockTTL,
 		"shutdown_timeout", cfg.Scheduler.ShutdownTimeout)
 
-	return scheduler
+	return cronScheduler
 }
 
 // healthServer implements the gRPC health checking protocol.
