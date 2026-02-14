@@ -191,7 +191,7 @@ func TestOverrideService_MigrateToPlatformRef(t *testing.T) {
 					"identical scripts should have >= 95%% similarity")
 			}
 		}
-		assert.Equal(t, 4, wouldMigrateCount, "all 4 platform sagas should be candidates")
+		assert.Equal(t, 7, wouldMigrateCount, "all 7 platform sagas should be candidates")
 
 		// Verify nothing actually changed
 		var scriptCount int
@@ -199,7 +199,7 @@ func TestOverrideService_MigrateToPlatformRef(t *testing.T) {
 			"SELECT COUNT(*) FROM "+schemaName+".saga_definition WHERE script IS NOT NULL AND script != ''").
 			Scan(&scriptCount)
 		require.NoError(t, err)
-		assert.Equal(t, 4, scriptCount, "dry run should not modify data")
+		assert.Equal(t, 7, scriptCount, "dry run should not modify data")
 	})
 
 	t.Run("apply migration converts to platform refs", func(t *testing.T) {
@@ -212,7 +212,7 @@ func TestOverrideService_MigrateToPlatformRef(t *testing.T) {
 				migratedCount++
 			}
 		}
-		assert.Equal(t, 4, migratedCount, "all 4 platform sagas should be migrated")
+		assert.Equal(t, 7, migratedCount, "all 7 platform sagas should be migrated")
 
 		// Verify scripts are now NULL and platform_ref is set
 		var refCount int
@@ -220,7 +220,7 @@ func TestOverrideService_MigrateToPlatformRef(t *testing.T) {
 			"SELECT COUNT(*) FROM "+schemaName+".saga_definition WHERE platform_ref IS NOT NULL AND (script IS NULL OR script = '')").
 			Scan(&refCount)
 		require.NoError(t, err)
-		assert.Equal(t, 4, refCount, "all sagas should now use platform_ref")
+		assert.Equal(t, 7, refCount, "all sagas should now use platform_ref")
 	})
 
 	t.Run("re-running migration skips already-migrated sagas", func(t *testing.T) {

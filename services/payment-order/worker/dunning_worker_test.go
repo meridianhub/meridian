@@ -798,15 +798,31 @@ func TestDunningWorker_TenantIsolation_Processing(t *testing.T) {
 		}
 	}
 
-	w.Stop()
-
 	// Both billing runs should have been processed
 	assert.True(t, processedA.Load(), "tenant A's billing run should have been processed")
 	assert.True(t, processedB.Load(), "tenant B's billing run should have been processed")
 
-	// Both tenant ZSETs should be empty
+	// Wait for ZSET cleanup to complete (ZRem happens after the callback)
 	keyA := dunningRetryZSetPrefix + tenantA
 	keyB := dunningRetryZSetPrefix + tenantB
+	cleanupDeadline := time.After(5 * time.Second)
+	for {
+		countA, _ := client.ZCard(ctx, keyA).Result()
+		countB, _ := client.ZCard(ctx, keyB).Result()
+		if countA == 0 && countB == 0 {
+			break
+		}
+		select {
+		case <-cleanupDeadline:
+			t.Fatalf("ZSET cleanup timeout: A=%d B=%d", countA, countB)
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	w.Stop()
+
+	// Both tenant ZSETs should be empty
 	countA, err := client.ZCard(ctx, keyA).Result()
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), countA)
