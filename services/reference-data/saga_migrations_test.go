@@ -87,6 +87,7 @@ func applySagaMigrations(t *testing.T, pool *pgxpool.Pool) {
 		"20260124000002_saga_references.sql",
 		"20260125000001_platform_saga_definition.sql",
 		"20260125000002_extend_saga_definition_platform_ref.sql",
+		"20260125000003_platform_ref_index.sql",
 		"20260127000001_fix_platform_saga_unique_constraint.sql",
 	}
 
