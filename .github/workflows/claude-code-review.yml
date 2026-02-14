@@ -160,43 +160,32 @@ jobs:
             - **Disagree**: The bot's suggestion is incorrect,
               inapplicable, or based on a misunderstanding.
 
-            **Step 3: Engage with threads you have an opinion on**
+            **Step 3: Include bot thread assessment in YOUR review**
 
-            If you believe a bot thread is already addressed or the bot
-            is wrong, **reply directly on that thread** to move the
-            conversation forward. Tag the bot so it can re-evaluate:
+            **NEVER reply directly in bot threads.** CodeRabbit ignores
+            replies from other bots ("Skipped: comment is from another
+            GitHub bot"). Thread replies are wasted effort.
 
-            ```bash
-            gh api graphql -f query='
-            mutation {
-              addPullRequestReviewThreadReply(input: {
-                pullRequestReviewThreadId: "PRRT_xxx",
-                body: "@coderabbitai This appears to be addressed in Section 12.1 which specifies these as prerequisites. The RPCs are documented as extensions to be built during implementation streams 4, 6, and 9."
-              }) {
-                comment { id }
-              }
-            }'
-            ```
+            Instead, include your assessment of bot concerns in:
+            - **Your summary comment** under a "### Bot Review Notes"
+              section - note which bot concerns are valid, already
+              addressed, or disagreed with
+            - **Your own inline comments** on the same file/line if you
+              have specific feedback about the bot's concern
 
-            **Reply guidelines:**
-            - Be specific: reference the file, line, section, or
-              commit that addresses the concern
-            - Tag the bot (`@coderabbitai`) so it can re-evaluate
-            - Keep it factual and concise
-            - If you genuinely agree with the bot, say so and note it
-              as a finding in your summary
+            The local `/tm` review process handles actually fixing code
+            for valid bot concerns and pushing (which triggers bot
+            re-review and thread resolution).
 
             **Step 4: Decide review outcome**
 
-            - If unresolved bot threads remain (whether you replied or
-              not): use `COMMENT`, not `APPROVE`. Note in your summary
-              which threads are pending and what you replied.
+            - If unresolved bot threads with valid concerns remain:
+              use `COMMENT`, not `APPROVE`. Note in your summary which
+              bot threads need attention.
+            - If bot concerns are already addressed or invalid:
+              proceed with your normal review outcome.
             - If no unresolved bot threads: proceed with your normal
               review outcome.
-
-            The goal is to **help the conversation converge**, not just
-            rigidly block. Your replies give the author and bots the
-            context they need to resolve threads faster.
 
             ## Review Outcomes (Three States)
 
