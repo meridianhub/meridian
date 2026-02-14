@@ -1,5 +1,5 @@
 # Port Configuration: See shared/platform/ports/ports.go for canonical port assignments.
-# This service uses ports.Party for gRPC.
+# This service uses ports.Party for gRPC and ports.HTTPHealth for HTTP webhooks/health.
 apiVersion: v1
 kind: Service
 metadata:
@@ -14,6 +14,10 @@ spec:
   - name: grpc
     port: 50055
     targetPort: grpc
+    protocol: TCP
+  - name: http
+    port: 8081
+    targetPort: http
     protocol: TCP
   selector:
     app: party
