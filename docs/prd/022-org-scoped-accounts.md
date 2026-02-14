@@ -264,7 +264,7 @@ triggers in UDFs).
 
 ```sql
 -- services/party/migrations/20260214000001_enhance_party_association.sql
-ALTER TABLE party_association ADD COLUMN metadata JSONB NULL DEFAULT '{}';
+ALTER TABLE party_association ADD COLUMN metadata JSONB NULL DEFAULT '{}'::jsonb;
 ALTER TABLE party_association
   ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE';
 ALTER TABLE party_association
