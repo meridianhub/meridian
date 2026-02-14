@@ -1,5 +1,5 @@
 # Port Configuration: See shared/platform/ports/ports.go for canonical port assignments.
-# This service uses ports.Party for gRPC.
+# This service uses ports.Party for gRPC and ports.HTTPHealth for HTTP webhooks/health.
 apiVersion: v1
 kind: Service
 metadata:
