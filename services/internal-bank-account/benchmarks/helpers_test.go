@@ -180,7 +180,8 @@ func setupTestContainer(t *testing.T) *testContainer {
 		correspondent_external_ref VARCHAR(100),
 		attributes JSONB NOT NULL DEFAULT '{}',
 		version BIGINT NOT NULL DEFAULT 1,
-		clearing_purpose VARCHAR(32) NULL
+		clearing_purpose VARCHAR(32) NULL,
+		org_party_id UUID NULL
 	)`, pq.QuoteIdentifier(schemaName))).Error
 	if err != nil {
 		t.Fatalf("Failed to create internal_bank_account table: %v", err)
