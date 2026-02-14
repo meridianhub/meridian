@@ -24,5 +24,8 @@ data:
   OTEL_SERVICE_NAME: "forecasting-service"
   OTEL_SAMPLING_RATE: "0.1"
 
+  # Redis configuration (distributed locking for scheduler)
+  REDIS_ADDR: "redis:6379"
+
   # Authentication configuration
   AUTH_ENABLED: "false"
