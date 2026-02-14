@@ -15,5 +15,9 @@ spec:
     port: 50055
     targetPort: grpc
     protocol: TCP
+  - name: http
+    port: 8081
+    targetPort: http
+    protocol: TCP
   selector:
     app: party

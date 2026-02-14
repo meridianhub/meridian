@@ -26,3 +26,8 @@ data:
 
   # Authentication configuration
   AUTH_ENABLED: "false"
+
+  # KYC/AML verification - mock provider for local development
+  VERIFICATION_PROVIDER: "mock"
+  ENVIRONMENT: "development"
+  HTTP_PORT: "8081"
