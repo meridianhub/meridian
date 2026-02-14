@@ -20,7 +20,7 @@ instructions: |
 # PRD: Multi-Party Resource Pooling (BIAN Syndicate Pattern)
 
 **Status:** Draft
-**Version:** 1.4
+**Version:** 1.5
 **Date:** 2026-02-13
 **Author:** Architecture Team
 **Task Master Tag:** `org-scoped-accounts`
@@ -29,6 +29,7 @@ instructions: |
 
 - [0002 - Microservices Per BIAN Domain](../adr/0002-microservices-per-bian-domain.md)
 - [0013 - Universal Quantity Type System](../adr/0013-generic-asset-quantity-types.md)
+- [0028 - Starlark Saga Orchestration with CEL Valuation](../adr/0028-starlark-saga-cel-valuation.md)
 
 **Related PRDs:**
 
@@ -48,6 +49,7 @@ instructions: |
 - [Implementation Tasks](#implementation-tasks)
 - [Appendix A: Syndicate Use Cases](#appendix-a-syndicate-use-cases)
 - [Appendix B: Parimutuel Betting Regulatory Context](#appendix-b-parimutuel-betting-regulatory-context)
+- [Appendix C: UKGC 2026 Transparency Mapping](#appendix-c-ukgc-2026-transparency-mapping)
 
 ---
 
@@ -80,8 +82,9 @@ Organization (the Syndicate).
    "Participant balance *within* Syndicate."
 2. **Governance Metadata:** Enhanced `PartyAssociation` to store
    "Structuring" data (equity share, roles).
-3. **Automated Fulfillment:** Starlark Sagas that read Governance Metadata
-   to execute Collateral Allocation (distribution).
+3. **Dynamic Incentivization:** CEL valuation policies and Starlark
+   Sagas that read Governance Metadata to execute Collateral Allocation
+   with dynamic fee adjustment (see ADR-0028).
 
 ---
 
@@ -100,6 +103,19 @@ account, the money moves:
 2. We know Alice *sent* £100 (via transaction history).
 3. We **do not** have a live balance record stating
    "Alice owns £100 of the Club's equity."
+
+### The "Rigid Cost" Gap
+
+Even when member positions are tracked correctly, platform fees remain
+static. A syndicate with 50 active members pays the same rate as a
+solo user. This creates a perverse incentive: syndicates that drive
+the most volume receive no cost benefit for doing so.
+
+Dynamic platforms solve this with **volume-based fee tiers**, but
+hard-coding tiers into application logic creates maintenance burden
+and prevents tenant-level customization. CEL valuation policies
+(ADR-0028) allow fee rules to be expressed as evaluable expressions
+that respond to syndicate metrics at runtime.
 
 ### Why this fails BIAN compliance
 
@@ -134,6 +150,31 @@ We extend the Party Service to act as the **Syndicate Assembly** engine.
 
 Distribution Sagas (Collateral Allocation) read the Metadata to determine
 splits, then execute transfers to the Scoped Accounts.
+
+### 4. Dynamic Fee Adjustment via CEL Policies (FR-3.3)
+
+Per ADR-0028, fee calculations can be expressed as CEL valuation
+policies rather than hard-coded application logic. This enables
+tenant-configurable pricing that responds to syndicate metrics.
+
+**Example CEL policy (stored in valuation service):**
+
+```cel
+// Tiered platform fee based on active syndicate member count
+member_count <= 5  ? base_fee :
+member_count <= 20 ? base_fee * 0.85 :
+member_count <= 50 ? base_fee * 0.70 :
+                     base_fee * 0.55
+```
+
+**Integration point:** Sagas call `run_policy(policy_id, context)` to
+evaluate fee rules at distribution time. The context map includes
+syndicate metrics (member count, total pool size, activity period)
+drawn from Party Association data.
+
+This solves the "Rigid Cost Gap": syndicates that drive volume
+receive proportional fee reductions, configured per-tenant without
+code deployment.
 
 ---
 
@@ -395,6 +436,58 @@ def distribute_yield(ctx):
     return postings
 ```
 
+### Example: Viral Fee Discount Saga
+
+Demonstrates dynamic fee calculation using CEL policies. When a
+syndicate grows, its platform fee decreases, incentivizing member
+recruitment.
+
+```python
+# sagas/syndicate/viral_fee.star
+
+def apply_syndicate_fee(ctx):
+    """Calculate and apply platform fee with syndicate discount."""
+
+    participants = party.list_participants(
+        org_id=ctx.org_id,
+        relationship_type="SYNDICATE_PARTICIPANT"
+    )
+
+    # CEL policy evaluates fee based on syndicate size
+    fee_result = run_policy(
+        policy_id="syndicate_platform_fee",
+        context={
+            "member_count": len(participants),
+            "pool_size": ctx.pool_amount,
+            "base_fee": Decimal("5.00"),
+        }
+    )
+
+    adjusted_fee = Decimal(fee_result["value"])
+
+    pool_ref = (
+        "party:" + ctx.org_id
+        + ":org:" + ctx.org_id
+        + ":currency:GBP"
+    )
+    pool_account = resolve_account(pool_ref)
+
+    return [
+        posting(
+            account_id=pool_account,
+            amount=adjusted_fee,
+            direction="DEBIT",
+            description="Platform Fee (syndicate discount applied)"
+        ),
+        posting(
+            account_id=ctx.platform_fee_account,
+            amount=adjusted_fee,
+            direction="CREDIT",
+            description="Platform Fee Revenue"
+        ),
+    ]
+```
+
 ---
 
 ## Implementation Tasks
@@ -619,3 +712,28 @@ a Remote Betting Intermediary licence?"*
   Allocation.
 - [ ] Flexibility: Distribution logic changes via Starlark
   (no code deploy).
+- [ ] Dynamic Pricing: CEL policy evaluation completes < 5ms p99.
+
+---
+
+## Appendix C: UKGC 2026 Transparency Mapping
+
+*Maps Meridian capabilities to the UKGC's anticipated 2026
+transparency requirements for online gambling operators.*
+
+The Gambling Commission's evolving framework emphasizes
+**real-time transparency** and **auditable fund segregation**.
+Meridian's architecture maps directly to these requirements.
+
+| UKGC Requirement | Meridian Feature |
+|---|---|
+| Real-time fund segregation visibility | Org-scoped accounts with bi-temporal audit trail |
+| Individual player balance attribution | `party_id + org_party_id` scoping on `account` table |
+| Fee transparency and disclosure | CEL valuation policies with audit log of evaluated rules |
+| Anti-money laundering trail | Immutable saga execution log with full posting lineage |
+| Syndicate/pool structure disclosure | Party Association metadata (publicly queryable per member) |
+| Dispute resolution data | Bi-temporal queries reconstruct state at any point in time |
+
+This mapping positions Meridian ahead of anticipated regulatory
+changes, reducing compliance risk for operators adopting the
+syndicate pattern.
