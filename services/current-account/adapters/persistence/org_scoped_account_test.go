@@ -77,7 +77,7 @@ func TestOrgScopedAccount_CanCreateWithOrgPartyID(t *testing.T) {
 	require.NoError(t, err)
 
 	// Set org_party_id directly via raw SQL since the domain model doesn't expose it yet
-	err = db.Exec("UPDATE accounts SET org_party_id = ? WHERE account_id = ?", orgPartyID, accountID).Error
+	err = db.Exec("UPDATE account SET org_party_id = ? WHERE account_id = ?", orgPartyID, accountID).Error
 	require.NoError(t, err)
 
 	// Verify org_party_id was stored
