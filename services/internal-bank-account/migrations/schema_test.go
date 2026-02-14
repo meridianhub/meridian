@@ -9,6 +9,7 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 // getMigrationsDir returns the absolute path to the migrations directory.
@@ -527,6 +528,137 @@ func TestSchema_SoftDelete(t *testing.T) {
 	`).Scan(&count).Error
 	require.NoError(t, err)
 	assert.Equal(t, 0, count, "Soft-deleted account should be excluded with WHERE deleted_at IS NULL")
+}
+
+// applyAllMigrations reads and executes all migration SQL files in order.
+func applyAllMigrations(t *testing.T, db *gorm.DB, migrationsDir string) {
+	t.Helper()
+	migrations := []string{
+		"20260112000001_initial.sql",
+		"20260116000001_add_clearing_purpose_column.sql",
+		"20260116000002_backfill_clearing_purpose.sql",
+		"20260206000001_create_valuation_features.sql",
+		"20260207000001_create_lien_table.sql",
+		"20260214000001_add_org_party_id.sql",
+		"20260214000002_add_org_scoping_indexes.sql",
+	}
+	for _, migration := range migrations {
+		sql, err := readMigrationFile(filepath.Join(migrationsDir, migration))
+		require.NoError(t, err, "Failed to read migration %s", migration)
+		require.NoError(t, db.Exec(sql).Error, "Failed to apply migration %s", migration)
+	}
+}
+
+// TestMigrations_OrgPartyID_ApplySuccessfully verifies the org_party_id migrations apply cleanly.
+func TestMigrations_OrgPartyID_ApplySuccessfully(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping migration test in short mode")
+	}
+
+	migrationsDir := getMigrationsDir(t)
+	db, cleanup := testdb.SetupPostgres(t, nil)
+	defer cleanup()
+
+	applyAllMigrations(t, db, migrationsDir)
+
+	// Verify org_party_id column exists
+	var columnCount int
+	err := db.Raw(`
+		SELECT COUNT(*) FROM information_schema.columns
+		WHERE table_name = 'internal_bank_account'
+		AND column_name = 'org_party_id'
+	`).Scan(&columnCount).Error
+	require.NoError(t, err)
+	assert.Equal(t, 1, columnCount, "org_party_id column should exist")
+
+	// Verify org_party_id is nullable (UUID NULL)
+	var isNullable string
+	err = db.Raw(`
+		SELECT is_nullable FROM information_schema.columns
+		WHERE table_name = 'internal_bank_account'
+		AND column_name = 'org_party_id'
+	`).Scan(&isNullable).Error
+	require.NoError(t, err)
+	assert.Equal(t, "YES", isNullable, "org_party_id should be nullable")
+
+	// Verify partial index exists
+	var indexCount int
+	err = db.Raw(`
+		SELECT COUNT(*) FROM pg_indexes
+		WHERE indexname = 'idx_internal_bank_account_org_party'
+	`).Scan(&indexCount).Error
+	require.NoError(t, err)
+	assert.Equal(t, 1, indexCount, "idx_internal_bank_account_org_party index should exist")
+}
+
+// TestSchema_OrgPartyID_GlobalAccountNullOrgParty verifies global accounts have NULL org_party_id.
+func TestSchema_OrgPartyID_GlobalAccountNullOrgParty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping org_party_id test in short mode")
+	}
+
+	migrationsDir := getMigrationsDir(t)
+	db, cleanup := testdb.SetupPostgres(t, nil)
+	defer cleanup()
+
+	applyAllMigrations(t, db, migrationsDir)
+
+	// Insert a global account (no org_party_id)
+	err := db.Exec(`
+		INSERT INTO internal_bank_account (
+			account_id, account_code, name, account_type,
+			instrument_code, dimension, created_by, updated_by
+		) VALUES (
+			'ACC-GLOBAL', 'GLOBAL-CLR', 'Global Clearing', 'CLEARING',
+			'GBP', 'CURRENCY', 'test', 'test'
+		)
+	`).Error
+	require.NoError(t, err, "Global account insert should succeed")
+
+	// Verify org_party_id is NULL
+	var orgPartyID *string
+	err = db.Raw(`
+		SELECT org_party_id FROM internal_bank_account
+		WHERE account_id = 'ACC-GLOBAL'
+	`).Scan(&orgPartyID).Error
+	require.NoError(t, err)
+	assert.Nil(t, orgPartyID, "org_party_id should be NULL for global accounts")
+}
+
+// TestSchema_OrgPartyID_OrgScopedAccount verifies org-scoped accounts can set org_party_id.
+func TestSchema_OrgPartyID_OrgScopedAccount(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping org_party_id test in short mode")
+	}
+
+	migrationsDir := getMigrationsDir(t)
+	db, cleanup := testdb.SetupPostgres(t, nil)
+	defer cleanup()
+
+	applyAllMigrations(t, db, migrationsDir)
+
+	orgID := "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+
+	// Insert an org-scoped account
+	err := db.Exec(`
+		INSERT INTO internal_bank_account (
+			account_id, account_code, name, account_type,
+			instrument_code, dimension, org_party_id, created_by, updated_by
+		) VALUES (
+			'ACC-ORG', 'ORG-NOSTRO', 'Org Nostro', 'NOSTRO',
+			'USD', 'CURRENCY', ?, 'test', 'test'
+		)
+	`, orgID).Error
+	require.NoError(t, err, "Org-scoped account insert should succeed")
+
+	// Verify org_party_id is set
+	var retrievedOrgID string
+	err = db.Raw(`
+		SELECT org_party_id FROM internal_bank_account
+		WHERE account_id = 'ACC-ORG'
+	`).Scan(&retrievedOrgID).Error
+	require.NoError(t, err)
+	assert.Equal(t, orgID, retrievedOrgID)
 }
 
 // TestSchema_CompositeIndexes verifies composite indexes exist.
