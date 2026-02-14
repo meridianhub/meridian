@@ -36,6 +36,7 @@ func setupValuationFeatureServiceTest(t *testing.T) (*Service, *gorm.DB, context
 		name VARCHAR(255) NOT NULL,
 		account_type VARCHAR(20) NOT NULL DEFAULT 'CLEARING',
 		clearing_purpose VARCHAR(20) NOT NULL DEFAULT 'UNSPECIFIED',
+		org_party_id UUID NULL,
 		instrument_code VARCHAR(32) NOT NULL DEFAULT 'GBP',
 		dimension VARCHAR(32) NOT NULL DEFAULT 'CURRENCY',
 		status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',

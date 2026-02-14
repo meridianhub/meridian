@@ -1162,3 +1162,113 @@ func TestBuilder_WithClearingPurpose_DefaultValue(t *testing.T) {
 	// Without calling WithClearingPurpose, the value should be the zero value
 	assert.Equal(t, ClearingPurpose(""), account.ClearingPurpose())
 }
+
+func TestNewInternalBankAccount_OrgScoped_NonClearingSuccess(t *testing.T) {
+	orgID := uuid.New()
+
+	// Non-CLEARING account types should succeed with org scoping
+	nonClearingTypes := []AccountType{
+		AccountTypeNostro,
+		AccountTypeVostro,
+		AccountTypeHolding,
+		AccountTypeSuspense,
+		AccountTypeRevenue,
+		AccountTypeExpense,
+	}
+
+	for _, accountType := range nonClearingTypes {
+		t.Run(string(accountType), func(t *testing.T) {
+			account, err := NewInternalBankAccount(
+				"IBA-ORG-001",
+				"ORG_"+string(accountType),
+				"Org Scoped "+string(accountType),
+				accountType,
+				ClearingPurposeUnspecified,
+				"USD",
+				"CURRENCY",
+				WithOrgPartyID(orgID),
+			)
+
+			require.NoError(t, err)
+			require.NotNil(t, account.OrgPartyID())
+			assert.Equal(t, orgID, *account.OrgPartyID())
+			assert.Equal(t, accountType, account.AccountType())
+		})
+	}
+}
+
+func TestNewInternalBankAccount_OrgScoped_ClearingRejected(t *testing.T) {
+	orgID := uuid.New()
+
+	account, err := NewInternalBankAccount(
+		"IBA-ORG-002",
+		"ORG_CLEARING",
+		"Org Scoped Clearing",
+		AccountTypeClearing,
+		ClearingPurposeGeneral,
+		"USD",
+		"CURRENCY",
+		WithOrgPartyID(orgID),
+	)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrOrgScopedClearingNotAllowed)
+	assert.Equal(t, InternalBankAccount{}, account, "should return zero value on error")
+}
+
+func TestNewInternalBankAccount_GlobalAccount_NilOrgPartyID(t *testing.T) {
+	// Default (no WithOrgPartyID option) should result in nil OrgPartyID
+	account, err := NewInternalBankAccount(
+		"IBA-GLOBAL",
+		"GLOBAL_CLEARING",
+		"Global Clearing",
+		AccountTypeClearing,
+		ClearingPurposeGeneral,
+		"USD",
+		"CURRENCY",
+	)
+
+	require.NoError(t, err)
+	assert.Nil(t, account.OrgPartyID(), "global account should have nil OrgPartyID")
+}
+
+func TestBuilder_WithOrgPartyID(t *testing.T) {
+	orgID := uuid.New()
+
+	account := NewInternalBankAccountBuilder().
+		WithID(uuid.New()).
+		WithAccountID("IBA-001").
+		WithAccountCode("ORG_NOSTRO").
+		WithName("Org Nostro").
+		WithAccountType(AccountTypeNostro).
+		WithOrgPartyID(&orgID).
+		WithInstrumentCode("USD").
+		WithDimension("CURRENCY").
+		WithStatus(AccountStatusActive).
+		WithVersion(1).
+		WithCreatedAt(time.Now()).
+		WithUpdatedAt(time.Now()).
+		Build()
+
+	require.NotNil(t, account.OrgPartyID())
+	assert.Equal(t, orgID, *account.OrgPartyID())
+}
+
+func TestBuilder_WithOrgPartyID_Nil(t *testing.T) {
+	account := NewInternalBankAccountBuilder().
+		WithID(uuid.New()).
+		WithAccountID("IBA-001").
+		WithAccountCode("GLOBAL_CLEARING").
+		WithName("Global Clearing").
+		WithAccountType(AccountTypeClearing).
+		WithOrgPartyID(nil).
+		WithInstrumentCode("USD").
+		WithDimension("CURRENCY").
+		WithStatus(AccountStatusActive).
+		WithVersion(1).
+		WithCreatedAt(time.Now()).
+		WithUpdatedAt(time.Now()).
+		Build()
+
+	assert.Nil(t, account.OrgPartyID())
+}

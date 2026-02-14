@@ -48,6 +48,7 @@ func toEntity(ctx context.Context, account domain.InternalBankAccount) *Internal
 		Name:                     account.Name(),
 		AccountType:              string(account.AccountType()),
 		ClearingPurpose:          clearingPurpose,
+		OrgPartyID:               account.OrgPartyID(),
 		InstrumentCode:           account.InstrumentCode(),
 		Dimension:                account.Dimension(),
 		Status:                   string(account.Status()),
@@ -100,6 +101,7 @@ func toDomain(entity *InternalBankAccountEntity) domain.InternalBankAccount {
 		WithName(entity.Name).
 		WithAccountType(domain.AccountType(entity.AccountType)).
 		WithClearingPurpose(clearingPurpose).
+		WithOrgPartyID(entity.OrgPartyID).
 		WithInstrumentCode(entity.InstrumentCode).
 		WithDimension(entity.Dimension).
 		WithStatus(domain.AccountStatus(entity.Status)).

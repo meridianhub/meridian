@@ -44,6 +44,9 @@ type InternalBankAccountEntity struct {
 	// Clearing purpose (only meaningful for CLEARING account type)
 	ClearingPurpose *string `gorm:"column:clearing_purpose;type:varchar(32)"`
 
+	// Organization party ID for org-scoped accounts (NULL = global)
+	OrgPartyID *uuid.UUID `gorm:"column:org_party_id;type:uuid"`
+
 	// Correspondent bank details (nullable for non-nostro/vostro accounts)
 	CorrespondentBankID      *string `gorm:"column:correspondent_bank_id;type:varchar(50)"`
 	CorrespondentBankName    *string `gorm:"column:correspondent_bank_name;type:varchar(255)"`

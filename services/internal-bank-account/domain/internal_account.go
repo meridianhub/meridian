@@ -28,11 +28,26 @@ type InternalBankAccount struct {
 	instrumentCode  string          // References Reference Data (e.g., "USD", "GBP")
 	dimension       string          // From reference_data (e.g., "CURRENCY", "ENERGY")
 	status          AccountStatus
+	orgPartyID      *uuid.UUID            // Organization party ID for org-scoped accounts (nil = global)
 	correspondent   *CorrespondentDetails // Required for NOSTRO/VOSTRO
 	attributes      map[string]string     // Metadata
 	version         int64
 	createdAt       time.Time
 	updatedAt       time.Time
+}
+
+// AccountOption is a functional option for configuring InternalBankAccount creation.
+type AccountOption func(*accountOptions)
+
+type accountOptions struct {
+	orgPartyID *uuid.UUID
+}
+
+// WithOrgPartyID sets the organization party ID for org-scoped accounts.
+func WithOrgPartyID(id uuid.UUID) AccountOption {
+	return func(o *accountOptions) {
+		o.orgPartyID = &id
+	}
 }
 
 // NewInternalBankAccount creates a new InternalBankAccount with validated fields.
@@ -48,11 +63,13 @@ type InternalBankAccount struct {
 //   - accountType must be valid
 //   - clearingPurpose must be valid if provided
 //   - clearingPurpose can only be non-UNSPECIFIED for CLEARING accounts
+//   - org-scoped accounts (orgPartyID non-nil) cannot be CLEARING type
 func NewInternalBankAccount(
 	accountID, accountCode, name string,
 	accountType AccountType,
 	clearingPurpose ClearingPurpose,
 	instrumentCode, dimension string,
+	opts ...AccountOption,
 ) (InternalBankAccount, error) {
 	if accountID == "" {
 		return InternalBankAccount{}, ErrAccountIDRequired
@@ -78,6 +95,17 @@ func NewInternalBankAccount(
 		return InternalBankAccount{}, ErrClearingPurposeRequired
 	}
 
+	// Apply functional options
+	var options accountOptions
+	for _, opt := range opts {
+		opt(&options)
+	}
+
+	// Org-scoped accounts cannot be CLEARING type
+	if options.orgPartyID != nil && accountType == AccountTypeClearing {
+		return InternalBankAccount{}, ErrOrgScopedClearingNotAllowed
+	}
+
 	now := time.Now()
 	return InternalBankAccount{
 		id:              uuid.New(),
@@ -88,6 +116,7 @@ func NewInternalBankAccount(
 		clearingPurpose: clearingPurpose,
 		instrumentCode:  instrumentCode,
 		dimension:       dimension,
+		orgPartyID:      options.orgPartyID,
 		status:          AccountStatusActive,
 		correspondent:   nil,
 		attributes:      nil,
@@ -246,6 +275,12 @@ func (a InternalBankAccount) Status() AccountStatus {
 	return a.status
 }
 
+// OrgPartyID returns the organization party ID for org-scoped accounts.
+// Returns nil for global accounts.
+func (a InternalBankAccount) OrgPartyID() *uuid.UUID {
+	return a.orgPartyID
+}
+
 // Correspondent returns the correspondent bank details.
 // Returns nil for non-NOSTRO/VOSTRO accounts.
 func (a InternalBankAccount) Correspondent() *CorrespondentDetails {
@@ -345,6 +380,12 @@ func (b *InternalBankAccountBuilder) WithDimension(dimension string) *InternalBa
 // WithStatus sets the account status.
 func (b *InternalBankAccountBuilder) WithStatus(status AccountStatus) *InternalBankAccountBuilder {
 	b.account.status = status
+	return b
+}
+
+// WithOrgPartyID sets the organization party ID for org-scoped accounts.
+func (b *InternalBankAccountBuilder) WithOrgPartyID(orgPartyID *uuid.UUID) *InternalBankAccountBuilder {
+	b.account.orgPartyID = orgPartyID
 	return b
 }
 
