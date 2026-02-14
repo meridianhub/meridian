@@ -41,6 +41,7 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 		currency CHAR(3) NOT NULL DEFAULT 'GBP',
 		status VARCHAR(20) NOT NULL DEFAULT 'active',
 		party_id UUID NOT NULL,
+		org_party_id UUID NULL,
 		balance BIGINT NOT NULL DEFAULT 0,
 		available_balance BIGINT NOT NULL DEFAULT 0,
 		overdraft_limit BIGINT NOT NULL DEFAULT 0,
