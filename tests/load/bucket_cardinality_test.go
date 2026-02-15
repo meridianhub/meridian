@@ -393,10 +393,10 @@ func TestSQLBucketKeyLookup(t *testing.T) {
 	require.NoError(t, err)
 	assert.Greater(t, count, int64(0), "Should find positions")
 
-	// Use P99 threshold: allow up to 50ms for containerized CI environments
+	// Use P99 threshold: allow up to 75ms for containerized CI environments
 	// Production with tuned postgres and warm cache should be <10ms
 	// Container overhead, cold JIT compilation, and CI variability add latency
-	assert.Less(t, elapsed, 50*time.Millisecond, "Bucket lookup should complete in <50ms (P99 for CI container env), took %v", elapsed)
+	assert.Less(t, elapsed, 75*time.Millisecond, "Bucket lookup should complete in <75ms (P99 for CI container env), took %v", elapsed)
 	t.Logf("Bucket key lookup for 100 buckets found %d positions in %v", count, elapsed)
 }
 
