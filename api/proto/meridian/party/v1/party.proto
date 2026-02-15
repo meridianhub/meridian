@@ -5,6 +5,7 @@ package meridian.party.v1;
 import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
 import "google/protobuf/field_mask.proto";
+import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 import "protoc-gen-openapiv2/options/annotations.proto";
 
@@ -114,6 +115,22 @@ enum RelationshipType {
   RELATIONSHIP_TYPE_GUARANTOR = 4;
   // RELATIONSHIP_TYPE_BENEFICIAL_OWNER is a beneficial ownership relationship.
   RELATIONSHIP_TYPE_BENEFICIAL_OWNER = 5;
+  // RELATIONSHIP_TYPE_SYNDICATE_PARTICIPANT is a syndicate participation relationship.
+  RELATIONSHIP_TYPE_SYNDICATE_PARTICIPANT = 6;
+  // RELATIONSHIP_TYPE_SYNDICATE_HOST is a syndicate hosting relationship.
+  RELATIONSHIP_TYPE_SYNDICATE_HOST = 7;
+}
+
+// AssociationStatus defines the lifecycle state of a party association.
+enum AssociationStatus {
+  // ASSOCIATION_STATUS_UNSPECIFIED means the status is unknown.
+  ASSOCIATION_STATUS_UNSPECIFIED = 0;
+  // ASSOCIATION_STATUS_ACTIVE means the association is currently active.
+  ASSOCIATION_STATUS_ACTIVE = 1;
+  // ASSOCIATION_STATUS_SUSPENDED means the association is temporarily suspended.
+  ASSOCIATION_STATUS_SUSPENDED = 2;
+  // ASSOCIATION_STATUS_TERMINATED means the association has been permanently ended.
+  ASSOCIATION_STATUS_TERMINATED = 3;
 }
 
 // Party represents a legal entity in the BIAN Party Reference Data Directory.
@@ -391,6 +408,18 @@ message RegisterAssociationsRequest {
     defined_only: true
     not_in: [0] // Prevent UNSPECIFIED
   }];
+
+  // metadata contains syndicate structuring data (e.g., allocation_share, role).
+  google.protobuf.Struct metadata = 4;
+
+  // status is the lifecycle state of this association (defaults to ACTIVE if not specified).
+  AssociationStatus status = 5;
+
+  // effective_from is when this association becomes effective.
+  google.protobuf.Timestamp effective_from = 6;
+
+  // effective_to is when this association expires (null means indefinite).
+  google.protobuf.Timestamp effective_to = 7;
 }
 
 // RegisterAssociationsResponse is the response after registering an association.
@@ -409,6 +438,18 @@ message RegisterAssociationsResponse {
 
   // created_at is when the association was created.
   google.protobuf.Timestamp created_at = 5 [(buf.validate.field).required = true];
+
+  // metadata contains syndicate structuring data.
+  google.protobuf.Struct metadata = 6;
+
+  // status is the lifecycle state of the association.
+  AssociationStatus status = 7;
+
+  // effective_from is when this association became effective.
+  google.protobuf.Timestamp effective_from = 8;
+
+  // effective_to is when this association expires.
+  google.protobuf.Timestamp effective_to = 9;
 }
 
 // UpdateAssociationsRequest is the request to update a party association.
@@ -480,6 +521,18 @@ message Association {
 
   // updated_at is when the association was last updated.
   google.protobuf.Timestamp updated_at = 5;
+
+  // metadata contains syndicate structuring data (e.g., allocation_share, role).
+  google.protobuf.Struct metadata = 6;
+
+  // status is the lifecycle state of this association.
+  AssociationStatus status = 7;
+
+  // effective_from is when this association became effective.
+  google.protobuf.Timestamp effective_from = 8;
+
+  // effective_to is when this association expires (null means indefinite).
+  google.protobuf.Timestamp effective_to = 9;
 }
 
 // --- Business Qualifier: Demographics ---
