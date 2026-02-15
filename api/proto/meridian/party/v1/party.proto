@@ -685,6 +685,59 @@ message RetrieveBankRelationsResponse {
   google.protobuf.Timestamp updated_at = 5;
 }
 
+// --- Business Qualifier: Syndicate Participants ---
+
+// ListParticipantsRequest is the request to list active participants for a syndicate.
+message ListParticipantsRequest {
+  // org_party_id is the identifier of the syndicate (organization party).
+  string org_party_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // relationship_type filters participants by relationship type.
+  RelationshipType relationship_type = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+// ListParticipantsResponse is the response containing active participants.
+message ListParticipantsResponse {
+  // participants is the list of active participant associations.
+  repeated Association participants = 1;
+}
+
+// GetStructuringDataRequest is the request to retrieve structuring metadata for a participant.
+message GetStructuringDataRequest {
+  // party_id is the identifier of the participant party.
+  string party_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // org_party_id is the identifier of the syndicate (organization party).
+  string org_party_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // relationship_type is the type of relationship to query.
+  RelationshipType relationship_type = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+// GetStructuringDataResponse is the response containing the structuring metadata.
+message GetStructuringDataResponse {
+  // metadata contains the structuring data (e.g., allocation_share, role).
+  google.protobuf.Struct metadata = 1;
+}
+
 // --- Business Qualifier: PaymentMethods ---
 
 // PaymentMethodProvider defines supported external payment providers.
@@ -1003,6 +1056,22 @@ service PartyService {
   rpc RetrieveBankRelations(RetrieveBankRelationsRequest) returns (RetrieveBankRelationsResponse) {
     option (google.api.http) = {
       get: "/v1/parties/{party_id}/bank-relations"
+    };
+  }
+
+  // --- Business Qualifier: Syndicate Participant Operations ---
+
+  // ListParticipants returns all active participants for a syndicate (org party).
+  rpc ListParticipants(ListParticipantsRequest) returns (ListParticipantsResponse) {
+    option (google.api.http) = {
+      get: "/v1/parties/{org_party_id}/participants"
+    };
+  }
+
+  // GetStructuringData returns the structuring metadata for a specific participant in a syndicate.
+  rpc GetStructuringData(GetStructuringDataRequest) returns (GetStructuringDataResponse) {
+    option (google.api.http) = {
+      get: "/v1/parties/{org_party_id}/participants/{party_id}/structuring-data"
     };
   }
 
