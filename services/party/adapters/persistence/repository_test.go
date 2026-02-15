@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/lib/pq"
 
@@ -66,6 +67,21 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 		transaction_id VARCHAR(100),
 		client_ip VARCHAR(45),
 		user_agent TEXT
+	)`, pq.QuoteIdentifier(schemaName))).Error
+	require.NoError(t, err)
+
+	// Create the party_association table in the tenant schema
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.party_association (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		party_id UUID NOT NULL,
+		related_party_id UUID NOT NULL,
+		relationship_type VARCHAR(50) NOT NULL,
+		metadata JSONB NULL DEFAULT '{}'::jsonb,
+		status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+		effective_from TIMESTAMPTZ NOT NULL DEFAULT now(),
+		effective_to TIMESTAMPTZ NULL,
+		created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+		updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 	)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
@@ -652,6 +668,196 @@ func TestFindByIDForUpdate_WithOrganizationContext_UsesOrgScope(t *testing.T) {
 	found, err = repo.FindByIDForUpdate(orgCtx, party.ID())
 	// May find via public schema fallback
 	t.Logf("FindByIDForUpdate with org context: found=%v, err=%v", found != nil, err)
+}
+
+// ListParticipants and GetStructuringData repository tests
+
+func TestListParticipants_ReturnsActiveAssociations(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+
+	orgPartyID := uuid.New()
+	participant1 := uuid.New()
+	participant2 := uuid.New()
+
+	// Create two ACTIVE associations pointing to the same org
+	_, err := repo.SaveAssociationWithInput(ctx, participant1, orgPartyID, "SYNDICATE_MEMBER", &AssociationInput{
+		Status: "ACTIVE",
+	})
+	require.NoError(t, err)
+
+	_, err = repo.SaveAssociationWithInput(ctx, participant2, orgPartyID, "SYNDICATE_MEMBER", &AssociationInput{
+		Status: "ACTIVE",
+	})
+	require.NoError(t, err)
+
+	// List participants
+	results, err := repo.ListParticipants(ctx, orgPartyID, "SYNDICATE_MEMBER")
+	require.NoError(t, err)
+	assert.Len(t, results, 2)
+
+	// Verify both participants are returned
+	partyIDs := make(map[uuid.UUID]bool)
+	for _, a := range results {
+		partyIDs[a.PartyID] = true
+	}
+	assert.True(t, partyIDs[participant1])
+	assert.True(t, partyIDs[participant2])
+}
+
+func TestListParticipants_ExcludesSuspendedAndTerminated(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+
+	orgPartyID := uuid.New()
+	activeParty := uuid.New()
+	suspendedParty := uuid.New()
+	terminatedParty := uuid.New()
+
+	_, err := repo.SaveAssociationWithInput(ctx, activeParty, orgPartyID, "SYNDICATE_MEMBER", &AssociationInput{
+		Status: "ACTIVE",
+	})
+	require.NoError(t, err)
+
+	_, err = repo.SaveAssociationWithInput(ctx, suspendedParty, orgPartyID, "SYNDICATE_MEMBER", &AssociationInput{
+		Status: "SUSPENDED",
+	})
+	require.NoError(t, err)
+
+	_, err = repo.SaveAssociationWithInput(ctx, terminatedParty, orgPartyID, "SYNDICATE_MEMBER", &AssociationInput{
+		Status: "TERMINATED",
+	})
+	require.NoError(t, err)
+
+	results, err := repo.ListParticipants(ctx, orgPartyID, "SYNDICATE_MEMBER")
+	require.NoError(t, err)
+	assert.Len(t, results, 1)
+	assert.Equal(t, activeParty, results[0].PartyID)
+}
+
+func TestListParticipants_FiltersRelationshipType(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+
+	orgPartyID := uuid.New()
+	member := uuid.New()
+	agent := uuid.New()
+
+	_, err := repo.SaveAssociationWithInput(ctx, member, orgPartyID, "SYNDICATE_MEMBER", nil)
+	require.NoError(t, err)
+
+	_, err = repo.SaveAssociationWithInput(ctx, agent, orgPartyID, "AGENT", nil)
+	require.NoError(t, err)
+
+	results, err := repo.ListParticipants(ctx, orgPartyID, "SYNDICATE_MEMBER")
+	require.NoError(t, err)
+	assert.Len(t, results, 1)
+	assert.Equal(t, member, results[0].PartyID)
+}
+
+func TestListParticipants_EmptyResult(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+
+	results, err := repo.ListParticipants(ctx, uuid.New(), "SYNDICATE_MEMBER")
+	require.NoError(t, err)
+	assert.Empty(t, results)
+}
+
+func TestGetStructuringData_ReturnsMetadata(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+
+	partyID := uuid.New()
+	orgPartyID := uuid.New()
+	metadata := `{"commitment_amount":"5000000","share_percentage":"25.5","role":"lead_arranger"}`
+
+	_, err := repo.SaveAssociationWithInput(ctx, partyID, orgPartyID, "SYNDICATE_MEMBER", &AssociationInput{
+		Metadata: &metadata,
+	})
+	require.NoError(t, err)
+
+	result, err := repo.GetStructuringData(ctx, partyID, orgPartyID, "SYNDICATE_MEMBER")
+	require.NoError(t, err)
+	assert.Equal(t, "5000000", result["commitment_amount"])
+	assert.Equal(t, "25.5", result["share_percentage"])
+	assert.Equal(t, "lead_arranger", result["role"])
+}
+
+func TestGetStructuringData_NotFoundReturnsEmptyMap(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+
+	result, err := repo.GetStructuringData(ctx, uuid.New(), uuid.New(), "SYNDICATE_MEMBER")
+	require.NoError(t, err)
+	assert.NotNil(t, result, "Should return empty map, not nil")
+	assert.Empty(t, result, "Should return empty map when not found")
+}
+
+func TestGetStructuringData_NilMetadataReturnsEmptyMap(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+
+	partyID := uuid.New()
+	orgPartyID := uuid.New()
+
+	// Create association without metadata
+	_, err := repo.SaveAssociationWithInput(ctx, partyID, orgPartyID, "SYNDICATE_MEMBER", nil)
+	require.NoError(t, err)
+
+	result, err := repo.GetStructuringData(ctx, partyID, orgPartyID, "SYNDICATE_MEMBER")
+	require.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Empty(t, result)
+}
+
+func TestSaveAssociationWithInput_PersistsAllFields(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+
+	partyID := uuid.New()
+	relatedID := uuid.New()
+	metadata := `{"key":"value"}`
+	effectiveFrom := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	effectiveTo := time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC)
+
+	associationID, err := repo.SaveAssociationWithInput(ctx, partyID, relatedID, "SYNDICATE_MEMBER", &AssociationInput{
+		Metadata:      &metadata,
+		Status:        "SUSPENDED",
+		EffectiveFrom: &effectiveFrom,
+		EffectiveTo:   &effectiveTo,
+	})
+	require.NoError(t, err)
+	assert.NotEqual(t, uuid.Nil, associationID)
+
+	// Verify persisted via FindAssociations
+	associations, err := repo.FindAssociations(ctx, partyID)
+	require.NoError(t, err)
+	require.Len(t, associations, 1)
+
+	a := associations[0]
+	assert.Equal(t, "SUSPENDED", a.Status)
+	assert.NotNil(t, a.Metadata)
+	assert.Contains(t, *a.Metadata, "key")
+	assert.Equal(t, effectiveFrom.UTC().Unix(), a.EffectiveFrom.UTC().Unix())
+	assert.NotNil(t, a.EffectiveTo)
+	assert.Equal(t, effectiveTo.UTC().Unix(), a.EffectiveTo.UTC().Unix())
 }
 
 func TestPing_WorksWithoutOrganizationContext(t *testing.T) {
