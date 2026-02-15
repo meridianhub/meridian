@@ -44,6 +44,7 @@ func setupControlTestDB(t *testing.T) (*persistence.Repository, *persistence.Lie
 		currency CHAR(3) NOT NULL DEFAULT 'GBP',
 		status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
 		party_id UUID NOT NULL,
+		org_party_id UUID NULL,
 		balance BIGINT NOT NULL DEFAULT 0,
 		available_balance BIGINT NOT NULL DEFAULT 0,
 		overdraft_limit BIGINT NOT NULL DEFAULT 0,

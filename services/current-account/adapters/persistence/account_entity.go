@@ -22,14 +22,15 @@ type CurrentAccountEntity struct {
 	ID uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
 
 	// Business fields - these column names must match the migration schema
-	AccountID             string    `gorm:"column:account_id;type:varchar(100);uniqueIndex;not null"`            // Business account identifier
-	AccountIdentification string    `gorm:"column:account_identification;type:varchar(34);uniqueIndex;not null"` // IBAN format
-	AccountType           string    `gorm:"column:account_type;type:varchar(50);not null"`                       // current, savings, etc.
-	Currency              string    `gorm:"column:currency;type:char(3);not null;default:'GBP'"`                 // ISO 4217
-	Status                string    `gorm:"column:status;type:varchar(20);not null;default:'active'"`
-	PartyID               uuid.UUID `gorm:"column:party_id;type:uuid;not null;index"`
-	OverdraftLimit        int64     `gorm:"column:overdraft_limit;not null;default:0"` // in smallest currency unit
-	OverdraftRate         float64   `gorm:"column:overdraft_rate;type:numeric(5,4);not null;default:0"`
+	AccountID             string     `gorm:"column:account_id;type:varchar(100);uniqueIndex;not null"`            // Business account identifier
+	AccountIdentification string     `gorm:"column:account_identification;type:varchar(34);uniqueIndex;not null"` // IBAN format
+	AccountType           string     `gorm:"column:account_type;type:varchar(50);not null"`                       // current, savings, etc.
+	Currency              string     `gorm:"column:currency;type:char(3);not null;default:'GBP'"`                 // ISO 4217
+	Status                string     `gorm:"column:status;type:varchar(20);not null;default:'active'"`
+	PartyID               uuid.UUID  `gorm:"column:party_id;type:uuid;not null;index"`
+	OrgPartyID            *uuid.UUID `gorm:"column:org_party_id;type:uuid"`             // NULL for personal accounts, set for org-scoped accounts
+	OverdraftLimit        int64      `gorm:"column:overdraft_limit;not null;default:0"` // in smallest currency unit
+	OverdraftRate         float64    `gorm:"column:overdraft_rate;type:numeric(5,4);not null;default:0"`
 
 	// Balance fields - NOT persisted to database (gorm:"-"), but kept for in-memory use.
 	// Balance computation is delegated to Position Keeping service per BIAN architecture.

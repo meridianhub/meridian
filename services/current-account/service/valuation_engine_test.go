@@ -75,6 +75,7 @@ func setupValuationEngineTestWithEngine(t *testing.T, engine ValuationEngine) (*
 		account_id VARCHAR(100) NOT NULL UNIQUE,
 		account_identification VARCHAR(34) NOT NULL UNIQUE,
 		party_id UUID NOT NULL,
+		org_party_id UUID NULL,
 		balance BIGINT NOT NULL DEFAULT 0,
 		available_balance BIGINT NOT NULL DEFAULT 0,
 		currency VARCHAR(3) NOT NULL DEFAULT 'GBP',
