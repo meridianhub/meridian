@@ -607,10 +607,10 @@ func TestSchema_OrgPartyID_GlobalAccountNullOrgParty(t *testing.T) {
 	err := db.Exec(`
 		INSERT INTO internal_bank_account (
 			account_id, account_code, name, account_type,
-			instrument_code, dimension, created_by, updated_by
+			instrument_code, dimension, clearing_purpose, created_by, updated_by
 		) VALUES (
 			'ACC-GLOBAL', 'GLOBAL-CLR', 'Global Clearing', 'CLEARING',
-			'GBP', 'CURRENCY', 'test', 'test'
+			'GBP', 'CURRENCY', 'CLEARING_PURPOSE_GENERAL', 'test', 'test'
 		)
 	`).Error
 	require.NoError(t, err, "Global account insert should succeed")
