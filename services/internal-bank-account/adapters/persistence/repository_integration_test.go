@@ -1126,6 +1126,183 @@ func TestIntegration_MultiTenant_MissingContext(t *testing.T) {
 }
 
 // ============================================================================
+// Org-Scoped Account Tests
+// ============================================================================
+
+// TestIntegration_SaveOrgScopedAccount tests persisting an org-scoped account.
+func TestIntegration_SaveOrgScopedAccount(t *testing.T) {
+	tc := setupIntegrationTestContainer(t)
+	defer tc.cleanup(t)
+
+	ctx := createTestContext()
+	orgID := uuid.New()
+
+	account, err := domain.NewInternalBankAccount(
+		"IBA-ORG-INT-001",
+		"ORG_HOLDING_001",
+		"Org Scoped Holding",
+		domain.AccountTypeHolding,
+		domain.ClearingPurposeUnspecified,
+		"GBP",
+		"CURRENCY",
+		domain.WithOrgPartyID(orgID),
+	)
+	require.NoError(t, err)
+
+	// Save
+	err = tc.repo.Save(ctx, account)
+	require.NoError(t, err)
+
+	// Retrieve and verify org_party_id persisted
+	retrieved, err := tc.repo.FindByID(ctx, account.ID())
+	require.NoError(t, err)
+
+	require.NotNil(t, retrieved.OrgPartyID())
+	assert.Equal(t, orgID, *retrieved.OrgPartyID())
+	assert.True(t, retrieved.IsScopedToOrganization())
+}
+
+// TestIntegration_SaveGlobalAccount_NilOrgPartyID tests that global accounts persist with null org_party_id.
+func TestIntegration_SaveGlobalAccount_NilOrgPartyID(t *testing.T) {
+	tc := setupIntegrationTestContainer(t)
+	defer tc.cleanup(t)
+
+	ctx := createTestContext()
+
+	account, err := domain.NewInternalBankAccount(
+		"IBA-GLOBAL-INT-001",
+		"GLOBAL_HOLDING_001",
+		"Global Holding",
+		domain.AccountTypeHolding,
+		domain.ClearingPurposeUnspecified,
+		"GBP",
+		"CURRENCY",
+	)
+	require.NoError(t, err)
+
+	err = tc.repo.Save(ctx, account)
+	require.NoError(t, err)
+
+	retrieved, err := tc.repo.FindByID(ctx, account.ID())
+	require.NoError(t, err)
+
+	assert.Nil(t, retrieved.OrgPartyID())
+	assert.False(t, retrieved.IsScopedToOrganization())
+}
+
+// TestIntegration_FindByOrganization tests finding accounts by org party ID.
+func TestIntegration_FindByOrganization(t *testing.T) {
+	tc := setupIntegrationTestContainer(t)
+	defer tc.cleanup(t)
+
+	ctx := createTestContext()
+	orgA := uuid.New()
+	orgB := uuid.New()
+
+	// Create org-scoped accounts for org A
+	accountA1, err := domain.NewInternalBankAccount(
+		"IBA-ORGA-001",
+		"ORGA_HOLDING_001",
+		"Org A Holding 1",
+		domain.AccountTypeHolding,
+		domain.ClearingPurposeUnspecified,
+		"GBP",
+		"CURRENCY",
+		domain.WithOrgPartyID(orgA),
+	)
+	require.NoError(t, err)
+	require.NoError(t, tc.repo.Save(ctx, accountA1))
+
+	accountA2, err := domain.NewInternalBankAccount(
+		"IBA-ORGA-002",
+		"ORGA_SUSPENSE_001",
+		"Org A Suspense",
+		domain.AccountTypeSuspense,
+		domain.ClearingPurposeUnspecified,
+		"GBP",
+		"CURRENCY",
+		domain.WithOrgPartyID(orgA),
+	)
+	require.NoError(t, err)
+	require.NoError(t, tc.repo.Save(ctx, accountA2))
+
+	// Create org-scoped account for org B
+	accountB1, err := domain.NewInternalBankAccount(
+		"IBA-ORGB-001",
+		"ORGB_HOLDING_001",
+		"Org B Holding",
+		domain.AccountTypeHolding,
+		domain.ClearingPurposeUnspecified,
+		"USD",
+		"CURRENCY",
+		domain.WithOrgPartyID(orgB),
+	)
+	require.NoError(t, err)
+	require.NoError(t, tc.repo.Save(ctx, accountB1))
+
+	// Create global account (no org) - use HOLDING since createTestAccountIntegration
+	// uses ClearingPurposeUnspecified which is invalid for CLEARING accounts
+	globalAccount := createTestAccountIntegration(t, "IBA-GLOBAL-002", "GLOBAL_HOLD_002", "Global Holding", domain.AccountTypeHolding)
+	require.NoError(t, tc.repo.Save(ctx, globalAccount))
+
+	// FindByOrganization for org A
+	orgAAccounts, err := tc.repo.FindByOrganization(ctx, orgA)
+	require.NoError(t, err)
+	assert.Len(t, orgAAccounts, 2)
+
+	// FindByOrganization for org B
+	orgBAccounts, err := tc.repo.FindByOrganization(ctx, orgB)
+	require.NoError(t, err)
+	assert.Len(t, orgBAccounts, 1)
+	assert.Equal(t, "ORGB_HOLDING_001", orgBAccounts[0].AccountCode())
+
+	// FindByOrganization for non-existent org
+	nonExistentOrg := uuid.New()
+	noAccounts, err := tc.repo.FindByOrganization(ctx, nonExistentOrg)
+	require.NoError(t, err)
+	assert.Empty(t, noAccounts)
+}
+
+// TestIntegration_ListWithOrgPartyIDFilter tests the List method with OrgPartyID filter.
+func TestIntegration_ListWithOrgPartyIDFilter(t *testing.T) {
+	tc := setupIntegrationTestContainer(t)
+	defer tc.cleanup(t)
+
+	ctx := createTestContext()
+	orgID := uuid.New()
+
+	// Create org-scoped account
+	orgAccount, err := domain.NewInternalBankAccount(
+		"IBA-FILTER-ORG-001",
+		"FILTER_ORG_HOLD",
+		"Org Holding",
+		domain.AccountTypeHolding,
+		domain.ClearingPurposeUnspecified,
+		"GBP",
+		"CURRENCY",
+		domain.WithOrgPartyID(orgID),
+	)
+	require.NoError(t, err)
+	require.NoError(t, tc.repo.Save(ctx, orgAccount))
+
+	// Create global account - use HOLDING since createTestAccountIntegration
+	// uses ClearingPurposeUnspecified which is invalid for CLEARING accounts
+	globalAccount := createTestAccountIntegration(t, "IBA-FILTER-GLOBAL-001", "FILTER_GLOBAL_HOLD", "Global Holding", domain.AccountTypeHolding)
+	require.NoError(t, tc.repo.Save(ctx, globalAccount))
+
+	// List with OrgPartyID filter should return only org-scoped accounts
+	results, err := tc.repo.List(ctx, domain.ListFilter{OrgPartyID: &orgID})
+	require.NoError(t, err)
+	assert.Len(t, results, 1)
+	assert.Equal(t, "FILTER_ORG_HOLD", results[0].AccountCode())
+
+	// List without filter returns all
+	allResults, err := tc.repo.List(ctx, domain.ListFilter{})
+	require.NoError(t, err)
+	assert.Len(t, allResults, 2)
+}
+
+// ============================================================================
 // Performance Benchmarks
 // ============================================================================
 //

@@ -281,6 +281,12 @@ func (a InternalBankAccount) OrgPartyID() *uuid.UUID {
 	return a.orgPartyID
 }
 
+// IsScopedToOrganization returns true if the account is scoped to a specific organization.
+// Global accounts (orgPartyID == nil) return false.
+func (a InternalBankAccount) IsScopedToOrganization() bool {
+	return a.orgPartyID != nil
+}
+
 // Correspondent returns the correspondent bank details.
 // Returns nil for non-NOSTRO/VOSTRO accounts.
 func (a InternalBankAccount) Correspondent() *CorrespondentDetails {

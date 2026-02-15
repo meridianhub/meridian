@@ -749,6 +749,153 @@ func TestReconstructCorrespondent(t *testing.T) {
 	})
 }
 
+// TestToEntity_WithOrgPartyID tests that toEntity correctly maps the org_party_id field.
+func TestToEntity_WithOrgPartyID(t *testing.T) {
+	ctx := createTestContextForMappers()
+
+	t.Run("org-scoped account", func(t *testing.T) {
+		orgID := uuid.New()
+		account, err := domain.NewInternalBankAccount(
+			"IBA-ORG-001",
+			"ORG_HOLDING",
+			"Org Holding Account",
+			domain.AccountTypeHolding,
+			domain.ClearingPurposeUnspecified,
+			"GBP",
+			"CURRENCY",
+			domain.WithOrgPartyID(orgID),
+		)
+		require.NoError(t, err)
+
+		entity := toEntity(ctx, account)
+
+		require.NotNil(t, entity.OrgPartyID)
+		assert.Equal(t, orgID, *entity.OrgPartyID)
+	})
+
+	t.Run("global account", func(t *testing.T) {
+		account, err := domain.NewInternalBankAccount(
+			"IBA-GLOBAL-001",
+			"GLOBAL_HOLDING",
+			"Global Holding Account",
+			domain.AccountTypeHolding,
+			domain.ClearingPurposeUnspecified,
+			"GBP",
+			"CURRENCY",
+		)
+		require.NoError(t, err)
+
+		entity := toEntity(ctx, account)
+
+		assert.Nil(t, entity.OrgPartyID)
+	})
+}
+
+// TestToDomain_WithOrgPartyID tests reconstructing org_party_id from entity.
+func TestToDomain_WithOrgPartyID(t *testing.T) {
+	now := time.Now()
+
+	t.Run("org-scoped entity", func(t *testing.T) {
+		orgID := uuid.New()
+		entity := &InternalBankAccountEntity{
+			ID:             uuid.New(),
+			AccountID:      "IBA-ORG-010",
+			AccountCode:    "ORG_HOLDING",
+			Name:           "Org Holding",
+			AccountType:    "HOLDING",
+			InstrumentCode: "GBP",
+			Dimension:      "CURRENCY",
+			Status:         "ACTIVE",
+			OrgPartyID:     &orgID,
+			Attributes:     make(AttributesJSON),
+			Version:        1,
+			CreatedAt:      now,
+			UpdatedAt:      now,
+			CreatedBy:      "system",
+			UpdatedBy:      "system",
+		}
+
+		account := toDomain(entity)
+
+		require.NotNil(t, account.OrgPartyID())
+		assert.Equal(t, orgID, *account.OrgPartyID())
+		assert.True(t, account.IsScopedToOrganization())
+	})
+
+	t.Run("global entity", func(t *testing.T) {
+		entity := &InternalBankAccountEntity{
+			ID:             uuid.New(),
+			AccountID:      "IBA-GLOBAL-010",
+			AccountCode:    "GLOBAL_HOLDING",
+			Name:           "Global Holding",
+			AccountType:    "HOLDING",
+			InstrumentCode: "GBP",
+			Dimension:      "CURRENCY",
+			Status:         "ACTIVE",
+			OrgPartyID:     nil,
+			Attributes:     make(AttributesJSON),
+			Version:        1,
+			CreatedAt:      now,
+			UpdatedAt:      now,
+			CreatedBy:      "system",
+			UpdatedBy:      "system",
+		}
+
+		account := toDomain(entity)
+
+		assert.Nil(t, account.OrgPartyID())
+		assert.False(t, account.IsScopedToOrganization())
+	})
+}
+
+// TestRoundTrip_OrgScopedAccount tests domain -> entity -> domain preserves OrgPartyID.
+func TestRoundTrip_OrgScopedAccount(t *testing.T) {
+	ctx := createTestContextForMappers()
+	orgID := uuid.New()
+
+	original, err := domain.NewInternalBankAccount(
+		"IBA-RT-ORG-001",
+		"ORG_NOSTRO",
+		"Org Scoped Nostro",
+		domain.AccountTypeNostro,
+		domain.ClearingPurposeUnspecified,
+		"USD",
+		"CURRENCY",
+		domain.WithOrgPartyID(orgID),
+	)
+	require.NoError(t, err)
+
+	entity := toEntity(ctx, original)
+	reconstructed := toDomain(entity)
+
+	require.NotNil(t, reconstructed.OrgPartyID())
+	assert.Equal(t, orgID, *reconstructed.OrgPartyID())
+	assert.True(t, reconstructed.IsScopedToOrganization())
+	assert.Equal(t, original.AccountID(), reconstructed.AccountID())
+}
+
+// TestRoundTrip_GlobalAccount tests that global account round-trips with nil OrgPartyID.
+func TestRoundTrip_GlobalAccount(t *testing.T) {
+	ctx := createTestContextForMappers()
+
+	original, err := domain.NewInternalBankAccount(
+		"IBA-RT-GLOBAL-001",
+		"GLOBAL_NOSTRO",
+		"Global Nostro",
+		domain.AccountTypeNostro,
+		domain.ClearingPurposeUnspecified,
+		"USD",
+		"CURRENCY",
+	)
+	require.NoError(t, err)
+
+	entity := toEntity(ctx, original)
+	reconstructed := toDomain(entity)
+
+	assert.Nil(t, reconstructed.OrgPartyID())
+	assert.False(t, reconstructed.IsScopedToOrganization())
+}
+
 // TestToDomain_PartialCorrespondent tests handling when only some correspondent fields are set.
 func TestToDomain_PartialCorrespondent(t *testing.T) {
 	now := time.Now()
