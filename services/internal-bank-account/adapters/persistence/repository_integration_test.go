@@ -1240,8 +1240,9 @@ func TestIntegration_FindByOrganization(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, tc.repo.Save(ctx, accountB1))
 
-	// Create global account (no org)
-	globalAccount := createTestAccountIntegration(t, "IBA-GLOBAL-002", "GLOBAL_CLR_002", "Global Clearing", domain.AccountTypeClearing)
+	// Create global account (no org) - use HOLDING since createTestAccountIntegration
+	// uses ClearingPurposeUnspecified which is invalid for CLEARING accounts
+	globalAccount := createTestAccountIntegration(t, "IBA-GLOBAL-002", "GLOBAL_HOLD_002", "Global Holding", domain.AccountTypeHolding)
 	require.NoError(t, tc.repo.Save(ctx, globalAccount))
 
 	// FindByOrganization for org A
@@ -1284,8 +1285,9 @@ func TestIntegration_ListWithOrgPartyIDFilter(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, tc.repo.Save(ctx, orgAccount))
 
-	// Create global account
-	globalAccount := createTestAccountIntegration(t, "IBA-FILTER-GLOBAL-001", "FILTER_GLOBAL_CLR", "Global Clearing", domain.AccountTypeClearing)
+	// Create global account - use HOLDING since createTestAccountIntegration
+	// uses ClearingPurposeUnspecified which is invalid for CLEARING accounts
+	globalAccount := createTestAccountIntegration(t, "IBA-FILTER-GLOBAL-001", "FILTER_GLOBAL_HOLD", "Global Holding", domain.AccountTypeHolding)
 	require.NoError(t, tc.repo.Save(ctx, globalAccount))
 
 	// List with OrgPartyID filter should return only org-scoped accounts
