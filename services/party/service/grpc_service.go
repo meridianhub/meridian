@@ -931,6 +931,10 @@ func protoToRelationshipType(rt pb.RelationshipType) string {
 		return string(domain.RelationshipTypeGuarantor)
 	case pb.RelationshipType_RELATIONSHIP_TYPE_BENEFICIAL_OWNER:
 		return string(domain.RelationshipTypeBeneficialOwner)
+	case pb.RelationshipType_RELATIONSHIP_TYPE_SYNDICATE_PARTICIPANT:
+		return string(domain.RelationshipTypeSyndicateParticipant)
+	case pb.RelationshipType_RELATIONSHIP_TYPE_SYNDICATE_HOST:
+		return string(domain.RelationshipTypeSyndicateHost)
 	default:
 		return "UNSPECIFIED"
 	}
@@ -949,6 +953,10 @@ func relationshipTypeToProto(rt string) pb.RelationshipType {
 		return pb.RelationshipType_RELATIONSHIP_TYPE_GUARANTOR
 	case string(domain.RelationshipTypeBeneficialOwner):
 		return pb.RelationshipType_RELATIONSHIP_TYPE_BENEFICIAL_OWNER
+	case string(domain.RelationshipTypeSyndicateParticipant):
+		return pb.RelationshipType_RELATIONSHIP_TYPE_SYNDICATE_PARTICIPANT
+	case string(domain.RelationshipTypeSyndicateHost):
+		return pb.RelationshipType_RELATIONSHIP_TYPE_SYNDICATE_HOST
 	default:
 		return pb.RelationshipType_RELATIONSHIP_TYPE_UNSPECIFIED
 	}
