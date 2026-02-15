@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -1285,4 +1286,119 @@ func TestBuilderWithStatusHistory(t *testing.T) {
 
 	assert.Len(t, account.StatusHistory(), 1)
 	assert.Equal(t, "Initial freeze", account.StatusHistory()[0].Reason)
+}
+
+// Org-scoped account tests
+
+func TestNewCurrentAccount_WithOrgPartyID(t *testing.T) {
+	orgPartyID := uuid.New()
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP",
+		WithOrgPartyID(orgPartyID))
+	require.NoError(t, err)
+
+	assert.True(t, account.IsScopedToOrganization())
+	require.NotNil(t, account.OrgPartyID())
+	assert.Equal(t, orgPartyID, *account.OrgPartyID())
+	assert.Equal(t, "PARTY-001", account.PartyID())
+}
+
+func TestNewCurrentAccount_WithoutOrgPartyID(t *testing.T) {
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
+	require.NoError(t, err)
+
+	assert.False(t, account.IsScopedToOrganization())
+	assert.Nil(t, account.OrgPartyID())
+}
+
+func TestNewCurrentAccount_OrgScopedWithoutPartyID_ReturnsError(t *testing.T) {
+	orgPartyID := uuid.New()
+	_, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "", "GBP",
+		WithOrgPartyID(orgPartyID))
+
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrOrgScopedWithoutParty)
+}
+
+func TestOrgPartyID_PreservedAcrossOperations(t *testing.T) {
+	orgPartyID := uuid.New()
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP",
+		WithOrgPartyID(orgPartyID))
+	require.NoError(t, err)
+
+	// Deposit
+	deposit, _ := NewMoney("GBP", 10000)
+	afterDeposit, err := account.Deposit(deposit)
+	require.NoError(t, err)
+	require.NotNil(t, afterDeposit.OrgPartyID())
+	assert.Equal(t, orgPartyID, *afterDeposit.OrgPartyID())
+
+	// Withdraw
+	withdrawal, _ := NewMoney("GBP", 5000)
+	afterWithdraw, err := afterDeposit.Withdraw(withdrawal)
+	require.NoError(t, err)
+	require.NotNil(t, afterWithdraw.OrgPartyID())
+	assert.Equal(t, orgPartyID, *afterWithdraw.OrgPartyID())
+
+	// Freeze
+	frozen, err := afterWithdraw.Freeze("Suspicious activity detected on account")
+	require.NoError(t, err)
+	require.NotNil(t, frozen.OrgPartyID())
+	assert.Equal(t, orgPartyID, *frozen.OrgPartyID())
+
+	// Unfreeze
+	unfrozen, err := frozen.Unfreeze()
+	require.NoError(t, err)
+	require.NotNil(t, unfrozen.OrgPartyID())
+	assert.Equal(t, orgPartyID, *unfrozen.OrgPartyID())
+
+	// PrepareForCredit
+	prepared, err := unfrozen.PrepareForCredit()
+	require.NoError(t, err)
+	require.NotNil(t, prepared.OrgPartyID())
+	assert.Equal(t, orgPartyID, *prepared.OrgPartyID())
+
+	// SetOverdraftLimit
+	limit, _ := NewMoney("GBP", 5000)
+	afterOverdraft, err := prepared.SetOverdraftLimit(limit, 10.0, true)
+	require.NoError(t, err)
+	require.NotNil(t, afterOverdraft.OrgPartyID())
+	assert.Equal(t, orgPartyID, *afterOverdraft.OrgPartyID())
+}
+
+func TestBuilder_WithOrgPartyID(t *testing.T) {
+	orgPartyID := uuid.New()
+	balance, _ := NewMoney("GBP", 10000)
+
+	account := NewCurrentAccountBuilder().
+		WithAccountID("ACC-001").
+		WithAccountIdentification("GB82WEST12345698765432").
+		WithPartyID("party-123").
+		WithOrgPartyID(&orgPartyID).
+		WithBalance(balance).
+		WithAvailableBalance(balance).
+		WithStatus(AccountStatusActive).
+		WithVersion(1).
+		Build()
+
+	assert.True(t, account.IsScopedToOrganization())
+	require.NotNil(t, account.OrgPartyID())
+	assert.Equal(t, orgPartyID, *account.OrgPartyID())
+}
+
+func TestBuilder_WithNilOrgPartyID(t *testing.T) {
+	balance, _ := NewMoney("GBP", 10000)
+
+	account := NewCurrentAccountBuilder().
+		WithAccountID("ACC-001").
+		WithAccountIdentification("GB82WEST12345698765432").
+		WithPartyID("party-123").
+		WithOrgPartyID(nil).
+		WithBalance(balance).
+		WithAvailableBalance(balance).
+		WithStatus(AccountStatusActive).
+		WithVersion(1).
+		Build()
+
+	assert.False(t, account.IsScopedToOrganization())
+	assert.Nil(t, account.OrgPartyID())
 }
