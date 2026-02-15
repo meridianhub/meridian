@@ -20,6 +20,7 @@ var (
 	ErrNegativeOverdraftRate   = errors.New("overdraft rate cannot be negative")
 	ErrNonZeroBalance          = errors.New("account balance must be zero to close")
 	ErrActiveLiens             = errors.New("account has active liens and cannot be closed")
+	ErrOrgScopedWithoutParty   = errors.New("org-scoped account requires a party ID")
 )
 
 // AccountStatus represents the lifecycle state of an account
@@ -59,6 +60,7 @@ type CurrentAccount struct {
 	accountID             string
 	accountIdentification string // IBAN
 	partyID               string
+	orgPartyID            *uuid.UUID // NULL for personal accounts, set for org-scoped accounts
 	balance               Money
 	availableBalance      Money
 	status                AccountStatus
@@ -73,16 +75,28 @@ type CurrentAccount struct {
 	updatedAt             time.Time
 }
 
+// AccountOption is a functional option for configuring new account creation.
+type AccountOption func(*CurrentAccount)
+
+// WithOrgPartyID sets the organization party ID for org-scoped accounts.
+func WithOrgPartyID(orgPartyID uuid.UUID) AccountOption {
+	return func(a *CurrentAccount) {
+		id := orgPartyID
+		a.orgPartyID = &id
+	}
+}
+
 // NewCurrentAccount creates a new current account with the given parameters.
 // Returns a value type (not pointer) following immutability principles.
-func NewCurrentAccount(accountID, iban, partyID, currency string) (CurrentAccount, error) {
+// Use WithOrgPartyID option to create an org-scoped account.
+func NewCurrentAccount(accountID, iban, partyID, currency string, opts ...AccountOption) (CurrentAccount, error) {
 	now := time.Now()
 	zeroMoney, err := NewMoney(currency, 0)
 	if err != nil {
 		return CurrentAccount{}, err
 	}
 
-	return CurrentAccount{
+	account := CurrentAccount{
 		id:                    uuid.New(),
 		accountID:             accountID,
 		accountIdentification: iban,
@@ -97,7 +111,18 @@ func NewCurrentAccount(accountID, iban, partyID, currency string) (CurrentAccoun
 		version:               1,
 		createdAt:             now,
 		updatedAt:             now,
-	}, nil
+	}
+
+	for _, opt := range opts {
+		opt(&account)
+	}
+
+	// Validation: org-scoped account requires a party ID
+	if account.orgPartyID != nil && account.partyID == "" {
+		return CurrentAccount{}, ErrOrgScopedWithoutParty
+	}
+
+	return account, nil
 }
 
 // Deposit adds funds to the account and returns a new account with the updated balance.
@@ -136,6 +161,7 @@ func (a CurrentAccount) Deposit(amount Money) (CurrentAccount, error) {
 		accountID:             a.accountID,
 		accountIdentification: a.accountIdentification,
 		partyID:               a.partyID,
+		orgPartyID:            a.orgPartyID,
 		balance:               newBalance,
 		availableBalance:      newAvailableBalance,
 		status:                a.status,
@@ -172,6 +198,7 @@ func (a CurrentAccount) PrepareForCredit() (CurrentAccount, error) {
 		accountID:             a.accountID,
 		accountIdentification: a.accountIdentification,
 		partyID:               a.partyID,
+		orgPartyID:            a.orgPartyID,
 		balance:               a.balance, // Balance NOT modified - Position Keeping is source of truth
 		availableBalance:      a.availableBalance,
 		status:                a.status,
@@ -223,6 +250,7 @@ func (a CurrentAccount) PrepareForDebit(amount Money) (CurrentAccount, error) {
 		accountID:             a.accountID,
 		accountIdentification: a.accountIdentification,
 		partyID:               a.partyID,
+		orgPartyID:            a.orgPartyID,
 		balance:               a.balance, // Balance NOT modified - Position Keeping is source of truth
 		availableBalance:      a.availableBalance,
 		status:                a.status,
@@ -280,6 +308,7 @@ func (a CurrentAccount) Withdraw(amount Money) (CurrentAccount, error) {
 		accountID:             a.accountID,
 		accountIdentification: a.accountIdentification,
 		partyID:               a.partyID,
+		orgPartyID:            a.orgPartyID,
 		balance:               newBalance,
 		availableBalance:      newAvailableBalance,
 		status:                a.status,
@@ -348,6 +377,7 @@ func (a CurrentAccount) withStatusChange(newStatus AccountStatus, reason string)
 		accountID:             a.accountID,
 		accountIdentification: a.accountIdentification,
 		partyID:               a.partyID,
+		orgPartyID:            a.orgPartyID,
 		balance:               a.balance,
 		availableBalance:      a.availableBalance,
 		status:                newStatus,
@@ -474,6 +504,7 @@ func (a CurrentAccount) SetOverdraftLimit(limit Money, rate float64, enabled boo
 		accountID:             a.accountID,
 		accountIdentification: a.accountIdentification,
 		partyID:               a.partyID,
+		orgPartyID:            a.orgPartyID,
 		balance:               a.balance,
 		availableBalance:      newAvailableBalance,
 		status:                a.status,
@@ -503,6 +534,12 @@ func (a CurrentAccount) AccountIdentification() string { return a.accountIdentif
 
 // PartyID returns the party (customer) identifier.
 func (a CurrentAccount) PartyID() string { return a.partyID }
+
+// OrgPartyID returns the organization party ID, or nil for personal accounts.
+func (a CurrentAccount) OrgPartyID() *uuid.UUID { return a.orgPartyID }
+
+// IsScopedToOrganization returns true if this account is scoped to an organization.
+func (a CurrentAccount) IsScopedToOrganization() bool { return a.orgPartyID != nil }
 
 // Balance returns the current balance.
 func (a CurrentAccount) Balance() Money { return a.balance }
@@ -586,6 +623,12 @@ func (b *CurrentAccountBuilder) WithAccountIdentification(iban string) *CurrentA
 // WithPartyID sets the party identifier.
 func (b *CurrentAccountBuilder) WithPartyID(partyID string) *CurrentAccountBuilder {
 	b.account.partyID = partyID
+	return b
+}
+
+// WithOrgPartyID sets the organization party ID. Pass nil for personal accounts.
+func (b *CurrentAccountBuilder) WithOrgPartyID(orgPartyID *uuid.UUID) *CurrentAccountBuilder {
+	b.account.orgPartyID = orgPartyID
 	return b
 }
 

@@ -370,6 +370,68 @@ func (r *Repository) FindByPartyID(ctx context.Context, partyID string) ([]domai
 	return accounts, nil
 }
 
+// FindByScopedParty retrieves an account by party ID, org party ID, and currency.
+// This supports org-scoped account lookups where an individual (partyID) holds
+// an account within an organization (orgPartyID) in a specific currency.
+// In multi-org mode, the context must contain the organization ID for schema routing.
+func (r *Repository) FindByScopedParty(ctx context.Context, partyID string, orgPartyID uuid.UUID, currency string) (domain.CurrentAccount, error) {
+	var account domain.CurrentAccount
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		partyUUID, err := uuid.Parse(partyID)
+		if err != nil {
+			return fmt.Errorf("invalid party ID %q: %w", partyID, err)
+		}
+
+		var entity CurrentAccountEntity
+		result := tx.Where("party_id = ? AND org_party_id = ? AND currency = ? AND deleted_at IS NULL",
+			partyUUID, orgPartyID, currency).First(&entity)
+
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return ErrAccountNotFound
+		}
+		if result.Error != nil {
+			return result.Error
+		}
+
+		account, err = toDomain(&entity)
+		return err
+	})
+	if err != nil {
+		return domain.CurrentAccount{}, err
+	}
+	return account, nil
+}
+
+// ListByOrganization retrieves all accounts scoped to an organization.
+// This returns all accounts where org_party_id matches, supporting NFR-2
+// (list all syndicate participant accounts for an organization).
+// In multi-org mode, the context must contain the organization ID for schema routing.
+func (r *Repository) ListByOrganization(ctx context.Context, orgPartyID uuid.UUID) ([]domain.CurrentAccount, error) {
+	var accounts []domain.CurrentAccount
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		var entities []CurrentAccountEntity
+		result := tx.Where("org_party_id = ? AND deleted_at IS NULL", orgPartyID).Find(&entities)
+
+		if result.Error != nil {
+			return result.Error
+		}
+
+		accounts = make([]domain.CurrentAccount, 0, len(entities))
+		for _, entity := range entities {
+			account, err := toDomain(&entity)
+			if err != nil {
+				return err
+			}
+			accounts = append(accounts, account)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return accounts, nil
+}
+
 // Delete soft deletes an account by its internal account ID.
 // In multi-org mode, the context must contain the organization ID for schema routing.
 func (r *Repository) Delete(ctx context.Context, accountID string) error {
@@ -432,6 +494,7 @@ func toEntity(ctx context.Context, account domain.CurrentAccount) (*CurrentAccou
 		Currency:              string(account.Balance().Currency()),
 		Status:                string(account.Status()),
 		PartyID:               partyUUID,
+		OrgPartyID:            account.OrgPartyID(),
 		OverdraftLimit:        account.OverdraftLimit().ToMinorUnitsUnchecked(),
 		OverdraftRate:         account.OverdraftRate(),
 		Balance:               account.Balance().ToMinorUnitsUnchecked(),          // gorm:"-" - not persisted
@@ -505,6 +568,7 @@ func toDomain(entity *CurrentAccountEntity) (domain.CurrentAccount, error) {
 		WithAccountID(entity.AccountID).
 		WithAccountIdentification(entity.AccountIdentification).
 		WithPartyID(entity.PartyID.String()).
+		WithOrgPartyID(entity.OrgPartyID).
 		WithBalance(balance).
 		WithAvailableBalance(availableBalance).
 		WithStatus(domain.AccountStatus(entity.Status)).
