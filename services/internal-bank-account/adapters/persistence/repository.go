@@ -255,6 +255,9 @@ func (r *Repository) List(ctx context.Context, filter domain.ListFilter) ([]doma
 		if filter.ClearingPurpose != nil {
 			query = query.Where("clearing_purpose = ?", string(*filter.ClearingPurpose))
 		}
+		if filter.OrgPartyID != nil {
+			query = query.Where("org_party_id = ?", *filter.OrgPartyID)
+		}
 
 		// Apply pagination
 		if filter.Limit > 0 {
@@ -281,6 +284,12 @@ func (r *Repository) List(ctx context.Context, filter domain.ListFilter) ([]doma
 		return nil, err
 	}
 	return accounts, nil
+}
+
+// FindByOrganization retrieves all accounts scoped to the given organization party ID.
+// Returns an empty slice if no accounts match.
+func (r *Repository) FindByOrganization(ctx context.Context, orgPartyID uuid.UUID) ([]domain.InternalBankAccount, error) {
+	return r.List(ctx, domain.ListFilter{OrgPartyID: &orgPartyID})
 }
 
 // ExistsByCode checks if an account with the given code exists.
