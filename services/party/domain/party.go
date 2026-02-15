@@ -82,18 +82,21 @@ type RelationshipType string
 
 // Relationship type constants
 const (
-	RelationshipTypeSpouse          RelationshipType = "SPOUSE"
-	RelationshipTypeDependent       RelationshipType = "DEPENDENT"
-	RelationshipTypeBusinessPartner RelationshipType = "BUSINESS_PARTNER"
-	RelationshipTypeGuarantor       RelationshipType = "GUARANTOR"
-	RelationshipTypeBeneficialOwner RelationshipType = "BENEFICIAL_OWNER"
+	RelationshipTypeSpouse               RelationshipType = "SPOUSE"
+	RelationshipTypeDependent            RelationshipType = "DEPENDENT"
+	RelationshipTypeBusinessPartner      RelationshipType = "BUSINESS_PARTNER"
+	RelationshipTypeGuarantor            RelationshipType = "GUARANTOR"
+	RelationshipTypeBeneficialOwner      RelationshipType = "BENEFICIAL_OWNER"
+	RelationshipTypeSyndicateParticipant RelationshipType = "SYNDICATE_PARTICIPANT"
+	RelationshipTypeSyndicateHost        RelationshipType = "SYNDICATE_HOST"
 )
 
 // IsValid checks if the relationship type is valid
 func (rt RelationshipType) IsValid() bool {
 	switch rt {
 	case RelationshipTypeSpouse, RelationshipTypeDependent, RelationshipTypeBusinessPartner,
-		RelationshipTypeGuarantor, RelationshipTypeBeneficialOwner:
+		RelationshipTypeGuarantor, RelationshipTypeBeneficialOwner,
+		RelationshipTypeSyndicateParticipant, RelationshipTypeSyndicateHost:
 		return true
 	default:
 		return false

@@ -280,6 +280,13 @@ message InternalBankAccountFacility {
   //
   // See ADR-0025: Clearing Purpose Specialization for design rationale.
   ClearingPurpose clearing_purpose = 12;
+
+  // org_party_id references the organization party for org-scoped accounts.
+  // Empty for global accounts. Org-scoped accounts CANNOT be CLEARING type (enforced at application layer).
+  string org_party_id = 13 [(buf.validate.field).string = {
+    pattern: "^[a-zA-Z0-9_-]*$"
+    max_len: 100
+  }];
 }
 
 // LienStatus defines the lifecycle state of a fund reservation (lien).
@@ -350,6 +357,13 @@ message InitiateInternalBankAccountRequest {
   //   account_type: INTERNAL_ACCOUNT_TYPE_CLEARING
   //   clearing_purpose: CLEARING_PURPOSE_DEPOSIT
   ClearingPurpose clearing_purpose = 8;
+
+  // org_party_id references the organization party for org-scoped accounts.
+  // Empty for global accounts. Org-scoped accounts CANNOT be CLEARING type (enforced at application layer).
+  string org_party_id = 9 [(buf.validate.field).string = {
+    pattern: "^[a-zA-Z0-9_-]*$"
+    max_len: 100
+  }];
 }
 
 // InitiateInternalBankAccountResponse returns the newly created account.

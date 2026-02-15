@@ -154,6 +154,13 @@ message CurrentAccountFacility {
   // transaction_history tracks recent transactions for this account
   // Task 5.4: Add transaction history and account status management features
   TransactionHistory transaction_history = 10;
+
+  // org_party_id references the organization party for org-scoped accounts.
+  // Empty for personal accounts. Used for syndicate-style multi-party ownership.
+  string org_party_id = 11 [(buf.validate.field).string = {
+    pattern: "^[a-zA-Z0-9_-]*$"
+    max_len: 100
+  }];
 }
 
 // AccountBalance represents the current balance state of an account
@@ -331,6 +338,13 @@ message InitiateCurrentAccountRequest {
   meridian.common.v1.Currency base_currency = 3 [(buf.validate.field).enum = {
     defined_only: true
     not_in: [0]
+  }];
+
+  // org_party_id references the organization party for org-scoped accounts.
+  // Empty for personal accounts. Used for syndicate-style multi-party ownership.
+  string org_party_id = 4 [(buf.validate.field).string = {
+    pattern: "^[a-zA-Z0-9_-]*$"
+    max_len: 100
   }];
 }
 
