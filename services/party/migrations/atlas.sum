@@ -1,7 +1,9 @@
-h1:HPaLPVrCo3PT25F3WEb/epkLJCG/8tUwKcbjqMLky6o=
+h1:BA8roKSOHv4D6cT/a+OuAgglhW+BNb510MPqnu74xwc=
 20251216000001_initial.sql h1:e2vtJfpgkEvioqxJ1piy7QAbmihqftHOSlkPDLs8jac=
 20251217000001_audit_system.sql h1:qB+oshTdK74dZ1qX/6Ux9Hz/Ij5yayGpjjSMrgoPIcg=
 20251223000001_business_qualifiers.sql h1:1wSGqT3zHTHS0AYHMjj/zd2JyMnM01AJtL89BmkieLU=
 20251223000002_optimize_association_index.sql h1:0JKaiiRhSGy6/0DJ7xou9kSw9LlQQeVVaJj2Exva9PU=
 20251231000001_party_verification.sql h1:t5v4KO/pDXmlpNuDe+48hEqECC6DLy8chN8pwLWO1m0=
 20260210000001_party_payment_methods.sql h1:akA923j6wcLaupuJ7cT0TcBivxSB5NqCIlJAF/V0ZC0=
+20260214000001_enhance_party_association.sql h1:+Tyn/PEjjxRT85MsnhudeYSXYU6FGrZPeXnp4FQ0pUA=
+20260214000002_party_association_constraints.sql h1:4WScSXRbZVcwINJAd3Xt0k98zIt5+s5zlEywXITiMpg=

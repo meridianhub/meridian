@@ -153,7 +153,7 @@ func TestSeeder_SeedTenant(t *testing.T) {
 		err := seeder.SeedTenant(ctx, tenantID)
 		require.NoError(t, err)
 
-		// Count should still be 5
+		// Count should still be 7
 		var count int
 		err = pool.QueryRow(ctx, "SELECT COUNT(*) FROM "+schemaName+".saga_definition WHERE is_system = true").Scan(&count)
 		require.NoError(t, err)
@@ -179,6 +179,8 @@ func TestSeeder_SeedTenant(t *testing.T) {
 		expectedIDs := []uuid.UUID{
 			uuid.NewSHA1(uuid.NameSpaceDNS, []byte("saga.meridian.current_account_deposit")),
 			uuid.NewSHA1(uuid.NameSpaceDNS, []byte("saga.meridian.current_account_withdrawal")),
+			uuid.NewSHA1(uuid.NameSpaceDNS, []byte("saga.meridian.dunning_escalation")),
+			uuid.NewSHA1(uuid.NameSpaceDNS, []byte("saga.meridian.dunning_unfreeze")),
 			uuid.NewSHA1(uuid.NameSpaceDNS, []byte("saga.meridian.payment_execution")),
 			uuid.NewSHA1(uuid.NameSpaceDNS, []byte("saga.meridian.reconciliation_adjustment")),
 			uuid.NewSHA1(uuid.NameSpaceDNS, []byte("saga.meridian.stripe_payment")),

@@ -127,7 +127,7 @@ func loadInternalBankAccountSchema(t *testing.T, pool *pgxpool.Pool) {
 	_, err := pool.Exec(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName)))
 	require.NoError(t, err, "Failed to create tenant schema")
 
-	// Create internal_bank_account table in tenant schema (matches migration 20260112000001_initial.sql)
+	// Create internal_bank_account table in tenant schema (matches migration 20260112000001_initial.sql + later migrations)
 	_, err = pool.Exec(ctx, fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS %s.internal_bank_account (`, pq.QuoteIdentifier(schemaName))+`
 			id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -140,6 +140,8 @@ func loadInternalBankAccountSchema(t *testing.T, pool *pgxpool.Pool) {
 			account_code character varying(50) NOT NULL,
 			name character varying(255) NOT NULL,
 			account_type character varying(20) NOT NULL,
+			clearing_purpose character varying(32) NULL,
+			org_party_id uuid NULL,
 			instrument_code character varying(32) NOT NULL,
 			dimension character varying(20) NOT NULL,
 			status character varying(20) NOT NULL DEFAULT 'ACTIVE',

@@ -57,4 +57,9 @@ var (
 	// ErrClearingPurposeRequired indicates that a CLEARING account was created
 	// without specifying a clearing purpose (cannot be UNSPECIFIED).
 	ErrClearingPurposeRequired = errors.New("clearing purpose required for CLEARING account type")
+
+	// ErrOrgScopedClearingNotAllowed indicates that an org-scoped account
+	// was created with CLEARING type, which is not permitted.
+	// CLEARING accounts are global by design and cannot be scoped to an organization.
+	ErrOrgScopedClearingNotAllowed = errors.New("org-scoped accounts cannot be CLEARING type")
 )
