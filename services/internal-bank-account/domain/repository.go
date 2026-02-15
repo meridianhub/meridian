@@ -50,6 +50,10 @@ type ListFilter struct {
 	// Only meaningful when filtering for CLEARING account types.
 	ClearingPurpose *ClearingPurpose
 
+	// OrgPartyID filters by organization party ID.
+	// Nil matches all accounts (both global and org-scoped).
+	OrgPartyID *uuid.UUID
+
 	// Limit specifies the maximum number of results to return.
 	// Zero or negative values use the implementation's default limit.
 	Limit int

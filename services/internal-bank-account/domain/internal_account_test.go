@@ -1254,6 +1254,63 @@ func TestBuilder_WithOrgPartyID(t *testing.T) {
 	assert.Equal(t, orgID, *account.OrgPartyID())
 }
 
+func TestIsScopedToOrganization(t *testing.T) {
+	t.Run("global account returns false", func(t *testing.T) {
+		account, err := NewInternalBankAccount(
+			"IBA-GLOBAL",
+			"GLOBAL_HOLDING",
+			"Global Holding",
+			AccountTypeHolding,
+			ClearingPurposeUnspecified,
+			"USD",
+			"CURRENCY",
+		)
+		require.NoError(t, err)
+		assert.False(t, account.IsScopedToOrganization())
+	})
+
+	t.Run("org-scoped account returns true", func(t *testing.T) {
+		orgID := uuid.New()
+		account, err := NewInternalBankAccount(
+			"IBA-ORG",
+			"ORG_HOLDING",
+			"Org Holding",
+			AccountTypeHolding,
+			ClearingPurposeUnspecified,
+			"USD",
+			"CURRENCY",
+			WithOrgPartyID(orgID),
+		)
+		require.NoError(t, err)
+		assert.True(t, account.IsScopedToOrganization())
+	})
+
+	t.Run("builder with nil OrgPartyID returns false", func(t *testing.T) {
+		account := NewInternalBankAccountBuilder().
+			WithID(uuid.New()).
+			WithAccountID("IBA-001").
+			WithAccountCode("TEST").
+			WithName("Test").
+			WithAccountType(AccountTypeHolding).
+			WithOrgPartyID(nil).
+			Build()
+		assert.False(t, account.IsScopedToOrganization())
+	})
+
+	t.Run("builder with OrgPartyID returns true", func(t *testing.T) {
+		orgID := uuid.New()
+		account := NewInternalBankAccountBuilder().
+			WithID(uuid.New()).
+			WithAccountID("IBA-001").
+			WithAccountCode("TEST").
+			WithName("Test").
+			WithAccountType(AccountTypeHolding).
+			WithOrgPartyID(&orgID).
+			Build()
+		assert.True(t, account.IsScopedToOrganization())
+	})
+}
+
 func TestBuilder_WithOrgPartyID_Nil(t *testing.T) {
 	account := NewInternalBankAccountBuilder().
 		WithID(uuid.New()).
