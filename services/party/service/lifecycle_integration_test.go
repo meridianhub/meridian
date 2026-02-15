@@ -97,6 +97,10 @@ func setupLifecycleIntegrationTest(t *testing.T) (*Service, *gorm.DB, context.Co
 		party_id UUID NOT NULL REFERENCES %[1]s.party(id) ON DELETE CASCADE,
 		related_party_id UUID NOT NULL,
 		relationship_type VARCHAR(50) NOT NULL,
+		metadata JSONB NULL DEFAULT '{}'::jsonb,
+		status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+		effective_from TIMESTAMPTZ NOT NULL DEFAULT now(),
+		effective_to TIMESTAMPTZ NULL,
 		created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
 		updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
 		UNIQUE(party_id, related_party_id, relationship_type)
