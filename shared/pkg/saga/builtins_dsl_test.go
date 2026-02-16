@@ -24,6 +24,7 @@ func newMockReferenceDataClient() *mockReferenceDataClient {
 		accounts: map[string]string{
 			"customer-001": "account-123",
 			"customer-002": "account-456",
+			"party:party-123:org:org-456:currency:GBP": "org-account-789",
 		},
 		instruments: map[string]string{
 			"USD": "instr-usd",
@@ -382,5 +383,150 @@ func TestConvertStarlarkToGo(t *testing.T) {
 		// Should only contain the valid key, non-string key is logged and dropped
 		expected := map[string]interface{}{"valid": "value"}
 		assert.Equal(t, expected, result)
+	})
+}
+
+func TestBuildOrgAccountRefBuiltin(t *testing.T) {
+	t.Run("builds valid composite reference", func(t *testing.T) {
+		builtins := NewRestrictedBuiltins(nil)
+		buildRef := builtins["build_org_account_ref"].(*starlark.Builtin)
+
+		thread := &starlark.Thread{Name: "test"}
+		result, err := buildRef.CallInternal(thread, nil, []starlark.Tuple{
+			{starlark.String("party_id"), starlark.String("party-123")},
+			{starlark.String("org_id"), starlark.String("org-456")},
+			{starlark.String("currency"), starlark.String("GBP")},
+		})
+
+		require.NoError(t, err)
+		assert.Equal(t, `"party:party-123:org:org-456:currency:GBP"`, result.String())
+	})
+
+	t.Run("rejects empty party_id", func(t *testing.T) {
+		builtins := NewRestrictedBuiltins(nil)
+		buildRef := builtins["build_org_account_ref"].(*starlark.Builtin)
+
+		thread := &starlark.Thread{Name: "test"}
+		_, err := buildRef.CallInternal(thread, nil, []starlark.Tuple{
+			{starlark.String("party_id"), starlark.String("")},
+			{starlark.String("org_id"), starlark.String("org-456")},
+			{starlark.String("currency"), starlark.String("GBP")},
+		})
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrEmptyParam)
+		assert.Contains(t, err.Error(), "party_id")
+	})
+
+	t.Run("rejects empty org_id", func(t *testing.T) {
+		builtins := NewRestrictedBuiltins(nil)
+		buildRef := builtins["build_org_account_ref"].(*starlark.Builtin)
+
+		thread := &starlark.Thread{Name: "test"}
+		_, err := buildRef.CallInternal(thread, nil, []starlark.Tuple{
+			{starlark.String("party_id"), starlark.String("party-123")},
+			{starlark.String("org_id"), starlark.String("")},
+			{starlark.String("currency"), starlark.String("GBP")},
+		})
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrEmptyParam)
+		assert.Contains(t, err.Error(), "org_id")
+	})
+
+	t.Run("rejects empty currency", func(t *testing.T) {
+		builtins := NewRestrictedBuiltins(nil)
+		buildRef := builtins["build_org_account_ref"].(*starlark.Builtin)
+
+		thread := &starlark.Thread{Name: "test"}
+		_, err := buildRef.CallInternal(thread, nil, []starlark.Tuple{
+			{starlark.String("party_id"), starlark.String("party-123")},
+			{starlark.String("org_id"), starlark.String("org-456")},
+			{starlark.String("currency"), starlark.String("")},
+		})
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrEmptyParam)
+		assert.Contains(t, err.Error(), "currency")
+	})
+
+	t.Run("missing required parameter", func(t *testing.T) {
+		builtins := NewRestrictedBuiltins(nil)
+		buildRef := builtins["build_org_account_ref"].(*starlark.Builtin)
+
+		thread := &starlark.Thread{Name: "test"}
+		_, err := buildRef.CallInternal(thread, nil, []starlark.Tuple{
+			{starlark.String("party_id"), starlark.String("party-123")},
+		})
+
+		require.Error(t, err)
+	})
+}
+
+func TestResolveAccountBuiltin_CompositeReference(t *testing.T) {
+	t.Run("resolves composite reference", func(t *testing.T) {
+		mockClient := newMockReferenceDataClient()
+		thread := &starlark.Thread{Name: "test"}
+		ctx := &StarlarkContext{
+			Context:     context.Background(),
+			KnowledgeAt: time.Now(),
+			LookupCache: NewLookupResultCache(),
+		}
+		thread.SetLocal("saga.StarlarkContext", ctx)
+		thread.SetLocal("saga.ReferenceDataClient", mockClient)
+
+		builtins := NewRestrictedBuiltins(nil)
+		resolveAccount := builtins["resolve_account"].(*starlark.Builtin)
+
+		// Build a composite reference
+		ref := BuildCompositeAccountRef("party-123", "org-456", "GBP")
+		args := starlark.Tuple{starlark.String(ref)}
+		result, err := resolveAccount.CallInternal(thread, args, nil)
+
+		require.NoError(t, err)
+		// The mock returns based on the reference string
+		assert.NotEmpty(t, result.String())
+	})
+
+	t.Run("rejects malformed composite reference", func(t *testing.T) {
+		thread := &starlark.Thread{Name: "test"}
+		ctx := &StarlarkContext{
+			Context:     context.Background(),
+			KnowledgeAt: time.Now(),
+			LookupCache: NewLookupResultCache(),
+		}
+		thread.SetLocal("saga.StarlarkContext", ctx)
+
+		builtins := NewRestrictedBuiltins(nil)
+		resolveAccount := builtins["resolve_account"].(*starlark.Builtin)
+
+		// Malformed: wrong segment count
+		args := starlark.Tuple{starlark.String("party:123:org:456")}
+		_, err := resolveAccount.CallInternal(thread, args, nil)
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrMalformedCompositeRef)
+	})
+
+	t.Run("backward compatible with simple references", func(t *testing.T) {
+		mockClient := newMockReferenceDataClient()
+		thread := &starlark.Thread{Name: "test"}
+		ctx := &StarlarkContext{
+			Context:     context.Background(),
+			KnowledgeAt: time.Now(),
+			LookupCache: NewLookupResultCache(),
+		}
+		thread.SetLocal("saga.StarlarkContext", ctx)
+		thread.SetLocal("saga.ReferenceDataClient", mockClient)
+
+		builtins := NewRestrictedBuiltins(nil)
+		resolveAccount := builtins["resolve_account"].(*starlark.Builtin)
+
+		// Simple reference without colons - should work as before
+		args := starlark.Tuple{starlark.String("customer-001")}
+		result, err := resolveAccount.CallInternal(thread, args, nil)
+
+		require.NoError(t, err)
+		assert.Equal(t, `"account-123"`, result.String())
 	})
 }

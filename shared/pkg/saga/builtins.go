@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"go.starlark.net/starlark"
 )
@@ -30,6 +31,9 @@ var (
 
 	// ErrInvalidParameterType is returned when a parameter has an unexpected type.
 	ErrInvalidParameterType = errors.New("invalid parameter type")
+
+	// ErrEmptyParam is returned when a required parameter is provided but empty.
+	ErrEmptyParam = errors.New("parameter must not be empty")
 )
 
 // NewRestrictedBuiltins creates a hardened Starlark environment with whitelisted functions.
@@ -200,10 +204,20 @@ func NewRestrictedBuiltins(logger *slog.Logger) starlark.StringDict {
 	})
 
 	// resolve_account - resolve account ID from reference
+	// Supports both simple references (e.g., "ACC-001") and composite references
+	// (e.g., "party:<party_id>:org:<org_id>:currency:<code>") for org-scoped account resolution.
+	// Composite references are validated before being passed to the ReferenceDataClient.
 	builtins["resolve_account"] = starlark.NewBuiltin("resolve_account", func(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 		var reference string
 		if err := starlark.UnpackArgs(b.Name(), args, kwargs, "reference", &reference); err != nil {
 			return nil, err
+		}
+
+		// Validate composite reference format if it contains colons
+		if strings.Contains(reference, ":") {
+			if _, err := ParseCompositeAccountRef(reference); err != nil {
+				return nil, fmt.Errorf("resolve_account: %w", err)
+			}
 		}
 
 		// Get StarlarkContext from thread
@@ -299,6 +313,34 @@ func NewRestrictedBuiltins(logger *slog.Logger) starlark.StringDict {
 		}
 
 		return starlark.String(instrumentID), nil
+	})
+
+	// build_org_account_ref - build a composite account reference for org-scoped resolution
+	// Returns a properly formatted composite reference string:
+	//   party:<party_id>:org:<org_id>:currency:<currency_code>
+	// This prevents manual string concatenation errors in saga scripts.
+	builtins["build_org_account_ref"] = starlark.NewBuiltin("build_org_account_ref", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+		var partyID, orgID, currency string
+		if err := starlark.UnpackArgs(b.Name(), args, kwargs,
+			"party_id", &partyID,
+			"org_id", &orgID,
+			"currency", &currency,
+		); err != nil {
+			return nil, err
+		}
+
+		if partyID == "" {
+			return nil, fmt.Errorf("build_org_account_ref: %w: party_id", ErrEmptyParam)
+		}
+		if orgID == "" {
+			return nil, fmt.Errorf("build_org_account_ref: %w: org_id", ErrEmptyParam)
+		}
+		if currency == "" {
+			return nil, fmt.Errorf("build_org_account_ref: %w: currency", ErrEmptyParam)
+		}
+
+		ref := BuildCompositeAccountRef(partyID, orgID, currency)
+		return starlark.String(ref), nil
 	})
 
 	// invoke_saga - invoke a child saga
