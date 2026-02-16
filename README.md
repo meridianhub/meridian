@@ -1,9 +1,8 @@
 # Meridian
 
-**Define your billing model in code. We handle the ledger.**
+A programmable billing engine with business logic defined in Starlark and CEL.
 
 ```python
-# Your business logic, not ours
 def distribute_revenue(ctx):
     participants = party.list_participants(ctx.org_id)
     for p in participants:
@@ -12,124 +11,88 @@ def distribute_revenue(ctx):
         post(account, ctx.amount * Decimal(share), "CREDIT")
 ```
 
-Meridian is a programmable billing engine. You define what to charge, how to split revenue, and when to settle — in [Starlark](https://github.com/google/starlark-go) (a locked-down Python) and [CEL](https://cel.dev/) (for validation). We provide the double-entry ledger, audit trails, and payment integration.
+Meridian normalizes billing capability. Define what to charge, how to split revenue, and when to settle — the engine handles the double-entry ledger, audit trails, and payment integration. Start with simple subscriptions; the same infrastructure scales to complex multi-party distributions.
 
-## The Problem
-
-Billing systems are either:
-
-1. **Rigid SaaS** — works until your model doesn't fit their assumptions
-2. **Custom-built** — 6 months of engineering before you bill anyone
-3. **Spreadsheets** — until the auditor asks for proof
-
-You need infrastructure that adapts to *your* model, not the other way around.
-
-## The Solution
+## How It Works
 
 | Layer | Technology | Purpose |
 |-------|------------|---------|
 | **Business Logic** | Starlark | Sagas, distributions, settlement flows |
 | **Validation** | CEL | Account policies, limits, eligibility rules |
-| **Valuation** | CEL + Market Data | Price anything: kWh, carbon credits, GPU-hours |
+| **Valuation** | CEL + Market Data | Pricing for any asset type |
 | **Ledger** | Double-entry, bi-temporal | Every balance stored, every change traceable |
-| **Payments** | Stripe Connect | Real money in, real money out |
+| **Payments** | Stripe Connect | Payment rails integration |
 
-### Starlark: Your Logic, Sandboxed
+### Starlark
 
-Starlark is Python without the footguns. No imports, no filesystem, no network — just pure business logic that runs deterministically. When a saga fails, it replays identically.
+Starlark is a deterministic subset of Python. No imports, no filesystem, no network — pure business logic that replays identically on failure.
 
 ```python
-# Contribution saga: member funds a syndicate position
 def contribute(ctx):
-    # Reserve funds from personal account
     reserve(ctx.from_account, ctx.amount)
-
-    # Credit org-scoped account
     credit(resolve_account(
         party_id=ctx.party_id,
         org_id=ctx.org_id,
         currency=ctx.currency
     ), ctx.amount)
-
-    # Record the structuring data
     return {"contributed": str(ctx.amount)}
 ```
 
-### CEL: Validate Before You Transact
+### CEL
 
-CEL expressions guard every operation. Define once, enforce everywhere.
+CEL expressions guard operations and compute valuations.
 
 ```cel
 // Account policy: daily limit
 transaction.amount <= account.daily_limit - account.daily_spent
 
-// Eligibility: KYC verified
+// Eligibility check
 party.verification_status == "VERIFIED"
 
-// Valuation: time-of-use energy pricing
+// Time-of-use pricing
 rate_schedule.lookup(timestamp.hour) * quantity
 ```
 
-### Bi-Temporal: Prove Everything
+### Bi-Temporal
 
 Every record tracks two timelines:
 
-- **Event time**: When it happened in the real world
-- **Knowledge time**: When the system learned about it
+- **Event time**: When it happened
+- **Knowledge time**: When the system recorded it
 
-When estimates become actuals, we don't overwrite — we supersede. The audit trail shows exactly what you knew, when you knew it, and what changed.
+Estimates supersede to actuals without overwriting history. The audit trail shows what was known at any point in time.
 
-This is the difference between "trust me" and "verify it yourself."
+## Use Cases
 
-## Who It's For
-
-Meridian is infrastructure for businesses that:
-
-- Bill for things that aren't simple subscriptions
-- Need audit trails that survive regulatory scrutiny
-- Want to define business logic, not maintain billing code
-- Handle multi-party splits, pooling, or syndication
-
-### Example Verticals
-
-| Vertical | What You'd Bill | Why Meridian |
-|----------|-----------------|--------------|
-| **Energy** | kWh at time-of-use rates | Bi-temporal estimates → actuals |
+| Domain | Billing Model | Relevant Features |
+|--------|---------------|-------------------|
+| **SaaS** | Subscriptions, usage metering | Billing cycles, Stripe integration |
+| **Energy** | Time-of-use rates, estimates → actuals | Bi-temporal, quality ladder |
 | **Marketplaces** | Revenue splits to sellers | Multi-party distribution sagas |
-| **Betting/Gaming** | Pool contributions and payouts | Segregated funds, audit trail |
-| **Carbon** | Tonnes CO₂e at exchange prices | Multi-asset with market data |
-| **GPU Cloud** | Compute-hours at spot pricing | Usage metering with valuation |
+| **Betting/Gaming** | Pool contributions and payouts | Org-scoped accounts, segregated funds |
+| **Carbon** | Exchange-priced assets | Multi-asset ledger, market data |
+| **Compute** | Spot-priced resource usage | Usage metering, valuation |
 
-## Compliance-Ready
+## Compliance
 
-Built for regulated industries:
-
-| Requirement | How Meridian Helps |
-|-------------|-------------------|
-| **Audit Trail** | Immutable, bi-temporal, every transaction traceable to origin |
-| **Segregation of Funds** | Org-scoped accounts track positions within pools |
-| **AML/KYC** | Party service integrates with Stripe Identity |
-| **Fair & Transparent** | Market Data Service provides verifiable pricing |
+| Requirement | Implementation |
+|-------------|----------------|
+| **Audit Trail** | Immutable, bi-temporal transaction history |
+| **Fund Segregation** | Org-scoped accounts track positions within pools |
+| **Identity** | Party service with Stripe Identity integration |
 | **Reconciliation** | Automated variance detection and settlement lifecycle |
-
-The architecture doesn't change for compliance — it's how the system works by default.
 
 ## Quick Start
 
 ```bash
-# Clone and setup
 git clone git@github.com:meridianhub/meridian.git
 cd meridian
 go mod download
 
-# Local Kubernetes cluster
 ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
-
-# Start development environment
 tilt up
 ```
 
-**Access:**
 - Tilt UI: http://localhost:10350
 - API Gateway: http://localhost:8080
 - gRPC: localhost:9090
@@ -138,17 +101,17 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed setup.
 
 ## Architecture
 
-Meridian follows [BIAN](https://bian.org/) service domain patterns — the same architecture used by global banks, adapted for modern infrastructure.
+Follows [BIAN](https://bian.org/) service domain patterns.
 
 | Service | Purpose |
 |---------|---------|
 | **CurrentAccount** | Customer accounts, transaction orchestration |
 | **PositionKeeping** | Pre-ledger transaction log, position tracking |
-| **FinancialAccounting** | Double-entry bookkeeping, general ledger |
+| **FinancialAccounting** | Double-entry bookkeeping |
 | **PaymentOrder** | Saga orchestration, settlement |
-| **MarketInformation** | Bi-temporal pricing with quality ladder |
-| **Party** | Customer data, associations, KYC status |
-| **Reconciliation** | Variance detection, dispute management |
+| **MarketInformation** | Bi-temporal pricing, quality ladder |
+| **Party** | Customer data, associations |
+| **Reconciliation** | Variance detection, disputes |
 | **ControlPlane** | Manifest management, Stripe billing |
 
 See [docs/adr/](docs/adr/) for architectural decisions.
@@ -157,32 +120,22 @@ See [docs/adr/](docs/adr/) for architectural decisions.
 
 - **Language**: Go
 - **API**: Protocol Buffers + gRPC
-- **Database**: CockroachDB (distributed SQL)
+- **Database**: CockroachDB
 - **Events**: Apache Kafka
 - **Orchestration**: Kubernetes
 - **Payments**: Stripe Connect
 
 ## Documentation
 
-- [Architecture Decisions](docs/adr/) — why we built it this way
-- [API Reference](api/proto/) — Protocol Buffer definitions
-- [PRDs](docs/prd/) — feature specifications
-- [Contributing](CONTRIBUTING.md) — development setup and standards
+- [Architecture Decisions](docs/adr/)
+- [API Reference](api/proto/)
+- [PRDs](docs/prd/)
+- [Contributing](CONTRIBUTING.md)
 
 ## License
 
 Business Source License 1.1 — See [LICENSE](LICENSE).
 
-- Use, modify, and deploy for your business
+- Use, modify, and deploy internally
 - Cannot offer competing Billing/Treasury-as-a-Service
 - Converts to Apache 2.0 on January 14, 2030
-
-Same model as CockroachDB, MariaDB, and HashiCorp.
-
----
-
-**MeridianHub** — Programmable billing infrastructure.
-
-[Website](https://meridianhub.cloud) ·
-[Documentation](https://docs.meridianhub.cloud) ·
-[Contact](mailto:hello@meridianhub.cloud)
