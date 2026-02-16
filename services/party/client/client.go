@@ -277,6 +277,52 @@ func (c *Client) GetDefaultPaymentMethod(ctx context.Context, req *partyv1.GetDe
 	return resp, nil
 }
 
+// ListParticipants returns all active participants for a syndicate (org party).
+// This is an idempotent read operation, so it uses circuit breaker with retry.
+func (c *Client) ListParticipants(ctx context.Context, req *partyv1.ListParticipantsRequest) (*partyv1.ListParticipantsResponse, error) {
+	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	ctx = clients.PropagateCorrelationID(ctx)
+	ctx = clients.PropagateOrganization(ctx)
+
+	if c.resilient != nil {
+		return clients.ExecuteWithResilience(ctx, c.resilient, "ListParticipants", func() (*partyv1.ListParticipantsResponse, error) {
+			return c.party.ListParticipants(ctx, req)
+		})
+	}
+
+	resp, err := c.party.ListParticipants(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list participants: %w", err)
+	}
+
+	return resp, nil
+}
+
+// GetStructuringData returns the structuring metadata for a specific participant in a syndicate.
+// This is an idempotent read operation, so it uses circuit breaker with retry.
+func (c *Client) GetStructuringData(ctx context.Context, req *partyv1.GetStructuringDataRequest) (*partyv1.GetStructuringDataResponse, error) {
+	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	ctx = clients.PropagateCorrelationID(ctx)
+	ctx = clients.PropagateOrganization(ctx)
+
+	if c.resilient != nil {
+		return clients.ExecuteWithResilience(ctx, c.resilient, "GetStructuringData", func() (*partyv1.GetStructuringDataResponse, error) {
+			return c.party.GetStructuringData(ctx, req)
+		})
+	}
+
+	resp, err := c.party.GetStructuringData(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get structuring data: %w", err)
+	}
+
+	return resp, nil
+}
+
 // Close terminates the gRPC connection gracefully.
 func (c *Client) Close() error {
 	if c.conn != nil {

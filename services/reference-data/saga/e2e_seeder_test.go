@@ -135,7 +135,7 @@ def posting_rules(ctx):
 			migratedCount++
 		}
 	}
-	assert.Equal(t, 7, migratedCount, "all 7 sagas should be migrated")
+	assert.Equal(t, 8, migratedCount, "all 8 sagas should be migrated")
 
 	// Verify beta's sagas now use platform_ref
 	betaCtx := tenant.WithTenant(ctx, betaID)
@@ -180,7 +180,7 @@ func TestE2E_SeededSagasAreActive(t *testing.T) {
 		count++
 	}
 	require.NoError(t, rows.Err())
-	assert.Equal(t, 7, count, "should have 7 seeded sagas")
+	assert.Equal(t, 8, count, "should have 8 seeded sagas")
 }
 
 // TestE2E_ReseedingDoesNotDuplicate verifies ON CONFLICT idempotency.
@@ -212,13 +212,13 @@ func TestE2E_ReseedingDoesNotDuplicate(t *testing.T) {
 	err = seeder.SeedTenant(ctx, tenantID)
 	require.NoError(t, err)
 
-	// Count should still be exactly 7
+	// Count should still be exactly 8
 	var count int
 	err = pool.QueryRow(ctx,
 		"SELECT COUNT(*) FROM "+schemaName+".saga_definition WHERE is_system = true").
 		Scan(&count)
 	require.NoError(t, err)
-	assert.Equal(t, 7, count, "re-seeding should not create duplicates")
+	assert.Equal(t, 8, count, "re-seeding should not create duplicates")
 }
 
 // TestE2E_PlatformRefIntegrityConstraint verifies the CHECK constraint:
