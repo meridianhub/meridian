@@ -1,6 +1,9 @@
 # Meridian
 
-A billing engine that normalizes and outsources billing processes. Business logic defined in Starlark and CEL.
+A billing engine that normalizes and outsources billing processes.
+
+- **Business logic**: [Starlark](https://github.com/google/starlark-go) (deterministic Python subset)
+- **Validation & valuation**: [CEL](https://cel.dev/) (Common Expression Language)
 
 ```python
 def distribute_revenue(ctx):
