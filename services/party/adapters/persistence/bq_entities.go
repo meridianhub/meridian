@@ -9,12 +9,16 @@ import (
 
 // PartyAssociationEntity represents a relationship between two parties
 type PartyAssociationEntity struct {
-	ID               uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
-	PartyID          uuid.UUID `gorm:"column:party_id;type:uuid;not null;index:idx_party_association_party_id"`
-	RelatedPartyID   uuid.UUID `gorm:"column:related_party_id;type:uuid;not null;index:idx_party_association_related_party_id"`
-	RelationshipType string    `gorm:"column:relationship_type;type:varchar(50);not null;index:idx_party_association_relationship_type"`
-	CreatedAt        time.Time `gorm:"column:created_at;not null;default:now()"`
-	UpdatedAt        time.Time `gorm:"column:updated_at;not null;default:now()"`
+	ID               uuid.UUID  `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	PartyID          uuid.UUID  `gorm:"column:party_id;type:uuid;not null;index:idx_party_association_party_id"`
+	RelatedPartyID   uuid.UUID  `gorm:"column:related_party_id;type:uuid;not null;index:idx_party_association_related_party_id"`
+	RelationshipType string     `gorm:"column:relationship_type;type:varchar(50);not null;index:idx_party_association_relationship_type"`
+	Metadata         *string    `gorm:"column:metadata;type:jsonb;default:'{}'"`
+	Status           string     `gorm:"column:status;type:varchar(20);not null;default:'ACTIVE'"`
+	EffectiveFrom    time.Time  `gorm:"column:effective_from;not null;default:now()"`
+	EffectiveTo      *time.Time `gorm:"column:effective_to"`
+	CreatedAt        time.Time  `gorm:"column:created_at;not null;default:now()"`
+	UpdatedAt        time.Time  `gorm:"column:updated_at;not null;default:now()"`
 }
 
 // TableName overrides the default table name

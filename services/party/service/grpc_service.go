@@ -17,6 +17,7 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/auth"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"gorm.io/gorm"
 )
@@ -71,6 +72,11 @@ type Repository interface {
 
 	SaveBankRelation(ctx context.Context, partyID uuid.UUID, accountOfficerID, relationshipManagerID, assignedBranch string) error
 	FindBankRelation(ctx context.Context, partyID uuid.UUID) (*persistence.PartyBankRelationEntity, error)
+
+	// Syndicate participant operations
+	SaveAssociationWithInput(ctx context.Context, partyID, relatedPartyID uuid.UUID, relationshipType string, input *persistence.AssociationInput) (uuid.UUID, error)
+	ListParticipants(ctx context.Context, orgPartyID uuid.UUID, relationshipType string) ([]persistence.PartyAssociationEntity, error)
+	GetStructuringData(ctx context.Context, partyID, orgPartyID uuid.UUID, relationshipType string) (map[string]interface{}, error)
 }
 
 // Service implements the PartyService gRPC service
@@ -629,9 +635,33 @@ func (s *Service) RegisterAssociations(ctx context.Context, req *pb.RegisterAsso
 		return nil, status.Errorf(codes.InvalidArgument, "circular association detected")
 	}
 
-	// Save association
+	// Build association input with optional fields
 	relationshipType := protoToRelationshipType(req.RelationshipType)
-	associationID, err := s.repo.SaveAssociation(ctx, partyID, relatedPartyID, relationshipType)
+	var input *persistence.AssociationInput
+	if req.Metadata != nil || req.Status != pb.AssociationStatus_ASSOCIATION_STATUS_UNSPECIFIED || req.EffectiveFrom != nil || req.EffectiveTo != nil {
+		input = &persistence.AssociationInput{}
+		if req.Metadata != nil {
+			metadataBytes, marshalErr := json.Marshal(req.Metadata.AsMap())
+			if marshalErr == nil {
+				metadataStr := string(metadataBytes)
+				input.Metadata = &metadataStr
+			}
+		}
+		if req.Status != pb.AssociationStatus_ASSOCIATION_STATUS_UNSPECIFIED {
+			input.Status = protoAssociationStatusToString(req.Status)
+		}
+		if req.EffectiveFrom != nil {
+			ef := req.EffectiveFrom.AsTime()
+			input.EffectiveFrom = &ef
+		}
+		if req.EffectiveTo != nil {
+			et := req.EffectiveTo.AsTime()
+			input.EffectiveTo = &et
+		}
+	}
+
+	// Save association
+	associationID, err := s.repo.SaveAssociationWithInput(ctx, partyID, relatedPartyID, relationshipType, input)
 	if err != nil {
 		s.logger.Error("failed to save association", "party_id", req.PartyId, "error", err)
 		if errors.Is(err, persistence.ErrAssociationExists) {
@@ -642,13 +672,45 @@ func (s *Service) RegisterAssociations(ctx context.Context, req *pb.RegisterAsso
 
 	s.logger.Info("party association registered", "party_id", req.PartyId, "related_party_id", req.RelatedPartyId)
 
-	return &pb.RegisterAssociationsResponse{
+	resp := &pb.RegisterAssociationsResponse{
 		AssociationId:    associationID.String(),
 		PartyId:          req.PartyId,
 		RelatedPartyId:   req.RelatedPartyId,
 		RelationshipType: req.RelationshipType,
 		CreatedAt:        timestamppb.Now(),
-	}, nil
+		Metadata:         req.Metadata,
+		Status:           req.Status,
+		EffectiveFrom:    req.EffectiveFrom,
+		EffectiveTo:      req.EffectiveTo,
+	}
+	if resp.Status == pb.AssociationStatus_ASSOCIATION_STATUS_UNSPECIFIED {
+		resp.Status = pb.AssociationStatus_ASSOCIATION_STATUS_ACTIVE
+	}
+
+	return resp, nil
+}
+
+// Association status string constants
+const (
+	associationStatusActive     = "ACTIVE"
+	associationStatusSuspended  = "SUSPENDED"
+	associationStatusTerminated = "TERMINATED"
+)
+
+// protoAssociationStatusToString converts proto AssociationStatus to string
+func protoAssociationStatusToString(s pb.AssociationStatus) string {
+	switch s {
+	case pb.AssociationStatus_ASSOCIATION_STATUS_ACTIVE:
+		return associationStatusActive
+	case pb.AssociationStatus_ASSOCIATION_STATUS_SUSPENDED:
+		return associationStatusSuspended
+	case pb.AssociationStatus_ASSOCIATION_STATUS_TERMINATED:
+		return associationStatusTerminated
+	case pb.AssociationStatus_ASSOCIATION_STATUS_UNSPECIFIED:
+		return associationStatusActive
+	default:
+		return associationStatusActive
+	}
 }
 
 // UpdateAssociations updates a party association
@@ -694,13 +756,7 @@ func (s *Service) RetrieveAssociations(ctx context.Context, req *pb.RetrieveAsso
 
 	pbAssociations := make([]*pb.Association, len(associations))
 	for i, assoc := range associations {
-		pbAssociations[i] = &pb.Association{
-			AssociationId:    assoc.ID.String(),
-			RelatedPartyId:   assoc.RelatedPartyID.String(),
-			RelationshipType: relationshipTypeToProto(assoc.RelationshipType),
-			CreatedAt:        timestamppb.New(assoc.CreatedAt),
-			UpdatedAt:        timestamppb.New(assoc.UpdatedAt),
-		}
+		pbAssociations[i] = associationEntityToProto(&assoc)
 	}
 
 	return &pb.RetrieveAssociationsResponse{
@@ -914,6 +970,112 @@ func (s *Service) RetrieveBankRelations(ctx context.Context, req *pb.RetrieveBan
 	}
 
 	return resp, nil
+}
+
+// ListParticipants returns all active participants for a syndicate (org party).
+func (s *Service) ListParticipants(ctx context.Context, req *pb.ListParticipantsRequest) (*pb.ListParticipantsResponse, error) {
+	orgPartyID, err := uuid.Parse(req.OrgPartyId)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid org_party_id format: %v", err)
+	}
+
+	relationshipType := protoToRelationshipType(req.RelationshipType)
+
+	associations, err := s.repo.ListParticipants(ctx, orgPartyID, relationshipType)
+	if err != nil {
+		s.logger.Error("failed to list participants",
+			"org_party_id", req.OrgPartyId,
+			"error", err)
+		return nil, status.Errorf(codes.Internal, "failed to list participants: %v", err)
+	}
+
+	participants := make([]*pb.Association, len(associations))
+	for i, assoc := range associations {
+		participants[i] = associationEntityToProto(&assoc)
+	}
+
+	return &pb.ListParticipantsResponse{
+		Participants: participants,
+	}, nil
+}
+
+// GetStructuringData returns the structuring metadata for a specific participant in a syndicate.
+func (s *Service) GetStructuringData(ctx context.Context, req *pb.GetStructuringDataRequest) (*pb.GetStructuringDataResponse, error) {
+	partyID, err := uuid.Parse(req.PartyId)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid party_id format: %v", err)
+	}
+
+	orgPartyID, err := uuid.Parse(req.OrgPartyId)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid org_party_id format: %v", err)
+	}
+
+	relationshipType := protoToRelationshipType(req.RelationshipType)
+
+	metadata, err := s.repo.GetStructuringData(ctx, partyID, orgPartyID, relationshipType)
+	if err != nil {
+		s.logger.Error("failed to get structuring data",
+			"party_id", req.PartyId,
+			"org_party_id", req.OrgPartyId,
+			"error", err)
+		return nil, status.Errorf(codes.Internal, "failed to get structuring data: %v", err)
+	}
+
+	pbStruct, err := structpb.NewStruct(metadata)
+	if err != nil {
+		s.logger.Error("failed to convert metadata to proto struct",
+			"party_id", req.PartyId,
+			"error", err)
+		return nil, status.Errorf(codes.Internal, "failed to convert metadata: %v", err)
+	}
+
+	return &pb.GetStructuringDataResponse{
+		Metadata: pbStruct,
+	}, nil
+}
+
+// associationEntityToProto converts a persistence entity to a proto Association message.
+func associationEntityToProto(entity *persistence.PartyAssociationEntity) *pb.Association {
+	assoc := &pb.Association{
+		AssociationId:    entity.ID.String(),
+		PartyId:          entity.PartyID.String(),
+		RelatedPartyId:   entity.RelatedPartyID.String(),
+		RelationshipType: relationshipTypeToProto(entity.RelationshipType),
+		CreatedAt:        timestamppb.New(entity.CreatedAt),
+		UpdatedAt:        timestamppb.New(entity.UpdatedAt),
+		Status:           associationStatusToProto(entity.Status),
+		EffectiveFrom:    timestamppb.New(entity.EffectiveFrom),
+	}
+
+	if entity.EffectiveTo != nil {
+		assoc.EffectiveTo = timestamppb.New(*entity.EffectiveTo)
+	}
+
+	if entity.Metadata != nil && *entity.Metadata != "" && *entity.Metadata != "{}" {
+		var metadataMap map[string]interface{}
+		if err := json.Unmarshal([]byte(*entity.Metadata), &metadataMap); err == nil {
+			if pbStruct, err := structpb.NewStruct(metadataMap); err == nil {
+				assoc.Metadata = pbStruct
+			}
+		}
+	}
+
+	return assoc
+}
+
+// associationStatusToProto converts a status string to proto AssociationStatus
+func associationStatusToProto(status string) pb.AssociationStatus {
+	switch status {
+	case associationStatusActive:
+		return pb.AssociationStatus_ASSOCIATION_STATUS_ACTIVE
+	case associationStatusSuspended:
+		return pb.AssociationStatus_ASSOCIATION_STATUS_SUSPENDED
+	case associationStatusTerminated:
+		return pb.AssociationStatus_ASSOCIATION_STATUS_TERMINATED
+	default:
+		return pb.AssociationStatus_ASSOCIATION_STATUS_UNSPECIFIED
+	}
 }
 
 // protoToRelationshipType converts proto RelationshipType to domain string

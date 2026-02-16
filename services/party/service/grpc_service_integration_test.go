@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -19,6 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/structpb"
 	"gorm.io/gorm"
 )
 
@@ -75,6 +77,21 @@ func setupIntegrationTest(t *testing.T) (*Service, *gorm.DB, context.Context, fu
 		transaction_id VARCHAR(100),
 		client_ip VARCHAR(45),
 		user_agent TEXT
+	)`, pq.QuoteIdentifier(schemaName))).Error
+	require.NoError(t, err)
+
+	// Create the party_association table in the tenant schema
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.party_association (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		party_id UUID NOT NULL,
+		related_party_id UUID NOT NULL,
+		relationship_type VARCHAR(50) NOT NULL,
+		metadata JSONB NULL DEFAULT '{}'::jsonb,
+		status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+		effective_from TIMESTAMPTZ NOT NULL DEFAULT now(),
+		effective_to TIMESTAMPTZ NULL,
+		created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+		updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 	)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
@@ -472,3 +489,326 @@ func TestNewService_NilRepository(t *testing.T) {
 	assert.Nil(t, svc, "Service should be nil")
 	assert.ErrorIs(t, err, ErrRepositoryNil)
 }
+
+// createSyndicateWithParticipants creates an org party and N participant parties
+// with SYNDICATE_PARTICIPANT associations, returning the org party ID and participant IDs.
+func createSyndicateWithParticipants(t *testing.T, svc *Service, ctx context.Context, numParticipants int) (string, []string) {
+	t.Helper()
+
+	// Create org party (syndicate host)
+	orgResp, err := svc.RegisterParty(ctx, &pb.RegisterPartyRequest{
+		PartyType: pb.PartyType_PARTY_TYPE_ORGANIZATION,
+		LegalName: "Syndicate Host Ltd",
+	})
+	require.NoError(t, err)
+	orgPartyID := orgResp.Party.PartyId
+
+	participantIDs := make([]string, numParticipants)
+	for i := 0; i < numParticipants; i++ {
+		// Create participant party
+		partResp, err := svc.RegisterParty(ctx, &pb.RegisterPartyRequest{
+			PartyType: pb.PartyType_PARTY_TYPE_ORGANIZATION,
+			LegalName: fmt.Sprintf("Participant %d Ltd", i+1),
+		})
+		require.NoError(t, err)
+		participantIDs[i] = partResp.Party.PartyId
+
+		// Create syndicate participant association with metadata
+		metadata, err := structpb.NewStruct(map[string]interface{}{
+			"allocation_share": float64(100) / float64(numParticipants),
+			"role":             fmt.Sprintf("participant_%d", i+1),
+		})
+		require.NoError(t, err)
+
+		_, err = svc.RegisterAssociations(ctx, &pb.RegisterAssociationsRequest{
+			PartyId:          participantIDs[i],
+			RelatedPartyId:   orgPartyID,
+			RelationshipType: pb.RelationshipType_RELATIONSHIP_TYPE_SYNDICATE_PARTICIPANT,
+			Metadata:         metadata,
+			Status:           pb.AssociationStatus_ASSOCIATION_STATUS_ACTIVE,
+		})
+		require.NoError(t, err)
+	}
+
+	return orgPartyID, participantIDs
+}
+
+// TestListParticipants_ReturnsActiveParticipants verifies that ListParticipants
+// returns all active syndicate participants for an organization party.
+func TestListParticipants_ReturnsActiveParticipants(t *testing.T) {
+	svc, _, ctx, cleanup := setupIntegrationTest(t)
+	defer cleanup()
+
+	orgPartyID, participantIDs := createSyndicateWithParticipants(t, svc, ctx, 3)
+
+	resp, err := svc.ListParticipants(ctx, &pb.ListParticipantsRequest{
+		OrgPartyId:       orgPartyID,
+		RelationshipType: pb.RelationshipType_RELATIONSHIP_TYPE_SYNDICATE_PARTICIPANT,
+	})
+	require.NoError(t, err)
+	require.Len(t, resp.Participants, 3, "Should return 3 active participants")
+
+	// Verify each participant has the expected fields
+	returnedPartyIDs := make(map[string]bool)
+	for _, p := range resp.Participants {
+		assert.NotEmpty(t, p.AssociationId)
+		assert.Equal(t, pb.RelationshipType_RELATIONSHIP_TYPE_SYNDICATE_PARTICIPANT, p.RelationshipType)
+		assert.Equal(t, pb.AssociationStatus_ASSOCIATION_STATUS_ACTIVE, p.Status)
+		assert.NotNil(t, p.CreatedAt)
+		assert.NotNil(t, p.EffectiveFrom)
+		assert.NotNil(t, p.Metadata)
+		// The related_party_id in the association is the org party
+		assert.Equal(t, orgPartyID, p.RelatedPartyId)
+		returnedPartyIDs[p.AssociationId] = true
+	}
+
+	// Verify all 3 distinct association IDs returned
+	assert.Len(t, returnedPartyIDs, 3)
+
+	_ = participantIDs // used by createSyndicateWithParticipants
+}
+
+// TestListParticipants_ExcludesSuspended verifies that SUSPENDED associations
+// are excluded from ListParticipants results.
+func TestListParticipants_ExcludesSuspended(t *testing.T) {
+	svc, db, ctx, cleanup := setupIntegrationTest(t)
+	defer cleanup()
+
+	orgPartyID, _ := createSyndicateWithParticipants(t, svc, ctx, 3)
+
+	// Suspend one participant's association directly in DB
+	err := db.Exec("UPDATE party_association SET status = 'SUSPENDED' WHERE related_party_id = ? LIMIT 1",
+		orgPartyID).Error
+	// LIMIT not supported in all DB engines, use a subquery approach instead
+	if err != nil {
+		// Fallback: update first association found
+		var assocID string
+		db.Raw("SELECT id FROM party_association WHERE related_party_id = ? LIMIT 1", orgPartyID).Scan(&assocID)
+		err = db.Exec("UPDATE party_association SET status = 'SUSPENDED' WHERE id = ?", assocID).Error
+		require.NoError(t, err)
+	}
+
+	resp, err := svc.ListParticipants(ctx, &pb.ListParticipantsRequest{
+		OrgPartyId:       orgPartyID,
+		RelationshipType: pb.RelationshipType_RELATIONSHIP_TYPE_SYNDICATE_PARTICIPANT,
+	})
+	require.NoError(t, err)
+	assert.Len(t, resp.Participants, 2, "Should return only 2 active participants (1 suspended)")
+
+	for _, p := range resp.Participants {
+		assert.Equal(t, pb.AssociationStatus_ASSOCIATION_STATUS_ACTIVE, p.Status)
+	}
+}
+
+// TestListParticipants_EmptyResult verifies that ListParticipants returns
+// an empty list (not an error) when no participants exist.
+func TestListParticipants_EmptyResult(t *testing.T) {
+	svc, _, ctx, cleanup := setupIntegrationTest(t)
+	defer cleanup()
+
+	// Create an org party with no participants
+	orgResp, err := svc.RegisterParty(ctx, &pb.RegisterPartyRequest{
+		PartyType: pb.PartyType_PARTY_TYPE_ORGANIZATION,
+		LegalName: "Empty Syndicate Ltd",
+	})
+	require.NoError(t, err)
+
+	resp, err := svc.ListParticipants(ctx, &pb.ListParticipantsRequest{
+		OrgPartyId:       orgResp.Party.PartyId,
+		RelationshipType: pb.RelationshipType_RELATIONSHIP_TYPE_SYNDICATE_PARTICIPANT,
+	})
+	require.NoError(t, err)
+	assert.Empty(t, resp.Participants)
+}
+
+// TestListParticipants_InvalidOrgPartyID verifies that an invalid UUID returns InvalidArgument.
+func TestListParticipants_InvalidOrgPartyID(t *testing.T) {
+	svc, _, ctx, cleanup := setupIntegrationTest(t)
+	defer cleanup()
+
+	resp, err := svc.ListParticipants(ctx, &pb.ListParticipantsRequest{
+		OrgPartyId:       "not-a-uuid",
+		RelationshipType: pb.RelationshipType_RELATIONSHIP_TYPE_SYNDICATE_PARTICIPANT,
+	})
+	assert.Nil(t, resp)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+}
+
+// TestGetStructuringData_ReturnsMetadata verifies that GetStructuringData
+// returns the correct metadata for a specific participant.
+func TestGetStructuringData_ReturnsMetadata(t *testing.T) {
+	svc, _, ctx, cleanup := setupIntegrationTest(t)
+	defer cleanup()
+
+	orgPartyID, participantIDs := createSyndicateWithParticipants(t, svc, ctx, 2)
+
+	// Get structuring data for first participant
+	resp, err := svc.GetStructuringData(ctx, &pb.GetStructuringDataRequest{
+		PartyId:          participantIDs[0],
+		OrgPartyId:       orgPartyID,
+		RelationshipType: pb.RelationshipType_RELATIONSHIP_TYPE_SYNDICATE_PARTICIPANT,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp.Metadata)
+
+	metadataMap := resp.Metadata.AsMap()
+	assert.Equal(t, float64(50), metadataMap["allocation_share"])
+	assert.Equal(t, "participant_1", metadataMap["role"])
+}
+
+// TestGetStructuringData_NotFoundReturnsEmpty verifies that GetStructuringData
+// returns an empty metadata map (not an error) when no association exists.
+func TestGetStructuringData_NotFoundReturnsEmpty(t *testing.T) {
+	svc, _, ctx, cleanup := setupIntegrationTest(t)
+	defer cleanup()
+
+	resp, err := svc.GetStructuringData(ctx, &pb.GetStructuringDataRequest{
+		PartyId:          uuid.New().String(),
+		OrgPartyId:       uuid.New().String(),
+		RelationshipType: pb.RelationshipType_RELATIONSHIP_TYPE_SYNDICATE_PARTICIPANT,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp.Metadata)
+
+	// Should be empty, not nil
+	metadataMap := resp.Metadata.AsMap()
+	assert.Empty(t, metadataMap)
+}
+
+// TestGetStructuringData_InvalidPartyID verifies that invalid UUIDs return InvalidArgument.
+func TestGetStructuringData_InvalidPartyID(t *testing.T) {
+	svc, _, ctx, cleanup := setupIntegrationTest(t)
+	defer cleanup()
+
+	resp, err := svc.GetStructuringData(ctx, &pb.GetStructuringDataRequest{
+		PartyId:          "not-a-uuid",
+		OrgPartyId:       uuid.New().String(),
+		RelationshipType: pb.RelationshipType_RELATIONSHIP_TYPE_SYNDICATE_PARTICIPANT,
+	})
+	assert.Nil(t, resp)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+}
+
+// TestGetStructuringData_InvalidOrgPartyID verifies that invalid org party UUID returns InvalidArgument.
+func TestGetStructuringData_InvalidOrgPartyID(t *testing.T) {
+	svc, _, ctx, cleanup := setupIntegrationTest(t)
+	defer cleanup()
+
+	resp, err := svc.GetStructuringData(ctx, &pb.GetStructuringDataRequest{
+		PartyId:          uuid.New().String(),
+		OrgPartyId:       "not-a-uuid",
+		RelationshipType: pb.RelationshipType_RELATIONSHIP_TYPE_SYNDICATE_PARTICIPANT,
+	})
+	assert.Nil(t, resp)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+}
+
+// TestRegisterAssociations_WithMetadata verifies that associations can be
+// created with metadata and the new lifecycle fields.
+func TestRegisterAssociations_WithMetadata(t *testing.T) {
+	svc, _, ctx, cleanup := setupIntegrationTest(t)
+	defer cleanup()
+
+	// Create two parties
+	party1Resp, err := svc.RegisterParty(ctx, &pb.RegisterPartyRequest{
+		PartyType: pb.PartyType_PARTY_TYPE_ORGANIZATION,
+		LegalName: "Host Corp",
+	})
+	require.NoError(t, err)
+
+	party2Resp, err := svc.RegisterParty(ctx, &pb.RegisterPartyRequest{
+		PartyType: pb.PartyType_PARTY_TYPE_ORGANIZATION,
+		LegalName: "Participant Corp",
+	})
+	require.NoError(t, err)
+
+	metadata, err := structpb.NewStruct(map[string]interface{}{
+		"allocation_share": 25.5,
+		"tier":             "gold",
+	})
+	require.NoError(t, err)
+
+	assocResp, err := svc.RegisterAssociations(ctx, &pb.RegisterAssociationsRequest{
+		PartyId:          party2Resp.Party.PartyId,
+		RelatedPartyId:   party1Resp.Party.PartyId,
+		RelationshipType: pb.RelationshipType_RELATIONSHIP_TYPE_SYNDICATE_PARTICIPANT,
+		Metadata:         metadata,
+		Status:           pb.AssociationStatus_ASSOCIATION_STATUS_ACTIVE,
+	})
+	require.NoError(t, err)
+	assert.NotEmpty(t, assocResp.AssociationId)
+	assert.Equal(t, pb.AssociationStatus_ASSOCIATION_STATUS_ACTIVE, assocResp.Status)
+
+	// Verify metadata was persisted via GetStructuringData
+	structResp, err := svc.GetStructuringData(ctx, &pb.GetStructuringDataRequest{
+		PartyId:          party2Resp.Party.PartyId,
+		OrgPartyId:       party1Resp.Party.PartyId,
+		RelationshipType: pb.RelationshipType_RELATIONSHIP_TYPE_SYNDICATE_PARTICIPANT,
+	})
+	require.NoError(t, err)
+
+	metadataMap := structResp.Metadata.AsMap()
+	assert.Equal(t, 25.5, metadataMap["allocation_share"])
+	assert.Equal(t, "gold", metadataMap["tier"])
+}
+
+// TestRetrieveAssociations_IncludesNewFields verifies that RetrieveAssociations
+// returns the new metadata, status, effective_from, effective_to fields.
+func TestRetrieveAssociations_IncludesNewFields(t *testing.T) {
+	svc, _, ctx, cleanup := setupIntegrationTest(t)
+	defer cleanup()
+
+	// Create two parties and an association with metadata
+	party1Resp, err := svc.RegisterParty(ctx, &pb.RegisterPartyRequest{
+		PartyType: pb.PartyType_PARTY_TYPE_ORGANIZATION,
+		LegalName: "Host Corp",
+	})
+	require.NoError(t, err)
+
+	party2Resp, err := svc.RegisterParty(ctx, &pb.RegisterPartyRequest{
+		PartyType: pb.PartyType_PARTY_TYPE_ORGANIZATION,
+		LegalName: "Partner Corp",
+	})
+	require.NoError(t, err)
+
+	metadata, err := structpb.NewStruct(map[string]interface{}{
+		"allocation_share": 50.0,
+	})
+	require.NoError(t, err)
+
+	_, err = svc.RegisterAssociations(ctx, &pb.RegisterAssociationsRequest{
+		PartyId:          party2Resp.Party.PartyId,
+		RelatedPartyId:   party1Resp.Party.PartyId,
+		RelationshipType: pb.RelationshipType_RELATIONSHIP_TYPE_SYNDICATE_PARTICIPANT,
+		Metadata:         metadata,
+	})
+	require.NoError(t, err)
+
+	// Retrieve associations for party2
+	assocResp, err := svc.RetrieveAssociations(ctx, &pb.RetrieveAssociationsRequest{
+		PartyId: party2Resp.Party.PartyId,
+	})
+	require.NoError(t, err)
+	require.Len(t, assocResp.Associations, 1)
+
+	assoc := assocResp.Associations[0]
+	assert.Equal(t, pb.AssociationStatus_ASSOCIATION_STATUS_ACTIVE, assoc.Status)
+	assert.NotNil(t, assoc.EffectiveFrom)
+	assert.Nil(t, assoc.EffectiveTo)
+	assert.NotNil(t, assoc.Metadata)
+
+	metadataMap := assoc.Metadata.AsMap()
+	assert.Equal(t, 50.0, metadataMap["allocation_share"])
+}
+
+// Suppress unused import warnings
+var (
+	_ = json.Marshal
+	_ = structpb.NewStruct
+)

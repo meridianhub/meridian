@@ -138,6 +138,18 @@ func (m *mockRepository) FindBankRelation(_ context.Context, _ uuid.UUID) (*pers
 	return nil, nil
 }
 
+func (m *mockRepository) SaveAssociationWithInput(_ context.Context, _, _ uuid.UUID, _ string, _ *persistence.AssociationInput) (uuid.UUID, error) {
+	return uuid.New(), nil
+}
+
+func (m *mockRepository) ListParticipants(_ context.Context, _ uuid.UUID, _ string) ([]persistence.PartyAssociationEntity, error) {
+	return []persistence.PartyAssociationEntity{}, nil
+}
+
+func (m *mockRepository) GetStructuringData(_ context.Context, _, _ uuid.UUID, _ string) (map[string]interface{}, error) {
+	return map[string]interface{}{}, nil
+}
+
 func newTestService(mock *mockRepository) *Service {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	svc, _ := NewService(mock, logger)
