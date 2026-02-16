@@ -1,6 +1,6 @@
 # Meridian
 
-A programmable billing engine with business logic defined in Starlark and CEL.
+A billing engine that normalizes and outsources billing processes. Business logic defined in Starlark and CEL.
 
 ```python
 def distribute_revenue(ctx):
@@ -11,7 +11,7 @@ def distribute_revenue(ctx):
         post(account, ctx.amount * Decimal(share), "CREDIT")
 ```
 
-Meridian normalizes billing capability. Define what to charge, how to split revenue, and when to settle — the engine handles the double-entry ledger, audit trails, and payment integration. Start with simple subscriptions; the same infrastructure scales to complex multi-party distributions.
+Define what to charge, how to split revenue, and when to settle. The engine handles the double-entry ledger, audit trails, and payment integration. Start with simple subscriptions; the same infrastructure scales to complex multi-party distributions.
 
 ## How It Works
 
