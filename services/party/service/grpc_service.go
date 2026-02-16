@@ -1039,6 +1039,7 @@ func (s *Service) GetStructuringData(ctx context.Context, req *pb.GetStructuring
 func associationEntityToProto(entity *persistence.PartyAssociationEntity) *pb.Association {
 	assoc := &pb.Association{
 		AssociationId:    entity.ID.String(),
+		PartyId:          entity.PartyID.String(),
 		RelatedPartyId:   entity.RelatedPartyID.String(),
 		RelationshipType: relationshipTypeToProto(entity.RelationshipType),
 		CreatedAt:        timestamppb.New(entity.CreatedAt),

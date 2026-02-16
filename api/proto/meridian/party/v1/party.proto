@@ -533,6 +533,9 @@ message Association {
 
   // effective_to is when this association expires (null means indefinite).
   google.protobuf.Timestamp effective_to = 9;
+
+  // party_id is the identifier of the party that holds this association.
+  string party_id = 10;
 }
 
 // --- Business Qualifier: Demographics ---

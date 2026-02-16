@@ -683,18 +683,18 @@ func TestListParticipants_ReturnsActiveAssociations(t *testing.T) {
 	participant2 := uuid.New()
 
 	// Create two ACTIVE associations pointing to the same org
-	_, err := repo.SaveAssociationWithInput(ctx, participant1, orgPartyID, "SYNDICATE_MEMBER", &AssociationInput{
+	_, err := repo.SaveAssociationWithInput(ctx, participant1, orgPartyID, string(domain.RelationshipTypeSyndicateParticipant), &AssociationInput{
 		Status: "ACTIVE",
 	})
 	require.NoError(t, err)
 
-	_, err = repo.SaveAssociationWithInput(ctx, participant2, orgPartyID, "SYNDICATE_MEMBER", &AssociationInput{
+	_, err = repo.SaveAssociationWithInput(ctx, participant2, orgPartyID, string(domain.RelationshipTypeSyndicateParticipant), &AssociationInput{
 		Status: "ACTIVE",
 	})
 	require.NoError(t, err)
 
 	// List participants
-	results, err := repo.ListParticipants(ctx, orgPartyID, "SYNDICATE_MEMBER")
+	results, err := repo.ListParticipants(ctx, orgPartyID, string(domain.RelationshipTypeSyndicateParticipant))
 	require.NoError(t, err)
 	assert.Len(t, results, 2)
 
@@ -718,22 +718,22 @@ func TestListParticipants_ExcludesSuspendedAndTerminated(t *testing.T) {
 	suspendedParty := uuid.New()
 	terminatedParty := uuid.New()
 
-	_, err := repo.SaveAssociationWithInput(ctx, activeParty, orgPartyID, "SYNDICATE_MEMBER", &AssociationInput{
+	_, err := repo.SaveAssociationWithInput(ctx, activeParty, orgPartyID, string(domain.RelationshipTypeSyndicateParticipant), &AssociationInput{
 		Status: "ACTIVE",
 	})
 	require.NoError(t, err)
 
-	_, err = repo.SaveAssociationWithInput(ctx, suspendedParty, orgPartyID, "SYNDICATE_MEMBER", &AssociationInput{
+	_, err = repo.SaveAssociationWithInput(ctx, suspendedParty, orgPartyID, string(domain.RelationshipTypeSyndicateParticipant), &AssociationInput{
 		Status: "SUSPENDED",
 	})
 	require.NoError(t, err)
 
-	_, err = repo.SaveAssociationWithInput(ctx, terminatedParty, orgPartyID, "SYNDICATE_MEMBER", &AssociationInput{
+	_, err = repo.SaveAssociationWithInput(ctx, terminatedParty, orgPartyID, string(domain.RelationshipTypeSyndicateParticipant), &AssociationInput{
 		Status: "TERMINATED",
 	})
 	require.NoError(t, err)
 
-	results, err := repo.ListParticipants(ctx, orgPartyID, "SYNDICATE_MEMBER")
+	results, err := repo.ListParticipants(ctx, orgPartyID, string(domain.RelationshipTypeSyndicateParticipant))
 	require.NoError(t, err)
 	assert.Len(t, results, 1)
 	assert.Equal(t, activeParty, results[0].PartyID)
@@ -749,13 +749,13 @@ func TestListParticipants_FiltersRelationshipType(t *testing.T) {
 	member := uuid.New()
 	agent := uuid.New()
 
-	_, err := repo.SaveAssociationWithInput(ctx, member, orgPartyID, "SYNDICATE_MEMBER", nil)
+	_, err := repo.SaveAssociationWithInput(ctx, member, orgPartyID, string(domain.RelationshipTypeSyndicateParticipant), nil)
 	require.NoError(t, err)
 
 	_, err = repo.SaveAssociationWithInput(ctx, agent, orgPartyID, "AGENT", nil)
 	require.NoError(t, err)
 
-	results, err := repo.ListParticipants(ctx, orgPartyID, "SYNDICATE_MEMBER")
+	results, err := repo.ListParticipants(ctx, orgPartyID, string(domain.RelationshipTypeSyndicateParticipant))
 	require.NoError(t, err)
 	assert.Len(t, results, 1)
 	assert.Equal(t, member, results[0].PartyID)
@@ -767,7 +767,7 @@ func TestListParticipants_EmptyResult(t *testing.T) {
 
 	repo := NewRepository(db)
 
-	results, err := repo.ListParticipants(ctx, uuid.New(), "SYNDICATE_MEMBER")
+	results, err := repo.ListParticipants(ctx, uuid.New(), string(domain.RelationshipTypeSyndicateParticipant))
 	require.NoError(t, err)
 	assert.Empty(t, results)
 }
@@ -782,12 +782,12 @@ func TestGetStructuringData_ReturnsMetadata(t *testing.T) {
 	orgPartyID := uuid.New()
 	metadata := `{"commitment_amount":"5000000","share_percentage":"25.5","role":"lead_arranger"}`
 
-	_, err := repo.SaveAssociationWithInput(ctx, partyID, orgPartyID, "SYNDICATE_MEMBER", &AssociationInput{
+	_, err := repo.SaveAssociationWithInput(ctx, partyID, orgPartyID, string(domain.RelationshipTypeSyndicateParticipant), &AssociationInput{
 		Metadata: &metadata,
 	})
 	require.NoError(t, err)
 
-	result, err := repo.GetStructuringData(ctx, partyID, orgPartyID, "SYNDICATE_MEMBER")
+	result, err := repo.GetStructuringData(ctx, partyID, orgPartyID, string(domain.RelationshipTypeSyndicateParticipant))
 	require.NoError(t, err)
 	assert.Equal(t, "5000000", result["commitment_amount"])
 	assert.Equal(t, "25.5", result["share_percentage"])
@@ -800,7 +800,7 @@ func TestGetStructuringData_NotFoundReturnsEmptyMap(t *testing.T) {
 
 	repo := NewRepository(db)
 
-	result, err := repo.GetStructuringData(ctx, uuid.New(), uuid.New(), "SYNDICATE_MEMBER")
+	result, err := repo.GetStructuringData(ctx, uuid.New(), uuid.New(), string(domain.RelationshipTypeSyndicateParticipant))
 	require.NoError(t, err)
 	assert.NotNil(t, result, "Should return empty map, not nil")
 	assert.Empty(t, result, "Should return empty map when not found")
@@ -816,10 +816,10 @@ func TestGetStructuringData_NilMetadataReturnsEmptyMap(t *testing.T) {
 	orgPartyID := uuid.New()
 
 	// Create association without metadata
-	_, err := repo.SaveAssociationWithInput(ctx, partyID, orgPartyID, "SYNDICATE_MEMBER", nil)
+	_, err := repo.SaveAssociationWithInput(ctx, partyID, orgPartyID, string(domain.RelationshipTypeSyndicateParticipant), nil)
 	require.NoError(t, err)
 
-	result, err := repo.GetStructuringData(ctx, partyID, orgPartyID, "SYNDICATE_MEMBER")
+	result, err := repo.GetStructuringData(ctx, partyID, orgPartyID, string(domain.RelationshipTypeSyndicateParticipant))
 	require.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.Empty(t, result)
@@ -837,7 +837,7 @@ func TestSaveAssociationWithInput_PersistsAllFields(t *testing.T) {
 	effectiveFrom := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	effectiveTo := time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC)
 
-	associationID, err := repo.SaveAssociationWithInput(ctx, partyID, relatedID, "SYNDICATE_MEMBER", &AssociationInput{
+	associationID, err := repo.SaveAssociationWithInput(ctx, partyID, relatedID, string(domain.RelationshipTypeSyndicateParticipant), &AssociationInput{
 		Metadata:      &metadata,
 		Status:        "SUSPENDED",
 		EffectiveFrom: &effectiveFrom,
