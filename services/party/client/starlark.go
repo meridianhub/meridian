@@ -119,6 +119,10 @@ func listParticipantsHandler(client *Client) saga.Handler {
 			return nil, err
 		}
 
+		if err := ctx.ValidatePartyAccessFromString(orgID); err != nil {
+			return nil, fmt.Errorf("party.list_participants: %w", err)
+		}
+
 		relType, err := parseRelationshipType(params)
 		if err != nil {
 			return nil, fmt.Errorf("party.list_participants: %w", err)
@@ -170,6 +174,13 @@ func getStructuringDataHandler(client *Client) saga.Handler {
 		orgID, err := saga.RequireStringParam(params, "org_id")
 		if err != nil {
 			return nil, err
+		}
+
+		if err := ctx.ValidatePartyAccessFromString(partyID); err != nil {
+			return nil, fmt.Errorf("party.get_structuring_data: %w", err)
+		}
+		if err := ctx.ValidatePartyAccessFromString(orgID); err != nil {
+			return nil, fmt.Errorf("party.get_structuring_data: %w", err)
 		}
 
 		relType, err := parseRelationshipType(params)

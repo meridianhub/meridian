@@ -16,7 +16,7 @@
 #      a. get_structuring_data: Get allocation share metadata
 #      b. resolve_account: Resolve participant's org-scoped account
 #      c. log_position: Create CREDIT entry in PositionKeeping
-#   3. finalize: Persist distribution metadata
+#   3. Return distribution result with per-participant details
 #
 # Input data (provided via input_data dictionary):
 #   - org_id: string - Syndicate organization party ID
