@@ -563,3 +563,66 @@ func TestGetStructuringDataHandler_CacheHit(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, map1["allocation_share"], map2["allocation_share"])
 }
+
+func TestListParticipantsHandler_PartyScopeViolation(t *testing.T) {
+	client := &Client{party: &mockPartyServiceClient{}}
+	registry := saga.NewHandlerRegistry()
+	err := RegisterStarlarkHandlers(registry, client)
+	require.NoError(t, err)
+
+	handler, err := registry.Get("party.list_participants")
+	require.NoError(t, err)
+
+	ownPartyID := uuid.New()
+	foreignOrgID := uuid.New()
+
+	ctx := &saga.StarlarkContext{
+		Context:         context.Background(),
+		SagaExecutionID: uuid.New(),
+		CorrelationID:   uuid.New(),
+		Logger:          slog.Default(),
+		PartyScope: &saga.PartyScope{
+			PartyID:        ownPartyID,
+			VisibleParties: []uuid.UUID{ownPartyID},
+		},
+	}
+
+	_, err = handler(ctx, map[string]any{
+		"org_id":            foreignOrgID.String(),
+		"relationship_type": "RELATIONSHIP_TYPE_SYNDICATE_PARTICIPANT",
+	})
+
+	assert.ErrorIs(t, err, saga.ErrPartyScopeViolation)
+}
+
+func TestGetStructuringDataHandler_PartyScopeViolation(t *testing.T) {
+	client := &Client{party: &mockPartyServiceClient{}}
+	registry := saga.NewHandlerRegistry()
+	err := RegisterStarlarkHandlers(registry, client)
+	require.NoError(t, err)
+
+	handler, err := registry.Get("party.get_structuring_data")
+	require.NoError(t, err)
+
+	ownPartyID := uuid.New()
+	foreignPartyID := uuid.New()
+
+	ctx := &saga.StarlarkContext{
+		Context:         context.Background(),
+		SagaExecutionID: uuid.New(),
+		CorrelationID:   uuid.New(),
+		Logger:          slog.Default(),
+		PartyScope: &saga.PartyScope{
+			PartyID:        ownPartyID,
+			VisibleParties: []uuid.UUID{ownPartyID},
+		},
+	}
+
+	_, err = handler(ctx, map[string]any{
+		"party_id":          foreignPartyID.String(),
+		"org_id":            ownPartyID.String(),
+		"relationship_type": "RELATIONSHIP_TYPE_SYNDICATE_PARTICIPANT",
+	})
+
+	assert.ErrorIs(t, err, saga.ErrPartyScopeViolation)
+}
