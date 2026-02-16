@@ -54,7 +54,7 @@ func TestPlatformDefaults(t *testing.T) {
 	defaults, err := PlatformDefaults()
 	require.NoError(t, err)
 
-	assert.Len(t, defaults, 7)
+	assert.Len(t, defaults, 8)
 
 	// Verify each default has required fields
 	for _, meta := range defaults {
@@ -76,6 +76,7 @@ func TestPlatformDefaults(t *testing.T) {
 	assert.Contains(t, names, "stripe_payment")
 	assert.Contains(t, names, "dunning_escalation")
 	assert.Contains(t, names, "dunning_unfreeze")
+	assert.Contains(t, names, "dividend_distribution")
 }
 
 func TestSeeder_SeedTenant(t *testing.T) {
@@ -105,7 +106,7 @@ func TestSeeder_SeedTenant(t *testing.T) {
 		var count int
 		err = pool.QueryRow(ctx, "SELECT COUNT(*) FROM "+schemaName+".saga_definition WHERE is_system = true").Scan(&count)
 		require.NoError(t, err)
-		assert.Equal(t, 7, count, "expected 7 system sagas")
+		assert.Equal(t, 8, count, "expected 8 system sagas")
 
 		// Verify each saga has platform_ref and no script
 		rows, err := pool.Query(ctx, `
