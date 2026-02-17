@@ -142,14 +142,18 @@ func (r *RedisService) Acquire(ctx context.Context, key Key, opts LockOptions) e
 	// Try to acquire lock with retries
 	for attempt := 0; attempt <= opts.MaxRetries; attempt++ {
 		// Use SET NX (set if not exists) with expiration
-		err := r.client.SetArgs(ctx, redisKey, opts.Token, redis.SetArgs{Mode: "NX", TTL: opts.TTL}).Err()
-		if err != nil && !errors.Is(err, redis.Nil) {
-			return fmt.Errorf("failed to acquire lock: %w", err)
-		}
-
+		_, err := r.client.SetArgs(ctx, redisKey, opts.Token, redis.SetArgs{
+			Mode: "NX",
+			TTL:  opts.TTL,
+		}).Result()
 		if err == nil {
+			// Lock acquired successfully
 			return nil
 		}
+		if !errors.Is(err, redis.Nil) {
+			return fmt.Errorf("failed to acquire lock: %w", err)
+		}
+		// redis.Nil means key already exists (lock held by someone else), fall through to retry
 
 		// Lock acquisition failed, check if we should retry
 		if attempt < opts.MaxRetries {
