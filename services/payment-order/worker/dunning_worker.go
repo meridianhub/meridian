@@ -209,10 +209,12 @@ func (w *DunningWorker) processDueRetriesForKey(ctx context.Context, key string)
 	now := NowFunc()
 	maxScore := strconv.FormatInt(now.Unix(), 10)
 
-	members, err := w.redis.ZRangeByScore(ctx, key, &redis.ZRangeBy{
-		Min:   "-inf",
-		Max:   maxScore,
-		Count: 100,
+	members, err := w.redis.ZRangeArgs(ctx, redis.ZRangeArgs{
+		Key:     key,
+		Start:   "-inf",
+		Stop:    maxScore,
+		ByScore: true,
+		Count:   100,
 	}).Result()
 	if err != nil {
 		w.logger.Error("failed to query dunning retries", "key", key, "error", err)
