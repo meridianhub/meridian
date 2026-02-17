@@ -252,9 +252,11 @@ func TestDunningWorker_ScheduleAndProcess(t *testing.T) {
 		// Poll before calling Stop() to avoid context cancellation racing with ZREM.
 		zsetDeadline := time.After(5 * time.Second)
 		for {
-			members, zErr := client.ZRangeByScore(context.Background(), zsetKey, &redis.ZRangeBy{
-				Min: "-inf",
-				Max: "+inf",
+			members, zErr := client.ZRangeArgs(context.Background(), redis.ZRangeArgs{
+				Key:     zsetKey,
+				Start:   "-inf",
+				Stop:    "+inf",
+				ByScore: true,
 			}).Result()
 			require.NoError(t, zErr)
 			if len(members) == 0 {
@@ -341,9 +343,11 @@ func TestDunningWorker_ScheduleAndProcess(t *testing.T) {
 		w.Stop()
 
 		// Verify the retry was removed from the ZSET (dropped)
-		members, err := client.ZRangeByScore(context.Background(), zsetKey, &redis.ZRangeBy{
-			Min: "-inf",
-			Max: "+inf",
+		members, err := client.ZRangeArgs(context.Background(), redis.ZRangeArgs{
+			Key:     zsetKey,
+			Start:   "-inf",
+			Stop:    "+inf",
+			ByScore: true,
 		}).Result()
 		require.NoError(t, err)
 		assert.Empty(t, members, "not-found retry should be removed from ZSET")
@@ -593,9 +597,11 @@ func TestDunningWorker_InvalidMemberInZSET(t *testing.T) {
 	w.Stop()
 
 	// Invalid member should be removed
-	members, err := client.ZRangeByScore(ctx, zsetKey, &redis.ZRangeBy{
-		Min: "-inf",
-		Max: "+inf",
+	members, err := client.ZRangeArgs(ctx, redis.ZRangeArgs{
+		Key:     zsetKey,
+		Start:   "-inf",
+		Stop:    "+inf",
+		ByScore: true,
 	}).Result()
 	require.NoError(t, err)
 	assert.Empty(t, members, "invalid member should be removed from ZSET")
@@ -689,17 +695,21 @@ func TestDunningWorker_TenantIsolation(t *testing.T) {
 	keyA := dunningRetryZSetPrefix + tenantA
 	keyB := dunningRetryZSetPrefix + tenantB
 
-	membersA, err := client.ZRangeByScore(ctx, keyA, &redis.ZRangeBy{
-		Min: "-inf",
-		Max: "+inf",
+	membersA, err := client.ZRangeArgs(ctx, redis.ZRangeArgs{
+		Key:     keyA,
+		Start:   "-inf",
+		Stop:    "+inf",
+		ByScore: true,
 	}).Result()
 	require.NoError(t, err)
 	assert.Len(t, membersA, 1)
 	assert.Equal(t, runA.ID.String(), membersA[0])
 
-	membersB, err := client.ZRangeByScore(ctx, keyB, &redis.ZRangeBy{
-		Min: "-inf",
-		Max: "+inf",
+	membersB, err := client.ZRangeArgs(ctx, redis.ZRangeArgs{
+		Key:     keyB,
+		Start:   "-inf",
+		Stop:    "+inf",
+		ByScore: true,
 	}).Result()
 	require.NoError(t, err)
 	assert.Len(t, membersB, 1)
