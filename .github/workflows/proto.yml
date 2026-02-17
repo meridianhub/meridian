@@ -59,7 +59,7 @@ jobs:
 
       - name: Fetch develop branch
         if: steps.check-label.outputs.skip != 'true'
-        run: git fetch origin develop:develop
+        run: git fetch https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} develop:develop
 
       - name: Set up buf
         if: steps.check-label.outputs.skip != 'true'
