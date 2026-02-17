@@ -238,18 +238,16 @@ func BenchmarkUnpooledAllocation(b *testing.B) {
 func BenchmarkPoolReuseRate(b *testing.B) {
 	// Track pool misses (new allocations)
 	var misses atomic.Int64
-	originalPool := attributeBagPool
+	originalNew := attributeBagPool.New
 
-	// Replace pool with instrumented version
-	attributeBagPool = sync.Pool{
-		New: func() any {
-			misses.Add(1)
-			return &AttributeBag{
-				entries: make([]kv, 0, 16),
-			}
-		},
+	// Replace pool's New func with instrumented version
+	attributeBagPool.New = func() any {
+		misses.Add(1)
+		return &AttributeBag{
+			entries: make([]kv, 0, 16),
+		}
 	}
-	defer func() { attributeBagPool = originalPool }()
+	defer func() { attributeBagPool.New = originalNew }()
 
 	// Warm up the pool
 	warmupBags := make([]*AttributeBag, 100)
