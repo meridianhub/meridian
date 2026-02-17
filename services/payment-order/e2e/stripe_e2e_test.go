@@ -328,9 +328,11 @@ func TestStripeE2E_PaymentDeclined_DunningEscalation(t *testing.T) {
 	require.NoError(t, err, "Payment order should reach FAILED after decline webhook")
 
 	// Step 5: Verify dunning was scheduled in Redis ZSET
-	members, err := env.Redis.ZRangeByScore(ctx, "dunning:retries", &redis.ZRangeBy{
-		Min: "-inf",
-		Max: "+inf",
+	members, err := env.Redis.ZRangeArgs(ctx, redis.ZRangeArgs{
+		Key:     "dunning:retries",
+		Start:   "-inf",
+		Stop:    "+inf",
+		ByScore: true,
 	}).Result()
 	require.NoError(t, err)
 	assert.Len(t, members, 1, "Dunning should be scheduled for failed payment")
@@ -338,9 +340,11 @@ func TestStripeE2E_PaymentDeclined_DunningEscalation(t *testing.T) {
 		"Dunning entry should reference the correct payment order")
 
 	// Step 6: Verify the dunning score is a future timestamp (~24h from now)
-	scores, err := env.Redis.ZRangeByScoreWithScores(ctx, "dunning:retries", &redis.ZRangeBy{
-		Min: "-inf",
-		Max: "+inf",
+	scores, err := env.Redis.ZRangeArgsWithScores(ctx, redis.ZRangeArgs{
+		Key:     "dunning:retries",
+		Start:   "-inf",
+		Stop:    "+inf",
+		ByScore: true,
 	}).Result()
 	require.NoError(t, err)
 	require.Len(t, scores, 1)

@@ -408,9 +408,11 @@ func TestStripeWebhookHandler_FailedPaymentTriggersDunning(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rr.Code)
 
 	// Verify dunning was scheduled in the ZSET
-	members, err := redisClient.ZRangeByScore(ctx, dunningRetryZSetPrefix+"test-tenant", &redis.ZRangeBy{
-		Min: "-inf",
-		Max: "+inf",
+	members, err := redisClient.ZRangeArgs(ctx, redis.ZRangeArgs{
+		Key:     dunningRetryZSetPrefix + "test-tenant",
+		Start:   "-inf",
+		Stop:    "+inf",
+		ByScore: true,
 	}).Result()
 	require.NoError(t, err)
 	assert.Len(t, members, 1)
