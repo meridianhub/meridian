@@ -27,6 +27,10 @@ data:
   # Redis configuration
   REDIS_URL: "redis://redis:6379"
 
+  # Authentication configuration
+  AUTH_ENABLED: "false"
+  # AUTH_JWKS_URL: "http://keycloak:8080/realms/meridian/protocol/openid-connect/certs"
+
   # Feature flags
   FEATURE_INCOMPLETE_IMPLEMENTATION: "true"
   ENVIRONMENT: "development"
