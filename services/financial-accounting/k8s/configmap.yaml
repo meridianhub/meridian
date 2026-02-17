@@ -24,6 +24,9 @@ data:
   OTEL_SERVICE_NAME: "financial-accounting-service"
   OTEL_SAMPLING_RATE: "0.1"
 
+  # Redis configuration
+  REDIS_URL: "redis://redis:6379"
+
   # Authentication configuration
   AUTH_ENABLED: "false"
   # AUTH_JWKS_URL: "http://keycloak:8080/realms/meridian/protocol/openid-connect/certs"

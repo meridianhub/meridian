@@ -37,6 +37,9 @@ data:
   FINANCIAL_ACCOUNTING_DATABASE_URL: "postgres://meridian_financial_accounting_user@cockroachdb:26257/meridian_financial_accounting?sslmode=disable"
   PAYMENT_ORDER_DATABASE_URL: "postgres://meridian_payment_order_user@cockroachdb:26257/meridian_payment_order?sslmode=disable"
 
+  # Redis configuration (slug caching)
+  REDIS_URL: "redis://redis:6379"
+
   # Authentication configuration
   AUTH_ENABLED: "false"
   # AUTH_JWKS_URL: "http://keycloak:8080/realms/meridian/protocol/openid-connect/certs"

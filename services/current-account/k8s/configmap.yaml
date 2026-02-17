@@ -20,6 +20,9 @@ data:
   GRPC_PORT: "50051"
   GRPC_MAX_CONCURRENT_STREAMS: "100"
 
+  # Redis configuration
+  REDIS_URL: "redis://redis:6379"
+
   # OpenTelemetry configuration
   OTEL_SERVICE_NAME: "current-account-service"
   OTEL_SAMPLING_RATE: "0.1"
