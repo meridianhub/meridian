@@ -14,6 +14,9 @@ type PermanentError struct {
 }
 
 func (e *PermanentError) Error() string {
+	if e.Err == nil {
+		return "permanent: <nil>"
+	}
 	return "permanent: " + e.Err.Error()
 }
 
