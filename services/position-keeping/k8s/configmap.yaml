@@ -24,6 +24,11 @@ data:
   REDIS_ENABLED: "true"
   REDIS_ADDRESS: "redis:6379"
 
+  # Account validation - validates accounts exist before creating position logs
+  ACCOUNT_VALIDATION_ENABLED: "true"
+  CURRENT_ACCOUNT_SERVICE_URL: "current-account:50051"
+  INTERNAL_BANK_ACCOUNT_SERVICE_URL: "internal-bank-account:50057"
+
   # OpenTelemetry configuration
   OTEL_SERVICE_NAME: "position-keeping-service"
   OTEL_SAMPLING_RATE: "0.1"
