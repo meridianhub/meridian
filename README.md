@@ -22,20 +22,59 @@ You write business logic in [Starlark](https://github.com/google/starlark-go)
 Meridian runs it on a double-entry ledger with automatic compensation on failure.
 
 ```python
-def charge_subscription(ctx):
-    account = resolve_account(party_id=ctx.customer_id, org_id=ctx.org_id, currency="GBP")
-    post(account, ctx.amount, "DEBIT")
-    record_receivable(account, ctx.amount, due_date=ctx.billing_date)
+deposit_saga = saga(name="current_account_deposit")
+
+def execute_deposit():
+    amount = Decimal(input_data["amount"])
+    account_id = input_data["account_id"]
+
+    step(name="log_position")
+    position_keeping.initiate_log(
+        position_id=account_id,
+        amount=amount,
+        currency=input_data["currency"],
+        direction="CREDIT",
+        transaction_id=input_data["transaction_id"],
+    )
+
+    step(name="post_to_ledger")
+    financial_accounting.capture_posting(
+        account_id=account_id,
+        amount=amount,
+        currency=input_data["currency"],
+        direction="CREDIT",
+        transaction_id=input_data["transaction_id"],
+    )
+
+execute_deposit()
 ```
 
-When you need more — revenue splits, usage metering, multi-party settlement — the same engine handles it:
+When you need revenue splits across participants, the same engine handles it:
 
 ```python
-def distribute_revenue(ctx):
-    for p in party.list_participants(ctx.org_id):
-        share = party.get_structuring_data(p.id, ctx.org_id)["allocation_share"]
-        account = resolve_account(party_id=p.id, org_id=ctx.org_id, currency="GBP")
-        post(account, ctx.amount * Decimal(share), "CREDIT")
+def execute_distribution():
+    total = Decimal(input_data["total_amount"])
+
+    step(name="list_participants")
+    participants = party.list_participants(org_id=input_data["org_id"])
+
+    for p in participants:
+        share = Decimal(str(p["metadata"]["allocation_share"]))
+        account_ref = build_org_account_ref(
+            party_id=p["party_id"],
+            org_id=input_data["org_id"],
+            currency="GBP",
+        )
+        account_id = resolve_account(reference=account_ref)
+
+        step(name="credit_" + p["party_id"])
+        position_keeping.initiate_log(
+            position_id=account_id,
+            amount=total * share,
+            currency="GBP",
+            direction="CREDIT",
+            transaction_id=input_data["transaction_id"],
+        )
 ```
 
 Validation and pricing rules use [CEL](https://cel.dev/) expressions:
