@@ -44,6 +44,10 @@ COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 # Copy binary from builder
 COPY --from=builder /build/current-account /current-account
 
+# Copy saga script assets required at runtime
+COPY --from=builder /build/services/reference-data/saga/defaults/ /saga-assets/services/reference-data/saga/defaults/
+COPY --from=builder /build/shared/pkg/saga/schema/handlers.yaml /saga-assets/shared/pkg/saga/schema/handlers.yaml
+
 # Use non-root user (distroless provides nonroot user at uid 65532)
 USER nonroot:nonroot
 

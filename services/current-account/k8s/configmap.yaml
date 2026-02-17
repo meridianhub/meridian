@@ -36,6 +36,9 @@ data:
   # Maximum retry attempts for failed webhook deliveries
   WEBHOOK_MAX_RETRIES: "3"
 
+  # Saga script assets directory (must match Dockerfile COPY destination)
+  SAGA_ASSET_DIR: "/saga-assets"
+
   # Authentication configuration
   # Set to "true" to require JWT validation on gRPC calls
   AUTH_ENABLED: "false"
