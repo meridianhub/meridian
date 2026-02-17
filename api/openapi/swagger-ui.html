@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Meridian API Explorer</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    .topbar {
+      background: #1a1a2e;
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+    .topbar h1 {
+      color: #e0e0e0;
+      font-family: system-ui, sans-serif;
+      font-size: 18px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .topbar select {
+      padding: 8px 12px;
+      border-radius: 6px;
+      border: 1px solid #444;
+      background: #2a2a3e;
+      color: #e0e0e0;
+      font-size: 14px;
+      font-family: system-ui, sans-serif;
+      min-width: 260px;
+      cursor: pointer;
+    }
+    .topbar select:focus { outline: 2px solid #6c63ff; }
+    .topbar .meta {
+      color: #888;
+      font-family: monospace;
+      font-size: 13px;
+      margin-left: auto;
+    }
+    .topbar .meta span { color: #6c63ff; }
+
+    #swagger-ui { padding: 0; }
+
+    /* Override swagger-ui topbar */
+    .swagger-ui .topbar { display: none; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <h1>Meridian API Explorer</h1>
+    <select id="service-select">
+      <option value="meridian.swagger.json">All Services (132 endpoints)</option>
+    </select>
+    <div class="meta">
+      Gateway: <span id="gateway-url">http://localhost:8090</span>
+    </div>
+  </div>
+  <div id="swagger-ui"></div>
+
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script>
+    const GATEWAY_URL = 'http://localhost:8090';
+
+    // Load catalog and populate dropdown
+    async function loadCatalog() {
+      const select = document.getElementById('service-select');
+      try {
+        const resp = await fetch('services/catalog.json');
+        const catalog = await resp.json();
+        catalog.forEach(svc => {
+          const opt = document.createElement('option');
+          opt.value = `services/${svc.file}`;
+          // Format: "Current Account (12 endpoints)"
+          const label = svc.name.replace(/Service$/, '').replace(/([A-Z])/g, ' $1').trim();
+          opt.textContent = `${label} (${svc.endpoints} endpoints)`;
+          select.appendChild(opt);
+        });
+      } catch (e) {
+        console.warn('No catalog.json found. Run: make swagger-split');
+      }
+    }
+
+    // Initialize Swagger UI
+    function loadSwagger(specUrl) {
+      SwaggerUIBundle({
+        url: specUrl,
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        presets: [
+          SwaggerUIBundle.presets.apis,
+          SwaggerUIBundle.SwaggerUIStandalonePreset
+        ],
+        layout: 'BaseLayout',
+        defaultModelsExpandDepth: 0,
+        docExpansion: 'list',
+        filter: true,
+        requestInterceptor: (req) => {
+          // Rewrite requests to go through the local gateway
+          if (req.url && !req.url.startsWith('http')) {
+            req.url = GATEWAY_URL + req.url;
+          }
+          // If request goes to a swagger spec host, redirect to gateway
+          const url = new URL(req.url);
+          if (url.port !== '8090' && !req.url.includes('swagger')) {
+            url.host = 'localhost:8090';
+            url.protocol = 'http:';
+            req.url = url.toString();
+          }
+          return req;
+        }
+      });
+    }
+
+    // Wire up service selector
+    document.getElementById('service-select').addEventListener('change', (e) => {
+      loadSwagger(e.target.value);
+    });
+
+    // Boot
+    loadCatalog();
+    loadSwagger('meridian.swagger.json');
+  </script>
+</body>
+</html>

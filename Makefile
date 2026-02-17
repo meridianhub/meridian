@@ -211,6 +211,22 @@ proto-openapi: proto
 		echo "Note: Run 'make proto' first to generate the spec"; \
 	fi
 
+## swagger-split: Split monolithic swagger into per-service files
+swagger-split:
+	@./scripts/split-swagger.sh
+
+## swagger-ui: Serve Swagger UI for interactive API exploration
+swagger-ui: swagger-split
+	@echo ""
+	@echo "Meridian API Explorer"
+	@echo "  Open: http://localhost:8091/swagger-ui.html"
+	@echo "  Gateway: http://localhost:8090"
+	@echo ""
+	@echo "  Use the dropdown to switch between services."
+	@echo "  Press Ctrl+C to stop."
+	@echo ""
+	@cd api/openapi && python3 -m http.server 8091
+
 ## proto-validate: Validate protobuf directory structure and versions
 proto-validate:
 	@echo "Validating protobuf directory structure..."
