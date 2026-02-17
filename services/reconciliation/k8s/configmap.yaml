@@ -31,6 +31,10 @@ data:
   # Settlement scheduler
   SETTLEMENT_SCHEDULER_ENABLED: "false"
 
+  # Authentication configuration
+  AUTH_ENABLED: "false"
+  # AUTH_JWKS_URL: "http://keycloak:8080/realms/meridian/protocol/openid-connect/certs"
+
   # OpenTelemetry configuration
   OTEL_SERVICE_NAME: "reconciliation-service"
   OTEL_SAMPLING_RATE: "0.1"
