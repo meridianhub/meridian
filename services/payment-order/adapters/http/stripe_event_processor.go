@@ -80,16 +80,16 @@ func (p *StripeEventProcessor) PreProcess(ctx context.Context, eventID string) e
 
 	key := processedWebhookKeyPrefix + eventID
 
-	// SET NX - only sets if key does not exist, returns true if set (new event)
-	wasSet, err := p.redis.SetNX(ctx, key, time.Now().Unix(), processedWebhookTTL).Result()
-	if err != nil {
+	// SET NX - only sets if key does not exist, returns OK if set (new event)
+	err := p.redis.SetArgs(ctx, key, time.Now().Unix(), redis.SetArgs{Mode: "NX", TTL: processedWebhookTTL}).Err()
+	if err != nil && !errors.Is(err, redis.Nil) {
 		p.logger.Error("failed to check stripe event idempotency",
 			"event_id", eventID,
 			"error", err)
 		return nil
 	}
 
-	if !wasSet {
+	if errors.Is(err, redis.Nil) {
 		p.logger.Info("stripe event already processed, skipping",
 			"event_id", eventID)
 		return ErrEventAlreadyProcessed

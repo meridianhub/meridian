@@ -130,9 +130,11 @@ func TestStripeEventProcessor_ScheduleDunning(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Verify the entry was added to the tenant-scoped ZSET
-		members, err := client.ZRangeByScore(ctx, zsetKey, &redis.ZRangeBy{
-			Min: "-inf",
-			Max: "+inf",
+		members, err := client.ZRangeArgs(ctx, redis.ZRangeArgs{
+			Key:     zsetKey,
+			Start:   "-inf",
+			Stop:    "+inf",
+			ByScore: true,
 		}).Result()
 		require.NoError(t, err)
 		assert.Len(t, members, 1)
@@ -194,9 +196,11 @@ func TestStripeEventProcessor_ScheduleDunning(t *testing.T) {
 
 		// Verify tenant A's key only has tenant A's entry
 		keyA := dunningRetryZSetPrefix + tenantA
-		membersA, err := client.ZRangeByScore(ctx, keyA, &redis.ZRangeBy{
-			Min: "-inf",
-			Max: "+inf",
+		membersA, err := client.ZRangeArgs(ctx, redis.ZRangeArgs{
+			Key:     keyA,
+			Start:   "-inf",
+			Stop:    "+inf",
+			ByScore: true,
 		}).Result()
 		require.NoError(t, err)
 		assert.Len(t, membersA, 1)
@@ -204,9 +208,11 @@ func TestStripeEventProcessor_ScheduleDunning(t *testing.T) {
 
 		// Verify tenant B's key only has tenant B's entry
 		keyB := dunningRetryZSetPrefix + tenantB
-		membersB, err := client.ZRangeByScore(ctx, keyB, &redis.ZRangeBy{
-			Min: "-inf",
-			Max: "+inf",
+		membersB, err := client.ZRangeArgs(ctx, redis.ZRangeArgs{
+			Key:     keyB,
+			Start:   "-inf",
+			Stop:    "+inf",
+			ByScore: true,
 		}).Result()
 		require.NoError(t, err)
 		assert.Len(t, membersB, 1)
