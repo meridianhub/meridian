@@ -24,6 +24,9 @@ data:
   OTEL_SERVICE_NAME: "financial-accounting-service"
   OTEL_SAMPLING_RATE: "0.1"
 
+  # Redis configuration
+  REDIS_URL: "redis://redis:6379"
+
   # Feature flags
   FEATURE_INCOMPLETE_IMPLEMENTATION: "true"
   ENVIRONMENT: "development"
