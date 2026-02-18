@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -170,21 +171,21 @@ func provisionAll(ctx context.Context, superuserDSN string, databases map[string
 }
 
 // provisionDatabases creates databases and users as needed.
+// Each DDL statement is executed individually because pgx v5's extended
+// protocol does not support multi-statement query strings.
 func provisionDatabases(ctx context.Context, conn *pgx.Conn, databases map[string]ServiceDatabase, logger *slog.Logger) error {
 	for dbName, sdb := range databases {
 		logger.Info("provisioning database", "database", dbName, "user", sdb.User)
 
-		sql := fmt.Sprintf(
-			`CREATE DATABASE IF NOT EXISTS %s;
-			 CREATE USER IF NOT EXISTS %s;
-			 GRANT ALL ON DATABASE %s TO %s;`,
-			quoteIdent(dbName),
-			quoteIdent(sdb.User),
-			quoteIdent(dbName),
-			quoteIdent(sdb.User),
-		)
-		if _, err := conn.Exec(ctx, sql); err != nil {
-			return fmt.Errorf("provision %s: %w", dbName, err)
+		stmts := []string{
+			fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s", quoteIdent(dbName)),
+			fmt.Sprintf("CREATE USER IF NOT EXISTS %s", quoteIdent(sdb.User)),
+			fmt.Sprintf("GRANT ALL ON DATABASE %s TO %s", quoteIdent(dbName), quoteIdent(sdb.User)),
+		}
+		for _, stmt := range stmts {
+			if _, err := conn.Exec(ctx, stmt); err != nil {
+				return fmt.Errorf("provision %s: %w", dbName, err)
+			}
 		}
 	}
 	return nil
@@ -307,38 +308,38 @@ func recordMigration(ctx context.Context, conn *pgx.Conn, service, filename stri
 }
 
 // buildServiceDSN modifies a superuser DSN to target a specific database and user.
-// It parses the DSN, replaces the database name and user, then builds a postgres:// URL.
+// It parses the URL, replaces user/database, and preserves all query parameters
+// (TLS settings, timeouts, etc.). It also sets simple_protocol exec mode so that
+// multi-statement migration files can be executed in a single Exec() call.
 func buildServiceDSN(superuserDSN string, sdb ServiceDatabase) string {
-	cfg, err := pgx.ParseConfig(superuserDSN)
+	parsed, err := url.Parse(superuserDSN)
 	if err != nil {
 		return superuserDSN
 	}
 
-	cfg.Database = sdb.Database
-	cfg.User = sdb.User
+	// Replace user credentials.
 	if sdb.Password != "" {
-		cfg.Password = sdb.Password
+		parsed.User = url.UserPassword(sdb.User, sdb.Password)
+	} else {
+		parsed.User = url.User(sdb.User)
 	}
 
-	// Build a proper postgres:// URL since ConnString() may return
-	// a registered config reference that doesn't work for new connections.
-	host := cfg.Host
-	port := cfg.Port
-	if port == 0 {
-		port = 26257
+	// Replace database in path (postgres://user@host:port/database).
+	parsed.Path = "/" + sdb.Database
+
+	// Ensure default port for CockroachDB if not specified.
+	if parsed.Port() == "" {
+		parsed.Host = parsed.Hostname() + ":26257"
 	}
 
-	sslmode := "disable"
-	if cfg.TLSConfig != nil {
-		sslmode = "require"
+	// Enable simple protocol so multi-statement migration SQL files work with pgx v5.
+	q := parsed.Query()
+	if q.Get("default_query_exec_mode") == "" {
+		q.Set("default_query_exec_mode", "simple_protocol")
 	}
+	parsed.RawQuery = q.Encode()
 
-	if sdb.Password != "" {
-		return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
-			sdb.User, sdb.Password, host, port, sdb.Database, sslmode)
-	}
-	return fmt.Sprintf("postgres://%s@%s:%d/%s?sslmode=%s",
-		sdb.User, host, port, sdb.Database, sslmode)
+	return parsed.String()
 }
 
 // quoteIdent wraps a SQL identifier in double quotes, escaping any embedded double quotes.
