@@ -2,6 +2,7 @@ package idempotency
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
@@ -13,9 +14,10 @@ import (
 //   - Check returns ErrResultNotFound (allows the request to proceed)
 //   - Locking operations return nil (no-op)
 //
-// Once Redis is available, operations are forwarded to a real RedisService.
+// Once Redis is available, operations are forwarded to a cached RedisService instance.
 type LazyService struct {
-	lazy *bootstrap.LazyClient[*redis.Client]
+	lazy      *bootstrap.LazyClient[*redis.Client]
+	cachedSvc atomic.Pointer[RedisService]
 }
 
 // NewLazyService creates an idempotency Service backed by a lazily-resolved Redis client.
@@ -30,11 +32,20 @@ func (s *LazyService) IsReady() bool {
 }
 
 func (s *LazyService) getService() (*RedisService, bool) {
+	// Fast path: return cached service if already resolved
+	if svc := s.cachedSvc.Load(); svc != nil {
+		return svc, true
+	}
+
 	client, err := s.lazy.Get()
 	if err != nil {
 		return nil, false
 	}
-	return NewRedisService(client), true
+
+	// Cache the RedisService instance on first resolution
+	svc := NewRedisService(client)
+	s.cachedSvc.CompareAndSwap(nil, svc)
+	return s.cachedSvc.Load(), true
 }
 
 // Check verifies if an operation has already been processed.

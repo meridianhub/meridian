@@ -23,7 +23,6 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/ports"
-	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 
@@ -187,34 +186,19 @@ func run(logger *slog.Logger) error {
 			"hint", "set PARTY_SERVICE_ENABLED=true to enable party registration")
 	}
 
-	// Initialize Redis client and slug cache (optional - uses LazyClient for graceful degradation).
-	// If Redis is not available at startup, the service starts without slug caching.
-	// LazyClient resolves Redis in the background with exponential backoff.
+	// Initialize Redis client and slug cache (optional).
+	// If Redis is not available at startup, slug caching is disabled until next restart.
+	// The slug cache is a performance optimization; the service operates correctly without it.
 	var slugCache *service.SlugCache
-	var lazyRedis *bootstrap.LazyClient[*redis.Client]
 	redisEnabled := env.GetEnvOrDefault("REDIS_ENABLED", envValueTrue) == envValueTrue
 	if redisEnabled {
 		redisConfig := bootstrap.DefaultRedisConfig()
 		redisConfig.Logger = logger
 		redisClient, err := bootstrap.NewRedisClient(ctx, redisConfig)
 		if err != nil {
-			// Redis not available at startup - use lazy resolution
-			logger.Warn("Redis not available at startup, slug caching will enable when Redis connects",
-				"error", err)
-			lazyRedis = bootstrap.NewLazyClient(ctx, "redis",
-				func(ctx context.Context) (*redis.Client, func(), error) {
-					client, redisErr := bootstrap.NewRedisClient(ctx, redisConfig)
-					if redisErr != nil {
-						return nil, nil, redisErr
-					}
-					return client, func() {
-						if closeErr := client.Close(); closeErr != nil {
-							logger.Error("failed to close Redis client", "error", closeErr)
-						}
-					}, nil
-				},
-				bootstrap.WithLazyLogger(logger),
-			)
+			logger.Warn("Redis not available at startup, slug caching disabled",
+				"error", err,
+				"hint", "slug caching will be available after service restart when Redis is reachable")
 		} else {
 			defer func() {
 				if err := redisClient.Close(); err != nil {
@@ -336,20 +320,6 @@ func run(logger *slog.Logger) error {
 			logger.Info("stopping provisioning worker...")
 			provisioningWorker.Stop()
 			logger.Info("provisioning worker stopped")
-			return nil
-		})
-	}
-
-	// Close lazily-resolved Redis client if it was resolved
-	if lazyRedis != nil {
-		orchestrator.AddCleanup(func() error {
-			if client, getErr := lazyRedis.Get(); getErr == nil {
-				if closeErr := client.Close(); closeErr != nil {
-					logger.Error("failed to close lazy Redis client", "error", closeErr)
-					return closeErr
-				}
-				logger.Info("lazy Redis client closed")
-			}
 			return nil
 		})
 	}
