@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -32,7 +33,6 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/ports"
-	"github.com/redis/go-redis/v9"
 	"github.com/sony/gobreaker/v2"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
@@ -44,6 +44,11 @@ var (
 	Version   = "dev"
 	Commit    = "unknown"
 	BuildDate = "unknown"
+)
+
+// Static errors for production environment requirements
+var (
+	ErrRedisRequiredInProduction = errors.New("redis required for idempotency in production environment")
 )
 
 func main() {
@@ -105,27 +110,34 @@ func run(logger *slog.Logger) error {
 	withdrawalRepo := persistence.NewWithdrawalRepository(db)
 	outboxRepo := events.NewPostgresOutboxRepository(db)
 
-	// Create Redis client lazily (optional - graceful degradation during startup).
-	// LazyClient resolves Redis in a background goroutine with exponential backoff.
-	// The idempotency service degrades gracefully (no-op) until Redis connects.
+	// Create Redis client and idempotency service.
+	// In production: fail fast if Redis is unavailable (idempotency is critical).
+	// In non-production: use NoopService for graceful degradation with metrics.
+	var idempotencyService idempotency.Service
 	redisConfig := bootstrap.DefaultRedisConfig()
 	redisConfig.Logger = logger
-	lazyRedis := bootstrap.NewLazyClient(ctx, "redis",
-		func(ctx context.Context) (*redis.Client, func(), error) {
-			client, err := bootstrap.NewRedisClient(ctx, redisConfig)
-			if err != nil {
-				return nil, nil, err
+	redisClient, redisErr := bootstrap.NewRedisClient(ctx, redisConfig)
+	if redisErr != nil {
+		if env.IsProduction() {
+			logger.Error("CRITICAL: Redis unavailable in production - failing fast", "error", redisErr)
+			return bootstrap.Permanent(fmt.Errorf("%w: %w", ErrRedisRequiredInProduction, redisErr))
+		}
+		logger.Warn("Redis not available at startup, using noop idempotency service - DEVELOPMENT ONLY",
+			"error", redisErr,
+			"environment", os.Getenv("ENVIRONMENT"))
+		idempotencyService = idempotency.NewNoopService(logger)
+		caobservability.SetNoopIdempotencyActive(true)
+		caobservability.RecordServiceDegradation(caobservability.ComponentIdempotency, caobservability.DegradationReasonStartupFallback)
+	} else {
+		idempotencyService = idempotency.NewRedisService(redisClient)
+		caobservability.SetNoopIdempotencyActive(false)
+		logger.Info("idempotency service initialized with Redis")
+		defer func() {
+			if err := redisClient.Close(); err != nil {
+				logger.Error("failed to close Redis client", "error", err)
 			}
-			return client, func() {
-				if err := client.Close(); err != nil {
-					logger.Error("failed to close Redis client", "error", err)
-				}
-				logger.Info("Redis client closed")
-			}, nil
-		},
-		bootstrap.WithLazyLogger(logger),
-	)
-	idempotencyService := idempotency.NewLazyService(lazyRedis)
+		}()
+	}
 
 	// Get Kubernetes namespace from environment (defaults to "default")
 	namespace := env.GetEnvOrDefault("K8S_NAMESPACE", "default")
@@ -309,17 +321,7 @@ func run(logger *slog.Logger) error {
 		})
 	}
 
-	// Close lazily-resolved Redis client if it was resolved
-	orchestrator.AddCleanup(func() error {
-		if client, err := lazyRedis.Get(); err == nil {
-			if closeErr := client.Close(); closeErr != nil {
-				logger.Error("failed to close Redis client", "error", closeErr)
-				return closeErr
-			}
-			logger.Info("Redis client closed")
-		}
-		return nil
-	})
+	// No additional Redis cleanup needed here — Redis client is closed via defer above when available
 	orchestrator.AddCleanup(func() error {
 		bootstrap.CloseDatabase(db, logger)
 		return nil

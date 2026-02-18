@@ -25,11 +25,11 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
+	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -41,6 +41,11 @@ var (
 	Version   = "dev"
 	Commit    = "unknown"
 	BuildDate = "unknown"
+)
+
+// Static errors for production environment requirements
+var (
+	ErrRedisRequiredInProduction = errors.New("redis required for idempotency in production environment")
 )
 
 // Prometheus metrics
@@ -251,36 +256,33 @@ func run(logger *slog.Logger) error {
 		logger.Info("compaction worker disabled")
 	}
 
-	// Create idempotency service with lazy Redis resolution.
-	// If Redis was available at startup, use it directly.
-	// If not, use LazyClient to resolve it in the background.
+	// Create idempotency service.
+	// In production: fail fast if Redis is enabled but unavailable (idempotency is critical).
+	// In non-production: use NoopService for graceful degradation with metrics.
+	// If Redis is not configured: use NoopService unconditionally.
 	var idempotencySvc idempotency.Service
 	if container.RedisClient != nil {
 		idempotencySvc = idempotency.NewRedisService(container.RedisClient)
+		observability.SetNoopIdempotencyActive(false)
 		logger.Info("idempotency service enabled with Redis")
 	} else if config.Redis.Enabled {
-		// Redis is enabled but was not available at startup - use lazy resolution
-		lazyRedis := bootstrap.NewLazyClient(ctx, "redis",
-			func(ctx context.Context) (*redis.Client, func(), error) {
-				client := redis.NewClient(&redis.Options{
-					Addr:            config.Redis.Address,
-					Password:        config.Redis.Password,
-					DB:              config.Redis.DB,
-					PoolSize:        config.Redis.PoolSize,
-					ConnMaxIdleTime: config.Redis.ConnMaxIdleTime,
-				})
-				if err := client.Ping(ctx).Err(); err != nil {
-					_ = client.Close()
-					return nil, nil, err
-				}
-				return client, func() { _ = client.Close() }, nil
-			},
-			bootstrap.WithLazyLogger(logger),
-		)
-		idempotencySvc = idempotency.NewLazyService(lazyRedis)
-		logger.Info("idempotency service using lazy Redis resolution")
+		// Redis is configured but was not available at container startup
+		if env.IsProduction() {
+			logger.Error("CRITICAL: Redis unavailable in production - failing fast",
+				"environment", os.Getenv("ENVIRONMENT"))
+			return bootstrap.Permanent(ErrRedisRequiredInProduction)
+		}
+		logger.Warn("Redis not available at startup, using noop idempotency service - DEVELOPMENT ONLY",
+			"environment", os.Getenv("ENVIRONMENT"))
+		idempotencySvc = idempotency.NewNoopService(logger)
+		observability.SetNoopIdempotencyActive(true)
+		observability.RecordServiceDegradation(observability.ComponentIdempotency, observability.DegradationReasonStartupFallback)
 	} else {
-		logger.Info("idempotency service disabled (Redis not configured)")
+		logger.Warn("Redis not configured, using noop idempotency service - DEVELOPMENT ONLY",
+			"environment", os.Getenv("ENVIRONMENT"))
+		idempotencySvc = idempotency.NewNoopService(logger)
+		observability.SetNoopIdempotencyActive(true)
+		observability.RecordServiceDegradation(observability.ComponentIdempotency, observability.DegradationReasonStartupFallback)
 	}
 
 	// Create account validator if validation is enabled

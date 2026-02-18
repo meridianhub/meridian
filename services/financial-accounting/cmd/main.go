@@ -251,10 +251,9 @@ func run(logger *slog.Logger) error {
 
 	// Create Redis client and idempotency service.
 	// In production: fail fast if Redis is unavailable (idempotency is critical).
-	// In non-production: use LazyClient for graceful degradation during startup.
+	// In non-production: use NoopService for graceful degradation with metrics.
 	var idempotencySvc idempotency.Service
 	var redisSvc *idempotency.RedisService // Keep reference for cleanup worker
-	var lazyRedis *bootstrap.LazyClient[*redis.Client]
 	var usingNoopIdempotency bool
 	redisClient, err := createRedisClient(logger)
 	if err != nil {
@@ -263,27 +262,11 @@ func run(logger *slog.Logger) error {
 				"error", err)
 			return bootstrap.Permanent(fmt.Errorf("%w: %w", ErrRedisRequiredInProduction, err))
 		}
-		// Non-production: use lazy Redis resolution instead of noop
-		logger.Warn("Redis not available at startup, using lazy resolution - DEVELOPMENT ONLY",
+		logger.Warn("Redis not available at startup, using noop idempotency service - DEVELOPMENT ONLY",
 			"error", err,
 			"environment", os.Getenv("ENVIRONMENT"))
-		lazyRedis = bootstrap.NewLazyClient(ctx, "redis",
-			func(_ context.Context) (*redis.Client, func(), error) {
-				//nolint:contextcheck // createRedisClient manages its own timeout context
-				client, redisErr := createRedisClient(logger)
-				if redisErr != nil {
-					return nil, nil, redisErr
-				}
-				return client, func() {
-					if closeErr := client.Close(); closeErr != nil {
-						logger.Error("failed to close Redis client", "error", closeErr)
-					}
-				}, nil
-			},
-			bootstrap.WithLazyLogger(logger),
-		)
-		idempotencySvc = idempotency.NewLazyService(lazyRedis)
-		usingNoopIdempotency = true // Tracks that we're in degraded mode initially
+		idempotencySvc = idempotency.NewNoopService(logger)
+		usingNoopIdempotency = true
 		serviceobs.SetNoopIdempotencyActive(true)
 		serviceobs.RecordServiceDegradation(serviceobs.ComponentIdempotency, serviceobs.DegradationReasonStartupFallback)
 	} else {
@@ -534,17 +517,6 @@ func run(logger *slog.Logger) error {
 		logger.Info("stopping idempotency cleanup worker...")
 		idempotencyCleanupWorker.Stop()
 		logger.Info("idempotency cleanup worker stopped")
-	}
-
-	// Close lazily-resolved Redis client if it was resolved
-	if lazyRedis != nil {
-		if client, getErr := lazyRedis.Get(); getErr == nil {
-			if closeErr := client.Close(); closeErr != nil {
-				logger.Error("failed to close lazy Redis client", "error", closeErr)
-			} else {
-				logger.Info("lazy Redis client closed")
-			}
-		}
 	}
 
 	// Stop outbox worker first (stop processing before closing Kafka producer)
