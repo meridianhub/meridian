@@ -330,10 +330,22 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 	}
 
 	if lien.Status == domain.LienStatusExecuted {
-		// Idempotent: already executed
-		return &pb.ExecuteLienResponse{
+		// Idempotent: already executed — cache result and release pending lock.
+		resp := &pb.ExecuteLienResponse{
 			Lien: s.domainToProtoLien(ctx, lien),
-		}, nil
+		}
+		if idempotencyKeyStr != "" && s.idempotencyService != nil {
+			if responseData, marshalErr := proto.Marshal(resp); marshalErr == nil {
+				_ = s.idempotencyService.StoreResult(ctx, idempotency.Result{
+					Key:         idempKey,
+					Status:      idempotency.StatusCompleted,
+					Data:        responseData,
+					CompletedAt: time.Now(),
+					TTL:         idempotencyResultTTL,
+				})
+			}
+		}
+		return resp, nil
 	}
 
 	// Acquire pessimistic lock for mutation
@@ -347,11 +359,23 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 		return nil, status.Errorf(codes.Internal, "failed to lock lien: %v", err)
 	}
 
-	// Re-check after lock: another request may have executed between read and lock
+	// Re-check after lock: another request may have executed between read and lock.
 	if lien.Status == domain.LienStatusExecuted {
-		return &pb.ExecuteLienResponse{
+		resp := &pb.ExecuteLienResponse{
 			Lien: s.domainToProtoLien(ctx, lien),
-		}, nil
+		}
+		if idempotencyKeyStr != "" && s.idempotencyService != nil {
+			if responseData, marshalErr := proto.Marshal(resp); marshalErr == nil {
+				_ = s.idempotencyService.StoreResult(ctx, idempotency.Result{
+					Key:         idempKey,
+					Status:      idempotency.StatusCompleted,
+					Data:        responseData,
+					CompletedAt: time.Now(),
+					TTL:         idempotencyResultTTL,
+				})
+			}
+		}
+		return resp, nil
 	}
 
 	// Execute the domain transition
@@ -497,10 +521,22 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 	}
 
 	if lien.Status == domain.LienStatusTerminated {
-		// Idempotent: already terminated
-		return &pb.TerminateLienResponse{
+		// Idempotent: already terminated — cache result and release pending lock.
+		resp := &pb.TerminateLienResponse{
 			Lien: s.domainToProtoLien(ctx, lien),
-		}, nil
+		}
+		if idempotencyKeyStr != "" && s.idempotencyService != nil {
+			if responseData, marshalErr := proto.Marshal(resp); marshalErr == nil {
+				_ = s.idempotencyService.StoreResult(ctx, idempotency.Result{
+					Key:         idempKey,
+					Status:      idempotency.StatusCompleted,
+					Data:        responseData,
+					CompletedAt: time.Now(),
+					TTL:         idempotencyResultTTL,
+				})
+			}
+		}
+		return resp, nil
 	}
 
 	// Acquire pessimistic lock for mutation
@@ -514,11 +550,23 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 		return nil, status.Errorf(codes.Internal, "failed to lock lien: %v", err)
 	}
 
-	// Re-check after lock: another request may have terminated between read and lock
+	// Re-check after lock: another request may have terminated between read and lock.
 	if lien.Status == domain.LienStatusTerminated {
-		return &pb.TerminateLienResponse{
+		resp := &pb.TerminateLienResponse{
 			Lien: s.domainToProtoLien(ctx, lien),
-		}, nil
+		}
+		if idempotencyKeyStr != "" && s.idempotencyService != nil {
+			if responseData, marshalErr := proto.Marshal(resp); marshalErr == nil {
+				_ = s.idempotencyService.StoreResult(ctx, idempotency.Result{
+					Key:         idempKey,
+					Status:      idempotency.StatusCompleted,
+					Data:        responseData,
+					CompletedAt: time.Now(),
+					TTL:         idempotencyResultTTL,
+				})
+			}
+		}
+		return resp, nil
 	}
 
 	// Terminate the domain transition
