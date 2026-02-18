@@ -97,8 +97,13 @@ func (s *PostgresService) Check(ctx context.Context, key Key) (*Result, error) {
 
 	// Check TTL expiry
 	if expiresAt != nil && time.Now().After(*expiresAt) {
-		// Expired: clean up and report not found
-		_, _ = s.pool.Exec(ctx, `DELETE FROM _idempotency_keys WHERE key = $1`, dbKey)
+		// Expired: clean up and report not found.
+		// Guard the DELETE with expires_at < NOW() to avoid removing a record
+		// that was refreshed by another process between our SELECT and DELETE.
+		_, _ = s.pool.Exec(ctx,
+			`DELETE FROM _idempotency_keys WHERE key = $1 AND expires_at IS NOT NULL AND expires_at < NOW()`,
+			dbKey,
+		)
 		return nil, ErrResultNotFound
 	}
 
