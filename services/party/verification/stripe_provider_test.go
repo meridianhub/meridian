@@ -434,6 +434,24 @@ func TestStripeIdentityProvider_AuthorizationHeader(t *testing.T) {
 	assert.Equal(t, "Bearer sk_live_secret_key", capturedAuthHeader)
 }
 
+func TestStripeIdentityProvider_PostNotFound_ReturnsServerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	cfg := newStripeTestConfig(server.URL)
+	provider, err := NewStripeIdentityProvider(cfg, newTestLogger())
+	require.NoError(t, err)
+
+	party := newTestParty(t, "John Doe")
+	_, err = provider.VerifyIdentity(context.Background(), party)
+
+	// POST 404 should be a server error (misconfigured endpoint), not ErrVerificationNotFound
+	assert.ErrorIs(t, err, ErrStripeServerError)
+	assert.NotErrorIs(t, err, ErrVerificationNotFound)
+}
+
 func TestStripeIdentityProvider_ContextCancellation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()

@@ -43,6 +43,9 @@ var _ Provider = (*StripeIdentityProvider)(nil)
 
 // NewStripeIdentityProvider creates a new StripeIdentityProvider from the given configuration.
 func NewStripeIdentityProvider(cfg *config.VerificationConfig, logger *slog.Logger) (*StripeIdentityProvider, error) {
+	if len(cfg.ProviderConfig) == 0 {
+		return nil, ErrStripeMissingAPIKey
+	}
 	apiKey := cfg.ProviderConfig["api_key"]
 	if apiKey == "" {
 		return nil, ErrStripeMissingAPIKey
@@ -256,7 +259,12 @@ func (p *StripeIdentityProvider) handleResponse(resp *http.Response, result inte
 		return ErrStripeRateLimited
 
 	case resp.StatusCode == http.StatusNotFound:
-		return ErrVerificationNotFound
+		// For GET requests, 404 means the resource does not exist.
+		// For POST requests, 404 indicates a misconfigured base URL or API version mismatch.
+		if resp.Request != nil && resp.Request.Method == http.MethodGet {
+			return ErrVerificationNotFound
+		}
+		return fmt.Errorf("%w: endpoint not found (check base URL configuration)", ErrStripeServerError)
 
 	default:
 		var stripeErr stripeErrorResponse
