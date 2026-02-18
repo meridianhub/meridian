@@ -43,7 +43,7 @@ var _ Provider = (*StripeIdentityProvider)(nil)
 
 // NewStripeIdentityProvider creates a new StripeIdentityProvider from the given configuration.
 func NewStripeIdentityProvider(cfg *config.VerificationConfig, logger *slog.Logger) (*StripeIdentityProvider, error) {
-	if len(cfg.ProviderConfig) == 0 {
+	if cfg == nil || len(cfg.ProviderConfig) == 0 {
 		return nil, ErrStripeMissingAPIKey
 	}
 	apiKey := cfg.ProviderConfig["api_key"]
