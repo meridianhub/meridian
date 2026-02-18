@@ -85,6 +85,52 @@ func TestLocalLockManager_DifferentKeysAreIndependent(t *testing.T) {
 	defer release3()
 }
 
+func TestLocalLockManager_StaleReleaseDoesNotUnlockNewHolder(t *testing.T) {
+	m := newLocalLockManager()
+	ctx := context.Background()
+
+	// First acquisition
+	acquired1, release1, err := m.Acquire(ctx, "tenant-1", "resource-a")
+	require.NoError(t, err)
+	assert.True(t, acquired1)
+
+	// Release - lock is now free
+	release1()
+
+	// Second acquisition of same key
+	acquired2, release2, err := m.Acquire(ctx, "tenant-1", "resource-a")
+	require.NoError(t, err)
+	assert.True(t, acquired2)
+	defer release2()
+
+	// Stale release1 called again - must NOT release the new holder's lock
+	release1()
+
+	// Lock should still be held: a third acquire must fail
+	acquired3, release3, err := m.Acquire(ctx, "tenant-1", "resource-a")
+	require.NoError(t, err)
+	assert.False(t, acquired3, "stale release should not have freed the lock held by the second acquirer")
+	assert.Nil(t, release3)
+}
+
+func TestLocalLockManager_ColonInResourceIDNoCollision(t *testing.T) {
+	m := newLocalLockManager()
+	ctx := context.Background()
+
+	// These two pairs would produce the same string with a ":" delimiter:
+	// "tenant" + ":" + "a:b" == "tenant:a" + ":" + "b"
+	// The struct key prevents this collision.
+	acquired1, release1, err := m.Acquire(ctx, "tenant", "a:b")
+	require.NoError(t, err)
+	assert.True(t, acquired1)
+	defer release1()
+
+	acquired2, release2, err := m.Acquire(ctx, "tenant:a", "b")
+	require.NoError(t, err)
+	assert.True(t, acquired2, "keys with ':' in resourceID must not collide with different tenantID")
+	defer release2()
+}
+
 func TestAlwaysLeader_IsLeaderReturnsTrue(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
