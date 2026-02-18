@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Meridian API Explorer</title>
-  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.18.2/swagger-ui.css">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -61,7 +61,7 @@
   </div>
   <div id="swagger-ui"></div>
 
-  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script src="https://unpkg.com/swagger-ui-dist@5.18.2/swagger-ui-bundle.js"></script>
   <script>
     const GATEWAY_URL = 'http://localhost:8090';
 
@@ -70,6 +70,10 @@
       const select = document.getElementById('service-select');
       try {
         const resp = await fetch('services/catalog.json');
+        if (!resp.ok) {
+          console.warn(`Catalog fetch failed (${resp.status}). Run: make swagger-split`);
+          return;
+        }
         const catalog = await resp.json();
         catalog.forEach(svc => {
           const opt = document.createElement('option');
@@ -80,7 +84,7 @@
           select.appendChild(opt);
         });
       } catch (e) {
-        console.warn('No catalog.json found. Run: make swagger-split');
+        console.warn('Failed to load catalog.json. Run: make swagger-split');
       }
     }
 
@@ -103,12 +107,14 @@
           if (req.url && !req.url.startsWith('http')) {
             req.url = GATEWAY_URL + req.url;
           }
-          // If request goes to a swagger spec host, redirect to gateway
-          const url = new URL(req.url);
-          if (url.port !== '8090' && !req.url.includes('swagger')) {
-            url.host = 'localhost:8090';
-            url.protocol = 'http:';
-            req.url = url.toString();
+          // Redirect API calls (not swagger spec fetches) to the local gateway
+          if (!req.url.includes('swagger') && !req.url.includes(':8091')) {
+            const url = new URL(req.url);
+            if (url.host !== 'localhost:8090') {
+              url.host = 'localhost:8090';
+              url.protocol = 'http:';
+              req.url = url.toString();
+            }
           }
           return req;
         }

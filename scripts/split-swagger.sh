@@ -17,7 +17,7 @@ if [ ! -f "$INPUT" ]; then
 fi
 
 if ! command -v jq &>/dev/null; then
-  echo "Error: jq is required. Install with: brew install jq" >&2
+  echo "Error: jq is required. Install with your package manager (e.g. brew install jq, apt install jq)." >&2
   exit 1
 fi
 
@@ -36,11 +36,11 @@ to_filename() {
     | tr '[:upper:]' '[:lower:]'
 }
 
-# Build catalog entries
-CATALOG="["
-FIRST=true
+# Initialize empty catalog
+echo '[]' > "$OUTPUT_DIR/catalog.json"
 
-for TAG in $TAGS; do
+printf '%s\n' "$TAGS" | while IFS= read -r TAG; do
+  [ -z "$TAG" ] && continue
   FILENAME=$(to_filename "$TAG")
 
   # Split: keep global metadata, filter paths by tag, include all definitions
@@ -69,23 +69,17 @@ for TAG in $TAGS; do
     definitions: .definitions
   }' "$INPUT" > "$OUTPUT_DIR/$FILENAME.swagger.json"
 
-  # Count endpoints in this service
+  # Count endpoints and append to catalog using jq
   COUNT=$(jq '.paths | [to_entries[].value | keys[]] | length' "$OUTPUT_DIR/$FILENAME.swagger.json")
 
-  if [ "$FIRST" = true ]; then
-    FIRST=false
-  else
-    CATALOG="$CATALOG,"
-  fi
-  CATALOG="$CATALOG{\"name\":\"$TAG\",\"file\":\"$FILENAME.swagger.json\",\"endpoints\":$COUNT}"
+  jq --arg name "$TAG" --arg file "$FILENAME.swagger.json" --argjson count "$COUNT" \
+    '. += [{"name": $name, "file": $file, "endpoints": $count}]' \
+    "$OUTPUT_DIR/catalog.json" > "$OUTPUT_DIR/catalog.tmp" && mv "$OUTPUT_DIR/catalog.tmp" "$OUTPUT_DIR/catalog.json"
 
   echo "  $FILENAME.swagger.json ($COUNT endpoints)"
 done
 
-CATALOG="$CATALOG]"
-echo "$CATALOG" | jq '.' > "$OUTPUT_DIR/catalog.json"
-
-TOTAL=$(echo "$CATALOG" | jq 'length')
+TOTAL=$(jq 'length' "$OUTPUT_DIR/catalog.json")
 echo ""
 echo "Split into $TOTAL service files in $OUTPUT_DIR/"
 echo "Catalog written to $OUTPUT_DIR/catalog.json"
