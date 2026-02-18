@@ -292,16 +292,19 @@ func run(logger *slog.Logger) error {
 	sigChan, signalCleanup := bootstrap.SignalHandler()
 	defer signalCleanup()
 
+	var runErr error
 	select {
 	case sig := <-sigChan:
 		logger.Info("received signal", "signal", sig)
 	case err := <-serverErrors:
-		return fmt.Errorf("server error: %w", err)
+		logger.Error("server error", "error", err)
+		runErr = fmt.Errorf("server error: %w", err)
 	case err := <-consumerErrors:
-		return fmt.Errorf("consumer error: %w", err)
+		logger.Error("consumer error", "error", err)
+		runErr = fmt.Errorf("consumer error: %w", err)
 	}
 
-	// Graceful shutdown
+	// Graceful shutdown (runs for both signal and error paths)
 	logger.Info("shutting down server...")
 
 	// Create shutdown context with timeout
@@ -332,7 +335,7 @@ func run(logger *slog.Logger) error {
 		logger.Info("HTTP server stopped")
 	}
 
-	return nil
+	return runErr
 }
 
 // initMDSPublisher creates and returns a MarketDataPublisher and its underlying gRPC connection.

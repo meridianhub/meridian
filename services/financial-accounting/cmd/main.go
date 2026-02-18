@@ -491,14 +491,16 @@ func run(logger *slog.Logger) error {
 	sigChan, signalCleanup := bootstrap.SignalHandler()
 	defer signalCleanup()
 
+	var runErr error
 	select {
 	case sig := <-sigChan:
 		logger.Info("received signal", "signal", sig)
 	case err := <-serverErrors:
-		return fmt.Errorf("server error: %w", err)
+		logger.Error("server error", "error", err)
+		runErr = fmt.Errorf("server error: %w", err)
 	}
 
-	// Graceful shutdown
+	// Graceful shutdown (runs for both signal and server error paths)
 	logger.Info("shutting down server...")
 
 	// Create shutdown context with timeout
@@ -556,7 +558,7 @@ func run(logger *slog.Logger) error {
 		grpcServer.Stop()
 	}
 
-	return nil
+	return runErr
 }
 
 // createRedisClient creates and validates a Redis client connection.

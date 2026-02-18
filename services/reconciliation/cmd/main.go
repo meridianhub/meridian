@@ -332,14 +332,16 @@ func run(logger *slog.Logger) error {
 	sigChan, signalCleanup := bootstrap.SignalHandler()
 	defer signalCleanup()
 
+	var runErr error
 	select {
 	case sig := <-sigChan:
 		logger.Info("received signal", "signal", sig)
 	case err := <-serverErrors:
-		return fmt.Errorf("server error: %w", err)
+		logger.Error("server error", "error", err)
+		runErr = fmt.Errorf("server error: %w", err)
 	}
 
-	// Graceful shutdown
+	// Graceful shutdown (runs for both signal and server error paths)
 	logger.Info("shutting down servers...")
 
 	// Stop scheduler first (it makes gRPC calls to self)
@@ -368,7 +370,7 @@ func run(logger *slog.Logger) error {
 		grpcServer.Stop()
 	}
 
-	return nil
+	return runErr
 }
 
 // wireScheduler creates and configures the CronScheduler with all its dependencies.

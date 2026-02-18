@@ -441,16 +441,19 @@ func run(logger *slog.Logger) error {
 	sigChan, signalCleanup := bootstrap.SignalHandler()
 	defer signalCleanup()
 
+	var runErr error
 	select {
 	case sig := <-sigChan:
 		logger.Info("received signal", "signal", sig)
 	case err := <-grpcErrors:
-		return fmt.Errorf("gRPC server error: %w", err)
+		logger.Error("gRPC server error", "error", err)
+		runErr = fmt.Errorf("gRPC server error: %w", err)
 	case err := <-httpErrors:
-		return fmt.Errorf("HTTP server error: %w", err)
+		logger.Error("HTTP server error", "error", err)
+		runErr = fmt.Errorf("HTTP server error: %w", err)
 	}
 
-	// Graceful shutdown
+	// Graceful shutdown (runs for both signal and error paths)
 	logger.Info("shutting down servers...")
 
 	// Shutdown outbox worker before stopping servers.
@@ -502,7 +505,7 @@ func run(logger *slog.Logger) error {
 		grpcServer.Stop()
 	}
 
-	return nil
+	return runErr
 }
 
 // healthServer implements the gRPC health checking protocol

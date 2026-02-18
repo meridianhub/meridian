@@ -125,24 +125,26 @@ func run(logger *slog.Logger) error {
 	sigChan, signalCleanup := bootstrap.SignalHandler()
 	defer signalCleanup()
 
+	var runErr error
 	select {
 	case sig := <-sigChan:
 		logger.Info("received signal", "signal", sig)
 	case err := <-serverErrors:
-		return fmt.Errorf("server error: %w", err)
+		logger.Error("server error", "error", err)
+		runErr = fmt.Errorf("server error: %w", err)
 	}
 
-	// Graceful shutdown
+	// Graceful shutdown (runs for both signal and server error paths)
 	logger.Info("initiating graceful shutdown...")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		return fmt.Errorf("shutdown error: %w", err)
+		logger.Error("shutdown error", "error", err)
 	}
 
-	return nil
+	return runErr
 }
 
 // parseLogLevel converts a string log level to slog.Level.

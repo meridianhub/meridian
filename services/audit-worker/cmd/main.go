@@ -202,14 +202,16 @@ func run(logger *slog.Logger) error {
 	sigChan, signalCleanup := bootstrap.SignalHandler()
 	defer signalCleanup()
 
+	var runErr error
 	select {
 	case sig := <-sigChan:
 		logger.Info("received signal", "signal", sig)
 	case err := <-serverErrors:
-		return err
+		logger.Error("HTTP server error", "error", err)
+		runErr = err
 	}
 
-	// Graceful shutdown
+	// Graceful shutdown (runs for both signal and server error paths)
 	logger.Info("shutting down...")
 
 	// Cancel audit worker context (also deferred above for early-return paths)
@@ -228,5 +230,5 @@ func run(logger *slog.Logger) error {
 		logger.Error("server shutdown error", "error", err)
 	}
 
-	return nil
+	return runErr
 }
