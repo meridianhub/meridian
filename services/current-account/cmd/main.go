@@ -325,6 +325,13 @@ func run(logger *slog.Logger) error {
 		return nil
 	})
 
+	// Cancel run-scoped context last (runs first in LIFO) to stop lazy resolution goroutines
+	// before other cleanup proceeds. This prevents orphan goroutines across RunWithRetry retries.
+	orchestrator.AddCleanup(func() error {
+		runCancel()
+		return nil
+	})
+
 	return orchestrator.Wait(serverErrors)
 }
 
