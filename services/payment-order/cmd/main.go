@@ -24,6 +24,7 @@ import (
 	"github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
 	"github.com/meridianhub/meridian/services/payment-order/config"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
+	poobservability "github.com/meridianhub/meridian/services/payment-order/observability"
 	"github.com/meridianhub/meridian/services/payment-order/service"
 	"github.com/meridianhub/meridian/services/payment-order/worker"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
@@ -65,6 +66,9 @@ var (
 
 // ErrMissingHMACSecret is returned when the WEBHOOK_HMAC_SECRET environment variable is not set.
 var ErrMissingHMACSecret = errors.New("WEBHOOK_HMAC_SECRET environment variable is required")
+
+// ErrRedisRequiredInProduction is returned when Redis is unavailable in production environments.
+var ErrRedisRequiredInProduction = errors.New("redis required for idempotency in production environment")
 
 func main() {
 	// Initialize structured logging with configurable log level
@@ -178,17 +182,32 @@ func run(logger *slog.Logger) error {
 	}
 	defer kafkaProducer.Close()
 
-	// Create Redis client and idempotency service
-	redisClient, err := createRedisClient(logger)
-	if err != nil {
-		return fmt.Errorf("failed to create Redis client: %w", err)
-	}
-	defer func() {
-		if err := redisClient.Close(); err != nil {
-			logger.Error("failed to close Redis client", "error", err)
+	// Create Redis client and idempotency service.
+	// In production: fail fast if Redis is unavailable (idempotency is critical).
+	// In non-production: use NoopService for graceful degradation with metrics.
+	var idempotencyService idempotency.Service
+	redisClient, redisErr := createRedisClient(logger)
+	if redisErr != nil {
+		if env.IsProduction() {
+			logger.Error("CRITICAL: Redis unavailable in production - failing fast", "error", redisErr)
+			return bootstrap.Permanent(fmt.Errorf("%w: %w", ErrRedisRequiredInProduction, redisErr))
 		}
-	}()
-	idempotencyService := idempotency.NewRedisService(redisClient)
+		logger.Warn("Redis not available at startup, using noop idempotency service - DEVELOPMENT ONLY",
+			"error", redisErr,
+			"environment", os.Getenv("ENVIRONMENT"))
+		idempotencyService = idempotency.NewNoopService(logger)
+		poobservability.SetNoopIdempotencyActive(true)
+		poobservability.RecordServiceDegradation(poobservability.ComponentIdempotency, poobservability.DegradationReasonStartupFallback)
+	} else {
+		idempotencyService = idempotency.NewRedisService(redisClient)
+		poobservability.SetNoopIdempotencyActive(false)
+		logger.Info("idempotency service initialized with Redis")
+		defer func() {
+			if err := redisClient.Close(); err != nil {
+				logger.Error("failed to close Redis client", "error", err)
+			}
+		}()
+	}
 
 	// Create Starlark handler registry with service client handlers.
 	// This enables saga scripts to call real services (not mocks).
@@ -297,7 +316,7 @@ func run(logger *slog.Logger) error {
 	var billingCronScheduler *scheduler.CronScheduler
 	var dunningWorker *worker.DunningWorker
 
-	if svcConfig.BillingEnabled {
+	if svcConfig.BillingEnabled && redisClient != nil {
 		billingRepo := persistence.NewBillingRepository(db)
 		billingMetrics := worker.NewBillingMetrics()
 
@@ -387,6 +406,8 @@ func run(logger *slog.Logger) error {
 			"shadow_mode", svcConfig.BillingShadowMode,
 			"dunning_poll_interval", svcConfig.DunningPollInterval,
 			"tenant_id", tenantID)
+	} else if svcConfig.BillingEnabled && redisClient == nil {
+		logger.Warn("billing workers disabled — Redis unavailable (DEVELOPMENT ONLY)")
 	} else {
 		logger.Info("billing workers disabled (BILLING_ENABLED=false)")
 	}
@@ -456,13 +477,19 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("failed to create webhook handler: %w", err)
 	}
 
-	// Create Stripe event processor for webhook idempotency and dunning
-	eventProcessor, err := webhookhttp.NewStripeEventProcessor(webhookhttp.StripeEventProcessorConfig{
-		RedisClient: redisClient,
-		Logger:      logger,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to create stripe event processor: %w", err)
+	// Create Stripe event processor for webhook idempotency and dunning.
+	// Requires Redis; if Redis is unavailable in non-production, skip Stripe webhook processing.
+	var eventProcessor *webhookhttp.StripeEventProcessor
+	if redisClient != nil {
+		eventProcessor, err = webhookhttp.NewStripeEventProcessor(webhookhttp.StripeEventProcessorConfig{
+			RedisClient: redisClient,
+			Logger:      logger,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create stripe event processor: %w", err)
+		}
+	} else {
+		logger.Warn("Stripe event processor disabled — Redis unavailable (DEVELOPMENT ONLY)")
 	}
 
 	// Create Stripe webhook handler (optional - only if STRIPE_API_KEY is configured)
