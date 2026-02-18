@@ -261,7 +261,50 @@ func TestVerificationConfig_SupportedProviders(t *testing.T) {
 	assert.Contains(t, SupportedProviders, "mock")
 	assert.Contains(t, SupportedProviders, "jumio")
 	assert.Contains(t, SupportedProviders, "onfido")
-	assert.Len(t, SupportedProviders, 3)
+	assert.Contains(t, SupportedProviders, "stripe")
+	assert.Len(t, SupportedProviders, 4)
+}
+
+func TestLoadVerificationConfig_StripeProvider_OnlyNeedsAPIKey(t *testing.T) {
+	clearVerificationEnv(t)
+	t.Setenv("VERIFICATION_PROVIDER", "stripe")
+	t.Setenv("VERIFICATION_WEBHOOK_SECRET", "webhook-secret")
+	t.Setenv("VERIFICATION_WEBHOOK_URL", "https://api.example.com/webhooks/verification")
+	t.Setenv("VERIFICATION_API_KEY", "sk_test_my-stripe-key")
+	// No VERIFICATION_API_SECRET — Stripe does not need it
+
+	cfg, err := LoadVerificationConfig()
+
+	require.NoError(t, err)
+	assert.Equal(t, "stripe", cfg.Provider)
+	assert.Equal(t, "sk_test_my-stripe-key", cfg.ProviderConfig["api_key"])
+	assert.Empty(t, cfg.ProviderConfig["api_secret"])
+}
+
+func TestVerificationConfig_Validate_StripeRequiresWebhookConfig(t *testing.T) {
+	cfg := &VerificationConfig{
+		Provider:       "stripe",
+		ProviderConfig: map[string]string{"api_key": "sk_test_key"},
+		// Missing WebhookSecret and WebhookURL
+	}
+
+	err := cfg.Validate()
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrEmptyWebhookSecretForNonMock)
+}
+
+func TestVerificationConfig_Validate_StripeWithoutAPISecretPasses(t *testing.T) {
+	cfg := &VerificationConfig{
+		Provider:       "stripe",
+		WebhookSecret:  "webhook-secret",
+		WebhookURL:     "https://example.com/webhooks/verification",
+		ProviderConfig: map[string]string{"api_key": "sk_test_key"},
+	}
+
+	err := cfg.Validate()
+
+	assert.NoError(t, err)
 }
 
 func TestVerificationConfig_ValidateForEnvironment_ProductionRejectsMock(t *testing.T) {

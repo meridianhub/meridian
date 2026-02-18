@@ -20,6 +20,7 @@ var (
 // Currently supported providers:
 //   - "mock": Returns a MockProvider for testing and development
 //   - "onfido": Onfido identity verification
+//   - "stripe": Stripe Identity verification
 //
 // Future providers (stubs, not yet implemented):
 //   - "jumio": Jumio identity verification
@@ -40,6 +41,8 @@ func NewProvider(cfg *config.VerificationConfig) (Provider, error) {
 		return nil, ErrUnsupportedProvider
 	case "onfido":
 		return NewOnfidoProvider(cfg, slog.Default())
+	case "stripe":
+		return NewStripeIdentityProvider(cfg, slog.Default())
 	default:
 		return nil, ErrUnsupportedProvider
 	}
@@ -78,6 +81,8 @@ func NewProviderWithOptions(cfg *config.VerificationConfig, opts ProviderOptions
 		return nil, ErrUnsupportedProvider
 	case "onfido":
 		return NewOnfidoProvider(cfg, slog.Default())
+	case "stripe":
+		return NewStripeIdentityProvider(cfg, slog.Default())
 	default:
 		return nil, ErrUnsupportedProvider
 	}

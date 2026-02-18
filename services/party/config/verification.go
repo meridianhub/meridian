@@ -13,6 +13,7 @@ import (
 //   - "mock": Mock provider for testing (always available)
 //   - "jumio": Jumio identity verification
 //   - "onfido": Onfido identity verification
+//   - "stripe": Stripe Identity verification
 //
 // ProviderConfig contains provider-specific settings like API keys and endpoints.
 // Required keys vary by provider.
@@ -51,7 +52,7 @@ var (
 )
 
 // SupportedProviders lists all supported verification provider names.
-var SupportedProviders = []string{"mock", "jumio", "onfido"}
+var SupportedProviders = []string{"mock", "jumio", "onfido", "stripe"}
 
 // LoadVerificationConfig loads verification configuration from environment variables.
 //
@@ -122,7 +123,8 @@ func (c *VerificationConfig) Validate() error {
 	if c.ProviderConfig["api_key"] == "" {
 		return ErrMissingProviderAPIKey
 	}
-	if c.ProviderConfig["api_secret"] == "" {
+	// Stripe only needs api_key; other providers require api_secret as well
+	if strings.ToLower(c.Provider) != "stripe" && c.ProviderConfig["api_secret"] == "" {
 		return ErrMissingProviderAPISecret
 	}
 

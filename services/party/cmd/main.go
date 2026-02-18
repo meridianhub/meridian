@@ -223,12 +223,31 @@ func run(logger *slog.Logger) error {
 				VerificationService: verificationSvc,
 				HMACSecrets: map[string][]byte{
 					"default": []byte(verificationCfg.WebhookSecret),
+					"stripe":  []byte(verificationCfg.WebhookSecret),
 				},
 				Logger: logger,
 			},
 		)
 		if err != nil {
 			return fmt.Errorf("failed to create webhook handler: %w", err)
+		}
+
+		// Register provider-specific webhook routes before the generic catch-all.
+		// For Stripe, we use the StripeWebhookAdapter which validates the Stripe-Signature
+		// header and translates the Stripe event format to our generic webhook format.
+		if strings.ToLower(verificationCfg.Provider) == "stripe" {
+			stripeAdapter, err := httpAdapter.NewStripeWebhookAdapter(
+				httpAdapter.StripeWebhookAdapterConfig{
+					InnerHandler:    webhookHandler,
+					WebhookSecret:   []byte(verificationCfg.WebhookSecret),
+					InnerHMACSecret: []byte(verificationCfg.WebhookSecret),
+					Logger:          logger,
+				},
+			)
+			if err != nil {
+				return fmt.Errorf("failed to create stripe webhook adapter: %w", err)
+			}
+			httpMux.Handle("/webhooks/verification/stripe", stripeAdapter)
 		}
 
 		httpMux.HandleFunc("/webhooks/verification/", webhookHandler.HandleWebhook)
