@@ -183,6 +183,9 @@ func run(logger *slog.Logger) error {
 		workerConfig := events.DefaultWorkerConfig("financial-accounting")
 		outboxWorker = events.NewWorker(outboxRepo, kafkaProducer, workerConfig, logger)
 		outboxWorker.Start(ctx)
+		// Ensure worker is stopped if run() returns early (e.g., init failure after this point).
+		// The shutdown block also calls Stop(), but calling it twice is safe.
+		defer outboxWorker.Stop()
 		logger.Info("outbox worker started",
 			"batch_size", workerConfig.BatchSize,
 			"poll_interval", workerConfig.PollInterval)

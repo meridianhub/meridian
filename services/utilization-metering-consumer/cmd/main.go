@@ -154,6 +154,15 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 
+	// Ensure the HTTP listener is released if init fails and RunWithRetry restarts.
+	// On the happy path, httpServer.Shutdown in the shutdown block closes it first,
+	// so the deferred Close sees ErrServerClosed (which we ignore).
+	defer func() {
+		if err := httpServer.Close(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Warn("failed to close HTTP server", "error", err)
+		}
+	}()
+
 	// Initialize Position Keeping client
 	logger.Info("initializing position keeping client", "endpoint", config.PositionKeepingEndpoint)
 

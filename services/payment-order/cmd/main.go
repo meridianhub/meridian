@@ -548,6 +548,15 @@ func run(logger *slog.Logger) error {
 	case err := <-serverErrors:
 		logger.Error("server error", "error", err)
 		runErr = err
+
+		// Prefer graceful exit if a shutdown signal is already pending.
+		// Without this, RunWithRetry would retry despite SIGTERM intent.
+		select {
+		case sig := <-sigChan:
+			logger.Info("received signal during error handling, treating as shutdown", "signal", sig)
+			runErr = nil
+		default:
+		}
 	}
 
 	// Graceful shutdown (runs for both signal and server error paths)
