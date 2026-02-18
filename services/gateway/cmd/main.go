@@ -37,9 +37,12 @@ func main() {
 		"commit", Commit,
 		"build_date", BuildDate)
 
-	// Run the service
-	if err := run(logger); err != nil {
-		logger.Error("service failed", "error", err)
+	// Run the service with retry for transient startup errors
+	if err := bootstrap.RunWithRetry(
+		func() error { return run(logger) },
+		bootstrap.WithRetryLogger(logger),
+	); err != nil {
+		logger.Error("service failed to start", "error", err)
 		os.Exit(1)
 	}
 
@@ -47,16 +50,16 @@ func main() {
 }
 
 func run(logger *slog.Logger) error {
-	// Load configuration
+	// Load configuration (permanent error if invalid)
 	config, err := gateway.LoadConfig()
 	if err != nil {
-		return fmt.Errorf("failed to load configuration: %w", err)
+		return bootstrap.Permanent(fmt.Errorf("failed to load configuration: %w", err))
 	}
 
 	// Production safety check: LOCAL_DEV_MODE must not be enabled in production namespaces
 	namespace := os.Getenv("POD_NAMESPACE")
 	if err := config.ValidateForNamespace(namespace); err != nil {
-		return err
+		return bootstrap.Permanent(err)
 	}
 
 	logger.Info("configuration loaded",
@@ -122,24 +125,26 @@ func run(logger *slog.Logger) error {
 	sigChan, signalCleanup := bootstrap.SignalHandler()
 	defer signalCleanup()
 
+	var runErr error
 	select {
 	case sig := <-sigChan:
 		logger.Info("received signal", "signal", sig)
 	case err := <-serverErrors:
-		return fmt.Errorf("server error: %w", err)
+		logger.Error("server error", "error", err)
+		runErr = fmt.Errorf("server error: %w", err)
 	}
 
-	// Graceful shutdown
+	// Graceful shutdown (runs for both signal and server error paths)
 	logger.Info("initiating graceful shutdown...")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		return fmt.Errorf("shutdown error: %w", err)
+		logger.Error("shutdown error", "error", err)
 	}
 
-	return nil
+	return runErr
 }
 
 // parseLogLevel converts a string log level to slog.Level.

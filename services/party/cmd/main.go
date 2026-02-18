@@ -51,9 +51,12 @@ func main() {
 		"commit", Commit,
 		"build_date", BuildDate)
 
-	// Run the service
-	if err := run(logger); err != nil {
-		logger.Error("service failed", "error", err)
+	// Run the service with retry for transient startup errors
+	if err := bootstrap.RunWithRetry(
+		func() error { return run(logger) },
+		bootstrap.WithRetryLogger(logger),
+	); err != nil {
+		logger.Error("service failed to start", "error", err)
 		os.Exit(1)
 	}
 
@@ -104,14 +107,14 @@ func run(logger *slog.Logger) error {
 	verificationCfg, err := config.LoadVerificationConfig()
 	if err != nil {
 		if isProduction {
-			return fmt.Errorf("verification config required in production: %w", err)
+			return bootstrap.Permanent(fmt.Errorf("verification config required in production: %w", err))
 		}
 		logger.Warn("verification config not loaded - KYC provider disabled", "error", err)
 		verificationCfg = nil
 	}
 	if verificationCfg != nil {
 		if err := verificationCfg.ValidateForEnvironment(environment); err != nil {
-			return fmt.Errorf("verification config invalid for environment %q: %w", environment, err)
+			return bootstrap.Permanent(fmt.Errorf("verification config invalid for environment %q: %w", environment, err))
 		}
 	}
 

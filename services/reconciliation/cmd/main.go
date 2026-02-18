@@ -52,8 +52,12 @@ func main() {
 		"commit", Commit,
 		"build_date", BuildDate)
 
-	if err := run(logger); err != nil {
-		logger.Error("service failed", "error", err)
+	// Run the service with retry for transient startup errors
+	if err := bootstrap.RunWithRetry(
+		func() error { return run(logger) },
+		bootstrap.WithRetryLogger(logger),
+	); err != nil {
+		logger.Error("service failed to start", "error", err)
 		os.Exit(1)
 	}
 
@@ -63,10 +67,10 @@ func main() {
 func run(logger *slog.Logger) error {
 	ctx := context.Background()
 
-	// Load configuration
+	// Load configuration (permanent error if invalid)
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		return fmt.Errorf("failed to load configuration: %w", err)
+		return bootstrap.Permanent(fmt.Errorf("failed to load configuration: %w", err))
 	}
 
 	logger.Info("configuration loaded",
@@ -328,14 +332,16 @@ func run(logger *slog.Logger) error {
 	sigChan, signalCleanup := bootstrap.SignalHandler()
 	defer signalCleanup()
 
+	var runErr error
 	select {
 	case sig := <-sigChan:
 		logger.Info("received signal", "signal", sig)
 	case err := <-serverErrors:
-		return fmt.Errorf("server error: %w", err)
+		logger.Error("server error", "error", err)
+		runErr = fmt.Errorf("server error: %w", err)
 	}
 
-	// Graceful shutdown
+	// Graceful shutdown (runs for both signal and server error paths)
 	logger.Info("shutting down servers...")
 
 	// Stop scheduler first (it makes gRPC calls to self)
@@ -364,7 +370,7 @@ func run(logger *slog.Logger) error {
 		grpcServer.Stop()
 	}
 
-	return nil
+	return runErr
 }
 
 // wireScheduler creates and configures the CronScheduler with all its dependencies.

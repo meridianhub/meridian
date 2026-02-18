@@ -80,9 +80,12 @@ func main() {
 		"commit", Commit,
 		"build_date", BuildDate)
 
-	// Run the service
-	if err := run(logger); err != nil {
-		logger.Error("service failed", "error", err)
+	// Run the service with retry for transient startup errors
+	if err := bootstrap.RunWithRetry(
+		func() error { return run(logger) },
+		bootstrap.WithRetryLogger(logger),
+	); err != nil {
+		logger.Error("service failed to start", "error", err)
 		os.Exit(1)
 	}
 
@@ -92,10 +95,10 @@ func main() {
 func run(logger *slog.Logger) error {
 	ctx := context.Background()
 
-	// Load and validate service configuration early (fail fast).
+	// Load and validate service configuration early (permanent error if invalid)
 	svcConfig := config.LoadServiceConfig()
 	if err := svcConfig.Validate(); err != nil {
-		return fmt.Errorf("invalid service configuration: %w", err)
+		return bootstrap.Permanent(fmt.Errorf("invalid service configuration: %w", err))
 	}
 	svcConfig.LogValues(logger)
 
@@ -438,7 +441,7 @@ func run(logger *slog.Logger) error {
 	// Create HTTP webhook handler
 	hmacSecret := []byte(env.GetEnvOrDefault("WEBHOOK_HMAC_SECRET", ""))
 	if len(hmacSecret) == 0 {
-		return ErrMissingHMACSecret
+		return bootstrap.Permanent(ErrMissingHMACSecret)
 	}
 
 	// Create a gRPC client wrapper for the local service
@@ -538,14 +541,25 @@ func run(logger *slog.Logger) error {
 	sigChan, signalCleanup := bootstrap.SignalHandler()
 	defer signalCleanup()
 
+	var runErr error
 	select {
 	case sig := <-sigChan:
 		logger.Info("received signal", "signal", sig)
 	case err := <-serverErrors:
-		return err
+		logger.Error("server error", "error", err)
+		runErr = err
+
+		// Prefer graceful exit if a shutdown signal is already pending.
+		// Without this, RunWithRetry would retry despite SIGTERM intent.
+		select {
+		case sig := <-sigChan:
+			logger.Info("received signal during error handling, treating as shutdown", "signal", sig)
+			runErr = nil
+		default:
+		}
 	}
 
-	// Graceful shutdown
+	// Graceful shutdown (runs for both signal and server error paths)
 	logger.Info("shutting down servers...")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), defaults.DefaultGracefulShutdown)
@@ -586,7 +600,7 @@ func run(logger *slog.Logger) error {
 		grpcServer.Stop()
 	}
 
-	return nil
+	return runErr
 }
 
 // localPaymentOrderClient wraps the local service to implement the client interface.

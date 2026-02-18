@@ -85,9 +85,12 @@ func main() {
 		"commit", Commit,
 		"build_date", BuildDate)
 
-	// Run the service
-	if err := run(logger); err != nil {
-		logger.Error("service failed", "error", err)
+	// Run the service with retry for transient startup errors
+	if err := bootstrap.RunWithRetry(
+		func() error { return run(logger) },
+		bootstrap.WithRetryLogger(logger),
+	); err != nil {
+		logger.Error("service failed to start", "error", err)
 		os.Exit(1)
 	}
 
@@ -97,10 +100,10 @@ func main() {
 func run(logger *slog.Logger) error {
 	ctx := context.Background()
 
-	// Load configuration
+	// Load configuration (permanent error if invalid)
 	config, err := app.LoadConfig()
 	if err != nil {
-		return fmt.Errorf("failed to load configuration: %w", err)
+		return bootstrap.Permanent(fmt.Errorf("failed to load configuration: %w", err))
 	}
 
 	// Override observability config with build info
@@ -438,16 +441,19 @@ func run(logger *slog.Logger) error {
 	sigChan, signalCleanup := bootstrap.SignalHandler()
 	defer signalCleanup()
 
+	var runErr error
 	select {
 	case sig := <-sigChan:
 		logger.Info("received signal", "signal", sig)
 	case err := <-grpcErrors:
-		return fmt.Errorf("gRPC server error: %w", err)
+		logger.Error("gRPC server error", "error", err)
+		runErr = fmt.Errorf("gRPC server error: %w", err)
 	case err := <-httpErrors:
-		return fmt.Errorf("HTTP server error: %w", err)
+		logger.Error("HTTP server error", "error", err)
+		runErr = fmt.Errorf("HTTP server error: %w", err)
 	}
 
-	// Graceful shutdown
+	// Graceful shutdown (runs for both signal and error paths)
 	logger.Info("shutting down servers...")
 
 	// Shutdown outbox worker before stopping servers.
@@ -499,7 +505,7 @@ func run(logger *slog.Logger) error {
 		grpcServer.Stop()
 	}
 
-	return nil
+	return runErr
 }
 
 // healthServer implements the gRPC health checking protocol

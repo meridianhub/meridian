@@ -106,9 +106,12 @@ func main() {
 		"commit", Commit,
 		"build_date", BuildDate)
 
-	// Run the service
-	if err := run(logger); err != nil {
-		logger.Error("service failed", "error", err)
+	// Run the service with retry for transient startup errors
+	if err := bootstrap.RunWithRetry(
+		func() error { return run(logger) },
+		bootstrap.WithRetryLogger(logger),
+	); err != nil {
+		logger.Error("service failed to start", "error", err)
 		os.Exit(1)
 	}
 
@@ -116,10 +119,10 @@ func main() {
 }
 
 func run(logger *slog.Logger) error {
-	// Load configuration
+	// Load configuration (permanent error if invalid)
 	config, err := app.LoadConfig()
 	if err != nil {
-		return fmt.Errorf("failed to load configuration: %w", err)
+		return bootstrap.Permanent(fmt.Errorf("failed to load configuration: %w", err))
 	}
 
 	logger.Info("configuration loaded",
@@ -148,6 +151,15 @@ func run(logger *slog.Logger) error {
 		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("HTTP server error", "error", err)
 			serverErrors <- fmt.Errorf("HTTP server error: %w", err)
+		}
+	}()
+
+	// Ensure the HTTP listener is released if init fails and RunWithRetry restarts.
+	// On the happy path, httpServer.Shutdown in the shutdown block closes it first,
+	// so the deferred Close sees ErrServerClosed (which we ignore).
+	defer func() {
+		if err := httpServer.Close(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Warn("failed to close HTTP server", "error", err)
 		}
 	}()
 
@@ -215,16 +227,16 @@ func run(logger *slog.Logger) error {
 			"mds_service_addr", config.MDSServiceAddr)
 	}
 
-	// Parse tenant zero ID
+	// Parse tenant zero ID (permanent error if invalid)
 	tenantZeroID, err := uuid.Parse(config.TenantZeroID)
 	if err != nil {
-		return fmt.Errorf("invalid TENANT_ZERO_ID: %w", err)
+		return bootstrap.Permanent(fmt.Errorf("invalid TENANT_ZERO_ID: %w", err))
 	}
 
-	// Load tenant-to-account mapping from configuration
+	// Load tenant-to-account mapping from configuration (permanent error if invalid)
 	tenantAccountMap, err := domain.ParseTenantAccountMapping(config.TenantAccountMapping)
 	if err != nil {
-		return fmt.Errorf("failed to load tenant account mapping: %w", err)
+		return bootstrap.Permanent(fmt.Errorf("failed to load tenant account mapping: %w", err))
 	}
 
 	// Ensure tenant-zero maps to itself if not explicitly configured
@@ -289,16 +301,19 @@ func run(logger *slog.Logger) error {
 	sigChan, signalCleanup := bootstrap.SignalHandler()
 	defer signalCleanup()
 
+	var runErr error
 	select {
 	case sig := <-sigChan:
 		logger.Info("received signal", "signal", sig)
 	case err := <-serverErrors:
-		return fmt.Errorf("server error: %w", err)
+		logger.Error("server error", "error", err)
+		runErr = fmt.Errorf("server error: %w", err)
 	case err := <-consumerErrors:
-		return fmt.Errorf("consumer error: %w", err)
+		logger.Error("consumer error", "error", err)
+		runErr = fmt.Errorf("consumer error: %w", err)
 	}
 
-	// Graceful shutdown
+	// Graceful shutdown (runs for both signal and error paths)
 	logger.Info("shutting down server...")
 
 	// Create shutdown context with timeout
@@ -329,7 +344,7 @@ func run(logger *slog.Logger) error {
 		logger.Info("HTTP server stopped")
 	}
 
-	return nil
+	return runErr
 }
 
 // initMDSPublisher creates and returns a MarketDataPublisher and its underlying gRPC connection.

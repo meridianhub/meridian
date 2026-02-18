@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"log/slog"
 	"net/http"
 	"os"
@@ -20,8 +19,6 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
-
-// Note: fmt.Fprintf is used for HTTP responses, log.Printf for application lifecycle logging
 
 var (
 	Version   = "dev"
@@ -77,30 +74,39 @@ func getPort() string {
 	return port
 }
 
+// Static errors for configuration validation.
+var (
+	ErrDatabaseURLRequired = errors.New("DATABASE_URL environment variable is required")
+	ErrAuditSchemaRequired = errors.New("AUDIT_SCHEMA environment variable is required")
+)
+
 // getDBConnectionString returns database connection string from environment.
-// DATABASE_URL is required - the service will fail fast if not provided.
-func getDBConnectionString() string {
+// DATABASE_URL is required - returns an error if not provided.
+func getDBConnectionString() (string, error) {
 	connStr := os.Getenv("DATABASE_URL")
 	if connStr == "" {
-		log.Fatal("DATABASE_URL environment variable is required")
+		return "", ErrDatabaseURLRequired
 	}
-	return connStr
+	return connStr, nil
 }
 
 // getAuditSchema returns the audit schema from environment.
 // Per ADR-0020, each service should run its own embedded worker.
 // The AUDIT_SCHEMA environment variable must be set to specify which schema to process.
-func getAuditSchema() string {
+func getAuditSchema() (string, error) {
 	schema := os.Getenv("AUDIT_SCHEMA")
 	if schema == "" {
-		log.Fatal("AUDIT_SCHEMA environment variable is required")
+		return "", ErrAuditSchemaRequired
 	}
-	return schema
+	return schema, nil
 }
 
 // setupDatabase initializes the database connection with GORM
 func setupDatabase(_ context.Context) (*gorm.DB, error) {
-	connStr := getDBConnectionString()
+	connStr, err := getDBConnectionString()
+	if err != nil {
+		return nil, bootstrap.Permanent(err)
+	}
 
 	// Initialize GORM with PostgreSQL driver
 	gormDB, err := gorm.Open(postgres.Open(connStr), &gorm.Config{
@@ -126,69 +132,103 @@ func setupDatabase(_ context.Context) (*gorm.DB, error) {
 }
 
 func main() {
-	log.Printf("audit-worker v%s (commit: %s, built: %s)", Version, Commit, BuildDate)
-
 	// Setup logger
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
 	slog.SetDefault(logger)
 
-	// Initialize database connection
+	logger.Info("starting audit-worker service",
+		"version", Version,
+		"commit", Commit,
+		"build_date", BuildDate)
+
+	// Run the service with retry for transient startup errors
+	if err := bootstrap.RunWithRetry(
+		func() error { return run(logger) },
+		bootstrap.WithRetryLogger(logger),
+	); err != nil {
+		logger.Error("service failed to start", "error", err)
+		os.Exit(1)
+	}
+
+	logger.Info("service stopped gracefully")
+}
+
+func run(logger *slog.Logger) error {
 	ctx := context.Background()
+
+	// Validate audit schema (permanent config error)
+	schema, err := getAuditSchema()
+	if err != nil {
+		return bootstrap.Permanent(err)
+	}
+
+	// Initialize database connection
 	gormDB, err := setupDatabase(ctx)
 	if err != nil {
-		log.Fatalf("Failed to setup database: %v", err)
+		return fmt.Errorf("failed to setup database: %w", err)
 	}
-	log.Println("Database connection established")
+	logger.Info("database connection established")
 
 	// Start audit worker
-	// The AUDIT_SCHEMA env var specifies which audit schema this worker processes.
-	schema := getAuditSchema()
 	auditWorker := audit.NewAuditWorker(gormDB, schema, logger)
 	workerCtx, workerCancel := context.WithCancel(ctx)
+	defer workerCancel()
 	auditWorker.Start(workerCtx)
-	log.Printf("Audit worker started for schema: %s", schema)
+	logger.Info("audit worker started", "schema", schema)
 
 	// Get port from environment or use default
 	port := getPort()
 
-	// Setup routes on default mux
-	setupRoutes(http.DefaultServeMux)
+	// Setup routes on a new mux
+	mux := http.NewServeMux()
+	setupRoutes(mux)
 
 	// Create server with proper timeouts (security best practice)
 	server := createServer(port)
+	server.Handler = mux
 
 	// Start server in background
+	serverErrors := make(chan error, 1)
 	go func() {
-		log.Printf("Starting HTTP server on :%s\n", port)
+		logger.Info("starting HTTP server", "port", port)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("Failed to start server: %v", err)
+			serverErrors <- fmt.Errorf("HTTP server error: %w", err)
 		}
 	}()
 
-	// Wait for interrupt signal
+	// Wait for interrupt signal or server error
 	sigChan, signalCleanup := bootstrap.SignalHandler()
 	defer signalCleanup()
-	<-sigChan
 
-	log.Println("Shutting down server...")
+	var runErr error
+	select {
+	case sig := <-sigChan:
+		logger.Info("received signal", "signal", sig)
+	case err := <-serverErrors:
+		logger.Error("HTTP server error", "error", err)
+		runErr = err
+	}
 
-	// Cancel audit worker context
+	// Graceful shutdown (runs for both signal and server error paths)
+	logger.Info("shutting down...")
+
+	// Cancel audit worker context (also deferred above for early-return paths)
 	workerCancel()
 
 	// Stop audit worker gracefully
-	log.Println("Stopping audit worker...")
+	logger.Info("stopping audit worker...")
 	auditWorker.Stop()
-	log.Println("Audit worker stopped")
+	logger.Info("audit worker stopped")
 
 	// Graceful shutdown with timeout
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), defaults.DefaultGracefulShutdown)
 	defer cancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Printf("Server shutdown error: %v", err)
+		logger.Error("server shutdown error", "error", err)
 	}
 
-	log.Println("Shutdown complete")
+	return runErr
 }
