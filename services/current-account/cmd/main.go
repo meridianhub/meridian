@@ -73,7 +73,10 @@ func main() {
 }
 
 func run(logger *slog.Logger) error {
-	ctx := context.Background()
+	// Use a run-scoped context so lazy resolution goroutines stop when run() returns
+	// (e.g., during RunWithRetry retries or shutdown).
+	ctx, runCancel := context.WithCancel(context.Background())
+	defer runCancel()
 
 	// Initialize OpenTelemetry tracer
 	tracer, err := bootstrap.NewTracer(ctx, bootstrap.TracerConfig{

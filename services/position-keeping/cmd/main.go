@@ -101,7 +101,10 @@ func main() {
 }
 
 func run(logger *slog.Logger) error {
-	ctx := context.Background()
+	// Use a run-scoped context so lazy resolution goroutines stop when run() returns
+	// (e.g., during RunWithRetry retries or shutdown).
+	ctx, runCancel := context.WithCancel(context.Background())
+	defer runCancel()
 
 	// Load configuration (permanent error if invalid)
 	config, err := app.LoadConfig()
@@ -542,6 +545,9 @@ func run(logger *slog.Logger) error {
 
 	// Graceful shutdown (runs for both signal and error paths)
 	logger.Info("shutting down servers...")
+
+	// Cancel run-scoped context to stop lazy resolution goroutines.
+	runCancel()
 
 	// Shutdown outbox worker before stopping servers (worker must stop before producer closes).
 	// The shutdown function arrives via channel once the goroutine has started the worker.
