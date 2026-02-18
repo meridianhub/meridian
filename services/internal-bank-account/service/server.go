@@ -19,6 +19,7 @@ import (
 	"github.com/meridianhub/meridian/services/internal-bank-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/internal-bank-account/domain"
 	ibaobservability "github.com/meridianhub/meridian/services/internal-bank-account/observability"
+	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -49,7 +50,8 @@ type Service struct {
 	lienRepo              *persistence.LienRepository
 	positionKeepingClient PositionKeepingClient
 	referenceDataClient   ReferenceDataClient
-	valuationEngine       ValuationEngine // Optional: executes valuation method logic
+	valuationEngine       ValuationEngine     // Optional: executes valuation method logic
+	idempotencyService    idempotency.Service // Optional: nil = no Redis idempotency guard
 	logger                *slog.Logger
 	tracer                *observability.Tracer
 }
@@ -129,6 +131,14 @@ func WithValuationEngine(engine ValuationEngine) Option {
 func WithValuationFeatureRepo(repo *persistence.ValuationFeatureRepository) Option {
 	return func(s *Service) {
 		s.valuationFeatureRepo = repo
+	}
+}
+
+// WithIdempotencyService sets the idempotency service for Redis-backed exactly-once guards.
+// When nil (default), mutating lien operations proceed without Redis idempotency protection.
+func WithIdempotencyService(svc idempotency.Service) Option {
+	return func(s *Service) {
+		s.idempotencyService = svc
 	}
 }
 
