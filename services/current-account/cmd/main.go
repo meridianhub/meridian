@@ -150,8 +150,9 @@ func run(logger *slog.Logger) error {
 
 	logger.Info("service initialized with external clients")
 
-	// Initialize Kafka producer lazily for outbox worker (optional - graceful degradation)
-	var outboxWorker *events.Worker
+	// Initialize Kafka producer lazily for outbox worker (optional - graceful degradation).
+	// The outbox worker stop function is communicated back via channel to avoid data races.
+	outboxStopCh := make(chan func(), 1)
 	kafkaBootstrapServers := env.GetEnvOrDefault("KAFKA_BOOTSTRAP_SERVERS", "")
 	if kafkaBootstrapServers != "" {
 		lazyKafka := bootstrap.NewLazyClient(ctx, "kafka-producer",
@@ -178,22 +179,22 @@ func run(logger *slog.Logger) error {
 			bootstrap.WithLazyLogger(logger),
 		)
 
-		// Start outbox worker that will use the lazy Kafka producer once available
-		// The worker polls for pending outbox events; Kafka availability is checked at publish time
+		// Start outbox worker that will use the lazy Kafka producer once available.
+		// Sends the stop function back via channel once the worker is running.
 		go func() {
-			// Wait for Kafka to become available before starting the worker
 			for {
 				producer, err := lazyKafka.Get()
 				if err == nil {
-					outboxWorker = events.NewWorker(
+					w := events.NewWorker(
 						outboxRepo,
 						producer,
 						events.DefaultWorkerConfig("current-account"),
 						logger.With("component", "outbox_worker"),
 					)
-					outboxWorker.Start(ctx)
+					w.Start(ctx)
 					logger.Info("outbox worker started",
 						"kafka_brokers", kafkaBootstrapServers)
+					outboxStopCh <- w.Stop
 					return
 				}
 				select {
@@ -267,15 +268,19 @@ func run(logger *slog.Logger) error {
 	// Wait for shutdown signal and orchestrate graceful shutdown
 	orchestrator := bootstrap.NewShutdownOrchestrator(grpcServer, logger)
 
-	// Register outbox worker cleanup (if initialized)
-	if outboxWorker != nil {
-		orchestrator.AddCleanup(func() error {
+	// Register outbox worker cleanup.
+	// The stop function arrives via channel once the goroutine has started the worker.
+	orchestrator.AddCleanup(func() error {
+		select {
+		case stopFn := <-outboxStopCh:
 			logger.Info("stopping outbox worker")
-			outboxWorker.Stop()
+			stopFn()
 			logger.Info("outbox worker stopped")
-			return nil
-		})
-	}
+		default:
+			// Worker never started (Kafka not resolved yet) - nothing to stop
+		}
+		return nil
+	})
 
 	// Register cleanup functions (LIFO order - external clients, then Redis, then database)
 	// Register external client cleanup functions first (they get called last in LIFO)

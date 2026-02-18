@@ -132,12 +132,13 @@ func run(logger *slog.Logger) error {
 
 	logger.Info("dependency container initialized")
 
-	// Initialize and start event outbox worker (if Kafka enabled)
-	var outboxWorker *events.Worker
-	var workerCancel context.CancelFunc
+	// Initialize and start event outbox worker (if Kafka enabled).
+	// The outbox shutdown function is communicated back via channel to avoid data races
+	// when the worker is started lazily inside a goroutine.
+	outboxShutdownCh := make(chan func(), 1)
 	if container.KafkaProducer() != nil {
 		workerConfig := events.DefaultWorkerConfig("position-keeping")
-		outboxWorker = events.NewWorker(
+		w := events.NewWorker(
 			container.OutboxRepository,
 			container.KafkaProducer(),
 			workerConfig,
@@ -145,10 +146,13 @@ func run(logger *slog.Logger) error {
 		)
 
 		// Start worker in background
-		var workerCtx context.Context
-		workerCtx, workerCancel = context.WithCancel(context.Background())
-		defer workerCancel()
-		outboxWorker.Start(workerCtx)
+		workerCtx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		w.Start(workerCtx)
+		outboxShutdownCh <- func() {
+			cancel()
+			w.Stop()
+		}
 	} else if config.Kafka.Enabled {
 		// Kafka is enabled but producer was not available at startup - use lazy resolution
 		lazyKafka := bootstrap.NewLazyClient(ctx, "kafka-producer",
@@ -174,22 +178,26 @@ func run(logger *slog.Logger) error {
 			bootstrap.WithLazyLogger(logger),
 		)
 
-		// Start outbox worker once Kafka producer resolves
+		// Start outbox worker once Kafka producer resolves.
+		// Sends shutdown function back via channel once the worker is running.
 		go func() {
 			for {
 				producer, err := lazyKafka.Get()
 				if err == nil {
 					workerConfig := events.DefaultWorkerConfig("position-keeping")
-					outboxWorker = events.NewWorker(
+					w := events.NewWorker(
 						container.OutboxRepository,
 						producer,
 						workerConfig,
 						logger,
 					)
-					var workerCtx context.Context
-					workerCtx, workerCancel = context.WithCancel(context.Background())
-					outboxWorker.Start(workerCtx) //nolint:contextcheck // Worker needs independent context for shutdown control
+					workerCtx, cancel := context.WithCancel(context.Background())
+					w.Start(workerCtx) //nolint:contextcheck // Worker needs independent context for shutdown control
 					logger.Info("outbox worker started after lazy Kafka resolution")
+					outboxShutdownCh <- func() {
+						cancel()
+						w.Stop()
+					}
 					return
 				}
 				select {
@@ -532,15 +540,14 @@ func run(logger *slog.Logger) error {
 	logger.Info("shutting down servers...")
 
 	// Shutdown outbox worker before stopping servers.
-	// Consider adding a shutdown timeout to prevent indefinite blocking
-	// if the worker fails to stop gracefully (e.g., Kafka broker unreachable).
-	if outboxWorker != nil {
+	// The shutdown function arrives via channel once the goroutine has started the worker.
+	select {
+	case shutdownFn := <-outboxShutdownCh:
 		logger.Info("stopping event outbox worker...")
-		if workerCancel != nil {
-			workerCancel() // Cancel context first to signal worker to stop accepting new work
-		}
-		outboxWorker.Stop() // Blocks until current batch completes and Kafka flush finishes
+		shutdownFn()
 		logger.Info("event outbox worker stopped")
+	default:
+		// Worker never started (Kafka not resolved yet) - nothing to stop
 	}
 
 	// Shutdown compaction worker
