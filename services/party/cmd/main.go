@@ -246,7 +246,7 @@ func run(logger *slog.Logger) error {
 				},
 			)
 			if err != nil {
-				return fmt.Errorf("failed to create stripe webhook adapter: %w", err)
+				return bootstrap.Permanent(fmt.Errorf("failed to create stripe webhook adapter: %w", err))
 			}
 			httpMux.Handle("/webhooks/verification/stripe", stripeAdapter)
 		}
