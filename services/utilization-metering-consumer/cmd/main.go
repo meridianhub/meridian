@@ -106,9 +106,12 @@ func main() {
 		"commit", Commit,
 		"build_date", BuildDate)
 
-	// Run the service
-	if err := run(logger); err != nil {
-		logger.Error("service failed", "error", err)
+	// Run the service with retry for transient startup errors
+	if err := bootstrap.RunWithRetry(
+		func() error { return run(logger) },
+		bootstrap.WithRetryLogger(logger),
+	); err != nil {
+		logger.Error("service failed to start", "error", err)
 		os.Exit(1)
 	}
 
@@ -116,10 +119,10 @@ func main() {
 }
 
 func run(logger *slog.Logger) error {
-	// Load configuration
+	// Load configuration (permanent error if invalid)
 	config, err := app.LoadConfig()
 	if err != nil {
-		return fmt.Errorf("failed to load configuration: %w", err)
+		return bootstrap.Permanent(fmt.Errorf("failed to load configuration: %w", err))
 	}
 
 	logger.Info("configuration loaded",
@@ -215,16 +218,16 @@ func run(logger *slog.Logger) error {
 			"mds_service_addr", config.MDSServiceAddr)
 	}
 
-	// Parse tenant zero ID
+	// Parse tenant zero ID (permanent error if invalid)
 	tenantZeroID, err := uuid.Parse(config.TenantZeroID)
 	if err != nil {
-		return fmt.Errorf("invalid TENANT_ZERO_ID: %w", err)
+		return bootstrap.Permanent(fmt.Errorf("invalid TENANT_ZERO_ID: %w", err))
 	}
 
-	// Load tenant-to-account mapping from configuration
+	// Load tenant-to-account mapping from configuration (permanent error if invalid)
 	tenantAccountMap, err := domain.ParseTenantAccountMapping(config.TenantAccountMapping)
 	if err != nil {
-		return fmt.Errorf("failed to load tenant account mapping: %w", err)
+		return bootstrap.Permanent(fmt.Errorf("failed to load tenant account mapping: %w", err))
 	}
 
 	// Ensure tenant-zero maps to itself if not explicitly configured

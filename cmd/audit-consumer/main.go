@@ -94,16 +94,28 @@ func main() {
 	}))
 	slog.SetDefault(logger)
 
-	logger.Info("audit-consumer starting",
+	logger.Info("starting audit-consumer service",
 		"version", Version,
 		"commit", Commit,
-		"built", BuildDate)
+		"build_date", BuildDate)
 
-	// Load configuration from environment
+	// Run the service with retry for transient startup errors
+	if err := bootstrap.RunWithRetry(
+		func() error { return run(logger) },
+		bootstrap.WithRetryLogger(logger),
+	); err != nil {
+		logger.Error("service failed to start", "error", err)
+		os.Exit(1)
+	}
+
+	logger.Info("service stopped gracefully")
+}
+
+func run(logger *slog.Logger) error {
+	// Load configuration from environment (permanent error if invalid)
 	config, err := app.LoadConfig()
 	if err != nil {
-		logger.Error("failed to load configuration", "error", err)
-		os.Exit(1)
+		return bootstrap.Permanent(fmt.Errorf("failed to load configuration: %w", err))
 	}
 
 	logger.Info("configuration loaded",
@@ -116,14 +128,12 @@ func main() {
 	ctx := context.Background()
 	container, err := app.NewContainer(ctx, config, logger)
 	if err != nil {
-		logger.Error("failed to initialize container", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to initialize container: %w", err)
 	}
 
 	// Start audit consumer
 	if err := container.AuditConsumer.Start(config.Kafka.Topic); err != nil {
-		logger.Error("failed to start audit consumer", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to start audit consumer: %w", err)
 	}
 	logger.Info("audit consumer started", "topic", config.Kafka.Topic)
 
@@ -136,22 +146,30 @@ func main() {
 	server.Handler = mux
 
 	// Start server in background
+	serverErrors := make(chan error, 1)
 	go func() {
 		logger.Info("starting HTTP server", "port", config.Service.Port)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("failed to start HTTP server", "error", err)
-			os.Exit(1)
+			serverErrors <- fmt.Errorf("HTTP server error: %w", err)
 		}
 	}()
 
-	// Wait for interrupt signal
+	// Wait for interrupt signal or server error
 	sigChan, signalCleanup := bootstrap.SignalHandler()
-	<-sigChan
+	defer signalCleanup()
 
-	logger.Info("shutdown signal received, starting graceful shutdown...")
+	select {
+	case sig := <-sigChan:
+		logger.Info("received signal", "signal", sig)
+	case err := <-serverErrors:
+		return err
+	}
 
-	// Graceful shutdown with timeout
+	// Graceful shutdown
+	logger.Info("shutting down...")
+
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), config.Service.GracefulShutdownTimeout)
+	defer cancel()
 
 	// Shutdown HTTP server
 	if err := server.Shutdown(shutdownCtx); err != nil {
@@ -159,18 +177,9 @@ func main() {
 	}
 
 	// Close container resources (includes consumer and database)
-	closeErr := container.Close(shutdownCtx)
-
-	// Cancel context after all shutdown operations complete
-	cancel()
-
-	// Clean up signal handler before potential exit
-	signalCleanup()
-
-	if closeErr != nil {
-		logger.Error("container close error", "error", closeErr)
-		os.Exit(1)
+	if err := container.Close(shutdownCtx); err != nil {
+		logger.Error("container close error", "error", err)
 	}
 
-	logger.Info("shutdown complete")
+	return nil
 }

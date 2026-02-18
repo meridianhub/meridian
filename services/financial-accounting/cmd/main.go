@@ -80,9 +80,12 @@ func main() {
 	environment := env.GetEnvOrDefault("ENVIRONMENT", "production")
 	logger.Info("service environment configured", "environment", environment)
 
-	// Run the service
-	if err := run(logger); err != nil {
-		logger.Error("service failed", "error", err)
+	// Run the service with retry for transient startup errors
+	if err := bootstrap.RunWithRetry(
+		func() error { return run(logger) },
+		bootstrap.WithRetryLogger(logger),
+	); err != nil {
+		logger.Error("service failed to start", "error", err)
 		os.Exit(1)
 	}
 
@@ -151,7 +154,7 @@ func run(logger *slog.Logger) error {
 			if env.IsProduction() {
 				logger.Error("CRITICAL: Failed to create Kafka producer in production - failing fast",
 					"error", err)
-				return fmt.Errorf("%w: %w", ErrKafkaRequiredInProduction, err)
+				return bootstrap.Permanent(fmt.Errorf("%w: %w", ErrKafkaRequiredInProduction, err))
 			}
 			logger.Warn("failed to create Kafka producer for outbox worker - DEVELOPMENT ONLY",
 				"error", err,
@@ -167,7 +170,7 @@ func run(logger *slog.Logger) error {
 		if env.IsProduction() {
 			logger.Error("CRITICAL: Kafka unavailable in production - failing fast",
 				"reason", "KAFKA_BOOTSTRAP_SERVERS not set")
-			return ErrKafkaRequiredInProduction
+			return bootstrap.Permanent(ErrKafkaRequiredInProduction)
 		}
 		logger.Warn("outbox worker disabled - DEVELOPMENT ONLY",
 			"reason", "KAFKA_BOOTSTRAP_SERVERS not set",
@@ -185,15 +188,15 @@ func run(logger *slog.Logger) error {
 			"poll_interval", workerConfig.PollInterval)
 	}
 
-	// Validate bank cash account ID is configured
+	// Validate bank cash account ID is configured (permanent config error)
 	bankCashAccountID := env.GetEnvOrDefault("BANK_CASH_ACCOUNT_ID", "")
 	if bankCashAccountID == "" {
-		return ErrBankCashAccountIDRequired
+		return bootstrap.Permanent(ErrBankCashAccountIDRequired)
 	}
 
-	// Validate UUID format
+	// Validate UUID format (permanent config error)
 	if _, err := uuid.Parse(bankCashAccountID); err != nil {
-		return fmt.Errorf("%w: %w", ErrBankCashAccountIDInvalid, err)
+		return bootstrap.Permanent(fmt.Errorf("%w: %w", ErrBankCashAccountIDInvalid, err))
 	}
 
 	logger.Info("bank cash account configured",
@@ -253,7 +256,7 @@ func run(logger *slog.Logger) error {
 		if env.IsProduction() {
 			logger.Error("CRITICAL: Redis unavailable in production - failing fast",
 				"error", err)
-			return fmt.Errorf("%w: %w", ErrRedisRequiredInProduction, err)
+			return bootstrap.Permanent(fmt.Errorf("%w: %w", ErrRedisRequiredInProduction, err))
 		}
 		// Non-fatal in non-production: fall back to noop service for development/testing
 		logger.Warn("using noop idempotency service - DEVELOPMENT ONLY",
