@@ -142,23 +142,16 @@ func (s *PostgresService) MarkPending(ctx context.Context, key Key, ttl time.Dur
 	}
 
 	if tag.RowsAffected() == 0 {
-		// Key already existed - check if it's expired
-		var expiresAtExisting *time.Time
-		err := s.pool.QueryRow(ctx,
-			`SELECT expires_at FROM _idempotency_keys WHERE key = $1`, dbKey,
-		).Scan(&expiresAtExisting)
+		// Key already existed - atomically replace it only if it's expired.
+		// The WHERE clause guards against race conditions where another writer
+		// refreshes the row between our INSERT and this UPDATE.
+		_, err = s.pool.Exec(ctx,
+			`UPDATE _idempotency_keys SET status = $1, expires_at = $2, result = NULL, token = NULL, created_at = CURRENT_TIMESTAMP
+			 WHERE key = $3 AND expires_at IS NOT NULL AND expires_at < NOW()`,
+			string(StatusPending), expiresAt, dbKey,
+		)
 		if err != nil {
-			return fmt.Errorf("failed to check existing key: %w", err)
-		}
-		// If existing key is expired, replace it
-		if expiresAtExisting != nil && time.Now().After(*expiresAtExisting) {
-			_, err = s.pool.Exec(ctx,
-				`UPDATE _idempotency_keys SET status = $1, expires_at = $2, result = NULL, token = NULL, created_at = CURRENT_TIMESTAMP WHERE key = $3`,
-				string(StatusPending), expiresAt, dbKey,
-			)
-			if err != nil {
-				return fmt.Errorf("failed to replace expired key: %w", err)
-			}
+			return fmt.Errorf("failed to replace expired key: %w", err)
 		}
 	}
 
@@ -393,8 +386,12 @@ func (s *PostgresService) IsHeld(ctx context.Context, key Key) (bool, error) {
 }
 
 // StartCleanup runs a background goroutine that periodically deletes expired rows.
-// It stops when the context is cancelled.
+// It stops when the context is cancelled. If cleanupInterval is zero or negative,
+// this is a no-op.
 func (s *PostgresService) StartCleanup(ctx context.Context) {
+	if s.cleanupInterval <= 0 {
+		return
+	}
 	ticker := time.NewTicker(s.cleanupInterval)
 	go func() {
 		defer ticker.Stop()
