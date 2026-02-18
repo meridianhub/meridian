@@ -62,8 +62,11 @@ func NewContainer(ctx context.Context, config *Config, logger *slog.Logger) (*Co
 		return nil, fmt.Errorf("failed to initialize database: %w", err)
 	}
 
+	// Redis is optional - log warning and continue if unavailable.
+	// Callers should check RedisClient for nil before use.
 	if err := container.initializeRedis(ctx); err != nil {
-		return nil, fmt.Errorf("failed to initialize redis: %w", err)
+		logger.Warn("Redis not available at startup, features requiring Redis will be disabled until it connects",
+			"error", err)
 	}
 
 	container.initializeAuditPublisher()

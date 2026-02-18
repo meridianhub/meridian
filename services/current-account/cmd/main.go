@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
@@ -31,6 +32,7 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/ports"
+	"github.com/redis/go-redis/v9"
 	"github.com/sony/gobreaker/v2"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
@@ -100,18 +102,27 @@ func run(logger *slog.Logger) error {
 	withdrawalRepo := persistence.NewWithdrawalRepository(db)
 	outboxRepo := events.NewPostgresOutboxRepository(db)
 
-	// Create Redis client and idempotency service (optional - graceful degradation)
-	var idempotencyService idempotency.Service
+	// Create Redis client lazily (optional - graceful degradation during startup).
+	// LazyClient resolves Redis in a background goroutine with exponential backoff.
+	// The idempotency service degrades gracefully (no-op) until Redis connects.
 	redisConfig := bootstrap.DefaultRedisConfig()
 	redisConfig.Logger = logger
-	redisClient, err := bootstrap.NewRedisClient(ctx, redisConfig)
-	if err != nil {
-		logger.Warn("Redis not available, idempotency protection disabled",
-			"error", err)
-	} else {
-		idempotencyService = idempotency.NewRedisService(redisClient)
-		logger.Info("idempotency protection enabled with Redis")
-	}
+	lazyRedis := bootstrap.NewLazyClient(ctx, "redis",
+		func(ctx context.Context) (*redis.Client, func(), error) {
+			client, err := bootstrap.NewRedisClient(ctx, redisConfig)
+			if err != nil {
+				return nil, nil, err
+			}
+			return client, func() {
+				if err := client.Close(); err != nil {
+					logger.Error("failed to close Redis client", "error", err)
+				}
+				logger.Info("Redis client closed")
+			}, nil
+		},
+		bootstrap.WithLazyLogger(logger),
+	)
+	idempotencyService := idempotency.NewLazyService(lazyRedis)
 
 	// Get Kubernetes namespace from environment (defaults to "default")
 	namespace := env.GetEnvOrDefault("K8S_NAMESPACE", "default")
@@ -139,36 +150,59 @@ func run(logger *slog.Logger) error {
 
 	logger.Info("service initialized with external clients")
 
-	// Initialize Kafka producer for outbox worker (optional - graceful degradation)
+	// Initialize Kafka producer lazily for outbox worker (optional - graceful degradation)
 	var outboxWorker *events.Worker
 	kafkaBootstrapServers := env.GetEnvOrDefault("KAFKA_BOOTSTRAP_SERVERS", "")
 	if kafkaBootstrapServers != "" {
-		// Initialize Kafka producer
-		kafkaProducer, err := kafka.NewProtoProducer(kafka.ProducerConfig{
-			BootstrapServers: kafkaBootstrapServers,
-			ClientID:         "current-account-outbox-worker",
-			Acks:             "all", // Wait for full replication for reliability
-			Retries:          5,
-			Compression:      "snappy",
-		})
-		if err != nil {
-			logger.Warn("failed to initialize Kafka producer, outbox pattern disabled",
-				"error", err)
-		} else {
-			// Initialize outbox worker
-			outboxWorker = events.NewWorker(
-				outboxRepo,
-				kafkaProducer,
-				events.DefaultWorkerConfig("current-account"),
-				logger.With("component", "outbox_worker"),
-			)
+		lazyKafka := bootstrap.NewLazyClient(ctx, "kafka-producer",
+			func(_ context.Context) (*kafka.ProtoProducer, func(), error) {
+				producer, err := kafka.NewProtoProducer(kafka.ProducerConfig{
+					BootstrapServers: kafkaBootstrapServers,
+					ClientID:         "current-account-outbox-worker",
+					Acks:             "all",
+					Retries:          5,
+					Compression:      "snappy",
+				})
+				if err != nil {
+					return nil, nil, err
+				}
+				return producer, func() { //nolint:contextcheck // FlushWithTimeout manages its own timeout
+					logger.Info("flushing and closing Kafka producer...")
+					if remaining := producer.FlushWithTimeout(5000); remaining > 0 {
+						logger.Warn("some Kafka messages not delivered before close", "remaining", remaining)
+					}
+					producer.Close()
+					logger.Info("Kafka producer closed")
+				}, nil
+			},
+			bootstrap.WithLazyLogger(logger),
+		)
 
-			// Start outbox worker in background
-			outboxWorker.Start(ctx)
-			logger.Info("outbox worker started",
-				"kafka_brokers", kafkaBootstrapServers,
-				"poll_interval", "5s")
-		}
+		// Start outbox worker that will use the lazy Kafka producer once available
+		// The worker polls for pending outbox events; Kafka availability is checked at publish time
+		go func() {
+			// Wait for Kafka to become available before starting the worker
+			for {
+				producer, err := lazyKafka.Get()
+				if err == nil {
+					outboxWorker = events.NewWorker(
+						outboxRepo,
+						producer,
+						events.DefaultWorkerConfig("current-account"),
+						logger.With("component", "outbox_worker"),
+					)
+					outboxWorker.Start(ctx)
+					logger.Info("outbox worker started",
+						"kafka_brokers", kafkaBootstrapServers)
+					return
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(1 * time.Second):
+				}
+			}
+		}()
 	} else {
 		logger.Warn("KAFKA_BOOTSTRAP_SERVERS not configured, outbox pattern disabled")
 	}
@@ -253,16 +287,17 @@ func run(logger *slog.Logger) error {
 		})
 	}
 
-	if redisClient != nil {
-		orchestrator.AddCleanup(func() error {
-			if err := redisClient.Close(); err != nil {
-				logger.Error("failed to close Redis client", "error", err)
-				return err
+	// Close lazily-resolved Redis client if it was resolved
+	orchestrator.AddCleanup(func() error {
+		if client, err := lazyRedis.Get(); err == nil {
+			if closeErr := client.Close(); closeErr != nil {
+				logger.Error("failed to close Redis client", "error", closeErr)
+				return closeErr
 			}
 			logger.Info("Redis client closed")
-			return nil
-		})
-	}
+		}
+		return nil
+	})
 	orchestrator.AddCleanup(func() error {
 		bootstrap.CloseDatabase(db, logger)
 		return nil

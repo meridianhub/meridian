@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
@@ -25,8 +26,10 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/events"
+	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -130,8 +133,6 @@ func run(logger *slog.Logger) error {
 	logger.Info("dependency container initialized")
 
 	// Initialize and start event outbox worker (if Kafka enabled)
-	// Worker config values (batch_size, poll_interval, max_retries) could be made configurable
-	// via environment variables for production tuning.
 	var outboxWorker *events.Worker
 	var workerCancel context.CancelFunc
 	if container.KafkaProducer() != nil {
@@ -146,8 +147,59 @@ func run(logger *slog.Logger) error {
 		// Start worker in background
 		var workerCtx context.Context
 		workerCtx, workerCancel = context.WithCancel(context.Background())
-		defer workerCancel() // Safety net; primary shutdown goes through explicit cancellation
+		defer workerCancel()
 		outboxWorker.Start(workerCtx)
+	} else if config.Kafka.Enabled {
+		// Kafka is enabled but producer was not available at startup - use lazy resolution
+		lazyKafka := bootstrap.NewLazyClient(ctx, "kafka-producer",
+			func(_ context.Context) (*kafka.ProtoProducer, func(), error) {
+				producerConfig := kafka.ProducerConfig{
+					BootstrapServers: strings.Join(config.Kafka.Brokers, ","),
+					ClientID:         "position-keeping-service",
+					Acks:             "all",
+					Retries:          3,
+					Compression:      "snappy",
+				}
+				producer, err := kafka.NewProtoProducer(producerConfig)
+				if err != nil {
+					return nil, nil, err
+				}
+				return producer, func() { //nolint:contextcheck // FlushWithTimeout manages its own timeout
+					if remaining := producer.FlushWithTimeout(5000); remaining > 0 {
+						logger.Warn("some Kafka messages not delivered before close", "remaining", remaining)
+					}
+					producer.Close()
+				}, nil
+			},
+			bootstrap.WithLazyLogger(logger),
+		)
+
+		// Start outbox worker once Kafka producer resolves
+		go func() {
+			for {
+				producer, err := lazyKafka.Get()
+				if err == nil {
+					workerConfig := events.DefaultWorkerConfig("position-keeping")
+					outboxWorker = events.NewWorker(
+						container.OutboxRepository,
+						producer,
+						workerConfig,
+						logger,
+					)
+					var workerCtx context.Context
+					workerCtx, workerCancel = context.WithCancel(context.Background())
+					outboxWorker.Start(workerCtx) //nolint:contextcheck // Worker needs independent context for shutdown control
+					logger.Info("outbox worker started after lazy Kafka resolution")
+					return
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(1 * time.Second):
+				}
+			}
+		}()
+		logger.Info("outbox worker pending lazy Kafka producer resolution")
 	} else {
 		logger.Info("event outbox worker disabled (kafka not configured)")
 	}
@@ -184,11 +236,34 @@ func run(logger *slog.Logger) error {
 		logger.Info("compaction worker disabled")
 	}
 
-	// Create idempotency service
+	// Create idempotency service with lazy Redis resolution.
+	// If Redis was available at startup, use it directly.
+	// If not, use LazyClient to resolve it in the background.
 	var idempotencySvc idempotency.Service
 	if container.RedisClient != nil {
 		idempotencySvc = idempotency.NewRedisService(container.RedisClient)
 		logger.Info("idempotency service enabled with Redis")
+	} else if config.Redis.Enabled {
+		// Redis is enabled but was not available at startup - use lazy resolution
+		lazyRedis := bootstrap.NewLazyClient(ctx, "redis",
+			func(ctx context.Context) (*redis.Client, func(), error) {
+				client := redis.NewClient(&redis.Options{
+					Addr:            config.Redis.Address,
+					Password:        config.Redis.Password,
+					DB:              config.Redis.DB,
+					PoolSize:        config.Redis.PoolSize,
+					ConnMaxIdleTime: config.Redis.ConnMaxIdleTime,
+				})
+				if err := client.Ping(ctx).Err(); err != nil {
+					_ = client.Close()
+					return nil, nil, err
+				}
+				return client, func() { _ = client.Close() }, nil
+			},
+			bootstrap.WithLazyLogger(logger),
+		)
+		idempotencySvc = idempotency.NewLazyService(lazyRedis)
+		logger.Info("idempotency service using lazy Redis resolution")
 	} else {
 		logger.Info("idempotency service disabled (Redis not configured)")
 	}
