@@ -186,7 +186,9 @@ func run(logger *slog.Logger) error {
 			"hint", "set PARTY_SERVICE_ENABLED=true to enable party registration")
 	}
 
-	// Initialize Redis client and slug cache (optional - skipped if REDIS_ENABLED is not "true")
+	// Initialize Redis client and slug cache (optional).
+	// If Redis is not available at startup, slug caching is disabled until next restart.
+	// The slug cache is a performance optimization; the service operates correctly without it.
 	var slugCache *service.SlugCache
 	redisEnabled := env.GetEnvOrDefault("REDIS_ENABLED", envValueTrue) == envValueTrue
 	if redisEnabled {
@@ -194,16 +196,18 @@ func run(logger *slog.Logger) error {
 		redisConfig.Logger = logger
 		redisClient, err := bootstrap.NewRedisClient(ctx, redisConfig)
 		if err != nil {
-			return fmt.Errorf("failed to create Redis client: %w", err)
+			logger.Warn("Redis not available at startup, slug caching disabled",
+				"error", err,
+				"hint", "slug caching will be available after service restart when Redis is reachable")
+		} else {
+			defer func() {
+				if err := redisClient.Close(); err != nil {
+					logger.Error("failed to close Redis client", "error", err)
+				}
+			}()
+			slugCache = service.NewSlugCache(redisClient)
+			logger.Info("slug cache initialized with Redis backend")
 		}
-		defer func() {
-			if err := redisClient.Close(); err != nil {
-				logger.Error("failed to close Redis client", "error", err)
-			}
-		}()
-
-		slugCache = service.NewSlugCache(redisClient)
-		logger.Info("slug cache initialized with Redis backend")
 	} else {
 		logger.Warn("Redis not enabled - slug caching disabled",
 			"hint", "set REDIS_ENABLED=true to enable slug caching")
