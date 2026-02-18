@@ -208,9 +208,6 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 	outboxPublisher := events.NewOutboxPublisher("unified")
 	outboxRepo := events.NewPostgresOutboxRepository(db)
 
-	// Local lock manager (from lock.go in this package)
-	_ = newLocalLockManager()
-
 	// ─── Register All Services ──────────────────────────────────────────
 
 	if err := registerServices(grpcServer, db, pgxPool, idempotencySvc, faEventPublisher, pkEventPublisher, outboxPublisher, outboxRepo, logger); err != nil {
@@ -484,10 +481,9 @@ func wirePositionKeeping(
 func wireForecasting(server *grpc.Server, pool *pgxpool.Pool, logger *slog.Logger) error {
 	repo := forecastingpersistence.NewStrategyRepository(pool)
 
-	// Create a no-op MDS adapter (market-information client not wired via gRPC in unified mode)
 	runner, err := forecastingstarlark.NewForecastRunner(forecastingstarlark.ForecastRunnerConfig{
-		MISClient: nil,
-		RefData:   nil,
+		MISClient: &noopMISClient{},
+		RefData:   &noopRefDataClient{},
 		Logger:    logger,
 	})
 	if err != nil {
@@ -612,4 +608,18 @@ func (p *noopFAPublisher) Publish(_ context.Context, _ financialaccountingservic
 
 func (p *noopFAPublisher) PublishBatch(_ context.Context, _ []financialaccountingservice.DomainEvent) error {
 	return nil
+}
+
+// noopMISClient is a no-op market information client for forecasting (no inter-service gRPC in dev).
+type noopMISClient struct{}
+
+func (c *noopMISClient) FetchObservations(_ context.Context, _ string, _ time.Time) ([]forecastingstarlark.Observation, error) {
+	return []forecastingstarlark.Observation{}, nil
+}
+
+// noopRefDataClient is a no-op reference data client for forecasting (no inter-service gRPC in dev).
+type noopRefDataClient struct{}
+
+func (c *noopRefDataClient) GetNodeByResolutionKey(_ context.Context, _, _ string) (*forecastingstarlark.ReferenceData, error) {
+	return &forecastingstarlark.ReferenceData{}, nil
 }
