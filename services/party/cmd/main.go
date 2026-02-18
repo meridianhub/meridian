@@ -234,12 +234,13 @@ func run(logger *slog.Logger) error {
 
 		// Register provider-specific webhook routes before the generic catch-all.
 		// For Stripe, we use the StripeWebhookAdapter which validates the Stripe-Signature
-		// header and translates the Stripe event format to our generic webhook format.
+		// header (using the Stripe endpoint signing secret) and translates the Stripe event
+		// format to our generic webhook format (signed with the generic HMAC secret).
 		if strings.ToLower(verificationCfg.Provider) == "stripe" {
 			stripeAdapter, err := httpAdapter.NewStripeWebhookAdapter(
 				httpAdapter.StripeWebhookAdapterConfig{
 					InnerHandler:    webhookHandler,
-					WebhookSecret:   []byte(verificationCfg.WebhookSecret),
+					WebhookSecret:   []byte(verificationCfg.StripeWebhookSecret),
 					InnerHMACSecret: []byte(verificationCfg.WebhookSecret),
 					Logger:          logger,
 				},

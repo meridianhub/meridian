@@ -195,10 +195,11 @@ func TestNewProviderWithOptions_NonMockProvider_ReturnsError(t *testing.T) {
 
 func TestNewProvider_StripeProvider(t *testing.T) {
 	cfg := &config.VerificationConfig{
-		Provider:       "stripe",
-		WebhookSecret:  "webhook-secret",
-		WebhookURL:     "https://example.com/webhook",
-		ProviderConfig: map[string]string{"api_key": "sk_test_key"},
+		Provider:            "stripe",
+		WebhookSecret:       "webhook-secret",
+		StripeWebhookSecret: "whsec_test_endpoint_secret",
+		WebhookURL:          "https://example.com/webhook",
+		ProviderConfig:      map[string]string{"api_key": "sk_test_key"},
 	}
 
 	provider, err := NewProvider(cfg)
@@ -212,10 +213,11 @@ func TestNewProvider_StripeProvider(t *testing.T) {
 
 func TestNewProviderWithOptions_StripeProvider(t *testing.T) {
 	cfg := &config.VerificationConfig{
-		Provider:       "stripe",
-		WebhookSecret:  "webhook-secret",
-		WebhookURL:     "https://example.com/webhook",
-		ProviderConfig: map[string]string{"api_key": "sk_test_key"},
+		Provider:            "stripe",
+		WebhookSecret:       "webhook-secret",
+		StripeWebhookSecret: "whsec_test_endpoint_secret",
+		WebhookURL:          "https://example.com/webhook",
+		ProviderConfig:      map[string]string{"api_key": "sk_test_key"},
 	}
 
 	provider, err := NewProviderWithOptions(cfg, DefaultProviderOptions())

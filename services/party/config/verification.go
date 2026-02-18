@@ -18,21 +18,33 @@ import (
 // ProviderConfig contains provider-specific settings like API keys and endpoints.
 // Required keys vary by provider.
 //
-// WebhookSecret is the HMAC secret used to verify incoming webhook signatures.
-// This prevents malicious actors from spoofing verification callbacks.
+// WebhookSecret is the HMAC secret used to verify incoming webhook signatures
+// for the generic webhook handler and as the inner HMAC secret for the Stripe
+// adapter. This prevents malicious actors from spoofing verification callbacks.
+//
+// StripeWebhookSecret is the Stripe endpoint signing secret (whsec_ prefixed)
+// used exclusively to validate the Stripe-Signature header on inbound Stripe
+// webhooks. Required when provider is "stripe".
 //
 // WebhookURL is the publicly accessible URL where providers send verification
 // callbacks. Required for production deployments.
 type VerificationConfig struct {
-	// Provider is the verification provider to use ("mock", "jumio", "onfido").
+	// Provider is the verification provider to use ("mock", "jumio", "onfido", "stripe").
 	Provider string
 
 	// ProviderConfig contains provider-specific configuration.
 	// For jumio/onfido: "api_key", "api_secret", "base_url" (optional).
+	// For stripe: "api_key", "base_url" (optional), "stripe_account" (optional).
 	ProviderConfig map[string]string
 
-	// WebhookSecret is the HMAC secret for validating webhook signatures.
+	// WebhookSecret is the HMAC secret for validating webhook signatures on the
+	// generic handler and as the inner HMAC secret for the Stripe adapter.
 	WebhookSecret string
+
+	// StripeWebhookSecret is the Stripe endpoint signing secret (whsec_ prefixed)
+	// used to validate inbound Stripe webhook signatures.
+	// Loaded from STRIPE_WEBHOOK_SECRET. Required when provider is "stripe".
+	StripeWebhookSecret string
 
 	// WebhookURL is the public URL for provider callbacks (e.g., "https://api.example.com/webhooks/verification").
 	WebhookURL string
@@ -46,6 +58,7 @@ var (
 	ErrEmptyWebhookURLForNonMock    = errors.New("webhook URL is required for non-mock providers")
 	ErrMissingProviderAPIKey        = errors.New("api_key is required in provider config")
 	ErrMissingProviderAPISecret     = errors.New("api_secret is required in provider config")
+	ErrMissingStripeWebhookSecret   = errors.New("stripe_webhook_secret is required when provider is stripe (set STRIPE_WEBHOOK_SECRET)")
 	ErrMockProviderInProduction     = errors.New("mock provider not allowed in production")
 	ErrWebhookHTTPSRequired         = errors.New("webhook URL must use HTTPS in production")
 	ErrWebhookSecretTooShort        = errors.New("webhook secret must be at least 32 characters in production")
@@ -60,13 +73,17 @@ var SupportedProviders = []string{"mock", "jumio", "onfido", "stripe"}
 //   - VERIFICATION_PROVIDER: The provider to use (required)
 //
 // Conditional environment variables (required for non-mock providers):
-//   - VERIFICATION_WEBHOOK_SECRET: HMAC secret for webhook validation
+//   - VERIFICATION_WEBHOOK_SECRET: HMAC secret for generic webhook validation
 //   - VERIFICATION_WEBHOOK_URL: Public webhook callback URL
 //
 // Provider-specific environment variables:
 //   - VERIFICATION_API_KEY: Provider API key
-//   - VERIFICATION_API_SECRET: Provider API secret
+//   - VERIFICATION_API_SECRET: Provider API secret (not required for Stripe)
 //   - VERIFICATION_BASE_URL: Provider base URL (optional, provider default used if not set)
+//
+// Stripe-specific environment variables:
+//   - STRIPE_WEBHOOK_SECRET: Stripe endpoint signing secret (whsec_ prefixed).
+//     Required when VERIFICATION_PROVIDER=stripe.
 func LoadVerificationConfig() (*VerificationConfig, error) {
 	providerConfig := make(map[string]string)
 
@@ -82,10 +99,11 @@ func LoadVerificationConfig() (*VerificationConfig, error) {
 	}
 
 	cfg := &VerificationConfig{
-		Provider:       strings.TrimSpace(os.Getenv("VERIFICATION_PROVIDER")),
-		ProviderConfig: providerConfig,
-		WebhookSecret:  strings.TrimSpace(os.Getenv("VERIFICATION_WEBHOOK_SECRET")),
-		WebhookURL:     strings.TrimSpace(os.Getenv("VERIFICATION_WEBHOOK_URL")),
+		Provider:            strings.TrimSpace(os.Getenv("VERIFICATION_PROVIDER")),
+		ProviderConfig:      providerConfig,
+		WebhookSecret:       strings.TrimSpace(os.Getenv("VERIFICATION_WEBHOOK_SECRET")),
+		StripeWebhookSecret: strings.TrimSpace(os.Getenv("STRIPE_WEBHOOK_SECRET")),
+		WebhookURL:          strings.TrimSpace(os.Getenv("VERIFICATION_WEBHOOK_URL")),
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -126,6 +144,11 @@ func (c *VerificationConfig) Validate() error {
 	// Stripe only needs api_key; other providers require api_secret as well
 	if strings.ToLower(c.Provider) != "stripe" && c.ProviderConfig["api_secret"] == "" {
 		return ErrMissingProviderAPISecret
+	}
+
+	// Stripe requires its own endpoint signing secret (distinct from the generic HMAC secret)
+	if strings.ToLower(c.Provider) == "stripe" && c.StripeWebhookSecret == "" {
+		return ErrMissingStripeWebhookSecret
 	}
 
 	return nil

@@ -89,11 +89,13 @@ func TestStripeProvider_FullLifecycleViaFactory(t *testing.T) {
 	server := newFakeStripeServer(t)
 	defer server.Close()
 
-	// Build config pointing at the fake server, with only api_key (no api_secret)
+	// Build config pointing at the fake server, with only api_key (no api_secret).
+	// StripeWebhookSecret is distinct from the generic WebhookSecret.
 	cfg := &config.VerificationConfig{
-		Provider:      "stripe",
-		WebhookSecret: "webhook-secret",
-		WebhookURL:    "https://example.com/webhooks/verification",
+		Provider:            "stripe",
+		WebhookSecret:       "generic-hmac-secret",
+		StripeWebhookSecret: "whsec_test_endpoint_secret",
+		WebhookURL:          "https://example.com/webhooks/verification",
 		ProviderConfig: map[string]string{
 			"api_key":  "sk_test_fake_key",
 			"base_url": server.URL,
@@ -148,9 +150,10 @@ func TestStripeProvider_GetVerificationStatus_NotFound(t *testing.T) {
 	defer server.Close()
 
 	cfg := &config.VerificationConfig{
-		Provider:      "stripe",
-		WebhookSecret: "webhook-secret",
-		WebhookURL:    "https://example.com/webhooks/verification",
+		Provider:            "stripe",
+		WebhookSecret:       "generic-hmac-secret",
+		StripeWebhookSecret: "whsec_test_endpoint_secret",
+		WebhookURL:          "https://example.com/webhooks/verification",
 		ProviderConfig: map[string]string{
 			"api_key":  "sk_test_fake_key",
 			"base_url": server.URL,
@@ -170,9 +173,10 @@ func TestStripeProvider_FactoryWithOptions(t *testing.T) {
 	defer server.Close()
 
 	cfg := &config.VerificationConfig{
-		Provider:      "stripe",
-		WebhookSecret: "webhook-secret",
-		WebhookURL:    "https://example.com/webhooks/verification",
+		Provider:            "stripe",
+		WebhookSecret:       "generic-hmac-secret",
+		StripeWebhookSecret: "whsec_test_endpoint_secret",
+		WebhookURL:          "https://example.com/webhooks/verification",
 		ProviderConfig: map[string]string{
 			"api_key":  "sk_test_fake_key",
 			"base_url": server.URL,
