@@ -133,9 +133,10 @@ func run(logger *slog.Logger) error {
 	logger.Info("dependency container initialized")
 
 	// Initialize and start event outbox worker (if Kafka enabled).
-	// The outbox shutdown function is communicated back via channel to avoid data races
-	// when the worker is started lazily inside a goroutine.
+	// Channels communicate the worker shutdown and Kafka cleanup functions back to the
+	// main goroutine to avoid data races when started lazily inside a goroutine.
 	outboxShutdownCh := make(chan func(), 1)
+	kafkaCleanupCh := make(chan func(), 1)
 	if container.KafkaProducer() != nil {
 		workerConfig := events.DefaultWorkerConfig("position-keeping")
 		w := events.NewWorker(
@@ -176,6 +177,9 @@ func run(logger *slog.Logger) error {
 				}, nil
 			},
 			bootstrap.WithLazyLogger(logger),
+			bootstrap.WithLazyOnCleanup(func(cleanup func()) {
+				kafkaCleanupCh <- cleanup
+			}),
 		)
 
 		// Start outbox worker once Kafka producer resolves.
@@ -539,7 +543,7 @@ func run(logger *slog.Logger) error {
 	// Graceful shutdown (runs for both signal and error paths)
 	logger.Info("shutting down servers...")
 
-	// Shutdown outbox worker before stopping servers.
+	// Shutdown outbox worker before stopping servers (worker must stop before producer closes).
 	// The shutdown function arrives via channel once the goroutine has started the worker.
 	select {
 	case shutdownFn := <-outboxShutdownCh:
@@ -548,6 +552,14 @@ func run(logger *slog.Logger) error {
 		logger.Info("event outbox worker stopped")
 	default:
 		// Worker never started (Kafka not resolved yet) - nothing to stop
+	}
+
+	// Close the lazily-resolved Kafka producer (flush buffered records).
+	select {
+	case cleanupFn := <-kafkaCleanupCh:
+		cleanupFn()
+	default:
+		// Kafka never resolved - nothing to close
 	}
 
 	// Shutdown compaction worker

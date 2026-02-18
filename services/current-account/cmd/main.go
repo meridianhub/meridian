@@ -151,8 +151,10 @@ func run(logger *slog.Logger) error {
 	logger.Info("service initialized with external clients")
 
 	// Initialize Kafka producer lazily for outbox worker (optional - graceful degradation).
-	// The outbox worker stop function is communicated back via channel to avoid data races.
+	// Channels communicate the outbox stop function and Kafka cleanup function back to the
+	// main goroutine to avoid data races.
 	outboxStopCh := make(chan func(), 1)
+	kafkaCleanupCh := make(chan func(), 1)
 	kafkaBootstrapServers := env.GetEnvOrDefault("KAFKA_BOOTSTRAP_SERVERS", "")
 	if kafkaBootstrapServers != "" {
 		lazyKafka := bootstrap.NewLazyClient(ctx, "kafka-producer",
@@ -177,6 +179,9 @@ func run(logger *slog.Logger) error {
 				}, nil
 			},
 			bootstrap.WithLazyLogger(logger),
+			bootstrap.WithLazyOnCleanup(func(cleanup func()) {
+				kafkaCleanupCh <- cleanup
+			}),
 		)
 
 		// Start outbox worker that will use the lazy Kafka producer once available.
@@ -268,8 +273,17 @@ func run(logger *slog.Logger) error {
 	// Wait for shutdown signal and orchestrate graceful shutdown
 	orchestrator := bootstrap.NewShutdownOrchestrator(grpcServer, logger)
 
-	// Register outbox worker cleanup.
-	// The stop function arrives via channel once the goroutine has started the worker.
+	// Register outbox worker and Kafka producer cleanup (LIFO: producer closes after worker stops).
+	// The stop/cleanup functions arrive via channels once the background goroutine resolves Kafka.
+	orchestrator.AddCleanup(func() error {
+		select {
+		case cleanupFn := <-kafkaCleanupCh:
+			cleanupFn()
+		default:
+			// Kafka never resolved - nothing to close
+		}
+		return nil
+	})
 	orchestrator.AddCleanup(func() error {
 		select {
 		case stopFn := <-outboxStopCh:
