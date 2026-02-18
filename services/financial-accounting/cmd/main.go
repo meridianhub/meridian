@@ -249,25 +249,41 @@ func run(logger *slog.Logger) error {
 		Logger:            logger,
 	})
 
-	// Create Redis client and idempotency service
+	// Create Redis client and idempotency service.
+	// In production: fail fast if Redis is unavailable (idempotency is critical).
+	// In non-production: use LazyClient for graceful degradation during startup.
 	var idempotencySvc idempotency.Service
 	var redisSvc *idempotency.RedisService // Keep reference for cleanup worker
+	var lazyRedis *bootstrap.LazyClient[*redis.Client]
 	var usingNoopIdempotency bool
 	redisClient, err := createRedisClient(logger)
 	if err != nil {
-		// Fail fast in production - Redis is required for idempotency guarantees
 		if env.IsProduction() {
 			logger.Error("CRITICAL: Redis unavailable in production - failing fast",
 				"error", err)
 			return bootstrap.Permanent(fmt.Errorf("%w: %w", ErrRedisRequiredInProduction, err))
 		}
-		// Non-fatal in non-production: fall back to noop service for development/testing
-		logger.Warn("using noop idempotency service - DEVELOPMENT ONLY",
+		// Non-production: use lazy Redis resolution instead of noop
+		logger.Warn("Redis not available at startup, using lazy resolution - DEVELOPMENT ONLY",
 			"error", err,
 			"environment", os.Getenv("ENVIRONMENT"))
-		idempotencySvc = newNoopIdempotencyService()
-		usingNoopIdempotency = true
-		// Record degradation metrics
+		lazyRedis = bootstrap.NewLazyClient(ctx, "redis",
+			func(_ context.Context) (*redis.Client, func(), error) {
+				//nolint:contextcheck // createRedisClient manages its own timeout context
+				client, redisErr := createRedisClient(logger)
+				if redisErr != nil {
+					return nil, nil, redisErr
+				}
+				return client, func() {
+					if closeErr := client.Close(); closeErr != nil {
+						logger.Error("failed to close Redis client", "error", closeErr)
+					}
+				}, nil
+			},
+			bootstrap.WithLazyLogger(logger),
+		)
+		idempotencySvc = idempotency.NewLazyService(lazyRedis)
+		usingNoopIdempotency = true // Tracks that we're in degraded mode initially
 		serviceobs.SetNoopIdempotencyActive(true)
 		serviceobs.RecordServiceDegradation(serviceobs.ComponentIdempotency, serviceobs.DegradationReasonStartupFallback)
 	} else {
@@ -520,6 +536,17 @@ func run(logger *slog.Logger) error {
 		logger.Info("idempotency cleanup worker stopped")
 	}
 
+	// Close lazily-resolved Redis client if it was resolved
+	if lazyRedis != nil {
+		if client, getErr := lazyRedis.Get(); getErr == nil {
+			if closeErr := client.Close(); closeErr != nil {
+				logger.Error("failed to close lazy Redis client", "error", closeErr)
+			} else {
+				logger.Info("lazy Redis client closed")
+			}
+		}
+	}
+
 	// Stop outbox worker first (stop processing before closing Kafka producer)
 	if outboxWorker != nil {
 		logger.Info("stopping outbox worker...")
@@ -611,47 +638,6 @@ func createRedisClient(logger *slog.Logger) (*redis.Client, error) {
 		"min_idle_conns", minIdleConns)
 
 	return client, nil
-}
-
-// noopIdempotencyService provides a no-operation implementation of idempotency.Service.
-// This allows the service to start without Redis for development and testing.
-// In production, use idempotency.NewRedisService for proper distributed idempotency.
-type noopIdempotencyService struct{}
-
-func newNoopIdempotencyService() *noopIdempotencyService {
-	return &noopIdempotencyService{}
-}
-
-func (s *noopIdempotencyService) Check(_ context.Context, _ idempotency.Key) (*idempotency.Result, error) {
-	return nil, idempotency.ErrResultNotFound
-}
-
-func (s *noopIdempotencyService) MarkPending(_ context.Context, _ idempotency.Key, _ time.Duration) error {
-	return nil
-}
-
-func (s *noopIdempotencyService) StoreResult(_ context.Context, _ idempotency.Result) error {
-	return nil
-}
-
-func (s *noopIdempotencyService) Delete(_ context.Context, _ idempotency.Key) error {
-	return nil
-}
-
-func (s *noopIdempotencyService) Acquire(_ context.Context, _ idempotency.Key, _ idempotency.LockOptions) error {
-	return nil
-}
-
-func (s *noopIdempotencyService) Release(_ context.Context, _ idempotency.Key, _ string) error {
-	return nil
-}
-
-func (s *noopIdempotencyService) Refresh(_ context.Context, _ idempotency.Key, _ string, _ time.Duration) error {
-	return nil
-}
-
-func (s *noopIdempotencyService) IsHeld(_ context.Context, _ idempotency.Key) (bool, error) {
-	return false, nil
 }
 
 // noopEventPublisher provides a no-operation implementation of service.EventPublisher.
