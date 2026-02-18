@@ -56,7 +56,8 @@ __debug_bin
 *_grpc.pb.go
 
 # Generated OpenAPI specs (regenerate with buf generate)
-api/openapi/
+api/openapi/*
+!api/openapi/swagger-ui.html
 __pycache__/
 # Add current-account binary to .gitignore (use leading / to avoid matching directories)
 /current-account

@@ -29,7 +29,7 @@ GOMOD=$(GOCMD) mod
 GOGET=$(GOCMD) get
 GOFMT=$(GOCMD) fmt
 
-.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-openapi proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt validate-semconv validate-sagas proto-jsonschema validate-manifest-jsonschema validate-manifests control-plane-ci test-control-plane migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-status-all migrate-lint-all migrate-hash-all migrate-apply-orgs migrate-status-orgs docs generate-saga-docs
+.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-openapi proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt validate-semconv validate-sagas proto-jsonschema validate-manifest-jsonschema validate-manifests control-plane-ci test-control-plane migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-status-all migrate-lint-all migrate-hash-all migrate-apply-orgs migrate-status-orgs docs generate-saga-docs swagger-split swagger-ui
 
 # Default target
 all: help
@@ -81,6 +81,10 @@ help:
 	@echo ""
 	@echo "Documentation targets:"
 	@echo "  make generate-saga-docs        - Generate Markdown and JSON Schema docs for saga handlers"
+	@echo ""
+	@echo "API Explorer targets:"
+	@echo "  make swagger-split             - Split monolithic swagger into per-service files"
+	@echo "  make swagger-ui                - Start local Swagger UI server (requires Tilt running)"
 	@echo ""
 	@echo "Variables:"
 	@echo "  VERSION=$(VERSION)"
@@ -210,6 +214,23 @@ proto-openapi: proto
 	else \
 		echo "Note: Run 'make proto' first to generate the spec"; \
 	fi
+
+## swagger-split: Split monolithic swagger into per-service files
+swagger-split:
+	@./scripts/split-swagger.sh
+
+## swagger-ui: Serve Swagger UI for interactive API exploration
+swagger-ui: swagger-split
+	@command -v python3 >/dev/null || { echo "Error: python3 is required for the HTTP server"; exit 1; }
+	@echo ""
+	@echo "Meridian API Explorer"
+	@echo "  Open: http://localhost:8091/swagger-ui.html"
+	@echo "  Gateway: http://localhost:8090"
+	@echo ""
+	@echo "  Use the dropdown to switch between services."
+	@echo "  Press Ctrl+C to stop."
+	@echo ""
+	@cd api/openapi && python3 -m http.server 8091
 
 ## proto-validate: Validate protobuf directory structure and versions
 proto-validate:
