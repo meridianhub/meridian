@@ -184,6 +184,10 @@ func (c *Compiler) CompileEligibility(expression string) (cel.Program, error) {
 		return nil, errors.Join(ErrCompilation, issues.Err())
 	}
 
+	if ast.OutputType() != cel.BoolType {
+		return nil, errors.Join(ErrCompilation, ErrEligibilityNotBool)
+	}
+
 	prg, err := c.eligibilityEnv.Program(ast, cel.CostLimit(CostLimit))
 	if err != nil {
 		return nil, errors.Join(ErrCompilation, err)
