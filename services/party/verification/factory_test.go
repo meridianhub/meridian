@@ -193,6 +193,42 @@ func TestNewProviderWithOptions_NonMockProvider_ReturnsError(t *testing.T) {
 	}
 }
 
+func TestNewProvider_StripeProvider(t *testing.T) {
+	cfg := &config.VerificationConfig{
+		Provider:            "stripe",
+		WebhookSecret:       "webhook-secret",
+		StripeWebhookSecret: "whsec_test_endpoint_secret",
+		WebhookURL:          "https://example.com/webhook",
+		ProviderConfig:      map[string]string{"api_key": "sk_test_key"},
+	}
+
+	provider, err := NewProvider(cfg)
+
+	require.NoError(t, err)
+	require.NotNil(t, provider)
+
+	_, ok := provider.(*StripeIdentityProvider)
+	assert.True(t, ok, "expected *StripeIdentityProvider type")
+}
+
+func TestNewProviderWithOptions_StripeProvider(t *testing.T) {
+	cfg := &config.VerificationConfig{
+		Provider:            "stripe",
+		WebhookSecret:       "webhook-secret",
+		StripeWebhookSecret: "whsec_test_endpoint_secret",
+		WebhookURL:          "https://example.com/webhook",
+		ProviderConfig:      map[string]string{"api_key": "sk_test_key"},
+	}
+
+	provider, err := NewProviderWithOptions(cfg, DefaultProviderOptions())
+
+	require.NoError(t, err)
+	require.NotNil(t, provider)
+
+	_, ok := provider.(*StripeIdentityProvider)
+	assert.True(t, ok, "expected *StripeIdentityProvider type")
+}
+
 func TestNewProviderWithOptions_OnfidoProvider(t *testing.T) {
 	cfg := &config.VerificationConfig{
 		Provider:       "onfido",
