@@ -93,6 +93,12 @@ message ValuationMethodTemplate {
 // AccountTypeDefinition defines the structural and behavioral characteristics
 // of an account type within the ledger system.
 message AccountTypeDefinition {
+  option (buf.validate.message).cel = {
+    id: "conversion_method_fields_together"
+    message: "default_conversion_method_id and default_conversion_method_version must both be set or both be empty"
+    expression: "(this.default_conversion_method_id == '') == (this.default_conversion_method_version == 0)"
+  };
+
   // id is the unique identifier for this definition (UUID).
   string id = 1 [(buf.validate.field).string.uuid = true];
 
@@ -141,7 +147,10 @@ message AccountTypeDefinition {
 
   // default_conversion_method_version is the version of the default conversion method.
   // Must be set together with default_conversion_method_id.
-  int32 default_conversion_method_version = 11 [(buf.validate.field).int32.gte = 0];
+  int32 default_conversion_method_version = 11 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).int32.gte = 1
+  ];
 
   // valuation_methods lists the valuation method templates associated with this account type.
   repeated ValuationMethodTemplate valuation_methods = 12;
@@ -300,11 +309,15 @@ message ListActiveResponse {
 
 // CreateDraftRequest contains the data to create a new account type definition.
 message CreateDraftRequest {
+  option (buf.validate.message).cel = {
+    id: "create_draft_conversion_method_fields_together"
+    message: "default_conversion_method_id and default_conversion_method_version must both be set or both be empty"
+    expression: "(this.default_conversion_method_id == '') == (this.default_conversion_method_version == 0)"
+  };
   // code is the human-readable account type code (e.g., "CUSTOMER_CURRENT").
+  // Must match the same pattern as AccountTypeDefinition.code.
   string code = 1 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 50
-    pattern: "^[A-Z][A-Z0-9_]*$"
+    pattern: "^[A-Z][A-Z0-9_]{0,48}[A-Z0-9]$"
   }];
 
   // display_name is a human-readable name for the account type.
@@ -341,7 +354,10 @@ message CreateDraftRequest {
   ];
 
   // default_conversion_method_version is the version of the default conversion method.
-  int32 default_conversion_method_version = 9 [(buf.validate.field).int32.gte = 0];
+  int32 default_conversion_method_version = 9 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).int32.gte = 1
+  ];
 
   // validation_cel is a CEL expression for validating account operations.
   string validation_cel = 10 [(buf.validate.field).string.max_len = 4096];
@@ -367,6 +383,11 @@ message CreateDraftResponse {
 
 // UpdateDefinitionRequest modifies an existing DRAFT account type definition.
 message UpdateDefinitionRequest {
+  option (buf.validate.message).cel = {
+    id: "update_definition_conversion_method_fields_together"
+    message: "default_conversion_method_id and default_conversion_method_version must both be set or both be empty"
+    expression: "(this.default_conversion_method_id == '') == (this.default_conversion_method_version == 0)"
+  };
   // id identifies which definition to update (UUID).
   string id = 1 [(buf.validate.field).string.uuid = true];
 
@@ -392,7 +413,10 @@ message UpdateDefinitionRequest {
   ];
 
   // default_conversion_method_version is the version of the default conversion method.
-  int32 default_conversion_method_version = 7 [(buf.validate.field).int32.gte = 0];
+  int32 default_conversion_method_version = 7 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).int32.gte = 1
+  ];
 
   // validation_cel is a CEL expression for validating account operations.
   string validation_cel = 8 [(buf.validate.field).string.max_len = 4096];
