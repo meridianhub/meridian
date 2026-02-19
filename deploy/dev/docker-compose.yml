@@ -19,8 +19,8 @@ services:
     image: cockroachdb/cockroach:latest-v24.1
     command: start-single-node --insecure
     ports:
-      - "26257:26257"
-      - "8080:8080"
+      - "127.0.0.1:26257:26257"
+      - "127.0.0.1:8080:8080"
     healthcheck:
       test: ["CMD", "cockroach", "sql", "--insecure", "-e", "SELECT 1"]
       interval: 5s
