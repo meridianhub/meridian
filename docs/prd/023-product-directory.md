@@ -139,6 +139,7 @@ type AccountTypeDefinition struct {
     DisplayName            string        // "GBP Personal Current Account"
     Description            string        // Detailed description of this product type
     NormalBalance          string        // "DEBIT" or "CREDIT"
+    BehaviorClass          string        // Fixed system behavior category (see below)
     InstrumentCode         string        // Designated instrument: "GBP", "KWH", "TONNE_CO2E"
     DefaultSagaPrefix      string        // e.g., "SAVINGS" for "{prefix}.deposit" routing
     FiatMethodID           *uuid.UUID    // Default method for any fiat→fiat conversion (e.g., forex-spot)
@@ -194,6 +195,31 @@ type ValuationMethodTemplate struct {
 }
 ```
 
+**BehaviorClass** is a fixed set of system behavior categories that
+services use to apply hard-coded constraints. The dynamic `Code`
+(e.g., `CLEARING_GBP`) is the user-facing product identifier, but
+the system needs `BehaviorClass = "CLEARING"` to know that
+org-scoping is forbidden, or `BehaviorClass = "CUSTOMER"` to enable
+party association. This replaces the role currently played by the
+`InternalAccountType` enum.
+
+| BehaviorClass | System Behavior |
+|---------------|-----------------|
+| `CUSTOMER` | Party-scoped, eligibility checks, external-facing |
+| `CLEARING` | Global (no org-scoping), settlement operations |
+| `NOSTRO` | Correspondent banking, our money at another bank |
+| `VOSTRO` | Correspondent banking, their money at our bank |
+| `HOLDING` | Temporary holding, time-bound lifecycle |
+| `SUSPENSE` | Unidentified/pending transactions, auto-resolution |
+| `REVENUE` | P&L tracking, credit normal balance |
+| `EXPENSE` | P&L tracking, debit normal balance |
+| `INVENTORY` | Non-cash asset tracking (energy, commodities) |
+
+New behavior classes can be added by extending the CHECK constraint
+in a migration, but this is deliberately a platform-level change
+(not tenant-configurable) because it maps to hard-coded service
+logic.
+
 #### Registry Interface
 
 ```go
@@ -230,6 +256,12 @@ CREATE TABLE account_type_definitions (
     display_name             VARCHAR(255) NOT NULL,
     description              TEXT,
     normal_balance           VARCHAR(10) NOT NULL CHECK (normal_balance IN ('DEBIT', 'CREDIT')),
+    behavior_class           VARCHAR(20) NOT NULL
+                             CHECK (behavior_class IN (
+                                 'CUSTOMER', 'CLEARING', 'NOSTRO', 'VOSTRO',
+                                 'HOLDING', 'SUSPENSE', 'REVENUE', 'EXPENSE',
+                                 'INVENTORY'
+                             )),
     instrument_code          VARCHAR(50) NOT NULL,
     default_saga_prefix      VARCHAR(100),
     fiat_method_id           UUID,
@@ -546,6 +578,7 @@ The manifest remains the authoring surface for product definitions:
 account_types:
   - code: CURRENT_GBP
     name: "GBP Current Account"
+    behavior_class: CUSTOMER
     normal_balance: DEBIT
     instrument_code: GBP
     fiat_method: "forex-spot-v1"     # Resolved to UUID via Valuation Engine lookup
@@ -563,6 +596,7 @@ account_types:
 
   - code: INVENTORY_KWH
     name: "kWh Inventory Account"
+    behavior_class: INVENTORY
     normal_balance: DEBIT
     instrument_code: KWH
     valuation_methods:               # Cross-class only
@@ -617,24 +651,55 @@ The compilation pipeline validates:
    instrument, valuation method IDs reference existing methods)
 5. Structured errors returned for iteration
 
+### Read-Through Cache Requirement
+
+Consuming services (`services/current-account`,
+`services/internal-bank-account`) must implement a read-through cache
+for account type definitions, following the `LocalInstrumentCache`
+pattern in `services/reference-data/cache/instrument_cache.go`.
+
+Account creation and valuation resolution are hot paths. A synchronous
+gRPC call to Reference Data for every `InitiateAccount` or
+`EvaluateAssetValuation` request is not acceptable. The cache must:
+
+- **Tenant-isolated**: Separate LRU cache per tenant (same as
+  `instrument_cache.go`).
+- **TTL with jitter**: 5-minute base TTL with 30-second jitter to
+  prevent thundering herd on expiry.
+- **Singleflight deduplication**: Concurrent requests for the same
+  account type code collapse into a single gRPC call.
+- **Precompiled CEL programs**: Cache the compiled CEL programs
+  (`ValidationCEL`, `BucketingCEL`, `EligibilityCEL`) alongside the
+  definition, not just the raw strings. This avoids re-compilation
+  on every evaluation.
+- **Precompiled JSON Schema**: Cache the compiled `AttributeSchema`
+  validator alongside the definition.
+- **Cache warming on startup**: Services prefetch ACTIVE account type
+  definitions on startup, same as `cache/prefetch.go` does for
+  instruments.
+
+The Reference Data service already provides the gRPC endpoint; the
+consuming service wraps it with a `LocalAccountTypeCache` using the
+same `hashicorp/golang-lru/v2` and `singleflight` libraries.
+
 ## Platform Blueprint Seed Data
 
 System account types seeded during tenant provisioning:
 
-| Code | Display Name | Normal Balance | Instrument | Saga Prefix |
-|------|-------------|----------------|------------|-------------|
-| `CURRENT_GBP` | GBP Current Account | DEBIT | GBP | `CURRENT` |
-| `CURRENT_EUR` | EUR Current Account | DEBIT | EUR | `CURRENT` |
-| `CURRENT_USD` | USD Current Account | DEBIT | USD | `CURRENT` |
-| `SAVINGS_GBP` | GBP Savings Account | DEBIT | GBP | `SAVINGS` |
-| `CLEARING_GBP` | GBP Clearing Account | DEBIT | GBP | `CLEARING` |
-| `NOSTRO_GBP` | GBP Nostro Account | DEBIT | GBP | `NOSTRO` |
-| `VOSTRO_GBP` | GBP Vostro Account | CREDIT | GBP | `VOSTRO` |
-| `HOLDING_GBP` | GBP Holding Account | DEBIT | GBP | `HOLDING` |
-| `SUSPENSE_GBP` | GBP Suspense Account | DEBIT | GBP | `SUSPENSE` |
-| `REVENUE_GBP` | GBP Revenue Account | CREDIT | GBP | `REVENUE` |
-| `EXPENSE_GBP` | GBP Expense Account | DEBIT | GBP | `EXPENSE` |
-| `INVENTORY_KWH` | kWh Inventory Account | DEBIT | KWH | `INVENTORY` |
+| Code | BehaviorClass | Instrument | Normal Balance | Saga Prefix |
+|------|---------------|------------|----------------|-------------|
+| `CURRENT_GBP` | CUSTOMER | GBP | DEBIT | `CURRENT` |
+| `CURRENT_EUR` | CUSTOMER | EUR | DEBIT | `CURRENT` |
+| `CURRENT_USD` | CUSTOMER | USD | DEBIT | `CURRENT` |
+| `SAVINGS_GBP` | CUSTOMER | GBP | DEBIT | `SAVINGS` |
+| `CLEARING_GBP` | CLEARING | GBP | DEBIT | `CLEARING` |
+| `NOSTRO_GBP` | NOSTRO | GBP | DEBIT | `NOSTRO` |
+| `VOSTRO_GBP` | VOSTRO | GBP | CREDIT | `VOSTRO` |
+| `HOLDING_GBP` | HOLDING | GBP | DEBIT | `HOLDING` |
+| `SUSPENSE_GBP` | SUSPENSE | GBP | DEBIT | `SUSPENSE` |
+| `REVENUE_GBP` | REVENUE | GBP | CREDIT | `REVENUE` |
+| `EXPENSE_GBP` | EXPENSE | GBP | DEBIT | `EXPENSE` |
+| `INVENTORY_KWH` | INVENTORY | KWH | DEBIT | `INVENTORY` |
 
 Tenants extend with their own entries (e.g., `ENERGY_SETTLEMENT_KWH`,
 `CARBON_INVENTORY_CO2E`, `VOUCHER_FOOD_GBP`).
@@ -698,6 +763,8 @@ Tenants extend with their own entries (e.g., `ENERGY_SETTLEMENT_KWH`,
 - **CEL compiler**: `services/reference-data/cel/compiler.go`
 - **ValuationFeature domain**: `shared/pkg/valuationfeature/`
 - **ValuationEngine interface**: `shared/pkg/valuation/`
+- **LocalInstrumentCache** (cache pattern template): `services/reference-data/cache/instrument_cache.go`
+- **Cache prefetch**: `services/reference-data/cache/prefetch.go`
 - **JSON Schema validator**: `cmd/position-tool/internal/validation/schema.go`
 - **Party service proto**: `api/proto/meridian/party/v1/party.proto`
 - **BIAN alignment PRD**: `.taskmaster/docs/prd-bian-alignment.md`
