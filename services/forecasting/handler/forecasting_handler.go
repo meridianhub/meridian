@@ -64,9 +64,6 @@ func NewService(
 	if runner == nil {
 		return nil, ErrRunnerRequired
 	}
-	if mds == nil {
-		return nil, ErrMDSRequired
-	}
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -201,6 +198,11 @@ func (s *Service) publishToMDS(
 	points []starlark.ForecastPoint,
 	executionTime time.Time,
 ) error {
+	if s.mds == nil {
+		s.logger.Warn("MDS publisher not configured, skipping forecast publish",
+			"point_count", len(points))
+		return nil
+	}
 	if len(points) == 0 {
 		return nil
 	}

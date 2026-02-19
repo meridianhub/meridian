@@ -48,12 +48,14 @@ import (
 	currentaccountservice "github.com/meridianhub/meridian/services/current-account/service"
 	financialaccountingpersistence "github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
 	financialaccountingservice "github.com/meridianhub/meridian/services/financial-accounting/service"
+	forecastingmds "github.com/meridianhub/meridian/services/forecasting/adapters/mds"
 	forecastingpersistence "github.com/meridianhub/meridian/services/forecasting/adapters/persistence"
 	forecastinghandler "github.com/meridianhub/meridian/services/forecasting/handler"
 	forecastingstarlark "github.com/meridianhub/meridian/services/forecasting/starlark"
 	internalbankaccountpersistence "github.com/meridianhub/meridian/services/internal-bank-account/adapters/persistence"
 	internalbankaccountservice "github.com/meridianhub/meridian/services/internal-bank-account/service"
 	marketinformationpersistence "github.com/meridianhub/meridian/services/market-information/adapters/persistence"
+	misclient "github.com/meridianhub/meridian/services/market-information/client"
 	marketinformationservice "github.com/meridianhub/meridian/services/market-information/service"
 	partypersistence "github.com/meridianhub/meridian/services/party/adapters/persistence"
 	partyservice "github.com/meridianhub/meridian/services/party/service"
@@ -85,6 +87,7 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/observability"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
@@ -208,9 +211,20 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 	outboxPublisher := events.NewOutboxPublisher("unified")
 	outboxRepo := events.NewPostgresOutboxRepository(db)
 
+	// MDS loopback client (forecasting → market-information via same gRPC server).
+	// grpc.NewClient is lazy — connects on first RPC, after the server is listening.
+	mdsClient, mdsCleanup, err := misclient.New(ctx, misclient.Config{
+		Target:      fmt.Sprintf("localhost:%d", grpcPort),
+		DialOptions: []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
+	})
+	if err != nil {
+		return fmt.Errorf("MDS loopback client: %w", err)
+	}
+	defer func() { _ = mdsCleanup() }()
+
 	// ─── Register All Services ──────────────────────────────────────────
 
-	if err := registerServices(grpcServer, db, pgxPool, idempotencySvc, faEventPublisher, pkEventPublisher, outboxPublisher, outboxRepo, logger); err != nil {
+	if err := registerServices(grpcServer, db, pgxPool, idempotencySvc, faEventPublisher, pkEventPublisher, outboxPublisher, outboxRepo, mdsClient, logger); err != nil {
 		return err
 	}
 
@@ -279,6 +293,7 @@ func registerServices(
 	pkEventPublisher pkdomain.EventPublisher,
 	outboxPublisher *events.OutboxPublisher,
 	outboxRepo *events.PostgresOutboxRepository,
+	mdsClient *misclient.Client,
 	logger *slog.Logger,
 ) error {
 	// Tier 0: No gRPC dependencies
@@ -309,7 +324,7 @@ func registerServices(
 		{"position-keeping", func() error {
 			return wirePositionKeeping(grpcServer, pgxPool, idempotencySvc, pkEventPublisher, logger)
 		}},
-		{"forecasting", func() error { return wireForecasting(grpcServer, pgxPool, logger) }},
+		{"forecasting", func() error { return wireForecasting(grpcServer, pgxPool, mdsClient, logger) }},
 	} {
 		if err := wire.fn(); err != nil {
 			return fmt.Errorf("%s: %w", wire.name, err)
@@ -478,19 +493,22 @@ func wirePositionKeeping(
 	return nil
 }
 
-func wireForecasting(server *grpc.Server, pool *pgxpool.Pool, logger *slog.Logger) error {
+func wireForecasting(server *grpc.Server, pool *pgxpool.Pool, mdsClient *misclient.Client, logger *slog.Logger) error {
 	repo := forecastingpersistence.NewStrategyRepository(pool)
 
+	misAdapter := forecastingmds.NewMISAdapter(mdsClient)
+	mdsPublisher := forecastingmds.NewPublisherAdapter(mdsClient)
+
 	runner, err := forecastingstarlark.NewForecastRunner(forecastingstarlark.ForecastRunnerConfig{
-		MISClient: &noopMISClient{},
-		RefData:   &noopRefDataClient{},
+		MISClient: misAdapter,
+		RefData:   &forecastingmds.NoOpRefDataClient{},
 		Logger:    logger,
 	})
 	if err != nil {
 		return fmt.Errorf("forecast runner: %w", err)
 	}
 
-	svc, err := forecastinghandler.NewService(repo, runner, nil, logger)
+	svc, err := forecastinghandler.NewService(repo, runner, mdsPublisher, logger)
 	if err != nil {
 		return err
 	}
@@ -608,18 +626,4 @@ func (p *noopFAPublisher) Publish(_ context.Context, _ financialaccountingservic
 
 func (p *noopFAPublisher) PublishBatch(_ context.Context, _ []financialaccountingservice.DomainEvent) error {
 	return nil
-}
-
-// noopMISClient is a no-op market information client for forecasting (no inter-service gRPC in dev).
-type noopMISClient struct{}
-
-func (c *noopMISClient) FetchObservations(_ context.Context, _ string, _ time.Time) ([]forecastingstarlark.Observation, error) {
-	return []forecastingstarlark.Observation{}, nil
-}
-
-// noopRefDataClient is a no-op reference data client for forecasting (no inter-service gRPC in dev).
-type noopRefDataClient struct{}
-
-func (c *noopRefDataClient) GetNodeByResolutionKey(_ context.Context, _, _ string) (*forecastingstarlark.ReferenceData, error) {
-	return &forecastingstarlark.ReferenceData{}, nil
 }
