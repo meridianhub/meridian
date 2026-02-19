@@ -337,29 +337,7 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 		resp := &pb.ExecuteLienResponse{
 			Lien: s.domainToProtoLien(ctx, lien),
 		}
-		if idempotencyKeyStr != "" && s.idempotencyService != nil {
-			if responseData, marshalErr := proto.Marshal(resp); marshalErr == nil {
-				if storeErr := s.idempotencyService.StoreResult(ctx, idempotency.Result{
-					Key:         idempKey,
-					Status:      idempotency.StatusCompleted,
-					Data:        responseData,
-					CompletedAt: time.Now(),
-					TTL:         idempotencyResultTTL,
-				}); storeErr != nil {
-					s.logger.Warn("failed to cache already-executed lien response", "error", storeErr)
-					// Release pending marker so retries are not blocked.
-					if delErr := s.idempotencyService.Delete(ctx, idempKey); delErr != nil {
-						s.logger.Warn("failed to clear pending idempotency state after cache error", "error", delErr)
-					}
-				}
-			} else {
-				s.logger.Warn("failed to marshal already-executed lien response for idempotency cache", "error", marshalErr)
-				// Release pending marker so retries are not blocked.
-				if delErr := s.idempotencyService.Delete(ctx, idempKey); delErr != nil {
-					s.logger.Warn("failed to clear pending idempotency state after marshal error", "error", delErr)
-				}
-			}
-		}
+		s.storeIdempotencyResultOrCleanup(ctx, idempKey, resp, "execute_lien:pre-lock")
 		return resp, nil
 	}
 
@@ -379,29 +357,7 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 		resp := &pb.ExecuteLienResponse{
 			Lien: s.domainToProtoLien(ctx, lien),
 		}
-		if idempotencyKeyStr != "" && s.idempotencyService != nil {
-			if responseData, marshalErr := proto.Marshal(resp); marshalErr == nil {
-				if storeErr := s.idempotencyService.StoreResult(ctx, idempotency.Result{
-					Key:         idempKey,
-					Status:      idempotency.StatusCompleted,
-					Data:        responseData,
-					CompletedAt: time.Now(),
-					TTL:         idempotencyResultTTL,
-				}); storeErr != nil {
-					s.logger.Warn("failed to cache post-lock already-executed lien response", "error", storeErr)
-					// Release pending marker so retries are not blocked.
-					if delErr := s.idempotencyService.Delete(ctx, idempKey); delErr != nil {
-						s.logger.Warn("failed to clear pending idempotency state after cache error", "error", delErr)
-					}
-				}
-			} else {
-				s.logger.Warn("failed to marshal post-lock already-executed lien response for idempotency cache", "error", marshalErr)
-				// Release pending marker so retries are not blocked.
-				if delErr := s.idempotencyService.Delete(ctx, idempKey); delErr != nil {
-					s.logger.Warn("failed to clear pending idempotency state after marshal error", "error", delErr)
-				}
-			}
-		}
+		s.storeIdempotencyResultOrCleanup(ctx, idempKey, resp, "execute_lien:post-lock")
 		return resp, nil
 	}
 
@@ -438,29 +394,7 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 	}
 
 	// Store successful result in Redis for future idempotency checks.
-	if idempotencyKeyStr != "" && s.idempotencyService != nil {
-		if responseData, marshalErr := proto.Marshal(resp); marshalErr == nil {
-			if storeErr := s.idempotencyService.StoreResult(ctx, idempotency.Result{
-				Key:         idempKey,
-				Status:      idempotency.StatusCompleted,
-				Data:        responseData,
-				CompletedAt: time.Now(),
-				TTL:         idempotencyResultTTL,
-			}); storeErr != nil {
-				s.logger.Error("failed to store idempotency result", "error", storeErr)
-				// Release pending marker so retries are not blocked by a stale lock.
-				if delErr := s.idempotencyService.Delete(ctx, idempKey); delErr != nil {
-					s.logger.Warn("failed to clear pending idempotency state after cache error", "error", delErr)
-				}
-			}
-		} else {
-			s.logger.Error("failed to marshal response for idempotency cache", "error", marshalErr)
-			// Release pending marker so retries are not blocked by a stale lock.
-			if delErr := s.idempotencyService.Delete(ctx, idempKey); delErr != nil {
-				s.logger.Warn("failed to clear pending idempotency state after marshal error", "error", delErr)
-			}
-		}
-	}
+	s.storeIdempotencyResultOrCleanup(ctx, idempKey, resp, "execute_lien")
 
 	return resp, nil
 }
@@ -562,29 +496,7 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 		resp := &pb.TerminateLienResponse{
 			Lien: s.domainToProtoLien(ctx, lien),
 		}
-		if idempotencyKeyStr != "" && s.idempotencyService != nil {
-			if responseData, marshalErr := proto.Marshal(resp); marshalErr == nil {
-				if storeErr := s.idempotencyService.StoreResult(ctx, idempotency.Result{
-					Key:         idempKey,
-					Status:      idempotency.StatusCompleted,
-					Data:        responseData,
-					CompletedAt: time.Now(),
-					TTL:         idempotencyResultTTL,
-				}); storeErr != nil {
-					s.logger.Warn("failed to cache already-terminated lien response", "error", storeErr)
-					// Release pending marker so retries are not blocked.
-					if delErr := s.idempotencyService.Delete(ctx, idempKey); delErr != nil {
-						s.logger.Warn("failed to clear pending idempotency state after cache error", "error", delErr)
-					}
-				}
-			} else {
-				s.logger.Warn("failed to marshal already-terminated lien response for idempotency cache", "error", marshalErr)
-				// Release pending marker so retries are not blocked.
-				if delErr := s.idempotencyService.Delete(ctx, idempKey); delErr != nil {
-					s.logger.Warn("failed to clear pending idempotency state after marshal error", "error", delErr)
-				}
-			}
-		}
+		s.storeIdempotencyResultOrCleanup(ctx, idempKey, resp, "terminate_lien:pre-lock")
 		return resp, nil
 	}
 
@@ -604,29 +516,7 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 		resp := &pb.TerminateLienResponse{
 			Lien: s.domainToProtoLien(ctx, lien),
 		}
-		if idempotencyKeyStr != "" && s.idempotencyService != nil {
-			if responseData, marshalErr := proto.Marshal(resp); marshalErr == nil {
-				if storeErr := s.idempotencyService.StoreResult(ctx, idempotency.Result{
-					Key:         idempKey,
-					Status:      idempotency.StatusCompleted,
-					Data:        responseData,
-					CompletedAt: time.Now(),
-					TTL:         idempotencyResultTTL,
-				}); storeErr != nil {
-					s.logger.Warn("failed to cache post-lock already-terminated lien response", "error", storeErr)
-					// Release pending marker so retries are not blocked.
-					if delErr := s.idempotencyService.Delete(ctx, idempKey); delErr != nil {
-						s.logger.Warn("failed to clear pending idempotency state after cache error", "error", delErr)
-					}
-				}
-			} else {
-				s.logger.Warn("failed to marshal post-lock already-terminated lien response for idempotency cache", "error", marshalErr)
-				// Release pending marker so retries are not blocked.
-				if delErr := s.idempotencyService.Delete(ctx, idempKey); delErr != nil {
-					s.logger.Warn("failed to clear pending idempotency state after marshal error", "error", delErr)
-				}
-			}
-		}
+		s.storeIdempotencyResultOrCleanup(ctx, idempKey, resp, "terminate_lien:post-lock")
 		return resp, nil
 	}
 
@@ -660,29 +550,7 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 	}
 
 	// Store successful result in Redis for future idempotency checks.
-	if idempotencyKeyStr != "" && s.idempotencyService != nil {
-		if responseData, marshalErr := proto.Marshal(resp); marshalErr == nil {
-			if storeErr := s.idempotencyService.StoreResult(ctx, idempotency.Result{
-				Key:         idempKey,
-				Status:      idempotency.StatusCompleted,
-				Data:        responseData,
-				CompletedAt: time.Now(),
-				TTL:         idempotencyResultTTL,
-			}); storeErr != nil {
-				s.logger.Error("failed to store idempotency result", "error", storeErr)
-				// Release pending marker so retries are not blocked by a stale lock.
-				if delErr := s.idempotencyService.Delete(ctx, idempKey); delErr != nil {
-					s.logger.Warn("failed to clear pending idempotency state after cache error", "error", delErr)
-				}
-			}
-		} else {
-			s.logger.Error("failed to marshal response for idempotency cache", "error", marshalErr)
-			// Release pending marker so retries are not blocked by a stale lock.
-			if delErr := s.idempotencyService.Delete(ctx, idempKey); delErr != nil {
-				s.logger.Warn("failed to clear pending idempotency state after marshal error", "error", delErr)
-			}
-		}
-	}
+	s.storeIdempotencyResultOrCleanup(ctx, idempKey, resp, "terminate_lien")
 
 	return resp, nil
 }
@@ -719,6 +587,36 @@ func (s *Service) RetrieveLien(ctx context.Context, req *pb.RetrieveLienRequest)
 	return &pb.RetrieveLienResponse{
 		Lien: s.domainToProtoLien(ctx, lien),
 	}, nil
+}
+
+// storeIdempotencyResultOrCleanup marshals resp, stores it in the idempotency
+// service, and—if either step fails—deletes the pending marker so that
+// subsequent retries are not blocked by a stale lock. It is a no-op when the
+// idempotency service is not configured or no key is present.
+func (s *Service) storeIdempotencyResultOrCleanup(ctx context.Context, idempKey idempotency.Key, resp proto.Message, logPrefix string) {
+	if s.idempotencyService == nil || idempKey.RequestID == "" {
+		return
+	}
+	responseData, marshalErr := proto.Marshal(resp)
+	if marshalErr != nil {
+		s.logger.Error(logPrefix+": failed to marshal response for idempotency cache", "error", marshalErr)
+		if delErr := s.idempotencyService.Delete(ctx, idempKey); delErr != nil {
+			s.logger.Warn(logPrefix+": failed to clear pending idempotency state after marshal error", "error", delErr)
+		}
+		return
+	}
+	if storeErr := s.idempotencyService.StoreResult(ctx, idempotency.Result{
+		Key:         idempKey,
+		Status:      idempotency.StatusCompleted,
+		Data:        responseData,
+		CompletedAt: time.Now(),
+		TTL:         idempotencyResultTTL,
+	}); storeErr != nil {
+		s.logger.Error(logPrefix+": failed to store idempotency result", "error", storeErr)
+		if delErr := s.idempotencyService.Delete(ctx, idempKey); delErr != nil {
+			s.logger.Warn(logPrefix+": failed to clear pending idempotency state after cache error", "error", delErr)
+		}
+	}
 }
 
 // buildInitiateLienResponse constructs a consistent InitiateLienResponse
