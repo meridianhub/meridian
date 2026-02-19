@@ -21,7 +21,7 @@ show_help() {
     echo -e "${BLUE}  ${BOLD}Meridian Platform CLI${NC}"
     echo -e "${BLUE}════════════════════════════════════════════════════════════════${NC}"
     echo ""
-    echo -e "${BOLD}Usage:${NC} meridian <command> [options]"
+    echo -e "${BOLD}Usage:${NC} ./dev <command> [options]"
     echo ""
     echo -e "${BOLD}Commands:${NC}"
     echo -e "  ${GREEN}start${NC}       Start the platform (tilt up)"
@@ -34,11 +34,11 @@ show_help() {
     echo -e "  ${GREEN}help${NC}        Show this help message"
     echo ""
     echo -e "${BOLD}Examples:${NC}"
-    echo -e "  meridian start            # Start the platform"
-    echo -e "  meridian demo             # Run full demo"
-    echo -e "  meridian horizon          # Run Horizon integrity proof"
-    echo -e "  meridian doctor           # Check dependencies"
-    echo -e "  meridian logs current-account"
+    echo -e "  ./dev start              # Start the platform"
+    echo -e "  ./dev demo               # Run full demo"
+    echo -e "  ./dev horizon            # Run Horizon integrity proof"
+    echo -e "  ./dev doctor             # Check dependencies"
+    echo -e "  ./dev logs current-account"
     echo ""
 }
 
@@ -65,7 +65,7 @@ cmd_status() {
         kubectl get pods 2>/dev/null | grep -E "(current-account|payment-order|position-keeping|financial-accounting)" || echo "  No services found"
     else
         echo -e "${YELLOW}⚠${NC} Tilt is not running"
-        echo -e "  Run: ${CYAN}meridian start${NC}"
+        echo -e "  Run: ${CYAN}./dev start${NC}"
     fi
 }
 
@@ -160,7 +160,7 @@ cmd_horizon() {
 
 cmd_doctor() {
     if [ -f "${SCRIPTS_DIR}/doctor.sh" ]; then
-        MERIDIAN_CMD="./meridian doctor" exec "${SCRIPTS_DIR}/doctor.sh" "$@"
+        MERIDIAN_CMD="./dev doctor" exec "${SCRIPTS_DIR}/doctor.sh" "$@"
     else
         echo -e "${RED}✗${NC} Doctor script not found: ${SCRIPTS_DIR}/doctor.sh"
         exit 1
@@ -170,7 +170,7 @@ cmd_doctor() {
 cmd_logs() {
     local service="$1"
     if [ -z "$service" ]; then
-        echo -e "${YELLOW}Usage:${NC} meridian logs <service-name>"
+        echo -e "${YELLOW}Usage:${NC} ./dev logs <service-name>"
         echo ""
         echo -e "${BOLD}Available services:${NC}"
         kubectl get pods --no-headers 2>/dev/null | awk '{print "  " $1}' || echo "  (none running)"
