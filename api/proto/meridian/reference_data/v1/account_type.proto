@@ -1,0 +1,511 @@
+syntax = "proto3";
+
+package meridian.reference_data.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1;referencedatav1";
+
+// BehaviorClass categorizes the accounting and operational behavior of an account type.
+enum BehaviorClass {
+  // BEHAVIOR_CLASS_UNSPECIFIED means the behavior class is unknown.
+  BEHAVIOR_CLASS_UNSPECIFIED = 0;
+  // BEHAVIOR_CLASS_CUSTOMER represents customer-facing accounts.
+  BEHAVIOR_CLASS_CUSTOMER = 1;
+  // BEHAVIOR_CLASS_CLEARING represents clearing accounts used to temporarily hold funds.
+  BEHAVIOR_CLASS_CLEARING = 2;
+  // BEHAVIOR_CLASS_NOSTRO represents nostro accounts (our account at another bank).
+  BEHAVIOR_CLASS_NOSTRO = 3;
+  // BEHAVIOR_CLASS_VOSTRO represents vostro accounts (another bank's account at us).
+  BEHAVIOR_CLASS_VOSTRO = 4;
+  // BEHAVIOR_CLASS_HOLDING represents holding accounts for safekeeping of assets.
+  BEHAVIOR_CLASS_HOLDING = 5;
+  // BEHAVIOR_CLASS_SUSPENSE represents suspense accounts for unresolved transactions.
+  BEHAVIOR_CLASS_SUSPENSE = 6;
+  // BEHAVIOR_CLASS_REVENUE represents revenue accounts for income tracking.
+  BEHAVIOR_CLASS_REVENUE = 7;
+  // BEHAVIOR_CLASS_EXPENSE represents expense accounts for cost tracking.
+  BEHAVIOR_CLASS_EXPENSE = 8;
+  // BEHAVIOR_CLASS_INVENTORY represents inventory accounts for asset tracking.
+  BEHAVIOR_CLASS_INVENTORY = 9;
+}
+
+// NormalBalance defines the expected sign of the balance under normal conditions.
+enum NormalBalance {
+  // NORMAL_BALANCE_UNSPECIFIED means the normal balance is unknown.
+  NORMAL_BALANCE_UNSPECIFIED = 0;
+  // NORMAL_BALANCE_DEBIT indicates the account type normally carries a debit balance (assets, expenses).
+  NORMAL_BALANCE_DEBIT = 1;
+  // NORMAL_BALANCE_CREDIT indicates the account type normally carries a credit balance (liabilities, revenue, equity).
+  NORMAL_BALANCE_CREDIT = 2;
+}
+
+// AccountTypeStatus defines the lifecycle state of an account type definition.
+enum AccountTypeStatus {
+  // ACCOUNT_TYPE_STATUS_UNSPECIFIED means the status is unknown.
+  ACCOUNT_TYPE_STATUS_UNSPECIFIED = 0;
+  // ACCOUNT_TYPE_STATUS_DRAFT means the account type is being defined and cannot be used.
+  ACCOUNT_TYPE_STATUS_DRAFT = 1;
+  // ACCOUNT_TYPE_STATUS_ACTIVE means the account type is available for use.
+  ACCOUNT_TYPE_STATUS_ACTIVE = 2;
+  // ACCOUNT_TYPE_STATUS_DEPRECATED means the account type is no longer recommended for new use.
+  ACCOUNT_TYPE_STATUS_DEPRECATED = 3;
+}
+
+// ValuationMethodTemplate defines a valuation method associated with an account type definition.
+message ValuationMethodTemplate {
+  // id is the unique identifier for this template (UUID).
+  string id = 1 [(buf.validate.field).string.uuid = true];
+
+  // account_type_id is the UUID of the parent account type definition.
+  string account_type_id = 2 [(buf.validate.field).string.uuid = true];
+
+  // input_instrument is the instrument code that is the input for this valuation method (e.g., "GBP").
+  string input_instrument = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 50
+  }];
+
+  // valuation_method_id is the UUID of the referenced valuation method.
+  string valuation_method_id = 4 [(buf.validate.field).string.uuid = true];
+
+  // valuation_method_version is the version of the referenced valuation method.
+  int32 valuation_method_version = 5 [(buf.validate.field).int32.gte = 1];
+
+  // parameters holds additional configuration for this valuation method template.
+  map<string, string> parameters = 6;
+
+  // status is the lifecycle status of this template.
+  AccountTypeStatus status = 7 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // successor_id is the UUID of the template that replaces this one when deprecated.
+  // Only set when status is DEPRECATED.
+  string successor_id = 8 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
+}
+
+// AccountTypeDefinition defines the structural and behavioral characteristics
+// of an account type within the ledger system.
+message AccountTypeDefinition {
+  option (buf.validate.message).cel = {
+    id: "conversion_method_fields_together"
+    message: "default_conversion_method_id and default_conversion_method_version must both be set or both be empty"
+    expression: "(this.default_conversion_method_id == '') == (this.default_conversion_method_version == 0)"
+  };
+
+  // id is the unique identifier for this definition (UUID).
+  string id = 1 [(buf.validate.field).string.uuid = true];
+
+  // code is the human-readable account type code (e.g., "CUSTOMER_CURRENT").
+  // Must start with an uppercase letter and contain only uppercase letters, digits, and underscores.
+  string code = 2 [(buf.validate.field).string = {pattern: "^[A-Z][A-Z0-9_]{0,48}[A-Z0-9]$"}];
+
+  // version allows multiple versions of the same account type code (monotonically increasing).
+  int32 version = 3 [(buf.validate.field).int32.gte = 1];
+
+  // display_name is a human-readable name for the account type.
+  string display_name = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // description provides additional context about this account type.
+  string description = 5 [(buf.validate.field).string.max_len = 1024];
+
+  // normal_balance defines the expected sign of the balance under normal conditions.
+  // NORMAL_BALANCE_UNSPECIFIED (0) is rejected - account types must have a defined normal balance.
+  NormalBalance normal_balance = 6 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // behavior_class categorizes the accounting and operational behavior.
+  // BEHAVIOR_CLASS_UNSPECIFIED (0) is rejected - account types must have a defined behavior class.
+  BehaviorClass behavior_class = 7 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // instrument_code is the instrument code associated with this account type (e.g., "GBP").
+  string instrument_code = 8 [(buf.validate.field).string.min_len = 1];
+
+  // default_saga_prefix is the saga prefix used for operations on accounts of this type.
+  string default_saga_prefix = 9;
+
+  // default_conversion_method_id is the UUID of the default valuation method for currency conversion.
+  // Must be set together with default_conversion_method_version.
+  string default_conversion_method_id = 10 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
+
+  // default_conversion_method_version is the version of the default conversion method.
+  // Must be set together with default_conversion_method_id.
+  int32 default_conversion_method_version = 11 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).int32.gte = 1
+  ];
+
+  // valuation_methods lists the valuation method templates associated with this account type.
+  repeated ValuationMethodTemplate valuation_methods = 12;
+
+  // validation_cel is a CEL expression for validating account operations.
+  string validation_cel = 13 [(buf.validate.field).string.max_len = 4096];
+
+  // bucketing_cel is a CEL expression for determining fungibility buckets.
+  string bucketing_cel = 14 [(buf.validate.field).string.max_len = 4096];
+
+  // eligibility_cel is a CEL expression for determining account eligibility.
+  string eligibility_cel = 15 [(buf.validate.field).string.max_len = 4096];
+
+  // attribute_schema is a JSON Schema defining valid attributes for this account type.
+  // Example: {"type":"object","properties":{"tier":{"type":"string"}}}
+  string attribute_schema = 16 [(buf.validate.field).string.max_len = 16384];
+
+  // attributes holds additional structured metadata for this account type.
+  map<string, string> attributes = 17;
+
+  // status is the current lifecycle status.
+  // ACCOUNT_TYPE_STATUS_UNSPECIFIED (0) is rejected - account types must have a defined status.
+  AccountTypeStatus status = 18 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // is_system indicates this is a system account type seeded during tenant provisioning.
+  // System account types are read-only (cannot be modified or deleted by tenants).
+  bool is_system = 19;
+
+  // successor_id is the UUID of the account type that replaces this one when deprecated.
+  // Only set when status is DEPRECATED.
+  string successor_id = 20 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
+
+  // created_at is when this definition was created.
+  google.protobuf.Timestamp created_at = 21 [(buf.validate.field).required = true];
+
+  // updated_at is when this definition was last modified.
+  google.protobuf.Timestamp updated_at = 22 [(buf.validate.field).required = true];
+
+  // activated_at is when this definition transitioned to ACTIVE (null if never activated).
+  google.protobuf.Timestamp activated_at = 23;
+
+  // deprecated_at is when this definition transitioned to DEPRECATED (null if not deprecated).
+  google.protobuf.Timestamp deprecated_at = 24;
+}
+
+// ========================================
+// Service Definition
+// ========================================
+
+// AccountTypeRegistryService manages account type definitions - the product directory
+// that describes how different account types behave, validate, and integrate with
+// the ledger and valuation systems.
+service AccountTypeRegistryService {
+  // GetDefinition retrieves a specific account type definition by ID.
+  // Returns NOT_FOUND if the definition does not exist.
+  rpc GetDefinition(GetDefinitionRequest) returns (GetDefinitionResponse);
+
+  // GetActiveDefinition retrieves the currently active definition for a given code.
+  // Returns NOT_FOUND if no active definition exists for the code.
+  rpc GetActiveDefinition(GetActiveDefinitionRequest) returns (GetActiveDefinitionResponse);
+
+  // ListActive returns all active account type definitions.
+  // Supports pagination and optional filtering by behavior class.
+  rpc ListActive(ListActiveRequest) returns (ListActiveResponse);
+
+  // CreateDraft creates a new account type definition in DRAFT status.
+  // Returns ALREADY_EXISTS if a definition with the same code+version exists.
+  // Returns INVALID_ARGUMENT if CEL expressions fail compilation.
+  rpc CreateDraft(CreateDraftRequest) returns (CreateDraftResponse);
+
+  // UpdateDefinition modifies a DRAFT account type definition.
+  // Returns NOT_FOUND if the definition does not exist.
+  // Returns FAILED_PRECONDITION if the definition is not in DRAFT status.
+  // Returns PERMISSION_DENIED if the definition is a system account type.
+  rpc UpdateDefinition(UpdateDefinitionRequest) returns (UpdateDefinitionResponse);
+
+  // ActivateAccountType transitions an account type from DRAFT to ACTIVE.
+  // Returns NOT_FOUND if the definition does not exist.
+  // Returns FAILED_PRECONDITION if the definition is not in DRAFT status.
+  // Returns PERMISSION_DENIED if the definition is a system account type.
+  rpc ActivateAccountType(ActivateAccountTypeRequest) returns (ActivateAccountTypeResponse);
+
+  // DeprecateAccountType transitions an account type from ACTIVE to DEPRECATED.
+  // Returns NOT_FOUND if the definition does not exist.
+  // Returns FAILED_PRECONDITION if the definition is not in ACTIVE status.
+  // Returns PERMISSION_DENIED if the definition is a system account type.
+  rpc DeprecateAccountType(DeprecateAccountTypeRequest) returns (DeprecateAccountTypeResponse);
+
+  // ValidateProductDefinition validates an account type definition without persisting it.
+  // Compiles and evaluates CEL expressions, validates attribute schema, and checks
+  // structural constraints. Returns detailed validation errors if invalid.
+  rpc ValidateProductDefinition(ValidateProductDefinitionRequest) returns (ValidateProductDefinitionResponse);
+}
+
+// ========================================
+// Request/Response Messages
+// ========================================
+
+// GetDefinitionRequest identifies which account type definition to retrieve by UUID.
+message GetDefinitionRequest {
+  // id is the UUID of the account type definition to retrieve.
+  string id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+// GetDefinitionResponse returns the requested account type definition.
+message GetDefinitionResponse {
+  // definition is the requested account type definition.
+  AccountTypeDefinition definition = 1;
+}
+
+// GetActiveDefinitionRequest identifies the active definition to retrieve by code.
+message GetActiveDefinitionRequest {
+  // code identifies the account type (e.g., "CUSTOMER_CURRENT").
+  string code = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 50
+  }];
+}
+
+// GetActiveDefinitionResponse returns the active account type definition.
+message GetActiveDefinitionResponse {
+  // definition is the requested active account type definition.
+  AccountTypeDefinition definition = 1;
+}
+
+// ListActiveRequest specifies filtering and pagination for listing active account types.
+message ListActiveRequest {
+  // behavior_class_filter returns only definitions with this behavior class.
+  // If BEHAVIOR_CLASS_UNSPECIFIED, returns all active definitions.
+  BehaviorClass behavior_class_filter = 1;
+
+  // page_size limits the number of results (max 100).
+  int32 page_size = 2 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 100
+  }];
+
+  // page_token for pagination (from previous response).
+  string page_token = 3;
+}
+
+// ListActiveResponse returns a page of active account type definitions.
+message ListActiveResponse {
+  // definitions is the list of matching active account type definitions.
+  repeated AccountTypeDefinition definitions = 1;
+
+  // next_page_token for pagination (empty if no more results).
+  string next_page_token = 2;
+}
+
+// CreateDraftRequest contains the data to create a new account type definition.
+message CreateDraftRequest {
+  option (buf.validate.message).cel = {
+    id: "create_draft_conversion_method_fields_together"
+    message: "default_conversion_method_id and default_conversion_method_version must both be set or both be empty"
+    expression: "(this.default_conversion_method_id == '') == (this.default_conversion_method_version == 0)"
+  };
+  // code is the human-readable account type code (e.g., "CUSTOMER_CURRENT").
+  // Must match the same pattern as AccountTypeDefinition.code.
+  string code = 1 [(buf.validate.field).string = {
+    pattern: "^[A-Z][A-Z0-9_]{0,48}[A-Z0-9]$"
+  }];
+
+  // display_name is a human-readable name for the account type.
+  string display_name = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // description provides additional context about this account type.
+  string description = 3 [(buf.validate.field).string.max_len = 1024];
+
+  // normal_balance defines the expected sign of the balance under normal conditions.
+  NormalBalance normal_balance = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // behavior_class categorizes the accounting and operational behavior.
+  BehaviorClass behavior_class = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // instrument_code is the instrument code associated with this account type (e.g., "GBP").
+  string instrument_code = 6 [(buf.validate.field).string.min_len = 1];
+
+  // default_saga_prefix is the saga prefix used for operations on accounts of this type.
+  string default_saga_prefix = 7;
+
+  // default_conversion_method_id is the UUID of the default valuation method for currency conversion.
+  string default_conversion_method_id = 8 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
+
+  // default_conversion_method_version is the version of the default conversion method.
+  int32 default_conversion_method_version = 9 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).int32.gte = 1
+  ];
+
+  // validation_cel is a CEL expression for validating account operations.
+  string validation_cel = 10 [(buf.validate.field).string.max_len = 4096];
+
+  // bucketing_cel is a CEL expression for determining fungibility buckets.
+  string bucketing_cel = 11 [(buf.validate.field).string.max_len = 4096];
+
+  // eligibility_cel is a CEL expression for determining account eligibility.
+  string eligibility_cel = 12 [(buf.validate.field).string.max_len = 4096];
+
+  // attribute_schema is a JSON Schema defining valid attributes for this account type.
+  string attribute_schema = 13 [(buf.validate.field).string.max_len = 16384];
+
+  // attributes holds additional structured metadata for this account type.
+  map<string, string> attributes = 14;
+}
+
+// CreateDraftResponse returns the newly created account type definition.
+message CreateDraftResponse {
+  // definition is the created account type in DRAFT status.
+  AccountTypeDefinition definition = 1;
+}
+
+// UpdateDefinitionRequest modifies an existing DRAFT account type definition.
+message UpdateDefinitionRequest {
+  option (buf.validate.message).cel = {
+    id: "update_definition_conversion_method_fields_together"
+    message: "default_conversion_method_id and default_conversion_method_version must both be set or both be empty"
+    expression: "(this.default_conversion_method_id == '') == (this.default_conversion_method_version == 0)"
+  };
+  // id identifies which definition to update (UUID).
+  string id = 1 [(buf.validate.field).string.uuid = true];
+
+  // display_name is a human-readable name for the account type.
+  string display_name = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // description provides additional context about this account type.
+  string description = 3 [(buf.validate.field).string.max_len = 1024];
+
+  // instrument_code is the instrument code associated with this account type.
+  string instrument_code = 4 [(buf.validate.field).string.min_len = 1];
+
+  // default_saga_prefix is the saga prefix used for operations on accounts of this type.
+  string default_saga_prefix = 5;
+
+  // default_conversion_method_id is the UUID of the default valuation method for currency conversion.
+  string default_conversion_method_id = 6 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
+
+  // default_conversion_method_version is the version of the default conversion method.
+  int32 default_conversion_method_version = 7 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).int32.gte = 1
+  ];
+
+  // validation_cel is a CEL expression for validating account operations.
+  string validation_cel = 8 [(buf.validate.field).string.max_len = 4096];
+
+  // bucketing_cel is a CEL expression for determining fungibility buckets.
+  string bucketing_cel = 9 [(buf.validate.field).string.max_len = 4096];
+
+  // eligibility_cel is a CEL expression for determining account eligibility.
+  string eligibility_cel = 10 [(buf.validate.field).string.max_len = 4096];
+
+  // attribute_schema is a JSON Schema defining valid attributes for this account type.
+  string attribute_schema = 11 [(buf.validate.field).string.max_len = 16384];
+
+  // attributes holds additional structured metadata for this account type.
+  map<string, string> attributes = 12;
+}
+
+// UpdateDefinitionResponse returns the updated account type definition.
+message UpdateDefinitionResponse {
+  // definition is the updated account type definition.
+  AccountTypeDefinition definition = 1;
+}
+
+// ActivateAccountTypeRequest transitions an account type from DRAFT to ACTIVE.
+message ActivateAccountTypeRequest {
+  // id identifies which definition to activate (UUID).
+  string id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+// ActivateAccountTypeResponse returns the activated account type definition.
+message ActivateAccountTypeResponse {
+  // definition is the activated account type now in ACTIVE status.
+  AccountTypeDefinition definition = 1;
+}
+
+// DeprecateAccountTypeRequest transitions an account type from ACTIVE to DEPRECATED.
+message DeprecateAccountTypeRequest {
+  // id identifies which definition to deprecate (UUID).
+  string id = 1 [(buf.validate.field).string.uuid = true];
+
+  // successor_id optionally specifies the UUID of the replacement account type.
+  // When provided, the deprecated definition will point to this successor.
+  // The successor must exist and be in ACTIVE status.
+  string successor_id = 2 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
+}
+
+// DeprecateAccountTypeResponse returns the deprecated account type definition.
+message DeprecateAccountTypeResponse {
+  // definition is the deprecated account type now in DEPRECATED status.
+  AccountTypeDefinition definition = 1;
+}
+
+// ValidationError describes a single validation failure within an account type definition.
+message ValidationError {
+  // field is the field path that failed validation (e.g., "validation_cel", "attribute_schema").
+  string field = 1;
+
+  // error_code is a machine-readable code for the error type (e.g., "CEL_COMPILE_ERROR").
+  string error_code = 2;
+
+  // message is a human-readable description of the validation error.
+  string message = 3;
+
+  // line is the line number within the expression or schema where the error occurred.
+  // 0 if not applicable.
+  int32 line = 4;
+
+  // column is the column number within the expression or schema where the error occurred.
+  // 0 if not applicable.
+  int32 column = 5;
+
+  // suggestions provides optional guidance on how to fix the error.
+  repeated string suggestions = 6;
+}
+
+// ValidateProductDefinitionRequest contains the definition to validate.
+message ValidateProductDefinitionRequest {
+  // definition is the account type definition to validate.
+  AccountTypeDefinition definition = 1 [(buf.validate.field).required = true];
+}
+
+// ValidateProductDefinitionResponse returns the validation result and any errors.
+message ValidateProductDefinitionResponse {
+  // valid is true if the definition passed all validation checks.
+  bool valid = 1;
+
+  // errors contains the list of validation failures. Empty if valid is true.
+  repeated ValidationError errors = 2;
+}
