@@ -1,7 +1,19 @@
 // Package main is the entry point for the Meridian unified binary.
 //
-// It supports a --migrate flag that applies all embedded service migrations
-// to CockroachDB before starting the application.
+// It wires all 11 Meridian services into a single Go process with a shared gRPC
+// server and gateway HTTP server. Services are initialized in tier dependency order:
+//
+//   - Tier 0 (no deps): party, reference-data, market-information, tenant, internal-bank-account
+//   - Tier 1 (Tier 0 deps): financial-accounting, position-keeping, forecasting
+//   - Tier 2 (Tier 1 deps): current-account
+//   - Tier 3 (Tier 2 deps): payment-order, reconciliation
+//
+// Flags:
+//
+//	--migrate       Apply all embedded SQL migrations and exit
+//	--grpc-port     gRPC listen port (default 50051)
+//	--http-port     Gateway HTTP listen port (default 8090)
+//	--database-url  Superuser DSN for migrations (or DATABASE_URL env var)
 package main
 
 import (
@@ -9,20 +21,90 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	// Proto registrations
+	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
+	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
+	forecastingv1 "github.com/meridianhub/meridian/api/proto/meridian/forecasting/v1"
+	internalbankaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_bank_account/v1"
+	marketinformationv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
+	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
+	paymentorderv1 "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1"
+	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
+	reconciliationv1 "github.com/meridianhub/meridian/api/proto/meridian/reconciliation/v1"
+	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
+	sagav1 "github.com/meridianhub/meridian/api/proto/meridian/saga/v1"
+	tenantv1 "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
+
+	// Service packages
+	currentaccountpersistence "github.com/meridianhub/meridian/services/current-account/adapters/persistence"
+	currentaccountservice "github.com/meridianhub/meridian/services/current-account/service"
+	financialaccountingpersistence "github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
+	financialaccountingservice "github.com/meridianhub/meridian/services/financial-accounting/service"
+	forecastingpersistence "github.com/meridianhub/meridian/services/forecasting/adapters/persistence"
+	forecastinghandler "github.com/meridianhub/meridian/services/forecasting/handler"
+	forecastingstarlark "github.com/meridianhub/meridian/services/forecasting/starlark"
+	internalbankaccountpersistence "github.com/meridianhub/meridian/services/internal-bank-account/adapters/persistence"
+	internalbankaccountservice "github.com/meridianhub/meridian/services/internal-bank-account/service"
+	marketinformationpersistence "github.com/meridianhub/meridian/services/market-information/adapters/persistence"
+	marketinformationservice "github.com/meridianhub/meridian/services/market-information/service"
+	partypersistence "github.com/meridianhub/meridian/services/party/adapters/persistence"
+	partyservice "github.com/meridianhub/meridian/services/party/service"
+	paymentorderpersistence "github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
+	paymentorderservice "github.com/meridianhub/meridian/services/payment-order/service"
+	pkpersistence "github.com/meridianhub/meridian/services/position-keeping/adapters/persistence"
+	pkdomain "github.com/meridianhub/meridian/services/position-keeping/domain"
+	positionkeepingservice "github.com/meridianhub/meridian/services/position-keeping/service"
+	reconciliationpersistence "github.com/meridianhub/meridian/services/reconciliation/adapters/persistence"
+	reconciliationservice "github.com/meridianhub/meridian/services/reconciliation/service"
+	refcel "github.com/meridianhub/meridian/services/reference-data/cel"
+	refhandler "github.com/meridianhub/meridian/services/reference-data/handler"
+	refnode "github.com/meridianhub/meridian/services/reference-data/node"
+	refregistry "github.com/meridianhub/meridian/services/reference-data/registry"
+	refsaga "github.com/meridianhub/meridian/services/reference-data/saga"
+	tenantpersistence "github.com/meridianhub/meridian/services/tenant/adapters/persistence"
+	tenantservice "github.com/meridianhub/meridian/services/tenant/service"
+
+	// Gateway
+	"github.com/meridianhub/meridian/services/gateway"
+
+	// Shared platform
 	"github.com/meridianhub/meridian/internal/migrations"
 	"github.com/meridianhub/meridian/services"
+	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	"github.com/meridianhub/meridian/shared/platform/bootstrap"
+	"github.com/meridianhub/meridian/shared/platform/env"
+	"github.com/meridianhub/meridian/shared/platform/events"
+	"github.com/meridianhub/meridian/shared/platform/observability"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/reflection"
+	"gorm.io/gorm"
 )
 
 func main() {
 	migrate := flag.Bool("migrate", false, "Apply all embedded SQL migrations to CockroachDB and exit")
 	databaseURL := flag.String("database-url", "", "Superuser DSN for CockroachDB (e.g., postgres://root@localhost:26257/defaultdb?sslmode=disable)")
+	grpcPort := flag.Int("grpc-port", 50051, "gRPC server listen port")
+	httpPort := flag.Int("http-port", 8090, "Gateway HTTP server listen port")
 	flag.Parse()
 
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
+	slog.SetDefault(logger)
+
+	// Set development defaults: disable auth and billing
+	setDevDefaults()
 
 	if *migrate {
 		dsn := *databaseURL
@@ -44,5 +126,500 @@ func main() {
 		return
 	}
 
-	fmt.Println("meridian: unified binary (use --migrate to apply database migrations)")
+	if err := run(logger, *grpcPort, *httpPort); err != nil {
+		logger.Error("fatal error", "error", err)
+		os.Exit(1)
+	}
+}
+
+// setDevDefaults sets environment variable defaults appropriate for unified local development.
+// These can be overridden by setting the variables before starting the binary.
+func setDevDefaults() {
+	defaults := map[string]string{
+		"AUTH_MODE":       "disabled",
+		"BILLING_ENABLED": "false",
+		"ENVIRONMENT":     "development",
+		"REDIS_ENABLED":   "false",
+		"KAFKA_ENABLED":   "false",
+	}
+	for k, v := range defaults {
+		if os.Getenv(k) == "" {
+			_ = os.Setenv(k, v)
+		}
+	}
+}
+
+func run(logger *slog.Logger, grpcPort, httpPort int) error {
+	ctx := context.Background()
+
+	logger.Info("starting meridian unified binary",
+		"grpc_port", grpcPort,
+		"http_port", httpPort)
+
+	// ─── Shared Infrastructure ───────────────────────────────────────────
+
+	// GORM database connection (used by party, tenant, iba, fa, ca, po, recon)
+	dbConfig := bootstrap.DefaultDatabaseConfig()
+	dbConfig.Logger = logger
+	db, err := bootstrap.NewDatabase(ctx, dbConfig)
+	if err != nil {
+		return fmt.Errorf("gorm database: %w", err)
+	}
+	defer bootstrap.CloseDatabase(db, logger)
+	logger.Info("GORM database connection established")
+
+	// pgxpool connection (used by reference-data, market-information, forecasting)
+	pgxDSN := env.GetEnvOrDefault("DATABASE_URL",
+		"postgres://meridian_user@localhost:26257/meridian?sslmode=disable")
+	pgxPool, err := pgxpool.New(ctx, pgxDSN)
+	if err != nil {
+		return fmt.Errorf("pgxpool: %w", err)
+	}
+	defer pgxPool.Close()
+	if err := pgxPool.Ping(ctx); err != nil {
+		return fmt.Errorf("pgxpool ping: %w", err)
+	}
+	logger.Info("pgxpool connection established")
+
+	// No-op tracer (tracing disabled in unified dev mode)
+	tracer, err := observability.NewTracer(ctx, observability.TracerConfig{
+		ServiceName:  "meridian-unified",
+		OTLPEndpoint: "localhost:4317",
+		Enabled:      false,
+	})
+	if err != nil {
+		return fmt.Errorf("tracer: %w", err)
+	}
+
+	// Shared gRPC server (no auth for unified dev mode)
+	grpcServer := bootstrap.NewGrpcServerBuilder(tracer, logger).Build()
+
+	// Idempotency service backed by pgxpool (no Redis required in dev)
+	idempotencySvc := idempotency.NewPostgresService(pgxPool)
+	if err := idempotencySvc.EnsureTable(ctx); err != nil {
+		return fmt.Errorf("idempotency table: %w", err)
+	}
+
+	// Noop event publishers for FA and PK (no Kafka in dev)
+	faEventPublisher := &noopFAPublisher{}
+	pkEventPublisher := pkdomain.NewNoOpEventPublisher()
+
+	// Outbox publisher and repo (writes to DB, no Kafka worker in dev)
+	outboxPublisher := events.NewOutboxPublisher("unified")
+	outboxRepo := events.NewPostgresOutboxRepository(db)
+
+	// ─── Register All Services ──────────────────────────────────────────
+
+	if err := registerServices(grpcServer, db, pgxPool, idempotencySvc, faEventPublisher, pkEventPublisher, outboxPublisher, outboxRepo, logger); err != nil {
+		return err
+	}
+
+	// ─── Start gRPC Server ───────────────────────────────────────────────
+
+	grpcAddr := fmt.Sprintf(":%d", grpcPort)
+	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", grpcAddr)
+	if err != nil {
+		return fmt.Errorf("listen %s: %w", grpcAddr, err)
+	}
+
+	serverErrors := make(chan error, 1)
+	go func() {
+		logger.Info("gRPC server starting", "address", grpcAddr)
+		if err := grpcServer.Serve(listener); err != nil {
+			serverErrors <- err
+		}
+	}()
+
+	// ─── Start Gateway HTTP Server ───────────────────────────────────────
+
+	gwServer := wireGateway(grpcPort, httpPort, pgxDSN, logger)
+
+	gatewayErrors := make(chan error, 1)
+	go func() {
+		if err := gwServer.Start(context.Background()); err != nil {
+			gatewayErrors <- err
+		}
+	}()
+
+	// ─── Graceful Shutdown ───────────────────────────────────────────────
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	select {
+	case sig := <-sigCh:
+		logger.Info("received signal, shutting down", "signal", sig)
+	case err := <-serverErrors:
+		return fmt.Errorf("gRPC server: %w", err)
+	case err := <-gatewayErrors:
+		return fmt.Errorf("gateway server: %w", err)
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := gwServer.Shutdown(shutdownCtx); err != nil {
+		logger.Error("gateway shutdown error", "error", err)
+	}
+
+	grpcServer.GracefulStop()
+	logger.Info("servers stopped")
+
+	return nil
+}
+
+// registerServices wires all 11 gRPC services into the shared server in tier dependency order,
+// then enables health checking and reflection.
+func registerServices(
+	grpcServer *grpc.Server,
+	db *gorm.DB,
+	pgxPool *pgxpool.Pool,
+	idempotencySvc idempotency.Service,
+	faEventPublisher financialaccountingservice.EventPublisher,
+	pkEventPublisher pkdomain.EventPublisher,
+	outboxPublisher *events.OutboxPublisher,
+	outboxRepo *events.PostgresOutboxRepository,
+	logger *slog.Logger,
+) error {
+	// Tier 0: No gRPC dependencies
+	for _, wire := range []struct {
+		name string
+		fn   func() error
+	}{
+		{"party", func() error { return wireParty(grpcServer, db, logger) }},
+		{"reference-data", func() error { return wireReferenceData(grpcServer, pgxPool, logger) }},
+		{"market-information", func() error { return wireMarketInformation(grpcServer, pgxPool, logger) }},
+		{"tenant", func() error { return wireTenant(grpcServer, db, logger) }},
+		{"internal-bank-account", func() error { return wireInternalBankAccount(grpcServer, db, logger) }},
+	} {
+		if err := wire.fn(); err != nil {
+			return fmt.Errorf("%s: %w", wire.name, err)
+		}
+	}
+	logger.Info("Tier 0 services registered")
+
+	// Tier 1: Depend on Tier 0 via loopback
+	for _, wire := range []struct {
+		name string
+		fn   func() error
+	}{
+		{"financial-accounting", func() error {
+			return wireFinancialAccounting(grpcServer, db, idempotencySvc, faEventPublisher, outboxPublisher, outboxRepo, logger)
+		}},
+		{"position-keeping", func() error {
+			return wirePositionKeeping(grpcServer, pgxPool, idempotencySvc, pkEventPublisher, logger)
+		}},
+		{"forecasting", func() error { return wireForecasting(grpcServer, pgxPool, logger) }},
+	} {
+		if err := wire.fn(); err != nil {
+			return fmt.Errorf("%s: %w", wire.name, err)
+		}
+	}
+	logger.Info("Tier 1 services registered")
+
+	// Tier 2: Depend on Tier 1
+	if err := wireCurrentAccount(grpcServer, db, idempotencySvc, logger); err != nil {
+		return fmt.Errorf("current-account: %w", err)
+	}
+	logger.Info("Tier 2 services registered")
+
+	// Tier 3: Depend on Tier 2
+	for _, wire := range []struct {
+		name string
+		fn   func() error
+	}{
+		{"payment-order", func() error { return wirePaymentOrder(grpcServer, db, idempotencySvc, logger) }},
+		{"reconciliation", func() error { return wireReconciliation(grpcServer, db, logger) }},
+	} {
+		if err := wire.fn(); err != nil {
+			return fmt.Errorf("%s: %w", wire.name, err)
+		}
+	}
+	logger.Info("Tier 3 services registered")
+
+	// Health + Reflection
+	healthServer := health.NewServer()
+	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
+	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
+	reflection.Register(grpcServer)
+
+	return nil
+}
+
+// ─── Tier 0 Wiring ──────────────────────────────────────────────────────────
+
+func wireParty(server *grpc.Server, db *gorm.DB, logger *slog.Logger) error {
+	repo := partypersistence.NewRepository(db)
+	svc, err := partyservice.NewService(repo, logger)
+	if err != nil {
+		return err
+	}
+	partyv1.RegisterPartyServiceServer(server, svc)
+	logger.Info("registered party service")
+	return nil
+}
+
+func wireReferenceData(server *grpc.Server, pool *pgxpool.Pool, logger *slog.Logger) error {
+	instrumentRegistry, err := refregistry.NewPostgresRegistry(pool)
+	if err != nil {
+		return fmt.Errorf("instrument registry: %w", err)
+	}
+
+	compiler, err := refcel.NewCompiler()
+	if err != nil {
+		return fmt.Errorf("CEL compiler: %w", err)
+	}
+
+	refDataSvc, err := refhandler.NewService(instrumentRegistry, compiler, logger)
+	if err != nil {
+		return fmt.Errorf("ref data service: %w", err)
+	}
+
+	nodeRepo := refnode.NewPostgresRepository(pool)
+	nodeSvc, err := refhandler.NewNodeService(nodeRepo, logger)
+	if err != nil {
+		return fmt.Errorf("node service: %w", err)
+	}
+
+	sagaRegistry := refsaga.NewPostgresRegistry(pool, nil)
+	sagaSvc := refsaga.NewRegistryHandler(sagaRegistry, nil, nil, logger)
+
+	referencedatav1.RegisterReferenceDataServiceServer(server, refDataSvc)
+	referencedatav1.RegisterNodeServiceServer(server, nodeSvc)
+	sagav1.RegisterSagaRegistryServiceServer(server, sagaSvc)
+	logger.Info("registered reference-data service")
+	return nil
+}
+
+func wireMarketInformation(server *grpc.Server, pool *pgxpool.Pool, logger *slog.Logger) error {
+	masterTenantID := env.GetEnvOrDefault("MASTER_TENANT_ID", "meridian_master")
+	repos := marketinformationpersistence.NewRepositories(pool, masterTenantID)
+
+	miServer, err := marketinformationservice.NewServer(
+		repos.DataSet,
+		repos.Observation,
+		repos.Source,
+		marketinformationservice.WithLogger(logger),
+	)
+	if err != nil {
+		return err
+	}
+
+	marketinformationv1.RegisterMarketInformationServiceServer(server, miServer)
+	logger.Info("registered market-information service")
+	return nil
+}
+
+func wireTenant(server *grpc.Server, db *gorm.DB, logger *slog.Logger) error {
+	repo := tenantpersistence.NewRepository(db)
+	svc := tenantservice.NewService(repo, nil, nil, nil, logger)
+	tenantv1.RegisterTenantServiceServer(server, svc)
+	logger.Info("registered tenant service")
+	return nil
+}
+
+func wireInternalBankAccount(server *grpc.Server, db *gorm.DB, logger *slog.Logger) error {
+	repo := internalbankaccountpersistence.NewRepository(db)
+	svc, err := internalbankaccountservice.NewService(repo)
+	if err != nil {
+		return err
+	}
+	internalbankaccountv1.RegisterInternalBankAccountServiceServer(server, svc)
+	logger.Info("registered internal-bank-account service")
+	return nil
+}
+
+// ─── Tier 1 Wiring ──────────────────────────────────────────────────────────
+
+func wireFinancialAccounting(
+	server *grpc.Server,
+	db *gorm.DB,
+	idempotencySvc idempotency.Service,
+	eventPub financialaccountingservice.EventPublisher,
+	outboxPub *events.OutboxPublisher,
+	outboxRepo *events.PostgresOutboxRepository,
+	logger *slog.Logger,
+) error {
+	svc, err := financialaccountingservice.NewFinancialAccountingService(
+		financialaccountingpersistence.NewLedgerRepository(db),
+		eventPub,
+		idempotencySvc,
+		outboxPub,
+		outboxRepo,
+	)
+	if err != nil {
+		return err
+	}
+
+	financialaccountingv1.RegisterFinancialAccountingServiceServer(server, svc)
+	logger.Info("registered financial-accounting service")
+	return nil
+}
+
+func wirePositionKeeping(
+	server *grpc.Server,
+	pool *pgxpool.Pool,
+	idempotencySvc idempotency.Service,
+	eventPub pkdomain.EventPublisher,
+	logger *slog.Logger,
+) error {
+	svc, err := positionkeepingservice.NewPositionKeepingService(
+		pkpersistence.NewPostgresRepository(pool),
+		pkpersistence.NewMeasurementRepository(pool),
+		eventPub,
+		idempotencySvc,
+	)
+	if err != nil {
+		return err
+	}
+
+	positionkeepingv1.RegisterPositionKeepingServiceServer(server, svc)
+	logger.Info("registered position-keeping service")
+	return nil
+}
+
+func wireForecasting(server *grpc.Server, pool *pgxpool.Pool, logger *slog.Logger) error {
+	repo := forecastingpersistence.NewStrategyRepository(pool)
+
+	runner, err := forecastingstarlark.NewForecastRunner(forecastingstarlark.ForecastRunnerConfig{
+		MISClient: &noopMISClient{},
+		RefData:   &noopRefDataClient{},
+		Logger:    logger,
+	})
+	if err != nil {
+		return fmt.Errorf("forecast runner: %w", err)
+	}
+
+	svc, err := forecastinghandler.NewService(repo, runner, nil, logger)
+	if err != nil {
+		return err
+	}
+
+	forecastingv1.RegisterForecastingServiceServer(server, svc)
+	logger.Info("registered forecasting service")
+	return nil
+}
+
+// ─── Tier 2 Wiring ──────────────────────────────────────────────────────────
+
+func wireCurrentAccount(
+	server *grpc.Server,
+	db *gorm.DB,
+	_ idempotency.Service,
+	logger *slog.Logger,
+) error {
+	repo := currentaccountpersistence.NewRepository(db)
+	lienRepo := currentaccountpersistence.NewLienRepository(db)
+
+	svc, err := currentaccountservice.NewService(repo, lienRepo)
+	if err != nil {
+		return err
+	}
+
+	currentaccountv1.RegisterCurrentAccountServiceServer(server, svc)
+	logger.Info("registered current-account service")
+	return nil
+}
+
+// ─── Tier 3 Wiring ──────────────────────────────────────────────────────────
+
+func wirePaymentOrder(
+	server *grpc.Server,
+	db *gorm.DB,
+	idempotencySvc idempotency.Service,
+	logger *slog.Logger,
+) error {
+	repo := paymentorderpersistence.NewPaymentOrderRepository(db)
+	svc, err := paymentorderservice.NewService(repo, idempotencySvc)
+	if err != nil {
+		return err
+	}
+
+	paymentorderv1.RegisterPaymentOrderServiceServer(server, svc)
+	logger.Info("registered payment-order service")
+	return nil
+}
+
+func wireReconciliation(
+	server *grpc.Server,
+	db *gorm.DB,
+	logger *slog.Logger,
+) error {
+	svc := reconciliationservice.NewAccountReconciliationService(
+		reconciliationservice.WithSettlementRunRepository(
+			reconciliationpersistence.NewSettlementRunRepository(db),
+		),
+		reconciliationservice.WithDisputeRepository(
+			reconciliationpersistence.NewDisputeRepository(db),
+		),
+		reconciliationservice.WithVarianceRepository(
+			reconciliationpersistence.NewVarianceRepository(db),
+		),
+		reconciliationservice.WithVarianceListRepository(
+			reconciliationpersistence.NewVarianceRepository(db),
+		),
+		reconciliationservice.WithLogger(logger),
+	)
+
+	reconciliationv1.RegisterAccountReconciliationServiceServer(server, svc)
+	logger.Info("registered reconciliation service")
+	return nil
+}
+
+// ─── Gateway Wiring ──────────────────────────────────────────────────────────
+
+// wireGateway creates the gateway HTTP server that proxies Connect/gRPC-Web
+// requests to the shared gRPC server running on grpcPort.
+func wireGateway(grpcPort, httpPort int, databaseURL string, logger *slog.Logger) *gateway.Server {
+	grpcTarget := fmt.Sprintf("localhost:%d", grpcPort)
+
+	config := &gateway.Config{
+		Port:         httpPort,
+		BaseDomain:   "localhost",
+		LocalDevMode: true,
+		DatabaseURL:  databaseURL,
+		Backends: []gateway.BackendRoute{
+			{Prefix: "/v1/party", Target: grpcTarget},
+			{Prefix: "/v1/reference-data", Target: grpcTarget},
+			{Prefix: "/v1/market-information", Target: grpcTarget},
+			{Prefix: "/v1/tenant", Target: grpcTarget},
+			{Prefix: "/v1/internal-bank-account", Target: grpcTarget},
+			{Prefix: "/v1/financial-accounting", Target: grpcTarget},
+			{Prefix: "/v1/position-keeping", Target: grpcTarget},
+			{Prefix: "/v1/forecasting", Target: grpcTarget},
+			{Prefix: "/v1/current-account", Target: grpcTarget},
+			{Prefix: "/v1/payment-order", Target: grpcTarget},
+			{Prefix: "/v1/reconciliation", Target: grpcTarget},
+			{Prefix: "/v1/saga", Target: grpcTarget},
+		},
+	}
+
+	return gateway.NewServer(config, logger, nil)
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+// noopFAPublisher is a no-op event publisher for financial-accounting (no Kafka in dev).
+type noopFAPublisher struct{}
+
+func (p *noopFAPublisher) Publish(_ context.Context, _ financialaccountingservice.DomainEvent) error {
+	return nil
+}
+
+func (p *noopFAPublisher) PublishBatch(_ context.Context, _ []financialaccountingservice.DomainEvent) error {
+	return nil
+}
+
+// noopMISClient is a no-op market information client for forecasting (no inter-service gRPC in dev).
+type noopMISClient struct{}
+
+func (c *noopMISClient) FetchObservations(_ context.Context, _ string, _ time.Time) ([]forecastingstarlark.Observation, error) {
+	return []forecastingstarlark.Observation{}, nil
+}
+
+// noopRefDataClient is a no-op reference data client for forecasting (no inter-service gRPC in dev).
+type noopRefDataClient struct{}
+
+func (c *noopRefDataClient) GetNodeByResolutionKey(_ context.Context, _, _ string) (*forecastingstarlark.ReferenceData, error) {
+	return &forecastingstarlark.ReferenceData{}, nil
 }
