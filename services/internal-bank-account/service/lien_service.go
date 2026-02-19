@@ -262,7 +262,10 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 	var idempotencyLockAcquired bool
 	if req.IdempotencyKey != nil && req.IdempotencyKey.Key != "" && s.idempotencyService != nil {
 		idempotencyKeyStr = req.IdempotencyKey.Key
-		tenantID, _ := tenant.FromContext(ctx)
+		tenantID, tenantOk := tenant.FromContext(ctx)
+		if !tenantOk {
+			s.logger.Warn("tenant context missing for idempotency key, using empty tenant")
+		}
 		idempKey = idempotency.Key{
 			TenantID:  string(tenantID),
 			Namespace: idempotencyNamespace,
@@ -336,13 +339,17 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 		}
 		if idempotencyKeyStr != "" && s.idempotencyService != nil {
 			if responseData, marshalErr := proto.Marshal(resp); marshalErr == nil {
-				_ = s.idempotencyService.StoreResult(ctx, idempotency.Result{
+				if storeErr := s.idempotencyService.StoreResult(ctx, idempotency.Result{
 					Key:         idempKey,
 					Status:      idempotency.StatusCompleted,
 					Data:        responseData,
 					CompletedAt: time.Now(),
 					TTL:         idempotencyResultTTL,
-				})
+				}); storeErr != nil {
+					s.logger.Warn("failed to cache already-executed lien response", "error", storeErr)
+				}
+			} else {
+				s.logger.Warn("failed to marshal already-executed lien response for idempotency cache", "error", marshalErr)
 			}
 		}
 		return resp, nil
@@ -366,13 +373,17 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 		}
 		if idempotencyKeyStr != "" && s.idempotencyService != nil {
 			if responseData, marshalErr := proto.Marshal(resp); marshalErr == nil {
-				_ = s.idempotencyService.StoreResult(ctx, idempotency.Result{
+				if storeErr := s.idempotencyService.StoreResult(ctx, idempotency.Result{
 					Key:         idempKey,
 					Status:      idempotency.StatusCompleted,
 					Data:        responseData,
 					CompletedAt: time.Now(),
 					TTL:         idempotencyResultTTL,
-				})
+				}); storeErr != nil {
+					s.logger.Warn("failed to cache post-lock already-executed lien response", "error", storeErr)
+				}
+			} else {
+				s.logger.Warn("failed to marshal post-lock already-executed lien response for idempotency cache", "error", marshalErr)
 			}
 		}
 		return resp, nil
@@ -453,7 +464,10 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 	var idempotencyLockAcquired bool
 	if req.IdempotencyKey != nil && req.IdempotencyKey.Key != "" && s.idempotencyService != nil {
 		idempotencyKeyStr = req.IdempotencyKey.Key
-		tenantID, _ := tenant.FromContext(ctx)
+		tenantID, tenantOk := tenant.FromContext(ctx)
+		if !tenantOk {
+			s.logger.Warn("tenant context missing for idempotency key, using empty tenant")
+		}
 		idempKey = idempotency.Key{
 			TenantID:  string(tenantID),
 			Namespace: idempotencyNamespace,
@@ -527,13 +541,17 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 		}
 		if idempotencyKeyStr != "" && s.idempotencyService != nil {
 			if responseData, marshalErr := proto.Marshal(resp); marshalErr == nil {
-				_ = s.idempotencyService.StoreResult(ctx, idempotency.Result{
+				if storeErr := s.idempotencyService.StoreResult(ctx, idempotency.Result{
 					Key:         idempKey,
 					Status:      idempotency.StatusCompleted,
 					Data:        responseData,
 					CompletedAt: time.Now(),
 					TTL:         idempotencyResultTTL,
-				})
+				}); storeErr != nil {
+					s.logger.Warn("failed to cache already-terminated lien response", "error", storeErr)
+				}
+			} else {
+				s.logger.Warn("failed to marshal already-terminated lien response for idempotency cache", "error", marshalErr)
 			}
 		}
 		return resp, nil
@@ -557,13 +575,17 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 		}
 		if idempotencyKeyStr != "" && s.idempotencyService != nil {
 			if responseData, marshalErr := proto.Marshal(resp); marshalErr == nil {
-				_ = s.idempotencyService.StoreResult(ctx, idempotency.Result{
+				if storeErr := s.idempotencyService.StoreResult(ctx, idempotency.Result{
 					Key:         idempKey,
 					Status:      idempotency.StatusCompleted,
 					Data:        responseData,
 					CompletedAt: time.Now(),
 					TTL:         idempotencyResultTTL,
-				})
+				}); storeErr != nil {
+					s.logger.Warn("failed to cache post-lock already-terminated lien response", "error", storeErr)
+				}
+			} else {
+				s.logger.Warn("failed to marshal post-lock already-terminated lien response for idempotency cache", "error", marshalErr)
 			}
 		}
 		return resp, nil
