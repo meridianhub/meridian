@@ -138,8 +138,8 @@ type AccountTypeDefinition struct {
     Version                int           // Allows multiple versions of the same code
     DisplayName            string        // "GBP Personal Current Account"
     Description            string        // Detailed description of this product type
-    NormalBalance          string        // "DEBIT" or "CREDIT"
-    BehaviorClass          string        // Fixed system behavior category (see below)
+    NormalBalance          NormalBalance  // DEBIT or CREDIT (typed enum)
+    BehaviorClass          BehaviorClass // Fixed system behavior category (typed enum)
     InstrumentCode         string        // Designated instrument: "GBP", "KWH", "TONNE_CO2E"
     DefaultSagaPrefix      string        // e.g., "SAVINGS" for "{prefix}.deposit" routing
     FiatMethodID           *uuid.UUID    // Default method for any fiat→fiat conversion (e.g., forex-spot)
@@ -150,7 +150,7 @@ type AccountTypeDefinition struct {
     EligibilityCEL         string        // CEL expression evaluated at account creation
     AttributeSchema        json.RawMessage // JSON Schema validating the Attributes map
     Attributes             map[string]any // Extensible metadata validated against AttributeSchema
-    Status                 Status        // DRAFT, ACTIVE, DEPRECATED. ACTIVE is immutable
+    Status                 Status        // DRAFT, ACTIVE, DEPRECATED (typed enum). ACTIVE is immutable
     IsSystem               bool          // Platform blueprint (read-only for tenants)
     SuccessorID            *uuid.UUID    // Points to replacement when deprecated
     CreatedAt              time.Time
@@ -724,7 +724,9 @@ Tenants extend with their own entries (e.g., `ENERGY_SETTLEMENT_KWH`,
 
 ## Success Criteria
 
-1. A tenant can define a new account type (e.g., `ENERGY_SETTLEMENT`) via manifest without any code changes or deployments.
+1. A tenant can define a new account type (e.g.,
+   `ENERGY_SETTLEMENT`) via manifest without any code changes or
+   deployments.
 2. Accounts created with `product_type_code = "ENERGY_SETTLEMENT"`
    automatically route to the correct Starlark saga.
 3. The manifest compilation pipeline validates product definitions and
@@ -741,18 +743,288 @@ Tenants extend with their own entries (e.g., `ENERGY_SETTLEMENT_KWH`,
    ineligible parties with a structured error.
 9. Product type `Attributes` are validated against `AttributeSchema`
    at both product definition and account creation time.
+10. `BehaviorClass`, `Status`, and `NormalBalance` are typed Go enums
+    with `IsValid()` methods, proto enums with `buf/validate`, and SQL
+    CHECK constraints -- three-layer validation with no stringly-typed
+    gaps.
+11. `ActivateAccountType` performs all cross-reference pre-checks
+    (instrument, valuation methods, CEL compilation, schema validation,
+    saga existence) and returns structured errors listing all failures.
+12. `CreateDraft` and platform seeding are idempotent via `ON CONFLICT`
+    and deterministic UUID generation respectively. Re-applying the
+    same manifest produces identical state.
+
+## Design for Correctness
+
+This section defines invariants that the AccountTypeRegistry must enforce
+to catch errors at compile/creation time rather than at runtime. These
+requirements are derived from existing codebase patterns and known bugs
+in the current account type system.
+
+### Type Safety
+
+#### Go Typed Enums with Exhaustive Validation
+
+All string-based fields with a fixed set of allowed values must be
+declared as Go typed string constants with an `IsValid()` method,
+following the pattern in `internal-bank-account/domain/account_type.go`
+and `reference-data/registry/instrument_status.go`.
+
+```go
+// Status represents the lifecycle status of an account type definition.
+type Status string
+
+const (
+    StatusDraft      Status = "DRAFT"
+    StatusActive     Status = "ACTIVE"
+    StatusDeprecated Status = "DEPRECATED"
+)
+
+func (s Status) IsValid() bool {
+    switch s {
+    case StatusDraft, StatusActive, StatusDeprecated:
+        return true
+    }
+    return false
+}
+
+// BehaviorClass represents a fixed system behavior category.
+type BehaviorClass string
+
+const (
+    BehaviorClassCustomer  BehaviorClass = "CUSTOMER"
+    BehaviorClassClearing  BehaviorClass = "CLEARING"
+    BehaviorClassNostro    BehaviorClass = "NOSTRO"
+    BehaviorClassVostro    BehaviorClass = "VOSTRO"
+    BehaviorClassHolding   BehaviorClass = "HOLDING"
+    BehaviorClassSuspense  BehaviorClass = "SUSPENSE"
+    BehaviorClassRevenue   BehaviorClass = "REVENUE"
+    BehaviorClassExpense   BehaviorClass = "EXPENSE"
+    BehaviorClassInventory BehaviorClass = "INVENTORY"
+)
+
+func (b BehaviorClass) IsValid() bool { /* switch-based check */ }
+
+// NormalBalance represents the accounting normal balance direction.
+type NormalBalance string
+
+const (
+    NormalBalanceDebit  NormalBalance = "DEBIT"
+    NormalBalanceCredit NormalBalance = "CREDIT"
+)
+
+func (n NormalBalance) IsValid() bool { /* switch-based check */ }
+```
+
+All three types are validated at the domain layer (constructor and
+setter methods), at the persistence layer (SQL CHECK constraints),
+and at the API layer (proto enum with `buf/validate`). Three-layer
+validation ensures no invalid value can enter the system regardless
+of entry point.
+
+**Note on exhaustive linter**: The `exhaustive` linter in
+`.golangci.yml` only covers `iota` enums, not typed string constants.
+All `switch` statements on `Status`, `BehaviorClass`, and
+`NormalBalance` must include a `default` case that returns an error
+or panics in tests. This is enforced by code review until the linter
+supports string-based exhaustive checks.
+
+#### Case Normalization
+
+All `Code`, `BehaviorClass`, `NormalBalance`, and `InstrumentCode`
+values are stored in uppercase. The domain constructor normalises
+input via `strings.ToUpper()` before validation. This prevents the
+class of bugs where `"current"` and `"CURRENT"` are treated as
+different values (a known issue in the current account service where
+`account_type` is stored as lowercase `"current"` while internal
+bank accounts use uppercase `"CLEARING"`).
+
+#### Proto Enum for BehaviorClass
+
+The proto definition for `BehaviorClass` uses a proto enum (not a
+string) with `buf/validate` rules:
+
+```protobuf
+enum BehaviorClass {
+    BEHAVIOR_CLASS_UNSPECIFIED = 0;
+    BEHAVIOR_CLASS_CUSTOMER    = 1;
+    BEHAVIOR_CLASS_CLEARING    = 2;
+    // ... remaining values
+}
+
+// In the message:
+BehaviorClass behavior_class = 6 [(buf.validate.field).enum = {
+    defined_only: true, not_in: [0]
+}];
+```
+
+This guarantees that gRPC callers cannot send an unrecognised
+behavior class. The existing pattern is proven in
+`internal_bank_account.proto::InternalAccountType`.
+
+### Immutability Invariants
+
+#### ACTIVE Definitions Are Immutable
+
+Once a definition transitions to ACTIVE, no fields may be modified.
+`UpdateDefinition` returns `ErrNotDraft` if `status != DRAFT`. This
+follows the existing InstrumentRegistry pattern where
+`updateDefinition` checks `if inst.Status != StatusDraft { return
+ErrNotDraft }`.
+
+To change an active product type: create a new version in DRAFT,
+configure it, activate it, deprecate the old version with
+`successor_id` pointing to the new one.
+
+#### Write-Once Fields
+
+The following fields are set once and cannot be changed after initial
+creation, even in DRAFT status:
+
+- `Code` -- immutable primary key (like instrument code)
+- `IsSystem` -- platform blueprints cannot be reclassified
+- `BehaviorClass` -- changing system behavior category after creation
+  would invalidate all accounts created under the old category
+
+Attempted modification returns `ErrFieldImmutable` with the field
+name. This follows the `ErrSuccessorWriteOnce` pattern in the
+instrument registry.
+
+#### Version Pinning at Account Creation
+
+When an account is created, it records an immutable
+`(product_type_code, product_type_version)` pair. The account
+operates under the rules of that version for its entire lifetime.
+Product type deprecation prevents new account creation but does not
+affect existing accounts.
+
+### Fail-Fast: Activation Pre-Checks
+
+The `ActivateAccountType` operation is the primary safety gate.
+Unlike the current InstrumentRegistry (which only checks status),
+the AccountTypeRegistry performs comprehensive cross-reference
+validation at activation time:
+
+1. **Instrument exists and is ACTIVE**: The `instrument_code`
+   references a live instrument in the InstrumentRegistry.
+2. **Fiat method exists** (if set): `fiat_method_id` and
+   `fiat_method_version` reference an existing valuation method.
+3. **Valuation method templates reference existing methods**: Each
+   `ValuationMethodTemplate.ValuationMethodID` resolves to a live
+   method.
+4. **Input instruments exist and are ACTIVE**: Each template's
+   `InputInstrument` references a live instrument.
+5. **CEL expressions compile**: All three CEL fields (validation,
+   bucketing, eligibility) compile successfully with their respective
+   environments. While these are also checked at draft creation,
+   re-validation at activation catches cases where the CEL
+   environment has changed since draft creation.
+6. **Attribute schema is valid**: `AttributeSchema` compiles as
+   valid JSON Schema, and the definition's own `Attributes` map
+   validates against it.
+7. **Saga exists** (if prefix set): If `default_saga_prefix` is
+   non-empty, at least one saga matching the
+   `{prefix}.{operation}` pattern exists in the saga registry
+   (platform or tenant).
+8. **No duplicate ACTIVE code**: The partial unique index
+   `uq_active_account_type_code` enforces this at the database
+   level, but the activation check returns a descriptive error
+   (`ErrActiveCodeExists`) before hitting the constraint.
+
+Activation failure returns a structured error listing all failed
+checks, not just the first one. This enables the manifest
+compilation pipeline to report all issues in a single pass.
+
+### Idempotency Contracts
+
+#### CreateDraft: ON CONFLICT DO NOTHING
+
+`CreateDraft` uses `INSERT ... ON CONFLICT (code, version) DO
+NOTHING` and returns the existing definition if the row already
+exists. This makes manifest re-application safe -- applying the
+same manifest twice produces the same result. This follows the
+pattern in `saga/postgres_registry.go` where duplicate saga
+definitions are handled with conflict resolution.
+
+#### ActivateAccountType: Idempotent Transition
+
+Calling `ActivateAccountType` on an already-ACTIVE definition
+returns success (nil error), not `ErrNotDraft`. This follows the
+idempotent transition pattern in `ValuationFeature.Activate()`
+where `if status == ACTIVE { return nil }`. This prevents saga
+retries from failing on the activation step.
+
+#### Deterministic UUID Generation for Seeding
+
+Platform blueprint seeding uses `uuid.NewSHA1(namespaceUUID,
+[]byte(code))` to generate deterministic IDs. Re-running the
+seed operation produces the same UUIDs and hits `ON CONFLICT`
+gracefully. This follows the existing pattern in the saga
+definition seeder.
+
+#### ValuationFeature Seeding: Upsert Semantics
+
+When an account is created and ValuationFeatures are seeded from
+templates, the seeding uses `INSERT ... ON CONFLICT
+(account_id, instrument_code) DO NOTHING`. If a feature already
+exists for that account+instrument pair (e.g., from a retry),
+the existing feature is preserved.
+
+### CEL Environment Scoping
+
+Each CEL policy type has a dedicated compilation environment with
+an explicit set of declared variables. This prevents the class of
+bugs where a CEL expression compiles successfully against one
+environment but fails at evaluation time because the expected
+variables are not present.
+
+| CEL Field | Environment Variables | Notes |
+|-----------|----------------------|-------|
+| `ValidationCEL` | `amount`, `attributes`, `timestamp`, `source` | Same as instrument validation |
+| `BucketingCEL` | `attributes` | Same as instrument bucketing |
+| `EligibilityCEL` | `party.type`, `party.status`, `party.external_reference_type`, `attributes` | New environment |
+
+Attempting to compile a CEL expression that references an
+undeclared variable (e.g., `party.type` in a `ValidationCEL`
+field) returns a compilation error, not a runtime error. This is
+the same behavior as the existing CEL compiler in
+`services/reference-data/cel/compiler.go`.
+
+### Concrete Bugs This Design Prevents
+
+The following are real failure modes identified in the current
+codebase that the AccountTypeRegistry eliminates:
+
+| Bug | Current Cause | How Registry Prevents It |
+|-----|---------------|--------------------------|
+| Case mismatch (`"current"` vs `"CURRENT"`) | Current account stores lowercase, IBA stores uppercase | Case normalization at domain layer |
+| No account type validation at creation | `InitiateCurrentAccount` accepts any string | Registry lookup at creation, reject unknown codes |
+| Hardcoded `ACCOUNT_TYPE_CURRENT` in saga handlers | `saga_handlers.go:467` uses proto enum constant | Registry-based lookup replaces hardcoded value |
+| AccountResolver divergence | Copy-pasted 3x across services with different safety checks | Single source of truth in registry |
+| Missing instrument validation at account creation | Current account skips instrument check when client is nil | Activation pre-check ensures instrument exists |
+| Stale valuation features | Per-account features manually configured, easy to forget | Product-type-level templates, auto-seeded |
+| CEL variable mismatch | Expression compiles but fails at eval when variables differ | Environment-scoped compilation |
+| Enum extension requires deployment | Adding a new account type needs code change + deploy | Registry entry via manifest, no deployment |
 
 ## Testing Strategy
 
-- **Unit tests**: Domain model validation, lifecycle transitions, CEL
-  compilation (validation, bucketing, eligibility environments),
-  attribute schema validation, optimistic locking. Following
+- **Unit tests**: Domain model validation (typed enums, case
+  normalization, immutability guards, write-once fields), lifecycle
+  transitions (including idempotent activation), CEL compilation
+  (validation, bucketing, eligibility environments -- including
+  cross-environment variable rejection), attribute schema validation,
+  optimistic locking, deterministic UUID generation. Following
   InstrumentRegistry test patterns.
-- **Integration tests**: Testcontainer-based (CockroachDB). Full registry
-  CRUD, multi-tenant isolation, platform blueprint seeding.
-- **E2E tests**: Manifest apply with account type registration, account
-  creation with product_type_code, saga routing verification,
-  valuation feature seeding from templates.
+- **Integration tests**: Testcontainer-based (CockroachDB). Full
+  registry CRUD, multi-tenant isolation, platform blueprint seeding
+  with ON CONFLICT idempotency, activation pre-check failures
+  (invalid instrument, missing valuation method, CEL compilation
+  error), partial unique index enforcement, SQL CHECK constraint
+  coverage for BehaviorClass/NormalBalance/Status.
+- **E2E tests**: Manifest apply with account type registration,
+  account creation with product_type_code, saga routing verification,
+  valuation feature seeding from templates, re-application
+  idempotency (apply same manifest twice, verify identical state).
 
 ## References
 
