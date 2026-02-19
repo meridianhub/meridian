@@ -336,17 +336,27 @@ Product types carry a `default_saga_prefix` field. Saga resolution follows:
 1. If default_saga_prefix is set:
    a. Try: "{default_saga_prefix}.{operation}" with tenant override
    b. Try: "{default_saga_prefix}.{operation}" platform default
-2. Fallback: "{operation}" (backwards compatible)
+   c. FAIL -- return ErrSagaNotFound (no fallback to generic)
+2. If default_saga_prefix is empty or null:
+   a. Try: "{operation}" with tenant override
+   b. Try: "{operation}" platform default
 ```
 
-When `default_saga_prefix` is empty or null, steps 1a/1b are skipped
-and resolution goes directly to the fallback. This is the expected
-path for product types that use the standard (non-prefixed) saga
-definitions.
+**No fallback when a prefix is defined.** If a product type declares
+`default_saga_prefix = "SAVINGS"`, it explicitly expects specialised
+logic in `SAVINGS.deposit`. Falling back silently to the generic
+`deposit` saga would bypass compliance rules, fee calculations, or
+interest accrual logic defined in the product-specific saga. Fail-fast
+here surfaces missing saga definitions at integration testing time
+rather than at runtime in production.
+
+When `default_saga_prefix` is empty or null, resolution uses the
+unprefixed operation name directly. This is the expected path for
+product types that use the standard saga definitions.
 
 Example: Product type `SAVINGS` with `default_saga_prefix = "SAVINGS"`:
 
-- Deposit operation resolves: `SAVINGS.deposit` (tenant) -> `SAVINGS.deposit` (platform) -> `deposit` (fallback)
+- Deposit operation resolves: `SAVINGS.deposit` (tenant) -> `SAVINGS.deposit` (platform) -> **error** (no fallback)
 
 ### Multi-Tenant Product Catalogs
 
@@ -504,9 +514,17 @@ true
 
 The `AttributeSchema` field holds a JSON Schema (draft 2020-12) that
 validates the `Attributes` map on the product type definition itself
-and on account-level attributes at creation time. This uses the
+and on **account-level** attributes at creation time. This uses the
 existing `santhosh-tekuri/jsonschema/v5` library already in the
 dependency tree (used by the position tool's `SchemaValidator`).
+
+**Scope distinction:** `AccountTypeDefinition.AttributeSchema`
+validates attributes stored on the **Account** entity (e.g.,
+`overdraft_limit`, `grid_zone`). This is distinct from
+`InstrumentDefinition.AttributeSchema`, which validates attributes
+stored on the **Position/Ledger** entity. Developers must use the
+correct schema for the correct layer -- account-level metadata
+belongs here, position-level metadata belongs on the instrument.
 
 **Validation points:**
 
@@ -660,16 +678,22 @@ The compilation pipeline validates:
    feedback loop and helps humans catch typos in manifest definitions
    (e.g., `instrument_code: "GBB"` → suggestion: `"GBP"`)
 
-### Read-Through Cache Requirement
+### Read-Through Cache Requirement (Stream H -- Critical Path)
 
-Consuming services (`services/current-account`,
-`services/internal-bank-account`) must implement a read-through cache
-for account type definitions, following the `LocalInstrumentCache`
-pattern in `services/reference-data/cache/instrument_cache.go`.
+**This is the highest-risk item for performance.** Consuming services
+(`services/current-account`, `services/internal-bank-account`) **MUST**
+implement a `LocalAccountTypeCache` exactly mirroring the
+`LocalInstrumentCache` in
+`services/reference-data/cache/instrument_cache.go`.
 
-Account creation and valuation resolution are hot paths. A synchronous
-gRPC call to Reference Data for every `InitiateAccount` or
-`EvaluateAssetValuation` request is not acceptable. The cache must:
+Every `InitiateAccount` call evaluates `EligibilityCEL` and validates
+`AttributeSchema`. Every transaction evaluates `ValidationCEL`. Every
+valuation resolves method templates. Without a local cache, each of
+these operations requires a synchronous gRPC round-trip to Reference
+Data, which will not meet throughput targets. The implementation plan
+must include an explicit **Stream H: Caching Layer** task that ports
+the `singleflight` + `hashicorp/golang-lru/v2` pattern to account
+types. The cache must:
 
 - **Tenant-isolated**: Separate LRU cache per tenant (same as
   `instrument_cache.go`).
@@ -702,7 +726,16 @@ same `hashicorp/golang-lru/v2` and `singleflight` libraries.
 
 ## Platform Blueprint Seed Data
 
-System account types seeded during tenant provisioning:
+System account types are seeded during tenant provisioning so that the
+platform works out of the box without tenants having to define base
+types. Every existing hardcoded enum value (`CURRENT`, `SAVINGS`,
+`CLEARING`, `NOSTRO`, `VOSTRO`, `HOLDING`, `SUSPENSE`, `REVENUE`,
+`EXPENSE`, `INVENTORY`) must have a corresponding seed entry. This
+ensures the First Client path requires zero product configuration --
+the default manifest provisions all standard account types
+automatically.
+
+Seed data:
 
 | Code | BehaviorClass | Instrument | Normal Balance | Saga Prefix |
 |------|---------------|------------|----------------|-------------|
