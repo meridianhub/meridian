@@ -42,6 +42,11 @@ func TestWireGateway_Config(t *testing.T) {
 	dialer := &net.Dialer{}
 	var dialErr error
 	for range 40 {
+		select {
+		case err := <-serverErr:
+			t.Fatalf("gateway server failed to start: %v", err)
+		default:
+		}
 		var conn net.Conn
 		conn, dialErr = dialer.DialContext(ctx, "tcp", addr)
 		if dialErr == nil {
