@@ -12,7 +12,10 @@ triggers:
 instructions: |
   The AccountTypeRegistry lives within Reference Data (not a separate service).
   It follows the InstrumentRegistry pattern exactly: DRAFT/ACTIVE/DEPRECATED lifecycle,
-  is_system flag for platform blueprints, CEL compilation at draft creation, optimistic locking.
+  is_system flag for platform blueprints, CEL compilation at draft creation.
+  Optimistic locking: UpdateDefinition includes updated_at in the WHERE clause; returns
+  ErrOptimisticLock when no rows match (concurrent modification detected).
+  Only one ACTIVE definition per code is allowed (enforced by partial unique index).
   Product definitions reference sagas by name convention ({prefix}.{operation}), not by embedding scripts.
   Product types also define accepted valuation methods (conversion rules) -- ValuationFeatures are
   configured at the product type level and seeded to accounts on creation, not per-account.
@@ -164,11 +167,12 @@ type AccountTypeDefinition struct {
 // instrument is a different asset class to the account's designated
 // instrument (e.g., kWh→GBP, CO2→GBP).
 //
-// Templates have their own lifecycle independent of the parent
-// AccountTypeDefinition. New conversion methods can be added to an
-// existing product type without creating a new product type version.
-// Deprecated templates use SuccessorID to point to their replacement,
-// following the same supersedes pattern as AccountTypeDefinition itself.
+// Templates have their own DRAFT/ACTIVE/DEPRECATED status and
+// SuccessorID fields, enabling independent lifecycle management.
+// In v1, templates are activated and deprecated alongside their
+// parent AccountTypeDefinition. Independent template lifecycle
+// (add/replace on an active product type) is deferred to v2.
+// SuccessorID points to a replacement template when deprecated.
 //
 // Example: INVENTORY_KWH accepts carbon credit deposits:
 //   - {InputInstrument: "TONNE_CO2E", MethodID: <carbon-kWh-method>}
@@ -200,6 +204,8 @@ type AccountTypeRegistry interface {
     ListActive(ctx context.Context) ([]*AccountTypeDefinition, error)
     ListByStatus(ctx context.Context, status Status) ([]*AccountTypeDefinition, error)
     CreateDraft(ctx context.Context, def *AccountTypeDefinition) error
+    // UpdateDefinition uses optimistic locking: the caller's UpdatedAt must match
+    // the stored value. Returns ErrOptimisticLock on concurrent modification.
     UpdateDefinition(ctx context.Context, code string, version int, updates *AccountTypeDefinition) error
     ActivateAccountType(ctx context.Context, code string, version int) error
     DeprecateAccountType(ctx context.Context, code string, version int, successorID *uuid.UUID) error
@@ -295,10 +301,16 @@ CREATE UNIQUE INDEX uq_active_valuation_method
 Product types carry a `default_saga_prefix` field. Saga resolution follows:
 
 ```text
-1. Try: "{default_saga_prefix}.{operation}" with tenant override
-2. Try: "{default_saga_prefix}.{operation}" platform default
-3. Fallback: "{operation}" (backwards compatible)
+1. If default_saga_prefix is set:
+   a. Try: "{default_saga_prefix}.{operation}" with tenant override
+   b. Try: "{default_saga_prefix}.{operation}" platform default
+2. Fallback: "{operation}" (backwards compatible)
 ```
+
+When `default_saga_prefix` is empty or null, steps 1a/1b are skipped
+and resolution goes directly to the fallback. This is the expected
+path for product types that use the standard (non-prefixed) saga
+definitions.
 
 Example: Product type `SAVINGS` with `default_saga_prefix = "SAVINGS"`:
 
@@ -383,23 +395,22 @@ ValuationFeatures from the product type's explicit templates. Fiat→fiat
 conversion does not require seeded features -- it is resolved at
 runtime from the product type's `fiat_method_id`.
 
-#### Independent Lifecycle and Supersedes
+#### Template Lifecycle and Supersedes
 
-Explicit valuation method templates have their own
-DRAFT → ACTIVE → DEPRECATED lifecycle, independent of the parent
-product type version. This means:
+Valuation method templates carry their own `Status` and `SuccessorID`
+fields. The schema supports independent lifecycle management, but in
+v1, templates are activated and deprecated alongside their parent
+product type. Independent template lifecycle (add/replace templates
+on an already-active product type) is deferred to v2.
 
-- **v1 scope**: Templates follow their parent's lifecycle -- they are
-  activated and deprecated alongside the product type. Independent
-  template lifecycle management (add/replace templates on an active
-  product type) is supported by the schema but deferred to v2.
-- **Adding a new conversion** (e.g., TONNE_CO2E→GBP to `CURRENT_GBP`)
-  creates a new template row without changing the product type
-  definition.
+Within a product type version:
+
+- **Adding a conversion** (e.g., TONNE_CO2E→GBP to `CURRENT_GBP`)
+  adds a template row to the DRAFT product type before activation.
 - **Replacing a method version** deprecates the old template (setting
-  `successor_id` to the new one) and activates the replacement. The
-  partial unique index ensures only one ACTIVE template per
-  `(account_type, input_instrument)` pair.
+  `successor_id` to the new one) and activates the replacement in a
+  new product type version. The partial unique index ensures only one
+  ACTIVE template per `(account_type, input_instrument)` pair.
 - **Existing accounts are unaffected** -- their already-seeded
   ValuationFeatures continue to reference the method version they were
   created with. New accounts pick up the current ACTIVE templates.
