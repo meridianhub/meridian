@@ -143,9 +143,9 @@ type AccountTypeDefinition struct {
     ValuationMethods       []ValuationMethodTemplate // Explicit non-fiat conversion templates
     ValidationCEL          string        // CEL expression for transaction validation
     BucketingCEL           string        // CEL expression for fungibility bucketing
-    EligibilityCEL         string        // v1 placeholder: reserved field, not enforced at runtime
-    AttributeSchema        []byte        // v1 placeholder: stored but not validated
-    Attributes             map[string]any // Extensible metadata (fee config, interest config, etc.)
+    EligibilityCEL         string        // CEL expression evaluated at account creation
+    AttributeSchema        json.RawMessage // JSON Schema validating the Attributes map
+    Attributes             map[string]any // Extensible metadata validated against AttributeSchema
     Status                 Status        // DRAFT, ACTIVE, DEPRECATED. ACTIVE is immutable
     IsSystem               bool          // Platform blueprint (read-only for tenants)
     SuccessorID            *uuid.UUID    // Points to replacement when deprecated
@@ -412,6 +412,118 @@ product type version. This means:
   reference and continue operating under the rules of the version they
   were created with. Deprecation only prevents new account creation.
 
+### Eligibility CEL
+
+The `EligibilityCEL` field holds a CEL expression evaluated at account
+creation time to determine whether the requesting party may open an
+account of this type. It uses a dedicated CEL environment following
+the same compiler infrastructure as `ValidationCEL` and `BucketingCEL`
+(security constraints: 4096 byte limit, depth 10, cost limit 10000).
+
+**CEL environment variables:**
+
+| Variable | Type | Source |
+|----------|------|--------|
+| `party.type` | `string` | Party service: `"PERSON"` or `"ORGANIZATION"` |
+| `party.status` | `string` | Party service: `"ACTIVE"`, `"RESTRICTED"`, `"SUSPENDED"`, `"TERMINATED"` |
+| `party.external_reference_type` | `string` | Party service: `"COMPANIES_HOUSE"`, `"LEI"`, etc. |
+| `attributes` | `map[string]string` | Request-supplied attributes for the new account |
+
+**Return type:** `bool` (true = eligible, false = rejected).
+
+**Evaluation point:** The account-creating service calls the registry's
+`CheckEligibility` method before persisting the account. Rejection
+returns a `FAILED_PRECONDITION` gRPC status with the expression that
+failed.
+
+**Compilation:** The CEL expression is compiled when the product type
+is created in DRAFT status, identical to how `ValidationCEL` is
+compiled today. Compilation failure prevents the draft from being
+saved.
+
+**Examples:**
+
+```text
+# Only active parties can open accounts
+party.status == 'ACTIVE'
+
+# Only organisations with a Companies House reference
+party.type == 'ORGANIZATION' && party.external_reference_type == 'COMPANIES_HOUSE'
+
+# Empty string = no eligibility restriction (all parties eligible)
+""
+```
+
+### Attribute Schema
+
+The `AttributeSchema` field holds a JSON Schema (draft 2020-12) that
+validates the `Attributes` map on the product type definition itself
+and on account-level attributes at creation time. This uses the
+existing `santhosh-tekuri/jsonschema/v5` library already in the
+dependency tree (used by the position tool's `SchemaValidator`).
+
+**Validation points:**
+
+1. **Product type creation/update**: When a product type is saved in
+   DRAFT status, the `Attributes` map is validated against
+   `AttributeSchema`. Invalid attributes prevent the draft from being
+   saved.
+2. **Account creation**: When an account is created with
+   `product_type_code`, any account-level attributes supplied in the
+   request are validated against the product type's `AttributeSchema`.
+
+**Schema compilation:** Schemas are compiled and cached on first use,
+following the existing `SchemaValidator` pattern (double-checked
+locking, SHA256 cache key).
+
+**Empty schema:** An empty or null `AttributeSchema` means no
+validation -- all attributes are accepted. This preserves backwards
+compatibility for product types that don't need structured attributes.
+
+**Example schemas:**
+
+```json
+// Savings account: requires interest tier, optional overdraft limit
+{
+  "type": "object",
+  "properties": {
+    "interest_tier": {
+      "type": "string",
+      "enum": ["STANDARD", "PREMIUM", "INTRODUCTORY"]
+    },
+    "overdraft_limit": {
+      "type": "string",
+      "pattern": "^[0-9]+(\\.[0-9]{2})?$"
+    }
+  },
+  "required": ["interest_tier"],
+  "additionalProperties": { "type": "string" }
+}
+```
+
+```json
+// Energy inventory: requires grid zone and source type
+{
+  "type": "object",
+  "properties": {
+    "grid_zone": {
+      "type": "string",
+      "description": "Electrical grid zone identifier"
+    },
+    "source_type": {
+      "type": "string",
+      "enum": ["solar", "wind", "hydro", "nuclear", "gas", "coal"]
+    },
+    "settlement_period": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    }
+  },
+  "required": ["grid_zone"],
+  "additionalProperties": { "type": "string" }
+}
+```
+
 #### Manifest Surface
 
 The manifest remains the authoring surface for product definitions:
@@ -425,6 +537,15 @@ account_types:
     fiat_method: "forex-spot-v1"     # Resolved to UUID via Valuation Engine lookup
     policies:
       validation: "amount > 0 && amount <= 1000000"
+      eligibility: "party.status == 'ACTIVE'"
+    attribute_schema:
+      type: object
+      properties:
+        overdraft_limit:
+          type: string
+          pattern: "^[0-9]+(\\.[0-9]{2})?$"
+      additionalProperties:
+        type: string
 
   - code: INVENTORY_KWH
     name: "kWh Inventory Account"
@@ -470,12 +591,17 @@ message ValidationError {
 
 The compilation pipeline validates:
 
-1. CEL expressions compile successfully (existing CEL compiler)
-2. Saga scripts parse and pass dry-run validation (existing saga
+1. All CEL expressions compile successfully -- `ValidationCEL`,
+   `BucketingCEL`, and `EligibilityCEL` (existing CEL compiler with
+   environment-specific variable declarations)
+2. `AttributeSchema` is valid JSON Schema (compilation via
+   `santhosh-tekuri/jsonschema/v5`), and `Attributes` map validates
+   against it
+3. Saga scripts parse and pass dry-run validation (existing saga
    validator)
-3. Cross-references are valid (instrument_code references a defined
+4. Cross-references are valid (instrument_code references a defined
    instrument, valuation method IDs reference existing methods)
-4. Structured errors returned for iteration
+5. Structured errors returned for iteration
 
 ## Platform Blueprint Seed Data
 
@@ -527,15 +653,22 @@ Tenants extend with their own entries (e.g., `ENERGY_SETTLEMENT_KWH`,
    or valuation method references are invalid.
 4. Existing accounts and services continue to work unchanged during migration (backwards compatible).
 5. Platform blueprints are seeded during tenant provisioning and are read-only for tenants.
-6. Valuation method templates defined on a product type are
+6. `InternalAccountType` and `common/v1/AccountType` proto enums are
+   fully removed, replaced by dynamic registry lookups.
+7. Valuation method templates defined on a product type are
    automatically seeded as ValuationFeatures when an account of that
    type is created -- no per-account manual configuration required.
+8. Account creation with an `EligibilityCEL` expression rejects
+   ineligible parties with a structured error.
+9. Product type `Attributes` are validated against `AttributeSchema`
+   at both product definition and account creation time.
 
 ## Testing Strategy
 
 - **Unit tests**: Domain model validation, lifecycle transitions, CEL
-  compilation, optimistic locking. Following InstrumentRegistry test
-  patterns.
+  compilation (validation, bucketing, eligibility environments),
+  attribute schema validation, optimistic locking. Following
+  InstrumentRegistry test patterns.
 - **Integration tests**: Testcontainer-based (CockroachDB). Full registry
   CRUD, multi-tenant isolation, platform blueprint seeding.
 - **E2E tests**: Manifest apply with account type registration, account
@@ -551,5 +684,7 @@ Tenants extend with their own entries (e.g., `ENERGY_SETTLEMENT_KWH`,
 - **CEL compiler**: `services/reference-data/cel/compiler.go`
 - **ValuationFeature domain**: `shared/pkg/valuationfeature/`
 - **ValuationEngine interface**: `shared/pkg/valuation/`
+- **JSON Schema validator**: `cmd/position-tool/internal/validation/schema.go`
+- **Party service proto**: `api/proto/meridian/party/v1/party.proto`
 - **BIAN alignment PRD**: `.taskmaster/docs/prd-bian-alignment.md`
 - **BIAN 13.0 Product Directory**: SD-CR-006 (external)
