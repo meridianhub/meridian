@@ -447,8 +447,11 @@ saved.
 # Only active parties can open accounts
 party.status == 'ACTIVE'
 
-# Only organisations with a Companies House reference
-party.type == 'ORGANIZATION' && party.external_reference_type == 'COMPANIES_HOUSE'
+# Restrict to organisations (e.g., internal groupings, syndicates)
+party.type == 'ORGANIZATION' && party.status == 'ACTIVE'
+
+# Personal accounts only
+party.type == 'PERSON'
 
 # Empty string = no eligibility restriction (all parties eligible)
 ""
