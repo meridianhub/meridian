@@ -1,0 +1,67 @@
+# Meridian local development stack
+#
+# Services:
+#   cockroachdb  - CockroachDB single-node (insecure) on port 26257, UI on 8080
+#   migrate      - One-shot migration runner; exits 0 when all migrations applied
+#   meridian     - Unified binary; starts after migrations complete
+#
+# Usage:
+#   docker compose -f deploy/dev/docker-compose.yml up
+#
+# Ports:
+#   26257 - CockroachDB SQL (postgres wire protocol)
+#   8080  - CockroachDB web UI
+#   50051 - meridian gRPC
+#   8090  - meridian HTTP gateway
+
+services:
+  cockroachdb:
+    image: cockroachdb/cockroach:latest-v24.1
+    command: start-single-node --insecure
+    ports:
+      - "26257:26257"
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "cockroach", "sql", "--insecure", "-e", "SELECT 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    volumes:
+      - cockroachdb_data:/cockroach/cockroach-data
+
+  migrate:
+    build:
+      context: ../..
+      dockerfile: cmd/meridian/Dockerfile
+    command: ["--migrate"]
+    depends_on:
+      cockroachdb:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgres://root@cockroachdb:26257/defaultdb?sslmode=disable"
+    restart: on-failure
+
+  meridian:
+    build:
+      context: ../..
+      dockerfile: cmd/meridian/Dockerfile
+    depends_on:
+      cockroachdb:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "50051:50051"
+      - "8090:8090"
+    environment:
+      AUTH_MODE: disabled
+      BILLING_ENABLED: "false"
+      DATABASE_URL: "postgres://root@cockroachdb:26257/defaultdb?sslmode=disable"
+      ENVIRONMENT: development
+      KAFKA_ENABLED: "false"
+      LOG_LEVEL: info
+      REDIS_ENABLED: "false"
+
+volumes:
+  cockroachdb_data:
