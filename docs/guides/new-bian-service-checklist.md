@@ -994,6 +994,282 @@ audit logging using `shared/platform/audit`.
 
 ---
 
+### Idempotency Service Wiring
+
+**Applies when**: The service accepts mutation requests that must not be executed more than
+once if the client retries (payment operations, ledger entries, state-changing RPCs).
+
+#### Overview
+
+The `shared/pkg/idempotency/` package provides distributed idempotency and locking. It has
+three concrete adapters:
+
+| Adapter | Type | Use Case |
+|---------|------|----------|
+| `RedisService` | `CleanableService` | Production — distributed, supports cleanup worker |
+| `PostgresService` | `Service` | Unified binary / local dev — no Redis required |
+| `NoopService` | `Service` | Non-production fallback when Redis unavailable at startup |
+
+All adapters satisfy the `idempotency.Service` interface (`Checker` + `Locker`). Service
+constructors accept `idempotency.Service`, so the adapter is injected at startup without
+changing domain code.
+
+Higher-level usage is via `idempotency.Executor`, which wraps your business logic with
+atomic check-mark-execute-store semantics.
+
+#### Standard Wiring Pattern (production fail-fast with non-production fallback)
+
+This is the gold-standard pattern from `services/financial-accounting/cmd/main.go`:
+
+```go
+import (
+    "github.com/meridianhub/meridian/shared/pkg/idempotency"
+    "github.com/meridianhub/meridian/shared/platform/env"
+    "github.com/redis/go-redis/v9"
+)
+
+var idempotencySvc idempotency.Service
+var redisSvc *idempotency.RedisService // Keep reference for cleanup worker
+
+redisClient, err := createRedisClient(logger)
+if err != nil {
+    if env.IsProduction() {
+        // Fail fast — idempotency is a hard requirement in production
+        logger.Error("CRITICAL: Redis unavailable in production - failing fast", "error", err)
+        return bootstrap.Permanent(fmt.Errorf("%w: %w", ErrRedisRequiredInProduction, err))
+    }
+    // Non-production: degrade gracefully and record metrics
+    logger.Warn("Redis not available, using noop idempotency service - DEVELOPMENT ONLY",
+        "error", err,
+        "environment", os.Getenv("ENVIRONMENT"))
+    idempotencySvc = idempotency.NewNoopService(logger)
+    serviceobs.SetNoopIdempotencyActive(true)
+    serviceobs.RecordServiceDegradation(serviceobs.ComponentIdempotency, serviceobs.DegradationReasonStartupFallback)
+} else {
+    redisSvc = idempotency.NewRedisService(redisClient)
+    idempotencySvc = redisSvc
+    serviceobs.SetNoopIdempotencyActive(false)
+    logger.Info("idempotency service initialized with Redis")
+    defer func() {
+        if err := redisClient.Close(); err != nil {
+            logger.Error("failed to close Redis client", "error", err)
+        }
+    }()
+}
+```
+
+**Key rules:**
+
+- `env.IsProduction()` determines fail-fast vs. graceful degradation. Never skip this check.
+- Record degradation metrics before returning from the error branch. This ensures the
+  health check reports degraded state and on-call alerts fire.
+- Keep the `*idempotency.RedisService` reference separate from the `idempotency.Service`
+  interface reference. The cleanup worker requires `idempotency.Cleaner`, which only
+  `RedisService` implements.
+
+#### Adapter Selection Table
+
+| Scenario | Adapter | Why |
+|----------|---------|-----|
+| Production Kubernetes deployment | `RedisService` | Distributed, TTL-based, supports cleanup |
+| Unified binary (`cmd/meridian/`) | `PostgresService` | No Redis dependency in dev |
+| Production Redis unavailable at startup | Fail fast with `bootstrap.Permanent` | Prevent silent data corruption |
+| Non-production Redis unavailable | `NoopService` | Allow dev iteration without full stack |
+| Integration tests | `NoopService` | Simplify test setup; use DB constraints for correctness |
+
+#### Cleanup Worker Wiring
+
+When using `RedisService`, wire the `IdempotencyCleanupWorker` to prevent PENDING keys from
+being stuck indefinitely after a service crash:
+
+```go
+import (
+    "{service}-config" // service-specific config package
+    "github.com/meridianhub/meridian/services/{service}/worker"
+)
+
+// Wire cleanup worker only when Redis is available
+cleanupConfig := config.LoadIdempotencyCleanupConfig()
+if redisSvc != nil && cleanupConfig.Enabled {
+    cleanupWorker, err := worker.NewIdempotencyCleanupWorker(
+        redisSvc,
+        cleanupConfig,
+        logger,
+    )
+    if err != nil {
+        logger.Error("failed to create idempotency cleanup worker", "error", err)
+    } else {
+        go func() {
+            if err := cleanupWorker.Start(ctx); err != nil {
+                logger.Error("idempotency cleanup worker error", "error", err)
+            }
+        }()
+    }
+
+    // Stop worker during graceful shutdown
+    defer cleanupWorker.Stop()
+}
+```
+
+The cleanup worker requires:
+
+1. The `IdempotencyCleanupConfig` loaded from environment — see
+   `services/financial-accounting/config/` for a reference implementation.
+2. The `redisSvc` reference (not the `idempotency.Service` interface), because cleanup
+   requires `idempotency.Cleaner` which is only implemented by `RedisService`.
+3. The worker must be stopped before the Redis client is closed during shutdown.
+
+**Reference**: `services/financial-accounting/worker/idempotency_cleanup_worker.go`
+
+#### Domain-Level Idempotency
+
+Idempotency operates at two levels and both are needed:
+
+| Level | Mechanism | Purpose |
+|-------|-----------|---------|
+| Redis / Postgres idempotency service | `idempotency.Key` with namespace + operation + entity | Prevent duplicate RPC execution across service restarts |
+| Database unique constraint | `UNIQUE (tenant_id, idempotency_key)` on the domain table | Prevent duplicate writes if the idempotency service is bypassed |
+
+Add a database-level unique constraint to the migration as a safety net even when the
+idempotency service is active.
+
+#### Anti-Patterns to Avoid
+
+These are the inconsistencies the consistency refactor fixed. Do not reintroduce them:
+
+- **Do not** use `NoopService` in production paths without recording degradation metrics.
+  Silent noop use allows duplicate requests to corrupt ledger state.
+- **Do not** skip `env.IsProduction()` and always use noop — this defeats the purpose of
+  the idempotency service.
+- **Do not** pass the `idempotency.Service` interface to the cleanup worker constructor.
+  The worker requires `idempotency.Cleaner`, which is only available on `*RedisService`.
+- **Do not** start the cleanup worker when `redisSvc == nil`. The noop path never sets
+  `redisSvc`, so guard on `redisSvc != nil` (not `idempotencySvc != nil`).
+- **Do not** omit the `defer redisClient.Close()` — leaked connections cause pool exhaustion
+  under load.
+
+**Reference**: `services/financial-accounting/cmd/main.go` (gold-standard pattern)
+
+---
+
+### Unified Binary Registration
+
+**Applies when**: The service should be included in `cmd/meridian/`, the single-binary
+entry point used for local development and single-node deployments.
+
+#### What `cmd/meridian/` Is
+
+`cmd/meridian/` is a single Go binary that wires all Meridian services into one process,
+sharing a single gRPC server, a single database connection pool, and a single Postgres-backed
+idempotency service (no Redis required).
+
+It is the recommended way to run Meridian locally and in single-node evaluation deployments.
+Production deployments run each service as an independent binary.
+
+Services are initialized in tier dependency order to avoid circular dependency issues with
+loopback gRPC calls:
+
+| Tier | Services |
+|------|----------|
+| 0 | party, reference-data, market-information, tenant, internal-bank-account |
+| 1 | financial-accounting, position-keeping, forecasting |
+| 2 | current-account |
+| 3 | payment-order, reconciliation |
+
+#### How to Register a New Service
+
+##### Step 1: Add proto import
+
+In `cmd/meridian/main.go`, add the proto package import alongside existing ones:
+
+```go
+import (
+    // ... existing proto registrations ...
+    yourservicev1 "github.com/meridianhub/meridian/api/proto/meridian/your_service/v1"
+)
+```
+
+##### Step 2: Add service package imports
+
+```go
+import (
+    // ... existing service packages ...
+    yourservicepersistence "github.com/meridianhub/meridian/services/your-service/adapters/persistence"
+    yourserviceservice     "github.com/meridianhub/meridian/services/your-service/service"
+)
+```
+
+##### Step 3: Add a wire function
+
+Create a dedicated `wire<ServiceName>` function following the tier pattern:
+
+```go
+func wireYourService(
+    server *grpc.Server,
+    db *gorm.DB,                   // use *pgxpool.Pool if service uses pgx
+    idempotencySvc idempotency.Service, // omit if service does not use idempotency
+    logger *slog.Logger,
+) error {
+    repo := yourservicepersistence.NewRepository(db)
+    svc, err := yourserviceservice.NewService(repo, idempotencySvc)
+    if err != nil {
+        return err
+    }
+    yourservicev1.RegisterYourServiceServer(server, svc)
+    logger.Info("registered your-service service")
+    return nil
+}
+```
+
+##### Step 4: Add the wire call in `registerServices`
+
+Place the call in the correct tier block based on service dependencies:
+
+```go
+// In the appropriate tier block:
+{"your-service", func() error {
+    return wireYourService(grpcServer, db, idempotencySvc, logger)
+}},
+```
+
+##### Step 5: Add gateway route
+
+In the `wireGateway` function, add a backend route for the service:
+
+```go
+Backends: []gateway.BackendRoute{
+    // ... existing routes ...
+    {Prefix: "/v1/your-service", Target: grpcTarget},
+},
+```
+
+##### Step 6: Add migration embed
+
+If the service has its own migration files, embed them into the unified migration runner.
+See `internal/migrations/` and `services/services.go` for the migration embed pattern used
+by existing services.
+
+#### Environment Variable Conventions
+
+The unified binary sets these development defaults via `setDevDefaults()`. Services that
+need additional environment variables should document them in their own `cmd/main.go` and
+ensure they have safe defaults for the unified binary context:
+
+| Variable | Unified binary default | Description |
+|----------|----------------------|-------------|
+| `AUTH_MODE` | `disabled` | Authentication mode |
+| `BILLING_ENABLED` | `false` | Billing subsystem toggle |
+| `ENVIRONMENT` | `development` | Used by `env.IsProduction()` |
+| `REDIS_ENABLED` | `false` | Redis availability hint |
+| `KAFKA_ENABLED` | `false` | Kafka availability hint |
+
+Services that use `env.IsProduction()` for fail-fast decisions will automatically use the
+noop/degraded path in the unified binary because `ENVIRONMENT=development`.
+
+**Reference**: `cmd/meridian/main.go`
+
+---
+
 ## Task 14: Starlark & CEL Integration (Conditional)
 
 **Applies when**: The service has tenant-definable business logic (pricing rules,
