@@ -274,14 +274,15 @@ CREATE TABLE account_type_definitions (
     status                   VARCHAR(20) NOT NULL DEFAULT 'DRAFT'
                              CHECK (status IN ('DRAFT', 'ACTIVE', 'DEPRECATED')),
     is_system                BOOLEAN NOT NULL DEFAULT FALSE,
-    successor_id             UUID REFERENCES account_type_definitions(id),
+    successor_id             UUID REFERENCES account_type_definitions(id)
+                             ON DELETE SET NULL,
     created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     activated_at             TIMESTAMPTZ,
     deprecated_at            TIMESTAMPTZ,
 
     CONSTRAINT uq_account_type_code_version UNIQUE (code, version),
-    CONSTRAINT chk_successor_not_self CHECK (successor_id != id),
+    CONSTRAINT chk_acct_type_successor_not_self CHECK (successor_id != id),
     CONSTRAINT chk_fiat_method_pair
         CHECK ((fiat_method_id IS NULL) = (fiat_method_version IS NULL))
 );
@@ -312,12 +313,13 @@ CREATE TABLE account_type_valuation_methods (
     parameters               JSONB DEFAULT '{}',
     status                   VARCHAR(20) NOT NULL DEFAULT 'DRAFT'
                              CHECK (status IN ('DRAFT', 'ACTIVE', 'DEPRECATED')),
-    successor_id             UUID REFERENCES account_type_valuation_methods(id),
+    successor_id             UUID REFERENCES account_type_valuation_methods(id)
+                             ON DELETE SET NULL,
     created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     -- Only one ACTIVE template per (account_type, input_instrument)
-    CONSTRAINT chk_successor_not_self
+    CONSTRAINT chk_val_method_successor_not_self
         CHECK (successor_id != id)
 );
 
@@ -973,10 +975,16 @@ validation at activation time:
 6. **Attribute schema is valid**: `AttributeSchema` compiles as
    valid JSON Schema, and the definition's own `Attributes` map
    validates against it.
-7. **Saga exists** (if prefix set): If `default_saga_prefix` is
-   non-empty, at least one saga matching the
-   `{prefix}.{operation}` pattern exists in the saga registry
-   (platform or tenant).
+7. **Saga prefix registered** (if prefix set): If
+   `default_saga_prefix` is non-empty, at least one saga whose
+   name starts with `{prefix}.` exists in the saga registry
+   (platform or tenant). For example, if `default_saga_prefix =
+   "SAVINGS"`, activation succeeds if any saga like
+   `SAVINGS.deposit` or `SAVINGS.withdrawal` is registered.
+   This confirms the prefix is in use -- per-operation saga
+   resolution (whether `SAVINGS.deposit` specifically exists) is
+   validated at runtime when the operation is invoked, not at
+   activation time, because the set of operations is open-ended.
 8. **No duplicate ACTIVE code**: The partial unique index
    `uq_active_account_type_code` enforces this at the database
    level, but the activation check returns a descriptive error
