@@ -6,14 +6,16 @@ triggers:
   - Adding new account types to the system
   - Configuring product-specific business logic (Starlark sagas, CEL validation per product)
   - Multi-tenant product catalog or blueprint configuration
-  - AI-assisted product definition generation
   - Questions about the relationship between accounts and product types
+  - Valuation method or conversion configuration per product type
   - BIAN Product Directory service domain
 instructions: |
   The AccountTypeRegistry lives within Reference Data (not a separate service).
   It follows the InstrumentRegistry pattern exactly: DRAFT/ACTIVE/DEPRECATED lifecycle,
   is_system flag for platform blueprints, CEL compilation at draft creation, optimistic locking.
   Product definitions reference sagas by name convention ({prefix}.{operation}), not by embedding scripts.
+  Product types also define accepted valuation methods (conversion rules) -- ValuationFeatures are
+  configured at the product type level and seeded to accounts on creation, not per-account.
   The manifest remains the authoring surface; the registry is the runtime query surface.
 ---
 
@@ -28,8 +30,10 @@ with no single source of truth. Account types are hardcoded as proto enums,
 preventing tenants from defining custom account types at runtime. This PRD
 introduces an AccountTypeRegistry within the Reference Data service -- following
 the established InstrumentRegistry pattern -- to provide a runtime-configurable,
-BIAN-aligned product catalog that supports multi-tenant customization,
-bi-temporal versioning, and AI-assisted product definition.
+BIAN-aligned product catalog that supports multi-tenant customization
+and bi-temporal versioning. Product types also define accepted valuation
+methods (asset conversion rules), correcting the current design where
+ValuationFeatures are configured per-account rather than per-product-type.
 
 ## Problem Statement
 
@@ -57,6 +61,11 @@ column hardcoded to `"current"` with no validation against any registry.
    types** -- Saga routing is by operation name, not by product type.
 4. **Cannot query what account types are available** -- No runtime API
    to list, filter, or inspect account type definitions.
+5. **Cannot define valuation methods at the product type level** --
+   ValuationFeatures (asset conversion rules) are currently configured
+   per-account. If a product type accepts USD deposits into a GBP
+   account, every individual account must have its ValuationFeature
+   configured manually rather than inheriting from the product definition.
 
 ### Existing Infrastructure (Already Built)
 
@@ -73,7 +82,9 @@ The infrastructure needed for a product catalog largely exists:
 | Manifest validation (CEL compilation, cross-references) | `services/control-plane/internal/validator/` | Production |
 | Schema-per-tenant isolation | `shared/platform/db/tenant_scope.go` | Production |
 | Starlark execution with typed service modules | `shared/pkg/saga/` | Production |
-| handlers.yaml schema registry (760 lines, 10 namespaces) | `shared/pkg/saga/schema/handlers.yaml` | Production |
+| handlers.yaml schema registry (760 lines, 9 namespaces) | `shared/pkg/saga/schema/handlers.yaml` | Production |
+| ValuationFeature domain model (per-account) | `shared/pkg/valuationfeature/` | Production |
+| ValuationEngine interface + Starlark runtime | `shared/pkg/valuation/` | Production |
 
 The Product Directory is a **composition of existing capabilities behind a new API surface**, not a new system from scratch.
 
@@ -120,25 +131,62 @@ A new Go package `services/reference-data/accounttype/` following the Instrument
 ```go
 type AccountTypeDefinition struct {
     ID                     uuid.UUID
-    Code                   string        // Immutable PK: "CURRENT", "SAVINGS", "ENERGY_SETTLEMENT"
+    Code                   string        // Immutable PK: "CURRENT_GBP", "SAVINGS_GBP"
     Version                int           // Allows multiple versions of the same code
-    DisplayName            string        // "Personal Current Account"
+    DisplayName            string        // "GBP Personal Current Account"
     Description            string        // Detailed description of this product type
     NormalBalance          string        // "DEBIT" or "CREDIT"
     InstrumentCode         string        // Designated instrument: "GBP", "KWH", "TONNE_CO2E"
     DefaultSagaPrefix      string        // e.g., "SAVINGS" for "{prefix}.deposit" routing
+    FiatMethodID           *uuid.UUID    // Default method for any fiat→fiat conversion (e.g., forex-spot)
+    FiatMethodVersion      *int          // Version of the fiat conversion method (nil when FiatMethodID is nil)
+    ValuationMethods       []ValuationMethodTemplate // Explicit non-fiat conversion templates
     ValidationCEL          string        // CEL expression for transaction validation
     BucketingCEL           string        // CEL expression for fungibility bucketing
-    EligibilityCEL         string        // CEL expression for account opening eligibility
-    AttributeSchema        []byte        // JSON Schema for extensible product attributes
+    EligibilityCEL         string        // v1 placeholder: reserved field, not enforced at runtime
+    AttributeSchema        []byte        // v1 placeholder: stored but not validated
     Attributes             map[string]any // Extensible metadata (fee config, interest config, etc.)
-    Status                 Status        // DRAFT, ACTIVE, DEPRECATED
+    Status                 Status        // DRAFT, ACTIVE, DEPRECATED. ACTIVE is immutable
     IsSystem               bool          // Platform blueprint (read-only for tenants)
     SuccessorID            *uuid.UUID    // Points to replacement when deprecated
     CreatedAt              time.Time
     UpdatedAt              time.Time
     ActivatedAt            *time.Time
     DeprecatedAt           *time.Time
+}
+
+// ValuationMethodTemplate defines an explicit non-fiat asset conversion
+// for this product type. Fiat-to-fiat conversions are handled
+// universally by the product type's FiatMethodID and do not need
+// per-currency templates.
+//
+// Templates are only needed for cross-class conversions where the input
+// instrument is a different asset class to the account's designated
+// instrument (e.g., kWh→GBP, CO2→GBP).
+//
+// Templates have their own lifecycle independent of the parent
+// AccountTypeDefinition. New conversion methods can be added to an
+// existing product type without creating a new product type version.
+// Deprecated templates use SuccessorID to point to their replacement,
+// following the same supersedes pattern as AccountTypeDefinition itself.
+//
+// Example: INVENTORY_KWH accepts carbon credit deposits:
+//   - {InputInstrument: "TONNE_CO2E", MethodID: <carbon-kWh-method>}
+//
+// Replacing a method version:
+//   - Deprecate old template (SuccessorID → new template)
+//   - New template with updated method version, Status=ACTIVE
+type ValuationMethodTemplate struct {
+    ID                     uuid.UUID
+    AccountTypeID          uuid.UUID     // Parent product type
+    InputInstrument        string        // Instrument to convert FROM (e.g., "USD")
+    ValuationMethodID      uuid.UUID     // Reference to Valuation Engine method
+    ValuationMethodVersion int           // Method version for immutability
+    Parameters             map[string]any // Default method parameters
+    Status                 Status        // DRAFT, ACTIVE, DEPRECATED
+    SuccessorID            *uuid.UUID    // Points to replacement when deprecated
+    CreatedAt              time.Time
+    UpdatedAt              time.Time
 }
 ```
 
@@ -178,6 +226,8 @@ CREATE TABLE account_type_definitions (
     normal_balance           VARCHAR(10) NOT NULL CHECK (normal_balance IN ('DEBIT', 'CREDIT')),
     instrument_code          VARCHAR(50) NOT NULL,
     default_saga_prefix      VARCHAR(100),
+    fiat_method_id           UUID,
+    fiat_method_version      INT,
     validation_cel           TEXT,
     bucketing_cel            TEXT,
     eligibility_cel          TEXT,
@@ -193,11 +243,51 @@ CREATE TABLE account_type_definitions (
     deprecated_at            TIMESTAMPTZ,
 
     CONSTRAINT uq_account_type_code_version UNIQUE (code, version),
-    CONSTRAINT chk_successor_not_self CHECK (successor_id != id)
+    CONSTRAINT chk_successor_not_self CHECK (successor_id != id),
+    CONSTRAINT chk_fiat_method_pair
+        CHECK ((fiat_method_id IS NULL) = (fiat_method_version IS NULL))
 );
 
 CREATE INDEX idx_account_type_status ON account_type_definitions (status);
 CREATE INDEX idx_account_type_code ON account_type_definitions (code);
+
+-- At most one ACTIVE definition per code at any time.
+CREATE UNIQUE INDEX uq_active_account_type_code
+    ON account_type_definitions (code)
+    WHERE status = 'ACTIVE';
+
+-- Explicit (non-fiat) valuation method templates per product type.
+-- Fiat-to-fiat conversions use the parent's fiat_method_id and do
+-- not need entries here. Templates are for cross-class conversions
+-- (e.g., kWh→GBP, CO2→GBP).
+-- Each template has its own DRAFT/ACTIVE/DEPRECATED lifecycle,
+-- independent of the parent account type version. New conversions
+-- can be added without bumping the product type version.
+-- Deprecated templates point to their replacement via successor_id.
+CREATE TABLE account_type_valuation_methods (
+    id                       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_type_id          UUID NOT NULL
+                             REFERENCES account_type_definitions(id),
+    input_instrument         VARCHAR(50) NOT NULL,
+    valuation_method_id      UUID NOT NULL,
+    valuation_method_version INT NOT NULL DEFAULT 1,
+    parameters               JSONB DEFAULT '{}',
+    status                   VARCHAR(20) NOT NULL DEFAULT 'DRAFT'
+                             CHECK (status IN ('DRAFT', 'ACTIVE', 'DEPRECATED')),
+    successor_id             UUID REFERENCES account_type_valuation_methods(id),
+    created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    -- Only one ACTIVE template per (account_type, input_instrument)
+    CONSTRAINT chk_successor_not_self
+        CHECK (successor_id != id)
+);
+
+-- Partial unique index: at most one ACTIVE method per input instrument
+-- per product type. Multiple DEPRECATED/DRAFT entries are allowed.
+CREATE UNIQUE INDEX uq_active_valuation_method
+    ON account_type_valuation_methods (account_type_id, input_instrument)
+    WHERE status = 'ACTIVE';
 ```
 
 ### Saga Routing Convention
@@ -224,45 +314,140 @@ Following the saga registry pattern (platform defaults + tenant overrides):
   CEL policies and saga prefixes. No inheritance mechanism in v1 -- tenants
   create independent definitions.
 
-### AI-as-Configurator Loop
+### Valuation Method Configuration
 
-The manifest remains the authoring surface for AI-generated product definitions:
+Product types define which asset conversions they accept. This replaces
+the current per-account ValuationFeature configuration with a
+product-type-level definition.
 
-```yaml
-# manifest.yaml -- AI generates this
-account_types:
-  - code: PREPAID_VOUCHER_GBP
-    name: "GBP Prepaid Food Voucher"
-    normal_balance: DEBIT
-    instrument_code: GBP
-    policies:
-      validation: "amount > 0 && amount <= 500"
-      bucketing: ""
+#### Two-Tier Conversion Resolution
 
-sagas:
-  - name: PREPAID_VOUCHER_GBP.deposit
-    script: |
-      def execute(ctx):
-          position_keeping.initiate_log(
-              position_id = ctx.params["account_id"],
-              amount = ctx.params["amount"],
-              direction = "CREDIT",
-          )
+An instrument is classified as fiat when its `Dimension == MONETARY` in
+the InstrumentRegistry (e.g., GBP, USD, EUR are all `MONETARY`; KWH is
+`ELECTRICITY`; TONNE_CO2E is `EMISSIONS`).
+
+Conversion method resolution follows two tiers:
+
+1. **Fiat-to-fiat** (universal): If both the input instrument and the
+   account's designated instrument are `MONETARY`, use the product
+   type's `FiatMethodID`. No per-currency templates needed -- a GBP
+   account automatically accepts USD, EUR, CHF, or any other fiat
+   currency via the same forex spot method.
+
+2. **Cross-class** (explicit templates): If the input instrument is a
+   different asset class (e.g., kWh into a GBP account), an explicit
+   `ValuationMethodTemplate` must exist. These require specific
+   conversion logic that cannot be generalised.
+
+```text
+Resolution order:
+  1. Check explicit template for (product_type, input_instrument)
+  2. If none, check if both instruments are fiat → use fiat_method_id
+  3. If neither → reject (no conversion available)
+
+Example: CURRENT_GBP (instrument_code=GBP, fiat_method_id=forex-spot)
+  - Deposit USD → fiat→fiat → forex-spot method (automatic)
+  - Deposit EUR → fiat→fiat → forex-spot method (automatic)
+  - Deposit kWh → no template → rejected
+  - Deposit kWh → add explicit template → accepted
+
+Example: INVENTORY_KWH (instrument_code=KWH, fiat_method_id=nil)
+  - Deposit MWH → explicit template for MWH→KWH required
+  - Deposit GBP → explicit template for GBP→KWH required
 ```
 
-The compilation pipeline validates:
+#### Current Design (Per-Account -- Being Replaced)
 
-1. CEL expressions compile successfully (existing CEL compiler)
-2. Saga scripts parse and pass dry-run validation (existing saga validator)
-3. Cross-references are valid (instrument_code references a defined instrument)
-4. Structured errors returned for AI iteration
+```text
+Account A (GBP) → manually add ValuationFeature(USD→GBP)
+Account B (GBP) → manually add ValuationFeature(USD→GBP)
+Account C (GBP) → forgot to add feature → runtime error
+```
+
+#### New Design (Per-Product-Type)
+
+```text
+Product Type CURRENT_GBP:
+  instrument_code: GBP
+  fiat_method: forex-spot  (handles all fiat→GBP automatically)
+  valuation_methods:       (only non-fiat, if any)
+    - input: TONNE_CO2E, method: carbon-to-gbp-v1
+
+Account creation (product_type_code=CURRENT_GBP):
+  → any fiat deposit auto-converts via forex-spot
+  → CO2 deposit converts via explicit template
+```
+
+When an account is created with a `product_type_code`, the system seeds
+ValuationFeatures from the product type's explicit templates. Fiat→fiat
+conversion does not require seeded features -- it is resolved at
+runtime from the product type's `fiat_method_id`.
+
+#### Independent Lifecycle and Supersedes
+
+Explicit valuation method templates have their own
+DRAFT → ACTIVE → DEPRECATED lifecycle, independent of the parent
+product type version. This means:
+
+- **v1 scope**: Templates follow their parent's lifecycle -- they are
+  activated and deprecated alongside the product type. Independent
+  template lifecycle management (add/replace templates on an active
+  product type) is supported by the schema but deferred to v2.
+- **Adding a new conversion** (e.g., TONNE_CO2E→GBP to `CURRENT_GBP`)
+  creates a new template row without changing the product type
+  definition.
+- **Replacing a method version** deprecates the old template (setting
+  `successor_id` to the new one) and activates the replacement. The
+  partial unique index ensures only one ACTIVE template per
+  `(account_type, input_instrument)` pair.
+- **Existing accounts are unaffected** -- their already-seeded
+  ValuationFeatures continue to reference the method version they were
+  created with. New accounts pick up the current ACTIVE templates.
+- **Fiat method upgrades** are done by updating `fiat_method_id` on the
+  product type definition. The new method applies to future valuation
+  requests. Running sagas pin the fiat method at initiation time to
+  prevent mid-saga method switches.
+- **Deprecated product types** do not affect existing accounts. Accounts
+  retain an immutable `(product_type_code, product_type_version)`
+  reference and continue operating under the rules of the version they
+  were created with. Deprecation only prevents new account creation.
+
+#### Manifest Surface
+
+The manifest remains the authoring surface for product definitions:
+
+```yaml
+account_types:
+  - code: CURRENT_GBP
+    name: "GBP Current Account"
+    normal_balance: DEBIT
+    instrument_code: GBP
+    fiat_method: "forex-spot-v1"     # Resolved to UUID via Valuation Engine lookup
+    policies:
+      validation: "amount > 0 && amount <= 1000000"
+
+  - code: INVENTORY_KWH
+    name: "kWh Inventory Account"
+    normal_balance: DEBIT
+    instrument_code: KWH
+    valuation_methods:               # Cross-class only
+      - input_instrument: TONNE_CO2E
+        method_id: "carbon-to-kwh-v1"
+        method_version: 1
+```
+
+The manifest applier resolves string references to UUIDs during
+compilation: `fiat_method` and `method_id` strings are looked up
+against the Valuation Engine's method registry. Unresolvable references
+produce a structured validation error.
 
 ### Compilation Pipeline Endpoint
 
 New endpoint for validating product definitions without persisting:
 
 ```protobuf
-rpc ValidateProductDefinition(ValidateProductDefinitionRequest) returns (ValidateProductDefinitionResponse);
+rpc ValidateProductDefinition(ValidateProductDefinitionRequest)
+    returns (ValidateProductDefinitionResponse);
 
 message ValidateProductDefinitionRequest {
     AccountTypeDefinition definition = 1;
@@ -275,81 +460,22 @@ message ValidateProductDefinitionResponse {
 }
 
 message ValidationError {
-    string field = 1;        // e.g., "policies.validation"
-    string error_code = 2;   // e.g., "CEL_COMPILATION_FAILED"
-    string message = 3;      // Human/AI-readable error description
+    string field = 1;      // e.g., "policies.validation"
+    string error_code = 2; // e.g., "CEL_COMPILATION_FAILED"
+    string message = 3;    // Human-readable error description
     int32 line = 4;
     int32 column = 5;
 }
 ```
 
-## Migration Strategy
+The compilation pipeline validates:
 
-### Phase 0: Foundation -- AccountTypeRegistry (8 story points)
-
-| Subtask | Points | Description |
-|---------|--------|-------------|
-| Domain model + interface | 2 | `AccountTypeDefinition`, `AccountTypeRegistry` interface, errors, following InstrumentRegistry |
-| PostgreSQL repository + migration | 3 | Table creation, CRUD, lifecycle transitions, is_system, versioning, CEL compilation at draft creation |
-| gRPC handler + proto | 2 | Service definition within Reference Data proto, REST annotations |
-| Integration tests | 1 | Testcontainer-based tests following existing e2e patterns |
-
-**Dependencies**: None.
-**Delivers**: Runtime-queryable product catalog with lifecycle management.
-
-### Phase 1: Account Linkage (5 story points)
-
-| Subtask | Points | Description |
-|---------|--------|-------------|
-| Add `product_type_code` to Current Account | 1 | New column (nullable initially), update domain model, entity, proto |
-| Add `product_type_code` to Internal Bank Account | 1 | New column alongside existing `account_type`, nullable initially |
-| Update manifest applier handler | 1 | `register_account_type` creates AccountTypeRegistry entries |
-| API surface for account creation | 2 | Accept `product_type_code` in create requests, validate against registry, return in responses |
-
-**Dependencies**: Phase 0.
-**Delivers**: Accounts linked to dynamic product definitions. Existing enum continues to work in parallel.
-
-### Phase 2: Consumer Migration (5 story points)
-
-| Subtask | Points | Description |
-|---------|--------|-------------|
-| Saga routing convention | 2 | Implement `{prefix}.{operation}` resolution with fallback in saga executor |
-| Payment-order account resolver | 1 | Replace enum switch with registry lookup |
-| Financial-accounting account resolver | 1 | Replace enum switch with registry lookup |
-| Remaining consumers | 1 | Smaller services with fewer references |
-
-**Dependencies**: Phase 1.
-**Delivers**: All runtime code uses the registry. Convention-based saga routing enables per-product-type workflows.
-
-### Phase 3: Enum Cleanup (3 story points)
-
-| Subtask | Points | Description |
-|---------|--------|-------------|
-| Remove `InternalAccountType` proto enum | 1 | Replace with string `product_type_code` in proto |
-| Remove `common/v1/AccountType` enum | 1 | Consolidate to single source of truth in registry |
-| Database migration | 1 | Drop CHECK constraint, add FK to registry, backfill existing accounts |
-
-**Dependencies**: Phase 2 fully deployed and verified.
-**Delivers**: Single source of truth. Zero enum fragmentation.
-
-### Phase 4: AI Compilation Pipeline (5 story points) -- Parallel with Phases 1-3
-
-| Subtask | Points | Description |
-|---------|--------|-------------|
-| `ValidateProductDefinition` endpoint | 2 | Accept manifest fragment, compile CEL, validate references, return structured errors |
-| Dry-run mode | 2 | Full validation without persisting, including cross-reference checks |
-| Structured error format | 1 | Machine-readable errors with field paths, error codes, line/column for AI feedback loop |
-
-**Dependencies**: Phase 0 only.
-**Delivers**: AI-as-configurator loop.
-
-### Total: 26 story points across 5 phases
-
-```text
-Phase 0 (8pt) --> Phase 1 (5pt) --> Phase 2 (5pt) --> Phase 3 (3pt)
-      |
-      +---------> Phase 4 (5pt) [parallel]
-```
+1. CEL expressions compile successfully (existing CEL compiler)
+2. Saga scripts parse and pass dry-run validation (existing saga
+   validator)
+3. Cross-references are valid (instrument_code references a defined
+   instrument, valuation method IDs reference existing methods)
+4. Structured errors returned for iteration
 
 ## Platform Blueprint Seed Data
 
@@ -385,20 +511,25 @@ Tenants extend with their own entries (e.g., `ENERGY_SETTLEMENT_KWH`,
 - **Approval workflows**: No multi-step approval chain for product
   definition changes. Lifecycle transitions are immediate. Governance
   deferred to a future Product Design service domain.
-- **UI**: Control plane UI is out of scope. REST API is the interaction surface.
-- **MCP server**: MCP integration for AI interaction is a future enhancement.
+- **UI**: Control plane UI is out of scope. REST API is the interaction
+  surface.
+- **Per-account valuation overrides**: v1 seeds ValuationFeatures from
+  the product type template. Per-account overrides of method parameters
+  are a future enhancement.
 
 ## Success Criteria
 
 1. A tenant can define a new account type (e.g., `ENERGY_SETTLEMENT`) via manifest without any code changes or deployments.
 2. Accounts created with `product_type_code = "ENERGY_SETTLEMENT"`
    automatically route to the correct Starlark saga.
-3. The AI-as-configurator loop works: AI generates a manifest with a new
-   product type, submits for validation, receives structured errors,
-   iterates until compilation succeeds.
+3. The manifest compilation pipeline validates product definitions and
+   returns structured errors when CEL expressions, cross-references,
+   or valuation method references are invalid.
 4. Existing accounts and services continue to work unchanged during migration (backwards compatible).
 5. Platform blueprints are seeded during tenant provisioning and are read-only for tenants.
-6. `InternalAccountType` and `common/v1/AccountType` proto enums are fully removed by Phase 3 completion.
+6. Valuation method templates defined on a product type are
+   automatically seeded as ValuationFeatures when an account of that
+   type is created -- no per-account manual configuration required.
 
 ## Testing Strategy
 
@@ -407,8 +538,9 @@ Tenants extend with their own entries (e.g., `ENERGY_SETTLEMENT_KWH`,
   patterns.
 - **Integration tests**: Testcontainer-based (CockroachDB). Full registry
   CRUD, multi-tenant isolation, platform blueprint seeding.
-- **E2E tests**: Manifest apply with account type registration, account creation with product_type_code, saga routing verification.
-- **Migration tests**: Verify existing accounts work during and after each phase.
+- **E2E tests**: Manifest apply with account type registration, account
+  creation with product_type_code, saga routing verification,
+  valuation feature seeding from templates.
 
 ## References
 
@@ -417,5 +549,7 @@ Tenants extend with their own entries (e.g., `ENERGY_SETTLEMENT_KWH`,
 - **Manifest AccountTypeDefinition**: `api/proto/meridian/control_plane/v1/manifest.proto:165`
 - **Applier handlers.yaml**: `services/control-plane/internal/applier/handlers.yaml:57`
 - **CEL compiler**: `services/reference-data/cel/compiler.go`
+- **ValuationFeature domain**: `shared/pkg/valuationfeature/`
+- **ValuationEngine interface**: `shared/pkg/valuation/`
 - **BIAN alignment PRD**: `.taskmaster/docs/prd-bian-alignment.md`
 - **BIAN 13.0 Product Directory**: SD-CR-006 (external)
