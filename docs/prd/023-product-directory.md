@@ -496,8 +496,8 @@ party.type == 'ORGANIZATION' && party.status == 'ACTIVE'
 # Personal accounts only
 party.type == 'PERSON'
 
-# Empty string = no eligibility restriction (all parties eligible)
-""
+# No eligibility restriction (all parties eligible)
+true
 ```
 
 ### Attribute Schema
