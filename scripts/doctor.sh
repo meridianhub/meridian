@@ -775,7 +775,12 @@ if [ "$ALL_CHECKS_PASSED" = true ]; then
     echo "  2. Generate protobuf code:"
     echo -e "     ${BLUE}make proto${NC}"
     echo ""
-    echo "  3. Start local development environment:"
+    echo "  3. Start local development:"
+    echo ""
+    echo -e "     ${BOLD}Docker Compose (no K8s required):${NC}"
+    echo -e "     ${BLUE}make dev-up${NC}"
+    echo ""
+    echo -e "     ${BOLD}Full Kubernetes stack:${NC}"
     echo -e "     ${BLUE}tilt up${NC}"
     echo ""
     exit 0
