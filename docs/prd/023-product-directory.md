@@ -101,7 +101,7 @@ and nodes already coexist within Reference Data.
 BIAN Product Directory stores metadata about products, not executable code. Meridian follows this separation:
 
 - **Product catalog** (AccountTypeRegistry): Stores metadata, CEL policies,
-  allowed instruments, default saga names. Consistent with how
+  designated instrument, default saga names. Consistent with how
   InstrumentRegistry stores CEL validation expressions.
 - **Saga registry** (existing): Stores executable Starlark scripts.
   Product definitions reference sagas by name, not by embedding scripts.
@@ -125,7 +125,7 @@ type AccountTypeDefinition struct {
     DisplayName            string        // "Personal Current Account"
     Description            string        // Detailed description of this product type
     NormalBalance          string        // "DEBIT" or "CREDIT"
-    AllowedInstrumentCodes []string      // ["GBP", "EUR"] -- empty = all allowed
+    InstrumentCode         string        // Designated instrument: "GBP", "KWH", "TONNE_CO2E"
     DefaultSagaPrefix      string        // e.g., "SAVINGS" for "{prefix}.deposit" routing
     ValidationCEL          string        // CEL expression for transaction validation
     BucketingCEL           string        // CEL expression for fungibility bucketing
@@ -176,7 +176,7 @@ CREATE TABLE account_type_definitions (
     display_name             VARCHAR(255) NOT NULL,
     description              TEXT,
     normal_balance           VARCHAR(10) NOT NULL CHECK (normal_balance IN ('DEBIT', 'CREDIT')),
-    allowed_instrument_codes TEXT[],
+    instrument_code          VARCHAR(50) NOT NULL,
     default_saga_prefix      VARCHAR(100),
     validation_cel           TEXT,
     bucketing_cel            TEXT,
@@ -231,16 +231,16 @@ The manifest remains the authoring surface for AI-generated product definitions:
 ```yaml
 # manifest.yaml -- AI generates this
 account_types:
-  - code: PREPAID_VOUCHER
-    name: "Prepaid Food Voucher"
+  - code: PREPAID_VOUCHER_GBP
+    name: "GBP Prepaid Food Voucher"
     normal_balance: DEBIT
-    allowed_instruments: ["FOOD_VOUCHER_GBP"]
+    instrument_code: GBP
     policies:
       validation: "amount > 0 && amount <= 500"
       bucketing: ""
 
 sagas:
-  - name: PREPAID_VOUCHER.deposit
+  - name: PREPAID_VOUCHER_GBP.deposit
     script: |
       def execute(ctx):
           position_keeping.initiate_log(
@@ -254,7 +254,7 @@ The compilation pipeline validates:
 
 1. CEL expressions compile successfully (existing CEL compiler)
 2. Saga scripts parse and pass dry-run validation (existing saga validator)
-3. Cross-references are valid (allowed_instruments reference defined instruments)
+3. Cross-references are valid (instrument_code references a defined instrument)
 4. Structured errors returned for AI iteration
 
 ### Compilation Pipeline Endpoint
@@ -355,18 +355,23 @@ Phase 0 (8pt) --> Phase 1 (5pt) --> Phase 2 (5pt) --> Phase 3 (3pt)
 
 System account types seeded during tenant provisioning:
 
-| Code | Display Name | Normal Balance | Default Instruments | Saga Prefix |
-|------|-------------|----------------|---------------------|-------------|
-| `CURRENT` | Current Account | DEBIT | All monetary | `CURRENT` |
-| `SAVINGS` | Savings Account | DEBIT | All monetary | `SAVINGS` |
-| `CLEARING` | Clearing Account | DEBIT | All | `CLEARING` |
-| `NOSTRO` | Nostro Account | DEBIT | All monetary | `NOSTRO` |
-| `VOSTRO` | Vostro Account | CREDIT | All monetary | `VOSTRO` |
-| `HOLDING` | Holding Account | DEBIT | All | `HOLDING` |
-| `SUSPENSE` | Suspense Account | DEBIT | All | `SUSPENSE` |
-| `REVENUE` | Revenue Account | CREDIT | All monetary | `REVENUE` |
-| `EXPENSE` | Expense Account | DEBIT | All monetary | `EXPENSE` |
-| `INVENTORY` | Inventory Account | DEBIT | All | `INVENTORY` |
+| Code | Display Name | Normal Balance | Instrument | Saga Prefix |
+|------|-------------|----------------|------------|-------------|
+| `CURRENT_GBP` | GBP Current Account | DEBIT | GBP | `CURRENT` |
+| `CURRENT_EUR` | EUR Current Account | DEBIT | EUR | `CURRENT` |
+| `CURRENT_USD` | USD Current Account | DEBIT | USD | `CURRENT` |
+| `SAVINGS_GBP` | GBP Savings Account | DEBIT | GBP | `SAVINGS` |
+| `CLEARING_GBP` | GBP Clearing Account | DEBIT | GBP | `CLEARING` |
+| `NOSTRO_GBP` | GBP Nostro Account | DEBIT | GBP | `NOSTRO` |
+| `VOSTRO_GBP` | GBP Vostro Account | CREDIT | GBP | `VOSTRO` |
+| `HOLDING_GBP` | GBP Holding Account | DEBIT | GBP | `HOLDING` |
+| `SUSPENSE_GBP` | GBP Suspense Account | DEBIT | GBP | `SUSPENSE` |
+| `REVENUE_GBP` | GBP Revenue Account | CREDIT | GBP | `REVENUE` |
+| `EXPENSE_GBP` | GBP Expense Account | DEBIT | GBP | `EXPENSE` |
+| `INVENTORY_KWH` | kWh Inventory Account | DEBIT | KWH | `INVENTORY` |
+
+Tenants extend with their own entries (e.g., `ENERGY_SETTLEMENT_KWH`,
+`CARBON_INVENTORY_CO2E`, `VOUCHER_FOOD_GBP`).
 
 ## Non-Goals for v1
 
