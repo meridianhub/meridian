@@ -1,6 +1,7 @@
 ### Reconciliation Service
 # BIAN-compliant account reconciliation: settlement runs, balance assertions, disputes.
 # Proto: api/proto/meridian/reconciliation/v1/reconciliation.proto
+# Prerequisites: Run 00-happy-path.http or 02-current-account.http first to set account_id
 
 ## --- Settlement Runs ---
 

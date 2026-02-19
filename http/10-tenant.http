@@ -50,8 +50,10 @@ x-tenant-id: {{tenant_id}}
   "tenantId": "{{new_tenant_id}}"
 }
 
-### Reconcile Migrations
+### Reconcile Migrations (specific tenant)
 GRPC {{grpc_host}}/meridian.tenant.v1.TenantService/ReconcileMigrations
 x-tenant-id: {{tenant_id}}
 
-{}
+{
+  "tenantId": "{{new_tenant_id}}"
+}

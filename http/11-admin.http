@@ -1,6 +1,7 @@
 ### Admin / Control Plane Service
 # Operational tooling: causation trees, balance sheets, system diagnostics.
 # Proto: api/proto/meridian/control_plane/v1/admin.proto
+# Prerequisites: Set position_id / transaction_id / event_id from prior operations
 
 ## --- Causation Trees ---
 # Trace the causal chain of events across services.

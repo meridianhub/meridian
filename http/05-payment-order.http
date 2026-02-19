@@ -1,6 +1,7 @@
 ### Payment Order Service
 # BIAN-compliant saga orchestration: funds reservation, gateway execution, ledger booking.
 # Proto: api/proto/meridian/payment_order/v1/payment_order.proto
+# Prerequisites: Run 00-happy-path.http or 02-current-account.http first to set account_id
 #
 # State Machine: INITIATED -> RESERVED -> EXECUTING -> COMPLETED
 
