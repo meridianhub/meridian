@@ -17,8 +17,8 @@ import (
 func TestWireGateway_Config(t *testing.T) {
 	// wireGateway should construct a gateway.Server with correct loopback routing
 	// for all 11 services. Verify the server starts and responds to health checks.
-	const grpcPort = 50099 // Use non-standard port to avoid conflicts
-	const httpPort = 8099  // Use non-standard port to avoid conflicts
+	grpcPort := allocateFreePort(t)
+	httpPort := allocateFreePort(t)
 
 	databaseURL := "postgres://root@localhost:26257/defaultdb?sslmode=disable"
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -76,6 +76,17 @@ func TestWireGateway_Config(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp2.StatusCode)
 
 	// Graceful shutdown
-	shutdownCtx := context.Background()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
 	require.NoError(t, srv.Shutdown(shutdownCtx))
+}
+
+// allocateFreePort returns an available TCP port on localhost by briefly
+// binding to :0 and reading the assigned port.
+func allocateFreePort(t *testing.T) int {
+	t.Helper()
+	l, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer l.Close()
+	return l.Addr().(*net.TCPAddr).Port
 }
