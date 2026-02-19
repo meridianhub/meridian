@@ -15,6 +15,9 @@ UTILITIES_DIR=./utilities
 DIST_DIR=./dist
 COVERAGE_DIR=./coverage
 
+# Dev environment
+DEV_COMPOSE=deploy/dev/docker-compose.yml
+
 # Tools
 GOLANGCI_LINT=golangci-lint
 BUF=$(shell go env GOPATH)/bin/buf
@@ -29,7 +32,7 @@ GOMOD=$(GOCMD) mod
 GOGET=$(GOCMD) get
 GOFMT=$(GOCMD) fmt
 
-.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-openapi proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt validate-semconv validate-sagas proto-jsonschema validate-manifest-jsonschema validate-manifests control-plane-ci test-control-plane migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-status-all migrate-lint-all migrate-hash-all migrate-apply-orgs migrate-status-orgs docs generate-saga-docs swagger-split swagger-ui
+.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-openapi proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt validate-semconv validate-sagas proto-jsonschema validate-manifest-jsonschema validate-manifests control-plane-ci test-control-plane migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-status-all migrate-lint-all migrate-hash-all migrate-apply-orgs migrate-status-orgs docs generate-saga-docs swagger-split swagger-ui dev-up dev-down dev-clean
 
 # Default target
 all: help
@@ -85,6 +88,11 @@ help:
 	@echo "API Explorer targets:"
 	@echo "  make swagger-split             - Split monolithic swagger into per-service files"
 	@echo "  make swagger-ui                - Start local Swagger UI server (requires Tilt running)"
+	@echo ""
+	@echo "Dev environment targets:"
+	@echo "  make dev-up                    - Start entire Meridian platform in dev mode"
+	@echo "  make dev-down                  - Stop dev environment containers"
+	@echo "  make dev-clean                 - Stop dev environment and delete all data volumes"
 	@echo ""
 	@echo "Variables:"
 	@echo "  VERSION=$(VERSION)"
@@ -476,3 +484,19 @@ test-control-plane:
 ## control-plane-ci: Run full control plane CI pipeline (schema sync + validation + tests)
 control-plane-ci: validate-manifest-jsonschema validate-manifests test-control-plane
 	@echo "Control plane CI pipeline passed"
+
+## dev-up: Start entire Meridian platform in dev mode
+dev-up:
+	@command -v docker >/dev/null || { echo "Error: docker is required"; exit 1; }
+	@echo "Starting Meridian dev environment..."
+	docker compose -f $(DEV_COMPOSE) up --build
+
+## dev-down: Stop dev environment containers
+dev-down:
+	@echo "Stopping dev environment..."
+	docker compose -f $(DEV_COMPOSE) down
+
+## dev-clean: Stop dev environment and delete all data volumes
+dev-clean:
+	@echo "Stopping dev environment and removing volumes..."
+	docker compose -f $(DEV_COMPOSE) down -v
