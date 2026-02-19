@@ -117,6 +117,165 @@ tilt up
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed setup and development workflow.
 
+## Local Development
+
+The dev stack runs Meridian as a single unified binary backed by a single-node CockroachDB instance.
+It is the fastest way to iterate locally without Kubernetes.
+
+### Prerequisites
+
+| Tool | Version | Install |
+|------|---------|---------|
+| Docker + Docker Compose v2 | 24+ / 2.20+ | [docs.docker.com](https://docs.docker.com/get-docker/) |
+| Go | 1.26+ | [go.dev/dl](https://go.dev/dl/) |
+| grpcurl | any | `brew install grpcurl` |
+| jq | any | `brew install jq` |
+
+### Start and Stop
+
+```bash
+# Build images and start the stack (CockroachDB + migrations + meridian)
+make dev-up
+
+# Stop containers, preserve data volumes
+make dev-down
+
+# Stop containers and delete all data volumes (full reset)
+make dev-clean
+```
+
+`make dev-up` runs `docker compose -f deploy/dev/docker-compose.yml up --build`. On first run this
+builds the `meridian` Docker image from source, which takes a few minutes. Subsequent runs use the
+cached image unless source files have changed.
+
+The `migrate` container applies all embedded schema migrations to CockroachDB on startup and then
+exits. The `meridian` container starts only after migrations complete successfully.
+
+### Port Mappings
+
+| Port | Service | Protocol |
+|------|---------|----------|
+| 26257 | CockroachDB SQL (postgres wire) | TCP |
+| 8080 | CockroachDB web UI | HTTP |
+| 50051 | Meridian gRPC | TCP |
+| 8090 | Meridian HTTP gateway | HTTP |
+
+CockroachDB is bound to `127.0.0.1` only. The Meridian ports are accessible from `localhost`.
+
+### Health Check
+
+```bash
+# HTTP health endpoint (returns 200 OK when the binary is running)
+curl -s http://localhost:8090/healthz
+
+# gRPC health check (requires grpcurl)
+grpcurl -plaintext localhost:50051 grpc.health.v1.Health/Check
+```
+
+### Using grpcurl
+
+The gRPC server has reflection enabled, so you can discover all available methods without a proto
+file.
+
+```bash
+# List all services
+grpcurl -plaintext localhost:50051 list
+
+# List methods for a specific service
+grpcurl -plaintext localhost:50051 list meridian.party.v1.PartyService
+
+# Describe a request message
+grpcurl -plaintext localhost:50051 describe meridian.party.v1.RegisterPartyRequest
+```
+
+### Basic Business Flow
+
+The following commands execute a complete deposit flow: create a party, open an account, and post a
+deposit. All commands target the HTTP gateway on port 8090.
+
+```bash
+# 1. Register a party (customer)
+PARTY=$(curl -s -X POST http://localhost:8090/v1/parties \
+  -H "Content-Type: application/json" \
+  -d '{"party_type": "PARTY_TYPE_INDIVIDUAL", "legal_name": "Alice Smith"}')
+echo $PARTY | jq .
+PARTY_ID=$(echo $PARTY | jq -r '.partyId')
+
+# 2. Open a current account
+ACCOUNT=$(curl -s -X POST http://localhost:8090/v1/current-accounts \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"party_id\": \"$PARTY_ID\",
+    \"account_identification\": \"GB29NWBK60161331926819\",
+    \"base_currency\": \"CURRENCY_GBP\"
+  }")
+echo $ACCOUNT | jq .
+ACCOUNT_ID=$(echo $ACCOUNT | jq -r '.accountId')
+
+# 3. Execute a deposit
+curl -s -X POST "http://localhost:8090/v1/current-accounts/$ACCOUNT_ID/deposits" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "amount": {"amount": {"currency_code": "GBP", "units": "100", "nanos": 0}},
+    "description": "Initial deposit",
+    "reference": "REF-001"
+  }' | jq .
+
+# 4. Retrieve the account to verify balance
+curl -s "http://localhost:8090/v1/current-accounts/$ACCOUNT_ID" | jq .
+```
+
+The same flow is available over gRPC:
+
+```bash
+# Register a party
+grpcurl -plaintext -d '{
+  "party_type": "PARTY_TYPE_INDIVIDUAL",
+  "legal_name": "Alice Smith"
+}' localhost:50051 meridian.party.v1.PartyService/RegisterParty
+
+# Open a current account (substitute PARTY_ID from previous response)
+grpcurl -plaintext -d '{
+  "party_id": "PARTY_ID",
+  "account_identification": "GB29NWBK60161331926819",
+  "base_currency": "CURRENCY_GBP"
+}' localhost:50051 meridian.current_account.v1.CurrentAccountService/InitiateCurrentAccount
+
+# Execute a deposit (substitute ACCOUNT_ID from previous response)
+grpcurl -plaintext -d '{
+  "account_id": "ACCOUNT_ID",
+  "amount": {"amount": {"currency_code": "GBP", "units": "100"}},
+  "description": "Initial deposit",
+  "reference": "REF-001"
+}' localhost:50051 meridian.current_account.v1.CurrentAccountService/ExecuteDeposit
+```
+
+### API Explorer
+
+A Swagger UI is embedded at `api/openapi/swagger-ui.html`. To browse the API interactively while
+the dev stack is running:
+
+```bash
+make swagger-ui
+# Open http://localhost:8091/swagger-ui.html
+```
+
+### Known Limitations vs Full Kubernetes Stack
+
+| Feature | Dev stack | Full K8s stack |
+|---------|-----------|----------------|
+| Kafka event publishing | Disabled (no-op) | Enabled |
+| Redis idempotency store | Disabled (Postgres fallback) | Enabled |
+| Authentication | Disabled (`AUTH_MODE=disabled`) | Keycloak OIDC |
+| Cron jobs / schedulers | Not running | Running |
+| Multi-replica | Single process | Horizontal pod autoscaling |
+| Observability (OTLP) | Disabled | Enabled |
+| TLS | None | cert-manager |
+
+The dev stack is suitable for feature development and integration testing. Use the full K8s stack
+(`make deploy-local`) when validating auth flows, event-driven behaviour, or multi-replica
+correctness.
+
 ## Architecture
 
 Built on [BIAN](https://bian.org/) banking service domain patterns.
