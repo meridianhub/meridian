@@ -1,0 +1,323 @@
+### Current Account Service
+# BIAN-compliant current account operations: deposits, withdrawals, liens, valuation features.
+# Proto: api/proto/meridian/current_account/v1/current_account.proto
+
+## --- Setup: Create Party + Account ---
+
+### Register Party (for account setup)
+GRPC {{grpc_host}}/meridian.party.v1.PartyService/RegisterParty
+x-tenant-id: {{tenant_id}}
+
+{
+  "partyType": "PARTY_TYPE_PERSON",
+  "legalName": "Account Test User",
+  "displayName": "Account Tester"
+}
+
+> {%
+    client.global.set("ca_party_id", response.body.party.partyId);
+%}
+
+### Open Current Account (GBP)
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/InitiateCurrentAccount
+x-tenant-id: {{tenant_id}}
+
+{
+  "partyId": "{{ca_party_id}}",
+  "accountIdentification": "GB82WEST12345698765432",
+  "baseCurrency": "CURRENCY_GBP"
+}
+
+> {%
+    client.global.set("ca_account_id", response.body.accountId);
+%}
+
+### Open Current Account (USD)
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/InitiateCurrentAccount
+x-tenant-id: {{tenant_id}}
+
+{
+  "partyId": "{{ca_party_id}}",
+  "accountIdentification": "GB45WEST12345612345678",
+  "baseCurrency": "CURRENCY_USD"
+}
+
+### Retrieve Account
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{ca_account_id}}"
+}
+
+### Update Account
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/UpdateCurrentAccount
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{ca_account_id}}",
+  "overdraftLimit": {
+    "amount": {
+      "currencyCode": "GBP",
+      "units": "500"
+    }
+  }
+}
+
+## --- Deposits ---
+
+### Deposit 1000 GBP
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/ExecuteDeposit
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{ca_account_id}}",
+  "amount": {
+    "amount": {
+      "currencyCode": "GBP",
+      "units": "1000"
+    }
+  },
+  "description": "Salary credit",
+  "reference": "SAL-2025-01",
+  "idempotencyKey": {
+    "key": "{{$uuid}}"
+  }
+}
+
+### Deposit fractional amount
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/ExecuteDeposit
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{ca_account_id}}",
+  "amount": {
+    "amount": {
+      "currencyCode": "GBP",
+      "units": "0",
+      "nanos": 990000000
+    }
+  },
+  "description": "Interest payment",
+  "reference": "INT-001",
+  "idempotencyKey": {
+    "key": "{{$uuid}}"
+  }
+}
+
+## --- Withdrawals (two-phase) ---
+
+### Initiate Withdrawal
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/InitiateWithdrawal
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{ca_account_id}}",
+  "amount": {
+    "amount": {
+      "currencyCode": "GBP",
+      "units": "250"
+    }
+  },
+  "description": "ATM withdrawal",
+  "reference": "ATM-001",
+  "idempotencyKey": {
+    "key": "{{$uuid}}"
+  }
+}
+
+> {%
+    client.global.set("ca_withdrawal_id", response.body.withdrawal.withdrawalId);
+%}
+
+### Execute Withdrawal
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/ExecuteWithdrawal
+x-tenant-id: {{tenant_id}}
+
+{
+  "withdrawalId": "{{ca_withdrawal_id}}",
+  "accountId": "{{ca_account_id}}",
+  "idempotencyKey": {
+    "key": "{{$uuid}}"
+  }
+}
+
+### Retrieve Withdrawal
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/RetrieveWithdrawal
+x-tenant-id: {{tenant_id}}
+
+{
+  "withdrawalId": "{{ca_withdrawal_id}}"
+}
+
+## --- Withdrawals (direct execution) ---
+
+### Direct Withdrawal (skip initiate)
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/ExecuteWithdrawal
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{ca_account_id}}",
+  "amount": {
+    "amount": {
+      "currencyCode": "GBP",
+      "units": "50"
+    }
+  },
+  "description": "POS purchase",
+  "reference": "POS-001",
+  "idempotencyKey": {
+    "key": "{{$uuid}}"
+  }
+}
+
+## --- Liens ---
+
+### Initiate Lien
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/InitiateLien
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{ca_account_id}}",
+  "amount": {
+    "amount": {
+      "currencyCode": "GBP",
+      "units": "200"
+    }
+  },
+  "paymentOrderReference": "PO-TEST-001",
+  "idempotencyKey": {
+    "key": "{{$uuid}}"
+  }
+}
+
+> {%
+    client.global.set("ca_lien_id", response.body.lien.lienId);
+%}
+
+### Retrieve Lien
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/RetrieveLien
+x-tenant-id: {{tenant_id}}
+
+{
+  "lienId": "{{ca_lien_id}}"
+}
+
+### Execute Lien
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/ExecuteLien
+x-tenant-id: {{tenant_id}}
+
+{
+  "lienId": "{{ca_lien_id}}",
+  "idempotencyKey": {
+    "key": "{{$uuid}}"
+  }
+}
+
+### Initiate Another Lien (for termination test)
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/InitiateLien
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{ca_account_id}}",
+  "amount": {
+    "amount": {
+      "currencyCode": "GBP",
+      "units": "100"
+    }
+  },
+  "paymentOrderReference": "PO-TEST-002",
+  "idempotencyKey": {
+    "key": "{{$uuid}}"
+  }
+}
+
+> {%
+    client.global.set("ca_lien_id_2", response.body.lien.lienId);
+%}
+
+### Terminate Lien
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/TerminateLien
+x-tenant-id: {{tenant_id}}
+
+{
+  "lienId": "{{ca_lien_id_2}}",
+  "reason": "Payment order cancelled"
+}
+
+### Get Active Amount Blocks
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/GetActiveAmountBlocks
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{ca_account_id}}"
+}
+
+## --- Account Lifecycle ---
+
+### Control Account (freeze)
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/ControlCurrentAccount
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{ca_account_id}}",
+  "action": "CONTROL_ACTION_FREEZE",
+  "reason": "Suspicious activity investigation"
+}
+
+### Control Account (unfreeze)
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/ControlCurrentAccount
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{ca_account_id}}",
+  "action": "CONTROL_ACTION_UNFREEZE",
+  "reason": "Investigation cleared"
+}
+
+## --- Valuation Features ---
+
+### Create Valuation Feature (EUR->GBP)
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/CreateValuationFeature
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{ca_account_id}}",
+  "instrumentCode": "EUR",
+  "valuationMethodId": "fx-spot-rate",
+  "valuationMethodVersion": 1,
+  "outputInstrument": "GBP",
+  "parameters": "{\"spread\": \"0.002\"}"
+}
+
+> {%
+    client.global.set("ca_vf_id", response.body.feature.id);
+%}
+
+### List Valuation Features
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/ListValuationFeatures
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{ca_account_id}}"
+}
+
+### Get Valuation Feature
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/GetValuationFeature
+x-tenant-id: {{tenant_id}}
+
+{
+  "featureId": "{{ca_vf_id}}"
+}
+
+### Evaluate Asset Valuation (inquiry)
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/EvaluateAssetValuation
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{ca_account_id}}",
+  "input": {
+    "amount": "500.00",
+    "instrumentCode": "EUR"
+  }
+}

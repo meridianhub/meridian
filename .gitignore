@@ -66,3 +66,6 @@ __pycache__/
 deployments/k8s/*/secret.yaml
 deployments/k8s/base/secret.yaml
 *.local.md
+
+# IntelliJ HTTP Client private environment (may contain secrets)
+http/http-client.private.env.json

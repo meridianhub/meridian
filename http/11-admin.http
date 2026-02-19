@@ -1,0 +1,63 @@
+### Admin / Control Plane Service
+# Operational tooling: causation trees, balance sheets, system diagnostics.
+# Proto: api/proto/meridian/control_plane/v1/admin.proto
+
+## --- Causation Trees ---
+# Trace the causal chain of events across services.
+# Useful for debugging saga flows and understanding event propagation.
+
+### Get Causation Tree by Position ID
+# Traces all events that led to a specific position entry
+GRPC {{grpc_host}}/meridian.control_plane.v1.CausationVisualizerService/GetCausationTreeForPosition
+x-tenant-id: {{tenant_id}}
+
+{
+  "positionId": "{{position_id}}"
+}
+
+### Get Causation Tree by Transaction ID
+# Traces all events related to a specific transaction
+GRPC {{grpc_host}}/meridian.control_plane.v1.CausationVisualizerService/GetCausationTreeForTransaction
+x-tenant-id: {{tenant_id}}
+
+{
+  "transactionId": "{{transaction_id}}"
+}
+
+### Get Causation Tree by Event ID
+# Traces events from a specific event in the chain
+GRPC {{grpc_host}}/meridian.control_plane.v1.CausationVisualizerService/GetCausationTreeForEvent
+x-tenant-id: {{tenant_id}}
+
+{
+  "eventId": "{{event_id}}"
+}
+
+## --- Balance Sheets ---
+# Aggregate financial position reports across all accounts.
+
+### Get Balance Sheet for Tenant
+GRPC {{grpc_host}}/meridian.control_plane.v1.BalanceSheetService/GetBalanceSheet
+x-tenant-id: {{tenant_id}}
+
+{
+  "tenantId": "{{tenant_id}}"
+}
+
+### Get Position Details (by account type and instrument)
+GRPC {{grpc_host}}/meridian.control_plane.v1.BalanceSheetService/GetPositionDetails
+x-tenant-id: {{tenant_id}}
+
+{
+  "tenantId": "{{tenant_id}}",
+  "accountType": "ACCOUNT_TYPE_CURRENT",
+  "instrumentCode": "GBP"
+}
+
+### Export Balance Sheet CSV
+GRPC {{grpc_host}}/meridian.control_plane.v1.BalanceSheetService/ExportBalanceSheetCSV
+x-tenant-id: {{tenant_id}}
+
+{
+  "tenantId": "{{tenant_id}}"
+}

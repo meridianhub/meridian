@@ -1,0 +1,97 @@
+### Saga Registry Service
+# Workflow definition management: register, validate, activate Starlark sagas.
+# Proto: api/proto/meridian/saga/v1/saga_registry.proto
+
+## --- Saga Lifecycle ---
+
+### Create Saga Draft
+GRPC {{grpc_host}}/meridian.saga.v1.SagaRegistryService/CreateSagaDraft
+x-tenant-id: {{tenant_id}}
+
+{
+  "name": "payment_transfer",
+  "version": 1,
+  "displayName": "Payment Transfer",
+  "description": "Standard payment transfer saga with lien reservation",
+  "script": "def execute(ctx):\n    lien = current_account.initiate_lien(\n        account_id=ctx.debtor_account_id,\n        amount=ctx.amount,\n        payment_order_reference=ctx.payment_order_id\n    )\n    return {\"lien_id\": lien.lien_id}\n\ndef compensate(ctx):\n    current_account.terminate_lien(\n        lien_id=ctx.lien_id,\n        reason=\"Saga compensation\"\n    )\n"
+}
+
+> {%
+    client.global.set("saga_id", response.body.saga.id);
+%}
+
+### Retrieve Saga by ID
+GRPC {{grpc_host}}/meridian.saga.v1.SagaRegistryService/GetSaga
+x-tenant-id: {{tenant_id}}
+
+{
+  "id": "{{saga_id}}"
+}
+
+### Get Active Saga by Name
+GRPC {{grpc_host}}/meridian.saga.v1.SagaRegistryService/GetActiveSaga
+x-tenant-id: {{tenant_id}}
+
+{
+  "name": "payment_transfer"
+}
+
+### List All Sagas
+GRPC {{grpc_host}}/meridian.saga.v1.SagaRegistryService/ListSagas
+x-tenant-id: {{tenant_id}}
+
+{}
+
+### Update Saga Definition
+GRPC {{grpc_host}}/meridian.saga.v1.SagaRegistryService/UpdateSagaDefinition
+x-tenant-id: {{tenant_id}}
+
+{
+  "id": "{{saga_id}}",
+  "description": "Standard payment transfer saga with lien reservation and gateway execution"
+}
+
+## --- Validation ---
+
+### Validate Existing Saga Draft
+GRPC {{grpc_host}}/meridian.saga.v1.SagaRegistryService/ValidateSagaDraft
+x-tenant-id: {{tenant_id}}
+
+{
+  "id": "{{saga_id}}"
+}
+
+### Validate Saga Script (inline, without saving)
+GRPC {{grpc_host}}/meridian.saga.v1.SagaRegistryService/ValidateSaga
+x-tenant-id: {{tenant_id}}
+
+{
+  "sagaName": "test_saga",
+  "script": "def execute(ctx):\n    return {\"status\": \"ok\"}\n\ndef compensate(ctx):\n    pass\n"
+}
+
+## --- Lifecycle Management ---
+
+### Activate Saga
+GRPC {{grpc_host}}/meridian.saga.v1.SagaRegistryService/ActivateSaga
+x-tenant-id: {{tenant_id}}
+
+{
+  "id": "{{saga_id}}"
+}
+
+### Deprecate Saga
+GRPC {{grpc_host}}/meridian.saga.v1.SagaRegistryService/DeprecateSaga
+x-tenant-id: {{tenant_id}}
+
+{
+  "id": "{{saga_id}}"
+}
+
+### Analyze Deprecation Impact
+GRPC {{grpc_host}}/meridian.saga.v1.SagaRegistryService/AnalyzeDeprecationImpact
+x-tenant-id: {{tenant_id}}
+
+{
+  "instrumentCode": "GBP"
+}

@@ -1,0 +1,174 @@
+### Position Keeping Service
+# BIAN-compliant position tracking: balance queries, position logs, reservations.
+# Proto: api/proto/meridian/position_keeping/v1/position_keeping.proto
+
+## --- Setup: Create Party + Account + Deposit ---
+
+### Register Party
+GRPC {{grpc_host}}/meridian.party.v1.PartyService/RegisterParty
+x-tenant-id: {{tenant_id}}
+
+{
+  "partyType": "PARTY_TYPE_PERSON",
+  "legalName": "Position Test User",
+  "displayName": "PK Tester"
+}
+
+> {%
+    client.global.set("pk_party_id", response.body.party.partyId);
+%}
+
+### Open Account
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/InitiateCurrentAccount
+x-tenant-id: {{tenant_id}}
+
+{
+  "partyId": "{{pk_party_id}}",
+  "accountIdentification": "GB11NWBK60161331926820",
+  "baseCurrency": "CURRENCY_GBP"
+}
+
+> {%
+    client.global.set("pk_account_id", response.body.accountId);
+%}
+
+### Seed Deposit
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/ExecuteDeposit
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{pk_account_id}}",
+  "amount": {
+    "amount": {
+      "currencyCode": "GBP",
+      "units": "5000"
+    }
+  },
+  "description": "Seed deposit for position tests",
+  "reference": "PK-SEED-001",
+  "idempotencyKey": {
+    "key": "{{$uuid}}"
+  }
+}
+
+## --- Balance Queries ---
+
+### Get Account Balance (current)
+GRPC {{grpc_host}}/meridian.position_keeping.v1.PositionKeepingService/GetAccountBalance
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{pk_account_id}}"
+}
+
+### Get All Balances (current + available + reserved)
+GRPC {{grpc_host}}/meridian.position_keeping.v1.PositionKeepingService/GetAccountBalances
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{pk_account_id}}"
+}
+
+### Get Projected Balance
+GRPC {{grpc_host}}/meridian.position_keeping.v1.PositionKeepingService/GetProjectedBalance
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{pk_account_id}}"
+}
+
+## --- Position Logs ---
+
+### Initiate Financial Position Log
+GRPC {{grpc_host}}/meridian.position_keeping.v1.PositionKeepingService/InitiateFinancialPositionLog
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{pk_account_id}}",
+  "amount": {
+    "amount": {
+      "currencyCode": "GBP",
+      "units": "100"
+    }
+  },
+  "direction": "POSTING_DIRECTION_CREDIT",
+  "description": "Manual adjustment",
+  "reference": "ADJ-001",
+  "idempotencyKey": {
+    "key": "{{$uuid}}"
+  }
+}
+
+> {%
+    client.global.set("pk_log_id", response.body.positionLogId);
+%}
+
+### Retrieve Financial Position Log
+GRPC {{grpc_host}}/meridian.position_keeping.v1.PositionKeepingService/RetrieveFinancialPositionLog
+x-tenant-id: {{tenant_id}}
+
+{
+  "positionLogId": "{{pk_log_id}}"
+}
+
+### List Financial Position Logs
+GRPC {{grpc_host}}/meridian.position_keeping.v1.PositionKeepingService/ListFinancialPositionLogs
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{pk_account_id}}",
+  "pageSize": 20
+}
+
+### Initiate Batch Position Logs
+GRPC {{grpc_host}}/meridian.position_keeping.v1.PositionKeepingService/InitiateFinancialPositionLogBatch
+x-tenant-id: {{tenant_id}}
+
+{
+  "entries": [
+    {
+      "accountId": "{{pk_account_id}}",
+      "amount": {
+        "amount": {
+          "currencyCode": "GBP",
+          "units": "50"
+        }
+      },
+      "direction": "POSTING_DIRECTION_CREDIT",
+      "description": "Batch entry 1",
+      "reference": "BATCH-001",
+      "idempotencyKey": {
+        "key": "{{$uuid}}"
+      }
+    }
+  ]
+}
+
+## --- Reservations ---
+
+### Record Reservation
+GRPC {{grpc_host}}/meridian.position_keeping.v1.PositionKeepingService/RecordReservation
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{pk_account_id}}",
+  "amount": {
+    "amount": {
+      "currencyCode": "GBP",
+      "units": "300"
+    }
+  },
+  "reference": "RES-001"
+}
+
+> {%
+    client.global.set("pk_reservation_id", response.body.reservationId);
+%}
+
+### Release Reservation
+GRPC {{grpc_host}}/meridian.position_keeping.v1.PositionKeepingService/ReleaseReservation
+x-tenant-id: {{tenant_id}}
+
+{
+  "reservationId": "{{pk_reservation_id}}"
+}

@@ -1,0 +1,116 @@
+### Reconciliation Service
+# BIAN-compliant account reconciliation: settlement runs, balance assertions, disputes.
+# Proto: api/proto/meridian/reconciliation/v1/reconciliation.proto
+
+## --- Settlement Runs ---
+
+### Initiate Account Reconciliation
+GRPC {{grpc_host}}/meridian.reconciliation.v1.AccountReconciliationService/InitiateAccountReconciliation
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{account_id}}",
+  "scope": "RECONCILIATION_SCOPE_ACCOUNT",
+  "settlementType": "SETTLEMENT_TYPE_END_OF_DAY",
+  "periodStart": "2025-01-01T00:00:00Z",
+  "periodEnd": "2025-01-31T23:59:59Z",
+  "initiatedBy": "system-scheduler",
+  "instrumentCode": "GBP",
+  "idempotencyKey": {
+    "key": "{{$uuid}}"
+  }
+}
+
+> {%
+    client.global.set("recon_id", response.body.reconciliation.reconciliationId);
+%}
+
+### Execute Account Reconciliation
+GRPC {{grpc_host}}/meridian.reconciliation.v1.AccountReconciliationService/ExecuteAccountReconciliation
+x-tenant-id: {{tenant_id}}
+
+{
+  "reconciliationId": "{{recon_id}}"
+}
+
+### Retrieve Account Reconciliation
+GRPC {{grpc_host}}/meridian.reconciliation.v1.AccountReconciliationService/RetrieveAccountReconciliation
+x-tenant-id: {{tenant_id}}
+
+{
+  "reconciliationId": "{{recon_id}}"
+}
+
+### List Reconciliation Results
+GRPC {{grpc_host}}/meridian.reconciliation.v1.AccountReconciliationService/ListReconciliationResults
+x-tenant-id: {{tenant_id}}
+
+{
+  "reconciliationId": "{{recon_id}}",
+  "pageSize": 50
+}
+
+### Control Reconciliation (cancel)
+GRPC {{grpc_host}}/meridian.reconciliation.v1.AccountReconciliationService/ControlAccountReconciliation
+x-tenant-id: {{tenant_id}}
+
+{
+  "reconciliationId": "{{recon_id}}",
+  "action": "CONTROL_ACTION_CANCEL",
+  "reason": "Incorrect period selected"
+}
+
+## --- Balance Assertions ---
+
+### Assert Balance
+GRPC {{grpc_host}}/meridian.reconciliation.v1.AccountReconciliationService/AssertBalance
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{account_id}}",
+  "expectedBalance": {
+    "amount": {
+      "currencyCode": "GBP",
+      "units": "1200"
+    }
+  }
+}
+
+## --- Disputes ---
+
+### Initiate Dispute
+GRPC {{grpc_host}}/meridian.reconciliation.v1.AccountReconciliationService/InitiateDispute
+x-tenant-id: {{tenant_id}}
+
+{
+  "reconciliationId": "{{recon_id}}",
+  "description": "Unmatched transaction from external system",
+  "amount": {
+    "amount": {
+      "currencyCode": "GBP",
+      "units": "50"
+    }
+  }
+}
+
+> {%
+    client.global.set("dispute_id", response.body.dispute.disputeId);
+%}
+
+### Retrieve Dispute
+GRPC {{grpc_host}}/meridian.reconciliation.v1.AccountReconciliationService/RetrieveDispute
+x-tenant-id: {{tenant_id}}
+
+{
+  "disputeId": "{{dispute_id}}"
+}
+
+### Control Dispute (resolve)
+GRPC {{grpc_host}}/meridian.reconciliation.v1.AccountReconciliationService/ControlDispute
+x-tenant-id: {{tenant_id}}
+
+{
+  "disputeId": "{{dispute_id}}",
+  "action": "DISPUTE_CONTROL_ACTION_RESOLVE",
+  "reason": "Transaction matched after investigation"
+}

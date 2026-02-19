@@ -1,0 +1,271 @@
+### Meridian Happy Path - End-to-End Flow (gRPC)
+# Demonstrates the core Meridian story: party registration, account opening,
+# deposits, withdrawals, liens, and balance verification.
+#
+# Prerequisites: `make dev-up` running locally
+# Environment: Select "local" in IntelliJ HTTP Client
+# Requires: IntelliJ "gRPC" and "Protocol Buffers" plugins
+
+### 1. Health Check (HTTP - gateway health endpoint)
+GET {{host}}/health
+
+> {%
+    client.test("Health check returns 200", function() {
+        client.assert(response.status === 200, "Expected 200");
+    });
+%}
+
+### 2. Register Party
+GRPC {{grpc_host}}/meridian.party.v1.PartyService/RegisterParty
+x-tenant-id: {{tenant_id}}
+
+{
+  "partyType": "PARTY_TYPE_PERSON",
+  "legalName": "Jane Smith",
+  "displayName": "Jane"
+}
+
+> {%
+    client.test("Party registered", function() {
+        client.assert(response.body.party.partyId, "Expected partyId");
+    });
+    client.global.set("party_id", response.body.party.partyId);
+%}
+
+### 3. Retrieve Party (verify)
+GRPC {{grpc_host}}/meridian.party.v1.PartyService/RetrieveParty
+x-tenant-id: {{tenant_id}}
+
+{
+  "partyId": "{{party_id}}"
+}
+
+> {%
+    client.test("Party retrieved", function() {
+        client.assert(response.body.party.legalName === "Jane Smith", "Expected legal name");
+        client.assert(response.body.party.status === "PARTY_STATUS_ACTIVE", "Expected ACTIVE");
+    });
+%}
+
+### 4. Open Current Account (GBP)
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/InitiateCurrentAccount
+x-tenant-id: {{tenant_id}}
+
+{
+  "partyId": "{{party_id}}",
+  "accountIdentification": "GB29NWBK60161331926819",
+  "baseCurrency": "CURRENCY_GBP"
+}
+
+> {%
+    client.test("Account created", function() {
+        client.assert(response.body.facility.accountId, "Expected accountId");
+    });
+    client.global.set("account_id", response.body.facility.accountId);
+%}
+
+### 5. Retrieve Account (verify ACTIVE)
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{account_id}}"
+}
+
+> {%
+    client.test("Account is active", function() {
+        client.assert(response.body.facility.accountStatus === "ACCOUNT_STATUS_ACTIVE", "Expected ACTIVE");
+    });
+%}
+
+### 6. Deposit 1000 GBP
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/ExecuteDeposit
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{account_id}}",
+  "amount": {
+    "amount": {
+      "currencyCode": "GBP",
+      "units": "1000"
+    }
+  },
+  "description": "Initial deposit",
+  "reference": "DEP-001",
+  "idempotencyKey": {
+    "key": "{{$uuid}}"
+  }
+}
+
+> {%
+    client.test("Deposit successful", function() {
+        client.assert(response.body.transactionId, "Expected transactionId");
+    });
+%}
+
+### 7. Check Balance (position-keeping)
+GRPC {{grpc_host}}/meridian.position_keeping.v1.PositionKeepingService/GetAccountBalances
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{account_id}}"
+}
+
+> {%
+    client.test("Balance query returns results", function() {
+        client.assert(response.body.balances, "Expected balances");
+    });
+%}
+
+### 8. Deposit 500 GBP
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/ExecuteDeposit
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{account_id}}",
+  "amount": {
+    "amount": {
+      "currencyCode": "GBP",
+      "units": "500"
+    }
+  },
+  "description": "Second deposit",
+  "reference": "DEP-002",
+  "idempotencyKey": {
+    "key": "{{$uuid}}"
+  }
+}
+
+> {%
+    client.test("Second deposit successful", function() {
+        client.assert(response.body.transactionId, "Expected transactionId");
+    });
+%}
+
+### 9. Initiate Withdrawal 200 GBP
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/InitiateWithdrawal
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{account_id}}",
+  "amount": {
+    "amount": {
+      "currencyCode": "GBP",
+      "units": "200"
+    }
+  },
+  "description": "ATM withdrawal",
+  "reference": "WD-001",
+  "idempotencyKey": {
+    "key": "{{$uuid}}"
+  }
+}
+
+> {%
+    client.test("Withdrawal initiated", function() {
+        client.assert(response.body.withdrawal.withdrawalId, "Expected withdrawalId");
+    });
+    client.global.set("withdrawal_id", response.body.withdrawal.withdrawalId);
+%}
+
+### 10. Execute Withdrawal
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/ExecuteWithdrawal
+x-tenant-id: {{tenant_id}}
+
+{
+  "withdrawalId": "{{withdrawal_id}}",
+  "idempotencyKey": {
+    "key": "{{$uuid}}"
+  }
+}
+
+> {%
+    client.test("Withdrawal executed", function() {
+        client.assert(response.body.withdrawal.status === "WITHDRAWAL_STATUS_COMPLETED", "Expected COMPLETED");
+    });
+%}
+
+### 11. Initiate Lien (reserve 100 GBP)
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/InitiateLien
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{account_id}}",
+  "amount": {
+    "amount": {
+      "currencyCode": "GBP",
+      "units": "100"
+    }
+  },
+  "paymentOrderReference": "PO-HAPPY-001",
+  "idempotencyKey": {
+    "key": "{{$uuid}}"
+  }
+}
+
+> {%
+    client.test("Lien created", function() {
+        client.assert(response.body.lien.lienId, "Expected lienId");
+    });
+    client.global.set("lien_id", response.body.lien.lienId);
+%}
+
+### 12. Retrieve Lien (verify ACTIVE)
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/RetrieveLien
+x-tenant-id: {{tenant_id}}
+
+{
+  "lienId": "{{lien_id}}"
+}
+
+> {%
+    client.test("Lien is active", function() {
+        client.assert(response.body.lien.status === "LIEN_STATUS_ACTIVE", "Expected ACTIVE");
+    });
+%}
+
+### 13. Execute Lien (convert to debit)
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/ExecuteLien
+x-tenant-id: {{tenant_id}}
+
+{
+  "lienId": "{{lien_id}}",
+  "idempotencyKey": {
+    "key": "{{$uuid}}"
+  }
+}
+
+> {%
+    client.test("Lien executed", function() {
+        client.assert(response.body.lien.status === "LIEN_STATUS_EXECUTED", "Expected EXECUTED");
+    });
+%}
+
+### 14. Get All Balances (final verification)
+# Expected: 1000 + 500 - 200 - 100 = 1200 GBP
+GRPC {{grpc_host}}/meridian.position_keeping.v1.PositionKeepingService/GetAccountBalances
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{account_id}}"
+}
+
+> {%
+    client.test("Final balance query succeeds", function() {
+        client.assert(response.body.balances, "Expected balances");
+    });
+%}
+
+### 15. Retrieve Account (final state)
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{account_id}}"
+}
+
+> {%
+    client.test("Account still active", function() {
+        client.assert(response.body.facility.accountStatus === "ACCOUNT_STATUS_ACTIVE", "Expected ACTIVE");
+    });
+%}
