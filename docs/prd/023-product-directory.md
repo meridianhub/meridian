@@ -142,9 +142,9 @@ type AccountTypeDefinition struct {
     BehaviorClass          BehaviorClass // Fixed system behavior category (typed enum)
     InstrumentCode         string        // Designated instrument: "GBP", "KWH", "TONNE_CO2E"
     DefaultSagaPrefix      string        // e.g., "SAVINGS" for "{prefix}.deposit" routing
-    FiatMethodID           *uuid.UUID    // Default method for any fiat→fiat conversion (e.g., forex-spot)
-    FiatMethodVersion      *int          // Version of the fiat conversion method (nil when FiatMethodID is nil)
-    ValuationMethods       []ValuationMethodTemplate // Explicit non-fiat conversion templates
+    DefaultConversionMethodID      *uuid.UUID // Default same-dimension conversion method
+    DefaultConversionMethodVersion *int       // Method version (nil when ID is nil)
+    ValuationMethods       []ValuationMethodTemplate // Explicit cross-dimension templates
     ValidationCEL          string        // CEL expression for transaction validation
     BucketingCEL           string        // CEL expression for fungibility bucketing
     EligibilityCEL         string        // CEL expression evaluated at account creation
@@ -159,14 +159,15 @@ type AccountTypeDefinition struct {
     DeprecatedAt           *time.Time
 }
 
-// ValuationMethodTemplate defines an explicit non-fiat asset conversion
-// for this product type. Fiat-to-fiat conversions are handled
-// universally by the product type's FiatMethodID and do not need
-// per-currency templates.
+// ValuationMethodTemplate defines an explicit cross-dimension conversion
+// for this product type. Same-dimension conversions (instruments sharing
+// the same Dimension, e.g., USD→GBP are both MONETARY, MWH→KWH are both
+// ELECTRICITY) are handled universally by DefaultConversionMethodID and
+// do not need per-instrument templates.
 //
-// Templates are only needed for cross-class conversions where the input
-// instrument is a different asset class to the account's designated
-// instrument (e.g., kWh→GBP, CO2→GBP).
+// Templates are only needed for cross-dimension conversions where the
+// input instrument has a different Dimension to the account's designated
+// instrument (e.g., TONNE_CO2E into a KWH account, kWh into a GBP account).
 //
 // Templates have their own DRAFT/ACTIVE/DEPRECATED status and
 // SuccessorID fields, enabling independent lifecycle management.
@@ -264,8 +265,8 @@ CREATE TABLE account_type_definitions (
                              )),
     instrument_code          VARCHAR(50) NOT NULL,
     default_saga_prefix      VARCHAR(100),
-    fiat_method_id           UUID,
-    fiat_method_version      INT,
+    default_conversion_method_id           UUID,
+    default_conversion_method_version      INT,
     validation_cel           TEXT,
     bucketing_cel            TEXT,
     eligibility_cel          TEXT,
@@ -283,8 +284,8 @@ CREATE TABLE account_type_definitions (
 
     CONSTRAINT uq_account_type_code_version UNIQUE (code, version),
     CONSTRAINT chk_acct_type_successor_not_self CHECK (successor_id != id),
-    CONSTRAINT chk_fiat_method_pair
-        CHECK ((fiat_method_id IS NULL) = (fiat_method_version IS NULL))
+    CONSTRAINT chk_default_conversion_method_pair
+        CHECK ((default_conversion_method_id IS NULL) = (default_conversion_method_version IS NULL))
 );
 
 CREATE INDEX idx_account_type_status ON account_type_definitions (status);
@@ -295,10 +296,10 @@ CREATE UNIQUE INDEX uq_active_account_type_code
     ON account_type_definitions (code)
     WHERE status = 'ACTIVE';
 
--- Explicit (non-fiat) valuation method templates per product type.
--- Fiat-to-fiat conversions use the parent's fiat_method_id and do
--- not need entries here. Templates are for cross-class conversions
--- (e.g., kWh→GBP, CO2→GBP).
+-- Explicit cross-dimension valuation method templates per product type.
+-- Same-dimension conversions use the parent's default_conversion_method_id
+-- and do not need entries here. Templates are for cross-dimension
+-- conversions (e.g., TONNE_CO2E→KWH, kWh→GBP).
 -- Each template has its own DRAFT/ACTIVE/DEPRECATED lifecycle,
 -- independent of the parent account type version. New conversions
 -- can be added without bumping the product type version.
@@ -378,38 +379,45 @@ product-type-level definition.
 
 #### Two-Tier Conversion Resolution
 
-An instrument is classified as fiat when its `Dimension == MONETARY` in
-the InstrumentRegistry (e.g., GBP, USD, EUR are all `MONETARY`; KWH is
-`ELECTRICITY`; TONNE_CO2E is `EMISSIONS`).
+Every instrument in the InstrumentRegistry carries a `Dimension`
+(e.g., `MONETARY` for GBP/USD/EUR, `ELECTRICITY` for KWH/MWH,
+`EMISSIONS` for TONNE_CO2E). Two instruments sharing the same
+dimension are considered **same-class** -- they measure the same
+physical quantity and can be converted via a single universal method.
 
 Conversion method resolution follows two tiers:
 
-1. **Fiat-to-fiat** (universal): If both the input instrument and the
-   account's designated instrument are `MONETARY`, use the product
-   type's `FiatMethodID`. No per-currency templates needed -- a GBP
-   account automatically accepts USD, EUR, CHF, or any other fiat
-   currency via the same forex spot method.
+1. **Same-dimension** (universal): If the input instrument and the
+   account's designated instrument share the same `Dimension`, use
+   the product type's `DefaultConversionMethodID`. No per-instrument
+   templates needed -- a GBP account automatically accepts USD, EUR,
+   CHF via a forex spot method; a KWH account automatically accepts
+   MWH via a unit conversion method.
 
-2. **Cross-class** (explicit templates): If the input instrument is a
-   different asset class (e.g., kWh into a GBP account), an explicit
+2. **Cross-dimension** (explicit templates): If the input instrument
+   has a different dimension to the account's designated instrument
+   (e.g., kWh into a GBP account), an explicit
    `ValuationMethodTemplate` must exist. These require specific
-   conversion logic that cannot be generalised.
+   conversion logic that cannot be generalised across dimensions.
 
 ```text
 Resolution order:
   1. Check explicit template for (product_type, input_instrument)
-  2. If none, check if both instruments are fiat → use fiat_method_id
+  2. If none, check if both instruments share the same Dimension
+     → use default_conversion_method_id
   3. If neither → reject (no conversion available)
 
-Example: CURRENT_GBP (instrument_code=GBP, fiat_method_id=forex-spot)
-  - Deposit USD → fiat→fiat → forex-spot method (automatic)
-  - Deposit EUR → fiat→fiat → forex-spot method (automatic)
-  - Deposit kWh → no template → rejected
+Example: CURRENT_GBP (instrument_code=GBP, Dimension=MONETARY,
+                       default_conversion_method_id=forex-spot)
+  - Deposit USD (MONETARY) → same-dimension → forex-spot (automatic)
+  - Deposit EUR (MONETARY) → same-dimension → forex-spot (automatic)
+  - Deposit kWh (ELECTRICITY) → no template → rejected
   - Deposit kWh → add explicit template → accepted
 
-Example: INVENTORY_KWH (instrument_code=KWH, fiat_method_id=nil)
-  - Deposit MWH → explicit template for MWH→KWH required
-  - Deposit GBP → explicit template for GBP→KWH required
+Example: INVENTORY_KWH (instrument_code=KWH, Dimension=ELECTRICITY,
+                         default_conversion_method_id=energy-unit-conv)
+  - Deposit MWH (ELECTRICITY) → same-dimension → energy-unit-conv
+  - Deposit GBP (MONETARY) → cross-dimension → explicit template
 ```
 
 #### Current Design (Per-Account -- Being Replaced)
@@ -424,20 +432,27 @@ Account C (GBP) → forgot to add feature → runtime error
 
 ```text
 Product Type CURRENT_GBP:
-  instrument_code: GBP
-  fiat_method: forex-spot  (handles all fiat→GBP automatically)
-  valuation_methods:       (only non-fiat, if any)
+  instrument_code: GBP (Dimension=MONETARY)
+  default_conversion_method: forex-spot  (any MONETARY→GBP)
+  valuation_methods:       (cross-dimension only)
     - input: TONNE_CO2E, method: carbon-to-gbp-v1
 
+Product Type INVENTORY_KWH:
+  instrument_code: KWH (Dimension=ELECTRICITY)
+  default_conversion_method: energy-unit-conv  (any ELECTRICITY→KWH)
+  valuation_methods:
+    - input: TONNE_CO2E, method: carbon-to-kwh-v1
+
 Account creation (product_type_code=CURRENT_GBP):
-  → any fiat deposit auto-converts via forex-spot
-  → CO2 deposit converts via explicit template
+  → USD deposit (MONETARY) → same-dimension → forex-spot
+  → CO2 deposit (EMISSIONS) → cross-dimension → explicit template
 ```
 
 When an account is created with a `product_type_code`, the system seeds
-ValuationFeatures from the product type's explicit templates. Fiat→fiat
-conversion does not require seeded features -- it is resolved at
-runtime from the product type's `fiat_method_id`.
+ValuationFeatures from the product type's cross-dimension templates.
+Same-dimension conversion does not require seeded features -- it is
+resolved at runtime from the product type's
+`default_conversion_method_id`.
 
 #### Template Lifecycle and Supersedes
 
@@ -458,10 +473,10 @@ Within a product type version:
 - **Existing accounts are unaffected** -- their already-seeded
   ValuationFeatures continue to reference the method version they were
   created with. New accounts pick up the current ACTIVE templates.
-- **Fiat method upgrades** are done by updating `fiat_method_id` on the
-  product type definition. The new method applies to future valuation
-  requests. Running sagas pin the fiat method at initiation time to
-  prevent mid-saga method switches.
+- **Default method upgrades** are done by updating
+  `default_conversion_method_id` on the product type definition. The
+  new method applies to future valuation requests. Running sagas pin
+  the method at initiation time to prevent mid-saga method switches.
 - **Deprecated product types** do not affect existing accounts. Accounts
   retain an immutable `(product_type_code, product_type_version)`
   reference and continue operating under the rules of the version they
@@ -601,7 +616,7 @@ account_types:
     behavior_class: CUSTOMER
     normal_balance: DEBIT
     instrument_code: GBP
-    fiat_method: "forex-spot-v1"     # Resolved to UUID via Valuation Engine lookup
+    default_conversion_method: "forex-spot-v1"  # Same-dimension (MONETARY→MONETARY)
     policies:
       validation: "amount > 0 && amount <= 1000000"
       eligibility: "party.status == 'ACTIVE'"
@@ -619,16 +634,16 @@ account_types:
     behavior_class: INVENTORY
     normal_balance: DEBIT
     instrument_code: KWH
-    valuation_methods:               # Cross-class only
+    valuation_methods:               # Cross-dimension only
       - input_instrument: TONNE_CO2E
         method_id: "carbon-to-kwh-v1"
         method_version: 1
 ```
 
 The manifest applier resolves string references to UUIDs during
-compilation: `fiat_method` and `method_id` strings are looked up
-against the Valuation Engine's method registry. Unresolvable references
-produce a structured validation error.
+compilation: `default_conversion_method` and `method_id` strings are
+looked up against the Valuation Engine's method registry. Unresolvable
+references produce a structured validation error.
 
 ### Compilation Pipeline Endpoint
 
@@ -960,8 +975,10 @@ validation at activation time:
 
 1. **Instrument exists and is ACTIVE**: The `instrument_code`
    references a live instrument in the InstrumentRegistry.
-2. **Fiat method exists** (if set): `fiat_method_id` and
-   `fiat_method_version` reference an existing valuation method.
+2. **Default conversion method exists** (if set):
+   `default_conversion_method_id` and
+   `default_conversion_method_version` reference an existing
+   valuation method.
 3. **Valuation method templates reference existing methods**: Each
    `ValuationMethodTemplate.ValuationMethodID` resolves to a live
    method.
