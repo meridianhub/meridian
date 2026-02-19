@@ -634,6 +634,7 @@ message ValidationError {
     string message = 3;    // Human-readable error description
     int32 line = 4;
     int32 column = 5;
+    repeated string suggestions = 6; // "Did you mean?" candidates
 }
 ```
 
@@ -649,7 +650,15 @@ The compilation pipeline validates:
    validator)
 4. Cross-references are valid (instrument_code references a defined
    instrument, valuation method IDs reference existing methods)
-5. Structured errors returned for iteration
+5. Structured errors returned for iteration, including **"Did you
+   mean?" suggestions** for unresolvable references. When an
+   `instrument_code` or `valuation_method` reference fails to
+   resolve, the validator computes Levenshtein distance against all
+   ACTIVE resources of the same type and populates
+   `ValidationError.suggestions` with the closest matches (up to 3,
+   distance threshold <= 3). This accelerates the AI-as-configurator
+   feedback loop and helps humans catch typos in manifest definitions
+   (e.g., `instrument_code: "GBB"` → suggestion: `"GBP"`)
 
 ### Read-Through Cache Requirement
 
@@ -677,6 +686,15 @@ gRPC call to Reference Data for every `InitiateAccount` or
 - **Cache warming on startup**: Services prefetch ACTIVE account type
   definitions on startup, same as `cache/prefetch.go` does for
   instruments.
+- **Platform default pinning**: Definitions with `is_system = true`
+  (platform blueprints like `CURRENT_GBP`, `CLEARING_USD`) are
+  prefetched into every tenant's cache at startup and assigned a
+  24-hour TTL instead of the standard 5 minutes. Platform defaults
+  are used by the vast majority of tenants and should never incur a
+  gRPC round-trip on the hot path. These entries are refreshed in
+  the background on TTL expiry rather than evicted, so a transient
+  Reference Data outage does not cause cache misses for platform
+  types.
 
 The Reference Data service already provides the gRPC endpoint; the
 consuming service wraps it with a `LocalAccountTypeCache` using the
