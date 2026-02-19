@@ -197,17 +197,26 @@ func (c *Compiler) CompileEligibility(expression string) (cel.Program, error) {
 }
 
 // EvalEligibility evaluates a compiled eligibility program with the given party context.
+// Only non-empty party fields are included in the evaluation map so that CEL has() checks
+// behave correctly — empty strings indicate absent fields rather than empty values.
 func EvalEligibility(prg cel.Program, partyType, partyStatus, partyExtRefType string, attributes map[string]string) (bool, error) {
 	if attributes == nil {
 		attributes = make(map[string]string)
 	}
 
+	party := make(map[string]string)
+	if partyType != "" {
+		party["type"] = partyType
+	}
+	if partyStatus != "" {
+		party["status"] = partyStatus
+	}
+	if partyExtRefType != "" {
+		party["external_reference_type"] = partyExtRefType
+	}
+
 	out, _, err := prg.Eval(map[string]any{
-		"party": map[string]string{
-			"type":                    partyType,
-			"status":                  partyStatus,
-			"external_reference_type": partyExtRefType,
-		},
+		"party":      party,
 		"attributes": attributes,
 	})
 	if err != nil {
