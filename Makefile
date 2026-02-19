@@ -486,8 +486,23 @@ control-plane-ci: validate-manifest-jsonschema validate-manifests test-control-p
 	@echo "Control plane CI pipeline passed"
 
 ## dev-up: Start entire Meridian platform in dev mode
+DEV_PORTS=26257 8080 50051 8090
 dev-up:
 	@command -v docker >/dev/null || { echo "Error: docker is required"; exit 1; }
+	@failed=0; for port in $(DEV_PORTS); do \
+		pid=$$(lsof -ti :$$port 2>/dev/null | head -1); \
+		if [ -n "$$pid" ]; then \
+			proc=$$(ps -p $$pid -o comm= 2>/dev/null || echo "unknown"); \
+			echo "Error: port $$port already in use by $$proc (pid $$pid)"; \
+			failed=1; \
+		fi; \
+	done; \
+	if [ $$failed -eq 1 ]; then \
+		echo ""; \
+		echo "Hint: if Tilt is running, stop it first:  tilt down"; \
+		echo "      or stop leftover containers:        make dev-down"; \
+		exit 1; \
+	fi
 	@echo "Starting Meridian dev environment..."
 	docker compose -f $(DEV_COMPOSE) up --build
 
