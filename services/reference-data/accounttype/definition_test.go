@@ -2,10 +2,12 @@ package accounttype_test
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/reference-data/accounttype"
+	refcel "github.com/meridianhub/meridian/services/reference-data/cel"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -189,4 +191,69 @@ func TestNormalBalanceIsValid_KnownValues(t *testing.T) {
 func TestNormalBalanceIsValid_UnknownValue(t *testing.T) {
 	assert.False(t, accounttype.NormalBalance("BOTH").IsValid())
 	assert.False(t, accounttype.NormalBalance("").IsValid())
+}
+
+func newCompiler(t *testing.T) accounttype.DefinitionCompiler {
+	t.Helper()
+	c, err := refcel.NewCompiler()
+	require.NoError(t, err)
+	return c
+}
+
+func TestNewDefinition_CEL_ValidExpressions(t *testing.T) {
+	c := newCompiler(t)
+	params := validParams()
+	params.Compiler = c
+	params.ValidationCEL = `parse_decimal(amount) > 0.0`
+	params.BucketingCEL = `bucket_key([attributes["type"]])`
+	params.EligibilityCEL = `party.status == 'ACTIVE'`
+
+	def, err := accounttype.NewDefinition(params)
+	require.NoError(t, err)
+	assert.Equal(t, params.ValidationCEL, def.ValidationCEL)
+	assert.Equal(t, params.BucketingCEL, def.BucketingCEL)
+	assert.Equal(t, params.EligibilityCEL, def.EligibilityCEL)
+}
+
+func TestNewDefinition_CEL_InvalidValidationCEL(t *testing.T) {
+	c := newCompiler(t)
+	params := validParams()
+	params.Compiler = c
+	params.ValidationCEL = `undefined_var > 0`
+
+	_, err := accounttype.NewDefinition(params)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, accounttype.ErrInvalidCEL))
+}
+
+func TestNewDefinition_CEL_InvalidBucketingCEL(t *testing.T) {
+	c := newCompiler(t)
+	params := validParams()
+	params.Compiler = c
+	params.BucketingCEL = `amount` // amount is not in bucket key env
+
+	_, err := accounttype.NewDefinition(params)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, accounttype.ErrInvalidCEL))
+}
+
+func TestNewDefinition_CEL_InvalidEligibilityCEL(t *testing.T) {
+	c := newCompiler(t)
+	params := validParams()
+	params.Compiler = c
+	params.EligibilityCEL = `amount > 0` // amount is not in eligibility env
+
+	_, err := accounttype.NewDefinition(params)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, accounttype.ErrInvalidCEL))
+}
+
+func TestNewDefinition_CEL_NilCompilerSkipsValidation(t *testing.T) {
+	params := validParams()
+	params.Compiler = nil
+	params.EligibilityCEL = `this is not valid CEL !!!`
+
+	// Without a compiler, CEL is not validated
+	_, err := accounttype.NewDefinition(params)
+	require.NoError(t, err)
 }

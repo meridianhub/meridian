@@ -4,6 +4,9 @@ import "errors"
 
 // Domain error sentinels for AccountTypeDefinition operations.
 var (
+	// ErrInvalidCEL is returned when a CEL expression fails to compile.
+	ErrInvalidCEL = errors.New("invalid CEL expression")
+
 	// ErrNotDraft is returned when an operation requires DRAFT status but the definition is not in DRAFT.
 	ErrNotDraft = errors.New("account type definition is not in DRAFT status")
 

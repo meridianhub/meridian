@@ -2,6 +2,8 @@ package accounttype
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -87,6 +89,27 @@ type Definition struct {
 	DeprecatedAt *time.Time
 }
 
+// compileCELFields validates all three CEL expressions using the provided compiler.
+// Returns an ErrInvalidCEL-wrapped error on the first compilation failure.
+func compileCELFields(compiler DefinitionCompiler, validationCEL, bucketingCEL, eligibilityCEL string) error {
+	if validationCEL != "" {
+		if err := compiler.ValidateValidationCEL(validationCEL); err != nil {
+			return errors.Join(ErrInvalidCEL, fmt.Errorf("validation_cel: %w", err))
+		}
+	}
+	if bucketingCEL != "" {
+		if err := compiler.ValidateBucketingCEL(bucketingCEL); err != nil {
+			return errors.Join(ErrInvalidCEL, fmt.Errorf("bucketing_cel: %w", err))
+		}
+	}
+	if eligibilityCEL != "" {
+		if err := compiler.ValidateEligibilityCEL(eligibilityCEL); err != nil {
+			return errors.Join(ErrInvalidCEL, fmt.Errorf("eligibility_cel: %w", err))
+		}
+	}
+	return nil
+}
+
 // ValuationMethodTemplate defines a valuation method associated with an account type.
 type ValuationMethodTemplate struct {
 	// ID is the unique identifier for this template.
@@ -120,6 +143,15 @@ type ValuationMethodTemplate struct {
 	UpdatedAt time.Time
 }
 
+// DefinitionCompiler validates CEL expressions for AccountTypeDefinition fields.
+// Pass a real CEL compiler to enforce compile-time CEL validation at draft creation.
+// Pass nil to skip CEL validation (useful for tests or when CEL is not configured).
+type DefinitionCompiler interface {
+	ValidateValidationCEL(expression string) error
+	ValidateBucketingCEL(expression string) error
+	ValidateEligibilityCEL(expression string) error
+}
+
 // NewDefinitionParams holds the input parameters for creating a new account type Definition.
 type NewDefinitionParams struct {
 	Code                           string
@@ -136,6 +168,9 @@ type NewDefinitionParams struct {
 	EligibilityCEL                 string
 	AttributeSchema                json.RawMessage
 	Attributes                     map[string]any
+	// Compiler optionally validates CEL expressions at draft creation time.
+	// When non-nil, invalid CEL expressions prevent the draft from being created.
+	Compiler DefinitionCompiler
 }
 
 // NewDefinition creates a new account type Definition in DRAFT status.
@@ -157,6 +192,13 @@ func NewDefinition(p NewDefinitionParams) (*Definition, error) {
 	// Pair constraint: both must be set or both must be nil.
 	if (p.DefaultConversionMethodID == nil) != (p.DefaultConversionMethodVersion == nil) {
 		return nil, ErrConversionMethodPair
+	}
+
+	// Compile CEL expressions at draft creation time (fail-fast).
+	if p.Compiler != nil {
+		if err := compileCELFields(p.Compiler, p.ValidationCEL, p.BucketingCEL, p.EligibilityCEL); err != nil {
+			return nil, err
+		}
 	}
 
 	now := time.Now().UTC()
