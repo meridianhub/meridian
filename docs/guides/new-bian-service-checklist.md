@@ -1160,8 +1160,9 @@ entry point used for local development and single-node deployments.
 #### What `cmd/meridian/` Is
 
 `cmd/meridian/` is a single Go binary that wires all Meridian services into one process,
-sharing a single gRPC server, a single database connection pool, and a single Postgres-backed
-idempotency service (no Redis required).
+sharing a single gRPC server, two database connections (a `*gorm.DB` for ORM-based services
+and a `*pgxpool.Pool` for pgx-based services), and a single Postgres-backed idempotency
+service (no Redis required).
 
 It is the recommended way to run Meridian locally and in single-node evaluation deployments.
 Production deployments run each service as an independent binary.
@@ -1201,17 +1202,43 @@ import (
 
 ##### Step 3: Add a wire function
 
-Create a dedicated `wire<ServiceName>` function following the tier pattern:
+Both database connections are created in `run()` before `registerServices` is called.
+Each wire function has a fixed signature that accepts whichever client the service
+requires. Use `*gorm.DB` for GORM-based persistence (party, financial-accounting,
+current-account, payment-order, reconciliation, tenant, internal-bank-account) or
+`*pgxpool.Pool` for services that use direct pgx access (reference-data,
+market-information, forecasting, position-keeping).
+
+GORM example:
 
 ```go
 func wireYourService(
     server *grpc.Server,
-    db *gorm.DB,                   // use *pgxpool.Pool if service uses pgx
+    db *gorm.DB,
     idempotencySvc idempotency.Service, // omit if service does not use idempotency
     logger *slog.Logger,
 ) error {
     repo := yourservicepersistence.NewRepository(db)
     svc, err := yourserviceservice.NewService(repo, idempotencySvc)
+    if err != nil {
+        return err
+    }
+    yourservicev1.RegisterYourServiceServer(server, svc)
+    logger.Info("registered your-service service")
+    return nil
+}
+```
+
+pgxpool example (if your service uses direct pgx):
+
+```go
+func wireYourService(
+    server *grpc.Server,
+    pool *pgxpool.Pool,
+    logger *slog.Logger,
+) error {
+    repo := yourservicepersistence.NewRepository(pool)
+    svc, err := yourserviceservice.NewService(repo, logger)
     if err != nil {
         return err
     }
