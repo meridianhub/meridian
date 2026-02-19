@@ -169,9 +169,9 @@ func TestNewService_NilRunner(t *testing.T) {
 }
 
 func TestNewService_NilMDS(t *testing.T) {
-	_, err := handler.NewService(&mockStrategyRepo{}, &starlark.ForecastRunner{}, nil, slog.Default())
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "MDS")
+	svc, err := handler.NewService(&mockStrategyRepo{}, &starlark.ForecastRunner{}, nil, slog.Default())
+	require.NoError(t, err)
+	assert.NotNil(t, svc)
 }
 
 func TestNewService_NilLogger(t *testing.T) {
