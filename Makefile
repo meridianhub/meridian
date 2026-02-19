@@ -487,12 +487,16 @@ control-plane-ci: validate-manifest-jsonschema validate-manifests test-control-p
 
 ## dev-up: Start entire Meridian platform in dev mode
 dev-up:
+	@command -v docker >/dev/null || { echo "Error: docker is required"; exit 1; }
+	@echo "Starting Meridian dev environment..."
 	docker compose -f $(DEV_COMPOSE) up --build
 
 ## dev-down: Stop dev environment containers
 dev-down:
+	@echo "Stopping dev environment..."
 	docker compose -f $(DEV_COMPOSE) down
 
 ## dev-clean: Stop dev environment and delete all data volumes
 dev-clean:
+	@echo "Stopping dev environment and removing volumes..."
 	docker compose -f $(DEV_COMPOSE) down -v
