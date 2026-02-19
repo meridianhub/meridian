@@ -448,10 +448,17 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 				TTL:         idempotencyResultTTL,
 			}); storeErr != nil {
 				s.logger.Error("failed to store idempotency result", "error", storeErr)
-				// Continue - operation succeeded, caching is best-effort.
+				// Release pending marker so retries are not blocked by a stale lock.
+				if delErr := s.idempotencyService.Delete(ctx, idempKey); delErr != nil {
+					s.logger.Warn("failed to clear pending idempotency state after cache error", "error", delErr)
+				}
 			}
 		} else {
 			s.logger.Error("failed to marshal response for idempotency cache", "error", marshalErr)
+			// Release pending marker so retries are not blocked by a stale lock.
+			if delErr := s.idempotencyService.Delete(ctx, idempKey); delErr != nil {
+				s.logger.Warn("failed to clear pending idempotency state after marshal error", "error", delErr)
+			}
 		}
 	}
 
@@ -663,10 +670,17 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 				TTL:         idempotencyResultTTL,
 			}); storeErr != nil {
 				s.logger.Error("failed to store idempotency result", "error", storeErr)
-				// Continue - operation succeeded, caching is best-effort.
+				// Release pending marker so retries are not blocked by a stale lock.
+				if delErr := s.idempotencyService.Delete(ctx, idempKey); delErr != nil {
+					s.logger.Warn("failed to clear pending idempotency state after cache error", "error", delErr)
+				}
 			}
 		} else {
 			s.logger.Error("failed to marshal response for idempotency cache", "error", marshalErr)
+			// Release pending marker so retries are not blocked by a stale lock.
+			if delErr := s.idempotencyService.Delete(ctx, idempKey); delErr != nil {
+				s.logger.Warn("failed to clear pending idempotency state after marshal error", "error", delErr)
+			}
 		}
 	}
 
