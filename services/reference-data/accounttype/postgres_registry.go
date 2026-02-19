@@ -261,7 +261,10 @@ func (r *PostgresRegistry) insertDraft(ctx context.Context, tx pgx.Tx, def *Defi
 	def.UpdatedAt = now
 	def.Status = StatusDraft
 
-	attrsJSON := marshalAttributes(def.Attributes)
+	attrsJSON, err := marshalAttributes(def.Attributes)
+	if err != nil {
+		return err
+	}
 
 	query := `
 		INSERT INTO account_type_definitions (
@@ -319,7 +322,10 @@ func (r *PostgresRegistry) insertValuationMethodTemplates(ctx context.Context, t
 		vmt.CreatedAt = now
 		vmt.UpdatedAt = now
 
-		vmtParams := marshalAttributes(vmt.Parameters)
+		vmtParams, err := marshalAttributes(vmt.Parameters)
+		if err != nil {
+			return fmt.Errorf("failed to marshal valuation method parameters: %w", err)
+		}
 
 		vmtQuery := `
 			INSERT INTO account_type_valuation_methods (
@@ -329,12 +335,11 @@ func (r *PostgresRegistry) insertValuationMethodTemplates(ctx context.Context, t
 			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 			ON CONFLICT DO NOTHING`
 
-		_, err := tx.Exec(ctx, vmtQuery,
+		if _, err = tx.Exec(ctx, vmtQuery,
 			vmt.ID, vmt.AccountTypeID, vmt.InputInstrument,
 			vmt.ValuationMethodID, vmt.ValuationMethodVersion,
 			vmtParams, string(vmt.Status), vmt.CreatedAt, vmt.UpdatedAt,
-		)
-		if err != nil {
+		); err != nil {
 			return fmt.Errorf("failed to insert valuation method template: %w", err)
 		}
 	}
@@ -480,72 +485,76 @@ func (r *PostgresRegistry) ActivateAccountType(ctx context.Context, code string,
 		def.ValuationMethods = methods
 
 		if errs := r.runActivationPreChecks(ctx, tx, def); len(errs) > 0 {
+			msgs := make([]string, len(errs))
+			for i, e := range errs {
+				msgs[i] = e.Error()
+			}
 			return fmt.Errorf("activation pre-check failed: %s: %w",
-				strings.Join(errs, "; "), ErrNotDraft)
+				strings.Join(msgs, "; "), errors.Join(errs...))
 		}
 
 		return r.setActive(ctx, tx, code, version, def.ID)
 	})
 }
 
-func (r *PostgresRegistry) runActivationPreChecks(ctx context.Context, tx pgx.Tx, def *Definition) []string {
-	var errs []string
+func (r *PostgresRegistry) runActivationPreChecks(ctx context.Context, tx pgx.Tx, def *Definition) []error {
+	var errs []error
 
 	if err := r.checkInstrumentActive(ctx, tx, def.InstrumentCode); err != nil {
-		errs = append(errs, fmt.Sprintf("instrument: %v", err))
+		errs = append(errs, fmt.Errorf("instrument: %w", err))
 	}
 
 	if def.DefaultConversionMethodID != nil {
 		if err := r.checkValuationMethodExists(ctx, tx, *def.DefaultConversionMethodID, *def.DefaultConversionMethodVersion); err != nil {
-			errs = append(errs, fmt.Sprintf("default conversion method: %v", err))
+			errs = append(errs, fmt.Errorf("default conversion method: %w", err))
 		}
 	}
 
 	errs = append(errs, r.checkValuationMethodTemplates(ctx, tx, def.ValuationMethods)...)
 
 	if err := compileCELFields(r.compiler, def.ValidationCEL, def.BucketingCEL, def.EligibilityCEL); err != nil {
-		errs = append(errs, fmt.Sprintf("CEL: %v", err))
+		errs = append(errs, fmt.Errorf("CEL: %w", err))
 	}
 
 	errs = append(errs, r.checkSchemaAndAttributes(def)...)
 
 	if def.DefaultSagaPrefix != "" {
 		if err := r.checkSagaExists(ctx, tx, def.DefaultSagaPrefix); err != nil {
-			errs = append(errs, fmt.Sprintf("saga prefix: %v", err))
+			errs = append(errs, fmt.Errorf("saga prefix: %w", err))
 		}
 	}
 
 	if err := r.checkNoActiveCodeDuplicate(ctx, tx, def.Code, def.ID); err != nil {
-		errs = append(errs, err.Error())
+		errs = append(errs, err)
 	}
 
 	return errs
 }
 
-func (r *PostgresRegistry) checkValuationMethodTemplates(ctx context.Context, tx pgx.Tx, methods []ValuationMethodTemplate) []string {
-	var errs []string
+func (r *PostgresRegistry) checkValuationMethodTemplates(ctx context.Context, tx pgx.Tx, methods []ValuationMethodTemplate) []error {
+	var errs []error
 	for _, vmt := range methods {
 		if err := r.checkValuationMethodExists(ctx, tx, vmt.ValuationMethodID, vmt.ValuationMethodVersion); err != nil {
-			errs = append(errs, fmt.Sprintf("valuation method template %s: method %v", vmt.InputInstrument, err))
+			errs = append(errs, fmt.Errorf("valuation method template %s: method: %w", vmt.InputInstrument, err))
 		}
 		if err := r.checkInstrumentActive(ctx, tx, vmt.InputInstrument); err != nil {
-			errs = append(errs, fmt.Sprintf("valuation method template %s: instrument %v", vmt.InputInstrument, err))
+			errs = append(errs, fmt.Errorf("valuation method template %s: instrument: %w", vmt.InputInstrument, err))
 		}
 	}
 	return errs
 }
 
-func (r *PostgresRegistry) checkSchemaAndAttributes(def *Definition) []string {
-	var errs []string
+func (r *PostgresRegistry) checkSchemaAndAttributes(def *Definition) []error {
+	var errs []error
 	if !hasNonEmptySchema(def.AttributeSchema) {
 		return errs
 	}
 
 	if err := validateJSONSchema(def.AttributeSchema); err != nil {
-		errs = append(errs, fmt.Sprintf("attribute schema: %v", err))
+		errs = append(errs, fmt.Errorf("attribute schema: %w", err))
 	} else if def.Attributes != nil {
 		if err := validateAttributesAgainstSchema(def.AttributeSchema, def.Attributes); err != nil {
-			errs = append(errs, fmt.Sprintf("attributes: %v", err))
+			errs = append(errs, fmt.Errorf("attributes: %w", err))
 		}
 	}
 	return errs
@@ -617,9 +626,11 @@ func (r *PostgresRegistry) DeprecateAccountType(ctx context.Context, code string
 			return ErrNotActive
 		}
 
-		// Enforce write-once semantics for successor_id
-		if existingSuccessorID != nil && successorID != nil && *existingSuccessorID != *successorID {
-			return ErrSuccessorWriteOnce
+		// Enforce write-once semantics for successor_id (no change/clear once set)
+		if existingSuccessorID != nil {
+			if successorID == nil || *existingSuccessorID != *successorID {
+				return ErrSuccessorWriteOnce
+			}
 		}
 
 		now := time.Now().UTC()
@@ -1004,15 +1015,15 @@ func validateSchemaIfPresent(schema json.RawMessage) error {
 }
 
 // marshalAttributes marshals a map to JSON bytes. Returns nil for nil maps.
-func marshalAttributes(attrs map[string]any) []byte {
+func marshalAttributes(attrs map[string]any) ([]byte, error) {
 	if attrs == nil {
-		return nil
+		return nil, nil
 	}
 	b, err := json.Marshal(attrs)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("failed to marshal attributes: %w", err)
 	}
-	return b
+	return b, nil
 }
 
 // hasNonEmptySchema checks whether the schema is non-nil and not just an empty JSON object.

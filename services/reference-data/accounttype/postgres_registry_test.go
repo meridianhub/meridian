@@ -157,7 +157,7 @@ func TestPostgresAccountTypeRegistry_UpdateDefinition(t *testing.T) {
 		assert.Equal(t, "true", result.ValidationCEL)
 	})
 
-	t.Run("returns ErrOptimisticLock when updated_at does not match", func(t *testing.T) {
+	t.Run("allows successive updates without optimistic lock conflict", func(t *testing.T) {
 		def := newTestDefinition("OPT_LOCK", "GBP")
 		require.NoError(t, reg.CreateDraft(ctx, def))
 
