@@ -49,12 +49,16 @@ var (
 
 	// ErrCompilation is returned when CEL compilation fails.
 	ErrCompilation = errors.New("CEL compilation failed")
+
+	// ErrEligibilityNotBool is returned when an eligibility expression does not return a boolean.
+	ErrEligibilityNotBool = errors.New("eligibility expression did not return boolean")
 )
 
 // Compiler provides CEL expression compilation with security constraints.
 type Compiler struct {
-	validationEnv *cel.Env
-	bucketKeyEnv  *cel.Env
+	validationEnv  *cel.Env
+	bucketKeyEnv   *cel.Env
+	eligibilityEnv *cel.Env
 }
 
 // NewCompiler creates a new CEL Compiler with configured environments.
@@ -69,9 +73,15 @@ func NewCompiler() (*Compiler, error) {
 		return nil, errors.Join(ErrEnvironmentCreation, fmt.Errorf("bucket key env: %w", err))
 	}
 
+	eligibilityEnv, err := createEligibilityEnv()
+	if err != nil {
+		return nil, errors.Join(ErrEnvironmentCreation, fmt.Errorf("eligibility env: %w", err))
+	}
+
 	return &Compiler{
-		validationEnv: validationEnv,
-		bucketKeyEnv:  bucketKeyEnv,
+		validationEnv:  validationEnv,
+		bucketKeyEnv:   bucketKeyEnv,
+		eligibilityEnv: eligibilityEnv,
 	}, nil
 }
 
@@ -103,6 +113,19 @@ func createBucketKeyEnv() (*cel.Env, error) {
 		cel.Variable("attributes", cel.MapType(cel.StringType, cel.StringType)),
 		SafeParseLib(),
 		BucketKeyLib(),
+	)
+}
+
+// createEligibilityEnv creates the CEL environment for eligibility expressions.
+// Variables available:
+//   - party: map[string]string - party context with keys: type, status, external_reference_type
+//   - attributes: map[string]string - key-value attributes for the account type
+//
+// The expression must return a boolean indicating eligibility.
+func createEligibilityEnv() (*cel.Env, error) {
+	return cel.NewEnv(
+		cel.Variable("party", cel.MapType(cel.StringType, cel.StringType)),
+		cel.Variable("attributes", cel.MapType(cel.StringType, cel.StringType)),
 	)
 }
 
@@ -146,6 +169,87 @@ func (c *Compiler) CompileBucketKey(expression string) (cel.Program, error) {
 	}
 
 	return prg, nil
+}
+
+// CompileEligibility compiles an eligibility expression against the eligibility environment.
+// Returns a cel.Program that can be evaluated with party and attributes input values.
+// The expression must return a boolean indicating whether a party is eligible.
+func (c *Compiler) CompileEligibility(expression string) (cel.Program, error) {
+	if err := validateExpressionConstraints(expression); err != nil {
+		return nil, err
+	}
+
+	ast, issues := c.eligibilityEnv.Compile(expression)
+	if issues != nil && issues.Err() != nil {
+		return nil, errors.Join(ErrCompilation, issues.Err())
+	}
+
+	if ast.OutputType() != cel.BoolType {
+		return nil, errors.Join(ErrCompilation, ErrEligibilityNotBool)
+	}
+
+	prg, err := c.eligibilityEnv.Program(ast, cel.CostLimit(CostLimit))
+	if err != nil {
+		return nil, errors.Join(ErrCompilation, err)
+	}
+
+	return prg, nil
+}
+
+// EvalEligibility evaluates a compiled eligibility program with the given party context.
+// Only non-empty party fields are included in the evaluation map so that CEL has() checks
+// behave correctly — empty strings indicate absent fields rather than empty values.
+func EvalEligibility(prg cel.Program, partyType, partyStatus, partyExtRefType string, attributes map[string]string) (bool, error) {
+	if attributes == nil {
+		attributes = make(map[string]string)
+	}
+
+	party := make(map[string]string)
+	if partyType != "" {
+		party["type"] = partyType
+	}
+	if partyStatus != "" {
+		party["status"] = partyStatus
+	}
+	if partyExtRefType != "" {
+		party["external_reference_type"] = partyExtRefType
+	}
+
+	out, _, err := prg.Eval(map[string]any{
+		"party":      party,
+		"attributes": attributes,
+	})
+	if err != nil {
+		return false, fmt.Errorf("eligibility evaluation error: %w", err)
+	}
+
+	result, ok := out.Value().(bool)
+	if !ok {
+		return false, ErrEligibilityNotBool
+	}
+
+	return result, nil
+}
+
+// ValidateValidationCEL compiles a validation CEL expression and discards the program.
+// Implements the accounttype.DefinitionCompiler interface.
+func (c *Compiler) ValidateValidationCEL(expression string) error {
+	_, err := c.CompileValidation(expression)
+	return err
+}
+
+// ValidateBucketingCEL compiles a bucketing CEL expression and discards the program.
+// Implements the accounttype.DefinitionCompiler interface.
+func (c *Compiler) ValidateBucketingCEL(expression string) error {
+	_, err := c.CompileBucketKey(expression)
+	return err
+}
+
+// ValidateEligibilityCEL compiles an eligibility CEL expression and discards the program.
+// Implements the accounttype.DefinitionCompiler interface.
+func (c *Compiler) ValidateEligibilityCEL(expression string) error {
+	_, err := c.CompileEligibility(expression)
+	return err
 }
 
 // validateExpressionConstraints checks that an expression meets security constraints.

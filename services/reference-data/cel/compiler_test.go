@@ -480,6 +480,141 @@ func TestSafeParseLib_InvalidInputs(t *testing.T) {
 	}
 }
 
+func TestCompileEligibility(t *testing.T) {
+	c, err := NewCompiler()
+	require.NoError(t, err)
+
+	tests := []struct {
+		name       string
+		expression string
+		wantErr    bool
+		errContain string
+	}{
+		{
+			name:       "simple party status check",
+			expression: `party.status == 'ACTIVE'`,
+			wantErr:    false,
+		},
+		{
+			name:       "compound party expression",
+			expression: `party.type == 'ORGANIZATION' && party.status == 'ACTIVE'`,
+			wantErr:    false,
+		},
+		{
+			name:       "party with external reference type",
+			expression: `party.external_reference_type == 'SWIFT_BIC'`,
+			wantErr:    false,
+		},
+		{
+			name:       "attribute access",
+			expression: `attributes["tier"] == "premium"`,
+			wantErr:    false,
+		},
+		{
+			name:       "amount is not declared in eligibility env",
+			expression: `amount > 0`,
+			wantErr:    true,
+			errContain: "undeclared reference",
+		},
+		{
+			name:       "syntax error",
+			expression: `party.status ==`,
+			wantErr:    true,
+			errContain: "CEL compilation failed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prg, err := c.CompileEligibility(tt.expression)
+			if tt.wantErr {
+				require.Error(t, err)
+				if tt.errContain != "" {
+					assert.Contains(t, err.Error(), tt.errContain)
+				}
+				assert.Nil(t, prg)
+			} else {
+				require.NoError(t, err)
+				assert.NotNil(t, prg)
+			}
+		})
+	}
+}
+
+func TestEvalEligibility(t *testing.T) {
+	c, err := NewCompiler()
+	require.NoError(t, err)
+
+	prg, err := c.CompileEligibility(`party.type == 'ORGANIZATION' && party.status == 'ACTIVE'`)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name            string
+		partyType       string
+		partyStatus     string
+		partyExtRefType string
+		attributes      map[string]string
+		want            bool
+	}{
+		{
+			name:        "active organization is eligible",
+			partyType:   "ORGANIZATION",
+			partyStatus: "ACTIVE",
+			attributes:  map[string]string{},
+			want:        true,
+		},
+		{
+			name:        "suspended party is not eligible",
+			partyType:   "ORGANIZATION",
+			partyStatus: "SUSPENDED",
+			attributes:  map[string]string{},
+			want:        false,
+		},
+		{
+			name:        "individual is not eligible",
+			partyType:   "INDIVIDUAL",
+			partyStatus: "ACTIVE",
+			attributes:  map[string]string{},
+			want:        false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := EvalEligibility(prg, tt.partyType, tt.partyStatus, tt.partyExtRefType, tt.attributes)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, result)
+		})
+	}
+}
+
+func TestCompileEligibility_CrossEnvRejection(t *testing.T) {
+	c, err := NewCompiler()
+	require.NoError(t, err)
+
+	// ValidationCEL env should reject party.type references
+	_, err = c.CompileValidation(`party.type == 'ORGANIZATION'`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "undeclared reference")
+
+	// EligibilityCEL env should reject amount references
+	_, err = c.CompileEligibility(`amount > 0`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "undeclared reference")
+}
+
+func TestCompileEligibility_TooLong(t *testing.T) {
+	c, err := NewCompiler()
+	require.NoError(t, err)
+
+	longExpr := strings.Repeat("true || ", MaxExpressionLength/8+1) + "true"
+	require.Greater(t, len(longExpr), MaxExpressionLength)
+
+	_, err = c.CompileEligibility(longExpr)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrExpressionTooLong)
+}
+
 func BenchmarkCompileValidation(b *testing.B) {
 	c, err := NewCompiler()
 	require.NoError(b, err)
