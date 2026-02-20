@@ -206,7 +206,7 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 
 	// Seed ValuationFeatures from product type templates (best-effort after account creation)
 	if cachedType != nil && len(cachedType.Definition.ValuationMethods) > 0 && s.valuationFeatureRepo != nil {
-		if err := s.seedValuationFeatures(ctx, account.ID(), cachedType.Definition.ValuationMethods); err != nil {
+		if err := s.seedValuationFeatures(ctx, account.ID(), cachedType.Definition); err != nil {
 			// Log but do not fail account creation - VF seeding is best-effort
 			s.logger.Error("failed to seed valuation features",
 				"account_id", accountID,
@@ -270,39 +270,12 @@ func validateAttributes(compiledSchema interface{ Validate(interface{}) error },
 	return compiledSchema.Validate(parsed)
 }
 
-// seedValuationFeatures creates ValuationFeature records from product type templates.
-// Each template maps an input instrument to a valuation method.
-// Features are created in INITIATED status and immediately activated.
-func (s *Service) seedValuationFeatures(ctx context.Context, accountID uuid.UUID, templates []accounttype.ValuationMethodTemplate) error {
-	for _, tmpl := range templates {
-		feature, err := vf.NewValuationFeature(
-			accountID,
-			tmpl.InputInstrument,
-			tmpl.ValuationMethodID,
-			tmpl.ValuationMethodVersion,
-			tmpl.Parameters,
-			"system",
-		)
-		if err != nil {
-			return fmt.Errorf("failed to create valuation feature for instrument %s: %w", tmpl.InputInstrument, err)
-		}
-
-		// Activate immediately for newly seeded features
-		if err := feature.Activate("system"); err != nil {
-			return fmt.Errorf("failed to activate valuation feature for instrument %s: %w", tmpl.InputInstrument, err)
-		}
-
-		if err := s.valuationFeatureRepo.Create(ctx, feature); err != nil {
-			return fmt.Errorf("failed to persist valuation feature for instrument %s: %w", tmpl.InputInstrument, err)
-		}
-
-		s.logger.Info("seeded valuation feature",
-			"account_id", accountID,
-			"instrument_code", tmpl.InputInstrument,
-			"valuation_method_id", tmpl.ValuationMethodID,
-			"valuation_method_version", tmpl.ValuationMethodVersion)
-	}
-	return nil
+// seedValuationFeatures seeds ValuationFeature records from product type templates.
+// Delegates to the shared ProductTypeSeeder which filters ACTIVE templates and
+// uses upsert semantics for saga retry safety.
+func (s *Service) seedValuationFeatures(ctx context.Context, accountID uuid.UUID, productType *accounttype.Definition) error {
+	seeder := vf.NewProductTypeSeeder(s.valuationFeatureRepo)
+	return seeder.SeedFromProductType(ctx, accountID, productType, time.Now().UTC())
 }
 
 // RetrieveCurrentAccount gets current account details including balance from Position Keeping.

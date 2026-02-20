@@ -23,6 +23,7 @@ import (
 	"github.com/meridianhub/meridian/services/reference-data/accounttype"
 	"github.com/meridianhub/meridian/services/reference-data/cache"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	vf "github.com/meridianhub/meridian/shared/pkg/valuationfeature"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc/codes"
@@ -256,7 +257,7 @@ func (s *Service) InitiateInternalBankAccount(ctx context.Context, req *pb.Initi
 	var clearingPurpose domain.ClearingPurpose
 	var dimension string
 	var productTypeVersion int
-	var valuationTemplates []accounttype.ValuationMethodTemplate
+	var productTypeDef *accounttype.Definition
 
 	// 2. Product type resolution via cache (if cache is configured and code is available)
 	if s.accountTypeCache != nil && productTypeCode != "" {
@@ -336,7 +337,7 @@ func (s *Service) InitiateInternalBankAccount(ctx context.Context, req *pb.Initi
 		// Derive account type from BehaviorClass via mapping
 		accountType = behaviorClassToAccountType[def.BehaviorClass]
 		productTypeVersion = def.Version
-		valuationTemplates = def.ValuationMethods
+		productTypeDef = def
 
 		// Derive dimension from instrument via Reference Data (if available)
 	} else if s.accountTypeCache == nil && req.ProductTypeCode != "" {
@@ -495,41 +496,14 @@ func (s *Service) InitiateInternalBankAccount(ctx context.Context, req *pb.Initi
 		return nil, status.Errorf(codes.Internal, "failed to create account: %v", err)
 	}
 
-	// Seed ValuationFeatures from product type templates
-	if s.valuationFeatureRepo != nil && len(valuationTemplates) > 0 {
-		for _, tmpl := range valuationTemplates {
-			if tmpl.Status != accounttype.StatusActive {
-				continue
-			}
-			feature, err := domain.NewValuationFeature(
-				account.ID(),
-				tmpl.InputInstrument,
-				tmpl.ValuationMethodID,
-				tmpl.ValuationMethodVersion,
-				tmpl.Parameters,
-				"system",
-			)
-			if err != nil {
-				s.logger.Warn("failed to create valuation feature from template",
-					"account_id", accountID,
-					"template_id", tmpl.ID.String(),
-					"error", err)
-				continue
-			}
-			// Auto-activate seeded features
-			if err := feature.Activate("system"); err != nil {
-				s.logger.Warn("failed to activate valuation feature from template",
-					"account_id", accountID,
-					"template_id", tmpl.ID.String(),
-					"error", err)
-				continue
-			}
-			if err := s.valuationFeatureRepo.Create(ctx, feature); err != nil {
-				s.logger.Warn("failed to persist valuation feature from template",
-					"account_id", accountID,
-					"template_id", tmpl.ID.String(),
-					"error", err)
-			}
+	// Seed ValuationFeatures from product type templates using upsert semantics.
+	if s.valuationFeatureRepo != nil && productTypeDef != nil && len(productTypeDef.ValuationMethods) > 0 {
+		seeder := vf.NewProductTypeSeeder(s.valuationFeatureRepo)
+		if err := seeder.SeedFromProductType(ctx, account.ID(), productTypeDef, time.Now().UTC()); err != nil {
+			s.logger.Warn("failed to seed valuation features from product type",
+				"account_id", accountID,
+				"product_type_code", productTypeCode,
+				"error", err)
 		}
 	}
 
