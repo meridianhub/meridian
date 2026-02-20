@@ -474,7 +474,7 @@ func (c *LocalAccountTypeCache) getOrCreateTenantCache(tenantID tenant.TenantID)
 
 // jitteredTTL returns the base TTL plus a random jitter.
 func (c *LocalAccountTypeCache) jitteredTTL() time.Duration {
-	if c.ttlJitter == 0 {
+	if c.ttlJitter <= 0 {
 		return c.baseTTL
 	}
 	jitterRange := int64(c.ttlJitter) * 2
