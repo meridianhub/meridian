@@ -247,7 +247,7 @@ jobs:
             - **Cross-system impact**: Dependencies on other services, data contracts, breaking changes?
 
             **Test Coverage Review:**
-            For each changed function, check whether the test file is in the diff. If it is, review whether the test actually verifies the behavior. If not, note: "No test changes for [function] - verify existing tests cover the new behavior." Focus on domain edge cases, not generic coverage.
+            For each changed function, check whether the test file is in the diff. If it is, review whether the test actually verifies the behavior. If not, check if a `*_test.go` file exists for the package, then note: "No test changes for [function] - verify existing tests cover the new behavior" or "No test file found for [file]." Focus on domain edge cases, not generic coverage.
 
             **Questions for the Author:**
             End your review with 2-5 specific questions about the change. Frame as genuine questions the diff alone does not answer:
@@ -315,6 +315,7 @@ jobs:
             | Blast radius | Low/Med/High | What breaks if this is wrong |
             | Rollback | Safe/Risky | Can this be reverted cleanly? |
             | Scale | Low/Med/High | Impact at 10x/100x load |
+            | Cross-system | Low/Med/High | Dependencies, data contracts, breaking changes |
             | Migration | N/A/Safe/Risky | CockroachDB compatibility |
 
             ### Findings
@@ -523,11 +524,15 @@ jobs:
             gh api repos/${{ github.repository }}/contents/docs/adr?ref=${{ github.event.pull_request.head.sha }} --jq '.[].name'
             gh api repos/${{ github.repository }}/contents/docs/prd?ref=${{ github.event.pull_request.head.sha }} --jq '.[].name'
             gh api repos/${{ github.repository }}/contents/docs/skills?ref=${{ github.event.pull_request.head.sha }} --jq '.[].name'
+            gh api repos/${{ github.repository }}/contents/docs/runbooks?ref=${{ github.event.pull_request.head.sha }} --jq '.[].name'
             ```
 
             2. Pick the 1-3 files whose names relate to the PR's changed
                services or features. Read their YAML frontmatter (first 20
-               lines) to confirm relevance via `triggers` and `description`.
+               lines) to confirm relevance via `triggers` and `description`:
+            ```bash
+            gh api repos/${{ github.repository }}/contents/docs/adr/{filename}?ref=${{ github.event.pull_request.head.sha }} --jq '.content' | base64 -d | head -20
+            ```
 
             3. For confirmed matches, read the full doc. Use the `instructions`
                field and body content to verify:
