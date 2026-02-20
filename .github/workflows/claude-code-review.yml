@@ -314,6 +314,7 @@ jobs:
             |------|-------|--------|
             | Blast radius | Low/Med/High | What breaks if this is wrong |
             | Rollback | Safe/Risky | Can this be reverted cleanly? |
+            | Scale | Low/Med/High | Impact at 10x/100x load |
             | Migration | N/A/Safe/Risky | CockroachDB compatibility |
 
             ### Findings
@@ -502,8 +503,42 @@ jobs:
 
             ---
 
-            PROJECT CONTEXT (reference as needed):
-            - CONTRIBUTING.md, docs/adr/, docs/prd/, service README files
+            ## Project Documentation Discovery
+
+            The repo has structured documentation with YAML frontmatter
+            containing `name`, `description`, `triggers`, and `instructions`
+            fields. Use these to verify the PR aligns with the holistic
+            architectural vision, not just local correctness.
+
+            **Directories:**
+            - `docs/skills/` - Operational guides (testing, starlark sagas, docker, etc.)
+            - `docs/adr/` - Architecture Decision Records (temporal quality ladder, asset types, saga orchestration, etc.)
+            - `docs/prd/` - Product Requirements Documents (feature specs, BIAN mappings, acceptance criteria)
+            - `docs/runbooks/` - Operational procedures (saga recovery, deployments)
+
+            **Discovery process (do NOT bulk-load all docs):**
+
+            1. List filenames in each directory - names are descriptive:
+            ```bash
+            gh api repos/${{ github.repository }}/contents/docs/adr?ref=${{ github.event.pull_request.head.sha }} --jq '.[].name'
+            gh api repos/${{ github.repository }}/contents/docs/prd?ref=${{ github.event.pull_request.head.sha }} --jq '.[].name'
+            gh api repos/${{ github.repository }}/contents/docs/skills?ref=${{ github.event.pull_request.head.sha }} --jq '.[].name'
+            ```
+
+            2. Pick the 1-3 files whose names relate to the PR's changed
+               services or features. Read their YAML frontmatter (first 20
+               lines) to confirm relevance via `triggers` and `description`.
+
+            3. For confirmed matches, read the full doc. Use the `instructions`
+               field and body content to verify:
+               - Does the PR fulfill the documented requirements?
+               - Does it follow the architectural decisions?
+               - Are there constraints or patterns the PR should respect?
+
+            This is your "holistic goal" check. A PR that passes linting
+            but violates an ADR or misses a PRD requirement is still wrong.
+
+            Also reference: CONTRIBUTING.md, service README files
 
           # Using Opus 4.5 for higher quality code reviews
           claude_args: '--model claude-opus-4-5-20251101 --allowed-tools "Bash(gh api:*),Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr checks:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"'
