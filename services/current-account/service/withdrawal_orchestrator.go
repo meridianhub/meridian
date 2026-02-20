@@ -5,6 +5,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -14,9 +15,11 @@ import (
 	"github.com/meridianhub/meridian/services/current-account/config"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
+	refsaga "github.com/meridianhub/meridian/services/reference-data/saga"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"github.com/meridianhub/meridian/shared/platform/observability"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -35,6 +38,7 @@ type WithdrawalOrchestrator struct {
 	fungibilityValidator *FungibilityValidator
 	sagaRunner           *saga.StarlarkSagaRunner
 	withdrawalScript     string
+	sagaResolver         *refsaga.ProductTypeSagaResolver
 }
 
 // WithdrawalOrchestratorConfig contains dependencies for creating a WithdrawalOrchestrator
@@ -53,8 +57,13 @@ type WithdrawalOrchestratorConfig struct {
 	FungibilityValidator *FungibilityValidator
 	// SagaRunner executes Starlark saga definitions.
 	SagaRunner *saga.StarlarkSagaRunner
-	// WithdrawalScript is the Starlark script for the withdrawal saga.
+	// WithdrawalScript is the Starlark script for the default withdrawal saga.
+	// Used when SagaResolver is nil or the account has no ProductTypeCode.
 	WithdrawalScript string
+	// SagaResolver optionally resolves the saga definition from the registry
+	// based on the account's ProductTypeCode. When set and the account has a
+	// ProductTypeCode, the resolved script is used instead of WithdrawalScript.
+	SagaResolver *refsaga.ProductTypeSagaResolver
 }
 
 // NewWithdrawalOrchestrator creates a new withdrawal orchestrator with the given dependencies.
@@ -88,6 +97,7 @@ func NewWithdrawalOrchestrator(cfg WithdrawalOrchestratorConfig) (*WithdrawalOrc
 		fungibilityValidator: cfg.FungibilityValidator,
 		sagaRunner:           cfg.SagaRunner,
 		withdrawalScript:     cfg.WithdrawalScript,
+		sagaResolver:         cfg.SagaResolver,
 	}, nil
 }
 
@@ -191,14 +201,27 @@ func (o *WithdrawalOrchestrator) Orchestrate(ctx context.Context, account domain
 	})
 	ctx = context.WithValue(ctx, ContextKeyAccount, account)
 
+	// Resolve saga script: use ProductTypeSagaResolver when configured and account has a product type,
+	// otherwise fall back to the static default withdrawal script.
+	withdrawalScript, err := o.resolveWithdrawalScript(ctx, account)
+	if err != nil {
+		sagaStatus = operationStatusFailed
+		o.logger.Error("failed to resolve withdrawal saga",
+			"account_id", account.AccountID(),
+			"product_type_code", account.ProductTypeCode(),
+			"error", err)
+		return nil, status.Errorf(codes.NotFound, "withdrawal saga not found for product type: %v", err)
+	}
+
 	// Execute saga via StarlarkSagaRunner
 	o.logger.Info("executing withdrawal saga via Starlark",
 		"account_id", account.AccountID(),
 		"transaction_id", transactionID,
 		"saga_execution_id", input.SagaExecutionID,
-		"correlation_id", correlationID)
+		"correlation_id", correlationID,
+		"product_type_code", account.ProductTypeCode())
 
-	output, err := o.sagaRunner.ExecuteSaga(ctx, "current_account_withdrawal", o.withdrawalScript, input)
+	output, err := o.sagaRunner.ExecuteSaga(ctx, "current_account_withdrawal", withdrawalScript, input)
 	if err != nil {
 		sagaStatus = operationStatusFailed
 		o.logger.Error("withdrawal saga failed",
@@ -266,4 +289,50 @@ func (o *WithdrawalOrchestrator) resolveClearingAccountID(ctx context.Context, c
 	// Neither configured - single-entry mode
 	o.logger.Debug("no clearing account configured, operating in single-entry mode")
 	return ""
+}
+
+// resolveWithdrawalScript returns the saga script to execute for the given account.
+//
+// Resolution order:
+//  1. If SagaResolver is configured and the account has a ProductTypeCode, resolve the
+//     saga definition from the registry using ProductTypeSagaResolver. The definition's
+//     ResolvedScript is used. If the resolver returns ErrSagaNotFound, the error is
+//     propagated (fail-fast: a prefixed product type must have a corresponding saga).
+//  2. Otherwise, fall back to the static default WithdrawalScript.
+func (o *WithdrawalOrchestrator) resolveWithdrawalScript(ctx context.Context, account domain.CurrentAccount) (string, error) {
+	if o.sagaResolver == nil || account.ProductTypeCode() == "" {
+		return o.withdrawalScript, nil
+	}
+
+	tenantID, ok := tenant.FromContext(ctx)
+	if !ok {
+		// No tenant context — fall back to static script
+		return o.withdrawalScript, nil
+	}
+
+	def, err := o.sagaResolver.ResolveForProductType(ctx, tenantID, account.ProductTypeCode(), "withdrawal")
+	if err != nil {
+		if errors.Is(err, refsaga.ErrSagaNotFound) {
+			// Prefix is defined but no saga found — fail fast per PRD convention
+			return "", err
+		}
+		// ErrNotFound (product type or generic saga missing) — fall back to static script
+		o.logger.Warn("saga resolution fell through to default withdrawal script",
+			"product_type_code", account.ProductTypeCode(),
+			"error", err)
+		return o.withdrawalScript, nil
+	}
+
+	if def.ResolvedScript == "" {
+		// Definition has no resolved script — fall back to static script
+		o.logger.Warn("resolved saga definition has no script, using default",
+			"saga_name", def.Name,
+			"product_type_code", account.ProductTypeCode())
+		return o.withdrawalScript, nil
+	}
+
+	o.logger.Debug("using product-type-specific withdrawal saga",
+		"saga_name", def.Name,
+		"product_type_code", account.ProductTypeCode())
+	return def.ResolvedScript, nil
 }

@@ -68,6 +68,11 @@ var (
 	// ErrNoScriptSource is returned when a saga has neither a custom script nor a platform_ref.
 	ErrNoScriptSource = errors.New("saga has no script source: neither custom script nor platform reference")
 
+	// ErrSagaNotFound is returned when no saga is found for a given product type prefix and operation.
+	// This is distinct from ErrNotFound: ErrSagaNotFound is used when prefix-based resolution
+	// fails with no fallback (a product type has a DefaultSagaPrefix but no matching saga exists).
+	ErrSagaNotFound = errors.New("saga not found for product type operation")
+
 	// ErrScriptHashMismatch is returned during replay when the pinned script hash
 	// does not match the current script, indicating potential corruption.
 	ErrScriptHashMismatch = errors.New("script hash mismatch: pinned version differs from current")
