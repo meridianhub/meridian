@@ -176,16 +176,10 @@ func normalizeAccountTypePageSize(pageSize int) int {
 
 // CreateDraft creates a new account type definition in DRAFT status.
 func (s *AccountTypeService) CreateDraft(ctx context.Context, req *pb.CreateDraftRequest) (*pb.CreateDraftResponse, error) {
-	var defaultConversionMethodID *uuid.UUID
-	var defaultConversionMethodVersion *int
-	if req.GetDefaultConversionMethodId() != "" {
-		id, err := uuid.Parse(req.GetDefaultConversionMethodId())
-		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid default_conversion_method_id: %v", err)
-		}
-		defaultConversionMethodID = &id
-		v := int(req.GetDefaultConversionMethodVersion())
-		defaultConversionMethodVersion = &v
+	defaultConversionMethodID, defaultConversionMethodVersion, err := parseConversionMethodPair(
+		req.GetDefaultConversionMethodId(), req.GetDefaultConversionMethodVersion())
+	if err != nil {
+		return nil, err
 	}
 
 	def, err := accounttype.NewDefinition(accounttype.NewDefinitionParams{
@@ -234,16 +228,10 @@ func (s *AccountTypeService) UpdateDefinition(ctx context.Context, req *pb.Updat
 		return nil, s.mapDomainError(ctx, err, "UpdateDefinition", req.GetId())
 	}
 
-	var defaultConversionMethodID *uuid.UUID
-	var defaultConversionMethodVersion *int
-	if req.GetDefaultConversionMethodId() != "" {
-		parsed, parseErr := uuid.Parse(req.GetDefaultConversionMethodId())
-		if parseErr != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid default_conversion_method_id: %v", parseErr)
-		}
-		defaultConversionMethodID = &parsed
-		v := int(req.GetDefaultConversionMethodVersion())
-		defaultConversionMethodVersion = &v
+	defaultConversionMethodID, defaultConversionMethodVersion, parseErr := parseConversionMethodPair(
+		req.GetDefaultConversionMethodId(), req.GetDefaultConversionMethodVersion())
+	if parseErr != nil {
+		return nil, parseErr
 	}
 
 	updates := &accounttype.Definition{
@@ -703,6 +691,23 @@ func protoBehaviorNormalBalanceToDomainString(n pb.NormalBalance) string {
 }
 
 // --- Map utilities ---
+
+// parseConversionMethodPair validates and parses the conversion method ID/version pair.
+// Returns nil pointers if ID is empty. Returns InvalidArgument if ID is invalid or version < 1.
+func parseConversionMethodPair(idStr string, version int32) (*uuid.UUID, *int, error) {
+	if idStr == "" {
+		return nil, nil, nil
+	}
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		return nil, nil, status.Errorf(codes.InvalidArgument, "invalid default_conversion_method_id: %v", err)
+	}
+	if version < 1 {
+		return nil, nil, status.Errorf(codes.InvalidArgument, "default_conversion_method_version must be >= 1 when default_conversion_method_id is set")
+	}
+	v := int(version)
+	return &id, &v, nil
+}
 
 func stringMapToAnyMap(m map[string]string) map[string]any {
 	if m == nil {
