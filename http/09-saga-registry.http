@@ -20,6 +20,7 @@ X-Tenant-ID: {{tenant_id}}
 
 > {%
     client.global.set("saga_id", response.body.saga.id);
+    client.global.set("saga_name", response.body.saga.name);
 %}
 
 ### Retrieve Saga by ID
@@ -27,7 +28,7 @@ GET {{host}}/v1/sagas/{{saga_id}}
 X-Tenant-ID: {{tenant_id}}
 
 ### Get Active Saga by Name
-GET {{host}}/v1/sagas/active/payment_transfer
+GET {{host}}/v1/sagas/active/{{saga_name}}
 X-Tenant-ID: {{tenant_id}}
 
 ### List All Sagas
