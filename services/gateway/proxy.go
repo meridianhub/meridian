@@ -137,6 +137,30 @@ func (h *ProxyHandler) RouteCount() int {
 	return len(h.routes)
 }
 
+// identityHeaderMiddleware is an HTTP middleware that strips client-supplied
+// identity headers and injects authenticated identity headers from the request
+// context set by the auth middleware.
+//
+// This provides the same security guarantee as the NewProxyHandler Director
+// for the Vanguard transcoder path: regardless of what a client sends, the
+// identity headers seen by backend services always reflect the gateway's
+// authentication result.
+func identityHeaderMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// SECURITY: Strip any incoming identity headers to prevent spoofing.
+		r.Header.Del(HeaderUserID)
+		r.Header.Del(HeaderTenantID)
+		r.Header.Del(HeaderAuthMethod)
+		r.Header.Del(HeaderAuthRoles)
+		r.Header.Del(auth.APIKeyHeader)
+
+		// Inject identity headers from the authenticated context.
+		addIdentityHeaders(r)
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 // addIdentityHeaders extracts authenticated identity from request context
 // and adds the corresponding headers to the outgoing request.
 //
