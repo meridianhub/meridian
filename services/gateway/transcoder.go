@@ -1,13 +1,18 @@
 package gateway
 
 import (
+	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"time"
 
 	"connectrpc.com/vanguard"
+	"golang.org/x/net/http2"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -98,14 +103,21 @@ func NewTranscoder(descriptorBytes []byte, backends []ServiceBackend) (http.Hand
 	return transcoder, nil
 }
 
-// newGRPCReverseProxy builds an httputil.ReverseProxy that forwards requests to addr.
-// The proxy uses the default http.Transport (HTTP/1.1). Full h2c (cleartext HTTP/2)
-// support — required for gRPC backends — will be added in the server wiring task
-// by configuring an http2.Transport with AllowHTTP: true on the reverse proxy.
+// newGRPCReverseProxy builds an httputil.ReverseProxy that forwards requests to addr
+// using cleartext HTTP/2 (h2c). gRPC backends require HTTP/2, so the proxy is
+// configured with an http2.Transport that has AllowHTTP enabled and TLS disabled.
 func newGRPCReverseProxy(addr string) http.Handler {
 	target := &url.URL{
 		Scheme: "http",
 		Host:   addr,
 	}
-	return httputil.NewSingleHostReverseProxy(target)
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy.Transport = &http2.Transport{
+		AllowHTTP: true,
+		DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
+			d := net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
+			return d.DialContext(ctx, network, addr)
+		},
+	}
+	return proxy
 }
