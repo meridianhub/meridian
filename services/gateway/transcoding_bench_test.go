@@ -407,7 +407,11 @@ func BenchmarkJSON_RetrieveParty_Parallel(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+			req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+			if err != nil {
+				b.Errorf("http.NewRequestWithContext: %v", err)
+				continue
+			}
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
 				b.Errorf("http.Do: %v", err)
@@ -415,6 +419,9 @@ func BenchmarkJSON_RetrieveParty_Parallel(b *testing.B) {
 			}
 			_, _ = io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
+			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+				b.Errorf("unexpected HTTP status: %d", resp.StatusCode)
+			}
 		}
 	})
 }
