@@ -58,4 +58,8 @@ var (
 
 	// ErrAttributesInvalid is returned when attributes do not validate against the attribute_schema.
 	ErrAttributesInvalid = errors.New("attributes do not validate against attribute_schema")
+
+	// ErrSystemAccountTypeReadOnly is returned when attempting to modify or deprecate a system account type.
+	// System account types (IsSystem=true) are seeded by the platform and are read-only.
+	ErrSystemAccountTypeReadOnly = errors.New("system account type is read-only")
 )
