@@ -102,6 +102,9 @@ func errorReformattingMiddleware(next http.Handler) http.Handler {
 			}
 			out, err := json.Marshal(canonical)
 			if err == nil {
+				// Remove Content-Length so it is not stale after reformatting.
+				// The marshaled body length differs from the original.
+				w.Header().Del("Content-Length")
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(rw.statusCode)
 				_, _ = w.Write(out)
