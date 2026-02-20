@@ -3,6 +3,7 @@ package main
 import (
 	"testing"
 
+	"github.com/meridianhub/meridian/services/gateway"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -56,4 +57,23 @@ func TestProtoDescriptors_ContainsAllServices(t *testing.T) {
 	for _, svc := range required {
 		assert.True(t, found[svc], "descriptor set must contain service %q", svc)
 	}
+}
+
+// TestWireGateway_TranscoderBuildsCleanly verifies that wireGateway successfully
+// constructs the Vanguard transcoder from the embedded descriptor set and the
+// registered serviceNames list. A build failure here indicates a mismatch between
+// serviceNames in main.go and the services present in the descriptor.
+func TestWireGateway_TranscoderBuildsCleanly(t *testing.T) {
+	// Construct per-service backends as wireGateway does, using a dummy address.
+	backends := make([]gateway.ServiceBackend, 0, len(serviceNames))
+	for _, name := range serviceNames {
+		backends = append(backends, gateway.ServiceBackend{
+			ServiceName: name,
+			BackendAddr: "localhost:50051",
+		})
+	}
+
+	handler, err := gateway.NewTranscoder(GetProtoDescriptors(), backends)
+	require.NoError(t, err, "transcoder must build cleanly from embedded descriptor and serviceNames")
+	assert.NotNil(t, handler)
 }

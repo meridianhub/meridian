@@ -586,8 +586,38 @@ func wireReconciliation(
 
 // ─── Gateway Wiring ──────────────────────────────────────────────────────────
 
-// wireGateway creates the gateway HTTP server that proxies Connect/gRPC-Web
-// requests to the shared gRPC server running on grpcPort.
+// serviceNames lists the fully-qualified gRPC service names to register with the
+// Vanguard REST↔gRPC transcoder in the unified development binary.
+//
+// All services run in the same process and share a single loopback gRPC address.
+// Per-service entries allow the transcoder to be selective: services that share
+// conflicting HTTP path patterns in their proto annotations cannot be registered
+// together in the same Vanguard instance.
+//
+// HTTP-route conflict: InternalBankAccountService and CurrentAccountService both
+// define REST routes for lien operations (/v1/liens/*). InternalBankAccountService
+// is registered here as the canonical REST owner; CurrentAccountService is still
+// reachable via native gRPC or Connect protocol.
+var serviceNames = []string{
+	"meridian.party.v1.PartyService",
+	"meridian.reference_data.v1.ReferenceDataService",
+	"meridian.reference_data.v1.NodeService",
+	"meridian.market_information.v1.MarketInformationService",
+	"meridian.tenant.v1.TenantService",
+	"meridian.internal_bank_account.v1.InternalBankAccountService",
+	"meridian.financial_accounting.v1.FinancialAccountingService",
+	"meridian.position_keeping.v1.PositionKeepingService",
+	"meridian.forecasting.v1.ForecastingService",
+	// CurrentAccountService excluded: conflicts with InternalBankAccountService
+	// on /v1/liens/* REST routes. Reachable via gRPC/Connect only.
+	"meridian.payment_order.v1.PaymentOrderService",
+	"meridian.reconciliation.v1.AccountReconciliationService",
+	"meridian.saga.v1.SagaRegistryService",
+}
+
+// wireGateway creates the gateway HTTP server with the Vanguard transcoder
+// routing REST/JSON, Connect, and gRPC-Web requests to the shared gRPC server
+// running on grpcPort.
 func wireGateway(grpcPort, httpPort int, databaseURL string, logger *slog.Logger) *gateway.Server {
 	grpcTarget := fmt.Sprintf("localhost:%d", grpcPort)
 
@@ -596,23 +626,30 @@ func wireGateway(grpcPort, httpPort int, databaseURL string, logger *slog.Logger
 		BaseDomain:   "localhost",
 		LocalDevMode: true,
 		DatabaseURL:  databaseURL,
-		Backends: []gateway.BackendRoute{
-			{Prefix: "/v1/party", Target: grpcTarget},
-			{Prefix: "/v1/reference-data", Target: grpcTarget},
-			{Prefix: "/v1/market-information", Target: grpcTarget},
-			{Prefix: "/v1/tenant", Target: grpcTarget},
-			{Prefix: "/v1/internal-bank-account", Target: grpcTarget},
-			{Prefix: "/v1/financial-accounting", Target: grpcTarget},
-			{Prefix: "/v1/position-keeping", Target: grpcTarget},
-			{Prefix: "/v1/forecasting", Target: grpcTarget},
-			{Prefix: "/v1/current-account", Target: grpcTarget},
-			{Prefix: "/v1/payment-order", Target: grpcTarget},
-			{Prefix: "/v1/reconciliation", Target: grpcTarget},
-			{Prefix: "/v1/saga", Target: grpcTarget},
-		},
 	}
 
-	return gateway.NewServer(config, logger, nil)
+	// Build per-service backends pointing at the shared loopback gRPC server.
+	backends := make([]gateway.ServiceBackend, 0, len(serviceNames))
+	for _, name := range serviceNames {
+		backends = append(backends, gateway.ServiceBackend{
+			ServiceName: name,
+			BackendAddr: grpcTarget,
+		})
+	}
+
+	// Build the Vanguard transcoder from the embedded FileDescriptorSet.
+	// On failure, log a warning and fall back to the placeholder handler —
+	// this keeps the health endpoints alive even if descriptors are stale.
+	var opts []gateway.ServerOption
+	transcoder, err := gateway.NewTranscoder(GetProtoDescriptors(), backends)
+	if err != nil {
+		logger.Warn("failed to build Vanguard transcoder; API routes will return 501",
+			"error", err)
+	} else {
+		opts = append(opts, gateway.WithTranscoder(transcoder))
+	}
+
+	return gateway.NewServer(config, logger, nil, opts...)
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

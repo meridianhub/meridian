@@ -28,6 +28,7 @@ type Server struct {
 	authMiddleware        *auth.CombinedAuthMiddleware
 	tenantAuthzMiddleware *auth.TenantAuthorizationMiddleware
 	healthChecker         *gwhealth.GatewayHealthChecker
+	transcoderHandler     http.Handler
 }
 
 // ServerOption is a functional option for configuring the server.
@@ -44,6 +45,15 @@ func WithAuthMiddleware(authMiddleware *auth.CombinedAuthMiddleware) ServerOptio
 func WithHealthChecker(healthChecker *gwhealth.GatewayHealthChecker) ServerOption {
 	return func(s *Server) {
 		s.healthChecker = healthChecker
+	}
+}
+
+// WithTranscoder sets the Vanguard transcoder as the API handler, replacing
+// the legacy prefix-based reverse proxy. When set, all /api/ requests are
+// dispatched through the transcoder rather than NewProxyHandler.
+func WithTranscoder(handler http.Handler) ServerOption {
+	return func(s *Server) {
+		s.transcoderHandler = handler
 	}
 }
 
@@ -86,7 +96,7 @@ func NewServer(config *Config, logger *slog.Logger, tenantResolver *platformgate
 // 1. Auth middleware (validates JWT or API key, injects identity into context)
 // 2. Tenant middleware (resolves tenant from subdomain, injects tenant into context)
 // 3. Tenant authorization middleware (verifies JWT tenant matches resolved tenant)
-// 4. Proxy handler (routes to backend services)
+// 4. Transcoder (Vanguard REST↔gRPC transcoder) or legacy proxy handler
 //
 // This order ensures:
 // - 401 Unauthorized is returned for missing/invalid credentials BEFORE tenant resolution
@@ -101,16 +111,21 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealth)
 	s.mux.HandleFunc("GET /readyz", s.handleReady)
 
-	// API routes - with auth and tenant middleware chain
-	// Create proxy handler if backends are configured, otherwise use placeholder
+	// API routes - with auth and tenant middleware chain.
+	// Prefer the Vanguard transcoder when configured; fall back to the legacy
+	// prefix-based reverse proxy when Backends are provided; otherwise use a
+	// placeholder that returns 501 Not Implemented.
 	var apiHandler http.Handler
-	if len(s.config.Backends) > 0 {
+	switch {
+	case s.transcoderHandler != nil:
+		apiHandler = s.transcoderHandler
+	case len(s.config.Backends) > 0:
 		apiHandler = NewProxyHandler(s.config.Backends)
-	} else {
+	default:
 		apiHandler = http.HandlerFunc(s.handleAPI)
 	}
 
-	// Build middleware chain: auth → tenant → tenant_authz → proxy
+	// Build middleware chain: auth → tenant → tenant_authz → transcoder/proxy
 	handler := http.StripPrefix("/api", apiHandler)
 
 	// Layer 3 (innermost): Tenant authorization (verify JWT tenant matches subdomain)

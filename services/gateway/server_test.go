@@ -211,6 +211,84 @@ func TestAPIRoutes_WithoutTenantResolver(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "gateway routing not yet implemented")
 }
 
+// TestWithTranscoder_UsedOverProxy verifies that when WithTranscoder is set,
+// API requests are dispatched through the transcoder rather than the legacy proxy.
+func TestWithTranscoder_UsedOverProxy(t *testing.T) {
+	transcoderCalled := false
+	fakeTranscoder := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		transcoderCalled = true
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("transcoder"))
+	})
+
+	config := &Config{
+		Port:        8080,
+		BaseDomain:  "api.example.com",
+		DatabaseURL: "postgres://localhost/test",
+		// Also set Backends to confirm transcoder takes precedence.
+		Backends: []BackendRoute{
+			{Prefix: "/v1/party", Target: "party:50051"},
+		},
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	server := NewServer(config, logger, nil, WithTranscoder(fakeTranscoder))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/meridian.party.v1.PartyService/CreateParty", nil)
+	rec := httptest.NewRecorder()
+
+	server.mux.ServeHTTP(rec, req)
+
+	assert.True(t, transcoderCalled, "transcoder should be called when configured")
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "transcoder", rec.Body.String())
+}
+
+// TestWithTranscoder_FallsBackToProxy verifies that when no transcoder is set,
+// API requests fall through to the legacy proxy.
+func TestWithTranscoder_FallsBackToProxy(t *testing.T) {
+	config := &Config{
+		Port:        8080,
+		BaseDomain:  "api.example.com",
+		DatabaseURL: "postgres://localhost/test",
+		// No Backends configured → placeholder handler
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	// No WithTranscoder option
+	server := NewServer(config, logger, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/party", nil)
+	rec := httptest.NewRecorder()
+
+	server.mux.ServeHTTP(rec, req)
+
+	// Should return 501 Not Implemented from the placeholder handler
+	assert.Equal(t, http.StatusNotImplemented, rec.Code)
+}
+
+// TestWithTranscoder_VanguardFromDescriptor verifies that a real Vanguard
+// transcoder built from the embedded descriptor set can be injected and
+// routes known gRPC paths without panicking.
+func TestWithTranscoder_VanguardFromDescriptor(t *testing.T) {
+	transcoder, err := NewTranscoder(testDescriptorBytes, partyBackend)
+	require.NoError(t, err)
+
+	config := &Config{
+		Port:        8080,
+		BaseDomain:  "api.example.com",
+		DatabaseURL: "postgres://localhost/test",
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	server := NewServer(config, logger, nil, WithTranscoder(transcoder))
+
+	// Send an unknown path — Vanguard returns 404, not a panic.
+	req := httptest.NewRequest(http.MethodGet, "/api/unknown/path", nil)
+	rec := httptest.NewRecorder()
+
+	assert.NotPanics(t, func() {
+		server.mux.ServeHTTP(rec, req)
+	})
+}
+
 // TestNewServer_InitializesCorrectly verifies server construction.
 func TestNewServer_InitializesCorrectly(t *testing.T) {
 	config := &Config{
