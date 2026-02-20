@@ -110,6 +110,13 @@ func setupProductTypeTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	err = db.AutoMigrate(&persistence.CurrentAccountEntity{}, &vf.Entity{})
 	require.NoError(t, err)
 
+	// Create the partial unique index required by UpsertFeature's ON CONFLICT clause.
+	// AutoMigrate only creates the table structure; partial indexes must be created manually.
+	err = db.Exec(fmt.Sprintf(`CREATE UNIQUE INDEX IF NOT EXISTS idx_valuation_feature_account_instrument_active
+		ON %s.valuation_features (account_id, instrument_code)
+		WHERE lifecycle_status = 'ACTIVE' AND valid_to = '9999-12-31 23:59:59+00'`, pq.QuoteIdentifier(schemaName))).Error
+	require.NoError(t, err)
+
 	ctx := tenant.WithTenant(context.Background(), tid)
 	return db, ctx, cleanup
 }

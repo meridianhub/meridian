@@ -22,6 +22,7 @@ var (
 
 // Service errors
 var (
-	ErrMethodOutputMismatch = errors.New("valuation method output_instrument does not match account native instrument")
-	ErrInvalidAction        = errors.New("invalid valuation feature action")
+	ErrMethodOutputMismatch  = errors.New("valuation method output_instrument does not match account native instrument")
+	ErrInvalidAction         = errors.New("invalid valuation feature action")
+	ErrNoConversionAvailable = errors.New("no conversion method available for the given instrument pair")
 )

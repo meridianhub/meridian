@@ -224,6 +224,48 @@ func (r *Repository) Update(ctx context.Context, feature *ValuationFeature) erro
 	return nil
 }
 
+// UpsertFeature inserts a valuation feature or silently skips if an active feature
+// already exists for the same (account_id, instrument_code) pair.
+// This is idempotent: calling it multiple times with the same pair is safe.
+// Uses INSERT ... ON CONFLICT (account_id, instrument_code) WHERE lifecycle_status = 'ACTIVE' DO NOTHING.
+func (r *Repository) UpsertFeature(ctx context.Context, feature *ValuationFeature) error {
+	entity, err := toEntity(feature)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidParameters, err)
+	}
+	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		result := tx.Exec(`
+			INSERT INTO valuation_features (
+				id, account_id, instrument_code,
+				valuation_method_id, valuation_method_version,
+				parameters, lifecycle_status,
+				valid_from, valid_to,
+				created_at, created_by,
+				updated_at, updated_by,
+				version
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT (account_id, instrument_code)
+			WHERE lifecycle_status = 'ACTIVE' AND valid_to = '9999-12-31 23:59:59+00'
+			DO NOTHING`,
+			entity.ID,
+			entity.AccountID,
+			entity.InstrumentCode,
+			entity.ValuationMethodID,
+			entity.ValuationMethodVersion,
+			entity.Parameters,
+			entity.LifecycleStatus,
+			entity.ValidFrom,
+			entity.ValidTo,
+			entity.CreatedAt,
+			entity.CreatedBy,
+			entity.UpdatedAt,
+			entity.UpdatedBy,
+			entity.Version,
+		)
+		return result.Error
+	})
+}
+
 // FindByIDForUpdate retrieves a valuation feature by its UUID with a pessimistic lock.
 func (r *Repository) FindByIDForUpdate(ctx context.Context, id uuid.UUID) (*ValuationFeature, error) {
 	var entity Entity
