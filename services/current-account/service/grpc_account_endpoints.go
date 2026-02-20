@@ -280,7 +280,7 @@ func (s *Service) seedValuationFeatures(ctx context.Context, accountID uuid.UUID
 			tmpl.InputInstrument,
 			tmpl.ValuationMethodID,
 			tmpl.ValuationMethodVersion,
-			nil, // No initial parameters from template
+			tmpl.Parameters,
 			"system",
 		)
 		if err != nil {

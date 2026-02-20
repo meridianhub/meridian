@@ -675,6 +675,7 @@ func TestInitiateCurrentAccount_WithProductType_ValuationFeatureSeeding(t *testi
 			ValuationMethodID:      methodID,
 			ValuationMethodVersion: 1,
 			Status:                 accounttype.StatusActive,
+			Parameters:             map[string]any{"source": "ECB", "frequency": "daily"},
 		},
 		{
 			ID:                     uuid.New(),
@@ -683,6 +684,7 @@ func TestInitiateCurrentAccount_WithProductType_ValuationFeatureSeeding(t *testi
 			ValuationMethodID:      methodID,
 			ValuationMethodVersion: 1,
 			Status:                 accounttype.StatusActive,
+			Parameters:             map[string]any{"source": "ECB", "frequency": "daily"},
 		},
 	}
 
@@ -726,13 +728,15 @@ func TestInitiateCurrentAccount_WithProductType_ValuationFeatureSeeding(t *testi
 	require.NoError(t, err)
 	assert.Len(t, features, 2, "Should have seeded 2 valuation features")
 
-	// Verify instruments
+	// Verify instruments and parameters
 	instruments := make(map[string]bool)
 	for _, f := range features {
 		instruments[f.InstrumentCode] = true
 		assert.Equal(t, methodID, f.ValuationMethodID)
 		assert.Equal(t, 1, f.ValuationMethodVersion)
 		assert.True(t, f.IsActive(), "Seeded features should be ACTIVE")
+		assert.Equal(t, "ECB", f.Parameters["source"], "Template parameters should be propagated")
+		assert.Equal(t, "daily", f.Parameters["frequency"], "Template parameters should be propagated")
 	}
 	assert.True(t, instruments["USD"], "Should have USD feature")
 	assert.True(t, instruments["EUR"], "Should have EUR feature")
