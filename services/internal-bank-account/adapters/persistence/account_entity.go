@@ -47,6 +47,10 @@ type InternalBankAccountEntity struct {
 	// Organization party ID for org-scoped accounts (NULL = global)
 	OrgPartyID *uuid.UUID `gorm:"column:org_party_id;type:uuid"`
 
+	// Product Directory fields (immutable after creation, nullable for pre-migration accounts)
+	ProductTypeCode    *string `gorm:"column:product_type_code;type:varchar(100)"`
+	ProductTypeVersion *int    `gorm:"column:product_type_version;type:integer"`
+
 	// Correspondent bank details (nullable for non-nostro/vostro accounts)
 	CorrespondentBankID      *string `gorm:"column:correspondent_bank_id;type:varchar(50)"`
 	CorrespondentBankName    *string `gorm:"column:correspondent_bank_name;type:varchar(255)"`

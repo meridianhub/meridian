@@ -34,6 +34,10 @@ type InternalBankAccount struct {
 	version         int64
 	createdAt       time.Time
 	updatedAt       time.Time
+
+	// Product Directory fields (immutable after creation)
+	productTypeCode    string // Product type code from AccountTypeRegistry
+	productTypeVersion int    // Pinned version of the product type definition
 }
 
 // AccountOption is a functional option for configuring InternalBankAccount creation.
@@ -306,6 +310,18 @@ func (a InternalBankAccount) Attributes() map[string]string {
 	return result
 }
 
+// ProductTypeCode returns the product type code from the Product Directory.
+// Empty string means the account was created before product type migration.
+func (a InternalBankAccount) ProductTypeCode() string {
+	return a.productTypeCode
+}
+
+// ProductTypeVersion returns the pinned version of the product type definition.
+// Zero means no version was pinned (use latest).
+func (a InternalBankAccount) ProductTypeVersion() int {
+	return a.productTypeVersion
+}
+
 // Version returns the version number for optimistic locking.
 func (a InternalBankAccount) Version() int64 {
 	return a.version
@@ -409,6 +425,18 @@ func (b *InternalBankAccountBuilder) WithAttributes(attributes map[string]string
 			b.account.attributes[k] = v
 		}
 	}
+	return b
+}
+
+// WithProductTypeCode sets the product type code.
+func (b *InternalBankAccountBuilder) WithProductTypeCode(code string) *InternalBankAccountBuilder {
+	b.account.productTypeCode = code
+	return b
+}
+
+// WithProductTypeVersion sets the product type version.
+func (b *InternalBankAccountBuilder) WithProductTypeVersion(version int) *InternalBankAccountBuilder {
+	b.account.productTypeVersion = version
 	return b
 }
 

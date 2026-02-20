@@ -287,6 +287,17 @@ message InternalBankAccountFacility {
     pattern: "^[a-zA-Z0-9_-]*$"
     max_len: 100
   }];
+
+  // product_type_code references the account type definition from the Product Directory.
+  // Empty for accounts created before the product type migration.
+  string product_type_code = 14 [(buf.validate.field).string = {
+    max_len: 100
+    pattern: "^[A-Z0-9_]*$"
+  }];
+
+  // product_type_version is the pinned version of the product type definition.
+  // Zero means no version was pinned.
+  int32 product_type_version = 15;
 }
 
 // LienStatus defines the lifecycle state of a fund reservation (lien).
@@ -323,11 +334,10 @@ message InitiateInternalBankAccountRequest {
     max_len: 255
   }];
 
-  // account_type defines the type of internal account.
-  InternalAccountType account_type = 3 [(buf.validate.field).enum = {
-    defined_only: true
-    not_in: [0]
-  }];
+  // Deprecated: Use product_type_code instead. When product_type_code is set, this field is ignored.
+  // During migration, if product_type_code is empty but account_type is set,
+  // a legacy mapping derives the product type code from enum + instrument_code.
+  InternalAccountType account_type = 3 [deprecated = true];
 
   // instrument_code references the instrument from Reference Data service.
   string instrument_code = 4 [(buf.validate.field).string = {
@@ -364,6 +374,22 @@ message InitiateInternalBankAccountRequest {
     pattern: "^[a-zA-Z0-9_-]*$"
     max_len: 100
   }];
+
+  // product_type_code references the account type definition from the Product Directory.
+  // When set, the service resolves the product type via LocalAccountTypeCache.
+  // Mutually preferred over account_type: if both are set, product_type_code takes precedence.
+  string product_type_code = 10 [(buf.validate.field).string = {
+    max_len: 100
+    pattern: "^[A-Z0-9_]*$"
+  }];
+
+  // product_type_version pins a specific version of the product type definition.
+  // Optional: if omitted, the latest active version is used.
+  optional int32 product_type_version = 11;
+
+  // attributes contains additional structured metadata for this account.
+  // Validated against the product type's AttributeSchema if defined.
+  google.protobuf.Struct attributes = 12;
 }
 
 // InitiateInternalBankAccountResponse returns the newly created account.

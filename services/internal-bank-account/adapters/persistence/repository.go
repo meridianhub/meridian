@@ -122,6 +122,8 @@ func (r *Repository) Save(ctx context.Context, account domain.InternalBankAccoun
 					"name":                       entity.Name,
 					"status":                     entity.Status,
 					"clearing_purpose":           entity.ClearingPurpose,
+					"product_type_code":          entity.ProductTypeCode,
+					"product_type_version":       entity.ProductTypeVersion,
 					"correspondent_bank_id":      entity.CorrespondentBankID,
 					"correspondent_bank_name":    entity.CorrespondentBankName,
 					"correspondent_external_ref": entity.CorrespondentExternalRef,

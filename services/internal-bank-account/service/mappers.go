@@ -27,16 +27,18 @@ var ErrUnknownClearingPurpose = errors.New("unknown clearing purpose")
 // toProtoFacility converts a domain InternalBankAccount to a proto InternalBankAccountFacility.
 func toProtoFacility(account domain.InternalBankAccount) *pb.InternalBankAccountFacility {
 	facility := &pb.InternalBankAccountFacility{
-		AccountId:       account.AccountID(),
-		AccountCode:     account.AccountCode(),
-		Name:            account.Name(),
-		AccountType:     accountTypeToProto(account.AccountType()),
-		ClearingPurpose: clearingPurposeToProto(account.ClearingPurpose()),
-		AccountStatus:   accountStatusToProto(account.Status()),
-		InstrumentCode:  account.InstrumentCode(),
-		CreatedAt:       timestamppb.New(account.CreatedAt()),
-		UpdatedAt:       timestamppb.New(account.UpdatedAt()),
-		Version:         int32(account.Version()),
+		AccountId:          account.AccountID(),
+		AccountCode:        account.AccountCode(),
+		Name:               account.Name(),
+		AccountType:        accountTypeToProto(account.AccountType()),
+		ClearingPurpose:    clearingPurposeToProto(account.ClearingPurpose()),
+		AccountStatus:      accountStatusToProto(account.Status()),
+		InstrumentCode:     account.InstrumentCode(),
+		CreatedAt:          timestamppb.New(account.CreatedAt()),
+		UpdatedAt:          timestamppb.New(account.UpdatedAt()),
+		Version:            int32(account.Version()),
+		ProductTypeCode:    account.ProductTypeCode(),
+		ProductTypeVersion: int32(account.ProductTypeVersion()),
 	}
 
 	// Map correspondent details if present
