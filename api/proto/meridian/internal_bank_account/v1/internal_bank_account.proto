@@ -52,7 +52,7 @@ option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
 };
 
 // ClearingPurpose distinguishes the specific purpose of clearing accounts.
-// Only applicable when account_type is INTERNAL_ACCOUNT_TYPE_CLEARING.
+// Only applicable when behavior_class is "CLEARING".
 //
 // Usage pattern:
 // - DEPOSIT: Clearing accounts that handle deposit operations (customer deposits flow here)
@@ -65,19 +65,19 @@ option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
 // - For non-CLEARING accounts: clearing_purpose MUST be UNSPECIFIED
 //
 // Example usage:
-//   account_type: INTERNAL_ACCOUNT_TYPE_CLEARING
+//   behavior_class: "CLEARING"
 //   clearing_purpose: CLEARING_PURPOSE_DEPOSIT
 //   account_code: "CLR-GBP-DEPOSIT"
 //
 // Query example:
 //   ListInternalBankAccounts with:
-//     account_type_filter: INTERNAL_ACCOUNT_TYPE_CLEARING
+//     behavior_class_filter: "CLEARING"
 //     clearing_purpose_filter: CLEARING_PURPOSE_DEPOSIT
 //
 // See ADR-0025: Clearing Purpose Specialization for design rationale.
 enum ClearingPurpose {
   // CLEARING_PURPOSE_UNSPECIFIED is the default value for non-clearing accounts.
-  // MUST be used when account_type is NOT INTERNAL_ACCOUNT_TYPE_CLEARING.
+  // MUST be used when behavior_class is NOT "CLEARING".
   CLEARING_PURPOSE_UNSPECIFIED = 0;
 
   // CLEARING_PURPOSE_DEPOSIT is for clearing accounts handling deposit operations.
@@ -101,28 +101,6 @@ enum ClearingPurpose {
   CLEARING_PURPOSE_GENERAL = 4;
 }
 
-// InternalAccountType defines the type of internal bank account per BIAN v13.0.
-// Internal accounts are non-customer-facing accounts used for operational purposes.
-enum InternalAccountType {
-  // INTERNAL_ACCOUNT_TYPE_UNSPECIFIED means the account type is unknown.
-  INTERNAL_ACCOUNT_TYPE_UNSPECIFIED = 0;
-  // INTERNAL_ACCOUNT_TYPE_CLEARING is for settlement and clearing operations.
-  INTERNAL_ACCOUNT_TYPE_CLEARING = 1;
-  // INTERNAL_ACCOUNT_TYPE_NOSTRO is our account held at another bank (their books, our money).
-  INTERNAL_ACCOUNT_TYPE_NOSTRO = 2;
-  // INTERNAL_ACCOUNT_TYPE_VOSTRO is another bank's account held at us (our books, their money).
-  INTERNAL_ACCOUNT_TYPE_VOSTRO = 3;
-  // INTERNAL_ACCOUNT_TYPE_HOLDING is for temporary holding of funds.
-  INTERNAL_ACCOUNT_TYPE_HOLDING = 4;
-  // INTERNAL_ACCOUNT_TYPE_SUSPENSE is for unidentified or pending transactions.
-  INTERNAL_ACCOUNT_TYPE_SUSPENSE = 5;
-  // INTERNAL_ACCOUNT_TYPE_REVENUE is for tracking revenue/income.
-  INTERNAL_ACCOUNT_TYPE_REVENUE = 6;
-  // INTERNAL_ACCOUNT_TYPE_EXPENSE is for tracking expenses/costs.
-  INTERNAL_ACCOUNT_TYPE_EXPENSE = 7;
-  // INTERNAL_ACCOUNT_TYPE_INVENTORY is for tracking non-cash assets (energy, commodities, etc.).
-  INTERNAL_ACCOUNT_TYPE_INVENTORY = 8;
-}
 
 // InternalAccountStatus defines the lifecycle state of an internal bank account.
 enum InternalAccountStatus {
@@ -223,11 +201,10 @@ message InternalBankAccountFacility {
     max_len: 255
   }];
 
-  // account_type defines the type of internal account.
-  InternalAccountType account_type = 4 [(buf.validate.field).enum = {
-    defined_only: true
-    not_in: [0]
-  }];
+  // behavior_class identifies the operational category of this account (e.g., "CLEARING", "NOSTRO").
+  // This replaces the deprecated InternalAccountType enum and is sourced from the
+  // product type definition in the Product Directory.
+  string behavior_class = 4 [(buf.validate.field).string.max_len = 50];
 
   // account_status is the current lifecycle state of the account.
   InternalAccountStatus account_status = 5 [(buf.validate.field).enum = {
@@ -261,11 +238,11 @@ message InternalBankAccountFacility {
   int32 version = 11 [(buf.validate.field).int32 = {gte: 0}];
 
   // clearing_purpose specifies the operational purpose of this clearing account.
-  // Only applicable when account_type is INTERNAL_ACCOUNT_TYPE_CLEARING.
+  // Only applicable when behavior_class is "CLEARING".
   //
   // Validation rules:
-  // - MUST be non-UNSPECIFIED when account_type is INTERNAL_ACCOUNT_TYPE_CLEARING
-  // - MUST be CLEARING_PURPOSE_UNSPECIFIED for all other account types
+  // - MUST be non-UNSPECIFIED when behavior_class is "CLEARING"
+  // - MUST be CLEARING_PURPOSE_UNSPECIFIED for all other behavior classes
   //
   // Purpose values:
   // - CLEARING_PURPOSE_DEPOSIT: For deposit clearing operations
@@ -274,7 +251,7 @@ message InternalBankAccountFacility {
   // - CLEARING_PURPOSE_GENERAL: For general clearing operations
   //
   // Example: A GBP deposit clearing account would have:
-  //   account_type: INTERNAL_ACCOUNT_TYPE_CLEARING
+  //   behavior_class: "CLEARING"
   //   clearing_purpose: CLEARING_PURPOSE_DEPOSIT
   //   account_code: "CLR-GBP-DEPOSIT"
   //
@@ -334,10 +311,10 @@ message InitiateInternalBankAccountRequest {
     max_len: 255
   }];
 
-  // Deprecated: Use product_type_code instead. When product_type_code is set, this field is ignored.
-  // During migration, if product_type_code is empty but account_type is set,
-  // a legacy mapping derives the product type code from enum + instrument_code.
-  InternalAccountType account_type = 3 [deprecated = true];
+  // Field 3 is reserved: was deprecated InternalAccountType account_type.
+  // Callers must use product_type_code instead.
+  reserved 3;
+  reserved "account_type";
 
   // instrument_code references the instrument from Reference Data service.
   string instrument_code = 4 [(buf.validate.field).string = {
@@ -356,15 +333,15 @@ message InitiateInternalBankAccountRequest {
   // idempotency_key ensures exactly-once processing for retry scenarios.
   meridian.common.v1.IdempotencyKey idempotency_key = 7;
 
-  // clearing_purpose specifies the purpose when account_type is CLEARING.
+  // clearing_purpose specifies the purpose when the product type's behavior_class is CLEARING.
   //
   // Validation rules:
-  // - REQUIRED when account_type is INTERNAL_ACCOUNT_TYPE_CLEARING (must be non-UNSPECIFIED)
-  // - MUST be CLEARING_PURPOSE_UNSPECIFIED (or omitted) for non-CLEARING account types
+  // - REQUIRED when behavior_class resolves to CLEARING (must be non-UNSPECIFIED)
+  // - MUST be CLEARING_PURPOSE_UNSPECIFIED (or omitted) for non-CLEARING behavior classes
   // - Attempting to set clearing_purpose on a non-CLEARING account returns InvalidArgument error
   //
   // Example for deposit clearing account:
-  //   account_type: INTERNAL_ACCOUNT_TYPE_CLEARING
+  //   product_type_code: "CLEARING_GBP"
   //   clearing_purpose: CLEARING_PURPOSE_DEPOSIT
   ClearingPurpose clearing_purpose = 8;
 
@@ -483,8 +460,10 @@ message RetrieveInternalBankAccountResponse {
 
 // ListInternalBankAccountsRequest queries accounts with filtering and pagination.
 message ListInternalBankAccountsRequest {
-  // account_type_filter returns only accounts of this type (optional).
-  InternalAccountType account_type_filter = 1;
+  // behavior_class_filter returns only accounts with this behavior class (optional).
+  // Use BehaviorClass string values e.g. "CLEARING", "NOSTRO", "VOSTRO".
+  // Empty string means no filtering by behavior class.
+  string behavior_class_filter = 1 [(buf.validate.field).string.max_len = 50];
 
   // instrument_code_filter returns only accounts for this instrument (optional).
   string instrument_code_filter = 2 [(buf.validate.field).string = {
@@ -501,13 +480,13 @@ message ListInternalBankAccountsRequest {
   // clearing_purpose_filter returns only clearing accounts with this purpose (optional).
   // If CLEARING_PURPOSE_UNSPECIFIED (or omitted), no filtering by clearing purpose is applied.
   //
-  // Usage: Combine with account_type_filter for precise clearing account queries:
-  //   account_type_filter: INTERNAL_ACCOUNT_TYPE_CLEARING
+  // Usage: Combine with behavior_class_filter for precise clearing account queries:
+  //   behavior_class_filter: "CLEARING"
   //   clearing_purpose_filter: CLEARING_PURPOSE_DEPOSIT
   //   instrument_code_filter: "GBP"
   // Returns: All GBP deposit clearing accounts
   //
-  // Note: If account_type_filter is not CLEARING, this filter has no effect
+  // Note: If behavior_class_filter is not "CLEARING", this filter has no effect
   // since only CLEARING accounts have non-UNSPECIFIED clearing_purpose values.
   ClearingPurpose clearing_purpose_filter = 5;
 }

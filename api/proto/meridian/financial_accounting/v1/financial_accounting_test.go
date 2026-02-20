@@ -18,7 +18,7 @@ func TestFinancialBookingLogCreation(t *testing.T) {
 
 	log := &financialaccountingv1.FinancialBookingLog{
 		Id:                      "log-123",
-		FinancialAccountType:    commonv1.AccountType_ACCOUNT_TYPE_DEBIT,
+		FinancialAccountType:    "DEBIT",
 		ProductServiceReference: "prod-456",
 		BusinessUnitReference:   "bu-789",
 		ChartOfAccountsRules:    "rules-001",
@@ -32,7 +32,7 @@ func TestFinancialBookingLogCreation(t *testing.T) {
 	if log.Id != "log-123" {
 		t.Errorf("Expected ID log-123, got %s", log.Id)
 	}
-	if log.FinancialAccountType != commonv1.AccountType_ACCOUNT_TYPE_DEBIT {
+	if log.FinancialAccountType != "DEBIT" {
 		t.Errorf("Expected DEBIT account type, got %v", log.FinancialAccountType)
 	}
 	if log.BaseCurrency != commonv1.Currency_CURRENCY_GBP {
@@ -77,7 +77,7 @@ func TestLedgerPostingCreation(t *testing.T) {
 // TestInitiateFinancialBookingLogRequest tests request message creation
 func TestInitiateFinancialBookingLogRequest(t *testing.T) {
 	req := &financialaccountingv1.InitiateFinancialBookingLogRequest{
-		FinancialAccountType:    commonv1.AccountType_ACCOUNT_TYPE_DEBIT,
+		FinancialAccountType:    "DEBIT",
 		ProductServiceReference: "prod-123",
 		BusinessUnitReference:   "bu-456",
 		ChartOfAccountsRules:    "rules-001",
@@ -88,7 +88,7 @@ func TestInitiateFinancialBookingLogRequest(t *testing.T) {
 		},
 	}
 
-	if req.FinancialAccountType != commonv1.AccountType_ACCOUNT_TYPE_DEBIT {
+	if req.FinancialAccountType != "DEBIT" {
 		t.Errorf("Expected DEBIT account type, got %v", req.FinancialAccountType)
 	}
 	if req.IdempotencyKey == nil {
@@ -235,7 +235,7 @@ func TestResponseMessages(t *testing.T) {
 		resp := &financialaccountingv1.InitiateFinancialBookingLogResponse{
 			FinancialBookingLog: &financialaccountingv1.FinancialBookingLog{
 				Id:                      "log-123",
-				FinancialAccountType:    commonv1.AccountType_ACCOUNT_TYPE_DEBIT,
+				FinancialAccountType:    "DEBIT",
 				ProductServiceReference: "prod-456",
 				BusinessUnitReference:   "bu-789",
 				ChartOfAccountsRules:    "rules-001",
@@ -254,7 +254,7 @@ func TestResponseMessages(t *testing.T) {
 		resp := &financialaccountingv1.UpdateFinancialBookingLogResponse{
 			FinancialBookingLog: &financialaccountingv1.FinancialBookingLog{
 				Id:                      "log-123",
-				FinancialAccountType:    commonv1.AccountType_ACCOUNT_TYPE_DEBIT,
+				FinancialAccountType:    "DEBIT",
 				ProductServiceReference: "prod-456",
 				BusinessUnitReference:   "bu-789",
 				ChartOfAccountsRules:    "updated-rules",
@@ -274,7 +274,7 @@ func TestResponseMessages(t *testing.T) {
 			FinancialBookingLogs: []*financialaccountingv1.FinancialBookingLog{
 				{
 					Id:                      "log-1",
-					FinancialAccountType:    commonv1.AccountType_ACCOUNT_TYPE_DEBIT,
+					FinancialAccountType:    "DEBIT",
 					ProductServiceReference: "prod-1",
 					BusinessUnitReference:   "bu-1",
 					ChartOfAccountsRules:    "rules-1",

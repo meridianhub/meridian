@@ -16,7 +16,6 @@ func TestPackageImports(t *testing.T) {
 	t.Run("common package imports", func(_ *testing.T) {
 		// Verify common types can be imported
 		_ = commonv1.ErrorCode_ERROR_CODE_UNSPECIFIED
-		_ = commonv1.AccountType_ACCOUNT_TYPE_UNSPECIFIED
 		_ = commonv1.PostingDirection_POSTING_DIRECTION_UNSPECIFIED
 		_ = commonv1.TransactionStatus_TRANSACTION_STATUS_UNSPECIFIED
 		_ = commonv1.Currency_CURRENCY_UNSPECIFIED

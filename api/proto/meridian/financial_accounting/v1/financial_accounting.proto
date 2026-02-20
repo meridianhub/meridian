@@ -58,11 +58,8 @@ message FinancialBookingLog {
     max_len: 255
   }];
 
-  // financial_account_type defines the type of account being used.
-  meridian.common.v1.AccountType financial_account_type = 2 [(buf.validate.field).enum = {
-    defined_only: true
-    not_in: [0]
-  }];
+  // financial_account_type defines the type of account being used (e.g., "CURRENT", "DEBIT", "CREDIT").
+  string financial_account_type = 2 [(buf.validate.field).string.max_len = 50];
 
   // product_service_reference identifies the financial product or service.
   string product_service_reference = 3 [(buf.validate.field).string = {
@@ -172,10 +169,10 @@ message LedgerPosting {
 
 // InitiateFinancialBookingLogRequest creates a new financial booking log.
 message InitiateFinancialBookingLogRequest {
-  // financial_account_type defines the type of account.
-  meridian.common.v1.AccountType financial_account_type = 1 [(buf.validate.field).enum = {
-    defined_only: true
-    not_in: [0]
+  // financial_account_type defines the type of account (e.g., "CURRENT", "DEBIT", "CREDIT").
+  string financial_account_type = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 50
   }];
 
   // product_service_reference identifies the financial product.

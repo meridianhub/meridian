@@ -7,24 +7,6 @@ import "google/type/money.proto";
 
 option go_package = "github.com/meridianhub/meridian/api/proto/meridian/common/v1;commonv1";
 
-// AccountType defines the type of account in BIAN terms.
-enum AccountType {
-  // ACCOUNT_TYPE_UNSPECIFIED means the account type is unknown.
-  ACCOUNT_TYPE_UNSPECIFIED = 0;
-  // ACCOUNT_TYPE_DEBIT is a debit account (asset).
-  ACCOUNT_TYPE_DEBIT = 1;
-  // ACCOUNT_TYPE_CREDIT is a credit account (liability).
-  ACCOUNT_TYPE_CREDIT = 2;
-  // ACCOUNT_TYPE_VOSTRO is a correspondent bank account (our books, their money).
-  ACCOUNT_TYPE_VOSTRO = 3;
-  // ACCOUNT_TYPE_NOSTRO is a correspondent bank account (their books, our money).
-  ACCOUNT_TYPE_NOSTRO = 4;
-  // ACCOUNT_TYPE_CURRENT is a current account (demand deposit).
-  ACCOUNT_TYPE_CURRENT = 5;
-  // ACCOUNT_TYPE_SAVINGS is a savings account.
-  ACCOUNT_TYPE_SAVINGS = 6;
-}
-
 // PostingDirection defines the direction of a financial posting.
 enum PostingDirection {
   // POSTING_DIRECTION_UNSPECIFIED means the direction is unknown.

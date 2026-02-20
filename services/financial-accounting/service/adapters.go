@@ -209,46 +209,14 @@ func toProtoFinancialBookingLog(log *domain.FinancialBookingLog) *financialaccou
 	}
 }
 
-// toProtoAccountType converts domain account type string to protobuf enum.
-func toProtoAccountType(accountType string) commonv1.AccountType {
-	switch accountType {
-	case string(domain.AccountTypeDebit):
-		return commonv1.AccountType_ACCOUNT_TYPE_DEBIT
-	case string(domain.AccountTypeCredit):
-		return commonv1.AccountType_ACCOUNT_TYPE_CREDIT
-	case string(domain.AccountTypeVostro):
-		return commonv1.AccountType_ACCOUNT_TYPE_VOSTRO
-	case string(domain.AccountTypeNostro):
-		return commonv1.AccountType_ACCOUNT_TYPE_NOSTRO
-	case string(domain.AccountTypeCurrent):
-		return commonv1.AccountType_ACCOUNT_TYPE_CURRENT
-	case string(domain.AccountTypeSavings):
-		return commonv1.AccountType_ACCOUNT_TYPE_SAVINGS
-	default:
-		return commonv1.AccountType_ACCOUNT_TYPE_UNSPECIFIED
-	}
+// toProtoAccountType converts domain account type string to protobuf string field.
+func toProtoAccountType(accountType string) string {
+	return accountType
 }
 
-// fromProtoAccountType converts protobuf AccountType enum to domain string.
-func fromProtoAccountType(accountType commonv1.AccountType) string {
-	switch accountType {
-	case commonv1.AccountType_ACCOUNT_TYPE_UNSPECIFIED:
-		return ""
-	case commonv1.AccountType_ACCOUNT_TYPE_DEBIT:
-		return string(domain.AccountTypeDebit)
-	case commonv1.AccountType_ACCOUNT_TYPE_CREDIT:
-		return string(domain.AccountTypeCredit)
-	case commonv1.AccountType_ACCOUNT_TYPE_VOSTRO:
-		return string(domain.AccountTypeVostro)
-	case commonv1.AccountType_ACCOUNT_TYPE_NOSTRO:
-		return string(domain.AccountTypeNostro)
-	case commonv1.AccountType_ACCOUNT_TYPE_CURRENT:
-		return string(domain.AccountTypeCurrent)
-	case commonv1.AccountType_ACCOUNT_TYPE_SAVINGS:
-		return string(domain.AccountTypeSavings)
-	default:
-		return ""
-	}
+// fromProtoAccountType converts protobuf string field to domain account type string.
+func fromProtoAccountType(accountType string) string {
+	return accountType
 }
 
 // fromProtoCurrency converts protobuf Currency enum to domain Currency.

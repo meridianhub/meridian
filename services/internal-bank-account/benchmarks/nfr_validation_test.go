@@ -67,7 +67,7 @@ func createNFRAccountRequest(codePrefix string) *pb.InitiateInternalBankAccountR
 	return &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     fmt.Sprintf("%s-%d", codePrefix, time.Now().UnixNano()%100000),
 		Name:            fmt.Sprintf("%s NFR Benchmark Account", codePrefix),
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_USD",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "USD",
 	}

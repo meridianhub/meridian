@@ -174,7 +174,7 @@ func initiateBookingLogHandler(client *Client) saga.Handler {
 			ProductServiceReference: productRef,
 			BusinessUnitReference:   businessUnit,
 			ChartOfAccountsRules:    chartRules,
-			FinancialAccountType:    commonv1.AccountType_ACCOUNT_TYPE_CURRENT, // Default
+			FinancialAccountType:    "CURRENT", // Default
 			BaseCurrency:            commonv1.Currency_CURRENCY_USD,            // Default
 			IdempotencyKey: &commonv1.IdempotencyKey{
 				Key: ctx.IdempotencyKey,

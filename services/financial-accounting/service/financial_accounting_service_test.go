@@ -1764,7 +1764,7 @@ func TestUpdateFinancialBookingLog_IdempotencyCaching(t *testing.T) {
 		cachedResponse := &financialaccountingv1.UpdateFinancialBookingLogResponse{
 			FinancialBookingLog: &financialaccountingv1.FinancialBookingLog{
 				Id:                      validBookingLogID.String(),
-				FinancialAccountType:    commonv1.AccountType_ACCOUNT_TYPE_CURRENT,
+				FinancialAccountType:    "CURRENT",
 				ProductServiceReference: "DEPOSIT-001",
 				BusinessUnitReference:   "RETAIL-UK",
 				ChartOfAccountsRules:    "GAAP-2024",

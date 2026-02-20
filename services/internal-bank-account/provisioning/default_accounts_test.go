@@ -3,6 +3,7 @@ package provisioning
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/internal_bank_account/v1"
@@ -61,7 +62,7 @@ func (m *mockService) InitiateInternalBankAccount(_ context.Context, req *pb.Ini
 			AccountId:      "IBA-test-" + req.AccountCode,
 			AccountCode:    req.AccountCode,
 			Name:           req.Name,
-			AccountType:    req.AccountType, //nolint:staticcheck // Intentional: reading deprecated field for test backwards compatibility
+			BehaviorClass:  req.ProductTypeCode,
 			AccountStatus:  pb.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE,
 			InstrumentCode: req.InstrumentCode,
 		},
@@ -73,8 +74,7 @@ func TestAccountTemplate_Validation(t *testing.T) {
 	for i, template := range DefaultAccounts {
 		assert.NotEmpty(t, template.Code, "template %d: Code required", i)
 		assert.NotEmpty(t, template.Name, "template %d: Name required", i)
-		assert.NotEqual(t, pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_UNSPECIFIED, template.Type,
-			"template %d: Type must be specified", i)
+		assert.NotEmpty(t, template.ProductTypeCode, "template %d: ProductTypeCode required", i)
 		assert.NotEmpty(t, template.InstrumentCode, "template %d: InstrumentCode required", i)
 		assert.NotEmpty(t, template.Dimension, "template %d: Dimension required", i)
 	}
@@ -117,17 +117,22 @@ func TestDefaultAccounts_CoveringRequiredTypes(t *testing.T) {
 	}
 }
 
-func TestDefaultAccounts_HasRequiredAccountTypes(t *testing.T) {
-	typeCount := make(map[pb.InternalAccountType]int)
+func TestDefaultAccounts_HasRequiredProductTypePrefixes(t *testing.T) {
+	// Verify we have accounts with each required behavior class prefix
+	prefixCount := make(map[string]int)
 	for _, template := range DefaultAccounts {
-		typeCount[template.Type]++
+		// Extract prefix (e.g., "CLEARING" from "CLEARING_GBP")
+		parts := strings.SplitN(template.ProductTypeCode, "_", 2)
+		if len(parts) > 0 {
+			prefixCount[parts[0]]++
+		}
 	}
 
 	// Verify we have at least one of each required type
-	assert.Greater(t, typeCount[pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING], 0, "missing CLEARING accounts")
-	assert.Greater(t, typeCount[pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_REVENUE], 0, "missing REVENUE accounts")
-	assert.Greater(t, typeCount[pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_EXPENSE], 0, "missing EXPENSE accounts")
-	assert.Greater(t, typeCount[pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_SUSPENSE], 0, "missing SUSPENSE accounts")
+	assert.Greater(t, prefixCount["CLEARING"], 0, "missing CLEARING accounts")
+	assert.Greater(t, prefixCount["REVENUE"], 0, "missing REVENUE accounts")
+	assert.Greater(t, prefixCount["EXPENSE"], 0, "missing EXPENSE accounts")
+	assert.Greater(t, prefixCount["SUSPENSE"], 0, "missing SUSPENSE accounts")
 }
 
 func TestProvisionDefaultAccounts_NewTenant(t *testing.T) {
@@ -209,20 +214,20 @@ func TestProvisionFromTemplates_CustomTemplates(t *testing.T) {
 	// Custom templates for energy company
 	energyTemplates := []AccountTemplate{
 		{
-			Code:           "CLR-KWH-DELIVERY",
-			Name:           "KWH Delivery Clearing",
-			Type:           pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-			InstrumentCode: "KWH",
-			Dimension:      DimensionEnergy,
-			Description:    "Clearing account for energy delivery",
+			Code:            "CLR-KWH-DELIVERY",
+			Name:            "KWH Delivery Clearing",
+			ProductTypeCode: "CLEARING_KWH",
+			InstrumentCode:  "KWH",
+			Dimension:       DimensionEnergy,
+			Description:     "Clearing account for energy delivery",
 		},
 		{
-			Code:           "REV-ENERGY-SALES",
-			Name:           "Energy Sales Revenue",
-			Type:           pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_REVENUE,
-			InstrumentCode: "GBP",
-			Dimension:      DimensionCurrency,
-			Description:    "Revenue from energy sales",
+			Code:            "REV-ENERGY-SALES",
+			Name:            "Energy Sales Revenue",
+			ProductTypeCode: "REVENUE_GBP",
+			InstrumentCode:  "GBP",
+			Dimension:       DimensionCurrency,
+			Description:     "Revenue from energy sales",
 		},
 	}
 

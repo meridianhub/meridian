@@ -86,7 +86,7 @@ func (o *PaymentOrchestrator) PostLedgerEntries(ctx context.Context, po *domain.
 	// Step 1: Create a BookingLog in PENDING status
 	bookingLogIDempKey := fmt.Sprintf("booking-log-%s", po.IdempotencyKey)
 	bookingLogResp, err := o.financialAccountingClient.InitiateFinancialBookingLog(ctx, &financialaccountingv1.InitiateFinancialBookingLogRequest{
-		FinancialAccountType:    commonpb.AccountType_ACCOUNT_TYPE_CURRENT,
+		FinancialAccountType:    "CURRENT",
 		ProductServiceReference: "payment-order",
 		BusinessUnitReference:   "payment-order-service",
 		ChartOfAccountsRules:    "outbound-payment",

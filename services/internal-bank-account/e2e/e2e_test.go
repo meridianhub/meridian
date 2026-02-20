@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/cel-go/cel"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/lib/pq"
@@ -21,6 +22,8 @@ import (
 	quantitypb "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"github.com/meridianhub/meridian/services/internal-bank-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/internal-bank-account/service"
+	"github.com/meridianhub/meridian/services/reference-data/accounttype"
+	"github.com/meridianhub/meridian/services/reference-data/cache"
 	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -35,6 +38,65 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
+
+// ============================================================================
+// Test Account Type Cache
+// ============================================================================
+
+// e2eStaticLoader provides a static in-memory account type loader for e2e tests.
+type e2eStaticLoader struct {
+	defs map[string]*accounttype.Definition
+}
+
+func (l *e2eStaticLoader) LoadAccountType(_ context.Context, code string) (*accounttype.Definition, error) {
+	def, ok := l.defs[code]
+	if !ok {
+		return nil, fmt.Errorf("account type not found: %s", code)
+	}
+	return def, nil
+}
+
+func (l *e2eStaticLoader) ListActiveAccountTypes(_ context.Context) ([]*accounttype.Definition, error) {
+	defs := make([]*accounttype.Definition, 0, len(l.defs))
+	for _, def := range l.defs {
+		defs = append(defs, def)
+	}
+	return defs, nil
+}
+
+// e2eNilCELCompiler is a no-op CEL compiler for e2e tests.
+type e2eNilCELCompiler struct{}
+
+func (c *e2eNilCELCompiler) CompileValidation(_ string) (cel.Program, error)  { return nil, nil }
+func (c *e2eNilCELCompiler) CompileBucketKey(_ string) (cel.Program, error)   { return nil, nil }
+func (c *e2eNilCELCompiler) CompileEligibility(_ string) (cel.Program, error) { return nil, nil }
+
+// newE2EAccountTypeCache creates a LocalAccountTypeCache with standard e2e test definitions.
+func newE2EAccountTypeCache() *cache.LocalAccountTypeCache {
+	defs := map[string]*accounttype.Definition{
+		"CLEARING_GBP": {Code: "CLEARING_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassClearing, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"CLEARING_USD": {Code: "CLEARING_USD", Version: 1, BehaviorClass: accounttype.BehaviorClassClearing, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"CLEARING_EUR": {Code: "CLEARING_EUR", Version: 1, BehaviorClass: accounttype.BehaviorClassClearing, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"NOSTRO_USD":   {Code: "NOSTRO_USD", Version: 1, BehaviorClass: accounttype.BehaviorClassNostro, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"NOSTRO_GBP":   {Code: "NOSTRO_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassNostro, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"NOSTRO_EUR":   {Code: "NOSTRO_EUR", Version: 1, BehaviorClass: accounttype.BehaviorClassNostro, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"VOSTRO_USD":   {Code: "VOSTRO_USD", Version: 1, BehaviorClass: accounttype.BehaviorClassVostro, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"VOSTRO_GBP":   {Code: "VOSTRO_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassVostro, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"HOLDING_GBP":  {Code: "HOLDING_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassHolding, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"HOLDING_USD":  {Code: "HOLDING_USD", Version: 1, BehaviorClass: accounttype.BehaviorClassHolding, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"HOLDING_EUR":  {Code: "HOLDING_EUR", Version: 1, BehaviorClass: accounttype.BehaviorClassHolding, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"HOLDING_KWH":  {Code: "HOLDING_KWH", Version: 1, BehaviorClass: accounttype.BehaviorClassHolding, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"SUSPENSE_GBP": {Code: "SUSPENSE_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassSuspense, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"SUSPENSE_USD": {Code: "SUSPENSE_USD", Version: 1, BehaviorClass: accounttype.BehaviorClassSuspense, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"REVENUE_GBP":  {Code: "REVENUE_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassRevenue, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"EXPENSE_GBP":  {Code: "EXPENSE_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassExpense, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"INVENTORY_GBP": {Code: "INVENTORY_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassInventory, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"INVENTORY_KWH": {Code: "INVENTORY_KWH", Version: 1, BehaviorClass: accounttype.BehaviorClassInventory, EligibilityCEL: "true", Status: accounttype.StatusActive},
+	}
+	loader := &e2eStaticLoader{defs: defs}
+	compiler := &e2eNilCELCompiler{}
+	return cache.NewLocalAccountTypeCache(loader, compiler)
+}
 
 // ============================================================================
 // Test Infrastructure
@@ -101,8 +163,9 @@ func setupE2ETestPool(t *testing.T) *e2eTestContext {
 
 	repo := persistence.NewRepository(db)
 
-	// Create service with repository (no external clients for E2E tests)
-	svc, err := service.NewService(repo)
+	// Create service with repository and account type cache for E2E tests
+	accountTypeCache := newE2EAccountTypeCache()
+	svc, err := service.NewServiceFull(repo, nil, nil, nil, nil, service.WithAccountTypeCache(accountTypeCache))
 	require.NoError(t, err, "Failed to create service")
 
 	return &e2eTestContext{
@@ -651,7 +714,7 @@ func TestE2E_AccountLifecycle(t *testing.T) {
 		resp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 			AccountCode:    accountCode,
 			Name:           "GBP Clearing Account",
-			AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+			ProductTypeCode: "CLEARING_GBP",
 			InstrumentCode: "GBP",
 		})
 		require.NoError(t, err)
@@ -660,7 +723,7 @@ func TestE2E_AccountLifecycle(t *testing.T) {
 
 		assert.Equal(t, accountCode, resp.Facility.AccountCode)
 		assert.Equal(t, "GBP Clearing Account", resp.Facility.Name)
-		assert.Equal(t, pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING, resp.Facility.AccountType)
+		assert.Equal(t, "CLEARING", resp.Facility.BehaviorClass)
 		assert.Equal(t, pb.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE, resp.Facility.AccountStatus)
 		assert.Equal(t, "GBP", resp.Facility.InstrumentCode)
 		assert.Equal(t, int32(1), resp.Facility.Version)
@@ -850,7 +913,7 @@ func TestE2E_MultiAssetAccounts(t *testing.T) {
 			resp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 				AccountCode:    tc.code,
 				Name:           tc.name,
-				AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_HOLDING,
+				ProductTypeCode: "HOLDING_GBP",
 				InstrumentCode: tc.instrument,
 			})
 			require.NoError(t, err, "Failed to create account for %s", tc.instrument)
@@ -930,7 +993,7 @@ func TestE2E_CorrespondentBanking(t *testing.T) {
 		resp, err := tc.svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 			AccountCode:    "USD_NOSTRO_CITI",
 			Name:           "USD NOSTRO at Citibank",
-			AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_NOSTRO,
+			ProductTypeCode: "NOSTRO_USD",
 			InstrumentCode: "USD",
 			CorrespondentDetails: &pb.CorrespondentBankDetails{
 				BankId:             "CITI001",
@@ -941,7 +1004,7 @@ func TestE2E_CorrespondentBanking(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		assert.Equal(t, pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_NOSTRO, resp.Facility.AccountType)
+		assert.Equal(t, "NOSTRO", resp.Facility.BehaviorClass)
 		require.NotNil(t, resp.Facility.CorrespondentDetails)
 		assert.Equal(t, "CITI001", resp.Facility.CorrespondentDetails.BankId)
 		assert.Equal(t, "Citibank NA", resp.Facility.CorrespondentDetails.BankName)
@@ -954,7 +1017,7 @@ func TestE2E_CorrespondentBanking(t *testing.T) {
 		resp, err := tc.svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 			AccountCode:    "EUR_VOSTRO_DB",
 			Name:           "EUR VOSTRO for Deutsche Bank",
-			AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_VOSTRO,
+			ProductTypeCode: "VOSTRO_USD",
 			InstrumentCode: "EUR",
 			CorrespondentDetails: &pb.CorrespondentBankDetails{
 				BankId:             "DB001",
@@ -965,7 +1028,7 @@ func TestE2E_CorrespondentBanking(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		assert.Equal(t, pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_VOSTRO, resp.Facility.AccountType)
+		assert.Equal(t, "VOSTRO", resp.Facility.BehaviorClass)
 		require.NotNil(t, resp.Facility.CorrespondentDetails)
 		assert.Equal(t, "DB001", resp.Facility.CorrespondentDetails.BankId)
 		assert.Equal(t, "Deutsche Bank AG", resp.Facility.CorrespondentDetails.BankName)
@@ -976,7 +1039,7 @@ func TestE2E_CorrespondentBanking(t *testing.T) {
 		_, err := tc.svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 			AccountCode:    "USD_NOSTRO_MISSING",
 			Name:           "USD NOSTRO Missing Correspondent",
-			AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_NOSTRO,
+			ProductTypeCode: "NOSTRO_USD",
 			InstrumentCode: "USD",
 			// Missing CorrespondentDetails
 		})
@@ -988,7 +1051,7 @@ func TestE2E_CorrespondentBanking(t *testing.T) {
 		_, err := tc.svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 			AccountCode:    "EUR_VOSTRO_MISSING",
 			Name:           "EUR VOSTRO Missing Correspondent",
-			AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_VOSTRO,
+			ProductTypeCode: "VOSTRO_USD",
 			InstrumentCode: "EUR",
 			// Missing CorrespondentDetails
 		})
@@ -1002,7 +1065,7 @@ func TestE2E_CorrespondentBanking(t *testing.T) {
 		resp, err := tc.svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 			AccountCode:    "GBP_CLEARING_ONLY",
 			Name:           "GBP Clearing Only",
-			AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+			ProductTypeCode: "CLEARING_GBP",
 			InstrumentCode: "GBP",
 		})
 		require.NoError(t, err)
@@ -1014,7 +1077,7 @@ func TestE2E_CorrespondentBanking(t *testing.T) {
 		createResp, err := tc.svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 			AccountCode:    "USD_NOSTRO_JPMORGAN",
 			Name:           "USD NOSTRO at JPMorgan",
-			AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_NOSTRO,
+			ProductTypeCode: "NOSTRO_USD",
 			InstrumentCode: "USD",
 			CorrespondentDetails: &pb.CorrespondentBankDetails{
 				BankId:             "JPM001",
@@ -1045,26 +1108,26 @@ func TestE2E_CorrespondentBanking(t *testing.T) {
 
 	t.Run("List NOSTRO accounts only", func(t *testing.T) {
 		resp, err := tc.svc.ListInternalBankAccounts(ctx, &pb.ListInternalBankAccountsRequest{
-			AccountTypeFilter: pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_NOSTRO,
+			BehaviorClassFilter: "NOSTRO",
 		})
 		require.NoError(t, err)
 		assert.Len(t, resp.Facilities, 2) // CITI and JPMorgan
 
 		for _, facility := range resp.Facilities {
-			assert.Equal(t, pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_NOSTRO, facility.AccountType)
+			assert.Equal(t, "NOSTRO", facility.BehaviorClass)
 			assert.NotNil(t, facility.CorrespondentDetails)
 		}
 	})
 
 	t.Run("List VOSTRO accounts only", func(t *testing.T) {
 		resp, err := tc.svc.ListInternalBankAccounts(ctx, &pb.ListInternalBankAccountsRequest{
-			AccountTypeFilter: pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_VOSTRO,
+			BehaviorClassFilter: "VOSTRO",
 		})
 		require.NoError(t, err)
 		assert.Len(t, resp.Facilities, 1) // Deutsche Bank
 
 		for _, facility := range resp.Facilities {
-			assert.Equal(t, pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_VOSTRO, facility.AccountType)
+			assert.Equal(t, "VOSTRO", facility.BehaviorClass)
 			assert.NotNil(t, facility.CorrespondentDetails)
 		}
 	})
@@ -1092,7 +1155,7 @@ func TestE2E_MultiTenantIsolation(t *testing.T) {
 			resp, err := tc.svc.InitiateInternalBankAccount(ctxTenantA, &pb.InitiateInternalBankAccountRequest{
 				AccountCode:    fmt.Sprintf("TENANT_A_ACC_%d", i),
 				Name:           fmt.Sprintf("Tenant A Account %d", i),
-				AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+				ProductTypeCode: "CLEARING_GBP",
 				InstrumentCode: "GBP",
 			})
 			require.NoError(t, err)
@@ -1106,7 +1169,7 @@ func TestE2E_MultiTenantIsolation(t *testing.T) {
 			resp, err := tc.svc.InitiateInternalBankAccount(ctxTenantB, &pb.InitiateInternalBankAccountRequest{
 				AccountCode:    fmt.Sprintf("TENANT_B_ACC_%d", i),
 				Name:           fmt.Sprintf("Tenant B Account %d", i),
-				AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_HOLDING,
+				ProductTypeCode: "HOLDING_GBP",
 				InstrumentCode: "EUR",
 			})
 			require.NoError(t, err)
@@ -1165,7 +1228,7 @@ func TestE2E_MultiTenantIsolation(t *testing.T) {
 		respA, err := tc.svc.InitiateInternalBankAccount(ctxTenantA, &pb.InitiateInternalBankAccountRequest{
 			AccountCode:    "SHARED_CODE",
 			Name:           "Shared Code Account - Tenant A",
-			AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_SUSPENSE,
+			ProductTypeCode: "SUSPENSE_GBP",
 			InstrumentCode: "USD",
 		})
 		require.NoError(t, err)
@@ -1174,7 +1237,7 @@ func TestE2E_MultiTenantIsolation(t *testing.T) {
 		respB, err := tc.svc.InitiateInternalBankAccount(ctxTenantB, &pb.InitiateInternalBankAccountRequest{
 			AccountCode:    "SHARED_CODE",
 			Name:           "Shared Code Account - Tenant B",
-			AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_REVENUE,
+			ProductTypeCode: "REVENUE_GBP",
 			InstrumentCode: "GBP",
 		})
 		require.NoError(t, err)
@@ -1183,8 +1246,8 @@ func TestE2E_MultiTenantIsolation(t *testing.T) {
 		assert.NotEqual(t, respA.AccountId, respB.AccountId)
 		assert.Equal(t, "SHARED_CODE", respA.Facility.AccountCode)
 		assert.Equal(t, "SHARED_CODE", respB.Facility.AccountCode)
-		assert.Equal(t, pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_SUSPENSE, respA.Facility.AccountType)
-		assert.Equal(t, pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_REVENUE, respB.Facility.AccountType)
+		assert.Equal(t, "SUSPENSE", respA.Facility.BehaviorClass)
+		assert.Equal(t, "REVENUE", respB.Facility.BehaviorClass)
 	})
 
 	t.Run("Control actions are tenant-isolated", func(t *testing.T) {
@@ -1229,7 +1292,7 @@ func TestE2E_AsyncOperationsWithAwait(t *testing.T) {
 			_, _ = tc.svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 				AccountCode:    accountCode,
 				Name:           "Async Created Account",
-				AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+				ProductTypeCode: "CLEARING_GBP",
 				InstrumentCode: "GBP",
 			})
 		}()
@@ -1265,7 +1328,7 @@ func TestE2E_AsyncOperationsWithAwait(t *testing.T) {
 		_, err := tc.svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 			AccountCode:    accountCode,
 			Name:           "Status Change Test Account",
-			AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_HOLDING,
+			ProductTypeCode: "HOLDING_GBP",
 			InstrumentCode: "EUR",
 		})
 		require.NoError(t, err)
@@ -1307,7 +1370,7 @@ func TestE2E_AsyncOperationsWithAwait(t *testing.T) {
 			_, _ = tc.svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 				AccountCode:    uniqueCode,
 				Name:           "Retry Test Account",
-				AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+				ProductTypeCode: "CLEARING_GBP",
 				InstrumentCode: "USD",
 			})
 		}()
@@ -1357,7 +1420,7 @@ func TestE2E_Pagination(t *testing.T) {
 		_, err := tc.svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 			AccountCode:    fmt.Sprintf("PAGE_ACC_%02d", i),
 			Name:           fmt.Sprintf("Pagination Account %d", i),
-			AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+			ProductTypeCode: "CLEARING_GBP",
 			InstrumentCode: "GBP",
 		})
 		require.NoError(t, err)
@@ -1455,7 +1518,7 @@ func TestE2E_OptimisticLocking(t *testing.T) {
 		createResp, err := tc.svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 			AccountCode:    accountCode,
 			Name:           "Version Test Account",
-			AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+			ProductTypeCode: "CLEARING_GBP",
 			InstrumentCode: "GBP",
 		})
 		require.NoError(t, err)
@@ -1494,28 +1557,29 @@ func TestE2E_AllAccountTypes(t *testing.T) {
 	tc := setupE2ETestPool(t)
 	ctx := setupTenantSchema(t, tc, "e2e_account_types_tenant")
 
-	// Test cases for all account types
+	// Test cases for all account types (using product_type_code with behavior class prefix)
 	accountTypes := []struct {
-		protoType            pb.InternalAccountType
+		productTypeCode      string
+		behaviorClass        string
 		requireCorrespondent bool
 		name                 string
 	}{
-		{pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING, false, "Clearing"},
-		{pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_HOLDING, false, "Holding"},
-		{pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_SUSPENSE, false, "Suspense"},
-		{pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_REVENUE, false, "Revenue"},
-		{pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_EXPENSE, false, "Expense"},
-		{pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_NOSTRO, true, "Nostro"},
-		{pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_VOSTRO, true, "Vostro"},
+		{"CLEARING_GBP", "CLEARING", false, "Clearing"},
+		{"HOLDING_GBP", "HOLDING", false, "Holding"},
+		{"SUSPENSE_GBP", "SUSPENSE", false, "Suspense"},
+		{"REVENUE_GBP", "REVENUE", false, "Revenue"},
+		{"EXPENSE_GBP", "EXPENSE", false, "Expense"},
+		{"NOSTRO_USD", "NOSTRO", true, "Nostro"},
+		{"VOSTRO_USD", "VOSTRO", true, "Vostro"},
 	}
 
 	for _, at := range accountTypes {
 		t.Run(fmt.Sprintf("Create %s account", at.name), func(t *testing.T) {
 			req := &pb.InitiateInternalBankAccountRequest{
-				AccountCode:    fmt.Sprintf("%s_ACCOUNT", at.name),
-				Name:           fmt.Sprintf("%s Test Account", at.name),
-				AccountType:    at.protoType,
-				InstrumentCode: "GBP",
+				AccountCode:     fmt.Sprintf("%s_ACCOUNT", at.name),
+				Name:            fmt.Sprintf("%s Test Account", at.name),
+				ProductTypeCode: at.productTypeCode,
+				InstrumentCode:  "GBP",
 			}
 
 			if at.requireCorrespondent {
@@ -1528,7 +1592,7 @@ func TestE2E_AllAccountTypes(t *testing.T) {
 
 			resp, err := tc.svc.InitiateInternalBankAccount(ctx, req)
 			require.NoError(t, err)
-			assert.Equal(t, at.protoType, resp.Facility.AccountType)
+			assert.Equal(t, at.behaviorClass, resp.Facility.BehaviorClass)
 
 			if at.requireCorrespondent {
 				assert.NotNil(t, resp.Facility.CorrespondentDetails)
@@ -1684,7 +1748,7 @@ func TestE2E_PerformanceBaselines(t *testing.T) {
 			_, err := tc.svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 				AccountCode:    fmt.Sprintf("PERF_ACC_%04d", i),
 				Name:           fmt.Sprintf("Performance Test Account %d", i),
-				AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+				ProductTypeCode: "CLEARING_GBP",
 				InstrumentCode: "GBP",
 			})
 			require.NoError(t, err)
@@ -1710,7 +1774,7 @@ func TestE2E_PerformanceBaselines(t *testing.T) {
 			_, err := tc.svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 				AccountCode:    code,
 				Name:           fmt.Sprintf("Retrieval Test Account %d", i),
-				AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_HOLDING,
+				ProductTypeCode: "HOLDING_GBP",
 				InstrumentCode: "EUR",
 			})
 			require.NoError(t, err)
@@ -1771,7 +1835,7 @@ func TestE2E_PerformanceBaselines(t *testing.T) {
 			_, err := tc.svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 				AccountCode:    fmt.Sprintf("LIST_ACC_%04d", i),
 				Name:           fmt.Sprintf("List Test Account %d", i),
-				AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_SUSPENSE,
+				ProductTypeCode: "SUSPENSE_GBP",
 				InstrumentCode: "USD",
 			})
 			require.NoError(t, err)
@@ -1816,7 +1880,7 @@ func TestE2E_PerformanceBaselines(t *testing.T) {
 					_, err := tc.svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 						AccountCode:    code,
 						Name:           fmt.Sprintf("Concurrent Account %d-%d", workerID, i),
-						AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+						ProductTypeCode: "CLEARING_GBP",
 						InstrumentCode: "GBP",
 					})
 					if err != nil {

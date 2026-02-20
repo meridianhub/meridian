@@ -37,7 +37,7 @@ func (m *mockInternalBankAccountServer) InitiateInternalBankAccount(_ context.Co
 			AccountId:      m.lastAccountID,
 			AccountCode:    req.GetAccountCode(),
 			Name:           req.GetName(),
-			AccountType:    req.GetAccountType(), //nolint:staticcheck // Intentional: reading deprecated field for test backwards compatibility
+			BehaviorClass:  req.GetProductTypeCode(),
 			AccountStatus:  internalbankaccountv1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE,
 			InstrumentCode: req.GetInstrumentCode(),
 			CreatedAt:      timestamppb.Now(),
@@ -56,7 +56,7 @@ func (m *mockInternalBankAccountServer) RetrieveInternalBankAccount(_ context.Co
 			AccountId:      req.GetAccountId(),
 			AccountCode:    "NOSTRO-USD-001",
 			Name:           "USD Nostro at Test Bank",
-			AccountType:    internalbankaccountv1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_NOSTRO,
+			BehaviorClass:  "NOSTRO",
 			AccountStatus:  internalbankaccountv1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE,
 			InstrumentCode: "USD",
 			CreatedAt:      timestamppb.Now(),
@@ -163,7 +163,7 @@ func TestRetrieveHandler(t *testing.T) {
 	assert.Equal(t, "test-account-456", resultMap["account_id"])
 	assert.Equal(t, "NOSTRO-USD-001", resultMap["account_code"])
 	assert.Equal(t, "USD Nostro at Test Bank", resultMap["name"])
-	assert.Equal(t, "NOSTRO", resultMap["account_type"])
+	assert.Equal(t, "NOSTRO", resultMap["behavior_class"])
 	assert.Equal(t, "ACTIVE", resultMap["status"])
 	assert.Equal(t, "USD", resultMap["instrument_code"])
 }
@@ -271,11 +271,11 @@ func TestInitiateHandler(t *testing.T) {
 	}
 
 	result, err := handler(ctx, map[string]any{
-		"account_code":    "NOSTRO-USD-001",
-		"name":            "USD Nostro at Test Bank",
-		"account_type":    "NOSTRO",
-		"instrument_code": "USD",
-		"description":     "Test nostro account",
+		"account_code":      "NOSTRO-USD-001",
+		"name":              "USD Nostro at Test Bank",
+		"product_type_code": "NOSTRO_USD",
+		"instrument_code":   "USD",
+		"description":       "Test nostro account",
 	})
 	require.NoError(t, err)
 
@@ -289,7 +289,7 @@ func TestInitiateHandler(t *testing.T) {
 	assert.Equal(t, "test-account-123", resultMap["account_id"])
 	assert.Equal(t, "NOSTRO-USD-001", resultMap["account_code"])
 	assert.Equal(t, "USD Nostro at Test Bank", resultMap["name"])
-	assert.Equal(t, "NOSTRO", resultMap["account_type"])
+	assert.Equal(t, "NOSTRO_USD", resultMap["behavior_class"])
 	assert.Equal(t, "ACTIVE", resultMap["status"])
 	assert.Equal(t, "USD", resultMap["instrument_code"])
 }
@@ -314,10 +314,10 @@ func TestInitiateHandler_MinimalParams(t *testing.T) {
 
 	// Only required fields
 	result, err := handler(ctx, map[string]any{
-		"account_code":    "VOSTRO-EUR-001",
-		"name":            "EUR Vostro Account",
-		"account_type":    "VOSTRO",
-		"instrument_code": "EUR",
+		"account_code":      "VOSTRO-EUR-001",
+		"name":              "EUR Vostro Account",
+		"product_type_code": "VOSTRO_EUR",
+		"instrument_code":   "EUR",
 	})
 	require.NoError(t, err)
 
@@ -353,21 +353,21 @@ func TestInitiateHandler_MissingRequiredFields(t *testing.T) {
 		{
 			name: "missing account_code",
 			params: map[string]any{
-				"name":            "Test",
-				"account_type":    "NOSTRO",
-				"instrument_code": "USD",
+				"name":              "Test",
+				"product_type_code": "NOSTRO_USD",
+				"instrument_code":   "USD",
 			},
 		},
 		{
 			name: "missing name",
 			params: map[string]any{
-				"account_code":    "TEST-001",
-				"account_type":    "NOSTRO",
-				"instrument_code": "USD",
+				"account_code":      "TEST-001",
+				"product_type_code": "NOSTRO_USD",
+				"instrument_code":   "USD",
 			},
 		},
 		{
-			name: "missing account_type",
+			name: "missing product_type_code",
 			params: map[string]any{
 				"account_code":    "TEST-001",
 				"name":            "Test",
@@ -377,9 +377,9 @@ func TestInitiateHandler_MissingRequiredFields(t *testing.T) {
 		{
 			name: "missing instrument_code",
 			params: map[string]any{
-				"account_code": "TEST-001",
-				"name":         "Test",
-				"account_type": "NOSTRO",
+				"account_code":      "TEST-001",
+				"name":              "Test",
+				"product_type_code": "NOSTRO_USD",
 			},
 		},
 	}

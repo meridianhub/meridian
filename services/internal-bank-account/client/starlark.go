@@ -102,15 +102,7 @@ func retrieveHandler(client *Client) saga.Handler {
 		}
 
 		// 5. Convert response to Starlark format
-		facility := resp.GetFacility()
-		return map[string]any{
-			"account_id":      facility.GetAccountId(),
-			"account_code":    facility.GetAccountCode(),
-			"name":            facility.GetName(),
-			"account_type":    convertAccountTypeToString(facility.GetAccountType()),
-			"status":          convertAccountStatusToString(facility.GetAccountStatus()),
-			"instrument_code": facility.GetInstrumentCode(),
-		}, nil
+		return convertFacilityToStarlark(resp.GetFacility().GetAccountId(), resp.GetFacility()), nil
 	}
 }
 
@@ -166,33 +158,31 @@ func getBalanceHandler(client *Client) saga.Handler {
 // Parameters:
 //   - account_code (string): The business-friendly account code (required)
 //   - name (string): The human-readable account name (required)
-//   - account_type (string): The account type - one of "CLEARING", "NOSTRO", "VOSTRO",
-//     "HOLDING", "SUSPENSE", "REVENUE", "EXPENSE", "INVENTORY" (required)
+//   - product_type_code (string): The product type code from the Product Directory (required)
 //   - instrument_code (string): The instrument code (e.g., "USD", "KWH") (required)
 //   - description (string): Additional context about the account's purpose (optional)
 //   - correspondent_bank_id (string): Correspondent bank ID for NOSTRO/VOSTRO (optional)
 //   - correspondent_bank_name (string): Correspondent bank name for NOSTRO/VOSTRO (optional)
 //   - correspondent_external_account_ref (string): External account reference (optional)
 //   - correspondent_swift_code (string): SWIFT/BIC code (optional)
-//   - correspondent_type (string): "NOSTRO" or "VOSTRO" (optional)
 //
 // Returns a map containing:
 //   - account_id: The generated unique identifier
 //   - account_code: The business-friendly account code
 //   - name: The human-readable account name
-//   - account_type: The account type
+//   - behavior_class: The behavior class (e.g., "NOSTRO", "VOSTRO", "CLEARING")
 //   - status: Always "ACTIVE" for newly created accounts
 //   - instrument_code: The instrument code
 func initiateHandler(client *Client) saga.Handler {
 	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 		// 1. Parse and validate required params
-		req, accountType, err := parseInitiateParams(params)
+		req, productTypeCode, err := parseInitiateParams(params)
 		if err != nil {
 			return nil, err
 		}
 
-		// 2. Add correspondent details if needed
-		if err := addCorrespondentDetails(req, params, accountType); err != nil {
+		// 2. Add correspondent details if needed (for NOSTRO/VOSTRO behavior classes)
+		if err := addCorrespondentDetails(req, params, productTypeCode); err != nil {
 			return nil, err
 		}
 
@@ -211,64 +201,54 @@ func initiateHandler(client *Client) saga.Handler {
 }
 
 // parseInitiateParams extracts and validates required parameters for account initiation.
-func parseInitiateParams(params map[string]any) (*internalbankaccountv1.InitiateInternalBankAccountRequest, internalbankaccountv1.InternalAccountType, error) {
+func parseInitiateParams(params map[string]any) (*internalbankaccountv1.InitiateInternalBankAccountRequest, string, error) {
 	accountCode, err := saga.RequireStringParam(params, "account_code")
 	if err != nil {
-		return nil, 0, err
+		return nil, "", err
 	}
 
 	name, err := saga.RequireStringParam(params, "name")
 	if err != nil {
-		return nil, 0, err
+		return nil, "", err
 	}
 
-	accountTypeStr, err := saga.RequireStringParam(params, "account_type")
+	productTypeCode, err := saga.RequireStringParam(params, "product_type_code")
 	if err != nil {
-		return nil, 0, err
+		return nil, "", err
 	}
 
 	instrumentCode, err := saga.RequireStringParam(params, "instrument_code")
 	if err != nil {
-		return nil, 0, err
+		return nil, "", err
 	}
 
 	// Parse optional description
 	description := getOptionalString(params, "description")
 
-	// Convert account type from string to enum
-	accountType, err := convertStringToAccountType(accountTypeStr)
-	if err != nil {
-		return nil, 0, fmt.Errorf("internal_bank_account.initiate: invalid account_type: %w", err)
-	}
-
 	req := &internalbankaccountv1.InitiateInternalBankAccountRequest{
-		AccountCode:    accountCode,
-		Name:           name,
-		AccountType:    accountType,
-		InstrumentCode: instrumentCode,
-		Description:    description,
+		AccountCode:     accountCode,
+		Name:            name,
+		ProductTypeCode: productTypeCode,
+		InstrumentCode:  instrumentCode,
+		Description:     description,
 	}
 
-	return req, accountType, nil
+	return req, productTypeCode, nil
 }
 
 // addCorrespondentDetails adds correspondent bank details to the request if needed.
-func addCorrespondentDetails(req *internalbankaccountv1.InitiateInternalBankAccountRequest, params map[string]any, accountType internalbankaccountv1.InternalAccountType) error {
-	// Only for NOSTRO/VOSTRO accounts
-	if accountType != internalbankaccountv1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_NOSTRO &&
-		accountType != internalbankaccountv1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_VOSTRO {
-		return nil
-	}
-
+// The correspondent_bank_id parameter triggers addition of correspondent details.
+// Correspondent type is determined from the product_type_code prefix (NOSTRO/VOSTRO).
+func addCorrespondentDetails(req *internalbankaccountv1.InitiateInternalBankAccountRequest, params map[string]any, productTypeCode string) error {
 	// Parse correspondent details if provided
 	bankID := getOptionalString(params, "correspondent_bank_id")
 	if bankID == "" {
 		return nil
 	}
 
-	// Determine correspondent type based on account type
+	// Determine correspondent type from product type code prefix
 	correspondentType := internalbankaccountv1.CorrespondentType_CORRESPONDENT_TYPE_NOSTRO
-	if accountType == internalbankaccountv1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_VOSTRO {
+	if len(productTypeCode) >= 6 && productTypeCode[:6] == "VOSTRO" {
 		correspondentType = internalbankaccountv1.CorrespondentType_CORRESPONDENT_TYPE_VOSTRO
 	}
 
@@ -299,7 +279,7 @@ func convertFacilityToStarlark(accountID string, facility *internalbankaccountv1
 		"account_id":      accountID,
 		"account_code":    facility.GetAccountCode(),
 		"name":            facility.GetName(),
-		"account_type":    convertAccountTypeToString(facility.GetAccountType()),
+		"behavior_class":  facility.GetBehaviorClass(),
 		"status":          convertAccountStatusToString(facility.GetAccountStatus()),
 		"instrument_code": facility.GetInstrumentCode(),
 	}
@@ -334,63 +314,9 @@ func prepareClientContext(ctx *saga.StarlarkContext) context.Context {
 }
 
 const (
-	// accountStatusUnspecified is the string representation for unspecified account types and statuses.
+	// accountStatusUnspecified is the string representation for unspecified statuses.
 	accountStatusUnspecified = "UNSPECIFIED"
 )
-
-// convertAccountTypeToString converts the proto enum to a human-readable string.
-func convertAccountTypeToString(t internalbankaccountv1.InternalAccountType) string {
-	switch t {
-	case internalbankaccountv1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING:
-		return "CLEARING"
-	case internalbankaccountv1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_NOSTRO:
-		return "NOSTRO"
-	case internalbankaccountv1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_VOSTRO:
-		return "VOSTRO"
-	case internalbankaccountv1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_HOLDING:
-		return "HOLDING"
-	case internalbankaccountv1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_SUSPENSE:
-		return "SUSPENSE"
-	case internalbankaccountv1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_REVENUE:
-		return "REVENUE"
-	case internalbankaccountv1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_EXPENSE:
-		return "EXPENSE"
-	case internalbankaccountv1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_INVENTORY:
-		return "INVENTORY"
-	case internalbankaccountv1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_UNSPECIFIED:
-		return accountStatusUnspecified
-	default:
-		return accountStatusUnspecified
-	}
-}
-
-// ErrUnknownAccountType is returned when an invalid account type string is provided.
-var ErrUnknownAccountType = fmt.Errorf("unknown account type")
-
-// convertStringToAccountType converts a string to the proto enum.
-func convertStringToAccountType(s string) (internalbankaccountv1.InternalAccountType, error) {
-	switch s {
-	case "CLEARING":
-		return internalbankaccountv1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING, nil
-	case "NOSTRO":
-		return internalbankaccountv1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_NOSTRO, nil
-	case "VOSTRO":
-		return internalbankaccountv1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_VOSTRO, nil
-	case "HOLDING":
-		return internalbankaccountv1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_HOLDING, nil
-	case "SUSPENSE":
-		return internalbankaccountv1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_SUSPENSE, nil
-	case "REVENUE":
-		return internalbankaccountv1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_REVENUE, nil
-	case "EXPENSE":
-		return internalbankaccountv1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_EXPENSE, nil
-	case "INVENTORY":
-		return internalbankaccountv1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_INVENTORY, nil
-	default:
-		return internalbankaccountv1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_UNSPECIFIED,
-			fmt.Errorf("%w: %s", ErrUnknownAccountType, s)
-	}
-}
 
 // convertAccountStatusToString converts the proto enum to a human-readable string.
 func convertAccountStatusToString(s internalbankaccountv1.InternalAccountStatus) string {

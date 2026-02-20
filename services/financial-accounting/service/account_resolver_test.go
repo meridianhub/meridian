@@ -342,7 +342,7 @@ func TestGetDepositClearingAccount_UsesClearingPurposeFilter(t *testing.T) {
 	require.NotNil(t, req)
 	assert.Equal(t, internalbankaccountv1.ClearingPurpose_CLEARING_PURPOSE_DEPOSIT, req.ClearingPurposeFilter,
 		"GetDepositClearingAccount should filter by CLEARING_PURPOSE_DEPOSIT")
-	assert.Equal(t, internalbankaccountv1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING, req.AccountTypeFilter)
+	assert.Equal(t, "CLEARING", req.BehaviorClassFilter)
 	assert.Equal(t, internalbankaccountv1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE, req.StatusFilter)
 	assert.Equal(t, "GBP", req.InstrumentCodeFilter)
 }
@@ -370,7 +370,7 @@ func TestGetWithdrawalClearingAccount_UsesClearingPurposeFilter(t *testing.T) {
 	require.NotNil(t, req)
 	assert.Equal(t, internalbankaccountv1.ClearingPurpose_CLEARING_PURPOSE_WITHDRAWAL, req.ClearingPurposeFilter,
 		"GetWithdrawalClearingAccount should filter by CLEARING_PURPOSE_WITHDRAWAL")
-	assert.Equal(t, internalbankaccountv1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING, req.AccountTypeFilter)
+	assert.Equal(t, "CLEARING", req.BehaviorClassFilter)
 	assert.Equal(t, internalbankaccountv1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE, req.StatusFilter)
 	assert.Equal(t, "USD", req.InstrumentCodeFilter)
 }
@@ -398,7 +398,7 @@ func TestGetSettlementClearingAccount_UsesClearingPurposeFilter(t *testing.T) {
 	require.NotNil(t, req)
 	assert.Equal(t, internalbankaccountv1.ClearingPurpose_CLEARING_PURPOSE_SETTLEMENT, req.ClearingPurposeFilter,
 		"GetSettlementClearingAccount should filter by CLEARING_PURPOSE_SETTLEMENT")
-	assert.Equal(t, internalbankaccountv1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING, req.AccountTypeFilter)
+	assert.Equal(t, "CLEARING", req.BehaviorClassFilter)
 	assert.Equal(t, internalbankaccountv1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE, req.StatusFilter)
 	assert.Equal(t, "EUR", req.InstrumentCodeFilter)
 }

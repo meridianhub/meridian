@@ -66,81 +66,9 @@ func ptTestCtx() context.Context {
 	return tenant.WithTenant(context.Background(), tenant.TenantID(testTenantIDForPT))
 }
 
-// --- Tests: Legacy backwards compatibility ---
+// --- Tests: product_type_code required ---
 
-func TestInitiate_LegacyAccountType_DeriveProductCode(t *testing.T) {
-	repo := newMockRepository()
-	svc, err := NewService(repo)
-	require.NoError(t, err)
-
-	ctx := context.Background()
-	resp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
-		AccountCode:     "CLR-GBP",
-		Name:            "GBP Clearing",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING, //nolint:staticcheck // testing deprecated field
-		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
-		InstrumentCode:  "GBP",
-	})
-	require.NoError(t, err)
-
-	// product_type_code should be derived from legacy mapping
-	assert.Equal(t, "CLEARING_GBP", resp.Facility.ProductTypeCode)
-	assert.Equal(t, int32(0), resp.Facility.ProductTypeVersion)
-}
-
-func TestInitiate_LegacyAccountType_AllTypes(t *testing.T) {
-	tests := []struct {
-		accountType pb.InternalAccountType
-		expected    string
-	}{
-		{pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING, "CLEARING_USD"},
-		{pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_NOSTRO, "NOSTRO_USD"},
-		{pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_VOSTRO, "VOSTRO_USD"},
-		{pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_HOLDING, "HOLDING_USD"},
-		{pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_SUSPENSE, "SUSPENSE_USD"},
-		{pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_REVENUE, "REVENUE_USD"},
-		{pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_EXPENSE, "EXPENSE_USD"},
-		{pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_INVENTORY, "INVENTORY_USD"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.expected, func(t *testing.T) {
-			repo := newMockRepository()
-			svc, err := NewService(repo)
-			require.NoError(t, err)
-
-			ctx := context.Background()
-			req := &pb.InitiateInternalBankAccountRequest{
-				AccountCode:    fmt.Sprintf("CODE-%s", tt.expected),
-				Name:           fmt.Sprintf("Test %s", tt.expected),
-				AccountType:    tt.accountType, //nolint:staticcheck // testing deprecated field
-				InstrumentCode: "USD",
-			}
-
-			// Add clearing purpose for CLEARING type, and correspondent for NOSTRO/VOSTRO
-			if tt.accountType == pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING {
-				req.ClearingPurpose = pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL
-			}
-			if tt.accountType == pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_NOSTRO ||
-				tt.accountType == pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_VOSTRO {
-				req.CorrespondentDetails = &pb.CorrespondentBankDetails{
-					BankId:             "BANK001",
-					BankName:           "Test Bank",
-					ExternalAccountRef: "REF-123",
-				}
-			}
-
-			resp, err := svc.InitiateInternalBankAccount(ctx, req)
-			require.NoError(t, err)
-			assert.Equal(t, tt.expected, resp.Facility.ProductTypeCode)
-		})
-	}
-}
-
-// --- Tests: product_type_code takes precedence over account_type ---
-
-func TestInitiate_ProductTypeCode_TakesPrecedence(t *testing.T) {
-	// With a cache, product_type_code takes precedence over the deprecated account_type enum
+func TestInitiate_ProductTypeCode_WithCache_Accepted(t *testing.T) {
 	defs := map[string]*accounttype.Definition{
 		"CUSTOM_PRODUCT": {
 			Code:           "CUSTOM_PRODUCT",
@@ -160,14 +88,12 @@ func TestInitiate_ProductTypeCode_TakesPrecedence(t *testing.T) {
 	resp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "CLR-GBP-OVERRIDE",
 		Name:            "GBP Clearing Override",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING, //nolint:staticcheck // testing deprecated field
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "GBP",
 		ProductTypeCode: "CUSTOM_PRODUCT",
 	})
 	require.NoError(t, err)
 
-	// product_type_code should be the explicitly set value, not the legacy mapping
 	assert.Equal(t, "CUSTOM_PRODUCT", resp.Facility.ProductTypeCode)
 }
 
@@ -181,7 +107,6 @@ func TestInitiate_ProductTypeCode_NoCacheReturnsError(t *testing.T) {
 	_, err = svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "CLR-GBP",
 		Name:            "GBP Clearing",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING, //nolint:staticcheck // testing deprecated field
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "GBP",
 		ProductTypeCode: "CUSTOM_PRODUCT",
@@ -440,31 +365,4 @@ func TestInitiate_ProductTypeFieldsPersistedAndReturned(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "HOLDING_KWH", retrieveResp.Facility.ProductTypeCode)
 	assert.Equal(t, int32(5), retrieveResp.Facility.ProductTypeVersion)
-}
-
-// --- Tests: legacyAccountTypeToProductCode function ---
-
-func TestLegacyAccountTypeToProductCode(t *testing.T) {
-	tests := []struct {
-		accountType    pb.InternalAccountType
-		instrumentCode string
-		expected       string
-	}{
-		{pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING, "GBP", "CLEARING_GBP"},
-		{pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_NOSTRO, "usd", "NOSTRO_USD"},
-		{pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_VOSTRO, "EUR", "VOSTRO_EUR"},
-		{pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_HOLDING, "BTC", "HOLDING_BTC"},
-		{pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_SUSPENSE, "KWH", "SUSPENSE_KWH"},
-		{pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_REVENUE, "USD", "REVENUE_USD"},
-		{pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_EXPENSE, "GBP", "EXPENSE_GBP"},
-		{pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_INVENTORY, "CARBON", "INVENTORY_CARBON"},
-		{pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_UNSPECIFIED, "USD", ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.expected, func(t *testing.T) {
-			result := legacyAccountTypeToProductCode(tt.accountType, tt.instrumentCode)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
 }

@@ -57,7 +57,7 @@ func main() {
 		Name:        "Solar Farm 1 Energy Inventory",
 
 		// INVENTORY accounts track non-cash assets
-		AccountType: ibav1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_INVENTORY,
+		ProductTypeCode: "INVENTORY_KWH",
 
 		// KWH is a standard energy instrument code
 		// Reference Data service defines the unit as "kilowatt-hour"
@@ -94,7 +94,7 @@ func main() {
 		AccountCode: "INV-GPU-CLUSTER-A100",
 		Name:        "A100 GPU Cluster Allocation Pool",
 
-		AccountType: ibav1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_INVENTORY,
+		ProductTypeCode: "INVENTORY_KWH",
 
 		// GPU_HOUR represents one hour of GPU compute time
 		// Dimension: COMPUTE
@@ -129,7 +129,7 @@ func main() {
 		AccountCode: "INV-CARBON-OFFSET-2026",
 		Name:        "2026 Carbon Offset Inventory",
 
-		AccountType: ibav1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_INVENTORY,
+		ProductTypeCode: "INVENTORY_KWH",
 
 		// TONNE_CO2E represents one metric tonne of CO2 equivalent
 		// Dimension: CARBON
@@ -165,7 +165,7 @@ func main() {
 		Name:        "Carbon Credits Pending Verification",
 
 		// SUSPENSE accounts hold unidentified or disputed items
-		AccountType: ibav1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_SUSPENSE,
+		ProductTypeCode: "SUSPENSE_GBP",
 
 		InstrumentCode: "TONNE_CO2E",
 
@@ -198,7 +198,7 @@ func main() {
 		Name:        "Grid Energy Sales Revenue",
 
 		// REVENUE accounts track income streams
-		AccountType: ibav1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_REVENUE,
+		ProductTypeCode: "REVENUE_GBP",
 
 		// Revenue in USD for energy sold to grid
 		InstrumentCode: "USD",
@@ -227,7 +227,7 @@ func main() {
 	log.Println("\n=== Summary: All Inventory Accounts ===")
 
 	listResp, err := client.ListInternalBankAccounts(ctx, &ibav1.ListInternalBankAccountsRequest{
-		AccountTypeFilter: ibav1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_INVENTORY,
+		BehaviorClassFilter: "INVENTORY",
 	})
 	if err != nil {
 		log.Fatalf("Failed to list accounts: %v", err)

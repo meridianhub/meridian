@@ -45,7 +45,7 @@ func TestBalanceService_GetBalance_ReturnsCurrentBalance(t *testing.T) {
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "CLR-USD-001",
 		Name:            "USD Clearing Account",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_USD",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "USD",
 	})
@@ -87,7 +87,7 @@ func TestBalanceService_GetBalance_MultiCurrency(t *testing.T) {
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "CLR-EUR-001",
 		Name:            "EUR Clearing Account",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "EUR",
 	})
@@ -126,7 +126,7 @@ func TestBalanceService_GetBalance_NonCurrencyInstrument(t *testing.T) {
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:    "ENERGY-001",
 		Name:           "Energy Holding Account",
-		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_HOLDING,
+		ProductTypeCode: "HOLDING_GBP",
 		InstrumentCode: "KWH",
 	})
 	require.NoError(t, err)
@@ -155,7 +155,7 @@ func TestBalanceService_GetBalance_RequiresActiveAccount(t *testing.T) {
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "CLR-001",
 		Name:            "USD Clearing Account",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "USD",
 	})
@@ -201,7 +201,7 @@ func TestBalanceService_GetBalance_ReactivatedAccountQueryable(t *testing.T) {
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "CLR-001",
 		Name:            "USD Clearing Account",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "USD",
 	})
@@ -243,7 +243,7 @@ func TestBalanceService_GetBalance_ClosedAccountNotQueryable(t *testing.T) {
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "CLR-001",
 		Name:            "USD Clearing Account",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "USD",
 	})
@@ -280,7 +280,7 @@ func TestBalanceService_GetBalance_HandlesPositionKeepingTimeout(t *testing.T) {
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "CLR-001",
 		Name:            "USD Clearing Account",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "USD",
 	})
@@ -310,7 +310,7 @@ func TestBalanceService_GetBalance_HandlesPositionKeepingRateLimiting(t *testing
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "CLR-001",
 		Name:            "USD Clearing Account",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "USD",
 	})
@@ -339,7 +339,7 @@ func TestBalanceService_GetBalance_HandlesPositionKeepingNotFound(t *testing.T) 
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "CLR-001",
 		Name:            "USD Clearing Account",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "USD",
 	})
@@ -369,7 +369,7 @@ func TestBalanceService_GetBalance_HandlesPositionKeepingUnavailable(t *testing.
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "CLR-001",
 		Name:            "USD Clearing Account",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "USD",
 	})
@@ -399,7 +399,7 @@ func TestBalanceService_GetBalance_HandlesPositionKeepingInternal(t *testing.T) 
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "CLR-001",
 		Name:            "USD Clearing Account",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "USD",
 	})
@@ -429,7 +429,7 @@ func TestBalanceService_GetBalance_HandlesPositionKeepingInvalidArgument(t *test
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "CLR-001",
 		Name:            "USD Clearing Account",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "USD",
 	})
@@ -458,7 +458,7 @@ func TestBalanceService_RequiresPositionKeepingClient(t *testing.T) {
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "CLR-001",
 		Name:            "USD Clearing Account",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "USD",
 	})
@@ -498,7 +498,7 @@ func TestBalanceService_NostroAccountBalance(t *testing.T) {
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:    "NOSTRO-GBP-HSBC",
 		Name:           "HSBC GBP Nostro Account",
-		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_NOSTRO,
+		ProductTypeCode: "NOSTRO_USD",
 		InstrumentCode: "GBP",
 		CorrespondentDetails: &pb.CorrespondentBankDetails{
 			BankId:             "HSBC001",
@@ -563,7 +563,7 @@ func TestBalanceService_MultipleBalanceTypes(t *testing.T) {
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "CLR-001",
 		Name:            "USD Clearing Account",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "USD",
 	})
@@ -621,7 +621,7 @@ func TestBalanceService_GetBalance_MissingCurrentBalanceReturnsNilBalance(t *tes
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "CLR-USD-NOCUR",
 		Name:            "No Current Balance Account",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "USD",
 	})
@@ -663,7 +663,7 @@ func TestBalanceService_GetBalance_NilAsOfTimestampReturnsFallback(t *testing.T)
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "CLR-USD-NOASOF",
 		Name:            "No AsOf Account",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "USD",
 	})
@@ -718,7 +718,7 @@ func BenchmarkGetBalance(b *testing.B) {
 	resp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "BENCH-BAL-001",
 		Name:            "Benchmark Balance Account",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "USD",
 	})
@@ -773,7 +773,7 @@ func BenchmarkGetBalance_MultipleBalanceTypes(b *testing.B) {
 	resp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "BENCH-MULTI-001",
 		Name:            "Benchmark Multi Balance Account",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "USD",
 	})

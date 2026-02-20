@@ -230,7 +230,7 @@ func (r *AccountResolver) queryInternalBankAccount(ctx context.Context, clearing
 	clearingPurpose := mapClearingTypeToPurpose(clearingType)
 
 	resp, err := r.client.ListInternalBankAccounts(ctx, &internalbankaccountv1.ListInternalBankAccountsRequest{
-		AccountTypeFilter:     internalbankaccountv1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		BehaviorClassFilter:   "CLEARING",
 		InstrumentCodeFilter:  instrumentCode,
 		StatusFilter:          internalbankaccountv1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE,
 		ClearingPurposeFilter: clearingPurpose,

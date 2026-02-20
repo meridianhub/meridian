@@ -463,7 +463,7 @@ func currentAccountFinAcctInitiateBookingLog(ctx *saga.StarlarkContext, params m
 
 	resp, err := deps.FinAcctClient.InitiateFinancialBookingLog(ctx,
 		&financialaccountingv1.InitiateFinancialBookingLogRequest{
-			FinancialAccountType:    commonpb.AccountType_ACCOUNT_TYPE_CURRENT,
+			FinancialAccountType:    "CURRENT",
 			ProductServiceReference: accountID,
 			BusinessUnitReference:   "current-account-service",
 			ChartOfAccountsRules:    transactionType,
