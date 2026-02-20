@@ -226,7 +226,7 @@ func (r *AccountResolver) resolveClearingAccount(ctx context.Context, clearingTy
 // without cache invalidation when the API is extended.
 func (r *AccountResolver) queryInternalBankAccount(ctx context.Context, clearingType ClearingAccountType, instrumentCode string) (string, error) {
 	resp, err := r.client.ListInternalBankAccounts(ctx, &internalbankaccountv1.ListInternalBankAccountsRequest{
-		AccountTypeFilter:    internalbankaccountv1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		BehaviorClassFilter:  "CLEARING",
 		InstrumentCodeFilter: instrumentCode,
 		StatusFilter:         internalbankaccountv1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE,
 	})

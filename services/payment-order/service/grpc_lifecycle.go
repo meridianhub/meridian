@@ -396,7 +396,7 @@ func (s *Service) reverseLedgerPosting(ctx context.Context, po *domain.PaymentOr
 	// Step 1: Create a BookingLog in PENDING status for the reversal
 	reversalBookingLogIDempKey := fmt.Sprintf("reversal-booking-log-%s", po.IdempotencyKey)
 	bookingLogResp, err := s.financialAccountingClient.InitiateFinancialBookingLog(ctx, &financialaccountingv1.InitiateFinancialBookingLogRequest{
-		FinancialAccountType:    commonpb.AccountType_ACCOUNT_TYPE_CURRENT,
+		FinancialAccountType:    "CURRENT",
 		ProductServiceReference: "payment-order-reversal",
 		BusinessUnitReference:   "payment-order-service",
 		ChartOfAccountsRules:    "payment-reversal",

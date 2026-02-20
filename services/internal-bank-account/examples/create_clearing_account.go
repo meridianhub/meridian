@@ -57,7 +57,7 @@ func main() {
 
 		// AccountType determines the operational purpose
 		// CLEARING is used for settlement and clearing operations
-		AccountType: ibav1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 
 		// InstrumentCode references the asset type from Reference Data service
 		// Common values: USD, EUR, GBP, KWH, GPU_HOUR, TONNE_CO2E

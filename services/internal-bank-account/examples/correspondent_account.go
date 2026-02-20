@@ -53,7 +53,7 @@ func main() {
 	nostroReq := &ibav1.InitiateInternalBankAccountRequest{
 		AccountCode:    "NOSTRO-EUR-DEUTSCHE",
 		Name:           "EUR Nostro at Deutsche Bank Frankfurt",
-		AccountType:    ibav1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_NOSTRO,
+		ProductTypeCode: "NOSTRO_USD",
 		InstrumentCode: "EUR",
 		Description:    "Primary EUR nostro account for European settlements",
 
@@ -111,7 +111,7 @@ func main() {
 	vostroReq := &ibav1.InitiateInternalBankAccountRequest{
 		AccountCode:    "VOSTRO-JPY-MUFG",
 		Name:           "JPY Vostro for MUFG Tokyo",
-		AccountType:    ibav1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_VOSTRO,
+		ProductTypeCode: "VOSTRO_USD",
 		InstrumentCode: "JPY",
 		Description:    "MUFG Bank's JPY account held at our institution",
 
@@ -151,7 +151,7 @@ func main() {
 
 	// List NOSTRO accounts
 	nostroList, err := client.ListInternalBankAccounts(ctx, &ibav1.ListInternalBankAccountsRequest{
-		AccountTypeFilter: ibav1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_NOSTRO,
+		BehaviorClassFilter: "NOSTRO",
 		StatusFilter:      ibav1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE,
 	})
 	if err != nil {
@@ -168,7 +168,7 @@ func main() {
 
 	// List VOSTRO accounts
 	vostroList, err := client.ListInternalBankAccounts(ctx, &ibav1.ListInternalBankAccountsRequest{
-		AccountTypeFilter: ibav1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_VOSTRO,
+		BehaviorClassFilter: "VOSTRO",
 		StatusFilter:      ibav1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE,
 	})
 	if err != nil {

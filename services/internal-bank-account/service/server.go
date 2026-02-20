@@ -210,35 +210,6 @@ var behaviorClassToAccountType = map[accounttype.BehaviorClass]domain.AccountTyp
 	accounttype.BehaviorClassInventory: domain.AccountTypeHolding,
 }
 
-// legacyAccountTypeToProductCode maps the deprecated InternalAccountType enum to a product type code.
-// Convention: <BEHAVIOR_CLASS>_<INSTRUMENT_CODE> (e.g., "CLEARING_GBP").
-func legacyAccountTypeToProductCode(at pb.InternalAccountType, instrumentCode string) string {
-	prefix := ""
-	//exhaustive:ignore
-	switch at {
-	case pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING:
-		prefix = "CLEARING"
-	case pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_NOSTRO:
-		prefix = "NOSTRO"
-	case pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_VOSTRO:
-		prefix = "VOSTRO"
-	case pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_HOLDING:
-		prefix = "HOLDING"
-	case pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_SUSPENSE:
-		prefix = "SUSPENSE"
-	case pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_REVENUE:
-		prefix = "REVENUE"
-	case pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_EXPENSE:
-		prefix = "EXPENSE"
-	case pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_INVENTORY:
-		prefix = "INVENTORY"
-	}
-	if prefix == "" {
-		return ""
-	}
-	return prefix + "_" + strings.ToUpper(instrumentCode)
-}
-
 // InitiateInternalBankAccount creates a new internal bank account.
 func (s *Service) InitiateInternalBankAccount(ctx context.Context, req *pb.InitiateInternalBankAccountRequest) (*pb.InitiateInternalBankAccountResponse, error) {
 	start := time.Now()
@@ -247,11 +218,8 @@ func (s *Service) InitiateInternalBankAccount(ctx context.Context, req *pb.Initi
 		ibaobservability.RecordOperationDuration("initiate_internal_bank_account", operationStatus, time.Since(start))
 	}()
 
-	// 1. Determine product_type_code: new field takes precedence, legacy mapping as fallback
+	// 1. Determine product_type_code (required for new accounts).
 	productTypeCode := req.ProductTypeCode
-	if productTypeCode == "" && req.AccountType != pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_UNSPECIFIED { //nolint:staticcheck // Intentional: reading deprecated field for backwards compatibility
-		productTypeCode = legacyAccountTypeToProductCode(req.AccountType, req.InstrumentCode) //nolint:staticcheck // Intentional: reading deprecated field for backwards compatibility
-	}
 
 	var accountType domain.AccountType
 	var clearingPurpose domain.ClearingPurpose
@@ -344,15 +312,12 @@ func (s *Service) InitiateInternalBankAccount(ctx context.Context, req *pb.Initi
 		// product_type_code was explicitly provided but cache is not configured
 		operationStatus = operationStatusFailed
 		return nil, status.Error(codes.FailedPrecondition,
-			"product type resolution not available; configure account type cache or use deprecated account_type field")
-	} else {
-		// Legacy path: no cache, derive account type from proto enum
-		var err error
-		accountType, err = protoToAccountType(req.AccountType) //nolint:staticcheck // Intentional: reading deprecated field for backwards compatibility
-		if err != nil {
-			operationStatus = opStatusInvalidAccountType
-			return nil, status.Errorf(codes.InvalidArgument, "invalid account type: %v", err)
-		}
+			"product type resolution not available; configure account type cache")
+	} else if productTypeCode == "" {
+		// product_type_code is required - the deprecated account_type enum has been removed
+		operationStatus = opStatusInvalidAccountType
+		return nil, status.Error(codes.InvalidArgument,
+			"product_type_code is required; the deprecated account_type enum has been removed")
 	}
 
 	// Convert clearing purpose from proto to domain
@@ -714,12 +679,10 @@ func (s *Service) ListInternalBankAccounts(ctx context.Context, req *pb.ListInte
 		Offset: 0,
 	}
 
-	// Apply account type filter
-	if req.AccountTypeFilter != pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_UNSPECIFIED {
-		accountType, err := protoToAccountType(req.AccountTypeFilter)
-		if err == nil {
-			filter.AccountType = &accountType
-		}
+	// Apply behavior class filter
+	if req.BehaviorClassFilter != "" {
+		accountType := domain.AccountType(req.BehaviorClassFilter)
+		filter.AccountType = &accountType
 	}
 
 	// Apply instrument code filter

@@ -57,7 +57,7 @@ func main() {
 	createResp, err := client.InitiateInternalBankAccount(ctx, &ibav1.InitiateInternalBankAccountRequest{
 		AccountCode:    "HOLD-LIFECYCLE-DEMO",
 		Name:           "Lifecycle Demo Holding Account",
-		AccountType:    ibav1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_HOLDING,
+		ProductTypeCode: "HOLDING_GBP",
 		InstrumentCode: "USD",
 		Description:    "Demonstration account for lifecycle transitions",
 		IdempotencyKey: &commonv1.IdempotencyKey{

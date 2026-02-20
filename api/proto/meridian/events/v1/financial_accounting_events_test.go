@@ -14,7 +14,7 @@ import (
 func TestFinancialBookingLogInitiatedEvent_Serialization(t *testing.T) {
 	event := &eventsv1.FinancialBookingLogInitiatedEvent{
 		BookingLogId:            "booking-log-123",
-		FinancialAccountType:    commonv1.AccountType_ACCOUNT_TYPE_DEBIT,
+		FinancialAccountType:    "DEBIT",
 		ProductServiceReference: "product-456",
 		BusinessUnitReference:   "bu-789",
 		BaseCurrency:            commonv1.Currency_CURRENCY_GBP,
@@ -308,7 +308,7 @@ func TestFinancialBookingLogInitiatedEvent_EmptyFields(t *testing.T) {
 	// Test that empty strings serialize/deserialize correctly
 	event := &eventsv1.FinancialBookingLogInitiatedEvent{
 		BookingLogId:            "",
-		FinancialAccountType:    commonv1.AccountType_ACCOUNT_TYPE_DEBIT,
+		FinancialAccountType:    "DEBIT",
 		ProductServiceReference: "",
 		BusinessUnitReference:   "",
 		BaseCurrency:            commonv1.Currency_CURRENCY_GBP,
@@ -342,7 +342,7 @@ func TestFinancialBookingLogInitiatedEvent_MaxLengthFields(t *testing.T) {
 
 	event := &eventsv1.FinancialBookingLogInitiatedEvent{
 		BookingLogId:            maxLengthString,
-		FinancialAccountType:    commonv1.AccountType_ACCOUNT_TYPE_DEBIT,
+		FinancialAccountType:    "DEBIT",
 		ProductServiceReference: maxLengthString,
 		BusinessUnitReference:   maxLengthString,
 		BaseCurrency:            commonv1.Currency_CURRENCY_GBP,
@@ -371,7 +371,7 @@ func TestFinancialBookingLogInitiatedEvent_UnspecifiedEnum(t *testing.T) {
 	// Test that UNSPECIFIED enum values serialize/deserialize
 	event := &eventsv1.FinancialBookingLogInitiatedEvent{
 		BookingLogId:            "booking-log-123",
-		FinancialAccountType:    commonv1.AccountType_ACCOUNT_TYPE_UNSPECIFIED,
+		FinancialAccountType:    "",
 		ProductServiceReference: "product-456",
 		BusinessUnitReference:   "bu-789",
 		BaseCurrency:            commonv1.Currency_CURRENCY_UNSPECIFIED,
@@ -391,7 +391,7 @@ func TestFinancialBookingLogInitiatedEvent_UnspecifiedEnum(t *testing.T) {
 		t.Fatalf("Failed to unmarshal event with unspecified enums: %v", err)
 	}
 
-	if decoded.FinancialAccountType != commonv1.AccountType_ACCOUNT_TYPE_UNSPECIFIED {
+	if decoded.FinancialAccountType != "" {
 		t.Errorf("Expected ACCOUNT_TYPE_UNSPECIFIED, got %v", decoded.FinancialAccountType)
 	}
 	if decoded.BaseCurrency != commonv1.Currency_CURRENCY_UNSPECIFIED {
@@ -403,7 +403,7 @@ func TestFinancialBookingLogInitiatedEvent_ZeroVersion(t *testing.T) {
 	// Test that version 0 serializes/deserializes (edge case)
 	event := &eventsv1.FinancialBookingLogInitiatedEvent{
 		BookingLogId:            "booking-log-123",
-		FinancialAccountType:    commonv1.AccountType_ACCOUNT_TYPE_DEBIT,
+		FinancialAccountType:    "DEBIT",
 		ProductServiceReference: "product-456",
 		BusinessUnitReference:   "bu-789",
 		BaseCurrency:            commonv1.Currency_CURRENCY_GBP,
@@ -432,7 +432,7 @@ func TestFinancialBookingLogInitiatedEvent_NegativeVersion(t *testing.T) {
 	// Test that negative version serializes/deserializes (invalid but should not crash)
 	event := &eventsv1.FinancialBookingLogInitiatedEvent{
 		BookingLogId:            "booking-log-123",
-		FinancialAccountType:    commonv1.AccountType_ACCOUNT_TYPE_DEBIT,
+		FinancialAccountType:    "DEBIT",
 		ProductServiceReference: "product-456",
 		BusinessUnitReference:   "bu-789",
 		BaseCurrency:            commonv1.Currency_CURRENCY_GBP,

@@ -1,9 +1,9 @@
 package provisioning
 
 import (
+	"strings"
 	"testing"
 
-	pb "github.com/meridianhub/meridian/api/proto/meridian/internal_bank_account/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -36,9 +36,12 @@ func TestListTemplateSets(t *testing.T) {
 }
 
 func TestEnergyAccounts_HasRequiredTypes(t *testing.T) {
-	typeCount := make(map[pb.InternalAccountType]int)
+	prefixCount := make(map[string]int)
 	for _, template := range EnergyAccounts {
-		typeCount[template.Type]++
+		parts := strings.SplitN(template.ProductTypeCode, "_", 2)
+		if len(parts) > 0 {
+			prefixCount[parts[0]]++
+		}
 	}
 
 	// Energy should have:
@@ -47,11 +50,11 @@ func TestEnergyAccounts_HasRequiredTypes(t *testing.T) {
 	// - Revenue accounts
 	// - Expense accounts
 	// - Suspense account
-	assert.Greater(t, typeCount[pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING], 0, "should have CLEARING accounts")
-	assert.Greater(t, typeCount[pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_INVENTORY], 0, "should have INVENTORY accounts")
-	assert.Greater(t, typeCount[pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_REVENUE], 0, "should have REVENUE accounts")
-	assert.Greater(t, typeCount[pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_EXPENSE], 0, "should have EXPENSE accounts")
-	assert.Greater(t, typeCount[pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_SUSPENSE], 0, "should have SUSPENSE accounts")
+	assert.Greater(t, prefixCount["CLEARING"], 0, "should have CLEARING accounts")
+	assert.Greater(t, prefixCount["INVENTORY"], 0, "should have INVENTORY accounts")
+	assert.Greater(t, prefixCount["REVENUE"], 0, "should have REVENUE accounts")
+	assert.Greater(t, prefixCount["EXPENSE"], 0, "should have EXPENSE accounts")
+	assert.Greater(t, prefixCount["SUSPENSE"], 0, "should have SUSPENSE accounts")
 }
 
 func TestEnergyAccounts_HasEnergyInstruments(t *testing.T) {
@@ -66,16 +69,19 @@ func TestEnergyAccounts_HasEnergyInstruments(t *testing.T) {
 }
 
 func TestComputeAccounts_HasRequiredTypes(t *testing.T) {
-	typeCount := make(map[pb.InternalAccountType]int)
+	prefixCount := make(map[string]int)
 	for _, template := range ComputeAccounts {
-		typeCount[template.Type]++
+		parts := strings.SplitN(template.ProductTypeCode, "_", 2)
+		if len(parts) > 0 {
+			prefixCount[parts[0]]++
+		}
 	}
 
-	assert.Greater(t, typeCount[pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING], 0, "should have CLEARING accounts")
-	assert.Greater(t, typeCount[pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_INVENTORY], 0, "should have INVENTORY accounts")
-	assert.Greater(t, typeCount[pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_REVENUE], 0, "should have REVENUE accounts")
-	assert.Greater(t, typeCount[pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_EXPENSE], 0, "should have EXPENSE accounts")
-	assert.Greater(t, typeCount[pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_SUSPENSE], 0, "should have SUSPENSE accounts")
+	assert.Greater(t, prefixCount["CLEARING"], 0, "should have CLEARING accounts")
+	assert.Greater(t, prefixCount["INVENTORY"], 0, "should have INVENTORY accounts")
+	assert.Greater(t, prefixCount["REVENUE"], 0, "should have REVENUE accounts")
+	assert.Greater(t, prefixCount["EXPENSE"], 0, "should have EXPENSE accounts")
+	assert.Greater(t, prefixCount["SUSPENSE"], 0, "should have SUSPENSE accounts")
 }
 
 func TestComputeAccounts_HasComputeInstruments(t *testing.T) {
@@ -100,7 +106,8 @@ func TestComputeAccounts_HasComputeInstruments(t *testing.T) {
 
 func TestMinimalAccounts_HasOnlySuspense(t *testing.T) {
 	assert.Equal(t, 1, len(MinimalAccounts), "minimal should have only 1 account")
-	assert.Equal(t, pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_SUSPENSE, MinimalAccounts[0].Type)
+	assert.True(t, strings.HasPrefix(MinimalAccounts[0].ProductTypeCode, "SUSPENSE"),
+		"minimal account should have SUSPENSE product type code, got: %s", MinimalAccounts[0].ProductTypeCode)
 }
 
 func TestTemplateSet_UniqueCodes(t *testing.T) {
@@ -141,12 +148,12 @@ func TestTemplateSet_ValidDimensions(t *testing.T) {
 	}
 }
 
-func TestTemplateSet_ValidAccountTypes(t *testing.T) {
+func TestTemplateSet_ValidProductTypeCodes(t *testing.T) {
 	for name, ts := range BuiltInTemplateSets {
 		t.Run(name, func(t *testing.T) {
 			for _, template := range ts.Templates {
-				assert.NotEqual(t, pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_UNSPECIFIED, template.Type,
-					"template %s in set %s has unspecified account type",
+				assert.NotEmpty(t, template.ProductTypeCode,
+					"template %s in set %s has empty product type code",
 					template.Code, name)
 			}
 		})

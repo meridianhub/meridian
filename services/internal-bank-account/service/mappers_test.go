@@ -11,76 +11,11 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-func TestProtoToAccountType_Valid(t *testing.T) {
-	tests := []struct {
-		name     string
-		proto    pb.InternalAccountType
-		expected domain.AccountType
-	}{
-		{"CLEARING", pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING, domain.AccountTypeClearing},
-		{"NOSTRO", pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_NOSTRO, domain.AccountTypeNostro},
-		{"VOSTRO", pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_VOSTRO, domain.AccountTypeVostro},
-		{"HOLDING", pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_HOLDING, domain.AccountTypeHolding},
-		{"SUSPENSE", pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_SUSPENSE, domain.AccountTypeSuspense},
-		{"REVENUE", pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_REVENUE, domain.AccountTypeRevenue},
-		{"EXPENSE", pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_EXPENSE, domain.AccountTypeExpense},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := protoToAccountType(tt.proto)
-			require.NoError(t, err)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-func TestProtoToAccountType_Unspecified(t *testing.T) {
-	_, err := protoToAccountType(pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_UNSPECIFIED)
-	assert.Error(t, err)
-	assert.ErrorIs(t, err, ErrUnspecifiedEnum)
-}
-
-func TestProtoToAccountType_Inventory(t *testing.T) {
-	// INVENTORY should map to HOLDING as the closest equivalent
-	result, err := protoToAccountType(pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_INVENTORY)
-	require.NoError(t, err)
-	assert.Equal(t, domain.AccountTypeHolding, result)
-}
-
-func TestProtoToAccountType_Unknown(t *testing.T) {
-	// Unknown enum values should return an error
-	_, err := protoToAccountType(pb.InternalAccountType(9999))
-	assert.Error(t, err)
-	assert.ErrorIs(t, err, ErrUnknownAccountType)
-}
-
 func TestProtoToAccountStatus_Unknown(t *testing.T) {
 	// Unknown enum values should return an error
 	_, err := protoToAccountStatus(pb.InternalAccountStatus(9999))
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, ErrUnknownAccountStatus)
-}
-
-func TestAccountTypeToProto_RoundTrip(t *testing.T) {
-	tests := []domain.AccountType{
-		domain.AccountTypeClearing,
-		domain.AccountTypeNostro,
-		domain.AccountTypeVostro,
-		domain.AccountTypeHolding,
-		domain.AccountTypeSuspense,
-		domain.AccountTypeRevenue,
-		domain.AccountTypeExpense,
-	}
-
-	for _, at := range tests {
-		t.Run(string(at), func(t *testing.T) {
-			proto := accountTypeToProto(at)
-			result, err := protoToAccountType(proto)
-			require.NoError(t, err)
-			assert.Equal(t, at, result)
-		})
-	}
 }
 
 func TestProtoToAccountStatus_Valid(t *testing.T) {
@@ -194,7 +129,7 @@ func TestToProtoFacility(t *testing.T) {
 	assert.Equal(t, "IBA-001", facility.AccountId)
 	assert.Equal(t, "CLR-001", facility.AccountCode)
 	assert.Equal(t, "Test Clearing Account", facility.Name)
-	assert.Equal(t, pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING, facility.AccountType)
+	assert.Equal(t, "CLEARING", facility.BehaviorClass)
 	assert.Equal(t, pb.ClearingPurpose_CLEARING_PURPOSE_DEPOSIT, facility.ClearingPurpose)
 	assert.Equal(t, pb.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE, facility.AccountStatus)
 	assert.Equal(t, "USD", facility.InstrumentCode)

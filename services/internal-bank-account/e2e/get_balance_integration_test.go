@@ -172,7 +172,7 @@ func TestE2E_GetBalance_PositionKeepingIntegration(t *testing.T) {
 			resp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 				AccountCode:    accountCode,
 				Name:           "GBP Clearing Account for Balance Tests",
-				AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+				ProductTypeCode: "CLEARING_GBP",
 				InstrumentCode: "GBP",
 			})
 			require.NoError(t, err)
@@ -205,7 +205,7 @@ func TestE2E_GetBalance_PositionKeepingIntegration(t *testing.T) {
 			_, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 				AccountCode:    newCode,
 				Name:           "EUR Account with Zero Balance",
-				AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_HOLDING,
+				ProductTypeCode: "HOLDING_GBP",
 				InstrumentCode: "EUR",
 			})
 			require.NoError(t, err)
@@ -241,7 +241,7 @@ func TestE2E_GetBalance_PositionKeepingIntegration(t *testing.T) {
 			createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 				AccountCode:    notFoundCode,
 				Name:           "Account with No Position",
-				AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_SUSPENSE,
+				ProductTypeCode: "SUSPENSE_GBP",
 				InstrumentCode: "GBP",
 			})
 			require.NoError(t, err)
@@ -291,7 +291,7 @@ func TestE2E_GetBalance_PositionKeepingIntegration(t *testing.T) {
 			_, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 				AccountCode:    closedCode,
 				Name:           "Account to Close",
-				AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+				ProductTypeCode: "CLEARING_GBP",
 				InstrumentCode: "GBP",
 			})
 			require.NoError(t, err)
@@ -388,7 +388,7 @@ func TestE2E_GetBalance_PositionKeepingIntegration(t *testing.T) {
 		_, err := tc.svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 			AccountCode:    accountCode,
 			Name:           "Account Without PK Client",
-			AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+			ProductTypeCode: "CLEARING_GBP",
 			InstrumentCode: "GBP",
 		})
 		require.NoError(t, err)
@@ -430,7 +430,7 @@ func TestE2E_GetBalance_PositionKeepingIntegration(t *testing.T) {
 				createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 					AccountCode:    tc.code,
 					Name:           tc.name,
-					AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_HOLDING,
+					ProductTypeCode: "HOLDING_GBP",
 					InstrumentCode: tc.instrument,
 				})
 				require.NoError(t, err)

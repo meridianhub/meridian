@@ -1,10 +1,6 @@
 // Package provisioning provides tenant-specific account template customization.
 package provisioning
 
-import (
-	pb "github.com/meridianhub/meridian/api/proto/meridian/internal_bank_account/v1"
-)
-
 // TemplateSet defines a named collection of account templates.
 // Different tenant types (banks, energy companies, etc.) can use different template sets.
 type TemplateSet struct {
@@ -47,94 +43,95 @@ var BuiltInTemplateSets = map[string]TemplateSet{
 var EnergyAccounts = []AccountTemplate{
 	// Standard currency clearing accounts
 	{
-		Code:           "CLR-GBP-DEPOSIT",
-		Name:           "GBP Deposit Clearing",
-		Type:           pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-		InstrumentCode: "GBP",
-		Dimension:      DimensionCurrency,
-		Description:    "Clearing account for GBP deposits pending settlement",
+		Code:            "CLR-GBP-DEPOSIT",
+		Name:            "GBP Deposit Clearing",
+		ProductTypeCode: "CLEARING_GBP",
+		ClearingPurpose: 0, // Will use default CLEARING_PURPOSE_DEPOSIT if set
+		InstrumentCode:  "GBP",
+		Dimension:       DimensionCurrency,
+		Description:     "Clearing account for GBP deposits pending settlement",
 	},
 	{
-		Code:           "CLR-GBP-WITHDRAW",
-		Name:           "GBP Withdrawal Clearing",
-		Type:           pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-		InstrumentCode: "GBP",
-		Dimension:      DimensionCurrency,
-		Description:    "Clearing account for GBP withdrawals pending settlement",
+		Code:            "CLR-GBP-WITHDRAW",
+		Name:            "GBP Withdrawal Clearing",
+		ProductTypeCode: "CLEARING_GBP",
+		InstrumentCode:  "GBP",
+		Dimension:       DimensionCurrency,
+		Description:     "Clearing account for GBP withdrawals pending settlement",
 	},
 
 	// Energy clearing accounts
 	{
-		Code:           "CLR-KWH-DELIVERY",
-		Name:           "KWH Delivery Clearing",
-		Type:           pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-		InstrumentCode: "KWH",
-		Dimension:      DimensionEnergy,
-		Description:    "Clearing account for energy delivery pending settlement",
+		Code:            "CLR-KWH-DELIVERY",
+		Name:            "KWH Delivery Clearing",
+		ProductTypeCode: "CLEARING_KWH",
+		InstrumentCode:  "KWH",
+		Dimension:       DimensionEnergy,
+		Description:     "Clearing account for energy delivery pending settlement",
 	},
 	{
-		Code:           "CLR-KWH-RECEIPT",
-		Name:           "KWH Receipt Clearing",
-		Type:           pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-		InstrumentCode: "KWH",
-		Dimension:      DimensionEnergy,
-		Description:    "Clearing account for energy receipt pending settlement",
+		Code:            "CLR-KWH-RECEIPT",
+		Name:            "KWH Receipt Clearing",
+		ProductTypeCode: "CLEARING_KWH",
+		InstrumentCode:  "KWH",
+		Dimension:       DimensionEnergy,
+		Description:     "Clearing account for energy receipt pending settlement",
 	},
 
 	// Energy inventory account
 	{
-		Code:           "INV-KWH-WHOLESALE",
-		Name:           "Wholesale Energy Inventory",
-		Type:           pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_INVENTORY,
-		InstrumentCode: "KWH",
-		Dimension:      DimensionEnergy,
-		Description:    "Inventory account for wholesale energy holdings",
+		Code:            "INV-KWH-WHOLESALE",
+		Name:            "Wholesale Energy Inventory",
+		ProductTypeCode: "INVENTORY_KWH",
+		InstrumentCode:  "KWH",
+		Dimension:       DimensionEnergy,
+		Description:     "Inventory account for wholesale energy holdings",
 	},
 
 	// Revenue accounts
 	{
-		Code:           "REV-ENERGY-SALES",
-		Name:           "Energy Sales Revenue",
-		Type:           pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_REVENUE,
-		InstrumentCode: "GBP",
-		Dimension:      DimensionCurrency,
-		Description:    "Revenue from energy sales",
+		Code:            "REV-ENERGY-SALES",
+		Name:            "Energy Sales Revenue",
+		ProductTypeCode: "REVENUE_GBP",
+		InstrumentCode:  "GBP",
+		Dimension:       DimensionCurrency,
+		Description:     "Revenue from energy sales",
 	},
 	{
-		Code:           "REV-GRID-FEE",
-		Name:           "Grid Access Fee Revenue",
-		Type:           pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_REVENUE,
-		InstrumentCode: "GBP",
-		Dimension:      DimensionCurrency,
-		Description:    "Revenue from grid access fees",
+		Code:            "REV-GRID-FEE",
+		Name:            "Grid Access Fee Revenue",
+		ProductTypeCode: "REVENUE_GBP",
+		InstrumentCode:  "GBP",
+		Dimension:       DimensionCurrency,
+		Description:     "Revenue from grid access fees",
 	},
 
 	// Expense accounts
 	{
-		Code:           "EXP-GRID-CONNECTION",
-		Name:           "Grid Connection Expense",
-		Type:           pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_EXPENSE,
-		InstrumentCode: "GBP",
-		Dimension:      DimensionCurrency,
-		Description:    "Expense for grid connection costs",
+		Code:            "EXP-GRID-CONNECTION",
+		Name:            "Grid Connection Expense",
+		ProductTypeCode: "EXPENSE_GBP",
+		InstrumentCode:  "GBP",
+		Dimension:       DimensionCurrency,
+		Description:     "Expense for grid connection costs",
 	},
 	{
-		Code:           "EXP-ENERGY-PROCUREMENT",
-		Name:           "Energy Procurement Expense",
-		Type:           pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_EXPENSE,
-		InstrumentCode: "GBP",
-		Dimension:      DimensionCurrency,
-		Description:    "Expense for energy procurement",
+		Code:            "EXP-ENERGY-PROCUREMENT",
+		Name:            "Energy Procurement Expense",
+		ProductTypeCode: "EXPENSE_GBP",
+		InstrumentCode:  "GBP",
+		Dimension:       DimensionCurrency,
+		Description:     "Expense for energy procurement",
 	},
 
 	// Suspense
 	{
-		Code:           "SUS-ENERGY-GENERAL",
-		Name:           "Energy General Suspense",
-		Type:           pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_SUSPENSE,
-		InstrumentCode: "GBP",
-		Dimension:      DimensionCurrency,
-		Description:    "Suspense account for unidentified energy-related transactions",
+		Code:            "SUS-ENERGY-GENERAL",
+		Name:            "Energy General Suspense",
+		ProductTypeCode: "SUSPENSE_GBP",
+		InstrumentCode:  "GBP",
+		Dimension:       DimensionCurrency,
+		Description:     "Suspense account for unidentified energy-related transactions",
 	},
 }
 
@@ -143,96 +140,96 @@ var EnergyAccounts = []AccountTemplate{
 var ComputeAccounts = []AccountTemplate{
 	// Standard currency clearing
 	{
-		Code:           "CLR-USD-DEPOSIT",
-		Name:           "USD Deposit Clearing",
-		Type:           pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-		InstrumentCode: "USD",
-		Dimension:      DimensionCurrency,
-		Description:    "Clearing account for USD deposits",
+		Code:            "CLR-USD-DEPOSIT",
+		Name:            "USD Deposit Clearing",
+		ProductTypeCode: "CLEARING_USD",
+		InstrumentCode:  "USD",
+		Dimension:       DimensionCurrency,
+		Description:     "Clearing account for USD deposits",
 	},
 	{
-		Code:           "CLR-USD-WITHDRAW",
-		Name:           "USD Withdrawal Clearing",
-		Type:           pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-		InstrumentCode: "USD",
-		Dimension:      DimensionCurrency,
-		Description:    "Clearing account for USD withdrawals",
+		Code:            "CLR-USD-WITHDRAW",
+		Name:            "USD Withdrawal Clearing",
+		ProductTypeCode: "CLEARING_USD",
+		InstrumentCode:  "USD",
+		Dimension:       DimensionCurrency,
+		Description:     "Clearing account for USD withdrawals",
 	},
 
 	// Compute clearing accounts
 	{
-		Code:           "CLR-GPU-HOUR-DELIVERY",
-		Name:           "GPU Hour Delivery Clearing",
-		Type:           pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-		InstrumentCode: "GPU-HOUR",
-		Dimension:      DimensionCompute,
-		Description:    "Clearing account for GPU hour delivery",
+		Code:            "CLR-GPU-HOUR-DELIVERY",
+		Name:            "GPU Hour Delivery Clearing",
+		ProductTypeCode: "CLEARING_GPU_HOUR",
+		InstrumentCode:  "GPU-HOUR",
+		Dimension:       DimensionCompute,
+		Description:     "Clearing account for GPU hour delivery",
 	},
 	{
-		Code:           "CLR-CPU-HOUR-DELIVERY",
-		Name:           "CPU Hour Delivery Clearing",
-		Type:           pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-		InstrumentCode: "CPU-HOUR",
-		Dimension:      DimensionCompute,
-		Description:    "Clearing account for CPU hour delivery",
+		Code:            "CLR-CPU-HOUR-DELIVERY",
+		Name:            "CPU Hour Delivery Clearing",
+		ProductTypeCode: "CLEARING_CPU_HOUR",
+		InstrumentCode:  "CPU-HOUR",
+		Dimension:       DimensionCompute,
+		Description:     "Clearing account for CPU hour delivery",
 	},
 
 	// Data transfer clearing
 	{
-		Code:           "CLR-DATA-EGRESS",
-		Name:           "Data Egress Clearing",
-		Type:           pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-		InstrumentCode: "GB-DATA",
-		Dimension:      DimensionData,
-		Description:    "Clearing account for data egress",
+		Code:            "CLR-DATA-EGRESS",
+		Name:            "Data Egress Clearing",
+		ProductTypeCode: "CLEARING_GB_DATA",
+		InstrumentCode:  "GB-DATA",
+		Dimension:       DimensionData,
+		Description:     "Clearing account for data egress",
 	},
 
 	// Inventory
 	{
-		Code:           "INV-GPU-CAPACITY",
-		Name:           "GPU Capacity Inventory",
-		Type:           pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_INVENTORY,
-		InstrumentCode: "GPU-HOUR",
-		Dimension:      DimensionCompute,
-		Description:    "Inventory of available GPU compute hours",
+		Code:            "INV-GPU-CAPACITY",
+		Name:            "GPU Capacity Inventory",
+		ProductTypeCode: "INVENTORY_GPU_HOUR",
+		InstrumentCode:  "GPU-HOUR",
+		Dimension:       DimensionCompute,
+		Description:     "Inventory of available GPU compute hours",
 	},
 
 	// Revenue accounts
 	{
-		Code:           "REV-COMPUTE-BILLING",
-		Name:           "Compute Billing Revenue",
-		Type:           pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_REVENUE,
-		InstrumentCode: "USD",
-		Dimension:      DimensionCurrency,
-		Description:    "Revenue from compute resource billing",
+		Code:            "REV-COMPUTE-BILLING",
+		Name:            "Compute Billing Revenue",
+		ProductTypeCode: "REVENUE_USD",
+		InstrumentCode:  "USD",
+		Dimension:       DimensionCurrency,
+		Description:     "Revenue from compute resource billing",
 	},
 	{
-		Code:           "REV-DATA-TRANSFER",
-		Name:           "Data Transfer Revenue",
-		Type:           pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_REVENUE,
-		InstrumentCode: "USD",
-		Dimension:      DimensionCurrency,
-		Description:    "Revenue from data transfer fees",
+		Code:            "REV-DATA-TRANSFER",
+		Name:            "Data Transfer Revenue",
+		ProductTypeCode: "REVENUE_USD",
+		InstrumentCode:  "USD",
+		Dimension:       DimensionCurrency,
+		Description:     "Revenue from data transfer fees",
 	},
 
 	// Expense
 	{
-		Code:           "EXP-INFRASTRUCTURE",
-		Name:           "Infrastructure Expense",
-		Type:           pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_EXPENSE,
-		InstrumentCode: "USD",
-		Dimension:      DimensionCurrency,
-		Description:    "Expense for infrastructure costs",
+		Code:            "EXP-INFRASTRUCTURE",
+		Name:            "Infrastructure Expense",
+		ProductTypeCode: "EXPENSE_USD",
+		InstrumentCode:  "USD",
+		Dimension:       DimensionCurrency,
+		Description:     "Expense for infrastructure costs",
 	},
 
 	// Suspense
 	{
-		Code:           "SUS-COMPUTE-GENERAL",
-		Name:           "Compute General Suspense",
-		Type:           pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_SUSPENSE,
-		InstrumentCode: "USD",
-		Dimension:      DimensionCurrency,
-		Description:    "Suspense account for unidentified compute transactions",
+		Code:            "SUS-COMPUTE-GENERAL",
+		Name:            "Compute General Suspense",
+		ProductTypeCode: "SUSPENSE_USD",
+		InstrumentCode:  "USD",
+		Dimension:       DimensionCurrency,
+		Description:     "Suspense account for unidentified compute transactions",
 	},
 }
 
@@ -240,12 +237,12 @@ var ComputeAccounts = []AccountTemplate{
 // Useful for tenants that want to configure accounts manually.
 var MinimalAccounts = []AccountTemplate{
 	{
-		Code:           "SUS-GENERAL",
-		Name:           "General Suspense Account",
-		Type:           pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_SUSPENSE,
-		InstrumentCode: "GBP",
-		Dimension:      DimensionCurrency,
-		Description:    "Suspense account for unidentified transactions",
+		Code:            "SUS-GENERAL",
+		Name:            "General Suspense Account",
+		ProductTypeCode: "SUSPENSE_GBP",
+		InstrumentCode:  "GBP",
+		Dimension:       DimensionCurrency,
+		Description:     "Suspense account for unidentified transactions",
 	},
 }
 

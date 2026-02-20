@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"testing"
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/internal_bank_account/v1"
@@ -36,16 +35,16 @@ func TestBalanceService_GetBalance_ReturnsCurrentBalance(t *testing.T) {
 			},
 		},
 	}
-	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	svc, err := newTestServiceWithCacheAndPosClient(repo, posClient)
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := testCtx()
 
 	// Create an active account
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "CLR-USD-001",
 		Name:            "USD Clearing Account",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_USD",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "USD",
 	})
@@ -78,16 +77,16 @@ func TestBalanceService_GetBalance_MultiCurrency(t *testing.T) {
 			},
 		},
 	}
-	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	svc, err := newTestServiceWithCacheAndPosClient(repo, posClient)
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := testCtx()
 
 	// Create EUR account
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "CLR-EUR-001",
 		Name:            "EUR Clearing Account",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "EUR",
 	})
@@ -117,17 +116,17 @@ func TestBalanceService_GetBalance_NonCurrencyInstrument(t *testing.T) {
 			},
 		},
 	}
-	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	svc, err := newTestServiceWithCacheAndPosClient(repo, posClient)
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := testCtx()
 
 	// Create energy holding account
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
-		AccountCode:    "ENERGY-001",
-		Name:           "Energy Holding Account",
-		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_HOLDING,
-		InstrumentCode: "KWH",
+		AccountCode:     "ENERGY-001",
+		Name:            "Energy Holding Account",
+		ProductTypeCode: "HOLDING_GBP",
+		InstrumentCode:  "KWH",
 	})
 	require.NoError(t, err)
 
@@ -146,16 +145,16 @@ func TestBalanceService_GetBalance_RequiresActiveAccount(t *testing.T) {
 	posClient := &mockPositionKeepingClient{
 		balances: []*positionkeepingv1.BalanceEntry{},
 	}
-	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	svc, err := newTestServiceWithCacheAndPosClient(repo, posClient)
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := testCtx()
 
 	// Create and suspend account
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "CLR-001",
 		Name:            "USD Clearing Account",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "USD",
 	})
@@ -192,16 +191,16 @@ func TestBalanceService_GetBalance_ReactivatedAccountQueryable(t *testing.T) {
 			},
 		},
 	}
-	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	svc, err := newTestServiceWithCacheAndPosClient(repo, posClient)
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := testCtx()
 
 	// Create account
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "CLR-001",
 		Name:            "USD Clearing Account",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "USD",
 	})
@@ -234,16 +233,16 @@ func TestBalanceService_GetBalance_ReactivatedAccountQueryable(t *testing.T) {
 func TestBalanceService_GetBalance_ClosedAccountNotQueryable(t *testing.T) {
 	repo := newMockRepository()
 	posClient := &mockPositionKeepingClient{}
-	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	svc, err := newTestServiceWithCacheAndPosClient(repo, posClient)
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := testCtx()
 
 	// Create and close account
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "CLR-001",
 		Name:            "USD Clearing Account",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "USD",
 	})
@@ -271,16 +270,16 @@ func TestBalanceService_GetBalance_HandlesPositionKeepingTimeout(t *testing.T) {
 	posClient := &mockPositionKeepingClient{
 		err: status.Error(codes.DeadlineExceeded, "context deadline exceeded"),
 	}
-	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	svc, err := newTestServiceWithCacheAndPosClient(repo, posClient)
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := testCtx()
 
 	// Create account
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "CLR-001",
 		Name:            "USD Clearing Account",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "USD",
 	})
@@ -301,16 +300,16 @@ func TestBalanceService_GetBalance_HandlesPositionKeepingRateLimiting(t *testing
 	posClient := &mockPositionKeepingClient{
 		err: status.Error(codes.ResourceExhausted, "rate limit exceeded"),
 	}
-	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	svc, err := newTestServiceWithCacheAndPosClient(repo, posClient)
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := testCtx()
 
 	// Create account
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "CLR-001",
 		Name:            "USD Clearing Account",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "USD",
 	})
@@ -331,15 +330,15 @@ func TestBalanceService_GetBalance_HandlesPositionKeepingNotFound(t *testing.T) 
 	posClient := &mockPositionKeepingClient{
 		err: status.Error(codes.NotFound, "position not found"),
 	}
-	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	svc, err := newTestServiceWithCacheAndPosClient(repo, posClient)
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := testCtx()
 
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "CLR-001",
 		Name:            "USD Clearing Account",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "USD",
 	})
@@ -361,15 +360,15 @@ func TestBalanceService_GetBalance_HandlesPositionKeepingUnavailable(t *testing.
 	posClient := &mockPositionKeepingClient{
 		err: status.Error(codes.Unavailable, "service temporarily unavailable"),
 	}
-	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	svc, err := newTestServiceWithCacheAndPosClient(repo, posClient)
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := testCtx()
 
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "CLR-001",
 		Name:            "USD Clearing Account",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "USD",
 	})
@@ -391,15 +390,15 @@ func TestBalanceService_GetBalance_HandlesPositionKeepingInternal(t *testing.T) 
 	posClient := &mockPositionKeepingClient{
 		err: status.Error(codes.Internal, "internal server error"),
 	}
-	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	svc, err := newTestServiceWithCacheAndPosClient(repo, posClient)
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := testCtx()
 
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "CLR-001",
 		Name:            "USD Clearing Account",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "USD",
 	})
@@ -421,15 +420,15 @@ func TestBalanceService_GetBalance_HandlesPositionKeepingInvalidArgument(t *test
 	posClient := &mockPositionKeepingClient{
 		err: status.Error(codes.InvalidArgument, "invalid account_id format"),
 	}
-	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	svc, err := newTestServiceWithCacheAndPosClient(repo, posClient)
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := testCtx()
 
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "CLR-001",
 		Name:            "USD Clearing Account",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "USD",
 	})
@@ -449,16 +448,16 @@ func TestBalanceService_GetBalance_HandlesPositionKeepingInvalidArgument(t *test
 func TestBalanceService_RequiresPositionKeepingClient(t *testing.T) {
 	// Service without Position Keeping client should return Unimplemented for balance queries
 	repo := newMockRepository()
-	svc, err := NewService(repo) // No Position Keeping client
+	svc, err := newTestServiceWithCache(repo) // No Position Keeping client
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := testCtx()
 
 	// Create account
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "CLR-001",
 		Name:            "USD Clearing Account",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "USD",
 	})
@@ -489,17 +488,17 @@ func TestBalanceService_NostroAccountBalance(t *testing.T) {
 			},
 		},
 	}
-	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	svc, err := newTestServiceWithCacheAndPosClient(repo, posClient)
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := testCtx()
 
 	// Create NOSTRO account with correspondent
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
-		AccountCode:    "NOSTRO-GBP-HSBC",
-		Name:           "HSBC GBP Nostro Account",
-		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_NOSTRO,
-		InstrumentCode: "GBP",
+		AccountCode:     "NOSTRO-GBP-HSBC",
+		Name:            "HSBC GBP Nostro Account",
+		ProductTypeCode: "NOSTRO_USD",
+		InstrumentCode:  "GBP",
 		CorrespondentDetails: &pb.CorrespondentBankDetails{
 			BankId:             "HSBC001",
 			BankName:           "HSBC UK",
@@ -554,16 +553,16 @@ func TestBalanceService_MultipleBalanceTypes(t *testing.T) {
 			},
 		},
 	}
-	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	svc, err := newTestServiceWithCacheAndPosClient(repo, posClient)
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := testCtx()
 
 	// Create account
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "CLR-001",
 		Name:            "USD Clearing Account",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "USD",
 	})
@@ -582,10 +581,10 @@ func TestBalanceService_MultipleBalanceTypes(t *testing.T) {
 func TestBalanceService_GetBalance_EmptyAccountIdReturnsInvalidArgument(t *testing.T) {
 	repo := newMockRepository()
 	posClient := &mockPositionKeepingClient{}
-	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	svc, err := newTestServiceWithCacheAndPosClient(repo, posClient)
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := testCtx()
 
 	for _, accountID := range []string{"", "   ", "\t"} {
 		_, err = svc.GetBalance(ctx, &pb.GetBalanceRequest{
@@ -613,15 +612,15 @@ func TestBalanceService_GetBalance_MissingCurrentBalanceReturnsNilBalance(t *tes
 			},
 		},
 	}
-	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	svc, err := newTestServiceWithCacheAndPosClient(repo, posClient)
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := testCtx()
 
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "CLR-USD-NOCUR",
 		Name:            "No Current Balance Account",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "USD",
 	})
@@ -655,15 +654,15 @@ func TestBalanceService_GetBalance_NilAsOfTimestampReturnsFallback(t *testing.T)
 		asOfSet: true,
 		asOf:    nil, // Explicitly no as_of from Position Keeping
 	}
-	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	svc, err := newTestServiceWithCacheAndPosClient(repo, posClient)
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := testCtx()
 
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "CLR-USD-NOASOF",
 		Name:            "No AsOf Account",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "USD",
 	})
@@ -709,16 +708,16 @@ func BenchmarkGetBalance(b *testing.B) {
 			},
 		},
 	}
-	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	svc, err := newTestServiceWithCacheAndPosClient(repo, posClient)
 	if err != nil {
 		b.Fatalf("failed to create service: %v", err)
 	}
 
-	ctx := context.Background()
+	ctx := testCtx()
 	resp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "BENCH-BAL-001",
 		Name:            "Benchmark Balance Account",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "USD",
 	})
@@ -764,16 +763,16 @@ func BenchmarkGetBalance_MultipleBalanceTypes(b *testing.B) {
 			},
 		},
 	}
-	svc, err := NewServiceWithClients(repo, posClient, nil, nil, nil)
+	svc, err := newTestServiceWithCacheAndPosClient(repo, posClient)
 	if err != nil {
 		b.Fatalf("failed to create service: %v", err)
 	}
 
-	ctx := context.Background()
+	ctx := testCtx()
 	resp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "BENCH-MULTI-001",
 		Name:            "Benchmark Multi Balance Account",
-		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
 		InstrumentCode:  "USD",
 	})

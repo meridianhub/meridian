@@ -15,9 +15,6 @@ import (
 // ErrUnspecifiedEnum is returned when an enum value is UNSPECIFIED.
 var ErrUnspecifiedEnum = errors.New("unspecified enum value")
 
-// ErrUnknownAccountType is returned when an account type value is not recognized.
-var ErrUnknownAccountType = errors.New("unknown account type")
-
 // ErrUnknownAccountStatus is returned when an account status value is not recognized.
 var ErrUnknownAccountStatus = errors.New("unknown account status")
 
@@ -30,7 +27,7 @@ func toProtoFacility(account domain.InternalBankAccount) *pb.InternalBankAccount
 		AccountId:          account.AccountID(),
 		AccountCode:        account.AccountCode(),
 		Name:               account.Name(),
-		AccountType:        accountTypeToProto(account.AccountType()),
+		BehaviorClass:      string(account.AccountType()),
 		ClearingPurpose:    clearingPurposeToProto(account.ClearingPurpose()),
 		AccountStatus:      accountStatusToProto(account.Status()),
 		InstrumentCode:     account.InstrumentCode(),
@@ -53,55 +50,6 @@ func toProtoFacility(account domain.InternalBankAccount) *pb.InternalBankAccount
 	}
 
 	return facility
-}
-
-// protoToAccountType converts a proto InternalAccountType to a domain AccountType.
-func protoToAccountType(pt pb.InternalAccountType) (domain.AccountType, error) {
-	switch pt {
-	case pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING:
-		return domain.AccountTypeClearing, nil
-	case pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_NOSTRO:
-		return domain.AccountTypeNostro, nil
-	case pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_VOSTRO:
-		return domain.AccountTypeVostro, nil
-	case pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_HOLDING:
-		return domain.AccountTypeHolding, nil
-	case pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_SUSPENSE:
-		return domain.AccountTypeSuspense, nil
-	case pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_REVENUE:
-		return domain.AccountTypeRevenue, nil
-	case pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_EXPENSE:
-		return domain.AccountTypeExpense, nil
-	case pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_INVENTORY:
-		// Map INVENTORY to HOLDING as closest equivalent
-		return domain.AccountTypeHolding, nil
-	case pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_UNSPECIFIED:
-		return "", fmt.Errorf("%w: account type", ErrUnspecifiedEnum)
-	default:
-		return "", fmt.Errorf("%w: %v", ErrUnknownAccountType, pt)
-	}
-}
-
-// accountTypeToProto converts a domain AccountType to a proto InternalAccountType.
-func accountTypeToProto(at domain.AccountType) pb.InternalAccountType {
-	switch at {
-	case domain.AccountTypeClearing:
-		return pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING
-	case domain.AccountTypeNostro:
-		return pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_NOSTRO
-	case domain.AccountTypeVostro:
-		return pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_VOSTRO
-	case domain.AccountTypeHolding:
-		return pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_HOLDING
-	case domain.AccountTypeSuspense:
-		return pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_SUSPENSE
-	case domain.AccountTypeRevenue:
-		return pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_REVENUE
-	case domain.AccountTypeExpense:
-		return pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_EXPENSE
-	default:
-		return pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_UNSPECIFIED
-	}
 }
 
 // protoToAccountStatus converts a proto InternalAccountStatus to a domain AccountStatus.

@@ -32,10 +32,10 @@ func BenchmarkInitiateAccount_Single(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()
 		req := &pb.InitiateInternalBankAccountRequest{
-			AccountCode:    fmt.Sprintf("BENCH-%08d", i),
-			Name:           fmt.Sprintf("Benchmark Account %d", i),
-			AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-			InstrumentCode: "GBP",
+			AccountCode:     fmt.Sprintf("BENCH-%08d", i),
+			Name:            fmt.Sprintf("Benchmark Account %d", i),
+			ProductTypeCode: "CLEARING_GBP",
+			InstrumentCode:  "GBP",
 		}
 		b.StartTimer()
 
@@ -55,10 +55,10 @@ func BenchmarkGetBalance_Single(b *testing.B) {
 
 	// Pre-create an account to query balance for
 	createReq := &pb.InitiateInternalBankAccountRequest{
-		AccountCode:    "BENCH-BALANCE-001",
-		Name:           "Balance Benchmark Account",
-		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-		InstrumentCode: "GBP",
+		AccountCode:     "BENCH-BALANCE-001",
+		Name:            "Balance Benchmark Account",
+		ProductTypeCode: "CLEARING_GBP",
+		InstrumentCode:  "GBP",
 	}
 	createResp, err := tc.service.InitiateInternalBankAccount(ctx, createReq)
 	if err != nil {
@@ -86,10 +86,10 @@ func BenchmarkRetrieveAccount_ByID(b *testing.B) {
 
 	// Pre-create an account to retrieve
 	createReq := &pb.InitiateInternalBankAccountRequest{
-		AccountCode:    "BENCH-RETRIEVE-ID-001",
-		Name:           "Retrieve by ID Benchmark Account",
-		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-		InstrumentCode: "GBP",
+		AccountCode:     "BENCH-RETRIEVE-ID-001",
+		Name:            "Retrieve by ID Benchmark Account",
+		ProductTypeCode: "CLEARING_GBP",
+		InstrumentCode:  "GBP",
 	}
 	createResp, err := tc.service.InitiateInternalBankAccount(ctx, createReq)
 	if err != nil {
@@ -119,10 +119,10 @@ func BenchmarkRetrieveAccount_ByCode(b *testing.B) {
 	// Pre-create an account to retrieve
 	accountCode := "BENCH-RETRIEVE-CODE-001"
 	createReq := &pb.InitiateInternalBankAccountRequest{
-		AccountCode:    accountCode,
-		Name:           "Retrieve by Code Benchmark Account",
-		AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-		InstrumentCode: "GBP",
+		AccountCode:     accountCode,
+		Name:            "Retrieve by Code Benchmark Account",
+		ProductTypeCode: "CLEARING_GBP",
+		InstrumentCode:  "GBP",
 	}
 	_, err := tc.service.InitiateInternalBankAccount(ctx, createReq)
 	if err != nil {
@@ -154,10 +154,10 @@ func BenchmarkUpdateAccount_Single(b *testing.B) {
 		b.StopTimer()
 		// Create a fresh account for each update
 		createReq := &pb.InitiateInternalBankAccountRequest{
-			AccountCode:    fmt.Sprintf("BENCH-UPDATE-%08d", i),
-			Name:           "Update Benchmark Account",
-			AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-			InstrumentCode: "GBP",
+			AccountCode:     fmt.Sprintf("BENCH-UPDATE-%08d", i),
+			Name:            "Update Benchmark Account",
+			ProductTypeCode: "CLEARING_GBP",
+			InstrumentCode:  "GBP",
 		}
 		createResp, err := tc.service.InitiateInternalBankAccount(ctx, createReq)
 		if err != nil {
@@ -184,21 +184,21 @@ func BenchmarkListAccounts(b *testing.B) {
 
 	// Pre-populate diverse accounts for list operations
 	instrumentCodes := []string{"GBP", "USD", "EUR"}
-	accountTypes := []pb.InternalAccountType{
-		pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-		pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_HOLDING,
-		pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_SUSPENSE,
-		pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_REVENUE,
-		pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_EXPENSE,
+	productTypeCodes := []string{
+		"CLEARING_GBP",
+		"HOLDING_GBP",
+		"SUSPENSE_GBP",
+		"REVENUE_GBP",
+		"EXPENSE_GBP",
 	}
 
 	// Create 100 accounts with varied attributes
 	for i := 0; i < 100; i++ {
 		req := &pb.InitiateInternalBankAccountRequest{
-			AccountCode:    fmt.Sprintf("BENCH-LIST-%04d", i),
-			Name:           fmt.Sprintf("List Benchmark Account %d", i),
-			AccountType:    accountTypes[i%len(accountTypes)],
-			InstrumentCode: instrumentCodes[i%len(instrumentCodes)],
+			AccountCode:     fmt.Sprintf("BENCH-LIST-%04d", i),
+			Name:            fmt.Sprintf("List Benchmark Account %d", i),
+			ProductTypeCode: productTypeCodes[i%len(productTypeCodes)],
+			InstrumentCode:  instrumentCodes[i%len(instrumentCodes)],
 		}
 		_, err := tc.service.InitiateInternalBankAccount(ctx, req)
 		if err != nil {
@@ -236,9 +236,9 @@ func BenchmarkListAccounts(b *testing.B) {
 		}
 	})
 
-	b.Run("ByType", func(b *testing.B) {
+	b.Run("ByBehaviorClass", func(b *testing.B) {
 		req := &pb.ListInternalBankAccountsRequest{
-			AccountTypeFilter: pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+			BehaviorClassFilter: "CLEARING",
 			Pagination: &commonpb.Pagination{
 				PageSize: 20,
 			},
@@ -289,7 +289,7 @@ func BenchmarkListAccounts(b *testing.B) {
 
 	b.Run("MultiFilter", func(b *testing.B) {
 		req := &pb.ListInternalBankAccountsRequest{
-			AccountTypeFilter:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+			BehaviorClassFilter:  "CLEARING",
 			InstrumentCodeFilter: "GBP",
 			StatusFilter:         pb.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE,
 			Pagination: &commonpb.Pagination{
@@ -316,10 +316,10 @@ func BenchmarkListAccounts_LargeDataset(b *testing.B) {
 	// Pre-populate 1000 accounts
 	for i := 0; i < 1000; i++ {
 		req := &pb.InitiateInternalBankAccountRequest{
-			AccountCode:    fmt.Sprintf("BENCH-LARGE-%06d", i),
-			Name:           fmt.Sprintf("Large Dataset Account %d", i),
-			AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-			InstrumentCode: "GBP",
+			AccountCode:     fmt.Sprintf("BENCH-LARGE-%06d", i),
+			Name:            fmt.Sprintf("Large Dataset Account %d", i),
+			ProductTypeCode: "CLEARING_GBP",
+			InstrumentCode:  "GBP",
 		}
 		_, err := tc.service.InitiateInternalBankAccount(ctx, req)
 		if err != nil {
@@ -352,10 +352,10 @@ func BenchmarkControlAccount_StatusTransition(b *testing.B) {
 		b.StopTimer()
 		// Create a fresh account for each transition
 		createReq := &pb.InitiateInternalBankAccountRequest{
-			AccountCode:    fmt.Sprintf("BENCH-CONTROL-%08d", i),
-			Name:           "Control Benchmark Account",
-			AccountType:    pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
-			InstrumentCode: "GBP",
+			AccountCode:     fmt.Sprintf("BENCH-CONTROL-%08d", i),
+			Name:            "Control Benchmark Account",
+			ProductTypeCode: "CLEARING_GBP",
+			InstrumentCode:  "GBP",
 		}
 		_, err := tc.service.InitiateInternalBankAccount(ctx, createReq)
 		if err != nil {

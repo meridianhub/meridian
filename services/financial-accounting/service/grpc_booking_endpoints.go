@@ -69,13 +69,10 @@ func (s *FinancialAccountingService) InitiateFinancialBookingLog(
 	}
 
 	// Validate account type
-	if req.FinancialAccountType == commonv1.AccountType_ACCOUNT_TYPE_UNSPECIFIED {
+	if req.FinancialAccountType == "" {
 		return nil, status.Error(codes.InvalidArgument, "financial_account_type must be specified")
 	}
 	accountType := fromProtoAccountType(req.FinancialAccountType)
-	if accountType == "" {
-		return nil, status.Error(codes.InvalidArgument, "invalid financial_account_type")
-	}
 
 	// Validate product service reference
 	if req.ProductServiceReference == "" {

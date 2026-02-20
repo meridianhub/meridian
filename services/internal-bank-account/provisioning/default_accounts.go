@@ -25,11 +25,12 @@ type AccountTemplate struct {
 	// Name is the human-readable display name (e.g., "GBP Deposit Clearing").
 	Name string
 
-	// Type is the account type (CLEARING, REVENUE, EXPENSE, SUSPENSE, etc.).
-	Type pb.InternalAccountType
+	// ProductTypeCode references the account type definition from the Product Directory.
+	// Convention: <BEHAVIOR_CLASS>_<INSTRUMENT_CODE> (e.g., "CLEARING_GBP", "REVENUE_GBP").
+	ProductTypeCode string
 
 	// ClearingPurpose specifies the operational purpose of clearing accounts.
-	// Only applicable when Type is INTERNAL_ACCOUNT_TYPE_CLEARING.
+	// Only applicable when the product type behavior class is CLEARING.
 	// Must be CLEARING_PURPOSE_UNSPECIFIED for non-clearing account types.
 	// Values: DEPOSIT (incoming funds), WITHDRAWAL (outgoing funds),
 	// SETTLEMENT (inter-party clearing), GENERAL (multi-purpose clearing).
@@ -71,7 +72,7 @@ var DefaultAccounts = []AccountTemplate{
 	{
 		Code:            "CLR-GBP-DEPOSIT",
 		Name:            "GBP Deposit Clearing",
-		Type:            pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_DEPOSIT,
 		InstrumentCode:  "GBP",
 		Dimension:       DimensionCurrency,
@@ -80,7 +81,7 @@ var DefaultAccounts = []AccountTemplate{
 	{
 		Code:            "CLR-GBP-WITHDRAW",
 		Name:            "GBP Withdrawal Clearing",
-		Type:            pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_GBP",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_WITHDRAWAL,
 		InstrumentCode:  "GBP",
 		Dimension:       DimensionCurrency,
@@ -91,7 +92,7 @@ var DefaultAccounts = []AccountTemplate{
 	{
 		Code:            "CLR-USD-DEPOSIT",
 		Name:            "USD Deposit Clearing",
-		Type:            pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_USD",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_DEPOSIT,
 		InstrumentCode:  "USD",
 		Dimension:       DimensionCurrency,
@@ -100,7 +101,7 @@ var DefaultAccounts = []AccountTemplate{
 	{
 		Code:            "CLR-USD-WITHDRAW",
 		Name:            "USD Withdrawal Clearing",
-		Type:            pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_USD",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_WITHDRAWAL,
 		InstrumentCode:  "USD",
 		Dimension:       DimensionCurrency,
@@ -111,7 +112,7 @@ var DefaultAccounts = []AccountTemplate{
 	{
 		Code:            "CLR-EUR-DEPOSIT",
 		Name:            "EUR Deposit Clearing",
-		Type:            pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_EUR",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_DEPOSIT,
 		InstrumentCode:  "EUR",
 		Dimension:       DimensionCurrency,
@@ -120,7 +121,7 @@ var DefaultAccounts = []AccountTemplate{
 	{
 		Code:            "CLR-EUR-WITHDRAW",
 		Name:            "EUR Withdrawal Clearing",
-		Type:            pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		ProductTypeCode: "CLEARING_EUR",
 		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_WITHDRAWAL,
 		InstrumentCode:  "EUR",
 		Dimension:       DimensionCurrency,
@@ -129,48 +130,48 @@ var DefaultAccounts = []AccountTemplate{
 
 	// Revenue Accounts
 	{
-		Code:           "REV-TRANSACTION-FEE",
-		Name:           "Transaction Fee Revenue",
-		Type:           pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_REVENUE,
-		InstrumentCode: "GBP",
-		Dimension:      DimensionCurrency,
-		Description:    "Revenue account for transaction processing fees",
+		Code:            "REV-TRANSACTION-FEE",
+		Name:            "Transaction Fee Revenue",
+		ProductTypeCode: "REVENUE_GBP",
+		InstrumentCode:  "GBP",
+		Dimension:       DimensionCurrency,
+		Description:     "Revenue account for transaction processing fees",
 	},
 	{
-		Code:           "REV-OVERDRAFT-INTEREST",
-		Name:           "Overdraft Interest Revenue",
-		Type:           pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_REVENUE,
-		InstrumentCode: "GBP",
-		Dimension:      DimensionCurrency,
-		Description:    "Revenue account for overdraft interest charges",
+		Code:            "REV-OVERDRAFT-INTEREST",
+		Name:            "Overdraft Interest Revenue",
+		ProductTypeCode: "REVENUE_GBP",
+		InstrumentCode:  "GBP",
+		Dimension:       DimensionCurrency,
+		Description:     "Revenue account for overdraft interest charges",
 	},
 	{
-		Code:           "REV-ACCOUNT-FEE",
-		Name:           "Account Maintenance Fee Revenue",
-		Type:           pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_REVENUE,
-		InstrumentCode: "GBP",
-		Dimension:      DimensionCurrency,
-		Description:    "Revenue account for account maintenance fees",
+		Code:            "REV-ACCOUNT-FEE",
+		Name:            "Account Maintenance Fee Revenue",
+		ProductTypeCode: "REVENUE_GBP",
+		InstrumentCode:  "GBP",
+		Dimension:       DimensionCurrency,
+		Description:     "Revenue account for account maintenance fees",
 	},
 
 	// Expense Accounts
 	{
-		Code:           "EXP-PAYMENT-PROCESSING",
-		Name:           "Payment Processing Expense",
-		Type:           pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_EXPENSE,
-		InstrumentCode: "GBP",
-		Dimension:      DimensionCurrency,
-		Description:    "Expense account for payment processing costs",
+		Code:            "EXP-PAYMENT-PROCESSING",
+		Name:            "Payment Processing Expense",
+		ProductTypeCode: "EXPENSE_GBP",
+		InstrumentCode:  "GBP",
+		Dimension:       DimensionCurrency,
+		Description:     "Expense account for payment processing costs",
 	},
 
 	// Suspense Account
 	{
-		Code:           "SUS-GENERAL",
-		Name:           "General Suspense Account",
-		Type:           pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_SUSPENSE,
-		InstrumentCode: "GBP",
-		Dimension:      DimensionCurrency,
-		Description:    "Suspense account for unidentified or pending transactions",
+		Code:            "SUS-GENERAL",
+		Name:            "General Suspense Account",
+		ProductTypeCode: "SUSPENSE_GBP",
+		InstrumentCode:  "GBP",
+		Dimension:       DimensionCurrency,
+		Description:     "Suspense account for unidentified or pending transactions",
 	},
 }
 
@@ -253,7 +254,7 @@ func (p *Provisioner) ProvisionFromTemplates(ctx context.Context, tenantID tenan
 		req := &pb.InitiateInternalBankAccountRequest{
 			AccountCode:     template.Code,
 			Name:            template.Name,
-			AccountType:     template.Type,
+			ProductTypeCode: template.ProductTypeCode,
 			ClearingPurpose: template.ClearingPurpose,
 			InstrumentCode:  template.InstrumentCode,
 			Description:     template.Description,
@@ -286,7 +287,7 @@ func (p *Provisioner) ProvisionFromTemplates(ctx context.Context, tenantID tenan
 		p.logger.Debug("created default account",
 			"tenant_id", tenantID,
 			"account_code", template.Code,
-			"account_type", template.Type.String())
+			"product_type_code", template.ProductTypeCode)
 		result.Created++
 	}
 

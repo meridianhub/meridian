@@ -48,7 +48,7 @@ func main() {
 
 	listResp, err := client.ListInternalBankAccounts(ctx, &ibav1.ListInternalBankAccountsRequest{
 		// Filter for CLEARING accounts (optional)
-		AccountTypeFilter: ibav1.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING,
+		BehaviorClassFilter: "CLEARING",
 		// Only active accounts
 		StatusFilter: ibav1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE,
 	})

@@ -165,7 +165,7 @@ func provisionSingleTenant(ctx context.Context, provisioner *provisioning.Provis
 		fmt.Printf("Dry run: Would provision %d accounts from '%s' template set for tenant %s:\n",
 			len(ts.Templates), ts.Name, tenantID)
 		for _, template := range ts.Templates {
-			fmt.Printf("  - %s (%s): %s\n", template.Code, template.Type.String(), template.Name)
+			fmt.Printf("  - %s (%s): %s\n", template.Code, template.ProductTypeCode, template.Name)
 		}
 		return nil
 	}
