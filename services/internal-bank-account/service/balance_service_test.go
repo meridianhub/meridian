@@ -124,10 +124,10 @@ func TestBalanceService_GetBalance_NonCurrencyInstrument(t *testing.T) {
 
 	// Create energy holding account
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
-		AccountCode:    "ENERGY-001",
-		Name:           "Energy Holding Account",
+		AccountCode:     "ENERGY-001",
+		Name:            "Energy Holding Account",
 		ProductTypeCode: "HOLDING_GBP",
-		InstrumentCode: "KWH",
+		InstrumentCode:  "KWH",
 	})
 	require.NoError(t, err)
 
@@ -496,10 +496,10 @@ func TestBalanceService_NostroAccountBalance(t *testing.T) {
 
 	// Create NOSTRO account with correspondent
 	createResp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
-		AccountCode:    "NOSTRO-GBP-HSBC",
-		Name:           "HSBC GBP Nostro Account",
+		AccountCode:     "NOSTRO-GBP-HSBC",
+		Name:            "HSBC GBP Nostro Account",
 		ProductTypeCode: "NOSTRO_USD",
-		InstrumentCode: "GBP",
+		InstrumentCode:  "GBP",
 		CorrespondentDetails: &pb.CorrespondentBankDetails{
 			BankId:             "HSBC001",
 			BankName:           "HSBC UK",

@@ -209,7 +209,6 @@ var behaviorClassToAccountType = map[accounttype.BehaviorClass]domain.AccountTyp
 	accounttype.BehaviorClassInventory: domain.AccountTypeHolding,
 }
 
-
 // InitiateInternalBankAccount creates a new internal bank account.
 func (s *Service) InitiateInternalBankAccount(ctx context.Context, req *pb.InitiateInternalBankAccountRequest) (*pb.InitiateInternalBankAccountResponse, error) {
 	start := time.Now()

@@ -1080,10 +1080,10 @@ func TestInitiateInternalBankAccount_EnergyInstrument(t *testing.T) {
 
 	ctx := testCtx()
 	req := &pb.InitiateInternalBankAccountRequest{
-		AccountCode:    "INV-ENERGY-001",
-		Name:           "Energy Inventory Account",
+		AccountCode:     "INV-ENERGY-001",
+		Name:            "Energy Inventory Account",
 		ProductTypeCode: "INVENTORY_GBP",
-		InstrumentCode: "KWH",
+		InstrumentCode:  "KWH",
 	}
 
 	resp, err := svc.InitiateInternalBankAccount(ctx, req)
@@ -1107,10 +1107,10 @@ func TestInitiateInternalBankAccount_ComputeInstrument(t *testing.T) {
 
 	ctx := testCtx()
 	req := &pb.InitiateInternalBankAccountRequest{
-		AccountCode:    "INV-COMPUTE-001",
-		Name:           "GPU Compute Inventory",
+		AccountCode:     "INV-COMPUTE-001",
+		Name:            "GPU Compute Inventory",
 		ProductTypeCode: "INVENTORY_GBP",
-		InstrumentCode: "GPU_HOUR",
+		InstrumentCode:  "GPU_HOUR",
 	}
 
 	resp, err := svc.InitiateInternalBankAccount(ctx, req)
@@ -1379,10 +1379,10 @@ func TestListInternalBankAccounts_WithFilters(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
-		AccountCode:    "HOLD-001",
-		Name:           "EUR Holding Account",
+		AccountCode:     "HOLD-001",
+		Name:            "EUR Holding Account",
 		ProductTypeCode: "HOLDING_EUR",
-		InstrumentCode: "EUR",
+		InstrumentCode:  "EUR",
 	})
 	require.NoError(t, err)
 
