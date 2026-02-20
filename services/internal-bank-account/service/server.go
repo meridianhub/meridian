@@ -196,6 +196,19 @@ var internalBehaviorClasses = map[accounttype.BehaviorClass]bool{
 	accounttype.BehaviorClassInventory: true,
 }
 
+// behaviorClassToAccountType maps a BehaviorClass to the corresponding domain AccountType.
+// INVENTORY maps to HOLDING because the IBA domain has no separate inventory type.
+var behaviorClassToAccountType = map[accounttype.BehaviorClass]domain.AccountType{
+	accounttype.BehaviorClassClearing:  domain.AccountTypeClearing,
+	accounttype.BehaviorClassNostro:    domain.AccountTypeNostro,
+	accounttype.BehaviorClassVostro:    domain.AccountTypeVostro,
+	accounttype.BehaviorClassHolding:   domain.AccountTypeHolding,
+	accounttype.BehaviorClassSuspense:  domain.AccountTypeSuspense,
+	accounttype.BehaviorClassRevenue:   domain.AccountTypeRevenue,
+	accounttype.BehaviorClassExpense:   domain.AccountTypeExpense,
+	accounttype.BehaviorClassInventory: domain.AccountTypeHolding,
+}
+
 // legacyAccountTypeToProductCode maps the deprecated InternalAccountType enum to a product type code.
 // Convention: <BEHAVIOR_CLASS>_<INSTRUMENT_CODE> (e.g., "CLEARING_GBP").
 func legacyAccountTypeToProductCode(at pb.InternalAccountType, instrumentCode string) string {
@@ -311,8 +324,8 @@ func (s *Service) InitiateInternalBankAccount(ctx context.Context, req *pb.Initi
 			}
 		}
 
-		// Derive account type from BehaviorClass
-		accountType = domain.AccountType(string(def.BehaviorClass))
+		// Derive account type from BehaviorClass via mapping
+		accountType = behaviorClassToAccountType[def.BehaviorClass]
 		productTypeVersion = def.Version
 		valuationTemplates = def.ValuationMethods
 
