@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"strings"
 )
 
 // grpcCodeNames maps numeric gRPC status codes to their canonical string names.
@@ -124,13 +125,11 @@ func grpcCodeName(code int) string {
 }
 
 // isJSONContentType reports whether the content-type header indicates JSON.
+// Media type tokens are compared case-insensitively per RFC 2616 §3.7.
 func isJSONContentType(ct string) bool {
-	// Accept "application/json" and variants like "application/json; charset=utf-8".
-	for i := 0; i < len(ct); i++ {
-		if ct[i] == ';' {
-			ct = ct[:i]
-			break
-		}
+	// Strip parameters (everything after the first ';').
+	if i := strings.IndexByte(ct, ';'); i >= 0 {
+		ct = ct[:i]
 	}
-	return ct == "application/json"
+	return strings.EqualFold(strings.TrimSpace(ct), "application/json")
 }

@@ -154,11 +154,18 @@ func TestErrorReformattingMiddleware_AllVanguardErrorCodes(t *testing.T) {
 	}
 }
 
-// TestIsJSONContentType verifies content-type detection logic.
+// TestIsJSONContentType verifies content-type detection logic, including
+// RFC 2616 §3.7 case-insensitive media type matching.
 func TestIsJSONContentType(t *testing.T) {
+	// Exact match and with parameters
 	assert.True(t, isJSONContentType("application/json"))
 	assert.True(t, isJSONContentType("application/json; charset=utf-8"))
 	assert.True(t, isJSONContentType("application/json;charset=utf-8"))
+	// Mixed-case variants must also match per RFC 2616
+	assert.True(t, isJSONContentType("Application/JSON"))
+	assert.True(t, isJSONContentType("APPLICATION/JSON"))
+	assert.True(t, isJSONContentType("application/JSON; charset=utf-8"))
+	// Non-JSON types
 	assert.False(t, isJSONContentType("text/plain"))
 	assert.False(t, isJSONContentType("text/html"))
 	assert.False(t, isJSONContentType(""))
