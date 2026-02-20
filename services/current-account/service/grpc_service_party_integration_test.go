@@ -37,18 +37,20 @@ var (
 
 // mockPartyClient implements clients.PartyClient for testing
 type mockPartyClient struct {
-	mu              sync.Mutex
-	validateCalls   int
-	getCalls        int
-	validateError   error
-	getError        error
-	partyStatus     partyv1.PartyStatus
-	partyExists     bool
-	simulateTimeout bool
-	timeoutDuration time.Duration
-	closeCalls      int
-	lastValidatedID string
-	lastRetrievedID string
+	mu                sync.Mutex
+	validateCalls     int
+	getCalls          int
+	validateError     error
+	getError          error
+	partyStatus       partyv1.PartyStatus
+	partyTypeOverride partyv1.PartyType // Override party type in GetParty response
+	extRefType        partyv1.ExternalReferenceType
+	partyExists       bool
+	simulateTimeout   bool
+	timeoutDuration   time.Duration
+	closeCalls        int
+	lastValidatedID   string
+	lastRetrievedID   string
 }
 
 func (m *mockPartyClient) ValidateParty(ctx context.Context, partyID string) error {
@@ -94,6 +96,8 @@ func (m *mockPartyClient) GetParty(_ context.Context, partyID string) (*partyv1.
 	getError := m.getError
 	partyExists := m.partyExists
 	partyStatus := m.partyStatus
+	partyType := m.partyTypeOverride
+	extRefType := m.extRefType
 	m.mu.Unlock()
 
 	if getError != nil {
@@ -105,9 +109,11 @@ func (m *mockPartyClient) GetParty(_ context.Context, partyID string) (*partyv1.
 	}
 
 	return &partyv1.Party{
-		PartyId:   partyID,
-		LegalName: "Test Party",
-		Status:    partyStatus,
+		PartyId:               partyID,
+		LegalName:             "Test Party",
+		PartyType:             partyType,
+		Status:                partyStatus,
+		ExternalReferenceType: extRefType,
 	}, nil
 }
 

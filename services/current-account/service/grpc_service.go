@@ -9,14 +9,19 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/google/cel-go/cel"
+	"github.com/santhosh-tekuri/jsonschema/v5"
+
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/config"
+	"github.com/meridianhub/meridian/services/reference-data/accounttype"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"github.com/meridianhub/meridian/shared/pkg/saga/schema"
 	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/meridianhub/meridian/shared/platform/observability"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/protobuf/proto"
 	"gorm.io/gorm"
 )
@@ -121,6 +126,66 @@ func (p *NoOpAccountEventPublisher) PublishWithTenant(_ context.Context, _, _ st
 	return nil
 }
 
+// CachedAccountType holds a resolved product type definition with precompiled programs.
+// This mirrors the fields from cache.CachedAccountType that the service needs.
+type CachedAccountType struct {
+	Definition         *accounttype.Definition
+	EligibilityProgram cel.Program
+	CompiledSchema     *jsonschema.Schema
+}
+
+// AccountTypeCache defines the interface for resolving product type definitions.
+// Implemented by cache.LocalAccountTypeCache (via an adapter).
+type AccountTypeCache interface {
+	GetOrLoad(ctx context.Context, tenantID tenant.TenantID, code string) (*CachedAccountType, error)
+}
+
+// Option is a functional option for configuring optional Service dependencies.
+type Option func(*Service)
+
+// WithAccountTypeCache sets the account type cache for product type resolution.
+func WithAccountTypeCache(cache AccountTypeCache) Option {
+	return func(s *Service) {
+		s.accountTypeCache = cache
+	}
+}
+
+// WithValuationFeatureRepo sets the valuation feature repository for VF seeding.
+func WithValuationFeatureRepo(repo *persistence.ValuationFeatureRepository) Option {
+	return func(s *Service) {
+		s.valuationFeatureRepo = repo
+	}
+}
+
+// WithValuationEngine sets the valuation engine for executing valuation logic.
+func WithValuationEngine(engine ValuationEngine) Option {
+	return func(s *Service) {
+		s.valuationEngine = engine
+	}
+}
+
+// WithEventPublisher sets the event publisher for lifecycle events.
+func WithEventPublisher(publisher AccountEventPublisher) Option {
+	return func(s *Service) {
+		s.eventPublisher = publisher
+	}
+}
+
+// WithWebhookNotifier sets the webhook notifier for lifecycle events.
+func WithWebhookNotifier(notifier WebhookNotifier) Option {
+	return func(s *Service) {
+		s.webhookNotifier = notifier
+	}
+}
+
+// ApplyOptions applies functional options to the service.
+// This allows optional dependencies to be set after construction.
+func (s *Service) ApplyOptions(opts ...Option) {
+	for _, opt := range opts {
+		opt(s)
+	}
+}
+
 // Service implements the CurrentAccountService gRPC service
 type Service struct {
 	pb.UnimplementedCurrentAccountServiceServer
@@ -133,7 +198,8 @@ type Service struct {
 	posKeepingClient       PositionKeepingClient
 	finAcctClient          FinancialAccountingClient
 	partyClient            PartyClient
-	valuationEngine        ValuationEngine // Optional: executes valuation method logic
+	accountTypeCache       AccountTypeCache // Optional: resolves product type definitions
+	valuationEngine        ValuationEngine  // Optional: executes valuation method logic
 	accountConfig          *config.AccountConfig
 	idempotencyService     idempotency.Service
 	eventPublisher         AccountEventPublisher // Optional: publishes lifecycle events to Kafka

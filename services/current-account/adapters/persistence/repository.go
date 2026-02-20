@@ -482,6 +482,16 @@ func toEntity(ctx context.Context, account domain.CurrentAccount) (*CurrentAccou
 		freezeReason = &reason
 	}
 
+	// Map product type fields (nil if empty for backwards compatibility)
+	var productTypeCode *string
+	var productTypeVersion *int
+	if account.ProductTypeCode() != "" {
+		code := account.ProductTypeCode()
+		productTypeCode = &code
+		version := account.ProductTypeVersion()
+		productTypeVersion = &version
+	}
+
 	// ToMinorUnitsUnchecked is safe here: domain layer validates amounts before persistence,
 	// so overflow (>92 quadrillion cents) cannot occur for valid accounts
 	// Note: Balance fields are not persisted to DB (gorm:"-") but kept on entity for
@@ -497,6 +507,8 @@ func toEntity(ctx context.Context, account domain.CurrentAccount) (*CurrentAccou
 		OrgPartyID:            account.OrgPartyID(),
 		OverdraftLimit:        account.OverdraftLimit().ToMinorUnitsUnchecked(),
 		OverdraftRate:         account.OverdraftRate(),
+		ProductTypeCode:       productTypeCode,
+		ProductTypeVersion:    productTypeVersion,
 		Balance:               account.Balance().ToMinorUnitsUnchecked(),          // gorm:"-" - not persisted
 		AvailableBalance:      account.AvailableBalance().ToMinorUnitsUnchecked(), // gorm:"-" - not persisted
 		FreezeReason:          freezeReason,
@@ -560,6 +572,16 @@ func toDomain(entity *CurrentAccountEntity) (domain.CurrentAccount, error) {
 		freezeReason = *entity.FreezeReason
 	}
 
+	// Map product type fields (empty string / 0 if nil for domain model)
+	productTypeCode := ""
+	productTypeVersion := 0
+	if entity.ProductTypeCode != nil {
+		productTypeCode = *entity.ProductTypeCode
+	}
+	if entity.ProductTypeVersion != nil {
+		productTypeVersion = *entity.ProductTypeVersion
+	}
+
 	// Use builder pattern to construct immutable domain model
 	// Note: Balance comes from entity's in-memory fields (gorm:"-") if populated,
 	// otherwise zero. Service layer should fetch authoritative balance from Position Keeping.
@@ -581,6 +603,8 @@ func toDomain(entity *CurrentAccountEntity) (domain.CurrentAccount, error) {
 		WithVersion(entity.Version).
 		WithCreatedAt(entity.CreatedAt).
 		WithUpdatedAt(entity.UpdatedAt).
+		WithProductTypeCode(productTypeCode).
+		WithProductTypeVersion(productTypeVersion).
 		Build(), nil
 }
 
