@@ -12,6 +12,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// mockValuationMethod implements ValuationMethodService for testing.
+type mockValuationMethod struct {
+	resolveMethodFn func(ctx *saga.StarlarkContext, name string) (string, int, []string, error)
+}
+
+func (m *mockValuationMethod) ResolveMethod(ctx *saga.StarlarkContext, name string) (string, int, []string, error) {
+	if m.resolveMethodFn != nil {
+		return m.resolveMethodFn(ctx, name)
+	}
+	// Default: return a deterministic UUID for any method name
+	id := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("test.method."+name))
+	return id.String(), 1, nil, nil
+}
+
 // mockReferenceData implements ReferenceDataService for testing.
 type mockReferenceData struct {
 	registerInstrumentFn     func(*saga.StarlarkContext, map[string]any) (any, error)
@@ -40,14 +54,14 @@ func (m *mockReferenceData) RegisterAccountType(ctx *saga.StarlarkContext, param
 	if m.registerAccountTypeFn != nil {
 		return m.registerAccountTypeFn(ctx, params)
 	}
-	return map[string]any{"account_type_code": params["account_type_code"], "status": "REGISTERED"}, nil
+	return map[string]any{"code": params["code"], "version": 1, "status": "ACTIVE"}, nil
 }
 
 func (m *mockReferenceData) DeleteAccountType(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 	if m.deleteAccountTypeFn != nil {
 		return m.deleteAccountTypeFn(ctx, params)
 	}
-	return map[string]any{"account_type_code": params["account_type_code"], "status": "DELETED"}, nil
+	return map[string]any{"code": params["code"], "status": "DELETED"}, nil
 }
 
 func (m *mockReferenceData) RegisterValuationRule(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
@@ -294,11 +308,207 @@ func TestCompensationHandlers(t *testing.T) {
 		handler, err := registry.Get("reference_data.delete_account_type")
 		require.NoError(t, err)
 
-		result, err := handler(ctx, map[string]any{"account_type_code": "CLEARING"})
+		result, err := handler(ctx, map[string]any{"code": "CLEARING"})
 		require.NoError(t, err)
 
 		resultMap, ok := result.(map[string]any)
 		require.True(t, ok)
 		assert.Equal(t, "DELETED", resultMap["status"])
 	})
+}
+
+// TestAccountTypeHandler_FullParams verifies handler accepts full AccountTypeDefinition params.
+func TestAccountTypeHandler_FullParams(t *testing.T) {
+	var capturedParams map[string]any
+	registry := saga.NewHandlerRegistry()
+	deps := &HandlerDependencies{
+		ReferenceData: &mockReferenceData{
+			registerAccountTypeFn: func(_ *saga.StarlarkContext, p map[string]any) (any, error) {
+				capturedParams = p
+				return map[string]any{"code": p["code"], "version": 1, "status": "ACTIVE"}, nil
+			},
+		},
+		InternalBankAccount: &mockInternalBankAccount{},
+	}
+
+	err := RegisterManifestHandlers(registry, deps)
+	require.NoError(t, err)
+
+	handler, err := registry.Get("reference_data.register_account_type")
+	require.NoError(t, err)
+
+	ctx := newTestStarlarkContext()
+	params := map[string]any{
+		"code":            "CUSTOMER_CURRENT",
+		"display_name":    "Current Account",
+		"behavior_class":  "CUSTOMER",
+		"normal_balance":  "CREDIT",
+		"instrument_code": "GBP",
+		"description":     "Standard customer current account",
+		"validation_cel":  "amount > 0",
+		"eligibility_cel": "balance >= 0",
+	}
+
+	result, err := handler(ctx, params)
+	require.NoError(t, err)
+
+	resultMap, ok := result.(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "CUSTOMER_CURRENT", resultMap["code"])
+	assert.Equal(t, "ACTIVE", resultMap["status"])
+
+	// Verify all params were forwarded to reference data service
+	assert.Equal(t, "CUSTOMER_CURRENT", capturedParams["code"])
+	assert.Equal(t, "CUSTOMER", capturedParams["behavior_class"])
+	assert.Equal(t, "CREDIT", capturedParams["normal_balance"])
+	assert.Equal(t, "amount > 0", capturedParams["validation_cel"])
+	assert.Equal(t, "balance >= 0", capturedParams["eligibility_cel"])
+}
+
+// TestAccountTypeHandler_IdempotentOnError verifies that reference data errors are propagated.
+func TestAccountTypeHandler_IdempotentOnError(t *testing.T) {
+	expectedErr := errors.New("reference data unavailable")
+	registry := saga.NewHandlerRegistry()
+	deps := &HandlerDependencies{
+		ReferenceData: &mockReferenceData{
+			registerAccountTypeFn: func(_ *saga.StarlarkContext, _ map[string]any) (any, error) {
+				return nil, expectedErr
+			},
+		},
+		InternalBankAccount: &mockInternalBankAccount{},
+	}
+
+	err := RegisterManifestHandlers(registry, deps)
+	require.NoError(t, err)
+
+	handler, err := registry.Get("reference_data.register_account_type")
+	require.NoError(t, err)
+
+	ctx := newTestStarlarkContext()
+	_, err = handler(ctx, map[string]any{
+		"code":            "CLEARING",
+		"behavior_class":  "CLEARING",
+		"normal_balance":  "DEBIT",
+		"instrument_code": "GBP",
+	})
+	assert.ErrorIs(t, err, expectedErr)
+}
+
+// TestAccountTypeHandler_ResolvesDefaultConversionMethod verifies that a named method is resolved
+// to a UUID+version before calling the reference data service.
+func TestAccountTypeHandler_ResolvesDefaultConversionMethod(t *testing.T) {
+	resolvedID := uuid.New().String()
+	var capturedParams map[string]any
+
+	registry := saga.NewHandlerRegistry()
+	deps := &HandlerDependencies{
+		ReferenceData: &mockReferenceData{
+			registerAccountTypeFn: func(_ *saga.StarlarkContext, p map[string]any) (any, error) {
+				capturedParams = p
+				return map[string]any{"code": p["code"], "version": 1, "status": "ACTIVE"}, nil
+			},
+		},
+		InternalBankAccount: &mockInternalBankAccount{},
+		ValuationMethod: &mockValuationMethod{
+			resolveMethodFn: func(_ *saga.StarlarkContext, name string) (string, int, []string, error) {
+				if name == "forex-spot-v1" {
+					return resolvedID, 3, nil, nil
+				}
+				return "", 0, nil, errors.New("not found")
+			},
+		},
+	}
+
+	err := RegisterManifestHandlers(registry, deps)
+	require.NoError(t, err)
+
+	handler, err := registry.Get("reference_data.register_account_type")
+	require.NoError(t, err)
+
+	ctx := newTestStarlarkContext()
+	params := map[string]any{
+		"code":                      "FX_ACCOUNT",
+		"display_name":              "FX Trading Account",
+		"behavior_class":            "CUSTOMER",
+		"normal_balance":            "DEBIT",
+		"instrument_code":           "USD",
+		"default_conversion_method": "forex-spot-v1",
+	}
+
+	result, err := handler(ctx, params)
+	require.NoError(t, err)
+
+	resultMap, ok := result.(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "FX_ACCOUNT", resultMap["code"])
+
+	// Verify the method name was replaced with UUID + version
+	assert.Equal(t, resolvedID, capturedParams["default_conversion_method_id"])
+	assert.Equal(t, 3, capturedParams["default_conversion_method_version"])
+	_, hasOldKey := capturedParams["default_conversion_method"]
+	assert.False(t, hasOldKey, "original string key should be removed from params")
+}
+
+// TestAccountTypeHandler_UnresolvableConversionMethod verifies structured error with suggestions.
+func TestAccountTypeHandler_UnresolvableConversionMethod(t *testing.T) {
+	registry := saga.NewHandlerRegistry()
+	deps := &HandlerDependencies{
+		ReferenceData:       &mockReferenceData{},
+		InternalBankAccount: &mockInternalBankAccount{},
+		ValuationMethod: &mockValuationMethod{
+			resolveMethodFn: func(_ *saga.StarlarkContext, _ string) (string, int, []string, error) {
+				// Return suggestions for typo
+				return "", 0, []string{"forex-spot-v1", "forex-spot-v2"}, errors.New("method not found")
+			},
+		},
+	}
+
+	err := RegisterManifestHandlers(registry, deps)
+	require.NoError(t, err)
+
+	handler, err := registry.Get("reference_data.register_account_type")
+	require.NoError(t, err)
+
+	ctx := newTestStarlarkContext()
+	params := map[string]any{
+		"code":                      "FX_ACCOUNT",
+		"behavior_class":            "CUSTOMER",
+		"normal_balance":            "DEBIT",
+		"instrument_code":           "USD",
+		"default_conversion_method": "forex-spt-v1", // typo
+	}
+
+	_, err = handler(ctx, params)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "forex-spt-v1")
+	assert.Contains(t, err.Error(), "forex-spot-v1")
+}
+
+// TestAccountTypeHandler_ConversionMethodWithoutService verifies error when service is nil.
+func TestAccountTypeHandler_ConversionMethodWithoutService(t *testing.T) {
+	registry := saga.NewHandlerRegistry()
+	deps := &HandlerDependencies{
+		ReferenceData:       &mockReferenceData{},
+		InternalBankAccount: &mockInternalBankAccount{},
+		ValuationMethod:     nil, // no valuation method service
+	}
+
+	err := RegisterManifestHandlers(registry, deps)
+	require.NoError(t, err)
+
+	handler, err := registry.Get("reference_data.register_account_type")
+	require.NoError(t, err)
+
+	ctx := newTestStarlarkContext()
+	params := map[string]any{
+		"code":                      "FX_ACCOUNT",
+		"behavior_class":            "CUSTOMER",
+		"normal_balance":            "DEBIT",
+		"instrument_code":           "USD",
+		"default_conversion_method": "forex-spot-v1",
+	}
+
+	_, err = handler(ctx, params)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no ValuationMethodService configured")
 }

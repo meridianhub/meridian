@@ -2,10 +2,15 @@ package applier
 
 import (
 	"embed"
+	"errors"
 	"fmt"
 
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 )
+
+// ErrNoValuationMethodService is returned when default_conversion_method is provided
+// but no ValuationMethodService was configured in HandlerDependencies.
+var ErrNoValuationMethodService = errors.New("no ValuationMethodService configured")
 
 //go:embed handlers.yaml
 var handlersYAMLFS embed.FS
@@ -32,7 +37,7 @@ func RegisterManifestHandlers(registry *saga.HandlerRegistry, deps *HandlerDepen
 				ProducesInstruments: []string{},
 			},
 		},
-		// Reference Data - Account type registration
+		// Reference Data - Account type registration (idempotent: CreateDraft + Activate)
 		"reference_data.register_account_type": {
 			handler: registerAccountTypeHandler(deps),
 			metadata: saga.HandlerMetadata{
@@ -96,12 +101,17 @@ type HandlerDependencies struct {
 	ReferenceData ReferenceDataService
 	// InternalBankAccount provides account provisioning.
 	InternalBankAccount InternalBankAccountService
+	// ValuationMethod provides UUID resolution for named valuation methods.
+	// May be nil if no default_conversion_method resolution is needed.
+	ValuationMethod ValuationMethodService
 }
 
 // ReferenceDataService abstracts the Reference Data gRPC client for testing.
 type ReferenceDataService interface {
 	RegisterInstrument(ctx *saga.StarlarkContext, params map[string]any) (any, error)
 	DeleteInstrument(ctx *saga.StarlarkContext, params map[string]any) (any, error)
+	// RegisterAccountType creates an account type draft (idempotent via ON CONFLICT DO NOTHING)
+	// and then activates it. Returns the registered code and version.
 	RegisterAccountType(ctx *saga.StarlarkContext, params map[string]any) (any, error)
 	DeleteAccountType(ctx *saga.StarlarkContext, params map[string]any) (any, error)
 	RegisterValuationRule(ctx *saga.StarlarkContext, params map[string]any) (any, error)
@@ -111,6 +121,15 @@ type ReferenceDataService interface {
 // InternalBankAccountService abstracts the Internal Bank Account gRPC client for testing.
 type InternalBankAccountService interface {
 	InitiateAccount(ctx *saga.StarlarkContext, params map[string]any) (any, error)
+}
+
+// ValuationMethodService resolves named valuation methods to their UUID and version.
+// The manifest references methods by human-readable name (e.g., "forex-spot-v1");
+// this service translates those to the UUID+version required by the AccountTypeRegistry.
+type ValuationMethodService interface {
+	// ResolveMethod looks up a valuation method by name and returns its UUID string and version.
+	// Returns (uuid, version, suggestions, error) where suggestions is populated on miss.
+	ResolveMethod(ctx *saga.StarlarkContext, name string) (id string, version int, suggestions []string, err error)
 }
 
 // registerInstrumentHandler creates a handler that registers an instrument via Reference Data.
@@ -127,9 +146,36 @@ func deleteInstrumentHandler(deps *HandlerDependencies) saga.Handler {
 	}
 }
 
-// registerAccountTypeHandler creates a handler that registers an account type.
+// registerAccountTypeHandler creates a handler that idempotently registers an account type.
+//
+// Idempotency semantics:
+//  1. Call CreateDraft on the AccountTypeRegistry (ON CONFLICT DO NOTHING if already exists).
+//  2. Call ActivateAccountType on the result (idempotent if already ACTIVE).
+//
+// If default_conversion_method is provided as a string name, it is resolved to a UUID+version
+// via the ValuationMethodService before calling CreateDraft. Unresolvable names produce a
+// structured ValidationError with Levenshtein suggestions.
 func registerAccountTypeHandler(deps *HandlerDependencies) saga.Handler {
 	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
+		// Resolve default_conversion_method name → UUID if provided
+		if methodName, ok := params["default_conversion_method"].(string); ok && methodName != "" {
+			if deps.ValuationMethod == nil {
+				return nil, fmt.Errorf("default_conversion_method %q: %w", methodName, ErrNoValuationMethodService)
+			}
+			id, version, suggestions, err := deps.ValuationMethod.ResolveMethod(ctx, methodName)
+			if err != nil {
+				if len(suggestions) > 0 {
+					return nil, fmt.Errorf("unresolvable default_conversion_method %q (did you mean: %v?): %w", methodName, suggestions, err)
+				}
+				return nil, fmt.Errorf("unresolvable default_conversion_method %q: %w", methodName, err)
+			}
+			// Replace the string name with resolved UUID and version in params copy
+			params = copyParams(params)
+			params["default_conversion_method_id"] = id
+			params["default_conversion_method_version"] = version
+			delete(params, "default_conversion_method")
+		}
+
 		return deps.ReferenceData.RegisterAccountType(ctx, params)
 	}
 }
@@ -160,4 +206,13 @@ func initiateAccountHandler(deps *HandlerDependencies) saga.Handler {
 	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 		return deps.InternalBankAccount.InitiateAccount(ctx, params)
 	}
+}
+
+// copyParams creates a shallow copy of a params map to avoid mutating the original.
+func copyParams(original map[string]any) map[string]any {
+	cp := make(map[string]any, len(original))
+	for k, v := range original {
+		cp[k] = v
+	}
+	return cp
 }
