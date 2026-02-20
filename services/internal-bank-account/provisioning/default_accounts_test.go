@@ -61,7 +61,7 @@ func (m *mockService) InitiateInternalBankAccount(_ context.Context, req *pb.Ini
 			AccountId:      "IBA-test-" + req.AccountCode,
 			AccountCode:    req.AccountCode,
 			Name:           req.Name,
-			AccountType:    req.AccountType,
+			AccountType:    req.AccountType, //nolint:staticcheck // Intentional: reading deprecated field for test backwards compatibility
 			AccountStatus:  pb.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE,
 			InstrumentCode: req.InstrumentCode,
 		},
