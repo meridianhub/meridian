@@ -1,61 +1,92 @@
 ---
 name: gateway-service
-description: Multi-tenant API gateway with JWT/API key authentication and request routing
+description: Multi-tenant API gateway with HTTP/JSON transcoding, JWT/API key authentication, and request routing
 triggers:
   - JWT authentication and JWKS configuration
   - API key authentication and rate limiting
   - Tenant resolution from subdomain or headers
-  - Request routing and proxy configuration
+  - HTTP/JSON to gRPC transcoding via Vanguard
+  - Adding a new backend service to the gateway
   - Local development mode setup
 instructions: |
-  Gateway handles authentication (JWT or API key), tenant resolution, and proxying.
-  Configure via environment variables: BASE_DOMAIN, JWKS_URL, API_KEYS, BACKENDS.
-  Use LOCAL_DEV_MODE=true with X-Tenant-Slug header for local development.
+  Gateway handles authentication (JWT or API key), tenant resolution, and HTTP/JSON↔gRPC
+  transcoding. Backend services always speak gRPC; Vanguard translates REST/JSON, Connect,
+  and gRPC-Web at the gateway edge.
 
-  Port: 8080 (HTTP)
+  Ports: 8090 (HTTP gateway), 50051 (native gRPC on backend services directly)
+
+  After any proto change, regenerate the descriptor: `make proto-descriptors`
+  To add a new service, add a ServiceBackend entry in cmd/meridian/main.go and rerun proto-descriptors.
+
+  Local dev: AUTH_MODE=disabled. Pass X-Tenant-ID header for tenant identification.
 ---
 
 # Gateway Service
 
 The Gateway Service is a multi-tenant API gateway that provides authentication,
-authorization, and request routing for the Meridian platform.
+authorization, HTTP/JSON transcoding, and request routing for the Meridian platform.
 
 ## Overview
 
 The gateway handles:
 
+- **HTTP/JSON Transcoding**: Accepts REST/JSON, Connect, and gRPC-Web requests and translates
+  them to gRPC for backend services (via [Vanguard](https://connectrpc.com/vanguard))
 - **JWT Authentication**: Validates Bearer tokens using JWKS (JSON Web Key Set)
 - **API Key Authentication**: Validates service-to-service API keys with rate limiting
 - **Tenant Resolution**: Extracts tenant identity from subdomain or headers
 - **Tenant Authorization**: Verifies authenticated identity is authorized for the resolved tenant
-- **Request Proxying**: Routes authenticated requests to backend services
+- **Identity Propagation**: Injects authenticated user/tenant context as gRPC metadata headers
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    subgraph External
-        Client["Client"]
-        JWKS["JWKS Provider<br/>(Auth0, Keycloak)"]
+    subgraph Clients
+        REST["REST/JSON Client<br/>(curl, browser)"]
+        ConnectClient["Connect Client<br/>(browser RPC)"]
+        GRPCWeb["gRPC-Web Client"]
+        GRPC["gRPC Client<br/>(server-to-server)"]
     end
 
-    subgraph Gateway["Gateway (proxy)"]
-        Auth["Auth<br/>Middleware"]
-        Tenant["Tenant<br/>Resolver"]
+    subgraph Gateway["Gateway :8090"]
+        Auth["Auth Middleware<br/>(JWT / API Key)"]
+        TenantRes["Tenant Resolver"]
+        TenantAuthz["Tenant Authz"]
+        Vanguard["Vanguard Transcoder<br/>(REST ↔ gRPC)"]
     end
 
-    subgraph Identity["Identity Context"]
-        Ctx["- User ID<br/>- Tenant ID<br/>- Roles/Scopes"]
+    subgraph Backends[":50051"]
+        Party["Party Service"]
+        Account["Current Account"]
+        PK["Position Keeping"]
+        Other["... other services"]
     end
 
-    Backend["Backend<br/>Services"]
+    JWKS["JWKS Provider"]
 
-    Client --> Gateway
-    JWKS -.->|"JWKS fetch"| Auth
-    Gateway --> Backend
-    Auth --> Tenant
-    Tenant --> Ctx
+    REST -->|HTTP/JSON| Auth
+    ConnectClient -->|Connect| Auth
+    GRPCWeb -->|gRPC-Web| Auth
+    GRPC -->|gRPC| Party
+    GRPC -->|gRPC| Account
+
+    Auth --> TenantRes
+    JWKS -.->|JWKS fetch| Auth
+    TenantRes --> TenantAuthz
+    TenantAuthz --> Vanguard
+    Vanguard -->|gRPC| Party
+    Vanguard -->|gRPC| Account
+    Vanguard -->|gRPC| PK
+    Vanguard -->|gRPC| Other
 ```
+
+### Ports
+
+| Port | Purpose |
+|------|---------|
+| **8090** | HTTP gateway — accepts REST/JSON, Connect, gRPC-Web |
+| **50051** | Native gRPC — direct backend access (dev only) |
 
 ### Middleware Chain
 
@@ -64,9 +95,49 @@ The gateway applies middleware in this order for `/api/*` routes:
 1. **Auth Middleware** (outermost): Validates JWT or API key, returns 401 if invalid
 2. **Tenant Middleware**: Resolves tenant from subdomain/header, injects into context
 3. **Tenant Authorization**: Verifies JWT tenant matches resolved tenant, returns 403 if mismatch
-4. **Backend Proxy**: Routes request to appropriate backend service
+4. **Identity Propagation**: Strips spoofed identity headers; injects authenticated context as gRPC metadata
+5. **Vanguard Transcoder**: Translates REST/JSON, Connect, or gRPC-Web to native gRPC; routes to backend
 
 Health endpoints (`/health`, `/ready`) bypass all middleware for Kubernetes probe compatibility.
+
+## HTTP/JSON Transcoding
+
+The gateway uses [Vanguard](https://pkg.go.dev/connectrpc.com/vanguard) to translate between
+REST/JSON and gRPC. See [ADR-0032](../../docs/adr/0032-vanguard-json-transcoding-gateway.md) for
+the decision rationale.
+
+### Supported Protocols
+
+| Protocol | Content-Type | URL Pattern |
+|----------|--------------|-------------|
+| REST/JSON | `application/json` | `/api/v1/parties`, `/api/v1/current-accounts`, etc. |
+| Connect | `application/connect+json` | `/api/<package>.<Service>/<Method>` |
+| gRPC-Web | `application/grpc-web+proto` | `/api/<package>.<Service>/<Method>` |
+| Native gRPC | — | Direct to `:50051` |
+
+### Proto Descriptor
+
+Vanguard discovers service schemas from a compiled `FileDescriptorSet` embedded in the binary:
+
+```bash
+# Regenerate after any proto change
+make proto-descriptors
+# This runs: buf build api/proto -o cmd/meridian/descriptor.binpb
+```
+
+Commit the updated `cmd/meridian/descriptor.binpb` after regenerating.
+
+### Adding a New Service
+
+1. Add `google.api.http` annotations to the proto file.
+2. Run `make proto-descriptors` to regenerate the descriptor.
+3. Add a `ServiceBackend` entry in `cmd/meridian/main.go`:
+
+   ```go
+   {ServiceName: "meridian.myservice.v1.MyService", BackendAddr: "my-service:50051"},
+   ```
+
+4. Commit both `descriptor.binpb` and the `main.go` change.
 
 ## Configuration
 

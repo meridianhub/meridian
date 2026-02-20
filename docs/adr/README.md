@@ -78,6 +78,8 @@ Architectural Decision Records) format.
 | [ADR-0028](0028-starlark-saga-cel-valuation.md) | Starlark Saga Orchestration with CEL Valuation | Accepted | 2025-01-20 |
 <!-- markdownlint-disable-next-line MD013 -->
 | [ADR-0031](0031-getbalance-nil-guard-retention.md) | Retain Nil Guard on PositionKeepingClient in GetBalance | Accepted | 2026-02-13 |
+<!-- markdownlint-disable-next-line MD013 -->
+| [ADR-0032](0032-vanguard-json-transcoding-gateway.md) | Vanguard HTTP/JSON Transcoding Gateway | Accepted | 2026-02-20 |
 
 ## Architecture Decision Relationships
 
@@ -141,6 +143,10 @@ graph LR
 ### Quality & Testing
 
 - [ADR-0008](0008-defensive-testing-standards.md) - Defensive Testing Standards
+
+### API Gateway & Protocols
+
+- [ADR-0032](0032-vanguard-json-transcoding-gateway.md) - Vanguard HTTP/JSON Transcoding Gateway
 
 ### Multi-Tenancy
 

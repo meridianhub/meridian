@@ -6,6 +6,7 @@ This directory contains how-to guides and usage documentation for Meridian devel
 
 | Guide | Description |
 |-------|-------------|
+| [Calling Meridian APIs](calling-meridian-apis.md) | HTTP/JSON, Connect, and gRPC — authentication, tenant isolation, quick start |
 | [Multi-Asset Integration](multi-asset-integration.md) | End-to-end guide for tracking non-fiat instruments (energy, carbon, compute) |
 | [New BIAN Service Checklist](new-bian-service-checklist.md) | Complete checklist for creating a new BIAN service domain |
 | [Circuit Breaker Usage](circuit-breaker-usage.md) | Using circuit breakers for resilient inter-service calls |
