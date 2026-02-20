@@ -208,6 +208,27 @@ var standardTestDefs = map[string]*accounttype.Definition{
 		EligibilityCEL: "true",
 		Status:         accounttype.StatusActive,
 	},
+	"NOSTRO_USD": {
+		Code:           "NOSTRO_USD",
+		Version:        1,
+		BehaviorClass:  accounttype.BehaviorClassNostro,
+		EligibilityCEL: "true",
+		Status:         accounttype.StatusActive,
+	},
+	"NOSTRO_GBP": {
+		Code:           "NOSTRO_GBP",
+		Version:        1,
+		BehaviorClass:  accounttype.BehaviorClassNostro,
+		EligibilityCEL: "true",
+		Status:         accounttype.StatusActive,
+	},
+	"VOSTRO_USD": {
+		Code:           "VOSTRO_USD",
+		Version:        1,
+		BehaviorClass:  accounttype.BehaviorClassVostro,
+		EligibilityCEL: "true",
+		Status:         accounttype.StatusActive,
+	},
 }
 
 // newTestServiceWithCache creates a service with a standard test cache for tests that

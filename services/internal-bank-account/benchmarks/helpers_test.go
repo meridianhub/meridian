@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/cel-go/cel"
 	"github.com/lib/pq"
 
 	"github.com/google/uuid"
@@ -25,6 +26,8 @@ import (
 	"github.com/meridianhub/meridian/services/internal-bank-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/internal-bank-account/domain"
 	"github.com/meridianhub/meridian/services/internal-bank-account/service"
+	"github.com/meridianhub/meridian/services/reference-data/accounttype"
+	"github.com/meridianhub/meridian/services/reference-data/cache"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -34,6 +37,60 @@ import (
 const (
 	benchTenantID = "bench_tenant"
 )
+
+// benchStaticLoader implements cache.AccountTypeLoader for benchmark tests.
+type benchStaticLoader struct {
+	defs map[string]*accounttype.Definition
+}
+
+func (l *benchStaticLoader) LoadAccountType(_ context.Context, code string) (*accounttype.Definition, error) {
+	def, ok := l.defs[code]
+	if !ok {
+		return nil, fmt.Errorf("account type not found: %s", code)
+	}
+	return def, nil
+}
+
+func (l *benchStaticLoader) ListActiveAccountTypes(_ context.Context) ([]*accounttype.Definition, error) {
+	defs := make([]*accounttype.Definition, 0, len(l.defs))
+	for _, def := range l.defs {
+		defs = append(defs, def)
+	}
+	return defs, nil
+}
+
+// benchNilCELCompiler is a no-op CEL compiler for benchmark tests.
+type benchNilCELCompiler struct{}
+
+func (c *benchNilCELCompiler) CompileValidation(_ string) (cel.Program, error) { return nil, nil }
+func (c *benchNilCELCompiler) CompileBucketKey(_ string) (cel.Program, error)  { return nil, nil }
+func (c *benchNilCELCompiler) CompileEligibility(_ string) (cel.Program, error) {
+	return nil, nil
+}
+
+// newBenchAccountTypeCache creates an account type cache with standard benchmark definitions.
+func newBenchAccountTypeCache() *cache.LocalAccountTypeCache {
+	defs := map[string]*accounttype.Definition{
+		"CLEARING_USD": {
+			Code: "CLEARING_USD", Version: 1,
+			BehaviorClass: accounttype.BehaviorClassClearing, EligibilityCEL: "true",
+			Status: accounttype.StatusActive,
+		},
+		"CLEARING_GBP": {
+			Code: "CLEARING_GBP", Version: 1,
+			BehaviorClass: accounttype.BehaviorClassClearing, EligibilityCEL: "true",
+			Status: accounttype.StatusActive,
+		},
+		"HOLDING_GBP": {
+			Code: "HOLDING_GBP", Version: 1,
+			BehaviorClass: accounttype.BehaviorClassHolding, EligibilityCEL: "true",
+			Status: accounttype.StatusActive,
+		},
+	}
+	loader := &benchStaticLoader{defs: defs}
+	compiler := &benchNilCELCompiler{}
+	return cache.NewLocalAccountTypeCache(loader, compiler)
+}
 
 // testContainer holds all benchmark infrastructure components.
 type testContainer struct {
@@ -239,8 +296,11 @@ func setupTestContainer(t *testing.T) *testContainer {
 	// Create mock Position Keeping client
 	pkClient := newMockPositionKeepingClient()
 
-	// Create service with mock clients
-	svc, err := service.NewServiceWithClients(repo, pkClient, nil, nil, nil)
+	// Create account type cache for product type resolution
+	accountTypeCache := newBenchAccountTypeCache()
+
+	// Create service with mock clients and cache
+	svc, err := service.NewServiceFull(repo, pkClient, nil, nil, nil, service.WithAccountTypeCache(accountTypeCache))
 	if err != nil {
 		t.Fatalf("Failed to create service: %v", err)
 	}
