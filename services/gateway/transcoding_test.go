@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,11 +34,29 @@ import (
 // mockPartyService implements the PartyService gRPC server for testing.
 type mockPartyService struct {
 	partyv1.UnimplementedPartyServiceServer
+	mu           sync.RWMutex
 	lastMetadata metadata.MD // captured from most recent call
 }
 
+func (m *mockPartyService) captureMetadata(ctx context.Context) {
+	md, _ := metadata.FromIncomingContext(ctx)
+	m.mu.Lock()
+	m.lastMetadata = md
+	m.mu.Unlock()
+}
+
+func (m *mockPartyService) LastMetadata() metadata.MD {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := metadata.MD{}
+	for k, v := range m.lastMetadata {
+		out[k] = append([]string(nil), v...)
+	}
+	return out
+}
+
 func (m *mockPartyService) RegisterParty(ctx context.Context, req *partyv1.RegisterPartyRequest) (*partyv1.RegisterPartyResponse, error) {
-	m.lastMetadata, _ = metadata.FromIncomingContext(ctx)
+	m.captureMetadata(ctx)
 	return &partyv1.RegisterPartyResponse{
 		Party: &partyv1.Party{
 			PartyId:     "party-001",
@@ -53,7 +72,7 @@ func (m *mockPartyService) RegisterParty(ctx context.Context, req *partyv1.Regis
 }
 
 func (m *mockPartyService) RetrieveParty(ctx context.Context, req *partyv1.RetrievePartyRequest) (*partyv1.RetrievePartyResponse, error) {
-	m.lastMetadata, _ = metadata.FromIncomingContext(ctx)
+	m.captureMetadata(ctx)
 	if req.PartyId == "not-found" {
 		return nil, status.Errorf(codes.NotFound, "party %q not found", req.PartyId)
 	}
@@ -682,7 +701,7 @@ func TestTranscoding_MetadataPropagation(t *testing.T) {
 		// metadataPropagationMiddleware strips incoming spoofed headers
 		// and writes nothing (no auth context). The gRPC backend should
 		// NOT receive the spoofed values.
-		md := mockParty.lastMetadata
+		md := mockParty.LastMetadata()
 		assert.Empty(t, md.Get("x-user-id"), "spoofed x-user-id should be stripped")
 		assert.Empty(t, md.Get("x-tenant-id"), "spoofed x-tenant-id should be stripped")
 	})

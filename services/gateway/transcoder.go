@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"time"
 
 	"connectrpc.com/vanguard"
 	"golang.org/x/net/http2"
@@ -114,7 +115,7 @@ func newGRPCReverseProxy(addr string) http.Handler {
 	proxy.Transport = &http2.Transport{
 		AllowHTTP: true,
 		DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
-			var d net.Dialer
+			d := net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
 			return d.DialContext(ctx, network, addr)
 		},
 	}
