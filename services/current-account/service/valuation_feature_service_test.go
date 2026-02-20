@@ -52,6 +52,8 @@ func setupValuationFeatureServiceTest(t *testing.T) (*Service, context.Context, 
 		opened_at TIMESTAMP WITH TIME ZONE,
 		closed_at TIMESTAMP WITH TIME ZONE,
 		freeze_reason TEXT,
+		product_type_code VARCHAR(50) NULL,
+		product_type_version INT NULL,
 		version BIGINT NOT NULL DEFAULT 1
 	)`, schemaName)).Error
 	require.NoError(t, err)
