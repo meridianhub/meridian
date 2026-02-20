@@ -190,65 +190,75 @@ grpcurl -plaintext localhost:50051 describe meridian.party.v1.RegisterPartyReque
 
 ### Basic Business Flow
 
-The following commands execute a complete deposit flow: create a party, open an account, and post a
-deposit. All commands target the HTTP gateway on port 8090.
+The gateway accepts REST/JSON on port 8090 and native gRPC on port 50051. The following commands
+execute a complete deposit flow via the HTTP/JSON gateway.
 
 ```bash
 # 1. Register a party (customer)
 PARTY=$(curl -s -X POST http://localhost:8090/v1/parties \
   -H "Content-Type: application/json" \
-  -d '{"party_type": "PARTY_TYPE_INDIVIDUAL", "legal_name": "Alice Smith"}')
+  -H "X-Tenant-ID: default" \
+  -d '{"partyType": "PARTY_TYPE_PERSON", "legalName": "Alice Smith"}')
 echo $PARTY | jq .
-PARTY_ID=$(echo $PARTY | jq -r '.partyId')
+PARTY_ID=$(echo $PARTY | jq -r '.party.partyId')
 
-# 2. Open a current account
+# 2. Open a current account (GBP)
 ACCOUNT=$(curl -s -X POST http://localhost:8090/v1/current-accounts \
   -H "Content-Type: application/json" \
+  -H "X-Tenant-ID: default" \
   -d "{
-    \"party_id\": \"$PARTY_ID\",
-    \"account_identification\": \"GB29NWBK60161331926819\",
-    \"base_currency\": \"CURRENCY_GBP\"
+    \"partyId\": \"$PARTY_ID\",
+    \"accountIdentification\": \"GB29NWBK60161331926819\",
+    \"baseCurrency\": \"CURRENCY_GBP\"
   }")
 echo $ACCOUNT | jq .
-ACCOUNT_ID=$(echo $ACCOUNT | jq -r '.accountId')
+ACCOUNT_ID=$(echo $ACCOUNT | jq -r '.facility.accountId')
 
-# 3. Execute a deposit
+# 3. Deposit 100 GBP
 curl -s -X POST "http://localhost:8090/v1/current-accounts/$ACCOUNT_ID/deposits" \
   -H "Content-Type: application/json" \
+  -H "X-Tenant-ID: default" \
   -d '{
-    "amount": {"amount": {"currency_code": "GBP", "units": "100", "nanos": 0}},
+    "amount": {"amount": {"currencyCode": "GBP", "units": "100"}},
     "description": "Initial deposit",
-    "reference": "REF-001"
+    "reference": "REF-001",
+    "idempotencyKey": {"key": "dep-001"}
   }' | jq .
 
-# 4. Retrieve the account to verify balance
-curl -s "http://localhost:8090/v1/current-accounts/$ACCOUNT_ID" | jq .
+# 4. Check balances
+curl -s "http://localhost:8090/v1/accounts/$ACCOUNT_ID/balances" \
+  -H "X-Tenant-ID: default" | jq .
 ```
 
-The same flow is available over gRPC:
+The same flow is available over native gRPC (bypasses the gateway):
 
 ```bash
 # Register a party
-grpcurl -plaintext -d '{
-  "party_type": "PARTY_TYPE_INDIVIDUAL",
-  "legal_name": "Alice Smith"
-}' localhost:50051 meridian.party.v1.PartyService/RegisterParty
+grpcurl -plaintext \
+  -H "x-tenant-id: default" \
+  -d '{"partyType": "PARTY_TYPE_PERSON", "legalName": "Alice Smith"}' \
+  localhost:50051 meridian.party.v1.PartyService/RegisterParty
 
 # Open a current account (substitute PARTY_ID from previous response)
-grpcurl -plaintext -d '{
-  "party_id": "PARTY_ID",
-  "account_identification": "GB29NWBK60161331926819",
-  "base_currency": "CURRENCY_GBP"
-}' localhost:50051 meridian.current_account.v1.CurrentAccountService/InitiateCurrentAccount
+grpcurl -plaintext \
+  -H "x-tenant-id: default" \
+  -d '{"partyId": "PARTY_ID", "accountIdentification": "GB29NWBK60161331926819", "baseCurrency": "CURRENCY_GBP"}' \
+  localhost:50051 meridian.current_account.v1.CurrentAccountService/InitiateCurrentAccount
 
-# Execute a deposit (substitute ACCOUNT_ID from previous response)
-grpcurl -plaintext -d '{
-  "account_id": "ACCOUNT_ID",
-  "amount": {"amount": {"currency_code": "GBP", "units": "100"}},
-  "description": "Initial deposit",
-  "reference": "REF-001"
-}' localhost:50051 meridian.current_account.v1.CurrentAccountService/ExecuteDeposit
+# Deposit 100 GBP (substitute ACCOUNT_ID from previous response)
+grpcurl -plaintext \
+  -H "x-tenant-id: default" \
+  -d '{
+    "accountId": "ACCOUNT_ID",
+    "amount": {"amount": {"currencyCode": "GBP", "units": "100"}},
+    "description": "Initial deposit",
+    "reference": "REF-001"
+  }' \
+  localhost:50051 meridian.current_account.v1.CurrentAccountService/ExecuteDeposit
 ```
+
+See [docs/guides/calling-meridian-apis.md](docs/guides/calling-meridian-apis.md) for a detailed
+API guide covering all supported protocols, error handling, and tenant isolation.
 
 ### API Explorer
 
