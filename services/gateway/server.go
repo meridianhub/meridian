@@ -115,10 +115,17 @@ func (s *Server) registerRoutes() {
 	// Prefer the Vanguard transcoder when configured; fall back to the legacy
 	// prefix-based reverse proxy when Backends are provided; otherwise use a
 	// placeholder that returns 501 Not Implemented.
+	//
+	// For the transcoder path, identityHeaderMiddleware wraps the handler to
+	// strip spoofed incoming identity headers and inject authenticated identity
+	// headers from the request context (the same security pattern used by
+	// NewProxyHandler via its custom Director). This ensures backends always
+	// receive X-User-ID, X-Tenant-ID, X-Auth-Method, and X-Auth-Roles from
+	// the gateway's authentication result, never from the client.
 	var apiHandler http.Handler
 	switch {
 	case s.transcoderHandler != nil:
-		apiHandler = s.transcoderHandler
+		apiHandler = identityHeaderMiddleware(s.transcoderHandler)
 	case len(s.config.Backends) > 0:
 		apiHandler = NewProxyHandler(s.config.Backends)
 	default:

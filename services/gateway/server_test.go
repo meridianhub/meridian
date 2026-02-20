@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/meridianhub/meridian/services/gateway/auth"
 	gwhealth "github.com/meridianhub/meridian/services/gateway/health"
 	"github.com/meridianhub/meridian/shared/pkg/health"
 	"github.com/stretchr/testify/assert"
@@ -263,6 +264,44 @@ func TestWithTranscoder_FallsBackToProxy(t *testing.T) {
 
 	// Should return 501 Not Implemented from the placeholder handler
 	assert.Equal(t, http.StatusNotImplemented, rec.Code)
+}
+
+// TestWithTranscoder_StripsAndInjectsIdentityHeaders verifies that the
+// identityHeaderMiddleware applied to the transcoder path strips client-supplied
+// spoofed headers and injects authenticated identity headers from context.
+func TestWithTranscoder_StripsAndInjectsIdentityHeaders(t *testing.T) {
+	var capturedHeaders http.Header
+
+	// Fake transcoder that captures the headers it receives.
+	capture := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		capturedHeaders = r.Header.Clone()
+	})
+
+	config := &Config{
+		Port:        8080,
+		BaseDomain:  "api.example.com",
+		DatabaseURL: "postgres://localhost/test",
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	server := NewServer(config, logger, nil, WithTranscoder(capture))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/meridian.party.v1.PartyService/CreateParty", nil)
+	// Simulate spoofed headers from a malicious client.
+	req.Header.Set(HeaderUserID, "spoofed-user")
+	req.Header.Set(HeaderTenantID, "spoofed-tenant")
+	req.Header.Set(HeaderAuthMethod, "jwt")
+	// Inject real authenticated identity via context (set by auth middleware).
+	ctx := context.WithValue(req.Context(), auth.UserIDContextKey, "real-user-789")
+	ctx = context.WithValue(ctx, auth.TenantIDContextKey, "real-tenant-abc")
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	server.mux.ServeHTTP(rec, req)
+
+	// Spoofed values must be replaced with the real authenticated identity.
+	assert.Equal(t, "real-user-789", capturedHeaders.Get(HeaderUserID))
+	assert.Equal(t, "real-tenant-abc", capturedHeaders.Get(HeaderTenantID))
+	assert.Equal(t, AuthMethodJWT, capturedHeaders.Get(HeaderAuthMethod))
 }
 
 // TestWithTranscoder_VanguardFromDescriptor verifies that a real Vanguard
