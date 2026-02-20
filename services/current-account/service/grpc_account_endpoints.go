@@ -118,7 +118,15 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 		}
 
 		// Evaluate CEL eligibility if an eligibility program is configured
-		if cachedType.EligibilityProgram != nil && s.partyClient != nil {
+		if cachedType.EligibilityProgram != nil {
+			if s.partyClient == nil {
+				operationStatus = "eligibility_unavailable"
+				s.logger.Error("party client not configured but eligibility program requires it",
+					"product_type_code", req.ProductTypeCode,
+					"party_id", req.PartyId,
+					"account_id", accountID)
+				return nil, status.Error(codes.FailedPrecondition, "party service is required for eligibility checks")
+			}
 			eligible, eligErr := s.evaluateEligibility(ctx, cachedType, req.PartyId, req.Attributes)
 			if eligErr != nil {
 				operationStatus = "eligibility_check_failed"
@@ -154,10 +162,19 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 			}
 		}
 
-		// Determine version: use requested version or latest from definition
+		// Determine version: use requested version or latest from definition.
+		// When a specific version is requested, validate it does not exceed the
+		// latest known version since the cache only holds the latest definition.
 		version := cachedType.Definition.Version
 		if req.ProductTypeVersion != nil {
-			version = int(*req.ProductTypeVersion)
+			requested := int(*req.ProductTypeVersion)
+			if requested > cachedType.Definition.Version {
+				operationStatus = "invalid_version"
+				return nil, status.Errorf(codes.InvalidArgument,
+					"requested version %d exceeds latest version %d for product type %s",
+					requested, cachedType.Definition.Version, req.ProductTypeCode)
+			}
+			version = requested
 		}
 
 		opts = append(opts, domain.WithProductType(req.ProductTypeCode, version))

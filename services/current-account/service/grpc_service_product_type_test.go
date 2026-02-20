@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"testing"
@@ -81,7 +82,7 @@ type jsonStringReader struct {
 
 func (r *jsonStringReader) Read(p []byte) (n int, err error) {
 	if r.i >= len(r.s) {
-		return 0, fmt.Errorf("EOF")
+		return 0, io.EOF
 	}
 	n = copy(p, r.s[r.i:])
 	r.i += n
@@ -408,6 +409,97 @@ func TestInitiateCurrentAccount_WithProductType_CELEligibility(t *testing.T) {
 		assert.Equal(t, codes.FailedPrecondition, st.Code())
 		assert.Contains(t, st.Message(), "not eligible")
 	})
+}
+
+// TestInitiateCurrentAccount_WithProductType_EligibilityRequiresPartyClient verifies
+// that account creation fails fast when an eligibility program is configured but
+// the party client is not available.
+func TestInitiateCurrentAccount_WithProductType_EligibilityRequiresPartyClient(t *testing.T) {
+	db, ctx, cleanup := setupProductTypeTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+
+	prg := compileTestEligibilityProgram(t, `party.type == "PERSON"`)
+
+	def := newTestDefinition("PERSONAL_CURRENT", accounttype.BehaviorClassCustomer)
+	def.EligibilityCEL = `party.type == "PERSON"`
+	cache := &mockAccountTypeCache{
+		entries: map[string]*CachedAccountType{
+			"PERSONAL_CURRENT": {
+				Definition:         def,
+				EligibilityProgram: prg,
+			},
+		},
+	}
+
+	svc := &Service{
+		repo:             repo,
+		partyClient:      nil, // No party client configured
+		accountTypeCache: cache,
+		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
+	}
+
+	req := &pb.InitiateCurrentAccountRequest{
+		AccountIdentification: "GB82WEST12345698765432",
+		PartyId:               newTestPartyID(),
+		BaseCurrency:          commonpb.Currency_CURRENCY_GBP,
+		ProductTypeCode:       "PERSONAL_CURRENT",
+	}
+	resp, err := svc.InitiateCurrentAccount(ctx, req)
+
+	require.Error(t, err)
+	assert.Nil(t, resp)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.FailedPrecondition, st.Code())
+	assert.Contains(t, st.Message(), "party service is required")
+}
+
+// TestInitiateCurrentAccount_WithProductType_VersionExceedsLatest verifies
+// that requesting a version higher than the latest cached version is rejected.
+func TestInitiateCurrentAccount_WithProductType_VersionExceedsLatest(t *testing.T) {
+	db, ctx, cleanup := setupProductTypeTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+
+	def := newTestDefinition("CURRENT_GBP", accounttype.BehaviorClassCustomer)
+	def.Version = 3 // latest version is 3
+	cache := &mockAccountTypeCache{
+		entries: map[string]*CachedAccountType{
+			"CURRENT_GBP": {Definition: def},
+		},
+	}
+
+	mockParty := &mockPartyClient{
+		partyExists: true,
+		partyStatus: partyv1.PartyStatus_PARTY_STATUS_ACTIVE,
+	}
+
+	svc := &Service{
+		repo:             repo,
+		partyClient:      mockParty,
+		accountTypeCache: cache,
+		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
+	}
+
+	requestedVersion := int32(5) // higher than latest version 3
+	req := &pb.InitiateCurrentAccountRequest{
+		AccountIdentification: "GB82WEST12345698765432",
+		PartyId:               newTestPartyID(),
+		BaseCurrency:          commonpb.Currency_CURRENCY_GBP,
+		ProductTypeCode:       "CURRENT_GBP",
+		ProductTypeVersion:    &requestedVersion,
+	}
+	resp, err := svc.InitiateCurrentAccount(ctx, req)
+
+	require.Error(t, err)
+	assert.Nil(t, resp)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+	assert.Contains(t, st.Message(), "exceeds latest version")
 }
 
 // TestInitiateCurrentAccount_WithProductType_AttributeValidation verifies
