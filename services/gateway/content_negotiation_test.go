@@ -408,7 +408,8 @@ func TestContentNegotiation_RPCPathVsRESTPath(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 		result := readJSONBody(t, resp)
-		party := result["party"].(map[string]interface{})
+		party, ok := result["party"].(map[string]interface{})
+		require.True(t, ok, "expected 'party' object in response, got: %v", result)
 		assert.Equal(t, "rest-path-test", party["partyId"])
 	})
 
