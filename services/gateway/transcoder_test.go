@@ -82,6 +82,40 @@ func TestNewTranscoder_MultipleServices(t *testing.T) {
 	assert.NotNil(t, handler)
 }
 
+// TestNewTranscoder_EmptyServiceName verifies that NewTranscoder returns an error
+// when a ServiceBackend has an empty ServiceName.
+func TestNewTranscoder_EmptyServiceName(t *testing.T) {
+	backends := []ServiceBackend{
+		{ServiceName: "", BackendAddr: "localhost:50051"},
+	}
+	_, err := NewTranscoder(testDescriptorBytes, backends)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrEmptyServiceName)
+}
+
+// TestNewTranscoder_EmptyBackendAddr verifies that NewTranscoder returns an error
+// when a ServiceBackend has an empty BackendAddr.
+func TestNewTranscoder_EmptyBackendAddr(t *testing.T) {
+	backends := []ServiceBackend{
+		{ServiceName: "meridian.party.v1.PartyService", BackendAddr: ""},
+	}
+	_, err := NewTranscoder(testDescriptorBytes, backends)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrEmptyBackendAddr)
+}
+
+// TestNewTranscoder_DuplicateService verifies that NewTranscoder returns an error
+// when two backends share the same ServiceName.
+func TestNewTranscoder_DuplicateService(t *testing.T) {
+	backends := []ServiceBackend{
+		{ServiceName: "meridian.party.v1.PartyService", BackendAddr: "localhost:50051"},
+		{ServiceName: "meridian.party.v1.PartyService", BackendAddr: "localhost:50052"},
+	}
+	_, err := NewTranscoder(testDescriptorBytes, backends)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDuplicateService)
+}
+
 // TestNewTranscoder_ServeHTTP verifies that the transcoder handler responds to
 // HTTP requests (even if the backend is unavailable, it should return a valid
 // HTTP response rather than panicking).

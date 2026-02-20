@@ -20,6 +20,12 @@ var (
 	ErrNoBackends = errors.New("at least one ServiceBackend must be provided")
 	// ErrNotServiceDescriptor is returned when a descriptor name resolves to a non-service type.
 	ErrNotServiceDescriptor = errors.New("descriptor is not a service")
+	// ErrEmptyServiceName is returned when a ServiceBackend has an empty ServiceName.
+	ErrEmptyServiceName = errors.New("ServiceBackend.ServiceName must not be empty")
+	// ErrEmptyBackendAddr is returned when a ServiceBackend has an empty BackendAddr.
+	ErrEmptyBackendAddr = errors.New("ServiceBackend.BackendAddr must not be empty")
+	// ErrDuplicateService is returned when two ServiceBackend entries share the same ServiceName.
+	ErrDuplicateService = errors.New("duplicate ServiceBackend.ServiceName")
 )
 
 // ServiceBackend maps a fully-qualified gRPC service name to the host:port of
@@ -50,6 +56,21 @@ type ServiceBackend struct {
 func NewTranscoder(descriptorBytes []byte, backends []ServiceBackend) (http.Handler, error) {
 	if len(backends) == 0 {
 		return nil, ErrNoBackends
+	}
+
+	// Validate backends upfront: check for empty fields and duplicates.
+	seen := make(map[string]struct{}, len(backends))
+	for _, b := range backends {
+		if b.ServiceName == "" {
+			return nil, ErrEmptyServiceName
+		}
+		if b.BackendAddr == "" {
+			return nil, ErrEmptyBackendAddr
+		}
+		if _, exists := seen[b.ServiceName]; exists {
+			return nil, fmt.Errorf("%w: %q", ErrDuplicateService, b.ServiceName)
+		}
+		seen[b.ServiceName] = struct{}{}
 	}
 
 	// 1. Parse the compiled FileDescriptorSet.
