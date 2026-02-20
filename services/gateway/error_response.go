@@ -51,7 +51,6 @@ type errorReformattingWriter struct {
 	http.ResponseWriter
 	statusCode int
 	body       bytes.Buffer
-	written    bool
 }
 
 func (w *errorReformattingWriter) WriteHeader(statusCode int) {
@@ -59,7 +58,6 @@ func (w *errorReformattingWriter) WriteHeader(statusCode int) {
 }
 
 func (w *errorReformattingWriter) Write(b []byte) (int, error) {
-	w.written = true
 	return w.body.Write(b)
 }
 
