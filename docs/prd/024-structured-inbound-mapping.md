@@ -479,23 +479,66 @@ requests.
 - Batch support: 2 points
 - Reference mappings + tests: 5 points
 
-**Critical path**: Proto, Engine, Gateway routing (16 points sequential)
-**Parallelizable**: DryRunMapping, batch support, and reference mappings
-can run alongside gateway integration
+**Critical path**: Proto (5) then Engine+DryRun (11) then Gateway (3)
+= 19 points sequential
+
+**Parallelizable**: Batch support (2) and reference mappings (5) can
+run alongside gateway integration
 
 ## Implementation Advisory
 
-- **JSON Path Library**: Use `tidwall/gjson` for `source_path`
-  extraction. Avoids full unmarshaling for performance. Fall back to
-  full `encoding/json` only for complex nested writes.
-- **CEL Compilation**: Pre-compile `FieldTransform` CEL expressions at
-  mapping registration. Cache compiled programs in the gateway
-  middleware using `hashicorp/golang-lru` (same pattern as
-  `services/reference-data/cel/`).
+### Dependencies
+
+- **`tidwall/gjson`**: Add to `go.mod` for `source_path` extraction.
+  Not currently in the module — must be added. Significantly faster
+  than `encoding/json` for path-based extraction (no full unmarshal).
+  Fall back to `encoding/json` only for complex nested writes.
+- **`hashicorp/golang-lru/v2`**: Already in `go.mod` (v2.0.7). Use
+  for compiled mapping cache in the gateway middleware.
+
+### Build Order
+
+Implement **DryRunMapping before the live middleware**. DryRun shares
+~90% of the transformation logic (path extraction, CEL evaluation,
+enum mapping, attribute flattening) but is easier to unit test because
+it's a simple RPC with no routing or Vanguard integration. Once DryRun
+works, the live middleware wraps the same engine with HTTP routing and
+request forwarding.
+
+Recommended sequence:
+
+1. Proto + CRUD (foundation)
+2. Mapping engine core (pure transform logic, no HTTP)
+3. DryRunMapping RPC (engine + RPC wrapper, full unit test coverage)
+4. Gateway `/inbound/` middleware (engine + HTTP routing + Vanguard)
+5. Reference mappings + integration tests
+
+### Caching Strategy
+
+The gateway must cache compiled mapping definitions to avoid
+re-fetching and re-compiling on every request.
+
+- **Cache implementation**: `hashicorp/golang-lru/v2` with a bounded
+  size per tenant. Key: `{tenant_id}:{mapping_name}:{version}`.
+- **Invalidation (V1)**: Short TTL of 1-5 minutes. Simple, no
+  infrastructure dependency. Acceptable because mapping definitions
+  change infrequently (registration/activation, not per-request).
+- **Invalidation (V2)**: Hook into the Event Bus via
+  `reference-data.mapping.updated` events for near-instant
+  invalidation. This aligns with the existing event-driven patterns
+  but is not required for the initial implementation.
+
+### Other Notes
+
+- **CEL Compilation**: Pre-compile all CEL expressions at mapping
+  registration time. Store compiled programs alongside the mapping
+  definition in the cache. Reuse the existing CEL compiler constraints
+  from `services/reference-data/cel/`.
 - **Recursion Guard**: The `/inbound/` routing strategy naturally
-  prevents recursion — Vanguard forwards to gRPC backends, not back to
-  the gateway's `/inbound/` handler. Validate at registration time that
-  `target_service` is a known gRPC service, not a mapping endpoint.
+  prevents recursion — Vanguard forwards to gRPC backends, not back
+  to the gateway's `/inbound/` handler. Validate at registration time
+  that `target_service` is a known gRPC service, not a mapping
+  endpoint.
 
 ## Open Questions
 
