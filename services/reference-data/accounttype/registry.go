@@ -22,6 +22,10 @@ type ValidationResult struct {
 // All methods extract tenant context from ctx using shared/platform/tenant.
 // Schema routing is handled by PostgreSQL search_path.
 type Registry interface {
+	// GetDefinitionByID retrieves a specific account type by its UUID.
+	// Returns ErrNotFound if the definition doesn't exist.
+	GetDefinitionByID(ctx context.Context, id uuid.UUID) (*Definition, error)
+
 	// GetDefinition retrieves a specific account type by code and version.
 	// Returns ErrNotFound if the definition doesn't exist.
 	GetDefinition(ctx context.Context, code string, version int) (*Definition, error)
