@@ -2,13 +2,13 @@
 
 ## Problem Statement
 
-External systems send JSON in their own formats — a bank's party payload looks
-different from an energy retailer's, which looks different from a carbon registry's.
-Today, every integration must manually conform to Meridian's exact proto-derived
-JSON structure (`camelCase` field names, specific enum strings, nested message
-shapes). This creates friction: integrators must read proto definitions to
-understand the expected format, and any structural mismatch causes opaque
-validation failures.
+External systems send JSON in their own formats — a bank's party payload
+looks different from an energy retailer's, which looks different from a
+carbon registry's. Today, every integration must manually conform to
+Meridian's exact proto-derived JSON structure (`camelCase` field names,
+specific enum strings, nested message shapes). This creates friction:
+integrators must read proto definitions to understand the expected format,
+and any structural mismatch causes opaque validation failures.
 
 Meanwhile, Meridian's three domains handle flexibility inconsistently:
 
@@ -19,7 +19,7 @@ Meanwhile, Meridian's three domains handle flexibility inconsistently:
 | Market Data | JSON Schema + `AttributeEntry` + `Struct` | CEL | Resolution keys | Full |
 
 The Vanguard transcoder (tasks 1-10) solved **protocol transcoding**
-(HTTP/JSON ↔ gRPC). This PRD addresses the next layer: **semantic
+(HTTP/JSON to gRPC). This PRD addresses the next layer: **semantic
 transcoding** — mapping external data formats to internal proto structures
 with validation, transformation, and computed field generation.
 
@@ -29,14 +29,18 @@ with validation, transformation, and computed field generation.
 
 **Protocol Layer** (solved by gateway-json-transcoding):
 
-- Vanguard transcodes REST/JSON → gRPC proto using `google.api.http` annotations
+- Vanguard transcodes REST/JSON to gRPC proto using `google.api.http`
+  annotations
 - Handles Content-Type negotiation (JSON, Connect, gRPC-Web)
 - Identity headers propagate as gRPC metadata
 
-**Schema Infrastructure** (exists in reference-data and market-information):
+**Schema Infrastructure** (exists in reference-data and
+market-information):
 
-- `attribute_schema` (JSON Schema, max 16KB) — defines valid attributes per entity type
-- CEL compiler (`services/reference-data/cel/compiler.go`) with security constraints:
+- `attribute_schema` (JSON Schema, max 16KB) — defines valid attributes
+  per entity type
+- CEL compiler (`services/reference-data/cel/compiler.go`) with security
+  constraints:
   - Max 4096 bytes, max 10 nesting depth, cost limit 10,000
   - Guaranteed termination (no while loops, no recursion)
 - `repeated AttributeEntry` for deterministic attribute ordering
@@ -59,98 +63,175 @@ with validation, transformation, and computed field generation.
    mapping; no tenant-aware transformations
 4. **Computed field generation at ingress**: Resolution keys, fungibility
    keys computed deep in service layers — could be computed earlier
-5. **External format discovery**: No way for integrators to ask "what JSON
-   shape does tenant X expect for party onboarding?"
+5. **External format discovery**: No way for integrators to ask "what
+   JSON shape does tenant X expect for party onboarding?"
 
 ## Solution: Inbound Mapping Definitions
 
 ### Core Concept
 
-An **Inbound Mapping** is a tenant-configurable definition that describes how
-to transform external JSON into Meridian's internal proto structure. Each
-mapping targets a specific RPC (e.g., `RegisterParty`, `CreateInstrument`,
-`RecordObservation`) and defines:
+An **Inbound Mapping** is a tenant-configurable definition that describes
+how to transform external JSON into Meridian's internal proto structure.
+Each mapping targets a specific RPC (e.g., `RegisterParty`,
+`CreateInstrument`, `RecordObservation`) and defines:
 
-1. **Field mappings**: External field paths → internal proto field paths
-2. **Type coercions**: String→enum, string→decimal, date format normalization
+1. **Field mappings**: External field paths to internal proto field paths
+2. **Type coercions**: String to enum, string to decimal, date format
+   normalization
 3. **Validation rules**: CEL expressions for cross-field validation
-4. **Computed fields**: CEL expressions that derive values from input (resolution keys, default values)
-5. **Attribute flattening**: Map flat external JSON keys into `repeated AttributeEntry` or `google.protobuf.Struct`
+4. **Computed fields**: CEL expressions that derive values from input
+   (resolution keys, default values)
+5. **Attribute flattening**: Map flat external JSON keys into
+   `repeated AttributeEntry` or `google.protobuf.Struct`
+
+### Routing Strategy
+
+Mapped requests use a **dedicated ingress path** to disambiguate from
+direct API calls:
+
+```text
+POST /inbound/{mapping_name}
+```
+
+The gateway:
+
+1. Extracts `mapping_name` from the URL path
+2. Looks up the mapping definition by name (tenant-scoped via identity
+   headers)
+3. Transforms the request body using the mapping rules
+4. Rewrites the request internally to the `target_service`/`target_rpc`
+5. Forwards the proto-conformant JSON to Vanguard
+
+This avoids intercepting standard gRPC paths (e.g., `/v1/party`), which
+would risk breaking clients that already send valid proto-JSON. It also
+supports multiple mappings per RPC — a tenant can have
+`bank-x-party-onboarding` and `bank-y-party-onboarding` targeting the
+same `RegisterParty` RPC with different field layouts.
 
 ### Architecture
 
 ```text
-External JSON → Gateway → Mapping Engine → Proto-conformant JSON → Vanguard → gRPC
-                               ↑
-                     InboundMappingDefinition
-                     (tenant-configured, per-RPC)
+POST /inbound/{mapping_name}
+  |
+  v
+Gateway --> Mapping Engine --> Proto-conformant JSON --> Vanguard --> gRPC
+                 |
+       InboundMappingDefinition
+       (tenant-configured, per-mapping-name)
 ```
 
-The Mapping Engine sits as middleware **before** Vanguard in the gateway chain. It:
+### Service Ownership
 
-1. Identifies the target RPC from the URL path
-2. Looks up the tenant's mapping definition for that RPC
-3. Transforms the request body
-4. Passes the conformant JSON to Vanguard for proto transcoding
+Mapping CRUD lives in **`services/reference-data/`**. Mappings are
+metadata about how to interpret data, analogous to Instrument Definitions
+and Attribute Schemas. They reuse the CEL compiler infrastructure already
+present in Reference Data (`services/reference-data/cel/compiler.go`).
+
+The **Mapping Engine middleware** lives in `services/gateway/` — it
+intercepts `/inbound/` requests, calls Reference Data to resolve the
+mapping definition, applies transforms, and forwards to Vanguard.
 
 ### Data Model
 
 ```protobuf
 // api/proto/meridian/mapping/v1/mapping.proto
 
+enum MappingStatus {
+  MAPPING_STATUS_UNSPECIFIED = 0;
+  MAPPING_STATUS_DRAFT = 1;
+  MAPPING_STATUS_ACTIVE = 2;
+  MAPPING_STATUS_DEPRECATED = 3;
+}
+
 message InboundMappingDefinition {
   string id = 1;
   string tenant_id = 2;
-  string name = 3;                          // e.g., "bank-x-party-onboarding"
-  string target_service = 4;                // e.g., "meridian.party.v1.PartyService"
-  string target_rpc = 5;                    // e.g., "RegisterParty"
-  string version = 6;                       // Semver for safe evolution
-  MappingStatus status = 7;                 // DRAFT → ACTIVE → DEPRECATED
+  string name = 3;              // "bank-x-party-onboarding"
+  string target_service = 4;    // "meridian.party.v1.PartyService"
+  string target_rpc = 5;        // "RegisterParty"
+  string version = 6;           // Semver for safe evolution
+  MappingStatus status = 7;
 
   // Schema of expected inbound JSON (for discovery/docs)
-  string input_schema = 8;                  // JSON Schema describing external format
+  string input_schema = 8;      // JSON Schema
 
   // Transformation rules (ordered, applied sequentially)
   repeated FieldMapping field_mappings = 9;
   repeated ComputedField computed_fields = 10;
-  string validation_expression = 11;        // CEL: cross-field validation (post-mapping)
+  string validation_expression = 11;  // CEL: post-mapping validation
 
   // Metadata
   google.protobuf.Timestamp created_at = 12;
   google.protobuf.Timestamp updated_at = 13;
+
+  // Batch support
+  bool is_batch = 14;           // Input is JSON array
+  string batch_target_path = 15; // Wrap array at this path
 }
 
 message FieldMapping {
-  string source_path = 1;                   // JSONPath in external JSON: "$.govt_id"
-  string target_path = 2;                   // Proto field path: "reference.government_id"
-  FieldTransform transform = 3;             // Optional transformation
+  string source_path = 1;       // JSONPath: "$.govt_id"
+  string target_path = 2;       // Proto path: "reference.government_id"
+  FieldTransform transform = 3; // Optional transformation
 }
 
 message FieldTransform {
   oneof transform {
-    string cel_expression = 1;              // CEL: "source.toUpper()"
-    EnumMapping enum_mapping = 2;           // {"INDIVIDUAL": "PARTY_TYPE_PERSON", ...}
-    string date_format = 3;                 // "2006-01-02" → RFC3339
-    string default_value = 4;               // If source missing, use this
-    AttributeFlatten attribute_flatten = 5;  // Map flat keys → AttributeEntry[]
+    string cel_expression = 1;
+    EnumMapping enum_mapping = 2;
+    string date_format = 3;       // "2006-01-02" to RFC3339
+    string default_value = 4;     // Fallback if source missing
+    AttributeFlatten attribute_flatten = 5;
   }
 }
 
 message EnumMapping {
-  map<string, string> values = 1;           // External → internal enum string
-  string fallback = 2;                      // Default if no match
+  map<string, string> values = 1; // External to internal
+  string fallback = 2;            // Default if no match
 }
 
 message AttributeFlatten {
-  repeated string source_keys = 1;          // External keys to collect
-  string target_field = 2;                  // "attributes" (repeated AttributeEntry)
+  repeated string source_keys = 1; // External keys to collect
+  string target_field = 2;         // "attributes"
 }
 
 message ComputedField {
-  string target_path = 1;                   // Proto field to populate
-  string cel_expression = 2;               // CEL using mapped fields as input
+  string target_path = 1;         // Proto field to populate
+  string cel_expression = 2;      // CEL using mapped fields
 }
 ```
+
+#### CEL Expression Context
+
+CEL expressions have access to different variables depending on where
+they appear:
+
+- **`FieldTransform.cel_expression`**: `source` (the extracted source
+  field value). Return type must match the target field type.
+- **`ComputedField.cel_expression`**: `input` (original external JSON
+  as `map<string, any>`) and `mapped` (intermediate state after
+  field_mappings applied as `map<string, any>`).
+- **`validation_expression`**: `input` and `mapped`. Must return
+  `bool` — `false` rejects the request with a 400 error.
+
+All CEL expressions are subject to the existing compiler constraints:
+max 4096 bytes, max 10 nesting depth, cost limit 10,000.
+
+### Batch Support
+
+External feeds often send JSON arrays (e.g., `[{obs1}, {obs2}]`) while
+Vanguard expects a wrapper object (e.g., `{"observations": [...]}`).
+
+When `is_batch = true`:
+
+1. The engine validates the input is a JSON array
+2. Applies field_mappings and computed_fields to each element
+3. Wraps the transformed array at `batch_target_path`
+
+Example: An energy feed sends `[{meter, reading}, {meter, reading}]`.
+With `batch_target_path = "observations"`, the engine produces
+`{"observations": [{mapped1}, {mapped2}]}` for
+`RecordObservationBatch`.
 
 ### Example: Bank Party Onboarding Mapping
 
@@ -168,6 +249,8 @@ message ComputedField {
 }
 ```
 
+**Request**: `POST /inbound/bank-x-party-onboarding`
+
 **Mapping Definition**:
 
 ```yaml
@@ -180,7 +263,9 @@ field_mappings:
     target: "party_type"
     transform:
       enum_mapping:
-        values: {"individual": "PARTY_TYPE_PERSON", "corporate": "PARTY_TYPE_ORGANIZATION"}
+        values:
+          individual: "PARTY_TYPE_PERSON"
+          corporate: "PARTY_TYPE_ORGANIZATION"
 
   - source: "$.full_name"
     target: "legal_name"
@@ -199,13 +284,13 @@ field_mappings:
 
 computed_fields:
   - target: "display_name"
-    cel: "input.full_name.split(' ')[0]"   # First name as display name
+    cel: "input.full_name.split(' ')[0]"
 
 validation:
   cel: "has(input.full_name) && size(input.full_name) > 0"
 ```
 
-**Result** (proto-conformant JSON passed to Vanguard):
+**Result** (proto-conformant JSON forwarded to Vanguard):
 
 ```json
 {
@@ -241,8 +326,9 @@ validation:
 
 **Mapping Definition** transforms to `RecordObservation` with:
 
-- `quality: "estimated"` → `QUALITY_ESTIMATE`
-- Flat `tenor` + `settlement` → `repeated AttributeEntry`
+- `quality: "estimated"` mapped to `QUALITY_ESTIMATE` via enum_mapping
+- Flat `tenor` + `settlement` collected into
+  `repeated AttributeEntry` via attribute_flatten
 - Computed `resolution_key_value` from attributes via CEL
 
 ### Example: Asset Class Definition Mapping
@@ -263,30 +349,41 @@ validation:
 
 **Mapping Definition** transforms to `RegisterInstrument` with:
 
-- `unit: "tCO2e"` → instrument code lookup/creation
-- Flat `registry`, `vintage_year`, `methodology` → `repeated AttributeEntry`
-- `validation_expression` computed: `"value >= 0.001"`
+- `unit: "tCO2e"` mapped to instrument code lookup/creation
+- Flat `registry`, `vintage_year`, `methodology` collected into
+  `repeated AttributeEntry`
+- `validation_expression`: `"value >= 0.001"`
 - `dimension` derived from unit type
 
 ## Scope
 
 ### In Scope (This PRD)
 
-1. **InboundMappingDefinition proto** — data model for mapping definitions
-2. **Mapping CRUD service** — create, update, version, activate/deprecate mappings
-3. **Mapping Engine middleware** — gateway component that applies mappings before Vanguard
-4. **CEL-based transforms** — reuse existing CEL compiler with mapping-specific extensions
-5. **Schema discovery API** — "what JSON shape does this mapping expect?"
-6. **Mapping validation** — compile-time verification that mappings produce valid proto JSON
-7. **Three reference mappings** — one each for Party, Reference Data, and Market Data
+1. **InboundMappingDefinition proto** — data model for mapping
+   definitions
+2. **Mapping CRUD service** — create, update, version,
+   activate/deprecate mappings (in `services/reference-data/`)
+3. **Mapping Engine middleware** — gateway component that intercepts
+   `/inbound/{mapping_name}` and applies mappings before Vanguard
+4. **CEL-based transforms** — reuse existing CEL compiler with
+   mapping-specific extensions
+5. **Schema discovery API** — "what JSON shape does this mapping
+   expect?"
+6. **Mapping validation** — compile-time verification that mappings
+   produce valid proto JSON
+7. **DryRunMapping RPC** — paste JSON, see transformed output or errors
+8. **Batch support** — `is_batch` + `batch_target_path` for array
+   inputs
+9. **Three reference mappings** — one each for Party, Reference Data,
+   and Market Data
 
 ### Out of Scope
 
 - **Outbound mapping** (response transformation) — separate PRD
-- **Streaming/batch mapping** — this covers request/response only
+- **Streaming mapping** — this covers request/response only
 - **UI for mapping creation** — API-first, UI later
 - **Mapping marketplace** — sharing mappings between tenants
-- **AI-assisted mapping generation** — future enhancement (LLM generates mapping from sample JSON)
+- **AI-assisted mapping generation** — future enhancement
 
 ## Design Constraints
 
@@ -294,67 +391,121 @@ validation:
 
 All mapping definitions must be **safe by construction**:
 
-1. **CEL only** for expressions — guaranteed termination, bounded cost, no side effects
-2. **JSON Schema validation** of both input and output — catch errors at definition time
-3. **Mapping compilation** at registration — parse all paths, compile all
-   CEL, validate all enum mappings. Reject invalid mappings immediately.
-4. **Cost limits** — reuse existing CEL compiler constraints
-   (max 4096 bytes, cost limit 10,000)
+1. **CEL only** for expressions — guaranteed termination, bounded cost,
+   no side effects
+2. **JSON Schema validation** of both input and output — catch errors at
+   definition time
+3. **Mapping compilation** at registration — parse all paths, compile
+   all CEL, validate all enum mappings. Reject invalid mappings
+   immediately.
+4. **Cost limits** — reuse existing CEL compiler constraints (max 4096
+   bytes, cost limit 10,000)
 5. **Immutable versions** — once active, a mapping version is frozen.
    Changes create new versions.
+6. **Recursion guard** — a mapping cannot target an RPC that triggers
+   another mapping. The `/inbound/` routing strategy prevents this
+   naturally since Vanguard forwards to gRPC, not back to `/inbound/`.
 
 ### Performance
 
 1. **Compiled mappings cached** — don't re-parse on every request. Cache
-   compiled CEL programs and path extractors per tenant+mapping.
-2. **Sub-millisecond overhead** for simple field mappings (rename + type coercion)
+   compiled CEL programs and path extractors per tenant+mapping using
+   `hashicorp/golang-lru` (same pattern as Reference Data).
+2. **Sub-millisecond overhead** for simple field mappings (rename + type
+   coercion)
 3. **< 5ms overhead** for complex mappings with CEL evaluation
-4. **Zero overhead** when no mapping defined — passthrough to Vanguard unchanged
+4. **Zero overhead** when no mapping defined — passthrough to Vanguard
+   unchanged
+5. **Lazy JSON path extraction** — use `tidwall/gjson` for source_path
+   extraction to avoid full unmarshaling where possible
 
 ### Consistency
 
-1. **Unified pattern** — Party, Reference Data, and Market Data all use the same mapping infrastructure
+1. **Unified pattern** — Party, Reference Data, and Market Data all use
+   the same mapping infrastructure
 2. **Deterministic** — same input + same mapping = same output, always
-3. **Bi-temporal aware** — mappings can set temporal fields (valid_from/valid_to) from external formats
+3. **Bi-temporal aware** — mappings can set temporal fields
+   (valid_from/valid_to) from external formats
+
+## Debugging and Visibility
+
+### Transformation Trace
+
+Every mapping execution generates a trace ID logged by the gateway.
+When a mapping fails (CEL error, missing required field, schema
+violation), the external partner receives a 400 with the trace ID for
+correlation.
+
+### DryRunMapping RPC
+
+A `DryRunMapping` RPC (analogous to `EvaluateAssetValuation` and
+`ExecuteDryRun` in sagas) allows a tenant to:
+
+1. Submit sample JSON and a mapping name
+2. Receive the transformed output or detailed error diagnostics
+3. See which fields mapped, which defaulted, which CEL expressions
+   evaluated
+
+This is essential for integrator DX — partners can iterate on their
+payload format against a mapping definition without sending live
+requests.
 
 ## Success Criteria
 
-1. An external system can send JSON in its own format and have it correctly mapped to a Meridian RPC
-2. A tenant can register a mapping definition via API and see it take effect immediately
-3. Mapping validation rejects invalid definitions at registration time (not at request time)
-4. Schema discovery API returns the expected input JSON shape for a given mapping
-5. Performance overhead < 5ms p99 for complex mappings
-6. All three domains (Party, Reference Data, Market Data) have working reference mappings
+1. An external system can `POST /inbound/{mapping_name}` with JSON in
+   its own format and have it correctly mapped to a Meridian RPC
+2. A tenant can register a mapping definition via API and see it take
+   effect immediately
+3. Mapping validation rejects invalid definitions at registration time
+   (not at request time)
+4. Schema discovery API returns the expected input JSON shape for a
+   given mapping
+5. DryRunMapping shows transformed output or detailed errors for sample
+   input
+6. Performance overhead < 5ms p99 for complex mappings
+7. All three domains (Party, Reference Data, Market Data) have working
+   reference mappings
+8. Batch array inputs are correctly wrapped and forwarded
 
 ## Complexity Estimate
 
-**Total: 21 points** (decomposition needed)
+**Total: 26 points** (decomposition needed)
 
 - Proto definition + CRUD service: 5 points
-- Mapping engine middleware: 8 points (core complexity — path extraction, CEL evaluation, attribute flattening)
-- Gateway integration: 3 points
+- Mapping engine middleware: 8 points (path extraction, CEL evaluation,
+  attribute flattening, batch wrapping)
+- Gateway routing (`/inbound/` handler): 3 points
+- DryRunMapping RPC + trace logging: 3 points
+- Batch support: 2 points
 - Reference mappings + tests: 5 points
 
-**Critical path**: Proto → Engine → Gateway integration (16 points sequential)
-**Parallelizable**: Reference mappings can run alongside gateway integration
+**Critical path**: Proto, Engine, Gateway routing (16 points sequential)
+**Parallelizable**: DryRunMapping, batch support, and reference mappings
+can run alongside gateway integration
+
+## Implementation Advisory
+
+- **JSON Path Library**: Use `tidwall/gjson` for `source_path`
+  extraction. Avoids full unmarshaling for performance. Fall back to
+  full `encoding/json` only for complex nested writes.
+- **CEL Compilation**: Pre-compile `FieldTransform` CEL expressions at
+  mapping registration. Cache compiled programs in the gateway
+  middleware using `hashicorp/golang-lru` (same pattern as
+  `services/reference-data/cel/`).
+- **Recursion Guard**: The `/inbound/` routing strategy naturally
+  prevents recursion — Vanguard forwards to gRPC backends, not back to
+  the gateway's `/inbound/` handler. Validate at registration time that
+  `target_service` is a known gRPC service, not a mapping endpoint.
 
 ## Open Questions
 
-1. **Where does the mapping engine live?** Gateway middleware (request-level)
-   vs dedicated mapping service (RPC-level)? Gateway is simpler but couples
-   mapping logic to the gateway. Dedicated service is cleaner but adds a
-   network hop.
-
-2. **Mapping inheritance?** Should tenants inherit from a base mapping and
-   override specific fields? Useful for "bank template" + tenant
+1. **Mapping inheritance?** Should tenants inherit from a base mapping
+   and override specific fields? Useful for "bank template" + tenant
    customizations.
 
-3. **Versioned RPCs?** If a proto message evolves (new fields), should
+2. **Versioned RPCs?** If a proto message evolves (new fields), should
    mappings auto-adapt or require explicit versioning?
 
-4. **Batch operations?** Some domains accept batch requests (bulk
-   observations). Should mappings apply per-item within a batch?
-
-5. **Error granularity?** When mapping fails, should the error indicate
+3. **Error granularity?** When mapping fails, should the error indicate
    which field/transform failed? (Yes, almost certainly — but how
    detailed?)
