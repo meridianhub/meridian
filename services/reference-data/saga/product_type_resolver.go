@@ -2,6 +2,7 @@ package saga
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/meridianhub/meridian/services/reference-data/cache"
@@ -60,8 +61,15 @@ func (r *ProductTypeSagaResolver) ResolveForProductType(
 	sagaName := prefix + "." + operation
 	def, err := r.registry.GetActive(ctx, sagaName)
 	if err != nil {
-		return nil, fmt.Errorf("%w: no saga '%s' found for product type '%s' operation '%s'",
-			ErrSagaNotFound, sagaName, productTypeCode, operation)
+		if errors.Is(err, ErrNotFound) {
+			return nil, fmt.Errorf("%w: no saga '%s' found for product type '%s' operation '%s'",
+				ErrSagaNotFound, sagaName, productTypeCode, operation)
+		}
+		// Propagate transient errors (e.g. DB timeout, context cancellation) without
+		// wrapping as ErrSagaNotFound, so callers can distinguish infrastructure failures
+		// from a genuinely missing saga definition.
+		return nil, fmt.Errorf("failed to resolve saga '%s' for product type '%s': %w",
+			sagaName, productTypeCode, err)
 	}
 	return def, nil
 }
