@@ -116,16 +116,16 @@ func (s *Server) registerRoutes() {
 	// prefix-based reverse proxy when Backends are provided; otherwise use a
 	// placeholder that returns 501 Not Implemented.
 	//
-	// For the transcoder path, identityHeaderMiddleware wraps the handler to
+	// For the transcoder path, metadataPropagationMiddleware wraps the handler to
 	// strip spoofed incoming identity headers and inject authenticated identity
-	// headers from the request context (the same security pattern used by
-	// NewProxyHandler via its custom Director). This ensures backends always
-	// receive X-User-ID, X-Tenant-ID, X-Auth-Method, and X-Auth-Roles from
-	// the gateway's authentication result, never from the client.
+	// as lowercase gRPC metadata headers (x-user-id, x-tenant-id, x-auth-method,
+	// x-auth-roles). Vanguard forwards these headers to the gRPC backend where
+	// they are read as incoming metadata by the existing interceptor chain
+	// (TenantExtractionInterceptor reads x-tenant-id).
 	var apiHandler http.Handler
 	switch {
 	case s.transcoderHandler != nil:
-		apiHandler = identityHeaderMiddleware(s.transcoderHandler)
+		apiHandler = metadataPropagationMiddleware(s.transcoderHandler)
 	case len(s.config.Backends) > 0:
 		apiHandler = NewProxyHandler(s.config.Backends)
 	default:
