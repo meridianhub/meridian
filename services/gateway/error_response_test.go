@@ -154,6 +154,38 @@ func TestErrorReformattingMiddleware_AllVanguardErrorCodes(t *testing.T) {
 	}
 }
 
+// TestErrorReformattingMiddleware_PassesThroughNonVanguardJSON verifies that
+// generic JSON error bodies without Vanguard's code/message fields are passed
+// through unmodified rather than being overwritten with empty values.
+func TestErrorReformattingMiddleware_PassesThroughNonVanguardJSON(t *testing.T) {
+	originalBody := `{"error":"bad request"}`
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(originalBody))
+	})
+
+	handler := errorReformattingMiddleware(inner)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Equal(t, originalBody, rec.Body.String(), "non-Vanguard JSON must pass through unmodified")
+}
+
+// TestErrorReformattingWriter_WriteHeaderGuard verifies that only the first
+// WriteHeader call is honored, matching net/http semantics.
+func TestErrorReformattingWriter_WriteHeaderGuard(t *testing.T) {
+	rec := httptest.NewRecorder()
+	rw := &errorReformattingWriter{ResponseWriter: rec, statusCode: http.StatusOK}
+
+	rw.WriteHeader(http.StatusNotFound)
+	rw.WriteHeader(http.StatusInternalServerError) // should be ignored
+
+	assert.Equal(t, http.StatusNotFound, rw.statusCode)
+}
+
 // TestIsJSONContentType verifies content-type detection logic, including
 // RFC 2616 §3.7 case-insensitive media type matching.
 func TestIsJSONContentType(t *testing.T) {

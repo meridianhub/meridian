@@ -31,9 +31,11 @@ var grpcCodeNames = map[int]string{
 
 // vanguardErrorBody is the JSON structure that Vanguard emits for error responses.
 // It follows the google.rpc.Status format with a numeric code.
+// Pointer fields allow presence detection: a missing field stays nil, enabling
+// us to distinguish a real Vanguard body from generic JSON errors.
 type vanguardErrorBody struct {
-	Code    int               `json:"code"`
-	Message string            `json:"message"`
+	Code    *int              `json:"code"`
+	Message *string           `json:"message"`
 	Details []json.RawMessage `json:"details"`
 }
 
@@ -49,12 +51,17 @@ type canonicalErrorBody struct {
 // allowing the middleware to rewrite error responses before they are sent to the client.
 type errorReformattingWriter struct {
 	http.ResponseWriter
-	statusCode int
-	body       bytes.Buffer
+	statusCode  int
+	body        bytes.Buffer
+	wroteHeader bool
 }
 
 func (w *errorReformattingWriter) WriteHeader(statusCode int) {
+	if w.wroteHeader {
+		return
+	}
 	w.statusCode = statusCode
+	w.wroteHeader = true
 }
 
 func (w *errorReformattingWriter) Write(b []byte) (int, error) {
@@ -91,10 +98,10 @@ func errorReformattingMiddleware(next http.Handler) http.Handler {
 		bodyBytes := rw.body.Bytes()
 
 		var vErr vanguardErrorBody
-		if isJSONContentType(ct) && json.Unmarshal(bodyBytes, &vErr) == nil {
-			codeName := grpcCodeName(vErr.Code)
+		if isJSONContentType(ct) && json.Unmarshal(bodyBytes, &vErr) == nil && vErr.Code != nil && vErr.Message != nil {
+			codeName := grpcCodeName(*vErr.Code)
 			canonical := canonicalErrorBody{
-				Error:   vErr.Message,
+				Error:   *vErr.Message,
 				Code:    codeName,
 				Details: vErr.Details,
 			}
