@@ -541,6 +541,8 @@ func applyAllMigrations(t *testing.T, db *gorm.DB, migrationsDir string) {
 		"20260207000001_create_lien_table.sql",
 		"20260214000001_add_org_party_id.sql",
 		"20260214000002_add_org_scoping_indexes.sql",
+		"20260220000001_add_product_type_code.sql",
+		"20260220000002_add_product_type_index.sql",
 	}
 	for _, migration := range migrations {
 		sql, err := readMigrationFile(filepath.Join(migrationsDir, migration))

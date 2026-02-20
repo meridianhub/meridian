@@ -172,6 +172,8 @@ func setupTestContainer(t *testing.T) *testContainer {
 		account_code VARCHAR(50) NOT NULL,
 		name VARCHAR(255) NOT NULL,
 		account_type VARCHAR(20) NOT NULL,
+		product_type_code VARCHAR(100) NULL,
+		product_type_version INTEGER NULL,
 		instrument_code VARCHAR(32) NOT NULL,
 		dimension VARCHAR(20) NOT NULL,
 		status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',

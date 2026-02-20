@@ -203,6 +203,8 @@ func applyInternalBankAccountSchema(t *testing.T, pool *pgxpool.Pool, schemaName
 			account_type character varying(20) NOT NULL,
 			clearing_purpose character varying(32) NULL,
 			org_party_id uuid NULL,
+			product_type_code character varying(100) NULL,
+			product_type_version integer NULL,
 			instrument_code character varying(32) NOT NULL,
 			dimension character varying(20) NOT NULL DEFAULT '',
 			status character varying(20) NOT NULL DEFAULT 'ACTIVE',

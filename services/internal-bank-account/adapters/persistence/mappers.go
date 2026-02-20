@@ -41,6 +41,15 @@ func toEntity(ctx context.Context, account domain.InternalBankAccount) *Internal
 		clearingPurpose = &cpStr
 	}
 
+	// Handle nullable product type fields
+	var productTypeCode *string
+	var productTypeVersion *int
+	if ptc := account.ProductTypeCode(); ptc != "" {
+		productTypeCode = &ptc
+		ptv := account.ProductTypeVersion()
+		productTypeVersion = &ptv
+	}
+
 	return &InternalBankAccountEntity{
 		ID:                       account.ID(),
 		AccountID:                account.AccountID(),
@@ -49,6 +58,8 @@ func toEntity(ctx context.Context, account domain.InternalBankAccount) *Internal
 		AccountType:              string(account.AccountType()),
 		ClearingPurpose:          clearingPurpose,
 		OrgPartyID:               account.OrgPartyID(),
+		ProductTypeCode:          productTypeCode,
+		ProductTypeVersion:       productTypeVersion,
 		InstrumentCode:           account.InstrumentCode(),
 		Dimension:                account.Dimension(),
 		Status:                   string(account.Status()),
@@ -93,6 +104,16 @@ func toDomain(entity *InternalBankAccountEntity) domain.InternalBankAccount {
 		clearingPurpose = domain.ClearingPurpose(*entity.ClearingPurpose)
 	}
 
+	// Handle nullable product type fields
+	var productTypeCode string
+	var productTypeVersion int
+	if entity.ProductTypeCode != nil {
+		productTypeCode = *entity.ProductTypeCode
+	}
+	if entity.ProductTypeVersion != nil {
+		productTypeVersion = *entity.ProductTypeVersion
+	}
+
 	// Use builder pattern to reconstruct domain model
 	return domain.NewInternalBankAccountBuilder().
 		WithID(entity.ID).
@@ -102,6 +123,8 @@ func toDomain(entity *InternalBankAccountEntity) domain.InternalBankAccount {
 		WithAccountType(domain.AccountType(entity.AccountType)).
 		WithClearingPurpose(clearingPurpose).
 		WithOrgPartyID(entity.OrgPartyID).
+		WithProductTypeCode(productTypeCode).
+		WithProductTypeVersion(productTypeVersion).
 		WithInstrumentCode(entity.InstrumentCode).
 		WithDimension(entity.Dimension).
 		WithStatus(domain.AccountStatus(entity.Status)).

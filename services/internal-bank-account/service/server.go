@@ -3,6 +3,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -19,8 +20,11 @@ import (
 	"github.com/meridianhub/meridian/services/internal-bank-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/internal-bank-account/domain"
 	ibaobservability "github.com/meridianhub/meridian/services/internal-bank-account/observability"
+	"github.com/meridianhub/meridian/services/reference-data/accounttype"
+	"github.com/meridianhub/meridian/services/reference-data/cache"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/observability"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -50,8 +54,9 @@ type Service struct {
 	lienRepo              *persistence.LienRepository
 	positionKeepingClient PositionKeepingClient
 	referenceDataClient   ReferenceDataClient
-	valuationEngine       ValuationEngine     // Optional: executes valuation method logic
-	idempotencyService    idempotency.Service // Optional: nil = no Redis idempotency guard
+	valuationEngine       ValuationEngine              // Optional: executes valuation method logic
+	idempotencyService    idempotency.Service          // Optional: nil = no Redis idempotency guard
+	accountTypeCache      *cache.LocalAccountTypeCache // Optional: resolves product_type_code
 	logger                *slog.Logger
 	tracer                *observability.Tracer
 }
@@ -142,6 +147,13 @@ func WithIdempotencyService(svc idempotency.Service) Option {
 	}
 }
 
+// WithAccountTypeCache sets the account type cache for product type resolution.
+func WithAccountTypeCache(c *cache.LocalAccountTypeCache) Option {
+	return func(s *Service) {
+		s.accountTypeCache = c
+	}
+}
+
 // NewServiceFull creates a service with all dependencies using functional options.
 func NewServiceFull(
 	repo domain.Repository,
@@ -171,6 +183,61 @@ func NewServiceFull(
 	return svc, nil
 }
 
+// internalBehaviorClasses defines BehaviorClass values that are valid for InternalBankAccount.
+// CUSTOMER is explicitly excluded — only CurrentAccount may use CUSTOMER behavior class.
+var internalBehaviorClasses = map[accounttype.BehaviorClass]bool{
+	accounttype.BehaviorClassClearing:  true,
+	accounttype.BehaviorClassNostro:    true,
+	accounttype.BehaviorClassVostro:    true,
+	accounttype.BehaviorClassHolding:   true,
+	accounttype.BehaviorClassSuspense:  true,
+	accounttype.BehaviorClassRevenue:   true,
+	accounttype.BehaviorClassExpense:   true,
+	accounttype.BehaviorClassInventory: true,
+}
+
+// behaviorClassToAccountType maps a BehaviorClass to the corresponding domain AccountType.
+// INVENTORY maps to HOLDING because the IBA domain has no separate inventory type.
+var behaviorClassToAccountType = map[accounttype.BehaviorClass]domain.AccountType{
+	accounttype.BehaviorClassClearing:  domain.AccountTypeClearing,
+	accounttype.BehaviorClassNostro:    domain.AccountTypeNostro,
+	accounttype.BehaviorClassVostro:    domain.AccountTypeVostro,
+	accounttype.BehaviorClassHolding:   domain.AccountTypeHolding,
+	accounttype.BehaviorClassSuspense:  domain.AccountTypeSuspense,
+	accounttype.BehaviorClassRevenue:   domain.AccountTypeRevenue,
+	accounttype.BehaviorClassExpense:   domain.AccountTypeExpense,
+	accounttype.BehaviorClassInventory: domain.AccountTypeHolding,
+}
+
+// legacyAccountTypeToProductCode maps the deprecated InternalAccountType enum to a product type code.
+// Convention: <BEHAVIOR_CLASS>_<INSTRUMENT_CODE> (e.g., "CLEARING_GBP").
+func legacyAccountTypeToProductCode(at pb.InternalAccountType, instrumentCode string) string {
+	prefix := ""
+	//exhaustive:ignore
+	switch at {
+	case pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING:
+		prefix = "CLEARING"
+	case pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_NOSTRO:
+		prefix = "NOSTRO"
+	case pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_VOSTRO:
+		prefix = "VOSTRO"
+	case pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_HOLDING:
+		prefix = "HOLDING"
+	case pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_SUSPENSE:
+		prefix = "SUSPENSE"
+	case pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_REVENUE:
+		prefix = "REVENUE"
+	case pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_EXPENSE:
+		prefix = "EXPENSE"
+	case pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_INVENTORY:
+		prefix = "INVENTORY"
+	}
+	if prefix == "" {
+		return ""
+	}
+	return prefix + "_" + strings.ToUpper(instrumentCode)
+}
+
 // InitiateInternalBankAccount creates a new internal bank account.
 func (s *Service) InitiateInternalBankAccount(ctx context.Context, req *pb.InitiateInternalBankAccountRequest) (*pb.InitiateInternalBankAccountResponse, error) {
 	start := time.Now()
@@ -179,15 +246,123 @@ func (s *Service) InitiateInternalBankAccount(ctx context.Context, req *pb.Initi
 		ibaobservability.RecordOperationDuration("initiate_internal_bank_account", operationStatus, time.Since(start))
 	}()
 
-	// Map proto account type to domain
-	accountType, err := protoToAccountType(req.AccountType)
+	// 1. Determine product_type_code: new field takes precedence, legacy mapping as fallback
+	productTypeCode := req.ProductTypeCode
+	if productTypeCode == "" && req.AccountType != pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_UNSPECIFIED { //nolint:staticcheck // Intentional: reading deprecated field for backwards compatibility
+		productTypeCode = legacyAccountTypeToProductCode(req.AccountType, req.InstrumentCode) //nolint:staticcheck // Intentional: reading deprecated field for backwards compatibility
+	}
+
+	var accountType domain.AccountType
+	var clearingPurpose domain.ClearingPurpose
+	var dimension string
+	var productTypeVersion int
+	var valuationTemplates []accounttype.ValuationMethodTemplate
+
+	// 2. Product type resolution via cache (if cache is configured and code is available)
+	if s.accountTypeCache != nil && productTypeCode != "" {
+		tenantID, ok := tenant.FromContext(ctx)
+		if !ok {
+			operationStatus = operationStatusFailed
+			return nil, status.Error(codes.InvalidArgument, "tenant context required")
+		}
+
+		cached, err := s.accountTypeCache.GetOrLoad(ctx, tenantID, productTypeCode)
+		if err != nil {
+			operationStatus = operationStatusFailed
+			s.logger.Warn("product type resolution failed",
+				"product_type_code", productTypeCode,
+				"error", err)
+			return nil, status.Errorf(codes.InvalidArgument, "product type not found: %s", productTypeCode)
+		}
+
+		if cached.Definition == nil {
+			operationStatus = operationStatusFailed
+			return nil, status.Errorf(codes.Internal, "product type %s has no definition", productTypeCode)
+		}
+
+		def := cached.Definition
+
+		// 3. BehaviorClass gating: must NOT be CUSTOMER
+		if !internalBehaviorClasses[def.BehaviorClass] {
+			operationStatus = operationStatusFailed
+			return nil, status.Errorf(codes.InvalidArgument,
+				"product type %s has behavior class %s which is not an internal account type",
+				productTypeCode, def.BehaviorClass)
+		}
+
+		// 4. EligibilityCEL evaluation (skip if empty or "true")
+		if cached.EligibilityProgram != nil && def.EligibilityCEL != "" && def.EligibilityCEL != "true" {
+			// For internal bank accounts, eligibility checks evaluate without a party.
+			// The CEL environment receives account-level context only.
+			activation := map[string]interface{}{
+				"instrument_code": req.InstrumentCode,
+				"account_code":    req.AccountCode,
+			}
+			out, _, evalErr := cached.EligibilityProgram.Eval(activation)
+			if evalErr != nil {
+				operationStatus = operationStatusFailed
+				return nil, status.Errorf(codes.Internal, "eligibility evaluation failed: %v", evalErr)
+			}
+			eligible, isBool := out.Value().(bool)
+			if !isBool || !eligible {
+				operationStatus = operationStatusFailed
+				return nil, status.Errorf(codes.FailedPrecondition,
+					"account not eligible per product type %s eligibility rules", productTypeCode)
+			}
+		}
+
+		// 5. Attribute validation against AttributeSchema (if defined)
+		if cached.CompiledSchema != nil {
+			attrsMap := map[string]interface{}{}
+			if req.Attributes != nil {
+				attrsMap = req.Attributes.AsMap()
+			}
+			attrsJSON, err := json.Marshal(attrsMap)
+			if err != nil {
+				operationStatus = operationStatusFailed
+				return nil, status.Errorf(codes.InvalidArgument, "invalid attributes: %v", err)
+			}
+			var attrs interface{}
+			if err := json.Unmarshal(attrsJSON, &attrs); err != nil {
+				operationStatus = operationStatusFailed
+				return nil, status.Errorf(codes.InvalidArgument, "invalid attributes JSON: %v", err)
+			}
+			if err := cached.CompiledSchema.Validate(attrs); err != nil {
+				operationStatus = operationStatusFailed
+				return nil, status.Errorf(codes.InvalidArgument, "attributes validation failed: %v", err)
+			}
+		}
+
+		// Derive account type from BehaviorClass via mapping
+		accountType = behaviorClassToAccountType[def.BehaviorClass]
+		productTypeVersion = def.Version
+		valuationTemplates = def.ValuationMethods
+
+		// Derive dimension from instrument via Reference Data (if available)
+	} else if s.accountTypeCache == nil && req.ProductTypeCode != "" {
+		// product_type_code was explicitly provided but cache is not configured
+		operationStatus = operationStatusFailed
+		return nil, status.Error(codes.FailedPrecondition,
+			"product type resolution not available; configure account type cache or use deprecated account_type field")
+	} else {
+		// Legacy path: no cache, derive account type from proto enum
+		var err error
+		accountType, err = protoToAccountType(req.AccountType) //nolint:staticcheck // Intentional: reading deprecated field for backwards compatibility
+		if err != nil {
+			operationStatus = opStatusInvalidAccountType
+			return nil, status.Errorf(codes.InvalidArgument, "invalid account type: %v", err)
+		}
+	}
+
+	// Convert clearing purpose from proto to domain
+	var err error
+	clearingPurpose, err = protoToClearingPurpose(req.ClearingPurpose)
 	if err != nil {
-		operationStatus = opStatusInvalidAccountType
-		return nil, status.Errorf(codes.InvalidArgument, "invalid account type: %v", err)
+		operationStatus = operationStatusFailed
+		return nil, status.Errorf(codes.InvalidArgument, "invalid clearing purpose: %v", err)
 	}
 
 	// Validate instrument exists and is ACTIVE via Reference Data service (if client is configured)
-	var dimension string
 	if s.referenceDataClient != nil {
 		validationStart := time.Now()
 		refDataCtx, refDataCancel := context.WithTimeout(ctx, 5*time.Second)
@@ -248,13 +423,6 @@ func (s *Service) InitiateInternalBankAccount(ctx context.Context, req *pb.Initi
 	// Generate account ID using full UUID for uniqueness
 	accountID := fmt.Sprintf("IBA-%s", uuid.New().String())
 
-	// Convert clearing purpose from proto to domain
-	clearingPurpose, err := protoToClearingPurpose(req.ClearingPurpose)
-	if err != nil {
-		operationStatus = operationStatusFailed
-		return nil, status.Errorf(codes.InvalidArgument, "invalid clearing purpose: %v", err)
-	}
-
 	// Create domain entity with dimension from Reference Data
 	account, err := domain.NewInternalBankAccount(
 		accountID,
@@ -268,6 +436,29 @@ func (s *Service) InitiateInternalBankAccount(ctx context.Context, req *pb.Initi
 	if err != nil {
 		operationStatus = operationStatusFailed
 		return nil, mapDomainErrorToGRPC(err)
+	}
+
+	// Set product type fields on the account via builder rebuild
+	if productTypeCode != "" {
+		account = domain.NewInternalBankAccountBuilder().
+			WithID(account.ID()).
+			WithAccountID(account.AccountID()).
+			WithAccountCode(account.AccountCode()).
+			WithName(account.Name()).
+			WithAccountType(account.AccountType()).
+			WithClearingPurpose(account.ClearingPurpose()).
+			WithInstrumentCode(account.InstrumentCode()).
+			WithDimension(account.Dimension()).
+			WithStatus(account.Status()).
+			WithOrgPartyID(account.OrgPartyID()).
+			WithCorrespondent(account.Correspondent()).
+			WithAttributes(account.Attributes()).
+			WithProductTypeCode(productTypeCode).
+			WithProductTypeVersion(productTypeVersion).
+			WithVersion(account.Version()).
+			WithCreatedAt(account.CreatedAt()).
+			WithUpdatedAt(account.UpdatedAt()).
+			Build()
 	}
 
 	// Handle correspondent details for NOSTRO/VOSTRO accounts
@@ -304,13 +495,52 @@ func (s *Service) InitiateInternalBankAccount(ctx context.Context, req *pb.Initi
 		return nil, status.Errorf(codes.Internal, "failed to create account: %v", err)
 	}
 
+	// Seed ValuationFeatures from product type templates
+	if s.valuationFeatureRepo != nil && len(valuationTemplates) > 0 {
+		for _, tmpl := range valuationTemplates {
+			if tmpl.Status != accounttype.StatusActive {
+				continue
+			}
+			feature, err := domain.NewValuationFeature(
+				account.ID(),
+				tmpl.InputInstrument,
+				tmpl.ValuationMethodID,
+				tmpl.ValuationMethodVersion,
+				tmpl.Parameters,
+				"system",
+			)
+			if err != nil {
+				s.logger.Warn("failed to create valuation feature from template",
+					"account_id", accountID,
+					"template_id", tmpl.ID.String(),
+					"error", err)
+				continue
+			}
+			// Auto-activate seeded features
+			if err := feature.Activate("system"); err != nil {
+				s.logger.Warn("failed to activate valuation feature from template",
+					"account_id", accountID,
+					"template_id", tmpl.ID.String(),
+					"error", err)
+				continue
+			}
+			if err := s.valuationFeatureRepo.Create(ctx, feature); err != nil {
+				s.logger.Warn("failed to persist valuation feature from template",
+					"account_id", accountID,
+					"template_id", tmpl.ID.String(),
+					"error", err)
+			}
+		}
+	}
+
 	// Record metric for account creation
 	ibaobservability.RecordAccountCreated(accountType.String())
 
 	s.logger.Info("created internal bank account",
 		"account_id", accountID,
 		"account_code", req.AccountCode,
-		"account_type", accountType.String())
+		"account_type", accountType.String(),
+		"product_type_code", productTypeCode)
 
 	return &pb.InitiateInternalBankAccountResponse{
 		AccountId: accountID,

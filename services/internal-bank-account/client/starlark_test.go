@@ -37,7 +37,7 @@ func (m *mockInternalBankAccountServer) InitiateInternalBankAccount(_ context.Co
 			AccountId:      m.lastAccountID,
 			AccountCode:    req.GetAccountCode(),
 			Name:           req.GetName(),
-			AccountType:    req.GetAccountType(),
+			AccountType:    req.GetAccountType(), //nolint:staticcheck // Intentional: reading deprecated field for test backwards compatibility
 			AccountStatus:  internalbankaccountv1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE,
 			InstrumentCode: req.GetInstrumentCode(),
 			CreatedAt:      timestamppb.Now(),
