@@ -73,11 +73,31 @@ func (m *mockPartyService) RegisterParty(ctx context.Context, req *partyv1.Regis
 
 func (m *mockPartyService) RetrieveParty(ctx context.Context, req *partyv1.RetrievePartyRequest) (*partyv1.RetrievePartyResponse, error) {
 	m.captureMetadata(ctx)
-	if req.PartyId == "not-found" {
+	switch req.PartyId {
+	case "not-found":
 		return nil, status.Errorf(codes.NotFound, "party %q not found", req.PartyId)
-	}
-	if req.PartyId == "invalid" {
+	case "invalid":
 		return nil, status.Errorf(codes.InvalidArgument, "invalid party_id format")
+	case "unauthenticated":
+		return nil, status.Errorf(codes.Unauthenticated, "authentication required")
+	case "permission-denied":
+		return nil, status.Errorf(codes.PermissionDenied, "insufficient permissions")
+	case "internal":
+		return nil, status.Errorf(codes.Internal, "internal server error")
+	case "deadline-exceeded":
+		return nil, status.Errorf(codes.DeadlineExceeded, "deadline exceeded")
+	case "unavailable":
+		return nil, status.Errorf(codes.Unavailable, "service unavailable")
+	case "data-loss":
+		return nil, status.Errorf(codes.DataLoss, "data loss occurred")
+	case "unknown":
+		return nil, status.Errorf(codes.Unknown, "unknown error")
+	case "already-exists":
+		return nil, status.Errorf(codes.AlreadyExists, "party already exists")
+	case "resource-exhausted":
+		return nil, status.Errorf(codes.ResourceExhausted, "quota exceeded")
+	case "unimplemented":
+		return nil, status.Errorf(codes.Unimplemented, "method not implemented")
 	}
 	return &partyv1.RetrievePartyResponse{
 		Party: &partyv1.Party{
@@ -564,7 +584,11 @@ func TestTranscoding_Proto3JSON_NestedMessage(t *testing.T) {
 // Error Response Mapping (gRPC code -> HTTP status)
 // ---------------------------------------------------------------------------
 
-// TestTranscoding_Error_NotFound tests gRPC NOT_FOUND -> HTTP 404.
+// ---------------------------------------------------------------------------
+// Error Response Format Tests
+// ---------------------------------------------------------------------------
+
+// TestTranscoding_Error_NotFound tests gRPC NOT_FOUND -> HTTP 404 with canonical error body.
 func TestTranscoding_Error_NotFound(t *testing.T) {
 	env := startTranscodingTestEnv(t, []ServiceBackend{
 		{ServiceName: "meridian.party.v1.PartyService"},
@@ -577,12 +601,12 @@ func TestTranscoding_Error_NotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 
 	result := readJSONBody(t, resp)
-	// gRPC error body should contain a message
-	assert.NotEmpty(t, result["message"], "error response should contain a message field")
-	assert.Contains(t, result["message"], "not found")
+	assert.Equal(t, "NOT_FOUND", result["code"], "error code should be string NOT_FOUND")
+	assert.NotEmpty(t, result["error"], "error response should contain an error field")
+	assert.Contains(t, result["error"], "not found")
 }
 
-// TestTranscoding_Error_InvalidArgument tests gRPC INVALID_ARGUMENT -> HTTP 400.
+// TestTranscoding_Error_InvalidArgument tests gRPC INVALID_ARGUMENT -> HTTP 400 with canonical error body.
 func TestTranscoding_Error_InvalidArgument(t *testing.T) {
 	env := startTranscodingTestEnv(t, []ServiceBackend{
 		{ServiceName: "meridian.party.v1.PartyService"},
@@ -595,7 +619,240 @@ func TestTranscoding_Error_InvalidArgument(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 
 	result := readJSONBody(t, resp)
-	assert.NotEmpty(t, result["message"])
+	assert.Equal(t, "INVALID_ARGUMENT", result["code"])
+	assert.NotEmpty(t, result["error"])
+}
+
+// TestTranscoding_Error_Unauthenticated tests gRPC UNAUTHENTICATED -> HTTP 401.
+func TestTranscoding_Error_Unauthenticated(t *testing.T) {
+	env := startTranscodingTestEnv(t, []ServiceBackend{
+		{ServiceName: "meridian.party.v1.PartyService"},
+	})
+
+	resp, err := httpGet(context.Background(), env.baseURL+"/api/v1/parties/unauthenticated")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+
+	result := readJSONBody(t, resp)
+	assert.Equal(t, "UNAUTHENTICATED", result["code"])
+	assert.Equal(t, "authentication required", result["error"])
+}
+
+// TestTranscoding_Error_PermissionDenied tests gRPC PERMISSION_DENIED -> HTTP 403.
+func TestTranscoding_Error_PermissionDenied(t *testing.T) {
+	env := startTranscodingTestEnv(t, []ServiceBackend{
+		{ServiceName: "meridian.party.v1.PartyService"},
+	})
+
+	resp, err := httpGet(context.Background(), env.baseURL+"/api/v1/parties/permission-denied")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+
+	result := readJSONBody(t, resp)
+	assert.Equal(t, "PERMISSION_DENIED", result["code"])
+	assert.NotEmpty(t, result["error"])
+}
+
+// TestTranscoding_Error_Internal tests gRPC INTERNAL -> HTTP 500.
+func TestTranscoding_Error_Internal(t *testing.T) {
+	env := startTranscodingTestEnv(t, []ServiceBackend{
+		{ServiceName: "meridian.party.v1.PartyService"},
+	})
+
+	resp, err := httpGet(context.Background(), env.baseURL+"/api/v1/parties/internal")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+
+	result := readJSONBody(t, resp)
+	assert.Equal(t, "INTERNAL", result["code"])
+	assert.NotEmpty(t, result["error"])
+}
+
+// TestTranscoding_Error_DeadlineExceeded tests gRPC DEADLINE_EXCEEDED -> HTTP 504.
+func TestTranscoding_Error_DeadlineExceeded(t *testing.T) {
+	env := startTranscodingTestEnv(t, []ServiceBackend{
+		{ServiceName: "meridian.party.v1.PartyService"},
+	})
+
+	resp, err := httpGet(context.Background(), env.baseURL+"/api/v1/parties/deadline-exceeded")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusGatewayTimeout, resp.StatusCode)
+
+	result := readJSONBody(t, resp)
+	assert.Equal(t, "DEADLINE_EXCEEDED", result["code"])
+	assert.NotEmpty(t, result["error"])
+}
+
+// TestTranscoding_Error_Unavailable tests gRPC UNAVAILABLE -> HTTP 503.
+func TestTranscoding_Error_Unavailable(t *testing.T) {
+	env := startTranscodingTestEnv(t, []ServiceBackend{
+		{ServiceName: "meridian.party.v1.PartyService"},
+	})
+
+	resp, err := httpGet(context.Background(), env.baseURL+"/api/v1/parties/unavailable")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+
+	result := readJSONBody(t, resp)
+	assert.Equal(t, "UNAVAILABLE", result["code"])
+	assert.NotEmpty(t, result["error"])
+}
+
+// TestTranscoding_Error_DataLoss tests gRPC DATA_LOSS -> HTTP 500.
+func TestTranscoding_Error_DataLoss(t *testing.T) {
+	env := startTranscodingTestEnv(t, []ServiceBackend{
+		{ServiceName: "meridian.party.v1.PartyService"},
+	})
+
+	resp, err := httpGet(context.Background(), env.baseURL+"/api/v1/parties/data-loss")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+
+	result := readJSONBody(t, resp)
+	assert.Equal(t, "DATA_LOSS", result["code"])
+	assert.NotEmpty(t, result["error"])
+}
+
+// TestTranscoding_Error_Unknown tests gRPC UNKNOWN -> HTTP 500.
+func TestTranscoding_Error_Unknown(t *testing.T) {
+	env := startTranscodingTestEnv(t, []ServiceBackend{
+		{ServiceName: "meridian.party.v1.PartyService"},
+	})
+
+	resp, err := httpGet(context.Background(), env.baseURL+"/api/v1/parties/unknown")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+
+	result := readJSONBody(t, resp)
+	assert.Equal(t, "UNKNOWN", result["code"])
+	assert.NotEmpty(t, result["error"])
+}
+
+// TestTranscoding_Error_AllStandardCodes verifies that all standard gRPC->HTTP
+// status code mappings produce the canonical error body format.
+func TestTranscoding_Error_AllStandardCodes(t *testing.T) {
+	env := startTranscodingTestEnv(t, []ServiceBackend{
+		{ServiceName: "meridian.party.v1.PartyService"},
+	})
+
+	cases := []struct {
+		partyID    string
+		httpStatus int
+		grpcCode   string
+	}{
+		{"not-found", http.StatusNotFound, "NOT_FOUND"},
+		{"invalid", http.StatusBadRequest, "INVALID_ARGUMENT"},
+		{"unauthenticated", http.StatusUnauthorized, "UNAUTHENTICATED"},
+		{"permission-denied", http.StatusForbidden, "PERMISSION_DENIED"},
+		{"internal", http.StatusInternalServerError, "INTERNAL"},
+		{"deadline-exceeded", http.StatusGatewayTimeout, "DEADLINE_EXCEEDED"},
+		{"unavailable", http.StatusServiceUnavailable, "UNAVAILABLE"},
+		{"data-loss", http.StatusInternalServerError, "DATA_LOSS"},
+		{"unknown", http.StatusInternalServerError, "UNKNOWN"},
+		{"already-exists", http.StatusConflict, "ALREADY_EXISTS"},
+		{"resource-exhausted", http.StatusTooManyRequests, "RESOURCE_EXHAUSTED"},
+		{"unimplemented", http.StatusNotImplemented, "UNIMPLEMENTED"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.grpcCode, func(t *testing.T) {
+			resp, err := httpGet(context.Background(), env.baseURL+"/api/v1/parties/"+tc.partyID)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+
+			assert.Equal(t, tc.httpStatus, resp.StatusCode, "HTTP status for %s", tc.grpcCode)
+
+			result := readJSONBody(t, resp)
+			assert.Equal(t, tc.grpcCode, result["code"], "code field for %s", tc.grpcCode)
+			assert.NotEmpty(t, result["error"], "error field for %s", tc.grpcCode)
+		})
+	}
+}
+
+// TestTranscoding_Error_BodyFormat verifies the canonical error body has the
+// correct fields: error (string), code (string), and no numeric code field.
+func TestTranscoding_Error_BodyFormat(t *testing.T) {
+	env := startTranscodingTestEnv(t, []ServiceBackend{
+		{ServiceName: "meridian.party.v1.PartyService"},
+	})
+
+	resp, err := httpGet(context.Background(), env.baseURL+"/api/v1/parties/not-found")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	require.Equal(t, http.StatusNotFound, resp.StatusCode)
+
+	result := readJSONBody(t, resp)
+
+	// Must have string code
+	code, ok := result["code"].(string)
+	require.True(t, ok, "code field must be a string, got %T", result["code"])
+	assert.Equal(t, "NOT_FOUND", code)
+
+	// Must have error message
+	errMsg, ok := result["error"].(string)
+	require.True(t, ok, "error field must be a string, got %T", result["error"])
+	assert.NotEmpty(t, errMsg)
+
+	// Must NOT have numeric code or message (Vanguard's original format)
+	_, hasNumericCode := result["message"]
+	assert.False(t, hasNumericCode, "response must not contain 'message' field (Vanguard raw format)")
+}
+
+// TestTranscoding_Error_ContentTypeJSON verifies that error responses are returned
+// with application/json Content-Type.
+func TestTranscoding_Error_ContentTypeJSON(t *testing.T) {
+	env := startTranscodingTestEnv(t, []ServiceBackend{
+		{ServiceName: "meridian.party.v1.PartyService"},
+	})
+
+	resp, err := httpGet(context.Background(), env.baseURL+"/api/v1/parties/not-found")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	assert.Contains(t, resp.Header.Get("Content-Type"), "application/json")
+}
+
+// TestTranscoding_Error_MalformedRequestBody tests behavior with invalid JSON body.
+// Vanguard attempts to transcode the body to proto; when that fails the gRPC backend
+// receives an UNKNOWN/INTERNAL error which maps to HTTP 500.
+func TestTranscoding_Error_MalformedRequestBody(t *testing.T) {
+	env := startTranscodingTestEnv(t, []ServiceBackend{
+		{ServiceName: "meridian.party.v1.PartyService"},
+	})
+
+	// Send malformed JSON to a POST endpoint
+	resp, err := httpPost(context.Background(), env.baseURL+"/api/v1/parties", "application/json", strings.NewReader("this is not json"))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	// Malformed JSON results in a proto parsing error; Vanguard maps this to UNKNOWN → 500.
+	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+
+	// Response should still be JSON with our canonical error format
+	ct := resp.Header.Get("Content-Type")
+	assert.Contains(t, ct, "application/json")
+
+	result := readJSONBody(t, resp)
+	assert.NotEmpty(t, result["error"], "error field must be present")
+	code, ok := result["code"].(string)
+	assert.True(t, ok, "code must be a string")
+	assert.NotEmpty(t, code)
 }
 
 // TestTranscoding_Error_NotFoundTenant tests gRPC NOT_FOUND -> HTTP 404 for tenant.
@@ -609,6 +866,9 @@ func TestTranscoding_Error_NotFoundTenant(t *testing.T) {
 	defer resp.Body.Close()
 
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+
+	result := readJSONBody(t, resp)
+	assert.Equal(t, "NOT_FOUND", result["code"])
 }
 
 // TestTranscoding_Error_UnknownRoute tests that an unknown route returns 404.
