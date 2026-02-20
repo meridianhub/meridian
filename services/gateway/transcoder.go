@@ -100,7 +100,9 @@ func NewTranscoder(descriptorBytes []byte, backends []ServiceBackend) (http.Hand
 		return nil, fmt.Errorf("create vanguard transcoder: %w", err)
 	}
 
-	return transcoder, nil
+	// 5. Wrap with error reformatting middleware to produce a consistent JSON
+	//    error body format across all gRPC error codes.
+	return errorReformattingMiddleware(transcoder), nil
 }
 
 // newGRPCReverseProxy builds an httputil.ReverseProxy that forwards requests to addr
