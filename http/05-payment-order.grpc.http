@@ -1,7 +1,6 @@
 ### Payment Order Service
 # BIAN-compliant saga orchestration: funds reservation, gateway execution, ledger booking.
 # Proto: api/proto/meridian/payment_order/v1/payment_order.proto
-# Gateway: HTTP/JSON via Vanguard transcoding
 # Prerequisites: Run 00-happy-path.http or 02-current-account.http first to set account_id
 #
 # State Machine: INITIATED -> RESERVED -> EXECUTING -> COMPLETED
@@ -9,9 +8,8 @@
 ## --- Payment Order Lifecycle ---
 
 ### Initiate Payment Order
-POST {{host}}/v1/payment-orders
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.payment_order.v1.PaymentOrderService/InitiatePaymentOrder
+x-tenant-id: {{tenant_id}}
 
 {
   "debtorAccountId": "{{account_id}}",
@@ -32,29 +30,36 @@ X-Tenant-ID: {{tenant_id}}
 %}
 
 ### Retrieve Payment Order
-GET {{host}}/v1/payment-orders/{{po_id}}
-X-Tenant-ID: {{tenant_id}}
-
-### Update Payment Order (gateway callback)
-PATCH {{host}}/v1/payment-orders/{{po_id}}
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.payment_order.v1.PaymentOrderService/RetrievePaymentOrder
+x-tenant-id: {{tenant_id}}
 
 {
+  "paymentOrderId": "{{po_id}}"
+}
+
+### Update Payment Order (gateway callback)
+GRPC {{grpc_host}}/meridian.payment_order.v1.PaymentOrderService/UpdatePaymentOrder
+x-tenant-id: {{tenant_id}}
+
+{
+  "paymentOrderId": "{{po_id}}",
   "gatewayReference": "GW-REF-12345",
   "gatewayStatus": "COMPLETED"
 }
 
 ### List Payment Orders
-GET {{host}}/v1/payment-orders?pageSize=20
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.payment_order.v1.PaymentOrderService/ListPaymentOrders
+x-tenant-id: {{tenant_id}}
+
+{
+  "pageSize": 20
+}
 
 ## --- Cancellation ---
 
 ### Initiate Payment Order (for cancellation test)
-POST {{host}}/v1/payment-orders
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.payment_order.v1.PaymentOrderService/InitiatePaymentOrder
+x-tenant-id: {{tenant_id}}
 
 {
   "debtorAccountId": "{{account_id}}",
@@ -75,22 +80,22 @@ X-Tenant-ID: {{tenant_id}}
 %}
 
 ### Cancel Payment Order
-POST {{host}}/v1/payment-orders/{{po_cancel_id}}/cancel
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.payment_order.v1.PaymentOrderService/CancelPaymentOrder
+x-tenant-id: {{tenant_id}}
 
 {
+  "paymentOrderId": "{{po_cancel_id}}",
   "reason": "Customer requested cancellation"
 }
 
 ## --- Reversal ---
 
 ### Reverse Payment Order
-POST {{host}}/v1/payment-orders/{{po_id}}/reverse
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.payment_order.v1.PaymentOrderService/ReversePaymentOrder
+x-tenant-id: {{tenant_id}}
 
 {
+  "paymentOrderId": "{{po_id}}",
   "reason": "Duplicate payment detected",
   "idempotencyKey": {
     "key": "{{$uuid}}"

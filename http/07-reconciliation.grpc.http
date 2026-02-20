@@ -1,15 +1,13 @@
 ### Reconciliation Service
 # BIAN-compliant account reconciliation: settlement runs, balance assertions, disputes.
 # Proto: api/proto/meridian/reconciliation/v1/reconciliation.proto
-# Gateway: HTTP/JSON via Vanguard transcoding
 # Prerequisites: Run 00-happy-path.http or 02-current-account.http first to set account_id
 
 ## --- Settlement Runs ---
 
 ### Initiate Account Reconciliation
-POST {{host}}/v1/reconciliation/runs
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.reconciliation.v1.AccountReconciliationService/InitiateAccountReconciliation
+x-tenant-id: {{tenant_id}}
 
 {
   "accountId": "{{account_id}}",
@@ -29,26 +27,36 @@ X-Tenant-ID: {{tenant_id}}
 %}
 
 ### Execute Account Reconciliation
-POST {{host}}/v1/reconciliation/runs/{{recon_id}}/execute
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
-
-{}
-
-### Retrieve Account Reconciliation
-GET {{host}}/v1/reconciliation/runs/{{recon_id}}
-X-Tenant-ID: {{tenant_id}}
-
-### List Reconciliation Results
-GET {{host}}/v1/reconciliation/runs/{{recon_id}}/results?pageSize=50
-X-Tenant-ID: {{tenant_id}}
-
-### Control Reconciliation (cancel)
-POST {{host}}/v1/reconciliation/runs/{{recon_id}}/control
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.reconciliation.v1.AccountReconciliationService/ExecuteAccountReconciliation
+x-tenant-id: {{tenant_id}}
 
 {
+  "reconciliationId": "{{recon_id}}"
+}
+
+### Retrieve Account Reconciliation
+GRPC {{grpc_host}}/meridian.reconciliation.v1.AccountReconciliationService/RetrieveAccountReconciliation
+x-tenant-id: {{tenant_id}}
+
+{
+  "reconciliationId": "{{recon_id}}"
+}
+
+### List Reconciliation Results
+GRPC {{grpc_host}}/meridian.reconciliation.v1.AccountReconciliationService/ListReconciliationResults
+x-tenant-id: {{tenant_id}}
+
+{
+  "reconciliationId": "{{recon_id}}",
+  "pageSize": 50
+}
+
+### Control Reconciliation (cancel)
+GRPC {{grpc_host}}/meridian.reconciliation.v1.AccountReconciliationService/ControlAccountReconciliation
+x-tenant-id: {{tenant_id}}
+
+{
+  "reconciliationId": "{{recon_id}}",
   "action": "CONTROL_ACTION_CANCEL",
   "reason": "Incorrect period selected"
 }
@@ -56,9 +64,8 @@ X-Tenant-ID: {{tenant_id}}
 ## --- Balance Assertions ---
 
 ### Assert Balance
-POST {{host}}/v1/reconciliation/assertions
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.reconciliation.v1.AccountReconciliationService/AssertBalance
+x-tenant-id: {{tenant_id}}
 
 {
   "accountId": "{{account_id}}",
@@ -73,9 +80,8 @@ X-Tenant-ID: {{tenant_id}}
 ## --- Disputes ---
 
 ### Initiate Dispute
-POST {{host}}/v1/reconciliation/disputes
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.reconciliation.v1.AccountReconciliationService/InitiateDispute
+x-tenant-id: {{tenant_id}}
 
 {
   "reconciliationId": "{{recon_id}}",
@@ -93,15 +99,19 @@ X-Tenant-ID: {{tenant_id}}
 %}
 
 ### Retrieve Dispute
-GET {{host}}/v1/reconciliation/disputes/{{dispute_id}}
-X-Tenant-ID: {{tenant_id}}
-
-### Control Dispute (resolve)
-POST {{host}}/v1/reconciliation/disputes/{{dispute_id}}/control
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.reconciliation.v1.AccountReconciliationService/RetrieveDispute
+x-tenant-id: {{tenant_id}}
 
 {
+  "disputeId": "{{dispute_id}}"
+}
+
+### Control Dispute (resolve)
+GRPC {{grpc_host}}/meridian.reconciliation.v1.AccountReconciliationService/ControlDispute
+x-tenant-id: {{tenant_id}}
+
+{
+  "disputeId": "{{dispute_id}}",
   "action": "DISPUTE_CONTROL_ACTION_RESOLVE",
   "reason": "Transaction matched after investigation"
 }

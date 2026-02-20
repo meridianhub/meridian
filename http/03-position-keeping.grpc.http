@@ -1,14 +1,12 @@
 ### Position Keeping Service
 # BIAN-compliant position tracking: balance queries, position logs, reservations.
 # Proto: api/proto/meridian/position_keeping/v1/position_keeping.proto
-# Gateway: HTTP/JSON via Vanguard transcoding
 
 ## --- Setup: Create Party + Account + Deposit ---
 
 ### Register Party
-POST {{host}}/v1/parties
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.party.v1.PartyService/RegisterParty
+x-tenant-id: {{tenant_id}}
 
 {
   "partyType": "PARTY_TYPE_PERSON",
@@ -21,9 +19,8 @@ X-Tenant-ID: {{tenant_id}}
 %}
 
 ### Open Account
-POST {{host}}/v1/current-accounts
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/InitiateCurrentAccount
+x-tenant-id: {{tenant_id}}
 
 {
   "partyId": "{{pk_party_id}}",
@@ -36,11 +33,11 @@ X-Tenant-ID: {{tenant_id}}
 %}
 
 ### Seed Deposit
-POST {{host}}/v1/current-accounts/{{pk_account_id}}/deposits
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/ExecuteDeposit
+x-tenant-id: {{tenant_id}}
 
 {
+  "accountId": "{{pk_account_id}}",
   "amount": {
     "amount": {
       "currencyCode": "GBP",
@@ -57,26 +54,34 @@ X-Tenant-ID: {{tenant_id}}
 ## --- Balance Queries ---
 
 ### Get Account Balance (current)
-GET {{host}}/v1/accounts/{{pk_account_id}}/balance/BALANCE_TYPE_CURRENT
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.position_keeping.v1.PositionKeepingService/GetAccountBalance
+x-tenant-id: {{tenant_id}}
 
+{
+  "accountId": "{{pk_account_id}}"
+}
 
 ### Get All Balances (current + available + reserved)
-GET {{host}}/v1/accounts/{{pk_account_id}}/balances
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.position_keeping.v1.PositionKeepingService/GetAccountBalances
+x-tenant-id: {{tenant_id}}
 
+{
+  "accountId": "{{pk_account_id}}"
+}
 
 ### Get Projected Balance
-GET {{host}}/v1/accounts/{{pk_account_id}}/projected-balance/GBP
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.position_keeping.v1.PositionKeepingService/GetProjectedBalance
+x-tenant-id: {{tenant_id}}
 
+{
+  "accountId": "{{pk_account_id}}"
+}
 
 ## --- Position Logs ---
 
 ### Initiate Financial Position Log
-POST {{host}}/v1/position-logs
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.position_keeping.v1.PositionKeepingService/InitiateFinancialPositionLog
+x-tenant-id: {{tenant_id}}
 
 {
   "accountId": "{{pk_account_id}}",
@@ -99,19 +104,25 @@ X-Tenant-ID: {{tenant_id}}
 %}
 
 ### Retrieve Financial Position Log
-GET {{host}}/v1/position-logs/{{pk_log_id}}
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.position_keeping.v1.PositionKeepingService/RetrieveFinancialPositionLog
+x-tenant-id: {{tenant_id}}
 
+{
+  "positionLogId": "{{pk_log_id}}"
+}
 
 ### List Financial Position Logs
-GET {{host}}/v1/position-logs?pageSize=20
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.position_keeping.v1.PositionKeepingService/ListFinancialPositionLogs
+x-tenant-id: {{tenant_id}}
 
+{
+  "accountId": "{{pk_account_id}}",
+  "pageSize": 20
+}
 
 ### Initiate Batch Position Logs
-POST {{host}}/v1/position-logs/batch
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.position_keeping.v1.PositionKeepingService/InitiateFinancialPositionLogBatch
+x-tenant-id: {{tenant_id}}
 
 {
   "entries": [
@@ -136,9 +147,8 @@ X-Tenant-ID: {{tenant_id}}
 ## --- Reservations ---
 
 ### Record Reservation
-POST {{host}}/v1/reservations
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.position_keeping.v1.PositionKeepingService/RecordReservation
+x-tenant-id: {{tenant_id}}
 
 {
   "accountId": "{{pk_account_id}}",
@@ -156,8 +166,9 @@ X-Tenant-ID: {{tenant_id}}
 %}
 
 ### Release Reservation
-POST {{host}}/v1/reservations/{{pk_reservation_id}}/release
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.position_keeping.v1.PositionKeepingService/ReleaseReservation
+x-tenant-id: {{tenant_id}}
 
-{}
+{
+  "reservationId": "{{pk_reservation_id}}"
+}

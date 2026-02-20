@@ -1,12 +1,14 @@
 ### Financial Accounting Service
 # BIAN-compliant double-entry bookkeeping: booking logs, ledger postings.
 # Proto: api/proto/meridian/financial_accounting/v1/financial_accounting.proto
+# Gateway: HTTP/JSON via Vanguard transcoding
 
 ## --- Booking Log Lifecycle ---
 
 ### Initiate Booking Log
-GRPC {{grpc_host}}/meridian.financial_accounting.v1.FinancialAccountingService/InitiateFinancialBookingLog
-x-tenant-id: {{tenant_id}}
+POST {{host}}/v1/booking-logs
+Content-Type: application/json
+X-Tenant-ID: {{tenant_id}}
 
 {
   "description": "Monthly revenue recognition",
@@ -21,38 +23,30 @@ x-tenant-id: {{tenant_id}}
 %}
 
 ### Retrieve Booking Log
-GRPC {{grpc_host}}/meridian.financial_accounting.v1.FinancialAccountingService/RetrieveFinancialBookingLog
-x-tenant-id: {{tenant_id}}
-
-{
-  "bookingLogId": "{{fa_log_id}}"
-}
+GET {{host}}/v1/booking-logs/{{fa_log_id}}
+X-Tenant-ID: {{tenant_id}}
 
 ### List Booking Logs
-GRPC {{grpc_host}}/meridian.financial_accounting.v1.FinancialAccountingService/ListFinancialBookingLogs
-x-tenant-id: {{tenant_id}}
-
-{
-  "pageSize": 20
-}
+GET {{host}}/v1/booking-logs?pageSize=20
+X-Tenant-ID: {{tenant_id}}
 
 ### Update Booking Log
-GRPC {{grpc_host}}/meridian.financial_accounting.v1.FinancialAccountingService/UpdateFinancialBookingLog
-x-tenant-id: {{tenant_id}}
+PUT {{host}}/v1/booking-logs/{{fa_log_id}}
+Content-Type: application/json
+X-Tenant-ID: {{tenant_id}}
 
 {
-  "bookingLogId": "{{fa_log_id}}",
   "status": "BOOKING_LOG_STATUS_POSTED"
 }
 
 ## --- Ledger Postings (double-entry) ---
 
 ### Capture Debit Posting
-GRPC {{grpc_host}}/meridian.financial_accounting.v1.FinancialAccountingService/CaptureLedgerPosting
-x-tenant-id: {{tenant_id}}
+POST {{host}}/v1/booking-logs/{{fa_log_id}}/postings
+Content-Type: application/json
+X-Tenant-ID: {{tenant_id}}
 
 {
-  "bookingLogId": "{{fa_log_id}}",
   "accountId": "revenue-gbp-001",
   "postingDirection": "POSTING_DIRECTION_DEBIT",
   "postingAmount": {
@@ -70,11 +64,11 @@ x-tenant-id: {{tenant_id}}
 %}
 
 ### Capture Credit Posting (balancing entry)
-GRPC {{grpc_host}}/meridian.financial_accounting.v1.FinancialAccountingService/CaptureLedgerPosting
-x-tenant-id: {{tenant_id}}
+POST {{host}}/v1/booking-logs/{{fa_log_id}}/postings
+Content-Type: application/json
+X-Tenant-ID: {{tenant_id}}
 
 {
-  "bookingLogId": "{{fa_log_id}}",
   "accountId": "accounts-receivable-001",
   "postingDirection": "POSTING_DIRECTION_CREDIT",
   "postingAmount": {
@@ -92,59 +86,50 @@ x-tenant-id: {{tenant_id}}
 %}
 
 ### Retrieve Ledger Posting
-GRPC {{grpc_host}}/meridian.financial_accounting.v1.FinancialAccountingService/RetrieveLedgerPosting
-x-tenant-id: {{tenant_id}}
-
-{
-  "ledgerPostingId": "{{fa_debit_id}}"
-}
+GET {{host}}/v1/postings/{{fa_debit_id}}
+X-Tenant-ID: {{tenant_id}}
 
 ### List Ledger Postings
-GRPC {{grpc_host}}/meridian.financial_accounting.v1.FinancialAccountingService/ListLedgerPostings
-x-tenant-id: {{tenant_id}}
-
-{
-  "bookingLogId": "{{fa_log_id}}",
-  "pageSize": 50
-}
+GET {{host}}/v1/postings?bookingLogId={{fa_log_id}}&pageSize=50
+X-Tenant-ID: {{tenant_id}}
 
 ### Update Ledger Posting
-GRPC {{grpc_host}}/meridian.financial_accounting.v1.FinancialAccountingService/UpdateLedgerPosting
-x-tenant-id: {{tenant_id}}
+PUT {{host}}/v1/postings/{{fa_debit_id}}
+Content-Type: application/json
+X-Tenant-ID: {{tenant_id}}
 
 {
-  "ledgerPostingId": "{{fa_debit_id}}",
   "description": "Revenue debit entry (updated)"
 }
 
 ## --- Booking Log Lifecycle Control ---
 
 ### Control Booking Log (suspend)
-GRPC {{grpc_host}}/meridian.financial_accounting.v1.FinancialAccountingService/ControlFinancialBookingLog
-x-tenant-id: {{tenant_id}}
+POST {{host}}/v1/booking-logs/{{fa_log_id}}/control
+Content-Type: application/json
+X-Tenant-ID: {{tenant_id}}
 
 {
-  "bookingLogId": "{{fa_log_id}}",
-  "action": "BOOKING_LOG_CONTROL_ACTION_SUSPEND",
+  "action":"BOOKING_LOG_CONTROL_ACTION_SUSPEND",
   "reason": "Pending audit review"
 }
 
 ### Control Booking Log (resume)
-GRPC {{grpc_host}}/meridian.financial_accounting.v1.FinancialAccountingService/ControlFinancialBookingLog
-x-tenant-id: {{tenant_id}}
+POST {{host}}/v1/booking-logs/{{fa_log_id}}/control
+Content-Type: application/json
+X-Tenant-ID: {{tenant_id}}
 
 {
-  "bookingLogId": "{{fa_log_id}}",
-  "action": "BOOKING_LOG_CONTROL_ACTION_RESUME",
+  "action":"BOOKING_LOG_CONTROL_ACTION_RESUME",
   "reason": "Audit review completed"
 }
 
 ### Control Booking Log (terminate)
-GRPC {{grpc_host}}/meridian.financial_accounting.v1.FinancialAccountingService/ControlFinancialBookingLog
-x-tenant-id: {{tenant_id}}
+POST {{host}}/v1/booking-logs/{{fa_log_id}}/control
+Content-Type: application/json
+X-Tenant-ID: {{tenant_id}}
 
 {
-  "bookingLogId": "{{fa_log_id}}",
-  "action": "BOOKING_LOG_CONTROL_ACTION_TERMINATE",
+  "action":"BOOKING_LOG_CONTROL_ACTION_TERMINATE",
   "reason": "End of period"
 }

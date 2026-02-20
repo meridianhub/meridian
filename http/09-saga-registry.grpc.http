@@ -1,14 +1,12 @@
 ### Saga Registry Service
 # Workflow definition management: register, validate, activate Starlark sagas.
 # Proto: api/proto/meridian/saga/v1/saga_registry.proto
-# Gateway: HTTP/JSON via Vanguard transcoding
 
 ## --- Saga Lifecycle ---
 
 ### Create Saga Draft
-POST {{host}}/v1/sagas
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.saga.v1.SagaRegistryService/CreateSagaDraft
+x-tenant-id: {{tenant_id}}
 
 {
   "name": "payment_transfer",
@@ -20,43 +18,52 @@ X-Tenant-ID: {{tenant_id}}
 
 > {%
     client.global.set("saga_id", response.body.saga.id);
-    client.global.set("saga_name", response.body.saga.name);
 %}
 
 ### Retrieve Saga by ID
-GET {{host}}/v1/sagas/{{saga_id}}
-X-Tenant-ID: {{tenant_id}}
-
-### Get Active Saga by Name
-GET {{host}}/v1/sagas/active/{{saga_name}}
-X-Tenant-ID: {{tenant_id}}
-
-### List All Sagas
-GET {{host}}/v1/sagas
-X-Tenant-ID: {{tenant_id}}
-
-### Update Saga Definition
-PATCH {{host}}/v1/sagas/{{saga_id}}
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.saga.v1.SagaRegistryService/GetSaga
+x-tenant-id: {{tenant_id}}
 
 {
+  "id": "{{saga_id}}"
+}
+
+### Get Active Saga by Name
+GRPC {{grpc_host}}/meridian.saga.v1.SagaRegistryService/GetActiveSaga
+x-tenant-id: {{tenant_id}}
+
+{
+  "name": "payment_transfer"
+}
+
+### List All Sagas
+GRPC {{grpc_host}}/meridian.saga.v1.SagaRegistryService/ListSagas
+x-tenant-id: {{tenant_id}}
+
+{}
+
+### Update Saga Definition
+GRPC {{grpc_host}}/meridian.saga.v1.SagaRegistryService/UpdateSagaDefinition
+x-tenant-id: {{tenant_id}}
+
+{
+  "id": "{{saga_id}}",
   "description": "Standard payment transfer saga with lien reservation and gateway execution"
 }
 
 ## --- Validation ---
 
 ### Validate Existing Saga Draft
-POST {{host}}/v1/sagas/{{saga_id}}/validate
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.saga.v1.SagaRegistryService/ValidateSagaDraft
+x-tenant-id: {{tenant_id}}
 
-{}
+{
+  "id": "{{saga_id}}"
+}
 
 ### Validate Saga Script (inline, without saving)
-POST {{host}}/v1/sagas/validate
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.saga.v1.SagaRegistryService/ValidateSaga
+x-tenant-id: {{tenant_id}}
 
 {
   "sagaName": "test_saga",
@@ -66,19 +73,25 @@ X-Tenant-ID: {{tenant_id}}
 ## --- Lifecycle Management ---
 
 ### Activate Saga
-POST {{host}}/v1/sagas/{{saga_id}}/activate
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.saga.v1.SagaRegistryService/ActivateSaga
+x-tenant-id: {{tenant_id}}
 
-{}
+{
+  "id": "{{saga_id}}"
+}
 
 ### Deprecate Saga
-POST {{host}}/v1/sagas/{{saga_id}}/deprecate
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.saga.v1.SagaRegistryService/DeprecateSaga
+x-tenant-id: {{tenant_id}}
 
-{}
+{
+  "id": "{{saga_id}}"
+}
 
 ### Analyze Deprecation Impact
-GET {{host}}/v1/sagas/deprecation-impact?instrumentCode=GBP
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.saga.v1.SagaRegistryService/AnalyzeDeprecationImpact
+x-tenant-id: {{tenant_id}}
+
+{
+  "instrumentCode": "GBP"
+}

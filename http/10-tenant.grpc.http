@@ -1,0 +1,59 @@
+### Tenant Service
+# Multi-tenant configuration and provisioning.
+# Proto: api/proto/meridian/tenant/v1/tenant.proto
+
+## --- Tenant Management ---
+
+### Create Tenant
+GRPC {{grpc_host}}/meridian.tenant.v1.TenantService/InitiateTenant
+x-tenant-id: {{tenant_id}}
+
+{
+  "tenantId": "acme_energy",
+  "displayName": "Acme Energy Corp",
+  "settlementAsset": "GBP",
+  "subdomain": "acme-energy"
+}
+
+> {%
+    client.global.set("new_tenant_id", response.body.tenant.tenantId);
+%}
+
+### Retrieve Tenant
+GRPC {{grpc_host}}/meridian.tenant.v1.TenantService/RetrieveTenant
+x-tenant-id: {{tenant_id}}
+
+{
+  "tenantId": "{{new_tenant_id}}"
+}
+
+### List Tenants
+GRPC {{grpc_host}}/meridian.tenant.v1.TenantService/ListTenants
+x-tenant-id: {{tenant_id}}
+
+{}
+
+### Update Tenant Status
+GRPC {{grpc_host}}/meridian.tenant.v1.TenantService/UpdateTenantStatus
+x-tenant-id: {{tenant_id}}
+
+{
+  "tenantId": "{{new_tenant_id}}",
+  "status": "TENANT_STATUS_ACTIVE"
+}
+
+### Get Provisioning Status
+GRPC {{grpc_host}}/meridian.tenant.v1.TenantService/GetTenantProvisioningStatus
+x-tenant-id: {{tenant_id}}
+
+{
+  "tenantId": "{{new_tenant_id}}"
+}
+
+### Reconcile Migrations (specific tenant)
+GRPC {{grpc_host}}/meridian.tenant.v1.TenantService/ReconcileMigrations
+x-tenant-id: {{tenant_id}}
+
+{
+  "tenantId": "{{new_tenant_id}}"
+}

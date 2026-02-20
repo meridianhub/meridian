@@ -1,12 +1,14 @@
 ### Party Reference Data Directory Service
 # BIAN-compliant party management: registration, lifecycle, associations, payment methods.
 # Proto: api/proto/meridian/party/v1/party.proto
+# Gateway: HTTP/JSON via Vanguard transcoding
 
 ## --- Registration ---
 
 ### Register Party (person)
-GRPC {{grpc_host}}/meridian.party.v1.PartyService/RegisterParty
-x-tenant-id: {{tenant_id}}
+POST {{host}}/v1/parties
+Content-Type: application/json
+X-Tenant-ID: {{tenant_id}}
 
 {
   "partyType": "PARTY_TYPE_PERSON",
@@ -19,8 +21,9 @@ x-tenant-id: {{tenant_id}}
 %}
 
 ### Register Party (organization)
-GRPC {{grpc_host}}/meridian.party.v1.PartyService/RegisterParty
-x-tenant-id: {{tenant_id}}
+POST {{host}}/v1/parties
+Content-Type: application/json
+X-Tenant-ID: {{tenant_id}}
 
 {
   "partyType": "PARTY_TYPE_ORGANIZATION",
@@ -35,50 +38,46 @@ x-tenant-id: {{tenant_id}}
 %}
 
 ### Retrieve Party
-GRPC {{grpc_host}}/meridian.party.v1.PartyService/RetrieveParty
-x-tenant-id: {{tenant_id}}
-
-{
-  "partyId": "{{party_id}}"
-}
+GET {{host}}/v1/parties/{{party_id}}
+X-Tenant-ID: {{tenant_id}}
 
 ### Update Party
-GRPC {{grpc_host}}/meridian.party.v1.PartyService/UpdateParty
-x-tenant-id: {{tenant_id}}
+PATCH {{host}}/v1/parties/{{party_id}}
+Content-Type: application/json
+X-Tenant-ID: {{tenant_id}}
 
 {
-  "partyId": "{{party_id}}",
   "displayName": "Jane S."
 }
 
 ## --- Lifecycle Control ---
 
 ### Control Party (restrict)
-GRPC {{grpc_host}}/meridian.party.v1.PartyService/ControlParty
-x-tenant-id: {{tenant_id}}
+POST {{host}}/v1/parties/{{party_id}}/control
+Content-Type: application/json
+X-Tenant-ID: {{tenant_id}}
 
 {
-  "partyId": "{{party_id}}",
   "action": "CONTROL_ACTION_RESTRICT",
   "reason": "KYC review pending"
 }
 
 ### Control Party (activate after restriction)
-GRPC {{grpc_host}}/meridian.party.v1.PartyService/ControlParty
-x-tenant-id: {{tenant_id}}
+POST {{host}}/v1/parties/{{party_id}}/control
+Content-Type: application/json
+X-Tenant-ID: {{tenant_id}}
 
 {
-  "partyId": "{{party_id}}",
   "action": "CONTROL_ACTION_ACTIVATE",
   "reason": "KYC review completed"
 }
 
 ### Control Party (suspend)
-GRPC {{grpc_host}}/meridian.party.v1.PartyService/ControlParty
-x-tenant-id: {{tenant_id}}
+POST {{host}}/v1/parties/{{party_id}}/control
+Content-Type: application/json
+X-Tenant-ID: {{tenant_id}}
 
 {
-  "partyId": "{{party_id}}",
   "action": "CONTROL_ACTION_SUSPEND",
   "reason": "Fraud investigation"
 }
@@ -86,92 +85,76 @@ x-tenant-id: {{tenant_id}}
 ## --- Reference BQ ---
 
 ### Update Reference
-GRPC {{grpc_host}}/meridian.party.v1.PartyService/UpdateReference
-x-tenant-id: {{tenant_id}}
+PATCH {{host}}/v1/parties/{{party_id}}/reference
+Content-Type: application/json
+X-Tenant-ID: {{tenant_id}}
 
 {
-  "partyId": "{{party_id}}",
   "externalReference": "CRM-12345",
   "externalReferenceType": "EXTERNAL_REFERENCE_TYPE_CRM"
 }
 
 ### Retrieve Reference
-GRPC {{grpc_host}}/meridian.party.v1.PartyService/RetrieveReference
-x-tenant-id: {{tenant_id}}
-
-{
-  "partyId": "{{party_id}}"
-}
+GET {{host}}/v1/parties/{{party_id}}/reference
+X-Tenant-ID: {{tenant_id}}
 
 ## --- Demographics BQ ---
 
 ### Exchange Demographics
-GRPC {{grpc_host}}/meridian.party.v1.PartyService/ExchangeDemographics
-x-tenant-id: {{tenant_id}}
+PATCH {{host}}/v1/parties/{{party_id}}/demographics
+Content-Type: application/json
+X-Tenant-ID: {{tenant_id}}
 
 {
-  "partyId": "{{party_id}}",
   "dateOfBirth": "1990-06-15",
   "nationality": "GB",
   "residenceCountry": "GB"
 }
 
 ### Retrieve Demographics
-GRPC {{grpc_host}}/meridian.party.v1.PartyService/RetrieveDemographics
-x-tenant-id: {{tenant_id}}
-
-{
-  "partyId": "{{party_id}}"
-}
+GET {{host}}/v1/parties/{{party_id}}/demographics
+X-Tenant-ID: {{tenant_id}}
 
 ## --- Bank Relations BQ ---
 
 ### Update Bank Relations
-GRPC {{grpc_host}}/meridian.party.v1.PartyService/UpdateBankRelations
-x-tenant-id: {{tenant_id}}
+PATCH {{host}}/v1/parties/{{party_id}}/bank-relations
+Content-Type: application/json
+X-Tenant-ID: {{tenant_id}}
 
 {
-  "partyId": "{{party_id}}",
   "relationshipType": "RELATIONSHIP_TYPE_CUSTOMER",
   "relationshipStatus": "RELATIONSHIP_STATUS_ACTIVE"
 }
 
 ### Retrieve Bank Relations
-GRPC {{grpc_host}}/meridian.party.v1.PartyService/RetrieveBankRelations
-x-tenant-id: {{tenant_id}}
-
-{
-  "partyId": "{{party_id}}"
-}
+GET {{host}}/v1/parties/{{party_id}}/bank-relations
+X-Tenant-ID: {{tenant_id}}
 
 ## --- Associations BQ ---
 
 ### Register Association
-GRPC {{grpc_host}}/meridian.party.v1.PartyService/RegisterAssociations
-x-tenant-id: {{tenant_id}}
+POST {{host}}/v1/parties/{{party_id}}/associations
+Content-Type: application/json
+X-Tenant-ID: {{tenant_id}}
 
 {
-  "partyId": "{{party_id}}",
   "associatedPartyId": "{{org_party_id}}",
   "associationType": "ASSOCIATION_TYPE_EMPLOYEE"
 }
 
 ### Retrieve Associations
-GRPC {{grpc_host}}/meridian.party.v1.PartyService/RetrieveAssociations
-x-tenant-id: {{tenant_id}}
-
-{
-  "partyId": "{{party_id}}"
-}
+GET {{host}}/v1/parties/{{party_id}}/associations
+X-Tenant-ID: {{tenant_id}}
 
 ## --- Payment Methods ---
 
 ### Add Payment Method
-GRPC {{grpc_host}}/meridian.party.v1.PartyService/AddPaymentMethod
-x-tenant-id: {{tenant_id}}
+POST {{host}}/v1/parties/{{party_id}}/payment-methods
+Content-Type: application/json
+X-Tenant-ID: {{tenant_id}}
 
 {
-  "partyId": "{{party_id}}",
   "provider": "PAYMENT_METHOD_PROVIDER_STRIPE",
   "type": "PAYMENT_METHOD_TYPE_CARD",
   "externalId": "pm_test_visa_4242",
@@ -183,53 +166,30 @@ x-tenant-id: {{tenant_id}}
 %}
 
 ### List Payment Methods
-GRPC {{grpc_host}}/meridian.party.v1.PartyService/ListPaymentMethods
-x-tenant-id: {{tenant_id}}
-
-{
-  "partyId": "{{party_id}}"
-}
+GET {{host}}/v1/parties/{{party_id}}/payment-methods
+X-Tenant-ID: {{tenant_id}}
 
 ### Set Default Payment Method
-GRPC {{grpc_host}}/meridian.party.v1.PartyService/SetDefaultPaymentMethod
-x-tenant-id: {{tenant_id}}
+POST {{host}}/v1/payment-methods/{{payment_method_id}}/default
+Content-Type: application/json
+X-Tenant-ID: {{tenant_id}}
 
-{
-  "partyId": "{{party_id}}",
-  "paymentMethodId": "{{payment_method_id}}"
-}
+{}
 
 ### Get Default Payment Method
-GRPC {{grpc_host}}/meridian.party.v1.PartyService/GetDefaultPaymentMethod
-x-tenant-id: {{tenant_id}}
-
-{
-  "partyId": "{{party_id}}"
-}
+GET {{host}}/v1/parties/{{party_id}}/payment-methods/default
+X-Tenant-ID: {{tenant_id}}
 
 ### Remove Payment Method
-GRPC {{grpc_host}}/meridian.party.v1.PartyService/RemovePaymentMethod
-x-tenant-id: {{tenant_id}}
-
-{
-  "partyId": "{{party_id}}",
-  "paymentMethodId": "{{payment_method_id}}"
-}
+DELETE {{host}}/v1/payment-methods/{{payment_method_id}}
+X-Tenant-ID: {{tenant_id}}
 
 ## --- Syndicate / Structuring ---
 
 ### List Participants
-GRPC {{grpc_host}}/meridian.party.v1.PartyService/ListParticipants
-x-tenant-id: {{tenant_id}}
-
-{
-  "partyId": "{{org_party_id}}"
-}
+GET {{host}}/v1/parties/{{org_party_id}}/participants
+X-Tenant-ID: {{tenant_id}}
 
 ### Get Structuring Data
-GRPC {{grpc_host}}/meridian.party.v1.PartyService/GetStructuringData
-x-tenant-id: {{tenant_id}}
-
-{
-  "partyId": "{{org_party_id}}"
-}
+GET {{host}}/v1/parties/{{org_party_id}}/participants/{{party_id}}/structuring-data
+X-Tenant-ID: {{tenant_id}}
