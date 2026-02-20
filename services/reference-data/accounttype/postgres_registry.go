@@ -111,6 +111,44 @@ func (r *PostgresRegistry) withWriteTransaction(ctx context.Context, fn func(tx 
 	return nil
 }
 
+// GetDefinitionByID retrieves a specific account type by its UUID.
+func (r *PostgresRegistry) GetDefinitionByID(ctx context.Context, id uuid.UUID) (*Definition, error) {
+	var result *Definition
+
+	err := r.withReadTransaction(ctx, func(tx pgx.Tx) error {
+		query := `
+			SELECT id, code, version, display_name, description,
+				normal_balance, behavior_class, instrument_code,
+				default_saga_prefix, default_conversion_method_id, default_conversion_method_version,
+				validation_cel, bucketing_cel, eligibility_cel,
+				attribute_schema, attributes,
+				status, is_system, successor_id,
+				created_at, updated_at, activated_at, deprecated_at
+			FROM account_type_definitions
+			WHERE id = $1`
+
+		row := tx.QueryRow(ctx, query, id)
+		def, err := r.scanDefinition(row)
+		if err != nil {
+			return err
+		}
+
+		methods, err := r.loadValuationMethods(ctx, tx, def.ID)
+		if err != nil {
+			return err
+		}
+		def.ValuationMethods = methods
+
+		result = def
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
 // GetDefinition retrieves a specific account type by code and version.
 func (r *PostgresRegistry) GetDefinition(ctx context.Context, code string, version int) (*Definition, error) {
 	var result *Definition

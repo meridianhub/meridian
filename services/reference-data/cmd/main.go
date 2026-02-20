@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
 	sagav1 "github.com/meridianhub/meridian/api/proto/meridian/saga/v1"
+	"github.com/meridianhub/meridian/services/reference-data/accounttype"
 	refcel "github.com/meridianhub/meridian/services/reference-data/cel"
 	"github.com/meridianhub/meridian/services/reference-data/handler"
 	"github.com/meridianhub/meridian/services/reference-data/node"
@@ -113,6 +114,13 @@ func run(logger *slog.Logger) error {
 	sagaRegistry := saga.NewPostgresRegistry(dbPool, nil)
 	logger.Info("saga registry initialized")
 
+	// Create account type registry
+	accountTypeRegistry, err := accounttype.NewPostgresRegistry(dbPool)
+	if err != nil {
+		return fmt.Errorf("failed to create account type registry: %w", err)
+	}
+	logger.Info("account type registry initialized")
+
 	// Create gRPC service handlers
 	refDataSvc, err := handler.NewService(instrumentRegistry, compiler, logger)
 	if err != nil {
@@ -125,6 +133,11 @@ func run(logger *slog.Logger) error {
 	}
 
 	sagaSvc := saga.NewRegistryHandler(sagaRegistry, nil, nil, logger)
+
+	accountTypeSvc, err := handler.NewAccountTypeService(accountTypeRegistry, instrumentRegistry, compiler, logger)
+	if err != nil {
+		return fmt.Errorf("failed to create account type service: %w", err)
+	}
 
 	logger.Info("gRPC service handlers initialized")
 
@@ -143,6 +156,7 @@ func run(logger *slog.Logger) error {
 	// Register gRPC services
 	referencedatav1.RegisterReferenceDataServiceServer(grpcServer, refDataSvc)
 	referencedatav1.RegisterNodeServiceServer(grpcServer, nodeSvc)
+	referencedatav1.RegisterAccountTypeRegistryServiceServer(grpcServer, accountTypeSvc)
 	sagav1.RegisterSagaRegistryServiceServer(grpcServer, sagaSvc)
 
 	// Register health check service
