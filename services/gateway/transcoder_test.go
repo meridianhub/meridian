@@ -93,6 +93,6 @@ func TestNewTranscoder_ServeHTTP(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/unknown.path/Method", nil)
 	handler.ServeHTTP(rec, req)
 
-	// Vanguard returns 404 for unknown paths — any valid HTTP response is acceptable.
-	assert.True(t, rec.Code >= 200, "expected a valid HTTP status code, got %d", rec.Code)
+	// Vanguard returns 404 for unknown paths.
+	assert.Equal(t, http.StatusNotFound, rec.Code, "expected 404 for unknown path, got %d", rec.Code)
 }

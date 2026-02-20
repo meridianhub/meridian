@@ -98,8 +98,10 @@ func NewTranscoder(descriptorBytes []byte, backends []ServiceBackend) (http.Hand
 	return transcoder, nil
 }
 
-// newGRPCReverseProxy builds an httputil.ReverseProxy that forwards requests to
-// addr over plain HTTP. gRPC backends inside the cluster use cleartext HTTP/2 (h2c).
+// newGRPCReverseProxy builds an httputil.ReverseProxy that forwards requests to addr.
+// The proxy uses the default http.Transport (HTTP/1.1). Full h2c (cleartext HTTP/2)
+// support — required for gRPC backends — will be added in the server wiring task
+// by configuring an http2.Transport with AllowHTTP: true on the reverse proxy.
 func newGRPCReverseProxy(addr string) http.Handler {
 	target := &url.URL{
 		Scheme: "http",
