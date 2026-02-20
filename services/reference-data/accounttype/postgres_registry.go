@@ -387,6 +387,9 @@ func (r *PostgresRegistry) fetchForUpdate(ctx context.Context, tx pgx.Tx, code s
 		}
 		return nil, fmt.Errorf("failed to check account type: %w", err)
 	}
+	if cur.isSystem {
+		return nil, ErrSystemAccountTypeReadOnly
+	}
 	if cur.status != string(StatusDraft) {
 		return nil, ErrNotDraft
 	}
@@ -609,17 +612,22 @@ func (r *PostgresRegistry) DeprecateAccountType(ctx context.Context, code string
 	return r.withWriteTransaction(ctx, func(tx pgx.Tx) error {
 		var defID uuid.UUID
 		var currentStatus string
+		var isSystem bool
 		var existingSuccessorID *uuid.UUID
 
-		checkQuery := `SELECT id, status, successor_id
+		checkQuery := `SELECT id, status, is_system, successor_id
 			FROM account_type_definitions WHERE code = $1 AND version = $2`
 		err := tx.QueryRow(ctx, checkQuery, code, version).Scan(
-			&defID, &currentStatus, &existingSuccessorID)
+			&defID, &currentStatus, &isSystem, &existingSuccessorID)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrNotFound
 			}
 			return fmt.Errorf("failed to check account type: %w", err)
+		}
+
+		if isSystem {
+			return ErrSystemAccountTypeReadOnly
 		}
 
 		if currentStatus != string(StatusActive) {
