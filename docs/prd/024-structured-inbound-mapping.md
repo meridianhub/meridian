@@ -374,32 +374,32 @@ target_service: meridian.party.v1.PartyService
 target_rpc: RegisterParty
 
 field_mappings:
-  - source: "type"
-    target: "party_type"
+  - source_path: "type"
+    target_path: "party_type"
     transform:
       enum_mapping:
         values:
           individual: "PARTY_TYPE_PERSON"
           corporate: "PARTY_TYPE_ORGANIZATION"
 
-  - source: "full_name"
-    target: "legal_name"
+  - source_path: "full_name"
+    target_path: "legal_name"
 
-  - source: "govt_id"
-    target: "reference.government_id"
+  - source_path: "govt_id"
+    target_path: "reference.government_id"
 
-  - source: "govt_id_type"
-    target: "reference.issuing_authority"
+  - source_path: "govt_id_type"
+    target_path: "reference.issuing_authority"
 
-  - source: "account_officer"
-    target: "bank_relations.account_officer_id"
+  - source_path: "account_officer"
+    target_path: "bank_relations.account_officer_id"
 
-  - source: "branch"
-    target: "bank_relations.assigned_branch"
+  - source_path: "branch"
+    target_path: "bank_relations.assigned_branch"
 
 computed_fields:
-  - target: "display_name"
-    cel: "input.full_name.split(' ')[0]"
+  - target_path: "display_name"
+    cel_expression: "input.full_name.split(' ')[0]"
 
 validation_cel: "has(input.full_name) && size(input.full_name) > 0"
 ```
@@ -462,19 +462,19 @@ is_batch: true
 batch_target_path: "observations"
 
 field_mappings:
-  - source: "meter_id"
-    target: "instrument_code"
+  - source_path: "meter_id"
+    target_path: "instrument_code"
 
-  - source: "reading"
-    target: "value"
+  - source_path: "reading"
+    target_path: "value"
     transform:
       cel_expression: "string(source)"
 
-  - source: "timestamp"
-    target: "observed_at"
+  - source_path: "timestamp"
+    target_path: "observed_at"
 
-  - source: "quality"
-    target: "quality_level"
+  - source_path: "quality"
+    target_path: "quality_level"
     transform:
       enum_mapping:
         values:
@@ -482,16 +482,17 @@ field_mappings:
           actual: "QUALITY_LEVEL_ACTUAL"
           verified: "QUALITY_LEVEL_VERIFIED"
 
-  - source: "tenor"
-    target: "attributes"
+  - source_path: "tenor"
+    target_path: "attributes"
     transform:
       attribute_flatten:
         source_keys: ["tenor", "settlement"]
         target_field: "attributes"
 
 computed_fields:
-  - target: "resolution_key_value"
-    cel: "mapped.attributes.tenor + ':' + mapped.attributes.settlement"
+  - target_path: "resolution_key_value"
+    cel_expression: >
+      mapped.attributes.tenor + ':' + mapped.attributes.settlement
 ```
 
 **Output** (wrapped batch forwarded to Vanguard):
@@ -552,32 +553,32 @@ target_service: meridian.reference_data.v1.ReferenceDataService
 target_rpc: RegisterInstrument
 
 field_mappings:
-  - source: "asset_type"
-    target: "instrument_code"
+  - source_path: "asset_type"
+    target_path: "instrument_code"
 
-  - source: "unit"
-    target: "unit_of_measure"
+  - source_path: "unit"
+    target_path: "unit_of_measure"
 
-  - source: "precision"
-    target: "decimal_precision"
+  - source_path: "precision"
+    target_path: "decimal_precision"
     transform:
       cel_expression: "int(source)"
 
-  - source: "registry"
-    target: "attributes"
+  - source_path: "registry"
+    target_path: "attributes"
     transform:
       attribute_flatten:
         source_keys: ["registry", "vintage_year", "methodology"]
         target_field: "attributes"
 
-  - source: "min_amount"
-    target: "minimum_amount"
+  - source_path: "min_amount"
+    target_path: "minimum_amount"
     transform:
       cel_expression: "string(source)"
 
 computed_fields:
-  - target: "dimension"
-    cel: "'DIMENSION_CARBON'"
+  - target_path: "dimension"
+    cel_expression: "'DIMENSION_CARBON'"
 
 validation_cel: >
   has(input.registry) && has(input.unit) && input.min_amount > 0
@@ -622,7 +623,7 @@ An **Outbound Mapping** transforms Meridian's internal proto-JSON
 responses back into partner-specific formats. This is the reverse of
 Phase 2 — same engine, opposite direction.
 
-### Routing Strategy
+### Routing and Version Selection
 
 Outbound mappings are activated by the **same ingress path**:
 
@@ -630,19 +631,28 @@ Outbound mappings are activated by the **same ingress path**:
 POST /inbound/{mapping_name}
 ```
 
-When a `MappingDefinition` with `direction = OUTBOUND` exists for the
-same `mapping_name` (or a paired outbound mapping is linked), the
-gateway applies it to the response body **after** Vanguard returns the
-proto-JSON response.
-
-Alternatively, outbound mappings can be explicitly linked:
+Outbound mappings are linked to inbound mappings via
+`outbound_mapping_id`:
 
 ```protobuf
 message MappingDefinition {
   // ... existing fields ...
-  string outbound_mapping_id = 17; // Optional: paired outbound mapping
+  string outbound_mapping_id = 17; // Paired outbound mapping
 }
 ```
+
+**Version selection rules:**
+
+1. When resolving the inbound mapping, the gateway also resolves its
+   paired outbound mapping via `outbound_mapping_id`
+2. If the inbound mapping has no `outbound_mapping_id`, the gateway
+   looks up the latest ACTIVE outbound `MappingDefinition` with the
+   same `name` and `direction = OUTBOUND`
+3. If no ACTIVE outbound mapping exists, the gateway returns
+   Vanguard's raw proto-JSON response unchanged (no transformation)
+   and logs a debug-level missing-outbound notice
+4. The resolved outbound mapping version is included in the
+   `X-Outbound-Mapping-Version` response header for traceability
 
 ### Architecture
 
@@ -694,30 +704,30 @@ target_service: meridian.party.v1.PartyService
 target_rpc: RegisterParty
 
 field_mappings:
-  - source: "partyId"
-    target: "id"
+  - source_path: "partyId"
+    target_path: "id"
 
-  - source: "partyType"
-    target: "type"
+  - source_path: "partyType"
+    target_path: "type"
     transform:
       enum_mapping:
         values:
           PARTY_TYPE_PERSON: "individual"
           PARTY_TYPE_ORGANIZATION: "corporate"
 
-  - source: "legalName"
-    target: "full_name"
+  - source_path: "legalName"
+    target_path: "full_name"
 
-  - source: "status"
-    target: "status"
+  - source_path: "status"
+    target_path: "status"
     transform:
       enum_mapping:
         values:
           PARTY_STATUS_ACTIVE: "active"
           PARTY_STATUS_SUSPENDED: "suspended"
 
-  - source: "createdAt"
-    target: "created_date"
+  - source_path: "createdAt"
+    target_path: "created_date"
     transform:
       date_format: "2006-01-02"
 ```
