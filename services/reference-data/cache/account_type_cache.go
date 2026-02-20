@@ -5,6 +5,7 @@ package cache
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math/rand/v2"
 	"strings"
 	"sync"
@@ -365,20 +366,26 @@ func (c *LocalAccountTypeCache) getByCode(ctx context.Context, code string) *Cac
 }
 
 // backgroundRefresh asynchronously reloads a system blueprint entry.
+// Uses singleflight to prevent thundering herd when multiple concurrent
+// Get calls see the same expired system blueprint.
 func (c *LocalAccountTypeCache) backgroundRefresh(ctx context.Context, tenantID tenant.TenantID, code string) {
-	ctx = tenant.WithTenant(ctx, tenantID)
+	sfKey := fmt.Sprintf("bg:%s:%s", tenantID, code)
+	c.sfGroup.Do(sfKey, func() (interface{}, error) { //nolint:errcheck // fire-and-forget refresh
+		ctx = tenant.WithTenant(ctx, tenantID)
 
-	def, err := c.loader.LoadAccountType(ctx, code)
-	if err != nil {
-		return // Silently fail - stale entry remains accessible
-	}
+		def, err := c.loader.LoadAccountType(ctx, code)
+		if err != nil {
+			return nil, err // Stale entry remains accessible
+		}
 
-	entry, err := c.compileCachedEntry(def)
-	if err != nil {
-		return
-	}
+		entry, err := c.compileCachedEntry(def)
+		if err != nil {
+			return nil, err
+		}
 
-	c.Put(ctx, entry)
+		c.Put(ctx, entry)
+		return entry, nil //nolint:nilnil // singleflight callback, return value unused
+	})
 }
 
 // compileCachedEntry compiles CEL programs and JSON Schema for a definition.
@@ -457,6 +464,7 @@ func (c *LocalAccountTypeCache) getOrCreateTenantCache(tenantID tenant.TenantID)
 
 	newCache, err := lru.New[AccountTypeKey, *CachedAccountType](c.cacheSize)
 	if err != nil {
+		slog.Error("failed to create tenant account type cache", "tenant_id", tenantID, "error", err)
 		return nil
 	}
 
