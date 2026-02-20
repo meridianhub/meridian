@@ -31,6 +31,8 @@ type CurrentAccountEntity struct {
 	OrgPartyID            *uuid.UUID `gorm:"column:org_party_id;type:uuid"`             // NULL for personal accounts, set for org-scoped accounts
 	OverdraftLimit        int64      `gorm:"column:overdraft_limit;not null;default:0"` // in smallest currency unit
 	OverdraftRate         float64    `gorm:"column:overdraft_rate;type:numeric(5,4);not null;default:0"`
+	ProductTypeCode       *string    `gorm:"column:product_type_code;type:varchar(50)"` // NULL for legacy accounts
+	ProductTypeVersion    *int       `gorm:"column:product_type_version"`               // NULL for legacy accounts
 
 	// Balance fields - NOT persisted to database (gorm:"-"), but kept for in-memory use.
 	// Balance computation is delegated to Position Keeping service per BIAN architecture.

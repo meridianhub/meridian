@@ -161,6 +161,12 @@ message CurrentAccountFacility {
     pattern: "^[a-zA-Z0-9_-]*$"
     max_len: 100
   }];
+
+  // product_type_code is the account type code from the Product Directory (immutable after creation).
+  string product_type_code = 12;
+
+  // product_type_version is the pinned version of the product type definition (immutable after creation).
+  int32 product_type_version = 13;
 }
 
 // AccountBalance represents the current balance state of an account
@@ -346,6 +352,24 @@ message InitiateCurrentAccountRequest {
     pattern: "^[a-zA-Z0-9_-]*$"
     max_len: 100
   }];
+
+  // product_type_code references an account type definition in the Product Directory.
+  // When provided, the service resolves the product type via LocalAccountTypeCache,
+  // validates BehaviorClass == CUSTOMER, evaluates EligibilityCEL, validates attributes
+  // against AttributeSchema, and seeds ValuationFeatures from templates.
+  // During transition, if empty, the service falls back to base_currency-derived defaults.
+  string product_type_code = 5 [(buf.validate.field).string = {
+    max_len: 50
+    pattern: "^[A-Z0-9_]*$"
+  }];
+
+  // product_type_version pins a specific version of the product type definition.
+  // If not specified, the latest active version is used.
+  optional int32 product_type_version = 6;
+
+  // attributes contains optional key-value pairs validated against the product type's
+  // AttributeSchema (JSON Schema). Stored on the account for product-specific metadata.
+  map<string, string> attributes = 7;
 }
 
 // Response for initiating a current account

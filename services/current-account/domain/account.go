@@ -73,6 +73,8 @@ type CurrentAccount struct {
 	version               int64
 	createdAt             time.Time
 	updatedAt             time.Time
+	productTypeCode       string // Immutable after creation - references Product Directory
+	productTypeVersion    int    // Immutable after creation - pinned version
 }
 
 // AccountOption is a functional option for configuring new account creation.
@@ -83,6 +85,14 @@ func WithOrgPartyID(orgPartyID uuid.UUID) AccountOption {
 	return func(a *CurrentAccount) {
 		id := orgPartyID
 		a.orgPartyID = &id
+	}
+}
+
+// WithProductType sets the product type code and version (immutable after creation).
+func WithProductType(code string, version int) AccountOption {
+	return func(a *CurrentAccount) {
+		a.productTypeCode = code
+		a.productTypeVersion = version
 	}
 }
 
@@ -174,6 +184,8 @@ func (a CurrentAccount) Deposit(amount Money) (CurrentAccount, error) {
 		version:               a.version + 1,
 		createdAt:             a.createdAt,
 		updatedAt:             now,
+		productTypeCode:       a.productTypeCode,
+		productTypeVersion:    a.productTypeVersion,
 	}, nil
 }
 
@@ -211,6 +223,8 @@ func (a CurrentAccount) PrepareForCredit() (CurrentAccount, error) {
 		version:               a.version + 1, // Version incremented for optimistic locking
 		createdAt:             a.createdAt,
 		updatedAt:             now,
+		productTypeCode:       a.productTypeCode,
+		productTypeVersion:    a.productTypeVersion,
 	}, nil
 }
 
@@ -263,6 +277,8 @@ func (a CurrentAccount) PrepareForDebit(amount Money) (CurrentAccount, error) {
 		version:               a.version + 1, // Version incremented for optimistic locking
 		createdAt:             a.createdAt,
 		updatedAt:             now,
+		productTypeCode:       a.productTypeCode,
+		productTypeVersion:    a.productTypeVersion,
 	}, nil
 }
 
@@ -321,6 +337,8 @@ func (a CurrentAccount) Withdraw(amount Money) (CurrentAccount, error) {
 		version:               a.version + 1,
 		createdAt:             a.createdAt,
 		updatedAt:             now,
+		productTypeCode:       a.productTypeCode,
+		productTypeVersion:    a.productTypeVersion,
 	}, nil
 }
 
@@ -390,6 +408,8 @@ func (a CurrentAccount) withStatusChange(newStatus AccountStatus, reason string)
 		version:               a.version + 1,
 		createdAt:             a.createdAt,
 		updatedAt:             now,
+		productTypeCode:       a.productTypeCode,
+		productTypeVersion:    a.productTypeVersion,
 	}
 }
 
@@ -517,6 +537,8 @@ func (a CurrentAccount) SetOverdraftLimit(limit Money, rate float64, enabled boo
 		version:               a.version + 1,
 		createdAt:             a.createdAt,
 		updatedAt:             time.Now(),
+		productTypeCode:       a.productTypeCode,
+		productTypeVersion:    a.productTypeVersion,
 	}, nil
 }
 
@@ -586,6 +608,12 @@ func (a CurrentAccount) CreatedAt() time.Time { return a.createdAt }
 
 // UpdatedAt returns when the account was last updated.
 func (a CurrentAccount) UpdatedAt() time.Time { return a.updatedAt }
+
+// ProductTypeCode returns the product type code from the Product Directory.
+func (a CurrentAccount) ProductTypeCode() string { return a.productTypeCode }
+
+// ProductTypeVersion returns the pinned product type version.
+func (a CurrentAccount) ProductTypeVersion() int { return a.productTypeVersion }
 
 // Builder pattern for reconstructing accounts from persistence layer.
 // This is needed because the persistence layer needs to set all fields
@@ -701,6 +729,18 @@ func (b *CurrentAccountBuilder) WithCreatedAt(t time.Time) *CurrentAccountBuilde
 // WithUpdatedAt sets when the account was last updated.
 func (b *CurrentAccountBuilder) WithUpdatedAt(t time.Time) *CurrentAccountBuilder {
 	b.account.updatedAt = t
+	return b
+}
+
+// WithProductTypeCode sets the product type code.
+func (b *CurrentAccountBuilder) WithProductTypeCode(code string) *CurrentAccountBuilder {
+	b.account.productTypeCode = code
+	return b
+}
+
+// WithProductTypeVersion sets the product type version.
+func (b *CurrentAccountBuilder) WithProductTypeVersion(version int) *CurrentAccountBuilder {
+	b.account.productTypeVersion = version
 	return b
 }
 

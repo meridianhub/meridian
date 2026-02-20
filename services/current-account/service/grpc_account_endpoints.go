@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -11,11 +13,20 @@ import (
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
+	"github.com/meridianhub/meridian/services/reference-data/accounttype"
+	celutil "github.com/meridianhub/meridian/services/reference-data/cel"
+	vf "github.com/meridianhub/meridian/shared/pkg/valuationfeature"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
-// InitiateCurrentAccount creates a new current account facility
+// InitiateCurrentAccount creates a new current account facility.
+// When product_type_code is provided, the account type definition is resolved from the
+// Product Directory, BehaviorClass is validated as CUSTOMER, CEL eligibility is evaluated
+// with party context, attributes are validated against the JSON Schema, and ValuationFeatures
+// are seeded from the product type templates.
+// When product_type_code is empty, backwards-compatible behavior is used (legacy path).
 func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCurrentAccountRequest) (*pb.InitiateCurrentAccountResponse, error) {
 	start := time.Now()
 	operationStatus := operationStatusSuccess
@@ -72,12 +83,115 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 			"account_id", accountID)
 	}
 
-	// Create domain model (now returns value, not pointer)
+	// Resolve product type if provided
+	var opts []domain.AccountOption
+	var cachedType *CachedAccountType
+
+	if req.ProductTypeCode != "" && s.accountTypeCache != nil {
+		tenantID, ok := tenant.FromContext(ctx)
+		if !ok {
+			operationStatus = "missing_tenant"
+			return nil, status.Error(codes.FailedPrecondition, "tenant context is required for product type resolution")
+		}
+
+		var err error
+		cachedType, err = s.accountTypeCache.GetOrLoad(ctx, tenantID, req.ProductTypeCode)
+		if err != nil {
+			operationStatus = "product_type_not_found"
+			s.logger.Warn("product type resolution failed",
+				"product_type_code", req.ProductTypeCode,
+				"account_id", accountID,
+				"error", err)
+			return nil, status.Errorf(codes.InvalidArgument, "product type not found: %s", req.ProductTypeCode)
+		}
+
+		// Gate: BehaviorClass must be CUSTOMER for current accounts
+		if cachedType.Definition.BehaviorClass != accounttype.BehaviorClassCustomer {
+			operationStatus = "invalid_behavior_class"
+			s.logger.Warn("product type has non-CUSTOMER behavior class",
+				"product_type_code", req.ProductTypeCode,
+				"behavior_class", cachedType.Definition.BehaviorClass,
+				"account_id", accountID)
+			return nil, status.Errorf(codes.InvalidArgument,
+				"product type %s has behavior class %s, expected CUSTOMER",
+				req.ProductTypeCode, cachedType.Definition.BehaviorClass)
+		}
+
+		// Evaluate CEL eligibility if an eligibility program is configured
+		if cachedType.EligibilityProgram != nil {
+			if s.partyClient == nil {
+				operationStatus = "eligibility_unavailable"
+				s.logger.Error("party client not configured but eligibility program requires it",
+					"product_type_code", req.ProductTypeCode,
+					"party_id", req.PartyId,
+					"account_id", accountID)
+				return nil, status.Error(codes.FailedPrecondition, "party service is required for eligibility checks")
+			}
+			eligible, eligErr := s.evaluateEligibility(ctx, cachedType, req.PartyId, req.Attributes)
+			if eligErr != nil {
+				operationStatus = "eligibility_check_failed"
+				s.logger.Error("eligibility evaluation failed",
+					"product_type_code", req.ProductTypeCode,
+					"party_id", req.PartyId,
+					"account_id", accountID,
+					"error", eligErr)
+				return nil, status.Errorf(codes.Internal, "eligibility check failed: %v", eligErr)
+			}
+			if !eligible {
+				operationStatus = "party_not_eligible"
+				s.logger.Warn("party not eligible for product type",
+					"product_type_code", req.ProductTypeCode,
+					"party_id", req.PartyId,
+					"account_id", accountID)
+				return nil, status.Errorf(codes.FailedPrecondition,
+					"party %s is not eligible for product type %s", req.PartyId, req.ProductTypeCode)
+			}
+		}
+
+		// Validate attributes against JSON Schema if schema is defined.
+		// Always validate when a schema exists - this catches missing required fields
+		// even when no attributes are provided.
+		if cachedType.CompiledSchema != nil {
+			attrs := req.Attributes
+			if attrs == nil {
+				attrs = map[string]string{}
+			}
+			if err := validateAttributes(cachedType.CompiledSchema, attrs); err != nil {
+				operationStatus = "invalid_attributes"
+				return nil, status.Errorf(codes.InvalidArgument, "attribute validation failed: %v", err)
+			}
+		}
+
+		// Determine version: use requested version or latest from definition.
+		// When a specific version is requested, validate it does not exceed the
+		// latest known version since the cache only holds the latest definition.
+		version := cachedType.Definition.Version
+		if req.ProductTypeVersion != nil {
+			requested := int(*req.ProductTypeVersion)
+			if requested > cachedType.Definition.Version {
+				operationStatus = "invalid_version"
+				return nil, status.Errorf(codes.InvalidArgument,
+					"requested version %d exceeds latest version %d for product type %s",
+					requested, cachedType.Definition.Version, req.ProductTypeCode)
+			}
+			version = requested
+		}
+
+		opts = append(opts, domain.WithProductType(req.ProductTypeCode, version))
+
+		s.logger.Info("product type resolved for account creation",
+			"product_type_code", req.ProductTypeCode,
+			"product_type_version", version,
+			"account_id", accountID)
+	}
+
+	// Create domain model
 	account, err := domain.NewCurrentAccount(
 		accountID,
 		req.AccountIdentification,
 		req.PartyId,
 		currency,
+		opts...,
 	)
 	if err != nil {
 		operationStatus = "domain_error"
@@ -90,6 +204,17 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 		return nil, status.Errorf(codes.Internal, "failed to create account: %v", err)
 	}
 
+	// Seed ValuationFeatures from product type templates (best-effort after account creation)
+	if cachedType != nil && len(cachedType.Definition.ValuationMethods) > 0 && s.valuationFeatureRepo != nil {
+		if err := s.seedValuationFeatures(ctx, account.ID(), cachedType.Definition.ValuationMethods); err != nil {
+			// Log but do not fail account creation - VF seeding is best-effort
+			s.logger.Error("failed to seed valuation features",
+				"account_id", accountID,
+				"product_type_code", req.ProductTypeCode,
+				"error", err)
+		}
+	}
+
 	// Record initial balance
 	caobservability.RecordBalance(safeMinorUnits(account.Balance()), currency)
 
@@ -98,6 +223,86 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 		AccountId: accountID,
 		Facility:  toProtoFacility(account),
 	}, nil
+}
+
+// evaluateEligibility retrieves party details and evaluates the CEL eligibility expression.
+func (s *Service) evaluateEligibility(ctx context.Context, cachedType *CachedAccountType, partyID string, attributes map[string]string) (bool, error) {
+	party, err := s.partyClient.GetParty(ctx, partyID)
+	if err != nil {
+		return false, fmt.Errorf("failed to retrieve party for eligibility: %w", err)
+	}
+
+	// Map proto enum values to the string keys expected by CEL expressions.
+	// Proto enums use names like "PARTY_TYPE_PERSON" - strip prefix for CEL.
+	partyType := stripEnumPrefix(party.GetPartyType().String(), "PARTY_TYPE_")
+	partyStatus := stripEnumPrefix(party.GetStatus().String(), "PARTY_STATUS_")
+	extRefType := stripEnumPrefix(party.GetExternalReferenceType().String(), "EXTERNAL_REFERENCE_TYPE_")
+
+	return celutil.EvalEligibility(cachedType.EligibilityProgram, partyType, partyStatus, extRefType, attributes)
+}
+
+// stripEnumPrefix removes the proto enum prefix to produce CEL-friendly values.
+// Example: "PARTY_TYPE_PERSON" -> "PERSON", "PARTY_STATUS_ACTIVE" -> "ACTIVE"
+func stripEnumPrefix(value, prefix string) string {
+	return strings.TrimPrefix(value, prefix)
+}
+
+// validateAttributes validates the request attributes against the compiled JSON Schema.
+func validateAttributes(compiledSchema interface{ Validate(interface{}) error }, attributes map[string]string) error {
+	// Convert map[string]string to map[string]interface{} for JSON Schema validation
+	attrMap := make(map[string]interface{}, len(attributes))
+	for k, v := range attributes {
+		attrMap[k] = v
+	}
+
+	// JSON Schema validators expect deserialized JSON (map[string]interface{}).
+	// Round-trip through JSON to ensure proper types.
+	raw, err := json.Marshal(attrMap)
+	if err != nil {
+		return fmt.Errorf("failed to marshal attributes: %w", err)
+	}
+
+	var parsed interface{}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return fmt.Errorf("failed to unmarshal attributes: %w", err)
+	}
+
+	return compiledSchema.Validate(parsed)
+}
+
+// seedValuationFeatures creates ValuationFeature records from product type templates.
+// Each template maps an input instrument to a valuation method.
+// Features are created in INITIATED status and immediately activated.
+func (s *Service) seedValuationFeatures(ctx context.Context, accountID uuid.UUID, templates []accounttype.ValuationMethodTemplate) error {
+	for _, tmpl := range templates {
+		feature, err := vf.NewValuationFeature(
+			accountID,
+			tmpl.InputInstrument,
+			tmpl.ValuationMethodID,
+			tmpl.ValuationMethodVersion,
+			tmpl.Parameters,
+			"system",
+		)
+		if err != nil {
+			return fmt.Errorf("failed to create valuation feature for instrument %s: %w", tmpl.InputInstrument, err)
+		}
+
+		// Activate immediately for newly seeded features
+		if err := feature.Activate("system"); err != nil {
+			return fmt.Errorf("failed to activate valuation feature for instrument %s: %w", tmpl.InputInstrument, err)
+		}
+
+		if err := s.valuationFeatureRepo.Create(ctx, feature); err != nil {
+			return fmt.Errorf("failed to persist valuation feature for instrument %s: %w", tmpl.InputInstrument, err)
+		}
+
+		s.logger.Info("seeded valuation feature",
+			"account_id", accountID,
+			"instrument_code", tmpl.InputInstrument,
+			"valuation_method_id", tmpl.ValuationMethodID,
+			"valuation_method_version", tmpl.ValuationMethodVersion)
+	}
+	return nil
 }
 
 // RetrieveCurrentAccount gets current account details including balance from Position Keeping.
