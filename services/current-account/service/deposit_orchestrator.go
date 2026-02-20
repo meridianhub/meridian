@@ -5,6 +5,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -14,9 +15,11 @@ import (
 	"github.com/meridianhub/meridian/services/current-account/config"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
+	refsaga "github.com/meridianhub/meridian/services/reference-data/saga"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"github.com/meridianhub/meridian/shared/platform/observability"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -34,6 +37,7 @@ type DepositOrchestrator struct {
 	fungibilityValidator *FungibilityValidator
 	sagaRunner           *saga.StarlarkSagaRunner
 	depositScript        string
+	sagaResolver         *refsaga.ProductTypeSagaResolver
 }
 
 // DepositOrchestratorConfig contains dependencies for creating a DepositOrchestrator
@@ -52,8 +56,13 @@ type DepositOrchestratorConfig struct {
 	FungibilityValidator *FungibilityValidator
 	// SagaRunner executes Starlark saga definitions.
 	SagaRunner *saga.StarlarkSagaRunner
-	// DepositScript is the Starlark script for the deposit saga.
+	// DepositScript is the Starlark script for the default deposit saga.
+	// Used when SagaResolver is nil or the account has no ProductTypeCode.
 	DepositScript string
+	// SagaResolver optionally resolves the saga definition from the registry
+	// based on the account's ProductTypeCode. When set and the account has a
+	// ProductTypeCode, the resolved script is used instead of DepositScript.
+	SagaResolver *refsaga.ProductTypeSagaResolver
 }
 
 // NewDepositOrchestrator creates a new deposit orchestrator with the given dependencies.
@@ -87,6 +96,7 @@ func NewDepositOrchestrator(cfg DepositOrchestratorConfig) (*DepositOrchestrator
 		fungibilityValidator: cfg.FungibilityValidator,
 		sagaRunner:           cfg.SagaRunner,
 		depositScript:        cfg.DepositScript,
+		sagaResolver:         cfg.SagaResolver,
 	}, nil
 }
 
@@ -189,14 +199,27 @@ func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.Cu
 	})
 	ctx = context.WithValue(ctx, ContextKeyAccount, account)
 
+	// Resolve saga script: use ProductTypeSagaResolver when configured and account has a product type,
+	// otherwise fall back to the static default deposit script.
+	depositScript, err := o.resolveDepositScript(ctx, account)
+	if err != nil {
+		sagaStatus = operationStatusFailed
+		o.logger.Error("failed to resolve deposit saga",
+			"account_id", account.AccountID(),
+			"product_type_code", account.ProductTypeCode(),
+			"error", err)
+		return nil, status.Errorf(codes.NotFound, "deposit saga not found for product type: %v", err)
+	}
+
 	// Execute saga via StarlarkSagaRunner
 	o.logger.Info("executing deposit saga via Starlark",
 		"account_id", account.AccountID(),
 		"transaction_id", transactionID,
 		"saga_execution_id", input.SagaExecutionID,
-		"correlation_id", correlationID)
+		"correlation_id", correlationID,
+		"product_type_code", account.ProductTypeCode())
 
-	output, err := o.sagaRunner.ExecuteSaga(ctx, "current_account_deposit", o.depositScript, input)
+	output, err := o.sagaRunner.ExecuteSaga(ctx, "current_account_deposit", depositScript, input)
 	if err != nil {
 		sagaStatus = operationStatusFailed
 		o.logger.Error("deposit saga failed",
@@ -270,4 +293,50 @@ func (o *DepositOrchestrator) resolveClearingAccountID(ctx context.Context, curr
 	// Neither configured - single-entry mode
 	o.logger.Debug("no clearing account configured, operating in single-entry mode")
 	return ""
+}
+
+// resolveDepositScript returns the saga script to execute for the given account.
+//
+// Resolution order:
+//  1. If SagaResolver is configured and the account has a ProductTypeCode, resolve the
+//     saga definition from the registry using ProductTypeSagaResolver. The definition's
+//     ResolvedScript is used. If the resolver returns ErrSagaNotFound, the error is
+//     propagated (fail-fast: a prefixed product type must have a corresponding saga).
+//  2. Otherwise, fall back to the static default DepositScript.
+func (o *DepositOrchestrator) resolveDepositScript(ctx context.Context, account domain.CurrentAccount) (string, error) {
+	if o.sagaResolver == nil || account.ProductTypeCode() == "" {
+		return o.depositScript, nil
+	}
+
+	tenantID, ok := tenant.FromContext(ctx)
+	if !ok {
+		// No tenant context — fall back to static script
+		return o.depositScript, nil
+	}
+
+	def, err := o.sagaResolver.ResolveForProductType(ctx, tenantID, account.ProductTypeCode(), "deposit")
+	if err != nil {
+		if errors.Is(err, refsaga.ErrSagaNotFound) {
+			// Prefix is defined but no saga found — fail fast per PRD convention
+			return "", err
+		}
+		// ErrNotFound (product type or generic saga missing) — fall back to static script
+		o.logger.Warn("saga resolution fell through to default deposit script",
+			"product_type_code", account.ProductTypeCode(),
+			"error", err)
+		return o.depositScript, nil
+	}
+
+	if def.ResolvedScript == "" {
+		// Definition has no resolved script — fall back to static script
+		o.logger.Warn("resolved saga definition has no script, using default",
+			"saga_name", def.Name,
+			"product_type_code", account.ProductTypeCode())
+		return o.depositScript, nil
+	}
+
+	o.logger.Debug("using product-type-specific deposit saga",
+		"saga_name", def.Name,
+		"product_type_code", account.ProductTypeCode())
+	return def.ResolvedScript, nil
 }
