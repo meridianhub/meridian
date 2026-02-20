@@ -312,8 +312,12 @@ func (s *Service) InitiateInternalBankAccount(ctx context.Context, req *pb.Initi
 		}
 
 		// 5. Attribute validation against AttributeSchema (if defined)
-		if cached.CompiledSchema != nil && req.Attributes != nil {
-			attrsJSON, err := json.Marshal(req.Attributes.AsMap())
+		if cached.CompiledSchema != nil {
+			attrsMap := map[string]interface{}{}
+			if req.Attributes != nil {
+				attrsMap = req.Attributes.AsMap()
+			}
+			attrsJSON, err := json.Marshal(attrsMap)
 			if err != nil {
 				operationStatus = operationStatusFailed
 				return nil, status.Errorf(codes.InvalidArgument, "invalid attributes: %v", err)
