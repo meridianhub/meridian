@@ -32,7 +32,7 @@ GOMOD=$(GOCMD) mod
 GOGET=$(GOCMD) get
 GOFMT=$(GOCMD) fmt
 
-.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-openapi proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt validate-semconv validate-sagas proto-jsonschema validate-manifest-jsonschema validate-manifests control-plane-ci test-control-plane migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-status-all migrate-lint-all migrate-hash-all migrate-apply-orgs migrate-status-orgs docs generate-saga-docs swagger-split swagger-ui dev-up dev-down dev-clean
+.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-openapi proto-lint proto-breaking proto-descriptors docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt validate-semconv validate-sagas proto-jsonschema validate-manifest-jsonschema validate-manifests control-plane-ci test-control-plane migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-status-all migrate-lint-all migrate-hash-all migrate-apply-orgs migrate-status-orgs docs generate-saga-docs swagger-split swagger-ui dev-up dev-down dev-clean
 
 # Default target
 all: help
@@ -53,6 +53,7 @@ help:
 	@echo "  make proto-v1          - Generate code from v1 protobuf definitions"
 	@echo "  make proto-v2          - Generate code from v2 protobuf definitions (future)"
 	@echo "  make proto-openapi     - Show location of generated OpenAPI spec"
+	@echo "  make proto-descriptors - Build compiled FileDescriptorSet for Vanguard transcoder"
 	@echo "  make proto-validate    - Validate protobuf directory structure"
 	@echo "  make proto-lint        - Lint protobuf files with buf"
 	@echo "  make proto-breaking    - Check for breaking proto changes"
@@ -186,7 +187,7 @@ clean:
 	@echo "Clean complete"
 
 ## proto: Generate code from all protobuf versions
-proto: proto-v1
+proto: proto-v1 proto-descriptors
 	@echo "All protobuf versions generated successfully"
 
 ## proto-v1: Generate code from v1 protobuf definitions
@@ -196,6 +197,13 @@ proto-v1: proto-validate
 	@$(BUF) generate
 	@echo "v1 protobuf generation complete"
 	@echo "Generated files in: api/proto/meridian/*/v1/"
+
+## proto-descriptors: Build compiled FileDescriptorSet for the Vanguard HTTP/JSON transcoder
+proto-descriptors: proto-validate
+	@echo "Building proto FileDescriptorSet..."
+	@which $(BUF) > /dev/null || (echo "buf not installed. Run 'go install github.com/bufbuild/buf/cmd/buf@latest'"; exit 1)
+	@$(BUF) build api/proto -o cmd/meridian/descriptor.binpb
+	@echo "Proto descriptor written to cmd/meridian/descriptor.binpb"
 
 ## proto-v2: Generate code from v2 protobuf definitions (placeholder for future use)
 proto-v2:
