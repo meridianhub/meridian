@@ -275,6 +275,11 @@ func (s *Service) InitiateInternalBankAccount(ctx context.Context, req *pb.Initi
 			return nil, status.Errorf(codes.InvalidArgument, "product type not found: %s", productTypeCode)
 		}
 
+		if cached.Definition == nil {
+			operationStatus = operationStatusFailed
+			return nil, status.Errorf(codes.Internal, "product type %s has no definition", productTypeCode)
+		}
+
 		def := cached.Definition
 
 		// 3. BehaviorClass gating: must NOT be CUSTOMER
@@ -330,6 +335,11 @@ func (s *Service) InitiateInternalBankAccount(ctx context.Context, req *pb.Initi
 		valuationTemplates = def.ValuationMethods
 
 		// Derive dimension from instrument via Reference Data (if available)
+	} else if s.accountTypeCache == nil && req.ProductTypeCode != "" {
+		// product_type_code was explicitly provided but cache is not configured
+		operationStatus = operationStatusFailed
+		return nil, status.Error(codes.FailedPrecondition,
+			"product type resolution not available; configure account type cache or use deprecated account_type field")
 	} else {
 		// Legacy path: no cache, derive account type from proto enum
 		var err error

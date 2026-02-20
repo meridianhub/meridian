@@ -140,12 +140,23 @@ func TestInitiate_LegacyAccountType_AllTypes(t *testing.T) {
 // --- Tests: product_type_code takes precedence over account_type ---
 
 func TestInitiate_ProductTypeCode_TakesPrecedence(t *testing.T) {
+	// With a cache, product_type_code takes precedence over the deprecated account_type enum
+	defs := map[string]*accounttype.Definition{
+		"CUSTOM_PRODUCT": {
+			Code:           "CUSTOM_PRODUCT",
+			Version:        1,
+			BehaviorClass:  accounttype.BehaviorClassClearing,
+			EligibilityCEL: "true",
+			Status:         accounttype.StatusActive,
+		},
+	}
+	testCache := newTestCacheWithDefinitions(defs)
+
 	repo := newMockRepository()
-	// No cache configured, so product_type_code is stored but not resolved
-	svc, err := NewService(repo)
+	svc, err := NewServiceFull(repo, nil, nil, nil, nil, WithAccountTypeCache(testCache))
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := ptTestCtx()
 	resp, err := svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
 		AccountCode:     "CLR-GBP-OVERRIDE",
 		Name:            "GBP Clearing Override",
@@ -158,6 +169,28 @@ func TestInitiate_ProductTypeCode_TakesPrecedence(t *testing.T) {
 
 	// product_type_code should be the explicitly set value, not the legacy mapping
 	assert.Equal(t, "CUSTOM_PRODUCT", resp.Facility.ProductTypeCode)
+}
+
+func TestInitiate_ProductTypeCode_NoCacheReturnsError(t *testing.T) {
+	// When product_type_code is provided but cache is not configured, return FailedPrecondition
+	repo := newMockRepository()
+	svc, err := NewService(repo)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	_, err = svc.InitiateInternalBankAccount(ctx, &pb.InitiateInternalBankAccountRequest{
+		AccountCode:     "CLR-GBP",
+		Name:            "GBP Clearing",
+		AccountType:     pb.InternalAccountType_INTERNAL_ACCOUNT_TYPE_CLEARING, //nolint:staticcheck // testing deprecated field
+		ClearingPurpose: pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL,
+		InstrumentCode:  "GBP",
+		ProductTypeCode: "CUSTOM_PRODUCT",
+	})
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.FailedPrecondition, st.Code())
+	assert.Contains(t, st.Message(), "product type resolution not available")
 }
 
 // --- Tests: BehaviorClass gating with cache ---
