@@ -257,16 +257,18 @@ jobs:
             For each changed function, check whether the test file is in the diff. If it is, review whether the test actually verifies the behavior. If not, check if a `*_test.go` file exists for the package, then note: "No test changes for [function] - verify existing tests cover the new behavior" or "No test file found for [file]." Focus on domain edge cases, not generic coverage.
 
             **Questions for the Author (根回し - Nemawashi):**
-            End your review with 2-5 probing questions. Each question
-            MUST reference a specific file and line number from the diff.
-            The goal is not "have you considered..." but to surface
-            unstated assumptions, implicit invariants, and the gap between
-            intent and reality.
+            Only include questions when you have genuine uncertainty about
+            the change. A clean config tweak or straightforward bug fix
+            needs zero questions. Do not manufacture questions to fill a
+            section.
 
-            Question types that produce depth:
+            When questions ARE warranted, each MUST reference a specific
+            file and line number from the diff. The goal is to surface
+            unstated assumptions and the gap between intent and reality:
+
             - **Invariant surfacing**: "Line 47 of `registry.go` assumes
               `account.Balance` is non-negative. What enforces that
-              upstream? If nothing, this is a latent bug."
+              upstream?"
             - **Interest behind position**: "Why synchronous here
               (`handler.go:82`) rather than async? The saga pattern
               elsewhere suggests eventual consistency was the intent."
@@ -278,11 +280,11 @@ jobs:
               than adding a new code path?"
             - **Current vs ideal state**: "The test at `_test.go:92`
               asserts the happy path. What's the actual failure mode when
-              the upstream returns partial data - silent corruption or
-              explicit error?"
+              the upstream returns partial data?"
 
-            Avoid generic questions. If you can't anchor a question to a
-            specific line, it probably isn't specific enough to be useful.
+            If you can't anchor a question to a specific line, it
+            probably isn't specific enough to be useful. Omit the section
+            entirely rather than ask generic questions.
 
             For PRDs and architecture docs, also ask:
             - What edge cases are missing from the spec?
@@ -352,9 +354,8 @@ jobs:
             | 🔴 | `file.go:42` | Description | Open |
             | 🟡 | `file.go:88` | Description | Open |
 
-            ### Questions for the Author
-            1. `file.go:47` - [Probing question about invariant/assumption/intent]
-            2. `other.go:82` - [Question anchored to specific code]
+            ### Questions for the Author (omit if none)
+            1. `file.go:47` - [Question anchored to specific code]
 
             ### Previously Flagged
             | Severity | Location | Description | Status |
