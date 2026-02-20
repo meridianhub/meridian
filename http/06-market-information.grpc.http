@@ -1,0 +1,154 @@
+### Market Information Service
+# Market data management: datasets, sources, observations for valuation and pricing.
+# Proto: api/proto/meridian/market_information/v1/market_information.proto
+
+## --- Datasets ---
+
+### Register Dataset
+GRPC {{grpc_host}}/meridian.market_information.v1.MarketInformationService/RegisterDataSet
+x-tenant-id: {{tenant_id}}
+
+{
+  "name": "fx-spot-rates",
+  "description": "Live FX spot rates from Reuters",
+  "assetClass": "FX"
+}
+
+> {%
+    client.global.set("mi_dataset_id", response.body.dataSet.dataSetId);
+%}
+
+### Retrieve Dataset
+GRPC {{grpc_host}}/meridian.market_information.v1.MarketInformationService/RetrieveDataSet
+x-tenant-id: {{tenant_id}}
+
+{
+  "dataSetId": "{{mi_dataset_id}}"
+}
+
+### Update Dataset
+GRPC {{grpc_host}}/meridian.market_information.v1.MarketInformationService/UpdateDataSet
+x-tenant-id: {{tenant_id}}
+
+{
+  "dataSetId": "{{mi_dataset_id}}",
+  "description": "Live FX spot rates from Reuters (updated feed)"
+}
+
+### Activate Dataset
+GRPC {{grpc_host}}/meridian.market_information.v1.MarketInformationService/ActivateDataSet
+x-tenant-id: {{tenant_id}}
+
+{
+  "dataSetId": "{{mi_dataset_id}}"
+}
+
+### List Datasets
+GRPC {{grpc_host}}/meridian.market_information.v1.MarketInformationService/ListDataSets
+x-tenant-id: {{tenant_id}}
+
+{}
+
+### Deprecate Dataset
+GRPC {{grpc_host}}/meridian.market_information.v1.MarketInformationService/DeprecateDataSet
+x-tenant-id: {{tenant_id}}
+
+{
+  "dataSetId": "{{mi_dataset_id}}"
+}
+
+## --- Data Sources ---
+
+### Register Data Source
+GRPC {{grpc_host}}/meridian.market_information.v1.MarketInformationService/RegisterDataSource
+x-tenant-id: {{tenant_id}}
+
+{
+  "dataSetId": "{{mi_dataset_id}}",
+  "name": "reuters-fx",
+  "description": "Reuters FX feed"
+}
+
+> {%
+    client.global.set("mi_source_id", response.body.dataSource.dataSourceId);
+%}
+
+### Update Data Source
+GRPC {{grpc_host}}/meridian.market_information.v1.MarketInformationService/UpdateDataSource
+x-tenant-id: {{tenant_id}}
+
+{
+  "dataSourceId": "{{mi_source_id}}",
+  "description": "Reuters FX feed (primary)"
+}
+
+### List Data Sources
+GRPC {{grpc_host}}/meridian.market_information.v1.MarketInformationService/ListDataSources
+x-tenant-id: {{tenant_id}}
+
+{
+  "dataSetId": "{{mi_dataset_id}}"
+}
+
+### Deactivate Data Source
+GRPC {{grpc_host}}/meridian.market_information.v1.MarketInformationService/DeactivateDataSource
+x-tenant-id: {{tenant_id}}
+
+{
+  "dataSourceId": "{{mi_source_id}}"
+}
+
+## --- Observations ---
+
+### Record Single Observation
+GRPC {{grpc_host}}/meridian.market_information.v1.MarketInformationService/RecordObservation
+x-tenant-id: {{tenant_id}}
+
+{
+  "dataSetId": "{{mi_dataset_id}}",
+  "dataSourceId": "{{mi_source_id}}",
+  "instrumentCode": "EUR/GBP",
+  "value": "0.8456"
+}
+
+> {%
+    client.global.set("mi_obs_id", response.body.observation.observationId);
+%}
+
+### Record Batch Observations
+GRPC {{grpc_host}}/meridian.market_information.v1.MarketInformationService/RecordObservationBatch
+x-tenant-id: {{tenant_id}}
+
+{
+  "observations": [
+    {
+      "dataSetId": "{{mi_dataset_id}}",
+      "dataSourceId": "{{mi_source_id}}",
+      "instrumentCode": "USD/GBP",
+      "value": "0.7923"
+    },
+    {
+      "dataSetId": "{{mi_dataset_id}}",
+      "dataSourceId": "{{mi_source_id}}",
+      "instrumentCode": "JPY/GBP",
+      "value": "0.005234"
+    }
+  ]
+}
+
+### Retrieve Observation
+GRPC {{grpc_host}}/meridian.market_information.v1.MarketInformationService/RetrieveObservation
+x-tenant-id: {{tenant_id}}
+
+{
+  "observationId": "{{mi_obs_id}}"
+}
+
+### List Observations
+GRPC {{grpc_host}}/meridian.market_information.v1.MarketInformationService/ListObservations
+x-tenant-id: {{tenant_id}}
+
+{
+  "dataSetId": "{{mi_dataset_id}}",
+  "pageSize": 50
+}

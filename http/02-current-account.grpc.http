@@ -1,14 +1,12 @@
 ### Current Account Service
 # BIAN-compliant current account operations: deposits, withdrawals, liens, valuation features.
 # Proto: api/proto/meridian/current_account/v1/current_account.proto
-# Gateway: HTTP/JSON via Vanguard transcoding
 
 ## --- Setup: Create Party + Account ---
 
 ### Register Party (for account setup)
-POST {{host}}/v1/parties
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.party.v1.PartyService/RegisterParty
+x-tenant-id: {{tenant_id}}
 
 {
   "partyType": "PARTY_TYPE_PERSON",
@@ -21,9 +19,8 @@ X-Tenant-ID: {{tenant_id}}
 %}
 
 ### Open Current Account (GBP)
-POST {{host}}/v1/current-accounts
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/InitiateCurrentAccount
+x-tenant-id: {{tenant_id}}
 
 {
   "partyId": "{{ca_party_id}}",
@@ -36,9 +33,8 @@ X-Tenant-ID: {{tenant_id}}
 %}
 
 ### Open Current Account (USD)
-POST {{host}}/v1/current-accounts
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/InitiateCurrentAccount
+x-tenant-id: {{tenant_id}}
 
 {
   "partyId": "{{ca_party_id}}",
@@ -47,15 +43,19 @@ X-Tenant-ID: {{tenant_id}}
 }
 
 ### Retrieve Account
-GET {{host}}/v1/current-accounts/{{ca_account_id}}
-X-Tenant-ID: {{tenant_id}}
-
-### Update Account
-PUT {{host}}/v1/current-accounts/{{ca_account_id}}
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount
+x-tenant-id: {{tenant_id}}
 
 {
+  "accountId": "{{ca_account_id}}"
+}
+
+### Update Account
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/UpdateCurrentAccount
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{ca_account_id}}",
   "overdraftLimit": {
     "amount": {
       "currencyCode": "GBP",
@@ -67,11 +67,11 @@ X-Tenant-ID: {{tenant_id}}
 ## --- Deposits ---
 
 ### Deposit 1000 GBP
-POST {{host}}/v1/current-accounts/{{ca_account_id}}/deposits
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/ExecuteDeposit
+x-tenant-id: {{tenant_id}}
 
 {
+  "accountId": "{{ca_account_id}}",
   "amount": {
     "amount": {
       "currencyCode": "GBP",
@@ -86,11 +86,11 @@ X-Tenant-ID: {{tenant_id}}
 }
 
 ### Deposit fractional amount
-POST {{host}}/v1/current-accounts/{{ca_account_id}}/deposits
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/ExecuteDeposit
+x-tenant-id: {{tenant_id}}
 
 {
+  "accountId": "{{ca_account_id}}",
   "amount": {
     "amount": {
       "currencyCode": "GBP",
@@ -108,11 +108,11 @@ X-Tenant-ID: {{tenant_id}}
 ## --- Withdrawals (two-phase) ---
 
 ### Initiate Withdrawal
-POST {{host}}/v1/current-accounts/{{ca_account_id}}/withdrawals:initiate
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/InitiateWithdrawal
+x-tenant-id: {{tenant_id}}
 
 {
+  "accountId": "{{ca_account_id}}",
   "amount": {
     "amount": {
       "currencyCode": "GBP",
@@ -130,30 +130,34 @@ X-Tenant-ID: {{tenant_id}}
     client.global.set("ca_withdrawal_id", response.body.withdrawal.withdrawalId);
 %}
 
-### Execute Withdrawal (two-phase)
-POST {{host}}/v1/current-accounts/{{ca_account_id}}/withdrawals:execute
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+### Execute Withdrawal
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/ExecuteWithdrawal
+x-tenant-id: {{tenant_id}}
 
 {
   "withdrawalId": "{{ca_withdrawal_id}}",
+  "accountId": "{{ca_account_id}}",
   "idempotencyKey": {
     "key": "{{$uuid}}"
   }
 }
 
 ### Retrieve Withdrawal
-GET {{host}}/v1/withdrawals/{{ca_withdrawal_id}}
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/RetrieveWithdrawal
+x-tenant-id: {{tenant_id}}
+
+{
+  "withdrawalId": "{{ca_withdrawal_id}}"
+}
 
 ## --- Withdrawals (direct execution) ---
 
 ### Direct Withdrawal (skip initiate)
-POST {{host}}/v1/current-accounts/{{ca_account_id}}/withdrawals:execute
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/ExecuteWithdrawal
+x-tenant-id: {{tenant_id}}
 
 {
+  "accountId": "{{ca_account_id}}",
   "amount": {
     "amount": {
       "currencyCode": "GBP",
@@ -170,11 +174,11 @@ X-Tenant-ID: {{tenant_id}}
 ## --- Liens ---
 
 ### Initiate Lien
-POST {{host}}/v1/current-accounts/{{ca_account_id}}/liens
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/InitiateLien
+x-tenant-id: {{tenant_id}}
 
 {
+  "accountId": "{{ca_account_id}}",
   "amount": {
     "amount": {
       "currencyCode": "GBP",
@@ -192,26 +196,30 @@ X-Tenant-ID: {{tenant_id}}
 %}
 
 ### Retrieve Lien
-GET {{host}}/v1/liens/{{ca_lien_id}}
-X-Tenant-ID: {{tenant_id}}
-
-### Execute Lien
-POST {{host}}/v1/liens/{{ca_lien_id}}/execute
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/RetrieveLien
+x-tenant-id: {{tenant_id}}
 
 {
+  "lienId": "{{ca_lien_id}}"
+}
+
+### Execute Lien
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/ExecuteLien
+x-tenant-id: {{tenant_id}}
+
+{
+  "lienId": "{{ca_lien_id}}",
   "idempotencyKey": {
     "key": "{{$uuid}}"
   }
 }
 
 ### Initiate Another Lien (for termination test)
-POST {{host}}/v1/current-accounts/{{ca_account_id}}/liens
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/InitiateLien
+x-tenant-id: {{tenant_id}}
 
 {
+  "accountId": "{{ca_account_id}}",
   "amount": {
     "amount": {
       "currencyCode": "GBP",
@@ -229,36 +237,40 @@ X-Tenant-ID: {{tenant_id}}
 %}
 
 ### Terminate Lien
-POST {{host}}/v1/liens/{{ca_lien_id_2}}/terminate
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/TerminateLien
+x-tenant-id: {{tenant_id}}
 
 {
+  "lienId": "{{ca_lien_id_2}}",
   "reason": "Payment order cancelled"
 }
 
 ### Get Active Amount Blocks
-GET {{host}}/v1/current-accounts/{{ca_account_id}}/amount-blocks
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/GetActiveAmountBlocks
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{ca_account_id}}"
+}
 
 ## --- Account Lifecycle ---
 
 ### Control Account (freeze)
-POST {{host}}/v1/current-accounts/{{ca_account_id}}/control
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/ControlCurrentAccount
+x-tenant-id: {{tenant_id}}
 
 {
+  "accountId": "{{ca_account_id}}",
   "action": "CONTROL_ACTION_FREEZE",
   "reason": "Suspicious activity investigation"
 }
 
 ### Control Account (unfreeze)
-POST {{host}}/v1/current-accounts/{{ca_account_id}}/control
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/ControlCurrentAccount
+x-tenant-id: {{tenant_id}}
 
 {
+  "accountId": "{{ca_account_id}}",
   "action": "CONTROL_ACTION_UNFREEZE",
   "reason": "Investigation cleared"
 }
@@ -266,11 +278,11 @@ X-Tenant-ID: {{tenant_id}}
 ## --- Valuation Features ---
 
 ### Create Valuation Feature (EUR->GBP)
-POST {{host}}/v1/current-accounts/{{ca_account_id}}/valuation-features
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/CreateValuationFeature
+x-tenant-id: {{tenant_id}}
 
 {
+  "accountId": "{{ca_account_id}}",
   "instrumentCode": "EUR",
   "valuationMethodId": "fx-spot-rate",
   "valuationMethodVersion": 1,
@@ -283,19 +295,27 @@ X-Tenant-ID: {{tenant_id}}
 %}
 
 ### List Valuation Features
-GET {{host}}/v1/current-accounts/{{ca_account_id}}/valuation-features
-X-Tenant-ID: {{tenant_id}}
-
-### Get Valuation Feature
-GET {{host}}/v1/valuation-features/{{ca_vf_id}}
-X-Tenant-ID: {{tenant_id}}
-
-### Evaluate Asset Valuation (inquiry)
-POST {{host}}/v1/current-accounts/{{ca_account_id}}/valuations:evaluate
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/ListValuationFeatures
+x-tenant-id: {{tenant_id}}
 
 {
+  "accountId": "{{ca_account_id}}"
+}
+
+### Get Valuation Feature
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/GetValuationFeature
+x-tenant-id: {{tenant_id}}
+
+{
+  "featureId": "{{ca_vf_id}}"
+}
+
+### Evaluate Asset Valuation (inquiry)
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/EvaluateAssetValuation
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{ca_account_id}}",
   "input": {
     "amount": "500.00",
     "instrumentCode": "EUR"

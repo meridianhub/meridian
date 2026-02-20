@@ -1,12 +1,14 @@
 ### Tenant Service
 # Multi-tenant configuration and provisioning.
 # Proto: api/proto/meridian/tenant/v1/tenant.proto
+# Gateway: HTTP/JSON via Vanguard transcoding
 
 ## --- Tenant Management ---
 
 ### Create Tenant
-GRPC {{grpc_host}}/meridian.tenant.v1.TenantService/InitiateTenant
-x-tenant-id: {{tenant_id}}
+POST {{host}}/v1/tenants
+Content-Type: application/json
+X-Tenant-ID: {{tenant_id}}
 
 {
   "tenantId": "acme_energy",
@@ -20,39 +22,30 @@ x-tenant-id: {{tenant_id}}
 %}
 
 ### Retrieve Tenant
-GRPC {{grpc_host}}/meridian.tenant.v1.TenantService/RetrieveTenant
-x-tenant-id: {{tenant_id}}
-
-{
-  "tenantId": "{{new_tenant_id}}"
-}
+GET {{host}}/v1/tenants/{{new_tenant_id}}
+X-Tenant-ID: {{tenant_id}}
 
 ### List Tenants
-GRPC {{grpc_host}}/meridian.tenant.v1.TenantService/ListTenants
-x-tenant-id: {{tenant_id}}
-
-{}
+GET {{host}}/v1/tenants
+X-Tenant-ID: {{tenant_id}}
 
 ### Update Tenant Status
-GRPC {{grpc_host}}/meridian.tenant.v1.TenantService/UpdateTenantStatus
-x-tenant-id: {{tenant_id}}
+PATCH {{host}}/v1/tenants/{{new_tenant_id}}/status
+Content-Type: application/json
+X-Tenant-ID: {{tenant_id}}
 
 {
-  "tenantId": "{{new_tenant_id}}",
   "status": "TENANT_STATUS_ACTIVE"
 }
 
 ### Get Provisioning Status
-GRPC {{grpc_host}}/meridian.tenant.v1.TenantService/GetTenantProvisioningStatus
-x-tenant-id: {{tenant_id}}
-
-{
-  "tenantId": "{{new_tenant_id}}"
-}
+GET {{host}}/v1/tenants/{{new_tenant_id}}/provisioning-status
+X-Tenant-ID: {{tenant_id}}
 
 ### Reconcile Migrations (specific tenant)
-GRPC {{grpc_host}}/meridian.tenant.v1.TenantService/ReconcileMigrations
-x-tenant-id: {{tenant_id}}
+POST {{host}}/v1/tenants:reconcile-migrations
+Content-Type: application/json
+X-Tenant-ID: {{tenant_id}}
 
 {
   "tenantId": "{{new_tenant_id}}"

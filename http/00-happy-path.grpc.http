@@ -1,12 +1,12 @@
-### Meridian Happy Path - End-to-End Flow (HTTP/JSON)
+### Meridian Happy Path - End-to-End Flow (gRPC)
 # Demonstrates the core Meridian story: party registration, account opening,
 # deposits, withdrawals, liens, and balance verification.
 #
 # Prerequisites: `make dev-up` running locally
 # Environment: Select "local" in IntelliJ HTTP Client
-# Gateway: HTTP/JSON via Vanguard transcoding at {{host}}
+# Requires: IntelliJ "gRPC" and "Protocol Buffers" plugins
 
-### 1. Health Check
+### 1. Health Check (HTTP - gateway health endpoint)
 GET {{host}}/health
 
 > {%
@@ -16,9 +16,8 @@ GET {{host}}/health
 %}
 
 ### 2. Register Party
-POST {{host}}/v1/parties
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.party.v1.PartyService/RegisterParty
+x-tenant-id: {{tenant_id}}
 
 {
   "partyType": "PARTY_TYPE_PERSON",
@@ -34,8 +33,12 @@ X-Tenant-ID: {{tenant_id}}
 %}
 
 ### 3. Retrieve Party (verify)
-GET {{host}}/v1/parties/{{party_id}}
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.party.v1.PartyService/RetrieveParty
+x-tenant-id: {{tenant_id}}
+
+{
+  "partyId": "{{party_id}}"
+}
 
 > {%
     client.test("Party retrieved", function() {
@@ -45,9 +48,8 @@ X-Tenant-ID: {{tenant_id}}
 %}
 
 ### 4. Open Current Account (GBP)
-POST {{host}}/v1/current-accounts
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/InitiateCurrentAccount
+x-tenant-id: {{tenant_id}}
 
 {
   "partyId": "{{party_id}}",
@@ -63,8 +65,12 @@ X-Tenant-ID: {{tenant_id}}
 %}
 
 ### 5. Retrieve Account (verify ACTIVE)
-GET {{host}}/v1/current-accounts/{{account_id}}
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{account_id}}"
+}
 
 > {%
     client.test("Account is active", function() {
@@ -73,11 +79,11 @@ X-Tenant-ID: {{tenant_id}}
 %}
 
 ### 6. Deposit 1000 GBP
-POST {{host}}/v1/current-accounts/{{account_id}}/deposits
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/ExecuteDeposit
+x-tenant-id: {{tenant_id}}
 
 {
+  "accountId": "{{account_id}}",
   "amount": {
     "amount": {
       "currencyCode": "GBP",
@@ -98,8 +104,12 @@ X-Tenant-ID: {{tenant_id}}
 %}
 
 ### 7. Check Balance (position-keeping)
-GET {{host}}/v1/accounts/{{account_id}}/balances
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.position_keeping.v1.PositionKeepingService/GetAccountBalances
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{account_id}}"
+}
 
 > {%
     client.test("Balance query returns results", function() {
@@ -108,11 +118,11 @@ X-Tenant-ID: {{tenant_id}}
 %}
 
 ### 8. Deposit 500 GBP
-POST {{host}}/v1/current-accounts/{{account_id}}/deposits
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/ExecuteDeposit
+x-tenant-id: {{tenant_id}}
 
 {
+  "accountId": "{{account_id}}",
   "amount": {
     "amount": {
       "currencyCode": "GBP",
@@ -133,11 +143,11 @@ X-Tenant-ID: {{tenant_id}}
 %}
 
 ### 9. Initiate Withdrawal 200 GBP
-POST {{host}}/v1/current-accounts/{{account_id}}/withdrawals:initiate
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/InitiateWithdrawal
+x-tenant-id: {{tenant_id}}
 
 {
+  "accountId": "{{account_id}}",
   "amount": {
     "amount": {
       "currencyCode": "GBP",
@@ -159,9 +169,8 @@ X-Tenant-ID: {{tenant_id}}
 %}
 
 ### 10. Execute Withdrawal
-POST {{host}}/v1/current-accounts/{{account_id}}/withdrawals:execute
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/ExecuteWithdrawal
+x-tenant-id: {{tenant_id}}
 
 {
   "withdrawalId": "{{withdrawal_id}}",
@@ -177,11 +186,11 @@ X-Tenant-ID: {{tenant_id}}
 %}
 
 ### 11. Initiate Lien (reserve 100 GBP)
-POST {{host}}/v1/current-accounts/{{account_id}}/liens
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/InitiateLien
+x-tenant-id: {{tenant_id}}
 
 {
+  "accountId": "{{account_id}}",
   "amount": {
     "amount": {
       "currencyCode": "GBP",
@@ -202,8 +211,12 @@ X-Tenant-ID: {{tenant_id}}
 %}
 
 ### 12. Retrieve Lien (verify ACTIVE)
-GET {{host}}/v1/liens/{{lien_id}}
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/RetrieveLien
+x-tenant-id: {{tenant_id}}
+
+{
+  "lienId": "{{lien_id}}"
+}
 
 > {%
     client.test("Lien is active", function() {
@@ -212,11 +225,11 @@ X-Tenant-ID: {{tenant_id}}
 %}
 
 ### 13. Execute Lien (convert to debit)
-POST {{host}}/v1/liens/{{lien_id}}/execute
-Content-Type: application/json
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/ExecuteLien
+x-tenant-id: {{tenant_id}}
 
 {
+  "lienId": "{{lien_id}}",
   "idempotencyKey": {
     "key": "{{$uuid}}"
   }
@@ -230,8 +243,12 @@ X-Tenant-ID: {{tenant_id}}
 
 ### 14. Get All Balances (final verification)
 # Expected: 1000 + 500 - 200 - 100 = 1200 GBP
-GET {{host}}/v1/accounts/{{account_id}}/balances
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.position_keeping.v1.PositionKeepingService/GetAccountBalances
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{account_id}}"
+}
 
 > {%
     client.test("Final balance query succeeds", function() {
@@ -240,8 +257,12 @@ X-Tenant-ID: {{tenant_id}}
 %}
 
 ### 15. Retrieve Account (final state)
-GET {{host}}/v1/current-accounts/{{account_id}}
-X-Tenant-ID: {{tenant_id}}
+GRPC {{grpc_host}}/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{account_id}}"
+}
 
 > {%
     client.test("Account still active", function() {

@@ -1,0 +1,150 @@
+### Financial Accounting Service
+# BIAN-compliant double-entry bookkeeping: booking logs, ledger postings.
+# Proto: api/proto/meridian/financial_accounting/v1/financial_accounting.proto
+
+## --- Booking Log Lifecycle ---
+
+### Initiate Booking Log
+GRPC {{grpc_host}}/meridian.financial_accounting.v1.FinancialAccountingService/InitiateFinancialBookingLog
+x-tenant-id: {{tenant_id}}
+
+{
+  "description": "Monthly revenue recognition",
+  "reference": "REV-2025-01",
+  "idempotencyKey": {
+    "key": "{{$uuid}}"
+  }
+}
+
+> {%
+    client.global.set("fa_log_id", response.body.bookingLogId);
+%}
+
+### Retrieve Booking Log
+GRPC {{grpc_host}}/meridian.financial_accounting.v1.FinancialAccountingService/RetrieveFinancialBookingLog
+x-tenant-id: {{tenant_id}}
+
+{
+  "bookingLogId": "{{fa_log_id}}"
+}
+
+### List Booking Logs
+GRPC {{grpc_host}}/meridian.financial_accounting.v1.FinancialAccountingService/ListFinancialBookingLogs
+x-tenant-id: {{tenant_id}}
+
+{
+  "pageSize": 20
+}
+
+### Update Booking Log
+GRPC {{grpc_host}}/meridian.financial_accounting.v1.FinancialAccountingService/UpdateFinancialBookingLog
+x-tenant-id: {{tenant_id}}
+
+{
+  "bookingLogId": "{{fa_log_id}}",
+  "status": "BOOKING_LOG_STATUS_POSTED"
+}
+
+## --- Ledger Postings (double-entry) ---
+
+### Capture Debit Posting
+GRPC {{grpc_host}}/meridian.financial_accounting.v1.FinancialAccountingService/CaptureLedgerPosting
+x-tenant-id: {{tenant_id}}
+
+{
+  "bookingLogId": "{{fa_log_id}}",
+  "accountId": "revenue-gbp-001",
+  "postingDirection": "POSTING_DIRECTION_DEBIT",
+  "postingAmount": {
+    "currencyCode": "GBP",
+    "units": "500"
+  },
+  "description": "Revenue debit entry",
+  "idempotencyKey": {
+    "key": "{{$uuid}}"
+  }
+}
+
+> {%
+    client.global.set("fa_debit_id", response.body.ledgerPostingId);
+%}
+
+### Capture Credit Posting (balancing entry)
+GRPC {{grpc_host}}/meridian.financial_accounting.v1.FinancialAccountingService/CaptureLedgerPosting
+x-tenant-id: {{tenant_id}}
+
+{
+  "bookingLogId": "{{fa_log_id}}",
+  "accountId": "accounts-receivable-001",
+  "postingDirection": "POSTING_DIRECTION_CREDIT",
+  "postingAmount": {
+    "currencyCode": "GBP",
+    "units": "500"
+  },
+  "description": "AR credit entry",
+  "idempotencyKey": {
+    "key": "{{$uuid}}"
+  }
+}
+
+> {%
+    client.global.set("fa_credit_id", response.body.ledgerPostingId);
+%}
+
+### Retrieve Ledger Posting
+GRPC {{grpc_host}}/meridian.financial_accounting.v1.FinancialAccountingService/RetrieveLedgerPosting
+x-tenant-id: {{tenant_id}}
+
+{
+  "ledgerPostingId": "{{fa_debit_id}}"
+}
+
+### List Ledger Postings
+GRPC {{grpc_host}}/meridian.financial_accounting.v1.FinancialAccountingService/ListLedgerPostings
+x-tenant-id: {{tenant_id}}
+
+{
+  "bookingLogId": "{{fa_log_id}}",
+  "pageSize": 50
+}
+
+### Update Ledger Posting
+GRPC {{grpc_host}}/meridian.financial_accounting.v1.FinancialAccountingService/UpdateLedgerPosting
+x-tenant-id: {{tenant_id}}
+
+{
+  "ledgerPostingId": "{{fa_debit_id}}",
+  "description": "Revenue debit entry (updated)"
+}
+
+## --- Booking Log Lifecycle Control ---
+
+### Control Booking Log (suspend)
+GRPC {{grpc_host}}/meridian.financial_accounting.v1.FinancialAccountingService/ControlFinancialBookingLog
+x-tenant-id: {{tenant_id}}
+
+{
+  "bookingLogId": "{{fa_log_id}}",
+  "action": "BOOKING_LOG_CONTROL_ACTION_SUSPEND",
+  "reason": "Pending audit review"
+}
+
+### Control Booking Log (resume)
+GRPC {{grpc_host}}/meridian.financial_accounting.v1.FinancialAccountingService/ControlFinancialBookingLog
+x-tenant-id: {{tenant_id}}
+
+{
+  "bookingLogId": "{{fa_log_id}}",
+  "action": "BOOKING_LOG_CONTROL_ACTION_RESUME",
+  "reason": "Audit review completed"
+}
+
+### Control Booking Log (terminate)
+GRPC {{grpc_host}}/meridian.financial_accounting.v1.FinancialAccountingService/ControlFinancialBookingLog
+x-tenant-id: {{tenant_id}}
+
+{
+  "bookingLogId": "{{fa_log_id}}",
+  "action": "BOOKING_LOG_CONTROL_ACTION_TERMINATE",
+  "reason": "End of period"
+}
