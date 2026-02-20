@@ -12,7 +12,7 @@ func TestLoadEmbeddedApplyManifest(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.NotEmpty(t, script)
-	assert.Equal(t, "1.0.0", version)
+	assert.Equal(t, "1.1.0", version)
 	assert.Contains(t, script, "apply_manifest")
 	assert.Contains(t, script, "execute_apply_manifest")
 	assert.Contains(t, script, "reference_data.register_instrument")

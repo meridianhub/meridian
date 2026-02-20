@@ -38,6 +38,8 @@ func TestBuildSagaInput(t *testing.T) {
 				DisplayName:    "USD Clearing Account",
 				InstrumentCode: "USD",
 				AccountType:    "CLEARING",
+				BehaviorClass:  "CLEARING",
+				NormalBalance:  "DEBIT",
 			},
 		},
 		ValuationRules: []ValuationRuleInput{
@@ -146,7 +148,7 @@ func TestApplyManifestSaga_ZeroLocalSagaDefinitions(t *testing.T) {
 	// Step 1: Load embedded saga script (simulates platform default fallback)
 	script, version, err := loadEmbeddedApplyManifest()
 	require.NoError(t, err, "embedded apply_manifest saga must be loadable")
-	assert.Equal(t, "1.0.0", version)
+	assert.Equal(t, "1.1.0", version)
 	assert.Contains(t, script, "execute_apply_manifest")
 
 	// Step 2: Set up handler registry with mock handlers
@@ -163,10 +165,11 @@ func TestApplyManifestSaga_ZeroLocalSagaDefinitions(t *testing.T) {
 			}, nil
 		},
 		registerAccountTypeFn: func(_ *saga.StarlarkContext, params map[string]any) (any, error) {
-			handlerCalls = append(handlerCalls, "register_account_type:"+params["account_type_code"].(string))
+			handlerCalls = append(handlerCalls, "register_account_type:"+params["code"].(string))
 			return map[string]any{
-				"account_type_code": params["account_type_code"],
-				"status":            "REGISTERED",
+				"code":    params["code"],
+				"version": int32(1),
+				"status":  "REGISTERED",
 			}, nil
 		},
 		registerValuationRuleFn: func(_ *saga.StarlarkContext, params map[string]any) (any, error) {
@@ -253,6 +256,8 @@ func TestApplyManifestSaga_ZeroLocalSagaDefinitions(t *testing.T) {
 				DisplayName:    "USD Clearing Account",
 				InstrumentCode: "USD",
 				AccountType:    "CLEARING",
+				BehaviorClass:  "CLEARING",
+				NormalBalance:  "DEBIT",
 			},
 		},
 		ValuationRules: []ValuationRuleInput{

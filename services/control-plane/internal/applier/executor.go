@@ -77,11 +77,25 @@ type InstrumentInput struct {
 
 // AccountTypeInput represents an account type to register and provision.
 type AccountTypeInput struct {
-	Code           string
-	DisplayName    string
-	Description    string
-	InstrumentCode string
-	AccountType    string
+	Code                    string
+	DisplayName             string
+	Description             string
+	BehaviorClass           string
+	NormalBalance           string
+	InstrumentCode          string
+	AccountType             string
+	DefaultSagaPrefix       string
+	DefaultConversionMethod string
+	ValidationCEL           string
+	EligibilityCEL          string
+	AttributeSchema         string
+	ValuationMethods        []ValuationMethodInput
+}
+
+// ValuationMethodInput represents a valuation method template for an account type.
+type ValuationMethodInput struct {
+	InputInstrument string
+	MethodName      string
 }
 
 // ValuationRuleInput represents a valuation rule to register.
@@ -289,12 +303,27 @@ func (e *ManifestExecutor) buildSagaInput(input *ApplyManifestInput) map[string]
 	// Convert account types
 	accountTypes := make([]interface{}, len(input.AccountTypes))
 	for i, at := range input.AccountTypes {
+		vmethods := make([]interface{}, len(at.ValuationMethods))
+		for j, vm := range at.ValuationMethods {
+			vmethods[j] = map[string]interface{}{
+				"input_instrument": vm.InputInstrument,
+				"method_name":      vm.MethodName,
+			}
+		}
 		accountTypes[i] = map[string]interface{}{
-			"code":            at.Code,
-			"display_name":    at.DisplayName,
-			"description":     at.Description,
-			"instrument_code": at.InstrumentCode,
-			"account_type":    at.AccountType,
+			"code":                      at.Code,
+			"display_name":              at.DisplayName,
+			"description":               at.Description,
+			"behavior_class":            at.BehaviorClass,
+			"normal_balance":            at.NormalBalance,
+			"instrument_code":           at.InstrumentCode,
+			"account_type":              at.AccountType,
+			"default_saga_prefix":       at.DefaultSagaPrefix,
+			"default_conversion_method": at.DefaultConversionMethod,
+			"validation_cel":            at.ValidationCEL,
+			"eligibility_cel":           at.EligibilityCEL,
+			"attribute_schema":          at.AttributeSchema,
+			"valuation_methods":         vmethods,
 		}
 	}
 	sagaInput["account_types"] = accountTypes
