@@ -1,0 +1,60 @@
+{
+  "name": "bank-x-party-onboarding",
+  "target_service": "meridian.party.v1.PartyService",
+  "target_rpc": "RegisterParty",
+  "version": 1,
+  "external_schema": "{\"type\":\"object\",\"required\":[\"party_type\",\"full_name\"],\"properties\":{\"party_type\":{\"type\":\"string\",\"enum\":[\"individual\",\"corporate\"]},\"full_name\":{\"type\":\"string\"},\"first_name\":{\"type\":\"string\"},\"date_of_birth\":{\"type\":\"string\",\"format\":\"date\"},\"govt_id\":{\"type\":\"string\"},\"email\":{\"type\":\"string\",\"format\":\"email\"},\"phone\":{\"type\":\"string\"}}}",
+  "inbound_validation_cel": "has(payload.party_type) && has(payload.full_name) && size(payload.full_name) > 0",
+  "fields": [
+    {
+      "external_path": "party_type",
+      "internal_path": "party_type",
+      "transform": {
+        "enum_mapping": {
+          "values": {
+            "individual": "PARTY_TYPE_PERSON",
+            "corporate": "PARTY_TYPE_ORGANIZATION"
+          }
+        }
+      }
+    },
+    {
+      "external_path": "full_name",
+      "internal_path": "legal_name"
+    },
+    {
+      "external_path": "date_of_birth",
+      "internal_path": "date_of_birth",
+      "transform": {
+        "date_format": "2006-01-02"
+      }
+    },
+    {
+      "external_path": "govt_id",
+      "internal_path": "reference.government_id"
+    },
+    {
+      "external_path": "email",
+      "internal_path": "contact.email"
+    },
+    {
+      "external_path": "phone",
+      "internal_path": "contact.phone"
+    }
+  ],
+  "inbound_computed_fields": [
+    {
+      "target_path": "display_name",
+      "cel_expression": "has(input.first_name) ? input.first_name : input.full_name"
+    }
+  ],
+  "outbound_computed_fields": [
+    {
+      "target_path": "full_name",
+      "cel_expression": "has(input.legal_name) ? input.legal_name : ''"
+    }
+  ],
+  "idempotency": {
+    "source_selector": "govt_id"
+  }
+}
