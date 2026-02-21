@@ -42,6 +42,10 @@ func (e *Engine) TransformInboundBatch(mapping *mappingv1.MappingDefinition, ext
 	for i, elem := range elements {
 		elemJSON := []byte(elem.Raw)
 
+		if err := e.runValidationCEL(mapping.GetInboundValidationCel(), elemJSON); err != nil {
+			return nil, fmt.Errorf("element %d: %w", i, err)
+		}
+
 		transformed, err := e.applyInboundFields(mapping.GetFields(), elemJSON)
 		if err != nil {
 			return nil, fmt.Errorf("element %d: %w", i, err)
@@ -103,6 +107,10 @@ func (e *Engine) TransformOutboundBatch(mapping *mappingv1.MappingDefinition, pr
 	results := make([]any, 0, len(elements))
 	for i, elem := range elements {
 		elemJSON := []byte(elem.Raw)
+
+		if err := e.runValidationCEL(mapping.GetOutboundValidationCel(), elemJSON); err != nil {
+			return nil, fmt.Errorf("element %d: %w", i, err)
+		}
 
 		transformed, err := e.applyOutboundFields(mapping.GetFields(), elemJSON)
 		if err != nil {

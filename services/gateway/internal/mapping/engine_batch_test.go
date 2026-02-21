@@ -363,6 +363,69 @@ func TestRoundTrip_Batch_EnumMapping(t *testing.T) {
 	assert.Equal(t, "inactive", arr[1].(map[string]any)["status"])
 }
 
+// --- Per-element validation CEL ---
+
+func TestTransformInbound_Batch_ValidationCEL_PerElement_Pass(t *testing.T) {
+	eng := newTestEngine(t)
+
+	mapping := &mappingv1.MappingDefinition{
+		IsBatch:              true,
+		BatchTargetPath:      "items",
+		InboundValidationCel: `has(payload.amount) && payload.amount > 0`,
+		Fields: []*mappingv1.FieldCorrespondence{
+			{ExternalPath: "amount", InternalPath: "amount"},
+		},
+	}
+
+	input := []byte(`[{"amount":10},{"amount":20}]`)
+
+	result, err := eng.TransformInboundBatch(mapping, input)
+	require.NoError(t, err)
+	assert.Len(t, result, 2)
+}
+
+func TestTransformInbound_Batch_ValidationCEL_PerElement_Fail(t *testing.T) {
+	eng := newTestEngine(t)
+
+	mapping := &mappingv1.MappingDefinition{
+		IsBatch:              true,
+		BatchTargetPath:      "items",
+		InboundValidationCel: `has(payload.amount) && payload.amount > 0`,
+		Fields: []*mappingv1.FieldCorrespondence{
+			{ExternalPath: "amount", InternalPath: "amount"},
+		},
+	}
+
+	// Second element has amount=0, which fails validation.
+	input := []byte(`[{"amount":10},{"amount":0}]`)
+
+	_, err := eng.TransformInboundBatch(mapping, input)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrValidation)
+	assert.Contains(t, err.Error(), "element 1")
+}
+
+func TestTransformOutbound_Batch_ValidationCEL_PerElement_Fail(t *testing.T) {
+	eng := newTestEngine(t)
+
+	mapping := &mappingv1.MappingDefinition{
+		IsBatch:               true,
+		BatchTargetPath:       "items",
+		OutboundValidationCel: `has(payload.amount)`,
+		Fields: []*mappingv1.FieldCorrespondence{
+			{ExternalPath: "amount", InternalPath: "amount"},
+		},
+	}
+
+	// Second element missing "amount".
+	protoJSON := []byte(`{"items":[{"amount":10},{"name":"no-amount"}]}`)
+
+	_, err := eng.TransformOutboundBatch(mapping, protoJSON)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrValidation)
+	assert.Contains(t, err.Error(), "element 1")
+}
+
 // --- Nested batch_target_path ---
 
 func TestTransformInbound_Batch_NestedTargetPath(t *testing.T) {
