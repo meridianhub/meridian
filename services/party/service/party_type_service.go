@@ -183,10 +183,15 @@ func (s *PartyTypeDefinitionService) validateAttributeSchema(schema string) erro
 	if len(schema) > MaxAttributeSchemaSize {
 		return ErrAttributeSchemaTooBig
 	}
-	// Must be a valid JSON object (JSON Schema is always a JSON object)
-	var parsed map[string]interface{}
+	// Must be a valid JSON object (JSON Schema is always a JSON object).
+	// Unmarshal into interface{} first so that JSON null (valid JSON but not an object)
+	// is caught by the type assertion below rather than silently yielding a nil map.
+	var parsed interface{}
 	if err := json.Unmarshal([]byte(schema), &parsed); err != nil {
 		return fmt.Errorf("%w: %w", ErrAttributeSchemaInvalidJSON, err)
+	}
+	if _, ok := parsed.(map[string]interface{}); !ok {
+		return ErrAttributeSchemaInvalidJSON
 	}
 	return nil
 }
