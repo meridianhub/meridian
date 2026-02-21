@@ -1,4 +1,38 @@
+---
+name: prd-structured-mapping-layer
+description: Bidirectional JSON mapping engine with unified property model across Party, Reference Data, and Market Data
+triggers:
+  - Implementing external JSON format mapping or transformation
+  - Building tenant-configurable field mappings or enum translations
+  - Working on inbound or outbound data transformation at the gateway
+  - Adding structured attributes or CEL validation to Party service
+  - Integrating external systems that send non-proto JSON formats
+  - Working on mapping definitions in the tenant manifest
+  - Questions about FieldCorrespondence, MappingDefinition, or DryRunMapping
+  - Batch JSON array ingestion for market data or observations
+instructions: |
+  Two phases. Phase 1: Unified Property Model — extract CEL compiler
+  to shared/pkg/cel/, add repeated AttributeEntry + JSON Schema +
+  CEL validation to Party (matching Reference Data and Market Data
+  patterns), add party_types to tenant manifest. Phase 2: Bidirectional
+  Mapping — single MappingDefinition with FieldCorrespondence
+  (external_path/internal_path), auto-reversible transforms (enum,
+  date, attribute flatten), explicit CelTransform (inbound_cel +
+  outbound_cel), IdempotencyConfig for dedup, DryRunMapping RPC,
+  gateway middleware at /mapping/{name}, manifest integration. CRUD
+  in services/reference-data/, engine middleware in services/gateway/.
+  Key deps: tidwall/gjson (add to go.mod), hashicorp/golang-lru/v2
+  (already present). All CEL expressions bounded: max 4096 bytes,
+  cost limit 10,000, guaranteed termination.
+---
+
 # PRD: Structured Mapping Layer
+
+**Status:** Not Started
+**Version:** 1.0
+**Date:** 2026-02-21
+**Author:** Architecture Team
+**Task Master Tag:** `structured-mapping-layer`
 
 ## Problem Statement
 
