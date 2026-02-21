@@ -53,4 +53,7 @@ var (
 
 	// ErrCELCompilerNil is returned when a nil CEL compiler is provided.
 	ErrCELCompilerNil = errors.New("cel compiler cannot be nil")
+
+	// ErrRequiredField is returned when a required field is empty or missing.
+	ErrRequiredField = errors.New("required field is missing")
 )

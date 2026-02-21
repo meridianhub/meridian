@@ -377,9 +377,12 @@ func (r *PostgresRepository) UpdateStatus(ctx context.Context, id uuid.UUID, new
 
 		now := time.Now().UTC()
 		updateQuery := `UPDATE mapping_definition SET status = $1, updated_at = $2 WHERE id = $3`
-		_, err := tx.Exec(ctx, updateQuery, string(newStatus), now, id)
+		result, err := tx.Exec(ctx, updateQuery, string(newStatus), now, id)
 		if err != nil {
 			return fmt.Errorf("failed to update mapping status: %w", err)
+		}
+		if result.RowsAffected() == 0 {
+			return ErrNotFound
 		}
 		return nil
 	})

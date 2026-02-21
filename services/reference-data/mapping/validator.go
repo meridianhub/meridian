@@ -166,6 +166,9 @@ func (v *Validator) validateCELTransform(t *CelTransform, idx int) error {
 }
 
 func (v *Validator) validateAttributeFlatten(af *AttributeFlatten, idx int) error {
+	if strings.TrimSpace(af.TargetField) == "" {
+		return fmt.Errorf("%w: fields[%d].transform.attribute_flatten.target_field", ErrRequiredField, idx)
+	}
 	for _, key := range af.SourceKeys {
 		if !isValidGjsonPath(key) {
 			return fmt.Errorf("%w: fields[%d].transform.attribute_flatten.source_keys %q",
@@ -177,6 +180,12 @@ func (v *Validator) validateAttributeFlatten(af *AttributeFlatten, idx int) erro
 
 func (v *Validator) validateComputedFields(fields []ComputedField, fieldName string) error {
 	for i, f := range fields {
+		if strings.TrimSpace(f.TargetPath) == "" {
+			return fmt.Errorf("%w: %s[%d].target_path", ErrRequiredField, fieldName, i)
+		}
+		if !isValidGjsonPath(f.TargetPath) {
+			return fmt.Errorf("%w: %s[%d].target_path %q", ErrInvalidGjsonPath, fieldName, i, f.TargetPath)
+		}
 		if err := v.validateCELExpressionRaw(f.CELExpression); err != nil {
 			return fmt.Errorf("%s[%d].cel_expression: %w: %w", fieldName, i, ErrInvalidCEL, err)
 		}
