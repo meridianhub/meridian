@@ -144,8 +144,65 @@ func (m *MappingMiddleware) handleMappingRequest(w http.ResponseWriter, r *http.
 		"target_path", targetPath,
 		"idempotency_key", result.IdempotencyKey != "")
 
-	next.ServeHTTP(w, r)
+	// Intercept the response from Vanguard to apply outbound transformation.
+	rec := newResponseRecorder()
+	defer rec.release()
+
+	start := time.Now()
+	next.ServeHTTP(rec, r)
+	elapsed := time.Since(start)
+
+	// Pass error responses (4xx/5xx) through untransformed.
+	if rec.code < 200 || rec.code >= 300 {
+		copyHeaders(w.Header(), rec.headers)
+		w.WriteHeader(rec.code)
+		_, _ = w.Write(rec.buf.Bytes())
+		return nil
+	}
+
+	// If the response body is empty, pass it through without transformation.
+	responseBody := rec.buf.Bytes()
+	if len(responseBody) == 0 {
+		copyHeaders(w.Header(), rec.headers)
+		w.WriteHeader(rec.code)
+		return nil
+	}
+
+	// Apply outbound transformation to the proto-JSON response body.
+	transformed, err := m.engine.TransformOutbound(mappingDef, responseBody)
+	if err != nil {
+		m.logger.Error("outbound transformation failed",
+			"name", name,
+			"tenant_id", tenantID,
+			"mapping_version", mappingDef.GetVersion(),
+			"elapsed", elapsed,
+			"error", err)
+		writeJSONError(w, http.StatusInternalServerError, "INTERNAL", "outbound transformation failed")
+		return err
+	}
+
+	m.logger.Debug("outbound transformation applied",
+		"name", name,
+		"tenant_id", tenantID,
+		"elapsed", elapsed,
+		"input_bytes", rec.buf.Len(),
+		"output_bytes", len(transformed))
+
+	copyHeaders(w.Header(), rec.headers)
+	// Update Content-Length to reflect the (possibly changed) transformed body size.
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(transformed)))
+	w.WriteHeader(rec.code)
+	_, _ = w.Write(transformed)
 	return nil
+}
+
+// copyHeaders copies all headers from src into dst.
+func copyHeaders(dst, src http.Header) {
+	for k, vs := range src {
+		for _, v := range vs {
+			dst.Add(k, v)
+		}
+	}
 }
 
 // resolveMappingDef resolves a mapping definition by name and tenant, writing
