@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/shared/platform/audit"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
@@ -23,6 +24,9 @@ type PartyEntity struct {
 	Status                string  `gorm:"column:status;type:varchar(20);not null;default:'ACTIVE';index:idx_party_status"`
 	ExternalReference     *string `gorm:"column:external_reference;type:varchar(100);uniqueIndex:idx_party_external_ref,where:external_reference IS NOT NULL AND deleted_at IS NULL"`
 	ExternalReferenceType *string `gorm:"column:external_reference_type;type:varchar(30);uniqueIndex:idx_party_external_ref,where:external_reference IS NOT NULL AND deleted_at IS NULL"`
+
+	// Attributes stores structured key-value metadata as a JSONB array of {key, value} objects.
+	Attributes datatypes.JSON `gorm:"column:attributes;type:jsonb;not null;default:'[]'"`
 
 	// Optimistic locking
 	Version int64 `gorm:"column:version;not null;default:1"`

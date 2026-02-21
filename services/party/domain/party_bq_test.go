@@ -536,6 +536,7 @@ func TestReconstructParty_WithBQData(t *testing.T) {
 		demographics,
 		referenceData,
 		bankRelations,
+		[]AttributeEntry{},
 		createdAt,
 		updatedAt,
 		5,

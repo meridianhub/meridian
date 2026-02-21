@@ -7,6 +7,7 @@ import "google/api/annotations.proto";
 import "google/protobuf/field_mask.proto";
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
+import "meridian/quantity/v1/quantity.proto";
 import "protoc-gen-openapiv2/options/annotations.proto";
 
 option go_package = "github.com/meridianhub/meridian/api/proto/meridian/party/v1;partyv1";
@@ -185,6 +186,10 @@ message Party {
 
   // version is for optimistic locking.
   int32 version = 10 [(buf.validate.field).int32 = {gte: 0}];
+
+  // attributes contains structured key-value metadata for this party,
+  // validated against the party type's attribute_schema at registration and update time.
+  repeated meridian.quantity.v1.AttributeEntry attributes = 11;
 }
 
 // RegisterPartyRequest is the request to register a new party in the directory.
@@ -209,6 +214,9 @@ message RegisterPartyRequest {
 
   // external_reference_type indicates the type of external reference provided.
   ExternalReferenceType external_reference_type = 5 [(buf.validate.field).enum = {defined_only: true}];
+
+  // attributes contains structured key-value metadata for this party.
+  repeated meridian.quantity.v1.AttributeEntry attributes = 6;
 }
 
 // RegisterPartyResponse is the response after registering a party.
