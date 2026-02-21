@@ -90,6 +90,7 @@ func run(logger *slog.Logger) error {
 	// Create repositories
 	repo := persistence.NewRepository(db)
 	pmRepo := persistence.NewPaymentMethodRepository(db)
+	partyTypeRepo := persistence.NewPartyTypeDefinitionRepository(db)
 
 	// Create party service
 	partyService, err := service.NewService(repo, logger)
@@ -97,6 +98,13 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("failed to create party service: %w", err)
 	}
 	partyService.WithPaymentMethodRepository(pmRepo)
+
+	// Create and wire party type definition service
+	partyTypeSvc, err := service.NewPartyTypeDefinitionService(partyTypeRepo)
+	if err != nil {
+		return fmt.Errorf("failed to create party type definition service: %w", err)
+	}
+	partyService.WithPartyTypeDefinitionService(partyTypeSvc)
 
 	// Load verification config with environment-aware validation.
 	// Production: fail fast if config is missing or invalid.

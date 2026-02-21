@@ -86,6 +86,7 @@ type Service struct {
 	repo                 Repository
 	pmRepo               PaymentMethodRepository
 	verificationProvider verification.Provider
+	partyTypeService     *PartyTypeDefinitionService
 	logger               *slog.Logger
 }
 

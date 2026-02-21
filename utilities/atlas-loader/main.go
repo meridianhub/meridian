@@ -67,6 +67,7 @@ func main() {
 		// Party service for customer/organization identity management
 		modelList = []interface{}{
 			&partypersistence.PartyEntity{},
+			&partypersistence.PartyTypeDefinitionEntity{},
 		}
 	case schemaPaymentOrder:
 		// Payment order service for payment processing
