@@ -20,6 +20,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -514,8 +516,15 @@ func TestMappingE2E_BatchMapping(t *testing.T) {
 	require.NoError(t, json.Unmarshal(results[0].ProtoJSON, &env0))
 	require.NoError(t, json.Unmarshal(results[1].ProtoJSON, &env1))
 
-	obs0 := env0["observations"].([]any)[0].(map[string]any)
-	obs1 := env1["observations"].([]any)[0].(map[string]any)
+	obs0Arr, ok0 := env0["observations"].([]any)
+	require.True(t, ok0 && len(obs0Arr) > 0, "result[0] must have observations array")
+	obs0, ok0m := obs0Arr[0].(map[string]any)
+	require.True(t, ok0m, "result[0] observations[0] must be a JSON object")
+
+	obs1Arr, ok1 := env1["observations"].([]any)
+	require.True(t, ok1 && len(obs1Arr) > 0, "result[1] must have observations array")
+	obs1, ok1m := obs1Arr[0].(map[string]any)
+	require.True(t, ok1m, "result[1] observations[0] must be a JSON object")
 
 	assert.Equal(t, "METER-001", obs0["source_id"])
 	assert.Equal(t, "DATA_QUALITY_ACTUAL", obs0["data_quality"])
@@ -853,7 +862,8 @@ func TestMappingE2E_TenantIsolation_Mappings(t *testing.T) {
 }
 
 // TestMappingE2E_TenantIsolation_TransformedFieldsNotContaminated verifies
-// that concurrent requests from different tenants carry their own transformed data.
+// that sequential requests from different tenants each carry their own transformed
+// data without cross-contamination (state isolation, not concurrency safety).
 func TestMappingE2E_TenantIsolation_TransformedFieldsNotContaminated(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -926,15 +936,26 @@ func TestMappingE2E_Performance_Sub100ms(t *testing.T) {
 		"govt_id": "PERF-ID-001"
 	}`)
 
+	// Allow overriding the threshold via TEST_PERF_THRESHOLD_MS to avoid flakiness
+	// on slow CI environments. Default is 100ms.
+	thresholdMs := 100
+	if v := os.Getenv("TEST_PERF_THRESHOLD_MS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			thresholdMs = n
+		}
+	}
+	threshold := time.Duration(thresholdMs) * time.Millisecond
+
 	start := time.Now()
 	req := newRequest(t, "/mapping/bank-x-party-onboarding", payload, "tenant_001")
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 	elapsed := time.Since(start)
 
+	t.Logf("mapping round-trip elapsed: %s (threshold: %s)", elapsed, threshold)
 	require.Equal(t, http.StatusOK, rr.Code)
-	assert.Less(t, elapsed, 100*time.Millisecond,
-		"full round-trip for a simple mapping should complete in under 100ms, got %s", elapsed)
+	assert.Less(t, elapsed, threshold,
+		"full round-trip for a simple mapping should complete within threshold, got %s", elapsed)
 }
 
 // =============================================================================
