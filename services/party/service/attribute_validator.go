@@ -43,7 +43,8 @@ var (
 type AttributeValidator struct {
 	repo        PartyTypeDefinitionRepository
 	celCompiler *sharedcel.Compiler
-	// cache keys are "<tenantID>:<partyType>" → compiled CEL program
+	// cache keys are "<tenantID>:<partyType>:<version>" → compiled CEL program.
+	// The version component ensures stale entries are evicted when ValidationCEL is updated.
 	cache *lru.Cache[string, cel.Program]
 }
 
@@ -111,7 +112,7 @@ func (v *AttributeValidator) ValidateAttributes(ctx context.Context, tenantID, p
 // evaluateValidationCEL compiles (or retrieves from cache) and evaluates the validation
 // CEL expression for the given party type definition.
 func (v *AttributeValidator) evaluateValidationCEL(def *persistence.PartyTypeDefinitionEntity, attrMap map[string]string) error {
-	cacheKey := def.TenantID + ":" + def.PartyType
+	cacheKey := fmt.Sprintf("%s:%s:%d", def.TenantID, def.PartyType, def.Version)
 
 	prg, ok := v.cache.Get(cacheKey)
 	if !ok {
