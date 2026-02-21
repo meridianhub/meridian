@@ -2,7 +2,6 @@ package mapping
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
@@ -20,6 +19,9 @@ type FieldTrace struct {
 }
 
 // DryRunResult holds all output from a dry-run execution.
+// ValidationPassed reflects only whether the CEL validation expression passed.
+// If validation passes but a transform error occurs, ValidationPassed remains true
+// and TransformedJSON is empty; field-level errors appear in FieldTraces.
 type DryRunResult struct {
 	TransformedJSON  string
 	IdempotencyKey   string
@@ -35,7 +37,7 @@ func (e *Engine) DryRunInbound(def *mappingv1.MappingDefinition, sampleJSON []by
 	start := time.Now()
 	result := &DryRunResult{}
 
-	// Validation
+	// Validation: report failure and stop if CEL validation rejects the payload.
 	if err := e.runValidationCEL(def.GetInboundValidationCel(), sampleJSON); err != nil {
 		result.ValidationPassed = false
 		result.ValidationErrors = []string{err.Error()}
@@ -44,20 +46,17 @@ func (e *Engine) DryRunInbound(def *mappingv1.MappingDefinition, sampleJSON []by
 	}
 	result.ValidationPassed = true
 
-	// Collect field traces
+	// Collect field traces before the full transform so errors are visible per-field.
 	result.FieldTraces = e.traceInboundFields(def.GetFields(), sampleJSON)
 
-	// Run the actual transform
+	// Run the actual transform. If it fails, ValidationPassed stays true (validation did pass);
+	// TransformedJSON stays empty and the field trace shows where the failure occurred.
 	inbound, err := e.TransformInbound(def, sampleJSON)
-	if err != nil {
-		result.ValidationPassed = false
-		result.ValidationErrors = []string{err.Error()}
-		result.ExecutionTimeMs = time.Since(start).Milliseconds()
-		return result
+	if err == nil {
+		result.TransformedJSON = string(inbound.ProtoJSON)
+		result.IdempotencyKey = inbound.IdempotencyKey
 	}
 
-	result.TransformedJSON = string(inbound.ProtoJSON)
-	result.IdempotencyKey = inbound.IdempotencyKey
 	result.ExecutionTimeMs = time.Since(start).Milliseconds()
 	return result
 }
@@ -67,7 +66,7 @@ func (e *Engine) DryRunOutbound(def *mappingv1.MappingDefinition, sampleJSON []b
 	start := time.Now()
 	result := &DryRunResult{}
 
-	// Validation
+	// Validation: report failure and stop if CEL validation rejects the payload.
 	if err := e.runValidationCEL(def.GetOutboundValidationCel(), sampleJSON); err != nil {
 		result.ValidationPassed = false
 		result.ValidationErrors = []string{err.Error()}
@@ -76,19 +75,16 @@ func (e *Engine) DryRunOutbound(def *mappingv1.MappingDefinition, sampleJSON []b
 	}
 	result.ValidationPassed = true
 
-	// Collect field traces
+	// Collect field traces before the full transform so errors are visible per-field.
 	result.FieldTraces = e.traceOutboundFields(def.GetFields(), sampleJSON)
 
-	// Run the actual transform
+	// Run the actual transform. If it fails, ValidationPassed stays true (validation did pass);
+	// TransformedJSON stays empty and the field trace shows where the failure occurred.
 	outJSON, err := e.TransformOutbound(def, sampleJSON)
-	if err != nil {
-		result.ValidationPassed = false
-		result.ValidationErrors = []string{err.Error()}
-		result.ExecutionTimeMs = time.Since(start).Milliseconds()
-		return result
+	if err == nil {
+		result.TransformedJSON = string(outJSON)
 	}
 
-	result.TransformedJSON = string(outJSON)
 	result.ExecutionTimeMs = time.Since(start).Milliseconds()
 	return result
 }
@@ -184,6 +180,3 @@ func toJSONString(v any) string {
 	}
 	return string(b)
 }
-
-// ErrDryRunDirection is returned when an unsupported direction is specified.
-var ErrDryRunDirection = errors.New("direction must be 'inbound' or 'outbound'")
