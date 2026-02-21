@@ -639,9 +639,9 @@ func (r *PostgresRegistry) compileCELExpressions(def *InstrumentDefinition) erro
 		}
 	}
 
-	// ErrorMessageExpression uses the same environment as validation
+	// ErrorMessageExpression uses the same environment as validation but returns a string.
 	if def.ErrorMessageExpression != "" {
-		_, err := r.compiler.CompileValidation(def.ErrorMessageExpression)
+		_, err := r.compiler.CompileValueExpression(def.ErrorMessageExpression)
 		if err != nil {
 			return errors.Join(ErrInvalidCEL, fmt.Errorf("error message expression: %w", err))
 		}
@@ -687,8 +687,8 @@ func (r *PostgresRegistry) getOrCompileErrorMessage(code string, version int, ex
 		return prg, nil
 	}
 
-	// Compile and cache
-	prg, err := r.compiler.CompileValidation(expr)
+	// Compile and cache; error message expressions return strings, not booleans.
+	prg, err := r.compiler.CompileValueExpression(expr)
 	if err != nil {
 		return nil, err
 	}

@@ -368,7 +368,8 @@ func (s *Service) evalErrorMessage(expr string, input map[string]any) (errs []st
 	if expr == "" {
 		return nil, ""
 	}
-	prg, err := s.compiler.CompileValidation(expr)
+	// Error message expressions return strings, not booleans.
+	prg, err := s.compiler.CompileValueExpression(expr)
 	if err != nil {
 		return []string{"error_message_expression: " + err.Error()}, ""
 	}
