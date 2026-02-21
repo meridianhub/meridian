@@ -190,6 +190,12 @@ func (s *MappingService) DryRunMapping(ctx context.Context, req *pb.DryRunMappin
 	if s.engine == nil {
 		return nil, status.Errorf(codes.Internal, "mapping engine not initialized: use NewMappingService to construct MappingService")
 	}
+	if req.GetMappingName() == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "mapping_name is required")
+	}
+	if req.GetMappingVersion() < 0 {
+		return nil, status.Errorf(codes.InvalidArgument, "mapping_version must be non-negative")
+	}
 
 	def, err := s.resolveMappingForDryRun(ctx, req.GetMappingName(), int(req.GetMappingVersion()))
 	if err != nil {
