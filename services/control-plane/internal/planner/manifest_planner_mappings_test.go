@@ -63,11 +63,13 @@ func TestPlan_GRPCMethodMapping_Mappings(t *testing.T) {
 }
 
 func TestPlan_MappingsPhaseIs5(t *testing.T) {
-	// Verify PhaseMappings constant has value 5 (between Sagas=4 and SeedData=6)
+	// Verify PhaseMappings constant has value 5 (between Sagas=4 and PartyTypes=6)
 	assert.Equal(t, Phase(5), PhaseMappings)
-	assert.Equal(t, Phase(6), PhaseSeedData)
+	assert.Equal(t, Phase(6), PhasePartyTypes)
+	assert.Equal(t, Phase(7), PhaseSeedData)
 	assert.Less(t, int(PhaseSagas), int(PhaseMappings))
-	assert.Less(t, int(PhaseMappings), int(PhaseSeedData))
+	assert.Less(t, int(PhaseMappings), int(PhasePartyTypes))
+	assert.Less(t, int(PhasePartyTypes), int(PhaseSeedData))
 }
 
 func TestPlan_MappingPhaseLabel(t *testing.T) {
@@ -76,5 +78,6 @@ func TestPlan_MappingPhaseLabel(t *testing.T) {
 	assert.Equal(t, "Valuation Rules", PhaseLabel(PhaseValuationRules))
 	assert.Equal(t, "Saga Definitions", PhaseLabel(PhaseSagas))
 	assert.Equal(t, "Mapping Definitions", PhaseLabel(PhaseMappings))
+	assert.Equal(t, "Party Types", PhaseLabel(PhasePartyTypes))
 	assert.Equal(t, "Seed Data", PhaseLabel(PhaseSeedData))
 }

@@ -31,9 +31,12 @@ const (
 	// PhaseMappings registers mapping definitions with Reference Data
 	// (can be registered after instruments and account types are provisioned).
 	PhaseMappings Phase = 5
+	// PhasePartyTypes registers party type definitions with the Party Service
+	// (no dependencies on other manifest sections).
+	PhasePartyTypes Phase = 6
 	// PhaseSeedData provisions seed data via various service calls
 	// (depends on all above being registered first).
-	PhaseSeedData Phase = 6
+	PhaseSeedData Phase = 7
 )
 
 // PhaseLabel returns a human-readable label for a phase.
@@ -51,6 +54,8 @@ func PhaseLabel(p Phase) string {
 		return "Mapping Definitions"
 	case PhaseSeedData:
 		return "Seed Data"
+	case PhasePartyTypes:
+		return "Party Types"
 	default:
 		return fmt.Sprintf("Phase(%d)", p)
 	}
@@ -75,6 +80,10 @@ const (
 	MethodUpdateSagaDefinition GRPCMethod = "meridian.saga.v1.SagaRegistryService/UpdateSagaDefinition"
 	MethodDeprecateSaga        GRPCMethod = "meridian.saga.v1.SagaRegistryService/DeprecateSaga"
 	MethodActivateSaga         GRPCMethod = "meridian.saga.v1.SagaRegistryService/ActivateSaga"
+
+	// Party Service
+	MethodRegisterPartyType GRPCMethod = "meridian.party.v1.PartyService/RegisterPartyType"
+	MethodUpdatePartyType   GRPCMethod = "meridian.party.v1.PartyService/UpdatePartyType"
 
 	// Mapping Service (Reference Data)
 	MethodCreateMapping    GRPCMethod = "meridian.mapping.v1.MappingService/CreateMapping"

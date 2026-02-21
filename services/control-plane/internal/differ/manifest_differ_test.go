@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
+	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -703,4 +704,159 @@ func filterActionsByResource(actions []PlannedAction, actionType ActionType, res
 		}
 	}
 	return result
+}
+
+// --- Party type differ tests ---
+
+func testPartyTypeDefinition(tenantID, partyType, schema string) *partyv1.PartyTypeDefinition {
+	return &partyv1.PartyTypeDefinition{
+		TenantId:        tenantID,
+		PartyType:       partyType,
+		AttributeSchema: schema,
+	}
+}
+
+func TestDiff_PartyTypeAdded_Create(t *testing.T) {
+	d := New(nil, nil)
+	oldManifest := testManifest()
+
+	newManifest := testManifest()
+	newManifest.PartyTypes = []*partyv1.PartyTypeDefinition{
+		testPartyTypeDefinition("tenant-1", "PERSON", `{"type":"object"}`),
+	}
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	creates := filterActionsByResource(plan.Actions, ActionCreate, ResourcePartyType)
+	assert.Len(t, creates, 1)
+	assert.Equal(t, "tenant-1:PERSON", creates[0].ResourceCode)
+	assert.Contains(t, creates[0].Description, "Create party type")
+}
+
+func TestDiff_PartyTypeRemoved_Delete(t *testing.T) {
+	d := New(nil, nil)
+	oldManifest := testManifest()
+	oldManifest.PartyTypes = []*partyv1.PartyTypeDefinition{
+		testPartyTypeDefinition("tenant-1", "PERSON", `{"type":"object"}`),
+	}
+
+	newManifest := testManifest()
+	// No party types in new manifest
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	deletes := filterActionsByResource(plan.Actions, ActionDelete, ResourcePartyType)
+	assert.Len(t, deletes, 1)
+	assert.Equal(t, "tenant-1:PERSON", deletes[0].ResourceCode)
+	assert.True(t, deletes[0].Breaking)
+	assert.True(t, plan.HasBreakingChanges)
+}
+
+func TestDiff_PartyTypeUnchanged_NoChange(t *testing.T) {
+	d := New(nil, nil)
+	partyType := testPartyTypeDefinition("tenant-1", "ORGANIZATION", `{"type":"object","properties":{}}`)
+	manifest := testManifest()
+	manifest.PartyTypes = []*partyv1.PartyTypeDefinition{partyType}
+
+	plan, err := d.Diff(context.Background(), manifest, manifest)
+	require.NoError(t, err)
+
+	noChanges := filterActionsByResource(plan.Actions, ActionNoChange, ResourcePartyType)
+	assert.Len(t, noChanges, 1)
+	assert.Equal(t, "tenant-1:ORGANIZATION", noChanges[0].ResourceCode)
+}
+
+func TestDiff_PartyTypeModifiedSchema_Update(t *testing.T) {
+	d := New(nil, nil)
+	oldManifest := testManifest()
+	oldManifest.PartyTypes = []*partyv1.PartyTypeDefinition{
+		testPartyTypeDefinition("tenant-1", "PERSON", `{"type":"object"}`),
+	}
+
+	newManifest := testManifest()
+	newManifest.PartyTypes = []*partyv1.PartyTypeDefinition{
+		testPartyTypeDefinition("tenant-1", "PERSON", `{"type":"object","properties":{"name":{"type":"string"}}}`),
+	}
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	updates := filterActionsByResource(plan.Actions, ActionUpdate, ResourcePartyType)
+	assert.Len(t, updates, 1)
+	assert.Equal(t, "tenant-1:PERSON", updates[0].ResourceCode)
+	assert.Contains(t, updates[0].Description, "attribute_schema changed")
+}
+
+func TestDiff_PartyTypeModifiedCEL_DescribesChange(t *testing.T) {
+	d := New(nil, nil)
+	oldManifest := testManifest()
+	oldManifest.PartyTypes = []*partyv1.PartyTypeDefinition{
+		{
+			TenantId:        "tenant-1",
+			PartyType:       "PERSON",
+			AttributeSchema: `{"type":"object"}`,
+			ValidationCel:   "attributes.age > 18",
+		},
+	}
+
+	newManifest := testManifest()
+	newManifest.PartyTypes = []*partyv1.PartyTypeDefinition{
+		{
+			TenantId:        "tenant-1",
+			PartyType:       "PERSON",
+			AttributeSchema: `{"type":"object"}`,
+			ValidationCel:   "attributes.age > 21",
+		},
+	}
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	updates := filterActionsByResource(plan.Actions, ActionUpdate, ResourcePartyType)
+	assert.Len(t, updates, 1)
+	assert.Contains(t, updates[0].Description, "validation_cel changed")
+}
+
+func TestDiff_MultiplePartyTypes_DifferentTenants(t *testing.T) {
+	d := New(nil, nil)
+	oldManifest := testManifest()
+
+	newManifest := testManifest()
+	newManifest.PartyTypes = []*partyv1.PartyTypeDefinition{
+		testPartyTypeDefinition("tenant-1", "PERSON", `{"type":"object"}`),
+		testPartyTypeDefinition("tenant-2", "PERSON", `{"type":"object"}`),
+		testPartyTypeDefinition("tenant-1", "ORGANIZATION", `{"type":"object"}`),
+	}
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	creates := filterActionsByResource(plan.Actions, ActionCreate, ResourcePartyType)
+	assert.Len(t, creates, 3, "all three party types should be created")
+}
+
+func TestDiff_PartyTypeKey_IsCompositeOfTenantAndType(t *testing.T) {
+	// Same party_type, different tenants = different keys
+	assert.NotEqual(t, partyTypeKey("tenant-1", "PERSON"), partyTypeKey("tenant-2", "PERSON"))
+	// Same tenant, different party_types = different keys
+	assert.NotEqual(t, partyTypeKey("tenant-1", "PERSON"), partyTypeKey("tenant-1", "ORGANIZATION"))
+	// Same values = same key
+	assert.Equal(t, partyTypeKey("tenant-1", "PERSON"), partyTypeKey("tenant-1", "PERSON"))
+}
+
+func TestDiff_NilLastApplied_WithPartyTypes_AllCreates(t *testing.T) {
+	d := New(nil, nil)
+	manifest := testManifest()
+	manifest.PartyTypes = []*partyv1.PartyTypeDefinition{
+		testPartyTypeDefinition("tenant-1", "PERSON", `{"type":"object"}`),
+	}
+
+	plan, err := d.Diff(context.Background(), nil, manifest)
+	require.NoError(t, err)
+
+	creates := filterActionsByResource(plan.Actions, ActionCreate, ResourcePartyType)
+	assert.Len(t, creates, 1)
+	assert.Equal(t, "tenant-1:PERSON", creates[0].ResourceCode)
 }

@@ -8,6 +8,7 @@ import (
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	mappingv1 "github.com/meridianhub/meridian/api/proto/meridian/mapping/v1"
+	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -53,6 +54,7 @@ func (d *ManifestDiffer) Diff(ctx context.Context, lastApplied, newManifest *con
 	d.diffAccountTypes(lastApplied, newManifest, plan)
 	d.diffValuationRules(lastApplied, newManifest, plan)
 	d.diffSagas(lastApplied, newManifest, plan)
+	d.diffPartyTypes(lastApplied, newManifest, plan)
 	d.diffMappings(lastApplied, newManifest, plan)
 
 	// Run safety checks on all DELETE actions
@@ -264,6 +266,50 @@ func (d *ManifestDiffer) diffSagas(lastApplied, newManifest *controlplanev1.Mani
 	}
 }
 
+func (d *ManifestDiffer) diffPartyTypes(lastApplied, newManifest *controlplanev1.Manifest, plan *DiffPlan) {
+	oldMap := partyTypeMap(getPartyTypes(lastApplied))
+	newMap := partyTypeMap(newManifest.GetPartyTypes())
+
+	for key, updated := range newMap {
+		prev, exists := oldMap[key]
+		if !exists {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourcePartyType,
+				ResourceCode: key,
+				Action:       ActionCreate,
+				Description:  fmt.Sprintf("Create party type %s", key),
+			})
+			continue
+		}
+		if !proto.Equal(prev, updated) {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourcePartyType,
+				ResourceCode: key,
+				Action:       ActionUpdate,
+				Description:  describePartyTypeChanges(key, prev, updated),
+			})
+		} else {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourcePartyType,
+				ResourceCode: key,
+				Action:       ActionNoChange,
+				Description:  fmt.Sprintf("Party type %s unchanged", key),
+			})
+		}
+	}
+
+	for key := range oldMap {
+		if _, exists := newMap[key]; !exists {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourcePartyType,
+				ResourceCode: key,
+				Action:       ActionDelete,
+				Description:  fmt.Sprintf("Delete party type %s", key),
+			})
+		}
+	}
+}
+
 func (d *ManifestDiffer) runSafetyChecks(ctx context.Context, plan *DiffPlan) error {
 	for _, action := range plan.Actions {
 		if action.Action != ActionDelete {
@@ -281,6 +327,8 @@ func (d *ManifestDiffer) runSafetyChecks(ctx context.Context, plan *DiffPlan) er
 			blocked, err = d.safety.CheckSagaDeletion(ctx, action.ResourceCode)
 		case ResourceValuationRule:
 			// Valuation rules have no downstream dependencies to check
+		case ResourcePartyType:
+			// Party types have no downstream dependencies to check via safety checker
 		case ResourceMapping:
 			// Mappings have no downstream dependencies to check
 		}
@@ -369,6 +417,13 @@ func getSagas(m *controlplanev1.Manifest) []*controlplanev1.SagaDefinition {
 	return m.GetSagas()
 }
 
+func getPartyTypes(m *controlplanev1.Manifest) []*partyv1.PartyTypeDefinition {
+	if m == nil {
+		return nil
+	}
+	return m.GetPartyTypes()
+}
+
 func getMappings(m *controlplanev1.Manifest) []*mappingv1.MappingDefinition {
 	if m == nil {
 		return nil
@@ -406,6 +461,20 @@ func sagaMap(sagas []*controlplanev1.SagaDefinition) map[string]*controlplanev1.
 	m := make(map[string]*controlplanev1.SagaDefinition, len(sagas))
 	for _, s := range sagas {
 		m[s.GetName()] = s
+	}
+	return m
+}
+
+// partyTypeKey produces a stable identifier for a party type definition.
+// The key is (tenant_id, party_type) to match uniqueness constraints.
+func partyTypeKey(tenantID, partyType string) string {
+	return tenantID + ":" + partyType
+}
+
+func partyTypeMap(defs []*partyv1.PartyTypeDefinition) map[string]*partyv1.PartyTypeDefinition {
+	m := make(map[string]*partyv1.PartyTypeDefinition, len(defs))
+	for _, d := range defs {
+		m[partyTypeKey(d.GetTenantId(), d.GetPartyType())] = d
 	}
 	return m
 }
@@ -471,6 +540,26 @@ func describeSagaChanges(name string, prev, updated *controlplanev1.SagaDefiniti
 		return fmt.Sprintf("Update saga %s", name)
 	}
 	return fmt.Sprintf("Update saga %s (%s)", name, strings.Join(changes, "; "))
+}
+
+func describePartyTypeChanges(key string, prev, updated *partyv1.PartyTypeDefinition) string {
+	var changes []string
+	if prev.GetAttributeSchema() != updated.GetAttributeSchema() {
+		changes = append(changes, "attribute_schema changed")
+	}
+	if prev.GetValidationCel() != updated.GetValidationCel() {
+		changes = append(changes, "validation_cel changed")
+	}
+	if prev.GetEligibilityCel() != updated.GetEligibilityCel() {
+		changes = append(changes, "eligibility_cel changed")
+	}
+	if prev.GetErrorMessageCel() != updated.GetErrorMessageCel() {
+		changes = append(changes, "error_message_cel changed")
+	}
+	if len(changes) == 0 {
+		return fmt.Sprintf("Update party type %s", key)
+	}
+	return fmt.Sprintf("Update party type %s (%s)", key, strings.Join(changes, "; "))
 }
 
 func describeMappingChanges(key string, prev, updated *mappingv1.MappingDefinition) string {
