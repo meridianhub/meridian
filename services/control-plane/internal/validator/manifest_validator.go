@@ -16,6 +16,7 @@ import (
 	"buf.build/go/protovalidate"
 	"github.com/google/cel-go/cel"
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
+	mappingv1 "github.com/meridianhub/meridian/api/proto/meridian/mapping/v1"
 	"github.com/shopspring/decimal"
 	"go.starlark.net/starlark"
 	"go.starlark.net/syntax"
@@ -147,6 +148,7 @@ type ManifestValidator struct {
 	celEnv          *cel.Env
 	bucketCelEnv    *cel.Env
 	partyTypeCelEnv *cel.Env
+	mappingCelEnv   *cel.Env
 }
 
 // New creates a new ManifestValidator.
@@ -190,11 +192,22 @@ func New() (*ManifestValidator, error) {
 		return nil, fmt.Errorf("failed to create party type CEL environment: %w", err)
 	}
 
+	// CEL environment for mapping validation/transformation expressions.
+	// These expressions operate on arbitrary payload fields.
+	mappingCelEnv, err := cel.NewEnv(
+		cel.Variable("payload", cel.MapType(cel.StringType, cel.DynType)),
+		cel.Variable("value", cel.DynType),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create mapping CEL environment: %w", err)
+	}
+
 	return &ManifestValidator{
 		protoValidator:  pv,
 		celEnv:          celEnv,
 		bucketCelEnv:    bucketCelEnv,
 		partyTypeCelEnv: partyTypeCelEnv,
+		mappingCelEnv:   mappingCelEnv,
 	}, nil
 }
 
@@ -227,7 +240,10 @@ func (v *ManifestValidator) Validate(
 	// 7. Party types validation
 	v.validatePartyTypes(manifest, result)
 
-	// 8. Immutability checks
+	// 8. Mappings validation
+	v.validateMappings(manifest, result)
+
+	// 9. Immutability checks
 	if previousManifest != nil {
 		v.validateImmutability(manifest, previousManifest, result)
 	}
@@ -323,6 +339,26 @@ func (v *ManifestValidator) validateDuplicates(
 			})
 		} else {
 			sagaNames[saga.GetName()] = i
+		}
+	}
+
+	// Check duplicate mapping (name, version) pairs
+	type mappingKey struct {
+		name    string
+		version int32
+	}
+	mappingKeys := make(map[mappingKey]int)
+	for i, mp := range manifest.GetMappings() {
+		key := mappingKey{name: mp.GetName(), version: mp.GetVersion()}
+		if prev, exists := mappingKeys[key]; exists {
+			addError(result, ValidationError{
+				Severity: SeverityError,
+				Path:     fmt.Sprintf("mappings[%d]", i),
+				Code:     "DUPLICATE_MAPPING",
+				Message:  fmt.Sprintf("duplicate mapping name=%q version=%d (first defined at mappings[%d])", mp.GetName(), mp.GetVersion(), prev),
+			})
+		} else {
+			mappingKeys[key] = i
 		}
 	}
 }
@@ -521,6 +557,208 @@ func (v *ManifestValidator) validateCrossReferences(
 			fmt.Sprintf("valuation_rules[%d].to_instrument", i),
 			result,
 		)
+	}
+}
+
+// validateMappings validates all MappingDefinition entries in the manifest.
+// It enforces no duplicate (name, version) pairs, valid CEL expressions,
+// and valid status.
+func (v *ManifestValidator) validateMappings(
+	manifest *controlplanev1.Manifest,
+	result *ValidationResult,
+) {
+	for i, mp := range manifest.GetMappings() {
+		v.validateSingleMapping(mp, fmt.Sprintf("mappings[%d]", i), result)
+	}
+}
+
+// validateSingleMapping validates one MappingDefinition entry.
+func (v *ManifestValidator) validateSingleMapping(
+	mp *mappingv1.MappingDefinition,
+	basePath string,
+	result *ValidationResult,
+) {
+	v.validateMappingCELExpressions(mp, basePath, result)
+	v.validateMappingFields(mp, basePath, result)
+	v.validateMappingComputedFields(mp, basePath, result)
+	v.validateMappingBatch(mp, basePath, result)
+	v.validateMappingStatus(mp, basePath, result)
+	v.validateMappingIdempotency(mp, basePath, result)
+}
+
+// validateMappingCELExpressions validates inbound/outbound CEL validation expressions.
+func (v *ManifestValidator) validateMappingCELExpressions(
+	mp *mappingv1.MappingDefinition,
+	basePath string,
+	result *ValidationResult,
+) {
+	if expr := mp.GetInboundValidationCel(); expr != "" {
+		v.validateMappingCELExpression(expr, basePath+".inbound_validation_cel", result)
+	}
+	if expr := mp.GetOutboundValidationCel(); expr != "" {
+		v.validateMappingCELExpression(expr, basePath+".outbound_validation_cel", result)
+	}
+}
+
+// validateMappingFields validates CEL transforms on field correspondences.
+func (v *ManifestValidator) validateMappingFields(
+	mp *mappingv1.MappingDefinition,
+	basePath string,
+	result *ValidationResult,
+) {
+	for j, field := range mp.GetFields() {
+		ft := field.GetTransform()
+		if ft == nil {
+			continue
+		}
+		celT := ft.GetCel()
+		if celT == nil {
+			continue
+		}
+		fieldPath := fmt.Sprintf("%s.fields[%d].transform.cel", basePath, j)
+		if expr := celT.GetInboundCel(); expr != "" {
+			v.validateMappingCELExpression(expr, fieldPath+".inbound_cel", result)
+		}
+		if expr := celT.GetOutboundCel(); expr != "" {
+			v.validateMappingCELExpression(expr, fieldPath+".outbound_cel", result)
+		}
+	}
+}
+
+// validateMappingComputedFields validates CEL expressions on computed fields.
+func (v *ManifestValidator) validateMappingComputedFields(
+	mp *mappingv1.MappingDefinition,
+	basePath string,
+	result *ValidationResult,
+) {
+	for j, cf := range mp.GetInboundComputedFields() {
+		if expr := cf.GetCelExpression(); expr != "" {
+			v.validateMappingCELExpression(expr, fmt.Sprintf("%s.inbound_computed_fields[%d].cel_expression", basePath, j), result)
+		}
+	}
+	for j, cf := range mp.GetOutboundComputedFields() {
+		if expr := cf.GetCelExpression(); expr != "" {
+			v.validateMappingCELExpression(expr, fmt.Sprintf("%s.outbound_computed_fields[%d].cel_expression", basePath, j), result)
+		}
+	}
+}
+
+// validateMappingBatch checks batch consistency (is_batch requires batch_target_path).
+func (v *ManifestValidator) validateMappingBatch(
+	mp *mappingv1.MappingDefinition,
+	basePath string,
+	result *ValidationResult,
+) {
+	if mp.GetIsBatch() && mp.GetBatchTargetPath() == "" {
+		addError(result, ValidationError{
+			Severity: SeverityError,
+			Path:     basePath + ".batch_target_path",
+			Code:     "MAPPING_BATCH_TARGET_REQUIRED",
+			Message:  "batch_target_path must be set when is_batch is true",
+		})
+	}
+}
+
+// mappingCELAvailableFields lists the variables available in mapping CEL expressions.
+var mappingCELAvailableFields = []string{"payload", "value"}
+
+// validateMappingCELExpression compiles a single CEL expression for mapping contexts.
+// Uses a simplified CEL environment with payload and value variables.
+func (v *ManifestValidator) validateMappingCELExpression(
+	expression string,
+	path string,
+	result *ValidationResult,
+) {
+	if len(expression) > 2048 {
+		addError(result, ValidationError{
+			Severity: SeverityError,
+			Path:     path,
+			Code:     "CEL_EXPRESSION_TOO_LONG",
+			Message:  fmt.Sprintf("CEL expression exceeds maximum length of 2048 bytes (got %d)", len(expression)),
+		})
+		return
+	}
+
+	_, issues := v.mappingCelEnv.Compile(expression)
+	if issues == nil || issues.Err() == nil {
+		return
+	}
+
+	errMsg := issues.Err().Error()
+
+	// Check for undeclared reference errors to provide field suggestions.
+	if strings.Contains(errMsg, "undeclared reference") {
+		undeclaredField := extractUndeclaredReference(errMsg)
+		suggestion := ""
+		if undeclaredField != "" {
+			if match := findClosestMatch(undeclaredField, mappingCELAvailableFields); match != "" {
+				suggestion = fmt.Sprintf("Did you mean %q?", match)
+			}
+		}
+		addError(result, ValidationError{
+			Severity:        SeverityError,
+			Path:            path,
+			Code:            "CEL_UNDECLARED_REFERENCE",
+			Message:         errMsg,
+			Suggestion:      suggestion,
+			AvailableFields: mappingCELAvailableFields,
+		})
+		return
+	}
+
+	addError(result, ValidationError{
+		Severity: SeverityError,
+		Path:     path,
+		Code:     "CEL_COMPILATION_ERROR",
+		Message:  errMsg,
+	})
+}
+
+// validateMappingStatus checks that status is a defined, non-unspecified value.
+func (v *ManifestValidator) validateMappingStatus(
+	mp *mappingv1.MappingDefinition,
+	basePath string,
+	result *ValidationResult,
+) {
+	status := mp.GetStatus()
+	if status == mappingv1.MappingStatus_MAPPING_STATUS_UNSPECIFIED {
+		addError(result, ValidationError{
+			Severity: SeverityError,
+			Path:     basePath + ".status",
+			Code:     "INVALID_MAPPING_STATUS",
+			Message:  "mapping status must be specified (DRAFT, ACTIVE, or DEPRECATED)",
+		})
+	}
+}
+
+// validateMappingIdempotency enforces cross-field constraints on IdempotencyConfig.
+// When use_content_hash is false, source_selector must be non-empty.
+// When use_content_hash is true, content_hash_fields must have at least one entry.
+func (v *ManifestValidator) validateMappingIdempotency(
+	mp *mappingv1.MappingDefinition,
+	basePath string,
+	result *ValidationResult,
+) {
+	cfg := mp.GetIdempotency()
+	if cfg == nil {
+		return
+	}
+	idemPath := basePath + ".idempotency"
+	if !cfg.GetUseContentHash() && cfg.GetSourceSelector() == "" {
+		addError(result, ValidationError{
+			Severity: SeverityError,
+			Path:     idemPath + ".source_selector",
+			Code:     "IDEMPOTENCY_SOURCE_REQUIRED",
+			Message:  "source_selector is required when use_content_hash is false",
+		})
+	}
+	if cfg.GetUseContentHash() && len(cfg.GetContentHashFields()) == 0 {
+		addError(result, ValidationError{
+			Severity: SeverityError,
+			Path:     idemPath + ".content_hash_fields",
+			Code:     "IDEMPOTENCY_HASH_FIELDS_REQUIRED",
+			Message:  "content_hash_fields must have at least one entry when use_content_hash is true",
+		})
 	}
 }
 

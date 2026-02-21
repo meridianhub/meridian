@@ -28,12 +28,15 @@ const (
 	// PhaseSagas registers saga definitions with the Saga Registry
 	// (depends on account types and instruments being registered first).
 	PhaseSagas Phase = 4
-	// PhaseSeedData provisions seed data via various service calls
-	// (depends on all above being registered first).
-	PhaseSeedData Phase = 5
+	// PhaseMappings registers mapping definitions with Reference Data
+	// (can be registered after instruments and account types are provisioned).
+	PhaseMappings Phase = 5
 	// PhasePartyTypes registers party type definitions with the Party Service
 	// (no dependencies on other manifest sections).
 	PhasePartyTypes Phase = 6
+	// PhaseSeedData provisions seed data via various service calls
+	// (depends on all above being registered first).
+	PhaseSeedData Phase = 7
 )
 
 // PhaseLabel returns a human-readable label for a phase.
@@ -47,6 +50,8 @@ func PhaseLabel(p Phase) string {
 		return "Valuation Rules"
 	case PhaseSagas:
 		return "Saga Definitions"
+	case PhaseMappings:
+		return "Mapping Definitions"
 	case PhaseSeedData:
 		return "Seed Data"
 	case PhasePartyTypes:
@@ -79,6 +84,11 @@ const (
 	// Party Service
 	MethodRegisterPartyType GRPCMethod = "meridian.party.v1.PartyService/RegisterPartyType"
 	MethodUpdatePartyType   GRPCMethod = "meridian.party.v1.PartyService/UpdatePartyType"
+
+	// Mapping Service (Reference Data)
+	MethodCreateMapping    GRPCMethod = "meridian.mapping.v1.MappingService/CreateMapping"
+	MethodUpdateMapping    GRPCMethod = "meridian.mapping.v1.MappingService/UpdateMapping"
+	MethodDeprecateMapping GRPCMethod = "meridian.mapping.v1.MappingService/DeprecateMapping"
 )
 
 // PlannedCall represents a single gRPC call in the execution plan.
@@ -182,7 +192,7 @@ func (p *ExecutionPlan) Visualize() string {
 	fmt.Fprintf(&b, "Total calls: %d\n\n", len(p.Calls))
 
 	byPhase := p.ByPhase()
-	for phase := PhaseInstruments; phase <= PhasePartyTypes; phase++ {
+	for phase := PhaseInstruments; phase <= PhaseSeedData; phase++ { //nolint:intrange
 		calls, ok := byPhase[phase]
 		if !ok {
 			continue

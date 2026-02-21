@@ -33,6 +33,7 @@ const (
 	ResourceValuationRule ResourceType = "valuation_rule"
 	ResourceSaga          ResourceType = "saga"
 	ResourcePartyType     ResourceType = "party_type"
+	ResourceMapping       ResourceType = "mapping"
 )
 
 // PlannedAction represents a single action in the diff plan.

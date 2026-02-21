@@ -12,7 +12,8 @@
                 "sagas",
                 "seedData",
                 "paymentRails",
-                "partyTypes"
+                "partyTypes",
+                "mappings"
             ],
             "properties": {
                 "version": {
@@ -76,6 +77,14 @@
                     "additionalProperties": false,
                     "type": "array",
                     "description": "party_types defines the tenant-configurable party type schemas for this tenant."
+                },
+                "mappings": {
+                    "items": {
+                        "$ref": "#/definitions/meridian.mapping.v1.MappingDefinition"
+                    },
+                    "additionalProperties": false,
+                    "type": "array",
+                    "description": "mappings defines the bidirectional field mapping definitions available to this tenant. Each mapping describes how an external JSON payload is transformed into an internal Meridian gRPC service call."
                 }
             },
             "additionalProperties": false,
@@ -441,6 +450,377 @@
             "type": "object",
             "title": "Valuation Rule",
             "description": "ValuationRule defines how one instrument is converted to another. Used for cross-instrument transactions (e.g., kWh to GBP, USD to EUR)."
+        },
+        "meridian.mapping.v1.AttributeFlatten": {
+            "required": [
+                "sourceKeys",
+                "targetField"
+            ],
+            "properties": {
+                "sourceKeys": {
+                    "items": {
+                        "type": "string"
+                    },
+                    "type": "array",
+                    "description": "source_keys lists the gjson paths (external) or proto paths (internal) to collect into the target. Each key's value is placed into the target map under that key name. At least one key must be provided for the flatten to have effect."
+                },
+                "targetField": {
+                    "type": "string",
+                    "description": "target_field is the name of the map field in the target message that receives the flattened values."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "Attribute Flatten",
+            "description": "AttributeFlatten defines a transform that merges multiple source fields into a single target map field. Useful for collecting scattered external fields into an attributes map."
+        },
+        "meridian.mapping.v1.CelTransform": {
+            "required": [
+                "inboundCel",
+                "outboundCel"
+            ],
+            "properties": {
+                "inboundCel": {
+                    "type": "string",
+                    "description": "inbound_cel is the CEL expression applied when mapping from external to internal format. Example: \"value.lowerAscii()\" to normalize incoming string values."
+                },
+                "outboundCel": {
+                    "type": "string",
+                    "description": "outbound_cel is the CEL expression applied when mapping from internal to external format. Example: \"value.upperAscii()\" to format outgoing string values."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "Cel Transform",
+            "description": "CelTransform defines bidirectional CEL expressions for field transformation."
+        },
+        "meridian.mapping.v1.ComputedField": {
+            "required": [
+                "targetPath",
+                "celExpression"
+            ],
+            "properties": {
+                "targetPath": {
+                    "type": "string",
+                    "description": "target_path is the proto field path in the internal message (dot-separated). Example: \"created_at\", \"metadata.ingested_by\""
+                },
+                "celExpression": {
+                    "type": "string",
+                    "description": "cel_expression is a CEL expression evaluated against the full source payload. The expression may reference any field from the source document. Example: \"now()\" for timestamp, \"'v1.' + version\" for derived strings."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "Computed Field",
+            "description": "ComputedField defines a field whose value is derived from a CEL expression rather than directly mapped from the source payload."
+        },
+        "meridian.mapping.v1.EnumMapping": {
+            "required": [
+                "values",
+                "fallback",
+                "outboundFallback"
+            ],
+            "properties": {
+                "values": {
+                    "additionalProperties": {
+                        "type": "string"
+                    },
+                    "type": "object",
+                    "description": "values maps external enum string values to internal enum string values. Example: {\"ACTIVE\": \"STATUS_ACTIVE\", \"INACTIVE\": \"STATUS_INACTIVE\"}"
+                },
+                "fallback": {
+                    "type": "string",
+                    "description": "fallback is the internal value to use when an external value is not found in the map. If empty, an unmapped inbound value causes an error."
+                },
+                "outboundFallback": {
+                    "type": "string",
+                    "description": "outbound_fallback is the external value to use when an internal value is not found in the map. If empty, an unmapped outbound value causes an error."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "Enum Mapping",
+            "description": "EnumMapping defines a bidirectional mapping between external and internal enum values."
+        },
+        "meridian.mapping.v1.FieldCorrespondence": {
+            "required": [
+                "externalPath",
+                "internalPath",
+                "transform"
+            ],
+            "properties": {
+                "externalPath": {
+                    "type": "string",
+                    "description": "external_path is the gjson path expression for locating the value in the external JSON payload. Supports dot notation, array indexing, and gjson modifiers. Example: \"customer.address.city\", \"items.#.price\", \"meta|@flatten\""
+                },
+                "internalPath": {
+                    "type": "string",
+                    "description": "internal_path is the proto field path in the internal message (dot-separated). Example: \"customer_id\", \"line_items.unit_price\", \"metadata.source\""
+                },
+                "transform": {
+                    "$ref": "#/definitions/meridian.mapping.v1.FieldTransform",
+                    "additionalProperties": false,
+                    "description": "transform defines an optional value transformation applied during mapping. If not set, the raw string value is used as-is."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "Field Correspondence",
+            "description": "FieldCorrespondence maps a single external field to an internal proto field."
+        },
+        "meridian.mapping.v1.FieldTransform": {
+            "properties": {
+                "cel": {
+                    "$ref": "#/definitions/meridian.mapping.v1.CelTransform",
+                    "additionalProperties": false,
+                    "description": "cel applies bidirectional CEL expressions for value transformation."
+                },
+                "enumMapping": {
+                    "$ref": "#/definitions/meridian.mapping.v1.EnumMapping",
+                    "additionalProperties": false,
+                    "description": "enum_mapping maps between external and internal enum string representations."
+                },
+                "dateFormat": {
+                    "type": "string",
+                    "description": "date_format specifies a Go time layout string for parsing and formatting date/time values. Example: \"2006-01-02\" for ISO date, \"2006-01-02T15:04:05Z07:00\" for RFC3339."
+                },
+                "defaultValue": {
+                    "type": "string",
+                    "description": "default_value is a literal string value used when the source field is absent or empty."
+                },
+                "attributeFlatten": {
+                    "$ref": "#/definitions/meridian.mapping.v1.AttributeFlatten",
+                    "additionalProperties": false,
+                    "description": "attribute_flatten collects multiple source keys into a single target map field."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "allOf": [
+                {
+                    "oneOf": [
+                        {
+                            "not": {
+                                "anyOf": [
+                                    {
+                                        "required": [
+                                            "cel"
+                                        ]
+                                    },
+                                    {
+                                        "required": [
+                                            "enumMapping"
+                                        ]
+                                    },
+                                    {
+                                        "required": [
+                                            "dateFormat"
+                                        ]
+                                    },
+                                    {
+                                        "required": [
+                                            "defaultValue"
+                                        ]
+                                    },
+                                    {
+                                        "required": [
+                                            "attributeFlatten"
+                                        ]
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "required": [
+                                "cel"
+                            ]
+                        },
+                        {
+                            "required": [
+                                "enumMapping"
+                            ]
+                        },
+                        {
+                            "required": [
+                                "dateFormat"
+                            ]
+                        },
+                        {
+                            "required": [
+                                "defaultValue"
+                            ]
+                        },
+                        {
+                            "required": [
+                                "attributeFlatten"
+                            ]
+                        }
+                    ]
+                }
+            ],
+            "title": "Field Transform",
+            "description": "FieldTransform defines how a single field value is transformed during mapping. At most one transform type may be set (proto oneof semantics). The Go service layer validates that at least one is provided when a FieldTransform is specified."
+        },
+        "meridian.mapping.v1.IdempotencyConfig": {
+            "required": [
+                "sourceSelector",
+                "useContentHash",
+                "contentHashFields"
+            ],
+            "properties": {
+                "sourceSelector": {
+                    "type": "string",
+                    "description": "source_selector is a gjson path expression that extracts the idempotency key from the external payload. Required when use_content_hash is false. Example: \"header.idempotency_key\", \"transaction.reference_id\""
+                },
+                "useContentHash": {
+                    "type": "boolean",
+                    "description": "use_content_hash indicates that the idempotency key should be derived from a hash of the selected content fields rather than a direct field value."
+                },
+                "contentHashFields": {
+                    "items": {
+                        "type": "string"
+                    },
+                    "type": "array",
+                    "description": "content_hash_fields lists the gjson paths whose values are included in the content hash. Required (non-empty) when use_content_hash is true."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "Idempotency Config",
+            "description": "IdempotencyConfig controls how idempotency keys are derived for mapped requests. Cross-field validation (enforced at the Go service layer):   - When use_content_hash is false: source_selector must be non-empty.   - When use_content_hash is true: content_hash_fields must contain at least one entry."
+        },
+        "meridian.mapping.v1.MappingDefinition": {
+            "required": [
+                "id",
+                "tenantId",
+                "name",
+                "targetService",
+                "targetRpc",
+                "version",
+                "status",
+                "externalSchema",
+                "fields",
+                "inboundComputedFields",
+                "outboundComputedFields",
+                "inboundValidationCel",
+                "outboundValidationCel",
+                "createdAt",
+                "updatedAt",
+                "isBatch",
+                "batchTargetPath",
+                "idempotency"
+            ],
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "id is the unique identifier for this mapping definition (UUID)."
+                },
+                "tenantId": {
+                    "type": "string",
+                    "description": "tenant_id is the tenant that owns this mapping definition (UUID)."
+                },
+                "name": {
+                    "type": "string",
+                    "description": "name is the human-readable name for this mapping. Example: \"Stripe Webhook -\u003e Payment Order\""
+                },
+                "targetService": {
+                    "type": "string",
+                    "description": "target_service is the Meridian gRPC service this mapping calls. Example: \"meridian.payment_order.v1.PaymentOrderService\""
+                },
+                "targetRpc": {
+                    "type": "string",
+                    "description": "target_rpc is the RPC method on the target service to invoke after mapping. Example: \"InitiatePaymentOrder\""
+                },
+                "version": {
+                    "type": "integer",
+                    "description": "version is the schema version for this mapping definition (monotonically increasing)."
+                },
+                "status": {
+                    "enum": [
+                        "MAPPING_STATUS_UNSPECIFIED",
+                        0,
+                        "MAPPING_STATUS_DRAFT",
+                        1,
+                        "MAPPING_STATUS_ACTIVE",
+                        2,
+                        "MAPPING_STATUS_DEPRECATED",
+                        3
+                    ],
+                    "oneOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "integer"
+                        }
+                    ],
+                    "title": "Mapping Status",
+                    "description": "MappingStatus defines the lifecycle state of a mapping definition."
+                },
+                "externalSchema": {
+                    "type": "string",
+                    "description": "external_schema is a JSON Schema string describing the expected external payload structure. Used for documentation and inbound validation."
+                },
+                "fields": {
+                    "items": {
+                        "$ref": "#/definitions/meridian.mapping.v1.FieldCorrespondence"
+                    },
+                    "additionalProperties": false,
+                    "type": "array",
+                    "description": "fields defines the field-level correspondences between external and internal formats."
+                },
+                "inboundComputedFields": {
+                    "items": {
+                        "$ref": "#/definitions/meridian.mapping.v1.ComputedField"
+                    },
+                    "additionalProperties": false,
+                    "type": "array",
+                    "description": "inbound_computed_fields defines fields computed during inbound (external -\u003e internal) mapping."
+                },
+                "outboundComputedFields": {
+                    "items": {
+                        "$ref": "#/definitions/meridian.mapping.v1.ComputedField"
+                    },
+                    "additionalProperties": false,
+                    "type": "array",
+                    "description": "outbound_computed_fields defines fields computed during outbound (internal -\u003e external) mapping."
+                },
+                "inboundValidationCel": {
+                    "type": "string",
+                    "description": "inbound_validation_cel is a CEL expression evaluated against the raw external payload before inbound mapping. The expression must return a boolean; false causes rejection. Example: \"has(payload.customer_id) \u0026\u0026 payload.amount \u003e 0\""
+                },
+                "outboundValidationCel": {
+                    "type": "string",
+                    "description": "outbound_validation_cel is a CEL expression evaluated against the mapped internal message before outbound mapping. The expression must return a boolean; false causes rejection."
+                },
+                "createdAt": {
+                    "type": "string",
+                    "description": "created_at is when this mapping definition was created.",
+                    "format": "date-time"
+                },
+                "updatedAt": {
+                    "type": "string",
+                    "description": "updated_at is when this mapping definition was last modified.",
+                    "format": "date-time"
+                },
+                "isBatch": {
+                    "type": "boolean",
+                    "description": "is_batch indicates this mapping handles array payloads. Cross-field validation (enforced at Go service layer): when is_batch is true, batch_target_path must be non-empty."
+                },
+                "batchTargetPath": {
+                    "type": "string",
+                    "description": "batch_target_path is the gjson path expression that selects the array of items to process when is_batch is true. Required when is_batch is true. Example: \"events\", \"data.items\""
+                },
+                "idempotency": {
+                    "$ref": "#/definitions/meridian.mapping.v1.IdempotencyConfig",
+                    "additionalProperties": false,
+                    "description": "idempotency defines how idempotency keys are derived for requests produced by this mapping."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "Mapping Definition",
+            "description": "MappingDefinition defines a bidirectional transformation between an external JSON schema and an internal Meridian gRPC service RPC. It supports:   - Field-level correspondence with optional transforms (CEL, enums, date formats)   - Computed fields derived from CEL expressions   - Inbound and outbound CEL validation   - Batch ingestion via gjson array paths   - Idempotency key configuration"
         },
         "meridian.party.v1.PartyTypeDefinition": {
             "required": [
