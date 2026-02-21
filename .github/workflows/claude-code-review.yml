@@ -109,9 +109,7 @@ jobs:
             gh api repos/${{ github.repository }}/contents/{filepath}?ref=${{ github.event.pull_request.head.sha }} --jq '.content' | base64 -d
             ```
 
-            Note: The contents API has a 1MB limit. If a file returns
-            403/404 (e.g., large generated files or test tables), fall
-            back to the blob API:
+            If the contents API returns 403/404 (file >1MB), use the blob API instead:
             ```bash
             gh api repos/${{ github.repository }}/git/blobs/{blob_sha} --jq '.content' | base64 -d
             ```
@@ -256,40 +254,24 @@ jobs:
             **Test Coverage Review:**
             For each changed function, check whether the test file is in the diff. If it is, review whether the test actually verifies the behavior. If not, check if a `*_test.go` file exists for the package, then note: "No test changes for [function] - verify existing tests cover the new behavior" or "No test file found for [file]." Focus on domain edge cases, not generic coverage.
 
-            **Questions for the Author (根回し - Nemawashi):**
+            **Questions for the Author (Nemawashi):**
             Only include questions when you have genuine uncertainty about
             the change. A clean config tweak or straightforward bug fix
             needs zero questions. Do not manufacture questions to fill a
             section.
 
             When questions ARE warranted, each MUST reference a specific
-            file and line number from the diff. The goal is to surface
-            unstated assumptions and the gap between intent and reality:
+            file and line number from the diff. Surface unstated assumptions
+            and the gap between intent and reality:
 
-            - **Invariant surfacing**: "Line 47 of `registry.go` assumes
-              `account.Balance` is non-negative. What enforces that
-              upstream?"
-            - **Interest behind position**: "Why synchronous here
-              (`handler.go:82`) rather than async? The saga pattern
-              elsewhere suggests eventual consistency was the intent."
-            - **What happens if we do nothing**: "If we skip this
-              migration (`003_add_index.sql`), does the query at
-              `repository.go:145` degrade gracefully or fail hard?"
-            - **Elimination over addition**: "Could `processor.go:60-80`
-              be replaced by the existing `shared/pkg/valuation` rather
-              than adding a new code path?"
-            - **Current vs ideal state**: "The test at `_test.go:92`
-              asserts the happy path. What's the actual failure mode when
-              the upstream returns partial data?"
+            - **Invariant surfacing**: "`registry.go:47` assumes Balance is non-negative. What enforces that upstream?"
+            - **Interest behind position**: "Why synchronous at `handler.go:82` rather than async?"
+            - **What if we skip this**: "Without `003_add_index.sql`, does `repository.go:145` degrade or fail?"
+            - **Elimination over addition**: "Could `processor.go:60-80` use existing `shared/pkg/valuation`?"
+            - **Failure modes**: "The test at `_test.go:92` covers happy path. What happens with partial data?"
 
-            If you can't anchor a question to a specific line, it
-            probably isn't specific enough to be useful. Omit the section
-            entirely rather than ask generic questions.
-
-            For PRDs and architecture docs, also ask:
-            - What edge cases are missing from the spec?
-            - What will break at scale that isn't addressed?
-            - What cross-system dependencies are implied but not stated?
+            If you can't anchor a question to a specific line, omit the
+            section entirely rather than ask generic questions.
 
             ## Priority Signals
 
