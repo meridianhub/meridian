@@ -289,6 +289,52 @@ func TestMappingMiddleware_ResolverError(t *testing.T) {
 	assertJSONErrorCode(t, rec.Body.Bytes(), "UNAVAILABLE")
 }
 
+func TestMappingMiddleware_EmptyTargetService(t *testing.T) {
+	md := simpleMappingDef()
+	md.TargetService = ""
+
+	resolver := &stubResolver{mapping: md}
+	eng := testEngine(t)
+	mw := NewMappingMiddleware(resolver, eng, testLogger())
+
+	capture := &captureHandler{}
+	handler := mw.Handler(capture)
+
+	body := `{"amount": 100, "currency": "GBP"}`
+	req := httptest.NewRequest(http.MethodPost, "/mapping/stripe-webhook", bytes.NewBufferString(body))
+	req = withTenantContext(req, "tenant-abc")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadGateway, rec.Code)
+	assertJSONErrorCode(t, rec.Body.Bytes(), "INTERNAL")
+	assert.Nil(t, capture.captured, "next handler should not be called")
+}
+
+func TestMappingMiddleware_EmptyTargetRPC(t *testing.T) {
+	md := simpleMappingDef()
+	md.TargetRpc = ""
+
+	resolver := &stubResolver{mapping: md}
+	eng := testEngine(t)
+	mw := NewMappingMiddleware(resolver, eng, testLogger())
+
+	capture := &captureHandler{}
+	handler := mw.Handler(capture)
+
+	body := `{"amount": 100, "currency": "GBP"}`
+	req := httptest.NewRequest(http.MethodPost, "/mapping/stripe-webhook", bytes.NewBufferString(body))
+	req = withTenantContext(req, "tenant-abc")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadGateway, rec.Code)
+	assertJSONErrorCode(t, rec.Body.Bytes(), "INTERNAL")
+	assert.Nil(t, capture.captured, "next handler should not be called")
+}
+
 // --- CachedMappingResolver tests ---
 
 func TestCachedMappingResolver_CachesResult(t *testing.T) {

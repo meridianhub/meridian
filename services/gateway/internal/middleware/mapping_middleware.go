@@ -39,6 +39,15 @@ var (
 
 	// ErrNoTenantID is returned when the request has no tenant ID in context.
 	ErrNoTenantID = errors.New("tenant ID not found in request context")
+
+	// ErrInvalidMappingName is returned when the mapping name in the URL is empty or nested.
+	ErrInvalidMappingName = errors.New("invalid mapping name")
+
+	// ErrEmptyBody is returned when the request body is empty.
+	ErrEmptyBody = errors.New("request body is empty")
+
+	// ErrInvalidMappingTarget is returned when a mapping has empty target_service or target_rpc.
+	ErrInvalidMappingTarget = errors.New("mapping has empty target_service or target_rpc")
 )
 
 // MappingMiddleware intercepts requests to /mapping/{name}, resolves the mapping
@@ -84,7 +93,7 @@ func (m *MappingMiddleware) handleMappingRequest(w http.ResponseWriter, r *http.
 	name := strings.TrimPrefix(r.URL.Path, "/mapping/")
 	if name == "" || strings.Contains(name, "/") {
 		writeJSONError(w, http.StatusBadRequest, "INVALID_ARGUMENT", "mapping name must be a single path segment")
-		return ErrNoTenantID
+		return ErrInvalidMappingName
 	}
 
 	// Extract tenant ID from auth context
@@ -115,9 +124,18 @@ func (m *MappingMiddleware) handleMappingRequest(w http.ResponseWriter, r *http.
 	r.Body = io.NopCloser(bytes.NewReader(result.ProtoJSON))
 	r.ContentLength = int64(len(result.ProtoJSON))
 
+	// Validate target fields before rewriting URL
+	targetService := mappingDef.GetTargetService()
+	targetRPC := mappingDef.GetTargetRpc()
+	if targetService == "" || targetRPC == "" {
+		writeJSONError(w, http.StatusBadGateway, "INTERNAL",
+			"mapping definition has empty target_service or target_rpc")
+		return ErrInvalidMappingTarget
+	}
+
 	// Rewrite URL from /mapping/{name} to the target gRPC-style path:
 	// /{service}/{rpc}
-	targetPath := "/" + mappingDef.GetTargetService() + "/" + mappingDef.GetTargetRpc()
+	targetPath := "/" + targetService + "/" + targetRPC
 	r.URL.Path = targetPath
 
 	m.logger.Debug("mapping middleware applied",
@@ -161,7 +179,7 @@ func (m *MappingMiddleware) readAndTransform(w http.ResponseWriter, r *http.Requ
 
 	if len(body) == 0 {
 		writeJSONError(w, http.StatusBadRequest, "INVALID_ARGUMENT", "request body is empty")
-		return nil, ErrMappingNotFound
+		return nil, ErrEmptyBody
 	}
 
 	result, err := m.engine.TransformInbound(mappingDef, body)
@@ -216,7 +234,7 @@ func NewCachedMappingResolver(delegate MappingResolver, ttl time.Duration) *Cach
 // cached result if available and not expired. On cache miss or expiry, it
 // calls the delegate resolver and caches the result.
 func (c *CachedMappingResolver) Resolve(ctx context.Context, tenantID, name string) (*mappingv1.MappingDefinition, error) {
-	key := tenantID + ":" + name
+	key := cacheKey(tenantID, name)
 
 	// Check cache
 	if val, ok := c.cache.Load(key); ok {
@@ -245,7 +263,14 @@ func (c *CachedMappingResolver) Resolve(ctx context.Context, tenantID, name stri
 
 // Invalidate removes a cached entry for the given tenant and name.
 func (c *CachedMappingResolver) Invalidate(tenantID, name string) {
-	c.cache.Delete(tenantID + ":" + name)
+	c.cache.Delete(cacheKey(tenantID, name))
+}
+
+// cacheKey builds a collision-resistant cache key using a null byte separator.
+// Tenant IDs are UUIDs and mapping names are alphanumeric, so neither can
+// contain a null byte.
+func cacheKey(tenantID, name string) string {
+	return tenantID + "\x00" + name
 }
 
 // GRPCMappingResolver resolves mapping definitions by calling the MappingService gRPC client.
