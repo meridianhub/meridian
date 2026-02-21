@@ -4,6 +4,7 @@ package meridian.control_plane.v1;
 
 import "buf/validate/validate.proto";
 import "google/protobuf/struct.proto";
+import "meridian/mapping/v1/mapping.proto";
 
 option go_package = "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1;controlplanev1";
 
@@ -50,6 +51,11 @@ message Manifest {
 
   // payment_rails defines external payment provider integrations for this tenant.
   repeated PaymentRails payment_rails = 8;
+
+  // mappings defines the bidirectional field mapping definitions available to this tenant.
+  // Each mapping describes how an external JSON payload is transformed into an internal
+  // Meridian gRPC service call.
+  repeated meridian.mapping.v1.MappingDefinition mappings = 9;
 }
 
 // ========================================

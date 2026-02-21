@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
+	mappingv1 "github.com/meridianhub/meridian/api/proto/meridian/mapping/v1"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -52,6 +53,7 @@ func (d *ManifestDiffer) Diff(ctx context.Context, lastApplied, newManifest *con
 	d.diffAccountTypes(lastApplied, newManifest, plan)
 	d.diffValuationRules(lastApplied, newManifest, plan)
 	d.diffSagas(lastApplied, newManifest, plan)
+	d.diffMappings(lastApplied, newManifest, plan)
 
 	// Run safety checks on all DELETE actions
 	if err := d.runSafetyChecks(ctx, plan); err != nil {
@@ -279,6 +281,8 @@ func (d *ManifestDiffer) runSafetyChecks(ctx context.Context, plan *DiffPlan) er
 			blocked, err = d.safety.CheckSagaDeletion(ctx, action.ResourceCode)
 		case ResourceValuationRule:
 			// Valuation rules have no downstream dependencies to check
+		case ResourceMapping:
+			// Mappings have no downstream dependencies to check
 		}
 
 		if err != nil {
@@ -289,6 +293,50 @@ func (d *ManifestDiffer) runSafetyChecks(ctx context.Context, plan *DiffPlan) er
 		}
 	}
 	return nil
+}
+
+func (d *ManifestDiffer) diffMappings(lastApplied, newManifest *controlplanev1.Manifest, plan *DiffPlan) {
+	oldMap := mappingMap(getMappings(lastApplied))
+	newMap := mappingMap(newManifest.GetMappings())
+
+	for key, updated := range newMap {
+		prev, exists := oldMap[key]
+		if !exists {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceMapping,
+				ResourceCode: key,
+				Action:       ActionCreate,
+				Description:  fmt.Sprintf("Create mapping %s (version: %d)", updated.GetName(), updated.GetVersion()),
+			})
+			continue
+		}
+		if !proto.Equal(prev, updated) {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceMapping,
+				ResourceCode: key,
+				Action:       ActionUpdate,
+				Description:  describeMappingChanges(key, prev, updated),
+			})
+		} else {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceMapping,
+				ResourceCode: key,
+				Action:       ActionNoChange,
+				Description:  fmt.Sprintf("Mapping %s unchanged", key),
+			})
+		}
+	}
+
+	for key := range oldMap {
+		if _, exists := newMap[key]; !exists {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceMapping,
+				ResourceCode: key,
+				Action:       ActionDelete,
+				Description:  fmt.Sprintf("Delete mapping %s", key),
+			})
+		}
+	}
 }
 
 // Helper functions to safely extract slices from possibly-nil manifests.
@@ -321,6 +369,13 @@ func getSagas(m *controlplanev1.Manifest) []*controlplanev1.SagaDefinition {
 	return m.GetSagas()
 }
 
+func getMappings(m *controlplanev1.Manifest) []*mappingv1.MappingDefinition {
+	if m == nil {
+		return nil
+	}
+	return m.GetMappings()
+}
+
 // Map-building helpers keyed by stable identifiers.
 
 func instrumentMap(instruments []*controlplanev1.InstrumentDefinition) map[string]*controlplanev1.InstrumentDefinition {
@@ -351,6 +406,19 @@ func sagaMap(sagas []*controlplanev1.SagaDefinition) map[string]*controlplanev1.
 	m := make(map[string]*controlplanev1.SagaDefinition, len(sagas))
 	for _, s := range sagas {
 		m[s.GetName()] = s
+	}
+	return m
+}
+
+// mappingKey produces a stable identifier for a mapping definition (name:version).
+func mappingKey(name string, version int32) string {
+	return fmt.Sprintf("%s:%d", name, version)
+}
+
+func mappingMap(mappings []*mappingv1.MappingDefinition) map[string]*mappingv1.MappingDefinition {
+	m := make(map[string]*mappingv1.MappingDefinition, len(mappings))
+	for _, mp := range mappings {
+		m[mappingKey(mp.GetName(), mp.GetVersion())] = mp
 	}
 	return m
 }
@@ -403,4 +471,24 @@ func describeSagaChanges(name string, prev, updated *controlplanev1.SagaDefiniti
 		return fmt.Sprintf("Update saga %s", name)
 	}
 	return fmt.Sprintf("Update saga %s (%s)", name, strings.Join(changes, "; "))
+}
+
+func describeMappingChanges(key string, prev, updated *mappingv1.MappingDefinition) string {
+	var changes []string
+	if prev.GetName() != updated.GetName() {
+		changes = append(changes, fmt.Sprintf("name: %q -> %q", prev.GetName(), updated.GetName()))
+	}
+	if prev.GetTargetService() != updated.GetTargetService() {
+		changes = append(changes, fmt.Sprintf("target_service: %q -> %q", prev.GetTargetService(), updated.GetTargetService()))
+	}
+	if prev.GetTargetRpc() != updated.GetTargetRpc() {
+		changes = append(changes, fmt.Sprintf("target_rpc: %q -> %q", prev.GetTargetRpc(), updated.GetTargetRpc()))
+	}
+	if prev.GetStatus() != updated.GetStatus() {
+		changes = append(changes, fmt.Sprintf("status: %s -> %s", prev.GetStatus(), updated.GetStatus()))
+	}
+	if len(changes) == 0 {
+		return fmt.Sprintf("Update mapping %s", key)
+	}
+	return fmt.Sprintf("Update mapping %s (%s)", key, strings.Join(changes, "; "))
 }

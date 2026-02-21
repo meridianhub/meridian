@@ -99,6 +99,8 @@ func phaseForResource(rt differ.ResourceType) Phase {
 		return PhaseValuationRules
 	case differ.ResourceSaga:
 		return PhaseSagas
+	case differ.ResourceMapping:
+		return PhaseMappings
 	default:
 		return PhaseSeedData
 	}
@@ -142,6 +144,11 @@ var grpcMethodMap = map[methodKey]GRPCMethod{
 	{differ.ResourceSaga, differ.ActionCreate}: MethodCreateSagaDraft,
 	{differ.ResourceSaga, differ.ActionUpdate}: MethodUpdateSagaDefinition,
 	{differ.ResourceSaga, differ.ActionDelete}: MethodDeprecateSaga,
+
+	// Mappings
+	{differ.ResourceMapping, differ.ActionCreate}: MethodCreateMapping,
+	{differ.ResourceMapping, differ.ActionUpdate}: MethodUpdateMapping,
+	{differ.ResourceMapping, differ.ActionDelete}: MethodDeprecateMapping,
 }
 
 // GenerateIdempotencyKey produces a deterministic SHA-256 based idempotency key.

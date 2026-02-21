@@ -28,9 +28,12 @@ const (
 	// PhaseSagas registers saga definitions with the Saga Registry
 	// (depends on account types and instruments being registered first).
 	PhaseSagas Phase = 4
+	// PhaseMappings registers mapping definitions with Reference Data
+	// (can be registered after instruments and account types are provisioned).
+	PhaseMappings Phase = 5
 	// PhaseSeedData provisions seed data via various service calls
 	// (depends on all above being registered first).
-	PhaseSeedData Phase = 5
+	PhaseSeedData Phase = 6
 )
 
 // PhaseLabel returns a human-readable label for a phase.
@@ -44,6 +47,8 @@ func PhaseLabel(p Phase) string {
 		return "Valuation Rules"
 	case PhaseSagas:
 		return "Saga Definitions"
+	case PhaseMappings:
+		return "Mapping Definitions"
 	case PhaseSeedData:
 		return "Seed Data"
 	default:
@@ -70,6 +75,11 @@ const (
 	MethodUpdateSagaDefinition GRPCMethod = "meridian.saga.v1.SagaRegistryService/UpdateSagaDefinition"
 	MethodDeprecateSaga        GRPCMethod = "meridian.saga.v1.SagaRegistryService/DeprecateSaga"
 	MethodActivateSaga         GRPCMethod = "meridian.saga.v1.SagaRegistryService/ActivateSaga"
+
+	// Mapping Service (Reference Data)
+	MethodCreateMapping    GRPCMethod = "meridian.mapping.v1.MappingService/CreateMapping"
+	MethodUpdateMapping    GRPCMethod = "meridian.mapping.v1.MappingService/UpdateMapping"
+	MethodDeprecateMapping GRPCMethod = "meridian.mapping.v1.MappingService/DeprecateMapping"
 )
 
 // PlannedCall represents a single gRPC call in the execution plan.
@@ -173,7 +183,7 @@ func (p *ExecutionPlan) Visualize() string {
 	fmt.Fprintf(&b, "Total calls: %d\n\n", len(p.Calls))
 
 	byPhase := p.ByPhase()
-	for phase := PhaseInstruments; phase <= PhaseSeedData; phase++ {
+	for phase := PhaseInstruments; phase <= PhaseSeedData; phase++ { //nolint:intrange
 		calls, ok := byPhase[phase]
 		if !ok {
 			continue
