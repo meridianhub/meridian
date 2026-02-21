@@ -144,8 +144,72 @@ func (m *MappingMiddleware) handleMappingRequest(w http.ResponseWriter, r *http.
 		"target_path", targetPath,
 		"idempotency_key", result.IdempotencyKey != "")
 
-	next.ServeHTTP(w, r)
+	// Intercept the response from Vanguard to apply outbound transformation.
+	rec := newResponseRecorder()
+	defer rec.release()
+
+	downstreamStart := time.Now()
+	next.ServeHTTP(rec, r)
+	downstreamElapsed := time.Since(downstreamStart)
+
+	// Pass non-2xx responses through untransformed.
+	if rec.code < 200 || rec.code >= 300 {
+		copyHeaders(w.Header(), rec.headers)
+		w.WriteHeader(rec.code)
+		_, _ = w.Write(rec.buf.Bytes())
+		return nil
+	}
+
+	// If the response body is empty, pass it through without transformation.
+	responseBody := rec.buf.Bytes()
+	if len(responseBody) == 0 {
+		copyHeaders(w.Header(), rec.headers)
+		w.WriteHeader(rec.code)
+		return nil
+	}
+
+	// Apply outbound transformation to the proto-JSON response body.
+	transformStart := time.Now()
+	transformed, err := m.engine.TransformOutbound(mappingDef, responseBody)
+	transformElapsed := time.Since(transformStart)
+	if err != nil {
+		m.logger.Error("outbound transformation failed",
+			"name", name,
+			"tenant_id", tenantID,
+			"mapping_version", mappingDef.GetVersion(),
+			"downstream_elapsed", downstreamElapsed,
+			"transform_elapsed", transformElapsed,
+			"error", err)
+		writeJSONError(w, http.StatusInternalServerError, "INTERNAL", "outbound transformation failed")
+		return err
+	}
+
+	m.logger.Debug("outbound transformation applied",
+		"name", name,
+		"tenant_id", tenantID,
+		"downstream_elapsed", downstreamElapsed,
+		"transform_elapsed", transformElapsed,
+		"input_bytes", rec.buf.Len(),
+		"output_bytes", len(transformed))
+
+	copyHeaders(w.Header(), rec.headers)
+	// Remove Transfer-Encoding before setting Content-Length to avoid conflicting
+	// HTTP headers (Transfer-Encoding: chunked + Content-Length violates semantics).
+	w.Header().Del("Transfer-Encoding")
+	// Update Content-Length to reflect the (possibly changed) transformed body size.
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(transformed)))
+	w.WriteHeader(rec.code)
+	_, _ = w.Write(transformed)
 	return nil
+}
+
+// copyHeaders copies all headers from src into dst.
+func copyHeaders(dst, src http.Header) {
+	for k, vs := range src {
+		for _, v := range vs {
+			dst.Add(k, v)
+		}
+	}
 }
 
 // resolveMappingDef resolves a mapping definition by name and tenant, writing
