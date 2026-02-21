@@ -379,6 +379,10 @@ func (r *PostgresRepository) UpdateStatus(ctx context.Context, id uuid.UUID, new
 		updateQuery := `UPDATE mapping_definition SET status = $1, updated_at = $2 WHERE id = $3`
 		result, err := tx.Exec(ctx, updateQuery, string(newStatus), now, id)
 		if err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+				return ErrAlreadyExists
+			}
 			return fmt.Errorf("failed to update mapping status: %w", err)
 		}
 		if result.RowsAffected() == 0 {

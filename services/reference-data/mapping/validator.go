@@ -26,6 +26,9 @@ func NewValidator(compiler *sharedcel.Compiler) (*Validator, error) {
 
 // Validate performs all semantic validations on a mapping definition.
 func (v *Validator) Validate(def *Definition) error {
+	if def == nil {
+		return fmt.Errorf("%w: definition cannot be nil", ErrRequiredField)
+	}
 	var errs []error
 
 	if err := v.validateExternalSchema(def.ExternalSchema); err != nil {
