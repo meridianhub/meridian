@@ -15,6 +15,10 @@ var ErrNilDiffPlan = errors.New("diff plan cannot be nil")
 // ErrNoMethodMapping is returned when no gRPC method mapping exists for a resource type/action combination.
 var ErrNoMethodMapping = errors.New("no gRPC method mapping")
 
+// ErrDeleteNotSupportedForPartyType is returned when a DELETE action is attempted on a party type.
+// Party types are managed through schema updates; deletion via manifest apply is not supported.
+var ErrDeleteNotSupportedForPartyType = errors.New("delete not supported for party types: update the schema instead")
+
 // ManifestPlanner transforms a DiffPlan into a dependency-ordered
 // ExecutionPlan of gRPC calls. It assigns each action to a phase
 // based on resource type dependencies and maps actions to the
@@ -99,6 +103,8 @@ func phaseForResource(rt differ.ResourceType) Phase {
 		return PhaseValuationRules
 	case differ.ResourceSaga:
 		return PhaseSagas
+	case differ.ResourcePartyType:
+		return PhasePartyTypes
 	default:
 		return PhaseSeedData
 	}
@@ -106,6 +112,9 @@ func phaseForResource(rt differ.ResourceType) Phase {
 
 // grpcMethodFor returns the gRPC method for a resource type and action.
 func grpcMethodFor(rt differ.ResourceType, action differ.ActionType) (GRPCMethod, error) {
+	if rt == differ.ResourcePartyType && action == differ.ActionDelete {
+		return "", ErrDeleteNotSupportedForPartyType
+	}
 	key := methodKey{rt, action}
 	method, ok := grpcMethodMap[key]
 	if !ok {
@@ -142,6 +151,12 @@ var grpcMethodMap = map[methodKey]GRPCMethod{
 	{differ.ResourceSaga, differ.ActionCreate}: MethodCreateSagaDraft,
 	{differ.ResourceSaga, differ.ActionUpdate}: MethodUpdateSagaDefinition,
 	{differ.ResourceSaga, differ.ActionDelete}: MethodDeprecateSaga,
+
+	// Party Types
+	{differ.ResourcePartyType, differ.ActionCreate}: MethodRegisterPartyType,
+	{differ.ResourcePartyType, differ.ActionUpdate}: MethodUpdatePartyType,
+	// DELETE for party types is not supported (party types are managed through schema updates)
+	// No delete method registered intentionally.
 }
 
 // GenerateIdempotencyKey produces a deterministic SHA-256 based idempotency key.

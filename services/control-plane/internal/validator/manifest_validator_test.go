@@ -5,6 +5,9 @@ import (
 	"testing"
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
+	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -1245,4 +1248,221 @@ func TestValidateImmutability_AddNewInstrument(t *testing.T) {
 	if !result.Valid {
 		t.Errorf("expected valid manifest when adding new instrument, got errors: %v", result.Errors)
 	}
+}
+
+// --- Party type validator tests ---
+
+func TestValidatePartyTypes_ValidDefinition(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	manifest := validManifest()
+	manifest.PartyTypes = []*partyv1.PartyTypeDefinition{
+		{
+			Id:              "ptd-person-001",
+			TenantId:        "tenant-1",
+			PartyType:       "PERSON",
+			AttributeSchema: `{"type": "object", "properties": {"name": {"type": "string"}}}`,
+		},
+	}
+
+	result := v.Validate(manifest, nil)
+	assert.True(t, result.Valid, "valid party type should pass validation, errors: %v", result.Errors)
+}
+
+func TestValidatePartyTypes_InvalidJSON_Schema(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	manifest := validManifest()
+	manifest.PartyTypes = []*partyv1.PartyTypeDefinition{
+		{
+			Id:              "ptd-person-001",
+			TenantId:        "tenant-1",
+			PartyType:       "PERSON",
+			AttributeSchema: `{not valid json`,
+		},
+	}
+
+	result := v.Validate(manifest, nil)
+	assert.False(t, result.Valid)
+	// Find the JSON schema error (there may be other errors)
+	var jsonSchemaErr *ValidationError
+	for i := range result.Errors {
+		if result.Errors[i].Code == "INVALID_JSON_SCHEMA" {
+			jsonSchemaErr = &result.Errors[i]
+			break
+		}
+	}
+	require.NotNil(t, jsonSchemaErr, "expected INVALID_JSON_SCHEMA error, got: %v", result.Errors)
+	assert.Contains(t, jsonSchemaErr.Path, "party_types[0].attribute_schema")
+}
+
+func TestValidatePartyTypes_DuplicatePartyType(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	manifest := validManifest()
+	manifest.PartyTypes = []*partyv1.PartyTypeDefinition{
+		{
+			Id:              "ptd-person-001",
+			TenantId:        "tenant-1",
+			PartyType:       "PERSON",
+			AttributeSchema: `{"type": "object"}`,
+		},
+		{
+			Id:              "ptd-person-002",
+			TenantId:        "tenant-1",
+			PartyType:       "PERSON",
+			AttributeSchema: `{"type": "object", "properties": {}}`,
+		},
+	}
+
+	result := v.Validate(manifest, nil)
+	assert.False(t, result.Valid)
+	var dupErr *ValidationError
+	for i := range result.Errors {
+		if result.Errors[i].Code == "DUPLICATE_PARTY_TYPE" {
+			dupErr = &result.Errors[i]
+			break
+		}
+	}
+	require.NotNil(t, dupErr, "expected DUPLICATE_PARTY_TYPE error, got: %v", result.Errors)
+	assert.Contains(t, dupErr.Path, "party_types[1].party_type")
+}
+
+func TestValidatePartyTypes_DifferentTenants_SamePartyType_Valid(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	manifest := validManifest()
+	manifest.PartyTypes = []*partyv1.PartyTypeDefinition{
+		{
+			Id:              "ptd-t1-person",
+			TenantId:        "tenant-1",
+			PartyType:       "PERSON",
+			AttributeSchema: `{"type": "object"}`,
+		},
+		{
+			Id:              "ptd-t2-person",
+			TenantId:        "tenant-2",
+			PartyType:       "PERSON",
+			AttributeSchema: `{"type": "object"}`,
+		},
+	}
+
+	result := v.Validate(manifest, nil)
+	assert.True(t, result.Valid, "same party type for different tenants should be valid, errors: %v", result.Errors)
+}
+
+func TestValidatePartyTypes_ValidCELExpressions(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	manifest := validManifest()
+	manifest.PartyTypes = []*partyv1.PartyTypeDefinition{
+		{
+			Id:              "ptd-person-001",
+			TenantId:        "tenant-1",
+			PartyType:       "PERSON",
+			AttributeSchema: `{"type": "object"}`,
+			ValidationCel:   "party_type == \"PERSON\"",
+			EligibilityCel:  "party_type != \"\"",
+		},
+	}
+
+	result := v.Validate(manifest, nil)
+	assert.True(t, result.Valid, "valid CEL expressions should pass, errors: %v", result.Errors)
+}
+
+func TestValidatePartyTypes_InvalidValidationCEL(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	manifest := validManifest()
+	manifest.PartyTypes = []*partyv1.PartyTypeDefinition{
+		{
+			Id:              "ptd-person-001",
+			TenantId:        "tenant-1",
+			PartyType:       "PERSON",
+			AttributeSchema: `{"type": "object"}`,
+			ValidationCel:   "undeclared_var > 0",
+		},
+	}
+
+	result := v.Validate(manifest, nil)
+	assert.False(t, result.Valid)
+	var celErr *ValidationError
+	for i := range result.Errors {
+		if result.Errors[i].Code == "CEL_UNDECLARED_REFERENCE" {
+			celErr = &result.Errors[i]
+			break
+		}
+	}
+	require.NotNil(t, celErr, "expected CEL_UNDECLARED_REFERENCE error, got: %v", result.Errors)
+	assert.Contains(t, celErr.Path, "party_types[0].validation_cel")
+}
+
+func TestValidatePartyTypes_InvalidEligibilityCEL(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	manifest := validManifest()
+	manifest.PartyTypes = []*partyv1.PartyTypeDefinition{
+		{
+			Id:              "ptd-person-001",
+			TenantId:        "tenant-1",
+			PartyType:       "PERSON",
+			AttributeSchema: `{"type": "object"}`,
+			EligibilityCel:  "invalid_field_name + 1",
+		},
+	}
+
+	result := v.Validate(manifest, nil)
+	assert.False(t, result.Valid)
+	var celErr *ValidationError
+	for i := range result.Errors {
+		if result.Errors[i].Code == "CEL_UNDECLARED_REFERENCE" {
+			celErr = &result.Errors[i]
+			break
+		}
+	}
+	require.NotNil(t, celErr, "expected CEL_UNDECLARED_REFERENCE error, got: %v", result.Errors)
+	assert.Contains(t, celErr.Path, "party_types[0].eligibility_cel")
+}
+
+func TestValidatePartyTypes_EmptyPartyTypes_Valid(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	manifest := validManifest()
+	// No party_types field - should be valid
+	result := v.Validate(manifest, nil)
+	assert.True(t, result.Valid, "manifest with no party types should be valid")
+}
+
+func TestValidatePartyTypes_MultipleErrors_ReportedAll(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	manifest := validManifest()
+	manifest.PartyTypes = []*partyv1.PartyTypeDefinition{
+		{
+			Id:              "ptd-person-001",
+			TenantId:        "tenant-1",
+			PartyType:       "PERSON",
+			AttributeSchema: `{bad json`,
+			ValidationCel:   "unknown_var > 0",
+		},
+	}
+
+	result := v.Validate(manifest, nil)
+	assert.False(t, result.Valid)
+	// Should have at least: INVALID_JSON_SCHEMA + CEL_UNDECLARED_REFERENCE
+	codes := make([]string, 0, len(result.Errors))
+	for _, e := range result.Errors {
+		codes = append(codes, e.Code)
+	}
+	assert.Contains(t, codes, "INVALID_JSON_SCHEMA")
+	assert.Contains(t, codes, "CEL_UNDECLARED_REFERENCE")
 }

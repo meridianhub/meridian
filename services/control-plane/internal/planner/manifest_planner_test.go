@@ -461,6 +461,7 @@ func TestPhaseLabel(t *testing.T) {
 	assert.Equal(t, "Valuation Rules", PhaseLabel(PhaseValuationRules))
 	assert.Equal(t, "Saga Definitions", PhaseLabel(PhaseSagas))
 	assert.Equal(t, "Seed Data", PhaseLabel(PhaseSeedData))
+	assert.Equal(t, "Party Types", PhaseLabel(PhasePartyTypes))
 	assert.True(t, strings.HasPrefix(PhaseLabel(Phase(99)), "Phase("))
 }
 
@@ -528,6 +529,52 @@ func TestPlan_FullEnergyManifest_DryRun(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, plan.Calls[0].IdempotencyKey, planNotDry.Calls[0].IdempotencyKey,
 		"idempotency key should not change based on dry run flag")
+}
+
+// --- Party type planner tests ---
+
+func TestPlan_PartyTypesInPhase6(t *testing.T) {
+	p := NewManifestPlanner()
+	diffPlan := &differ.DiffPlan{
+		Actions: []differ.PlannedAction{
+			{ResourceType: differ.ResourcePartyType, ResourceCode: "tenant-1:PERSON", Action: differ.ActionCreate},
+		},
+	}
+
+	plan, err := p.Plan(diffPlan, "tenant-1", "1.0", false)
+	require.NoError(t, err)
+	require.Len(t, plan.Calls, 1)
+	assert.Equal(t, PhasePartyTypes, plan.Calls[0].Phase)
+}
+
+func TestPlan_GRPCMethodMapping_PartyTypes(t *testing.T) {
+	p := NewManifestPlanner()
+	diffPlan := &differ.DiffPlan{
+		Actions: []differ.PlannedAction{
+			{ResourceType: differ.ResourcePartyType, ResourceCode: "tenant-1:PERSON", Action: differ.ActionCreate},
+			{ResourceType: differ.ResourcePartyType, ResourceCode: "tenant-1:ORGANIZATION", Action: differ.ActionUpdate},
+		},
+	}
+
+	plan, err := p.Plan(diffPlan, "tenant-1", "1.0", false)
+	require.NoError(t, err)
+
+	callsByCode := indexCallsByResourceID(plan.Calls)
+	assert.Equal(t, MethodRegisterPartyType, callsByCode["tenant-1:PERSON"].GRPCMethod)
+	assert.Equal(t, MethodUpdatePartyType, callsByCode["tenant-1:ORGANIZATION"].GRPCMethod)
+}
+
+func TestPlan_PartyType_Delete_NotSupported(t *testing.T) {
+	p := NewManifestPlanner()
+	diffPlan := &differ.DiffPlan{
+		Actions: []differ.PlannedAction{
+			{ResourceType: differ.ResourcePartyType, ResourceCode: "tenant-1:PERSON", Action: differ.ActionDelete},
+		},
+	}
+
+	_, err := p.Plan(diffPlan, "tenant-1", "1.0", false)
+	assert.Error(t, err, "DELETE for party types should fail")
+	assert.ErrorIs(t, err, ErrDeleteNotSupportedForPartyType)
 }
 
 // --- Test helpers ---

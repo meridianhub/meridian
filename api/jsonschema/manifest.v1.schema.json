@@ -11,7 +11,8 @@
                 "valuationRules",
                 "sagas",
                 "seedData",
-                "paymentRails"
+                "paymentRails",
+                "partyTypes"
             ],
             "properties": {
                 "version": {
@@ -67,6 +68,14 @@
                     "additionalProperties": false,
                     "type": "array",
                     "description": "payment_rails defines external payment provider integrations for this tenant."
+                },
+                "partyTypes": {
+                    "items": {
+                        "$ref": "#/definitions/meridian.party.v1.PartyTypeDefinition"
+                    },
+                    "additionalProperties": false,
+                    "type": "array",
+                    "description": "party_types defines the tenant-configurable party type schemas for this tenant."
                 }
             },
             "additionalProperties": false,
@@ -432,6 +441,68 @@
             "type": "object",
             "title": "Valuation Rule",
             "description": "ValuationRule defines how one instrument is converted to another. Used for cross-instrument transactions (e.g., kWh to GBP, USD to EUR)."
+        },
+        "meridian.party.v1.PartyTypeDefinition": {
+            "required": [
+                "id",
+                "tenantId",
+                "partyType",
+                "attributeSchema",
+                "validationCel",
+                "eligibilityCel",
+                "errorMessageCel",
+                "createdAt",
+                "updatedAt",
+                "version"
+            ],
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "id is the unique identifier for this party type definition."
+                },
+                "tenantId": {
+                    "type": "string",
+                    "description": "tenant_id is the tenant that owns this party type definition."
+                },
+                "partyType": {
+                    "type": "string",
+                    "description": "party_type is the party classification this definition applies to (e.g., \"PERSON\", \"ORGANIZATION\"). Uppercase alphanumeric with underscores, max 100 characters."
+                },
+                "attributeSchema": {
+                    "type": "string",
+                    "description": "attribute_schema is a JSON Schema document defining the structure and constraints for party attributes of this type (max 16KB). Must be non-empty when provided."
+                },
+                "validationCel": {
+                    "type": "string",
+                    "description": "validation_cel is a CEL expression for cross-field validation of party attributes. Evaluated at party registration and update time."
+                },
+                "eligibilityCel": {
+                    "type": "string",
+                    "description": "eligibility_cel is a CEL expression for determining account type eligibility for parties of this type."
+                },
+                "errorMessageCel": {
+                    "type": "string",
+                    "description": "error_message_cel is a CEL expression for generating custom error messages when validation or eligibility checks fail."
+                },
+                "createdAt": {
+                    "type": "string",
+                    "description": "created_at is when this party type definition was created.",
+                    "format": "date-time"
+                },
+                "updatedAt": {
+                    "type": "string",
+                    "description": "updated_at is when this party type definition was last modified.",
+                    "format": "date-time"
+                },
+                "version": {
+                    "type": "integer",
+                    "description": "version is for optimistic locking."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "--- Party Type Definitions ---",
+            "description": "--- Party Type Definitions ---  PartyTypeDefinition defines a tenant-configurable schema for a party type, including JSON Schema for attribute validation and CEL expressions for cross-field validation, account eligibility, and custom error messages."
         }
     }
 }

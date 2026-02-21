@@ -6,6 +6,7 @@
 package validator
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -142,9 +143,10 @@ type ValidationResult struct {
 
 // ManifestValidator validates Meridian manifests.
 type ManifestValidator struct {
-	protoValidator protovalidate.Validator
-	celEnv         *cel.Env
-	bucketCelEnv   *cel.Env
+	protoValidator  protovalidate.Validator
+	celEnv          *cel.Env
+	bucketCelEnv    *cel.Env
+	partyTypeCelEnv *cel.Env
 }
 
 // New creates a new ManifestValidator.
@@ -178,10 +180,21 @@ func New() (*ManifestValidator, error) {
 		return nil, fmt.Errorf("failed to create bucket CEL environment: %w", err)
 	}
 
+	// CEL environment for party type validation/eligibility expressions.
+	// These expressions operate on party attributes.
+	partyTypeCelEnv, err := cel.NewEnv(
+		cel.Variable("attributes", cel.MapType(cel.StringType, cel.DynType)),
+		cel.Variable("party_type", cel.StringType),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create party type CEL environment: %w", err)
+	}
+
 	return &ManifestValidator{
-		protoValidator: pv,
-		celEnv:         celEnv,
-		bucketCelEnv:   bucketCelEnv,
+		protoValidator:  pv,
+		celEnv:          celEnv,
+		bucketCelEnv:    bucketCelEnv,
+		partyTypeCelEnv: partyTypeCelEnv,
 	}, nil
 }
 
@@ -211,7 +224,10 @@ func (v *ManifestValidator) Validate(
 	// 6. Payment rails validation
 	v.validatePaymentRails(manifest, result)
 
-	// 7. Immutability checks
+	// 7. Party types validation
+	v.validatePartyTypes(manifest, result)
+
+	// 8. Immutability checks
 	if previousManifest != nil {
 		v.validateImmutability(manifest, previousManifest, result)
 	}
@@ -631,6 +647,62 @@ func checkInstrumentRef(
 		ve.Suggestion = fmt.Sprintf("Did you mean %q?", suggestion)
 	}
 	addError(result, ve)
+}
+
+// celPartyTypeFields lists the variables available in party type CEL expressions.
+var celPartyTypeFields = []string{"attributes", "party_type"}
+
+// validatePartyTypes validates all party type definitions in the manifest.
+func (v *ManifestValidator) validatePartyTypes(
+	manifest *controlplanev1.Manifest,
+	result *ValidationResult,
+) {
+	// Check duplicate (tenant_id, party_type) pairs
+	seen := make(map[string]int)
+	for i, pt := range manifest.GetPartyTypes() {
+		key := pt.GetTenantId() + ":" + pt.GetPartyType()
+		if prev, exists := seen[key]; exists {
+			addError(result, ValidationError{
+				Severity: SeverityError,
+				Path:     fmt.Sprintf("party_types[%d].party_type", i),
+				Code:     "DUPLICATE_PARTY_TYPE",
+				Message:  fmt.Sprintf("duplicate party_type %q for tenant %q (first defined at party_types[%d])", pt.GetPartyType(), pt.GetTenantId(), prev),
+			})
+		} else {
+			seen[key] = i
+		}
+
+		basePath := fmt.Sprintf("party_types[%d]", i)
+
+		// Validate attribute_schema is valid JSON
+		if schema := pt.GetAttributeSchema(); schema != "" {
+			v.validatePartyTypeSchema(schema, basePath+".attribute_schema", result)
+		}
+
+		// Validate CEL expressions
+		if expr := pt.GetValidationCel(); expr != "" {
+			v.validateCELExpression(expr, basePath+".validation_cel", v.partyTypeCelEnv, celPartyTypeFields, result)
+		}
+		if expr := pt.GetEligibilityCel(); expr != "" {
+			v.validateCELExpression(expr, basePath+".eligibility_cel", v.partyTypeCelEnv, celPartyTypeFields, result)
+		}
+		if expr := pt.GetErrorMessageCel(); expr != "" {
+			v.validateCELExpression(expr, basePath+".error_message_cel", v.partyTypeCelEnv, celPartyTypeFields, result)
+		}
+	}
+}
+
+// validatePartyTypeSchema validates that a party type attribute_schema is valid JSON.
+func (v *ManifestValidator) validatePartyTypeSchema(schema, path string, result *ValidationResult) {
+	var js json.RawMessage
+	if err := json.Unmarshal([]byte(schema), &js); err != nil {
+		addError(result, ValidationError{
+			Severity: SeverityError,
+			Path:     path,
+			Code:     "INVALID_JSON_SCHEMA",
+			Message:  fmt.Sprintf("attribute_schema is not valid JSON: %s", err.Error()),
+		})
+	}
 }
 
 // validateImmutability checks that immutable code fields have not been changed.
