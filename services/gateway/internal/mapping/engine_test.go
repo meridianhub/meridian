@@ -771,6 +771,27 @@ func TestTransformInbound_IdempotencyKey_MissingSelector_Error(t *testing.T) {
 	assert.ErrorIs(t, err, ErrIdempotencyKey)
 }
 
+func TestTransformInbound_IdempotencyKey_ContentHash_MissingField_Error(t *testing.T) {
+	eng := newTestEngine(t)
+
+	mapping := &mappingv1.MappingDefinition{
+		Fields: []*mappingv1.FieldCorrespondence{
+			{ExternalPath: "amount", InternalPath: "amount"},
+		},
+		Idempotency: &mappingv1.IdempotencyConfig{
+			UseContentHash:    true,
+			ContentHashFields: []string{"customer_id", "amount"},
+		},
+	}
+
+	// customer_id is missing from the payload.
+	input := []byte(`{"amount":100}`)
+	_, err := eng.TransformInbound(mapping, input)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrIdempotencyKey)
+	assert.Contains(t, err.Error(), "customer_id")
+}
+
 // --- CEL cache ---
 
 func TestCELCache_HitAndMiss(t *testing.T) {
@@ -993,10 +1014,59 @@ func TestTransformOutbound_PassthroughUnmappedFields(t *testing.T) {
 
 	assert.Equal(t, "Alice", out["ext_name"])
 	assert.Equal(t, "should_remain", out["extra_field"])
+	// Internal field "name" should be removed since it differs from external "ext_name".
+	_, namePresent := out["name"]
+	assert.False(t, namePresent, "internal field 'name' should be removed from outbound output")
 
 	nested, ok := out["nested"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "value", nested["deep"])
+}
+
+func TestTransformOutbound_InternalFieldsRemovedWhenRenamed(t *testing.T) {
+	eng := newTestEngine(t)
+
+	mapping := &mappingv1.MappingDefinition{
+		Fields: []*mappingv1.FieldCorrespondence{
+			{ExternalPath: "customer_name", InternalPath: "name"},
+			{ExternalPath: "customer_email", InternalPath: "email"},
+		},
+	}
+
+	input := []byte(`{"name":"Alice","email":"alice@example.com"}`)
+	output, err := eng.TransformOutbound(mapping, input)
+	require.NoError(t, err)
+
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(output, &out))
+
+	// External paths should be present.
+	assert.Equal(t, "Alice", out["customer_name"])
+	assert.Equal(t, "alice@example.com", out["customer_email"])
+
+	// Internal paths should be removed.
+	_, namePresent := out["name"]
+	assert.False(t, namePresent, "internal field 'name' should not leak")
+	_, emailPresent := out["email"]
+	assert.False(t, emailPresent, "internal field 'email' should not leak")
+}
+
+func TestTransformOutbound_SamePaths_NotDeleted(t *testing.T) {
+	eng := newTestEngine(t)
+
+	mapping := &mappingv1.MappingDefinition{
+		Fields: []*mappingv1.FieldCorrespondence{
+			{ExternalPath: "name", InternalPath: "name"},
+		},
+	}
+
+	input := []byte(`{"name":"Alice"}`)
+	output, err := eng.TransformOutbound(mapping, input)
+	require.NoError(t, err)
+
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(output, &out))
+	assert.Equal(t, "Alice", out["name"])
 }
 
 // --- Multiple transforms in same mapping ---
@@ -1144,6 +1214,95 @@ func TestNewEngineWithCacheSize(t *testing.T) {
 }
 
 // --- CEL compilation error ---
+
+func TestTransformInbound_AttributeFlatten_ExternalPathMissing(t *testing.T) {
+	eng := newTestEngine(t)
+
+	mapping := &mappingv1.MappingDefinition{
+		Fields: []*mappingv1.FieldCorrespondence{
+			{
+				// ExternalPath is "color" but may not exist; flatten should still run using source_keys.
+				ExternalPath: "color",
+				InternalPath: "attributes",
+				Transform: &mappingv1.FieldTransform{
+					Transform: &mappingv1.FieldTransform_AttributeFlatten{
+						AttributeFlatten: &mappingv1.AttributeFlatten{
+							SourceKeys:  []string{"size", "weight"},
+							TargetField: "attributes",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// "color" is absent but "size" and "weight" exist.
+	input := []byte(`{"size":"large","weight":"5kg"}`)
+	result, err := eng.TransformInbound(mapping, input)
+	require.NoError(t, err)
+
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(result.ProtoJSON, &out))
+
+	attrs, ok := out["attributes"].([]any)
+	require.True(t, ok, "attributes should be an array")
+	assert.Len(t, attrs, 2)
+}
+
+func TestTransformInbound_CELListResult(t *testing.T) {
+	eng := newTestEngine(t)
+
+	mapping := &mappingv1.MappingDefinition{
+		Fields: []*mappingv1.FieldCorrespondence{
+			{ExternalPath: "name", InternalPath: "name"},
+		},
+		InboundComputedFields: []*mappingv1.ComputedField{
+			{
+				TargetPath:    "tags",
+				CelExpression: `["tag1", "tag2", "tag3"]`,
+			},
+		},
+	}
+
+	input := []byte(`{"name":"Alice"}`)
+	result, err := eng.TransformInbound(mapping, input)
+	require.NoError(t, err)
+
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(result.ProtoJSON, &out))
+
+	tags, ok := out["tags"].([]any)
+	require.True(t, ok, "tags should be an array, got %T", out["tags"])
+	assert.Equal(t, []any{"tag1", "tag2", "tag3"}, tags)
+}
+
+func TestTransformInbound_CELMapResult(t *testing.T) {
+	eng := newTestEngine(t)
+
+	mapping := &mappingv1.MappingDefinition{
+		Fields: []*mappingv1.FieldCorrespondence{
+			{ExternalPath: "name", InternalPath: "name"},
+		},
+		InboundComputedFields: []*mappingv1.ComputedField{
+			{
+				TargetPath:    "metadata",
+				CelExpression: `{"source": "webhook", "version": "v2"}`,
+			},
+		},
+	}
+
+	input := []byte(`{"name":"Alice"}`)
+	result, err := eng.TransformInbound(mapping, input)
+	require.NoError(t, err)
+
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(result.ProtoJSON, &out))
+
+	meta, ok := out["metadata"].(map[string]any)
+	require.True(t, ok, "metadata should be a map, got %T", out["metadata"])
+	assert.Equal(t, "webhook", meta["source"])
+	assert.Equal(t, "v2", meta["version"])
+}
 
 func TestTransformInbound_InvalidCEL_Error(t *testing.T) {
 	eng := newTestEngine(t)

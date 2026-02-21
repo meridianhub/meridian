@@ -14,6 +14,7 @@ import (
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
+	"github.com/google/cel-go/common/types/traits"
 	"github.com/google/cel-go/ext"
 	lru "github.com/hashicorp/golang-lru/v2"
 	mappingv1 "github.com/meridianhub/meridian/api/proto/meridian/mapping/v1"
@@ -182,6 +183,20 @@ func (e *Engine) applyInboundFields(fields []*mappingv1.FieldCorrespondence, ext
 	output := "{}"
 	for _, field := range fields {
 		val := gjson.GetBytes(externalJSON, field.GetExternalPath())
+
+		// Attribute flatten derives from multiple source keys; run regardless of ExternalPath existence.
+		if ft := field.GetTransform(); ft != nil && ft.GetAttributeFlatten() != nil {
+			transformed, err := e.applyInboundTransform(ft, val, externalJSON)
+			if err != nil {
+				return "", fmt.Errorf("field %s -> %s: %w", field.GetExternalPath(), field.GetInternalPath(), err)
+			}
+			output, err = sjson.Set(output, field.GetInternalPath(), transformed)
+			if err != nil {
+				return "", fmt.Errorf("%w: setting %s: %w", ErrFieldExtraction, field.GetInternalPath(), err)
+			}
+			continue
+		}
+
 		if !val.Exists() {
 			var err error
 			output, err = e.applyDefaultIfPresent(field, output)
@@ -222,6 +237,8 @@ func (e *Engine) applyDefaultIfPresent(field *mappingv1.FieldCorrespondence, out
 }
 
 // applyOutboundFields applies field correspondences for outbound transformation.
+// After mapping each field to its external path, the original internal path is removed
+// from the output to prevent leaking internal field names to external consumers.
 func (e *Engine) applyOutboundFields(fields []*mappingv1.FieldCorrespondence, protoJSON []byte) (string, error) {
 	output := string(protoJSON)
 	for _, field := range fields {
@@ -238,6 +255,11 @@ func (e *Engine) applyOutboundFields(fields []*mappingv1.FieldCorrespondence, pr
 		output, err = sjson.Set(output, field.GetExternalPath(), transformed)
 		if err != nil {
 			return "", fmt.Errorf("%w: setting %s: %w", ErrFieldExtraction, field.GetExternalPath(), err)
+		}
+
+		// Remove the original internal field to avoid leaking internal names.
+		if field.GetInternalPath() != field.GetExternalPath() {
+			output, _ = sjson.Delete(output, field.GetInternalPath())
 		}
 	}
 	return output, nil
@@ -433,6 +455,9 @@ func (e *Engine) deriveContentHash(fields []string, externalJSON []byte) (string
 
 	for _, path := range sortedFields {
 		val := gjson.GetBytes(externalJSON, path)
+		if !val.Exists() {
+			return "", fmt.Errorf("%w: content hash field %q not found in payload", ErrIdempotencyKey, path)
+		}
 		hasher.Write([]byte(path))
 		hasher.Write([]byte("="))
 		hasher.Write([]byte(val.String()))
@@ -564,6 +589,23 @@ func celValToInterface(v ref.Val) any {
 		}
 		return v.Value()
 	default:
+		if l, ok := v.(traits.Lister); ok {
+			it := l.Iterator()
+			var out []any
+			for it.HasNext() == types.True {
+				out = append(out, celValToInterface(it.Next()))
+			}
+			return out
+		}
+		if m, ok := v.(traits.Mapper); ok {
+			it := m.Iterator()
+			out := map[string]any{}
+			for it.HasNext() == types.True {
+				k := it.Next()
+				out[fmt.Sprint(k.Value())] = celValToInterface(m.Get(k))
+			}
+			return out
+		}
 		return v.Value()
 	}
 }
