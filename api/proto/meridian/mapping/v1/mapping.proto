@@ -367,7 +367,8 @@ message ListMappingsRequest {
   // target_service filters results by target service name. Empty means no filter.
   string target_service = 2 [(buf.validate.field).string.max_len = 255];
 
-  // page_size is the maximum number of results to return (1-100). Defaults to 20.
+  // page_size is the maximum number of results to return (0-100).
+  // A value of 0 uses the server default (20). Maximum is 100.
   int32 page_size = 3 [(buf.validate.field).int32 = {
     gte: 0
     lte: 100
