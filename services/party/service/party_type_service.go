@@ -131,8 +131,8 @@ func (s *PartyTypeDefinitionService) Update(ctx context.Context, id uuid.UUID, i
 		return nil, err
 	}
 
-	// Optimistic locking check
-	if input.Version > 0 && existing.Version != input.Version {
+	// Optimistic locking check: caller must always supply the current version.
+	if existing.Version != input.Version {
 		return nil, persistence.ErrPartyTypeVersionConflict
 	}
 
@@ -165,6 +165,7 @@ func (s *PartyTypeDefinitionService) Update(ctx context.Context, id uuid.UUID, i
 	existing.ValidationCEL = updatedValidationCEL
 	existing.EligibilityCEL = updatedEligibilityCEL
 	existing.ErrorMessageCEL = updatedErrorMessageCEL
+	existing.UpdatedAt = time.Now()
 	existing.Version++
 
 	if err := s.repo.Update(ctx, existing); err != nil {
