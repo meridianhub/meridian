@@ -52,7 +52,11 @@ message EnumMapping {
 message AttributeFlatten {
   // source_keys lists the gjson paths (external) or proto paths (internal) to collect into the target.
   // Each key's value is placed into the target map under that key name.
-  repeated string source_keys = 1 [(buf.validate.field).repeated.max_items = 64];
+  // At least one key must be provided for the flatten to have effect.
+  repeated string source_keys = 1 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 64
+  }];
 
   // target_field is the name of the map field in the target message that receives the flattened values.
   string target_field = 2 [(buf.validate.field).string = {
@@ -62,9 +66,11 @@ message AttributeFlatten {
 }
 
 // FieldTransform defines how a single field value is transformed during mapping.
-// Exactly one transform type must be set.
+// At most one transform type may be set (proto oneof semantics). The Go service
+// layer validates that at least one is provided when a FieldTransform is specified.
 message FieldTransform {
-  // transform is the transformation to apply. Exactly one must be set.
+  // transform is the transformation to apply. At most one may be set per proto oneof semantics.
+  // The Go service layer enforces that at least one variant is selected when a transform is present.
   oneof transform {
     // cel applies bidirectional CEL expressions for value transformation.
     CelTransform cel = 1;
@@ -397,10 +403,13 @@ message UpdateMappingRequest {
   google.protobuf.FieldMask update_mask = 12;
 
   // name is the updated human-readable name (optional).
-  string name = 2 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 255
-  }];
+  // When "name" is included in update_mask, the Go service layer enforces min_len = 1.
+  // IGNORE_IF_ZERO_VALUE is used so that the default empty string does not fail validation
+  // when "name" is not included in update_mask (FieldMask partial update semantics).
+  string name = 2 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.max_len = 255
+  ];
 
   // external_schema is the updated JSON Schema string (optional).
   string external_schema = 3 [(buf.validate.field).string.max_len = 65536];
