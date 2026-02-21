@@ -1,0 +1,432 @@
+syntax = "proto3";
+
+package meridian.mapping.v1;
+
+import "buf/validate/validate.proto";
+import "google/api/annotations.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/mapping/v1;mappingv1";
+
+// MappingStatus defines the lifecycle state of a mapping definition.
+enum MappingStatus {
+  // MAPPING_STATUS_UNSPECIFIED means the status is unknown.
+  MAPPING_STATUS_UNSPECIFIED = 0;
+  // MAPPING_STATUS_DRAFT means the mapping is being defined and cannot be used.
+  MAPPING_STATUS_DRAFT = 1;
+  // MAPPING_STATUS_ACTIVE means the mapping is available for use.
+  MAPPING_STATUS_ACTIVE = 2;
+  // MAPPING_STATUS_DEPRECATED means the mapping is no longer recommended for new use.
+  MAPPING_STATUS_DEPRECATED = 3;
+}
+
+// CelTransform defines bidirectional CEL expressions for field transformation.
+message CelTransform {
+  // inbound_cel is the CEL expression applied when mapping from external to internal format.
+  // Example: "value.lowerAscii()" to normalize incoming string values.
+  string inbound_cel = 1 [(buf.validate.field).string.max_len = 2048];
+
+  // outbound_cel is the CEL expression applied when mapping from internal to external format.
+  // Example: "value.upperAscii()" to format outgoing string values.
+  string outbound_cel = 2 [(buf.validate.field).string.max_len = 2048];
+}
+
+// EnumMapping defines a bidirectional mapping between external and internal enum values.
+message EnumMapping {
+  // values maps external enum string values to internal enum string values.
+  // Example: {"ACTIVE": "STATUS_ACTIVE", "INACTIVE": "STATUS_INACTIVE"}
+  map<string, string> values = 1;
+
+  // fallback is the internal value to use when an external value is not found in the map.
+  // If empty, an unmapped inbound value causes an error.
+  string fallback = 2 [(buf.validate.field).string.max_len = 256];
+
+  // outbound_fallback is the external value to use when an internal value is not found in the map.
+  // If empty, an unmapped outbound value causes an error.
+  string outbound_fallback = 3 [(buf.validate.field).string.max_len = 256];
+}
+
+// AttributeFlatten defines a transform that merges multiple source fields into a single target map field.
+// Useful for collecting scattered external fields into an attributes map.
+message AttributeFlatten {
+  // source_keys lists the gjson paths (external) or proto paths (internal) to collect into the target.
+  // Each key's value is placed into the target map under that key name.
+  repeated string source_keys = 1 [(buf.validate.field).repeated.max_items = 64];
+
+  // target_field is the name of the map field in the target message that receives the flattened values.
+  string target_field = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 256
+  }];
+}
+
+// FieldTransform defines how a single field value is transformed during mapping.
+// Exactly one transform type must be set.
+message FieldTransform {
+  // transform is the transformation to apply. Exactly one must be set.
+  oneof transform {
+    // cel applies bidirectional CEL expressions for value transformation.
+    CelTransform cel = 1;
+
+    // enum_mapping maps between external and internal enum string representations.
+    EnumMapping enum_mapping = 2;
+
+    // date_format specifies a Go time layout string for parsing and formatting date/time values.
+    // Example: "2006-01-02" for ISO date, "2006-01-02T15:04:05Z07:00" for RFC3339.
+    string date_format = 3;
+
+    // default_value is a literal string value used when the source field is absent or empty.
+    string default_value = 4;
+
+    // attribute_flatten collects multiple source keys into a single target map field.
+    AttributeFlatten attribute_flatten = 5;
+  }
+}
+
+// FieldCorrespondence maps a single external field to an internal proto field.
+message FieldCorrespondence {
+  // external_path is the gjson path expression for locating the value in the external JSON payload.
+  // Supports dot notation, array indexing, and gjson modifiers.
+  // Example: "customer.address.city", "items.#.price", "meta|@flatten"
+  string external_path = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 512
+  }];
+
+  // internal_path is the proto field path in the internal message (dot-separated).
+  // Example: "customer_id", "line_items.unit_price", "metadata.source"
+  string internal_path = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 512
+  }];
+
+  // transform defines an optional value transformation applied during mapping.
+  // If not set, the raw string value is used as-is.
+  FieldTransform transform = 3;
+}
+
+// ComputedField defines a field whose value is derived from a CEL expression
+// rather than directly mapped from the source payload.
+message ComputedField {
+  // target_path is the proto field path in the internal message (dot-separated).
+  // Example: "created_at", "metadata.ingested_by"
+  string target_path = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 512
+  }];
+
+  // cel_expression is a CEL expression evaluated against the full source payload.
+  // The expression may reference any field from the source document.
+  // Example: "now()" for timestamp, "'v1.' + version" for derived strings.
+  string cel_expression = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 2048
+  }];
+}
+
+// IdempotencyConfig controls how idempotency keys are derived for mapped requests.
+message IdempotencyConfig {
+  // source_selector is a gjson path expression that extracts the idempotency key
+  // from the external payload.
+  // Example: "header.idempotency_key", "transaction.reference_id"
+  string source_selector = 1 [(buf.validate.field).string.max_len = 512];
+
+  // use_content_hash indicates that the idempotency key should be derived from
+  // a hash of the selected content fields rather than a direct field value.
+  bool use_content_hash = 2;
+
+  // content_hash_fields lists the gjson paths whose values are included in the content hash.
+  // Only used when use_content_hash is true.
+  repeated string content_hash_fields = 3 [(buf.validate.field).repeated.max_items = 32];
+}
+
+// MappingDefinition defines a bidirectional transformation between an external JSON
+// schema and an internal Meridian gRPC service RPC.
+//
+// It supports:
+//   - Field-level correspondence with optional transforms (CEL, enums, date formats)
+//   - Computed fields derived from CEL expressions
+//   - Inbound and outbound CEL validation
+//   - Batch ingestion via gjson array paths
+//   - Idempotency key configuration
+message MappingDefinition {
+  // id is the unique identifier for this mapping definition (UUID).
+  string id = 1 [(buf.validate.field).string.uuid = true];
+
+  // tenant_id is the tenant that owns this mapping definition (UUID).
+  string tenant_id = 2 [(buf.validate.field).string.uuid = true];
+
+  // name is the human-readable name for this mapping.
+  // Example: "Stripe Webhook -> Payment Order"
+  string name = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // target_service is the Meridian gRPC service this mapping calls.
+  // Example: "meridian.payment_order.v1.PaymentOrderService"
+  string target_service = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // target_rpc is the RPC method on the target service to invoke after mapping.
+  // Example: "InitiatePaymentOrder"
+  string target_rpc = 5 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+
+  // version is the schema version for this mapping definition (monotonically increasing).
+  int32 version = 6 [(buf.validate.field).int32.gte = 1];
+
+  // status is the lifecycle state of this mapping definition.
+  MappingStatus status = 7 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // external_schema is a JSON Schema string describing the expected external payload structure.
+  // Used for documentation and inbound validation.
+  string external_schema = 8 [(buf.validate.field).string.max_len = 65536];
+
+  // fields defines the field-level correspondences between external and internal formats.
+  repeated FieldCorrespondence fields = 9;
+
+  // inbound_computed_fields defines fields computed during inbound (external -> internal) mapping.
+  repeated ComputedField inbound_computed_fields = 10;
+
+  // outbound_computed_fields defines fields computed during outbound (internal -> external) mapping.
+  repeated ComputedField outbound_computed_fields = 11;
+
+  // inbound_validation_cel is a CEL expression evaluated against the raw external payload
+  // before inbound mapping. The expression must return a boolean; false causes rejection.
+  // Example: "has(payload.customer_id) && payload.amount > 0"
+  string inbound_validation_cel = 12 [(buf.validate.field).string.max_len = 2048];
+
+  // outbound_validation_cel is a CEL expression evaluated against the mapped internal message
+  // before outbound mapping. The expression must return a boolean; false causes rejection.
+  string outbound_validation_cel = 13 [(buf.validate.field).string.max_len = 2048];
+
+  // created_at is when this mapping definition was created.
+  google.protobuf.Timestamp created_at = 14;
+
+  // updated_at is when this mapping definition was last modified.
+  google.protobuf.Timestamp updated_at = 15;
+
+  // is_batch indicates this mapping handles array payloads.
+  // When true, batch_target_path must be set.
+  bool is_batch = 16;
+
+  // batch_target_path is the gjson path expression that selects the array of items
+  // to process when is_batch is true.
+  // Example: "events", "data.items"
+  string batch_target_path = 17 [(buf.validate.field).string.max_len = 512];
+
+  // idempotency defines how idempotency keys are derived for requests produced by this mapping.
+  IdempotencyConfig idempotency = 18;
+}
+
+// ========================================
+// Service Definition
+// ========================================
+
+// MappingService manages mapping definitions - the configuration that describes
+// how external JSON payloads are transformed into internal Meridian gRPC calls.
+service MappingService {
+  // CreateMapping creates a new mapping definition in DRAFT status.
+  // Returns ALREADY_EXISTS if a mapping with the same name and version exists.
+  rpc CreateMapping(CreateMappingRequest) returns (CreateMappingResponse) {
+    option (google.api.http) = {
+      post: "/v1/mappings"
+      body: "*"
+    };
+  }
+
+  // GetMapping retrieves a specific mapping definition by ID.
+  // Returns NOT_FOUND if the mapping does not exist.
+  rpc GetMapping(GetMappingRequest) returns (GetMappingResponse) {
+    option (google.api.http) = {
+      get: "/v1/mappings/{id}"
+    };
+  }
+
+  // ListMappings returns mapping definitions for the tenant, with optional filtering.
+  rpc ListMappings(ListMappingsRequest) returns (ListMappingsResponse) {
+    option (google.api.http) = {
+      get: "/v1/mappings"
+    };
+  }
+
+  // UpdateMapping modifies an existing mapping definition.
+  // Returns NOT_FOUND if the mapping does not exist.
+  // Returns FAILED_PRECONDITION if the mapping is not in DRAFT status.
+  rpc UpdateMapping(UpdateMappingRequest) returns (UpdateMappingResponse) {
+    option (google.api.http) = {
+      put: "/v1/mappings/{id}"
+      body: "*"
+    };
+  }
+
+  // DeleteMapping removes a mapping definition.
+  // Returns NOT_FOUND if the mapping does not exist.
+  // Returns FAILED_PRECONDITION if the mapping is in ACTIVE status.
+  rpc DeleteMapping(DeleteMappingRequest) returns (DeleteMappingResponse) {
+    option (google.api.http) = {
+      delete: "/v1/mappings/{id}"
+    };
+  }
+}
+
+// CreateMappingRequest is the request to create a new mapping definition.
+message CreateMappingRequest {
+  // name is the human-readable name for this mapping.
+  string name = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // target_service is the Meridian gRPC service this mapping calls.
+  string target_service = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // target_rpc is the RPC method on the target service to invoke after mapping.
+  string target_rpc = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+
+  // version is the schema version for this mapping definition.
+  int32 version = 4 [(buf.validate.field).int32.gte = 1];
+
+  // external_schema is a JSON Schema string describing the expected external payload structure.
+  string external_schema = 5 [(buf.validate.field).string.max_len = 65536];
+
+  // fields defines the field-level correspondences between external and internal formats.
+  repeated FieldCorrespondence fields = 6;
+
+  // inbound_computed_fields defines fields computed during inbound mapping.
+  repeated ComputedField inbound_computed_fields = 7;
+
+  // outbound_computed_fields defines fields computed during outbound mapping.
+  repeated ComputedField outbound_computed_fields = 8;
+
+  // inbound_validation_cel is a CEL expression for inbound payload validation.
+  string inbound_validation_cel = 9 [(buf.validate.field).string.max_len = 2048];
+
+  // outbound_validation_cel is a CEL expression for outbound payload validation.
+  string outbound_validation_cel = 10 [(buf.validate.field).string.max_len = 2048];
+
+  // is_batch indicates this mapping handles array payloads.
+  bool is_batch = 11;
+
+  // batch_target_path is the gjson path for selecting the array when is_batch is true.
+  string batch_target_path = 12 [(buf.validate.field).string.max_len = 512];
+
+  // idempotency defines how idempotency keys are derived for requests.
+  IdempotencyConfig idempotency = 13;
+}
+
+// CreateMappingResponse is the response after creating a mapping definition.
+message CreateMappingResponse {
+  // mapping is the newly created mapping definition.
+  MappingDefinition mapping = 1 [(buf.validate.field).required = true];
+}
+
+// GetMappingRequest is the request to retrieve a mapping definition by ID.
+message GetMappingRequest {
+  // id is the unique identifier of the mapping definition (UUID).
+  string id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+// GetMappingResponse is the response containing the requested mapping definition.
+message GetMappingResponse {
+  // mapping is the requested mapping definition.
+  MappingDefinition mapping = 1 [(buf.validate.field).required = true];
+}
+
+// ListMappingsRequest is the request to list mapping definitions for a tenant.
+message ListMappingsRequest {
+  // status filters results by lifecycle status. If UNSPECIFIED, all statuses are returned.
+  MappingStatus status = 1 [(buf.validate.field).enum.defined_only = true];
+
+  // target_service filters results by target service name. Empty means no filter.
+  string target_service = 2 [(buf.validate.field).string.max_len = 255];
+
+  // page_size is the maximum number of results to return (1-100). Defaults to 20.
+  int32 page_size = 3 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 100
+  }];
+
+  // page_token is the pagination token from a previous ListMappingsResponse.
+  string page_token = 4 [(buf.validate.field).string.max_len = 512];
+}
+
+// ListMappingsResponse is the response containing a page of mapping definitions.
+message ListMappingsResponse {
+  // mappings is the list of mapping definitions matching the request criteria.
+  repeated MappingDefinition mappings = 1;
+
+  // next_page_token is the pagination token for the next page. Empty if no more results.
+  string next_page_token = 2;
+
+  // total_count is the total number of mappings matching the filter criteria.
+  int32 total_count = 3;
+}
+
+// UpdateMappingRequest is the request to update an existing mapping definition.
+message UpdateMappingRequest {
+  // id is the unique identifier of the mapping definition to update (UUID).
+  string id = 1 [(buf.validate.field).string.uuid = true];
+
+  // name is the updated human-readable name (optional).
+  string name = 2 [(buf.validate.field).string.max_len = 255];
+
+  // external_schema is the updated JSON Schema string (optional).
+  string external_schema = 3 [(buf.validate.field).string.max_len = 65536];
+
+  // fields replaces the field-level correspondences (optional).
+  repeated FieldCorrespondence fields = 4;
+
+  // inbound_computed_fields replaces the inbound computed fields (optional).
+  repeated ComputedField inbound_computed_fields = 5;
+
+  // outbound_computed_fields replaces the outbound computed fields (optional).
+  repeated ComputedField outbound_computed_fields = 6;
+
+  // inbound_validation_cel is the updated inbound validation expression (optional).
+  string inbound_validation_cel = 7 [(buf.validate.field).string.max_len = 2048];
+
+  // outbound_validation_cel is the updated outbound validation expression (optional).
+  string outbound_validation_cel = 8 [(buf.validate.field).string.max_len = 2048];
+
+  // is_batch is the updated batch flag (optional).
+  bool is_batch = 9;
+
+  // batch_target_path is the updated batch target path (optional).
+  string batch_target_path = 10 [(buf.validate.field).string.max_len = 512];
+
+  // idempotency is the updated idempotency configuration (optional).
+  IdempotencyConfig idempotency = 11;
+}
+
+// UpdateMappingResponse is the response after updating a mapping definition.
+message UpdateMappingResponse {
+  // mapping is the updated mapping definition.
+  MappingDefinition mapping = 1 [(buf.validate.field).required = true];
+}
+
+// DeleteMappingRequest is the request to delete a mapping definition.
+message DeleteMappingRequest {
+  // id is the unique identifier of the mapping definition to delete (UUID).
+  string id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+// DeleteMappingResponse is the response after deleting a mapping definition.
+message DeleteMappingResponse {
+  // id is the identifier of the deleted mapping definition.
+  string id = 1;
+}
