@@ -376,11 +376,14 @@ func (p *Party) Attributes() []AttributeEntry {
 }
 
 // SetAttributes replaces the party's attributes.
+// The input slice is copied defensively so callers cannot mutate Party state after the call.
 func (p *Party) SetAttributes(attrs []AttributeEntry) {
 	if attrs == nil {
 		attrs = []AttributeEntry{}
 	}
-	p.attributes = attrs
+	copied := make([]AttributeEntry, len(attrs))
+	copy(copied, attrs)
+	p.attributes = copied
 	p.updatedAt = time.Now()
 	p.version++
 }

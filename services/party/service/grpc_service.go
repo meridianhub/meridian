@@ -170,7 +170,7 @@ func (s *Service) RegisterParty(ctx context.Context, req *pb.RegisterPartyReques
 		}
 	}
 
-	// Set optional attributes (stored without incrementing version since this is initial creation)
+	// Set optional attributes if provided at registration time.
 	if len(req.Attributes) > 0 {
 		party.SetAttributes(protoAttributesToDomain(req.Attributes))
 	}
