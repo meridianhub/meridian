@@ -246,19 +246,25 @@ func isValidGjsonPath(path string) bool {
 	return isGjsonPathSyntaxValid(path)
 }
 
-// isGjsonPathSyntaxValid checks for balanced brackets and valid modifiers.
+// isGjsonPathSyntaxValid checks for balanced and correctly matched brackets.
+// Uses a stack to enforce that each closing bracket matches its opener,
+// catching mismatched pairs like "[}" which a simple depth counter misses.
 func isGjsonPathSyntaxValid(path string) bool {
-	depth := 0
+	stack := make([]rune, 0, 8)
 	for _, ch := range path {
 		switch ch {
 		case '[', '{':
-			depth++
+			stack = append(stack, ch)
 		case ']', '}':
-			depth--
-			if depth < 0 {
+			if len(stack) == 0 {
+				return false
+			}
+			open := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			if (ch == ']' && open != '[') || (ch == '}' && open != '{') {
 				return false
 			}
 		}
 	}
-	return depth == 0
+	return len(stack) == 0
 }

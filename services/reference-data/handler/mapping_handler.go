@@ -107,8 +107,7 @@ func (s *MappingService) ListMappings(ctx context.Context, req *pb.ListMappingsR
 
 	defs, total, err := s.repo.ListByTenant(ctx, statusFilter, req.GetTargetService(), pageSize, req.GetPageToken())
 	if err != nil {
-		s.logger.Error("failed to list mappings", "error", err)
-		return nil, status.Errorf(codes.Internal, "failed to list mappings: %v", err)
+		return nil, s.mapDomainError(ctx, err, "ListMappings", "")
 	}
 
 	mappings := make([]*pb.MappingDefinition, len(defs))
