@@ -20,6 +20,7 @@ var (
 	ErrCompilation         = sharedcel.ErrCompilation
 	ErrEligibilityNotBool  = sharedcel.ErrEligibilityNotBool
 	ErrBucketKeyNotString  = sharedcel.ErrBucketKeyNotString
+	ErrValidationNotBool   = sharedcel.ErrValidationNotBool
 )
 
 // Compiler is an alias for the shared CEL compiler.

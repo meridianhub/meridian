@@ -309,6 +309,7 @@ func TestSafeParseLib_ParseInt(t *testing.T) {
 	c, err := NewCompiler()
 	require.NoError(t, err)
 
+	// parse_int returns an integer, not a boolean — use CompileValueExpression.
 	tests := []struct {
 		name       string
 		expression string
@@ -343,7 +344,7 @@ func TestSafeParseLib_ParseInt(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			prg, err := c.CompileValidation(tt.expression)
+			prg, err := c.CompileValueExpression(tt.expression)
 			require.NoError(t, err)
 
 			result, _, err := prg.Eval(input)
@@ -361,6 +362,7 @@ func TestSafeParseLib_ParseDecimal(t *testing.T) {
 	c, err := NewCompiler()
 	require.NoError(t, err)
 
+	// parse_decimal returns a double, not a boolean — use CompileValueExpression.
 	tests := []struct {
 		name       string
 		expression string
@@ -394,7 +396,7 @@ func TestSafeParseLib_ParseDecimal(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			prg, err := c.CompileValidation(tt.expression)
+			prg, err := c.CompileValueExpression(tt.expression)
 			require.NoError(t, err)
 
 			result, _, err := prg.Eval(input)
@@ -459,25 +461,29 @@ func TestSafeParseLib_InvalidInputs(t *testing.T) {
 		"source":     "",
 	}
 
-	tests := []struct {
-		name       string
-		expression string
-	}{
-		{"invalid date", `parse_iso_date("not-a-date")`},
-		{"invalid int", `parse_int("not-a-number")`},
-		{"invalid decimal", `parse_decimal("not-a-number")`},
-		{"invalid bool", `parse_bool("maybe")`},
+	// parse_iso_date, parse_int, parse_decimal return non-boolean values so they
+	// must be compiled via CompileValueExpression.
+	valueExprCases := []string{
+		`parse_iso_date("not-a-date")`,
+		`parse_int("not-a-number")`,
+		`parse_decimal("not-a-number")`,
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			prg, err := c.CompileValidation(tt.expression)
+	for _, expr := range valueExprCases {
+		t.Run(expr, func(t *testing.T) {
+			prg, err := c.CompileValueExpression(expr)
 			require.NoError(t, err)
-
 			_, _, err = prg.Eval(input)
 			require.Error(t, err, "invalid input should produce evaluation error")
 		})
 	}
+
+	// parse_bool returns boolean so it uses CompileValidation.
+	t.Run("invalid bool", func(t *testing.T) {
+		prg, err := c.CompileValidation(`parse_bool("maybe")`)
+		require.NoError(t, err)
+		_, _, err = prg.Eval(input)
+		require.Error(t, err, "invalid input should produce evaluation error")
+	})
 }
 
 func TestCompileEligibility(t *testing.T) {

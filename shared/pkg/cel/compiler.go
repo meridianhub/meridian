@@ -55,6 +55,9 @@ var (
 
 	// ErrBucketKeyNotString is returned when a bucket key expression does not return a string.
 	ErrBucketKeyNotString = errors.New("bucket key expression must return string")
+
+	// ErrValidationNotBool is returned when a validation expression does not return a boolean.
+	ErrValidationNotBool = errors.New("validation expression must return boolean")
 )
 
 // Compiler provides CEL expression compilation with security constraints.
@@ -132,10 +135,36 @@ func createEligibilityEnv() (*cel.Env, error) {
 	)
 }
 
-// CompileValidation compiles a validation expression against the validation environment.
+// CompileValidation compiles a boolean validation expression against the validation environment.
 // Returns a cel.Program that can be evaluated with the appropriate input values.
-// The expression should return a boolean indicating validity.
+// The expression must return a boolean indicating validity.
 func (c *Compiler) CompileValidation(expression string) (cel.Program, error) {
+	if err := validateExpressionConstraints(expression); err != nil {
+		return nil, err
+	}
+
+	ast, issues := c.validationEnv.Compile(expression)
+	if issues != nil && issues.Err() != nil {
+		return nil, errors.Join(ErrCompilation, issues.Err())
+	}
+
+	if ast.OutputType() != cel.BoolType {
+		return nil, errors.Join(ErrCompilation, ErrValidationNotBool)
+	}
+
+	prg, err := c.validationEnv.Program(ast, cel.CostLimit(CostLimit))
+	if err != nil {
+		return nil, errors.Join(ErrCompilation, err)
+	}
+
+	return prg, nil
+}
+
+// CompileValueExpression compiles a value-returning expression against the validation environment.
+// Unlike CompileValidation, this method does not require a boolean output type and is intended
+// for pricing formulas and other expressions that return numeric or string values.
+// The validation environment provides: attributes, amount, valid_from, valid_to, source.
+func (c *Compiler) CompileValueExpression(expression string) (cel.Program, error) {
 	if err := validateExpressionConstraints(expression); err != nil {
 		return nil, err
 	}
