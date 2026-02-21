@@ -400,8 +400,9 @@ func evalBucketKey(compiler *refcel.Compiler, expr string, input map[string]any)
 }
 
 func evalErrorMessage(compiler *refcel.Compiler, expr string, input map[string]any) (string, error) {
-	// Error message uses validation environment (has access to all variables)
-	prg, err := compiler.CompileValidation(expr)
+	// Error message uses the validation environment (has access to all variables)
+	// but returns a string, so use CompileValueExpression rather than CompileValidation.
+	prg, err := compiler.CompileValueExpression(expr)
 	if err != nil {
 		return "", fmt.Errorf("compilation failed: %w", err)
 	}

@@ -88,8 +88,10 @@ func (r *PostgresPolicyRepository) Create(ctx context.Context, p *Policy) error 
 		return ErrSystemReadOnly
 	}
 
-	// Validate CEL expression at creation time (fail-fast)
-	_, err := r.compiler.CompileValidation(p.CelExpression)
+	// Validate CEL expression at creation time (fail-fast).
+	// Valuation policies return numeric values, so use CompileValueExpression
+	// rather than CompileValidation (which enforces boolean return type).
+	_, err := r.compiler.CompileValueExpression(p.CelExpression)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidCEL, err)
 	}
@@ -318,7 +320,7 @@ func (r *PostgresPolicyRepository) DryRun(ctx context.Context, policyName string
 		return nil, err
 	}
 
-	prg, compileErr := r.compiler.CompileValidation(policy.CelExpression)
+	prg, compileErr := r.compiler.CompileValueExpression(policy.CelExpression)
 	if compileErr != nil {
 		return failedDryRun(policy.EstimatedCost, compileErr.Error()), nil
 	}
