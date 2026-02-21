@@ -14,14 +14,17 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	mappingv1 "github.com/meridianhub/meridian/api/proto/meridian/mapping/v1"
 	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
 	sagav1 "github.com/meridianhub/meridian/api/proto/meridian/saga/v1"
 	"github.com/meridianhub/meridian/services/reference-data/accounttype"
 	refcel "github.com/meridianhub/meridian/services/reference-data/cel"
 	"github.com/meridianhub/meridian/services/reference-data/handler"
+	"github.com/meridianhub/meridian/services/reference-data/mapping"
 	"github.com/meridianhub/meridian/services/reference-data/node"
 	"github.com/meridianhub/meridian/services/reference-data/registry"
 	"github.com/meridianhub/meridian/services/reference-data/saga"
+	sharedcel "github.com/meridianhub/meridian/shared/pkg/cel"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
@@ -121,6 +124,18 @@ func run(logger *slog.Logger) error {
 	}
 	logger.Info("account type registry initialized")
 
+	// Create mapping repository and validator
+	mappingRepo := mapping.NewPostgresRepository(dbPool)
+	mappingCELCompiler, err := sharedcel.NewCompiler()
+	if err != nil {
+		return fmt.Errorf("failed to create mapping CEL compiler: %w", err)
+	}
+	mappingValidator, err := mapping.NewValidator(mappingCELCompiler)
+	if err != nil {
+		return fmt.Errorf("failed to create mapping validator: %w", err)
+	}
+	logger.Info("mapping repository and validator initialized")
+
 	// Create gRPC service handlers
 	refDataSvc, err := handler.NewService(instrumentRegistry, compiler, logger)
 	if err != nil {
@@ -137,6 +152,11 @@ func run(logger *slog.Logger) error {
 	accountTypeSvc, err := handler.NewAccountTypeService(accountTypeRegistry, instrumentRegistry, compiler, logger)
 	if err != nil {
 		return fmt.Errorf("failed to create account type service: %w", err)
+	}
+
+	mappingSvc, err := handler.NewMappingService(mappingRepo, mappingValidator, logger)
+	if err != nil {
+		return fmt.Errorf("failed to create mapping service: %w", err)
 	}
 
 	logger.Info("gRPC service handlers initialized")
@@ -158,6 +178,7 @@ func run(logger *slog.Logger) error {
 	referencedatav1.RegisterNodeServiceServer(grpcServer, nodeSvc)
 	referencedatav1.RegisterAccountTypeRegistryServiceServer(grpcServer, accountTypeSvc)
 	sagav1.RegisterSagaRegistryServiceServer(grpcServer, sagaSvc)
+	mappingv1.RegisterMappingServiceServer(grpcServer, mappingSvc)
 
 	// Register health check service
 	healthServer := health.NewServer()

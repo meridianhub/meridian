@@ -1,4 +1,4 @@
-h1:9uvMNqMdU5ppdrnQbK2+d9lxZKKzUNJgvbeWunT12aA=
+h1:qNXnWbsNKxbJuRKU3QgWqMbpA9US5jfUh52K2GatXsU=
 20260104000001_initial.sql h1:2h8BgK7z85efnTzrKZ23RRN3HPtRf9UOTy9FXhA33ik=
 20260105000001_add_is_system.sql h1:eRDijg0+SC31BlTqSxDUO/5651nNGlvfHCRhP2W1xlk=
 20260106000001_add_successor_id.sql h1:QasQ5t/OPJ8j138LFpSwy38qGwTyKWwWSlVg1EsPifc=
@@ -21,3 +21,5 @@ h1:9uvMNqMdU5ppdrnQbK2+d9lxZKKzUNJgvbeWunT12aA=
 20260211000002_account_type_active_unique_index.sql h1:IfW9H4oskycME7Sdn7BXl8Upnh/Cq2KxsFLPoPnjSAo=
 20260211000003_account_type_valuation_methods.sql h1:20+TtpfM3FjEboyaNEniUTmu/kDvsPoXJnXSUig49M8=
 20260211000004_account_type_val_method_active_index.sql h1:aFoxOlhX9XdwTGEg+tuLa27BeVnaU7lYzKvjuBAct4E=
+20260221000001_mapping_definition.sql h1:npYQTdrDNnIXe01VFTb85l/LJXj4m2WMzMrb+3pnALI=
+20260221000002_mapping_definition_active_index.sql h1:v/yCArDD8nVfv3g1+QfR5bPTiJKXCM5Vmycflrlg3a8=
