@@ -288,6 +288,17 @@ service MappingService {
       delete: "/v1/mappings/{id}"
     };
   }
+
+  // DryRunMapping executes a mapping against sample JSON without persisting any results.
+  // Used for testing and validating a mapping definition before live deployment.
+  // Returns NOT_FOUND if the mapping name does not resolve to an ACTIVE definition
+  // and no explicit version resolves to an existing definition.
+  rpc DryRunMapping(DryRunMappingRequest) returns (DryRunMappingResponse) {
+    option (google.api.http) = {
+      post: "/v1/mappings/dry-run"
+      body: "*"
+    };
+  }
 }
 
 // CreateMappingRequest is the request to create a new mapping definition.
@@ -456,4 +467,79 @@ message DeleteMappingRequest {
 message DeleteMappingResponse {
   // id is the identifier of the deleted mapping definition.
   string id = 1;
+}
+
+// FieldMappingTrace records the outcome of a single field transform during a dry run.
+message FieldMappingTrace {
+  // source_path is the source field path (external_path for inbound, internal_path for outbound).
+  string source_path = 1;
+
+  // target_path is the target field path (internal_path for inbound, external_path for outbound).
+  string target_path = 2;
+
+  // source_value is the raw source value as a JSON string before transformation.
+  string source_value = 3;
+
+  // transformed_value is the resulting value after transformation as a JSON string.
+  string transformed_value = 4;
+
+  // transform_type describes the transform applied (e.g. "cel", "enum_mapping", "date_format",
+  // "default_value", "attribute_flatten", or "none" if no transform was configured).
+  string transform_type = 5;
+}
+
+// DryRunValidationResult reports the outcome of validation during a dry run.
+message DryRunValidationResult {
+  // passed is true if all validation checks succeeded.
+  bool passed = 1;
+
+  // errors lists all validation error messages. Empty when passed is true.
+  repeated string errors = 2;
+}
+
+// DryRunMappingRequest is the request to dry-run a mapping against sample JSON.
+message DryRunMappingRequest {
+  // mapping_name is the name of the mapping definition to execute.
+  string mapping_name = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // mapping_version is the version to use. When 0 (default), the latest ACTIVE version is used.
+  int32 mapping_version = 2 [(buf.validate.field).int32.gte = 0];
+
+  // direction is the transformation direction: "inbound" (external → internal) or
+  // "outbound" (internal → external).
+  string direction = 3 [(buf.validate.field).string = {
+    in: [
+      "inbound",
+      "outbound"
+    ]
+  }];
+
+  // sample_json is the input JSON payload to transform.
+  string sample_json = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 1048576
+  }];
+}
+
+// DryRunMappingResponse is the response from a dry-run mapping execution.
+message DryRunMappingResponse {
+  // transformed_json is the output JSON after applying the mapping.
+  // Empty when validation fails before transformation can complete.
+  string transformed_json = 1;
+
+  // idempotency_key is the derived idempotency key (inbound direction only).
+  // Empty for outbound direction or when no idempotency config is set.
+  string idempotency_key = 2;
+
+  // validation_result reports whether validation passed and any error messages.
+  DryRunValidationResult validation_result = 3;
+
+  // execution_time_ms is the wall-clock time in milliseconds taken to execute the transform.
+  int64 execution_time_ms = 4;
+
+  // field_mapping_trace contains a detailed log of each field transformation applied.
+  repeated FieldMappingTrace field_mapping_trace = 5;
 }

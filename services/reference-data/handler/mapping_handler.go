@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 
@@ -13,14 +14,16 @@ import (
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/mapping/v1"
 	"github.com/meridianhub/meridian/services/reference-data/mapping"
+	sharedmapping "github.com/meridianhub/meridian/shared/pkg/mapping"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
-// MappingService implements MappingServiceServer for MappingDefinition CRUD.
+// MappingService implements MappingServiceServer for MappingDefinition CRUD and DryRunMapping.
 type MappingService struct {
 	pb.UnimplementedMappingServiceServer
 	repo      mapping.Repository
 	validator *mapping.Validator
+	engine    *sharedmapping.Engine
 	logger    *slog.Logger
 }
 
@@ -28,6 +31,7 @@ type MappingService struct {
 var ErrMappingRepoNil = errors.New("mapping repository cannot be nil")
 
 // NewMappingService creates a new MappingService.
+// A mapping engine is created automatically for DryRunMapping support.
 func NewMappingService(repo mapping.Repository, validator *mapping.Validator, logger *slog.Logger) (*MappingService, error) {
 	if repo == nil {
 		return nil, ErrMappingRepoNil
@@ -35,9 +39,14 @@ func NewMappingService(repo mapping.Repository, validator *mapping.Validator, lo
 	if logger == nil {
 		logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	}
+	engine, err := sharedmapping.NewEngine()
+	if err != nil {
+		return nil, fmt.Errorf("creating mapping engine: %w", err)
+	}
 	return &MappingService{
 		repo:      repo,
 		validator: validator,
+		engine:    engine,
 		logger:    logger,
 	}, nil
 }
@@ -173,6 +182,70 @@ func (s *MappingService) DeleteMapping(ctx context.Context, req *pb.DeleteMappin
 	s.logger.Info("mapping deleted", "id", id)
 
 	return &pb.DeleteMappingResponse{Id: req.GetId()}, nil
+}
+
+// DryRunMapping executes a mapping definition against sample JSON for testing purposes.
+// No data is persisted. Returns the transformed output, validation result, and field-level trace.
+func (s *MappingService) DryRunMapping(ctx context.Context, req *pb.DryRunMappingRequest) (*pb.DryRunMappingResponse, error) {
+	def, err := s.resolveMappingForDryRun(ctx, req.GetMappingName(), int(req.GetMappingVersion()))
+	if err != nil {
+		return nil, s.mapDomainError(ctx, err, "DryRunMapping", req.GetMappingName())
+	}
+
+	protoMapping := mappingToProto(def)
+	sampleJSON := []byte(req.GetSampleJson())
+
+	var dryResult *sharedmapping.DryRunResult
+	switch req.GetDirection() {
+	case "inbound":
+		dryResult = s.engine.DryRunInbound(protoMapping, sampleJSON)
+	case "outbound":
+		dryResult = s.engine.DryRunOutbound(protoMapping, sampleJSON)
+	default:
+		return nil, status.Errorf(codes.InvalidArgument, "direction must be 'inbound' or 'outbound'")
+	}
+
+	return &pb.DryRunMappingResponse{
+		TransformedJson:   dryResult.TransformedJSON,
+		IdempotencyKey:    dryResult.IdempotencyKey,
+		ValidationResult:  dryRunValidationToProto(dryResult),
+		ExecutionTimeMs:   dryResult.ExecutionTimeMs,
+		FieldMappingTrace: fieldTracesToProto(dryResult.FieldTraces),
+	}, nil
+}
+
+// resolveMappingForDryRun looks up a mapping definition by name and optional version.
+// If version is 0, returns the latest ACTIVE definition. Otherwise returns the definition
+// with the exact version regardless of status.
+func (s *MappingService) resolveMappingForDryRun(ctx context.Context, name string, version int) (*mapping.Definition, error) {
+	if version == 0 {
+		return s.repo.GetLatestActive(ctx, name)
+	}
+	return s.repo.GetByNameAndVersion(ctx, name, version)
+}
+
+func dryRunValidationToProto(r *sharedmapping.DryRunResult) *pb.DryRunValidationResult {
+	return &pb.DryRunValidationResult{
+		Passed: r.ValidationPassed,
+		Errors: r.ValidationErrors,
+	}
+}
+
+func fieldTracesToProto(traces []sharedmapping.FieldTrace) []*pb.FieldMappingTrace {
+	if len(traces) == 0 {
+		return nil
+	}
+	result := make([]*pb.FieldMappingTrace, len(traces))
+	for i, t := range traces {
+		result[i] = &pb.FieldMappingTrace{
+			SourcePath:       t.SourcePath,
+			TargetPath:       t.TargetPath,
+			SourceValue:      t.SourceValue,
+			TransformedValue: t.TransformedValue,
+			TransformType:    t.TransformType,
+		}
+	}
+	return result
 }
 
 // --- Helpers ---

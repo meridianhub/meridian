@@ -20,6 +20,7 @@ type Repository interface {
 	Create(ctx context.Context, def *Definition) error
 	GetByID(ctx context.Context, id uuid.UUID) (*Definition, error)
 	GetLatestActive(ctx context.Context, name string) (*Definition, error)
+	GetByNameAndVersion(ctx context.Context, name string, version int) (*Definition, error)
 	ListByTenant(ctx context.Context, statusFilter Status, targetServiceFilter string, pageSize int, pageToken string) ([]*Definition, int, error)
 	Update(ctx context.Context, def *Definition, expectedUpdatedAt time.Time) error
 	UpdateStatus(ctx context.Context, id uuid.UUID, newStatus Status) error
@@ -202,6 +203,33 @@ func (r *PostgresRepository) GetLatestActive(ctx context.Context, name string) (
 			ORDER BY version DESC
 			LIMIT 1`
 		row := tx.QueryRow(ctx, query, name)
+		def, err := r.scanRow(row)
+		if err != nil {
+			return err
+		}
+		result = def
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// GetByNameAndVersion retrieves a specific mapping definition by name and version.
+func (r *PostgresRepository) GetByNameAndVersion(ctx context.Context, name string, version int) (*Definition, error) {
+	var result *Definition
+	err := r.withReadTx(ctx, func(tx pgx.Tx) error {
+		query := `
+			SELECT id, tenant_id, name, target_service, target_rpc, version, status,
+				external_schema, fields, inbound_computed_fields, outbound_computed_fields,
+				inbound_validation_cel, outbound_validation_cel,
+				is_batch, batch_target_path, idempotency,
+				created_at, updated_at
+			FROM mapping_definition
+			WHERE name = $1 AND version = $2
+			LIMIT 1`
+		row := tx.QueryRow(ctx, query, name, version)
 		def, err := r.scanRow(row)
 		if err != nil {
 			return err
