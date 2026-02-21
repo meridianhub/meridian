@@ -187,6 +187,10 @@ func (s *MappingService) DeleteMapping(ctx context.Context, req *pb.DeleteMappin
 // DryRunMapping executes a mapping definition against sample JSON for testing purposes.
 // No data is persisted. Returns the transformed output, validation result, and field-level trace.
 func (s *MappingService) DryRunMapping(ctx context.Context, req *pb.DryRunMappingRequest) (*pb.DryRunMappingResponse, error) {
+	if s.engine == nil {
+		return nil, status.Errorf(codes.Internal, "mapping engine not initialized: use NewMappingService to construct MappingService")
+	}
+
 	def, err := s.resolveMappingForDryRun(ctx, req.GetMappingName(), int(req.GetMappingVersion()))
 	if err != nil {
 		return nil, s.mapDomainError(ctx, err, "DryRunMapping", req.GetMappingName())
