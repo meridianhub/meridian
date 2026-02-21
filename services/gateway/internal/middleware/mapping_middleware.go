@@ -189,6 +189,9 @@ func (m *MappingMiddleware) handleMappingRequest(w http.ResponseWriter, r *http.
 		"output_bytes", len(transformed))
 
 	copyHeaders(w.Header(), rec.headers)
+	// Remove Transfer-Encoding before setting Content-Length to avoid conflicting
+	// HTTP headers (Transfer-Encoding: chunked + Content-Length violates semantics).
+	w.Header().Del("Transfer-Encoding")
 	// Update Content-Length to reflect the (possibly changed) transformed body size.
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(transformed)))
 	w.WriteHeader(rec.code)

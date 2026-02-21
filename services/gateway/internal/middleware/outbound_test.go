@@ -214,6 +214,8 @@ func TestMappingMiddleware_OutboundUpdatesContentLength(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
+	// Verify Content-Length was updated to reflect the transformed body size.
+	assert.Equal(t, fmt.Sprintf("%d", rec.Body.Len()), rec.Header().Get("Content-Length"))
 
 	var result map[string]any
 	err := json.Unmarshal(rec.Body.Bytes(), &result)
