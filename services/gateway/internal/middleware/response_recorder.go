@@ -9,9 +9,10 @@ import (
 // responseRecorder captures the HTTP response status code and body written by a
 // downstream handler, allowing the middleware to inspect and rewrite the response.
 type responseRecorder struct {
-	code    int
-	headers http.Header
-	buf     *bytes.Buffer
+	code        int
+	headers     http.Header
+	buf         *bytes.Buffer
+	wroteHeader bool
 }
 
 // bufPool is a pool of byte buffers used to capture response bodies without
@@ -52,14 +53,23 @@ func (r *responseRecorder) Header() http.Header {
 	return r.headers
 }
 
-// Write captures the response body bytes.
+// Write captures the response body bytes. If WriteHeader has not been called,
+// it implicitly sets the status to 200, matching net/http.ResponseWriter semantics.
 func (r *responseRecorder) Write(b []byte) (int, error) {
+	if !r.wroteHeader {
+		r.WriteHeader(http.StatusOK)
+	}
 	return r.buf.Write(b)
 }
 
-// WriteHeader captures the HTTP status code. Subsequent calls are no-ops.
+// WriteHeader captures the HTTP status code. Subsequent calls are no-ops,
+// matching net/http.ResponseWriter first-call-wins semantics.
 func (r *responseRecorder) WriteHeader(code int) {
+	if r.wroteHeader {
+		return
+	}
 	r.code = code
+	r.wroteHeader = true
 }
 
 // release returns the underlying buffer to the pool.

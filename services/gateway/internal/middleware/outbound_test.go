@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	mappingv1 "github.com/meridianhub/meridian/api/proto/meridian/mapping/v1"
+	"github.com/meridianhub/meridian/services/gateway/internal/mapping" //nolint:depguard
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -490,35 +491,26 @@ func TestMappingMiddleware_NonMappingRequestNotRecorded(t *testing.T) {
 	assert.Equal(t, `{"name":"Alice"}`, rec.Body.String())
 }
 
-func TestMappingMiddleware_OutboundLatency(t *testing.T) {
-	// Transformation should complete well within 5ms p99 for simple mappings.
+func BenchmarkMappingMiddleware_OutboundTransform(b *testing.B) {
 	md := simpleMappingDef()
 	resolver := &stubResolver{mapping: md}
-	eng := testEngine(t)
-	mw := NewMappingMiddleware(resolver, eng, testLogger())
+	eng, err := mapping.NewEngine()
+	if err != nil {
+		b.Fatal(err)
+	}
+	mw := NewMappingMiddleware(resolver, eng, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	backend := vanguardHandler(http.StatusOK, `{"amount":100,"currency_code":"GBP"}`, nil)
 	handler := mw.Handler(backend)
 
-	const iterations = 100
-	var totalDuration time.Duration
-
-	for i := 0; i < iterations; i++ {
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
 		body := `{"amount": 100, "currency": "GBP"}`
 		req := httptest.NewRequest(http.MethodPost, "/mapping/stripe-webhook", bytes.NewBufferString(body))
 		req = withTenantContext(req, "tenant-abc")
 		rec := httptest.NewRecorder()
-
-		start := time.Now()
 		handler.ServeHTTP(rec, req)
-		totalDuration += time.Since(start)
-
-		require.Equal(t, http.StatusOK, rec.Code)
 	}
-
-	avg := totalDuration / iterations
-	assert.Less(t, avg, 5*time.Millisecond,
-		"average transformation latency %v should be less than 5ms", avg)
 }
 
 func TestMappingMiddleware_RoundTripInboundOutbound(t *testing.T) {

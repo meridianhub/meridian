@@ -152,7 +152,7 @@ func (m *MappingMiddleware) handleMappingRequest(w http.ResponseWriter, r *http.
 	next.ServeHTTP(rec, r)
 	elapsed := time.Since(start)
 
-	// Pass error responses (4xx/5xx) through untransformed.
+	// Pass non-2xx responses through untransformed.
 	if rec.code < 200 || rec.code >= 300 {
 		copyHeaders(w.Header(), rec.headers)
 		w.WriteHeader(rec.code)
