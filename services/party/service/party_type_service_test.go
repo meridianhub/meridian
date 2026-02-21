@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -110,6 +111,8 @@ func testCtx() context.Context {
 	return tenant.WithTenant(context.Background(), tenant.TenantID(testTenantID))
 }
 
+func strPtr(s string) *string { return &s }
+
 // --- Constructor tests ---
 
 func TestNewPartyTypeDefinitionService_NilRepoReturnsError(t *testing.T) {
@@ -160,7 +163,7 @@ func TestRegister_SchemaTooBigReturnsError(t *testing.T) {
 	svc, _ := newTestPartyTypeService(t)
 
 	bigSchema := `{"type":"object","properties":{"k":{"type":"string","description":"` +
-		string(make([]byte, MaxAttributeSchemaSize)) + `"}}}`
+		strings.Repeat("a", MaxAttributeSchemaSize) + `"}}}`
 
 	_, err := svc.Register(testCtx(), RegisterPartyTypeInput{
 		TenantID:        testTenantID,
@@ -309,7 +312,7 @@ func TestUpdate_Success(t *testing.T) {
 
 	newSchema := `{"type":"object","properties":{"income":{"type":"number"}}}`
 	updated, err := svc.Update(ctx, id, UpdatePartyTypeInput{
-		AttributeSchema: newSchema,
+		AttributeSchema: strPtr(newSchema),
 		Version:         1,
 	})
 
@@ -335,7 +338,7 @@ func TestUpdate_VersionConflict(t *testing.T) {
 
 	// Client thinks version is 1, but DB has 2
 	_, err := svc.Update(ctx, id, UpdatePartyTypeInput{
-		AttributeSchema: validAttributeSchema,
+		AttributeSchema: strPtr(validAttributeSchema),
 		Version:         1,
 	})
 
@@ -347,7 +350,7 @@ func TestUpdate_NotFound(t *testing.T) {
 	svc, _ := newTestPartyTypeService(t)
 
 	_, err := svc.Update(testCtx(), uuid.New(), UpdatePartyTypeInput{
-		AttributeSchema: validAttributeSchema,
+		AttributeSchema: strPtr(validAttributeSchema),
 		Version:         1,
 	})
 
@@ -371,7 +374,7 @@ func TestUpdate_InvalidSchemaReturnsError(t *testing.T) {
 	}
 
 	_, err := svc.Update(ctx, id, UpdatePartyTypeInput{
-		AttributeSchema: "not valid json",
+		AttributeSchema: strPtr("not valid json"),
 		Version:         1,
 	})
 
@@ -395,9 +398,9 @@ func TestUpdate_PreservesExistingCELWhenNotProvided(t *testing.T) {
 		UpdatedAt:       time.Now(),
 	}
 
-	// Update only AttributeSchema, not ValidationCEL
+	// Update only AttributeSchema, not ValidationCEL (nil ValidationCEL means preserve existing)
 	updated, err := svc.Update(ctx, id, UpdatePartyTypeInput{
-		AttributeSchema: `{"type":"object","properties":{"income":{"type":"number"}}}`,
+		AttributeSchema: strPtr(`{"type":"object","properties":{"income":{"type":"number"}}}`),
 		Version:         1,
 	})
 

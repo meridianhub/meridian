@@ -73,6 +73,10 @@ func (s *Service) GetPartyType(ctx context.Context, req *pb.GetPartyTypeRequest)
 		return nil, status.Error(codes.Unimplemented, "party type definition operations not configured")
 	}
 
+	if _, err := tenant.RequireFromContext(ctx); err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "tenant context required: %v", err)
+	}
+
 	id, err := uuid.Parse(req.Id)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid party type definition ID format: %v", err)
@@ -129,6 +133,10 @@ func (s *Service) UpdatePartyType(ctx context.Context, req *pb.UpdatePartyTypeRe
 		return nil, status.Error(codes.Unimplemented, "party type definition operations not configured")
 	}
 
+	if _, err := tenant.RequireFromContext(ctx); err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "tenant context required: %v", err)
+	}
+
 	id, err := uuid.Parse(req.Id)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid party type definition ID format: %v", err)
@@ -144,21 +152,23 @@ func (s *Service) UpdatePartyType(ctx context.Context, req *pb.UpdatePartyTypeRe
 		for _, path := range req.UpdateMask.Paths {
 			switch path {
 			case "attribute_schema":
-				input.AttributeSchema = req.AttributeSchema
+				input.AttributeSchema = &req.AttributeSchema
 			case "validation_cel":
-				input.ValidationCEL = req.ValidationCel
+				input.ValidationCEL = &req.ValidationCel
 			case "eligibility_cel":
-				input.EligibilityCEL = req.EligibilityCel
+				input.EligibilityCEL = &req.EligibilityCel
 			case "error_message_cel":
-				input.ErrorMessageCEL = req.ErrorMessageCel
+				input.ErrorMessageCEL = &req.ErrorMessageCel
+			default:
+				return nil, status.Errorf(codes.InvalidArgument, "unsupported update mask path: %q", path)
 			}
 		}
 	} else {
-		// No field mask - update all provided non-empty fields
-		input.AttributeSchema = req.AttributeSchema
-		input.ValidationCEL = req.ValidationCel
-		input.EligibilityCEL = req.EligibilityCel
-		input.ErrorMessageCEL = req.ErrorMessageCel
+		// No field mask - update all fields
+		input.AttributeSchema = &req.AttributeSchema
+		input.ValidationCEL = &req.ValidationCel
+		input.EligibilityCEL = &req.EligibilityCel
+		input.ErrorMessageCEL = &req.ErrorMessageCel
 	}
 
 	entity, err := s.partyTypeService.Update(ctx, id, input)

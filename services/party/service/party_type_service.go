@@ -69,11 +69,12 @@ type RegisterPartyTypeInput struct {
 }
 
 // UpdatePartyTypeInput holds the input for updating a party type definition.
+// Pointer fields distinguish "not provided" (nil = preserve existing) from "set to empty" (ptr to "" = clear).
 type UpdatePartyTypeInput struct {
-	AttributeSchema string
-	ValidationCEL   string
-	EligibilityCEL  string
-	ErrorMessageCEL string
+	AttributeSchema *string
+	ValidationCEL   *string
+	EligibilityCEL  *string
+	ErrorMessageCEL *string
 	Version         int64
 }
 
@@ -135,27 +136,26 @@ func (s *PartyTypeDefinitionService) Update(ctx context.Context, id uuid.UUID, i
 		return nil, persistence.ErrPartyTypeVersionConflict
 	}
 
-	// Apply updates (non-empty fields overwrite existing)
-	if input.AttributeSchema != "" {
-		if err := s.validateAttributeSchema(input.AttributeSchema); err != nil {
+	// Apply updates: nil pointer means "not provided" (preserve existing); non-nil means "set to this value" (including empty = clear).
+	if input.AttributeSchema != nil {
+		if err := s.validateAttributeSchema(*input.AttributeSchema); err != nil {
 			return nil, err
 		}
-		existing.AttributeSchema = input.AttributeSchema
+		existing.AttributeSchema = *input.AttributeSchema
 	}
 
-	// For CEL fields, apply if provided (even if empty string means "clear")
 	updatedValidationCEL := existing.ValidationCEL
 	updatedEligibilityCEL := existing.EligibilityCEL
 	updatedErrorMessageCEL := existing.ErrorMessageCEL
 
-	if input.ValidationCEL != "" {
-		updatedValidationCEL = input.ValidationCEL
+	if input.ValidationCEL != nil {
+		updatedValidationCEL = *input.ValidationCEL
 	}
-	if input.EligibilityCEL != "" {
-		updatedEligibilityCEL = input.EligibilityCEL
+	if input.EligibilityCEL != nil {
+		updatedEligibilityCEL = *input.EligibilityCEL
 	}
-	if input.ErrorMessageCEL != "" {
-		updatedErrorMessageCEL = input.ErrorMessageCEL
+	if input.ErrorMessageCEL != nil {
+		updatedErrorMessageCEL = *input.ErrorMessageCEL
 	}
 
 	if err := s.validateCELExpressions(updatedValidationCEL, updatedEligibilityCEL, updatedErrorMessageCEL); err != nil {
