@@ -74,10 +74,10 @@ message FieldTransform {
 
     // date_format specifies a Go time layout string for parsing and formatting date/time values.
     // Example: "2006-01-02" for ISO date, "2006-01-02T15:04:05Z07:00" for RFC3339.
-    string date_format = 3;
+    string date_format = 3 [(buf.validate.field).string.max_len = 128];
 
     // default_value is a literal string value used when the source field is absent or empty.
-    string default_value = 4;
+    string default_value = 4 [(buf.validate.field).string.max_len = 1024];
 
     // attribute_flatten collects multiple source keys into a single target map field.
     AttributeFlatten attribute_flatten = 5;
@@ -196,13 +196,13 @@ message MappingDefinition {
   string external_schema = 8 [(buf.validate.field).string.max_len = 65536];
 
   // fields defines the field-level correspondences between external and internal formats.
-  repeated FieldCorrespondence fields = 9;
+  repeated FieldCorrespondence fields = 9 [(buf.validate.field).repeated.max_items = 256];
 
   // inbound_computed_fields defines fields computed during inbound (external -> internal) mapping.
-  repeated ComputedField inbound_computed_fields = 10;
+  repeated ComputedField inbound_computed_fields = 10 [(buf.validate.field).repeated.max_items = 64];
 
   // outbound_computed_fields defines fields computed during outbound (internal -> external) mapping.
-  repeated ComputedField outbound_computed_fields = 11;
+  repeated ComputedField outbound_computed_fields = 11 [(buf.validate.field).repeated.max_items = 64];
 
   // inbound_validation_cel is a CEL expression evaluated against the raw external payload
   // before inbound mapping. The expression must return a boolean; false causes rejection.
@@ -311,13 +311,13 @@ message CreateMappingRequest {
   string external_schema = 5 [(buf.validate.field).string.max_len = 65536];
 
   // fields defines the field-level correspondences between external and internal formats.
-  repeated FieldCorrespondence fields = 6;
+  repeated FieldCorrespondence fields = 6 [(buf.validate.field).repeated.max_items = 256];
 
   // inbound_computed_fields defines fields computed during inbound mapping.
-  repeated ComputedField inbound_computed_fields = 7;
+  repeated ComputedField inbound_computed_fields = 7 [(buf.validate.field).repeated.max_items = 64];
 
   // outbound_computed_fields defines fields computed during outbound mapping.
-  repeated ComputedField outbound_computed_fields = 8;
+  repeated ComputedField outbound_computed_fields = 8 [(buf.validate.field).repeated.max_items = 64];
 
   // inbound_validation_cel is a CEL expression for inbound payload validation.
   string inbound_validation_cel = 9 [(buf.validate.field).string.max_len = 2048];
@@ -403,13 +403,13 @@ message UpdateMappingRequest {
   string external_schema = 3 [(buf.validate.field).string.max_len = 65536];
 
   // fields replaces the field-level correspondences (optional).
-  repeated FieldCorrespondence fields = 4;
+  repeated FieldCorrespondence fields = 4 [(buf.validate.field).repeated.max_items = 256];
 
   // inbound_computed_fields replaces the inbound computed fields (optional).
-  repeated ComputedField inbound_computed_fields = 5;
+  repeated ComputedField inbound_computed_fields = 5 [(buf.validate.field).repeated.max_items = 64];
 
   // outbound_computed_fields replaces the outbound computed fields (optional).
-  repeated ComputedField outbound_computed_fields = 6;
+  repeated ComputedField outbound_computed_fields = 6 [(buf.validate.field).repeated.max_items = 64];
 
   // inbound_validation_cel is the updated inbound validation expression (optional).
   string inbound_validation_cel = 7 [(buf.validate.field).string.max_len = 2048];
