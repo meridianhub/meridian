@@ -24,12 +24,13 @@ Party has none of this — custom data lives in unvalidated
 `google.protobuf.Struct` metadata on associations only.
 
 The Vanguard transcoder (tasks 1-10) solved **protocol transcoding**
-(HTTP/JSON to gRPC). This PRD addresses three layers above that:
+(HTTP/JSON to gRPC). This PRD addresses two layers above that:
 
 1. **Consistent property model** — bring Party in line with Reference
    Data and Market Data
-2. **Inbound mapping** — transform external JSON to internal proto
-3. **Outbound mapping** — transform internal proto to external JSON
+2. **Bidirectional mapping** — a single definition that transforms
+   external JSON to internal proto (inbound) and internal proto back
+   to external JSON (outbound), without duplicating logic
 
 ## Technical Context
 
@@ -79,22 +80,19 @@ The Vanguard transcoder (tasks 1-10) solved **protocol transcoding**
 5. **Format discovery**: No way for integrators to ask "what JSON shape
    does tenant X expect?"
 
-## Solution: Three-Phase Mapping Layer
+## Solution: Two-Phase Mapping Layer
 
 ### Phase 1: Unified Property Model
 
 Bring Party into consistency with Reference Data and Market Data by
 adding structured attribute support and CEL validation.
 
-### Phase 2: Inbound Mapping
+### Phase 2: Bidirectional Mapping
 
-Tenant-configurable definitions that transform external JSON into
-Meridian's internal proto structures before Vanguard processes them.
-
-### Phase 3: Outbound Mapping
-
-Tenant-configurable definitions that transform internal proto responses
-back into partner-specific JSON formats after Vanguard processes them.
+A single `MappingDefinition` describes the correspondence between
+external and internal fields. The engine runs it **forward** for
+inbound requests and **backward** for outbound responses — no
+duplicate definitions needed.
 
 ---
 
@@ -171,33 +169,43 @@ No new CEL functions needed — `parse_iso_date`, `parse_int`,
 | Party attributes field + migration | 3 |
 | CEL compiler integration in Party service | 2 |
 | Schema validation at registration | 3 |
+| Manifest: add `party_types` + differ/planner | 3 |
 | Tests + reference party type definitions | 2 |
-| **Total** | **13** |
+| **Total** | **16** |
 
 ---
 
-## Phase 2: Inbound Mapping
+## Phase 2: Bidirectional Mapping
 
 ### Core Concept
 
-An **Inbound Mapping** is a tenant-configurable definition that
-describes how to transform external JSON into Meridian's internal proto
-structure. Each mapping targets a specific RPC and defines:
+A **MappingDefinition** is a single, bidirectional definition that
+describes the correspondence between external and internal fields.
+The mapping engine runs it **forward** (external to proto) for inbound
+requests and **backward** (proto to external) for outbound responses.
 
-1. **Field mappings**: External field paths to internal proto field paths
-2. **Type coercions**: String to enum, string to decimal, date format
-   normalization
-3. **Validation rules**: CEL expressions for cross-field validation
-4. **Computed fields**: CEL expressions that derive values from input
-5. **Attribute flattening**: Map flat external JSON keys into
-   `repeated AttributeEntry` or `google.protobuf.Struct`
+Most transforms are naturally reversible:
+
+| Transform | Inbound | Outbound |
+|-----------|---------|----------|
+| Field rename | Read external, write internal | Read internal, write external |
+| Enum mapping | Look up external key | Invert: look up internal key |
+| Date format | Parse external format to RFC3339 | Format RFC3339 to external |
+| Attribute flatten | Collect keys into `AttributeEntry[]` | Unflatten to flat keys |
+| Default value | Apply if source missing | Skip (inbound-only) |
+| CEL expression | **Not reversible** — needs explicit pair | See `CelTransform` below |
+
+For the one non-reversible transform (CEL), we provide explicit
+`inbound_cel` and `outbound_cel` fields. This means **one mapping
+definition handles both directions** — no duplicate definitions, no
+pairing logic, no version synchronization problem.
 
 ### Routing Strategy
 
-Mapped requests use a **dedicated ingress path**:
+Mapped requests use a **dedicated path**:
 
 ```text
-POST /inbound/{mapping_name}
+POST /mapping/{mapping_name}
 ```
 
 The gateway:
@@ -207,9 +215,11 @@ The gateway:
    the **latest ACTIVE version**. If no ACTIVE version exists, return
    404. Version override via `X-Mapping-Version` header is supported
    but optional.
-3. Transforms the request body using the mapping rules
+3. **Inbound**: transforms the request body (external to proto)
 4. Rewrites the request internally to the `target_service`/`target_rpc`
 5. Forwards the proto-conformant JSON to Vanguard
+6. **Outbound**: transforms the response body (proto to external)
+7. Returns the partner-format JSON to the caller
 
 This avoids intercepting standard gRPC paths (e.g., `/v1/party`) and
 supports multiple mappings per RPC — a tenant can have
@@ -227,8 +237,8 @@ metadata about how to interpret data, analogous to Instrument
 Definitions and Attribute Schemas.
 
 The **Mapping Engine middleware** lives in `services/gateway/` — it
-intercepts `/inbound/` requests, resolves the mapping definition,
-applies transforms, and forwards to Vanguard.
+intercepts `/mapping/` requests, resolves the mapping definition,
+applies transforms in both directions, and forwards to Vanguard.
 
 ### Data Model
 
@@ -242,64 +252,74 @@ enum MappingStatus {
   MAPPING_STATUS_DEPRECATED = 3;
 }
 
-enum MappingDirection {
-  MAPPING_DIRECTION_UNSPECIFIED = 0;
-  MAPPING_DIRECTION_INBOUND = 1;   // Phase 2
-  MAPPING_DIRECTION_OUTBOUND = 2;  // Phase 3
-}
-
 message MappingDefinition {
   string id = 1;
   string tenant_id = 2;
   string name = 3;              // "bank-x-party-onboarding"
-  MappingDirection direction = 4;
-  string target_service = 5;    // "meridian.party.v1.PartyService"
-  string target_rpc = 6;        // "RegisterParty"
-  string version = 7;           // Semver for safe evolution
-  MappingStatus status = 8;
+  string target_service = 4;    // "meridian.party.v1.PartyService"
+  string target_rpc = 5;        // "RegisterParty"
+  string version = 6;           // Semver for safe evolution
+  MappingStatus status = 7;
 
   // Schema of expected external JSON (for discovery/docs)
-  string external_schema = 9;   // JSON Schema
+  string external_schema = 8;   // JSON Schema
 
-  // Transformation pipeline (executed in order below)
-  repeated FieldMapping field_mappings = 10;
-  repeated ComputedField computed_fields = 11;
-  string validation_cel = 12;   // CEL: post-mapping validation
+  // Bidirectional field correspondences
+  repeated FieldCorrespondence fields = 9;
+
+  // Direction-specific computed fields
+  repeated ComputedField inbound_computed_fields = 10;
+  repeated ComputedField outbound_computed_fields = 11;
+
+  // Direction-specific validation
+  string inbound_validation_cel = 12;
+  string outbound_validation_cel = 13;
 
   // Metadata
-  google.protobuf.Timestamp created_at = 13;
-  google.protobuf.Timestamp updated_at = 14;
+  google.protobuf.Timestamp created_at = 14;
+  google.protobuf.Timestamp updated_at = 15;
 
-  // Batch support
-  bool is_batch = 15;           // Input is JSON array
-  string batch_target_path = 16; // Wrap array at this path
+  // Batch support (inbound only)
+  bool is_batch = 16;           // Input is JSON array
+  string batch_target_path = 17; // Wrap array at this path
 }
 ```
 
-**Execution order**: `field_mappings` (sequentially) then
-`computed_fields` (sequentially, on post-mapped state) then
-`validation_cel` (on final state, must return `true`).
+**Inbound execution order**: `fields` (forward, sequentially) then
+`inbound_computed_fields` (sequentially) then `inbound_validation_cel`
+(must return `true`).
+
+**Outbound execution order**: `fields` (reverse, sequentially) then
+`outbound_computed_fields` (sequentially) then
+`outbound_validation_cel` (must return `true`).
 
 ```protobuf
-message FieldMapping {
-  string source_path = 1;       // gjson path: "govt_id"
-  string target_path = 2;       // Proto path: "reference.government_id"
-  FieldTransform transform = 3; // Optional transformation
+message FieldCorrespondence {
+  string external_path = 1;       // gjson path: "govt_id"
+  string internal_path = 2;       // Proto path: "reference.government_id"
+  FieldTransform transform = 3;   // Optional transformation
 }
 
 message FieldTransform {
   oneof transform {
-    string cel_expression = 1;
-    EnumMapping enum_mapping = 2;
-    string date_format = 3;       // "2006-01-02" to RFC3339
-    string default_value = 4;     // Fallback if source missing
-    AttributeFlatten attribute_flatten = 5;
+    CelTransform cel_transform = 1;  // Explicit inbound + outbound
+    EnumMapping enum_mapping = 2;    // Auto-reversible
+    string date_format = 3;          // Auto-reversible
+    string default_value = 4;        // Inbound only
+    AttributeFlatten attribute_flatten = 5; // Auto-reversible
   }
+}
+
+// For transforms that aren't naturally reversible
+message CelTransform {
+  string inbound_cel = 1;   // external value -> internal value
+  string outbound_cel = 2;  // internal value -> external value
 }
 
 message EnumMapping {
   map<string, string> values = 1; // External to internal
-  string fallback = 2;            // Default if no match
+  string fallback = 2;            // Default if no match (inbound)
+  string outbound_fallback = 3;   // Default if no match (outbound)
 }
 
 message AttributeFlatten {
@@ -308,30 +328,40 @@ message AttributeFlatten {
 }
 
 message ComputedField {
-  string target_path = 1;         // Proto field to populate
-  string cel_expression = 2;      // CEL using mapped fields
+  string target_path = 1;         // Field to populate
+  string cel_expression = 2;      // CEL expression
 }
 ```
 
 #### Path Syntax
 
-Source paths use **gjson syntax** (no `$` prefix):
+`external_path` uses **gjson syntax** (no `$` prefix):
 
 - Object fields: `govt_id`, `reference.government_id`
 - Array index: `items.0`
 - Array length: `items.#`
 - Nested array map: `items.#.name`
 
-Target paths use **proto field path notation** (dot-separated field
+`internal_path` uses **proto field path notation** (dot-separated field
 names matching the proto message structure).
 
 #### CEL Expression Context
 
-| Location | Variables | Return Type |
-|----------|-----------|-------------|
-| `FieldTransform.cel_expression` | `source` (extracted value) | Target field type |
-| `ComputedField.cel_expression` | `input` (original JSON), `mapped` (post-mapping state) | Target field type |
-| `validation_cel` | `input`, `mapped` | `bool` (false = reject with 400) |
+**Inbound:**
+
+| Location | Variables | Return |
+|----------|-----------|--------|
+| `CelTransform.inbound_cel` | `source` (extracted external value) | Internal field type |
+| `inbound_computed_fields` | `input` (external JSON), `mapped` (post-mapping) | Target field type |
+| `inbound_validation_cel` | `input`, `mapped` | `bool` |
+
+**Outbound:**
+
+| Location | Variables | Return |
+|----------|-----------|--------|
+| `CelTransform.outbound_cel` | `source` (internal proto value) | External field type |
+| `outbound_computed_fields` | `input` (proto JSON), `mapped` (post-mapping) | Target field type |
+| `outbound_validation_cel` | `input`, `mapped` | `bool` |
 
 All CEL expressions are subject to existing compiler constraints:
 max 4096 bytes, max 10 nesting depth, cost limit 10,000.
@@ -347,11 +377,11 @@ When `is_batch = true`:
 2. Applies field_mappings and computed_fields to each element
 3. Wraps the transformed array at `batch_target_path`
 
-### Example: Bank Party Onboarding
+### Example: Bank Party Onboarding (Bidirectional)
 
-**Request**: `POST /inbound/bank-x-party-onboarding`
+**Inbound request**: `POST /mapping/bank-x-party-onboarding`
 
-**External JSON**:
+**External JSON** (from bank's system):
 
 ```json
 {
@@ -365,46 +395,46 @@ When `is_batch = true`:
 }
 ```
 
-**Mapping Definition**:
+**Mapping Definition** (single definition, works both directions):
 
 ```yaml
 name: bank-x-party-onboarding
-direction: INBOUND
 target_service: meridian.party.v1.PartyService
 target_rpc: RegisterParty
 
-field_mappings:
-  - source_path: "type"
-    target_path: "party_type"
+fields:
+  - external_path: "type"
+    internal_path: "party_type"
     transform:
       enum_mapping:
         values:
           individual: "PARTY_TYPE_PERSON"
           corporate: "PARTY_TYPE_ORGANIZATION"
 
-  - source_path: "full_name"
-    target_path: "legal_name"
+  - external_path: "full_name"
+    internal_path: "legal_name"
 
-  - source_path: "govt_id"
-    target_path: "reference.government_id"
+  - external_path: "govt_id"
+    internal_path: "reference.government_id"
 
-  - source_path: "govt_id_type"
-    target_path: "reference.issuing_authority"
+  - external_path: "govt_id_type"
+    internal_path: "reference.issuing_authority"
 
-  - source_path: "account_officer"
-    target_path: "bank_relations.account_officer_id"
+  - external_path: "account_officer"
+    internal_path: "bank_relations.account_officer_id"
 
-  - source_path: "branch"
-    target_path: "bank_relations.assigned_branch"
+  - external_path: "branch"
+    internal_path: "bank_relations.assigned_branch"
 
-computed_fields:
+inbound_computed_fields:
   - target_path: "display_name"
     cel_expression: "input.full_name.split(' ')[0]"
 
-validation_cel: "has(input.full_name) && size(input.full_name) > 0"
+inbound_validation_cel: >
+  has(input.full_name) && size(input.full_name) > 0
 ```
 
-**Output** (proto-conformant JSON forwarded to Vanguard):
+**Inbound output** (proto-conformant JSON forwarded to Vanguard):
 
 ```json
 {
@@ -422,9 +452,58 @@ validation_cel: "has(input.full_name) && size(input.full_name) > 0"
 }
 ```
 
+**Outbound** — the same mapping auto-reverses the response. The gRPC
+service returns proto-JSON:
+
+```json
+{
+  "partyId": "p-123",
+  "partyType": "PARTY_TYPE_PERSON",
+  "legalName": "Alice Smith",
+  "displayName": "Alice",
+  "status": "PARTY_STATUS_ACTIVE",
+  "createdAt": "2026-02-20T10:30:00Z"
+}
+```
+
+The engine reverses `fields` — enum mappings invert automatically
+(`PARTY_TYPE_PERSON` to `individual`), field renames reverse
+(`legal_name` to `full_name`). Fields not in the mapping
+(`partyId`, `status`, `createdAt`) pass through unchanged:
+
+```json
+{
+  "partyId": "p-123",
+  "type": "individual",
+  "full_name": "Alice Smith",
+  "displayName": "Alice",
+  "status": "PARTY_STATUS_ACTIVE",
+  "createdAt": "2026-02-20T10:30:00Z"
+}
+```
+
+To suppress or rename unmapped response fields, add them to `fields`:
+
+```yaml
+  # Pass through with rename
+  - external_path: "id"
+    internal_path: "party_id"
+  - external_path: "status"
+    internal_path: "status"
+    transform:
+      enum_mapping:
+        values:
+          active: "PARTY_STATUS_ACTIVE"
+          suspended: "PARTY_STATUS_SUSPENDED"
+  - external_path: "created_date"
+    internal_path: "created_at"
+    transform:
+      date_format: "2006-01-02"
+```
+
 ### Example: Energy Retailer Market Data (Batch)
 
-**Request**: `POST /inbound/energy-metering-feed`
+**Request**: `POST /mapping/energy-metering-feed`
 
 **External JSON** (batch of readings):
 
@@ -455,26 +534,27 @@ validation_cel: "has(input.full_name) && size(input.full_name) > 0"
 
 ```yaml
 name: energy-metering-feed
-direction: INBOUND
 target_service: meridian.market_information.v1.MarketInformationService
 target_rpc: RecordObservationBatch
 is_batch: true
 batch_target_path: "observations"
 
-field_mappings:
-  - source_path: "meter_id"
-    target_path: "instrument_code"
+fields:
+  - external_path: "meter_id"
+    internal_path: "instrument_code"
 
-  - source_path: "reading"
-    target_path: "value"
+  - external_path: "reading"
+    internal_path: "value"
     transform:
-      cel_expression: "string(source)"
+      cel_transform:
+        inbound_cel: "string(source)"
+        outbound_cel: "double(source)"
 
-  - source_path: "timestamp"
-    target_path: "observed_at"
+  - external_path: "timestamp"
+    internal_path: "observed_at"
 
-  - source_path: "quality"
-    target_path: "quality_level"
+  - external_path: "quality"
+    internal_path: "quality_level"
     transform:
       enum_mapping:
         values:
@@ -482,20 +562,20 @@ field_mappings:
           actual: "QUALITY_LEVEL_ACTUAL"
           verified: "QUALITY_LEVEL_VERIFIED"
 
-  - source_path: "tenor"
-    target_path: "attributes"
+  - external_path: "tenor"
+    internal_path: "attributes"
     transform:
       attribute_flatten:
         source_keys: ["tenor", "settlement"]
         target_field: "attributes"
 
-computed_fields:
+inbound_computed_fields:
   - target_path: "resolution_key_value"
     cel_expression: >
       mapped.attributes.tenor + ':' + mapped.attributes.settlement
 ```
 
-**Output** (wrapped batch forwarded to Vanguard):
+**Inbound output** (wrapped batch forwarded to Vanguard):
 
 ```json
 {
@@ -528,7 +608,7 @@ computed_fields:
 
 ### Example: Carbon Registry Asset Class
 
-**Request**: `POST /inbound/verra-carbon-credit`
+**Request**: `POST /mapping/verra-carbon-credit`
 
 **External JSON**:
 
@@ -548,43 +628,46 @@ computed_fields:
 
 ```yaml
 name: verra-carbon-credit
-direction: INBOUND
 target_service: meridian.reference_data.v1.ReferenceDataService
 target_rpc: RegisterInstrument
 
-field_mappings:
-  - source_path: "asset_type"
-    target_path: "instrument_code"
+fields:
+  - external_path: "asset_type"
+    internal_path: "instrument_code"
 
-  - source_path: "unit"
-    target_path: "unit_of_measure"
+  - external_path: "unit"
+    internal_path: "unit_of_measure"
 
-  - source_path: "precision"
-    target_path: "decimal_precision"
+  - external_path: "precision"
+    internal_path: "decimal_precision"
     transform:
-      cel_expression: "int(source)"
+      cel_transform:
+        inbound_cel: "int(source)"
+        outbound_cel: "int(source)"
 
-  - source_path: "registry"
-    target_path: "attributes"
+  - external_path: "registry"
+    internal_path: "attributes"
     transform:
       attribute_flatten:
         source_keys: ["registry", "vintage_year", "methodology"]
         target_field: "attributes"
 
-  - source_path: "min_amount"
-    target_path: "minimum_amount"
+  - external_path: "min_amount"
+    internal_path: "minimum_amount"
     transform:
-      cel_expression: "string(source)"
+      cel_transform:
+        inbound_cel: "string(source)"
+        outbound_cel: "double(source)"
 
-computed_fields:
+inbound_computed_fields:
   - target_path: "dimension"
     cel_expression: "'DIMENSION_CARBON'"
 
-validation_cel: >
+inbound_validation_cel: >
   has(input.registry) && has(input.unit) && input.min_amount > 0
 ```
 
-**Output** (proto-conformant JSON forwarded to Vanguard):
+**Inbound output** (proto-conformant JSON forwarded to Vanguard):
 
 ```json
 {
@@ -606,154 +689,14 @@ validation_cel: >
 | Item | Points |
 |------|--------|
 | MappingDefinition proto + CRUD service | 5 |
-| Mapping engine core (path extraction, CEL, flattening) | 8 |
-| Gateway `/inbound/` routing handler | 3 |
-| DryRunMapping RPC + transformation trace | 3 |
+| Bidirectional engine core (path extraction, CEL, flattening) | 8 |
+| Outbound reverse engine (auto-invert transforms) | 3 |
+| Gateway `/mapping/` routing + response interception | 4 |
+| DryRunMapping RPC (inbound + outbound) + trace | 3 |
 | Batch support (`is_batch` + `batch_target_path`) | 2 |
-| Reference mappings (Party, Market Data, Reference Data) | 5 |
-| **Total** | **26** |
-
----
-
-## Phase 3: Outbound Mapping
-
-### Core Concept
-
-An **Outbound Mapping** transforms Meridian's internal proto-JSON
-responses back into partner-specific formats. This is the reverse of
-Phase 2 — same engine, opposite direction.
-
-### Routing and Version Selection
-
-Outbound mappings are activated by the **same ingress path**:
-
-```text
-POST /inbound/{mapping_name}
-```
-
-Outbound mappings are linked to inbound mappings via
-`outbound_mapping_id`:
-
-```protobuf
-message MappingDefinition {
-  // ... existing fields ...
-  string outbound_mapping_id = 17; // Paired outbound mapping
-}
-```
-
-**Version selection rules:**
-
-1. When resolving the inbound mapping, the gateway also resolves its
-   paired outbound mapping via `outbound_mapping_id`
-2. If the inbound mapping has no `outbound_mapping_id`, the gateway
-   looks up the latest ACTIVE outbound `MappingDefinition` with the
-   same `name` and `direction = OUTBOUND`
-3. If no ACTIVE outbound mapping exists, the gateway returns
-   Vanguard's raw proto-JSON response unchanged (no transformation)
-   and logs a debug-level missing-outbound notice
-4. The resolved outbound mapping version is included in the
-   `X-Outbound-Mapping-Version` response header for traceability
-
-### Architecture
-
-```text
-POST /inbound/{mapping_name}
-  |
-  v
-Gateway --> Inbound Engine --> Proto JSON --> Vanguard --> gRPC Service
-                                                |
-                                           Proto JSON Response
-                                                |
-                                                v
-                               Outbound Engine --> Partner JSON Response
-                                    |
-                          OutboundMappingDefinition
-```
-
-### Data Model
-
-Outbound mappings reuse the same `MappingDefinition` proto with
-`direction = OUTBOUND`. The field semantics reverse:
-
-- `source_path` refers to proto response fields (gjson on proto-JSON)
-- `target_path` refers to the partner's expected output structure
-- `computed_fields` derive values from the response
-- `validation_cel` validates the output before returning
-
-### Example: Bank Party Response
-
-**Internal proto-JSON** (from Vanguard):
-
-```json
-{
-  "partyId": "p-123",
-  "partyType": "PARTY_TYPE_PERSON",
-  "legalName": "Alice Smith",
-  "displayName": "Alice",
-  "status": "PARTY_STATUS_ACTIVE",
-  "createdAt": "2026-02-20T10:30:00Z"
-}
-```
-
-**Outbound Mapping** (`bank-x-party-response`):
-
-```yaml
-name: bank-x-party-response
-direction: OUTBOUND
-target_service: meridian.party.v1.PartyService
-target_rpc: RegisterParty
-
-field_mappings:
-  - source_path: "partyId"
-    target_path: "id"
-
-  - source_path: "partyType"
-    target_path: "type"
-    transform:
-      enum_mapping:
-        values:
-          PARTY_TYPE_PERSON: "individual"
-          PARTY_TYPE_ORGANIZATION: "corporate"
-
-  - source_path: "legalName"
-    target_path: "full_name"
-
-  - source_path: "status"
-    target_path: "status"
-    transform:
-      enum_mapping:
-        values:
-          PARTY_STATUS_ACTIVE: "active"
-          PARTY_STATUS_SUSPENDED: "suspended"
-
-  - source_path: "createdAt"
-    target_path: "created_date"
-    transform:
-      date_format: "2006-01-02"
-```
-
-**Partner receives**:
-
-```json
-{
-  "id": "p-123",
-  "type": "individual",
-  "full_name": "Alice Smith",
-  "status": "active",
-  "created_date": "2026-02-20"
-}
-```
-
-### Phase 3 Scope
-
-| Item | Points |
-|------|--------|
-| Outbound engine (reverse field mapping) | 5 |
-| Gateway response interception middleware | 3 |
-| Inbound/outbound pairing logic | 2 |
-| DryRunMapping extension for outbound | 2 |
-| Reference outbound mappings + tests | 3 |
-| **Total** | **15** |
+| Manifest integration (differ, planner, validator) | 3 |
+| Reference mappings (Party, Market Data, Ref Data) | 5 |
+| **Total** | **33** |
 
 ---
 
@@ -777,8 +720,8 @@ All mapping definitions must be **safe by construction**:
 5. **Immutable versions** — once active, a mapping version is frozen.
    Changes create new versions.
 6. **Recursion guard** — a mapping cannot target an RPC that triggers
-   another mapping. The `/inbound/` routing strategy prevents this
-   naturally since Vanguard forwards to gRPC, not back to `/inbound/`.
+   another mapping. The `/mapping/` routing strategy prevents this
+   naturally since Vanguard forwards to gRPC, not back to `/mapping/`.
 7. **Service validation** — at registration, `target_service` is
    validated against the proto descriptor set (compiled into the
    gateway) to ensure it refers to a known gRPC service.
@@ -792,8 +735,8 @@ All mapping definitions must be **safe by construction**:
 3. **< 5ms overhead** for complex mappings with CEL evaluation
 4. **Zero overhead** when no mapping defined — passthrough to Vanguard
    unchanged
-5. **Lazy JSON path extraction** — use `tidwall/gjson` for source_path
-   extraction to avoid full unmarshaling where possible
+5. **Lazy JSON path extraction** — use `tidwall/gjson` for
+   external_path/internal_path extraction to avoid full unmarshaling
 
 ### Consistency
 
@@ -817,8 +760,8 @@ When a mapping fails, the external partner receives a structured error:
   "trace_id": "abc-123",
   "details": {
     "field": "govt_id_type",
-    "source_path": "govt_id_type",
-    "target_path": "reference.issuing_authority",
+    "external_path": "govt_id_type",
+    "internal_path": "reference.issuing_authority",
     "transform": "enum_mapping",
     "error": "No mapping for value 'passport_number' and no fallback"
   }
@@ -848,32 +791,31 @@ payload format without sending live requests.
 1. (Phase 1) Party supports `repeated AttributeEntry` with JSON Schema
    validation and CEL expressions, consistent with Reference Data and
    Market Data
-2. (Phase 2) An external system can `POST /inbound/{mapping_name}`
+2. (Phase 2) An external system can `POST /mapping/{mapping_name}`
    with JSON in its own format and have it correctly mapped to a
    Meridian RPC
-3. (Phase 2) A tenant can register a mapping definition via API and
+3. (Phase 2) The same mapping definition auto-reverses responses back
+   to the partner's JSON format (bidirectional)
+4. (Phase 2) A tenant can register a mapping definition via API and
    see it take effect immediately
-4. (Phase 2) Mapping validation rejects invalid definitions at
+5. (Phase 2) Mapping validation rejects invalid definitions at
    registration time (not at request time)
-5. (Phase 2) Schema discovery API returns the expected input JSON shape
-6. (Phase 2) DryRunMapping shows transformed output or detailed errors
-7. (Phase 2) Batch array inputs are correctly wrapped and forwarded
-8. (Phase 2) Error responses include field path, transform type, error
+6. (Phase 2) Schema discovery API returns the expected external JSON
+   shape
+7. (Phase 2) DryRunMapping shows transformed output (both directions)
+   or detailed errors
+8. (Phase 2) Batch array inputs are correctly wrapped and forwarded
+9. (Phase 2) Error responses include field path, transform type, error
    message, and trace ID
-9. (Phase 2) Performance overhead < 5ms p99 for complex mappings
-10. (Phase 3) Outbound mappings transform proto-JSON responses back to
-    partner-specific formats
-11. (Phase 3) Inbound/outbound mapping pairs work end-to-end on a
-    single `/inbound/` request
+10. (Phase 2) Performance overhead < 5ms p99 for complex mappings
 
 ## Complexity Estimate
 
 | Phase | Points | Description |
 |-------|--------|-------------|
-| Phase 1 | 13 | Unified property model (Party consistency) |
-| Phase 2 | 26 | Inbound mapping (engine, gateway, DryRun, batch) |
-| Phase 3 | 15 | Outbound mapping (reverse engine, response middleware) |
-| **Total** | **54** | |
+| Phase 1 | 16 | Unified property model + manifest integration |
+| Phase 2 | 33 | Bidirectional mapping + manifest integration |
+| **Total** | **49** | |
 
 ### Phase 2 Build Order
 
@@ -885,16 +827,17 @@ it's a simple RPC with no routing or Vanguard integration.
 Recommended sequence:
 
 1. Proto + CRUD (foundation)
-2. Mapping engine core (pure transform logic, no HTTP)
-3. DryRunMapping RPC (engine + RPC wrapper, full unit test coverage)
-4. Gateway `/inbound/` middleware (engine + HTTP routing + Vanguard)
-5. Reference mappings + integration tests
+2. Mapping engine core — inbound transforms (pure logic, no HTTP)
+3. Reverse engine — outbound auto-inversion of transforms
+4. DryRunMapping RPC (engine + RPC, inbound + outbound, unit tests)
+5. Gateway `/mapping/` middleware (routing + response interception)
+6. Reference mappings + integration tests
 
 ### Phase Dependencies
 
 ```text
 Phase 1 ──┐
-           ├──> Phase 2 ──> Phase 3
+           ├──> Phase 2
            │
 (Phase 1 is recommended before Phase 2 for full consistency,
  but Phase 2 can start in parallel if Party attributes are
@@ -905,9 +848,9 @@ Phase 1 ──┐
 
 ### Dependencies
 
-- **`tidwall/gjson`**: Add to `go.mod` for `source_path` extraction.
-  Not currently in the module. gjson syntax uses dot notation without
-  `$` prefix (e.g., `govt_id` not `$.govt_id`).
+- **`tidwall/gjson`**: Add to `go.mod` for path extraction. Not
+  currently in the module. gjson syntax uses dot notation without `$`
+  prefix (e.g., `govt_id` not `$.govt_id`).
 - **`hashicorp/golang-lru/v2`**: Already in `go.mod` (v2.0.7). Use
   for compiled mapping cache in the gateway middleware.
 
@@ -934,6 +877,95 @@ The gateway must cache compiled mapping definitions.
   CEL compiler from `services/reference-data/cel/` to
   `shared/pkg/cel/` so both Party and the mapping engine can use it
   without importing the reference-data service.
+
+## Manifest Integration
+
+The tenant manifest
+(`api/proto/meridian/control_plane/v1/manifest.proto`) is the atomic
+configuration snapshot for a Meridian tenant. It currently declares
+instruments, account types, valuation rules, sagas, payment rails,
+and seed data. Both phases of this PRD require manifest extensions.
+
+### Phase 1: Add `party_types` to Manifest
+
+```protobuf
+message Manifest {
+  // ... existing fields ...
+  repeated PartyTypeDefinition party_types = 9;
+}
+```
+
+This lets tenants declare party type schemas, validation rules, and
+eligibility checks alongside their other business model definitions.
+The control-plane differ and planner must be extended to handle
+`party_types` — diff changes, plan additions/removals, and apply
+them via the Party service CRUD RPCs.
+
+### Phase 2: Add `mappings` to Manifest
+
+```protobuf
+message Manifest {
+  // ... existing fields ...
+  repeated MappingDefinition mappings = 10;
+}
+```
+
+This lets tenants declare their bidirectional mapping definitions
+as part of the manifest. The control-plane must diff mapping changes
+and apply them via the Reference Data mapping CRUD RPCs.
+
+### Files Requiring Updates
+
+| File | Change |
+|------|--------|
+| `api/proto/meridian/control_plane/v1/manifest.proto` | Add fields |
+| `api/jsonschema/manifest.v1.schema.json` | Regenerate |
+| `api/proto/meridian/control_plane/v1/examples/*.manifest.json` | Add examples |
+| `services/control-plane/internal/differ/` | Diff party_types + mappings |
+| `services/control-plane/internal/planner/` | Plan apply operations |
+| `services/control-plane/internal/validator/` | Validate references |
+| `scripts/validate-manifest-jsonschema.sh` | No change (auto) |
+
+### Example: Energy Trading Manifest with Mappings
+
+```json
+{
+  "version": "1.0",
+  "metadata": {
+    "name": "Nordic Energy Trading",
+    "industry": "energy"
+  },
+  "instruments": [ ... ],
+  "accountTypes": [ ... ],
+  "mappings": [
+    {
+      "name": "energy-metering-feed",
+      "targetService": "meridian.market_information.v1.MarketInformationService",
+      "targetRpc": "RecordObservationBatch",
+      "isBatch": true,
+      "batchTargetPath": "observations",
+      "fields": [
+        {
+          "externalPath": "meter_id",
+          "internalPath": "instrument_code"
+        },
+        {
+          "externalPath": "quality",
+          "internalPath": "quality_level",
+          "transform": {
+            "enumMapping": {
+              "values": {
+                "estimated": "QUALITY_LEVEL_ESTIMATE",
+                "actual": "QUALITY_LEVEL_ACTUAL"
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
+```
 
 ## Open Questions
 
