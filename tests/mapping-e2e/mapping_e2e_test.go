@@ -887,25 +887,32 @@ func TestMappingE2E_TenantIsolation_TransformedFieldsNotContaminated(t *testing.
 		},
 	}
 
-	echoA := &echoHandler{}
-	echoB := &echoHandler{}
+	// Use a single long-lived pipeline to verify that shared handler state does
+	// not contaminate sequential requests from different tenants.
+	sharedEcho := &echoHandler{}
+	pipeline := newPipeline(t, resolver, sharedEcho)
 
 	payloadA := []byte(`{"org_name":"ACME Corp","tenant_ref":"TENANT-A-REF"}`)
 	payloadB := []byte(`{"org_name":"Beta Ltd","tenant_ref":"TENANT-B-REF"}`)
 
 	reqA := newRequest(t, "/mapping/shared-mapping", payloadA, "tenant_a")
 	rrA := httptest.NewRecorder()
-	newPipeline(t, resolver, echoA).ServeHTTP(rrA, reqA)
+	pipeline.ServeHTTP(rrA, reqA)
 	require.Equal(t, http.StatusOK, rrA.Code)
+	// Capture inbound-transformed body echoed back in the response before the
+	// second request overwrites sharedEcho.received.
+	receivedA := make([]byte, len(sharedEcho.received))
+	copy(receivedA, sharedEcho.received)
 
 	reqB := newRequest(t, "/mapping/shared-mapping", payloadB, "tenant_b")
 	rrB := httptest.NewRecorder()
-	newPipeline(t, resolver, echoB).ServeHTTP(rrB, reqB)
+	pipeline.ServeHTTP(rrB, reqB)
 	require.Equal(t, http.StatusOK, rrB.Code)
+	receivedB := sharedEcho.received
 
 	var forwardedA, forwardedB map[string]any
-	require.NoError(t, json.Unmarshal(echoA.received, &forwardedA))
-	require.NoError(t, json.Unmarshal(echoB.received, &forwardedB))
+	require.NoError(t, json.Unmarshal(receivedA, &forwardedA))
+	require.NoError(t, json.Unmarshal(receivedB, &forwardedB))
 
 	assert.Equal(t, "ACME Corp", forwardedA["legal_name"],
 		"tenant A payload must not contain tenant B data")
