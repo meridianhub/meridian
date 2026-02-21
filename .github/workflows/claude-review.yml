@@ -109,11 +109,6 @@ jobs:
             gh api repos/${{ github.repository }}/contents/{filepath}?ref=${{ github.event.pull_request.head.sha }} --jq '.content' | base64 -d
             ```
 
-            If the contents API returns 403/404 (file >1MB), use the blob API instead:
-            ```bash
-            gh api repos/${{ github.repository }}/git/blobs/{blob_sha} --jq '.content' | base64 -d
-            ```
-
             If the file imports a Meridian package central to the change, read that package's types/interface file too. If the file is a test, read the file being tested. Spend more time reading than commenting.
 
             ## Proportional Response
@@ -254,24 +249,17 @@ jobs:
             **Test Coverage Review:**
             For each changed function, check whether the test file is in the diff. If it is, review whether the test actually verifies the behavior. If not, check if a `*_test.go` file exists for the package, then note: "No test changes for [function] - verify existing tests cover the new behavior" or "No test file found for [file]." Focus on domain edge cases, not generic coverage.
 
-            **Questions for the Author (Nemawashi):**
-            Only include questions when you have genuine uncertainty about
-            the change. A clean config tweak or straightforward bug fix
-            needs zero questions. Do not manufacture questions to fill a
-            section.
+            **Questions for the Author:**
+            End your review with 2-5 specific questions about the change. Frame as genuine questions the diff alone does not answer:
+            - "What happens to in-flight sagas if this migration runs while the service is processing?"
+            - "The test covers the happy path. How does this behave when the upstream service returns a partial response?"
+            - "This changes the tenant scoping query. Have you verified this against multi-tenant integration tests?"
+            - "Is the compensation logic correct if step 3 fails after step 2 commits?"
 
-            When questions ARE warranted, each MUST reference a specific
-            file and line number from the diff. Surface unstated assumptions
-            and the gap between intent and reality:
-
-            - **Invariant surfacing**: "`registry.go:47` assumes Balance is non-negative. What enforces that upstream?"
-            - **Interest behind position**: "Why synchronous at `handler.go:82` rather than async?"
-            - **What if we skip this**: "Without `003_add_index.sql`, does `repository.go:145` degrade or fail?"
-            - **Elimination over addition**: "Could `processor.go:60-80` use existing `shared/pkg/valuation`?"
-            - **Failure modes**: "The test at `_test.go:92` covers happy path. What happens with partial data?"
-
-            If you can't anchor a question to a specific line, omit the
-            section entirely rather than ask generic questions.
+            For PRDs and architecture docs, also ask:
+            - What edge cases are missing from the spec?
+            - What will break at scale that isn't addressed?
+            - What cross-system dependencies are implied but not stated?
 
             ## Priority Signals
 
@@ -336,8 +324,9 @@ jobs:
             | 🔴 | `file.go:42` | Description | Open |
             | 🟡 | `file.go:88` | Description | Open |
 
-            ### Questions for the Author (omit if none)
-            1. `file.go:47` - [Question anchored to specific code]
+            ### Questions for the Author
+            1. [Specific question about design/edge case/untested scenario]
+            2. [Another question the diff alone does not answer]
 
             ### Previously Flagged
             | Severity | Location | Description | Status |
@@ -556,8 +545,8 @@ jobs:
 
             Also reference: CONTRIBUTING.md, service README files
 
-          # Using Opus 4.6 for highest quality code reviews
-          claude_args: '--model claude-opus-4-6 --allowed-tools "Bash(gh api:*),Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr checks:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"'
+          # Using Opus 4.5 for higher quality code reviews
+          claude_args: '--model claude-opus-4-5-20251101 --allowed-tools "Bash(gh api:*),Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr checks:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"'
 
       - name: Report Final Status
         if: always()
