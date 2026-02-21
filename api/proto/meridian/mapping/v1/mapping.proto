@@ -527,7 +527,7 @@ message DryRunMappingRequest {
 // DryRunMappingResponse is the response from a dry-run mapping execution.
 message DryRunMappingResponse {
   // transformed_json is the output JSON after applying the mapping.
-  // Empty when validation fails before transformation can complete.
+  // Empty when validation fails or a transform error occurs.
   string transformed_json = 1;
 
   // idempotency_key is the derived idempotency key (inbound direction only).
@@ -535,6 +535,8 @@ message DryRunMappingResponse {
   string idempotency_key = 2;
 
   // validation_result reports whether validation passed and any error messages.
+  // ValidationResult.passed reflects only CEL validation; check transform_error
+  // for failures that occur after validation succeeds.
   DryRunValidationResult validation_result = 3;
 
   // execution_time_ms is the wall-clock time in milliseconds taken to execute the transform.
@@ -542,4 +544,9 @@ message DryRunMappingResponse {
 
   // field_mapping_trace contains a detailed log of each field transformation applied.
   repeated FieldMappingTrace field_mapping_trace = 5;
+
+  // transform_error contains an error message when the transform failed after validation
+  // succeeded (e.g. idempotency key extraction failure, field extraction error).
+  // Empty when the transform completed successfully.
+  string transform_error = 6;
 }

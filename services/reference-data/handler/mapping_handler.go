@@ -211,6 +211,7 @@ func (s *MappingService) DryRunMapping(ctx context.Context, req *pb.DryRunMappin
 		ValidationResult:  dryRunValidationToProto(dryResult),
 		ExecutionTimeMs:   dryResult.ExecutionTimeMs,
 		FieldMappingTrace: fieldTracesToProto(dryResult.FieldTraces),
+		TransformError:    dryResult.TransformError,
 	}, nil
 }
 

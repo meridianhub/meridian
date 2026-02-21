@@ -20,13 +20,15 @@ type FieldTrace struct {
 
 // DryRunResult holds all output from a dry-run execution.
 // ValidationPassed reflects only whether the CEL validation expression passed.
-// If validation passes but a transform error occurs, ValidationPassed remains true
-// and TransformedJSON is empty; field-level errors appear in FieldTraces.
+// If validation passes but a transform error occurs, ValidationPassed remains true,
+// TransformError holds the error message, and TransformedJSON is empty.
+// Field-level errors appear in FieldTraces for per-field diagnostics.
 type DryRunResult struct {
 	TransformedJSON  string
 	IdempotencyKey   string
 	ValidationPassed bool
 	ValidationErrors []string
+	TransformError   string
 	ExecutionTimeMs  int64
 	FieldTraces      []FieldTrace
 }
@@ -50,9 +52,11 @@ func (e *Engine) DryRunInbound(def *mappingv1.MappingDefinition, sampleJSON []by
 	result.FieldTraces = e.traceInboundFields(def.GetFields(), sampleJSON)
 
 	// Run the actual transform. If it fails, ValidationPassed stays true (validation did pass);
-	// TransformedJSON stays empty and the field trace shows where the failure occurred.
+	// TransformError captures the failure and TransformedJSON stays empty.
 	inbound, err := e.TransformInbound(def, sampleJSON)
-	if err == nil {
+	if err != nil {
+		result.TransformError = err.Error()
+	} else {
 		result.TransformedJSON = string(inbound.ProtoJSON)
 		result.IdempotencyKey = inbound.IdempotencyKey
 	}
@@ -79,9 +83,11 @@ func (e *Engine) DryRunOutbound(def *mappingv1.MappingDefinition, sampleJSON []b
 	result.FieldTraces = e.traceOutboundFields(def.GetFields(), sampleJSON)
 
 	// Run the actual transform. If it fails, ValidationPassed stays true (validation did pass);
-	// TransformedJSON stays empty and the field trace shows where the failure occurred.
+	// TransformError captures the failure and TransformedJSON stays empty.
 	outJSON, err := e.TransformOutbound(def, sampleJSON)
-	if err == nil {
+	if err != nil {
+		result.TransformError = err.Error()
+	} else {
 		result.TransformedJSON = string(outJSON)
 	}
 
