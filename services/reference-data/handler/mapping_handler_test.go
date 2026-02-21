@@ -56,7 +56,21 @@ func (r *stubMappingRepo) GetByID(_ context.Context, id uuid.UUID) (*mapping.Def
 	return def, nil
 }
 
-func (r *stubMappingRepo) GetLatestActive(_ context.Context, _ string) (*mapping.Definition, error) {
+func (r *stubMappingRepo) GetLatestActive(_ context.Context, name string) (*mapping.Definition, error) {
+	for _, d := range r.defs {
+		if d.Name == name && d.Status == mapping.StatusActive {
+			return d, nil
+		}
+	}
+	return nil, mapping.ErrNotFound
+}
+
+func (r *stubMappingRepo) GetByNameAndVersion(_ context.Context, name string, version int) (*mapping.Definition, error) {
+	for _, d := range r.defs {
+		if d.Name == name && d.Version == version {
+			return d, nil
+		}
+	}
 	return nil, mapping.ErrNotFound
 }
 
@@ -287,4 +301,235 @@ func TestMappingService_DeleteMapping_Active_Fails(t *testing.T) {
 func TestMappingService_NewMappingService_NilRepo(t *testing.T) {
 	_, err := handlerpkg.NewMappingService(nil, nil, nil)
 	require.Error(t, err)
+}
+
+// --- DryRunMapping tests ---
+
+// activeMappingWithFields creates a mapping definition in ACTIVE status with the given fields.
+func activeMappingWithFields(t *testing.T, repo *stubMappingRepo, name string, fields []*pb.FieldCorrespondence) string {
+	t.Helper()
+	ctx := tenantCtx()
+
+	pbFields := make([]*pb.FieldCorrespondence, len(fields))
+	copy(pbFields, fields)
+
+	svc, err := handlerpkg.NewMappingService(repo, nil, nil)
+	require.NoError(t, err)
+
+	createResp, err := svc.CreateMapping(ctx, &pb.CreateMappingRequest{
+		Name:          name,
+		TargetService: "svc",
+		TargetRpc:     "Rpc",
+		Version:       1,
+		Fields:        pbFields,
+	})
+	require.NoError(t, err)
+
+	id, _ := uuid.Parse(createResp.GetMapping().GetId())
+	require.NoError(t, repo.UpdateStatus(ctx, id, mapping.StatusActive))
+
+	return createResp.GetMapping().GetId()
+}
+
+func TestMappingService_DryRunMapping_Inbound_Success(t *testing.T) {
+	repo := newStubRepo()
+	activeMappingWithFields(t, repo, "test-mapping", []*pb.FieldCorrespondence{
+		{ExternalPath: "customer_name", InternalPath: "name"},
+		{ExternalPath: "customer_email", InternalPath: "email"},
+	})
+
+	svc := newMappingService(t, repo)
+
+	resp, err := svc.DryRunMapping(tenantCtx(), &pb.DryRunMappingRequest{
+		MappingName: "test-mapping",
+		Direction:   "inbound",
+		SampleJson:  `{"customer_name":"Alice","customer_email":"alice@example.com"}`,
+	})
+	require.NoError(t, err)
+	assert.True(t, resp.GetValidationResult().GetPassed())
+	assert.NotEmpty(t, resp.GetTransformedJson())
+	assert.GreaterOrEqual(t, resp.GetExecutionTimeMs(), int64(0))
+	assert.Len(t, resp.GetFieldMappingTrace(), 2)
+
+	// Verify trace content
+	trace0 := resp.GetFieldMappingTrace()[0]
+	assert.Equal(t, "customer_name", trace0.GetSourcePath())
+	assert.Equal(t, "name", trace0.GetTargetPath())
+	assert.Equal(t, "none", trace0.GetTransformType())
+}
+
+func TestMappingService_DryRunMapping_Outbound_Success(t *testing.T) {
+	repo := newStubRepo()
+	activeMappingWithFields(t, repo, "outbound-mapping", []*pb.FieldCorrespondence{
+		{ExternalPath: "customer_name", InternalPath: "name"},
+	})
+
+	svc := newMappingService(t, repo)
+
+	resp, err := svc.DryRunMapping(tenantCtx(), &pb.DryRunMappingRequest{
+		MappingName: "outbound-mapping",
+		Direction:   "outbound",
+		SampleJson:  `{"name":"Bob"}`,
+	})
+	require.NoError(t, err)
+	assert.True(t, resp.GetValidationResult().GetPassed())
+	assert.NotEmpty(t, resp.GetTransformedJson())
+	assert.Len(t, resp.GetFieldMappingTrace(), 1)
+
+	trace0 := resp.GetFieldMappingTrace()[0]
+	assert.Equal(t, "name", trace0.GetSourcePath())
+	assert.Equal(t, "customer_name", trace0.GetTargetPath())
+}
+
+func TestMappingService_DryRunMapping_MappingNotFound(t *testing.T) {
+	repo := newStubRepo()
+	svc := newMappingService(t, repo)
+
+	_, err := svc.DryRunMapping(tenantCtx(), &pb.DryRunMappingRequest{
+		MappingName: "nonexistent",
+		Direction:   "inbound",
+		SampleJson:  `{}`,
+	})
+	require.Error(t, err)
+	assert.Equal(t, codes.NotFound, status.Code(err))
+}
+
+func TestMappingService_DryRunMapping_ValidationFailure(t *testing.T) {
+	repo := newStubRepo()
+	ctx := tenantCtx()
+
+	svc, err := handlerpkg.NewMappingService(repo, nil, nil)
+	require.NoError(t, err)
+
+	createResp, err := svc.CreateMapping(ctx, &pb.CreateMappingRequest{
+		Name:                 "validated-mapping",
+		TargetService:        "svc",
+		TargetRpc:            "Rpc",
+		Version:              1,
+		InboundValidationCel: "has(payload.required_field)",
+	})
+	require.NoError(t, err)
+
+	id, _ := uuid.Parse(createResp.GetMapping().GetId())
+	require.NoError(t, repo.UpdateStatus(ctx, id, mapping.StatusActive))
+
+	resp, err := svc.DryRunMapping(ctx, &pb.DryRunMappingRequest{
+		MappingName: "validated-mapping",
+		Direction:   "inbound",
+		SampleJson:  `{"other_field":"value"}`,
+	})
+	require.NoError(t, err)
+	assert.False(t, resp.GetValidationResult().GetPassed())
+	assert.NotEmpty(t, resp.GetValidationResult().GetErrors())
+}
+
+func TestMappingService_DryRunMapping_WithExplicitVersion(t *testing.T) {
+	repo := newStubRepo()
+	activeMappingWithFields(t, repo, "versioned-mapping", []*pb.FieldCorrespondence{
+		{ExternalPath: "foo", InternalPath: "bar"},
+	})
+
+	svc := newMappingService(t, repo)
+
+	resp, err := svc.DryRunMapping(tenantCtx(), &pb.DryRunMappingRequest{
+		MappingName:    "versioned-mapping",
+		MappingVersion: 1,
+		Direction:      "inbound",
+		SampleJson:     `{"foo":"baz"}`,
+	})
+	require.NoError(t, err)
+	assert.True(t, resp.GetValidationResult().GetPassed())
+}
+
+func TestMappingService_DryRunMapping_FieldTrace_CELTransform(t *testing.T) {
+	repo := newStubRepo()
+	ctx := tenantCtx()
+
+	svc, err := handlerpkg.NewMappingService(repo, nil, nil)
+	require.NoError(t, err)
+
+	createResp, err := svc.CreateMapping(ctx, &pb.CreateMappingRequest{
+		Name:          "cel-mapping",
+		TargetService: "svc",
+		TargetRpc:     "Rpc",
+		Version:       1,
+		Fields: []*pb.FieldCorrespondence{
+			{
+				ExternalPath: "status",
+				InternalPath: "status",
+				Transform: &pb.FieldTransform{
+					Transform: &pb.FieldTransform_Cel{
+						Cel: &pb.CelTransform{InboundCel: "value.lowerAscii()"},
+					},
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	id, _ := uuid.Parse(createResp.GetMapping().GetId())
+	require.NoError(t, repo.UpdateStatus(ctx, id, mapping.StatusActive))
+
+	resp, err := svc.DryRunMapping(ctx, &pb.DryRunMappingRequest{
+		MappingName: "cel-mapping",
+		Direction:   "inbound",
+		SampleJson:  `{"status":"ACTIVE"}`,
+	})
+	require.NoError(t, err)
+	assert.True(t, resp.GetValidationResult().GetPassed())
+
+	require.Len(t, resp.GetFieldMappingTrace(), 1)
+	trace := resp.GetFieldMappingTrace()[0]
+	assert.Equal(t, "cel", trace.GetTransformType())
+	assert.Equal(t, `"ACTIVE"`, trace.GetSourceValue())
+	assert.Equal(t, `"active"`, trace.GetTransformedValue())
+}
+
+func TestMappingService_DryRunMapping_IdempotencyKey_Inbound(t *testing.T) {
+	repo := newStubRepo()
+	ctx := tenantCtx()
+
+	svc, err := handlerpkg.NewMappingService(repo, nil, nil)
+	require.NoError(t, err)
+
+	createResp, err := svc.CreateMapping(ctx, &pb.CreateMappingRequest{
+		Name:          "idempotent-mapping",
+		TargetService: "svc",
+		TargetRpc:     "Rpc",
+		Version:       1,
+		Fields: []*pb.FieldCorrespondence{
+			{ExternalPath: "ref", InternalPath: "reference"},
+		},
+		Idempotency: &pb.IdempotencyConfig{
+			SourceSelector: "ref",
+		},
+	})
+	require.NoError(t, err)
+
+	id, _ := uuid.Parse(createResp.GetMapping().GetId())
+	require.NoError(t, repo.UpdateStatus(ctx, id, mapping.StatusActive))
+
+	resp, err := svc.DryRunMapping(ctx, &pb.DryRunMappingRequest{
+		MappingName: "idempotent-mapping",
+		Direction:   "inbound",
+		SampleJson:  `{"ref":"txn-001"}`,
+	})
+	require.NoError(t, err)
+	assert.True(t, resp.GetValidationResult().GetPassed())
+	assert.Equal(t, "txn-001", resp.GetIdempotencyKey())
+}
+
+func TestMappingService_DryRunMapping_InvalidDirection(t *testing.T) {
+	repo := newStubRepo()
+	activeMappingWithFields(t, repo, "dir-test", nil)
+
+	svc := newMappingService(t, repo)
+
+	_, err := svc.DryRunMapping(tenantCtx(), &pb.DryRunMappingRequest{
+		MappingName: "dir-test",
+		Direction:   "sideways",
+		SampleJson:  `{}`,
+	})
+	require.Error(t, err)
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
 }
