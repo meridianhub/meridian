@@ -1,0 +1,62 @@
+{
+  "name": "energy-metering-feed",
+  "target_service": "meridian.market_information.v1.MarketInformationService",
+  "target_rpc": "RecordObservationBatch",
+  "version": 1,
+  "external_schema": "{\"type\":\"array\",\"items\":{\"type\":\"object\",\"required\":[\"meter_id\",\"timestamp\",\"value_kwh\",\"quality\"],\"properties\":{\"meter_id\":{\"type\":\"string\"},\"timestamp\":{\"type\":\"string\",\"format\":\"date-time\"},\"value_kwh\":{\"type\":\"number\"},\"quality\":{\"type\":\"string\",\"enum\":[\"estimated\",\"coefficient\",\"actual\",\"revised\"]},\"tenor\":{\"type\":\"string\"},\"settlement_date\":{\"type\":\"string\",\"format\":\"date\"}}}}",
+  "inbound_validation_cel": "has(payload.meter_id) && has(payload.value_kwh) && double(payload.value_kwh) >= 0.0",
+  "is_batch": true,
+  "batch_target_path": "observations",
+  "fields": [
+    {
+      "external_path": "meter_id",
+      "internal_path": "source_id"
+    },
+    {
+      "external_path": "timestamp",
+      "internal_path": "observed_at",
+      "transform": {
+        "date_format": "2006-01-02T15:04:05Z07:00"
+      }
+    },
+    {
+      "external_path": "value_kwh",
+      "internal_path": "quantity"
+    },
+    {
+      "external_path": "quality",
+      "internal_path": "data_quality",
+      "transform": {
+        "enum_mapping": {
+          "values": {
+            "estimated": "DATA_QUALITY_ESTIMATE",
+            "coefficient": "DATA_QUALITY_COEFFICIENT",
+            "actual": "DATA_QUALITY_ACTUAL",
+            "revised": "DATA_QUALITY_REVISED"
+          },
+          "fallback": "DATA_QUALITY_ESTIMATE"
+        }
+      }
+    },
+    {
+      "external_path": "attributes",
+      "internal_path": "attributes",
+      "transform": {
+        "attribute_flatten": {
+          "source_keys": ["tenor", "settlement_date"],
+          "target_field": "attributes"
+        }
+      }
+    }
+  ],
+  "inbound_computed_fields": [
+    {
+      "target_path": "resolution_key_value",
+      "cel_expression": "input.meter_id + ':' + input.timestamp"
+    }
+  ],
+  "idempotency": {
+    "use_content_hash": true,
+    "content_hash_fields": ["meter_id", "timestamp"]
+  }
+}

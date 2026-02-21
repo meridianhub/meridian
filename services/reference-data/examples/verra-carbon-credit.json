@@ -1,0 +1,48 @@
+{
+  "name": "verra-carbon-credit",
+  "target_service": "meridian.reference_data.v1.ReferenceDataService",
+  "target_rpc": "RegisterInstrument",
+  "version": 1,
+  "external_schema": "{\"type\":\"object\",\"required\":[\"vcs_id\",\"project_name\",\"vintage_year\",\"methodology\",\"min_amount\"],\"properties\":{\"vcs_id\":{\"type\":\"string\"},\"project_name\":{\"type\":\"string\"},\"vintage_year\":{\"type\":\"integer\"},\"methodology\":{\"type\":\"string\"},\"registry\":{\"type\":\"string\"},\"min_amount\":{\"type\":\"number\"},\"validation_date\":{\"type\":\"string\",\"format\":\"date\"}}}",
+  "inbound_validation_cel": "has(payload.vcs_id) && has(payload.min_amount) && double(payload.min_amount) > 0.0",
+  "fields": [
+    {
+      "external_path": "vcs_id",
+      "internal_path": "code"
+    },
+    {
+      "external_path": "project_name",
+      "internal_path": "display_name"
+    },
+    {
+      "external_path": "validation_date",
+      "internal_path": "validation_date",
+      "transform": {
+        "date_format": "2006-01-02"
+      }
+    },
+    {
+      "external_path": "min_amount",
+      "internal_path": "min_amount"
+    },
+    {
+      "external_path": "attributes",
+      "internal_path": "attributes",
+      "transform": {
+        "attribute_flatten": {
+          "source_keys": ["registry", "vintage_year", "methodology"],
+          "target_field": "attributes"
+        }
+      }
+    }
+  ],
+  "inbound_computed_fields": [
+    {
+      "target_path": "dimension",
+      "cel_expression": "'Carbon'"
+    }
+  ],
+  "idempotency": {
+    "source_selector": "vcs_id"
+  }
+}
