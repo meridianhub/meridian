@@ -148,9 +148,9 @@ func (m *MappingMiddleware) handleMappingRequest(w http.ResponseWriter, r *http.
 	rec := newResponseRecorder()
 	defer rec.release()
 
-	start := time.Now()
+	downstreamStart := time.Now()
 	next.ServeHTTP(rec, r)
-	elapsed := time.Since(start)
+	downstreamElapsed := time.Since(downstreamStart)
 
 	// Pass non-2xx responses through untransformed.
 	if rec.code < 200 || rec.code >= 300 {
@@ -169,13 +169,16 @@ func (m *MappingMiddleware) handleMappingRequest(w http.ResponseWriter, r *http.
 	}
 
 	// Apply outbound transformation to the proto-JSON response body.
+	transformStart := time.Now()
 	transformed, err := m.engine.TransformOutbound(mappingDef, responseBody)
+	transformElapsed := time.Since(transformStart)
 	if err != nil {
 		m.logger.Error("outbound transformation failed",
 			"name", name,
 			"tenant_id", tenantID,
 			"mapping_version", mappingDef.GetVersion(),
-			"elapsed", elapsed,
+			"downstream_elapsed", downstreamElapsed,
+			"transform_elapsed", transformElapsed,
 			"error", err)
 		writeJSONError(w, http.StatusInternalServerError, "INTERNAL", "outbound transformation failed")
 		return err
@@ -184,7 +187,8 @@ func (m *MappingMiddleware) handleMappingRequest(w http.ResponseWriter, r *http.
 	m.logger.Debug("outbound transformation applied",
 		"name", name,
 		"tenant_id", tenantID,
-		"elapsed", elapsed,
+		"downstream_elapsed", downstreamElapsed,
+		"transform_elapsed", transformElapsed,
 		"input_bytes", rec.buf.Len(),
 		"output_bytes", len(transformed))
 
