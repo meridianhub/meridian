@@ -288,11 +288,12 @@ func domainAttributesToProto(attrs []domain.AttributeEntry) []*quantityv1.Attrib
 }
 
 // protoAttributesToDomain converts proto AttributeEntry slice to domain AttributeEntry slice.
+// Nil proto entries are skipped.
 func protoAttributesToDomain(attrs []*quantityv1.AttributeEntry) []domain.AttributeEntry {
-	result := make([]domain.AttributeEntry, len(attrs))
-	for i, a := range attrs {
+	result := make([]domain.AttributeEntry, 0, len(attrs))
+	for _, a := range attrs {
 		if a != nil {
-			result[i] = domain.AttributeEntry{Key: a.Key, Value: a.Value}
+			result = append(result, domain.AttributeEntry{Key: a.Key, Value: a.Value})
 		}
 	}
 	return result
