@@ -52,6 +52,9 @@ var (
 
 	// ErrEligibilityNotBool is returned when an eligibility expression does not return a boolean.
 	ErrEligibilityNotBool = errors.New("eligibility expression did not return boolean")
+
+	// ErrBucketKeyNotString is returned when a bucket key expression does not return a string.
+	ErrBucketKeyNotString = errors.New("bucket key expression must return string")
 )
 
 // Compiler provides CEL expression compilation with security constraints.
@@ -161,6 +164,10 @@ func (c *Compiler) CompileBucketKey(expression string) (cel.Program, error) {
 	ast, issues := c.bucketKeyEnv.Compile(expression)
 	if issues != nil && issues.Err() != nil {
 		return nil, errors.Join(ErrCompilation, issues.Err())
+	}
+
+	if ast.OutputType() != cel.StringType {
+		return nil, errors.Join(ErrCompilation, ErrBucketKeyNotString)
 	}
 
 	prg, err := c.bucketKeyEnv.Program(ast, cel.CostLimit(CostLimit))
