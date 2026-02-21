@@ -108,6 +108,12 @@ func (s *PartyTypeDefinitionService) Register(ctx context.Context, input Registe
 	return entity, nil
 }
 
+// CELCompiler returns the CEL compiler used by this service.
+// Allows sharing the compiler with other components such as AttributeValidator.
+func (s *PartyTypeDefinitionService) CELCompiler() *sharedcel.Compiler {
+	return s.celCompiler
+}
+
 // GetByID retrieves a party type definition by ID.
 func (s *PartyTypeDefinitionService) GetByID(ctx context.Context, id uuid.UUID) (*persistence.PartyTypeDefinitionEntity, error) {
 	return s.repo.GetByID(ctx, id)
