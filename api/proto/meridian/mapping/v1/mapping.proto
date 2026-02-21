@@ -36,7 +36,7 @@ message CelTransform {
 message EnumMapping {
   // values maps external enum string values to internal enum string values.
   // Example: {"ACTIVE": "STATUS_ACTIVE", "INACTIVE": "STATUS_INACTIVE"}
-  map<string, string> values = 1;
+  map<string, string> values = 1 [(buf.validate.field).map.max_pairs = 256];
 
   // fallback is the internal value to use when an external value is not found in the map.
   // If empty, an unmapped inbound value causes an error.
@@ -397,7 +397,10 @@ message UpdateMappingRequest {
   google.protobuf.FieldMask update_mask = 12;
 
   // name is the updated human-readable name (optional).
-  string name = 2 [(buf.validate.field).string.max_len = 255];
+  string name = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
 
   // external_schema is the updated JSON Schema string (optional).
   string external_schema = 3 [(buf.validate.field).string.max_len = 65536];
