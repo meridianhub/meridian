@@ -16,6 +16,7 @@ import (
 	"github.com/meridianhub/meridian/services/party/domain"
 	"github.com/meridianhub/meridian/services/party/verification"
 	"github.com/meridianhub/meridian/shared/platform/auth"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -87,6 +88,7 @@ type Service struct {
 	pmRepo               PaymentMethodRepository
 	verificationProvider verification.Provider
 	partyTypeService     *PartyTypeDefinitionService
+	attributeValidator   *AttributeValidator
 	logger               *slog.Logger
 }
 
@@ -117,6 +119,14 @@ func (s *Service) WithPaymentMethodRepository(pmRepo PaymentMethodRepository) *S
 // When set, ExchangeDemographics delegates to the real provider instead of returning a stub.
 func (s *Service) WithVerificationProvider(provider verification.Provider) *Service {
 	s.verificationProvider = provider
+	return s
+}
+
+// WithAttributeValidator sets the attribute validator on the service.
+// When set, RegisterParty and UpdateParty validate attributes against the tenant's
+// PartyTypeDefinition schema and CEL rules.
+func (s *Service) WithAttributeValidator(v *AttributeValidator) *Service {
+	s.attributeValidator = v
 	return s
 }
 
@@ -174,6 +184,22 @@ func (s *Service) RegisterParty(ctx context.Context, req *pb.RegisterPartyReques
 	// Set optional attributes if provided at registration time.
 	if len(req.Attributes) > 0 {
 		party.SetAttributes(protoAttributesToDomain(req.Attributes))
+	}
+
+	// === Attribute validation ===
+
+	// Validate attributes against the tenant's PartyTypeDefinition schema and CEL rules.
+	// Validation is skipped when no validator is configured or no tenant context is present.
+	if s.attributeValidator != nil {
+		if tid, ok := tenant.FromContext(ctx); ok {
+			if err := s.attributeValidator.ValidateAttributes(ctx, tid.String(), string(partyType), party); err != nil {
+				s.logger.Warn("attribute validation failed during registration",
+					"party_type", partyType,
+					"tenant_id", tid.String(),
+					"error", err)
+				return nil, status.Errorf(codes.InvalidArgument, "attribute validation failed: %v", err)
+			}
+		}
 	}
 
 	// === External reference handling ===
@@ -404,8 +430,12 @@ func (s *Service) UpdateParty(ctx context.Context, req *pb.UpdatePartyRequest) (
 	}
 
 	// Apply field mask updates
+	attributesUpdated := false
 	if req.UpdateMask != nil && len(req.UpdateMask.Paths) > 0 {
 		for _, path := range req.UpdateMask.Paths {
+			if path == "attributes" {
+				attributesUpdated = true
+			}
 			if err := s.applyFieldUpdate(party, path, req); err != nil {
 				s.logger.Error("failed to apply field update", "field", path, "error", err)
 				return nil, status.Errorf(codes.InvalidArgument, "failed to update field %s: %v", path, err)
@@ -417,6 +447,22 @@ func (s *Service) UpdateParty(ctx context.Context, req *pb.UpdatePartyRequest) (
 			if err := party.SetDisplayName(req.DisplayName); err != nil {
 				s.logger.Error("invalid display name", "error", err)
 				return nil, status.Errorf(codes.InvalidArgument, "invalid display name: %v", err)
+			}
+		}
+	}
+
+	// Validate attributes if they were updated and a validator is configured.
+	// Validation is skipped when no validator is configured or no tenant context is present.
+	if attributesUpdated && s.attributeValidator != nil {
+		if tid, ok := tenant.FromContext(ctx); ok {
+			partyType := string(party.PartyType())
+			if err := s.attributeValidator.ValidateAttributes(ctx, tid.String(), partyType, party); err != nil {
+				s.logger.Warn("attribute validation failed during update",
+					"party_id", req.PartyId,
+					"party_type", partyType,
+					"tenant_id", tid.String(),
+					"error", err)
+				return nil, status.Errorf(codes.InvalidArgument, "attribute validation failed: %v", err)
 			}
 		}
 	}
@@ -445,6 +491,8 @@ func (s *Service) applyFieldUpdate(party *domain.Party, path string, req *pb.Upd
 		if req.DisplayName != "" {
 			return party.SetDisplayName(req.DisplayName)
 		}
+	case "attributes":
+		party.SetAttributes(protoAttributesToDomain(req.Attributes))
 	default:
 		return ErrUnsupportedFieldUpdate
 	}

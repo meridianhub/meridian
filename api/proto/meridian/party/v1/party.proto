@@ -244,7 +244,7 @@ message RetrievePartyResponse {
 // UpdatePartyRequest is the request to update party details (BIAN UpCR).
 // When update_mask is provided, only the specified fields are updated.
 // When update_mask is empty or not provided, only display_name is updated.
-// Supported update_mask paths: "display_name".
+// Supported update_mask paths: "display_name", "attributes".
 message UpdatePartyRequest {
   // party_id is the unique identifier of the party to update.
   string party_id = 1 [(buf.validate.field).string = {
@@ -254,7 +254,7 @@ message UpdatePartyRequest {
   }];
 
   // update_mask specifies which fields to update (partial update support).
-  // Supported paths: "display_name". Other fields are reserved for future use.
+  // Supported paths: "display_name", "attributes".
   google.protobuf.FieldMask update_mask = 2;
 
   // legal_name is the updated official registered name (optional).
@@ -271,6 +271,10 @@ message UpdatePartyRequest {
 
   // version is for optimistic locking.
   int32 version = 7 [(buf.validate.field).int32 = {gte: 0}];
+
+  // attributes contains structured key-value metadata to set on the party.
+  // Validated against the tenant's PartyTypeDefinition schema when present.
+  repeated meridian.quantity.v1.AttributeEntry attributes = 8;
 }
 
 // UpdatePartyResponse is the response after updating a party.

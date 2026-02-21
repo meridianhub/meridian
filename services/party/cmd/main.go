@@ -106,6 +106,13 @@ func run(logger *slog.Logger) error {
 	}
 	partyService.WithPartyTypeDefinitionService(partyTypeSvc)
 
+	// Create and wire attribute validator
+	attributeValidator, err := service.NewAttributeValidator(partyTypeRepo, partyTypeSvc.CELCompiler())
+	if err != nil {
+		return fmt.Errorf("failed to create attribute validator: %w", err)
+	}
+	partyService.WithAttributeValidator(attributeValidator)
+
 	// Load verification config with environment-aware validation.
 	// Production: fail fast if config is missing or invalid.
 	// Development: allow service to start without provider (warn and continue).
