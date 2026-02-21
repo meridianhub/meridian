@@ -461,6 +461,7 @@ func TestPhaseLabel(t *testing.T) {
 	assert.Equal(t, "Valuation Rules", PhaseLabel(PhaseValuationRules))
 	assert.Equal(t, "Saga Definitions", PhaseLabel(PhaseSagas))
 	assert.Equal(t, "Seed Data", PhaseLabel(PhaseSeedData))
+	assert.Equal(t, "Party Types", PhaseLabel(PhasePartyTypes))
 	assert.True(t, strings.HasPrefix(PhaseLabel(Phase(99)), "Phase("))
 }
 
@@ -563,7 +564,7 @@ func TestPlan_GRPCMethodMapping_PartyTypes(t *testing.T) {
 	assert.Equal(t, MethodUpdatePartyType, callsByCode["tenant-1:ORGANIZATION"].GRPCMethod)
 }
 
-func TestPlan_PartyType_Delete_NoMethodMapping(t *testing.T) {
+func TestPlan_PartyType_Delete_NotSupported(t *testing.T) {
 	p := NewManifestPlanner()
 	diffPlan := &differ.DiffPlan{
 		Actions: []differ.PlannedAction{
@@ -572,12 +573,8 @@ func TestPlan_PartyType_Delete_NoMethodMapping(t *testing.T) {
 	}
 
 	_, err := p.Plan(diffPlan, "tenant-1", "1.0", false)
-	assert.Error(t, err, "DELETE for party types should fail as no method is mapped")
-	assert.ErrorIs(t, err, ErrNoMethodMapping)
-}
-
-func TestPhaseLabel_PartyTypes(t *testing.T) {
-	assert.Equal(t, "Party Types", PhaseLabel(PhasePartyTypes))
+	assert.Error(t, err, "DELETE for party types should fail")
+	assert.ErrorIs(t, err, ErrDeleteNotSupportedForPartyType)
 }
 
 // --- Test helpers ---
