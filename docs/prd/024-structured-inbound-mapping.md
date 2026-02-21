@@ -155,7 +155,7 @@ No new CEL functions needed — `parse_iso_date`, `parse_int`,
 
 1. Add `PartyTypeDefinition` proto + CRUD RPCs to Party service
 2. Add `attributes` field to `Party` proto and persistence
-3. Wire CEL compiler (import from reference-data or extract to shared)
+3. Extract CEL compiler to `shared/pkg/cel/` (hard prerequisite)
 4. Validate attributes against schema at `RegisterParty` /
    `UpdateParty` time
 5. Keep existing `Association.metadata` (Struct) for backwards
@@ -167,11 +167,11 @@ No new CEL functions needed — `parse_iso_date`, `parse_int`,
 |------|--------|
 | PartyTypeDefinition proto + CRUD | 3 |
 | Party attributes field + migration | 3 |
-| CEL compiler integration in Party service | 2 |
+| Extract CEL compiler to `shared/pkg/cel/` + Party integration | 3 |
 | Schema validation at registration | 3 |
 | Manifest: add `party_types` + differ/planner | 3 |
 | Tests + reference party type definitions | 2 |
-| **Total** | **16** |
+| **Total** | **17** |
 
 ---
 
@@ -240,6 +240,14 @@ The **Mapping Engine middleware** lives in `services/gateway/` — it
 intercepts `/mapping/` requests, resolves the mapping definition,
 applies transforms in both directions, and forwards to Vanguard.
 
+**Hard prerequisite (Phase 1)**: The CEL compiler must be extracted
+from `services/reference-data/cel/` to **`shared/pkg/cel/`** before
+Phase 2 begins. Both the Party service (Phase 1) and the mapping
+engine in the gateway (Phase 2) need CEL compilation. Without
+extraction, the gateway would import the reference-data service
+package — creating a circular dependency. This extraction is
+scoped as part of Phase 1's CEL compiler integration work.
+
 ### Data Model
 
 ```protobuf
@@ -282,12 +290,48 @@ message MappingDefinition {
   // Batch support (inbound only)
   bool is_batch = 16;           // Input is JSON array
   string batch_target_path = 17; // Wrap array at this path
+
+  // Idempotency derivation rules
+  IdempotencyConfig idempotency = 18;
 }
 ```
 
+#### Idempotency
+
+External systems (dumb pipes) often retry requests without internal
+request IDs, risking duplicate records. The `IdempotencyConfig` lets
+the mapping derive an idempotency key from the request itself, so the
+gateway can deduplicate retries before they reach the gRPC service.
+
+```protobuf
+message IdempotencyConfig {
+  // Extract from header or body path
+  // e.g., "header:X-Request-ID" or "body:transaction_ref"
+  string source_selector = 1;
+
+  // Derive key from content hash (e.g., hash of meter_id + timestamp)
+  bool use_content_hash = 2;
+  repeated string content_hash_fields = 3;
+}
+```
+
+**Resolution order**:
+
+1. If `source_selector` is set and the value exists in the request,
+   use it as the idempotency key
+2. If `use_content_hash = true`, hash the specified
+   `content_hash_fields` (post-mapping values) to derive the key
+3. If neither is configured, no deduplication is applied (passthrough)
+
+The derived key is passed as gRPC metadata to the target service,
+which uses its existing idempotency infrastructure to detect
+duplicates. For batch requests (`is_batch = true`), the key is
+derived **per element** using the element's field values.
+
 **Inbound execution order**: `fields` (forward, sequentially) then
 `inbound_computed_fields` (sequentially) then `inbound_validation_cel`
-(must return `true`).
+(must return `true`) then `idempotency` (derive key from mapped
+values).
 
 **Outbound execution order**: `fields` (reverse, sequentially) then
 `outbound_computed_fields` (sequentially) then
@@ -813,9 +857,9 @@ payload format without sending live requests.
 
 | Phase | Points | Description |
 |-------|--------|-------------|
-| Phase 1 | 16 | Unified property model + manifest integration |
+| Phase 1 | 17 | Unified property model + CEL extraction + manifest |
 | Phase 2 | 33 | Bidirectional mapping + manifest integration |
-| **Total** | **49** | |
+| **Total** | **50** | |
 
 ### Phase 2 Build Order
 
@@ -873,10 +917,9 @@ The gateway must cache compiled mapping definitions.
   definition in the cache.
 - **Recursion Guard**: Validated at registration — `target_service`
   checked against proto descriptor set.
-- **CEL Compiler Location**: If Phase 1 proceeds first, extract the
-  CEL compiler from `services/reference-data/cel/` to
-  `shared/pkg/cel/` so both Party and the mapping engine can use it
-  without importing the reference-data service.
+- **CEL Compiler Location**: Hard requirement — extract the CEL
+  compiler from `services/reference-data/cel/` to `shared/pkg/cel/`
+  in Phase 1. See Service Ownership section.
 
 ## Manifest Integration
 
