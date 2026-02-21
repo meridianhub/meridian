@@ -530,6 +530,56 @@ func TestPlan_FullEnergyManifest_DryRun(t *testing.T) {
 		"idempotency key should not change based on dry run flag")
 }
 
+// --- Party type planner tests ---
+
+func TestPlan_PartyTypesInPhase6(t *testing.T) {
+	p := NewManifestPlanner()
+	diffPlan := &differ.DiffPlan{
+		Actions: []differ.PlannedAction{
+			{ResourceType: differ.ResourcePartyType, ResourceCode: "tenant-1:PERSON", Action: differ.ActionCreate},
+		},
+	}
+
+	plan, err := p.Plan(diffPlan, "tenant-1", "1.0", false)
+	require.NoError(t, err)
+	require.Len(t, plan.Calls, 1)
+	assert.Equal(t, PhasePartyTypes, plan.Calls[0].Phase)
+}
+
+func TestPlan_GRPCMethodMapping_PartyTypes(t *testing.T) {
+	p := NewManifestPlanner()
+	diffPlan := &differ.DiffPlan{
+		Actions: []differ.PlannedAction{
+			{ResourceType: differ.ResourcePartyType, ResourceCode: "tenant-1:PERSON", Action: differ.ActionCreate},
+			{ResourceType: differ.ResourcePartyType, ResourceCode: "tenant-1:ORGANIZATION", Action: differ.ActionUpdate},
+		},
+	}
+
+	plan, err := p.Plan(diffPlan, "tenant-1", "1.0", false)
+	require.NoError(t, err)
+
+	callsByCode := indexCallsByResourceID(plan.Calls)
+	assert.Equal(t, MethodRegisterPartyType, callsByCode["tenant-1:PERSON"].GRPCMethod)
+	assert.Equal(t, MethodUpdatePartyType, callsByCode["tenant-1:ORGANIZATION"].GRPCMethod)
+}
+
+func TestPlan_PartyType_Delete_NoMethodMapping(t *testing.T) {
+	p := NewManifestPlanner()
+	diffPlan := &differ.DiffPlan{
+		Actions: []differ.PlannedAction{
+			{ResourceType: differ.ResourcePartyType, ResourceCode: "tenant-1:PERSON", Action: differ.ActionDelete},
+		},
+	}
+
+	_, err := p.Plan(diffPlan, "tenant-1", "1.0", false)
+	assert.Error(t, err, "DELETE for party types should fail as no method is mapped")
+	assert.ErrorIs(t, err, ErrNoMethodMapping)
+}
+
+func TestPhaseLabel_PartyTypes(t *testing.T) {
+	assert.Equal(t, "Party Types", PhaseLabel(PhasePartyTypes))
+}
+
 // --- Test helpers ---
 
 func indexCallsByResourceID(calls []PlannedCall) map[string]PlannedCall {

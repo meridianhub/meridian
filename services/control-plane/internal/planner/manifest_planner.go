@@ -99,6 +99,8 @@ func phaseForResource(rt differ.ResourceType) Phase {
 		return PhaseValuationRules
 	case differ.ResourceSaga:
 		return PhaseSagas
+	case differ.ResourcePartyType:
+		return PhasePartyTypes
 	default:
 		return PhaseSeedData
 	}
@@ -142,6 +144,12 @@ var grpcMethodMap = map[methodKey]GRPCMethod{
 	{differ.ResourceSaga, differ.ActionCreate}: MethodCreateSagaDraft,
 	{differ.ResourceSaga, differ.ActionUpdate}: MethodUpdateSagaDefinition,
 	{differ.ResourceSaga, differ.ActionDelete}: MethodDeprecateSaga,
+
+	// Party Types
+	{differ.ResourcePartyType, differ.ActionCreate}: MethodRegisterPartyType,
+	{differ.ResourcePartyType, differ.ActionUpdate}: MethodUpdatePartyType,
+	// DELETE for party types is not supported (party types are managed through schema updates)
+	// No delete method registered intentionally.
 }
 
 // GenerateIdempotencyKey produces a deterministic SHA-256 based idempotency key.
