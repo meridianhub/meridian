@@ -97,8 +97,8 @@ status. The error message includes the index of the failing element.
 Use `DryRunInbound` to inspect transforms before registering:
 
 ```go
-result, err := engine.DryRunInbound(def, inputJSON)
-if err != nil {
+result := engine.DryRunInbound(def, inputJSON)
+if result.TransformError != nil {
     // CEL compilation or parse error
 }
 if !result.ValidationPassed {

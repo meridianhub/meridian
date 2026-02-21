@@ -131,7 +131,7 @@ double(payload.min_amount) > 0
 The engine supports dry-run execution that returns field-level traces without side effects:
 
 ```go
-result, err := engine.DryRunInbound(def, inputJSON)
+result := engine.DryRunInbound(def, inputJSON)
 // result.TransformedJSON  - the output
 // result.ValidationPassed - true/false
 // result.FieldTraces      - per-field transformation details
