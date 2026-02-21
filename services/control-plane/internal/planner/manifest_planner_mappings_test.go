@@ -36,11 +36,11 @@ func TestPlan_MappingsAfterSagas(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, plan.Calls, 3)
 
-	// Instruments (1) < Sagas (4) < Mappings (5)
-	for i := 1; i < len(plan.Calls); i++ {
-		assert.LessOrEqual(t, int(plan.Calls[i-1].Phase), int(plan.Calls[i].Phase),
-			"calls should be sorted by phase")
-	}
+	// Verify each resource is assigned to its exact expected phase.
+	callsByCode := indexCallsByResourceID(plan.Calls)
+	assert.Equal(t, PhaseInstruments, callsByCode["GBP"].Phase, "instrument should be in phase 1")
+	assert.Equal(t, PhaseSagas, callsByCode["process_payment"].Phase, "saga should be in phase 4")
+	assert.Equal(t, PhaseMappings, callsByCode["stripe_webhook:1"].Phase, "mapping should be in phase 5")
 }
 
 func TestPlan_GRPCMethodMapping_Mappings(t *testing.T) {
