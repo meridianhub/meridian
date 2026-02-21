@@ -12,6 +12,7 @@ import (
 	"github.com/meridianhub/meridian/services/party/domain"
 	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/db"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -38,6 +39,41 @@ func toJSONB(s string) string {
 	// Marshal as JSON string
 	b, _ := json.Marshal(s)
 	return string(b)
+}
+
+// attributeEntryJSON is the on-disk JSON representation of a domain.AttributeEntry.
+type attributeEntryJSON struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+// serializeAttributes marshals domain AttributeEntry slice to JSONB-ready bytes.
+func serializeAttributes(attrs []domain.AttributeEntry) datatypes.JSON {
+	if len(attrs) == 0 {
+		return datatypes.JSON([]byte("[]"))
+	}
+	entries := make([]attributeEntryJSON, len(attrs))
+	for i, a := range attrs {
+		entries[i] = attributeEntryJSON{Key: a.Key, Value: a.Value}
+	}
+	b, _ := json.Marshal(entries)
+	return datatypes.JSON(b)
+}
+
+// deserializeAttributes unmarshals JSONB bytes to a domain AttributeEntry slice.
+func deserializeAttributes(raw datatypes.JSON) []domain.AttributeEntry {
+	if len(raw) == 0 {
+		return []domain.AttributeEntry{}
+	}
+	var entries []attributeEntryJSON
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return []domain.AttributeEntry{}
+	}
+	attrs := make([]domain.AttributeEntry, len(entries))
+	for i, e := range entries {
+		attrs[i] = domain.AttributeEntry{Key: e.Key, Value: e.Value}
+	}
+	return attrs
 }
 
 // Repository provides persistence operations for parties
@@ -170,6 +206,7 @@ func (r *Repository) Save(ctx context.Context, party *domain.Party) error {
 					"status":                  entity.Status,
 					"external_reference":      entity.ExternalReference,
 					"external_reference_type": entity.ExternalReferenceType,
+					"attributes":              entity.Attributes,
 					"version":                 entity.Version,
 					"updated_at":              entity.UpdatedAt,
 					"updated_by":              entity.UpdatedBy,
@@ -333,15 +370,16 @@ func toEntity(ctx context.Context, party *domain.Party) *PartyEntity {
 	auditUser := audit.GetUserFromContext(ctx)
 
 	entity := &PartyEntity{
-		ID:        party.ID(),
-		PartyType: string(party.PartyType()),
-		LegalName: party.LegalName(),
-		Status:    string(party.Status()),
-		Version:   party.Version(),
-		CreatedAt: party.CreatedAt(),
-		UpdatedAt: party.UpdatedAt(),
-		CreatedBy: auditUser,
-		UpdatedBy: auditUser,
+		ID:         party.ID(),
+		PartyType:  string(party.PartyType()),
+		LegalName:  party.LegalName(),
+		Status:     string(party.Status()),
+		Attributes: serializeAttributes(party.Attributes()),
+		Version:    party.Version(),
+		CreatedAt:  party.CreatedAt(),
+		UpdatedAt:  party.UpdatedAt(),
+		CreatedBy:  auditUser,
+		UpdatedBy:  auditUser,
 	}
 
 	// Handle optional display name
@@ -390,6 +428,7 @@ func toDomain(entity *PartyEntity) *domain.Party {
 		domain.DemographicData{},
 		domain.ReferenceData{},
 		domain.BankRelationship{},
+		deserializeAttributes(entity.Attributes),
 		entity.CreatedAt,
 		entity.UpdatedAt,
 		entity.Version,

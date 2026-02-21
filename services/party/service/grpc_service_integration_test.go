@@ -51,6 +51,7 @@ func setupIntegrationTest(t *testing.T) (*Service, *gorm.DB, context.Context, fu
 		status VARCHAR(20) NOT NULL,
 		external_reference VARCHAR(255),
 		external_reference_type VARCHAR(50),
+		attributes JSONB NOT NULL DEFAULT '[]'::jsonb,
 		version BIGINT NOT NULL DEFAULT 1,
 		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
 		updated_at TIMESTAMP WITH TIME ZONE NOT NULL,

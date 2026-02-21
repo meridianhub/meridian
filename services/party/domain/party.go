@@ -200,6 +200,13 @@ type BankRelationship struct {
 	RelationshipStartDate time.Time
 }
 
+// AttributeEntry represents a single key-value attribute for a party.
+// Keys are snake_case identifiers validated against the party type's attribute_schema.
+type AttributeEntry struct {
+	Key   string
+	Value string
+}
+
 // Party represents a BIAN Party Reference Data Directory domain model.
 //
 // The Version field implements optimistic concurrency control to prevent lost updates
@@ -219,6 +226,7 @@ type Party struct {
 	demographics          DemographicData
 	referenceData         ReferenceData
 	bankRelations         BankRelationship
+	attributes            []AttributeEntry
 	createdAt             time.Time
 	updatedAt             time.Time
 	version               int64
@@ -236,13 +244,14 @@ func NewParty(partyType PartyType, legalName string) (*Party, error) {
 
 	now := time.Now()
 	return &Party{
-		id:        uuid.New(),
-		partyType: partyType,
-		legalName: legalName,
-		status:    PartyStatusActive,
-		createdAt: now,
-		updatedAt: now,
-		version:   1,
+		id:         uuid.New(),
+		partyType:  partyType,
+		legalName:  legalName,
+		status:     PartyStatusActive,
+		attributes: []AttributeEntry{},
+		createdAt:  now,
+		updatedAt:  now,
+		version:    1,
 	}, nil
 }
 
@@ -260,10 +269,14 @@ func ReconstructParty(
 	demographics DemographicData,
 	referenceData ReferenceData,
 	bankRelations BankRelationship,
+	attributes []AttributeEntry,
 	createdAt time.Time,
 	updatedAt time.Time,
 	version int64,
 ) *Party {
+	if attributes == nil {
+		attributes = []AttributeEntry{}
+	}
 	return &Party{
 		id:                    id,
 		partyType:             partyType,
@@ -276,6 +289,7 @@ func ReconstructParty(
 		demographics:          demographics,
 		referenceData:         referenceData,
 		bankRelations:         bankRelations,
+		attributes:            attributes,
 		createdAt:             createdAt,
 		updatedAt:             updatedAt,
 		version:               version,
@@ -352,6 +366,23 @@ func (p *Party) ReferenceData() ReferenceData {
 // BankRelations returns the party's bank relationship information
 func (p *Party) BankRelations() BankRelationship {
 	return p.bankRelations
+}
+
+// Attributes returns a copy of the party's structured key-value attributes.
+func (p *Party) Attributes() []AttributeEntry {
+	result := make([]AttributeEntry, len(p.attributes))
+	copy(result, p.attributes)
+	return result
+}
+
+// SetAttributes replaces the party's attributes.
+func (p *Party) SetAttributes(attrs []AttributeEntry) {
+	if attrs == nil {
+		attrs = []AttributeEntry{}
+	}
+	p.attributes = attrs
+	p.updatedAt = time.Now()
+	p.version++
 }
 
 // SetDisplayName sets the party's display name

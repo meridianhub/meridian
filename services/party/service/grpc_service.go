@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
+	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"github.com/meridianhub/meridian/services/party/adapters/persistence"
 	"github.com/meridianhub/meridian/services/party/domain"
 	"github.com/meridianhub/meridian/services/party/verification"
@@ -169,6 +170,11 @@ func (s *Service) RegisterParty(ctx context.Context, req *pb.RegisterPartyReques
 		}
 	}
 
+	// Set optional attributes (stored without incrementing version since this is initial creation)
+	if len(req.Attributes) > 0 {
+		party.SetAttributes(protoAttributesToDomain(req.Attributes))
+	}
+
 	// === External reference handling ===
 
 	if req.ExternalReference != "" {
@@ -264,11 +270,32 @@ func domainToProto(party *domain.Party) *pb.Party {
 		Status:                partyStatusToProto(party.Status()),
 		ExternalReference:     party.ExternalReference(),
 		ExternalReferenceType: externalRefTypeToProto(party.ExternalReferenceType()),
+		Attributes:            domainAttributesToProto(party.Attributes()),
 		CreatedAt:             timestamppb.New(party.CreatedAt()),
 		UpdatedAt:             timestamppb.New(party.UpdatedAt()),
 		// #nosec G115 - Version is bounded by database constraints
 		Version: int32(party.Version()),
 	}
+}
+
+// domainAttributesToProto converts domain AttributeEntry slice to proto AttributeEntry slice.
+func domainAttributesToProto(attrs []domain.AttributeEntry) []*quantityv1.AttributeEntry {
+	result := make([]*quantityv1.AttributeEntry, len(attrs))
+	for i, a := range attrs {
+		result[i] = &quantityv1.AttributeEntry{Key: a.Key, Value: a.Value}
+	}
+	return result
+}
+
+// protoAttributesToDomain converts proto AttributeEntry slice to domain AttributeEntry slice.
+func protoAttributesToDomain(attrs []*quantityv1.AttributeEntry) []domain.AttributeEntry {
+	result := make([]domain.AttributeEntry, len(attrs))
+	for i, a := range attrs {
+		if a != nil {
+			result[i] = domain.AttributeEntry{Key: a.Key, Value: a.Value}
+		}
+	}
+	return result
 }
 
 // protoToPartyType converts a proto PartyType to domain PartyType

@@ -568,6 +568,7 @@ func TestReconstructParty(t *testing.T) {
 		DemographicData{},
 		ReferenceData{},
 		BankRelationship{},
+		[]AttributeEntry{},
 		createdAt,
 		updatedAt,
 		5,
