@@ -475,9 +475,6 @@ func describeSagaChanges(name string, prev, updated *controlplanev1.SagaDefiniti
 
 func describeMappingChanges(key string, prev, updated *mappingv1.MappingDefinition) string {
 	var changes []string
-	if prev.GetName() != updated.GetName() {
-		changes = append(changes, fmt.Sprintf("name: %q -> %q", prev.GetName(), updated.GetName()))
-	}
 	if prev.GetTargetService() != updated.GetTargetService() {
 		changes = append(changes, fmt.Sprintf("target_service: %q -> %q", prev.GetTargetService(), updated.GetTargetService()))
 	}

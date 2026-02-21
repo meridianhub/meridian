@@ -451,3 +451,122 @@ func TestValidateMappings_FullRoundTrip(t *testing.T) {
 		t.Logf("warnings (not failures): %v", result.Warnings)
 	}
 }
+
+func TestValidateMappings_IdempotencyNoHashRequiresSourceSelector(t *testing.T) {
+	v, err := New()
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	m := validManifest()
+	mp := validMapping()
+	mp.Idempotency = &mappingv1.IdempotencyConfig{
+		UseContentHash: false,
+		SourceSelector: "", // Missing required field
+	}
+	m.Mappings = []*mappingv1.MappingDefinition{mp}
+
+	result := v.Validate(m, nil)
+	if result.Valid {
+		t.Error("expected invalid manifest for idempotency without source_selector")
+	}
+
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == "IDEMPOTENCY_SOURCE_REQUIRED" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected IDEMPOTENCY_SOURCE_REQUIRED error, got: %v", result.Errors)
+	}
+}
+
+func TestValidateMappings_IdempotencyContentHashRequiresFields(t *testing.T) {
+	v, err := New()
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	m := validManifest()
+	mp := validMapping()
+	mp.Idempotency = &mappingv1.IdempotencyConfig{
+		UseContentHash:    true,
+		ContentHashFields: nil, // Missing required fields
+	}
+	m.Mappings = []*mappingv1.MappingDefinition{mp}
+
+	result := v.Validate(m, nil)
+	if result.Valid {
+		t.Error("expected invalid manifest for content hash idempotency without hash fields")
+	}
+
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == "IDEMPOTENCY_HASH_FIELDS_REQUIRED" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected IDEMPOTENCY_HASH_FIELDS_REQUIRED error, got: %v", result.Errors)
+	}
+}
+
+func TestValidateMappings_IdempotencyWithSourceSelector_Valid(t *testing.T) {
+	v, err := New()
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	m := validManifest()
+	mp := validMapping()
+	mp.Idempotency = &mappingv1.IdempotencyConfig{
+		UseContentHash: false,
+		SourceSelector: "header.idempotency_key",
+	}
+	m.Mappings = []*mappingv1.MappingDefinition{mp}
+
+	result := v.Validate(m, nil)
+	if !result.Valid {
+		t.Errorf("expected valid manifest with idempotency source_selector, got errors: %v", result.Errors)
+	}
+}
+
+func TestValidateMappings_IdempotencyWithContentHash_Valid(t *testing.T) {
+	v, err := New()
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	m := validManifest()
+	mp := validMapping()
+	mp.Idempotency = &mappingv1.IdempotencyConfig{
+		UseContentHash:    true,
+		ContentHashFields: []string{"transaction.id", "transaction.amount"},
+	}
+	m.Mappings = []*mappingv1.MappingDefinition{mp}
+
+	result := v.Validate(m, nil)
+	if !result.Valid {
+		t.Errorf("expected valid manifest with idempotency content hash fields, got errors: %v", result.Errors)
+	}
+}
+
+func TestValidateMappings_NoIdempotencyConfig_Valid(t *testing.T) {
+	v, err := New()
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	m := validManifest()
+	mp := validMapping()
+	// No idempotency config - should be valid
+	m.Mappings = []*mappingv1.MappingDefinition{mp}
+
+	result := v.Validate(m, nil)
+	if !result.Valid {
+		t.Errorf("expected valid manifest without idempotency config, got errors: %v", result.Errors)
+	}
+}

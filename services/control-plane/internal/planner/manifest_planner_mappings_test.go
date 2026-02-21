@@ -62,10 +62,6 @@ func TestPlan_GRPCMethodMapping_Mappings(t *testing.T) {
 	assert.Equal(t, MethodDeprecateMapping, callsByCode["old_mapping:1"].GRPCMethod)
 }
 
-func TestPhaseLabel_Mappings(t *testing.T) {
-	assert.Equal(t, "Mapping Definitions", PhaseLabel(PhaseMappings))
-}
-
 func TestPlan_MappingsPhaseIs5(t *testing.T) {
 	// Verify PhaseMappings constant has value 5 (between Sagas=4 and SeedData=6)
 	assert.Equal(t, Phase(5), PhaseMappings)

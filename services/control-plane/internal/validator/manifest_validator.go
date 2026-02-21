@@ -567,6 +567,7 @@ func (v *ManifestValidator) validateSingleMapping(
 	v.validateMappingComputedFields(mp, basePath, result)
 	v.validateMappingBatch(mp, basePath, result)
 	v.validateMappingStatus(mp, basePath, result)
+	v.validateMappingIdempotency(mp, basePath, result)
 }
 
 // validateMappingCELExpressions validates inbound/outbound CEL validation expressions.
@@ -642,6 +643,9 @@ func (v *ManifestValidator) validateMappingBatch(
 	}
 }
 
+// mappingCELAvailableFields lists the variables available in mapping CEL expressions.
+var mappingCELAvailableFields = []string{"payload", "value"}
+
 // validateMappingCELExpression compiles a single CEL expression for mapping contexts.
 // Uses a simplified CEL environment with payload and value variables.
 func (v *ManifestValidator) validateMappingCELExpression(
@@ -664,11 +668,33 @@ func (v *ManifestValidator) validateMappingCELExpression(
 		return
 	}
 
+	errMsg := issues.Err().Error()
+
+	// Check for undeclared reference errors to provide field suggestions.
+	if strings.Contains(errMsg, "undeclared reference") {
+		undeclaredField := extractUndeclaredReference(errMsg)
+		suggestion := ""
+		if undeclaredField != "" {
+			if match := findClosestMatch(undeclaredField, mappingCELAvailableFields); match != "" {
+				suggestion = fmt.Sprintf("Did you mean %q?", match)
+			}
+		}
+		addError(result, ValidationError{
+			Severity:        SeverityError,
+			Path:            path,
+			Code:            "CEL_UNDECLARED_REFERENCE",
+			Message:         errMsg,
+			Suggestion:      suggestion,
+			AvailableFields: mappingCELAvailableFields,
+		})
+		return
+	}
+
 	addError(result, ValidationError{
 		Severity: SeverityError,
 		Path:     path,
 		Code:     "CEL_COMPILATION_ERROR",
-		Message:  issues.Err().Error(),
+		Message:  errMsg,
 	})
 }
 
@@ -685,6 +711,37 @@ func (v *ManifestValidator) validateMappingStatus(
 			Path:     basePath + ".status",
 			Code:     "INVALID_MAPPING_STATUS",
 			Message:  "mapping status must be specified (DRAFT, ACTIVE, or DEPRECATED)",
+		})
+	}
+}
+
+// validateMappingIdempotency enforces cross-field constraints on IdempotencyConfig.
+// When use_content_hash is false, source_selector must be non-empty.
+// When use_content_hash is true, content_hash_fields must have at least one entry.
+func (v *ManifestValidator) validateMappingIdempotency(
+	mp *mappingv1.MappingDefinition,
+	basePath string,
+	result *ValidationResult,
+) {
+	cfg := mp.GetIdempotency()
+	if cfg == nil {
+		return
+	}
+	idemPath := basePath + ".idempotency"
+	if !cfg.GetUseContentHash() && cfg.GetSourceSelector() == "" {
+		addError(result, ValidationError{
+			Severity: SeverityError,
+			Path:     idemPath + ".source_selector",
+			Code:     "IDEMPOTENCY_SOURCE_REQUIRED",
+			Message:  "source_selector is required when use_content_hash is false",
+		})
+	}
+	if cfg.GetUseContentHash() && len(cfg.GetContentHashFields()) == 0 {
+		addError(result, ValidationError{
+			Severity: SeverityError,
+			Path:     idemPath + ".content_hash_fields",
+			Code:     "IDEMPOTENCY_HASH_FIELDS_REQUIRED",
+			Message:  "content_hash_fields must have at least one entry when use_content_hash is true",
 		})
 	}
 }
