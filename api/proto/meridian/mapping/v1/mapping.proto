@@ -4,6 +4,7 @@ package meridian.mapping.v1;
 
 import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
+import "google/protobuf/field_mask.proto";
 import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/meridianhub/meridian/api/proto/meridian/mapping/v1;mappingv1";
@@ -125,9 +126,13 @@ message ComputedField {
 }
 
 // IdempotencyConfig controls how idempotency keys are derived for mapped requests.
+//
+// Cross-field validation (enforced at the Go service layer):
+//   - When use_content_hash is false: source_selector must be non-empty.
+//   - When use_content_hash is true: content_hash_fields must contain at least one entry.
 message IdempotencyConfig {
   // source_selector is a gjson path expression that extracts the idempotency key
-  // from the external payload.
+  // from the external payload. Required when use_content_hash is false.
   // Example: "header.idempotency_key", "transaction.reference_id"
   string source_selector = 1 [(buf.validate.field).string.max_len = 512];
 
@@ -136,7 +141,7 @@ message IdempotencyConfig {
   bool use_content_hash = 2;
 
   // content_hash_fields lists the gjson paths whose values are included in the content hash.
-  // Only used when use_content_hash is true.
+  // Required (non-empty) when use_content_hash is true.
   repeated string content_hash_fields = 3 [(buf.validate.field).repeated.max_items = 32];
 }
 
@@ -215,11 +220,12 @@ message MappingDefinition {
   google.protobuf.Timestamp updated_at = 15;
 
   // is_batch indicates this mapping handles array payloads.
-  // When true, batch_target_path must be set.
+  // Cross-field validation (enforced at Go service layer): when is_batch is true,
+  // batch_target_path must be non-empty.
   bool is_batch = 16;
 
   // batch_target_path is the gjson path expression that selects the array of items
-  // to process when is_batch is true.
+  // to process when is_batch is true. Required when is_batch is true.
   // Example: "events", "data.items"
   string batch_target_path = 17 [(buf.validate.field).string.max_len = 512];
 
@@ -378,9 +384,17 @@ message ListMappingsResponse {
 }
 
 // UpdateMappingRequest is the request to update an existing mapping definition.
+// Use update_mask to specify which fields to update. Only fields listed in the mask are modified.
+// Supported paths: "name", "external_schema", "fields", "inbound_computed_fields",
+// "outbound_computed_fields", "inbound_validation_cel", "outbound_validation_cel",
+// "is_batch", "batch_target_path", "idempotency".
 message UpdateMappingRequest {
   // id is the unique identifier of the mapping definition to update (UUID).
   string id = 1 [(buf.validate.field).string.uuid = true];
+
+  // update_mask specifies which fields to update. Only paths listed in the mask are modified.
+  // When empty, all provided fields are updated (full replace semantics).
+  google.protobuf.FieldMask update_mask = 12;
 
   // name is the updated human-readable name (optional).
   string name = 2 [(buf.validate.field).string.max_len = 255];

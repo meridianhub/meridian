@@ -33,6 +33,7 @@ require (
 	github.com/testcontainers/testcontainers-go/modules/kafka v0.40.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.40.0
 	github.com/testcontainers/testcontainers-go/modules/redis v0.40.0
+	github.com/tidwall/gjson v1.18.0
 	github.com/twmb/franz-go v1.20.6
 	github.com/twmb/franz-go/pkg/kadm v1.17.2
 	go.opentelemetry.io/otel v1.40.0
@@ -63,7 +64,6 @@ require (
 	github.com/prometheus/procfs v0.16.1 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
-	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.0 // indirect
 	github.com/twmb/franz-go/pkg/kmsg v1.12.0 // indirect
