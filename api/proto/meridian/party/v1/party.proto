@@ -924,6 +924,159 @@ message GetDefaultPaymentMethodResponse {
   PartyPaymentMethod payment_method = 1 [(buf.validate.field).required = true];
 }
 
+// --- Party Type Definitions ---
+
+// PartyTypeDefinition defines a tenant-configurable schema for a party type,
+// including JSON Schema for attribute validation and CEL expressions for
+// cross-field validation, account eligibility, and custom error messages.
+message PartyTypeDefinition {
+  // id is the unique identifier for this party type definition.
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // tenant_id is the tenant that owns this party type definition.
+  string tenant_id = 2 [(buf.validate.field).string = {min_len: 1}];
+
+  // party_type is the party classification this definition applies to (e.g., "PERSON", "ORGANIZATION").
+  // Uppercase alphanumeric with underscores, max 100 characters.
+  string party_type = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[A-Z][A-Z0-9_]*$"
+  }];
+
+  // attribute_schema is a JSON Schema document defining the structure and constraints
+  // for party attributes of this type (max 16KB). Must be non-empty when provided.
+  string attribute_schema = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 16384
+  }];
+
+  // validation_cel is a CEL expression for cross-field validation of party attributes.
+  // Evaluated at party registration and update time.
+  string validation_cel = 5 [(buf.validate.field).string = {max_len: 4096}];
+
+  // eligibility_cel is a CEL expression for determining account type eligibility
+  // for parties of this type.
+  string eligibility_cel = 6 [(buf.validate.field).string = {max_len: 4096}];
+
+  // error_message_cel is a CEL expression for generating custom error messages
+  // when validation or eligibility checks fail.
+  string error_message_cel = 7 [(buf.validate.field).string = {max_len: 1024}];
+
+  // created_at is when this party type definition was created.
+  google.protobuf.Timestamp created_at = 8;
+
+  // updated_at is when this party type definition was last modified.
+  google.protobuf.Timestamp updated_at = 9;
+
+  // version is for optimistic locking.
+  int32 version = 10 [(buf.validate.field).int32 = {gte: 0}];
+}
+
+// RegisterPartyTypeRequest is the request to register a new party type definition.
+message RegisterPartyTypeRequest {
+  // party_type is the party classification this definition applies to (e.g., "PERSON", "ORGANIZATION").
+  // Uppercase alphanumeric with underscores, max 100 characters.
+  string party_type = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[A-Z][A-Z0-9_]*$"
+  }];
+
+  // attribute_schema is a JSON Schema document defining the structure and constraints
+  // for party attributes of this type (max 16KB). Must be non-empty when provided.
+  string attribute_schema = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 16384
+  }];
+
+  // validation_cel is a CEL expression for cross-field validation of party attributes.
+  string validation_cel = 3 [(buf.validate.field).string = {max_len: 4096}];
+
+  // eligibility_cel is a CEL expression for determining account type eligibility.
+  string eligibility_cel = 4 [(buf.validate.field).string = {max_len: 4096}];
+
+  // error_message_cel is a CEL expression for generating custom error messages.
+  string error_message_cel = 5 [(buf.validate.field).string = {max_len: 1024}];
+}
+
+// RegisterPartyTypeResponse is the response after registering a party type definition.
+message RegisterPartyTypeResponse {
+  // party_type_definition is the newly registered party type definition.
+  PartyTypeDefinition party_type_definition = 1 [(buf.validate.field).required = true];
+}
+
+// GetPartyTypeRequest is the request to retrieve a party type definition by ID.
+message GetPartyTypeRequest {
+  // id is the unique identifier of the party type definition to retrieve.
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+}
+
+// GetPartyTypeResponse is the response containing the requested party type definition.
+message GetPartyTypeResponse {
+  // party_type_definition is the requested party type definition.
+  PartyTypeDefinition party_type_definition = 1 [(buf.validate.field).required = true];
+}
+
+// ListPartyTypesRequest is the request to list party type definitions for the tenant.
+message ListPartyTypesRequest {
+  // party_type filters results to a specific party classification (optional).
+  // When provided, must match the pattern used in PartyTypeDefinition.party_type.
+  string party_type = 1 [(buf.validate.field).string = {
+    max_len: 100
+    pattern: "^([A-Z][A-Z0-9_]*)?$"
+  }];
+}
+
+// ListPartyTypesResponse is the response containing party type definitions.
+message ListPartyTypesResponse {
+  // party_type_definitions is the list of party type definitions for the tenant.
+  repeated PartyTypeDefinition party_type_definitions = 1;
+}
+
+// UpdatePartyTypeRequest is the request to update a party type definition.
+message UpdatePartyTypeRequest {
+  // id is the unique identifier of the party type definition to update.
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // update_mask specifies which fields to update (partial update support).
+  // Supported paths: "attribute_schema", "validation_cel", "eligibility_cel", "error_message_cel".
+  google.protobuf.FieldMask update_mask = 2;
+
+  // attribute_schema is the updated JSON Schema document (optional, max 16KB).
+  string attribute_schema = 3 [(buf.validate.field).string = {max_len: 16384}];
+
+  // validation_cel is the updated cross-field validation CEL expression (optional).
+  string validation_cel = 4 [(buf.validate.field).string = {max_len: 4096}];
+
+  // eligibility_cel is the updated account eligibility CEL expression (optional).
+  string eligibility_cel = 5 [(buf.validate.field).string = {max_len: 4096}];
+
+  // error_message_cel is the updated custom error message CEL expression (optional).
+  string error_message_cel = 6 [(buf.validate.field).string = {max_len: 1024}];
+
+  // version is for optimistic locking.
+  int32 version = 7 [(buf.validate.field).int32 = {gte: 0}];
+}
+
+// UpdatePartyTypeResponse is the response after updating a party type definition.
+message UpdatePartyTypeResponse {
+  // party_type_definition is the updated party type definition.
+  PartyTypeDefinition party_type_definition = 1 [(buf.validate.field).required = true];
+}
+
 // PartyService provides BIAN-compliant party reference data management.
 //
 // Design Notes:
@@ -1122,6 +1275,46 @@ service PartyService {
   rpc GetDefaultPaymentMethod(GetDefaultPaymentMethodRequest) returns (GetDefaultPaymentMethodResponse) {
     option (google.api.http) = {
       get: "/v1/parties/{party_id}/payment-methods/default"
+    };
+  }
+
+  // --- Party Type Definition Operations ---
+
+  // RegisterPartyType creates a new tenant-configurable party type definition.
+  rpc RegisterPartyType(RegisterPartyTypeRequest) returns (RegisterPartyTypeResponse) {
+    option (google.api.http) = {
+      post: "/v1/party-types"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      responses: {
+        key: "201"
+        value: {
+          description: "Party type definition registered successfully"
+        }
+      }
+    };
+  }
+
+  // GetPartyType retrieves a party type definition by ID.
+  rpc GetPartyType(GetPartyTypeRequest) returns (GetPartyTypeResponse) {
+    option (google.api.http) = {
+      get: "/v1/party-types/{id}"
+    };
+  }
+
+  // ListPartyTypes lists all party type definitions for the tenant.
+  rpc ListPartyTypes(ListPartyTypesRequest) returns (ListPartyTypesResponse) {
+    option (google.api.http) = {
+      get: "/v1/party-types"
+    };
+  }
+
+  // UpdatePartyType updates a party type definition.
+  rpc UpdatePartyType(UpdatePartyTypeRequest) returns (UpdatePartyTypeResponse) {
+    option (google.api.http) = {
+      patch: "/v1/party-types/{id}"
+      body: "*"
     };
   }
 }
