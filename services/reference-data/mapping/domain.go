@@ -2,6 +2,7 @@
 package mapping
 
 import (
+	"bytes"
 	"encoding/json"
 	"time"
 
@@ -17,6 +18,21 @@ const (
 	StatusActive     Status = "ACTIVE"
 	StatusDeprecated Status = "DEPRECATED"
 )
+
+// CanTransitionTo returns true if transitioning from s to next is a valid lifecycle step.
+// Allowed transitions: DRAFT → ACTIVE, ACTIVE → DEPRECATED.
+func (s Status) CanTransitionTo(next Status) bool {
+	switch s {
+	case StatusDraft:
+		return next == StatusActive
+	case StatusActive:
+		return next == StatusDeprecated
+	case StatusDeprecated:
+		return false
+	default:
+		return false
+	}
+}
 
 // CelTransform holds bidirectional CEL expressions for a field.
 type CelTransform struct {
@@ -151,11 +167,12 @@ func MarshalIdempotency(cfg *IdempotencyConfig) (json.RawMessage, error) {
 
 // UnmarshalIdempotency deserializes the IdempotencyConfig JSON from storage.
 func UnmarshalIdempotency(data []byte) (*IdempotencyConfig, error) {
-	if len(data) == 0 {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
 		return nil, nil //nolint:nilnil // nil config with nil error signals "no idempotency config stored"
 	}
 	var cfg IdempotencyConfig
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	if err := json.Unmarshal(trimmed, &cfg); err != nil {
 		return nil, err
 	}
 	return &cfg, nil

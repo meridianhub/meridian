@@ -42,6 +42,9 @@ var (
 	// ErrOptimisticLock is returned when an optimistic-lock conflict is detected on update.
 	ErrOptimisticLock = errors.New("mapping definition was modified by another transaction")
 
+	// ErrInvalidStatusTransition is returned when a status transition violates the lifecycle.
+	ErrInvalidStatusTransition = errors.New("invalid status transition")
+
 	// ErrTransformVariantRequired is returned when a FieldTransform has no variant set.
 	ErrTransformVariantRequired = errors.New("at least one transform variant must be set")
 

@@ -263,7 +263,7 @@ func (r *PostgresRepository) ListByTenant(ctx context.Context, statusFilter Stat
 				created_at, updated_at
 			FROM mapping_definition
 			WHERE 1=1%s
-			ORDER BY name, version DESC
+			ORDER BY id
 			LIMIT $%d`, whereClause, argIdx)
 
 		rows, err := tx.Query(ctx, listQuery, args...)
@@ -358,6 +358,7 @@ func (r *PostgresRepository) Update(ctx context.Context, def *Definition, expect
 }
 
 // UpdateStatus transitions the status of a mapping definition.
+// Enforces lifecycle: DRAFT → ACTIVE → DEPRECATED.
 func (r *PostgresRepository) UpdateStatus(ctx context.Context, id uuid.UUID, newStatus Status) error {
 	return r.withWriteTx(ctx, func(tx pgx.Tx) error {
 		var currentStatus string
@@ -367,6 +368,11 @@ func (r *PostgresRepository) UpdateStatus(ctx context.Context, id uuid.UUID, new
 				return ErrNotFound
 			}
 			return fmt.Errorf("failed to fetch mapping status: %w", err)
+		}
+
+		current := Status(currentStatus)
+		if !current.CanTransitionTo(newStatus) {
+			return fmt.Errorf("%w: %s → %s", ErrInvalidStatusTransition, current, newStatus)
 		}
 
 		now := time.Now().UTC()
@@ -380,11 +386,12 @@ func (r *PostgresRepository) UpdateStatus(ctx context.Context, id uuid.UUID, new
 }
 
 // Delete removes a DRAFT or DEPRECATED mapping definition. Returns ErrNotActive if ACTIVE.
+// Uses SELECT FOR UPDATE to prevent a concurrent activation racing the delete.
 func (r *PostgresRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	return r.withWriteTx(ctx, func(tx pgx.Tx) error {
 		var currentStatus string
-		checkQuery := sqlFetchStatus
-		if err := tx.QueryRow(ctx, checkQuery, id).Scan(&currentStatus); err != nil {
+		lockQuery := `SELECT status FROM mapping_definition WHERE id = $1 FOR UPDATE`
+		if err := tx.QueryRow(ctx, lockQuery, id).Scan(&currentStatus); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrNotFound
 			}

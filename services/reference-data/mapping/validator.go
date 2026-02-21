@@ -92,6 +92,12 @@ func (v *Validator) validateFields(fields []FieldCorrespondence) error {
 		if !isValidGjsonPath(f.ExternalPath) {
 			return fmt.Errorf("%w: fields[%d].external_path %q", ErrInvalidGjsonPath, i, f.ExternalPath)
 		}
+		if strings.TrimSpace(f.InternalPath) == "" {
+			return fmt.Errorf("%w: fields[%d].internal_path is required", ErrInvalidGjsonPath, i)
+		}
+		if !isValidGjsonPath(f.InternalPath) {
+			return fmt.Errorf("%w: fields[%d].internal_path %q", ErrInvalidGjsonPath, i, f.InternalPath)
+		}
 		if externalPaths[f.ExternalPath] {
 			return fmt.Errorf("%w: %q", ErrDuplicateExternalPath, f.ExternalPath)
 		}

@@ -13,6 +13,7 @@ import (
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/mapping/v1"
 	"github.com/meridianhub/meridian/services/reference-data/mapping"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
 // MappingService implements MappingServiceServer for MappingDefinition CRUD.
@@ -237,6 +238,7 @@ func (s *MappingService) mapDomainError(ctx context.Context, err error, operatio
 	}
 
 	errorMappings := []errorEntry{
+		{tenant.ErrMissingTenantContext, codes.Unauthenticated, "missing tenant context", slog.LevelWarn},
 		{mapping.ErrNotFound, codes.NotFound, "mapping definition not found", slog.LevelWarn},
 		{mapping.ErrNotDraft, codes.FailedPrecondition, "mapping definition must be in DRAFT status", slog.LevelWarn},
 		{mapping.ErrNotActive, codes.FailedPrecondition, "mapping definition must be in ACTIVE status", slog.LevelWarn},
@@ -249,6 +251,7 @@ func (s *MappingService) mapDomainError(ctx context.Context, err error, operatio
 		{mapping.ErrBatchTargetPathRequired, codes.InvalidArgument, "batch_target_path required", slog.LevelWarn},
 		{mapping.ErrIdempotencyConfig, codes.InvalidArgument, "invalid idempotency config", slog.LevelWarn},
 		{mapping.ErrOptimisticLock, codes.Aborted, "mapping definition was modified concurrently", slog.LevelWarn},
+		{mapping.ErrInvalidStatusTransition, codes.FailedPrecondition, "invalid status transition", slog.LevelWarn},
 	}
 
 	for _, m := range errorMappings {
