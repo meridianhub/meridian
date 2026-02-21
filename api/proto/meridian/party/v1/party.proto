@@ -941,11 +941,19 @@ message PartyTypeDefinition {
   string tenant_id = 2 [(buf.validate.field).string = {min_len: 1}];
 
   // party_type is the party classification this definition applies to (e.g., "PERSON", "ORGANIZATION").
-  string party_type = 3 [(buf.validate.field).string = {min_len: 1}];
+  // Uppercase alphanumeric with underscores, max 100 characters.
+  string party_type = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[A-Z][A-Z0-9_]*$"
+  }];
 
   // attribute_schema is a JSON Schema document defining the structure and constraints
-  // for party attributes of this type (max 16KB).
-  string attribute_schema = 4 [(buf.validate.field).string = {max_len: 16384}];
+  // for party attributes of this type (max 16KB). Must be non-empty when provided.
+  string attribute_schema = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 16384
+  }];
 
   // validation_cel is a CEL expression for cross-field validation of party attributes.
   // Evaluated at party registration and update time.
@@ -972,11 +980,19 @@ message PartyTypeDefinition {
 // RegisterPartyTypeRequest is the request to register a new party type definition.
 message RegisterPartyTypeRequest {
   // party_type is the party classification this definition applies to (e.g., "PERSON", "ORGANIZATION").
-  string party_type = 1 [(buf.validate.field).string = {min_len: 1}];
+  // Uppercase alphanumeric with underscores, max 100 characters.
+  string party_type = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[A-Z][A-Z0-9_]*$"
+  }];
 
   // attribute_schema is a JSON Schema document defining the structure and constraints
-  // for party attributes of this type (max 16KB).
-  string attribute_schema = 2 [(buf.validate.field).string = {max_len: 16384}];
+  // for party attributes of this type (max 16KB). Must be non-empty when provided.
+  string attribute_schema = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 16384
+  }];
 
   // validation_cel is a CEL expression for cross-field validation of party attributes.
   string validation_cel = 3 [(buf.validate.field).string = {max_len: 4096}];
@@ -1013,7 +1029,11 @@ message GetPartyTypeResponse {
 // ListPartyTypesRequest is the request to list party type definitions for the tenant.
 message ListPartyTypesRequest {
   // party_type filters results to a specific party classification (optional).
-  string party_type = 1 [(buf.validate.field).string = {max_len: 100}];
+  // When provided, must match the pattern used in PartyTypeDefinition.party_type.
+  string party_type = 1 [(buf.validate.field).string = {
+    max_len: 100
+    pattern: "^([A-Z][A-Z0-9_]*)?$"
+  }];
 }
 
 // ListPartyTypesResponse is the response containing party type definitions.
