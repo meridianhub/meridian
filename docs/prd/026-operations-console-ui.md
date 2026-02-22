@@ -312,7 +312,7 @@ The codebase contains 14 service directories. Here is how they map to UI pages:
 | internal-bank-account | Internal Accounts | Both |
 | forecasting | Forecasting | Both |
 | tenant | Tenant Management | Platform only |
-| gateway | (infrastructure, no UI) | — |
+| gateway (mapping service) | Gateway Mappings | Both |
 | control-plane | Platform Monitoring | Platform only |
 | audit-worker | Audit Log | Both |
 | utilization-metering-consumer | (background, no direct UI) | — |
@@ -960,6 +960,104 @@ The checklist persists in the browser's session storage and
 appears as a collapsible panel on the relevant pages during
 an active configuration session.
 
+### 4.18 Gateway Mappings
+
+**Lens:** Both
+
+**Purpose:** Define and manage bidirectional JSON-to-gRPC
+field mappings for external integrations. Operators can
+create mappings that transform external JSON payloads
+(webhooks from Stripe, partner APIs, IoT devices) into
+internal gRPC calls and vice versa — without writing code.
+
+**Layout:**
+
+- **List view:** DataTable with columns: Name, Target
+  Service, Target RPC, Version, Status (DRAFT/ACTIVE/
+  DEPRECATED), Updated. Filterable by status and target
+  service.
+- **Detail view:** Mapping header with tabs:
+  - **Field Correspondences:** Visual field mapper showing
+    external JSON paths (gjson syntax) mapped to internal
+    proto paths. Each row shows the source path, target
+    path, and transform type (CEL, enum mapping, date
+    format, default value, attribute flatten).
+  - **Transforms:** Expand each field correspondence to
+    edit its transform:
+    - **CEL Transform:** Bidirectional CEL expressions
+      (inbound_cel / outbound_cel) with `CELEditor`
+    - **Enum Mapping:** Table of external-to-internal
+      value pairs with fallback values
+    - **Date Format:** Go time layout string
+    - **Default Value:** Literal fallback when source
+      is absent
+    - **Attribute Flatten:** Collect multiple gjson paths
+      into a single map field
+  - **Computed Fields:** Separate inbound and outbound
+    computed fields with CEL expressions (e.g.,
+    `target_path: "created_at"`, `cel: "now()"`)
+  - **Validation:** Inbound and outbound CEL validation
+    expressions with `CELEditor`
+  - **Idempotency:** Configure key derivation — either a
+    gjson source selector or content hash from specified
+    fields
+  - **Batch Config:** Toggle batch mode and set the gjson
+    path to the array in the payload
+  - **JSON Schema:** External schema editor for
+    documenting the expected inbound/outbound format
+- **Dry Run Playground:** The key testing feature. Paste
+  sample JSON, select direction (inbound/outbound), and
+  call `DryRunMapping`. Results show:
+  - Transformed output JSON (pretty-printed)
+  - Derived idempotency key
+  - Validation result (passed/failed with error messages)
+  - Execution time in milliseconds
+  - **Field mapping trace:** Per-field log showing source
+    path, target path, source value, transformed value,
+    and transform type — essential for debugging
+  - Transform error (if any, after validation passed)
+- **Actions:** Create mapping (DRAFT), edit (DRAFT only),
+  activate (DRAFT to ACTIVE), deprecate (ACTIVE to
+  DEPRECATED), delete (DRAFT or DEPRECATED only), dry run.
+
+**Lifecycle:**
+
+```mermaid
+stateDiagram-v2
+    [*] --> DRAFT: CreateMapping
+    DRAFT --> ACTIVE: Activate
+    DRAFT --> [*]: DeleteMapping
+    ACTIVE --> DEPRECATED: DeprecateMapping
+    DEPRECATED --> [*]: DeleteMapping
+```
+
+**RPCs consumed:**
+
+- `MappingService.CreateMapping`
+- `MappingService.GetMapping`
+- `MappingService.ListMappings`
+- `MappingService.UpdateMapping` (field mask for partial
+  updates, DRAFT only)
+- `MappingService.DeleteMapping` (DRAFT or DEPRECATED only)
+- `MappingService.DryRunMapping` (test transformation
+  pipeline)
+
+**Design notes:**
+
+- The field mapper UI should visualize the gjson path
+  syntax with helpful examples (dot notation,
+  `items.#.price` for array access, `@flatten` modifiers)
+- The dry run playground is the primary testing tool —
+  operators should be able to iterate on mappings and
+  see results immediately without activating
+- Version management: multiple versions per mapping name,
+  but only one ACTIVE version at a time
+- Batch mode visualization: show how array payloads get
+  split into individual RPC calls
+
+**Real-time candidates:** None (configuration workflow,
+not operational data).
+
 ---
 
 ## 5. Real-Time Readiness
@@ -1449,6 +1547,10 @@ frontend/
 │   │   │   │   └── [code].tsx      # Account type detail + CEL policies
 │   │   │   └── nodes/
 │   │   │       └── index.tsx       # Hierarchical tree browser
+│   │   ├── mappings/
+│   │   │   ├── index.tsx           # Mapping list
+│   │   │   ├── [mappingId].tsx     # Mapping detail + field editor
+│   │   │   └── dry-run.tsx         # Dry run playground
 │   │   ├── starlark/
 │   │   │   ├── index.tsx           # List (defaults or overrides)
 │   │   │   └── [sagaId].tsx        # Detail/editor
@@ -1472,6 +1574,7 @@ frontend/
 │   │   ├── use-instruments.ts     # React Query hooks for instrument CRUD
 │   │   ├── use-account-types.ts   # React Query hooks for account type CRUD
 │   │   ├── use-reference-nodes.ts # React Query hooks for reference data nodes
+│   │   ├── use-mappings.ts        # React Query hooks for mapping CRUD + dry run
 │   │   ├── use-auth.ts             # JWT decode, role checks
 │   │   ├── use-tenant-context.ts   # Current tenant slug, switching
 │   │   └── use-event-stream.ts     # WebSocket integration (stub until PRD-025)
@@ -1613,6 +1716,9 @@ tools are available.
     with bi-temporal queries.
 12. **CELEditor component:** Shared CEL expression editor
     with variable reference and security constraint hints.
+13. **Gateway Mappings page:** Mapping list, field
+    correspondence editor, transform configuration, dry
+    run playground with field mapping trace.
 
 ### Phase 3: Real-Time + Starlark Editor + Product Workflow
 
@@ -1855,7 +1961,18 @@ Every RPC in the system mapped to its UI surface:
 | GetNodeHistory | Reference Nodes | History view |
 | ImportNodes | Reference Nodes | Batch import |
 
-**Total: 124 RPCs across 14 services, all mapped to UI
+### Mapping Service (6 RPCs)
+
+| RPC | UI Page | Action Type |
+|-----|---------|------------|
+| CreateMapping | Gateway Mappings | Create form |
+| GetMapping | Gateway Mappings | Detail view |
+| ListMappings | Gateway Mappings | List view |
+| UpdateMapping | Gateway Mappings | Edit form |
+| DeleteMapping | Gateway Mappings | Action button |
+| DryRunMapping | Gateway Mappings | Dry run playground |
+
+**Total: 130 RPCs across 15 services, all mapped to UI
 surfaces.**
 
 ---
