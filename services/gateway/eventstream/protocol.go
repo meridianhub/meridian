@@ -104,7 +104,8 @@ type EventPayload struct {
 	AggregateType string `json:"aggregate_type,omitempty"`
 
 	// TenantID identifies the tenant that owns this event.
-	TenantID string `json:"tenant_id,omitempty"`
+	// Always present: domain.NewDomainEvent enforces a non-empty tenant ID.
+	TenantID string `json:"tenant_id"`
 
 	// CorrelationID links related events across services.
 	CorrelationID string `json:"correlation_id,omitempty"`
