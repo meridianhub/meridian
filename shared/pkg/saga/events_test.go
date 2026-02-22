@@ -153,7 +153,7 @@ func TestOutboxEventPublisher_PublishProgress(t *testing.T) {
 		},
 	}
 
-	publisher := NewOutboxEventPublisher(mockWriter, "saga-events", "saga-service")
+	publisher := NewOutboxEventPublisher(mockWriter, "saga.events.v1", "saga-service")
 
 	ctx := context.Background()
 	sagaID := uuid.New()
@@ -166,7 +166,7 @@ func TestOutboxEventPublisher_PublishProgress(t *testing.T) {
 	require.Len(t, writtenEntries, 1)
 	entry := writtenEntries[0]
 
-	assert.Equal(t, "saga-events", entry.Topic)
+	assert.Equal(t, "saga.events.v1", entry.Topic)
 	assert.Equal(t, "saga-service", entry.ServiceName)
 	assert.Equal(t, correlationID.String(), entry.CorrelationID)
 	assert.Equal(t, sagaID.String(), entry.AggregateID)
@@ -222,7 +222,7 @@ func TestTxContext_WithOutbox(t *testing.T) {
 		AggregateID:   sagaID.String(),
 		AggregateType: "SagaInstance",
 		CorrelationID: correlationID.String(),
-		Topic:         "saga-events",
+		Topic:         "saga.events.v1",
 		ServiceName:   "test-service",
 	}
 

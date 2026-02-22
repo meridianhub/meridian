@@ -23,7 +23,7 @@ configMapGenerator:
   behavior: merge
   literals:
   - service_name=position-keeping
-  - audit_topic=audit.events.position-keeping
+  - audit_topic=audit.events.position-keeping.v1
   - kafka_group_id=audit-consumer-position-keeping
   - kafka_client_id=audit-consumer-position-keeping
 

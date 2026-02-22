@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	marketinformationv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
 	"github.com/meridianhub/meridian/services/market-information/domain"
@@ -14,7 +15,12 @@ import (
 
 const (
 	// ObservationRecordedTopic is the Kafka topic for observation recorded events.
-	ObservationRecordedTopic = "meridian.market_information.v1.ObservationRecorded"
+	// Named using the service-name.event-name.v1 convention for channel derivation.
+	ObservationRecordedTopic = "market-information.observation-recorded.v1"
+
+	// DeprecatedObservationRecordedTopic is the old topic name retained for
+	// dual-publish during migration.
+	DeprecatedObservationRecordedTopic = "meridian.market_information.v1.ObservationRecorded"
 )
 
 var (
@@ -60,8 +66,9 @@ type protoPublisher interface {
 // KafkaObservationPublisher publishes observation domain events to Kafka topics.
 // It uses the protoPublisher interface for reliable message delivery with tenant isolation.
 type KafkaObservationPublisher struct {
-	producer protoPublisher
-	topic    string
+	producer        protoPublisher
+	topic           string
+	deprecatedTopic string
 }
 
 // NewKafkaObservationPublisher creates a new Kafka-based observation event publisher.
@@ -76,8 +83,9 @@ func NewKafkaObservationPublisher(producer protoPublisher) (*KafkaObservationPub
 	}
 
 	return &KafkaObservationPublisher{
-		producer: producer,
-		topic:    ObservationRecordedTopic,
+		producer:        producer,
+		topic:           ObservationRecordedTopic,
+		deprecatedTopic: DeprecatedObservationRecordedTopic,
 	}, nil
 }
 
@@ -104,6 +112,16 @@ func (p *KafkaObservationPublisher) PublishObservationRecorded(
 	if err := p.producer.PublishWithTenant(ctx, p.topic, partitionKey, event); err != nil {
 		return fmt.Errorf("failed to publish ObservationRecorded event for observation %s: %w",
 			observation.ID().String(), err)
+	}
+
+	// Dual-publish to deprecated topic for migration backwards compatibility
+	if p.deprecatedTopic != "" {
+		if err := p.producer.PublishWithTenant(ctx, p.deprecatedTopic, partitionKey, event); err != nil {
+			slog.Warn("failed to publish ObservationRecorded to deprecated topic",
+				"topic", p.deprecatedTopic,
+				"error", err,
+			)
+		}
 	}
 
 	return nil
@@ -133,6 +151,15 @@ func (p *KafkaObservationPublisher) Publish(ctx context.Context, event any) erro
 		partitionKey := e.DatasetCode
 		if err := p.producer.PublishWithTenant(ctx, p.topic, partitionKey, e); err != nil {
 			return fmt.Errorf("failed to publish ObservationRecorded event: %w", err)
+		}
+		// Dual-publish to deprecated topic for migration backwards compatibility
+		if p.deprecatedTopic != "" {
+			if err := p.producer.PublishWithTenant(ctx, p.deprecatedTopic, partitionKey, e); err != nil {
+				slog.Warn("failed to publish ObservationRecorded to deprecated topic",
+					"topic", p.deprecatedTopic,
+					"error", err,
+				)
+			}
 		}
 		return nil
 	default:

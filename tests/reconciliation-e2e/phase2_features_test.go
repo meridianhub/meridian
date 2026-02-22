@@ -55,7 +55,7 @@ func TestBalanceAssertionGRPC_Balanced(t *testing.T) {
 	assert.Equal(t, domain.AssertionStatusPassed, persisted.Status)
 
 	// Verify no imbalance event published
-	imbalanceEvents := infra.mockPublisher.getEventsByTopic("reconciliation.balance.imbalance.detected")
+	imbalanceEvents := infra.mockPublisher.getEventsByTopic("reconciliation.balance-imbalance-detected.v1")
 	assert.Empty(t, imbalanceEvents, "no imbalance event for balanced positions")
 }
 
@@ -91,7 +91,7 @@ func TestBalanceAssertionGRPC_Imbalanced(t *testing.T) {
 	assert.Equal(t, domain.AssertionStatusFailed, persisted.Status)
 
 	// Verify imbalance event was published
-	imbalanceEvents := infra.mockPublisher.getEventsByTopic("reconciliation.balance.imbalance.detected")
+	imbalanceEvents := infra.mockPublisher.getEventsByTopic("reconciliation.balance-imbalance-detected.v1")
 	require.Len(t, imbalanceEvents, 1)
 
 	// Verify trend tracking was started
@@ -227,7 +227,7 @@ func TestKafkaEventPublishing_FullPipeline(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify finalization event was published through the mock publisher
-	lockEvents := infra.mockPublisher.getEventsByTopic("reconciliation.position.lock.requested")
+	lockEvents := infra.mockPublisher.getEventsByTopic("reconciliation.position-lock-requested.v1")
 	require.Len(t, lockEvents, 1, "finalizer should publish a lock event via the publisher")
 
 	// Verify final state
@@ -658,7 +658,7 @@ func TestCrossFeature_PipelineWithAssertionAndEvents(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify finalization events
-	lockEvents := infra.mockPublisher.getEventsByTopic("reconciliation.position.lock.requested")
+	lockEvents := infra.mockPublisher.getEventsByTopic("reconciliation.position-lock-requested.v1")
 	assert.Len(t, lockEvents, 1)
 
 	// Phase 4: Balance assertion via gRPC

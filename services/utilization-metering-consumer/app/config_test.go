@@ -52,14 +52,14 @@ func TestLoadConfig_Success(t *testing.T) {
 	if config.TenantZeroID != "00000000-0000-0000-0000-000000000000" {
 		t.Errorf("Expected TenantZeroID to be '00000000-0000-0000-0000-000000000000', got '%s'", config.TenantZeroID)
 	}
-	// Verify default audit topics (6 services)
+	// Verify default audit topics (6 services, service-name.event-name.v1 convention)
 	expectedTopics := []string{
-		"current-account.audit.events",
-		"financial-accounting.audit.events",
-		"position-keeping.audit.events",
-		"party.audit.events",
-		"payment-order.audit.events",
-		"tenant.audit.events",
+		"audit.events.current-account.v1",
+		"audit.events.financial-accounting.v1",
+		"audit.events.position-keeping.v1",
+		"audit.events.party.v1",
+		"audit.events.payment-order.v1",
+		"audit.events.tenant.v1",
 	}
 	if len(config.AuditTopics) != len(expectedTopics) {
 		t.Errorf("Expected %d audit topics, got %d", len(expectedTopics), len(config.AuditTopics))

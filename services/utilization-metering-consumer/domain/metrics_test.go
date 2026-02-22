@@ -41,7 +41,7 @@ func TestRecordEventConsumed(t *testing.T) {
 	eventsConsumedTotal.Reset()
 
 	service := "current-account"
-	topic := "current-account.audit.events"
+	topic := "audit.events.current-account.v1"
 
 	RecordEventConsumed(service, topic)
 
@@ -103,7 +103,7 @@ func TestRecordPositionKeepingAPIError(t *testing.T) {
 }
 
 func TestRecordKafkaConsumerLag(t *testing.T) {
-	topic := "tenant.audit.events"
+	topic := "audit.events.tenant.v1"
 	partition := "0"
 	lag := 1500.0
 

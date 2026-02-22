@@ -198,7 +198,7 @@ func RecordTenantAuditWriteDuration(tenantID string, duration time.Duration) {
 }
 
 // RecordConsumerLag sets the current consumer lag for the topic.
-// topic should be the Kafka topic name (e.g., "audit.events.current-account").
+// topic should be the Kafka topic name (e.g., "audit.events.current-account.v1").
 // lag is the number of messages behind the latest offset.
 func RecordConsumerLag(topic string, lag float64) {
 	withServiceName(func(svcName string) {

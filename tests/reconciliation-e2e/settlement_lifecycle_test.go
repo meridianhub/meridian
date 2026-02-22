@@ -162,7 +162,7 @@ func TestSettlementLifecycle_FullCycle(t *testing.T) {
 	assert.Equal(t, run3.RunID, lockCalls[0].RunID)
 
 	// Verify finalization event was published
-	lockEvents := infra.mockPublisher.getEventsByTopic("reconciliation.position.lock.requested")
+	lockEvents := infra.mockPublisher.getEventsByTopic("reconciliation.position-lock-requested.v1")
 	assert.Len(t, lockEvents, 1)
 }
 
@@ -316,7 +316,7 @@ func TestSettlementLifecycle_FinalizeIdempotent(t *testing.T) {
 	require.NoError(t, err)
 
 	// No new lock events should be published for idempotent call
-	lockEvents := infra.mockPublisher.getEventsByTopic("reconciliation.position.lock.requested")
+	lockEvents := infra.mockPublisher.getEventsByTopic("reconciliation.position-lock-requested.v1")
 	assert.Empty(t, lockEvents, "idempotent finalization should not publish new events")
 }
 

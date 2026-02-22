@@ -519,12 +519,12 @@ func TestAuditConsumer_Start(t *testing.T) {
 	}()
 
 	topics := []string{
-		"current-account.audit.events",
-		"financial-accounting.audit.events",
-		"position-keeping.audit.events",
-		"party.audit.events",
-		"payment-order.audit.events",
-		"tenant.audit.events",
+		"audit.events.current-account.v1",
+		"audit.events.financial-accounting.v1",
+		"audit.events.position-keeping.v1",
+		"audit.events.party.v1",
+		"audit.events.payment-order.v1",
+		"audit.events.tenant.v1",
 	}
 
 	// Start in a goroutine with timeout since Start blocks

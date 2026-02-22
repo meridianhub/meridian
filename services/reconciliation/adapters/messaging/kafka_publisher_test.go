@@ -14,6 +14,47 @@ func TestNoopPublisher_Publish(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestTopicConstants_FollowNamingConvention(t *testing.T) {
+	// Verify all topic constants follow service-name.event-name.v1 convention
+	topics := map[string]string{
+		"TopicReconciliationRunStarted":   TopicReconciliationRunStarted,
+		"TopicReconciliationRunCompleted": TopicReconciliationRunCompleted,
+		"TopicVarianceDetected":           TopicVarianceDetected,
+		"TopicPositionLockRequested":      TopicPositionLockRequested,
+		"TopicDisputeCreated":             TopicDisputeCreated,
+		"TopicDisputeResolved":            TopicDisputeResolved,
+	}
+
+	for name, topic := range topics {
+		assert.Regexp(t, `^reconciliation\.[a-z-]+\.v1$`, topic,
+			"%s should follow service-name.event-name.v1 convention", name)
+	}
+}
+
+func TestDeprecatedTopicFor(t *testing.T) {
+	tests := []struct {
+		newTopic        string
+		deprecatedTopic string
+	}{
+		{TopicReconciliationRunStarted, DeprecatedTopicReconciliationRunStarted},
+		{TopicReconciliationRunCompleted, DeprecatedTopicReconciliationRunCompleted},
+		{TopicVarianceDetected, DeprecatedTopicVarianceDetected},
+		{TopicPositionLockRequested, DeprecatedTopicPositionLockRequested},
+		{TopicDisputeCreated, DeprecatedTopicDisputeCreated},
+		{TopicDisputeResolved, DeprecatedTopicDisputeResolved},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.newTopic, func(t *testing.T) {
+			got := deprecatedTopicFor(tt.newTopic)
+			assert.Equal(t, tt.deprecatedTopic, got)
+		})
+	}
+
+	// Unknown topic returns empty string
+	assert.Empty(t, deprecatedTopicFor("unknown.topic"))
+}
+
 func TestExtractPartitionKey(t *testing.T) {
 	tests := []struct {
 		name     string
