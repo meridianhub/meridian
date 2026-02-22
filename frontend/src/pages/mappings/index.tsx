@@ -1,0 +1,134 @@
+import * as React from 'react'
+import { useNavigate } from 'react-router-dom'
+import type { ColumnDef } from '@tanstack/react-table'
+import { DataTable } from '@/components/shared/data-table'
+import { TimeDisplay } from '@/components/shared/time-display'
+import { StatusBadge } from '@/components/shared/status-badge'
+import { useApiClients } from '@/api/context'
+import { Card } from '@/components/ui/card'
+
+export interface MappingDefinition {
+  id: string
+  name: string
+  targetService: string
+  targetRpc: string
+  version: number
+  status: string
+  createdAt?: { seconds: bigint | number; nanos?: number }
+  updatedAt?: { seconds: bigint | number; nanos?: number }
+}
+
+interface ListMappingsParams {
+  pageToken?: string
+  pageSize: number
+  filters?: Record<string, string>
+}
+
+interface ListMappingsResult {
+  items: MappingDefinition[]
+  nextPageToken?: string
+}
+
+export function MappingsPage() {
+  const navigate = useNavigate()
+  const clients = useApiClients()
+
+  const columns: ColumnDef<MappingDefinition>[] = [
+    {
+      accessorKey: 'name',
+      header: 'Name',
+      cell: ({ row }) => (
+        <span className="font-medium">{row.original.name}</span>
+      ),
+    },
+    {
+      accessorKey: 'targetService',
+      header: 'Target Service',
+      cell: ({ row }) => (
+        <span className="font-mono text-xs text-muted-foreground">
+          {row.original.targetService}
+        </span>
+      ),
+    },
+    {
+      accessorKey: 'targetRpc',
+      header: 'Target RPC',
+      cell: ({ row }) => (
+        <span className="font-mono text-xs">{row.original.targetRpc}</span>
+      ),
+    },
+    {
+      accessorKey: 'version',
+      header: 'Version',
+      cell: ({ row }) => `v${row.original.version}`,
+    },
+    {
+      accessorKey: 'status',
+      header: 'Status',
+      cell: ({ row }) => {
+        const raw = row.original.status
+        // Strip the MAPPING_STATUS_ prefix for display
+        const display = raw.replace(/^MAPPING_STATUS_/, '')
+        return <StatusBadge status={display} />
+      },
+    },
+    {
+      accessorKey: 'updatedAt',
+      header: 'Updated',
+      cell: ({ row }) => <TimeDisplay timestamp={row.original.updatedAt} />,
+    },
+  ]
+
+  const filters = [
+    {
+      field: 'status',
+      label: 'Status',
+      type: 'select' as const,
+      options: [
+        { label: 'Draft', value: 'MAPPING_STATUS_DRAFT' },
+        { label: 'Active', value: 'MAPPING_STATUS_ACTIVE' },
+        { label: 'Deprecated', value: 'MAPPING_STATUS_DEPRECATED' },
+      ],
+    },
+  ]
+
+  const queryFn = async (params: ListMappingsParams): Promise<ListMappingsResult> => {
+    const response = await clients.mapping.listMappings({
+      pageToken: params.pageToken,
+      pageSize: params.pageSize,
+      status: params.filters?.status ? (params.filters.status as never) : undefined,
+    })
+
+    return {
+      items: (response.mappings ?? []) as MappingDefinition[],
+      nextPageToken: response.nextPageToken,
+    }
+  }
+
+  const handleRowClick = (mapping: MappingDefinition) => {
+    navigate(`/gateway-mappings/${mapping.id}`)
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">Gateway Mappings</h1>
+        <p className="mt-2 text-muted-foreground">
+          Manage field correspondence mappings between external JSON payloads and internal Meridian
+          services.
+        </p>
+      </div>
+
+      <Card className="p-6">
+        <DataTable
+          queryKey={['mappings']}
+          queryFn={queryFn}
+          columns={columns}
+          pageSize={25}
+          filters={filters}
+          onRowClick={handleRowClick}
+        />
+      </Card>
+    </div>
+  )
+}

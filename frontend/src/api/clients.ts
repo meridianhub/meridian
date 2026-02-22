@@ -14,6 +14,7 @@ import { AccountTypeRegistryService } from './gen/meridian/reference_data/v1/acc
 import { NodeService } from './gen/meridian/reference_data/v1/node_pb'
 import { InternalBankAccountService } from './gen/meridian/internal_bank_account/v1/internal_bank_account_pb'
 import { MarketInformationService } from './gen/meridian/market_information/v1/market_information_pb'
+import { MappingService } from './gen/meridian/mapping/v1/mapping_pb'
 import { ForecastingService } from './gen/meridian/forecasting/v1/forecasting_pb'
 
 export function createServiceClients(transport: Transport) {
@@ -32,6 +33,7 @@ export function createServiceClients(transport: Transport) {
     node: createClient(NodeService, transport),
     internalBankAccount: createClient(InternalBankAccountService, transport),
     marketInformation: createClient(MarketInformationService, transport),
+    mapping: createClient(MappingService, transport),
     forecasting: createClient(ForecastingService, transport),
   }
 }

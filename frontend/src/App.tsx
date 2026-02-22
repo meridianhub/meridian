@@ -22,9 +22,10 @@ import { PartyDetailPage } from '@/pages/parties/[partyId]'
 import { AuditLogPage } from '@/pages/audit'
 import { StarlarkConfigPage } from '@/pages/starlark/index'
 import { StarlarkDetailPage } from '@/pages/starlark/detail'
-import { useAuth } from '@/contexts/auth-context'
 import { PositionsPage } from '@/pages/positions'
 import { PositionDetailPage } from '@/pages/positions/detail'
+import { MappingsPage } from '@/pages/mappings'
+import { MappingDetailPage } from '@/pages/mappings/[mappingId]'
 import { InstrumentsPage } from '@/pages/reference-data/instruments'
 import { AccountTypesPage } from '@/pages/reference-data/account-types'
 import { NodesPage } from '@/pages/reference-data/nodes'
@@ -108,11 +109,9 @@ function AppShellLayout() {
         <Route path="/reference-data/instruments" element={<InstrumentsPage />} />
         <Route path="/reference-data/account-types" element={<AccountTypesPage />} />
         <Route path="/reference-data/nodes" element={<NodesPage />} />
-        <Route
-          path="/gateway-mappings"
-          element={<PlaceholderPage title="Gateway Mappings" />}
-        />
-        <Route path="/audit-log" element={<PlaceholderPage title="Audit Log" />} />
+        <Route path="/gateway-mappings" element={<MappingsPage />} />
+        <Route path="/gateway-mappings/:mappingId" element={<MappingDetailPage />} />
+        <Route path="/audit-log" element={<AuditLogPage />} />
 
         {/* Platform-only routes */}
         <Route
