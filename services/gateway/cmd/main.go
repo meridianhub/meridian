@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -10,12 +11,19 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/services/gateway"
+	"github.com/meridianhub/meridian/services/gateway/eventstream"
+	"github.com/meridianhub/meridian/services/gateway/eventstream/adapters"
 	gwhealth "github.com/meridianhub/meridian/services/gateway/health"
 	"github.com/meridianhub/meridian/shared/pkg/health"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/db"
 	"github.com/redis/go-redis/v9"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
+
+// ErrRedisURLRequired is returned when Redis fan-out is enabled but no REDIS_URL is configured.
+var ErrRedisURLRequired = errors.New("redis fan-out requires REDIS_URL to be configured")
 
 // Build information set via ldflags during compilation.
 var (
@@ -68,7 +76,10 @@ func run(logger *slog.Logger) error {
 		"local_dev_mode", config.LocalDevMode,
 		"namespace", namespace,
 		"redis_enabled", config.RedisURL != "",
-		"backend_routes", len(config.Backends))
+		"backend_routes", len(config.Backends),
+		"event_stream_enabled", config.EventStream.Enabled,
+		"event_stream_kafka", config.EventStream.KafkaEnabled,
+		"event_stream_redis", config.EventStream.RedisEnabled)
 
 	// Initialize database pool for tenant resolution and health checks
 	dbPool, err := db.NewPostgresPool(context.Background(), db.DefaultConfig(config.DatabaseURL))
@@ -107,14 +118,53 @@ func run(logger *slog.Logger) error {
 		CheckTimeout: 5 * time.Second,
 	})
 
+	// Build server options
+	serverOpts := []gateway.ServerOption{
+		gateway.WithHealthChecker(healthChecker),
+	}
+
+	// Wire event streaming if enabled
+	var eventRouter *eventstream.Router
+	if config.EventStream.Enabled {
+		router, wsHandler, cleanup, err := buildEventStreamComponents(config, logger, redisClient)
+		if err != nil {
+			return fmt.Errorf("failed to initialize event streaming: %w", err)
+		}
+		if cleanup != nil {
+			defer cleanup()
+		}
+		eventRouter = router
+		serverOpts = append(serverOpts, gateway.WithEventStreamHandler(wsHandler))
+		logger.Info("event streaming initialized",
+			"kafka", config.EventStream.KafkaEnabled,
+			"redis_fanout", config.EventStream.RedisEnabled)
+	}
+
 	// Create server with health checker
 	// Note: Tenant resolver will be initialized in a future task when database connection is available.
 	// For now, pass nil to allow the server to start without tenant resolution.
 	// Health endpoints will work regardless of tenant resolver configuration.
-	server := gateway.NewServer(config, logger, nil, gateway.WithHealthChecker(healthChecker))
+	server := gateway.NewServer(config, logger, nil, serverOpts...)
+
+	// Shared error channel for both the HTTP server and event router.
+	// Buffered with capacity 2 so neither goroutine blocks on send.
+	serverErrors := make(chan error, 2)
+
+	// Start event router in background (consumes from EventSource and publishes to FanOut)
+	routerCtx, routerCancel := context.WithCancel(context.Background())
+	defer routerCancel()
+
+	if eventRouter != nil {
+		go func() {
+			if err := eventRouter.Start(routerCtx); err != nil {
+				logger.Error("event router error", "error", err)
+				serverErrors <- fmt.Errorf("event router error: %w", err)
+			}
+		}()
+		logger.Info("event router started")
+	}
 
 	// Start server in background
-	serverErrors := make(chan error, 1)
 	go func() {
 		if err := server.Start(context.Background()); err != nil {
 			serverErrors <- err
@@ -145,6 +195,89 @@ func run(logger *slog.Logger) error {
 	}
 
 	return runErr
+}
+
+// buildEventStreamComponents constructs the event source, fan-out, router, and WebSocket
+// handler based on configuration flags. Returns the router (for lifecycle management),
+// the handler (for route registration), an optional cleanup function, and any error.
+//
+// The caller is responsible for calling router.Start(ctx) in a goroutine to begin
+// event consumption, and router.Shutdown(ctx) during graceful shutdown.
+//
+// Source selection:
+//   - KafkaEnabled=true  → KafkaEventSource (production: Kafka topics)
+//   - KafkaEnabled=false → OutboxEventSource (dev/CI: polls shared outbox table)
+//
+// Fan-out selection:
+//   - RedisEnabled=true  → RedisFanOut (multi-instance: Redis pub/sub per tenant)
+//   - RedisEnabled=false → LocalFanOut (single-instance: in-process channels)
+func buildEventStreamComponents(
+	config *gateway.Config,
+	logger *slog.Logger,
+	redisClient *redis.Client,
+) (*eventstream.Router, *eventstream.Handler, func(), error) {
+	esCfg := config.EventStream
+
+	// Select event source
+	var source eventstream.EventSource
+	var cleanup func()
+
+	if esCfg.KafkaEnabled {
+		kafkaSource, err := adapters.NewKafkaEventSource(
+			esCfg.KafkaBrokers,
+			esCfg.KafkaTopics,
+			logger,
+		)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to create kafka event source: %w", err)
+		}
+		source = kafkaSource
+		logger.Info("using kafka event source",
+			"brokers", esCfg.KafkaBrokers,
+			"topics", esCfg.KafkaTopics)
+	} else {
+		// Outbox source: requires a GORM DB connection to the shared database.
+		// This is the dev/CI adapter; cross-service DB access is forbidden in production (ADR-0002).
+		gormDB, err := gorm.Open(postgres.Open(config.DatabaseURL), &gorm.Config{
+			SkipDefaultTransaction: true,
+		})
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to open gorm DB for outbox source: %w", err)
+		}
+
+		sqlDB, err := gormDB.DB()
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to get underlying DB for outbox source: %w", err)
+		}
+		cleanup = func() {
+			if err := sqlDB.Close(); err != nil {
+				logger.Warn("failed to close outbox DB connection", "error", err)
+			}
+		}
+
+		outbox := adapters.NewOutboxEventSource(gormDB, esCfg.OutboxPollInterval, logger)
+		source = outbox
+		logger.Info("using outbox event source (dev/CI mode)",
+			"poll_interval", esCfg.OutboxPollInterval)
+	}
+
+	// Select fan-out backend
+	var fanOut eventstream.FanOut
+	if esCfg.RedisEnabled {
+		if redisClient == nil {
+			return nil, nil, cleanup, ErrRedisURLRequired
+		}
+		fanOut = adapters.NewRedisFanOut(redisClient, logger)
+		logger.Info("using redis fan-out")
+	} else {
+		fanOut = adapters.NewLocalFanOut(esCfg.BufferSize)
+		logger.Info("using local (in-process) fan-out", "buffer_size", esCfg.BufferSize)
+	}
+
+	router := eventstream.NewRouter(source, fanOut)
+	handler := eventstream.NewHandler(router, logger)
+
+	return router, handler, cleanup, nil
 }
 
 // parseLogLevel converts a string log level to slog.Level.

@@ -606,7 +606,181 @@ func TestParseAPIKeysEnv(t *testing.T) {
 	}
 }
 
-// setAuthEnvVars sets auth-related environment variables and returns a cleanup function.
+// TestLoadEventStreamConfig_Defaults verifies default values when no env vars are set.
+func TestLoadEventStreamConfig_Defaults(t *testing.T) {
+	eventStreamEnvVars := []string{
+		"EVENT_STREAM_ENABLED", "KAFKA_ENABLED", "KAFKA_BROKERS", "KAFKA_TOPICS",
+		"OUTBOX_POLL_INTERVAL", "EVENT_STREAM_REDIS_ENABLED",
+		"EVENT_STREAM_MAX_CONNECTIONS", "EVENT_STREAM_BUFFER_SIZE",
+	}
+	for _, key := range eventStreamEnvVars {
+		os.Unsetenv(key)
+	}
+
+	cfg := loadEventStreamConfig()
+
+	assert.False(t, cfg.Enabled)
+	assert.False(t, cfg.KafkaEnabled)
+	assert.Empty(t, cfg.KafkaBrokers)
+	assert.Nil(t, cfg.KafkaTopics)
+	assert.Equal(t, 500*time.Millisecond, cfg.OutboxPollInterval)
+	assert.False(t, cfg.RedisEnabled)
+	assert.Equal(t, 0, cfg.MaxConnections)
+	assert.Equal(t, 256, cfg.BufferSize)
+}
+
+// TestLoadEventStreamConfig_FullConfiguration verifies all env vars are loaded.
+func TestLoadEventStreamConfig_FullConfiguration(t *testing.T) {
+	cleanup := setEventStreamEnvVars(t, map[string]string{
+		"EVENT_STREAM_ENABLED":         "true",
+		"KAFKA_ENABLED":                "true",
+		"KAFKA_BROKERS":                "kafka1:9092,kafka2:9092",
+		"KAFKA_TOPICS":                 "events.payment,events.party",
+		"OUTBOX_POLL_INTERVAL":         "1s",
+		"EVENT_STREAM_REDIS_ENABLED":   "true",
+		"EVENT_STREAM_MAX_CONNECTIONS": "500",
+		"EVENT_STREAM_BUFFER_SIZE":     "512",
+	})
+	defer cleanup()
+
+	cfg := loadEventStreamConfig()
+
+	assert.True(t, cfg.Enabled)
+	assert.True(t, cfg.KafkaEnabled)
+	assert.Equal(t, "kafka1:9092,kafka2:9092", cfg.KafkaBrokers)
+	assert.Equal(t, []string{"events.payment", "events.party"}, cfg.KafkaTopics)
+	assert.Equal(t, 1*time.Second, cfg.OutboxPollInterval)
+	assert.True(t, cfg.RedisEnabled)
+	assert.Equal(t, 500, cfg.MaxConnections)
+	assert.Equal(t, 512, cfg.BufferSize)
+}
+
+// TestLoadConfig_EventStreamDefaults verifies EventStreamConfig is included in LoadConfig output.
+func TestLoadConfig_EventStreamDefaults(t *testing.T) {
+	cleanup := setEnvVars(t, map[string]string{
+		"BASE_DOMAIN":  "api.example.com",
+		"DATABASE_URL": "postgres://user@localhost/db",
+	})
+	defer cleanup()
+
+	// Clear event stream env vars
+	eventStreamEnvVars := []string{
+		"EVENT_STREAM_ENABLED", "KAFKA_ENABLED", "KAFKA_BROKERS", "KAFKA_TOPICS",
+		"OUTBOX_POLL_INTERVAL", "EVENT_STREAM_REDIS_ENABLED",
+		"EVENT_STREAM_MAX_CONNECTIONS", "EVENT_STREAM_BUFFER_SIZE",
+	}
+	for _, key := range eventStreamEnvVars {
+		os.Unsetenv(key)
+	}
+
+	config, err := LoadConfig()
+
+	require.NoError(t, err)
+	assert.False(t, config.EventStream.Enabled)
+	assert.False(t, config.EventStream.KafkaEnabled)
+	assert.Equal(t, 500*time.Millisecond, config.EventStream.OutboxPollInterval)
+	assert.Equal(t, 256, config.EventStream.BufferSize)
+}
+
+// TestValidate_KafkaValidation verifies that Kafka-specific fields are validated when Kafka is enabled.
+func TestValidate_KafkaValidation(t *testing.T) {
+	t.Run("kafka_enabled_no_brokers", func(t *testing.T) {
+		cfg := &Config{
+			BaseDomain:  "api.example.com",
+			DatabaseURL: "postgres://user@localhost/db",
+			Port:        8080,
+			EventStream: EventStreamConfig{
+				Enabled:      true,
+				KafkaEnabled: true,
+				KafkaTopics:  []string{"events"},
+			},
+		}
+		err := cfg.Validate()
+		assert.ErrorIs(t, err, ErrKafkaBrokersRequired)
+	})
+
+	t.Run("kafka_enabled_no_topics", func(t *testing.T) {
+		cfg := &Config{
+			BaseDomain:  "api.example.com",
+			DatabaseURL: "postgres://user@localhost/db",
+			Port:        8080,
+			EventStream: EventStreamConfig{
+				Enabled:      true,
+				KafkaEnabled: true,
+				KafkaBrokers: "kafka:9092",
+			},
+		}
+		err := cfg.Validate()
+		assert.ErrorIs(t, err, ErrKafkaTopicsRequired)
+	})
+
+	t.Run("kafka_enabled_with_all_fields", func(t *testing.T) {
+		cfg := &Config{
+			BaseDomain:  "api.example.com",
+			DatabaseURL: "postgres://user@localhost/db",
+			Port:        8080,
+			EventStream: EventStreamConfig{
+				Enabled:      true,
+				KafkaEnabled: true,
+				KafkaBrokers: "kafka:9092",
+				KafkaTopics:  []string{"events"},
+			},
+		}
+		err := cfg.Validate()
+		assert.NoError(t, err)
+	})
+
+	t.Run("kafka_fields_not_validated_when_disabled", func(t *testing.T) {
+		cfg := &Config{
+			BaseDomain:  "api.example.com",
+			DatabaseURL: "postgres://user@localhost/db",
+			Port:        8080,
+			EventStream: EventStreamConfig{
+				Enabled:      true,
+				KafkaEnabled: false, // Outbox mode - Kafka fields not required
+			},
+		}
+		err := cfg.Validate()
+		assert.NoError(t, err)
+	})
+}
+
+// setEventStreamEnvVars sets event-stream-related environment variables and returns a cleanup function.
+func setEventStreamEnvVars(t *testing.T, vars map[string]string) func() {
+	t.Helper()
+
+	eventStreamEnvVars := []string{
+		"EVENT_STREAM_ENABLED", "KAFKA_ENABLED", "KAFKA_BROKERS", "KAFKA_TOPICS",
+		"OUTBOX_POLL_INTERVAL", "EVENT_STREAM_REDIS_ENABLED",
+		"EVENT_STREAM_MAX_CONNECTIONS", "EVENT_STREAM_BUFFER_SIZE",
+	}
+
+	originals := make(map[string]string)
+	wasSet := make(map[string]bool)
+
+	for _, key := range eventStreamEnvVars {
+		if val, ok := os.LookupEnv(key); ok {
+			originals[key] = val
+			wasSet[key] = true
+		}
+		os.Unsetenv(key)
+	}
+
+	for key, value := range vars {
+		os.Setenv(key, value)
+	}
+
+	return func() {
+		for _, key := range eventStreamEnvVars {
+			if wasSet[key] {
+				os.Setenv(key, originals[key])
+			} else {
+				os.Unsetenv(key)
+			}
+		}
+	}
+}
+
 func setAuthEnvVars(t *testing.T, vars map[string]string) func() {
 	t.Helper()
 

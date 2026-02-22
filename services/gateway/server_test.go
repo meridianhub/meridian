@@ -761,6 +761,79 @@ func TestHandleReady_WithHealthChecker_LegacyEndpoints(t *testing.T) {
 	assert.Equal(t, "NOT READY", rec.Body.String())
 }
 
+// TestWithEventStreamHandler_RouteRegistered verifies that /ws/events is registered
+// when an event stream handler is provided.
+func TestWithEventStreamHandler_RouteRegistered(t *testing.T) {
+	handlerCalled := false
+	fakeHandler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		handlerCalled = true
+		w.WriteHeader(http.StatusSwitchingProtocols)
+	})
+
+	config := &Config{
+		Port:        8080,
+		BaseDomain:  "api.example.com",
+		DatabaseURL: "postgres://localhost/test",
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	// Build a real eventstream handler wrapping fakeHandler via an adapter.
+	// We bypass the full eventstream.Handler and instead verify routing works
+	// by directly constructing the server option.
+	server := NewServer(config, logger, nil, WithEventStreamHandlerHTTP(fakeHandler))
+
+	req := httptest.NewRequest(http.MethodGet, "/ws/events", nil)
+	rec := httptest.NewRecorder()
+
+	server.mux.ServeHTTP(rec, req)
+
+	assert.True(t, handlerCalled, "event stream handler should be called for GET /ws/events")
+}
+
+// TestWithEventStreamHandler_NotRegisteredWhenNil verifies that /ws/events is NOT
+// registered when no event stream handler is provided.
+func TestWithEventStreamHandler_NotRegisteredWhenNil(t *testing.T) {
+	config := &Config{
+		Port:        8080,
+		BaseDomain:  "api.example.com",
+		DatabaseURL: "postgres://localhost/test",
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	server := NewServer(config, logger, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/ws/events", nil)
+	rec := httptest.NewRecorder()
+
+	server.mux.ServeHTTP(rec, req)
+
+	// Without an event stream handler, the route is not registered.
+	// Go 1.22+ ServeMux returns 404 for unregistered routes.
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+// TestWithEventStreamHandler_HealthEndpointsUnaffected verifies that adding the
+// event stream handler does not break health check endpoints.
+func TestWithEventStreamHandler_HealthEndpointsUnaffected(t *testing.T) {
+	fakeHandler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusSwitchingProtocols)
+	})
+
+	config := &Config{
+		Port:        8080,
+		BaseDomain:  "api.example.com",
+		DatabaseURL: "postgres://localhost/test",
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	server := NewServer(config, logger, nil, WithEventStreamHandlerHTTP(fakeHandler))
+
+	for _, endpoint := range []string{"/health", "/ready"} {
+		req := httptest.NewRequest(http.MethodGet, endpoint, nil)
+		rec := httptest.NewRecorder()
+		server.mux.ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code, "health endpoint %s must still work", endpoint)
+	}
+}
+
 // TestWithHealthChecker verifies the functional option works correctly.
 func TestWithHealthChecker(t *testing.T) {
 	config := &Config{
