@@ -187,10 +187,10 @@ func validateChannelPattern(p ChannelPattern) error {
 // subscription receives. An empty filter matches all events on the subscribed channels.
 type SubscriptionFilters struct {
 	// AggregateID, when non-empty, restricts delivery to events from this aggregate.
-	AggregateID string
+	AggregateID string `json:"aggregate_id,omitempty"`
 
 	// CorrelationID, when non-empty, restricts delivery to events with this correlation ID.
-	CorrelationID string
+	CorrelationID string `json:"correlation_id,omitempty"`
 }
 
 // Subscription describes a client's interest in one or more event channels.
