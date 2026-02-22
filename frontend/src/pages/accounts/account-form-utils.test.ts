@@ -33,6 +33,20 @@ describe('amountToBigInt', () => {
   it('throws on invalid string', () => {
     expect(() => amountToBigInt('abc')).toThrow()
   })
+
+  it('throws on scientific notation (prevents float parsing exploit)', () => {
+    expect(() => amountToBigInt('1e5')).toThrow()
+  })
+
+  it('handles rounding at the third decimal place', () => {
+    // 1.555 with 2dp should round up to 1.56 = BigInt(156)
+    expect(amountToBigInt('1.555')).toBe(BigInt(156))
+  })
+
+  it('truncates without rounding when next digit < 5', () => {
+    // 1.554 with 2dp should stay 1.55 = BigInt(155)
+    expect(amountToBigInt('1.554')).toBe(BigInt(155))
+  })
 })
 
 describe('bigIntToDisplayAmount', () => {

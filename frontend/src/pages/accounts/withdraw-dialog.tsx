@@ -55,7 +55,10 @@ async function initiateWithdrawal(
     throw new Error(data.message ?? `Failed to initiate withdrawal: ${response.status}`)
   }
 
-  const data = (await response.json()) as { withdrawalId: string }
+  const data = (await response.json()) as { withdrawalId?: string }
+  if (!data.withdrawalId) {
+    throw new Error('Withdrawal ID missing from response')
+  }
   return data.withdrawalId
 }
 
@@ -140,6 +143,10 @@ export function WithdrawDialog({ open, onOpenChange, accountId, currency }: With
 
   function handleExecute(e: React.FormEvent) {
     e.preventDefault()
+    if (!withdrawalId) {
+      setServerError('Withdrawal ID missing. Please re-initiate the withdrawal.')
+      return
+    }
     setServerError(null)
     executeMutation.mutate()
   }
@@ -223,7 +230,7 @@ export function WithdrawDialog({ open, onOpenChange, accountId, currency }: With
           <Button
             type="submit"
             form="withdraw-form"
-            disabled={isPending}
+            disabled={isPending || (step === 'confirm' && !withdrawalId)}
           >
             {step === 'initiate'
               ? initiateMutation.isPending ? 'Initiating...' : 'Initiate'
