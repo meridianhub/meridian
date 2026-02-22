@@ -606,7 +606,6 @@ func TestParseAPIKeysEnv(t *testing.T) {
 	}
 }
 
-// setAuthEnvVars sets auth-related environment variables and returns a cleanup function.
 // TestLoadEventStreamConfig_Defaults verifies default values when no env vars are set.
 func TestLoadEventStreamConfig_Defaults(t *testing.T) {
 	eventStreamEnvVars := []string{
@@ -681,6 +680,69 @@ func TestLoadConfig_EventStreamDefaults(t *testing.T) {
 	assert.False(t, config.EventStream.KafkaEnabled)
 	assert.Equal(t, 500*time.Millisecond, config.EventStream.OutboxPollInterval)
 	assert.Equal(t, 256, config.EventStream.BufferSize)
+}
+
+// TestValidate_KafkaValidation verifies that Kafka-specific fields are validated when Kafka is enabled.
+func TestValidate_KafkaValidation(t *testing.T) {
+	t.Run("kafka_enabled_no_brokers", func(t *testing.T) {
+		cfg := &Config{
+			BaseDomain:  "api.example.com",
+			DatabaseURL: "postgres://user@localhost/db",
+			Port:        8080,
+			EventStream: EventStreamConfig{
+				Enabled:      true,
+				KafkaEnabled: true,
+				KafkaTopics:  []string{"events"},
+			},
+		}
+		err := cfg.Validate()
+		assert.ErrorIs(t, err, ErrKafkaBrokersRequired)
+	})
+
+	t.Run("kafka_enabled_no_topics", func(t *testing.T) {
+		cfg := &Config{
+			BaseDomain:  "api.example.com",
+			DatabaseURL: "postgres://user@localhost/db",
+			Port:        8080,
+			EventStream: EventStreamConfig{
+				Enabled:      true,
+				KafkaEnabled: true,
+				KafkaBrokers: "kafka:9092",
+			},
+		}
+		err := cfg.Validate()
+		assert.ErrorIs(t, err, ErrKafkaTopicsRequired)
+	})
+
+	t.Run("kafka_enabled_with_all_fields", func(t *testing.T) {
+		cfg := &Config{
+			BaseDomain:  "api.example.com",
+			DatabaseURL: "postgres://user@localhost/db",
+			Port:        8080,
+			EventStream: EventStreamConfig{
+				Enabled:      true,
+				KafkaEnabled: true,
+				KafkaBrokers: "kafka:9092",
+				KafkaTopics:  []string{"events"},
+			},
+		}
+		err := cfg.Validate()
+		assert.NoError(t, err)
+	})
+
+	t.Run("kafka_fields_not_validated_when_disabled", func(t *testing.T) {
+		cfg := &Config{
+			BaseDomain:  "api.example.com",
+			DatabaseURL: "postgres://user@localhost/db",
+			Port:        8080,
+			EventStream: EventStreamConfig{
+				Enabled:      true,
+				KafkaEnabled: false, // Outbox mode - Kafka fields not required
+			},
+		}
+		err := cfg.Validate()
+		assert.NoError(t, err)
+	})
 }
 
 // setEventStreamEnvVars sets event-stream-related environment variables and returns a cleanup function.

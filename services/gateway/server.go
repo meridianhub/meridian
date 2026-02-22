@@ -153,24 +153,7 @@ func (s *Server) registerRoutes() {
 	}
 
 	// Build middleware chain: auth → tenant → tenant_authz → transcoder/proxy
-	handler := http.StripPrefix("/api", apiHandler)
-
-	// Layer 3 (innermost): Tenant authorization (verify JWT tenant matches subdomain)
-	if s.tenantAuthzMiddleware != nil {
-		handler = s.tenantAuthzMiddleware.Handler(handler)
-	}
-
-	// Layer 2: Tenant resolution (extract tenant from subdomain/header)
-	if s.tenantResolver != nil {
-		handler = s.tenantResolver.Handler(handler)
-	}
-
-	// Layer 1 (outermost): Authentication (validate JWT or API key)
-	if s.authMiddleware != nil {
-		handler = s.authMiddleware.Handler(handler)
-	}
-
-	s.mux.Handle("/api/", handler)
+	s.mux.Handle("/api/", s.wrapWithAuthChain(http.StripPrefix("/api", apiHandler)))
 
 	// WebSocket event stream endpoint - with auth and tenant middleware chain.
 	// Claims are bridged from the gateway auth context to the eventstream context

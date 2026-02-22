@@ -143,6 +143,12 @@ var (
 
 	// ErrJWKSURLRequired is returned when AUTH_ENABLED is true but JWKS_URL is not set.
 	ErrJWKSURLRequired = errors.New("JWKS_URL is required when AUTH_ENABLED is true")
+
+	// ErrKafkaBrokersRequired is returned when KAFKA_ENABLED is true but KAFKA_BROKERS is not set.
+	ErrKafkaBrokersRequired = errors.New("KAFKA_BROKERS is required when KAFKA_ENABLED is true")
+
+	// ErrKafkaTopicsRequired is returned when KAFKA_ENABLED is true but KAFKA_TOPICS is not set.
+	ErrKafkaTopicsRequired = errors.New("KAFKA_TOPICS is required when KAFKA_ENABLED is true")
 )
 
 // LoadConfig loads configuration from environment variables.
@@ -314,6 +320,16 @@ func (c *Config) Validate() error {
 	// Validate auth configuration
 	if c.Auth.Enabled && c.Auth.JWKSURL == "" {
 		return ErrJWKSURLRequired
+	}
+
+	// Validate Kafka configuration when Kafka is enabled
+	if c.EventStream.Enabled && c.EventStream.KafkaEnabled {
+		if c.EventStream.KafkaBrokers == "" {
+			return ErrKafkaBrokersRequired
+		}
+		if len(c.EventStream.KafkaTopics) == 0 {
+			return ErrKafkaTopicsRequired
+		}
 	}
 
 	return nil

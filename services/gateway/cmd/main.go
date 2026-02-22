@@ -146,6 +146,10 @@ func run(logger *slog.Logger) error {
 	// Health endpoints will work regardless of tenant resolver configuration.
 	server := gateway.NewServer(config, logger, nil, serverOpts...)
 
+	// Shared error channel for both the HTTP server and event router.
+	// Buffered with capacity 2 so neither goroutine blocks on send.
+	serverErrors := make(chan error, 2)
+
 	// Start event router in background (consumes from EventSource and publishes to FanOut)
 	routerCtx, routerCancel := context.WithCancel(context.Background())
 	defer routerCancel()
@@ -154,13 +158,13 @@ func run(logger *slog.Logger) error {
 		go func() {
 			if err := eventRouter.Start(routerCtx); err != nil {
 				logger.Error("event router error", "error", err)
+				serverErrors <- fmt.Errorf("event router error: %w", err)
 			}
 		}()
 		logger.Info("event router started")
 	}
 
 	// Start server in background
-	serverErrors := make(chan error, 1)
 	go func() {
 		if err := server.Start(context.Background()); err != nil {
 			serverErrors <- err
