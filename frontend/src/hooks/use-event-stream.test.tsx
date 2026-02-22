@@ -27,14 +27,14 @@ const createWrapper = () => {
 }
 
 describe('useEventStream', () => {
-  it('should return stable interface with connected, lastEvent, error', () => {
+  it('should return stable interface with connected and lastEvent', () => {
     const { result } = renderHook(() => useEventStream(), {
       wrapper: createWrapper(),
     })
 
     expect(result.current).toHaveProperty('connected')
     expect(result.current).toHaveProperty('lastEvent')
-    expect(result.current).toHaveProperty('error')
+    expect(result.current).not.toHaveProperty('error')
   })
 
   it('should initialize with connected=false', () => {
@@ -53,13 +53,6 @@ describe('useEventStream', () => {
     expect(result.current.lastEvent).toBeNull()
   })
 
-  it('should initialize with null error', () => {
-    const { result } = renderHook(() => useEventStream(), {
-      wrapper: createWrapper(),
-    })
-
-    expect(result.current.error).toBeNull()
-  })
 
   it('should contain expected event types in EVENT_QUERY_MAP', () => {
     const expectedEventTypes = [

@@ -38,20 +38,21 @@ export interface UseEventStreamOptions {
  * Maps domain event types to React Query cache keys that should be invalidated.
  * This enables automatic cache invalidation when events are received.
  *
+ * Query keys follow the tenantKeys factory structure: ['tenants', tenantId, 'resource', ...]
  * Example: When 'AccountStatusChanged' is received, invalidate accounts and account-specific queries.
  */
 export const EVENT_QUERY_MAP: Record<string, (event: DomainEvent) => unknown[][]> = {
   AccountStatusChanged: (e) => [
-    ['accounts', e.tenantSlug],
-    ['accounts', e.tenantSlug, { accountId: e.payload.accountId }],
+    ['tenants', e.tenantSlug, 'accounts'],
+    ['tenants', e.tenantSlug, 'accounts', e.payload.accountId],
   ],
   TransactionCompleted: (e) => [
-    ['accounts', e.tenantSlug, { accountId: e.payload.accountId }],
-    ['position-logs', e.tenantSlug],
+    ['tenants', e.tenantSlug, 'accounts', e.payload.accountId],
+    ['tenants', e.tenantSlug, 'position-logs'],
   ],
   PaymentOrderCompleted: (e) => [
-    ['payment-orders', e.tenantSlug],
-    ['payment-orders', e.tenantSlug, { paymentOrderId: e.payload.paymentOrderId }],
+    ['tenants', e.tenantSlug, 'payment-orders'],
+    ['tenants', e.tenantSlug, 'payment-orders', e.payload.paymentOrderId],
   ],
 }
 
@@ -60,11 +61,13 @@ export const EVENT_QUERY_MAP: Record<string, (event: DomainEvent) => unknown[][]
  * This is a stub implementation that provides the complete interface for Phase 3 component development.
  * The actual WebSocket connection will be implemented in Phase 4 (PRD-025).
  *
+ * Enforces tenant isolation - events from other tenants are silently ignored.
+ *
  * @param options Configuration options for event filtering, callbacks, and cache invalidation
- * @returns Object with connection status, last received event, and any connection errors
+ * @returns Object with connection status and last received event
  *
  * @example
- * const { connected, lastEvent, error } = useEventStream({
+ * const { connected, lastEvent } = useEventStream({
  *   eventTypes: ['AccountStatusChanged', 'TransactionCompleted'],
  *   onEvent: (event) => console.log('Event received:', event),
  *   autoInvalidate: true
@@ -79,7 +82,6 @@ export function useEventStream(options: UseEventStreamOptions = {}) {
 
   const [connected, setConnected] = useState(false)
   const [lastEvent, setLastEvent] = useState<DomainEvent | null>(null)
-  const [error, setError] = useState<Error | null>(null)
 
   // Phase 4: WebSocket connection setup
   // This useEffect will be implemented in Phase 4 (PRD-025) to connect to:
@@ -101,10 +103,15 @@ export function useEventStream(options: UseEventStreamOptions = {}) {
 
   /**
    * Internal handler for processing received events.
-   * Applies event type filtering, fires the onEvent callback, and triggers cache invalidation.
+   * Validates tenant isolation, applies event type filtering, fires callbacks, and triggers cache invalidation.
    */
   const handleEvent = useCallback(
     (event: DomainEvent) => {
+      // Enforce tenant isolation - ignore events from other tenants
+      if (event.tenantSlug !== tenantSlug) {
+        return
+      }
+
       // Filter by event types if specified
       if (eventTypes && !eventTypes.includes(event.eventType)) {
         return
@@ -124,7 +131,7 @@ export function useEventStream(options: UseEventStreamOptions = {}) {
         })
       }
     },
-    [eventTypes, onEvent, autoInvalidate, queryClient]
+    [eventTypes, onEvent, autoInvalidate, queryClient, tenantSlug]
   )
 
   return {
@@ -132,7 +139,5 @@ export function useEventStream(options: UseEventStreamOptions = {}) {
     connected,
     /** The last event received, or null if no events yet */
     lastEvent,
-    /** Any connection error that occurred, or null if connected successfully */
-    error,
   }
 }
