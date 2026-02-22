@@ -1,4 +1,5 @@
 import { PageErrorBoundary } from '@/components/error-boundary'
+import { DashboardPage } from '@/pages/dashboard'
 
 export interface Route {
   path: string
@@ -7,7 +8,7 @@ export interface Route {
 }
 
 const routes: Route[] = [
-  { path: '/', name: 'Dashboard', component: () => <div>Dashboard</div> },
+  { path: '/', name: 'Dashboard', component: DashboardPage },
   { path: '/accounts', name: 'Accounts', component: () => <div>Accounts</div> },
   {
     path: '/internal-accounts',

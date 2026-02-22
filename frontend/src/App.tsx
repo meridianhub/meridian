@@ -7,7 +7,17 @@ import { AuthProvider } from '@/contexts/auth-context'
 import { TenantProvider } from '@/contexts/tenant-context'
 import { ProtectedRoute, PlatformOnlyRoute } from '@/components/routing'
 import { AppShell } from '@/components/layout/app-shell'
+import { PartiesPage } from '@/pages/parties'
+import { PartyDetailPage } from '@/pages/parties/[partyId]'
 import { AuditLogPage } from '@/pages/audit'
+
+import { PositionsPage } from '@/pages/positions'
+import { PositionDetailPage } from '@/pages/positions/detail'
+
+import { InternalAccountsPage } from '@/pages/internal-accounts'
+import { MarketDataPage } from '@/pages/market-data'
+import { DatasetDetailPage } from '@/pages/market-data/[datasetCode]'
+import { ForecastingPage } from '@/pages/forecasting'
 
 // Placeholder page components - replaced as each page task is implemented
 function PlaceholderPage({ title }: { title: string }) {
@@ -51,20 +61,23 @@ function AppShellLayout() {
         {/* Tenant-scoped routes */}
         <Route path="/" element={<PlaceholderPage title="Dashboard" />} />
         <Route path="/accounts" element={<PlaceholderPage title="Accounts" />} />
-        <Route
-          path="/internal-accounts"
-          element={<PlaceholderPage title="Internal Accounts" />}
-        />
+        <Route path="/internal-accounts" element={<InternalAccountsPage />} />
+        <Route path="/internal-accounts/:accountId" element={<PlaceholderPage title="Internal Account Detail" />} />
         <Route path="/payments" element={<PlaceholderPage title="Payments" />} />
         <Route path="/transactions" element={<PlaceholderPage title="Transactions" />} />
-        <Route path="/positions" element={<PlaceholderPage title="Positions" />} />
+        <Route path="/positions" element={<PositionsPage />} />
+        <Route path="/positions/:logId" element={<PositionDetailPage />} />
         <Route path="/ledger" element={<PlaceholderPage title="Ledger" />} />
-        <Route path="/parties" element={<PlaceholderPage title="Parties" />} />
+        <Route path="/parties" element={<PartiesPage />} />
+        <Route path="/parties/:partyId" element={<PartyDetailPage />} />
         <Route path="/reconciliation" element={<PlaceholderPage title="Reconciliation" />} />
         <Route
           path="/starlark-config"
           element={<PlaceholderPage title="Starlark Configuration" />}
         />
+        <Route path="/market-data" element={<MarketDataPage />} />
+        <Route path="/market-data/:datasetCode" element={<DatasetDetailPage />} />
+        <Route path="/forecasting" element={<ForecastingPage />} />
         <Route path="/reference-data" element={<PlaceholderPage title="Reference Data" />} />
         <Route
           path="/gateway-mappings"

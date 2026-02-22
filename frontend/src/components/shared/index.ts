@@ -6,3 +6,6 @@ export type { AuditTrailProps, AuditEntry, AuditEntriesResponse, AuditOperation 
 
 export { HandlerReference } from './handler-reference';
 export type { HandlerReferenceProps, Handler, HandlerParameter, ServiceSchema, HandlerSchemaResponse } from './handler-reference';
+
+export { QualityLadderBadge } from './quality-ladder-badge';
+export { DirectionBadge } from './direction-badge';
