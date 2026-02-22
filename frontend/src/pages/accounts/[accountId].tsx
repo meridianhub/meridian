@@ -136,7 +136,7 @@ export function AccountDetailPage() {
   const { accountId } = useParams<{ accountId: string }>()
   const { tenantSlug } = useTenantContext()
 
-  const { data: account, isLoading } = useQuery({
+  const { data: account, isLoading, isError } = useQuery({
     queryKey: tenantKeys.account(tenantSlug ?? '', accountId ?? ''),
     queryFn: () => retrieveAccount(tenantSlug ?? '', accountId ?? ''),
     enabled: !!accountId,
@@ -146,7 +146,8 @@ export function AccountDetailPage() {
     return <AccountDetailSkeleton />
   }
 
-  if (account === null || account === undefined) {
+  // null = 404 from server; isError = network/server failure; undefined = query not yet resolved
+  if (isError || account === null || account === undefined) {
     return <AccountNotFound />
   }
 
