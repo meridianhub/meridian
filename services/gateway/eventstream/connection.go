@@ -198,9 +198,13 @@ func (c *Connection) Start(ctx context.Context) {
 		}
 	}()
 
-	if c.wsConn != nil {
-		c.wsConn.SetReadLimit(maxReadSize)
+	if c.wsConn == nil {
+		// No WebSocket connection; wait for cancellation only.
+		<-c.ctx.Done()
+		return
 	}
+
+	c.wsConn.SetReadLimit(maxReadSize)
 
 	var wg sync.WaitGroup
 
@@ -309,7 +313,8 @@ func (c *Connection) readPump() {
 	}
 }
 
-// pingLoop periodically pings the client and checks JWT expiry.
+// pingLoop periodically pings the client, checks JWT expiry, and enforces
+// idle timeout.
 func (c *Connection) pingLoop() {
 	pingTicker := time.NewTicker(PingInterval)
 	defer pingTicker.Stop()
@@ -322,6 +327,16 @@ func (c *Connection) pingLoop() {
 		case <-c.ctx.Done():
 			return
 		case <-pingTicker.C:
+			// Check idle timeout before pinging.
+			if time.Since(c.LastActivity()) > IdleTimeout {
+				c.logger.Info("idle timeout, closing connection",
+					slog.String("conn_id", c.id),
+					slog.String("tenant_id", c.tenantID),
+				)
+				c.Close(websocket.StatusGoingAway, "idle timeout")
+				return
+			}
+
 			pingCtx, cancel := context.WithTimeout(c.ctx, PongTimeout)
 			err := c.wsConn.Ping(pingCtx)
 			cancel()
