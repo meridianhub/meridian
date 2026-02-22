@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { ReconciliationPage } from './index'
 
 function makeQueryClient() {
@@ -14,7 +14,11 @@ function makeQueryClient() {
 function Wrapper({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={makeQueryClient()}>
-      <MemoryRouter>{children}</MemoryRouter>
+      <MemoryRouter initialEntries={['/reconciliation']}>
+        <Routes>
+          <Route path="/reconciliation" element={<>{children}</>} />
+        </Routes>
+      </MemoryRouter>
     </QueryClientProvider>
   )
 }
@@ -137,32 +141,51 @@ describe('ReconciliationPage - list view', () => {
       new Response(JSON.stringify({ items: sampleRuns }), { status: 200 }),
     )
 
-    let navigatedTo: string | null = null
-    const MockRouter = ({ children }: { children: React.ReactNode }) => {
+    let currentPath = '/reconciliation'
+    const RouterWrapper = ({ children }: { children: React.ReactNode }) => {
       const qc = makeQueryClient()
       return (
         <QueryClientProvider client={qc}>
           <MemoryRouter initialEntries={['/reconciliation']}>
-            {children}
+            <Routes>
+              <Route path="/reconciliation" element={<>{children}</>} />
+              <Route
+                path="/reconciliation/:runId"
+                element={
+                  <div
+                    data-testid="detail-page"
+                    ref={(el) => {
+                      if (el) currentPath = window.location.pathname
+                    }}
+                  >
+                    Detail Page
+                  </div>
+                }
+              />
+            </Routes>
           </MemoryRouter>
         </QueryClientProvider>
       )
     }
 
-    // We test navigation is called via the row click mechanism
-    // The actual URL change is verified by checking cursor-pointer class is applied
-    render(<ReconciliationPage />, { wrapper: MockRouter })
+    render(<ReconciliationPage />, { wrapper: RouterWrapper })
 
     await waitFor(() => {
       expect(screen.getByText('run-001')).toBeInTheDocument()
     })
 
-    // Row should be clickable (cursor-pointer class applied by DataTable)
+    // Row should be clickable (cursor-pointer class applied by DataTable when onRowClick provided)
     const rows = screen.getAllByRole('row')
     const dataRow = rows.find((r) => r.textContent?.includes('run-001'))
     expect(dataRow).toBeDefined()
     expect(dataRow?.className).toContain('cursor-pointer')
-    void navigatedTo
+
+    // Click the row and verify navigation to detail page
+    await userEvent.click(dataRow!)
+    await waitFor(() => {
+      expect(screen.getByTestId('detail-page')).toBeInTheDocument()
+    })
+    void currentPath
   })
 
   it('shows error state when fetch fails', async () => {
