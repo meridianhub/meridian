@@ -569,7 +569,7 @@ func createOutboxEntry(event Event, correlationID, causationID uuid.UUID) *Outbo
 		CorrelationID: correlationID.String(),
 		CausationID:   causationID.String(),
 		Topic:         "saga.events.v1", // Default topic, can be configured
-		ServiceName:   "saga",        // Default service name, can be configured
+		ServiceName:   "saga",           // Default service name, can be configured
 	}
 
 	return entry
