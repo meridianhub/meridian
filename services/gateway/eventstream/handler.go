@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
@@ -17,41 +16,25 @@ import (
 // Using a private struct avoids collisions with other packages.
 type claimsContextKey struct{}
 
-// gatewayAuthClaimsKey is the string-typed context key used by the gateway auth
-// middleware (services/gateway/auth.ClaimsContextKey = "claims"). We replicate
-// the value here to avoid creating a circular or downward import from this domain
-// package to the HTTP adapter package.
+// ContextWithClaims returns a derived context carrying the given claims under
+// the eventstream-specific key. The integration layer (e.g., gateway server
+// wiring) must call this as an adapter after the auth middleware has injected
+// claims — see services/gateway/auth.GetClaimsFromContext.
 //
-// IMPORTANT: If auth.ClaimsContextKey is ever changed, this constant MUST be
-// updated to match. The test TestClaimsFromContext_GatewayAuthKey verifies that
-// ContextWithClaims (which sets both keys) works end-to-end; add a cross-package
-// assertion if compile-time safety is required.
-type gatewayAuthContextKey string
-
-const gatewayAuthClaimsKey gatewayAuthContextKey = "claims"
-
-// ContextWithClaims returns a derived context carrying the given claims.
-// Both the eventstream-specific key and the gateway auth key are set so
-// that ClaimsFromContext works regardless of which middleware set the claims.
+// In tests, call this directly to simulate what the auth middleware does in
+// production.
 func ContextWithClaims(ctx context.Context, claims *platformauth.Claims) context.Context {
-	ctx = context.WithValue(ctx, claimsContextKey{}, claims)
-	ctx = context.WithValue(ctx, gatewayAuthClaimsKey, claims)
-	return ctx
+	return context.WithValue(ctx, claimsContextKey{}, claims)
 }
 
-// ClaimsFromContext retrieves Claims from the context. It checks both the
-// eventstream-specific key (set by ContextWithClaims or tests) and the
-// gateway auth middleware key so that either injection path works.
+// ClaimsFromContext retrieves Claims stored by ContextWithClaims.
+// Returns nil, false if no claims are present.
 func ClaimsFromContext(ctx context.Context) (*platformauth.Claims, bool) {
-	// Try the eventstream-specific key first (tests, internal).
-	if claims, ok := ctx.Value(claimsContextKey{}).(*platformauth.Claims); ok && claims != nil {
-		return claims, true
+	claims, ok := ctx.Value(claimsContextKey{}).(*platformauth.Claims)
+	if !ok || claims == nil {
+		return nil, false
 	}
-	// Fall back to the gateway auth middleware key.
-	if claims, ok := ctx.Value(gatewayAuthClaimsKey).(*platformauth.Claims); ok && claims != nil {
-		return claims, true
-	}
-	return nil, false
+	return claims, true
 }
 
 // Sentinel errors returned by AuthorizeChannels.
@@ -93,10 +76,12 @@ func AuthorizeChannels(claims *platformauth.Claims, roleAccess RoleChannelAccess
 	}
 
 	// Build the union of allowed patterns across all roles held by this principal.
-	var allowed []string
+	var allowed []ChannelPattern
 	for _, role := range claims.GetRoles() {
 		if patterns, ok := roleAccess[role]; ok {
-			allowed = append(allowed, patterns...)
+			for _, p := range patterns {
+				allowed = append(allowed, ChannelPattern(p))
+			}
 		}
 	}
 
@@ -109,17 +94,11 @@ func AuthorizeChannels(claims *platformauth.Claims, roleAccess RoleChannelAccess
 }
 
 // channelPermitted reports whether ch is permitted by at least one of the given patterns.
-func channelPermitted(ch string, patterns []string) bool {
+// It delegates to ChannelPattern.Matches so that authorization uses the same semantics
+// as subscription matching.
+func channelPermitted(ch string, patterns []ChannelPattern) bool {
 	for _, p := range patterns {
-		if p == "*" {
-			return true
-		}
-		if strings.HasSuffix(p, "*") {
-			prefix := strings.TrimSuffix(p, "*")
-			if strings.HasPrefix(ch, prefix) {
-				return true
-			}
-		} else if p == ch {
+		if p.Matches(ch) {
 			return true
 		}
 	}
