@@ -150,7 +150,6 @@ describe('getUserLens', () => {
 
 describe('parseJWT - type validation', () => {
   it('rejects token with non-numeric exp', () => {
-    const token = createTestToken({})
     // Manually craft a token with exp as string
     const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))
       .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
