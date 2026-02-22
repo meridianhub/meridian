@@ -17,10 +17,15 @@ import (
 // Using a private struct avoids collisions with other packages.
 type claimsContextKey struct{}
 
-// gatewayAuthClaimsKey is the string-typed context key used by the gateway
-// auth middleware (services/gateway/auth). We replicate it here to avoid
-// importing the gateway/auth package from a domain package.
-// Value must match auth.ClaimsContextKey = "claims".
+// gatewayAuthClaimsKey is the string-typed context key used by the gateway auth
+// middleware (services/gateway/auth.ClaimsContextKey = "claims"). We replicate
+// the value here to avoid creating a circular or downward import from this domain
+// package to the HTTP adapter package.
+//
+// IMPORTANT: If auth.ClaimsContextKey is ever changed, this constant MUST be
+// updated to match. The test TestClaimsFromContext_GatewayAuthKey verifies that
+// ContextWithClaims (which sets both keys) works end-to-end; add a cross-package
+// assertion if compile-time safety is required.
 type gatewayAuthContextKey string
 
 const gatewayAuthClaimsKey gatewayAuthContextKey = "claims"
@@ -138,6 +143,15 @@ func WithRoleChannelAccess(roleAccess RoleChannelAccess) HandlerOption {
 	}
 }
 
+// WithAcceptOptions overrides the websocket.AcceptOptions used when upgrading
+// connections. This is primarily for tests or deployments that need to configure
+// allowed origins, compression, or other upgrade parameters.
+func WithAcceptOptions(opts websocket.AcceptOptions) HandlerOption {
+	return func(h *Handler) {
+		h.upgrader = opts
+	}
+}
+
 // NewHandler creates a Handler backed by the given Router.
 // If logger is nil, slog.Default() is used.
 func NewHandler(router *Router, logger *slog.Logger, opts ...HandlerOption) *Handler {
@@ -148,9 +162,6 @@ func NewHandler(router *Router, logger *slog.Logger, opts ...HandlerOption) *Han
 		router:     router,
 		logger:     logger,
 		roleAccess: DefaultRoleAccess,
-		upgrader: websocket.AcceptOptions{
-			InsecureSkipVerify: true, // Origin check is handled by the auth middleware
-		},
 	}
 	for _, opt := range opts {
 		opt(h)
