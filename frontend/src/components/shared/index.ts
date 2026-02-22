@@ -7,5 +7,7 @@ export type { AuditTrailProps, AuditEntry, AuditEntriesResponse, AuditOperation 
 export { HandlerReference } from './handler-reference';
 export type { HandlerReferenceProps, Handler, HandlerParameter, ServiceSchema, HandlerSchemaResponse } from './handler-reference';
 
+export { SagaTimeline } from './saga-timeline';
+export type { SagaTimelineProps, SagaStep } from './saga-timeline';
 export { QualityLadderBadge } from './quality-ladder-badge';
 export { DirectionBadge } from './direction-badge';
