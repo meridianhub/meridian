@@ -16,6 +16,10 @@ import { useInitiatePayment } from './payment-mutations'
 // IBAN pattern: 2 letter country code + 2 digits + up to 30 alphanumeric chars (no spaces)
 const IBAN_PATTERN = /^[A-Z]{2}[0-9]{2}[A-Z0-9]{1,30}$/
 
+function normalizeIban(iban: string): string {
+  return iban.trim().replace(/\s+/g, '')
+}
+
 interface FormData {
   debtorAccountId: string
   creditorIban: string
@@ -66,7 +70,7 @@ export function InitiatePaymentDialog({
       newErrors.debtorAccountId = 'Debtor account is required'
     }
 
-    const normalizedIban = formData.creditorIban.trim().replace(/\s+/g, '')
+    const normalizedIban = normalizeIban(formData.creditorIban)
     if (!normalizedIban) {
       newErrors.creditorIban = 'IBAN is required'
     } else if (!IBAN_PATTERN.test(normalizedIban)) {
@@ -91,10 +95,9 @@ export function InitiatePaymentDialog({
     if (!validate()) return
 
     try {
-      const normalizedIban = formData.creditorIban.trim().replace(/\s+/g, '')
       const result = await initiate.mutateAsync({
         debtorAccountId: formData.debtorAccountId.trim(),
-        creditorReference: normalizedIban,
+        creditorReference: normalizeIban(formData.creditorIban),
         amount: formData.amount.trim(),
         currency: formData.currency,
       })
