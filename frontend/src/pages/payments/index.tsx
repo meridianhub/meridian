@@ -4,6 +4,8 @@ import { DataTable } from '@/components/shared/data-table'
 import { MoneyDisplay } from '@/components/shared/money-display'
 import { StatusBadge } from '@/components/shared/status-badge'
 import { TimeDisplay } from '@/components/shared/time-display'
+import { useTenantSlug } from '@/hooks/use-tenant-context'
+import { tenantKeys } from '@/lib/query-keys'
 import { fetchPayments, type PaymentOrder } from './payments-query'
 
 const STATUS_OPTIONS = [
@@ -63,6 +65,8 @@ interface PaymentsPageProps {
 
 export function PaymentsPage({ onRowNavigate }: PaymentsPageProps = {}) {
   const navigate = useNavigate()
+  const tenantSlug = useTenantSlug()
+  const queryKey = tenantSlug ? tenantKeys.payments(tenantSlug) : ['payments']
 
   function handleRowClick(row: PaymentOrder) {
     if (onRowNavigate) {
@@ -76,7 +80,7 @@ export function PaymentsPage({ onRowNavigate }: PaymentsPageProps = {}) {
     <div className="p-6">
       <h1 className="mb-6 text-2xl font-semibold">Payments</h1>
       <DataTable
-        queryKey={['payments']}
+        queryKey={queryKey}
         queryFn={fetchPayments}
         columns={columns}
         filters={FILTER_CONFIGS}

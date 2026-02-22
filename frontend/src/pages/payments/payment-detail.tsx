@@ -8,6 +8,8 @@ import { StatusBadge } from '@/components/shared/status-badge'
 import { TimeDisplay } from '@/components/shared/time-display'
 import { SagaTimeline } from '@/components/shared/saga-timeline'
 import { AuditTrail } from '@/components/shared/audit-trail'
+import { useTenantSlug } from '@/hooks/use-tenant-context'
+import { tenantKeys } from '@/lib/query-keys'
 import { fetchPaymentDetail } from './payment-detail-query'
 
 function PaymentDetailSkeleton() {
@@ -31,9 +33,13 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
 
 export function PaymentDetailPage() {
   const { paymentOrderId } = useParams<{ paymentOrderId: string }>()
+  const tenantSlug = useTenantSlug()
+  const queryKey = tenantSlug && paymentOrderId
+    ? tenantKeys.payment(tenantSlug, paymentOrderId)
+    : ['payments', paymentOrderId]
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['payments', paymentOrderId],
+    queryKey,
     queryFn: () => fetchPaymentDetail(paymentOrderId!),
     enabled: !!paymentOrderId,
   })

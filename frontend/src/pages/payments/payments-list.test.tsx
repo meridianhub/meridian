@@ -4,6 +4,8 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import { AuthProvider } from '@/contexts/auth-context'
+import { TenantProvider } from '@/contexts/tenant-context'
 import { PaymentsPage } from './index'
 
 // Mock the payments query function
@@ -21,11 +23,16 @@ function makeQueryClient() {
 }
 
 function Wrapper({ children }: { children: React.ReactNode }) {
+  const qc = makeQueryClient()
   return (
-    <QueryClientProvider client={makeQueryClient()}>
-      <TooltipProvider>
-        <MemoryRouter>{children}</MemoryRouter>
-      </TooltipProvider>
+    <QueryClientProvider client={qc}>
+      <AuthProvider>
+        <TenantProvider>
+          <TooltipProvider>
+            <MemoryRouter>{children}</MemoryRouter>
+          </TooltipProvider>
+        </TenantProvider>
+      </AuthProvider>
     </QueryClientProvider>
   )
 }
@@ -135,13 +142,18 @@ describe('PaymentsPage - navigation', () => {
 
     const onNavigate = vi.fn()
 
+    const qc = makeQueryClient()
     render(
-      <QueryClientProvider client={makeQueryClient()}>
-        <TooltipProvider>
-          <MemoryRouter initialEntries={['/payments']}>
-            <PaymentsPage onRowNavigate={onNavigate} />
-          </MemoryRouter>
-        </TooltipProvider>
+      <QueryClientProvider client={qc}>
+        <AuthProvider>
+          <TenantProvider>
+            <TooltipProvider>
+              <MemoryRouter initialEntries={['/payments']}>
+                <PaymentsPage onRowNavigate={onNavigate} />
+              </MemoryRouter>
+            </TooltipProvider>
+          </TenantProvider>
+        </AuthProvider>
       </QueryClientProvider>,
     )
 

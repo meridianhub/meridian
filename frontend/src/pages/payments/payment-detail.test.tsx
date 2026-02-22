@@ -4,6 +4,8 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import { AuthProvider } from '@/contexts/auth-context'
+import { TenantProvider } from '@/contexts/tenant-context'
 import { PaymentDetailPage } from './payment-detail'
 
 vi.mock('./payment-detail-query', () => ({
@@ -26,15 +28,20 @@ function Wrapper({
   paymentOrderId?: string
   children: React.ReactNode
 }) {
+  const qc = makeQueryClient()
   return (
-    <QueryClientProvider client={makeQueryClient()}>
-      <TooltipProvider>
-        <MemoryRouter initialEntries={[`/payments/${paymentOrderId}`]}>
-          <Routes>
-            <Route path="/payments/:paymentOrderId" element={children} />
-          </Routes>
-        </MemoryRouter>
-      </TooltipProvider>
+    <QueryClientProvider client={qc}>
+      <AuthProvider>
+        <TenantProvider>
+          <TooltipProvider>
+            <MemoryRouter initialEntries={[`/payments/${paymentOrderId}`]}>
+              <Routes>
+                <Route path="/payments/:paymentOrderId" element={children} />
+              </Routes>
+            </MemoryRouter>
+          </TooltipProvider>
+        </TenantProvider>
+      </AuthProvider>
     </QueryClientProvider>
   )
 }
