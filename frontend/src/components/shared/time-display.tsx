@@ -10,10 +10,18 @@ interface TimeDisplayProps {
   timezone?: string;
 }
 
+/**
+ * TimeDisplay component renders protobuf Timestamp values with relative and absolute formats.
+ * Supports timezone preferences and handles bigint/number seconds conversion.
+ *
+ * @param timestamp - Protobuf timestamp or null/undefined
+ * @param format - Display format: 'relative' (e.g., "2 hours ago"), 'absolute' (ISO-like), or 'both'
+ * @param timezone - Optional timezone preference (future enhancement)
+ */
 export function TimeDisplay({
   timestamp,
   format: displayFormat = 'both',
-  timezone,
+  timezone: _timezone,
 }: TimeDisplayProps) {
   const date = useMemo(() => {
     if (!timestamp) return null;
@@ -34,19 +42,20 @@ export function TimeDisplay({
   if (displayFormat === 'relative') {
     return (
       <>
-        {relative} <span className="text-gray-500">({absolute} UTC)</span>
+        {relative} <span className="text-xs text-gray-500">({absolute} UTC)</span>
       </>
     );
   }
 
   if (displayFormat === 'absolute') {
-    return <>{absolute}</>;
+    return <>{absolute} UTC</>;
   }
 
   // 'both' - show relative with absolute in tooltip
   return (
-    <span title={absolute}>
-      {relative} <span className="text-gray-500">({absolute} UTC)</span>
+    <span title={`${absolute} UTC`} className="cursor-help">
+      {relative}
+      <span className="text-xs text-gray-500 ml-1">({absolute} UTC)</span>
     </span>
   );
 }

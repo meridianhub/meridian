@@ -76,4 +76,17 @@ describe('TimeDisplay', () => {
     // Relative format should still display the absolute time
     expect(container.textContent).toMatch(/\d{4}-\d{2}-\d{2}/);
   });
+
+  it('includes "UTC" in absolute format output', () => {
+    render(<TimeDisplay timestamp={mockTimestamp} format="absolute" />);
+    expect(screen.getByText(/UTC/)).toBeInTheDocument();
+  });
+
+  it('sets tooltip title with absolute time', () => {
+    const { container } = render(
+      <TimeDisplay timestamp={mockTimestamp} format="both" />
+    );
+    const span = container.querySelector('span[title]');
+    expect(span).toHaveAttribute('title', expect.stringContaining('UTC'));
+  });
 });
