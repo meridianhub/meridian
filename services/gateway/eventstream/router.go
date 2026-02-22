@@ -220,7 +220,12 @@ func (r *Router) RegisterConnection(conn ConnectionSender) {
 	r.mu.Unlock()
 
 	if isFirst {
-		_ = r.fanOut.Subscribe(r.ctx, tenantID, r.makeTenantHandler(tenantID))
+		if err := r.fanOut.Subscribe(r.ctx, tenantID, r.makeTenantHandler(tenantID)); err != nil {
+			r.logger.Error("failed to subscribe to fanout for tenant",
+				slog.String("tenant_id", tenantID),
+				slog.String("error", err.Error()),
+			)
+		}
 	}
 }
 
@@ -249,7 +254,12 @@ func (r *Router) UnregisterConnection(connID string) {
 	r.mu.Unlock()
 
 	if isLast {
-		_ = r.fanOut.Unsubscribe(r.ctx, tenantID)
+		if err := r.fanOut.Unsubscribe(r.ctx, tenantID); err != nil {
+			r.logger.Error("failed to unsubscribe from fanout for tenant",
+				slog.String("tenant_id", tenantID),
+				slog.String("error", err.Error()),
+			)
+		}
 	}
 }
 
@@ -305,9 +315,8 @@ func (r *Router) Start(ctx context.Context) error {
 	})
 }
 
-// Shutdown performs a graceful shutdown of the Router. It cancels internal
-// operations and waits for the EventSource to drain. The provided ctx controls
-// the maximum wait duration.
+// Shutdown cancels internal operations, causing Start to return once the
+// EventSource acknowledges cancellation.
 func (r *Router) Shutdown(_ context.Context) error {
 	r.cancel()
 	return nil
