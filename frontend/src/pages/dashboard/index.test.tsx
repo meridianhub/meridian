@@ -1,7 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
 import { screen, waitFor } from '@testing-library/react'
-import { http, HttpResponse } from 'msw'
-import { server } from '@/test/msw-handlers'
 import { renderWithProviders } from '@/test/test-utils'
 import { createTenantUserToken } from '@/test/jwt-helpers'
 import { DashboardPage } from './index'
