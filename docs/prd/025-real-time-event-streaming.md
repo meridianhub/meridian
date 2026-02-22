@@ -347,6 +347,12 @@ using JSON messages.
 }
 ```
 
+> **Naming convention**: `event_type` uses the protobuf message name
+> in snake_case (e.g., `payment_order.reserved.v1`), which is
+> distinct from the Kafka topic name in kebab-case
+> (`payment-order.reserved.v1`). The `channel` field uses the
+> kebab-case form derived from the topic.
+
 **Server → Client (Subscription Confirmed):**
 
 ```json
@@ -544,7 +550,7 @@ definitions to be added to the auth system:
 | `ops:audit` | `audit.*` | Compliance / audit |
 
 These roles are carried in the JWT `roles` claim (already supported
-by `CombinedAuthMiddleware` and the `MeridianClaims` struct in
+by `CombinedAuthMiddleware` and the `Claims` struct in
 `shared/platform/auth/jwt.go`). The subscription handler validates
 channel access against the connection's roles before confirming a
 subscription.
@@ -805,11 +811,11 @@ instead of `time.Sleep`.
 | Kafka | Domain topics, `x-tenant-id` headers | New consumer group only |
 | CockroachDB | `event_outbox` tables | Read-only access (non-Kafka) |
 | Redis | Pub/Sub channels | New Pub/Sub usage |
-| JWT Auth | `MeridianClaims` (roles, tenant_id) | Add `ops:*` role defs |
+| JWT Auth | `Claims` (roles, tenant_id) | Add `ops:*` role defs |
 | OpenTelemetry | Tracer via `shared/platform/observability` | New WS span kinds |
 | Protobuf | Event defs, `protojson` marshalling | No changes |
 
-No new infrastructure. No new databases. No new message brokers.
+No new infrastructure, databases, or message brokers.
 
 ---
 
