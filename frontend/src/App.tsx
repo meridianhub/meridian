@@ -7,6 +7,7 @@ import { AuthProvider } from '@/contexts/auth-context'
 import { TenantProvider } from '@/contexts/tenant-context'
 import { ProtectedRoute, PlatformOnlyRoute } from '@/components/routing'
 import { AppShell } from '@/components/layout/app-shell'
+import { AuditLogPage } from '@/pages/audit'
 
 // Placeholder page components - replaced as each page task is implemented
 function PlaceholderPage({ title }: { title: string }) {
@@ -69,7 +70,7 @@ function AppShellLayout() {
           path="/gateway-mappings"
           element={<PlaceholderPage title="Gateway Mappings" />}
         />
-        <Route path="/audit-log" element={<PlaceholderPage title="Audit Log" />} />
+        <Route path="/audit-log" element={<AuditLogPage />} />
 
         {/* Platform-only routes */}
         <Route
