@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/services/gateway/auth"
+	"github.com/meridianhub/meridian/services/gateway/eventstream"
 	gwhealth "github.com/meridianhub/meridian/services/gateway/health"
 	"github.com/meridianhub/meridian/shared/pkg/health"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
@@ -29,6 +30,8 @@ type Server struct {
 	tenantAuthzMiddleware *auth.TenantAuthorizationMiddleware
 	healthChecker         *gwhealth.GatewayHealthChecker
 	transcoderHandler     http.Handler
+	eventStreamHandler    *eventstream.Handler
+	rawEventStreamHandler http.Handler // used by tests and WithEventStreamHandlerHTTP
 }
 
 // ServerOption is a functional option for configuring the server.
@@ -54,6 +57,23 @@ func WithHealthChecker(healthChecker *gwhealth.GatewayHealthChecker) ServerOptio
 func WithTranscoder(handler http.Handler) ServerOption {
 	return func(s *Server) {
 		s.transcoderHandler = handler
+	}
+}
+
+// WithEventStreamHandler sets the WebSocket event stream handler. When set,
+// the GET /ws/events route is registered with the full auth middleware chain.
+func WithEventStreamHandler(handler *eventstream.Handler) ServerOption {
+	return func(s *Server) {
+		s.eventStreamHandler = handler
+	}
+}
+
+// WithEventStreamHandlerHTTP registers an arbitrary http.Handler on GET /ws/events.
+// This is primarily used in tests where a real *eventstream.Handler is not needed.
+// Production code should use WithEventStreamHandler.
+func WithEventStreamHandlerHTTP(handler http.Handler) ServerOption {
+	return func(s *Server) {
+		s.rawEventStreamHandler = handler
 	}
 }
 
@@ -151,6 +171,61 @@ func (s *Server) registerRoutes() {
 	}
 
 	s.mux.Handle("/api/", handler)
+
+	// WebSocket event stream endpoint - with auth and tenant middleware chain.
+	// Claims are bridged from the gateway auth context to the eventstream context
+	// so that the eventstream.Handler can authorize channel subscriptions.
+	//
+	// rawEventStreamHandler takes precedence (used in tests). Production code uses
+	// eventStreamHandler which gets wrapped with the claims bridge.
+	if s.rawEventStreamHandler != nil {
+		wsHandler := s.wrapWithAuthChain(s.rawEventStreamHandler)
+		s.mux.Handle("GET /ws/events", wsHandler)
+	} else if s.eventStreamHandler != nil {
+		wsHandler := s.buildEventStreamHandler()
+		s.mux.Handle("GET /ws/events", wsHandler)
+	}
+}
+
+// buildEventStreamHandler wraps the eventstream.Handler with a claims bridge and
+// the gateway auth middleware chain.
+//
+// Middleware chain: authMiddleware → tenantResolver → tenantAuthzMiddleware → claimsBridge → wsHandler
+func (s *Server) buildEventStreamHandler() http.Handler {
+	// Claims bridge: reads claims from gateway auth context (set by authMiddleware)
+	// and injects them into the eventstream-specific context key so that the
+	// eventstream.Handler can authorize channel subscriptions.
+	claimsBridge := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if claims, ok := auth.GetClaimsFromContext(r.Context()); ok {
+			r = r.WithContext(eventstream.ContextWithClaims(r.Context(), claims))
+		}
+		s.eventStreamHandler.ServeHTTP(w, r)
+	})
+
+	return s.wrapWithAuthChain(claimsBridge)
+}
+
+// wrapWithAuthChain wraps a handler with the auth middleware chain:
+// authMiddleware → tenantResolver → tenantAuthzMiddleware → inner
+func (s *Server) wrapWithAuthChain(inner http.Handler) http.Handler {
+	handler := inner
+
+	// Layer 3 (innermost): Tenant authorization (verify JWT tenant matches subdomain)
+	if s.tenantAuthzMiddleware != nil {
+		handler = s.tenantAuthzMiddleware.Handler(handler)
+	}
+
+	// Layer 2: Tenant resolution (extract tenant from subdomain/header)
+	if s.tenantResolver != nil {
+		handler = s.tenantResolver.Handler(handler)
+	}
+
+	// Layer 1 (outermost): Authentication (validate JWT or API key)
+	if s.authMiddleware != nil {
+		handler = s.authMiddleware.Handler(handler)
+	}
+
+	return handler
 }
 
 // handleHealth is the liveness probe endpoint.

@@ -37,6 +37,42 @@ type Config struct {
 
 	// Auth contains the authentication configuration.
 	Auth AuthConfig
+
+	// EventStream contains the event streaming configuration.
+	EventStream EventStreamConfig
+}
+
+// EventStreamConfig holds the configuration for the real-time event streaming subsystem.
+type EventStreamConfig struct {
+	// Enabled is the master switch for event streaming. When false, the /ws/events
+	// endpoint is not registered and no event sources are started.
+	Enabled bool
+
+	// KafkaEnabled selects the Kafka event source. When true, KafkaBrokers and
+	// KafkaTopics are required. When false (default), the outbox polling source is used.
+	KafkaEnabled bool
+
+	// KafkaBrokers is a comma-separated list of Kafka bootstrap servers
+	// (e.g., "kafka1:9092,kafka2:9092"). Required when KafkaEnabled is true.
+	KafkaBrokers string
+
+	// KafkaTopics is the list of Kafka topics to consume. Required when KafkaEnabled is true.
+	KafkaTopics []string
+
+	// OutboxPollInterval is the polling interval for the outbox event source.
+	// Only used when KafkaEnabled is false. Defaults to 500ms.
+	OutboxPollInterval time.Duration
+
+	// RedisEnabled selects the Redis fan-out backend. When true, the existing
+	// RedisURL from Config is used. When false, an in-process local fan-out is used.
+	RedisEnabled bool
+
+	// MaxConnections is the maximum number of concurrent WebSocket connections.
+	// A value of 0 means no limit.
+	MaxConnections int
+
+	// BufferSize is the per-connection event buffer size. Defaults to 256.
+	BufferSize int
 }
 
 // AuthConfig holds the authentication configuration for the gateway.
@@ -133,6 +169,9 @@ func LoadConfig() (*Config, error) {
 	// Load auth configuration
 	config.Auth = loadAuthConfig()
 
+	// Load event stream configuration
+	config.EventStream = loadEventStreamConfig()
+
 	// Validate configuration
 	if err := config.Validate(); err != nil {
 		return nil, err
@@ -203,6 +242,31 @@ func loadAuthConfig() AuthConfig {
 	}
 
 	return config
+}
+
+// loadEventStreamConfig loads event streaming configuration from environment variables.
+//
+// Environment variables:
+//   - EVENT_STREAM_ENABLED: Master switch for event streaming (default: false)
+//   - KAFKA_ENABLED: Use Kafka as event source (default: false, uses outbox polling)
+//   - KAFKA_BROKERS: Comma-separated Kafka bootstrap servers
+//   - KAFKA_TOPICS: Comma-separated list of Kafka topics to consume
+//   - OUTBOX_POLL_INTERVAL: Polling interval for outbox source (default: 500ms)
+//   - EVENT_STREAM_REDIS_ENABLED: Use Redis for fan-out (default: false, uses local fan-out)
+//   - EVENT_STREAM_MAX_CONNECTIONS: Maximum WebSocket connections (default: 0, no limit)
+//   - EVENT_STREAM_BUFFER_SIZE: Per-connection event buffer size (default: 256)
+func loadEventStreamConfig() EventStreamConfig {
+	cfg := EventStreamConfig{
+		Enabled:            env.GetEnvAsBool("EVENT_STREAM_ENABLED", false),
+		KafkaEnabled:       env.GetEnvAsBool("KAFKA_ENABLED", false),
+		KafkaBrokers:       os.Getenv("KAFKA_BROKERS"),
+		KafkaTopics:        env.GetEnvAsSlice("KAFKA_TOPICS", nil),
+		OutboxPollInterval: env.GetEnvAsDuration("OUTBOX_POLL_INTERVAL", 500*time.Millisecond),
+		RedisEnabled:       env.GetEnvAsBool("EVENT_STREAM_REDIS_ENABLED", false),
+		MaxConnections:     env.GetEnvAsInt("EVENT_STREAM_MAX_CONNECTIONS", 0),
+		BufferSize:         env.GetEnvAsInt("EVENT_STREAM_BUFFER_SIZE", 256),
+	}
+	return cfg
 }
 
 // parseAPIKeysEnv parses a comma-separated list of "key:identity" pairs.
