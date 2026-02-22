@@ -152,6 +152,33 @@ The gateway already handles this. A platform admin JWT (no `x-tenant-id` claim) 
 
 If the bypass doesn't exist yet, the gateway needs a small change: when JWT has `platform-admin` or `super-admin` role and no `x-tenant-id` claim, skip the tenant authorization check but still inject the resolved tenant into context.
 
+#### Phase 0 Prerequisite: Platform Admin Gateway Bypass
+
+The two-lens architecture requires that
+`TenantAuthorizationMiddleware` in `combined_middleware.go`
+allows JWTs with `platform-admin` or `super-admin` role and
+no `x-tenant-id` claim to pass through when accessing
+tenant-scoped services via subdomain.
+
+**Current behavior (verify):** API keys bypass the tenant
+authorization check. JWT-based access for platform admins
+may not have the same bypass.
+
+**Required behavior:** When JWT has `platform-admin` or
+`super-admin` role AND no `x-tenant-id` claim, the
+middleware must:
+
+1. Skip the JWT tenant ID vs resolved tenant ID comparison
+2. Still inject the resolved tenant ID (from subdomain)
+   into the request context
+3. Log the cross-tenant access for audit purposes
+
+**This must be verified and, if missing, implemented before
+Phase 1 begins.** The entire TenantSelector and platform
+admin experience depends on it. If the bypass doesn't
+exist, file a gateway issue and add it to Phase 1
+prerequisites.
+
 **Platform-level API calls** (tenant management, platform config):
 
 The Tenant Service uses `PlatformAdminInterceptor` which requires:
@@ -211,7 +238,7 @@ Rationale:
 └─────────────────────────────────────────────────────────┘
 ```
 
-**Real-time integration (Phase 3, per PRD-025):**
+**Real-time integration (Phase 4, per PRD-025):**
 
 ```text
 WebSocket event arrives (e.g., AccountStatusChanged)
@@ -232,25 +259,27 @@ Components are built identically whether WebSocket exists or not. No polling. No
 **Query key convention:**
 
 ```typescript
-// Pattern: [resource, tenantSlug, ...params]
-['accounts', slug]                              // list all
-['accounts', slug, { accountId: '123' }]        // single account
-['accounts', slug, { status: 'ACTIVE', page: 2 }] // filtered list
-['position-logs', slug, { accountId: '123' }]   // position logs for account
-['booking-logs', slug]                           // all booking logs
-['payment-orders', slug, { status: 'EXECUTING' }] // filtered payments
-['tenants']                                       // platform-level (no slug)
-['sagas', slug]                                   // tenant sagas
-['sagas', 'platform']                             // platform saga defaults
+// Tenant-scoped (cleared on tenant switch):
+['accounts', slug, ...params]
+['payment-orders', slug, ...params]
+['sagas', slug, ...params]
+
+// Platform-scoped (NOT cleared on tenant switch):
+['platform', 'tenants']
+['platform', 'sagas-defaults']
+['platform', 'monitoring']
+
+// Tenant switch clears tenant-scoped queries only:
+queryClient.removeQueries({
+  predicate: (query) => query.queryKey[1] === previousSlug,
+});
 ```
 
-Including `tenantSlug` in every query key means switching tenants invalidates all cached data automatically:
-
-```typescript
-queryClient.invalidateQueries({ queryKey: [undefined, previousSlug] });
-// Or more precisely:
-queryClient.removeQueries(); // Nuclear option on tenant switch
-```
+Including `tenantSlug` in every tenant-scoped query key
+means switching tenants invalidates only that tenant's
+cached data. Platform-scoped queries (prefixed with
+`'platform'`) survive tenant switches — the platform
+admin's tenant list cache is preserved across switches.
 
 ### 3.6 Authentication Flow
 
@@ -263,6 +292,36 @@ queryClient.removeQueries(); // Nuclear option on tenant switch
 6. On 401 response → attempt token refresh
 7. On refresh failure → redirect to login
 ```
+
+#### Token Persistence Across Page Refresh
+
+Memory-only storage loses tokens on refresh. Two options:
+
+**Option A (Recommended): Secure httpOnly cookie via auth
+proxy**
+
+A lightweight auth endpoint (not a BFF — it handles only
+token exchange) sits at `console.meridian.io/auth/`. It
+performs the OAuth PKCE exchange and sets a secure,
+httpOnly, SameSite=Strict cookie. The Connect-ES transport
+sends this cookie automatically. The auth proxy is
+stateless — it validates the cookie and injects the
+Authorization header before proxying to the gateway.
+
+This does NOT violate the "no BFF" decision (Section 3.4)
+because it handles only authentication, not data
+aggregation. It is a standard pattern for SPAs that need
+secure token storage.
+
+**Option B: Silent token refresh via iframe.**
+On page load, attempt a silent OAuth refresh via hidden
+iframe. If the identity provider session is still valid, a
+new access token is issued without user interaction. If
+expired, redirect to login.
+
+Option A is preferred because it eliminates client-side
+token handling entirely. Option B has known issues with
+third-party cookie restrictions in Safari and Firefox.
 
 **JWT structure** (from `shared/platform/auth/jwt.go`):
 
@@ -329,15 +388,36 @@ The codebase contains 14 service directories. Here is how they map to UI pages:
 - **Recent activity feed:** Last 10 domain events (account created, payment completed, variance detected)
 - **Quick actions:** Create account, initiate payment, run reconciliation
 
+**Count strategy:** The dashboard needs counts (total
+accounts, open payment orders, pending reconciliations).
+Two approaches:
+
+**Approach A (Immediate):** Call list RPCs with
+`page_size: 1` and use the response metadata. If the proto
+responses include a `total_count` field, use it directly.
+If they only return `next_page_token` (cursor-based
+pagination without total count), the dashboard cannot show
+exact counts without paginating through all results.
+
+**Approach B (If no total_count):** Show "recent" counts
+instead of totals. "12 active accounts" becomes
+"12 accounts (showing recent)". The list pages show the
+full paginated data — the dashboard shows a preview.
+
+Check each List RPC response proto for a `total_count` or
+`total_size` field. If none exist, use Approach B for
+Phase 1 and file issues to add count RPCs or
+`total_count` fields to list responses for Phase 2.
+
 **RPCs consumed:**
 
-- `CurrentAccountService.ListCurrentAccounts` (with status filter for counts — placeholder: may need a count-only endpoint or client-side count from paginated response)
+- `CurrentAccountService.ListCurrentAccounts` (with status filter for counts)
 - `PaymentOrderService.ListPaymentOrders` (status filter: INITIATED, EXECUTING)
 - `ReconciliationService.ListReconciliationResults` (status filter: RUNNING)
 
 **Aggregation concern:** Dashboard requires data from 3+ services. React Query fetches in parallel. No BFF needed — components render independently as each query resolves.
 
-**Real-time candidates:** Event activity feed (Phase 3 WebSocket).
+**Real-time candidates:** Event activity feed (Phase 4 WebSocket).
 
 ### 4.3 Accounts (Current Accounts)
 
@@ -580,7 +660,7 @@ variance detection, dispute resolution.
 - `MarketInformationService.RecordObservation` / `RecordObservationBatch`
 - `MarketInformationService.RetrieveObservation` / `ListObservations`
 
-**Real-time candidates:** New observations (Phase 3).
+**Real-time candidates:** New observations (Phase 4).
 
 ### 4.11 Forecasting
 
@@ -614,7 +694,7 @@ variance detection, dispute resolution.
 
 **Open item:** No audit query RPC exists in the current proto definitions. The audit-worker consumes events and stores them, but there is no gRPC service for querying the stored audit log. **This needs to be added** — either as an `AuditService` with `ListAuditEntries` / `RetrieveAuditEntry` RPCs, or as a read path on an existing service.
 
-**Real-time candidates:** Live audit feed (Phase 3 WebSocket — new audit entries appear in real time).
+**Real-time candidates:** Live audit feed (Phase 4 WebSocket — new audit entries appear in real time).
 
 ### 4.13 Starlark Configuration
 
@@ -693,7 +773,7 @@ variance detection, dispute resolution.
 4. Show per-service status (PENDING → IN_PROGRESS → COMPLETED/FAILED)
 5. On completion → navigate to tenant detail
 
-**Real-time candidates:** Provisioning progress (Phase 3 WebSocket).
+**Real-time candidates:** Provisioning progress (Phase 4 WebSocket).
 
 ### 4.15 Reference Data & Product Configuration
 
@@ -941,10 +1021,25 @@ transaction through it to verify the full stack.
 
 #### Implementation Approach
 
-This workflow is **not a wizard** — it is a contextual guide
-that connects existing pages. Each step links to the relevant
-page with pre-filled context. A "Product Setup" checklist
-component tracks progress across the steps:
+**Implementation approach:** This is a lightweight multi-page
+workflow orchestrator — effectively a guided wizard that
+spans existing pages rather than a standalone step-by-step
+dialog. It carries meaningful implementation complexity:
+
+- Session-persisted state (ProductSetupChecklist) that
+  tracks progress across page navigations
+- Collapsible panel rendered conditionally on relevant
+  pages during an active session
+- Deep links between pages with pre-filled context (e.g.,
+  "Create Account Type" pre-selects the instrument from
+  Step 1)
+- State synchronization: when a user activates an
+  instrument on the Instruments page, the checklist on the
+  Starlark page must reflect this
+
+This is Phase 3 work because it depends on all the pages
+it connects (instruments, account types, sagas) existing
+first.
 
 ```typescript
 interface ProductSetupChecklist {
@@ -1064,7 +1159,7 @@ not operational data).
 
 ### 5.1 React Query Cache Invalidation Architecture
 
-Every component uses React Query for data fetching. Real-time events (Phase 3, per PRD-025) integrate by invalidating specific query keys:
+Every component uses React Query for data fetching. Real-time events (Phase 4, per PRD-025) integrate by invalidating specific query keys:
 
 ```typescript
 // Event → Query Key mapping
@@ -1162,7 +1257,10 @@ Platform admin only. A combobox/dropdown in the header that:
 - Shows currently selected tenant with display name and slug
 - On selection change:
   1. Updates TenantContext
-  2. Calls `queryClient.removeQueries()` to clear all cached data
+  2. Clears tenant-scoped queries for the previous tenant:
+     `queryClient.removeQueries({ predicate: (q) => q.queryKey[1] === previousSlug })`
+     Platform-scoped queries (prefixed `'platform'`) are
+     preserved — the tenant list cache survives switches.
   3. Reconfigures Connect transport base URL to new tenant subdomain
   4. All visible queries automatically refetch
 
@@ -1190,6 +1288,9 @@ type):
 - Amounts stored as cents (int64) — divide by
   10^precision for display.
 
+**Loading state:** Show "—" placeholder when amount data
+is loading or null.
+
 **Precision constraint:** Proto `InstrumentAmount` uses
 int64 for the amount field. JavaScript `number` loses
 precision above 2^53. All amount arithmetic and display
@@ -1201,6 +1302,9 @@ by default.
 ### 6.4 StatusBadge
 
 Renders status values with consistent color coding.
+
+**Loading state:** Show grey pill with shimmer animation
+when status data is loading.
 
 ```typescript
 type StatusVariant = 'success' | 'warning' | 'error' | 'info' | 'neutral';
@@ -1258,6 +1362,21 @@ interface FilterConfig {
 
 Uses cursor-based pagination (page tokens from protobuf
 responses), not offset-based.
+
+**Loading states:**
+
+- First load (no data): Render column headers +
+  `pageSize` skeleton rows. Each skeleton row matches
+  column widths with animated shimmer placeholders.
+- Background refetch (stale data): Render actual data
+  with a thin animated bar at the top of the table. Data
+  remains interactive during refetch.
+- Empty state: Render the EmptyState component with an
+  icon, message ("No accounts found"), and optional
+  action button ("Create Account").
+- Error state: Render column headers + inline error
+  message with retry button. Maintain table height to
+  prevent layout shift.
 
 **Filtering constraint:** Every filter maps 1:1 to a field
 on the underlying RPC request message. The backend uses
@@ -1412,6 +1531,9 @@ Shows each step with timestamp, status (completed/active/pending),
 and expansion for error details on failure. Compensation steps
 shown below the main timeline when saga rolls back.
 
+**Loading state:** Show grey dots with pulse animation when
+timeline data is loading.
+
 ### 6.11 CELEditor
 
 Inline editor for CEL (Common Expression Language) expressions
@@ -1505,6 +1627,52 @@ Each handler expands to show:
 `handlers.yaml` definitions via a schema endpoint or
 embedded at build time during proto code generation.
 
+### 6.13 Error Handling Architecture
+
+**Page-level error boundary:** Wraps each route. Catches
+render errors and unhandled promise rejections. Displays a
+full-page error state with: error message (sanitized — no
+stack traces), "Retry" button that remounts the page, and
+"Go to Dashboard" fallback link.
+
+**Component-level error states:** Each component that uses
+React Query handles three states explicitly:
+
+- `isLoading` (first load, no cached data): Show skeleton
+  placeholder matching the component's layout. DataTable
+  shows column headers + skeleton rows. Cards show shimmer
+  rectangles matching content areas. SagaTimeline shows
+  grey dots with pulse animation.
+- `isError` (query failed): Show inline error with retry
+  button. Do NOT collapse the component — maintain its
+  layout space to prevent page reflow. Error message from
+  Connect-ES includes gRPC status code mapped to
+  human-readable text.
+- `isFetching` (background refetch, stale data visible):
+  Show a subtle loading indicator (e.g., thin progress bar
+  at top of component) while displaying stale data. User
+  sees current data with a visual hint that it's
+  refreshing.
+
+**Dashboard resilience:** The dashboard fetches from 3+
+services in parallel. If one service is down, only that
+card shows an error state. Other cards render normally.
+This is the default React Query behavior — each query is
+independent.
+
+**gRPC status code mapping:**
+
+| gRPC Code | User-Facing Message |
+|-----------|---------------------|
+| UNAVAILABLE | "Service temporarily unavailable. Retrying..." |
+| DEADLINE_EXCEEDED | "Request timed out. Please try again." |
+| UNAUTHENTICATED | (trigger token refresh, then redirect to login) |
+| PERMISSION_DENIED | "You don't have permission for this action." |
+| NOT_FOUND | "Resource not found." (navigate to list view) |
+| ALREADY_EXISTS | "This resource already exists." (on create forms) |
+| INVALID_ARGUMENT | Show field-level validation errors from details |
+| INTERNAL | "Something went wrong. Please try again." |
+
 ---
 
 ## 7. Frontend Project Structure
@@ -1558,6 +1726,7 @@ frontend/
 │   │       ├── quality-ladder-badge.tsx
 │   │       ├── saga-timeline.tsx
 │   │       ├── product-setup-checklist.tsx
+│   │       ├── error-boundary.tsx
 │   │       └── empty-state.tsx
 │   ├── pages/
 │   │   ├── dashboard/
@@ -1711,38 +1880,171 @@ MSW intercepts Connect-ES HTTP calls and returns proto-like JSON responses. Test
 
 Everything runs in jsdom via Vitest unless explicitly justified. Browser tests (Playwright) are not in scope for Phase 1. If visual regression testing is needed later, it would be a separate concern.
 
+### 8.6 Phase 1 Test Scenarios
+
+#### Accounts Page
+
+**Happy path:**
+
+- List renders with paginated accounts, correct columns,
+  working sort
+- Detail view shows all tabs with correct data
+- Create account form submits successfully, list refreshes
+- Deposit action completes, balance updates in detail view
+- Freeze/unfreeze toggles status badge correctly
+
+**Unhappy path:**
+
+- List API returns 503 → error state with retry button
+- Create account returns ALREADY_EXISTS → form shows
+  inline error
+- Deposit returns INVALID_ARGUMENT (negative amount) →
+  field-level error
+- Detail view for non-existent account → NOT_FOUND →
+  redirect to list with toast
+
+**Edge cases:**
+
+- Account with zero balance displays "0.00" not blank
+- Account with max int64 balance renders without overflow
+- IBAN with 34 characters (max length) doesn't break
+  table layout
+- Frozen account: deposit and withdrawal actions are
+  disabled
+- Closed account: all mutating actions hidden
+- Single account in list (no pagination controls shown)
+- Exactly `pageSize` items (next page token may or may
+  not exist)
+
+**Negative testing:**
+
+- TypeScript catches: wrong prop types to AccountDetail
+  component (compile-time)
+- API returns unexpected field type (string where number
+  expected) → graceful fallback, no crash
+- API returns unknown enum value for status → StatusBadge
+  shows 'neutral' variant with raw string
+
+#### Payments Page
+
+**Happy path:**
+
+- List renders payment orders with status badges
+- Detail view shows SagaTimeline with correct step
+  progression
+- Initiate payment form validates IBAN format, submits,
+  shows new order in list
+- Cancel payment updates status to CANCELLED
+
+**Unhappy path:**
+
+- Initiate returns INVALID_ARGUMENT (bad IBAN) →
+  field-level validation
+- Initiate returns FAILED_PRECONDITION (insufficient
+  funds) → error dialog with explanation
+- Cancel on already-completed payment →
+  FAILED_PRECONDITION → toast with message
+
+**Edge cases:**
+
+- Payment in EXECUTING state: cancel button disabled
+  (can't cancel mid-execution)
+- Payment with compensation steps: SagaTimeline shows
+  rollback branch below main timeline
+- Payment with all timestamps identical (instant
+  processing): timeline still renders distinct steps
+- Very large amount (max precision): MoneyDisplay formats
+  correctly
+
+**Negative testing:**
+
+- SagaTimeline receives unknown saga state → renders as
+  grey "unknown" step, doesn't crash
+- Payment detail receives null amount → MoneyDisplay
+  shows "—" placeholder
+
+### 8.7 Accessibility Requirements
+
+**Target:** WCAG 2.1 AA compliance.
+
+shadcn/ui (built on Radix) provides accessible primitives
+by default. The following must be maintained, not broken:
+
+- **Keyboard navigation:** All interactive elements
+  reachable via Tab. DataTable rows navigable with arrow
+  keys. Dialog and dropdown focus trapping works
+  correctly. Esc closes modals/dropdowns.
+- **Screen reader support:** All form inputs have
+  associated labels. Status changes announced via
+  aria-live regions (e.g., "Payment order status changed
+  to COMPLETED"). DataTable rows use proper role="row"
+  and role="cell" semantics.
+- **Color independence:** StatusBadge uses both color AND
+  text label. QualityLadderBadge uses icons alongside
+  colors. Error states use both red color and error icon.
+  No information conveyed by color alone.
+- **Focus indicators:** Visible focus rings on all
+  interactive elements (Tailwind's ring utilities). Custom
+  focus styles for StarlarkEditor and CELEditor (CodeMirror
+  provides these but verify).
+- **Reduced motion:** Respect `prefers-reduced-motion`
+  media query. Skeleton shimmer animations and
+  SagaTimeline transitions should be disabled when user
+  has reduced motion preference.
+
+**Testing:** Add axe-core integration to Vitest setup.
+Run accessibility audit on every component render test:
+
+```typescript
+import { axe } from 'vitest-axe';
+
+it('has no accessibility violations', async () => {
+  const { container } = render(<AccountList />);
+  const results = await axe(container);
+  expect(results).toHaveNoViolations();
+});
+```
+
+This runs in jsdom — no browser needed. Add to every
+component test file.
+
 ---
 
 ## 9. Implementation Phases
 
 ### Phase 1: Foundation + Core Pages
 
-**Goal:** Working console with account and payment management.
+**Goal:** Working console with account and payment
+management.
 
 1. **Project setup:** Vite + React + TypeScript + Tailwind +
    shadcn/ui. Configure `buf generate` for proto code
    generation. Set up Connect-ES transport with JWT
    interceptor.
 2. **Auth flow:** Login redirect, JWT extraction, role
-   detection, token refresh.
+   detection, token refresh. Auth proxy for secure httpOnly
+   cookie persistence (Section 3.6).
 3. **AppShell + routing:** Sidebar navigation, two-lens
    rendering, TenantSelector for platform admin.
-4. **Shared components:** MoneyDisplay, StatusBadge, DataTable,
-   TimeDisplay, EmptyState.
+4. **Shared components:** MoneyDisplay, StatusBadge,
+   DataTable, TimeDisplay, EmptyState, error boundaries
+   (Section 6.13), loading skeletons.
 5. **Accounts page:** List + detail + create + deposit +
    withdraw + control actions.
 6. **Payments page:** List + detail + initiate + cancel.
    SagaTimeline component for saga visualization.
-7. **Testing infrastructure:** Vitest + MSW + fixtures. Tests
-   for all Phase 1 components.
+7. **Testing infrastructure:** Vitest + MSW + fixtures +
+   axe-core accessibility audits. Tests for all Phase 1
+   components per Section 8.6 scenarios.
 
-### Phase 2: Full Service Coverage + Configuration
+### Phase 2: Service Coverage (CRUD Pages)
 
-**Goal:** Every service has a UI page. Product configuration
-tools are available.
+**Goal:** Every remaining service gets a UI page. These
+are structurally repetitive — once Phase 1 patterns exist,
+each follows the same list/detail/action template.
 
-1. **Positions page:** List + detail + balance views + quality
-   ladder badge.
+1. **Positions page:** List + detail + balance views +
+   quality ladder badge.
 2. **Ledger page:** Booking logs + postings + balance
    validation display.
 3. **Parties page:** List + detail + KYC status.
@@ -1755,43 +2057,60 @@ tools are available.
    with time-series chart.
 7. **Forecasting page:** Forward curve computation form +
    result chart.
-8. **Audit page:** Audit log browser with filtering (requires
-   audit query RPC — open item).
-9. **Instruments page:** Full instrument lifecycle with CEL
-   expression editing and CEL Playground
+8. **Audit page:** Audit log browser with filtering
+   (requires audit query RPC — dependency).
+
+**Rationale:** Phase 2 pages are fast because the patterns
+exist from Phase 1. DataTable, error handling, loading
+states, and filter conventions are established. Each page
+is a new composition of existing primitives.
+
+### Phase 3: Configuration Tooling
+
+**Goal:** Architecturally novel pages that introduce new
+component types (code editors, tree browsers, visual field
+mappers, CEL playgrounds). This is not CRUD — it deserves
+its own phase.
+
+1. **Reference Data — Instruments page:** Full instrument
+   lifecycle with CEL expression editing and CEL Playground
    (EvaluateInstrument).
-10. **Account Types page:** Full account type lifecycle with
-    CEL policy editing and ValidateProductDefinition.
-11. **Reference Data Nodes page:** Hierarchical tree browser
-    with bi-temporal queries.
-12. **CELEditor component:** Shared CEL expression editor
-    with variable reference and security constraint hints.
-13. **Gateway Mappings page:** Mapping list, field
-    correspondence editor, transform configuration, dry
-    run playground with field mapping trace.
+2. **Reference Data — Account Types page:** Full account
+   type lifecycle with CEL policy editing and
+   ValidateProductDefinition.
+3. **Reference Data — Nodes page:** Hierarchical tree
+   browser with bi-temporal queries.
+4. **CELEditor component:** Shared CEL expression editor
+   with variable reference and security constraint hints.
+5. **StarlarkEditor + HandlerReference components:**
+   CodeMirror editor with inline validation errors,
+   complexity metrics panel, and handler autocomplete.
+6. **Starlark Configuration pages:** Platform defaults
+   view, tenant overrides view with diff.
+7. **Gateway Mappings page:** Mapping list, field
+   correspondence editor, transform configuration, dry
+   run playground with field mapping trace.
+8. **Product Configuration Workflow:** Guided checklist
+   connecting instruments, account types, and sagas into
+   a coherent authoring flow (Section 4.17).
 
-### Phase 3: Real-Time + Starlark Editor + Product Workflow
+**Rationale:** Phase 3 pages are slow because they
+introduce new component types. Mixing them with Phase 2
+CRUD pages creates false equivalence in effort estimation.
 
-**Goal:** Live updates, Starlark configuration management,
-and end-to-end product configuration.
+### Phase 4: Real-Time + Platform Operations
 
-1. **WebSocket integration:** Implement `useEventStream` hook
-   per PRD-025. Wire cache invalidation map.
-2. **Starlark Configuration page:** StarlarkEditor component
-   (CodeMirror) with inline validation errors, complexity
-   metrics panel, and handler autocomplete. Platform
-   defaults view, tenant overrides view with diff.
-3. **HandlerReference component:** Browsable handler schema
-   panel alongside the StarlarkEditor.
-4. **Product Configuration Workflow:** Guided checklist
-   connecting instruments, account types, and sagas into a
-   coherent authoring flow (Section 4.17).
-5. **Tenant Management page:** Full tenant lifecycle with
+**Goal:** Live updates, tenant lifecycle management, and
+platform monitoring.
+
+1. **WebSocket integration:** Implement `useEventStream`
+   hook per PRD-025. Wire cache invalidation map.
+2. **Tenant Management page:** Full tenant lifecycle with
    provisioning progress UI.
-6. **Platform Monitoring page:** Service health grid (depends
-   on Control Plane API surface).
-7. **Dashboard enrichment:** Live activity feed via WebSocket
-   events.
+3. **Platform Monitoring page:** Service health grid
+   (depends on Control Plane API surface).
+4. **Dashboard enrichment:** Live activity feed via
+   WebSocket events.
 
 ---
 
@@ -1802,16 +2121,21 @@ and end-to-end product configuration.
 | # | Item | Status | Resolution Needed |
 |---|------|--------|-------------------|
 | 1 | **Audit query RPC** | **Blocks Phase 2** | Need `AuditService.ListAuditEntries` and `RetrieveAuditEntry` RPCs. Backend task required before Audit page (4.12) can be built. |
-| 2 | **Platform admin gateway bypass** | **Blocks Phase 1** | Verify `TenantAuthorizationMiddleware` skips tenant check for `platform-admin` JWT without `x-tenant-id`. Backend task required before Phase 1. |
-| 3 | **Identity provider** | Not specified | OAuth 2.0/OIDC provider (Keycloak, Auth0) needs choosing. UI needs login redirect URL and JWKS endpoint. |
-| 4 | **Control Plane API surface** | Unclear | What gRPC services does the Control Plane expose? Determines Platform Monitoring page scope. |
-| 5 | **Party service proto** | Not fully explored | Party proto needs detailed review for complete page specification. |
-| 6 | **Reference Data RPCs** | Mapped | Instrument (8 RPCs), Account Type (8 RPCs), Node (9 RPCs) now fully specified in Section 4.15. |
-| 7 | **WebSocket backend** | Separate PRD | PRD-025 defines the real-time streaming backend. Phase 3 depends on it. |
-| 8 | **Starlark override API** | Partially exists | Check if `CreateTenantOverride()` is exposed as gRPC RPC or internal only. |
-| 9 | **Dashboard count endpoints** | May need RPCs | Count-only RPCs for dashboard stats, or use `page_size=1` with `next_page_token`. |
-| 10 | **Handler schema endpoint** | Needs design | StarlarkEditor needs handler metadata for autocomplete. Either expose via gRPC RPC or embed at build time. |
-| 11 | **CEL evaluation in reconciliation** | Future | Balance assertion CEL expressions are stored but not evaluated by the recon service. Future work to add evaluation. |
+| 2 | **Identity provider** | Not specified | OAuth 2.0/OIDC provider (Keycloak, Auth0) needs choosing. UI needs login redirect URL and JWKS endpoint. |
+| 3 | **Control Plane API surface** | Unclear | What gRPC services does the Control Plane expose? Determines Platform Monitoring page scope. |
+| 4 | **Party service proto** | Not fully explored | Party proto needs detailed review for complete page specification. |
+| 5 | **Reference Data RPCs** | Mapped | Instrument (8 RPCs), Account Type (8 RPCs), Node (9 RPCs) now fully specified in Section 4.15. |
+| 6 | **WebSocket backend** | Separate PRD | PRD-025 defines the real-time streaming backend. Phase 4 depends on it. |
+| 7 | **Starlark override API** | Partially exists | Check if `CreateTenantOverride()` is exposed as gRPC RPC or internal only. |
+| 8 | **Handler schema endpoint** | Needs design | StarlarkEditor needs handler metadata for autocomplete. Either expose via gRPC RPC or embed at build time. |
+| 9 | **CEL evaluation in reconciliation** | Future | Balance assertion CEL expressions are stored but not evaluated by the recon service. Future work to add evaluation. |
+
+**Resolved items:**
+
+- **Platform admin gateway bypass** — promoted to Phase 0
+  Prerequisite in Section 3.3.
+- **Dashboard count endpoints** — resolved with count
+  strategy in Section 4.2.
 
 <!-- markdownlint-enable MD013 -->
 
@@ -2029,7 +2353,7 @@ surfaces.**
 
 ## Appendix B: Event Catalog Summary
 
-Events that drive real-time cache invalidation (Phase 3):
+Events that drive real-time cache invalidation (Phase 4):
 
 | Domain | Event Count | Key Events for UI |
 |--------|------------|-------------------|
