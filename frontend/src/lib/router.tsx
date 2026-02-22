@@ -1,4 +1,6 @@
 import { PageErrorBoundary } from '@/components/error-boundary'
+import { LedgerPage } from '@/pages/ledger'
+import { BookingLogDetailPage } from '@/pages/ledger/booking-log-detail'
 
 export interface Route {
   path: string
@@ -17,7 +19,8 @@ const routes: Route[] = [
   { path: '/payments', name: 'Payments', component: () => <div>Payments</div> },
   { path: '/transactions', name: 'Transactions', component: () => <div>Transactions</div> },
   { path: '/positions', name: 'Positions', component: () => <div>Positions</div> },
-  { path: '/ledger', name: 'Ledger', component: () => <div>Ledger</div> },
+  { path: '/ledger', name: 'Ledger', component: LedgerPage },
+  { path: '/ledger/:bookingLogId', name: 'Booking Log Detail', component: BookingLogDetailPage },
   { path: '/parties', name: 'Parties', component: () => <div>Parties</div> },
   {
     path: '/reconciliation',
