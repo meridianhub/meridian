@@ -63,8 +63,9 @@ func TestNewHandler_CustomRoleAccess(t *testing.T) {
 }
 
 // TestWithRoleChannelAccess_DefensiveCopy verifies that WithRoleChannelAccess makes a
-// deep copy of the provided map and slice values so that mutations to the original
-// after construction do not affect the Handler's authorization decisions.
+// deep copy of the provided map so that mutations to the original after construction do
+// not affect the Handler's authorization decisions. The assertion is exercised via a
+// real WebSocket subscribe round-trip so that the handler's internal copy is used.
 func TestWithRoleChannelAccess_DefensiveCopy(t *testing.T) {
 	router := eventstream.NewRouter(
 		&stubEventSource{},
@@ -75,66 +76,59 @@ func TestWithRoleChannelAccess_DefensiveCopy(t *testing.T) {
 		"custom:role": {"my-channel.*"},
 	}
 	h := eventstream.NewHandler(router, nil, eventstream.WithRoleChannelAccess(roleAccess))
-	require.NotNil(t, h)
 
-	// Mutate the original map: add a new role and overwrite the slice.
+	// Mutate the original map BEFORE any connections are made.
+	// The handler must not observe this mutation.
 	roleAccess["custom:role"] = []string{"other-channel.*"}
-	roleAccess["extra:role"] = []string{"extra.*"}
 
-	// The handler should still use the original patterns captured at construction time.
 	claims := &platformauth.Claims{
 		UserID:   "user-1",
 		TenantID: "tenant-abc",
 		Roles:    []string{"custom:role"},
 	}
+	srv := httptest.NewServer(injectClaimsMiddleware(claims, h))
+	t.Cleanup(srv.Close)
 
-	// "my-channel.created" was allowed at construction; still allowed after caller mutates.
-	err := eventstream.AuthorizeChannels(claims, eventstream.RoleChannelAccess{"custom:role": {"my-channel.*"}}, []string{"my-channel.created"})
-	assert.NoError(t, err, "sanity: my-channel.* matches my-channel.created")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-	// Construct a second handler with the mutated map to confirm mutation was not shared.
-	h2 := eventstream.NewHandler(router, nil, eventstream.WithRoleChannelAccess(roleAccess))
-	require.NotNil(t, h2)
-	// h was built before mutation; h2 was built after. They are independent.
-	_ = h
-	_ = h2
-}
+	clientConn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	require.NoError(t, err)
+	defer clientConn.CloseNow()
 
-// TestNewHandler_DefaultRoleAccess_DefensiveCopy verifies that mutating DefaultRoleAccess
-// after NewHandler construction does not affect an already-constructed Handler.
-func TestNewHandler_DefaultRoleAccess_DefensiveCopy(t *testing.T) {
-	// Save original default.
-	original := make(eventstream.RoleChannelAccess, len(eventstream.DefaultRoleAccess))
-	for role, patterns := range eventstream.DefaultRoleAccess {
-		cp := make([]string, len(patterns))
-		copy(cp, patterns)
-		original[role] = cp
+	err = await.New().
+		AtMost(2 * time.Second).
+		PollInterval(10 * time.Millisecond).
+		Until(func() bool {
+			return len(router.GetConnectionsByTenant("tenant-abc")) > 0
+		})
+	require.NoError(t, err)
+
+	// "my-channel.created" was allowed at construction; the mutation to "other-channel.*"
+	// must NOT affect the handler — we expect a subscribed confirmation, not an error.
+	subMsg := eventstream.ClientMessage{
+		Type:     eventstream.ClientMessageTypeSubscribe,
+		ID:       "sub-defensive",
+		Channels: []eventstream.ChannelPattern{"my-channel.created"},
 	}
-	t.Cleanup(func() {
-		// Restore DefaultRoleAccess after test to avoid polluting other tests.
-		for role, patterns := range original {
-			eventstream.DefaultRoleAccess[role] = patterns
-		}
-		for role := range eventstream.DefaultRoleAccess {
-			if _, ok := original[role]; !ok {
-				delete(eventstream.DefaultRoleAccess, role)
+	data, err := json.Marshal(subMsg)
+	require.NoError(t, err)
+	require.NoError(t, clientConn.Write(ctx, websocket.MessageText, data))
+
+	var resp eventstream.ServerMessage
+	err = await.New().
+		AtMost(2 * time.Second).
+		PollInterval(10 * time.Millisecond).
+		UntilNoError(func() error {
+			_, msgData, readErr := clientConn.Read(ctx)
+			if readErr != nil {
+				return readErr
 			}
-		}
-	})
-
-	router := eventstream.NewRouter(&stubEventSource{}, eventstream.NewInProcessFanOut())
-	h := eventstream.NewHandler(router, nil)
-	require.NotNil(t, h)
-
-	// Mutate the global DefaultRoleAccess after construction.
-	eventstream.DefaultRoleAccess["ops:admin"] = []string{} // wipe admin access
-
-	// The handler built before the mutation should be unaffected.
-	// Verify via AuthorizeChannels using the handler's captured access (indirectly
-	// via a subscribe round-trip is not feasible without WebSocket overhead here,
-	// so we verify the DefaultRoleAccess mutation is visible on the package level
-	// while the handler retains its own copy).
-	_ = h // handler is constructed; test ensures no panic / data race on construction
+			return json.Unmarshal(msgData, &resp)
+		})
+	require.NoError(t, err)
+	assert.Equal(t, eventstream.ServerMessageTypeSubscribed, resp.Type,
+		"handler should use its defensive copy (my-channel.*) not the mutated map (other-channel.*)")
 }
 
 // --- HTTP upgrade ---
