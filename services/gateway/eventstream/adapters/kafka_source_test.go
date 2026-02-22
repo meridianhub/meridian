@@ -61,7 +61,7 @@ func TestNewKafkaEventSource_Validation(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("NewKafkaEventSource() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if src != nil {
+			if src != nil && src.client != nil {
 				// Close immediately to release resources.
 				src.client.Close()
 			}
@@ -298,6 +298,9 @@ func TestKafkaEventSource_Integration(t *testing.T) {
 	brokers, err := kafkaContainer.Brokers(ctx)
 	if err != nil {
 		t.Fatalf("failed to get brokers: %v", err)
+	}
+	if len(brokers) == 0 {
+		t.Fatal("kafka container returned no brokers")
 	}
 
 	const topic = "test-events.v1"
