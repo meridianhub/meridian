@@ -3,10 +3,14 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 import { queryClient } from '@/lib/query-client'
 import { PageErrorBoundary } from '@/components/error-boundary'
-import { AuthProvider } from '@/contexts/auth-context'
+import { AuthProvider, useAuth } from '@/contexts/auth-context'
 import { TenantProvider } from '@/contexts/tenant-context'
 import { ProtectedRoute, PlatformOnlyRoute } from '@/components/routing'
 import { AppShell } from '@/components/layout/app-shell'
+import { ApiClientProvider } from '@/api/context'
+import { TooltipProvider } from '@/components/ui/tooltip'
+import { TenantsPage } from '@/pages/tenants/index'
+import { TenantDetailPage } from '@/pages/tenants/[tenantId]'
 
 // Placeholder page components - replaced as each page task is implemented
 function PlaceholderPage({ title }: { title: string }) {
@@ -76,7 +80,15 @@ function AppShellLayout() {
           path="/tenants"
           element={
             <PlatformOnlyRoute>
-              <PlaceholderPage title="Tenant Management" />
+              <TenantsPage />
+            </PlatformOnlyRoute>
+          }
+        />
+        <Route
+          path="/tenants/:tenantId"
+          element={
+            <PlatformOnlyRoute>
+              <TenantDetailPage />
             </PlatformOnlyRoute>
           }
         />
@@ -96,26 +108,42 @@ function AppShellLayout() {
   )
 }
 
+/**
+ * Inner app that has access to the auth context for ApiClientProvider.
+ */
+function AuthenticatedApp() {
+  const { accessToken } = useAuth()
+  const getToken = () => accessToken ?? ''
+
+  return (
+    <ApiClientProvider tenantSlug={null} getToken={getToken}>
+      <TooltipProvider>
+        <TenantProvider>
+          <BrowserRouter>
+            <Routes>
+              <Route path="/login" element={<LoginPage />} />
+              <Route
+                path="/*"
+                element={
+                  <ProtectedRoute>
+                    <AppShellLayout />
+                  </ProtectedRoute>
+                }
+              />
+            </Routes>
+          </BrowserRouter>
+        </TenantProvider>
+      </TooltipProvider>
+    </ApiClientProvider>
+  )
+}
+
 export function App() {
   return (
     <PageErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
-          <TenantProvider>
-            <BrowserRouter>
-              <Routes>
-                <Route path="/login" element={<LoginPage />} />
-                <Route
-                  path="/*"
-                  element={
-                    <ProtectedRoute>
-                      <AppShellLayout />
-                    </ProtectedRoute>
-                  }
-                />
-              </Routes>
-            </BrowserRouter>
-          </TenantProvider>
+          <AuthenticatedApp />
         </AuthProvider>
         {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
       </QueryClientProvider>

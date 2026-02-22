@@ -2,8 +2,10 @@ import { type ReactNode } from 'react'
 import { render, type RenderOptions, type RenderResult } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { configureAxe } from 'vitest-axe'
-import { AuthProvider } from '@/contexts/auth-context'
+import { AuthProvider, useAuth } from '@/contexts/auth-context'
 import { TenantProvider } from '@/contexts/tenant-context'
+import { ApiClientProvider } from '@/api/context'
+import { TooltipProvider } from '@/components/ui/tooltip'
 
 /**
  * Pre-configured axe instance that skips color-contrast checks.
@@ -42,12 +44,30 @@ interface AllProvidersProps {
   queryClient?: QueryClient
 }
 
+/**
+ * Inner wrapper that consumes AuthProvider context to set up ApiClientProvider.
+ * Must be a child of AuthProvider.
+ */
+function ApiClientWrapper({ children }: { children: ReactNode }) {
+  const { accessToken } = useAuth()
+  const getToken = () => accessToken ?? ''
+  return (
+    <ApiClientProvider tenantSlug={null} getToken={getToken}>
+      {children}
+    </ApiClientProvider>
+  )
+}
+
 function AllProviders({ children, initialToken, queryClient }: AllProvidersProps) {
   const client = queryClient ?? createTestQueryClient()
   return (
     <QueryClientProvider client={client}>
       <AuthProvider initialToken={initialToken}>
-        <TenantProvider>{children}</TenantProvider>
+        <ApiClientWrapper>
+          <TenantProvider>
+            <TooltipProvider>{children}</TooltipProvider>
+          </TenantProvider>
+        </ApiClientWrapper>
       </AuthProvider>
     </QueryClientProvider>
   )
