@@ -46,7 +46,10 @@ func subscribeReady(t *testing.T, fo *adapters.LocalFanOut, tenantID string, han
 	}()
 
 	// Probe: publish events until the handler is reached, confirming registration.
+	// A distinct EventID prevents the probe from being confused with test events
+	// that share the same EventID produced by makeEvent.
 	probeEvent := makeEvent(tenantID)
+	probeEvent.EventID = "probe-ready"
 	probeErr := await.New().
 		AtMost(time.Second).
 		PollInterval(5 * time.Millisecond).
