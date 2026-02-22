@@ -1,4 +1,3 @@
-import { ReactNode } from 'react'
 import { PageErrorBoundary } from '@/components/error-boundary'
 
 export interface Route {
