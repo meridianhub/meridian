@@ -8,9 +8,13 @@ import { StatCard } from './stat-card'
 import { ActivityFeed, type ActivityItem } from './activity-feed'
 import { QuickActions, type QuickAction } from './quick-actions'
 
+// Cache dashboard stats for 60s to reduce unnecessary refetches on navigation
+const DASHBOARD_STALE_TIME = 60_000
+
 function useDashboardStats(tenantSlug: string | null) {
   const clients = useApiClients()
 
+  // pageSize: 1 for stat queries — we only need totalCount from pagination metadata
   const paymentsQuery = useQuery({
     queryKey: [...tenantKeys.all(tenantSlug ?? ''), 'dashboard', 'payments'],
     queryFn: () =>
@@ -18,6 +22,7 @@ function useDashboardStats(tenantSlug: string | null) {
         pagination: { pageSize: 1, pageToken: '' },
       }),
     enabled: !!tenantSlug,
+    staleTime: DASHBOARD_STALE_TIME,
   })
 
   const bookingLogsQuery = useQuery({
@@ -27,6 +32,7 @@ function useDashboardStats(tenantSlug: string | null) {
         pagination: { pageSize: 1, pageToken: '' },
       }),
     enabled: !!tenantSlug,
+    staleTime: DASHBOARD_STALE_TIME,
   })
 
   const ledgerPostingsQuery = useQuery({
@@ -36,9 +42,21 @@ function useDashboardStats(tenantSlug: string | null) {
         pagination: { pageSize: 1, pageToken: '' },
       }),
     enabled: !!tenantSlug,
+    staleTime: DASHBOARD_STALE_TIME,
   })
 
-  return { paymentsQuery, bookingLogsQuery, ledgerPostingsQuery }
+  // Separate query for activity feed — uses larger page to populate the list
+  const activityQuery = useQuery({
+    queryKey: [...tenantKeys.all(tenantSlug ?? ''), 'dashboard', 'activity'],
+    queryFn: () =>
+      clients.paymentOrder.listPaymentOrders({
+        pagination: { pageSize: 10, pageToken: '' },
+      }),
+    enabled: !!tenantSlug,
+    staleTime: DASHBOARD_STALE_TIME,
+  })
+
+  return { paymentsQuery, bookingLogsQuery, ledgerPostingsQuery, activityQuery }
 }
 
 function getCountFromPagination(
@@ -62,7 +80,8 @@ function getCountFromPagination(
 
 export function DashboardPage() {
   const { tenantSlug } = useTenantContext()
-  const { paymentsQuery, bookingLogsQuery, ledgerPostingsQuery } = useDashboardStats(tenantSlug)
+  const { paymentsQuery, bookingLogsQuery, ledgerPostingsQuery, activityQuery } =
+    useDashboardStats(tenantSlug)
 
   const paymentsCount = paymentsQuery.data
     ? getCountFromPagination(
@@ -85,18 +104,18 @@ export function DashboardPage() {
       )
     : null
 
-  // Build recent activity feed from payment orders data
-  const activityItems: ActivityItem[] = (paymentsQuery.data?.paymentOrders ?? [])
-    .slice(0, 10)
-    .map((po) => ({
-      id: po.id ?? String(Math.random()),
-      type: 'payment' as const,
-      title: `Payment order ${po.id ?? ''}`,
-      description: po.id ? `ID: ${po.id}` : undefined,
-      timestamp: po.createdAt ?? null,
-      status: po.status?.toString(),
-    }))
+  // Build recent activity feed from dedicated activity query (pageSize: 10)
+  const activityItems: ActivityItem[] = (activityQuery.data?.paymentOrders ?? []).map((po) => ({
+    id: po.id ?? String(Math.random()),
+    type: 'payment' as const,
+    title: `Payment order ${po.id ?? ''}`,
+    description: po.id ? `ID: ${po.id}` : undefined,
+    timestamp: po.createdAt ?? null,
+    status: po.status?.toString(),
+  }))
 
+  // Quick actions will navigate to dedicated pages once routes are implemented.
+  // Disabled until routing infrastructure is wired (task 026-operations-console.17).
   const quickActions: QuickAction[] = [
     {
       id: 'view-payments',
@@ -104,6 +123,7 @@ export function DashboardPage() {
       description: 'Browse all payment orders',
       icon: <CreditCard className="h-4 w-4" />,
       onClick: () => {},
+      disabled: true,
     },
     {
       id: 'view-booking-logs',
@@ -111,6 +131,7 @@ export function DashboardPage() {
       description: 'Browse financial booking logs',
       icon: <FileText className="h-4 w-4" />,
       onClick: () => {},
+      disabled: true,
     },
     {
       id: 'view-ledger',
@@ -118,6 +139,7 @@ export function DashboardPage() {
       description: 'Browse double-entry ledger',
       icon: <BarChart3 className="h-4 w-4" />,
       onClick: () => {},
+      disabled: true,
     },
     {
       id: 'view-reconciliations',
@@ -125,6 +147,7 @@ export function DashboardPage() {
       description: 'Check reconciliation status',
       icon: <ArrowRight className="h-4 w-4" />,
       onClick: () => {},
+      disabled: true,
     },
   ]
 
@@ -176,10 +199,7 @@ export function DashboardPage() {
             <CardTitle>Recent Activity</CardTitle>
           </CardHeader>
           <CardContent>
-            <ActivityFeed
-              items={activityItems}
-              isLoading={paymentsQuery.isLoading}
-            />
+            <ActivityFeed items={activityItems} isLoading={activityQuery.isLoading} />
           </CardContent>
         </Card>
 
