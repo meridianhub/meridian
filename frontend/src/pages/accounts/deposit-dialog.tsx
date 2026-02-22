@@ -22,9 +22,17 @@ interface DepositDialogProps {
 }
 
 function validateAmount(value: string): string | null {
-  if (!value.trim()) return 'Amount is required'
-  if (isNaN(parseFloat(value))) return 'Invalid amount'
-  if (parseFloat(value) <= 0) return 'Amount must be greater than zero'
+  const trimmed = value.trim()
+  if (!trimmed) return 'Amount is required'
+  try {
+    const minorUnits = amountToBigInt(trimmed)
+    if (minorUnits <= 0n) return 'Amount must be greater than zero'
+  } catch (err) {
+    // amountToBigInt throws 'Amount must be positive' for negative values
+    const msg = err instanceof Error ? err.message : 'Invalid amount'
+    if (msg === 'Amount must be positive') return 'Amount must be greater than zero'
+    return 'Invalid amount'
+  }
   return null
 }
 

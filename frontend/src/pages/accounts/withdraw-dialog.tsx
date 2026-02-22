@@ -24,9 +24,17 @@ interface WithdrawDialogProps {
 type Step = 'initiate' | 'confirm'
 
 function validateAmount(value: string): string | null {
-  if (!value.trim()) return 'Amount is required'
-  if (isNaN(parseFloat(value))) return 'Invalid amount'
-  if (parseFloat(value) <= 0) return 'Amount must be greater than zero'
+  const trimmed = value.trim()
+  if (!trimmed) return 'Amount is required'
+  try {
+    const minorUnits = amountToBigInt(trimmed)
+    if (minorUnits <= 0n) return 'Amount must be greater than zero'
+  } catch (err) {
+    // amountToBigInt throws 'Amount must be positive' for negative values
+    const msg = err instanceof Error ? err.message : 'Invalid amount'
+    if (msg === 'Amount must be positive') return 'Amount must be greater than zero'
+    return 'Invalid amount'
+  }
   return null
 }
 
@@ -84,6 +92,7 @@ async function executeWithdrawal(tenantSlug: string, withdrawalId: string): Prom
 export function WithdrawDialog({ open, onOpenChange, accountId, currency }: WithdrawDialogProps) {
   const { tenantSlug } = useTenantContext()
   const queryClient = useQueryClient()
+  const isOpenRef = React.useRef(open)
   const [step, setStep] = React.useState<Step>('initiate')
   const [amount, setAmount] = React.useState('')
   const [amountError, setAmountError] = React.useState<string | null>(null)
@@ -91,6 +100,7 @@ export function WithdrawDialog({ open, onOpenChange, accountId, currency }: With
   const [withdrawalId, setWithdrawalId] = React.useState<string | null>(null)
 
   React.useEffect(() => {
+    isOpenRef.current = open
     if (!open) {
       setStep('initiate')
       setAmount('')
@@ -106,10 +116,12 @@ export function WithdrawDialog({ open, onOpenChange, accountId, currency }: With
       return initiateWithdrawal(tenantSlug ?? '', accountId, minorUnits)
     },
     onSuccess: (id) => {
+      if (!isOpenRef.current) return
       setWithdrawalId(id)
       setStep('confirm')
     },
     onError: (error: Error) => {
+      if (!isOpenRef.current) return
       setServerError(error.message)
     },
   })
@@ -125,6 +137,7 @@ export function WithdrawDialog({ open, onOpenChange, accountId, currency }: With
       onOpenChange(false)
     },
     onError: (error: Error) => {
+      if (!isOpenRef.current) return
       setServerError(error.message)
     },
   })
