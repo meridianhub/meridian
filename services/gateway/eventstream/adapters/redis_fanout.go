@@ -24,7 +24,7 @@ type subscription struct {
 
 // RedisFanOut implements eventstream.FanOut using Redis pub/sub.
 // Each tenant is assigned a dedicated channel: meridian:events:{tenant_id}.
-// Events are JSON-marshaled before publishing and unmarshaled on receipt.
+// Events are JSON-marshaled on publish and unmarshaled on receipt.
 //
 // Implementations are safe for concurrent use from multiple goroutines.
 type RedisFanOut struct {
@@ -88,39 +88,44 @@ func (f *RedisFanOut) Subscribe(ctx context.Context, tenantID string, handler ev
 	}
 
 	subCtx, cancel := context.WithCancel(ctx)
-	f.subscriptions[tenantID] = &subscription{
+	sub := &subscription{
 		cancel:  cancel,
 		handler: handler,
 	}
+	f.subscriptions[tenantID] = sub
 	f.mu.Unlock()
 
 	ch := channel(tenantID)
 	pubsub := f.client.Subscribe(subCtx, ch)
 
-	go f.receiveLoop(subCtx, tenantID, pubsub, handler)
+	// Wait for Redis to acknowledge the subscription before returning.
+	// This prevents messages published immediately after Subscribe from being lost.
+	if _, err := pubsub.Receive(subCtx); err != nil {
+		cancel()
+		_ = pubsub.Close()
+		f.mu.Lock()
+		if cur, ok := f.subscriptions[tenantID]; ok && cur == sub {
+			delete(f.subscriptions, tenantID)
+		}
+		f.mu.Unlock()
+		return fmt.Errorf("redis subscribe to %s: %w", ch, err)
+	}
+
+	go f.receiveLoop(subCtx, tenantID, pubsub, sub)
 
 	f.logger.Debug("subscribed", "tenant_id", tenantID, "channel", ch)
 	return nil
 }
 
 // receiveLoop processes messages from the Redis pub/sub channel until the context is done.
-// On exit it closes the pubsub subscription and removes the entry from the subscription map.
-func (f *RedisFanOut) receiveLoop(ctx context.Context, tenantID string, pubsub *redis.PubSub, handler eventstream.EventHandler) {
+// On exit it closes the pubsub subscription and removes the entry from the subscription map,
+// but only if the map entry still points to this subscription (identity check).
+func (f *RedisFanOut) receiveLoop(ctx context.Context, tenantID string, pubsub *redis.PubSub, sub *subscription) {
 	defer func() {
 		_ = pubsub.Close()
-		// Clean up the subscription map entry only if it still points to this subscription
-		// (a Replace may have already installed a new one).
 		f.mu.Lock()
-		if sub, ok := f.subscriptions[tenantID]; ok {
-			// Compare by checking whether the context is the one we own.
-			// The simplest safe check: if context is done, remove the entry.
-			select {
-			case <-ctx.Done():
-				delete(f.subscriptions, tenantID)
-			default:
-				// A new subscription replaced us; leave the map alone.
-				_ = sub
-			}
+		if cur, ok := f.subscriptions[tenantID]; ok && cur == sub {
+			delete(f.subscriptions, tenantID)
 		}
 		f.mu.Unlock()
 
@@ -136,7 +141,7 @@ func (f *RedisFanOut) receiveLoop(ctx context.Context, tenantID string, pubsub *
 			if !ok {
 				return
 			}
-			f.handleMessage(ctx, tenantID, msg.Payload, handler)
+			f.handleMessage(ctx, tenantID, msg.Payload, sub.handler)
 		}
 	}
 }

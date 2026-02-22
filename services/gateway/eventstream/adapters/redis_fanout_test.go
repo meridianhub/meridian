@@ -16,6 +16,7 @@ import (
 
 	"github.com/meridianhub/meridian/services/gateway/eventstream"
 	"github.com/meridianhub/meridian/services/gateway/eventstream/adapters"
+	"github.com/meridianhub/meridian/shared/platform/await"
 )
 
 func setupMiniredis(t *testing.T) (*miniredis.Miniredis, *redis.Client) {
@@ -101,17 +102,14 @@ func TestRedisFanOut_PubSub_Flow(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Subscribe first
+	// Subscribe first; Subscribe blocks until Redis acknowledges the subscription.
 	err := fanOut.Subscribe(ctx, tenantID, func(_ context.Context, event eventstream.DomainEvent) error {
 		received <- event
 		return nil
 	})
 	require.NoError(t, err)
 
-	// Give subscription goroutine time to start
-	time.Sleep(50 * time.Millisecond)
-
-	// Publish an event
+	// Publish an event - subscription is confirmed so no missed messages.
 	evt := newTestEvent(tenantID)
 	err = fanOut.Publish(context.Background(), evt)
 	require.NoError(t, err)
@@ -153,14 +151,16 @@ func TestRedisFanOut_Subscribe_ReplacesExistingHandler(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	time.Sleep(50 * time.Millisecond)
-
 	// Publish
 	evt := newTestEvent(tenantID)
 	err = fanOut.Publish(context.Background(), evt)
 	require.NoError(t, err)
 
-	time.Sleep(100 * time.Millisecond)
+	// Wait until the second handler has received the event.
+	err = await.AtMost(3 * time.Second).Until(func() bool {
+		return secondCount.Load() == 1
+	})
+	require.NoError(t, err, "timed out waiting for second handler to receive event")
 
 	// Only second handler should be active
 	assert.Equal(t, int32(0), firstCount.Load(), "first handler should not receive events after replacement")
@@ -183,21 +183,23 @@ func TestRedisFanOut_Unsubscribe_StopsDelivery(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	time.Sleep(50 * time.Millisecond)
-
 	// Unsubscribe
 	err = fanOut.Unsubscribe(ctx, tenantID)
 	require.NoError(t, err)
 
-	time.Sleep(50 * time.Millisecond)
-
-	// Publish after unsubscribe
+	// Publish after unsubscribe; count should stay 0.
 	evt := newTestEvent(tenantID)
 	err = fanOut.Publish(ctx, evt)
 	require.NoError(t, err)
 
-	time.Sleep(100 * time.Millisecond)
-
+	// Allow a brief window for any stray delivery.
+	err = await.AtMost(300 * time.Millisecond).
+		PollInterval(10 * time.Millisecond).
+		Until(func() bool {
+			// We expect zero events; we wait the full window.
+			return false
+		})
+	assert.ErrorIs(t, err, await.ErrTimeout, "expected timeout (no events delivered)")
 	assert.Equal(t, int32(0), count.Load(), "handler should not receive events after unsubscribe")
 }
 
@@ -223,14 +225,16 @@ func TestRedisFanOut_TenantIsolation(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	time.Sleep(50 * time.Millisecond)
-
 	// Publish to tenant-A only
 	evt := newTestEvent("tenant-A")
 	err = fanOut.Publish(ctx, evt)
 	require.NoError(t, err)
 
-	time.Sleep(100 * time.Millisecond)
+	// Wait for tenant-A to receive the event
+	err = await.AtMost(3 * time.Second).Until(func() bool {
+		return countA.Load() == 1
+	})
+	require.NoError(t, err, "timed out waiting for tenant-A handler")
 
 	assert.Equal(t, int32(1), countA.Load(), "tenant-A handler should receive 1 event")
 	assert.Equal(t, int32(0), countB.Load(), "tenant-B handler should not receive tenant-A events")
@@ -250,15 +254,11 @@ func TestRedisFanOut_ContextCancellation_StopsSubscription(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	time.Sleep(50 * time.Millisecond)
-
 	// Cancel context
 	cancel()
 
-	time.Sleep(100 * time.Millisecond)
-
-	// After context cancel, the subscription map entry should be cleaned up
-	// We verify by checking that unsubscribing is a no-op (no double-cancel)
+	// After context cancel, the subscription map entry should be cleaned up.
+	// We verify by checking that unsubscribing is a no-op (no double-cancel).
 	err = fanOut.Unsubscribe(context.Background(), tenantID)
 	assert.NoError(t, err)
 }
@@ -281,8 +281,6 @@ func TestRedisFanOut_ConcurrentPublish(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	time.Sleep(50 * time.Millisecond)
-
 	var wg sync.WaitGroup
 	for i := 0; i < numEvents; i++ {
 		wg.Add(1)
@@ -295,13 +293,10 @@ func TestRedisFanOut_ConcurrentPublish(t *testing.T) {
 	wg.Wait()
 
 	// Wait for all deliveries
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if count.Load() == numEvents {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	err = await.AtMost(5 * time.Second).Until(func() bool {
+		return count.Load() == numEvents
+	})
+	require.NoError(t, err, "timed out waiting for all events to be delivered")
 
 	assert.Equal(t, int32(numEvents), count.Load())
 }
