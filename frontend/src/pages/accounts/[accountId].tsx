@@ -1,3 +1,4 @@
+import * as React from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronLeftIcon } from 'lucide-react'
@@ -9,6 +10,10 @@ import { TimeDisplay } from '@/components/shared/time-display'
 import { AuditTrail } from '@/components/shared'
 import { useTenantContext } from '@/contexts/tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
+import { DepositDialog } from './deposit-dialog'
+import { WithdrawDialog } from './withdraw-dialog'
+import { ControlDialog } from './control-dialog'
+import type { ControlAction } from './control-dialog'
 import type { AccountStatus, CurrentAccount, RetrieveCurrentAccountResponse } from './types'
 
 async function retrieveAccount(
@@ -89,29 +94,74 @@ function AccountNotFound() {
 // Action buttons based on account status
 // ---------------------------------------------------------------------------
 
-function AccountActions({ status }: { status: AccountStatus }) {
+interface AccountActionsProps {
+  status: AccountStatus
+  accountId: string
+  currency: string
+}
+
+function AccountActions({ status, accountId, currency }: AccountActionsProps) {
+  const [depositOpen, setDepositOpen] = React.useState(false)
+  const [withdrawOpen, setWithdrawOpen] = React.useState(false)
+  const [controlOpen, setControlOpen] = React.useState(false)
+  const [controlAction, setControlAction] = React.useState<ControlAction>('freeze')
+
   if (status === 'CLOSED' || status === 'SUSPENDED') {
     return null
   }
 
+  function openControl(action: ControlAction) {
+    setControlAction(action)
+    setControlOpen(true)
+  }
+
   return (
-    <div className="flex gap-2">
-      {status === 'ACTIVE' && (
-        <>
-          <Button variant="outline" size="sm">
-            Freeze
+    <>
+      <div className="flex gap-2">
+        {status === 'ACTIVE' && (
+          <>
+            <Button variant="outline" size="sm" onClick={() => setDepositOpen(true)}>
+              Deposit
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setWithdrawOpen(true)}>
+              Withdraw
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => openControl('freeze')}>
+              Freeze
+            </Button>
+            <Button variant="destructive" size="sm" onClick={() => openControl('close')}>
+              Close Account
+            </Button>
+          </>
+        )}
+        {status === 'FROZEN' && (
+          <Button variant="outline" size="sm" onClick={() => openControl('unfreeze')}>
+            Unfreeze
           </Button>
-          <Button variant="destructive" size="sm">
-            Close Account
-          </Button>
-        </>
-      )}
-      {status === 'FROZEN' && (
-        <Button variant="outline" size="sm">
-          Unfreeze
-        </Button>
-      )}
-    </div>
+        )}
+      </div>
+
+      <DepositDialog
+        open={depositOpen}
+        onOpenChange={setDepositOpen}
+        accountId={accountId}
+        currency={currency}
+      />
+
+      <WithdrawDialog
+        open={withdrawOpen}
+        onOpenChange={setWithdrawOpen}
+        accountId={accountId}
+        currency={currency}
+      />
+
+      <ControlDialog
+        open={controlOpen}
+        onOpenChange={setControlOpen}
+        accountId={accountId}
+        action={controlAction}
+      />
+    </>
   )
 }
 
@@ -174,7 +224,11 @@ export function AccountDetailPage() {
             <p className="mt-1 font-mono text-sm text-muted-foreground">{account.iban}</p>
           )}
         </div>
-        <AccountActions status={account.status} />
+        <AccountActions
+          status={account.status}
+          accountId={account.accountId}
+          currency={account.baseCurrency}
+        />
       </div>
 
       {/* Summary fields */}
