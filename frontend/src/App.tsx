@@ -13,6 +13,8 @@ import { AuditLogPage } from '@/pages/audit'
 
 import { PositionsPage } from '@/pages/positions'
 import { PositionDetailPage } from '@/pages/positions/detail'
+import { MappingsPage } from '@/pages/mappings'
+import { MappingDetailPage } from '@/pages/mappings/[mappingId]'
 
 // Placeholder page components - replaced as each page task is implemented
 function PlaceholderPage({ title }: { title: string }) {
@@ -73,10 +75,8 @@ function AppShellLayout() {
           element={<PlaceholderPage title="Starlark Configuration" />}
         />
         <Route path="/reference-data" element={<PlaceholderPage title="Reference Data" />} />
-        <Route
-          path="/gateway-mappings"
-          element={<PlaceholderPage title="Gateway Mappings" />}
-        />
+        <Route path="/gateway-mappings" element={<MappingsPage />} />
+        <Route path="/gateway-mappings/:mappingId" element={<MappingDetailPage />} />
         <Route path="/audit-log" element={<AuditLogPage />} />
 
         {/* Platform-only routes */}
