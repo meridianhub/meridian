@@ -47,7 +47,7 @@ describe('Dialog component accessibility', () => {
 
   it('has no violations when open', async () => {
     const user = userEvent.setup()
-    const { container } = render(<DialogExample />)
+    render(<DialogExample />)
 
     const openButton = screen.getByRole('button', { name: /open dialog/i })
     await user.click(openButton)
@@ -56,7 +56,8 @@ describe('Dialog component accessibility', () => {
       expect(screen.getByText('Dialog Title')).toBeInTheDocument()
     })
 
-    const results = await axe(container)
+    // Use document.body to include portaled content from DialogPortal
+    const results = await axe(document.body)
     expect(results).toHaveNoViolations()
   })
 

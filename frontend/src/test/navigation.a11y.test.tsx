@@ -42,8 +42,7 @@ describe('Sidebar/Navigation accessibility', () => {
     expect(dashboardLink).toHaveFocus()
   })
 
-  it('all navigation links are keyboard accessible', async () => {
-    const user = userEvent.setup()
+  it('all navigation links are keyboard accessible', () => {
     render(<Sidebar lens="tenant" currentPath="/" isOpen={true} />)
 
     const links = screen.getAllByRole('link')
