@@ -322,6 +322,93 @@ func TestAuthorizeChannels_NilClaims_EmptyChannels_ReturnsError(t *testing.T) {
 	assert.ErrorIs(t, err, eventstream.ErrUnauthorizedNoClaims)
 }
 
+func TestAuthorizeChannels_DenialWrapsErrUnauthorizedChannel(t *testing.T) {
+	claims := &platformauth.Claims{
+		UserID:   "user-1",
+		TenantID: "tenant-abc",
+		Roles:    []string{"ops:payments"},
+	}
+	err := eventstream.AuthorizeChannels(claims, eventstream.DefaultRoleAccess, []string{
+		"current-account.created", // not allowed for ops:payments
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, eventstream.ErrUnauthorizedChannel)
+}
+
+// TestAuthorizeChannels_RoleBoundaries exercises the exact boundary between allowed and
+// denied channels for each built-in role, using table-driven cases.
+func TestAuthorizeChannels_RoleBoundaries(t *testing.T) {
+	tests := []struct {
+		name        string
+		roles       []string
+		channel     string
+		expectAllow bool
+	}{
+		// ops:accounts boundaries
+		{"accounts allows current-account", []string{"ops:accounts"}, "current-account.created", true},
+		{"accounts allows current-account wildcard", []string{"ops:accounts"}, "current-account.balance-updated", true},
+		{"accounts allows party", []string{"ops:accounts"}, "party.updated", true},
+		{"accounts allows audit.events.party", []string{"ops:accounts"}, "audit.events.party.created", true},
+		{"accounts denies payment-order", []string{"ops:accounts"}, "payment-order.created", false},
+		{"accounts denies financial-accounting", []string{"ops:accounts"}, "financial-accounting.entry.created", false},
+		{"accounts denies audit.events.payment-order", []string{"ops:accounts"}, "audit.events.payment-order.updated", false},
+		{"accounts denies reconciliation", []string{"ops:accounts"}, "reconciliation.completed", false},
+
+		// ops:payments boundaries
+		{"payments allows payment-order", []string{"ops:payments"}, "payment-order.created", true},
+		{"payments allows payment-order wildcard", []string{"ops:payments"}, "payment-order.reserved", true},
+		{"payments allows audit.events.payment-order", []string{"ops:payments"}, "audit.events.payment-order.updated", true},
+		{"payments denies current-account", []string{"ops:payments"}, "current-account.created", false},
+		{"payments denies party", []string{"ops:payments"}, "party.updated", false},
+		{"payments denies financial-accounting", []string{"ops:payments"}, "financial-accounting.entry.created", false},
+		{"payments denies audit.events.party", []string{"ops:payments"}, "audit.events.party.created", false},
+
+		// ops:finance boundaries
+		{"finance allows financial-accounting", []string{"ops:finance"}, "financial-accounting.entry.created", true},
+		{"finance allows position-keeping", []string{"ops:finance"}, "position-keeping.updated", true},
+		{"finance allows reconciliation", []string{"ops:finance"}, "reconciliation.completed", true},
+		{"finance denies current-account", []string{"ops:finance"}, "current-account.created", false},
+		{"finance denies payment-order", []string{"ops:finance"}, "payment-order.created", false},
+		{"finance denies party", []string{"ops:finance"}, "party.updated", false},
+		{"finance denies audit.events.payment-order", []string{"ops:finance"}, "audit.events.payment-order.updated", false},
+
+		// ops:audit boundaries
+		{"audit allows audit wildcard", []string{"ops:audit"}, "audit.events.party.created", true},
+		{"audit allows audit.events.payment-order", []string{"ops:audit"}, "audit.events.payment-order.updated", true},
+		{"audit denies current-account", []string{"ops:audit"}, "current-account.created", false},
+		{"audit denies payment-order", []string{"ops:audit"}, "payment-order.created", false},
+		{"audit denies financial-accounting", []string{"ops:audit"}, "financial-accounting.entry.created", false},
+		{"audit denies position-keeping", []string{"ops:audit"}, "position-keeping.updated", false},
+
+		// ops:admin boundaries
+		{"admin allows all channels", []string{"ops:admin"}, "any-channel.whatsoever", true},
+		{"admin allows payment-order", []string{"ops:admin"}, "payment-order.created", true},
+		{"admin allows audit wildcard", []string{"ops:admin"}, "audit.events.party.created", true},
+
+		// multi-role union
+		{"accounts+payments allows both", []string{"ops:accounts", "ops:payments"}, "party.updated", true},
+		{"accounts+payments allows payment-order", []string{"ops:accounts", "ops:payments"}, "payment-order.created", true},
+		{"accounts+payments denies finance", []string{"ops:accounts", "ops:payments"}, "financial-accounting.entry.created", false},
+		{"accounts+finance allows cross-domain", []string{"ops:accounts", "ops:finance"}, "reconciliation.completed", true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			claims := &platformauth.Claims{
+				UserID:   "user-1",
+				TenantID: "tenant-abc",
+				Roles:    tc.roles,
+			}
+			err := eventstream.AuthorizeChannels(claims, eventstream.DefaultRoleAccess, []string{tc.channel})
+			if tc.expectAllow {
+				assert.NoError(t, err)
+			} else {
+				assert.ErrorIs(t, err, eventstream.ErrUnauthorizedChannel)
+			}
+		})
+	}
+}
+
 // --- Subscribe message handling via WebSocket ---
 
 func TestHandler_Subscribe_AuthorizedChannel_SendsSubscribed(t *testing.T) {
