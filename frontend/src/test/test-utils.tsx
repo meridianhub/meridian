@@ -2,8 +2,9 @@ import { type ReactNode } from 'react'
 import { render, type RenderOptions, type RenderResult } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { configureAxe } from 'vitest-axe'
-import { AuthProvider } from '@/contexts/auth-context'
-import { TenantProvider } from '@/contexts/tenant-context'
+import { AuthProvider, useAuth } from '@/contexts/auth-context'
+import { TenantProvider, useTenantContext } from '@/contexts/tenant-context'
+import { ApiClientProvider } from '@/api/context'
 
 /**
  * Pre-configured axe instance that skips color-contrast checks.
@@ -42,12 +43,25 @@ interface AllProvidersProps {
   queryClient?: QueryClient
 }
 
+function ApiClientBridge({ children }: { children: ReactNode }) {
+  const { accessToken } = useAuth()
+  const { tenantSlug } = useTenantContext()
+  const getToken = () => Promise.resolve(accessToken ?? '')
+  return (
+    <ApiClientProvider tenantSlug={tenantSlug} getToken={getToken}>
+      {children}
+    </ApiClientProvider>
+  )
+}
+
 function AllProviders({ children, initialToken, queryClient }: AllProvidersProps) {
   const client = queryClient ?? createTestQueryClient()
   return (
     <QueryClientProvider client={client}>
       <AuthProvider initialToken={initialToken}>
-        <TenantProvider>{children}</TenantProvider>
+        <TenantProvider>
+          <ApiClientBridge>{children}</ApiClientBridge>
+        </TenantProvider>
       </AuthProvider>
     </QueryClientProvider>
   )
