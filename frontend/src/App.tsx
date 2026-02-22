@@ -1,3 +1,4 @@
+import { type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
 import { useCallback } from 'react'
 import { QueryClientProvider } from '@tanstack/react-query'
@@ -9,6 +10,9 @@ import { TenantProvider, useTenantContext } from '@/contexts/tenant-context'
 import { ApiClientProvider } from '@/api/context'
 import { ProtectedRoute, PlatformOnlyRoute } from '@/components/routing'
 import { AppShell } from '@/components/layout/app-shell'
+import { TooltipProvider } from '@/components/ui/tooltip'
+import { TenantsPage } from '@/pages/tenants/index'
+import { TenantDetailPage } from '@/pages/tenants/[tenantId]'
 import { AccountsPage } from '@/pages/accounts'
 import { AccountDetailPage } from '@/pages/accounts/[accountId]'
 import { PaymentsPage } from '@/pages/payments'
@@ -26,22 +30,6 @@ import { LedgerPage } from '@/pages/ledger'
 import { BookingLogDetailPage } from '@/pages/ledger/booking-log-detail'
 import { ReconciliationPage } from '@/pages/reconciliation'
 import { ReconciliationDetailPage } from '@/pages/reconciliation/detail'
-
-/**
- * Bridges Auth and Tenant context to ApiClientProvider.
- * This component reads the token and tenant slug from context,
- * then provides them to the API client layer.
- */
-function ApiClientBridge({ children }: { children: React.ReactNode }) {
-  const { accessToken } = useAuth()
-  const { tenantSlug } = useTenantContext()
-  const getToken = useCallback(() => Promise.resolve(accessToken ?? ''), [accessToken])
-  return (
-    <ApiClientProvider tenantSlug={tenantSlug} getToken={getToken}>
-      {children}
-    </ApiClientProvider>
-  )
-}
 
 // Placeholder page components - replaced as each page task is implemented
 function PlaceholderPage({ title }: { title: string }) {
@@ -115,7 +103,15 @@ function AppShellLayout() {
           path="/tenants"
           element={
             <PlatformOnlyRoute>
-              <PlaceholderPage title="Tenant Management" />
+              <TenantsPage />
+            </PlatformOnlyRoute>
+          }
+        />
+        <Route
+          path="/tenants/:tenantId"
+          element={
+            <PlatformOnlyRoute>
+              <TenantDetailPage />
             </PlatformOnlyRoute>
           }
         />
@@ -135,28 +131,56 @@ function AppShellLayout() {
   )
 }
 
+/**
+ * Bridge component that reads tenantSlug from TenantProvider and passes it
+ * to ApiClientProvider so API calls route to the correct tenant domain.
+ * Must be rendered inside both AuthProvider and TenantProvider.
+ */
+function ApiClientBridge({ children }: { children: ReactNode }) {
+  const { accessToken } = useAuth()
+  const { tenantSlug } = useTenantContext()
+  const getToken = () => accessToken ?? ''
+
+  return (
+    <ApiClientProvider tenantSlug={tenantSlug} getToken={getToken}>
+      {children}
+    </ApiClientProvider>
+  )
+}
+
+/**
+ * Inner app that has access to auth and tenant contexts for ApiClientProvider.
+ */
+function AuthenticatedApp() {
+  return (
+    <TenantProvider>
+      <ApiClientBridge>
+        <TooltipProvider>
+          <BrowserRouter>
+            <Routes>
+              <Route path="/login" element={<LoginPage />} />
+              <Route
+                path="/*"
+                element={
+                  <ProtectedRoute>
+                    <AppShellLayout />
+                  </ProtectedRoute>
+                }
+              />
+            </Routes>
+          </BrowserRouter>
+        </TooltipProvider>
+      </ApiClientBridge>
+    </TenantProvider>
+  )
+}
+
 export function App() {
   return (
     <PageErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
-          <TenantProvider>
-            <BrowserRouter>
-              <ApiClientBridge>
-                <Routes>
-                  <Route path="/login" element={<LoginPage />} />
-                  <Route
-                    path="/*"
-                    element={
-                      <ProtectedRoute>
-                        <AppShellLayout />
-                      </ProtectedRoute>
-                    }
-                  />
-                </Routes>
-              </ApiClientBridge>
-            </BrowserRouter>
-          </TenantProvider>
+          <AuthenticatedApp />
         </AuthProvider>
         {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
       </QueryClientProvider>
