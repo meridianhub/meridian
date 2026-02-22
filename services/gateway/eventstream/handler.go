@@ -48,8 +48,10 @@ func ClaimsFromContext(ctx context.Context) (*platformauth.Claims, bool) {
 		return claims, true
 	}
 	// Fall back to the gateway auth middleware key.
-	claims, ok := ctx.Value(gatewayAuthClaimsKey).(*platformauth.Claims)
-	return claims, ok
+	if claims, ok := ctx.Value(gatewayAuthClaimsKey).(*platformauth.Claims); ok && claims != nil {
+		return claims, true
+	}
+	return nil, false
 }
 
 // Sentinel errors returned by AuthorizeChannels.
@@ -177,7 +179,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	claims, ok := ClaimsFromContext(r.Context())
 	if !ok || claims == nil {
 		h.logger.Debug("websocket upgrade rejected: no claims in context")
-		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		writeJSONUnauthorized(w, "unauthorized")
 		return
 	}
 
@@ -185,7 +187,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.logger.Debug("websocket upgrade rejected: empty tenant ID in claims",
 			slog.String("user_id", claims.UserID),
 		)
-		http.Error(w, `{"error":"unauthorized: missing tenant ID"}`, http.StatusUnauthorized)
+		writeJSONUnauthorized(w, "unauthorized: missing tenant ID")
 		return
 	}
 
@@ -289,4 +291,12 @@ func (h *Handler) handleUnsubscribe(conn *Connection, msg ClientMessage) {
 		slog.String("conn_id", conn.ID()),
 		slog.String("subscription_id", msg.ID),
 	)
+}
+
+// writeJSONUnauthorized writes a 401 Unauthorized JSON response.
+// It sets Content-Type: application/json so clients can parse the error body.
+func writeJSONUnauthorized(w http.ResponseWriter, message string) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusUnauthorized)
+	_, _ = fmt.Fprintf(w, `{"error":%q}`, message)
 }
