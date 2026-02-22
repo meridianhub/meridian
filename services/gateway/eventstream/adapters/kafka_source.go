@@ -77,7 +77,16 @@ func NewKafkaEventSource(
 		logger = slog.Default()
 	}
 
-	brokers := strings.Split(bootstrapServers, ",")
+	rawBrokers := strings.Split(bootstrapServers, ",")
+	brokers := make([]string, 0, len(rawBrokers))
+	for _, b := range rawBrokers {
+		if b = strings.TrimSpace(b); b != "" {
+			brokers = append(brokers, b)
+		}
+	}
+	if len(brokers) == 0 {
+		return nil, ErrEmptyBootstrapServers
+	}
 
 	opts := []kgo.Opt{
 		kgo.SeedBrokers(brokers...),
@@ -182,7 +191,10 @@ func (s *KafkaEventSource) recordToDomainEvent(record *kgo.Record) (eventstream.
 		ts = time.Now().UTC()
 	}
 
-	channel, _ := eventstream.DeriveChannel(record.Topic)
+	channel, err := eventstream.DeriveChannel(record.Topic)
+	if err != nil {
+		return eventstream.DomainEvent{}, fmt.Errorf("failed to derive channel from topic %q: %w", record.Topic, err)
+	}
 
 	// Build the event ID from the header if present; otherwise leave it for
 	// NewDomainEvent to generate a fresh UUID via NewDomainEvent.
