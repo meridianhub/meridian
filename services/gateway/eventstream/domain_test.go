@@ -229,6 +229,52 @@ func TestNewSubscription_EmptyChannelPattern_ReturnsError(t *testing.T) {
 	assert.True(t, errors.Is(err, eventstream.ErrEmptyChannelPattern))
 }
 
+func TestNewSubscription_InvalidWildcardPosition_ReturnsError(t *testing.T) {
+	tests := []struct {
+		name    string
+		pattern eventstream.ChannelPattern
+	}{
+		{name: "wildcard in middle", pattern: "foo*bar"},
+		{name: "wildcard at start only", pattern: "*bar"},
+		{name: "double wildcard", pattern: "foo**"},
+		{name: "wildcard not at end", pattern: "foo*.bar"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := eventstream.NewSubscription(
+				"sub-001",
+				[]eventstream.ChannelPattern{tc.pattern},
+				eventstream.SubscriptionFilters{},
+			)
+			require.Error(t, err)
+			assert.True(t, errors.Is(err, eventstream.ErrInvalidChannelPattern))
+		})
+	}
+}
+
+func TestNewSubscription_ValidWildcardPositions_Succeed(t *testing.T) {
+	tests := []struct {
+		name    string
+		pattern eventstream.ChannelPattern
+	}{
+		{name: "trailing wildcard", pattern: "payment.*"},
+		{name: "standalone wildcard", pattern: "*"},
+		{name: "exact no wildcard", pattern: "payment.created"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := eventstream.NewSubscription(
+				"sub-001",
+				[]eventstream.ChannelPattern{tc.pattern},
+				eventstream.SubscriptionFilters{},
+			)
+			require.NoError(t, err)
+		})
+	}
+}
+
 // --- Subscription.Matches ---
 
 func TestSubscription_Matches(t *testing.T) {

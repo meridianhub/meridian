@@ -28,14 +28,18 @@ type EventSource interface {
 //
 // A typical flow:
 //  1. An EventSource adapter calls Publish for every received event.
-//  2. FanOut matches the event against all active Subscriptions registered for the tenant.
-//  3. Matching handlers are called, delivering the event to connected SSE or WebSocket clients.
+//  2. FanOut routes the event to all handlers subscribed for event.TenantID.
+//  3. Matching handlers deliver the event to connected SSE or WebSocket clients.
+//
+// Tenant isolation is enforced through event.TenantID — Publish does not accept a
+// separate tenantID parameter to prevent accidental cross-tenant delivery when the
+// caller's routing key diverges from the event's own identity.
 //
 // Implementations must be safe for concurrent use from multiple goroutines.
 type FanOut interface {
-	// Publish broadcasts event to all handlers currently subscribed for tenantID.
-	// Returns ErrEmptyTenantID if tenantID is empty.
-	Publish(ctx context.Context, tenantID string, event DomainEvent) error
+	// Publish broadcasts event to all handlers currently subscribed for event.TenantID.
+	// Returns ErrEmptyTenantID if event.TenantID is empty.
+	Publish(ctx context.Context, event DomainEvent) error
 
 	// Subscribe registers handler to receive events for tenantID.
 	// If a handler is already registered for tenantID, it is replaced.

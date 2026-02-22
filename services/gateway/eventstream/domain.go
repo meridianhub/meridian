@@ -27,20 +27,31 @@ var (
 
 	// ErrEmptyChannelPattern is returned when an empty channel pattern is provided.
 	ErrEmptyChannelPattern = errors.New("channel pattern cannot be empty")
+
+	// ErrInvalidChannelPattern is returned when a channel pattern contains a wildcard
+	// in an unsupported position. Only a trailing "*" is supported (e.g., "payment.*" or "*").
+	// Wildcards embedded in the middle of a pattern (e.g., "foo*bar") are rejected to avoid
+	// silent subscription misses from unexpected literal matching.
+	ErrInvalidChannelPattern = errors.New("channel pattern wildcard '*' must appear only as the last character")
 )
 
 // ChannelPattern is a string that identifies a logical event channel.
 // Glob-style prefix matching is supported via a trailing "*" wildcard.
 //
-// Examples:
+// Valid patterns:
 //
 //	"payment-order.created"    // exact match
 //	"payment-order.*"          // all payment-order events
 //	"*"                        // all channels
+//
+// Wildcards are only allowed in the trailing position. Patterns such as
+// "foo*bar" are rejected by NewSubscription with ErrInvalidChannelPattern.
 type ChannelPattern string
 
 // Matches reports whether the given channel name satisfies this pattern.
 // The only wildcard supported is a trailing "*" which matches any suffix.
+// Patterns with wildcards in non-trailing positions are treated as literal strings;
+// use NewSubscription to reject such patterns at construction time.
 func (p ChannelPattern) Matches(channel string) bool {
 	pattern := string(p)
 	if pattern == "*" {
@@ -134,10 +145,9 @@ func NewDomainEvent(
 }
 
 // deriveChannel converts a topic string to a channel name by stripping trailing
-// version suffixes of the form ".vN" (e.g., ".v1", ".v2").
+// version suffixes of the form ".vN" where N is one or more digits (e.g., ".v1", ".v2").
+// Topics without a version suffix are returned unchanged.
 func deriveChannel(topic string) string {
-	// Strip trailing ".vN" suffix where N is one or more digits.
-	// Walk backwards to find the suffix and strip it.
 	dot := strings.LastIndex(topic, ".")
 	if dot < 0 {
 		return topic
@@ -156,6 +166,21 @@ func deriveChannel(topic string) string {
 		}
 	}
 	return topic
+}
+
+// validateChannelPattern checks that a channel pattern is non-empty and that any
+// wildcard character appears only as the last character. Returns ErrEmptyChannelPattern
+// or ErrInvalidChannelPattern on failure.
+func validateChannelPattern(p ChannelPattern) error {
+	s := string(p)
+	if s == "" {
+		return ErrEmptyChannelPattern
+	}
+	idx := strings.Index(s, "*")
+	if idx >= 0 && idx != len(s)-1 {
+		return ErrInvalidChannelPattern
+	}
+	return nil
 }
 
 // SubscriptionFilters contains optional filters that narrow which events a
@@ -185,6 +210,7 @@ type Subscription struct {
 // Returns ErrEmptySubscriptionID if id is empty.
 // Returns ErrNoChannels if channels is empty.
 // Returns ErrEmptyChannelPattern if any channel pattern is empty.
+// Returns ErrInvalidChannelPattern if any pattern contains a wildcard in a non-trailing position.
 func NewSubscription(id string, channels []ChannelPattern, filters SubscriptionFilters) (Subscription, error) {
 	if id == "" {
 		return Subscription{}, ErrEmptySubscriptionID
@@ -193,8 +219,8 @@ func NewSubscription(id string, channels []ChannelPattern, filters SubscriptionF
 		return Subscription{}, ErrNoChannels
 	}
 	for _, ch := range channels {
-		if ch == "" {
-			return Subscription{}, ErrEmptyChannelPattern
+		if err := validateChannelPattern(ch); err != nil {
+			return Subscription{}, err
 		}
 	}
 	return Subscription{
