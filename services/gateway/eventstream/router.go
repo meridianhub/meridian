@@ -81,11 +81,26 @@ func (r *ConnectionRegistry) Unregister(connID string) {
 	}
 }
 
-// GetByID returns the connection with the given ID, or nil if not found.
-func (r *ConnectionRegistry) GetByID(connID string) ConnectionSender {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.byID[connID]
+// UnregisterByID atomically removes and returns the connection with connID.
+// Returns nil if connID is not registered. Using a single lock acquisition
+// avoids the TOCTOU race between lookup and removal.
+func (r *ConnectionRegistry) UnregisterByID(connID string) ConnectionSender {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	conn, ok := r.byID[connID]
+	if !ok {
+		return nil
+	}
+
+	delete(r.byID, connID)
+
+	tenantMap := r.byTenant[conn.TenantID()]
+	delete(tenantMap, connID)
+	if len(tenantMap) == 0 {
+		delete(r.byTenant, conn.TenantID())
+	}
+	return conn
 }
 
 // GetByTenant returns a snapshot of all connections for tenantID.
@@ -137,7 +152,13 @@ func (f *InProcessFanOut) Publish(ctx context.Context, event DomainEvent) error 
 	f.mu.RUnlock()
 
 	if ok {
-		_ = h(ctx, event)
+		if err := h(ctx, event); err != nil {
+			slog.Warn("fan-out handler returned error",
+				slog.String("tenant_id", event.TenantID),
+				slog.String("event_id", event.EventID),
+				slog.Any("error", err),
+			)
+		}
 	}
 	return nil
 }
@@ -232,14 +253,12 @@ func (r *Router) RegisterConnection(conn ConnectionSender) {
 // UnregisterConnection removes the connection with connID from the registry and
 // unsubscribes from the FanOut when the last connection for a tenant departs.
 func (r *Router) UnregisterConnection(connID string) {
-	// Look up the connection's tenant before removing it.
-	existing := r.registry.GetByID(connID)
+	// Atomically remove the connection and get its tenant in one lock acquisition.
+	existing := r.registry.UnregisterByID(connID)
 	if existing == nil {
 		return
 	}
 	tenantID := existing.TenantID()
-
-	r.registry.Unregister(connID)
 
 	r.mu.Lock()
 	count := r.tenantSubCounts[tenantID]
