@@ -32,6 +32,10 @@ func ValidateChannelPattern(pattern string) error {
 //
 // The zero value is usable and matches nothing. Use NewChannelMatcher or
 // NewChannelMatcherFromSubscription to construct with an initial set of patterns.
+//
+// ChannelMatcher is not safe for concurrent use. Callers that share a
+// ChannelMatcher across goroutines must synchronize all calls to Add and
+// Matches themselves.
 type ChannelMatcher struct {
 	patterns []ChannelPattern
 }
