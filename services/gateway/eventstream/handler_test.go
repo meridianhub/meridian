@@ -62,6 +62,79 @@ func TestNewHandler_CustomRoleAccess(t *testing.T) {
 	require.NotNil(t, h)
 }
 
+// TestWithRoleChannelAccess_DefensiveCopy verifies that WithRoleChannelAccess makes a
+// deep copy of both the map and each slice so that in-place slice mutations and map
+// reassignments to the original after construction do not affect the Handler's
+// authorization decisions. The assertion is exercised via a real WebSocket subscribe
+// round-trip so that the handler's internal copy is exercised.
+func TestWithRoleChannelAccess_DefensiveCopy(t *testing.T) {
+	router := eventstream.NewRouter(
+		&stubEventSource{},
+		eventstream.NewInProcessFanOut(),
+	)
+
+	originalPatterns := []string{"my-channel.*"}
+	roleAccess := eventstream.RoleChannelAccess{
+		"custom:role": originalPatterns,
+	}
+	h := eventstream.NewHandler(router, nil, eventstream.WithRoleChannelAccess(roleAccess))
+
+	// Mutate the original in two ways:
+	// 1. In-place slice element mutation (catches shallow slice copy).
+	originalPatterns[0] = "other-channel.*"
+	// 2. Map key reassignment (catches shallow map copy).
+	roleAccess["custom:role"] = []string{"replaced-channel.*"}
+
+	claims := &platformauth.Claims{
+		UserID:   "user-1",
+		TenantID: "tenant-abc",
+		Roles:    []string{"custom:role"},
+	}
+	srv := httptest.NewServer(injectClaimsMiddleware(claims, h))
+	t.Cleanup(srv.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	clientConn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	require.NoError(t, err)
+	defer clientConn.CloseNow()
+
+	err = await.New().
+		AtMost(2 * time.Second).
+		PollInterval(10 * time.Millisecond).
+		Until(func() bool {
+			return len(router.GetConnectionsByTenant("tenant-abc")) > 0
+		})
+	require.NoError(t, err)
+
+	// "my-channel.created" was allowed at construction; the mutation to "other-channel.*"
+	// must NOT affect the handler — we expect a subscribed confirmation, not an error.
+	subMsg := eventstream.ClientMessage{
+		Type:     eventstream.ClientMessageTypeSubscribe,
+		ID:       "sub-defensive",
+		Channels: []eventstream.ChannelPattern{"my-channel.created"},
+	}
+	data, err := json.Marshal(subMsg)
+	require.NoError(t, err)
+	require.NoError(t, clientConn.Write(ctx, websocket.MessageText, data))
+
+	var resp eventstream.ServerMessage
+	err = await.New().
+		AtMost(2 * time.Second).
+		PollInterval(10 * time.Millisecond).
+		UntilNoError(func() error {
+			_, msgData, readErr := clientConn.Read(ctx)
+			if readErr != nil {
+				return readErr
+			}
+			return json.Unmarshal(msgData, &resp)
+		})
+	require.NoError(t, err)
+	assert.Equal(t, eventstream.ServerMessageTypeSubscribed, resp.Type,
+		"handler should use its defensive copy (my-channel.*) not the mutated map (other-channel.*)")
+}
+
 // --- HTTP upgrade ---
 
 func TestHandler_ServeHTTP_MissingClaims_Returns401(t *testing.T) {
@@ -320,6 +393,98 @@ func TestAuthorizeChannels_NilClaims_EmptyChannels_ReturnsError(t *testing.T) {
 	// nil claims should error even when channels is empty, per the function contract.
 	err := eventstream.AuthorizeChannels(nil, eventstream.DefaultRoleAccess, []string{})
 	assert.ErrorIs(t, err, eventstream.ErrUnauthorizedNoClaims)
+}
+
+func TestAuthorizeChannels_DenialWrapsErrUnauthorizedChannel(t *testing.T) {
+	claims := &platformauth.Claims{
+		UserID:   "user-1",
+		TenantID: "tenant-abc",
+		Roles:    []string{"ops:payments"},
+	}
+	err := eventstream.AuthorizeChannels(claims, eventstream.DefaultRoleAccess, []string{
+		"current-account.created", // not allowed for ops:payments
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, eventstream.ErrUnauthorizedChannel)
+}
+
+// TestAuthorizeChannels_RoleBoundaries exercises the exact boundary between allowed and
+// denied channels for each built-in role, using table-driven cases.
+func TestAuthorizeChannels_RoleBoundaries(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		roles       []string
+		channel     string
+		expectAllow bool
+	}{
+		// ops:accounts boundaries
+		{"accounts allows current-account", []string{"ops:accounts"}, "current-account.created", true},
+		{"accounts allows current-account wildcard", []string{"ops:accounts"}, "current-account.balance-updated", true},
+		{"accounts allows party", []string{"ops:accounts"}, "party.updated", true},
+		{"accounts allows audit.events.party", []string{"ops:accounts"}, "audit.events.party.created", true},
+		{"accounts denies payment-order", []string{"ops:accounts"}, "payment-order.created", false},
+		{"accounts denies financial-accounting", []string{"ops:accounts"}, "financial-accounting.entry.created", false},
+		{"accounts denies audit.events.payment-order", []string{"ops:accounts"}, "audit.events.payment-order.updated", false},
+		{"accounts denies reconciliation", []string{"ops:accounts"}, "reconciliation.completed", false},
+
+		// ops:payments boundaries
+		{"payments allows payment-order", []string{"ops:payments"}, "payment-order.created", true},
+		{"payments allows payment-order wildcard", []string{"ops:payments"}, "payment-order.reserved", true},
+		{"payments allows audit.events.payment-order", []string{"ops:payments"}, "audit.events.payment-order.updated", true},
+		{"payments denies current-account", []string{"ops:payments"}, "current-account.created", false},
+		{"payments denies party", []string{"ops:payments"}, "party.updated", false},
+		{"payments denies financial-accounting", []string{"ops:payments"}, "financial-accounting.entry.created", false},
+		{"payments denies audit.events.party", []string{"ops:payments"}, "audit.events.party.created", false},
+
+		// ops:finance boundaries
+		{"finance allows financial-accounting", []string{"ops:finance"}, "financial-accounting.entry.created", true},
+		{"finance allows position-keeping", []string{"ops:finance"}, "position-keeping.updated", true},
+		{"finance allows reconciliation", []string{"ops:finance"}, "reconciliation.completed", true},
+		{"finance denies current-account", []string{"ops:finance"}, "current-account.created", false},
+		{"finance denies payment-order", []string{"ops:finance"}, "payment-order.created", false},
+		{"finance denies party", []string{"ops:finance"}, "party.updated", false},
+		{"finance denies audit.events.payment-order", []string{"ops:finance"}, "audit.events.payment-order.updated", false},
+
+		// ops:audit boundaries
+		{"audit allows audit wildcard", []string{"ops:audit"}, "audit.events.party.created", true},
+		{"audit allows audit.events.payment-order", []string{"ops:audit"}, "audit.events.payment-order.updated", true},
+		{"audit denies current-account", []string{"ops:audit"}, "current-account.created", false},
+		{"audit denies payment-order", []string{"ops:audit"}, "payment-order.created", false},
+		{"audit denies financial-accounting", []string{"ops:audit"}, "financial-accounting.entry.created", false},
+		{"audit denies position-keeping", []string{"ops:audit"}, "position-keeping.updated", false},
+
+		// ops:admin boundaries
+		{"admin allows all channels", []string{"ops:admin"}, "any-channel.whatsoever", true},
+		{"admin allows payment-order", []string{"ops:admin"}, "payment-order.created", true},
+		{"admin allows audit wildcard", []string{"ops:admin"}, "audit.events.party.created", true},
+
+		// multi-role union
+		{"accounts+payments allows both", []string{"ops:accounts", "ops:payments"}, "party.updated", true},
+		{"accounts+payments allows payment-order", []string{"ops:accounts", "ops:payments"}, "payment-order.created", true},
+		{"accounts+payments denies finance", []string{"ops:accounts", "ops:payments"}, "financial-accounting.entry.created", false},
+		{"accounts+finance allows cross-domain", []string{"ops:accounts", "ops:finance"}, "reconciliation.completed", true},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			claims := &platformauth.Claims{
+				UserID:   "user-1",
+				TenantID: "tenant-abc",
+				Roles:    tc.roles,
+			}
+			err := eventstream.AuthorizeChannels(claims, eventstream.DefaultRoleAccess, []string{tc.channel})
+			if tc.expectAllow {
+				assert.NoError(t, err)
+			} else {
+				assert.ErrorIs(t, err, eventstream.ErrUnauthorizedChannel)
+			}
+		})
+	}
 }
 
 // --- Subscribe message handling via WebSocket ---

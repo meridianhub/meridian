@@ -117,10 +117,24 @@ type Handler struct {
 // HandlerOption is a functional option for configuring a Handler.
 type HandlerOption func(*Handler)
 
+// copyRoleChannelAccess returns a deep copy of a RoleChannelAccess map so that
+// the Handler's internal state cannot be mutated by the caller after construction.
+func copyRoleChannelAccess(src RoleChannelAccess) RoleChannelAccess {
+	dst := make(RoleChannelAccess, len(src))
+	for role, patterns := range src {
+		cp := make([]string, len(patterns))
+		copy(cp, patterns)
+		dst[role] = cp
+	}
+	return dst
+}
+
 // WithRoleChannelAccess sets a custom role-to-channel access map.
+// A defensive copy is made so that subsequent mutations to the caller's map
+// do not affect the Handler.
 func WithRoleChannelAccess(roleAccess RoleChannelAccess) HandlerOption {
 	return func(h *Handler) {
-		h.roleAccess = roleAccess
+		h.roleAccess = copyRoleChannelAccess(roleAccess)
 	}
 }
 
@@ -142,7 +156,7 @@ func NewHandler(router *Router, logger *slog.Logger, opts ...HandlerOption) *Han
 	h := &Handler{
 		router:     router,
 		logger:     logger,
-		roleAccess: DefaultRoleAccess,
+		roleAccess: copyRoleChannelAccess(DefaultRoleAccess),
 	}
 	for _, opt := range opts {
 		opt(h)
