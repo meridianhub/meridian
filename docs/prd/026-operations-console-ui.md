@@ -493,7 +493,9 @@ Phase 1 and file issues to add count RPCs or
 - **List view:** DataTable with columns: Log ID, Account ID, Amount, Currency/Instrument, Direction (DEBIT/CREDIT), Status, Quality Level, Transaction Date. Filterable by account, direction, quality level.
 - **Detail view:** Position log details with quality ladder indicator (ESTIMATE → COEFFICIENT → ACTUAL → REVISED). Balance view showing provisional vs available balance.
 - **Measurement view:** Quality ladder visualization for a position — shows the progression from estimate to actual.
-- **Actions:** Record position log, record measurement, record reservation, release reservation, get projected balance.
+- **Actions:** Record position log, record measurement,
+  update position, merge positions, record reservation,
+  release reservation, get projected balance.
 
 **RPCs consumed:**
 
@@ -502,6 +504,8 @@ Phase 1 and file issues to add count RPCs or
 - `PositionKeepingService.ListFinancialPositionLogs`
 - `PositionKeepingService.RecordMeasurement`
 - `PositionKeepingService.GetAccountBalance` / `GetAccountBalances`
+- `PositionKeepingService.UpdatePosition`
+- `PositionKeepingService.MergePositions`
 - `PositionKeepingService.RecordReservation` / `ReleaseReservation`
 - `PositionKeepingService.GetProjectedBalance`
 - `PositionKeepingService.BulkImportTransactions`
@@ -536,24 +540,112 @@ Phase 1 and file issues to add count RPCs or
 
 **Lens:** Both
 
-**Purpose:** Party management — customer profiles, demographics, KYC/AML status.
+**Purpose:** Party management — customer and counterparty
+profiles, demographics, associations, bank relations,
+payment methods, and party type configuration.
 
-**Layout:**
+PartyService follows the BIAN Party Reference Data
+Directory pattern with 25 RPCs across 7 functional areas.
 
-- **List view:** DataTable of parties with name, type (Individual/Organization), status, KYC status, risk score. Searchable by name/ID.
-- **Detail view:** Party header → Tabs: Demographics, Addresses, Relationships, KYC/AML Status, Audit Trail.
-- **Actions:** Register party, update demographics, trigger KYC verification.
+#### Layout
 
-**RPCs consumed:**
+- **List view:** DataTable of parties by party type. No
+  `ListParties` RPC exists — the list view queries
+  `ListParticipants` scoped to the tenant's organization
+  party. Columns: Name, Party Type, Status, External
+  Reference, Created. Filterable by party type and status.
+- **Detail view:** Party header (status badge, type,
+  external reference) → Tabs:
+  - **Overview:** Core party data (RegisterParty /
+    RetrieveParty fields)
+  - **Demographics:** Address, contact, and identity
+    details (UpdateDemographics / RetrieveDemographics).
+    ExchangeDemographics for third-party verification.
+  - **References:** External reference data
+    (UpdateReference / RetrieveReference)
+  - **Associations:** Relationships to other parties
+    (RegisterAssociations / UpdateAssociations /
+    RetrieveAssociations)
+  - **Bank Relations:** Banking counterparty details
+    (UpdateBankRelations / RetrieveBankRelations)
+  - **Payment Methods:** Payment instruments on file
+    (AddPaymentMethod / RemovePaymentMethod /
+    SetDefaultPaymentMethod / ListPaymentMethods /
+    GetDefaultPaymentMethod)
+  - **Audit Trail:** AuditTrail component (Section 6.7)
+- **Actions:** Register party, update party, control
+  party (status transitions: Active → Restricted →
+  Suspended → Terminated), update demographics, add
+  payment method, register associations.
+
+#### Party Types (Tenant Configuration)
+
+Party types define behavioral templates for parties,
+similar to how Account Types define account behavior.
+
+- **List view:** DataTable of party types: Name, Category
+  (Individual/Organization), Status, Version.
+- **Detail view:** Party type header with tabs:
+  - **Definition:** Name, category, description,
+    attribute schema (JSON Schema)
+  - **CEL Policies:** `validation_cel` and
+    `eligibility_cel` expressions with inline `CELEditor`
+  - **Lineage:** Version history
+- **Actions:** Register party type, update, get.
+
+**RPCs consumed (25 total):**
+
+Core:
 
 - `PartyService.RegisterParty`
 - `PartyService.RetrieveParty`
-- `PartyService.ListParties`
-- `PartyService.UpdatePartyDemographics`
-- `PartyService.InitiateVerification`
-- `PartyService.RetrieveVerification`
+- `PartyService.UpdateParty`
+- `PartyService.ControlParty`
 
-**Real-time candidates:** KYC verification completion events.
+Demographics:
+
+- `PartyService.UpdateDemographics`
+- `PartyService.RetrieveDemographics`
+- `PartyService.ExchangeDemographics` (verification)
+
+References:
+
+- `PartyService.UpdateReference`
+- `PartyService.RetrieveReference`
+
+Associations:
+
+- `PartyService.RegisterAssociations`
+- `PartyService.UpdateAssociations`
+- `PartyService.RetrieveAssociations`
+
+Bank Relations:
+
+- `PartyService.UpdateBankRelations`
+- `PartyService.RetrieveBankRelations`
+
+Participants:
+
+- `PartyService.ListParticipants`
+- `PartyService.GetStructuringData`
+
+Payment Methods:
+
+- `PartyService.AddPaymentMethod`
+- `PartyService.RemovePaymentMethod`
+- `PartyService.SetDefaultPaymentMethod`
+- `PartyService.ListPaymentMethods`
+- `PartyService.GetDefaultPaymentMethod`
+
+Party Types:
+
+- `PartyService.RegisterPartyType`
+- `PartyService.GetPartyType`
+- `PartyService.ListPartyTypes`
+- `PartyService.UpdatePartyType`
+
+**Real-time candidates:** Verification completion,
+status changes.
 
 ### 4.9 Reconciliation
 
@@ -1770,6 +1862,9 @@ frontend/
 │   │   ├── parties/
 │   │   │   ├── index.tsx
 │   │   │   └── [partyId].tsx
+│   │   ├── party-types/
+│   │   │   ├── index.tsx           # Party type list
+│   │   │   └── [typeId].tsx        # Party type detail + CEL policies
 │   │   ├── reconciliation/
 │   │   │   ├── index.tsx
 │   │   │   └── [reconciliationId].tsx
@@ -1807,6 +1902,7 @@ frontend/
 │   │   ├── use-positions.ts        # React Query hooks for PositionKeeping RPCs
 │   │   ├── use-ledger.ts           # React Query hooks for FinancialAccounting RPCs
 │   │   ├── use-parties.ts          # React Query hooks for Party RPCs
+│   │   ├── use-party-types.ts     # React Query hooks for PartyType CRUD
 │   │   ├── use-reconciliation.ts   # React Query hooks for Reconciliation RPCs
 │   │   ├── use-market-data.ts      # React Query hooks for MarketInformation RPCs
 │   │   ├── use-sagas.ts            # React Query hooks for SagaRegistry RPCs
@@ -2151,7 +2247,7 @@ platform monitoring.
 | 1 | **Audit query RPC** | **Blocks Phase 2** | Need `AuditService.ListAuditEntries` and `RetrieveAuditEntry` RPCs. Backend task required before Audit page (4.12) can be built. |
 | 2 | **Identity provider** | Not specified | OAuth 2.0/OIDC provider (Keycloak, Auth0) needs choosing. UI needs login redirect URL and JWKS endpoint. |
 | 3 | **Control Plane API surface** | Unclear | What gRPC services does the Control Plane expose? Determines Platform Monitoring page scope. |
-| 4 | **Party service proto** | Not fully explored | Party proto needs detailed review for complete page specification. |
+| 4 | **Party service proto** | Mapped | 25 RPCs across 7 functional areas now fully specified in Section 4.8. |
 | 5 | **Reference Data RPCs** | Mapped | Instrument (8 RPCs), Account Type (8 RPCs), Node (9 RPCs) now fully specified in Section 4.15. |
 | 6 | **WebSocket backend** | Separate PRD | PRD-025 defines the real-time streaming backend. Phase 4 depends on it. |
 | 7 | **Starlark override API** | Partially exists | Check if `CreateTenantOverride()` is exposed as gRPC RPC or internal only. |
@@ -2221,7 +2317,7 @@ Every RPC in the system mapped to its UI surface:
 | ListLedgerPostings | Ledger | Detail tab |
 | ControlFinancialBookingLog | Ledger | Action buttons |
 
-### Position Keeping Service (13 RPCs)
+### Position Keeping Service (15 RPCs)
 
 | RPC | UI Page | Action Type |
 |-----|---------|------------|
@@ -2235,6 +2331,8 @@ Every RPC in the system mapped to its UI surface:
 | RecordMeasurement | Positions | Action form |
 | GetAccountBalance | Positions | Balance display |
 | GetAccountBalances | Positions | Balance display |
+| UpdatePosition | Positions | Edit form |
+| MergePositions | Positions | Action dialog |
 | RecordReservation | Positions | Action form |
 | ReleaseReservation | Positions | Action button |
 | GetProjectedBalance | Positions | Balance display |
@@ -2252,6 +2350,36 @@ Every RPC in the system mapped to its UI surface:
 | InitiateDispute | Reconciliation | Action form |
 | ControlDispute | Reconciliation | Action button |
 | RetrieveDispute | Reconciliation | Detail view |
+
+### Party Service (25 RPCs)
+
+| RPC | UI Page | Action Type |
+|-----|---------|------------|
+| RegisterParty | Parties | Create form |
+| RetrieveParty | Parties | Detail view |
+| UpdateParty | Parties | Edit form |
+| ControlParty | Parties | Action buttons (status transitions) |
+| UpdateReference | Parties | References tab |
+| RetrieveReference | Parties | References tab |
+| RegisterAssociations | Parties | Associations tab |
+| UpdateAssociations | Parties | Associations tab |
+| RetrieveAssociations | Parties | Associations tab |
+| ExchangeDemographics | Parties | Demographics tab (verify) |
+| UpdateDemographics | Parties | Demographics tab |
+| RetrieveDemographics | Parties | Demographics tab |
+| UpdateBankRelations | Parties | Bank Relations tab |
+| RetrieveBankRelations | Parties | Bank Relations tab |
+| ListParticipants | Parties | List view |
+| GetStructuringData | Parties | Detail view |
+| AddPaymentMethod | Parties | Payment Methods tab |
+| RemovePaymentMethod | Parties | Payment Methods tab |
+| SetDefaultPaymentMethod | Parties | Payment Methods tab |
+| ListPaymentMethods | Parties | Payment Methods tab |
+| GetDefaultPaymentMethod | Parties | Payment Methods tab |
+| RegisterPartyType | Party Types | Create form |
+| GetPartyType | Party Types | Detail view |
+| ListPartyTypes | Party Types | List view |
+| UpdatePartyType | Party Types | Edit form |
 
 ### Market Information Service (14 RPCs)
 
@@ -2375,7 +2503,7 @@ Every RPC in the system mapped to its UI surface:
 | DeleteMapping | Gateway Mappings | Action button |
 | DryRunMapping | Gateway Mappings | Dry run playground |
 
-**Total: 132 RPCs across 15 services, all mapped to UI
+**Total: 159 RPCs across 15 services, all mapped to UI
 surfaces.**
 
 ---
