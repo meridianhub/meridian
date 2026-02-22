@@ -7,7 +7,12 @@ where every position has atomic audit trails, every transaction is traceable,
 every balance is verifiable.
 
 **Architecture**: BIAN-compliant microservices, Go, Protocol Buffers, gRPC,
-Kubernetes.
+Kubernetes. Hexagonal architecture (ports and adapters) with clean
+separation between domain logic, application services, and infrastructure.
+
+**Design principles**: Stateless services designed for horizontal scaling.
+Idempotent operations. Schema-driven service modules (`handlers.yaml` as
+single source of truth). Consistent patterns across all services.
 
 **Quality focus**: Security, proper error handling with wrapped errors, TDD
 with table-driven tests, golangci-lint compliance.
@@ -58,8 +63,86 @@ requires understanding the SYSTEM:
   functions)
 - **Domain invariant violations**: Does the change break contracts defined
   in handlers.yaml or BIAN service domain boundaries?
+- **Hexagonal architecture**: Does the change respect port/adapter
+  boundaries? Domain logic must not import infrastructure packages.
+  Adapters must implement domain-defined interfaces, not the reverse.
+- **Idempotency**: Can this operation be safely retried? All mutations
+  should be idempotent (use idempotency keys, upserts, or conditional
+  writes). Networks fail mid-request; retries are inevitable.
+- **Stateless services**: Does the change store state in-process (caches,
+  singletons, goroutine-local data) that would break with multiple
+  replicas? Services must scale horizontally without coordination.
+- **Pattern consistency**: Does this follow the same patterns used in
+  other services? Check similar services for naming conventions,
+  directory structure, error handling style, and interface contracts.
+  Inconsistency is a maintenance tax.
+- **Starlark/CEL constraints**: If the PR touches Starlark scripts, they
+  must be guaranteed to terminate (no `while` loops, no recursion). CEL
+  expressions must be pure and sub-millisecond. These are intentional
+  safety constraints, not limitations.
+- **Dimensional type safety**: `Quantity[D]` uses phantom types to prevent
+  mixing asset classes (kWh vs GBP). Verify that dimensional boundaries
+  are respected and not bypassed via raw decimal operations.
 - **Blast radius**: If this change fails in production, what breaks? Can
   it be rolled back without data loss?
+
+## CockroachDB & Atlas Migrations
+
+Meridian uses **CockroachDB** (not PostgreSQL) and **Atlas** (not Flyway)
+for migrations. Each service has its own migration directory:
+
+```text
+services/<service>/migrations/     # SQL files + atlas.sum
+services/<service>/atlas/atlas.hcl # Atlas config
+```
+
+**Migration naming**: `YYYYMMDD000NNN_description.sql`
+
+**CockroachDB-specific rules** (violations cause deployment failures):
+
+1. **Never create a partial index on a column added in the same
+   migration.** CockroachDB requires columns to be "public" first.
+   Split into two migration files.
+2. **Never reference a newly-added column in DML within the same
+   migration.** UPDATE/INSERT using a column from ALTER TABLE in the
+   same transaction will fail.
+3. **Never use PL/pgSQL triggers.** All lifecycle enforcement (status
+   transitions, immutable fields) must be at the Go application layer.
+4. **Never use `COMMENT ON INDEX index_name`.** CockroachDB requires
+   `table@index_name` syntax. Use SQL comments instead.
+5. **Never use expression indexes with context-dependent functions.**
+   `date_trunc()`, `NOW()` cannot appear in expression indexes.
+6. **Omit `CONCURRENTLY` from `CREATE INDEX`.** CockroachDB creates
+   all indexes online by default.
+
+**Event-driven patterns**: Since CockroachDB lacks LISTEN/NOTIFY, use
+polling or the outbox pattern (`shared/platform/events/outbox.go`).
+
+**If a PR modifies migration files**: Verify `atlas.sum` is updated
+(`atlas migrate hash`). Flag any edits to existing migrations - they
+are immutable once deployed.
+
+## Testing Standards
+
+- **Never use `time.Sleep` in tests.** Use `shared/platform/await`
+  which polls conditions until met or timeout:
+
+  ```go
+  err := await.Until(func() bool {
+      return order.Status == "COMPLETED"
+  })
+  ```
+
+- **Use CockroachDB testcontainers** for integration tests, not plain
+  PostgreSQL. This ensures production parity:
+
+  ```go
+  db, cleanup := testdb.SetupCockroachDB(t, nil)
+  defer cleanup()
+  ```
+
+- Table-driven tests with descriptive names. Test both happy path AND
+  error conditions (invalid inputs, boundary cases, concurrent access).
 
 ## Read Before You Review
 
