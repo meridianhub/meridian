@@ -31,6 +31,11 @@ const (
 
 	// maxReadSize limits the size of incoming WebSocket messages (64 KB).
 	maxReadSize = 64 * 1024
+
+	// CloseCodeTokenExpired is a custom WebSocket close code (4001) indicating
+	// that the connection was closed because the JWT token expired. Codes
+	// 4000-4999 are reserved for application use per RFC 6455.
+	CloseCodeTokenExpired = websocket.StatusCode(4001)
 )
 
 // MessageHandler is a callback invoked when the connection receives a client message.
@@ -263,9 +268,9 @@ func (c *Connection) writePump() {
 			// After each successful write, check if any messages were dropped.
 			if dropped := c.droppedCount.Swap(0); dropped > 0 {
 				overflowMsg := ServerMessage{
-					Type:         ServerMessageTypeError,
-					ErrorCode:    ErrorCodeBufferOverflow,
-					ErrorMessage: fmt.Sprintf("server dropped %d message(s) due to buffer overflow", dropped),
+					Type:          ServerMessageTypeSystem,
+					ErrorCode:     ErrorCodeBufferOverflow,
+					SystemMessage: fmt.Sprintf("Dropped %d events. UI state may be stale.", dropped),
 				}
 				if err := c.writeMessage(overflowMsg); err != nil {
 					c.Close(websocket.StatusInternalError, "write error")
@@ -355,7 +360,7 @@ func (c *Connection) pingLoop() {
 					slog.String("conn_id", c.id),
 					slog.String("tenant_id", c.tenantID),
 				)
-				c.Close(websocket.StatusPolicyViolation, "JWT expired")
+				c.Close(CloseCodeTokenExpired, "JWT expired")
 				return
 			}
 		}
