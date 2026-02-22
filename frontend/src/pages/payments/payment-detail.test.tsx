@@ -12,6 +12,13 @@ vi.mock('./payment-detail-query', () => ({
   fetchPaymentDetail: vi.fn(),
 }))
 
+// Mock dialog mutations to avoid requiring a live API transport
+vi.mock('./dialogs/payment-mutations', () => ({
+  useInitiatePayment: () => ({ mutateAsync: vi.fn(), isPending: false, reset: vi.fn() }),
+  useCancelPayment: () => ({ mutateAsync: vi.fn(), isPending: false, reset: vi.fn() }),
+  useReversePayment: () => ({ mutateAsync: vi.fn(), isPending: false, reset: vi.fn() }),
+}))
+
 import { fetchPaymentDetail } from './payment-detail-query'
 const mockFetch = vi.mocked(fetchPaymentDetail)
 
