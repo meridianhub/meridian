@@ -6,6 +6,16 @@ import { server } from './msw-handlers'
 
 expect.extend({ toHaveNoViolations })
 
+// Polyfill ResizeObserver for cmdk and other components that use it in jsdom
+global.ResizeObserver = class ResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
+// Polyfill scrollIntoView for cmdk keyboard navigation in jsdom
+Element.prototype.scrollIntoView = function () {}
+
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
 afterEach(() => {
   cleanup()
