@@ -1,0 +1,501 @@
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest'
+import { render, screen, act, waitFor } from '@testing-library/react'
+import { AuthProvider, useAuth, parseJWT } from '@/contexts/auth-context'
+import {
+  createTestToken,
+  createExpiredToken,
+  createPlatformAdminToken,
+  createTenantUserToken,
+  createSuperAdminToken,
+} from '@/test/jwt-helpers'
+
+// Mock fetch for token refresh - restore after all tests
+const mockFetch = vi.fn()
+const originalFetch = global.fetch
+
+beforeAll(() => {
+  global.fetch = mockFetch
+})
+
+afterAll(() => {
+  global.fetch = originalFetch
+})
+
+describe('parseJWT', () => {
+  it('parses a valid JWT and extracts claims', () => {
+    const token = createTestToken({
+      userId: 'user-123',
+      roles: ['viewer'],
+      scopes: ['read'],
+      iss: 'meridian-auth',
+      aud: 'meridian-console',
+    })
+
+    const claims = parseJWT(token)
+    expect(claims).not.toBeNull()
+    expect(claims!.userId).toBe('user-123')
+    expect(claims!.roles).toEqual(['viewer'])
+    expect(claims!.scopes).toEqual(['read'])
+    expect(claims!.iss).toBe('meridian-auth')
+    expect(claims!.aud).toBe('meridian-console')
+  })
+
+  it('returns null for a malformed token', () => {
+    expect(parseJWT('not-a-jwt')).toBeNull()
+    expect(parseJWT('')).toBeNull()
+    expect(parseJWT('only.two')).toBeNull()
+    expect(parseJWT('invalid.base64!@#.signature')).toBeNull()
+  })
+
+  it('parses an expired token (parsing does not check expiry)', () => {
+    const token = createExpiredToken()
+    const claims = parseJWT(token)
+    expect(claims).not.toBeNull()
+    expect(claims!.exp).toBeLessThan(Math.floor(Date.now() / 1000))
+  })
+
+  it('parses token with tenantId', () => {
+    const token = createTenantUserToken('tenant-abc')
+    const claims = parseJWT(token)
+    expect(claims).not.toBeNull()
+    expect(claims!.tenantId).toBe('tenant-abc')
+  })
+
+  it('parses token without tenantId for platform admins', () => {
+    const token = createPlatformAdminToken()
+    const claims = parseJWT(token)
+    expect(claims).not.toBeNull()
+    expect(claims!.tenantId).toBeUndefined()
+    expect(claims!.roles).toContain('platform-admin')
+  })
+})
+
+describe('getUserLens', () => {
+  it('returns platform for platform-admin without tenantId', async () => {
+    const token = createPlatformAdminToken()
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ accessToken: token }),
+    })
+
+    const TestComponent = () => {
+      const { lens } = useAuth()
+      return <div data-testid="lens">{lens}</div>
+    }
+
+    await act(async () => {
+      render(
+        <AuthProvider initialToken={token}>
+          <TestComponent />
+        </AuthProvider>,
+      )
+    })
+
+    expect(screen.getByTestId('lens').textContent).toBe('platform')
+  })
+
+  it('returns platform for super-admin without tenantId', async () => {
+    const token = createSuperAdminToken()
+
+    const TestComponent = () => {
+      const { lens } = useAuth()
+      return <div data-testid="lens">{lens}</div>
+    }
+
+    await act(async () => {
+      render(
+        <AuthProvider initialToken={token}>
+          <TestComponent />
+        </AuthProvider>,
+      )
+    })
+
+    expect(screen.getByTestId('lens').textContent).toBe('platform')
+  })
+
+  it('returns tenant for tenant users with tenantId', async () => {
+    const token = createTenantUserToken('tenant-xyz')
+
+    const TestComponent = () => {
+      const { lens } = useAuth()
+      return <div data-testid="lens">{lens}</div>
+    }
+
+    await act(async () => {
+      render(
+        <AuthProvider initialToken={token}>
+          <TestComponent />
+        </AuthProvider>,
+      )
+    })
+
+    expect(screen.getByTestId('lens').textContent).toBe('tenant')
+  })
+
+  it('returns tenant for platform-admin WITH a tenantId (viewing tenant context)', async () => {
+    const token = createTestToken({
+      userId: 'admin-456',
+      tenantId: 'some-tenant',
+      roles: ['platform-admin'],
+    })
+
+    const TestComponent = () => {
+      const { lens } = useAuth()
+      return <div data-testid="lens">{lens}</div>
+    }
+
+    await act(async () => {
+      render(
+        <AuthProvider initialToken={token}>
+          <TestComponent />
+        </AuthProvider>,
+      )
+    })
+
+    expect(screen.getByTestId('lens').textContent).toBe('tenant')
+  })
+})
+
+describe('parseJWT - type validation', () => {
+  it('rejects token with non-numeric exp', () => {
+    // Manually craft a token with exp as string
+    const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+    const payload = btoa(JSON.stringify({
+      userId: 'user-1',
+      exp: 'not-a-number',
+      iss: 'meridian-auth',
+      aud: 'meridian-console',
+      roles: [],
+      scopes: [],
+    })).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+    const badToken = `${header}.${payload}.sig`
+    expect(parseJWT(badToken)).toBeNull()
+  })
+
+  it('rejects token with non-string userId', () => {
+    const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+    const payload = btoa(JSON.stringify({
+      userId: 123,
+      exp: Math.floor(Date.now() / 1000) + 3600,
+      iss: 'meridian-auth',
+      aud: 'meridian-console',
+      roles: [],
+      scopes: [],
+    })).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+    const badToken = `${header}.${payload}.sig`
+    expect(parseJWT(badToken)).toBeNull()
+  })
+
+  it('rejects token when exp is NaN', () => {
+    const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+    const payload = btoa(JSON.stringify({
+      userId: 'user-1',
+      exp: NaN,
+      iss: 'meridian-auth',
+      aud: 'meridian-console',
+      roles: [],
+      scopes: [],
+    })).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+    const badToken = `${header}.${payload}.sig`
+    expect(parseJWT(badToken)).toBeNull()
+  })
+})
+
+describe('AuthProvider', () => {
+  beforeEach(() => {
+    mockFetch.mockReset()
+    localStorage.clear()
+    sessionStorage.clear()
+  })
+
+  afterEach(() => {
+    localStorage.clear()
+    sessionStorage.clear()
+  })
+
+  it('starts unauthenticated with no token', async () => {
+    const TestComponent = () => {
+      const { isAuthenticated, claims } = useAuth()
+      return (
+        <div>
+          <span data-testid="auth">{String(isAuthenticated)}</span>
+          <span data-testid="claims">{claims ? 'has-claims' : 'no-claims'}</span>
+        </div>
+      )
+    }
+
+    await act(async () => {
+      render(
+        <AuthProvider>
+          <TestComponent />
+        </AuthProvider>,
+      )
+    })
+
+    expect(screen.getByTestId('auth').textContent).toBe('false')
+    expect(screen.getByTestId('claims').textContent).toBe('no-claims')
+  })
+
+  it('becomes authenticated with a valid token', async () => {
+    const token = createTestToken({ userId: 'user-123' })
+
+    const TestComponent = () => {
+      const { isAuthenticated, claims } = useAuth()
+      return (
+        <div>
+          <span data-testid="auth">{String(isAuthenticated)}</span>
+          <span data-testid="userId">{claims?.userId ?? 'none'}</span>
+        </div>
+      )
+    }
+
+    await act(async () => {
+      render(
+        <AuthProvider initialToken={token}>
+          <TestComponent />
+        </AuthProvider>,
+      )
+    })
+
+    expect(screen.getByTestId('auth').textContent).toBe('true')
+    expect(screen.getByTestId('userId').textContent).toBe('user-123')
+  })
+
+  it('does NOT persist tokens to localStorage', async () => {
+    const token = createTestToken({ userId: 'user-123' })
+
+    const TestComponent = () => {
+      const { isAuthenticated } = useAuth()
+      return <span data-testid="auth">{String(isAuthenticated)}</span>
+    }
+
+    await act(async () => {
+      render(
+        <AuthProvider initialToken={token}>
+          <TestComponent />
+        </AuthProvider>,
+      )
+    })
+
+    expect(screen.getByTestId('auth').textContent).toBe('true')
+
+    // Verify nothing in localStorage or sessionStorage
+    const localStorageKeys = Object.keys(localStorage)
+    const sessionStorageKeys = Object.keys(sessionStorage)
+
+    const tokenInLocalStorage = localStorageKeys.some(
+      (key) => localStorage.getItem(key)?.includes(token),
+    )
+    const tokenInSessionStorage = sessionStorageKeys.some(
+      (key) => sessionStorage.getItem(key)?.includes(token),
+    )
+
+    expect(tokenInLocalStorage).toBe(false)
+    expect(tokenInSessionStorage).toBe(false)
+  })
+
+  it('calls refresh endpoint and updates token on refresh', async () => {
+    const initialToken = createTestToken({ userId: 'user-123' })
+    const newToken = createTestToken({ userId: 'user-123', roles: ['admin'] })
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ accessToken: newToken }),
+    })
+
+    let refreshFn: (() => Promise<boolean>) | null = null
+
+    const TestComponent = () => {
+      const { claims, refreshToken } = useAuth()
+      refreshFn = refreshToken
+      return <span data-testid="roles">{claims?.roles.join(',') ?? 'none'}</span>
+    }
+
+    await act(async () => {
+      render(
+        <AuthProvider initialToken={initialToken}>
+          <TestComponent />
+        </AuthProvider>,
+      )
+    })
+
+    expect(screen.getByTestId('roles').textContent).toBe('viewer')
+
+    await act(async () => {
+      await refreshFn!()
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('roles').textContent).toBe('admin')
+    })
+
+    expect(mockFetch).toHaveBeenCalledWith('/api/auth/refresh', expect.any(Object))
+  })
+
+  it('becomes unauthenticated when refresh returns 401', async () => {
+    const initialToken = createTestToken({ userId: 'user-123' })
+
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+    })
+
+    let refreshFn: (() => Promise<boolean>) | null = null
+
+    const TestComponent = () => {
+      const { isAuthenticated, refreshToken } = useAuth()
+      refreshFn = refreshToken
+      return <span data-testid="auth">{String(isAuthenticated)}</span>
+    }
+
+    await act(async () => {
+      render(
+        <AuthProvider initialToken={initialToken}>
+          <TestComponent />
+        </AuthProvider>,
+      )
+    })
+
+    expect(screen.getByTestId('auth').textContent).toBe('true')
+
+    await act(async () => {
+      await refreshFn!()
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('auth').textContent).toBe('false')
+    })
+  })
+
+  it('stays authenticated when refresh returns 5xx (transient error)', async () => {
+    const initialToken = createTestToken({ userId: 'user-123' })
+
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 503,
+    })
+
+    let refreshFn: (() => Promise<boolean>) | null = null
+
+    const TestComponent = () => {
+      const { isAuthenticated, refreshToken } = useAuth()
+      refreshFn = refreshToken
+      return <span data-testid="auth">{String(isAuthenticated)}</span>
+    }
+
+    await act(async () => {
+      render(
+        <AuthProvider initialToken={initialToken}>
+          <TestComponent />
+        </AuthProvider>,
+      )
+    })
+
+    expect(screen.getByTestId('auth').textContent).toBe('true')
+
+    let result: boolean = true
+    await act(async () => {
+      result = await refreshFn!()
+    })
+
+    // Should return false but NOT clear auth state on transient error
+    expect(result).toBe(false)
+    expect(screen.getByTestId('auth').textContent).toBe('true')
+  })
+
+  it('clears accessToken when login is called with a malformed token', async () => {
+    let loginFn: ((token: string) => void) | null = null
+
+    const TestComponent = () => {
+      const { isAuthenticated, accessToken, login } = useAuth()
+      loginFn = login
+      return (
+        <div>
+          <span data-testid="auth">{String(isAuthenticated)}</span>
+          <span data-testid="token">{accessToken ?? 'null'}</span>
+        </div>
+      )
+    }
+
+    await act(async () => {
+      render(
+        <AuthProvider>
+          <TestComponent />
+        </AuthProvider>,
+      )
+    })
+
+    await act(async () => {
+      loginFn!('not.a.valid.jwt.token')
+    })
+
+    // Token parse failed - should not store malformed token
+    expect(screen.getByTestId('auth').textContent).toBe('false')
+    expect(screen.getByTestId('token').textContent).toBe('null')
+  })
+
+  it('provides login function that sets token from auth response', async () => {
+    const newToken = createTenantUserToken('tenant-123')
+
+    let loginFn: ((token: string) => void) | null = null
+
+    const TestComponent = () => {
+      const { isAuthenticated, claims, login } = useAuth()
+      loginFn = login
+      return (
+        <div>
+          <span data-testid="auth">{String(isAuthenticated)}</span>
+          <span data-testid="tenantId">{claims?.tenantId ?? 'none'}</span>
+        </div>
+      )
+    }
+
+    await act(async () => {
+      render(
+        <AuthProvider>
+          <TestComponent />
+        </AuthProvider>,
+      )
+    })
+
+    expect(screen.getByTestId('auth').textContent).toBe('false')
+
+    await act(async () => {
+      loginFn!(newToken)
+    })
+
+    expect(screen.getByTestId('auth').textContent).toBe('true')
+    expect(screen.getByTestId('tenantId').textContent).toBe('tenant-123')
+  })
+
+  it('provides logout function that clears auth state', async () => {
+    const token = createTestToken({ userId: 'user-123' })
+
+    let logoutFn: (() => void) | null = null
+
+    const TestComponent = () => {
+      const { isAuthenticated, logout } = useAuth()
+      logoutFn = logout
+      return <span data-testid="auth">{String(isAuthenticated)}</span>
+    }
+
+    await act(async () => {
+      render(
+        <AuthProvider initialToken={token}>
+          <TestComponent />
+        </AuthProvider>,
+      )
+    })
+
+    expect(screen.getByTestId('auth').textContent).toBe('true')
+
+    await act(async () => {
+      logoutFn!()
+    })
+
+    expect(screen.getByTestId('auth').textContent).toBe('false')
+  })
+})
