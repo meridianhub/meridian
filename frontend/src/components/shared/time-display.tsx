@@ -37,12 +37,13 @@ export function TimeDisplay({
         : timestamp.seconds;
 
     return new Date(seconds * 1000 + Math.floor((timestamp.nanos || 0) / 1_000_000));
-  }, [timestamp]);
+  }, [timestamp?.seconds, timestamp?.nanos]);
 
   if (!date) return <>—</>;
 
   const relative = formatDistanceToNow(date, { addSuffix: true });
-  const absolute = format(date, 'yyyy-MM-dd HH:mm:ss');
+  // Format using UTC time string to ensure consistency across timezones
+  const absolute = date.toISOString().split('T')[0] + ' ' + date.toISOString().split('T')[1].substring(0, 8);
 
   if (displayFormat === 'relative') {
     return (
