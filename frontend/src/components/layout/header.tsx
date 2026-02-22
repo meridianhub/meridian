@@ -24,9 +24,11 @@ function TenantSelectorPlaceholder(_props: TenantSelectorProps) {
 
 interface HeaderProps {
   onMenuToggle: () => void
+  sidebarOpen?: boolean
+  sidebarId?: string
 }
 
-export function Header({ onMenuToggle }: HeaderProps) {
+export function Header({ onMenuToggle, sidebarOpen, sidebarId }: HeaderProps) {
   const { logout } = useAuth()
   const { isPlatformAdmin } = useTenantContext()
 
@@ -36,6 +38,8 @@ export function Header({ onMenuToggle }: HeaderProps) {
         variant="ghost"
         size="icon"
         aria-label="Toggle menu"
+        aria-expanded={sidebarOpen}
+        aria-controls={sidebarId}
         onClick={onMenuToggle}
         className="shrink-0"
       >

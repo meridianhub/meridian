@@ -34,13 +34,15 @@ interface SidebarProps {
   lens: 'platform' | 'tenant'
   currentPath?: string
   isOpen?: boolean
+  id?: string
 }
 
-export function Sidebar({ lens, currentPath = '/', isOpen = false }: SidebarProps) {
+export function Sidebar({ lens, currentPath = '/', isOpen = false, id }: SidebarProps) {
   const showPlatformItems = lens === 'platform'
 
   return (
     <aside
+      id={id}
       data-open={String(isOpen)}
       className={cn(
         'flex h-full w-64 flex-col bg-gray-900 text-white transition-transform duration-200',
