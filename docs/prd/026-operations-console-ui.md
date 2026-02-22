@@ -1168,7 +1168,8 @@ Platform admin only. A combobox/dropdown in the header that:
 
 ### 6.3 MoneyDisplay
 
-Renders monetary and instrument amounts with correct formatting.
+Renders monetary and instrument amounts with correct
+formatting.
 
 ```typescript
 interface MoneyDisplayProps {
@@ -1178,11 +1179,24 @@ interface MoneyDisplayProps {
 }
 ```
 
-**Formatting rules** (from ADR-0013 universal quantity type):
+**Formatting rules** (from ADR-0013 universal quantity
+type):
 
-- Fiat currencies: Use `Intl.NumberFormat` with ISO 4217 currency code. JPY = 0 decimals, GBP/USD = 2, BHD = 3.
-- Non-fiat instruments (kWh, GPU_HOUR, TONNE_CO2E): Display with instrument-specific precision. Unit shown as suffix.
-- Amounts stored as cents (int64) — divide by 10^precision for display.
+- Fiat currencies: Use `Intl.NumberFormat` with ISO 4217
+  currency code. JPY = 0 decimals, GBP/USD = 2, BHD = 3.
+- Non-fiat instruments (kWh, GPU_HOUR, TONNE_CO2E):
+  Display with instrument-specific precision. Unit shown
+  as suffix.
+- Amounts stored as cents (int64) — divide by
+  10^precision for display.
+
+**Precision constraint:** Proto `InstrumentAmount` uses
+int64 for the amount field. JavaScript `number` loses
+precision above 2^53. All amount arithmetic and display
+formatting **must** use `BigInt`, not `number`. The
+`bigint` type in the interface enforces this. The
+Connect-ES generated code represents int64 as `bigint`
+by default.
 
 ### 6.4 StatusBadge
 
@@ -1216,16 +1230,52 @@ Built on shadcn Table + React Query pagination.
 ```typescript
 interface DataTableProps<T> {
   queryKey: QueryKey;
-  queryFn: (params: { pageToken?: string; pageSize: number }) => Promise<{ items: T[]; nextPageToken?: string }>;
+  queryFn: (params: {
+    pageToken?: string;
+    pageSize: number;
+    filters?: Record<string, string>;
+  }) => Promise<{
+    items: T[];
+    nextPageToken?: string;
+  }>;
   columns: ColumnDef<T>[];
   pageSize?: number;        // default: 25
   filters?: FilterConfig[];
-  searchable?: boolean;
   onRowClick?: (row: T) => void;
+}
+
+interface FilterConfig {
+  /** RPC request field this filter maps to */
+  field: string;
+  /** Display label */
+  label: string;
+  /** Filter type determines the UI control */
+  type: 'select' | 'text' | 'date-range';
+  /** For select: allowed values from proto enum */
+  options?: Array<{ label: string; value: string }>;
 }
 ```
 
-Uses cursor-based pagination (page tokens from protobuf responses), not offset-based.
+Uses cursor-based pagination (page tokens from protobuf
+responses), not offset-based.
+
+**Filtering constraint:** Every filter maps 1:1 to a field
+on the underlying RPC request message. The backend uses
+CockroachDB with strict index lookups — there is no fuzzy
+text search. Filters are:
+
+- **Select filters:** Status dropdowns, enum fields
+  (maps to proto enum filter field)
+- **Exact match inputs:** ID, IBAN, account code
+  (maps to string equality field)
+- **Date range:** Created/updated timestamps
+  (maps to timestamp range fields)
+
+There is no generic "search all fields" bar. Each page
+defines its filter configuration explicitly based on what
+the underlying RPC supports. If a future page needs
+full-text search, it requires a dedicated search RPC
+backed by an appropriate index.
 
 ### 6.6 TimeDisplay
 
@@ -1751,8 +1801,8 @@ and end-to-end product configuration.
 
 | # | Item | Status | Resolution Needed |
 |---|------|--------|-------------------|
-| 1 | **Audit query RPC** | Missing | Need `AuditService.ListAuditEntries` and `RetrieveAuditEntry` RPCs. Audit-worker writes to DB but has no read API. |
-| 2 | **Platform admin gateway bypass** | Needs verification | Confirm `TenantAuthorizationMiddleware` allows JWT with `platform-admin` role and no `x-tenant-id` claim via subdomain. |
+| 1 | **Audit query RPC** | **Blocks Phase 2** | Need `AuditService.ListAuditEntries` and `RetrieveAuditEntry` RPCs. Backend task required before Audit page (4.12) can be built. |
+| 2 | **Platform admin gateway bypass** | **Blocks Phase 1** | Verify `TenantAuthorizationMiddleware` skips tenant check for `platform-admin` JWT without `x-tenant-id`. Backend task required before Phase 1. |
 | 3 | **Identity provider** | Not specified | OAuth 2.0/OIDC provider (Keycloak, Auth0) needs choosing. UI needs login redirect URL and JWKS endpoint. |
 | 4 | **Control Plane API surface** | Unclear | What gRPC services does the Control Plane expose? Determines Platform Monitoring page scope. |
 | 5 | **Party service proto** | Not fully explored | Party proto needs detailed review for complete page specification. |
@@ -2021,4 +2071,69 @@ const queryClient = new QueryClient({
 - Tenant list (TenantSelector): `staleTime: 5 * 60_000` (5 min — tenant list changes rarely)
 - Payment detail during saga: `staleTime: 5_000` (5s — saga transitions are frequent)
 
-All values are initial defaults, validated during testing. Marked as "validate in testing" per PRD requirements.
+All values are initial defaults, validated during testing.
+Marked as "validate in testing" per PRD requirements.
+
+---
+
+## Appendix D: Implementation Notes
+
+### D.1 Environment Variables
+
+The frontend build pipeline must inject environment
+variables correctly per deployment target:
+
+```bash
+# Local development (Tilt)
+VITE_API_BASE_URL=http://localhost:8080
+VITE_AUTH_DOMAIN=http://localhost:8180
+
+# Staging
+VITE_API_BASE_URL=https://{tenant}.api.staging.meridian.io
+
+# Production
+VITE_API_BASE_URL=https://{tenant}.api.meridian.io
+```
+
+The `{tenant}` placeholder is resolved at runtime by the
+`TenantContext` — the Connect transport base URL is
+constructed dynamically from the active tenant slug.
+
+### D.2 Generated Code
+
+Add `src/api/gen/` to `.gitignore`. The CI pipeline must
+regenerate proto TypeScript clients on every build to ensure
+they match the committed proto definitions:
+
+```bash
+# In CI build step
+buf generate --template buf.gen.yaml
+```
+
+This ensures the frontend types cannot drift from the
+backend proto contracts. Local development uses a
+`buf generate` watch mode or pre-build step.
+
+### D.3 Backend Prerequisites for Phase 1
+
+Before frontend Phase 1 begins, these backend tasks must
+be completed or verified:
+
+1. **Gateway platform-admin bypass** (Open Item #2):
+   Verify `TenantAuthorizationMiddleware` in
+   `combined_middleware.go` allows JWT with
+   `platform-admin` role and no `x-tenant-id` claim
+   to access tenant-scoped services via subdomain.
+   Without this, the TenantSelector cannot function.
+
+2. **Identity provider decision** (Open Item #3):
+   Choose OAuth 2.0/OIDC provider and configure JWKS
+   endpoint. The frontend auth flow depends on this.
+
+### D.4 Backend Prerequisites for Phase 2
+
+1. **Audit query RPC** (Open Item #1): Implement
+   `AuditService` with `ListAuditEntries` and
+   `RetrieveAuditEntry` RPCs. Without this, the
+   Audit page (4.12) and the AuditTrail shared
+   component (6.7) cannot be built.
