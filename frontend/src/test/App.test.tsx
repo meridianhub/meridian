@@ -9,4 +9,9 @@ describe('App', () => {
       'Meridian Operations Console',
     )
   })
+
+  it('renders without crashing with QueryClientProvider', () => {
+    const { container } = render(<App />)
+    expect(container).toBeTruthy()
+  })
 })
