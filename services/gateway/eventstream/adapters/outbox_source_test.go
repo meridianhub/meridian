@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/gateway/eventstream"
 	"github.com/meridianhub/meridian/services/gateway/eventstream/adapters"
+	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
@@ -363,8 +364,13 @@ func TestOutboxSource_PicksUpNewEntriesAfterFirstPoll(t *testing.T) {
 
 	var mu sync.Mutex
 	var received []string
+	countReceived := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(received)
+	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	go func() {
@@ -376,18 +382,20 @@ func TestOutboxSource_PicksUpNewEntriesAfterFirstPoll(t *testing.T) {
 		})
 	}()
 
-	// Wait for first poll to complete, then insert a second entry.
-	time.Sleep(150 * time.Millisecond)
+	// Wait until the first entry is delivered, then insert a second entry.
+	err := await.New().AtMost(5 * time.Second).PollInterval(20 * time.Millisecond).
+		Until(func() bool { return countReceived() >= 1 })
+	require.NoError(t, err, "first entry should have been delivered")
 
 	entry2 := newCompletedEntry("svc", "second.event.v1", "svc.second.v1")
 	entry2.CreatedAt = time.Now().UTC()
 	insertOutboxEntry(t, db, entry2)
 
-	// Wait for another poll to pick up the second entry.
-	time.Sleep(200 * time.Millisecond)
+	// Wait until the second entry is also delivered.
+	err = await.New().AtMost(5 * time.Second).PollInterval(20 * time.Millisecond).
+		Until(func() bool { return countReceived() >= 2 })
+	require.NoError(t, err, "second entry should have been delivered")
 	cancel()
-
-	<-ctx.Done()
 
 	mu.Lock()
 	defer mu.Unlock()

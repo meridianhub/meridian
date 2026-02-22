@@ -125,13 +125,29 @@ func (s *OutboxEventSource) pollEvents(ctx context.Context, handler eventstream.
 	// Fetch completed outbox entries ordered by (created_at, id) so delivery
 	// is deterministic and the high-water mark advances monotonically.
 	//
-	// We use a single query across all services. Per-service high-water mark
-	// filtering happens in application code after fetching because CockroachDB
-	// cannot efficiently express "WHERE (service_name, created_at) > (?, ?)"
-	// across multiple services in a single parameterised query.
+	// We apply a global minimum HWM as a SQL lower bound so the query window
+	// advances as entries are processed. Without this, Limit(batchSize) would
+	// repeatedly fetch the same oldest rows once the table has more than
+	// batchSize completed entries, causing newer rows to be permanently
+	// unreachable.
+	//
+	// The minimum across all service HWMs is used rather than per-service
+	// bounds because CockroachDB cannot efficiently express
+	// "WHERE (service_name, created_at) > (?, ?)" across multiple services.
+	// In-memory per-service filtering below handles the fine-grained dedup.
+	query := s.db.WithContext(ctx).Where("status = ?", events.StatusCompleted)
+	if len(hwm) > 0 {
+		var minTime time.Time
+		for _, m := range hwm {
+			if minTime.IsZero() || m.createdAt.Before(minTime) {
+				minTime = m.createdAt
+			}
+		}
+		query = query.Where("created_at >= ?", minTime)
+	}
+
 	var entries []events.EventOutbox
-	if err := s.db.WithContext(ctx).
-		Where("status = ?", events.StatusCompleted).
+	if err := query.
 		Order("created_at ASC, id ASC").
 		Limit(s.batchSize).
 		Find(&entries).Error; err != nil {
@@ -142,12 +158,19 @@ func (s *OutboxEventSource) pollEvents(ctx context.Context, handler eventstream.
 		return nil
 	}
 
-	// Track the new high-water marks accumulated during this batch before
-	// invoking any handlers so that a handler error does not prevent the mark
-	// from advancing on the next poll.
+	// blocked tracks services where a handler error occurred in this batch.
+	// Once a service is blocked, remaining entries for that service are skipped
+	// so the high-water mark does not advance past the failed entry, preserving
+	// at-least-once retry semantics across polls.
+	blocked := make(map[string]struct{})
 	newMarks := make(map[string]waterMark)
 
 	for _, entry := range entries {
+		// Skip any further entries for a service that failed earlier in this batch.
+		if _, isBlocked := blocked[entry.ServiceName]; isBlocked {
+			continue
+		}
+
 		mark, seen := hwm[entry.ServiceName]
 		if seen {
 			// Skip entries at or before the high-water mark for this service.
@@ -173,8 +196,9 @@ func (s *OutboxEventSource) pollEvents(ctx context.Context, handler eventstream.
 				"event_type", entry.EventType,
 				"service", entry.ServiceName,
 			)
-			// Do not advance the high-water mark for this service on error;
-			// the next poll will retry from the same position.
+			// Block this service for the remainder of the batch so no later
+			// entries overwrite newMarks and skip past the failed position.
+			blocked[entry.ServiceName] = struct{}{}
 			continue
 		}
 
