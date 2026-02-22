@@ -283,6 +283,108 @@ describe('AccountDetailPage - action buttons', () => {
   })
 })
 
+describe('AccountDetailPage - dialog integration', () => {
+  it('opens DepositDialog when Deposit button is clicked', async () => {
+    server.use(
+      http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
+        HttpResponse.json({ account: mockAccount }),
+      ),
+    )
+
+    renderDetailPage()
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /deposit/i })).toBeInTheDocument()
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: /deposit/i }))
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/deposit funds/i).length).toBeGreaterThan(0)
+    })
+  })
+
+  it('opens WithdrawDialog when Withdraw button is clicked', async () => {
+    server.use(
+      http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
+        HttpResponse.json({ account: mockAccount }),
+      ),
+    )
+
+    renderDetailPage()
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /withdraw/i })).toBeInTheDocument()
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: /withdraw/i }))
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/withdraw/i).length).toBeGreaterThan(1)
+    })
+  })
+
+  it('opens ControlDialog when Freeze button is clicked', async () => {
+    server.use(
+      http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
+        HttpResponse.json({ account: mockAccount }),
+      ),
+    )
+
+    renderDetailPage()
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^freeze$/i })).toBeInTheDocument()
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: /^freeze$/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
+    })
+  })
+
+  it('opens ControlDialog when Unfreeze button is clicked', async () => {
+    server.use(
+      http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
+        HttpResponse.json({ account: mockFrozenAccount }),
+      ),
+    )
+
+    renderDetailPage('acct-frozen')
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^unfreeze$/i })).toBeInTheDocument()
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: /^unfreeze$/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
+    })
+  })
+
+  it('opens ControlDialog when Close Account button is clicked', async () => {
+    server.use(
+      http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
+        HttpResponse.json({ account: mockAccount }),
+      ),
+    )
+
+    renderDetailPage()
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /close account/i })).toBeInTheDocument()
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: /close account/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
+    })
+  })
+})
+
 describe('AccountDetailPage - back navigation', () => {
   it('renders a back link to accounts list', async () => {
     server.use(
