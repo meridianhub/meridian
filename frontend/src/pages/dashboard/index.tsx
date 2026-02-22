@@ -105,8 +105,8 @@ export function DashboardPage() {
     : null
 
   // Build recent activity feed from dedicated activity query (pageSize: 10)
-  const activityItems: ActivityItem[] = (activityQuery.data?.paymentOrders ?? []).map((po) => ({
-    id: po.id ?? String(Math.random()),
+  const activityItems: ActivityItem[] = (activityQuery.data?.paymentOrders ?? []).map((po, idx) => ({
+    id: po.id ?? `activity-${idx}`,
     type: 'payment' as const,
     title: `Payment order ${po.id ?? ''}`,
     description: po.id ? `ID: ${po.id}` : undefined,
