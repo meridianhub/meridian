@@ -199,7 +199,13 @@ export function DashboardPage() {
             <CardTitle>Recent Activity</CardTitle>
           </CardHeader>
           <CardContent>
-            <ActivityFeed items={activityItems} isLoading={activityQuery.isLoading} />
+            {activityQuery.isError ? (
+              <div className="py-8 text-center text-sm text-muted-foreground">
+                Failed to load recent activity
+              </div>
+            ) : (
+              <ActivityFeed items={activityItems} isLoading={activityQuery.isLoading} />
+            )}
           </CardContent>
         </Card>
 
