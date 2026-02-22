@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"time"
 )
 
 // ConnectionSender is the interface the Router uses to interact with a client
@@ -211,13 +212,25 @@ type Router struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	logger *slog.Logger
+	logger  *slog.Logger
+	metrics *Metrics
+}
+
+// RouterOption is a functional option for configuring a Router.
+type RouterOption func(*Router)
+
+// WithRouterMetrics attaches a Metrics instance to the Router.
+// When set, the Router records connection and event delivery metrics.
+func WithRouterMetrics(m *Metrics) RouterOption {
+	return func(r *Router) {
+		r.metrics = m
+	}
 }
 
 // NewRouter creates a Router backed by the given EventSource and FanOut.
-func NewRouter(source EventSource, fanOut FanOut) *Router {
+func NewRouter(source EventSource, fanOut FanOut, opts ...RouterOption) *Router {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Router{
+	r := &Router{
 		source:          source,
 		fanOut:          fanOut,
 		registry:        NewConnectionRegistry(),
@@ -226,6 +239,10 @@ func NewRouter(source EventSource, fanOut FanOut) *Router {
 		cancel:          cancel,
 		logger:          slog.Default(),
 	}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r
 }
 
 // RegisterConnection adds conn to the registry and ensures a FanOut subscription
@@ -310,6 +327,16 @@ func (r *Router) HandleEvent(_ context.Context, event DomainEvent) error {
 					slog.String("tenant_id", event.TenantID),
 					slog.String("event_id", event.EventID),
 				)
+				if r.metrics != nil {
+					r.metrics.IncEventDropped("buffer_full")
+				}
+			} else {
+				if r.metrics != nil {
+					r.metrics.IncEventDelivered(event.TenantID, event.Channel)
+					if !event.Timestamp.IsZero() {
+						r.metrics.ObserveLatency(time.Since(event.Timestamp))
+					}
+				}
 			}
 		}
 	}
