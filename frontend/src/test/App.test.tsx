@@ -1,6 +1,33 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import App from '@/App'
+
+// Mock transport and clients to avoid dependency on generated proto files
+vi.mock('@/api/transport', () => ({
+  createTenantTransport: vi.fn(() => ({ __type: 'mock-transport' })),
+}))
+
+vi.mock('@/api/clients', () => ({
+  createServiceClients: vi.fn(() => ({
+    currentAccount: {},
+    paymentOrder: {},
+    financialAccounting: {
+      listFinancialBookingLogs: vi.fn().mockResolvedValue({ financialBookingLogs: [], pagination: {} }),
+      retrieveFinancialBookingLog: vi.fn().mockResolvedValue({ financialBookingLog: null }),
+    },
+    positionKeeping: {},
+    accountReconciliation: {},
+    party: {},
+    tenant: {},
+    sagaRegistry: {},
+    sagaAdmin: {},
+    referenceData: {},
+    accountTypeRegistry: {},
+    node: {},
+    internalBankAccount: {},
+    marketInformation: {},
+  })),
+}))
 
 describe('App', () => {
   it('renders the operations console heading', () => {
