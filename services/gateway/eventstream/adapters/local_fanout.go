@@ -4,10 +4,15 @@ package adapters
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	"github.com/meridianhub/meridian/services/gateway/eventstream"
 )
+
+// ErrNegativeBufferSize is returned when NewLocalFanOutE is called with a
+// negative buffer size.
+var ErrNegativeBufferSize = errors.New("buffer size must be non-negative")
 
 // LocalFanOut is an in-process FanOut implementation that routes DomainEvents to
 // subscribed handlers via buffered channels. It is used as the default fan-out
@@ -25,14 +30,29 @@ type LocalFanOut struct {
 	bufferSize  int
 }
 
-// NewLocalFanOut returns a LocalFanOut with the given per-subscriber channel buffer
-// size. A bufferSize of 0 creates unbuffered channels (every Publish blocks until
-// the handler processes the event — suitable only for tests).
+// NewLocalFanOut returns a LocalFanOut with the given per-subscriber channel
+// buffer size. It panics if bufferSize is negative. Use NewLocalFanOutE when
+// the buffer size is derived from user-supplied configuration.
 func NewLocalFanOut(bufferSize int) *LocalFanOut {
+	fo, err := NewLocalFanOutE(bufferSize)
+	if err != nil {
+		panic(err)
+	}
+	return fo
+}
+
+// NewLocalFanOutE returns a LocalFanOut with the given per-subscriber channel
+// buffer size, or ErrNegativeBufferSize if bufferSize is negative.
+// A bufferSize of 0 creates unbuffered channels (every Publish blocks until
+// the handler processes the event — suitable only for tests).
+func NewLocalFanOutE(bufferSize int) (*LocalFanOut, error) {
+	if bufferSize < 0 {
+		return nil, ErrNegativeBufferSize
+	}
 	return &LocalFanOut{
 		subscribers: make(map[string]chan eventstream.DomainEvent),
 		bufferSize:  bufferSize,
-	}
+	}, nil
 }
 
 // Publish delivers event to the handler subscribed for event.TenantID.

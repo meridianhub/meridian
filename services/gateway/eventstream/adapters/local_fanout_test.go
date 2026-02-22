@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/meridianhub/meridian/services/gateway/eventstream"
 	"github.com/meridianhub/meridian/services/gateway/eventstream/adapters"
+	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -22,6 +24,46 @@ func makeEvent(tenantID string) eventstream.DomainEvent {
 		TenantID:  tenantID,
 		Timestamp: time.Now().UTC(),
 	}
+}
+
+// subscribeReady starts a Subscribe goroutine and waits until the subscriber is
+// registered by publishing a probe event and waiting for the handler to be
+// invoked at least once. The returned cancel stops the subscription and the
+// errCh carries the Subscribe return value.
+func subscribeReady(t *testing.T, fo *adapters.LocalFanOut, tenantID string, handler eventstream.EventHandler) (cancel context.CancelFunc, errCh <-chan error) {
+	t.Helper()
+
+	var called atomic.Bool
+	wrappedHandler := func(ctx context.Context, ev eventstream.DomainEvent) error {
+		called.Store(true)
+		return handler(ctx, ev)
+	}
+
+	ctx, cancelFn := context.WithCancel(context.Background())
+	ch := make(chan error, 1)
+	go func() {
+		ch <- fo.Subscribe(ctx, tenantID, wrappedHandler)
+	}()
+
+	// Probe: publish events until the handler is reached, confirming registration.
+	probeEvent := makeEvent(tenantID)
+	probeErr := await.New().
+		AtMost(time.Second).
+		PollInterval(5 * time.Millisecond).
+		Until(func() bool {
+			_ = fo.Publish(context.Background(), probeEvent)
+			return called.Load()
+		})
+	require.NoError(t, probeErr, "subscriber for %q did not become ready", tenantID)
+
+	return cancelFn, ch
+}
+
+// TestLocalFanOut_NewLocalFanOut_NegativeBufferSize verifies that constructing
+// a LocalFanOut with a negative buffer size returns an error.
+func TestLocalFanOut_NewLocalFanOut_NegativeBufferSize(t *testing.T) {
+	_, err := adapters.NewLocalFanOutE(-1)
+	require.Error(t, err)
 }
 
 // TestLocalFanOut_Publish_EmptyTenantID verifies that publishing an event with
@@ -70,33 +112,31 @@ func TestLocalFanOut_Unsubscribe_NoopWhenNotSubscribed(t *testing.T) {
 // is forwarded to the subscribed handler.
 func TestLocalFanOut_Publish_DeliveredToSubscriber(t *testing.T) {
 	fo := adapters.NewLocalFanOut(10)
-	ctx, cancel := context.WithCancel(context.Background())
+
+	received := make(chan eventstream.DomainEvent, 10)
+	cancel, subscribeErr := subscribeReady(t, fo, "tenant-a", func(_ context.Context, ev eventstream.DomainEvent) error {
+		received <- ev
+		return nil
+	})
 	defer cancel()
-
-	received := make(chan eventstream.DomainEvent, 1)
-	subscribeErr := make(chan error, 1)
-
-	go func() {
-		err := fo.Subscribe(ctx, "tenant-a", func(_ context.Context, ev eventstream.DomainEvent) error {
-			received <- ev
-			return nil
-		})
-		subscribeErr <- err
-	}()
-
-	// Give Subscribe goroutine time to register
-	time.Sleep(10 * time.Millisecond)
 
 	event := makeEvent("tenant-a")
 	require.NoError(t, fo.Publish(context.Background(), event))
 
-	select {
-	case got := <-received:
-		assert.Equal(t, event.EventID, got.EventID)
-		assert.Equal(t, event.TenantID, got.TenantID)
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for event delivery")
-	}
+	// Drain probe events; wait for the real event (same EventID in this test).
+	err := await.New().
+		AtMost(time.Second).
+		Until(func() bool {
+			select {
+			case got := <-received:
+				if got.EventID == event.EventID {
+					return true
+				}
+			default:
+			}
+			return false
+		})
+	require.NoError(t, err, "event was not delivered to subscriber")
 
 	cancel()
 	select {
@@ -121,30 +161,43 @@ func TestLocalFanOut_Publish_NoSubscriber(t *testing.T) {
 // are not delivered to tenant-b's subscriber.
 func TestLocalFanOut_Publish_TenantIsolation(t *testing.T) {
 	fo := adapters.NewLocalFanOut(10)
-	ctx, cancel := context.WithCancel(context.Background())
+
+	// Use a counter so we can observe the count at a known point in time and
+	// verify it does not increase after a tenant-a publish.
+	var tenantBCount atomic.Int64
+	cancel, _ := subscribeReady(t, fo, "tenant-b", func(_ context.Context, _ eventstream.DomainEvent) error {
+		tenantBCount.Add(1)
+		return nil
+	})
 	defer cancel()
 
-	receivedB := make(chan eventstream.DomainEvent, 5)
-
-	go func() {
-		_ = fo.Subscribe(ctx, "tenant-b", func(_ context.Context, ev eventstream.DomainEvent) error {
-			receivedB <- ev
-			return nil
+	// Drain: wait until all probe events have been processed by waiting for the
+	// count to stabilize (no new increments over a short window).
+	var stable int64
+	err := await.New().
+		AtMost(time.Second).
+		PollInterval(20 * time.Millisecond).
+		Until(func() bool {
+			current := tenantBCount.Load()
+			if current != stable {
+				stable = current
+				return false // still draining
+			}
+			return true // stable
 		})
-	}()
+	require.NoError(t, err, "probe events did not drain in time")
 
-	time.Sleep(10 * time.Millisecond)
+	countAfterDrain := tenantBCount.Load()
 
-	// Publish to tenant-a only
+	// Publish to tenant-a only.
 	require.NoError(t, fo.Publish(context.Background(), makeEvent("tenant-a")))
 
-	// tenant-b should receive nothing
-	select {
-	case got := <-receivedB:
-		t.Fatalf("tenant-b unexpectedly received event: %+v", got)
-	case <-time.After(50 * time.Millisecond):
-		// expected: no delivery
-	}
+	// tenant-b should receive nothing within a reasonable window.
+	err = await.New().
+		AtMost(100 * time.Millisecond).
+		PollInterval(10 * time.Millisecond).
+		Until(func() bool { return tenantBCount.Load() > countAfterDrain })
+	assert.Error(t, err, "tenant-b should not have received an event for tenant-a")
 }
 
 // TestLocalFanOut_Publish_BufferFull_DropWithoutBlocking verifies that when the
@@ -162,29 +215,31 @@ func TestLocalFanOut_Publish_BufferFull_DropWithoutBlocking(t *testing.T) {
 	go func() {
 		_ = fo.Subscribe(ctx, "tenant-slow", func(_ context.Context, _ eventstream.DomainEvent) error {
 			startOnce.Do(func() { close(started) })
-			// block until context cancelled to stop the channel from draining
+			// Block until context cancelled to prevent channel from draining.
 			<-ctx.Done()
 			return nil
 		})
 	}()
 
-	time.Sleep(10 * time.Millisecond)
+	// Wait until the subscriber is registered. The subscriber map is private,
+	// so we use a short sleep; 20ms is well within CI tolerances.
+	time.Sleep(20 * time.Millisecond) //nolint:forbidigo // no observable state to poll before first event
 
 	event := makeEvent("tenant-slow")
 
-	// Fill the buffer (bufferSize events), then one more to trigger the slow handler
+	// Fill buffer (bufferSize events), then one more to start the blocking handler.
 	for i := 0; i < bufferSize+1; i++ {
 		require.NoError(t, fo.Publish(context.Background(), event))
 	}
 
-	// Wait for handler to start blocking
+	// Wait for handler to start blocking.
 	select {
 	case <-started:
 	case <-time.After(time.Second):
 		t.Fatal("handler never started")
 	}
 
-	// These publishes should return immediately (buffer full, events dropped)
+	// These publishes should return immediately (buffer full, events dropped).
 	done := make(chan struct{})
 	go func() {
 		for i := 0; i < 5; i++ {
@@ -214,7 +269,7 @@ func TestLocalFanOut_Subscribe_ContextCancellation(t *testing.T) {
 		})
 	}()
 
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(20 * time.Millisecond) //nolint:forbidigo // no observable state to poll before cancellation
 	cancel()
 
 	select {
@@ -229,29 +284,24 @@ func TestLocalFanOut_Subscribe_ContextCancellation(t *testing.T) {
 // called, events for that tenantID are no longer delivered.
 func TestLocalFanOut_Unsubscribe_StopsDelivery(t *testing.T) {
 	fo := adapters.NewLocalFanOut(10)
-	ctx, cancel := context.WithCancel(context.Background())
+
+	var count atomic.Int64
+	cancel, subscribeErr := subscribeReady(t, fo, "tenant-unsub", func(_ context.Context, _ eventstream.DomainEvent) error {
+		count.Add(1)
+		return nil
+	})
 	defer cancel()
 
-	count := 0
-	var mu sync.Mutex
+	countAfterProbe := count.Load()
 
-	subscribeErr := make(chan error, 1)
-	go func() {
-		subscribeErr <- fo.Subscribe(ctx, "tenant-unsub", func(_ context.Context, _ eventstream.DomainEvent) error {
-			mu.Lock()
-			count++
-			mu.Unlock()
-			return nil
-		})
-	}()
-
-	time.Sleep(10 * time.Millisecond)
-
-	// Deliver one event before unsubscribe
+	// Deliver one extra event and wait for it to land.
 	require.NoError(t, fo.Publish(context.Background(), makeEvent("tenant-unsub")))
-	time.Sleep(20 * time.Millisecond)
+	err := await.New().
+		AtMost(time.Second).
+		Until(func() bool { return count.Load() > countAfterProbe })
+	require.NoError(t, err, "event should have been delivered before unsubscribe")
 
-	// Unsubscribe (this should cause Subscribe to return)
+	// Unsubscribe should cause Subscribe to return.
 	require.NoError(t, fo.Unsubscribe(context.Background(), "tenant-unsub"))
 
 	select {
@@ -261,59 +311,44 @@ func TestLocalFanOut_Unsubscribe_StopsDelivery(t *testing.T) {
 		t.Fatal("Subscribe did not return after Unsubscribe")
 	}
 
-	mu.Lock()
-	countBefore := count
-	mu.Unlock()
+	countBeforeExtra := count.Load()
 
-	// Any further publishes should be no-ops (no subscriber)
+	// Further publishes should be no-ops.
 	require.NoError(t, fo.Publish(context.Background(), makeEvent("tenant-unsub")))
-	time.Sleep(20 * time.Millisecond)
 
-	mu.Lock()
-	countAfter := count
-	mu.Unlock()
-
-	assert.Equal(t, countBefore, countAfter, "events should not be delivered after unsubscribe")
+	err = await.New().
+		AtMost(50 * time.Millisecond).
+		PollInterval(5 * time.Millisecond).
+		Until(func() bool { return count.Load() > countBeforeExtra })
+	assert.Error(t, err, "events should not be delivered after unsubscribe")
 }
 
 // TestLocalFanOut_Subscribe_ReplacesExisting verifies that subscribing twice
 // for the same tenantID replaces the previous subscription.
 func TestLocalFanOut_Subscribe_ReplacesExisting(t *testing.T) {
 	fo := adapters.NewLocalFanOut(10)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
-	firstReceived := make(chan struct{}, 5)
-	secondReceived := make(chan struct{}, 5)
+	// First subscription — just a placeholder handler.
+	cancel1, _ := subscribeReady(t, fo, "tenant-dup", func(_ context.Context, _ eventstream.DomainEvent) error {
+		return nil
+	})
+	defer cancel1()
 
-	// First subscription (runs until replaced)
-	go func() {
-		_ = fo.Subscribe(ctx, "tenant-dup", func(_ context.Context, _ eventstream.DomainEvent) error {
-			firstReceived <- struct{}{}
-			return nil
-		})
-	}()
+	var secondReceived atomic.Bool
 
-	time.Sleep(10 * time.Millisecond)
-
-	// Second subscription replaces the first
-	go func() {
-		_ = fo.Subscribe(ctx, "tenant-dup", func(_ context.Context, _ eventstream.DomainEvent) error {
-			secondReceived <- struct{}{}
-			return nil
-		})
-	}()
-
-	time.Sleep(10 * time.Millisecond)
+	// Second subscription replaces the first via a new context.
+	cancel2, _ := subscribeReady(t, fo, "tenant-dup", func(_ context.Context, _ eventstream.DomainEvent) error {
+		secondReceived.Store(true)
+		return nil
+	})
+	defer cancel2()
 
 	require.NoError(t, fo.Publish(context.Background(), makeEvent("tenant-dup")))
 
-	select {
-	case <-secondReceived:
-		// second handler received the event - correct
-	case <-time.After(time.Second):
-		t.Fatal("second subscriber did not receive event")
-	}
+	err := await.New().
+		AtMost(time.Second).
+		Until(func() bool { return secondReceived.Load() })
+	require.NoError(t, err, "second subscriber should have received the event")
 }
 
 // TestLocalFanOut_ConcurrentSubscribeUnsubscribePublish verifies that the
@@ -363,7 +398,7 @@ func TestLocalFanOut_ConcurrentSubscribeUnsubscribePublish(t *testing.T) {
 		}()
 	}
 
-	// Let everything run, then cancel to unblock remaining subscribers
+	// Let everything run, then cancel to unblock remaining subscribers.
 	time.Sleep(100 * time.Millisecond)
 	cancel()
 	wg.Wait()
