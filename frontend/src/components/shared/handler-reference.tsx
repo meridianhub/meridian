@@ -4,34 +4,75 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { ChevronRight } from 'lucide-react'
 
+/**
+ * Represents a parameter for a Starlark handler.
+ */
 export interface HandlerParameter {
+  /** The parameter name */
   name: string
+  /** The parameter type (e.g., 'Decimal', 'string', 'enum') */
   type: string
+  /** Whether the parameter is required */
   required: boolean
+  /** Enum values if the parameter is an enum type */
   enumValues: string[]
 }
 
+/**
+ * Represents a single Starlark handler with its metadata and parameters.
+ */
 export interface Handler {
+  /** The handler name (e.g., 'initiate_log') */
   name: string
+  /** A brief description of what the handler does */
   description: string
+  /** The parameters this handler accepts */
   params: HandlerParameter[]
 }
 
+/**
+ * Represents a service that provides Starlark handlers.
+ */
 export interface ServiceSchema {
+  /** The service name (e.g., 'position_keeping') */
   serviceName: string
+  /** The handlers provided by this service */
   handlers: Handler[]
 }
 
+/**
+ * The response structure from the handler schema API.
+ */
 export interface HandlerSchemaResponse {
+  /** The list of services with their handlers */
   services: ServiceSchema[]
 }
 
+/**
+ * Props for the HandlerReference component.
+ */
 export interface HandlerReferenceProps {
+  /** Filter string to search handlers and services (case-insensitive) */
   filter?: string
+  /** Callback invoked when user clicks insert button with Starlark call template */
   onInsert: (template: string) => void
+  /** Optional CSS class names to apply to the root container */
   className?: string
 }
 
+/**
+ * HandlerReference component displays available Starlark handlers organized by service.
+ *
+ * Features:
+ * - Loads handler schema from API (currently mock data)
+ * - Displays handlers grouped by service using accordion
+ * - Filters handlers by service name or handler name (case-insensitive)
+ * - Shows parameter types, required status, and enum values
+ * - Generates Starlark call templates with proper parameter syntax
+ *
+ * @param props Component props
+ * @returns React component displaying handler reference
+ */
 export function HandlerReference({ filter = '', onInsert, className }: HandlerReferenceProps) {
   const [schema, setSchema] = useState<HandlerSchemaResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -118,6 +159,12 @@ export function HandlerReference({ filter = '', onInsert, className }: HandlerRe
     fetchSchema()
   }, [])
 
+  /**
+   * Generates a Starlark call template for a handler with its parameters.
+   * @param serviceName The service name (e.g., 'position_keeping')
+   * @param handler The handler definition with parameters
+   * @returns A Starlark function call template (e.g., 'service.handler(param1="", param2="")')
+   */
   const generateTemplate = (serviceName: string, handler: Handler): string => {
     const params = handler.params
       .map((p) => {
@@ -129,6 +176,11 @@ export function HandlerReference({ filter = '', onInsert, className }: HandlerRe
     return params ? `${serviceName}.${handler.name}(${params})` : `${serviceName}.${handler.name}()`
   }
 
+  /**
+   * Handles the insert button click by generating and passing the template to onInsert callback.
+   * @param serviceName The service name
+   * @param handler The handler to insert
+   */
   const handleInsert = (serviceName: string, handler: Handler) => {
     const template = generateTemplate(serviceName, handler)
     onInsert(template)
