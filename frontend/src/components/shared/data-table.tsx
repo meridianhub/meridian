@@ -135,6 +135,7 @@ function FilterBar({
         return (
           <Input
             key={f.field}
+            aria-label={f.label}
             placeholder={`Filter by ${f.label}`}
             value={values[f.field] ?? ''}
             onChange={(e) => onChange(f.field, e.target.value)}
