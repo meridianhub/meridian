@@ -7,6 +7,8 @@ import { AuthProvider } from '@/contexts/auth-context'
 import { TenantProvider } from '@/contexts/tenant-context'
 import { ProtectedRoute, PlatformOnlyRoute } from '@/components/routing'
 import { AppShell } from '@/components/layout/app-shell'
+import { PartiesPage } from '@/pages/parties'
+import { PartyDetailPage } from '@/pages/parties/[partyId]'
 
 // Placeholder page components - replaced as each page task is implemented
 function PlaceholderPage({ title }: { title: string }) {
@@ -58,7 +60,8 @@ function AppShellLayout() {
         <Route path="/transactions" element={<PlaceholderPage title="Transactions" />} />
         <Route path="/positions" element={<PlaceholderPage title="Positions" />} />
         <Route path="/ledger" element={<PlaceholderPage title="Ledger" />} />
-        <Route path="/parties" element={<PlaceholderPage title="Parties" />} />
+        <Route path="/parties" element={<PartiesPage />} />
+        <Route path="/parties/:partyId" element={<PartyDetailPage />} />
         <Route path="/reconciliation" element={<PlaceholderPage title="Reconciliation" />} />
         <Route
           path="/starlark-config"
