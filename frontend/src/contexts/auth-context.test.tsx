@@ -148,6 +148,55 @@ describe('getUserLens', () => {
   })
 })
 
+describe('parseJWT - type validation', () => {
+  it('rejects token with non-numeric exp', () => {
+    const token = createTestToken({})
+    // Manually craft a token with exp as string
+    const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+    const payload = btoa(JSON.stringify({
+      userId: 'user-1',
+      exp: 'not-a-number',
+      iss: 'meridian-auth',
+      aud: 'meridian-console',
+      roles: [],
+      scopes: [],
+    })).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+    const badToken = `${header}.${payload}.sig`
+    expect(parseJWT(badToken)).toBeNull()
+  })
+
+  it('rejects token with non-string userId', () => {
+    const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+    const payload = btoa(JSON.stringify({
+      userId: 123,
+      exp: Math.floor(Date.now() / 1000) + 3600,
+      iss: 'meridian-auth',
+      aud: 'meridian-console',
+      roles: [],
+      scopes: [],
+    })).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+    const badToken = `${header}.${payload}.sig`
+    expect(parseJWT(badToken)).toBeNull()
+  })
+
+  it('rejects token when exp is NaN', () => {
+    const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+    const payload = btoa(JSON.stringify({
+      userId: 'user-1',
+      exp: NaN,
+      iss: 'meridian-auth',
+      aud: 'meridian-console',
+      roles: [],
+      scopes: [],
+    })).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+    const badToken = `${header}.${payload}.sig`
+    expect(parseJWT(badToken)).toBeNull()
+  })
+})
+
 describe('AuthProvider', () => {
   beforeEach(() => {
     mockFetch.mockReset()
@@ -279,7 +328,7 @@ describe('AuthProvider', () => {
     expect(mockFetch).toHaveBeenCalledWith('/api/auth/refresh', expect.any(Object))
   })
 
-  it('becomes unauthenticated when refresh fails', async () => {
+  it('becomes unauthenticated when refresh returns 401', async () => {
     const initialToken = createTestToken({ userId: 'user-123' })
 
     mockFetch.mockResolvedValueOnce({
@@ -312,6 +361,73 @@ describe('AuthProvider', () => {
     await waitFor(() => {
       expect(screen.getByTestId('auth').textContent).toBe('false')
     })
+  })
+
+  it('stays authenticated when refresh returns 5xx (transient error)', async () => {
+    const initialToken = createTestToken({ userId: 'user-123' })
+
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 503,
+    })
+
+    let refreshFn: (() => Promise<boolean>) | null = null
+
+    const TestComponent = () => {
+      const { isAuthenticated, refreshToken } = useAuth()
+      refreshFn = refreshToken
+      return <span data-testid="auth">{String(isAuthenticated)}</span>
+    }
+
+    await act(async () => {
+      render(
+        <AuthProvider initialToken={initialToken}>
+          <TestComponent />
+        </AuthProvider>,
+      )
+    })
+
+    expect(screen.getByTestId('auth').textContent).toBe('true')
+
+    let result: boolean = true
+    await act(async () => {
+      result = await refreshFn!()
+    })
+
+    // Should return false but NOT clear auth state on transient error
+    expect(result).toBe(false)
+    expect(screen.getByTestId('auth').textContent).toBe('true')
+  })
+
+  it('clears accessToken when login is called with a malformed token', async () => {
+    let loginFn: ((token: string) => void) | null = null
+
+    const TestComponent = () => {
+      const { isAuthenticated, accessToken, login } = useAuth()
+      loginFn = login
+      return (
+        <div>
+          <span data-testid="auth">{String(isAuthenticated)}</span>
+          <span data-testid="token">{accessToken ?? 'null'}</span>
+        </div>
+      )
+    }
+
+    await act(async () => {
+      render(
+        <AuthProvider>
+          <TestComponent />
+        </AuthProvider>,
+      )
+    })
+
+    await act(async () => {
+      loginFn!('not.a.valid.jwt.token')
+    })
+
+    // Token parse failed - should not store malformed token
+    expect(screen.getByTestId('auth').textContent).toBe('false')
+    expect(screen.getByTestId('token').textContent).toBe('null')
   })
 
   it('provides login function that sets token from auth response', async () => {

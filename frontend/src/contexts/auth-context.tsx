@@ -33,25 +33,35 @@ export function parseJWT(token: string): JWTClaims | null {
   try {
     const payload = parts[1]
     // Pad base64url to standard base64
-    const padded = payload.replace(/-/g, '+').replace(/_/g, '/').padEnd(
-      payload.length + ((4 - (payload.length % 4)) % 4),
-      '=',
-    )
-    const decoded = JSON.parse(atob(padded))
+    const padded = payload
+      .replace(/-/g, '+')
+      .replace(/_/g, '/')
+      .padEnd(payload.length + ((4 - (payload.length % 4)) % 4), '=')
+    const decoded = JSON.parse(atob(padded)) as Record<string, unknown>
 
-    if (!decoded.userId || !decoded.exp || !decoded.iss || !decoded.aud) {
+    // Strict type validation to prevent expiry bypass and type confusion
+    if (
+      typeof decoded.userId !== 'string' ||
+      typeof decoded.exp !== 'number' ||
+      !isFinite(decoded.exp) ||
+      typeof decoded.iss !== 'string' ||
+      typeof decoded.aud !== 'string' ||
+      !decoded.userId ||
+      !decoded.iss ||
+      !decoded.aud
+    ) {
       return null
     }
 
     return {
       userId: decoded.userId,
-      tenantId: decoded.tenantId,
-      roles: Array.isArray(decoded.roles) ? decoded.roles : [],
-      scopes: Array.isArray(decoded.scopes) ? decoded.scopes : [],
+      tenantId: typeof decoded.tenantId === 'string' ? decoded.tenantId : undefined,
+      roles: Array.isArray(decoded.roles) ? (decoded.roles as string[]) : [],
+      scopes: Array.isArray(decoded.scopes) ? (decoded.scopes as string[]) : [],
       exp: decoded.exp,
       iss: decoded.iss,
       aud: decoded.aud,
-      sub: decoded.sub,
+      sub: typeof decoded.sub === 'string' ? decoded.sub : undefined,
     }
   } catch {
     return null
@@ -79,19 +89,30 @@ interface AuthProviderProps {
 
 export function AuthProvider({ children, initialToken }: AuthProviderProps) {
   // Tokens are stored in memory only - never persisted to localStorage/sessionStorage
-  const [accessToken, setAccessToken] = useState<string | null>(initialToken ?? null)
+  const [accessToken, setAccessToken] = useState<string | null>(() => {
+    if (!initialToken) return null
+    // Only store token if it parses successfully
+    return parseJWT(initialToken) ? initialToken : null
+  })
   const [claims, setClaims] = useState<JWTClaims | null>(() => {
     if (!initialToken) return null
     return parseJWT(initialToken)
   })
 
   const updateToken = useCallback((token: string | null) => {
-    setAccessToken(token)
     if (!token) {
+      setAccessToken(null)
       setClaims(null)
       return
     }
     const parsed = parseJWT(token)
+    if (!parsed) {
+      // Malformed token - clear both token and claims
+      setAccessToken(null)
+      setClaims(null)
+      return
+    }
+    setAccessToken(token)
     setClaims(parsed)
   }, [])
 
@@ -115,7 +136,11 @@ export function AuthProvider({ children, initialToken }: AuthProviderProps) {
       })
 
       if (!response.ok) {
-        updateToken(null)
+        // Only clear auth state on 401 Unauthorized.
+        // Transient errors (5xx, network) should not log the user out.
+        if (response.status === 401) {
+          updateToken(null)
+        }
         return false
       }
 
@@ -123,7 +148,7 @@ export function AuthProvider({ children, initialToken }: AuthProviderProps) {
       updateToken(data.accessToken)
       return true
     } catch {
-      updateToken(null)
+      // Network error - do not clear auth state (may be transient)
       return false
     }
   }, [updateToken])
