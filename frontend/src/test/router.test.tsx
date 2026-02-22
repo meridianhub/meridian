@@ -7,7 +7,7 @@ import {
   getRouteHandlers,
 } from '@/lib/router'
 
-// Mock transport and clients to avoid dependency on generated proto files
+// Mock api modules so router can import page components without generated proto files
 vi.mock('@/api/transport', () => ({
   createTenantTransport: vi.fn(() => ({ __type: 'mock-transport' })),
 }))

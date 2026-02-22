@@ -7,6 +7,13 @@ import { AuthProvider } from '@/contexts/auth-context'
 import { TenantProvider } from '@/contexts/tenant-context'
 import { createPlatformAdminToken, createTenantUserToken } from '@/test/jwt-helpers'
 
+// Mock TenantSelector to avoid dependency on ungenerated proto clients
+vi.mock('@/components/layout/tenant-selector', () => ({
+  TenantSelector: () => (
+    <div data-testid="tenant-selector" aria-label="Select tenant">Select Tenant</div>
+  ),
+}))
+
 function renderWithProviders(ui: React.ReactElement, token?: string) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },

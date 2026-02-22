@@ -56,6 +56,51 @@ export const handlers = [
     return HttpResponse.json({}, { status: 501 })
   }),
 
+  // PositionKeepingService - financial position logs and balances
+  http.post('*/meridian.position_keeping.v1.PositionKeepingService/*', () => {
+    return HttpResponse.json({})
+  }),
+
+  // PartyService - party management
+  http.post('*/meridian.party.v1.PartyService/*', () => {
+    return HttpResponse.json({})
+  }),
+
+  // FinancialAccountingService - ledger entries
+  http.post('*/meridian.financial_accounting.v1.FinancialAccountingService/*', () => {
+    return HttpResponse.json({})
+  }),
+
+  // AccountReconciliationService - reconciliation
+  http.post('*/meridian.reconciliation.v1.AccountReconciliationService/*', () => {
+    return HttpResponse.json({})
+  }),
+
+  // ReferenceDataService - instruments and reference data
+  http.post('*/meridian.reference_data.v1.ReferenceDataService/*', () => {
+    return HttpResponse.json({})
+  }),
+
+  // AccountTypeRegistryService - account type definitions
+  http.post('*/meridian.reference_data.v1.AccountTypeRegistryService/*', () => {
+    return HttpResponse.json({})
+  }),
+
+  // NodeService - reference data nodes
+  http.post('*/meridian.reference_data.v1.NodeService/*', () => {
+    return HttpResponse.json({})
+  }),
+
+  // InternalBankAccountService - internal accounts
+  http.post('*/meridian.internal_bank_account.v1.InternalBankAccountService/*', () => {
+    return HttpResponse.json({})
+  }),
+
+  // MarketInformationService - market data
+  http.post('*/meridian.market_information.v1.MarketInformationService/*', () => {
+    return HttpResponse.json({})
+  }),
+
   // REST auth refresh endpoint used by AuthContext
   http.post('/api/auth/refresh', () => {
     return HttpResponse.json({}, { status: 401 })
