@@ -13,6 +13,10 @@ separation between domain logic, application services, and infrastructure.
 **Design principles**: Stateless services designed for horizontal scaling.
 Idempotent operations. Schema-driven service modules (`handlers.yaml` as
 single source of truth). Consistent patterns across all services.
+Immutability by default - this diverges from idiomatic Go convention but
+is deliberate: financial transactions, audit trails, and ledger entries
+must never be silently mutated. Prefer value types, return new structs
+over modifying receivers, and treat domain objects as append-only.
 
 **Quality focus**: Security, proper error handling with wrapped errors, TDD
 with table-driven tests, golangci-lint compliance.
@@ -83,6 +87,10 @@ requires understanding the SYSTEM:
 - **Dimensional type safety**: `Quantity[D]` uses phantom types to prevent
   mixing asset classes (kWh vs GBP). Verify that dimensional boundaries
   are respected and not bypassed via raw decimal operations.
+- **Immutability discipline**: Financial domain objects (transactions,
+  ledger entries, audit records) must be immutable once created. Flag
+  any in-place mutation of domain structs - return new values instead.
+  This is stricter than idiomatic Go but required for audit integrity.
 - **Blast radius**: If this change fails in production, what breaks? Can
   it be rolled back without data loss?
 
