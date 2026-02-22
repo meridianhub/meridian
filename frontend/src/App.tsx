@@ -9,6 +9,9 @@ import { ProtectedRoute, PlatformOnlyRoute } from '@/components/routing'
 import { AppShell } from '@/components/layout/app-shell'
 import { AuditLogPage } from '@/pages/audit'
 
+import { PositionsPage } from '@/pages/positions'
+import { PositionDetailPage } from '@/pages/positions/detail'
+
 // Placeholder page components - replaced as each page task is implemented
 function PlaceholderPage({ title }: { title: string }) {
   return (
@@ -57,7 +60,8 @@ function AppShellLayout() {
         />
         <Route path="/payments" element={<PlaceholderPage title="Payments" />} />
         <Route path="/transactions" element={<PlaceholderPage title="Transactions" />} />
-        <Route path="/positions" element={<PlaceholderPage title="Positions" />} />
+        <Route path="/positions" element={<PositionsPage />} />
+        <Route path="/positions/:logId" element={<PositionDetailPage />} />
         <Route path="/ledger" element={<PlaceholderPage title="Ledger" />} />
         <Route path="/parties" element={<PlaceholderPage title="Parties" />} />
         <Route path="/reconciliation" element={<PlaceholderPage title="Reconciliation" />} />
