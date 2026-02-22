@@ -8,19 +8,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { useAuth } from '@/contexts/auth-context'
 import { useTenantContext } from '@/contexts/tenant-context'
-
-interface TenantSelectorProps {
-  // Placeholder component for TenantSelector - will be replaced with full implementation
-  // once Task 10 (TenantSelector) is complete
-}
-
-function TenantSelectorPlaceholder(_props: TenantSelectorProps) {
-  return (
-    <div data-testid="tenant-selector" className="flex items-center gap-2 text-sm text-gray-300">
-      <span>Select Tenant</span>
-    </div>
-  )
-}
+import { TenantSelector } from '@/components/layout/tenant-selector'
 
 interface HeaderProps {
   onMenuToggle: () => void
@@ -51,7 +39,7 @@ export function Header({ onMenuToggle, sidebarOpen, sidebarId }: HeaderProps) {
       </div>
 
       <div className="ml-auto flex items-center gap-4">
-        {isPlatformAdmin && <TenantSelectorPlaceholder />}
+        {isPlatformAdmin && <TenantSelector />}
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

@@ -9,6 +9,7 @@ import { ProtectedRoute, PlatformOnlyRoute } from '@/components/routing'
 import { AppShell } from '@/components/layout/app-shell'
 import { PartiesPage } from '@/pages/parties'
 import { PartyDetailPage } from '@/pages/parties/[partyId]'
+import { AuditLogPage } from '@/pages/audit'
 
 // Placeholder page components - replaced as each page task is implemented
 function PlaceholderPage({ title }: { title: string }) {
@@ -72,7 +73,7 @@ function AppShellLayout() {
           path="/gateway-mappings"
           element={<PlaceholderPage title="Gateway Mappings" />}
         />
-        <Route path="/audit-log" element={<PlaceholderPage title="Audit Log" />} />
+        <Route path="/audit-log" element={<AuditLogPage />} />
 
         {/* Platform-only routes */}
         <Route
