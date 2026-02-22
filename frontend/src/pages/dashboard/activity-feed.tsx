@@ -1,0 +1,86 @@
+import { StatusBadge } from '@/components/shared/status-badge'
+import { TimeDisplay } from '@/components/shared/time-display'
+import { cn } from '@/lib/utils'
+
+export interface ActivityItem {
+  id: string
+  type: 'payment' | 'account' | 'reconciliation' | 'saga' | 'system'
+  title: string
+  description?: string
+  timestamp: { seconds: bigint | number; nanos?: number } | null | undefined
+  status?: string
+}
+
+interface ActivityFeedProps {
+  items: ActivityItem[]
+  isLoading?: boolean
+  className?: string
+}
+
+function ActivitySkeleton() {
+  return (
+    <div data-testid="activity-skeleton" className="flex items-start gap-3 py-3">
+      <div className="mt-1 h-2 w-2 animate-pulse rounded-full bg-muted" />
+      <div className="flex-1 space-y-1">
+        <div className="h-4 w-48 animate-pulse rounded bg-muted" />
+        <div className="h-3 w-32 animate-pulse rounded bg-muted" />
+      </div>
+      <div className="h-3 w-16 animate-pulse rounded bg-muted" />
+    </div>
+  )
+}
+
+const TYPE_COLORS: Record<ActivityItem['type'], string> = {
+  payment: 'bg-blue-400',
+  account: 'bg-green-400',
+  reconciliation: 'bg-yellow-400',
+  saga: 'bg-purple-400',
+  system: 'bg-gray-400',
+}
+
+export function ActivityFeed({ items, isLoading, className }: ActivityFeedProps) {
+  if (isLoading) {
+    return (
+      <div className={cn('divide-y', className)}>
+        {Array.from({ length: 5 }).map((_, i) => (
+          <ActivitySkeleton key={i} />
+        ))}
+      </div>
+    )
+  }
+
+  if (items.length === 0) {
+    return (
+      <div className={cn('py-8 text-center text-sm text-muted-foreground', className)}>
+        No recent activity
+      </div>
+    )
+  }
+
+  return (
+    <div className={cn('divide-y', className)}>
+      {items.map((item) => (
+        <div key={item.id} className="flex items-start gap-3 py-3">
+          <div
+            className={cn(
+              'mt-2 h-2 w-2 flex-shrink-0 rounded-full',
+              TYPE_COLORS[item.type] ?? 'bg-gray-400',
+            )}
+          />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span className="truncate text-sm font-medium">{item.title}</span>
+              {item.status && <StatusBadge status={item.status} />}
+            </div>
+            {item.description && (
+              <p className="mt-0.5 truncate text-xs text-muted-foreground">{item.description}</p>
+            )}
+          </div>
+          <div className="flex-shrink-0 text-xs text-muted-foreground">
+            <TimeDisplay timestamp={item.timestamp} format="relative" />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
