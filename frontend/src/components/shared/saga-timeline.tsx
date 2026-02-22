@@ -54,18 +54,20 @@ export function SagaTimeline({
       <div className="flex items-start">
         {SAGA_STEPS.map((step, i) => {
           const stepData = steps.find((s) => s.status === step)
+          const prevStepData = i > 0 ? steps.find((s) => s.status === SAGA_STEPS[i - 1]) : undefined
           const isCompleted = stepData?.timestamp != null
+          const isPrevCompleted = prevStepData?.timestamp != null
           const isCurrent = step === currentStatus
 
           return (
             <div key={step} className="flex flex-1 flex-col items-center">
               <div className="flex w-full items-center">
-                {/* Left connector */}
+                {/* Left connector - colored based on previous step completion */}
                 {i > 0 && (
                   <div
                     className={cn(
                       'h-0.5 flex-1',
-                      isCompleted ? 'bg-primary' : 'bg-muted',
+                      isPrevCompleted ? 'bg-primary' : 'bg-muted',
                     )}
                   />
                 )}

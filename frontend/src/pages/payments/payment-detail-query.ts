@@ -37,5 +37,9 @@ export async function fetchPaymentDetail(
     throw new Error('Payment order not found')
   }
 
-  return data.paymentOrder
+  return {
+    ...data.paymentOrder,
+    sagaSteps: data.paymentOrder.sagaSteps ?? [],
+    compensationSteps: data.paymentOrder.compensationSteps ?? [],
+  }
 }
