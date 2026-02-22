@@ -7,13 +7,15 @@ import { AuthProvider } from '@/contexts/auth-context'
 import { TenantProvider } from '@/contexts/tenant-context'
 import { ProtectedRoute, PlatformOnlyRoute } from '@/components/routing'
 import { AppShell } from '@/components/layout/app-shell'
+import { AccountsPage } from '@/pages/accounts'
+import { AccountDetailPage } from '@/pages/accounts/[accountId]'
+import { PaymentsPage } from '@/pages/payments'
+import { PaymentDetailPage } from '@/pages/payments/payment-detail'
 import { PartiesPage } from '@/pages/parties'
 import { PartyDetailPage } from '@/pages/parties/[partyId]'
 import { AuditLogPage } from '@/pages/audit'
-
 import { PositionsPage } from '@/pages/positions'
 import { PositionDetailPage } from '@/pages/positions/detail'
-
 import { InternalAccountsPage } from '@/pages/internal-accounts'
 import { MarketDataPage } from '@/pages/market-data'
 import { DatasetDetailPage } from '@/pages/market-data/[datasetCode]'
@@ -62,13 +64,14 @@ function AppShellLayout() {
       <Routes>
         {/* Tenant-scoped routes */}
         <Route path="/" element={<PlaceholderPage title="Dashboard" />} />
-        <Route path="/accounts" element={<PlaceholderPage title="Accounts" />} />
+        <Route path="/accounts" element={<AccountsPage />} />
+        <Route path="/accounts/:accountId" element={<AccountDetailPage />} />
         <Route path="/internal-accounts" element={<InternalAccountsPage />} />
         <Route path="/internal-accounts/:accountId" element={<PlaceholderPage title="Internal Account Detail" />} />
-        <Route path="/payments" element={<PlaceholderPage title="Payments" />} />
+        <Route path="/payments" element={<PaymentsPage />} />
+        <Route path="/payments/:paymentOrderId" element={<PaymentDetailPage />} />
         <Route path="/transactions" element={<PlaceholderPage title="Transactions" />} />
-        <Route path="/positions" element={<PositionsPage />} />
-        <Route path="/positions/:logId" element={<PositionDetailPage />} />
+        <Route path="/positions" element={<PlaceholderPage title="Positions" />} />
         <Route path="/ledger" element={<PlaceholderPage title="Ledger" />} />
         <Route path="/parties" element={<PartiesPage />} />
         <Route path="/parties/:partyId" element={<PartyDetailPage />} />
@@ -78,15 +81,12 @@ function AppShellLayout() {
           path="/starlark-config"
           element={<PlaceholderPage title="Starlark Configuration" />}
         />
-        <Route path="/market-data" element={<MarketDataPage />} />
-        <Route path="/market-data/:datasetCode" element={<DatasetDetailPage />} />
-        <Route path="/forecasting" element={<ForecastingPage />} />
         <Route path="/reference-data" element={<PlaceholderPage title="Reference Data" />} />
         <Route
           path="/gateway-mappings"
           element={<PlaceholderPage title="Gateway Mappings" />}
         />
-        <Route path="/audit-log" element={<AuditLogPage />} />
+        <Route path="/audit-log" element={<PlaceholderPage title="Audit Log" />} />
 
         {/* Platform-only routes */}
         <Route
