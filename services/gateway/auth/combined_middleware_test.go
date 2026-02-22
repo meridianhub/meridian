@@ -396,6 +396,169 @@ func TestTenantAuthorizationMiddleware(t *testing.T) {
 		assert.Equal(t, http.StatusForbidden, rr.Code)
 		assert.Contains(t, rr.Body.String(), "tenant context not resolved")
 	})
+
+	t.Run("platform-admin without tenant claim accesses tenant via subdomain", func(t *testing.T) {
+		middleware := NewTenantAuthorizationMiddleware(logger)
+
+		var capturedCtx context.Context
+		nextHandler := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			capturedCtx = r.Context()
+		})
+
+		handler := middleware.Handler(nextHandler)
+
+		// JWT has platform-admin role but no tenant ID claim
+		claims := &platformauth.Claims{
+			UserID: "admin-user",
+			Roles:  []string{"platform-admin"},
+		}
+		ctx := injectClaimsToContext(context.Background(), claims)
+		// Tenant middleware resolved the tenant from subdomain
+		ctx = tenant.WithTenant(ctx, tenant.MustNewTenantID("acme_corp"))
+
+		req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+		req = req.WithContext(ctx)
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusOK, rr.Code)
+		// Resolved tenant must still be in context for downstream handlers
+		resolvedTenant, hasTenant := tenant.FromContext(capturedCtx)
+		assert.True(t, hasTenant)
+		assert.Equal(t, "acme_corp", resolvedTenant.String())
+	})
+
+	t.Run("super-admin without tenant claim accesses tenant via subdomain", func(t *testing.T) {
+		middleware := NewTenantAuthorizationMiddleware(logger)
+
+		var nextCalled bool
+		nextHandler := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+			nextCalled = true
+		})
+
+		handler := middleware.Handler(nextHandler)
+
+		// JWT has super-admin role but no tenant ID claim
+		claims := &platformauth.Claims{
+			UserID: "super-user",
+			Roles:  []string{"super-admin"},
+		}
+		ctx := injectClaimsToContext(context.Background(), claims)
+		ctx = tenant.WithTenant(ctx, tenant.MustNewTenantID("some_corp"))
+
+		req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+		req = req.WithContext(ctx)
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusOK, rr.Code)
+		assert.True(t, nextCalled)
+	})
+
+	t.Run("regular tenant admin denied cross-tenant access", func(t *testing.T) {
+		middleware := NewTenantAuthorizationMiddleware(logger)
+
+		nextHandler := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+			t.Error("next handler should not be called")
+		})
+
+		handler := middleware.Handler(nextHandler)
+
+		// JWT has admin role scoped to acme_corp but subdomain resolves other_corp
+		claims := &platformauth.Claims{
+			UserID:   "tenant-admin",
+			TenantID: "acme_corp",
+			Roles:    []string{"admin"},
+		}
+		ctx := injectClaimsToContext(context.Background(), claims)
+		ctx = tenant.WithTenant(ctx, tenant.MustNewTenantID("other_corp"))
+
+		req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+		req = req.WithContext(ctx)
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusForbidden, rr.Code)
+		assert.Contains(t, rr.Body.String(), "not authorized for this tenant")
+	})
+
+	t.Run("platform-admin with tenant claim uses normal tenant matching", func(t *testing.T) {
+		middleware := NewTenantAuthorizationMiddleware(logger)
+
+		var nextCalled bool
+		nextHandler := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+			nextCalled = true
+		})
+
+		handler := middleware.Handler(nextHandler)
+
+		// JWT has platform-admin role AND a tenant ID claim - treated as normal tenant matching
+		claims := &platformauth.Claims{
+			UserID:   "admin-user",
+			TenantID: "acme_corp",
+			Roles:    []string{"platform-admin"},
+		}
+		ctx := injectClaimsToContext(context.Background(), claims)
+		ctx = tenant.WithTenant(ctx, tenant.MustNewTenantID("acme_corp"))
+
+		req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+		req = req.WithContext(ctx)
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusOK, rr.Code)
+		assert.True(t, nextCalled)
+	})
+}
+
+func TestHasPlatformAdminRole(t *testing.T) {
+	tests := []struct {
+		name     string
+		claims   *platformauth.Claims
+		expected bool
+	}{
+		{
+			name:     "platform-admin role returns true",
+			claims:   &platformauth.Claims{Roles: []string{"platform-admin"}},
+			expected: true,
+		},
+		{
+			name:     "super-admin role returns true",
+			claims:   &platformauth.Claims{Roles: []string{"super-admin"}},
+			expected: true,
+		},
+		{
+			name:     "both roles returns true",
+			claims:   &platformauth.Claims{Roles: []string{"platform-admin", "super-admin"}},
+			expected: true,
+		},
+		{
+			name:     "admin role returns false",
+			claims:   &platformauth.Claims{Roles: []string{"admin"}},
+			expected: false,
+		},
+		{
+			name:     "no roles returns false",
+			claims:   &platformauth.Claims{Roles: []string{}},
+			expected: false,
+		},
+		{
+			name:     "nil claims returns false",
+			claims:   nil,
+			expected: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := hasPlatformAdminRole(tc.claims)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
 }
 
 func TestMiddlewareChainOrder(t *testing.T) {
