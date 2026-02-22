@@ -62,6 +62,61 @@ func TestNewHandler_CustomRoleAccess(t *testing.T) {
 	require.NotNil(t, h)
 }
 
+// TestWithRoleChannelAccess_DefensiveCopy verifies that mutating the caller's
+// map after passing it to WithRoleChannelAccess does not affect the handler.
+func TestWithRoleChannelAccess_DefensiveCopy(t *testing.T) {
+	router := eventstream.NewRouter(
+		&stubEventSource{},
+		eventstream.NewInProcessFanOut(),
+	)
+	roleAccess := eventstream.RoleChannelAccess{
+		"ops:audit": {"audit.*"},
+	}
+	claims := &platformauth.Claims{
+		UserID:   "user-1",
+		TenantID: "tenant-abc",
+		Roles:    []string{"ops:audit"},
+	}
+
+	h := eventstream.NewHandler(router, nil, eventstream.WithRoleChannelAccess(roleAccess))
+
+	// Mutate the original map after handler construction.
+	delete(roleAccess, "ops:audit")
+
+	// The handler should still authorize the channel using the snapshot taken at construction.
+	srv := httptest.NewServer(injectClaimsMiddleware(claims, h))
+	defer srv.Close()
+
+	ctx := context.Background()
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/"
+	clientConn, _, err := websocket.Dial(ctx, wsURL, nil)
+	require.NoError(t, err)
+	defer clientConn.CloseNow()
+
+	subMsg := eventstream.ClientMessage{
+		Type:     eventstream.ClientMessageTypeSubscribe,
+		ID:       "sub-copy",
+		Channels: []eventstream.ChannelPattern{"audit.events"},
+	}
+	data, _ := json.Marshal(subMsg)
+	require.NoError(t, clientConn.Write(ctx, websocket.MessageText, data))
+
+	// Expect a "subscribed" confirmation (not an error), proving the copy was used.
+	var confirmed eventstream.ServerMessage
+	err = await.New().
+		AtMost(2 * time.Second).
+		PollInterval(10 * time.Millisecond).
+		Until(func() bool {
+			_, msgData, readErr := clientConn.Read(ctx)
+			if readErr != nil {
+				return false
+			}
+			return json.Unmarshal(msgData, &confirmed) == nil
+		})
+	require.NoError(t, err)
+	assert.Equal(t, eventstream.ServerMessageTypeSubscribed, confirmed.Type)
+}
+
 // --- HTTP upgrade ---
 
 func TestHandler_ServeHTTP_MissingClaims_Returns401(t *testing.T) {

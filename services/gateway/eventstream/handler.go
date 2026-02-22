@@ -118,9 +118,11 @@ type Handler struct {
 type HandlerOption func(*Handler)
 
 // WithRoleChannelAccess sets a custom role-to-channel access map.
+// A shallow copy is taken so that mutations to the caller's map do not affect
+// in-flight authorization decisions.
 func WithRoleChannelAccess(roleAccess RoleChannelAccess) HandlerOption {
 	return func(h *Handler) {
-		h.roleAccess = roleAccess
+		h.roleAccess = copyRoleAccess(roleAccess)
 	}
 }
 
@@ -133,6 +135,17 @@ func WithAcceptOptions(opts websocket.AcceptOptions) HandlerOption {
 	}
 }
 
+// copyRoleAccess returns a shallow copy of a RoleChannelAccess map so that
+// mutations to the original cannot affect the handler after construction.
+// The pattern slices are shared (patterns are treated as immutable strings).
+func copyRoleAccess(src RoleChannelAccess) RoleChannelAccess {
+	dst := make(RoleChannelAccess, len(src))
+	for role, patterns := range src {
+		dst[role] = patterns
+	}
+	return dst
+}
+
 // NewHandler creates a Handler backed by the given Router.
 // If logger is nil, slog.Default() is used.
 func NewHandler(router *Router, logger *slog.Logger, opts ...HandlerOption) *Handler {
@@ -142,7 +155,7 @@ func NewHandler(router *Router, logger *slog.Logger, opts ...HandlerOption) *Han
 	h := &Handler{
 		router:     router,
 		logger:     logger,
-		roleAccess: DefaultRoleAccess,
+		roleAccess: copyRoleAccess(DefaultRoleAccess),
 	}
 	for _, opt := range opts {
 		opt(h)
