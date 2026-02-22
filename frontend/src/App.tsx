@@ -7,6 +7,8 @@ import { AuthProvider } from '@/contexts/auth-context'
 import { TenantProvider } from '@/contexts/tenant-context'
 import { ProtectedRoute, PlatformOnlyRoute } from '@/components/routing'
 import { AppShell } from '@/components/layout/app-shell'
+import { AccountsPage } from '@/pages/accounts'
+import { AccountDetailPage } from '@/pages/accounts/[accountId]'
 
 // Placeholder page components - replaced as each page task is implemented
 function PlaceholderPage({ title }: { title: string }) {
@@ -49,7 +51,8 @@ function AppShellLayout() {
       <Routes>
         {/* Tenant-scoped routes */}
         <Route path="/" element={<PlaceholderPage title="Dashboard" />} />
-        <Route path="/accounts" element={<PlaceholderPage title="Accounts" />} />
+        <Route path="/accounts" element={<AccountsPage />} />
+        <Route path="/accounts/:accountId" element={<AccountDetailPage />} />
         <Route
           path="/internal-accounts"
           element={<PlaceholderPage title="Internal Accounts" />}

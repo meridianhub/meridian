@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { configureAxe } from 'vitest-axe'
 import { AuthProvider } from '@/contexts/auth-context'
 import { TenantProvider } from '@/contexts/tenant-context'
+import { TooltipProvider } from '@/components/ui/tooltip'
 
 /**
  * Pre-configured axe instance that skips color-contrast checks.
@@ -47,7 +48,9 @@ function AllProviders({ children, initialToken, queryClient }: AllProvidersProps
   return (
     <QueryClientProvider client={client}>
       <AuthProvider initialToken={initialToken}>
-        <TenantProvider>{children}</TenantProvider>
+        <TenantProvider>
+          <TooltipProvider>{children}</TooltipProvider>
+        </TenantProvider>
       </AuthProvider>
     </QueryClientProvider>
   )
