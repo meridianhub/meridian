@@ -2,8 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
-import { server } from '@/test/msw-handlers'
-import { http, HttpResponse } from 'msw'
 import { StarlarkConfigPage } from './index'
 
 // Mock useApiClients so we can inject test clients

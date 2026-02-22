@@ -1,7 +1,6 @@
 import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import type { ColumnDef } from '@tanstack/react-table'
-import { useQuery } from '@tanstack/react-query'
 import { Card } from '@/components/ui/card'
 import { DataTable, type DataTableQueryParams, type DataTableResult } from '@/components/shared/data-table'
 import { TimeDisplay } from '@/components/shared/time-display'

@@ -70,9 +70,20 @@ function DetailSkeleton() {
 interface SplitPaneProps {
   platformSaga: SagaDefinition
   tenantSaga: SagaDefinition
+  tenantScript: string
+  onTenantScriptChange: (value: string) => void
+  validationErrors: ValidationError[]
+  complexityMetrics?: ComplexityMetrics
 }
 
-function SplitPane({ platformSaga, tenantSaga }: SplitPaneProps) {
+function SplitPane({
+  platformSaga,
+  tenantSaga,
+  tenantScript,
+  onTenantScriptChange,
+  validationErrors,
+  complexityMetrics,
+}: SplitPaneProps) {
   return (
     <div data-testid="split-pane" className="grid grid-cols-2 gap-4">
       <div className="flex flex-col gap-2">
@@ -93,9 +104,11 @@ function SplitPane({ platformSaga, tenantSaga }: SplitPaneProps) {
           <StatusBadge status={sagaStatusLabel(tenantSaga.status)} />
         </div>
         <StarlarkEditor
-          value={tenantSaga.script}
-          onChange={() => {}}
+          value={tenantScript}
+          onChange={onTenantScriptChange}
           readOnly={isReadOnly(tenantSaga)}
+          errors={validationErrors}
+          complexityMetrics={complexityMetrics}
           className="min-h-[400px]"
         />
       </div>
@@ -257,7 +270,7 @@ export function StarlarkDetailPage() {
 
         {/* Action buttons */}
         <div className="flex items-center gap-2 shrink-0">
-          {!readOnly && (
+          {(!readOnly || showSplitPane) && (
             <Button
               variant="outline"
               size="sm"
@@ -293,7 +306,14 @@ export function StarlarkDetailPage() {
       {/* Editor area */}
       <Card className="p-6">
         {showSplitPane ? (
-          <SplitPane platformSaga={platformDefault} tenantSaga={sagaData} />
+          <SplitPane
+            platformSaga={platformDefault}
+            tenantSaga={sagaData}
+            tenantScript={effectiveScript}
+            onTenantScriptChange={handleScriptChange}
+            validationErrors={validationErrors}
+            complexityMetrics={complexityMetrics}
+          />
         ) : (
           <StarlarkEditor
             value={effectiveScript}
