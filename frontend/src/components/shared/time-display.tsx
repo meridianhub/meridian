@@ -56,7 +56,7 @@ export function TimeDisplay({
     return <>{absolute} UTC</>;
   }
 
-  // 'both' - show relative with absolute in tooltip
+  // 'both' format: show relative time with absolute time in tooltip on hover
   return (
     <Tooltip>
       <TooltipTrigger asChild>
