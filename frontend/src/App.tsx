@@ -12,6 +12,11 @@ import { ApiClientProvider } from '@/api/context'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { TenantsPage } from '@/pages/tenants/index'
 import { TenantDetailPage } from '@/pages/tenants/[tenantId]'
+import { PartiesPage } from '@/pages/parties'
+import { PartyDetailPage } from '@/pages/parties/[partyId]'
+import { AuditLogPage } from '@/pages/audit'
+import { PositionsPage } from '@/pages/positions'
+import { PositionDetailPage } from '@/pages/positions/detail'
 
 // Placeholder page components - replaced as each page task is implemented
 function PlaceholderPage({ title }: { title: string }) {
@@ -61,9 +66,11 @@ function AppShellLayout() {
         />
         <Route path="/payments" element={<PlaceholderPage title="Payments" />} />
         <Route path="/transactions" element={<PlaceholderPage title="Transactions" />} />
-        <Route path="/positions" element={<PlaceholderPage title="Positions" />} />
+        <Route path="/positions" element={<PositionsPage />} />
+        <Route path="/positions/:logId" element={<PositionDetailPage />} />
         <Route path="/ledger" element={<PlaceholderPage title="Ledger" />} />
-        <Route path="/parties" element={<PlaceholderPage title="Parties" />} />
+        <Route path="/parties" element={<PartiesPage />} />
+        <Route path="/parties/:partyId" element={<PartyDetailPage />} />
         <Route path="/reconciliation" element={<PlaceholderPage title="Reconciliation" />} />
         <Route
           path="/starlark-config"
@@ -74,7 +81,7 @@ function AppShellLayout() {
           path="/gateway-mappings"
           element={<PlaceholderPage title="Gateway Mappings" />}
         />
-        <Route path="/audit-log" element={<PlaceholderPage title="Audit Log" />} />
+        <Route path="/audit-log" element={<AuditLogPage />} />
 
         {/* Platform-only routes */}
         <Route

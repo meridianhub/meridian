@@ -3,7 +3,7 @@ import { render, type RenderOptions, type RenderResult } from '@testing-library/
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { configureAxe } from 'vitest-axe'
 import { AuthProvider, useAuth } from '@/contexts/auth-context'
-import { TenantProvider } from '@/contexts/tenant-context'
+import { TenantProvider, useTenantContext } from '@/contexts/tenant-context'
 import { ApiClientProvider } from '@/api/context'
 import { TooltipProvider } from '@/components/ui/tooltip'
 
@@ -44,15 +44,12 @@ interface AllProvidersProps {
   queryClient?: QueryClient
 }
 
-/**
- * Inner wrapper that consumes AuthProvider context to set up ApiClientProvider.
- * Must be a child of AuthProvider.
- */
-function ApiClientWrapper({ children }: { children: ReactNode }) {
+function ApiClientBridge({ children }: { children: ReactNode }) {
   const { accessToken } = useAuth()
-  const getToken = () => accessToken ?? ''
+  const { tenantSlug } = useTenantContext()
+  const getToken = () => Promise.resolve(accessToken ?? '')
   return (
-    <ApiClientProvider tenantSlug={null} getToken={getToken}>
+    <ApiClientProvider tenantSlug={tenantSlug} getToken={getToken}>
       {children}
     </ApiClientProvider>
   )
@@ -63,11 +60,11 @@ function AllProviders({ children, initialToken, queryClient }: AllProvidersProps
   return (
     <QueryClientProvider client={client}>
       <AuthProvider initialToken={initialToken}>
-        <ApiClientWrapper>
-          <TenantProvider>
+        <TenantProvider>
+          <ApiClientBridge>
             <TooltipProvider>{children}</TooltipProvider>
-          </TenantProvider>
-        </ApiClientWrapper>
+          </ApiClientBridge>
+        </TenantProvider>
       </AuthProvider>
     </QueryClientProvider>
   )
