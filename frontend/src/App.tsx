@@ -7,6 +7,8 @@ import { AuthProvider } from '@/contexts/auth-context'
 import { TenantProvider } from '@/contexts/tenant-context'
 import { ProtectedRoute, PlatformOnlyRoute } from '@/components/routing'
 import { AppShell } from '@/components/layout/app-shell'
+import { PartiesPage } from '@/pages/parties'
+import { PartyDetailPage } from '@/pages/parties/[partyId]'
 import { AuditLogPage } from '@/pages/audit'
 
 import { PositionsPage } from '@/pages/positions'
@@ -63,7 +65,8 @@ function AppShellLayout() {
         <Route path="/positions" element={<PositionsPage />} />
         <Route path="/positions/:logId" element={<PositionDetailPage />} />
         <Route path="/ledger" element={<PlaceholderPage title="Ledger" />} />
-        <Route path="/parties" element={<PlaceholderPage title="Parties" />} />
+        <Route path="/parties" element={<PartiesPage />} />
+        <Route path="/parties/:partyId" element={<PartyDetailPage />} />
         <Route path="/reconciliation" element={<PlaceholderPage title="Reconciliation" />} />
         <Route
           path="/starlark-config"
