@@ -199,8 +199,10 @@ func (m *CombinedAuthMiddleware) handleLegacyAPIKeyAuth(w http.ResponseWriter, r
 // auth → tenant → tenant_authorization → proxy
 //
 // Authorization rules:
-// - JWT: tenant ID in JWT claims must match resolved tenant ID (403 if mismatch)
-// - API key: API keys are authorized for all tenants (service-to-service)
+//   - JWT: tenant ID in JWT claims must match resolved tenant ID (403 if mismatch)
+//   - JWT with platform-admin/super-admin role and no tenant claim: bypass comparison,
+//     allow access to any tenant resolved from subdomain (cross-tenant access is logged)
+//   - API key: API keys are authorized for all tenants (service-to-service)
 type TenantAuthorizationMiddleware struct {
 	logger *slog.Logger
 }
@@ -251,6 +253,24 @@ func (m *TenantAuthorizationMiddleware) Handler(next http.Handler) http.Handler 
 			return
 		}
 
+		// Platform-admin/super-admin bypass: when JWT has no tenant claim but has
+		// elevated platform role, allow cross-tenant access via subdomain resolution.
+		if jwtTenantID == "" {
+			claims, hasClaims := GetClaimsFromContext(ctx)
+			if hasClaims && hasPlatformAdminRole(claims) {
+				m.logger.Info("platform admin cross-tenant access",
+					slog.String("user_id", claims.UserID),
+					slog.String("resolved_tenant", resolvedTenant.String()),
+					slog.String("path", r.URL.Path),
+				)
+				next.ServeHTTP(w, r)
+				return
+			}
+			// No tenant claim and not a platform admin
+			writeForbidden(w, "missing tenant claim in token")
+			return
+		}
+
 		// Compare JWT tenant with resolved tenant
 		if !tenantsMatch(jwtTenantID, resolvedTenant) {
 			m.logger.Warn("JWT tenant does not match resolved tenant",
@@ -268,6 +288,14 @@ func (m *TenantAuthorizationMiddleware) Handler(next http.Handler) http.Handler 
 		)
 		next.ServeHTTP(w, r)
 	})
+}
+
+// hasPlatformAdminRole returns true if claims contain platform-admin or super-admin role.
+func hasPlatformAdminRole(claims *platformauth.Claims) bool {
+	if claims == nil {
+		return false
+	}
+	return claims.HasRole(platformauth.RolePlatformAdmin) || claims.HasRole(platformauth.RoleSuperAdmin)
 }
 
 // tenantsMatch compares JWT tenant ID (string) with resolved tenant ID.
