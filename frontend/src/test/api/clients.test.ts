@@ -20,11 +20,11 @@ describe('createServiceClients', () => {
     vi.clearAllMocks()
   })
 
-  it('returns an object with all 14 service clients', () => {
+  it('returns an object with all 15 service clients', () => {
     const transport = makeTransport()
     const clients = createServiceClients(transport)
 
-    expect(Object.keys(clients)).toHaveLength(14)
+    expect(Object.keys(clients)).toHaveLength(15)
   })
 
   it('creates clients for all expected services', () => {
@@ -45,13 +45,14 @@ describe('createServiceClients', () => {
     expect(clients).toHaveProperty('node')
     expect(clients).toHaveProperty('internalBankAccount')
     expect(clients).toHaveProperty('marketInformation')
+    expect(clients).toHaveProperty('forecasting')
   })
 
   it('calls createClient for each service with the provided transport', () => {
     const transport = makeTransport()
     createServiceClients(transport)
 
-    expect(createClient).toHaveBeenCalledTimes(14)
+    expect(createClient).toHaveBeenCalledTimes(15)
     vi.mocked(createClient).mock.calls.forEach(([, t]) => {
       expect(t).toBe(transport)
     })
