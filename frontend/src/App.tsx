@@ -14,6 +14,11 @@ import { AuditLogPage } from '@/pages/audit'
 import { PositionsPage } from '@/pages/positions'
 import { PositionDetailPage } from '@/pages/positions/detail'
 
+import { InternalAccountsPage } from '@/pages/internal-accounts'
+import { MarketDataPage } from '@/pages/market-data'
+import { DatasetDetailPage } from '@/pages/market-data/[datasetCode]'
+import { ForecastingPage } from '@/pages/forecasting'
+
 // Placeholder page components - replaced as each page task is implemented
 function PlaceholderPage({ title }: { title: string }) {
   return (
@@ -56,10 +61,8 @@ function AppShellLayout() {
         {/* Tenant-scoped routes */}
         <Route path="/" element={<PlaceholderPage title="Dashboard" />} />
         <Route path="/accounts" element={<PlaceholderPage title="Accounts" />} />
-        <Route
-          path="/internal-accounts"
-          element={<PlaceholderPage title="Internal Accounts" />}
-        />
+        <Route path="/internal-accounts" element={<InternalAccountsPage />} />
+        <Route path="/internal-accounts/:accountId" element={<PlaceholderPage title="Internal Account Detail" />} />
         <Route path="/payments" element={<PlaceholderPage title="Payments" />} />
         <Route path="/transactions" element={<PlaceholderPage title="Transactions" />} />
         <Route path="/positions" element={<PositionsPage />} />
@@ -72,6 +75,9 @@ function AppShellLayout() {
           path="/starlark-config"
           element={<PlaceholderPage title="Starlark Configuration" />}
         />
+        <Route path="/market-data" element={<MarketDataPage />} />
+        <Route path="/market-data/:datasetCode" element={<DatasetDetailPage />} />
+        <Route path="/forecasting" element={<ForecastingPage />} />
         <Route path="/reference-data" element={<PlaceholderPage title="Reference Data" />} />
         <Route
           path="/gateway-mappings"
