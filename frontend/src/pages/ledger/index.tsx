@@ -99,7 +99,7 @@ export function LedgerPage() {
 
     const response = await clients.financialAccounting.listFinancialBookingLogs({
       pagination: { pageSize: params.pageSize, pageToken: params.pageToken ?? '' },
-      status: statusFilter as never,
+      ...(statusFilter !== undefined && { status: statusFilter as never }),
     })
 
     const items = (response.financialBookingLogs ?? []).map((log) => ({

@@ -13,13 +13,13 @@ describe('DirectionBadge', () => {
     expect(screen.getByText('CREDIT')).toBeInTheDocument()
   })
 
-  it('applies debit styling for DEBIT direction', () => {
+  it('sets data-direction attribute for DEBIT', () => {
     render(<DirectionBadge direction="DEBIT" />)
     const badge = screen.getByTestId('direction-badge')
     expect(badge).toHaveAttribute('data-direction', 'DEBIT')
   })
 
-  it('applies credit styling for CREDIT direction', () => {
+  it('sets data-direction attribute for CREDIT', () => {
     render(<DirectionBadge direction="CREDIT" />)
     const badge = screen.getByTestId('direction-badge')
     expect(badge).toHaveAttribute('data-direction', 'CREDIT')

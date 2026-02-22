@@ -76,7 +76,7 @@ function computeTotals(postings: LedgerPosting[], currency: string): { debitTota
   for (const posting of postings) {
     const direction = getDirectionName(posting.postingDirection)
     const units = posting.postingAmount?.units
-    const amount = typeof units === 'bigint' ? units : typeof units === 'number' ? BigInt(Math.floor(units)) : 0n
+    const amount = typeof units === 'bigint' ? units : typeof units === 'number' && Number.isSafeInteger(units) ? BigInt(units) : 0n
 
     if (direction === 'DEBIT') {
       debitTotal += amount
@@ -108,7 +108,8 @@ const postingColumns: ColumnDef<LedgerPosting>[] = [
     header: 'Amount',
     cell: ({ row }) => {
       const amount = row.original.postingAmount
-      const units = typeof amount?.units === 'bigint' ? amount.units : BigInt(Math.floor(Number(amount?.units ?? 0)))
+      const rawUnits = amount?.units
+      const units = typeof rawUnits === 'bigint' ? rawUnits : typeof rawUnits === 'number' && Number.isSafeInteger(rawUnits) ? BigInt(rawUnits) : 0n
       const currency = amount?.currencyCode ?? ''
       return <MoneyDisplay amount={units} currency={currency} />
     },
@@ -204,9 +205,10 @@ export function BookingLogDetailPage() {
           currencyCode: typeof p.postingAmount?.currencyCode === 'string'
             ? p.postingAmount.currencyCode
             : '',
-          units: typeof p.postingAmount?.units === 'bigint'
-            ? p.postingAmount.units
-            : BigInt(Math.floor(Number(p.postingAmount?.units ?? 0))),
+          units: (() => {
+            const u = p.postingAmount?.units
+            return typeof u === 'bigint' ? u : typeof u === 'number' && Number.isSafeInteger(u) ? BigInt(u) : 0n
+          })(),
           nanos: p.postingAmount?.nanos ?? 0,
         },
         accountId: p.accountId,
