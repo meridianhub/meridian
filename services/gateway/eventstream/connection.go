@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -57,10 +58,10 @@ type Connection struct {
 	lastActivity time.Time
 	activityMu   sync.RWMutex
 
-	closeOnce      sync.Once
-	msgHandler     MessageHandler
-	logger         *slog.Logger
-	overflowNotify chan int
+	closeOnce    sync.Once
+	msgHandler   MessageHandler
+	logger       *slog.Logger
+	droppedCount atomic.Int64
 }
 
 // NewConnection constructs a Connection. The wsConn may be nil for unit tests
@@ -69,17 +70,16 @@ type Connection struct {
 func NewConnection(id, tenantID string, claims *platformauth.Claims, wsConn *websocket.Conn) *Connection {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Connection{
-		id:             id,
-		tenantID:       tenantID,
-		claims:         claims,
-		subscriptions:  make(map[string]Subscription),
-		sendChan:       make(chan ServerMessage, BufferSize),
-		wsConn:         wsConn,
-		ctx:            ctx,
-		cancel:         cancel,
-		lastActivity:   time.Now(),
-		logger:         slog.Default(),
-		overflowNotify: make(chan int, 1),
+		id:            id,
+		tenantID:      tenantID,
+		claims:        claims,
+		subscriptions: make(map[string]Subscription),
+		sendChan:      make(chan ServerMessage, BufferSize),
+		wsConn:        wsConn,
+		ctx:           ctx,
+		cancel:        cancel,
+		lastActivity:  time.Now(),
+		logger:        slog.Default(),
 	}
 }
 
@@ -111,14 +111,11 @@ func (c *Connection) Send(msg ServerMessage) bool {
 	}
 }
 
-// handleOverflow notifies the write pump that messages were dropped so it
-// can send a BUFFER_OVERFLOW system message to the client.
+// handleOverflow increments the dropped message counter. The write pump
+// periodically checks and resets this counter to send BUFFER_OVERFLOW
+// notifications to the client.
 func (c *Connection) handleOverflow() {
-	select {
-	case c.overflowNotify <- 1:
-	default:
-		// Overflow notification already pending
-	}
+	c.droppedCount.Add(1)
 }
 
 // AddSubscription registers a subscription for this connection.
@@ -255,15 +252,17 @@ func (c *Connection) writePump() {
 				c.Close(websocket.StatusInternalError, "write error")
 				return
 			}
-		case dropped := <-c.overflowNotify:
-			overflowMsg := ServerMessage{
-				Type:         ServerMessageTypeError,
-				ErrorCode:    ErrorCodeBufferOverflow,
-				ErrorMessage: fmt.Sprintf("server dropped %d message(s) due to buffer overflow", dropped),
-			}
-			if err := c.writeMessage(overflowMsg); err != nil {
-				c.Close(websocket.StatusInternalError, "write error")
-				return
+			// After each successful write, check if any messages were dropped.
+			if dropped := c.droppedCount.Swap(0); dropped > 0 {
+				overflowMsg := ServerMessage{
+					Type:         ServerMessageTypeError,
+					ErrorCode:    ErrorCodeBufferOverflow,
+					ErrorMessage: fmt.Sprintf("server dropped %d message(s) due to buffer overflow", dropped),
+				}
+				if err := c.writeMessage(overflowMsg); err != nil {
+					c.Close(websocket.StatusInternalError, "write error")
+					return
+				}
 			}
 		}
 	}

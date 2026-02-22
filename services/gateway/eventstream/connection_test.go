@@ -15,6 +15,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/meridianhub/meridian/services/gateway/eventstream"
 	platformauth "github.com/meridianhub/meridian/shared/platform/auth"
+	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -376,11 +377,7 @@ func TestConnection_HandleOverflow_SendsSystemMessage(t *testing.T) {
 		conn.Start(ctx)
 	}()
 
-	// Wait briefly for Start goroutines to be running
-	time.Sleep(50 * time.Millisecond)
-
-	// Read messages from client side until we get the overflow warning
-	// First fill the buffer, then send one more to trigger overflow
+	// Fill the buffer — Send is non-blocking so no need to wait for goroutines.
 	msg := eventstream.ServerMessage{
 		Type:          eventstream.ServerMessageTypeSystem,
 		SystemMessage: "filler",
@@ -456,7 +453,13 @@ func TestConnection_LastActivity_UpdatesOnSend(t *testing.T) {
 	conn := eventstream.NewConnection("conn-1", "tenant_abc", claims, nil)
 
 	before := conn.LastActivity()
-	time.Sleep(10 * time.Millisecond)
+
+	// Wait for the clock to advance beyond the initial lastActivity.
+	err := await.New().
+		AtMost(1 * time.Second).
+		PollInterval(1 * time.Millisecond).
+		Until(func() bool { return time.Now().After(before) })
+	require.NoError(t, err)
 
 	msg := eventstream.ServerMessage{
 		Type:          eventstream.ServerMessageTypeSystem,
@@ -465,7 +468,7 @@ func TestConnection_LastActivity_UpdatesOnSend(t *testing.T) {
 	conn.Send(msg)
 
 	after := conn.LastActivity()
-	assert.True(t, after.After(before) || after.Equal(before))
+	assert.True(t, after.After(before))
 }
 
 // --- SubscriptionCount ---
