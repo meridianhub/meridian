@@ -6,7 +6,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 
-interface TimeDisplayProps {
+export interface TimeDisplayProps {
   timestamp: {
     seconds: bigint | number;
     nanos?: number;
