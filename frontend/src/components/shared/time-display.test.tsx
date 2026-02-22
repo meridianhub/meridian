@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { TimeDisplay } from './time-display';
@@ -15,6 +15,12 @@ describe('TimeDisplay', () => {
     // Mock the current time for consistent testing
     vi.useFakeTimers();
     vi.setSystemTime(mockDate);
+  });
+
+  afterEach(() => {
+    // Restore real timers after each test to prevent state leakage
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
   });
 
   // Helper to render with TooltipProvider
