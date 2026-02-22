@@ -246,7 +246,7 @@ function DisputeCard({
                 key={status}
                 variant={status === 'RESOLVED' ? 'default' : 'outline'}
                 size="sm"
-                disabled={mutation.isPending && pendingStatus === status}
+                disabled={mutation.isPending}
                 onClick={() => {
                   setPendingStatus(status)
                   mutation.mutate(status)
@@ -469,6 +469,9 @@ function BalanceAssertionsTab({ runId }: { runId: string }) {
               onChange={setExpression}
               context="validation"
             />
+            <p className="mt-1 text-xs text-muted-foreground">
+              Expression saved for audit trail. Assertions use strict equality (e.g. total debits == total credits).
+            </p>
           </div>
           {saveError && (
             <p data-testid="assertion-error" className="text-xs text-destructive">
