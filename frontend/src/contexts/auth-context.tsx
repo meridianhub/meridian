@@ -24,8 +24,8 @@ interface AuthContextValue extends AuthState {
   refreshToken: () => Promise<boolean>
 }
 
-export function parseJWT(token: string): JWTClaims | null {
-  if (!token) return null
+export function parseJWT(token: unknown): JWTClaims | null {
+  if (typeof token !== 'string' || !token) return null
 
   const parts = token.split('.')
   if (parts.length !== 3) return null
@@ -76,7 +76,8 @@ export function parseJWT(token: string): JWTClaims | null {
 }
 
 function isTokenExpired(claims: JWTClaims): boolean {
-  return claims.exp < Math.floor(Date.now() / 1000)
+  // Use <= to match JWT spec: token must not be accepted on or after exp
+  return claims.exp <= Math.floor(Date.now() / 1000)
 }
 
 function getUserLens(claims: JWTClaims | null): 'platform' | 'tenant' {
