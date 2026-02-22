@@ -4,6 +4,7 @@ package adapters
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -15,6 +16,9 @@ import (
 
 // channelPrefix is the Redis pub/sub channel namespace for tenant events.
 const channelPrefix = "meridian:events:"
+
+// ErrNilHandler is returned by Subscribe when a nil handler is provided.
+var ErrNilHandler = errors.New("handler cannot be nil")
 
 // subscription holds the state for a single tenant subscription.
 type subscription struct {
@@ -76,9 +80,13 @@ func (f *RedisFanOut) Publish(ctx context.Context, event eventstream.DomainEvent
 // If a subscription already exists for tenantID, it is replaced (the prior
 // subscription's goroutine is stopped before the new one starts).
 // Returns eventstream.ErrEmptyTenantID if tenantID is empty.
+// Returns ErrNilHandler if handler is nil.
 func (f *RedisFanOut) Subscribe(ctx context.Context, tenantID string, handler eventstream.EventHandler) error {
 	if tenantID == "" {
 		return eventstream.ErrEmptyTenantID
+	}
+	if handler == nil {
+		return ErrNilHandler
 	}
 
 	// Cancel any existing subscription for this tenant.

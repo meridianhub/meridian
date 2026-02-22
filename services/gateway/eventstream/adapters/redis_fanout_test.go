@@ -73,6 +73,15 @@ func TestRedisFanOut_Subscribe_EmptyTenantID(t *testing.T) {
 	assert.ErrorIs(t, err, eventstream.ErrEmptyTenantID)
 }
 
+// TestRedisFanOut_Subscribe_NilHandler verifies that subscribing with a nil handler returns ErrNilHandler.
+func TestRedisFanOut_Subscribe_NilHandler(t *testing.T) {
+	_, client := setupMiniredis(t)
+	fanOut := adapters.NewRedisFanOut(client, testLogger())
+
+	err := fanOut.Subscribe(context.Background(), "tenant-123", nil)
+	assert.ErrorIs(t, err, adapters.ErrNilHandler)
+}
+
 // TestRedisFanOut_Unsubscribe_EmptyTenantID verifies that unsubscribing with an empty tenantID returns ErrEmptyTenantID.
 func TestRedisFanOut_Unsubscribe_EmptyTenantID(t *testing.T) {
 	_, client := setupMiniredis(t)
