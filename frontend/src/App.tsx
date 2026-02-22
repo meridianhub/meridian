@@ -20,6 +20,9 @@ import { PaymentDetailPage } from '@/pages/payments/payment-detail'
 import { PartiesPage } from '@/pages/parties'
 import { PartyDetailPage } from '@/pages/parties/[partyId]'
 import { AuditLogPage } from '@/pages/audit'
+import { StarlarkConfigPage } from '@/pages/starlark/index'
+import { StarlarkDetailPage } from '@/pages/starlark/detail'
+import { useAuth } from '@/contexts/auth-context'
 import { PositionsPage } from '@/pages/positions'
 import { PositionDetailPage } from '@/pages/positions/detail'
 import { InternalAccountsPage } from '@/pages/internal-accounts'
@@ -67,6 +70,9 @@ function NotFoundPage() {
  */
 function AppShellLayout() {
   const { pathname } = useLocation()
+  const { lens } = useAuth()
+  const isPlatformAdmin = lens === 'platform'
+
   return (
     <AppShell currentPath={pathname}>
       <Routes>
@@ -89,8 +95,12 @@ function AppShellLayout() {
         <Route path="/reconciliation/:runId" element={<ReconciliationDetailPage />} />
         <Route
           path="/starlark-config"
-          element={<PlaceholderPage title="Starlark Configuration" />}
+          element={<StarlarkConfigPage isPlatformAdmin={isPlatformAdmin} />}
         />
+        <Route path="/starlark-config/:definitionId" element={<StarlarkDetailPage />} />
+        <Route path="/market-data" element={<MarketDataPage />} />
+        <Route path="/market-data/:datasetCode" element={<DatasetDetailPage />} />
+        <Route path="/forecasting" element={<ForecastingPage />} />
         <Route path="/reference-data" element={<PlaceholderPage title="Reference Data" />} />
         <Route
           path="/gateway-mappings"
