@@ -165,7 +165,11 @@ func (c *Connection) MatchesEvent(event DomainEvent) []string {
 }
 
 // CheckJWTExpiry reports whether the JWT token has expired.
+// Returns false if no claims are associated with the connection.
 func (c *Connection) CheckJWTExpiry() bool {
+	if c.claims == nil {
+		return false
+	}
 	return c.claims.IsExpired()
 }
 
