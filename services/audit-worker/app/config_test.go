@@ -35,7 +35,7 @@ func TestLoadConfig(t *testing.T) {
 					t.Errorf("Kafka.BootstrapServers = %s, want kafka:9092", c.Kafka.BootstrapServers)
 				}
 				if c.Kafka.Topic != "audit.events.current-account.v1" {
-					t.Errorf("Kafka.Topic = %s, want audit.events.current-account", c.Kafka.Topic)
+					t.Errorf("Kafka.Topic = %s, want audit.events.current-account.v1", c.Kafka.Topic)
 				}
 			},
 		},

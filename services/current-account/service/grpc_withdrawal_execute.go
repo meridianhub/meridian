@@ -443,7 +443,10 @@ func (s *Service) completeWithdrawalWithOutbox(ctx context.Context, withdrawal *
 		}
 
 		if err := s.outboxRepo.Insert(ctx, tx, deprecatedEntry); err != nil {
-			return fmt.Errorf("failed to create deprecated outbox entry: %w", err)
+			s.logger.Warn("failed to create deprecated outbox entry (continuing)",
+				"topic", deprecatedEntry.Topic,
+				"error", err,
+			)
 		}
 
 		return nil

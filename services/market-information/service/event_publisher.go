@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	marketinformationv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
 	"github.com/meridianhub/meridian/services/market-information/domain"
@@ -115,8 +116,12 @@ func (p *KafkaObservationPublisher) PublishObservationRecorded(
 
 	// Dual-publish to deprecated topic for migration backwards compatibility
 	if p.deprecatedTopic != "" {
-		// Best-effort: log but do not fail if deprecated topic publish fails
-		_ = p.producer.PublishWithTenant(ctx, p.deprecatedTopic, partitionKey, event)
+		if err := p.producer.PublishWithTenant(ctx, p.deprecatedTopic, partitionKey, event); err != nil {
+			slog.Warn("failed to publish ObservationRecorded to deprecated topic",
+				"topic", p.deprecatedTopic,
+				"error", err,
+			)
+		}
 	}
 
 	return nil
@@ -149,7 +154,12 @@ func (p *KafkaObservationPublisher) Publish(ctx context.Context, event any) erro
 		}
 		// Dual-publish to deprecated topic for migration backwards compatibility
 		if p.deprecatedTopic != "" {
-			_ = p.producer.PublishWithTenant(ctx, p.deprecatedTopic, partitionKey, e)
+			if err := p.producer.PublishWithTenant(ctx, p.deprecatedTopic, partitionKey, e); err != nil {
+				slog.Warn("failed to publish ObservationRecorded to deprecated topic",
+					"topic", p.deprecatedTopic,
+					"error", err,
+				)
+			}
 		}
 		return nil
 	default:
