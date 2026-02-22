@@ -2,12 +2,10 @@ import * as React from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { ColumnDef } from '@tanstack/react-table'
 import { DataTable } from '@/components/shared/data-table'
-import { MoneyDisplay } from '@/components/shared/money-display'
 import { TimeDisplay } from '@/components/shared/time-display'
-import { QualityLadderBadge } from '@/components/shared/quality-ladder-badge'
-import { DirectionBadge } from '@/components/shared/direction-badge'
 import { useApiClients } from '@/api/context'
 import { Card } from '@/components/ui/card'
+import { TransactionStatus } from '@/api/gen/meridian/common/v1/types_pb'
 
 export interface PositionEntry {
   entryId: string
@@ -113,20 +111,21 @@ export function PositionsPage() {
       label: 'Status',
       type: 'select' as const,
       options: [
-        { label: 'Initiated', value: 'TRANSACTION_STATUS_INITIATED' },
-        { label: 'Reserved', value: 'TRANSACTION_STATUS_RESERVED' },
-        { label: 'Executing', value: 'TRANSACTION_STATUS_EXECUTING' },
-        { label: 'Completed', value: 'TRANSACTION_STATUS_COMPLETED' },
-        { label: 'Failed', value: 'TRANSACTION_STATUS_FAILED' },
-        { label: 'Cancelled', value: 'TRANSACTION_STATUS_CANCELLED' },
+        { label: 'Pending', value: String(TransactionStatus.PENDING) },
+        { label: 'Posted', value: String(TransactionStatus.POSTED) },
+        { label: 'Failed', value: String(TransactionStatus.FAILED) },
+        { label: 'Cancelled', value: String(TransactionStatus.CANCELLED) },
+        { label: 'Reversed', value: String(TransactionStatus.REVERSED) },
       ],
     },
   ]
 
   const queryFn = async (params: ListPositionLogsParams): Promise<ListPositionLogsResult> => {
+    const statusValue = params.filters?.status
     const response = await clients.positionKeeping.listFinancialPositionLogs({
       pageToken: params.pageToken ?? '',
       accountId: params.filters?.accountId ?? '',
+      status: statusValue ? (Number(statusValue) as TransactionStatus) : TransactionStatus.UNSPECIFIED,
       pagination: {
         pageSize: params.pageSize,
         pageToken: params.pageToken ?? '',
@@ -166,5 +165,3 @@ export function PositionsPage() {
   )
 }
 
-// Re-export types needed for the detail page
-export { MoneyDisplay, QualityLadderBadge, DirectionBadge }

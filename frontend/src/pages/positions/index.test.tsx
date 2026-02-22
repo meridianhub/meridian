@@ -135,6 +135,7 @@ describe('PositionsPage', () => {
     )
 
     await waitFor(() => {
+      // Status is displayed with underscores replaced by spaces
       expect(screen.getByText('TRANSACTION STATUS COMPLETED')).toBeInTheDocument()
     })
   })
@@ -169,10 +170,11 @@ describe('PositionsPage', () => {
     )
 
     const statusFilter = screen.getByLabelText(/Status/i)
-    await user.selectOptions(statusFilter, 'TRANSACTION_STATUS_COMPLETED')
+    // Status filter uses numeric enum values as strings
+    await user.selectOptions(statusFilter, '2') // TransactionStatus.POSTED = 2
 
     await waitFor(() => {
-      expect(statusFilter).toHaveValue('TRANSACTION_STATUS_COMPLETED')
+      expect(statusFilter).toHaveValue('2')
     })
   })
 
@@ -212,7 +214,7 @@ describe('PositionsPage', () => {
     })
   })
 
-  it('shows filter by quality level option in status filter', () => {
+  it('shows status filter options from TransactionStatus enum', () => {
     render(
       <Wrapper>
         <PositionsPage />
@@ -220,8 +222,11 @@ describe('PositionsPage', () => {
     )
 
     const statusFilter = screen.getByLabelText(/Status/i)
-    // Should have status options
     const options = Array.from(statusFilter.querySelectorAll('option'))
+    // One "All Status" option + 5 status options
     expect(options.length).toBeGreaterThan(1)
+    expect(screen.getByRole('option', { name: /Pending/i })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /Posted/i })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /Failed/i })).toBeInTheDocument()
   })
 })
