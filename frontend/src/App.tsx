@@ -1,10 +1,11 @@
+import { type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 import { queryClient } from '@/lib/query-client'
 import { PageErrorBoundary } from '@/components/error-boundary'
 import { AuthProvider, useAuth } from '@/contexts/auth-context'
-import { TenantProvider } from '@/contexts/tenant-context'
+import { TenantProvider, useTenantContext } from '@/contexts/tenant-context'
 import { ProtectedRoute, PlatformOnlyRoute } from '@/components/routing'
 import { AppShell } from '@/components/layout/app-shell'
 import { ApiClientProvider } from '@/api/context'
@@ -109,16 +110,30 @@ function AppShellLayout() {
 }
 
 /**
- * Inner app that has access to the auth context for ApiClientProvider.
+ * Bridge component that reads tenantSlug from TenantProvider and passes it
+ * to ApiClientProvider so API calls route to the correct tenant domain.
+ * Must be rendered inside both AuthProvider and TenantProvider.
  */
-function AuthenticatedApp() {
+function ApiClientBridge({ children }: { children: ReactNode }) {
   const { accessToken } = useAuth()
+  const { tenantSlug } = useTenantContext()
   const getToken = () => accessToken ?? ''
 
   return (
-    <ApiClientProvider tenantSlug={null} getToken={getToken}>
-      <TooltipProvider>
-        <TenantProvider>
+    <ApiClientProvider tenantSlug={tenantSlug} getToken={getToken}>
+      {children}
+    </ApiClientProvider>
+  )
+}
+
+/**
+ * Inner app that has access to auth and tenant contexts for ApiClientProvider.
+ */
+function AuthenticatedApp() {
+  return (
+    <TenantProvider>
+      <ApiClientBridge>
+        <TooltipProvider>
           <BrowserRouter>
             <Routes>
               <Route path="/login" element={<LoginPage />} />
@@ -132,9 +147,9 @@ function AuthenticatedApp() {
               />
             </Routes>
           </BrowserRouter>
-        </TenantProvider>
-      </TooltipProvider>
-    </ApiClientProvider>
+        </TooltipProvider>
+      </ApiClientBridge>
+    </TenantProvider>
   )
 }
 

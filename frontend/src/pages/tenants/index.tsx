@@ -85,6 +85,13 @@ function InitiateTenantDialog({ open, onOpenChange, onSuccess }: InitiateTenantD
   })
   const [errors, setErrors] = React.useState<Partial<InitiateTenantFormData>>({})
 
+  React.useEffect(() => {
+    if (!open) {
+      setFormData({ tenantId: '', displayName: '', settlementAsset: '', slug: '' })
+      setErrors({})
+    }
+  }, [open])
+
   function validate(): boolean {
     const newErrors: Partial<InitiateTenantFormData> = {}
     if (!formData.tenantId.trim()) {

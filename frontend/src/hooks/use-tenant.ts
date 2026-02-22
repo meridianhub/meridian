@@ -47,6 +47,9 @@ export function useUpdateTenantStatus(tenantId: string) {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: platformKeys.tenant(tenantId) })
+      void queryClient.invalidateQueries({
+        queryKey: [...platformKeys.tenant(tenantId), 'provisioning-status'],
+      })
       void queryClient.invalidateQueries({ queryKey: platformKeys.tenants() })
     },
   })
