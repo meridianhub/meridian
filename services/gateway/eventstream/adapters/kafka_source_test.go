@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"sync"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/services/gateway/eventstream"
+	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/testcontainers/testcontainers-go/modules/kafka"
 	"github.com/twmb/franz-go/pkg/kadm"
@@ -339,8 +341,15 @@ func TestKafkaEventSource_Integration(t *testing.T) {
 			}
 		}()
 
-		// Brief pause to let the consumer join the group and reach the end offset.
-		time.Sleep(2 * time.Second)
+		// Poll until the consumer group has at least one active member.
+		if err := await.New().
+			AtMost(10 * time.Second).
+			PollInterval(200 * time.Millisecond).
+			UntilNoError(func() error {
+				return consumerGroupActive(ctx, brokerAddr, consumerGroupID)
+			}); err != nil {
+			t.Fatalf("consumer group did not become active: %v", err)
+		}
 
 		// Produce a record now that the consumer is at the end.
 		record := &kgo.Record{
@@ -392,8 +401,15 @@ func TestKafkaEventSource_Integration(t *testing.T) {
 			})
 		}()
 
-		// Let it run briefly then cancel.
-		time.Sleep(200 * time.Millisecond)
+		// Wait for the consumer to start polling before cancelling.
+		if err := await.New().
+			AtMost(5 * time.Second).
+			PollInterval(100 * time.Millisecond).
+			UntilNoError(func() error {
+				return consumerGroupActive(ctx, brokerAddr, consumerGroupID)
+			}); err != nil {
+			t.Logf("consumer group may not be fully active: %v (continuing)", err)
+		}
 		cancel2()
 
 		select {
@@ -440,8 +456,15 @@ func TestKafkaEventSource_Integration(t *testing.T) {
 		go func() { defer wg2.Done(); _ = src1.Start(ctx3, handler) }()
 		go func() { defer wg2.Done(); _ = src2.Start(ctx3, handler) }()
 
-		// Give both consumers time to join the group and reach the end.
-		time.Sleep(3 * time.Second)
+		// Poll until at least one consumer has joined the group.
+		if err := await.New().
+			AtMost(15 * time.Second).
+			PollInterval(200 * time.Millisecond).
+			UntilNoError(func() error {
+				return consumerGroupActive(ctx3, brokerAddr, consumerGroupID)
+			}); err != nil {
+			t.Fatalf("consumer group did not become active: %v", err)
+		}
 
 		// Produce a record — only one consumer will receive it (partition assignment).
 		r := &kgo.Record{
@@ -479,6 +502,28 @@ func assertString(t *testing.T, field, got, want string) {
 
 func newDiscardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
+}
+
+// consumerGroupActive returns nil when the ops-console-events consumer group has at
+// least one active member, or a non-nil error if it is empty or does not exist.
+// Used with await.UntilNoError to replace time.Sleep in integration tests.
+func consumerGroupActive(ctx context.Context, broker, groupID string) error {
+	client, err := kgo.NewClient(kgo.SeedBrokers(broker))
+	if err != nil {
+		return fmt.Errorf("create client: %w", err)
+	}
+	defer client.Close()
+
+	admin := kadm.NewClient(client)
+	described, err := admin.DescribeGroups(ctx, groupID)
+	if err != nil {
+		return fmt.Errorf("describe groups: %w", err)
+	}
+	grp, ok := described[groupID]
+	if !ok || grp.Err != nil || len(grp.Members) == 0 {
+		return fmt.Errorf("group %q has no active members", groupID)
+	}
+	return nil
 }
 
 // mustCreateTopics creates the given topics in the Kafka broker using kadm,
