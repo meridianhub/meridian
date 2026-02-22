@@ -361,41 +361,30 @@ func TestConnection_Close_MultipleCallsNoPanic(t *testing.T) {
 // --- Backpressure overflow handling ---
 
 func TestConnection_HandleOverflow_SendsSystemMessage(t *testing.T) {
-	serverConn, clientConn := setupTestWebSocketPair(t)
-	defer clientConn.CloseNow()
-
+	// Use nil wsConn so no write pump drains the buffer — overflow is deterministic.
 	claims := &platformauth.Claims{UserID: "user-1", TenantID: "tenant_abc"}
-	conn := eventstream.NewConnection("conn-1", "tenant_abc", claims, serverConn)
+	conn := eventstream.NewConnection("conn-1", "tenant_abc", claims, nil)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		conn.Start(ctx)
-	}()
-
-	// Fill the buffer — Send is non-blocking so no need to wait for goroutines.
 	msg := eventstream.ServerMessage{
 		Type:          eventstream.ServerMessageTypeSystem,
 		SystemMessage: "filler",
 	}
 
-	// We need to drain the buffer from the client side while filling
-	// So we fill synchronously knowing the write pump is active
+	// Fill the buffer completely (all 256 slots).
+	for i := 0; i < eventstream.BufferSize; i++ {
+		ok := conn.Send(msg)
+		require.True(t, ok, "Send %d should succeed while buffer has capacity", i)
+	}
+
+	// Next sends must fail because no write pump is draining.
 	droppedCount := 0
-	for i := 0; i < eventstream.BufferSize+5; i++ {
+	for i := 0; i < 5; i++ {
 		if !conn.Send(msg) {
 			droppedCount++
 		}
 	}
 
-	assert.Greater(t, droppedCount, 0, "should have dropped at least one message")
-
-	conn.Close(websocket.StatusNormalClosure, "done")
-	wg.Wait()
+	assert.Equal(t, 5, droppedCount, "all 5 sends should be dropped when buffer is full")
 }
 
 // --- Concurrent subscription access ---
