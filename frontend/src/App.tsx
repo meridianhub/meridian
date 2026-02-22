@@ -1,3 +1,4 @@
+import { type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
 import { useCallback } from 'react'
 import { QueryClientProvider } from '@tanstack/react-query'
@@ -9,6 +10,9 @@ import { TenantProvider, useTenantContext } from '@/contexts/tenant-context'
 import { ApiClientProvider } from '@/api/context'
 import { ProtectedRoute, PlatformOnlyRoute } from '@/components/routing'
 import { AppShell } from '@/components/layout/app-shell'
+import { TooltipProvider } from '@/components/ui/tooltip'
+import { TenantsPage } from '@/pages/tenants/index'
+import { TenantDetailPage } from '@/pages/tenants/[tenantId]'
 import { AccountsPage } from '@/pages/accounts'
 import { AccountDetailPage } from '@/pages/accounts/[accountId]'
 import { PaymentsPage } from '@/pages/payments'
@@ -16,10 +20,15 @@ import { PaymentDetailPage } from '@/pages/payments/payment-detail'
 import { PartiesPage } from '@/pages/parties'
 import { PartyDetailPage } from '@/pages/parties/[partyId]'
 import { AuditLogPage } from '@/pages/audit'
+import { StarlarkConfigPage } from '@/pages/starlark/index'
+import { StarlarkDetailPage } from '@/pages/starlark/detail'
 import { PositionsPage } from '@/pages/positions'
 import { PositionDetailPage } from '@/pages/positions/detail'
 import { MappingsPage } from '@/pages/mappings'
 import { MappingDetailPage } from '@/pages/mappings/[mappingId]'
+import { InstrumentsPage } from '@/pages/reference-data/instruments'
+import { AccountTypesPage } from '@/pages/reference-data/account-types'
+import { NodesPage } from '@/pages/reference-data/nodes'
 import { InternalAccountsPage } from '@/pages/internal-accounts'
 import { MarketDataPage } from '@/pages/market-data'
 import { DatasetDetailPage } from '@/pages/market-data/[datasetCode]'
@@ -28,22 +37,6 @@ import { LedgerPage } from '@/pages/ledger'
 import { BookingLogDetailPage } from '@/pages/ledger/booking-log-detail'
 import { ReconciliationPage } from '@/pages/reconciliation'
 import { ReconciliationDetailPage } from '@/pages/reconciliation/detail'
-
-/**
- * Bridges Auth and Tenant context to ApiClientProvider.
- * This component reads the token and tenant slug from context,
- * then provides them to the API client layer.
- */
-function ApiClientBridge({ children }: { children: React.ReactNode }) {
-  const { accessToken } = useAuth()
-  const { tenantSlug } = useTenantContext()
-  const getToken = useCallback(() => Promise.resolve(accessToken ?? ''), [accessToken])
-  return (
-    <ApiClientProvider tenantSlug={tenantSlug} getToken={getToken}>
-      {children}
-    </ApiClientProvider>
-  )
-}
 
 // Placeholder page components - replaced as each page task is implemented
 function PlaceholderPage({ title }: { title: string }) {
@@ -81,6 +74,9 @@ function NotFoundPage() {
  */
 function AppShellLayout() {
   const { pathname } = useLocation()
+  const { lens } = useAuth()
+  const isPlatformAdmin = lens === 'platform'
+
   return (
     <AppShell currentPath={pathname}>
       <Routes>
@@ -103,9 +99,16 @@ function AppShellLayout() {
         <Route path="/reconciliation/:runId" element={<ReconciliationDetailPage />} />
         <Route
           path="/starlark-config"
-          element={<PlaceholderPage title="Starlark Configuration" />}
+          element={<StarlarkConfigPage isPlatformAdmin={isPlatformAdmin} />}
         />
+        <Route path="/starlark-config/:definitionId" element={<StarlarkDetailPage />} />
+        <Route path="/market-data" element={<MarketDataPage />} />
+        <Route path="/market-data/:datasetCode" element={<DatasetDetailPage />} />
+        <Route path="/forecasting" element={<ForecastingPage />} />
         <Route path="/reference-data" element={<PlaceholderPage title="Reference Data" />} />
+        <Route path="/reference-data/instruments" element={<InstrumentsPage />} />
+        <Route path="/reference-data/account-types" element={<AccountTypesPage />} />
+        <Route path="/reference-data/nodes" element={<NodesPage />} />
         <Route path="/gateway-mappings" element={<MappingsPage />} />
         <Route path="/gateway-mappings/:mappingId" element={<MappingDetailPage />} />
         <Route path="/audit-log" element={<AuditLogPage />} />
@@ -115,7 +118,15 @@ function AppShellLayout() {
           path="/tenants"
           element={
             <PlatformOnlyRoute>
-              <PlaceholderPage title="Tenant Management" />
+              <TenantsPage />
+            </PlatformOnlyRoute>
+          }
+        />
+        <Route
+          path="/tenants/:tenantId"
+          element={
+            <PlatformOnlyRoute>
+              <TenantDetailPage />
             </PlatformOnlyRoute>
           }
         />
@@ -135,28 +146,56 @@ function AppShellLayout() {
   )
 }
 
+/**
+ * Bridge component that reads tenantSlug from TenantProvider and passes it
+ * to ApiClientProvider so API calls route to the correct tenant domain.
+ * Must be rendered inside both AuthProvider and TenantProvider.
+ */
+function ApiClientBridge({ children }: { children: ReactNode }) {
+  const { accessToken } = useAuth()
+  const { tenantSlug } = useTenantContext()
+  const getToken = () => accessToken ?? ''
+
+  return (
+    <ApiClientProvider tenantSlug={tenantSlug} getToken={getToken}>
+      {children}
+    </ApiClientProvider>
+  )
+}
+
+/**
+ * Inner app that has access to auth and tenant contexts for ApiClientProvider.
+ */
+function AuthenticatedApp() {
+  return (
+    <TenantProvider>
+      <ApiClientBridge>
+        <TooltipProvider>
+          <BrowserRouter>
+            <Routes>
+              <Route path="/login" element={<LoginPage />} />
+              <Route
+                path="/*"
+                element={
+                  <ProtectedRoute>
+                    <AppShellLayout />
+                  </ProtectedRoute>
+                }
+              />
+            </Routes>
+          </BrowserRouter>
+        </TooltipProvider>
+      </ApiClientBridge>
+    </TenantProvider>
+  )
+}
+
 export function App() {
   return (
     <PageErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
-          <TenantProvider>
-            <BrowserRouter>
-              <ApiClientBridge>
-                <Routes>
-                  <Route path="/login" element={<LoginPage />} />
-                  <Route
-                    path="/*"
-                    element={
-                      <ProtectedRoute>
-                        <AppShellLayout />
-                      </ProtectedRoute>
-                    }
-                  />
-                </Routes>
-              </ApiClientBridge>
-            </BrowserRouter>
-          </TenantProvider>
+          <AuthenticatedApp />
         </AuthProvider>
         {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
       </QueryClientProvider>

@@ -2,15 +2,10 @@ import { type ReactNode } from 'react'
 import { render, type RenderOptions, type RenderResult } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { configureAxe } from 'vitest-axe'
-<<<<<<< HEAD
-import { AuthProvider } from '@/contexts/auth-context'
-import { TenantProvider } from '@/contexts/tenant-context'
-import { TooltipProvider } from '@/components/ui/tooltip'
-=======
 import { AuthProvider, useAuth } from '@/contexts/auth-context'
 import { TenantProvider, useTenantContext } from '@/contexts/tenant-context'
 import { ApiClientProvider } from '@/api/context'
->>>>>>> origin/develop
+import { TooltipProvider } from '@/components/ui/tooltip'
 
 /**
  * Pre-configured axe instance that skips color-contrast checks.
@@ -66,11 +61,9 @@ function AllProviders({ children, initialToken, queryClient }: AllProvidersProps
     <QueryClientProvider client={client}>
       <AuthProvider initialToken={initialToken}>
         <TenantProvider>
-<<<<<<< HEAD
-          <TooltipProvider>{children}</TooltipProvider>
-=======
-          <ApiClientBridge>{children}</ApiClientBridge>
->>>>>>> origin/develop
+          <ApiClientBridge>
+            <TooltipProvider>{children}</TooltipProvider>
+          </ApiClientBridge>
         </TenantProvider>
       </AuthProvider>
     </QueryClientProvider>
