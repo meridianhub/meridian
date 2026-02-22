@@ -31,7 +31,7 @@ type RedisFanOut struct {
 	client        *redis.Client
 	subscriptions map[string]*subscription
 	logger        *slog.Logger
-	mu            sync.RWMutex
+	mu            sync.Mutex
 }
 
 // Compile-time interface compliance check.
