@@ -1,8 +1,10 @@
-import { Link, useParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
-import { ChevronLeftIcon } from 'lucide-react'
+import * as React from 'react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { ChevronLeftIcon, Plus } from 'lucide-react'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 import { MoneyDisplay } from '@/components/shared/money-display'
 import { StatusBadge } from '@/components/shared/status-badge'
 import { TimeDisplay } from '@/components/shared/time-display'
@@ -11,6 +13,11 @@ import { AuditTrail } from '@/components/shared/audit-trail'
 import { useTenantSlug } from '@/hooks/use-tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
 import { fetchPaymentDetail } from './payment-detail-query'
+import {
+  InitiatePaymentDialog,
+  CancelPaymentDialog,
+  ReversePaymentDialog,
+} from './dialogs'
 
 function PaymentDetailSkeleton() {
   return (
@@ -31,9 +38,75 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
   )
 }
 
+const CANCELLABLE_STATUSES = new Set(['INITIATED', 'RESERVED', 'EXECUTING'])
+
+function PaymentActions({
+  paymentOrderId,
+  status,
+  onActionSuccess,
+}: {
+  paymentOrderId: string
+  status: string
+  onActionSuccess: () => void
+}) {
+  const [cancelOpen, setCancelOpen] = React.useState(false)
+  const [reverseOpen, setReverseOpen] = React.useState(false)
+
+  const showCancel = CANCELLABLE_STATUSES.has(status)
+  const showReverse = status === 'COMPLETED'
+
+  if (!showCancel && !showReverse) {
+    return null
+  }
+
+  return (
+    <>
+      <div className="flex gap-2">
+        {showCancel && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCancelOpen(true)}
+          >
+            Cancel Payment
+          </Button>
+        )}
+        {showReverse && (
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setReverseOpen(true)}
+          >
+            Reverse Payment
+          </Button>
+        )}
+      </div>
+
+      <CancelPaymentDialog
+        open={cancelOpen}
+        onOpenChange={setCancelOpen}
+        onSuccess={onActionSuccess}
+        paymentOrderId={paymentOrderId}
+        currentStatus={status}
+      />
+      <ReversePaymentDialog
+        open={reverseOpen}
+        onOpenChange={setReverseOpen}
+        onSuccess={onActionSuccess}
+        paymentOrderId={paymentOrderId}
+        currentStatus={status}
+      />
+    </>
+  )
+}
+
 export function PaymentDetailPage() {
   const { paymentOrderId } = useParams<{ paymentOrderId: string }>()
   const tenantSlug = useTenantSlug()
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const [initiateOpen, setInitiateOpen] = React.useState(false)
+
   const queryKey = tenantSlug && paymentOrderId
     ? tenantKeys.payment(tenantSlug, paymentOrderId)
     : ['payments', paymentOrderId]
@@ -43,6 +116,16 @@ export function PaymentDetailPage() {
     queryFn: () => fetchPaymentDetail(paymentOrderId!),
     enabled: !!paymentOrderId,
   })
+
+  function handleActionSuccess() {
+    void queryClient.invalidateQueries({ queryKey })
+  }
+
+  function handleInitiateSuccess(newPaymentOrderId: string) {
+    if (newPaymentOrderId) {
+      void navigate(`/payments/${newPaymentOrderId}`)
+    }
+  }
 
   if (isLoading) {
     return <PaymentDetailSkeleton />
@@ -75,9 +158,28 @@ export function PaymentDetailPage() {
       </Link>
 
       {/* Page header */}
-      <div className="flex items-center gap-4">
-        <h1 className="text-2xl font-semibold">{data.paymentOrderId}</h1>
-        <StatusBadge status={data.status} />
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <h1 className="text-2xl font-semibold">{data.paymentOrderId}</h1>
+          <StatusBadge status={data.status} />
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setInitiateOpen(true)}
+          >
+            <Plus className="mr-1 h-4 w-4" />
+            New Payment
+          </Button>
+
+          <PaymentActions
+            paymentOrderId={data.paymentOrderId}
+            status={data.status}
+            onActionSuccess={handleActionSuccess}
+          />
+        </div>
       </div>
 
       {/* Tabs */}
@@ -144,6 +246,12 @@ export function PaymentDetailPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <InitiatePaymentDialog
+        open={initiateOpen}
+        onOpenChange={setInitiateOpen}
+        onSuccess={handleInitiateSuccess}
+      />
     </div>
   )
 }
