@@ -126,7 +126,7 @@ func TestLocalFanOut_Publish_DeliveredToSubscriber(t *testing.T) {
 	event := makeEvent("tenant-a")
 	require.NoError(t, fo.Publish(context.Background(), event))
 
-	// Drain probe events; wait for the real event (same EventID in this test).
+	// Drain probe events (EventID "probe-ready"); wait for the real event.
 	err := await.New().
 		AtMost(time.Second).
 		Until(func() bool {
