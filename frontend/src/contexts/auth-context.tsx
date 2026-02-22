@@ -53,11 +53,18 @@ export function parseJWT(token: string): JWTClaims | null {
       return null
     }
 
+    const roles = Array.isArray(decoded.roles)
+      ? (decoded.roles as unknown[]).filter((r): r is string => typeof r === 'string')
+      : []
+    const scopes = Array.isArray(decoded.scopes)
+      ? (decoded.scopes as unknown[]).filter((s): s is string => typeof s === 'string')
+      : []
+
     return {
       userId: decoded.userId,
       tenantId: typeof decoded.tenantId === 'string' ? decoded.tenantId : undefined,
-      roles: Array.isArray(decoded.roles) ? (decoded.roles as string[]) : [],
-      scopes: Array.isArray(decoded.scopes) ? (decoded.scopes as string[]) : [],
+      roles,
+      scopes,
       exp: decoded.exp,
       iss: decoded.iss,
       aud: decoded.aud,
@@ -145,6 +152,11 @@ export function AuthProvider({ children, initialToken }: AuthProviderProps) {
       }
 
       const data = (await response.json()) as { accessToken: string }
+      const parsed = parseJWT(data.accessToken)
+      if (!parsed) {
+        // Server returned a malformed token - treat as refresh failure without clearing auth
+        return false
+      }
       updateToken(data.accessToken)
       return true
     } catch {

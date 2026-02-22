@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest'
 import { render, screen, act } from '@testing-library/react'
 import { AuthProvider } from '@/contexts/auth-context'
 import {
@@ -14,8 +14,16 @@ import {
   createTenantUserToken,
 } from '@/test/jwt-helpers'
 
-// Mock fetch for token refresh
-global.fetch = vi.fn()
+// Mock fetch for token refresh - restore after all tests
+const originalFetch = global.fetch
+
+beforeAll(() => {
+  global.fetch = vi.fn()
+})
+
+afterAll(() => {
+  global.fetch = originalFetch
+})
 
 function renderWithAuth(
   component: React.ReactNode,

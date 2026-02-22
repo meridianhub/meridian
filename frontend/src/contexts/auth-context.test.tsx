@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest'
 import { render, screen, act, waitFor } from '@testing-library/react'
 import { AuthProvider, useAuth, parseJWT } from '@/contexts/auth-context'
 import {
@@ -9,9 +9,17 @@ import {
   createSuperAdminToken,
 } from '@/test/jwt-helpers'
 
-// Mock fetch for token refresh
+// Mock fetch for token refresh - restore after all tests
 const mockFetch = vi.fn()
-global.fetch = mockFetch
+const originalFetch = global.fetch
+
+beforeAll(() => {
+  global.fetch = mockFetch
+})
+
+afterAll(() => {
+  global.fetch = originalFetch
+})
 
 describe('parseJWT', () => {
   it('parses a valid JWT and extracts claims', () => {
