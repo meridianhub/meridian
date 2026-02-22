@@ -544,8 +544,8 @@ definitions to be added to the auth system:
 | Role | Allowed Channels | Use Case |
 |------|------------------|----------|
 | `ops:admin` | `*` (all channels) | Platform operators |
-| `ops:accounts` | `current-account.*`, `party.*`, `audit.party` | Account management |
-| `ops:payments` | `payment-order.*`, `audit.payment-order` | Payment operations |
+| `ops:accounts` | `current-account.*`, `party.*`, `audit.events.party.*` | Account management |
+| `ops:payments` | `payment-order.*`, `audit.events.payment-order.*` | Payment operations |
 | `ops:finance` | `financial-accounting.*`, `position-keeping.*`, `reconciliation.*` | Finance / recon |
 | `ops:audit` | `audit.*` | Compliance / audit |
 
