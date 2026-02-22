@@ -54,15 +54,9 @@ export function formatMoney(
     return sign + formatDecimal(intPart, fracPart, prec) + suffix
   }
 
-  // Fiat currency: use Intl.NumberFormat
-  // Build numeric value from parts to avoid float precision issues for display
-  // For very large amounts (> 2^53), use string manipulation
-  const intStr = intPart.toString()
-  const fracStr = fracPart.toString().padStart(prec, '0')
-
-  const numericStr = prec > 0 ? `${intStr}.${fracStr}` : intStr
-  const numericValue = parseFloat(numericStr)
-
+  // Fiat currency: extract symbol via formatToParts to avoid parseFloat precision loss.
+  // Using formatToParts(0) gives us the currency symbol and its position without
+  // passing the actual (potentially > 2^53) amount through Number conversion.
   const formatter = new Intl.NumberFormat(undefined, {
     style: 'currency',
     currency,
@@ -70,7 +64,19 @@ export function formatMoney(
     maximumFractionDigits: prec,
   })
 
-  return sign + formatter.format(numericValue)
+  const parts = formatter.formatToParts(0)
+  const currencySymbol = parts.find((p) => p.type === 'currency')?.value ?? ''
+  const currencyFirst =
+    parts[0]?.type === 'currency' ||
+    (parts[0]?.type === 'literal' && parts[1]?.type === 'currency')
+
+  const numericFormatted = formatDecimal(intPart, fracPart, prec)
+
+  if (currencyFirst) {
+    return sign + currencySymbol + numericFormatted
+  } else {
+    return sign + numericFormatted + '\u00a0' + currencySymbol
+  }
 }
 
 /**

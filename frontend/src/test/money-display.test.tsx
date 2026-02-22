@@ -138,6 +138,16 @@ describe('formatMoney', () => {
       // As long as result is well-formed, precision is maintained
       expect(result).not.toContain('NaN')
     })
+
+    it('fiat: correctly formats amount larger than 2^53 without precision loss', () => {
+      // 9007199254740993 pence (2^53+1) = £90,071,992,547,409.93
+      // If parseFloat were used, 2^53+1 would round to 2^53, losing the last digit
+      const largeGBP = 9007199254740993n
+      const result = formatMoney(largeGBP, 'GBP')
+      // The integer part should end in ...09.93, NOT ...08.96 (which parseFloat would give)
+      expect(result).toContain('09.93')
+      expect(result).not.toContain('NaN')
+    })
   })
 })
 
