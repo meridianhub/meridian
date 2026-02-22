@@ -407,8 +407,28 @@ func (s *Service) completeWithdrawalWithOutbox(ctx context.Context, withdrawal *
 			return fmt.Errorf("failed to marshal withdrawal status event: %w", err)
 		}
 
-		// Create outbox entry within the same transaction
+		// Create outbox entry within the same transaction (new canonical topic)
 		outboxEntry := &events.EventOutbox{
+			ID:            uuid.New(),
+			EventType:     "WithdrawalStatusUpdated",
+			AggregateID:   withdrawal.Reference,
+			AggregateType: "Withdrawal",
+			EventPayload:  eventPayload,
+			Status:        events.StatusPending,
+			Topic:         "current-account.withdrawal-status.v1",
+			PartitionKey:  accountID.String(),
+			CreatedAt:     time.Now(),
+			RetryCount:    0,
+			ServiceName:   "current-account",
+		}
+
+		// Insert outbox entry within the transaction
+		if err := s.outboxRepo.Insert(ctx, tx, outboxEntry); err != nil {
+			return fmt.Errorf("failed to create outbox entry: %w", err)
+		}
+
+		// Dual-publish: also write to deprecated topic for migration backwards compatibility
+		deprecatedEntry := &events.EventOutbox{
 			ID:            uuid.New(),
 			EventType:     "WithdrawalStatusUpdated",
 			AggregateID:   withdrawal.Reference,
@@ -422,9 +442,8 @@ func (s *Service) completeWithdrawalWithOutbox(ctx context.Context, withdrawal *
 			ServiceName:   "current-account",
 		}
 
-		// Insert outbox entry within the transaction
-		if err := s.outboxRepo.Insert(ctx, tx, outboxEntry); err != nil {
-			return fmt.Errorf("failed to create outbox entry: %w", err)
+		if err := s.outboxRepo.Insert(ctx, tx, deprecatedEntry); err != nil {
+			return fmt.Errorf("failed to create deprecated outbox entry: %w", err)
 		}
 
 		return nil
