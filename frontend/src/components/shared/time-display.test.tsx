@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { TimeDisplay } from './time-display';
 
 describe('TimeDisplay', () => {
@@ -16,6 +17,10 @@ describe('TimeDisplay', () => {
     vi.setSystemTime(mockDate);
   });
 
+  // Helper to render with TooltipProvider
+  const renderWithTooltip = (component: React.ReactElement) =>
+    render(<TooltipProvider>{component}</TooltipProvider>);
+
   it('renders em dash for null timestamp', () => {
     const { container } = render(<TimeDisplay timestamp={null} />);
     expect(container.textContent).toContain('—');
@@ -27,7 +32,7 @@ describe('TimeDisplay', () => {
   });
 
   it('renders relative format by default', () => {
-    render(<TimeDisplay timestamp={mockTimestamp} />);
+    renderWithTooltip(<TimeDisplay timestamp={mockTimestamp} />);
     expect(screen.getByText(/ago/)).toBeInTheDocument();
   });
 
@@ -64,7 +69,7 @@ describe('TimeDisplay', () => {
   });
 
   it('renders both formats when "both" is specified', () => {
-    render(<TimeDisplay timestamp={mockTimestamp} format="both" />);
+    renderWithTooltip(<TimeDisplay timestamp={mockTimestamp} format="both" />);
     expect(screen.getByText(/ago/)).toBeInTheDocument();
     expect(screen.getByText(/2025-02-22/)).toBeInTheDocument();
   });
@@ -82,11 +87,11 @@ describe('TimeDisplay', () => {
     expect(screen.getByText(/UTC/)).toBeInTheDocument();
   });
 
-  it('sets tooltip title with absolute time', () => {
-    const { container } = render(
+  it('includes cursor-help styling for both format', () => {
+    const { container } = renderWithTooltip(
       <TimeDisplay timestamp={mockTimestamp} format="both" />
     );
-    const span = container.querySelector('span[title]');
-    expect(span).toHaveAttribute('title', expect.stringContaining('UTC'));
+    const span = container.querySelector('span.cursor-help');
+    expect(span).toBeInTheDocument();
   });
 });

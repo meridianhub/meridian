@@ -1,5 +1,10 @@
 import { useMemo } from 'react';
 import { formatDistanceToNow, format } from 'date-fns';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 
 interface TimeDisplayProps {
   timestamp: {
@@ -53,9 +58,16 @@ export function TimeDisplay({
 
   // 'both' - show relative with absolute in tooltip
   return (
-    <span title={`${absolute} UTC`} className="cursor-help">
-      {relative}
-      <span className="text-xs text-gray-500 ml-1">({absolute} UTC)</span>
-    </span>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="cursor-help">
+          {relative}
+          <span className="text-xs text-gray-500 ml-1">({absolute} UTC)</span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>
+        <p className="text-sm">{absolute} UTC</p>
+      </TooltipContent>
+    </Tooltip>
   );
 }
