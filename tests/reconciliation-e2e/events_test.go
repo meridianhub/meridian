@@ -36,7 +36,7 @@ func TestEvents_SettlementFinalizedPublishesLockEvent(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify lock event
-	lockEvents := infra.mockPublisher.getEventsByTopic("reconciliation.position.lock.requested")
+	lockEvents := infra.mockPublisher.getEventsByTopic("reconciliation.position-lock-requested.v1")
 	require.Len(t, lockEvents, 1)
 
 	event, ok := lockEvents[0].Event.(service.PositionLockRequestedEvent)
@@ -81,7 +81,7 @@ func TestEvents_DisputeCreatedAndResolved(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify created event
-	createdEvents := infra.mockPublisher.getEventsByTopic("reconciliation.dispute.created")
+	createdEvents := infra.mockPublisher.getEventsByTopic("reconciliation.dispute-created.v1")
 	require.Len(t, createdEvents, 1)
 	createdEvent, ok := createdEvents[0].Event.(service.DisputeCreatedEvent)
 	require.True(t, ok)
@@ -98,7 +98,7 @@ func TestEvents_DisputeCreatedAndResolved(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify resolved event
-	resolvedEvents := infra.mockPublisher.getEventsByTopic("reconciliation.dispute.resolved")
+	resolvedEvents := infra.mockPublisher.getEventsByTopic("reconciliation.dispute-resolved.v1")
 	require.Len(t, resolvedEvents, 1)
 	resolvedEvent, ok := resolvedEvents[0].Event.(service.DisputeResolvedEvent)
 	require.True(t, ok)
@@ -131,7 +131,7 @@ func TestEvents_BalanceImbalancePublishesEvent(t *testing.T) {
 	assert.Equal(t, domain.AssertionStatusFailed, result.Assertion.Status)
 
 	// Verify imbalance event
-	imbalanceEvents := infra.mockPublisher.getEventsByTopic("reconciliation.balance.imbalance.detected")
+	imbalanceEvents := infra.mockPublisher.getEventsByTopic("reconciliation.balance-imbalance-detected.v1")
 	require.Len(t, imbalanceEvents, 1)
 
 	event, ok := imbalanceEvents[0].Event.(*domain.BalanceImbalanceDetectedEvent)

@@ -23,7 +23,7 @@ configMapGenerator:
   behavior: merge
   literals:
   - service_name=tenant
-  - audit_topic=audit.events.tenant
+  - audit_topic=audit.events.tenant.v1
   - kafka_group_id=audit-consumer-tenant
   - kafka_client_id=audit-consumer-tenant
 

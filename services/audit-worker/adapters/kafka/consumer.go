@@ -66,7 +66,7 @@ type AuditConsumer struct {
 type ConsumerConfig struct {
 	// BootstrapServers is the Kafka broker addresses (e.g., "kafka:9092").
 	BootstrapServers string
-	// Topic is the Kafka topic to consume audit events from (e.g., "audit.events.current-account").
+	// Topic is the Kafka topic to consume audit events from (e.g., "audit.events.current-account.v1").
 	Topic string
 	// GroupID is the consumer group ID (e.g., "audit-consumer-current-account").
 	GroupID string

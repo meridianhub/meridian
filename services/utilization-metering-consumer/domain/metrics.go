@@ -138,7 +138,7 @@ func GetServiceName() string {
 
 // RecordEventConsumed increments the counter for successfully consumed events.
 // service: source service name (e.g., "current-account", "financial-accounting")
-// topic: Kafka topic name (e.g., "current-account.audit.events")
+// topic: Kafka topic name (e.g., "audit.events.current-account.v1")
 func RecordEventConsumed(service, topic string) {
 	eventsConsumedTotal.WithLabelValues(service, topic).Inc()
 }

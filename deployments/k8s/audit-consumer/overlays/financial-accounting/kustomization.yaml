@@ -23,7 +23,7 @@ configMapGenerator:
   behavior: merge
   literals:
   - service_name=financial-accounting
-  - audit_topic=audit.events.financial-accounting
+  - audit_topic=audit.events.financial-accounting.v1
   - kafka_group_id=audit-consumer-financial-accounting
   - kafka_client_id=audit-consumer-financial-accounting
 

@@ -14,14 +14,45 @@ import (
 )
 
 // Topic constants for reconciliation domain events.
+// Named using the service-name.event-name.v1 convention for channel derivation.
 const (
-	TopicReconciliationRunStarted   = "reconciliation.run.started"
-	TopicReconciliationRunCompleted = "reconciliation.run.completed"
-	TopicVarianceDetected           = "reconciliation.variance.detected"
-	TopicPositionLockRequested      = "reconciliation.position.lock.requested"
-	TopicDisputeCreated             = "reconciliation.dispute.created"
-	TopicDisputeResolved            = "reconciliation.dispute.resolved"
+	TopicReconciliationRunStarted   = "reconciliation.run-started.v1"
+	TopicReconciliationRunCompleted = "reconciliation.run-completed.v1"
+	TopicVarianceDetected           = "reconciliation.variance-detected.v1"
+	TopicPositionLockRequested      = "reconciliation.position-lock-requested.v1"
+	TopicDisputeCreated             = "reconciliation.dispute-created.v1"
+	TopicDisputeResolved            = "reconciliation.dispute-resolved.v1"
+
+	// Deprecated topic names retained for dual-publish migration.
+	DeprecatedTopicReconciliationRunStarted   = "reconciliation.run.started"
+	DeprecatedTopicReconciliationRunCompleted = "reconciliation.run.completed"
+	DeprecatedTopicVarianceDetected           = "reconciliation.variance.detected"
+	DeprecatedTopicPositionLockRequested      = "reconciliation.position.lock.requested"
+	DeprecatedTopicDisputeCreated             = "reconciliation.dispute.created"
+	DeprecatedTopicDisputeResolved            = "reconciliation.dispute.resolved"
 )
+
+// deprecatedTopicFor maps new topic names to their deprecated counterparts
+// for dual-publish during migration. Returns empty string if no deprecated
+// topic exists.
+func deprecatedTopicFor(topic string) string {
+	switch topic {
+	case TopicReconciliationRunStarted:
+		return DeprecatedTopicReconciliationRunStarted
+	case TopicReconciliationRunCompleted:
+		return DeprecatedTopicReconciliationRunCompleted
+	case TopicVarianceDetected:
+		return DeprecatedTopicVarianceDetected
+	case TopicPositionLockRequested:
+		return DeprecatedTopicPositionLockRequested
+	case TopicDisputeCreated:
+		return DeprecatedTopicDisputeCreated
+	case TopicDisputeResolved:
+		return DeprecatedTopicDisputeResolved
+	default:
+		return ""
+	}
+}
 
 // KafkaPublisher publishes reconciliation domain events to Kafka topics.
 // It wraps the shared platform ProtoProducer with JSON serialization and
@@ -56,8 +87,30 @@ func NewKafkaPublisher(brokers string, logger *slog.Logger) (*KafkaPublisher, er
 }
 
 // Publish sends a domain event to the specified topic with the tenant ID as
-// partition key for cross-tenant isolation.
+// partition key for cross-tenant isolation. If the topic has a deprecated
+// counterpart, the event is also published to the deprecated topic for
+// backwards compatibility during migration.
 func (p *KafkaPublisher) Publish(ctx context.Context, topic string, event interface{}) error {
+	if err := p.publishToTopic(ctx, topic, event); err != nil {
+		return err
+	}
+
+	// Dual-publish to deprecated topic for migration backwards compatibility
+	if oldTopic := deprecatedTopicFor(topic); oldTopic != "" {
+		if err := p.publishToTopic(ctx, oldTopic, event); err != nil {
+			p.logger.WarnContext(ctx, "failed to dual-publish to deprecated topic",
+				"topic", oldTopic,
+				"error", err,
+			)
+			// Do not fail the overall publish; the canonical topic succeeded.
+		}
+	}
+
+	return nil
+}
+
+// publishToTopic sends a domain event to a single Kafka topic.
+func (p *KafkaPublisher) publishToTopic(ctx context.Context, topic string, event interface{}) error {
 	start := time.Now()
 
 	data, err := json.Marshal(event)

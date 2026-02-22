@@ -53,7 +53,7 @@ func TestDisputeWorkflow_FullLifecycle(t *testing.T) {
 	assert.Equal(t, "Incorrect booking amount", initiateResp.Dispute.Reason)
 
 	// Verify dispute created event was published
-	createdEvents := infra.mockPublisher.getEventsByTopic("reconciliation.dispute.created")
+	createdEvents := infra.mockPublisher.getEventsByTopic("reconciliation.dispute-created.v1")
 	assert.Len(t, createdEvents, 1)
 
 	// Step 2: Escalate the dispute
@@ -77,7 +77,7 @@ func TestDisputeWorkflow_FullLifecycle(t *testing.T) {
 	assert.NotNil(t, resolveResp.Dispute.ResolvedAt)
 
 	// Verify dispute resolved event was published
-	resolvedEvents := infra.mockPublisher.getEventsByTopic("reconciliation.dispute.resolved")
+	resolvedEvents := infra.mockPublisher.getEventsByTopic("reconciliation.dispute-resolved.v1")
 	assert.Len(t, resolvedEvents, 1)
 
 	// Verify saga was invoked for resolution

@@ -49,7 +49,7 @@ type KafkaConfig struct {
 	// BootstrapServers is the comma-separated list of Kafka broker addresses
 	BootstrapServers string
 	// Topic is the Kafka topic to consume audit events from
-	// (e.g., "audit.events.current-account", "audit.events.financial-accounting")
+	// (e.g., "audit.events.current-account.v1", "audit.events.financial-accounting.v1")
 	Topic string
 	// GroupID is the consumer group ID for this consumer
 	GroupID string

@@ -870,7 +870,7 @@ Additionally, infrastructure topics lack version suffixes:
 | Current | Standard Form |
 |---------|---------------|
 | `audit.events` | `audit.events.v1` |
-| `audit.events.dlq` | `audit.events.dlq.v1` |
+| `audit.events.dlq` | `audit.events.v1.dlq` |
 | `audit.events.<service>` | `audit.events.<service>.v1` |
 | `saga-events` | `saga.events.v1` |
 

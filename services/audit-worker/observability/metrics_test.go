@@ -120,11 +120,11 @@ func TestRecordConsumerLag(t *testing.T) {
 	SetServiceName("test-service")
 
 	// Record lag
-	RecordConsumerLag("audit.events.current-account", 100.0)
-	RecordConsumerLag("audit.events.current-account", 50.0) // Update lag
+	RecordConsumerLag("audit.events.current-account.v1", 100.0)
+	RecordConsumerLag("audit.events.current-account.v1", 50.0) // Update lag
 
 	// Verify metric
-	metric := consumerLag.WithLabelValues("test-service", "audit.events.current-account")
+	metric := consumerLag.WithLabelValues("test-service", "audit.events.current-account.v1")
 	value := testutil.ToFloat64(metric)
 	assert.Equal(t, 50.0, value, "should have recorded latest lag value")
 }

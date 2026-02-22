@@ -631,7 +631,7 @@ func (p *noopEventPublisher) PublishBatch(_ context.Context, _ []service.DomainE
 //
 // Environment variables:
 //   - KAFKA_BOOTSTRAP_SERVERS: Kafka broker addresses (e.g., "kafka:9092")
-//   - KAFKA_AUDIT_TOPIC: Topic for audit events (default: "audit.events")
+//   - KAFKA_AUDIT_TOPIC: Topic for audit events (default: "audit.events.v1")
 func initAuditPublisher(logger *slog.Logger) (*audit.Publisher, error) {
 	// Set schema name for audit events
 	audit.SetSchemaName("financial_accounting")
@@ -642,7 +642,7 @@ func initAuditPublisher(logger *slog.Logger) (*audit.Publisher, error) {
 		return nil, nil //nolint:nilnil // Intentionally returns nil when Kafka is not configured
 	}
 
-	topic := env.GetEnvOrDefault("KAFKA_AUDIT_TOPIC", "audit.events")
+	topic := env.GetEnvOrDefault("KAFKA_AUDIT_TOPIC", kafka.AuditEventsTopic)
 
 	config := audit.PublisherConfig{
 		BootstrapServers: bootstrapServers,

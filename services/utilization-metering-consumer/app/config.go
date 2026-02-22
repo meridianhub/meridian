@@ -49,14 +49,14 @@ type Config struct {
 // LoadConfig loads configuration from environment variables.
 // Returns an error if required configuration is missing.
 func LoadConfig() (*Config, error) {
-	// Default audit topics for all 6 services
+	// Default audit topics for all 6 services (service-name.event-name.v1 convention)
 	defaultAuditTopics := []string{
-		"current-account.audit.events",
-		"financial-accounting.audit.events",
-		"position-keeping.audit.events",
-		"party.audit.events",
-		"payment-order.audit.events",
-		"tenant.audit.events",
+		"audit.events.current-account.v1",
+		"audit.events.financial-accounting.v1",
+		"audit.events.position-keeping.v1",
+		"audit.events.party.v1",
+		"audit.events.payment-order.v1",
+		"audit.events.tenant.v1",
 	}
 
 	config := &Config{
