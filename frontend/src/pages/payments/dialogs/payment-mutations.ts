@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useApiClients } from '@/api/context'
 import { tenantKeys } from '@/lib/query-keys'
 import { useTenantSlug } from '@/hooks/use-tenant-context'
+import { amountToBigInt } from './payment-form-utils'
 
 function generateIdempotencyKey(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -37,7 +38,7 @@ export function useInitiatePayment() {
         debtorAccountId: request.debtorAccountId,
         creditorReference: request.creditorReference,
         amount: {
-          units: Math.floor(parseFloat(request.amount) * 100).toString(),
+          units: amountToBigInt(request.amount).toString(),
           currency: request.currency,
         },
         idempotencyKey: {
