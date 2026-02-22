@@ -67,22 +67,32 @@ export function StarlarkEditor({
   const editorRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const readOnlyCompartment = useRef(new Compartment())
+  const linterCompartment = useRef(new Compartment())
 
+  // Keep refs to latest errors and onChange to avoid stale closures
+  const errorsRef = useRef(errors)
+  const onChangeRef = useRef(onChange)
+  errorsRef.current = errors
+  onChangeRef.current = onChange
+
+  // Mount editor once
   useEffect(() => {
     if (!editorRef.current) return
 
-    const errorLinter = linter((): Diagnostic[] =>
-      errors.map((e) => {
-        const from = getLineOffset(value, e.line, e.column)
-        const to = Math.min(from + 10, value.length)
+    const errorLinter = linter((): Diagnostic[] => {
+      const currentErrors = errorsRef.current
+      const currentDoc = viewRef.current?.state.doc.toString() ?? ''
+      return currentErrors.map((e) => {
+        const from = getLineOffset(currentDoc, e.line, e.column)
+        const to = Math.min(from + 10, currentDoc.length)
         return {
           from,
           to,
           severity: categoryToSeverity(e.category),
           message: e.message,
         }
-      }),
-    )
+      })
+    })
 
     const view = new EditorView({
       doc: value,
@@ -90,11 +100,11 @@ export function StarlarkEditor({
         basicSetup,
         python(),
         lintGutter(),
-        errorLinter,
+        linterCompartment.current.of(errorLinter),
         readOnlyCompartment.current.of(EditorView.editable.of(!readOnly)),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
-            onChange(update.state.doc.toString())
+            onChangeRef.current(update.state.doc.toString())
           }
         }),
       ],
@@ -107,11 +117,22 @@ export function StarlarkEditor({
       view.destroy()
       viewRef.current = null
     }
-    // Only recreate on readOnly change; other updates handled via reconfigure
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [readOnly])
+  }, [])
 
-  // Update editable state when readOnly changes without rebuilding
+  // Sync external value changes into the editor without rebuilding
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    const current = view.state.doc.toString()
+    if (current !== value) {
+      view.dispatch({
+        changes: { from: 0, to: current.length, insert: value },
+      })
+    }
+  }, [value])
+
+  // Reconfigure read-only state
   useEffect(() => {
     const view = viewRef.current
     if (!view) return
@@ -119,6 +140,31 @@ export function StarlarkEditor({
       effects: readOnlyCompartment.current.reconfigure(EditorView.editable.of(!readOnly)),
     })
   }, [readOnly])
+
+  // Force linter to re-run when errors change by replacing the linter extension
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+
+    const errorLinter = linter((): Diagnostic[] => {
+      const currentErrors = errorsRef.current
+      const currentDoc = view.state.doc.toString()
+      return currentErrors.map((e) => {
+        const from = getLineOffset(currentDoc, e.line, e.column)
+        const to = Math.min(from + 10, currentDoc.length)
+        return {
+          from,
+          to,
+          severity: categoryToSeverity(e.category),
+          message: e.message,
+        }
+      })
+    })
+
+    view.dispatch({
+      effects: linterCompartment.current.reconfigure(errorLinter),
+    })
+  }, [errors])
 
   return (
     <div

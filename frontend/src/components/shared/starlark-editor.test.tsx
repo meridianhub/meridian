@@ -7,18 +7,20 @@ vi.mock('codemirror', () => ({
   basicSetup: [],
 }))
 
+const mockDispatch = vi.fn()
+
 vi.mock('@codemirror/view', () => ({
   EditorView: class MockEditorView {
     static editable = { of: vi.fn(() => ({})) }
     static updateListener = { of: vi.fn(() => ({})) }
     dom: HTMLElement
     state: { doc: { toString: () => string } }
+    dispatch = mockDispatch
 
     constructor(config: {
       doc?: string
       extensions?: unknown[]
       parent?: HTMLElement
-      dispatch?: (tr: unknown) => void
     }) {
       this.dom = document.createElement('div')
       this.dom.className = 'cm-editor'
@@ -32,8 +34,6 @@ vi.mock('@codemirror/view', () => ({
     destroy() {
       this.dom.remove()
     }
-
-    dispatch() {}
   },
   keymap: { of: vi.fn(() => ({})) },
 }))
@@ -58,7 +58,7 @@ vi.mock('@codemirror/lang-python', () => ({
 }))
 
 vi.mock('@codemirror/lint', () => ({
-  linter: vi.fn(() => ({})),
+  linter: vi.fn((fn: () => unknown) => fn),
   lintGutter: vi.fn(() => ({})),
 }))
 
@@ -230,5 +230,38 @@ describe('StarlarkEditor', () => {
     expect(container.querySelector('[data-testid="starlark-editor"]')?.classList).toContain(
       'custom-class',
     )
+  })
+
+  it('dispatches to reconfigure linter when errors prop changes', () => {
+    const { rerender } = render(<StarlarkEditor {...defaultProps} errors={[]} />)
+    const initialCalls = mockDispatch.mock.calls.length
+
+    const newErrors: ValidationError[] = [
+      { line: 1, column: 0, message: 'New error', category: 'ERROR' },
+    ]
+    rerender(<StarlarkEditor {...defaultProps} errors={newErrors} />)
+    // dispatch should have been called to reconfigure the linter compartment
+    expect(mockDispatch.mock.calls.length).toBeGreaterThan(initialCalls)
+  })
+
+  it('dispatches to sync value when value prop changes externally', () => {
+    const { rerender } = render(
+      <StarlarkEditor {...defaultProps} value="initial code" />,
+    )
+    const initialCalls = mockDispatch.mock.calls.length
+
+    rerender(<StarlarkEditor {...defaultProps} value="updated code" />)
+    // dispatch should have been called to sync the doc
+    expect(mockDispatch.mock.calls.length).toBeGreaterThan(initialCalls)
+  })
+
+  it('reconfigures read-only when readOnly prop changes', () => {
+    const { rerender } = render(
+      <StarlarkEditor {...defaultProps} readOnly={false} />,
+    )
+    const initialCalls = mockDispatch.mock.calls.length
+
+    rerender(<StarlarkEditor {...defaultProps} readOnly={true} />)
+    expect(mockDispatch.mock.calls.length).toBeGreaterThan(initialCalls)
   })
 })
