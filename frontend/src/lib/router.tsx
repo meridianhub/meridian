@@ -8,10 +8,48 @@ export interface Route {
 }
 
 const routes: Route[] = [
+  { path: '/', name: 'Dashboard', component: DashboardPage },
+  { path: '/accounts', name: 'Accounts', component: () => <div>Accounts</div> },
   {
-    path: '/',
-    name: 'Dashboard',
-    component: DashboardPage,
+    path: '/internal-accounts',
+    name: 'Internal Accounts',
+    component: () => <div>Internal Accounts</div>,
+  },
+  { path: '/payments', name: 'Payments', component: () => <div>Payments</div> },
+  { path: '/transactions', name: 'Transactions', component: () => <div>Transactions</div> },
+  { path: '/positions', name: 'Positions', component: () => <div>Positions</div> },
+  { path: '/ledger', name: 'Ledger', component: () => <div>Ledger</div> },
+  { path: '/parties', name: 'Parties', component: () => <div>Parties</div> },
+  {
+    path: '/reconciliation',
+    name: 'Reconciliation',
+    component: () => <div>Reconciliation</div>,
+  },
+  {
+    path: '/starlark-config',
+    name: 'Starlark Configuration',
+    component: () => <div>Starlark Configuration</div>,
+  },
+  {
+    path: '/reference-data',
+    name: 'Reference Data',
+    component: () => <div>Reference Data</div>,
+  },
+  {
+    path: '/gateway-mappings',
+    name: 'Gateway Mappings',
+    component: () => <div>Gateway Mappings</div>,
+  },
+  { path: '/audit-log', name: 'Audit Log', component: () => <div>Audit Log</div> },
+  {
+    path: '/tenants',
+    name: 'Tenant Management',
+    component: () => <div>Tenant Management</div>,
+  },
+  {
+    path: '/platform',
+    name: 'Platform Monitoring',
+    component: () => <div>Platform Monitoring</div>,
   },
 ]
 
@@ -19,9 +57,7 @@ export function getRoutes(): Route[] {
   return routes
 }
 
-export function wrapRouteWithErrorBoundary(
-  component: React.ComponentType
-): React.ComponentType {
+export function wrapRouteWithErrorBoundary(component: React.ComponentType): React.ComponentType {
   return function WrappedRoute() {
     const Component = component
     return (
@@ -33,7 +69,7 @@ export function wrapRouteWithErrorBoundary(
 }
 
 export function createRouteHandler(
-  route: Route
+  route: Route,
 ): { path: string; name: string; component: React.ComponentType } {
   return {
     path: route.path,

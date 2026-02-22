@@ -46,6 +46,11 @@ export const handlers = [
     return HttpResponse.json({})
   }),
 
+  // AuditService - audit log queries (stub: returns 501 until RPC is implemented)
+  http.post('*/meridian.audit.v1.AuditService/*', () => {
+    return HttpResponse.json({}, { status: 501 })
+  }),
+
   // REST auth refresh endpoint used by AuthContext
   http.post('/api/auth/refresh', () => {
     return HttpResponse.json({}, { status: 401 })
