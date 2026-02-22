@@ -20,7 +20,7 @@ export const apiConfig = {
 } as const
 
 export function buildTenantBaseUrl(tenantSlug: string): string {
-  const base = import.meta.env.VITE_API_BASE_URL
+  const base = apiConfig.baseUrl
   if (base && base !== DEFAULT_API_BASE_URL) {
     const parsed = new URL(base)
     parsed.hostname = `${tenantSlug}.${parsed.hostname}`
