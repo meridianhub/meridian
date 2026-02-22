@@ -1,0 +1,128 @@
+import * as React from 'react'
+import { useNavigate } from 'react-router-dom'
+import type { ColumnDef } from '@tanstack/react-table'
+import { DataTable } from '@/components/shared/data-table'
+import { TimeDisplay } from '@/components/shared/time-display'
+import { StatusBadge } from '@/components/shared/status-badge'
+import { useClients } from '@/api/context'
+import { Card } from '@/components/ui/card'
+
+export interface Party {
+  partyId: string
+  name: string
+  partyType: 'INDIVIDUAL' | 'ORGANIZATION' | 'GOVERNMENT'
+  status: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED' | 'PENDING_VERIFICATION'
+  externalReference?: string
+  createdAt?: { seconds: bigint | number; nanos?: number }
+}
+
+interface ListPartiesParams {
+  pageToken?: string
+  pageSize: number
+  filters?: Record<string, string>
+}
+
+interface ListPartiesResult {
+  items: Party[]
+  nextPageToken?: string
+}
+
+export function PartiesPage() {
+  const navigate = useNavigate()
+  const clients = useClients()
+
+  const columns: ColumnDef<Party>[] = [
+    {
+      accessorKey: 'name',
+      header: 'Name',
+      cell: ({ row }) => row.original.name,
+    },
+    {
+      accessorKey: 'partyType',
+      header: 'Party Type',
+      cell: ({ row }) => {
+        const type = row.original.partyType
+        return <span className="text-sm">{type}</span>
+      },
+    },
+    {
+      accessorKey: 'status',
+      header: 'Status',
+      cell: ({ row }) => <StatusBadge status={row.original.status} />,
+    },
+    {
+      accessorKey: 'externalReference',
+      header: 'External Ref',
+      cell: ({ row }) => row.original.externalReference || '—',
+    },
+    {
+      accessorKey: 'createdAt',
+      header: 'Created',
+      cell: ({ row }) => <TimeDisplay timestamp={row.original.createdAt} />,
+    },
+  ]
+
+  const filters = [
+    {
+      field: 'partyType',
+      label: 'Party Type',
+      type: 'select' as const,
+      options: [
+        { label: 'Individual', value: 'INDIVIDUAL' },
+        { label: 'Organization', value: 'ORGANIZATION' },
+        { label: 'Government', value: 'GOVERNMENT' },
+      ],
+    },
+    {
+      field: 'status',
+      label: 'Status',
+      type: 'select' as const,
+      options: [
+        { label: 'Active', value: 'ACTIVE' },
+        { label: 'Inactive', value: 'INACTIVE' },
+        { label: 'Suspended', value: 'SUSPENDED' },
+        { label: 'Pending Verification', value: 'PENDING_VERIFICATION' },
+      ],
+    },
+  ]
+
+  const queryFn = async (params: ListPartiesParams): Promise<ListPartiesResult> => {
+    const response = await clients.party.listParticipants({
+      pageToken: params.pageToken,
+      pageSize: params.pageSize,
+      partyType: params.filters?.partyType,
+      status: params.filters?.status,
+    })
+
+    return {
+      items: response.participants as Party[],
+      nextPageToken: response.nextPageToken,
+    }
+  }
+
+  const handleRowClick = (party: Party) => {
+    navigate(`/parties/${party.partyId}`)
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">Parties</h1>
+        <p className="mt-2 text-muted-foreground">
+          Manage parties, their demographics, and linked accounts.
+        </p>
+      </div>
+
+      <Card className="p-6">
+        <DataTable
+          queryKey={['parties']}
+          queryFn={queryFn}
+          columns={columns}
+          pageSize={25}
+          filters={filters}
+          onRowClick={handleRowClick}
+        />
+      </Card>
+    </div>
+  )
+}

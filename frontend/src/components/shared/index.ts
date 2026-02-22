@@ -6,3 +6,5 @@ export type { AuditTrailProps, AuditEntry, AuditEntriesResponse, AuditOperation 
 
 export { SagaTimeline } from './saga-timeline';
 export type { SagaTimelineProps, SagaStep } from './saga-timeline';
+export { QualityLadderBadge } from './quality-ladder-badge';
+export { DirectionBadge } from './direction-badge';

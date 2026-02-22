@@ -7,6 +7,15 @@ import {
   getRouteHandlers,
 } from '@/lib/router'
 
+// Mock api modules so router can import DashboardPage without generated proto files
+vi.mock('@/api/transport', () => ({
+  createTenantTransport: vi.fn(() => ({ __type: 'mock-transport' })),
+}))
+
+vi.mock('@/api/clients', () => ({
+  createServiceClients: vi.fn(() => ({})),
+}))
+
 // Mock component that throws an error
 function ErrorComponent() {
   throw new Error('Route error')
