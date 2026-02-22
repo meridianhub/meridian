@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { EditorView } from '@codemirror/view'
-import { Compartment } from '@codemirror/state'
+import { Compartment, Transaction } from '@codemirror/state'
 import { python } from '@codemirror/lang-python'
 import { linter, lintGutter, type Diagnostic } from '@codemirror/lint'
 import { basicSetup } from 'codemirror'
@@ -107,7 +107,13 @@ export function StarlarkEditor({
         linterCompartment.current.of(errorLinter),
         readOnlyCompartment.current.of(EditorView.editable.of(!readOnly)),
         EditorView.updateListener.of((update) => {
-          if (update.docChanged) {
+          // Only invoke onChange for genuine user edits, not programmatic dispatches
+          if (
+            update.docChanged &&
+            update.transactions.some(
+              (tr) => tr.annotation(Transaction.userEvent) != null,
+            )
+          ) {
             onChangeRef.current(update.state.doc.toString())
           }
         }),
