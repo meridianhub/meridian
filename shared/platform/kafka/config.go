@@ -12,7 +12,8 @@ const (
 	// AuditEventsTopic is the Kafka topic for audit events.
 	AuditEventsTopic = "audit.events.v1"
 	// AuditEventsDLQTopic is the dead letter queue for failed audit events.
-	AuditEventsDLQTopic = "audit.events.dlq.v1"
+	// Matches the suffix-derived name: AuditEventsTopic + ".dlq".
+	AuditEventsDLQTopic = "audit.events.v1.dlq"
 
 	// DeprecatedAuditEventsTopic is the old topic name for migration backwards compatibility.
 	DeprecatedAuditEventsTopic = "audit.events"
@@ -112,7 +113,7 @@ func DefaultAuditTopicConfig() AuditTopicConfig {
 //
 // Environment variables:
 // - AUDIT_KAFKA_TOPIC: Topic name for audit events (default: "audit.events.v1")
-// - AUDIT_KAFKA_DLQ_TOPIC: Dead letter queue topic (default: "audit.events.dlq.v1")
+// - AUDIT_KAFKA_DLQ_TOPIC: Dead letter queue topic (default: "audit.events.v1.dlq")
 // - AUDIT_KAFKA_CONSUMER_GROUP: Consumer group ID (default: "audit-consumer-group")
 func AuditTopicConfigFromEnv() AuditTopicConfig {
 	config := DefaultAuditTopicConfig()
