@@ -1,0 +1,300 @@
+import { describe, it, expect } from 'vitest'
+import { screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { http, HttpResponse } from 'msw'
+import { server } from '@/test/msw-handlers'
+import { renderWithProviders } from '@/test/test-utils'
+import { createTenantUserToken } from '@/test/jwt-helpers'
+import { AccountDetailPage } from './[accountId]'
+
+const tenantToken = createTenantUserToken('tenant-test')
+
+function renderDetailPage(accountId = 'acct-001') {
+  return renderWithProviders(
+    <MemoryRouter initialEntries={[`/accounts/${accountId}`]}>
+      <Routes>
+        <Route path="/accounts/:accountId" element={<AccountDetailPage />} />
+        <Route path="/accounts" element={<div>Accounts List</div>} />
+      </Routes>
+    </MemoryRouter>,
+    { initialToken: tenantToken },
+  )
+}
+
+const mockAccount = {
+  accountId: 'acct-001',
+  iban: 'GB29NWBK60161331926819',
+  status: 'ACTIVE',
+  baseCurrency: 'GBP',
+  availableBalance: '100000',
+  reservedBalance: '0',
+  name: 'Main Account',
+  partyId: 'party-123',
+  createdAt: { seconds: 1700000000, nanos: 0 },
+  updatedAt: { seconds: 1700000001, nanos: 0 },
+}
+
+const mockFrozenAccount = {
+  ...mockAccount,
+  accountId: 'acct-frozen',
+  status: 'FROZEN',
+}
+
+const mockClosedAccount = {
+  ...mockAccount,
+  accountId: 'acct-closed',
+  status: 'CLOSED',
+}
+
+describe('AccountDetailPage - loading and error states', () => {
+  it('renders skeleton while loading', () => {
+    server.use(
+      http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
+        new Promise(() => {}),
+      ),
+    )
+
+    renderDetailPage()
+
+    expect(screen.getByTestId('account-detail-skeleton')).toBeInTheDocument()
+  })
+
+  it('shows 404 state for non-existent account', async () => {
+    server.use(
+      http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
+        HttpResponse.json({ message: 'not found' }, { status: 404 }),
+      ),
+    )
+
+    renderDetailPage('nonexistent-id')
+
+    await waitFor(() => {
+      expect(screen.getByTestId('account-not-found')).toBeInTheDocument()
+    })
+  })
+})
+
+describe('AccountDetailPage - account overview', () => {
+  it('renders account ID in header', async () => {
+    server.use(
+      http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
+        HttpResponse.json({ account: mockAccount }),
+      ),
+    )
+
+    renderDetailPage()
+
+    await waitFor(() => {
+      expect(screen.getAllByText('acct-001').length).toBeGreaterThan(0)
+    })
+  })
+
+  it('renders IBAN', async () => {
+    server.use(
+      http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
+        HttpResponse.json({ account: mockAccount }),
+      ),
+    )
+
+    renderDetailPage()
+
+    await waitFor(() => {
+      expect(screen.getAllByText('GB29NWBK60161331926819').length).toBeGreaterThan(0)
+    })
+  })
+
+  it('renders status badge', async () => {
+    server.use(
+      http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
+        HttpResponse.json({ account: mockAccount }),
+      ),
+    )
+
+    renderDetailPage()
+
+    await waitFor(() => {
+      expect(screen.getAllByText('ACTIVE').length).toBeGreaterThan(0)
+    })
+  })
+
+  it('renders currency', async () => {
+    server.use(
+      http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
+        HttpResponse.json({ account: mockAccount }),
+      ),
+    )
+
+    renderDetailPage()
+
+    await waitFor(() => {
+      expect(screen.getAllByText('GBP').length).toBeGreaterThan(0)
+    })
+  })
+})
+
+describe('AccountDetailPage - tabs', () => {
+  it('renders Overview tab by default', async () => {
+    server.use(
+      http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
+        HttpResponse.json({ account: mockAccount }),
+      ),
+    )
+
+    renderDetailPage()
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: /overview/i })).toBeInTheDocument()
+    })
+  })
+
+  it('renders all required tabs', async () => {
+    server.use(
+      http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
+        HttpResponse.json({ account: mockAccount }),
+      ),
+    )
+
+    renderDetailPage()
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: /overview/i })).toBeInTheDocument()
+    })
+
+    expect(screen.getByRole('tab', { name: /transactions/i })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /liens/i })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /audit/i })).toBeInTheDocument()
+  })
+
+  it('switches to Transactions tab when clicked', async () => {
+    server.use(
+      http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
+        HttpResponse.json({ account: mockAccount }),
+      ),
+    )
+
+    renderDetailPage()
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: /transactions/i })).toBeInTheDocument()
+    })
+
+    await userEvent.click(screen.getByRole('tab', { name: /transactions/i }))
+
+    expect(screen.getByRole('tab', { name: /transactions/i })).toHaveAttribute(
+      'data-state',
+      'active',
+    )
+  })
+
+  it('switches to Audit Trail tab when clicked', async () => {
+    server.use(
+      http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
+        HttpResponse.json({ account: mockAccount }),
+      ),
+    )
+
+    renderDetailPage()
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: /audit/i })).toBeInTheDocument()
+    })
+
+    await userEvent.click(screen.getByRole('tab', { name: /audit/i }))
+
+    expect(screen.getByRole('tab', { name: /audit/i })).toHaveAttribute('data-state', 'active')
+  })
+})
+
+describe('AccountDetailPage - action buttons', () => {
+  it('renders Freeze button for ACTIVE account', async () => {
+    server.use(
+      http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
+        HttpResponse.json({ account: mockAccount }),
+      ),
+    )
+
+    renderDetailPage()
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /freeze/i })).toBeInTheDocument()
+    })
+  })
+
+  it('renders Unfreeze button for FROZEN account', async () => {
+    server.use(
+      http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
+        HttpResponse.json({ account: mockFrozenAccount }),
+      ),
+    )
+
+    renderDetailPage('acct-frozen')
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /unfreeze/i })).toBeInTheDocument()
+    })
+  })
+
+  it('does not render action buttons for CLOSED account', async () => {
+    server.use(
+      http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
+        HttpResponse.json({ account: mockClosedAccount }),
+      ),
+    )
+
+    renderDetailPage('acct-closed')
+
+    await waitFor(() => {
+      // Closed account should show no action buttons
+      expect(screen.queryByRole('button', { name: /freeze/i })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /unfreeze/i })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /close/i })).not.toBeInTheDocument()
+    })
+  })
+
+  it('renders Close button for ACTIVE account', async () => {
+    server.use(
+      http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
+        HttpResponse.json({ account: mockAccount }),
+      ),
+    )
+
+    renderDetailPage()
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /close account/i })).toBeInTheDocument()
+    })
+  })
+
+  it('hides Close button for FROZEN account (must unfreeze first)', async () => {
+    server.use(
+      http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
+        HttpResponse.json({ account: mockFrozenAccount }),
+      ),
+    )
+
+    renderDetailPage('acct-frozen')
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /unfreeze/i })).toBeInTheDocument()
+    })
+
+    expect(screen.queryByRole('button', { name: /close account/i })).not.toBeInTheDocument()
+  })
+})
+
+describe('AccountDetailPage - back navigation', () => {
+  it('renders a back link to accounts list', async () => {
+    server.use(
+      http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
+        HttpResponse.json({ account: mockAccount }),
+      ),
+    )
+
+    renderDetailPage()
+
+    await waitFor(() => {
+      expect(screen.getByRole('link', { name: /accounts/i })).toBeInTheDocument()
+    })
+  })
+})
