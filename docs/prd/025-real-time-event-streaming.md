@@ -205,7 +205,14 @@ type DomainEvent struct {
 - Deserializes protobuf payloads to JSON via `protojson`
 - Independent consumer group — no impact on existing processing
 
-**Adapter: OutboxEventSource** (`KAFKA_ENABLED=false`)
+**Adapter: OutboxEventSource** (local/dev/CI only)
+
+> **ADR-0002 constraint**: Cross-service database access is forbidden
+> in production. This adapter reads `event_outbox` tables from
+> multiple service databases, which is only possible in local/dev/CI
+> where all services share a single CockroachDB instance. This
+> adapter MUST NOT be enabled in production configurations. In
+> production, Kafka is mandatory for event streaming.
 
 - Polls `event_outbox` tables across service databases
 - Reads entries with `status = 'completed'` (already published to
@@ -213,14 +220,15 @@ type DomainEvent struct {
 - Tracks a high-water mark (last processed `created_at` + `id`)
   per table
 - Poll interval: configurable, default 500ms
-- Enables event streaming in dev environments without Kafka
+- Guarded by config: only enabled when `KAFKA_ENABLED=false`
+  (which itself is a dev-only setting)
 
 ### 4.3 Kafka Topics Consumed
 
 These are the existing topics — no new topics needed:
 
 ```yaml
-# Position Keeping events
+# Position Keeping events (already conformant)
 - position-keeping.transaction-captured.v1
 - position-keeping.transaction-amended.v1
 - position-keeping.transaction-reconciled.v1
@@ -231,12 +239,12 @@ These are the existing topics — no new topics needed:
 - position-keeping.bulk-transaction-captured.v1
 - position-keeping.opening-balance-recorded.v1
 
-# Current Account events
+# Current Account events (already conformant)
 - current-account.account-frozen.v1
 - current-account.account-unfrozen.v1
 - current-account.account-closed.v1
 
-# Payment Order events (saga lifecycle)
+# Payment Order events (already conformant)
 - payment-order.initiated.v1
 - payment-order.reserved.v1
 - payment-order.executing.v1
@@ -245,39 +253,41 @@ These are the existing topics — no new topics needed:
 - payment-order.cancelled.v1
 - payment-order.reversed.v1
 
-# Financial Accounting events
-- financial-accounting.booking-log.controlled
+# Financial Accounting events (already conformant)
+- financial-accounting.booking-log-controlled.v1
 
-# Reconciliation events
-- reconciliation.run.started
-- reconciliation.run.completed
-- reconciliation.variance.detected
-- reconciliation.position.lock.requested
-- reconciliation.dispute.created
-- reconciliation.dispute.resolved
+# Reconciliation events (RENAME — Section 14)
+- reconciliation.run-started.v1
+- reconciliation.run-completed.v1
+- reconciliation.variance-detected.v1
+- reconciliation.position-lock-requested.v1
+- reconciliation.dispute-created.v1
+- reconciliation.dispute-resolved.v1
 
-# Market Information events
-- meridian.market_information.v1.ObservationRecorded
+# Market Information events (RENAME — Section 14)
+- market-information.observation-recorded.v1
 
-# Audit events (per-service)
-- audit.events.current-account
-- audit.events.financial-accounting
-- audit.events.position-keeping
-- audit.events.payment-order
-- audit.events.tenant
-- audit.events.party
+# Audit events per-service (ADD VERSION — Section 14)
+- audit.events.current-account.v1
+- audit.events.financial-accounting.v1
+- audit.events.position-keeping.v1
+- audit.events.payment-order.v1
+- audit.events.tenant.v1
+- audit.events.party.v1
 ```
+
+> **Note**: Topics marked RENAME or ADD VERSION show the target state
+> after the standardization in Section 14. Current topic names are
+> documented there.
 
 **Consumer group strategy**: The `ops-console-events` consumer group is
 separate from all existing service consumers. It can be scaled
 independently, and lag does not affect business operations.
 
-**Note on topic naming inconsistency**: The codebase has evolved
-organically, resulting in mixed naming conventions (some topics use
-`.v1` suffix, reconciliation uses dots instead of hyphens,
-market-information uses a fully-qualified protobuf-style name). The
-event stream module normalizes these into a consistent channel
-namespace for subscription purposes (see Section 4.4).
+**Prerequisite**: Section 14 defines a topic naming standardization
+that must be completed before or alongside Phase 2. Once
+standardized, all topics follow `service-name.event-name.v1` and
+channel derivation is trivial (strip `.v1` suffix).
 
 ### 4.4 Subscription Protocol
 
@@ -358,16 +368,17 @@ using JSON messages.
 }
 ```
 
-**Channel namespace**: Topics are normalized into a consistent channel
-namespace by stripping version suffixes and normalizing separators:
+**Channel namespace**: After topic naming standardization
+(Section 14), all topics follow `service-name.event-name.v1`.
+Channels are derived by stripping the `.v1` suffix:
 
 | Kafka Topic | Channel |
 |-------------|---------|
 | `payment-order.initiated.v1` | `payment-order.initiated` |
 | `position-keeping.transaction-captured.v1` | `position-keeping.transaction-captured` |
-| `reconciliation.run.started` | `reconciliation.run-started` |
-| `audit.events.current-account` | `audit.current-account` |
-| `meridian.market_information.v1.ObservationRecorded` | `market-information.observation-recorded` |
+| `reconciliation.run-started.v1` | `reconciliation.run-started` |
+| `audit.events.current-account.v1` | `audit.events.current-account` |
+| `market-information.observation-recorded.v1` | `market-information.observation-recorded` |
 
 Channel patterns use glob-style matching:
 
@@ -501,9 +512,23 @@ stateDiagram-v2
 - **JWT Expiry**: Checked every 60 seconds. Expired → close frame
   with code `4001` (Token Expired). Client re-authenticates and
   reconnects.
-- **Backpressure**: Per-connection buffer of 256 messages. Buffer
-  full → oldest messages dropped, client receives `dropped_events`
-  notification with count. Client fetches current state via REST.
+- **Backpressure**: Per-connection buffer of 256 messages. On
+  overflow, oldest messages are dropped and the server injects a
+  synthetic system event into the stream:
+
+```json
+{
+  "type": "system",
+  "level": "warning",
+  "code": "BUFFER_OVERFLOW",
+  "dropped_count": 15,
+  "message": "Dropped 15 events. UI state may be stale."
+}
+```
+
+The `useEventStream` hook should treat `BUFFER_OVERFLOW` as a
+trigger to re-fetch current state via REST, ensuring the UI
+self-heals without manual refresh.
 
 ### 4.8 Authorization & Role-Based Channel Access
 
@@ -561,6 +586,7 @@ services/gateway/
 
 ```go
 // Select event source based on configuration
+// OutboxEventSource is dev/CI only (ADR-0002: no cross-service DB)
 var source eventstream.EventSource
 if cfg.Kafka.Enabled {
     source = adapters.NewKafkaEventSource(
@@ -618,13 +644,17 @@ mux.HandleFunc("GET /ws/events", wsHandler.ServeHTTP)
 
 ### Phase 2: Kafka Event Source
 
+**Prerequisite:** Kafka topic naming standardization (Section 14)
+must be completed first or in parallel.
+
 **Deliverables:**
 
 - `KafkaEventSource` adapter consuming all domain event topics
 - Dedicated consumer group (`ops-console-events`)
 - Tenant extraction from Kafka headers (`x-tenant-id`)
 - Protobuf to JSON serialization via `protojson`
-- Topic-to-channel normalization for inconsistent naming conventions
+- Channel derivation (strip `.v1` suffix — no normalization needed
+  after standardization)
 - Backpressure handling (buffer + drop policy)
 - Metrics: events consumed, delivered, dropped, active connections
 
@@ -763,7 +793,7 @@ instead of `time.Sleep`.
 | JWT token replay on WS | Medium | Expiry checked every 60s. Close on expiry. |
 | Noisy tenant floods events | Medium | Per-tenant rate limiting on fan-out. |
 | Outbox polling latency (non-Kafka) | Low | 500ms poll acceptable for ops console. |
-| Topic naming inconsistency | Medium | Normalization + table-driven tests. |
+| Topic rename migration risk | Medium | Dual-publish during transition. See Section 14. |
 
 ---
 
@@ -807,3 +837,86 @@ No new infrastructure. No new databases. No new message brokers.
 | Event stream to SIEM | Post-MVP | Kafka consumer → Splunk/Datadog |
 | Mobile push notifications | Separate PRD | FCM/APNs integration |
 | More current-account events | When implemented | Proto defs exist, not yet on Kafka |
+
+---
+
+## 14. Prerequisite: Kafka Topic Naming Standardization
+
+### Problem
+
+An audit of the codebase reveals 31 Kafka topics using 4 different
+naming conventions. 81% follow the dominant pattern
+`service-name.event-name.v1`, but three services deviate:
+
+| Service | Current Topic | Standard Form |
+|---------|---------------|---------------|
+| Reconciliation | `reconciliation.run.started` | `reconciliation.run-started.v1` |
+| Reconciliation | `reconciliation.run.completed` | `reconciliation.run-completed.v1` |
+| Reconciliation | `reconciliation.variance.detected` | `reconciliation.variance-detected.v1` |
+| Reconciliation | `reconciliation.position.lock.requested` | `reconciliation.position-lock-requested.v1` |
+| Reconciliation | `reconciliation.dispute.created` | `reconciliation.dispute-created.v1` |
+| Reconciliation | `reconciliation.dispute.resolved` | `reconciliation.dispute-resolved.v1` |
+| Market Info | `meridian.market_information.v1.ObservationRecorded` | `market-information.observation-recorded.v1` |
+| Current Acct | `current-account.withdrawal.status` | `current-account.withdrawal-status.v1` |
+
+Additionally, infrastructure topics lack version suffixes:
+
+| Current | Standard Form |
+|---------|---------------|
+| `audit.events` | `audit.events.v1` |
+| `audit.events.dlq` | `audit.events.dlq.v1` |
+| `audit.events.<service>` | `audit.events.<service>.v1` |
+| `saga-events` | `saga.events.v1` |
+
+### Why Fix at Source
+
+Downstream normalization (regex in the event stream module) creates
+cognitive overhead: developers must remember that topic names and
+channel names are different, debugging requires mentally mapping
+between two naming schemes, and every new topic risks introducing
+yet another convention.
+
+Fixing at source means:
+
+- Topic name = channel name (minus `.v1`) — zero mental overhead
+- No normalization code to maintain or test
+- Consistent `grep`-ability across the entire codebase
+- New services naturally follow the convention
+
+### Standard: `service-name.event-name.v1`
+
+All Kafka topics MUST follow this pattern:
+
+- **service-name**: kebab-case, matches the service directory name
+  (e.g., `reconciliation`, `market-information`, `current-account`)
+- **event-name**: kebab-case, descriptive of the event
+  (e.g., `run-started`, `observation-recorded`)
+- **v1**: explicit version suffix for schema evolution (per ADR-0004)
+
+### Migration Strategy
+
+Each service that deviates is an independent, low-risk change:
+
+1. **Update the topic constant** in the publisher
+2. **Dual-publish** to both old and new topic names during a
+   transition window (1 release cycle)
+3. **Update consumers** to subscribe to the new topic name
+4. **Remove the old topic** after all consumers have migrated
+
+Since each non-conforming service has its own publisher and a small
+number of consumers, each rename is a 1-2 point task.
+
+### Scope
+
+| Task | Files Changed | Complexity |
+|------|---------------|------------|
+| Reconciliation (6 topics) | `kafka_publisher.go` + consumers | 3 points |
+| Market Information (1 topic) | `event_publisher.go` + consumers | 1 point |
+| Current Account withdrawal (1 topic) | `grpc_withdrawal_execute.go` + consumers | 1 point |
+| Audit topics (version suffix) | `shared/platform/kafka/config.go` + consumers | 2 points |
+| Saga default topic | `shared/pkg/saga/step_execution.go` | 1 point |
+| **Total** | | **8 points** |
+
+This standardization should be completed before or alongside Phase 2
+of the event streaming implementation. It can be parallelized — each
+service rename is independent.
