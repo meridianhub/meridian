@@ -63,23 +63,27 @@ func TestNewHandler_CustomRoleAccess(t *testing.T) {
 }
 
 // TestWithRoleChannelAccess_DefensiveCopy verifies that WithRoleChannelAccess makes a
-// deep copy of the provided map so that mutations to the original after construction do
-// not affect the Handler's authorization decisions. The assertion is exercised via a
-// real WebSocket subscribe round-trip so that the handler's internal copy is used.
+// deep copy of both the map and each slice so that in-place slice mutations and map
+// reassignments to the original after construction do not affect the Handler's
+// authorization decisions. The assertion is exercised via a real WebSocket subscribe
+// round-trip so that the handler's internal copy is exercised.
 func TestWithRoleChannelAccess_DefensiveCopy(t *testing.T) {
 	router := eventstream.NewRouter(
 		&stubEventSource{},
 		eventstream.NewInProcessFanOut(),
 	)
 
+	originalPatterns := []string{"my-channel.*"}
 	roleAccess := eventstream.RoleChannelAccess{
-		"custom:role": {"my-channel.*"},
+		"custom:role": originalPatterns,
 	}
 	h := eventstream.NewHandler(router, nil, eventstream.WithRoleChannelAccess(roleAccess))
 
-	// Mutate the original map BEFORE any connections are made.
-	// The handler must not observe this mutation.
-	roleAccess["custom:role"] = []string{"other-channel.*"}
+	// Mutate the original in two ways:
+	// 1. In-place slice element mutation (catches shallow slice copy).
+	originalPatterns[0] = "other-channel.*"
+	// 2. Map key reassignment (catches shallow map copy).
+	roleAccess["custom:role"] = []string{"replaced-channel.*"}
 
 	claims := &platformauth.Claims{
 		UserID:   "user-1",
