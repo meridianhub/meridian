@@ -124,14 +124,16 @@ func run(logger *slog.Logger) error {
 	}
 
 	// Wire event streaming if enabled
+	var eventRouter *eventstream.Router
 	if config.EventStream.Enabled {
-		wsHandler, cleanup, err := buildEventStreamHandler(config, logger, redisClient)
+		router, wsHandler, cleanup, err := buildEventStreamComponents(config, logger, redisClient)
 		if err != nil {
 			return fmt.Errorf("failed to initialize event streaming: %w", err)
 		}
 		if cleanup != nil {
 			defer cleanup()
 		}
+		eventRouter = router
 		serverOpts = append(serverOpts, gateway.WithEventStreamHandler(wsHandler))
 		logger.Info("event streaming initialized",
 			"kafka", config.EventStream.KafkaEnabled,
@@ -143,6 +145,19 @@ func run(logger *slog.Logger) error {
 	// For now, pass nil to allow the server to start without tenant resolution.
 	// Health endpoints will work regardless of tenant resolver configuration.
 	server := gateway.NewServer(config, logger, nil, serverOpts...)
+
+	// Start event router in background (consumes from EventSource and publishes to FanOut)
+	routerCtx, routerCancel := context.WithCancel(context.Background())
+	defer routerCancel()
+
+	if eventRouter != nil {
+		go func() {
+			if err := eventRouter.Start(routerCtx); err != nil {
+				logger.Error("event router error", "error", err)
+			}
+		}()
+		logger.Info("event router started")
+	}
 
 	// Start server in background
 	serverErrors := make(chan error, 1)
@@ -178,9 +193,12 @@ func run(logger *slog.Logger) error {
 	return runErr
 }
 
-// buildEventStreamHandler constructs the event source, fan-out, router, and WebSocket
-// handler based on configuration flags. Returns the handler, an optional cleanup
-// function, and any initialization error.
+// buildEventStreamComponents constructs the event source, fan-out, router, and WebSocket
+// handler based on configuration flags. Returns the router (for lifecycle management),
+// the handler (for route registration), an optional cleanup function, and any error.
+//
+// The caller is responsible for calling router.Start(ctx) in a goroutine to begin
+// event consumption, and router.Shutdown(ctx) during graceful shutdown.
 //
 // Source selection:
 //   - KafkaEnabled=true  → KafkaEventSource (production: Kafka topics)
@@ -189,11 +207,11 @@ func run(logger *slog.Logger) error {
 // Fan-out selection:
 //   - RedisEnabled=true  → RedisFanOut (multi-instance: Redis pub/sub per tenant)
 //   - RedisEnabled=false → LocalFanOut (single-instance: in-process channels)
-func buildEventStreamHandler(
+func buildEventStreamComponents(
 	config *gateway.Config,
 	logger *slog.Logger,
 	redisClient *redis.Client,
-) (*eventstream.Handler, func(), error) {
+) (*eventstream.Router, *eventstream.Handler, func(), error) {
 	esCfg := config.EventStream
 
 	// Select event source
@@ -207,7 +225,7 @@ func buildEventStreamHandler(
 			logger,
 		)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create kafka event source: %w", err)
+			return nil, nil, nil, fmt.Errorf("failed to create kafka event source: %w", err)
 		}
 		source = kafkaSource
 		logger.Info("using kafka event source",
@@ -220,12 +238,12 @@ func buildEventStreamHandler(
 			SkipDefaultTransaction: true,
 		})
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to open gorm DB for outbox source: %w", err)
+			return nil, nil, nil, fmt.Errorf("failed to open gorm DB for outbox source: %w", err)
 		}
 
 		sqlDB, err := gormDB.DB()
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to get underlying DB for outbox source: %w", err)
+			return nil, nil, nil, fmt.Errorf("failed to get underlying DB for outbox source: %w", err)
 		}
 		cleanup = func() {
 			if err := sqlDB.Close(); err != nil {
@@ -243,7 +261,7 @@ func buildEventStreamHandler(
 	var fanOut eventstream.FanOut
 	if esCfg.RedisEnabled {
 		if redisClient == nil {
-			return nil, cleanup, ErrRedisURLRequired
+			return nil, nil, cleanup, ErrRedisURLRequired
 		}
 		fanOut = adapters.NewRedisFanOut(redisClient, logger)
 		logger.Info("using redis fan-out")
@@ -255,7 +273,7 @@ func buildEventStreamHandler(
 	router := eventstream.NewRouter(source, fanOut)
 	handler := eventstream.NewHandler(router, logger)
 
-	return handler, cleanup, nil
+	return router, handler, cleanup, nil
 }
 
 // parseLogLevel converts a string log level to slog.Level.
