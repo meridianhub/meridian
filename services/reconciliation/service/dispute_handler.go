@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	reconciliationv1 "github.com/meridianhub/meridian/api/proto/meridian/reconciliation/v1"
+	"github.com/meridianhub/meridian/services/reconciliation/adapters/messaging"
 	"github.com/meridianhub/meridian/services/reconciliation/domain"
 	"github.com/meridianhub/meridian/shared/platform/auth"
 	"google.golang.org/grpc/codes"
@@ -119,7 +120,7 @@ func (s *AccountReconciliationService) InitiateDispute(
 			Reason:     dispute.Reason,
 			RaisedBy:   dispute.RaisedBy,
 		}
-		if err := s.eventPublisher.Publish(ctx, "reconciliation.dispute.created", event); err != nil {
+		if err := s.eventPublisher.Publish(ctx, messaging.TopicDisputeCreated, event); err != nil {
 			slog.WarnContext(ctx, "failed to publish DisputeCreatedEvent",
 				"dispute_id", dispute.DisputeID, "error", err)
 		}
@@ -213,7 +214,7 @@ func (s *AccountReconciliationService) ControlDispute(
 			Resolution: dispute.Resolution,
 			ResolvedBy: dispute.ResolvedBy,
 		}
-		if err := s.eventPublisher.Publish(ctx, "reconciliation.dispute.resolved", event); err != nil {
+		if err := s.eventPublisher.Publish(ctx, messaging.TopicDisputeResolved, event); err != nil {
 			slog.WarnContext(ctx, "failed to publish DisputeResolvedEvent",
 				"dispute_id", dispute.DisputeID, "error", err)
 		}

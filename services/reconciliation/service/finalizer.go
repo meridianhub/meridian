@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/meridianhub/meridian/services/reconciliation/adapters/messaging"
 	"github.com/meridianhub/meridian/services/reconciliation/domain"
 	"github.com/meridianhub/meridian/services/reconciliation/observability"
 	"github.com/meridianhub/meridian/shared/platform/auth"
@@ -186,7 +187,7 @@ func (f *SettlementFinalizer) FinalizeSettlement(ctx context.Context, runID uuid
 			PeriodEnd:   run.PeriodEnd.Format(time.RFC3339),
 			Status:      "LOCKED",
 		}
-		if pubErr := f.publisher.Publish(ctx, "reconciliation.position.lock.requested", event); pubErr != nil {
+		if pubErr := f.publisher.Publish(ctx, messaging.TopicPositionLockRequested, event); pubErr != nil {
 			f.logger.WarnContext(ctx, "failed to publish PositionLockRequestedEvent",
 				"run_id", runID, "error", pubErr)
 		}
