@@ -4,9 +4,8 @@ import {
   getCoreRowModel,
   useReactTable,
   type ColumnDef,
-  type QueryKey,
 } from '@tanstack/react-table'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, type QueryKey } from '@tanstack/react-query'
 import {
   Table,
   TableBody,
@@ -25,7 +24,8 @@ export interface FilterOption {
 }
 
 export interface FilterConfig {
-  key: string
+  /** RPC request field this filter maps to */
+  field: string
   label: string
   type: 'text' | 'select'
   options?: FilterOption[]
@@ -106,16 +106,16 @@ function FilterBar({
       {filters.map((f) => {
         if (f.type === 'select' && f.options) {
           return (
-            <div key={f.key} className="flex flex-col gap-1">
-              <label htmlFor={`filter-${f.key}`} className="sr-only">
+            <div key={f.field} className="flex flex-col gap-1">
+              <label htmlFor={`filter-${f.field}`} className="sr-only">
                 {f.label}
               </label>
               <select
-                id={`filter-${f.key}`}
+                id={`filter-${f.field}`}
                 aria-label={f.label}
                 role="combobox"
-                value={values[f.key] ?? ''}
-                onChange={(e) => onChange(f.key, e.target.value)}
+                value={values[f.field] ?? ''}
+                onChange={(e) => onChange(f.field, e.target.value)}
                 className={cn(
                   'h-9 min-w-[140px] rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none',
                   'focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]',
@@ -134,10 +134,10 @@ function FilterBar({
 
         return (
           <Input
-            key={f.key}
+            key={f.field}
             placeholder={`Filter by ${f.label}`}
-            value={values[f.key] ?? ''}
-            onChange={(e) => onChange(f.key, e.target.value)}
+            value={values[f.field] ?? ''}
+            onChange={(e) => onChange(f.field, e.target.value)}
             className="h-9 w-[200px]"
           />
         )

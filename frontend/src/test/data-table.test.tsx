@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -347,7 +347,7 @@ describe('DataTable - filter system', () => {
           queryKey={['test-filter1']}
           queryFn={queryFn}
           columns={columns}
-          filters={[{ key: 'status', label: 'Status', type: 'text' }]}
+          filters={[{ field: 'status', label: 'Status', type: 'text' }]}
         />
       </Wrapper>,
     )
@@ -364,7 +364,7 @@ describe('DataTable - filter system', () => {
           queryKey={['test-filter2']}
           queryFn={queryFn}
           columns={columns}
-          filters={[{ key: 'status', label: 'Status', type: 'text' }]}
+          filters={[{ field: 'status', label: 'Status', type: 'text' }]}
         />
       </Wrapper>,
     )
@@ -391,7 +391,7 @@ describe('DataTable - filter system', () => {
           queryKey={['test-filter3']}
           queryFn={queryFn}
           columns={columns}
-          filters={[{ key: 'name', label: 'Name', type: 'text' }]}
+          filters={[{ field: 'name', label: 'Name', type: 'text' }]}
         />
       </Wrapper>,
     )
@@ -425,7 +425,7 @@ describe('DataTable - filter system', () => {
           columns={columns}
           filters={[
             {
-              key: 'status',
+              field: 'status',
               label: 'Status',
               type: 'select',
               options: [
