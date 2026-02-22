@@ -611,8 +611,15 @@ interface AssertBalanceForm {
 
 The reconciliation service stores the CEL expression for audit
 purposes. The actual assertion checks strict equality
-(total debits == total credits). Future phases may evaluate the
-CEL expression for custom tolerance rules.
+(total debits == total credits). Future phases may evaluate
+the CEL expression for custom tolerance rules.
+
+**UI note:** The CEL expression field must display a
+prominent inline hint: "Expression saved for audit trail.
+Assertions currently use strict equality (total debits ==
+total credits). Custom CEL evaluation is planned for a
+future release." This prevents operators from expecting
+their expressions to affect assertion behavior.
 
 #### Design Note: Variance Detection
 
@@ -800,7 +807,11 @@ currencies (GBP, USD), energy (kWh), carbon credits
   Version. Filterable by status and dimension.
 - **Detail view:** Instrument header with tabs:
   - **Definition:** Code, dimension, precision (0-18 decimals),
-    display name, description
+    display name, description. **Overflow warning:** When
+    precision exceeds 12, show a warning that maximum
+    representable amount is limited (e.g., precision 18
+    caps int64 at ~9.22). Display the computed max amount
+    for the selected precision.
   - **CEL Expressions:** Three editable CEL fields with inline
     `CELEditor` (Section 6.11):
     - `validation_expression` — validates amounts
@@ -901,7 +912,10 @@ DNO/GSP/asset hierarchies, and market data correlation structures.
   resolution key (computed hierarchical path), version.
 - **Temporal query:** "As-at" date picker for bi-temporal
   point-in-time queries. Slide the date to see what the
-  hierarchy looked like at any past moment.
+  hierarchy looked like at any past moment. The date picker
+  defaults to UTC and displays the timezone explicitly
+  (e.g., "2026-01-15 00:00 UTC") since proto timestamps
+  are UTC.
 - **History view:** All temporal versions of a node, ordered
   newest first.
 - **Actions:** Create node (with optional parent), update
@@ -1109,7 +1123,14 @@ internal gRPC calls and vice versa — without writing code.
   - Execution time in milliseconds
   - **Field mapping trace:** Per-field log showing source
     path, target path, source value, transformed value,
-    and transform type — essential for debugging
+    and transform type — essential for debugging.
+    **PII caution:** External payloads may contain
+    sensitive data (emails, phone numbers, card numbers).
+    The trace should mask values in fields whose path
+    contains common PII indicators (email, phone, ssn,
+    card, password) — e.g., `"a***e@example.com"`.
+    Operators can toggle masking off for non-production
+    test data.
   - Transform error (if any, after validation passed)
 - **Actions:** Create mapping (DRAFT), edit (DRAFT only),
   activate (DRAFT to ACTIVE), deprecate (ACTIVE to
@@ -1876,6 +1897,13 @@ MSW intercepts Connect-ES HTTP calls and returns proto-like JSON responses. Test
 - Error boundaries (service unavailable → error state)
 - Role-based rendering (auditor sees read-only, admin sees actions)
 
+**Connect-ES transport mode:** MSW intercepts at the HTTP
+level. Configure the Connect transport with
+`useBinaryFormat: false` (JSON mode) in test environments
+so MSW handlers can return plain JSON responses matching
+proto message shapes. This avoids binary protobuf
+encoding complexity in test fixtures.
+
 ### 8.5 No Browser Tests
 
 Everything runs in jsdom via Vitest unless explicitly justified. Browser tests (Playwright) are not in scope for Phase 1. If visual regression testing is needed later, it would be a separate concern.
@@ -2127,7 +2155,7 @@ platform monitoring.
 | 5 | **Reference Data RPCs** | Mapped | Instrument (8 RPCs), Account Type (8 RPCs), Node (9 RPCs) now fully specified in Section 4.15. |
 | 6 | **WebSocket backend** | Separate PRD | PRD-025 defines the real-time streaming backend. Phase 4 depends on it. |
 | 7 | **Starlark override API** | Partially exists | Check if `CreateTenantOverride()` is exposed as gRPC RPC or internal only. |
-| 8 | **Handler schema endpoint** | Needs design | StarlarkEditor needs handler metadata for autocomplete. Either expose via gRPC RPC or embed at build time. |
+| 8 | **Handler schema endpoint** | **Blocks Phase 3** | StarlarkEditor needs handler metadata for autocomplete. Either expose via gRPC RPC or embed at build time. Design during Phase 2. |
 | 9 | **CEL evaluation in reconciliation** | Future | Balance assertion CEL expressions are stored but not evaluated by the recon service. Future work to add evaluation. |
 
 **Resolved items:**
@@ -2145,7 +2173,7 @@ platform monitoring.
 
 Every RPC in the system mapped to its UI surface:
 
-### Current Account Service (17 RPCs)
+### Current Account Service (18 RPCs)
 
 | RPC | UI Page | Action Type |
 |-----|---------|------------|
@@ -2166,6 +2194,7 @@ Every RPC in the system mapped to its UI surface:
 | GetActiveAmountBlocks | Accounts | Detail tab |
 | CreateValuationFeature | Accounts | Config form |
 | ListValuationFeatures | Accounts | Detail tab |
+| EvaluateAssetValuation | Accounts | Action button |
 
 ### Payment Order Service (6 RPCs)
 
@@ -2269,7 +2298,7 @@ Every RPC in the system mapped to its UI surface:
 |-----|---------|------------|
 | ComputeForwardCurve | Forecasting | Compute form + result |
 
-### Saga Registry Service (9 RPCs)
+### Saga Registry Service (10 RPCs)
 
 | RPC | UI Page | Action Type |
 |-----|---------|------------|
@@ -2346,7 +2375,7 @@ Every RPC in the system mapped to its UI surface:
 | DeleteMapping | Gateway Mappings | Action button |
 | DryRunMapping | Gateway Mappings | Dry run playground |
 
-**Total: 130 RPCs across 15 services, all mapped to UI
+**Total: 132 RPCs across 15 services, all mapped to UI
 surfaces.**
 
 ---
