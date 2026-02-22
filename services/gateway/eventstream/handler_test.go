@@ -338,6 +338,8 @@ func TestAuthorizeChannels_DenialWrapsErrUnauthorizedChannel(t *testing.T) {
 // TestAuthorizeChannels_RoleBoundaries exercises the exact boundary between allowed and
 // denied channels for each built-in role, using table-driven cases.
 func TestAuthorizeChannels_RoleBoundaries(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name        string
 		roles       []string
@@ -394,6 +396,8 @@ func TestAuthorizeChannels_RoleBoundaries(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			claims := &platformauth.Claims{
 				UserID:   "user-1",
 				TenantID: "tenant-abc",
