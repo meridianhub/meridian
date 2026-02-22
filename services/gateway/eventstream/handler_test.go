@@ -17,18 +17,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// --- Context key alignment ---
+// --- Context helpers ---
 
-// TestClaimsFromContext_GatewayAuthKey verifies that ClaimsFromContext honors
-// the string context key "claims" used by the gateway auth middleware
-// (services/gateway/auth.ClaimsContextKey). This test guards against silent
-// runtime breakage if the auth package changes its context key value.
-func TestClaimsFromContext_GatewayAuthKey(t *testing.T) {
+// TestContextWithClaims_RoundTrip verifies that ClaimsFromContext retrieves the
+// exact claims stored by ContextWithClaims. In production, the gateway wiring
+// layer calls ContextWithClaims as an adapter after the auth middleware has
+// injected claims; tests use it directly to simulate that wiring.
+func TestContextWithClaims_RoundTrip(t *testing.T) {
 	claims := &platformauth.Claims{UserID: "user-1", TenantID: "tenant-abc"}
 
-	// Inject claims using the same string key the gateway auth middleware uses.
-	// The key type is unexported from gateway/auth, so we use ContextWithClaims
-	// which sets both keys, then verify ClaimsFromContext returns the correct value.
 	ctx := eventstream.ContextWithClaims(context.Background(), claims)
 	got, ok := eventstream.ClaimsFromContext(ctx)
 	require.True(t, ok)
