@@ -216,6 +216,39 @@ func TestOutboxSource_HighWaterMark_PerServiceTracking(t *testing.T) {
 	assert.Equal(t, 1, received["svc-b.event.v1"], "service-b event delivered once")
 }
 
+func TestOutboxSource_HighWaterMark_SameTimestampNoDuplicates(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	// Insert 3 entries with the same created_at timestamp, simulating a bulk insert.
+	sameTime := time.Now().UTC().Add(-time.Second).Truncate(time.Millisecond)
+	for i := 0; i < 3; i++ {
+		e := newCompletedEntry("svc", "same-ts.event.v1", "svc.same-ts.v1")
+		e.CreatedAt = sameTime
+		insertOutboxEntry(t, db, e)
+	}
+
+	source := adapters.NewOutboxEventSource(db, 50*time.Millisecond, newTestLogger(t))
+
+	var mu sync.Mutex
+	var count int
+
+	// Run for enough time to allow multiple polls.
+	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+	defer cancel()
+
+	_ = source.Start(ctx, func(_ context.Context, _ eventstream.DomainEvent) error {
+		mu.Lock()
+		count++
+		mu.Unlock()
+		return nil
+	})
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, 3, count, "all 3 same-timestamp entries should be delivered exactly once")
+}
+
 // --- Batch size limiting ---
 
 func TestOutboxSource_BatchSize_LimitsEntriesPerPoll(t *testing.T) {

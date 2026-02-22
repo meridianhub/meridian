@@ -52,12 +52,15 @@ type waterMark struct {
 }
 
 // NewOutboxEventSource constructs an OutboxEventSource with the given database
-// connection and options. The logger must not be nil.
+// connection and options. Panics if logger is nil.
 func NewOutboxEventSource(
 	db *gorm.DB,
 	pollInterval time.Duration,
 	logger *slog.Logger,
 ) *OutboxEventSource {
+	if logger == nil {
+		panic("outbox: logger must not be nil")
+	}
 	if pollInterval <= 0 {
 		pollInterval = DefaultPollInterval
 	}
@@ -148,13 +151,17 @@ func (s *OutboxEventSource) pollEvents(ctx context.Context, handler eventstream.
 		mark, seen := hwm[entry.ServiceName]
 		if seen {
 			// Skip entries at or before the high-water mark for this service.
-			if entry.CreatedAt.Before(mark.createdAt) ||
-				(entry.CreatedAt.Equal(mark.createdAt) && entry.ID == mark.id) {
+			// The query orders by (created_at ASC, id ASC). We use lexicographic
+			// UUID string comparison for same-timestamp entries because UUIDs are
+			// not time-ordered, but the ORDER BY clause makes the sort stable and
+			// consistent across polls. Any entry whose (createdAt, id) position is
+			// at or before the mark has already been delivered.
+			if entry.CreatedAt.Before(mark.createdAt) {
 				continue
 			}
-			// Same timestamp but different ID — only skip if we've already
-			// advanced past this ID. UUIDs are not monotonic so we skip any ID
-			// equal to the last seen one; entries with a greater created_at always pass.
+			if entry.CreatedAt.Equal(mark.createdAt) && entry.ID.String() <= mark.id.String() {
+				continue
+			}
 		}
 
 		event := s.outboxToDomainEvent(entry)
@@ -179,12 +186,14 @@ func (s *OutboxEventSource) pollEvents(ctx context.Context, handler eventstream.
 	}
 
 	// Commit the new high-water marks under the lock.
+	// Use the same lexicographic UUID comparison as the skip logic above to
+	// ensure the mark only ever advances forward.
 	if len(newMarks) > 0 {
 		s.mu.Lock()
 		for svc, mark := range newMarks {
 			current, exists := s.highWaterMark[svc]
 			if !exists || mark.createdAt.After(current.createdAt) ||
-				(mark.createdAt.Equal(current.createdAt) && mark.id != current.id) {
+				(mark.createdAt.Equal(current.createdAt) && mark.id.String() > current.id.String()) {
 				s.highWaterMark[svc] = mark
 			}
 		}
