@@ -8,6 +8,9 @@ import { TenantProvider } from '@/contexts/tenant-context'
 import { ProtectedRoute, PlatformOnlyRoute } from '@/components/routing'
 import { AppShell } from '@/components/layout/app-shell'
 import { AuditLogPage } from '@/pages/audit'
+import { StarlarkConfigPage } from '@/pages/starlark/index'
+import { StarlarkDetailPage } from '@/pages/starlark/detail'
+import { useAuth } from '@/contexts/auth-context'
 
 // Placeholder page components - replaced as each page task is implemented
 function PlaceholderPage({ title }: { title: string }) {
@@ -45,6 +48,9 @@ function NotFoundPage() {
  */
 function AppShellLayout() {
   const { pathname } = useLocation()
+  const { lens } = useAuth()
+  const isPlatformAdmin = lens === 'platform'
+
   return (
     <AppShell currentPath={pathname}>
       <Routes>
@@ -63,8 +69,9 @@ function AppShellLayout() {
         <Route path="/reconciliation" element={<PlaceholderPage title="Reconciliation" />} />
         <Route
           path="/starlark-config"
-          element={<PlaceholderPage title="Starlark Configuration" />}
+          element={<StarlarkConfigPage isPlatformAdmin={isPlatformAdmin} />}
         />
+        <Route path="/starlark-config/:definitionId" element={<StarlarkDetailPage />} />
         <Route path="/reference-data" element={<PlaceholderPage title="Reference Data" />} />
         <Route
           path="/gateway-mappings"
