@@ -10,9 +10,14 @@ const (
 	DefaultClientID = "meridian-service"
 
 	// AuditEventsTopic is the Kafka topic for audit events.
-	AuditEventsTopic = "audit.events"
+	AuditEventsTopic = "audit.events.v1"
 	// AuditEventsDLQTopic is the dead letter queue for failed audit events.
-	AuditEventsDLQTopic = "audit.events.dlq"
+	AuditEventsDLQTopic = "audit.events.dlq.v1"
+
+	// DeprecatedAuditEventsTopic is the old topic name for migration backwards compatibility.
+	DeprecatedAuditEventsTopic = "audit.events"
+	// DeprecatedAuditEventsDLQTopic is the old DLQ topic name.
+	DeprecatedAuditEventsDLQTopic = "audit.events.dlq"
 
 	// AuditConsumerGroup is the consumer group for audit event processing.
 	AuditConsumerGroup = "audit-consumer-group"
@@ -106,8 +111,8 @@ func DefaultAuditTopicConfig() AuditTopicConfig {
 // Falls back to defaults for any unset variables.
 //
 // Environment variables:
-// - AUDIT_KAFKA_TOPIC: Topic name for audit events (default: "audit.events")
-// - AUDIT_KAFKA_DLQ_TOPIC: Dead letter queue topic (default: "audit.events.dlq")
+// - AUDIT_KAFKA_TOPIC: Topic name for audit events (default: "audit.events.v1")
+// - AUDIT_KAFKA_DLQ_TOPIC: Dead letter queue topic (default: "audit.events.dlq.v1")
 // - AUDIT_KAFKA_CONSUMER_GROUP: Consumer group ID (default: "audit-consumer-group")
 func AuditTopicConfigFromEnv() AuditTopicConfig {
 	config := DefaultAuditTopicConfig()

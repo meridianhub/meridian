@@ -59,7 +59,7 @@ func TestNewAuditConsumer(t *testing.T) {
 			name: "valid configuration",
 			config: ConsumerConfig{
 				BootstrapServers: "localhost:9092",
-				Topic:            "audit.events.test",
+				Topic:            "audit.events.test.v1",
 				GroupID:          "test-group",
 				ClientID:         "test-client",
 				DB:               setupTestDB(t),
@@ -71,7 +71,7 @@ func TestNewAuditConsumer(t *testing.T) {
 		{
 			name: "empty bootstrap servers",
 			config: ConsumerConfig{
-				Topic:    "audit.events.test",
+				Topic:    "audit.events.test.v1",
 				GroupID:  "test-group",
 				ClientID: "test-client",
 				DB:       setupTestDB(t),
@@ -94,7 +94,7 @@ func TestNewAuditConsumer(t *testing.T) {
 			name: "nil database",
 			config: ConsumerConfig{
 				BootstrapServers: "localhost:9092",
-				Topic:            "audit.events.test",
+				Topic:            "audit.events.test.v1",
 				GroupID:          "test-group",
 				ClientID:         "test-client",
 				DB:               nil,
@@ -106,7 +106,7 @@ func TestNewAuditConsumer(t *testing.T) {
 			name: "applies default timeout",
 			config: ConsumerConfig{
 				BootstrapServers: "localhost:9092",
-				Topic:            "audit.events.test",
+				Topic:            "audit.events.test.v1",
 				GroupID:          "test-group",
 				ClientID:         "test-client",
 				DB:               setupTestDB(t),
@@ -118,7 +118,7 @@ func TestNewAuditConsumer(t *testing.T) {
 			name: "applies default max retries",
 			config: ConsumerConfig{
 				BootstrapServers: "localhost:9092",
-				Topic:            "audit.events.test",
+				Topic:            "audit.events.test.v1",
 				GroupID:          "test-group",
 				ClientID:         "test-client",
 				DB:               setupTestDB(t),

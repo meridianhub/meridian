@@ -62,7 +62,7 @@
 //	// Optionally configure Kafka publisher
 //	publisher, err := audit.NewPublisher(audit.PublisherConfig{
 //	    BootstrapServers: os.Getenv("KAFKA_BOOTSTRAP_SERVERS"),
-//	    Topic:            "audit.events.my-service",
+//	    Topic:            "audit.events.my-service.v1",
 //	    SchemaName:       "my_service",
 //	    ClientID:         "my-service-audit-publisher",
 //	})

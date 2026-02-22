@@ -23,7 +23,7 @@ configMapGenerator:
   behavior: merge
   literals:
   - service_name=payment-order
-  - audit_topic=audit.events.payment-order
+  - audit_topic=audit.events.payment-order.v1
   - kafka_group_id=audit-consumer-payment-order
   - kafka_client_id=audit-consumer-payment-order
   - db_max_open_conns=40

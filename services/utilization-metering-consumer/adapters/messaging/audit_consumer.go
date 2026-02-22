@@ -222,7 +222,7 @@ func (ac *AuditConsumer) publishToMDS(measurement *auditdomain.Measurement) {
 // - Commit offsets after successful processing
 //
 // Parameters:
-// - topics: List of Kafka topic names to consume from (e.g., ["current-account.audit.events", ...])
+// - topics: List of Kafka topic names to consume from (e.g., ["audit.events.current-account.v1", ...])
 //
 // Returns an error if subscription fails. Call Stop() to gracefully shutdown consumption.
 func (ac *AuditConsumer) Start(topics []string) error {

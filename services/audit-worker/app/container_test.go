@@ -53,7 +53,7 @@ func TestNewContainer(t *testing.T) {
 				},
 				Kafka: KafkaConfig{
 					BootstrapServers: kafkaServers,
-					Topic:            "audit.events.test",
+					Topic:            "audit.events.test.v1",
 					GroupID:          "test-consumer-group",
 					ClientID:         "test-consumer",
 					HandlerTimeout:   30 * time.Second,
@@ -79,7 +79,7 @@ func TestNewContainer(t *testing.T) {
 				},
 				Kafka: KafkaConfig{
 					BootstrapServers: kafkaServers,
-					Topic:            "audit.events.test",
+					Topic:            "audit.events.test.v1",
 					GroupID:          "test-consumer-group",
 					ClientID:         "test-consumer",
 					HandlerTimeout:   30 * time.Second,
@@ -166,7 +166,7 @@ func TestContainer_Close(t *testing.T) {
 		},
 		Kafka: KafkaConfig{
 			BootstrapServers: kafkaServers,
-			Topic:            "audit.events.test",
+			Topic:            "audit.events.test.v1",
 			GroupID:          "test-consumer-group",
 			ClientID:         "test-consumer",
 			HandlerTimeout:   30 * time.Second,
@@ -235,7 +235,7 @@ func TestContainer_DatabaseConnection(t *testing.T) {
 		},
 		Kafka: KafkaConfig{
 			BootstrapServers: kafkaServers,
-			Topic:            "audit.events.test",
+			Topic:            "audit.events.test.v1",
 			GroupID:          "test-consumer-group",
 			ClientID:         "test-consumer",
 			HandlerTimeout:   30 * time.Second,

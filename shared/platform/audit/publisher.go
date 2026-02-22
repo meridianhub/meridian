@@ -31,7 +31,7 @@ type Publisher struct {
 type PublisherConfig struct {
 	// BootstrapServers is the Kafka broker addresses (e.g., "kafka:9092").
 	BootstrapServers string
-	// Topic is the Kafka topic for audit events (default: "audit.events").
+	// Topic is the Kafka topic for audit events (default: "audit.events.v1").
 	Topic string
 	// SchemaName identifies the service schema (e.g., "party", "current_account").
 	SchemaName string

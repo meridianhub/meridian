@@ -69,9 +69,9 @@ type ConsumerConfig struct {
 	GroupID string
 	// ClientID identifies the consumer for logging and metrics.
 	ClientID string
-	// Topic is the Kafka topic for audit events (default: "audit.events").
+	// Topic is the Kafka topic for audit events (default: "audit.events.v1").
 	Topic string
-	// DLQTopicSuffix is appended to topic name for DLQ (default: ".dlq" -> "audit.events.dlq").
+	// DLQTopicSuffix is appended to topic name for DLQ (default: ".dlq" -> "audit.events.v1.dlq").
 	DLQTopicSuffix string
 	// DB is the GORM database connection for writing to audit_log.
 	DB *gorm.DB
@@ -98,7 +98,7 @@ func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 		config.Topic = kafka.AuditEventsTopic
 	}
 	if config.DLQTopicSuffix == "" {
-		config.DLQTopicSuffix = ".dlq" // Results in "audit.events.dlq"
+		config.DLQTopicSuffix = ".dlq" // Results in "audit.events.v1.dlq"
 	}
 	if config.HandlerTimeout == 0 {
 		config.HandlerTimeout = defaults.DefaultRPCTimeout

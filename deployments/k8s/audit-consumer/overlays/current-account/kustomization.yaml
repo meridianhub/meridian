@@ -23,7 +23,7 @@ configMapGenerator:
   behavior: merge
   literals:
   - service_name=current-account
-  - audit_topic=audit.events.current-account
+  - audit_topic=audit.events.current-account.v1
   - kafka_group_id=audit-consumer-current-account
   - kafka_client_id=audit-consumer-current-account
   - db_max_open_conns=50

@@ -21,7 +21,7 @@ func TestLoadConfig(t *testing.T) {
 				"SERVICE_NAME":            "current-account",
 				"DATABASE_URL":            "postgres://user:pass@localhost:5432/db",
 				"KAFKA_BOOTSTRAP_SERVERS": "kafka:9092",
-				"AUDIT_TOPIC":             "audit.events.current-account",
+				"AUDIT_TOPIC":             "audit.events.current-account.v1",
 			},
 			wantErr: false,
 			validate: func(t *testing.T, c *Config) {
@@ -34,7 +34,7 @@ func TestLoadConfig(t *testing.T) {
 				if c.Kafka.BootstrapServers != "kafka:9092" {
 					t.Errorf("Kafka.BootstrapServers = %s, want kafka:9092", c.Kafka.BootstrapServers)
 				}
-				if c.Kafka.Topic != "audit.events.current-account" {
+				if c.Kafka.Topic != "audit.events.current-account.v1" {
 					t.Errorf("Kafka.Topic = %s, want audit.events.current-account", c.Kafka.Topic)
 				}
 			},
@@ -44,7 +44,7 @@ func TestLoadConfig(t *testing.T) {
 			envVars: map[string]string{
 				"DATABASE_URL":            "postgres://user:pass@localhost:5432/db",
 				"KAFKA_BOOTSTRAP_SERVERS": "kafka:9092",
-				"AUDIT_TOPIC":             "audit.events",
+				"AUDIT_TOPIC":             "audit.events.v1",
 			},
 			wantErr:     true,
 			expectedErr: ErrEmptyServiceName,
@@ -54,7 +54,7 @@ func TestLoadConfig(t *testing.T) {
 			envVars: map[string]string{
 				"SERVICE_NAME":            "current-account",
 				"KAFKA_BOOTSTRAP_SERVERS": "kafka:9092",
-				"AUDIT_TOPIC":             "audit.events",
+				"AUDIT_TOPIC":             "audit.events.v1",
 			},
 			wantErr:     true,
 			expectedErr: ErrEmptyDatabaseURL,
@@ -64,7 +64,7 @@ func TestLoadConfig(t *testing.T) {
 			envVars: map[string]string{
 				"SERVICE_NAME": "current-account",
 				"DATABASE_URL": "postgres://user:pass@localhost:5432/db",
-				"AUDIT_TOPIC":  "audit.events",
+				"AUDIT_TOPIC":  "audit.events.v1",
 			},
 			wantErr:     true,
 			expectedErr: ErrEmptyBootstrapServers,
@@ -85,7 +85,7 @@ func TestLoadConfig(t *testing.T) {
 				"SERVICE_NAME":              "financial-accounting",
 				"DATABASE_URL":              "postgres://user:pass@localhost:5432/db",
 				"KAFKA_BOOTSTRAP_SERVERS":   "kafka:9092",
-				"AUDIT_TOPIC":               "audit.events.financial-accounting",
+				"AUDIT_TOPIC":               "audit.events.financial-accounting.v1",
 				"PORT":                      "9090",
 				"GRACEFUL_SHUTDOWN_TIMEOUT": "60s",
 				"KAFKA_HANDLER_TIMEOUT":     "45s",
@@ -109,7 +109,7 @@ func TestLoadConfig(t *testing.T) {
 				"SERVICE_NAME":            "position-keeping",
 				"DATABASE_URL":            "postgres://user:pass@localhost:5432/db",
 				"KAFKA_BOOTSTRAP_SERVERS": "kafka:9092",
-				"AUDIT_TOPIC":             "audit.events.position-keeping",
+				"AUDIT_TOPIC":             "audit.events.position-keeping.v1",
 				"DB_MAX_OPEN_CONNS":       "50",
 				"DB_MAX_IDLE_CONNS":       "10",
 				"DB_CONN_MAX_LIFETIME":    "10m",
@@ -137,7 +137,7 @@ func TestLoadConfig(t *testing.T) {
 				"SERVICE_NAME":            "payment-order",
 				"DATABASE_URL":            "postgres://user:pass@localhost:5432/db",
 				"KAFKA_BOOTSTRAP_SERVERS": "kafka1:9092,kafka2:9092",
-				"AUDIT_TOPIC":             "audit.events.payment-order",
+				"AUDIT_TOPIC":             "audit.events.payment-order.v1",
 				"KAFKA_GROUP_ID":          "payment-order-audit-consumer",
 				"KAFKA_CLIENT_ID":         "payment-order-consumer-1",
 				"KAFKA_MAX_RETRIES":       "5",
@@ -164,7 +164,7 @@ func TestLoadConfig(t *testing.T) {
 				"SERVICE_NAME":            "tenant",
 				"DATABASE_URL":            "postgres://user:pass@localhost:5432/db",
 				"KAFKA_BOOTSTRAP_SERVERS": "kafka:9092",
-				"AUDIT_TOPIC":             "audit.events.tenant",
+				"AUDIT_TOPIC":             "audit.events.tenant.v1",
 			},
 			wantErr: false,
 			validate: func(t *testing.T, c *Config) {
@@ -255,7 +255,7 @@ func TestConfigValidate(t *testing.T) {
 				},
 				Kafka: KafkaConfig{
 					BootstrapServers: "kafka:9092",
-					Topic:            "audit.events",
+					Topic:            "audit.events.v1",
 					GroupID:          "group-1",
 				},
 			},
@@ -275,7 +275,7 @@ func TestConfigValidate(t *testing.T) {
 				},
 				Kafka: KafkaConfig{
 					BootstrapServers: "kafka:9092",
-					Topic:            "audit.events",
+					Topic:            "audit.events.v1",
 					GroupID:          "group-1",
 				},
 			},
@@ -296,7 +296,7 @@ func TestConfigValidate(t *testing.T) {
 				},
 				Kafka: KafkaConfig{
 					BootstrapServers: "kafka:9092",
-					Topic:            "audit.events",
+					Topic:            "audit.events.v1",
 					GroupID:          "group-1",
 				},
 			},

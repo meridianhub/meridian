@@ -23,7 +23,7 @@ configMapGenerator:
   behavior: merge
   literals:
   - service_name=party
-  - audit_topic=audit.events.party
+  - audit_topic=audit.events.party.v1
   - kafka_group_id=audit-consumer-party
   - kafka_client_id=audit-consumer-party
 
