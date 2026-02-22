@@ -79,21 +79,34 @@ describe('ApiClientProvider and useApiClients', () => {
     expect(createTenantTransport).toHaveBeenCalledWith(null, getToken)
   })
 
-  it('recreates clients when tenant slug changes', () => {
-    const { rerender } = renderHook(() => useApiClients(), {
-      wrapper: ({ children }: { children: ReactNode }) => (
-        <ApiClientProvider tenantSlug="acme" getToken={getToken}>
-          {children}
-        </ApiClientProvider>
-      ),
-    })
+  it('does not recreate clients when tenant slug stays the same', () => {
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <ApiClientProvider tenantSlug="acme" getToken={getToken}>
+        {children}
+      </ApiClientProvider>
+    )
 
+    const { rerender } = renderHook(() => useApiClients(), { wrapper })
     expect(createServiceClients).toHaveBeenCalledTimes(1)
 
     rerender()
-
-    // Same tenant - no recreation
     expect(createServiceClients).toHaveBeenCalledTimes(1)
+  })
+
+  it('recreates clients when tenant slug changes', () => {
+    let tenantSlug = 'acme'
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <ApiClientProvider tenantSlug={tenantSlug} getToken={getToken}>
+        {children}
+      </ApiClientProvider>
+    )
+
+    const { rerender } = renderHook(() => useApiClients(), { wrapper })
+    expect(createServiceClients).toHaveBeenCalledTimes(1)
+
+    tenantSlug = 'newcorp'
+    rerender()
+    expect(createServiceClients).toHaveBeenCalledTimes(2)
   })
 
   it('renders children', () => {
