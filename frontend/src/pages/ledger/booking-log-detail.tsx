@@ -63,6 +63,14 @@ function getCurrencyName(currency: unknown): string {
       1: 'GBP',
       2: 'USD',
       3: 'EUR',
+      4: 'JPY',
+      5: 'AUD',
+      6: 'CAD',
+      7: 'CHF',
+      8: 'CNY',
+      9: 'INR',
+      10: 'SGD',
+      11: 'HKD',
     }
     return currencyMap[currency] ?? String(currency)
   }
