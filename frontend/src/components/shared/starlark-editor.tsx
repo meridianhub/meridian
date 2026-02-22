@@ -52,7 +52,8 @@ function getLineOffset(doc: string, line: number, column: number): number {
   for (let i = 0; i < line - 1 && i < lines.length; i++) {
     offset += lines[i].length + 1 // +1 for newline
   }
-  return offset + Math.max(0, column)
+  // Clamp to doc length to prevent Diagnostic range errors when doc shrinks
+  return Math.min(offset + Math.max(0, column), doc.length)
 }
 
 export function StarlarkEditor({
@@ -84,7 +85,8 @@ export function StarlarkEditor({
       const currentDoc = viewRef.current?.state.doc.toString() ?? ''
       return currentErrors.map((e) => {
         const from = getLineOffset(currentDoc, e.line, e.column)
-        const to = Math.min(from + 10, currentDoc.length)
+        // Ensure to >= from and both within doc bounds
+        const to = Math.max(from, Math.min(from + 10, currentDoc.length))
         return {
           from,
           to,
@@ -151,7 +153,8 @@ export function StarlarkEditor({
       const currentDoc = view.state.doc.toString()
       return currentErrors.map((e) => {
         const from = getLineOffset(currentDoc, e.line, e.column)
-        const to = Math.min(from + 10, currentDoc.length)
+        // Ensure to >= from and both within doc bounds
+        const to = Math.max(from, Math.min(from + 10, currentDoc.length))
         return {
           from,
           to,
@@ -193,21 +196,23 @@ export function StarlarkEditor({
           </div>
           <ul className="divide-y divide-destructive/10 text-xs">
             {errors.map((error, index) => (
-              <li
-                key={index}
-                data-testid={`error-item-${index}`}
-                className={cn(
-                  'flex cursor-pointer items-start gap-2 px-3 py-1.5 hover:bg-destructive/10',
-                  error.category === 'WARNING' && 'text-yellow-700 dark:text-yellow-400',
-                  error.category !== 'WARNING' && 'text-destructive',
-                )}
-                onClick={() => onErrorClick?.(error)}
-              >
-                <span className="shrink-0 font-mono text-muted-foreground">
-                  {error.line}:{error.column}
-                </span>
-                <span className="shrink-0 uppercase opacity-60">[{error.category}]</span>
-                <span>{error.message}</span>
+              <li key={index}>
+                <button
+                  type="button"
+                  data-testid={`error-item-${index}`}
+                  className={cn(
+                    'flex w-full cursor-pointer items-start gap-2 px-3 py-1.5 text-left hover:bg-destructive/10',
+                    error.category === 'WARNING' && 'text-yellow-700 dark:text-yellow-400',
+                    error.category !== 'WARNING' && 'text-destructive',
+                  )}
+                  onClick={() => onErrorClick?.(error)}
+                >
+                  <span className="shrink-0 font-mono text-muted-foreground">
+                    {error.line}:{error.column}
+                  </span>
+                  <span className="shrink-0 uppercase opacity-60">[{error.category}]</span>
+                  <span>{error.message}</span>
+                </button>
               </li>
             ))}
           </ul>
