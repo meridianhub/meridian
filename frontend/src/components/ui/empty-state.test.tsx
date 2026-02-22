@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { FileQuestion, Plus } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { EmptyState } from './empty-state'
 
 describe('EmptyState', () => {
