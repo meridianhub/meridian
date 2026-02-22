@@ -74,12 +74,13 @@ describe('TimeDisplay', () => {
     expect(screen.getByText(/2025-02-22/)).toBeInTheDocument();
   });
 
-  it('shows absolute time in output', () => {
+  it('shows only relative time for relative format', () => {
     const { container } = render(
       <TimeDisplay timestamp={mockTimestamp} format="relative" />
     );
-    // Relative format should still display the absolute time
-    expect(container.textContent).toMatch(/\d{4}-\d{2}-\d{2}/);
+    // Relative format should only show relative time
+    expect(container.textContent).toMatch(/ago/);
+    expect(container.textContent).not.toMatch(/UTC/);
   });
 
   it('includes "UTC" in absolute format output', () => {

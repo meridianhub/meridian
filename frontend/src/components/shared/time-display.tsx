@@ -43,14 +43,11 @@ export function TimeDisplay({
 
   const relative = formatDistanceToNow(date, { addSuffix: true });
   // Format using UTC time string to ensure consistency across timezones
-  const absolute = date.toISOString().split('T')[0] + ' ' + date.toISOString().split('T')[1].substring(0, 8);
+  const iso = date.toISOString();
+  const absolute = iso.replace('T', ' ').slice(0, 19);
 
   if (displayFormat === 'relative') {
-    return (
-      <>
-        {relative} <span className="text-xs text-gray-500">({absolute} UTC)</span>
-      </>
-    );
+    return <>{relative}</>;
   }
 
   if (displayFormat === 'absolute') {
