@@ -32,8 +32,8 @@ export interface AuditTrailProps {
 // Stub audit client
 //
 // The audit query RPC (ListAuditEntries) does not exist yet (Open Item #1).
-// This stub tries to call the service and returns an empty list on 501/503
-// or any network failure, keeping the UI functional while the backend is built.
+// This stub calls the service and throws StubError on 501/503 responses so the
+// UI can show a "coming soon" banner while the backend is built.
 // ---------------------------------------------------------------------------
 
 async function fetchAuditEntries(
@@ -242,15 +242,28 @@ export function AuditTrail({ entityType, entityId }: AuditTrailProps) {
     return <AuditTrailSkeleton />;
   }
 
-  // Stub fallback: audit service not yet implemented
-  if (isError && isStubError(error)) {
+  if (isError) {
+    if (isStubError(error)) {
+      // Stub fallback: audit service not yet implemented (Open Item #1)
+      return (
+        <div
+          data-testid="audit-trail-stub"
+          className="rounded-lg border border-dashed p-6 text-center"
+        >
+          <p className="text-sm text-muted-foreground">
+            Audit log coming soon — the audit query service is not yet available.
+          </p>
+        </div>
+      );
+    }
+    // Generic error state for non-stub failures (500, network, parse errors)
     return (
       <div
-        data-testid="audit-trail-stub"
+        data-testid="audit-trail-error"
         className="rounded-lg border border-dashed p-6 text-center"
       >
         <p className="text-sm text-muted-foreground">
-          Audit log coming soon — the audit query service is not yet available.
+          Unable to load audit history. Please try again.
         </p>
       </div>
     );

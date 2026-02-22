@@ -136,7 +136,7 @@ describe('AuditTrail', () => {
   });
 
   describe('stub fallback', () => {
-    it('renders stub banner when audit service is unavailable', async () => {
+    it('renders stub banner when audit service is unavailable (501)', async () => {
       server.use(
         http.post('*/meridian.audit.v1.AuditService/*', () =>
           HttpResponse.json({}, { status: 501 }),
@@ -147,6 +147,18 @@ describe('AuditTrail', () => {
         expect(screen.getByTestId('audit-trail-stub')).toBeInTheDocument(),
       );
     });
+
+    it('renders error state for non-stub failures (500)', async () => {
+      server.use(
+        http.post('*/meridian.audit.v1.AuditService/*', () =>
+          HttpResponse.json({}, { status: 500 }),
+        ),
+      );
+      renderWithQuery(<AuditTrail entityType="customers" entityId="id-1" />);
+      await waitFor(() =>
+        expect(screen.getByTestId('audit-trail-error')).toBeInTheDocument(),
+      );
+    });
   });
 
   describe('query cache', () => {
@@ -154,12 +166,20 @@ describe('AuditTrail', () => {
       // We verify this by checking that the component issues a request on each
       // mount even when data might be cached. MSW intercepts all calls so we
       // can count them via a spy.
+      //
+      // We must use a non-zero gcTime so the cache persists across unmount/remount.
+      // With gcTime: 0, the cache is evicted immediately on unmount regardless of
+      // staleTime, which would make this test pass even if staleTime were Infinity.
       const fetchSpy = vi.fn(() => HttpResponse.json({ entries: [] }));
       server.use(
         http.post('*/meridian.audit.v1.AuditService/*', fetchSpy),
       );
 
-      const qc = makeQueryClient();
+      const qc = new QueryClient({
+        defaultOptions: {
+          queries: { retry: false, gcTime: 5 * 60 * 1000, staleTime: 0 },
+        },
+      });
 
       const { unmount } = renderWithQuery(
         <AuditTrail entityType="customers" entityId="id-1" />,
@@ -169,7 +189,8 @@ describe('AuditTrail', () => {
       await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
       unmount();
 
-      // Second mount — staleTime: 0 means data is immediately stale, refetch triggered
+      // Second mount — cache entry is present but staleTime: 0 means it's
+      // immediately stale, so the component triggers a refetch on mount.
       renderWithQuery(<AuditTrail entityType="customers" entityId="id-1" />, qc);
       await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
     });
