@@ -319,6 +319,12 @@ func TestAuthorizeChannels_EmptyChannels_NoError(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestAuthorizeChannels_NilClaims_EmptyChannels_ReturnsError(t *testing.T) {
+	// nil claims should error even when channels is empty, per the function contract.
+	err := eventstream.AuthorizeChannels(nil, eventstream.DefaultRoleAccess, []string{})
+	assert.ErrorIs(t, err, eventstream.ErrUnauthorizedNoClaims)
+}
+
 // --- Subscribe message handling via WebSocket ---
 
 func TestHandler_Subscribe_AuthorizedChannel_SendsSubscribed(t *testing.T) {

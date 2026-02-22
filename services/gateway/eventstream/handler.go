@@ -60,19 +60,19 @@ var DefaultRoleAccess = RoleChannelAccess{
 }
 
 // AuthorizeChannels checks whether all requested channel patterns are permitted
-// for at least one of the roles in claims. Returns nil if the request is
-// authorized or if channels is empty.
+// for at least one of the roles in claims. Returns nil if authorized or if
+// channels is empty and claims are present.
 //
 // Returns an error if:
-//   - claims is nil
+//   - claims is nil (regardless of whether channels is empty)
 //   - any channel pattern is not covered by the union of patterns allowed for
 //     the claims' roles
 func AuthorizeChannels(claims *platformauth.Claims, roleAccess RoleChannelAccess, channels []string) error {
-	if len(channels) == 0 {
-		return nil
-	}
 	if claims == nil {
 		return ErrUnauthorizedNoClaims
+	}
+	if len(channels) == 0 {
+		return nil
 	}
 
 	// Build the union of allowed patterns across all roles held by this principal.
