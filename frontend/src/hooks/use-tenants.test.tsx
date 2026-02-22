@@ -131,4 +131,25 @@ describe('useTenants', () => {
 
     expect(result.current.data).toEqual([])
   })
+
+  it('fetches all pages when nextPageToken is present', async () => {
+    const page1Tenants = [mockTenants[0]]
+    const page2Tenants = [mockTenants[1]]
+    const listTenants = vi.fn()
+      .mockResolvedValueOnce({ tenants: page1Tenants, nextPageToken: 'token-page-2' })
+      .mockResolvedValueOnce({ tenants: page2Tenants, nextPageToken: '' })
+
+    vi.mocked(useApiClients).mockReturnValue({
+      tenant: { listTenants },
+    } as unknown as ReturnType<typeof useApiClients>)
+
+    const { result } = renderHook(() => useTenants(), { wrapper: makeWrapper() })
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+    expect(listTenants).toHaveBeenCalledTimes(2)
+    expect(listTenants).toHaveBeenNthCalledWith(1, {})
+    expect(listTenants).toHaveBeenNthCalledWith(2, { pageToken: 'token-page-2' })
+    expect(result.current.data).toEqual([...page1Tenants, ...page2Tenants])
+  })
 })

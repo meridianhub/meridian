@@ -14,8 +14,15 @@ export function useTenants() {
   return useQuery({
     queryKey: platformKeys.tenants(),
     queryFn: async () => {
-      const response = await tenant.listTenants({})
-      return response.tenants
+      const first = await tenant.listTenants({})
+      let all = first.tenants ?? []
+      let pageToken = first.nextPageToken
+      while (pageToken) {
+        const page = await tenant.listTenants({ pageToken })
+        all = all.concat(page.tenants ?? [])
+        pageToken = page.nextPageToken
+      }
+      return all
     },
     staleTime: 5 * 60_000,
   })

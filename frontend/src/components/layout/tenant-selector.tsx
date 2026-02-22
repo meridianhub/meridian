@@ -21,9 +21,10 @@ import { useTenantContext } from '@/contexts/tenant-context'
 export function TenantSelector() {
   const [open, setOpen] = React.useState(false)
   const { data: tenants, isLoading } = useTenants()
-  const { tenantSlug, switchTenant } = useTenantContext()
+  const { tenantSlug, currentTenant: contextTenant, switchTenant } = useTenantContext()
 
-  const currentTenant = tenants?.find((t) => t.slug === tenantSlug)
+  // Use the loaded tenant data first, fall back to context (e.g., on error or partial data)
+  const resolvedTenant = tenants?.find((t) => t.slug === tenantSlug) ?? contextTenant
 
   if (isLoading) {
     return (
@@ -52,7 +53,7 @@ export function TenantSelector() {
             className="w-[200px] justify-between"
           >
             <span className="truncate">
-              {currentTenant ? currentTenant.displayName : 'Select tenant...'}
+              {resolvedTenant ? resolvedTenant.displayName ?? resolvedTenant.name : 'Select tenant...'}
             </span>
             <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
           </Button>
