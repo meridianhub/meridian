@@ -20,6 +20,8 @@ import { InternalAccountsPage } from '@/pages/internal-accounts'
 import { MarketDataPage } from '@/pages/market-data'
 import { DatasetDetailPage } from '@/pages/market-data/[datasetCode]'
 import { ForecastingPage } from '@/pages/forecasting'
+import { ReconciliationPage } from '@/pages/reconciliation'
+import { ReconciliationDetailPage } from '@/pages/reconciliation/detail'
 
 // Placeholder page components - replaced as each page task is implemented
 function PlaceholderPage({ title }: { title: string }) {
@@ -71,8 +73,10 @@ function AppShellLayout() {
         <Route path="/transactions" element={<PlaceholderPage title="Transactions" />} />
         <Route path="/positions" element={<PlaceholderPage title="Positions" />} />
         <Route path="/ledger" element={<PlaceholderPage title="Ledger" />} />
-        <Route path="/parties" element={<PlaceholderPage title="Parties" />} />
-        <Route path="/reconciliation" element={<PlaceholderPage title="Reconciliation" />} />
+        <Route path="/parties" element={<PartiesPage />} />
+        <Route path="/parties/:partyId" element={<PartyDetailPage />} />
+        <Route path="/reconciliation" element={<ReconciliationPage />} />
+        <Route path="/reconciliation/:runId" element={<ReconciliationDetailPage />} />
         <Route
           path="/starlark-config"
           element={<PlaceholderPage title="Starlark Configuration" />}
