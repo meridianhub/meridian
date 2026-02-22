@@ -620,7 +620,7 @@ func (m *mockEventPublisher) PublishBalanceImbalanceDetected(_ context.Context, 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.events = append(m.events, publishedEvent{
-		Topic: "reconciliation.balance.imbalance.detected",
+		Topic: "reconciliation.balance-imbalance-detected.v1",
 		Event: event,
 	})
 	return m.err

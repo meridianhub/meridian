@@ -78,7 +78,7 @@ func TestBalanceAssertion_Imbalanced(t *testing.T) {
 	assert.True(t, result.Event.ImbalanceAmount.Equal(decimal.NewFromFloat(200.00)))
 
 	// Verify event was published to mock publisher
-	imbalanceEvents := infra.mockPublisher.getEventsByTopic("reconciliation.balance.imbalance.detected")
+	imbalanceEvents := infra.mockPublisher.getEventsByTopic("reconciliation.balance-imbalance-detected.v1")
 	assert.Len(t, imbalanceEvents, 1)
 
 	// Verify assertion was persisted
