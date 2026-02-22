@@ -52,8 +52,10 @@ function getLineOffset(doc: string, line: number, column: number): number {
   for (let i = 0; i < line - 1 && i < lines.length; i++) {
     offset += lines[i].length + 1 // +1 for newline
   }
+  // Proto ValidationError uses 1-indexed columns; convert to 0-indexed for CodeMirror
+  const zeroIndexedColumn = Math.max(0, column - 1)
   // Clamp to doc length to prevent Diagnostic range errors when doc shrinks
-  return Math.min(offset + Math.max(0, column), doc.length)
+  return Math.min(offset + zeroIndexedColumn, doc.length)
 }
 
 export function StarlarkEditor({
