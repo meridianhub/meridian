@@ -66,11 +66,6 @@ export const handlers = [
     return HttpResponse.json({})
   }),
 
-  // FinancialAccountingService - ledger entries
-  http.post('*/meridian.financial_accounting.v1.FinancialAccountingService/*', () => {
-    return HttpResponse.json({})
-  }),
-
   // AccountReconciliationService - reconciliation
   http.post('*/meridian.reconciliation.v1.AccountReconciliationService/*', () => {
     return HttpResponse.json({})
