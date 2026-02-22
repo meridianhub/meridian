@@ -22,6 +22,11 @@ export const tenantKeys = {
     [...tenantKeys.all(tenantId), 'sagas'] as const,
   saga: (tenantId: string, sagaId: string) =>
     [...tenantKeys.sagas(tenantId), sagaId] as const,
+
+  payments: (tenantId: string) =>
+    [...tenantKeys.all(tenantId), 'payments'] as const,
+  payment: (tenantId: string, paymentOrderId: string) =>
+    [...tenantKeys.payments(tenantId), paymentOrderId] as const,
 } as const
 
 export const platformKeys = {

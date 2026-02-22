@@ -9,6 +9,17 @@ import { ProtectedRoute, PlatformOnlyRoute } from '@/components/routing'
 import { AppShell } from '@/components/layout/app-shell'
 import { AccountsPage } from '@/pages/accounts'
 import { AccountDetailPage } from '@/pages/accounts/[accountId]'
+import { PaymentsPage } from '@/pages/payments'
+import { PaymentDetailPage } from '@/pages/payments/payment-detail'
+import { PartiesPage } from '@/pages/parties'
+import { PartyDetailPage } from '@/pages/parties/[partyId]'
+import { AuditLogPage } from '@/pages/audit'
+import { PositionsPage } from '@/pages/positions'
+import { PositionDetailPage } from '@/pages/positions/detail'
+import { InternalAccountsPage } from '@/pages/internal-accounts'
+import { MarketDataPage } from '@/pages/market-data'
+import { DatasetDetailPage } from '@/pages/market-data/[datasetCode]'
+import { ForecastingPage } from '@/pages/forecasting'
 
 // Placeholder page components - replaced as each page task is implemented
 function PlaceholderPage({ title }: { title: string }) {
@@ -53,11 +64,10 @@ function AppShellLayout() {
         <Route path="/" element={<PlaceholderPage title="Dashboard" />} />
         <Route path="/accounts" element={<AccountsPage />} />
         <Route path="/accounts/:accountId" element={<AccountDetailPage />} />
-        <Route
-          path="/internal-accounts"
-          element={<PlaceholderPage title="Internal Accounts" />}
-        />
-        <Route path="/payments" element={<PlaceholderPage title="Payments" />} />
+        <Route path="/internal-accounts" element={<InternalAccountsPage />} />
+        <Route path="/internal-accounts/:accountId" element={<PlaceholderPage title="Internal Account Detail" />} />
+        <Route path="/payments" element={<PaymentsPage />} />
+        <Route path="/payments/:paymentOrderId" element={<PaymentDetailPage />} />
         <Route path="/transactions" element={<PlaceholderPage title="Transactions" />} />
         <Route path="/positions" element={<PlaceholderPage title="Positions" />} />
         <Route path="/ledger" element={<PlaceholderPage title="Ledger" />} />
