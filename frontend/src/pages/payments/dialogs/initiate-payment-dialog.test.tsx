@@ -157,6 +157,31 @@ describe('InitiatePaymentDialog - IBAN validation', () => {
     })
   })
 
+  it('accepts IBAN with spaces (normalizes before validation)', async () => {
+    const user = userEvent.setup()
+    const mutateAsync = vi.fn().mockResolvedValue({ paymentOrderId: 'po-new' })
+    mockUseInitiatePayment.mockReturnValue(makeMockMutation({ mutateAsync }))
+
+    render(
+      <Wrapper>
+        <InitiatePaymentDialog open={true} onOpenChange={vi.fn()} onSuccess={vi.fn()} />
+      </Wrapper>,
+    )
+
+    await user.type(screen.getByLabelText(/debtor account/i), 'acct-001')
+    await user.type(screen.getByLabelText(/creditor iban/i), 'GB29 NWBK 6016 1331 9268 19')
+    await user.type(screen.getByLabelText(/amount/i), '100.00')
+    await user.click(screen.getByRole('button', { name: /initiate payment/i }))
+
+    await waitFor(() => {
+      expect(screen.queryByText(/invalid iban format/i)).not.toBeInTheDocument()
+      // Submitted IBAN should have spaces removed
+      expect(mutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ creditorReference: 'GB29NWBK60161331926819' }),
+      )
+    })
+  })
+
   it('shows validation error for empty amount', async () => {
     const user = userEvent.setup()
 

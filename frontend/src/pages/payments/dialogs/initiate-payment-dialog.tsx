@@ -66,9 +66,10 @@ export function InitiatePaymentDialog({
       newErrors.debtorAccountId = 'Debtor account is required'
     }
 
-    if (!formData.creditorIban.trim()) {
+    const normalizedIban = formData.creditorIban.trim().replace(/\s+/g, '')
+    if (!normalizedIban) {
       newErrors.creditorIban = 'IBAN is required'
-    } else if (!IBAN_PATTERN.test(formData.creditorIban.trim())) {
+    } else if (!IBAN_PATTERN.test(normalizedIban)) {
       newErrors.creditorIban = 'Invalid IBAN format'
     }
 
@@ -90,9 +91,10 @@ export function InitiatePaymentDialog({
     if (!validate()) return
 
     try {
+      const normalizedIban = formData.creditorIban.trim().replace(/\s+/g, '')
       const result = await initiate.mutateAsync({
         debtorAccountId: formData.debtorAccountId.trim(),
-        creditorReference: formData.creditorIban.trim(),
+        creditorReference: normalizedIban,
         amount: formData.amount.trim(),
         currency: formData.currency,
       })

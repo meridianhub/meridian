@@ -5,6 +5,9 @@ import { useTenantSlug } from '@/hooks/use-tenant-context'
 import { amountToBigInt } from './payment-form-utils'
 
 function generateIdempotencyKey(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
