@@ -56,8 +56,8 @@ ALTER TABLE public.platform_saga_definition
 ```
 
 **Issue**: `ALTER TABLE ... ADD CONSTRAINT IF NOT EXISTS` is CockroachDB-specific syntax.
-Standard PostgreSQL does not support `IF NOT EXISTS` for `ADD CONSTRAINT`.
-This fails on PostgreSQL 14 and below; PostgreSQL 15+ added partial support for certain constraint types only.
+Standard PostgreSQL does not support `IF NOT EXISTS` for `ADD CONSTRAINT` in any version.
+This will fail on any PostgreSQL deployment.
 
 **Required Change for PostgreSQL**:
 
@@ -80,7 +80,8 @@ END $$;
 ```
 
 **Occurrence counts**:
-`20260128000002_versioned_platform_sagas_constraints.sql` — 4 occurrences;
+`20260128000002_versioned_platform_sagas_constraints.sql` — 2 occurrences (the other 2 `IF NOT EXISTS`
+in that file apply to `CREATE INDEX IF NOT EXISTS`, which is standard SQL and fully compatible);
 `20260129000002_bitemporal_platform_sagas_constraints.sql` — 1 occurrence.
 
 ---
