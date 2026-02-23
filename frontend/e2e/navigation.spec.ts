@@ -23,6 +23,7 @@ const TENANT_ROUTES = [
   { path: '/starlark-config', label: 'Starlark Config', heading: /Starlark Configuration/i },
   { path: '/market-data', label: 'Market Data', heading: /^Market Data$/ },
   { path: '/forecasting', label: 'Forecasting', heading: /^Forecasting$/ },
+  { path: '/reference-data', label: 'Reference Data', heading: /^Reference Data$/ },
   { path: '/gateway-mappings', label: 'Gateway Mappings', heading: /Gateway Mappings/i },
   { path: '/manifests', label: 'Manifests', heading: /Manifest Configuration/i },
   { path: '/audit-log', label: 'Audit Log', heading: /^Audit Log$/ },
