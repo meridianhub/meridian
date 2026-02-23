@@ -20,7 +20,8 @@
 | Files fully compatible as-is | 109 |
 
 The migration corpus is in **good shape for PostgreSQL 16**. Most migrations were written with
-standard SQL that runs on both CockroachDB and PostgreSQL. Three files contain issues:
+standard SQL that runs on both CockroachDB and PostgreSQL. Three files have **blocking**
+incompatibilities; one additional file has an informational difference that requires no fix:
 
 1. Two files use `ADD CONSTRAINT IF NOT EXISTS` — a CockroachDB v21.2+ extension not supported
    in PostgreSQL 16. Fixed by removing `IF NOT EXISTS`.
@@ -28,6 +29,8 @@ standard SQL that runs on both CockroachDB and PostgreSQL. Three files contain i
    CockroachDB but not PostgreSQL (which requires `ALTER TABLE DROP CONSTRAINT`). The migration
    file is **not** modified (that would break existing CockroachDB CI); instead a pre-migration
    SQL script handles this in the demo environment.
+3. One file uses `SERIAL` (tenant service) — semantics differ between CRDB and PostgreSQL but
+   are functionally compatible for this use case. No fix required.
 
 The `gen_random_uuid()` function, used extensively across all services, is natively available
 in PostgreSQL 13+ with no extension required.
@@ -90,12 +93,19 @@ DROP INDEX IF EXISTS "public"."uq_platform_saga_definition_name" CASCADE;
 ```
 
 This statement is correct for CockroachDB, where `DROP INDEX CASCADE` drops a constraint-backed
-unique index along with its constraint. On PostgreSQL, this fails:
+unique index along with its constraint. On PostgreSQL, this fails with:
 
-> `ERROR: index "uq_platform_saga_definition_name" does not exist`
+```text
+ERROR: cannot drop index "uq_platform_saga_definition_name" because constraint
+  "uq_platform_saga_definition_name" on table "platform_saga_definition" requires it
+HINT: You can drop constraint "uq_platform_saga_definition_name" on table
+  "platform_saga_definition" instead.
+```
 
-PostgreSQL does not treat constraint-backed unique indexes as droppable via `DROP INDEX`. The
-required PostgreSQL syntax is `ALTER TABLE … DROP CONSTRAINT`.
+The constraint was explicitly named in migration `20260125000001_platform_saga_definition.sql`
+(line 36), so PostgreSQL creates a backing index with the same name and owns it under the
+constraint. PostgreSQL refuses to drop the index directly; the constraint must be dropped via
+`ALTER TABLE … DROP CONSTRAINT`.
 
 **Why the migration file is NOT modified:**
 
