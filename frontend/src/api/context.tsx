@@ -40,3 +40,7 @@ export function useApiClients(): ServiceClients {
   }
   return ctx.clients
 }
+
+// Short alias used by page components
+// eslint-disable-next-line react-refresh/only-export-components
+export const useClients = useApiClients
