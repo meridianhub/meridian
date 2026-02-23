@@ -12,9 +12,12 @@ var latencyBuckets = []float64{0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5}
 
 // Metrics holds Prometheus metric collectors for the WebSocket event-streaming layer.
 // Create a new instance per service via NewMetrics and wire it into the Router,
-// Handler, and Connection components. All methods on Metrics are nil-safe: calling
-// them on a nil *Metrics is a no-op, which allows callers to pass nil when metrics
-// are not required without adding nil-check boilerplate at each call site.
+// Handler, and Connection components.
+//
+// The recording methods (IncConnectionOpened, IncConnectionClosed, IncEventDelivered,
+// IncEventDropped, ObserveLatency, SetSubscriptionCount) are nil-safe and may be called
+// on a nil *Metrics as a no-op. Accessor methods (ActiveConnections, EventsDelivered,
+// etc.) are intended for use in tests only and are not nil-safe.
 type Metrics struct {
 	activeConnections *prometheus.GaugeVec
 	eventsDelivered   *prometheus.CounterVec
