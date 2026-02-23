@@ -107,15 +107,31 @@ const sampleRun = {
 const sampleVariances = [
   {
     varianceId: 'var-001',
-    reasonCode: 'AMOUNT_MISMATCH',
-    expected: { amount: '10000', currency: 'GBP', direction: 'DEBIT', entryId: 'e1' },
-    actual: { amount: '9500', currency: 'GBP', direction: 'DEBIT', entryId: 'e2' },
+    runId: 'run-001',
+    snapshotId: 'snap-001',
+    accountId: 'acc-001',
+    instrumentCode: 'GBP',
+    expectedAmount: '10000',
+    actualAmount: '9500',
+    varianceAmount: '-500',
+    reason: 'VARIANCE_REASON_AMOUNT_MISMATCH',
+    status: 'VARIANCE_STATUS_OPEN',
+    createdAt: '2026-02-23T00:00:00Z',
+    updatedAt: '2026-02-23T00:00:00Z',
   },
   {
     varianceId: 'var-002',
-    reasonCode: 'MISSING_ENTRY',
-    expected: { amount: '5000', currency: 'GBP', direction: 'CREDIT', entryId: 'e3' },
-    actual: null,
+    runId: 'run-001',
+    snapshotId: 'snap-001',
+    accountId: 'acc-002',
+    instrumentCode: 'GBP',
+    expectedAmount: '5000',
+    actualAmount: '0',
+    varianceAmount: '-5000',
+    reason: 'VARIANCE_REASON_MISSING_ENTRY',
+    status: 'VARIANCE_STATUS_OPEN',
+    createdAt: '2026-02-23T00:00:00Z',
+    updatedAt: '2026-02-23T00:00:00Z',
   },
 ]
 
@@ -153,7 +169,7 @@ function mockFetch(runDetail = sampleRun, variances = sampleVariances, disputes 
   vi.spyOn(globalThis, 'fetch').mockImplementation((input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input.toString()
     if (url.includes('/variances')) {
-      return Promise.resolve(new Response(JSON.stringify({ items: variances }), { status: 200 }))
+      return Promise.resolve(new Response(JSON.stringify({ variances, nextPageToken: '', totalCount: variances.length }), { status: 200 }))
     }
     if (url.includes('/disputes')) {
       return Promise.resolve(new Response(JSON.stringify({ items: disputes }), { status: 200 }))
@@ -397,7 +413,7 @@ describe('ReconciliationDetailPage - disputes tab', () => {
         return Promise.resolve(new Response(null, { status: 200 }))
       }
       if (url.includes('/variances')) {
-        return Promise.resolve(new Response(JSON.stringify({ items: sampleVariances }), { status: 200 }))
+        return Promise.resolve(new Response(JSON.stringify({ variances: sampleVariances, nextPageToken: '', totalCount: sampleVariances.length }), { status: 200 }))
       }
       if (url.includes('/disputes')) {
         return Promise.resolve(new Response(JSON.stringify({ items: sampleDisputes }), { status: 200 }))
@@ -507,7 +523,7 @@ describe('ReconciliationDetailPage - balance assertions tab', () => {
         return Promise.resolve(new Response(null, { status: 200 }))
       }
       if (url.includes('/variances')) {
-        return Promise.resolve(new Response(JSON.stringify({ items: sampleVariances }), { status: 200 }))
+        return Promise.resolve(new Response(JSON.stringify({ variances: sampleVariances, nextPageToken: '', totalCount: sampleVariances.length }), { status: 200 }))
       }
       if (url.includes('/disputes')) {
         return Promise.resolve(new Response(JSON.stringify({ items: sampleDisputes }), { status: 200 }))
