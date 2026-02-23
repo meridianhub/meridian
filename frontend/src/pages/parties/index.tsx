@@ -95,6 +95,8 @@ export function PartiesPage() {
       pageToken: params.pageToken,
       pageSize: params.pageSize,
       searchQuery: params.filters?.searchQuery,
+      partyType: params.filters?.partyType,
+      status: params.filters?.status,
     })
 
     const parties: Party[] = response.parties.map((p: Party) => ({
