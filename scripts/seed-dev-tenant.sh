@@ -63,4 +63,72 @@ case "$HTTP_CODE" in
 esac
 
 rm -f /tmp/seed-response.json
+
+# --- Seed sample party (organization) ---
+
+echo "Creating sample organization ..."
+
+HTTP_CODE=$(curl -s -o /tmp/seed-response.json -w "%{http_code}" \
+  -X POST "${GATEWAY_URL}/meridian.party.v1.PartyService/RegisterParty" \
+  -H "Content-Type: application/json" \
+  -H "X-Tenant-Slug: dev-tenant" \
+  -d '{
+    "partyType": "PARTY_TYPE_ORGANIZATION",
+    "legalName": "Acme Energy Ltd",
+    "displayName": "Acme Energy",
+    "externalReference": "acme-001"
+  }')
+
+BODY=$(cat /tmp/seed-response.json 2>/dev/null || echo "")
+
+case "$HTTP_CODE" in
+  200)
+    if echo "$BODY" | grep -qi "already.exist"; then
+      echo "Sample organization already exists."
+    else
+      echo "Sample organization created."
+    fi
+    ;;
+  409)
+    echo "Sample organization already exists."
+    ;;
+  *)
+    echo "WARNING: Could not create sample organization (HTTP ${HTTP_CODE}): ${BODY}"
+    ;;
+esac
+
+# --- Seed sample party (person) ---
+
+echo "Creating sample person ..."
+
+HTTP_CODE=$(curl -s -o /tmp/seed-response.json -w "%{http_code}" \
+  -X POST "${GATEWAY_URL}/meridian.party.v1.PartyService/RegisterParty" \
+  -H "Content-Type: application/json" \
+  -H "X-Tenant-Slug: dev-tenant" \
+  -d '{
+    "partyType": "PARTY_TYPE_PERSON",
+    "legalName": "Jane Smith",
+    "displayName": "Jane Smith",
+    "externalReference": "person-001"
+  }')
+
+BODY=$(cat /tmp/seed-response.json 2>/dev/null || echo "")
+
+case "$HTTP_CODE" in
+  200)
+    if echo "$BODY" | grep -qi "already.exist"; then
+      echo "Sample person already exists."
+    else
+      echo "Sample person created."
+    fi
+    ;;
+  409)
+    echo "Sample person already exists."
+    ;;
+  *)
+    echo "WARNING: Could not create sample person (HTTP ${HTTP_CODE}): ${BODY}"
+    ;;
+esac
+
+rm -f /tmp/seed-response.json
 echo "Seed complete."

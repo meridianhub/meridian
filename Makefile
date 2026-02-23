@@ -517,7 +517,7 @@ dev-up: proto
 	@echo "  Once ready, services will be available at:"
 	@echo ""
 	@echo "    Meridian Console         http://localhost:5173"
-	@echo "    Gateway (REST/Connect)   http://localhost:8090"
+	@echo "    Gateway (REST/Connect)   localhost:8090 (API only, no web UI)"
 	@echo "    gRPC                     localhost:50051"
 	@echo "    CockroachDB UI           http://localhost:8080"
 	@echo "    CockroachDB SQL          postgresql://root@localhost:26257/defaultdb?sslmode=disable"

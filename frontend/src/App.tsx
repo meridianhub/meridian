@@ -36,6 +36,7 @@ import { LedgerPage } from '@/pages/ledger'
 import { BookingLogDetailPage } from '@/pages/ledger/booking-log-detail'
 import { ReconciliationPage } from '@/pages/reconciliation'
 import { ReconciliationDetailPage } from '@/pages/reconciliation/detail'
+import { DashboardPage } from '@/pages/dashboard'
 
 // Placeholder page components - replaced as each page task is implemented
 function PlaceholderPage({ title }: { title: string }) {
@@ -127,7 +128,7 @@ function AppShellLayout() {
     <AppShell currentPath={pathname}>
       <Routes>
         {/* Tenant-scoped routes */}
-        <Route path="/" element={<PlaceholderPage title="Dashboard" />} />
+        <Route path="/" element={<DashboardPage />} />
         <Route path="/accounts" element={<AccountsPage />} />
         <Route path="/accounts/:accountId" element={<AccountDetailPage />} />
         <Route path="/internal-accounts" element={<InternalAccountsPage />} />

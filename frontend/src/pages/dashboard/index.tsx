@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import { CreditCard, FileText, BarChart3, ArrowRight } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useApiClients } from '@/api/context'
@@ -79,6 +80,7 @@ function getCountFromPagination(
 }
 
 export function DashboardPage() {
+  const navigate = useNavigate()
   const { tenantSlug } = useTenantContext()
   const { paymentsQuery, bookingLogsQuery, ledgerPostingsQuery, activityQuery } =
     useDashboardStats(tenantSlug)
@@ -114,40 +116,34 @@ export function DashboardPage() {
     status: po.status?.toString(),
   }))
 
-  // Quick actions will navigate to dedicated pages once routes are implemented.
-  // Disabled until routing infrastructure is wired (task 026-operations-console.17).
   const quickActions: QuickAction[] = [
     {
       id: 'view-payments',
       label: 'View Payment Orders',
       description: 'Browse all payment orders',
       icon: <CreditCard className="h-4 w-4" />,
-      onClick: () => {},
-      disabled: true,
+      onClick: () => navigate('/payments'),
     },
     {
       id: 'view-booking-logs',
       label: 'View Booking Logs',
       description: 'Browse financial booking logs',
       icon: <FileText className="h-4 w-4" />,
-      onClick: () => {},
-      disabled: true,
+      onClick: () => navigate('/ledger'),
     },
     {
       id: 'view-ledger',
       label: 'View Ledger Postings',
       description: 'Browse double-entry ledger',
       icon: <BarChart3 className="h-4 w-4" />,
-      onClick: () => {},
-      disabled: true,
+      onClick: () => navigate('/ledger'),
     },
     {
       id: 'view-reconciliations',
       label: 'Reconciliations',
       description: 'Check reconciliation status',
       icon: <ArrowRight className="h-4 w-4" />,
-      onClick: () => {},
-      disabled: true,
+      onClick: () => navigate('/reconciliation'),
     },
   ]
 
