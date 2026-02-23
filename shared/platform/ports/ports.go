@@ -118,6 +118,12 @@ const (
 	// Protocol: gRPC (internal)
 	// Visibility: Cluster-internal only
 	Forecasting = 50061
+
+	// ControlPlane is the gRPC port for the Control Plane service.
+	// Manages manifest application, validation, and diffing.
+	// Protocol: gRPC (internal)
+	// Visibility: Cluster-internal only
+	ControlPlane = 50062
 )
 
 // HTTP service ports (various protocols).
