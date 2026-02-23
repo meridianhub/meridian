@@ -58,15 +58,6 @@ done
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 
-# UFW rule helper — adds the rule only if it is not already present.
-ufw_allow_if_missing() {
-  local rule="$*"
-  if ! ufw status verbose | grep -qF "$rule"; then
-    # shellcheck disable=SC2086
-    ufw allow $rule
-  fi
-}
-
 # ---------------------------------------------------------------------------
 # 1. System updates and essential packages
 # ---------------------------------------------------------------------------
@@ -306,7 +297,6 @@ log "  Created ${MERIDIAN_DIR}/{certs,data,scripts}"
 
 log "6/7 — Hardening SSH configuration..."
 
-SSHD_CONFIG="/etc/ssh/sshd_config"
 SSHD_CUSTOM="/etc/ssh/sshd_config.d/99-meridian-hardening.conf"
 
 # Write a drop-in config so we don't patch sshd_config directly
