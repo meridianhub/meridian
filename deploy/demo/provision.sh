@@ -38,6 +38,10 @@ MERIDIAN_DIR="${MERIDIAN_DIR:-/opt/meridian}"
 while [[ $# -gt 0 ]]; do
   case $1 in
     --ssh-authorized-keys)
+      if [[ $# -lt 2 || -z "$2" ]]; then
+        echo "error: --ssh-authorized-keys requires a value" >&2
+        exit 1
+      fi
       SSH_AUTHORIZED_KEYS="$2"
       shift 2
       ;;
@@ -188,7 +192,7 @@ update_cloudflare_rules() {
 
   if [[ -z "${cf_ipv4}" && -z "${cf_ipv6}" ]]; then
     log "  WARNING: Failed to fetch Cloudflare IPs. HTTP/HTTPS rules NOT updated."
-    return 1
+    return 0
   fi
 
   # Remove existing Cloudflare-added HTTP/HTTPS rules (comment-based identification)
@@ -225,7 +229,7 @@ log "  UFW enabled."
 
 # Cron job to refresh Cloudflare IPs weekly (runs as root, every Sunday at 03:00)
 CRON_MARKER="# meridian-cloudflare-ufw"
-CRON_CMD="0 3 * * 0 root /opt/meridian/scripts/update-cloudflare-ufw.sh >> /var/log/cloudflare-ufw.log 2>&1 ${CRON_MARKER}"
+CRON_CMD="0 3 * * 0 root ${MERIDIAN_DIR}/scripts/update-cloudflare-ufw.sh >> /var/log/cloudflare-ufw.log 2>&1 ${CRON_MARKER}"
 if ! grep -qF "${CRON_MARKER}" /etc/cron.d/meridian-cloudflare 2>/dev/null; then
   cat > /etc/cron.d/meridian-cloudflare <<EOF
 ${CRON_CMD}
@@ -235,16 +239,32 @@ EOF
 fi
 
 # Install the update script itself so the cron job can call it
-install -d -m 755 /opt/meridian/scripts
-cat > /opt/meridian/scripts/update-cloudflare-ufw.sh <<'SCRIPT'
+install -d -m 755 "${MERIDIAN_DIR}/scripts"
+cat > "${MERIDIAN_DIR}/scripts/update-cloudflare-ufw.sh" <<'SCRIPT'
 #!/usr/bin/env bash
 set -euo pipefail
 
 CF_RULES_FILE="/etc/ufw/cloudflare_ranges.txt"
 
-CF_IPV4=$(curl -fsSL https://www.cloudflare.com/ips-v4)
-CF_IPV6=$(curl -fsSL https://www.cloudflare.com/ips-v6)
+CF_IPV4=$(curl -fsSL https://www.cloudflare.com/ips-v4 2>/dev/null || true)
+CF_IPV6=$(curl -fsSL https://www.cloudflare.com/ips-v6 2>/dev/null || true)
 
+# Abort if both lists are empty — do not wipe existing rules
+if [[ -z "${CF_IPV4}" && -z "${CF_IPV6}" ]]; then
+  echo "$(date '+%Y-%m-%d %H:%M:%S') ERROR: Failed to fetch Cloudflare IP ranges. Existing rules unchanged." >&2
+  exit 1
+fi
+
+NEW_RANGES=$(printf '%s\n%s' "${CF_IPV4}" "${CF_IPV6}")
+
+# Guard: refuse to wipe if the new range list is suspiciously short
+RANGE_COUNT=$(echo "${NEW_RANGES}" | grep -c '[0-9]' || true)
+if [[ "${RANGE_COUNT}" -lt 5 ]]; then
+  echo "$(date '+%Y-%m-%d %H:%M:%S') ERROR: Cloudflare IP list has only ${RANGE_COUNT} entries; aborting to avoid wiping rules." >&2
+  exit 1
+fi
+
+# Remove stale rules
 if [[ -f "${CF_RULES_FILE}" ]]; then
   while IFS= read -r range; do
     [[ -z "${range}" ]] && continue
@@ -253,7 +273,7 @@ if [[ -f "${CF_RULES_FILE}" ]]; then
   done < "${CF_RULES_FILE}"
 fi
 
-printf '%s\n%s' "${CF_IPV4}" "${CF_IPV6}" > "${CF_RULES_FILE}"
+echo "${NEW_RANGES}" > "${CF_RULES_FILE}"
 
 while IFS= read -r range; do
   [[ -z "${range}" ]] && continue
@@ -262,7 +282,7 @@ while IFS= read -r range; do
 done < "${CF_RULES_FILE}"
 
 ufw reload
-echo "$(date '+%Y-%m-%d %H:%M:%S') Cloudflare UFW rules updated."
+echo "$(date '+%Y-%m-%d %H:%M:%S') Cloudflare UFW rules updated (${RANGE_COUNT} ranges)."
 SCRIPT
 chmod 755 /opt/meridian/scripts/update-cloudflare-ufw.sh
 
@@ -353,5 +373,5 @@ log "  SSH          : password auth disabled, root login restricted"
 log ""
 log "Next steps:"
 log "  1. Copy deploy/demo/docker-compose.yml to ${MERIDIAN_DIR}/docker-compose.yml"
-log "  2. Copy .env.demo to ${MERIDIAN_DIR}/.env (fill in secrets)"
+log "  2. Copy deploy/demo/.env.demo.example to ${MERIDIAN_DIR}/.env and fill in secrets"
 log "  3. Log in as '${DEPLOY_USER}' and run: cd ${MERIDIAN_DIR} && docker compose up -d"
