@@ -502,6 +502,11 @@ func (r *Repository) ListByOrganization(ctx context.Context, orgPartyID uuid.UUI
 func (r *Repository) ListAccounts(ctx context.Context, params ListAccountsParams) (*ListAccountsResult, error) {
 	var result *ListAccountsResult
 	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		limit := params.Limit
+		if limit <= 0 {
+			limit = 25
+		}
+
 		// Base query: exclude soft-deleted accounts
 		baseQuery := tx.Model(&CurrentAccountEntity{}).Where("deleted_at IS NULL")
 
@@ -541,14 +546,14 @@ func (r *Repository) ListAccounts(ctx context.Context, params ListAccountsParams
 		var entities []CurrentAccountEntity
 		if err := pageQuery.
 			Order("created_at DESC, id DESC").
-			Limit(params.Limit + 1). // fetch one extra to detect next page
+			Limit(limit + 1). // fetch one extra to detect next page
 			Find(&entities).Error; err != nil {
 			return err
 		}
 
-		hasMore := len(entities) > params.Limit
+		hasMore := len(entities) > limit
 		if hasMore {
-			entities = entities[:params.Limit]
+			entities = entities[:limit]
 		}
 
 		accounts := make([]domain.CurrentAccount, 0, len(entities))

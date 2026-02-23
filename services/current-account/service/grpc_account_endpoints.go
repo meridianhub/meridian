@@ -304,7 +304,11 @@ func (s *Service) ListCurrentAccounts(ctx context.Context, req *pb.ListCurrentAc
 	}
 
 	if req.Status != pb.AccountStatus_ACCOUNT_STATUS_UNSPECIFIED {
-		params.Status = protoToAccountStatus(req.Status)
+		statusStr, ok := protoToAccountStatus(req.Status)
+		if !ok {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid status: %v", req.Status)
+		}
+		params.Status = statusStr
 	}
 
 	// Execute query
@@ -328,18 +332,19 @@ func (s *Service) ListCurrentAccounts(ctx context.Context, req *pb.ListCurrentAc
 }
 
 // protoToAccountStatus converts a proto AccountStatus to a domain status string.
-func protoToAccountStatus(s pb.AccountStatus) string {
+// Returns false for unrecognized enum values.
+func protoToAccountStatus(s pb.AccountStatus) (string, bool) {
 	switch s {
 	case pb.AccountStatus_ACCOUNT_STATUS_ACTIVE:
-		return string(domain.AccountStatusActive)
+		return string(domain.AccountStatusActive), true
 	case pb.AccountStatus_ACCOUNT_STATUS_FROZEN:
-		return string(domain.AccountStatusFrozen)
+		return string(domain.AccountStatusFrozen), true
 	case pb.AccountStatus_ACCOUNT_STATUS_CLOSED:
-		return string(domain.AccountStatusClosed)
+		return string(domain.AccountStatusClosed), true
 	case pb.AccountStatus_ACCOUNT_STATUS_UNSPECIFIED:
-		return ""
+		return "", true
 	}
-	return ""
+	return "", false
 }
 
 // RetrieveCurrentAccount gets current account details including balance from Position Keeping.
