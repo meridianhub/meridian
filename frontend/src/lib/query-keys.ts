@@ -39,3 +39,10 @@ export const platformKeys = {
 
   metrics: () => [...platformKeys.all, 'metrics'] as const,
 } as const
+
+export const manifestKeys = {
+  all: ['manifest'] as const,
+  current: () => [...manifestKeys.all, 'current'] as const,
+  history: () => [...manifestKeys.all, 'history'] as const,
+  version: (version: string) => [...manifestKeys.all, 'version', version] as const,
+} as const
