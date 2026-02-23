@@ -5,17 +5,20 @@ on:
     branches: [develop, main]
     paths:
       - 'frontend/**'
+      - '.github/workflows/frontend.yml'
   pull_request:
     branches: [develop, main]
     paths:
       - 'frontend/**'
+      - '.github/workflows/frontend.yml'
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   test:
-    name: Test & Typecheck
+    name: Frontend Tests & Coverage
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -38,8 +41,33 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Run tests
-        run: npx vitest run --reporter=verbose
+      - name: Run tests with coverage
+        run: npx vitest run --coverage --reporter=verbose
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: frontend/coverage/
+          retention-days: 7
+
+      - name: Check 80% line coverage threshold
+        run: |
+          LINES=$(node -e "
+            const s = require('./coverage/coverage-summary.json');
+            console.log(s.total.lines.pct);
+          ")
+          echo "Line coverage: ${LINES}%"
+          node -e "
+            const s = require('./coverage/coverage-summary.json');
+            const pct = s.total.lines.pct;
+            if (pct < 80) {
+              console.error('Coverage ' + pct + '% is below the 80% minimum threshold');
+              process.exit(1);
+            }
+            console.log('Coverage ' + pct + '% meets the 80% minimum threshold');
+          "
 
   lint:
     name: Lint
