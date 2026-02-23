@@ -49,8 +49,9 @@ function ApiClientBridge({ children }: { children: ReactNode }) {
   const { accessToken } = useAuth()
   const { tenantSlug } = useTenantContext()
   const getToken = () => Promise.resolve(accessToken ?? '')
+  const getTenantSlug = () => tenantSlug
   return (
-    <ApiClientProvider tenantSlug={tenantSlug} getToken={getToken}>
+    <ApiClientProvider tenantSlug={tenantSlug} getToken={getToken} getTenantSlug={getTenantSlug}>
       {children}
     </ApiClientProvider>
   )

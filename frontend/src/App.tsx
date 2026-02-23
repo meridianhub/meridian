@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useRef } from 'react'
+import { type ReactNode, useCallback, useEffect, useRef } from 'react'
 import { BrowserRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
@@ -57,7 +57,7 @@ function LoginPage() {
       const payload = btoa(
         JSON.stringify({
           userId: 'dev-user',
-          tenantId: role === 'tenant-user' ? 'meridian-dev' : undefined,
+          tenantId: role === 'tenant-user' ? 'dev-tenant' : undefined,
           roles: [role],
           scopes: ['read', 'write'],
           exp: Math.floor(Date.now() / 1000) + 86400,
@@ -200,15 +200,42 @@ function AppShellLayout() {
 function ApiClientBridge({ children }: { children: ReactNode }) {
   const { accessToken } = useAuth()
   const { tenantSlug } = useTenantContext()
+
   const tokenRef = useRef(accessToken)
-  tokenRef.current = accessToken
+  const slugRef = useRef(tenantSlug)
+
+  useEffect(() => {
+    tokenRef.current = accessToken
+  }, [accessToken])
+
+  useEffect(() => {
+    slugRef.current = tenantSlug
+  }, [tenantSlug])
+
   const getToken = useCallback(() => tokenRef.current ?? '', [])
+  const getTenantSlug = useCallback(() => slugRef.current, [])
 
   return (
-    <ApiClientProvider tenantSlug={tenantSlug} getToken={getToken}>
+    <ApiClientProvider tenantSlug={tenantSlug} getToken={getToken} getTenantSlug={getTenantSlug}>
       {children}
     </ApiClientProvider>
   )
+}
+
+/**
+ * In dev mode, auto-select the seeded dev tenant for platform admins
+ * so pages show data immediately after login.
+ */
+function DevTenantAutoSelector() {
+  const { isPlatformAdmin, currentTenant, switchTenant } = useTenantContext()
+
+  useEffect(() => {
+    if (isPlatformAdmin && !currentTenant) {
+      switchTenant({ id: 'dev_tenant', slug: 'dev-tenant', name: 'Dev Tenant' })
+    }
+  }, [isPlatformAdmin, currentTenant, switchTenant])
+
+  return null
 }
 
 /**
@@ -218,6 +245,7 @@ function AuthenticatedApp() {
   return (
     <TenantProvider>
       <ApiClientBridge>
+        {import.meta.env.DEV && <DevTenantAutoSelector />}
         <TooltipProvider>
           <BrowserRouter>
             <Routes>

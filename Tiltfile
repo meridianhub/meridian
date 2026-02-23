@@ -831,6 +831,17 @@ local_resource(
   trigger_mode=TRIGGER_MODE_MANUAL,  # Can be re-run manually via 'tilt trigger keycloak-setup'
 )
 
+# Seed dev tenant - creates a dev tenant via the gateway for local manual testing
+# Idempotent: safe to re-run (exits 0 if tenant already exists)
+local_resource(
+  'seed-dev-tenant',
+  cmd='./scripts/seed-dev-tenant.sh',
+  resource_deps=['gateway'],
+  labels=['setup'],
+  auto_init=True,
+  trigger_mode=TRIGGER_MODE_MANUAL,  # Can be re-run manually via 'tilt trigger seed-dev-tenant'
+)
+
 # GetBalance smoke test - manual trigger for verifying balance query flow
 local_resource(
   'smoke-test-get-balance',

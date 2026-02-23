@@ -17,40 +17,43 @@ import { createConnectTransport } from '@connectrpc/connect-web'
 import { buildTenantBaseUrl, apiConfig } from '@/api/config'
 
 describe('createTenantTransport', () => {
+  const getTenantSlug = vi.fn(() => null)
+
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
   it('uses apiConfig.baseUrl when tenantSlug is null', () => {
     const getToken = vi.fn(() => 'token')
-    createTenantTransport(null, getToken)
+    createTenantTransport(null, getToken, getTenantSlug)
 
     expect(createConnectTransport).toHaveBeenCalledWith(
       expect.objectContaining({ baseUrl: apiConfig.baseUrl }),
     )
   })
 
-  it('uses tenant-specific URL when tenantSlug is provided', () => {
+  it('uses apiConfig.baseUrl in dev mode even when tenantSlug is provided', () => {
+    // import.meta.env.DEV is true in vitest
     const getToken = vi.fn(() => 'token')
-    createTenantTransport('acme', getToken)
+    createTenantTransport('acme', getToken, getTenantSlug)
 
-    expect(buildTenantBaseUrl).toHaveBeenCalledWith('acme')
+    expect(buildTenantBaseUrl).not.toHaveBeenCalled()
     expect(createConnectTransport).toHaveBeenCalledWith(
-      expect.objectContaining({ baseUrl: 'https://acme.api.meridian.io' }),
+      expect.objectContaining({ baseUrl: apiConfig.baseUrl }),
     )
   })
 
-  it('includes auth interceptor in transport config', () => {
+  it('includes both auth and tenant interceptors in transport config', () => {
     const getToken = vi.fn(() => 'token')
-    createTenantTransport(null, getToken)
+    createTenantTransport(null, getToken, getTenantSlug)
 
     const callArgs = vi.mocked(createConnectTransport).mock.calls[0][0]
-    expect(callArgs.interceptors).toHaveLength(1)
+    expect(callArgs.interceptors).toHaveLength(2)
   })
 
   it('passes useBinaryFormat from apiConfig', () => {
     const getToken = vi.fn(() => null)
-    createTenantTransport(null, getToken)
+    createTenantTransport(null, getToken, getTenantSlug)
 
     expect(createConnectTransport).toHaveBeenCalledWith(
       expect.objectContaining({ useBinaryFormat: false }),
