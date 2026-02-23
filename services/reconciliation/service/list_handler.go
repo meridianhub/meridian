@@ -231,6 +231,8 @@ func toDomainDisputeStatusFilter(s reconciliationv1.DisputeStatus) *domain.Dispu
 		ds = domain.DisputeStatusRejected
 	case reconciliationv1.DisputeStatus_DISPUTE_STATUS_UNSPECIFIED:
 		return nil
+	default:
+		return nil
 	}
 	return &ds
 }
