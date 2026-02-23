@@ -583,6 +583,69 @@ func (s *AccountReconciliationService) RetrieveAccountReconciliation(
 	}, nil
 }
 
+// ListAccountReconciliations returns paginated settlement runs.
+func (s *AccountReconciliationService) ListAccountReconciliations(
+	ctx context.Context,
+	req *reconciliationv1.ListAccountReconciliationsRequest,
+) (*reconciliationv1.ListAccountReconciliationsResponse, error) {
+	if s.runRepo == nil {
+		return nil, status.Error(codes.Unimplemented, "ListAccountReconciliations not yet implemented")
+	}
+
+	pageSize := int(req.GetPageSize())
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	if pageSize > 1000 {
+		pageSize = 1000
+	}
+
+	offset, err := decodeCursor(req.GetPageToken())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid page_token: %v", err)
+	}
+
+	filter := domain.RunFilter{
+		Limit:  pageSize + 1,
+		Offset: offset,
+	}
+
+	if req.GetAccountId() != "" {
+		accountID := req.GetAccountId()
+		filter.AccountID = &accountID
+	}
+
+	if req.GetStatus() != reconciliationv1.RunStatus_RUN_STATUS_UNSPECIFIED {
+		domainStatus := toDomainRunStatus(req.GetStatus())
+		filter.Status = &domainStatus
+	}
+
+	runs, err := s.runRepo.List(ctx, filter)
+	if err != nil {
+		s.logger.Error("failed to list settlement runs",
+			slog.String("error", err.Error()),
+		)
+		return nil, status.Error(codes.Internal, "failed to list settlement runs")
+	}
+
+	var nextPageToken string
+	if len(runs) > pageSize {
+		runs = runs[:pageSize]
+		nextPageToken = encodeCursor(offset + pageSize)
+	}
+
+	summaries := make([]*reconciliationv1.SettlementRunSummary, len(runs))
+	for i, run := range runs {
+		summaries[i] = toProtoRunSummary(run)
+	}
+
+	return &reconciliationv1.ListAccountReconciliationsResponse{
+		Runs:          summaries,
+		NextPageToken: nextPageToken,
+		TotalCount:    -1,
+	}, nil
+}
+
 // ControlAccountReconciliation controls a settlement run (cancel, pause, resume).
 func (s *AccountReconciliationService) ControlAccountReconciliation(
 	ctx context.Context,
