@@ -79,7 +79,7 @@ services:
       - ../../api/proto:/api/proto:ro
       - frontend_node_modules:/app/node_modules
     environment:
-      VITE_API_URL: "http://localhost:8090"
+      VITE_API_BASE_URL: "http://localhost:8090"
 
 volumes:
   cockroachdb_data:

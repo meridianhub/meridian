@@ -1,6 +1,5 @@
-import { type ReactNode } from 'react'
+import { type ReactNode, useCallback, useRef } from 'react'
 import { BrowserRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom'
-import { useCallback } from 'react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 import { queryClient } from '@/lib/query-client'
@@ -201,7 +200,9 @@ function AppShellLayout() {
 function ApiClientBridge({ children }: { children: ReactNode }) {
   const { accessToken } = useAuth()
   const { tenantSlug } = useTenantContext()
-  const getToken = () => accessToken ?? ''
+  const tokenRef = useRef(accessToken)
+  tokenRef.current = accessToken
+  const getToken = useCallback(() => tokenRef.current ?? '', [])
 
   return (
     <ApiClientProvider tenantSlug={tenantSlug} getToken={getToken}>
