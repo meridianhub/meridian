@@ -11,6 +11,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+BOLD='\033[1m'
 NC='\033[0m'
 
 # Track overall status
@@ -611,14 +612,14 @@ echo " Core Development Tools"
 echo "═══════════════════════════════════════"
 echo ""
 
-check_tool "go" "1.23+"
-check_go_environment
+check_tool "go" "1.23+" || true
+check_go_environment || true
 echo ""
 
-check_tool "make" ""
+check_tool "make" "" || true
 echo ""
 
-check_tool "git" "2.x+"
+check_tool "git" "2.x+" || true
 echo ""
 
 # Container & Orchestration
@@ -627,28 +628,28 @@ echo " Container & Orchestration"
 echo "═══════════════════════════════════════"
 echo ""
 
-check_tool "docker" "20.x+"
+check_tool "docker" "20.x+" || true
 echo ""
 
-check_docker_daemon
+check_docker_daemon || true
 echo ""
 
-check_tool "kubectl" "1.28+"
+check_tool "kubectl" "1.28+" || true
 echo ""
 
-check_tool "helm" "3.x+"
+check_tool "helm" "3.x+" || true
 echo ""
 
-check_tool "kind" ""
+check_tool "kind" "" || true
 echo ""
 
-check_tool "ctlptl" ""
+check_tool "ctlptl" "" || true
 echo ""
 
-check_tool "tilt" "0.30+"
+check_tool "tilt" "0.30+" || true
 echo ""
 
-check_k8s_cluster
+check_k8s_cluster || true
 echo ""
 
 # API Development Tools
@@ -657,13 +658,13 @@ echo " API Development Tools"
 echo "═══════════════════════════════════════"
 echo ""
 
-check_tool "buf" "1.x+"
+check_tool "buf" "1.x+" || true
 echo ""
 
-check_tool "protoc" "3.x+"
+check_tool "protoc" "3.x+" || true
 echo ""
 
-check_tool "grpcurl" ""
+check_tool "grpcurl" "" || true
 echo ""
 
 # Database Tools
@@ -672,7 +673,7 @@ echo " Database Tools"
 echo "═══════════════════════════════════════"
 echo ""
 
-check_tool "cockroach" "23.x+"
+check_tool "cockroach" "23.x+" || true
 echo ""
 
 # Code Quality
@@ -681,7 +682,7 @@ echo " Code Quality & Linting"
 echo "═══════════════════════════════════════"
 echo ""
 
-check_tool "golangci-lint" "2.x+"
+check_tool "golangci-lint" "2.x+" || true
 echo ""
 
 # Node.js
@@ -690,13 +691,13 @@ echo " Node.js & npm"
 echo "═══════════════════════════════════════"
 echo ""
 
-check_tool "node" "20+"
+check_tool "node" "20+" || true
 echo ""
 
-check_tool "npm" "10+"
+check_tool "npm" "10+" || true
 echo ""
 
-check_npm_dependencies
+check_npm_dependencies || true
 echo ""
 
 # Documentation Tools
@@ -731,7 +732,7 @@ echo " Git Configuration"
 echo "═══════════════════════════════════════"
 echo ""
 
-check_git_hooks
+check_git_hooks || true
 echo ""
 
 # Project Dependencies
