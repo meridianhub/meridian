@@ -231,7 +231,8 @@ func TestUpdateDispute_ResolveSuccess(t *testing.T) {
 		service.WithDisputeRepository(repo),
 	)
 
-	resp, err := svc.UpdateDispute(context.Background(), &reconciliationv1.UpdateDisputeRequest{
+	ctx := ctxWithClaims("admin")
+	resp, err := svc.UpdateDispute(ctx, &reconciliationv1.UpdateDisputeRequest{
 		RunId:           runID.String(),
 		DisputeId:       d.DisputeID.String(),
 		Status:          reconciliationv1.DisputeStatus_DISPUTE_STATUS_RESOLVED,
@@ -293,7 +294,8 @@ func TestUpdateDispute_InvalidTransition(t *testing.T) {
 		service.WithDisputeRepository(repo),
 	)
 
-	_, err := svc.UpdateDispute(context.Background(), &reconciliationv1.UpdateDisputeRequest{
+	ctx := ctxWithClaims("admin")
+	_, err := svc.UpdateDispute(ctx, &reconciliationv1.UpdateDisputeRequest{
 		RunId:     runID.String(),
 		DisputeId: d.DisputeID.String(),
 		Status:    reconciliationv1.DisputeStatus_DISPUTE_STATUS_REJECTED,

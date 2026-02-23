@@ -3,9 +3,11 @@ package service
 import (
 	"context"
 	"errors"
+	"log/slog"
 
 	"github.com/google/uuid"
 	reconciliationv1 "github.com/meridianhub/meridian/api/proto/meridian/reconciliation/v1"
+	"github.com/meridianhub/meridian/services/reconciliation/adapters/messaging"
 	"github.com/meridianhub/meridian/services/reconciliation/domain"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -138,10 +140,30 @@ func (s *AccountReconciliationService) UpdateDispute(
 			return nil, status.Errorf(codes.FailedPrecondition, "invalid status transition: %v", err)
 		}
 	case reconciliationv1.DisputeStatus_DISPUTE_STATUS_RESOLVED:
+		if err := requireAdminOrOperator(ctx); err != nil {
+			return nil, err
+		}
 		if err := dispute.Resolve(req.GetResolutionNotes(), req.GetResolvedBy()); err != nil {
 			return nil, status.Errorf(codes.FailedPrecondition, "invalid status transition: %v", err)
 		}
+
+		if s.sagaRuntime != nil {
+			sagaParams := map[string]interface{}{
+				"variance_id": dispute.VarianceID.String(),
+				"dispute_id":  dispute.DisputeID.String(),
+				"account_id":  dispute.AccountID,
+				"resolved_by": dispute.ResolvedBy,
+				"resolution":  dispute.Resolution,
+			}
+			if err := s.sagaRuntime.InvokeSaga(ctx, "reconciliation_adjustment", sagaParams); err != nil {
+				slog.WarnContext(ctx, "failed to invoke reconciliation_adjustment saga",
+					"dispute_id", dispute.DisputeID, "error", err)
+			}
+		}
 	case reconciliationv1.DisputeStatus_DISPUTE_STATUS_REJECTED:
+		if err := requireAdminOrOperator(ctx); err != nil {
+			return nil, err
+		}
 		if err := dispute.Reject(req.GetResolutionNotes(), req.GetResolvedBy()); err != nil {
 			return nil, status.Errorf(codes.FailedPrecondition, "invalid status transition: %v", err)
 		}
@@ -151,6 +173,22 @@ func (s *AccountReconciliationService) UpdateDispute(
 
 	if err := s.disputeRepo.Update(ctx, dispute); err != nil {
 		return nil, status.Error(codes.Internal, "failed to update dispute")
+	}
+
+	if dispute.Status.IsFinal() && s.eventPublisher != nil {
+		event := DisputeResolvedEvent{
+			DisputeID:  dispute.DisputeID.String(),
+			VarianceID: dispute.VarianceID.String(),
+			RunID:      dispute.RunID.String(),
+			AccountID:  dispute.AccountID,
+			Action:     newStatus.String(),
+			Resolution: dispute.Resolution,
+			ResolvedBy: dispute.ResolvedBy,
+		}
+		if err := s.eventPublisher.Publish(ctx, messaging.TopicDisputeResolved, event); err != nil {
+			slog.WarnContext(ctx, "failed to publish DisputeResolvedEvent",
+				"dispute_id", dispute.DisputeID, "error", err)
+		}
 	}
 
 	return &reconciliationv1.UpdateDisputeResponse{
