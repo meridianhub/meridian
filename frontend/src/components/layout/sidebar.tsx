@@ -4,7 +4,6 @@ import {
   Wallet,
   Building,
   ArrowLeftRight,
-  FileText,
   Building2,
   Activity,
   Users,
