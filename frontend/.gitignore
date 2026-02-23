@@ -28,3 +28,7 @@ src/api/gen
 
 # Coverage reports
 coverage
+
+# Playwright
+playwright-report
+test-results

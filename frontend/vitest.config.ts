@@ -77,10 +77,12 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     globals: true,
     css: true,
+    // Exclude Playwright E2E tests - they are run separately via `npm run e2e`
+    exclude: ['node_modules/**', 'e2e/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html', 'json-summary'],
-      exclude: ['node_modules/', 'src/api/gen/', 'src/test/'],
+      exclude: ['node_modules/', 'src/api/gen/', 'src/test/', 'e2e/'],
     },
   },
   resolve: {

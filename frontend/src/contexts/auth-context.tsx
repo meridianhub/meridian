@@ -191,6 +191,16 @@ export function AuthProvider({ children, initialToken }: AuthProviderProps) {
   const lens = getUserLens(claims)
   const isAuthenticated = claims !== null && !isTokenExpired(claims)
 
+  // Expose dev-only login bypass for E2E testing
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      ;(window as unknown as Record<string, unknown>).__DEV_LOGIN__ = login
+      return () => {
+        delete (window as unknown as Record<string, unknown>).__DEV_LOGIN__
+      }
+    }
+  }, [login])
+
   const value: AuthContextValue = {
     isAuthenticated,
     claims,
