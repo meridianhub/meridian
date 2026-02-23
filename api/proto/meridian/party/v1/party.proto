@@ -702,6 +702,41 @@ message RetrieveBankRelationsResponse {
 
 // --- Business Qualifier: Syndicate Participants ---
 
+// ListPartiesRequest is the request to list parties with pagination and filtering.
+message ListPartiesRequest {
+  // page_size is the maximum number of parties to return per page (default 25, max 100).
+  int32 page_size = 1 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 100
+  }];
+
+  // page_token is the cursor token from a previous response to get the next page.
+  // Leave empty to get the first page.
+  string page_token = 2;
+
+  // party_type filters results to a specific party classification (optional).
+  PartyType party_type = 3 [(buf.validate.field).enum = {defined_only: true}];
+
+  // status filters results to parties with a specific status (optional).
+  PartyStatus status = 4 [(buf.validate.field).enum = {defined_only: true}];
+
+  // search_query filters results by case-insensitive substring match on legal_name or display_name.
+  string search_query = 5 [(buf.validate.field).string = {max_len: 255}];
+}
+
+// ListPartiesResponse is the paginated response containing parties.
+message ListPartiesResponse {
+  // parties is the list of parties for this page.
+  repeated Party parties = 1;
+
+  // next_page_token is the cursor to fetch the next page.
+  // Empty when there are no more results.
+  string next_page_token = 2;
+
+  // total_count is the total number of parties matching the filter criteria.
+  int64 total_count = 3;
+}
+
 // ListParticipantsRequest is the request to list active participants for a syndicate.
 message ListParticipantsRequest {
   // org_party_id is the identifier of the syndicate (organization party).
@@ -1109,6 +1144,13 @@ service PartyService {
           description: "Party registered successfully"
         }
       }
+    };
+  }
+
+  // ListParties returns a paginated list of parties with optional filtering.
+  rpc ListParties(ListPartiesRequest) returns (ListPartiesResponse) {
+    option (google.api.http) = {
+      get: "/v1/parties"
     };
   }
 

@@ -7,9 +7,10 @@ import { BrowserRouter } from 'react-router-dom'
 vi.mock('@/api/context', () => ({
   useClients: vi.fn(() => ({
     party: {
-      listParticipants: vi.fn().mockResolvedValue({
-        participants: [],
-        nextPageToken: undefined,
+      listParties: vi.fn().mockResolvedValue({
+        parties: [],
+        nextPageToken: '',
+        totalCount: 0n,
       }),
     },
   })),
@@ -40,6 +41,7 @@ describe('PartiesPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
+
   it('renders the page title', () => {
     render(
       <Wrapper>

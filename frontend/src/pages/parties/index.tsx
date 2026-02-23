@@ -9,9 +9,9 @@ import { Card } from '@/components/ui/card'
 
 export interface Party {
   partyId: string
-  name: string
-  partyType: 'INDIVIDUAL' | 'ORGANIZATION' | 'GOVERNMENT'
-  status: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED' | 'PENDING_VERIFICATION'
+  legalName: string
+  partyType: string
+  status: string
   externalReference?: string
   createdAt?: { seconds: bigint | number; nanos?: number }
 }
@@ -33,9 +33,9 @@ export function PartiesPage() {
 
   const columns: ColumnDef<Party>[] = [
     {
-      accessorKey: 'name',
+      accessorKey: 'legalName',
       header: 'Name',
-      cell: ({ row }) => row.original.name,
+      cell: ({ row }) => row.original.legalName,
     },
     {
       accessorKey: 'partyType',
@@ -68,9 +68,8 @@ export function PartiesPage() {
       label: 'Party Type',
       type: 'select' as const,
       options: [
-        { label: 'Individual', value: 'INDIVIDUAL' },
-        { label: 'Organization', value: 'ORGANIZATION' },
-        { label: 'Government', value: 'GOVERNMENT' },
+        { label: 'Person', value: 'PARTY_TYPE_PERSON' },
+        { label: 'Organization', value: 'PARTY_TYPE_ORGANIZATION' },
       ],
     },
     {
@@ -78,24 +77,39 @@ export function PartiesPage() {
       label: 'Status',
       type: 'select' as const,
       options: [
-        { label: 'Active', value: 'ACTIVE' },
-        { label: 'Inactive', value: 'INACTIVE' },
-        { label: 'Suspended', value: 'SUSPENDED' },
-        { label: 'Pending Verification', value: 'PENDING_VERIFICATION' },
+        { label: 'Active', value: 'PARTY_STATUS_ACTIVE' },
+        { label: 'Restricted', value: 'PARTY_STATUS_RESTRICTED' },
+        { label: 'Suspended', value: 'PARTY_STATUS_SUSPENDED' },
+        { label: 'Terminated', value: 'PARTY_STATUS_TERMINATED' },
       ],
+    },
+    {
+      field: 'searchQuery',
+      label: 'Search',
+      type: 'text' as const,
     },
   ]
 
   const queryFn = async (params: ListPartiesParams): Promise<ListPartiesResult> => {
-    const response = await clients.party.listParticipants({
+    const response = await clients.party.listParties({
       pageToken: params.pageToken,
       pageSize: params.pageSize,
+      searchQuery: params.filters?.searchQuery,
       partyType: params.filters?.partyType,
       status: params.filters?.status,
     })
 
+    const parties: Party[] = response.parties.map((p: Party) => ({
+      partyId: p.partyId,
+      legalName: p.legalName,
+      partyType: p.partyType,
+      status: p.status,
+      externalReference: p.externalReference,
+      createdAt: p.createdAt,
+    }))
+
     return {
-      items: response.participants as Party[],
+      items: parties,
       nextPageToken: response.nextPageToken,
     }
   }
