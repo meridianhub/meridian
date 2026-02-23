@@ -280,4 +280,124 @@ describe('BookingLogDetailPage', () => {
       expect(screen.getByTestId('credit-total')).toBeInTheDocument()
     })
   })
+
+  it('shows error state when API request fails', async () => {
+    setupMockClients({ result: new Error('Network error') })
+    renderWithApiClients(<BookingLogDetailPage />, {
+      initialToken: createTenantUserToken('tenant-001'),
+      queryClient: createTestQueryClient(),
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText(/failed to load booking log/i)).toBeInTheDocument()
+    })
+  })
+
+  it('shows error state when financialBookingLog is null', async () => {
+    setupMockClients({ result: { financialBookingLog: null } })
+    renderWithApiClients(<BookingLogDetailPage />, {
+      initialToken: createTenantUserToken('tenant-001'),
+      queryClient: createTestQueryClient(),
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText(/failed to load booking log/i)).toBeInTheDocument()
+    })
+  })
+
+  it('shows loading state while fetching', () => {
+    vi.mocked(createServiceClients).mockReturnValue({
+      currentAccount: {} as never,
+      paymentOrder: {} as never,
+      financialAccounting: {
+        retrieveFinancialBookingLog: vi.fn(() => new Promise(() => {})),
+      } as never,
+      positionKeeping: {} as never,
+      accountReconciliation: {} as never,
+      party: {} as never,
+      tenant: {} as never,
+      sagaRegistry: {} as never,
+      sagaAdmin: {} as never,
+      referenceData: {} as never,
+      accountTypeRegistry: {} as never,
+      node: {} as never,
+      internalBankAccount: {} as never,
+      marketInformation: {} as never,
+    })
+
+    renderWithApiClients(<BookingLogDetailPage />, {
+      initialToken: createTenantUserToken('tenant-001'),
+      queryClient: createTestQueryClient(),
+    })
+
+    // Loading state shows "Loading..." in breadcrumb
+    expect(screen.getByText('Loading...')).toBeInTheDocument()
+  })
+
+  it('shows no balance indicator when there are no postings', async () => {
+    const logWithNoPostings = { ...mockBookingLog, postings: [] }
+    setupMockClients({ result: { financialBookingLog: logWithNoPostings } })
+    renderWithApiClients(<BookingLogDetailPage />, {
+      initialToken: createTenantUserToken('tenant-001'),
+      queryClient: createTestQueryClient(),
+    })
+
+    await waitFor(() => {
+      expect(screen.getAllByText('log-001').length).toBeGreaterThan(0)
+    })
+    expect(screen.queryByTestId('balance-indicator')).not.toBeInTheDocument()
+  })
+
+  it('handles numeric direction values (DEBIT=1, CREDIT=2)', async () => {
+    const logWithNumericDirections = {
+      ...mockBookingLog,
+      postings: [
+        { ...mockBookingLog.postings[0], postingDirection: 1 }, // DEBIT
+        { ...mockBookingLog.postings[1], postingDirection: 2 }, // CREDIT
+      ],
+    }
+    setupMockClients({ result: { financialBookingLog: logWithNumericDirections } })
+    renderWithApiClients(<BookingLogDetailPage />, {
+      initialToken: createTenantUserToken('tenant-001'),
+      queryClient: createTestQueryClient(),
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText('DEBIT')).toBeInTheDocument()
+    })
+    expect(screen.getByText('CREDIT')).toBeInTheDocument()
+  })
+
+  it('handles numeric currency code (GBP=1)', async () => {
+    const logWithNumericCurrency = { ...mockBookingLog, baseCurrency: 1 }
+    setupMockClients({ result: { financialBookingLog: logWithNumericCurrency } })
+    renderWithApiClients(<BookingLogDetailPage />, {
+      initialToken: createTenantUserToken('tenant-001'),
+      queryClient: createTestQueryClient(),
+    })
+
+    await waitFor(() => {
+      expect(screen.getAllByText('log-001').length).toBeGreaterThan(0)
+    })
+  })
+
+  it('handles numeric status values (POSTED=2)', async () => {
+    const logWithNumericStatus = {
+      ...mockBookingLog,
+      status: 2, // POSTED
+      postings: [
+        { ...mockBookingLog.postings[0], status: 2 },
+        { ...mockBookingLog.postings[1], status: 2 },
+      ],
+    }
+    setupMockClients({ result: { financialBookingLog: logWithNumericStatus } })
+    renderWithApiClients(<BookingLogDetailPage />, {
+      initialToken: createTenantUserToken('tenant-001'),
+      queryClient: createTestQueryClient(),
+    })
+
+    await waitFor(() => {
+      expect(screen.getAllByText('POSTED').length).toBeGreaterThan(0)
+    })
+  })
 })
