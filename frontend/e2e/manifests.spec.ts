@@ -2,6 +2,9 @@ import { test, expect } from './fixtures'
 import { type Page } from '@playwright/test'
 import * as path from 'path'
 import * as fs from 'fs'
+import { fileURLToPath } from 'url'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 /**
  * E2E tests for the Manifest Management flow.
