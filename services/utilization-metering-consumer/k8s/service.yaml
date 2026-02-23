@@ -18,9 +18,5 @@ spec:
     port: 8080
     targetPort: http
     protocol: TCP
-  - name: metrics
-    port: 8080
-    targetPort: metrics
-    protocol: TCP
   selector:
     app: utilization-metering-consumer

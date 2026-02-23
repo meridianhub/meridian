@@ -124,6 +124,7 @@ export function ManifestApplyDialog({ open, onOpenChange }: ManifestApplyDialogP
             </label>
             <textarea
               id="manifest-json"
+              data-testid="manifest-json"
               value={manifestJson}
               onChange={(e) => handleJsonChange(e.target.value)}
               className="min-h-[200px] w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm"
