@@ -14,6 +14,7 @@ import (
 	"github.com/meridianhub/meridian/services/control-plane/internal/manifest"
 	"github.com/meridianhub/meridian/services/control-plane/internal/planner"
 	"github.com/meridianhub/meridian/services/control-plane/internal/validator"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -142,7 +143,8 @@ func (h *ApplyManifestHandler) ApplyManifest(
 
 	// Step 3: Plan execution
 	logger.Info("step 3: planning execution")
-	execPlan, planResult := h.plan(diffResult.plan, "", req.GetManifest().GetVersion(), req.GetDryRun())
+	tenantID, _ := tenant.FromContext(ctx)
+	execPlan, planResult := h.plan(diffResult.plan, string(tenantID), req.GetManifest().GetVersion(), req.GetDryRun())
 	response.StepResults = append(response.StepResults, planResult)
 
 	if execPlan == nil {
@@ -277,7 +279,17 @@ func (h *ApplyManifestHandler) diff(
 	var lastApplied *controlplanev1.Manifest
 	if h.versionStore != nil {
 		prev, err := h.versionStore.GetLatestApplied(ctx)
-		if err == nil && prev != nil {
+		if err != nil {
+			return diffOutput{
+				err: err,
+				stepResult: &controlplanev1.StepResult{
+					StepName: "diff",
+					Status:   controlplanev1.StepResultStatus_STEP_RESULT_STATUS_FAILED,
+					Message:  fmt.Sprintf("Diff failed (version lookup): %s", err.Error()),
+				},
+			}
+		}
+		if prev != nil {
 			lastApplied = prev.Manifest
 		}
 	}
