@@ -751,8 +751,8 @@ func BenchmarkEventStream_ConcurrentConnections(b *testing.B) {
 		b.Fatalf("router did not start: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
+	ctx, cancel := context.WithCancel(context.Background())
+	b.Cleanup(cancel)
 
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws"
 
