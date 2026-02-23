@@ -50,13 +50,14 @@ interface ExpandableSectionProps {
   title: string
   count: number
   children: React.ReactNode
+  'data-testid'?: string
 }
 
-function ExpandableSection({ title, count, children }: ExpandableSectionProps) {
+function ExpandableSection({ title, count, children, 'data-testid': testId }: ExpandableSectionProps) {
   const [open, setOpen] = useState(false)
 
   return (
-    <div className="border-b border-border last:border-b-0">
+    <div className="border-b border-border last:border-b-0" data-testid={testId}>
       <button
         type="button"
         onClick={() => setOpen(!open)}
@@ -92,7 +93,7 @@ export function ManifestCurrentView() {
   const sagas = manifest?.sagas ?? []
 
   return (
-    <Card className="overflow-hidden">
+    <Card className="overflow-hidden" data-testid="manifest-current-view">
       <div className="border-b border-border px-4 py-3">
         <div className="flex items-center gap-3">
           <h3 className="text-lg font-semibold">Version {version}</h3>
@@ -112,7 +113,7 @@ export function ManifestCurrentView() {
         )}
       </div>
 
-      <ExpandableSection title="Instruments" count={instruments.length}>
+      <ExpandableSection title="Instruments" count={instruments.length} data-testid="instruments-section">
         {instruments.length === 0 ? (
           <p className="text-xs text-muted-foreground">No instruments defined.</p>
         ) : (
@@ -130,7 +131,7 @@ export function ManifestCurrentView() {
         )}
       </ExpandableSection>
 
-      <ExpandableSection title="Account Types" count={accountTypes.length}>
+      <ExpandableSection title="Account Types" count={accountTypes.length} data-testid="account-types-section">
         {accountTypes.length === 0 ? (
           <p className="text-xs text-muted-foreground">No account types defined.</p>
         ) : (

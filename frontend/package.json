@@ -16,7 +16,8 @@
     "typecheck": "tsc --noEmit",
     "generate": "buf generate --template buf.gen.yaml ../api/proto",
     "e2e": "playwright test",
-    "e2e:headed": "playwright test --headed"
+    "e2e:headed": "playwright test --headed",
+    "e2e:manifests": "playwright test manifests.spec.ts"
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.11.0",
