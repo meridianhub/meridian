@@ -213,7 +213,6 @@ func applyManifest(ctx context.Context, conn *grpc.ClientConn, tid, path string)
 		return fmt.Errorf("ApplyManifest RPC: %w", err)
 	}
 
-	fmt.Printf("Manifest applied successfully:\n")
 	fmt.Printf("  Job ID: %s\n", resp.GetJobId())
 	fmt.Printf("  Status: %s\n", resp.GetStatus().String())
 	if diff := resp.GetDiffSummary(); diff != "" {
@@ -227,6 +226,7 @@ func applyManifest(ctx context.Context, conn *grpc.ClientConn, tid, path string)
 		return fmt.Errorf("%w: %d error(s)", ErrManifestValidation, len(resp.GetValidationErrors()))
 	}
 
+	fmt.Println("Manifest applied successfully.")
 	return nil
 }
 
