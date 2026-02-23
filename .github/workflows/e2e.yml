@@ -135,6 +135,10 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      - name: Generate frontend protobuf files
+        working-directory: frontend
+        run: npm run generate
+
       - name: Install Playwright browsers
         working-directory: frontend
         run: npx playwright install --with-deps chromium
