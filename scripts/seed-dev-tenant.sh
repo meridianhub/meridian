@@ -1,134 +1,40 @@
 #!/usr/bin/env bash
 #
-# Seed a dev tenant for local manual testing.
-# Idempotent: exits 0 if tenant already exists.
+# Seed a dev tenant with manifest configuration.
+# Delegates to the seed-dev Go binary (cmd/seed-dev).
 #
 # Usage:
-#   ./scripts/seed-dev-tenant.sh                     # default: localhost:8090
+#   ./scripts/seed-dev-tenant.sh                         # default: localhost
 #   GATEWAY_HOST=meridian:8090 ./scripts/seed-dev-tenant.sh  # inside docker network
+#   GATEWAY_URL=http://meridian:8090 ./scripts/seed-dev-tenant.sh
+#   MANIFEST_PATH=examples/manifests/carbon.json ./scripts/seed-dev-tenant.sh
+#   ./scripts/seed-dev-tenant.sh --skip-manifest         # tenant creation only
+#
+# Environment variables (all optional):
+#   GATEWAY_URL      - HTTP URL for gateway health check (default: http://localhost:8090)
+#   GRPC_ADDR        - gRPC server address (default: localhost:50051)
+#   MANIFEST_PATH    - Path to manifest JSON file (default: examples/manifests/energy.json)
+#   TENANT_ID        - Tenant ID to create (default: dev_tenant)
+#   TENANT_SLUG      - Tenant URL slug (default: dev-tenant)
+#
+# Legacy variable support:
+#   GATEWAY_HOST     - If set and GATEWAY_URL is not, derived as http://${GATEWAY_HOST}
 
 set -euo pipefail
 
-GATEWAY_HOST="${GATEWAY_HOST:-localhost:8090}"
-GATEWAY_URL="http://${GATEWAY_HOST}"
-MAX_RETRIES=30
-RETRY_INTERVAL=2
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+BIN="${REPO_ROOT}/bin/seed-dev"
 
-echo "Waiting for gateway at ${GATEWAY_URL} ..."
+# Support the legacy GATEWAY_HOST variable used by docker-compose.
+if [ -z "${GATEWAY_URL:-}" ] && [ -n "${GATEWAY_HOST:-}" ]; then
+  export GATEWAY_URL="http://${GATEWAY_HOST}"
+fi
 
-for i in $(seq 1 "$MAX_RETRIES"); do
-  if curl -sf "${GATEWAY_URL}/healthz" >/dev/null 2>&1; then
-    echo "Gateway is healthy."
-    break
-  fi
-  if [ "$i" -eq "$MAX_RETRIES" ]; then
-    echo "ERROR: Gateway did not become healthy after $((MAX_RETRIES * RETRY_INTERVAL))s"
-    exit 1
-  fi
-  sleep "$RETRY_INTERVAL"
-done
+# Build the binary if it does not exist.
+if [ ! -f "${BIN}" ]; then
+  echo "Building seed-dev binary..."
+  (cd "${REPO_ROOT}" && go build -o bin/seed-dev ./cmd/seed-dev)
+fi
 
-echo "Creating dev tenant ..."
-
-HTTP_CODE=$(curl -s -o /tmp/seed-response.json -w "%{http_code}" \
-  -X POST "${GATEWAY_URL}/meridian.tenant.v1.TenantService/InitiateTenant" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "tenantId": "dev_tenant",
-    "displayName": "Dev Tenant",
-    "settlementAsset": "GBP",
-    "subdomain": "dev-tenant"
-  }')
-
-BODY=$(cat /tmp/seed-response.json 2>/dev/null || echo "")
-
-case "$HTTP_CODE" in
-  200)
-    echo "Dev tenant created successfully."
-    ;;
-  409)
-    echo "Dev tenant already exists (idempotent, no action needed)."
-    ;;
-  *)
-    # Connect protocol returns 200 even for AlreadyExists in some configs;
-    # check the response body for the "already exists" code.
-    if echo "$BODY" | grep -qi "already.exist"; then
-      echo "Dev tenant already exists (idempotent, no action needed)."
-    else
-      echo "ERROR: Unexpected response (HTTP ${HTTP_CODE}):"
-      echo "$BODY"
-      exit 1
-    fi
-    ;;
-esac
-
-rm -f /tmp/seed-response.json
-
-# --- Seed sample party (organization) ---
-
-echo "Creating sample organization ..."
-
-HTTP_CODE=$(curl -s -o /tmp/seed-response.json -w "%{http_code}" \
-  -X POST "${GATEWAY_URL}/meridian.party.v1.PartyService/RegisterParty" \
-  -H "Content-Type: application/json" \
-  -H "X-Tenant-Slug: dev-tenant" \
-  -d '{
-    "partyType": "PARTY_TYPE_ORGANIZATION",
-    "legalName": "Acme Energy Ltd",
-    "displayName": "Acme Energy",
-    "externalReference": "acme-001"
-  }')
-
-BODY=$(cat /tmp/seed-response.json 2>/dev/null || echo "")
-
-case "$HTTP_CODE" in
-  200)
-    if echo "$BODY" | grep -qi "already.exist"; then
-      echo "Sample organization already exists."
-    else
-      echo "Sample organization created."
-    fi
-    ;;
-  409)
-    echo "Sample organization already exists."
-    ;;
-  *)
-    echo "WARNING: Could not create sample organization (HTTP ${HTTP_CODE}): ${BODY}"
-    ;;
-esac
-
-# --- Seed sample party (person) ---
-
-echo "Creating sample person ..."
-
-HTTP_CODE=$(curl -s -o /tmp/seed-response.json -w "%{http_code}" \
-  -X POST "${GATEWAY_URL}/meridian.party.v1.PartyService/RegisterParty" \
-  -H "Content-Type: application/json" \
-  -H "X-Tenant-Slug: dev-tenant" \
-  -d '{
-    "partyType": "PARTY_TYPE_PERSON",
-    "legalName": "Jane Smith",
-    "displayName": "Jane Smith",
-    "externalReference": "person-001"
-  }')
-
-BODY=$(cat /tmp/seed-response.json 2>/dev/null || echo "")
-
-case "$HTTP_CODE" in
-  200)
-    if echo "$BODY" | grep -qi "already.exist"; then
-      echo "Sample person already exists."
-    else
-      echo "Sample person created."
-    fi
-    ;;
-  409)
-    echo "Sample person already exists."
-    ;;
-  *)
-    echo "WARNING: Could not create sample person (HTTP ${HTTP_CODE}): ${BODY}"
-    ;;
-esac
-
-rm -f /tmp/seed-response.json
-echo "Seed complete."
+exec "${BIN}" "$@"
