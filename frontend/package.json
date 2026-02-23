@@ -14,7 +14,9 @@
     "test": "vitest",
     "test:coverage": "vitest --coverage",
     "typecheck": "tsc --noEmit",
-    "generate": "buf generate --template buf.gen.yaml ../api/proto"
+    "generate": "buf generate --template buf.gen.yaml ../api/proto",
+    "e2e": "playwright test",
+    "e2e:headed": "playwright test --headed"
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.11.0",
@@ -44,6 +46,7 @@
     "@bufbuild/buf": "^1.65.0",
     "@bufbuild/protoc-gen-es": "^2.11.0",
     "@eslint/js": "^9.39.1",
+    "@playwright/test": "^1.58.2",
     "@tailwindcss/vite": "^4.2.0",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.3.0",
