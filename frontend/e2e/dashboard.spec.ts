@@ -16,10 +16,11 @@ test.describe('Dashboard smoke test', () => {
   })
 
   test('renders stat card section', async ({ platformAdminPage }) => {
-    // Stat cards are always rendered (loading or data states)
-    await expect(platformAdminPage.getByText('Payment Orders')).toBeVisible()
-    await expect(platformAdminPage.getByText('Booking Logs')).toBeVisible()
-    await expect(platformAdminPage.getByText('Ledger Postings')).toBeVisible()
+    // Stat cards are always rendered (loading or data states).
+    // Use exact: true to avoid matching partial text in Quick Actions buttons.
+    await expect(platformAdminPage.getByText('Payment Orders', { exact: true })).toBeVisible()
+    await expect(platformAdminPage.getByText('Booking Logs', { exact: true })).toBeVisible()
+    await expect(platformAdminPage.getByText('Ledger Postings', { exact: true })).toBeVisible()
   })
 
   test('renders quick actions panel', async ({ platformAdminPage }) => {
