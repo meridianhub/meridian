@@ -21,11 +21,10 @@
 -- multiple tenant schemas apply the same migration.
 
 -- Drop the old UNIQUE(name) constraint to allow multiple versions per saga.
--- PostgreSQL: ALTER TABLE DROP CONSTRAINT is required for constraint-backed unique indexes.
--- CockroachDB used DROP INDEX CASCADE, but that syntax does not work on PostgreSQL
--- for constraint-backed indexes (requires ALTER TABLE instead).
-ALTER TABLE public.platform_saga_definition
-  DROP CONSTRAINT IF EXISTS uq_platform_saga_definition_name;
+-- CockroachDB requires DROP INDEX CASCADE for unique constraints.
+-- PostgreSQL requires ALTER TABLE DROP CONSTRAINT (applied by demo pre-migration script).
+-- See deploy/demo/pg-pre-migration.sql for PostgreSQL-specific prerequisite DDL.
+DROP INDEX IF EXISTS "public"."uq_platform_saga_definition_name" CASCADE;
 
 -- Add new compound unique index allowing multiple versions per saga
 -- Using CREATE UNIQUE INDEX IF NOT EXISTS for idempotency

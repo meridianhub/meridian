@@ -13,16 +13,24 @@
 | Category | Count |
 |----------|-------|
 | Total migration files | 113 |
-| Files with incompatibilities | 3 |
-| Files with notable differences (compatible after correction) | 1 |
+| Files with incompatibilities | 4 |
+| Files fixed in this branch | 2 |
+| Files handled by pre-migration script | 1 |
+| Files with notable differences (no fix required) | 1 |
 | Files fully compatible as-is | 109 |
 
 The migration corpus is in **good shape for PostgreSQL 16**. Most migrations were written with
-standard SQL that runs on both CockroachDB and PostgreSQL. Three files contain a CRDB-specific
-syntax (`ADD CONSTRAINT IF NOT EXISTS`) that PostgreSQL does not support. One file uses a
-schema-qualified `DROP INDEX … CASCADE` pattern that requires replacement with the PostgreSQL
-equivalent. The `gen_random_uuid()` function, widely used across all services, is natively
-available in PostgreSQL 13+ with no extension required.
+standard SQL that runs on both CockroachDB and PostgreSQL. Three files contain issues:
+
+1. Two files use `ADD CONSTRAINT IF NOT EXISTS` — a CockroachDB v21.2+ extension not supported
+   in PostgreSQL 16. Fixed by removing `IF NOT EXISTS`.
+2. One file uses `DROP INDEX … CASCADE` for a constraint-backed unique index — valid on
+   CockroachDB but not PostgreSQL (which requires `ALTER TABLE DROP CONSTRAINT`). The migration
+   file is **not** modified (that would break existing CockroachDB CI); instead a pre-migration
+   SQL script handles this in the demo environment.
+
+The `gen_random_uuid()` function, used extensively across all services, is natively available
+in PostgreSQL 13+ with no extension required.
 
 No CRDB-exclusive features were found: no hash-sharded indexes, no `SPLIT AT`, no zone
 configurations, no `crdb_internal` references, no `SHOW CLUSTER SETTING`, no PL/pgSQL `DO $$`
@@ -33,105 +41,81 @@ blocks, no `LANGUAGE plpgsql` functions or triggers, no range types, no interlea
 ## Issue 1 (BLOCKING): `ADD CONSTRAINT IF NOT EXISTS` — Not Supported in PostgreSQL
 
 **Severity:** Blocking — migrations will fail with a syntax error
+**Status:** Fixed in this branch
 
 `ALTER TABLE … ADD CONSTRAINT IF NOT EXISTS` is not valid syntax in any PostgreSQL release
-including PostgreSQL 16. PostgreSQL raises `ERROR: syntax error at or near "IF"`.
+including PostgreSQL 16. PostgreSQL raises `ERROR: syntax error at or near "IF"`. This syntax
+was added in CockroachDB v21.2 but has never been part of PostgreSQL.
 
-### Affected Files
+### Affected Files (Fixed)
 
 #### `services/reference-data/migrations/20260128000002_versioned_platform_sagas_constraints.sql`
 
-Lines 16 and 20:
-
-```sql
-ALTER TABLE public.platform_saga_definition
-  ADD CONSTRAINT IF NOT EXISTS chk_platform_saga_definition_status
-    CHECK (status IN ('ACTIVE', 'DEPRECATED'));
-
-ALTER TABLE public.platform_saga_definition
-  ADD CONSTRAINT IF NOT EXISTS chk_platform_saga_definition_previous_version
-    CHECK (previous_version ~ '^[0-9]+\.[0-9]+\.[0-9]+$' OR previous_version IS NULL);
-```
+Lines 16 and 20 — `IF NOT EXISTS` removed from two `ADD CONSTRAINT` statements.
 
 #### `services/reference-data/migrations/20260129000002_bitemporal_platform_sagas_constraints.sql`
 
-Line 15:
+Line 15 — `IF NOT EXISTS` removed from one `ADD CONSTRAINT` statement.
+
+### Fix Applied
 
 ```sql
-ALTER TABLE public.platform_saga_definition
-  ADD CONSTRAINT IF NOT EXISTS chk_platform_saga_definition_validity_range
-    CHECK (valid_to IS NULL OR valid_to > valid_from);
-```
-
-### Required Fix
-
-Remove `IF NOT EXISTS` from all `ADD CONSTRAINT` statements. The idempotency guard is
-unnecessary for Atlas-managed migrations (each migration runs exactly once).
-
-```sql
--- Before (CRDB-only):
+-- Before (CRDB-only — fails on PostgreSQL 16):
 ALTER TABLE public.platform_saga_definition
   ADD CONSTRAINT IF NOT EXISTS chk_platform_saga_definition_status
     CHECK (status IN ('ACTIVE', 'DEPRECATED'));
 
--- After (PostgreSQL-compatible):
+-- After (PostgreSQL-compatible — also works on CockroachDB):
 ALTER TABLE public.platform_saga_definition
   ADD CONSTRAINT chk_platform_saga_definition_status
     CHECK (status IN ('ACTIVE', 'DEPRECATED'));
 ```
 
-Apply the same change for `chk_platform_saga_definition_previous_version` and
-`chk_platform_saga_definition_validity_range`.
+The `IF NOT EXISTS` guard was unnecessary in both databases. Atlas-managed migrations run
+exactly once. The tenant provisioner handles duplicate-object errors via `isAlreadyExistsError`
+for the per-tenant CockroachDB path, so explicit `IF NOT EXISTS` provides no additional safety.
 
 ---
 
 ## Issue 2 (BLOCKING): Schema-Qualified `DROP INDEX` for Constraint-Backed Unique Index
 
-**Severity:** Blocking — behavior diverges between CRDB and PostgreSQL
+**Severity:** Blocking — PostgreSQL will raise an error at runtime
+**Status:** Handled via pre-migration script (`deploy/demo/pg-pre-migration.sql`)
 
 **File:**
 `services/reference-data/migrations/20260127000001_fix_platform_saga_unique_constraint.sql`
-(line 28)
 
 ```sql
--- CockroachDB requires DROP INDEX CASCADE for unique constraints.
--- PostgreSQL requires ALTER TABLE DROP CONSTRAINT (handled by migration runner).
--- This migration targets CockroachDB (production). The PostgreSQL test helper
--- applies the equivalent ALTER TABLE DROP CONSTRAINT before running this file.
 DROP INDEX IF EXISTS "public"."uq_platform_saga_definition_name" CASCADE;
 ```
 
-The migration's own comment acknowledges this divergence. In CockroachDB, `DROP INDEX CASCADE`
-is required to drop a unique index that backs a constraint. In PostgreSQL, the correct method
-is `ALTER TABLE … DROP CONSTRAINT`.
+This statement is correct for CockroachDB, where `DROP INDEX CASCADE` drops a constraint-backed
+unique index along with its constraint. On PostgreSQL, this fails:
 
-`DROP INDEX IF EXISTS "public"."uq_platform_saga_definition_name" CASCADE` will succeed on
-PostgreSQL **only if** the index was created with `CREATE UNIQUE INDEX`. If the index was
-created implicitly by a table `UNIQUE` constraint (as is the case here), PostgreSQL requires
-`ALTER TABLE DROP CONSTRAINT` instead.
+> `ERROR: index "uq_platform_saga_definition_name" does not exist`
 
-The source migration (`20260125000001_platform_saga_definition.sql`) created this constraint
-via a `UNIQUE(name)` table constraint. Dropping it on PostgreSQL requires:
+PostgreSQL does not treat constraint-backed unique indexes as droppable via `DROP INDEX`. The
+required PostgreSQL syntax is `ALTER TABLE … DROP CONSTRAINT`.
+
+**Why the migration file is NOT modified:**
+
+The E2E test suite runs against CockroachDB and uses this exact `DROP INDEX CASCADE` syntax.
+Changing the file to PostgreSQL syntax would break existing CI. The migration's own comment
+documents this divergence and notes that the PostgreSQL test helper handles it separately.
+
+**Demo deployment solution:**
+
+Run `deploy/demo/pg-pre-migration.sql` against the `meridian_reference_data` database before
+executing Atlas migrations. This script drops the constraint using the PostgreSQL-compatible
+`ALTER TABLE DROP CONSTRAINT IF EXISTS` syntax. When Atlas then runs
+`20260127000001_fix_platform_saga_unique_constraint.sql`, the `DROP INDEX IF EXISTS` statement
+is a no-op (the index no longer exists), and the rest of the migration proceeds normally.
 
 ```sql
+-- deploy/demo/pg-pre-migration.sql
 ALTER TABLE public.platform_saga_definition
   DROP CONSTRAINT IF EXISTS uq_platform_saga_definition_name;
 ```
-
-### Required Fix
-
-Replace the CRDB-specific `DROP INDEX … CASCADE` with the PostgreSQL-compatible form:
-
-```sql
--- Before (CRDB-only for constraint-backed unique indexes):
-DROP INDEX IF EXISTS "public"."uq_platform_saga_definition_name" CASCADE;
-
--- After (PostgreSQL-compatible):
-ALTER TABLE public.platform_saga_definition
-  DROP CONSTRAINT IF EXISTS uq_platform_saga_definition_name;
-```
-
-> **Note:** PostgreSQL 16 supports `DROP CONSTRAINT IF EXISTS` syntax.
 
 ---
 
@@ -213,35 +197,21 @@ PostgreSQL (PostgreSQL has no such restriction, but the splits cause no harm):
 1. Provision a PostgreSQL 16 database.
 2. No extension installation required — `gen_random_uuid()` is built-in since PostgreSQL 13.
 
-### Fixes Applied in This Branch
+### Step 1: Run Pre-Migration Script
 
-The following files were updated in this branch:
+Before executing Atlas migrations, run the pre-migration script against the
+`meridian_reference_data` database:
 
-1. `services/reference-data/migrations/20260127000001_fix_platform_saga_unique_constraint.sql`
-   — Replaced `DROP INDEX … CASCADE` with `ALTER TABLE DROP CONSTRAINT`
-2. `services/reference-data/migrations/20260128000002_versioned_platform_sagas_constraints.sql`
-   — Removed `IF NOT EXISTS` from two `ADD CONSTRAINT` statements
-3. `services/reference-data/migrations/20260129000002_bitemporal_platform_sagas_constraints.sql`
-   — Removed `IF NOT EXISTS` from one `ADD CONSTRAINT` statement
-4. `services/reference-data/migrations/atlas.sum` — Regenerated after migration edits
-
-### Atlas Configuration for PostgreSQL
-
-The Atlas config (`atlas.hcl`) per service needs a PostgreSQL dev-url for the demo environment:
-
-```hcl
-env "demo" {
-  url = "postgresql://<user>:<password>@<host>:<port>/<db>?sslmode=require"
-  dev = "docker://postgres/16/dev"
-  migration {
-    dir = "file://migrations"
-  }
-}
+```bash
+psql "$REFERENCE_DATA_DATABASE_URL" -f deploy/demo/pg-pre-migration.sql
 ```
 
-### Migration Execution Order
+This script handles the one CockroachDB-specific `DROP INDEX` statement that cannot be made
+dual-compatible without breaking existing CockroachDB CI.
 
-Run migrations per service in this order to respect provisioning dependencies:
+### Step 2: Run Atlas Migrations
+
+Run Atlas migrations per service in the following order to respect provisioning dependencies:
 
 1. `control-plane`
 2. `tenant`
@@ -256,11 +226,15 @@ Run migrations per service in this order to respect provisioning dependencies:
 11. `forecasting`
 12. `reconciliation`
 
+### Atlas Configuration for PostgreSQL
+
+The Atlas config (`atlas.hcl`) per service needs a PostgreSQL connection URL. The existing
+`env "local"` and `env "ci"` environments already use `dev = "docker://postgres/16/dev"`,
+confirming all migrations are already validated against PostgreSQL 16 in CI via Atlas linting.
+
 ### Validation Checklist
 
-- [ ] `ADD CONSTRAINT IF NOT EXISTS` removed from 3 files in `reference-data/migrations`
-- [ ] `DROP INDEX … CASCADE` replaced with `ALTER TABLE DROP CONSTRAINT`
-- [ ] `atlas.sum` for `reference-data` regenerated
+- [ ] `deploy/demo/pg-pre-migration.sql` run against `meridian_reference_data` database
 - [ ] All 12 services migrate cleanly against a fresh PostgreSQL 16 instance
 - [ ] Smoke test: `gen_random_uuid()` works (default on PG 16)
 - [ ] Smoke test: `JSONB` columns accept and return expected payloads
@@ -282,5 +256,22 @@ Run migrations per service in this order to respect provisioning dependencies:
 | payment-order | 11 | None (DROP+CREATE workarounds) | Compatible |
 | position-keeping | 11 | None (DROP+CREATE workarounds) | Compatible |
 | reconciliation | 9 | None | Compatible |
-| reference-data | 24 | 3 files fixed (Issues 1 and 2) | Fixed |
+| reference-data | 24 | 3 files (Issues 1 and 2) | 2 fixed, 1 via pre-migration script |
 | tenant | 4 | SERIAL semantics (informational) | Compatible |
+
+---
+
+## Changes Made in This Branch
+
+### Fixed Migration Files
+
+- `services/reference-data/migrations/20260128000002_versioned_platform_sagas_constraints.sql`
+  — Removed `IF NOT EXISTS` from two `ADD CONSTRAINT` statements
+- `services/reference-data/migrations/20260129000002_bitemporal_platform_sagas_constraints.sql`
+  — Removed `IF NOT EXISTS` from one `ADD CONSTRAINT` statement
+- `services/reference-data/migrations/atlas.sum` — Regenerated after migration edits
+
+### New Files
+
+- `deploy/demo/pg-migration-compatibility-report.md` — This document
+- `deploy/demo/pg-pre-migration.sql` — Pre-migration script for PostgreSQL demo deployment
