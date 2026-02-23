@@ -71,6 +71,13 @@ func TestAllRPCsReturnUnimplemented(t *testing.T) {
 			},
 		},
 		{
+			name: "ListAccountReconciliations",
+			call: func() error {
+				_, err := svc.ListAccountReconciliations(ctx, &reconciliationv1.ListAccountReconciliationsRequest{})
+				return err
+			},
+		},
+		{
 			name: "RetrieveAccountReconciliation",
 			call: func() error {
 				_, err := svc.RetrieveAccountReconciliation(ctx, &reconciliationv1.RetrieveAccountReconciliationRequest{})

@@ -72,6 +72,28 @@ func toProtoRunStatus(s domain.RunStatus) reconciliationv1.RunStatus {
 	return reconciliationv1.RunStatus_RUN_STATUS_UNSPECIFIED
 }
 
+// toDomainRunStatus converts a proto RunStatus to domain.
+// UNSPECIFIED returns RunStatusPending as default.
+func toDomainRunStatus(s reconciliationv1.RunStatus) domain.RunStatus {
+	switch s {
+	case reconciliationv1.RunStatus_RUN_STATUS_UNSPECIFIED:
+		return domain.RunStatusPending
+	case reconciliationv1.RunStatus_RUN_STATUS_PENDING:
+		return domain.RunStatusPending
+	case reconciliationv1.RunStatus_RUN_STATUS_RUNNING:
+		return domain.RunStatusRunning
+	case reconciliationv1.RunStatus_RUN_STATUS_COMPLETED:
+		return domain.RunStatusCompleted
+	case reconciliationv1.RunStatus_RUN_STATUS_FAILED:
+		return domain.RunStatusFailed
+	case reconciliationv1.RunStatus_RUN_STATUS_CANCELLED:
+		return domain.RunStatusCancelled
+	case reconciliationv1.RunStatus_RUN_STATUS_PAUSED:
+		return domain.RunStatusPaused
+	}
+	return domain.RunStatusPending
+}
+
 // toProtoReconciliationScope converts a domain ReconciliationScope to proto.
 func toProtoReconciliationScope(s domain.ReconciliationScope) reconciliationv1.ReconciliationScope {
 	switch s {
