@@ -82,8 +82,8 @@ export function Sidebar({ lens, currentPath = '/', isOpen = false, id }: Sidebar
                 const isActive = currentPath === item.href
                 return (
                   <li key={item.href}>
-                    <a
-                      href={item.href}
+                    <Link
+                      to={item.href}
                       aria-current={isActive ? 'page' : undefined}
                       className={cn(
                         'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
@@ -94,7 +94,7 @@ export function Sidebar({ lens, currentPath = '/', isOpen = false, id }: Sidebar
                     >
                       <Icon className="size-4 shrink-0" />
                       {item.label}
-                    </a>
+                    </Link>
                   </li>
                 )
               })}

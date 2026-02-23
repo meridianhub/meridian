@@ -25,7 +25,7 @@ export function buildTenantBaseUrl(tenantSlug: string): string {
 
   // In local dev (localhost), tenant is identified via JWT, not subdomain
   if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
-    return base
+    return base.replace(/\/$/, '')
   }
 
   // In production, use tenant subdomain routing
