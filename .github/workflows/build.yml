@@ -42,7 +42,12 @@ jobs:
       - name: Generate protobuf files
         run: buf generate
 
+      - name: Verify compilation
+        if: github.event_name == 'pull_request'
+        run: go build ./...
+
       - name: Run tests
+        if: github.event_name != 'pull_request'
         run: make test
 
       - name: Set up Docker Buildx
