@@ -52,20 +52,22 @@ const (
 type AccountReconciliationService struct {
 	reconciliationv1.UnimplementedAccountReconciliationServiceServer
 
-	runRepo          domain.SettlementRunRepository
-	disputeRepo      domain.DisputeRepository
-	varianceRepo     VarianceFinder
-	varianceListRepo VarianceLister
-	sagaRuntime      SagaRuntime
-	eventPublisher   EventPublisher
-	assertor         *BalanceAssertor
-	policyRuntime    valuation.PolicyRuntime
-	starlarkRuntime  valuation.StarlarkRuntime
-	valuationCache   valuation.Cache
-	logger           *slog.Logger
-	snapshotCapturer SnapshotCapturerFunc
-	varianceDetector VarianceDetectorFunc
-	varianceValuator VarianceValuatorFunc
+	runRepo           domain.SettlementRunRepository
+	disputeRepo       domain.DisputeRepository
+	disputeListRepo   DisputeLister
+	assertionListRepo AssertionLister
+	varianceRepo      VarianceFinder
+	varianceListRepo  VarianceLister
+	sagaRuntime       SagaRuntime
+	eventPublisher    EventPublisher
+	assertor          *BalanceAssertor
+	policyRuntime     valuation.PolicyRuntime
+	starlarkRuntime   valuation.StarlarkRuntime
+	valuationCache    valuation.Cache
+	logger            *slog.Logger
+	snapshotCapturer  SnapshotCapturerFunc
+	varianceDetector  VarianceDetectorFunc
+	varianceValuator  VarianceValuatorFunc
 
 	// pauseMu protects pauseSignals map.
 	pauseMu      sync.Mutex

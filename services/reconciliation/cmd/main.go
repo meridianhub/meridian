@@ -137,6 +137,8 @@ func run(logger *slog.Logger) error {
 	serviceOpts := []service.Option{
 		service.WithSettlementRunRepository(runRepo),
 		service.WithDisputeRepository(disputeRepo),
+		service.WithDisputeListRepository(disputeRepo),
+		service.WithAssertionListRepository(assertionRepo),
 		service.WithVarianceRepository(varianceRepo),
 		service.WithVarianceListRepository(varianceRepo),
 		service.WithEventPublisher(eventPublisher),
