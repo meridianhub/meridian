@@ -5,8 +5,10 @@ import { DataTable } from '@/components/shared/data-table'
 import type { DataTableQueryParams, DataTableResult } from '@/components/shared/data-table'
 import { StatusBadge } from '@/components/shared/status-badge'
 import { TimeDisplay } from '@/components/shared/time-display'
+import { Button } from '@/components/ui/button'
 import { useTenantContext } from '@/contexts/tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
+import { CreateAccountDialog } from './create-account-dialog'
 import type { CurrentAccount } from './types'
 
 const STATUS_OPTIONS = [
@@ -89,6 +91,7 @@ interface RawListCurrentAccountsResponse {
 export function AccountsPage() {
   const navigate = useNavigate()
   const { tenantSlug } = useTenantContext()
+  const [createOpen, setCreateOpen] = React.useState(false)
 
   const columns: ColumnDef<CurrentAccount>[] = [
     {
@@ -129,6 +132,7 @@ export function AccountsPage() {
     <div className="p-6">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Accounts</h1>
+        <Button onClick={() => setCreateOpen(true)}>Create Account</Button>
       </div>
 
       <DataTable
@@ -149,6 +153,12 @@ export function AccountsPage() {
           },
         ]}
         onRowClick={(row) => navigate(`/accounts/${row.accountId}`)}
+      />
+
+      <CreateAccountDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        onCreated={(accountId) => navigate(`/accounts/${accountId}`)}
       />
     </div>
   )
