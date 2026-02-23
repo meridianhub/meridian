@@ -1,7 +1,7 @@
 name: E2E Tests
-# Triggers on frontend/**, services/**, or this file.
 
 on:
+  workflow_dispatch:
   push:
     branches: [develop, main]
     paths:
