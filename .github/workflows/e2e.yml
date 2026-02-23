@@ -144,7 +144,10 @@ jobs:
         env:
           VITE_E2E_MODE: 'true'
           VITE_API_BASE_URL: 'http://localhost:8090'
-        run: npm run build
+        # Skip tsc type-checking (handled by the dedicated Frontend Tests CI job).
+        # Run vite build directly so transient TypeScript errors in test files or
+        # other in-flight PRs don't block the E2E smoke tests.
+        run: npx vite build
 
       - name: Run Playwright tests
         working-directory: frontend
