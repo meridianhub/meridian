@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { fireEvent, screen, waitFor } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { renderWithProviders } from '@/test/test-utils'
 import { createTenantUserToken } from '@/test/jwt-helpers'
@@ -10,6 +9,13 @@ import { ApplyManifestStatus } from '@/api/gen/meridian/control_plane/v1/apply_m
 vi.mock('@/api/context', () => ({
   useApiClients: vi.fn(),
   ApiClientProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}))
+
+// The component calls create(ManifestSchema, parsed) before calling applyManifest.
+// In tests, ManifestSchema is a stub that doesn't satisfy @bufbuild/protobuf's create().
+// We mock the entire module to return the parsed object directly.
+vi.mock('@bufbuild/protobuf', () => ({
+  create: (_schema: unknown, data: unknown) => data,
 }))
 
 import { useApiClients } from '@/api/context'
@@ -102,7 +108,8 @@ describe('ManifestApplyDialog', () => {
     const textarea = screen.getByLabelText(/manifest json/i)
     fireEvent.change(textarea, { target: { value: validManifest } })
 
-    await userEvent.click(screen.getByRole('button', { name: /preview changes/i }))
+    // Use fireEvent.click because Radix Dialog sets pointer-events:none on body in jsdom
+    fireEvent.click(screen.getByRole('button', { name: /preview changes/i }))
 
     await waitFor(() => {
       expect(applyManifestMock).toHaveBeenCalledWith(
@@ -118,7 +125,7 @@ describe('ManifestApplyDialog', () => {
     const textarea = screen.getByLabelText(/manifest json/i)
     fireEvent.change(textarea, { target: { value: validManifest } })
 
-    await userEvent.click(screen.getByRole('button', { name: /preview changes/i }))
+    fireEvent.click(screen.getByRole('button', { name: /preview changes/i }))
 
     await waitFor(() => {
       expect(screen.getByTestId('dry-run-result')).toBeInTheDocument()
@@ -133,7 +140,7 @@ describe('ManifestApplyDialog', () => {
     const textarea = screen.getByLabelText(/manifest json/i)
     fireEvent.change(textarea, { target: { value: validManifest } })
 
-    await userEvent.click(screen.getByRole('button', { name: /preview changes/i }))
+    fireEvent.click(screen.getByRole('button', { name: /preview changes/i }))
 
     await waitFor(() => {
       expect(screen.getByText('validate')).toBeInTheDocument()
@@ -148,7 +155,7 @@ describe('ManifestApplyDialog', () => {
     const textarea = screen.getByLabelText(/manifest json/i)
     fireEvent.change(textarea, { target: { value: validManifest } })
 
-    await userEvent.click(screen.getByRole('button', { name: /preview changes/i }))
+    fireEvent.click(screen.getByRole('button', { name: /preview changes/i }))
 
     await waitFor(() => {
       const applyBtn = screen.getByRole('button', { name: /apply manifest/i })
@@ -166,13 +173,13 @@ describe('ManifestApplyDialog', () => {
     const textarea = screen.getByLabelText(/manifest json/i)
     fireEvent.change(textarea, { target: { value: validManifest } })
 
-    await userEvent.click(screen.getByRole('button', { name: /preview changes/i }))
+    fireEvent.click(screen.getByRole('button', { name: /preview changes/i }))
 
     await waitFor(() => {
       expect(screen.getByTestId('dry-run-result')).toBeInTheDocument()
     })
 
-    await userEvent.click(screen.getByRole('button', { name: /apply manifest/i }))
+    fireEvent.click(screen.getByRole('button', { name: /apply manifest/i }))
 
     await waitFor(() => {
       expect(applyManifestMock).toHaveBeenCalledWith(
@@ -188,7 +195,7 @@ describe('ManifestApplyDialog', () => {
     const textarea = screen.getByLabelText(/manifest json/i)
     fireEvent.change(textarea, { target: { value: 'not-json' } })
 
-    await userEvent.click(screen.getByRole('button', { name: /preview changes/i }))
+    fireEvent.click(screen.getByRole('button', { name: /preview changes/i }))
 
     await waitFor(() => {
       expect(screen.getByTestId('parse-error')).toBeInTheDocument()
@@ -215,7 +222,7 @@ describe('ManifestApplyDialog', () => {
     const textarea = screen.getByLabelText(/manifest json/i)
     fireEvent.change(textarea, { target: { value: validManifest } })
 
-    await userEvent.click(screen.getByRole('button', { name: /preview changes/i }))
+    fireEvent.click(screen.getByRole('button', { name: /preview changes/i }))
 
     await waitFor(() => {
       expect(screen.getByTestId('validation-errors')).toBeInTheDocument()
@@ -237,7 +244,7 @@ describe('ManifestApplyDialog', () => {
     const textarea = screen.getByLabelText(/manifest json/i)
     fireEvent.change(textarea, { target: { value: validManifest } })
 
-    await userEvent.click(screen.getByRole('button', { name: /preview changes/i }))
+    fireEvent.click(screen.getByRole('button', { name: /preview changes/i }))
 
     await waitFor(() => {
       expect(screen.getByTestId('validation-errors')).toBeInTheDocument()
