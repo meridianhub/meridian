@@ -284,7 +284,7 @@ done < "${CF_RULES_FILE}"
 ufw reload
 echo "$(date '+%Y-%m-%d %H:%M:%S') Cloudflare UFW rules updated (${RANGE_COUNT} ranges)."
 SCRIPT
-chmod 755 /opt/meridian/scripts/update-cloudflare-ufw.sh
+chmod 755 "${MERIDIAN_DIR}/scripts/update-cloudflare-ufw.sh"
 
 # ---------------------------------------------------------------------------
 # 5. Meridian directory structure
