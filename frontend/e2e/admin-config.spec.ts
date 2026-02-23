@@ -185,7 +185,7 @@ async function setupInstrumentRoutes(page: Page) {
 }
 
 async function setupAccountTypeRoutes(page: Page) {
-  await page.route('**/meridian.reference_data.v1.AccountTypeRegistry/ListActive', (route) => {
+  await page.route('**/meridian.reference_data.v1.AccountTypeRegistryService/ListActive', (route) => {
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -240,14 +240,14 @@ async function setupSagaRoutes(page: Page) {
 }
 
 async function setupMappingRoutes(page: Page) {
-  await page.route('**/meridian.gateway.v1.MappingService/ListMappings', (route) => {
+  await page.route('**/meridian.mapping.v1.MappingService/ListMappings', (route) => {
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({ mappings: MAPPINGS, nextPageToken: '' }),
     })
   })
-  await page.route('**/meridian.gateway.v1.MappingService/GetMapping', (route) => {
+  await page.route('**/meridian.mapping.v1.MappingService/GetMapping', (route) => {
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
