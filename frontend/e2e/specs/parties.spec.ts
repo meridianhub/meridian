@@ -1,4 +1,4 @@
-import { test, expect } from '../fixtures'
+import { test, expect, navigateTo } from '../fixtures'
 import { switchToTab } from '../helpers/parties'
 
 /**
@@ -8,25 +8,30 @@ import { switchToTab } from '../helpers/parties'
  * API calls will fail gracefully when the backend is unavailable — the tests
  * verify UI structure, filter rendering, and tab layout rather than live data.
  *
+ * Auth tokens are memory-only (not persisted to localStorage). All tests use
+ * navigateTo() for client-side navigation to preserve the in-memory auth state.
+ * page.goto() after authentication would trigger a full-page reload and lose
+ * the token.
+ *
  * For full integration testing with live backend data see task 45 (CI E2E
  * workflow).
  */
 
 test.describe('Parties list', () => {
   test('renders the Parties heading', async ({ authenticatedPage: page }) => {
-    await page.goto('/parties')
+    await navigateTo(page, '/parties')
     await expect(page.getByRole('heading', { name: 'Parties' })).toBeVisible()
   })
 
   test('renders the data table', async ({ authenticatedPage: page }) => {
-    await page.goto('/parties')
+    await navigateTo(page, '/parties')
     // The DataTable wrapper renders; it may be in loading state or empty state
     // but the table element itself must be present
     await expect(page.locator('table')).toBeVisible()
   })
 
   test('renders expected column headers', async ({ authenticatedPage: page }) => {
-    await page.goto('/parties')
+    await navigateTo(page, '/parties')
     await expect(page.getByRole('columnheader', { name: 'Name' })).toBeVisible()
     await expect(page.getByRole('columnheader', { name: 'Party Type' })).toBeVisible()
     await expect(page.getByRole('columnheader', { name: 'Status' })).toBeVisible()
@@ -35,18 +40,18 @@ test.describe('Parties list', () => {
   })
 
   test('renders Party Type filter with correct options', async ({ authenticatedPage: page }) => {
-    await page.goto('/parties')
+    await navigateTo(page, '/parties')
     // The filter label should be visible in the filter bar
     await expect(page.getByText('Party Type')).toBeVisible()
   })
 
   test('renders Status filter', async ({ authenticatedPage: page }) => {
-    await page.goto('/parties')
+    await navigateTo(page, '/parties')
     await expect(page.getByText('Status')).toBeVisible()
   })
 
   test('renders Search filter', async ({ authenticatedPage: page }) => {
-    await page.goto('/parties')
+    await navigateTo(page, '/parties')
     // The DataTable renders a text input for the search filter
     await expect(page.getByPlaceholder(/search/i).or(page.getByText('Search'))).toBeVisible()
   })
@@ -54,7 +59,7 @@ test.describe('Parties list', () => {
 
 test.describe('Party detail navigation', () => {
   test('navigates to detail page on row click', async ({ authenticatedPage: page }) => {
-    await page.goto('/parties')
+    await navigateTo(page, '/parties')
     // Only attempt navigation if at least one row is present
     const firstRow = page.locator('table tbody tr').first()
     const rowCount = await page.locator('table tbody tr').count()
@@ -72,7 +77,7 @@ test.describe('Party detail navigation', () => {
 
   test('shows Party ID not found for missing partyId param', async ({ authenticatedPage: page }) => {
     // Directly verify that the error message renders for an invalid ID
-    await page.goto('/parties/00000000-0000-0000-0000-000000000000')
+    await navigateTo(page, '/parties/00000000-0000-0000-0000-000000000000')
     // Page should render — it will show either the header or an error state
     // (the component renders even without backend data)
     await expect(
@@ -85,11 +90,11 @@ test.describe('Party detail navigation', () => {
 
 test.describe('Party detail — 7-tab layout', () => {
   test.beforeEach(async ({ authenticatedPage: page }) => {
-    await page.goto('/parties')
+    await navigateTo(page, '/parties')
     const rowCount = await page.locator('table tbody tr').count()
     if (rowCount === 0) {
       // Navigate directly to a party detail stub so tab structure tests run
-      await page.goto('/parties/00000000-0000-0000-0000-000000000000')
+      await navigateTo(page, '/parties/00000000-0000-0000-0000-000000000000')
     } else {
       await page.locator('table tbody tr').first().click()
     }
@@ -126,7 +131,7 @@ test.describe('Party detail — 7-tab layout', () => {
 
 test.describe('Party header component', () => {
   test.beforeEach(async ({ authenticatedPage: page }) => {
-    await page.goto('/parties')
+    await navigateTo(page, '/parties')
     const rowCount = await page.locator('table tbody tr').count()
     if (rowCount === 0) {
       test.skip()
@@ -154,10 +159,10 @@ test.describe('Party header component', () => {
 
 test.describe('Tab switching', () => {
   test.beforeEach(async ({ authenticatedPage: page }) => {
-    await page.goto('/parties')
+    await navigateTo(page, '/parties')
     const rowCount = await page.locator('table tbody tr').count()
     if (rowCount === 0) {
-      await page.goto('/parties/00000000-0000-0000-0000-000000000000')
+      await navigateTo(page, '/parties/00000000-0000-0000-0000-000000000000')
     } else {
       await page.locator('table tbody tr').first().click()
     }
@@ -224,10 +229,10 @@ test.describe('Tab switching', () => {
 
 test.describe('Tab keyboard navigation', () => {
   test.beforeEach(async ({ authenticatedPage: page }) => {
-    await page.goto('/parties')
+    await navigateTo(page, '/parties')
     const rowCount = await page.locator('table tbody tr').count()
     if (rowCount === 0) {
-      await page.goto('/parties/00000000-0000-0000-0000-000000000000')
+      await navigateTo(page, '/parties/00000000-0000-0000-0000-000000000000')
     } else {
       await page.locator('table tbody tr').first().click()
     }
@@ -252,7 +257,7 @@ test.describe('Tab keyboard navigation', () => {
 
 test.describe('Party creation (conditional — dialog not yet implemented)', () => {
   test.skip('should create a new party via dialog when feature is available', async ({ authenticatedPage: page }) => {
-    await page.goto('/parties')
+    await navigateTo(page, '/parties')
     const createButton = page.getByRole('button', { name: /Add Party|Create Party|New Party/i })
     if (!(await createButton.isVisible())) {
       test.skip()
