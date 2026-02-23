@@ -277,23 +277,36 @@ func applyMigrationsToSchema(t *testing.T, pool *pgxpool.Pool, service string, s
 }
 
 // adaptCockroachDDLForPostgres rewrites CockroachDB-specific DDL statements to work on PostgreSQL.
-// CockroachDB requires DROP INDEX CASCADE to drop unique constraints, while PostgreSQL requires
-// ALTER TABLE DROP CONSTRAINT. This function translates the CockroachDB form to PostgreSQL.
-// It also rewrites "ADD CONSTRAINT IF NOT EXISTS" to use DO blocks that ignore duplicate
-// constraint errors, since PostgreSQL does not support IF NOT EXISTS on ADD CONSTRAINT.
+//
+// Transformations applied:
+//
+//  1. DROP INDEX CASCADE for constraint-backed unique indexes: CockroachDB requires
+//     DROP INDEX CASCADE to drop unique constraints; PostgreSQL requires ALTER TABLE
+//     DROP CONSTRAINT.
+//
+//  2. ADD CONSTRAINT ... CHECK on public-schema tables: These migrations run
+//     per-tenant but modify the shared public schema. In tests, multiple tenant schemas
+//     are provisioned against the same database, so the second tenant's migration would
+//     fail with "constraint already exists". All ADD CONSTRAINT CHECK statements that
+//     target public-schema tables are wrapped in a DO block that ignores
+//     duplicate_object errors (SQLSTATE 42710), providing idempotent application.
+//     This handles both the legacy "ADD CONSTRAINT IF NOT EXISTS" form (CockroachDB
+//     extension) and the standard "ADD CONSTRAINT" form used after the PG16 fix.
 func adaptCockroachDDLForPostgres(sql string) string {
 	result := strings.ReplaceAll(sql,
 		`DROP INDEX IF EXISTS "public"."uq_platform_saga_definition_name" CASCADE`,
 		`ALTER TABLE "public"."platform_saga_definition" DROP CONSTRAINT IF EXISTS "uq_platform_saga_definition_name"`,
 	)
-	// CockroachDB supports ADD CONSTRAINT IF NOT EXISTS; PostgreSQL does not.
-	// Find each ALTER TABLE ... ADD CONSTRAINT IF NOT EXISTS CHECK(...) statement
-	// and wrap it in a DO block that ignores duplicate_object errors.
-	// NOTE: This only handles CHECK constraints. UNIQUE/FK constraints would need
-	// additional patterns if future migrations use IF NOT EXISTS with them.
-	re := regexp.MustCompile(`(?s)(ALTER TABLE\s+\S+\s+)ADD CONSTRAINT IF NOT EXISTS\s+(\S+\s+CHECK\s*\([^;]+?\));`)
+	// Wrap ADD CONSTRAINT ... CHECK statements targeting public-schema tables in a
+	// DO block that ignores duplicate_object errors. This handles both:
+	//   - "ADD CONSTRAINT IF NOT EXISTS" (CockroachDB extension, removed for PG16 compat)
+	//   - "ADD CONSTRAINT" (standard SQL, used after the PG16 compatibility fix)
+	//
+	// The pattern matches ALTER TABLE public.<table> ADD CONSTRAINT [IF NOT EXISTS]
+	// <name> CHECK (<expr>); and wraps it in an exception handler.
+	re := regexp.MustCompile(`(?s)(ALTER TABLE\s+public\.\S+\s+)ADD CONSTRAINT(?:\s+IF NOT EXISTS)?\s+(\S+\s+CHECK\s*\([^;]+?\));`)
 	result = re.ReplaceAllStringFunc(result, func(match string) string {
-		// Strip "IF NOT EXISTS" and wrap in exception handler
+		// Normalise: strip "IF NOT EXISTS" if present
 		inner := strings.Replace(match, "ADD CONSTRAINT IF NOT EXISTS", "ADD CONSTRAINT", 1)
 		// Remove trailing semicolon since it goes inside the DO block
 		inner = strings.TrimSuffix(strings.TrimSpace(inner), ";")
