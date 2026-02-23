@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { handleConnectError } from '@/lib/error-handling'
 import { useInitiatePayment } from './payment-mutations'
+import { amountToBigInt } from './payment-form-utils'
 
 // IBAN pattern: 2 letter country code + 2 digits + up to 30 alphanumeric chars (no spaces)
 const IBAN_PATTERN = /^[A-Z]{2}[0-9]{2}[A-Z0-9]{1,30}$/
@@ -75,9 +76,13 @@ export function InitiatePaymentDialog({
     if (!formData.amount.trim()) {
       newErrors.amount = 'Amount is required'
     } else {
-      const parsed = parseFloat(formData.amount)
-      if (isNaN(parsed) || parsed <= 0) {
-        newErrors.amount = 'Amount must be positive'
+      try {
+        const minorUnits = amountToBigInt(formData.amount.trim())
+        if (minorUnits <= 0n) {
+          newErrors.amount = 'Amount must be positive'
+        }
+      } catch {
+        newErrors.amount = 'Invalid amount'
       }
     }
 
