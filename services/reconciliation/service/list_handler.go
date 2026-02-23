@@ -146,20 +146,6 @@ func (s *AccountReconciliationService) UpdateDispute(
 		if err := dispute.Resolve(req.GetResolutionNotes(), req.GetResolvedBy()); err != nil {
 			return nil, status.Errorf(codes.FailedPrecondition, "invalid status transition: %v", err)
 		}
-
-		if s.sagaRuntime != nil {
-			sagaParams := map[string]interface{}{
-				"variance_id": dispute.VarianceID.String(),
-				"dispute_id":  dispute.DisputeID.String(),
-				"account_id":  dispute.AccountID,
-				"resolved_by": dispute.ResolvedBy,
-				"resolution":  dispute.Resolution,
-			}
-			if err := s.sagaRuntime.InvokeSaga(ctx, "reconciliation_adjustment", sagaParams); err != nil {
-				slog.WarnContext(ctx, "failed to invoke reconciliation_adjustment saga",
-					"dispute_id", dispute.DisputeID, "error", err)
-			}
-		}
 	case reconciliationv1.DisputeStatus_DISPUTE_STATUS_REJECTED:
 		if err := requireAdminOrOperator(ctx); err != nil {
 			return nil, err
@@ -173,6 +159,21 @@ func (s *AccountReconciliationService) UpdateDispute(
 
 	if err := s.disputeRepo.Update(ctx, dispute); err != nil {
 		return nil, status.Error(codes.Internal, "failed to update dispute")
+	}
+
+	// Invoke reconciliation_adjustment saga after persisting resolved state
+	if newStatus == reconciliationv1.DisputeStatus_DISPUTE_STATUS_RESOLVED && s.sagaRuntime != nil {
+		sagaParams := map[string]interface{}{
+			"variance_id": dispute.VarianceID.String(),
+			"dispute_id":  dispute.DisputeID.String(),
+			"account_id":  dispute.AccountID,
+			"resolved_by": dispute.ResolvedBy,
+			"resolution":  dispute.Resolution,
+		}
+		if err := s.sagaRuntime.InvokeSaga(ctx, "reconciliation_adjustment", sagaParams); err != nil {
+			slog.WarnContext(ctx, "failed to invoke reconciliation_adjustment saga",
+				"dispute_id", dispute.DisputeID, "error", err)
+		}
 	}
 
 	if dispute.Status.IsFinal() && s.eventPublisher != nil {
