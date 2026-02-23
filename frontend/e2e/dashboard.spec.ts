@@ -11,16 +11,11 @@ import { test, expect } from './fixtures'
  */
 test.describe('Dashboard smoke test', () => {
   test('renders dashboard heading after platform-admin login', async ({ platformAdminPage }) => {
-    // Auth injection navigates to '/' which redirects to ProtectedRoute -> dashboard
-    await platformAdminPage.waitForURL('/')
-
-    // Dashboard heading is the primary landmark
+    // Wait on the UI landmark rather than URL to avoid redirect path mismatches
     await expect(platformAdminPage.getByRole('heading', { name: 'Dashboard' })).toBeVisible()
   })
 
   test('renders stat card section', async ({ platformAdminPage }) => {
-    await platformAdminPage.waitForURL('/')
-
     // Stat cards are always rendered (loading or data states)
     await expect(platformAdminPage.getByText('Payment Orders')).toBeVisible()
     await expect(platformAdminPage.getByText('Booking Logs')).toBeVisible()
@@ -28,8 +23,6 @@ test.describe('Dashboard smoke test', () => {
   })
 
   test('renders quick actions panel', async ({ platformAdminPage }) => {
-    await platformAdminPage.waitForURL('/')
-
     await expect(platformAdminPage.getByText('Quick Actions')).toBeVisible()
   })
 })
