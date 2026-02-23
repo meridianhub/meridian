@@ -50,8 +50,12 @@ jobs:
           mkdir -p coverage
           # Split packages across 3 shards via round-robin for parallel execution
           shard_pkgs=$(go list ./... | awk "NR % 3 == ${{ matrix.shard_index }}")
-          pkg_count=$(echo "$shard_pkgs" | wc -l | tr -d ' ')
+          pkg_count=$(printf '%s\n' "$shard_pkgs" | sed '/^\s*$/d' | wc -l | tr -d ' ')
           echo "Shard ${{ matrix.shard_index }}/3: testing $pkg_count packages"
+          if [ -z "$shard_pkgs" ] || [ "$pkg_count" -eq 0 ]; then
+            echo "No packages in this shard, skipping"
+            exit 0
+          fi
           # Use -short flag to skip timing-sensitive tests in CI
           gotestsum --format testdox \
             --junitfile test-results.xml \
@@ -112,7 +116,15 @@ jobs:
       - name: Merge coverage from shards
         run: |
           mkdir -p coverage
-          gocovmerge coverage-shards/coverage-shard-*/coverage.out > coverage/coverage.out
+          shopt -s nullglob
+          cov_files=(coverage-shards/coverage-shard-*/coverage.out)
+          if [ ${#cov_files[@]} -eq 0 ]; then
+            echo "No coverage files found, creating empty profile"
+            echo "mode: atomic" > coverage/coverage.out
+            cp coverage/coverage.out coverage/coverage-filtered.out
+            exit 0
+          fi
+          gocovmerge "${cov_files[@]}" > coverage/coverage.out
           echo "Filtering generated proto files from coverage..."
           grep -v -E '\.pb\.go|\.pb\.validate\.go|_grpc\.pb\.go' coverage/coverage.out > coverage/coverage-filtered.out || true
 
