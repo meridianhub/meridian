@@ -77,8 +77,8 @@ test.describe('Accounts page', () => {
     const dialog = authenticatedPage.getByRole('dialog')
     await dialog.getByLabel('IBAN').fill('not-a-valid-iban')
     await dialog.getByLabel('Party ID').fill('party-001')
-    await authenticatedPage.getByRole('button', { name: 'Create Account', exact: true }).click()
-    await expect(authenticatedPage.getByText(/valid IBAN/i)).toBeVisible()
+    await dialog.getByRole('button', { name: 'Create Account', exact: true }).click()
+    await expect(dialog.getByText(/valid IBAN/i)).toBeVisible()
   })
 
   test('Create Account dialog resets fields after cancel and reopen', async ({
@@ -137,7 +137,7 @@ test.describe('Account detail page', () => {
  */
 test.describe('Account lifecycle (requires backend)', () => {
   test.skip(
-    !process.env.MERIDIAN_E2E_BACKEND,
+    process.env.MERIDIAN_E2E_BACKEND !== '1',
     'Set MERIDIAN_E2E_BACKEND=1 to run full lifecycle tests',
   )
 
@@ -160,7 +160,7 @@ test.describe('Account lifecycle (requires backend)', () => {
     await createDialog.getByLabel('IBAN').fill(testIban)
     await createDialog.getByLabel('Currency').selectOption(currency)
     await createDialog.getByLabel('Party ID').fill('dev-party-001')
-    await authenticatedPage.getByRole('button', { name: 'Create Account', exact: true }).click()
+    await createDialog.getByRole('button', { name: 'Create Account', exact: true }).click()
 
     // Step 4: After creation, navigates to account detail page
     await expect(authenticatedPage.getByText(testIban)).toBeVisible({ timeout: 10_000 })
@@ -202,12 +202,15 @@ test.describe('Account lifecycle (requires backend)', () => {
   test('deposit dialog shows error for empty amount', async ({ authenticatedPage }) => {
     // Navigate to an existing active account via accounts list
     await navigateTo(authenticatedPage, '/accounts')
-    // Assumes at least one active account exists with a Deposit button visible in detail
-    // Navigate to detail and verify deposit validation
-    await authenticatedPage.getByRole('button', { name: 'Deposit' }).first().click()
-    await expect(authenticatedPage.getByRole('dialog')).toBeVisible()
+    // Click the first data row to navigate to the account detail page
+    // (nth(0) is the header row, nth(1) is the first data row)
+    await authenticatedPage.getByRole('row').nth(1).click()
+    // Deposit button exists on the account detail page
+    await authenticatedPage.getByRole('button', { name: 'Deposit' }).click()
+    const depositDialog = authenticatedPage.getByRole('dialog')
+    await expect(depositDialog).toBeVisible()
     // Submit with empty amount
-    await authenticatedPage.getByRole('button', { name: 'Deposit', exact: true }).click()
+    await depositDialog.getByRole('button', { name: 'Deposit', exact: true }).click()
     await expect(authenticatedPage.getByText('Amount is required')).toBeVisible()
   })
 })

@@ -89,6 +89,10 @@ export function CreateAccountDialog({ open, onOpenChange, onCreated }: CreateAcc
 
   function validate(): FormErrors {
     const next: FormErrors = {}
+    if (!tenantSlug) {
+      next.general = 'No tenant selected'
+      return next
+    }
     const iban = formData.iban.trim().toUpperCase()
     if (!iban) {
       next.iban = 'IBAN is required'
