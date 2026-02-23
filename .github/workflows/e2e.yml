@@ -105,9 +105,9 @@ jobs:
             sleep 2
           done
 
-          # Create dev tenant (idempotent)
+          # Create dev tenant (idempotent) via REST endpoint
           HTTP_CODE=$(curl -s -o /tmp/seed-response.json -w "%{http_code}" \
-            -X POST "${GATEWAY_URL}/api/meridian.tenant.v1.TenantService/InitiateTenant" \
+            -X POST "${GATEWAY_URL}/api/v1/tenants" \
             -H "Content-Type: application/json" \
             -d '{"tenantId":"dev_tenant","displayName":"Dev Tenant","settlementAsset":"GBP","subdomain":"dev-tenant"}')
           BODY=$(cat /tmp/seed-response.json 2>/dev/null || echo "")
