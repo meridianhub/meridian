@@ -16,6 +16,7 @@ import {
   Map,
   ClipboardList,
   CheckSquare,
+  FileJson,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -39,6 +40,7 @@ const TENANT_NAV_ITEMS: NavItem[] = [
   { label: 'Forecasting', href: '/forecasting', icon: BarChart3 },
   { label: 'Reference Data', href: '/reference-data', icon: Database },
   { label: 'Gateway Mappings', href: '/gateway-mappings', icon: Map },
+  { label: 'Manifests', href: '/manifests', icon: FileJson },
   { label: 'Audit Log', href: '/audit-log', icon: ClipboardList },
 ]
 
