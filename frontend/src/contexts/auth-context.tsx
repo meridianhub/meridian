@@ -24,6 +24,7 @@ interface AuthContextValue extends AuthState {
   refreshToken: () => Promise<boolean>
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function parseJWT(token: unknown): JWTClaims | null {
   if (typeof token !== 'string' || !token) return null
 
@@ -171,6 +172,7 @@ export function AuthProvider({ children, initialToken }: AuthProviderProps) {
     if (!claims || !accessToken) return
     if (isTokenExpired(claims)) {
       // Token already expired - attempt refresh
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       void refreshToken()
       return
     }
@@ -202,6 +204,7 @@ export function AuthProvider({ children, initialToken }: AuthProviderProps) {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext)
   if (!ctx) {

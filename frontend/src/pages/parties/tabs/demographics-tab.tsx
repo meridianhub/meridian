@@ -49,7 +49,7 @@ export function DemographicsTab({ partyId }: DemographicsTabProps) {
   const clients = useClients()
   const queryClient = useQueryClient()
   const [isEditing, setIsEditing] = React.useState(false)
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<DemographicsFormData>()
+  const { register, handleSubmit, reset } = useForm<DemographicsFormData>()
 
   const { data: demographics, isLoading } = useQuery({
     queryKey: ['party', partyId, 'demographics'],

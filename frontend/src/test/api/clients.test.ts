@@ -20,7 +20,7 @@ describe('createServiceClients', () => {
     vi.clearAllMocks()
   })
 
-  it('returns an object with all 15 service clients', () => {
+  it('returns an object with all 16 service clients', () => {
     const transport = makeTransport()
     const clients = createServiceClients(transport)
 

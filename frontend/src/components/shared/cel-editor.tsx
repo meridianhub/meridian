@@ -22,6 +22,7 @@ export interface CELEditorProps {
   className?: string
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const CONTEXT_VARIABLES: Record<CELContext, string[]> = {
   validation: ['attributes', 'amount', 'valid_from', 'valid_to', 'source'],
   bucketKey: ['attributes'],

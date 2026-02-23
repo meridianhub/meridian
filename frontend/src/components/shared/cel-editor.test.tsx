@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { CELEditor, CONTEXT_VARIABLES, type CELEditorProps } from './cel-editor'
 
 // CodeMirror uses DOM APIs not available in jsdom. Mock the EditorView at module level.

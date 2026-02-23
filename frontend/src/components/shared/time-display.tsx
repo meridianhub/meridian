@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { formatDistanceToNow, format } from 'date-fns';
+import { formatDistanceToNow } from 'date-fns';
 import {
   Tooltip,
   TooltipContent,
@@ -37,6 +37,7 @@ export function TimeDisplay({
         : timestamp.seconds;
 
     return new Date(seconds * 1000 + Math.floor((timestamp.nanos || 0) / 1_000_000));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally depend on primitive fields, not object reference
   }, [timestamp?.seconds, timestamp?.nanos]);
 
   if (!date) return <>—</>;

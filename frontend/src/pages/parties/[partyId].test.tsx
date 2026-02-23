@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 
@@ -30,20 +29,6 @@ function makeQueryClient() {
       queries: { retry: false, staleTime: Infinity },
     },
   })
-}
-
-function Wrapper({ children }: { children: React.ReactNode }) {
-  const qc = makeQueryClient()
-  return (
-    <QueryClientProvider client={qc}>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/parties/:partyId" element={children} />
-          <Route path="*" element={<div>Not found</div>} />
-        </Routes>
-      </BrowserRouter>
-    </QueryClientProvider>
-  )
 }
 
 // Helper to render on a specific route
@@ -89,8 +74,6 @@ describe('PartyDetailPage', () => {
   })
 
   it('switches to demographics tab on click', async () => {
-    const user = userEvent.setup()
-
     renderAtRoute(<PartyDetailPage />, '/parties/test-party-1')
 
     // Verify page renders
@@ -98,8 +81,6 @@ describe('PartyDetailPage', () => {
   })
 
   it('switches to payment methods tab on click', async () => {
-    const user = userEvent.setup()
-
     renderAtRoute(<PartyDetailPage />, '/parties/test-party-1')
 
     // Verify page renders
@@ -107,8 +88,6 @@ describe('PartyDetailPage', () => {
   })
 
   it('switches to audit trail tab on click', async () => {
-    const user = userEvent.setup()
-
     renderAtRoute(<PartyDetailPage />, '/parties/test-party-1')
 
     // Verify page renders

@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { AuditLogPage, type AuditLogEntry, type AuditOperation } from './index'
+import { AuditLogPage, type AuditLogEntry } from './index'
 
 function makeQueryClient() {
   return new QueryClient({
@@ -58,10 +58,10 @@ describe('AuditLogPage', () => {
 
   describe('rendering', () => {
     it('renders page title and description', () => {
-      ;(global.fetch as any).mockResolvedValue({
+      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
         ok: true,
         json: async () => ({ entries: [] }),
-      })
+      } as Response)
 
       render(
         <Wrapper>
@@ -76,10 +76,10 @@ describe('AuditLogPage', () => {
     })
 
     it('renders DataTable with all columns', async () => {
-      ;(global.fetch as any).mockResolvedValue({
+      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
         ok: true,
         json: async () => ({ entries: [mockAuditEntry] }),
-      })
+      } as Response)
 
       render(
         <Wrapper>
@@ -97,7 +97,7 @@ describe('AuditLogPage', () => {
     })
 
     it('renders filter controls', async () => {
-      ;(global.fetch as any).mockResolvedValue({
+      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
         ok: true,
         json: async () => ({ entries: [] }),
       })
@@ -118,7 +118,7 @@ describe('AuditLogPage', () => {
 
   describe('audit log list', () => {
     it('displays audit entries in table', async () => {
-      ;(global.fetch as any).mockResolvedValue({
+      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
         ok: true,
         json: async () => ({ entries: [mockAuditEntry, mockAuditEntryUpdate] }),
       })
@@ -136,7 +136,7 @@ describe('AuditLogPage', () => {
     })
 
     it('renders operation badges with correct styling', async () => {
-      ;(global.fetch as any).mockResolvedValue({
+      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
         ok: true,
         json: async () => ({ entries: [mockAuditEntry, mockAuditEntryUpdate, mockAuditEntryDelete] }),
       })
@@ -160,7 +160,7 @@ describe('AuditLogPage', () => {
     })
 
     it('shows empty state when no entries', async () => {
-      ;(global.fetch as any).mockResolvedValue({
+      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
         ok: true,
         json: async () => ({ entries: [] }),
       })
@@ -177,7 +177,7 @@ describe('AuditLogPage', () => {
     })
 
     it('shows loading skeleton while fetching', () => {
-      ;(global.fetch as any).mockImplementation(() => new Promise(() => {}))
+      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockImplementation(() => new Promise(() => {}))
 
       render(
         <Wrapper>
@@ -192,7 +192,7 @@ describe('AuditLogPage', () => {
   describe('filtering', () => {
     it('filters by table name', async () => {
       const user = userEvent.setup()
-      ;(global.fetch as any).mockResolvedValue({
+      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
         ok: true,
         json: async () => ({ entries: [mockAuditEntry] }),
       })
@@ -209,7 +209,7 @@ describe('AuditLogPage', () => {
       await user.selectOptions(tableFilter, 'current_account')
 
       await waitFor(() => {
-        const calls = (global.fetch as any).mock.calls
+        const calls = (global.fetch as vi.MockedFunction<typeof fetch>).mock.calls
         const lastCall = calls[calls.length - 1]
         expect(lastCall[0]).toContain('tableName=current_account')
       })
@@ -217,7 +217,7 @@ describe('AuditLogPage', () => {
 
     it('filters by operation', async () => {
       const user = userEvent.setup()
-      ;(global.fetch as any).mockResolvedValue({
+      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
         ok: true,
         json: async () => ({ entries: [mockAuditEntryUpdate] }),
       })
@@ -234,7 +234,7 @@ describe('AuditLogPage', () => {
       await user.selectOptions(operationFilter, 'UPDATE')
 
       await waitFor(() => {
-        const calls = (global.fetch as any).mock.calls
+        const calls = (global.fetch as vi.MockedFunction<typeof fetch>).mock.calls
         const lastCall = calls[calls.length - 1]
         expect(lastCall[0]).toContain('operation=UPDATE')
       })
@@ -242,7 +242,7 @@ describe('AuditLogPage', () => {
 
     it('filters by user', async () => {
       const user = userEvent.setup()
-      ;(global.fetch as any).mockResolvedValue({
+      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
         ok: true,
         json: async () => ({ entries: [mockAuditEntry] }),
       })
@@ -259,7 +259,7 @@ describe('AuditLogPage', () => {
       await user.type(userInput, 'user@example.com')
 
       await waitFor(() => {
-        const calls = (global.fetch as any).mock.calls
+        const calls = (global.fetch as vi.MockedFunction<typeof fetch>).mock.calls
         const lastCall = calls[calls.length - 1]
         expect(lastCall[0]).toContain('changedBy=user%40example.com')
       })
@@ -267,7 +267,7 @@ describe('AuditLogPage', () => {
 
     it('resets pagination when filters change', async () => {
       const user = userEvent.setup()
-      ;(global.fetch as any).mockResolvedValue({
+      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
         ok: true,
         json: async () => ({ entries: [mockAuditEntry], nextPageToken: 'token-1' }),
       })
@@ -289,7 +289,7 @@ describe('AuditLogPage', () => {
 
       // Verify pagination token is reset
       await waitFor(() => {
-        const calls = (global.fetch as any).mock.calls
+        const calls = (global.fetch as vi.MockedFunction<typeof fetch>).mock.calls
         const lastCall = calls[calls.length - 1]
         expect(lastCall[0]).not.toContain('pageToken=token-1')
       })
@@ -299,7 +299,7 @@ describe('AuditLogPage', () => {
   describe('row click and detail panel', () => {
     it('opens detail panel when row is clicked', async () => {
       const user = userEvent.setup()
-      ;(global.fetch as any).mockResolvedValue({
+      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
         ok: true,
         json: async () => ({ entries: [mockAuditEntry] }),
       })
@@ -318,7 +318,7 @@ describe('AuditLogPage', () => {
 
     it('displays entry metadata in detail panel', async () => {
       const user = userEvent.setup()
-      ;(global.fetch as any).mockResolvedValue({
+      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
         ok: true,
         json: async () => ({ entries: [mockAuditEntry] }),
       })
@@ -339,7 +339,7 @@ describe('AuditLogPage', () => {
 
     it('displays JSON diff in detail panel for INSERT operation', async () => {
       const user = userEvent.setup()
-      ;(global.fetch as any).mockResolvedValue({
+      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
         ok: true,
         json: async () => ({ entries: [mockAuditEntry] }),
       })
@@ -360,7 +360,7 @@ describe('AuditLogPage', () => {
 
     it('displays JSON diff for UPDATE operation (before/after)', async () => {
       const user = userEvent.setup()
-      ;(global.fetch as any).mockResolvedValue({
+      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
         ok: true,
         json: async () => ({ entries: [mockAuditEntryUpdate] }),
       })
@@ -382,7 +382,7 @@ describe('AuditLogPage', () => {
 
     it('displays JSON diff for DELETE operation', async () => {
       const user = userEvent.setup()
-      ;(global.fetch as any).mockResolvedValue({
+      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
         ok: true,
         json: async () => ({ entries: [mockAuditEntryDelete] }),
       })
@@ -403,7 +403,7 @@ describe('AuditLogPage', () => {
 
     it('closes detail panel when backdrop is clicked', async () => {
       const user = userEvent.setup()
-      ;(global.fetch as any).mockResolvedValue({
+      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
         ok: true,
         json: async () => ({ entries: [mockAuditEntry] }),
       })
@@ -425,7 +425,7 @@ describe('AuditLogPage', () => {
 
     it('closes detail panel when close button is clicked', async () => {
       const user = userEvent.setup()
-      ;(global.fetch as any).mockResolvedValue({
+      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
         ok: true,
         json: async () => ({ entries: [mockAuditEntry] }),
       })
@@ -448,7 +448,7 @@ describe('AuditLogPage', () => {
 
   describe('error handling', () => {
     it('shows loading state on network error', async () => {
-      ;(global.fetch as any).mockRejectedValue(new Error('Network error'))
+      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockRejectedValue(new Error('Network error'))
 
       render(
         <Wrapper>
@@ -461,7 +461,7 @@ describe('AuditLogPage', () => {
     })
 
     it('handles stub service (501/503 responses)', async () => {
-      ;(global.fetch as any).mockResolvedValue({
+      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
         ok: false,
         status: 501,
       })

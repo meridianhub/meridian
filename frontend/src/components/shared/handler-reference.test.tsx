@@ -1,71 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, within } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import { HandlerReference } from './handler-reference'
 
 describe('HandlerReference', () => {
-  const mockSchema = {
-    services: [
-      {
-        serviceName: 'position_keeping',
-        handlers: [
-          {
-            name: 'initiate_log',
-            description: 'Initiates a position log entry',
-            params: [
-              {
-                name: 'amount',
-                type: 'Decimal',
-                required: true,
-                enumValues: [],
-              },
-              {
-                name: 'direction',
-                type: 'enum',
-                required: true,
-                enumValues: ['DEBIT', 'CREDIT'],
-              },
-            ],
-          },
-          {
-            name: 'finalize_log',
-            description: 'Finalizes a position log entry',
-            params: [
-              {
-                name: 'log_id',
-                type: 'string',
-                required: true,
-                enumValues: [],
-              },
-            ],
-          },
-        ],
-      },
-      {
-        serviceName: 'current_account',
-        handlers: [
-          {
-            name: 'debit',
-            description: 'Debits an account',
-            params: [
-              {
-                name: 'account_id',
-                type: 'string',
-                required: true,
-                enumValues: [],
-              },
-              {
-                name: 'amount',
-                type: 'Decimal',
-                required: true,
-                enumValues: [],
-              },
-            ],
-          },
-        ],
-      },
-    ],
-  }
-
   const defaultProps = {
     filter: '',
     onInsert: vi.fn(),

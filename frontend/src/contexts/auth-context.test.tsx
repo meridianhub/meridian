@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/globals */
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest'
 import { render, screen, act, waitFor } from '@testing-library/react'
 import { AuthProvider, useAuth, parseJWT } from '@/contexts/auth-context'

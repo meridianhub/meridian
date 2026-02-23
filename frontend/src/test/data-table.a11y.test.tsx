@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
 import { axe } from '@/test/test-utils'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ColumnDef } from '@tanstack/react-table'
