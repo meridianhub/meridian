@@ -106,7 +106,8 @@ func (s *AccountReconciliationService) UpdateDispute(
 		return nil, status.Errorf(codes.InvalidArgument, "invalid dispute_id: %v", err)
 	}
 
-	if _, err := uuid.Parse(req.GetRunId()); err != nil {
+	runID, err := uuid.Parse(req.GetRunId())
+	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid run_id: %v", err)
 	}
 
@@ -116,6 +117,10 @@ func (s *AccountReconciliationService) UpdateDispute(
 			return nil, status.Errorf(codes.NotFound, "dispute %s not found", disputeID)
 		}
 		return nil, status.Error(codes.Internal, "failed to retrieve dispute")
+	}
+
+	if dispute.RunID != runID {
+		return nil, status.Errorf(codes.NotFound, "dispute %s not found in run %s", disputeID, runID)
 	}
 
 	newStatus := req.GetStatus()

@@ -328,6 +328,25 @@ func TestUpdateDispute_InvalidRunID(t *testing.T) {
 	assert.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
+func TestUpdateDispute_RunIDMismatch(t *testing.T) {
+	repo := newMockDisputeRepo()
+	d := makeDisputeForRun(t, uuid.New(), domain.DisputeStatusOpen)
+	repo.disputes[d.DisputeID] = d
+
+	svc := service.NewAccountReconciliationService(
+		service.WithDisputeRepository(repo),
+	)
+
+	// Use a different run_id than the dispute's run_id
+	_, err := svc.UpdateDispute(context.Background(), &reconciliationv1.UpdateDisputeRequest{
+		RunId:     uuid.New().String(), // different run
+		DisputeId: d.DisputeID.String(),
+		Status:    reconciliationv1.DisputeStatus_DISPUTE_STATUS_RESOLVED,
+	})
+	require.Error(t, err)
+	assert.Equal(t, codes.NotFound, status.Code(err))
+}
+
 func TestUpdateDispute_UnspecifiedStatus(t *testing.T) {
 	repo := newMockDisputeRepo()
 	d := makeDisputeForRun(t, uuid.New(), domain.DisputeStatusOpen)
