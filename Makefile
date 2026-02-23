@@ -32,7 +32,7 @@ GOMOD=$(GOCMD) mod
 GOGET=$(GOCMD) get
 GOFMT=$(GOCMD) fmt
 
-.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-openapi proto-lint proto-breaking proto-descriptors docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt validate-semconv validate-sagas proto-jsonschema validate-manifest-jsonschema validate-manifests control-plane-ci test-control-plane migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-status-all migrate-lint-all migrate-hash-all migrate-apply-orgs migrate-status-orgs docs generate-saga-docs swagger-split swagger-ui dev-up dev-down dev-clean
+.PHONY: all help build seed-dev seed-dev-build test lint clean proto proto-v1 proto-v2 proto-openapi proto-lint proto-breaking proto-descriptors docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt validate-semconv validate-sagas proto-jsonschema validate-manifest-jsonschema validate-manifests control-plane-ci test-control-plane migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-status-all migrate-lint-all migrate-hash-all migrate-apply-orgs migrate-status-orgs docs generate-saga-docs swagger-split swagger-ui dev-up dev-down dev-clean
 
 # Default target
 all: help
@@ -43,6 +43,8 @@ help:
 	@echo ""
 	@echo "Available targets:"
 	@echo "  make build             - Compile all Go services"
+	@echo "  make seed-dev-build    - Build the seed-dev binary"
+	@echo "  make seed-dev          - Build and run seed-dev against local dev environment"
 	@echo "  make test              - Run tests with coverage"
 	@echo "  make lint              - Run golangci-lint, validate Tiltfile, and validate semconv versions"
 	@echo "  make validate-tilt     - Validate Tiltfile configuration"
@@ -109,6 +111,17 @@ build: tidy
 	@echo "Build complete:"
 	@echo "  - $(DIST_DIR)/$(BINARY_NAME)"
 	@echo "  - $(DIST_DIR)/atlas-loader"
+
+## seed-dev-build: Build the seed-dev binary
+seed-dev-build:
+	@echo "Building seed-dev binary..."
+	@mkdir -p bin
+	$(GOBUILD) -o bin/seed-dev ./cmd/seed-dev
+	@echo "Binary written to bin/seed-dev"
+
+## seed-dev: Seed the local dev tenant with manifest configuration
+seed-dev: seed-dev-build
+	@./scripts/seed-dev-tenant.sh
 
 ## test: Run tests with coverage
 test:
