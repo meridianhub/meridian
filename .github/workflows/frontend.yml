@@ -14,7 +14,6 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
 
 jobs:
   test:
@@ -51,17 +50,14 @@ jobs:
           name: coverage-report
           path: frontend/coverage/
           retention-days: 7
+          if-no-files-found: ignore
 
       - name: Check 80% line coverage threshold
         run: |
-          LINES=$(node -e "
-            const s = require('./coverage/coverage-summary.json');
-            console.log(s.total.lines.pct);
-          ")
-          echo "Line coverage: ${LINES}%"
           node -e "
             const s = require('./coverage/coverage-summary.json');
             const pct = s.total.lines.pct;
+            console.log('Line coverage: ' + pct + '%');
             if (pct < 80) {
               console.error('Coverage ' + pct + '% is below the 80% minimum threshold');
               process.exit(1);
