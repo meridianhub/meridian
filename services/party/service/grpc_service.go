@@ -79,6 +79,9 @@ type Repository interface {
 	SaveAssociationWithInput(ctx context.Context, partyID, relatedPartyID uuid.UUID, relationshipType string, input *persistence.AssociationInput) (uuid.UUID, error)
 	ListParticipants(ctx context.Context, orgPartyID uuid.UUID, relationshipType string) ([]persistence.PartyAssociationEntity, error)
 	GetStructuringData(ctx context.Context, partyID, orgPartyID uuid.UUID, relationshipType string) (map[string]interface{}, error)
+
+	// List operations
+	ListParties(ctx context.Context, params persistence.ListPartiesParams) (*persistence.ListPartiesResult, error)
 }
 
 // Service implements the PartyService gRPC service
@@ -281,6 +284,78 @@ func (s *Service) RetrieveParty(ctx context.Context, req *pb.RetrievePartyReques
 	return &pb.RetrievePartyResponse{
 		Party: domainToProto(party),
 	}, nil
+}
+
+// ListParties returns a paginated list of parties with optional filtering.
+func (s *Service) ListParties(ctx context.Context, req *pb.ListPartiesRequest) (*pb.ListPartiesResponse, error) {
+	// Apply defaults and validate page size
+	pageSize := int(req.PageSize)
+	if pageSize <= 0 {
+		pageSize = 25
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+
+	// Decode cursor
+	cursor, err := persistence.DecodePartyCursor(req.PageToken)
+	if err != nil {
+		s.logger.Warn("invalid page_token", "page_token", req.PageToken, "error", err)
+		return nil, status.Errorf(codes.InvalidArgument, "invalid page_token: %v", err)
+	}
+
+	// Build filter params
+	params := persistence.ListPartiesParams{
+		Limit:       pageSize,
+		Cursor:      cursor,
+		SearchQuery: req.SearchQuery,
+	}
+
+	if req.PartyType != pb.PartyType_PARTY_TYPE_UNSPECIFIED {
+		partyType, err := protoToPartyType(req.PartyType)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid party_type: %v", err)
+		}
+		params.PartyType = string(partyType)
+	}
+
+	if req.Status != pb.PartyStatus_PARTY_STATUS_UNSPECIFIED {
+		params.Status = protoToPartyStatus(req.Status)
+	}
+
+	result, err := s.repo.ListParties(ctx, params)
+	if err != nil {
+		s.logger.Error("failed to list parties", "error", err)
+		return nil, status.Errorf(codes.Internal, "failed to list parties: %v", err)
+	}
+
+	pbParties := make([]*pb.Party, len(result.Parties))
+	for i, p := range result.Parties {
+		pbParties[i] = domainToProto(p)
+	}
+
+	return &pb.ListPartiesResponse{
+		Parties:       pbParties,
+		NextPageToken: result.NextCursor,
+		TotalCount:    result.TotalCount,
+	}, nil
+}
+
+// protoToPartyStatus converts a proto PartyStatus to domain string
+func protoToPartyStatus(s pb.PartyStatus) string {
+	switch s {
+	case pb.PartyStatus_PARTY_STATUS_ACTIVE:
+		return string(domain.PartyStatusActive)
+	case pb.PartyStatus_PARTY_STATUS_RESTRICTED:
+		return string(domain.PartyStatusRestricted)
+	case pb.PartyStatus_PARTY_STATUS_SUSPENDED:
+		return string(domain.PartyStatusSuspended)
+	case pb.PartyStatus_PARTY_STATUS_TERMINATED:
+		return string(domain.PartyStatusTerminated)
+	case pb.PartyStatus_PARTY_STATUS_UNSPECIFIED:
+		return ""
+	}
+	return ""
 }
 
 // domainToProto converts a domain Party to a proto Party message.

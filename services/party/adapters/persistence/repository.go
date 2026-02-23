@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,7 +24,72 @@ var (
 	ErrPartyExists       = errors.New("party already exists")
 	ErrVersionConflict   = errors.New("version conflict: party was modified by another transaction")
 	ErrAssociationExists = errors.New("association already exists between parties")
+	ErrInvalidCursor     = errors.New("invalid pagination cursor")
 )
+
+// PartyCursor represents a pagination cursor for cursor-based pagination.
+// It uses created_at + id as a composite cursor to handle ties.
+type PartyCursor struct {
+	CreatedAt time.Time
+	ID        uuid.UUID
+}
+
+// EncodePartyCursor encodes a cursor to a base64 opaque page token.
+func EncodePartyCursor(c PartyCursor) string {
+	data := c.CreatedAt.Format(time.RFC3339Nano) + "|" + c.ID.String()
+	return base64.URLEncoding.EncodeToString([]byte(data))
+}
+
+// DecodePartyCursor decodes a base64 page token back to a PartyCursor.
+// Returns ErrInvalidCursor if the token is malformed.
+func DecodePartyCursor(token string) (PartyCursor, error) {
+	if token == "" {
+		return PartyCursor{}, nil
+	}
+
+	data, err := base64.URLEncoding.DecodeString(token)
+	if err != nil {
+		return PartyCursor{}, ErrInvalidCursor
+	}
+
+	parts := strings.SplitN(string(data), "|", 2)
+	if len(parts) != 2 {
+		return PartyCursor{}, ErrInvalidCursor
+	}
+
+	createdAt, err := time.Parse(time.RFC3339Nano, parts[0])
+	if err != nil {
+		return PartyCursor{}, ErrInvalidCursor
+	}
+
+	id, err := uuid.Parse(parts[1])
+	if err != nil {
+		return PartyCursor{}, ErrInvalidCursor
+	}
+
+	return PartyCursor{CreatedAt: createdAt, ID: id}, nil
+}
+
+// ListPartiesParams holds filter and pagination parameters for listing parties.
+type ListPartiesParams struct {
+	// PartyType filters by party classification (empty = no filter).
+	PartyType string
+	// Status filters by party lifecycle status (empty = no filter).
+	Status string
+	// SearchQuery performs a case-insensitive substring search on legal_name and display_name.
+	SearchQuery string
+	// Limit is the maximum number of results to return.
+	Limit int
+	// Cursor is the pagination cursor (zero value = first page).
+	Cursor PartyCursor
+}
+
+// ListPartiesResult holds the results of a ListParties query.
+type ListPartiesResult struct {
+	Parties    []*domain.Party
+	TotalCount int64
+	NextCursor string
+}
 
 // toJSONB prepares a string for JSONB storage.
 // If the input is a valid JSON object or array, it's returned as-is.
@@ -764,6 +830,92 @@ func (r *Repository) ListParticipants(ctx context.Context, orgPartyID uuid.UUID,
 			Find(&associations).Error
 	})
 	return associations, err
+}
+
+// ListParties retrieves a paginated list of parties with optional filtering.
+// Results are ordered by created_at DESC, id DESC (newest first) for stable pagination.
+// The context must contain the tenant ID for schema routing.
+func (r *Repository) ListParties(ctx context.Context, params ListPartiesParams) (*ListPartiesResult, error) {
+	var result *ListPartiesResult
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		// Base query: exclude soft-deleted parties
+		baseQuery := tx.Model(&PartyEntity{}).Where("deleted_at IS NULL")
+
+		// Apply filters
+		if params.PartyType != "" {
+			baseQuery = baseQuery.Where("party_type = ?", params.PartyType)
+		}
+		if params.Status != "" {
+			baseQuery = baseQuery.Where("status = ?", params.Status)
+		}
+		if params.SearchQuery != "" {
+			searchPattern := "%" + strings.ToLower(params.SearchQuery) + "%"
+			baseQuery = baseQuery.Where("LOWER(legal_name) LIKE ? OR LOWER(display_name) LIKE ?", searchPattern, searchPattern)
+		}
+
+		// Get total count matching filters
+		var totalCount int64
+		if err := baseQuery.Count(&totalCount).Error; err != nil {
+			return err
+		}
+
+		if totalCount == 0 {
+			result = &ListPartiesResult{
+				Parties:    []*domain.Party{},
+				TotalCount: 0,
+				NextCursor: "",
+			}
+			return nil
+		}
+
+		// Apply cursor for pagination
+		pageQuery := baseQuery
+		if !params.Cursor.CreatedAt.IsZero() {
+			// Composite cursor: items before cursor position in DESC order
+			pageQuery = pageQuery.Where(
+				"(created_at < ?) OR (created_at = ? AND id < ?)",
+				params.Cursor.CreatedAt, params.Cursor.CreatedAt, params.Cursor.ID,
+			)
+		}
+
+		var entities []PartyEntity
+		if err := pageQuery.
+			Order("created_at DESC, id DESC").
+			Limit(params.Limit + 1). // fetch one extra to detect next page
+			Find(&entities).Error; err != nil {
+			return err
+		}
+
+		hasMore := len(entities) > params.Limit
+		if hasMore {
+			entities = entities[:params.Limit]
+		}
+
+		parties := make([]*domain.Party, len(entities))
+		for i := range entities {
+			parties[i] = toDomain(&entities[i])
+		}
+
+		var nextCursor string
+		if hasMore && len(entities) > 0 {
+			last := entities[len(entities)-1]
+			nextCursor = EncodePartyCursor(PartyCursor{
+				CreatedAt: last.CreatedAt,
+				ID:        last.ID,
+			})
+		}
+
+		result = &ListPartiesResult{
+			Parties:    parties,
+			TotalCount: totalCount,
+			NextCursor: nextCursor,
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // GetStructuringData retrieves the metadata JSONB for a specific association.
