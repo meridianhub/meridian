@@ -69,7 +69,9 @@ SSH into the Droplet and run:
 
 ```bash
 sudo mkdir -p /opt/meridian/certs
-sudo chmod 700 /opt/meridian/certs
+# Replace <service-user> with the reverse proxy user (e.g. caddy or www-data)
+sudo chown root:<service-user> /opt/meridian/certs
+sudo chmod 750 /opt/meridian/certs
 ```
 
 Write the certificate:
@@ -78,6 +80,8 @@ Write the certificate:
 sudo tee /opt/meridian/certs/origin-cert.pem <<'EOF'
 <paste Origin Certificate PEM here>
 EOF
+sudo chown root:<service-user> /opt/meridian/certs/origin-cert.pem
+sudo chmod 644 /opt/meridian/certs/origin-cert.pem
 ```
 
 Write the private key:
@@ -86,7 +90,8 @@ Write the private key:
 sudo tee /opt/meridian/certs/origin-key.pem <<'EOF'
 <paste Private Key PEM here>
 EOF
-sudo chmod 600 /opt/meridian/certs/origin-key.pem
+sudo chown root:<service-user> /opt/meridian/certs/origin-key.pem
+sudo chmod 640 /opt/meridian/certs/origin-key.pem
 ```
 
 Verify the files are in place:
@@ -94,11 +99,13 @@ Verify the files are in place:
 ```bash
 ls -la /opt/meridian/certs/
 # Expected:
-# -rw------- ... origin-key.pem
-# -rw-r--r-- ... origin-cert.pem
+# -rw-r----- root:<service-user>  origin-key.pem   (640)
+# -rw-r--r-- root:<service-user>  origin-cert.pem  (644)
 ```
 
-The Caddy / Nginx configuration for the Droplet should reference these paths directly.
+The reverse proxy (Caddy / Nginx) configuration should reference these paths directly. The
+`<service-user>` group membership grants the proxy read access while preventing other users from
+reading the private key.
 
 ---
 
@@ -159,12 +166,17 @@ Increase to PL2 for staging and production after confirming no legitimate traffi
 
 Recommended rate-limit rules for the demo environment:
 
-| Rule name              | Expression                                      | Threshold   | Period | Action  |
-|------------------------|--------------------------------------------------|-------------|--------|---------|
-| API general            | `http.request.uri.path matches "^/api/"`         | 1000 req    | 1 min  | Block   |
-| Auth endpoints         | `http.request.uri.path matches "^/api/auth/"`    | 20 req      | 1 min  | Block   |
-| Health check bypass    | `http.request.uri.path eq "/healthz"`            | (skip rule) | —      | Skip    |
+| Rule name      | Expression                                    | Threshold | Period | Action |
+|----------------|------------------------------------------------|-----------|--------|--------|
+| API general    | `http.request.uri.path matches "^/api/"`       | 1000 req  | 1 min  | Block  |
+| Auth endpoints | `http.request.uri.path matches "^/api/auth/"`  | 20 req    | 1 min  | Block  |
 
+> `/healthz` does not match `^/api/`, so health check requests are unaffected by the rules above
+> and require no bypass rule. If you ever need to exempt a path that **does** match a rate-limit
+> expression, create a WAF Custom Rule (`Security → WAF → Custom Rules`) with the **Skip** action
+> and select **Skip › Rate Limiting Rules** — rate limiting bypass cannot be configured within the
+> rate limiting rule table itself.
+>
 > On the free plan, rate limiting is not available. Consider enabling it when promoting to
 > staging or production.
 
@@ -241,18 +253,25 @@ means the proxy is disabled (orange cloud is off) or DNS has not yet propagated.
 
 ### 6.3 Origin Certificate validation
 
-Verify that the Droplet is presenting the correct certificate and that Cloudflare accepts it:
+Verify that the Droplet is presenting the correct Origin Certificate. Because Cloudflare terminates
+TLS at the edge and presents its own edge certificate to the public internet, the origin certificate
+must be inspected by connecting **directly** to the Droplet IP, bypassing the Cloudflare proxy:
 
 ```bash
-# From any machine — tests the full Cloudflare-to-origin TLS chain
-curl -sv https://demo.meridianhub.cloud 2>&1 | grep -E "subject|issuer|expire|SSL"
+# Run from a host that can reach <DROPLET_IP>:443 directly (e.g. SSH into the Droplet or a bastion)
+openssl s_client -connect <DROPLET_IP>:443 -servername demo.meridianhub.cloud \
+  </dev/null 2>&1 | grep -E "subject|issuer|notAfter"
 
 # The certificate issuer should be:
 # issuer: O=Cloudflare, Inc.; CN=Cloudflare Origin CA RSA Root
 ```
 
-If you see a certificate issued by Let's Encrypt or another public CA instead, the Origin
-Certificate has not been installed correctly on the Droplet.
+> **Note:** Connecting via `https://demo.meridianhub.cloud` (through the Cloudflare proxy) will
+> display Cloudflare's **edge** certificate issued by a public CA (e.g. DigiCert). Direct
+> connection to the Droplet IP is required to inspect the origin certificate.
+
+If the issuer is not `Cloudflare Origin CA RSA Root`, the Origin Certificate has not been installed
+correctly on the Droplet. Re-run Section 2.2.
 
 ### 6.4 SSL mode confirmation
 
