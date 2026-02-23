@@ -857,12 +857,24 @@ local_resource(
   trigger_mode=TRIGGER_MODE_MANUAL,
 )
 
+# Generate TypeScript proto clients from api/proto definitions
+# Uses buf + protoc-gen-es from frontend/node_modules/.bin
+local_resource(
+  'frontend-generate',
+  cmd='cd frontend && npm run generate',
+  deps=['api/proto'],
+  resource_deps=['frontend-deps', 'generate-proto'],
+  labels=['frontend'],
+  auto_init=True,
+  trigger_mode=TRIGGER_MODE_MANUAL,
+)
+
 # Start Vite dev server with HMR
 local_resource(
   'frontend',
   serve_cmd='cd frontend && npm run dev -- --port 5173 --host 0.0.0.0',
   deps=['frontend/src', 'frontend/index.html', 'frontend/vite.config.ts'],
-  resource_deps=['frontend-deps', 'gateway'],
+  resource_deps=['frontend-generate', 'gateway'],
   labels=['frontend'],
   links=['http://localhost:5173'],
 )
