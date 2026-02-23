@@ -11,8 +11,9 @@
 -- multiple tenant schemas apply the same migration.
 
 -- Check constraint: valid_to must be strictly after valid_from
+-- Note: ADD CONSTRAINT IF NOT EXISTS is CockroachDB-only syntax; omitted for PostgreSQL compatibility.
 ALTER TABLE public.platform_saga_definition
-  ADD CONSTRAINT IF NOT EXISTS chk_platform_saga_definition_validity_range
+  ADD CONSTRAINT chk_platform_saga_definition_validity_range
     CHECK (valid_to IS NULL OR valid_to > valid_from);
 
 -- Index for temporal lookups: "which version of saga X was active at time T?"

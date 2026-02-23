@@ -11,13 +11,13 @@
 -- multiple tenant schemas apply the same migration.
 
 -- Add CHECK constraints for data integrity
--- Note: ADD CONSTRAINT IF NOT EXISTS is supported in CockroachDB v21.2+
+-- Note: ADD CONSTRAINT IF NOT EXISTS is CockroachDB-only syntax; omitted for PostgreSQL compatibility.
 ALTER TABLE public.platform_saga_definition
-  ADD CONSTRAINT IF NOT EXISTS chk_platform_saga_definition_status
+  ADD CONSTRAINT chk_platform_saga_definition_status
     CHECK (status IN ('ACTIVE', 'DEPRECATED'));
 
 ALTER TABLE public.platform_saga_definition
-  ADD CONSTRAINT IF NOT EXISTS chk_platform_saga_definition_previous_version
+  ADD CONSTRAINT chk_platform_saga_definition_previous_version
     CHECK (previous_version ~ '^[0-9]+\.[0-9]+\.[0-9]+$' OR previous_version IS NULL);
 
 -- Create index for finding active versions efficiently
