@@ -73,13 +73,15 @@ export function ManifestHistoryTable() {
 
   return (
     <>
-      <DataTable<ManifestVersion>
-        queryKey={manifestKeys.history()}
-        queryFn={fetchVersions}
-        columns={columns}
-        pageSize={20}
-        onRowClick={setSelectedVersion}
-      />
+      <div data-testid="manifest-history-table">
+        <DataTable<ManifestVersion>
+          queryKey={manifestKeys.history()}
+          queryFn={fetchVersions}
+          columns={columns}
+          pageSize={20}
+          onRowClick={setSelectedVersion}
+        />
+      </div>
 
       <Dialog open={selectedVersion != null} onOpenChange={() => setSelectedVersion(null)}>
         <DialogContent className="max-w-2xl">
