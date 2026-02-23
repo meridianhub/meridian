@@ -123,7 +123,7 @@ is a no-op (the index no longer exists), and the rest of the migration proceeds 
 
 ```sql
 -- deploy/demo/pg-pre-migration.sql
-ALTER TABLE public.platform_saga_definition
+ALTER TABLE IF EXISTS public.platform_saga_definition
   DROP CONSTRAINT IF EXISTS uq_platform_saga_definition_name;
 ```
 
@@ -238,9 +238,11 @@ Run Atlas migrations per service in the following order to respect provisioning 
 
 ### Atlas Configuration for PostgreSQL
 
-The Atlas config (`atlas.hcl`) per service needs a PostgreSQL connection URL. The existing
-`env "local"` and `env "ci"` environments already use `dev = "docker://postgres/16/dev"`,
-confirming all migrations are already validated against PostgreSQL 16 in CI via Atlas linting.
+The Atlas config (`atlas.hcl`) per service needs a PostgreSQL connection URL. Five services
+(current-account, financial-accounting, party, payment-order, position-keeping) execute their
+full migration history against PostgreSQL 16 in CI via `atlas migrate apply`; reference-data
+migrations are not currently tested in CI. The `env "local"` and `env "ci"` configurations
+use `dev = "docker://postgres/16/dev"` for schema diffing and lint validation.
 
 ### Validation Checklist
 
