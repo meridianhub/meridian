@@ -529,6 +529,38 @@ message RetrieveAccountReconciliationResponse {
   SettlementRunSummary run = 1 [(buf.validate.field).required = true];
 }
 
+// --- List: Paginated list of settlement runs ---
+
+// ListAccountReconciliationsRequest lists settlement runs with pagination.
+message ListAccountReconciliationsRequest {
+  // page_size is the maximum number of runs to return (default: 50, max: 1000).
+  int32 page_size = 1 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 1000
+  }];
+
+  // page_token is an opaque cursor for fetching the next page.
+  string page_token = 2;
+
+  // status filters runs by status (optional).
+  RunStatus status = 3;
+
+  // account_id filters runs by account (optional).
+  string account_id = 4 [(buf.validate.field).string.max_len = 255];
+}
+
+// ListAccountReconciliationsResponse returns paginated settlement runs.
+message ListAccountReconciliationsResponse {
+  // runs are the matching settlement run summaries.
+  repeated SettlementRunSummary runs = 1;
+
+  // next_page_token is the cursor for fetching the next page (empty if last page).
+  string next_page_token = 2;
+
+  // total_count is the total number of runs matching the filter (-1 if unknown).
+  int64 total_count = 3;
+}
+
 // --- Control: Cancel, pause, or resume a settlement run ---
 
 // ControlAccountReconciliationRequest controls a settlement run lifecycle.
@@ -777,6 +809,13 @@ service AccountReconciliationService {
     };
   }
 
+  // ListAccountReconciliations returns paginated settlement runs.
+  rpc ListAccountReconciliations(ListAccountReconciliationsRequest) returns (ListAccountReconciliationsResponse) {
+    option (google.api.http) = {
+      get: "/v1/reconciliation/runs"
+    };
+  }
+
   // RetrieveAccountReconciliation retrieves a settlement run summary.
   rpc RetrieveAccountReconciliation(RetrieveAccountReconciliationRequest) returns (RetrieveAccountReconciliationResponse) {
     option (google.api.http) = {
@@ -796,6 +835,9 @@ service AccountReconciliationService {
   rpc ListReconciliationResults(ListReconciliationResultsRequest) returns (ListReconciliationResultsResponse) {
     option (google.api.http) = {
       get: "/v1/reconciliation/runs/{run_id}/results"
+      additional_bindings: {
+        get: "/v1/reconciliation/runs/{run_id}/variances"
+      }
     };
   }
 

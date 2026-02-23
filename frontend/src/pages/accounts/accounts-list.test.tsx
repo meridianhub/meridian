@@ -22,21 +22,20 @@ function renderAccountsPage(initialPath = '/accounts') {
   )
 }
 
+// Mock proto response shape (CurrentAccountFacility fields)
 const mockAccounts = [
   {
     accountId: 'acct-001',
-    iban: 'GB29NWBK60161331926819',
-    status: 'ACTIVE',
-    baseCurrency: 'GBP',
-    availableBalance: '100000',
+    accountIdentification: 'GB29NWBK60161331926819',
+    accountStatus: 'ACCOUNT_STATUS_ACTIVE',
+    baseCurrency: 'CURRENCY_GBP',
     createdAt: { seconds: 1700000000, nanos: 0 },
   },
   {
     accountId: 'acct-002',
-    iban: 'DE89370400440532013000',
-    status: 'FROZEN',
-    baseCurrency: 'EUR',
-    availableBalance: '50000',
+    accountIdentification: 'DE89370400440532013000',
+    accountStatus: 'ACCOUNT_STATUS_FROZEN',
+    baseCurrency: 'CURRENCY_EUR',
     createdAt: { seconds: 1700100000, nanos: 0 },
   },
 ]
@@ -175,7 +174,7 @@ describe('AccountsPage - filtering', () => {
     await waitFor(() => expect(capturedRequests.length).toBeGreaterThan(0))
 
     const statusSelect = screen.getByRole('combobox', { name: /status/i })
-    await userEvent.selectOptions(statusSelect, 'ACTIVE')
+    await userEvent.selectOptions(statusSelect, 'ACCOUNT_STATUS_ACTIVE')
 
     await waitFor(() => {
       // DataTable passes filters as a record - the page should call the API with the filter

@@ -25,23 +25,43 @@ function buildDevToken(role: 'platform-admin' | 'tenant-user'): string {
 /**
  * Inject a dev auth token via window.__DEV_LOGIN__ exposed by AuthProvider in DEV mode
  * and in E2E builds (VITE_E2E_MODE=true).
+ *
+ * Auth tokens are memory-only (not persisted). After calling this, use
+ * navigateTo() for client-side navigation to preserve the in-memory auth state.
+ * Avoid page.goto() for subsequent navigations.
+ *
+ * After injecting the token, triggers client-side navigation to '/' so
+ * ProtectedRoute renders the authenticated content instead of redirecting to /login.
  */
 async function injectDevAuth(page: Page, role: 'platform-admin' | 'tenant-user') {
   const token = buildDevToken(role)
-  // Load the app first so AuthProvider mounts and exposes __DEV_LOGIN__
+  // Start at / which redirects to /login via ProtectedRoute (unauthenticated)
   await page.goto('/')
   await page.waitForFunction(() => typeof (window as Record<string, unknown>).__DEV_LOGIN__ === 'function')
+  // Set the in-memory auth token
   await page.evaluate((t) => {
     ;(window as Record<string, unknown>).__DEV_LOGIN__(t)
   }, token)
-  // Auth token is in-memory only: do NOT reload the page (would lose the token).
-  // Navigate using the client-side router so ProtectedRoute sees the authenticated state.
+  // Navigate to / via client-side routing so ProtectedRoute renders the authenticated app.
+  // Using history.pushState + popstate event keeps the memory auth state intact.
   await page.evaluate(() => {
     window.history.pushState({}, '', '/')
     window.dispatchEvent(new PopStateEvent('popstate'))
   })
   // Wait for the app shell <main> to confirm authenticated layout is rendered.
   await page.waitForSelector('main', { timeout: 10_000 })
+}
+
+/**
+ * Navigate to a path using client-side routing (React Router history.pushState).
+ * Use this instead of page.goto() after authentication to preserve memory-only auth tokens.
+ */
+export async function navigateTo(page: Page, path: string) {
+  await page.evaluate((p) => {
+    window.history.pushState({}, '', p)
+    // Dispatch popstate so React Router picks up the new URL
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  }, path)
 }
 
 type Fixtures = {

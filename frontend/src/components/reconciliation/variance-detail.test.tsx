@@ -4,19 +4,17 @@ import { VarianceDetail, type Variance } from './variance-detail'
 
 const baseVariance: Variance = {
   varianceId: 'var-001',
-  reasonCode: 'AMOUNT_MISMATCH',
-  expected: {
-    amount: '10000',
-    currency: 'GBP',
-    direction: 'DEBIT',
-    entryId: 'entry-exp-1',
-  },
-  actual: {
-    amount: '9500',
-    currency: 'GBP',
-    direction: 'DEBIT',
-    entryId: 'entry-act-1',
-  },
+  runId: 'run-001',
+  snapshotId: 'snap-001',
+  accountId: 'acc-001',
+  instrumentCode: 'GBP',
+  expectedAmount: '100.00',
+  actualAmount: '95.00',
+  varianceAmount: '-5.00',
+  reason: 'VARIANCE_REASON_AMOUNT_MISMATCH',
+  status: 'VARIANCE_STATUS_OPEN',
+  createdAt: '2026-02-23T00:00:00Z',
+  updatedAt: '2026-02-23T00:00:00Z',
 }
 
 describe('VarianceDetail - rendering', () => {
@@ -25,55 +23,53 @@ describe('VarianceDetail - rendering', () => {
     expect(screen.getByText('var-001')).toBeInTheDocument()
   })
 
-  it('renders the reason code badge', () => {
+  it('renders the reason code badge with prefix stripped', () => {
     render(<VarianceDetail variance={baseVariance} />)
     expect(screen.getByText('AMOUNT_MISMATCH')).toBeInTheDocument()
   })
 
-  it('renders Expected and Actual section labels', () => {
+  it('renders the status badge with prefix stripped', () => {
+    render(<VarianceDetail variance={baseVariance} />)
+    expect(screen.getByText('OPEN')).toBeInTheDocument()
+  })
+
+  it('renders Expected, Actual, and Variance section labels', () => {
     render(<VarianceDetail variance={baseVariance} />)
     expect(screen.getByText('Expected')).toBeInTheDocument()
     expect(screen.getByText('Actual')).toBeInTheDocument()
+    expect(screen.getByText('Variance')).toBeInTheDocument()
   })
 
-  it('renders expected side direction', () => {
+  it('renders expected amount', () => {
     render(<VarianceDetail variance={baseVariance} />)
-    const directionTexts = screen.getAllByText(/Direction: DEBIT/)
-    expect(directionTexts.length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('100.00')).toBeInTheDocument()
   })
 
-  it('renders expected side entry ID', () => {
+  it('renders actual amount', () => {
     render(<VarianceDetail variance={baseVariance} />)
-    expect(screen.getByText(/entry-exp-1/)).toBeInTheDocument()
+    expect(screen.getByText('95.00')).toBeInTheDocument()
   })
 
-  it('renders actual side entry ID', () => {
+  it('renders variance amount', () => {
     render(<VarianceDetail variance={baseVariance} />)
-    expect(screen.getByText(/entry-act-1/)).toBeInTheDocument()
+    expect(screen.getByText('-5.00')).toBeInTheDocument()
   })
 
-  it('shows "No entry" when expected is null', () => {
-    const v: Variance = { ...baseVariance, expected: null }
+  it('renders account and instrument', () => {
+    render(<VarianceDetail variance={baseVariance} />)
+    expect(screen.getByText(/acc-001/)).toBeInTheDocument()
+    expect(screen.getByText(/GBP/)).toBeInTheDocument()
+  })
+
+  it('renders resolution note when provided', () => {
+    const v: Variance = { ...baseVariance, resolutionNote: 'Accepted as timing difference' }
     render(<VarianceDetail variance={v} />)
-    expect(screen.getByText('No entry')).toBeInTheDocument()
+    expect(screen.getByText('Accepted as timing difference')).toBeInTheDocument()
   })
 
-  it('shows "No entry" when actual is null', () => {
-    const v: Variance = { ...baseVariance, actual: null }
-    render(<VarianceDetail variance={v} />)
-    expect(screen.getByText('No entry')).toBeInTheDocument()
-  })
-
-  it('renders notes when provided', () => {
-    const v: Variance = { ...baseVariance, notes: 'Investigate this discrepancy' }
-    render(<VarianceDetail variance={v} />)
-    expect(screen.getByText('Investigate this discrepancy')).toBeInTheDocument()
-  })
-
-  it('does not render notes section when notes is absent', () => {
+  it('does not render resolution note section when absent', () => {
     render(<VarianceDetail variance={baseVariance} />)
-    // baseVariance has no notes
-    expect(screen.queryByText(/investigate/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/accepted/i)).not.toBeInTheDocument()
   })
 
   it('has data-testid variance-detail', () => {
@@ -84,22 +80,38 @@ describe('VarianceDetail - rendering', () => {
 
 describe('VarianceDetail - reason codes', () => {
   const reasonCodes = [
-    'AMOUNT_MISMATCH',
-    'MISSING_ENTRY',
-    'DUPLICATE_ENTRY',
-    'TIMING_DIFFERENCE',
-    'CURRENCY_MISMATCH',
-    'DIRECTION_ERROR',
-    'QUALITY_UPGRADE',
-    'EXTERNAL_MISMATCH',
-    'CORRECTION_APPLIED',
+    'VARIANCE_REASON_AMOUNT_MISMATCH',
+    'VARIANCE_REASON_MISSING_ENTRY',
+    'VARIANCE_REASON_DUPLICATE_ENTRY',
+    'VARIANCE_REASON_TIMING_DIFFERENCE',
+    'VARIANCE_REASON_CURRENCY_MISMATCH',
+    'VARIANCE_REASON_DIRECTION_ERROR',
+    'VARIANCE_REASON_OTHER',
   ] as const
 
   for (const code of reasonCodes) {
     it(`renders reason code: ${code}`, () => {
-      const v: Variance = { ...baseVariance, reasonCode: code }
+      const v: Variance = { ...baseVariance, reason: code }
       render(<VarianceDetail variance={v} />)
-      expect(screen.getByText(code)).toBeInTheDocument()
+      expect(screen.getByText(code.replace('VARIANCE_REASON_', ''))).toBeInTheDocument()
+    })
+  }
+})
+
+describe('VarianceDetail - status codes', () => {
+  const statuses = [
+    'VARIANCE_STATUS_OPEN',
+    'VARIANCE_STATUS_INVESTIGATING',
+    'VARIANCE_STATUS_DISPUTED',
+    'VARIANCE_STATUS_RESOLVED',
+    'VARIANCE_STATUS_ACCEPTED',
+  ] as const
+
+  for (const status of statuses) {
+    it(`renders status: ${status}`, () => {
+      const v: Variance = { ...baseVariance, status }
+      render(<VarianceDetail variance={v} />)
+      expect(screen.getByText(status.replace('VARIANCE_STATUS_', ''))).toBeInTheDocument()
     })
   }
 })

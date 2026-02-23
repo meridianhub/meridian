@@ -32,8 +32,13 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build \
     -o meridian \
     ./cmd/meridian/
 
-# Verify the binary exists and is executable
-RUN test -x meridian && echo "Binary built successfully"
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build \
+    -ldflags="-w -s" \
+    -o seed-dev \
+    ./cmd/seed-dev/
+
+# Verify the binaries exist and are executable
+RUN test -x meridian && test -x seed-dev && echo "Binaries built successfully"
 
 # Runtime stage - distroless for minimal attack surface (~2MB base)
 FROM gcr.io/distroless/static-debian12
@@ -41,8 +46,9 @@ FROM gcr.io/distroless/static-debian12
 # Copy timezone data from builder for time-sensitive operations
 COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 
-# Copy binary from builder
+# Copy binaries from builder
 COPY --from=builder /build/meridian /meridian
+COPY --from=builder /build/seed-dev /seed-dev
 
 # Use non-root user (distroless provides nonroot user at uid 65532)
 USER nonroot:nonroot

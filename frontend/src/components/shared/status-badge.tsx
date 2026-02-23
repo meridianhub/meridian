@@ -26,6 +26,9 @@ const STATUS_MAP: Record<string, StatusVariant> = {
   PROVISIONING_PENDING: 'info',
   PROVISIONING_FAILED: 'error',
   DEPROVISIONED: 'neutral',
+  // Manifest apply statuses
+  APPLIED: 'success',
+  ROLLED_BACK: 'warning',
   // Position quality ladder
   ESTIMATE: 'warning',
   COEFFICIENT: 'info',
