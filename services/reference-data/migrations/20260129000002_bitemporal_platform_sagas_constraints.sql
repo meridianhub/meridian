@@ -7,8 +7,9 @@
 -- on columns added in the same schema change batch.
 --
 -- IMPORTANT: This migration runs per-tenant but modifies objects in the shared
--- public schema. All DDL statements must be idempotent to avoid errors when
--- multiple tenant schemas apply the same migration.
+-- public schema. CREATE INDEX uses IF NOT EXISTS for SQL-level idempotency.
+-- ADD CONSTRAINT statements rely on the tenant provisioner's isAlreadyExistsError
+-- handler to treat duplicate-object errors as success (application-layer idempotency).
 
 -- Check constraint: valid_to must be strictly after valid_from
 -- Note: ADD CONSTRAINT IF NOT EXISTS is CockroachDB-only syntax; omitted for PostgreSQL compatibility.
