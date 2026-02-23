@@ -92,6 +92,9 @@
     async function loadSwagger(specUrl) {
       try {
         const resp = await fetch(specUrl);
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}`);
+        }
         const spec = await resp.json();
         // Point "Try it out" at the local gateway
         spec.host = 'localhost:8090';
