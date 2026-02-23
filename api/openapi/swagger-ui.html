@@ -103,18 +103,21 @@
         docExpansion: 'list',
         filter: true,
         requestInterceptor: (req) => {
-          // Rewrite requests to go through the local gateway
-          if (req.url && !req.url.startsWith('http')) {
-            req.url = GATEWAY_URL + req.url;
+          // Leave spec/catalog fetches alone — they're served by the local python server
+          if (req.url.includes('.json') || req.url.includes(':8091')) {
+            return req;
           }
-          // Redirect API calls (not swagger spec fetches) to the local gateway
-          if (!req.url.includes('swagger') && !req.url.includes(':8091')) {
+          // Redirect API calls to the local gateway
+          try {
             const url = new URL(req.url);
             if (url.host !== 'localhost:8090') {
               url.host = 'localhost:8090';
               url.protocol = 'http:';
               req.url = url.toString();
             }
+          } catch {
+            // Relative URL — prefix with gateway
+            req.url = GATEWAY_URL + '/' + req.url.replace(/^\//, '');
           }
           return req;
         }
