@@ -68,6 +68,9 @@ jobs:
       - name: Generate protobuf files
         run: buf generate
 
+      - name: Build proto FileDescriptorSet
+        run: buf build api/proto -o cmd/meridian/descriptor.binpb
+
       - name: Build meridian binary
         run: CGO_ENABLED=0 go build -o ./dist/meridian ./cmd/meridian/
 
@@ -84,8 +87,44 @@ jobs:
             ./dist/meridian &
 
       - name: Seed dev tenant
-        run: GATEWAY_HOST=localhost:8090 ./scripts/seed-dev-tenant.sh
-        # Script polls /healthz with 30 retries at 2s intervals before seeding
+        # The gateway exposes the Connect/gRPC API under /api/ prefix.
+        # Seed the dev tenant by calling the TenantService endpoint directly.
+        run: |
+          GATEWAY_URL="http://localhost:8090"
+
+          # Wait for gateway to be healthy (up to 60s)
+          for i in $(seq 1 30); do
+            if curl -sf "${GATEWAY_URL}/healthz" >/dev/null 2>&1; then
+              echo "Gateway is healthy."
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "ERROR: Gateway did not become healthy after 60s"
+              exit 1
+            fi
+            sleep 2
+          done
+
+          # Create dev tenant (idempotent)
+          HTTP_CODE=$(curl -s -o /tmp/seed-response.json -w "%{http_code}" \
+            -X POST "${GATEWAY_URL}/api/meridian.tenant.v1.TenantService/InitiateTenant" \
+            -H "Content-Type: application/json" \
+            -d '{"tenantId":"dev_tenant","displayName":"Dev Tenant","settlementAsset":"GBP","subdomain":"dev-tenant"}')
+          BODY=$(cat /tmp/seed-response.json 2>/dev/null || echo "")
+          case "$HTTP_CODE" in
+            200) echo "Dev tenant created." ;;
+            409) echo "Dev tenant already exists." ;;
+            *)
+              if echo "$BODY" | grep -qi "already.exist"; then
+                echo "Dev tenant already exists."
+              else
+                echo "ERROR: Unexpected response (HTTP ${HTTP_CODE}): ${BODY}"
+                exit 1
+              fi
+              ;;
+          esac
+          rm -f /tmp/seed-response.json
+          echo "Seed complete."
 
       - name: Install frontend dependencies
         working-directory: frontend
