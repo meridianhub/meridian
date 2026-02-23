@@ -796,6 +796,9 @@ service AccountReconciliationService {
   rpc ListReconciliationResults(ListReconciliationResultsRequest) returns (ListReconciliationResultsResponse) {
     option (google.api.http) = {
       get: "/v1/reconciliation/runs/{run_id}/results"
+      additional_bindings: {
+        get: "/v1/reconciliation/runs/{run_id}/variances"
+      }
     };
   }
 
