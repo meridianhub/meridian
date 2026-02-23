@@ -25,13 +25,14 @@ import (
 var ErrManifestValidation = errors.New("manifest validation failed")
 
 var (
-	gatewayURL   string
-	grpcAddr     string
-	manifestPath string
-	tenantID     string
-	tenantSlug   string
-	timeout      time.Duration
-	skipManifest bool
+	gatewayURL       string
+	grpcAddr         string
+	controlPlaneAddr string
+	manifestPath     string
+	tenantID         string
+	tenantSlug       string
+	timeout          time.Duration
+	skipManifest     bool
 )
 
 var rootCmd = &cobra.Command{
@@ -54,7 +55,10 @@ Examples:
   seed-dev --skip-manifest
 
   # Custom gateway and gRPC addresses
-  seed-dev --gateway-url=http://meridian:8090 --grpc-addr=meridian:50051`,
+  seed-dev --gateway-url=http://meridian:8090 --grpc-addr=meridian:50051
+
+  # Tilt mode: separate service addresses
+  seed-dev --grpc-addr=localhost:50056 --control-plane-addr=localhost:50062`,
 	RunE: runSeed,
 }
 
@@ -71,7 +75,10 @@ func init() {
 		"Gateway HTTP URL (used for health check)")
 	rootCmd.Flags().StringVar(&grpcAddr, "grpc-addr",
 		getEnvOrDefault("GRPC_ADDR", "localhost:50051"),
-		"gRPC server address (host:port)")
+		"gRPC server address for tenant service (host:port)")
+	rootCmd.Flags().StringVar(&controlPlaneAddr, "control-plane-addr",
+		getEnvOrDefault("CONTROL_PLANE_ADDR", ""),
+		"gRPC address for control-plane service (defaults to --grpc-addr)")
 	rootCmd.Flags().StringVar(&manifestPath, "manifest",
 		getEnvOrDefault("MANIFEST_PATH", "examples/manifests/energy.json"),
 		"Path to manifest JSON file")
@@ -122,8 +129,22 @@ func runSeed(_ *cobra.Command, _ []string) error {
 		return nil
 	}
 
+	// Use separate connection for control-plane if address differs from tenant service
+	cpAddr := controlPlaneAddr
+	if cpAddr == "" {
+		cpAddr = grpcAddr
+	}
+	manifestConn := conn
+	if cpAddr != grpcAddr {
+		manifestConn, err = grpc.NewClient(cpAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if err != nil {
+			return fmt.Errorf("connect to control-plane gRPC server %s: %w", cpAddr, err)
+		}
+		defer func() { _ = manifestConn.Close() }()
+	}
+
 	fmt.Printf("Applying manifest from %s ...\n", manifestPath)
-	if err := applyManifest(ctx, conn, tenantID, manifestPath); err != nil {
+	if err := applyManifest(ctx, manifestConn, tenantID, manifestPath); err != nil {
 		return fmt.Errorf("apply manifest: %w", err)
 	}
 

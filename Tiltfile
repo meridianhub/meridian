@@ -403,7 +403,7 @@ k8s_resource(
   ],
   resource_deps=[
     'generate-proto',  # Ensures proto files are generated before building
-    'init-database',  # Ensures database and user are created before app starts
+    'migrate-reference-data',  # Last in migration chain — ensures ALL service tables (incl. audit_outbox) exist
     'redis',
     'kafka-cluster',
     'keycloak',
@@ -480,6 +480,7 @@ k8s_resource(
 #   - ReferenceData:        50059
 #   - Reconciliation:       50060
 #   - Forecasting:          50061
+#   - ControlPlane:         50062
 #   - Gateway (HTTP):       8080
 #   - HTTPHealth:           8081
 #   - HTTPMetrics:          9090
@@ -559,6 +560,13 @@ grpc_microservice(
     'reference-data',
     grpc_port=50059,  # ports.ReferenceData
     resource_deps=['cockroachdb', 'migrate-reference-data'],
+)
+
+# Control Plane Service - gRPC microservice for manifest application and validation
+grpc_microservice(
+    'control-plane',
+    grpc_port=50062,  # ports.ControlPlane
+    resource_deps=['cockroachdb', 'migrate-control-plane'],
 )
 
 # =============================================================================
@@ -757,10 +765,17 @@ migration_job(
 )
 
 migration_job(
+  'migrate-control-plane',
+  'control-plane',
+  'platform',
+  resource_deps=['migrate-payment-order'],  # Shares meridian_platform DB with tenant - must run before tenant
+)
+
+migration_job(
   'migrate-tenant',
   'tenant',
   'platform',
-  resource_deps=['migrate-payment-order'],
+  resource_deps=['migrate-control-plane'],  # Same DB as control-plane - must not run concurrently
 )
 
 migration_job(
@@ -840,8 +855,8 @@ local_resource(
 # Idempotent: safe to re-run (exits 0 if tenant already exists)
 local_resource(
   'seed-dev-tenant',
-  cmd='./scripts/seed-dev-tenant.sh',
-  resource_deps=['gateway'],
+  cmd='./scripts/seed-dev-tenant.sh --grpc-addr=localhost:50056 --control-plane-addr=localhost:50062',
+  resource_deps=['tenant', 'control-plane'],
   labels=['setup'],
   auto_init=True,
   trigger_mode=TRIGGER_MODE_MANUAL,  # Can be re-run manually via 'tilt trigger seed-dev-tenant'

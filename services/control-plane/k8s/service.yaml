@@ -1,0 +1,19 @@
+# Port Configuration: See shared/platform/ports/ports.go for canonical port assignments.
+# This service uses ports.ControlPlane for gRPC.
+apiVersion: v1
+kind: Service
+metadata:
+  name: control-plane
+  labels:
+    app: control-plane
+    component: microservice
+spec:
+  type: ClusterIP
+  clusterIP: None  # Headless service for gRPC client-side load balancing
+  ports:
+  - name: grpc
+    port: 50062
+    targetPort: grpc
+    protocol: TCP
+  selector:
+    app: control-plane
