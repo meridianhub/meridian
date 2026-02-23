@@ -32,6 +32,13 @@ function genStubPlugin(): Plugin {
     export const TransactionStatus = { UNSPECIFIED: 0, PENDING: 1, POSTED: 2, FAILED: 3, CANCELLED: 4, REVERSED: 5 }
     export const PostingDirection = { UNSPECIFIED: 0, DEBIT: 1, CREDIT: 2 }
     export const Currency = { UNSPECIFIED: 0, GBP: 1, USD: 2, EUR: 3 }
+    export const SagaStatus = { UNSPECIFIED: 0, DRAFT: 1, ACTIVE: 2, DEPRECATED: 3 }
+    export const ErrorCategory = { UNSPECIFIED: 0, SYNTAX: 1, UNDEFINED_HANDLER: 2, TYPE_MISMATCH: 3, RUNTIME: 4, TIMEOUT: 5 }
+    export const TenantStatus = { UNSPECIFIED: 0, ACTIVE: 1, SUSPENDED: 2, DEPROVISIONED: 3, PROVISIONING: 4, PROVISIONING_FAILED: 5, PROVISIONING_PENDING: 6 }
+    export const ServiceProvisioningStatus_Status = { UNSPECIFIED: 0, PENDING: 1, IN_PROGRESS: 2, COMPLETED: 3, FAILED: 4 }
+    export const InstrumentStatus = { UNSPECIFIED: 0, DRAFT: 1, ACTIVE: 2, DEPRECATED: 3 }
+    export const Dimension = { UNSPECIFIED: 0, CURRENCY: 1, ENERGY: 2, MASS: 3, VOLUME: 4, TIME: 5, COMPUTE: 6, CARBON: 7, DATA: 8, COUNT: 9 }
+    export const BehaviorClass = { UNSPECIFIED: 0, CUSTOMER: 1, CLEARING: 2, NOSTRO: 3, VOSTRO: 4, HOLDING: 5, SUSPENSE: 6, REVENUE: 7, EXPENSE: 8, INVENTORY: 9 }
     export default {}
   `
   return {

@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest'
 import { renderHook } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { ReactNode } from 'react'
-import { useEventStream, DomainEvent, EVENT_QUERY_MAP } from './use-event-stream'
+import type { ReactNode } from 'react'
+import { useEventStream, EVENT_QUERY_MAP, type DomainEvent } from './use-event-stream'
 import { TenantProvider } from '@/contexts/tenant-context'
 import { AuthProvider } from '@/contexts/auth-context'
 

@@ -180,7 +180,8 @@ function DisputeCard({
 }) {
   const qc = useQueryClient()
   const [notes, setNotes] = React.useState('')
-  const [pendingStatus, setPendingStatus] = React.useState<DisputeStatus | null>(null)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [_pendingStatus, setPendingStatus] = React.useState<DisputeStatus | null>(null)
 
   const mutation = useMutation({
     mutationFn: (status: DisputeStatus) =>

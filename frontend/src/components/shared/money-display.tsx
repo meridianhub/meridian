@@ -26,6 +26,7 @@ export interface FormatMoneyOptions {
  * Format a BigInt amount (in smallest currency unit) to a display string.
  * Uses BigInt arithmetic throughout to avoid precision loss for amounts > 2^53.
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function formatMoney(
   amount: bigint | string | null | undefined,
   currency: string,

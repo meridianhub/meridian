@@ -49,7 +49,7 @@ describe('Router Integration', () => {
   describe('wrapRouteWithErrorBoundary', () => {
     it('wraps route component with error boundary for error handling', () => {
       render(
-        wrapRouteWithErrorBoundary(ErrorComponent)({} as React.ComponentProps<any>)
+        wrapRouteWithErrorBoundary(ErrorComponent)({} as Record<string, never>)
       )
 
       expect(screen.getByText('Something went wrong')).toBeInTheDocument()
@@ -57,7 +57,7 @@ describe('Router Integration', () => {
 
     it('allows safe route to render normally', () => {
       render(
-        wrapRouteWithErrorBoundary(SafeComponent)({} as React.ComponentProps<any>)
+        wrapRouteWithErrorBoundary(SafeComponent)({} as Record<string, never>)
       )
 
       expect(screen.getByText('Safe Route Content')).toBeInTheDocument()
@@ -87,7 +87,7 @@ describe('Router Integration', () => {
       }
 
       const handler = createRouteHandler(route)
-      render(handler.component({} as React.ComponentProps<any>))
+      render(handler.component({} as Record<string, never>))
 
       expect(screen.getByText('Something went wrong')).toBeInTheDocument()
     })

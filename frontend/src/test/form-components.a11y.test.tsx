@@ -2,8 +2,11 @@ import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { axe } from '@/test/test-utils'
-import { Button } from '@/components/ui/button'
+import { Button, type buttonVariants } from '@/components/ui/button'
+import type { VariantProps } from 'class-variance-authority'
 import { Input } from '@/components/ui/input'
+
+type ButtonVariant = NonNullable<VariantProps<typeof buttonVariants>['variant']>
 
 describe('Button component accessibility', () => {
   it('has no accessibility violations', async () => {
@@ -40,7 +43,7 @@ describe('Button component accessibility', () => {
 
     for (const variant of variants) {
       const { container } = render(
-        <Button variant={variant as any}>Test</Button>
+        <Button variant={variant as ButtonVariant}>Test</Button>
       )
       const results = await axe(container)
       expect(results).toHaveNoViolations()
