@@ -1,5 +1,5 @@
 import { test, expect } from '../fixtures'
-import { navigateToFirstPartyDetail, switchToTab } from '../helpers/parties'
+import { switchToTab } from '../helpers/parties'
 
 /**
  * E2E tests for the Parties page.
