@@ -349,7 +349,7 @@ func TestKafkaEventSource_Integration(t *testing.T) {
 			AtMost(10 * time.Second).
 			PollInterval(200 * time.Millisecond).
 			UntilNoError(func() error {
-				return consumerGroupActive(ctx, brokerAddr, consumerGroupID)
+				return consumerGroupActive(ctx, brokerAddr, ConsumerGroupID)
 			}); err != nil {
 			t.Fatalf("consumer group did not become active: %v", err)
 		}
@@ -409,7 +409,7 @@ func TestKafkaEventSource_Integration(t *testing.T) {
 			AtMost(5 * time.Second).
 			PollInterval(100 * time.Millisecond).
 			UntilNoError(func() error {
-				return consumerGroupActive(ctx, brokerAddr, consumerGroupID)
+				return consumerGroupActive(ctx, brokerAddr, ConsumerGroupID)
 			}); err != nil {
 			t.Logf("consumer group may not be fully active: %v (continuing)", err)
 		}
@@ -464,7 +464,7 @@ func TestKafkaEventSource_Integration(t *testing.T) {
 			AtMost(15 * time.Second).
 			PollInterval(200 * time.Millisecond).
 			UntilNoError(func() error {
-				return consumerGroupActive(ctx3, brokerAddr, consumerGroupID)
+				return consumerGroupActive(ctx3, brokerAddr, ConsumerGroupID)
 			}); err != nil {
 			t.Fatalf("consumer group did not become active: %v", err)
 		}

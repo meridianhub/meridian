@@ -25,7 +25,8 @@ const (
 	headerCorrelationID = "correlation_id"
 	headerCausationID   = "causation_id"
 
-	consumerGroupID = "ops-console-events"
+	// ConsumerGroupID is the Kafka consumer group used by KafkaEventSource.
+	ConsumerGroupID = "ops-console-events"
 )
 
 // Sentinel errors returned by KafkaEventSource constructors.
@@ -90,7 +91,7 @@ func NewKafkaEventSource(
 
 	opts := []kgo.Opt{
 		kgo.SeedBrokers(brokers...),
-		kgo.ConsumerGroup(consumerGroupID),
+		kgo.ConsumerGroup(ConsumerGroupID),
 		kgo.ConsumeTopics(topics...),
 		kgo.ConsumeResetOffset(kgo.NewOffset().AtEnd()),
 		kgo.BlockRebalanceOnPoll(),
