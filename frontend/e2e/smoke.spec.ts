@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 
+/** Basic smoke tests: homepage title and API health check. */
 test.describe('Smoke Tests', () => {
   test('homepage loads', async ({ page }) => {
     await page.goto('/')
