@@ -1,5 +1,9 @@
 name: Deploy Demo
 
+# Required secrets:
+#   DEPLOY_SSH_KEY  - Private SSH key (Ed25519 or RSA 4096+) for the root user on the Droplet
+#   DROPLET_IP      - IP address of the DigitalOcean Droplet (e.g. 143.198.xxx.xxx)
+
 on:
   push:
     branches: [demo]
@@ -7,7 +11,7 @@ on:
 
 concurrency:
   group: deploy-demo
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -16,7 +20,6 @@ permissions:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  IMAGE_TAG: demo
 
 jobs:
   build-and-push:
@@ -51,13 +54,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=demo
+            type=sha,prefix=demo-,format=short
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./cmd/meridian/Dockerfile
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
@@ -71,6 +84,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: demo
+      url: https://demo.meridianhub.cloud
 
     steps:
       - name: Deploy via SSH
