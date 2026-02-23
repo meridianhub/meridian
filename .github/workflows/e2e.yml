@@ -82,8 +82,10 @@ jobs:
 
       - name: Start meridian backend
         # Binary auto-sets: AUTH_MODE=disabled, BILLING_ENABLED=false, KAFKA_ENABLED=false
+        # Use meridian_platform as DATABASE_URL so GORM connects to the database where
+        # tenant/party/IBA/FA/CA/PO/reconciliation tables were created by migrations.
         run: |
-          DATABASE_URL="postgres://root@localhost:26257/defaultdb?sslmode=disable" \
+          DATABASE_URL="postgres://root@localhost:26257/meridian_platform?sslmode=disable" \
             ./dist/meridian &
 
       - name: Seed dev tenant
