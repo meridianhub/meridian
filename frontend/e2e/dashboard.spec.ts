@@ -7,6 +7,11 @@ import { test, expect } from './fixtures'
  * They do NOT require the Meridian backend — API calls will fail gracefully
  * and the dashboard renders with loading/empty states.
  *
+ * Auth tokens are memory-only (not persisted). The fixtures inject auth and
+ * land at / (Dashboard), so these tests do not need additional navigation.
+ * Quick Actions use React Router client-side navigation (navigate()), which
+ * preserves the in-memory token.
+ *
  * For full integration testing with a live backend, see task 45 (CI E2E workflow).
  */
 test.describe('Dashboard', () => {

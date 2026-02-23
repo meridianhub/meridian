@@ -1,10 +1,14 @@
-import { test, expect } from './fixtures'
+import { test, expect, navigateTo } from './fixtures'
 
 /**
  * Navigation smoke tests.
  *
  * Verifies that all sidebar links load their respective pages without crashing.
  * Tests run against the Vite dev server only — no backend required.
+ *
+ * Auth tokens are memory-only (not persisted). All tests use navigateTo() for
+ * client-side navigation to preserve the in-memory auth state. page.goto()
+ * after authentication triggers a full-page reload and loses the token.
  *
  * Active-link highlighting is tested by checking aria-current="page" on the
  * active nav link, which is set in sidebar.tsx based on currentPath.
@@ -32,7 +36,7 @@ const TENANT_ROUTES = [
 test.describe('Sidebar navigation - tenant-user', () => {
   for (const route of TENANT_ROUTES) {
     test(`${route.path} renders without error`, async ({ authenticatedPage: page }) => {
-      await page.goto(route.path)
+      await navigateTo(page, route.path)
 
       // Page must have a body with content
       await expect(page.locator('body')).not.toBeEmpty()
@@ -56,7 +60,7 @@ test.describe('Sidebar navigation - platform-admin', () => {
 
   for (const route of PLATFORM_ROUTES) {
     test(`${route.path} renders without error`, async ({ platformAdminPage: page }) => {
-      await page.goto(route.path)
+      await navigateTo(page, route.path)
 
       await expect(page.locator('body')).not.toBeEmpty()
       await expect(page.getByText(/Something went wrong/i)).not.toBeVisible()
@@ -69,7 +73,8 @@ test.describe('Sidebar navigation - platform-admin', () => {
 
 test.describe('Active link highlighting', () => {
   test('Dashboard link is active on /', async ({ authenticatedPage: page }) => {
-    await page.goto('/')
+    // Fixture already lands at /; re-navigate to ensure correct state
+    await navigateTo(page, '/')
     const nav = page.getByRole('navigation', { name: 'Main navigation' })
     const dashboardLink = nav.getByRole('link', { name: 'Dashboard' })
 
@@ -78,7 +83,7 @@ test.describe('Active link highlighting', () => {
   })
 
   test('Accounts link is active on /accounts', async ({ authenticatedPage: page }) => {
-    await page.goto('/accounts')
+    await navigateTo(page, '/accounts')
     const nav = page.getByRole('navigation', { name: 'Main navigation' })
     const accountsLink = nav.getByRole('link', { name: 'Accounts' })
 
@@ -87,7 +92,7 @@ test.describe('Active link highlighting', () => {
   })
 
   test('only the active link has aria-current="page"', async ({ authenticatedPage: page }) => {
-    await page.goto('/accounts')
+    await navigateTo(page, '/accounts')
     const nav = page.getByRole('navigation', { name: 'Main navigation' })
 
     // Dashboard link must NOT be active
@@ -100,7 +105,7 @@ test.describe('Active link highlighting', () => {
   })
 
   test('active link updates after sidebar navigation', async ({ authenticatedPage: page }) => {
-    await page.goto('/')
+    await navigateTo(page, '/')
 
     const nav = page.getByRole('navigation', { name: 'Main navigation' })
 
@@ -130,7 +135,7 @@ test.describe('Tenant context preservation across navigation', () => {
   test('tenant subtitle persists after navigating away from Dashboard and back', async ({
     authenticatedPage: page,
   }) => {
-    // Start on Dashboard — tenant subtitle visible
+    // Fixture lands at / (Dashboard) — tenant subtitle should be visible
     await expect(page.getByText(/Overview for dev-tenant/)).toBeVisible()
 
     // Navigate to Accounts
@@ -148,7 +153,7 @@ test.describe('Tenant context preservation across navigation', () => {
 
 test.describe('Error handling', () => {
   test('404 page renders for unknown routes', async ({ authenticatedPage: page }) => {
-    await page.goto('/this-route-does-not-exist-12345')
+    await navigateTo(page, '/this-route-does-not-exist-12345')
 
     await expect(page.getByText(/404/)).toBeVisible()
     await expect(page.getByText(/Page Not Found/i)).toBeVisible()
@@ -157,8 +162,8 @@ test.describe('Error handling', () => {
 
 test.describe('Mobile sidebar', () => {
   test('sidebar is initially closed on mobile viewport', async ({ authenticatedPage: page }) => {
+    // Resize viewport; fixture already landed at / so no further navigation needed
     await page.setViewportSize({ width: 375, height: 812 })
-    await page.goto('/')
 
     const sidebar = page.locator('#app-sidebar')
     await expect(sidebar).toHaveAttribute('data-open', 'false')
@@ -166,7 +171,6 @@ test.describe('Mobile sidebar', () => {
 
   test('menu toggle opens and closes the sidebar', async ({ authenticatedPage: page }) => {
     await page.setViewportSize({ width: 375, height: 812 })
-    await page.goto('/')
 
     const sidebar = page.locator('#app-sidebar')
     const toggle = page.getByRole('button', { name: 'Toggle menu' })
