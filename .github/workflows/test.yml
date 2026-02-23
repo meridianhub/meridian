@@ -68,6 +68,7 @@ jobs:
         with:
           name: coverage-shard-${{ matrix.shard_index }}
           path: coverage/coverage.out
+          if-no-files-found: ignore
 
       - name: Upload test results
         uses: actions/upload-artifact@v6
@@ -77,10 +78,11 @@ jobs:
           path: |
             test-results.xml
             test-results.json
+          if-no-files-found: ignore
 
       - name: Test summary
         uses: test-summary/action@v2
-        if: always()
+        if: ${{ always() && hashFiles('test-results.xml') != '' }}
         with:
           paths: test-results.xml
 
@@ -123,7 +125,7 @@ jobs:
           path: coverage-shards
 
       - name: Install gocovmerge
-        run: go install github.com/wadey/gocovmerge@latest
+        run: go install github.com/wadey/gocovmerge@b5bfa59
 
       - name: Merge coverage from shards
         run: |
