@@ -12,7 +12,9 @@ var latencyBuckets = []float64{0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5}
 
 // Metrics holds Prometheus metric collectors for the WebSocket event-streaming layer.
 // Create a new instance per service via NewMetrics and wire it into the Router,
-// Handler, and Connection components.
+// Handler, and Connection components. All methods on Metrics are nil-safe: calling
+// them on a nil *Metrics is a no-op, which allows callers to pass nil when metrics
+// are not required without adding nil-check boilerplate at each call site.
 type Metrics struct {
 	activeConnections *prometheus.GaugeVec
 	eventsDelivered   *prometheus.CounterVec
@@ -90,33 +92,51 @@ func NewMetrics(reg prometheus.Registerer) (*Metrics, error) {
 
 // IncConnectionOpened increments the active connection gauge for the given tenant.
 func (m *Metrics) IncConnectionOpened(tenantID string) {
+	if m == nil {
+		return
+	}
 	m.activeConnections.WithLabelValues(tenantID).Inc()
 }
 
 // IncConnectionClosed decrements the active connection gauge for the given tenant.
 // reason is recorded in logs but not as a metric label to avoid high cardinality.
 func (m *Metrics) IncConnectionClosed(tenantID, _ string) {
+	if m == nil {
+		return
+	}
 	m.activeConnections.WithLabelValues(tenantID).Dec()
 }
 
 // IncEventDelivered increments the delivered-events counter for the given tenant and channel.
 func (m *Metrics) IncEventDelivered(tenantID, channel string) {
+	if m == nil {
+		return
+	}
 	m.eventsDelivered.WithLabelValues(tenantID, channel).Inc()
 }
 
 // IncEventDropped increments the dropped-events counter for the given reason.
 // Recognized reasons: "buffer_full", "no_subscriber".
 func (m *Metrics) IncEventDropped(reason string) {
+	if m == nil {
+		return
+	}
 	m.eventsDropped.WithLabelValues(reason).Inc()
 }
 
 // ObserveLatency records an event's publish-to-delivery latency.
 func (m *Metrics) ObserveLatency(d time.Duration) {
+	if m == nil {
+		return
+	}
 	m.eventLatency.Observe(d.Seconds())
 }
 
 // SetSubscriptionCount sets the current total number of active subscriptions.
 func (m *Metrics) SetSubscriptionCount(n int) {
+	if m == nil {
+		return
+	}
 	m.subscriptionCount.Set(float64(n))
 }
 
