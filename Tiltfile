@@ -842,6 +842,32 @@ local_resource(
 )
 
 # =============================================================================
+# Frontend (Vite Dev Server)
+# =============================================================================
+# React + Vite frontend with hot module replacement.
+# Connects to the gateway at localhost:8090 via Connect protocol.
+
+# Install frontend dependencies (re-runs when package.json/lock changes)
+local_resource(
+  'frontend-deps',
+  cmd='cd frontend && npm install',
+  deps=['frontend/package.json', 'frontend/package-lock.json'],
+  labels=['frontend'],
+  auto_init=True,
+  trigger_mode=TRIGGER_MODE_MANUAL,
+)
+
+# Start Vite dev server with HMR
+local_resource(
+  'frontend',
+  serve_cmd='cd frontend && npm run dev -- --port 5173 --host 0.0.0.0',
+  deps=['frontend/src', 'frontend/index.html', 'frontend/vite.config.ts'],
+  resource_deps=['frontend-deps', 'gateway'],
+  labels=['frontend'],
+  links=['http://localhost:5173'],
+)
+
+# =============================================================================
 # UI Configuration
 # =============================================================================
 
@@ -879,6 +905,11 @@ Gateway:
   • HTTP Gateway           → localhost:8090 (subdomain routing)
     - Tenant resolution via TenantResolverMiddleware
     - Proxies to gRPC backends via Connect protocol
+
+Frontend:
+  • Meridian Console       → http://localhost:5173 (Vite + React)
+    - Hot module replacement enabled
+    - Connects to gateway at localhost:8090
 
 Backing Services:
   • CockroachDB            → localhost:26257
