@@ -88,40 +88,32 @@
       }
     }
 
-    // Initialize Swagger UI
-    function loadSwagger(specUrl) {
-      SwaggerUIBundle({
-        url: specUrl,
-        dom_id: '#swagger-ui',
-        deepLinking: true,
-        presets: [
-          SwaggerUIBundle.presets.apis,
-          SwaggerUIBundle.SwaggerUIStandalonePreset
-        ],
-        layout: 'BaseLayout',
-        defaultModelsExpandDepth: 0,
-        docExpansion: 'list',
-        filter: true,
-        requestInterceptor: (req) => {
-          // Leave spec/catalog fetches alone — they're served by the local python server
-          if (req.url.includes('.json') || req.url.includes(':8091')) {
-            return req;
-          }
-          // Redirect API calls to the local gateway
-          try {
-            const url = new URL(req.url);
-            if (url.host !== 'localhost:8090') {
-              url.host = 'localhost:8090';
-              url.protocol = 'http:';
-              req.url = url.toString();
-            }
-          } catch {
-            // Relative URL — prefix with gateway
-            req.url = GATEWAY_URL + '/' + req.url.replace(/^\//, '');
-          }
-          return req;
-        }
-      });
+    // Fetch spec, patch host/schemes, then render Swagger UI
+    async function loadSwagger(specUrl) {
+      try {
+        const resp = await fetch(specUrl);
+        const spec = await resp.json();
+        // Point "Try it out" at the local gateway
+        spec.host = 'localhost:8090';
+        spec.schemes = ['http'];
+
+        SwaggerUIBundle({
+          spec: spec,
+          dom_id: '#swagger-ui',
+          deepLinking: true,
+          presets: [
+            SwaggerUIBundle.presets.apis,
+            SwaggerUIBundle.SwaggerUIStandalonePreset
+          ],
+          layout: 'BaseLayout',
+          defaultModelsExpandDepth: 0,
+          docExpansion: 'list',
+          filter: true,
+        });
+      } catch (e) {
+        document.getElementById('swagger-ui').innerHTML =
+          '<div style="padding:24px;color:#e55">Failed to load spec: ' + specUrl + '<br>' + e.message + '</div>';
+      }
     }
 
     // Wire up service selector
