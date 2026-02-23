@@ -47,7 +47,7 @@ For PostgreSQL compatibility (dual-database support), the following categories o
 - `services/reference-data/migrations/20260128000002_versioned_platform_sagas_constraints.sql`
 - `services/reference-data/migrations/20260129000002_bitemporal_platform_sagas_constraints.sql`
 
-**CockroachDB Syntax** (not supported in PostgreSQL < 15):
+**CockroachDB Syntax** (not supported in any PostgreSQL version):
 
 ```sql
 ALTER TABLE public.platform_saga_definition
