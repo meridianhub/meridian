@@ -1,0 +1,82 @@
+syntax = "proto3";
+
+package meridian.audit.v1;
+
+import "buf/validate/validate.proto";
+import "google/api/annotations.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "meridian/audit/v1/audit_events.proto";
+
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/audit/v1;auditv1";
+
+// AuditLogEntry represents a single audit trail entry for display.
+message AuditLogEntry {
+  // entry_id uniquely identifies this audit entry.
+  string entry_id = 1;
+
+  // timestamp when the change occurred.
+  google.protobuf.Timestamp timestamp = 2;
+
+  // table_name is the database table that was modified.
+  string table_name = 3;
+
+  // operation indicates what type of change occurred.
+  AuditOperation operation = 4;
+
+  // record_id is the identifier of the modified record.
+  string record_id = 5;
+
+  // changed_by identifies the user who made the change.
+  string changed_by = 6;
+
+  // old_values contains the record state before modification (null for INSERT).
+  google.protobuf.Struct old_values = 7;
+
+  // new_values contains the record state after modification (null for DELETE).
+  google.protobuf.Struct new_values = 8;
+}
+
+// ListAuditEntriesRequest requests paginated audit entries with optional filters.
+message ListAuditEntriesRequest {
+  // page_size is the maximum number of entries to return (default 25, max 100).
+  int32 page_size = 1 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 100
+  }];
+
+  // page_token is the token for cursor-based pagination.
+  string page_token = 2;
+
+  // table_name filters entries by table (e.g., "current_account", "party").
+  string table_name = 3 [(buf.validate.field).string.max_len = 100];
+
+  // operation filters by operation type (INSERT, UPDATE, DELETE).
+  AuditOperation operation = 4;
+
+  // changed_by filters by the user who made the change.
+  string changed_by = 5 [(buf.validate.field).string.max_len = 100];
+
+  // record_id filters entries for a specific record.
+  string record_id = 6 [(buf.validate.field).string.max_len = 50];
+}
+
+// ListAuditEntriesResponse contains paginated audit entries.
+message ListAuditEntriesResponse {
+  // entries is the list of audit log entries.
+  repeated AuditLogEntry entries = 1;
+
+  // next_page_token is the token for fetching the next page (empty if no more).
+  string next_page_token = 2;
+}
+
+// AuditService provides query operations for audit trail entries.
+service AuditService {
+  // ListAuditEntries returns paginated audit entries with optional filtering.
+  rpc ListAuditEntries(ListAuditEntriesRequest) returns (ListAuditEntriesResponse) {
+    option (google.api.http) = {
+      post: "/meridian.audit.v1.AuditService/ListAuditEntries"
+      body: "*"
+    };
+  }
+}

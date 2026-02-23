@@ -30,6 +30,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	// Proto registrations
+	auditv1 "github.com/meridianhub/meridian/api/proto/meridian/audit/v1"
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	forecastingv1 "github.com/meridianhub/meridian/api/proto/meridian/forecasting/v1"
@@ -44,6 +45,7 @@ import (
 	tenantv1 "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
 
 	// Service packages
+	auditservice "github.com/meridianhub/meridian/services/audit-worker/service"
 	controlplaneservice "github.com/meridianhub/meridian/services/control-plane/service"
 	currentaccountpersistence "github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	currentaccountservice "github.com/meridianhub/meridian/services/current-account/service"
@@ -308,6 +310,7 @@ func registerServices(
 		{"tenant", func() error { return wireTenant(grpcServer, db, logger) }},
 		{"internal-bank-account", func() error { return wireInternalBankAccount(grpcServer, db, logger) }},
 		{"control-plane", func() error { return wireControlPlane(grpcServer, pgxPool, logger) }},
+		{"audit", func() error { return wireAudit(grpcServer, db, logger) }},
 	} {
 		if err := wire.fn(); err != nil {
 			return fmt.Errorf("%s: %w", wire.name, err)
@@ -586,6 +589,18 @@ func wireReconciliation(
 	return nil
 }
 
+// ─── Audit Wiring ────────────────────────────────────────────────────────────
+
+func wireAudit(server *grpc.Server, db *gorm.DB, logger *slog.Logger) error {
+	svc, err := auditservice.NewAuditService(db, logger)
+	if err != nil {
+		return err
+	}
+	auditv1.RegisterAuditServiceServer(server, svc)
+	logger.Info("registered audit service")
+	return nil
+}
+
 // ─── Control Plane Wiring ────────────────────────────────────────────────────
 
 func wireControlPlane(server *grpc.Server, pool *pgxpool.Pool, logger *slog.Logger) error {
@@ -626,6 +641,7 @@ var serviceNames = []string{
 	"meridian.reconciliation.v1.AccountReconciliationService",
 	"meridian.saga.v1.SagaRegistryService",
 	"meridian.control_plane.v1.ApplyManifestService",
+	"meridian.audit.v1.AuditService",
 }
 
 // wireGateway creates the gateway HTTP server with the Vanguard transcoder
