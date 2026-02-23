@@ -278,6 +278,75 @@ func (s *Service) seedValuationFeatures(ctx context.Context, accountID uuid.UUID
 	return seeder.SeedFromProductType(ctx, accountID, productType, time.Now().UTC())
 }
 
+// ListCurrentAccounts returns a paginated list of current accounts with optional filtering.
+func (s *Service) ListCurrentAccounts(ctx context.Context, req *pb.ListCurrentAccountsRequest) (*pb.ListCurrentAccountsResponse, error) {
+	// Apply defaults and validate page size
+	pageSize := int(req.PageSize)
+	if pageSize <= 0 {
+		pageSize = 25
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+
+	// Decode cursor
+	cursor, err := persistence.DecodeAccountCursor(req.PageToken)
+	if err != nil {
+		s.logger.Warn("invalid page_token", "page_token", req.PageToken, "error", err)
+		return nil, status.Errorf(codes.InvalidArgument, "invalid page_token: %v", err)
+	}
+
+	// Build filter params
+	params := persistence.ListAccountsParams{
+		Limit:  pageSize,
+		Cursor: cursor,
+		IBAN:   req.Iban,
+	}
+
+	if req.Status != pb.AccountStatus_ACCOUNT_STATUS_UNSPECIFIED {
+		statusStr, ok := protoToAccountStatus(req.Status)
+		if !ok {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid status: %v", req.Status)
+		}
+		params.Status = statusStr
+	}
+
+	// Execute query
+	result, err := s.repo.ListAccounts(ctx, params)
+	if err != nil {
+		s.logger.Error("failed to list accounts", "error", err)
+		return nil, status.Errorf(codes.Internal, "failed to list accounts: %v", err)
+	}
+
+	// Convert to proto
+	accounts := make([]*pb.CurrentAccountFacility, 0, len(result.Accounts))
+	for _, acc := range result.Accounts {
+		accounts = append(accounts, toProtoFacility(acc))
+	}
+
+	return &pb.ListCurrentAccountsResponse{
+		Accounts:      accounts,
+		NextPageToken: result.NextCursor,
+		TotalCount:    result.TotalCount,
+	}, nil
+}
+
+// protoToAccountStatus converts a proto AccountStatus to a domain status string.
+// Returns false for unrecognized enum values.
+func protoToAccountStatus(s pb.AccountStatus) (string, bool) {
+	switch s {
+	case pb.AccountStatus_ACCOUNT_STATUS_ACTIVE:
+		return string(domain.AccountStatusActive), true
+	case pb.AccountStatus_ACCOUNT_STATUS_FROZEN:
+		return string(domain.AccountStatusFrozen), true
+	case pb.AccountStatus_ACCOUNT_STATUS_CLOSED:
+		return string(domain.AccountStatusClosed), true
+	case pb.AccountStatus_ACCOUNT_STATUS_UNSPECIFIED:
+		return "", true
+	}
+	return "", false
+}
+
 // RetrieveCurrentAccount gets current account details including balance from Position Keeping.
 func (s *Service) RetrieveCurrentAccount(ctx context.Context, req *pb.RetrieveCurrentAccountRequest) (*pb.RetrieveCurrentAccountResponse, error) {
 	start := time.Now()

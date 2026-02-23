@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
@@ -20,7 +21,70 @@ var (
 	ErrAccountNotFound = errors.New("account not found")
 	ErrAccountExists   = errors.New("account already exists")
 	ErrVersionConflict = errors.New("version conflict: account was modified by another transaction")
+	ErrInvalidCursor   = errors.New("invalid pagination cursor")
 )
+
+// AccountCursor represents a pagination cursor for cursor-based pagination.
+// It uses created_at + id as a composite cursor to handle ties.
+type AccountCursor struct {
+	CreatedAt time.Time
+	ID        uuid.UUID
+}
+
+// EncodeAccountCursor encodes a cursor to a base64 opaque page token.
+func EncodeAccountCursor(c AccountCursor) string {
+	data := c.CreatedAt.Format(time.RFC3339Nano) + "|" + c.ID.String()
+	return base64.URLEncoding.EncodeToString([]byte(data))
+}
+
+// DecodeAccountCursor decodes a base64 page token back to an AccountCursor.
+// Returns ErrInvalidCursor if the token is malformed.
+func DecodeAccountCursor(token string) (AccountCursor, error) {
+	if token == "" {
+		return AccountCursor{}, nil
+	}
+
+	data, err := base64.URLEncoding.DecodeString(token)
+	if err != nil {
+		return AccountCursor{}, ErrInvalidCursor
+	}
+
+	parts := strings.SplitN(string(data), "|", 2)
+	if len(parts) != 2 {
+		return AccountCursor{}, ErrInvalidCursor
+	}
+
+	createdAt, err := time.Parse(time.RFC3339Nano, parts[0])
+	if err != nil {
+		return AccountCursor{}, ErrInvalidCursor
+	}
+
+	id, err := uuid.Parse(parts[1])
+	if err != nil {
+		return AccountCursor{}, ErrInvalidCursor
+	}
+
+	return AccountCursor{CreatedAt: createdAt, ID: id}, nil
+}
+
+// ListAccountsParams holds filter and pagination parameters for listing accounts.
+type ListAccountsParams struct {
+	// Status filters by account lifecycle status (empty = no filter).
+	Status string
+	// IBAN filters by IBAN prefix match (empty = no filter).
+	IBAN string
+	// Limit is the maximum number of results to return.
+	Limit int
+	// Cursor is the pagination cursor (zero value = first page).
+	Cursor AccountCursor
+}
+
+// ListAccountsResult holds the results of a ListAccounts query.
+type ListAccountsResult struct {
+	Accounts   []domain.CurrentAccount
+	TotalCount int64
+	NextCursor string
+}
 
 // Repository provides persistence operations for current accounts
 type Repository struct {
@@ -430,6 +494,97 @@ func (r *Repository) ListByOrganization(ctx context.Context, orgPartyID uuid.UUI
 		return nil, err
 	}
 	return accounts, nil
+}
+
+// ListAccounts retrieves a paginated list of accounts with optional filtering.
+// Results are ordered by created_at DESC, id DESC (newest first) for stable pagination.
+// The context must contain the tenant ID for schema routing.
+func (r *Repository) ListAccounts(ctx context.Context, params ListAccountsParams) (*ListAccountsResult, error) {
+	var result *ListAccountsResult
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		limit := params.Limit
+		if limit <= 0 {
+			limit = 25
+		}
+
+		// Base query: exclude soft-deleted accounts
+		baseQuery := tx.Model(&CurrentAccountEntity{}).Where("deleted_at IS NULL")
+
+		// Apply filters
+		if params.Status != "" {
+			baseQuery = baseQuery.Where("status = ?", params.Status)
+		}
+		if params.IBAN != "" {
+			baseQuery = baseQuery.Where("account_identification LIKE ?", params.IBAN+"%")
+		}
+
+		// Get total count matching filters
+		var totalCount int64
+		if err := baseQuery.Count(&totalCount).Error; err != nil {
+			return err
+		}
+
+		if totalCount == 0 {
+			result = &ListAccountsResult{
+				Accounts:   []domain.CurrentAccount{},
+				TotalCount: 0,
+				NextCursor: "",
+			}
+			return nil
+		}
+
+		// Apply cursor for pagination
+		pageQuery := baseQuery
+		if !params.Cursor.CreatedAt.IsZero() {
+			// Composite cursor: items before cursor position in DESC order
+			pageQuery = pageQuery.Where(
+				"(created_at < ?) OR (created_at = ? AND id < ?)",
+				params.Cursor.CreatedAt, params.Cursor.CreatedAt, params.Cursor.ID,
+			)
+		}
+
+		var entities []CurrentAccountEntity
+		if err := pageQuery.
+			Order("created_at DESC, id DESC").
+			Limit(limit + 1). // fetch one extra to detect next page
+			Find(&entities).Error; err != nil {
+			return err
+		}
+
+		hasMore := len(entities) > limit
+		if hasMore {
+			entities = entities[:limit]
+		}
+
+		accounts := make([]domain.CurrentAccount, 0, len(entities))
+		for i := range entities {
+			account, err := toDomain(&entities[i])
+			if err != nil {
+				return err
+			}
+			accounts = append(accounts, account)
+		}
+
+		var nextCursor string
+		if hasMore && len(entities) > 0 {
+			last := entities[len(entities)-1]
+			nextCursor = EncodeAccountCursor(AccountCursor{
+				CreatedAt: last.CreatedAt,
+				ID:        last.ID,
+			})
+		}
+
+		result = &ListAccountsResult{
+			Accounts:   accounts,
+			TotalCount: totalCount,
+			NextCursor: nextCursor,
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // Delete soft deletes an account by its internal account ID.
