@@ -1,0 +1,125 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - 'frontend/**'
+      - 'services/**'
+      - '.github/workflows/e2e.yml'
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - 'frontend/**'
+      - 'services/**'
+      - '.github/workflows/e2e.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: Playwright E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Start CockroachDB
+        run: |
+          docker run -d \
+            --name cockroachdb \
+            -p 26257:26257 \
+            cockroachdb/cockroach:latest-v24.1 \
+            start-single-node --insecure
+          # Wait for CockroachDB to be ready (up to 60s)
+          for i in $(seq 1 30); do
+            if docker exec cockroachdb cockroach sql --insecure -e 'SELECT 1' >/dev/null 2>&1; then
+              echo "CockroachDB is ready"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "ERROR: CockroachDB did not become ready after 60s"
+              exit 1
+            fi
+            sleep 2
+          done
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.0'
+          cache: true
+
+      - name: Set up buf
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Generate protobuf files
+        run: buf generate
+
+      - name: Build meridian binary
+        run: CGO_ENABLED=0 go build -o ./dist/meridian ./cmd/meridian/
+
+      - name: Run database migrations
+        run: |
+          ./dist/meridian \
+            --migrate \
+            --database-url "postgres://root@localhost:26257/defaultdb?sslmode=disable"
+
+      - name: Start meridian backend
+        # Binary auto-sets: AUTH_MODE=disabled, BILLING_ENABLED=false, KAFKA_ENABLED=false
+        run: |
+          DATABASE_URL="postgres://root@localhost:26257/defaultdb?sslmode=disable" \
+            ./dist/meridian &
+
+      - name: Seed dev tenant
+        run: GATEWAY_HOST=localhost:8090 ./scripts/seed-dev-tenant.sh
+        # Script polls /healthz with 30 retries at 2s intervals before seeding
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          VITE_E2E_MODE: 'true'
+          VITE_API_BASE_URL: 'http://localhost:8090'
+        run: npm run build
+
+      - name: Run Playwright tests
+        working-directory: frontend
+        env:
+          CI: 'true'
+        run: npx playwright test --reporter=html
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 30
+
+      - name: Upload Playwright traces
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-traces
+          path: frontend/test-results/
+          retention-days: 30
