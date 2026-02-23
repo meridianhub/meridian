@@ -1,5 +1,5 @@
 import { type ReactNode } from 'react'
-import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom'
 import { useCallback } from 'react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
@@ -49,11 +49,58 @@ function PlaceholderPage({ title }: { title: string }) {
 }
 
 function LoginPage() {
+  const { login } = useAuth()
+  const navigate = useNavigate()
+
+  const devLogin = useCallback(
+    (role: 'platform-admin' | 'tenant-user') => {
+      const header = btoa(JSON.stringify({ alg: 'none', typ: 'JWT' }))
+      const payload = btoa(
+        JSON.stringify({
+          userId: 'dev-user',
+          tenantId: role === 'tenant-user' ? 'meridian-dev' : undefined,
+          roles: [role],
+          scopes: ['read', 'write'],
+          exp: Math.floor(Date.now() / 1000) + 86400,
+          iss: 'meridian-dev',
+          aud: 'meridian-console',
+          sub: 'dev-user',
+        }),
+      )
+      login(`${header}.${payload}.dev-signature`)
+      navigate('/')
+    },
+    [login, navigate],
+  )
+
   return (
     <div className="flex min-h-screen items-center justify-center">
-      <div className="text-center">
-        <h1 className="text-2xl font-semibold">Meridian Operations Console</h1>
-        <p className="mt-2 text-muted-foreground">Please sign in to continue.</p>
+      <div className="text-center space-y-6">
+        <div>
+          <h1 className="text-2xl font-semibold">Meridian Operations Console</h1>
+          <p className="mt-2 text-muted-foreground">Please sign in to continue.</p>
+        </div>
+        {import.meta.env.DEV && (
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground uppercase tracking-wider">
+              Development Login
+            </p>
+            <div className="flex gap-2 justify-center">
+              <button
+                onClick={() => devLogin('platform-admin')}
+                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              >
+                Platform Admin
+              </button>
+              <button
+                onClick={() => devLogin('tenant-user')}
+                className="rounded-md bg-secondary px-4 py-2 text-sm font-medium text-secondary-foreground hover:bg-secondary/80"
+              >
+                Tenant User
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
