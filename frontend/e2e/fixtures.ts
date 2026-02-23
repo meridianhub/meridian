@@ -23,15 +23,25 @@ function buildDevToken(role: 'platform-admin' | 'tenant-user'): string {
 }
 
 /**
- * Inject a dev auth token via window.__DEV_LOGIN__ exposed by AuthProvider in DEV mode.
+ * Inject a dev auth token via window.__DEV_LOGIN__ exposed by AuthProvider in DEV mode
+ * and in E2E builds (VITE_E2E_MODE=true).
  */
 async function injectDevAuth(page: Page, role: 'platform-admin' | 'tenant-user') {
   const token = buildDevToken(role)
+  // Load the app first so AuthProvider mounts and exposes __DEV_LOGIN__
   await page.goto('/')
   await page.waitForFunction(() => typeof (window as Record<string, unknown>).__DEV_LOGIN__ === 'function')
   await page.evaluate((t) => {
     ;(window as Record<string, unknown>).__DEV_LOGIN__(t)
   }, token)
+  // Auth token is in-memory only: do NOT reload the page (would lose the token).
+  // Navigate using the client-side router so ProtectedRoute sees the authenticated state.
+  await page.evaluate(() => {
+    window.history.pushState({}, '', '/')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  })
+  // Wait for the app shell <main> to confirm authenticated layout is rendered.
+  await page.waitForSelector('main', { timeout: 10_000 })
 }
 
 type Fixtures = {
