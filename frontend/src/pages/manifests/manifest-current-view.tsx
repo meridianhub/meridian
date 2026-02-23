@@ -121,7 +121,9 @@ export function ManifestCurrentView() {
               <li key={inst.code} className="flex items-center gap-2">
                 <code className="rounded bg-muted px-1.5 py-0.5 font-mono">{inst.code}</code>
                 <span>{inst.name}</span>
-                <span className="text-muted-foreground">({inst.dimensions?.unit})</span>
+                {inst.dimensions?.unit && (
+                  <span className="text-muted-foreground">({inst.dimensions.unit})</span>
+                )}
               </li>
             ))}
           </ul>

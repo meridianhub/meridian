@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { useApiClients } from '@/api/context'
+import { useAuth } from '@/contexts/auth-context'
 import { manifestKeys } from '@/lib/query-keys'
 import {
   ApplyManifestStatus,
@@ -26,15 +27,20 @@ interface ManifestApplyDialogProps {
 
 export function ManifestApplyDialog({ open, onOpenChange }: ManifestApplyDialogProps) {
   const { manifestApplier } = useApiClients()
+  const { claims } = useAuth()
   const queryClient = useQueryClient()
   const [manifestJson, setManifestJson] = useState('')
   const [dryRunResult, setDryRunResult] = useState<ApplyManifestResponse | null>(null)
   const [parseError, setParseError] = useState<string | null>(null)
+  const [applyError, setApplyError] = useState<string | null>(null)
+
+  const appliedBy = claims?.userId ?? 'unknown'
 
   function resetState() {
     setManifestJson('')
     setDryRunResult(null)
     setParseError(null)
+    setApplyError(null)
   }
 
   function handleOpenChange(nextOpen: boolean) {
@@ -49,7 +55,7 @@ export function ManifestApplyDialog({ open, onOpenChange }: ManifestApplyDialogP
       return manifestApplier.applyManifest({
         manifest,
         dryRun: true,
-        appliedBy: 'console-user',
+        appliedBy,
       })
     },
     onSuccess: (result) => {
@@ -69,18 +75,29 @@ export function ManifestApplyDialog({ open, onOpenChange }: ManifestApplyDialogP
       return manifestApplier.applyManifest({
         manifest,
         dryRun: false,
-        appliedBy: 'console-user',
+        appliedBy,
       })
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: manifestKeys.all })
       handleOpenChange(false)
     },
+    onError: (err: Error) => {
+      setApplyError(err.message)
+    },
   })
+
+  function handleJsonChange(value: string) {
+    setManifestJson(value)
+    setDryRunResult(null)
+    setParseError(null)
+    setApplyError(null)
+  }
 
   function handlePreview() {
     setParseError(null)
     setDryRunResult(null)
+    setApplyError(null)
     dryRunMutation.mutate()
   }
 
@@ -108,7 +125,7 @@ export function ManifestApplyDialog({ open, onOpenChange }: ManifestApplyDialogP
             <textarea
               id="manifest-json"
               value={manifestJson}
-              onChange={(e) => setManifestJson(e.target.value)}
+              onChange={(e) => handleJsonChange(e.target.value)}
               className="min-h-[200px] w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm"
               placeholder='{"version": "1.0", "metadata": {...}, "instruments": [...]}'
             />
@@ -121,6 +138,12 @@ export function ManifestApplyDialog({ open, onOpenChange }: ManifestApplyDialogP
           )}
 
           {dryRunResult && <DryRunResultPanel result={dryRunResult} />}
+
+          {applyError && (
+            <div data-testid="apply-error" className="rounded border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+              Apply failed: {applyError}
+            </div>
+          )}
         </div>
 
         <DialogFooter>

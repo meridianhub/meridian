@@ -58,7 +58,8 @@ export function ManifestHistoryTable() {
   const [selectedVersion, setSelectedVersion] = useState<ManifestVersion | null>(null)
 
   async function fetchVersions(params: DataTableQueryParams): Promise<DataTableResult<ManifestVersion>> {
-    const offset = params.pageToken ? parseInt(params.pageToken, 10) : 0
+    const parsed = params.pageToken ? parseInt(params.pageToken, 10) : 0
+    const offset = Number.isNaN(parsed) ? 0 : parsed
     const response = await manifestHistory.listManifestVersions({
       limit: params.pageSize,
       offset,
