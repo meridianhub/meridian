@@ -86,7 +86,7 @@ jobs:
         # tenant/party/IBA/FA/CA/PO/reconciliation tables were created by migrations.
         run: |
           DATABASE_URL="postgres://root@localhost:26257/meridian_platform?sslmode=disable" \
-            ./dist/meridian &
+            ./dist/meridian >/tmp/meridian.log 2>&1 &
 
       - name: Seed dev tenant
         # The gateway exposes the Connect/gRPC API under /api/ prefix.
@@ -121,6 +121,9 @@ jobs:
                 echo "Dev tenant already exists."
               else
                 echo "ERROR: Unexpected response (HTTP ${HTTP_CODE}): ${BODY}"
+                echo "--- meridian backend logs ---"
+                cat /tmp/meridian.log || true
+                echo "--- end meridian logs ---"
                 exit 1
               fi
               ;;
