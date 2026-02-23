@@ -1130,3 +1130,172 @@ func TestExecuteDeposit_IdempotencyCleanupOnFailure(t *testing.T) {
 	// Verify pending state was cleaned up
 	require.False(t, mockIdemp.isPending(idempKey), "pending state should be cleaned up after failure")
 }
+
+func TestListCurrentAccounts(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns empty list when no accounts exist", func(t *testing.T) {
+		db, ctx, cleanup := setupTestDB(t)
+		defer cleanup()
+
+		repo := persistence.NewRepository(db)
+		svc := mustNewService(t, repo, nil)
+
+		resp, err := svc.ListCurrentAccounts(ctx, &pb.ListCurrentAccountsRequest{})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		require.Empty(t, resp.Accounts)
+		require.Equal(t, int64(0), resp.TotalCount)
+		require.Empty(t, resp.NextPageToken)
+	})
+
+	t.Run("returns all accounts with default page size", func(t *testing.T) {
+		db, ctx, cleanup := setupTestDB(t)
+		defer cleanup()
+
+		repo := persistence.NewRepository(db)
+		svc := mustNewService(t, repo, nil)
+
+		// Create two accounts
+		acc1, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", uuid.New().String(), "GBP")
+		require.NoError(t, err)
+		require.NoError(t, repo.Save(ctx, acc1))
+
+		acc2, err := domain.NewCurrentAccount("ACC-002", "DE89370400440532013000", uuid.New().String(), "EUR")
+		require.NoError(t, err)
+		require.NoError(t, repo.Save(ctx, acc2))
+
+		resp, err := svc.ListCurrentAccounts(ctx, &pb.ListCurrentAccountsRequest{})
+		require.NoError(t, err)
+		require.Len(t, resp.Accounts, 2)
+		require.Equal(t, int64(2), resp.TotalCount)
+	})
+
+	t.Run("filters by status", func(t *testing.T) {
+		db, ctx, cleanup := setupTestDB(t)
+		defer cleanup()
+
+		repo := persistence.NewRepository(db)
+		svc := mustNewService(t, repo, nil)
+
+		// Create an active account
+		acc1, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", uuid.New().String(), "GBP")
+		require.NoError(t, err)
+		require.NoError(t, repo.Save(ctx, acc1))
+
+		// Create account and freeze it
+		acc2, err := domain.NewCurrentAccount("ACC-002", "DE89370400440532013000", uuid.New().String(), "EUR")
+		require.NoError(t, err)
+		acc2, err = acc2.Freeze("test freeze")
+		require.NoError(t, err)
+		require.NoError(t, repo.Save(ctx, acc2))
+
+		// Filter by ACTIVE
+		resp, err := svc.ListCurrentAccounts(ctx, &pb.ListCurrentAccountsRequest{
+			Status: pb.AccountStatus_ACCOUNT_STATUS_ACTIVE,
+		})
+		require.NoError(t, err)
+		require.Len(t, resp.Accounts, 1)
+		require.Equal(t, pb.AccountStatus_ACCOUNT_STATUS_ACTIVE, resp.Accounts[0].AccountStatus)
+	})
+
+	t.Run("filters by IBAN prefix", func(t *testing.T) {
+		db, ctx, cleanup := setupTestDB(t)
+		defer cleanup()
+
+		repo := persistence.NewRepository(db)
+		svc := mustNewService(t, repo, nil)
+
+		acc1, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", uuid.New().String(), "GBP")
+		require.NoError(t, err)
+		require.NoError(t, repo.Save(ctx, acc1))
+
+		acc2, err := domain.NewCurrentAccount("ACC-002", "DE89370400440532013000", uuid.New().String(), "EUR")
+		require.NoError(t, err)
+		require.NoError(t, repo.Save(ctx, acc2))
+
+		// Filter by GB prefix
+		resp, err := svc.ListCurrentAccounts(ctx, &pb.ListCurrentAccountsRequest{
+			Iban: "GB",
+		})
+		require.NoError(t, err)
+		require.Len(t, resp.Accounts, 1)
+		require.Equal(t, "GB82WEST12345698765432", resp.Accounts[0].AccountIdentification)
+	})
+
+	t.Run("paginates results", func(t *testing.T) {
+		db, ctx, cleanup := setupTestDB(t)
+		defer cleanup()
+
+		repo := persistence.NewRepository(db)
+		svc := mustNewService(t, repo, nil)
+
+		// Create 3 accounts
+		for i := 0; i < 3; i++ {
+			iban := fmt.Sprintf("GB%02dWEST1234569876543%d", 10+i, i)
+			acc, err := domain.NewCurrentAccount(fmt.Sprintf("ACC-%03d", i), iban, uuid.New().String(), "GBP")
+			require.NoError(t, err)
+			require.NoError(t, repo.Save(ctx, acc))
+			time.Sleep(2 * time.Millisecond) // ensure distinct created_at for cursor ordering
+		}
+
+		// First page: page_size=2
+		resp, err := svc.ListCurrentAccounts(ctx, &pb.ListCurrentAccountsRequest{
+			PageSize: 2,
+		})
+		require.NoError(t, err)
+		require.Len(t, resp.Accounts, 2)
+		require.Equal(t, int64(3), resp.TotalCount)
+		require.NotEmpty(t, resp.NextPageToken)
+
+		// Second page
+		resp2, err := svc.ListCurrentAccounts(ctx, &pb.ListCurrentAccountsRequest{
+			PageSize:  2,
+			PageToken: resp.NextPageToken,
+		})
+		require.NoError(t, err)
+		require.Len(t, resp2.Accounts, 1)
+		require.Empty(t, resp2.NextPageToken)
+	})
+
+	t.Run("returns InvalidArgument for malformed page_token", func(t *testing.T) {
+		db, ctx, cleanup := setupTestDB(t)
+		defer cleanup()
+
+		repo := persistence.NewRepository(db)
+		svc := mustNewService(t, repo, nil)
+
+		resp, err := svc.ListCurrentAccounts(ctx, &pb.ListCurrentAccountsRequest{
+			PageToken: "not-valid-base64-cursor!!!",
+		})
+		require.Nil(t, resp)
+		require.Error(t, err)
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		require.Equal(t, codes.InvalidArgument, st.Code())
+	})
+
+	t.Run("applies default page size of 25", func(t *testing.T) {
+		db, ctx, cleanup := setupTestDB(t)
+		defer cleanup()
+
+		repo := persistence.NewRepository(db)
+		svc := mustNewService(t, repo, nil)
+
+		resp, err := svc.ListCurrentAccounts(ctx, &pb.ListCurrentAccountsRequest{PageSize: 0})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+	})
+
+	t.Run("clamps page size to max 100", func(t *testing.T) {
+		db, ctx, cleanup := setupTestDB(t)
+		defer cleanup()
+
+		repo := persistence.NewRepository(db)
+		svc := mustNewService(t, repo, nil)
+
+		resp, err := svc.ListCurrentAccounts(ctx, &pb.ListCurrentAccountsRequest{PageSize: 100})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+	})
+}
