@@ -119,7 +119,7 @@ jobs:
         run: go mod download
 
       - name: Download coverage artifacts
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           pattern: coverage-shard-*
           path: coverage-shards
