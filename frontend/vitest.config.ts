@@ -29,6 +29,8 @@ function genStubPlugin(): Plugin {
     export const MarketInformationService = { typeName: 'stub', methods: [] }
     export const MappingService = { typeName: 'stub', methods: [] }
     export const ForecastingService = { typeName: 'stub', methods: [] }
+    export const ManifestHistoryService = { typeName: 'stub', methods: [] }
+    export const ApplyManifestService = { typeName: 'stub', methods: [] }
     export const TransactionStatus = { UNSPECIFIED: 0, PENDING: 1, POSTED: 2, FAILED: 3, CANCELLED: 4, REVERSED: 5 }
     export const PostingDirection = { UNSPECIFIED: 0, DEBIT: 1, CREDIT: 2 }
     export const Currency = { UNSPECIFIED: 0, GBP: 1, USD: 2, EUR: 3 }
@@ -39,6 +41,9 @@ function genStubPlugin(): Plugin {
     export const InstrumentStatus = { UNSPECIFIED: 0, DRAFT: 1, ACTIVE: 2, DEPRECATED: 3 }
     export const Dimension = { UNSPECIFIED: 0, CURRENCY: 1, ENERGY: 2, MASS: 3, VOLUME: 4, TIME: 5, COMPUTE: 6, CARBON: 7, DATA: 8, COUNT: 9 }
     export const BehaviorClass = { UNSPECIFIED: 0, CUSTOMER: 1, CLEARING: 2, NOSTRO: 3, VOSTRO: 4, HOLDING: 5, SUSPENSE: 6, REVENUE: 7, EXPENSE: 8, INVENTORY: 9 }
+    export const ApplyManifestStatus = { UNSPECIFIED: 0, DRY_RUN: 1, APPLIED: 2, VALIDATION_FAILED: 3, FAILED: 4 }
+    export const ApplyStatus = { UNSPECIFIED: 0, APPLIED: 1, FAILED: 2, ROLLED_BACK: 3 }
+    export const ManifestSchema = { typeName: 'meridian.control_plane.v1.Manifest', fields: [] }
     export default {}
   `
   return {
