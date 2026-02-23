@@ -78,10 +78,17 @@ func NewMetrics(reg prometheus.Registerer) (*Metrics, error) {
 		subscriptionCount,
 		eventLatency,
 	}
+	var registered []prometheus.Collector
 	for _, c := range collectors {
 		if err := reg.Register(c); err != nil {
+			// Best-effort cleanup: unregister already-registered collectors so the
+			// caller's registry is not polluted on partial failure.
+			for _, r := range registered {
+				reg.Unregister(r)
+			}
 			return nil, err
 		}
+		registered = append(registered, c)
 	}
 
 	return &Metrics{
