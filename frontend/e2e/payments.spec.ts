@@ -369,9 +369,12 @@ test.describe('Payment lifecycle (requires backend)', () => {
     await authenticatedPage.getByRole('link', { name: 'Payments' }).click()
     await expect(authenticatedPage.getByRole('heading', { name: 'Payments' })).toBeVisible()
 
-    // List should have one more payment
-    const newCount = await tableBody.locator('tr').count()
-    expect(newCount).toBe(initialCount + 1)
+    // Wait for the table to reflect the new payment — use toHaveCount to retry
+    // until the list data reloads rather than reading count immediately (avoids race)
+    const updatedTableBody = authenticatedPage.getByRole('table').locator('tbody')
+    await expect(updatedTableBody.locator('tr')).toHaveCount(initialCount + 1, {
+      timeout: 10_000,
+    })
   })
 
   test('ledger shows booking entries after payment creation', async ({ authenticatedPage }) => {
