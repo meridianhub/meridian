@@ -4,7 +4,7 @@
 #   cockroachdb  - CockroachDB single-node (insecure) on port 26257, UI on 8080
 #   migrate      - One-shot migration runner; exits 0 when all migrations applied
 #   meridian     - Unified binary; starts after migrations complete
-#   seed         - One-shot seed runner; creates dev tenant (idempotent)
+#   seed         - One-shot seed runner; creates dev tenant and applies manifest (idempotent)
 #   frontend     - Vite dev server with HMR on port 5173
 #
 # Usage:
@@ -67,16 +67,20 @@ services:
       REDIS_ENABLED: "false"
 
   seed:
-    image: curlimages/curl:latest
+    build:
+      context: ../..
+      dockerfile: cmd/meridian/Dockerfile
+    entrypoint: ["/seed-dev"]
+    command:
+      - "--manifest=/manifests/energy.json"
     depends_on:
       meridian:
         condition: service_started
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        GATEWAY_HOST=meridian:8090 /scripts/seed-dev-tenant.sh
+    environment:
+      GATEWAY_URL: "http://meridian:8090"
+      GRPC_ADDR: "meridian:50051"
     volumes:
-      - ../../scripts/seed-dev-tenant.sh:/scripts/seed-dev-tenant.sh:ro
+      - ../../examples/manifests:/manifests:ro
     restart: "no"
 
   frontend:

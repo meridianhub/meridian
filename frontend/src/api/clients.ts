@@ -16,6 +16,8 @@ import { InternalBankAccountService } from './gen/meridian/internal_bank_account
 import { MarketInformationService } from './gen/meridian/market_information/v1/market_information_pb'
 import { MappingService } from './gen/meridian/mapping/v1/mapping_pb'
 import { ForecastingService } from './gen/meridian/forecasting/v1/forecasting_pb'
+import { ManifestHistoryService } from './gen/meridian/control_plane/v1/manifest_history_service_pb'
+import { ApplyManifestService } from './gen/meridian/control_plane/v1/apply_manifest_service_pb'
 
 export function createServiceClients(transport: Transport) {
   return {
@@ -35,6 +37,8 @@ export function createServiceClients(transport: Transport) {
     marketInformation: createClient(MarketInformationService, transport),
     mapping: createClient(MappingService, transport),
     forecasting: createClient(ForecastingService, transport),
+    manifestHistory: createClient(ManifestHistoryService, transport),
+    manifestApplier: createClient(ApplyManifestService, transport),
   }
 }
 

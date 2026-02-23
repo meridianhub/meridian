@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -33,6 +34,7 @@ type mockRepository struct {
 	findByIDErr          error
 	findByIDForUpdateErr error
 	findByExternalRefErr error
+	listPartiesErr       error
 }
 
 func newMockRepository() *mockRepository {
@@ -148,6 +150,57 @@ func (m *mockRepository) ListParticipants(_ context.Context, _ uuid.UUID, _ stri
 
 func (m *mockRepository) GetStructuringData(_ context.Context, _, _ uuid.UUID, _ string) (map[string]interface{}, error) {
 	return map[string]interface{}{}, nil
+}
+
+func (m *mockRepository) ListParties(_ context.Context, params persistence.ListPartiesParams) (*persistence.ListPartiesResult, error) {
+	if m.listPartiesErr != nil {
+		return nil, m.listPartiesErr
+	}
+	// Collect all parties matching filters
+	var parties []*domain.Party
+	for _, p := range m.parties {
+		if params.PartyType != "" && string(p.PartyType()) != params.PartyType {
+			continue
+		}
+		if params.Status != "" && string(p.Status()) != params.Status {
+			continue
+		}
+		if params.SearchQuery != "" {
+			q := strings.ToLower(params.SearchQuery)
+			if !strings.Contains(strings.ToLower(p.LegalName()), q) &&
+				!strings.Contains(strings.ToLower(p.DisplayName()), q) {
+				continue
+			}
+		}
+		parties = append(parties, p)
+	}
+
+	total := int64(len(parties))
+
+	// Apply limit
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 25
+	}
+	hasMore := len(parties) > limit
+	if hasMore {
+		parties = parties[:limit]
+	}
+
+	var nextCursor string
+	if hasMore && len(parties) > 0 {
+		last := parties[len(parties)-1]
+		nextCursor = persistence.EncodePartyCursor(persistence.PartyCursor{
+			CreatedAt: last.CreatedAt(),
+			ID:        last.ID(),
+		})
+	}
+
+	return &persistence.ListPartiesResult{
+		Parties:    parties,
+		TotalCount: total,
+		NextCursor: nextCursor,
+	}, nil
 }
 
 func newTestService(mock *mockRepository) *Service {
@@ -851,5 +904,145 @@ func TestExchangeDemographics(t *testing.T) {
 		st, ok := status.FromError(err)
 		require.True(t, ok)
 		assert.Equal(t, codes.NotFound, st.Code())
+	})
+}
+
+func TestListParties(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	registerParty := func(svc *Service, partyType pb.PartyType, legalName string) *pb.Party {
+		req := &pb.RegisterPartyRequest{
+			PartyType: partyType,
+			LegalName: legalName,
+		}
+		resp, err := svc.RegisterParty(ctx, req)
+		require.NoError(t, err)
+		return resp.Party
+	}
+
+	t.Run("returns empty list when no parties exist", func(t *testing.T) {
+		mock := newMockRepository()
+		svc := newTestService(mock)
+
+		resp, err := svc.ListParties(ctx, &pb.ListPartiesRequest{})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		assert.Empty(t, resp.Parties)
+		assert.Equal(t, int64(0), resp.TotalCount)
+		assert.Empty(t, resp.NextPageToken)
+	})
+
+	t.Run("returns all parties with default page size", func(t *testing.T) {
+		mock := newMockRepository()
+		svc := newTestService(mock)
+
+		registerParty(svc, pb.PartyType_PARTY_TYPE_PERSON, "Alice Smith")
+		registerParty(svc, pb.PartyType_PARTY_TYPE_ORGANIZATION, "Acme Corp")
+
+		resp, err := svc.ListParties(ctx, &pb.ListPartiesRequest{})
+		require.NoError(t, err)
+		assert.Len(t, resp.Parties, 2)
+		assert.Equal(t, int64(2), resp.TotalCount)
+	})
+
+	t.Run("filters by party type", func(t *testing.T) {
+		mock := newMockRepository()
+		svc := newTestService(mock)
+
+		registerParty(svc, pb.PartyType_PARTY_TYPE_PERSON, "Alice Smith")
+		registerParty(svc, pb.PartyType_PARTY_TYPE_ORGANIZATION, "Acme Corp")
+
+		resp, err := svc.ListParties(ctx, &pb.ListPartiesRequest{
+			PartyType: pb.PartyType_PARTY_TYPE_PERSON,
+		})
+		require.NoError(t, err)
+		require.Len(t, resp.Parties, 1)
+		assert.Equal(t, pb.PartyType_PARTY_TYPE_PERSON, resp.Parties[0].PartyType)
+	})
+
+	t.Run("filters by status", func(t *testing.T) {
+		mock := newMockRepository()
+		svc := newTestService(mock)
+
+		alice := registerParty(svc, pb.PartyType_PARTY_TYPE_PERSON, "Alice Smith")
+		registerParty(svc, pb.PartyType_PARTY_TYPE_PERSON, "Bob Jones")
+
+		// Suspend Alice
+		_, err := svc.ControlParty(ctx, &pb.ControlPartyRequest{
+			PartyId:       alice.PartyId,
+			ControlAction: pb.ControlAction_CONTROL_ACTION_SUSPEND,
+			Reason:        "test",
+			ActorId:       "admin",
+		})
+		require.NoError(t, err)
+
+		resp, err := svc.ListParties(ctx, &pb.ListPartiesRequest{
+			Status: pb.PartyStatus_PARTY_STATUS_ACTIVE,
+		})
+		require.NoError(t, err)
+		require.Len(t, resp.Parties, 1)
+		assert.Equal(t, pb.PartyStatus_PARTY_STATUS_ACTIVE, resp.Parties[0].Status)
+	})
+
+	t.Run("filters by search query", func(t *testing.T) {
+		mock := newMockRepository()
+		svc := newTestService(mock)
+
+		registerParty(svc, pb.PartyType_PARTY_TYPE_PERSON, "Alice Smith")
+		registerParty(svc, pb.PartyType_PARTY_TYPE_ORGANIZATION, "Acme Corp")
+
+		resp, err := svc.ListParties(ctx, &pb.ListPartiesRequest{
+			SearchQuery: "alice",
+		})
+		require.NoError(t, err)
+		require.Len(t, resp.Parties, 1)
+		assert.Equal(t, "Alice Smith", resp.Parties[0].LegalName)
+	})
+
+	t.Run("applies default page size of 25", func(t *testing.T) {
+		mock := newMockRepository()
+		svc := newTestService(mock)
+
+		resp, err := svc.ListParties(ctx, &pb.ListPartiesRequest{PageSize: 0})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+	})
+
+	t.Run("clamps page size to max 100", func(t *testing.T) {
+		mock := newMockRepository()
+		svc := newTestService(mock)
+
+		resp, err := svc.ListParties(ctx, &pb.ListPartiesRequest{PageSize: 100})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+	})
+
+	t.Run("returns InvalidArgument for malformed page_token", func(t *testing.T) {
+		mock := newMockRepository()
+		svc := newTestService(mock)
+
+		resp, err := svc.ListParties(ctx, &pb.ListPartiesRequest{
+			PageToken: "not-valid-base64-cursor!!!",
+		})
+		assert.Nil(t, resp)
+		require.Error(t, err)
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.InvalidArgument, st.Code())
+	})
+
+	t.Run("returns Internal on repository error", func(t *testing.T) {
+		mock := newMockRepository()
+		mock.listPartiesErr = errDatabaseFailed
+		svc := newTestService(mock)
+
+		resp, err := svc.ListParties(ctx, &pb.ListPartiesRequest{})
+		assert.Nil(t, resp)
+		require.Error(t, err)
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.Internal, st.Code())
 	})
 }

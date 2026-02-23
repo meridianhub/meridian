@@ -62,8 +62,8 @@ async function fetchRunDetail(runId: string): Promise<ReconciliationRunDetail> {
 async function fetchVariances(runId: string): Promise<Variance[]> {
   const res = await fetch(`/api/v1/reconciliation/runs/${runId}/variances`)
   if (!res.ok) throw new Error(`Failed to fetch variances: ${res.status}`)
-  const data = (await res.json()) as { items: Variance[] }
-  return data.items
+  const data = (await res.json()) as { variances: Variance[]; nextPageToken?: string; totalCount?: number }
+  return data.variances ?? []
 }
 
 async function fetchDisputes(runId: string): Promise<Dispute[]> {

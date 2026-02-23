@@ -35,7 +35,32 @@ async function fetchReconciliationRuns(params: {
   }
   const res = await fetch(url.toString())
   if (!res.ok) throw new Error(`Failed to fetch reconciliation runs: ${res.status}`)
-  return res.json() as Promise<{ items: ReconciliationRun[]; nextPageToken?: string }>
+  const data = await res.json() as {
+    runs?: Array<{
+      runId?: string
+      accountId?: string
+      scope?: string
+      settlementType?: string
+      status?: string
+      varianceCount?: number
+      periodStart?: string
+      periodEnd?: string
+    }>
+    nextPageToken?: string
+  }
+  return {
+    items: (data.runs ?? []).map((run) => ({
+      runId: run.runId ?? '',
+      accountId: run.accountId ?? '',
+      scope: run.scope?.replace('RECONCILIATION_SCOPE_', '') ?? '',
+      settlementType: run.settlementType?.replace('SETTLEMENT_TYPE_', '') ?? '',
+      status: run.status?.replace('RUN_STATUS_', '') ?? '',
+      varianceCount: run.varianceCount ?? 0,
+      periodStart: run.periodStart ?? '',
+      periodEnd: run.periodEnd ?? '',
+    })),
+    nextPageToken: data.nextPageToken,
+  }
 }
 
 const columns: ColumnDef<ReconciliationRun>[] = [
@@ -118,9 +143,9 @@ export function ReconciliationPage() {
             label: 'Status',
             type: 'select',
             options: [
-              { label: 'Running', value: 'RUNNING' },
-              { label: 'Completed', value: 'COMPLETED' },
-              { label: 'Failed', value: 'FAILED' },
+              { label: 'Running', value: 'RUN_STATUS_RUNNING' },
+              { label: 'Completed', value: 'RUN_STATUS_COMPLETED' },
+              { label: 'Failed', value: 'RUN_STATUS_FAILED' },
             ],
           },
           { field: 'account_id', label: 'Account ID', type: 'text' },

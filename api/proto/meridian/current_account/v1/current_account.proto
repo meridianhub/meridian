@@ -1125,6 +1125,38 @@ message ListValuationFeaturesResponse {
   repeated ValuationFeature features = 1;
 }
 
+// ListCurrentAccountsRequest is the request to list current accounts with pagination and filtering.
+message ListCurrentAccountsRequest {
+  // page_size is the maximum number of accounts to return per page (default 25, max 100).
+  int32 page_size = 1 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 100
+  }];
+
+  // page_token is the cursor token from a previous response to get the next page.
+  // Leave empty to get the first page.
+  string page_token = 2;
+
+  // status filters results to accounts with a specific status (optional).
+  AccountStatus status = 3 [(buf.validate.field).enum = {defined_only: true}];
+
+  // iban filters results by IBAN prefix match (optional).
+  string iban = 4 [(buf.validate.field).string = {max_len: 34}];
+}
+
+// ListCurrentAccountsResponse is the paginated response containing current accounts.
+message ListCurrentAccountsResponse {
+  // accounts is the list of current accounts for this page.
+  repeated CurrentAccountFacility accounts = 1;
+
+  // next_page_token is the cursor to fetch the next page.
+  // Empty when there are no more results.
+  string next_page_token = 2;
+
+  // total_count is the total number of accounts matching the filter criteria.
+  int64 total_count = 3;
+}
+
 // ValuationWarning represents a warning generated during valuation execution.
 // Warnings indicate degraded conditions that did not prevent computation
 // but may affect result confidence.
@@ -1255,6 +1287,17 @@ service CurrentAccountService {
           description: "Current account created successfully"
         }
       }
+    };
+  }
+
+  // ListCurrentAccounts returns a paginated list of current accounts with optional filtering.
+  rpc ListCurrentAccounts(ListCurrentAccountsRequest) returns (ListCurrentAccountsResponse) {
+    option (google.api.http) = {
+      get: "/v1/current-accounts"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "List current accounts"
+      description: "Returns a paginated list of current accounts with optional filtering by status and IBAN."
     };
   }
 

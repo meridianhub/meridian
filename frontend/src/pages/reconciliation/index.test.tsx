@@ -23,13 +23,14 @@ function Wrapper({ children }: { children: React.ReactNode }) {
   )
 }
 
+// sampleRuns uses the proto/gateway response format (runs array with full enum names).
 const sampleRuns = [
   {
     runId: 'run-001',
     accountId: 'acc-123',
-    scope: 'FULL',
-    settlementType: 'GROSS',
-    status: 'COMPLETED',
+    scope: 'RECONCILIATION_SCOPE_FULL',
+    settlementType: 'SETTLEMENT_TYPE_ON_DEMAND',
+    status: 'RUN_STATUS_COMPLETED',
     varianceCount: 2,
     periodStart: '2026-01-01T00:00:00Z',
     periodEnd: '2026-01-31T23:59:59Z',
@@ -37,9 +38,9 @@ const sampleRuns = [
   {
     runId: 'run-002',
     accountId: 'acc-456',
-    scope: 'PARTIAL',
-    settlementType: 'NET',
-    status: 'RUNNING',
+    scope: 'RECONCILIATION_SCOPE_ACCOUNT',
+    settlementType: 'SETTLEMENT_TYPE_DAILY',
+    status: 'RUN_STATUS_RUNNING',
     varianceCount: 0,
     periodStart: '2026-02-01T00:00:00Z',
     periodEnd: '2026-02-28T23:59:59Z',
@@ -53,7 +54,7 @@ describe('ReconciliationPage - list view', () => {
 
   it('renders page heading', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ items: [] }), { status: 200 }),
+      new Response(JSON.stringify({ runs: [] }), { status: 200 }),
     )
     render(<ReconciliationPage />, { wrapper: Wrapper })
     expect(screen.getByText('Reconciliation')).toBeInTheDocument()
@@ -61,7 +62,7 @@ describe('ReconciliationPage - list view', () => {
 
   it('renders settlement runs in the table', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ items: sampleRuns }), { status: 200 }),
+      new Response(JSON.stringify({ runs: sampleRuns }), { status: 200 }),
     )
     render(<ReconciliationPage />, { wrapper: Wrapper })
 
@@ -73,7 +74,7 @@ describe('ReconciliationPage - list view', () => {
 
   it('shows variance count with destructive badge when count > 0', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ items: sampleRuns }), { status: 200 }),
+      new Response(JSON.stringify({ runs: sampleRuns }), { status: 200 }),
     )
     render(<ReconciliationPage />, { wrapper: Wrapper })
 
@@ -89,19 +90,19 @@ describe('ReconciliationPage - list view', () => {
 
   it('renders status badges for each run', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ items: sampleRuns }), { status: 200 }),
+      new Response(JSON.stringify({ runs: sampleRuns }), { status: 200 }),
     )
     render(<ReconciliationPage />, { wrapper: Wrapper })
 
     await waitFor(() => {
-      expect(screen.getByText('COMPLETED')).toBeInTheDocument()
-      expect(screen.getByText('RUNNING')).toBeInTheDocument()
+      expect(screen.getByText('COMPLETED')).toBeInTheDocument()  // RUN_STATUS_ prefix stripped
+      expect(screen.getByText('RUNNING')).toBeInTheDocument()    // RUN_STATUS_ prefix stripped
     })
   })
 
   it('renders period column with formatted dates', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ items: sampleRuns }), { status: 200 }),
+      new Response(JSON.stringify({ runs: sampleRuns }), { status: 200 }),
     )
     render(<ReconciliationPage />, { wrapper: Wrapper })
 
@@ -112,7 +113,7 @@ describe('ReconciliationPage - list view', () => {
 
   it('renders column headers', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ items: [] }), { status: 200 }),
+      new Response(JSON.stringify({ runs: [] }), { status: 200 }),
     )
     render(<ReconciliationPage />, { wrapper: Wrapper })
 
@@ -126,7 +127,7 @@ describe('ReconciliationPage - list view', () => {
 
   it('shows filters for status and account ID', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ items: [] }), { status: 200 }),
+      new Response(JSON.stringify({ runs: [] }), { status: 200 }),
     )
     render(<ReconciliationPage />, { wrapper: Wrapper })
 
@@ -138,7 +139,7 @@ describe('ReconciliationPage - list view', () => {
 
   it('navigates to detail page on row click', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ items: sampleRuns }), { status: 200 }),
+      new Response(JSON.stringify({ runs: sampleRuns }), { status: 200 }),
     )
 
     let currentPath = '/reconciliation'
@@ -199,7 +200,7 @@ describe('ReconciliationPage - list view', () => {
 
   it('shows empty state when no runs returned', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ items: [] }), { status: 200 }),
+      new Response(JSON.stringify({ runs: [] }), { status: 200 }),
     )
     render(<ReconciliationPage />, { wrapper: Wrapper })
 
