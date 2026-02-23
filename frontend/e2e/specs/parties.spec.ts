@@ -144,12 +144,11 @@ test.describe('Party header component', () => {
   })
 
   test('displays party name in h2 or loading skeleton', async ({ authenticatedPage: page }) => {
-    // Either the name renders or a skeleton is shown while loading
-    const headerSection = page.locator('.p-6.border-b')
-    const hasContent = await headerSection.or(
-      page.locator('[data-testid="audit-trail-skeleton"]')
-    ).isVisible()
-    expect(hasContent).toBeTruthy()
+    // Either the header renders (party-header.tsx:44 — .p-6.border-b)
+    // or the loading skeleton renders (party-header.tsx:32 — .p-6.space-y-4)
+    await expect(
+      page.locator('.p-6.border-b').or(page.locator('.p-6.space-y-4'))
+    ).toBeVisible()
   })
 })
 
@@ -168,12 +167,14 @@ test.describe('Tab switching', () => {
   test('Overview tab renders without error', async ({ authenticatedPage: page }) => {
     // Already on Overview by default
     await expect(page.getByRole('tab', { name: 'Overview', selected: true })).toBeVisible()
-    // Content area is present
-    await expect(page.locator('[data-radix-collection-item]').or(
-      page.getByText('Party ID').or(page.getByText('No data'))
-    )).toBeVisible({ timeout: 10_000 }).catch(() => {
-      // Acceptable: API not available, content will be in loading state
-    })
+    // Content area shows data, empty state, or loading skeleton — use soft assertion
+    // so the test passes even when the API is unavailable (loading state is acceptable)
+    await expect.soft(
+      page.locator('[data-radix-collection-item]')
+        .or(page.getByText('Party ID'))
+        .or(page.getByText('No data'))
+        .or(page.locator('[class*="skeleton"]'))
+    ).toBeVisible({ timeout: 10_000 })
   })
 
   test('Demographics tab activates on click', async ({ authenticatedPage: page }) => {
