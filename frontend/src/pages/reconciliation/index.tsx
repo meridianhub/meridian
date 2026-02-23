@@ -143,9 +143,9 @@ export function ReconciliationPage() {
             label: 'Status',
             type: 'select',
             options: [
-              { label: 'Running', value: 'RUNNING' },
-              { label: 'Completed', value: 'COMPLETED' },
-              { label: 'Failed', value: 'FAILED' },
+              { label: 'Running', value: 'RUN_STATUS_RUNNING' },
+              { label: 'Completed', value: 'RUN_STATUS_COMPLETED' },
+              { label: 'Failed', value: 'RUN_STATUS_FAILED' },
             ],
           },
           { field: 'account_id', label: 'Account ID', type: 'text' },
