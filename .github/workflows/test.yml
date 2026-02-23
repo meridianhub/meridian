@@ -12,8 +12,12 @@ permissions:
 
 jobs:
   test:
-    name: Run Tests
+    name: "Tests (shard ${{ matrix.shard_index }})"
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard_index: [0, 1, 2]
 
     steps:
       - name: Checkout code
@@ -44,15 +48,71 @@ jobs:
           SKIP_KAFKA_TESTS: "1"
         run: |
           mkdir -p coverage
+          # Split packages across 3 shards via round-robin for parallel execution
+          shard_pkgs=$(go list ./... | awk "NR % 3 == ${{ matrix.shard_index }}")
+          pkg_count=$(echo "$shard_pkgs" | wc -l | tr -d ' ')
+          echo "Shard ${{ matrix.shard_index }}/3: testing $pkg_count packages"
           # Use -short flag to skip timing-sensitive tests in CI
-          # These tests validate exponential backoff, jitter, and timeouts which
-          # can be flaky due to CPU scheduler variance in CI environments.
-          # Functional correctness (retry attempts, error handling) is still validated.
-          # Run full test suite locally without -short for complete validation.
           gotestsum --format testdox \
             --junitfile test-results.xml \
             --jsonfile test-results.json \
-            -- -short -race -coverprofile=coverage/coverage.out -covermode=atomic ./...
+            -- -short -race -coverprofile=coverage/coverage.out -covermode=atomic $shard_pkgs
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: coverage-shard-${{ matrix.shard_index }}
+          path: coverage/coverage.out
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: test-results-shard-${{ matrix.shard_index }}
+          path: |
+            test-results.xml
+            test-results.json
+
+      - name: Test summary
+        uses: test-summary/action@v2
+        if: always()
+        with:
+          paths: test-results.xml
+
+      - name: Annotate failures
+        if: failure()
+        run: |
+          jq -r 'select(.Action == "fail" and .Test != null) | "::error file=\(.Package | sub("github.com/meridianhub/meridian/"; "")),line=1::\(.Test) failed"' test-results.json | sort -u || true
+
+  coverage:
+    name: Coverage Report
+    needs: test
+    runs-on: ubuntu-latest
+    if: always() && !cancelled()
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.0'
+
+      - name: Download coverage artifacts
+        uses: actions/download-artifact@v6
+        with:
+          pattern: coverage-shard-*
+          path: coverage-shards
+
+      - name: Install gocovmerge
+        run: go install github.com/wadey/gocovmerge@latest
+
+      - name: Merge coverage from shards
+        run: |
+          mkdir -p coverage
+          gocovmerge coverage-shards/coverage-shard-*/coverage.out > coverage/coverage.out
           echo "Filtering generated proto files from coverage..."
           grep -v -E '\.pb\.go|\.pb\.validate\.go|_grpc\.pb\.go' coverage/coverage.out > coverage/coverage-filtered.out || true
 
@@ -78,35 +138,29 @@ jobs:
 
       - name: Check test coverage threshold
         run: |
-          # Use filtered coverage (excludes generated .pb.go files)
           coverage=$(go tool cover -func=coverage/coverage-filtered.out | grep total | awk '{print $3}' | sed 's/%//')
           echo "Coverage (excluding generated proto files): ${coverage}%"
-          # Threshold for actual code (not including generated proto files)
-          # Raised to 50% after proto implementation with comprehensive tests
           if (( $(echo "$coverage < 50.0" | bc -l) )); then
             echo "❌ Coverage ${coverage}% is below 50% threshold"
             exit 1
           fi
           echo "✅ Coverage ${coverage}% meets threshold"
 
-      - name: Upload test results
-        uses: actions/upload-artifact@v6
-        if: always()
-        with:
-          name: test-results
-          path: |
-            test-results.xml
-            test-results.json
-
-      - name: Test summary
-        uses: test-summary/action@v2
-        if: always()
-        with:
-          paths: test-results.xml
-
-      - name: Annotate failures
-        if: failure()
+  # Gate job preserves the "Run Tests" check name for required status checks
+  test-gate:
+    name: Run Tests
+    needs: [test, coverage]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check results
         run: |
-          # gotestsum --jsonfile produces newline-delimited JSON (one object per line)
-          # Filter for test failures (not package-level) and deduplicate
-          jq -r 'select(.Action == "fail" and .Test != null) | "::error file=\(.Package | sub("github.com/meridianhub/meridian/"; "")),line=1::\(.Test) failed"' test-results.json | sort -u || true
+          if [ "${{ needs.test.result }}" != "success" ]; then
+            echo "Test shards failed"
+            exit 1
+          fi
+          if [ "${{ needs.coverage.result }}" != "success" ]; then
+            echo "Coverage check failed"
+            exit 1
+          fi
+          echo "All tests and coverage checks passed"
