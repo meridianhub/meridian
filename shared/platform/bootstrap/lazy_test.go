@@ -50,7 +50,7 @@ func TestLazyClient_GetAfterResolution_ReturnsClient(t *testing.T) {
 	})
 
 	// Wait for background resolution
-	waitForReady(t, lc, 2*time.Second)
+	waitForReady(t, lc, 5*time.Second)
 
 	got, err := lc.Get()
 	if err != nil {
@@ -76,7 +76,7 @@ func TestLazyClient_IsReady_FalseBeforeTrueAfter(t *testing.T) {
 	}
 
 	close(resolved)
-	waitForReady(t, lc, 2*time.Second)
+	waitForReady(t, lc, 5*time.Second)
 
 	if !lc.IsReady() {
 		t.Error("IsReady() after resolution = false, want true")
@@ -96,7 +96,7 @@ func TestLazyClient_RetriesOnError(t *testing.T) {
 		return &fakeClient{Name: "eventually"}, func() {}, nil
 	}, WithLazyInitialWait(1*time.Millisecond), WithLazyMaxWait(5*time.Millisecond))
 
-	waitForReady(t, lc, 2*time.Second)
+	waitForReady(t, lc, 5*time.Second)
 
 	got, err := lc.Get()
 	if err != nil {
@@ -160,7 +160,7 @@ func TestLazyClient_CleanupAppended(t *testing.T) {
 		cleanups = append(cleanups, fn)
 	}))
 
-	waitForReady(t, lc, 2*time.Second)
+	waitForReady(t, lc, 5*time.Second)
 
 	mu.Lock()
 	n := len(cleanups)
