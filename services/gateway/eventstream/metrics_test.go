@@ -55,6 +55,11 @@ func TestNewMetrics_RegistersAllMetrics(t *testing.T) {
 	}
 }
 
+func TestNewMetrics_NilRegisterer_ReturnsError(t *testing.T) {
+	_, err := eventstream.NewMetrics(nil)
+	require.ErrorIs(t, err, eventstream.ErrNilRegisterer)
+}
+
 func TestNewMetrics_DuplicateRegistration_ReturnsError(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	_, err := eventstream.NewMetrics(reg)

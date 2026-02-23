@@ -1,6 +1,7 @@
 package eventstream
 
 import (
+	"errors"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -20,10 +21,16 @@ type Metrics struct {
 	eventLatency      prometheus.Histogram
 }
 
+// ErrNilRegisterer is returned by NewMetrics when reg is nil.
+var ErrNilRegisterer = errors.New("eventstream: prometheus registerer must not be nil")
+
 // NewMetrics registers all eventstream Prometheus metrics with the given registry
-// and returns a Metrics wrapper. An error is returned if any metric name is already
-// registered in the provided registry.
+// and returns a Metrics wrapper. An error is returned if reg is nil or if any
+// metric name is already registered in the provided registry.
 func NewMetrics(reg prometheus.Registerer) (*Metrics, error) {
+	if reg == nil {
+		return nil, ErrNilRegisterer
+	}
 	activeConnections := prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "meridian_ws_connections_active",
