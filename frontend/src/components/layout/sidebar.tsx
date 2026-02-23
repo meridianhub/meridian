@@ -4,10 +4,18 @@ import {
   Wallet,
   Building,
   ArrowLeftRight,
-  FileText,
-  BarChart2,
   Building2,
   Activity,
+  Users,
+  TrendingUp,
+  BookOpen,
+  Code,
+  LineChart,
+  BarChart3,
+  Database,
+  Map,
+  ClipboardList,
+  CheckSquare,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -22,8 +30,16 @@ const TENANT_NAV_ITEMS: NavItem[] = [
   { label: 'Accounts', href: '/accounts', icon: Wallet },
   { label: 'Internal Accounts', href: '/internal-accounts', icon: Building },
   { label: 'Payments', href: '/payments', icon: ArrowLeftRight },
-  { label: 'Transactions', href: '/transactions', icon: FileText },
-  { label: 'Reports', href: '/reports', icon: BarChart2 },
+  { label: 'Positions', href: '/positions', icon: TrendingUp },
+  { label: 'Ledger', href: '/ledger', icon: BookOpen },
+  { label: 'Parties', href: '/parties', icon: Users },
+  { label: 'Reconciliation', href: '/reconciliation', icon: CheckSquare },
+  { label: 'Starlark Config', href: '/starlark-config', icon: Code },
+  { label: 'Market Data', href: '/market-data', icon: LineChart },
+  { label: 'Forecasting', href: '/forecasting', icon: BarChart3 },
+  { label: 'Reference Data', href: '/reference-data', icon: Database },
+  { label: 'Gateway Mappings', href: '/gateway-mappings', icon: Map },
+  { label: 'Audit Log', href: '/audit-log', icon: ClipboardList },
 ]
 
 const PLATFORM_NAV_ITEMS: NavItem[] = [

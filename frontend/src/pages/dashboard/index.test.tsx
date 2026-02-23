@@ -1,8 +1,17 @@
 import { describe, it, expect, vi } from 'vitest'
 import { screen, waitFor } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import { renderWithProviders } from '@/test/test-utils'
 import { createTenantUserToken } from '@/test/jwt-helpers'
 import { DashboardPage } from './index'
+
+function DashboardWithRouter() {
+  return (
+    <MemoryRouter>
+      <DashboardPage />
+    </MemoryRouter>
+  )
+}
 
 // Mock the transport and clients modules to avoid importing proto generated files
 vi.mock('@/api/transport', () => ({
@@ -105,7 +114,7 @@ function setupMockClients({
 describe('DashboardPage', () => {
   it('renders dashboard heading', () => {
     setupMockClients()
-    renderWithProviders(<DashboardPage />, {
+    renderWithProviders(<DashboardWithRouter />, {
       initialToken: createTenantUserToken('tenant-001'),
     })
 
@@ -114,7 +123,7 @@ describe('DashboardPage', () => {
 
   it('renders stat card titles', () => {
     setupMockClients()
-    renderWithProviders(<DashboardPage />, {
+    renderWithProviders(<DashboardWithRouter />, {
       initialToken: createTenantUserToken('tenant-001'),
     })
 
@@ -145,7 +154,7 @@ describe('DashboardPage', () => {
       marketInformation: {} as never,
     })
 
-    renderWithProviders(<DashboardPage />, {
+    renderWithProviders(<DashboardWithRouter />, {
       initialToken: createTenantUserToken('tenant-001'),
     })
 
@@ -169,7 +178,7 @@ describe('DashboardPage', () => {
       },
     })
 
-    renderWithProviders(<DashboardPage />, {
+    renderWithProviders(<DashboardWithRouter />, {
       initialToken: createTenantUserToken('tenant-001'),
     })
 
@@ -193,7 +202,7 @@ describe('DashboardPage', () => {
       },
     })
 
-    renderWithProviders(<DashboardPage />, {
+    renderWithProviders(<DashboardWithRouter />, {
       initialToken: createTenantUserToken('tenant-001'),
     })
 
@@ -207,7 +216,7 @@ describe('DashboardPage', () => {
 
   it('renders recent activity section', () => {
     setupMockClients()
-    renderWithProviders(<DashboardPage />, {
+    renderWithProviders(<DashboardWithRouter />, {
       initialToken: createTenantUserToken('tenant-001'),
     })
 
@@ -216,7 +225,7 @@ describe('DashboardPage', () => {
 
   it('renders quick actions section', () => {
     setupMockClients()
-    renderWithProviders(<DashboardPage />, {
+    renderWithProviders(<DashboardWithRouter />, {
       initialToken: createTenantUserToken('tenant-001'),
     })
 
@@ -239,7 +248,7 @@ describe('DashboardPage', () => {
       },
     })
 
-    renderWithProviders(<DashboardPage />, {
+    renderWithProviders(<DashboardWithRouter />, {
       initialToken: createTenantUserToken('tenant-001'),
     })
 
@@ -251,7 +260,7 @@ describe('DashboardPage', () => {
 
   it('renders without crashing when no tenant context', () => {
     setupMockClients()
-    renderWithProviders(<DashboardPage />)
+    renderWithProviders(<DashboardWithRouter />)
 
     expect(screen.getByRole('heading', { name: /dashboard/i })).toBeInTheDocument()
   })
@@ -279,7 +288,7 @@ describe('DashboardPage', () => {
     })
 
     // Render without token (no tenant)
-    renderWithProviders(<DashboardPage />)
+    renderWithProviders(<DashboardWithRouter />)
 
     // Queries should not be called with no tenant
     expect(mockListPayments).not.toHaveBeenCalled()
