@@ -63,7 +63,7 @@ jobs:
           build-args: |
             VERSION=${{ github.ref_name }}
             COMMIT=${{ github.sha }}
-            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            BUILD_DATE=${{ github.event.head_commit.timestamp || github.event.repository.updated_at }}
 
   deploy:
     name: Deploy to Demo Droplet
@@ -104,5 +104,5 @@ jobs:
               sleep 5
             done
             echo "Health check failed after $max_attempts attempts"
-            docker compose logs --tail=50
+            cd /opt/meridian && docker compose logs --tail=50
             exit 1
