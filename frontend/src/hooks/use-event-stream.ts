@@ -80,6 +80,8 @@ export function useEventStream(options: UseEventStreamOptions = {}) {
   const queryClient = useQueryClient()
   const tenantSlug = useTenantSlug()
 
+  // Phase 4: setConnected will be called from WebSocket onopen/onclose handlers
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [connected, setConnected] = useState(false)
   const [lastEvent, setLastEvent] = useState<DomainEvent | null>(null)
 
@@ -93,8 +95,9 @@ export function useEventStream(options: UseEventStreamOptions = {}) {
   // - Clean up WebSocket on unmount
   useEffect(() => {
     // STUB: Phase 4 implementation
-    // For now, this hook provides the interface without connection logic
-    setConnected(false)
+    // For now, this hook provides the interface without connection logic.
+    // Phase 4 will establish a WebSocket connection here, call _handleEvent
+    // on messages, and set connected = true on open.
 
     return () => {
       // Phase 4: Cleanup WebSocket connection
@@ -104,8 +107,9 @@ export function useEventStream(options: UseEventStreamOptions = {}) {
   /**
    * Internal handler for processing received events.
    * Validates tenant isolation, applies event type filtering, fires callbacks, and triggers cache invalidation.
+   * Prefixed with _ as it's unused until Phase 4 WebSocket integration.
    */
-  const handleEvent = useCallback(
+  const _handleEvent = useCallback(
     (event: DomainEvent) => {
       // Enforce tenant isolation - ignore events from other tenants
       if (event.tenantSlug !== tenantSlug) {
@@ -133,6 +137,9 @@ export function useEventStream(options: UseEventStreamOptions = {}) {
     },
     [eventTypes, onEvent, autoInvalidate, queryClient, tenantSlug]
   )
+
+  // Ensure _handleEvent is referenced for Phase 4
+  void _handleEvent
 
   return {
     /** Whether the WebSocket is currently connected (Phase 4) */

@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { formatDistanceToNow, format } from 'date-fns';
+import { formatDistanceToNow } from 'date-fns';
 import {
   Tooltip,
   TooltipContent,

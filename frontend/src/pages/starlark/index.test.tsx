@@ -95,7 +95,7 @@ describe('StarlarkConfigPage', () => {
 
   describe('rendering', () => {
     it('renders page title and description', () => {
-      vi.mocked(useApiClients).mockReturnValue(makeMockClients() as any)
+      vi.mocked(useApiClients).mockReturnValue(makeMockClients() as never)
 
       render(
         <Wrapper>
@@ -107,7 +107,7 @@ describe('StarlarkConfigPage', () => {
     })
 
     it('renders DataTable with all expected columns', async () => {
-      vi.mocked(useApiClients).mockReturnValue(makeMockClients() as any)
+      vi.mocked(useApiClients).mockReturnValue(makeMockClients() as never)
 
       render(
         <Wrapper>
@@ -125,7 +125,7 @@ describe('StarlarkConfigPage', () => {
     })
 
     it('displays saga definitions in table', async () => {
-      vi.mocked(useApiClients).mockReturnValue(makeMockClients() as any)
+      vi.mocked(useApiClients).mockReturnValue(makeMockClients() as never)
 
       render(
         <Wrapper>
@@ -141,7 +141,7 @@ describe('StarlarkConfigPage', () => {
     })
 
     it('shows empty state when no sagas returned', async () => {
-      vi.mocked(useApiClients).mockReturnValue(makeMockClients([]) as any)
+      vi.mocked(useApiClients).mockReturnValue(makeMockClients([]) as never)
 
       render(
         <Wrapper>
@@ -159,7 +159,7 @@ describe('StarlarkConfigPage', () => {
     it('shows override counts column for platform admin', async () => {
       // We need to test this with a platform admin auth context
       // Platform admin sees extra column for override counts
-      vi.mocked(useApiClients).mockReturnValue(makeMockClients() as any)
+      vi.mocked(useApiClients).mockReturnValue(makeMockClients() as never)
 
       render(
         <Wrapper>
@@ -173,7 +173,7 @@ describe('StarlarkConfigPage', () => {
     })
 
     it('does not show override counts column for tenant admin', async () => {
-      vi.mocked(useApiClients).mockReturnValue(makeMockClients() as any)
+      vi.mocked(useApiClients).mockReturnValue(makeMockClients() as never)
 
       render(
         <Wrapper>
@@ -189,7 +189,7 @@ describe('StarlarkConfigPage', () => {
 
   describe('tenant admin view', () => {
     it('shows source column for tenant admin (platform default vs tenant override)', async () => {
-      vi.mocked(useApiClients).mockReturnValue(makeMockClients() as any)
+      vi.mocked(useApiClients).mockReturnValue(makeMockClients() as never)
 
       render(
         <Wrapper>
@@ -203,7 +203,7 @@ describe('StarlarkConfigPage', () => {
     })
 
     it('displays "Platform Default" source for system sagas', async () => {
-      vi.mocked(useApiClients).mockReturnValue(makeMockClients([platformSaga]) as any)
+      vi.mocked(useApiClients).mockReturnValue(makeMockClients([platformSaga]) as never)
 
       render(
         <Wrapper>
@@ -217,7 +217,7 @@ describe('StarlarkConfigPage', () => {
     })
 
     it('displays "Tenant Override" source for non-system sagas', async () => {
-      vi.mocked(useApiClients).mockReturnValue(makeMockClients([tenantSaga]) as any)
+      vi.mocked(useApiClients).mockReturnValue(makeMockClients([tenantSaga]) as never)
 
       render(
         <Wrapper>
@@ -234,7 +234,7 @@ describe('StarlarkConfigPage', () => {
   describe('status badges', () => {
     it('renders status badges for each saga', async () => {
       vi.mocked(useApiClients).mockReturnValue(
-        makeMockClients([platformSaga, tenantSaga, deprecatedSaga]) as any,
+        makeMockClients([platformSaga, tenantSaga, deprecatedSaga]) as never,
       )
 
       render(
@@ -253,7 +253,7 @@ describe('StarlarkConfigPage', () => {
 
   describe('row navigation', () => {
     it('renders rows as links to detail pages', async () => {
-      vi.mocked(useApiClients).mockReturnValue(makeMockClients([platformSaga]) as any)
+      vi.mocked(useApiClients).mockReturnValue(makeMockClients([platformSaga]) as never)
 
       render(
         <Wrapper>
@@ -275,7 +275,7 @@ describe('StarlarkConfigPage', () => {
         sagaRegistry: {
           listSagas: vi.fn().mockReturnValue(new Promise(() => {})),
         },
-      } as any)
+      } as never)
 
       render(
         <Wrapper>
@@ -291,7 +291,7 @@ describe('StarlarkConfigPage', () => {
         sagaRegistry: {
           listSagas: vi.fn().mockRejectedValue(new Error('Network error')),
         },
-      } as any)
+      } as never)
 
       render(
         <Wrapper>

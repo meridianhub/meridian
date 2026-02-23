@@ -6,7 +6,6 @@ import { CELEditor } from '@/components/shared/cel-editor'
 import { useApiClients } from '@/api/context'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
-  AccountTypeStatus,
   BehaviorClass,
   type AccountTypeDefinition,
 } from '@/api/gen/meridian/reference_data/v1/account_type_pb'

@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import type { ServiceClients } from '@/api/clients'
 import { StarlarkDetailPage } from './detail'
 
 // Mock useApiClients
@@ -80,7 +81,7 @@ function makeQueryClient() {
 }
 
 function renderWithRoute(definitionId: string, clients: ReturnType<typeof makeMockClients>) {
-  vi.mocked(useApiClients).mockReturnValue(clients as any)
+  vi.mocked(useApiClients).mockReturnValue(clients as unknown as ServiceClients)
   const qc = makeQueryClient()
   return render(
     <QueryClientProvider client={qc}>
@@ -220,7 +221,7 @@ describe('StarlarkDetailPage', () => {
           getSaga: vi.fn().mockReturnValue(new Promise(() => {})),
           getActiveSaga: vi.fn().mockReturnValue(new Promise(() => {})),
         },
-      } as any)
+      } as unknown as ServiceClients)
 
       const qc = makeQueryClient()
       render(

@@ -77,7 +77,7 @@ function getCurrencyName(currency: unknown): string {
   return String(currency ?? '')
 }
 
-function computeTotals(postings: LedgerPosting[], currency: string): { debitTotal: bigint; creditTotal: bigint } {
+function computeTotals(postings: LedgerPosting[], _currency: string): { debitTotal: bigint; creditTotal: bigint } {
   let debitTotal = 0n
   let creditTotal = 0n
 

@@ -1,24 +1,11 @@
 import * as React from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { useApiClients } from '@/api/context'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ChevronRight, ChevronDown } from 'lucide-react'
 import type { ReferenceDataNode } from '@/api/gen/meridian/reference_data/v1/node_pb'
-import type { Timestamp } from '@bufbuild/protobuf/wkt'
-import { cn } from '@/lib/utils'
-
-function dateStringToTimestamp(dateStr: string): Timestamp | undefined {
-  if (!dateStr) return undefined
-  const ms = Date.parse(dateStr)
-  if (isNaN(ms)) return undefined
-  return {
-    $typeName: 'google.protobuf.Timestamp',
-    seconds: BigInt(Math.floor(ms / 1000)),
-    nanos: 0,
-  }
-}
 
 interface NodeRowProps {
   node: ReferenceDataNode
@@ -28,7 +15,6 @@ interface NodeRowProps {
 
 function NodeRow({ node, depth, asAt }: NodeRowProps) {
   const clients = useApiClients()
-  const queryClient = useQueryClient()
   const [expanded, setExpanded] = React.useState(false)
 
   const childrenQueryKey = ['node-children', node.id, asAt]
