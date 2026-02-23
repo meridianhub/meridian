@@ -2,9 +2,10 @@ import { describe, it, expect } from 'vitest'
 import { buildTenantBaseUrl } from '@/api/config'
 
 describe('buildTenantBaseUrl', () => {
-  it('builds a tenant-scoped URL for a given slug', () => {
+  it('returns localhost base URL unchanged in local dev', () => {
+    // In local dev (localhost), tenant is identified via JWT, not subdomain
     const url = buildTenantBaseUrl('acme')
-    expect(url).toContain('acme')
+    expect(url).toBe('http://localhost:8090')
   })
 
   it('returns a valid URL string', () => {
@@ -15,12 +16,6 @@ describe('buildTenantBaseUrl', () => {
   it('does not end with a trailing slash', () => {
     const url = buildTenantBaseUrl('acme')
     expect(url).not.toMatch(/\/$/)
-  })
-
-  it('includes the tenant slug in the hostname', () => {
-    const url = buildTenantBaseUrl('my-org')
-    const parsed = new URL(url)
-    expect(parsed.hostname).toContain('my-org')
   })
 })
 

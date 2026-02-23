@@ -495,7 +495,7 @@ control-plane-ci: validate-manifest-jsonschema validate-manifests test-control-p
 
 ## dev-up: Start entire Meridian platform in dev mode
 DEV_PORTS=26257 8080 50051 8090
-dev-up:
+dev-up: proto
 	@command -v docker >/dev/null || { echo "Error: docker is required"; exit 1; }
 	@failed=0; for port in $(DEV_PORTS); do \
 		pid=$$(lsof -ti :$$port 2>/dev/null | head -1); \
@@ -511,7 +511,22 @@ dev-up:
 		echo "      or stop leftover containers:        make dev-down"; \
 		exit 1; \
 	fi
+	@echo ""
 	@echo "Starting Meridian dev environment..."
+	@echo ""
+	@echo "  Once ready, services will be available at:"
+	@echo ""
+	@echo "    Meridian Console         http://localhost:5173"
+	@echo "    Gateway (REST/Connect)   http://localhost:8090"
+	@echo "    gRPC                     localhost:50051"
+	@echo "    CockroachDB UI           http://localhost:8080"
+	@echo "    CockroachDB SQL          postgresql://root@localhost:26257/defaultdb?sslmode=disable"
+	@echo ""
+	@echo "  Swagger UI (requires separate terminal):"
+	@echo "    make swagger-ui          http://localhost:8091/swagger-ui.html"
+	@echo ""
+	@echo "  Press Ctrl+C to stop."
+	@echo ""
 	docker compose -f $(DEV_COMPOSE) up --build
 
 ## dev-down: Stop dev environment containers

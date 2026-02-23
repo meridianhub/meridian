@@ -1,4 +1,4 @@
-const DEFAULT_API_BASE_URL = 'http://localhost:8080'
+const DEFAULT_API_BASE_URL = 'http://localhost:8090'
 
 function getApiBaseUrl(): string {
   const url = import.meta.env.VITE_API_BASE_URL
@@ -21,10 +21,14 @@ export const apiConfig = {
 
 export function buildTenantBaseUrl(tenantSlug: string): string {
   const base = apiConfig.baseUrl
-  if (base && base !== DEFAULT_API_BASE_URL) {
-    const parsed = new URL(base)
-    parsed.hostname = `${tenantSlug}.${parsed.hostname}`
-    return parsed.toString().replace(/\/$/, '')
+  const parsed = new URL(base)
+
+  // In local dev (localhost), tenant is identified via JWT, not subdomain
+  if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
+    return base.replace(/\/$/, '')
   }
-  return `https://${tenantSlug}.api.meridian.io`
+
+  // In production, use tenant subdomain routing
+  parsed.hostname = `${tenantSlug}.${parsed.hostname}`
+  return parsed.toString().replace(/\/$/, '')
 }

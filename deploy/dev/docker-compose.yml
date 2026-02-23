@@ -4,6 +4,8 @@
 #   cockroachdb  - CockroachDB single-node (insecure) on port 26257, UI on 8080
 #   migrate      - One-shot migration runner; exits 0 when all migrations applied
 #   meridian     - Unified binary; starts after migrations complete
+#   seed         - One-shot seed runner; creates dev tenant (idempotent)
+#   frontend     - Vite dev server with HMR on port 5173
 #
 # Usage:
 #   docker compose -f deploy/dev/docker-compose.yml up
@@ -13,6 +15,7 @@
 #   8080  - CockroachDB web UI
 #   50051 - meridian gRPC
 #   8090  - meridian HTTP gateway
+#   5173  - frontend (Vite dev server)
 
 services:
   cockroachdb:
@@ -63,5 +66,35 @@ services:
       LOG_LEVEL: info
       REDIS_ENABLED: "false"
 
+  seed:
+    image: curlimages/curl:latest
+    depends_on:
+      meridian:
+        condition: service_started
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        GATEWAY_HOST=meridian:8090 /scripts/seed-dev-tenant.sh
+    volumes:
+      - ../../scripts/seed-dev-tenant.sh:/scripts/seed-dev-tenant.sh:ro
+    restart: "no"
+
+  frontend:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run generate && npm run dev -- --host 0.0.0.0 --port 5173"
+    depends_on:
+      meridian:
+        condition: service_started
+    ports:
+      - "127.0.0.1:5173:5173"
+    volumes:
+      - ../../frontend:/app
+      - ../../api/proto:/api/proto:ro
+      - frontend_node_modules:/app/node_modules
+    environment:
+      VITE_API_BASE_URL: "http://localhost:8090"
+
 volumes:
   cockroachdb_data:
+  frontend_node_modules:

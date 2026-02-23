@@ -31,6 +31,7 @@ import { createServiceClients } from '@/api/clients'
 
 describe('ApiClientProvider and useApiClients', () => {
   const getToken = vi.fn(() => 'test-token')
+  const getTenantSlug = vi.fn(() => 'acme')
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -38,7 +39,7 @@ describe('ApiClientProvider and useApiClients', () => {
 
   it('provides service clients to children via hook', () => {
     const wrapper = ({ children }: { children: ReactNode }) => (
-      <ApiClientProvider tenantSlug="acme" getToken={getToken}>
+      <ApiClientProvider tenantSlug="acme" getToken={getToken} getTenantSlug={getTenantSlug}>
         {children}
       </ApiClientProvider>
     )
@@ -55,34 +56,35 @@ describe('ApiClientProvider and useApiClients', () => {
     )
   })
 
-  it('creates transport with tenant slug', () => {
+  it('creates transport with tenant slug and slug getter', () => {
     const wrapper = ({ children }: { children: ReactNode }) => (
-      <ApiClientProvider tenantSlug="acme" getToken={getToken}>
+      <ApiClientProvider tenantSlug="acme" getToken={getToken} getTenantSlug={getTenantSlug}>
         {children}
       </ApiClientProvider>
     )
 
     renderHook(() => useApiClients(), { wrapper })
 
-    expect(createTenantTransport).toHaveBeenCalledWith('acme', getToken)
+    expect(createTenantTransport).toHaveBeenCalledWith('acme', getToken, getTenantSlug)
   })
 
   it('creates transport with null when no tenant slug', () => {
+    const nullSlugGetter = vi.fn(() => null)
     const wrapper = ({ children }: { children: ReactNode }) => (
-      <ApiClientProvider tenantSlug={null} getToken={getToken}>
+      <ApiClientProvider tenantSlug={null} getToken={getToken} getTenantSlug={nullSlugGetter}>
         {children}
       </ApiClientProvider>
     )
 
     renderHook(() => useApiClients(), { wrapper })
 
-    expect(createTenantTransport).toHaveBeenCalledWith(null, getToken)
+    expect(createTenantTransport).toHaveBeenCalledWith(null, getToken, nullSlugGetter)
   })
 
   it('recreates clients when tenant slug changes', () => {
     const { rerender } = renderHook(() => useApiClients(), {
       wrapper: ({ children }: { children: ReactNode }) => (
-        <ApiClientProvider tenantSlug="acme" getToken={getToken}>
+        <ApiClientProvider tenantSlug="acme" getToken={getToken} getTenantSlug={getTenantSlug}>
           {children}
         </ApiClientProvider>
       ),
@@ -98,7 +100,7 @@ describe('ApiClientProvider and useApiClients', () => {
 
   it('renders children', () => {
     const { getByText } = render(
-      <ApiClientProvider tenantSlug="acme" getToken={getToken}>
+      <ApiClientProvider tenantSlug="acme" getToken={getToken} getTenantSlug={getTenantSlug}>
         <span>test child</span>
       </ApiClientProvider>,
     )

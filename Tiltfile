@@ -831,6 +831,17 @@ local_resource(
   trigger_mode=TRIGGER_MODE_MANUAL,  # Can be re-run manually via 'tilt trigger keycloak-setup'
 )
 
+# Seed dev tenant - creates a dev tenant via the gateway for local manual testing
+# Idempotent: safe to re-run (exits 0 if tenant already exists)
+local_resource(
+  'seed-dev-tenant',
+  cmd='./scripts/seed-dev-tenant.sh',
+  resource_deps=['gateway'],
+  labels=['setup'],
+  auto_init=True,
+  trigger_mode=TRIGGER_MODE_MANUAL,  # Can be re-run manually via 'tilt trigger seed-dev-tenant'
+)
+
 # GetBalance smoke test - manual trigger for verifying balance query flow
 local_resource(
   'smoke-test-get-balance',
@@ -839,6 +850,44 @@ local_resource(
   labels=['test'],
   auto_init=False,  # Run manually with 'tilt trigger smoke-test-get-balance'
   trigger_mode=TRIGGER_MODE_MANUAL,
+)
+
+# =============================================================================
+# Frontend (Vite Dev Server)
+# =============================================================================
+# React + Vite frontend with hot module replacement.
+# Connects to the gateway at localhost:8090 via Connect protocol.
+
+# Install frontend dependencies (re-runs when package.json/lock changes)
+local_resource(
+  'frontend-deps',
+  cmd='cd frontend && npm install',
+  deps=['frontend/package.json', 'frontend/package-lock.json'],
+  labels=['frontend'],
+  auto_init=True,
+  trigger_mode=TRIGGER_MODE_MANUAL,
+)
+
+# Generate TypeScript proto clients from api/proto definitions
+# Uses buf + protoc-gen-es from frontend/node_modules/.bin
+local_resource(
+  'frontend-generate',
+  cmd='cd frontend && npm run generate',
+  deps=['api/proto'],
+  resource_deps=['frontend-deps', 'generate-proto'],
+  labels=['frontend'],
+  auto_init=True,
+  trigger_mode=TRIGGER_MODE_MANUAL,
+)
+
+# Start Vite dev server with HMR
+local_resource(
+  'frontend',
+  serve_cmd='cd frontend && npm run dev -- --port 5173 --host 0.0.0.0',
+  deps=['frontend/src', 'frontend/index.html', 'frontend/vite.config.ts'],
+  resource_deps=['frontend-generate', 'gateway'],
+  labels=['frontend'],
+  links=['http://localhost:5173'],
 )
 
 # =============================================================================
@@ -879,6 +928,11 @@ Gateway:
   • HTTP Gateway           → localhost:8090 (subdomain routing)
     - Tenant resolution via TenantResolverMiddleware
     - Proxies to gRPC backends via Connect protocol
+
+Frontend:
+  • Meridian Console       → http://localhost:5173 (Vite + React)
+    - Hot module replacement enabled
+    - Connects to gateway at localhost:8090
 
 Backing Services:
   • CockroachDB            → localhost:26257
