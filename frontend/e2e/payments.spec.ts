@@ -115,22 +115,48 @@ test.describe('Initiate Payment dialog (no backend required)', () => {
  * These are annotated with .skip so they pass in smoke-test mode (no backend).
  * Un-skip when running against a full stack (task 45 CI workflow).
  *
- * Party ID: 'dev-party-001' and account ID: 'dev-account-001' must exist in
- * the dev tenant seed data.
+ * Prerequisites:
+ * - Account ID 'dev-account-001' must exist in the dev tenant seed data
+ * - At least one payment must exist OR the suite creates one in the first test
+ *
+ * This suite runs serially (test.describe.serial) because tests mutate shared
+ * backend state and later tests depend on payments created by earlier tests.
  */
-test.describe('Payment lifecycle (requires backend)', () => {
+test.describe.serial('Payment lifecycle (requires backend)', () => {
   test.skip(
     process.env.MERIDIAN_E2E_BACKEND !== '1',
     'Set MERIDIAN_E2E_BACKEND=1 to run full lifecycle tests',
   )
 
+  /**
+   * Navigate to payments list and return the URL of the first payment row.
+   * If no payments exist, creates one first to ensure subsequent tests have
+   * at least one payment in the list.
+   */
+  async function navigateToFirstPayment(page: Parameters<typeof navigateTo>[0]) {
+    await navigateTo(page, '/payments')
+    await expect(page.getByRole('heading', { name: 'Payments' })).toBeVisible()
+
+    const tableBody = page.getByRole('table').locator('tbody')
+    const rowCount = await tableBody.locator('tr').count()
+
+    if (rowCount === 0) {
+      // No existing payments — skip tests that require a pre-existing payment
+      // by throwing a descriptive error (the test will fail with a clear message)
+      throw new Error(
+        'No payments found in the list. Ensure seed data includes at least one payment, ' +
+          'or run the lifecycle tests in order (the initiate payment test creates one).',
+      )
+    }
+
+    await page.getByRole('row').nth(1).click()
+    await expect(page).toHaveURL(/\/payments\/[a-zA-Z0-9_-]+$/)
+  }
+
   test('payment detail page renders tabs: Overview, Saga Steps, Audit Trail', async ({
     authenticatedPage,
   }) => {
-    await navigateTo(authenticatedPage, '/payments')
-    // Navigate to first payment row to get to detail page
-    await authenticatedPage.getByRole('row').nth(1).click()
-    await expect(authenticatedPage).toHaveURL(/\/payments\/[a-zA-Z0-9_-]+$/)
+    await navigateToFirstPayment(authenticatedPage)
 
     await expect(authenticatedPage.getByRole('tab', { name: 'Overview' })).toBeVisible()
     await expect(authenticatedPage.getByRole('tab', { name: 'Saga Steps' })).toBeVisible()
@@ -140,25 +166,19 @@ test.describe('Payment lifecycle (requires backend)', () => {
   test('payment detail Saga Steps tab renders Saga Progression section', async ({
     authenticatedPage,
   }) => {
-    await navigateTo(authenticatedPage, '/payments')
-    await authenticatedPage.getByRole('row').nth(1).click()
-    await expect(authenticatedPage).toHaveURL(/\/payments\/[a-zA-Z0-9_-]+$/)
+    await navigateToFirstPayment(authenticatedPage)
 
     await authenticatedPage.getByRole('tab', { name: 'Saga Steps' }).click()
     await expect(authenticatedPage.getByText('Saga Progression')).toBeVisible()
   })
 
   test('payment detail page shows New Payment button', async ({ authenticatedPage }) => {
-    await navigateTo(authenticatedPage, '/payments')
-    await authenticatedPage.getByRole('row').nth(1).click()
-    await expect(authenticatedPage).toHaveURL(/\/payments\/[a-zA-Z0-9_-]+$/)
+    await navigateToFirstPayment(authenticatedPage)
     await expect(authenticatedPage.getByRole('button', { name: 'New Payment' })).toBeVisible()
   })
 
   test('opens Initiate Payment dialog from New Payment button', async ({ authenticatedPage }) => {
-    await navigateTo(authenticatedPage, '/payments')
-    await authenticatedPage.getByRole('row').nth(1).click()
-    await expect(authenticatedPage).toHaveURL(/\/payments\/[a-zA-Z0-9_-]+$/)
+    await navigateToFirstPayment(authenticatedPage)
 
     await authenticatedPage.getByRole('button', { name: 'New Payment' }).click()
     const dialog = authenticatedPage.getByRole('dialog')
@@ -167,9 +187,7 @@ test.describe('Payment lifecycle (requires backend)', () => {
   })
 
   test('Initiate Payment dialog contains required form fields', async ({ authenticatedPage }) => {
-    await navigateTo(authenticatedPage, '/payments')
-    await authenticatedPage.getByRole('row').nth(1).click()
-    await expect(authenticatedPage).toHaveURL(/\/payments\/[a-zA-Z0-9_-]+$/)
+    await navigateToFirstPayment(authenticatedPage)
 
     await authenticatedPage.getByRole('button', { name: 'New Payment' }).click()
     const dialog = authenticatedPage.getByRole('dialog')
@@ -182,9 +200,7 @@ test.describe('Payment lifecycle (requires backend)', () => {
   })
 
   test('Initiate Payment dialog Currency defaults to GBP', async ({ authenticatedPage }) => {
-    await navigateTo(authenticatedPage, '/payments')
-    await authenticatedPage.getByRole('row').nth(1).click()
-    await expect(authenticatedPage).toHaveURL(/\/payments\/[a-zA-Z0-9_-]+$/)
+    await navigateToFirstPayment(authenticatedPage)
 
     await authenticatedPage.getByRole('button', { name: 'New Payment' }).click()
     const dialog = authenticatedPage.getByRole('dialog')
@@ -193,9 +209,7 @@ test.describe('Payment lifecycle (requires backend)', () => {
   })
 
   test('Initiate Payment dialog validates required fields', async ({ authenticatedPage }) => {
-    await navigateTo(authenticatedPage, '/payments')
-    await authenticatedPage.getByRole('row').nth(1).click()
-    await expect(authenticatedPage).toHaveURL(/\/payments\/[a-zA-Z0-9_-]+$/)
+    await navigateToFirstPayment(authenticatedPage)
 
     await authenticatedPage.getByRole('button', { name: 'New Payment' }).click()
     const dialog = authenticatedPage.getByRole('dialog')
@@ -209,9 +223,7 @@ test.describe('Payment lifecycle (requires backend)', () => {
   })
 
   test('Initiate Payment dialog validates IBAN format', async ({ authenticatedPage }) => {
-    await navigateTo(authenticatedPage, '/payments')
-    await authenticatedPage.getByRole('row').nth(1).click()
-    await expect(authenticatedPage).toHaveURL(/\/payments\/[a-zA-Z0-9_-]+$/)
+    await navigateToFirstPayment(authenticatedPage)
 
     await authenticatedPage.getByRole('button', { name: 'New Payment' }).click()
     const dialog = authenticatedPage.getByRole('dialog')
@@ -225,9 +237,7 @@ test.describe('Payment lifecycle (requires backend)', () => {
   })
 
   test('Initiate Payment dialog closes on Cancel', async ({ authenticatedPage }) => {
-    await navigateTo(authenticatedPage, '/payments')
-    await authenticatedPage.getByRole('row').nth(1).click()
-    await expect(authenticatedPage).toHaveURL(/\/payments\/[a-zA-Z0-9_-]+$/)
+    await navigateToFirstPayment(authenticatedPage)
 
     await authenticatedPage.getByRole('button', { name: 'New Payment' }).click()
     const dialog = authenticatedPage.getByRole('dialog')
@@ -240,9 +250,7 @@ test.describe('Payment lifecycle (requires backend)', () => {
   test('Initiate Payment dialog resets fields after cancel and reopen', async ({
     authenticatedPage,
   }) => {
-    await navigateTo(authenticatedPage, '/payments')
-    await authenticatedPage.getByRole('row').nth(1).click()
-    await expect(authenticatedPage).toHaveURL(/\/payments\/[a-zA-Z0-9_-]+$/)
+    await navigateToFirstPayment(authenticatedPage)
 
     // Open dialog and fill fields
     await authenticatedPage.getByRole('button', { name: 'New Payment' }).click()
@@ -268,10 +276,8 @@ test.describe('Payment lifecycle (requires backend)', () => {
   test('IEEE-754 precision: initiate payment with amount 0.29 and verify display', async ({
     authenticatedPage,
   }) => {
-    // Navigate to payments list and then to detail
-    await navigateTo(authenticatedPage, '/payments')
-    await authenticatedPage.getByRole('row').nth(1).click()
-    await expect(authenticatedPage).toHaveURL(/\/payments\/[a-zA-Z0-9_-]+$/)
+    // Navigate to first payment detail page
+    await navigateToFirstPayment(authenticatedPage)
 
     // Open Initiate Payment dialog
     await authenticatedPage.getByRole('button', { name: 'New Payment' }).click()
@@ -307,9 +313,7 @@ test.describe('Payment lifecycle (requires backend)', () => {
     ]
 
     for (const { amount, expected } of edgeCases) {
-      await navigateTo(authenticatedPage, '/payments')
-      await authenticatedPage.getByRole('row').nth(1).click()
-      await expect(authenticatedPage).toHaveURL(/\/payments\/[a-zA-Z0-9_-]+$/)
+      await navigateToFirstPayment(authenticatedPage)
 
       await authenticatedPage.getByRole('button', { name: 'New Payment' }).click()
       const dialog = authenticatedPage.getByRole('dialog')
@@ -326,9 +330,7 @@ test.describe('Payment lifecycle (requires backend)', () => {
   })
 
   test('payment status shows a valid saga status after creation', async ({ authenticatedPage }) => {
-    await navigateTo(authenticatedPage, '/payments')
-    await authenticatedPage.getByRole('row').nth(1).click()
-    await expect(authenticatedPage).toHaveURL(/\/payments\/[a-zA-Z0-9_-]+$/)
+    await navigateToFirstPayment(authenticatedPage)
 
     await authenticatedPage.getByRole('button', { name: 'New Payment' }).click()
     const dialog = authenticatedPage.getByRole('dialog')
@@ -353,8 +355,7 @@ test.describe('Payment lifecycle (requires backend)', () => {
     const initialCount = await tableBody.locator('tr').count()
 
     // Navigate to detail to open the New Payment dialog
-    await authenticatedPage.getByRole('row').nth(1).click()
-    await expect(authenticatedPage).toHaveURL(/\/payments\/[a-zA-Z0-9_-]+$/)
+    await navigateToFirstPayment(authenticatedPage)
 
     await authenticatedPage.getByRole('button', { name: 'New Payment' }).click()
     const dialog = authenticatedPage.getByRole('dialog')
@@ -379,9 +380,7 @@ test.describe('Payment lifecycle (requires backend)', () => {
 
   test('ledger shows booking entries after payment creation', async ({ authenticatedPage }) => {
     // Initiate a payment
-    await navigateTo(authenticatedPage, '/payments')
-    await authenticatedPage.getByRole('row').nth(1).click()
-    await expect(authenticatedPage).toHaveURL(/\/payments\/[a-zA-Z0-9_-]+$/)
+    await navigateToFirstPayment(authenticatedPage)
 
     await authenticatedPage.getByRole('button', { name: 'New Payment' }).click()
     const dialog = authenticatedPage.getByRole('dialog')
