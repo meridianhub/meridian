@@ -89,7 +89,7 @@ export function CreateAccountDialog({ open, onOpenChange, onCreated }: CreateAcc
 
   function validate(): FormErrors {
     const next: FormErrors = {}
-    const iban = formData.iban.trim()
+    const iban = formData.iban.trim().toUpperCase()
     if (!iban) {
       next.iban = 'IBAN is required'
     } else if (!IBAN_PATTERN.test(iban)) {
@@ -105,7 +105,7 @@ export function CreateAccountDialog({ open, onOpenChange, onCreated }: CreateAcc
     mutationFn: () =>
       createAccount(
         tenantSlug ?? '',
-        formData.iban.trim(),
+        formData.iban.trim().toUpperCase(),
         formData.currency,
         formData.partyId.trim(),
       ),
