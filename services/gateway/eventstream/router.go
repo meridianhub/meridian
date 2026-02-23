@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"time"
 )
 
 // ConnectionSender is the interface the Router uses to interact with a client
@@ -211,13 +212,25 @@ type Router struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	logger *slog.Logger
+	logger  *slog.Logger
+	metrics *Metrics
+}
+
+// RouterOption is a functional option for configuring a Router.
+type RouterOption func(*Router)
+
+// WithRouterMetrics attaches a Metrics instance to the Router.
+// When set, the Router records connection and event delivery metrics.
+func WithRouterMetrics(m *Metrics) RouterOption {
+	return func(r *Router) {
+		r.metrics = m
+	}
 }
 
 // NewRouter creates a Router backed by the given EventSource and FanOut.
-func NewRouter(source EventSource, fanOut FanOut) *Router {
+func NewRouter(source EventSource, fanOut FanOut, opts ...RouterOption) *Router {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Router{
+	r := &Router{
 		source:          source,
 		fanOut:          fanOut,
 		registry:        NewConnectionRegistry(),
@@ -226,6 +239,10 @@ func NewRouter(source EventSource, fanOut FanOut) *Router {
 		cancel:          cancel,
 		logger:          slog.Default(),
 	}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r
 }
 
 // RegisterConnection adds conn to the registry and ensures a FanOut subscription
@@ -295,7 +312,6 @@ func (r *Router) HandleEvent(_ context.Context, event DomainEvent) error {
 		if len(subIDs) == 0 {
 			continue
 		}
-
 		payload := NewEventPayload(event)
 		for _, subID := range subIDs {
 			msg := ServerMessage{
@@ -304,16 +320,34 @@ func (r *Router) HandleEvent(_ context.Context, event DomainEvent) error {
 				Channel:        event.Channel,
 				Event:          &payload,
 			}
-			if !conn.Send(msg) {
-				r.logger.Warn("dropped event: connection buffer full",
-					slog.String("conn_id", conn.ID()),
-					slog.String("tenant_id", event.TenantID),
-					slog.String("event_id", event.EventID),
-				)
-			}
+			r.deliverMessage(conn, msg, event)
 		}
 	}
 	return nil
+}
+
+// deliverMessage sends msg to conn and records delivery metrics.
+func (r *Router) deliverMessage(conn ConnectionSender, msg ServerMessage, event DomainEvent) {
+	if !conn.Send(msg) {
+		r.logger.Warn("dropped event: connection buffer full",
+			slog.String("conn_id", conn.ID()),
+			slog.String("tenant_id", event.TenantID),
+			slog.String("event_id", event.EventID),
+		)
+		if r.metrics != nil {
+			r.metrics.IncEventDropped("buffer_full")
+		}
+		return
+	}
+	if r.metrics == nil {
+		return
+	}
+	r.metrics.IncEventDelivered(event.TenantID, event.Channel)
+	if !event.Timestamp.IsZero() {
+		if latency := time.Since(event.Timestamp); latency > 0 {
+			r.metrics.ObserveLatency(latency)
+		}
+	}
 }
 
 // Start begins consuming events from the EventSource and publishing them to the

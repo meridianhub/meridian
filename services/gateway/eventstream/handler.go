@@ -112,6 +112,7 @@ type Handler struct {
 	logger     *slog.Logger
 	upgrader   websocket.AcceptOptions
 	roleAccess RoleChannelAccess
+	metrics    *Metrics
 }
 
 // HandlerOption is a functional option for configuring a Handler.
@@ -144,6 +145,14 @@ func WithRoleChannelAccess(roleAccess RoleChannelAccess) HandlerOption {
 func WithAcceptOptions(opts websocket.AcceptOptions) HandlerOption {
 	return func(h *Handler) {
 		h.upgrader = opts
+	}
+}
+
+// WithHandlerMetrics attaches a Metrics instance to the Handler.
+// When set, the Handler records connection open/close metrics.
+func WithHandlerMetrics(m *Metrics) HandlerOption {
+	return func(h *Handler) {
+		h.metrics = m
 	}
 }
 
@@ -194,16 +203,29 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	conn := NewConnection(connID, claims.TenantID, claims, wsConn)
 	conn.SetMessageHandler(h.makeMessageHandler(claims))
 
+	if h.metrics != nil {
+		h.metrics.IncConnectionOpened(claims.TenantID)
+	}
 	h.router.RegisterConnection(conn)
-	defer h.router.UnregisterConnection(connID)
+	defer func() {
+		h.router.UnregisterConnection(connID)
+		if h.metrics != nil {
+			h.metrics.IncConnectionClosed(claims.TenantID, "disconnect")
+		}
+	}()
 
-	h.logger.Debug("websocket connection established",
+	h.logger.Info("websocket connection established",
 		slog.String("conn_id", connID),
 		slog.String("tenant_id", claims.TenantID),
 		slog.String("user_id", claims.UserID),
 	)
 
 	conn.Start(r.Context())
+
+	h.logger.Info("websocket connection closed",
+		slog.String("conn_id", connID),
+		slog.String("tenant_id", claims.TenantID),
+	)
 }
 
 // makeMessageHandler returns a MessageHandler that processes client subscribe/unsubscribe messages.
