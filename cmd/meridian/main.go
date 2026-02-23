@@ -44,6 +44,7 @@ import (
 	tenantv1 "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
 
 	// Service packages
+	controlplaneservice "github.com/meridianhub/meridian/services/control-plane/service"
 	currentaccountpersistence "github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	currentaccountservice "github.com/meridianhub/meridian/services/current-account/service"
 	financialaccountingpersistence "github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
@@ -306,6 +307,7 @@ func registerServices(
 		{"market-information", func() error { return wireMarketInformation(grpcServer, pgxPool, logger) }},
 		{"tenant", func() error { return wireTenant(grpcServer, db, logger) }},
 		{"internal-bank-account", func() error { return wireInternalBankAccount(grpcServer, db, logger) }},
+		{"control-plane", func() error { return wireControlPlane(grpcServer, pgxPool, logger) }},
 	} {
 		if err := wire.fn(); err != nil {
 			return fmt.Errorf("%s: %w", wire.name, err)
@@ -584,6 +586,16 @@ func wireReconciliation(
 	return nil
 }
 
+// ─── Control Plane Wiring ────────────────────────────────────────────────────
+
+func wireControlPlane(server *grpc.Server, pool *pgxpool.Pool, logger *slog.Logger) error {
+	if err := controlplaneservice.RegisterApplyManifestService(server, pool, logger); err != nil {
+		return err
+	}
+	logger.Info("registered control-plane service (ApplyManifestService)")
+	return nil
+}
+
 // ─── Gateway Wiring ──────────────────────────────────────────────────────────
 
 // serviceNames lists the fully-qualified gRPC service names to register with the
@@ -613,6 +625,7 @@ var serviceNames = []string{
 	"meridian.payment_order.v1.PaymentOrderService",
 	"meridian.reconciliation.v1.AccountReconciliationService",
 	"meridian.saga.v1.SagaRegistryService",
+	"meridian.control_plane.v1.ApplyManifestService",
 }
 
 // wireGateway creates the gateway HTTP server with the Vanguard transcoder

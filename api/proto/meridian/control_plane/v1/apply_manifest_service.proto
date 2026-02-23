@@ -1,0 +1,125 @@
+syntax = "proto3";
+
+package meridian.control_plane.v1;
+
+import "buf/validate/validate.proto";
+import "meridian/control_plane/v1/manifest.proto";
+import "meridian/control_plane/v1/manifest_history_service.proto";
+
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1;controlplanev1";
+
+// ApplyManifestService is the public entry point for applying tenant manifests.
+// It orchestrates validation, diffing, planning, and execution of manifest changes.
+service ApplyManifestService {
+  // ApplyManifest validates and applies a manifest, returning the execution result.
+  // In dry_run mode, validation and planning are performed but no changes are committed.
+  rpc ApplyManifest(ApplyManifestRequest) returns (ApplyManifestResponse);
+}
+
+// ApplyManifestRequest contains the manifest to apply and apply options.
+message ApplyManifestRequest {
+  // manifest is the complete tenant manifest to apply.
+  Manifest manifest = 1 [(buf.validate.field).required = true];
+
+  // dry_run when true performs validation and planning without committing changes.
+  bool dry_run = 2;
+
+  // force when true skips breaking-change confirmation checks (e.g., deletions).
+  bool force = 3;
+
+  // applied_by identifies who is applying this manifest (e.g., user email, API key ID).
+  string applied_by = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+}
+
+// ApplyManifestResponse contains the result of a manifest application.
+message ApplyManifestResponse {
+  // job_id is the tracking identifier for this apply operation.
+  string job_id = 1;
+
+  // status is the outcome of the apply operation.
+  ApplyManifestStatus status = 2;
+
+  // step_results contains the result of each execution step.
+  repeated StepResult step_results = 3;
+
+  // snapshot is the manifest version record created by this apply, if successful.
+  ManifestVersion snapshot = 4;
+
+  // validation_errors contains structured validation errors if the manifest is invalid.
+  repeated ValidationError validation_errors = 5;
+
+  // diff_summary is a human-readable summary of changes detected.
+  string diff_summary = 6;
+}
+
+// ApplyManifestStatus represents the outcome of an apply operation.
+enum ApplyManifestStatus {
+  // APPLY_MANIFEST_STATUS_UNSPECIFIED is the default zero value.
+  APPLY_MANIFEST_STATUS_UNSPECIFIED = 0;
+
+  // APPLY_MANIFEST_STATUS_APPLIED indicates the manifest was successfully applied.
+  APPLY_MANIFEST_STATUS_APPLIED = 1;
+
+  // APPLY_MANIFEST_STATUS_FAILED indicates the apply operation failed.
+  APPLY_MANIFEST_STATUS_FAILED = 2;
+
+  // APPLY_MANIFEST_STATUS_DRY_RUN indicates the operation was a dry run (no changes committed).
+  APPLY_MANIFEST_STATUS_DRY_RUN = 3;
+
+  // APPLY_MANIFEST_STATUS_VALIDATION_FAILED indicates the manifest failed validation.
+  APPLY_MANIFEST_STATUS_VALIDATION_FAILED = 4;
+
+  // APPLY_MANIFEST_STATUS_BLOCKED indicates the operation was blocked by safety checks.
+  APPLY_MANIFEST_STATUS_BLOCKED = 5;
+}
+
+// StepResult represents the outcome of a single execution step.
+message StepResult {
+  // step_name identifies this step (e.g., "validate", "diff", "plan", "execute").
+  string step_name = 1;
+
+  // status is the outcome of this step.
+  StepResultStatus status = 2;
+
+  // message provides human-readable details about this step's result.
+  string message = 3;
+
+  // details contains additional structured information about this step.
+  map<string, string> details = 4;
+}
+
+// StepResultStatus represents the outcome of a single step.
+enum StepResultStatus {
+  // STEP_RESULT_STATUS_UNSPECIFIED is the default zero value.
+  STEP_RESULT_STATUS_UNSPECIFIED = 0;
+
+  // STEP_RESULT_STATUS_SUCCESS indicates the step completed successfully.
+  STEP_RESULT_STATUS_SUCCESS = 1;
+
+  // STEP_RESULT_STATUS_FAILED indicates the step failed.
+  STEP_RESULT_STATUS_FAILED = 2;
+
+  // STEP_RESULT_STATUS_SKIPPED indicates the step was skipped (e.g., execution in dry_run mode).
+  STEP_RESULT_STATUS_SKIPPED = 3;
+}
+
+// ValidationError represents a structured validation finding.
+message ValidationError {
+  // severity indicates whether this blocks activation.
+  string severity = 1;
+
+  // path is the location within the manifest (e.g., "instruments[0].code").
+  string path = 2;
+
+  // code is a machine-readable error code (e.g., "CEL_TYPE_ERROR").
+  string code = 3;
+
+  // message is a human-readable description of the issue.
+  string message = 4;
+
+  // suggestion is a "Did you mean...?" hint for typos.
+  string suggestion = 5;
+}
