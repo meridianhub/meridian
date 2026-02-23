@@ -23,7 +23,8 @@ function buildDevToken(role: 'platform-admin' | 'tenant-user'): string {
 }
 
 /**
- * Inject a dev auth token via window.__DEV_LOGIN__ exposed by AuthProvider in DEV mode.
+ * Inject a dev auth token via window.__DEV_LOGIN__ exposed by AuthProvider in DEV mode
+ * and in E2E builds (VITE_E2E_MODE=true).
  *
  * Auth tokens are memory-only (not persisted). After calling this, use
  * navigateTo() for client-side navigation to preserve the in-memory auth state.
@@ -47,6 +48,8 @@ async function injectDevAuth(page: Page, role: 'platform-admin' | 'tenant-user')
     window.history.pushState({}, '', '/')
     window.dispatchEvent(new PopStateEvent('popstate'))
   })
+  // Wait for the app shell <main> to confirm authenticated layout is rendered.
+  await page.waitForSelector('main', { timeout: 10_000 })
 }
 
 /**

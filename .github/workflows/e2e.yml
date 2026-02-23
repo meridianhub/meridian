@@ -1,0 +1,177 @@
+name: E2E Tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [develop, main]
+    paths:
+      - 'frontend/**'
+      - 'services/**'
+      - '.github/workflows/e2e.yml'
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - 'frontend/**'
+      - 'services/**'
+      - '.github/workflows/e2e.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: Playwright E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Start CockroachDB
+        run: |
+          docker run -d \
+            --name cockroachdb \
+            -p 26257:26257 \
+            cockroachdb/cockroach:latest-v24.1 \
+            start-single-node --insecure
+          # Wait for CockroachDB to be ready (up to 60s)
+          for i in $(seq 1 30); do
+            if docker exec cockroachdb cockroach sql --insecure -e 'SELECT 1' >/dev/null 2>&1; then
+              echo "CockroachDB is ready"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "ERROR: CockroachDB did not become ready after 60s"
+              exit 1
+            fi
+            sleep 2
+          done
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.0'
+          cache: true
+
+      - name: Set up buf
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Generate protobuf files
+        run: buf generate
+
+      - name: Build proto FileDescriptorSet
+        run: buf build api/proto -o cmd/meridian/descriptor.binpb
+
+      - name: Build meridian binary
+        run: CGO_ENABLED=0 go build -o ./dist/meridian ./cmd/meridian/
+
+      - name: Run database migrations
+        run: |
+          ./dist/meridian \
+            --migrate \
+            --database-url "postgres://root@localhost:26257/defaultdb?sslmode=disable"
+
+      - name: Start meridian backend
+        # Binary auto-sets: AUTH_MODE=disabled, BILLING_ENABLED=false, KAFKA_ENABLED=false
+        # Use meridian_platform as DATABASE_URL so GORM connects to the database where
+        # tenant/party/IBA/FA/CA/PO/reconciliation tables were created by migrations.
+        run: |
+          DATABASE_URL="postgres://root@localhost:26257/meridian_platform?sslmode=disable" \
+            ./dist/meridian >/tmp/meridian.log 2>&1 &
+
+      - name: Seed dev tenant
+        # The gateway exposes the Connect/gRPC API under /api/ prefix.
+        # Seed the dev tenant by calling the TenantService endpoint directly.
+        run: |
+          GATEWAY_URL="http://localhost:8090"
+
+          # Wait for gateway to be healthy (up to 60s)
+          for i in $(seq 1 30); do
+            if curl -sf "${GATEWAY_URL}/healthz" >/dev/null 2>&1; then
+              echo "Gateway is healthy."
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "ERROR: Gateway did not become healthy after 60s"
+              exit 1
+            fi
+            sleep 2
+          done
+
+          # Create dev tenant (idempotent) via REST endpoint
+          HTTP_CODE=$(curl -s -o /tmp/seed-response.json -w "%{http_code}" \
+            -X POST "${GATEWAY_URL}/api/v1/tenants" \
+            -H "Content-Type: application/json" \
+            -d '{"tenantId":"dev_tenant","displayName":"Dev Tenant","settlementAsset":"GBP","subdomain":"dev-tenant"}')
+          BODY=$(cat /tmp/seed-response.json 2>/dev/null || echo "")
+          case "$HTTP_CODE" in
+            200) echo "Dev tenant created." ;;
+            409) echo "Dev tenant already exists." ;;
+            *)
+              if echo "$BODY" | grep -qi "already.exist"; then
+                echo "Dev tenant already exists."
+              else
+                echo "ERROR: Unexpected response (HTTP ${HTTP_CODE}): ${BODY}"
+                echo "--- meridian backend logs ---"
+                cat /tmp/meridian.log || true
+                echo "--- end meridian logs ---"
+                exit 1
+              fi
+              ;;
+          esac
+          rm -f /tmp/seed-response.json
+          echo "Seed complete."
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Generate frontend protobuf files
+        working-directory: frontend
+        run: npm run generate
+
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          VITE_E2E_MODE: 'true'
+          VITE_API_BASE_URL: 'http://localhost:8090'
+        # Skip tsc type-checking (handled by the dedicated Frontend Tests CI job).
+        # Run vite build directly so transient TypeScript errors in test files or
+        # other in-flight PRs don't block the E2E smoke tests.
+        run: npx vite build
+
+      - name: Run Playwright tests
+        working-directory: frontend
+        env:
+          CI: 'true'
+        run: npx playwright test --reporter=html
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 30
+
+      - name: Upload Playwright traces
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-traces
+          path: frontend/test-results/
+          retention-days: 30

@@ -191,9 +191,9 @@ export function AuthProvider({ children, initialToken }: AuthProviderProps) {
   const lens = getUserLens(claims)
   const isAuthenticated = claims !== null && !isTokenExpired(claims)
 
-  // Expose dev-only login bypass for E2E testing
+  // Expose login bypass for dev mode and E2E CI builds (VITE_E2E_MODE=true)
   useEffect(() => {
-    if (import.meta.env.DEV) {
+    if (import.meta.env.DEV || import.meta.env.VITE_E2E_MODE === 'true') {
       ;(window as unknown as Record<string, unknown>).__DEV_LOGIN__ = login
       return () => {
         delete (window as unknown as Record<string, unknown>).__DEV_LOGIN__
