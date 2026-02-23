@@ -147,7 +147,7 @@ func TestE2E_FullStack_KafkaToWebSocket(t *testing.T) {
 		AtMost(15 * time.Second).
 		PollInterval(200 * time.Millisecond).
 		UntilNoError(func() error {
-			return consumerGroupActiveHelper(ctx, brokerAddr, "ops-console-events")
+			return consumerGroupActiveHelper(ctx, brokerAddr, adapters.ConsumerGroupID)
 		})
 	require.NoError(t, err, "Kafka consumer group should become active")
 
@@ -1053,7 +1053,8 @@ func TestLoad_ConcurrentConnections_Throughput(t *testing.T) {
 	// Success criteria from PRD Section 12.
 	assert.Equal(t, expectedTotal, totalDelivered, "all paced events must be delivered")
 	assert.Less(t, avgLatencyMs, 500.0, "average latency should be < 500ms")
-	assert.GreaterOrEqual(t, numConnections, 100, "must support 100+ concurrent connections")
+	assert.GreaterOrEqual(t, len(router.GetConnectionsByTenant("load-tenant")), 100,
+		"must support 100+ concurrent connections")
 
 	for _, c := range conns {
 		c.Close(websocket.StatusNormalClosure, "done")
