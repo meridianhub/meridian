@@ -783,6 +783,99 @@ message RetrieveDisputeResponse {
   DisputeDetail dispute = 1 [(buf.validate.field).required = true];
 }
 
+// ListDisputesRequest retrieves disputes for a settlement run.
+message ListDisputesRequest {
+  // run_id is the identifier of the settlement run.
+  string run_id = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.uuid = true
+  ];
+
+  // filter_status filters by dispute status (optional).
+  DisputeStatus filter_status = 2;
+
+  // page_size is the maximum number of results (default: 50, max: 1000).
+  int32 page_size = 3 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 1000
+  }];
+
+  // page_token is an opaque cursor for pagination.
+  string page_token = 4;
+}
+
+// ListDisputesResponse returns paginated disputes for a settlement run.
+message ListDisputesResponse {
+  // items are the matching disputes.
+  repeated DisputeDetail items = 1;
+
+  // next_page_token is the cursor for the next page (empty if last page).
+  string next_page_token = 2;
+
+  // total_count is the total number of disputes (-1 if unknown).
+  int64 total_count = 3;
+}
+
+// UpdateDisputeRequest updates dispute status directly.
+message UpdateDisputeRequest {
+  // run_id is the identifier of the settlement run.
+  string run_id = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.uuid = true
+  ];
+
+  // dispute_id is the identifier of the dispute to update.
+  string dispute_id = 2 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.uuid = true
+  ];
+
+  // status is the new dispute status.
+  DisputeStatus status = 3 [(buf.validate.field).enum.defined_only = true];
+
+  // resolution_notes records the resolution details.
+  string resolution_notes = 4 [(buf.validate.field).string.max_len = 1000];
+
+  // resolved_by identifies who is updating the dispute.
+  string resolved_by = 5 [(buf.validate.field).string.max_len = 255];
+}
+
+// UpdateDisputeResponse returns the updated dispute.
+message UpdateDisputeResponse {
+  // dispute is the updated dispute.
+  DisputeDetail dispute = 1 [(buf.validate.field).required = true];
+}
+
+// ListBalanceAssertionsRequest retrieves balance assertions for a settlement run.
+message ListBalanceAssertionsRequest {
+  // run_id is the identifier of the settlement run.
+  string run_id = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.uuid = true
+  ];
+
+  // page_size is the maximum number of results (default: 50, max: 1000).
+  int32 page_size = 2 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 1000
+  }];
+
+  // page_token is an opaque cursor for pagination.
+  string page_token = 3;
+}
+
+// ListBalanceAssertionsResponse returns paginated balance assertions for a settlement run.
+message ListBalanceAssertionsResponse {
+  // items are the matching balance assertions.
+  repeated BalanceAssertionDetail items = 1;
+
+  // next_page_token is the cursor for the next page (empty if last page).
+  string next_page_token = 2;
+
+  // total_count is the total number of assertions (-1 if unknown).
+  int64 total_count = 3;
+}
+
 // AccountReconciliationService provides BIAN-compliant reconciliation operations.
 service AccountReconciliationService {
   // InitiateAccountReconciliation creates a new settlement run.
@@ -846,6 +939,10 @@ service AccountReconciliationService {
     option (google.api.http) = {
       post: "/v1/reconciliation/assertions"
       body: "*"
+      additional_bindings: {
+        post: "/v1/reconciliation/runs/{run_id}/assertions"
+        body: "*"
+      }
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       responses: {
@@ -885,6 +982,28 @@ service AccountReconciliationService {
   rpc RetrieveDispute(RetrieveDisputeRequest) returns (RetrieveDisputeResponse) {
     option (google.api.http) = {
       get: "/v1/reconciliation/disputes/{dispute_id}"
+    };
+  }
+
+  // ListDisputes returns paginated disputes for a settlement run.
+  rpc ListDisputes(ListDisputesRequest) returns (ListDisputesResponse) {
+    option (google.api.http) = {
+      get: "/v1/reconciliation/runs/{run_id}/disputes"
+    };
+  }
+
+  // UpdateDispute updates a dispute status directly (for PATCH support).
+  rpc UpdateDispute(UpdateDisputeRequest) returns (UpdateDisputeResponse) {
+    option (google.api.http) = {
+      patch: "/v1/reconciliation/runs/{run_id}/disputes/{dispute_id}"
+      body: "*"
+    };
+  }
+
+  // ListBalanceAssertions returns paginated balance assertions for a settlement run.
+  rpc ListBalanceAssertions(ListBalanceAssertionsRequest) returns (ListBalanceAssertionsResponse) {
+    option (google.api.http) = {
+      get: "/v1/reconciliation/runs/{run_id}/assertions"
     };
   }
 }
