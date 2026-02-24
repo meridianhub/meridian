@@ -203,6 +203,23 @@ describe('RegisterInstrumentDialog', () => {
     })
   })
 
+  it('clears form fields after successful registration', async () => {
+    const user = userEvent.setup()
+    renderDialog()
+
+    await user.type(screen.getByLabelText(/code/i), 'KWH')
+    await user.type(screen.getByLabelText(/display name/i), 'Kilowatt Hour')
+    await user.selectOptions(screen.getByLabelText(/dimension/i), '2')
+    await user.click(screen.getByRole('button', { name: /register instrument/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/instrument created in draft status/i)).toBeInTheDocument()
+    })
+
+    expect(screen.getByLabelText(/code/i)).toHaveValue('')
+    expect(screen.getByLabelText(/display name/i)).toHaveValue('')
+  })
+
   it('closes dialog on Cancel button click', async () => {
     const user = userEvent.setup()
     const { onOpenChange } = renderDialog()

@@ -77,6 +77,8 @@ export function RegisterInstrumentDialog({ open, onOpenChange }: RegisterInstrum
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: referenceKeys.instruments() })
+      setFormData(INITIAL_FORM)
+      setErrors({})
       setSuccessMessage(
         'Instrument created in DRAFT status. Activation required via manifest or API.',
       )
