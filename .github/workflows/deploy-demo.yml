@@ -114,7 +114,7 @@ jobs:
         env:
           VITE_API_BASE_URL: https://demo.meridianhub.cloud
           VITE_DEMO_MODE: "true"
-        run: npm run build
+        run: npx vite build
 
       - name: Upload frontend artifact
         uses: actions/upload-artifact@v4
