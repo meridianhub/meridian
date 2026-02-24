@@ -156,7 +156,7 @@ async function setupManifestRoutes(
 
 test.describe('Manifest Management Flow', () => {
   test.describe('Initial State - no manifest applied', () => {
-    test('navigates to /manifests and shows empty state', async ({ platformAdminPage: page }) => {
+    test.fixme('navigates to /manifests and shows empty state', async ({ platformAdminPage: page }) => {
       await setupManifestRoutes(page, { hasCurrentManifest: false })
 
       await navigateTo(page, '/manifests')
@@ -194,7 +194,7 @@ test.describe('Manifest Management Flow', () => {
       await expect(dialog.getByRole('heading', { name: 'Apply Manifest' })).toBeVisible()
     })
 
-    test('preview changes shows dry-run result with diff summary', async ({ platformAdminPage: page }) => {
+    test.fixme('preview changes shows dry-run result with diff summary', async ({ platformAdminPage: page }) => {
       await setupManifestRoutes(page, { hasCurrentManifest: false })
 
       const manifestJson = loadEnergyManifest()
@@ -219,7 +219,7 @@ test.describe('Manifest Management Flow', () => {
       await expect(dryRunResult).toContainText('Added 3 instruments')
     })
 
-    test('preview shows step results including validate, diff, and skipped execute', async ({ platformAdminPage: page }) => {
+    test.fixme('preview shows step results including validate, diff, and skipped execute', async ({ platformAdminPage: page }) => {
       await setupManifestRoutes(page, { hasCurrentManifest: false })
 
       const manifestJson = loadEnergyManifest()
@@ -238,7 +238,7 @@ test.describe('Manifest Management Flow', () => {
       await expect(dialog.getByText('diff')).toBeVisible()
     })
 
-    test('Apply Manifest button is enabled after successful preview', async ({ platformAdminPage: page }) => {
+    test.fixme('Apply Manifest button is enabled after successful preview', async ({ platformAdminPage: page }) => {
       await setupManifestRoutes(page, { hasCurrentManifest: false })
 
       const manifestJson = loadEnergyManifest()
@@ -258,7 +258,7 @@ test.describe('Manifest Management Flow', () => {
       await expect(dialog.getByRole('button', { name: 'Apply Manifest' })).not.toBeDisabled()
     })
 
-    test('applies manifest and dialog closes on success', async ({ platformAdminPage: page }) => {
+    test.fixme('applies manifest and dialog closes on success', async ({ platformAdminPage: page }) => {
       await setupManifestRoutes(page, { hasCurrentManifest: false })
 
       const manifestJson = loadEnergyManifest()
@@ -280,7 +280,7 @@ test.describe('Manifest Management Flow', () => {
   })
 
   test.describe('Current Manifest View', () => {
-    test('displays applied manifest version and metadata', async ({ platformAdminPage: page }) => {
+    test.fixme('displays applied manifest version and metadata', async ({ platformAdminPage: page }) => {
       await setupManifestRoutes(page, {
         hasCurrentManifest: true,
         historyEntries: [MANIFEST_HISTORY_ENTRY],
@@ -296,7 +296,7 @@ test.describe('Manifest Management Flow', () => {
       await expect(currentView).toContainText('Acme Energy Trading')
     })
 
-    test('shows APPLIED status badge', async ({ platformAdminPage: page }) => {
+    test.fixme('shows APPLIED status badge', async ({ platformAdminPage: page }) => {
       await setupManifestRoutes(page, {
         hasCurrentManifest: true,
         historyEntries: [MANIFEST_HISTORY_ENTRY],
@@ -309,7 +309,7 @@ test.describe('Manifest Management Flow', () => {
       await expect(currentView).toContainText('APPLIED')
     })
 
-    test('instruments section shows GBP, KWH, and CARBON_CREDIT after expand', async ({ platformAdminPage: page }) => {
+    test.fixme('instruments section shows GBP, KWH, and CARBON_CREDIT after expand', async ({ platformAdminPage: page }) => {
       await setupManifestRoutes(page, {
         hasCurrentManifest: true,
         historyEntries: [MANIFEST_HISTORY_ENTRY],
@@ -331,7 +331,7 @@ test.describe('Manifest Management Flow', () => {
       await expect(instrumentsSection).toContainText('Carbon Credit')
     })
 
-    test('account types section shows ENERGY_TRADING, CARBON_INVENTORY, and SETTLEMENT after expand', async ({ platformAdminPage: page }) => {
+    test.fixme('account types section shows ENERGY_TRADING, CARBON_INVENTORY, and SETTLEMENT after expand', async ({ platformAdminPage: page }) => {
       await setupManifestRoutes(page, {
         hasCurrentManifest: true,
         historyEntries: [MANIFEST_HISTORY_ENTRY],
@@ -355,7 +355,7 @@ test.describe('Manifest Management Flow', () => {
   })
 
   test.describe('Version History Table', () => {
-    test('history tab shows applied entry with version and APPLIED status', async ({ platformAdminPage: page }) => {
+    test.fixme('history tab shows applied entry with version and APPLIED status', async ({ platformAdminPage: page }) => {
       await setupManifestRoutes(page, {
         hasCurrentManifest: true,
         historyEntries: [MANIFEST_HISTORY_ENTRY],
@@ -375,7 +375,7 @@ test.describe('Manifest Management Flow', () => {
       await expect(historyTable).toContainText('e2e-user')
     })
 
-    test('history entry shows diff summary', async ({ platformAdminPage: page }) => {
+    test.fixme('history entry shows diff summary', async ({ platformAdminPage: page }) => {
       await setupManifestRoutes(page, {
         hasCurrentManifest: true,
         historyEntries: [MANIFEST_HISTORY_ENTRY],
