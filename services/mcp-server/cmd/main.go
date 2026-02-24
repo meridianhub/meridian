@@ -28,8 +28,10 @@ var (
 )
 
 func main() {
-	logLevel := parseLogLevel(os.Getenv("LOG_LEVEL"))
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+	// Log to stderr: in stdio mode, stdout is the JSON-RPC wire protocol channel.
+	// Logging to stdout would corrupt the protocol for MCP clients.
+	logLevel := parseLogLevel(env.GetEnvOrDefault("LOG_LEVEL", ""))
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
 		Level: logLevel,
 	}))
 	slog.SetDefault(logger)

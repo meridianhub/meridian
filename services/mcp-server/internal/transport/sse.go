@@ -85,6 +85,7 @@ func (t *SSETransport) Close() error {
 
 	for id, client := range t.clients {
 		close(client.done)
+		close(client.events)
 		delete(t.clients, id)
 	}
 	t.mu.Unlock()
@@ -183,8 +184,12 @@ func (t *SSETransport) HandleMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	t.inbox <- &msg
-	w.WriteHeader(http.StatusAccepted)
+	select {
+	case t.inbox <- &msg:
+		w.WriteHeader(http.StatusAccepted)
+	default:
+		http.Error(w, "server busy", http.StatusServiceUnavailable)
+	}
 }
 
 // ClientCount returns the number of connected SSE clients.

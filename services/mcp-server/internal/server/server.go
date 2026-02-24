@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 
 	"github.com/meridianhub/meridian/services/mcp-server/internal/transport"
 )
@@ -97,7 +98,8 @@ func New(t transport.Transport, cfg Config, logger *slog.Logger) *MCPServer {
 	}
 }
 
-// RegisterTool registers a tool with the server.
+// RegisterTool registers a tool with the server. It must be called before Run;
+// calling it concurrently with Run is not safe.
 func (s *MCPServer) RegisterTool(tool Tool, handler ToolHandler) {
 	s.tools[tool.Name] = tool
 	s.handlers[tool.Name] = handler
@@ -180,6 +182,7 @@ func (s *MCPServer) handleToolsList(msg *transport.JSONRPCMessage) *transport.JS
 	for _, tool := range s.tools {
 		tools = append(tools, tool)
 	}
+	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
 
 	result := ToolsListResult{Tools: tools}
 	resp, err := transport.NewResponse(msg.ID, result)

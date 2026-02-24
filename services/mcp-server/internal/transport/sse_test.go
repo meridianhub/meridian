@@ -235,7 +235,7 @@ func TestSSETransport_HandleSSE_StreamsEvents(t *testing.T) {
 	sessionID := ""
 	for _, line := range strings.Split(endpointEvent, "\n") {
 		if strings.HasPrefix(line, "data: /message?sessionId=") {
-			sessionID = strings.TrimPrefix(line, "data: /message?sessionId=")
+			sessionID = strings.TrimSpace(strings.TrimPrefix(line, "data: /message?sessionId="))
 			break
 		}
 	}
