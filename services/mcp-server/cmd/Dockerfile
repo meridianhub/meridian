@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /build
 
 # Copy go mod files first for better caching
-COPY go.mod go.sum* ./
+COPY go.mod go.sum ./
 RUN go mod download && go mod verify
 
 # Copy source code

@@ -79,21 +79,26 @@ func (t *SSETransport) Close() error {
 		return nil
 	}
 
-	close(t.inbox)
-
+	// Close inbox under the write lock to prevent the race with HandleMessage.
 	t.mu.Lock()
-	defer t.mu.Unlock()
+	close(t.inbox)
 
 	for id, client := range t.clients {
 		close(client.done)
 		delete(t.clients, id)
 	}
+	t.mu.Unlock()
 
 	return nil
 }
 
 // HandleSSE is the HTTP handler for SSE client connections (GET /sse).
 func (t *SSETransport) HandleSSE(w http.ResponseWriter, r *http.Request) {
+	if t.closed.Load() {
+		http.Error(w, "transport closed", http.StatusServiceUnavailable)
+		return
+	}
+
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming not supported", http.StatusInternalServerError)
@@ -156,23 +161,25 @@ func (t *SSETransport) HandleMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	t.mu.RLock()
-	_, exists := t.clients[sessionID]
-	t.mu.RUnlock()
-
-	if !exists {
-		http.Error(w, "unknown session", http.StatusNotFound)
-		return
-	}
-
 	var msg JSONRPCMessage
 	if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
 	}
 
+	// Hold the read lock across both the session check and inbox send.
+	// Close() holds the write lock when closing the inbox, so this
+	// prevents the race between Close and send-on-closed-channel.
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	if t.closed.Load() {
 		http.Error(w, "transport closed", http.StatusServiceUnavailable)
+		return
+	}
+
+	if _, exists := t.clients[sessionID]; !exists {
+		http.Error(w, "unknown session", http.StatusNotFound)
 		return
 	}
 

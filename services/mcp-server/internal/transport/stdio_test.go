@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -35,7 +36,7 @@ func TestStdioTransport_ReadMessage(t *testing.T) {
 }
 
 func TestStdioTransport_WriteMessage(t *testing.T) {
-	reader := strings.NewReader("")
+	reader := strings.NewReader("\n") // needs valid input to avoid blocking
 	writer := &bytes.Buffer{}
 
 	tr := NewStdioTransport(reader, writer)
@@ -66,10 +67,12 @@ func TestStdioTransport_WriteMessage(t *testing.T) {
 }
 
 func TestStdioTransport_ReadWriteRoundTrip(t *testing.T) {
-	// Pipe: write to one end, read from the other
+	// Write a message, then read it back via a new transport.
 	buf := &bytes.Buffer{}
 
-	writerTransport := NewStdioTransport(strings.NewReader(""), buf)
+	// Write using a transport that has a dummy reader
+	writerTransport := NewStdioTransport(strings.NewReader("\n"), buf)
+	defer writerTransport.Close()
 
 	request := &JSONRPCMessage{
 		JSONRPC: JSONRPCVersion,
@@ -81,7 +84,9 @@ func TestStdioTransport_ReadWriteRoundTrip(t *testing.T) {
 		t.Fatalf("WriteMessage error: %v", err)
 	}
 
-	readerTransport := NewStdioTransport(buf, &bytes.Buffer{})
+	// Read via a new transport using the buffer's bytes
+	readerTransport := NewStdioTransport(strings.NewReader(buf.String()), &bytes.Buffer{})
+	defer readerTransport.Close()
 
 	msg, err := readerTransport.ReadMessage(context.Background())
 	if err != nil {
@@ -97,8 +102,9 @@ func TestStdioTransport_ReadWriteRoundTrip(t *testing.T) {
 }
 
 func TestStdioTransport_ReadMessage_ContextCancelled(t *testing.T) {
-	// Use a reader that blocks forever (no data)
-	pr, _ := blockingPipe()
+	// Use a pipe: the read end blocks because nothing is written
+	pr, pw := io.Pipe()
+	defer pw.Close()
 
 	tr := NewStdioTransport(pr, &bytes.Buffer{})
 	defer tr.Close()
@@ -150,16 +156,15 @@ func TestStdioTransport_ReadMessage_MultipleMessages(t *testing.T) {
 	}
 }
 
-// blockingPipe returns an io.Reader that blocks forever on reads.
-func blockingPipe() (*blockingReader, struct{}) {
-	return &blockingReader{ch: make(chan struct{})}, struct{}{}
-}
+func TestStdioTransport_ReadMessage_EOF(t *testing.T) {
+	// Empty reader = immediate EOF
+	reader := strings.NewReader("")
 
-type blockingReader struct {
-	ch chan struct{}
-}
+	tr := NewStdioTransport(reader, &bytes.Buffer{})
+	defer tr.Close()
 
-func (r *blockingReader) Read([]byte) (int, error) {
-	<-r.ch // blocks forever
-	return 0, nil
+	_, err := tr.ReadMessage(context.Background())
+	if err == nil {
+		t.Error("expected error on empty reader, got nil")
+	}
 }

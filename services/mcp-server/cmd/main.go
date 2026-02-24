@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/meridianhub/meridian/services/mcp-server/internal/server"
 	"github.com/meridianhub/meridian/services/mcp-server/internal/transport"
@@ -89,6 +90,14 @@ func runStdio(logger *slog.Logger, cfg server.Config) error {
 	return srv.Run(ctx)
 }
 
+const (
+	httpReadHeaderTimeout = 10 * time.Second
+	httpReadTimeout       = 30 * time.Second
+	httpWriteTimeout      = 0 // SSE requires no write timeout (long-lived streams)
+	httpIdleTimeout       = 120 * time.Second
+	shutdownTimeout       = 30 * time.Second
+)
+
 func runSSE(logger *slog.Logger, cfg server.Config) error {
 	port := env.GetEnvOrDefault("MCP_SSE_PORT", "8090")
 	addr := fmt.Sprintf(":%s", port)
@@ -105,8 +114,12 @@ func runSSE(logger *slog.Logger, cfg server.Config) error {
 	mux.HandleFunc("/message", sseTr.HandleMessage)
 
 	httpServer := &http.Server{
-		Addr:    addr,
-		Handler: mux,
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: httpReadHeaderTimeout,
+		ReadTimeout:       httpReadTimeout,
+		WriteTimeout:      httpWriteTimeout,
+		IdleTimeout:       httpIdleTimeout,
 	}
 
 	// Start MCP server loop in background
@@ -131,14 +144,17 @@ func runSSE(logger *slog.Logger, cfg server.Config) error {
 	sigChan, signalCleanup := bootstrap.SignalHandler()
 	defer signalCleanup()
 
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer shutdownCancel()
+
 	if err := bootstrap.WaitForShutdownSignal(sigChan, serverErrors, logger); err != nil {
 		cancel()
-		_ = bootstrap.GracefulShutdown(context.Background(), logger, httpServer)
+		_ = bootstrap.GracefulShutdown(shutdownCtx, logger, httpServer)
 		return err
 	}
 
 	cancel()
-	return bootstrap.GracefulShutdown(context.Background(), logger, httpServer)
+	return bootstrap.GracefulShutdown(shutdownCtx, logger, httpServer)
 }
 
 // parseLogLevel converts a string log level to slog.Level.
