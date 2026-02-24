@@ -62,7 +62,7 @@ export function Sidebar({ lens, currentPath = '/', isOpen = false, id, onClose }
 
   return (
     <>
-      {isOpen && (
+      {isOpen && onClose && (
         <div
           className="fixed inset-0 z-30 bg-black/50 md:hidden"
           aria-hidden="true"

@@ -21,7 +21,7 @@ export function Header({ onMenuToggle, sidebarOpen, sidebarId }: HeaderProps) {
   const { isPlatformAdmin } = useTenantContext()
 
   return (
-    <header className="flex h-14 items-center gap-4 border-b bg-white px-4 shadow-sm">
+    <header className="relative z-50 flex h-14 items-center gap-4 border-b bg-white px-4 shadow-sm">
       <Button
         variant="ghost"
         size="icon"
