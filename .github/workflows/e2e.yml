@@ -168,19 +168,23 @@ jobs:
         run: |
           GATEWAY_URL="http://localhost:8090"
 
-          # Create acme_corp tenant (treat 409 as success)
-          HTTP_CODE=$(curl -sS -o /dev/null -w "%{http_code}" \
-            -X POST "${GATEWAY_URL}/api/v1/tenants" \
-            -H "Content-Type: application/json" \
-            -d '{"tenantId":"acme_corp","displayName":"ACME Corporation","settlementAsset":"GBP","slug":"acme-corp"}')
-          echo "acme_corp: HTTP ${HTTP_CODE}"
+          create_tenant() {
+            local TENANT_ID=$1
+            local PAYLOAD=$2
+            HTTP_CODE=$(curl -sS -o /tmp/tenant_resp.txt -w "%{http_code}" \
+              -X POST "${GATEWAY_URL}/api/v1/tenants" \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD")
+            echo "${TENANT_ID}: HTTP ${HTTP_CODE}"
+            if [ "$HTTP_CODE" != "200" ] && [ "$HTTP_CODE" != "201" ] && [ "$HTTP_CODE" != "409" ]; then
+              echo "ERROR: Unexpected response for ${TENANT_ID}:"
+              cat /tmp/tenant_resp.txt
+              exit 1
+            fi
+          }
 
-          # Create energy_co tenant (treat 409 as success)
-          HTTP_CODE=$(curl -sS -o /dev/null -w "%{http_code}" \
-            -X POST "${GATEWAY_URL}/api/v1/tenants" \
-            -H "Content-Type: application/json" \
-            -d '{"tenantId":"energy_co","displayName":"Energy Co Ltd","settlementAsset":"KWH","slug":"energy-co"}')
-          echo "energy_co: HTTP ${HTTP_CODE}"
+          create_tenant "acme_corp" '{"tenantId":"acme_corp","displayName":"ACME Corporation","settlementAsset":"GBP","slug":"acme-corp"}'
+          create_tenant "energy_co" '{"tenantId":"energy_co","displayName":"Energy Co Ltd","settlementAsset":"KWH","slug":"energy-co"}'
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
