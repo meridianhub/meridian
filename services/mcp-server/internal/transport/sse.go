@@ -95,11 +95,6 @@ func (t *SSETransport) Close() error {
 
 // HandleSSE is the HTTP handler for SSE client connections (GET /sse).
 func (t *SSETransport) HandleSSE(w http.ResponseWriter, r *http.Request) {
-	if t.closed.Load() {
-		http.Error(w, "transport closed", http.StatusServiceUnavailable)
-		return
-	}
-
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming not supported", http.StatusInternalServerError)
@@ -112,7 +107,14 @@ func (t *SSETransport) HandleSSE(w http.ResponseWriter, r *http.Request) {
 		done:   make(chan struct{}),
 	}
 
+	// Check closed and register atomically under the write lock to prevent
+	// a race where Close() runs between the check and registration.
 	t.mu.Lock()
+	if t.closed.Load() {
+		t.mu.Unlock()
+		http.Error(w, "transport closed", http.StatusServiceUnavailable)
+		return
+	}
 	t.clients[client.id] = client
 	t.mu.Unlock()
 

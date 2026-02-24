@@ -84,9 +84,12 @@ func runStdio(logger *slog.Logger, cfg server.Config) error {
 	defer signalCleanup()
 
 	go func() {
-		<-sigChan
-		logger.Info("received shutdown signal")
-		cancel()
+		select {
+		case <-sigChan:
+			logger.Info("received shutdown signal")
+			cancel()
+		case <-ctx.Done():
+		}
 	}()
 
 	return srv.Run(ctx)
@@ -146,17 +149,16 @@ func runSSE(logger *slog.Logger, cfg server.Config) error {
 	sigChan, signalCleanup := bootstrap.SignalHandler()
 	defer signalCleanup()
 
+	serverErr := bootstrap.WaitForShutdownSignal(sigChan, serverErrors, logger)
+
+	// Create the shutdown context AFTER the signal/error arrives so the full
+	// timeout window is available for graceful drain.
+	cancel()
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownCancel()
 
-	if err := bootstrap.WaitForShutdownSignal(sigChan, serverErrors, logger); err != nil {
-		cancel()
-		_ = bootstrap.GracefulShutdown(shutdownCtx, logger, httpServer)
-		return err
-	}
-
-	cancel()
-	return bootstrap.GracefulShutdown(shutdownCtx, logger, httpServer)
+	_ = bootstrap.GracefulShutdown(shutdownCtx, logger, httpServer)
+	return serverErr
 }
 
 // parseLogLevel converts a string log level to slog.Level.
