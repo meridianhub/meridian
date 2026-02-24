@@ -15,6 +15,7 @@
 #   /opt/meridian/.env            - Filled-in environment file
 #   /opt/meridian/Caddyfile       - Caddy configuration
 #   /opt/meridian/dex.yaml        - Dex OIDC configuration
+#   /opt/meridian/frontend/       - Built frontend static files (deployed by CI)
 #   /opt/meridian/certs/          - Cloudflare Origin Certificate files
 #     origin-cert.pem
 #     origin-key.pem
@@ -124,6 +125,7 @@ services:
     volumes:
       - /opt/meridian/Caddyfile:/etc/caddy/Caddyfile:ro
       - /opt/meridian/certs:/etc/caddy/certs:ro
+      - /opt/meridian/frontend:/var/www/html:ro
       - caddy_data:/data
       - caddy_config:/config
 
