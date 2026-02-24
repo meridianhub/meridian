@@ -22,9 +22,8 @@
 
 -- Drop the old UNIQUE(name) constraint to allow multiple versions per saga.
 -- CockroachDB requires DROP INDEX CASCADE for unique constraints.
--- PostgreSQL requires ALTER TABLE DROP CONSTRAINT (handled by migration runner).
--- This migration targets CockroachDB (production). The PostgreSQL test helper
--- applies the equivalent ALTER TABLE DROP CONSTRAINT before running this file.
+-- PostgreSQL requires ALTER TABLE DROP CONSTRAINT (applied by demo pre-migration script).
+-- See deploy/demo/pg-pre-migration.sql for PostgreSQL-specific prerequisite DDL.
 DROP INDEX IF EXISTS "public"."uq_platform_saga_definition_name" CASCADE;
 
 -- Add new compound unique index allowing multiple versions per saga
