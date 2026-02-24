@@ -24,7 +24,7 @@ instructions: |
 
 > **Status**: Not Started
 > **Task Master Tag**: `mcp-server`
-> **Complexity**: 34 points (estimated)
+> **Complexity**: 41 points (estimated)
 > **Last Updated**: 2026-02-24
 > **Companion PRDs**: [Control Plane](014-control-plane.md), [Starlark Saga Orchestration](006-starlark-saga-orchestration-core.md)
 > **ADR References**: [ADR-028](../adr/0028-starlark-saga-cel-valuation.md)
@@ -142,6 +142,7 @@ Read-only tools for understanding system state and explaining outcomes.
 **FR-2.3**: Query ledger postings with filters (account, instrument, date range).
 **FR-2.4**: Inspect saga execution history (steps, timing, errors).
 **FR-2.5**: Check reconciliation status and variance reports.
+**FR-2.6**: Explain a historical valuation (rates used, market data source, calculation path).
 
 ### FR-3: Simulation Tools
 
@@ -151,6 +152,7 @@ Predict outcomes without side effects.
 **FR-3.2**: Evaluate CEL expressions with provided context variables.
 **FR-3.3**: Compare two manifests and show the diff.
 **FR-3.4**: Simulate valuation computation for a given quantity and market context.
+**FR-3.5**: Execute a saga in simulation mode (full pipeline, no DB side effects).
 
 ### FR-4: Reference Data Tools
 
@@ -159,6 +161,7 @@ Query the catalog of available definitions.
 **FR-4.1**: Query market data (rates, prices) for instruments.
 **FR-4.2**: List and describe available saga handler schemas (what service methods exist).
 **FR-4.3**: Describe the handler parameter types for generating Starlark code.
+**FR-4.4**: Retrieve the full economy structure (instruments, account types, sagas) in one call.
 
 ### FR-5: Prompt Resources and Context
 
@@ -439,7 +442,70 @@ Check settlement health.
 
 **Maps to**: Reconciliation Service query RPCs (existing).
 
+#### `meridian_explain_valuation`
+
+Explain how a historical valuation was computed.
+
+```json
+{
+  "name": "meridian_explain_valuation",
+  "description": "Explain a valuation: rates used, market data source, and calculation path.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "lien_id": {
+        "type": "string",
+        "description": "UUID of the lien or valuation event to explain"
+      },
+      "transaction_id": {
+        "type": "string",
+        "description": "UUID of the transaction (alternative to lien_id)"
+      }
+    }
+  }
+}
+```
+
+**Maps to**: Valuation service + Market Information lookups (reconstruct
+calculation path from audit trail).
+
 ### 4.3 Simulation Tools
+
+#### `meridian_saga_simulate`
+
+Execute a saga in simulation mode (full pipeline, zero DB side effects).
+
+```json
+{
+  "name": "meridian_saga_simulate",
+  "description": "Execute a saga in simulation mode. Runs the full pipeline without side effects.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "saga_name": {
+        "type": "string",
+        "description": "Name of the saga definition to execute"
+      },
+      "version": {
+        "type": "integer",
+        "description": "Saga version (latest active if omitted)"
+      },
+      "input_data": {
+        "type": "object",
+        "description": "Input parameters for the saga execution"
+      },
+      "knowledge_at": {
+        "type": "string",
+        "description": "ISO 8601 timestamp for bi-temporal replay (historical simulation)"
+      }
+    },
+    "required": ["saga_name", "input_data"]
+  }
+}
+```
+
+**Maps to**: Saga runtime `Execute` with `is_simulation=true`. Uses existing
+bi-temporal `knowledge_at` parameter for historical what-if analysis.
 
 #### `meridian_cel_evaluate`
 
@@ -519,6 +585,25 @@ Test pricing computations.
 **Maps to**: Valuation service compute RPCs + Market Information lookups.
 
 ### 4.4 Reference Data Tools
+
+#### `meridian_economy_structure`
+
+Get a complete overview of the tenant's business model in one call.
+
+```json
+{
+  "name": "meridian_economy_structure",
+  "description": "Get the tenant's full economy: active instruments, account types, sagas, and valuation rules.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  }
+}
+```
+
+**Maps to**: Composite call to Reference Data (instruments, sagas) +
+Control Plane (active manifest summary). Essential for bootstrapping
+LLM context at the start of a conversation.
 
 #### `meridian_instruments_list`
 
@@ -629,6 +714,29 @@ MCP prompts are pre-built conversation starters for common workflows.
 | `simulate-change` | "What happens if we change rule X?" | Get current manifest → Modify → Diff → Dry-run → Report |
 | `debug-failure` | "Why did transaction X fail?" | Find saga execution → Get causation tree → Identify failure step |
 
+#### The Write - Validate - Fix Loop
+
+All design prompts embed a core iteration pattern that the LLM follows:
+
+```text
+1. WRITE   → Generate Starlark/CEL/Manifest from conversation
+2. VALIDATE → Call meridian_starlark_validate / meridian_cel_validate / meridian_manifest_validate
+3. FIX     → Parse structured errors (line, column, suggestion), correct the code
+4. REPEAT  → Loop steps 2-3 until validation passes
+5. OUTPUT  → Present the validated artifact to the user
+```
+
+This loop is reliable because the error formatter (Section 5.5) returns
+structured, actionable feedback. The LLM does not guess at fixes - it
+reads line numbers, error types, and suggestions from the validation
+response and applies targeted corrections.
+
+The `design-economy` prompt includes this instruction explicitly:
+
+> "Always validate before presenting results. If validation fails,
+> fix errors using the line/column information in the response and
+> re-validate. Never present unvalidated code to the user."
+
 ---
 
 ## 5. Technical Architecture
@@ -700,6 +808,8 @@ services/mcp-server/
 │   │   └── docs.go                # Static documentation resources
 │   ├── prompts/
 │   │   └── prompts.go             # Guided workflow prompts
+│   ├── errors/
+│   │   └── formatter.go           # Structured error formatting for LLM consumption
 │   ├── auth/
 │   │   └── auth.go                # JWT/API key extraction from MCP config
 │   └── session/
@@ -765,6 +875,54 @@ Each MCP tool handler is a thin function that:
 
 No business logic lives in the MCP server.
 
+### 5.5 Error Formatting (Cross-Cutting)
+
+Raw gRPC errors are useless to an LLM. The MCP server includes an
+**error formatter** that transforms validation failures into structured,
+actionable feedback the LLM can use to self-correct.
+
+**Input** (raw gRPC error):
+
+```text
+rpc error: code = InvalidArgument desc = CEL compilation failed:
+ERROR: <input>:1:15: undeclared reference to 'atributes'
+```
+
+**Output** (formatted for LLM):
+
+```json
+{
+  "valid": false,
+  "errors": [
+    {
+      "type": "cel_compilation",
+      "line": 1,
+      "column": 15,
+      "message": "Undeclared reference 'atributes'",
+      "suggestion": "Did you mean 'attributes'?"
+    }
+  ]
+}
+```
+
+This enables the **Write - Validate - Fix** loop: the LLM generates
+code, calls a validation tool, receives structured errors with line
+numbers and suggestions, fixes the issues, and re-validates. Without
+structured errors, this loop degrades to guessing.
+
+The formatter covers:
+
+- **CEL errors**: Line/column, undeclared references, type mismatches
+- **Starlark errors**: Syntax errors, forbidden constructs (`while`,
+  recursion), undefined handler references
+- **Manifest errors**: Missing cross-references, duplicate codes,
+  schema violations
+- **Proto validation errors**: Required field missing, enum out of
+  range, string pattern mismatch
+
+Implementation: `internal/errors/formatter.go` - a single module
+that all tool handlers call before returning error responses.
+
 ---
 
 ## 6. Safety Model
@@ -808,8 +966,8 @@ Every MCP tool is classified by mutation risk:
 
 | Category | Tools | Confirmation Required |
 |----------|-------|----------------------|
-| **Read** | `causation_tree`, `positions_query`, `postings_query`, `instruments_list`, `saga_describe`, `handlers_describe`, `reconciliation_status`, `saga_executions`, `manifest_history` | None |
-| **Simulate** | `manifest_validate`, `manifest_plan`, `cel_validate`, `cel_evaluate`, `starlark_validate`, `manifest_diff`, `valuation_simulate` | None (no side effects) |
+| **Read** | `causation_tree`, `positions_query`, `postings_query`, `instruments_list`, `saga_describe`, `handlers_describe`, `reconciliation_status`, `saga_executions`, `manifest_history`, `explain_valuation`, `economy_structure` | None |
+| **Simulate** | `manifest_validate`, `manifest_plan`, `cel_validate`, `cel_evaluate`, `starlark_validate`, `manifest_diff`, `valuation_simulate`, `saga_simulate` | None (no side effects) |
 | **Write** | `manifest_apply` | Requires prior `manifest_plan` in session |
 
 Only **one tool** (`manifest_apply`) can mutate state, and it requires a
@@ -949,9 +1107,9 @@ sequenceDiagram
 
 ## 9. Work Streams
 
-### Stream 1: Core MCP Server (13 points)
+### Stream 1: Core MCP Server (15 points)
 
-Foundation: MCP protocol, transport, auth, tool registration.
+Foundation: MCP protocol, transport, auth, tool registration, error formatting.
 
 | Task | Points | Description |
 |------|--------|-------------|
@@ -960,6 +1118,7 @@ Foundation: MCP protocol, transport, auth, tool registration.
 | 1.3 | 2 | Session state (plan cache, rate limiter) |
 | 1.4 | 3 | gRPC client wiring (reuse `shared/pkg/clients/`) |
 | 1.5 | 3 | Tool registration framework with JSON schema validation |
+| 1.6 | 2 | Error formatter (CEL, Starlark, manifest, proto → structured JSON) |
 
 ### Stream 2: Economy Design Tools (8 points)
 
@@ -970,21 +1129,24 @@ Foundation: MCP protocol, transport, auth, tool registration.
 | 2.3 | 2 | `manifest_history` |
 | 2.4 | 1 | Plan-before-apply gate enforcement |
 
-### Stream 3: Audit Tools (5 points)
+### Stream 3: Audit Tools (7 points)
 
 | Task | Points | Description |
 |------|--------|-------------|
 | 3.1 | 2 | `causation_tree`, `saga_executions` |
 | 3.2 | 2 | `positions_query`, `postings_query` |
 | 3.3 | 1 | `reconciliation_status` |
+| 3.4 | 2 | `explain_valuation` (reconstruct calculation path from audit trail) |
 
-### Stream 4: Simulation and Reference Data Tools (5 points)
+### Stream 4: Simulation and Reference Data Tools (8 points)
 
 | Task | Points | Description |
 |------|--------|-------------|
 | 4.1 | 2 | `cel_evaluate`, `manifest_diff` |
 | 4.2 | 1 | `valuation_simulate` |
-| 4.3 | 2 | `instruments_list`, `instrument_describe`, `sagas_list`, `saga_describe`, `handlers_describe` |
+| 4.3 | 2 | `saga_simulate` (simulation mode flag on saga runtime) |
+| 4.4 | 2 | `instruments_list`, `instrument_describe`, `sagas_list`, `saga_describe`, `handlers_describe` |
+| 4.5 | 1 | `economy_structure` (composite call for context bootstrapping) |
 
 ### Stream 5: Resources, Prompts, and Documentation (3 points)
 
@@ -998,13 +1160,13 @@ Foundation: MCP protocol, transport, auth, tool registration.
 
 ```mermaid
 graph LR
-    S1["Stream 1: Core<br/>13 pts"] --> S2["Stream 2: Design<br/>8 pts"]
-    S1 --> S3["Stream 3: Audit<br/>5 pts"]
-    S1 --> S4["Stream 4: Simulate<br/>5 pts"]
+    S1["Stream 1: Core<br/>15 pts"] --> S2["Stream 2: Design<br/>8 pts"]
+    S1 --> S3["Stream 3: Audit<br/>7 pts"]
+    S1 --> S4["Stream 4: Simulate<br/>8 pts"]
     S1 --> S5["Stream 5: Resources<br/>3 pts"]
 ```
 
-**Critical path**: Stream 1 → Stream 2 (21 points).
+**Critical path**: Stream 1 → Stream 2 (23 points).
 Streams 3, 4, and 5 can run in parallel after Stream 1 completes.
 
 ---
@@ -1059,6 +1221,6 @@ Streams 3, 4, and 5 can run in parallel after Stream 1 completes.
 |----------|---------|----------|
 | **MCP SDK language** | Go (consistency with Meridian), TypeScript (larger MCP ecosystem) | Leaning Go for consistency and existing client reuse |
 | **Handler schema exposure** | New RPC on Reference Data, or embedded in MCP server from build-time codegen | TBD - depends on how dynamic handler schemas are |
-| **Saga dry-run** | Extend existing saga runtime with simulation mode, or build separate simulation engine | TBD - existing `knowledge_at` parameter provides partial simulation |
+| **Saga simulation** | Add `is_simulation` flag to existing runtime, or use `knowledge_at` only | Leaning `is_simulation` flag - cleaner semantics than temporal replay for what-if |
 | **Multi-tenant MCP** | One server per tenant (simple), or single server with tenant switching (complex) | Leaning one-per-tenant for isolation simplicity |
 | **Resource refresh** | Poll for changes, or invalidate on manifest apply | TBD - poll is simpler, invalidation is more responsive |
