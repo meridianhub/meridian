@@ -290,9 +290,12 @@ func provisionDatabases(ctx context.Context, conn *pgx.Conn, databases map[strin
 
 // provisionPostgresDatabase creates a database and user for PostgreSQL if they do not exist.
 //
-// PostgreSQL does not support CREATE DATABASE IF NOT EXISTS. We attempt the creation and
-// ignore SQLSTATE 42P04 (duplicate_database). CREATE USER IF NOT EXISTS is supported in
-// PostgreSQL 9.1+. We connect to the target database separately to grant schema privileges,
+// PostgreSQL does not support CREATE DATABASE IF NOT EXISTS or CREATE USER IF NOT EXISTS.
+// We attempt the creation and ignore idempotency errors:
+//   - 42P04 (duplicate_database) for CREATE DATABASE
+//   - 42710 (duplicate_object) for CREATE USER
+//
+// We connect to the target database separately to grant schema privileges,
 // because the superuser connection may be to a different database.
 func provisionPostgresDatabase(ctx context.Context, superConn *pgx.Conn, dbName string, sdb ServiceDatabase, logger *slog.Logger) error {
 	// 1. Create database — tolerate "already exists" (42P04).
@@ -304,9 +307,14 @@ func provisionPostgresDatabase(ctx context.Context, superConn *pgx.Conn, dbName 
 		logger.Debug("database already exists, skipping creation", "database", dbName)
 	}
 
-	// 2. Create user if not exists (PG 8.1+ syntax).
-	if _, err := superConn.Exec(ctx, fmt.Sprintf("CREATE USER IF NOT EXISTS %s", quoteIdent(sdb.User))); err != nil {
-		return fmt.Errorf("provision %s (create user): %w", dbName, err)
+	// 2. Create user — tolerate "already exists" (42710 = duplicate_object).
+	// PostgreSQL has no CREATE USER IF NOT EXISTS syntax.
+	if _, err := superConn.Exec(ctx, fmt.Sprintf("CREATE USER %s", quoteIdent(sdb.User))); err != nil {
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "42710" {
+			return fmt.Errorf("provision %s (create user): %w", dbName, err)
+		}
+		logger.Debug("user already exists, skipping creation", "user", sdb.User)
 	}
 
 	// 3. Grant database-level privileges.
