@@ -69,6 +69,40 @@ export function RegisterInstrumentDialog({ open, onOpenChange }: RegisterInstrum
   const [errors, setErrors] = React.useState<FormErrors>({})
   const [successMessage, setSuccessMessage] = React.useState<string | null>(null)
 
+  const mutation = useMutation({
+    mutationFn: () =>
+      clients.referenceData.registerInstrument({
+        code: formData.code.trim(),
+        displayName: formData.displayName.trim(),
+        dimension: Number(formData.dimension),
+        precision: Number(formData.decimalPlaces),
+        description: formData.description.trim(),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: referenceKeys.instruments() })
+      setSuccessMessage(
+        'Instrument created in DRAFT status. Activation required via manifest or API.',
+      )
+    },
+    onError: (err) => {
+      const result = handleConnectError(err)
+      if (result.code === Code.InvalidArgument && Object.keys(result.fieldErrors).length > 0) {
+        const fieldMap: FormErrors = {}
+        for (const [field, msg] of Object.entries(result.fieldErrors)) {
+          if (field === 'code') fieldMap.code = msg
+          else if (field === 'display_name') fieldMap.displayName = msg
+          else if (field === 'dimension') fieldMap.dimension = msg
+          else if (field === 'precision') fieldMap.decimalPlaces = msg
+          else if (field === 'description') fieldMap.description = msg
+          else fieldMap.general = msg
+        }
+        setErrors(fieldMap)
+      } else {
+        setErrors({ general: result.message })
+      }
+    },
+  })
+
   React.useEffect(() => {
     if (!open) {
       setFormData(INITIAL_FORM)
@@ -117,40 +151,6 @@ export function RegisterInstrumentDialog({ open, onOpenChange }: RegisterInstrum
     setErrors(next)
     return Object.keys(next).length === 0
   }
-
-  const mutation = useMutation({
-    mutationFn: () =>
-      clients.referenceData.registerInstrument({
-        code: formData.code.trim(),
-        displayName: formData.displayName.trim(),
-        dimension: Number(formData.dimension),
-        precision: Number(formData.decimalPlaces),
-        description: formData.description.trim(),
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: referenceKeys.instruments() })
-      setSuccessMessage(
-        'Instrument created in DRAFT status. Activation required via manifest or API.',
-      )
-    },
-    onError: (err) => {
-      const result = handleConnectError(err)
-      if (result.code === Code.InvalidArgument && Object.keys(result.fieldErrors).length > 0) {
-        const fieldMap: FormErrors = {}
-        for (const [field, msg] of Object.entries(result.fieldErrors)) {
-          if (field === 'code') fieldMap.code = msg
-          else if (field === 'display_name') fieldMap.displayName = msg
-          else if (field === 'dimension') fieldMap.dimension = msg
-          else if (field === 'precision') fieldMap.decimalPlaces = msg
-          else if (field === 'description') fieldMap.description = msg
-          else fieldMap.general = msg
-        }
-        setErrors(fieldMap)
-      } else {
-        setErrors({ general: result.message })
-      }
-    },
-  })
 
   function handleCodeChange(e: React.ChangeEvent<HTMLInputElement>) {
     const upper = e.target.value.toUpperCase()
