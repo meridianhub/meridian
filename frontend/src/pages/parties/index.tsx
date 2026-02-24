@@ -7,6 +7,8 @@ import { StatusBadge } from '@/components/shared/status-badge'
 import { useClients } from '@/api/context'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { tenantKeys } from '@/lib/query-keys'
+import { useTenantSlug } from '@/hooks/use-tenant-context'
 import { RegisterPartyDialog } from './dialogs/register-party-dialog'
 
 export interface Party {
@@ -32,6 +34,7 @@ interface ListPartiesResult {
 export function PartiesPage() {
   const navigate = useNavigate()
   const clients = useClients()
+  const tenantSlug = useTenantSlug()
   const [registerOpen, setRegisterOpen] = React.useState(false)
 
   const columns: ColumnDef<Party>[] = [
@@ -137,7 +140,7 @@ export function PartiesPage() {
 
       <Card className="p-6">
         <DataTable
-          queryKey={['parties']}
+          queryKey={tenantKeys.parties(tenantSlug ?? '')}
           queryFn={queryFn}
           columns={columns}
           pageSize={25}
