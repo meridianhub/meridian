@@ -78,6 +78,7 @@ stateDiagram-v2
 | PRD | Description |
 |-----|-------------|
 | [Meridian Edge](003-meridian-edge.md) | Embedded modular monolith for IoT devices and browser (WASM) |
+| [MCP Server](027-mcp-server.md) | Model Context Protocol server bridging LLMs to Meridian Core |
 
 ### Task Master PRDs (`.taskmaster/docs/`)
 
@@ -220,6 +221,7 @@ material.
 ### Operations & SaaS
 
 - [Control Plane](014-control-plane.md) - SaaS operations layer for manifest management
+- [MCP Server](027-mcp-server.md) - Model Context Protocol server bridging LLMs to Meridian Core
 - [Codebase Health Audit](012-codebase-health-audit.md) - Remediation for documentation, CI/CD, and code hygiene
 - [Production Readiness Review](009-production-readiness-review.md) - Audit and remediation for production gaps
 
