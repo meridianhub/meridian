@@ -14,6 +14,7 @@ import { DepositDialog } from './deposit-dialog'
 import { WithdrawDialog } from './withdraw-dialog'
 import { ControlDialog } from './control-dialog'
 import type { ControlAction } from './control-dialog'
+import { CreateLienDialog } from './create-lien-dialog'
 import type { AccountStatus, CurrentAccount, RetrieveCurrentAccountResponse } from './types'
 
 async function retrieveAccount(
@@ -103,6 +104,7 @@ interface AccountActionsProps {
 function AccountActions({ status, accountId, currency }: AccountActionsProps) {
   const [depositOpen, setDepositOpen] = React.useState(false)
   const [withdrawOpen, setWithdrawOpen] = React.useState(false)
+  const [lienOpen, setLienOpen] = React.useState(false)
   const [controlOpen, setControlOpen] = React.useState(false)
   const [controlAction, setControlAction] = React.useState<ControlAction>('freeze')
 
@@ -125,6 +127,9 @@ function AccountActions({ status, accountId, currency }: AccountActionsProps) {
             </Button>
             <Button variant="outline" size="sm" onClick={() => setWithdrawOpen(true)}>
               Withdraw
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setLienOpen(true)}>
+              Create Lien
             </Button>
             <Button variant="outline" size="sm" onClick={() => openControl('freeze')}>
               Freeze
@@ -153,6 +158,14 @@ function AccountActions({ status, accountId, currency }: AccountActionsProps) {
         onOpenChange={setWithdrawOpen}
         accountId={accountId}
         currency={currency}
+      />
+
+      <CreateLienDialog
+        open={lienOpen}
+        onOpenChange={setLienOpen}
+        accountId={accountId}
+        instrumentCode={currency}
+        accountType="current"
       />
 
       <ControlDialog
