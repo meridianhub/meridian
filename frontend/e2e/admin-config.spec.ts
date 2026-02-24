@@ -354,7 +354,7 @@ test.describe('Tenant detail page', () => {
   test('renders tenant display name and ID', async ({ platformAdminPage: page }) => {
     await navigateTo(page, '/tenants/acme_corp')
 
-    await expect(page.getByText('ACME Corporation')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('heading', { name: 'ACME Corporation' })).toBeVisible({ timeout: 15_000 })
     await expect(page.getByText('acme_corp').first()).toBeVisible()
   })
 
@@ -374,7 +374,7 @@ test.describe('Tenant detail page', () => {
   test('shows Provisioning Status card', async ({ platformAdminPage: page }) => {
     await navigateTo(page, '/tenants/acme_corp')
 
-    await expect(page.getByText('Provisioning Status')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Provisioning Status').first()).toBeVisible({ timeout: 15_000 })
   })
 
   test('shows not found when tenant does not exist', async ({ platformAdminPage: page }) => {
