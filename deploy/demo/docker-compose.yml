@@ -1,0 +1,106 @@
+# Meridian demo deployment stack
+#
+# Services:
+#   postgres  - PostgreSQL 16 (internal only, not exposed to host)
+#   meridian  - Unified binary; starts after postgres is healthy
+#   caddy     - Reverse proxy; exposes 80/443, terminates TLS via Cloudflare Origin Certificate
+#
+# Usage:
+#   cp deploy/demo/.env.demo.example /opt/meridian/.env
+#   # Edit /opt/meridian/.env with actual values
+#   docker compose --env-file /opt/meridian/.env -f /opt/meridian/docker-compose.yml up -d
+#
+# Directory layout expected on the host:
+#   /opt/meridian/.env            - Filled-in environment file
+#   /opt/meridian/Caddyfile       - Caddy configuration
+#   /opt/meridian/certs/          - Cloudflare Origin Certificate files
+#     origin-cert.pem
+#     origin-key.pem
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-meridian}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-meridian}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-meridian} -d ${POSTGRES_DB:-meridian}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    # Not exposed to host — accessed only by meridian on the internal network
+
+  meridian:
+    image: ${MERIDIAN_IMAGE:-ghcr.io/meridianhub/meridian:demo}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # --- Application ---
+      ENVIRONMENT: ${ENVIRONMENT:-demo}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+
+      # --- Database driver ---
+      DB_DRIVER: postgres
+
+      # --- Database URLs (all services share the same PostgreSQL instance in demo) ---
+      DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
+      PLATFORM_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
+      CURRENT_ACCOUNT_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
+      FINANCIAL_ACCOUNTING_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
+      POSITION_KEEPING_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
+      PAYMENT_ORDER_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
+      PARTY_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
+      INTERNAL_BANK_ACCOUNT_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
+      MARKET_INFORMATION_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
+      REFERENCE_DATA_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
+
+      # --- Authentication ---
+      AUTH_MODE: ${AUTH_MODE:-disabled}
+
+      # --- Feature flags ---
+      BILLING_ENABLED: ${BILLING_ENABLED:-false}
+      REDIS_ENABLED: ${REDIS_ENABLED:-false}
+      KAFKA_ENABLED: ${KAFKA_ENABLED:-false}
+
+      # --- Multi-tenancy ---
+      MASTER_TENANT_ID: ${MASTER_TENANT_ID:-meridian_master}
+
+      # --- Connection pool ---
+      DB_MAX_OPEN_CONNS: ${DB_MAX_OPEN_CONNS:-25}
+      DB_MAX_IDLE_CONNS: ${DB_MAX_IDLE_CONNS:-5}
+      DB_CONN_MAX_LIFETIME: ${DB_CONN_MAX_LIFETIME:-5m}
+      DB_CONN_MAX_IDLE_TIME: ${DB_CONN_MAX_IDLE_TIME:-10m}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8090/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    # Not exposed to host — accessed only by caddy on the internal network
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      meridian:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /opt/meridian/Caddyfile:/etc/caddy/Caddyfile:ro
+      - /opt/meridian/certs:/etc/caddy/certs:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:
