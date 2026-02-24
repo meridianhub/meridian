@@ -248,7 +248,7 @@ function AuthenticatedApp() {
   return (
     <TenantProvider>
       <ApiClientBridge>
-        {(import.meta.env.DEV || import.meta.env.VITE_DEMO_MODE === 'true') && <DevTenantAutoSelector />}
+        {(import.meta.env.DEV || import.meta.env.VITE_E2E_MODE === 'true' || import.meta.env.VITE_DEMO_MODE === 'true') && <DevTenantAutoSelector />}
         <TooltipProvider>
           <BrowserRouter>
             <Routes>

@@ -157,7 +157,7 @@ export function DashboardPage() {
       </div>
 
       {/* Stat Cards */}
-      <div className="grid gap-4 md:grid-cols-3">
+      <div data-testid="stat-cards" className="grid gap-4 md:grid-cols-3">
         <StatCard
           title="Payment Orders"
           value={paymentsCount?.count}

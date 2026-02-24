@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -177,24 +178,15 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 
 	// ─── Shared Infrastructure ───────────────────────────────────────────
 
-	// GORM database connection (used by party, tenant, iba, fa, ca, po, recon)
-	dbConfig := bootstrap.DefaultDatabaseConfig()
-	dbConfig.Logger = logger
-	db, err := bootstrap.NewDatabase(ctx, dbConfig)
+	// Per-service database connections derived from a base DSN.
+	// Each service connects to its own database as defined by migrations.ServiceDatabases.
+	baseDSN := env.GetEnvOrDefault("DATABASE_URL",
+		"postgres://root@localhost:26257/defaultdb?sslmode=disable")
+	conns, err := newServiceConns(ctx, baseDSN, logger)
 	if err != nil {
-		return fmt.Errorf("gorm database: %w", err)
+		return fmt.Errorf("service connections: %w", err)
 	}
-	defer bootstrap.CloseDatabase(db, logger)
-	logger.Info("GORM database connection established")
-
-	// pgxpool connection (used by reference-data, market-information, forecasting)
-	pgxDSN := env.GetEnvOrDefault("DATABASE_URL",
-		"postgres://meridian_user@localhost:26257/meridian?sslmode=disable")
-	pgxPool, err := connectPgxPool(ctx, pgxDSN, logger)
-	if err != nil {
-		return err
-	}
-	defer pgxPool.Close()
+	defer conns.closeAll(logger)
 
 	// No-op tracer (tracing disabled in unified dev mode)
 	tracer, err := observability.NewTracer(ctx, observability.TracerConfig{
@@ -209,8 +201,8 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 	// Shared gRPC server (no auth for unified dev mode)
 	grpcServer := bootstrap.NewGrpcServerBuilder(tracer, logger).Build()
 
-	// Idempotency service backed by pgxpool (no Redis required in dev)
-	idempotencySvc := idempotency.NewPostgresService(pgxPool)
+	// Idempotency service backed by the platform pgxpool (no Redis required in dev)
+	idempotencySvc := idempotency.NewPostgresService(conns.pgxPool("control-plane"))
 	if err := idempotencySvc.EnsureTable(ctx); err != nil {
 		return fmt.Errorf("idempotency table: %w", err)
 	}
@@ -219,9 +211,9 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 	faEventPublisher := &noopFAPublisher{}
 	pkEventPublisher := pkdomain.NewNoOpEventPublisher()
 
-	// Outbox publisher and repo (writes to DB, no Kafka worker in dev)
+	// Outbox publisher and repo (writes to FA database, no Kafka worker in dev)
 	outboxPublisher := events.NewOutboxPublisher("unified")
-	outboxRepo := events.NewPostgresOutboxRepository(db)
+	outboxRepo := events.NewPostgresOutboxRepository(conns.gormDB("financial-accounting"))
 
 	// MDS loopback client (forecasting → market-information via same gRPC server).
 	// grpc.NewClient is lazy — connects on first RPC, after the server is listening.
@@ -236,7 +228,7 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 
 	// ─── Register All Services ──────────────────────────────────────────
 
-	if err := registerServices(grpcServer, db, pgxPool, idempotencySvc, faEventPublisher, pkEventPublisher, outboxPublisher, outboxRepo, mdsClient, logger); err != nil {
+	if err := registerServices(grpcServer, conns, idempotencySvc, faEventPublisher, pkEventPublisher, outboxPublisher, outboxRepo, mdsClient, logger); err != nil {
 		return err
 	}
 
@@ -258,7 +250,8 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 
 	// ─── Start Gateway HTTP Server ───────────────────────────────────────
 
-	gwServer, err := wireGateway(grpcPort, httpPort, pgxDSN, logger)
+	platformDSN := replaceDSNDatabase(baseDSN, "meridian_platform")
+	gwServer, err := wireGateway(grpcPort, httpPort, platformDSN, logger)
 	if err != nil {
 		return fmt.Errorf("gateway init: %w", err)
 	}
@@ -301,8 +294,7 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 // then enables health checking and reflection.
 func registerServices(
 	grpcServer *grpc.Server,
-	db *gorm.DB,
-	pgxPool *pgxpool.Pool,
+	conns *serviceConns,
 	idempotencySvc idempotency.Service,
 	faEventPublisher financialaccountingservice.EventPublisher,
 	pkEventPublisher pkdomain.EventPublisher,
@@ -316,13 +308,15 @@ func registerServices(
 		name string
 		fn   func() error
 	}{
-		{"party", func() error { return wireParty(grpcServer, db, logger) }},
-		{"reference-data", func() error { return wireReferenceData(grpcServer, pgxPool, logger) }},
-		{"market-information", func() error { return wireMarketInformation(grpcServer, pgxPool, logger) }},
-		{"tenant", func() error { return wireTenant(grpcServer, db, logger) }},
-		{"internal-bank-account", func() error { return wireInternalBankAccount(grpcServer, db, logger) }},
-		{"control-plane", func() error { return wireControlPlane(grpcServer, pgxPool, logger) }},
-		{"audit", func() error { return wireAudit(grpcServer, db, logger) }},
+		{"party", func() error { return wireParty(grpcServer, conns.gormDB("party"), logger) }},
+		{"reference-data", func() error { return wireReferenceData(grpcServer, conns.pgxPool("reference-data"), logger) }},
+		{"market-information", func() error { return wireMarketInformation(grpcServer, conns.pgxPool("market-information"), logger) }},
+		{"tenant", func() error { return wireTenant(grpcServer, conns.gormDB("tenant"), logger) }},
+		{"internal-bank-account", func() error {
+			return wireInternalBankAccount(grpcServer, conns.gormDB("internal-bank-account"), logger)
+		}},
+		{"control-plane", func() error { return wireControlPlane(grpcServer, conns.pgxPool("control-plane"), logger) }},
+		{"audit", func() error { return wireAudit(grpcServer, conns.gormDB("tenant"), logger) }}, // audit uses platform DB
 	} {
 		if err := wire.fn(); err != nil {
 			return fmt.Errorf("%s: %w", wire.name, err)
@@ -336,12 +330,12 @@ func registerServices(
 		fn   func() error
 	}{
 		{"financial-accounting", func() error {
-			return wireFinancialAccounting(grpcServer, db, idempotencySvc, faEventPublisher, outboxPublisher, outboxRepo, logger)
+			return wireFinancialAccounting(grpcServer, conns.gormDB("financial-accounting"), idempotencySvc, faEventPublisher, outboxPublisher, outboxRepo, logger)
 		}},
 		{"position-keeping", func() error {
-			return wirePositionKeeping(grpcServer, pgxPool, idempotencySvc, pkEventPublisher, logger)
+			return wirePositionKeeping(grpcServer, conns.pgxPool("position-keeping"), idempotencySvc, pkEventPublisher, logger)
 		}},
-		{"forecasting", func() error { return wireForecasting(grpcServer, pgxPool, mdsClient, logger) }},
+		{"forecasting", func() error { return wireForecasting(grpcServer, conns.pgxPool("forecasting"), mdsClient, logger) }},
 	} {
 		if err := wire.fn(); err != nil {
 			return fmt.Errorf("%s: %w", wire.name, err)
@@ -350,7 +344,7 @@ func registerServices(
 	logger.Info("Tier 1 services registered")
 
 	// Tier 2: Depend on Tier 1
-	if err := wireCurrentAccount(grpcServer, db, idempotencySvc, logger); err != nil {
+	if err := wireCurrentAccount(grpcServer, conns.gormDB("current-account"), idempotencySvc, logger); err != nil {
 		return fmt.Errorf("current-account: %w", err)
 	}
 	logger.Info("Tier 2 services registered")
@@ -360,8 +354,10 @@ func registerServices(
 		name string
 		fn   func() error
 	}{
-		{"payment-order", func() error { return wirePaymentOrder(grpcServer, db, idempotencySvc, logger) }},
-		{"reconciliation", func() error { return wireReconciliation(grpcServer, db, logger) }},
+		{"payment-order", func() error {
+			return wirePaymentOrder(grpcServer, conns.gormDB("payment-order"), idempotencySvc, logger)
+		}},
+		{"reconciliation", func() error { return wireReconciliation(grpcServer, conns.gormDB("reconciliation"), logger) }},
 	} {
 		if err := wire.fn(); err != nil {
 			return fmt.Errorf("%s: %w", wire.name, err)
@@ -703,6 +699,125 @@ func wireGateway(grpcPort, httpPort int, databaseURL string, logger *slog.Logger
 	}
 
 	return gateway.NewServer(config, logger, nil, opts...), nil
+}
+
+// ─── Per-Service Database Connections ────────────────────────────────────────
+
+// replaceDSNDatabase replaces the database name in a PostgreSQL/CockroachDB DSN URL.
+func replaceDSNDatabase(baseDSN, database string) string {
+	parsed, err := url.Parse(baseDSN)
+	if err != nil {
+		return baseDSN
+	}
+	parsed.Path = "/" + database
+	return parsed.String()
+}
+
+// serviceConns holds per-database connections for the unified binary.
+// Services sharing the same database (e.g., tenant and control-plane both use
+// meridian_platform) share the same connection object.
+type serviceConns struct {
+	gormDBs  map[string]*gorm.DB
+	pgxPools map[string]*pgxpool.Pool
+}
+
+// gormDB returns the GORM connection for the given service's database.
+// Panics with a descriptive message if serviceName is not in ServiceDatabases.
+func (c *serviceConns) gormDB(serviceName string) *gorm.DB {
+	sdb, ok := migrations.ServiceDatabases[serviceName]
+	if !ok {
+		panic(fmt.Sprintf("unknown service %q: not found in ServiceDatabases", serviceName))
+	}
+	return c.gormDBs[sdb.Database]
+}
+
+// pgxPool returns the pgxpool connection for the given service's database.
+// Panics with a descriptive message if serviceName is not in ServiceDatabases.
+func (c *serviceConns) pgxPool(serviceName string) *pgxpool.Pool {
+	sdb, ok := migrations.ServiceDatabases[serviceName]
+	if !ok {
+		panic(fmt.Sprintf("unknown service %q: not found in ServiceDatabases", serviceName))
+	}
+	return c.pgxPools[sdb.Database]
+}
+
+// closeAll closes all database connections.
+func (c *serviceConns) closeAll(logger *slog.Logger) {
+	for name, db := range c.gormDBs {
+		bootstrap.CloseDatabase(db, logger)
+		logger.Info("closed GORM connection", "database", name)
+	}
+	for name, pool := range c.pgxPools {
+		pool.Close()
+		logger.Info("closed pgxpool connection", "database", name)
+	}
+}
+
+// newServiceConns creates per-database GORM and pgxpool connections for all services
+// defined in the ServiceDatabases map. The baseDSN provides the host, port, and
+// credentials; the database name is replaced for each service's target database.
+func newServiceConns(ctx context.Context, baseDSN string, logger *slog.Logger) (*serviceConns, error) {
+	conns := &serviceConns{
+		gormDBs:  make(map[string]*gorm.DB),
+		pgxPools: make(map[string]*pgxpool.Pool),
+	}
+
+	// Services requiring GORM connections.
+	gormServices := []string{
+		"party", "tenant", "internal-bank-account",
+		"financial-accounting", "current-account",
+		"payment-order", "reconciliation",
+	}
+
+	// Services requiring pgxpool connections.
+	pgxServices := []string{
+		"control-plane", "reference-data", "market-information",
+		"position-keeping", "forecasting",
+	}
+
+	// Create GORM connections (deduplicated by database name).
+	for _, svc := range gormServices {
+		sdb := migrations.ServiceDatabases[svc]
+		if _, exists := conns.gormDBs[sdb.Database]; exists {
+			continue
+		}
+		dsn := replaceDSNDatabase(baseDSN, sdb.Database)
+		cfg := bootstrap.DatabaseConfig{
+			DSN:             dsn,
+			MaxOpenConns:    10,
+			MaxIdleConns:    2,
+			ConnMaxLifetime: 5 * time.Minute,
+			ConnMaxIdleTime: 10 * time.Minute,
+			Logger:          logger,
+		}
+		db, err := bootstrap.NewDatabase(ctx, cfg)
+		if err != nil {
+			conns.closeAll(logger)
+			return nil, fmt.Errorf("gorm %s: %w", sdb.Database, err)
+		}
+		conns.gormDBs[sdb.Database] = db
+	}
+
+	// Create pgxpool connections (deduplicated by database name).
+	for _, svc := range pgxServices {
+		sdb := migrations.ServiceDatabases[svc]
+		if _, exists := conns.pgxPools[sdb.Database]; exists {
+			continue
+		}
+		dsn := replaceDSNDatabase(baseDSN, sdb.Database)
+		pool, err := connectPgxPool(ctx, dsn, logger)
+		if err != nil {
+			conns.closeAll(logger)
+			return nil, fmt.Errorf("pgxpool %s: %w", sdb.Database, err)
+		}
+		conns.pgxPools[sdb.Database] = pool
+	}
+
+	logger.Info("per-service database connections established",
+		"gorm_databases", len(conns.gormDBs),
+		"pgxpool_databases", len(conns.pgxPools))
+
+	return conns, nil
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
