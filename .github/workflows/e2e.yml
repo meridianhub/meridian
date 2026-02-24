@@ -88,17 +88,17 @@ jobs:
           retention-days: 1
 
   # ===========================================================================
-  # E2E Shards: run Playwright tests in parallel across 3 runners
+  # E2E Shards: run Playwright tests in parallel across 4 runners
   # ===========================================================================
   e2e:
-    name: 'E2E Shard ${{ matrix.shardIndex }}/3'
+    name: 'E2E Shard ${{ matrix.shardIndex }}/4'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     needs: build
     strategy:
       fail-fast: false
       matrix:
-        shardIndex: [1, 2, 3]
+        shardIndex: [1, 2, 3, 4]
 
     steps:
       - name: Checkout code
@@ -206,11 +206,11 @@ jobs:
         working-directory: frontend
         run: npx playwright install --with-deps chromium
 
-      - name: Run Playwright tests (shard ${{ matrix.shardIndex }}/3)
+      - name: Run Playwright tests (shard ${{ matrix.shardIndex }}/4)
         working-directory: frontend
         env:
           CI: 'true'
-        run: npx playwright test --shard=${{ matrix.shardIndex }}/3 --reporter=blob
+        run: npx playwright test --shard=${{ matrix.shardIndex }}/4 --reporter=blob
 
       - name: Upload blob report
         uses: actions/upload-artifact@v6
@@ -235,7 +235,7 @@ jobs:
     name: Merge E2E Reports
     runs-on: ubuntu-latest
     needs: e2e
-    if: always()
+    if: ${{ always() && needs.e2e.result != 'skipped' }}
 
     steps:
       - name: Checkout code
