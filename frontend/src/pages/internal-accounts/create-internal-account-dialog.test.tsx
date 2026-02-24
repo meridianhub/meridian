@@ -19,8 +19,8 @@ const mockListActive = vi.fn()
 const mockListInstruments = vi.fn()
 const mockInvalidateQueries = vi.fn()
 
-vi.mock('@/api/context', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api/context')>()
+vi.mock('@/api/context', async () => {
+  const actual = await vi.importActual('@/api/context')
   return {
     ...actual,
     useApiClients: vi.fn(() => ({
