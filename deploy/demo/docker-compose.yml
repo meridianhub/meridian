@@ -23,7 +23,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-meridian}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}
       POSTGRES_DB: ${POSTGRES_DB:-meridian}
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -50,16 +50,16 @@ services:
       DB_DRIVER: postgres
 
       # --- Database URLs (all services share the same PostgreSQL instance in demo) ---
-      DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
-      PLATFORM_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
-      CURRENT_ACCOUNT_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
-      FINANCIAL_ACCOUNTING_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
-      POSITION_KEEPING_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
-      PAYMENT_ORDER_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
-      PARTY_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
-      INTERNAL_BANK_ACCOUNT_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
-      MARKET_INFORMATION_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
-      REFERENCE_DATA_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
+      PLATFORM_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
+      CURRENT_ACCOUNT_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
+      FINANCIAL_ACCOUNTING_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
+      POSITION_KEEPING_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
+      PAYMENT_ORDER_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
+      PARTY_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
+      INTERNAL_BANK_ACCOUNT_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
+      MARKET_INFORMATION_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
+      REFERENCE_DATA_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
 
       # --- Authentication ---
       AUTH_MODE: ${AUTH_MODE:-disabled}
@@ -77,12 +77,10 @@ services:
       DB_MAX_IDLE_CONNS: ${DB_MAX_IDLE_CONNS:-5}
       DB_CONN_MAX_LIFETIME: ${DB_CONN_MAX_LIFETIME:-5m}
       DB_CONN_MAX_IDLE_TIME: ${DB_CONN_MAX_IDLE_TIME:-10m}
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8090/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+    # Note: The meridian image uses gcr.io/distroless/static-debian12 (no shell,
+    # no wget), so a CMD-SHELL healthcheck cannot run. Health is monitored via
+    # the gRPC health check service on port 50051. Caddy uses service_started
+    # and retries upstream connections itself during meridian startup.
     # Not exposed to host — accessed only by caddy on the internal network
 
   caddy:
@@ -90,7 +88,7 @@ services:
     restart: unless-stopped
     depends_on:
       meridian:
-        condition: service_healthy
+        condition: service_started
     ports:
       - "80:80"
       - "443:443"
