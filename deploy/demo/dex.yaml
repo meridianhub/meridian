@@ -1,0 +1,43 @@
+# Dex OIDC provider configuration for Meridian demo environment.
+#
+# Dex is a lightweight, Go-based OIDC identity provider (~20MB RAM vs ~500MB for Keycloak).
+# It serves JWKS keys and issues JWTs that the Meridian gateway validates.
+#
+# Token acquisition (password grant):
+#   curl -X POST http://dex:5556/dex/token \
+#     -d "grant_type=password" \
+#     -d "client_id=meridian-service" \
+#     -d "scope=openid email profile" \
+#     -d "username=developer@meridian.local" \
+#     -d "password=<your-password>"
+
+issuer: http://dex:5556/dex
+
+storage:
+  type: sqlite3
+  config:
+    file: /var/dex/dex.db
+
+web:
+  http: 0.0.0.0:5556
+
+oauth2:
+  passwordConnector: local
+  skipApprovalScreen: true
+
+staticClients:
+  - id: meridian-service
+    name: Meridian
+    redirectURIs:
+      - "https://demo.meridianhub.cloud/callback"
+      - "http://localhost:8090/callback"
+    public: true
+
+enablePasswordDB: true
+
+staticPasswords:
+  - email: "developer@meridian.local"
+    # Generate with: htpasswd -nbBC 10 "" 'your-password' | tr -d ':\n' | sed 's/$2y/$2a/'
+    hash: "REPLACE_WITH_BCRYPT_HASH"
+    username: "developer"
+    userID: "00000000-0000-0000-0000-000000000001"
