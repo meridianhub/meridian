@@ -21,6 +21,7 @@ export function AppShell({ children, currentPath = '/' }: AppShellProps) {
         lens={lens}
         currentPath={currentPath}
         isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
       />
 
       <div className="flex flex-1 flex-col overflow-hidden">

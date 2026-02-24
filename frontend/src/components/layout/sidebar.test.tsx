@@ -84,13 +84,13 @@ describe('Sidebar', () => {
 
   describe('mobile collapsed state', () => {
     it('accepts isOpen prop and renders with open state', () => {
-      const { container } = renderSidebar({ lens: 'tenant', isOpen: true })
-      expect(container.firstChild).toHaveAttribute('data-open', 'true')
+      renderSidebar({ lens: 'tenant', isOpen: true })
+      expect(screen.getByRole('complementary')).toHaveAttribute('data-open', 'true')
     })
 
     it('renders with closed state when isOpen is false', () => {
-      const { container } = renderSidebar({ lens: 'tenant', isOpen: false })
-      expect(container.firstChild).toHaveAttribute('data-open', 'false')
+      renderSidebar({ lens: 'tenant', isOpen: false })
+      expect(screen.getByRole('complementary')).toHaveAttribute('data-open', 'false')
     })
   })
 
