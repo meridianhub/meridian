@@ -248,10 +248,20 @@ describe('RegisterDataSetDialog - successful submission', () => {
     })
   })
 
-  it('disables submit button while pending', () => {
+  it('disables submit button while pending', async () => {
+    const user = userEvent.setup()
     setupMock(vi.fn().mockReturnValue(new Promise(() => {})))
     renderDialog()
-    expect(screen.queryByRole('button', { name: /registering/i })).not.toBeInTheDocument()
+
+    await user.type(screen.getByLabelText(/^code$/i), 'USD_EUR_FX')
+    await user.type(screen.getByLabelText(/display name/i), 'USD/EUR FX Rate')
+    await user.selectOptions(screen.getByLabelText(/^category$/i), '1')
+    await user.type(screen.getByLabelText(/^unit$/i), 'USD/EUR')
+    await user.click(screen.getByRole('button', { name: /register data set/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /registering/i })).toBeDisabled()
+    })
   })
 })
 
