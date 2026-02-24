@@ -27,6 +27,11 @@ export const tenantKeys = {
     [...tenantKeys.all(tenantId), 'payments'] as const,
   payment: (tenantId: string, paymentOrderId: string) =>
     [...tenantKeys.payments(tenantId), paymentOrderId] as const,
+
+  internalAccounts: (tenantId: string) =>
+    [...tenantKeys.all(tenantId), 'internal-accounts'] as const,
+  internalAccount: (tenantId: string, accountId: string) =>
+    [...tenantKeys.internalAccounts(tenantId), accountId] as const,
 } as const
 
 export const platformKeys = {

@@ -1,3 +1,4 @@
+import * as React from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import { useNavigate } from 'react-router-dom'
 import { DataTable } from '@/components/shared/data-table'
@@ -6,6 +7,8 @@ import { TimeDisplay } from '@/components/shared'
 import { useApiClients } from '@/api/context'
 import { useTenantContext } from '@/contexts/tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
+import { Button } from '@/components/ui/button'
+import { CreateInternalAccountDialog } from './create-internal-account-dialog'
 
 interface InternalAccountRow {
   accountId: string
@@ -90,6 +93,7 @@ export function InternalAccountsPage() {
   const { tenantSlug } = useTenantContext()
   const clients = useApiClients()
   const navigate = useNavigate()
+  const [createDialogOpen, setCreateDialogOpen] = React.useState(false)
 
   if (!tenantSlug) {
     return (
@@ -101,12 +105,20 @@ export function InternalAccountsPage() {
 
   return (
     <div className="p-6">
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold">Internal Accounts</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Operational accounts including clearing, nostro, vostro, and holding accounts.
-        </p>
+      <div className="mb-6 flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold">Internal Accounts</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Operational accounts including clearing, nostro, vostro, and holding accounts.
+          </p>
+        </div>
+        <Button onClick={() => setCreateDialogOpen(true)}>New Internal Account</Button>
       </div>
+
+      <CreateInternalAccountDialog
+        open={createDialogOpen}
+        onOpenChange={setCreateDialogOpen}
+      />
 
       <DataTable<InternalAccountRow>
         queryKey={[...tenantKeys.all(tenantSlug), 'internal-accounts']}
