@@ -17,6 +17,9 @@ import (
 
 // setupTestPostgres starts a PostgreSQL 16 testcontainer and returns a
 // superuser DSN and cleanup function.
+//
+// POSTGRES_HOST_AUTH_METHOD=trust disables password auth so service users
+// created with CREATE USER (no password) can connect.
 func setupTestPostgres(t *testing.T) (string, func()) {
 	t.Helper()
 
@@ -28,6 +31,10 @@ func setupTestPostgres(t *testing.T) (string, func()) {
 		tcpostgres.WithDatabase("defaultdb"),
 		tcpostgres.WithUsername("postgres"),
 		tcpostgres.WithPassword("postgres"),
+		// POSTGRES_HOST_AUTH_METHOD=trust makes pg_hba.conf allow all connections
+		// without password. This lets service users created with CREATE USER (no
+		// password) authenticate. Safe for isolated test containers.
+		testcontainers.WithEnv(map[string]string{"POSTGRES_HOST_AUTH_METHOD": "trust"}),
 		testcontainers.WithWaitStrategy(
 			wait.ForLog("database system is ready to accept connections").
 				WithOccurrence(2).
