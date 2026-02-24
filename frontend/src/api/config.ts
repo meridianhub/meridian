@@ -16,7 +16,7 @@ function getApiBaseUrl(): string {
 
 export const apiConfig = {
   baseUrl: getApiBaseUrl(),
-  useBinaryFormat: import.meta.env.PROD,
+  useBinaryFormat: import.meta.env.PROD && import.meta.env.VITE_E2E_MODE !== 'true',
 } as const
 
 export function buildTenantBaseUrl(tenantSlug: string): string {
