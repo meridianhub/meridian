@@ -155,6 +155,19 @@ func setDevDefaults() {
 	}
 }
 
+func connectPgxPool(ctx context.Context, dsn string, logger *slog.Logger) (*pgxpool.Pool, error) {
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		return nil, fmt.Errorf("pgxpool: %w", err)
+	}
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("pgxpool ping: %w", err)
+	}
+	logger.Info("pgxpool connection established")
+	return pool, nil
+}
+
 func run(logger *slog.Logger, grpcPort, httpPort int) error {
 	ctx := context.Background()
 
@@ -177,15 +190,11 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 	// pgxpool connection (used by reference-data, market-information, forecasting)
 	pgxDSN := env.GetEnvOrDefault("DATABASE_URL",
 		"postgres://meridian_user@localhost:26257/meridian?sslmode=disable")
-	pgxPool, err := pgxpool.New(ctx, pgxDSN)
+	pgxPool, err := connectPgxPool(ctx, pgxDSN, logger)
 	if err != nil {
-		return fmt.Errorf("pgxpool: %w", err)
+		return err
 	}
 	defer pgxPool.Close()
-	if err := pgxPool.Ping(ctx); err != nil {
-		return fmt.Errorf("pgxpool ping: %w", err)
-	}
-	logger.Info("pgxpool connection established")
 
 	// No-op tracer (tracing disabled in unified dev mode)
 	tracer, err := observability.NewTracer(ctx, observability.TracerConfig{
@@ -249,7 +258,10 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 
 	// ─── Start Gateway HTTP Server ───────────────────────────────────────
 
-	gwServer := wireGateway(grpcPort, httpPort, pgxDSN, logger)
+	gwServer, err := wireGateway(grpcPort, httpPort, pgxDSN, logger)
+	if err != nil {
+		return fmt.Errorf("gateway init: %w", err)
+	}
 
 	gatewayErrors := make(chan error, 1)
 	go func() {
@@ -647,7 +659,7 @@ var serviceNames = []string{
 // wireGateway creates the gateway HTTP server with the Vanguard transcoder
 // routing REST/JSON, Connect, and gRPC-Web requests to the shared gRPC server
 // running on grpcPort.
-func wireGateway(grpcPort, httpPort int, databaseURL string, logger *slog.Logger) *gateway.Server {
+func wireGateway(grpcPort, httpPort int, databaseURL string, logger *slog.Logger) (*gateway.Server, error) {
 	grpcTarget := fmt.Sprintf("localhost:%d", grpcPort)
 
 	authConfig := gateway.LoadAuthConfig()
@@ -681,18 +693,16 @@ func wireGateway(grpcPort, httpPort int, databaseURL string, logger *slog.Logger
 		opts = append(opts, gateway.WithTranscoder(transcoder))
 	}
 
-	// Wire auth middleware if enabled
+	// Wire auth middleware if enabled — fail fast if misconfigured
 	if authConfig.Enabled {
 		authMiddleware, err := gateway.BuildAuthMiddleware(authConfig, logger)
 		if err != nil {
-			logger.Error("failed to build auth middleware; API routes will be unauthenticated",
-				"error", err)
-		} else if authMiddleware != nil {
-			opts = append(opts, gateway.WithAuthMiddleware(authMiddleware))
+			return nil, fmt.Errorf("failed to build auth middleware: %w", err)
 		}
+		opts = append(opts, gateway.WithAuthMiddleware(authMiddleware))
 	}
 
-	return gateway.NewServer(config, logger, nil, opts...)
+	return gateway.NewServer(config, logger, nil, opts...), nil
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

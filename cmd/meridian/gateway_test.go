@@ -23,7 +23,8 @@ func TestWireGateway_Config(t *testing.T) {
 	databaseURL := "postgres://root@localhost:26257/defaultdb?sslmode=disable"
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	srv := wireGateway(grpcPort, httpPort, databaseURL, logger)
+	srv, err := wireGateway(grpcPort, httpPort, databaseURL, logger)
+	require.NoError(t, err)
 	require.NotNil(t, srv)
 
 	// Start the gateway server
