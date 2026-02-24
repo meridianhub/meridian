@@ -98,20 +98,23 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Generate protobuf TypeScript clients
-        working-directory: frontend
-        run: npx buf generate --template buf.gen.yaml ../api/proto
-
       - name: Install dependencies
         working-directory: frontend
         run: npm ci
+
+      - name: Generate protobuf TypeScript clients
+        working-directory: frontend
+        run: |
+          export PATH="$PWD/node_modules/.bin:$PATH"
+          buf generate --template buf.gen.yaml ../api/proto
+
 
       - name: Build frontend
         working-directory: frontend
         env:
           VITE_API_BASE_URL: https://demo.meridianhub.cloud
           VITE_DEMO_MODE: "true"
-        run: npm run build
+        run: npx vite build
 
       - name: Upload frontend artifact
         uses: actions/upload-artifact@v4
