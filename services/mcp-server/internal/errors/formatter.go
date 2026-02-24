@@ -286,13 +286,14 @@ func findClosestMatch(target string, candidates []string) string {
 		return ""
 	}
 
+	maxAllowed := len(target)/2 + 1
+	bestDist := maxAllowed
 	bestMatch := ""
-	threshold := len(target)/2 + 1
 
 	for _, candidate := range candidates {
 		dist := levenshteinDistance(strings.ToLower(target), strings.ToLower(candidate))
-		if dist < threshold {
-			threshold = dist
+		if dist < bestDist {
+			bestDist = dist
 			bestMatch = candidate
 		}
 	}
@@ -327,23 +328,10 @@ func levenshteinDistance(a, b string) int {
 			del := prev[i] + 1
 			ins := curr[i-1] + 1
 			sub := prev[i-1] + cost
-			curr[i] = min3(del, ins, sub)
+			curr[i] = min(del, min(ins, sub))
 		}
 		prev, curr = curr, prev
 	}
 
 	return prev[la]
-}
-
-func min3(a, b, c int) int {
-	if a < b {
-		if a < c {
-			return a
-		}
-		return c
-	}
-	if b < c {
-		return b
-	}
-	return c
 }

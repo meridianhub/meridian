@@ -40,26 +40,6 @@ func TestFormatGRPCError_CELCompilationError(t *testing.T) {
 	}
 }
 
-// TestFormatGRPCError_CELTypo verifies that a typo in CEL produces a suggestion.
-func TestFormatGRPCError_CELTypo(t *testing.T) {
-	grpcErr := status.Errorf(codes.InvalidArgument,
-		"cel compilation failed: ERROR: :1:1: undeclared reference to 'ammount'")
-
-	result := mcperrors.FormatGRPCError(grpcErr)
-
-	if result.Valid {
-		t.Fatal("expected Valid=false")
-	}
-	if len(result.Errors) == 0 {
-		t.Fatal("expected at least one error")
-	}
-
-	detail := result.Errors[0]
-	if detail.Suggestion == "" {
-		t.Error("expected a typo suggestion for 'ammount'")
-	}
-}
-
 // TestFormatGRPCError_StarlarkSyntaxError verifies Starlark syntax errors are parsed.
 func TestFormatGRPCError_StarlarkSyntaxError(t *testing.T) {
 	grpcErr := status.Errorf(codes.InvalidArgument,
@@ -149,8 +129,10 @@ func TestFormatGRPCError_TypoSuggestions(t *testing.T) {
 		typo       string
 		suggestion string
 	}{
-		{"atributes", "attributes"}, //nolint:misspell // intentional typo for testing
-		{"ammount", "amount"},       //nolint:misspell // intentional typo for testing
+		{"atributes", "attributes"},   //nolint:misspell // intentional typo for testing
+		{"ammount", "amount"},         //nolint:misspell // intentional typo for testing
+		{"instruement", "instrument"}, //nolint:misspell // intentional typo for testing
+		{"bukket_id", "bucket_id"},    //nolint:misspell // intentional typo for testing
 	}
 
 	for _, tc := range tests {
@@ -228,7 +210,7 @@ func TestFormatGRPCError_MultipleCELErrors(t *testing.T) {
 	}
 }
 
-// TestFormatError_PlainError verifies that a plain (non-gRPC) error is also handled.
+// TestFormatError_PlainError verifies that a plain (non-gRPC) error is handled as TypeGeneric.
 func TestFormatError_PlainError(t *testing.T) {
 	err := fmt.Errorf("some plain error")
 
@@ -239,5 +221,9 @@ func TestFormatError_PlainError(t *testing.T) {
 	}
 	if len(result.Errors) == 0 {
 		t.Fatal("expected at least one error")
+	}
+	detail := result.Errors[0]
+	if detail.Type != mcperrors.TypeGeneric {
+		t.Errorf("expected type %q for plain error, got %q", mcperrors.TypeGeneric, detail.Type)
 	}
 }
