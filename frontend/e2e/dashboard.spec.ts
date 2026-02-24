@@ -29,10 +29,10 @@ test.describe('Dashboard', () => {
     })
 
     test('renders stat card titles', async ({ platformAdminPage: page }) => {
-      const statCards = page.getByTestId('stat-cards')
-      await expect(statCards.getByText('Payment Orders')).toBeVisible({ timeout: 15_000 })
-      await expect(statCards.getByText('Booking Logs')).toBeVisible()
-      await expect(statCards.getByText('Ledger Postings')).toBeVisible()
+      const statCardTitle = page.getByTestId('stat-cards').locator('[data-slot="card-title"]')
+      await expect(statCardTitle.filter({ hasText: 'Payment Orders' })).toBeVisible({ timeout: 15_000 })
+      await expect(statCardTitle.filter({ hasText: 'Booking Logs' })).toBeVisible()
+      await expect(statCardTitle.filter({ hasText: 'Ledger Postings' })).toBeVisible()
     })
 
     test('renders Recent Activity section', async ({ platformAdminPage: page }) => {
@@ -64,10 +64,10 @@ test.describe('Dashboard', () => {
     })
 
     test('renders stat card titles', async ({ authenticatedPage: page }) => {
-      const statCards = page.getByTestId('stat-cards')
-      await expect(statCards.getByText('Payment Orders')).toBeVisible({ timeout: 15_000 })
-      await expect(statCards.getByText('Booking Logs')).toBeVisible()
-      await expect(statCards.getByText('Ledger Postings')).toBeVisible()
+      const statCardTitle = page.getByTestId('stat-cards').locator('[data-slot="card-title"]')
+      await expect(statCardTitle.filter({ hasText: 'Payment Orders' })).toBeVisible({ timeout: 15_000 })
+      await expect(statCardTitle.filter({ hasText: 'Booking Logs' })).toBeVisible()
+      await expect(statCardTitle.filter({ hasText: 'Ledger Postings' })).toBeVisible()
     })
 
     test('renders activity feed section', async ({ authenticatedPage: page }) => {
