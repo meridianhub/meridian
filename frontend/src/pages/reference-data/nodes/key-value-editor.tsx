@@ -9,13 +9,18 @@ export interface KeyValueEditorProps {
 }
 
 interface KVPair {
-  id: number
   key: string
   val: string
+  /** Stable identity for React key - set once on creation, never changes */
+  uid: string
 }
 
-function pairsFromRecord(record: Record<string, string>, startId: number): KVPair[] {
-  return Object.entries(record).map(([key, val], i) => ({ id: startId + i, key, val }))
+function pairsFromRecord(record: Record<string, string>): KVPair[] {
+  return Object.entries(record).map(([key, val], i) => ({
+    uid: `init-${i}-${key}`,
+    key,
+    val,
+  }))
 }
 
 function toRecord(pairs: KVPair[]): Record<string, string> {
@@ -28,53 +33,50 @@ function toRecord(pairs: KVPair[]): Record<string, string> {
   return record
 }
 
+let globalUid = 0
+function nextUid(): string {
+  return `kve-${++globalUid}`
+}
+
 export function KeyValueEditor({ value, onChange }: KeyValueEditorProps) {
-  const nextIdRef = React.useRef(0)
+  const [pairs, setPairs] = React.useState<KVPair[]>(() => pairsFromRecord(value))
 
-  const [pairs, setPairs] = React.useState<KVPair[]>(() => {
-    const initial = pairsFromRecord(value, nextIdRef.current)
-    nextIdRef.current += initial.length
-    return initial
-  })
-
-  // Sync pairs when external value is reset (e.g., dialog reset)
+  // Sync pairs when external value prop reference changes (e.g., dialog reset).
+  // We use the value reference as the trigger and do a functional update to
+  // avoid listing `pairs` as a dependency (which would cause infinite loops).
   const prevValueRef = React.useRef(value)
   React.useEffect(() => {
     if (prevValueRef.current !== value) {
       prevValueRef.current = value
-      // Only reset if the external value is structurally different from current internal state
-      const currentRecord = toRecord(pairs)
-      const currentJson = JSON.stringify(currentRecord, Object.keys(currentRecord).sort())
-      const newJson = JSON.stringify(value, Object.keys(value).sort())
-      if (currentJson !== newJson) {
-        const newPairs = pairsFromRecord(value, nextIdRef.current)
-        nextIdRef.current += newPairs.length
-        setPairs(newPairs)
-      }
+      setPairs((currentPairs) => {
+        const currentJson = JSON.stringify(toRecord(currentPairs), Object.keys(toRecord(currentPairs)).sort())
+        const newJson = JSON.stringify(value, Object.keys(value).sort())
+        return currentJson === newJson ? currentPairs : pairsFromRecord(value)
+      })
     }
-  })
+  }, [value])
 
   function handleAdd() {
-    const id = nextIdRef.current++
-    const updated = [...pairs, { id, key: '', val: '' }]
+    const uid = nextUid()
+    const updated = [...pairs, { uid, key: '', val: '' }]
     setPairs(updated)
     onChange(toRecord(updated))
   }
 
-  function handleRemove(id: number) {
-    const updated = pairs.filter((p) => p.id !== id)
+  function handleRemove(uid: string) {
+    const updated = pairs.filter((p) => p.uid !== uid)
     setPairs(updated)
     onChange(toRecord(updated))
   }
 
-  function handleKeyChange(id: number, key: string) {
-    const updated = pairs.map((p) => (p.id === id ? { ...p, key } : p))
+  function handleKeyChange(uid: string, key: string) {
+    const updated = pairs.map((p) => (p.uid === uid ? { ...p, key } : p))
     setPairs(updated)
     onChange(toRecord(updated))
   }
 
-  function handleValChange(id: number, val: string) {
-    const updated = pairs.map((p) => (p.id === id ? { ...p, val } : p))
+  function handleValChange(uid: string, val: string) {
+    const updated = pairs.map((p) => (p.uid === uid ? { ...p, val } : p))
     setPairs(updated)
     onChange(toRecord(updated))
   }
@@ -91,11 +93,11 @@ export function KeyValueEditor({ value, onChange }: KeyValueEditorProps) {
       {pairs.map((p, index) => {
         const isDuplicate = p.key.trim() && (keyCounts[p.key.trim()] ?? 0) > 1
         return (
-          <div key={p.id} className="flex items-center gap-2">
+          <div key={p.uid} className="flex items-center gap-2">
             <div className="flex-1 space-y-0.5">
               <Input
                 value={p.key}
-                onChange={(e) => handleKeyChange(p.id, e.target.value)}
+                onChange={(e) => handleKeyChange(p.uid, e.target.value)}
                 placeholder="key"
                 aria-label={`Attribute key ${index + 1}`}
                 className={isDuplicate ? 'border-destructive' : ''}
@@ -106,7 +108,7 @@ export function KeyValueEditor({ value, onChange }: KeyValueEditorProps) {
             </div>
             <Input
               value={p.val}
-              onChange={(e) => handleValChange(p.id, e.target.value)}
+              onChange={(e) => handleValChange(p.uid, e.target.value)}
               placeholder="value"
               aria-label={`Attribute value ${index + 1}`}
               className="flex-1"
@@ -116,7 +118,7 @@ export function KeyValueEditor({ value, onChange }: KeyValueEditorProps) {
               variant="ghost"
               size="sm"
               className="h-9 w-9 p-0 shrink-0"
-              onClick={() => handleRemove(p.id)}
+              onClick={() => handleRemove(p.uid)}
               aria-label={`Remove attribute ${index + 1}`}
             >
               <Trash2 className="h-4 w-4" />
