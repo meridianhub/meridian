@@ -108,7 +108,6 @@ jobs:
           export PATH="$PWD/node_modules/.bin:$PATH"
           buf generate --template buf.gen.yaml ../api/proto
 
-
       - name: Build frontend
         working-directory: frontend
         env:
@@ -132,6 +131,9 @@ jobs:
       url: https://demo.meridianhub.cloud
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
       - name: Download frontend artifact
         uses: actions/download-artifact@v4
         with:
@@ -147,6 +149,17 @@ jobs:
           source: "frontend-dist/*"
           target: /opt/meridian/frontend/
           strip_components: 1
+          overwrite: true
+
+      - name: Deploy config files via SCP
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DROPLET_IP }}
+          username: root
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          source: "deploy/demo/Caddyfile,deploy/demo/docker-compose.yml,deploy/demo/dex.yaml"
+          target: /opt/meridian/
+          strip_components: 2
           overwrite: true
 
       - name: Deploy via SSH
