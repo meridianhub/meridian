@@ -1,25 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { renderWithProviders } from '@/test/test-utils'
 import { ReconciliationPage } from './index'
 
-function makeQueryClient() {
-  return new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  })
-}
-
-function Wrapper({ children }: { children: React.ReactNode }) {
-  return (
-    <QueryClientProvider client={makeQueryClient()}>
-      <MemoryRouter initialEntries={['/reconciliation']}>
-        <Routes>
-          <Route path="/reconciliation" element={<>{children}</>} />
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>
+function renderPage() {
+  return renderWithProviders(
+    <MemoryRouter initialEntries={['/reconciliation']}>
+      <Routes>
+        <Route path="/reconciliation" element={<ReconciliationPage />} />
+        <Route path="/reconciliation/:runId" element={<div data-testid="detail-page">Detail Page</div>} />
+      </Routes>
+    </MemoryRouter>,
   )
 }
 
@@ -56,7 +49,7 @@ describe('ReconciliationPage - list view', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ runs: [] }), { status: 200 }),
     )
-    render(<ReconciliationPage />, { wrapper: Wrapper })
+    renderPage()
     expect(screen.getByText('Reconciliation')).toBeInTheDocument()
   })
 
@@ -64,7 +57,7 @@ describe('ReconciliationPage - list view', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ runs: sampleRuns }), { status: 200 }),
     )
-    render(<ReconciliationPage />, { wrapper: Wrapper })
+    renderPage()
 
     await waitFor(() => {
       expect(screen.getByText('run-001')).toBeInTheDocument()
@@ -76,7 +69,7 @@ describe('ReconciliationPage - list view', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ runs: sampleRuns }), { status: 200 }),
     )
-    render(<ReconciliationPage />, { wrapper: Wrapper })
+    renderPage()
 
     await waitFor(() => {
       expect(screen.getByText('run-001')).toBeInTheDocument()
@@ -92,7 +85,7 @@ describe('ReconciliationPage - list view', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ runs: sampleRuns }), { status: 200 }),
     )
-    render(<ReconciliationPage />, { wrapper: Wrapper })
+    renderPage()
 
     await waitFor(() => {
       expect(screen.getByText('COMPLETED')).toBeInTheDocument()  // RUN_STATUS_ prefix stripped
@@ -104,7 +97,7 @@ describe('ReconciliationPage - list view', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ runs: sampleRuns }), { status: 200 }),
     )
-    render(<ReconciliationPage />, { wrapper: Wrapper })
+    renderPage()
 
     await waitFor(() => {
       expect(screen.getByText('2026-01-01 – 2026-01-31')).toBeInTheDocument()
@@ -115,7 +108,7 @@ describe('ReconciliationPage - list view', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ runs: [] }), { status: 200 }),
     )
-    render(<ReconciliationPage />, { wrapper: Wrapper })
+    renderPage()
 
     await waitFor(() => {
       expect(screen.getByRole('columnheader', { name: 'Run ID' })).toBeInTheDocument()
@@ -129,7 +122,7 @@ describe('ReconciliationPage - list view', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ runs: [] }), { status: 200 }),
     )
-    render(<ReconciliationPage />, { wrapper: Wrapper })
+    renderPage()
 
     await waitFor(() => {
       expect(screen.getByRole('combobox', { name: /status/i })).toBeInTheDocument()
@@ -142,34 +135,7 @@ describe('ReconciliationPage - list view', () => {
       new Response(JSON.stringify({ runs: sampleRuns }), { status: 200 }),
     )
 
-    let currentPath = '/reconciliation'
-    const RouterWrapper = ({ children }: { children: React.ReactNode }) => {
-      const qc = makeQueryClient()
-      return (
-        <QueryClientProvider client={qc}>
-          <MemoryRouter initialEntries={['/reconciliation']}>
-            <Routes>
-              <Route path="/reconciliation" element={<>{children}</>} />
-              <Route
-                path="/reconciliation/:runId"
-                element={
-                  <div
-                    data-testid="detail-page"
-                    ref={(el) => {
-                      if (el) currentPath = window.location.pathname
-                    }}
-                  >
-                    Detail Page
-                  </div>
-                }
-              />
-            </Routes>
-          </MemoryRouter>
-        </QueryClientProvider>
-      )
-    }
-
-    render(<ReconciliationPage />, { wrapper: RouterWrapper })
+    renderPage()
 
     await waitFor(() => {
       expect(screen.getByText('run-001')).toBeInTheDocument()
@@ -186,12 +152,11 @@ describe('ReconciliationPage - list view', () => {
     await waitFor(() => {
       expect(screen.getByTestId('detail-page')).toBeInTheDocument()
     })
-    void currentPath
   })
 
   it('shows error state when fetch fails', async () => {
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Network error'))
-    render(<ReconciliationPage />, { wrapper: Wrapper })
+    renderPage()
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument()
@@ -202,10 +167,18 @@ describe('ReconciliationPage - list view', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ runs: [] }), { status: 200 }),
     )
-    render(<ReconciliationPage />, { wrapper: Wrapper })
+    renderPage()
 
     await waitFor(() => {
       expect(screen.getByTestId('empty-state')).toBeInTheDocument()
     })
+  })
+
+  it('renders Start Reconciliation button in header', () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ runs: [] }), { status: 200 }),
+    )
+    renderPage()
+    expect(screen.getByRole('button', { name: /start reconciliation/i })).toBeInTheDocument()
   })
 })
