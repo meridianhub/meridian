@@ -6,6 +6,8 @@ import { TimeDisplay } from '@/components/shared/time-display'
 import { StatusBadge } from '@/components/shared/status-badge'
 import { useClients } from '@/api/context'
 import { Card } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { RegisterPartyDialog } from './dialogs/register-party-dialog'
 
 export interface Party {
   partyId: string
@@ -30,6 +32,7 @@ interface ListPartiesResult {
 export function PartiesPage() {
   const navigate = useNavigate()
   const clients = useClients()
+  const [registerOpen, setRegisterOpen] = React.useState(false)
 
   const columns: ColumnDef<Party>[] = [
     {
@@ -120,12 +123,17 @@ export function PartiesPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Parties</h1>
-        <p className="mt-2 text-muted-foreground">
-          Manage parties, their demographics, and linked accounts.
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Parties</h1>
+          <p className="mt-2 text-muted-foreground">
+            Manage parties, their demographics, and linked accounts.
+          </p>
+        </div>
+        <Button onClick={() => setRegisterOpen(true)}>Register Party</Button>
       </div>
+
+      <RegisterPartyDialog open={registerOpen} onOpenChange={setRegisterOpen} />
 
       <Card className="p-6">
         <DataTable
