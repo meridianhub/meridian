@@ -75,7 +75,7 @@ function NodeRow({ node, depth, asAt, onAddChild }: NodeRowProps) {
         <Button
           variant="ghost"
           size="sm"
-          className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 shrink-0"
+          className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 shrink-0"
           onClick={() => onAddChild(node.id)}
           aria-label={`Add child to ${node.id}`}
         >

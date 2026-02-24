@@ -281,8 +281,9 @@ describe('CreateNodeDialog - submission', () => {
       nodeType: undefined,
       parentId: undefined,
     })
-    // attributes should include code and displayName
-    expect(callArgs.attributes).toBeDefined()
+    // attributes should include code and displayName as protobuf Struct string values
+    expect(callArgs.attributes?.fields?.code?.kind?.value).toBe('REGION_EU')
+    expect(callArgs.attributes?.fields?.displayName?.kind?.value).toBe('Europe')
   })
 
   it('includes nodeType when provided', async () => {

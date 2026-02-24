@@ -103,10 +103,12 @@ export function CreateNodeDialog({ open, onOpenChange, defaultParentId }: Create
 
   const mutation = useMutation({
     mutationFn: async () => {
+      // User-provided extra attributes are merged first; code, displayName, and
+      // description always win to prevent the KeyValueEditor from overriding them.
       const attrs: Record<string, unknown> = {
+        ...formData.attributes,
         code: formData.code.trim(),
         displayName: formData.displayName.trim(),
-        ...formData.attributes,
       }
       if (formData.description.trim()) {
         attrs.description = formData.description.trim()

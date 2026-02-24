@@ -14,47 +14,69 @@ interface KVPair {
   val: string
 }
 
-function pairsFromRecord(record: Record<string, string>): KVPair[] {
-  return Object.entries(record).map(([key, val], i) => ({ id: i, key, val }))
+function pairsFromRecord(record: Record<string, string>, startId: number): KVPair[] {
+  return Object.entries(record).map(([key, val], i) => ({ id: startId + i, key, val }))
 }
 
-let nextId = 0
+function toRecord(pairs: KVPair[]): Record<string, string> {
+  const record: Record<string, string> = {}
+  for (const p of pairs) {
+    if (p.key.trim()) {
+      record[p.key.trim()] = p.val
+    }
+  }
+  return record
+}
 
 export function KeyValueEditor({ value, onChange }: KeyValueEditorProps) {
-  const [pairs, setPairs] = React.useState<KVPair[]>(() => pairsFromRecord(value))
+  const nextIdRef = React.useRef(0)
 
-  function emit(updated: KVPair[]) {
-    const record: Record<string, string> = {}
-    for (const p of updated) {
-      if (p.key.trim()) {
-        record[p.key.trim()] = p.val
+  const [pairs, setPairs] = React.useState<KVPair[]>(() => {
+    const initial = pairsFromRecord(value, nextIdRef.current)
+    nextIdRef.current += initial.length
+    return initial
+  })
+
+  // Sync pairs when external value is reset (e.g., dialog reset)
+  const prevValueRef = React.useRef(value)
+  React.useEffect(() => {
+    if (prevValueRef.current !== value) {
+      prevValueRef.current = value
+      // Only reset if the external value is structurally different from current internal state
+      const currentRecord = toRecord(pairs)
+      const currentJson = JSON.stringify(currentRecord, Object.keys(currentRecord).sort())
+      const newJson = JSON.stringify(value, Object.keys(value).sort())
+      if (currentJson !== newJson) {
+        const newPairs = pairsFromRecord(value, nextIdRef.current)
+        nextIdRef.current += newPairs.length
+        setPairs(newPairs)
       }
     }
-    onChange(record)
-  }
+  })
 
   function handleAdd() {
-    const updated = [...pairs, { id: ++nextId, key: '', val: '' }]
+    const id = nextIdRef.current++
+    const updated = [...pairs, { id, key: '', val: '' }]
     setPairs(updated)
-    emit(updated)
+    onChange(toRecord(updated))
   }
 
   function handleRemove(id: number) {
     const updated = pairs.filter((p) => p.id !== id)
     setPairs(updated)
-    emit(updated)
+    onChange(toRecord(updated))
   }
 
   function handleKeyChange(id: number, key: string) {
     const updated = pairs.map((p) => (p.id === id ? { ...p, key } : p))
     setPairs(updated)
-    emit(updated)
+    onChange(toRecord(updated))
   }
 
   function handleValChange(id: number, val: string) {
     const updated = pairs.map((p) => (p.id === id ? { ...p, val } : p))
     setPairs(updated)
-    emit(updated)
+    onChange(toRecord(updated))
   }
 
   // Detect duplicate keys
