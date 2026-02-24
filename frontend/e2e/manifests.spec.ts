@@ -399,10 +399,17 @@ test.describe('Manifest Management Flow', () => {
       })
 
       const manifestJson = loadEnergyManifest()
+
+      // Wait for the GetCurrentManifest mock to respond after navigation
+      const responsePromise = page.waitForResponse(
+        (resp) => resp.url().includes('GetCurrentManifest'),
+        { timeout: 15_000 },
+      )
       await navigateTo(page, '/manifests')
+      await responsePromise
 
       // Verify manifest is already shown
-      await expect(page.getByTestId('manifest-current-view')).toBeVisible({ timeout: 10_000 })
+      await expect(page.getByTestId('manifest-current-view')).toBeVisible({ timeout: 15_000 })
 
       // Open apply dialog and re-apply same manifest
       await page.getByRole('button', { name: 'Apply Manifest' }).click()
