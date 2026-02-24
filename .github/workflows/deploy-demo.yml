@@ -111,7 +111,7 @@ jobs:
             until [ $attempt -ge $max_attempts ]; do
               attempt=$((attempt+1))
               echo "Health check attempt $attempt/$max_attempts"
-              if curl -sf http://localhost:8090/healthz > /dev/null 2>&1; then
+              if curl -sf http://localhost:80/healthz -H 'Host: demo.meridianhub.cloud' > /dev/null 2>&1; then
                 echo "Service is healthy"
                 exit 0
               fi
