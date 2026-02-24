@@ -34,7 +34,6 @@ interface FormData {
   displayName: string
   dimension: string
   decimalPlaces: string
-  symbol: string
   description: string
 }
 
@@ -43,7 +42,6 @@ interface FormErrors {
   displayName?: string
   dimension?: string
   decimalPlaces?: string
-  symbol?: string
   description?: string
   general?: string
 }
@@ -58,7 +56,6 @@ const INITIAL_FORM: FormData = {
   displayName: '',
   dimension: '',
   decimalPlaces: '0',
-  symbol: '',
   description: '',
 }
 
@@ -138,10 +135,6 @@ export function RegisterInstrumentDialog({ open, onOpenChange }: RegisterInstrum
       next.decimalPlaces = 'Decimal places must be a whole number'
     } else if (dp < 0 || dp > 18) {
       next.decimalPlaces = 'Decimal places must be between 0 and 18'
-    }
-
-    if (formData.symbol && (formData.symbol.length < 1 || formData.symbol.length > 5)) {
-      next.symbol = 'Symbol must be between 1 and 5 characters'
     }
 
     if (formData.description && formData.description.length > 1000) {
@@ -288,26 +281,6 @@ export function RegisterInstrumentDialog({ open, onOpenChange }: RegisterInstrum
               {errors.decimalPlaces && (
                 <p id="instrument-decimal-places-error" className="text-sm text-destructive">
                   {errors.decimalPlaces}
-                </p>
-              )}
-            </div>
-
-            <div className="space-y-1">
-              <label htmlFor="instrument-symbol" className="text-sm font-medium">
-                Symbol
-              </label>
-              <Input
-                id="instrument-symbol"
-                value={formData.symbol}
-                onChange={handleChange('symbol')}
-                placeholder="$ or kWh"
-                aria-label="Symbol"
-                aria-describedby={errors.symbol ? 'instrument-symbol-error' : undefined}
-                maxLength={5}
-              />
-              {errors.symbol && (
-                <p id="instrument-symbol-error" className="text-sm text-destructive">
-                  {errors.symbol}
                 </p>
               )}
             </div>

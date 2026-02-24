@@ -82,9 +82,8 @@ describe('RegisterInstrumentDialog', () => {
     expect(screen.getByLabelText(/decimal places/i)).toBeInTheDocument()
   })
 
-  it('renders optional form fields', () => {
+  it('renders optional description field', () => {
     renderDialog()
-    expect(screen.getByLabelText(/symbol/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/description/i)).toBeInTheDocument()
   })
 
