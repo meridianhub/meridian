@@ -38,7 +38,7 @@ services:
     # Not exposed to host — accessed only by meridian on the internal network
 
   dex:
-    image: ghcr.io/dexidp/dex:v2.41.1
+    image: ghcr.io/dexidp/dex:v2.41.1-alpine
     restart: unless-stopped
     command: ["dex", "serve", "/etc/dex/config.yaml"]
     volumes:
@@ -85,6 +85,11 @@ services:
       # --- Authentication (Dex OIDC) ---
       AUTH_ENABLED: ${AUTH_ENABLED:-true}
       JWKS_URL: ${JWKS_URL:-http://dex:5556/dex/keys}
+      JWKS_CACHE_TTL: ${JWKS_CACHE_TTL:-}
+      JWKS_REFRESH_TTL: ${JWKS_REFRESH_TTL:-}
+      JWT_ISSUER: ${JWT_ISSUER:-}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-}
+      API_KEYS: ${API_KEYS:-}
       BASE_DOMAIN: ${BASE_DOMAIN:-demo.meridianhub.cloud}
       LOCAL_DEV_MODE: ${LOCAL_DEV_MODE:-false}
 
