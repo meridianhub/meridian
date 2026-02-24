@@ -31,6 +31,13 @@ interface ListMappingsResult {
   nextPageToken?: string
 }
 
+// Map string enum names to proto numeric values for ListMappingsRequest.status
+const STATUS_MAP: Record<string, 0 | 1 | 2 | 3> = {
+  MAPPING_STATUS_DRAFT: 1,
+  MAPPING_STATUS_ACTIVE: 2,
+  MAPPING_STATUS_DEPRECATED: 3,
+}
+
 export function MappingsPage() {
   const navigate = useNavigate()
   const clients = useApiClients()
@@ -94,13 +101,6 @@ export function MappingsPage() {
       ],
     },
   ]
-
-  // Map string enum names to proto numeric values for ListMappingsRequest.status
-  const STATUS_MAP: Record<string, 0 | 1 | 2 | 3> = {
-    MAPPING_STATUS_DRAFT: 1,
-    MAPPING_STATUS_ACTIVE: 2,
-    MAPPING_STATUS_DEPRECATED: 3,
-  }
 
   const queryFn = async (params: ListMappingsParams): Promise<ListMappingsResult> => {
     const response = await clients.mapping.listMappings({
