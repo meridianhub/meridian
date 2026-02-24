@@ -81,10 +81,10 @@ function LoginPage() {
           <h1 className="text-2xl font-semibold">Meridian Operations Console</h1>
           <p className="mt-2 text-muted-foreground">Please sign in to continue.</p>
         </div>
-        {import.meta.env.DEV && (
+        {(import.meta.env.DEV || import.meta.env.VITE_DEMO_MODE === 'true') && (
           <div className="space-y-2">
             <p className="text-xs text-muted-foreground uppercase tracking-wider">
-              Development Login
+              {import.meta.env.DEV ? 'Development Login' : 'Demo Login'}
             </p>
             <div className="flex gap-2 justify-center">
               <button
@@ -248,7 +248,7 @@ function AuthenticatedApp() {
   return (
     <TenantProvider>
       <ApiClientBridge>
-        {(import.meta.env.DEV || import.meta.env.VITE_E2E_MODE === 'true') && <DevTenantAutoSelector />}
+        {(import.meta.env.DEV || import.meta.env.VITE_E2E_MODE === 'true' || import.meta.env.VITE_DEMO_MODE === 'true') && <DevTenantAutoSelector />}
         <TooltipProvider>
           <BrowserRouter>
             <Routes>

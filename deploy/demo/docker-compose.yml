@@ -1,11 +1,10 @@
 # Meridian demo deployment stack
 #
 # Services:
-#   postgres        - PostgreSQL 16 (internal only, not exposed to host)
-#   keycloak        - Identity provider (OAuth 2.0 / OIDC)
-#   keycloak-setup  - One-shot init container that configures Keycloak realm/client/user
-#   meridian        - Unified binary; starts after postgres + keycloak are healthy
-#   caddy           - Reverse proxy; exposes 80/443, terminates TLS via Cloudflare Origin Certificate
+#   postgres   - PostgreSQL 16 (internal only, not exposed to host)
+#   dex        - Lightweight OIDC identity provider (~20MB RAM)
+#   meridian   - Unified binary; starts after postgres + dex are healthy
+#   caddy      - Reverse proxy; exposes 80/443, terminates TLS via Cloudflare Origin Certificate
 #
 # Usage:
 #   cp deploy/demo/.env.demo.example /opt/meridian/.env
@@ -15,6 +14,8 @@
 # Directory layout expected on the host:
 #   /opt/meridian/.env            - Filled-in environment file
 #   /opt/meridian/Caddyfile       - Caddy configuration
+#   /opt/meridian/dex.yaml        - Dex OIDC configuration
+#   /opt/meridian/frontend/       - Built frontend static files (deployed by CI)
 #   /opt/meridian/certs/          - Cloudflare Origin Certificate files
 #     origin-cert.pem
 #     origin-key.pem
@@ -37,83 +38,22 @@ services:
       start_period: 10s
     # Not exposed to host — accessed only by meridian on the internal network
 
-  keycloak:
-    image: quay.io/keycloak/keycloak:26.0
+  dex:
+    image: ghcr.io/dexidp/dex:v2.41.1-alpine
     restart: unless-stopped
-    command: ["start-dev", "--http-port=8080"]
-    environment:
-      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
-      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
-      KC_HTTP_RELATIVE_PATH: /
-      KC_HOSTNAME_STRICT: "false"
-      KC_HOSTNAME_STRICT_HTTPS: "false"
-      KC_HEALTH_ENABLED: "true"
+    command: ["dex", "serve", "/etc/dex/config.yaml"]
+    volumes:
+      - /opt/meridian/dex.yaml:/etc/dex/config.yaml:ro
+      - dex_data:/var/dex
     healthcheck:
-      test: ["CMD", "bash", "-lc", "{ printf 'HEAD /health/ready HTTP/1.0\r\n\r\n' >&0; grep -q 'HTTP/1.0 200'; } 0<>/dev/tcp/localhost/9000"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 30s
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:5556/dex/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
     # Not exposed to host — accessed by meridian on the internal network.
-    # Expose port 18080 on the host for local token acquisition during development:
-    #   ports: ["18080:8080"]
-
-  keycloak-setup:
-    image: curlimages/curl:8.12.1
-    depends_on:
-      keycloak:
-        condition: service_healthy
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        set -e
-        KEYCLOAK_URL="http://keycloak:8080"
-        ADMIN_USER="$${KEYCLOAK_ADMIN:-admin}"
-        ADMIN_PASSWORD="$${KEYCLOAK_ADMIN_PASSWORD:-admin}"
-        REALM="meridian"
-        CLIENT_ID="meridian-service"
-        TEST_USER="developer@meridian.local"
-        TEST_PASSWORD="developer"
-
-        echo "Getting admin token..."
-        TOKEN=$$(curl -sf -X POST "$$KEYCLOAK_URL/realms/master/protocol/openid-connect/token" \
-          -d "username=$$ADMIN_USER" -d "password=$$ADMIN_PASSWORD" \
-          -d "grant_type=password" -d "client_id=admin-cli" | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')
-
-        if [ -z "$$TOKEN" ]; then echo "Failed to get admin token"; exit 1; fi
-
-        echo "Creating realm..."
-        curl -sf -o /dev/null -w "%{http_code}" -X POST "$$KEYCLOAK_URL/admin/realms" \
-          -H "Authorization: Bearer $$TOKEN" -H "Content-Type: application/json" \
-          -d '{"realm":"'"$$REALM"'","enabled":true,"displayName":"Meridian","accessTokenLifespan":3600}' || true
-
-        echo "Creating roles..."
-        curl -sf -o /dev/null -X POST "$$KEYCLOAK_URL/admin/realms/$$REALM/roles" \
-          -H "Authorization: Bearer $$TOKEN" -H "Content-Type: application/json" \
-          -d '{"name":"user","description":"Standard user role"}' 2>/dev/null || true
-        curl -sf -o /dev/null -X POST "$$KEYCLOAK_URL/admin/realms/$$REALM/roles" \
-          -H "Authorization: Bearer $$TOKEN" -H "Content-Type: application/json" \
-          -d '{"name":"admin","description":"Administrator role"}' 2>/dev/null || true
-
-        echo "Creating client..."
-        curl -sf -o /dev/null -X POST "$$KEYCLOAK_URL/admin/realms/$$REALM/clients" \
-          -H "Authorization: Bearer $$TOKEN" -H "Content-Type: application/json" \
-          -d '{"clientId":"'"$$CLIENT_ID"'","enabled":true,"publicClient":true,"directAccessGrantsEnabled":true,"standardFlowEnabled":true,"redirectUris":["http://localhost:*","https://*.meridianhub.cloud/*"],"webOrigins":["+"]}' 2>/dev/null || true
-
-        echo "Creating test user..."
-        curl -sf -o /dev/null -X POST "$$KEYCLOAK_URL/admin/realms/$$REALM/users" \
-          -H "Authorization: Bearer $$TOKEN" -H "Content-Type: application/json" \
-          -d '{"username":"'"$$TEST_USER"'","email":"'"$$TEST_USER"'","emailVerified":true,"enabled":true,"firstName":"Developer","lastName":"User","credentials":[{"type":"password","value":"'"$$TEST_PASSWORD"'","temporary":false}]}' 2>/dev/null || true
-
-        echo "Keycloak setup complete!"
-        echo "  Realm:     $$REALM"
-        echo "  Client:    $$CLIENT_ID"
-        echo "  User:      $$TEST_USER / $$TEST_PASSWORD"
-        echo "  JWKS:      $$KEYCLOAK_URL/realms/$$REALM/protocol/openid-connect/certs"
-    environment:
-      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
-      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
-    restart: "no"
+    # Expose port 15556 on the host for local token acquisition during development:
+    #   ports: ["15556:5556"]
 
   meridian:
     image: ${MERIDIAN_IMAGE:-ghcr.io/meridianhub/meridian:demo}
@@ -121,7 +61,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      keycloak:
+      dex:
         condition: service_healthy
     environment:
       # --- Application ---
@@ -143,9 +83,14 @@ services:
       MARKET_INFORMATION_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
       REFERENCE_DATA_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
 
-      # --- Authentication (Keycloak OIDC) ---
+      # --- Authentication (Dex OIDC) ---
       AUTH_ENABLED: ${AUTH_ENABLED:-true}
-      JWKS_URL: ${JWKS_URL:-http://keycloak:8080/realms/meridian/protocol/openid-connect/certs}
+      JWKS_URL: ${JWKS_URL:-http://dex:5556/dex/keys}
+      JWKS_CACHE_TTL: ${JWKS_CACHE_TTL:-}
+      JWKS_REFRESH_TTL: ${JWKS_REFRESH_TTL:-}
+      JWT_ISSUER: ${JWT_ISSUER:-}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-}
+      API_KEYS: ${API_KEYS:-}
       BASE_DOMAIN: ${BASE_DOMAIN:-demo.meridianhub.cloud}
       LOCAL_DEV_MODE: ${LOCAL_DEV_MODE:-false}
 
@@ -180,10 +125,12 @@ services:
     volumes:
       - /opt/meridian/Caddyfile:/etc/caddy/Caddyfile:ro
       - /opt/meridian/certs:/etc/caddy/certs:ro
+      - /opt/meridian/frontend:/var/www/html:ro
       - caddy_data:/data
       - caddy_config:/config
 
 volumes:
   postgres_data:
+  dex_data:
   caddy_data:
   caddy_config:
