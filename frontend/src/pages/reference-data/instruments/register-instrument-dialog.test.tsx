@@ -5,18 +5,20 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter } from 'react-router-dom'
 import { TooltipProvider } from '@/components/ui/tooltip'
 
-const mockRegisterInstrument = vi.fn().mockResolvedValue({
-  instrument: {
-    id: 'aaaaaaaa-0000-0000-0000-000000000001',
-    code: 'KWH',
-    version: 1,
-    dimension: 2,
-    precision: 6,
-    status: 1,
-    displayName: 'Kilowatt Hour',
-    description: '',
-  },
-})
+const mockRegisterInstrument = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({
+    instrument: {
+      id: 'aaaaaaaa-0000-0000-0000-000000000001',
+      code: 'KWH',
+      version: 1,
+      dimension: 2,
+      precision: 6,
+      status: 1,
+      displayName: 'Kilowatt Hour',
+      description: '',
+    },
+  }),
+)
 
 vi.mock('@/api/context', () => ({
   useApiClients: vi.fn(() => ({
@@ -218,6 +220,33 @@ describe('RegisterInstrumentDialog', () => {
 
     expect(screen.getByLabelText(/code/i)).toHaveValue('')
     expect(screen.getByLabelText(/display name/i)).toHaveValue('')
+  })
+
+  it('invalidates instruments query after successful registration', async () => {
+    const user = userEvent.setup()
+    const qc = makeQueryClient()
+    vi.spyOn(qc, 'invalidateQueries')
+
+    render(
+      <QueryClientProvider client={qc}>
+        <TooltipProvider>
+          <BrowserRouter>
+            <RegisterInstrumentDialog open={true} onOpenChange={vi.fn()} />
+          </BrowserRouter>
+        </TooltipProvider>
+      </QueryClientProvider>,
+    )
+
+    await user.type(screen.getByLabelText(/code/i), 'KWH')
+    await user.type(screen.getByLabelText(/display name/i), 'Kilowatt Hour')
+    await user.selectOptions(screen.getByLabelText(/dimension/i), '2')
+    await user.click(screen.getByRole('button', { name: /register instrument/i }))
+
+    await waitFor(() => {
+      expect(qc.invalidateQueries).toHaveBeenCalledWith(
+        expect.objectContaining({ queryKey: expect.arrayContaining(['reference', 'instruments']) }),
+      )
+    })
   })
 
   it('closes dialog on Cancel button click', async () => {
