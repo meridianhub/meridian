@@ -115,7 +115,9 @@ func TestRunMigrations_Postgres(t *testing.T) {
 	err = caConn.QueryRow(ctx,
 		`SELECT EXISTS(
 			SELECT 1 FROM information_schema.columns
-			WHERE table_name = 'account' AND column_name = 'status'
+			WHERE table_schema = 'public'
+			  AND table_name = 'account'
+			  AND column_name = 'status'
 		)`,
 	).Scan(&hasStatus)
 	if err != nil {
