@@ -1,8 +1,12 @@
 // Package migrations provides an embedded migration runner that applies
-// SQL migration files from an embed.FS to CockroachDB databases.
+// SQL migration files from an embed.FS to CockroachDB or PostgreSQL databases.
 //
 // It handles database and user provisioning, migration tracking via
 // a _meridian_migrations table, and idempotent re-runs.
+//
+// The driver is selected via the DB_DRIVER environment variable:
+//   - "cockroachdb" (default): connects on port 26257, uses CockroachDB DDL
+//   - "postgres": connects on port 5432, uses standard PostgreSQL DDL
 package migrations
 
 import (
@@ -12,16 +16,41 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/url"
+	"os"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
+
+// Driver identifies the target database engine.
+type Driver string
+
+const (
+	// DriverCockroachDB is the default driver for CockroachDB.
+	DriverCockroachDB Driver = "cockroachdb"
+	// DriverPostgres targets standard PostgreSQL 13+.
+	DriverPostgres Driver = "postgres"
+)
+
+// DriverFromEnv reads DB_DRIVER from the environment, defaulting to CockroachDB.
+func DriverFromEnv() Driver {
+	switch strings.ToLower(os.Getenv("DB_DRIVER")) {
+	case "postgres", "postgresql":
+		return DriverPostgres
+	default:
+		return DriverCockroachDB
+	}
+}
 
 // ErrUnknownService is returned when a migration file belongs to a service
 // that has no entry in ServiceDatabases.
 var ErrUnknownService = errors.New("unknown service: no database mapping")
+
+// ErrUnsupportedDriver is returned when an unrecognized Driver value is used.
+var ErrUnsupportedDriver = errors.New("unsupported driver")
 
 // ServiceDatabase maps a service directory name to its target database, user, and password.
 type ServiceDatabase struct {
@@ -60,12 +89,24 @@ type serviceMigration struct {
 // RunMigrations discovers migration files from the provided embed.FS, provisions
 // databases and users as superuser, then applies unapplied migrations in order.
 //
-// The superuserDSN should connect to CockroachDB as a privileged user (e.g., root)
-// capable of CREATE DATABASE, CREATE USER, and GRANT operations.
+// The superuserDSN should connect to the database as a privileged user (e.g., root
+// for CockroachDB, postgres for PostgreSQL) capable of CREATE DATABASE, CREATE USER,
+// and GRANT operations.
+//
+// The driver is read from the DB_DRIVER environment variable (default: cockroachdb).
 //
 // Migration state is tracked per-database in a _meridian_migrations table.
 // Running this function multiple times is safe (idempotent).
 func RunMigrations(ctx context.Context, migrationFS fs.FS, superuserDSN string, logger *slog.Logger) error {
+	driver := DriverFromEnv()
+	return runMigrations(ctx, migrationFS, superuserDSN, driver, logger)
+}
+
+// runMigrations is the internal implementation, accepting an explicit driver
+// to allow testing without environment variable manipulation.
+func runMigrations(ctx context.Context, migrationFS fs.FS, superuserDSN string, driver Driver, logger *slog.Logger) error {
+	logger.Info("running migrations", "driver", driver)
+
 	migrations, err := discoverMigrations(migrationFS)
 	if err != nil {
 		return fmt.Errorf("discover migrations: %w", err)
@@ -87,7 +128,7 @@ func RunMigrations(ctx context.Context, migrationFS fs.FS, superuserDSN string, 
 	}
 
 	// Connect as superuser to provision databases and users, then close.
-	if err := provisionAll(ctx, superuserDSN, dbSet, logger); err != nil {
+	if err := provisionAll(ctx, superuserDSN, dbSet, driver, logger); err != nil {
 		return err
 	}
 
@@ -97,9 +138,9 @@ func RunMigrations(ctx context.Context, migrationFS fs.FS, superuserDSN string, 
 	// Apply migrations to each database.
 	for dbName, dbMigrations := range byDB {
 		sdb := dbMigrations[0].sdb
-		dsn := buildServiceDSN(superuserDSN, sdb)
+		dsn := buildServiceDSN(superuserDSN, sdb, driver)
 
-		if err := applyDatabaseMigrations(ctx, dsn, dbName, dbMigrations, logger); err != nil {
+		if err := applyDatabaseMigrations(ctx, dsn, dbName, dbMigrations, driver, logger); err != nil {
 			return fmt.Errorf("apply migrations to %s: %w", dbName, err)
 		}
 	}
@@ -160,34 +201,127 @@ func discoverMigrations(migrationFS fs.FS) ([]serviceMigration, error) {
 }
 
 // provisionAll connects as superuser, provisions databases, and closes the connection.
-func provisionAll(ctx context.Context, superuserDSN string, databases map[string]ServiceDatabase, logger *slog.Logger) error {
+// For PostgreSQL, it also connects to each provisioned database to grant public schema
+// privileges to the service user (database-level grants alone are insufficient).
+func provisionAll(ctx context.Context, superuserDSN string, databases map[string]ServiceDatabase, driver Driver, logger *slog.Logger) error {
 	superConn, err := pgx.Connect(ctx, superuserDSN)
 	if err != nil {
 		return fmt.Errorf("connect as superuser: %w", err)
 	}
 	defer func() { _ = superConn.Close(ctx) }()
 
-	return provisionDatabases(ctx, superConn, databases, logger)
+	if err := provisionDatabases(ctx, superConn, databases, driver, logger); err != nil {
+		return err
+	}
+
+	// For PostgreSQL, grant public schema privileges per database.
+	// This cannot be done from a connection to a different database.
+	if driver == DriverPostgres {
+		for dbName, sdb := range databases {
+			if err := grantPostgresSchemaPrivileges(ctx, superuserDSN, dbName, sdb, logger); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// grantPostgresSchemaPrivileges connects to the target database as superuser and
+// grants CREATE on the public schema to the service user.
+func grantPostgresSchemaPrivileges(ctx context.Context, superuserDSN string, dbName string, sdb ServiceDatabase, logger *slog.Logger) error {
+	// Build a superuser DSN targeting the specific database (preserve superuser credentials).
+	parsed, err := url.Parse(superuserDSN)
+	if err != nil {
+		return fmt.Errorf("parse superuser DSN: %w", err)
+	}
+	parsed.Path = "/" + dbName
+	if parsed.Port() == "" {
+		parsed.Host = parsed.Hostname() + ":5432"
+	}
+	targetDSN := parsed.String()
+
+	conn, err := pgx.Connect(ctx, targetDSN)
+	if err != nil {
+		return fmt.Errorf("connect to %s for schema grants: %w", dbName, err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+
+	if _, err := conn.Exec(ctx, fmt.Sprintf("GRANT ALL ON SCHEMA public TO %s", quoteIdent(sdb.User))); err != nil {
+		return fmt.Errorf("schema grant on %s: %w", dbName, err)
+	}
+	logger.Debug("granted schema privileges", "database", dbName, "user", sdb.User)
+	return nil
 }
 
 // provisionDatabases creates databases and users as needed.
 // Each DDL statement is executed individually because pgx v5's extended
 // protocol does not support multi-statement query strings.
-func provisionDatabases(ctx context.Context, conn *pgx.Conn, databases map[string]ServiceDatabase, logger *slog.Logger) error {
+//
+// CockroachDB supports CREATE DATABASE IF NOT EXISTS and CREATE USER IF NOT EXISTS.
+// PostgreSQL does not have IF NOT EXISTS on CREATE DATABASE, so we attempt the creation
+// and ignore SQLSTATE 42P04 (duplicate_database) if it already exists.
+func provisionDatabases(ctx context.Context, conn *pgx.Conn, databases map[string]ServiceDatabase, driver Driver, logger *slog.Logger) error {
 	for dbName, sdb := range databases {
-		logger.Info("provisioning database", "database", dbName, "user", sdb.User)
+		logger.Info("provisioning database", "database", dbName, "user", sdb.User, "driver", driver)
 
-		stmts := []string{
-			fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s", quoteIdent(dbName)),
-			fmt.Sprintf("CREATE USER IF NOT EXISTS %s", quoteIdent(sdb.User)),
-			fmt.Sprintf("GRANT ALL ON DATABASE %s TO %s", quoteIdent(dbName), quoteIdent(sdb.User)),
-		}
-		for _, stmt := range stmts {
-			if _, err := conn.Exec(ctx, stmt); err != nil {
-				return fmt.Errorf("provision %s: %w", dbName, err)
+		switch driver {
+		case DriverPostgres:
+			if err := provisionPostgresDatabase(ctx, conn, dbName, sdb, logger); err != nil {
+				return err
 			}
+		case DriverCockroachDB:
+			stmts := []string{
+				fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s", quoteIdent(dbName)),
+				fmt.Sprintf("CREATE USER IF NOT EXISTS %s", quoteIdent(sdb.User)),
+				fmt.Sprintf("GRANT ALL ON DATABASE %s TO %s", quoteIdent(dbName), quoteIdent(sdb.User)),
+			}
+			for _, stmt := range stmts {
+				if _, err := conn.Exec(ctx, stmt); err != nil {
+					return fmt.Errorf("provision %s: %w", dbName, err)
+				}
+			}
+		default:
+			return fmt.Errorf("%w: %q", ErrUnsupportedDriver, driver)
 		}
 	}
+	return nil
+}
+
+// provisionPostgresDatabase creates a database and user for PostgreSQL if they do not exist.
+//
+// PostgreSQL does not support CREATE DATABASE IF NOT EXISTS or CREATE USER IF NOT EXISTS.
+// We attempt the creation and ignore idempotency errors:
+//   - 42P04 (duplicate_database) for CREATE DATABASE
+//   - 42710 (duplicate_object) for CREATE USER
+//
+// We connect to the target database separately to grant schema privileges,
+// because the superuser connection may be to a different database.
+func provisionPostgresDatabase(ctx context.Context, superConn *pgx.Conn, dbName string, sdb ServiceDatabase, logger *slog.Logger) error {
+	// 1. Create database — tolerate "already exists" (42P04).
+	if _, err := superConn.Exec(ctx, fmt.Sprintf("CREATE DATABASE %s", quoteIdent(dbName))); err != nil {
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "42P04" {
+			return fmt.Errorf("provision %s (create database): %w", dbName, err)
+		}
+		logger.Debug("database already exists, skipping creation", "database", dbName)
+	}
+
+	// 2. Create user — tolerate "already exists" (42710 = duplicate_object).
+	// PostgreSQL has no CREATE USER IF NOT EXISTS syntax.
+	if _, err := superConn.Exec(ctx, fmt.Sprintf("CREATE USER %s", quoteIdent(sdb.User))); err != nil {
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "42710" {
+			return fmt.Errorf("provision %s (create user): %w", dbName, err)
+		}
+		logger.Debug("user already exists, skipping creation", "user", sdb.User)
+	}
+
+	// 3. Grant database-level privileges.
+	if _, err := superConn.Exec(ctx, fmt.Sprintf("GRANT ALL PRIVILEGES ON DATABASE %s TO %s", quoteIdent(dbName), quoteIdent(sdb.User))); err != nil {
+		return fmt.Errorf("provision %s (grant db): %w", dbName, err)
+	}
+
 	return nil
 }
 
@@ -227,14 +361,14 @@ func groupByDatabase(migrations []serviceMigration) map[string][]dbMigration {
 }
 
 // applyDatabaseMigrations connects to a specific database and applies unapplied migrations.
-func applyDatabaseMigrations(ctx context.Context, dsn, dbName string, migrations []dbMigration, logger *slog.Logger) error {
+func applyDatabaseMigrations(ctx context.Context, dsn, dbName string, migrations []dbMigration, driver Driver, logger *slog.Logger) error {
 	conn, err := pgx.Connect(ctx, dsn)
 	if err != nil {
 		return fmt.Errorf("connect to %s: %w", dbName, err)
 	}
 	defer func() { _ = conn.Close(ctx) }()
 
-	if err := ensureMigrationsTable(ctx, conn); err != nil {
+	if err := ensureMigrationsTable(ctx, conn, driver); err != nil {
 		return fmt.Errorf("create tracking table: %w", err)
 	}
 
@@ -265,17 +399,37 @@ func applyDatabaseMigrations(ctx context.Context, dsn, dbName string, migrations
 }
 
 // ensureMigrationsTable creates the _meridian_migrations tracking table if it does not exist.
-func ensureMigrationsTable(ctx context.Context, conn *pgx.Conn) error {
-	_, err := conn.Exec(ctx, `
-		CREATE TABLE IF NOT EXISTS _meridian_migrations (
-			id          INT8 NOT NULL DEFAULT unique_rowid(),
-			service     VARCHAR(255) NOT NULL,
-			filename    VARCHAR(255) NOT NULL,
-			applied_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-			PRIMARY KEY (id),
-			UNIQUE (service, filename)
-		)
-	`)
+//
+// CockroachDB uses unique_rowid() for the default ID. PostgreSQL uses BIGSERIAL (a standard
+// auto-incrementing integer sequence). Both produce unique INT8 primary keys.
+func ensureMigrationsTable(ctx context.Context, conn *pgx.Conn, driver Driver) error {
+	var ddl string
+	switch driver {
+	case DriverPostgres:
+		ddl = `
+			CREATE TABLE IF NOT EXISTS _meridian_migrations (
+				id          BIGSERIAL PRIMARY KEY,
+				service     VARCHAR(255) NOT NULL,
+				filename    VARCHAR(255) NOT NULL,
+				applied_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+				UNIQUE (service, filename)
+			)
+		`
+	case DriverCockroachDB:
+		ddl = `
+			CREATE TABLE IF NOT EXISTS _meridian_migrations (
+				id          INT8 NOT NULL DEFAULT unique_rowid(),
+				service     VARCHAR(255) NOT NULL,
+				filename    VARCHAR(255) NOT NULL,
+				applied_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+				PRIMARY KEY (id),
+				UNIQUE (service, filename)
+			)
+		`
+	default:
+		return fmt.Errorf("%w: %q", ErrUnsupportedDriver, driver)
+	}
+	_, err := conn.Exec(ctx, ddl)
 	return err
 }
 
@@ -311,7 +465,9 @@ func recordMigration(ctx context.Context, conn *pgx.Conn, service, filename stri
 // It parses the URL, replaces user/database, and preserves all query parameters
 // (TLS settings, timeouts, etc.). It also sets simple_protocol exec mode so that
 // multi-statement migration files can be executed in a single Exec() call.
-func buildServiceDSN(superuserDSN string, sdb ServiceDatabase) string {
+//
+// The default port is 26257 for CockroachDB and 5432 for PostgreSQL.
+func buildServiceDSN(superuserDSN string, sdb ServiceDatabase, driver Driver) string {
 	parsed, err := url.Parse(superuserDSN)
 	if err != nil {
 		return superuserDSN
@@ -327,9 +483,13 @@ func buildServiceDSN(superuserDSN string, sdb ServiceDatabase) string {
 	// Replace database in path (postgres://user@host:port/database).
 	parsed.Path = "/" + sdb.Database
 
-	// Ensure default port for CockroachDB if not specified.
+	// Ensure default port if not specified.
 	if parsed.Port() == "" {
-		parsed.Host = parsed.Hostname() + ":26257"
+		defaultPort := "26257"
+		if driver == DriverPostgres {
+			defaultPort = "5432"
+		}
+		parsed.Host = parsed.Hostname() + ":" + defaultPort
 	}
 
 	// Enable simple protocol so multi-statement migration SQL files work with pgx v5.
