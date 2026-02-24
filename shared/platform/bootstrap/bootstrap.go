@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/meridianhub/meridian/shared/platform/env"
@@ -41,14 +43,20 @@ type DatabaseConfig struct {
 // with sensible defaults suitable for production workloads.
 //
 // Environment variables:
-//   - DATABASE_URL: Connection string (default: postgres://meridian_user@localhost:26257/meridian?sslmode=disable)
+//   - DATABASE_URL: Connection string. Default port is 26257 for CockroachDB (default)
+//     or 5432 when DB_DRIVER=postgres.
+//   - DB_DRIVER: Database driver ("cockroachdb" default, "postgres" for PostgreSQL).
 //   - DB_MAX_OPEN_CONNS: Maximum open connections (default: 25)
 //   - DB_MAX_IDLE_CONNS: Maximum idle connections (default: 5)
 //   - DB_CONN_MAX_LIFETIME: Connection max lifetime (default: 5m)
 //   - DB_CONN_MAX_IDLE_TIME: Connection max idle time (default: 10m)
 func DefaultDatabaseConfig() DatabaseConfig {
+	defaultDSN := "postgres://meridian_user@localhost:26257/meridian?sslmode=disable"
+	if strings.ToLower(os.Getenv("DB_DRIVER")) == "postgres" || strings.ToLower(os.Getenv("DB_DRIVER")) == "postgresql" {
+		defaultDSN = "postgres://meridian_user@localhost:5432/meridian?sslmode=disable"
+	}
 	return DatabaseConfig{
-		DSN:             env.GetEnvOrDefault("DATABASE_URL", "postgres://meridian_user@localhost:26257/meridian?sslmode=disable"),
+		DSN:             env.GetEnvOrDefault("DATABASE_URL", defaultDSN),
 		MaxOpenConns:    env.GetEnvAsInt("DB_MAX_OPEN_CONNS", 25),
 		MaxIdleConns:    env.GetEnvAsInt("DB_MAX_IDLE_CONNS", 5),
 		ConnMaxLifetime: env.GetEnvAsDuration("DB_CONN_MAX_LIFETIME", 5*time.Minute),

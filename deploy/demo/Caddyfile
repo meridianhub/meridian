@@ -1,0 +1,4 @@
+demo.meridianhub.cloud, *.demo.meridianhub.cloud {
+	tls /etc/caddy/certs/origin-cert.pem /etc/caddy/certs/origin-key.pem
+	reverse_proxy meridian:8090
+}
