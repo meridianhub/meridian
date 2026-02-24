@@ -17,6 +17,10 @@ import { test, expect } from './fixtures'
  * In CI production builds, DevTenantAutoSelector auto-selects the dev tenant
  * asynchronously. Dashboard sub-components (stat cards, quick actions, activity)
  * only render after the tenant is set, so assertions use 15s timeouts.
+ *
+ * CardTitle (shadcn) renders as <div data-slot="card-title">, not <h3>.
+ * Use data-slot selectors instead of getByRole('heading', ...) for card titles.
+ * Stat card titles overlap with Quick Actions text, so scope via data-testid.
  */
 test.describe('Dashboard', () => {
   test.describe('as platform-admin', () => {
@@ -25,17 +29,22 @@ test.describe('Dashboard', () => {
     })
 
     test('renders stat card titles', async ({ platformAdminPage: page }) => {
-      await expect(page.getByText('Payment Orders')).toBeVisible({ timeout: 15_000 })
-      await expect(page.getByText('Booking Logs')).toBeVisible()
-      await expect(page.getByText('Ledger Postings')).toBeVisible()
+      const statCards = page.getByTestId('stat-cards')
+      await expect(statCards.getByText('Payment Orders')).toBeVisible({ timeout: 15_000 })
+      await expect(statCards.getByText('Booking Logs')).toBeVisible()
+      await expect(statCards.getByText('Ledger Postings')).toBeVisible()
     })
 
     test('renders Recent Activity section', async ({ platformAdminPage: page }) => {
-      await expect(page.getByRole('heading', { name: 'Recent Activity' })).toBeVisible({ timeout: 15_000 })
+      await expect(
+        page.locator('[data-slot="card-title"]', { hasText: 'Recent Activity' }),
+      ).toBeVisible({ timeout: 15_000 })
     })
 
     test('renders Quick Actions section', async ({ platformAdminPage: page }) => {
-      await expect(page.getByRole('heading', { name: 'Quick Actions' })).toBeVisible({ timeout: 15_000 })
+      await expect(
+        page.locator('[data-slot="card-title"]', { hasText: 'Quick Actions' }),
+      ).toBeVisible({ timeout: 15_000 })
     })
 
     test('shows tenant context subtitle', async ({ platformAdminPage: page }) => {
@@ -55,20 +64,22 @@ test.describe('Dashboard', () => {
     })
 
     test('renders stat card titles', async ({ authenticatedPage: page }) => {
-      await expect(page.getByText('Payment Orders')).toBeVisible({ timeout: 15_000 })
-      await expect(page.getByText('Booking Logs')).toBeVisible()
-      await expect(page.getByText('Ledger Postings')).toBeVisible()
+      const statCards = page.getByTestId('stat-cards')
+      await expect(statCards.getByText('Payment Orders')).toBeVisible({ timeout: 15_000 })
+      await expect(statCards.getByText('Booking Logs')).toBeVisible()
+      await expect(statCards.getByText('Ledger Postings')).toBeVisible()
     })
 
     test('renders activity feed section', async ({ authenticatedPage: page }) => {
-      await expect(page.getByRole('heading', { name: 'Recent Activity' })).toBeVisible({ timeout: 15_000 })
-      // Activity feed shows items, "No recent activity", or loading — all are valid without backend
-      const feed = page.getByRole('heading', { name: 'Recent Activity' }).locator('..')
-      await expect(feed).toBeVisible()
+      await expect(
+        page.locator('[data-slot="card-title"]', { hasText: 'Recent Activity' }),
+      ).toBeVisible({ timeout: 15_000 })
     })
 
     test('renders quick actions section', async ({ authenticatedPage: page }) => {
-      await expect(page.getByRole('heading', { name: 'Quick Actions' })).toBeVisible({ timeout: 15_000 })
+      await expect(
+        page.locator('[data-slot="card-title"]', { hasText: 'Quick Actions' }),
+      ).toBeVisible({ timeout: 15_000 })
     })
 
     test('shows tenant context subtitle', async ({ authenticatedPage: page }) => {
