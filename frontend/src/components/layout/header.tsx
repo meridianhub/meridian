@@ -29,7 +29,7 @@ export function Header({ onMenuToggle, sidebarOpen, sidebarId }: HeaderProps) {
         aria-expanded={sidebarOpen}
         aria-controls={sidebarId}
         onClick={onMenuToggle}
-        className="shrink-0"
+        className="shrink-0 md:hidden"
       >
         <Menu className="size-5" />
       </Button>

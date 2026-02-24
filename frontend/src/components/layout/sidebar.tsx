@@ -54,17 +54,27 @@ interface SidebarProps {
   currentPath?: string
   isOpen?: boolean
   id?: string
+  onClose?: () => void
 }
 
-export function Sidebar({ lens, currentPath = '/', isOpen = false, id }: SidebarProps) {
+export function Sidebar({ lens, currentPath = '/', isOpen = false, id, onClose }: SidebarProps) {
   const showPlatformItems = lens === 'platform'
 
   return (
-    <aside
+    <>
+      {isOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/50 md:hidden"
+          aria-hidden="true"
+          onClick={onClose}
+        />
+      )}
+      <aside
       id={id}
       data-open={String(isOpen)}
       className={cn(
         'flex h-full w-64 flex-col bg-gray-900 text-white transition-transform duration-200',
+        'max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40',
         !isOpen && 'max-md:-translate-x-full',
       )}
     >
@@ -121,5 +131,6 @@ export function Sidebar({ lens, currentPath = '/', isOpen = false, id }: Sidebar
         </ul>
       </nav>
     </aside>
+    </>
   )
 }
