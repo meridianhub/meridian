@@ -95,11 +95,18 @@ export function MappingsPage() {
     },
   ]
 
+  // Map string enum names to proto numeric values for ListMappingsRequest.status
+  const STATUS_MAP: Record<string, 0 | 1 | 2 | 3> = {
+    MAPPING_STATUS_DRAFT: 1,
+    MAPPING_STATUS_ACTIVE: 2,
+    MAPPING_STATUS_DEPRECATED: 3,
+  }
+
   const queryFn = async (params: ListMappingsParams): Promise<ListMappingsResult> => {
     const response = await clients.mapping.listMappings({
       pageToken: params.pageToken,
       pageSize: params.pageSize,
-      status: params.filters?.status ? (params.filters.status as 0 | 1 | 2 | 3) : undefined,
+      status: params.filters?.status ? STATUS_MAP[params.filters.status] : undefined,
     })
 
     return {
