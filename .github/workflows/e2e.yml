@@ -58,6 +58,9 @@ jobs:
       - name: Build meridian binary
         run: CGO_ENABLED=0 go build -o ./dist/meridian ./cmd/meridian/
 
+      - name: Build seed-dev binary
+        run: CGO_ENABLED=0 go build -o ./dist/seed-dev ./cmd/seed-dev/
+
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
@@ -73,11 +76,13 @@ jobs:
           VITE_API_BASE_URL: 'http://localhost:8090'
         run: npx vite build
 
-      - name: Upload backend binary
+      - name: Upload backend binaries
         uses: actions/upload-artifact@v6
         with:
           name: meridian-binary
-          path: dist/meridian
+          path: |
+            dist/meridian
+            dist/seed-dev
           retention-days: 1
 
       - name: Upload frontend build
@@ -110,8 +115,8 @@ jobs:
           name: meridian-binary
           path: dist/
 
-      - name: Make binary executable
-        run: chmod +x dist/meridian
+      - name: Make binaries executable
+        run: chmod +x dist/meridian dist/seed-dev
 
       - name: Download frontend build
         uses: actions/download-artifact@v6
@@ -150,46 +155,32 @@ jobs:
           DATABASE_URL="postgres://root@localhost:26257/meridian_platform?sslmode=disable" \
             ./dist/meridian >/tmp/meridian.log 2>&1 &
 
-      - name: Seed dev tenant
+      - name: Seed dev tenant and apply manifest
+        run: |
+          ./dist/seed-dev \
+            --gateway-url=http://localhost:8090 \
+            --grpc-addr=localhost:50051 \
+            --manifest=examples/manifests/energy.json \
+            --tenant-id=dev_tenant \
+            --tenant-slug=dev-tenant
+
+      - name: Create additional test tenants
         run: |
           GATEWAY_URL="http://localhost:8090"
 
-          # Wait for gateway to be healthy (up to 60s)
-          for i in $(seq 1 30); do
-            if curl -sf "${GATEWAY_URL}/healthz" >/dev/null 2>&1; then
-              echo "Gateway is healthy."
-              break
-            fi
-            if [ "$i" -eq 30 ]; then
-              echo "ERROR: Gateway did not become healthy after 60s"
-              exit 1
-            fi
-            sleep 2
-          done
-
-          # Create dev tenant (idempotent) via REST endpoint
-          HTTP_CODE=$(curl -s -o /tmp/seed-response.json -w "%{http_code}" \
+          # Create acme_corp tenant (treat 409 as success)
+          HTTP_CODE=$(curl -sS -o /dev/null -w "%{http_code}" \
             -X POST "${GATEWAY_URL}/api/v1/tenants" \
             -H "Content-Type: application/json" \
-            -d '{"tenantId":"dev_tenant","displayName":"Dev Tenant","settlementAsset":"GBP","subdomain":"dev-tenant"}')
-          BODY=$(cat /tmp/seed-response.json 2>/dev/null || echo "")
-          case "$HTTP_CODE" in
-            200) echo "Dev tenant created." ;;
-            409) echo "Dev tenant already exists." ;;
-            *)
-              if echo "$BODY" | grep -qi "already.exist"; then
-                echo "Dev tenant already exists."
-              else
-                echo "ERROR: Unexpected response (HTTP ${HTTP_CODE}): ${BODY}"
-                echo "--- meridian backend logs ---"
-                cat /tmp/meridian.log || true
-                echo "--- end meridian logs ---"
-                exit 1
-              fi
-              ;;
-          esac
-          rm -f /tmp/seed-response.json
-          echo "Seed complete."
+            -d '{"tenantId":"acme_corp","displayName":"ACME Corporation","settlementAsset":"GBP","slug":"acme-corp"}')
+          echo "acme_corp: HTTP ${HTTP_CODE}"
+
+          # Create energy_co tenant (treat 409 as success)
+          HTTP_CODE=$(curl -sS -o /dev/null -w "%{http_code}" \
+            -X POST "${GATEWAY_URL}/api/v1/tenants" \
+            -H "Content-Type: application/json" \
+            -d '{"tenantId":"energy_co","displayName":"Energy Co Ltd","settlementAsset":"KWH","slug":"energy-co"}')
+          echo "energy_co: HTTP ${HTTP_CODE}"
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
