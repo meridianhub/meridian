@@ -11,7 +11,7 @@
 #     -d "username=developer@meridian.local" \
 #     -d "password=<your-password>"
 
-issuer: http://dex:5556/dex
+issuer: https://demo.meridianhub.cloud/dex
 
 storage:
   type: sqlite3
