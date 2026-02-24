@@ -106,6 +106,7 @@ jobs:
         working-directory: frontend
         run: buf generate --template buf.gen.yaml ../api/proto
 
+
       - name: Build frontend
         working-directory: frontend
         env:
