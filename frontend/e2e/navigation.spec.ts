@@ -85,7 +85,7 @@ test.describe('Active link highlighting', () => {
   test('Accounts link is active on /accounts', async ({ authenticatedPage: page }) => {
     await navigateTo(page, '/accounts')
     const nav = page.getByRole('navigation', { name: 'Main navigation' })
-    const accountsLink = nav.getByRole('link', { name: 'Accounts' })
+    const accountsLink = nav.getByRole('link', { name: 'Accounts', exact: true })
 
     await expect(accountsLink).toHaveAttribute('aria-current', 'page')
     await expect(accountsLink).toHaveClass(/bg-gray-700/)
@@ -100,7 +100,7 @@ test.describe('Active link highlighting', () => {
     await expect(dashboardLink).not.toHaveAttribute('aria-current', 'page')
 
     // Accounts link must be active
-    const accountsLink = nav.getByRole('link', { name: 'Accounts' })
+    const accountsLink = nav.getByRole('link', { name: 'Accounts', exact: true })
     await expect(accountsLink).toHaveAttribute('aria-current', 'page')
   })
 
@@ -139,7 +139,7 @@ test.describe('Tenant context preservation across navigation', () => {
     await expect(page.getByText(/Overview for dev-tenant/)).toBeVisible()
 
     // Navigate to Accounts
-    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Accounts' }).click()
+    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Accounts', exact: true }).click()
     await expect(page).toHaveURL('/accounts')
 
     // Navigate back to Dashboard

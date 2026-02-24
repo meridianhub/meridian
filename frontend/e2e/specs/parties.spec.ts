@@ -41,8 +41,11 @@ test.describe('Parties list', () => {
 
   test('renders Party Type filter with correct options', async ({ authenticatedPage: page }) => {
     await navigateTo(page, '/parties')
-    // The filter label should be visible in the filter bar
-    await expect(page.getByText('Party Type')).toBeVisible()
+    // The filter renders as a button (combobox trigger) in the filter bar.
+    // Use role-based locator to avoid matching the column header with the same text.
+    await expect(page.getByRole('button', { name: /party type/i }).or(
+      page.getByRole('combobox', { name: /party type/i })
+    )).toBeVisible()
   })
 
   test('renders Status filter', async ({ authenticatedPage: page }) => {
@@ -173,12 +176,14 @@ test.describe('Tab switching', () => {
     // Already on Overview by default
     await expect(page.getByRole('tab', { name: 'Overview', selected: true })).toBeVisible()
     // Content area shows data, empty state, or loading skeleton — use soft assertion
-    // so the test passes even when the API is unavailable (loading state is acceptable)
+    // so the test passes even when the API is unavailable (loading state is acceptable).
+    // Use .first() because the .or() chain can match multiple elements (e.g. radix items).
     await expect.soft(
-      page.locator('[data-radix-collection-item]')
+      page.getByRole('tabpanel')
         .or(page.getByText('Party ID'))
         .or(page.getByText('No data'))
         .or(page.locator('[class*="skeleton"]'))
+        .first()
     ).toBeVisible({ timeout: 10_000 })
   })
 
