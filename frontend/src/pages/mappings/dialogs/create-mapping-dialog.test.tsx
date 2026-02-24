@@ -80,11 +80,11 @@ describe('CreateMappingDialog - rendering', () => {
       </Wrapper>,
     )
 
-    expect(screen.getByLabelText(/name/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/source format/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/^name/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/target service/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/description/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/mapping rules/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/target rpc/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/version/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/external schema/i)).toBeInTheDocument()
   })
 
   it('renders submit and cancel buttons', () => {
@@ -96,29 +96,6 @@ describe('CreateMappingDialog - rendering', () => {
 
     expect(screen.getByRole('button', { name: /create mapping/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /cancel/i })).toBeInTheDocument()
-  })
-})
-
-describe('CreateMappingDialog - source format options', () => {
-  beforeEach(() => {
-    mockUseCreateMapping.mockReturnValue(makeMockMutation())
-  })
-
-  it('renders all source format options', () => {
-    render(
-      <Wrapper>
-        <CreateMappingDialog open={true} onOpenChange={vi.fn()} onSuccess={vi.fn()} />
-      </Wrapper>,
-    )
-
-    const select = screen.getByLabelText(/source format/i)
-    expect(select).toBeInTheDocument()
-
-    const options = Array.from((select as HTMLSelectElement).options).map((o) => o.text)
-    expect(options).toContain('JSON')
-    expect(options).toContain('XML')
-    expect(options).toContain('CSV')
-    expect(options).toContain('ISO 20022')
   })
 })
 
@@ -165,23 +142,6 @@ describe('CreateMappingDialog - validation', () => {
     })
   })
 
-  it('shows validation error when source format not selected', async () => {
-    const user = userEvent.setup()
-
-    render(
-      <Wrapper>
-        <CreateMappingDialog open={true} onOpenChange={vi.fn()} onSuccess={vi.fn()} />
-      </Wrapper>,
-    )
-
-    await user.type(screen.getByLabelText(/^name/i), 'My Mapping')
-    await user.click(screen.getByRole('button', { name: /create mapping/i }))
-
-    await waitFor(() => {
-      expect(screen.getByText(/source format is required/i)).toBeInTheDocument()
-    })
-  })
-
   it('shows validation error when target service not selected', async () => {
     const user = userEvent.setup()
 
@@ -192,7 +152,6 @@ describe('CreateMappingDialog - validation', () => {
     )
 
     await user.type(screen.getByLabelText(/^name/i), 'My Mapping')
-    await user.selectOptions(screen.getByLabelText(/source format/i), 'SOURCE_FORMAT_JSON')
     await user.click(screen.getByRole('button', { name: /create mapping/i }))
 
     await waitFor(() => {
@@ -200,7 +159,7 @@ describe('CreateMappingDialog - validation', () => {
     })
   })
 
-  it('shows error for invalid JSON in mapping rules', async () => {
+  it('shows validation error when target RPC not filled', async () => {
     const user = userEvent.setup()
 
     render(
@@ -210,16 +169,37 @@ describe('CreateMappingDialog - validation', () => {
     )
 
     await user.type(screen.getByLabelText(/^name/i), 'My Mapping')
-    await user.selectOptions(screen.getByLabelText(/source format/i), 'SOURCE_FORMAT_JSON')
     await user.selectOptions(
       screen.getByLabelText(/target service/i),
       'meridian.current_account.v1.CurrentAccountService',
     )
+    await user.click(screen.getByRole('button', { name: /create mapping/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/target rpc is required/i)).toBeInTheDocument()
+    })
+  })
+
+  it('shows error for invalid JSON in external schema', async () => {
+    const user = userEvent.setup()
+
+    render(
+      <Wrapper>
+        <CreateMappingDialog open={true} onOpenChange={vi.fn()} onSuccess={vi.fn()} />
+      </Wrapper>,
+    )
+
+    await user.type(screen.getByLabelText(/^name/i), 'My Mapping')
+    await user.selectOptions(
+      screen.getByLabelText(/target service/i),
+      'meridian.current_account.v1.CurrentAccountService',
+    )
+    await user.type(screen.getByLabelText(/target rpc/i), 'CreateAccount')
 
     // Clear and type invalid JSON (avoid { } which are special chars in userEvent)
-    const rulesField = screen.getByLabelText(/mapping rules/i)
-    await user.clear(rulesField)
-    await user.type(rulesField, 'not-valid-json')
+    const schemaField = screen.getByLabelText(/external schema/i)
+    await user.clear(schemaField)
+    await user.type(schemaField, 'not-valid-json')
 
     await user.click(screen.getByRole('button', { name: /create mapping/i }))
 
@@ -228,7 +208,7 @@ describe('CreateMappingDialog - validation', () => {
     })
   })
 
-  it('accepts valid JSON in mapping rules', async () => {
+  it('accepts empty external schema (optional field)', async () => {
     const user = userEvent.setup()
     const mutateAsync = vi.fn().mockResolvedValue({ id: 'mapping-new-1' })
     mockUseCreateMapping.mockReturnValue(makeMockMutation({ mutateAsync }))
@@ -240,11 +220,12 @@ describe('CreateMappingDialog - validation', () => {
     )
 
     await user.type(screen.getByLabelText(/^name/i), 'My Mapping')
-    await user.selectOptions(screen.getByLabelText(/source format/i), 'SOURCE_FORMAT_JSON')
     await user.selectOptions(
       screen.getByLabelText(/target service/i),
       'meridian.current_account.v1.CurrentAccountService',
     )
+    await user.type(screen.getByLabelText(/target rpc/i), 'CreateAccount')
+    await user.clear(screen.getByLabelText(/external schema/i))
 
     await user.click(screen.getByRole('button', { name: /create mapping/i }))
 
@@ -254,20 +235,20 @@ describe('CreateMappingDialog - validation', () => {
   })
 })
 
-describe('CreateMappingDialog - JSON editor', () => {
+describe('CreateMappingDialog - JSON schema editor', () => {
   beforeEach(() => {
     mockUseCreateMapping.mockReturnValue(makeMockMutation())
   })
 
-  it('pre-populates mapping rules with a template', () => {
+  it('pre-populates external schema with a template', () => {
     render(
       <Wrapper>
         <CreateMappingDialog open={true} onOpenChange={vi.fn()} onSuccess={vi.fn()} />
       </Wrapper>,
     )
 
-    const rulesField = screen.getByLabelText(/mapping rules/i) as HTMLTextAreaElement
-    expect(rulesField.value).toContain('fieldMappings')
+    const schemaField = screen.getByLabelText(/external schema/i) as HTMLTextAreaElement
+    expect(schemaField.value).toContain('"type"')
   })
 
   it('shows inline syntax error for invalid JSON', async () => {
@@ -280,17 +261,16 @@ describe('CreateMappingDialog - JSON editor', () => {
     )
 
     await user.type(screen.getByLabelText(/^name/i), 'My Mapping')
-    await user.selectOptions(screen.getByLabelText(/source format/i), 'SOURCE_FORMAT_JSON')
     await user.selectOptions(
       screen.getByLabelText(/target service/i),
       'meridian.current_account.v1.CurrentAccountService',
     )
+    await user.type(screen.getByLabelText(/target rpc/i), 'CreateAccount')
 
-    // Use fireEvent to set invalid JSON directly (avoid userEvent special char issues with { })
-    const rulesField = screen.getByLabelText(/mapping rules/i)
-    await user.clear(rulesField)
     // Type something that is not valid JSON without using { } special chars
-    await user.type(rulesField, 'not-valid-json')
+    const schemaField = screen.getByLabelText(/external schema/i)
+    await user.clear(schemaField)
+    await user.type(schemaField, 'not-valid-json')
 
     await user.click(screen.getByRole('button', { name: /create mapping/i }))
 
@@ -316,11 +296,11 @@ describe('CreateMappingDialog - successful submission', () => {
     )
 
     await user.type(screen.getByLabelText(/^name/i), 'Stripe Webhook')
-    await user.selectOptions(screen.getByLabelText(/source format/i), 'SOURCE_FORMAT_JSON')
     await user.selectOptions(
       screen.getByLabelText(/target service/i),
       'meridian.payment_order.v1.PaymentOrderService',
     )
+    await user.type(screen.getByLabelText(/target rpc/i), 'InitiatePaymentOrder')
     await user.click(screen.getByRole('button', { name: /create mapping/i }))
 
     await waitFor(() => {
@@ -328,8 +308,9 @@ describe('CreateMappingDialog - successful submission', () => {
       expect(mutateAsync).toHaveBeenCalledWith(
         expect.objectContaining({
           name: 'Stripe Webhook',
-          sourceFormat: 'SOURCE_FORMAT_JSON',
           targetService: 'meridian.payment_order.v1.PaymentOrderService',
+          targetRpc: 'InitiatePaymentOrder',
+          version: 1,
         }),
       )
     })
@@ -377,11 +358,11 @@ describe('CreateMappingDialog - error handling', () => {
     )
 
     await user.type(screen.getByLabelText(/^name/i), 'My Mapping')
-    await user.selectOptions(screen.getByLabelText(/source format/i), 'SOURCE_FORMAT_JSON')
     await user.selectOptions(
       screen.getByLabelText(/target service/i),
       'meridian.current_account.v1.CurrentAccountService',
     )
+    await user.type(screen.getByLabelText(/target rpc/i), 'CreateAccount')
     await user.click(screen.getByRole('button', { name: /create mapping/i }))
 
     await waitFor(() => {
@@ -403,11 +384,11 @@ describe('CreateMappingDialog - error handling', () => {
     )
 
     await user.type(screen.getByLabelText(/^name/i), 'My Mapping')
-    await user.selectOptions(screen.getByLabelText(/source format/i), 'SOURCE_FORMAT_JSON')
     await user.selectOptions(
       screen.getByLabelText(/target service/i),
       'meridian.current_account.v1.CurrentAccountService',
     )
+    await user.type(screen.getByLabelText(/target rpc/i), 'CreateAccount')
     await user.click(screen.getByRole('button', { name: /create mapping/i }))
 
     await waitFor(() => {
@@ -459,11 +440,11 @@ describe('CreateMappingDialog - DRAFT status', () => {
     )
 
     await user.type(screen.getByLabelText(/^name/i), 'Draft Mapping')
-    await user.selectOptions(screen.getByLabelText(/source format/i), 'SOURCE_FORMAT_JSON')
     await user.selectOptions(
       screen.getByLabelText(/target service/i),
       'meridian.current_account.v1.CurrentAccountService',
     )
+    await user.type(screen.getByLabelText(/target rpc/i), 'CreateAccount')
     await user.click(screen.getByRole('button', { name: /create mapping/i }))
 
     await waitFor(() => {

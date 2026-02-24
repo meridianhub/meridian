@@ -13,13 +13,6 @@ import { Input } from '@/components/ui/input'
 import { handleConnectError } from '@/lib/error-handling'
 import { useCreateMapping } from './mapping-mutations'
 
-const SOURCE_FORMAT_OPTIONS = [
-  { label: 'JSON', value: 'SOURCE_FORMAT_JSON' },
-  { label: 'XML', value: 'SOURCE_FORMAT_XML' },
-  { label: 'CSV', value: 'SOURCE_FORMAT_CSV' },
-  { label: 'ISO 20022', value: 'SOURCE_FORMAT_ISO20022' },
-]
-
 const TARGET_SERVICE_OPTIONS = [
   { label: 'Current Account', value: 'meridian.current_account.v1.CurrentAccountService' },
   { label: 'Payment Order', value: 'meridian.payment_order.v1.PaymentOrderService' },
@@ -29,26 +22,27 @@ const TARGET_SERVICE_OPTIONS = [
   { label: 'Financial Accounting', value: 'meridian.financial_accounting.v1.FinancialAccountingService' },
 ]
 
-const DEFAULT_MAPPING_RULES = `{
-  "fieldMappings": [
-    { "source": "$.amount", "target": "amount.value" }
-  ]
+const DEFAULT_EXTERNAL_SCHEMA = `{
+  "type": "object",
+  "properties": {
+    "amount": { "type": "number" }
+  }
 }`
 
 interface FormData {
   name: string
-  sourceFormat: string
   targetService: string
-  description: string
-  mappingRules: string
+  targetRpc: string
+  version: string
+  externalSchema: string
 }
 
 interface FormErrors {
   name?: string
-  sourceFormat?: string
   targetService?: string
-  description?: string
-  mappingRules?: string
+  targetRpc?: string
+  version?: string
+  externalSchema?: string
   general?: string
 }
 
@@ -66,10 +60,10 @@ export function CreateMappingDialog({
   const createMapping = useCreateMapping()
   const [formData, setFormData] = React.useState<FormData>({
     name: '',
-    sourceFormat: '',
     targetService: '',
-    description: '',
-    mappingRules: DEFAULT_MAPPING_RULES,
+    targetRpc: '',
+    version: '1',
+    externalSchema: DEFAULT_EXTERNAL_SCHEMA,
   })
   const [errors, setErrors] = React.useState<FormErrors>({})
 
@@ -77,10 +71,10 @@ export function CreateMappingDialog({
     if (!open) {
       setFormData({
         name: '',
-        sourceFormat: '',
         targetService: '',
-        description: '',
-        mappingRules: DEFAULT_MAPPING_RULES,
+        targetRpc: '',
+        version: '1',
+        externalSchema: DEFAULT_EXTERNAL_SCHEMA,
       })
       setErrors({})
       createMapping.reset()
@@ -96,25 +90,26 @@ export function CreateMappingDialog({
       newErrors.name = 'Name must be 255 characters or fewer'
     }
 
-    if (!formData.sourceFormat) {
-      newErrors.sourceFormat = 'Source format is required'
-    }
-
     if (!formData.targetService) {
       newErrors.targetService = 'Target service is required'
     }
 
-    if (formData.description.length > 1000) {
-      newErrors.description = 'Description must be 1000 characters or fewer'
+    if (!formData.targetRpc.trim()) {
+      newErrors.targetRpc = 'Target RPC is required'
+    } else if (formData.targetRpc.trim().length > 128) {
+      newErrors.targetRpc = 'Target RPC must be 128 characters or fewer'
     }
 
-    if (!formData.mappingRules.trim()) {
-      newErrors.mappingRules = 'Mapping rules are required'
-    } else {
+    const versionNum = parseInt(formData.version, 10)
+    if (!formData.version || isNaN(versionNum) || versionNum < 1) {
+      newErrors.version = 'Version must be a positive integer'
+    }
+
+    if (formData.externalSchema.trim()) {
       try {
-        JSON.parse(formData.mappingRules)
+        JSON.parse(formData.externalSchema)
       } catch {
-        newErrors.mappingRules = 'Invalid JSON: check syntax and try again'
+        newErrors.externalSchema = 'Invalid JSON: check syntax and try again'
       }
     }
 
@@ -129,10 +124,10 @@ export function CreateMappingDialog({
     try {
       const result = await createMapping.mutateAsync({
         name: formData.name.trim(),
-        sourceFormat: formData.sourceFormat,
         targetService: formData.targetService,
-        description: formData.description.trim(),
-        mappingRules: formData.mappingRules.trim(),
+        targetRpc: formData.targetRpc.trim(),
+        version: parseInt(formData.version, 10),
+        externalSchema: formData.externalSchema.trim(),
       })
 
       const mappingId = (result as { id?: string } | null | undefined)?.id ?? ''
@@ -145,10 +140,10 @@ export function CreateMappingDialog({
         const fieldMap: FormErrors = {}
         for (const [field, msg] of Object.entries(result.fieldErrors)) {
           if (field === 'name') fieldMap.name = msg
-          else if (field === 'source_format') fieldMap.sourceFormat = msg
           else if (field === 'target_service') fieldMap.targetService = msg
-          else if (field === 'description') fieldMap.description = msg
-          else if (field === 'mapping_rules') fieldMap.mappingRules = msg
+          else if (field === 'target_rpc') fieldMap.targetRpc = msg
+          else if (field === 'version') fieldMap.version = msg
+          else if (field === 'external_schema') fieldMap.externalSchema = msg
           else fieldMap.general = msg
         }
         setErrors(fieldMap)
@@ -209,31 +204,6 @@ export function CreateMappingDialog({
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label htmlFor="sourceFormat" className="text-sm font-medium">
-                  Source Format <span className="text-destructive">*</span>
-                </label>
-                <select
-                  id="sourceFormat"
-                  value={formData.sourceFormat}
-                  onChange={handleChange('sourceFormat')}
-                  className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
-                  aria-describedby={errors.sourceFormat ? 'sourceFormat-error' : undefined}
-                >
-                  <option value="">Select format...</option>
-                  {SOURCE_FORMAT_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-                {errors.sourceFormat && (
-                  <p id="sourceFormat-error" className="text-sm text-destructive">
-                    {errors.sourceFormat}
-                  </p>
-                )}
-              </div>
-
-              <div className="space-y-1">
                 <label htmlFor="targetService" className="text-sm font-medium">
                   Target Service <span className="text-destructive">*</span>
                 </label>
@@ -257,45 +227,63 @@ export function CreateMappingDialog({
                   </p>
                 )}
               </div>
+
+              <div className="space-y-1">
+                <label htmlFor="version" className="text-sm font-medium">
+                  Version <span className="text-destructive">*</span>
+                </label>
+                <Input
+                  id="version"
+                  type="number"
+                  min={1}
+                  value={formData.version}
+                  onChange={handleChange('version')}
+                  placeholder="1"
+                  aria-describedby={errors.version ? 'version-error' : undefined}
+                />
+                {errors.version && (
+                  <p id="version-error" className="text-sm text-destructive">
+                    {errors.version}
+                  </p>
+                )}
+              </div>
             </div>
 
             <div className="space-y-1">
-              <label htmlFor="description" className="text-sm font-medium">
-                Description
+              <label htmlFor="targetRpc" className="text-sm font-medium">
+                Target RPC <span className="text-destructive">*</span>
               </label>
-              <textarea
-                id="description"
-                value={formData.description}
-                onChange={handleChange('description')}
-                placeholder="Optional description for this mapping..."
-                maxLength={1000}
-                rows={2}
-                className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none focus:border-ring"
-                aria-describedby={errors.description ? 'description-error' : undefined}
+              <Input
+                id="targetRpc"
+                value={formData.targetRpc}
+                onChange={handleChange('targetRpc')}
+                placeholder="e.g. InitiatePaymentOrder"
+                maxLength={128}
+                aria-describedby={errors.targetRpc ? 'targetRpc-error' : undefined}
               />
-              {errors.description && (
-                <p id="description-error" className="text-sm text-destructive">
-                  {errors.description}
+              {errors.targetRpc && (
+                <p id="targetRpc-error" className="text-sm text-destructive">
+                  {errors.targetRpc}
                 </p>
               )}
             </div>
 
             <div className="space-y-1">
-              <label htmlFor="mappingRules" className="text-sm font-medium">
-                Mapping Rules <span className="text-destructive">*</span>
+              <label htmlFor="externalSchema" className="text-sm font-medium">
+                External Schema (JSON Schema)
               </label>
               <textarea
-                id="mappingRules"
-                value={formData.mappingRules}
-                onChange={handleChange('mappingRules')}
+                id="externalSchema"
+                value={formData.externalSchema}
+                onChange={handleChange('externalSchema')}
                 rows={8}
                 className="w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs shadow-xs outline-none focus:border-ring"
-                aria-describedby={errors.mappingRules ? 'mappingRules-error' : undefined}
+                aria-describedby={errors.externalSchema ? 'externalSchema-error' : undefined}
                 spellCheck={false}
               />
-              {errors.mappingRules && (
-                <p id="mappingRules-error" className="text-sm text-destructive" role="alert">
-                  {errors.mappingRules}
+              {errors.externalSchema && (
+                <p id="externalSchema-error" className="text-sm text-destructive" role="alert">
+                  {errors.externalSchema}
                 </p>
               )}
             </div>

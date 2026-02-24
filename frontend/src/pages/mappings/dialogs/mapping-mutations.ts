@@ -3,10 +3,10 @@ import { useApiClients } from '@/api/context'
 
 export interface CreateMappingRequest {
   name: string
-  sourceFormat: string
   targetService: string
-  description: string
-  mappingRules: string
+  targetRpc: string
+  version: number
+  externalSchema: string
 }
 
 export function useCreateMapping() {
@@ -17,10 +17,10 @@ export function useCreateMapping() {
     mutationFn: async (request: CreateMappingRequest) => {
       const response = await clients.mapping.createMapping({
         name: request.name,
-        sourceFormat: request.sourceFormat as never,
         targetService: request.targetService,
-        description: request.description,
-        mappingRules: request.mappingRules,
+        targetRpc: request.targetRpc,
+        version: request.version,
+        externalSchema: request.externalSchema,
       })
       return response.mapping
     },

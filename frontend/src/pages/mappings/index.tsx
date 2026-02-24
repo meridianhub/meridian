@@ -99,7 +99,7 @@ export function MappingsPage() {
     const response = await clients.mapping.listMappings({
       pageToken: params.pageToken,
       pageSize: params.pageSize,
-      status: params.filters?.status ? (params.filters.status as never) : undefined,
+      status: params.filters?.status ? (params.filters.status as 0 | 1 | 2 | 3) : undefined,
     })
 
     return {
@@ -113,6 +113,7 @@ export function MappingsPage() {
   }
 
   const handleCreateSuccess = (mappingId: string) => {
+    if (!mappingId) return
     navigate(`/gateway-mappings/${mappingId}`)
   }
 
