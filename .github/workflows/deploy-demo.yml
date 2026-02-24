@@ -98,13 +98,14 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Generate protobuf TypeScript clients
-        working-directory: frontend
-        run: npx buf generate --template buf.gen.yaml ../api/proto
-
       - name: Install dependencies
         working-directory: frontend
         run: npm ci
+
+      - name: Generate protobuf TypeScript clients
+        working-directory: frontend
+        run: buf generate --template buf.gen.yaml ../api/proto
+
 
       - name: Build frontend
         working-directory: frontend
