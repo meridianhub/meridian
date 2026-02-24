@@ -722,14 +722,22 @@ type serviceConns struct {
 }
 
 // gormDB returns the GORM connection for the given service's database.
+// Panics with a descriptive message if serviceName is not in ServiceDatabases.
 func (c *serviceConns) gormDB(serviceName string) *gorm.DB {
-	sdb := migrations.ServiceDatabases[serviceName]
+	sdb, ok := migrations.ServiceDatabases[serviceName]
+	if !ok {
+		panic(fmt.Sprintf("unknown service %q: not found in ServiceDatabases", serviceName))
+	}
 	return c.gormDBs[sdb.Database]
 }
 
 // pgxPool returns the pgxpool connection for the given service's database.
+// Panics with a descriptive message if serviceName is not in ServiceDatabases.
 func (c *serviceConns) pgxPool(serviceName string) *pgxpool.Pool {
-	sdb := migrations.ServiceDatabases[serviceName]
+	sdb, ok := migrations.ServiceDatabases[serviceName]
+	if !ok {
+		panic(fmt.Sprintf("unknown service %q: not found in ServiceDatabases", serviceName))
+	}
 	return c.pgxPools[sdb.Database]
 }
 
