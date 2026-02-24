@@ -6,6 +6,8 @@ import { TimeDisplay } from '@/components/shared/time-display'
 import { StatusBadge } from '@/components/shared/status-badge'
 import { useApiClients } from '@/api/context'
 import { Card } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { CreateMappingDialog } from './dialogs/create-mapping-dialog'
 
 export interface MappingDefinition {
   id: string
@@ -32,6 +34,7 @@ interface ListMappingsResult {
 export function MappingsPage() {
   const navigate = useNavigate()
   const clients = useApiClients()
+  const [createDialogOpen, setCreateDialogOpen] = React.useState(false)
 
   const columns: ColumnDef<MappingDefinition>[] = [
     {
@@ -109,15 +112,28 @@ export function MappingsPage() {
     navigate(`/gateway-mappings/${mapping.id}`)
   }
 
+  const handleCreateSuccess = (mappingId: string) => {
+    navigate(`/gateway-mappings/${mappingId}`)
+  }
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Gateway Mappings</h1>
-        <p className="mt-2 text-muted-foreground">
-          Manage field correspondence mappings between external JSON payloads and internal Meridian
-          services.
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Gateway Mappings</h1>
+          <p className="mt-2 text-muted-foreground">
+            Manage field correspondence mappings between external JSON payloads and internal Meridian
+            services.
+          </p>
+        </div>
+        <Button onClick={() => setCreateDialogOpen(true)}>Create Mapping</Button>
       </div>
+
+      <CreateMappingDialog
+        open={createDialogOpen}
+        onOpenChange={setCreateDialogOpen}
+        onSuccess={handleCreateSuccess}
+      />
 
       <Card className="p-6">
         <DataTable

@@ -1,11 +1,21 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter } from 'react-router-dom'
 
 // Mock the API context to avoid loading ungenerated proto files
 vi.mock('@/api/context', () => ({
   useApiClients: vi.fn(),
+}))
+
+// Mock the create mapping mutation to avoid API client calls in page integration tests
+vi.mock('./dialogs/mapping-mutations', () => ({
+  useCreateMapping: vi.fn(() => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+    reset: vi.fn(),
+  })),
 }))
 
 import { useApiClients } from '@/api/context'
@@ -159,6 +169,32 @@ describe('MappingsPage', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('empty-state')).toBeInTheDocument()
+    })
+  })
+
+  it('renders Create Mapping button in the header', () => {
+    render(
+      <Wrapper>
+        <MappingsPage />
+      </Wrapper>,
+    )
+
+    expect(screen.getByRole('button', { name: /create mapping/i })).toBeInTheDocument()
+  })
+
+  it('opens the create mapping dialog when button is clicked', async () => {
+    const user = userEvent.setup()
+
+    render(
+      <Wrapper>
+        <MappingsPage />
+      </Wrapper>,
+    )
+
+    await user.click(screen.getByRole('button', { name: /create mapping/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
     })
   })
 })
