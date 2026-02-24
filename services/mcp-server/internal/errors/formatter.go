@@ -21,8 +21,6 @@ const (
 	TypeStarlarkSyntax = "starlark_syntax"
 	// TypeManifestValidation is produced by manifest structural or proto validation.
 	TypeManifestValidation = "manifest_validation"
-	// TypeProtoValidation is produced by protovalidate field constraint violations.
-	TypeProtoValidation = "proto_validation"
 	// TypeGeneric is used when the error type cannot be determined.
 	TypeGeneric = "generic"
 )
@@ -99,7 +97,7 @@ var knownStarlarkBuiltins = []string{
 	"fail",
 }
 
-// celAvailableFields lists the CEL variable names commonly available in account-type policy expressions.
+// celAvailableFields lists the CEL variable names commonly available in policy expressions.
 var celAvailableFields = []string{
 	"quantity",
 	"instrument",
@@ -113,9 +111,9 @@ var celAvailableFields = []string{
 	"party_type",
 }
 
-// celErrorPattern matches CEL error messages like "ERROR: :1:15: message".
-// Group 1 = line, Group 2 = column, Group 3 = message.
-var celErrorPattern = regexp.MustCompile(`ERROR:\s*[^:]*:(\d+):(\d+):\s*(.+)`)
+// celErrorPattern matches a single CEL error line: "ERROR: :1:15: message".
+// Group 1 = line, Group 2 = column, Group 3 = message (to end of line).
+var celErrorPattern = regexp.MustCompile(`ERROR:\s*[^:]*:(\d+):(\d+):\s*([^\n]+)`)
 
 // starlarkErrorPattern matches Starlark error locations like "file.star:5:10: message".
 // Group 1 = line, Group 2 = column, Group 3 = message.
@@ -127,9 +125,9 @@ var undeclaredReferencePattern = regexp.MustCompile(`undeclared reference to '([
 // undefinedNamePattern matches "undefined: name".
 var undefinedNamePattern = regexp.MustCompile(`undefined:\s*(\S+)`)
 
-// validationJSONPattern matches the JSON array embedded in manifest validation error messages.
-// The control-plane grpc_handler embeds validation errors as JSON in the message.
-var validationJSONPattern = regexp.MustCompile(`\[(\{.+})\]`)
+// validationJSONArrayPattern matches a JSON array at the end of a validation error message.
+// It looks for a top-level JSON array starting at '[' and captures everything to the end.
+var validationJSONArrayPattern = regexp.MustCompile(`(\[[\s\S]*\])$`)
 
 // manifestValidationEntry is used to deserialise JSON embedded in manifest validation errors.
 type manifestValidationEntry struct {
@@ -177,9 +175,14 @@ func extractMessage(err error) string {
 }
 
 // isCELError returns true when the message looks like a CEL compilation error.
+// It requires both a CEL-context keyword and the canonical "ERROR:" marker that
+// the CEL library emits, avoiding false positives from words like "cancel".
 func isCELError(msg string) bool {
 	lower := strings.ToLower(msg)
-	return strings.Contains(lower, "cel") && strings.Contains(msg, "ERROR:")
+	hasCELContext := strings.Contains(lower, "cel compilation") ||
+		strings.Contains(lower, "cel expression") ||
+		strings.Contains(lower, "cel error")
+	return hasCELContext && strings.Contains(msg, "ERROR:")
 }
 
 // isStarlarkError returns true when the message looks like a Starlark error.
@@ -190,29 +193,39 @@ func isStarlarkError(msg string) bool {
 
 // isManifestValidationError returns true when the message embeds a JSON validation array.
 func isManifestValidationError(msg string) bool {
-	return strings.Contains(msg, "manifest validation") ||
-		validationJSONPattern.MatchString(msg)
+	lower := strings.ToLower(msg)
+	return strings.Contains(lower, "manifest validation") ||
+		validationJSONArrayPattern.MatchString(msg)
 }
 
-// parseCELError parses a CEL compilation error message.
-// CEL errors look like: "cel compilation failed: ERROR: :1:15: undeclared reference to 'atributes'"
+// parseCELError parses a CEL compilation error message, extracting all error occurrences.
+// CEL errors look like: "cel compilation failed: ERROR: :1:15: undeclared reference to 'x'"
+// Multiple errors may appear on separate lines (one ERROR: prefix per error).
 func parseCELError(msg string) []ErrorDetail {
-	detail := ErrorDetail{Type: TypeCELCompilation, Message: msg}
+	matches := celErrorPattern.FindAllStringSubmatch(msg, -1)
+	if len(matches) == 0 {
+		// No structured CEL error found: return raw message.
+		return []ErrorDetail{{Type: TypeCELCompilation, Message: msg}}
+	}
 
-	if m := celErrorPattern.FindStringSubmatch(msg); m != nil {
+	details := make([]ErrorDetail, 0, len(matches))
+	for _, m := range matches {
+		detail := ErrorDetail{
+			Type:    TypeCELCompilation,
+			Message: strings.TrimSpace(m[3]),
+		}
 		detail.Line, _ = strconv.Atoi(m[1])
 		detail.Column, _ = strconv.Atoi(m[2])
-		detail.Message = strings.TrimSpace(m[3])
-	}
 
-	// Typo suggestion for undeclared references.
-	if m := undeclaredReferencePattern.FindStringSubmatch(msg); m != nil {
-		if suggestion := findClosestMatch(m[1], celAvailableFields); suggestion != "" {
-			detail.Suggestion = fmt.Sprintf("Did you mean %q?", suggestion)
+		// Typo suggestion scoped to this error's message fragment.
+		if ref := undeclaredReferencePattern.FindStringSubmatch(m[3]); ref != nil {
+			if suggestion := findClosestMatch(ref[1], celAvailableFields); suggestion != "" {
+				detail.Suggestion = fmt.Sprintf("Did you mean %q?", suggestion)
+			}
 		}
+		details = append(details, detail)
 	}
-
-	return []ErrorDetail{detail}
+	return details
 }
 
 // parseStarlarkError parses a Starlark compilation or execution error.
@@ -242,26 +255,24 @@ func parseStarlarkError(msg string) []ErrorDetail {
 // parseManifestValidationError extracts structured validation errors embedded as JSON
 // in the gRPC error message by the control-plane ApplyManifestHandler.
 func parseManifestValidationError(msg string) []ErrorDetail {
-	// Try to extract JSON array from the message.
-	if m := validationJSONPattern.FindStringSubmatch(msg); m != nil {
-		jsonBytes := []byte("[" + m[1] + "]")
+	// Try to extract the trailing JSON array from the message.
+	if m := validationJSONArrayPattern.FindString(msg); m != "" {
 		var entries []manifestValidationEntry
-		if err := json.Unmarshal(jsonBytes, &entries); err == nil && len(entries) > 0 {
+		if err := json.Unmarshal([]byte(m), &entries); err == nil && len(entries) > 0 {
 			details := make([]ErrorDetail, 0, len(entries))
 			for _, e := range entries {
-				detail := ErrorDetail{
+				details = append(details, ErrorDetail{
 					Type:       TypeManifestValidation,
 					Message:    e.Message,
 					Path:       e.Path,
 					Suggestion: e.Suggestion,
-				}
-				details = append(details, detail)
+				})
 			}
 			return details
 		}
 	}
 
-	// Fallback: return as a single generic manifest validation error.
+	// Fallback: return as a single manifest validation error.
 	return []ErrorDetail{
 		{Type: TypeManifestValidation, Message: msg},
 	}

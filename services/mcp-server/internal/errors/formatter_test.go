@@ -206,6 +206,28 @@ func TestFormatGRPCError_StarlarkUndefinedName(t *testing.T) {
 	}
 }
 
+// TestFormatGRPCError_MultipleCELErrors verifies that multiple CEL errors on separate
+// lines are all extracted rather than just the first one.
+func TestFormatGRPCError_MultipleCELErrors(t *testing.T) {
+	grpcErr := status.Error(codes.InvalidArgument,
+		"cel compilation failed: ERROR: :1:5: undeclared reference to 'ammount'\nERROR: :2:3: undeclared reference to 'atributes'")
+
+	result := mcperrors.FormatGRPCError(grpcErr)
+
+	if result.Valid {
+		t.Fatal("expected Valid=false")
+	}
+	if len(result.Errors) != 2 {
+		t.Errorf("expected 2 CEL errors, got %d", len(result.Errors))
+	}
+	if result.Errors[0].Line != 1 {
+		t.Errorf("expected first error Line=1, got %d", result.Errors[0].Line)
+	}
+	if result.Errors[1].Line != 2 {
+		t.Errorf("expected second error Line=2, got %d", result.Errors[1].Line)
+	}
+}
+
 // TestFormatError_PlainError verifies that a plain (non-gRPC) error is also handled.
 func TestFormatError_PlainError(t *testing.T) {
 	err := fmt.Errorf("some plain error")
