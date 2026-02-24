@@ -689,6 +689,37 @@ LLM context at the start of a conversation.
 
 **Maps to**: Handler schema registry (new read-only endpoint to expose handler YAML as structured data).
 
+#### `meridian_market_data_query`
+
+Query market rates and prices.
+
+```json
+{
+  "name": "meridian_market_data_query",
+  "description": "Query market data: rates, prices, and curves for instruments.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "instrument_code": {
+        "type": "string",
+        "description": "Instrument code (e.g., 'KWH', 'USD')"
+      },
+      "rate_type": {
+        "type": "string",
+        "description": "Type of rate (e.g., 'SPOT', 'FORWARD', 'FX')"
+      },
+      "effective_at": {
+        "type": "string",
+        "description": "ISO 8601 timestamp for historical rate lookup"
+      }
+    },
+    "required": ["instrument_code"]
+  }
+}
+```
+
+**Maps to**: Market Information service query RPCs (existing).
+
 ### 4.5 MCP Resources (Context, Not Tools)
 
 MCP resources are loaded into the LLM's context automatically, not invoked
@@ -966,7 +997,7 @@ Every MCP tool is classified by mutation risk:
 
 | Category | Tools | Confirmation Required |
 |----------|-------|----------------------|
-| **Read** | `causation_tree`, `positions_query`, `postings_query`, `instruments_list`, `saga_describe`, `handlers_describe`, `reconciliation_status`, `saga_executions`, `manifest_history`, `explain_valuation`, `economy_structure` | None |
+| **Read** | `causation_tree`, `positions_query`, `postings_query`, `instruments_list`, `instrument_describe`, `sagas_list`, `saga_describe`, `handlers_describe`, `market_data_query`, `reconciliation_status`, `saga_executions`, `manifest_history`, `explain_valuation`, `economy_structure` | None |
 | **Simulate** | `manifest_validate`, `manifest_plan`, `cel_validate`, `cel_evaluate`, `starlark_validate`, `manifest_diff`, `valuation_simulate`, `saga_simulate` | None (no side effects) |
 | **Write** | `manifest_apply` | Requires prior `manifest_plan` in session |
 
@@ -1145,7 +1176,7 @@ Foundation: MCP protocol, transport, auth, tool registration, error formatting.
 | 4.1 | 2 | `cel_evaluate`, `manifest_diff` |
 | 4.2 | 1 | `valuation_simulate` |
 | 4.3 | 2 | `saga_simulate` (simulation mode flag on saga runtime) |
-| 4.4 | 2 | `instruments_list`, `instrument_describe`, `sagas_list`, `saga_describe`, `handlers_describe` |
+| 4.4 | 2 | `instruments_list`, `instrument_describe`, `sagas_list`, `saga_describe`, `handlers_describe`, `market_data_query` |
 | 4.5 | 1 | `economy_structure` (composite call for context bootstrapping) |
 
 ### Stream 5: Resources, Prompts, and Documentation (3 points)
