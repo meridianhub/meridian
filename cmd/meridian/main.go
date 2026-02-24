@@ -202,7 +202,7 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 	grpcServer := bootstrap.NewGrpcServerBuilder(tracer, logger).Build()
 
 	// Idempotency service backed by the platform pgxpool (no Redis required in dev)
-	idempotencySvc := idempotency.NewPostgresService(conns.pgxPools["meridian_platform"])
+	idempotencySvc := idempotency.NewPostgresService(conns.pgxPool("control-plane"))
 	if err := idempotencySvc.EnsureTable(ctx); err != nil {
 		return fmt.Errorf("idempotency table: %w", err)
 	}
