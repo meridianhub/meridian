@@ -121,7 +121,7 @@ export function InternalAccountsPage() {
       />
 
       <DataTable<InternalAccountRow>
-        queryKey={[...tenantKeys.all(tenantSlug), 'internal-accounts']}
+        queryKey={tenantKeys.internalAccounts(tenantSlug)}
         queryFn={async ({ pageToken, pageSize, filters }) => {
           const statusFilter = filters?.status ? parseInt(filters.status, 10) : 0
           const res = await clients.internalBankAccount.listInternalBankAccounts({
