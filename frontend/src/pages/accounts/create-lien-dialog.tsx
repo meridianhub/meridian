@@ -44,9 +44,18 @@ function validateReason(value: string): string | null {
   return null
 }
 
+/**
+ * Parses a datetime-local string (YYYY-MM-DDTHH:mm) as UTC.
+ * The datetime-local input produces a timezone-naive string; treating it as
+ * UTC ensures consistent behaviour regardless of the operator's local timezone.
+ */
+function parseDatetimeLocalAsUtc(value: string): Date {
+  return new Date(value + ':00Z')
+}
+
 function validateExpiry(value: string): string | null {
   if (!value) return null
-  const date = new Date(value)
+  const date = parseDatetimeLocalAsUtc(value)
   if (isNaN(date.getTime())) return 'Invalid date'
   if (date <= new Date()) return 'Expiry must be in the future'
   return null
@@ -139,7 +148,7 @@ export function CreateLienDialog({
     mutationFn: () => {
       const minorUnits = amountToBigInt(amount, decimalPlaces).toString()
       const expiresAtSeconds = expiry
-        ? Math.floor(new Date(expiry).getTime() / 1000).toString()
+        ? Math.floor(parseDatetimeLocalAsUtc(expiry).getTime() / 1000).toString()
         : undefined
       return initiateLien(
         tenantSlug ?? '',
