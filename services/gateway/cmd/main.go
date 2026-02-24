@@ -123,6 +123,17 @@ func run(logger *slog.Logger) error {
 		gateway.WithHealthChecker(healthChecker),
 	}
 
+	// Wire auth middleware if enabled
+	if config.Auth.Enabled {
+		authMiddleware, err := gateway.BuildAuthMiddleware(config.Auth, logger)
+		if err != nil {
+			return bootstrap.Permanent(fmt.Errorf("failed to build auth middleware: %w", err))
+		}
+		if authMiddleware != nil {
+			serverOpts = append(serverOpts, gateway.WithAuthMiddleware(authMiddleware))
+		}
+	}
+
 	// Wire event streaming if enabled
 	var eventRouter *eventstream.Router
 	if config.EventStream.Enabled {

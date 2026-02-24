@@ -517,7 +517,7 @@ func TestLoadAuthConfig_Defaults(t *testing.T) {
 		os.Unsetenv(key)
 	}
 
-	config := loadAuthConfig()
+	config := LoadAuthConfig()
 
 	assert.False(t, config.Enabled)
 	assert.Empty(t, config.JWKSURL)
@@ -545,7 +545,7 @@ func TestLoadAuthConfig_FullConfiguration(t *testing.T) {
 	})
 	defer cleanup()
 
-	config := loadAuthConfig()
+	config := LoadAuthConfig()
 
 	assert.True(t, config.Enabled)
 	assert.Equal(t, "https://auth.example.com/.well-known/jwks.json", config.JWKSURL)

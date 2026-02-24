@@ -650,11 +650,14 @@ var serviceNames = []string{
 func wireGateway(grpcPort, httpPort int, databaseURL string, logger *slog.Logger) *gateway.Server {
 	grpcTarget := fmt.Sprintf("localhost:%d", grpcPort)
 
+	authConfig := gateway.LoadAuthConfig()
+
 	config := &gateway.Config{
 		Port:         httpPort,
-		BaseDomain:   "localhost",
-		LocalDevMode: true,
+		BaseDomain:   env.GetEnvOrDefault("BASE_DOMAIN", "localhost"),
+		LocalDevMode: env.GetEnvAsBool("LOCAL_DEV_MODE", true),
 		DatabaseURL:  databaseURL,
+		Auth:         authConfig,
 	}
 
 	// Build per-service backends pointing at the shared loopback gRPC server.
@@ -676,6 +679,17 @@ func wireGateway(grpcPort, httpPort int, databaseURL string, logger *slog.Logger
 			"error", err)
 	} else {
 		opts = append(opts, gateway.WithTranscoder(transcoder))
+	}
+
+	// Wire auth middleware if enabled
+	if authConfig.Enabled {
+		authMiddleware, err := gateway.BuildAuthMiddleware(authConfig, logger)
+		if err != nil {
+			logger.Error("failed to build auth middleware; API routes will be unauthenticated",
+				"error", err)
+		} else if authMiddleware != nil {
+			opts = append(opts, gateway.WithAuthMiddleware(authMiddleware))
+		}
 	}
 
 	return gateway.NewServer(config, logger, nil, opts...)

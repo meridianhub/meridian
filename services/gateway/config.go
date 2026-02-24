@@ -173,7 +173,7 @@ func LoadConfig() (*Config, error) {
 	}
 
 	// Load auth configuration
-	config.Auth = loadAuthConfig()
+	config.Auth = LoadAuthConfig()
 
 	// Load event stream configuration
 	config.EventStream = loadEventStreamConfig()
@@ -186,7 +186,7 @@ func LoadConfig() (*Config, error) {
 	return config, nil
 }
 
-// loadAuthConfig loads authentication configuration from environment variables.
+// LoadAuthConfig loads authentication configuration from environment variables.
 //
 // Environment variables:
 //   - AUTH_ENABLED: Enable authentication (default: false)
@@ -198,7 +198,7 @@ func LoadConfig() (*Config, error) {
 //   - API_KEYS: Comma-separated list of "key:identity" pairs
 //   - API_KEY_RATE_LIMIT_PER_SECOND: Requests per second per key (default: 100)
 //   - API_KEY_RATE_LIMIT_BURST: Burst size for rate limiting (default: 200)
-func loadAuthConfig() AuthConfig {
+func LoadAuthConfig() AuthConfig {
 	config := AuthConfig{
 		Enabled:            env.GetEnvAsBool("AUTH_ENABLED", false),
 		JWKSURL:            os.Getenv("JWKS_URL"),
