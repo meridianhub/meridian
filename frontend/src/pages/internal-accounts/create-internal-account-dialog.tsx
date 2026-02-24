@@ -70,21 +70,25 @@ export function CreateInternalAccountDialog({ open, onOpenChange }: CreateIntern
   }, [open])
 
   const { data: accountTypesData, isLoading: accountTypesLoading } = useQuery({
-    queryKey: ['account-types-internal'],
+    queryKey: tenantSlug
+      ? [...tenantKeys.all(tenantSlug), 'account-types-internal']
+      : ['account-types-internal'],
     queryFn: async () => {
       const res = await clients.accountTypeRegistry.listActive({})
       return res.definitions?.filter((d) => INTERNAL_BEHAVIOR_CLASSES.includes(d.behaviorClass)) ?? []
     },
-    enabled: open,
+    enabled: open && !!tenantSlug,
   })
 
   const { data: instrumentsData, isLoading: instrumentsLoading } = useQuery({
-    queryKey: ['instruments-active'],
+    queryKey: tenantSlug
+      ? [...tenantKeys.all(tenantSlug), 'instruments-active']
+      : ['instruments-active'],
     queryFn: async () => {
       const res = await clients.referenceData.listInstruments({ statusFilter: 2 })
       return res.instruments ?? []
     },
-    enabled: open,
+    enabled: open && !!tenantSlug,
   })
 
   const accountTypes = accountTypesData ?? []
