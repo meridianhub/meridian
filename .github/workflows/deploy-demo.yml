@@ -104,7 +104,9 @@ jobs:
 
       - name: Generate protobuf TypeScript clients
         working-directory: frontend
-        run: buf generate --template buf.gen.yaml ../api/proto
+        run: |
+          export PATH="$PWD/node_modules/.bin:$PATH"
+          buf generate --template buf.gen.yaml ../api/proto
 
 
       - name: Build frontend
