@@ -337,7 +337,7 @@ test.describe('Tenant Management page', () => {
 
     const dialog = page.getByRole('dialog')
     // Use timestamp to avoid tenant ID collisions across test runs
-    const uniqueId = `e2e-tenant-${Date.now()}`
+    const uniqueId = `e2e_tenant_${Date.now()}`
     await dialog.getByLabel('Tenant ID').fill(uniqueId)
     await dialog.getByLabel('Display Name').fill('E2E Test Tenant')
     await dialog.getByLabel('Settlement Asset').fill('GBP')
