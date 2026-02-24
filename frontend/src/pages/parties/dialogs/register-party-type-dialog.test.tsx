@@ -32,9 +32,6 @@ vi.mock('@tanstack/react-query', async () => {
   }
 })
 
-vi.mock('@/hooks/use-tenant-context', () => ({
-  useTenantSlug: () => 'test-tenant',
-}))
 
 function renderDialog(props: { open?: boolean; onOpenChange?: (open: boolean) => void } = {}) {
   const { open = true, onOpenChange = vi.fn() } = props
@@ -231,7 +228,7 @@ describe('RegisterPartyTypeDialog - successful submission', () => {
     await waitFor(() => {
       expect(mockInvalidateQueries).toHaveBeenCalledWith(
         expect.objectContaining({
-          queryKey: expect.arrayContaining(['party-types']),
+          queryKey: expect.arrayContaining(['reference']),
         }),
       )
     })

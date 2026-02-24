@@ -13,8 +13,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useApiClients } from '@/api/context'
 import { handleConnectError } from '@/lib/error-handling'
-import { tenantKeys } from '@/lib/query-keys'
-import { useTenantSlug } from '@/hooks/use-tenant-context'
+import { referenceKeys } from '@/lib/query-keys'
 
 // Pattern: uppercase letter followed by uppercase letters, digits, underscores
 const PARTY_TYPE_CODE_PATTERN = /^[A-Z][A-Z0-9_]*$/
@@ -42,7 +41,6 @@ export interface RegisterPartyTypeDialogProps {
 
 export function RegisterPartyTypeDialog({ open, onOpenChange }: RegisterPartyTypeDialogProps) {
   const clients = useApiClients()
-  const tenantSlug = useTenantSlug()
   const queryClient = useQueryClient()
 
   const [formData, setFormData] = React.useState<FormData>(initialFormData)
@@ -68,7 +66,7 @@ export function RegisterPartyTypeDialog({ open, onOpenChange }: RegisterPartyTyp
       })
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: tenantKeys.partyTypes(tenantSlug ?? '') })
+      queryClient.invalidateQueries({ queryKey: referenceKeys.partyTypes() })
       onOpenChange(false)
     },
     onError: (err) => {
