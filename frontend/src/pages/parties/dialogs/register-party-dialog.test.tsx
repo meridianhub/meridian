@@ -162,6 +162,26 @@ describe('RegisterPartyDialog - party types loading', () => {
       expect(screen.getByLabelText(/party type/i)).toBeDisabled()
     })
   })
+
+  it('shows error message when listPartyTypes fails', async () => {
+    const { Code, ConnectError } = await import('@connectrpc/connect')
+    mockListPartyTypes.mockRejectedValue(new ConnectError('unavailable', Code.Unavailable))
+    renderDialog()
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/party type/i)).toBeDisabled()
+    })
+  })
+
+  it('disables submit button when listPartyTypes fails', async () => {
+    const { Code, ConnectError } = await import('@connectrpc/connect')
+    mockListPartyTypes.mockRejectedValue(new ConnectError('unavailable', Code.Unavailable))
+    renderDialog()
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /register party/i })).toBeDisabled()
+    })
+  })
 })
 
 describe('RegisterPartyDialog - validation', () => {

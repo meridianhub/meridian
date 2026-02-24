@@ -64,14 +64,19 @@ export function RegisterPartyDialog({ open, onOpenChange }: RegisterPartyDialogP
     }
   }, [open])
 
-  const { data: partyTypesData, isLoading: partyTypesLoading } = useQuery({
+  const {
+    data: partyTypesData,
+    isLoading: partyTypesLoading,
+    isError: partyTypesError,
+    error: partyTypesErrorObj,
+  } = useQuery({
     queryKey: tenantKeys.partyTypes(tenantSlug ?? ''),
     queryFn: () => clients.party.listPartyTypes({}),
     enabled: open,
   })
 
   const partyTypeDefinitions = partyTypesData?.partyTypeDefinitions ?? []
-  const noPartyTypes = !partyTypesLoading && partyTypeDefinitions.length === 0
+  const noPartyTypes = !partyTypesLoading && !partyTypesError && partyTypeDefinitions.length === 0
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -196,6 +201,21 @@ export function RegisterPartyDialog({ open, onOpenChange }: RegisterPartyDialogP
                 >
                   <option value="">Loading party types...</option>
                 </select>
+              ) : partyTypesError ? (
+                <div>
+                  <select
+                    id="partyType"
+                    disabled
+                    aria-disabled="true"
+                    className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
+                    aria-describedby="partyType-error-load"
+                  >
+                    <option value="">Failed to load party types</option>
+                  </select>
+                  <p id="partyType-error-load" className="mt-1 text-sm text-destructive">
+                    {handleConnectError(partyTypesErrorObj).message}
+                  </p>
+                </div>
               ) : noPartyTypes ? (
                 <div>
                   <select
@@ -262,7 +282,7 @@ export function RegisterPartyDialog({ open, onOpenChange }: RegisterPartyDialogP
           <Button
             type="submit"
             form="register-party-form"
-            disabled={mutation.isPending || partyTypesLoading || noPartyTypes}
+            disabled={mutation.isPending || partyTypesLoading || partyTypesError || noPartyTypes}
           >
             {mutation.isPending ? 'Registering...' : 'Register Party'}
           </Button>
