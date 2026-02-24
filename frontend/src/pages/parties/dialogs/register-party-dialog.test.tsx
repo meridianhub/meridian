@@ -110,9 +110,6 @@ describe('RegisterPartyDialog - rendering', () => {
     expect(screen.getByLabelText(/display name/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/party type/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/legal name/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/email/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/phone/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/country code/i)).toBeInTheDocument()
   })
 
   it('renders submit and cancel buttons', () => {
@@ -147,6 +144,24 @@ describe('RegisterPartyDialog - party types loading', () => {
       expect(screen.getByText(/no party types have been configured/i)).toBeInTheDocument()
     })
   })
+
+  it('disables submit button when no party types are configured', async () => {
+    mockListPartyTypes.mockResolvedValue({ partyTypeDefinitions: [] })
+    renderDialog()
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /register party/i })).toBeDisabled()
+    })
+  })
+
+  it('disables party type select when no party types are configured', async () => {
+    mockListPartyTypes.mockResolvedValue({ partyTypeDefinitions: [] })
+    renderDialog()
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/party type/i)).toBeDisabled()
+    })
+  })
 })
 
 describe('RegisterPartyDialog - validation', () => {
@@ -177,71 +192,6 @@ describe('RegisterPartyDialog - validation', () => {
       expect(screen.getByText(/party type is required/i)).toBeInTheDocument()
     })
   })
-
-  it('shows error for invalid email format', async () => {
-    const user = userEvent.setup()
-    renderDialog()
-
-    // Wait for party type options to load
-    await waitFor(() => {
-      const select = screen.getByLabelText(/party type/i) as HTMLSelectElement
-      expect(Array.from(select.options).some((o) => o.value === 'PERSON')).toBe(true)
-    })
-
-    await user.type(screen.getByLabelText(/display name/i), 'Test Party')
-    await user.selectOptions(screen.getByLabelText(/party type/i), 'PERSON')
-    await user.type(screen.getByLabelText(/email/i), 'not-an-email')
-    await user.click(screen.getByRole('button', { name: /register party/i }))
-
-    await waitFor(() => {
-      expect(screen.getByText(/invalid email format/i)).toBeInTheDocument()
-    })
-  })
-
-  it('shows error for invalid phone format', async () => {
-    const user = userEvent.setup()
-    renderDialog()
-
-    await user.type(screen.getByLabelText(/display name/i), 'Test Party')
-    await user.type(screen.getByLabelText(/phone/i), '01234567890')
-    await user.click(screen.getByRole('button', { name: /register party/i }))
-
-    await waitFor(() => {
-      expect(screen.getByText(/e\.164 format/i)).toBeInTheDocument()
-    })
-  })
-
-  it('accepts valid E.164 phone format without phone error', async () => {
-    const user = userEvent.setup()
-    mockRegisterParty.mockResolvedValue({ party: { partyId: 'party-123' } })
-    renderDialog()
-
-    await waitFor(() => {
-      expect(screen.getByRole('combobox')).toBeInTheDocument()
-    })
-
-    await user.type(screen.getByLabelText(/display name/i), 'Test Party')
-    await user.selectOptions(screen.getByLabelText(/party type/i), 'PERSON')
-    await user.type(screen.getByLabelText(/phone/i), '+441234567890')
-    await user.click(screen.getByRole('button', { name: /register party/i }))
-
-    await waitFor(() => {
-      expect(screen.queryByText(/e\.164 format/i)).not.toBeInTheDocument()
-    })
-  })
-
-  it('shows error for invalid country code (lowercase)', async () => {
-    const user = userEvent.setup()
-    renderDialog()
-
-    await user.type(screen.getByLabelText(/display name/i), 'Test Party')
-    await user.type(screen.getByLabelText(/country code/i), 'gb')
-    await user.click(screen.getByRole('button', { name: /register party/i }))
-
-    await waitFor(() => {
-      expect(screen.getByText(/2 uppercase letters/i)).toBeInTheDocument()
-    })
-  })
 })
 
 describe('RegisterPartyDialog - successful submission', () => {
@@ -251,13 +201,14 @@ describe('RegisterPartyDialog - successful submission', () => {
     mockRegisterParty.mockResolvedValue({ party: { partyId: 'party-new-123' } })
   })
 
-  it('submits form and navigates to party detail page on success', async () => {
+  it('submits form with correct data and navigates to party detail page on success', async () => {
     const user = userEvent.setup()
     const onOpenChange = vi.fn()
     renderDialog({ onOpenChange })
 
     await waitFor(() => {
-      expect(screen.getByRole('combobox')).toBeInTheDocument()
+      const select = screen.getByLabelText(/party type/i) as HTMLSelectElement
+      expect(Array.from(select.options).some((o) => o.value === 'PERSON')).toBe(true)
     })
 
     await user.type(screen.getByLabelText(/display name/i), 'Acme Corp')
@@ -268,7 +219,7 @@ describe('RegisterPartyDialog - successful submission', () => {
       expect(mockRegisterParty).toHaveBeenCalledWith(
         expect.objectContaining({
           displayName: 'Acme Corp',
-          partyType: 'PERSON',
+          partyType: 1, // PERSON enum value
         }),
       )
     })
@@ -284,13 +235,34 @@ describe('RegisterPartyDialog - successful submission', () => {
     })
   })
 
+  it('maps ORGANIZATION party type to enum value 2', async () => {
+    const user = userEvent.setup()
+    renderDialog()
+
+    await waitFor(() => {
+      const select = screen.getByLabelText(/party type/i) as HTMLSelectElement
+      expect(Array.from(select.options).some((o) => o.value === 'ORGANIZATION')).toBe(true)
+    })
+
+    await user.type(screen.getByLabelText(/display name/i), 'Corp Ltd')
+    await user.selectOptions(screen.getByLabelText(/party type/i), 'ORGANIZATION')
+    await user.click(screen.getByRole('button', { name: /register party/i }))
+
+    await waitFor(() => {
+      expect(mockRegisterParty).toHaveBeenCalledWith(
+        expect.objectContaining({ partyType: 2 }),
+      )
+    })
+  })
+
   it('disables submit button while mutation is pending', async () => {
     mockRegisterParty.mockImplementation(() => new Promise(() => {}))
     const user = userEvent.setup()
     renderDialog()
 
     await waitFor(() => {
-      expect(screen.getByRole('combobox')).toBeInTheDocument()
+      const select = screen.getByLabelText(/party type/i) as HTMLSelectElement
+      expect(Array.from(select.options).some((o) => o.value === 'PERSON')).toBe(true)
     })
 
     await user.type(screen.getByLabelText(/display name/i), 'Acme Corp')
@@ -327,7 +299,8 @@ describe('RegisterPartyDialog - error handling', () => {
     renderDialog()
 
     await waitFor(() => {
-      expect(screen.getByRole('combobox')).toBeInTheDocument()
+      const select = screen.getByLabelText(/party type/i) as HTMLSelectElement
+      expect(Array.from(select.options).some((o) => o.value === 'PERSON')).toBe(true)
     })
 
     await user.type(screen.getByLabelText(/display name/i), 'Existing Corp')
@@ -348,7 +321,8 @@ describe('RegisterPartyDialog - error handling', () => {
     renderDialog()
 
     await waitFor(() => {
-      expect(screen.getByRole('combobox')).toBeInTheDocument()
+      const select = screen.getByLabelText(/party type/i) as HTMLSelectElement
+      expect(Array.from(select.options).some((o) => o.value === 'PERSON')).toBe(true)
     })
 
     await user.type(screen.getByLabelText(/display name/i), 'Test Corp')

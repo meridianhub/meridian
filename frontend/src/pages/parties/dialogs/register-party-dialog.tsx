@@ -17,29 +17,23 @@ import { handleConnectError } from '@/lib/error-handling'
 import { tenantKeys } from '@/lib/query-keys'
 import { useTenantSlug } from '@/hooks/use-tenant-context'
 
-// E.164 phone format: + followed by 1-15 digits
-const PHONE_PATTERN = /^\+[1-9]\d{1,14}$/
-// ISO 3166-1 alpha-2 country code
-const COUNTRY_CODE_PATTERN = /^[A-Z]{2}$/
-// Email format
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+// Maps PartyTypeDefinition.party_type strings to PartyType enum values.
+// PARTY_TYPE_PERSON = 1, PARTY_TYPE_ORGANIZATION = 2
+const PARTY_TYPE_ENUM: Record<string, number> = {
+  PERSON: 1,
+  ORGANIZATION: 2,
+}
 
 interface FormData {
   displayName: string
   partyType: string
   legalName: string
-  email: string
-  phone: string
-  countryCode: string
 }
 
 interface FormErrors {
   displayName?: string
   partyType?: string
   legalName?: string
-  email?: string
-  phone?: string
-  countryCode?: string
   general?: string
 }
 
@@ -52,9 +46,6 @@ const initialFormData: FormData = {
   displayName: '',
   partyType: '',
   legalName: '',
-  email: '',
-  phone: '',
-  countryCode: '',
 }
 
 export function RegisterPartyDialog({ open, onOpenChange }: RegisterPartyDialogProps) {
@@ -80,11 +71,13 @@ export function RegisterPartyDialog({ open, onOpenChange }: RegisterPartyDialogP
   })
 
   const partyTypeDefinitions = partyTypesData?.partyTypeDefinitions ?? []
+  const noPartyTypes = !partyTypesLoading && partyTypeDefinitions.length === 0
 
   const mutation = useMutation({
     mutationFn: async () => {
+      const partyTypeValue = PARTY_TYPE_ENUM[formData.partyType] ?? 0
       return clients.party.registerParty({
-        partyType: formData.partyType as unknown as number,
+        partyType: partyTypeValue,
         legalName: formData.legalName.trim() || formData.displayName.trim(),
         displayName: formData.displayName.trim(),
       })
@@ -129,18 +122,6 @@ export function RegisterPartyDialog({ open, onOpenChange }: RegisterPartyDialogP
 
     if (formData.legalName.trim() && formData.legalName.trim().length > 255) {
       newErrors.legalName = 'Legal name must be 255 characters or fewer'
-    }
-
-    if (formData.email.trim() && !EMAIL_PATTERN.test(formData.email.trim())) {
-      newErrors.email = 'Invalid email format'
-    }
-
-    if (formData.phone.trim() && !PHONE_PATTERN.test(formData.phone.trim())) {
-      newErrors.phone = 'Phone must be in E.164 format (e.g. +441234567890)'
-    }
-
-    if (formData.countryCode.trim() && !COUNTRY_CODE_PATTERN.test(formData.countryCode.trim())) {
-      newErrors.countryCode = 'Country code must be 2 uppercase letters (e.g. GB)'
     }
 
     setErrors(newErrors)
@@ -215,14 +196,14 @@ export function RegisterPartyDialog({ open, onOpenChange }: RegisterPartyDialogP
                 >
                   <option value="">Loading party types...</option>
                 </select>
-              ) : partyTypeDefinitions.length === 0 ? (
+              ) : noPartyTypes ? (
                 <div>
                   <select
                     id="partyType"
-                    value={formData.partyType}
-                    onChange={handleChange('partyType')}
+                    disabled
+                    aria-disabled="true"
                     className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
-                    aria-describedby={errors.partyType ? 'partyType-error' : 'partyType-hint'}
+                    aria-describedby="partyType-hint"
                   >
                     <option value="">No party types configured</option>
                   </select>
@@ -271,65 +252,6 @@ export function RegisterPartyDialog({ open, onOpenChange }: RegisterPartyDialogP
                 </p>
               )}
             </div>
-
-            <div className="space-y-1">
-              <label htmlFor="email" className="text-sm font-medium">
-                Email
-              </label>
-              <Input
-                id="email"
-                type="text"
-                inputMode="email"
-                value={formData.email}
-                onChange={handleChange('email')}
-                placeholder="contact@example.com"
-                aria-describedby={errors.email ? 'email-error' : undefined}
-              />
-              {errors.email && (
-                <p id="email-error" className="text-sm text-destructive">
-                  {errors.email}
-                </p>
-              )}
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <label htmlFor="phone" className="text-sm font-medium">
-                  Phone
-                </label>
-                <Input
-                  id="phone"
-                  value={formData.phone}
-                  onChange={handleChange('phone')}
-                  placeholder="+441234567890"
-                  aria-describedby={errors.phone ? 'phone-error' : undefined}
-                />
-                {errors.phone && (
-                  <p id="phone-error" className="text-sm text-destructive">
-                    {errors.phone}
-                  </p>
-                )}
-              </div>
-
-              <div className="space-y-1">
-                <label htmlFor="countryCode" className="text-sm font-medium">
-                  Country Code
-                </label>
-                <Input
-                  id="countryCode"
-                  value={formData.countryCode}
-                  onChange={handleChange('countryCode')}
-                  placeholder="GB"
-                  maxLength={2}
-                  aria-describedby={errors.countryCode ? 'countryCode-error' : undefined}
-                />
-                {errors.countryCode && (
-                  <p id="countryCode-error" className="text-sm text-destructive">
-                    {errors.countryCode}
-                  </p>
-                )}
-              </div>
-            </div>
           </div>
         </form>
 
@@ -340,7 +262,7 @@ export function RegisterPartyDialog({ open, onOpenChange }: RegisterPartyDialogP
           <Button
             type="submit"
             form="register-party-form"
-            disabled={mutation.isPending}
+            disabled={mutation.isPending || partyTypesLoading || noPartyTypes}
           >
             {mutation.isPending ? 'Registering...' : 'Register Party'}
           </Button>
