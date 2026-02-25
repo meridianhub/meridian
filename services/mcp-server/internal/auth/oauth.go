@@ -69,9 +69,10 @@ type CodeEntry struct {
 // Each code can be consumed exactly once and expires after authCodeTTL.
 // A background sweep runs every storeEvictInterval to evict abandoned entries.
 type CodeStore struct {
-	mu    sync.Mutex
-	codes map[string]CodeEntry
-	stop  chan struct{}
+	mu        sync.Mutex
+	codes     map[string]CodeEntry
+	stop      chan struct{}
+	closeOnce sync.Once
 }
 
 // NewCodeStore creates an empty CodeStore and starts the background eviction goroutine.
@@ -85,9 +86,9 @@ func NewCodeStore() *CodeStore {
 	return s
 }
 
-// Close stops the background eviction goroutine.
+// Close stops the background eviction goroutine. Safe to call multiple times.
 func (s *CodeStore) Close() {
-	close(s.stop)
+	s.closeOnce.Do(func() { close(s.stop) })
 }
 
 // evictLoop periodically removes entries that have passed authCodeTTL
@@ -195,11 +196,10 @@ func (h *AuthorizationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Validate redirect_uri against the registered value to prevent open redirect.
-	// If omitted, the registered URI is used; if provided it must match exactly.
-	redirectURI := q.Get("redirect_uri")
-	if redirectURI == "" {
-		redirectURI = h.cfg.RedirectURI
-	} else if redirectURI != h.cfg.RedirectURI {
+	// If the client provides one it must match exactly; reject mismatches.
+	// After validation, always redirect to the registered URI (not the client-supplied one)
+	// so the redirect target is never user-controlled.
+	if clientRedirect := q.Get("redirect_uri"); clientRedirect != "" && clientRedirect != h.cfg.RedirectURI {
 		http.Error(w, "redirect_uri does not match registered value", http.StatusBadRequest)
 		return
 	}
@@ -227,17 +227,17 @@ func (h *AuthorizationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	h.store.Store(code, CodeEntry{
 		CodeChallenge: challenge,
 		ClientID:      clientID,
-		RedirectURI:   redirectURI,
+		RedirectURI:   h.cfg.RedirectURI,
 		IssuedAt:      time.Now(),
 	})
 
 	h.logger.Info("authorization code issued", "client_id", clientID)
 
-	// Build redirect URL via url.Parse so any existing query params in the
-	// registered redirect URI are preserved alongside code and state.
-	target, err := url.Parse(redirectURI)
+	// Build redirect URL via url.Parse using the registered (trusted) URI.
+	// The redirect target is never derived from user-supplied input.
+	target, err := url.Parse(h.cfg.RedirectURI)
 	if err != nil {
-		h.logger.Error("invalid redirect URI", "error", err)
+		h.logger.Error("invalid registered redirect URI", "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -342,6 +342,7 @@ func (h *TokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"access_token": token,
 		"token_type":   "Bearer",
