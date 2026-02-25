@@ -26,7 +26,7 @@ implementations (`client/starlark.go`). The analysis is based on:
 
 ## Services Requiring client/starlark.go
 
-### 1. internal-bank-account (HIGH PRIORITY)
+### 1. internal-account (HIGH PRIORITY)
 
 **Status**: Has `client/client.go` but **missing `client/starlark.go`**
 
@@ -47,10 +47,10 @@ implementations (`client/starlark.go`). The analysis is based on:
 
 | Handler Name | gRPC Method | Category | Idempotent | ProducesInstruments |
 |-------------|-------------|----------|------------|-------------------|
-| `internal_bank_account.initiate` | `InitiateInternalBankAccount` | Settlement | No (uses circuit breaker only) | YES - currencies |
-| `internal_bank_account.retrieve` | `RetrieveInternalBankAccount` | Settlement | Yes (with retry) | NO - read-only |
-| `internal_bank_account.get_balance` | `GetBalance` | Settlement | Yes (with retry) | NO - read-only |
-| `internal_bank_account.list_accounts` | `ListInternalBankAccounts` | Settlement | Yes (with retry) | NO - read-only |
+| `internal_account.initiate` | `InitiateInternalAccount` | Settlement | No (uses circuit breaker only) | YES - currencies |
+| `internal_account.retrieve` | `RetrieveInternalAccount` | Settlement | Yes (with retry) | NO - read-only |
+| `internal_account.get_balance` | `GetBalance` | Settlement | Yes (with retry) | NO - read-only |
+| `internal_account.list_accounts` | `ListInternalAccounts` | Settlement | Yes (with retry) | NO - read-only |
 
 **Implementation Notes**:
 
@@ -69,7 +69,7 @@ implementations (`client/starlark.go`). The analysis is based on:
 
 - **10 cross-service references** found in:
   - `services/payment-order/service/` (4 files - bucket solvency evaluation, saga handlers)
-  - `services/internal-bank-account/service/` (3 files - account validation)
+  - `services/internal-account/service/` (3 files - account validation)
   - `services/financial-accounting/service/` (1 file)
   - `services/financial-accounting/cmd/` (1 file)
 - **Currently used** in payment-order saga handlers for bucket-aware solvency checks
@@ -266,7 +266,7 @@ See detailed analysis in "Services Requiring client/starlark.go → Section 4. p
 
 | Service | Priority | Cross-Service Refs | Saga Use Case | Complexity |
 |---------|----------|-------------------|---------------|-----------|
-| **internal-bank-account** | **HIGH** | 14 | Nostro/vostro account creation in cross-border payments | 5 points |
+| **internal-account** | **HIGH** | 14 | Nostro/vostro account creation in cross-border payments | 5 points |
 | **reference-data** | **HIGH** | 10 | Bucket solvency checks (already used in payment-order) | 3 points |
 | **market-information** | **MEDIUM** | 3 | FX rate lookups in multi-currency transactions | 3 points |
 | **party** | **DEFERRED** | 11 | No saga integration needed (pre-saga + async patterns) | N/A |
@@ -346,18 +346,18 @@ func prepareClientContext(ctx *saga.StarlarkContext) context.Context {
 
 ---
 
-### internal-bank-account Handler Specifications
+### internal-account Handler Specifications
 
-**File**: `services/internal-bank-account/client/starlark.go`
+**File**: `services/internal-account/client/starlark.go`
 
-#### Handler: `internal_bank_account.initiate`
+#### Handler: `internal_account.initiate`
 
 **Purpose**: Create nostro/vostro accounts for cross-border settlement
 
 **Input Parameters**:
 
 ```starlark
-internal_bank_account.initiate(
+internal_account.initiate(
     account_type="NOSTRO",           # NOSTRO, VOSTRO, CLEARING, etc.
     currency="USD",
     account_name="USD Nostro Account",
@@ -376,18 +376,18 @@ internal_bank_account.initiate(
 }
 ```
 
-**gRPC Method**: `InitiateInternalBankAccount`
+**gRPC Method**: `InitiateInternalAccount`
 
 ---
 
-#### Handler: `internal_bank_account.retrieve`
+#### Handler: `internal_account.retrieve`
 
 **Purpose**: Fetch account details for saga decision points
 
 **Input Parameters**:
 
 ```starlark
-internal_bank_account.retrieve(
+internal_account.retrieve(
     account_id="acc_..."
 )
 ```
@@ -404,18 +404,18 @@ internal_bank_account.retrieve(
 }
 ```
 
-**gRPC Method**: `RetrieveInternalBankAccount`
+**gRPC Method**: `RetrieveInternalAccount`
 
 ---
 
-#### Handler: `internal_bank_account.get_balance`
+#### Handler: `internal_account.get_balance`
 
 **Purpose**: Query account balance for solvency checks
 
 **Input Parameters**:
 
 ```starlark
-internal_bank_account.get_balance(
+internal_account.get_balance(
     account_id="acc_..."
 )
 ```
@@ -434,14 +434,14 @@ internal_bank_account.get_balance(
 
 ---
 
-#### Handler: `internal_bank_account.list_accounts`
+#### Handler: `internal_account.list_accounts`
 
-**Purpose**: List internal bank accounts with optional filtering
+**Purpose**: List internal accounts with optional filtering
 
 **Input Parameters**:
 
 ```starlark
-internal_bank_account.list_accounts(
+internal_account.list_accounts(
     account_type="NOSTRO",  # Optional filter by type
     currency="USD",         # Optional filter by currency
     status="ACTIVE"         # Optional filter by status
@@ -471,7 +471,7 @@ internal_bank_account.list_accounts(
 }
 ```
 
-**gRPC Method**: `ListInternalBankAccounts`
+**gRPC Method**: `ListInternalAccounts`
 
 **Error Cases**:
 
@@ -699,11 +699,11 @@ Each handler's `ProducesInstruments` metadata enables **Conservation Rule** enfo
 
 | Service | Handlers | ProducesInstruments | Conservation Rule Impact |
 |---------|----------|-------------------|--------------------------|
-| internal-bank-account | `initiate` | Currencies | Creates Money instruments (nostro/vostro) |
+| internal-account | `initiate` | Currencies | Creates Money instruments (nostro/vostro) |
 | reference-data | All | `[]` | Read-only - no instrument creation |
 | market-information | All | `[]` | Read-only - no instrument creation |
 
-**Key Insight**: Only `internal-bank-account.initiate` produces instruments. All other handlers are read-only
+**Key Insight**: Only `internal-account.initiate` produces instruments. All other handlers are read-only
 and support saga decision logic without creating/destroying value. Party service handlers are deferred as
 party operations occur outside saga orchestration (pre-saga validation + async verification).
 
@@ -738,7 +738,7 @@ and do not require idempotency key-based duplicate detection tests.
 
 | Subtask | Service | Story Points | Dependencies |
 |---------|---------|--------------|--------------|
-| **19.2** | internal-bank-account | 5 | None (parallel) |
+| **19.2** | internal-account | 5 | None (parallel) |
 | **19.3** | reference-data | 3 | None (parallel) |
 | **19.4** | market-information | 3 | None (parallel) |
 | **19.5** | party | N/A | Deferred (documented in audit) |
@@ -749,7 +749,7 @@ Subtasks 19.2-19.4 can execute **in parallel** after this audit report is review
 
 ## Appendix: Cross-Service Reference Details
 
-### internal-bank-account (14 references)
+### internal-account (14 references)
 
 ```text
 services/payment-order/service/payment_orchestrator.go:70
@@ -771,8 +771,8 @@ services/position-keeping/cmd/main.go
 services/payment-order/service/saga_handlers.go:44
 services/payment-order/service/bucket_solvency_test.go:25
 services/payment-order/service/grpc_service.go:120
-services/internal-bank-account/service/server.go
-services/internal-bank-account/service/client_interfaces.go
+services/internal-account/service/server.go
+services/internal-account/service/client_interfaces.go
 services/financial-accounting/service/financial_accounting_service.go
 services/financial-accounting/cmd/main.go
 ```
@@ -806,7 +806,7 @@ This audit provides a complete roadmap for saga handler implementation across Me
 The three services requiring handlers represent **11 story points** of work that can be parallelized across
 subtasks 19.2-19.4, enabling future saga patterns including:
 
-1. **Cross-border payments** (internal-bank-account + market-information)
+1. **Cross-border payments** (internal-account + market-information)
 2. **Bucket-aware solvency** (reference-data - already in use)
 
 The party service (subtask 19.5) has been **deferred** after analysis showing that party operations occur

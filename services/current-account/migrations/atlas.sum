@@ -1,4 +1,4 @@
-h1:IE6VEc7Hdkr+JDlt/7m9Co3FDCHpiR8A+xixoAHnUpE=
+h1:9x4xA8TXAvRq3scPczAfUR/8NLNU4422u1+E7wJJL2o=
 20251216000001_initial.sql h1:nyRf35O3eYNJqShAvOEhvliXKLIR6e/V8B9JhOHde9w=
 20251216000002_audit_system.sql h1:X/0ZHt9cGTYmFbUUvKAkBgEiGw9fYEqfnbMB8I4SCR8=
 20251217000001_fix_audit_status_constraint.sql h1:yQxsHxbUp5g+ehkKFjOhZs59SbfaQIPw4/sA2xE2rwU=
@@ -15,3 +15,7 @@ h1:IE6VEc7Hdkr+JDlt/7m9Co3FDCHpiR8A+xixoAHnUpE=
 20260214000002_add_org_scoping_indexes.sql h1:p2lT9KnjRIgMJ2Pf5YzKtnnw86a9Jylu+r7n9ejDp3A=
 20260220000001_add_product_type_columns.sql h1:s8eMBKruWtNsWaUiok598RebucwW5s4RcjDXQ3sovXM=
 20260220000002_add_product_type_index.sql h1:jPsYaxj4polHDAY2QweDbChuyBzYrH16ZQtcLhgbyXM=
+20260225000001_add_instrument_columns.sql h1:Jw5ufRMr5G1E+C0knfb/Pdma9orkTOTXKL14V/OgT+o=
+20260225000002_migrate_currency_data.sql h1:J+f+xWKGT1sV50ZOojzkZWwtWb3hMxLJyqFHvqygs9I=
+20260225000003_recreate_scope_integrity_index.sql h1:SUUC21+/32puxl/Y8iuY7OYNSj6O6OK4Q0dGNYNk36M=
+20260225000004_drop_currency_column.sql h1:jRdIqJ0UNpaGa+Aw9m+f/sgpkqdEzQibyTYsHl46HQo=

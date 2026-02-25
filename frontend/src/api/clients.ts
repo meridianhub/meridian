@@ -12,7 +12,7 @@ import { SagaAdminService } from './gen/meridian/saga/v1/saga_admin_pb'
 import { ReferenceDataService } from './gen/meridian/reference_data/v1/instrument_pb'
 import { AccountTypeRegistryService } from './gen/meridian/reference_data/v1/account_type_pb'
 import { NodeService } from './gen/meridian/reference_data/v1/node_pb'
-import { InternalBankAccountService } from './gen/meridian/internal_bank_account/v1/internal_bank_account_pb'
+import { InternalAccountService } from './gen/meridian/internal_account/v1/internal_account_pb'
 import { MarketInformationService } from './gen/meridian/market_information/v1/market_information_pb'
 import { MappingService } from './gen/meridian/mapping/v1/mapping_pb'
 import { ForecastingService } from './gen/meridian/forecasting/v1/forecasting_pb'
@@ -33,7 +33,7 @@ export function createServiceClients(transport: Transport) {
     referenceData: createClient(ReferenceDataService, transport),
     accountTypeRegistry: createClient(AccountTypeRegistryService, transport),
     node: createClient(NodeService, transport),
-    internalBankAccount: createClient(InternalBankAccountService, transport),
+    internalAccount: createClient(InternalAccountService, transport),
     marketInformation: createClient(MarketInformationService, transport),
     mapping: createClient(MappingService, transport),
     forecasting: createClient(ForecastingService, transport),

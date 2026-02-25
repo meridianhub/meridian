@@ -10,26 +10,26 @@ import (
 	"testing"
 	"time"
 
-	internalbankaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_bank_account/v1"
+	internalaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// mockInternalBankAccountClient is a mock implementation for testing.
-type mockInternalBankAccountClient struct {
-	listResponse *internalbankaccountv1.ListInternalBankAccountsResponse
+// mockInternalAccountClient is a mock implementation for testing.
+type mockInternalAccountClient struct {
+	listResponse *internalaccountv1.ListInternalAccountsResponse
 	listErr      error
 	callCount    atomic.Int32
 	mu           sync.Mutex
 
 	// For capturing request parameters in tests
-	lastRequest *internalbankaccountv1.ListInternalBankAccountsRequest
+	lastRequest *internalaccountv1.ListInternalAccountsRequest
 
 	// For simulating latency
 	latency time.Duration
 }
 
-func (m *mockInternalBankAccountClient) ListInternalBankAccounts(_ context.Context, req *internalbankaccountv1.ListInternalBankAccountsRequest) (*internalbankaccountv1.ListInternalBankAccountsResponse, error) {
+func (m *mockInternalAccountClient) ListInternalAccounts(_ context.Context, req *internalaccountv1.ListInternalAccountsRequest) (*internalaccountv1.ListInternalAccountsResponse, error) {
 	if m.latency > 0 {
 		time.Sleep(m.latency)
 	}
@@ -40,19 +40,19 @@ func (m *mockInternalBankAccountClient) ListInternalBankAccounts(_ context.Conte
 	return m.listResponse, m.listErr
 }
 
-func (m *mockInternalBankAccountClient) RetrieveInternalBankAccount(_ context.Context, _ *internalbankaccountv1.RetrieveInternalBankAccountRequest) (*internalbankaccountv1.RetrieveInternalBankAccountResponse, error) {
+func (m *mockInternalAccountClient) RetrieveInternalAccount(_ context.Context, _ *internalaccountv1.RetrieveInternalAccountRequest) (*internalaccountv1.RetrieveInternalAccountResponse, error) {
 	return nil, nil
 }
 
-func (m *mockInternalBankAccountClient) Close() error {
+func (m *mockInternalAccountClient) Close() error {
 	return nil
 }
 
-func (m *mockInternalBankAccountClient) getCallCount() int {
+func (m *mockInternalAccountClient) getCallCount() int {
 	return int(m.callCount.Load())
 }
 
-func (m *mockInternalBankAccountClient) getLastRequest() *internalbankaccountv1.ListInternalBankAccountsRequest {
+func (m *mockInternalAccountClient) getLastRequest() *internalaccountv1.ListInternalAccountsRequest {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.lastRequest
@@ -76,7 +76,7 @@ func TestNewAccountResolver_NilClient_ReturnsError(t *testing.T) {
 }
 
 func TestNewAccountResolver_NilLogger_ReturnsError(t *testing.T) {
-	mockClient := &mockInternalBankAccountClient{}
+	mockClient := &mockInternalAccountClient{}
 
 	_, err := NewAccountResolver(AccountResolverConfig{
 		Client: mockClient,
@@ -87,7 +87,7 @@ func TestNewAccountResolver_NilLogger_ReturnsError(t *testing.T) {
 }
 
 func TestNewAccountResolver_DefaultConfig(t *testing.T) {
-	mockClient := &mockInternalBankAccountClient{}
+	mockClient := &mockInternalAccountClient{}
 
 	resolver, err := NewAccountResolver(AccountResolverConfig{
 		Client: mockClient,
@@ -102,7 +102,7 @@ func TestNewAccountResolver_DefaultConfig(t *testing.T) {
 }
 
 func TestNewAccountResolver_CustomCacheTTL(t *testing.T) {
-	mockClient := &mockInternalBankAccountClient{}
+	mockClient := &mockInternalAccountClient{}
 	customTTL := 10 * time.Minute
 
 	resolver, err := NewAccountResolver(AccountResolverConfig{
@@ -116,9 +116,9 @@ func TestNewAccountResolver_CustomCacheTTL(t *testing.T) {
 }
 
 func TestCacheKeyFormat(t *testing.T) {
-	mockClient := &mockInternalBankAccountClient{
-		listResponse: &internalbankaccountv1.ListInternalBankAccountsResponse{
-			Facilities: []*internalbankaccountv1.InternalBankAccountFacility{
+	mockClient := &mockInternalAccountClient{
+		listResponse: &internalaccountv1.ListInternalAccountsResponse{
+			Facilities: []*internalaccountv1.InternalAccountFacility{
 				{AccountId: "test-account"},
 			},
 		},
@@ -155,9 +155,9 @@ func TestCacheKeyFormat(t *testing.T) {
 // =============================================================================
 
 func TestCacheHit(t *testing.T) {
-	mockClient := &mockInternalBankAccountClient{
-		listResponse: &internalbankaccountv1.ListInternalBankAccountsResponse{
-			Facilities: []*internalbankaccountv1.InternalBankAccountFacility{
+	mockClient := &mockInternalAccountClient{
+		listResponse: &internalaccountv1.ListInternalAccountsResponse{
+			Facilities: []*internalaccountv1.InternalAccountFacility{
 				{AccountId: "clearing-account-123"},
 			},
 		},
@@ -184,9 +184,9 @@ func TestCacheHit(t *testing.T) {
 }
 
 func TestCacheMiss_QueriesBackend(t *testing.T) {
-	mockClient := &mockInternalBankAccountClient{
-		listResponse: &internalbankaccountv1.ListInternalBankAccountsResponse{
-			Facilities: []*internalbankaccountv1.InternalBankAccountFacility{
+	mockClient := &mockInternalAccountClient{
+		listResponse: &internalaccountv1.ListInternalAccountsResponse{
+			Facilities: []*internalaccountv1.InternalAccountFacility{
 				{AccountId: "clearing-account-123"},
 			},
 		},
@@ -209,9 +209,9 @@ func TestCacheMiss_QueriesBackend(t *testing.T) {
 }
 
 func TestCacheTTL_Expiration(t *testing.T) {
-	mockClient := &mockInternalBankAccountClient{
-		listResponse: &internalbankaccountv1.ListInternalBankAccountsResponse{
-			Facilities: []*internalbankaccountv1.InternalBankAccountFacility{
+	mockClient := &mockInternalAccountClient{
+		listResponse: &internalaccountv1.ListInternalAccountsResponse{
+			Facilities: []*internalaccountv1.InternalAccountFacility{
 				{AccountId: "clearing-account-123"},
 			},
 		},
@@ -248,9 +248,9 @@ func TestCacheTTL_Expiration(t *testing.T) {
 func TestCacheStampede_SingleflightCoalescing(t *testing.T) {
 	var backendCallCount atomic.Int32
 
-	mockClient := &mockInternalBankAccountClient{
-		listResponse: &internalbankaccountv1.ListInternalBankAccountsResponse{
-			Facilities: []*internalbankaccountv1.InternalBankAccountFacility{
+	mockClient := &mockInternalAccountClient{
+		listResponse: &internalaccountv1.ListInternalAccountsResponse{
+			Facilities: []*internalaccountv1.InternalAccountFacility{
 				{AccountId: "clearing-account-123"},
 			},
 		},
@@ -320,9 +320,9 @@ func TestCacheStampede_SingleflightCoalescing(t *testing.T) {
 // =============================================================================
 
 func TestGetDepositClearingAccount_UsesClearingPurposeFilter(t *testing.T) {
-	mockClient := &mockInternalBankAccountClient{
-		listResponse: &internalbankaccountv1.ListInternalBankAccountsResponse{
-			Facilities: []*internalbankaccountv1.InternalBankAccountFacility{
+	mockClient := &mockInternalAccountClient{
+		listResponse: &internalaccountv1.ListInternalAccountsResponse{
+			Facilities: []*internalaccountv1.InternalAccountFacility{
 				{AccountId: "deposit-clearing-123"},
 			},
 		},
@@ -340,17 +340,17 @@ func TestGetDepositClearingAccount_UsesClearingPurposeFilter(t *testing.T) {
 	// Verify the request sent to backend has correct filtering
 	req := mockClient.getLastRequest()
 	require.NotNil(t, req)
-	assert.Equal(t, internalbankaccountv1.ClearingPurpose_CLEARING_PURPOSE_DEPOSIT, req.ClearingPurposeFilter,
+	assert.Equal(t, internalaccountv1.ClearingPurpose_CLEARING_PURPOSE_DEPOSIT, req.ClearingPurposeFilter,
 		"GetDepositClearingAccount should filter by CLEARING_PURPOSE_DEPOSIT")
 	assert.Equal(t, "CLEARING", req.BehaviorClassFilter)
-	assert.Equal(t, internalbankaccountv1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE, req.StatusFilter)
+	assert.Equal(t, internalaccountv1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE, req.StatusFilter)
 	assert.Equal(t, "GBP", req.InstrumentCodeFilter)
 }
 
 func TestGetWithdrawalClearingAccount_UsesClearingPurposeFilter(t *testing.T) {
-	mockClient := &mockInternalBankAccountClient{
-		listResponse: &internalbankaccountv1.ListInternalBankAccountsResponse{
-			Facilities: []*internalbankaccountv1.InternalBankAccountFacility{
+	mockClient := &mockInternalAccountClient{
+		listResponse: &internalaccountv1.ListInternalAccountsResponse{
+			Facilities: []*internalaccountv1.InternalAccountFacility{
 				{AccountId: "withdrawal-clearing-456"},
 			},
 		},
@@ -368,17 +368,17 @@ func TestGetWithdrawalClearingAccount_UsesClearingPurposeFilter(t *testing.T) {
 	// Verify the request sent to backend has correct filtering
 	req := mockClient.getLastRequest()
 	require.NotNil(t, req)
-	assert.Equal(t, internalbankaccountv1.ClearingPurpose_CLEARING_PURPOSE_WITHDRAWAL, req.ClearingPurposeFilter,
+	assert.Equal(t, internalaccountv1.ClearingPurpose_CLEARING_PURPOSE_WITHDRAWAL, req.ClearingPurposeFilter,
 		"GetWithdrawalClearingAccount should filter by CLEARING_PURPOSE_WITHDRAWAL")
 	assert.Equal(t, "CLEARING", req.BehaviorClassFilter)
-	assert.Equal(t, internalbankaccountv1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE, req.StatusFilter)
+	assert.Equal(t, internalaccountv1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE, req.StatusFilter)
 	assert.Equal(t, "USD", req.InstrumentCodeFilter)
 }
 
 func TestGetSettlementClearingAccount_UsesClearingPurposeFilter(t *testing.T) {
-	mockClient := &mockInternalBankAccountClient{
-		listResponse: &internalbankaccountv1.ListInternalBankAccountsResponse{
-			Facilities: []*internalbankaccountv1.InternalBankAccountFacility{
+	mockClient := &mockInternalAccountClient{
+		listResponse: &internalaccountv1.ListInternalAccountsResponse{
+			Facilities: []*internalaccountv1.InternalAccountFacility{
 				{AccountId: "settlement-clearing-789"},
 			},
 		},
@@ -396,10 +396,10 @@ func TestGetSettlementClearingAccount_UsesClearingPurposeFilter(t *testing.T) {
 	// Verify the request sent to backend has correct filtering
 	req := mockClient.getLastRequest()
 	require.NotNil(t, req)
-	assert.Equal(t, internalbankaccountv1.ClearingPurpose_CLEARING_PURPOSE_SETTLEMENT, req.ClearingPurposeFilter,
+	assert.Equal(t, internalaccountv1.ClearingPurpose_CLEARING_PURPOSE_SETTLEMENT, req.ClearingPurposeFilter,
 		"GetSettlementClearingAccount should filter by CLEARING_PURPOSE_SETTLEMENT")
 	assert.Equal(t, "CLEARING", req.BehaviorClassFilter)
-	assert.Equal(t, internalbankaccountv1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE, req.StatusFilter)
+	assert.Equal(t, internalaccountv1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE, req.StatusFilter)
 	assert.Equal(t, "EUR", req.InstrumentCodeFilter)
 }
 
@@ -408,9 +408,9 @@ func TestGetSettlementClearingAccount_UsesClearingPurposeFilter(t *testing.T) {
 // =============================================================================
 
 func TestNoResults_ReturnsError(t *testing.T) {
-	mockClient := &mockInternalBankAccountClient{
-		listResponse: &internalbankaccountv1.ListInternalBankAccountsResponse{
-			Facilities: []*internalbankaccountv1.InternalBankAccountFacility{}, // Empty result
+	mockClient := &mockInternalAccountClient{
+		listResponse: &internalaccountv1.ListInternalAccountsResponse{
+			Facilities: []*internalaccountv1.InternalAccountFacility{}, // Empty result
 		},
 	}
 
@@ -428,7 +428,7 @@ func TestNoResults_ReturnsError(t *testing.T) {
 var errAccountResolverTestConnectionRefused = errors.New("connection refused")
 
 func TestBackendError_PropagatesError(t *testing.T) {
-	mockClient := &mockInternalBankAccountClient{
+	mockClient := &mockInternalAccountClient{
 		listErr: errAccountResolverTestConnectionRefused,
 	}
 
@@ -449,9 +449,9 @@ func TestBackendError_PropagatesError(t *testing.T) {
 // =============================================================================
 
 func TestMultipleAccounts_GetDepositClearingAccount_ReturnsError(t *testing.T) {
-	mockClient := &mockInternalBankAccountClient{
-		listResponse: &internalbankaccountv1.ListInternalBankAccountsResponse{
-			Facilities: []*internalbankaccountv1.InternalBankAccountFacility{
+	mockClient := &mockInternalAccountClient{
+		listResponse: &internalaccountv1.ListInternalAccountsResponse{
+			Facilities: []*internalaccountv1.InternalAccountFacility{
 				{AccountId: "clearing-account-1"},
 				{AccountId: "clearing-account-2"},
 			},
@@ -473,9 +473,9 @@ func TestMultipleAccounts_GetDepositClearingAccount_ReturnsError(t *testing.T) {
 }
 
 func TestMultipleAccounts_GetWithdrawalClearingAccount_ReturnsError(t *testing.T) {
-	mockClient := &mockInternalBankAccountClient{
-		listResponse: &internalbankaccountv1.ListInternalBankAccountsResponse{
-			Facilities: []*internalbankaccountv1.InternalBankAccountFacility{
+	mockClient := &mockInternalAccountClient{
+		listResponse: &internalaccountv1.ListInternalAccountsResponse{
+			Facilities: []*internalaccountv1.InternalAccountFacility{
 				{AccountId: "clearing-account-1"},
 				{AccountId: "clearing-account-2"},
 				{AccountId: "clearing-account-3"},
@@ -498,9 +498,9 @@ func TestMultipleAccounts_GetWithdrawalClearingAccount_ReturnsError(t *testing.T
 }
 
 func TestMultipleAccounts_GetSettlementClearingAccount_ReturnsError(t *testing.T) {
-	mockClient := &mockInternalBankAccountClient{
-		listResponse: &internalbankaccountv1.ListInternalBankAccountsResponse{
-			Facilities: []*internalbankaccountv1.InternalBankAccountFacility{
+	mockClient := &mockInternalAccountClient{
+		listResponse: &internalaccountv1.ListInternalAccountsResponse{
+			Facilities: []*internalaccountv1.InternalAccountFacility{
 				{AccountId: "clearing-account-1"},
 				{AccountId: "clearing-account-2"},
 			},
@@ -522,9 +522,9 @@ func TestMultipleAccounts_GetSettlementClearingAccount_ReturnsError(t *testing.T
 }
 
 func TestMultipleAccounts_DoesNotCache(t *testing.T) {
-	mockClient := &mockInternalBankAccountClient{
-		listResponse: &internalbankaccountv1.ListInternalBankAccountsResponse{
-			Facilities: []*internalbankaccountv1.InternalBankAccountFacility{
+	mockClient := &mockInternalAccountClient{
+		listResponse: &internalaccountv1.ListInternalAccountsResponse{
+			Facilities: []*internalaccountv1.InternalAccountFacility{
 				{AccountId: "clearing-account-1"},
 				{AccountId: "clearing-account-2"},
 			},
@@ -550,9 +550,9 @@ func TestMultipleAccounts_DoesNotCache(t *testing.T) {
 }
 
 func TestSingleAccount_StillWorks(t *testing.T) {
-	mockClient := &mockInternalBankAccountClient{
-		listResponse: &internalbankaccountv1.ListInternalBankAccountsResponse{
-			Facilities: []*internalbankaccountv1.InternalBankAccountFacility{
+	mockClient := &mockInternalAccountClient{
+		listResponse: &internalaccountv1.ListInternalAccountsResponse{
+			Facilities: []*internalaccountv1.InternalAccountFacility{
 				{AccountId: "single-clearing-account"},
 			},
 		},
@@ -585,9 +585,9 @@ func TestSingleAccount_StillWorks(t *testing.T) {
 // =============================================================================
 
 func TestAccountResolver_InvalidateCache(t *testing.T) {
-	mockClient := &mockInternalBankAccountClient{
-		listResponse: &internalbankaccountv1.ListInternalBankAccountsResponse{
-			Facilities: []*internalbankaccountv1.InternalBankAccountFacility{
+	mockClient := &mockInternalAccountClient{
+		listResponse: &internalaccountv1.ListInternalAccountsResponse{
+			Facilities: []*internalaccountv1.InternalAccountFacility{
 				{AccountId: "clearing-account-123"},
 			},
 		},
@@ -620,9 +620,9 @@ func TestAccountResolver_InvalidateCache(t *testing.T) {
 }
 
 func TestAccountResolver_InvalidateCacheEntry(t *testing.T) {
-	mockClient := &mockInternalBankAccountClient{
-		listResponse: &internalbankaccountv1.ListInternalBankAccountsResponse{
-			Facilities: []*internalbankaccountv1.InternalBankAccountFacility{
+	mockClient := &mockInternalAccountClient{
+		listResponse: &internalaccountv1.ListInternalAccountsResponse{
+			Facilities: []*internalaccountv1.InternalAccountFacility{
 				{AccountId: "clearing-account-123"},
 			},
 		},
@@ -653,9 +653,9 @@ func TestAccountResolver_InvalidateCacheEntry(t *testing.T) {
 }
 
 func TestAccountResolver_DepositVsWithdrawalVsSettlement_SeparateCacheKeys(t *testing.T) {
-	mockClient := &mockInternalBankAccountClient{
-		listResponse: &internalbankaccountv1.ListInternalBankAccountsResponse{
-			Facilities: []*internalbankaccountv1.InternalBankAccountFacility{
+	mockClient := &mockInternalAccountClient{
+		listResponse: &internalaccountv1.ListInternalAccountsResponse{
+			Facilities: []*internalaccountv1.InternalAccountFacility{
 				{AccountId: "clearing-account-123"},
 			},
 		},
@@ -692,9 +692,9 @@ func TestAccountResolver_DepositVsWithdrawalVsSettlement_SeparateCacheKeys(t *te
 }
 
 func TestAccountResolver_ConcurrentAccess_NoRace(t *testing.T) {
-	mockClient := &mockInternalBankAccountClient{
-		listResponse: &internalbankaccountv1.ListInternalBankAccountsResponse{
-			Facilities: []*internalbankaccountv1.InternalBankAccountFacility{
+	mockClient := &mockInternalAccountClient{
+		listResponse: &internalaccountv1.ListInternalAccountsResponse{
+			Facilities: []*internalaccountv1.InternalAccountFacility{
 				{AccountId: "clearing-account-123"},
 			},
 		},
@@ -763,27 +763,27 @@ func TestMapClearingTypeToPurpose(t *testing.T) {
 	testCases := []struct {
 		name         string
 		clearingType ClearingAccountType
-		expected     internalbankaccountv1.ClearingPurpose
+		expected     internalaccountv1.ClearingPurpose
 	}{
 		{
 			name:         "deposit maps to CLEARING_PURPOSE_DEPOSIT",
 			clearingType: ClearingAccountTypeDeposit,
-			expected:     internalbankaccountv1.ClearingPurpose_CLEARING_PURPOSE_DEPOSIT,
+			expected:     internalaccountv1.ClearingPurpose_CLEARING_PURPOSE_DEPOSIT,
 		},
 		{
 			name:         "withdrawal maps to CLEARING_PURPOSE_WITHDRAWAL",
 			clearingType: ClearingAccountTypeWithdrawal,
-			expected:     internalbankaccountv1.ClearingPurpose_CLEARING_PURPOSE_WITHDRAWAL,
+			expected:     internalaccountv1.ClearingPurpose_CLEARING_PURPOSE_WITHDRAWAL,
 		},
 		{
 			name:         "settlement maps to CLEARING_PURPOSE_SETTLEMENT",
 			clearingType: ClearingAccountTypeSettlement,
-			expected:     internalbankaccountv1.ClearingPurpose_CLEARING_PURPOSE_SETTLEMENT,
+			expected:     internalaccountv1.ClearingPurpose_CLEARING_PURPOSE_SETTLEMENT,
 		},
 		{
 			name:         "unknown type maps to CLEARING_PURPOSE_UNSPECIFIED",
 			clearingType: ClearingAccountType("UNKNOWN"),
-			expected:     internalbankaccountv1.ClearingPurpose_CLEARING_PURPOSE_UNSPECIFIED,
+			expected:     internalaccountv1.ClearingPurpose_CLEARING_PURPOSE_UNSPECIFIED,
 		},
 	}
 

@@ -24,7 +24,7 @@ import (
 //
 // Flow:
 // 1. Customer initiates a deposit (Current Account)
-// 2. System resolves the deposit clearing account (Internal Bank Account)
+// 2. System resolves the deposit clearing account (Internal Account)
 // 3. Ledger posting created: Debit Clearing Account, Credit Customer Account (Financial Accounting)
 // 4. Position logs recorded for both accounts (Position Keeping)
 // 5. Verify: Ledger is balanced
@@ -41,12 +41,12 @@ func TestDepositClearingFlow(t *testing.T) {
 
 		// Step 1: Create deposit clearing account
 		depositClearingAccountID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-DEPOSIT", "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
 		// Step 2: Create withdrawal clearing account (for comparison)
 		_ = createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-WITHDRAW", "GBP", "CLEARING_PURPOSE_WITHDRAWAL")
 
 		// Step 3: Create customer account
@@ -62,7 +62,7 @@ func TestDepositClearingFlow(t *testing.T) {
 		// The deposit operation should:
 		// a) Resolve the deposit clearing account by purpose
 		resolvedAccountID, resolvedAccountCode, found := getClearingAccountByPurpose(t, ctx,
-			infra.internalBankAccountDB, schemaName, "GBP", "CLEARING_PURPOSE_DEPOSIT")
+			infra.internalAccountDB, schemaName, "GBP", "CLEARING_PURPOSE_DEPOSIT")
 		require.True(t, found, "deposit clearing account should be found")
 		assert.Equal(t, depositClearingAccountID, resolvedAccountID)
 		assert.Equal(t, "CLR-GBP-DEPOSIT", resolvedAccountCode)
@@ -117,23 +117,23 @@ func TestDepositClearingFlow(t *testing.T) {
 
 		// Create both deposit and withdrawal clearing accounts
 		depositAccountID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-DEP", "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
 		withdrawalAccountID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-WDR", "GBP", "CLEARING_PURPOSE_WITHDRAWAL")
 
 		// When resolving for DEPOSIT purpose
 		resolvedID, _, found := getClearingAccountByPurpose(t, ctx,
-			infra.internalBankAccountDB, schemaName, "GBP", "CLEARING_PURPOSE_DEPOSIT")
+			infra.internalAccountDB, schemaName, "GBP", "CLEARING_PURPOSE_DEPOSIT")
 		require.True(t, found)
 		assert.Equal(t, depositAccountID, resolvedID, "should resolve to deposit account")
 		assert.NotEqual(t, withdrawalAccountID, resolvedID, "should NOT resolve to withdrawal account")
 
 		// When resolving for WITHDRAWAL purpose
 		resolvedID, _, found = getClearingAccountByPurpose(t, ctx,
-			infra.internalBankAccountDB, schemaName, "GBP", "CLEARING_PURPOSE_WITHDRAWAL")
+			infra.internalAccountDB, schemaName, "GBP", "CLEARING_PURPOSE_WITHDRAWAL")
 		require.True(t, found)
 		assert.Equal(t, withdrawalAccountID, resolvedID, "should resolve to withdrawal account")
 		assert.NotEqual(t, depositAccountID, resolvedID, "should NOT resolve to deposit account")
@@ -145,7 +145,7 @@ func TestDepositClearingFlow(t *testing.T) {
 
 		// Setup accounts
 		clearingAccountID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-DEP", "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
 		partyID := uuid.New().String()
@@ -199,7 +199,7 @@ func TestDepositClearingFlow(t *testing.T) {
 
 		// Setup accounts (clearing account created but not directly used in this test)
 		_ = createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-DEP", "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
 		partyID := uuid.New().String()
@@ -259,7 +259,7 @@ func TestDepositClearingAccountResolution(t *testing.T) {
 		// Don't create any clearing accounts
 		// Try to resolve
 		_, _, found := getClearingAccountByPurpose(t, ctx,
-			infra.internalBankAccountDB, schemaName, "GBP", "CLEARING_PURPOSE_DEPOSIT")
+			infra.internalAccountDB, schemaName, "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
 		assert.False(t, found, "should not find clearing account when none exists")
 	})
@@ -270,19 +270,19 @@ func TestDepositClearingAccountResolution(t *testing.T) {
 
 		// Create clearing account
 		createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-DEP", "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
 		// Suspend it
-		_, err := infra.internalBankAccountDB.pool.Exec(ctx, fmt.Sprintf(`
-			UPDATE %s.internal_bank_accounts SET status = 'SUSPENDED'
+		_, err := infra.internalAccountDB.pool.Exec(ctx, fmt.Sprintf(`
+			UPDATE %s.internal_accounts SET status = 'SUSPENDED'
 			WHERE account_code = 'CLR-GBP-DEP'
 		`, pq.QuoteIdentifier(schemaName)))
 		require.NoError(t, err)
 
 		// Try to resolve - should not find it
 		_, _, found := getClearingAccountByPurpose(t, ctx,
-			infra.internalBankAccountDB, schemaName, "GBP", "CLEARING_PURPOSE_DEPOSIT")
+			infra.internalAccountDB, schemaName, "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
 		assert.False(t, found, "should not resolve suspended clearing account")
 	})
@@ -293,30 +293,30 @@ func TestDepositClearingAccountResolution(t *testing.T) {
 
 		// Create clearing accounts for multiple currencies
 		gbpAccountID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-DEP", "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
 		usdAccountID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-USD-DEP", "USD", "CLEARING_PURPOSE_DEPOSIT")
 
 		eurAccountID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-EUR-DEP", "EUR", "CLEARING_PURPOSE_DEPOSIT")
 
 		// Verify each currency resolves to correct account
 		id, _, found := getClearingAccountByPurpose(t, ctx,
-			infra.internalBankAccountDB, schemaName, "GBP", "CLEARING_PURPOSE_DEPOSIT")
+			infra.internalAccountDB, schemaName, "GBP", "CLEARING_PURPOSE_DEPOSIT")
 		require.True(t, found)
 		assert.Equal(t, gbpAccountID, id)
 
 		id, _, found = getClearingAccountByPurpose(t, ctx,
-			infra.internalBankAccountDB, schemaName, "USD", "CLEARING_PURPOSE_DEPOSIT")
+			infra.internalAccountDB, schemaName, "USD", "CLEARING_PURPOSE_DEPOSIT")
 		require.True(t, found)
 		assert.Equal(t, usdAccountID, id)
 
 		id, _, found = getClearingAccountByPurpose(t, ctx,
-			infra.internalBankAccountDB, schemaName, "EUR", "CLEARING_PURPOSE_DEPOSIT")
+			infra.internalAccountDB, schemaName, "EUR", "CLEARING_PURPOSE_DEPOSIT")
 		require.True(t, found)
 		assert.Equal(t, eurAccountID, id)
 	})

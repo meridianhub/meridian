@@ -137,8 +137,8 @@ var grpcMethodMap = map[methodKey]GRPCMethod{
 	{differ.ResourceInstrument, differ.ActionUpdate}: MethodUpdateInstrument,
 	{differ.ResourceInstrument, differ.ActionDelete}: MethodDeprecateInstrument,
 
-	// Account Types: CREATE maps to InitiateAccount on Internal Bank Account Service.
-	// Account types are registered as reference data AND provisioned as internal bank accounts.
+	// Account Types: CREATE maps to InitiateAccount on Internal Account Service.
+	// Account types are registered as reference data AND provisioned as internal accounts.
 	{differ.ResourceAccountType, differ.ActionCreate}: MethodInitiateAccount,
 	{differ.ResourceAccountType, differ.ActionUpdate}: MethodInitiateAccount,
 	{differ.ResourceAccountType, differ.ActionDelete}: MethodInitiateAccount,

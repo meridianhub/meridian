@@ -43,7 +43,7 @@ describe('createServiceClients', () => {
     expect(clients).toHaveProperty('referenceData')
     expect(clients).toHaveProperty('accountTypeRegistry')
     expect(clients).toHaveProperty('node')
-    expect(clients).toHaveProperty('internalBankAccount')
+    expect(clients).toHaveProperty('internalAccount')
     expect(clients).toHaveProperty('marketInformation')
     expect(clients).toHaveProperty('mapping')
     expect(clients).toHaveProperty('forecasting')

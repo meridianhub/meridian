@@ -7,7 +7,7 @@ triggers:
   - Bi-temporal valuation replay for audit and reconciliation
   - Multi-currency and multi-commodity conversion with full audit trail
 instructions: |
-  Account Services (CurrentAccount, InternalBankAccount) host the Asset Valuation service domain via
+  Account Services (CurrentAccount, InternalAccount) host the Asset Valuation service domain via
   shared library (Virtual Service pattern). Each account's ValuationFeature (Behavior Qualifier) defines
   how it accepts value. The shared/pkg/valuation library executes Starlark ValuationMethods that invoke
   named CEL Policies via run_policy(). Math lives in Policies; Starlark is pure procedure.
@@ -70,7 +70,7 @@ To ensure 100% compatibility with the BIAN Service Landscape, this PRD adopts st
 
 The Account-Scoped Valuation Engine enables multi-asset ledgers by making **accounts responsible for defining
 how they accept value**. Instead of a centralized pricing service, valuation logic is embedded within
-Account Services (CurrentAccount, InternalBankAccount) via a shared library.
+Account Services (CurrentAccount, InternalAccount) via a shared library.
 
 ### The "Probe Pattern"
 
@@ -93,7 +93,7 @@ shared/pkg/valuation/          # Shared library (Policy + Starlark runtime)
 └── cache.go                  # L1 in-memory cache (policies + methods)
 
 services/current-account/      # Implements EvaluateAssetValuation RPC
-services/internal-bank-account/ # Implements EvaluateAssetValuation RPC
+services/internal-account/ # Implements EvaluateAssetValuation RPC
 ```
 
 **Why Embedded Library > Standalone Service:**
@@ -236,7 +236,7 @@ of the Account Fulfillment Arrangement (Control Record). This allows accounts to
 // BIAN-native structure for Account with multiple features
 message AccountFulfillmentArrangement {  // Control Record (CR)
   string account_id = 1;
-  string account_type = 2;  // "CURRENT_ACCOUNT", "INTERNAL_BANK_ACCOUNT"
+  string account_type = 2;  // "CURRENT_ACCOUNT", "INTERNAL_ACCOUNT"
 
   // Behavior Qualifiers (BQ) - each feature is a separate BQ
   ValuationFeature valuation_feature = 3;
@@ -273,7 +273,7 @@ message ValuationFeature {  // Behavior Qualifier (BQ)
 #### Database Schema (ValuationFeature BQ)
 
 ```sql
--- Added to CurrentAccount and InternalBankAccount schemas
+-- Added to CurrentAccount and InternalAccount schemas
 -- Named as BIAN Behavior Qualifier
 CREATE TABLE valuation_features (
     feature_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1925,7 +1925,7 @@ reservation (within the same bucket) and calculates the correct tier pricing. Th
 package bucketing
 
 // CalculateBucketID generates a canonical bucket key from an InstrumentAmount.
-// Used by: CurrentAccount, InternalBankAccount, PositionKeeping, ReferenceData, Valuation
+// Used by: CurrentAccount, InternalAccount, PositionKeeping, ReferenceData, Valuation
 func CalculateBucketID(amount *quantity.InstrumentAmount) string {
     if amount == nil || len(amount.Attributes) == 0 {
         return ""  // No bucketing for simple instruments
@@ -2272,7 +2272,7 @@ Fulfillment Arrangements (Control Records).
 **Tasks:**
 
 1. Add `valuation_features` table to Current Account service (BIAN BQ schema)
-2. Add `valuation_features` table to Internal Bank Account service (BIAN BQ schema)
+2. Add `valuation_features` table to Internal Account service (BIAN BQ schema)
 3. Implement CRUD operations for ValuationFeature lifecycle (INITIATED → ACTIVE → TERMINATED)
 4. Add bi-temporal query support
 5. Update Tenant Provisioning to seed default methods (e.g., `USD_IDENTITY`)
@@ -2404,11 +2404,11 @@ Methods are Starlark procedures; Policies are named CEL expressions.
 - Graceful degradation when Market Information unavailable
 - Metrics show execution time and cache hit rate
 
-### Stream 5: Internal Bank Account Integration (P1, 10 points)
+### Stream 5: Internal Account Integration (P1, 10 points)
 
 **Tasks:**
 
-1. Add `EvaluateAssetValuation` RPC to Internal Bank Account proto (inquiry-only)
+1. Add `EvaluateAssetValuation` RPC to Internal Account proto (inquiry-only)
 2. Update `InitiateLien` to accept `InstrumentAmount` (any asset class)
 3. Update `InitiateLien` response to include `valued_amount` and `basis`
 4. Update `ExecuteDeposit` to perform atomic valuation

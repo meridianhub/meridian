@@ -368,7 +368,7 @@ The codebase contains 14 service directories. Here is how they map to UI pages:
 | reconciliation | Reconciliation | Both |
 | reference-data (saga registry) | Starlark Config | Both (different views) |
 | market-information | Market Data | Both |
-| internal-bank-account | Internal Accounts | Both |
+| internal-account | Internal Accounts | Both |
 | forecasting | Forecasting | Both |
 | tenant | Tenant Management | Platform only |
 | gateway (mapping service) | Gateway Mappings | Both |
@@ -443,7 +443,7 @@ Phase 1 and file issues to add count RPCs or
 
 **Real-time candidates:** Account status changes, transaction completion, withdrawal status updates.
 
-### 4.4 Internal Bank Accounts
+### 4.4 Internal Accounts
 
 **Lens:** Both
 
@@ -453,13 +453,13 @@ Phase 1 and file issues to add count RPCs or
 
 **RPCs consumed:**
 
-- `InternalBankAccountService.InitiateInternalBankAccount`
-- `InternalBankAccountService.RetrieveInternalBankAccount`
-- `InternalBankAccountService.ListInternalBankAccounts`
-- `InternalBankAccountService.GetBalance`
-- `InternalBankAccountService.ControlInternalBankAccount`
-- `InternalBankAccountService.InitiateLien` / `ExecuteLien` / `TerminateLien`
-- `InternalBankAccountService.CreateValuationFeature` / `ListValuationFeatures` / `EvaluateAssetValuation`
+- `InternalAccountService.InitiateInternalAccount`
+- `InternalAccountService.RetrieveInternalAccount`
+- `InternalAccountService.ListInternalAccounts`
+- `InternalAccountService.GetBalance`
+- `InternalAccountService.ControlInternalAccount`
+- `InternalAccountService.InitiateLien` / `ExecuteLien` / `TerminateLien`
+- `InternalAccountService.CreateValuationFeature` / `ListValuationFeatures` / `EvaluateAssetValuation`
 
 ### 4.5 Payments
 
@@ -1813,7 +1813,7 @@ frontend/
 │   │   │       ├── party/v1/
 │   │   │       ├── reconciliation/v1/
 │   │   │       ├── market_information/v1/
-│   │   │       ├── internal_bank_account/v1/
+│   │   │       ├── internal_account/v1/
 │   │   │       ├── forecasting/v1/
 │   │   │       ├── saga/v1/
 │   │   │       ├── tenant/v1/
@@ -2400,15 +2400,15 @@ Every RPC in the system mapped to its UI surface:
 | RetrieveObservation | Market Data | Detail view |
 | ListObservations | Market Data | Chart + list |
 
-### Internal Bank Account Service (15 RPCs)
+### Internal Account Service (15 RPCs)
 
 | RPC | UI Page | Action Type |
 |-----|---------|------------|
-| InitiateInternalBankAccount | Internal Accounts | Create form |
-| UpdateInternalBankAccount | Internal Accounts | Edit form |
-| ControlInternalBankAccount | Internal Accounts | Action buttons |
-| RetrieveInternalBankAccount | Internal Accounts | Detail view |
-| ListInternalBankAccounts | Internal Accounts | List view |
+| InitiateInternalAccount | Internal Accounts | Create form |
+| UpdateInternalAccount | Internal Accounts | Edit form |
+| ControlInternalAccount | Internal Accounts | Action buttons |
+| RetrieveInternalAccount | Internal Accounts | Detail view |
+| ListInternalAccounts | Internal Accounts | List view |
 | GetBalance | Internal Accounts | Balance display |
 | CreateValuationFeature | Internal Accounts | Config form |
 | UpdateValuationFeature | Internal Accounts | Edit form |

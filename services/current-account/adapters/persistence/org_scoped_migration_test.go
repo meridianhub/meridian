@@ -99,7 +99,8 @@ func TestOrgScopedMigrations_CockroachDB(t *testing.T) {
 			AccountID:             "ACC-ORG-001",
 			AccountIdentification: "GB82WEST11111111111111",
 			AccountType:           "current",
-			Currency:              "GBP",
+			InstrumentCode:        "GBP",
+			Dimension:             "CURRENCY",
 			Status:                "active",
 			PartyID:               partyID,
 			OrgPartyID:            &orgPartyID,
@@ -127,7 +128,8 @@ func TestOrgScopedMigrations_CockroachDB(t *testing.T) {
 			AccountID:             "ACC-PERSONAL-001",
 			AccountIdentification: "GB82WEST22222222222222",
 			AccountType:           "current",
-			Currency:              "GBP",
+			InstrumentCode:        "GBP",
+			Dimension:             "CURRENCY",
 			Status:                "active",
 			PartyID:               uuid.New(),
 			OrgPartyID:            nil,
@@ -147,7 +149,7 @@ func TestOrgScopedMigrations_CockroachDB(t *testing.T) {
 		assert.Nil(t, retrieved.OrgPartyID, "Personal account should have NULL org_party_id")
 	})
 
-	t.Run("UniqueConstraintOnPartyOrgCurrency", func(t *testing.T) {
+	t.Run("UniqueConstraintOnPartyOrgInstrumentCode", func(t *testing.T) {
 		partyID := uuid.New()
 		orgPartyID := uuid.New()
 		now := time.Now()
@@ -158,7 +160,8 @@ func TestOrgScopedMigrations_CockroachDB(t *testing.T) {
 			AccountID:             "ACC-UNIQ-001",
 			AccountIdentification: "GB82WEST33333333333333",
 			AccountType:           "current",
-			Currency:              "GBP",
+			InstrumentCode:        "GBP",
+			Dimension:             "CURRENCY",
 			Status:                "active",
 			PartyID:               partyID,
 			OrgPartyID:            &orgPartyID,
@@ -171,13 +174,14 @@ func TestOrgScopedMigrations_CockroachDB(t *testing.T) {
 		err := gormDB.Create(entity1).Error
 		require.NoError(t, err, "First org-scoped account should succeed")
 
-		// Duplicate: same party + org + currency should fail
+		// Duplicate: same party + org + instrument_code should fail
 		entity2 := &CurrentAccountEntity{
 			ID:                    uuid.New(),
 			AccountID:             "ACC-UNIQ-002",
 			AccountIdentification: "GB82WEST44444444444444",
 			AccountType:           "current",
-			Currency:              "GBP",
+			InstrumentCode:        "GBP",
+			Dimension:             "CURRENCY",
 			Status:                "active",
 			PartyID:               partyID,
 			OrgPartyID:            &orgPartyID,
@@ -188,15 +192,16 @@ func TestOrgScopedMigrations_CockroachDB(t *testing.T) {
 			UpdatedBy:             "system",
 		}
 		err = gormDB.Create(entity2).Error
-		assert.Error(t, err, "Duplicate (party_id, org_party_id, currency) should be rejected by unique index")
+		assert.Error(t, err, "Duplicate (party_id, org_party_id, instrument_code) should be rejected by unique index")
 
-		// Different currency: same party + org + EUR should succeed
+		// Different instrument_code: same party + org + EUR should succeed
 		entity3 := &CurrentAccountEntity{
 			ID:                    uuid.New(),
 			AccountID:             "ACC-UNIQ-003",
 			AccountIdentification: "GB82WEST55555555555555",
 			AccountType:           "current",
-			Currency:              "EUR",
+			InstrumentCode:        "EUR",
+			Dimension:             "CURRENCY",
 			Status:                "active",
 			PartyID:               partyID,
 			OrgPartyID:            &orgPartyID,
@@ -207,21 +212,22 @@ func TestOrgScopedMigrations_CockroachDB(t *testing.T) {
 			UpdatedBy:             "system",
 		}
 		err = gormDB.Create(entity3).Error
-		assert.NoError(t, err, "Different currency for same (party_id, org_party_id) should succeed")
+		assert.NoError(t, err, "Different instrument_code for same (party_id, org_party_id) should succeed")
 	})
 
 	t.Run("UniqueConstraintDoesNotAffectPersonalAccounts", func(t *testing.T) {
 		partyID := uuid.New()
 		now := time.Now()
 
-		// Two personal accounts (NULL org_party_id) with same party and currency
+		// Two personal accounts (NULL org_party_id) with same party and instrument_code
 		// should succeed because the partial unique index only applies WHERE org_party_id IS NOT NULL
 		entity1 := &CurrentAccountEntity{
 			ID:                    uuid.New(),
 			AccountID:             "ACC-PERS-DUP-001",
 			AccountIdentification: "GB82WEST66666666666666",
 			AccountType:           "current",
-			Currency:              "GBP",
+			InstrumentCode:        "GBP",
+			Dimension:             "CURRENCY",
 			Status:                "active",
 			PartyID:               partyID,
 			OrgPartyID:            nil,
@@ -239,7 +245,8 @@ func TestOrgScopedMigrations_CockroachDB(t *testing.T) {
 			AccountID:             "ACC-PERS-DUP-002",
 			AccountIdentification: "GB82WEST77777777777777",
 			AccountType:           "savings",
-			Currency:              "GBP",
+			InstrumentCode:        "GBP",
+			Dimension:             "CURRENCY",
 			Status:                "active",
 			PartyID:               partyID,
 			OrgPartyID:            nil,
@@ -250,7 +257,7 @@ func TestOrgScopedMigrations_CockroachDB(t *testing.T) {
 			UpdatedBy:             "system",
 		}
 		err = gormDB.Create(entity2).Error
-		assert.NoError(t, err, "Multiple personal accounts with same party+currency should be allowed")
+		assert.NoError(t, err, "Multiple personal accounts with same party+instrument_code should be allowed")
 	})
 }
 

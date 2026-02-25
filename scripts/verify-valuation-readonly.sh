@@ -38,7 +38,7 @@ FORBIDDEN_PATTERNS=(
     "meridianhub/meridian/services/position-keeping/client"
     "meridianhub/meridian/services/financial-accounting/client"
     "meridianhub/meridian/services/current-account/client"
-    "meridianhub/meridian/services/internal-bank-account/client"
+    "meridianhub/meridian/services/internal-account/client"
 
     # Database write operations
     "gorm.io/gorm.*Create"

@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	internalbankaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_bank_account/v1"
+	internalaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
 	poobservability "github.com/meridianhub/meridian/services/payment-order/observability"
 	"golang.org/x/sync/singleflight"
 )
@@ -26,11 +26,11 @@ var (
 	// ErrEmptyClearingAccountID is returned when a clearing account has an empty account_id.
 	ErrEmptyClearingAccountID = errors.New("clearing account has empty account_id")
 
-	// ErrNilClearingAccountResponse is returned when the internal bank account service returns a nil response.
-	ErrNilClearingAccountResponse = errors.New("nil response from internal bank account service")
+	// ErrNilClearingAccountResponse is returned when the internal account service returns a nil response.
+	ErrNilClearingAccountResponse = errors.New("nil response from internal account service")
 
 	// ErrAccountResolverClientNil is returned when attempting to create an AccountResolver with a nil client.
-	ErrAccountResolverClientNil = errors.New("internal bank account client cannot be nil")
+	ErrAccountResolverClientNil = errors.New("internal account client cannot be nil")
 
 	// ErrAccountResolverLoggerNil is returned when attempting to create an AccountResolver with a nil logger.
 	ErrAccountResolverLoggerNil = errors.New("logger cannot be nil")
@@ -55,13 +55,13 @@ type cacheEntry struct {
 	expiresAt time.Time
 }
 
-// AccountResolver resolves clearing account IDs dynamically from the Internal Bank Account service.
+// AccountResolver resolves clearing account IDs dynamically from the Internal Account service.
 // It provides caching to reduce external service calls and supports settlement clearing account lookups.
 //
 // Thread-safe: All methods can be called concurrently from multiple goroutines.
 // Uses singleflight to prevent cache stampede (multiple concurrent requests for the same key).
 type AccountResolver struct {
-	client InternalBankAccountClient
+	client InternalAccountClient
 	logger *slog.Logger
 
 	// Cache configuration
@@ -78,8 +78,8 @@ type AccountResolver struct {
 
 // AccountResolverConfig holds configuration for creating an AccountResolver.
 type AccountResolverConfig struct {
-	// Client is the Internal Bank Account gRPC client.
-	Client InternalBankAccountClient
+	// Client is the Internal Account gRPC client.
+	Client InternalAccountClient
 
 	// Logger is used for logging resolver operations.
 	Logger *slog.Logger
@@ -88,7 +88,7 @@ type AccountResolverConfig struct {
 	// Defaults to 5 minutes if not specified.
 	CacheTTL time.Duration
 
-	// LookupTimeout is the timeout for individual lookup requests to the Internal Bank Account service.
+	// LookupTimeout is the timeout for individual lookup requests to the Internal Account service.
 	// Defaults to 2 seconds if not specified.
 	LookupTimeout time.Duration
 }
@@ -137,7 +137,7 @@ func NewAccountResolver(cfg AccountResolverConfig) (*AccountResolver, error) {
 // Settlement accounts are used by Payment Order for payment completion and reconciliation
 // with external payment gateways.
 //
-// It first checks the cache, and if not found or expired, queries the Internal Bank Account
+// It first checks the cache, and if not found or expired, queries the Internal Account
 // service for an active CLEARING account matching the instrument.
 func (r *AccountResolver) GetSettlementClearingAccount(ctx context.Context, instrumentCode string) (string, error) {
 	return r.resolveClearingAccount(ctx, ClearingAccountTypeSettlement, instrumentCode)
@@ -180,8 +180,8 @@ func (r *AccountResolver) resolveClearingAccount(ctx context.Context, clearingTy
 		lookupCtx, cancel := context.WithTimeout(ctx, r.lookupTimeout)
 		defer cancel()
 
-		// Query the Internal Bank Account service
-		accountID, err := r.queryInternalBankAccount(lookupCtx, clearingType, instrumentCode)
+		// Query the Internal Account service
+		accountID, err := r.queryInternalAccount(lookupCtx, clearingType, instrumentCode)
 		if err != nil {
 			return "", err
 		}
@@ -224,19 +224,19 @@ func (r *AccountResolver) resolveClearingAccount(ctx context.Context, clearingTy
 	return accountID, nil
 }
 
-// queryInternalBankAccount queries the Internal Bank Account service for a clearing account
+// queryInternalAccount queries the Internal Account service for a clearing account
 // with the specified clearing purpose.
-func (r *AccountResolver) queryInternalBankAccount(ctx context.Context, clearingType ClearingAccountType, instrumentCode string) (string, error) {
+func (r *AccountResolver) queryInternalAccount(ctx context.Context, clearingType ClearingAccountType, instrumentCode string) (string, error) {
 	clearingPurpose := mapClearingTypeToPurpose(clearingType)
 
-	resp, err := r.client.ListInternalBankAccounts(ctx, &internalbankaccountv1.ListInternalBankAccountsRequest{
+	resp, err := r.client.ListInternalAccounts(ctx, &internalaccountv1.ListInternalAccountsRequest{
 		BehaviorClassFilter:   "CLEARING",
 		InstrumentCodeFilter:  instrumentCode,
-		StatusFilter:          internalbankaccountv1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE,
+		StatusFilter:          internalaccountv1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE,
 		ClearingPurposeFilter: clearingPurpose,
 	})
 	if err != nil {
-		r.logger.Error("failed to query internal bank accounts",
+		r.logger.Error("failed to query internal accounts",
 			"clearing_type", clearingType,
 			"clearing_purpose", clearingPurpose.String(),
 			"instrument_code", instrumentCode,
@@ -246,7 +246,7 @@ func (r *AccountResolver) queryInternalBankAccount(ctx context.Context, clearing
 
 	// Defensive check for nil response
 	if resp == nil {
-		r.logger.Error("nil response from internal bank account service",
+		r.logger.Error("nil response from internal account service",
 			"clearing_type", clearingType,
 			"clearing_purpose", clearingPurpose.String(),
 			"instrument_code", instrumentCode)
@@ -288,13 +288,13 @@ func (r *AccountResolver) queryInternalBankAccount(ctx context.Context, clearing
 }
 
 // mapClearingTypeToPurpose converts the internal ClearingAccountType to the proto ClearingPurpose enum.
-func mapClearingTypeToPurpose(clearingType ClearingAccountType) internalbankaccountv1.ClearingPurpose {
+func mapClearingTypeToPurpose(clearingType ClearingAccountType) internalaccountv1.ClearingPurpose {
 	switch clearingType {
 	case ClearingAccountTypeSettlement:
-		return internalbankaccountv1.ClearingPurpose_CLEARING_PURPOSE_SETTLEMENT
+		return internalaccountv1.ClearingPurpose_CLEARING_PURPOSE_SETTLEMENT
 	default:
 		// For unknown types, return UNSPECIFIED which means no filtering by clearing purpose.
-		return internalbankaccountv1.ClearingPurpose_CLEARING_PURPOSE_UNSPECIFIED
+		return internalaccountv1.ClearingPurpose_CLEARING_PURPOSE_UNSPECIFIED
 	}
 }
 

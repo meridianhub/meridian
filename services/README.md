@@ -32,7 +32,7 @@ flowchart LR
             PO["PaymentOrder<br/>:50054, :8080"]
             RD["ReferenceData<br/>:50051"]
             MI["MarketInformation<br/>:50058"]
-            IBA["InternalBankAccount<br/>:50057"]
+            IBA["InternalAccount<br/>:50057"]
             Recon["Reconciliation<br/>:50060"]
             FC["Forecasting<br/>:50061"]
         end
@@ -149,7 +149,7 @@ All inter-service communication uses gRPC with Protocol Buffers:
 | Tenant | Party | `RegisterParty()` | Register org party (optional) |
 | Tenant | ReferenceData | SQL seed | Seed system instruments during provisioning |
 | PositionKeeping | ReferenceData | `GetInstrument()` | Retrieve instrument definitions |
-| InternalBankAccount | PositionKeeping | `GetBalance()` | Query balance for internal accounts |
+| InternalAccount | PositionKeeping | `GetBalance()` | Query balance for internal accounts |
 | Reconciliation | PositionKeeping | Query positions | Compare position data across services |
 | Reconciliation | FinancialAccounting | Query ledger | Compare ledger entries across services |
 | Reconciliation | CurrentAccount | Query accounts | Compare account state across services |
@@ -258,7 +258,7 @@ Redis provides optional distributed idempotency for exactly-once semantics:
 | PaymentOrder | 50054 | 8080 | 9090 |
 | Party | 50055 | - | 9090 |
 | Tenant | 50056 | - | 9090 |
-| InternalBankAccount | 50057 | - | 9090 |
+| InternalAccount | 50057 | - | 9090 |
 | MarketInformation | 50058 | - | 8082 |
 | Reconciliation | 50060 | - | 9090 |
 | Forecasting | 50061 | - | 9090 |
@@ -395,9 +395,9 @@ The Utilization Metering Consumer is a centralized Kafka consumer for platform b
 See [services/utilization-metering-consumer/README.md](utilization-metering-consumer/README.md) for full
 documentation and [k8s/README.md](utilization-metering-consumer/k8s/README.md) for deployment details.
 
-### Internal Bank Account Service
+### Internal Account Service
 
-The Internal Bank Account service manages non-customer accounts used for internal accounting
+The Internal Account service manages non-customer accounts used for internal accounting
 and correspondent banking operations.
 
 **Responsibilities:**
@@ -409,7 +409,7 @@ and correspondent banking operations.
 
 **Account Types:** CLEARING, NOSTRO, VOSTRO, HOLDING, SUSPENSE, REVENUE, EXPENSE, INVENTORY
 
-See [services/internal-bank-account/README.md](internal-bank-account/README.md) for full documentation.
+See [services/internal-account/README.md](internal-account/README.md) for full documentation.
 
 ### Reconciliation Service
 
@@ -542,7 +542,7 @@ When `Resilience` is configured, clients automatically include:
 | PositionKeeping | `services/position-keeping/client` | 50053 |
 | Party | `services/party/client` | 50055 |
 | Tenant | `services/tenant/client` | 50056 |
-| InternalBankAccount | `services/internal-bank-account/client` | 50057 |
+| InternalAccount | `services/internal-account/client` | 50057 |
 | MarketInformation | `services/market-information/client` | 50058 |
 | Reconciliation | `services/reconciliation/client` | 50060 |
 | ReferenceData | `services/reference-data/client` | 50051 |
@@ -880,11 +880,11 @@ erDiagram
     invoice ||--o{ dunning : "escalates"
 
     %% ════════════════════════════════════
-    %% INTERNAL BANK ACCOUNT SERVICE
+    %% INTERNAL ACCOUNT SERVICE
     %% DB: meridian_iba (org_{tenant} schema)
     %% ════════════════════════════════════
 
-    internal_bank_account {
+    internal_account {
         uuid id PK
         varchar account_id UK
         varchar account_code
@@ -911,8 +911,8 @@ erDiagram
         varchar lifecycle_status "INITIATED|ACTIVE|TERMINATED"
     }
 
-    internal_bank_account ||--o{ iba_lien : "holds"
-    internal_bank_account ||--o{ iba_valuation_features : "valued-by"
+    internal_account ||--o{ iba_lien : "holds"
+    internal_account ||--o{ iba_valuation_features : "valued-by"
 
     %% ════════════════════════════════════
     %% REFERENCE DATA SERVICE (Central Registry)
@@ -950,9 +950,9 @@ erDiagram
     account ||..o{ payment_order : "debtor"
     ca_lien ||..o| payment_order : "reserves"
     financial_booking_log ||..o| payment_order : "books"
-    internal_bank_account ||..o{ ledger_posting : "posted-to"
+    internal_account ||..o{ ledger_posting : "posted-to"
     instrument_definition ||..o{ financial_position_log : "denominated"
-    instrument_definition ||..o{ internal_bank_account : "denominated"
+    instrument_definition ||..o{ internal_account : "denominated"
     valuation_method ||..o{ ca_valuation_features : "applied"
     valuation_method ||..o{ iba_valuation_features : "applied"
     tenant ||..o{ billing_run : "billed"
@@ -960,7 +960,7 @@ erDiagram
 
 Tenant Management (3), Party (6), Current Account (4),
 Financial Accounting (2), Position Keeping (5), Payment Order (4),
-Internal Bank Account (3), Reference Data (2). These services form
+Internal Account (3), Reference Data (2). These services form
 the densely interconnected transaction processing core.
 
 ### Market Data, Reconciliation & Operations (17 tables)

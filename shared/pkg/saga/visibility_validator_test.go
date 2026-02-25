@@ -247,7 +247,7 @@ func TestNewVisibilityManifestFromInput(t *testing.T) {
 	input := map[string]interface{}{
 		"party_id":           partyID.String(),
 		"counterparty_id":    counterpartyID.String(),
-		"authorized_lookups": []interface{}{"resolve_account", "internal_bank_account"},
+		"authorized_lookups": []interface{}{"resolve_account", "internal_account"},
 	}
 
 	manifest := NewVisibilityManifestFromInput(input)
@@ -257,7 +257,7 @@ func TestNewVisibilityManifestFromInput(t *testing.T) {
 	assert.Contains(t, manifest.ReferencedParties, counterpartyID)
 	assert.Len(t, manifest.AuthorizedLookups, 2)
 	assert.Contains(t, manifest.AuthorizedLookups, "resolve_account")
-	assert.Contains(t, manifest.AuthorizedLookups, "internal_bank_account")
+	assert.Contains(t, manifest.AuthorizedLookups, "internal_account")
 }
 
 func TestVisibilityManifest_isAuthorizedLookup(t *testing.T) {
@@ -266,6 +266,6 @@ func TestVisibilityManifest_isAuthorizedLookup(t *testing.T) {
 	}
 
 	assert.True(t, manifest.isAuthorizedLookup("resolve_account"))
-	assert.False(t, manifest.isAuthorizedLookup("internal_bank_account"))
+	assert.False(t, manifest.isAuthorizedLookup("internal_account"))
 	assert.False(t, manifest.isAuthorizedLookup("unknown_lookup"))
 }

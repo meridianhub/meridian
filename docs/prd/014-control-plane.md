@@ -104,7 +104,7 @@ graph TD
     UI -->|user management| CP5
 
     CP2 -->|gRPC| RD[reference-data]
-    CP2 -->|gRPC| IBA[internal-bank-account]
+    CP2 -->|gRPC| IBA[internal-account]
     CP2 -->|gRPC| PK[position-keeping]
     CP3 -->|Kafka| SAGA[Saga Engine]
 ```
@@ -852,7 +852,7 @@ the Control Plane verifies this precondition and panics if unmet.
 The seeding sequence:
 
 1. Tenant Service provisions `meridian-ops` schema
-2. Internal Bank Account Service seeds nostro/revenue accounts
+2. Internal Account Service seeds nostro/revenue accounts
    (via existing post-provisioning hook)
 3. Control Plane startup verifies accounts exist
 4. Stripe webhook processing enabled
