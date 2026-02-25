@@ -15,10 +15,11 @@ instructions: |
   Approach: generalize fields, keep BIAN service domain names. The BIAN
   classification provides taxonomy value -- the problem is field-level
   assumptions that force banking concepts on non-banking use cases.
+  System is pre-production so all changes are direct refactors -- no
+  deprecation periods, dual fields, or backwards compatibility shims.
   Phase 1 (high): Current Account field generalization.
   Phase 2 (medium): Drop "Bank" from Internal Account naming.
-  Phase 3 (low): Deprecate common Currency enum.
-  All changes must be backwards compatible (dual fields, dual handlers).
+  Phase 3 (low): Remove common Currency enum.
 ---
 
 # Asset-Agnostic Account Services
@@ -59,6 +60,10 @@ classification ("Current Account", "Internal Account") provides taxonomy
 value for compliance-focused tenants. The problem is not the service name
 -- it is the field-level assumptions that force banking concepts onto
 non-banking use cases.
+
+**Pre-production system** -- no live clients, no deployed tenants. All
+changes are direct refactors with no deprecation periods or backwards
+compatibility shims required.
 
 ## Current State
 
@@ -115,18 +120,15 @@ account service truly asset-agnostic.
 
 **Database:**
 
-- Add `instrument_code VARCHAR(32) NOT NULL` column
-  (backfill from `currency` via instrument code mapping)
+- Replace `currency CHAR(3)` column with `instrument_code VARCHAR(32)`
 - Add `dimension VARCHAR(20) NOT NULL` column
-  (backfill all existing as `'CURRENCY'`)
-- Deprecate `currency` column
-  (keep for backwards compat during migration, drop later)
+- Drop `currency` column and its default `'GBP'`
 
 **Domain:**
 
 - Replace `Money` balance types with instrument-aware equivalents
   (or defer to Position Keeping, which already handles this)
-- Add `instrumentCode` and `dimension` fields
+- Replace currency field with `instrumentCode` and `dimension`
 
 **Proto:**
 
@@ -141,14 +143,13 @@ account service truly asset-agnostic.
 
 - Rename column: `account_identification` -> `external_identifier`
 - Widen from VARCHAR(34) to VARCHAR(255)
-- Validation rules move to product type configuration
-  (IBAN regex for banking products, MPAN for energy, etc.)
 
 **Domain:**
 
 - Rename field: `accountIdentification` -> `externalIdentifier`
 - Remove hard-coded IBAN validation from domain constructor
 - Validation delegated to product type's CEL validation rules
+  (IBAN regex for banking products, MPAN for energy, etc.)
 
 **Proto:**
 
@@ -156,37 +157,33 @@ account service truly asset-agnostic.
 - Remove IBAN pattern constraint from proto validation
 - Document that format is product-type-dependent
 
-#### 1.3 Make Overdraft a Product-Type Behaviour (Not Hard-Coded)
+#### 1.3 Remove Overdraft as Hard-Coded Facility
 
 **Domain:**
 
-- Extract `overdraftLimit`, `overdraftEnabled`, `overdraftRate`
+- Remove `overdraftLimit`, `overdraftEnabled`, `overdraftRate`
   from the core domain model
-- Move to `attributes` map or a dedicated credit facility sub-entity
-  controlled by product type
-- Overdraft becomes one possible "credit facility" behaviour,
-  configured via Product Directory
+- Credit facility behaviour driven by Product Directory configuration
+- Overdraft becomes one possible product-type behaviour, not a core
+  account concept
 
 **Proto:**
 
-- Deprecate `OverdraftConfiguration` as a top-level field on
-  `CurrentAccountFacility`
-- Add generic `CreditFacility` or move to product-type-driven attributes
+- Remove `OverdraftConfiguration` from `CurrentAccountFacility`
+- Credit facility configured via product-type attributes
 
 **Database:**
 
-- Existing `overdraft_limit`, `overdraft_rate` columns remain
-  for backwards compat
-- New accounts use product-type-driven configuration
+- Drop `overdraft_limit`, `overdraft_rate` columns
+- Product-type-driven configuration replaces hard-coded fields
 
 #### 1.4 Generalize Account Type Vocabulary
 
 **Current:** `account_type` uses banking terms -- "current", "savings"
 
 **Proposed:** Account type is derived from `product_type_code` in the
-Product Directory. The `account_type` column becomes a legacy field.
-Product types define the behaviour class (just as internal accounts
-already work).
+Product Directory. Remove the `account_type` column. Product types
+define the behaviour class (just as internal accounts already work).
 
 ### Phase 2: Internal Account -- Drop "Bank" from Naming (Medium Priority)
 
@@ -201,7 +198,7 @@ asset-agnostic; the naming just hasn't caught up.
 | `meridian.internal_bank_account.v1` | `meridian.internal_account.v1` |
 | `InternalBankAccountFacility` | `InternalAccountFacility` |
 | `InternalBankAccount` (Go struct) | `InternalAccount` (Go struct) |
-| `internal_bank_account` (DB table) | Keep as-is or rename with view |
+| `internal_bank_account` (DB table) | `internal_account` |
 | `internal_bank_account.*` (Starlark) | `internal_account.*` |
 
 #### 2.2 Generalize Correspondent Terminology
@@ -219,48 +216,35 @@ Note: NOSTRO/VOSTRO are useful beyond banking (any correspondent/mirror
 account pattern), so the behaviour class names can stay. The "Bank"
 prefix on the container type is what needs to go.
 
-### Phase 3: Common Proto Generalization (Low Priority, Opportunistic)
+### Phase 3: Common Proto Cleanup (Low Priority, Opportunistic)
 
-#### 3.1 Currency Enum -> Instrument Reference
+#### 3.1 Remove Currency Enum
 
 The `meridian.common.v1.Currency` enum is inherently limited (only 7
 currencies). Services should reference instruments by code string, not
 by enum. This is already the pattern in internal accounts and position
 keeping.
 
-- Deprecate `Currency` enum in common proto
-- Services that still use it (current account) migrate to
-  `instrument_code` string in Phase 1
+- Remove `Currency` enum from common proto
+- All services use `instrument_code` string references
 - `MoneyAmount` wrapping `google.type.Money` remains valid for
   currency-denominated amounts but should not be the only representation
 
 ## Cross-Cutting Concerns
 
-### Proto Backwards Compatibility
-
-All proto field renames MUST follow gRPC backwards compatibility:
-
-- Add new fields alongside old ones
-- Mark old fields as `deprecated = true`
-- Old field numbers are NEVER reused
-- Both old and new fields work during transition period
-
 ### Starlark Handler Migration
 
-Handler prefix change (`internal_bank_account.*` -> `internal_account.*`)
-requires:
-
-- Dual-registration during transition (both prefixes route to same handler)
-- Existing saga scripts continue to work with old prefix
-- New saga scripts use new prefix
-- Deprecation warning logged for old prefix usage
+Handler prefix `internal_bank_account.*` -> `internal_account.*`:
+update all registered handlers and all existing saga scripts that
+reference the old prefix. Since the system is pre-production, update
+all references in a single pass.
 
 ### Database Migration Strategy
 
-- New columns added alongside old ones
-- Backfill migration populates new columns from old data
-- Application reads from new columns, writes to both during transition
-- Old columns dropped in a future cleanup migration (separate PRD)
+- Write new Atlas migrations that rename/drop/add columns directly
+- No backfill needed for pre-production data (test data can be
+  re-seeded)
+- Update GORM entity structs to match new schema
 
 ### Reference Data Alignment
 
@@ -276,10 +260,9 @@ already do. This ensures consistency.
    (e.g., MPAN meter ID)
 3. Internal account API references `InternalAccountFacility` (no "Bank")
    in proto
-4. All existing banking tenants continue to work unchanged
-   (backwards compatible)
-5. Starlark sagas written against old handler prefixes still execute
-6. No data loss during migration -- all existing accounts retain data
+4. No banking-specific fields remain hard-coded in domain models
+5. All tests pass with updated field names and types
+6. Starlark saga scripts use new handler prefixes
 
 ## Out of Scope
 
@@ -296,8 +279,7 @@ already do. This ensures consistency.
 
 | Risk | Mitigation |
 |------|-----------|
-| Proto renames break clients | Dual-field with deprecation |
-| Handler prefix breaks sagas | Dual-registration + warnings |
-| DB table rename | Keep table name, change app layer |
-| Large blast radius | Phase: fields first, naming second |
-| Test fixtures assume banking | Update per phase, self-contained |
+| Large blast radius across codebase | Phase the work: fields first, naming second |
+| Test fixtures assume banking fields | Update alongside code changes per phase |
+| DB table rename breaks references | Rename in migrations + all Go references |
+| Starlark scripts use old prefixes | Find-and-replace all saga definitions |
