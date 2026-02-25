@@ -178,14 +178,14 @@ account service truly asset-agnostic.
 
 **Database:**
 
-- Drop `overdraft_limit`, `overdraft_rate` columns
+- Drop `overdraft_limit`, `overdraft_enabled`, `overdraft_rate` columns
 - Product-type-driven configuration replaces hard-coded fields
 
 #### 1.4 Generalize Account Type Vocabulary
 
 **Current:** `account_type` uses banking terms -- "current", "savings"
 
-**Proposed:** Replace `account_type` with `behaviour_class` derived from
+**Proposed:** Replace `account_type` with `behavior_class` derived from
 `product_type_code` in the Product Directory. This mirrors the internal
 account pattern where `behavior_class` is the abstract classification.
 
@@ -218,6 +218,7 @@ asset-agnostic; the naming just hasn't caught up.
 | `correspondent_external_ref` | `counterparty_external_ref` |
 | `swift_code` | Move to `attributes` (product-type-specific) |
 | `CORRESPONDENT_TYPE_NOSTRO` | `COUNTERPARTY_TYPE_NOSTRO` |
+| `CORRESPONDENT_TYPE_VOSTRO` | `COUNTERPARTY_TYPE_VOSTRO` |
 
 Note: NOSTRO/VOSTRO are useful beyond banking (any correspondent/mirror
 account pattern), so the behaviour class names can stay. The "Bank"
