@@ -218,7 +218,8 @@ func testLienEntity(t *testing.T, db *gorm.DB) {
 		AccountID:             "ACC-LIEN-001",
 		AccountIdentification: "GB82WEST12345698765433",
 		AccountType:           "current",
-		Currency:              "GBP",
+		InstrumentCode:        "GBP",
+		Dimension:             "CURRENCY",
 		Status:                "active",
 		PartyID:               partyID,
 		OverdraftLimit:        5000,
@@ -359,7 +360,8 @@ func testWithdrawalEntity(t *testing.T, db *gorm.DB) {
 		AccountID:             "ACC-WD-001",
 		AccountIdentification: "GB82WEST12345698765499",
 		AccountType:           "current",
-		Currency:              "GBP",
+		InstrumentCode:        "GBP",
+		Dimension:             "CURRENCY",
 		Status:                "active",
 		PartyID:               partyID,
 		OverdraftLimit:        5000,
@@ -519,7 +521,8 @@ func testCurrentAccountEntity(t *testing.T, db *gorm.DB) {
 		AccountID:             "ACC-TEST-001",           // Business identifier - matches account_id column
 		AccountIdentification: "GB82WEST12345698765432", // IBAN - matches account_identification column
 		AccountType:           "current",
-		Currency:              "GBP",
+		InstrumentCode:        "GBP",
+		Dimension:             "CURRENCY",
 		Status:                "active",
 		PartyID:               partyID,
 		OverdraftLimit:        5000,
@@ -544,7 +547,8 @@ func testCurrentAccountEntity(t *testing.T, db *gorm.DB) {
 
 	// Verify data integrity
 	assert.Equal(t, entity.AccountIdentification, retrieved.AccountIdentification)
-	assert.Equal(t, entity.Currency, retrieved.Currency)
+	assert.Equal(t, entity.InstrumentCode, retrieved.InstrumentCode)
+	assert.Equal(t, entity.Dimension, retrieved.Dimension)
 	assert.Equal(t, entity.OverdraftLimit, retrieved.OverdraftLimit)
 }
 
