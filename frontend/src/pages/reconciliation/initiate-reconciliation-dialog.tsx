@@ -93,7 +93,7 @@ async function initiateReconciliation(
   }
 
   const response = await fetch(
-    `/api/meridian.reconciliation.v1.AccountReconciliationService/InitiateAccountReconciliation`,
+    `/meridian.reconciliation.v1.AccountReconciliationService/InitiateAccountReconciliation`,
     {
       method: 'POST',
       headers: {

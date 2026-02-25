@@ -172,7 +172,7 @@ jobs:
             local TENANT_ID=$1
             local PAYLOAD=$2
             HTTP_CODE=$(curl -sS -o /tmp/tenant_resp.txt -w "%{http_code}" \
-              -X POST "${GATEWAY_URL}/api/v1/tenants" \
+              -X POST "${GATEWAY_URL}/v1/tenants" \
               -H "Content-Type: application/json" \
               -d "$PAYLOAD")
             echo "${TENANT_ID}: HTTP ${HTTP_CODE}"

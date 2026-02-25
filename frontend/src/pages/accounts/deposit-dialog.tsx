@@ -42,7 +42,7 @@ async function depositFunds(
   amountMinorUnits: string,
 ): Promise<void> {
   const response = await fetch(
-    `/api/meridian.current_account.v1.CurrentAccountService/DepositFunds`,
+    `/meridian.current_account.v1.CurrentAccountService/DepositFunds`,
     {
       method: 'POST',
       headers: {

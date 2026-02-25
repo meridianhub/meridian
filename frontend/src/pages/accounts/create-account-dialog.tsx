@@ -43,7 +43,7 @@ async function createAccount(
   partyId: string,
 ): Promise<string> {
   const response = await fetch(
-    `/api/meridian.current_account.v1.CurrentAccountService/InitiateCurrentAccount`,
+    `/meridian.current_account.v1.CurrentAccountService/InitiateCurrentAccount`,
     {
       method: 'POST',
       headers: {

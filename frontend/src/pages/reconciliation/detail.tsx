@@ -54,20 +54,20 @@ export interface BalanceAssertion {
 // ---------------------------------------------------------------------------
 
 async function fetchRunDetail(runId: string): Promise<ReconciliationRunDetail> {
-  const res = await fetch(`/api/v1/reconciliation/runs/${runId}`)
+  const res = await fetch(`/v1/reconciliation/runs/${runId}`)
   if (!res.ok) throw new Error(`Failed to fetch run detail: ${res.status}`)
   return res.json() as Promise<ReconciliationRunDetail>
 }
 
 async function fetchVariances(runId: string): Promise<Variance[]> {
-  const res = await fetch(`/api/v1/reconciliation/runs/${runId}/variances`)
+  const res = await fetch(`/v1/reconciliation/runs/${runId}/variances`)
   if (!res.ok) throw new Error(`Failed to fetch variances: ${res.status}`)
   const data = (await res.json()) as { variances: Variance[]; nextPageToken?: string; totalCount?: number }
   return data.variances ?? []
 }
 
 async function fetchDisputes(runId: string): Promise<Dispute[]> {
-  const res = await fetch(`/api/v1/reconciliation/runs/${runId}/disputes`)
+  const res = await fetch(`/v1/reconciliation/runs/${runId}/disputes`)
   if (!res.ok) throw new Error(`Failed to fetch disputes: ${res.status}`)
   const data = (await res.json()) as { items: Dispute[] }
   return data.items
@@ -80,7 +80,7 @@ async function updateDisputeStatus(
   resolutionNotes: string,
 ): Promise<void> {
   const res = await fetch(
-    `/api/v1/reconciliation/runs/${runId}/disputes/${disputeId}`,
+    `/v1/reconciliation/runs/${runId}/disputes/${disputeId}`,
     {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -91,7 +91,7 @@ async function updateDisputeStatus(
 }
 
 async function fetchBalanceAssertions(runId: string): Promise<BalanceAssertion[]> {
-  const res = await fetch(`/api/v1/reconciliation/runs/${runId}/assertions`)
+  const res = await fetch(`/v1/reconciliation/runs/${runId}/assertions`)
   if (!res.ok) throw new Error(`Failed to fetch assertions: ${res.status}`)
   const data = (await res.json()) as { items: BalanceAssertion[] }
   return data.items
@@ -101,7 +101,7 @@ async function saveBalanceAssertion(
   runId: string,
   assertion: { name: string; expression: string },
 ): Promise<void> {
-  const res = await fetch(`/api/v1/reconciliation/runs/${runId}/assertions`, {
+  const res = await fetch(`/v1/reconciliation/runs/${runId}/assertions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(assertion),

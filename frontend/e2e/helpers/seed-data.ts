@@ -18,7 +18,7 @@ export async function createMapping(
     outboundValidationCel?: string
   },
 ) {
-  const resp = await request.post(`${BASE_URL}/api/v1/mappings`, {
+  const resp = await request.post(`${BASE_URL}/v1/mappings`, {
     data: {
       name: mapping.name,
       target_service: mapping.targetService,
@@ -54,7 +54,7 @@ export async function createTenant(
     slug: string
   },
 ) {
-  const resp = await request.post(`${BASE_URL}/api/v1/tenants`, {
+  const resp = await request.post(`${BASE_URL}/v1/tenants`, {
     data: {
       tenantId: tenant.tenantId,
       displayName: tenant.displayName,

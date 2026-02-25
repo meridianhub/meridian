@@ -60,7 +60,7 @@ async function performAccountControl(
   endpoint: string,
 ): Promise<void> {
   const response = await fetch(
-    `/api/meridian.current_account.v1.CurrentAccountService/${endpoint}`,
+    `/meridian.current_account.v1.CurrentAccountService/${endpoint}`,
     {
       method: 'POST',
       headers: {

@@ -35,7 +35,7 @@ async function listAccounts(
   }
 
   const response = await fetch(
-    `/api/meridian.current_account.v1.CurrentAccountService/ListCurrentAccounts`,
+    `/meridian.current_account.v1.CurrentAccountService/ListCurrentAccounts`,
     {
       method: 'POST',
       headers: {

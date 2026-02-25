@@ -30,7 +30,7 @@ describe('MSW infrastructure', () => {
     )
 
     const response = await fetch(
-      '/api/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount',
+      '/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -48,7 +48,7 @@ describe('MSW infrastructure', () => {
   it('resets handlers between tests so previous overrides do not bleed through', async () => {
     // The handler from the previous test was reset by afterEach server.resetHandlers()
     const response = await fetch(
-      '/api/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount',
+      '/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

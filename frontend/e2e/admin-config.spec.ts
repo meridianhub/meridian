@@ -225,7 +225,7 @@ test.describe('Starlark Configuration detail page', () => {
 })
 
 // ─── Gateway Mappings ─────────────────────────────────────────────────────────
-// TODO: Gateway mapping REST API (POST /api/v1/mappings) is not yet registered
+// TODO: Gateway mapping REST API (POST /v1/mappings) is not yet registered
 // in the unified binary's Vanguard transcoder. Re-enable once the mapping CRUD
 // endpoints are available via REST.
 

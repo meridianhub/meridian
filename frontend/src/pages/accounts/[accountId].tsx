@@ -22,7 +22,7 @@ async function retrieveAccount(
   accountId: string,
 ): Promise<CurrentAccount | null> {
   const response = await fetch(
-    `/api/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount`,
+    `/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount`,
     {
       method: 'POST',
       headers: {
