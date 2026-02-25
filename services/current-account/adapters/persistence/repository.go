@@ -434,11 +434,11 @@ func (r *Repository) FindByPartyID(ctx context.Context, partyID string) ([]domai
 	return accounts, nil
 }
 
-// FindByScopedParty retrieves an account by party ID, org party ID, and currency.
+// FindByScopedParty retrieves an account by party ID, org party ID, and instrument code.
 // This supports org-scoped account lookups where an individual (partyID) holds
-// an account within an organization (orgPartyID) in a specific currency.
+// an account within an organization (orgPartyID) for a specific instrument (e.g. GBP, kWh).
 // In multi-org mode, the context must contain the organization ID for schema routing.
-func (r *Repository) FindByScopedParty(ctx context.Context, partyID string, orgPartyID uuid.UUID, currency string) (domain.CurrentAccount, error) {
+func (r *Repository) FindByScopedParty(ctx context.Context, partyID string, orgPartyID uuid.UUID, instrumentCode string) (domain.CurrentAccount, error) {
 	var account domain.CurrentAccount
 	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		partyUUID, err := uuid.Parse(partyID)
@@ -447,8 +447,8 @@ func (r *Repository) FindByScopedParty(ctx context.Context, partyID string, orgP
 		}
 
 		var entity CurrentAccountEntity
-		result := tx.Where("party_id = ? AND org_party_id = ? AND currency = ? AND deleted_at IS NULL",
-			partyUUID, orgPartyID, currency).First(&entity)
+		result := tx.Where("party_id = ? AND org_party_id = ? AND instrument_code = ? AND deleted_at IS NULL",
+			partyUUID, orgPartyID, instrumentCode).First(&entity)
 
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return ErrAccountNotFound
@@ -656,7 +656,8 @@ func toEntity(ctx context.Context, account domain.CurrentAccount) (*CurrentAccou
 		AccountID:             account.AccountID(),             // Business account identifier
 		AccountIdentification: account.AccountIdentification(), // IBAN stored in account_identification
 		AccountType:           "current",                       // Default for current accounts
-		Currency:              string(account.Balance().Currency()),
+		InstrumentCode:        account.Balance().CurrencyCode(),
+		Dimension:             account.Balance().Quantity().Instrument.Dimension,
 		Status:                string(account.Status()),
 		PartyID:               partyUUID,
 		OrgPartyID:            account.OrgPartyID(),
@@ -685,16 +686,16 @@ func toDomain(entity *CurrentAccountEntity) (domain.CurrentAccount, error) {
 	// Use entity's in-memory balance fields if populated (e.g., from recent save),
 	// otherwise initialize with zero values.
 	// The service layer should populate from Position Keeping for authoritative balance.
-	balance, err := domain.NewMoney(entity.Currency, entity.Balance)
+	balance, err := domain.NewMoneyFromInstrument(entity.InstrumentCode, entity.Dimension, entity.Balance)
 	if err != nil {
 		return domain.CurrentAccount{}, fmt.Errorf("failed to create balance: %w", err)
 	}
-	availableBalance, err := domain.NewMoney(entity.Currency, entity.AvailableBalance)
+	availableBalance, err := domain.NewMoneyFromInstrument(entity.InstrumentCode, entity.Dimension, entity.AvailableBalance)
 	if err != nil {
 		return domain.CurrentAccount{}, fmt.Errorf("failed to create available balance: %w", err)
 	}
 
-	overdraftLimit, err := domain.NewMoney(entity.Currency, entity.OverdraftLimit)
+	overdraftLimit, err := domain.NewMoneyFromInstrument(entity.InstrumentCode, entity.Dimension, entity.OverdraftLimit)
 	if err != nil {
 		return domain.CurrentAccount{}, fmt.Errorf("failed to create overdraft limit from database: %w", err)
 	}

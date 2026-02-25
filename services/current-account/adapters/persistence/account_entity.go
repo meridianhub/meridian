@@ -25,7 +25,8 @@ type CurrentAccountEntity struct {
 	AccountID             string     `gorm:"column:account_id;type:varchar(100);uniqueIndex;not null"`            // Business account identifier
 	AccountIdentification string     `gorm:"column:account_identification;type:varchar(34);uniqueIndex;not null"` // IBAN format
 	AccountType           string     `gorm:"column:account_type;type:varchar(50);not null"`                       // current, savings, etc.
-	Currency              string     `gorm:"column:currency;type:char(3);not null;default:'GBP'"`                 // ISO 4217
+	InstrumentCode        string     `gorm:"column:instrument_code;type:varchar(32);not null;default:'GBP'"`      // Instrument code (e.g. GBP, kWh)
+	Dimension             string     `gorm:"column:dimension;type:varchar(20);not null;default:'CURRENCY'"`       // Asset dimension (e.g. CURRENCY, ELECTRICITY)
 	Status                string     `gorm:"column:status;type:varchar(20);not null;default:'active'"`
 	PartyID               uuid.UUID  `gorm:"column:party_id;type:uuid;not null;index"`
 	OrgPartyID            *uuid.UUID `gorm:"column:org_party_id;type:uuid"`             // NULL for personal accounts, set for org-scoped accounts
