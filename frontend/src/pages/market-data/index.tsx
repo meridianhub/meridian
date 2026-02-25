@@ -1,3 +1,4 @@
+import * as React from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import { useNavigate } from 'react-router-dom'
 import { DataTable } from '@/components/shared/data-table'
@@ -6,6 +7,9 @@ import { TimeDisplay } from '@/components/shared'
 import { useApiClients } from '@/api/context'
 import { useTenantContext } from '@/contexts/tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
+import { Button } from '@/components/ui/button'
+import { CATEGORY_OPTIONS, STATUS_OPTIONS } from './constants'
+import { RegisterDataSetDialog } from './register-dataset-dialog'
 
 interface DataSetRow {
   id: string
@@ -57,25 +61,6 @@ function dataCategoryLabel(category: number): string {
   }
 }
 
-const STATUS_OPTIONS = [
-  { label: 'Draft', value: '1' },
-  { label: 'Active', value: '2' },
-  { label: 'Deprecated', value: '3' },
-]
-
-const CATEGORY_OPTIONS = [
-  { label: 'FX Rate', value: '1' },
-  { label: 'Interest Rate', value: '2' },
-  { label: 'Commodity Price', value: '3' },
-  { label: 'Equity Price', value: '4' },
-  { label: 'Index Value', value: '5' },
-  { label: 'Energy Price', value: '6' },
-  { label: 'Carbon Price', value: '7' },
-  { label: 'Benchmark Rate', value: '8' },
-  { label: 'Volatility', value: '9' },
-  { label: 'Credit Spread', value: '10' },
-]
-
 const columns: ColumnDef<DataSetRow>[] = [
   {
     accessorKey: 'code',
@@ -125,6 +110,7 @@ export function MarketDataPage() {
   const { tenantSlug } = useTenantContext()
   const clients = useApiClients()
   const navigate = useNavigate()
+  const [registerOpen, setRegisterOpen] = React.useState(false)
 
   if (!tenantSlug) {
     return (
@@ -136,11 +122,14 @@ export function MarketDataPage() {
 
   return (
     <div className="p-6">
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold">Market Data</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Market data sets with price observations for FX rates, interest rates, energy prices, and more.
-        </p>
+      <div className="mb-6 flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold">Market Data</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Market data sets with price observations for FX rates, interest rates, energy prices, and more.
+          </p>
+        </div>
+        <Button onClick={() => setRegisterOpen(true)}>Register Dataset</Button>
       </div>
 
       <DataTable<DataSetRow>
@@ -185,6 +174,8 @@ export function MarketDataPage() {
         ]}
         onRowClick={(row) => navigate(`/market-data/${row.code}`)}
       />
+
+      <RegisterDataSetDialog open={registerOpen} onOpenChange={setRegisterOpen} />
     </div>
   )
 }

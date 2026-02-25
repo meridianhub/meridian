@@ -15,6 +15,7 @@
 #   /opt/meridian/.env            - Filled-in environment file
 #   /opt/meridian/Caddyfile       - Caddy configuration
 #   /opt/meridian/dex.yaml        - Dex OIDC configuration
+#   /opt/meridian/init-databases.sql - Per-service database init (runs on first Postgres boot)
 #   /opt/meridian/frontend/       - Built frontend static files (deployed by CI)
 #   /opt/meridian/certs/          - Cloudflare Origin Certificate files
 #     origin-cert.pem
@@ -30,6 +31,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-meridian}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - /opt/meridian/init-databases.sql:/docker-entrypoint-initdb.d/init-databases.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-meridian} -d ${POSTGRES_DB:-meridian}"]
       interval: 5s
@@ -71,17 +73,10 @@ services:
       # --- Database driver ---
       DB_DRIVER: postgres
 
-      # --- Database URLs (all services share the same PostgreSQL instance in demo) ---
+      # --- Database ---
+      # The unified binary derives per-service database names from a single base DSN.
+      # Per-service databases are created by init-databases.sql on first Postgres boot.
       DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
-      PLATFORM_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
-      CURRENT_ACCOUNT_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
-      FINANCIAL_ACCOUNTING_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
-      POSITION_KEEPING_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
-      PAYMENT_ORDER_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
-      PARTY_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
-      INTERNAL_BANK_ACCOUNT_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
-      MARKET_INFORMATION_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
-      REFERENCE_DATA_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
 
       # --- Authentication (Dex OIDC) ---
       AUTH_ENABLED: ${AUTH_ENABLED:-true}

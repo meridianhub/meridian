@@ -427,8 +427,12 @@ func TestInstrumentDescribe_ValidRequest(t *testing.T) {
 func TestInstrumentDescribe_MissingCode(t *testing.T) {
 	r := mustRegisterRefdata(t, tools.ReferenceDataDeps{})
 
-	result := callTool(t, r, "meridian_instrument_describe", `{}`)
-	assertErrorResult(t, result)
+	// "code" is declared required in the JSON Schema, so the registry validates
+	// the input before calling the handler and returns a Go error.
+	_, err := r.Call(context.Background(), "meridian_instrument_describe", json.RawMessage(`{}`))
+	if err == nil {
+		t.Fatal("expected validation error for missing required code, got nil")
+	}
 }
 
 func TestInstrumentDescribe_GRPCError(t *testing.T) {
@@ -465,12 +469,15 @@ func TestSagasList_ValidQuery(t *testing.T) {
 	m := resultMap(t, result)
 
 	if m["count"] != 1 {
-		t.Errorf("expected count=1, got %v", m["count"])
+		t.Fatalf("expected count=1, got %v", m["count"])
 	}
 
 	sagas, ok := m["sagas"].([]map[string]interface{})
 	if !ok {
 		t.Fatal("expected sagas slice")
+	}
+	if len(sagas) == 0 {
+		t.Fatal("expected at least one saga")
 	}
 	if sagas[0]["name"] != "process_payment" {
 		t.Errorf("expected saga name process_payment, got %v", sagas[0]["name"])
@@ -639,12 +646,15 @@ func TestMarketDataQuery_ListDatasets(t *testing.T) {
 	m := resultMap(t, result)
 
 	if m["count"] != 1 {
-		t.Errorf("expected count=1, got %v", m["count"])
+		t.Fatalf("expected count=1, got %v", m["count"])
 	}
 
 	datasets, ok := m["datasets"].([]map[string]interface{})
 	if !ok {
 		t.Fatal("expected datasets slice")
+	}
+	if len(datasets) == 0 {
+		t.Fatal("expected at least one dataset")
 	}
 	if datasets[0]["code"] != "USD_EUR_FX" {
 		t.Errorf("expected dataset code USD_EUR_FX, got %v", datasets[0]["code"])
@@ -678,12 +688,15 @@ func TestMarketDataQuery_ListObservations(t *testing.T) {
 		t.Errorf("expected dataset_code=USD_EUR_FX, got %v", m["dataset_code"])
 	}
 	if m["count"] != 1 {
-		t.Errorf("expected count=1, got %v", m["count"])
+		t.Fatalf("expected count=1, got %v", m["count"])
 	}
 
 	observations, ok := m["observations"].([]map[string]interface{})
 	if !ok {
 		t.Fatal("expected observations slice")
+	}
+	if len(observations) == 0 {
+		t.Fatal("expected at least one observation")
 	}
 	if observations[0]["value"] != "1.0823" {
 		t.Errorf("expected value=1.0823, got %v", observations[0]["value"])

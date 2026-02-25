@@ -41,11 +41,10 @@ test.describe('Parties list', () => {
 
   test('renders Party Type filter with correct options', async ({ authenticatedPage: page }) => {
     await navigateTo(page, '/parties')
-    // The filter renders as a button (combobox trigger) in the filter bar.
-    // Use role-based locator to avoid matching the column header with the same text.
-    await expect(page.getByRole('button', { name: /party type/i }).or(
-      page.getByRole('combobox', { name: /party type/i })
-    )).toBeVisible()
+    // The filter renders as a combobox (select) in the filter bar.
+    // Use getByRole('combobox') to target the filter select specifically,
+    // avoiding the "Add Party Type" action button which also matches /party type/i.
+    await expect(page.getByRole('combobox', { name: /party type/i })).toBeVisible()
   })
 
   test('renders Status filter', async ({ authenticatedPage: page }) => {

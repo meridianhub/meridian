@@ -8,11 +8,13 @@ import { useApiClients } from '@/api/context'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { AlertTriangle } from 'lucide-react'
+import { referenceKeys } from '@/lib/query-keys'
 import {
   InstrumentStatus,
   Dimension,
   type InstrumentDefinition,
 } from '@/api/gen/meridian/reference_data/v1/instrument_pb'
+import { RegisterInstrumentDialog } from './register-instrument-dialog'
 
 const DIMENSION_LABELS: Record<number, string> = {
   0: 'Unspecified',
@@ -61,6 +63,7 @@ interface CELPlaygroundResult {
 
 export function InstrumentsPage() {
   const clients = useApiClients()
+  const [registerDialogOpen, setRegisterDialogOpen] = React.useState(false)
 
   const [validationExpression, setValidationExpression] = React.useState('amount > 0')
   const [fungibilityExpression, setFungibilityExpression] = React.useState('instrument_code')
@@ -178,16 +181,26 @@ export function InstrumentsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Instruments</h1>
-        <p className="mt-2 text-muted-foreground">
-          Reference data instrument definitions with CEL validation expressions.
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Instruments</h1>
+          <p className="mt-2 text-muted-foreground">
+            Reference data instrument definitions with CEL validation expressions.
+          </p>
+        </div>
+        <Button onClick={() => setRegisterDialogOpen(true)}>
+          Register Instrument
+        </Button>
       </div>
+
+      <RegisterInstrumentDialog
+        open={registerDialogOpen}
+        onOpenChange={setRegisterDialogOpen}
+      />
 
       <Card className="p-6">
         <DataTable
-          queryKey={['instruments']}
+          queryKey={referenceKeys.instruments()}
           queryFn={queryFn}
           columns={columns}
           pageSize={25}

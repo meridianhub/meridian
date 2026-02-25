@@ -4,16 +4,18 @@ import { useApiClients } from '@/api/context'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { ChevronRight, ChevronDown } from 'lucide-react'
+import { ChevronRight, ChevronDown, Plus } from 'lucide-react'
 import type { ReferenceDataNode } from '@/api/gen/meridian/reference_data/v1/node_pb'
+import { CreateNodeDialog } from './create-node-dialog'
 
 interface NodeRowProps {
   node: ReferenceDataNode
   depth: number
   asAt: string
+  onAddChild: (parentId: string) => void
 }
 
-function NodeRow({ node, depth, asAt }: NodeRowProps) {
+function NodeRow({ node, depth, asAt, onAddChild }: NodeRowProps) {
   const clients = useApiClients()
   const [expanded, setExpanded] = React.useState(false)
 
@@ -45,7 +47,7 @@ function NodeRow({ node, depth, asAt }: NodeRowProps) {
   return (
     <>
       <div
-        className="flex items-center gap-1 py-1.5 hover:bg-muted/30 rounded px-1"
+        className="group flex items-center gap-1 py-1.5 hover:bg-muted/30 rounded px-1"
         style={{ paddingLeft: `${depth * 20 + 4}px` }}
       >
         <Button
@@ -63,16 +65,26 @@ function NodeRow({ node, depth, asAt }: NodeRowProps) {
           )}
         </Button>
 
-        <div className="flex items-center gap-3 min-w-0">
+        <div className="flex items-center gap-3 min-w-0 flex-1">
           <span className="font-mono text-sm font-medium truncate">{node.id}</span>
           <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground shrink-0">
             {node.nodeType}
           </span>
         </div>
+
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 shrink-0"
+          onClick={() => onAddChild(node.id)}
+          aria-label={`Add child to ${node.id}`}
+        >
+          <Plus className="h-3 w-3" />
+        </Button>
       </div>
 
       {expanded && children.map((child) => (
-        <NodeRow key={child.id} node={child} depth={depth + 1} asAt={asAt} />
+        <NodeRow key={child.id} node={child} depth={depth + 1} asAt={asAt} onAddChild={onAddChild} />
       ))}
     </>
   )
@@ -81,6 +93,8 @@ function NodeRow({ node, depth, asAt }: NodeRowProps) {
 export function NodesPage() {
   const clients = useApiClients()
   const [asAt, setAsAt] = React.useState('')
+  const [createDialogOpen, setCreateDialogOpen] = React.useState(false)
+  const [createDialogParentId, setCreateDialogParentId] = React.useState<string | undefined>(undefined)
 
   const rootsQueryKey = ['node-roots', asAt]
 
@@ -99,14 +113,36 @@ export function NodesPage() {
 
   const roots = rootsData ?? []
 
+  function handleAddChildNode(parentId: string) {
+    setCreateDialogParentId(parentId)
+    setCreateDialogOpen(true)
+  }
+
+  function handleAddRootNode() {
+    setCreateDialogParentId(undefined)
+    setCreateDialogOpen(true)
+  }
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Nodes</h1>
-        <p className="mt-2 text-muted-foreground">
-          Hierarchical reference data node browser with bi-temporal query support.
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Nodes</h1>
+          <p className="mt-2 text-muted-foreground">
+            Hierarchical reference data node browser with bi-temporal query support.
+          </p>
+        </div>
+        <Button onClick={handleAddRootNode} aria-label="Add Node">
+          <Plus className="h-4 w-4 mr-1" />
+          Add Node
+        </Button>
       </div>
+
+      <CreateNodeDialog
+        open={createDialogOpen}
+        onOpenChange={setCreateDialogOpen}
+        defaultParentId={createDialogParentId}
+      />
 
       <Card>
         <CardHeader>
@@ -144,7 +180,7 @@ export function NodesPage() {
           ) : (
             <div className="font-mono text-sm">
               {roots.map((node) => (
-                <NodeRow key={node.id} node={node} depth={0} asAt={asAt} />
+                <NodeRow key={node.id} node={node} depth={0} asAt={asAt} onAddChild={handleAddChildNode} />
               ))}
             </div>
           )}

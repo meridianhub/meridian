@@ -1,8 +1,11 @@
+import * as React from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { ColumnDef } from '@tanstack/react-table'
 import { DataTable } from '@/components/shared/data-table'
 import { StatusBadge } from '@/components/shared/status-badge'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { InitiateReconciliationDialog } from './initiate-reconciliation-dialog'
 
 export interface ReconciliationRun {
   runId: string
@@ -119,19 +122,32 @@ const columns: ColumnDef<ReconciliationRun>[] = [
 
 export function ReconciliationPage() {
   const navigate = useNavigate()
+  const [dialogOpen, setDialogOpen] = React.useState(false)
 
   function handleRowClick(run: ReconciliationRun) {
     void navigate(`/reconciliation/${run.runId}`)
   }
 
+  function handleReconciliationSuccess(runId: string) {
+    void navigate(`/reconciliation/${runId}`)
+  }
+
   return (
     <div className="p-6">
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold">Reconciliation</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Settlement runs, variance detection, and dispute resolution.
-        </p>
+      <div className="mb-6 flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold">Reconciliation</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Settlement runs, variance detection, and dispute resolution.
+          </p>
+        </div>
+        <Button onClick={() => setDialogOpen(true)}>Start Reconciliation</Button>
       </div>
+      <InitiateReconciliationDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        onSuccess={handleReconciliationSuccess}
+      />
       <DataTable
         queryKey={['reconciliation-runs']}
         queryFn={fetchReconciliationRuns}

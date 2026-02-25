@@ -1,3 +1,4 @@
+import * as React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -11,6 +12,7 @@ const mockPartyClient = {
     totalCount: 0n,
   }),
   listPartyTypes: vi.fn().mockResolvedValue({ partyTypeDefinitions: [] }),
+  registerPartyType: vi.fn().mockResolvedValue({}),
 }
 
 vi.mock('@/api/context', async () => {

@@ -14,6 +14,9 @@ export const tenantKeys = {
   account: (tenantId: string, accountId: string) =>
     [...tenantKeys.accounts(tenantId), accountId] as const,
 
+  liens: (tenantId: string, accountId: string) =>
+    [...tenantKeys.account(tenantId, accountId), 'liens'] as const,
+
   transactions: (tenantId: string) =>
     [...tenantKeys.all(tenantId), 'transactions'] as const,
   transaction: (tenantId: string, transactionId: string) =>
