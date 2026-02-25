@@ -202,7 +202,7 @@ X-Tenant-ID: {{tenant_id}}
 %}
 
 ### 12. Retrieve Lien (verify ACTIVE)
-GET {{host}}/v1/liens/{{lien_id}}
+GET {{host}}/v1/internal-bank-account-liens/{{lien_id}}
 X-Tenant-ID: {{tenant_id}}
 
 > {%
@@ -212,7 +212,7 @@ X-Tenant-ID: {{tenant_id}}
 %}
 
 ### 13. Execute Lien (convert to debit)
-POST {{host}}/v1/liens/{{lien_id}}/execute
+POST {{host}}/v1/internal-bank-account-liens/{{lien_id}}/execute
 Content-Type: application/json
 X-Tenant-ID: {{tenant_id}}
 

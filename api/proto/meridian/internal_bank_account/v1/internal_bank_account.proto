@@ -1112,7 +1112,7 @@ service InternalBankAccountService {
   // Supports ACTIVATE (INITIATED -> ACTIVE) and TERMINATE (ACTIVE -> TERMINATED) actions.
   rpc UpdateValuationFeature(UpdateValuationFeatureRequest) returns (UpdateValuationFeatureResponse) {
     option (google.api.http) = {
-      post: "/v1/valuation-features/{feature_id}/control"
+      post: "/v1/internal-bank-account-valuation-features/{feature_id}/control"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -1127,7 +1127,7 @@ service InternalBankAccountService {
   // 2. By account_id + instrument_code + knowledge_at: Find the valid feature at a specific time
   rpc GetValuationFeature(GetValuationFeatureRequest) returns (GetValuationFeatureResponse) {
     option (google.api.http) = {
-      get: "/v1/valuation-features/{feature_id}"
+      get: "/v1/internal-bank-account-valuation-features/{feature_id}"
       additional_bindings: {
         get: "/v1/internal-bank-accounts/{account_id}/valuation-features/lookup"
       }
@@ -1189,7 +1189,7 @@ service InternalBankAccountService {
   // Transitions lien from ACTIVE to EXECUTED (terminal, idempotent).
   rpc ExecuteLien(ExecuteLienRequest) returns (ExecuteLienResponse) {
     option (google.api.http) = {
-      post: "/v1/liens/{lien_id}/execute"
+      post: "/v1/internal-bank-account-liens/{lien_id}/execute"
       body: "*"
     };
   }
@@ -1198,7 +1198,7 @@ service InternalBankAccountService {
   // Transitions lien from ACTIVE to TERMINATED (terminal, idempotent).
   rpc TerminateLien(TerminateLienRequest) returns (TerminateLienResponse) {
     option (google.api.http) = {
-      post: "/v1/liens/{lien_id}/terminate"
+      post: "/v1/internal-bank-account-liens/{lien_id}/terminate"
       body: "*"
     };
   }
@@ -1206,7 +1206,7 @@ service InternalBankAccountService {
   // RetrieveLien fetches a lien by ID.
   rpc RetrieveLien(RetrieveLienRequest) returns (RetrieveLienResponse) {
     option (google.api.http) = {
-      get: "/v1/liens/{lien_id}"
+      get: "/v1/internal-bank-account-liens/{lien_id}"
     };
   }
 }

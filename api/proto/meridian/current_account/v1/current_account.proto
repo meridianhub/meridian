@@ -1272,7 +1272,7 @@ message EvaluateAssetValuationResponse {
 // - DELETE operations are intentionally not provided. Accounts are managed
 //   through status transitions (Active → Frozen → Closed) for audit compliance.
 // - Liens follow a lifecycle pattern: create under account context, then
-//   operate independently via /v1/liens/{lien_id} for execute/terminate/retrieve.
+//   operate independently via /v1/current-account-liens/{lien_id} for execute/terminate/retrieve.
 service CurrentAccountService {
   // InitiateCurrentAccount creates a new current account facility
   rpc InitiateCurrentAccount(InitiateCurrentAccountRequest) returns (InitiateCurrentAccountResponse) {
@@ -1371,7 +1371,7 @@ service CurrentAccountService {
   // InitiateLien creates a fund reservation on an account.
   // Used by Payment Order to reserve funds before external payment execution.
   // Note: Liens are created under the account context but become independent
-  // resources with their own endpoints (GET/POST /v1/liens/{lien_id}) for
+  // resources with their own endpoints (GET/POST /v1/current-account-liens/{lien_id}) for
   // execute, terminate, and retrieve operations.
   rpc InitiateLien(InitiateLienRequest) returns (InitiateLienResponse) {
     option (google.api.http) = {
@@ -1392,7 +1392,7 @@ service CurrentAccountService {
   // Called when the external payment is confirmed as settled
   rpc ExecuteLien(ExecuteLienRequest) returns (ExecuteLienResponse) {
     option (google.api.http) = {
-      post: "/v1/liens/{lien_id}/execute"
+      post: "/v1/current-account-liens/{lien_id}/execute"
       body: "*"
     };
   }
@@ -1401,7 +1401,7 @@ service CurrentAccountService {
   // Called when the external payment fails or is cancelled
   rpc TerminateLien(TerminateLienRequest) returns (TerminateLienResponse) {
     option (google.api.http) = {
-      post: "/v1/liens/{lien_id}/terminate"
+      post: "/v1/current-account-liens/{lien_id}/terminate"
       body: "*"
     };
   }
@@ -1409,7 +1409,7 @@ service CurrentAccountService {
   // RetrieveLien gets lien details
   rpc RetrieveLien(RetrieveLienRequest) returns (RetrieveLienResponse) {
     option (google.api.http) = {
-      get: "/v1/liens/{lien_id}"
+      get: "/v1/current-account-liens/{lien_id}"
     };
   }
 
@@ -1479,7 +1479,7 @@ service CurrentAccountService {
   // Supports ACTIVATE (INITIATED → ACTIVE) and TERMINATE (ACTIVE → TERMINATED) actions.
   rpc UpdateValuationFeature(UpdateValuationFeatureRequest) returns (UpdateValuationFeatureResponse) {
     option (google.api.http) = {
-      post: "/v1/valuation-features/{feature_id}/control"
+      post: "/v1/current-account-valuation-features/{feature_id}/control"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -1494,7 +1494,7 @@ service CurrentAccountService {
   // 2. By account_id + instrument_code + knowledge_at: Find the valid feature at a specific time
   rpc GetValuationFeature(GetValuationFeatureRequest) returns (GetValuationFeatureResponse) {
     option (google.api.http) = {
-      get: "/v1/valuation-features/{feature_id}"
+      get: "/v1/current-account-valuation-features/{feature_id}"
       additional_bindings: {
         get: "/v1/current-accounts/{account_id}/valuation-features/lookup"
       }

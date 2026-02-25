@@ -625,14 +625,6 @@ func wireControlPlane(server *grpc.Server, pool *pgxpool.Pool, logger *slog.Logg
 // Vanguard REST↔gRPC transcoder in the unified development binary.
 //
 // All services run in the same process and share a single loopback gRPC address.
-// Per-service entries allow the transcoder to be selective: services that share
-// conflicting HTTP path patterns in their proto annotations cannot be registered
-// together in the same Vanguard instance.
-//
-// HTTP-route conflict: InternalBankAccountService and CurrentAccountService both
-// define REST routes for lien operations (/v1/liens/*). InternalBankAccountService
-// is registered here as the canonical REST owner; CurrentAccountService is still
-// reachable via native gRPC or Connect protocol.
 var serviceNames = []string{
 	"meridian.party.v1.PartyService",
 	"meridian.reference_data.v1.ReferenceDataService",
@@ -640,12 +632,10 @@ var serviceNames = []string{
 	"meridian.market_information.v1.MarketInformationService",
 	"meridian.tenant.v1.TenantService",
 	"meridian.internal_bank_account.v1.InternalBankAccountService",
+	"meridian.current_account.v1.CurrentAccountService",
 	"meridian.financial_accounting.v1.FinancialAccountingService",
 	"meridian.position_keeping.v1.PositionKeepingService",
 	"meridian.forecasting.v1.ForecastingService",
-	// CurrentAccountService excluded from Vanguard: its REST routes (/v1/liens/*)
-	// conflict with InternalBankAccountService. Still reachable via Connect protocol
-	// (/{package}.{Service}/{Method} paths don't conflict).
 	"meridian.payment_order.v1.PaymentOrderService",
 	"meridian.reconciliation.v1.AccountReconciliationService",
 	"meridian.saga.v1.SagaRegistryService",
