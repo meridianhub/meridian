@@ -17,7 +17,6 @@ import (
 	"github.com/google/uuid"
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 
-	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -167,9 +166,9 @@ func setupPartyIntegrationTestDB(t *testing.T) (*gorm.DB, context.Context, func(
 
 func createInitiateAccountRequest(partyID, iban string) *pb.InitiateCurrentAccountRequest {
 	return &pb.InitiateCurrentAccountRequest{
-		AccountIdentification: iban,
-		PartyId:               partyID,
-		BaseCurrency:          commonpb.Currency_CURRENCY_GBP,
+		ExternalIdentifier: iban,
+		PartyId:            partyID,
+		InstrumentCode:     "GBP",
 	}
 }
 
@@ -218,7 +217,7 @@ func TestInitiateCurrentAccount_WithPartyValidation_Success(t *testing.T) {
 	assert.NotNil(t, resp)
 	assert.NotEmpty(t, resp.AccountId)
 	assert.NotNil(t, resp.Facility)
-	assert.Equal(t, commonpb.Currency_CURRENCY_GBP, resp.Facility.BaseCurrency)
+	assert.Equal(t, "GBP", resp.Facility.InstrumentCode)
 
 	// Verify party validation was called
 	assert.Equal(t, 1, mockParty.validateCalls, "Party validation should be called once")
@@ -455,9 +454,9 @@ func TestInitiateCurrentAccount_ConcurrentCreationSameParty(t *testing.T) {
 	for i := 0; i < numAccounts; i++ {
 		go func(idx int) {
 			req := &pb.InitiateCurrentAccountRequest{
-				AccountIdentification: "GB82WEST1234569876543" + string(rune('0'+idx)),
-				PartyId:               partyID,
-				BaseCurrency:          commonpb.Currency_CURRENCY_GBP,
+				ExternalIdentifier: "GB82WEST1234569876543" + string(rune('0'+idx)),
+				PartyId:            partyID,
+				InstrumentCode:     "GBP",
 			}
 			_, err := svc.InitiateCurrentAccount(ctx, req)
 			results <- err
