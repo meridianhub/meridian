@@ -1,13 +1,15 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { ColumnDef } from '@tanstack/react-table'
 import { Card } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 import { DataTable, type DataTableQueryParams, type DataTableResult } from '@/components/shared/data-table'
 import { TimeDisplay } from '@/components/shared/time-display'
 import { StatusBadge } from '@/components/shared/status-badge'
 import { useApiClients } from '@/api/context'
 import type { SagaDefinition } from '@/api/gen/meridian/saga/v1/saga_registry_pb'
 import { SagaStatus } from '@/api/gen/meridian/saga/v1/saga_registry_pb'
+import { CreateSagaDraftDialog } from './create-saga-draft-dialog'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -52,6 +54,7 @@ export interface StarlarkConfigPageProps {
 
 export function StarlarkConfigPage({ isPlatformAdmin = false }: StarlarkConfigPageProps) {
   const { sagaRegistry } = useApiClients()
+  const [createDialogOpen, setCreateDialogOpen] = useState(false)
 
   const columns = useMemo((): ColumnDef<SagaDefinition>[] => {
     const base: ColumnDef<SagaDefinition>[] = [
@@ -128,12 +131,17 @@ export function StarlarkConfigPage({ isPlatformAdmin = false }: StarlarkConfigPa
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Starlark Configuration</h1>
-        <p className="mt-2 text-muted-foreground">
-          Manage saga workflow definitions and Starlark scripts
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Starlark Configuration</h1>
+          <p className="mt-2 text-muted-foreground">
+            Manage saga workflow definitions and Starlark scripts
+          </p>
+        </div>
+        <Button onClick={() => setCreateDialogOpen(true)}>Create Saga</Button>
       </div>
+
+      <CreateSagaDraftDialog open={createDialogOpen} onOpenChange={setCreateDialogOpen} />
 
       <Card className="p-6">
         <DataTable<SagaDefinition>
