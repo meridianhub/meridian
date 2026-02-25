@@ -157,7 +157,7 @@ jobs:
           host: ${{ secrets.DROPLET_IP }}
           username: root
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          source: "deploy/demo/Caddyfile,deploy/demo/docker-compose.yml,deploy/demo/dex.yaml"
+          source: "deploy/demo/Caddyfile,deploy/demo/docker-compose.yml,deploy/demo/dex.yaml,deploy/demo/init-databases.sql"
           target: /opt/meridian/
           strip_components: 2
           overwrite: true
