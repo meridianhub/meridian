@@ -77,6 +77,7 @@ stateDiagram-v2
 
 | PRD | Description |
 |-----|-------------|
+| [Asset-Agnostic Accounts](028-asset-agnostic-accounts.md) | Generalize account services for non-fiat asset classes |
 | [Meridian Edge](003-meridian-edge.md) | Embedded modular monolith for IoT devices and browser (WASM) |
 | [MCP Server](027-mcp-server.md) | Model Context Protocol server bridging LLMs to Meridian Core |
 
@@ -200,6 +201,7 @@ material.
 - [Market Information Management](004-market-information-management.md) - BIAN service for market data and pricing
 - [Starlark Typed Service Clients](007-starlark-typed-service-clients.md) - Type-safe service handlers for saga orchestration
 - [Valuation Service](011-valuation-service.md) - BIAN-native multi-asset valuation engine
+- [Asset-Agnostic Accounts](028-asset-agnostic-accounts.md) - Generalize account fields for non-fiat assets
 
 ### Execution Engine
 

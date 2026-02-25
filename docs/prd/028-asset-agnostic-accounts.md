@@ -1,4 +1,34 @@
-# PRD: Asset-Agnostic Account Services
+---
+name: prd-asset-agnostic-accounts
+description: >-
+  Generalize Current Account and Internal Bank Account services to be
+  truly asset-agnostic. Replace banking-specific fields (IBAN, Currency,
+  overdraft) with instrument-aware equivalents and drop "Bank" from
+  Internal Account naming.
+triggers:
+  - Working on current account or internal account field generalization
+  - Replacing currency fields with instrument_code and dimension
+  - Renaming internal bank account to internal account
+  - Making account services support non-fiat asset classes
+  - Generalizing IBAN to external_identifier
+instructions: |
+  Approach: generalize fields, keep BIAN service domain names. The BIAN
+  classification provides taxonomy value -- the problem is field-level
+  assumptions that force banking concepts on non-banking use cases.
+  Phase 1 (high): Current Account field generalization.
+  Phase 2 (medium): Drop "Bank" from Internal Account naming.
+  Phase 3 (low): Deprecate common Currency enum.
+  All changes must be backwards compatible (dual fields, dual handlers).
+---
+
+# Asset-Agnostic Account Services
+
+> **Status**: Not Started
+> **Task Master Tag**: `asset-agnostic-accounts`
+> **Last Updated**: 2026-02-25
+> **Related PRDs**: [Internal Bank Account](002-internal-bank-account.md),
+> [Universal Asset System](001-universal-asset-system.md),
+> [Product Directory](023-product-directory.md)
 
 ## Problem Statement
 
