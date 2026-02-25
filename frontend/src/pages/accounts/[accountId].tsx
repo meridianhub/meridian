@@ -15,6 +15,7 @@ import { WithdrawDialog } from './withdraw-dialog'
 import { ControlDialog } from './control-dialog'
 import type { ControlAction } from './control-dialog'
 import { CreateLienDialog } from './create-lien-dialog'
+import { CreateValuationFeatureDialog } from '@/components/shared/create-valuation-feature-dialog'
 import type { AccountStatus, CurrentAccount, RetrieveCurrentAccountResponse } from './types'
 
 async function retrieveAccount(
@@ -107,6 +108,7 @@ function AccountActions({ status, accountId, currency }: AccountActionsProps) {
   const [lienOpen, setLienOpen] = React.useState(false)
   const [controlOpen, setControlOpen] = React.useState(false)
   const [controlAction, setControlAction] = React.useState<ControlAction>('freeze')
+  const [valuationFeatureOpen, setValuationFeatureOpen] = React.useState(false)
 
   if (status === 'CLOSED' || status === 'SUSPENDED') {
     return null
@@ -130,6 +132,9 @@ function AccountActions({ status, accountId, currency }: AccountActionsProps) {
             </Button>
             <Button variant="outline" size="sm" onClick={() => setLienOpen(true)}>
               Create Lien
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setValuationFeatureOpen(true)}>
+              Add Valuation Feature
             </Button>
             <Button variant="outline" size="sm" onClick={() => openControl('freeze')}>
               Freeze
@@ -173,6 +178,14 @@ function AccountActions({ status, accountId, currency }: AccountActionsProps) {
         onOpenChange={setControlOpen}
         accountId={accountId}
         action={controlAction}
+      />
+
+      <CreateValuationFeatureDialog
+        open={valuationFeatureOpen}
+        onOpenChange={setValuationFeatureOpen}
+        accountId={accountId}
+        accountType="current"
+        accountCurrency={currency}
       />
     </>
   )
