@@ -653,16 +653,16 @@ func toEntity(ctx context.Context, account domain.CurrentAccount) (*CurrentAccou
 	// in-memory round-trip. Position Keeping is now the source of truth for balances.
 	return &CurrentAccountEntity{
 		ID:                    account.ID(),
-		AccountID:             account.AccountID(),             // Business account identifier
-		AccountIdentification: account.AccountIdentification(), // IBAN stored in account_identification
-		AccountType:           "current",                       // Default for current accounts
-		InstrumentCode:        account.Balance().CurrencyCode(),
-		Dimension:             account.Balance().Quantity().Instrument.Dimension,
+		AccountID:             account.AccountID(),          // Business account identifier
+		AccountIdentification: account.ExternalIdentifier(), // IBAN stored in account_identification
+		AccountType:           "current",                    // Default for current accounts
+		InstrumentCode:        account.InstrumentCode(),
+		Dimension:             account.Dimension(),
 		Status:                string(account.Status()),
 		PartyID:               partyUUID,
 		OrgPartyID:            account.OrgPartyID(),
-		OverdraftLimit:        account.OverdraftLimit().ToMinorUnitsUnchecked(),
-		OverdraftRate:         account.OverdraftRate(),
+		OverdraftLimit:        0, // Overdraft is now product-type behavior, not domain state
+		OverdraftRate:         0, // Overdraft is now product-type behavior, not domain state
 		ProductTypeCode:       productTypeCode,
 		ProductTypeVersion:    productTypeVersion,
 		Balance:               account.Balance().ToMinorUnitsUnchecked(),          // gorm:"-" - not persisted
@@ -678,7 +678,6 @@ func toEntity(ctx context.Context, account domain.CurrentAccount) (*CurrentAccou
 }
 
 // toDomain converts database entity to domain model using the builder pattern.
-// Note: OverdraftEnabled is derived from OverdraftLimit > 0
 // Note: Balance fields are not persisted - balance computation delegated to Position Keeping service.
 // The service layer is responsible for populating balance from Position Keeping after retrieval.
 func toDomain(entity *CurrentAccountEntity) (domain.CurrentAccount, error) {
@@ -694,14 +693,6 @@ func toDomain(entity *CurrentAccountEntity) (domain.CurrentAccount, error) {
 	if err != nil {
 		return domain.CurrentAccount{}, fmt.Errorf("failed to create available balance: %w", err)
 	}
-
-	overdraftLimit, err := domain.NewMoneyFromInstrument(entity.InstrumentCode, entity.Dimension, entity.OverdraftLimit)
-	if err != nil {
-		return domain.CurrentAccount{}, fmt.Errorf("failed to create overdraft limit from database: %w", err)
-	}
-
-	// Derive overdraft enabled from limit > 0
-	overdraftEnabled := entity.OverdraftLimit > 0
 
 	// Balance is now computed by Position Keeping service, so use current time as placeholder.
 	// The service layer will update this when fetching balance from Position Keeping.
@@ -744,7 +735,9 @@ func toDomain(entity *CurrentAccountEntity) (domain.CurrentAccount, error) {
 	return domain.NewCurrentAccountBuilder().
 		WithID(entity.ID).
 		WithAccountID(entity.AccountID).
-		WithAccountIdentification(entity.AccountIdentification).
+		WithExternalIdentifier(entity.AccountIdentification).
+		WithInstrumentCode(entity.InstrumentCode).
+		WithDimension(entity.Dimension).
 		WithPartyID(entity.PartyID.String()).
 		WithOrgPartyID(entity.OrgPartyID).
 		WithBalance(balance).
@@ -752,9 +745,6 @@ func toDomain(entity *CurrentAccountEntity) (domain.CurrentAccount, error) {
 		WithStatus(domain.AccountStatus(entity.Status)).
 		WithFreezeReason(freezeReason).
 		WithStatusHistory(statusHistory).
-		WithOverdraftLimit(overdraftLimit).
-		WithOverdraftEnabled(overdraftEnabled).
-		WithOverdraftRate(entity.OverdraftRate).
 		WithBalanceUpdatedAt(balanceUpdatedAt).
 		WithVersion(entity.Version).
 		WithCreatedAt(entity.CreatedAt).

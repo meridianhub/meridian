@@ -49,7 +49,7 @@ func TestFindByID_UsesAccountID(t *testing.T) {
 	found, err := repo.FindByID(ctx, accountID)
 	require.NoError(t, err, "FindByID with account_id should succeed")
 	assert.Equal(t, accountID, found.AccountID())
-	assert.Equal(t, accountIdentification, found.AccountIdentification())
+	assert.Equal(t, accountIdentification, found.ExternalIdentifier())
 
 	// FindByID with IBAN should NOT find the account (it's not searching that column)
 	_, err = repo.FindByID(ctx, accountIdentification)

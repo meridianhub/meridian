@@ -3,7 +3,6 @@ package domain
 
 import (
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,7 +16,6 @@ var (
 	ErrInvalidAmount           = errors.New("invalid amount")
 	ErrInvalidStatusTransition = errors.New("invalid status transition")
 	ErrInvalidFreezeReason     = errors.New("freeze reason must be at least 10 characters")
-	ErrNegativeOverdraftRate   = errors.New("overdraft rate cannot be negative")
 	ErrNonZeroBalance          = errors.New("account balance must be zero to close")
 	ErrActiveLiens             = errors.New("account has active liens and cannot be closed")
 	ErrOrgScopedWithoutParty   = errors.New("org-scoped account requires a party ID")
@@ -56,25 +54,24 @@ type StatusChange struct {
 // This type is immutable: all fields are unexported and all methods return
 // new instances rather than mutating the receiver.
 type CurrentAccount struct {
-	id                    uuid.UUID
-	accountID             string
-	accountIdentification string // IBAN
-	partyID               string
-	orgPartyID            *uuid.UUID // NULL for personal accounts, set for org-scoped accounts
-	balance               Money
-	availableBalance      Money
-	status                AccountStatus
-	freezeReason          string         // Reason for freezing the account (required when frozen)
-	statusHistory         []StatusChange // Audit trail of status changes
-	overdraftLimit        Money
-	overdraftEnabled      bool
-	overdraftRate         float64
-	balanceUpdatedAt      time.Time
-	version               int64
-	createdAt             time.Time
-	updatedAt             time.Time
-	productTypeCode       string // Immutable after creation - references Product Directory
-	productTypeVersion    int    // Immutable after creation - pinned version
+	id                 uuid.UUID
+	accountID          string
+	externalIdentifier string // IBAN or other external identifier
+	instrumentCode     string // Instrument code (e.g. GBP, kWh)
+	dimension          string // Asset dimension (e.g. CURRENCY, ELECTRICITY)
+	partyID            string
+	orgPartyID         *uuid.UUID // NULL for personal accounts, set for org-scoped accounts
+	balance            Money
+	availableBalance   Money
+	status             AccountStatus
+	freezeReason       string         // Reason for freezing the account (required when frozen)
+	statusHistory      []StatusChange // Audit trail of status changes
+	balanceUpdatedAt   time.Time
+	version            int64
+	createdAt          time.Time
+	updatedAt          time.Time
+	productTypeCode    string // Immutable after creation - references Product Directory
+	productTypeVersion int    // Immutable after creation - pinned version
 }
 
 // AccountOption is a functional option for configuring new account creation.
@@ -99,28 +96,36 @@ func WithProductType(code string, version int) AccountOption {
 // NewCurrentAccount creates a new current account with the given parameters.
 // Returns a value type (not pointer) following immutability principles.
 // Use WithOrgPartyID option to create an org-scoped account.
-func NewCurrentAccount(accountID, iban, partyID, currency string, opts ...AccountOption) (CurrentAccount, error) {
+//
+// instrumentCode is the instrument code (e.g. "GBP", "kWh").
+// dimension is the asset dimension (e.g. "CURRENCY", "ELECTRICITY").
+func NewCurrentAccount(accountID, externalIdentifier, partyID, instrumentCode string, opts ...AccountOption) (CurrentAccount, error) {
+	return NewCurrentAccountWithDimension(accountID, externalIdentifier, partyID, instrumentCode, "CURRENCY", opts...)
+}
+
+// NewCurrentAccountWithDimension creates a new current account with explicit instrument code and dimension.
+// Use this when creating accounts for non-currency instruments.
+func NewCurrentAccountWithDimension(accountID, externalIdentifier, partyID, instrumentCode, dimension string, opts ...AccountOption) (CurrentAccount, error) {
 	now := time.Now()
-	zeroMoney, err := NewMoney(currency, 0)
+	zeroMoney, err := NewMoneyFromInstrument(instrumentCode, dimension, 0)
 	if err != nil {
 		return CurrentAccount{}, err
 	}
 
 	account := CurrentAccount{
-		id:                    uuid.New(),
-		accountID:             accountID,
-		accountIdentification: iban,
-		partyID:               partyID,
-		balance:               zeroMoney,
-		availableBalance:      zeroMoney,
-		status:                AccountStatusActive,
-		overdraftLimit:        zeroMoney,
-		overdraftEnabled:      false,
-		overdraftRate:         0,
-		balanceUpdatedAt:      now,
-		version:               1,
-		createdAt:             now,
-		updatedAt:             now,
+		id:                 uuid.New(),
+		accountID:          accountID,
+		externalIdentifier: externalIdentifier,
+		instrumentCode:     instrumentCode,
+		dimension:          dimension,
+		partyID:            partyID,
+		balance:            zeroMoney,
+		availableBalance:   zeroMoney,
+		status:             AccountStatusActive,
+		balanceUpdatedAt:   now,
+		version:            1,
+		createdAt:          now,
+		updatedAt:          now,
 	}
 
 	for _, opt := range opts {
@@ -161,31 +166,26 @@ func (a CurrentAccount) Deposit(amount Money) (CurrentAccount, error) {
 	}
 
 	now := time.Now()
-	newAvailableBalance, err := calculateAvailableBalance(newBalance, a.overdraftLimit, a.overdraftEnabled)
-	if err != nil {
-		return CurrentAccount{}, err
-	}
 
 	return CurrentAccount{
-		id:                    a.id,
-		accountID:             a.accountID,
-		accountIdentification: a.accountIdentification,
-		partyID:               a.partyID,
-		orgPartyID:            a.orgPartyID,
-		balance:               newBalance,
-		availableBalance:      newAvailableBalance,
-		status:                a.status,
-		freezeReason:          a.freezeReason,
-		statusHistory:         a.statusHistory,
-		overdraftLimit:        a.overdraftLimit,
-		overdraftEnabled:      a.overdraftEnabled,
-		overdraftRate:         a.overdraftRate,
-		balanceUpdatedAt:      now,
-		version:               a.version + 1,
-		createdAt:             a.createdAt,
-		updatedAt:             now,
-		productTypeCode:       a.productTypeCode,
-		productTypeVersion:    a.productTypeVersion,
+		id:                 a.id,
+		accountID:          a.accountID,
+		externalIdentifier: a.externalIdentifier,
+		instrumentCode:     a.instrumentCode,
+		dimension:          a.dimension,
+		partyID:            a.partyID,
+		orgPartyID:         a.orgPartyID,
+		balance:            newBalance,
+		availableBalance:   newBalance,
+		status:             a.status,
+		freezeReason:       a.freezeReason,
+		statusHistory:      a.statusHistory,
+		balanceUpdatedAt:   now,
+		version:            a.version + 1,
+		createdAt:          a.createdAt,
+		updatedAt:          now,
+		productTypeCode:    a.productTypeCode,
+		productTypeVersion: a.productTypeVersion,
 	}, nil
 }
 
@@ -206,25 +206,24 @@ func (a CurrentAccount) PrepareForCredit() (CurrentAccount, error) {
 
 	now := time.Now()
 	return CurrentAccount{
-		id:                    a.id,
-		accountID:             a.accountID,
-		accountIdentification: a.accountIdentification,
-		partyID:               a.partyID,
-		orgPartyID:            a.orgPartyID,
-		balance:               a.balance, // Balance NOT modified - Position Keeping is source of truth
-		availableBalance:      a.availableBalance,
-		status:                a.status,
-		freezeReason:          a.freezeReason,
-		statusHistory:         a.statusHistory,
-		overdraftLimit:        a.overdraftLimit,
-		overdraftEnabled:      a.overdraftEnabled,
-		overdraftRate:         a.overdraftRate,
-		balanceUpdatedAt:      a.balanceUpdatedAt,
-		version:               a.version + 1, // Version incremented for optimistic locking
-		createdAt:             a.createdAt,
-		updatedAt:             now,
-		productTypeCode:       a.productTypeCode,
-		productTypeVersion:    a.productTypeVersion,
+		id:                 a.id,
+		accountID:          a.accountID,
+		externalIdentifier: a.externalIdentifier,
+		instrumentCode:     a.instrumentCode,
+		dimension:          a.dimension,
+		partyID:            a.partyID,
+		orgPartyID:         a.orgPartyID,
+		balance:            a.balance, // Balance NOT modified - Position Keeping is source of truth
+		availableBalance:   a.availableBalance,
+		status:             a.status,
+		freezeReason:       a.freezeReason,
+		statusHistory:      a.statusHistory,
+		balanceUpdatedAt:   a.balanceUpdatedAt,
+		version:            a.version + 1, // Version incremented for optimistic locking
+		createdAt:          a.createdAt,
+		updatedAt:          now,
+		productTypeCode:    a.productTypeCode,
+		productTypeVersion: a.productTypeVersion,
 	}, nil
 }
 
@@ -252,7 +251,7 @@ func (a CurrentAccount) PrepareForDebit(amount Money) (CurrentAccount, error) {
 		return CurrentAccount{}, ErrCurrencyMismatch
 	}
 
-	// Check if sufficient funds (including overdraft via availableBalance)
+	// Check if sufficient funds (via availableBalance)
 	cmp, _ := amount.Compare(a.availableBalance)
 	if cmp > 0 {
 		return CurrentAccount{}, ErrInsufficientFunds
@@ -260,25 +259,24 @@ func (a CurrentAccount) PrepareForDebit(amount Money) (CurrentAccount, error) {
 
 	now := time.Now()
 	return CurrentAccount{
-		id:                    a.id,
-		accountID:             a.accountID,
-		accountIdentification: a.accountIdentification,
-		partyID:               a.partyID,
-		orgPartyID:            a.orgPartyID,
-		balance:               a.balance, // Balance NOT modified - Position Keeping is source of truth
-		availableBalance:      a.availableBalance,
-		status:                a.status,
-		freezeReason:          a.freezeReason,
-		statusHistory:         a.statusHistory,
-		overdraftLimit:        a.overdraftLimit,
-		overdraftEnabled:      a.overdraftEnabled,
-		overdraftRate:         a.overdraftRate,
-		balanceUpdatedAt:      a.balanceUpdatedAt,
-		version:               a.version + 1, // Version incremented for optimistic locking
-		createdAt:             a.createdAt,
-		updatedAt:             now,
-		productTypeCode:       a.productTypeCode,
-		productTypeVersion:    a.productTypeVersion,
+		id:                 a.id,
+		accountID:          a.accountID,
+		externalIdentifier: a.externalIdentifier,
+		instrumentCode:     a.instrumentCode,
+		dimension:          a.dimension,
+		partyID:            a.partyID,
+		orgPartyID:         a.orgPartyID,
+		balance:            a.balance, // Balance NOT modified - Position Keeping is source of truth
+		availableBalance:   a.availableBalance,
+		status:             a.status,
+		freezeReason:       a.freezeReason,
+		statusHistory:      a.statusHistory,
+		balanceUpdatedAt:   a.balanceUpdatedAt,
+		version:            a.version + 1, // Version incremented for optimistic locking
+		createdAt:          a.createdAt,
+		updatedAt:          now,
+		productTypeCode:    a.productTypeCode,
+		productTypeVersion: a.productTypeVersion,
 	}, nil
 }
 
@@ -301,7 +299,7 @@ func (a CurrentAccount) Withdraw(amount Money) (CurrentAccount, error) {
 		return CurrentAccount{}, ErrCurrencyMismatch
 	}
 
-	// Check if sufficient funds (including overdraft)
+	// Check if sufficient funds
 	cmp, _ := amount.Compare(a.availableBalance) // Same currency already verified above
 	if cmp > 0 {
 		return CurrentAccount{}, ErrInsufficientFunds
@@ -314,49 +312,27 @@ func (a CurrentAccount) Withdraw(amount Money) (CurrentAccount, error) {
 	}
 
 	now := time.Now()
-	newAvailableBalance, err := calculateAvailableBalance(newBalance, a.overdraftLimit, a.overdraftEnabled)
-	if err != nil {
-		return CurrentAccount{}, err
-	}
 
 	return CurrentAccount{
-		id:                    a.id,
-		accountID:             a.accountID,
-		accountIdentification: a.accountIdentification,
-		partyID:               a.partyID,
-		orgPartyID:            a.orgPartyID,
-		balance:               newBalance,
-		availableBalance:      newAvailableBalance,
-		status:                a.status,
-		freezeReason:          a.freezeReason,
-		statusHistory:         a.statusHistory,
-		overdraftLimit:        a.overdraftLimit,
-		overdraftEnabled:      a.overdraftEnabled,
-		overdraftRate:         a.overdraftRate,
-		balanceUpdatedAt:      now,
-		version:               a.version + 1,
-		createdAt:             a.createdAt,
-		updatedAt:             now,
-		productTypeCode:       a.productTypeCode,
-		productTypeVersion:    a.productTypeVersion,
+		id:                 a.id,
+		accountID:          a.accountID,
+		externalIdentifier: a.externalIdentifier,
+		instrumentCode:     a.instrumentCode,
+		dimension:          a.dimension,
+		partyID:            a.partyID,
+		orgPartyID:         a.orgPartyID,
+		balance:            newBalance,
+		availableBalance:   newBalance,
+		status:             a.status,
+		freezeReason:       a.freezeReason,
+		statusHistory:      a.statusHistory,
+		balanceUpdatedAt:   now,
+		version:            a.version + 1,
+		createdAt:          a.createdAt,
+		updatedAt:          now,
+		productTypeCode:    a.productTypeCode,
+		productTypeVersion: a.productTypeVersion,
 	}, nil
-}
-
-// ErrAvailableBalanceCalculation indicates a failure to calculate available balance,
-// typically due to currency mismatch or overflow between balance and overdraft limit.
-var ErrAvailableBalanceCalculation = errors.New("failed to calculate available balance")
-
-// calculateAvailableBalance computes available balance based on current balance and overdraft settings.
-// Returns an error if the addition fails (currency mismatch or overflow).
-func calculateAvailableBalance(balance, overdraftLimit Money, overdraftEnabled bool) (Money, error) {
-	if overdraftEnabled {
-		newAvail, err := balance.Add(overdraftLimit)
-		if err != nil {
-			return Money{}, fmt.Errorf("%w: %w", ErrAvailableBalanceCalculation, err)
-		}
-		return newAvail, nil
-	}
-	return balance, nil
 }
 
 // withStatusChange creates a new CurrentAccount with the status changed and history recorded.
@@ -391,25 +367,24 @@ func (a CurrentAccount) withStatusChange(newStatus AccountStatus, reason string)
 	}
 
 	return CurrentAccount{
-		id:                    a.id,
-		accountID:             a.accountID,
-		accountIdentification: a.accountIdentification,
-		partyID:               a.partyID,
-		orgPartyID:            a.orgPartyID,
-		balance:               a.balance,
-		availableBalance:      a.availableBalance,
-		status:                newStatus,
-		freezeReason:          freezeReason,
-		statusHistory:         newHistory,
-		overdraftLimit:        a.overdraftLimit,
-		overdraftEnabled:      a.overdraftEnabled,
-		overdraftRate:         a.overdraftRate,
-		balanceUpdatedAt:      a.balanceUpdatedAt,
-		version:               a.version + 1,
-		createdAt:             a.createdAt,
-		updatedAt:             now,
-		productTypeCode:       a.productTypeCode,
-		productTypeVersion:    a.productTypeVersion,
+		id:                 a.id,
+		accountID:          a.accountID,
+		externalIdentifier: a.externalIdentifier,
+		instrumentCode:     a.instrumentCode,
+		dimension:          a.dimension,
+		partyID:            a.partyID,
+		orgPartyID:         a.orgPartyID,
+		balance:            a.balance,
+		availableBalance:   a.availableBalance,
+		status:             newStatus,
+		freezeReason:       freezeReason,
+		statusHistory:      newHistory,
+		balanceUpdatedAt:   a.balanceUpdatedAt,
+		version:            a.version + 1,
+		createdAt:          a.createdAt,
+		updatedAt:          now,
+		productTypeCode:    a.productTypeCode,
+		productTypeVersion: a.productTypeVersion,
 	}
 }
 
@@ -488,60 +463,6 @@ func (a CurrentAccount) Close(reason string) (CurrentAccount, error) {
 	return a.withStatusChange(AccountStatusClosed, closeReason), nil
 }
 
-// UpdateOverdraftSettings configures the overdraft facility with validation and returns a new account.
-// This is a convenience wrapper that validates rate >= 0 before delegating to SetOverdraftLimit.
-// The original account is not modified.
-func (a CurrentAccount) UpdateOverdraftSettings(limit Money, rate float64, enabled bool) (CurrentAccount, error) {
-	if rate < 0 {
-		return CurrentAccount{}, ErrNegativeOverdraftRate
-	}
-	return a.SetOverdraftLimit(limit, rate, enabled)
-}
-
-// SetOverdraftLimit configures the overdraft facility and returns a new account.
-// Note: For new code, prefer UpdateOverdraftSettings which includes rate validation.
-// The original account is not modified.
-func (a CurrentAccount) SetOverdraftLimit(limit Money, rate float64, enabled bool) (CurrentAccount, error) {
-	if limit.Currency() != a.balance.Currency() {
-		return CurrentAccount{}, ErrCurrencyMismatch
-	}
-
-	// Validate that Balance + OverdraftLimit won't overflow if enabled
-	if enabled {
-		_, err := a.balance.Add(limit)
-		if err != nil {
-			return CurrentAccount{}, err // Return overflow error to caller
-		}
-	}
-
-	newAvailableBalance, err := calculateAvailableBalance(a.balance, limit, enabled)
-	if err != nil {
-		return CurrentAccount{}, err
-	}
-
-	return CurrentAccount{
-		id:                    a.id,
-		accountID:             a.accountID,
-		accountIdentification: a.accountIdentification,
-		partyID:               a.partyID,
-		orgPartyID:            a.orgPartyID,
-		balance:               a.balance,
-		availableBalance:      newAvailableBalance,
-		status:                a.status,
-		freezeReason:          a.freezeReason,
-		statusHistory:         a.statusHistory,
-		overdraftLimit:        limit,
-		overdraftEnabled:      enabled,
-		overdraftRate:         rate,
-		balanceUpdatedAt:      a.balanceUpdatedAt,
-		version:               a.version + 1,
-		createdAt:             a.createdAt,
-		updatedAt:             time.Now(),
-		productTypeCode:       a.productTypeCode,
-		productTypeVersion:    a.productTypeVersion,
-	}, nil
-}
-
 // Accessor methods for unexported fields.
 // These return copies of values, preserving immutability.
 
@@ -551,8 +472,20 @@ func (a CurrentAccount) ID() uuid.UUID { return a.id }
 // AccountID returns the business account identifier (e.g., "ACC-xxx").
 func (a CurrentAccount) AccountID() string { return a.accountID }
 
-// AccountIdentification returns the IBAN.
-func (a CurrentAccount) AccountIdentification() string { return a.accountIdentification }
+// ExternalIdentifier returns the external identifier (e.g., IBAN).
+func (a CurrentAccount) ExternalIdentifier() string { return a.externalIdentifier }
+
+// AccountIdentification returns the external identifier (IBAN).
+//
+// Deprecated: Use ExternalIdentifier() instead.
+// NOTE: Migrate callers to ExternalIdentifier() before removing this method.
+func (a CurrentAccount) AccountIdentification() string { return a.externalIdentifier }
+
+// InstrumentCode returns the instrument code (e.g. "GBP", "kWh").
+func (a CurrentAccount) InstrumentCode() string { return a.instrumentCode }
+
+// Dimension returns the asset dimension (e.g. "CURRENCY", "ELECTRICITY").
+func (a CurrentAccount) Dimension() string { return a.dimension }
 
 // PartyID returns the party (customer) identifier.
 func (a CurrentAccount) PartyID() string { return a.partyID }
@@ -566,7 +499,7 @@ func (a CurrentAccount) IsScopedToOrganization() bool { return a.orgPartyID != n
 // Balance returns the current balance.
 func (a CurrentAccount) Balance() Money { return a.balance }
 
-// AvailableBalance returns the available balance (including overdraft if enabled).
+// AvailableBalance returns the available balance.
 func (a CurrentAccount) AvailableBalance() Money { return a.availableBalance }
 
 // Status returns the account status.
@@ -587,15 +520,6 @@ func (a CurrentAccount) StatusHistory() []StatusChange {
 	copy(result, a.statusHistory)
 	return result
 }
-
-// OverdraftLimit returns the configured overdraft limit.
-func (a CurrentAccount) OverdraftLimit() Money { return a.overdraftLimit }
-
-// OverdraftEnabled returns whether overdraft is enabled.
-func (a CurrentAccount) OverdraftEnabled() bool { return a.overdraftEnabled }
-
-// OverdraftRate returns the overdraft interest rate.
-func (a CurrentAccount) OverdraftRate() float64 { return a.overdraftRate }
 
 // BalanceUpdatedAt returns when the balance was last updated.
 func (a CurrentAccount) BalanceUpdatedAt() time.Time { return a.balanceUpdatedAt }
@@ -642,9 +566,30 @@ func (b *CurrentAccountBuilder) WithAccountID(accountID string) *CurrentAccountB
 	return b
 }
 
-// WithAccountIdentification sets the IBAN.
+// WithExternalIdentifier sets the external identifier (e.g., IBAN).
+func (b *CurrentAccountBuilder) WithExternalIdentifier(externalIdentifier string) *CurrentAccountBuilder {
+	b.account.externalIdentifier = externalIdentifier
+	return b
+}
+
+// WithAccountIdentification sets the external identifier (IBAN).
+//
+// Deprecated: Use WithExternalIdentifier() instead.
+// NOTE: Migrate callers to WithExternalIdentifier() before removing this method.
 func (b *CurrentAccountBuilder) WithAccountIdentification(iban string) *CurrentAccountBuilder {
-	b.account.accountIdentification = iban
+	b.account.externalIdentifier = iban
+	return b
+}
+
+// WithInstrumentCode sets the instrument code (e.g. "GBP", "kWh").
+func (b *CurrentAccountBuilder) WithInstrumentCode(instrumentCode string) *CurrentAccountBuilder {
+	b.account.instrumentCode = instrumentCode
+	return b
+}
+
+// WithDimension sets the asset dimension (e.g. "CURRENCY", "ELECTRICITY").
+func (b *CurrentAccountBuilder) WithDimension(dimension string) *CurrentAccountBuilder {
+	b.account.dimension = dimension
 	return b
 }
 
@@ -687,24 +632,6 @@ func (b *CurrentAccountBuilder) WithFreezeReason(reason string) *CurrentAccountB
 // WithStatusHistory sets the status change history.
 func (b *CurrentAccountBuilder) WithStatusHistory(history []StatusChange) *CurrentAccountBuilder {
 	b.account.statusHistory = history
-	return b
-}
-
-// WithOverdraftLimit sets the overdraft limit.
-func (b *CurrentAccountBuilder) WithOverdraftLimit(limit Money) *CurrentAccountBuilder {
-	b.account.overdraftLimit = limit
-	return b
-}
-
-// WithOverdraftEnabled sets whether overdraft is enabled.
-func (b *CurrentAccountBuilder) WithOverdraftEnabled(enabled bool) *CurrentAccountBuilder {
-	b.account.overdraftEnabled = enabled
-	return b
-}
-
-// WithOverdraftRate sets the overdraft interest rate.
-func (b *CurrentAccountBuilder) WithOverdraftRate(rate float64) *CurrentAccountBuilder {
-	b.account.overdraftRate = rate
 	return b
 }
 
