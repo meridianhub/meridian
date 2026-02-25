@@ -1,10 +1,11 @@
 # Meridian demo deployment stack
 #
 # Services:
-#   postgres   - PostgreSQL 16 (internal only, not exposed to host)
-#   dex        - Lightweight OIDC identity provider (~20MB RAM)
-#   meridian   - Unified binary; starts after postgres + dex are healthy
-#   caddy      - Reverse proxy; exposes 80/443, terminates TLS via Cloudflare Origin Certificate
+#   postgres    - PostgreSQL 16 (internal only, not exposed to host)
+#   dex         - Lightweight OIDC identity provider (~20MB RAM)
+#   meridian    - Unified binary; starts after postgres + dex are healthy
+#   caddy       - Reverse proxy; exposes 80/443, terminates TLS via Cloudflare Origin Certificate
+#   mcp-server  - MCP server for AI integration (internal, proxied via Caddy)
 #
 # Usage:
 #   cp deploy/demo/.env.demo.example /opt/meridian/.env
@@ -107,6 +108,33 @@ services:
     # the gRPC health check service on port 50051. Caddy uses service_started
     # and retries upstream connections itself during meridian startup.
     # Not exposed to host — accessed only by caddy on the internal network
+
+  mcp-server:
+    image: ${MCP_SERVER_IMAGE:-ghcr.io/meridianhub/mcp-server:demo}
+    restart: unless-stopped
+    depends_on:
+      meridian:
+        condition: service_started
+    environment:
+      # --- MCP Transport ---
+      MCP_TRANSPORT: sse
+      MCP_SSE_PORT: "8090"
+      MCP_SERVER_NAME: ${MCP_SERVER_NAME:-meridian-mcp}
+      MCP_BASE_URL: ${MCP_BASE_URL:-}
+
+      # --- Meridian API ---
+      MERIDIAN_API_URL: meridian:50051
+      MCP_API_KEY: ${MCP_API_KEY:?MCP_API_KEY must be set in the env file}
+
+      # --- Application ---
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+
+      # --- OAuth (optional) ---
+      MCP_OAUTH_ENABLED: ${MCP_OAUTH_ENABLED:-false}
+      MCP_OAUTH_CLIENT_ID: ${MCP_OAUTH_CLIENT_ID:-}
+      MCP_OAUTH_REDIRECT_URI: ${MCP_OAUTH_REDIRECT_URI:-}
+    # Not exposed to host — accessed only by caddy on the internal network
+    # Add to Caddyfile: reverse_proxy /mcp/* mcp-server:8090
 
   caddy:
     image: caddy:2-alpine
