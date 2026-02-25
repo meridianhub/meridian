@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { http, HttpResponse } from 'msw'
 import { server } from '@/test/msw-handlers'
-import { renderWithProviders } from '@/test/test-utils'
+import { renderWithProviders, createTestQueryClient } from '@/test/test-utils'
 import { createTenantUserToken } from '@/test/jwt-helpers'
 import { CreateValuationFeatureDialog } from './create-valuation-feature-dialog'
 
@@ -369,31 +369,29 @@ describe('CreateValuationFeatureDialog - cancel', () => {
 
 describe('CreateValuationFeatureDialog - reset on close', () => {
   it('clears form when dialog closes and reopens', () => {
-    const { rerender } = renderCurrentAccountDialog({ open: true })
+    const queryClient = createTestQueryClient()
 
-    rerender(
-      <MemoryRouter>
-        <CreateValuationFeatureDialog
-          open={false}
-          onOpenChange={vi.fn()}
-          accountId="acct-001"
-          accountType="current"
-          accountCurrency="GBP"
-        />
-      </MemoryRouter>,
-    )
+    function makeDialog(open: boolean) {
+      return (
+        <MemoryRouter>
+          <CreateValuationFeatureDialog
+            open={open}
+            onOpenChange={vi.fn()}
+            accountId="acct-001"
+            accountType="current"
+            accountCurrency="GBP"
+          />
+        </MemoryRouter>
+      )
+    }
 
-    rerender(
-      <MemoryRouter>
-        <CreateValuationFeatureDialog
-          open={true}
-          onOpenChange={vi.fn()}
-          accountId="acct-001"
-          accountType="current"
-          accountCurrency="GBP"
-        />
-      </MemoryRouter>,
-    )
+    const { rerender } = renderWithProviders(makeDialog(true), {
+      initialToken: tenantToken,
+      queryClient,
+    })
+
+    rerender(makeDialog(false))
+    rerender(makeDialog(true))
 
     expect(screen.getByLabelText(/input instrument code/i)).toHaveValue('')
     expect(screen.getByLabelText(/valuation method id/i)).toHaveValue('')

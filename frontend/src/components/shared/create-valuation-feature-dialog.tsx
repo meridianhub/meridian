@@ -100,7 +100,11 @@ async function createValuationFeature(
   }
 
   const data = (await response.json()) as { feature?: { id?: string } }
-  return data.feature?.id ?? ''
+  const featureId = data.feature?.id
+  if (!featureId) {
+    throw new ConnectError('Feature ID missing from response', Code.Internal)
+  }
+  return featureId
 }
 
 function validateForm(formData: FormData, accountCurrency: string): FormErrors {
