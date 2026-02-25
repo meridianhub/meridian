@@ -371,8 +371,7 @@ func (s *MCPServer) handlePromptsGet(msg *transport.JSONRPCMessage) *transport.J
 				fmt.Sprintf("prompt not found: %q", params.Name))
 		}
 		if errors.Is(err, prompts.ErrMissingRequiredArgument) {
-			return transport.NewErrorResponse(msg.ID, transport.CodeInvalidParams,
-				fmt.Sprintf("missing required argument: %v", err))
+			return transport.NewErrorResponse(msg.ID, transport.CodeInvalidParams, err.Error())
 		}
 		return transport.NewErrorResponse(msg.ID, transport.CodeInternalError,
 			fmt.Sprintf("prompt get failed: %v", err))

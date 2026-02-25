@@ -81,10 +81,17 @@ func (r *Registry) register() {
 }
 
 // List returns all registered prompt descriptors (without message content).
+// Each Prompt is a deep copy; callers cannot mutate registry state.
 func (r *Registry) List() []Prompt {
 	result := make([]Prompt, len(r.defs))
 	for i, d := range r.defs {
-		result[i] = d.meta
+		p := d.meta
+		if len(p.Arguments) > 0 {
+			args := make([]Argument, len(p.Arguments))
+			copy(args, p.Arguments)
+			p.Arguments = args
+		}
+		result[i] = p
 	}
 	return result
 }

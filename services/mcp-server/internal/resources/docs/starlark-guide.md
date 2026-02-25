@@ -70,7 +70,7 @@ amount > 0 && amount <= account.credit_limit
 date_trunc(transaction.created_at, "day") + "_" + account.type_code
 ```
 
-CEL is evaluated in < 1ms, is purely functional (no side effects), and cannot loop.
+CEL is evaluated in < 10ms, is purely functional (no side effects), and cannot loop.
 
 ## Compensation
 
