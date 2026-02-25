@@ -184,6 +184,7 @@ func buildInstrumentDescribeTool(client ReferenceDataClient) Tool {
 		InputSchema: map[string]interface{}{
 			"type":                 "object",
 			"additionalProperties": false,
+			"required":             []interface{}{"code"},
 			"properties": map[string]interface{}{
 				"code": map[string]interface{}{
 					"type":        "string",
