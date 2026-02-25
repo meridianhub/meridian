@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	mcpauth "github.com/meridianhub/meridian/services/mcp-server/internal/auth"
 	"github.com/meridianhub/meridian/services/mcp-server/internal/server"
 	"github.com/meridianhub/meridian/services/mcp-server/internal/transport"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
@@ -103,6 +104,45 @@ const (
 	shutdownTimeout       = 30 * time.Second
 )
 
+// buildOAuthConfig reads OAuth configuration from environment variables.
+// Returns a zero-value config and false when OAuth is not configured (MCP_OAUTH_ENABLED != "true").
+func buildOAuthConfig(baseURL string) (mcpauth.OAuthConfig, bool) {
+	if env.GetEnvOrDefault("MCP_OAUTH_ENABLED", "false") != "true" {
+		return mcpauth.OAuthConfig{}, false
+	}
+	clientID := env.GetEnvOrDefault("MCP_OAUTH_CLIENT_ID", "meridian-mcp")
+	return mcpauth.OAuthConfig{
+		ClientID:         clientID,
+		AuthorizationURL: baseURL + "/oauth/authorize",
+		TokenURL:         baseURL + "/oauth/token",
+		RedirectURI:      env.GetEnvOrDefault("MCP_OAUTH_REDIRECT_URI", baseURL+"/oauth/callback"),
+	}, true
+}
+
+// passthroughValidator accepts every token without verification.
+// Used when MCP_OAUTH_ENABLED=true but no JWT validator is configured —
+// a full JWT validator should be wired here for production deployments.
+type passthroughValidator struct {
+	logger *slog.Logger
+}
+
+func (p *passthroughValidator) ValidateBearer(_ string) error {
+	p.logger.Warn("bearer token validation skipped — configure a JWT validator for production")
+	return nil
+}
+
+// passthroughIssuer echoes a fixed opaque token.
+// Replace with a real JWT signer for production use.
+type passthroughIssuer struct {
+	logger *slog.Logger
+}
+
+func (p *passthroughIssuer) Issue(claims map[string]any) (string, error) {
+	p.logger.Warn("token issuer is a passthrough — configure a real JWT issuer for production")
+	// In production this would sign a JWT. For now, issue a structured opaque token.
+	return fmt.Sprintf("mcp-issued-%v", claims["client_id"]), nil
+}
+
 func runSSE(logger *slog.Logger, cfg server.Config) error {
 	port := env.GetEnvOrDefault("MCP_SSE_PORT", "8090")
 	addr := fmt.Sprintf(":%s", port)
@@ -115,8 +155,37 @@ func runSSE(logger *slog.Logger, cfg server.Config) error {
 	srv := server.New(sseTr, cfg, logger)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/sse", sseTr.HandleSSE)
-	mux.HandleFunc("/message", sseTr.HandleMessage)
+
+	// OAuth 2.1 endpoints (optional — enabled via MCP_OAUTH_ENABLED=true).
+	baseURL := env.GetEnvOrDefault("MCP_BASE_URL", fmt.Sprintf("http://localhost:%s", port))
+	oauthCfg, oauthEnabled := buildOAuthConfig(baseURL)
+	if oauthEnabled {
+		logger.Info("OAuth 2.1 enabled",
+			"authorization_url", oauthCfg.AuthorizationURL,
+			"token_url", oauthCfg.TokenURL)
+
+		store := mcpauth.NewCodeStore()
+		defer store.Close()
+		issuer := &passthroughIssuer{logger: logger}
+		authzHandler := mcpauth.NewAuthorizationHandler(oauthCfg, store)
+		tokenHandler := mcpauth.NewTokenHandler(oauthCfg, store, issuer)
+
+		mux.Handle("/oauth/authorize", authzHandler)
+		mux.Handle("/oauth/token", tokenHandler)
+
+		meta := mcpauth.Metadata{
+			AuthorizationURL: oauthCfg.AuthorizationURL,
+			TokenURL:         oauthCfg.TokenURL,
+		}
+		validator := &passthroughValidator{logger: logger}
+		bearerMW := mcpauth.NewBearerMiddleware(validator, meta)
+
+		mux.Handle("/sse", bearerMW.Handler(http.HandlerFunc(sseTr.HandleSSE)))
+		mux.Handle("/message", bearerMW.Handler(http.HandlerFunc(sseTr.HandleMessage)))
+	} else {
+		mux.HandleFunc("/sse", sseTr.HandleSSE)
+		mux.HandleFunc("/message", sseTr.HandleMessage)
+	}
 
 	httpServer := &http.Server{
 		Addr:              addr,
