@@ -6,6 +6,7 @@ import (
 
 	"github.com/meridianhub/meridian/services/mcp-server/internal/session"
 	"github.com/meridianhub/meridian/services/mcp-server/internal/tools"
+	"github.com/meridianhub/meridian/shared/platform/await"
 )
 
 func TestRateLimiter_AllowWithinLimit(t *testing.T) {
@@ -50,9 +51,12 @@ func TestRateLimiter_ResetAfterWindow(t *testing.T) {
 		t.Error("expected Allow false when limit reached")
 	}
 
-	time.Sleep(60 * time.Millisecond)
-
-	if !rl.Allow(tools.CategoryRead) {
+	// Wait for the window to reset.
+	err := await.New().
+		AtMost(500 * time.Millisecond).
+		PollInterval(10 * time.Millisecond).
+		Until(func() bool { return rl.Allow(tools.CategoryRead) })
+	if err != nil {
 		t.Error("expected Allow true after window reset")
 	}
 }

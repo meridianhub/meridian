@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/services/mcp-server/internal/session"
+	"github.com/meridianhub/meridian/shared/platform/await"
 )
 
 func TestPlanCache_StoreAndRetrieve(t *testing.T) {
@@ -60,9 +61,11 @@ func TestPlanCache_TTLExpiry(t *testing.T) {
 		t.Fatal("expected plan to exist immediately after store")
 	}
 
-	time.Sleep(100 * time.Millisecond)
-
-	if cache.Exists(hash) {
+	err := await.New().
+		AtMost(500 * time.Millisecond).
+		PollInterval(10 * time.Millisecond).
+		Until(func() bool { return !cache.Exists(hash) })
+	if err != nil {
 		t.Error("expected plan to be expired after TTL")
 	}
 }
@@ -79,12 +82,27 @@ func TestPlanCache_MissingHash(t *testing.T) {
 func TestPlanCache_Cleanup(t *testing.T) {
 	cache := session.NewPlanCache(50 * time.Millisecond)
 
+	hashes := make([]string, 5)
 	for i := 0; i < 5; i++ {
-		manifest := []byte{byte(i)}
-		cache.Store(manifest)
+		hashes[i] = cache.Store([]byte{byte(i)})
 	}
 
-	time.Sleep(100 * time.Millisecond)
+	// Wait for all entries to expire before cleaning up.
+	err := await.New().
+		AtMost(500 * time.Millisecond).
+		PollInterval(10 * time.Millisecond).
+		Until(func() bool {
+			for _, h := range hashes {
+				if cache.Exists(h) {
+					return false
+				}
+			}
+			return true
+		})
+	if err != nil {
+		t.Fatal("entries did not expire in time")
+	}
+
 	cache.Cleanup()
 
 	// All entries should be expired and cleaned up.

@@ -24,7 +24,12 @@ type PlanCache struct {
 }
 
 // NewPlanCache returns a PlanCache with the given TTL for each stored plan.
+// Panics if ttl is non-positive to prevent silent misconfiguration where
+// entries would be immediately invalid.
 func NewPlanCache(ttl time.Duration) *PlanCache {
+	if ttl <= 0 {
+		panic("session: PlanCache TTL must be positive")
+	}
 	return &PlanCache{
 		entries: make(map[string]planEntry),
 		ttl:     ttl,

@@ -30,13 +30,24 @@ type RateLimiter struct {
 
 // NewRateLimiter returns a RateLimiter with the given per-category limits.
 // Categories not present in limits are always allowed.
+// Panics if any limit has a non-positive Window or non-positive MaxRequests,
+// to prevent accidental unlimited-request bypass through misconfiguration.
 func NewRateLimiter(limits map[tools.ToolCategory]CategoryLimit) *RateLimiter {
+	copiedLimits := make(map[tools.ToolCategory]CategoryLimit, len(limits))
 	state := make(map[tools.ToolCategory]*windowState, len(limits))
-	for cat := range limits {
-		state[cat] = &windowState{windowStart: time.Now()}
+	now := time.Now()
+	for cat, limit := range limits {
+		if limit.Window <= 0 {
+			panic("session: RateLimiter Window must be positive")
+		}
+		if limit.MaxRequests <= 0 {
+			panic("session: RateLimiter MaxRequests must be positive")
+		}
+		copiedLimits[cat] = limit
+		state[cat] = &windowState{windowStart: now}
 	}
 	return &RateLimiter{
-		limits: limits,
+		limits: copiedLimits,
 		state:  state,
 	}
 }

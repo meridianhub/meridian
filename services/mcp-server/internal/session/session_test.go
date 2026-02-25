@@ -6,6 +6,7 @@ import (
 
 	"github.com/meridianhub/meridian/services/mcp-server/internal/session"
 	"github.com/meridianhub/meridian/services/mcp-server/internal/tools"
+	"github.com/meridianhub/meridian/shared/platform/await"
 )
 
 func TestSession_PlanBeforeApply(t *testing.T) {
@@ -60,7 +61,15 @@ func TestSession_CleanupExpiredPlans(t *testing.T) {
 		t.Fatal("expected plan to exist before expiry")
 	}
 
-	time.Sleep(100 * time.Millisecond)
+	// Wait for the plan to expire before cleaning up.
+	err := await.New().
+		AtMost(500 * time.Millisecond).
+		PollInterval(10 * time.Millisecond).
+		Until(func() bool { return !s.ValidatePlan(hash) })
+	if err != nil {
+		t.Fatal("plan did not expire in time")
+	}
+
 	s.Cleanup()
 
 	if s.ValidatePlan(hash) {
