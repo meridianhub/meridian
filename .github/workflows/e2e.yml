@@ -73,7 +73,7 @@ jobs:
         working-directory: frontend
         env:
           VITE_E2E_MODE: 'true'
-          VITE_API_BASE_URL: 'http://localhost:5173/api'
+          VITE_API_BASE_URL: 'http://localhost:5173'
         run: npx vite build
 
       - name: Upload backend binaries
