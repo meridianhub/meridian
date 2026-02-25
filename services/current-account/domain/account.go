@@ -3,6 +3,7 @@ package domain
 
 import (
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -98,7 +99,7 @@ func WithProductType(code string, version int) AccountOption {
 // Use WithOrgPartyID option to create an org-scoped account.
 //
 // instrumentCode is the instrument code (e.g. "GBP", "kWh").
-// dimension is the asset dimension (e.g. "CURRENCY", "ELECTRICITY").
+// Dimension defaults to "CURRENCY". Use NewCurrentAccountWithDimension for explicit dimensions.
 func NewCurrentAccount(accountID, externalIdentifier, partyID, instrumentCode string, opts ...AccountOption) (CurrentAccount, error) {
 	return NewCurrentAccountWithDimension(accountID, externalIdentifier, partyID, instrumentCode, "CURRENCY", opts...)
 }
@@ -111,7 +112,8 @@ func NewCurrentAccount(accountID, externalIdentifier, partyID, instrumentCode st
 // is deferred until the Money type is generalised beyond CURRENCY-only instruments).
 func NewCurrentAccountWithDimension(accountID, externalIdentifier, partyID, instrumentCode, dimension string, opts ...AccountOption) (CurrentAccount, error) {
 	now := time.Now()
-	zeroMoney, err := NewMoneyFromInstrument(instrumentCode, dimension, 0)
+	normalizedDimension := strings.ToUpper(dimension)
+	zeroMoney, err := NewMoneyFromInstrument(instrumentCode, normalizedDimension, 0)
 	if err != nil {
 		return CurrentAccount{}, err
 	}
@@ -121,7 +123,7 @@ func NewCurrentAccountWithDimension(accountID, externalIdentifier, partyID, inst
 		accountID:          accountID,
 		externalIdentifier: externalIdentifier,
 		instrumentCode:     instrumentCode,
-		dimension:          dimension,
+		dimension:          normalizedDimension,
 		partyID:            partyID,
 		balance:            zeroMoney,
 		availableBalance:   zeroMoney,
@@ -600,8 +602,9 @@ func (b *CurrentAccountBuilder) WithInstrumentCode(instrumentCode string) *Curre
 }
 
 // WithDimension sets the asset dimension (e.g. "CURRENCY", "ELECTRICITY").
+// The value is normalized to uppercase.
 func (b *CurrentAccountBuilder) WithDimension(dimension string) *CurrentAccountBuilder {
-	b.account.dimension = dimension
+	b.account.dimension = strings.ToUpper(dimension)
 	return b
 }
 
