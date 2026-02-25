@@ -190,7 +190,7 @@ account service truly asset-agnostic.
 account pattern where `behavior_class` is the abstract classification.
 
 **Prerequisite:** Product Directory (PRD-023) must be operational before
-this subtask executes, since behaviour class resolution depends on it.
+this subtask executes, since behavior class resolution depends on it.
 
 ### Phase 2: Internal Account -- Drop "Bank" from Naming (Medium Priority)
 
