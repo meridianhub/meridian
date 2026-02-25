@@ -62,6 +62,9 @@ func (m *mockReconciliationClient) ListAccountReconciliations(ctx context.Contex
 }
 
 func (m *mockReconciliationClient) ListReconciliationResults(ctx context.Context, req *reconciliationv1.ListReconciliationResultsRequest) (*reconciliationv1.ListReconciliationResultsResponse, error) {
+	if m.listResultsFn == nil {
+		return &reconciliationv1.ListReconciliationResultsResponse{}, nil
+	}
 	return m.listResultsFn(ctx, req)
 }
 
