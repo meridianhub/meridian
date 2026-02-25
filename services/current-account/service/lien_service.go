@@ -1083,7 +1083,7 @@ func (s *Service) hydrateAccountWithPrefetchedBalance(account domain.CurrentAcco
 
 // currentAccountInstrumentCode is the instrument code used for Current Account balance queries.
 // Current Account operates exclusively with GBP currency (CURRENCY dimension).
-// The Internal Bank Account service will use different instrument codes for multi-asset support.
+// The Internal Account service will use different instrument codes for multi-asset support.
 const currentAccountInstrumentCode = "GBP"
 
 // getAccountBalanceCents gets the account balance in cents from Position Keeping service.

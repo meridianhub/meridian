@@ -1172,7 +1172,7 @@ loopback gRPC calls:
 
 | Tier | Services |
 |------|----------|
-| 0 | party, reference-data, market-information, tenant, internal-bank-account |
+| 0 | party, reference-data, market-information, tenant, internal-account |
 | 1 | financial-accounting, position-keeping, forecasting |
 | 2 | current-account |
 | 3 | payment-order, reconciliation |
@@ -1205,7 +1205,7 @@ import (
 Both database connections are created in `run()` before `registerServices` is called.
 Each wire function has a fixed signature that accepts whichever client the service
 requires. Use `*gorm.DB` for GORM-based persistence (party, financial-accounting,
-current-account, payment-order, reconciliation, tenant, internal-bank-account) or
+current-account, payment-order, reconciliation, tenant, internal-account) or
 `*pgxpool.Pool` for services that use direct pgx access (reference-data,
 market-information, forecasting, position-keeping).
 

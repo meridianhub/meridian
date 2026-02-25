@@ -41,7 +41,7 @@ visualization, balance sheet aggregation, and staff identity management.
 | **Type** | Infrastructure (not BIAN) |
 | **Language** | Go |
 | **Database** | PostgreSQL/CockroachDB |
-| **Standalone** | No (requires Position Keeping, Reference Data, Internal Bank Account) |
+| **Standalone** | No (requires Position Keeping, Reference Data, Internal Account) |
 
 ## Architecture
 
@@ -63,7 +63,7 @@ flowchart TB
 
     subgraph "Downstream Services"
         E -->|Phase 1| RD[Reference Data]
-        E -->|Phase 2| IBA[Internal Bank Account]
+        E -->|Phase 2| IBA[Internal Account]
         E -->|Phase 3| RD
         E -->|Phase 4| SR[Saga Registry]
     end
@@ -201,7 +201,7 @@ Maps diff actions to dependency-ordered gRPC calls in five phases:
 | Phase | Resources | Target Service |
 |-------|-----------|---------------|
 | 1 | Instruments | Reference Data |
-| 2 | Account Types | Internal Bank Account |
+| 2 | Account Types | Internal Account |
 | 3 | Valuation Rules | Reference Data |
 | 4 | Saga Definitions | Saga Registry |
 | 5 | Seed Data | Various |
@@ -392,7 +392,7 @@ erDiagram
 |---------|---------|
 | Position Keeping | Balance sheet aggregation, causation tree tracing |
 | Reference Data | Instrument, account type, valuation rule, and saga registration |
-| Internal Bank Account | Account provisioning during manifest apply |
+| Internal Account | Account provisioning during manifest apply |
 | Kafka | Stripe payment event publishing |
 
 ## Configuration

@@ -48,7 +48,7 @@ type WithdrawalOrchestratorConfig struct {
 	PosKeepingClient PositionKeepingClient
 	FinAcctClient    FinancialAccountingClient
 	AccountConfig    *config.AccountConfig
-	// AccountResolver enables dynamic clearing account resolution from Internal Bank Account service.
+	// AccountResolver enables dynamic clearing account resolution from Internal Account service.
 	// If provided, takes precedence over AccountConfig for clearing account lookup.
 	// If nil, falls back to static AccountConfig environment variables.
 	AccountResolver *AccountResolver

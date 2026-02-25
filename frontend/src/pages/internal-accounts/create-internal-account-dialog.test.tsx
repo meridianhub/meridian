@@ -14,7 +14,7 @@ vi.mock('react-router-dom', async () => {
   }
 })
 
-const mockInitiateInternalBankAccount = vi.fn()
+const mockInitiateInternalAccount = vi.fn()
 const mockListActive = vi.fn()
 const mockListInstruments = vi.fn()
 const mockInvalidateQueries = vi.fn()
@@ -24,8 +24,8 @@ vi.mock('@/api/context', async () => {
   return {
     ...actual,
     useApiClients: vi.fn(() => ({
-      internalBankAccount: {
-        initiateInternalBankAccount: mockInitiateInternalBankAccount,
+      internalAccount: {
+        initiateInternalAccount: mockInitiateInternalAccount,
       },
       accountTypeRegistry: {
         listActive: mockListActive,
@@ -35,8 +35,8 @@ vi.mock('@/api/context', async () => {
       },
     })),
     useClients: vi.fn(() => ({
-      internalBankAccount: {
-        initiateInternalBankAccount: mockInitiateInternalBankAccount,
+      internalAccount: {
+        initiateInternalAccount: mockInitiateInternalAccount,
       },
       accountTypeRegistry: {
         listActive: mockListActive,
@@ -90,7 +90,7 @@ describe('CreateInternalAccountDialog - rendering', () => {
     vi.clearAllMocks()
     mockListActive.mockResolvedValue({ definitions: mockAccountTypes })
     mockListInstruments.mockResolvedValue({ instruments: mockInstruments })
-    mockInitiateInternalBankAccount.mockResolvedValue({ accountId: 'acc-new-123' })
+    mockInitiateInternalAccount.mockResolvedValue({ accountId: 'acc-new-123' })
   })
 
   it('does not render dialog content when closed', () => {
@@ -306,7 +306,7 @@ describe('CreateInternalAccountDialog - successful submission', () => {
     vi.clearAllMocks()
     mockListActive.mockResolvedValue({ definitions: mockAccountTypes })
     mockListInstruments.mockResolvedValue({ instruments: mockInstruments })
-    mockInitiateInternalBankAccount.mockResolvedValue({ accountId: 'acc-new-123' })
+    mockInitiateInternalAccount.mockResolvedValue({ accountId: 'acc-new-123' })
   })
 
   it('submits form and navigates to account detail page on success', async () => {
@@ -325,7 +325,7 @@ describe('CreateInternalAccountDialog - successful submission', () => {
     await user.click(screen.getByRole('button', { name: /create account/i }))
 
     await waitFor(() => {
-      expect(mockInitiateInternalBankAccount).toHaveBeenCalledWith(
+      expect(mockInitiateInternalAccount).toHaveBeenCalledWith(
         expect.objectContaining({
           name: 'GBP Clearing',
           accountCode: 'CLR-GBP-001',
@@ -347,7 +347,7 @@ describe('CreateInternalAccountDialog - successful submission', () => {
   })
 
   it('disables submit button while pending', async () => {
-    mockInitiateInternalBankAccount.mockImplementation(() => new Promise(() => {}))
+    mockInitiateInternalAccount.mockImplementation(() => new Promise(() => {}))
     const user = userEvent.setup()
     renderDialog()
 
@@ -387,7 +387,7 @@ describe('CreateInternalAccountDialog - error handling', () => {
         },
       },
     ]
-    mockInitiateInternalBankAccount.mockRejectedValue(err)
+    mockInitiateInternalAccount.mockRejectedValue(err)
 
     renderDialog()
 
@@ -410,7 +410,7 @@ describe('CreateInternalAccountDialog - error handling', () => {
     const user = userEvent.setup()
     const { Code, ConnectError } = await import('@connectrpc/connect')
     const err = new ConnectError('server error', Code.Internal)
-    mockInitiateInternalBankAccount.mockRejectedValue(err)
+    mockInitiateInternalAccount.mockRejectedValue(err)
 
     renderDialog()
 
@@ -435,7 +435,7 @@ describe('CreateInternalAccountDialog - cache invalidation', () => {
     vi.clearAllMocks()
     mockListActive.mockResolvedValue({ definitions: mockAccountTypes })
     mockListInstruments.mockResolvedValue({ instruments: mockInstruments })
-    mockInitiateInternalBankAccount.mockResolvedValue({ accountId: 'acc-new-456' })
+    mockInitiateInternalAccount.mockResolvedValue({ accountId: 'acc-new-456' })
   })
 
   it('invalidates internal-accounts query key on success', async () => {

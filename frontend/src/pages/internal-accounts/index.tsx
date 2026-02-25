@@ -124,7 +124,7 @@ export function InternalAccountsPage() {
         queryKey={tenantKeys.internalAccounts(tenantSlug)}
         queryFn={async ({ pageToken, pageSize, filters }) => {
           const statusFilter = filters?.status ? parseInt(filters.status, 10) : 0
-          const res = await clients.internalBankAccount.listInternalBankAccounts({
+          const res = await clients.internalAccount.listInternalAccounts({
             behaviorClassFilter: filters?.behaviorClass ?? '',
             statusFilter,
             pagination: { pageToken: pageToken ?? '', pageSize },

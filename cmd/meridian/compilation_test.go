@@ -20,7 +20,7 @@ func TestCompilation(t *testing.T) {
 	assert.NotNil(t, wireReferenceData)
 	assert.NotNil(t, wireMarketInformation)
 	assert.NotNil(t, wireTenant)
-	assert.NotNil(t, wireInternalBankAccount)
+	assert.NotNil(t, wireInternalAccount)
 	assert.NotNil(t, wireFinancialAccounting)
 	assert.NotNil(t, wirePositionKeeping)
 	assert.NotNil(t, wireForecasting)

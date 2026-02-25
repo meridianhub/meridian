@@ -524,7 +524,7 @@ no persistence adapter is implemented. Service is registered in
 **Severity**: Medium - Withdrawal-by-ID operations fail in
 production.
 
-### internal-bank-account: Position Keeping Client Not Wired
+### internal-account: Position Keeping Client Not Wired
 
 - **RetrieveBalances** (`service/server.go:596`) - Returns
   `codes.Unimplemented` when `positionKeepingClient == nil`:

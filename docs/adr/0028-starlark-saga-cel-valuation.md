@@ -451,7 +451,7 @@ func (r *SagaRuntime) createBuiltins(
         // Create a posting instruction
         "posting": starlark.NewBuiltin("posting", createPostingBuiltin),
 
-        // Resolve internal bank account
+        // Resolve internal account
         "resolve_account": starlark.NewBuiltin("resolve_account", func(
             thread *starlark.Thread,
             fn *starlark.Builtin,

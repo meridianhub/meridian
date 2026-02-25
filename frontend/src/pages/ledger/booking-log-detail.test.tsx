@@ -30,7 +30,7 @@ vi.mock('@/api/clients', () => ({
     referenceData: {},
     accountTypeRegistry: {},
     node: {},
-    internalBankAccount: {},
+    internalAccount: {},
     marketInformation: {},
   })),
 }))
@@ -144,7 +144,7 @@ function setupMockClients({ result }: { result?: object | Error } = {}) {
     referenceData: {} as never,
     accountTypeRegistry: {} as never,
     node: {} as never,
-    internalBankAccount: {} as never,
+    internalAccount: {} as never,
     marketInformation: {} as never,
   })
 }
@@ -321,7 +321,7 @@ describe('BookingLogDetailPage', () => {
       referenceData: {} as never,
       accountTypeRegistry: {} as never,
       node: {} as never,
-      internalBankAccount: {} as never,
+      internalAccount: {} as never,
       marketInformation: {} as never,
     })
 

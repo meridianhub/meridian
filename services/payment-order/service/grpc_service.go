@@ -11,7 +11,7 @@ import (
 
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
-	internalbankaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_bank_account/v1"
+	internalaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
@@ -30,7 +30,7 @@ var (
 	ErrRepositoryNil                = errors.New("repository cannot be nil")
 	ErrCurrentAccountClientNil      = errors.New("current account client cannot be nil")
 	ErrFinancialAccountingClientNil = errors.New("financial accounting client cannot be nil")
-	ErrInternalBankAccountClientNil = errors.New("internal bank account client cannot be nil when internal clearing is enabled")
+	ErrInternalAccountClientNil     = errors.New("internal account client cannot be nil when internal clearing is enabled")
 	ErrPaymentGatewayNil            = errors.New("payment gateway cannot be nil")
 	ErrGatewayAccountConfigNil      = errors.New("gateway account config cannot be nil")
 	ErrIdempotencyServiceNil        = errors.New("idempotency service cannot be nil")
@@ -88,18 +88,18 @@ type FinancialAccountingClient interface {
 	Close() error
 }
 
-// InternalBankAccountClient defines the interface for communicating with the Internal Bank Account service
+// InternalAccountClient defines the interface for communicating with the Internal Account service
 // for clearing account resolution. This is an optional dependency for internal clearing operations.
-type InternalBankAccountClient interface {
-	// GetBalance retrieves the current balance for an internal bank account.
+type InternalAccountClient interface {
+	// GetBalance retrieves the current balance for an internal account.
 	// Used to query clearing account balances for reconciliation.
-	GetBalance(ctx context.Context, req *internalbankaccountv1.GetBalanceRequest) (*internalbankaccountv1.GetBalanceResponse, error)
-	// RetrieveInternalBankAccount fetches account details by ID.
+	GetBalance(ctx context.Context, req *internalaccountv1.GetBalanceRequest) (*internalaccountv1.GetBalanceResponse, error)
+	// RetrieveInternalAccount fetches account details by ID.
 	// Used to verify clearing account configuration.
-	RetrieveInternalBankAccount(ctx context.Context, req *internalbankaccountv1.RetrieveInternalBankAccountRequest) (*internalbankaccountv1.RetrieveInternalBankAccountResponse, error)
-	// ListInternalBankAccounts queries accounts with filtering.
+	RetrieveInternalAccount(ctx context.Context, req *internalaccountv1.RetrieveInternalAccountRequest) (*internalaccountv1.RetrieveInternalAccountResponse, error)
+	// ListInternalAccounts queries accounts with filtering.
 	// Used to discover clearing accounts by type and instrument.
-	ListInternalBankAccounts(ctx context.Context, req *internalbankaccountv1.ListInternalBankAccountsRequest) (*internalbankaccountv1.ListInternalBankAccountsResponse, error)
+	ListInternalAccounts(ctx context.Context, req *internalaccountv1.ListInternalAccountsRequest) (*internalaccountv1.ListInternalAccountsResponse, error)
 	// Close terminates the client connection
 	Close() error
 }
@@ -207,8 +207,8 @@ type Service struct {
 	repo                      persistence.Repository
 	currentAccountClient      CurrentAccountClient
 	financialAccountingClient FinancialAccountingClient
-	internalBankAccountClient InternalBankAccountClient // Optional - for internal clearing operations
-	referenceDataClient       ReferenceDataClient       // Optional - for bucket-aware solvency validation
+	internalAccountClient     InternalAccountClient // Optional - for internal clearing operations
+	referenceDataClient       ReferenceDataClient   // Optional - for bucket-aware solvency validation
 	paymentGateway            gateway.PaymentGateway
 	gatewayAccountConfig      *config.GatewayAccountConfig
 	kafkaPublisher            KafkaPublisher
@@ -229,8 +229,8 @@ type Config struct {
 	Repository                persistence.Repository
 	CurrentAccountClient      CurrentAccountClient
 	FinancialAccountingClient FinancialAccountingClient
-	InternalBankAccountClient InternalBankAccountClient // Optional - for internal clearing operations
-	ReferenceDataClient       ReferenceDataClient       // Optional - for bucket-aware solvency validation
+	InternalAccountClient     InternalAccountClient // Optional - for internal clearing operations
+	ReferenceDataClient       ReferenceDataClient   // Optional - for bucket-aware solvency validation
 	PaymentGateway            gateway.PaymentGateway
 	GatewayAccountConfig      *config.GatewayAccountConfig
 	KafkaPublisher            KafkaPublisher
@@ -251,7 +251,7 @@ type Config struct {
 	// If nil, default retry config is used. Primarily useful for testing.
 	LienExecutionRetryConfig *sharedclients.RetryConfig
 	// InternalClearingEnabled enables internal clearing operations (default: false).
-	// When enabled, the service uses InternalBankAccountClient for clearing account resolution.
+	// When enabled, the service uses InternalAccountClient for clearing account resolution.
 	InternalClearingEnabled bool
 
 	// HandlerRegistry is an optional external handler registry with cross-service Starlark
@@ -328,9 +328,9 @@ func NewServiceWithConfig(cfg Config) (*Service, error) {
 		return nil, ErrIdempotencyServiceNil
 	}
 	// KafkaPublisher is optional - nil is handled gracefully by publishEvent
-	// InternalBankAccountClient is optional but required if internal clearing is enabled
-	if cfg.InternalClearingEnabled && cfg.InternalBankAccountClient == nil {
-		return nil, ErrInternalBankAccountClientNil
+	// InternalAccountClient is optional but required if internal clearing is enabled
+	if cfg.InternalClearingEnabled && cfg.InternalAccountClient == nil {
+		return nil, ErrInternalAccountClientNil
 	}
 
 	// Apply default logger if not provided
@@ -367,7 +367,7 @@ func NewServiceWithConfig(cfg Config) (*Service, error) {
 		CurrentAccountClient:      cfg.CurrentAccountClient,
 		PaymentGateway:            cfg.PaymentGateway,
 		FinancialAccountingClient: cfg.FinancialAccountingClient,
-		InternalBankAccountClient: cfg.InternalBankAccountClient,
+		InternalAccountClient:     cfg.InternalAccountClient,
 		ReferenceDataClient:       cfg.ReferenceDataClient,
 		GatewayAccountConfig:      cfg.GatewayAccountConfig,
 		KafkaPublisher:            cfg.KafkaPublisher,
@@ -385,8 +385,8 @@ func NewServiceWithConfig(cfg Config) (*Service, error) {
 		repo:                      cfg.Repository,
 		currentAccountClient:      cfg.CurrentAccountClient,
 		financialAccountingClient: cfg.FinancialAccountingClient,
-		internalBankAccountClient: cfg.InternalBankAccountClient, // Optional - may be nil
-		referenceDataClient:       cfg.ReferenceDataClient,       // Optional - may be nil
+		internalAccountClient:     cfg.InternalAccountClient, // Optional - may be nil
+		referenceDataClient:       cfg.ReferenceDataClient,   // Optional - may be nil
 		paymentGateway:            cfg.PaymentGateway,
 		gatewayAccountConfig:      cfg.GatewayAccountConfig,
 		kafkaPublisher:            cfg.KafkaPublisher,

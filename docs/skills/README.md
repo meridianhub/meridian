@@ -77,7 +77,7 @@ Service documentation includes YAML frontmatter for Claude Code discovery:
 - **[financial-accounting](../../services/financial-accounting/README.md)** - Double-entry bookkeeping
 - **[payment-order](../../services/payment-order/README.md)** - Payment saga orchestrator
 - **[party](../../services/party/README.md)** - Party reference data directory
-- **[internal-bank-account](../../services/internal-bank-account/README.md)** - Internal bank account registry
+- **[internal-account](../../services/internal-account/README.md)** - Internal account registry
 - **[reference-data](../../services/reference-data/README.md)** - Instrument definitions and CEL validation
 
 **Infrastructure Services:**

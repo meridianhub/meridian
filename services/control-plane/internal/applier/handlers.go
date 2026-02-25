@@ -21,7 +21,7 @@ var handlersYAMLFS embed.FS
 //
 // The apply_manifest saga calls handlers in four service namespaces:
 //   - reference_data: RegisterInstrument, RegisterAccountType, RegisterValuationRule, RegisterSagaDefinition
-//   - internal_bank_account: Initiate
+//   - internal_account: Initiate
 //
 // Each handler is registered with metadata for compensation support.
 func RegisterManifestHandlers(registry *saga.HandlerRegistry, deps *HandlerDependencies) error {
@@ -61,8 +61,8 @@ func RegisterManifestHandlers(registry *saga.HandlerRegistry, deps *HandlerDepen
 				ProducesInstruments: []string{},
 			},
 		},
-		// Internal Bank Account - Account initiation
-		"internal_bank_account.initiate": {
+		// Internal Account - Account initiation
+		"internal_account.initiate": {
 			handler: initiateAccountHandler(deps),
 			metadata: saga.HandlerMetadata{
 				Category:            saga.HandlerCategorySettlement,
@@ -99,8 +99,8 @@ func RegisterManifestHandlers(registry *saga.HandlerRegistry, deps *HandlerDepen
 type HandlerDependencies struct {
 	// ReferenceData provides instrument, account type, valuation rule, and saga management.
 	ReferenceData ReferenceDataService
-	// InternalBankAccount provides account provisioning.
-	InternalBankAccount InternalBankAccountService
+	// InternalAccount provides account provisioning.
+	InternalAccount InternalAccountService
 	// ValuationMethod provides UUID resolution for named valuation methods.
 	// May be nil if no default_conversion_method resolution is needed.
 	ValuationMethod ValuationMethodService
@@ -118,8 +118,8 @@ type ReferenceDataService interface {
 	RegisterSagaDefinition(ctx *saga.StarlarkContext, params map[string]any) (any, error)
 }
 
-// InternalBankAccountService abstracts the Internal Bank Account gRPC client for testing.
-type InternalBankAccountService interface {
+// InternalAccountService abstracts the Internal Account gRPC client for testing.
+type InternalAccountService interface {
 	InitiateAccount(ctx *saga.StarlarkContext, params map[string]any) (any, error)
 }
 
@@ -201,10 +201,10 @@ func registerSagaDefinitionHandler(deps *HandlerDependencies) saga.Handler {
 	}
 }
 
-// initiateAccountHandler creates a handler that initiates an internal bank account.
+// initiateAccountHandler creates a handler that initiates an internal account.
 func initiateAccountHandler(deps *HandlerDependencies) saga.Handler {
 	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
-		return deps.InternalBankAccount.InitiateAccount(ctx, params)
+		return deps.InternalAccount.InitiateAccount(ctx, params)
 	}
 }
 

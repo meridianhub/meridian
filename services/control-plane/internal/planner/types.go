@@ -1,5 +1,5 @@
 // Package planner transforms a diff plan into a dependency-ordered sequence
-// of gRPC calls to downstream services (Reference Data, Internal Bank Account,
+// of gRPC calls to downstream services (Reference Data, Internal Account,
 // Saga Registry). It ensures resources are created in the correct order
 // respecting inter-resource dependencies.
 package planner
@@ -19,7 +19,7 @@ type Phase int
 const (
 	// PhaseInstruments registers instruments with Reference Data (no dependencies).
 	PhaseInstruments Phase = 1
-	// PhaseAccountTypes registers account types and initiates internal bank accounts
+	// PhaseAccountTypes registers account types and initiates internal accounts
 	// (depends on instruments being registered first).
 	PhaseAccountTypes Phase = 2
 	// PhaseValuationRules registers valuation rules with Reference Data
@@ -72,8 +72,8 @@ const (
 	MethodDeprecateInstrument GRPCMethod = "meridian.reference_data.v1.ReferenceDataService/DeprecateInstrument"
 	MethodActivateInstrument  GRPCMethod = "meridian.reference_data.v1.ReferenceDataService/ActivateInstrument"
 
-	// Internal Bank Account Service
-	MethodInitiateAccount GRPCMethod = "meridian.internal_bank_account.v1.InternalBankAccountService/InitiateInternalBankAccount"
+	// Internal Account Service
+	MethodInitiateAccount GRPCMethod = "meridian.internal_account.v1.InternalAccountService/InitiateInternalAccount"
 
 	// Saga Registry Service
 	MethodCreateSagaDraft      GRPCMethod = "meridian.saga.v1.SagaRegistryService/CreateSagaDraft"

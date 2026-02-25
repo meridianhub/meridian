@@ -12,7 +12,7 @@ import (
 	"github.com/lib/pq"
 
 	"github.com/google/uuid"
-	internalbankaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_bank_account/v1"
+	internalaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
 	"github.com/meridianhub/meridian/shared/platform/audit"
@@ -552,7 +552,7 @@ type postingServiceMockClient struct {
 	err                  error
 }
 
-func (m *postingServiceMockClient) ListInternalBankAccounts(_ context.Context, req *internalbankaccountv1.ListInternalBankAccountsRequest) (*internalbankaccountv1.ListInternalBankAccountsResponse, error) {
+func (m *postingServiceMockClient) ListInternalAccounts(_ context.Context, req *internalaccountv1.ListInternalAccountsRequest) (*internalaccountv1.ListInternalAccountsResponse, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -565,19 +565,19 @@ func (m *postingServiceMockClient) ListInternalBankAccounts(_ context.Context, r
 	}
 
 	if accountID == "" {
-		return &internalbankaccountv1.ListInternalBankAccountsResponse{
-			Facilities: []*internalbankaccountv1.InternalBankAccountFacility{},
+		return &internalaccountv1.ListInternalAccountsResponse{
+			Facilities: []*internalaccountv1.InternalAccountFacility{},
 		}, nil
 	}
 
-	return &internalbankaccountv1.ListInternalBankAccountsResponse{
-		Facilities: []*internalbankaccountv1.InternalBankAccountFacility{
+	return &internalaccountv1.ListInternalAccountsResponse{
+		Facilities: []*internalaccountv1.InternalAccountFacility{
 			{AccountId: accountID},
 		},
 	}, nil
 }
 
-func (m *postingServiceMockClient) RetrieveInternalBankAccount(_ context.Context, _ *internalbankaccountv1.RetrieveInternalBankAccountRequest) (*internalbankaccountv1.RetrieveInternalBankAccountResponse, error) {
+func (m *postingServiceMockClient) RetrieveInternalAccount(_ context.Context, _ *internalaccountv1.RetrieveInternalAccountRequest) (*internalaccountv1.RetrieveInternalAccountResponse, error) {
 	return nil, nil
 }
 

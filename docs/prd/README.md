@@ -32,7 +32,7 @@ stateDiagram-v2
 |-----|-----------------|-------|
 | [Codebase Health Audit](012-codebase-health-audit.md) | `codebase-health-audit` | 22/22 done |
 | [Durable Execution Engine](005-durable-execution-engine.md) | `starlark-saga-orchestration` | 24/24 done |
-| [Internal Bank Account](002-internal-bank-account.md) | `internal-bank-account` | 33/33 done |
+| [Internal Account](002-internal-account.md) | `internal-account` | 33/33 done |
 | [Market Information Management](004-market-information-management.md) | `market-information-management` | 17/18 done, 1 cancelled |
 | [Market Data & Dynamic Pricing](016-market-data-dynamic-pricing.md) | `market-data-dynamic-pricing` | 12/12 done |
 | [Production Readiness Review](009-production-readiness-review.md) | `production-readiness` | 10/10 done |
@@ -70,7 +70,7 @@ stateDiagram-v2
 | PRD | Task Master Tag | Description |
 |-----|-----------------|-------------|
 | [Current Account Withdrawal Persistence](018-current-account-withdrawal-persistence.md) | `account-service-wiring` | Wire withdrawal-by-ID gRPC handlers in current-account service |
-| [Internal Bank Account - Position Keeping Client](019-internal-bank-account-position-keeping-client.md) | `account-service-wiring` | Wire Position Keeping gRPC client in internal-bank-account service |
+| [Internal Account - Position Keeping Client](019-internal-account-position-keeping-client.md) | `account-service-wiring` | Wire Position Keeping gRPC client in internal-account service |
 | [Party KYC/AML Provider Integration](020-party-kyc-aml-provider-integration.md) | `party-kyc-aml` | External KYC/AML provider adapter for production party onboarding |
 
 #### Not Started
@@ -138,7 +138,7 @@ These PRDs were implemented by appending tasks to existing tags rather than crea
 
 | PRD | Description | Date Created |
 |-----|-------------|--------------|
-| `prd-internal-bank-account-integration-phase2.md` | Phase 2: FA, Payment Order, Position Keeping integration | 2026-01-15 |
+| `prd-internal-account-integration-phase2.md` | Phase 2: FA, Payment Order, Position Keeping integration | 2026-01-15 |
 
 ### Other Documents (`.taskmaster/docs/`)
 
@@ -174,7 +174,7 @@ Meridian uses two PRD locations with different purposes:
 - Long-term reference documentation
 - Features with significant design complexity
 
-**Examples:** Universal Asset System, Starlark Saga Orchestration, Internal Bank Account Service
+**Examples:** Universal Asset System, Starlark Saga Orchestration, Internal Account Service
 
 **Tactical PRDs** (`.taskmaster/docs/`) - Use for:
 
@@ -197,7 +197,7 @@ material.
 ### Core Platform
 
 - [Universal Asset System](001-universal-asset-system.md) - Multi-asset support with dimensional safety
-- [Internal Bank Account](002-internal-bank-account.md) - BIAN service for clearing, nostro/vostro accounts
+- [Internal Account](002-internal-account.md) - BIAN service for clearing, nostro/vostro accounts
 - [Market Information Management](004-market-information-management.md) - BIAN service for market data and pricing
 - [Starlark Typed Service Clients](007-starlark-typed-service-clients.md) - Type-safe service handlers for saga orchestration
 - [Valuation Service](011-valuation-service.md) - BIAN-native multi-asset valuation engine
@@ -230,7 +230,8 @@ material.
 ### Service Wiring (Micro-PRDs)
 
 - [Current Account Withdrawal Persistence](018-current-account-withdrawal-persistence.md) - Wire withdrawal-by-ID gRPC handlers
-- [IBA - Position Keeping Client](019-internal-bank-account-position-keeping-client.md) - Wire PK gRPC client in IBA service
+- [Internal Account - PK Client](019-internal-account-position-keeping-client.md) -
+  Wire PK gRPC client in Internal Account service
 - [Party KYC/AML Provider Integration](020-party-kyc-aml-provider-integration.md) - External KYC/AML provider adapter
 
 ### Deployment Targets

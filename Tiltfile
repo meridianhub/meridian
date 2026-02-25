@@ -86,7 +86,7 @@ db_urls = {
   'position_keeping': os.getenv('POSITION_KEEPING_DATABASE_URL', 'postgres://meridian_position_keeping_user@cockroachdb:26257/meridian_position_keeping?sslmode=disable'),
   'payment_order': os.getenv('PAYMENT_ORDER_DATABASE_URL', 'postgres://meridian_payment_order_user@cockroachdb:26257/meridian_payment_order?sslmode=disable'),
   'party': os.getenv('PARTY_DATABASE_URL', 'postgres://meridian_party_user@cockroachdb:26257/meridian_party?sslmode=disable'),
-  'internal_bank_account': os.getenv('INTERNAL_BANK_ACCOUNT_DATABASE_URL', 'postgres://meridian_internal_bank_account_user@cockroachdb:26257/meridian_internal_bank_account?sslmode=disable'),
+  'internal_account': os.getenv('INTERNAL_ACCOUNT_DATABASE_URL', 'postgres://meridian_internal_account_user@cockroachdb:26257/meridian_internal_account?sslmode=disable'),
   'market_information': os.getenv('MARKET_INFORMATION_DATABASE_URL', 'postgres://meridian_market_information_user@cockroachdb:26257/meridian_market_information?sslmode=disable'),
   'reconciliation': os.getenv('RECONCILIATION_DATABASE_URL', 'postgres://meridian_reconciliation_user@cockroachdb:26257/meridian_reconciliation?sslmode=disable'),
   'forecasting': os.getenv('FORECASTING_DATABASE_URL', 'postgres://meridian_forecasting_user@cockroachdb:26257/meridian_forecasting?sslmode=disable'),
@@ -475,7 +475,7 @@ k8s_resource(
 #   - PaymentOrder:         50054
 #   - Party:                50055
 #   - Tenant:               50056
-#   - InternalBankAccount:  50057
+#   - InternalAccount:  50057
 #   - MarketInformation:    50058
 #   - ReferenceData:        50059
 #   - Reconciliation:       50060
@@ -527,11 +527,11 @@ grpc_microservice(
     resource_deps=['cockroachdb', 'migrate-party'],
 )
 
-# Internal-Bank-Account Service - gRPC microservice for internal account management
+# Internal-Account Service - gRPC microservice for internal account management
 grpc_microservice(
-    'internal-bank-account',
-    grpc_port=50057,  # ports.InternalBankAccount
-    resource_deps=['cockroachdb', 'migrate-internal-bank-account', 'position-keeping', 'current-account'],
+    'internal-account',
+    grpc_port=50057,  # ports.InternalAccount
+    resource_deps=['cockroachdb', 'migrate-internal-account', 'position-keeping', 'current-account'],
 )
 
 # Market-Information Service - gRPC microservice for price benchmarks and market data
@@ -829,9 +829,9 @@ migration_job(
 )
 
 migration_job(
-  'migrate-internal-bank-account',
-  'internal-bank-account',
-  'internal_bank_account',
+  'migrate-internal-account',
+  'internal-account',
+  'internal_account',
   resource_deps=['migrate-party'],
 )
 
@@ -839,7 +839,7 @@ migration_job(
   'migrate-market-information',
   'market-information',
   'market_information',
-  resource_deps=['migrate-internal-bank-account'],
+  resource_deps=['migrate-internal-account'],
 )
 
 migration_job(
@@ -909,7 +909,7 @@ local_resource(
 local_resource(
   'smoke-test-get-balance',
   cmd='./scripts/smoke-test-get-balance.sh',
-  resource_deps=['internal-bank-account', 'position-keeping'],
+  resource_deps=['internal-account', 'position-keeping'],
   labels=['test'],
   auto_init=False,  # Run manually with 'tilt trigger smoke-test-get-balance'
   trigger_mode=TRIGGER_MODE_MANUAL,
@@ -981,7 +981,7 @@ Microservices:
   • Payment-Order          → localhost:50054 (gRPC)
   • Party                  → localhost:50055 (gRPC)
   • Tenant                 → localhost:50056 (gRPC)
-  • Internal-Bank-Account  → localhost:50057 (gRPC)
+  • Internal-Account  → localhost:50057 (gRPC)
   • Market-Information     → localhost:50058 (gRPC)
   • Reference-Data         → localhost:50059 (gRPC)
   • Reconciliation         → localhost:50060 (gRPC)
@@ -1030,7 +1030,7 @@ Database Architecture (database-per-service):
     - meridian_position_keeping
     - meridian_payment_order
     - meridian_party
-    - meridian_internal_bank_account
+    - meridian_internal_account
     - meridian_market_information
     - meridian_reconciliation
     - meridian_forecasting
@@ -1047,12 +1047,12 @@ Database Migrations:
     4. payment_order → meridian_payment_order (payment orders, saga state)
     5. party → meridian_party (party reference data)
     6. tenant → meridian_platform (tenant registry)
-    7. internal_bank_account → meridian_internal_bank_account (internal accounts)
+    7. internal_account → meridian_internal_account (internal accounts)
     8. market_information → meridian_market_information (price benchmarks, market data)
     9. reconciliation → meridian_reconciliation (reconciliation processes)
     10. forecasting → meridian_forecasting (forecasting strategies)
     11. reference_data → meridian_reference_data (instrument definitions, nodes, saga definitions)
-  • Parallel execution: current_account + financial_accounting + party + tenant + internal_bank_account + market_information + reconciliation + forecasting + reference_data
+  • Parallel execution: current_account + financial_accounting + party + tenant + internal_account + market_information + reconciliation + forecasting + reference_data
   • Sequential dependencies:
     - position_keeping waits for current_account (Account FK)
     - payment_order waits for current_account (Account FK)
@@ -1063,7 +1063,7 @@ Database Migrations:
     - tilt trigger migrate-payment-order
     - tilt trigger migrate-party
     - tilt trigger migrate-tenant
-    - tilt trigger migrate-internal-bank-account
+    - tilt trigger migrate-internal-account
     - tilt trigger migrate-market-information
     - tilt trigger migrate-reconciliation
     - tilt trigger migrate-forecasting

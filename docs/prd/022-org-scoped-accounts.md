@@ -33,7 +33,7 @@ instructions: |
 
 **Related PRDs:**
 
-- [Internal Bank Account](./002-internal-bank-account.md)
+- [Internal Account](./002-internal-account.md)
 - [Starlark Saga Orchestration](./006-starlark-saga-orchestration-core.md)
 
 ---
@@ -229,11 +229,11 @@ WHERE org_party_id IS NOT NULL;
 > Syndicate-scoped accounts enforce one-per-party-per-org-per-currency;
 > personal accounts retain their current flexibility.
 
-### 2. Internal Bank Account (Expansion)
+### 2. Internal Account (Expansion)
 
 *Allows Syndicates to hold their own P&L accounts.*
 
-> **Architecture Note:** Internal bank accounts use schema-per-tenant
+> **Architecture Note:** Internal accounts use schema-per-tenant
 > isolation (`org_{tenant_id}` schema routing). The `org_party_id`
 > here represents a *sub-organization within a tenant* (e.g., a
 > syndicate within a betting platform tenant), not the tenant itself.
@@ -244,8 +244,8 @@ WHERE org_party_id IS NOT NULL;
 #### Migration 1: Add column
 
 ```sql
--- services/internal-bank-account/migrations/20260214000001_add_org_party_id.sql
-ALTER TABLE internal_bank_account ADD COLUMN org_party_id UUID NULL;
+-- services/internal-account/migrations/20260214000001_add_org_party_id.sql
+ALTER TABLE internal_account ADD COLUMN org_party_id UUID NULL;
 ```
 
 *Validation Rule (application-layer):* Org-Scoped internal accounts
@@ -496,15 +496,15 @@ def apply_syndicate_fee(ctx):
 
 - [ ] DB Migration 1a: Add `org_party_id` to `account` table.
 - [ ] DB Migration 1b: Add indexes for org-scoped queries (separate file).
-- [ ] DB Migration 2a: Add `org_party_id` to `internal_bank_account`
+- [ ] DB Migration 2a: Add `org_party_id` to `internal_account`
   table.
 - [ ] DB Migration 2b: Add indexes for org-scoped queries on
-  `internal_bank_account` (separate file).
+  `internal_account` (separate file).
 - [ ] DB Migration 3a: Add `metadata`, `status`, `effective_from`,
   `effective_to` to `party_association`.
 - [ ] DB Migration 3b: Add constraints and indexes for party
   association (separate file).
-- [ ] Proto: Update `Party`, `CurrentAccount`, `InternalBankAccount`
+- [ ] Proto: Update `Party`, `CurrentAccount`, `InternalAccount`
   definitions.
 
 ### Stream 2: Service Logic (5 SP)
@@ -514,7 +514,7 @@ def apply_syndicate_fee(ctx):
   and enforce syndicate uniqueness.
 - [ ] Current Account: Update domain model and entity with
   `OrgPartyID` field.
-- [ ] Internal Bank Account: Add application-layer validation
+- [ ] Internal Account: Add application-layer validation
   preventing Org-Scoped accounts from being CLEARING accounts.
 
 ### Stream 3: Saga Infrastructure (5 SP)

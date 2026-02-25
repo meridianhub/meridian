@@ -1,0 +1,178 @@
+### Internal Account Service
+# Treasury and internal (nostro/vostro/clearing) account management.
+# Proto: api/proto/meridian/internal_account/v1/internal_account.proto
+
+## --- Account Lifecycle ---
+
+### Create Internal Account (Nostro)
+GRPC {{grpc_host}}/meridian.internal_account.v1.InternalAccountService/InitiateInternalAccount
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountCode": "NOSTRO-GBP-BARC",
+  "name": "GBP Nostro account at Barclays",
+  "accountType": "INTERNAL_ACCOUNT_TYPE_NOSTRO",
+  "instrumentCode": "GBP",
+  "description": "Primary GBP nostro for correspondent banking"
+}
+
+> {%
+    client.global.set("iba_id", response.body.account.accountId);
+%}
+
+### Retrieve Internal Account
+GRPC {{grpc_host}}/meridian.internal_account.v1.InternalAccountService/RetrieveInternalAccount
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{iba_id}}"
+}
+
+### Update Internal Account
+GRPC {{grpc_host}}/meridian.internal_account.v1.InternalAccountService/UpdateInternalAccount
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{iba_id}}",
+  "description": "GBP Nostro account at Barclays (primary)"
+}
+
+### List Internal Accounts
+GRPC {{grpc_host}}/meridian.internal_account.v1.InternalAccountService/ListInternalAccounts
+x-tenant-id: {{tenant_id}}
+
+{}
+
+### Get Balance
+GRPC {{grpc_host}}/meridian.internal_account.v1.InternalAccountService/GetBalance
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{iba_id}}"
+}
+
+## --- Lifecycle Control ---
+
+### Control Account (suspend)
+GRPC {{grpc_host}}/meridian.internal_account.v1.InternalAccountService/ControlInternalAccount
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{iba_id}}",
+  "controlAction": "CONTROL_ACTION_SUSPEND",
+  "reason": "Pending correspondent bank reconciliation review"
+}
+
+### Control Account (activate / unsuspend)
+GRPC {{grpc_host}}/meridian.internal_account.v1.InternalAccountService/ControlInternalAccount
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{iba_id}}",
+  "controlAction": "CONTROL_ACTION_ACTIVATE",
+  "reason": "Reconciliation completed successfully"
+}
+
+### Control Account (close)
+GRPC {{grpc_host}}/meridian.internal_account.v1.InternalAccountService/ControlInternalAccount
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{iba_id}}",
+  "controlAction": "CONTROL_ACTION_CLOSE",
+  "reason": "Account decommissioned - correspondent relationship ended"
+}
+
+## --- Valuation Features ---
+
+### Create Valuation Feature
+GRPC {{grpc_host}}/meridian.internal_account.v1.InternalAccountService/CreateValuationFeature
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{iba_id}}",
+  "instrumentCode": "EUR",
+  "valuationMethodId": "fx-spot-rate",
+  "valuationMethodVersion": 1,
+  "outputInstrument": "GBP",
+  "parameters": "{\"spread\": \"0.003\"}"
+}
+
+> {%
+    client.global.set("iba_vf_id", response.body.feature.id);
+%}
+
+### List Valuation Features
+GRPC {{grpc_host}}/meridian.internal_account.v1.InternalAccountService/ListValuationFeatures
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{iba_id}}"
+}
+
+### Get Valuation Feature
+GRPC {{grpc_host}}/meridian.internal_account.v1.InternalAccountService/GetValuationFeature
+x-tenant-id: {{tenant_id}}
+
+{
+  "featureId": "{{iba_vf_id}}"
+}
+
+### Evaluate Valuation (inquiry)
+GRPC {{grpc_host}}/meridian.internal_account.v1.InternalAccountService/EvaluateAssetValuation
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{iba_id}}",
+  "input": {
+    "amount": "1000.00",
+    "instrumentCode": "EUR"
+  }
+}
+
+## --- Liens ---
+
+### Initiate Lien on Internal Account
+GRPC {{grpc_host}}/meridian.internal_account.v1.InternalAccountService/InitiateLien
+x-tenant-id: {{tenant_id}}
+
+{
+  "accountId": "{{iba_id}}",
+  "input": {
+    "amount": "5000.00",
+    "instrumentCode": "GBP"
+  },
+  "paymentOrderReference": "TREASURY-PO-001"
+}
+
+> {%
+    client.global.set("iba_lien_id", response.body.lien.lienId);
+%}
+
+### Retrieve Lien
+GRPC {{grpc_host}}/meridian.internal_account.v1.InternalAccountService/RetrieveLien
+x-tenant-id: {{tenant_id}}
+
+{
+  "lienId": "{{iba_lien_id}}"
+}
+
+### Execute Lien
+GRPC {{grpc_host}}/meridian.internal_account.v1.InternalAccountService/ExecuteLien
+x-tenant-id: {{tenant_id}}
+
+{
+  "lienId": "{{iba_lien_id}}",
+  "idempotencyKey": {
+    "key": "{{$uuid}}"
+  }
+}
+
+### Terminate Lien
+GRPC {{grpc_host}}/meridian.internal_account.v1.InternalAccountService/TerminateLien
+x-tenant-id: {{tenant_id}}
+
+{
+  "lienId": "{{iba_lien_id}}",
+  "reason": "Treasury transfer cancelled"
+}

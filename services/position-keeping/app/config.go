@@ -122,15 +122,15 @@ type CompactionConfig struct {
 type AccountValidationConfig struct {
 	// Enabled indicates if account validation is enabled
 	// When enabled, the service validates that accounts exist in Current Account
-	// or Internal Bank Account before creating position logs.
+	// or Internal Account before creating position logs.
 	// Defaults to true to prevent orphan position logs.
 	Enabled bool
 	// CurrentAccountServiceURL is the gRPC address of the Current Account service
 	// Optional - if not specified, Current Account validation is skipped
 	CurrentAccountServiceURL string
-	// InternalBankAccountServiceURL is the gRPC address of the Internal Bank Account service
-	// Optional - if not specified, Internal Bank Account validation is skipped
-	InternalBankAccountServiceURL string
+	// InternalAccountServiceURL is the gRPC address of the Internal Account service
+	// Optional - if not specified, Internal Account validation is skipped
+	InternalAccountServiceURL string
 	// CacheTTL is how long to cache validation results
 	// Defaults to 1 minute if not specified
 	CacheTTL time.Duration
@@ -245,11 +245,12 @@ func loadCompactionConfig() CompactionConfig {
 // loadAccountValidationConfig loads account validation configuration from environment variables
 func loadAccountValidationConfig() AccountValidationConfig {
 	return AccountValidationConfig{
-		Enabled:                       env.GetEnvAsBool("ACCOUNT_VALIDATION_ENABLED", true),
-		CurrentAccountServiceURL:      env.GetEnvOrDefault("CURRENT_ACCOUNT_SERVICE_URL", ""),
-		InternalBankAccountServiceURL: env.GetEnvOrDefault("INTERNAL_BANK_ACCOUNT_SERVICE_URL", ""),
-		CacheTTL:                      env.GetEnvAsDuration("ACCOUNT_VALIDATION_CACHE_TTL", 1*time.Minute),
-		ConnectionTimeout:             env.GetEnvAsDuration("ACCOUNT_VALIDATION_CONNECTION_TIMEOUT", 5*time.Second),
+		Enabled:                  env.GetEnvAsBool("ACCOUNT_VALIDATION_ENABLED", true),
+		CurrentAccountServiceURL: env.GetEnvOrDefault("CURRENT_ACCOUNT_SERVICE_URL", ""),
+		InternalAccountServiceURL: env.GetEnvOrDefault("INTERNAL_ACCOUNT_SERVICE_URL",
+			env.GetEnvOrDefault("INTERNAL_BANK_ACCOUNT_SERVICE_URL", "")),
+		CacheTTL:          env.GetEnvAsDuration("ACCOUNT_VALIDATION_CACHE_TTL", 1*time.Minute),
+		ConnectionTimeout: env.GetEnvAsDuration("ACCOUNT_VALIDATION_CONNECTION_TIMEOUT", 5*time.Second),
 	}
 }
 
@@ -332,7 +333,7 @@ func (c *CompactionConfig) Validate() error {
 
 // Validate validates the account validation configuration
 func (c *AccountValidationConfig) Validate() error {
-	if c.Enabled && c.CurrentAccountServiceURL == "" && c.InternalBankAccountServiceURL == "" {
+	if c.Enabled && c.CurrentAccountServiceURL == "" && c.InternalAccountServiceURL == "" {
 		return ErrAccountValidationURLRequired
 	}
 	return nil

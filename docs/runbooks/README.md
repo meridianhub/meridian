@@ -26,8 +26,8 @@ scenarios.
 
 - **[database-per-service-migration.md](database-per-service-migration.md)** - Procedures for
   migrating to database-per-service architecture
-- **[internal-bank-account-operations.md](internal-bank-account-operations.md)** - Internal bank
-  account operational procedures and reconciliation
+- **[internal-account-operations.md](internal-account-operations.md)** - Internal account
+  operational procedures and reconciliation
 - **[market-information-operations.md](market-information-operations.md)** - Market data operations,
   pricing updates, and rate management
 - **[troubleshooting-saga-handlers.md](troubleshooting-saga-handlers.md)** - Debugging Starlark saga
