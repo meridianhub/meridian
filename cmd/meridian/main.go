@@ -643,12 +643,17 @@ var serviceNames = []string{
 	"meridian.financial_accounting.v1.FinancialAccountingService",
 	"meridian.position_keeping.v1.PositionKeepingService",
 	"meridian.forecasting.v1.ForecastingService",
-	// CurrentAccountService excluded: conflicts with InternalBankAccountService
-	// on /v1/liens/* REST routes. Reachable via gRPC/Connect only.
+	// CurrentAccountService excluded from Vanguard: its REST routes (/v1/liens/*)
+	// conflict with InternalBankAccountService. Still reachable via Connect protocol
+	// (/{package}.{Service}/{Method} paths don't conflict).
 	"meridian.payment_order.v1.PaymentOrderService",
 	"meridian.reconciliation.v1.AccountReconciliationService",
 	"meridian.saga.v1.SagaRegistryService",
+	"meridian.saga.v1.SagaAdminService",
 	"meridian.control_plane.v1.ApplyManifestService",
+	"meridian.control_plane.v1.ManifestHistoryService",
+	"meridian.reference_data.v1.AccountTypeRegistryService",
+	"meridian.mapping.v1.MappingService",
 	"meridian.audit.v1.AuditService",
 }
 

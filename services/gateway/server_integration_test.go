@@ -199,8 +199,8 @@ func TestIntegration_APIRoutes_RequiresTenantContext(t *testing.T) {
 	require.NoError(t, err)
 
 	// Test API route returns placeholder response
-	t.Run("GET /api/v1/test returns 501 Not Implemented", func(t *testing.T) {
-		resp, err := httpGet(ctx, baseURL+"/api/v1/test")
+	t.Run("GET /v1/test returns 501 Not Implemented", func(t *testing.T) {
+		resp, err := httpGet(ctx, baseURL+"/v1/test")
 		require.NoError(t, err)
 		defer resp.Body.Close()
 

@@ -237,7 +237,7 @@ func TestHeaderPropagationMiddleware_AllHeadersSet(t *testing.T) {
 		capturedHeaders = r.Header.Clone()
 	}))
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/party/create", nil)
+	req := httptest.NewRequest(http.MethodPost, "/v1/party/create", nil)
 	req.Host = "acme.api.meridian.io"
 	req.RemoteAddr = "192.168.1.100:45678"
 	req.Header.Set("x-tenant-id", "acme_corp") // Pre-set by TenantResolverMiddleware
@@ -350,7 +350,7 @@ func TestHeaderPropagationMiddleware_MiddlewareChainIntegration(t *testing.T) {
 
 	chain := tenantMiddleware(HeaderPropagationMiddleware(finalHandler))
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/test", nil)
+	req := httptest.NewRequest(http.MethodPost, "/v1/test", nil)
 	req.Host = "tenant1.api.meridian.io"
 	req.RemoteAddr = "203.0.113.100:12345"
 	rec := httptest.NewRecorder()

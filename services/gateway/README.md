@@ -90,7 +90,7 @@ flowchart LR
 
 ### Middleware Chain
 
-The gateway applies middleware in this order for `/api/*` routes:
+The gateway applies middleware in this order for all routes:
 
 1. **Auth Middleware** (outermost): Validates JWT or API key, returns 401 if invalid
 2. **Tenant Middleware**: Resolves tenant from subdomain/header, injects into context
@@ -110,9 +110,9 @@ the decision rationale.
 
 | Protocol | Content-Type | URL Pattern |
 |----------|--------------|-------------|
-| REST/JSON | `application/json` | `/api/v1/parties`, `/api/v1/current-accounts`, etc. |
-| Connect | `application/connect+json` | `/api/<package>.<Service>/<Method>` |
-| gRPC-Web | `application/grpc-web+proto` | `/api/<package>.<Service>/<Method>` |
+| REST/JSON | `application/json` | `/v1/parties`, `/v1/current-accounts`, etc. |
+| Connect | `application/connect+json` | `/<package>.<Service>/<Method>` |
+| gRPC-Web | `application/grpc-web+proto` | `/<package>.<Service>/<Method>` |
 | Native gRPC | — | Direct to `:50051` |
 
 ### Proto Descriptor
@@ -250,7 +250,7 @@ export API_KEYS="sk_prod_abc123:payments-service,sk_prod_def456:reporting-servic
 ### Usage
 
 ```bash
-curl -H "X-API-Key: $API_KEY" https://acme.api.meridianhub.cloud/api/v1/accounts
+curl -H "X-API-Key: $API_KEY" https://acme.api.meridianhub.cloud/v1/accounts
 ```
 
 ### Rate Limiting
@@ -349,7 +349,7 @@ In this mode, use the `X-Tenant-Slug` header to specify the tenant:
 export LOCAL_DEV_MODE=true
 curl -H "Authorization: Bearer $JWT" \
      -H "X-Tenant-Slug: acme_bank" \
-     http://localhost:8080/api/v1/accounts
+     http://localhost:8080/v1/accounts
 ```
 
 This mode is blocked in production namespaces (any namespace prefixed with `prod`).

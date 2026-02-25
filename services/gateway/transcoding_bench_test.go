@@ -197,7 +197,7 @@ func httpDo(b *testing.B, method, url, contentType, body string) {
 }
 
 // ---------------------------------------------------------------------------
-// Simple RPC benchmarks – GET /api/v1/parties/{id}  (RetrieveParty)
+// Simple RPC benchmarks – GET /v1/parties/{id}  (RetrieveParty)
 // ---------------------------------------------------------------------------
 
 // BenchmarkGRPC_RetrieveParty measures native gRPC latency for RetrieveParty.
@@ -229,7 +229,7 @@ func BenchmarkJSON_RetrieveParty(b *testing.B) {
 	})
 	defer env.cleanup()
 
-	url := env.baseURL + "/api/v1/parties/bench-party"
+	url := env.baseURL + "/v1/parties/bench-party"
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -239,7 +239,7 @@ func BenchmarkJSON_RetrieveParty(b *testing.B) {
 }
 
 // ---------------------------------------------------------------------------
-// Mutation RPC benchmarks – POST /api/v1/parties  (RegisterParty)
+// Mutation RPC benchmarks – POST /v1/parties  (RegisterParty)
 // ---------------------------------------------------------------------------
 
 // BenchmarkGRPC_RegisterParty measures native gRPC latency for RegisterParty (POST with body).
@@ -273,7 +273,7 @@ func BenchmarkJSON_RegisterParty(b *testing.B) {
 	})
 	defer env.cleanup()
 
-	url := env.baseURL + "/api/v1/parties"
+	url := env.baseURL + "/v1/parties"
 	body := `{"partyType":"PARTY_TYPE_PERSON","legalName":"Bench User","displayName":"Bench"}`
 
 	b.ReportAllocs()
@@ -284,7 +284,7 @@ func BenchmarkJSON_RegisterParty(b *testing.B) {
 }
 
 // ---------------------------------------------------------------------------
-// List RPC benchmarks – GET /api/v1/tenants  (ListTenants)
+// List RPC benchmarks – GET /v1/tenants  (ListTenants)
 // ---------------------------------------------------------------------------
 
 // BenchmarkGRPC_ListTenants measures native gRPC latency for ListTenants (response with array).
@@ -314,7 +314,7 @@ func BenchmarkJSON_ListTenants(b *testing.B) {
 	})
 	defer env.cleanup()
 
-	url := env.baseURL + "/api/v1/tenants"
+	url := env.baseURL + "/v1/tenants"
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -324,7 +324,7 @@ func BenchmarkJSON_ListTenants(b *testing.B) {
 }
 
 // ---------------------------------------------------------------------------
-// Complex RPC benchmarks – POST /api/v1/sagas/validate  (ValidateSaga)
+// Complex RPC benchmarks – POST /v1/sagas/validate  (ValidateSaga)
 // ---------------------------------------------------------------------------
 
 // BenchmarkGRPC_ValidateSaga measures native gRPC latency for ValidateSaga (complex request + response).
@@ -358,7 +358,7 @@ func BenchmarkJSON_ValidateSaga(b *testing.B) {
 	})
 	defer env.cleanup()
 
-	url := env.baseURL + "/api/v1/sagas/validate"
+	url := env.baseURL + "/v1/sagas/validate"
 	body := `{"sagaName":"bench_saga","script":"result = payment.create_lien(amount=\"100.00\", direction=\"DEBIT\")","version":"1.0.0"}`
 
 	b.ReportAllocs()
@@ -401,7 +401,7 @@ func BenchmarkJSON_RetrieveParty_Parallel(b *testing.B) {
 	})
 	defer env.cleanup()
 
-	url := env.baseURL + "/api/v1/parties/bench-party"
+	url := env.baseURL + "/v1/parties/bench-party"
 
 	b.ReportAllocs()
 	b.ResetTimer()
