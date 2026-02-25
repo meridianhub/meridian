@@ -438,7 +438,7 @@ func (r *Repository) FindByPartyID(ctx context.Context, partyID string) ([]domai
 // This supports org-scoped account lookups where an individual (partyID) holds
 // an account within an organization (orgPartyID) for a specific instrument (e.g. GBP, kWh).
 // In multi-org mode, the context must contain the organization ID for schema routing.
-func (r *Repository) FindByScopedParty(ctx context.Context, partyID string, orgPartyID uuid.UUID, currency string) (domain.CurrentAccount, error) {
+func (r *Repository) FindByScopedParty(ctx context.Context, partyID string, orgPartyID uuid.UUID, instrumentCode string) (domain.CurrentAccount, error) {
 	var account domain.CurrentAccount
 	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		partyUUID, err := uuid.Parse(partyID)
@@ -448,7 +448,7 @@ func (r *Repository) FindByScopedParty(ctx context.Context, partyID string, orgP
 
 		var entity CurrentAccountEntity
 		result := tx.Where("party_id = ? AND org_party_id = ? AND instrument_code = ? AND deleted_at IS NULL",
-			partyUUID, orgPartyID, currency).First(&entity)
+			partyUUID, orgPartyID, instrumentCode).First(&entity)
 
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return ErrAccountNotFound
