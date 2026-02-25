@@ -78,7 +78,8 @@ func setupValuationEngineTestWithEngine(t *testing.T, engine ValuationEngine) (*
 		org_party_id UUID NULL,
 		balance BIGINT NOT NULL DEFAULT 0,
 		available_balance BIGINT NOT NULL DEFAULT 0,
-		currency VARCHAR(3) NOT NULL DEFAULT 'GBP',
+		instrument_code VARCHAR(32) NOT NULL DEFAULT 'GBP',
+		dimension VARCHAR(20) NOT NULL DEFAULT 'CURRENCY',
 		status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
 		overdraft_limit BIGINT NOT NULL DEFAULT 0,
 		overdraft_enabled BOOLEAN NOT NULL DEFAULT FALSE,
@@ -153,8 +154,8 @@ func createTestAccountForValuation(t *testing.T, _ context.Context, db *gorm.DB,
 	if len(ident) > 8 {
 		ident = ident[:8]
 	}
-	err := db.Exec(fmt.Sprintf(`INSERT INTO %q.account (id, account_id, account_identification, party_id, currency, status)
-		VALUES (?, ?, ?, ?, ?, 'ACTIVE')`, schemaName),
+	err := db.Exec(fmt.Sprintf(`INSERT INTO %q.account (id, account_id, account_identification, party_id, instrument_code, dimension, status)
+		VALUES (?, ?, ?, ?, ?, 'CURRENCY', 'ACTIVE')`, schemaName),
 		id, accountID, "GB29NWBK"+ident, partyID, currency).Error
 	require.NoError(t, err)
 	return id
