@@ -172,6 +172,21 @@ func TestAuthorizationHandler_WrongRedirectURI_ReturnsBadRequest(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+func TestAuthorizationHandler_NonGetMethod_ReturnsMethodNotAllowed(t *testing.T) {
+	store := newTestStore(t)
+	cfg := auth.OAuthConfig{
+		ClientID:    "meridian-mcp",
+		RedirectURI: "http://localhost:8090/oauth/callback",
+	}
+	handler := auth.NewAuthorizationHandler(cfg, store)
+
+	req := httptest.NewRequest(http.MethodPost, "/oauth/authorize", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+}
+
 // -----------------------------------------------------------------------
 // TokenHandler
 // -----------------------------------------------------------------------

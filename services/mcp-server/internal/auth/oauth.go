@@ -181,6 +181,12 @@ func NewAuthorizationHandler(cfg OAuthConfig, store *CodeStore) *AuthorizationHa
 
 // ServeHTTP implements http.Handler.
 func (h *AuthorizationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// OAuth 2.1 authorization endpoints must only respond to GET.
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
 	q := r.URL.Query()
 
 	clientID := q.Get("client_id")
