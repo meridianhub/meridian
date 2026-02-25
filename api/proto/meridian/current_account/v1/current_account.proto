@@ -128,7 +128,7 @@ message CurrentAccountFacility {
     not_in: [0] /* Prevent UNSPECIFIED in requests */
   }];
 
-  // instrument_code is the primary instrument for this account (e.g. "GBP", "kWh", "GPU_HOUR").
+  // instrument_code is the primary instrument for this account (e.g. "GBP", "KWH", "GPU_HOUR").
   string instrument_code = 4 [(buf.validate.field).string = {
     min_len: 1
     max_len: 32
@@ -347,7 +347,7 @@ message InitiateCurrentAccountRequest {
     max_len: 255
   }];
 
-  // instrument_code is the primary instrument for this account (e.g. "GBP", "kWh", "GPU_HOUR").
+  // instrument_code is the primary instrument for this account (e.g. "GBP", "KWH", "GPU_HOUR").
   string instrument_code = 3 [(buf.validate.field).string = {
     min_len: 1
     max_len: 32
