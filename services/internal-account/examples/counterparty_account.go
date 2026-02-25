@@ -93,8 +93,10 @@ func main() {
 	log.Printf("NOSTRO account created:")
 	log.Printf("  Account ID:       %s", nostroResp.AccountId)
 	log.Printf("  Account Code:     %s", nostroResp.Facility.AccountCode)
-	log.Printf("  Counterparty:     %s", nostroResp.Facility.CounterpartyDetails.CounterpartyName)
-	log.Printf("  External Ref:     %s", nostroResp.Facility.CounterpartyDetails.CounterpartyExternalRef)
+	if cd := nostroResp.Facility.GetCounterpartyDetails(); cd != nil {
+		log.Printf("  Counterparty:     %s", cd.CounterpartyName)
+		log.Printf("  External Ref:     %s", cd.CounterpartyExternalRef)
+	}
 
 	// =========================================================================
 	// Example 2: Create a VOSTRO account
@@ -139,8 +141,10 @@ func main() {
 	log.Printf("VOSTRO account created:")
 	log.Printf("  Account ID:       %s", vostroResp.AccountId)
 	log.Printf("  Account Code:     %s", vostroResp.Facility.AccountCode)
-	log.Printf("  Counterparty:     %s", vostroResp.Facility.CounterpartyDetails.CounterpartyName)
-	log.Printf("  Our Reference:    %s", vostroResp.Facility.CounterpartyDetails.CounterpartyExternalRef)
+	if cd := vostroResp.Facility.GetCounterpartyDetails(); cd != nil {
+		log.Printf("  Counterparty:     %s", cd.CounterpartyName)
+		log.Printf("  Our Reference:    %s", cd.CounterpartyExternalRef)
+	}
 
 	// =========================================================================
 	// Example 3: List all counterparty accounts
@@ -159,10 +163,12 @@ func main() {
 
 	log.Printf("Active NOSTRO accounts: %d", len(nostroList.Facilities))
 	for _, acc := range nostroList.Facilities {
-		log.Printf("  - %s: %s at %s",
-			acc.AccountCode,
-			acc.InstrumentCode,
-			acc.CounterpartyDetails.CounterpartyName)
+		cd := acc.GetCounterpartyDetails()
+		counterpartyName := ""
+		if cd != nil {
+			counterpartyName = cd.CounterpartyName
+		}
+		log.Printf("  - %s: %s at %s", acc.AccountCode, acc.InstrumentCode, counterpartyName)
 	}
 
 	// List VOSTRO accounts
@@ -176,10 +182,12 @@ func main() {
 
 	log.Printf("Active VOSTRO accounts: %d", len(vostroList.Facilities))
 	for _, acc := range vostroList.Facilities {
-		log.Printf("  - %s: %s for %s",
-			acc.AccountCode,
-			acc.InstrumentCode,
-			acc.CounterpartyDetails.CounterpartyName)
+		cd := acc.GetCounterpartyDetails()
+		counterpartyName := ""
+		if cd != nil {
+			counterpartyName = cd.CounterpartyName
+		}
+		log.Printf("  - %s: %s for %s", acc.AccountCode, acc.InstrumentCode, counterpartyName)
 	}
 
 	// =========================================================================
@@ -213,7 +221,9 @@ func main() {
 	}
 
 	log.Printf("Account updated:")
-	log.Printf("  New External Ref: %s", updateResp.Facility.CounterpartyDetails.CounterpartyExternalRef)
+	if cd := updateResp.Facility.GetCounterpartyDetails(); cd != nil {
+		log.Printf("  New External Ref: %s", cd.CounterpartyExternalRef)
+	}
 	log.Printf("  Version:          %d -> %d", nostroResp.Facility.Version, updateResp.Facility.Version)
 
 	log.Println("\nExample completed successfully!")
