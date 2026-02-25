@@ -98,7 +98,7 @@ export function PartiesPage() {
     },
   ]
 
-  const queryFn = async (params: ListPartiesParams): Promise<ListPartiesResult> => {
+  const queryFn = React.useCallback(async (params: ListPartiesParams): Promise<ListPartiesResult> => {
     const response = await clients.party.listParties({
       pageToken: params.pageToken,
       pageSize: params.pageSize,
@@ -120,7 +120,7 @@ export function PartiesPage() {
       items: parties,
       nextPageToken: response.nextPageToken,
     }
-  }
+  }, [clients.party])
 
   const handleRowClick = (party: Party) => {
     navigate(`/parties/${party.partyId}`)
