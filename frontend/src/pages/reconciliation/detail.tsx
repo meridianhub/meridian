@@ -12,6 +12,7 @@ import {
   type Variance,
 } from '@/components/reconciliation/variance-detail'
 import { cn } from '@/lib/utils'
+import { CreateDisputeDialog } from './create-dispute-dialog'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -119,6 +120,9 @@ function VariancesTab({ runId }: { runId: string }) {
     queryFn: () => fetchVariances(runId),
   })
 
+  const [disputeDialogOpen, setDisputeDialogOpen] = React.useState(false)
+  const [selectedVariance, setSelectedVariance] = React.useState<Variance | null>(null)
+
   if (isLoading) {
     return (
       <div className="space-y-3">
@@ -153,11 +157,41 @@ function VariancesTab({ runId }: { runId: string }) {
   }
 
   return (
-    <div className="space-y-3">
-      {variances.map((v) => (
-        <VarianceDetail key={v.varianceId} variance={v} />
-      ))}
-    </div>
+    <>
+      <div className="space-y-3">
+        {variances.map((v) => (
+          <div key={v.varianceId}>
+            <VarianceDetail variance={v} />
+            <div className="mt-2 flex justify-end">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setSelectedVariance(v)
+                  setDisputeDialogOpen(true)
+                }}
+              >
+                Raise Dispute
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {selectedVariance && (
+        <CreateDisputeDialog
+          open={disputeDialogOpen}
+          onOpenChange={setDisputeDialogOpen}
+          runId={runId}
+          lineItem={{
+            varianceId: selectedVariance.varianceId,
+            amount: selectedVariance.varianceAmount,
+            expectedAmount: selectedVariance.expectedAmount,
+            timestamp: selectedVariance.createdAt,
+          }}
+        />
+      )}
+    </>
   )
 }
 
