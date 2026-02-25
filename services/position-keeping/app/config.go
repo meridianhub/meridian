@@ -245,11 +245,12 @@ func loadCompactionConfig() CompactionConfig {
 // loadAccountValidationConfig loads account validation configuration from environment variables
 func loadAccountValidationConfig() AccountValidationConfig {
 	return AccountValidationConfig{
-		Enabled:                   env.GetEnvAsBool("ACCOUNT_VALIDATION_ENABLED", true),
-		CurrentAccountServiceURL:  env.GetEnvOrDefault("CURRENT_ACCOUNT_SERVICE_URL", ""),
-		InternalAccountServiceURL: env.GetEnvOrDefault("INTERNAL_ACCOUNT_SERVICE_URL", ""),
-		CacheTTL:                  env.GetEnvAsDuration("ACCOUNT_VALIDATION_CACHE_TTL", 1*time.Minute),
-		ConnectionTimeout:         env.GetEnvAsDuration("ACCOUNT_VALIDATION_CONNECTION_TIMEOUT", 5*time.Second),
+		Enabled:                  env.GetEnvAsBool("ACCOUNT_VALIDATION_ENABLED", true),
+		CurrentAccountServiceURL: env.GetEnvOrDefault("CURRENT_ACCOUNT_SERVICE_URL", ""),
+		InternalAccountServiceURL: env.GetEnvOrDefault("INTERNAL_ACCOUNT_SERVICE_URL",
+			env.GetEnvOrDefault("INTERNAL_BANK_ACCOUNT_SERVICE_URL", "")),
+		CacheTTL:          env.GetEnvAsDuration("ACCOUNT_VALIDATION_CACHE_TTL", 1*time.Minute),
+		ConnectionTimeout: env.GetEnvAsDuration("ACCOUNT_VALIDATION_CONNECTION_TIMEOUT", 5*time.Second),
 	}
 }
 

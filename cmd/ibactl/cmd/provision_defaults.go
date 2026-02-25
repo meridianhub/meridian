@@ -124,7 +124,7 @@ func runProvisionDefaults(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("%w: %s (use --list-templates to see available sets)", ErrUnknownTemplateSet, templateSet)
 	}
 
-	// Create IBA client
+	// Create internal account client
 	ibaClient, cleanup, err := newClient()
 	if err != nil {
 		return fmt.Errorf("failed to create internal account client: %w", err)
