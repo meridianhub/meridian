@@ -10,6 +10,7 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	reconciliationv1 "github.com/meridianhub/meridian/api/proto/meridian/reconciliation/v1"
@@ -54,15 +55,25 @@ type AuditClients struct {
 
 // RegisterAuditTools registers all read-only audit tools into the registry.
 // It does not modify registry.go or cmd/main.go.
+// Tools whose required client is nil are silently skipped.
 func RegisterAuditTools(r *Registry, clients AuditClients) {
-	tools := []Tool{
-		buildCausationTreeTool(clients.SagaAdmin),
-		buildPositionsQueryTool(clients.PositionKeeping),
-		buildPostingsQueryTool(clients.FinancialAccounting),
-		buildSagaExecutionsTool(clients.SagaRegistry),
-		buildReconciliationStatusTool(clients.Reconciliation),
+	candidates := []Tool{}
+	if clients.SagaAdmin != nil {
+		candidates = append(candidates, buildCausationTreeTool(clients.SagaAdmin))
 	}
-	for _, t := range tools {
+	if clients.PositionKeeping != nil {
+		candidates = append(candidates, buildPositionsQueryTool(clients.PositionKeeping))
+	}
+	if clients.FinancialAccounting != nil {
+		candidates = append(candidates, buildPostingsQueryTool(clients.FinancialAccounting))
+	}
+	if clients.SagaRegistry != nil {
+		candidates = append(candidates, buildSagaExecutionsTool(clients.SagaRegistry))
+	}
+	if clients.Reconciliation != nil {
+		candidates = append(candidates, buildReconciliationStatusTool(clients.Reconciliation))
+	}
+	for _, t := range candidates {
 		if err := r.Register(t); err != nil {
 			panic(fmt.Sprintf("failed to register audit tool %q: %v", t.Name, err))
 		}
@@ -196,57 +207,65 @@ func buildPositionsQueryTool(client PositionQuerier) Tool {
 			},
 		},
 		Handler: func(ctx context.Context, params json.RawMessage) (interface{}, error) {
-			var p struct {
-				AccountID string `json:"account_id"`
-				PageSize  int32  `json:"page_size"`
-			}
-			if err := json.Unmarshal(params, &p); err != nil {
-				return mcperrors.FormatGRPCError(err), nil
-			}
-
-			req := &positionkeepingv1.ListFinancialPositionLogsRequest{}
-			if p.AccountID != "" {
-				req.AccountId = p.AccountID
-			}
-
-			resp, err := client.ListFinancialPositionLogs(ctx, req)
-			if err != nil {
-				return mcperrors.FormatGRPCError(err), nil
-			}
-
-			if len(resp.Logs) == 0 {
-				return map[string]interface{}{
-					"message": "no position logs found matching the query",
-					"logs":    []interface{}{},
-				}, nil
-			}
-
-			logs := make([]map[string]interface{}, 0, len(resp.Logs))
-			for _, log := range resp.Logs {
-				entry := map[string]interface{}{
-					"log_id":     log.LogId,
-					"account_id": log.AccountId,
-					"version":    log.Version,
-				}
-				if log.StatusTracking != nil {
-					entry["status"] = log.StatusTracking.CurrentStatus.String()
-				}
-				if log.CreatedAt != nil {
-					entry["created_at"] = log.CreatedAt.AsTime().Format(time.RFC3339)
-				}
-				if log.UpdatedAt != nil {
-					entry["updated_at"] = log.UpdatedAt.AsTime().Format(time.RFC3339)
-				}
-				entry["transaction_count"] = len(log.TransactionLogEntries)
-				logs = append(logs, entry)
-			}
-
-			return map[string]interface{}{
-				"count": len(logs),
-				"logs":  logs,
-			}, nil
+			return handlePositionsQuery(ctx, client, params)
 		},
 	}
+}
+
+// handlePositionsQuery implements the meridian_positions_query handler logic.
+func handlePositionsQuery(ctx context.Context, client PositionQuerier, params json.RawMessage) (interface{}, error) {
+	var p struct {
+		AccountID string `json:"account_id"`
+		PageSize  int32  `json:"page_size"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return mcperrors.FormatGRPCError(err), nil
+	}
+
+	req := &positionkeepingv1.ListFinancialPositionLogsRequest{}
+	if p.AccountID != "" {
+		req.AccountId = p.AccountID
+	}
+	if p.PageSize > 0 {
+		req.Pagination = &commonv1.Pagination{PageSize: p.PageSize}
+	}
+
+	resp, err := client.ListFinancialPositionLogs(ctx, req)
+	if err != nil {
+		return mcperrors.FormatGRPCError(err), nil
+	}
+
+	if len(resp.Logs) == 0 {
+		return map[string]interface{}{
+			"message": "no position logs found matching the query",
+			"logs":    []interface{}{},
+		}, nil
+	}
+
+	logs := make([]map[string]interface{}, 0, len(resp.Logs))
+	for _, log := range resp.Logs {
+		entry := map[string]interface{}{
+			"log_id":     log.LogId,
+			"account_id": log.AccountId,
+			"version":    log.Version,
+		}
+		if log.StatusTracking != nil {
+			entry["status"] = log.StatusTracking.CurrentStatus.String()
+		}
+		if log.CreatedAt != nil {
+			entry["created_at"] = log.CreatedAt.AsTime().Format(time.RFC3339)
+		}
+		if log.UpdatedAt != nil {
+			entry["updated_at"] = log.UpdatedAt.AsTime().Format(time.RFC3339)
+		}
+		entry["transaction_count"] = len(log.TransactionLogEntries)
+		logs = append(logs, entry)
+	}
+
+	return map[string]interface{}{
+		"count": len(logs),
+		"logs":  logs,
+	}, nil
 }
 
 // buildPostingsQueryTool returns the meridian_postings_query tool.
@@ -345,11 +364,16 @@ func buildPostingsRequest(p postingsQueryParams) (*financialaccountingv1.ListLed
 	if p.BookingLogID != "" {
 		req.FinancialBookingLogId = p.BookingLogID
 	}
+	if p.PageSize > 0 {
+		req.Pagination = &commonv1.Pagination{PageSize: p.PageSize}
+	}
+	var dateFrom, dateTo time.Time
 	if p.DateFrom != "" {
 		t, err := time.Parse(time.RFC3339, p.DateFrom)
 		if err != nil {
 			return nil, fmt.Sprintf("invalid date_from format (expected RFC3339): %v", err)
 		}
+		dateFrom = t
 		req.ValueDateFrom = timestamppb.New(t)
 	}
 	if p.DateTo != "" {
@@ -357,7 +381,11 @@ func buildPostingsRequest(p postingsQueryParams) (*financialaccountingv1.ListLed
 		if err != nil {
 			return nil, fmt.Sprintf("invalid date_to format (expected RFC3339): %v", err)
 		}
+		dateTo = t
 		req.ValueDateTo = timestamppb.New(t)
+	}
+	if !dateFrom.IsZero() && !dateTo.IsZero() && dateFrom.After(dateTo) {
+		return nil, "date_from must be before or equal to date_to"
 	}
 	return req, ""
 }
@@ -444,6 +472,9 @@ func handleSagaExecutions(ctx context.Context, client SagaExecutionQuerier, para
 			}, nil
 		}
 		req.StatusFilter = statusVal
+	}
+	if p.PageSize > 0 {
+		req.PageSize = p.PageSize
 	}
 
 	resp, err := client.ListSagas(ctx, req)

@@ -330,7 +330,7 @@ func TestPostingsQuery_DateRangeFilter_PassedToClient(t *testing.T) {
 	r := tools.NewRegistry()
 	tools.RegisterAuditTools(r, clients)
 
-	params := json.RawMessage(`{"date_from": "2024-01-01T00:00:00Z", "date_to": "2024-01-31T23:59:59Z"}`)
+	params := json.RawMessage(`{"date_from": "2024-01-01T00:00:00Z", "date_to": "2024-01-31T23:59:59Z", "page_size": 50}`)
 	_, err := r.Call(context.Background(), "meridian_postings_query", params)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -343,6 +343,9 @@ func TestPostingsQuery_DateRangeFilter_PassedToClient(t *testing.T) {
 	}
 	if capturedReq.ValueDateTo == nil {
 		t.Error("expected value_date_to to be set")
+	}
+	if capturedReq.Pagination == nil || capturedReq.Pagination.PageSize != 50 {
+		t.Errorf("expected page_size=50 to be propagated, got pagination=%v", capturedReq.Pagination)
 	}
 }
 
@@ -363,6 +366,33 @@ func TestPostingsQuery_GRPCError_FormattedResponse(t *testing.T) {
 	}
 	if result == nil {
 		t.Fatal("expected non-nil result")
+	}
+}
+
+func TestPostingsQuery_DateFromAfterDateTo_ReturnsError(t *testing.T) {
+	mock := &mockFinancialAccountingClient{
+		listPostingsFn: func(_ context.Context, _ *financialaccountingv1.ListLedgerPostingsRequest) (*financialaccountingv1.ListLedgerPostingsResponse, error) {
+			t.Fatal("handler should not be called for invalid date range")
+			return nil, nil
+		},
+	}
+
+	clients := newAuditClients(nil, nil, mock, nil, nil)
+	r := tools.NewRegistry()
+	tools.RegisterAuditTools(r, clients)
+
+	// date_from is after date_to — should return an error map, not call the backend.
+	params := json.RawMessage(`{"date_from": "2024-02-01T00:00:00Z", "date_to": "2024-01-01T00:00:00Z"}`)
+	result, err := r.Call(context.Background(), "meridian_postings_query", params)
+	if err != nil {
+		t.Fatalf("unexpected error return: %v", err)
+	}
+	m, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map result, got %T", result)
+	}
+	if _, hasErr := m["error"]; !hasErr {
+		t.Errorf("expected 'error' key in result, got keys: %v", m)
 	}
 }
 
@@ -624,10 +654,43 @@ func TestReconciliationStatus_EmptyResults_MeaningfulResponse(t *testing.T) {
 	}
 }
 
+// noopMocks returns a full set of non-nil mock clients that return empty responses.
+func noopMocks() (tools.SagaAdminQuerier, tools.PositionQuerier, tools.PostingQuerier, tools.SagaExecutionQuerier, tools.ReconciliationQuerier) {
+	sagaAdmin := &mockSagaAdminClient{
+		getCausationTreeFn: func(_ context.Context, _ *sagav1.GetCausationTreeRequest) (*sagav1.GetCausationTreeResponse, error) {
+			return &sagav1.GetCausationTreeResponse{}, nil
+		},
+	}
+	positionKeeping := &mockPositionKeepingClient{
+		listLogsFn: func(_ context.Context, _ *positionkeepingv1.ListFinancialPositionLogsRequest) (*positionkeepingv1.ListFinancialPositionLogsResponse, error) {
+			return &positionkeepingv1.ListFinancialPositionLogsResponse{}, nil
+		},
+	}
+	financialAccounting := &mockFinancialAccountingClient{
+		listPostingsFn: func(_ context.Context, _ *financialaccountingv1.ListLedgerPostingsRequest) (*financialaccountingv1.ListLedgerPostingsResponse, error) {
+			return &financialaccountingv1.ListLedgerPostingsResponse{}, nil
+		},
+	}
+	sagaRegistry := &mockSagaRegistryClient{
+		listSagasFn: func(_ context.Context, _ *sagav1.ListSagasRequest) (*sagav1.ListSagasResponse, error) {
+			return &sagav1.ListSagasResponse{}, nil
+		},
+	}
+	reconciliation := &mockReconciliationClient{
+		listRunsFn: func(_ context.Context, _ *reconciliationv1.ListAccountReconciliationsRequest) (*reconciliationv1.ListAccountReconciliationsResponse, error) {
+			return &reconciliationv1.ListAccountReconciliationsResponse{}, nil
+		},
+		listResultsFn: func(_ context.Context, _ *reconciliationv1.ListReconciliationResultsRequest) (*reconciliationv1.ListReconciliationResultsResponse, error) {
+			return &reconciliationv1.ListReconciliationResultsResponse{}, nil
+		},
+	}
+	return sagaAdmin, positionKeeping, financialAccounting, sagaRegistry, reconciliation
+}
+
 // --- Audit log entries tests (via AuditService) ---
 
 func TestAuditLogEntries_ToolRegistered(t *testing.T) {
-	clients := newAuditClients(nil, nil, nil, nil, nil)
+	clients := newAuditClients(noopMocks())
 	r := tools.NewRegistry()
 	tools.RegisterAuditTools(r, clients)
 
@@ -652,7 +715,7 @@ func TestAuditLogEntries_ToolRegistered(t *testing.T) {
 }
 
 func TestAuditTools_AllCategoryRead(t *testing.T) {
-	clients := newAuditClients(nil, nil, nil, nil, nil)
+	clients := newAuditClients(noopMocks())
 	r := tools.NewRegistry()
 	tools.RegisterAuditTools(r, clients)
 
@@ -660,5 +723,27 @@ func TestAuditTools_AllCategoryRead(t *testing.T) {
 		if tool.Category != tools.CategoryRead {
 			t.Errorf("expected tool %q to be CategoryRead, got %v", tool.Name, tool.Category)
 		}
+	}
+}
+
+func TestAuditTools_NilClient_SkipsRegistration(t *testing.T) {
+	// Only SagaAdmin is configured; the other 4 tools must not be registered.
+	clients := newAuditClients(
+		&mockSagaAdminClient{
+			getCausationTreeFn: func(_ context.Context, _ *sagav1.GetCausationTreeRequest) (*sagav1.GetCausationTreeResponse, error) {
+				return &sagav1.GetCausationTreeResponse{}, nil
+			},
+		},
+		nil, nil, nil, nil,
+	)
+	r := tools.NewRegistry()
+	tools.RegisterAuditTools(r, clients)
+
+	listed := r.List()
+	if len(listed) != 1 {
+		t.Fatalf("expected 1 registered tool, got %d", len(listed))
+	}
+	if listed[0].Name != "meridian_causation_tree" {
+		t.Errorf("expected meridian_causation_tree, got %q", listed[0].Name)
 	}
 }
