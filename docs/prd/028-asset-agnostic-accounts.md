@@ -8,7 +8,7 @@ description: >-
 triggers:
   - Working on current account or internal account field generalization
   - Replacing currency fields with instrument_code and dimension
-  - Renaming internal account to internal account
+  - Renaming internal bank account to internal account
   - Making account services support non-fiat asset classes
   - Generalizing IBAN to external_identifier
 instructions: |
@@ -201,12 +201,12 @@ asset-agnostic; the naming just hasn't caught up.
 
 | Current | Proposed |
 |---------|----------|
-| `services/internal-account/` | `services/internal-account/` |
-| `meridian.internal_account.v1` | `meridian.internal_account.v1` |
-| `InternalAccountFacility` | `InternalAccountFacility` |
-| `InternalAccount` (Go struct) | `InternalAccount` (Go struct) |
-| `internal_account` (DB table) | `internal_account` |
-| `internal_account.*` (Starlark) | `internal_account.*` |
+| `services/internal-bank-account/` | `services/internal-account/` |
+| `meridian.internal_bank_account.v1` | `meridian.internal_account.v1` |
+| `InternalBankAccountFacility` | `InternalAccountFacility` |
+| `InternalBankAccount` (Go struct) | `InternalAccount` (Go struct) |
+| `internal_bank_account` (DB table) | `internal_account` |
+| `internal_bank_account.*` (Starlark) | `internal_account.*` |
 
 #### 2.2 Generalize Correspondent Terminology
 
@@ -242,7 +242,7 @@ keeping.
 
 ### Starlark Handler Migration
 
-Handler prefix `internal_account.*` -> `internal_account.*`:
+Handler prefix `internal_bank_account.*` -> `internal_account.*`:
 update all registered handlers and all existing saga scripts that
 reference the old prefix. Since the system is pre-production, update
 all references in a single pass.
