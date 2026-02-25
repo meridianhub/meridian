@@ -16,26 +16,21 @@ import { handleConnectError } from '@/lib/error-handling'
 import { tenantKeys } from '@/lib/query-keys'
 import { useTenantSlug } from '@/hooks/use-tenant-context'
 
-// RelationshipType enum values (from proto meridian.party.v1)
-const RELATIONSHIP_TYPE_ENUM: Record<string, number> = {
-  RELATIONSHIP_TYPE_SPOUSE: 1,
-  RELATIONSHIP_TYPE_DEPENDENT: 2,
-  RELATIONSHIP_TYPE_BUSINESS_PARTNER: 3,
-  RELATIONSHIP_TYPE_GUARANTOR: 4,
-  RELATIONSHIP_TYPE_BENEFICIAL_OWNER: 5,
-  RELATIONSHIP_TYPE_SYNDICATE_PARTICIPANT: 6,
-  RELATIONSHIP_TYPE_SYNDICATE_HOST: 7,
-}
+// RelationshipType enum values mirrored from proto meridian.party.v1.RelationshipType.
+// Keep in sync with the proto definition; order matches numeric values 1–7.
+const RELATIONSHIP_TYPES = [
+  { value: 'RELATIONSHIP_TYPE_SPOUSE', numericValue: 1, label: 'Spouse' },
+  { value: 'RELATIONSHIP_TYPE_DEPENDENT', numericValue: 2, label: 'Dependent' },
+  { value: 'RELATIONSHIP_TYPE_BUSINESS_PARTNER', numericValue: 3, label: 'Business Partner' },
+  { value: 'RELATIONSHIP_TYPE_GUARANTOR', numericValue: 4, label: 'Guarantor' },
+  { value: 'RELATIONSHIP_TYPE_BENEFICIAL_OWNER', numericValue: 5, label: 'Beneficial Owner' },
+  { value: 'RELATIONSHIP_TYPE_SYNDICATE_PARTICIPANT', numericValue: 6, label: 'Syndicate Participant' },
+  { value: 'RELATIONSHIP_TYPE_SYNDICATE_HOST', numericValue: 7, label: 'Syndicate Host' },
+] as const
 
-const RELATIONSHIP_TYPE_LABELS: Record<string, string> = {
-  RELATIONSHIP_TYPE_SPOUSE: 'Spouse',
-  RELATIONSHIP_TYPE_DEPENDENT: 'Dependent',
-  RELATIONSHIP_TYPE_BUSINESS_PARTNER: 'Business Partner',
-  RELATIONSHIP_TYPE_GUARANTOR: 'Guarantor',
-  RELATIONSHIP_TYPE_BENEFICIAL_OWNER: 'Beneficial Owner',
-  RELATIONSHIP_TYPE_SYNDICATE_PARTICIPANT: 'Syndicate Participant',
-  RELATIONSHIP_TYPE_SYNDICATE_HOST: 'Syndicate Host',
-}
+const RELATIONSHIP_TYPE_ENUM: Record<string, number> = Object.fromEntries(
+  RELATIONSHIP_TYPES.map(({ value, numericValue }) => [value, numericValue]),
+)
 
 interface Party {
   partyId: string
@@ -81,6 +76,9 @@ function useDebounce<T>(value: T, delay: number): T {
   return debounced
 }
 
+// Converts a YYYY-MM-DD string to a proto Timestamp.
+// The date is interpreted as UTC midnight so the stored timestamp is
+// timezone-neutral and consistent regardless of the browser's locale.
 function parseLocalDateToTimestamp(dateStr: string): { seconds: bigint; nanos: number } | undefined {
   if (!dateStr) return undefined
   const date = new Date(`${dateStr}T00:00:00Z`)
@@ -114,7 +112,8 @@ export function RegisterAssociationsDialog({
   }, [open])
 
   const { data: partySearchData } = useQuery({
-    queryKey: ['party-search', debouncedSearch],
+    // Include tenantSlug in the key to prevent cross-tenant cache contamination.
+    queryKey: ['party-search', tenantSlug ?? '', debouncedSearch],
     queryFn: () => clients.party.listParties({ searchQuery: debouncedSearch, pageSize: 20 }),
     enabled: debouncedSearch.length >= 2,
   })
@@ -133,9 +132,12 @@ export function RegisterAssociationsDialog({
       })
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: tenantKeys.partyAssociations(tenantSlug ?? '', partyId),
-      })
+      // Only invalidate if we have a valid tenant slug.
+      if (tenantSlug) {
+        queryClient.invalidateQueries({
+          queryKey: tenantKeys.partyAssociations(tenantSlug, partyId),
+        })
+      }
       onOpenChange(false)
     },
     onError: (err) => {
@@ -185,7 +187,7 @@ export function RegisterAssociationsDialog({
     const value = e.target.value
     setSearchInput(value)
     setShowDropdown(true)
-    // Clear selected party if user edits the input
+    // Clear selected party if user edits the input after making a selection.
     if (formData.relatedPartyId) {
       setFormData((prev) => ({ ...prev, relatedPartyId: '', relatedPartyName: '' }))
     }
@@ -250,6 +252,9 @@ export function RegisterAssociationsDialog({
                 aria-describedby={errors.relatedPartyId ? 'relatedParty-error' : undefined}
                 aria-required="true"
                 aria-label="Related Party"
+                aria-autocomplete="list"
+                aria-controls={showResults && searchResults.length > 0 ? 'party-search-listbox' : undefined}
+                aria-expanded={showResults && searchResults.length > 0}
               />
               {errors.relatedPartyId && (
                 <p id="relatedParty-error" className="text-sm text-destructive">
@@ -258,6 +263,7 @@ export function RegisterAssociationsDialog({
               )}
               {showResults && searchResults.length > 0 && (
                 <ul
+                  id="party-search-listbox"
                   role="listbox"
                   aria-label="Party search results"
                   className="absolute z-50 mt-1 max-h-48 w-full overflow-auto rounded-md border border-input bg-popover shadow-md"
@@ -266,7 +272,7 @@ export function RegisterAssociationsDialog({
                     <li
                       key={party.partyId}
                       role="option"
-                      aria-selected={false}
+                      aria-selected={party.partyId === formData.relatedPartyId}
                       className="cursor-pointer px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground"
                       onMouseDown={(e) => {
                         e.preventDefault()
@@ -294,7 +300,7 @@ export function RegisterAssociationsDialog({
                 aria-required="true"
               >
                 <option value="">Select relationship type</option>
-                {Object.entries(RELATIONSHIP_TYPE_LABELS).map(([value, label]) => (
+                {RELATIONSHIP_TYPES.map(({ value, label }) => (
                   <option key={value} value={value}>
                     {label}
                   </option>
@@ -317,7 +323,6 @@ export function RegisterAssociationsDialog({
                   type="date"
                   value={formData.effectiveFrom}
                   onChange={handleFieldChange('effectiveFrom')}
-                  aria-describedby={undefined}
                 />
               </div>
 
