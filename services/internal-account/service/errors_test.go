@@ -81,20 +81,20 @@ func TestErrorMapping_InvalidAccountType_MapsToInvalidArgument(t *testing.T) {
 	assert.Contains(t, st.Message(), domain.ErrInvalidAccountType.Error())
 }
 
-func TestErrorMapping_CorrespondentRequired_MapsToInvalidArgument(t *testing.T) {
-	err := mapDomainErrorToGRPC(domain.ErrCorrespondentRequired)
+func TestErrorMapping_CounterpartyRequired_MapsToInvalidArgument(t *testing.T) {
+	err := mapDomainErrorToGRPC(domain.ErrCounterpartyRequired)
 	st, ok := status.FromError(err)
 	require.True(t, ok, "expected gRPC status error")
 	assert.Equal(t, codes.InvalidArgument, st.Code())
-	assert.Contains(t, st.Message(), domain.ErrCorrespondentRequired.Error())
+	assert.Contains(t, st.Message(), domain.ErrCounterpartyRequired.Error())
 }
 
-func TestErrorMapping_CorrespondentNotAllowed_MapsToInvalidArgument(t *testing.T) {
-	err := mapDomainErrorToGRPC(domain.ErrCorrespondentNotAllowed)
+func TestErrorMapping_CounterpartyNotAllowed_MapsToInvalidArgument(t *testing.T) {
+	err := mapDomainErrorToGRPC(domain.ErrCounterpartyNotAllowed)
 	st, ok := status.FromError(err)
 	require.True(t, ok, "expected gRPC status error")
 	assert.Equal(t, codes.InvalidArgument, st.Code())
-	assert.Contains(t, st.Message(), domain.ErrCorrespondentNotAllowed.Error())
+	assert.Contains(t, st.Message(), domain.ErrCounterpartyNotAllowed.Error())
 }
 
 func TestErrorMapping_AccountIDRequired_MapsToInvalidArgument(t *testing.T) {

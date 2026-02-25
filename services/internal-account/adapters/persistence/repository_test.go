@@ -50,9 +50,9 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 		instrument_code VARCHAR(32) NOT NULL,
 		dimension VARCHAR(20) NOT NULL,
 		status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
-		correspondent_bank_id VARCHAR(50),
-		correspondent_bank_name VARCHAR(255),
-		correspondent_external_ref VARCHAR(100),
+		counterparty_id VARCHAR(50),
+		counterparty_name VARCHAR(255),
+		counterparty_external_ref VARCHAR(100),
 		attributes JSONB NOT NULL DEFAULT '{}',
 		version BIGINT NOT NULL DEFAULT 1
 	)`, pq.QuoteIdentifier(schemaName))).Error
@@ -357,9 +357,9 @@ func TestTenantIsolation(t *testing.T) {
 			instrument_code VARCHAR(32) NOT NULL,
 			dimension VARCHAR(20) NOT NULL,
 			status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
-			correspondent_bank_id VARCHAR(50),
-			correspondent_bank_name VARCHAR(255),
-			correspondent_external_ref VARCHAR(100),
+			counterparty_id VARCHAR(50),
+			counterparty_name VARCHAR(255),
+			counterparty_external_ref VARCHAR(100),
 			attributes JSONB NOT NULL DEFAULT '{}',
 			version BIGINT NOT NULL DEFAULT 1
 		)`, pq.QuoteIdentifier(schemaName))).Error
@@ -408,7 +408,7 @@ func TestStatusHistoryRecording(t *testing.T) {
 	assert.Equal(t, int64(1), count)
 }
 
-func TestCorrespondentDetails(t *testing.T) {
+func TestCounterpartyDetails(t *testing.T) {
 	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
@@ -426,24 +426,24 @@ func TestCorrespondentDetails(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// Add correspondent details
-	correspondent, err := domain.NewCorrespondentDetails("CITI001", "Citibank NA", "12345678")
+	// Add counterparty details
+	counterparty, err := domain.NewCounterpartyDetails("CITI001", "Citibank NA", "12345678")
 	require.NoError(t, err)
-	nostro, err = nostro.UpdateCorrespondent(correspondent)
+	nostro, err = nostro.UpdateCounterparty(counterparty)
 	require.NoError(t, err)
 
 	// Save
 	err = repo.Save(ctx, nostro)
 	require.NoError(t, err)
 
-	// Retrieve and verify correspondent details
+	// Retrieve and verify counterparty details
 	retrieved, err := repo.FindByID(ctx, nostro.ID())
 	require.NoError(t, err)
 
-	require.NotNil(t, retrieved.Correspondent())
-	assert.Equal(t, "CITI001", retrieved.Correspondent().BankID())
-	assert.Equal(t, "Citibank NA", retrieved.Correspondent().BankName())
-	assert.Equal(t, "12345678", retrieved.Correspondent().ExternalAccountRef())
+	require.NotNil(t, retrieved.Counterparty())
+	assert.Equal(t, "CITI001", retrieved.Counterparty().CounterpartyID())
+	assert.Equal(t, "Citibank NA", retrieved.Counterparty().CounterpartyName())
+	assert.Equal(t, "12345678", retrieved.Counterparty().ExternalRef())
 }
 
 func TestJSONBAttributes(t *testing.T) {
@@ -502,9 +502,9 @@ func TestRoundTripMapping(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	correspondent, err := domain.NewCorrespondentDetails("DB001", "Deutsche Bank AG", "DE89370400440532013000")
+	counterparty, err := domain.NewCounterpartyDetails("DB001", "Deutsche Bank AG", "DE89370400440532013000")
 	require.NoError(t, err)
-	original, err = original.UpdateCorrespondent(correspondent)
+	original, err = original.UpdateCounterparty(counterparty)
 	require.NoError(t, err)
 
 	// Save
@@ -526,11 +526,11 @@ func TestRoundTripMapping(t *testing.T) {
 	assert.Equal(t, original.Status(), retrieved.Status())
 	assert.Equal(t, original.Version(), retrieved.Version())
 
-	// Verify correspondent details
-	require.NotNil(t, retrieved.Correspondent())
-	assert.Equal(t, original.Correspondent().BankID(), retrieved.Correspondent().BankID())
-	assert.Equal(t, original.Correspondent().BankName(), retrieved.Correspondent().BankName())
-	assert.Equal(t, original.Correspondent().ExternalAccountRef(), retrieved.Correspondent().ExternalAccountRef())
+	// Verify counterparty details
+	require.NotNil(t, retrieved.Counterparty())
+	assert.Equal(t, original.Counterparty().CounterpartyID(), retrieved.Counterparty().CounterpartyID())
+	assert.Equal(t, original.Counterparty().CounterpartyName(), retrieved.Counterparty().CounterpartyName())
+	assert.Equal(t, original.Counterparty().ExternalRef(), retrieved.Counterparty().ExternalRef())
 }
 
 func TestExistsByCode(t *testing.T) {

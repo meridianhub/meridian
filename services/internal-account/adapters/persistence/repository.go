@@ -110,7 +110,7 @@ func (r *Repository) Save(ctx context.Context, account domain.InternalAccount) e
 			}
 
 			// Optimistic locking contract: The domain model increments version on all
-			// mutations (Suspend, Activate, Close, UpdateCorrespondent) before passing
+			// mutations (Suspend, Activate, Close, UpdateCounterparty) before passing
 			// to Save. We check the original version (current - 1) to detect concurrent
 			// modifications. If another transaction has modified the record, the version
 			// won't match and we return ErrVersionConflict.
@@ -118,19 +118,19 @@ func (r *Repository) Save(ctx context.Context, account domain.InternalAccount) e
 			updateResult := tx.Model(&InternalAccountEntity{}).
 				Where("account_id = ? AND version = ? AND deleted_at IS NULL", entity.AccountID, originalVersion).
 				Updates(map[string]interface{}{
-					"account_code":               entity.AccountCode,
-					"name":                       entity.Name,
-					"status":                     entity.Status,
-					"clearing_purpose":           entity.ClearingPurpose,
-					"product_type_code":          entity.ProductTypeCode,
-					"product_type_version":       entity.ProductTypeVersion,
-					"correspondent_bank_id":      entity.CorrespondentBankID,
-					"correspondent_bank_name":    entity.CorrespondentBankName,
-					"correspondent_external_ref": entity.CorrespondentExternalRef,
-					"attributes":                 entity.Attributes,
-					"version":                    entity.Version,
-					"updated_at":                 entity.UpdatedAt,
-					"updated_by":                 entity.UpdatedBy,
+					"account_code":              entity.AccountCode,
+					"name":                      entity.Name,
+					"status":                    entity.Status,
+					"clearing_purpose":          entity.ClearingPurpose,
+					"product_type_code":         entity.ProductTypeCode,
+					"product_type_version":      entity.ProductTypeVersion,
+					"counterparty_id":           entity.CounterpartyID,
+					"counterparty_name":         entity.CounterpartyName,
+					"counterparty_external_ref": entity.CounterpartyExternalRef,
+					"attributes":                entity.Attributes,
+					"version":                   entity.Version,
+					"updated_at":                entity.UpdatedAt,
+					"updated_by":                entity.UpdatedBy,
 				})
 
 			if updateResult.Error != nil {

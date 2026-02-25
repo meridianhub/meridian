@@ -10,7 +10,7 @@
 // The service implements standard BIAN Control Record operations:
 //
 //   - Initiate (InCR): Create new internal accounts
-//   - Update (UpCR): Modify account settings (name, description, correspondent)
+//   - Update (UpCR): Modify account settings (name, description, counterparty)
 //   - Control (CoCR): Lifecycle transitions (suspend, activate, close)
 //   - Retrieve (ReCR): Fetch individual accounts by ID
 //   - List: Query accounts with filtering and pagination

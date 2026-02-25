@@ -55,11 +55,11 @@ func main() {
 	log.Println("Creating a new holding account...")
 
 	createResp, err := client.InitiateInternalAccount(ctx, &ibav1.InitiateInternalAccountRequest{
-		AccountCode:    "HOLD-LIFECYCLE-DEMO",
-		Name:           "Lifecycle Demo Holding Account",
+		AccountCode:     "HOLD-LIFECYCLE-DEMO",
+		Name:            "Lifecycle Demo Holding Account",
 		ProductTypeCode: "HOLDING_GBP",
-		InstrumentCode: "USD",
-		Description:    "Demonstration account for lifecycle transitions",
+		InstrumentCode:  "USD",
+		Description:     "Demonstration account for lifecycle transitions",
 		IdempotencyKey: &commonv1.IdempotencyKey{
 			Key: "lifecycle-demo-" + time.Now().Format("20060102150405"),
 		},

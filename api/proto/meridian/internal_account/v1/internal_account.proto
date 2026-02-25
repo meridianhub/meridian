@@ -130,49 +130,44 @@ enum ControlAction {
   CONTROL_ACTION_CLOSE = 3;
 }
 
-// CorrespondentType distinguishes between nostro and vostro relationships.
-enum CorrespondentType {
-  // CORRESPONDENT_TYPE_UNSPECIFIED is the default value and should not be used.
-  CORRESPONDENT_TYPE_UNSPECIFIED = 0;
-  // CORRESPONDENT_TYPE_NOSTRO means our account at the correspondent bank.
-  CORRESPONDENT_TYPE_NOSTRO = 1;
-  // CORRESPONDENT_TYPE_VOSTRO means their account at our bank.
-  CORRESPONDENT_TYPE_VOSTRO = 2;
+// CounterpartyType distinguishes between nostro and vostro relationships.
+enum CounterpartyType {
+  // COUNTERPARTY_TYPE_UNSPECIFIED is the default value and should not be used.
+  COUNTERPARTY_TYPE_UNSPECIFIED = 0;
+  // COUNTERPARTY_TYPE_NOSTRO means our account at the counterparty.
+  COUNTERPARTY_TYPE_NOSTRO = 1;
+  // COUNTERPARTY_TYPE_VOSTRO means their account at our institution.
+  COUNTERPARTY_TYPE_VOSTRO = 2;
 }
 
-// CorrespondentBankDetails contains information about the correspondent bank
+// CounterpartyDetails contains information about the counterparty
 // for NOSTRO and VOSTRO account types.
-message CorrespondentBankDetails {
-  // bank_id is the unique identifier for the correspondent bank.
-  string bank_id = 1 [(buf.validate.field).string = {
+message CounterpartyDetails {
+  // counterparty_id is the unique identifier for the counterparty.
+  string counterparty_id = 1 [(buf.validate.field).string = {
     min_len: 1
     max_len: 100
     pattern: "^[a-zA-Z0-9_-]+$"
   }];
 
-  // bank_name is the display name of the correspondent bank.
-  string bank_name = 2 [(buf.validate.field).string = {
+  // counterparty_name is the display name of the counterparty.
+  string counterparty_name = 2 [(buf.validate.field).string = {
     min_len: 1
     max_len: 255
   }];
 
-  // external_account_ref is the account reference at the correspondent bank.
-  string external_account_ref = 3 [(buf.validate.field).string = {
+  // counterparty_external_ref is the account reference at the counterparty.
+  string counterparty_external_ref = 3 [(buf.validate.field).string = {
     min_len: 1
     max_len: 255
   }];
 
-  // swift_code is the SWIFT/BIC code of the correspondent bank (optional).
-  // Pattern validates BIC8 (8 chars) or BIC11 (11 chars) format.
-  // Empty string is allowed for correspondent banks without SWIFT codes
-  // (e.g., domestic correspondents, emerging market banks).
-  string swift_code = 4 [(buf.validate.field).string = {
-    max_len: 11
-    pattern: "^([A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?)?$"
-  }];
+  // attributes provides extensibility for counterparty-specific metadata.
+  // Product-type-specific fields (e.g., swift_code for banking) should be stored here.
+  map<string, string> attributes = 4;
 
-  // correspondent_type indicates whether this is a NOSTRO or VOSTRO relationship.
-  CorrespondentType correspondent_type = 5 [(buf.validate.field).enum = {
+  // counterparty_type indicates whether this is a NOSTRO or VOSTRO relationship.
+  CounterpartyType counterparty_type = 5 [(buf.validate.field).enum = {
     defined_only: true
     not_in: [0]
   }];
@@ -220,10 +215,10 @@ message InternalAccountFacility {
     pattern: "^[A-Z][A-Z0-9_]*$"
   }];
 
-  // correspondent_details contains correspondent bank information for NOSTRO/VOSTRO accounts.
+  // counterparty_details contains counterparty information for NOSTRO/VOSTRO accounts.
   // Required when account_type is NOSTRO or VOSTRO (enforced at service layer since
   // proto validation cannot express cross-field conditional constraints).
-  CorrespondentBankDetails correspondent_details = 7;
+  CounterpartyDetails counterparty_details = 7;
 
   // description provides additional context about this account's purpose.
   string description = 8 [(buf.validate.field).string.max_len = 1000];
@@ -323,9 +318,9 @@ message InitiateInternalAccountRequest {
     pattern: "^[A-Z][A-Z0-9_]*$"
   }];
 
-  // correspondent_details is required for NOSTRO/VOSTRO account types.
+  // counterparty_details is required for NOSTRO/VOSTRO account types.
   // Cross-field validation enforced at service layer.
-  CorrespondentBankDetails correspondent_details = 5;
+  CounterpartyDetails counterparty_details = 5;
 
   // description provides additional context about this account's purpose.
   string description = 6 [(buf.validate.field).string.max_len = 1000];
@@ -394,8 +389,8 @@ message UpdateInternalAccountRequest {
   // description is the updated description (optional).
   string description = 3 [(buf.validate.field).string.max_len = 1000];
 
-  // correspondent_details updates correspondent information (for NOSTRO/VOSTRO accounts).
-  CorrespondentBankDetails correspondent_details = 4;
+  // counterparty_details updates counterparty information (for NOSTRO/VOSTRO accounts).
+  CounterpartyDetails counterparty_details = 4;
 
   // expected_version for optimistic locking. If provided, update fails if current version differs.
   int32 expected_version = 5 [(buf.validate.field).int32 = {gte: 0}];

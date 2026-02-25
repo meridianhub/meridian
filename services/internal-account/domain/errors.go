@@ -18,13 +18,13 @@ var (
 	// ErrInvalidAccountType indicates an unrecognized account type was provided.
 	ErrInvalidAccountType = errors.New("invalid account type")
 
-	// ErrCorrespondentRequired indicates that correspondent details are required
+	// ErrCounterpartyRequired indicates that counterparty details are required
 	// for NOSTRO/VOSTRO accounts but were not provided.
-	ErrCorrespondentRequired = errors.New("correspondent details required for NOSTRO/VOSTRO accounts")
+	ErrCounterpartyRequired = errors.New("counterparty details required for NOSTRO/VOSTRO accounts")
 
-	// ErrCorrespondentNotAllowed indicates that correspondent details were provided
-	// for an account type that does not support correspondent relationships.
-	ErrCorrespondentNotAllowed = errors.New("correspondent details not allowed for this account type")
+	// ErrCounterpartyNotAllowed indicates that counterparty details were provided
+	// for an account type that does not support counterparty relationships.
+	ErrCounterpartyNotAllowed = errors.New("counterparty details not allowed for this account type")
 
 	// ErrDuplicateAccountCode indicates an account with the given code already exists.
 	ErrDuplicateAccountCode = errors.New("account code already exists")

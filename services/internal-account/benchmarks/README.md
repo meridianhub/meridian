@@ -161,4 +161,4 @@ Test data includes varied instrument codes to validate multi-asset performance:
 Account types tested:
 
 - CLEARING, HOLDING, SUSPENSE, REVENUE, EXPENSE
-- NOSTRO/VOSTRO (with correspondent details)
+- NOSTRO/VOSTRO (with counterparty details)
