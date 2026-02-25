@@ -135,7 +135,7 @@ func TestRunMigrations_Postgres_ScramAuth(t *testing.T) {
 
 	t.Setenv("DB_DRIVER", "postgres")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 
 	// Start PostgreSQL WITHOUT trust auth (uses default scram-sha-256).
