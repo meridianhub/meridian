@@ -123,6 +123,7 @@ MCP_TRANSPORT=sse MCP_SSE_PORT=8090 ./mcp-server
 | `MCP_OAUTH_CLIENT_ID` | `meridian-mcp` | OAuth client ID advertised to clients |
 | `MCP_OAUTH_REDIRECT_URI` | `{MCP_BASE_URL}/oauth/callback` | OAuth redirect URI |
 | `MERIDIAN_API_URL` | - | gRPC address of the Meridian gateway (e.g., `localhost:9090`) |
+| `MERIDIAN_API_KEY` | - | Bearer token sent in the `Authorization` header on all outgoing gRPC calls |
 | `LOG_LEVEL` | `info` | Log verbosity: `debug`, `info`, `warn`, `error` |
 
 ## OAuth 2.1 Configuration
@@ -167,6 +168,7 @@ Add the following to your Claude Desktop configuration file
       "env": {
         "MCP_TRANSPORT": "stdio",
         "MERIDIAN_API_URL": "localhost:9090",
+        "MERIDIAN_API_KEY": "pk_your_tenant_api_key",
         "LOG_LEVEL": "info"
       }
     }
@@ -268,7 +270,7 @@ The MCP server is included in the Tilt local development stack.
 ### Prerequisites
 
 - A running Meridian local cluster (see root `Tiltfile`)
-- Go 1.22+ for building locally outside of Tilt
+- Go 1.26+ for building locally outside of Tilt
 
 ### Running with Tilt
 
@@ -291,6 +293,7 @@ go build -o /tmp/meridian-mcp ./services/mcp-server/cmd
 
 # Run in stdio mode
 MERIDIAN_API_URL=localhost:9090 \
+  MERIDIAN_API_KEY=pk_your_tenant_api_key \
   LOG_LEVEL=debug \
   /tmp/meridian-mcp
 ```
@@ -301,6 +304,7 @@ MERIDIAN_API_URL=localhost:9090 \
 MCP_TRANSPORT=sse \
   MCP_SSE_PORT=8090 \
   MERIDIAN_API_URL=localhost:9090 \
+  MERIDIAN_API_KEY=pk_your_tenant_api_key \
   LOG_LEVEL=debug \
   /tmp/meridian-mcp
 ```
