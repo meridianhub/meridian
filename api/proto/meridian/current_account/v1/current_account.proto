@@ -115,12 +115,11 @@ message CurrentAccountFacility {
     pattern: "^[a-zA-Z0-9_-]+$"
   }];
 
-  // account_identification is the IBAN or other standard account identifier.
-  // IBAN format: 2 letter country code + 2 check digits + up to 30 alphanumeric characters.
-  string account_identification = 2 [(buf.validate.field).string = {
+  // external_identifier is the external account identifier (e.g. IBAN, sort code + account number, or
+  // any product-type-specific reference). Format validated by product type CEL rules.
+  string external_identifier = 2 [(buf.validate.field).string = {
     min_len: 1
-    max_len: 34 // IBAN max length
-    pattern: "^[A-Z]{2}[0-9]{2}[A-Z0-9]{1,30}$" // IBAN format validation
+    max_len: 255
   }];
 
   // account_status is the current lifecycle state of the account
@@ -129,10 +128,11 @@ message CurrentAccountFacility {
     not_in: [0] /* Prevent UNSPECIFIED in requests */
   }];
 
-  // base_currency is the primary currency for this account
-  meridian.common.v1.Currency base_currency = 4 [(buf.validate.field).enum = {
-    defined_only: true
-    not_in: [0] /* Prevent UNSPECIFIED currency */
+  // instrument_code is the primary instrument for this account (e.g. "GBP", "kWh", "GPU_HOUR").
+  string instrument_code = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 32
+    pattern: "^[A-Z][A-Z0-9_]*$"
   }];
 
   // created_at is when the account facility was created
@@ -148,8 +148,9 @@ message CurrentAccountFacility {
   // Task 5.2: Implement account balance tracking and overdraft limits
   AccountBalance current_balance = 8;
 
-  // overdraft_limit configures the overdraft facility for this account
-  OverdraftConfiguration overdraft_limit = 9;
+  // Field 9 reserved - overdraft_limit removed (use product type configuration instead)
+  reserved 9;
+  reserved "overdraft_limit";
 
   // transaction_history tracks recent transactions for this account
   // Task 5.4: Add transaction history and account status management features
@@ -167,6 +168,10 @@ message CurrentAccountFacility {
 
   // product_type_version is the pinned version of the product type definition (immutable after creation).
   int32 product_type_version = 13;
+
+  // dimension classifies the instrument type (e.g. "CURRENCY", "ENERGY", "COMPUTE", "CARBON").
+  // Used for reporting, validation, and routing. Validated by product type CEL rules.
+  string dimension = 14;
 }
 
 // AccountBalance represents the current balance state of an account
@@ -183,8 +188,10 @@ message AccountBalance {
 }
 
 // OverdraftConfiguration defines the overdraft facility settings
-// Task 5.2: Overdraft limits
+// Deprecated: Overdraft configuration is now managed via product type definitions.
+// This message is retained for wire compatibility with existing consumers.
 message OverdraftConfiguration {
+  option deprecated = true;
   // overdraft_limit is the maximum overdraft amount allowed
   meridian.common.v1.MoneyAmount overdraft_limit = 1 [(buf.validate.field).required = true];
 
@@ -333,17 +340,18 @@ message InitiateCurrentAccountRequest {
     max_len: 100
   }];
 
-  // account_identification is the IBAN
-  string account_identification = 2 [(buf.validate.field).string = {
+  // external_identifier is the external account identifier (e.g. IBAN, sort code + account number, or
+  // any product-type-specific reference). Format validated by product type CEL rules.
+  string external_identifier = 2 [(buf.validate.field).string = {
     min_len: 1
-    max_len: 34
-    pattern: "^[A-Z]{2}[0-9]{2}[A-Z0-9]{1,30}$"
+    max_len: 255
   }];
 
-  // base_currency is the account currency
-  meridian.common.v1.Currency base_currency = 3 [(buf.validate.field).enum = {
-    defined_only: true
-    not_in: [0]
+  // instrument_code is the primary instrument for this account (e.g. "GBP", "kWh", "GPU_HOUR").
+  string instrument_code = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 32
+    pattern: "^[A-Z][A-Z0-9_]*$"
   }];
 
   // org_party_id references the organization party for org-scoped accounts.

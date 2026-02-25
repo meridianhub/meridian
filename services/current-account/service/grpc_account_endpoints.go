@@ -37,11 +37,11 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 	// Generate account ID
 	accountID := fmt.Sprintf("ACC-%s", uuid.New().String()[:8])
 
-	// Map currency enum to string
-	currency := mapCurrency(req.BaseCurrency)
+	// Use instrument_code directly as the account's native instrument
+	currency := req.InstrumentCode
 	if currency == "" {
 		operationStatus = operationStatusInvalidCurrency
-		return nil, status.Errorf(codes.InvalidArgument, "unsupported currency: %v", req.BaseCurrency)
+		return nil, status.Errorf(codes.InvalidArgument, "instrument_code is required")
 	}
 
 	// Validate party exists and is active (if party client is configured)
@@ -188,7 +188,7 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 	// Create domain model
 	account, err := domain.NewCurrentAccount(
 		accountID,
-		req.AccountIdentification,
+		req.ExternalIdentifier,
 		req.PartyId,
 		currency,
 		opts...,
