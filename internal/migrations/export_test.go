@@ -5,3 +5,8 @@ package migrations
 func BuildServiceDSN(superuserDSN string, sdb ServiceDatabase, driver Driver) string {
 	return buildServiceDSN(superuserDSN, sdb, driver)
 }
+
+// BuildSuperuserDSN is the exported test alias for buildSuperuserDSN.
+func BuildSuperuserDSN(superuserDSN string, dbName string, driver Driver) string {
+	return buildSuperuserDSN(superuserDSN, dbName, driver)
+}
