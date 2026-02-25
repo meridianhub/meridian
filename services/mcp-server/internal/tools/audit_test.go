@@ -44,11 +44,11 @@ func (m *mockFinancialAccountingClient) ListLedgerPostings(ctx context.Context, 
 	return m.listPostingsFn(ctx, req)
 }
 
-type mockSagaRegistryClient struct {
+type mockAuditSagaRegistryClient struct {
 	listSagasFn func(ctx context.Context, req *sagav1.ListSagasRequest) (*sagav1.ListSagasResponse, error)
 }
 
-func (m *mockSagaRegistryClient) ListSagas(ctx context.Context, req *sagav1.ListSagasRequest) (*sagav1.ListSagasResponse, error) {
+func (m *mockAuditSagaRegistryClient) ListSagas(ctx context.Context, req *sagav1.ListSagasRequest) (*sagav1.ListSagasResponse, error) {
 	return m.listSagasFn(ctx, req)
 }
 
@@ -421,7 +421,7 @@ func TestPostingsQuery_EmptyResults_MeaningfulResponse(t *testing.T) {
 // --- meridian_saga_executions tests ---
 
 func TestSagaExecutions_ValidParams_ReturnSagas(t *testing.T) {
-	mock := &mockSagaRegistryClient{
+	mock := &mockAuditSagaRegistryClient{
 		listSagasFn: func(_ context.Context, _ *sagav1.ListSagasRequest) (*sagav1.ListSagasResponse, error) {
 			return &sagav1.ListSagasResponse{
 				Sagas: []*sagav1.SagaDefinition{
@@ -451,7 +451,7 @@ func TestSagaExecutions_ValidParams_ReturnSagas(t *testing.T) {
 func TestSagaExecutions_StatusFilter_PassedToClient(t *testing.T) {
 	var capturedReq *sagav1.ListSagasRequest
 
-	mock := &mockSagaRegistryClient{
+	mock := &mockAuditSagaRegistryClient{
 		listSagasFn: func(_ context.Context, req *sagav1.ListSagasRequest) (*sagav1.ListSagasResponse, error) {
 			capturedReq = req
 			return &sagav1.ListSagasResponse{}, nil
@@ -488,7 +488,7 @@ func TestSagaExecutions_InvalidStatus_ValidationError(t *testing.T) {
 }
 
 func TestSagaExecutions_GRPCError_FormattedResponse(t *testing.T) {
-	mock := &mockSagaRegistryClient{
+	mock := &mockAuditSagaRegistryClient{
 		listSagasFn: func(_ context.Context, _ *sagav1.ListSagasRequest) (*sagav1.ListSagasResponse, error) {
 			return nil, errors.New("saga registry unavailable")
 		},
@@ -671,7 +671,7 @@ func noopMocks() (tools.SagaAdminQuerier, tools.PositionQuerier, tools.PostingQu
 			return &financialaccountingv1.ListLedgerPostingsResponse{}, nil
 		},
 	}
-	sagaRegistry := &mockSagaRegistryClient{
+	sagaRegistry := &mockAuditSagaRegistryClient{
 		listSagasFn: func(_ context.Context, _ *sagav1.ListSagasRequest) (*sagav1.ListSagasResponse, error) {
 			return &sagav1.ListSagasResponse{}, nil
 		},
