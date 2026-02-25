@@ -292,19 +292,15 @@ func TestStarlarkValidate_SyntaxError(t *testing.T) {
 	}
 }
 
-// TestStarlarkValidate_ForbiddenWhileLoop verifies that scripts with while loops
-// are flagged as invalid.
-func TestStarlarkValidate_ForbiddenWhileLoop(t *testing.T) {
+// TestStarlarkValidate_CommentedWhileLoopAllowed verifies that commented text
+// mentioning while does not fail validation.
+func TestStarlarkValidate_CommentedWhileLoopAllowed(t *testing.T) {
 	r := newValidationRegistry(t)
 
-	// while is a reserved keyword in Starlark, so while loops in
-	// a real Starlark script would be a syntax error. We test the
-	// termination check for the string pattern.
 	params := json.RawMessage(`{
 		"script": "# while loop attempt\nx = 0\n# while True: x += 1\n"
 	}`)
 
-	// A commented-out while is fine
 	result, err := r.Call(context.Background(), "meridian_starlark_validate", params)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -316,5 +312,35 @@ func TestStarlarkValidate_ForbiddenWhileLoop(t *testing.T) {
 	valid, _ := m["valid"].(bool)
 	if !valid {
 		t.Errorf("expected valid=true for commented while, got: %v", m)
+	}
+}
+
+// TestStarlarkValidate_ForbiddenWhileLoop verifies that a script containing an
+// actual while statement is rejected as a syntax error (Starlark does not
+// permit while loops at the language level).
+func TestStarlarkValidate_ForbiddenWhileLoop(t *testing.T) {
+	r := newValidationRegistry(t)
+
+	// "while True:" is a syntax error in Starlark — the language does not
+	// support while loops to guarantee termination.
+	params := json.RawMessage(`{
+		"script": "x = 0\nwhile True:\n    x = x + 1\n"
+	}`)
+
+	result, err := r.Call(context.Background(), "meridian_starlark_validate", params)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	m, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map result, got %T", result)
+	}
+	valid, _ := m["valid"].(bool)
+	if valid {
+		t.Errorf("expected valid=false for while loop, got: %v", m)
+	}
+	errs, _ := m["errors"].([]interface{})
+	if len(errs) == 0 {
+		t.Errorf("expected errors for while loop, got: %v", m)
 	}
 }

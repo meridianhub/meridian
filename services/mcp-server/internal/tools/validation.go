@@ -11,7 +11,7 @@ import (
 	"github.com/google/cel-go/checker"
 	mcperrors "github.com/meridianhub/meridian/services/mcp-server/internal/errors"
 	sharedcel "github.com/meridianhub/meridian/shared/pkg/cel"
-	"go.starlark.net/syntax"
+	starlarkSyntax "go.starlark.net/syntax"
 )
 
 // ErrUnknownCELEnvironment is returned when an unsupported CEL environment name is provided.
@@ -58,7 +58,7 @@ func celValidateTool() Tool {
 func starlarkValidateTool() Tool {
 	return Tool{
 		Name:        "meridian_starlark_validate",
-		Description: "Validate a Starlark saga script for syntax errors and forbidden constructs (while loops, recursion).",
+		Description: "Validate a Starlark saga script for syntax errors.",
 		Category:    CategorySimulate,
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -66,10 +66,6 @@ func starlarkValidateTool() Tool {
 				"script": map[string]interface{}{
 					"type":        "string",
 					"description": "The Starlark script source code",
-				},
-				"handler_context": map[string]interface{}{
-					"type":        "object",
-					"description": "Optional: instrument codes and handler names to validate references against",
 				},
 			},
 			"required": []interface{}{"script"},
@@ -175,15 +171,14 @@ func (*zeroCostEstimator) EstimateCallCost(_, _ string, _ *checker.AstNode, _ []
 // handleStarlarkValidate is the handler for the meridian_starlark_validate tool.
 func handleStarlarkValidate(_ context.Context, params json.RawMessage) (interface{}, error) {
 	var input struct {
-		Script         string          `json:"script"`
-		HandlerContext json.RawMessage `json:"handler_context,omitempty"`
+		Script string `json:"script"`
 	}
 	if err := json.Unmarshal(params, &input); err != nil {
 		return nil, fmt.Errorf("unmarshal params: %w", err)
 	}
 
-	opts := syntax.FileOptions{}
-	_, parseErr := opts.Parse("saga.star", input.Script, syntax.RetainComments)
+	opts := starlarkSyntax.FileOptions{}
+	file, parseErr := opts.Parse("saga.star", input.Script, starlarkSyntax.RetainComments)
 	if parseErr != nil {
 		errDetails := formatStarlarkError(parseErr)
 		return map[string]interface{}{
@@ -192,9 +187,7 @@ func handleStarlarkValidate(_ context.Context, params json.RawMessage) (interfac
 		}, nil
 	}
 
-	// Starlark's parser already rejects while loops as a syntax error.
-	// checkStarlarkTermination is a defense-in-depth hook for future rules.
-	if issues := checkStarlarkTermination(input.Script); len(issues) > 0 {
+	if issues := checkStarlarkTermination(file); len(issues) > 0 {
 		return map[string]interface{}{
 			"valid":  false,
 			"errors": issues,
@@ -203,17 +196,17 @@ func handleStarlarkValidate(_ context.Context, params json.RawMessage) (interfac
 
 	return map[string]interface{}{
 		"valid":   true,
-		"message": "Script syntax valid, no forbidden constructs detected",
+		"message": "Script syntax valid",
 	}, nil
 }
 
 // formatStarlarkError converts a Starlark parse error into an error detail slice.
-// It extracts line/column from the syntax.Error struct when available, and falls
+// It extracts line/column from the starlarkSyntax.Error struct when available, and falls
 // back to parsing the canonical "filename:line:col: msg" error string via the
 // existing mcperrors formatter. FormatGRPCError is called with the original error
 // so no dynamic intermediate error is created.
 func formatStarlarkError(err error) []interface{} {
-	var synErr syntax.Error
+	var synErr starlarkSyntax.Error
 	if errors.As(err, &synErr) {
 		// Direct extraction from the structured error type.
 		detail := mcperrors.ErrorDetail{
@@ -232,12 +225,24 @@ func formatStarlarkError(err error) []interface{} {
 	return formatErrorDetails(formatted.Errors)
 }
 
-// checkStarlarkTermination checks for forbidden constructs that would violate
-// termination guarantees. Starlark's parser already rejects while loops as
-// syntax errors; this hook is retained for future defense-in-depth rules
-// (e.g., deeply nested for-loops, large literal collections).
-func checkStarlarkTermination(_ string) []interface{} {
-	return nil
+// checkStarlarkTermination walks the parsed AST and returns error details for
+// any forbidden constructs. Currently detects while loops; the Starlark parser
+// permits while syntactically but Meridian forbids them for termination guarantees.
+func checkStarlarkTermination(file *starlarkSyntax.File) []interface{} {
+	var issues []interface{}
+	starlarkSyntax.Walk(file, func(n starlarkSyntax.Node) bool {
+		if while, ok := n.(*starlarkSyntax.WhileStmt); ok {
+			start, _ := while.Span()
+			issues = append(issues, map[string]interface{}{
+				"type":    mcperrors.TypeStarlarkSyntax,
+				"line":    int(start.Line),
+				"column":  int(start.Col),
+				"message": "while loops are not permitted in Starlark saga scripts (termination guarantee violation)",
+			})
+		}
+		return true
+	})
+	return issues
 }
 
 // formatErrorDetails converts a slice of mcperrors.ErrorDetail into a slice of
