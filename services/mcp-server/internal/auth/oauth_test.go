@@ -25,6 +25,14 @@ func generatePKCEPair(t *testing.T) (verifier, challenge string) {
 	return
 }
 
+// newTestStore creates a CodeStore and registers cleanup with t.
+func newTestStore(t *testing.T) *auth.CodeStore {
+	t.Helper()
+	s := auth.NewCodeStore()
+	t.Cleanup(s.Close)
+	return s
+}
+
 // -----------------------------------------------------------------------
 // OAuthConfig
 // -----------------------------------------------------------------------
@@ -66,7 +74,7 @@ func TestAuthMetadata_JSON(t *testing.T) {
 // -----------------------------------------------------------------------
 
 func TestAuthorizationHandler_GeneratesCode(t *testing.T) {
-	store := auth.NewCodeStore()
+	store := newTestStore(t)
 	cfg := auth.OAuthConfig{
 		ClientID:         "meridian-mcp",
 		AuthorizationURL: "https://auth.example.com/authorize",
@@ -75,7 +83,7 @@ func TestAuthorizationHandler_GeneratesCode(t *testing.T) {
 	}
 	handler := auth.NewAuthorizationHandler(cfg, store)
 
-	verifier, challenge := generatePKCEPair(t)
+	_, challenge := generatePKCEPair(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/oauth/authorize?"+url.Values{
 		"response_type":         {"code"},
@@ -85,7 +93,6 @@ func TestAuthorizationHandler_GeneratesCode(t *testing.T) {
 		"code_challenge_method": {"S256"},
 		"state":                 {"random-state"},
 	}.Encode(), nil)
-	_ = verifier
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -105,7 +112,7 @@ func TestAuthorizationHandler_GeneratesCode(t *testing.T) {
 }
 
 func TestAuthorizationHandler_MissingChallenge_ReturnsBadRequest(t *testing.T) {
-	store := auth.NewCodeStore()
+	store := newTestStore(t)
 	cfg := auth.OAuthConfig{
 		ClientID:    "meridian-mcp",
 		RedirectURI: "http://localhost:8090/oauth/callback",
@@ -120,7 +127,7 @@ func TestAuthorizationHandler_MissingChallenge_ReturnsBadRequest(t *testing.T) {
 }
 
 func TestAuthorizationHandler_WrongClientID_ReturnsBadRequest(t *testing.T) {
-	store := auth.NewCodeStore()
+	store := newTestStore(t)
 	cfg := auth.OAuthConfig{
 		ClientID:    "meridian-mcp",
 		RedirectURI: "http://localhost:8090/oauth/callback",
@@ -142,12 +149,35 @@ func TestAuthorizationHandler_WrongClientID_ReturnsBadRequest(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+func TestAuthorizationHandler_WrongRedirectURI_ReturnsBadRequest(t *testing.T) {
+	store := newTestStore(t)
+	cfg := auth.OAuthConfig{
+		ClientID:    "meridian-mcp",
+		RedirectURI: "http://localhost:8090/oauth/callback",
+	}
+	handler := auth.NewAuthorizationHandler(cfg, store)
+
+	_, challenge := generatePKCEPair(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/oauth/authorize?"+url.Values{
+		"response_type":         {"code"},
+		"client_id":             {cfg.ClientID},
+		"redirect_uri":          {"https://evil.example.com/steal"},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+	}.Encode(), nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
 // -----------------------------------------------------------------------
 // TokenHandler
 // -----------------------------------------------------------------------
 
 func TestTokenHandler_ExchangesCodeForToken(t *testing.T) {
-	store := auth.NewCodeStore()
+	store := newTestStore(t)
 	cfg := auth.OAuthConfig{
 		ClientID:    "meridian-mcp",
 		RedirectURI: "http://localhost:8090/oauth/callback",
@@ -190,7 +220,7 @@ func TestTokenHandler_ExchangesCodeForToken(t *testing.T) {
 }
 
 func TestTokenHandler_InvalidVerifier_ReturnsUnauthorized(t *testing.T) {
-	store := auth.NewCodeStore()
+	store := newTestStore(t)
 	cfg := auth.OAuthConfig{
 		ClientID:    "meridian-mcp",
 		RedirectURI: "http://localhost:8090/oauth/callback",
@@ -226,7 +256,7 @@ func TestTokenHandler_InvalidVerifier_ReturnsUnauthorized(t *testing.T) {
 }
 
 func TestTokenHandler_ExpiredCode_ReturnsUnauthorized(t *testing.T) {
-	store := auth.NewCodeStore()
+	store := newTestStore(t)
 	cfg := auth.OAuthConfig{
 		ClientID:    "meridian-mcp",
 		RedirectURI: "http://localhost:8090/oauth/callback",
@@ -263,7 +293,7 @@ func TestTokenHandler_ExpiredCode_ReturnsUnauthorized(t *testing.T) {
 }
 
 func TestTokenHandler_UnknownCode_ReturnsUnauthorized(t *testing.T) {
-	store := auth.NewCodeStore()
+	store := newTestStore(t)
 	cfg := auth.OAuthConfig{
 		ClientID:    "meridian-mcp",
 		RedirectURI: "http://localhost:8090/oauth/callback",
@@ -291,7 +321,7 @@ func TestTokenHandler_UnknownCode_ReturnsUnauthorized(t *testing.T) {
 }
 
 func TestTokenHandler_CodeIsConsumedAfterExchange(t *testing.T) {
-	store := auth.NewCodeStore()
+	store := newTestStore(t)
 	cfg := auth.OAuthConfig{
 		ClientID:    "meridian-mcp",
 		RedirectURI: "http://localhost:8090/oauth/callback",
@@ -334,12 +364,47 @@ func TestTokenHandler_CodeIsConsumedAfterExchange(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, w2.Code)
 }
 
+func TestTokenHandler_MismatchedRedirectURI_ReturnsUnauthorized(t *testing.T) {
+	store := newTestStore(t)
+	cfg := auth.OAuthConfig{
+		ClientID:    "meridian-mcp",
+		RedirectURI: "http://localhost:8090/oauth/callback",
+	}
+
+	verifier, challenge := generatePKCEPair(t)
+	code := "code-redirect-mismatch"
+	store.Store(code, auth.CodeEntry{
+		CodeChallenge: challenge,
+		ClientID:      cfg.ClientID,
+		RedirectURI:   cfg.RedirectURI,
+		IssuedAt:      time.Now(),
+	})
+
+	issuer := &fakeTokenIssuer{token: "tok"}
+	handler := auth.NewTokenHandler(cfg, store, issuer)
+
+	form := url.Values{
+		"grant_type":    {"authorization_code"},
+		"code":          {code},
+		"redirect_uri":  {"https://evil.example.com/steal"},
+		"client_id":     {cfg.ClientID},
+		"code_verifier": {verifier},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/oauth/token",
+		strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
 // -----------------------------------------------------------------------
 // AuthCodeStore
 // -----------------------------------------------------------------------
 
 func TestAuthCodeStore_TTL(t *testing.T) {
-	store := auth.NewCodeStore()
+	store := newTestStore(t)
 
 	_, challenge := generatePKCEPair(t)
 	entry := auth.CodeEntry{
@@ -355,7 +420,7 @@ func TestAuthCodeStore_TTL(t *testing.T) {
 }
 
 func TestAuthCodeStore_ConsumeOnlyOnce(t *testing.T) {
-	store := auth.NewCodeStore()
+	store := newTestStore(t)
 
 	_, challenge := generatePKCEPair(t)
 	entry := auth.CodeEntry{

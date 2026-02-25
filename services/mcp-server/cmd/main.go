@@ -165,6 +165,7 @@ func runSSE(logger *slog.Logger, cfg server.Config) error {
 			"token_url", oauthCfg.TokenURL)
 
 		store := mcpauth.NewCodeStore()
+		defer store.Close()
 		issuer := &passthroughIssuer{logger: logger}
 		authzHandler := mcpauth.NewAuthorizationHandler(oauthCfg, store)
 		tokenHandler := mcpauth.NewTokenHandler(oauthCfg, store, issuer)

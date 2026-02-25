@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +30,8 @@ const (
 	authCodeTTL = 10 * time.Minute
 	// authCodeBytes is the number of random bytes in a generated auth code.
 	authCodeBytes = 32
+	// storeEvictInterval is how often the CodeStore sweeps expired entries.
+	storeEvictInterval = 5 * time.Minute
 )
 
 // ErrInvalidBearerToken is returned by BearerValidator when the token is
@@ -64,15 +67,51 @@ type CodeEntry struct {
 
 // CodeStore is a thread-safe in-memory store for authorization codes.
 // Each code can be consumed exactly once and expires after authCodeTTL.
+// A background sweep runs every storeEvictInterval to evict abandoned entries.
 type CodeStore struct {
 	mu    sync.Mutex
 	codes map[string]CodeEntry
+	stop  chan struct{}
 }
 
-// NewCodeStore creates an empty CodeStore.
+// NewCodeStore creates an empty CodeStore and starts the background eviction goroutine.
+// Call [CodeStore.Close] to stop the eviction goroutine when the store is no longer needed.
 func NewCodeStore() *CodeStore {
-	return &CodeStore{
+	s := &CodeStore{
 		codes: make(map[string]CodeEntry),
+		stop:  make(chan struct{}),
+	}
+	go s.evictLoop()
+	return s
+}
+
+// Close stops the background eviction goroutine.
+func (s *CodeStore) Close() {
+	close(s.stop)
+}
+
+// evictLoop periodically removes entries that have passed authCodeTTL
+// without being consumed. This bounds store size under load.
+func (s *CodeStore) evictLoop() {
+	ticker := time.NewTicker(storeEvictInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			s.evictExpired()
+		case <-s.stop:
+			return
+		}
+	}
+}
+
+func (s *CodeStore) evictExpired() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for code, entry := range s.codes {
+		if time.Since(entry.IssuedAt) > authCodeTTL {
+			delete(s.codes, code)
+		}
 	}
 }
 
@@ -149,9 +188,14 @@ func (h *AuthorizationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Validate redirect_uri against the registered value to prevent open redirect.
+	// If omitted, the registered URI is used; if provided it must match exactly.
 	redirectURI := q.Get("redirect_uri")
 	if redirectURI == "" {
 		redirectURI = h.cfg.RedirectURI
+	} else if redirectURI != h.cfg.RedirectURI {
+		http.Error(w, "redirect_uri does not match registered value", http.StatusBadRequest)
+		return
 	}
 
 	challenge := q.Get("code_challenge")
@@ -183,14 +227,12 @@ func (h *AuthorizationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 
 	h.logger.Info("authorization code issued", "client_id", clientID)
 
-	// Build redirect URL.
-	state := q.Get("state")
-	redirectTarget := fmt.Sprintf("%s?code=%s", redirectURI, code)
-	if state != "" {
-		redirectTarget += "&state=" + state
+	// Build redirect URL using url.Values so all query parameters are properly encoded.
+	params := url.Values{"code": {code}}
+	if state := q.Get("state"); state != "" {
+		params.Set("state", state)
 	}
-
-	http.Redirect(w, r, redirectTarget, http.StatusFound)
+	http.Redirect(w, r, redirectURI+"?"+params.Encode(), http.StatusFound)
 }
 
 // -----------------------------------------------------------------------
@@ -237,6 +279,7 @@ func (h *TokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	code := r.FormValue("code")
 	verifier := r.FormValue("code_verifier")
 	clientID := r.FormValue("client_id")
+	redirectURI := r.FormValue("redirect_uri")
 
 	if code == "" || verifier == "" || clientID == "" {
 		http.Error(w, "missing required parameters", http.StatusBadRequest)
@@ -253,6 +296,12 @@ func (h *TokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Validate client_id matches what was authorized.
 	if entry.ClientID != clientID {
 		writeOAuthError(w, "invalid_grant", "client_id mismatch")
+		return
+	}
+
+	// Validate redirect_uri if provided (RFC 6749 §4.1.3: MUST match if present).
+	if redirectURI != "" && redirectURI != entry.RedirectURI {
+		writeOAuthError(w, "invalid_grant", "redirect_uri mismatch")
 		return
 	}
 
@@ -357,14 +406,14 @@ func verifyPKCE(verifier, challenge string) bool {
 
 // extractBearerFromHeader extracts the raw token from an Authorization: Bearer header.
 func extractBearerFromHeader(r *http.Request) (string, error) {
-	auth := r.Header.Get("Authorization")
-	if auth == "" {
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
 		return "", ErrInvalidBearerToken
 	}
-	if !strings.HasPrefix(auth, "Bearer ") {
+	if !strings.HasPrefix(authHeader, "Bearer ") {
 		return "", ErrInvalidBearerToken
 	}
-	token := strings.TrimPrefix(auth, "Bearer ")
+	token := strings.TrimPrefix(authHeader, "Bearer ")
 	if token == "" {
 		return "", ErrInvalidBearerToken
 	}
