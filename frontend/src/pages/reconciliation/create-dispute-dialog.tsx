@@ -118,10 +118,13 @@ export function CreateDisputeDialog({
   }, [open])
 
   const mutation = useMutation({
-    mutationFn: () => createDispute(runId, lineItem.varianceId, formData),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['reconciliation-disputes', runId] })
-      onOpenChange(false)
+    mutationFn: (vars: { runId: string; varianceId: string; data: FormData }) =>
+      createDispute(vars.runId, vars.varianceId, vars.data),
+    onSuccess: (_result, vars) => {
+      void queryClient.invalidateQueries({ queryKey: ['reconciliation-disputes', vars.runId] })
+      if (lineItem.varianceId === vars.varianceId) {
+        onOpenChange(false)
+      }
     },
     onError: (err: Error) => {
       setErrors({ general: err.message })
@@ -143,7 +146,7 @@ export function CreateDisputeDialog({
       return
     }
     setErrors({})
-    mutation.mutate()
+    mutation.mutate({ runId, varianceId: lineItem.varianceId, data: { ...formData } })
   }
 
   const showExpectedAmount = formData.reason === 'DISPUTE_REASON_AMOUNT_MISMATCH'
