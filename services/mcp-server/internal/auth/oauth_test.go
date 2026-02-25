@@ -234,7 +234,7 @@ func TestTokenHandler_ExchangesCodeForToken(t *testing.T) {
 	assert.NotEmpty(t, resp["access_token"])
 }
 
-func TestTokenHandler_InvalidVerifier_ReturnsUnauthorized(t *testing.T) {
+func TestTokenHandler_InvalidVerifier_ReturnsBadRequest(t *testing.T) {
 	store := newTestStore(t)
 	cfg := auth.OAuthConfig{
 		ClientID:    "meridian-mcp",
@@ -259,7 +259,7 @@ func TestTokenHandler_InvalidVerifier_ReturnsUnauthorized(t *testing.T) {
 		"code":          {code},
 		"redirect_uri":  {cfg.RedirectURI},
 		"client_id":     {cfg.ClientID},
-		"code_verifier": {"wrong-verifier-AAAAAAAAAAAAAAAAAAAAAAAAA"},
+		"code_verifier": {"wrong-verifier-AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}, // 43+ chars per RFC 7636
 	}
 	req := httptest.NewRequest(http.MethodPost, "/oauth/token",
 		strings.NewReader(form.Encode()))
@@ -270,7 +270,7 @@ func TestTokenHandler_InvalidVerifier_ReturnsUnauthorized(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-func TestTokenHandler_ExpiredCode_ReturnsUnauthorized(t *testing.T) {
+func TestTokenHandler_ExpiredCode_ReturnsBadRequest(t *testing.T) {
 	store := newTestStore(t)
 	cfg := auth.OAuthConfig{
 		ClientID:    "meridian-mcp",
@@ -307,7 +307,7 @@ func TestTokenHandler_ExpiredCode_ReturnsUnauthorized(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-func TestTokenHandler_UnknownCode_ReturnsUnauthorized(t *testing.T) {
+func TestTokenHandler_UnknownCode_ReturnsBadRequest(t *testing.T) {
 	store := newTestStore(t)
 	cfg := auth.OAuthConfig{
 		ClientID:    "meridian-mcp",
@@ -379,7 +379,7 @@ func TestTokenHandler_CodeIsConsumedAfterExchange(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w2.Code)
 }
 
-func TestTokenHandler_MismatchedRedirectURI_ReturnsUnauthorized(t *testing.T) {
+func TestTokenHandler_MismatchedRedirectURI_ReturnsBadRequest(t *testing.T) {
 	store := newTestStore(t)
 	cfg := auth.OAuthConfig{
 		ClientID:    "meridian-mcp",
