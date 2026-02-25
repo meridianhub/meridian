@@ -614,6 +614,49 @@ k8s_resource(
 )
 
 # =============================================================================
+# MCP Server
+# =============================================================================
+# Model Context Protocol server for AI agent integration.
+# Exposes Meridian's transaction engine capabilities via MCP SSE transport.
+# Connects to the gateway for all backend gRPC service calls.
+
+# Standard build args for mcp-server
+mcp_server_build_args = {
+    'VERSION': 'dev',
+    'COMMIT': local('git rev-parse --short HEAD'),
+    'BUILD_DATE': get_build_date(),
+}
+
+# Build mcp-server Docker image
+docker_build(
+    'mcp-server',
+    context='.',
+    dockerfile='services/mcp-server/cmd/Dockerfile',
+    build_args=mcp_server_build_args,
+)
+
+# Deploy mcp-server K8s manifests
+k8s_yaml('services/mcp-server/k8s/secret.yaml')
+k8s_yaml('services/mcp-server/k8s/configmap.yaml')
+k8s_yaml('services/mcp-server/k8s/deployment.yaml')
+k8s_yaml('services/mcp-server/k8s/service.yaml')
+
+# Configure mcp-server resource
+k8s_resource(
+    'mcp-server',
+    port_forwards=['18090:8090'],  # MCP SSE endpoint (18090 to avoid conflict with gateway)
+    resource_deps=[
+        'generate-proto',   # Ensures proto files are generated before building
+        'gateway',          # MCP server routes all gRPC calls through the gateway
+        'control-plane',    # Wait for control-plane readiness (init container check)
+    ],
+    labels=['gateway'],
+    objects=[
+        'mcp-server-config:configmap',
+    ],
+)
+
+# =============================================================================
 # Resource Configuration
 # =============================================================================
 
@@ -948,6 +991,9 @@ Gateway:
   • HTTP Gateway           → localhost:8090 (subdomain routing)
     - Tenant resolution via TenantResolverMiddleware
     - Proxies to gRPC backends via Connect protocol
+  • MCP Server             → localhost:18090 (SSE transport)
+    - Model Context Protocol for AI agent integration
+    - Routes all gRPC calls through the HTTP gateway
 
 Frontend:
   • Meridian Console       → http://localhost:5173 (Vite + React)

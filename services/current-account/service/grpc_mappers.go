@@ -2,7 +2,6 @@ package service
 
 import (
 	"log/slog"
-	"time"
 
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
@@ -20,24 +19,18 @@ const (
 
 func toProtoFacility(account domain.CurrentAccount) *pb.CurrentAccountFacility {
 	return &pb.CurrentAccountFacility{
-		AccountId:             account.AccountID(),
-		AccountIdentification: account.AccountIdentification(),
-		AccountStatus:         mapStatusToProto(account.Status()),
-		BaseCurrency:          mapCurrencyToProto(string(account.Balance().Currency())),
-		CreatedAt:             timestamppb.New(account.CreatedAt()),
-		UpdatedAt:             timestamppb.New(account.UpdatedAt()),
+		AccountId:          account.AccountID(),
+		ExternalIdentifier: account.AccountIdentification(),
+		AccountStatus:      mapStatusToProto(account.Status()),
+		InstrumentCode:     string(account.Balance().Currency()),
+		CreatedAt:          timestamppb.New(account.CreatedAt()),
+		UpdatedAt:          timestamppb.New(account.UpdatedAt()),
 		// #nosec G115 - Version is bounded by database constraints
 		Version: int32(account.Version()),
 		CurrentBalance: &pb.AccountBalance{
 			CurrentBalance:   toMoneyAmount(account.Balance()),
 			AvailableBalance: toMoneyAmount(account.AvailableBalance()),
 			LastUpdated:      timestamppb.New(account.BalanceUpdatedAt()),
-		},
-		OverdraftLimit: &pb.OverdraftConfiguration{
-			OverdraftLimit: toMoneyAmount(account.OverdraftLimit()),
-			InterestRate:   account.OverdraftRate(),
-			IsEnabled:      account.OverdraftEnabled(),
-			LastUpdated:    timestamppb.New(time.Now()),
 		},
 		ProductTypeCode: account.ProductTypeCode(),
 		// #nosec G115 - ProductTypeVersion is bounded by database constraints
@@ -124,19 +117,6 @@ func mapStatusToProto(status domain.AccountStatus) pb.AccountStatus {
 		return pb.AccountStatus_ACCOUNT_STATUS_CLOSED
 	default:
 		return pb.AccountStatus_ACCOUNT_STATUS_UNSPECIFIED
-	}
-}
-
-func mapCurrencyToProto(currency string) commonpb.Currency {
-	switch currency {
-	case currencyGBP:
-		return commonpb.Currency_CURRENCY_GBP
-	case currencyUSD:
-		return commonpb.Currency_CURRENCY_USD
-	case currencyEUR:
-		return commonpb.Currency_CURRENCY_EUR
-	default:
-		return commonpb.Currency_CURRENCY_UNSPECIFIED
 	}
 }
 
