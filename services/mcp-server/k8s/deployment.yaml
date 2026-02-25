@@ -54,6 +54,7 @@ spec:
             memory: 32Mi
         securityContext:
           allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
           runAsNonRoot: true
           runAsUser: 65532
           capabilities:
@@ -80,6 +81,7 @@ spec:
             memory: 32Mi
         securityContext:
           allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
           runAsNonRoot: true
           runAsUser: 65532
           capabilities:
