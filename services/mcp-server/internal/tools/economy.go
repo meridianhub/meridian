@@ -3,6 +3,8 @@ package tools
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -275,6 +277,17 @@ func handleManifestApply(ctx context.Context, client ManifestApplier, sess PlanS
 		}, nil
 	}
 
+	// Verify that the manifest content matches the planned manifest by comparing
+	// the SHA256 hash of the apply-time manifest against the provided plan_hash.
+	// This prevents applying a different manifest than what was planned.
+	contentHash := sha256Hex(p.Manifest)
+	if contentHash != p.PlanHash {
+		return map[string]interface{}{
+			"error":   "manifest content does not match the planned manifest",
+			"message": "The manifest provided to apply differs from the one used during plan. Re-run meridian_manifest_plan with the updated manifest.",
+		}, nil
+	}
+
 	manifest, err := manifestJSONToProto(p.Manifest)
 	if err != nil {
 		return map[string]interface{}{ //nolint:nilerr // err is surfaced in the tool response
@@ -462,4 +475,10 @@ func formatProtoValidationErrors(errs []*controlplanev1.ValidationError) []inter
 // formatValidationErrors converts mcperrors.ErrorDetail into tool-response-compatible format.
 func formatValidationErrors(details []mcperrors.ErrorDetail) []interface{} {
 	return formatErrorDetails(details)
+}
+
+// sha256Hex returns the hex-encoded SHA256 digest of data.
+func sha256Hex(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }

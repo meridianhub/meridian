@@ -386,6 +386,48 @@ func TestManifestApply_WithoutPlan_Rejected(t *testing.T) {
 	}
 }
 
+func TestManifestApply_ContentMismatch_Rejected(t *testing.T) {
+	mock := &mockManifestApplier{
+		applyFn: func(_ context.Context, req *controlplanev1.ApplyManifestRequest) (*controlplanev1.ApplyManifestResponse, error) {
+			if req.DryRun {
+				return &controlplanev1.ApplyManifestResponse{
+					Status: controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_DRY_RUN,
+				}, nil
+			}
+			t.Fatal("should not call backend with mismatched manifest")
+			return nil, nil
+		},
+	}
+
+	r := tools.NewRegistry()
+	sess := newTestSession()
+	tools.RegisterEconomyTools(r, sess, tools.EconomyDeps{Applier: mock})
+
+	// Plan with manifest A
+	manifestA := validManifestJSON()
+	planParams := json.RawMessage(fmt.Sprintf(`{"manifest": %s}`, manifestA))
+	planResult, err := r.Call(context.Background(), "meridian_manifest_plan", planParams)
+	if err != nil {
+		t.Fatalf("plan failed: %v", err)
+	}
+	planHash := planResult.(map[string]interface{})["plan_hash"].(string)
+
+	// Apply with a different manifest B but the plan_hash from manifest A
+	manifestB := json.RawMessage(`{"version": "2.0", "metadata": {"name": "Different", "industry": "banking", "description": "Changed"}}`)
+	applyParams := json.RawMessage(fmt.Sprintf(`{"manifest": %s, "plan_hash": %q, "applied_by": "test@example.com"}`, manifestB, planHash))
+	result, err := r.Call(context.Background(), "meridian_manifest_apply", applyParams)
+	if err != nil {
+		t.Fatalf("expected error in result, not Go error: %v", err)
+	}
+	m, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map result, got %T", result)
+	}
+	if errMsg, _ := m["error"].(string); errMsg == "" {
+		t.Error("expected 'error' key in result for content mismatch")
+	}
+}
+
 func TestManifestApply_MissingRequiredFields_SchemaError(t *testing.T) {
 	mock := &mockManifestApplier{
 		applyFn: func(_ context.Context, _ *controlplanev1.ApplyManifestRequest) (*controlplanev1.ApplyManifestResponse, error) {
