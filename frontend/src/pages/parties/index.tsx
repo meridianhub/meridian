@@ -126,6 +126,8 @@ export function PartiesPage() {
     navigate(`/parties/${party.partyId}`)
   }
 
+  if (!tenantSlug) return null
+
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between">
@@ -151,7 +153,7 @@ export function PartiesPage() {
 
       <Card className="p-6">
         <DataTable
-          queryKey={tenantKeys.parties(tenantSlug ?? '')}
+          queryKey={tenantKeys.parties(tenantSlug)}
           queryFn={queryFn}
           columns={columns}
           pageSize={25}
