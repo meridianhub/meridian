@@ -74,22 +74,22 @@ func (c *e2eNilCELCompiler) CompileEligibility(_ string) (cel.Program, error) { 
 // newE2EAccountTypeCache creates a LocalAccountTypeCache with standard e2e test definitions.
 func newE2EAccountTypeCache() *cache.LocalAccountTypeCache {
 	defs := map[string]*accounttype.Definition{
-		"CLEARING_GBP": {Code: "CLEARING_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassClearing, EligibilityCEL: "true", Status: accounttype.StatusActive},
-		"CLEARING_USD": {Code: "CLEARING_USD", Version: 1, BehaviorClass: accounttype.BehaviorClassClearing, EligibilityCEL: "true", Status: accounttype.StatusActive},
-		"CLEARING_EUR": {Code: "CLEARING_EUR", Version: 1, BehaviorClass: accounttype.BehaviorClassClearing, EligibilityCEL: "true", Status: accounttype.StatusActive},
-		"NOSTRO_USD":   {Code: "NOSTRO_USD", Version: 1, BehaviorClass: accounttype.BehaviorClassNostro, EligibilityCEL: "true", Status: accounttype.StatusActive},
-		"NOSTRO_GBP":   {Code: "NOSTRO_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassNostro, EligibilityCEL: "true", Status: accounttype.StatusActive},
-		"NOSTRO_EUR":   {Code: "NOSTRO_EUR", Version: 1, BehaviorClass: accounttype.BehaviorClassNostro, EligibilityCEL: "true", Status: accounttype.StatusActive},
-		"VOSTRO_USD":   {Code: "VOSTRO_USD", Version: 1, BehaviorClass: accounttype.BehaviorClassVostro, EligibilityCEL: "true", Status: accounttype.StatusActive},
-		"VOSTRO_GBP":   {Code: "VOSTRO_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassVostro, EligibilityCEL: "true", Status: accounttype.StatusActive},
-		"HOLDING_GBP":  {Code: "HOLDING_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassHolding, EligibilityCEL: "true", Status: accounttype.StatusActive},
-		"HOLDING_USD":  {Code: "HOLDING_USD", Version: 1, BehaviorClass: accounttype.BehaviorClassHolding, EligibilityCEL: "true", Status: accounttype.StatusActive},
-		"HOLDING_EUR":  {Code: "HOLDING_EUR", Version: 1, BehaviorClass: accounttype.BehaviorClassHolding, EligibilityCEL: "true", Status: accounttype.StatusActive},
-		"HOLDING_KWH":  {Code: "HOLDING_KWH", Version: 1, BehaviorClass: accounttype.BehaviorClassHolding, EligibilityCEL: "true", Status: accounttype.StatusActive},
-		"SUSPENSE_GBP": {Code: "SUSPENSE_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassSuspense, EligibilityCEL: "true", Status: accounttype.StatusActive},
-		"SUSPENSE_USD": {Code: "SUSPENSE_USD", Version: 1, BehaviorClass: accounttype.BehaviorClassSuspense, EligibilityCEL: "true", Status: accounttype.StatusActive},
-		"REVENUE_GBP":  {Code: "REVENUE_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassRevenue, EligibilityCEL: "true", Status: accounttype.StatusActive},
-		"EXPENSE_GBP":  {Code: "EXPENSE_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassExpense, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"CLEARING_GBP":  {Code: "CLEARING_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassClearing, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"CLEARING_USD":  {Code: "CLEARING_USD", Version: 1, BehaviorClass: accounttype.BehaviorClassClearing, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"CLEARING_EUR":  {Code: "CLEARING_EUR", Version: 1, BehaviorClass: accounttype.BehaviorClassClearing, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"NOSTRO_USD":    {Code: "NOSTRO_USD", Version: 1, BehaviorClass: accounttype.BehaviorClassNostro, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"NOSTRO_GBP":    {Code: "NOSTRO_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassNostro, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"NOSTRO_EUR":    {Code: "NOSTRO_EUR", Version: 1, BehaviorClass: accounttype.BehaviorClassNostro, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"VOSTRO_USD":    {Code: "VOSTRO_USD", Version: 1, BehaviorClass: accounttype.BehaviorClassVostro, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"VOSTRO_GBP":    {Code: "VOSTRO_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassVostro, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"HOLDING_GBP":   {Code: "HOLDING_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassHolding, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"HOLDING_USD":   {Code: "HOLDING_USD", Version: 1, BehaviorClass: accounttype.BehaviorClassHolding, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"HOLDING_EUR":   {Code: "HOLDING_EUR", Version: 1, BehaviorClass: accounttype.BehaviorClassHolding, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"HOLDING_KWH":   {Code: "HOLDING_KWH", Version: 1, BehaviorClass: accounttype.BehaviorClassHolding, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"SUSPENSE_GBP":  {Code: "SUSPENSE_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassSuspense, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"SUSPENSE_USD":  {Code: "SUSPENSE_USD", Version: 1, BehaviorClass: accounttype.BehaviorClassSuspense, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"REVENUE_GBP":   {Code: "REVENUE_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassRevenue, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"EXPENSE_GBP":   {Code: "EXPENSE_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassExpense, EligibilityCEL: "true", Status: accounttype.StatusActive},
 		"INVENTORY_GBP": {Code: "INVENTORY_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassInventory, EligibilityCEL: "true", Status: accounttype.StatusActive},
 		"INVENTORY_KWH": {Code: "INVENTORY_KWH", Version: 1, BehaviorClass: accounttype.BehaviorClassInventory, EligibilityCEL: "true", Status: accounttype.StatusActive},
 	}
@@ -712,10 +712,10 @@ func TestE2E_AccountLifecycle(t *testing.T) {
 
 	t.Run("1. Initiate new internal account", func(t *testing.T) {
 		resp, err := svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-			AccountCode:    accountCode,
-			Name:           "GBP Clearing Account",
+			AccountCode:     accountCode,
+			Name:            "GBP Clearing Account",
 			ProductTypeCode: "CLEARING_GBP",
-			InstrumentCode: "GBP",
+			InstrumentCode:  "GBP",
 		})
 		require.NoError(t, err)
 		require.NotEmpty(t, resp.AccountId)
@@ -911,10 +911,10 @@ func TestE2E_MultiAssetAccounts(t *testing.T) {
 	t.Run("Create multi-asset accounts", func(t *testing.T) {
 		for _, tc := range testCases {
 			resp, err := svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-				AccountCode:    tc.code,
-				Name:           tc.name,
+				AccountCode:     tc.code,
+				Name:            tc.name,
 				ProductTypeCode: "HOLDING_GBP",
-				InstrumentCode: tc.instrument,
+				InstrumentCode:  tc.instrument,
 			})
 			require.NoError(t, err, "Failed to create account for %s", tc.instrument)
 
@@ -1147,10 +1147,10 @@ func TestE2E_MultiTenantIsolation(t *testing.T) {
 		// Create 3 accounts for tenant A
 		for i := 1; i <= 3; i++ {
 			resp, err := tc.svc.InitiateInternalAccount(ctxTenantA, &pb.InitiateInternalAccountRequest{
-				AccountCode:    fmt.Sprintf("TENANT_A_ACC_%d", i),
-				Name:           fmt.Sprintf("Tenant A Account %d", i),
+				AccountCode:     fmt.Sprintf("TENANT_A_ACC_%d", i),
+				Name:            fmt.Sprintf("Tenant A Account %d", i),
 				ProductTypeCode: "CLEARING_GBP",
-				InstrumentCode: "GBP",
+				InstrumentCode:  "GBP",
 			})
 			require.NoError(t, err)
 			assert.NotEmpty(t, resp.AccountId)
@@ -1161,10 +1161,10 @@ func TestE2E_MultiTenantIsolation(t *testing.T) {
 		// Create 2 accounts for tenant B
 		for i := 1; i <= 2; i++ {
 			resp, err := tc.svc.InitiateInternalAccount(ctxTenantB, &pb.InitiateInternalAccountRequest{
-				AccountCode:    fmt.Sprintf("TENANT_B_ACC_%d", i),
-				Name:           fmt.Sprintf("Tenant B Account %d", i),
+				AccountCode:     fmt.Sprintf("TENANT_B_ACC_%d", i),
+				Name:            fmt.Sprintf("Tenant B Account %d", i),
 				ProductTypeCode: "HOLDING_GBP",
-				InstrumentCode: "EUR",
+				InstrumentCode:  "EUR",
 			})
 			require.NoError(t, err)
 			assert.NotEmpty(t, resp.AccountId)
@@ -1220,19 +1220,19 @@ func TestE2E_MultiTenantIsolation(t *testing.T) {
 	t.Run("Both tenants can use the same account code independently", func(t *testing.T) {
 		// Tenant A creates account with code "SHARED_CODE"
 		respA, err := tc.svc.InitiateInternalAccount(ctxTenantA, &pb.InitiateInternalAccountRequest{
-			AccountCode:    "SHARED_CODE",
-			Name:           "Shared Code Account - Tenant A",
+			AccountCode:     "SHARED_CODE",
+			Name:            "Shared Code Account - Tenant A",
 			ProductTypeCode: "SUSPENSE_GBP",
-			InstrumentCode: "USD",
+			InstrumentCode:  "USD",
 		})
 		require.NoError(t, err)
 
 		// Tenant B creates account with the same code
 		respB, err := tc.svc.InitiateInternalAccount(ctxTenantB, &pb.InitiateInternalAccountRequest{
-			AccountCode:    "SHARED_CODE",
-			Name:           "Shared Code Account - Tenant B",
+			AccountCode:     "SHARED_CODE",
+			Name:            "Shared Code Account - Tenant B",
 			ProductTypeCode: "REVENUE_GBP",
-			InstrumentCode: "GBP",
+			InstrumentCode:  "GBP",
 		})
 		require.NoError(t, err)
 
@@ -1284,10 +1284,10 @@ func TestE2E_AsyncOperationsWithAwait(t *testing.T) {
 		go func() {
 			time.Sleep(100 * time.Millisecond) // Simulate async processing delay
 			_, _ = tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-				AccountCode:    accountCode,
-				Name:           "Async Created Account",
+				AccountCode:     accountCode,
+				Name:            "Async Created Account",
 				ProductTypeCode: "CLEARING_GBP",
-				InstrumentCode: "GBP",
+				InstrumentCode:  "GBP",
 			})
 		}()
 
@@ -1320,10 +1320,10 @@ func TestE2E_AsyncOperationsWithAwait(t *testing.T) {
 
 		// Create account
 		_, err := tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-			AccountCode:    accountCode,
-			Name:           "Status Change Test Account",
+			AccountCode:     accountCode,
+			Name:            "Status Change Test Account",
 			ProductTypeCode: "HOLDING_GBP",
-			InstrumentCode: "EUR",
+			InstrumentCode:  "EUR",
 		})
 		require.NoError(t, err)
 
@@ -1362,10 +1362,10 @@ func TestE2E_AsyncOperationsWithAwait(t *testing.T) {
 		go func() {
 			time.Sleep(200 * time.Millisecond)
 			_, _ = tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-				AccountCode:    uniqueCode,
-				Name:           "Retry Test Account",
+				AccountCode:     uniqueCode,
+				Name:            "Retry Test Account",
 				ProductTypeCode: "CLEARING_GBP",
-				InstrumentCode: "USD",
+				InstrumentCode:  "USD",
 			})
 		}()
 
@@ -1412,10 +1412,10 @@ func TestE2E_Pagination(t *testing.T) {
 	const totalAccounts = 10
 	for i := 1; i <= totalAccounts; i++ {
 		_, err := tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-			AccountCode:    fmt.Sprintf("PAGE_ACC_%02d", i),
-			Name:           fmt.Sprintf("Pagination Account %d", i),
+			AccountCode:     fmt.Sprintf("PAGE_ACC_%02d", i),
+			Name:            fmt.Sprintf("Pagination Account %d", i),
 			ProductTypeCode: "CLEARING_GBP",
-			InstrumentCode: "GBP",
+			InstrumentCode:  "GBP",
 		})
 		require.NoError(t, err)
 	}
@@ -1510,10 +1510,10 @@ func TestE2E_OptimisticLocking(t *testing.T) {
 
 		// Create account
 		createResp, err := tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-			AccountCode:    accountCode,
-			Name:           "Version Test Account",
+			AccountCode:     accountCode,
+			Name:            "Version Test Account",
 			ProductTypeCode: "CLEARING_GBP",
-			InstrumentCode: "GBP",
+			InstrumentCode:  "GBP",
 		})
 		require.NoError(t, err)
 		initialVersion := createResp.Facility.Version
@@ -1553,8 +1553,8 @@ func TestE2E_AllAccountTypes(t *testing.T) {
 
 	// Test cases for all account types (using product_type_code with behavior class prefix)
 	accountTypes := []struct {
-		productTypeCode      string
-		behaviorClass        string
+		productTypeCode     string
+		behaviorClass       string
 		requireCounterparty bool
 		name                string
 	}{
@@ -1740,10 +1740,10 @@ func TestE2E_PerformanceBaselines(t *testing.T) {
 			start := time.Now()
 
 			_, err := tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-				AccountCode:    fmt.Sprintf("PERF_ACC_%04d", i),
-				Name:           fmt.Sprintf("Performance Test Account %d", i),
+				AccountCode:     fmt.Sprintf("PERF_ACC_%04d", i),
+				Name:            fmt.Sprintf("Performance Test Account %d", i),
 				ProductTypeCode: "CLEARING_GBP",
-				InstrumentCode: "GBP",
+				InstrumentCode:  "GBP",
 			})
 			require.NoError(t, err)
 
@@ -1766,10 +1766,10 @@ func TestE2E_PerformanceBaselines(t *testing.T) {
 			code := fmt.Sprintf("RETRIEVE_ACC_%04d", i)
 			codes[i] = code
 			_, err := tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-				AccountCode:    code,
-				Name:           fmt.Sprintf("Retrieval Test Account %d", i),
+				AccountCode:     code,
+				Name:            fmt.Sprintf("Retrieval Test Account %d", i),
 				ProductTypeCode: "HOLDING_GBP",
-				InstrumentCode: "EUR",
+				InstrumentCode:  "EUR",
 			})
 			require.NoError(t, err)
 		}
@@ -1827,10 +1827,10 @@ func TestE2E_PerformanceBaselines(t *testing.T) {
 		// Create 50 accounts for pagination tests
 		for i := 0; i < 50; i++ {
 			_, err := tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-				AccountCode:    fmt.Sprintf("LIST_ACC_%04d", i),
-				Name:           fmt.Sprintf("List Test Account %d", i),
+				AccountCode:     fmt.Sprintf("LIST_ACC_%04d", i),
+				Name:            fmt.Sprintf("List Test Account %d", i),
 				ProductTypeCode: "SUSPENSE_GBP",
-				InstrumentCode: "USD",
+				InstrumentCode:  "USD",
 			})
 			require.NoError(t, err)
 		}
@@ -1872,10 +1872,10 @@ func TestE2E_PerformanceBaselines(t *testing.T) {
 				for i := 0; i < opsPerWorker; i++ {
 					code := fmt.Sprintf("CONCURRENT_%d_%d", workerID, i)
 					_, err := tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-						AccountCode:    code,
-						Name:           fmt.Sprintf("Concurrent Account %d-%d", workerID, i),
+						AccountCode:     code,
+						Name:            fmt.Sprintf("Concurrent Account %d-%d", workerID, i),
 						ProductTypeCode: "CLEARING_GBP",
-						InstrumentCode: "GBP",
+						InstrumentCode:  "GBP",
 					})
 					if err != nil {
 						errChan <- err

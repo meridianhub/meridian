@@ -28,9 +28,9 @@ type InternalAccount struct {
 	instrumentCode  string          // References Reference Data (e.g., "USD", "GBP")
 	dimension       string          // From reference_data (e.g., "CURRENCY", "ENERGY")
 	status          AccountStatus
-	orgPartyID      *uuid.UUID            // Organization party ID for org-scoped accounts (nil = global)
-	counterparty    *CounterpartyDetails  // Required for NOSTRO/VOSTRO
-	attributes      map[string]string     // Metadata
+	orgPartyID      *uuid.UUID           // Organization party ID for org-scoped accounts (nil = global)
+	counterparty    *CounterpartyDetails // Required for NOSTRO/VOSTRO
+	attributes      map[string]string    // Metadata
 	version         int64
 	createdAt       time.Time
 	updatedAt       time.Time
