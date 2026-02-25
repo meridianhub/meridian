@@ -115,7 +115,7 @@ export function RegisterAssociationsDialog({
     // Include tenantSlug in the key to prevent cross-tenant cache contamination.
     queryKey: ['party-search', tenantSlug ?? '', debouncedSearch],
     queryFn: () => clients.party.listParties({ searchQuery: debouncedSearch, pageSize: 20 }),
-    enabled: debouncedSearch.length >= 2,
+    enabled: !!tenantSlug && debouncedSearch.length >= 2,
   })
 
   const searchResults: Party[] = partySearchData?.parties ?? []
@@ -147,6 +147,7 @@ export function RegisterAssociationsDialog({
         for (const [field, msg] of Object.entries(result.fieldErrors)) {
           if (field === 'related_party_id') fieldMap.relatedPartyId = msg
           else if (field === 'relationship_type') fieldMap.relationshipType = msg
+          else if (field === 'effective_to') fieldMap.effectiveTo = msg
           else fieldMap.general = msg
         }
         setErrors(fieldMap)
@@ -244,6 +245,7 @@ export function RegisterAssociationsDialog({
               </label>
               <Input
                 id="relatedParty"
+                role="combobox"
                 value={searchInput}
                 onChange={handleSearchChange}
                 onFocus={() => setShowDropdown(true)}
@@ -251,8 +253,8 @@ export function RegisterAssociationsDialog({
                 autoComplete="off"
                 aria-describedby={errors.relatedPartyId ? 'relatedParty-error' : undefined}
                 aria-required="true"
-                aria-label="Related Party"
                 aria-autocomplete="list"
+                aria-haspopup="listbox"
                 aria-controls={showResults && searchResults.length > 0 ? 'party-search-listbox' : undefined}
                 aria-expanded={showResults && searchResults.length > 0}
               />
