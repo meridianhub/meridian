@@ -106,9 +106,17 @@ func assertErrorResult(t *testing.T, result interface{}) {
 	t.Helper()
 	switch v := result.(type) {
 	case map[string]interface{}:
-		valid, _ := v["valid"].(bool)
-		if valid {
-			t.Error("expected valid=false, got valid=true in map result")
+		validRaw, exists := v["valid"]
+		if !exists {
+			t.Error("expected error map to include 'valid' key")
+			return
+		}
+		valid, ok := validRaw.(bool)
+		if !ok || valid {
+			t.Error("expected valid=false in map result")
+		}
+		if _, ok := v["errors"]; !ok {
+			t.Error("expected error map to include 'errors' key")
 		}
 	case mcperrors.FormattedError:
 		if v.Valid {
@@ -324,12 +332,15 @@ func TestInstrumentsList_ValidQuery(t *testing.T) {
 	m := resultMap(t, result)
 
 	if m["count"] != 2 {
-		t.Errorf("expected count=2, got %v", m["count"])
+		t.Fatalf("expected count=2, got %v", m["count"])
 	}
 
 	instruments, ok := m["instruments"].([]map[string]interface{})
 	if !ok {
 		t.Fatal("expected instruments slice")
+	}
+	if len(instruments) == 0 {
+		t.Fatal("expected at least one instrument")
 	}
 	if instruments[0]["code"] != "USD" {
 		t.Errorf("expected first instrument code USD, got %v", instruments[0]["code"])

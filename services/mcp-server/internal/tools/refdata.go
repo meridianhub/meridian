@@ -340,11 +340,15 @@ func buildSagaDescribeTool(client SagaRegistryClient) Tool {
 				return formatError("either id or name is required"), nil
 			}
 
-			resp, err := client.GetSaga(ctx, &sagav1.GetSagaRequest{
-				Id:      p.ID,
-				Name:    p.Name,
-				Version: p.Version,
-			})
+			req := &sagav1.GetSagaRequest{}
+			if p.ID != "" {
+				req.Id = p.ID
+			} else {
+				req.Name = p.Name
+				req.Version = p.Version
+			}
+
+			resp, err := client.GetSaga(ctx, req)
 			if err != nil {
 				fe := mcperrors.FormatGRPCError(err)
 				return fe, nil
