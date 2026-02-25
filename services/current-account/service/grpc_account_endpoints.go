@@ -418,59 +418,12 @@ func (s *Service) UpdateCurrentAccount(ctx context.Context, req *pb.UpdateCurren
 	// Track if any updates were made
 	updated := false
 
-	// Apply overdraft settings updates if any overdraft fields are provided
+	// Overdraft settings are no longer managed at the domain level.
+	// Overdraft is now a product-type behavior defined in the Product Directory.
+	// Requests to update overdraft fields are logged and ignored.
 	if req.OverdraftLimit != nil || req.OverdraftEnabled != nil || req.OverdraftRate != nil {
-		// Determine new overdraft values, using current values as defaults
-		newLimit := account.OverdraftLimit()
-		newRate := account.OverdraftRate()
-		newEnabled := account.OverdraftEnabled()
-
-		// Apply overdraft limit if provided
-		if req.OverdraftLimit != nil {
-			limitCurrency := req.OverdraftLimit.Amount.CurrencyCode
-			if limitCurrency != account.Balance().CurrencyCode() {
-				operationStatus = opStatusCurrencyMismatch
-				return nil, status.Errorf(codes.InvalidArgument,
-					"overdraft limit currency mismatch: expected %s, got %s",
-					account.Balance().CurrencyCode(), limitCurrency)
-			}
-
-			// Convert to minor units
-			limitCents := req.OverdraftLimit.Amount.Units*100 + int64(req.OverdraftLimit.Amount.Nanos/10000000)
-			var err error
-			newLimit, err = domain.NewMoney(limitCurrency, limitCents)
-			if err != nil {
-				operationStatus = operationStatusInvalidCurrency
-				return nil, status.Errorf(codes.InvalidArgument, "invalid overdraft limit: %v", err)
-			}
-		}
-
-		// Apply overdraft rate if provided
-		if req.OverdraftRate != nil {
-			newRate = *req.OverdraftRate
-		}
-
-		// Apply overdraft enabled if provided
-		if req.OverdraftEnabled != nil {
-			newEnabled = *req.OverdraftEnabled
-		}
-
-		// Use domain method to update overdraft settings with validation
-		account, err = account.UpdateOverdraftSettings(newLimit, newRate, newEnabled)
-		if err != nil {
-			if errors.Is(err, domain.ErrNegativeOverdraftRate) {
-				operationStatus = opStatusInvalidAmount
-				return nil, status.Errorf(codes.InvalidArgument, "invalid overdraft rate: %v", err)
-			}
-			operationStatus = "update_overdraft_failed"
-			return nil, status.Errorf(codes.InvalidArgument, "failed to update overdraft settings: %v", err)
-		}
-		updated = true
-
-		s.logger.Info("overdraft settings updated",
-			"account_id", req.AccountId,
-			"overdraft_enabled", newEnabled,
-			"overdraft_rate", newRate)
+		s.logger.Warn("overdraft update request ignored: overdraft is now product-type behavior",
+			"account_id", req.AccountId)
 	}
 
 	// If no updates were made, return current state

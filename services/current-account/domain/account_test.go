@@ -19,6 +19,29 @@ func TestNewCurrentAccount(t *testing.T) {
 	assert.Equal(t, int64(0), account.Balance().AmountCents())
 	assert.Equal(t, CurrencyGBP, account.Balance().Currency())
 	assert.Equal(t, AccountStatusActive, account.Status())
+	assert.Equal(t, "GB82WEST12345698765432", account.ExternalIdentifier())
+	assert.Equal(t, "GBP", account.InstrumentCode())
+	assert.Equal(t, "CURRENCY", account.Dimension())
+}
+
+func TestNewCurrentAccount_InstrumentAndDimensionFields(t *testing.T) {
+	account, err := NewCurrentAccount("ACC-001", "IBAN-001", "PARTY-001", "GBP")
+	require.NoError(t, err)
+
+	assert.Equal(t, "GBP", account.InstrumentCode())
+	assert.Equal(t, "CURRENCY", account.Dimension())
+	assert.Equal(t, "IBAN-001", account.ExternalIdentifier())
+	// Deprecated alias should still work
+	assert.Equal(t, "IBAN-001", account.AccountIdentification())
+}
+
+func TestNewCurrentAccountWithDimension_ExplicitDimension(t *testing.T) {
+	account, err := NewCurrentAccountWithDimension("ACC-001", "IDENT-001", "PARTY-001", "GBP", "CURRENCY")
+	require.NoError(t, err)
+
+	assert.Equal(t, "GBP", account.InstrumentCode())
+	assert.Equal(t, "CURRENCY", account.Dimension())
+	assert.Equal(t, "IDENT-001", account.ExternalIdentifier())
 }
 
 func TestDeposit(t *testing.T) {
@@ -58,7 +81,7 @@ func TestDeposit(t *testing.T) {
 			initialBalance, _ := NewMoney("GBP", tt.initialBal)
 			account := NewCurrentAccountBuilder().
 				WithAccountID("ACC-001").
-				WithAccountIdentification("GB82WEST12345698765432").
+				WithExternalIdentifier("GB82WEST12345698765432").
 				WithPartyID("PARTY-001").
 				WithBalance(initialBalance).
 				WithAvailableBalance(initialBalance).
@@ -101,7 +124,7 @@ func TestDepositWhenClosed(t *testing.T) {
 	zeroMoney, _ := NewMoney("GBP", 0)
 	account := NewCurrentAccountBuilder().
 		WithAccountID("ACC-001").
-		WithAccountIdentification("GB82WEST12345698765432").
+		WithExternalIdentifier("GB82WEST12345698765432").
 		WithPartyID("PARTY-001").
 		WithBalance(zeroMoney).
 		WithAvailableBalance(zeroMoney).
@@ -150,7 +173,7 @@ func TestPrepareForCreditWhenClosed(t *testing.T) {
 	zeroMoney, _ := NewMoney("GBP", 0)
 	account := NewCurrentAccountBuilder().
 		WithAccountID("ACC-001").
-		WithAccountIdentification("GB82WEST12345698765432").
+		WithExternalIdentifier("GB82WEST12345698765432").
 		WithPartyID("PARTY-001").
 		WithBalance(zeroMoney).
 		WithAvailableBalance(zeroMoney).
@@ -168,7 +191,7 @@ func TestPrepareForDebit(t *testing.T) {
 	balance, _ := NewMoney("GBP", 10000) // £100.00
 	account := NewCurrentAccountBuilder().
 		WithAccountID("ACC-001").
-		WithAccountIdentification("GB82WEST12345698765432").
+		WithExternalIdentifier("GB82WEST12345698765432").
 		WithPartyID("PARTY-001").
 		WithBalance(balance).
 		WithAvailableBalance(balance).
@@ -193,7 +216,7 @@ func TestPrepareForDebitInsufficientFunds(t *testing.T) {
 	balance, _ := NewMoney("GBP", 5000) // £50.00
 	account := NewCurrentAccountBuilder().
 		WithAccountID("ACC-001").
-		WithAccountIdentification("GB82WEST12345698765432").
+		WithExternalIdentifier("GB82WEST12345698765432").
 		WithPartyID("PARTY-001").
 		WithBalance(balance).
 		WithAvailableBalance(balance).
@@ -213,7 +236,7 @@ func TestPrepareForDebitWhenFrozen(t *testing.T) {
 	balance, _ := NewMoney("GBP", 10000)
 	account := NewCurrentAccountBuilder().
 		WithAccountID("ACC-001").
-		WithAccountIdentification("GB82WEST12345698765432").
+		WithExternalIdentifier("GB82WEST12345698765432").
 		WithPartyID("PARTY-001").
 		WithBalance(balance).
 		WithAvailableBalance(balance).
@@ -233,7 +256,7 @@ func TestPrepareForDebitWhenClosed(t *testing.T) {
 	zeroMoney, _ := NewMoney("GBP", 0)
 	account := NewCurrentAccountBuilder().
 		WithAccountID("ACC-001").
-		WithAccountIdentification("GB82WEST12345698765432").
+		WithExternalIdentifier("GB82WEST12345698765432").
 		WithPartyID("PARTY-001").
 		WithBalance(zeroMoney).
 		WithAvailableBalance(zeroMoney).
@@ -287,7 +310,7 @@ func TestWithdraw(t *testing.T) {
 			initialBalance, _ := NewMoney("GBP", tt.initialBal)
 			account := NewCurrentAccountBuilder().
 				WithAccountID("ACC-001").
-				WithAccountIdentification("GB82WEST12345698765432").
+				WithExternalIdentifier("GB82WEST12345698765432").
 				WithPartyID("PARTY-001").
 				WithBalance(initialBalance).
 				WithAvailableBalance(initialBalance).
@@ -317,60 +340,22 @@ func TestWithdraw(t *testing.T) {
 	}
 }
 
-func TestWithdrawWithOverdraft(t *testing.T) {
-	// Build account with initial balance using builder
-	initialBalance, _ := NewMoney("GBP", 1000)
-	zeroMoney, _ := NewMoney("GBP", 0)
-	account := NewCurrentAccountBuilder().
-		WithAccountID("ACC-001").
-		WithAccountIdentification("GB82WEST12345698765432").
-		WithPartyID("PARTY-001").
-		WithBalance(initialBalance).
-		WithAvailableBalance(initialBalance).
-		WithOverdraftLimit(zeroMoney).
-		WithStatus(AccountStatusActive).
-		WithVersion(1).
-		Build()
-
-	// Set overdraft limit of £500
-	overdraftLimit, _ := NewMoney("GBP", 500)
-	account, err := account.SetOverdraftLimit(overdraftLimit, 19.9, true)
-	assert.NoError(t, err)
-
-	// Should be able to withdraw £1200 (balance + overdraft)
-	withdrawMoney, _ := NewMoney("GBP", 1200)
-	updatedAccount, err := account.Withdraw(withdrawMoney)
-	assert.NoError(t, err)
-
-	assert.Equal(t, int64(-200), updatedAccount.Balance().AmountCents())
-}
-
-func TestWithdraw_ExceedsOverdraft(t *testing.T) {
+func TestWithdraw_ExceedsAvailableBalance(t *testing.T) {
 	// Build account with £10 balance
 	initialBalance, _ := NewMoney("GBP", 1000) // £10
-	zeroMoney, _ := NewMoney("GBP", 0)
 	account := NewCurrentAccountBuilder().
 		WithAccountID("ACC-001").
-		WithAccountIdentification("GB82WEST12345698765432").
+		WithExternalIdentifier("GB82WEST12345698765432").
 		WithPartyID("PARTY-001").
 		WithBalance(initialBalance).
 		WithAvailableBalance(initialBalance).
-		WithOverdraftLimit(zeroMoney).
 		WithStatus(AccountStatusActive).
 		WithVersion(1).
 		Build()
 
-	// Set overdraft limit of £5
-	overdraftLimit, _ := NewMoney("GBP", 500) // £5
-	account, err := account.SetOverdraftLimit(overdraftLimit, 19.9, true)
-	require.NoError(t, err)
-
-	// Available balance should be £15 (£10 balance + £5 overdraft)
-	assert.Equal(t, int64(1500), account.AvailableBalance().AmountCents())
-
-	// Attempt to withdraw £20 (exceeds £15 available)
+	// Attempt to withdraw £20 (exceeds £10 available)
 	withdrawMoney, _ := NewMoney("GBP", 2000) // £20
-	_, err = account.Withdraw(withdrawMoney)
+	_, err := account.Withdraw(withdrawMoney)
 
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, ErrInsufficientFunds)
@@ -381,7 +366,7 @@ func TestWithdraw_CurrencyMismatch(t *testing.T) {
 	initialBalance, _ := NewMoney("GBP", 10000) // £100
 	account := NewCurrentAccountBuilder().
 		WithAccountID("ACC-001").
-		WithAccountIdentification("GB82WEST12345698765432").
+		WithExternalIdentifier("GB82WEST12345698765432").
 		WithPartyID("PARTY-001").
 		WithBalance(initialBalance).
 		WithAvailableBalance(initialBalance).
@@ -425,7 +410,7 @@ func TestWithdraw_ClosedAccount(t *testing.T) {
 	balance, _ := NewMoney("GBP", 10000)
 	account := NewCurrentAccountBuilder().
 		WithAccountID("ACC-001").
-		WithAccountIdentification("GB82WEST12345698765432").
+		WithExternalIdentifier("GB82WEST12345698765432").
 		WithPartyID("PARTY-001").
 		WithBalance(balance).
 		WithAvailableBalance(balance).
@@ -446,7 +431,7 @@ func TestWithdraw_ExactAvailableBalance(t *testing.T) {
 	initialBalance, _ := NewMoney("GBP", 10000) // £100
 	account := NewCurrentAccountBuilder().
 		WithAccountID("ACC-001").
-		WithAccountIdentification("GB82WEST12345698765432").
+		WithExternalIdentifier("GB82WEST12345698765432").
 		WithPartyID("PARTY-001").
 		WithBalance(initialBalance).
 		WithAvailableBalance(initialBalance).
@@ -462,20 +447,18 @@ func TestWithdraw_ExactAvailableBalance(t *testing.T) {
 	assert.Equal(t, int64(0), updatedAccount.Balance().AmountCents())
 }
 
-func TestWithdraw_ExactAvailableBalanceWithOverdraft(t *testing.T) {
-	// Build account with £10 balance and £5 overdraft = £15 available
+func TestWithdraw_ExactAvailableBalanceFromService(t *testing.T) {
+	// Simulate the service layer setting availableBalance independently from balance.
+	// The domain no longer manages overdraft - service sets available balance.
 	initialBalance, _ := NewMoney("GBP", 1000)   // £10
-	overdraftLimit, _ := NewMoney("GBP", 500)    // £5
-	availableBalance, _ := NewMoney("GBP", 1500) // £15
+	availableBalance, _ := NewMoney("GBP", 1500) // £15 (service has added overdraft externally)
 
 	account := NewCurrentAccountBuilder().
 		WithAccountID("ACC-001").
-		WithAccountIdentification("GB82WEST12345698765432").
+		WithExternalIdentifier("GB82WEST12345698765432").
 		WithPartyID("PARTY-001").
 		WithBalance(initialBalance).
 		WithAvailableBalance(availableBalance).
-		WithOverdraftLimit(overdraftLimit).
-		WithOverdraftEnabled(true).
 		WithStatus(AccountStatusActive).
 		WithVersion(1).
 		Build()
@@ -485,14 +468,15 @@ func TestWithdraw_ExactAvailableBalanceWithOverdraft(t *testing.T) {
 	updatedAccount, err := account.Withdraw(withdrawMoney)
 
 	assert.NoError(t, err)
-	assert.Equal(t, int64(-500), updatedAccount.Balance().AmountCents()) // Balance is -£5 (fully using overdraft)
+	// Balance goes from £10 to -£5 (service-managed overdraft zone)
+	assert.Equal(t, int64(-500), updatedAccount.Balance().AmountCents())
 }
 
 func TestWithdraw_NegativeAmount(t *testing.T) {
 	initialBalance, _ := NewMoney("GBP", 10000)
 	account := NewCurrentAccountBuilder().
 		WithAccountID("ACC-001").
-		WithAccountIdentification("GB82WEST12345698765432").
+		WithExternalIdentifier("GB82WEST12345698765432").
 		WithPartyID("PARTY-001").
 		WithBalance(initialBalance).
 		WithAvailableBalance(initialBalance).
@@ -535,33 +519,26 @@ func TestStatusTransitions(t *testing.T) {
 	assert.ErrorIs(t, err, ErrInvalidStatusTransition)
 }
 
-func TestSetOverdraftLimit(t *testing.T) {
-	// Build account with initial balance using builder
-	initialBalance, _ := NewMoney("GBP", 1000)
-	zeroMoney, _ := NewMoney("GBP", 0)
+func TestBuilder_InstrumentCode_Dimension(t *testing.T) {
+	// Test that builder correctly sets instrumentCode and dimension fields
+	balance, _ := NewMoney("GBP", 1000)
 	account := NewCurrentAccountBuilder().
 		WithAccountID("ACC-001").
-		WithAccountIdentification("GB82WEST12345698765432").
+		WithExternalIdentifier("GB82WEST12345698765432").
+		WithInstrumentCode("GBP").
+		WithDimension("CURRENCY").
 		WithPartyID("PARTY-001").
-		WithBalance(initialBalance).
-		WithAvailableBalance(initialBalance).
-		WithOverdraftLimit(zeroMoney).
+		WithBalance(balance).
+		WithAvailableBalance(balance).
 		WithStatus(AccountStatusActive).
 		WithVersion(1).
 		Build()
 
-	overdraftLimit, _ := NewMoney("GBP", 500)
-	updatedAccount, err := account.SetOverdraftLimit(overdraftLimit, 19.9, true)
-	assert.NoError(t, err)
-
-	assert.Equal(t, int64(500), updatedAccount.OverdraftLimit().AmountCents())
-	assert.Equal(t, 19.9, updatedAccount.OverdraftRate())
-	assert.True(t, updatedAccount.OverdraftEnabled())
-	assert.Equal(t, int64(1500), updatedAccount.AvailableBalance().AmountCents())
-
-	// Original account should be unchanged (immutability)
-	assert.Equal(t, int64(0), account.OverdraftLimit().AmountCents())
-	assert.False(t, account.OverdraftEnabled())
+	assert.Equal(t, "GBP", account.InstrumentCode())
+	assert.Equal(t, "CURRENCY", account.Dimension())
+	assert.Equal(t, "GB82WEST12345698765432", account.ExternalIdentifier())
+	// Deprecated alias
+	assert.Equal(t, "GB82WEST12345698765432", account.AccountIdentification())
 }
 
 func TestCurrencyMismatch(t *testing.T) {
@@ -616,76 +593,18 @@ func TestNewCurrentAccount_InvalidCurrency_ReturnsError(t *testing.T) {
 // Note: The new decimal-based Money implementation does not overflow on arithmetic
 // operations like int64 did. Overflow is now checked when converting to minor units.
 
-func TestSetOverdraftLimit_LargeValues(t *testing.T) {
-	// Build account with large balance using builder
-	largeBalance, err := NewMoney("GBP", 1000000000000) // 10 billion cents = 100 million GBP
-	require.NoError(t, err)
-	zeroMoney, _ := NewMoney("GBP", 0)
-
-	account := NewCurrentAccountBuilder().
-		WithAccountID("ACC-001").
-		WithAccountIdentification("GB82WEST12345698765432").
-		WithPartyID("PARTY-001").
-		WithBalance(largeBalance).
-		WithAvailableBalance(largeBalance).
-		WithOverdraftLimit(zeroMoney).
-		WithStatus(AccountStatusActive).
-		WithVersion(1).
-		Build()
-
-	// Set overdraft
-	overdraftLimit, err := NewMoney("GBP", 100000000000) // 1 billion cents
-	require.NoError(t, err)
-
-	updatedAccount, err := account.SetOverdraftLimit(overdraftLimit, 0.1, true)
-	assert.NoError(t, err, "Large values should be handled correctly")
-
-	// Available balance should be sum
-	assert.Equal(t, int64(1100000000000), updatedAccount.AvailableBalance().AmountCents())
-}
-
-func TestSetOverdraftLimit_DisabledDoesNotAddToAvailable(t *testing.T) {
-	// Build account with balance using builder
-	balance, err := NewMoney("GBP", 100000)
-	require.NoError(t, err)
-	zeroMoney, _ := NewMoney("GBP", 0)
-
-	account := NewCurrentAccountBuilder().
-		WithAccountID("ACC-001").
-		WithAccountIdentification("GB82WEST12345698765432").
-		WithPartyID("PARTY-001").
-		WithBalance(balance).
-		WithAvailableBalance(balance).
-		WithOverdraftLimit(zeroMoney).
-		WithStatus(AccountStatusActive).
-		WithVersion(1).
-		Build()
-
-	// Set overdraft disabled
-	overdraftLimit, err := NewMoney("GBP", 50000)
-	require.NoError(t, err)
-
-	updatedAccount, err := account.SetOverdraftLimit(overdraftLimit, 0.1, false)
-	assert.NoError(t, err)
-
-	// Available balance should NOT include overdraft when disabled
-	assert.Equal(t, int64(100000), updatedAccount.AvailableBalance().AmountCents())
-}
-
 // Tests for large deposits
 func TestDeposit_LargeValues(t *testing.T) {
 	// Build account with large balance using builder
 	balance, err := NewMoney("GBP", 1000000000000)
 	require.NoError(t, err)
-	zeroMoney, _ := NewMoney("GBP", 0)
 
 	account := NewCurrentAccountBuilder().
 		WithAccountID("ACC-001").
-		WithAccountIdentification("GB82WEST12345698765432").
+		WithExternalIdentifier("GB82WEST12345698765432").
 		WithPartyID("PARTY-001").
 		WithBalance(balance).
 		WithAvailableBalance(balance).
-		WithOverdraftLimit(zeroMoney).
 		WithStatus(AccountStatusActive).
 		WithVersion(1).
 		Build()
@@ -807,19 +726,17 @@ func TestImmutability_FailedOperationDoesNotModify(t *testing.T) {
 func TestCurrentAccountBuilder(t *testing.T) {
 	balance, _ := NewMoney("GBP", 10000)
 	available, _ := NewMoney("GBP", 15000)
-	overdraft, _ := NewMoney("GBP", 5000)
 	now := time.Now()
 
 	account := NewCurrentAccountBuilder().
 		WithAccountID("ACC-001").
-		WithAccountIdentification("GB82WEST12345698765432").
+		WithExternalIdentifier("GB82WEST12345698765432").
+		WithInstrumentCode("GBP").
+		WithDimension("CURRENCY").
 		WithPartyID("party-123").
 		WithBalance(balance).
 		WithAvailableBalance(available).
 		WithStatus(AccountStatusActive).
-		WithOverdraftLimit(overdraft).
-		WithOverdraftEnabled(true).
-		WithOverdraftRate(0.15).
 		WithVersion(5).
 		WithCreatedAt(now).
 		WithUpdatedAt(now).
@@ -827,59 +744,15 @@ func TestCurrentAccountBuilder(t *testing.T) {
 		Build()
 
 	assert.Equal(t, "ACC-001", account.AccountID())
-	assert.Equal(t, "GB82WEST12345698765432", account.AccountIdentification())
+	assert.Equal(t, "GB82WEST12345698765432", account.ExternalIdentifier())
+	assert.Equal(t, "GB82WEST12345698765432", account.AccountIdentification()) // deprecated alias
+	assert.Equal(t, "GBP", account.InstrumentCode())
+	assert.Equal(t, "CURRENCY", account.Dimension())
 	assert.Equal(t, "party-123", account.PartyID())
 	assert.Equal(t, int64(10000), account.Balance().AmountCents())
 	assert.Equal(t, int64(15000), account.AvailableBalance().AmountCents())
 	assert.Equal(t, AccountStatusActive, account.Status())
-	assert.Equal(t, int64(5000), account.OverdraftLimit().AmountCents())
-	assert.True(t, account.OverdraftEnabled())
-	assert.Equal(t, 0.15, account.OverdraftRate())
 	assert.Equal(t, int64(5), account.Version())
-}
-
-// calculateAvailableBalance tests
-
-func TestCalculateAvailableBalance(t *testing.T) {
-	t.Run("without overdraft returns balance", func(t *testing.T) {
-		balance, _ := NewMoney("GBP", 10000)
-		overdraft, _ := NewMoney("GBP", 5000)
-
-		result, err := calculateAvailableBalance(balance, overdraft, false)
-
-		require.NoError(t, err)
-		assert.Equal(t, balance, result)
-	})
-
-	t.Run("with overdraft returns balance plus limit", func(t *testing.T) {
-		balance, _ := NewMoney("GBP", 10000)
-		overdraft, _ := NewMoney("GBP", 5000)
-
-		result, err := calculateAvailableBalance(balance, overdraft, true)
-
-		require.NoError(t, err)
-		assert.Equal(t, int64(15000), result.AmountCents())
-	})
-
-	t.Run("negative balance with overdraft", func(t *testing.T) {
-		balance, _ := NewMoney("GBP", -3000)
-		overdraft, _ := NewMoney("GBP", 5000)
-
-		result, err := calculateAvailableBalance(balance, overdraft, true)
-
-		require.NoError(t, err)
-		assert.Equal(t, int64(2000), result.AmountCents())
-	})
-
-	t.Run("currency mismatch returns error", func(t *testing.T) {
-		balance, _ := NewMoney("GBP", 10000)
-		overdraft, _ := NewMoney("USD", 5000)
-
-		_, err := calculateAvailableBalance(balance, overdraft, true)
-
-		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrAvailableBalanceCalculation)
-	})
 }
 
 // Tests for state machine enforcement
@@ -1139,42 +1012,6 @@ func TestClose_TerminalState(t *testing.T) {
 	})
 }
 
-func TestUpdateOverdraftSettings_Valid(t *testing.T) {
-	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
-	require.NoError(t, err)
-
-	limit, _ := NewMoney("GBP", 50000)
-	updatedAccount, err := account.UpdateOverdraftSettings(limit, 19.9, true)
-
-	assert.NoError(t, err)
-	assert.Equal(t, int64(50000), updatedAccount.OverdraftLimit().AmountCents())
-	assert.Equal(t, 19.9, updatedAccount.OverdraftRate())
-	assert.True(t, updatedAccount.OverdraftEnabled())
-}
-
-func TestUpdateOverdraftSettings_NegativeRate(t *testing.T) {
-	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
-	require.NoError(t, err)
-
-	limit, _ := NewMoney("GBP", 50000)
-	_, err = account.UpdateOverdraftSettings(limit, -0.5, true)
-
-	assert.Error(t, err)
-	assert.ErrorIs(t, err, ErrNegativeOverdraftRate)
-}
-
-func TestUpdateOverdraftSettings_ZeroRate(t *testing.T) {
-	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
-	require.NoError(t, err)
-
-	// Zero rate should be valid (promotional period, etc.)
-	limit, _ := NewMoney("GBP", 50000)
-	updatedAccount, err := account.UpdateOverdraftSettings(limit, 0, true)
-
-	assert.NoError(t, err)
-	assert.Equal(t, 0.0, updatedAccount.OverdraftRate())
-}
-
 func TestStatusHistory_Immutability(t *testing.T) {
 	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
 	require.NoError(t, err)
@@ -1356,13 +1193,6 @@ func TestOrgPartyID_PreservedAcrossOperations(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, prepared.OrgPartyID())
 	assert.Equal(t, orgPartyID, *prepared.OrgPartyID())
-
-	// SetOverdraftLimit
-	limit, _ := NewMoney("GBP", 5000)
-	afterOverdraft, err := prepared.SetOverdraftLimit(limit, 10.0, true)
-	require.NoError(t, err)
-	require.NotNil(t, afterOverdraft.OrgPartyID())
-	assert.Equal(t, orgPartyID, *afterOverdraft.OrgPartyID())
 }
 
 func TestBuilder_WithOrgPartyID(t *testing.T) {
@@ -1371,7 +1201,7 @@ func TestBuilder_WithOrgPartyID(t *testing.T) {
 
 	account := NewCurrentAccountBuilder().
 		WithAccountID("ACC-001").
-		WithAccountIdentification("GB82WEST12345698765432").
+		WithExternalIdentifier("GB82WEST12345698765432").
 		WithPartyID("party-123").
 		WithOrgPartyID(&orgPartyID).
 		WithBalance(balance).
@@ -1390,7 +1220,7 @@ func TestBuilder_WithNilOrgPartyID(t *testing.T) {
 
 	account := NewCurrentAccountBuilder().
 		WithAccountID("ACC-001").
-		WithAccountIdentification("GB82WEST12345698765432").
+		WithExternalIdentifier("GB82WEST12345698765432").
 		WithPartyID("party-123").
 		WithOrgPartyID(nil).
 		WithBalance(balance).

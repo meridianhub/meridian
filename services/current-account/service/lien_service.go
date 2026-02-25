@@ -1000,41 +1000,34 @@ func (s *Service) hydrateAccountWithBalance(ctx context.Context, account domain.
 	}
 
 	// Create balance Money object
-	balance, err := domain.NewMoney(string(account.Balance().Currency()), balanceCents)
+	balance, err := domain.NewMoneyFromInstrument(account.InstrumentCode(), account.Dimension(), balanceCents)
 	if err != nil {
 		return domain.CurrentAccount{}, fmt.Errorf("failed to create balance: %w", err)
 	}
 
-	// Calculate available balance: balance + overdraft (if enabled) - active liens
+	// Calculate available balance: balance - active liens
+	// Overdraft is now product-type behavior and no longer managed in the domain.
 	availableBalance := s.calculateAvailableBalance(ctx, account.ID(), balance)
-	if account.OverdraftEnabled() {
-		overdraftLimitCents, _ := account.OverdraftLimit().ToMinorUnits()
-		if overdraftLimitCents > 0 {
-			// Add overdraft to available balance
-			availableWithOverdraft, err := availableBalance.Add(account.OverdraftLimit())
-			if err == nil {
-				availableBalance = availableWithOverdraft
-			}
-		}
-	}
 
 	// Use builder to reconstruct account with new balance
 	return domain.NewCurrentAccountBuilder().
 		WithID(account.ID()).
 		WithAccountID(account.AccountID()).
-		WithAccountIdentification(account.AccountIdentification()).
+		WithExternalIdentifier(account.ExternalIdentifier()).
+		WithInstrumentCode(account.InstrumentCode()).
+		WithDimension(account.Dimension()).
 		WithPartyID(account.PartyID()).
+		WithOrgPartyID(account.OrgPartyID()).
 		WithBalance(balance).
 		WithAvailableBalance(availableBalance).
 		WithStatus(account.Status()).
 		WithFreezeReason(account.FreezeReason()).
 		WithStatusHistory(account.StatusHistory()).
-		WithOverdraftLimit(account.OverdraftLimit()).
-		WithOverdraftEnabled(account.OverdraftEnabled()).
-		WithOverdraftRate(account.OverdraftRate()).
 		WithVersion(account.Version()).
 		WithCreatedAt(account.CreatedAt()).
 		WithUpdatedAt(account.UpdatedAt()).
+		WithProductTypeCode(account.ProductTypeCode()).
+		WithProductTypeVersion(account.ProductTypeVersion()).
 		Build(), nil
 }
 
@@ -1043,41 +1036,35 @@ func (s *Service) hydrateAccountWithBalance(ctx context.Context, account domain.
 // The balanceCents parameter should be fetched from Position Keeping BEFORE entering the transaction.
 func (s *Service) hydrateAccountWithPrefetchedBalance(account domain.CurrentAccount, balanceCents int64) (domain.CurrentAccount, error) {
 	// Create balance Money object
-	balance, err := domain.NewMoney(string(account.Balance().Currency()), balanceCents)
+	balance, err := domain.NewMoneyFromInstrument(account.InstrumentCode(), account.Dimension(), balanceCents)
 	if err != nil {
 		return domain.CurrentAccount{}, fmt.Errorf("failed to create balance: %w", err)
 	}
 
 	// For available balance, just use balance (no lien subtraction needed for ExecuteLien
-	// since the lien will be executed immediately - the reservation converts to actual debit)
+	// since the lien will be executed immediately - the reservation converts to actual debit).
+	// Overdraft is now product-type behavior and no longer managed in the domain.
 	availableBalance := balance
-	if account.OverdraftEnabled() {
-		overdraftLimitCents, _ := account.OverdraftLimit().ToMinorUnits()
-		if overdraftLimitCents > 0 {
-			availableWithOverdraft, err := availableBalance.Add(account.OverdraftLimit())
-			if err == nil {
-				availableBalance = availableWithOverdraft
-			}
-		}
-	}
 
 	// Use builder to reconstruct account with new balance
 	return domain.NewCurrentAccountBuilder().
 		WithID(account.ID()).
 		WithAccountID(account.AccountID()).
-		WithAccountIdentification(account.AccountIdentification()).
+		WithExternalIdentifier(account.ExternalIdentifier()).
+		WithInstrumentCode(account.InstrumentCode()).
+		WithDimension(account.Dimension()).
 		WithPartyID(account.PartyID()).
+		WithOrgPartyID(account.OrgPartyID()).
 		WithBalance(balance).
 		WithAvailableBalance(availableBalance).
 		WithStatus(account.Status()).
 		WithFreezeReason(account.FreezeReason()).
 		WithStatusHistory(account.StatusHistory()).
-		WithOverdraftLimit(account.OverdraftLimit()).
-		WithOverdraftEnabled(account.OverdraftEnabled()).
-		WithOverdraftRate(account.OverdraftRate()).
 		WithVersion(account.Version()).
 		WithCreatedAt(account.CreatedAt()).
 		WithUpdatedAt(account.UpdatedAt()).
+		WithProductTypeCode(account.ProductTypeCode()).
+		WithProductTypeVersion(account.ProductTypeVersion()).
 		Build(), nil
 }
 

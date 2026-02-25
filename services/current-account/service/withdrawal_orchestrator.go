@@ -183,7 +183,7 @@ func (o *WithdrawalOrchestrator) Orchestrate(ctx context.Context, account domain
 		CorrelationID:   correlationUUID,
 		Input: map[string]interface{}{
 			"account_id":             account.AccountID(),
-			"account_identification": account.AccountIdentification(),
+			"account_identification": account.ExternalIdentifier(),
 			"amount":                 amount.Amount().String(), // Decimal as string
 			"currency":               string(amount.Currency()),
 			"transaction_id":         transactionID,

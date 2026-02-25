@@ -207,8 +207,8 @@ func TestFindByIBAN(t *testing.T) {
 	if retrieved.AccountID() != accountID {
 		t.Errorf("Expected AccountID %s, got %s", accountID, retrieved.AccountID())
 	}
-	if retrieved.AccountIdentification() != iban {
-		t.Errorf("Expected IBAN %s, got %s", iban, retrieved.AccountIdentification())
+	if retrieved.ExternalIdentifier() != iban {
+		t.Errorf("Expected IBAN %s, got %s", iban, retrieved.ExternalIdentifier())
 	}
 }
 

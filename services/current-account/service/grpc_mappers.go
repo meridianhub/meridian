@@ -20,9 +20,9 @@ const (
 func toProtoFacility(account domain.CurrentAccount) *pb.CurrentAccountFacility {
 	return &pb.CurrentAccountFacility{
 		AccountId:          account.AccountID(),
-		ExternalIdentifier: account.AccountIdentification(),
+		ExternalIdentifier: account.ExternalIdentifier(),
 		AccountStatus:      mapStatusToProto(account.Status()),
-		InstrumentCode:     string(account.Balance().Currency()),
+		InstrumentCode:     account.InstrumentCode(),
 		CreatedAt:          timestamppb.New(account.CreatedAt()),
 		UpdatedAt:          timestamppb.New(account.UpdatedAt()),
 		// #nosec G115 - Version is bounded by database constraints
