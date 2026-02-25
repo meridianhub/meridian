@@ -135,6 +135,19 @@ describe('CreateDisputeDialog', () => {
       await user.selectOptions(screen.getByRole('combobox', { name: /reason/i }), 'DISPUTE_REASON_OTHER')
       expect(screen.queryByLabelText('Expected Amount')).not.toBeInTheDocument()
     })
+
+    it('shows error when expected amount is empty for AMOUNT_MISMATCH reason', async () => {
+      const user = userEvent.setup()
+      renderDialog({ open: true })
+
+      await user.selectOptions(screen.getByRole('combobox', { name: /reason/i }), 'DISPUTE_REASON_AMOUNT_MISMATCH')
+      await user.type(screen.getByLabelText('Description'), 'Amount is wrong')
+      await user.click(screen.getByRole('button', { name: /raise dispute/i }))
+
+      expect(
+        await screen.findByText('Expected amount is required for amount mismatch disputes'),
+      ).toBeInTheDocument()
+    })
   })
 
   describe('description validation', () => {
@@ -212,7 +225,7 @@ describe('CreateDisputeDialog', () => {
       })
     })
 
-    it('invalidates reconciliation-disputes query on success', async () => {
+    it('completes dispute submission without error', async () => {
       const user = userEvent.setup()
 
       server.use(
@@ -221,21 +234,22 @@ describe('CreateDisputeDialog', () => {
         }),
       )
 
-      renderDialog({ open: true })
+      const onOpenChange = vi.fn()
+      renderDialog({ open: true, onOpenChange })
 
       await user.selectOptions(screen.getByRole('combobox', { name: /reason/i }), 'DISPUTE_REASON_OTHER')
       await user.type(screen.getByLabelText('Description'), 'Test')
       await user.click(screen.getByRole('button', { name: /raise dispute/i }))
 
-      // Just verify the mutation completes without error (query invalidation is a side effect)
       await waitFor(() => {
-        expect(screen.queryByText('Submitting...')).not.toBeInTheDocument()
+        expect(onOpenChange).toHaveBeenCalledWith(false)
       })
     })
   })
 
   describe('form reset on close', () => {
-    it('resets form fields when dialog is closed and reopened', () => {
+    it('resets form fields when dialog is closed and reopened', async () => {
+      const user = userEvent.setup()
       const { rerender } = renderWithProviders(
         <MemoryRouter>
           <Routes>
@@ -254,6 +268,14 @@ describe('CreateDisputeDialog', () => {
         </MemoryRouter>,
       )
 
+      // Populate fields before closing
+      await user.selectOptions(screen.getByRole('combobox', { name: /reason/i }), 'DISPUTE_REASON_OTHER')
+      await user.type(screen.getByLabelText('Description'), 'Some content')
+
+      expect((screen.getByRole('combobox', { name: /reason/i }) as HTMLSelectElement).value).toBe('DISPUTE_REASON_OTHER')
+      expect((screen.getByLabelText('Description') as HTMLTextAreaElement).value).toBe('Some content')
+
+      // Close dialog
       rerender(
         <MemoryRouter>
           <Routes>
@@ -272,6 +294,7 @@ describe('CreateDisputeDialog', () => {
         </MemoryRouter>,
       )
 
+      // Reopen dialog
       rerender(
         <MemoryRouter>
           <Routes>
@@ -290,6 +313,7 @@ describe('CreateDisputeDialog', () => {
         </MemoryRouter>,
       )
 
+      // Fields should be reset to empty
       expect((screen.getByRole('combobox', { name: /reason/i }) as HTMLSelectElement).value).toBe('')
       expect((screen.getByLabelText('Description') as HTMLTextAreaElement).value).toBe('')
     })
