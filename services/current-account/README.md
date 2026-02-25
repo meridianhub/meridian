@@ -70,9 +70,9 @@ BIAN-compliant current account facility microservice with lien-based payment res
 | Method | HTTP | Purpose |
 |--------|------|---------|
 | `InitiateLien` | `POST /v1/current-accounts/{id}/liens` | Reserve funds |
-| `ExecuteLien` | `POST /v1/liens/{id}/execute` | Debit reserved funds |
-| `TerminateLien` | `POST /v1/liens/{id}/terminate` | Release reservation |
-| `RetrieveLien` | `GET /v1/liens/{id}` | Get lien details |
+| `ExecuteLien` | `POST /v1/current-account-liens/{id}/execute` | Debit reserved funds |
+| `TerminateLien` | `POST /v1/current-account-liens/{id}/terminate` | Release reservation |
+| `RetrieveLien` | `GET /v1/current-account-liens/{id}` | Get lien details |
 
 ## Saga Definitions
 

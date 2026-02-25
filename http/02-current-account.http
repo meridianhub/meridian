@@ -192,11 +192,11 @@ X-Tenant-ID: {{tenant_id}}
 %}
 
 ### Retrieve Lien
-GET {{host}}/v1/liens/{{ca_lien_id}}
+GET {{host}}/v1/current-account-liens/{{ca_lien_id}}
 X-Tenant-ID: {{tenant_id}}
 
 ### Execute Lien
-POST {{host}}/v1/liens/{{ca_lien_id}}/execute
+POST {{host}}/v1/current-account-liens/{{ca_lien_id}}/execute
 Content-Type: application/json
 X-Tenant-ID: {{tenant_id}}
 
@@ -229,7 +229,7 @@ X-Tenant-ID: {{tenant_id}}
 %}
 
 ### Terminate Lien
-POST {{host}}/v1/liens/{{ca_lien_id_2}}/terminate
+POST {{host}}/v1/current-account-liens/{{ca_lien_id_2}}/terminate
 Content-Type: application/json
 X-Tenant-ID: {{tenant_id}}
 
@@ -287,7 +287,7 @@ GET {{host}}/v1/current-accounts/{{ca_account_id}}/valuation-features
 X-Tenant-ID: {{tenant_id}}
 
 ### Get Valuation Feature
-GET {{host}}/v1/valuation-features/{{ca_vf_id}}
+GET {{host}}/v1/current-account-valuation-features/{{ca_vf_id}}
 X-Tenant-ID: {{tenant_id}}
 
 ### Evaluate Asset Valuation (inquiry)

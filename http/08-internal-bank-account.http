@@ -99,7 +99,7 @@ GET {{host}}/v1/internal-bank-accounts/{{iba_id}}/valuation-features
 X-Tenant-ID: {{tenant_id}}
 
 ### Get Valuation Feature
-GET {{host}}/v1/valuation-features/{{iba_vf_id}}
+GET {{host}}/v1/internal-bank-account-valuation-features/{{iba_vf_id}}
 X-Tenant-ID: {{tenant_id}}
 
 ### Evaluate Valuation (inquiry)
@@ -134,11 +134,11 @@ X-Tenant-ID: {{tenant_id}}
 %}
 
 ### Retrieve Lien
-GET {{host}}/v1/liens/{{iba_lien_id}}
+GET {{host}}/v1/internal-bank-account-liens/{{iba_lien_id}}
 X-Tenant-ID: {{tenant_id}}
 
 ### Execute Lien
-POST {{host}}/v1/liens/{{iba_lien_id}}/execute
+POST {{host}}/v1/internal-bank-account-liens/{{iba_lien_id}}/execute
 Content-Type: application/json
 X-Tenant-ID: {{tenant_id}}
 
@@ -149,7 +149,7 @@ X-Tenant-ID: {{tenant_id}}
 }
 
 ### Terminate Lien
-POST {{host}}/v1/liens/{{iba_lien_id}}/terminate
+POST {{host}}/v1/internal-bank-account-liens/{{iba_lien_id}}/terminate
 Content-Type: application/json
 X-Tenant-ID: {{tenant_id}}
 
