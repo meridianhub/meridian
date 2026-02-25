@@ -697,6 +697,84 @@ func TestEconomyTools_NilClients_SkipsRegistration(t *testing.T) {
 	}
 }
 
+func TestEconomyTools_NilSession_SkipsPlanApply(t *testing.T) {
+	mock := &mockManifestApplier{
+		applyFn: func(_ context.Context, _ *controlplanev1.ApplyManifestRequest) (*controlplanev1.ApplyManifestResponse, error) {
+			return &controlplanev1.ApplyManifestResponse{}, nil
+		},
+	}
+
+	r := tools.NewRegistry()
+	// nil session: plan and apply should not be registered
+	tools.RegisterEconomyTools(r, nil, tools.EconomyDeps{Applier: mock})
+
+	listed := r.List()
+	names := make(map[string]bool)
+	for _, tool := range listed {
+		names[tool.Name] = true
+	}
+	if !names["meridian_manifest_validate"] {
+		t.Error("expected meridian_manifest_validate to be registered with nil session")
+	}
+	if names["meridian_manifest_plan"] {
+		t.Error("expected meridian_manifest_plan to NOT be registered with nil session")
+	}
+	if names["meridian_manifest_apply"] {
+		t.Error("expected meridian_manifest_apply to NOT be registered with nil session")
+	}
+}
+
+func TestManifestApply_DifferentJSONWhitespace_StillMatches(t *testing.T) {
+	mock := &mockManifestApplier{
+		applyFn: func(_ context.Context, req *controlplanev1.ApplyManifestRequest) (*controlplanev1.ApplyManifestResponse, error) {
+			if req.DryRun {
+				return &controlplanev1.ApplyManifestResponse{
+					Status: controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_DRY_RUN,
+				}, nil
+			}
+			return &controlplanev1.ApplyManifestResponse{
+				Status: controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_APPLIED,
+				JobId:  "job-whitespace",
+			}, nil
+		},
+	}
+
+	r := tools.NewRegistry()
+	sess := newTestSession()
+	tools.RegisterEconomyTools(r, sess, tools.EconomyDeps{Applier: mock})
+
+	// Plan with compact JSON
+	compact := json.RawMessage(`{"version":"1.0","metadata":{"name":"Test","industry":"energy","description":"Test"}}`)
+	planParams := json.RawMessage(fmt.Sprintf(`{"manifest": %s}`, compact))
+	planResult, err := r.Call(context.Background(), "meridian_manifest_plan", planParams)
+	if err != nil {
+		t.Fatalf("plan failed: %v", err)
+	}
+	planHash := planResult.(map[string]interface{})["plan_hash"].(string)
+
+	// Apply with same data but different whitespace/key order
+	spaced := json.RawMessage(`{
+		"version": "1.0",
+		"metadata": {
+			"name": "Test",
+			"industry": "energy",
+			"description": "Test"
+		}
+	}`)
+	applyParams := json.RawMessage(fmt.Sprintf(`{"manifest": %s, "plan_hash": %q, "applied_by": "test"}`, spaced, planHash))
+	result, err := r.Call(context.Background(), "meridian_manifest_apply", applyParams)
+	if err != nil {
+		t.Fatalf("apply failed: %v", err)
+	}
+	m, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map result, got %T", result)
+	}
+	if s, _ := m["status"].(string); s != "APPLY_MANIFEST_STATUS_APPLIED" {
+		t.Errorf("expected APPLIED status (whitespace should not matter), got %q; result=%v", s, m)
+	}
+}
+
 func TestEconomyTools_PartialClients_RegistersAvailable(t *testing.T) {
 	historian := &mockManifestHistorian{
 		listFn: func(_ context.Context, _ *controlplanev1.ListManifestVersionsRequest) (*controlplanev1.ListManifestVersionsResponse, error) {

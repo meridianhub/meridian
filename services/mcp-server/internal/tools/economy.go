@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	mcperrors "github.com/meridianhub/meridian/services/mcp-server/internal/errors"
@@ -48,8 +49,10 @@ func RegisterEconomyTools(registry *Registry, sess PlanStore, deps EconomyDeps) 
 
 	if deps.Applier != nil {
 		candidates = append(candidates, buildManifestValidateTool(deps.Applier))
-		candidates = append(candidates, buildManifestPlanTool(deps.Applier, sess))
-		candidates = append(candidates, buildManifestApplyTool(deps.Applier, sess))
+		if sess != nil {
+			candidates = append(candidates, buildManifestPlanTool(deps.Applier, sess))
+			candidates = append(candidates, buildManifestApplyTool(deps.Applier, sess))
+		}
 	}
 	if deps.Historian != nil {
 		candidates = append(candidates, buildManifestHistoryTool(deps.Historian))
@@ -206,8 +209,12 @@ func handleManifestPlan(ctx context.Context, client ManifestApplier, sess PlanSt
 		}, nil
 	}
 
-	// Store the manifest in the plan cache so apply can verify it.
-	planHash := sess.StorePlan(p.Manifest)
+	// Store canonical manifest bytes so semantically equivalent JSON hashes identically.
+	canonicalBytes, err := canonicalManifestBytes(manifest)
+	if err != nil {
+		return mcperrors.FormatGRPCError(err), nil
+	}
+	planHash := sess.StorePlan(canonicalBytes)
 
 	result := map[string]interface{}{
 		"valid":     true,
@@ -277,22 +284,26 @@ func handleManifestApply(ctx context.Context, client ManifestApplier, sess PlanS
 		}, nil
 	}
 
-	// Verify that the manifest content matches the planned manifest by comparing
-	// the SHA256 hash of the apply-time manifest against the provided plan_hash.
-	// This prevents applying a different manifest than what was planned.
-	contentHash := sha256Hex(p.Manifest)
-	if contentHash != p.PlanHash {
-		return map[string]interface{}{
-			"error":   "manifest content does not match the planned manifest",
-			"message": "The manifest provided to apply differs from the one used during plan. Re-run meridian_manifest_plan with the updated manifest.",
-		}, nil
-	}
-
 	manifest, err := manifestJSONToProto(p.Manifest)
 	if err != nil {
 		return map[string]interface{}{ //nolint:nilerr // err is surfaced in the tool response
 			"valid":  false,
 			"errors": []interface{}{map[string]interface{}{"type": mcperrors.TypeManifestValidation, "message": err.Error()}},
+		}, nil
+	}
+
+	// Verify manifest content matches the plan by comparing canonical proto bytes.
+	// This is whitespace/key-order agnostic since we canonicalize via deterministic
+	// proto marshaling before hashing.
+	canonicalBytes, err := canonicalManifestBytes(manifest)
+	if err != nil {
+		return mcperrors.FormatGRPCError(err), nil
+	}
+	contentHash := sha256Hex(canonicalBytes)
+	if contentHash != p.PlanHash {
+		return map[string]interface{}{
+			"error":   "manifest content does not match the planned manifest",
+			"message": "The manifest provided to apply differs from the one used during plan. Re-run meridian_manifest_plan with the updated manifest.",
 		}, nil
 	}
 
@@ -475,6 +486,17 @@ func formatProtoValidationErrors(errs []*controlplanev1.ValidationError) []inter
 // formatValidationErrors converts mcperrors.ErrorDetail into tool-response-compatible format.
 func formatValidationErrors(details []mcperrors.ErrorDetail) []interface{} {
 	return formatErrorDetails(details)
+}
+
+// canonicalManifestBytes returns deterministic proto-encoded bytes for a manifest.
+// This ensures semantically equivalent manifests (differing only in JSON key
+// order or whitespace) produce identical hashes.
+func canonicalManifestBytes(m *controlplanev1.Manifest) ([]byte, error) {
+	b, err := proto.MarshalOptions{Deterministic: true}.Marshal(m)
+	if err != nil {
+		return nil, fmt.Errorf("failed to canonicalize manifest: %w", err)
+	}
+	return b, nil
 }
 
 // sha256Hex returns the hex-encoded SHA256 digest of data.
