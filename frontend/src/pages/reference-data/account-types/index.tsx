@@ -5,10 +5,12 @@ import { StatusBadge } from '@/components/shared/status-badge'
 import { CELEditor } from '@/components/shared/cel-editor'
 import { useApiClients } from '@/api/context'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 import {
   BehaviorClass,
   type AccountTypeDefinition,
 } from '@/api/gen/meridian/reference_data/v1/account_type_pb'
+import { CreateAccountTypeDialog } from './create-account-type-dialog'
 
 const BEHAVIOR_CLASS_LABELS: Record<number, string> = {
   0: 'Unspecified',
@@ -42,6 +44,7 @@ interface ListAccountTypesResult {
 export function AccountTypesPage() {
   const clients = useApiClients()
   const [selectedDefinition, setSelectedDefinition] = React.useState<AccountTypeDefinition | null>(null)
+  const [createDialogOpen, setCreateDialogOpen] = React.useState(false)
 
   const columns: ColumnDef<AccountTypeDefinition>[] = [
     {
@@ -99,12 +102,22 @@ export function AccountTypesPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Account Types</h1>
-        <p className="mt-2 text-muted-foreground">
-          Account type registry with CEL policy configuration.
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Account Types</h1>
+          <p className="mt-2 text-muted-foreground">
+            Account type registry with CEL policy configuration.
+          </p>
+        </div>
+        <Button onClick={() => setCreateDialogOpen(true)}>
+          Create Account Type
+        </Button>
       </div>
+
+      <CreateAccountTypeDialog
+        open={createDialogOpen}
+        onOpenChange={setCreateDialogOpen}
+      />
 
       <Card className="p-6">
         <DataTable
