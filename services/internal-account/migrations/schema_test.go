@@ -383,10 +383,10 @@ func TestSchema_UniqueConstraints(t *testing.T) {
 	assert.Contains(t, err.Error(), "idx_internal_account_account_id", "Error should reference unique index")
 }
 
-// TestSchema_CorrespondentBankFields verifies correspondent bank fields are nullable.
-func TestSchema_CorrespondentBankFields(t *testing.T) {
+// TestSchema_CounterpartyFields verifies counterparty fields are nullable.
+func TestSchema_CounterpartyFields(t *testing.T) {
 	if testing.Short() {
-		t.Skip("Skipping correspondent bank test in short mode")
+		t.Skip("Skipping counterparty test in short mode")
 	}
 
 	migrationsDir := getMigrationsDir(t)
@@ -396,24 +396,24 @@ func TestSchema_CorrespondentBankFields(t *testing.T) {
 
 	applyAllMigrations(t, db, migrationsDir)
 
-	// Insert without correspondent bank (CLEARING account)
+	// Insert without counterparty (CLEARING account)
 	err := db.Exec(`
 		INSERT INTO internal_account (
 			account_id, account_code, name, account_type,
 			instrument_code, dimension, created_by, updated_by
 		) VALUES (
-			'ACC-NO-CORR', 'NO-CORR', 'No Correspondent', 'CLEARING',
+			'ACC-NO-COUNTERPARTY', 'NO-COUNTERPARTY', 'No Counterparty', 'CLEARING',
 			'GBP', 'CURRENCY', 'test', 'test'
 		)
 	`).Error
-	assert.NoError(t, err, "Account without correspondent should succeed")
+	assert.NoError(t, err, "Account without counterparty should succeed")
 
-	// Insert with correspondent bank (NOSTRO account)
+	// Insert with counterparty (NOSTRO account)
 	err = db.Exec(`
 		INSERT INTO internal_account (
 			account_id, account_code, name, account_type,
 			instrument_code, dimension,
-			correspondent_bank_id, correspondent_bank_name, correspondent_external_ref,
+			counterparty_id, counterparty_name, counterparty_external_ref,
 			created_by, updated_by
 		) VALUES (
 			'ACC-NOSTRO', 'NOSTRO-USD', 'USD Nostro at JPM', 'NOSTRO',
@@ -422,19 +422,19 @@ func TestSchema_CorrespondentBankFields(t *testing.T) {
 			'test', 'test'
 		)
 	`).Error
-	assert.NoError(t, err, "Nostro account with correspondent should succeed")
+	assert.NoError(t, err, "Nostro account with counterparty should succeed")
 
-	// Verify correspondent fields
-	var bankID, bankName, extRef *string
+	// Verify counterparty fields
+	var counterpartyID, counterpartyName, externalRef *string
 	err = db.Raw(`
-		SELECT correspondent_bank_id, correspondent_bank_name, correspondent_external_ref
+		SELECT counterparty_id, counterparty_name, counterparty_external_ref
 		FROM internal_account WHERE account_id = 'ACC-NOSTRO'
-	`).Row().Scan(&bankID, &bankName, &extRef)
+	`).Row().Scan(&counterpartyID, &counterpartyName, &externalRef)
 	require.NoError(t, err)
-	assert.NotNil(t, bankID)
-	assert.Equal(t, "JPMORGAN", *bankID)
-	assert.Equal(t, "JPMorgan Chase Bank", *bankName)
-	assert.Equal(t, "REF-123456", *extRef)
+	assert.NotNil(t, counterpartyID)
+	assert.Equal(t, "JPMORGAN", *counterpartyID)
+	assert.Equal(t, "JPMorgan Chase Bank", *counterpartyName)
+	assert.Equal(t, "REF-123456", *externalRef)
 }
 
 // TestSchema_SoftDelete verifies soft delete column works correctly.

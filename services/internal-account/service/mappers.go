@@ -38,14 +38,14 @@ func toProtoFacility(account domain.InternalAccount) *pb.InternalAccountFacility
 		ProductTypeVersion: int32(account.ProductTypeVersion()),
 	}
 
-	// Map correspondent details if present
-	if correspondent := account.Correspondent(); correspondent != nil {
-		facility.CorrespondentDetails = &pb.CorrespondentBankDetails{
-			BankId:             correspondent.BankID(),
-			BankName:           correspondent.BankName(),
-			ExternalAccountRef: correspondent.ExternalAccountRef(),
-			SwiftCode:          correspondent.SwiftCode(),
-			CorrespondentType:  correspondentTypeFromAccountType(account.AccountType()),
+	// Map counterparty details if present
+	if counterparty := account.Counterparty(); counterparty != nil {
+		facility.CounterpartyDetails = &pb.CounterpartyDetails{
+			CounterpartyId:          counterparty.CounterpartyID(),
+			CounterpartyName:        counterparty.CounterpartyName(),
+			CounterpartyExternalRef: counterparty.ExternalRef(),
+			Attributes:              counterparty.Attributes(),
+			CounterpartyType:        counterpartyTypeFromAccountType(account.AccountType()),
 		}
 	}
 
@@ -118,21 +118,21 @@ func clearingPurposeToProto(cp domain.ClearingPurpose) pb.ClearingPurpose {
 	}
 }
 
-// correspondentTypeFromAccountType returns the correspondent type based on account type.
-func correspondentTypeFromAccountType(at domain.AccountType) pb.CorrespondentType {
+// counterpartyTypeFromAccountType returns the counterparty type based on account type.
+func counterpartyTypeFromAccountType(at domain.AccountType) pb.CounterpartyType {
 	switch at {
 	case domain.AccountTypeNostro:
-		return pb.CorrespondentType_CORRESPONDENT_TYPE_NOSTRO
+		return pb.CounterpartyType_COUNTERPARTY_TYPE_NOSTRO
 	case domain.AccountTypeVostro:
-		return pb.CorrespondentType_CORRESPONDENT_TYPE_VOSTRO
+		return pb.CounterpartyType_COUNTERPARTY_TYPE_VOSTRO
 	case domain.AccountTypeClearing,
 		domain.AccountTypeHolding,
 		domain.AccountTypeSuspense,
 		domain.AccountTypeRevenue,
 		domain.AccountTypeExpense:
-		return pb.CorrespondentType_CORRESPONDENT_TYPE_UNSPECIFIED
+		return pb.CounterpartyType_COUNTERPARTY_TYPE_UNSPECIFIED
 	default:
-		return pb.CorrespondentType_CORRESPONDENT_TYPE_UNSPECIFIED
+		return pb.CounterpartyType_COUNTERPARTY_TYPE_UNSPECIFIED
 	}
 }
 
@@ -149,9 +149,9 @@ func mapDomainErrorToGRPC(err error) error {
 		return status.Error(codes.InvalidArgument, err.Error())
 	case errors.Is(err, domain.ErrInvalidStatusTransition):
 		return status.Error(codes.FailedPrecondition, err.Error())
-	case errors.Is(err, domain.ErrCorrespondentRequired):
+	case errors.Is(err, domain.ErrCounterpartyRequired):
 		return status.Error(codes.InvalidArgument, err.Error())
-	case errors.Is(err, domain.ErrCorrespondentNotAllowed):
+	case errors.Is(err, domain.ErrCounterpartyNotAllowed):
 		return status.Error(codes.InvalidArgument, err.Error())
 	case errors.Is(err, domain.ErrDuplicateAccountCode):
 		return status.Error(codes.AlreadyExists, err.Error())

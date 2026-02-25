@@ -42,7 +42,7 @@
 //
 //   - UUID primary key
 //   - Tenant-scoped unique constraint on account_code
-//   - JSONB storage for correspondent details
+//   - JSONB storage for counterparty details
 //   - Timestamp tracking (created_at, updated_at)
 //   - Version column for optimistic locking
 //

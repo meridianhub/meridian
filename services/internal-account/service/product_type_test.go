@@ -252,12 +252,12 @@ func TestInitiate_WithCache_AllInternalBehaviorClasses(t *testing.T) {
 			if bc.class == accounttype.BehaviorClassClearing {
 				req.ClearingPurpose = pb.ClearingPurpose_CLEARING_PURPOSE_GENERAL
 			}
-			// Add correspondent for NOSTRO/VOSTRO
+			// Add counterparty for NOSTRO/VOSTRO
 			if bc.class == accounttype.BehaviorClassNostro || bc.class == accounttype.BehaviorClassVostro {
-				req.CorrespondentDetails = &pb.CorrespondentBankDetails{
-					BankId:             "BANK001",
-					BankName:           "Test Bank",
-					ExternalAccountRef: "REF-123",
+				req.CounterpartyDetails = &pb.CounterpartyDetails{
+					CounterpartyId:          "BANK001",
+					CounterpartyName:        "Test Bank",
+					CounterpartyExternalRef: "REF-123",
 				}
 			}
 

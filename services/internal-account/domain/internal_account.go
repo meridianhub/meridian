@@ -12,8 +12,8 @@ import (
 //
 // Internal accounts are used for the bank's own operations:
 // - CLEARING: For settling transactions between accounts
-// - NOSTRO: Our account at another bank (requires correspondent)
-// - VOSTRO: Another bank's account at our bank (requires correspondent)
+// - NOSTRO: Our account at another institution (requires counterparty)
+// - VOSTRO: Another institution's account at our institution (requires counterparty)
 // - HOLDING: Temporarily holding funds during processing
 // - SUSPENSE: Transactions that cannot be immediately categorized
 // - REVENUE: Tracking income and revenue streams
@@ -29,7 +29,7 @@ type InternalAccount struct {
 	dimension       string          // From reference_data (e.g., "CURRENCY", "ENERGY")
 	status          AccountStatus
 	orgPartyID      *uuid.UUID            // Organization party ID for org-scoped accounts (nil = global)
-	correspondent   *CorrespondentDetails // Required for NOSTRO/VOSTRO
+	counterparty    *CounterpartyDetails  // Required for NOSTRO/VOSTRO
 	attributes      map[string]string     // Metadata
 	version         int64
 	createdAt       time.Time
@@ -60,7 +60,7 @@ func WithOrgPartyID(id uuid.UUID) AccountOption {
 // Initial state:
 //   - Status: ACTIVE
 //   - Version: 1
-//   - Correspondent: nil (must be set via UpdateCorrespondent for NOSTRO/VOSTRO before use)
+//   - Counterparty: nil (must be set via UpdateCounterparty for NOSTRO/VOSTRO before use)
 //
 // Validation:
 //   - accountID, accountCode, name cannot be empty
@@ -122,7 +122,7 @@ func NewInternalAccount(
 		dimension:       dimension,
 		orgPartyID:      options.orgPartyID,
 		status:          AccountStatusActive,
-		correspondent:   nil,
+		counterparty:    nil,
 		attributes:      nil,
 		version:         1,
 		createdAt:       now,
@@ -178,29 +178,29 @@ func (a InternalAccount) Rename(newName string) (InternalAccount, error) {
 	return newAccount, nil
 }
 
-// UpdateCorrespondent sets or updates the correspondent bank details.
-// Returns a new instance with updated correspondent.
+// UpdateCounterparty sets or updates the counterparty details.
+// Returns a new instance with updated counterparty.
 //
 // Validation:
-//   - NOSTRO/VOSTRO accounts REQUIRE correspondent details (cannot pass nil)
-//   - Other account types REJECT correspondent details (cannot pass non-nil)
-func (a InternalAccount) UpdateCorrespondent(details *CorrespondentDetails) (InternalAccount, error) {
+//   - NOSTRO/VOSTRO accounts REQUIRE counterparty details (cannot pass nil)
+//   - Other account types REJECT counterparty details (cannot pass non-nil)
+func (a InternalAccount) UpdateCounterparty(details *CounterpartyDetails) (InternalAccount, error) {
 	if a.status == AccountStatusClosed {
 		return a, ErrAccountClosed
 	}
 
-	requiresCorrespondent := a.accountType.RequiresCorrespondent()
+	requiresCounterparty := a.accountType.RequiresCorrespondent()
 
-	if requiresCorrespondent && details == nil {
-		return a, ErrCorrespondentRequired
+	if requiresCounterparty && details == nil {
+		return a, ErrCounterpartyRequired
 	}
-	if !requiresCorrespondent && details != nil {
-		return a, ErrCorrespondentNotAllowed
+	if !requiresCounterparty && details != nil {
+		return a, ErrCounterpartyNotAllowed
 	}
 
-	// Create new instance with updated correspondent
+	// Create new instance with updated counterparty
 	newAccount := a.copyWithUpdatedTime()
-	newAccount.correspondent = details
+	newAccount.counterparty = details
 	newAccount.version++
 	return newAccount, nil
 }
@@ -291,10 +291,10 @@ func (a InternalAccount) IsScopedToOrganization() bool {
 	return a.orgPartyID != nil
 }
 
-// Correspondent returns the correspondent bank details.
+// Counterparty returns the counterparty details.
 // Returns nil for non-NOSTRO/VOSTRO accounts.
-func (a InternalAccount) Correspondent() *CorrespondentDetails {
-	return a.correspondent
+func (a InternalAccount) Counterparty() *CounterpartyDetails {
+	return a.counterparty
 }
 
 // Attributes returns a copy of the metadata attributes.
@@ -411,9 +411,9 @@ func (b *InternalAccountBuilder) WithOrgPartyID(orgPartyID *uuid.UUID) *Internal
 	return b
 }
 
-// WithCorrespondent sets the correspondent bank details.
-func (b *InternalAccountBuilder) WithCorrespondent(correspondent *CorrespondentDetails) *InternalAccountBuilder {
-	b.account.correspondent = correspondent
+// WithCounterparty sets the counterparty details.
+func (b *InternalAccountBuilder) WithCounterparty(counterparty *CounterpartyDetails) *InternalAccountBuilder {
+	b.account.counterparty = counterparty
 	return b
 }
 

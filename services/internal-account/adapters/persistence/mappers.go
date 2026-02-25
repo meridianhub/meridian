@@ -12,15 +12,15 @@ import (
 func toEntity(ctx context.Context, account domain.InternalAccount) *InternalAccountEntity {
 	auditUser := audit.GetUserFromContext(ctx)
 
-	// Handle nullable correspondent fields
-	var correspondentBankID, correspondentBankName, correspondentExternalRef *string
-	if correspondent := account.Correspondent(); correspondent != nil {
-		bankID := correspondent.BankID()
-		bankName := correspondent.BankName()
-		externalRef := correspondent.ExternalAccountRef()
-		correspondentBankID = &bankID
-		correspondentBankName = &bankName
-		correspondentExternalRef = &externalRef
+	// Handle nullable counterparty fields
+	var counterpartyID, counterpartyName, counterpartyExternalRef *string
+	if counterparty := account.Counterparty(); counterparty != nil {
+		id := counterparty.CounterpartyID()
+		name := counterparty.CounterpartyName()
+		externalRef := counterparty.ExternalRef()
+		counterpartyID = &id
+		counterpartyName = &name
+		counterpartyExternalRef = &externalRef
 	}
 
 	// Convert attributes map
@@ -51,41 +51,40 @@ func toEntity(ctx context.Context, account domain.InternalAccount) *InternalAcco
 	}
 
 	return &InternalAccountEntity{
-		ID:                       account.ID(),
-		AccountID:                account.AccountID(),
-		AccountCode:              account.AccountCode(),
-		Name:                     account.Name(),
-		AccountType:              string(account.AccountType()),
-		ClearingPurpose:          clearingPurpose,
-		OrgPartyID:               account.OrgPartyID(),
-		ProductTypeCode:          productTypeCode,
-		ProductTypeVersion:       productTypeVersion,
-		InstrumentCode:           account.InstrumentCode(),
-		Dimension:                account.Dimension(),
-		Status:                   string(account.Status()),
-		CorrespondentBankID:      correspondentBankID,
-		CorrespondentBankName:    correspondentBankName,
-		CorrespondentExternalRef: correspondentExternalRef,
-		Attributes:               attributes,
-		Version:                  account.Version(),
-		CreatedAt:                account.CreatedAt(),
-		UpdatedAt:                account.UpdatedAt(),
-		CreatedBy:                auditUser,
-		UpdatedBy:                auditUser,
+		ID:                      account.ID(),
+		AccountID:               account.AccountID(),
+		AccountCode:             account.AccountCode(),
+		Name:                    account.Name(),
+		AccountType:             string(account.AccountType()),
+		ClearingPurpose:         clearingPurpose,
+		OrgPartyID:              account.OrgPartyID(),
+		ProductTypeCode:         productTypeCode,
+		ProductTypeVersion:      productTypeVersion,
+		InstrumentCode:          account.InstrumentCode(),
+		Dimension:               account.Dimension(),
+		Status:                  string(account.Status()),
+		CounterpartyID:          counterpartyID,
+		CounterpartyName:        counterpartyName,
+		CounterpartyExternalRef: counterpartyExternalRef,
+		Attributes:              attributes,
+		Version:                 account.Version(),
+		CreatedAt:               account.CreatedAt(),
+		UpdatedAt:               account.UpdatedAt(),
+		CreatedBy:               auditUser,
+		UpdatedBy:               auditUser,
 	}
 }
 
 // toDomain converts a persistence entity to a domain InternalAccount.
 func toDomain(entity *InternalAccountEntity) domain.InternalAccount {
-	// Handle correspondent details reconstruction
-	var correspondent *domain.CorrespondentDetails
-	if entity.CorrespondentBankID != nil && entity.CorrespondentBankName != nil && entity.CorrespondentExternalRef != nil {
-		// Reconstruct correspondent details from persistence
-		// Use empty swift code and nil attributes since we don't persist those in the main table
-		correspondent = reconstructCorrespondent(
-			*entity.CorrespondentBankID,
-			*entity.CorrespondentBankName,
-			*entity.CorrespondentExternalRef,
+	// Handle counterparty details reconstruction
+	var counterparty *domain.CounterpartyDetails
+	if entity.CounterpartyID != nil && entity.CounterpartyName != nil && entity.CounterpartyExternalRef != nil {
+		// Reconstruct counterparty details from persistence
+		counterparty = reconstructCounterparty(
+			*entity.CounterpartyID,
+			*entity.CounterpartyName,
+			*entity.CounterpartyExternalRef,
 		)
 	}
 
@@ -128,7 +127,7 @@ func toDomain(entity *InternalAccountEntity) domain.InternalAccount {
 		WithInstrumentCode(entity.InstrumentCode).
 		WithDimension(entity.Dimension).
 		WithStatus(domain.AccountStatus(entity.Status)).
-		WithCorrespondent(correspondent).
+		WithCounterparty(counterparty).
 		WithAttributes(attributes).
 		WithVersion(entity.Version).
 		WithCreatedAt(entity.CreatedAt).
@@ -136,17 +135,17 @@ func toDomain(entity *InternalAccountEntity) domain.InternalAccount {
 		Build()
 }
 
-// reconstructCorrespondent creates a CorrespondentDetails from persisted values.
+// reconstructCounterparty creates a CounterpartyDetails from persisted values.
 // This bypasses normal validation since we trust persisted data.
-func reconstructCorrespondent(bankID, bankName, externalRef string) *domain.CorrespondentDetails {
+func reconstructCounterparty(counterpartyID, counterpartyName, externalRef string) *domain.CounterpartyDetails {
 	// Use the domain constructor - persisted data should always be valid
-	details, err := domain.NewCorrespondentDetails(bankID, bankName, externalRef)
+	details, err := domain.NewCounterpartyDetails(counterpartyID, counterpartyName, externalRef)
 	if err != nil {
 		// Log at warn level - this indicates data corruption that needs investigation.
 		// Return nil to gracefully handle corrupt data without failing the request.
-		slog.Warn("corrupt correspondent data in database",
-			"bankID", bankID,
-			"bankName", bankName,
+		slog.Warn("corrupt counterparty data in database",
+			"counterpartyID", counterpartyID,
+			"counterpartyName", counterpartyName,
 			"externalRef", externalRef,
 			"error", err,
 		)

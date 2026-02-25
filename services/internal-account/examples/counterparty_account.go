@@ -2,11 +2,11 @@
 
 // Package examples provides runnable examples demonstrating Internal Account service usage.
 //
-// This file demonstrates NOSTRO and VOSTRO account setup for correspondent banking.
-// - NOSTRO: "Our account at your bank" - Our funds held at a correspondent bank
+// This file demonstrates NOSTRO and VOSTRO account setup for counterparty banking.
+// - NOSTRO: "Our account at your bank" - Our funds held at a counterparty bank
 // - VOSTRO: "Your account at our bank" - Their funds held at our bank
 //
-// Run with: go run ./services/internal-account/examples/correspondent_account.go
+// Run with: go run ./services/internal-account/examples/counterparty_account.go
 package main
 
 import (
@@ -45,41 +45,39 @@ func main() {
 	// Example 1: Create a NOSTRO account
 	// =========================================================================
 	// NOSTRO = "Our account at your bank"
-	// Used when we hold funds at a correspondent bank for foreign currency operations
+	// Used when we hold funds at a counterparty bank for foreign currency operations
 
 	log.Println("=== Creating NOSTRO Account ===")
-	log.Println("NOSTRO accounts represent our funds held at correspondent banks")
+	log.Println("NOSTRO accounts represent our funds held at counterparty banks")
 
 	nostroReq := &ibav1.InitiateInternalAccountRequest{
-		AccountCode:    "NOSTRO-EUR-DEUTSCHE",
-		Name:           "EUR Nostro at Deutsche Bank Frankfurt",
+		AccountCode:     "NOSTRO-EUR-DEUTSCHE",
+		Name:            "EUR Nostro at Deutsche Bank Frankfurt",
 		ProductTypeCode: "NOSTRO_USD",
-		InstrumentCode: "EUR",
-		Description:    "Primary EUR nostro account for European settlements",
+		InstrumentCode:  "EUR",
+		Description:     "Primary EUR nostro account for European settlements",
 
-		// CorrespondentDetails is REQUIRED for NOSTRO/VOSTRO accounts
+		// CounterpartyDetails is REQUIRED for NOSTRO/VOSTRO accounts
 		// Validation will reject requests without this for these account types
-		CorrespondentDetails: &ibav1.CorrespondentBankDetails{
-			// BankId is our internal identifier for the correspondent
-			BankId: "deutsche-frankfurt",
+		CounterpartyDetails: &ibav1.CounterpartyDetails{
+			// CounterpartyId is our internal identifier for the counterparty
+			CounterpartyId: "deutsche-frankfurt",
 
-			// BankName is the official name of the correspondent bank
-			BankName: "Deutsche Bank AG, Frankfurt",
+			// CounterpartyName is the official name of the counterparty bank
+			CounterpartyName: "Deutsche Bank AG, Frankfurt",
 
-			// ExternalAccountRef is our account number at their bank
+			// CounterpartyExternalRef is our account number at their bank
 			// This is the IBAN or account reference they gave us
-			ExternalAccountRef: "DE89370400440532013000",
+			CounterpartyExternalRef: "DE89370400440532013000",
 
-			// SwiftCode is the SWIFT/BIC code (8 or 11 characters)
-			// Format: BANKCCLL[XXX] where:
-			//   - BANK: Bank code (4 chars)
-			//   - CC: Country code (2 chars)
-			//   - LL: Location code (2 chars)
-			//   - XXX: Branch code (optional, 3 chars)
-			SwiftCode: "DEUTDEFF",
+			// SWIFT/BIC codes and other product-specific attributes go in the
+			// attributes map (product type determines which attributes are relevant)
+			Attributes: map[string]string{
+				"swift_code": "DEUTDEFF",
+			},
 
-			// CorrespondentType must match the account type
-			CorrespondentType: ibav1.CorrespondentType_CORRESPONDENT_TYPE_NOSTRO,
+			// CounterpartyType must match the account type
+			CounterpartyType: ibav1.CounterpartyType_COUNTERPARTY_TYPE_NOSTRO,
 		},
 
 		IdempotencyKey: &commonv1.IdempotencyKey{
@@ -95,36 +93,37 @@ func main() {
 	log.Printf("NOSTRO account created:")
 	log.Printf("  Account ID:       %s", nostroResp.AccountId)
 	log.Printf("  Account Code:     %s", nostroResp.Facility.AccountCode)
-	log.Printf("  Correspondent:    %s", nostroResp.Facility.CorrespondentDetails.BankName)
-	log.Printf("  External Ref:     %s", nostroResp.Facility.CorrespondentDetails.ExternalAccountRef)
-	log.Printf("  SWIFT:            %s", nostroResp.Facility.CorrespondentDetails.SwiftCode)
+	log.Printf("  Counterparty:     %s", nostroResp.Facility.CounterpartyDetails.CounterpartyName)
+	log.Printf("  External Ref:     %s", nostroResp.Facility.CounterpartyDetails.CounterpartyExternalRef)
 
 	// =========================================================================
 	// Example 2: Create a VOSTRO account
 	// =========================================================================
 	// VOSTRO = "Your account at our bank"
-	// Used when a correspondent bank holds funds with us
+	// Used when a counterparty bank holds funds with us
 
 	log.Println("\n=== Creating VOSTRO Account ===")
-	log.Println("VOSTRO accounts represent correspondent funds held at our bank")
+	log.Println("VOSTRO accounts represent counterparty funds held at our bank")
 
 	vostroReq := &ibav1.InitiateInternalAccountRequest{
-		AccountCode:    "VOSTRO-JPY-MUFG",
-		Name:           "JPY Vostro for MUFG Tokyo",
+		AccountCode:     "VOSTRO-JPY-MUFG",
+		Name:            "JPY Vostro for MUFG Tokyo",
 		ProductTypeCode: "VOSTRO_USD",
-		InstrumentCode: "JPY",
-		Description:    "MUFG Bank's JPY account held at our institution",
+		InstrumentCode:  "JPY",
+		Description:     "MUFG Bank's JPY account held at our institution",
 
-		CorrespondentDetails: &ibav1.CorrespondentBankDetails{
-			BankId:   "mufg-tokyo",
-			BankName: "MUFG Bank, Ltd., Tokyo",
+		CounterpartyDetails: &ibav1.CounterpartyDetails{
+			CounterpartyId:   "mufg-tokyo",
+			CounterpartyName: "MUFG Bank, Ltd., Tokyo",
 
-			// For VOSTRO, ExternalAccountRef is our internal reference for their account
-			ExternalAccountRef: "VOSTRO-MUFG-001",
+			// For VOSTRO, CounterpartyExternalRef is our internal reference for their account
+			CounterpartyExternalRef: "VOSTRO-MUFG-001",
 
-			SwiftCode: "BOTKJPJT",
+			Attributes: map[string]string{
+				"swift_code": "BOTKJPJT",
+			},
 
-			CorrespondentType: ibav1.CorrespondentType_CORRESPONDENT_TYPE_VOSTRO,
+			CounterpartyType: ibav1.CounterpartyType_COUNTERPARTY_TYPE_VOSTRO,
 		},
 
 		IdempotencyKey: &commonv1.IdempotencyKey{
@@ -140,19 +139,19 @@ func main() {
 	log.Printf("VOSTRO account created:")
 	log.Printf("  Account ID:       %s", vostroResp.AccountId)
 	log.Printf("  Account Code:     %s", vostroResp.Facility.AccountCode)
-	log.Printf("  Correspondent:    %s", vostroResp.Facility.CorrespondentDetails.BankName)
-	log.Printf("  Our Reference:    %s", vostroResp.Facility.CorrespondentDetails.ExternalAccountRef)
+	log.Printf("  Counterparty:     %s", vostroResp.Facility.CounterpartyDetails.CounterpartyName)
+	log.Printf("  Our Reference:    %s", vostroResp.Facility.CounterpartyDetails.CounterpartyExternalRef)
 
 	// =========================================================================
-	// Example 3: List all correspondent accounts
+	// Example 3: List all counterparty accounts
 	// =========================================================================
 
-	log.Println("\n=== Listing Correspondent Accounts ===")
+	log.Println("\n=== Listing Counterparty Accounts ===")
 
 	// List NOSTRO accounts
 	nostroList, err := client.ListInternalAccounts(ctx, &ibav1.ListInternalAccountsRequest{
 		BehaviorClassFilter: "NOSTRO",
-		StatusFilter:      ibav1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE,
+		StatusFilter:        ibav1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE,
 	})
 	if err != nil {
 		log.Fatalf("Failed to list NOSTRO accounts: %v", err)
@@ -163,13 +162,13 @@ func main() {
 		log.Printf("  - %s: %s at %s",
 			acc.AccountCode,
 			acc.InstrumentCode,
-			acc.CorrespondentDetails.BankName)
+			acc.CounterpartyDetails.CounterpartyName)
 	}
 
 	// List VOSTRO accounts
 	vostroList, err := client.ListInternalAccounts(ctx, &ibav1.ListInternalAccountsRequest{
 		BehaviorClassFilter: "VOSTRO",
-		StatusFilter:      ibav1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE,
+		StatusFilter:        ibav1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE,
 	})
 	if err != nil {
 		log.Fatalf("Failed to list VOSTRO accounts: %v", err)
@@ -180,26 +179,28 @@ func main() {
 		log.Printf("  - %s: %s for %s",
 			acc.AccountCode,
 			acc.InstrumentCode,
-			acc.CorrespondentDetails.BankName)
+			acc.CounterpartyDetails.CounterpartyName)
 	}
 
 	// =========================================================================
-	// Example 4: Update correspondent details
+	// Example 4: Update counterparty details
 	// =========================================================================
 
-	log.Println("\n=== Updating Correspondent Details ===")
+	log.Println("\n=== Updating Counterparty Details ===")
 
 	// Update the NOSTRO account's external reference (e.g., IBAN changed)
 	updateReq := &ibav1.UpdateInternalAccountRequest{
 		AccountId: nostroResp.AccountId,
 
-		// Update correspondent details
-		CorrespondentDetails: &ibav1.CorrespondentBankDetails{
-			BankId:             "deutsche-frankfurt",
-			BankName:           "Deutsche Bank AG, Frankfurt", // Name unchanged
-			ExternalAccountRef: "DE89370400440532013001",      // New IBAN
-			SwiftCode:          "DEUTDEFF",
-			CorrespondentType:  ibav1.CorrespondentType_CORRESPONDENT_TYPE_NOSTRO,
+		// Update counterparty details
+		CounterpartyDetails: &ibav1.CounterpartyDetails{
+			CounterpartyId:          "deutsche-frankfurt",
+			CounterpartyName:        "Deutsche Bank AG, Frankfurt", // Name unchanged
+			CounterpartyExternalRef: "DE89370400440532013001",      // New IBAN
+			Attributes: map[string]string{
+				"swift_code": "DEUTDEFF",
+			},
+			CounterpartyType: ibav1.CounterpartyType_COUNTERPARTY_TYPE_NOSTRO,
 		},
 
 		// Optimistic locking - use current version to prevent conflicts
@@ -212,7 +213,7 @@ func main() {
 	}
 
 	log.Printf("Account updated:")
-	log.Printf("  New External Ref: %s", updateResp.Facility.CorrespondentDetails.ExternalAccountRef)
+	log.Printf("  New External Ref: %s", updateResp.Facility.CounterpartyDetails.CounterpartyExternalRef)
 	log.Printf("  Version:          %d -> %d", nostroResp.Facility.Version, updateResp.Facility.Version)
 
 	log.Println("\nExample completed successfully!")

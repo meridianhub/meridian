@@ -61,17 +61,17 @@ func TestToEntity_BasicFields(t *testing.T) {
 	assert.False(t, entity.CreatedAt.IsZero())
 	assert.False(t, entity.UpdatedAt.IsZero())
 
-	// Verify nullable fields are nil for non-correspondent accounts
-	assert.Nil(t, entity.CorrespondentBankID)
-	assert.Nil(t, entity.CorrespondentBankName)
-	assert.Nil(t, entity.CorrespondentExternalRef)
+	// Verify nullable fields are nil for non-counterparty accounts
+	assert.Nil(t, entity.CounterpartyID)
+	assert.Nil(t, entity.CounterpartyName)
+	assert.Nil(t, entity.CounterpartyExternalRef)
 }
 
-// TestToEntity_WithCorrespondent tests mapping accounts with correspondent details.
-func TestToEntity_WithCorrespondent(t *testing.T) {
+// TestToEntity_WithCounterparty tests mapping accounts with counterparty details.
+func TestToEntity_WithCounterparty(t *testing.T) {
 	ctx := createTestContextForMappers()
 
-	// Create NOSTRO account with correspondent details
+	// Create NOSTRO account with counterparty details
 	account, err := domain.NewInternalAccount(
 		"IBA-MAP-002",
 		"USD_NOSTRO_CITI",
@@ -83,22 +83,22 @@ func TestToEntity_WithCorrespondent(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	correspondent, err := domain.NewCorrespondentDetails("CITI001", "Citibank NA", "12345678")
+	counterparty, err := domain.NewCounterpartyDetails("CITI001", "Citibank NA", "12345678")
 	require.NoError(t, err)
-	account, err = account.UpdateCorrespondent(correspondent)
+	account, err = account.UpdateCounterparty(counterparty)
 	require.NoError(t, err)
 
 	// Convert to entity
 	entity := toEntity(ctx, account)
 
-	// Verify correspondent fields
-	require.NotNil(t, entity.CorrespondentBankID)
-	require.NotNil(t, entity.CorrespondentBankName)
-	require.NotNil(t, entity.CorrespondentExternalRef)
+	// Verify counterparty fields
+	require.NotNil(t, entity.CounterpartyID)
+	require.NotNil(t, entity.CounterpartyName)
+	require.NotNil(t, entity.CounterpartyExternalRef)
 
-	assert.Equal(t, "CITI001", *entity.CorrespondentBankID)
-	assert.Equal(t, "Citibank NA", *entity.CorrespondentBankName)
-	assert.Equal(t, "12345678", *entity.CorrespondentExternalRef)
+	assert.Equal(t, "CITI001", *entity.CounterpartyID)
+	assert.Equal(t, "Citibank NA", *entity.CounterpartyName)
+	assert.Equal(t, "12345678", *entity.CounterpartyExternalRef)
 }
 
 // TestToEntity_WithAttributes tests mapping accounts with JSONB attributes.
@@ -141,7 +141,7 @@ func TestToEntity_NilAttributes(t *testing.T) {
 		"GBP_BASIC",
 		"GBP Basic Account",
 		domain.AccountTypeClearing,
-		domain.ClearingPurposeGeneral, // CLEARING accounts require a specific purpose
+		domain.ClearingPurposeGeneral,
 		"GBP",
 		"CURRENCY",
 	)
@@ -192,46 +192,46 @@ func TestToDomain_BasicFields(t *testing.T) {
 	assert.Equal(t, domain.AccountStatusActive, account.Status())
 	assert.Equal(t, int64(1), account.Version())
 
-	// Verify correspondent is nil for non-NOSTRO/VOSTRO accounts
-	assert.Nil(t, account.Correspondent())
+	// Verify counterparty is nil for non-NOSTRO/VOSTRO accounts
+	assert.Nil(t, account.Counterparty())
 }
 
-// TestToDomain_WithCorrespondent tests reconstructing correspondent details from entity.
-func TestToDomain_WithCorrespondent(t *testing.T) {
+// TestToDomain_WithCounterparty tests reconstructing counterparty details from entity.
+func TestToDomain_WithCounterparty(t *testing.T) {
 	now := time.Now()
-	bankID := "CITI001"
-	bankName := "Citibank NA"
+	counterpartyID := "CITI001"
+	counterpartyName := "Citibank NA"
 	externalRef := "12345678"
 
 	entity := &InternalAccountEntity{
-		ID:                       uuid.New(),
-		AccountID:                "IBA-MAP-011",
-		AccountCode:              "USD_NOSTRO_CITI",
-		Name:                     "USD NOSTRO at Citibank",
-		AccountType:              "NOSTRO",
-		ClearingPurpose:          nil, // NOSTRO accounts don't have clearing purpose
-		InstrumentCode:           "USD",
-		Dimension:                "CURRENCY",
-		Status:                   "ACTIVE",
-		CorrespondentBankID:      &bankID,
-		CorrespondentBankName:    &bankName,
-		CorrespondentExternalRef: &externalRef,
-		Version:                  1,
-		CreatedAt:                now,
-		UpdatedAt:                now,
-		CreatedBy:                "system",
-		UpdatedBy:                "system",
-		Attributes:               make(AttributesJSON),
+		ID:                      uuid.New(),
+		AccountID:               "IBA-MAP-011",
+		AccountCode:             "USD_NOSTRO_CITI",
+		Name:                    "USD NOSTRO at Citibank",
+		AccountType:             "NOSTRO",
+		ClearingPurpose:         nil,
+		InstrumentCode:          "USD",
+		Dimension:               "CURRENCY",
+		Status:                  "ACTIVE",
+		CounterpartyID:          &counterpartyID,
+		CounterpartyName:        &counterpartyName,
+		CounterpartyExternalRef: &externalRef,
+		Version:                 1,
+		CreatedAt:               now,
+		UpdatedAt:               now,
+		CreatedBy:               "system",
+		UpdatedBy:               "system",
+		Attributes:              make(AttributesJSON),
 	}
 
 	// Convert to domain
 	account := toDomain(entity)
 
-	// Verify correspondent details reconstructed
-	require.NotNil(t, account.Correspondent())
-	assert.Equal(t, "CITI001", account.Correspondent().BankID())
-	assert.Equal(t, "Citibank NA", account.Correspondent().BankName())
-	assert.Equal(t, "12345678", account.Correspondent().ExternalAccountRef())
+	// Verify counterparty details reconstructed
+	require.NotNil(t, account.Counterparty())
+	assert.Equal(t, "CITI001", account.Counterparty().CounterpartyID())
+	assert.Equal(t, "Citibank NA", account.Counterparty().CounterpartyName())
+	assert.Equal(t, "12345678", account.Counterparty().ExternalRef())
 }
 
 // TestToDomain_WithAttributes tests reconstructing attributes from entity.
@@ -282,7 +282,7 @@ func TestToDomain_EmptyAttributes(t *testing.T) {
 		AccountCode:     "GBP_BASIC",
 		Name:            "GBP Basic Account",
 		AccountType:     "CLEARING",
-		ClearingPurpose: nil, // nil means unspecified
+		ClearingPurpose: nil,
 		InstrumentCode:  "GBP",
 		Dimension:       "CURRENCY",
 		Status:          "ACTIVE",
@@ -324,7 +324,7 @@ func TestToDomain_AllAccountTypes(t *testing.T) {
 				AccountCode:     "CODE_" + tc.entityType,
 				Name:            tc.entityType + " Account",
 				AccountType:     tc.entityType,
-				ClearingPurpose: nil, // nil means unspecified
+				ClearingPurpose: nil,
 				InstrumentCode:  "GBP",
 				Dimension:       "CURRENCY",
 				Status:          "ACTIVE",
@@ -361,7 +361,7 @@ func TestToDomain_AllStatuses(t *testing.T) {
 				AccountCode:     "CODE_" + tc.entityStatus,
 				Name:            tc.entityStatus + " Account",
 				AccountType:     "CLEARING",
-				ClearingPurpose: nil, // nil means unspecified
+				ClearingPurpose: nil,
 				InstrumentCode:  "GBP",
 				Dimension:       "CURRENCY",
 				Status:          tc.entityStatus,
@@ -460,7 +460,7 @@ func TestToEntity_ClearingPurpose(t *testing.T) {
 			"IBA-CP-Unspecified",
 			"CODE_Unspecified",
 			"Holding Account with Unspecified Purpose",
-			domain.AccountTypeHolding, // Non-CLEARING account type
+			domain.AccountTypeHolding,
 			domain.ClearingPurposeUnspecified,
 			"GBP",
 			"CURRENCY",
@@ -506,11 +506,11 @@ func TestRoundTrip_BasicAccount(t *testing.T) {
 	assert.Equal(t, original.Version(), reconstructed.Version())
 }
 
-// TestRoundTrip_WithCorrespondent tests roundtrip with correspondent details.
-func TestRoundTrip_WithCorrespondent(t *testing.T) {
+// TestRoundTrip_WithCounterparty tests roundtrip with counterparty details.
+func TestRoundTrip_WithCounterparty(t *testing.T) {
 	ctx := createTestContextForMappers()
 
-	// Create NOSTRO account with correspondent
+	// Create NOSTRO account with counterparty
 	original, err := domain.NewInternalAccount(
 		"IBA-RT-002",
 		"USD_NOSTRO_CITI",
@@ -522,20 +522,20 @@ func TestRoundTrip_WithCorrespondent(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	correspondent, err := domain.NewCorrespondentDetails("CITI001", "Citibank NA", "12345678")
+	counterparty, err := domain.NewCounterpartyDetails("CITI001", "Citibank NA", "12345678")
 	require.NoError(t, err)
-	original, err = original.UpdateCorrespondent(correspondent)
+	original, err = original.UpdateCounterparty(counterparty)
 	require.NoError(t, err)
 
 	// Convert domain -> entity -> domain
 	entity := toEntity(ctx, original)
 	reconstructed := toDomain(entity)
 
-	// Verify correspondent details preserved
-	require.NotNil(t, reconstructed.Correspondent())
-	assert.Equal(t, original.Correspondent().BankID(), reconstructed.Correspondent().BankID())
-	assert.Equal(t, original.Correspondent().BankName(), reconstructed.Correspondent().BankName())
-	assert.Equal(t, original.Correspondent().ExternalAccountRef(), reconstructed.Correspondent().ExternalAccountRef())
+	// Verify counterparty details preserved
+	require.NotNil(t, reconstructed.Counterparty())
+	assert.Equal(t, original.Counterparty().CounterpartyID(), reconstructed.Counterparty().CounterpartyID())
+	assert.Equal(t, original.Counterparty().CounterpartyName(), reconstructed.Counterparty().CounterpartyName())
+	assert.Equal(t, original.Counterparty().ExternalRef(), reconstructed.Counterparty().ExternalRef())
 }
 
 // TestRoundTrip_WithAttributes tests roundtrip with JSONB attributes.
@@ -580,7 +580,7 @@ func TestRoundTrip_WithAttributes(t *testing.T) {
 func TestRoundTrip_VostroAccount(t *testing.T) {
 	ctx := createTestContextForMappers()
 
-	// Create VOSTRO account with correspondent
+	// Create VOSTRO account with counterparty
 	original, err := domain.NewInternalAccount(
 		"IBA-RT-004",
 		"EUR_VOSTRO_DB",
@@ -592,9 +592,9 @@ func TestRoundTrip_VostroAccount(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	correspondent, err := domain.NewCorrespondentDetails("DB001", "Deutsche Bank AG", "DE89370400440532013000")
+	counterparty, err := domain.NewCounterpartyDetails("DB001", "Deutsche Bank AG", "DE89370400440532013000")
 	require.NoError(t, err)
-	original, err = original.UpdateCorrespondent(correspondent)
+	original, err = original.UpdateCounterparty(counterparty)
 	require.NoError(t, err)
 
 	// Convert domain -> entity -> domain
@@ -612,10 +612,10 @@ func TestRoundTrip_VostroAccount(t *testing.T) {
 	assert.Equal(t, original.Status(), reconstructed.Status())
 	assert.Equal(t, original.Version(), reconstructed.Version())
 
-	require.NotNil(t, reconstructed.Correspondent())
-	assert.Equal(t, "DB001", reconstructed.Correspondent().BankID())
-	assert.Equal(t, "Deutsche Bank AG", reconstructed.Correspondent().BankName())
-	assert.Equal(t, "DE89370400440532013000", reconstructed.Correspondent().ExternalAccountRef())
+	require.NotNil(t, reconstructed.Counterparty())
+	assert.Equal(t, "DB001", reconstructed.Counterparty().CounterpartyID())
+	assert.Equal(t, "Deutsche Bank AG", reconstructed.Counterparty().CounterpartyName())
+	assert.Equal(t, "DE89370400440532013000", reconstructed.Counterparty().ExternalRef())
 }
 
 // TestRoundTrip_SuspendedStatus tests roundtrip for suspended account.
@@ -628,7 +628,7 @@ func TestRoundTrip_SuspendedStatus(t *testing.T) {
 		"GBP_SUSPENDED",
 		"GBP Suspended Account",
 		domain.AccountTypeClearing,
-		domain.ClearingPurposeGeneral, // CLEARING accounts require a specific purpose
+		domain.ClearingPurposeGeneral,
 		"GBP",
 		"CURRENCY",
 	)
@@ -643,7 +643,7 @@ func TestRoundTrip_SuspendedStatus(t *testing.T) {
 
 	// Verify status preserved
 	assert.Equal(t, domain.AccountStatusSuspended, reconstructed.Status())
-	assert.Equal(t, int64(2), reconstructed.Version()) // Version incremented on suspend
+	assert.Equal(t, int64(2), reconstructed.Version())
 }
 
 // TestAttributesJSON_Value tests AttributesJSON Value() for database writes.
@@ -715,34 +715,34 @@ func TestAttributesJSON_Scan(t *testing.T) {
 	})
 }
 
-// TestReconstructCorrespondent tests the helper function for correspondent reconstruction.
-func TestReconstructCorrespondent(t *testing.T) {
-	t.Run("valid correspondent", func(t *testing.T) {
-		result := reconstructCorrespondent("BANK001", "Test Bank", "REF123")
+// TestReconstructCounterparty tests the helper function for counterparty reconstruction.
+func TestReconstructCounterparty(t *testing.T) {
+	t.Run("valid counterparty", func(t *testing.T) {
+		result := reconstructCounterparty("CPTY001", "Test Counterparty", "REF123")
 
 		require.NotNil(t, result)
-		assert.Equal(t, "BANK001", result.BankID())
-		assert.Equal(t, "Test Bank", result.BankName())
-		assert.Equal(t, "REF123", result.ExternalAccountRef())
+		assert.Equal(t, "CPTY001", result.CounterpartyID())
+		assert.Equal(t, "Test Counterparty", result.CounterpartyName())
+		assert.Equal(t, "REF123", result.ExternalRef())
 	})
 
-	t.Run("invalid bank name too short", func(t *testing.T) {
-		// Bank name must be at least 3 characters
-		result := reconstructCorrespondent("BANK001", "XY", "REF123")
+	t.Run("invalid counterparty name too short", func(t *testing.T) {
+		// Counterparty name must be at least 3 characters
+		result := reconstructCounterparty("CPTY001", "XY", "REF123")
 
 		// Should return nil for invalid data (logged as warning)
 		assert.Nil(t, result)
 	})
 
-	t.Run("empty bank ID", func(t *testing.T) {
-		result := reconstructCorrespondent("", "Test Bank", "REF123")
+	t.Run("empty counterparty ID", func(t *testing.T) {
+		result := reconstructCounterparty("", "Test Counterparty", "REF123")
 
 		// Should return nil for invalid data
 		assert.Nil(t, result)
 	})
 
 	t.Run("empty external ref", func(t *testing.T) {
-		result := reconstructCorrespondent("BANK001", "Test Bank", "")
+		result := reconstructCounterparty("CPTY001", "Test Counterparty", "")
 
 		// Should return nil for invalid data
 		assert.Nil(t, result)
@@ -896,24 +896,24 @@ func TestRoundTrip_GlobalAccount(t *testing.T) {
 	assert.False(t, reconstructed.IsScopedToOrganization())
 }
 
-// TestToDomain_PartialCorrespondent tests handling when only some correspondent fields are set.
-func TestToDomain_PartialCorrespondent(t *testing.T) {
+// TestToDomain_PartialCounterparty tests handling when only some counterparty fields are set.
+func TestToDomain_PartialCounterparty(t *testing.T) {
 	now := time.Now()
 
-	t.Run("only bank ID set", func(t *testing.T) {
-		bankID := "CITI001"
+	t.Run("only counterparty ID set", func(t *testing.T) {
+		counterpartyID := "CPTY001"
 		entity := &InternalAccountEntity{
-			ID:                  uuid.New(),
-			AccountID:           "IBA-PARTIAL-001",
-			AccountCode:         "TEST",
-			Name:                "Test Account",
-			AccountType:         "CLEARING",
-			ClearingPurpose:     nil, // nil means unspecified
-			InstrumentCode:      "GBP",
-			Dimension:           "CURRENCY",
-			Status:              "ACTIVE",
-			CorrespondentBankID: &bankID,
-			// Other correspondent fields are nil
+			ID:             uuid.New(),
+			AccountID:      "IBA-PARTIAL-001",
+			AccountCode:    "TEST",
+			Name:           "Test Account",
+			AccountType:    "CLEARING",
+			ClearingPurpose: nil,
+			InstrumentCode: "GBP",
+			Dimension:      "CURRENCY",
+			Status:         "ACTIVE",
+			CounterpartyID: &counterpartyID,
+			// Other counterparty fields are nil
 			Attributes: make(AttributesJSON),
 			Version:    1,
 			CreatedAt:  now,
@@ -924,26 +924,26 @@ func TestToDomain_PartialCorrespondent(t *testing.T) {
 
 		account := toDomain(entity)
 
-		// Correspondent should be nil when not all fields are present
-		assert.Nil(t, account.Correspondent())
+		// Counterparty should be nil when not all fields are present
+		assert.Nil(t, account.Counterparty())
 	})
 
 	t.Run("two of three fields set", func(t *testing.T) {
-		bankID := "CITI001"
-		bankName := "Citibank NA"
+		counterpartyID := "CPTY001"
+		counterpartyName := "Citibank NA"
 		entity := &InternalAccountEntity{
-			ID:                    uuid.New(),
-			AccountID:             "IBA-PARTIAL-002",
-			AccountCode:           "TEST",
-			Name:                  "Test Account",
-			AccountType:           "CLEARING",
-			ClearingPurpose:       nil, // nil means unspecified
-			InstrumentCode:        "GBP",
-			Dimension:             "CURRENCY",
-			Status:                "ACTIVE",
-			CorrespondentBankID:   &bankID,
-			CorrespondentBankName: &bankName,
-			// ExternalRef is nil
+			ID:               uuid.New(),
+			AccountID:        "IBA-PARTIAL-002",
+			AccountCode:      "TEST",
+			Name:             "Test Account",
+			AccountType:      "CLEARING",
+			ClearingPurpose:  nil,
+			InstrumentCode:   "GBP",
+			Dimension:        "CURRENCY",
+			Status:           "ACTIVE",
+			CounterpartyID:   &counterpartyID,
+			CounterpartyName: &counterpartyName,
+			// CounterpartyExternalRef is nil
 			Attributes: make(AttributesJSON),
 			Version:    1,
 			CreatedAt:  now,
@@ -954,7 +954,7 @@ func TestToDomain_PartialCorrespondent(t *testing.T) {
 
 		account := toDomain(entity)
 
-		// Correspondent should be nil when not all fields are present
-		assert.Nil(t, account.Correspondent())
+		// Counterparty should be nil when not all fields are present
+		assert.Nil(t, account.Counterparty())
 	})
 }

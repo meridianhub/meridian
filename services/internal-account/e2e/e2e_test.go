@@ -2,7 +2,7 @@
 
 // Package e2e provides end-to-end integration tests for the internal account service.
 // These tests verify the full account lifecycle from creation through closure,
-// including multi-tenant isolation, multi-asset support, and correspondent banking.
+// including multi-tenant isolation, multi-asset support, and counterparty banking.
 package e2e
 
 import (
@@ -271,9 +271,9 @@ func applyInternalAccountSchema(t *testing.T, pool *pgxpool.Pool, schemaName str
 			instrument_code character varying(32) NOT NULL,
 			dimension character varying(20) NOT NULL DEFAULT '',
 			status character varying(20) NOT NULL DEFAULT 'ACTIVE',
-			correspondent_bank_id character varying(50) NULL,
-			correspondent_bank_name character varying(255) NULL,
-			correspondent_external_ref character varying(100) NULL,
+			counterparty_id character varying(50) NULL,
+			counterparty_name character varying(255) NULL,
+			counterparty_external_ref character varying(100) NULL,
 			attributes jsonb NOT NULL DEFAULT '{}',
 			version bigint NOT NULL DEFAULT 1,
 			PRIMARY KEY (id),
@@ -977,133 +977,127 @@ func TestE2E_MultiAssetAccounts(t *testing.T) {
 }
 
 // ============================================================================
-// E2E Test: Correspondent Banking (NOSTRO/VOSTRO)
+// E2E Test: Counterparty Banking (NOSTRO/VOSTRO)
 // ============================================================================
 
-// TestE2E_CorrespondentBanking tests creating NOSTRO and VOSTRO accounts with correspondent details.
-func TestE2E_CorrespondentBanking(t *testing.T) {
+// TestE2E_CounterpartyBanking tests creating NOSTRO and VOSTRO accounts with counterparty details.
+func TestE2E_CounterpartyBanking(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
 
 	tc := setupE2ETestPool(t)
-	ctx := setupTenantSchema(t, tc, "e2e_correspondent_tenant")
+	ctx := setupTenantSchema(t, tc, "e2e_counterparty_tenant")
 
 	t.Run("Create NOSTRO account (our account at Citibank)", func(t *testing.T) {
 		resp, err := tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-			AccountCode:    "USD_NOSTRO_CITI",
-			Name:           "USD NOSTRO at Citibank",
+			AccountCode:     "USD_NOSTRO_CITI",
+			Name:            "USD NOSTRO at Citibank",
 			ProductTypeCode: "NOSTRO_USD",
-			InstrumentCode: "USD",
-			CorrespondentDetails: &pb.CorrespondentBankDetails{
-				BankId:             "CITI001",
-				BankName:           "Citibank NA",
-				ExternalAccountRef: "12345678901",
-				SwiftCode:          "CITIUS33",
+			InstrumentCode:  "USD",
+			CounterpartyDetails: &pb.CounterpartyDetails{
+				CounterpartyId:          "CITI001",
+				CounterpartyName:        "Citibank NA",
+				CounterpartyExternalRef: "12345678901",
 			},
 		})
 		require.NoError(t, err)
 
 		assert.Equal(t, "NOSTRO", resp.Facility.BehaviorClass)
-		require.NotNil(t, resp.Facility.CorrespondentDetails)
-		assert.Equal(t, "CITI001", resp.Facility.CorrespondentDetails.BankId)
-		assert.Equal(t, "Citibank NA", resp.Facility.CorrespondentDetails.BankName)
-		assert.Equal(t, "12345678901", resp.Facility.CorrespondentDetails.ExternalAccountRef)
-		assert.Equal(t, "CITIUS33", resp.Facility.CorrespondentDetails.SwiftCode)
-		assert.Equal(t, pb.CorrespondentType_CORRESPONDENT_TYPE_NOSTRO, resp.Facility.CorrespondentDetails.CorrespondentType)
+		require.NotNil(t, resp.Facility.CounterpartyDetails)
+		assert.Equal(t, "CITI001", resp.Facility.CounterpartyDetails.CounterpartyId)
+		assert.Equal(t, "Citibank NA", resp.Facility.CounterpartyDetails.CounterpartyName)
+		assert.Equal(t, "12345678901", resp.Facility.CounterpartyDetails.CounterpartyExternalRef)
+		assert.Equal(t, pb.CounterpartyType_COUNTERPARTY_TYPE_NOSTRO, resp.Facility.CounterpartyDetails.CounterpartyType)
 	})
 
 	t.Run("Create VOSTRO account (Deutsche Bank's account at our bank)", func(t *testing.T) {
 		resp, err := tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-			AccountCode:    "EUR_VOSTRO_DB",
-			Name:           "EUR VOSTRO for Deutsche Bank",
+			AccountCode:     "EUR_VOSTRO_DB",
+			Name:            "EUR VOSTRO for Deutsche Bank",
 			ProductTypeCode: "VOSTRO_USD",
-			InstrumentCode: "EUR",
-			CorrespondentDetails: &pb.CorrespondentBankDetails{
-				BankId:             "DB001",
-				BankName:           "Deutsche Bank AG",
-				ExternalAccountRef: "DE89370400440532013000",
-				SwiftCode:          "DEUTDEFF",
+			InstrumentCode:  "EUR",
+			CounterpartyDetails: &pb.CounterpartyDetails{
+				CounterpartyId:          "DB001",
+				CounterpartyName:        "Deutsche Bank AG",
+				CounterpartyExternalRef: "DE89370400440532013000",
 			},
 		})
 		require.NoError(t, err)
 
 		assert.Equal(t, "VOSTRO", resp.Facility.BehaviorClass)
-		require.NotNil(t, resp.Facility.CorrespondentDetails)
-		assert.Equal(t, "DB001", resp.Facility.CorrespondentDetails.BankId)
-		assert.Equal(t, "Deutsche Bank AG", resp.Facility.CorrespondentDetails.BankName)
-		assert.Equal(t, pb.CorrespondentType_CORRESPONDENT_TYPE_VOSTRO, resp.Facility.CorrespondentDetails.CorrespondentType)
+		require.NotNil(t, resp.Facility.CounterpartyDetails)
+		assert.Equal(t, "DB001", resp.Facility.CounterpartyDetails.CounterpartyId)
+		assert.Equal(t, "Deutsche Bank AG", resp.Facility.CounterpartyDetails.CounterpartyName)
+		assert.Equal(t, pb.CounterpartyType_COUNTERPARTY_TYPE_VOSTRO, resp.Facility.CounterpartyDetails.CounterpartyType)
 	})
 
-	t.Run("NOSTRO account requires correspondent details", func(t *testing.T) {
+	t.Run("NOSTRO account requires counterparty details", func(t *testing.T) {
 		_, err := tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-			AccountCode:    "USD_NOSTRO_MISSING",
-			Name:           "USD NOSTRO Missing Correspondent",
+			AccountCode:     "USD_NOSTRO_MISSING",
+			Name:            "USD NOSTRO Missing Counterparty",
 			ProductTypeCode: "NOSTRO_USD",
-			InstrumentCode: "USD",
-			// Missing CorrespondentDetails
+			InstrumentCode:  "USD",
+			// Missing CounterpartyDetails
 		})
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "correspondent")
+		assert.Contains(t, err.Error(), "counterparty")
 	})
 
-	t.Run("VOSTRO account requires correspondent details", func(t *testing.T) {
+	t.Run("VOSTRO account requires counterparty details", func(t *testing.T) {
 		_, err := tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-			AccountCode:    "EUR_VOSTRO_MISSING",
-			Name:           "EUR VOSTRO Missing Correspondent",
+			AccountCode:     "EUR_VOSTRO_MISSING",
+			Name:            "EUR VOSTRO Missing Counterparty",
 			ProductTypeCode: "VOSTRO_USD",
-			InstrumentCode: "EUR",
-			// Missing CorrespondentDetails
+			InstrumentCode:  "EUR",
+			// Missing CounterpartyDetails
 		})
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "correspondent")
+		assert.Contains(t, err.Error(), "counterparty")
 	})
 
-	t.Run("CLEARING account rejects correspondent details", func(t *testing.T) {
-		// The domain should reject correspondent details for non-NOSTRO/VOSTRO accounts
+	t.Run("CLEARING account rejects counterparty details", func(t *testing.T) {
+		// The domain should reject counterparty details for non-NOSTRO/VOSTRO accounts
 		// First create the account successfully
 		resp, err := tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-			AccountCode:    "GBP_CLEARING_ONLY",
-			Name:           "GBP Clearing Only",
+			AccountCode:     "GBP_CLEARING_ONLY",
+			Name:            "GBP Clearing Only",
 			ProductTypeCode: "CLEARING_GBP",
-			InstrumentCode: "GBP",
+			InstrumentCode:  "GBP",
 		})
 		require.NoError(t, err)
-		assert.Nil(t, resp.Facility.CorrespondentDetails)
+		assert.Nil(t, resp.Facility.CounterpartyDetails)
 	})
 
-	t.Run("Update correspondent details on NOSTRO account", func(t *testing.T) {
+	t.Run("Update counterparty details on NOSTRO account", func(t *testing.T) {
 		// First create the NOSTRO account
 		createResp, err := tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-			AccountCode:    "USD_NOSTRO_JPMORGAN",
-			Name:           "USD NOSTRO at JPMorgan",
+			AccountCode:     "USD_NOSTRO_JPMORGAN",
+			Name:            "USD NOSTRO at JPMorgan",
 			ProductTypeCode: "NOSTRO_USD",
-			InstrumentCode: "USD",
-			CorrespondentDetails: &pb.CorrespondentBankDetails{
-				BankId:             "JPM001",
-				BankName:           "JPMorgan Chase",
-				ExternalAccountRef: "987654321",
-				SwiftCode:          "CHASUS33",
+			InstrumentCode:  "USD",
+			CounterpartyDetails: &pb.CounterpartyDetails{
+				CounterpartyId:          "JPM001",
+				CounterpartyName:        "JPMorgan Chase",
+				CounterpartyExternalRef: "987654321",
 			},
 		})
 		require.NoError(t, err)
 
-		// Update correspondent details using account_code
+		// Update counterparty details using account_code
 		updateResp, err := tc.svc.UpdateInternalAccount(ctx, &pb.UpdateInternalAccountRequest{
 			AccountId: createResp.Facility.AccountCode,
-			CorrespondentDetails: &pb.CorrespondentBankDetails{
-				BankId:             "JPM001",
-				BankName:           "JPMorgan Chase & Co",
-				ExternalAccountRef: "999888777",
-				SwiftCode:          "CHASUS33XXX",
+			CounterpartyDetails: &pb.CounterpartyDetails{
+				CounterpartyId:          "JPM001",
+				CounterpartyName:        "JPMorgan Chase & Co",
+				CounterpartyExternalRef: "999888777",
 			},
 		})
 		require.NoError(t, err)
 
 		// Verify updated details
-		assert.Equal(t, "JPMorgan Chase & Co", updateResp.Facility.CorrespondentDetails.BankName)
-		assert.Equal(t, "999888777", updateResp.Facility.CorrespondentDetails.ExternalAccountRef)
-		assert.Equal(t, "CHASUS33XXX", updateResp.Facility.CorrespondentDetails.SwiftCode)
+		assert.Equal(t, "JPMorgan Chase & Co", updateResp.Facility.CounterpartyDetails.CounterpartyName)
+		assert.Equal(t, "999888777", updateResp.Facility.CounterpartyDetails.CounterpartyExternalRef)
 	})
 
 	t.Run("List NOSTRO accounts only", func(t *testing.T) {
@@ -1115,7 +1109,7 @@ func TestE2E_CorrespondentBanking(t *testing.T) {
 
 		for _, facility := range resp.Facilities {
 			assert.Equal(t, "NOSTRO", facility.BehaviorClass)
-			assert.NotNil(t, facility.CorrespondentDetails)
+			assert.NotNil(t, facility.CounterpartyDetails)
 		}
 	})
 
@@ -1128,7 +1122,7 @@ func TestE2E_CorrespondentBanking(t *testing.T) {
 
 		for _, facility := range resp.Facilities {
 			assert.Equal(t, "VOSTRO", facility.BehaviorClass)
-			assert.NotNil(t, facility.CorrespondentDetails)
+			assert.NotNil(t, facility.CounterpartyDetails)
 		}
 	})
 }
@@ -1561,8 +1555,8 @@ func TestE2E_AllAccountTypes(t *testing.T) {
 	accountTypes := []struct {
 		productTypeCode      string
 		behaviorClass        string
-		requireCorrespondent bool
-		name                 string
+		requireCounterparty bool
+		name                string
 	}{
 		{"CLEARING_GBP", "CLEARING", false, "Clearing"},
 		{"HOLDING_GBP", "HOLDING", false, "Holding"},
@@ -1582,11 +1576,11 @@ func TestE2E_AllAccountTypes(t *testing.T) {
 				InstrumentCode:  "GBP",
 			}
 
-			if at.requireCorrespondent {
-				req.CorrespondentDetails = &pb.CorrespondentBankDetails{
-					BankId:             "BANK001",
-					BankName:           "Test Bank",
-					ExternalAccountRef: "REF123",
+			if at.requireCounterparty {
+				req.CounterpartyDetails = &pb.CounterpartyDetails{
+					CounterpartyId:          "BANK001",
+					CounterpartyName:        "Test Bank",
+					CounterpartyExternalRef: "REF123",
 				}
 			}
 
@@ -1594,8 +1588,8 @@ func TestE2E_AllAccountTypes(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, at.behaviorClass, resp.Facility.BehaviorClass)
 
-			if at.requireCorrespondent {
-				assert.NotNil(t, resp.Facility.CorrespondentDetails)
+			if at.requireCounterparty {
+				assert.NotNil(t, resp.Facility.CounterpartyDetails)
 			}
 		})
 	}

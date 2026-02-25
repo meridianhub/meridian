@@ -11,7 +11,7 @@ triggers:
   - Balance queries for internal accounts
 instructions: |
   InternalAccount manages non-customer accounts used for internal accounting purposes:
-  - Counterparty accounts (nostro/vostro for correspondent banking)
+  - Counterparty accounts (nostro/vostro for counterparty banking)
   - Operational accounts (clearing, suspense, holding, revenue, expense)
   - Multi-asset support (fiat, energy, carbon credits, compute hours)
 
@@ -42,11 +42,11 @@ BIAN-compliant internal account registry microservice for managing counterparty 
 ## Purpose
 
 The Internal Account service manages accounts that are not customer-facing but are essential
-for internal accounting and correspondent banking operations:
+for internal accounting and counterparty banking operations:
 
 - **Clearing Accounts**: Settlement and clearing operations during transaction processing
-- **Nostro Accounts**: "Our account at your bank" - accounts held at correspondent banks
-- **Vostro Accounts**: "Your account at our bank" - accounts held by correspondent banks at us
+- **Nostro Accounts**: "Our account at your bank" - accounts held at counterparty banks
+- **Vostro Accounts**: "Your account at our bank" - accounts held by counterparty banks at us
 - **Holding Accounts**: Temporary holding of funds during multi-step processes
 - **Suspense Accounts**: Unidentified or pending transactions awaiting resolution
 - **Revenue Accounts**: Income and revenue tracking for GL integration
@@ -78,12 +78,11 @@ req := &iba.InitiateInternalAccountRequest{
     Name:           "USD Nostro at HSBC London",
     AccountType:    iba.INTERNAL_ACCOUNT_TYPE_NOSTRO,
     InstrumentCode: "USD",
-    CorrespondentDetails: &iba.CorrespondentBankDetails{
-        BankId:             "hsbc-london",
-        BankName:           "HSBC London",
-        ExternalAccountRef: "GB12HSBC12345678901234",
-        SwiftCode:          "HSBCGB2L",
-        CorrespondentType:  iba.CORRESPONDENT_TYPE_NOSTRO,
+    CounterpartyDetails: &iba.CounterpartyDetails{
+        CounterpartyId:          "hsbc-london",
+        CounterpartyName:        "HSBC London",
+        CounterpartyExternalRef: "GB12HSBC12345678901234",
+        CounterpartyType:        iba.COUNTERPARTY_TYPE_NOSTRO,
     },
     Description:    "Primary USD clearing account at HSBC London",
     IdempotencyKey: &common.IdempotencyKey{Key: "create-nostro-001"},
@@ -197,19 +196,19 @@ classDiagram
         +ClearingPurpose ClearingPurpose
         +InternalAccountStatus AccountStatus
         +string InstrumentCode
-        +CorrespondentBankDetails CorrespondentDetails
+        +CounterpartyDetails CounterpartyDetails
         +string Description
         +int32 Version
         +Timestamp CreatedAt
         +Timestamp UpdatedAt
     }
 
-    class CorrespondentBankDetails {
-        +string BankID
-        +string BankName
-        +string ExternalAccountRef
-        +string SwiftCode
-        +CorrespondentType CorrespondentType
+    class CounterpartyDetails {
+        +string CounterpartyID
+        +string CounterpartyName
+        +string CounterpartyExternalRef
+        +map Attributes
+        +CounterpartyType CounterpartyType
     }
 
     class InternalAccountType {
@@ -247,7 +246,7 @@ classDiagram
         CLOSE
     }
 
-    class CorrespondentType {
+    class CounterpartyType {
         <<enumeration>>
         NOSTRO
         VOSTRO
@@ -256,8 +255,8 @@ classDiagram
     InternalAccountFacility --> InternalAccountType
     InternalAccountFacility --> ClearingPurpose
     InternalAccountFacility --> InternalAccountStatus
-    InternalAccountFacility --> CorrespondentBankDetails
-    CorrespondentBankDetails --> CorrespondentType
+    InternalAccountFacility --> CounterpartyDetails
+    CounterpartyDetails --> CounterpartyType
 ```
 
 **Field Notes:**
@@ -265,15 +264,15 @@ classDiagram
 - `AccountID`: System-generated KSUID (e.g., `2rPxMVkj3tNmqPwT5Wk8Lc4M9xZ`)
 - `AccountCode`: Business-friendly code (e.g., `NOSTRO-USD-HSBC`, `CLR-001`)
 - `InstrumentCode`: References instrument from Reference Data service (e.g., `USD`, `KWH`, `GPU_HOUR`)
-- `CorrespondentDetails`: Required for NOSTRO/VOSTRO accounts, null for others
+- `CounterpartyDetails`: Required for NOSTRO/VOSTRO accounts, null for others
 
 ## Account Types
 
 | Type | Description | Typical Use |
 |------|-------------|-------------|
 | `CLEARING` | Settlement and clearing operations | Interbank settlement, payment clearing |
-| `NOSTRO` | Our account at another bank | Foreign currency holdings, correspondent banking |
-| `VOSTRO` | Their account at our bank | Correspondent accounts for partner banks |
+| `NOSTRO` | Our account at another bank | Foreign currency holdings, counterparty banking |
+| `VOSTRO` | Their account at our bank | Counterparty accounts for partner banks |
 | `HOLDING` | Temporary fund holding | Escrow, pending transfers, batch processing |
 | `SUSPENSE` | Unmatched/pending transactions | Reconciliation, error correction |
 | `REVENUE` | Income tracking | Fee collection, interest income |
@@ -505,7 +504,7 @@ sequenceDiagram
 | `account_type` | Must not be UNSPECIFIED | "account_type must be specified" |
 | `instrument_code` | Pattern: `^[A-Z][A-Z0-9_]*$`, max 32 chars | "instrument_code must match pattern" |
 | `control_action.reason` | Min 10 chars for audit completeness | "reason must be at least 10 characters" |
-| `correspondent_details` | Required for NOSTRO/VOSTRO types | "correspondent_details required for nostro/vostro" |
+| `counterparty_details` | Required for NOSTRO/VOSTRO types | "counterparty details required for nostro/vostro" |
 
 ## Database Schema
 
@@ -526,17 +525,14 @@ erDiagram
         timestamp updated_at
     }
 
-    correspondent_bank_details {
-        uuid id PK
-        uuid internal_account_id FK
-        string bank_id
-        string bank_name
-        string external_account_ref
-        string swift_code "nullable"
-        string correspondent_type "NOSTRO|VOSTRO"
+    counterparty_details {
+        string counterparty_id "nullable"
+        string counterparty_name "nullable"
+        string counterparty_external_ref "nullable"
+        string counterparty_type "NOSTRO|VOSTRO"
     }
 
-    internal_account ||--o| correspondent_bank_details : "has (nostro/vostro only)"
+    internal_account ||--o| counterparty_details : "has (nostro/vostro only)"
 ```
 
 ## Service Dependencies
@@ -639,9 +635,9 @@ client.ControlInternalAccount(ctx, &iba.ControlInternalAccountRequest{
 })
 ```
 
-### Correspondent Banking
+### Counterparty Banking
 
-Nostro and vostro accounts require correspondent bank details:
+Nostro and vostro accounts require counterparty details:
 
 ```go
 // Nostro: Our account at their bank
@@ -649,12 +645,11 @@ nostro := &iba.InitiateInternalAccountRequest{
     AccountCode: "NOSTRO-EUR-DEUTSCHE",
     AccountType: iba.INTERNAL_ACCOUNT_TYPE_NOSTRO,
     InstrumentCode: "EUR",
-    CorrespondentDetails: &iba.CorrespondentBankDetails{
-        BankId:             "deutsche-frankfurt",
-        BankName:           "Deutsche Bank Frankfurt",
-        ExternalAccountRef: "DE89370400440532013000",
-        SwiftCode:          "DEUTDEFF",
-        CorrespondentType:  iba.CORRESPONDENT_TYPE_NOSTRO,
+    CounterpartyDetails: &iba.CounterpartyDetails{
+        CounterpartyId:          "deutsche-frankfurt",
+        CounterpartyName:        "Deutsche Bank Frankfurt",
+        CounterpartyExternalRef: "DE89370400440532013000",
+        CounterpartyType:        iba.COUNTERPARTY_TYPE_NOSTRO,
     },
 }
 
@@ -663,12 +658,11 @@ vostro := &iba.InitiateInternalAccountRequest{
     AccountCode: "VOSTRO-JPY-MUFG",
     AccountType: iba.INTERNAL_ACCOUNT_TYPE_VOSTRO,
     InstrumentCode: "JPY",
-    CorrespondentDetails: &iba.CorrespondentBankDetails{
-        BankId:             "mufg-tokyo",
-        BankName:           "MUFG Bank Tokyo",
-        ExternalAccountRef: "VOSTRO-MUFG-001",
-        SwiftCode:          "BOTKJPJT",
-        CorrespondentType:  iba.CORRESPONDENT_TYPE_VOSTRO,
+    CounterpartyDetails: &iba.CounterpartyDetails{
+        CounterpartyId:          "mufg-tokyo",
+        CounterpartyName:        "MUFG Bank Tokyo",
+        CounterpartyExternalRef: "VOSTRO-MUFG-001",
+        CounterpartyType:        iba.COUNTERPARTY_TYPE_VOSTRO,
     },
 }
 ```
