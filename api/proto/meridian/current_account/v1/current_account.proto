@@ -365,7 +365,7 @@ message InitiateCurrentAccountRequest {
   // When provided, the service resolves the product type via LocalAccountTypeCache,
   // validates BehaviorClass == CUSTOMER, evaluates EligibilityCEL, validates attributes
   // against AttributeSchema, and seeds ValuationFeatures from templates.
-  // During transition, if empty, the service falls back to base_currency-derived defaults.
+  // When empty, the service uses instrument_code and dimension from this request directly.
   string product_type_code = 5 [(buf.validate.field).string = {
     max_len: 50
     pattern: "^[A-Z0-9_]*$"
