@@ -38,4 +38,8 @@ breaking:
     # Intentional breaking change: ValuationFeature extraction (valuation-engine task 12)
     # Types moved from current_account.proto to shared valuation_feature/v1/ package
     - api/proto/meridian/current_account/v1/current_account.proto
+    # Intentional breaking change: Service rename (asset-agnostic-accounts task 6)
+    # Package renamed from internal_bank_account to internal_account
+    # All consumers updated in this PR
+    - api/proto/meridian/internal_bank_account/v1/internal_bank_account.proto
   ignore_unstable_packages: true
