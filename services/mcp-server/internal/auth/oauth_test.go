@@ -252,7 +252,7 @@ func TestTokenHandler_InvalidVerifier_ReturnsUnauthorized(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func TestTokenHandler_ExpiredCode_ReturnsUnauthorized(t *testing.T) {
@@ -289,7 +289,7 @@ func TestTokenHandler_ExpiredCode_ReturnsUnauthorized(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func TestTokenHandler_UnknownCode_ReturnsUnauthorized(t *testing.T) {
@@ -317,7 +317,7 @@ func TestTokenHandler_UnknownCode_ReturnsUnauthorized(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func TestTokenHandler_CodeIsConsumedAfterExchange(t *testing.T) {
@@ -361,7 +361,7 @@ func TestTokenHandler_CodeIsConsumedAfterExchange(t *testing.T) {
 
 	// Second exchange: code already consumed
 	w2 := makeRequest()
-	assert.Equal(t, http.StatusUnauthorized, w2.Code)
+	assert.Equal(t, http.StatusBadRequest, w2.Code)
 }
 
 func TestTokenHandler_MismatchedRedirectURI_ReturnsUnauthorized(t *testing.T) {
@@ -396,7 +396,7 @@ func TestTokenHandler_MismatchedRedirectURI_ReturnsUnauthorized(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 // -----------------------------------------------------------------------

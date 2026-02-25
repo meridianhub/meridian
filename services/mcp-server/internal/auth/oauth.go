@@ -188,6 +188,12 @@ func (h *AuthorizationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Require response_type=code (only supported grant).
+	if q.Get("response_type") != "code" {
+		http.Error(w, "response_type must be 'code'", http.StatusBadRequest)
+		return
+	}
+
 	// Validate redirect_uri against the registered value to prevent open redirect.
 	// If omitted, the registered URI is used; if provided it must match exactly.
 	redirectURI := q.Get("redirect_uri")
@@ -227,12 +233,21 @@ func (h *AuthorizationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 
 	h.logger.Info("authorization code issued", "client_id", clientID)
 
-	// Build redirect URL using url.Values so all query parameters are properly encoded.
-	params := url.Values{"code": {code}}
+	// Build redirect URL via url.Parse so any existing query params in the
+	// registered redirect URI are preserved alongside code and state.
+	target, err := url.Parse(redirectURI)
+	if err != nil {
+		h.logger.Error("invalid redirect URI", "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	params := target.Query()
+	params.Set("code", code)
 	if state := q.Get("state"); state != "" {
 		params.Set("state", state)
 	}
-	http.Redirect(w, r, redirectURI+"?"+params.Encode(), http.StatusFound)
+	target.RawQuery = params.Encode()
+	http.Redirect(w, r, target.String(), http.StatusFound)
 }
 
 // -----------------------------------------------------------------------
@@ -420,10 +435,11 @@ func extractBearerFromHeader(r *http.Request) (string, error) {
 	return token, nil
 }
 
-// writeOAuthError writes a 401 with an RFC 6749 error response.
+// writeOAuthError writes an RFC 6749 §5.2 error response.
+// Token endpoint errors use HTTP 400 Bad Request (not 401).
 func writeOAuthError(w http.ResponseWriter, code, description string) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusUnauthorized)
+	w.WriteHeader(http.StatusBadRequest)
 	_ = json.NewEncoder(w).Encode(map[string]string{
 		"error":             code,
 		"error_description": description,
