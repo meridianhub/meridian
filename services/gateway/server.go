@@ -52,7 +52,7 @@ func WithHealthChecker(healthChecker *gwhealth.GatewayHealthChecker) ServerOptio
 }
 
 // WithTranscoder sets the Vanguard transcoder as the API handler, replacing
-// the legacy prefix-based reverse proxy. When set, all /api/ requests are
+// the legacy prefix-based reverse proxy. When set, all API requests are
 // dispatched through the transcoder rather than NewProxyHandler.
 func WithTranscoder(handler http.Handler) ServerOption {
 	return func(s *Server) {
@@ -123,13 +123,15 @@ func NewServer(config *Config, logger *slog.Logger, tenantResolver *platformgate
 // - 403 Forbidden is returned if authenticated but JWT tenant doesn't match subdomain tenant
 // - API keys bypass tenant authorization (service-to-service auth)
 func (s *Server) registerRoutes() {
-	// Health check endpoints - NO middleware (required for K8s probes)
-	s.mux.HandleFunc("GET /health", s.handleHealth)
-	s.mux.HandleFunc("GET /ready", s.handleReady)
+	// Health check endpoints - NO middleware (required for K8s probes).
+	// Registered without method constraints so they take precedence over the
+	// "/" catch-all for ALL methods, returning 405 for non-GET requests.
+	s.mux.HandleFunc("/health", s.getOnly(s.handleHealth))
+	s.mux.HandleFunc("/ready", s.getOnly(s.handleReady))
 
 	// Legacy health endpoints for backwards compatibility
-	s.mux.HandleFunc("GET /healthz", s.handleHealth)
-	s.mux.HandleFunc("GET /readyz", s.handleReady)
+	s.mux.HandleFunc("/healthz", s.getOnly(s.handleHealth))
+	s.mux.HandleFunc("/readyz", s.getOnly(s.handleReady))
 
 	// API routes - with auth and tenant middleware chain.
 	// Prefer the Vanguard transcoder when configured; fall back to the legacy
@@ -153,7 +155,7 @@ func (s *Server) registerRoutes() {
 	}
 
 	// Build middleware chain: auth → tenant → tenant_authz → transcoder/proxy
-	s.mux.Handle("/api/", s.wrapWithAuthChain(http.StripPrefix("/api", apiHandler)))
+	s.mux.Handle("/", s.wrapWithAuthChain(apiHandler))
 
 	// WebSocket event stream endpoint - with auth and tenant middleware chain.
 	// Claims are bridged from the gateway auth context to the eventstream context
@@ -209,6 +211,19 @@ func (s *Server) wrapWithAuthChain(inner http.Handler) http.Handler {
 	}
 
 	return handler
+}
+
+// getOnly wraps a handler to only accept GET (and HEAD) requests,
+// returning 405 Method Not Allowed for anything else.
+func (s *Server) getOnly(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		h(w, r)
+	}
 }
 
 // handleHealth is the liveness probe endpoint.

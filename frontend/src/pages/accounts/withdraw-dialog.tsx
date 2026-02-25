@@ -44,7 +44,7 @@ async function initiateWithdrawal(
   amountMinorUnits: string,
 ): Promise<string> {
   const response = await fetch(
-    `/api/meridian.current_account.v1.CurrentAccountService/InitiateWithdrawal`,
+    `/meridian.current_account.v1.CurrentAccountService/InitiateWithdrawal`,
     {
       method: 'POST',
       headers: {
@@ -72,7 +72,7 @@ async function initiateWithdrawal(
 
 async function executeWithdrawal(tenantSlug: string, withdrawalId: string): Promise<void> {
   const response = await fetch(
-    `/api/meridian.current_account.v1.CurrentAccountService/ExecuteWithdrawal`,
+    `/meridian.current_account.v1.CurrentAccountService/ExecuteWithdrawal`,
     {
       method: 'POST',
       headers: {

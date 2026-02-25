@@ -14,14 +14,18 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  server: {
+    proxy: {
+      '/meridian.': { target: 'http://localhost:8090', changeOrigin: true },
+      '/v1': { target: 'http://localhost:8090', changeOrigin: true },
+    },
+  },
   preview: {
     port: 5173,
     strictPort: true,
     proxy: {
-      '/api': {
-        target: 'http://localhost:8090',
-        changeOrigin: true,
-      },
+      '/meridian.': { target: 'http://localhost:8090', changeOrigin: true },
+      '/v1': { target: 'http://localhost:8090', changeOrigin: true },
     },
   },
 })

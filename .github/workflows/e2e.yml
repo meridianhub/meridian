@@ -73,7 +73,7 @@ jobs:
         working-directory: frontend
         env:
           VITE_E2E_MODE: 'true'
-          VITE_API_BASE_URL: 'http://localhost:5173/api'
+          VITE_API_BASE_URL: 'http://localhost:5173'
         run: npx vite build
 
       - name: Upload backend binaries
@@ -172,7 +172,7 @@ jobs:
             local TENANT_ID=$1
             local PAYLOAD=$2
             HTTP_CODE=$(curl -sS -o /tmp/tenant_resp.txt -w "%{http_code}" \
-              -X POST "${GATEWAY_URL}/api/v1/tenants" \
+              -X POST "${GATEWAY_URL}/v1/tenants" \
               -H "Content-Type: application/json" \
               -d "$PAYLOAD")
             echo "${TENANT_ID}: HTTP ${HTTP_CODE}"

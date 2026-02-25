@@ -202,7 +202,7 @@ func TestAPIRoutes_WithoutTenantResolver(t *testing.T) {
 	server := NewServer(config, logger, nil)
 
 	// Request to API endpoint
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/test", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/test", nil)
 	rec := httptest.NewRecorder()
 
 	server.mux.ServeHTTP(rec, req)
@@ -234,7 +234,7 @@ func TestWithTranscoder_UsedOverProxy(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	server := NewServer(config, logger, nil, WithTranscoder(fakeTranscoder))
 
-	req := httptest.NewRequest(http.MethodPost, "/api/meridian.party.v1.PartyService/CreateParty", nil)
+	req := httptest.NewRequest(http.MethodPost, "/meridian.party.v1.PartyService/CreateParty", nil)
 	rec := httptest.NewRecorder()
 
 	server.mux.ServeHTTP(rec, req)
@@ -257,7 +257,7 @@ func TestWithTranscoder_FallsBackToProxy(t *testing.T) {
 	// No WithTranscoder option
 	server := NewServer(config, logger, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/party", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/party", nil)
 	rec := httptest.NewRecorder()
 
 	server.mux.ServeHTTP(rec, req)
@@ -285,7 +285,7 @@ func TestWithTranscoder_StripsAndInjectsIdentityHeaders(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	server := NewServer(config, logger, nil, WithTranscoder(capture))
 
-	req := httptest.NewRequest(http.MethodPost, "/api/meridian.party.v1.PartyService/CreateParty", nil)
+	req := httptest.NewRequest(http.MethodPost, "/meridian.party.v1.PartyService/CreateParty", nil)
 	// Simulate spoofed headers from a malicious client.
 	req.Header.Set(HeaderUserID, "spoofed-user")
 	req.Header.Set(HeaderTenantID, "spoofed-tenant")
@@ -320,7 +320,7 @@ func TestWithTranscoder_VanguardFromDescriptor(t *testing.T) {
 	server := NewServer(config, logger, nil, WithTranscoder(transcoder))
 
 	// Send an unknown path — Vanguard returns 404, not a panic.
-	req := httptest.NewRequest(http.MethodGet, "/api/unknown/path", nil)
+	req := httptest.NewRequest(http.MethodGet, "/unknown/path", nil)
 	rec := httptest.NewRecorder()
 
 	assert.NotPanics(t, func() {
@@ -807,8 +807,9 @@ func TestWithEventStreamHandler_NotRegisteredWhenNil(t *testing.T) {
 	server.mux.ServeHTTP(rec, req)
 
 	// Without an event stream handler, the route is not registered.
-	// Go 1.22+ ServeMux returns 404 for unregistered routes.
-	assert.Equal(t, http.StatusNotFound, rec.Code)
+	// The request falls through to the "/" catch-all API handler which
+	// returns 501 when no transcoder or proxy is configured.
+	assert.Equal(t, http.StatusNotImplemented, rec.Code)
 }
 
 // TestWithEventStreamHandler_HealthEndpointsUnaffected verifies that adding the

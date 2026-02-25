@@ -282,7 +282,7 @@ func readJSONBody(t *testing.T, resp *http.Response) map[string]interface{} {
 // Integration Tests
 // ---------------------------------------------------------------------------
 
-// TestTranscoding_PartyService_RegisterParty tests POST /api/v1/parties end-to-end.
+// TestTranscoding_PartyService_RegisterParty tests POST /v1/parties end-to-end.
 func TestTranscoding_PartyService_RegisterParty(t *testing.T) {
 	env := startTranscodingTestEnv(t, []ServiceBackend{
 		{ServiceName: "meridian.party.v1.PartyService"},
@@ -294,7 +294,7 @@ func TestTranscoding_PartyService_RegisterParty(t *testing.T) {
 		"displayName": "Alice"
 	}`
 
-	resp, err := httpPost(context.Background(), env.baseURL+"/api/v1/parties", "application/json", strings.NewReader(body))
+	resp, err := httpPost(context.Background(), env.baseURL+"/v1/parties", "application/json", strings.NewReader(body))
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -316,13 +316,13 @@ func TestTranscoding_PartyService_RegisterParty(t *testing.T) {
 	assert.NotEmpty(t, party["updatedAt"])
 }
 
-// TestTranscoding_PartyService_RetrieveParty tests GET /api/v1/parties/{party_id}.
+// TestTranscoding_PartyService_RetrieveParty tests GET /v1/parties/{party_id}.
 func TestTranscoding_PartyService_RetrieveParty(t *testing.T) {
 	env := startTranscodingTestEnv(t, []ServiceBackend{
 		{ServiceName: "meridian.party.v1.PartyService"},
 	})
 
-	resp, err := httpGet(context.Background(), env.baseURL+"/api/v1/parties/party-123")
+	resp, err := httpGet(context.Background(), env.baseURL+"/v1/parties/party-123")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -342,13 +342,13 @@ func TestTranscoding_PartyService_RetrieveParty(t *testing.T) {
 	assert.NoError(t, err, "createdAt should be RFC3339: %s", createdAt)
 }
 
-// TestTranscoding_TenantService_RetrieveTenant tests GET /api/v1/tenants/{tenant_id}.
+// TestTranscoding_TenantService_RetrieveTenant tests GET /v1/tenants/{tenant_id}.
 func TestTranscoding_TenantService_RetrieveTenant(t *testing.T) {
 	env := startTranscodingTestEnv(t, []ServiceBackend{
 		{ServiceName: "meridian.tenant.v1.TenantService"},
 	})
 
-	resp, err := httpGet(context.Background(), env.baseURL+"/api/v1/tenants/acme_corp")
+	resp, err := httpGet(context.Background(), env.baseURL+"/v1/tenants/acme_corp")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -365,13 +365,13 @@ func TestTranscoding_TenantService_RetrieveTenant(t *testing.T) {
 	assert.Equal(t, "acme-corp", tenant["slug"])
 }
 
-// TestTranscoding_TenantService_ListTenants tests GET /api/v1/tenants.
+// TestTranscoding_TenantService_ListTenants tests GET /v1/tenants.
 func TestTranscoding_TenantService_ListTenants(t *testing.T) {
 	env := startTranscodingTestEnv(t, []ServiceBackend{
 		{ServiceName: "meridian.tenant.v1.TenantService"},
 	})
 
-	resp, err := httpGet(context.Background(), env.baseURL+"/api/v1/tenants")
+	resp, err := httpGet(context.Background(), env.baseURL+"/v1/tenants")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -383,13 +383,13 @@ func TestTranscoding_TenantService_ListTenants(t *testing.T) {
 	assert.Len(t, tenants, 1)
 }
 
-// TestTranscoding_SagaRegistryService_ListSagas tests GET /api/v1/sagas.
+// TestTranscoding_SagaRegistryService_ListSagas tests GET /v1/sagas.
 func TestTranscoding_SagaRegistryService_ListSagas(t *testing.T) {
 	env := startTranscodingTestEnv(t, []ServiceBackend{
 		{ServiceName: "meridian.saga.v1.SagaRegistryService"},
 	})
 
-	resp, err := httpGet(context.Background(), env.baseURL+"/api/v1/sagas")
+	resp, err := httpGet(context.Background(), env.baseURL+"/v1/sagas")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -405,7 +405,7 @@ func TestTranscoding_SagaRegistryService_ListSagas(t *testing.T) {
 	assert.Equal(t, "SAGA_STATUS_ACTIVE", saga["status"])
 }
 
-// TestTranscoding_SagaRegistryService_ValidateSaga tests POST /api/v1/sagas/validate.
+// TestTranscoding_SagaRegistryService_ValidateSaga tests POST /v1/sagas/validate.
 func TestTranscoding_SagaRegistryService_ValidateSaga(t *testing.T) {
 	env := startTranscodingTestEnv(t, []ServiceBackend{
 		{ServiceName: "meridian.saga.v1.SagaRegistryService"},
@@ -417,7 +417,7 @@ func TestTranscoding_SagaRegistryService_ValidateSaga(t *testing.T) {
 		"version": "1.0.0"
 	}`
 
-	resp, err := httpPost(context.Background(), env.baseURL+"/api/v1/sagas/validate", "application/json", strings.NewReader(body))
+	resp, err := httpPost(context.Background(), env.baseURL+"/v1/sagas/validate", "application/json", strings.NewReader(body))
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -442,7 +442,7 @@ func TestTranscoding_MultipleServices(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("party service via /v1/parties", func(t *testing.T) {
-		resp, err := httpGet(ctx, env.baseURL+"/api/v1/parties/multi-test")
+		resp, err := httpGet(ctx, env.baseURL+"/v1/parties/multi-test")
 		require.NoError(t, err)
 		defer resp.Body.Close()
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -453,7 +453,7 @@ func TestTranscoding_MultipleServices(t *testing.T) {
 	})
 
 	t.Run("tenant service via /v1/tenants", func(t *testing.T) {
-		resp, err := httpGet(ctx, env.baseURL+"/api/v1/tenants")
+		resp, err := httpGet(ctx, env.baseURL+"/v1/tenants")
 		require.NoError(t, err)
 		defer resp.Body.Close()
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -464,7 +464,7 @@ func TestTranscoding_MultipleServices(t *testing.T) {
 	})
 
 	t.Run("saga service via /v1/sagas", func(t *testing.T) {
-		resp, err := httpGet(ctx, env.baseURL+"/api/v1/sagas")
+		resp, err := httpGet(ctx, env.baseURL+"/v1/sagas")
 		require.NoError(t, err)
 		defer resp.Body.Close()
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -486,7 +486,7 @@ func TestTranscoding_Proto3JSON_CamelCaseFields(t *testing.T) {
 		{ServiceName: "meridian.party.v1.PartyService"},
 	})
 
-	resp, err := httpGet(context.Background(), env.baseURL+"/api/v1/parties/camel-test")
+	resp, err := httpGet(context.Background(), env.baseURL+"/v1/parties/camel-test")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -518,7 +518,7 @@ func TestTranscoding_Proto3JSON_EnumAsStrings(t *testing.T) {
 		{ServiceName: "meridian.party.v1.PartyService"},
 	})
 
-	resp, err := httpGet(context.Background(), env.baseURL+"/api/v1/parties/enum-test")
+	resp, err := httpGet(context.Background(), env.baseURL+"/v1/parties/enum-test")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -537,7 +537,7 @@ func TestTranscoding_Proto3JSON_RFC3339Timestamps(t *testing.T) {
 		{ServiceName: "meridian.party.v1.PartyService"},
 	})
 
-	resp, err := httpGet(context.Background(), env.baseURL+"/api/v1/parties/ts-test")
+	resp, err := httpGet(context.Background(), env.baseURL+"/v1/parties/ts-test")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -567,7 +567,7 @@ func TestTranscoding_Proto3JSON_NestedMessage(t *testing.T) {
 		"displayName": "NC"
 	}`
 
-	resp, err := httpPost(context.Background(), env.baseURL+"/api/v1/parties", "application/json", strings.NewReader(body))
+	resp, err := httpPost(context.Background(), env.baseURL+"/v1/parties", "application/json", strings.NewReader(body))
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -594,7 +594,7 @@ func TestTranscoding_Error_NotFound(t *testing.T) {
 		{ServiceName: "meridian.party.v1.PartyService"},
 	})
 
-	resp, err := httpGet(context.Background(), env.baseURL+"/api/v1/parties/not-found")
+	resp, err := httpGet(context.Background(), env.baseURL+"/v1/parties/not-found")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -612,7 +612,7 @@ func TestTranscoding_Error_InvalidArgument(t *testing.T) {
 		{ServiceName: "meridian.party.v1.PartyService"},
 	})
 
-	resp, err := httpGet(context.Background(), env.baseURL+"/api/v1/parties/invalid")
+	resp, err := httpGet(context.Background(), env.baseURL+"/v1/parties/invalid")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -629,7 +629,7 @@ func TestTranscoding_Error_Unauthenticated(t *testing.T) {
 		{ServiceName: "meridian.party.v1.PartyService"},
 	})
 
-	resp, err := httpGet(context.Background(), env.baseURL+"/api/v1/parties/unauthenticated")
+	resp, err := httpGet(context.Background(), env.baseURL+"/v1/parties/unauthenticated")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -646,7 +646,7 @@ func TestTranscoding_Error_PermissionDenied(t *testing.T) {
 		{ServiceName: "meridian.party.v1.PartyService"},
 	})
 
-	resp, err := httpGet(context.Background(), env.baseURL+"/api/v1/parties/permission-denied")
+	resp, err := httpGet(context.Background(), env.baseURL+"/v1/parties/permission-denied")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -663,7 +663,7 @@ func TestTranscoding_Error_Internal(t *testing.T) {
 		{ServiceName: "meridian.party.v1.PartyService"},
 	})
 
-	resp, err := httpGet(context.Background(), env.baseURL+"/api/v1/parties/internal")
+	resp, err := httpGet(context.Background(), env.baseURL+"/v1/parties/internal")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -680,7 +680,7 @@ func TestTranscoding_Error_DeadlineExceeded(t *testing.T) {
 		{ServiceName: "meridian.party.v1.PartyService"},
 	})
 
-	resp, err := httpGet(context.Background(), env.baseURL+"/api/v1/parties/deadline-exceeded")
+	resp, err := httpGet(context.Background(), env.baseURL+"/v1/parties/deadline-exceeded")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -697,7 +697,7 @@ func TestTranscoding_Error_Unavailable(t *testing.T) {
 		{ServiceName: "meridian.party.v1.PartyService"},
 	})
 
-	resp, err := httpGet(context.Background(), env.baseURL+"/api/v1/parties/unavailable")
+	resp, err := httpGet(context.Background(), env.baseURL+"/v1/parties/unavailable")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -714,7 +714,7 @@ func TestTranscoding_Error_DataLoss(t *testing.T) {
 		{ServiceName: "meridian.party.v1.PartyService"},
 	})
 
-	resp, err := httpGet(context.Background(), env.baseURL+"/api/v1/parties/data-loss")
+	resp, err := httpGet(context.Background(), env.baseURL+"/v1/parties/data-loss")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -731,7 +731,7 @@ func TestTranscoding_Error_Unknown(t *testing.T) {
 		{ServiceName: "meridian.party.v1.PartyService"},
 	})
 
-	resp, err := httpGet(context.Background(), env.baseURL+"/api/v1/parties/unknown")
+	resp, err := httpGet(context.Background(), env.baseURL+"/v1/parties/unknown")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -770,7 +770,7 @@ func TestTranscoding_Error_AllStandardCodes(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.grpcCode, func(t *testing.T) {
-			resp, err := httpGet(context.Background(), env.baseURL+"/api/v1/parties/"+tc.partyID)
+			resp, err := httpGet(context.Background(), env.baseURL+"/v1/parties/"+tc.partyID)
 			require.NoError(t, err)
 			defer resp.Body.Close()
 
@@ -790,7 +790,7 @@ func TestTranscoding_Error_BodyFormat(t *testing.T) {
 		{ServiceName: "meridian.party.v1.PartyService"},
 	})
 
-	resp, err := httpGet(context.Background(), env.baseURL+"/api/v1/parties/not-found")
+	resp, err := httpGet(context.Background(), env.baseURL+"/v1/parties/not-found")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -820,7 +820,7 @@ func TestTranscoding_Error_ContentTypeJSON(t *testing.T) {
 		{ServiceName: "meridian.party.v1.PartyService"},
 	})
 
-	resp, err := httpGet(context.Background(), env.baseURL+"/api/v1/parties/not-found")
+	resp, err := httpGet(context.Background(), env.baseURL+"/v1/parties/not-found")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -837,7 +837,7 @@ func TestTranscoding_Error_MalformedRequestBody(t *testing.T) {
 	})
 
 	// Send malformed JSON to a POST endpoint
-	resp, err := httpPost(context.Background(), env.baseURL+"/api/v1/parties", "application/json", strings.NewReader("this is not json"))
+	resp, err := httpPost(context.Background(), env.baseURL+"/v1/parties", "application/json", strings.NewReader("this is not json"))
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -861,7 +861,7 @@ func TestTranscoding_Error_NotFoundTenant(t *testing.T) {
 		{ServiceName: "meridian.tenant.v1.TenantService"},
 	})
 
-	resp, err := httpGet(context.Background(), env.baseURL+"/api/v1/tenants/not-found")
+	resp, err := httpGet(context.Background(), env.baseURL+"/v1/tenants/not-found")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -877,7 +877,7 @@ func TestTranscoding_Error_UnknownRoute(t *testing.T) {
 		{ServiceName: "meridian.party.v1.PartyService"},
 	})
 
-	resp, err := httpGet(context.Background(), env.baseURL+"/api/v1/nonexistent/path")
+	resp, err := httpGet(context.Background(), env.baseURL+"/v1/nonexistent/path")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -944,7 +944,7 @@ func TestTranscoding_MetadataPropagation(t *testing.T) {
 
 	t.Run("identity headers stripped from client requests", func(t *testing.T) {
 		// Send request with spoofed identity headers.
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/v1/parties/meta-test", nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/v1/parties/meta-test", nil)
 		require.NoError(t, err)
 		req.Header.Set("X-User-ID", "spoofed-user")
 		req.Header.Set("X-Tenant-ID", "spoofed-tenant")
@@ -985,7 +985,7 @@ func TestTranscoding_RequestBody_AcceptsCamelCase(t *testing.T) {
 	// camelCase field names
 	body := `{"partyType":"PARTY_TYPE_PERSON","legalName":"Camel Alice","displayName":"CA"}`
 
-	resp, err := httpPost(context.Background(), env.baseURL+"/api/v1/parties", "application/json", strings.NewReader(body))
+	resp, err := httpPost(context.Background(), env.baseURL+"/v1/parties", "application/json", strings.NewReader(body))
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -1007,7 +1007,7 @@ func TestTranscoding_RequestBody_AcceptsSnakeCase(t *testing.T) {
 	// snake_case field names
 	body := `{"party_type":"PARTY_TYPE_PERSON","legal_name":"Snake Alice","display_name":"SA"}`
 
-	resp, err := httpPost(context.Background(), env.baseURL+"/api/v1/parties", "application/json", strings.NewReader(body))
+	resp, err := httpPost(context.Background(), env.baseURL+"/v1/parties", "application/json", strings.NewReader(body))
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -1025,7 +1025,7 @@ func TestTranscoding_ContentType_JSON(t *testing.T) {
 		{ServiceName: "meridian.party.v1.PartyService"},
 	})
 
-	resp, err := httpGet(context.Background(), env.baseURL+"/api/v1/parties/content-type-test")
+	resp, err := httpGet(context.Background(), env.baseURL+"/v1/parties/content-type-test")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 

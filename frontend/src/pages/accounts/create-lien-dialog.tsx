@@ -89,7 +89,7 @@ async function initiateLien(
     body.expiresAt = { seconds: expiresAtSeconds }
   }
 
-  const response = await fetch(`/api/${serviceName}/InitiateLien`, {
+  const response = await fetch(`/${serviceName}/InitiateLien`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

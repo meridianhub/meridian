@@ -11,17 +11,17 @@ package gateway
 //
 //   - REST/JSON (HTTP/JSON transcoding):
 //       Content-Type: application/json
-//       Paths: /api/v1/parties, /api/v1/tenants, etc.  (from google.api.http annotations)
+//       Paths: /v1/parties, /v1/tenants, etc.  (from google.api.http annotations)
 //       HTTP verbs: GET, POST, PUT, PATCH, DELETE
 //
 //   - Connect protocol:
 //       Content-Type: application/connect+json  or  application/connect+proto
-//       Paths: /api/meridian.party.v1.PartyService/RegisterParty  (RPC-style under /api prefix)
+//       Paths: /meridian.party.v1.PartyService/RegisterParty  (RPC-style)
 //       HTTP verb: POST
 //
 //   - gRPC-Web:
 //       Content-Type: application/grpc-web+proto  or  application/grpc-web+json
-//       Paths: /api/meridian.party.v1.PartyService/RetrieveParty  (RPC-style under /api prefix)
+//       Paths: /meridian.party.v1.PartyService/RetrieveParty  (RPC-style)
 //       HTTP verb: POST
 //       Body: length-prefixed protobuf frames (5-byte prefix per message)
 //
@@ -30,11 +30,10 @@ package gateway
 //       is reachable at the address configured in ServiceBackend.BackendAddr.
 //
 // URL construction for Connect/gRPC-Web clients:
-//   The gateway mounts the transcoder on /api/, stripping the prefix before
-//   passing to Vanguard. Connect/gRPC-Web clients must target the full URL:
-//     http://<host>/api/<package>.<Service>/<Method>
+//   The gateway mounts the transcoder on /, so clients target the full URL:
+//     http://<host>/<package>.<Service>/<Method>
 //   The connect-go library uses the last two path segments (/<Service>/<Method>)
-//   as the RPC procedure identifier, making the /api prefix transparent.
+//   as the RPC procedure identifier.
 //
 // Protocol selection guidelines:
 //   - REST clients (curl, fetch, browsers): use HTTP/JSON
@@ -66,15 +65,13 @@ import (
 )
 
 // partyRetrieveURL returns the full URL for the PartyService/RetrieveParty RPC.
-// The /api prefix is required because the gateway mounts the transcoder under /api/
-// and strips that prefix before passing requests to Vanguard.
 func partyRetrieveURL(baseURL string) string {
-	return baseURL + "/api/meridian.party.v1.PartyService/RetrieveParty"
+	return baseURL + "/meridian.party.v1.PartyService/RetrieveParty"
 }
 
 // partyRegisterURL returns the full URL for the PartyService/RegisterParty RPC.
 func partyRegisterURL(baseURL string) string {
-	return baseURL + "/api/meridian.party.v1.PartyService/RegisterParty"
+	return baseURL + "/meridian.party.v1.PartyService/RegisterParty"
 }
 
 // ---------------------------------------------------------------------------
@@ -91,7 +88,7 @@ func partyRegisterURL(baseURL string) string {
 // TestContentNegotiation_ConnectProto verifies that Vanguard accepts
 // Connect-protocol requests using binary protobuf encoding.
 //
-// Wire format: POST /api/<package>.<Service>/<Method>
+// Wire format: POST /<package>.<Service>/<Method>
 // Content-Type: application/connect+proto
 // Body: 5-byte length-prefixed protobuf message
 func TestContentNegotiation_ConnectProto(t *testing.T) {
@@ -118,7 +115,7 @@ func TestContentNegotiation_ConnectProto(t *testing.T) {
 
 // TestContentNegotiation_ConnectJSON verifies Connect protocol with JSON encoding.
 //
-// Wire format: POST /api/<package>.<Service>/<Method>
+// Wire format: POST /<package>.<Service>/<Method>
 // Content-Type: application/connect+json
 // Body: JSON-encoded request message
 func TestContentNegotiation_ConnectJSON(t *testing.T) {
@@ -177,7 +174,7 @@ func TestContentNegotiation_ConnectProtocol_RegisterParty(t *testing.T) {
 // TestContentNegotiation_GRPCWebProto verifies that Vanguard accepts
 // gRPC-Web requests using binary protobuf encoding.
 //
-// Wire format: POST /api/<package>.<Service>/<Method>
+// Wire format: POST /<package>.<Service>/<Method>
 // Content-Type: application/grpc-web+proto
 // Body: 5-byte length-prefixed protobuf frames
 func TestContentNegotiation_GRPCWebProto(t *testing.T) {
@@ -205,7 +202,7 @@ func TestContentNegotiation_GRPCWebProto(t *testing.T) {
 
 // TestContentNegotiation_GRPCWebJSON verifies gRPC-Web with JSON encoding.
 //
-// Wire format: POST /api/<package>.<Service>/<Method>
+// Wire format: POST /<package>.<Service>/<Method>
 // Content-Type: application/grpc-web+json
 func TestContentNegotiation_GRPCWebJSON(t *testing.T) {
 	env := startTranscodingTestEnv(t, []ServiceBackend{
@@ -260,7 +257,7 @@ func TestContentNegotiation_GRPCWebProto_ManualFraming(t *testing.T) {
 	frame.Write(msgBytes)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		env.baseURL+"/api/meridian.party.v1.PartyService/RetrieveParty",
+		env.baseURL+"/meridian.party.v1.PartyService/RetrieveParty",
 		&frame)
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/grpc-web+proto")
@@ -333,7 +330,7 @@ func TestContentNegotiation_ContentTypeRouting_JSON(t *testing.T) {
 	})
 
 	body := `{"partyType":"PARTY_TYPE_PERSON","legalName":"JSON Client","displayName":"JC"}`
-	resp, err := httpPost(context.Background(), env.baseURL+"/api/v1/parties",
+	resp, err := httpPost(context.Background(), env.baseURL+"/v1/parties",
 		"application/json", strings.NewReader(body))
 	require.NoError(t, err)
 	defer resp.Body.Close()
@@ -401,8 +398,8 @@ func TestContentNegotiation_RPCPathVsRESTPath(t *testing.T) {
 
 	ctx := context.Background()
 
-	t.Run("REST path: GET /api/v1/parties/{id}", func(t *testing.T) {
-		resp, err := httpGet(ctx, env.baseURL+"/api/v1/parties/rest-path-test")
+	t.Run("REST path: GET /v1/parties/{id}", func(t *testing.T) {
+		resp, err := httpGet(ctx, env.baseURL+"/v1/parties/rest-path-test")
 		require.NoError(t, err)
 		defer resp.Body.Close()
 
@@ -413,7 +410,7 @@ func TestContentNegotiation_RPCPathVsRESTPath(t *testing.T) {
 		assert.Equal(t, "rest-path-test", party["partyId"])
 	})
 
-	t.Run("Connect RPC path: POST /api/<svc>/RetrieveParty", func(t *testing.T) {
+	t.Run("Connect RPC path: POST /<svc>/RetrieveParty", func(t *testing.T) {
 		client := connect.NewClient[partyv1.RetrievePartyRequest, partyv1.RetrievePartyResponse](
 			&http.Client{},
 			partyRetrieveURL(env.baseURL),
@@ -426,7 +423,7 @@ func TestContentNegotiation_RPCPathVsRESTPath(t *testing.T) {
 		assert.Equal(t, "rpc-path-test", resp.Msg.GetParty().GetPartyId())
 	})
 
-	t.Run("gRPC-Web RPC path: POST /api/<svc>/RetrieveParty", func(t *testing.T) {
+	t.Run("gRPC-Web RPC path: POST /<svc>/RetrieveParty", func(t *testing.T) {
 		client := connect.NewClient[partyv1.RetrievePartyRequest, partyv1.RetrievePartyResponse](
 			&http.Client{},
 			partyRetrieveURL(env.baseURL),
@@ -546,7 +543,7 @@ func TestContentNegotiation_GRPCWebContentType_Response(t *testing.T) {
 	body.Write(msgBytes)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		env.baseURL+"/api/meridian.party.v1.PartyService/RetrieveParty",
+		env.baseURL+"/meridian.party.v1.PartyService/RetrieveParty",
 		&body)
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/grpc-web+proto")
@@ -578,14 +575,14 @@ func TestContentNegotiation_MultipleServices_AllProtocols(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("party via REST/JSON", func(t *testing.T) {
-		resp, err := httpGet(ctx, env.baseURL+"/api/v1/parties/multi-proto-test")
+		resp, err := httpGet(ctx, env.baseURL+"/v1/parties/multi-proto-test")
 		require.NoError(t, err)
 		defer resp.Body.Close()
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 	})
 
 	t.Run("tenant via REST/JSON", func(t *testing.T) {
-		resp, err := httpGet(ctx, env.baseURL+"/api/v1/tenants/multi-proto-tenant")
+		resp, err := httpGet(ctx, env.baseURL+"/v1/tenants/multi-proto-tenant")
 		require.NoError(t, err)
 		defer resp.Body.Close()
 		assert.Equal(t, http.StatusOK, resp.StatusCode)

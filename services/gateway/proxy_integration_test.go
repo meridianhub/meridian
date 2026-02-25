@@ -78,7 +78,7 @@ func TestIntegration_ProxyToBackend(t *testing.T) {
 
 	// Test proxying to backend
 	t.Run("proxy routes to backend", func(t *testing.T) {
-		resp, err := httpPost(ctx, baseURL+"/api/v1/sagas/validate", "application/json", strings.NewReader(`{"saga_name":"test"}`))
+		resp, err := httpPost(ctx, baseURL+"/v1/sagas/validate", "application/json", strings.NewReader(`{"saga_name":"test"}`))
 		require.NoError(t, err)
 		defer resp.Body.Close()
 
@@ -95,7 +95,7 @@ func TestIntegration_ProxyToBackend(t *testing.T) {
 
 	// Test 404 for unmatched routes
 	t.Run("unmatched routes return 404", func(t *testing.T) {
-		resp, err := httpGet(ctx, baseURL+"/api/v1/unmatched")
+		resp, err := httpGet(ctx, baseURL+"/v1/unmatched")
 		require.NoError(t, err)
 		defer resp.Body.Close()
 
@@ -163,7 +163,7 @@ func TestIntegration_ProxyForwardsIdentityHeaders(t *testing.T) {
 
 	// Verify proxy works (identity forwarding tested in unit tests)
 	t.Run("proxy works with backend", func(t *testing.T) {
-		resp, err := httpGet(ctx, baseURL+"/api/v1/test")
+		resp, err := httpGet(ctx, baseURL+"/v1/test")
 		require.NoError(t, err)
 		defer resp.Body.Close()
 
@@ -243,7 +243,7 @@ func TestIntegration_ProxyMultipleBackends(t *testing.T) {
 		sagaBackendCalled = false
 		partyBackendCalled = false
 
-		resp, err := httpGet(ctx, baseURL+"/api/v1/sagas/list")
+		resp, err := httpGet(ctx, baseURL+"/v1/sagas/list")
 		require.NoError(t, err)
 		defer resp.Body.Close()
 
@@ -260,7 +260,7 @@ func TestIntegration_ProxyMultipleBackends(t *testing.T) {
 		sagaBackendCalled = false
 		partyBackendCalled = false
 
-		resp, err := httpGet(ctx, baseURL+"/api/v1/party/create")
+		resp, err := httpGet(ctx, baseURL+"/v1/party/create")
 		require.NoError(t, err)
 		defer resp.Body.Close()
 
@@ -345,14 +345,14 @@ func TestIntegration_ProxySagaValidationEndpoint(t *testing.T) {
 	require.NoError(t, err, "gateway failed to become ready")
 
 	// Test saga validation endpoint
-	t.Run("POST /api/v1/sagas/validate routes correctly", func(t *testing.T) {
+	t.Run("POST /v1/sagas/validate routes correctly", func(t *testing.T) {
 		requestBody := `{
 			"saga_name": "test_payment_saga",
 			"script": "result = payment.create_lien(amount=\"100.00\")",
 			"version": "1.0.0"
 		}`
 
-		resp, err := httpPost(ctx, baseURL+"/api/v1/sagas/validate", "application/json", strings.NewReader(requestBody))
+		resp, err := httpPost(ctx, baseURL+"/v1/sagas/validate", "application/json", strings.NewReader(requestBody))
 		require.NoError(t, err)
 		defer resp.Body.Close()
 

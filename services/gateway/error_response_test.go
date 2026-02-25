@@ -55,7 +55,7 @@ func TestErrorReformattingMiddleware_RewritesErrorBody(t *testing.T) {
 
 	handler := errorReformattingMiddleware(inner)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/parties/x", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/parties/x", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -83,7 +83,7 @@ func TestErrorReformattingMiddleware_PassesThroughSuccessResponse(t *testing.T) 
 
 	handler := errorReformattingMiddleware(inner)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/parties/abc", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/parties/abc", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 

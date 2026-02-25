@@ -28,7 +28,7 @@ async function fetchReconciliationRuns(params: {
   pageSize: number
   filters?: Record<string, string>
 }): Promise<{ items: ReconciliationRun[]; nextPageToken?: string }> {
-  const url = new URL('/api/v1/reconciliation/runs', window.location.origin)
+  const url = new URL('/v1/reconciliation/runs', window.location.origin)
   url.searchParams.set('page_size', String(params.pageSize))
   if (params.pageToken) url.searchParams.set('page_token', params.pageToken)
   if (params.filters) {
