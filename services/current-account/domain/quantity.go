@@ -95,6 +95,20 @@ func NewMoney(currency string, amountCents int64) (Money, error) {
 	}, nil
 }
 
+// NewMoneyFromInstrument creates Money from persisted instrument_code + dimension and minor-unit amount.
+// This is used by the persistence layer to reconstruct Money without losing the stored dimension.
+func NewMoneyFromInstrument(instrumentCode, dimension string, amountCents int64) (Money, error) {
+	precision := currencyPrecision(instrumentCode)
+	inst, err := quantity.NewInstrument(instrumentCode, 1, dimension, precision)
+	if err != nil {
+		return Money{}, fmt.Errorf("invalid instrument %s/%s: %w", instrumentCode, dimension, err)
+	}
+	amount := decimal.NewFromInt(amountCents).Shift(-int32(precision))
+	return Money{
+		qty: quantity.NewMoney(amount, inst),
+	}, nil
+}
+
 // NewMoneyFromMajorUnits creates Money from major units (pounds, dollars, etc.).
 // This is the preferred constructor for new code.
 //

@@ -686,16 +686,16 @@ func toDomain(entity *CurrentAccountEntity) (domain.CurrentAccount, error) {
 	// Use entity's in-memory balance fields if populated (e.g., from recent save),
 	// otherwise initialize with zero values.
 	// The service layer should populate from Position Keeping for authoritative balance.
-	balance, err := domain.NewMoney(entity.InstrumentCode, entity.Balance)
+	balance, err := domain.NewMoneyFromInstrument(entity.InstrumentCode, entity.Dimension, entity.Balance)
 	if err != nil {
 		return domain.CurrentAccount{}, fmt.Errorf("failed to create balance: %w", err)
 	}
-	availableBalance, err := domain.NewMoney(entity.InstrumentCode, entity.AvailableBalance)
+	availableBalance, err := domain.NewMoneyFromInstrument(entity.InstrumentCode, entity.Dimension, entity.AvailableBalance)
 	if err != nil {
 		return domain.CurrentAccount{}, fmt.Errorf("failed to create available balance: %w", err)
 	}
 
-	overdraftLimit, err := domain.NewMoney(entity.InstrumentCode, entity.OverdraftLimit)
+	overdraftLimit, err := domain.NewMoneyFromInstrument(entity.InstrumentCode, entity.Dimension, entity.OverdraftLimit)
 	if err != nil {
 		return domain.CurrentAccount{}, fmt.Errorf("failed to create overdraft limit from database: %w", err)
 	}
