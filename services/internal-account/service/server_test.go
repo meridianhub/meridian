@@ -305,7 +305,7 @@ func TestInitiateInternalAccount_Success(t *testing.T) {
 	assert.Equal(t, pb.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE, resp.Facility.AccountStatus)
 }
 
-func TestInitiateInternalAccount_WithCorrespondent(t *testing.T) {
+func TestInitiateInternalAccount_WithCounterparty(t *testing.T) {
 	defs := map[string]*accounttype.Definition{
 		"NOSTRO_USD": {
 			Code:           "NOSTRO_USD",
@@ -327,23 +327,22 @@ func TestInitiateInternalAccount_WithCorrespondent(t *testing.T) {
 		Name:            "HSBC USD Nostro",
 		ProductTypeCode: "NOSTRO_USD",
 		InstrumentCode:  "USD",
-		CorrespondentDetails: &pb.CorrespondentBankDetails{
-			BankId:             "HSBC001",
-			BankName:           "HSBC Bank",
-			ExternalAccountRef: "12345678",
-			SwiftCode:          "HSBCGB2L",
-			CorrespondentType:  pb.CorrespondentType_CORRESPONDENT_TYPE_NOSTRO,
+		CounterpartyDetails: &pb.CounterpartyDetails{
+			CounterpartyId:          "HSBC001",
+			CounterpartyName:        "HSBC Bank",
+			CounterpartyExternalRef: "12345678",
+			CounterpartyType:        pb.CounterpartyType_COUNTERPARTY_TYPE_NOSTRO,
 		},
 	}
 
 	resp, err := svc.InitiateInternalAccount(ctx, req)
 	require.NoError(t, err)
-	assert.NotNil(t, resp.Facility.CorrespondentDetails)
-	assert.Equal(t, "HSBC001", resp.Facility.CorrespondentDetails.BankId)
-	assert.Equal(t, "HSBC Bank", resp.Facility.CorrespondentDetails.BankName)
+	assert.NotNil(t, resp.Facility.CounterpartyDetails)
+	assert.Equal(t, "HSBC001", resp.Facility.CounterpartyDetails.CounterpartyId)
+	assert.Equal(t, "HSBC Bank", resp.Facility.CounterpartyDetails.CounterpartyName)
 }
 
-func TestInitiateInternalAccount_NostroWithoutCorrespondent(t *testing.T) {
+func TestInitiateInternalAccount_NostroWithoutCounterparty(t *testing.T) {
 	defs := map[string]*accounttype.Definition{
 		"NOSTRO_USD": {
 			Code:           "NOSTRO_USD",
@@ -365,7 +364,7 @@ func TestInitiateInternalAccount_NostroWithoutCorrespondent(t *testing.T) {
 		Name:            "HSBC USD Nostro",
 		ProductTypeCode: "NOSTRO_USD",
 		InstrumentCode:  "USD",
-		// Missing CorrespondentDetails
+		// Missing CounterpartyDetails
 	}
 
 	resp, err := svc.InitiateInternalAccount(ctx, req)

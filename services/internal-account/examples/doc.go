@@ -5,7 +5,7 @@
 //
 //	go run ./services/internal-account/examples/create_clearing_account.go
 //	go run ./services/internal-account/examples/query_balance.go
-//	go run ./services/internal-account/examples/correspondent_account.go
+//	go run ./services/internal-account/examples/counterparty_account.go
 //	go run ./services/internal-account/examples/multi_asset.go
 //	go run ./services/internal-account/examples/account_lifecycle.go
 //
@@ -13,7 +13,7 @@
 //
 //   - create_clearing_account.go: Basic account creation with tenant context
 //   - query_balance.go: Balance retrieval via Position Keeping delegation
-//   - correspondent_account.go: NOSTRO/VOSTRO setup for correspondent banking
+//   - counterparty_account.go: NOSTRO/VOSTRO setup for counterparty banking
 //   - multi_asset.go: Creating energy, compute, and carbon accounts
 //   - account_lifecycle.go: Full account lifecycle management
 //

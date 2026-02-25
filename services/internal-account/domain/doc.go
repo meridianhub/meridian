@@ -25,10 +25,10 @@
 //	ACTIVE -> CLOSED (permanent, terminal state)
 //	SUSPENDED -> CLOSED (permanent, terminal state)
 //
-// # Correspondent Banking
+// # Counterparty Banking
 //
-// NOSTRO and VOSTRO accounts require [CorrespondentDetails] to track the relationship
-// with the correspondent bank, including bank identifiers and external account references.
+// NOSTRO and VOSTRO accounts require [CounterpartyDetails] to track the relationship
+// with the counterparty, including identifiers and external account references.
 //
 // # Design Decisions
 //
@@ -53,7 +53,7 @@
 //   - [InternalAccount]: The aggregate root representing an internal account
 //   - [AccountType]: Enumeration of account types (CLEARING, NOSTRO, etc.)
 //   - [AccountStatus]: Enumeration of lifecycle states (ACTIVE, SUSPENDED, CLOSED)
-//   - [CorrespondentDetails]: Bank relationship details for NOSTRO/VOSTRO accounts
+//   - [CounterpartyDetails]: Counterparty relationship details for NOSTRO/VOSTRO accounts
 //   - [Repository]: Interface for persistence operations
 //
 // # Example Usage
@@ -69,7 +69,7 @@
 //	    "CURRENCY",          // dimension
 //	)
 //
-// Creating a nostro account with correspondent details:
+// Creating a nostro account with counterparty details:
 //
 //	account, _ := domain.NewInternalAccount(
 //	    "NOSTRO-USD-001",
@@ -79,12 +79,10 @@
 //	    "USD",
 //	    "CURRENCY",
 //	)
-//	correspondent := domain.NewCorrespondentDetails(
+//	counterparty, err := domain.NewCounterpartyDetails(
 //	    "HSBC-UK",
 //	    "HSBC UK",
 //	    "GB12345678",
-//	    "HSBCGB2L",
-//	    domain.CorrespondentTypeNostro,
 //	)
-//	account, err = account.UpdateCorrespondent(&correspondent)
+//	account, err = account.UpdateCounterparty(counterparty)
 package domain

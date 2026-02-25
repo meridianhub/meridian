@@ -51,10 +51,10 @@ type InternalAccountEntity struct {
 	ProductTypeCode    *string `gorm:"column:product_type_code;type:varchar(100)"`
 	ProductTypeVersion *int    `gorm:"column:product_type_version;type:integer"`
 
-	// Correspondent bank details (nullable for non-nostro/vostro accounts)
-	CorrespondentBankID      *string `gorm:"column:correspondent_bank_id;type:varchar(50)"`
-	CorrespondentBankName    *string `gorm:"column:correspondent_bank_name;type:varchar(255)"`
-	CorrespondentExternalRef *string `gorm:"column:correspondent_external_ref;type:varchar(100)"`
+	// Counterparty details (nullable for non-nostro/vostro accounts)
+	CounterpartyID          *string `gorm:"column:counterparty_id;type:varchar(100)"`
+	CounterpartyName        *string `gorm:"column:counterparty_name;type:varchar(255)"`
+	CounterpartyExternalRef *string `gorm:"column:counterparty_external_ref;type:varchar(255)"`
 
 	// Extensible attributes
 	Attributes AttributesJSON `gorm:"column:attributes;type:jsonb;not null;default:'{}'"`

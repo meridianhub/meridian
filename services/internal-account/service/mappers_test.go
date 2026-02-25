@@ -61,21 +61,21 @@ func TestAccountStatusToProto_RoundTrip(t *testing.T) {
 	}
 }
 
-func TestCorrespondentTypeFromAccountType(t *testing.T) {
+func TestCounterpartyTypeFromAccountType(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    domain.AccountType
-		expected pb.CorrespondentType
+		expected pb.CounterpartyType
 	}{
-		{"NOSTRO", domain.AccountTypeNostro, pb.CorrespondentType_CORRESPONDENT_TYPE_NOSTRO},
-		{"VOSTRO", domain.AccountTypeVostro, pb.CorrespondentType_CORRESPONDENT_TYPE_VOSTRO},
-		{"CLEARING", domain.AccountTypeClearing, pb.CorrespondentType_CORRESPONDENT_TYPE_UNSPECIFIED},
-		{"HOLDING", domain.AccountTypeHolding, pb.CorrespondentType_CORRESPONDENT_TYPE_UNSPECIFIED},
+		{"NOSTRO", domain.AccountTypeNostro, pb.CounterpartyType_COUNTERPARTY_TYPE_NOSTRO},
+		{"VOSTRO", domain.AccountTypeVostro, pb.CounterpartyType_COUNTERPARTY_TYPE_VOSTRO},
+		{"CLEARING", domain.AccountTypeClearing, pb.CounterpartyType_COUNTERPARTY_TYPE_UNSPECIFIED},
+		{"HOLDING", domain.AccountTypeHolding, pb.CounterpartyType_COUNTERPARTY_TYPE_UNSPECIFIED},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := correspondentTypeFromAccountType(tt.input)
+			result := counterpartyTypeFromAccountType(tt.input)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -92,8 +92,8 @@ func TestMapDomainErrorToGRPC(t *testing.T) {
 		{"AccountSuspended", domain.ErrAccountSuspended, codes.FailedPrecondition},
 		{"InvalidAccountType", domain.ErrInvalidAccountType, codes.InvalidArgument},
 		{"InvalidStatusTransition", domain.ErrInvalidStatusTransition, codes.FailedPrecondition},
-		{"CorrespondentRequired", domain.ErrCorrespondentRequired, codes.InvalidArgument},
-		{"CorrespondentNotAllowed", domain.ErrCorrespondentNotAllowed, codes.InvalidArgument},
+		{"CounterpartyRequired", domain.ErrCounterpartyRequired, codes.InvalidArgument},
+		{"CounterpartyNotAllowed", domain.ErrCounterpartyNotAllowed, codes.InvalidArgument},
 		{"DuplicateAccountCode", domain.ErrDuplicateAccountCode, codes.AlreadyExists},
 		{"VersionMismatch", domain.ErrVersionMismatch, codes.Aborted},
 		{"AccountIDRequired", domain.ErrAccountIDRequired, codes.InvalidArgument},
@@ -133,14 +133,14 @@ func TestToProtoFacility(t *testing.T) {
 	assert.Equal(t, pb.ClearingPurpose_CLEARING_PURPOSE_DEPOSIT, facility.ClearingPurpose)
 	assert.Equal(t, pb.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE, facility.AccountStatus)
 	assert.Equal(t, "USD", facility.InstrumentCode)
-	assert.Nil(t, facility.CorrespondentDetails)
+	assert.Nil(t, facility.CounterpartyDetails)
 	assert.NotNil(t, facility.CreatedAt)
 	assert.NotNil(t, facility.UpdatedAt)
 	assert.Equal(t, int32(1), facility.Version)
 }
 
-func TestToProtoFacility_WithCorrespondent(t *testing.T) {
-	// Create a NOSTRO account with correspondent
+func TestToProtoFacility_WithCounterparty(t *testing.T) {
+	// Create a NOSTRO account with counterparty
 	account, err := domain.NewInternalAccount(
 		"IBA-002",
 		"NOSTRO-USD-HSBC",
@@ -152,27 +152,26 @@ func TestToProtoFacility_WithCorrespondent(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// Add correspondent details
-	correspondent, err := domain.NewCorrespondentDetailsWithOptions(
+	// Add counterparty details
+	counterparty, err := domain.NewCounterpartyDetailsWithOptions(
 		"HSBC001",
 		"HSBC Bank",
 		"12345678",
-		"HSBCGB2L",
-		nil,
+		map[string]string{"swift_code": "HSBCGB2L"},
 	)
 	require.NoError(t, err)
 
-	account, err = account.UpdateCorrespondent(correspondent)
+	account, err = account.UpdateCounterparty(counterparty)
 	require.NoError(t, err)
 
 	facility := toProtoFacility(account)
 
-	assert.NotNil(t, facility.CorrespondentDetails)
-	assert.Equal(t, "HSBC001", facility.CorrespondentDetails.BankId)
-	assert.Equal(t, "HSBC Bank", facility.CorrespondentDetails.BankName)
-	assert.Equal(t, "12345678", facility.CorrespondentDetails.ExternalAccountRef)
-	assert.Equal(t, "HSBCGB2L", facility.CorrespondentDetails.SwiftCode)
-	assert.Equal(t, pb.CorrespondentType_CORRESPONDENT_TYPE_NOSTRO, facility.CorrespondentDetails.CorrespondentType)
+	assert.NotNil(t, facility.CounterpartyDetails)
+	assert.Equal(t, "HSBC001", facility.CounterpartyDetails.CounterpartyId)
+	assert.Equal(t, "HSBC Bank", facility.CounterpartyDetails.CounterpartyName)
+	assert.Equal(t, "12345678", facility.CounterpartyDetails.CounterpartyExternalRef)
+	assert.Equal(t, "HSBCGB2L", facility.CounterpartyDetails.Attributes["swift_code"])
+	assert.Equal(t, pb.CounterpartyType_COUNTERPARTY_TYPE_NOSTRO, facility.CounterpartyDetails.CounterpartyType)
 }
 
 func TestProtoToClearingPurpose(t *testing.T) {

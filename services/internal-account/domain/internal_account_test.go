@@ -101,7 +101,7 @@ func TestNewInternalAccount_Success(t *testing.T) {
 			// Verify initial state
 			assert.Equal(t, AccountStatusActive, account.Status(), "initial status should be ACTIVE")
 			assert.Equal(t, int64(1), account.Version(), "initial version should be 1")
-			assert.Nil(t, account.Correspondent(), "correspondent should be nil initially")
+			assert.Nil(t, account.Counterparty(), "counterparty should be nil initially")
 			assert.Nil(t, account.Attributes(), "attributes should be nil initially")
 
 			// Verify timestamps
@@ -355,134 +355,134 @@ func TestImmutability_AttributesNotShared(t *testing.T) {
 	assert.NotContains(t, originalAttrs, "new_key", "modifying returned attributes should not affect internal state")
 }
 
-func TestUpdateCorrespondent_Success(t *testing.T) {
+func TestUpdateCounterparty_Success(t *testing.T) {
 	// Create a NOSTRO account
 	nostroAccount := createTestAccount(t, AccountTypeNostro)
 
-	// Create correspondent details
-	correspondent, err := NewCorrespondentDetails(
+	// Create counterparty details
+	counterparty, err := NewCounterpartyDetails(
 		"CHASE001",
 		"JPMorgan Chase Bank",
 		"ACC-12345",
 	)
 	require.NoError(t, err)
 
-	// Update correspondent
-	updated, err := nostroAccount.UpdateCorrespondent(correspondent)
+	// Update counterparty
+	updated, err := nostroAccount.UpdateCounterparty(counterparty)
 	require.NoError(t, err)
 
-	assert.NotNil(t, updated.Correspondent())
-	assert.Equal(t, "CHASE001", updated.Correspondent().BankID())
+	assert.NotNil(t, updated.Counterparty())
+	assert.Equal(t, "CHASE001", updated.Counterparty().CounterpartyID())
 	assert.Equal(t, int64(2), updated.Version())
 
 	// Verify original is unchanged
-	assert.Nil(t, nostroAccount.Correspondent())
+	assert.Nil(t, nostroAccount.Counterparty())
 	assert.Equal(t, int64(1), nostroAccount.Version())
 }
 
-func TestUpdateCorrespondent_VostroAccount(t *testing.T) {
+func TestUpdateCounterparty_VostroAccount(t *testing.T) {
 	// Create a VOSTRO account
 	vostroAccount := createTestAccount(t, AccountTypeVostro)
 
-	// Create correspondent details
-	correspondent, err := NewCorrespondentDetails(
+	// Create counterparty details
+	counterparty, err := NewCounterpartyDetails(
 		"DB001",
 		"Deutsche Bank",
 		"VOSTRO-REF-001",
 	)
 	require.NoError(t, err)
 
-	// Update correspondent
-	updated, err := vostroAccount.UpdateCorrespondent(correspondent)
+	// Update counterparty
+	updated, err := vostroAccount.UpdateCounterparty(counterparty)
 	require.NoError(t, err)
 
-	assert.NotNil(t, updated.Correspondent())
-	assert.Equal(t, "DB001", updated.Correspondent().BankID())
+	assert.NotNil(t, updated.Counterparty())
+	assert.Equal(t, "DB001", updated.Counterparty().CounterpartyID())
 }
 
-func TestUpdateCorrespondent_ValidationForType(t *testing.T) {
-	t.Run("NOSTRO requires correspondent", func(t *testing.T) {
+func TestUpdateCounterparty_ValidationForType(t *testing.T) {
+	t.Run("NOSTRO requires counterparty", func(t *testing.T) {
 		nostro := createTestAccount(t, AccountTypeNostro)
 
-		// Try to set nil correspondent on NOSTRO
-		_, err := nostro.UpdateCorrespondent(nil)
+		// Try to set nil counterparty on NOSTRO
+		_, err := nostro.UpdateCounterparty(nil)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrCorrespondentRequired)
+		assert.ErrorIs(t, err, ErrCounterpartyRequired)
 	})
 
-	t.Run("VOSTRO requires correspondent", func(t *testing.T) {
+	t.Run("VOSTRO requires counterparty", func(t *testing.T) {
 		vostro := createTestAccount(t, AccountTypeVostro)
 
-		// Try to set nil correspondent on VOSTRO
-		_, err := vostro.UpdateCorrespondent(nil)
+		// Try to set nil counterparty on VOSTRO
+		_, err := vostro.UpdateCounterparty(nil)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrCorrespondentRequired)
+		assert.ErrorIs(t, err, ErrCounterpartyRequired)
 	})
 
-	t.Run("CLEARING rejects correspondent", func(t *testing.T) {
+	t.Run("CLEARING rejects counterparty", func(t *testing.T) {
 		clearing := createTestAccount(t, AccountTypeClearing)
 
-		correspondent, err := NewCorrespondentDetails(
+		counterparty, err := NewCounterpartyDetails(
 			"BANK001",
 			"Some Bank",
 			"REF-001",
 		)
 		require.NoError(t, err)
 
-		// Try to set correspondent on CLEARING account
-		_, err = clearing.UpdateCorrespondent(correspondent)
+		// Try to set counterparty on CLEARING account
+		_, err = clearing.UpdateCounterparty(counterparty)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrCorrespondentNotAllowed)
+		assert.ErrorIs(t, err, ErrCounterpartyNotAllowed)
 	})
 
-	t.Run("HOLDING rejects correspondent", func(t *testing.T) {
+	t.Run("HOLDING rejects counterparty", func(t *testing.T) {
 		holding := createTestAccount(t, AccountTypeHolding)
 
-		correspondent, err := NewCorrespondentDetails(
+		counterparty, err := NewCounterpartyDetails(
 			"BANK001",
 			"Some Bank",
 			"REF-001",
 		)
 		require.NoError(t, err)
 
-		// Try to set correspondent on HOLDING account
-		_, err = holding.UpdateCorrespondent(correspondent)
+		// Try to set counterparty on HOLDING account
+		_, err = holding.UpdateCounterparty(counterparty)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrCorrespondentNotAllowed)
+		assert.ErrorIs(t, err, ErrCounterpartyNotAllowed)
 	})
 
-	t.Run("SUSPENSE rejects correspondent", func(t *testing.T) {
+	t.Run("SUSPENSE rejects counterparty", func(t *testing.T) {
 		suspense := createTestAccount(t, AccountTypeSuspense)
 
-		correspondent, err := NewCorrespondentDetails(
+		counterparty, err := NewCounterpartyDetails(
 			"BANK001",
 			"Some Bank",
 			"REF-001",
 		)
 		require.NoError(t, err)
 
-		_, err = suspense.UpdateCorrespondent(correspondent)
+		_, err = suspense.UpdateCounterparty(counterparty)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrCorrespondentNotAllowed)
+		assert.ErrorIs(t, err, ErrCounterpartyNotAllowed)
 	})
 }
 
-func TestUpdateCorrespondent_ClosedAccount(t *testing.T) {
+func TestUpdateCounterparty_ClosedAccount(t *testing.T) {
 	nostro := createTestAccount(t, AccountTypeNostro)
 
 	// Close the account
 	closed, err := nostro.Close("Decommissioned")
 	require.NoError(t, err)
 
-	// Try to update correspondent on closed account
-	correspondent, err := NewCorrespondentDetails(
+	// Try to update counterparty on closed account
+	counterparty, err := NewCounterpartyDetails(
 		"BANK001",
 		"Some Bank",
 		"REF-001",
 	)
 	require.NoError(t, err)
 
-	_, err = closed.UpdateCorrespondent(correspondent)
+	_, err = closed.UpdateCounterparty(counterparty)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrAccountClosed)
 }
@@ -556,7 +556,7 @@ func TestBuilder_Reconstruction(t *testing.T) {
 	id := uuid.New()
 	createdAt := time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC)
 	updatedAt := time.Date(2024, 1, 15, 14, 30, 0, 0, time.UTC)
-	correspondent, err := NewCorrespondentDetails(
+	counterparty, err := NewCounterpartyDetails(
 		"CHASE001",
 		"JPMorgan Chase Bank",
 		"ACC-12345",
@@ -578,7 +578,7 @@ func TestBuilder_Reconstruction(t *testing.T) {
 		WithInstrumentCode("USD").
 		WithDimension("CURRENCY").
 		WithStatus(AccountStatusSuspended).
-		WithCorrespondent(correspondent).
+		WithCounterparty(counterparty).
 		WithAttributes(attributes).
 		WithVersion(5).
 		WithCreatedAt(createdAt).
@@ -594,8 +594,8 @@ func TestBuilder_Reconstruction(t *testing.T) {
 	assert.Equal(t, "USD", account.InstrumentCode())
 	assert.Equal(t, "CURRENCY", account.Dimension())
 	assert.Equal(t, AccountStatusSuspended, account.Status())
-	assert.NotNil(t, account.Correspondent())
-	assert.Equal(t, "CHASE001", account.Correspondent().BankID())
+	assert.NotNil(t, account.Counterparty())
+	assert.Equal(t, "CHASE001", account.Counterparty().CounterpartyID())
 	assert.Equal(t, int64(5), account.Version())
 	assert.Equal(t, createdAt, account.CreatedAt())
 	assert.Equal(t, updatedAt, account.UpdatedAt())
@@ -651,19 +651,19 @@ func TestVersionIncrement(t *testing.T) {
 	assert.Equal(t, int64(1), account.Version())
 }
 
-func TestVersionIncrement_UpdateCorrespondent(t *testing.T) {
+func TestVersionIncrement_UpdateCounterparty(t *testing.T) {
 	nostro := createTestAccount(t, AccountTypeNostro)
 	assert.Equal(t, int64(1), nostro.Version())
 
-	correspondent, err := NewCorrespondentDetails(
+	counterparty, err := NewCounterpartyDetails(
 		"BANK001",
 		"Test Bank",
 		"REF-001",
 	)
 	require.NoError(t, err)
 
-	// Update correspondent should increment version
-	updated, err := nostro.UpdateCorrespondent(correspondent)
+	// Update counterparty should increment version
+	updated, err := nostro.UpdateCounterparty(counterparty)
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), updated.Version())
 
@@ -756,8 +756,8 @@ func TestImmutability_RenamePreservesAttributes(t *testing.T) {
 	assert.Equal(t, "treasury", renamedAttrs["department"])
 }
 
-func TestUpdateCorrespondent_PreservesAttributes(t *testing.T) {
-	// Test that UpdateCorrespondent on an account WITH attributes properly deep copies them
+func TestUpdateCounterparty_PreservesAttributes(t *testing.T) {
+	// Test that UpdateCounterparty on an account WITH attributes properly deep copies them
 	attrs := map[string]string{"category": "international"}
 	account := NewInternalAccountBuilder().
 		WithID(uuid.New()).
@@ -774,15 +774,15 @@ func TestUpdateCorrespondent_PreservesAttributes(t *testing.T) {
 		WithUpdatedAt(time.Now()).
 		Build()
 
-	correspondent, err := NewCorrespondentDetails(
+	counterparty, err := NewCounterpartyDetails(
 		"CHASE001",
 		"JPMorgan Chase Bank",
 		"ACC-12345",
 	)
 	require.NoError(t, err)
 
-	// Update correspondent - this triggers copyWithUpdatedTime
-	updated, err := account.UpdateCorrespondent(correspondent)
+	// Update counterparty - this triggers copyWithUpdatedTime
+	updated, err := account.UpdateCounterparty(counterparty)
 	require.NoError(t, err)
 
 	// Verify attributes are preserved
@@ -791,36 +791,36 @@ func TestUpdateCorrespondent_PreservesAttributes(t *testing.T) {
 	assert.Equal(t, "international", updatedAttrs["category"])
 }
 
-func TestUpdateCorrespondent_RevenueRejectsCorrespondent(t *testing.T) {
+func TestUpdateCounterparty_RevenueRejectsCounterparty(t *testing.T) {
 	revenue := createTestAccount(t, AccountTypeRevenue)
 
-	correspondent, err := NewCorrespondentDetails(
+	counterparty, err := NewCounterpartyDetails(
 		"BANK001",
 		"Some Bank",
 		"REF-001",
 	)
 	require.NoError(t, err)
 
-	// Try to set correspondent on REVENUE account
-	_, err = revenue.UpdateCorrespondent(correspondent)
+	// Try to set counterparty on REVENUE account
+	_, err = revenue.UpdateCounterparty(counterparty)
 	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrCorrespondentNotAllowed)
+	assert.ErrorIs(t, err, ErrCounterpartyNotAllowed)
 }
 
-func TestUpdateCorrespondent_ExpenseRejectsCorrespondent(t *testing.T) {
+func TestUpdateCounterparty_ExpenseRejectsCounterparty(t *testing.T) {
 	expense := createTestAccount(t, AccountTypeExpense)
 
-	correspondent, err := NewCorrespondentDetails(
+	counterparty, err := NewCounterpartyDetails(
 		"BANK001",
 		"Some Bank",
 		"REF-001",
 	)
 	require.NoError(t, err)
 
-	// Try to set correspondent on EXPENSE account
-	_, err = expense.UpdateCorrespondent(correspondent)
+	// Try to set counterparty on EXPENSE account
+	_, err = expense.UpdateCounterparty(counterparty)
 	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrCorrespondentNotAllowed)
+	assert.ErrorIs(t, err, ErrCounterpartyNotAllowed)
 }
 
 func TestBuilder_WithNilAttributes(t *testing.T) {
@@ -866,7 +866,7 @@ func TestBuilder_MinimalFields(t *testing.T) {
 	assert.Empty(t, account.InstrumentCode())
 	assert.Empty(t, account.Dimension())
 	assert.Equal(t, AccountStatus(""), account.Status())
-	assert.Nil(t, account.Correspondent())
+	assert.Nil(t, account.Counterparty())
 	assert.Nil(t, account.Attributes())
 	assert.Equal(t, int64(0), account.Version())
 	assert.True(t, account.CreatedAt().IsZero())
@@ -922,9 +922,9 @@ func TestLifecycleTransitions_RenameFromSuspended(t *testing.T) {
 	assert.Equal(t, AccountStatusSuspended, renamed.Status())
 }
 
-func TestUpdateCorrespondent_ReplaceExisting(t *testing.T) {
-	// Create a NOSTRO account with correspondent already set via builder
-	originalCorrespondent, err := NewCorrespondentDetails(
+func TestUpdateCounterparty_ReplaceExisting(t *testing.T) {
+	// Create a NOSTRO account with counterparty already set via builder
+	originalCounterparty, err := NewCounterpartyDetails(
 		"OLD_BANK",
 		"Old Bank Name",
 		"OLD-REF-001",
@@ -940,32 +940,32 @@ func TestUpdateCorrespondent_ReplaceExisting(t *testing.T) {
 		WithInstrumentCode("USD").
 		WithDimension("CURRENCY").
 		WithStatus(AccountStatusActive).
-		WithCorrespondent(originalCorrespondent).
+		WithCounterparty(originalCounterparty).
 		WithVersion(1).
 		WithCreatedAt(time.Now()).
 		WithUpdatedAt(time.Now()).
 		Build()
 
-	// Verify original correspondent is set
-	assert.Equal(t, "OLD_BANK", account.Correspondent().BankID())
+	// Verify original counterparty is set
+	assert.Equal(t, "OLD_BANK", account.Counterparty().CounterpartyID())
 
-	// Replace with new correspondent
-	newCorrespondent, err := NewCorrespondentDetails(
+	// Replace with new counterparty
+	newCounterparty, err := NewCounterpartyDetails(
 		"NEW_BANK",
 		"New Bank Name",
 		"NEW-REF-001",
 	)
 	require.NoError(t, err)
 
-	updated, err := account.UpdateCorrespondent(newCorrespondent)
+	updated, err := account.UpdateCounterparty(newCounterparty)
 	require.NoError(t, err)
 
-	// Verify new correspondent is set
-	assert.Equal(t, "NEW_BANK", updated.Correspondent().BankID())
+	// Verify new counterparty is set
+	assert.Equal(t, "NEW_BANK", updated.Counterparty().CounterpartyID())
 	assert.Equal(t, int64(2), updated.Version())
 
-	// Verify original account still has old correspondent
-	assert.Equal(t, "OLD_BANK", account.Correspondent().BankID())
+	// Verify original account still has old counterparty
+	assert.Equal(t, "OLD_BANK", account.Counterparty().CounterpartyID())
 	assert.Equal(t, int64(1), account.Version())
 }
 

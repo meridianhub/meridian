@@ -147,9 +147,9 @@ func loadInternalAccountSchema(t *testing.T, pool *pgxpool.Pool) {
 			instrument_code character varying(32) NOT NULL,
 			dimension character varying(20) NOT NULL,
 			status character varying(20) NOT NULL DEFAULT 'ACTIVE',
-			correspondent_bank_id character varying(50) NULL,
-			correspondent_bank_name character varying(255) NULL,
-			correspondent_external_ref character varying(100) NULL,
+			counterparty_id character varying(50) NULL,
+			counterparty_name character varying(255) NULL,
+			counterparty_external_ref character varying(100) NULL,
 			attributes jsonb NOT NULL DEFAULT '{}',
 			version bigint NOT NULL DEFAULT 1,
 			PRIMARY KEY (id),
@@ -514,8 +514,8 @@ func TestIntegration_StatusHistory(t *testing.T) {
 	assert.Equal(t, "SUSPENDED", history[1].ToStatus)
 }
 
-// TestIntegration_CorrespondentDetails tests persistence of correspondent bank details.
-func TestIntegration_CorrespondentDetails(t *testing.T) {
+// TestIntegration_CounterpartyDetails tests persistence of counterparty details.
+func TestIntegration_CounterpartyDetails(t *testing.T) {
 	tc := setupIntegrationTestContainer(t)
 	defer tc.cleanup(t)
 
@@ -533,24 +533,24 @@ func TestIntegration_CorrespondentDetails(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// Add correspondent details
-	correspondent, err := domain.NewCorrespondentDetails("CITI001", "Citibank NA", "12345678")
+	// Add counterparty details
+	counterparty, err := domain.NewCounterpartyDetails("CITI001", "Citibank NA", "12345678")
 	require.NoError(t, err)
-	nostro, err = nostro.UpdateCorrespondent(correspondent)
+	nostro, err = nostro.UpdateCounterparty(counterparty)
 	require.NoError(t, err)
 
 	// Save
 	err = tc.repo.Save(ctx, nostro)
 	require.NoError(t, err)
 
-	// Retrieve and verify correspondent details
+	// Retrieve and verify counterparty details
 	retrieved, err := tc.repo.FindByID(ctx, nostro.ID())
 	require.NoError(t, err)
 
-	require.NotNil(t, retrieved.Correspondent())
-	assert.Equal(t, "CITI001", retrieved.Correspondent().BankID())
-	assert.Equal(t, "Citibank NA", retrieved.Correspondent().BankName())
-	assert.Equal(t, "12345678", retrieved.Correspondent().ExternalAccountRef())
+	require.NotNil(t, retrieved.Counterparty())
+	assert.Equal(t, "CITI001", retrieved.Counterparty().CounterpartyID())
+	assert.Equal(t, "Citibank NA", retrieved.Counterparty().CounterpartyName())
+	assert.Equal(t, "12345678", retrieved.Counterparty().ExternalRef())
 }
 
 // TestIntegration_JSONBAttributes tests persistence and retrieval of JSONB attributes.
@@ -803,9 +803,9 @@ func setupMultiTenantContainer(t *testing.T, tenants ...tenant.TenantID) *testCo
 				instrument_code character varying(32) NOT NULL,
 				dimension character varying(20) NOT NULL,
 				status character varying(20) NOT NULL DEFAULT 'ACTIVE',
-				correspondent_bank_id character varying(50) NULL,
-				correspondent_bank_name character varying(255) NULL,
-				correspondent_external_ref character varying(100) NULL,
+				counterparty_id character varying(50) NULL,
+				counterparty_name character varying(255) NULL,
+				counterparty_external_ref character varying(100) NULL,
 				attributes jsonb NOT NULL DEFAULT '{}',
 				version bigint NOT NULL DEFAULT 1,
 				PRIMARY KEY (id)
@@ -1421,9 +1421,9 @@ func loadBenchSchema(b *testing.B, pool *pgxpool.Pool) {
 			instrument_code VARCHAR(32) NOT NULL,
 			dimension VARCHAR(20) NOT NULL,
 			status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
-			correspondent_bank_id VARCHAR(50),
-			correspondent_bank_name VARCHAR(255),
-			correspondent_external_ref VARCHAR(100),
+			counterparty_id VARCHAR(50),
+			counterparty_name VARCHAR(255),
+			counterparty_external_ref VARCHAR(100),
 			attributes JSONB NOT NULL DEFAULT '{}',
 			version BIGINT NOT NULL DEFAULT 1
 		)

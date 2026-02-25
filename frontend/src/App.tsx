@@ -38,6 +38,7 @@ import { ReconciliationPage } from '@/pages/reconciliation'
 import { ReconciliationDetailPage } from '@/pages/reconciliation/detail'
 import { DashboardPage } from '@/pages/dashboard'
 import { ManifestsPage } from '@/pages/manifests'
+import { McpConfigPage } from '@/pages/mcp-config'
 
 // Placeholder page components - replaced as each page task is implemented
 function PlaceholderPage({ title }: { title: string }) {
@@ -160,6 +161,7 @@ function AppShellLayout() {
         <Route path="/gateway-mappings" element={<MappingsPage />} />
         <Route path="/gateway-mappings/:mappingId" element={<MappingDetailPage />} />
         <Route path="/manifests" element={<ManifestsPage />} />
+        <Route path="/mcp-config" element={<McpConfigPage />} />
         <Route path="/audit-log" element={<AuditLogPage />} />
 
         {/* Platform-only routes */}

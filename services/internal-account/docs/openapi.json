@@ -284,41 +284,44 @@
     }
   },
   "definitions": {
-    "CorrespondentBankDetails": {
+    "CounterpartyDetails": {
       "type": "object",
       "properties": {
-        "bankId": {
+        "counterpartyId": {
           "type": "string",
-          "description": "bank_id is the unique identifier for the correspondent bank."
+          "description": "counterparty_id is the unique identifier for the counterparty."
         },
-        "bankName": {
+        "counterpartyName": {
           "type": "string",
-          "description": "bank_name is the display name of the correspondent bank."
+          "description": "counterparty_name is the display name of the counterparty."
         },
-        "externalAccountRef": {
+        "counterpartyExternalRef": {
           "type": "string",
-          "description": "external_account_ref is the account reference at the correspondent bank."
+          "description": "counterparty_external_ref is the account reference at the counterparty."
         },
-        "swiftCode": {
-          "type": "string",
-          "description": "swift_code is the SWIFT/BIC code of the correspondent bank (optional).\nPattern validates BIC8 (8 chars) or BIC11 (11 chars) format.\nEmpty string is allowed for correspondent banks without SWIFT codes\n(e.g., domestic correspondents, emerging market banks)."
+        "attributes": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "attributes contains product-type-specific metadata (e.g., swift_code for banking counterparties)."
         },
-        "correspondentType": {
-          "$ref": "#/definitions/CorrespondentType",
-          "description": "correspondent_type indicates whether this is a NOSTRO or VOSTRO relationship."
+        "counterpartyType": {
+          "$ref": "#/definitions/CounterpartyType",
+          "description": "counterparty_type indicates whether this is a NOSTRO or VOSTRO relationship."
         }
       },
-      "description": "CorrespondentBankDetails contains information about the correspondent bank\nfor NOSTRO and VOSTRO account types."
+      "description": "CounterpartyDetails contains information about the counterparty\nfor NOSTRO and VOSTRO account types."
     },
-    "CorrespondentType": {
+    "CounterpartyType": {
       "type": "string",
       "enum": [
-        "CORRESPONDENT_TYPE_UNSPECIFIED",
-        "CORRESPONDENT_TYPE_NOSTRO",
-        "CORRESPONDENT_TYPE_VOSTRO"
+        "COUNTERPARTY_TYPE_UNSPECIFIED",
+        "COUNTERPARTY_TYPE_NOSTRO",
+        "COUNTERPARTY_TYPE_VOSTRO"
       ],
-      "default": "CORRESPONDENT_TYPE_UNSPECIFIED",
-      "description": "CorrespondentType distinguishes between nostro and vostro relationships.\n\n - CORRESPONDENT_TYPE_UNSPECIFIED: CORRESPONDENT_TYPE_UNSPECIFIED is the default value and should not be used.\n - CORRESPONDENT_TYPE_NOSTRO: CORRESPONDENT_TYPE_NOSTRO means our account at the correspondent bank.\n - CORRESPONDENT_TYPE_VOSTRO: CORRESPONDENT_TYPE_VOSTRO means their account at our bank."
+      "default": "COUNTERPARTY_TYPE_UNSPECIFIED",
+      "description": "CounterpartyType distinguishes between nostro and vostro relationships.\n\n - COUNTERPARTY_TYPE_UNSPECIFIED: COUNTERPARTY_TYPE_UNSPECIFIED is the default value and should not be used.\n - COUNTERPARTY_TYPE_NOSTRO: COUNTERPARTY_TYPE_NOSTRO means our account at the counterparty bank.\n - COUNTERPARTY_TYPE_VOSTRO: COUNTERPARTY_TYPE_VOSTRO means their account at our bank."
     },
     "InstrumentAmount": {
       "type": "object",

@@ -475,7 +475,7 @@ func TestBalanceService_RequiresPositionKeepingClient(t *testing.T) {
 }
 
 func TestBalanceService_NostroAccountBalance(t *testing.T) {
-	// Test balance query for NOSTRO account (with correspondent details)
+	// Test balance query for NOSTRO account (with counterparty details)
 	repo := newMockRepository()
 	posClient := &mockPositionKeepingClient{
 		balances: []*positionkeepingv1.BalanceEntry{
@@ -493,17 +493,16 @@ func TestBalanceService_NostroAccountBalance(t *testing.T) {
 
 	ctx := testCtx()
 
-	// Create NOSTRO account with correspondent
+	// Create NOSTRO account with counterparty
 	createResp, err := svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
 		AccountCode:     "NOSTRO-GBP-HSBC",
 		Name:            "HSBC GBP Nostro Account",
 		ProductTypeCode: "NOSTRO_USD",
 		InstrumentCode:  "GBP",
-		CorrespondentDetails: &pb.CorrespondentBankDetails{
-			BankId:             "HSBC001",
-			BankName:           "HSBC UK",
-			ExternalAccountRef: "GB29NWBK60161331926819",
-			SwiftCode:          "HSBCGB2L",
+		CounterpartyDetails: &pb.CounterpartyDetails{
+			CounterpartyId:          "HSBC001",
+			CounterpartyName:        "HSBC UK",
+			CounterpartyExternalRef: "GB29NWBK60161331926819",
 		},
 	})
 	require.NoError(t, err)

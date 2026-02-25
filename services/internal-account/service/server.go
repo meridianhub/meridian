@@ -417,7 +417,7 @@ func (s *Service) InitiateInternalAccount(ctx context.Context, req *pb.InitiateI
 			WithDimension(account.Dimension()).
 			WithStatus(account.Status()).
 			WithOrgPartyID(account.OrgPartyID()).
-			WithCorrespondent(account.Correspondent()).
+			WithCounterparty(account.Counterparty()).
 			WithAttributes(account.Attributes()).
 			WithProductTypeCode(productTypeCode).
 			WithProductTypeVersion(productTypeVersion).
@@ -427,27 +427,26 @@ func (s *Service) InitiateInternalAccount(ctx context.Context, req *pb.InitiateI
 			Build()
 	}
 
-	// Handle correspondent details for NOSTRO/VOSTRO accounts
-	if req.CorrespondentDetails != nil {
-		correspondent, err := domain.NewCorrespondentDetailsWithOptions(
-			req.CorrespondentDetails.BankId,
-			req.CorrespondentDetails.BankName,
-			req.CorrespondentDetails.ExternalAccountRef,
-			req.CorrespondentDetails.SwiftCode,
-			nil,
+	// Handle counterparty details for NOSTRO/VOSTRO accounts
+	if req.CounterpartyDetails != nil {
+		counterparty, err := domain.NewCounterpartyDetailsWithOptions(
+			req.CounterpartyDetails.CounterpartyId,
+			req.CounterpartyDetails.CounterpartyName,
+			req.CounterpartyDetails.CounterpartyExternalRef,
+			req.CounterpartyDetails.Attributes,
 		)
 		if err != nil {
 			operationStatus = operationStatusFailed
-			return nil, status.Errorf(codes.InvalidArgument, "invalid correspondent details: %v", err)
+			return nil, status.Errorf(codes.InvalidArgument, "invalid counterparty details: %v", err)
 		}
-		account, err = account.UpdateCorrespondent(correspondent)
+		account, err = account.UpdateCounterparty(counterparty)
 		if err != nil {
 			operationStatus = operationStatusFailed
 			return nil, mapDomainErrorToGRPC(err)
 		}
 	} else if accountType.RequiresCorrespondent() {
 		operationStatus = operationStatusFailed
-		return nil, status.Errorf(codes.InvalidArgument, "correspondent details required for %s accounts", accountType)
+		return nil, status.Errorf(codes.InvalidArgument, "counterparty details required for %s accounts", accountType)
 	}
 
 	// Persist via repository
@@ -544,20 +543,19 @@ func (s *Service) updateAccount(ctx context.Context, account domain.InternalAcco
 		}
 	}
 
-	// Update correspondent details if provided
-	if req.CorrespondentDetails != nil {
-		correspondent, err := domain.NewCorrespondentDetailsWithOptions(
-			req.CorrespondentDetails.BankId,
-			req.CorrespondentDetails.BankName,
-			req.CorrespondentDetails.ExternalAccountRef,
-			req.CorrespondentDetails.SwiftCode,
-			nil,
+	// Update counterparty details if provided
+	if req.CounterpartyDetails != nil {
+		counterparty, err := domain.NewCounterpartyDetailsWithOptions(
+			req.CounterpartyDetails.CounterpartyId,
+			req.CounterpartyDetails.CounterpartyName,
+			req.CounterpartyDetails.CounterpartyExternalRef,
+			req.CounterpartyDetails.Attributes,
 		)
 		if err != nil {
 			*operationStatus = operationStatusFailed
-			return nil, status.Errorf(codes.InvalidArgument, "invalid correspondent details: %v", err)
+			return nil, status.Errorf(codes.InvalidArgument, "invalid counterparty details: %v", err)
 		}
-		account, err = account.UpdateCorrespondent(correspondent)
+		account, err = account.UpdateCounterparty(counterparty)
 		if err != nil {
 			*operationStatus = operationStatusFailed
 			return nil, mapDomainErrorToGRPC(err)

@@ -170,10 +170,10 @@ func TestE2E_GetBalance_PositionKeepingIntegration(t *testing.T) {
 
 		t.Run("setup: create active account", func(t *testing.T) {
 			resp, err := svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-				AccountCode:    accountCode,
-				Name:           "GBP Clearing Account for Balance Tests",
+				AccountCode:     accountCode,
+				Name:            "GBP Clearing Account for Balance Tests",
 				ProductTypeCode: "CLEARING_GBP",
-				InstrumentCode: "GBP",
+				InstrumentCode:  "GBP",
 			})
 			require.NoError(t, err)
 			require.NotEmpty(t, resp.AccountId)
@@ -203,10 +203,10 @@ func TestE2E_GetBalance_PositionKeepingIntegration(t *testing.T) {
 		t.Run("returns zero balance when no position configured", func(t *testing.T) {
 			newCode := "EUR_ZERO_BAL"
 			_, err := svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-				AccountCode:    newCode,
-				Name:           "EUR Account with Zero Balance",
+				AccountCode:     newCode,
+				Name:            "EUR Account with Zero Balance",
 				ProductTypeCode: "HOLDING_GBP",
-				InstrumentCode: "EUR",
+				InstrumentCode:  "EUR",
 			})
 			require.NoError(t, err)
 
@@ -239,10 +239,10 @@ func TestE2E_GetBalance_PositionKeepingIntegration(t *testing.T) {
 		t.Run("returns Internal when PK returns NotFound", func(t *testing.T) {
 			notFoundCode := "GBP_NO_POSITION"
 			createResp, err := svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-				AccountCode:    notFoundCode,
-				Name:           "Account with No Position",
+				AccountCode:     notFoundCode,
+				Name:            "Account with No Position",
 				ProductTypeCode: "SUSPENSE_GBP",
-				InstrumentCode: "GBP",
+				InstrumentCode:  "GBP",
 			})
 			require.NoError(t, err)
 
@@ -289,10 +289,10 @@ func TestE2E_GetBalance_PositionKeepingIntegration(t *testing.T) {
 		t.Run("returns FailedPrecondition for CLOSED account", func(t *testing.T) {
 			closedCode := "GBP_CLOSED_BAL"
 			_, err := svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-				AccountCode:    closedCode,
-				Name:           "Account to Close",
+				AccountCode:     closedCode,
+				Name:            "Account to Close",
 				ProductTypeCode: "CLEARING_GBP",
-				InstrumentCode: "GBP",
+				InstrumentCode:  "GBP",
 			})
 			require.NoError(t, err)
 
@@ -386,10 +386,10 @@ func TestE2E_GetBalance_PositionKeepingIntegration(t *testing.T) {
 
 		accountCode := "GBP_NOPK_ACC"
 		_, err := tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-			AccountCode:    accountCode,
-			Name:           "Account Without PK Client",
+			AccountCode:     accountCode,
+			Name:            "Account Without PK Client",
 			ProductTypeCode: "CLEARING_GBP",
-			InstrumentCode: "GBP",
+			InstrumentCode:  "GBP",
 		})
 		require.NoError(t, err)
 
@@ -428,10 +428,10 @@ func TestE2E_GetBalance_PositionKeepingIntegration(t *testing.T) {
 		for _, tc := range testCases {
 			t.Run(fmt.Sprintf("GetBalance for %s", tc.instrument), func(t *testing.T) {
 				createResp, err := svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-					AccountCode:    tc.code,
-					Name:           tc.name,
+					AccountCode:     tc.code,
+					Name:            tc.name,
 					ProductTypeCode: "HOLDING_GBP",
-					InstrumentCode: tc.instrument,
+					InstrumentCode:  tc.instrument,
 				})
 				require.NoError(t, err)
 

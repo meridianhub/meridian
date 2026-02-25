@@ -2,7 +2,7 @@
 
 // Package e2e provides end-to-end integration tests for the internal account service.
 // These tests verify the full account lifecycle from creation through closure,
-// including multi-tenant isolation, multi-asset support, and correspondent banking.
+// including multi-tenant isolation, multi-asset support, and counterparty banking.
 package e2e
 
 import (
@@ -74,22 +74,22 @@ func (c *e2eNilCELCompiler) CompileEligibility(_ string) (cel.Program, error) { 
 // newE2EAccountTypeCache creates a LocalAccountTypeCache with standard e2e test definitions.
 func newE2EAccountTypeCache() *cache.LocalAccountTypeCache {
 	defs := map[string]*accounttype.Definition{
-		"CLEARING_GBP": {Code: "CLEARING_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassClearing, EligibilityCEL: "true", Status: accounttype.StatusActive},
-		"CLEARING_USD": {Code: "CLEARING_USD", Version: 1, BehaviorClass: accounttype.BehaviorClassClearing, EligibilityCEL: "true", Status: accounttype.StatusActive},
-		"CLEARING_EUR": {Code: "CLEARING_EUR", Version: 1, BehaviorClass: accounttype.BehaviorClassClearing, EligibilityCEL: "true", Status: accounttype.StatusActive},
-		"NOSTRO_USD":   {Code: "NOSTRO_USD", Version: 1, BehaviorClass: accounttype.BehaviorClassNostro, EligibilityCEL: "true", Status: accounttype.StatusActive},
-		"NOSTRO_GBP":   {Code: "NOSTRO_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassNostro, EligibilityCEL: "true", Status: accounttype.StatusActive},
-		"NOSTRO_EUR":   {Code: "NOSTRO_EUR", Version: 1, BehaviorClass: accounttype.BehaviorClassNostro, EligibilityCEL: "true", Status: accounttype.StatusActive},
-		"VOSTRO_USD":   {Code: "VOSTRO_USD", Version: 1, BehaviorClass: accounttype.BehaviorClassVostro, EligibilityCEL: "true", Status: accounttype.StatusActive},
-		"VOSTRO_GBP":   {Code: "VOSTRO_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassVostro, EligibilityCEL: "true", Status: accounttype.StatusActive},
-		"HOLDING_GBP":  {Code: "HOLDING_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassHolding, EligibilityCEL: "true", Status: accounttype.StatusActive},
-		"HOLDING_USD":  {Code: "HOLDING_USD", Version: 1, BehaviorClass: accounttype.BehaviorClassHolding, EligibilityCEL: "true", Status: accounttype.StatusActive},
-		"HOLDING_EUR":  {Code: "HOLDING_EUR", Version: 1, BehaviorClass: accounttype.BehaviorClassHolding, EligibilityCEL: "true", Status: accounttype.StatusActive},
-		"HOLDING_KWH":  {Code: "HOLDING_KWH", Version: 1, BehaviorClass: accounttype.BehaviorClassHolding, EligibilityCEL: "true", Status: accounttype.StatusActive},
-		"SUSPENSE_GBP": {Code: "SUSPENSE_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassSuspense, EligibilityCEL: "true", Status: accounttype.StatusActive},
-		"SUSPENSE_USD": {Code: "SUSPENSE_USD", Version: 1, BehaviorClass: accounttype.BehaviorClassSuspense, EligibilityCEL: "true", Status: accounttype.StatusActive},
-		"REVENUE_GBP":  {Code: "REVENUE_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassRevenue, EligibilityCEL: "true", Status: accounttype.StatusActive},
-		"EXPENSE_GBP":  {Code: "EXPENSE_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassExpense, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"CLEARING_GBP":  {Code: "CLEARING_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassClearing, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"CLEARING_USD":  {Code: "CLEARING_USD", Version: 1, BehaviorClass: accounttype.BehaviorClassClearing, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"CLEARING_EUR":  {Code: "CLEARING_EUR", Version: 1, BehaviorClass: accounttype.BehaviorClassClearing, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"NOSTRO_USD":    {Code: "NOSTRO_USD", Version: 1, BehaviorClass: accounttype.BehaviorClassNostro, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"NOSTRO_GBP":    {Code: "NOSTRO_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassNostro, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"NOSTRO_EUR":    {Code: "NOSTRO_EUR", Version: 1, BehaviorClass: accounttype.BehaviorClassNostro, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"VOSTRO_USD":    {Code: "VOSTRO_USD", Version: 1, BehaviorClass: accounttype.BehaviorClassVostro, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"VOSTRO_GBP":    {Code: "VOSTRO_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassVostro, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"HOLDING_GBP":   {Code: "HOLDING_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassHolding, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"HOLDING_USD":   {Code: "HOLDING_USD", Version: 1, BehaviorClass: accounttype.BehaviorClassHolding, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"HOLDING_EUR":   {Code: "HOLDING_EUR", Version: 1, BehaviorClass: accounttype.BehaviorClassHolding, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"HOLDING_KWH":   {Code: "HOLDING_KWH", Version: 1, BehaviorClass: accounttype.BehaviorClassHolding, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"SUSPENSE_GBP":  {Code: "SUSPENSE_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassSuspense, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"SUSPENSE_USD":  {Code: "SUSPENSE_USD", Version: 1, BehaviorClass: accounttype.BehaviorClassSuspense, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"REVENUE_GBP":   {Code: "REVENUE_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassRevenue, EligibilityCEL: "true", Status: accounttype.StatusActive},
+		"EXPENSE_GBP":   {Code: "EXPENSE_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassExpense, EligibilityCEL: "true", Status: accounttype.StatusActive},
 		"INVENTORY_GBP": {Code: "INVENTORY_GBP", Version: 1, BehaviorClass: accounttype.BehaviorClassInventory, EligibilityCEL: "true", Status: accounttype.StatusActive},
 		"INVENTORY_KWH": {Code: "INVENTORY_KWH", Version: 1, BehaviorClass: accounttype.BehaviorClassInventory, EligibilityCEL: "true", Status: accounttype.StatusActive},
 	}
@@ -271,9 +271,9 @@ func applyInternalAccountSchema(t *testing.T, pool *pgxpool.Pool, schemaName str
 			instrument_code character varying(32) NOT NULL,
 			dimension character varying(20) NOT NULL DEFAULT '',
 			status character varying(20) NOT NULL DEFAULT 'ACTIVE',
-			correspondent_bank_id character varying(50) NULL,
-			correspondent_bank_name character varying(255) NULL,
-			correspondent_external_ref character varying(100) NULL,
+			counterparty_id character varying(50) NULL,
+			counterparty_name character varying(255) NULL,
+			counterparty_external_ref character varying(100) NULL,
 			attributes jsonb NOT NULL DEFAULT '{}',
 			version bigint NOT NULL DEFAULT 1,
 			PRIMARY KEY (id),
@@ -712,10 +712,10 @@ func TestE2E_AccountLifecycle(t *testing.T) {
 
 	t.Run("1. Initiate new internal account", func(t *testing.T) {
 		resp, err := svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-			AccountCode:    accountCode,
-			Name:           "GBP Clearing Account",
+			AccountCode:     accountCode,
+			Name:            "GBP Clearing Account",
 			ProductTypeCode: "CLEARING_GBP",
-			InstrumentCode: "GBP",
+			InstrumentCode:  "GBP",
 		})
 		require.NoError(t, err)
 		require.NotEmpty(t, resp.AccountId)
@@ -911,10 +911,10 @@ func TestE2E_MultiAssetAccounts(t *testing.T) {
 	t.Run("Create multi-asset accounts", func(t *testing.T) {
 		for _, tc := range testCases {
 			resp, err := svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-				AccountCode:    tc.code,
-				Name:           tc.name,
+				AccountCode:     tc.code,
+				Name:            tc.name,
 				ProductTypeCode: "HOLDING_GBP",
-				InstrumentCode: tc.instrument,
+				InstrumentCode:  tc.instrument,
 			})
 			require.NoError(t, err, "Failed to create account for %s", tc.instrument)
 
@@ -977,133 +977,131 @@ func TestE2E_MultiAssetAccounts(t *testing.T) {
 }
 
 // ============================================================================
-// E2E Test: Correspondent Banking (NOSTRO/VOSTRO)
+// E2E Test: Counterparty Banking (NOSTRO/VOSTRO)
 // ============================================================================
 
-// TestE2E_CorrespondentBanking tests creating NOSTRO and VOSTRO accounts with correspondent details.
-func TestE2E_CorrespondentBanking(t *testing.T) {
+// TestE2E_CounterpartyBanking tests creating NOSTRO and VOSTRO accounts with counterparty details.
+func TestE2E_CounterpartyBanking(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
 
 	tc := setupE2ETestPool(t)
-	ctx := setupTenantSchema(t, tc, "e2e_correspondent_tenant")
+	ctx := setupTenantSchema(t, tc, "e2e_counterparty_tenant")
 
 	t.Run("Create NOSTRO account (our account at Citibank)", func(t *testing.T) {
 		resp, err := tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-			AccountCode:    "USD_NOSTRO_CITI",
-			Name:           "USD NOSTRO at Citibank",
+			AccountCode:     "USD_NOSTRO_CITI",
+			Name:            "USD NOSTRO at Citibank",
 			ProductTypeCode: "NOSTRO_USD",
-			InstrumentCode: "USD",
-			CorrespondentDetails: &pb.CorrespondentBankDetails{
-				BankId:             "CITI001",
-				BankName:           "Citibank NA",
-				ExternalAccountRef: "12345678901",
-				SwiftCode:          "CITIUS33",
+			InstrumentCode:  "USD",
+			CounterpartyDetails: &pb.CounterpartyDetails{
+				CounterpartyId:          "CITI001",
+				CounterpartyName:        "Citibank NA",
+				CounterpartyExternalRef: "12345678901",
 			},
 		})
 		require.NoError(t, err)
 
 		assert.Equal(t, "NOSTRO", resp.Facility.BehaviorClass)
-		require.NotNil(t, resp.Facility.CorrespondentDetails)
-		assert.Equal(t, "CITI001", resp.Facility.CorrespondentDetails.BankId)
-		assert.Equal(t, "Citibank NA", resp.Facility.CorrespondentDetails.BankName)
-		assert.Equal(t, "12345678901", resp.Facility.CorrespondentDetails.ExternalAccountRef)
-		assert.Equal(t, "CITIUS33", resp.Facility.CorrespondentDetails.SwiftCode)
-		assert.Equal(t, pb.CorrespondentType_CORRESPONDENT_TYPE_NOSTRO, resp.Facility.CorrespondentDetails.CorrespondentType)
+		require.NotNil(t, resp.Facility.CounterpartyDetails)
+		assert.Equal(t, "CITI001", resp.Facility.CounterpartyDetails.CounterpartyId)
+		assert.Equal(t, "Citibank NA", resp.Facility.CounterpartyDetails.CounterpartyName)
+		assert.Equal(t, "12345678901", resp.Facility.CounterpartyDetails.CounterpartyExternalRef)
+		assert.Equal(t, pb.CounterpartyType_COUNTERPARTY_TYPE_NOSTRO, resp.Facility.CounterpartyDetails.CounterpartyType)
 	})
 
 	t.Run("Create VOSTRO account (Deutsche Bank's account at our bank)", func(t *testing.T) {
 		resp, err := tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-			AccountCode:    "EUR_VOSTRO_DB",
-			Name:           "EUR VOSTRO for Deutsche Bank",
+			AccountCode:     "EUR_VOSTRO_DB",
+			Name:            "EUR VOSTRO for Deutsche Bank",
 			ProductTypeCode: "VOSTRO_USD",
-			InstrumentCode: "EUR",
-			CorrespondentDetails: &pb.CorrespondentBankDetails{
-				BankId:             "DB001",
-				BankName:           "Deutsche Bank AG",
-				ExternalAccountRef: "DE89370400440532013000",
-				SwiftCode:          "DEUTDEFF",
+			InstrumentCode:  "EUR",
+			CounterpartyDetails: &pb.CounterpartyDetails{
+				CounterpartyId:          "DB001",
+				CounterpartyName:        "Deutsche Bank AG",
+				CounterpartyExternalRef: "DE89370400440532013000",
 			},
 		})
 		require.NoError(t, err)
 
 		assert.Equal(t, "VOSTRO", resp.Facility.BehaviorClass)
-		require.NotNil(t, resp.Facility.CorrespondentDetails)
-		assert.Equal(t, "DB001", resp.Facility.CorrespondentDetails.BankId)
-		assert.Equal(t, "Deutsche Bank AG", resp.Facility.CorrespondentDetails.BankName)
-		assert.Equal(t, pb.CorrespondentType_CORRESPONDENT_TYPE_VOSTRO, resp.Facility.CorrespondentDetails.CorrespondentType)
+		require.NotNil(t, resp.Facility.CounterpartyDetails)
+		assert.Equal(t, "DB001", resp.Facility.CounterpartyDetails.CounterpartyId)
+		assert.Equal(t, "Deutsche Bank AG", resp.Facility.CounterpartyDetails.CounterpartyName)
+		assert.Equal(t, pb.CounterpartyType_COUNTERPARTY_TYPE_VOSTRO, resp.Facility.CounterpartyDetails.CounterpartyType)
 	})
 
-	t.Run("NOSTRO account requires correspondent details", func(t *testing.T) {
+	t.Run("NOSTRO account requires counterparty details", func(t *testing.T) {
 		_, err := tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-			AccountCode:    "USD_NOSTRO_MISSING",
-			Name:           "USD NOSTRO Missing Correspondent",
+			AccountCode:     "USD_NOSTRO_MISSING",
+			Name:            "USD NOSTRO Missing Counterparty",
 			ProductTypeCode: "NOSTRO_USD",
-			InstrumentCode: "USD",
-			// Missing CorrespondentDetails
+			InstrumentCode:  "USD",
+			// Missing CounterpartyDetails
 		})
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "correspondent")
+		assert.Contains(t, err.Error(), "counterparty")
 	})
 
-	t.Run("VOSTRO account requires correspondent details", func(t *testing.T) {
+	t.Run("VOSTRO account requires counterparty details", func(t *testing.T) {
 		_, err := tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-			AccountCode:    "EUR_VOSTRO_MISSING",
-			Name:           "EUR VOSTRO Missing Correspondent",
+			AccountCode:     "EUR_VOSTRO_MISSING",
+			Name:            "EUR VOSTRO Missing Counterparty",
 			ProductTypeCode: "VOSTRO_USD",
-			InstrumentCode: "EUR",
-			// Missing CorrespondentDetails
+			InstrumentCode:  "EUR",
+			// Missing CounterpartyDetails
 		})
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "correspondent")
+		assert.Contains(t, err.Error(), "counterparty")
 	})
 
-	t.Run("CLEARING account rejects correspondent details", func(t *testing.T) {
-		// The domain should reject correspondent details for non-NOSTRO/VOSTRO accounts
-		// First create the account successfully
-		resp, err := tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-			AccountCode:    "GBP_CLEARING_ONLY",
-			Name:           "GBP Clearing Only",
+	t.Run("CLEARING account rejects counterparty details", func(t *testing.T) {
+		// The domain should reject counterparty details on non-NOSTRO/VOSTRO accounts
+		_, err := tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
+			AccountCode:     "GBP_CLEARING_ONLY",
+			Name:            "GBP Clearing Only",
 			ProductTypeCode: "CLEARING_GBP",
-			InstrumentCode: "GBP",
+			InstrumentCode:  "GBP",
+			CounterpartyDetails: &pb.CounterpartyDetails{
+				CounterpartyId:          "BANK001",
+				CounterpartyName:        "Test Bank",
+				CounterpartyExternalRef: "REF123",
+			},
 		})
-		require.NoError(t, err)
-		assert.Nil(t, resp.Facility.CorrespondentDetails)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "counterparty")
 	})
 
-	t.Run("Update correspondent details on NOSTRO account", func(t *testing.T) {
+	t.Run("Update counterparty details on NOSTRO account", func(t *testing.T) {
 		// First create the NOSTRO account
 		createResp, err := tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-			AccountCode:    "USD_NOSTRO_JPMORGAN",
-			Name:           "USD NOSTRO at JPMorgan",
+			AccountCode:     "USD_NOSTRO_JPMORGAN",
+			Name:            "USD NOSTRO at JPMorgan",
 			ProductTypeCode: "NOSTRO_USD",
-			InstrumentCode: "USD",
-			CorrespondentDetails: &pb.CorrespondentBankDetails{
-				BankId:             "JPM001",
-				BankName:           "JPMorgan Chase",
-				ExternalAccountRef: "987654321",
-				SwiftCode:          "CHASUS33",
+			InstrumentCode:  "USD",
+			CounterpartyDetails: &pb.CounterpartyDetails{
+				CounterpartyId:          "JPM001",
+				CounterpartyName:        "JPMorgan Chase",
+				CounterpartyExternalRef: "987654321",
 			},
 		})
 		require.NoError(t, err)
 
-		// Update correspondent details using account_code
+		// Update counterparty details using account_code
 		updateResp, err := tc.svc.UpdateInternalAccount(ctx, &pb.UpdateInternalAccountRequest{
 			AccountId: createResp.Facility.AccountCode,
-			CorrespondentDetails: &pb.CorrespondentBankDetails{
-				BankId:             "JPM001",
-				BankName:           "JPMorgan Chase & Co",
-				ExternalAccountRef: "999888777",
-				SwiftCode:          "CHASUS33XXX",
+			CounterpartyDetails: &pb.CounterpartyDetails{
+				CounterpartyId:          "JPM001",
+				CounterpartyName:        "JPMorgan Chase & Co",
+				CounterpartyExternalRef: "999888777",
 			},
 		})
 		require.NoError(t, err)
 
 		// Verify updated details
-		assert.Equal(t, "JPMorgan Chase & Co", updateResp.Facility.CorrespondentDetails.BankName)
-		assert.Equal(t, "999888777", updateResp.Facility.CorrespondentDetails.ExternalAccountRef)
-		assert.Equal(t, "CHASUS33XXX", updateResp.Facility.CorrespondentDetails.SwiftCode)
+		assert.Equal(t, "JPMorgan Chase & Co", updateResp.Facility.CounterpartyDetails.CounterpartyName)
+		assert.Equal(t, "999888777", updateResp.Facility.CounterpartyDetails.CounterpartyExternalRef)
 	})
 
 	t.Run("List NOSTRO accounts only", func(t *testing.T) {
@@ -1115,7 +1113,7 @@ func TestE2E_CorrespondentBanking(t *testing.T) {
 
 		for _, facility := range resp.Facilities {
 			assert.Equal(t, "NOSTRO", facility.BehaviorClass)
-			assert.NotNil(t, facility.CorrespondentDetails)
+			assert.NotNil(t, facility.CounterpartyDetails)
 		}
 	})
 
@@ -1128,7 +1126,7 @@ func TestE2E_CorrespondentBanking(t *testing.T) {
 
 		for _, facility := range resp.Facilities {
 			assert.Equal(t, "VOSTRO", facility.BehaviorClass)
-			assert.NotNil(t, facility.CorrespondentDetails)
+			assert.NotNil(t, facility.CounterpartyDetails)
 		}
 	})
 }
@@ -1153,10 +1151,10 @@ func TestE2E_MultiTenantIsolation(t *testing.T) {
 		// Create 3 accounts for tenant A
 		for i := 1; i <= 3; i++ {
 			resp, err := tc.svc.InitiateInternalAccount(ctxTenantA, &pb.InitiateInternalAccountRequest{
-				AccountCode:    fmt.Sprintf("TENANT_A_ACC_%d", i),
-				Name:           fmt.Sprintf("Tenant A Account %d", i),
+				AccountCode:     fmt.Sprintf("TENANT_A_ACC_%d", i),
+				Name:            fmt.Sprintf("Tenant A Account %d", i),
 				ProductTypeCode: "CLEARING_GBP",
-				InstrumentCode: "GBP",
+				InstrumentCode:  "GBP",
 			})
 			require.NoError(t, err)
 			assert.NotEmpty(t, resp.AccountId)
@@ -1167,10 +1165,10 @@ func TestE2E_MultiTenantIsolation(t *testing.T) {
 		// Create 2 accounts for tenant B
 		for i := 1; i <= 2; i++ {
 			resp, err := tc.svc.InitiateInternalAccount(ctxTenantB, &pb.InitiateInternalAccountRequest{
-				AccountCode:    fmt.Sprintf("TENANT_B_ACC_%d", i),
-				Name:           fmt.Sprintf("Tenant B Account %d", i),
+				AccountCode:     fmt.Sprintf("TENANT_B_ACC_%d", i),
+				Name:            fmt.Sprintf("Tenant B Account %d", i),
 				ProductTypeCode: "HOLDING_GBP",
-				InstrumentCode: "EUR",
+				InstrumentCode:  "EUR",
 			})
 			require.NoError(t, err)
 			assert.NotEmpty(t, resp.AccountId)
@@ -1226,19 +1224,19 @@ func TestE2E_MultiTenantIsolation(t *testing.T) {
 	t.Run("Both tenants can use the same account code independently", func(t *testing.T) {
 		// Tenant A creates account with code "SHARED_CODE"
 		respA, err := tc.svc.InitiateInternalAccount(ctxTenantA, &pb.InitiateInternalAccountRequest{
-			AccountCode:    "SHARED_CODE",
-			Name:           "Shared Code Account - Tenant A",
+			AccountCode:     "SHARED_CODE",
+			Name:            "Shared Code Account - Tenant A",
 			ProductTypeCode: "SUSPENSE_GBP",
-			InstrumentCode: "USD",
+			InstrumentCode:  "USD",
 		})
 		require.NoError(t, err)
 
 		// Tenant B creates account with the same code
 		respB, err := tc.svc.InitiateInternalAccount(ctxTenantB, &pb.InitiateInternalAccountRequest{
-			AccountCode:    "SHARED_CODE",
-			Name:           "Shared Code Account - Tenant B",
+			AccountCode:     "SHARED_CODE",
+			Name:            "Shared Code Account - Tenant B",
 			ProductTypeCode: "REVENUE_GBP",
-			InstrumentCode: "GBP",
+			InstrumentCode:  "GBP",
 		})
 		require.NoError(t, err)
 
@@ -1290,10 +1288,10 @@ func TestE2E_AsyncOperationsWithAwait(t *testing.T) {
 		go func() {
 			time.Sleep(100 * time.Millisecond) // Simulate async processing delay
 			_, _ = tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-				AccountCode:    accountCode,
-				Name:           "Async Created Account",
+				AccountCode:     accountCode,
+				Name:            "Async Created Account",
 				ProductTypeCode: "CLEARING_GBP",
-				InstrumentCode: "GBP",
+				InstrumentCode:  "GBP",
 			})
 		}()
 
@@ -1326,10 +1324,10 @@ func TestE2E_AsyncOperationsWithAwait(t *testing.T) {
 
 		// Create account
 		_, err := tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-			AccountCode:    accountCode,
-			Name:           "Status Change Test Account",
+			AccountCode:     accountCode,
+			Name:            "Status Change Test Account",
 			ProductTypeCode: "HOLDING_GBP",
-			InstrumentCode: "EUR",
+			InstrumentCode:  "EUR",
 		})
 		require.NoError(t, err)
 
@@ -1368,10 +1366,10 @@ func TestE2E_AsyncOperationsWithAwait(t *testing.T) {
 		go func() {
 			time.Sleep(200 * time.Millisecond)
 			_, _ = tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-				AccountCode:    uniqueCode,
-				Name:           "Retry Test Account",
+				AccountCode:     uniqueCode,
+				Name:            "Retry Test Account",
 				ProductTypeCode: "CLEARING_GBP",
-				InstrumentCode: "USD",
+				InstrumentCode:  "USD",
 			})
 		}()
 
@@ -1418,10 +1416,10 @@ func TestE2E_Pagination(t *testing.T) {
 	const totalAccounts = 10
 	for i := 1; i <= totalAccounts; i++ {
 		_, err := tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-			AccountCode:    fmt.Sprintf("PAGE_ACC_%02d", i),
-			Name:           fmt.Sprintf("Pagination Account %d", i),
+			AccountCode:     fmt.Sprintf("PAGE_ACC_%02d", i),
+			Name:            fmt.Sprintf("Pagination Account %d", i),
 			ProductTypeCode: "CLEARING_GBP",
-			InstrumentCode: "GBP",
+			InstrumentCode:  "GBP",
 		})
 		require.NoError(t, err)
 	}
@@ -1516,10 +1514,10 @@ func TestE2E_OptimisticLocking(t *testing.T) {
 
 		// Create account
 		createResp, err := tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-			AccountCode:    accountCode,
-			Name:           "Version Test Account",
+			AccountCode:     accountCode,
+			Name:            "Version Test Account",
 			ProductTypeCode: "CLEARING_GBP",
-			InstrumentCode: "GBP",
+			InstrumentCode:  "GBP",
 		})
 		require.NoError(t, err)
 		initialVersion := createResp.Facility.Version
@@ -1559,10 +1557,10 @@ func TestE2E_AllAccountTypes(t *testing.T) {
 
 	// Test cases for all account types (using product_type_code with behavior class prefix)
 	accountTypes := []struct {
-		productTypeCode      string
-		behaviorClass        string
-		requireCorrespondent bool
-		name                 string
+		productTypeCode     string
+		behaviorClass       string
+		requireCounterparty bool
+		name                string
 	}{
 		{"CLEARING_GBP", "CLEARING", false, "Clearing"},
 		{"HOLDING_GBP", "HOLDING", false, "Holding"},
@@ -1582,11 +1580,11 @@ func TestE2E_AllAccountTypes(t *testing.T) {
 				InstrumentCode:  "GBP",
 			}
 
-			if at.requireCorrespondent {
-				req.CorrespondentDetails = &pb.CorrespondentBankDetails{
-					BankId:             "BANK001",
-					BankName:           "Test Bank",
-					ExternalAccountRef: "REF123",
+			if at.requireCounterparty {
+				req.CounterpartyDetails = &pb.CounterpartyDetails{
+					CounterpartyId:          "BANK001",
+					CounterpartyName:        "Test Bank",
+					CounterpartyExternalRef: "REF123",
 				}
 			}
 
@@ -1594,8 +1592,8 @@ func TestE2E_AllAccountTypes(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, at.behaviorClass, resp.Facility.BehaviorClass)
 
-			if at.requireCorrespondent {
-				assert.NotNil(t, resp.Facility.CorrespondentDetails)
+			if at.requireCounterparty {
+				assert.NotNil(t, resp.Facility.CounterpartyDetails)
 			}
 		})
 	}
@@ -1746,10 +1744,10 @@ func TestE2E_PerformanceBaselines(t *testing.T) {
 			start := time.Now()
 
 			_, err := tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-				AccountCode:    fmt.Sprintf("PERF_ACC_%04d", i),
-				Name:           fmt.Sprintf("Performance Test Account %d", i),
+				AccountCode:     fmt.Sprintf("PERF_ACC_%04d", i),
+				Name:            fmt.Sprintf("Performance Test Account %d", i),
 				ProductTypeCode: "CLEARING_GBP",
-				InstrumentCode: "GBP",
+				InstrumentCode:  "GBP",
 			})
 			require.NoError(t, err)
 
@@ -1772,10 +1770,10 @@ func TestE2E_PerformanceBaselines(t *testing.T) {
 			code := fmt.Sprintf("RETRIEVE_ACC_%04d", i)
 			codes[i] = code
 			_, err := tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-				AccountCode:    code,
-				Name:           fmt.Sprintf("Retrieval Test Account %d", i),
+				AccountCode:     code,
+				Name:            fmt.Sprintf("Retrieval Test Account %d", i),
 				ProductTypeCode: "HOLDING_GBP",
-				InstrumentCode: "EUR",
+				InstrumentCode:  "EUR",
 			})
 			require.NoError(t, err)
 		}
@@ -1833,10 +1831,10 @@ func TestE2E_PerformanceBaselines(t *testing.T) {
 		// Create 50 accounts for pagination tests
 		for i := 0; i < 50; i++ {
 			_, err := tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-				AccountCode:    fmt.Sprintf("LIST_ACC_%04d", i),
-				Name:           fmt.Sprintf("List Test Account %d", i),
+				AccountCode:     fmt.Sprintf("LIST_ACC_%04d", i),
+				Name:            fmt.Sprintf("List Test Account %d", i),
 				ProductTypeCode: "SUSPENSE_GBP",
-				InstrumentCode: "USD",
+				InstrumentCode:  "USD",
 			})
 			require.NoError(t, err)
 		}
@@ -1878,10 +1876,10 @@ func TestE2E_PerformanceBaselines(t *testing.T) {
 				for i := 0; i < opsPerWorker; i++ {
 					code := fmt.Sprintf("CONCURRENT_%d_%d", workerID, i)
 					_, err := tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
-						AccountCode:    code,
-						Name:           fmt.Sprintf("Concurrent Account %d-%d", workerID, i),
+						AccountCode:     code,
+						Name:            fmt.Sprintf("Concurrent Account %d-%d", workerID, i),
 						ProductTypeCode: "CLEARING_GBP",
-						InstrumentCode: "GBP",
+						InstrumentCode:  "GBP",
 					})
 					if err != nil {
 						errChan <- err

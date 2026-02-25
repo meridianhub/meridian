@@ -33,7 +33,7 @@ Each example is a standalone Go program that can be run independently:
 # From repository root
 go run ./services/internal-account/examples/create_clearing_account.go
 go run ./services/internal-account/examples/query_balance.go
-go run ./services/internal-account/examples/correspondent_account.go
+go run ./services/internal-account/examples/counterparty_account.go
 go run ./services/internal-account/examples/multi_asset.go
 go run ./services/internal-account/examples/account_lifecycle.go
 ```
@@ -66,19 +66,19 @@ Balance retrieval via Position Keeping delegation. Demonstrates:
 go run ./services/internal-account/examples/query_balance.go
 ```
 
-### 3. correspondent_account.go
+### 3. counterparty_account.go
 
-NOSTRO/VOSTRO account setup for correspondent banking. Demonstrates:
+NOSTRO/VOSTRO account setup for counterparty banking. Demonstrates:
 
 - Creating NOSTRO accounts (our account at another bank)
 - Creating VOSTRO accounts (their account at our bank)
-- Required CorrespondentBankDetails structure
-- SWIFT/BIC code validation
-- Updating correspondent details
+- Required CounterpartyDetails structure
+- Counterparty attributes (e.g., SWIFT/BIC codes)
+- Updating counterparty details
 - Optimistic locking with expected_version
 
 ```bash
-go run ./services/internal-account/examples/correspondent_account.go
+go run ./services/internal-account/examples/counterparty_account.go
 ```
 
 ### 4. multi_asset.go
@@ -155,7 +155,7 @@ IdempotencyKey: &commonv1.IdempotencyKey{
 
 ## Account Types Reference
 
-| Type | Purpose | Requires Correspondent |
+| Type | Purpose | Requires Counterparty |
 |------|---------|----------------------|
 | `CLEARING` | Settlement and clearing operations | No |
 | `NOSTRO` | Our account at another bank | Yes |
@@ -206,6 +206,6 @@ For balance queries, Position Keeping must be running. Start with Tilt or:
 go run ./services/position-keeping/cmd
 ```
 
-### "correspondent_details required"
+### "counterparty details required"
 
-NOSTRO and VOSTRO accounts require CorrespondentBankDetails. See `correspondent_account.go`.
+NOSTRO and VOSTRO accounts require CounterpartyDetails. See `counterparty_account.go`.

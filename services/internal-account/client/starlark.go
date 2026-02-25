@@ -5,11 +5,19 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	internalaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
 	"github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
+)
+
+var (
+	// ErrCounterpartyAttributesNotMap is returned when counterparty_attributes is not a map.
+	ErrCounterpartyAttributesNotMap = errors.New("counterparty_attributes must be a map[string]any")
+	// ErrCounterpartyAttributeValueNotString is returned when a counterparty_attributes value is not a string.
+	ErrCounterpartyAttributeValueNotString = errors.New("counterparty_attributes value must be a string")
 )
 
 // RegisterStarlarkHandlers registers all Starlark service bindings for Internal Account.
@@ -161,10 +169,9 @@ func getBalanceHandler(client *Client) saga.Handler {
 //   - product_type_code (string): The product type code from the Product Directory (required)
 //   - instrument_code (string): The instrument code (e.g., "USD", "KWH") (required)
 //   - description (string): Additional context about the account's purpose (optional)
-//   - correspondent_bank_id (string): Correspondent bank ID for NOSTRO/VOSTRO (optional)
-//   - correspondent_bank_name (string): Correspondent bank name for NOSTRO/VOSTRO (optional)
-//   - correspondent_external_account_ref (string): External account reference (optional)
-//   - correspondent_swift_code (string): SWIFT/BIC code (optional)
+//   - counterparty_id (string): Counterparty ID for NOSTRO/VOSTRO (optional)
+//   - counterparty_name (string): Counterparty name for NOSTRO/VOSTRO (optional)
+//   - counterparty_external_ref (string): External account reference at counterparty (optional)
 //
 // Returns a map containing:
 //   - account_id: The generated unique identifier
@@ -181,8 +188,8 @@ func initiateHandler(client *Client) saga.Handler {
 			return nil, err
 		}
 
-		// 2. Add correspondent details if needed (for NOSTRO/VOSTRO behavior classes)
-		if err := addCorrespondentDetails(req, params, productTypeCode); err != nil {
+		// 2. Add counterparty details if needed (for NOSTRO/VOSTRO behavior classes)
+		if err := addCounterpartyDetails(req, params, productTypeCode); err != nil {
 			return nil, err
 		}
 
@@ -236,28 +243,44 @@ func parseInitiateParams(params map[string]any) (*internalaccountv1.InitiateInte
 	return req, productTypeCode, nil
 }
 
-// addCorrespondentDetails adds correspondent bank details to the request if needed.
-// The correspondent_bank_id parameter triggers addition of correspondent details.
-// Correspondent type is determined from the product_type_code prefix (NOSTRO/VOSTRO).
-func addCorrespondentDetails(req *internalaccountv1.InitiateInternalAccountRequest, params map[string]any, productTypeCode string) error {
-	// Parse correspondent details if provided
-	bankID := getOptionalString(params, "correspondent_bank_id")
-	if bankID == "" {
+// addCounterpartyDetails adds counterparty details to the request if needed.
+// The counterparty_id parameter triggers addition of counterparty details.
+// Counterparty type is determined from the product_type_code prefix (NOSTRO/VOSTRO).
+func addCounterpartyDetails(req *internalaccountv1.InitiateInternalAccountRequest, params map[string]any, productTypeCode string) error {
+	// Parse counterparty details if provided
+	counterpartyID := getOptionalString(params, "counterparty_id")
+	if counterpartyID == "" {
 		return nil
 	}
 
-	// Determine correspondent type from product type code prefix
-	correspondentType := internalaccountv1.CorrespondentType_CORRESPONDENT_TYPE_NOSTRO
+	// Determine counterparty type from product type code prefix
+	counterpartyType := internalaccountv1.CounterpartyType_COUNTERPARTY_TYPE_NOSTRO
 	if len(productTypeCode) >= 6 && productTypeCode[:6] == "VOSTRO" {
-		correspondentType = internalaccountv1.CorrespondentType_CORRESPONDENT_TYPE_VOSTRO
+		counterpartyType = internalaccountv1.CounterpartyType_COUNTERPARTY_TYPE_VOSTRO
 	}
 
-	req.CorrespondentDetails = &internalaccountv1.CorrespondentBankDetails{
-		BankId:             bankID,
-		BankName:           getOptionalString(params, "correspondent_bank_name"),
-		ExternalAccountRef: getOptionalString(params, "correspondent_external_account_ref"),
-		SwiftCode:          getOptionalString(params, "correspondent_swift_code"),
-		CorrespondentType:  correspondentType,
+	// Parse optional attributes map (e.g., swift_code, bic_code)
+	attributes := map[string]string{}
+	if raw, ok := params["counterparty_attributes"]; ok {
+		rawMap, ok := raw.(map[string]any)
+		if !ok {
+			return fmt.Errorf("%w: got %T", ErrCounterpartyAttributesNotMap, raw)
+		}
+		for k, v := range rawMap {
+			s, ok := v.(string)
+			if !ok {
+				return fmt.Errorf("%w: key %s got %T", ErrCounterpartyAttributeValueNotString, k, v)
+			}
+			attributes[k] = s
+		}
+	}
+
+	req.CounterpartyDetails = &internalaccountv1.CounterpartyDetails{
+		CounterpartyId:          counterpartyID,
+		CounterpartyName:        getOptionalString(params, "counterparty_name"),
+		CounterpartyExternalRef: getOptionalString(params, "counterparty_external_ref"),
+		Attributes:              attributes,
+		CounterpartyType:        counterpartyType,
 	}
 
 	return nil
