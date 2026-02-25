@@ -5,19 +5,15 @@ import { MemoryRouter } from 'react-router-dom'
 import { McpConfigPage } from './index'
 
 // Mock tenant context for tests that need a specific tenant
-vi.mock('@/contexts/tenant-context', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/contexts/tenant-context')>()
-  return {
-    ...actual,
-    useTenantContext: vi.fn(() => ({
-      tenantSlug: 'test-tenant',
-      currentTenant: { id: 'tid', slug: 'test-tenant', name: 'Test Tenant' },
-      isPlatformAdmin: false,
-      switchTenant: vi.fn(),
-      clearTenant: vi.fn(),
-    })),
-  }
-})
+vi.mock('@/contexts/tenant-context', () => ({
+  useTenantContext: vi.fn(() => ({
+    tenantSlug: 'test-tenant',
+    currentTenant: { id: 'tid', slug: 'test-tenant', name: 'Test Tenant' },
+    isPlatformAdmin: false,
+    switchTenant: vi.fn(),
+    clearTenant: vi.fn(),
+  })),
+}))
 
 import { useTenantContext } from '@/contexts/tenant-context'
 
