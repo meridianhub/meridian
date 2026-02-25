@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	mcperrors "github.com/meridianhub/meridian/services/mcp-server/internal/errors"
 	"github.com/meridianhub/meridian/shared/pkg/valuation"
+	"github.com/shopspring/decimal"
 )
 
 // CELEvaluator evaluates CEL expressions against named environments with
@@ -283,6 +284,13 @@ func handleValuationSimulate(ctx context.Context, simulator ValuationSimulator, 
 		}, nil
 	}
 
+	inputAmount, err := decimal.NewFromString(p.InputAmount)
+	if err != nil {
+		return map[string]interface{}{ //nolint:nilerr // parse error surfaced in tool response
+			"error": fmt.Sprintf("invalid input_amount: %v", err),
+		}, nil
+	}
+
 	req := &valuation.Request{
 		RequestID:   uuid.New(),
 		MethodID:    methodID,
@@ -291,6 +299,7 @@ func handleValuationSimulate(ctx context.Context, simulator ValuationSimulator, 
 		KnowledgeAt: time.Now(),
 		Quantity: valuation.Quantity{
 			InstrumentCode: p.InputInstrument,
+			Amount:         inputAmount,
 		},
 		Parameters: p.Parameters,
 	}
@@ -299,6 +308,11 @@ func handleValuationSimulate(ctx context.Context, simulator ValuationSimulator, 
 	if err != nil {
 		return map[string]interface{}{ //nolint:nilerr // simulator error is surfaced in the tool response, not returned as a Go error
 			"error": err.Error(),
+		}, nil
+	}
+	if resp == nil {
+		return map[string]interface{}{
+			"error": "simulator returned nil response",
 		}, nil
 	}
 
