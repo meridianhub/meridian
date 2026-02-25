@@ -16,7 +16,8 @@ import { handleConnectError } from '@/lib/error-handling'
 import { referenceKeys } from '@/lib/query-keys'
 import { Code } from '@connectrpc/connect'
 
-const CODE_PATTERN = /^[A-Z][A-Z0-9_]*$/
+// Matches proto: ^[A-Z][A-Z0-9_]{0,48}[A-Z0-9]$ (2-50 chars, no trailing underscore)
+const CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,48}[A-Z0-9]$/
 const SAGA_PREFIX_PATTERN = /^[a-z][a-z0-9_]*$/
 
 const NORMAL_BALANCE_OPTIONS = [
@@ -88,7 +89,7 @@ export function CreateAccountTypeDialog({ open, onOpenChange }: CreateAccountTyp
   const [errors, setErrors] = React.useState<FormErrors>({})
   const [successMessage, setSuccessMessage] = React.useState<string | null>(null)
 
-  const { data: instrumentsData, isLoading: instrumentsLoading } = useQuery({
+  const { data: instrumentsData, isLoading: instrumentsLoading, isError: instrumentsError } = useQuery({
     queryKey: [...referenceKeys.instruments(), 'active'],
     queryFn: async () => {
       const res = await clients.referenceData.listInstruments({ statusFilter: 2 })
@@ -161,9 +162,7 @@ export function CreateAccountTypeDialog({ open, onOpenChange }: CreateAccountTyp
     if (!code) {
       next.code = 'Code is required'
     } else if (!CODE_PATTERN.test(code)) {
-      next.code = 'Invalid code format — must start with an uppercase letter, uppercase letters, digits, and underscores only'
-    } else if (code.length < 2 || code.length > 50) {
-      next.code = 'Code must be between 2 and 50 characters'
+      next.code = 'Invalid code format — must start and end with an uppercase letter or digit, with uppercase letters, digits, and underscores only (2–50 characters)'
     }
 
     if (!formData.displayName.trim()) {
@@ -219,13 +218,19 @@ export function CreateAccountTypeDialog({ open, onOpenChange }: CreateAccountTyp
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    if (mutation.isPending) return
     if (!validate()) return
     setSuccessMessage(null)
     mutation.mutate()
   }
 
+  function handleOpenChange(nextOpen: boolean) {
+    if (!nextOpen && mutation.isPending) return
+    onOpenChange(nextOpen)
+  }
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Create Account Type</DialogTitle>
@@ -362,6 +367,15 @@ export function CreateAccountTypeDialog({ open, onOpenChange }: CreateAccountTyp
                   >
                     <option value="">Loading instruments…</option>
                   </select>
+                ) : instrumentsError ? (
+                  <select
+                    id="account-type-instrument"
+                    disabled
+                    className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
+                    aria-describedby="account-type-instrument-load-error"
+                  >
+                    <option value="">Failed to load instruments</option>
+                  </select>
                 ) : (
                   <select
                     id="account-type-instrument"
@@ -378,6 +392,11 @@ export function CreateAccountTypeDialog({ open, onOpenChange }: CreateAccountTyp
                       </option>
                     ))}
                   </select>
+                )}
+                {instrumentsError && (
+                  <p id="account-type-instrument-load-error" className="text-sm text-destructive">
+                    Unable to load instruments. Please close and reopen the dialog to retry.
+                  </p>
                 )}
                 {errors.instrumentCode && (
                   <p id="account-type-instrument-error" className="text-sm text-destructive">

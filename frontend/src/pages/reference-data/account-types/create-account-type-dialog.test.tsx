@@ -49,8 +49,8 @@ function makeQueryClient() {
   })
 }
 
-function Wrapper({ children }: { children: React.ReactNode }) {
-  const qc = makeQueryClient()
+function Wrapper({ children, queryClient }: { children: React.ReactNode; queryClient?: QueryClient }) {
+  const qc = queryClient ?? makeQueryClient()
   return (
     <QueryClientProvider client={qc}>
       <TooltipProvider>
@@ -150,14 +150,14 @@ describe('CreateAccountTypeDialog', () => {
     expect(await screen.findByText(/invalid code format/i)).toBeInTheDocument()
   })
 
-  it('validates code length is between 2 and 50 characters', async () => {
+  it('validates code with trailing underscore as invalid', async () => {
     const user = userEvent.setup()
     renderDialog()
     const codeInput = screen.getByLabelText(/code/i)
-    // Single char — too short after uppercase forced (A → A is 1 char)
-    await user.type(codeInput, 'A')
+    // Trailing underscore is rejected by proto pattern
+    await user.type(codeInput, 'CUSTOMER_')
     await user.click(screen.getByRole('button', { name: /create account type/i }))
-    expect(await screen.findByText(/code must be between 2 and 50 characters/i)).toBeInTheDocument()
+    expect(await screen.findByText(/invalid code format/i)).toBeInTheDocument()
   })
 
   it('validates display name is required on submit', async () => {
@@ -362,8 +362,9 @@ describe('CreateAccountTypeDialog', () => {
   it('resets form when dialog is closed and reopened', async () => {
     const user = userEvent.setup()
     const onOpenChange = vi.fn()
+    const qc = makeQueryClient()
     const { rerender } = render(
-      <Wrapper>
+      <Wrapper queryClient={qc}>
         <CreateAccountTypeDialog open={true} onOpenChange={onOpenChange} />
       </Wrapper>,
     )
@@ -372,12 +373,12 @@ describe('CreateAccountTypeDialog', () => {
     expect(screen.getByLabelText(/code/i)).toHaveValue('CUSTOMER')
 
     rerender(
-      <Wrapper>
+      <Wrapper queryClient={qc}>
         <CreateAccountTypeDialog open={false} onOpenChange={onOpenChange} />
       </Wrapper>,
     )
     rerender(
-      <Wrapper>
+      <Wrapper queryClient={qc}>
         <CreateAccountTypeDialog open={true} onOpenChange={onOpenChange} />
       </Wrapper>,
     )

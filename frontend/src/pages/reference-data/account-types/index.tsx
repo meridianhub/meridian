@@ -6,6 +6,7 @@ import { CELEditor } from '@/components/shared/cel-editor'
 import { useApiClients } from '@/api/context'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { referenceKeys } from '@/lib/query-keys'
 import {
   BehaviorClass,
   type AccountTypeDefinition,
@@ -121,7 +122,7 @@ export function AccountTypesPage() {
 
       <Card className="p-6">
         <DataTable
-          queryKey={['account-types']}
+          queryKey={referenceKeys.accountTypes()}
           queryFn={queryFn}
           columns={columns}
           pageSize={25}
