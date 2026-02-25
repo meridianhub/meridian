@@ -7,6 +7,7 @@ interface ImportMetaEnv {
   readonly VITE_AUTH_DOMAIN: string
   readonly VITE_DEMO_MODE: string
   readonly VITE_E2E_MODE?: string
+  readonly VITE_MCP_SERVER_URL?: string
 }
 
 interface ImportMeta {
