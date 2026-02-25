@@ -211,7 +211,7 @@ func buildValuationSimulateTool(simulator ValuationSimulator) Tool {
 				"method_id": map[string]interface{}{
 					"type":        "string",
 					"description": "UUID of the ValuationMethod to simulate.",
-					"pattern":     `^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`,
+					"pattern":     `^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`,
 				},
 				"input_instrument": map[string]interface{}{
 					"type":        "string",
@@ -226,12 +226,12 @@ func buildValuationSimulateTool(simulator ValuationSimulator) Tool {
 				"account_id": map[string]interface{}{
 					"type":        "string",
 					"description": "UUID of the account context for valuation.",
-					"pattern":     `^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`,
+					"pattern":     `^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`,
 				},
 				"party_id": map[string]interface{}{
 					"type":        "string",
 					"description": "UUID of the party context for valuation.",
-					"pattern":     `^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`,
+					"pattern":     `^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`,
 				},
 				"parameters": map[string]interface{}{
 					"type":        "object",
