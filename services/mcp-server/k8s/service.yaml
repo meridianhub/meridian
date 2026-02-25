@@ -1,0 +1,18 @@
+# Port Configuration: See shared/platform/ports/ports.go for canonical port assignments.
+# This service uses port 8090 for SSE transport (MCP_SSE_PORT).
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-server
+  labels:
+    app: mcp-server
+    component: mcp-gateway
+spec:
+  type: ClusterIP
+  ports:
+  - name: sse
+    port: 8090
+    targetPort: sse
+    protocol: TCP
+  selector:
+    app: mcp-server
