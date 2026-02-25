@@ -1,6 +1,7 @@
 package currentaccountv1_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -276,6 +277,16 @@ func TestValidation_ExternalIdentifierFormat(t *testing.T) {
 			name:       "valid GPU node reference",
 			identifier: "NODE-A100-CLUSTER-42",
 			wantError:  false,
+		},
+		{
+			name:       "max length 255 valid",
+			identifier: strings.Repeat("A", 255),
+			wantError:  false,
+		},
+		{
+			name:       "max length 256 invalid",
+			identifier: strings.Repeat("A", 256),
+			wantError:  true,
 		},
 		{
 			name:       "empty string fails (min_len: 1)",
