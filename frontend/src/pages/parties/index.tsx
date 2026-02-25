@@ -7,6 +7,9 @@ import { StatusBadge } from '@/components/shared/status-badge'
 import { useClients } from '@/api/context'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { tenantKeys } from '@/lib/query-keys'
+import { useTenantSlug } from '@/hooks/use-tenant-context'
+import { RegisterPartyDialog } from './dialogs/register-party-dialog'
 import { RegisterPartyTypeDialog } from './dialogs/register-party-type-dialog'
 
 export interface Party {
@@ -32,6 +35,8 @@ interface ListPartiesResult {
 export function PartiesPage() {
   const navigate = useNavigate()
   const clients = useClients()
+  const tenantSlug = useTenantSlug()
+  const [registerOpen, setRegisterOpen] = React.useState(false)
   const [addPartyTypeOpen, setAddPartyTypeOpen] = React.useState(false)
 
   const columns: ColumnDef<Party>[] = [
@@ -93,7 +98,7 @@ export function PartiesPage() {
     },
   ]
 
-  const queryFn = async (params: ListPartiesParams): Promise<ListPartiesResult> => {
+  const queryFn = React.useCallback(async (params: ListPartiesParams): Promise<ListPartiesResult> => {
     const response = await clients.party.listParties({
       pageToken: params.pageToken,
       pageSize: params.pageSize,
@@ -115,11 +120,13 @@ export function PartiesPage() {
       items: parties,
       nextPageToken: response.nextPageToken,
     }
-  }
+  }, [clients.party])
 
   const handleRowClick = (party: Party) => {
     navigate(`/parties/${party.partyId}`)
   }
+
+  if (!tenantSlug) return null
 
   return (
     <div className="space-y-6">
@@ -130,11 +137,15 @@ export function PartiesPage() {
             Manage parties, their demographics, and linked accounts.
           </p>
         </div>
-        <Button variant="outline" onClick={() => setAddPartyTypeOpen(true)}>
-          Add Party Type
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={() => setRegisterOpen(true)}>Register Party</Button>
+          <Button variant="outline" onClick={() => setAddPartyTypeOpen(true)}>
+            Add Party Type
+          </Button>
+        </div>
       </div>
 
+      <RegisterPartyDialog open={registerOpen} onOpenChange={setRegisterOpen} />
       <RegisterPartyTypeDialog
         open={addPartyTypeOpen}
         onOpenChange={setAddPartyTypeOpen}
@@ -142,7 +153,7 @@ export function PartiesPage() {
 
       <Card className="p-6">
         <DataTable
-          queryKey={['parties']}
+          queryKey={tenantKeys.parties(tenantSlug)}
           queryFn={queryFn}
           columns={columns}
           pageSize={25}

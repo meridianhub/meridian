@@ -11,17 +11,25 @@ const mockPartyClient = {
     nextPageToken: '',
     totalCount: 0n,
   }),
+  listPartyTypes: vi.fn().mockResolvedValue({ partyTypeDefinitions: [] }),
   registerPartyType: vi.fn().mockResolvedValue({}),
 }
 
-vi.mock('@/api/context', () => ({
-  ApiClientProvider: ({ children }: { children: React.ReactNode }) => children,
-  useClients: vi.fn(() => ({ party: mockPartyClient })),
-  useApiClients: vi.fn(() => ({ party: mockPartyClient })),
-}))
+vi.mock('@/api/context', async () => {
+  const actual = await vi.importActual('@/api/context')
+  return {
+    ...actual,
+    useClients: vi.fn(() => ({ party: mockPartyClient })),
+    useApiClients: vi.fn(() => ({ party: mockPartyClient })),
+  }
+})
 
 vi.mock('@/hooks/use-tenant-context', () => ({
   useTenantSlug: () => 'test-tenant',
+  useCurrentTenant: () => null,
+  useIsPlatformAdmin: () => false,
+  useSwitchTenant: () => vi.fn(),
+  useClearTenant: () => vi.fn(),
 }))
 
 import { PartiesPage } from './index'

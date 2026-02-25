@@ -39,6 +39,9 @@ export const tenantKeys = {
   partyAssociations: (tenantId: string, partyId: string) =>
     [...tenantKeys.party(tenantId, partyId), 'associations'] as const,
 
+  partyTypes: (tenantId: string) =>
+    [...tenantKeys.all(tenantId), 'party-types'] as const,
+
   internalAccounts: (tenantId: string) =>
     [...tenantKeys.all(tenantId), 'internal-accounts'] as const,
   internalAccount: (tenantId: string, accountId: string) =>
