@@ -118,19 +118,19 @@ func (r *Repository) Save(ctx context.Context, account domain.InternalAccount) e
 			updateResult := tx.Model(&InternalAccountEntity{}).
 				Where("account_id = ? AND version = ? AND deleted_at IS NULL", entity.AccountID, originalVersion).
 				Updates(map[string]interface{}{
-					"account_code":               entity.AccountCode,
-					"name":                       entity.Name,
-					"status":                     entity.Status,
-					"clearing_purpose":           entity.ClearingPurpose,
-					"product_type_code":          entity.ProductTypeCode,
-					"product_type_version":       entity.ProductTypeVersion,
-					"counterparty_id":          entity.CounterpartyID,
-					"counterparty_name":        entity.CounterpartyName,
+					"account_code":              entity.AccountCode,
+					"name":                      entity.Name,
+					"status":                    entity.Status,
+					"clearing_purpose":          entity.ClearingPurpose,
+					"product_type_code":         entity.ProductTypeCode,
+					"product_type_version":      entity.ProductTypeVersion,
+					"counterparty_id":           entity.CounterpartyID,
+					"counterparty_name":         entity.CounterpartyName,
 					"counterparty_external_ref": entity.CounterpartyExternalRef,
-					"attributes":                 entity.Attributes,
-					"version":                    entity.Version,
-					"updated_at":                 entity.UpdatedAt,
-					"updated_by":                 entity.UpdatedBy,
+					"attributes":                entity.Attributes,
+					"version":                   entity.Version,
+					"updated_at":                entity.UpdatedAt,
+					"updated_by":                entity.UpdatedBy,
 				})
 
 			if updateResult.Error != nil {

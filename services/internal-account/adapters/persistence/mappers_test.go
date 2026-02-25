@@ -903,16 +903,16 @@ func TestToDomain_PartialCounterparty(t *testing.T) {
 	t.Run("only counterparty ID set", func(t *testing.T) {
 		counterpartyID := "CPTY001"
 		entity := &InternalAccountEntity{
-			ID:             uuid.New(),
-			AccountID:      "IBA-PARTIAL-001",
-			AccountCode:    "TEST",
-			Name:           "Test Account",
-			AccountType:    "CLEARING",
+			ID:              uuid.New(),
+			AccountID:       "IBA-PARTIAL-001",
+			AccountCode:     "TEST",
+			Name:            "Test Account",
+			AccountType:     "CLEARING",
 			ClearingPurpose: nil,
-			InstrumentCode: "GBP",
-			Dimension:      "CURRENCY",
-			Status:         "ACTIVE",
-			CounterpartyID: &counterpartyID,
+			InstrumentCode:  "GBP",
+			Dimension:       "CURRENCY",
+			Status:          "ACTIVE",
+			CounterpartyID:  &counterpartyID,
 			// Other counterparty fields are nil
 			Attributes: make(AttributesJSON),
 			Version:    1,

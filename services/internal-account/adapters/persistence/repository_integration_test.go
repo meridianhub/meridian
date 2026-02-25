@@ -534,7 +534,8 @@ func TestIntegration_CounterpartyDetails(t *testing.T) {
 	require.NoError(t, err)
 
 	// Add counterparty details
-	counterparty := domain.NewCounterpartyDetails("CITI001", "Citibank NA", "12345678")
+	counterparty, err := domain.NewCounterpartyDetails("CITI001", "Citibank NA", "12345678")
+	require.NoError(t, err)
 	nostro, err = nostro.UpdateCounterparty(counterparty)
 	require.NoError(t, err)
 
