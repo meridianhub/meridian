@@ -120,7 +120,7 @@ services:
       MCP_TRANSPORT: sse
       MCP_SSE_PORT: "8090"
       MCP_SERVER_NAME: ${MCP_SERVER_NAME:-meridian-mcp}
-      MCP_BASE_URL: ${MCP_BASE_URL:-}
+      MCP_BASE_URL: ${MCP_BASE_URL:?MCP_BASE_URL must be set in the env file (e.g. https://your-domain)}
 
       # --- Meridian API ---
       MERIDIAN_API_URL: meridian:50051
@@ -134,7 +134,8 @@ services:
       MCP_OAUTH_CLIENT_ID: ${MCP_OAUTH_CLIENT_ID:-}
       MCP_OAUTH_REDIRECT_URI: ${MCP_OAUTH_REDIRECT_URI:-}
     # Not exposed to host — accessed only by caddy on the internal network
-    # Add to Caddyfile: reverse_proxy /mcp/* mcp-server:8090
+    # Add to Caddyfile: reverse_proxy /sse mcp-server:8090
+    #                   reverse_proxy /message mcp-server:8090
 
   caddy:
     image: caddy:2-alpine
