@@ -8,8 +8,7 @@ demo.meridianhub.cloud, *.demo.meridianhub.cloud {
 
 	# API: ConnectRPC + health probes
 	@api {
-		path /meridian.* /grpc.*
-		path /healthz /readyz
+		path /meridian.* /grpc.* /healthz /readyz
 	}
 	handle @api {
 		reverse_proxy meridian:8090
