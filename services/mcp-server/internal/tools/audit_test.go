@@ -122,7 +122,13 @@ func TestCausationTree_ValidParams_ReturnTree(t *testing.T) {
 }
 
 func TestCausationTree_MissingSagaID_ValidationError(t *testing.T) {
-	clients := newAuditClients(nil, nil, nil, nil, nil)
+	mock := &mockSagaAdminClient{
+		getCausationTreeFn: func(_ context.Context, _ *sagav1.GetCausationTreeRequest) (*sagav1.GetCausationTreeResponse, error) {
+			t.Fatal("handler should not be called for missing saga_id")
+			return nil, nil
+		},
+	}
+	clients := newAuditClients(mock, nil, nil, nil, nil)
 	r := tools.NewRegistry()
 	tools.RegisterAuditTools(r, clients)
 
@@ -476,10 +482,18 @@ func TestSagaExecutions_StatusFilter_PassedToClient(t *testing.T) {
 }
 
 func TestSagaExecutions_InvalidStatus_ValidationError(t *testing.T) {
-	clients := newAuditClients(nil, nil, nil, nil, nil)
+	mock := &mockAuditSagaRegistryClient{
+		listSagasFn: func(_ context.Context, _ *sagav1.ListSagasRequest) (*sagav1.ListSagasResponse, error) {
+			t.Fatal("handler should not be called for invalid status")
+			return nil, nil
+		},
+	}
+	clients := newAuditClients(nil, nil, nil, mock, nil)
 	r := tools.NewRegistry()
 	tools.RegisterAuditTools(r, clients)
 
+	// "INVALID_STATUS_VALUE" is rejected by the JSON schema enum constraint,
+	// so r.Call returns a non-nil error (schema validation, not tool-not-found).
 	params := json.RawMessage(`{"status": "INVALID_STATUS_VALUE"}`)
 	_, err := r.Call(context.Background(), "meridian_saga_executions", params)
 	if err == nil {

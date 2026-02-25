@@ -188,7 +188,7 @@ func buildPositionsQueryTool(client PositionQuerier) Tool {
 	return Tool{
 		Name:     "meridian_positions_query",
 		Category: CategoryRead,
-		Description: "Query financial position logs with optional bi-temporal filtering. " +
+		Description: "Query financial position logs with optional account filtering. " +
 			"Returns position log summaries for one or all accounts. " +
 			"Use this to inspect account positions, transaction histories, and status tracking.",
 		InputSchema: map[string]interface{}{
