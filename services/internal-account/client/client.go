@@ -99,11 +99,11 @@ type Config struct {
 
 // Client provides access to the InternalAccount service.
 type Client struct {
-	conn                *grpc.ClientConn
+	conn            *grpc.ClientConn
 	internalAccount internalaccountv1.InternalAccountServiceClient
-	tracer              *observability.Tracer
-	resilient           *clients.ResilientClient
-	timeout             time.Duration
+	tracer          *observability.Tracer
+	resilient       *clients.ResilientClient
+	timeout         time.Duration
 }
 
 // New creates a new InternalAccount gRPC client.
@@ -195,11 +195,11 @@ func New(cfg Config) (*Client, func(), error) {
 	}
 
 	client := &Client{
-		conn:                conn,
+		conn:            conn,
 		internalAccount: internalaccountv1.NewInternalAccountServiceClient(conn),
-		tracer:              cfg.Tracer,
-		resilient:           resilient,
-		timeout:             cfg.Timeout,
+		tracer:          cfg.Tracer,
+		resilient:       resilient,
+		timeout:         cfg.Timeout,
 	}
 
 	cleanup := func() {

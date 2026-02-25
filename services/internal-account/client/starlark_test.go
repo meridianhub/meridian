@@ -111,9 +111,9 @@ func setupTestClient(t *testing.T) (*Client, *mockInternalAccountServer, func())
 	require.NoError(t, err)
 
 	c := &Client{
-		conn:                conn,
+		conn:            conn,
 		internalAccount: internalaccountv1.NewInternalAccountServiceClient(conn),
-		timeout:             5 * time.Second,
+		timeout:         5 * time.Second,
 	}
 
 	fullCleanup := func() {
