@@ -11,7 +11,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
-export const DISPUTE_REASON_OPTIONS = [
+const DISPUTE_REASON_OPTIONS = [
   { label: 'Amount Mismatch', value: 'DISPUTE_REASON_AMOUNT_MISMATCH' },
   { label: 'Missing Entry', value: 'DISPUTE_REASON_MISSING_ENTRY' },
   { label: 'Duplicate', value: 'DISPUTE_REASON_DUPLICATE' },
