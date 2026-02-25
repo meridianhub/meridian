@@ -6,7 +6,7 @@ metadata:
   name: mcp-server
   labels:
     app: mcp-server
-    component: mcp-gateway
+    component: mcp-server
 spec:
   type: ClusterIP
   ports:

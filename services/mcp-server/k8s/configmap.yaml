@@ -4,7 +4,7 @@ metadata:
   name: mcp-server-config
   labels:
     app: mcp-server
-    component: mcp-gateway
+    component: mcp-server
 data:
   # Logging configuration
   LOG_LEVEL: "info"
