@@ -96,8 +96,7 @@ spec:
             cpu: 200m
             memory: 256Mi
         livenessProbe:
-          httpGet:
-            path: /sse
+          tcpSocket:
             port: sse
           initialDelaySeconds: 10
           periodSeconds: 10
@@ -105,8 +104,7 @@ spec:
           successThreshold: 1
           failureThreshold: 3
         readinessProbe:
-          httpGet:
-            path: /sse
+          tcpSocket:
             port: sse
           initialDelaySeconds: 5
           periodSeconds: 5
@@ -114,8 +112,7 @@ spec:
           successThreshold: 1
           failureThreshold: 3
         startupProbe:
-          httpGet:
-            path: /sse
+          tcpSocket:
             port: sse
           initialDelaySeconds: 0
           periodSeconds: 2
