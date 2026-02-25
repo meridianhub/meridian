@@ -104,7 +104,11 @@ func NewCurrentAccount(accountID, externalIdentifier, partyID, instrumentCode st
 }
 
 // NewCurrentAccountWithDimension creates a new current account with explicit instrument code and dimension.
-// Use this when creating accounts for non-currency instruments.
+//
+// NOTE: This service currently only supports CURRENCY dimension (enforced by NewMoneyFromInstrument).
+// Passing any other dimension returns ErrInvalidCurrency. The dimension field is stored on the domain
+// model for future multi-asset support (task 1 adds the schema column; full non-currency support
+// is deferred until the Money type is generalised beyond CURRENCY-only instruments).
 func NewCurrentAccountWithDimension(accountID, externalIdentifier, partyID, instrumentCode, dimension string, opts ...AccountOption) (CurrentAccount, error) {
 	now := time.Now()
 	zeroMoney, err := NewMoneyFromInstrument(instrumentCode, dimension, 0)
@@ -251,8 +255,12 @@ func (a CurrentAccount) PrepareForDebit(amount Money) (CurrentAccount, error) {
 		return CurrentAccount{}, ErrCurrencyMismatch
 	}
 
-	// Check if sufficient funds (via availableBalance)
-	cmp, _ := amount.Compare(a.availableBalance)
+	// Check if sufficient funds (via availableBalance).
+	// Currency match is already verified above, so Compare cannot return an error here.
+	cmp, err := amount.Compare(a.availableBalance)
+	if err != nil {
+		return CurrentAccount{}, err
+	}
 	if cmp > 0 {
 		return CurrentAccount{}, ErrInsufficientFunds
 	}
@@ -299,8 +307,12 @@ func (a CurrentAccount) Withdraw(amount Money) (CurrentAccount, error) {
 		return CurrentAccount{}, ErrCurrencyMismatch
 	}
 
-	// Check if sufficient funds
-	cmp, _ := amount.Compare(a.availableBalance) // Same currency already verified above
+	// Check if sufficient funds.
+	// Currency match is already verified above, so Compare cannot return an error here.
+	cmp, err := amount.Compare(a.availableBalance)
+	if err != nil {
+		return CurrentAccount{}, err
+	}
 	if cmp > 0 {
 		return CurrentAccount{}, ErrInsufficientFunds
 	}
