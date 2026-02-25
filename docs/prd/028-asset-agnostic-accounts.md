@@ -76,7 +76,7 @@ compatibility shims required.
 | Domain | `overdraftLimit` etc. | Hard-coded overdraft facility |
 | Entity | `Currency` | `CHAR(3)` ISO 4217, no dimension |
 | Entity | `AccountType` | `VARCHAR(50)` -- "current", "savings" |
-| Proto | `base_currency` | `Currency` enum (GBP, USD, EUR only) |
+| Proto | `base_currency` | `Currency` enum (7 fiat codes only) |
 | Proto | `account_identification` | IBAN pattern validation |
 | Proto | `OverdraftConfiguration` | Nested message in facility |
 | Migration | `currency` column | Default `'GBP'` |
@@ -129,13 +129,17 @@ account service truly asset-agnostic.
 - Replace `Money` balance types with instrument-aware equivalents
   (or defer to Position Keeping, which already handles this)
 - Replace currency field with `instrumentCode` and `dimension`
+- Migrate `cadomain.Money` cross-service usage (payment-order imports
+  this type) to a shared instrument-aware type in `shared/pkg/`
 
 **Proto:**
 
 - Replace `base_currency` (Currency enum) with `instrument_code` (string)
-  -- dimension derivable from reference data
+- `dimension` resolved at write-time from Reference Data and persisted
+  in the DB column (not re-derived on every read)
 - Update `InitiateCurrentAccountRequest` to accept `instrument_code`
-  instead of `base_currency`
+  instead of `base_currency` -- `dimension` is not a request field,
+  it is derived by the service and returned in responses
 
 #### 1.2 Generalize `account_identification` (IBAN -> External Identifier)
 
@@ -181,9 +185,12 @@ account service truly asset-agnostic.
 
 **Current:** `account_type` uses banking terms -- "current", "savings"
 
-**Proposed:** Account type is derived from `product_type_code` in the
-Product Directory. Remove the `account_type` column. Product types
-define the behaviour class (just as internal accounts already work).
+**Proposed:** Replace `account_type` with `behaviour_class` derived from
+`product_type_code` in the Product Directory. This mirrors the internal
+account pattern where `behavior_class` is the abstract classification.
+
+**Prerequisite:** Product Directory (PRD-023) must be operational before
+this subtask executes, since behaviour class resolution depends on it.
 
 ### Phase 2: Internal Account -- Drop "Bank" from Naming (Medium Priority)
 
@@ -248,14 +255,16 @@ all references in a single pass.
 
 ### Reference Data Alignment
 
-Current account creation should resolve `instrument_code` against the
-Reference Data service to derive `dimension`, just as internal accounts
-already do. This ensures consistency.
+Current account creation resolves `instrument_code` against the
+Reference Data service to derive `dimension` at write-time (same
+pattern as internal accounts). The resolved `dimension` is persisted
+in the DB column so reads have no runtime dependency on Reference Data.
 
 ## Success Criteria
 
 1. A new current account can be created with `instrument_code: "KWH"`
-   and `dimension: "ENERGY"` -- no currency assumption
+   -- service derives `dimension: "ENERGY"` from Reference Data and
+   returns it in the response. No currency assumption.
 2. A new current account can use a non-IBAN `external_identifier`
    (e.g., MPAN meter ID)
 3. Internal account API references `InternalAccountFacility` (no "Bank")
@@ -279,7 +288,9 @@ already do. This ensures consistency.
 
 | Risk | Mitigation |
 |------|-----------|
-| Large blast radius across codebase | Phase the work: fields first, naming second |
+| Large blast radius across codebase | Phase: fields first, naming second |
+| `cadomain.Money` cross-service dep | Migrate to shared type in Phase 1 |
+| Product Directory not yet operational | Phase 1.4 has explicit prerequisite |
 | Test fixtures assume banking fields | Update alongside code changes per phase |
 | DB table rename breaks references | Rename in migrations + all Go references |
 | Starlark scripts use old prefixes | Find-and-replace all saga definitions |
