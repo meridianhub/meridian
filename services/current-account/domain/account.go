@@ -98,7 +98,7 @@ func WithProductType(code string, version int) AccountOption {
 // Returns a value type (not pointer) following immutability principles.
 // Use WithOrgPartyID option to create an org-scoped account.
 //
-// instrumentCode is the instrument code (e.g. "GBP", "kWh").
+// instrumentCode is the instrument code (currently currency codes, e.g. "GBP").
 // Dimension defaults to "CURRENCY". Use NewCurrentAccountWithDimension for explicit dimensions.
 func NewCurrentAccount(accountID, externalIdentifier, partyID, instrumentCode string, opts ...AccountOption) (CurrentAccount, error) {
 	return NewCurrentAccountWithDimension(accountID, externalIdentifier, partyID, instrumentCode, "CURRENCY", opts...)
@@ -495,10 +495,10 @@ func (a CurrentAccount) ExternalIdentifier() string { return a.externalIdentifie
 // NOTE: Migrate callers to ExternalIdentifier() before removing this method.
 func (a CurrentAccount) AccountIdentification() string { return a.externalIdentifier }
 
-// InstrumentCode returns the instrument code (e.g. "GBP", "kWh").
+// InstrumentCode returns the instrument code (currently currency codes, e.g. "GBP").
 func (a CurrentAccount) InstrumentCode() string { return a.instrumentCode }
 
-// Dimension returns the asset dimension (e.g. "CURRENCY", "ELECTRICITY").
+// Dimension returns the asset dimension (currently "CURRENCY").
 func (a CurrentAccount) Dimension() string { return a.dimension }
 
 // PartyID returns the party (customer) identifier.
@@ -601,7 +601,7 @@ func (b *CurrentAccountBuilder) WithInstrumentCode(instrumentCode string) *Curre
 	return b
 }
 
-// WithDimension sets the asset dimension (e.g. "CURRENCY", "ELECTRICITY").
+// WithDimension sets the asset dimension (currently "CURRENCY" is supported).
 // The value is normalized to uppercase.
 func (b *CurrentAccountBuilder) WithDimension(dimension string) *CurrentAccountBuilder {
 	b.account.dimension = strings.ToUpper(dimension)
