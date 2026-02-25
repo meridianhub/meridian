@@ -3,6 +3,8 @@ import { useQuery } from '@tanstack/react-query'
 import { useClients } from '@/api/context'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/ui/empty-state'
+import { Button } from '@/components/ui/button'
+import { RegisterAssociationsDialog } from '../dialogs/register-associations-dialog'
 
 interface AssociationsTabProps {
   partyId: string
@@ -10,6 +12,7 @@ interface AssociationsTabProps {
 
 export function AssociationsTab({ partyId }: AssociationsTabProps) {
   const clients = useClients()
+  const [dialogOpen, setDialogOpen] = React.useState(false)
 
   const { isLoading } = useQuery({
     queryKey: ['party', partyId, 'associations'],
@@ -27,5 +30,17 @@ export function AssociationsTab({ partyId }: AssociationsTabProps) {
     )
   }
 
-  return <EmptyState title="Associations" description="No associations information available." />
+  return (
+    <>
+      <div className="flex justify-end mb-4">
+        <Button onClick={() => setDialogOpen(true)}>Add Association</Button>
+      </div>
+      <EmptyState title="Associations" description="No associations information available." />
+      <RegisterAssociationsDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        partyId={partyId}
+      />
+    </>
+  )
 }

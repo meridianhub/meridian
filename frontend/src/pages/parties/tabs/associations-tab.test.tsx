@@ -1,12 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { TooltipProvider } from '@/components/ui/tooltip'
 
 vi.mock('@/api/context', () => ({
   useClients: vi.fn(),
+  useApiClients: vi.fn(),
 }))
 
-import { useClients } from '@/api/context'
+vi.mock('@/hooks/use-tenant-context', () => ({
+  useTenantSlug: () => 'test-tenant',
+  useCurrentTenant: () => null,
+  useIsPlatformAdmin: () => false,
+  useSwitchTenant: () => vi.fn(),
+  useClearTenant: () => vi.fn(),
+}))
+
+import { useClients, useApiClients } from '@/api/context'
 import { AssociationsTab } from './associations-tab'
 
 function makeQueryClient() {
@@ -17,10 +27,18 @@ function makeQueryClient() {
   })
 }
 
+const mockPartyClient = {
+  getAssociations: vi.fn(),
+  listParties: vi.fn().mockResolvedValue({ parties: [] }),
+  registerAssociations: vi.fn(),
+}
+
 function renderTab(partyId = 'party-001') {
   return render(
     <QueryClientProvider client={makeQueryClient()}>
-      <AssociationsTab partyId={partyId} />
+      <TooltipProvider>
+        <AssociationsTab partyId={partyId} />
+      </TooltipProvider>
     </QueryClientProvider>,
   )
 }
@@ -28,6 +46,9 @@ function renderTab(partyId = 'party-001') {
 describe('AssociationsTab', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(useApiClients).mockReturnValue({
+      party: mockPartyClient,
+    } as ReturnType<typeof useApiClients>)
   })
 
   describe('loading state', () => {
@@ -83,6 +104,20 @@ describe('AssociationsTab', () => {
 
       await waitFor(() => {
         expect(screen.getByText(/no associations information available/i)).toBeInTheDocument()
+      })
+    })
+
+    it('renders add association button', async () => {
+      vi.mocked(useClients).mockReturnValue({
+        party: {
+          getAssociations: vi.fn().mockResolvedValue({}),
+        },
+      } as ReturnType<typeof useClients>)
+
+      renderTab()
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /add association/i })).toBeInTheDocument()
       })
     })
   })
