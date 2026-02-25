@@ -1,0 +1,14 @@
+# PodDisruptionBudget for internal-account service
+# Ensures at least 2 replicas remain available during disruptions
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: internal-account-pdb
+  labels:
+    app: internal-account
+    component: microservice
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: internal-account

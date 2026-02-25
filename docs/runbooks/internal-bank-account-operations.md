@@ -1,24 +1,24 @@
 ---
-name: internal-bank-account-operations
-description: Operational procedures for Internal Bank Account service including account management, troubleshooting, and disaster recovery
+name: internal-account-operations
+description: Operational procedures for Internal Account service including account management, troubleshooting, and disaster recovery
 triggers:
-  - Troubleshooting Internal Bank Account issues
+  - Troubleshooting Internal Account issues
   - Managing account lifecycle operations
   - Investigating balance query problems
   - Handling correspondent bank account setup
   - Creating or suspending internal accounts
   - Position Keeping integration failures
 instructions: |
-  Use this runbook for Internal Bank Account service operations.
-  Port: 50057 (gRPC). Database: internal_bank_account.
+  Use this runbook for Internal Account service operations.
+  Port: 50057 (gRPC). Database: internal_account.
   Balance queries route to Position Keeping (50053).
   Account types: CLEARING, NOSTRO, VOSTRO, HOLDING, SUSPENSE, REVENUE, EXPENSE, INVENTORY.
   Status transitions: ACTIVE <-> SUSPENDED -> CLOSED (CLOSED is permanent).
 ---
 
-# Internal Bank Account Operations Runbook
+# Internal Account Operations Runbook
 
-**When to use this runbook**: Managing internal bank accounts, troubleshooting balance queries,
+**When to use this runbook**: Managing internal accounts, troubleshooting balance queries,
 handling account lifecycle operations, or recovering from service failures.
 
 > **Note**: This service manages non-customer-facing accounts (clearing, nostro/vostro, holding,
@@ -28,12 +28,12 @@ handling account lifecycle operations, or recovering from service failures.
 
 | Property | Value |
 |----------|-------|
-| **Service Name** | internal-bank-account |
+| **Service Name** | internal-account |
 | **gRPC Port** | 50057 |
 | **HTTP/REST Port** | 8057 (via gRPC gateway) |
-| **Database** | internal_bank_account (schema-per-tenant) |
+| **Database** | internal_account (schema-per-tenant) |
 | **Namespace** | production / staging |
-| **Deployment** | internal-bank-account |
+| **Deployment** | internal-account |
 
 ### Dependencies
 
@@ -92,8 +92,8 @@ grpcurl -plaintext \
     "instrument_code": "GBP",
     "description": "Primary clearing account for GBP deposits"
   }' \
-  internal-bank-account.production.svc.cluster.local:50057 \
-  meridian.internal_bank_account.v1.InternalBankAccountService/InitiateInternalBankAccount
+  internal-account.production.svc.cluster.local:50057 \
+  meridian.internal_account.v1.InternalAccountService/InitiateInternalAccount
 ```
 
 **Expected response:**
@@ -115,14 +115,14 @@ grpcurl -plaintext \
 
 ### Query Account Balance
 
-**Important**: Balance is retrieved from Position Keeping service. Internal Bank Account does not store balance locally.
+**Important**: Balance is retrieved from Position Keeping service. Internal Account does not store balance locally.
 
 ```bash
-# Query balance via Internal Bank Account (routes to Position Keeping)
+# Query balance via Internal Account (routes to Position Keeping)
 grpcurl -plaintext \
   -d '{"account_id": "2gKVPLwqhSJPgQKX4L8tH3Rymkv"}' \
-  internal-bank-account.production.svc.cluster.local:50057 \
-  meridian.internal_bank_account.v1.InternalBankAccountService/GetBalance
+  internal-account.production.svc.cluster.local:50057 \
+  meridian.internal_account.v1.InternalAccountService/GetBalance
 
 # Direct query to Position Keeping (if debugging integration)
 grpcurl -plaintext \
@@ -142,8 +142,8 @@ grpcurl -plaintext \
     "control_action": "CONTROL_ACTION_SUSPEND",
     "reason": "Compliance review - pending investigation of unusual activity pattern detected on 2026-01-15"
   }' \
-  internal-bank-account.production.svc.cluster.local:50057 \
-  meridian.internal_bank_account.v1.InternalBankAccountService/ControlInternalBankAccount
+  internal-account.production.svc.cluster.local:50057 \
+  meridian.internal_account.v1.InternalAccountService/ControlInternalAccount
 ```
 
 ### Reactivate a Suspended Account
@@ -155,8 +155,8 @@ grpcurl -plaintext \
     "control_action": "CONTROL_ACTION_ACTIVATE",
     "reason": "Compliance review completed - no issues found. Approved by compliance officer Jane Smith"
   }' \
-  internal-bank-account.production.svc.cluster.local:50057 \
-  meridian.internal_bank_account.v1.InternalBankAccountService/ControlInternalBankAccount
+  internal-account.production.svc.cluster.local:50057 \
+  meridian.internal_account.v1.InternalAccountService/ControlInternalAccount
 ```
 
 ### Close an Account (Permanent)
@@ -167,8 +167,8 @@ grpcurl -plaintext \
 # 1. Verify zero balance first
 grpcurl -plaintext \
   -d '{"account_id": "2gKVPLwqhSJPgQKX4L8tH3Rymkv"}' \
-  internal-bank-account.production.svc.cluster.local:50057 \
-  meridian.internal_bank_account.v1.InternalBankAccountService/GetBalance
+  internal-account.production.svc.cluster.local:50057 \
+  meridian.internal_account.v1.InternalAccountService/GetBalance
 
 # 2. Close the account (only if balance is zero)
 grpcurl -plaintext \
@@ -177,8 +177,8 @@ grpcurl -plaintext \
     "control_action": "CONTROL_ACTION_CLOSE",
     "reason": "Account no longer required - replaced by CLR-GBP-002. Authorized by operations manager"
   }' \
-  internal-bank-account.production.svc.cluster.local:50057 \
-  meridian.internal_bank_account.v1.InternalBankAccountService/ControlInternalBankAccount
+  internal-account.production.svc.cluster.local:50057 \
+  meridian.internal_account.v1.InternalAccountService/ControlInternalAccount
 ```
 
 ### Add Correspondent Bank Account (NOSTRO/VOSTRO)
@@ -201,8 +201,8 @@ grpcurl -plaintext \
     },
     "description": "Primary USD nostro account for international settlements"
   }' \
-  internal-bank-account.production.svc.cluster.local:50057 \
-  meridian.internal_bank_account.v1.InternalBankAccountService/InitiateInternalBankAccount
+  internal-account.production.svc.cluster.local:50057 \
+  meridian.internal_account.v1.InternalAccountService/InitiateInternalAccount
 ```
 
 **VOSTRO account** (their money at our bank):
@@ -223,8 +223,8 @@ grpcurl -plaintext \
     },
     "description": "Vostro account for Deutsche Bank EUR transactions"
   }' \
-  internal-bank-account.production.svc.cluster.local:50057 \
-  meridian.internal_bank_account.v1.InternalBankAccountService/InitiateInternalBankAccount
+  internal-account.production.svc.cluster.local:50057 \
+  meridian.internal_account.v1.InternalAccountService/InitiateInternalAccount
 ```
 
 ### List Accounts by Type
@@ -233,8 +233,8 @@ grpcurl -plaintext \
 # List all clearing accounts
 grpcurl -plaintext \
   -d '{"account_type_filter": "INTERNAL_ACCOUNT_TYPE_CLEARING"}' \
-  internal-bank-account.production.svc.cluster.local:50057 \
-  meridian.internal_bank_account.v1.InternalBankAccountService/ListInternalBankAccounts
+  internal-account.production.svc.cluster.local:50057 \
+  meridian.internal_account.v1.InternalAccountService/ListInternalAccounts
 
 # List all active NOSTRO accounts
 grpcurl -plaintext \
@@ -242,14 +242,14 @@ grpcurl -plaintext \
     "account_type_filter": "INTERNAL_ACCOUNT_TYPE_NOSTRO",
     "status_filter": "INTERNAL_ACCOUNT_STATUS_ACTIVE"
   }' \
-  internal-bank-account.production.svc.cluster.local:50057 \
-  meridian.internal_bank_account.v1.InternalBankAccountService/ListInternalBankAccounts
+  internal-account.production.svc.cluster.local:50057 \
+  meridian.internal_account.v1.InternalAccountService/ListInternalAccounts
 
 # List accounts for specific instrument
 grpcurl -plaintext \
   -d '{"instrument_code_filter": "GBP"}' \
-  internal-bank-account.production.svc.cluster.local:50057 \
-  meridian.internal_bank_account.v1.InternalBankAccountService/ListInternalBankAccounts
+  internal-account.production.svc.cluster.local:50057 \
+  meridian.internal_account.v1.InternalAccountService/ListInternalAccounts
 ```
 
 ---
@@ -274,18 +274,18 @@ grpcurl -plaintext \
 ```promql
 # P99 balance query latency
 histogram_quantile(0.99,
-  sum(rate(iba_balance_query_duration_seconds_bucket{service="internal-bank-account"}[5m])) by (le)
+  sum(rate(iba_balance_query_duration_seconds_bucket{service="internal-account"}[5m])) by (le)
 )
 
 # Balance query error rate
-sum(rate(iba_balance_query_errors_total{service="internal-bank-account"}[5m]))
+sum(rate(iba_balance_query_errors_total{service="internal-account"}[5m]))
 ```
 
 **Account operations:**
 
 ```promql
 # Account creation rate by type
-sum(rate(iba_account_creation_total{service="internal-bank-account"}[1h])) by (account_type)
+sum(rate(iba_account_creation_total{service="internal-account"}[1h])) by (account_type)
 
 # Suspended accounts count
 iba_accounts_by_status{status="SUSPENDED"}
@@ -309,21 +309,21 @@ iba_circuit_breaker_state{target="position-keeping"}
 **High balance query latency:**
 
 ```yaml
-- alert: InternalBankAccountBalanceQuerySlow
+- alert: InternalAccountBalanceQuerySlow
   expr: histogram_quantile(0.99, sum(rate(iba_balance_query_duration_seconds_bucket[5m])) by (le)) > 0.5
   for: 5m
   labels:
     severity: warning
   annotations:
-    summary: "Internal Bank Account balance queries are slow"
+    summary: "Internal Account balance queries are slow"
     description: "P99 balance query latency is {{ $value }}s (threshold: 500ms)"
-    runbook: "docs/runbooks/internal-bank-account-operations.md#balance-queries-slow"
+    runbook: "docs/runbooks/internal-account-operations.md#balance-queries-slow"
 ```
 
 **Position Keeping integration failure:**
 
 ```yaml
-- alert: InternalBankAccountPositionKeepingDown
+- alert: InternalAccountPositionKeepingDown
   expr: sum(rate(iba_position_keeping_errors_total[5m])) > 20
   for: 2m
   labels:
@@ -331,16 +331,16 @@ iba_circuit_breaker_state{target="position-keeping"}
   annotations:
     summary: "Position Keeping integration failing"
     description: "High error rate communicating with Position Keeping: {{ $value }} errors/min"
-    runbook: "docs/runbooks/internal-bank-account-operations.md#position-keeping-integration-failures"
+    runbook: "docs/runbooks/internal-account-operations.md#position-keeping-integration-failures"
 ```
 
 ### Grafana Dashboards
 
 > **Setup Required**: Configure these dashboard links for your environment
 
-- **Service Dashboard**: [Grafana - Internal Bank Account Overview]
+- **Service Dashboard**: [Grafana - Internal Account Overview]
 - **Position Keeping Integration**: [Grafana - Cross-Service Dependencies]
-- **Account Operations**: [Grafana - Internal Bank Account Operations]
+- **Account Operations**: [Grafana - Internal Account Operations]
 
 ---
 
@@ -354,10 +354,10 @@ iba_circuit_breaker_state{target="position-keeping"}
 
 ```bash
 # Check pod status
-kubectl get pods -n production -l app=internal-bank-account
+kubectl get pods -n production -l app=internal-account
 
 # Check logs for startup errors
-kubectl logs -n production -l app=internal-bank-account --tail=100
+kubectl logs -n production -l app=internal-account --tail=100
 
 # Verify database connectivity
 kubectl exec -it <pod-name> -n production -- nc -zv cockroachdb 26257
@@ -371,7 +371,7 @@ kubectl exec -it <pod-name> -n production -- \
 
 ```bash
 # Verify ConfigMap
-kubectl describe configmap internal-bank-account-config -n production
+kubectl describe configmap internal-account-config -n production
 
 # Check secrets are mounted
 kubectl describe pod <pod-name> -n production | grep -A10 "Mounts:"
@@ -430,7 +430,7 @@ kubectl exec -it <iba-pod> -n production -- \
 
 ```bash
 # View circuit breaker state
-kubectl logs -n production -l app=internal-bank-account --tail=200 | grep -i "circuit"
+kubectl logs -n production -l app=internal-account --tail=200 | grep -i "circuit"
 
 # If open, wait for half-open state (typically 30s) or restart pod
 kubectl delete pod <iba-pod> -n production
@@ -455,7 +455,7 @@ kubectl exec -it <iba-pod> -n production -- \
 
 ```bash
 # Verify NetworkPolicy allows traffic
-kubectl describe networkpolicy internal-bank-account -n production | grep -A10 "position-keeping"
+kubectl describe networkpolicy internal-account -n production | grep -A10 "position-keeping"
 ```
 
 **4. Check DNS resolution:**
@@ -501,7 +501,7 @@ kubectl exec -it cockroachdb-0 -n production -- cockroach sql < /path/to/migrati
 
 ### Duplicate Account Errors
 
-**Symptoms:** InitiateInternalBankAccount returns ALREADY_EXISTS error
+**Symptoms:** InitiateInternalAccount returns ALREADY_EXISTS error
 
 **1. Check if account exists:**
 
@@ -509,8 +509,8 @@ kubectl exec -it cockroachdb-0 -n production -- cockroach sql < /path/to/migrati
 # Search by account_code
 grpcurl -plaintext \
   -d '{}' \
-  internal-bank-account.production.svc.cluster.local:50057 \
-  meridian.internal_bank_account.v1.InternalBankAccountService/ListInternalBankAccounts \
+  internal-account.production.svc.cluster.local:50057 \
+  meridian.internal_account.v1.InternalAccountService/ListInternalAccounts \
   | jq '.facilities[] | select(.account_code == "CLR-GBP-001")'
 ```
 
@@ -522,12 +522,12 @@ USE tenant_schema;
 
 -- Find account by code
 SELECT account_id, account_code, name, status
-FROM internal_bank_account
+FROM internal_account
 WHERE account_code = 'CLR-GBP-001';
 
 -- Check for closed accounts with same code
 SELECT account_id, account_code, status
-FROM internal_bank_account
+FROM internal_account
 WHERE account_code LIKE 'CLR-GBP%';
 ```
 
@@ -571,7 +571,7 @@ WHERE account_code LIKE 'CLR-GBP%';
 **1. Stop the service:**
 
 ```bash
-kubectl scale deployment internal-bank-account -n production --replicas=0
+kubectl scale deployment internal-account -n production --replicas=0
 ```
 
 **2. Restore from backup:**
@@ -589,7 +589,7 @@ cockroach sql --execute="
 
 # Verify restore
 cockroach sql --execute="
-  SELECT COUNT(*) FROM tenant_schema_restored.internal_bank_account;
+  SELECT COUNT(*) FROM tenant_schema_restored.internal_account;
 "
 ```
 
@@ -606,7 +606,7 @@ ALTER DATABASE tenant_schema_restored RENAME TO tenant_schema;
 **4. Restart service:**
 
 ```bash
-kubectl scale deployment internal-bank-account -n production --replicas=3
+kubectl scale deployment internal-account -n production --replicas=3
 ```
 
 ### Replay from Event Log (Kafka)
@@ -617,7 +617,7 @@ If account state becomes inconsistent, replay events from Kafka:
 
 ```sql
 SELECT account_id, version, updated_at
-FROM internal_bank_account
+FROM internal_account
 WHERE updated_at > '2026-01-15 00:00:00';
 ```
 
@@ -627,7 +627,7 @@ WHERE updated_at > '2026-01-15 00:00:00';
 # List events for specific account
 kafka-console-consumer \
   --bootstrap-server kafka:9092 \
-  --topic internal-bank-account-events \
+  --topic internal-account-events \
   --from-beginning \
   | jq 'select(.account_id == "2gKVPLwqhSJPgQKX4L8tH3Rymkv")'
 ```
@@ -638,9 +638,9 @@ kafka-console-consumer \
 # Use event replay tool
 ./event-replay \
   --source kafka:9092 \
-  --topic internal-bank-account-events \
+  --topic internal-account-events \
   --from-timestamp "2026-01-15T00:00:00Z" \
-  --target internal-bank-account:50057
+  --target internal-account:50057
 ```
 
 ### Tenant Schema Recovery
@@ -657,7 +657,7 @@ cockroach sql --execute="SHOW DATABASES;" | grep -E "^org_|^tenant_"
 ```bash
 cockroach sql --execute="
   RESTORE DATABASE org_acme_bank
-  FROM 's3://meridian-backups/production/2026-01-15-00-00/internal_bank_account/'
+  FROM 's3://meridian-backups/production/2026-01-15-00-00/internal_account/'
   AS OF SYSTEM TIME '2026-01-14 23:00:00';
 "
 ```
@@ -670,7 +670,7 @@ SELECT COUNT(*) as total_accounts,
        COUNT(CASE WHEN status = 'ACTIVE' THEN 1 END) as active,
        COUNT(CASE WHEN status = 'SUSPENDED' THEN 1 END) as suspended,
        COUNT(CASE WHEN status = 'CLOSED' THEN 1 END) as closed
-FROM internal_bank_account;
+FROM internal_account;
 ```
 
 ### Rollback Procedures
@@ -679,16 +679,16 @@ FROM internal_bank_account;
 
 ```bash
 # List deployment history
-kubectl rollout history deployment/internal-bank-account -n production
+kubectl rollout history deployment/internal-account -n production
 
 # Rollback to previous version
-kubectl rollout undo deployment/internal-bank-account -n production
+kubectl rollout undo deployment/internal-account -n production
 
 # Rollback to specific revision
-kubectl rollout undo deployment/internal-bank-account -n production --to-revision=5
+kubectl rollout undo deployment/internal-account -n production --to-revision=5
 
 # Verify rollback
-kubectl rollout status deployment/internal-bank-account -n production
+kubectl rollout status deployment/internal-account -n production
 ```
 
 **Rollback database migration:**
@@ -711,11 +711,11 @@ cockroach sql < migrations/rollback/20260115000001_rollback.sql
 ### kubectl Shortcuts
 
 ```bash
-# Get Internal Bank Account pods
-alias kiba='kubectl get pods -n production -l app=internal-bank-account'
+# Get Internal Account pods
+alias kiba='kubectl get pods -n production -l app=internal-account'
 
 # Logs for IBA
-alias kiblog='kubectl logs -n production -l app=internal-bank-account --tail=100'
+alias kiblog='kubectl logs -n production -l app=internal-account --tail=100'
 
 # Exec into IBA pod (use pod name from kiba)
 alias kibexec='kubectl exec -it -n production --'
@@ -726,25 +726,25 @@ alias kibexec='kubectl exec -it -n production --'
 ```sql
 -- Count accounts by type
 SELECT account_type, COUNT(*)
-FROM internal_bank_account
+FROM internal_account
 GROUP BY account_type;
 
 -- Find recently modified accounts
 SELECT account_id, account_code, status, updated_at
-FROM internal_bank_account
+FROM internal_account
 ORDER BY updated_at DESC
 LIMIT 20;
 
 -- Audit trail for specific account
 SELECT from_status, to_status, reason, changed_at
-FROM internal_bank_account_status_history
+FROM internal_account_status_history
 WHERE account_id = '2gKVPLwqhSJPgQKX4L8tH3Rymkv'
 ORDER BY changed_at DESC;
 
 -- Find accounts with correspondent details
 SELECT account_id, account_code, account_type,
        correspondent_bank_id, correspondent_bank_name
-FROM internal_bank_account
+FROM internal_account
 WHERE account_type IN ('NOSTRO', 'VOSTRO');
 ```
 
@@ -752,30 +752,30 @@ WHERE account_type IN ('NOSTRO', 'VOSTRO');
 
 ```bash
 # Health check
-grpcurl -plaintext internal-bank-account:50057 grpc.health.v1.Health/Check
+grpcurl -plaintext internal-account:50057 grpc.health.v1.Health/Check
 
 # List available services
-grpcurl -plaintext internal-bank-account:50057 list
+grpcurl -plaintext internal-account:50057 list
 
 # Describe service methods
-grpcurl -plaintext internal-bank-account:50057 describe meridian.internal_bank_account.v1.InternalBankAccountService
+grpcurl -plaintext internal-account:50057 describe meridian.internal_account.v1.InternalAccountService
 
 # Get account by ID
-grpcurl -plaintext -d '{"account_id": "XXX"}' internal-bank-account:50057 \
-  meridian.internal_bank_account.v1.InternalBankAccountService/RetrieveInternalBankAccount
+grpcurl -plaintext -d '{"account_id": "XXX"}' internal-account:50057 \
+  meridian.internal_account.v1.InternalAccountService/RetrieveInternalAccount
 ```
 
 ### Useful One-Liners
 
 ```bash
 # Find pod with highest memory usage
-kubectl top pods -n production -l app=internal-bank-account --sort-by=memory
+kubectl top pods -n production -l app=internal-account --sort-by=memory
 
 # Watch pod status
-watch -n 2 'kubectl get pods -n production -l app=internal-bank-account'
+watch -n 2 'kubectl get pods -n production -l app=internal-account'
 
 # Stream logs from all IBA pods
-stern -n production internal-bank-account
+stern -n production internal-account
 
 # Check connectivity to dependencies
 # Position Keeping on gRPC port

@@ -16,7 +16,7 @@ func TestLoadEmbeddedApplyManifest(t *testing.T) {
 	assert.Contains(t, script, "apply_manifest")
 	assert.Contains(t, script, "execute_apply_manifest")
 	assert.Contains(t, script, "reference_data.register_instrument")
-	assert.Contains(t, script, "internal_bank_account.initiate")
+	assert.Contains(t, script, "internal_account.initiate")
 }
 
 func TestIsSemverGreater(t *testing.T) {

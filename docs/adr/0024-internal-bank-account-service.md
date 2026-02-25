@@ -1,5 +1,5 @@
 ---
-name: adr-024-internal-bank-account-service
+name: adr-024-internal-account-service
 description: Dedicated BIAN service for managing internal non-customer-facing accounts
 triggers:
   - Designing internal account management
@@ -8,7 +8,7 @@ triggers:
   - Querying internal account registry
   - Understanding multi-asset internal accounts
 instructions: |
-  Use Internal Bank Account service as the registry for non-customer-facing accounts
+  Use Internal Account service as the registry for non-customer-facing accounts
   (CLEARING, NOSTRO, VOSTRO, HOLDING, SUSPENSE, REVENUE, EXPENSE, INVENTORY).
 
   Balance is NOT stored here - delegate to Position Keeping (ADR-0023).
@@ -16,7 +16,7 @@ instructions: |
   Lifecycle: ACTIVE -> SUSPENDED -> CLOSED (no PENDING state).
 ---
 
-# 24. Internal Bank Account Service Domain
+# 24. Internal Account Service Domain
 
 Date: 2026-01-15
 
@@ -63,18 +63,18 @@ and other asset classes.
 * **Account lifecycle management**: Ability to suspend accounts during audits, close accounts
   when no longer needed
 * **Elimination of environment variables**: Dynamic registry replaces static configuration
-* **BIAN compliance**: Alignment with BIAN Internal Bank Account service domain
+* **BIAN compliance**: Alignment with BIAN Internal Account service domain
 * **Multi-tenancy**: Schema-per-tenant isolation for internal accounts
 
 ## Considered Options
 
 1. Environment variables (status quo)
 2. Shared reference data service
-3. Dedicated Internal Bank Account service (BIAN-aligned)
+3. Dedicated Internal Account service (BIAN-aligned)
 
 ## Decision Outcome
 
-Chosen option: "Dedicated Internal Bank Account service", because it aligns with BIAN service
+Chosen option: "Dedicated Internal Account service", because it aligns with BIAN service
 domain patterns, provides proper lifecycle management, supports multi-asset accounts, and
 eliminates configuration drift from environment variables.
 
@@ -84,14 +84,14 @@ eliminates configuration drift from environment variables.
 * **Lifecycle management**: ACTIVE -> SUSPENDED -> CLOSED transitions with audit trail
 * **Multi-tenancy**: Schema-per-tenant isolation (consistent with other Meridian services)
 * **Discoverable**: Services query the registry instead of reading environment variables
-* **BIAN alignment**: Follows BIAN Internal Bank Account service domain patterns
+* **BIAN alignment**: Follows BIAN Internal Account service domain patterns
 * **Balance delegation**: Clean separation - registry owns metadata, Position Keeping owns
   balances (per ADR-0023)
 
 ### Negative Consequences
 
 * **Additional service**: Increases operational complexity (one more service to deploy)
-* **Dependency**: Transaction services depend on Internal Bank Account availability
+* **Dependency**: Transaction services depend on Internal Account availability
 * **Migration effort**: Existing environment variable usage must migrate to registry queries
 
 ## Pros and Cons of the Options
@@ -120,9 +120,9 @@ Create a general-purpose reference data service for all static configuration.
 * Bad, because lifecycle management differs from static reference data
 * Bad, because harder to reason about ownership and responsibilities
 
-### Option 3: Dedicated Internal Bank Account Service (Chosen)
+### Option 3: Dedicated Internal Account Service (Chosen)
 
-Create BIAN-aligned Internal Bank Account service as a multi-asset account registry.
+Create BIAN-aligned Internal Account service as a multi-asset account registry.
 
 * Good, because BIAN alignment (follows service domain patterns)
 * Good, because proper lifecycle management (ACTIVE, SUSPENDED, CLOSED)
@@ -186,12 +186,12 @@ because internal accounts are created by authorized operations, not customer req
 
 ### Balance Delegation
 
-Balance is NOT stored in Internal Bank Account service. Following ADR-0023 (Balance Delegation
+Balance is NOT stored in Internal Account service. Following ADR-0023 (Balance Delegation
 to Position Keeping), all balance queries delegate to Position Keeping:
 
 ```go
-// Internal Bank Account stores metadata only
-type InternalBankAccount struct {
+// Internal Account stores metadata only
+type InternalAccount struct {
     ID          string
     TenantID    string
     AccountType AccountType
@@ -215,10 +215,10 @@ func (s *Service) GetAccountBalance(ctx context.Context, accountID string) (*Bal
 
 ### Database Schema
 
-Schema-per-tenant with `internal_bank_account` table:
+Schema-per-tenant with `internal_account` table:
 
 ```sql
-CREATE TABLE internal_bank_account (
+CREATE TABLE internal_account (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     account_type    VARCHAR(20) NOT NULL,  -- CLEARING, NOSTRO, VOSTRO, etc.
     asset_class     VARCHAR(20) NOT NULL,  -- CURRENCY, ENERGY, COMPUTE, CARBON
@@ -232,9 +232,9 @@ CREATE TABLE internal_bank_account (
     CONSTRAINT valid_status CHECK (status IN ('ACTIVE', 'SUSPENDED', 'CLOSED'))
 );
 
-CREATE INDEX idx_internal_bank_account_type ON internal_bank_account(account_type);
-CREATE INDEX idx_internal_bank_account_asset ON internal_bank_account(asset_class, asset_code);
-CREATE INDEX idx_internal_bank_account_status ON internal_bank_account(status);
+CREATE INDEX idx_internal_account_type ON internal_account(account_type);
+CREATE INDEX idx_internal_account_asset ON internal_account(asset_class, asset_code);
+CREATE INDEX idx_internal_account_status ON internal_account(status);
 ```
 
 ### Registry Pattern
@@ -243,7 +243,7 @@ Other services query the registry to discover internal accounts:
 
 ```go
 // Query internal accounts by type and asset
-clearingAccounts, err := internalBankAccountClient.ListAccounts(ctx, &iba.ListAccountsRequest{
+clearingAccounts, err := internalAccountClient.ListAccounts(ctx, &iba.ListAccountsRequest{
     AccountType: iba.ACCOUNT_TYPE_CLEARING,
     AssetClass:  iba.ASSET_CLASS_CURRENCY,
     AssetCode:   "USD",
@@ -260,8 +260,8 @@ counterpartyAccountID := clearingAccounts.Accounts[0].Id
 ### gRPC Service Interface
 
 ```protobuf
-service InternalBankAccountService {
-    // Create a new internal bank account
+service InternalAccountService {
+    // Create a new internal account
     rpc CreateAccount(CreateAccountRequest) returns (Account);
 
     // Retrieve account by ID
@@ -292,7 +292,7 @@ service InternalBankAccountService {
 * [ADR-0002: Microservices Per BIAN Domain](0002-microservices-per-bian-domain.md)
 * [ADR-0013: Generic Asset Quantity Types](0013-generic-asset-quantity-types.md)
 * [ADR-0023: Balance Delegation to Position Keeping](0023-balance-delegation-to-position-keeping.md)
-* [BIAN Internal Bank Account Service Domain](https://bian.org/semantic-apis/internal-bank-account/)
+* [BIAN Internal Account Service Domain](https://bian.org/semantic-apis/internal-account/)
 
 ## Notes
 

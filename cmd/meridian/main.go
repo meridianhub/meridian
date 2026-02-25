@@ -3,7 +3,7 @@
 // It wires all 11 Meridian services into a single Go process with a shared gRPC
 // server and gateway HTTP server. Services are initialized in tier dependency order:
 //
-//   - Tier 0 (no deps): party, reference-data, market-information, tenant, internal-bank-account
+//   - Tier 0 (no deps): party, reference-data, market-information, tenant, internal-account
 //   - Tier 1 (Tier 0 deps): financial-accounting, position-keeping, forecasting
 //   - Tier 2 (Tier 1 deps): current-account
 //   - Tier 3 (Tier 2 deps): payment-order, reconciliation
@@ -35,7 +35,7 @@ import (
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	forecastingv1 "github.com/meridianhub/meridian/api/proto/meridian/forecasting/v1"
-	internalbankaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_bank_account/v1"
+	internalaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
 	marketinformationv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	paymentorderv1 "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1"
@@ -56,8 +56,8 @@ import (
 	forecastingpersistence "github.com/meridianhub/meridian/services/forecasting/adapters/persistence"
 	forecastinghandler "github.com/meridianhub/meridian/services/forecasting/handler"
 	forecastingstarlark "github.com/meridianhub/meridian/services/forecasting/starlark"
-	internalbankaccountpersistence "github.com/meridianhub/meridian/services/internal-bank-account/adapters/persistence"
-	internalbankaccountservice "github.com/meridianhub/meridian/services/internal-bank-account/service"
+	internalaccountpersistence "github.com/meridianhub/meridian/services/internal-account/adapters/persistence"
+	internalaccountservice "github.com/meridianhub/meridian/services/internal-account/service"
 	marketinformationpersistence "github.com/meridianhub/meridian/services/market-information/adapters/persistence"
 	misclient "github.com/meridianhub/meridian/services/market-information/client"
 	marketinformationservice "github.com/meridianhub/meridian/services/market-information/service"
@@ -312,8 +312,8 @@ func registerServices(
 		{"reference-data", func() error { return wireReferenceData(grpcServer, conns.pgxPool("reference-data"), logger) }},
 		{"market-information", func() error { return wireMarketInformation(grpcServer, conns.pgxPool("market-information"), logger) }},
 		{"tenant", func() error { return wireTenant(grpcServer, conns.gormDB("tenant"), logger) }},
-		{"internal-bank-account", func() error {
-			return wireInternalBankAccount(grpcServer, conns.gormDB("internal-bank-account"), logger)
+		{"internal-account", func() error {
+			return wireInternalAccount(grpcServer, conns.gormDB("internal-account"), logger)
 		}},
 		{"control-plane", func() error { return wireControlPlane(grpcServer, conns.pgxPool("control-plane"), logger) }},
 		{"audit", func() error { return wireAudit(grpcServer, conns.gormDB("tenant"), logger) }}, // audit uses platform DB
@@ -446,14 +446,14 @@ func wireTenant(server *grpc.Server, db *gorm.DB, logger *slog.Logger) error {
 	return nil
 }
 
-func wireInternalBankAccount(server *grpc.Server, db *gorm.DB, logger *slog.Logger) error {
-	repo := internalbankaccountpersistence.NewRepository(db)
-	svc, err := internalbankaccountservice.NewService(repo)
+func wireInternalAccount(server *grpc.Server, db *gorm.DB, logger *slog.Logger) error {
+	repo := internalaccountpersistence.NewRepository(db)
+	svc, err := internalaccountservice.NewService(repo)
 	if err != nil {
 		return err
 	}
-	internalbankaccountv1.RegisterInternalBankAccountServiceServer(server, svc)
-	logger.Info("registered internal-bank-account service")
+	internalaccountv1.RegisterInternalAccountServiceServer(server, svc)
+	logger.Info("registered internal-account service")
 	return nil
 }
 
@@ -625,17 +625,27 @@ func wireControlPlane(server *grpc.Server, pool *pgxpool.Pool, logger *slog.Logg
 // Vanguard REST↔gRPC transcoder in the unified development binary.
 //
 // All services run in the same process and share a single loopback gRPC address.
+// Per-service entries allow the transcoder to be selective: services that share
+// conflicting HTTP path patterns in their proto annotations cannot be registered
+// together in the same Vanguard instance.
+//
+// HTTP-route conflict: InternalAccountService and CurrentAccountService both
+// define REST routes for lien operations (/v1/liens/*). InternalAccountService
+// is registered here as the canonical REST owner; CurrentAccountService is still
+// reachable via native gRPC or Connect protocol.
 var serviceNames = []string{
 	"meridian.party.v1.PartyService",
 	"meridian.reference_data.v1.ReferenceDataService",
 	"meridian.reference_data.v1.NodeService",
 	"meridian.market_information.v1.MarketInformationService",
 	"meridian.tenant.v1.TenantService",
-	"meridian.internal_bank_account.v1.InternalBankAccountService",
-	"meridian.current_account.v1.CurrentAccountService",
+	"meridian.internal_account.v1.InternalAccountService",
 	"meridian.financial_accounting.v1.FinancialAccountingService",
 	"meridian.position_keeping.v1.PositionKeepingService",
 	"meridian.forecasting.v1.ForecastingService",
+	// CurrentAccountService excluded from Vanguard: its REST routes (/v1/liens/*)
+	// conflict with InternalAccountService. Still reachable via Connect protocol
+	// (/{package}.{Service}/{Method} paths don't conflict).
 	"meridian.payment_order.v1.PaymentOrderService",
 	"meridian.reconciliation.v1.AccountReconciliationService",
 	"meridian.saga.v1.SagaRegistryService",
@@ -759,7 +769,7 @@ func newServiceConns(ctx context.Context, baseDSN string, logger *slog.Logger) (
 
 	// Services requiring GORM connections.
 	gormServices := []string{
-		"party", "tenant", "internal-bank-account",
+		"party", "tenant", "internal-account",
 		"financial-accounting", "current-account",
 		"payment-order", "reconciliation",
 	}

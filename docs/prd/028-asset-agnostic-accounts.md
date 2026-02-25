@@ -1,14 +1,14 @@
 ---
 name: prd-asset-agnostic-accounts
 description: >-
-  Generalize Current Account and Internal Bank Account services to be
+  Generalize Current Account and Internal Account services to be
   truly asset-agnostic. Replace banking-specific fields (IBAN, Currency,
   overdraft) with instrument-aware equivalents and drop "Bank" from
   Internal Account naming.
 triggers:
   - Working on current account or internal account field generalization
   - Replacing currency fields with instrument_code and dimension
-  - Renaming internal bank account to internal account
+  - Renaming internal account to internal account
   - Making account services support non-fiat asset classes
   - Generalizing IBAN to external_identifier
 instructions: |
@@ -27,7 +27,7 @@ instructions: |
 > **Status**: Not Started
 > **Task Master Tag**: `asset-agnostic-accounts`
 > **Last Updated**: 2026-02-25
-> **Related PRDs**: [Internal Bank Account](002-internal-bank-account.md),
+> **Related PRDs**: [Internal Account](002-internal-account.md),
 > [Universal Asset System](001-universal-asset-system.md),
 > [Product Directory](023-product-directory.md)
 
@@ -44,12 +44,12 @@ friction for non-banking tenants:
    into the domain. A solar co-op or AI compute platform would not recognise
    these as their concepts.
 
-2. **Internal Bank Account Service** -- carries "Bank" in every layer (service
+2. **Internal Account Service** -- carries "Bank" in every layer (service
    directory, proto package, DB table name, domain model) despite already being
    generalized internally with `instrument_code` + `dimension`. Correspondent
    details use NOSTRO/VOSTRO/SWIFT terminology.
 
-A non-bank tenant sees "Current Account" and "Internal Bank Account" in the
+A non-bank tenant sees "Current Account" and "Internal Account" in the
 API and immediately assumes this is banking-only software. The field-level
 assumptions reinforce that perception.
 
@@ -82,19 +82,19 @@ compatibility shims required.
 | Migration | `currency` column | Default `'GBP'` |
 | Starlark | `current_account.*` | Handler prefix |
 
-### Internal Bank Account Service
+### Internal Account Service
 
 | Layer | Banking-Specific Element | Details |
 |-------|--------------------------|---------|
-| Directory | `internal-bank-account/` | "Bank" in path |
-| Domain | `InternalBankAccount` struct | "Bank" in type name |
-| Entity | `internal_bank_account` table | "Bank" in table name |
-| Proto | `internal_bank_account.v1` | "bank_account" in package |
-| Proto | `InternalBankAccountFacility` | "Bank" in message name |
+| Directory | `internal-account/` | "Bank" in path |
+| Domain | `InternalAccount` struct | "Bank" in type name |
+| Entity | `internal_account` table | "Bank" in table name |
+| Proto | `internal_account.v1` | "bank_account" in package |
+| Proto | `InternalAccountFacility` | "Bank" in message name |
 | Proto | `CorrespondentBankDetails` | "Bank" in type |
 | Proto | `swift_code` field | SWIFT/BIC specific |
 | Proto | `NOSTRO/VOSTRO` enums | Banking correspondent terms |
-| Starlark | `internal_bank_account.*` | Handler prefix |
+| Starlark | `internal_account.*` | Handler prefix |
 | Migration | `correspondent_bank_*` cols | "Bank" in column names |
 
 ### What Internal Account Already Does Right
@@ -201,12 +201,12 @@ asset-agnostic; the naming just hasn't caught up.
 
 | Current | Proposed |
 |---------|----------|
-| `services/internal-bank-account/` | `services/internal-account/` |
-| `meridian.internal_bank_account.v1` | `meridian.internal_account.v1` |
-| `InternalBankAccountFacility` | `InternalAccountFacility` |
-| `InternalBankAccount` (Go struct) | `InternalAccount` (Go struct) |
-| `internal_bank_account` (DB table) | `internal_account` |
-| `internal_bank_account.*` (Starlark) | `internal_account.*` |
+| `services/internal-account/` | `services/internal-account/` |
+| `meridian.internal_account.v1` | `meridian.internal_account.v1` |
+| `InternalAccountFacility` | `InternalAccountFacility` |
+| `InternalAccount` (Go struct) | `InternalAccount` (Go struct) |
+| `internal_account` (DB table) | `internal_account` |
+| `internal_account.*` (Starlark) | `internal_account.*` |
 
 #### 2.2 Generalize Correspondent Terminology
 
@@ -242,7 +242,7 @@ keeping.
 
 ### Starlark Handler Migration
 
-Handler prefix `internal_bank_account.*` -> `internal_account.*`:
+Handler prefix `internal_account.*` -> `internal_account.*`:
 update all registered handlers and all existing saga scripts that
 reference the old prefix. Since the system is pre-production, update
 all references in a single pass.

@@ -177,7 +177,7 @@ Go handler, gateway registration, and a queryable audit storage layer.
 | Page | API Calls | Status |
 |------|-----------|--------|
 | `forecasting/index.tsx` | `clients.forecasting.computeForwardCurve` | Typed gRPC client — needs proto/service check |
-| `internal-accounts/index.tsx` | `clients.internalBankAccount.listInternalBankAccounts` | Typed gRPC client — appears wired |
+| `internal-accounts/index.tsx` | `clients.internalAccount.listInternalAccounts` | Typed gRPC client — appears wired |
 | `mappings/index.tsx` | `clients.mapping.listMappings` | Typed gRPC client — appears wired |
 | `market-data/index.tsx` | `clients.marketInformation.listDataSets` | Typed gRPC client — appears wired |
 | `starlark/index.tsx` | Saga registry client | Typed gRPC client — appears wired |

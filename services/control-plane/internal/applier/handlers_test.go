@@ -82,12 +82,12 @@ func (m *mockReferenceData) RegisterSagaDefinition(ctx *saga.StarlarkContext, pa
 	return map[string]any{"saga_name": params["saga_name"], "status": "REGISTERED"}, nil
 }
 
-// mockInternalBankAccount implements InternalBankAccountService for testing.
-type mockInternalBankAccount struct {
+// mockInternalAccount implements InternalAccountService for testing.
+type mockInternalAccount struct {
 	initiateAccountFn func(*saga.StarlarkContext, map[string]any) (any, error)
 }
 
-func (m *mockInternalBankAccount) InitiateAccount(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
+func (m *mockInternalAccount) InitiateAccount(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 	if m.initiateAccountFn != nil {
 		return m.initiateAccountFn(ctx, params)
 	}
@@ -113,8 +113,8 @@ func newTestStarlarkContext() *saga.StarlarkContext {
 func TestRegisterManifestHandlers(t *testing.T) {
 	registry := saga.NewHandlerRegistry()
 	deps := &HandlerDependencies{
-		ReferenceData:       &mockReferenceData{},
-		InternalBankAccount: &mockInternalBankAccount{},
+		ReferenceData:   &mockReferenceData{},
+		InternalAccount: &mockInternalAccount{},
 	}
 
 	err := RegisterManifestHandlers(registry, deps)
@@ -127,7 +127,7 @@ func TestRegisterManifestHandlers(t *testing.T) {
 		"reference_data.delete_account_type",
 		"reference_data.register_valuation_rule",
 		"reference_data.register_saga_definition",
-		"internal_bank_account.initiate",
+		"internal_account.initiate",
 	}
 
 	for _, name := range expectedHandlers {
@@ -140,8 +140,8 @@ func TestRegisterManifestHandlers(t *testing.T) {
 func TestRegisterInstrumentHandler(t *testing.T) {
 	registry := saga.NewHandlerRegistry()
 	deps := &HandlerDependencies{
-		ReferenceData:       &mockReferenceData{},
-		InternalBankAccount: &mockInternalBankAccount{},
+		ReferenceData:   &mockReferenceData{},
+		InternalAccount: &mockInternalAccount{},
 	}
 
 	err := RegisterManifestHandlers(registry, deps)
@@ -176,7 +176,7 @@ func TestRegisterInstrumentHandler_Error(t *testing.T) {
 				return nil, expectedErr
 			},
 		},
-		InternalBankAccount: &mockInternalBankAccount{},
+		InternalAccount: &mockInternalAccount{},
 	}
 
 	err := RegisterManifestHandlers(registry, deps)
@@ -193,14 +193,14 @@ func TestRegisterInstrumentHandler_Error(t *testing.T) {
 func TestInitiateAccountHandler(t *testing.T) {
 	registry := saga.NewHandlerRegistry()
 	deps := &HandlerDependencies{
-		ReferenceData:       &mockReferenceData{},
-		InternalBankAccount: &mockInternalBankAccount{},
+		ReferenceData:   &mockReferenceData{},
+		InternalAccount: &mockInternalAccount{},
 	}
 
 	err := RegisterManifestHandlers(registry, deps)
 	require.NoError(t, err)
 
-	handler, err := registry.Get("internal_bank_account.initiate")
+	handler, err := registry.Get("internal_account.initiate")
 	require.NoError(t, err)
 
 	ctx := newTestStarlarkContext()
@@ -224,8 +224,8 @@ func TestInitiateAccountHandler(t *testing.T) {
 func TestRegisterValuationRuleHandler(t *testing.T) {
 	registry := saga.NewHandlerRegistry()
 	deps := &HandlerDependencies{
-		ReferenceData:       &mockReferenceData{},
-		InternalBankAccount: &mockInternalBankAccount{},
+		ReferenceData:   &mockReferenceData{},
+		InternalAccount: &mockInternalAccount{},
 	}
 
 	err := RegisterManifestHandlers(registry, deps)
@@ -254,8 +254,8 @@ func TestRegisterValuationRuleHandler(t *testing.T) {
 func TestRegisterSagaDefinitionHandler(t *testing.T) {
 	registry := saga.NewHandlerRegistry()
 	deps := &HandlerDependencies{
-		ReferenceData:       &mockReferenceData{},
-		InternalBankAccount: &mockInternalBankAccount{},
+		ReferenceData:   &mockReferenceData{},
+		InternalAccount: &mockInternalAccount{},
 	}
 
 	err := RegisterManifestHandlers(registry, deps)
@@ -283,8 +283,8 @@ func TestRegisterSagaDefinitionHandler(t *testing.T) {
 func TestCompensationHandlers(t *testing.T) {
 	registry := saga.NewHandlerRegistry()
 	deps := &HandlerDependencies{
-		ReferenceData:       &mockReferenceData{},
-		InternalBankAccount: &mockInternalBankAccount{},
+		ReferenceData:   &mockReferenceData{},
+		InternalAccount: &mockInternalAccount{},
 	}
 
 	err := RegisterManifestHandlers(registry, deps)
@@ -328,7 +328,7 @@ func TestAccountTypeHandler_FullParams(t *testing.T) {
 				return map[string]any{"code": p["code"], "version": 1, "status": "ACTIVE"}, nil
 			},
 		},
-		InternalBankAccount: &mockInternalBankAccount{},
+		InternalAccount: &mockInternalAccount{},
 	}
 
 	err := RegisterManifestHandlers(registry, deps)
@@ -375,7 +375,7 @@ func TestAccountTypeHandler_IdempotentOnError(t *testing.T) {
 				return nil, expectedErr
 			},
 		},
-		InternalBankAccount: &mockInternalBankAccount{},
+		InternalAccount: &mockInternalAccount{},
 	}
 
 	err := RegisterManifestHandlers(registry, deps)
@@ -408,7 +408,7 @@ func TestAccountTypeHandler_ResolvesDefaultConversionMethod(t *testing.T) {
 				return map[string]any{"code": p["code"], "version": 1, "status": "ACTIVE"}, nil
 			},
 		},
-		InternalBankAccount: &mockInternalBankAccount{},
+		InternalAccount: &mockInternalAccount{},
 		ValuationMethod: &mockValuationMethod{
 			resolveMethodFn: func(_ *saga.StarlarkContext, name string) (string, int, []string, error) {
 				if name == "forex-spot-v1" {
@@ -453,8 +453,8 @@ func TestAccountTypeHandler_ResolvesDefaultConversionMethod(t *testing.T) {
 func TestAccountTypeHandler_UnresolvableConversionMethod(t *testing.T) {
 	registry := saga.NewHandlerRegistry()
 	deps := &HandlerDependencies{
-		ReferenceData:       &mockReferenceData{},
-		InternalBankAccount: &mockInternalBankAccount{},
+		ReferenceData:   &mockReferenceData{},
+		InternalAccount: &mockInternalAccount{},
 		ValuationMethod: &mockValuationMethod{
 			resolveMethodFn: func(_ *saga.StarlarkContext, _ string) (string, int, []string, error) {
 				// Return suggestions for typo
@@ -488,9 +488,9 @@ func TestAccountTypeHandler_UnresolvableConversionMethod(t *testing.T) {
 func TestAccountTypeHandler_ConversionMethodWithoutService(t *testing.T) {
 	registry := saga.NewHandlerRegistry()
 	deps := &HandlerDependencies{
-		ReferenceData:       &mockReferenceData{},
-		InternalBankAccount: &mockInternalBankAccount{},
-		ValuationMethod:     nil, // no valuation method service
+		ReferenceData:   &mockReferenceData{},
+		InternalAccount: &mockInternalAccount{},
+		ValuationMethod: nil, // no valuation method service
 	}
 
 	err := RegisterManifestHandlers(registry, deps)

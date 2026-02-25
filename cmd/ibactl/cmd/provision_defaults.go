@@ -10,7 +10,7 @@ import (
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
 	"github.com/meridianhub/meridian/cmd/tenantctl/client"
-	"github.com/meridianhub/meridian/services/internal-bank-account/provisioning"
+	"github.com/meridianhub/meridian/services/internal-account/provisioning"
 	"github.com/meridianhub/meridian/shared/platform/ports"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/spf13/cobra"
@@ -43,10 +43,10 @@ var (
 
 var provisionDefaultsCmd = &cobra.Command{
 	Use:   "provision-defaults [tenant-id]",
-	Short: "Provision default internal bank accounts for a tenant",
-	Long: `Provision default internal bank accounts for a tenant.
+	Short: "Provision default internal accounts for a tenant",
+	Long: `Provision default internal accounts for a tenant.
 
-This command creates a set of internal bank accounts for a tenant based on
+This command creates a set of internal accounts for a tenant based on
 the selected template set:
 
   default  - Standard banking (clearing, revenue, expense, suspense)
@@ -127,7 +127,7 @@ func runProvisionDefaults(cmd *cobra.Command, args []string) error {
 	// Create IBA client
 	ibaClient, cleanup, err := newClient()
 	if err != nil {
-		return fmt.Errorf("failed to create internal bank account client: %w", err)
+		return fmt.Errorf("failed to create internal account client: %w", err)
 	}
 	defer cleanup()
 

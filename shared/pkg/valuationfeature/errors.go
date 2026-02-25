@@ -1,5 +1,5 @@
 // Package valuationfeature provides shared domain, persistence, and CRUD operations
-// for valuation features across account services (Current Account, Internal Bank Account).
+// for valuation features across account services (Current Account, Internal Account).
 package valuationfeature
 
 import "errors"

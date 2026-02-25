@@ -283,7 +283,7 @@ func NewServiceWithValuationFeatures(repo *persistence.Repository, valuationFeat
 //
 // Optional parameters:
 //   - accountConfig: Static clearing account configuration (environment variables)
-//   - accountResolver: Dynamic clearing account resolution from Internal Bank Account service
+//   - accountResolver: Dynamic clearing account resolution from Internal Account service
 //   - fungibilityValidator: Validates fungibility for non-fungible instruments
 //
 // If both accountConfig and accountResolver are provided, the resolver takes precedence

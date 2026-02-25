@@ -72,7 +72,7 @@ async function initiateLien(
   const serviceName =
     accountType === 'current'
       ? 'meridian.current_account.v1.CurrentAccountService'
-      : 'meridian.internal_bank_account.v1.InternalBankAccountService'
+      : 'meridian.internal_account.v1.InternalAccountService'
 
   const body: Record<string, unknown> = {
     accountId,

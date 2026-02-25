@@ -10,7 +10,7 @@
 #
 # Phases (executed sequentially, parallel within each phase):
 #   Phase 1: Register instruments with Reference Data service
-#   Phase 2: Register account types + initiate internal bank accounts
+#   Phase 2: Register account types + initiate internal accounts
 #   Phase 3: Register valuation rules with Reference Data service
 #   Phase 4: Register saga definitions with Reference Data service
 #
@@ -53,7 +53,7 @@ def execute_apply_manifest():
             "status": "REGISTERED",
         })
 
-    # Phase 2: Register account types and initiate internal bank accounts
+    # Phase 2: Register account types and initiate internal accounts
     for account_type in account_types:
         # Register the account type as reference data
         step(name="register_account_type_" + account_type["code"])
@@ -64,9 +64,9 @@ def execute_apply_manifest():
             instrument_code=account_type["instrument_code"],
         )
 
-        # Initiate the internal bank account
+        # Initiate the internal account
         step(name="initiate_account_" + account_type["code"])
-        account_result = internal_bank_account.initiate(
+        account_result = internal_account.initiate(
             account_code=account_type["code"],
             name=account_type.get("display_name", account_type["code"]),
             account_type=account_type.get("account_type", "CLEARING"),

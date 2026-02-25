@@ -48,7 +48,7 @@ func TestProtoDescriptors_ContainsAllServices(t *testing.T) {
 		"PaymentOrderService",
 		"MarketInformationService",
 		"AccountReconciliationService",
-		"InternalBankAccountService",
+		"InternalAccountService",
 		"SagaRegistryService",
 		"TenantService",
 		"ForecastingService",

@@ -44,12 +44,12 @@ type serviceGRPC struct {
 type e2eTestInfra struct {
 	// Databases (one per bounded context)
 	currentAccountDB      *serviceDB
-	internalBankAccountDB *serviceDB
+	internalAccountDB     *serviceDB
 	positionKeepingDB     *serviceDB
 	financialAccountingDB *serviceDB
 
 	// gRPC services (if needed for real service testing)
-	internalBankAccountGRPC *serviceGRPC
+	internalAccountGRPC *serviceGRPC
 }
 
 // =============================================================================
@@ -73,8 +73,8 @@ func setupE2EInfra(t *testing.T) *e2eTestInfra {
 		// Current Account database
 		infra.currentAccountDB = setupServiceDB(ctx, t, "meridian_current_account")
 
-		// Internal Bank Account database
-		infra.internalBankAccountDB = setupServiceDB(ctx, t, "meridian_internal_bank_account")
+		// Internal Account database
+		infra.internalAccountDB = setupServiceDB(ctx, t, "meridian_internal_account")
 
 		// Position Keeping database
 		infra.positionKeepingDB = setupServiceDB(ctx, t, "meridian_position_keeping")
@@ -137,19 +137,19 @@ func (infra *e2eTestInfra) cleanup() {
 	defer cancel()
 
 	// Close gRPC services
-	if infra.internalBankAccountGRPC != nil {
-		if infra.internalBankAccountGRPC.server != nil {
-			infra.internalBankAccountGRPC.server.GracefulStop()
+	if infra.internalAccountGRPC != nil {
+		if infra.internalAccountGRPC.server != nil {
+			infra.internalAccountGRPC.server.GracefulStop()
 		}
-		if infra.internalBankAccountGRPC.listener != nil {
-			_ = infra.internalBankAccountGRPC.listener.Close()
+		if infra.internalAccountGRPC.listener != nil {
+			_ = infra.internalAccountGRPC.listener.Close()
 		}
 	}
 
 	// Close database connections
 	for _, db := range []*serviceDB{
 		infra.currentAccountDB,
-		infra.internalBankAccountDB,
+		infra.internalAccountDB,
 		infra.positionKeepingDB,
 		infra.financialAccountingDB,
 	} {
@@ -222,15 +222,15 @@ func setupCurrentAccountSchema(t *testing.T, db *serviceDB, schemaName string) {
 	require.NoError(t, err, "failed to create liens table")
 }
 
-// setupInternalBankAccountSchema applies Internal Bank Account service schema.
-func setupInternalBankAccountSchema(t *testing.T, db *serviceDB, schemaName string) {
+// setupInternalAccountSchema applies Internal Account service schema.
+func setupInternalAccountSchema(t *testing.T, db *serviceDB, schemaName string) {
 	t.Helper()
 
 	ctx := context.Background()
 
-	// Create internal_bank_accounts table
+	// Create internal_accounts table
 	accountsSQL := fmt.Sprintf(`
-		CREATE TABLE IF NOT EXISTS %s.internal_bank_accounts (
+		CREATE TABLE IF NOT EXISTS %s.internal_accounts (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			account_code VARCHAR(50) NOT NULL UNIQUE,
 			account_type VARCHAR(50) NOT NULL,
@@ -246,12 +246,12 @@ func setupInternalBankAccountSchema(t *testing.T, db *serviceDB, schemaName stri
 	`, pq.QuoteIdentifier(schemaName))
 
 	_, err := db.pool.Exec(ctx, accountsSQL)
-	require.NoError(t, err, "failed to create internal_bank_accounts table")
+	require.NoError(t, err, "failed to create internal_accounts table")
 
 	// Create index on clearing_purpose for efficient lookups
 	indexSQL := fmt.Sprintf(`
 		CREATE INDEX IF NOT EXISTS idx_iba_clearing_purpose
-		ON %s.internal_bank_accounts(clearing_purpose, instrument_code)
+		ON %s.internal_accounts(clearing_purpose, instrument_code)
 		WHERE clearing_purpose IS NOT NULL
 	`, pq.QuoteIdentifier(schemaName))
 
@@ -337,13 +337,13 @@ func setupTestTenant(t *testing.T, infra *e2eTestInfra, tenantIDStr string) (con
 
 	// Create tenant schema in each service database
 	createTenantSchema(t, infra.currentAccountDB, tenantID)
-	createTenantSchema(t, infra.internalBankAccountDB, tenantID)
+	createTenantSchema(t, infra.internalAccountDB, tenantID)
 	createTenantSchema(t, infra.positionKeepingDB, tenantID)
 	createTenantSchema(t, infra.financialAccountingDB, tenantID)
 
 	// Apply service-specific schemas
 	setupCurrentAccountSchema(t, infra.currentAccountDB, schemaName)
-	setupInternalBankAccountSchema(t, infra.internalBankAccountDB, schemaName)
+	setupInternalAccountSchema(t, infra.internalAccountDB, schemaName)
 	setupPositionKeepingSchema(t, infra.positionKeepingDB, schemaName)
 	setupFinancialAccountingSchema(t, infra.financialAccountingDB, schemaName)
 
@@ -356,7 +356,7 @@ func setupTestTenant(t *testing.T, infra *e2eTestInfra, tenantIDStr string) (con
 		cleanupCtx := context.Background()
 		for _, db := range []*serviceDB{
 			infra.currentAccountDB,
-			infra.internalBankAccountDB,
+			infra.internalAccountDB,
 			infra.positionKeepingDB,
 			infra.financialAccountingDB,
 		} {
@@ -388,7 +388,7 @@ func createClearingAccount(
 
 	var accountID string
 	insertSQL := fmt.Sprintf(`
-		INSERT INTO %s.internal_bank_accounts
+		INSERT INTO %s.internal_accounts
 		(account_code, account_type, instrument_code, clearing_purpose, status, description)
 		VALUES ($1, 'CLEARING', $2, $3, 'ACTIVE', $4)
 		RETURNING id
@@ -525,7 +525,7 @@ func getClearingAccountByPurpose(
 	t.Helper()
 
 	querySQL := fmt.Sprintf(`
-		SELECT id, account_code FROM %s.internal_bank_accounts
+		SELECT id, account_code FROM %s.internal_accounts
 		WHERE instrument_code = $1 AND clearing_purpose = $2 AND status = 'ACTIVE'
 		LIMIT 1
 	`, pq.QuoteIdentifier(schemaName))

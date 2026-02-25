@@ -62,10 +62,10 @@ type PaymentOrchestrator struct {
 	currentAccountClient      CurrentAccountClient
 	paymentGateway            gateway.PaymentGateway
 	financialAccountingClient FinancialAccountingClient
-	internalBankAccountClient InternalBankAccountClient // Optional - for internal clearing
-	referenceDataClient       ReferenceDataClient       // Optional - for bucket-aware solvency and GetSaga()
-	bucketEvaluator           *BucketEvaluator          // Cached CEL evaluator for bucket IDs
-	accountResolver           *AccountResolver          // Optional - resolves clearing accounts dynamically
+	internalAccountClient     InternalAccountClient // Optional - for internal clearing
+	referenceDataClient       ReferenceDataClient   // Optional - for bucket-aware solvency and GetSaga()
+	bucketEvaluator           *BucketEvaluator      // Cached CEL evaluator for bucket IDs
+	accountResolver           *AccountResolver      // Optional - resolves clearing accounts dynamically
 	gatewayAccountConfig      *config.GatewayAccountConfig
 	kafkaPublisher            KafkaPublisher
 	lienExecutionRetryConfig  *sharedclients.RetryConfig
@@ -86,9 +86,9 @@ type PaymentOrchestratorConfig struct {
 	CurrentAccountClient      CurrentAccountClient
 	PaymentGateway            gateway.PaymentGateway
 	FinancialAccountingClient FinancialAccountingClient
-	InternalBankAccountClient InternalBankAccountClient // Optional - for internal clearing
-	ReferenceDataClient       ReferenceDataClient       // Optional - for bucket-aware solvency validation
-	AccountResolver           *AccountResolver          // Optional - auto-created if InternalBankAccountClient is provided
+	InternalAccountClient     InternalAccountClient // Optional - for internal clearing
+	ReferenceDataClient       ReferenceDataClient   // Optional - for bucket-aware solvency validation
+	AccountResolver           *AccountResolver      // Optional - auto-created if InternalAccountClient is provided
 	GatewayAccountConfig      *config.GatewayAccountConfig
 	KafkaPublisher            KafkaPublisher
 	LienExecutionRetryConfig  *sharedclients.RetryConfig
@@ -115,7 +115,7 @@ type PaymentOrchestratorConfig struct {
 // Returns an error if required dependencies (Logger, Repo) are nil. CurrentAccountClient and
 // PaymentGateway are validated at runtime in Orchestrate() with graceful error handling.
 //
-// If InternalBankAccountClient is provided but AccountResolver is nil, an AccountResolver
+// If InternalAccountClient is provided but AccountResolver is nil, an AccountResolver
 // is automatically created using the client and logger.
 func NewPaymentOrchestrator(cfg PaymentOrchestratorConfig) (*PaymentOrchestrator, error) {
 	if cfg.Logger == nil {
@@ -125,12 +125,12 @@ func NewPaymentOrchestrator(cfg PaymentOrchestratorConfig) (*PaymentOrchestrator
 		return nil, ErrOrchestratorRepoNil
 	}
 
-	// Auto-create AccountResolver if InternalBankAccountClient is provided but AccountResolver is nil
+	// Auto-create AccountResolver if InternalAccountClient is provided but AccountResolver is nil
 	accountResolver := cfg.AccountResolver
-	if cfg.InternalBankAccountClient != nil && accountResolver == nil {
+	if cfg.InternalAccountClient != nil && accountResolver == nil {
 		var err error
 		accountResolver, err = NewAccountResolver(AccountResolverConfig{
-			Client: cfg.InternalBankAccountClient,
+			Client: cfg.InternalAccountClient,
 			Logger: cfg.Logger,
 		})
 		if err != nil {
@@ -188,7 +188,7 @@ func NewPaymentOrchestrator(cfg PaymentOrchestratorConfig) (*PaymentOrchestrator
 		currentAccountClient:      cfg.CurrentAccountClient,
 		paymentGateway:            cfg.PaymentGateway,
 		financialAccountingClient: cfg.FinancialAccountingClient,
-		internalBankAccountClient: cfg.InternalBankAccountClient,
+		internalAccountClient:     cfg.InternalAccountClient,
 		referenceDataClient:       cfg.ReferenceDataClient,
 		bucketEvaluator:           bucketEvaluator,
 		accountResolver:           accountResolver,

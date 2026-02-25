@@ -41,7 +41,7 @@ The numbered prefix (`00-`, `01-`, etc.) indicates the recommended order for end
 | 05 | Payment Order | `05-payment-order.http` | `05-payment-order.grpc.http` |
 | 06 | Market Information | `06-market-information.http` | `06-market-information.grpc.http` |
 | 07 | Reconciliation | `07-reconciliation.http` | `07-reconciliation.grpc.http` |
-| 08 | Internal Bank Account | `08-internal-bank-account.http` | `08-internal-bank-account.grpc.http` |
+| 08 | Internal Account | `08-internal-account.http` | `08-internal-account.grpc.http` |
 | 09 | Saga Registry | `09-saga-registry.http` | `09-saga-registry.grpc.http` |
 | 10 | Tenant | `10-tenant.http` | `10-tenant.grpc.http` |
 | 11 | Admin | `11-admin.http` | `11-admin.grpc.http` |

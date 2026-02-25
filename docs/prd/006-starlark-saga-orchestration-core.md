@@ -87,7 +87,7 @@ This capability extends multiple BIAN service domains by externalizing their orc
 |----------------|----------------------|---------------|
 | Payment Order | `payment_orchestrator.go` | `payment_execution.star` |
 | Current Account | `withdrawal_orchestrator.go`, `deposit_orchestrator.go` | `withdrawal.star`, `deposit.star` |
-| Internal Bank Account | Clearing operations | `clearing_settlement.star` |
+| Internal Account | Clearing operations | `clearing_settlement.star` |
 | *NEW* Settlement | N/A | `energy_settlement.star`, `asset_settlement.star` |
 
 The saga definitions become **Administrative Plan Records** - auditable configuration that governs workflow execution.
@@ -566,7 +566,7 @@ Starlark scripts can ONLY invoke handlers in this registry. Attempting to call a
 |----------------|---------|-----------------|
 | Step handlers | `"position_keeping.initiate_log"` | Step handler registry |
 | Instruments | `resolve_instrument("KWH")` | `instrument_definitions` |
-| Accounts | `resolve_account("clearing", "GBP")` | Internal Bank Account service |
+| Accounts | `resolve_account("clearing", "GBP")` | Internal Account service |
 | Other sagas | `invoke_saga("sub_workflow")` | `saga_definitions` |
 | Valuation rules | `valuate("KWH", "GBP", "RETAIL")` | Valuation rules (future) |
 | **Attribute keys** | `ctx.position.attributes["gsp_code"]` | Instrument attribute schema |
@@ -1012,7 +1012,7 @@ Rather than rigid party-to-party relationship tables, authorization flows from
 |    1. ctx.position.party_id -> current_account.by_party()                   |
 |       Result: Customer's current account                                    |
 |                                                                             |
-|    2. ctx.position.attributes -> internal_bank_account.by_attributes()      |
+|    2. ctx.position.attributes -> internal_account.by_attributes()      |
 |       Result: Account matching those attributes                             |
 |                                                                             |
 |  Authorization is IMPLICIT:                                                 |
@@ -1035,7 +1035,7 @@ saga(
     version = "1.0.0",
     authorized_lookups = [
         "current_account.by_party",           # Can resolve party -> account
-        "internal_bank_account.by_attributes", # Can resolve attributes -> account
+        "internal_account.by_attributes", # Can resolve attributes -> account
     ],
     steps = [
         step(
@@ -1052,7 +1052,7 @@ saga(
                     posting(
                         # Resolve internal account from position's attributes
                         # Attributes are tenant-defined (gsp_code, region, etc.)
-                        account_id = internal_bank_account.by_attributes(
+                        account_id = internal_account.by_attributes(
                             ctx.position.attributes
                         ),
                         direction = "DEBIT",
@@ -1079,21 +1079,21 @@ func (r *Runtime) ResolveLookup(sagaDef SagaDefinition, lookupType string, key a
     switch lookupType {
     case "current_account.by_party":
         return r.currentAccountClient.GetByParty(ctx, key.(uuid.UUID))
-    case "internal_bank_account.by_attributes":
+    case "internal_account.by_attributes":
         // Generic lookup - matches against attributes JSONB
         attrs := key.(map[string]any)
         return r.internalBankClient.GetByAttributes(ctx, attrs)
     }
 }
 
-// Internal Bank Account: generic attribute matching
-func (s *InternalBankAccountService) GetByAttributes(ctx context.Context, attrs map[string]any) (*Account, error) {
-    query := s.db.Model(&InternalBankAccount{})
+// Internal Account: generic attribute matching
+func (s *InternalAccountService) GetByAttributes(ctx context.Context, attrs map[string]any) (*Account, error) {
+    query := s.db.Model(&InternalAccount{})
     // Build query dynamically from whatever attributes are passed
     for k, v := range attrs {
         query = query.Where("attributes @> ?", map[string]any{k: v})
     }
-    var account InternalBankAccount
+    var account InternalAccount
     return &account, query.First(&account).Error
 }
 ```
@@ -1175,7 +1175,7 @@ Functions available within Starlark scripts:
 | `step()` | `step(name, action, params, compensation=None)` | Define a saga step |
 | `posting()` | `posting(account_id, direction, amount, description=None)` | Create ledger posting instruction |
 | `cel_eval()` | `cel_eval(expression, context) -> value` | Evaluate CEL expression |
-| `resolve_account()` | `resolve_account(purpose, currency) -> account_id` | Lookup internal bank account by purpose |
+| `resolve_account()` | `resolve_account(purpose, currency) -> account_id` | Lookup internal account by purpose |
 | `resolve_instrument()` | `resolve_instrument(code, version=None) -> instrument` | Lookup instrument definition |
 | `invoke_saga()` | `invoke_saga(name, version=None, context={}) -> result` | Invoke child saga |
 | `valuate()` | `valuate(instrument, quantity, context_type) -> valuation` | Call Valuation Engine (single context) |
@@ -1737,8 +1737,8 @@ This PRD references capabilities across multiple services. This section clarifie
 | **Party Service** | Party hierarchy (org -> child parties) | Partial | Need to verify recursive query support |
 | **Current Account** | `account.party_id` reference | Exists | Links account to party (not FK) |
 | **Current Account** | Account lookup by party | Exists | `current_account.by_party()` |
-| **Internal Bank Account** | `attributes` JSONB column | Exists | Can store GSP, DNO, etc. |
-| **Internal Bank Account** | Lookup by attributes | Partial | May need index/API |
+| **Internal Account** | `attributes` JSONB column | Exists | Can store GSP, DNO, etc. |
+| **Internal Account** | Lookup by attributes | Partial | May need index/API |
 | **Reference Data** | Instrument definitions with lifecycle | Exists | Pattern to follow |
 | **Position Keeping** | Position with `party_id` | Exists | Core position model |
 | **Market Information** | Bi-temporal observations | Exists | `knowledge_at` support |
@@ -1755,7 +1755,7 @@ This PRD references capabilities across multiple services. This section clarifie
 | **Shared Runtime** | Party scope injection | P0 | `ctx.party_scope` |
 | **Party Service** | Party hierarchy query (recursive) | P1 | `visible_parties` resolution |
 | **Party Service** | `party_relationships` table (optional) | P2 | OPERATOR, CUSTODIAN, BROKER |
-| **Internal Bank Account** | Lookup by GSP code | P1 | `by_attributes(gsp="P")` |
+| **Internal Account** | Lookup by GSP code | P1 | `by_attributes(gsp="P")` |
 
 ### Integration Points Requiring Coordination
 
@@ -1763,7 +1763,7 @@ This PRD references capabilities across multiple services. This section clarifie
 |-------------|-------------------|------------|
 | Party scope resolution | Party Service <-> Saga Runtime | Runtime calls Party Service to resolve hierarchy |
 | Account lookup | Current Account <-> Saga Runtime | Runtime calls Current Account for party's accounts |
-| Internal account lookup | Internal Bank Account <-> Saga Runtime | Runtime calls IBA for GSP/DNO accounts |
+| Internal account lookup | Internal Account <-> Saga Runtime | Runtime calls IBA for GSP/DNO accounts |
 | Position access | Position Keeping <-> Saga Runtime | Step handlers query positions with party scope |
 | Valuation (future) | Valuation Engine <-> Saga Runtime | `valuate()` step handler |
 
@@ -1803,10 +1803,10 @@ use these attributes for account resolution without hardcoding attribute keys:
 | Lookup Type | Method | Notes |
 |-------------|--------|-------|
 | Party -> Account | `current_account.by_party(party_id)` | Standard party lookup |
-| Attributes -> Account | `internal_bank_account.by_attributes(attrs)` | Generic JSONB matching |
+| Attributes -> Account | `internal_account.by_attributes(attrs)` | Generic JSONB matching |
 | Party details | `party.get(party_id)` | Scope-checked party lookup |
 
-**Required**: Internal Bank Account service needs generic attribute-based lookup API:
+**Required**: Internal Account service needs generic attribute-based lookup API:
 
 - Input: `map[string]any` (tenant-defined keys)
 - Query: JSONB `@>` containment or key matching

@@ -85,12 +85,12 @@ const (
 	// Visibility: Cluster-internal only
 	Tenant = 50056
 
-	// InternalBankAccount is the gRPC port for the Internal Bank Account service.
-	// BIAN Service Domain: Internal Bank Account
+	// InternalAccount is the gRPC port for the Internal Account service.
+	// BIAN Service Domain: Internal Account
 	// Manages counterparty and operational accounts for internal accounting.
 	// Protocol: gRPC (internal)
 	// Visibility: Cluster-internal only
-	InternalBankAccount = 50057
+	InternalAccount = 50057
 
 	// MarketInformation is the gRPC port for the Market Information service.
 	// BIAN Service Domain: Market Information Management

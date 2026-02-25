@@ -25,7 +25,7 @@ function genStubPlugin(): Plugin {
     export const ReferenceDataService = { typeName: 'stub', methods: [] }
     export const AccountTypeRegistryService = { typeName: 'stub', methods: [] }
     export const NodeService = { typeName: 'stub', methods: [] }
-    export const InternalBankAccountService = { typeName: 'stub', methods: [] }
+    export const InternalAccountService = { typeName: 'stub', methods: [] }
     export const MarketInformationService = { typeName: 'stub', methods: [] }
     export const MappingService = { typeName: 'stub', methods: [] }
     export const ForecastingService = { typeName: 'stub', methods: [] }

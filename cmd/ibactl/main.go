@@ -1,4 +1,4 @@
-// ibactl is a CLI tool for managing Internal Bank Accounts in Meridian.
+// ibactl is a CLI tool for managing Internal Accounts in Meridian.
 //
 // Usage:
 //
