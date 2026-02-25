@@ -133,9 +133,10 @@ export function CreateDisputeDialog({
 
   function handleChange<K extends keyof FormData>(field: K, value: FormData[K]) {
     setFormData((prev) => ({ ...prev, [field]: value }))
-    if (errors[field as keyof FormErrors]) {
-      setErrors((prev) => ({ ...prev, [field]: undefined }))
-    }
+    setErrors((prev) => {
+      if (!prev[field as keyof FormErrors] && !prev.general) return prev
+      return { ...prev, [field]: undefined, general: undefined }
+    })
   }
 
   function handleSubmit(e: React.FormEvent) {
