@@ -17,26 +17,26 @@ func TestCurrentAccountFacility_BasicConstruction(t *testing.T) {
 	now := timestamppb.New(time.Now())
 
 	facility := &currentaccountv1.CurrentAccountFacility{
-		AccountId:             "ACC-12345",
-		AccountIdentification: "GB29NWBK60161331926819",
-		AccountStatus:         currentaccountv1.AccountStatus_ACCOUNT_STATUS_ACTIVE,
-		BaseCurrency:          commonv1.Currency_CURRENCY_GBP,
-		CreatedAt:             now,
-		UpdatedAt:             now,
-		Version:               1,
+		AccountId:          "ACC-12345",
+		ExternalIdentifier: "GB29NWBK60161331926819",
+		AccountStatus:      currentaccountv1.AccountStatus_ACCOUNT_STATUS_ACTIVE,
+		InstrumentCode:     "GBP",
+		CreatedAt:          now,
+		UpdatedAt:          now,
+		Version:            1,
 	}
 
 	if facility.GetAccountId() == "" {
 		t.Error("AccountId should not be empty")
 	}
-	if facility.GetAccountIdentification() == "" {
-		t.Error("AccountIdentification should not be empty")
+	if facility.GetExternalIdentifier() == "" {
+		t.Error("ExternalIdentifier should not be empty")
 	}
 	if facility.GetAccountStatus() != currentaccountv1.AccountStatus_ACCOUNT_STATUS_ACTIVE {
 		t.Error("AccountStatus should be ACTIVE")
 	}
-	if facility.GetBaseCurrency() != commonv1.Currency_CURRENCY_GBP {
-		t.Error("BaseCurrency should be GBP")
+	if facility.GetInstrumentCode() != "GBP" {
+		t.Errorf("Expected instrument code GBP, got %s", facility.GetInstrumentCode())
 	}
 	if facility.GetVersion() != 1 {
 		t.Errorf("Expected version 1, got %d", facility.GetVersion())
@@ -69,12 +69,12 @@ func TestCurrentAccountFacility_StatusTransitions(t *testing.T) {
 	now := timestamppb.New(time.Now())
 
 	facility := &currentaccountv1.CurrentAccountFacility{
-		AccountId:             "ACC-12345",
-		AccountIdentification: "GB29NWBK60161331926819",
-		AccountStatus:         currentaccountv1.AccountStatus_ACCOUNT_STATUS_ACTIVE,
-		BaseCurrency:          commonv1.Currency_CURRENCY_GBP,
-		CreatedAt:             now,
-		UpdatedAt:             now,
+		AccountId:          "ACC-12345",
+		ExternalIdentifier: "GB29NWBK60161331926819",
+		AccountStatus:      currentaccountv1.AccountStatus_ACCOUNT_STATUS_ACTIVE,
+		InstrumentCode:     "GBP",
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	}
 
 	// Test transition to frozen
@@ -96,10 +96,10 @@ func TestCurrentAccountFacility_BalanceTracking(t *testing.T) {
 	now := timestamppb.New(time.Now())
 
 	facility := &currentaccountv1.CurrentAccountFacility{
-		AccountId:             "ACC-12345",
-		AccountIdentification: "GB29NWBK60161331926819",
-		AccountStatus:         currentaccountv1.AccountStatus_ACCOUNT_STATUS_ACTIVE,
-		BaseCurrency:          commonv1.Currency_CURRENCY_GBP,
+		AccountId:          "ACC-12345",
+		ExternalIdentifier: "GB29NWBK60161331926819",
+		AccountStatus:      currentaccountv1.AccountStatus_ACCOUNT_STATUS_ACTIVE,
+		InstrumentCode:     "GBP",
 		CurrentBalance: &currentaccountv1.AccountBalance{
 			AvailableBalance: &commonv1.MoneyAmount{
 				Amount: &money.Money{
@@ -136,213 +136,41 @@ func TestCurrentAccountFacility_BalanceTracking(t *testing.T) {
 	}
 }
 
-// TestCurrentAccountFacility_OverdraftLimit tests overdraft limit functionality
-func TestCurrentAccountFacility_OverdraftLimit(t *testing.T) {
+// TestCurrentAccountFacility_InstrumentCode tests asset-agnostic instrument code field
+func TestCurrentAccountFacility_InstrumentCode(t *testing.T) {
 	now := timestamppb.New(time.Now())
 
-	facility := &currentaccountv1.CurrentAccountFacility{
-		AccountId:             "ACC-12345",
-		AccountIdentification: "GB29NWBK60161331926819",
-		AccountStatus:         currentaccountv1.AccountStatus_ACCOUNT_STATUS_ACTIVE,
-		BaseCurrency:          commonv1.Currency_CURRENCY_GBP,
-		OverdraftLimit: &currentaccountv1.OverdraftConfiguration{
-			OverdraftLimit: &commonv1.MoneyAmount{
-				Amount: &money.Money{
-					CurrencyCode: "GBP",
-					Units:        500,
-					Nanos:        0,
-				},
-			},
-			InterestRate: 12.5,
-			IsEnabled:    true,
-			LastUpdated:  now,
-		},
-		CreatedAt: now,
-		UpdatedAt: now,
-		Version:   1,
+	tests := []struct {
+		name           string
+		instrumentCode string
+		dimension      string
+	}{
+		{"currency GBP", "GBP", "CURRENCY"},
+		{"energy kWh", "KWH", "ENERGY"},
+		{"compute GPU hours", "GPU_HOUR", "COMPUTE"},
+		{"carbon credits", "TONNE_CO2E", "CARBON"},
 	}
 
-	if facility.GetOverdraftLimit() == nil {
-		t.Error("OverdraftLimit should not be nil")
-	}
-	if facility.GetOverdraftLimit().GetOverdraftLimit() == nil {
-		t.Error("OverdraftLimit.OverdraftLimit should not be nil")
-	}
-	if facility.GetOverdraftLimit().GetOverdraftLimit().GetAmount().GetUnits() != 500 {
-		t.Errorf("Expected overdraft limit 500, got %d", facility.GetOverdraftLimit().GetOverdraftLimit().GetAmount().GetUnits())
-	}
-	if !facility.GetOverdraftLimit().GetIsEnabled() {
-		t.Error("Overdraft should be enabled")
-	}
-	if facility.GetOverdraftLimit().GetInterestRate() != 12.5 {
-		t.Errorf("Expected interest rate 12.5, got %f", facility.GetOverdraftLimit().GetInterestRate())
-	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			facility := &currentaccountv1.CurrentAccountFacility{
+				AccountId:          "ACC-12345",
+				ExternalIdentifier: "ACCT-001",
+				AccountStatus:      currentaccountv1.AccountStatus_ACCOUNT_STATUS_ACTIVE,
+				InstrumentCode:     tt.instrumentCode,
+				Dimension:          tt.dimension,
+				CreatedAt:          now,
+				UpdatedAt:          now,
+				Version:            1,
+			}
 
-// TestCurrentAccountFacility_BalanceWithOverdraft tests balance calculation with overdraft
-func TestCurrentAccountFacility_BalanceWithOverdraft(t *testing.T) {
-	now := timestamppb.New(time.Now())
-
-	facility := &currentaccountv1.CurrentAccountFacility{
-		AccountId:             "ACC-12345",
-		AccountIdentification: "GB29NWBK60161331926819",
-		AccountStatus:         currentaccountv1.AccountStatus_ACCOUNT_STATUS_ACTIVE,
-		BaseCurrency:          commonv1.Currency_CURRENCY_GBP,
-		CurrentBalance: &currentaccountv1.AccountBalance{
-			CurrentBalance: &commonv1.MoneyAmount{
-				Amount: &money.Money{
-					CurrencyCode: "GBP",
-					Units:        100,
-					Nanos:        0,
-				},
-			},
-			AvailableBalance: &commonv1.MoneyAmount{
-				Amount: &money.Money{
-					CurrencyCode: "GBP",
-					Units:        600, // 100 (current) + 500 (overdraft)
-					Nanos:        0,
-				},
-			},
-			LastUpdated: now,
-		},
-		OverdraftLimit: &currentaccountv1.OverdraftConfiguration{
-			OverdraftLimit: &commonv1.MoneyAmount{
-				Amount: &money.Money{
-					CurrencyCode: "GBP",
-					Units:        500,
-					Nanos:        0,
-				},
-			},
-			InterestRate: 10.0,
-			IsEnabled:    true,
-			LastUpdated:  now,
-		},
-		CreatedAt: now,
-		UpdatedAt: now,
-		Version:   1,
-	}
-
-	// Test that available balance includes overdraft
-	currentBal := facility.GetCurrentBalance().GetCurrentBalance().GetAmount().GetUnits()
-	overdraftLim := facility.GetOverdraftLimit().GetOverdraftLimit().GetAmount().GetUnits()
-	availableBal := facility.GetCurrentBalance().GetAvailableBalance().GetAmount().GetUnits()
-
-	expectedAvailable := currentBal + overdraftLim
-	if availableBal != expectedAvailable {
-		t.Errorf("Expected available balance %d (current %d + overdraft %d), got %d",
-			expectedAvailable, currentBal, overdraftLim, availableBal)
-	}
-}
-
-// TestDebitTransaction_BasicConstruction tests debit transaction message
-// for subtask 5.3: Create debit/credit transaction operations
-func TestDebitTransaction_BasicConstruction(t *testing.T) {
-	now := timestamppb.New(time.Now())
-
-	debit := &currentaccountv1.AccountTransaction{
-		TransactionId: "TXN-12345",
-		AccountId:     "ACC-12345",
-		Direction:     commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
-		Amount: &commonv1.MoneyAmount{
-			Amount: &money.Money{
-				CurrencyCode: "GBP",
-				Units:        100,
-				Nanos:        0,
-			},
-		},
-		Status:      commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
-		Description: "Debit transaction test",
-		Reference:   "REF-12345",
-		Timestamp:   now,
-	}
-
-	if debit.GetTransactionId() == "" {
-		t.Error("TransactionId should not be empty")
-	}
-	if debit.GetDirection() != commonv1.PostingDirection_POSTING_DIRECTION_DEBIT {
-		t.Error("Direction should be DEBIT")
-	}
-	if debit.GetAmount().GetAmount().GetUnits() != 100 {
-		t.Errorf("Expected amount 100, got %d", debit.GetAmount().GetAmount().GetUnits())
-	}
-	if debit.GetStatus() != commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED {
-		t.Error("Status should be POSTED")
-	}
-}
-
-// TestCreditTransaction_BasicConstruction tests credit transaction message
-func TestCreditTransaction_BasicConstruction(t *testing.T) {
-	now := timestamppb.New(time.Now())
-
-	credit := &currentaccountv1.AccountTransaction{
-		TransactionId: "TXN-67890",
-		AccountId:     "ACC-12345",
-		Direction:     commonv1.PostingDirection_POSTING_DIRECTION_CREDIT,
-		Amount: &commonv1.MoneyAmount{
-			Amount: &money.Money{
-				CurrencyCode: "GBP",
-				Units:        250,
-				Nanos:        0,
-			},
-		},
-		Status:      commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
-		Description: "Credit transaction test",
-		Reference:   "REF-67890",
-		Timestamp:   now,
-	}
-
-	if credit.GetTransactionId() == "" {
-		t.Error("TransactionId should not be empty")
-	}
-	if credit.GetDirection() != commonv1.PostingDirection_POSTING_DIRECTION_CREDIT {
-		t.Error("Direction should be CREDIT")
-	}
-	if credit.GetAmount().GetAmount().GetUnits() != 250 {
-		t.Errorf("Expected amount 250, got %d", credit.GetAmount().GetAmount().GetUnits())
-	}
-}
-
-// TestTransactionHistory_BasicConstruction tests transaction history
-// for subtask 5.4: Add transaction history and account status management features
-func TestTransactionHistory_BasicConstruction(t *testing.T) {
-	now := timestamppb.New(time.Now())
-
-	history := &currentaccountv1.TransactionHistory{
-		AccountId: "ACC-12345",
-		Transactions: []*currentaccountv1.AccountTransaction{
-			{
-				TransactionId: "TXN-1",
-				AccountId:     "ACC-12345",
-				Direction:     commonv1.PostingDirection_POSTING_DIRECTION_CREDIT,
-				Amount: &commonv1.MoneyAmount{
-					Amount: &money.Money{CurrencyCode: "GBP", Units: 100},
-				},
-				Status:    commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
-				Timestamp: now,
-			},
-			{
-				TransactionId: "TXN-2",
-				AccountId:     "ACC-12345",
-				Direction:     commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
-				Amount: &commonv1.MoneyAmount{
-					Amount: &money.Money{CurrencyCode: "GBP", Units: 50},
-				},
-				Status:    commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
-				Timestamp: now,
-			},
-		},
-		TotalCount:  2,
-		LastUpdated: now,
-	}
-
-	if history.GetAccountId() == "" {
-		t.Error("AccountId should not be empty")
-	}
-	if len(history.GetTransactions()) != 2 {
-		t.Errorf("Expected 2 transactions, got %d", len(history.GetTransactions()))
-	}
-	if history.GetTotalCount() != 2 {
-		t.Errorf("Expected total count 2, got %d", history.GetTotalCount())
+			if facility.GetInstrumentCode() != tt.instrumentCode {
+				t.Errorf("Expected instrument code %s, got %s", tt.instrumentCode, facility.GetInstrumentCode())
+			}
+			if facility.GetDimension() != tt.dimension {
+				t.Errorf("Expected dimension %s, got %s", tt.dimension, facility.GetDimension())
+			}
+		})
 	}
 }
 
@@ -351,10 +179,10 @@ func TestCurrentAccountFacility_WithTransactionHistory(t *testing.T) {
 	now := timestamppb.New(time.Now())
 
 	facility := &currentaccountv1.CurrentAccountFacility{
-		AccountId:             "ACC-12345",
-		AccountIdentification: "GB29NWBK60161331926819",
-		AccountStatus:         currentaccountv1.AccountStatus_ACCOUNT_STATUS_ACTIVE,
-		BaseCurrency:          commonv1.Currency_CURRENCY_GBP,
+		AccountId:          "ACC-12345",
+		ExternalIdentifier: "GB29NWBK60161331926819",
+		AccountStatus:      currentaccountv1.AccountStatus_ACCOUNT_STATUS_ACTIVE,
+		InstrumentCode:     "GBP",
 		CurrentBalance: &currentaccountv1.AccountBalance{
 			CurrentBalance: &commonv1.MoneyAmount{
 				Amount: &money.Money{CurrencyCode: "GBP", Units: 500},
@@ -414,8 +242,9 @@ func TestCurrentAccountFacility_WithTransactionHistory(t *testing.T) {
 	}
 }
 
-// TestValidation_IBANFormat tests IBAN format validation
-func TestValidation_IBANFormat(t *testing.T) {
+// TestValidation_ExternalIdentifierFormat tests external identifier validation
+// The field now accepts any string up to 255 characters; format is validated by product type CEL rules.
+func TestValidation_ExternalIdentifierFormat(t *testing.T) {
 	validator, err := protovalidate.New()
 	if err != nil {
 		t.Fatalf("Failed to create validator: %v", err)
@@ -424,72 +253,57 @@ func TestValidation_IBANFormat(t *testing.T) {
 	now := timestamppb.New(time.Now())
 
 	tests := []struct {
-		name      string
-		iban      string
-		wantError bool
+		name       string
+		identifier string
+		wantError  bool
 	}{
 		{
-			name:      "valid UK IBAN",
-			iban:      "GB29NWBK60161331926819",
-			wantError: false,
+			name:       "valid IBAN",
+			identifier: "GB29NWBK60161331926819",
+			wantError:  false,
 		},
 		{
-			name:      "valid German IBAN",
-			iban:      "DE89370400440532013000",
-			wantError: false,
+			name:       "valid sort code and account number",
+			identifier: "20-00-00/12345678",
+			wantError:  false,
 		},
 		{
-			name:      "valid French IBAN",
-			iban:      "FR1420041010050500013M02606",
-			wantError: false,
+			name:       "valid meter ID",
+			identifier: "METER-UK-001-2024",
+			wantError:  false,
 		},
 		{
-			name:      "invalid no country code",
-			iban:      "29NWBK60161331926819",
-			wantError: true,
+			name:       "valid GPU node reference",
+			identifier: "NODE-A100-CLUSTER-42",
+			wantError:  false,
 		},
 		{
-			name:      "invalid lowercase country code",
-			iban:      "gb29NWBK60161331926819",
-			wantError: true,
-		},
-		{
-			name:      "invalid missing check digits",
-			iban:      "GBNWBK60161331926819",
-			wantError: true,
-		},
-		{
-			name:      "invalid with spaces",
-			iban:      "GB29 NWBK 6016 1331 9268 19",
-			wantError: true,
-		},
-		{
-			name:      "invalid with special characters",
-			iban:      "GB29-NWBK-60161331926819",
-			wantError: true,
+			name:       "empty string fails (min_len: 1)",
+			identifier: "",
+			wantError:  true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			facility := &currentaccountv1.CurrentAccountFacility{
-				AccountId:             "acc-123",
-				AccountIdentification: tt.iban,
-				AccountStatus:         currentaccountv1.AccountStatus_ACCOUNT_STATUS_ACTIVE,
-				BaseCurrency:          commonv1.Currency_CURRENCY_GBP,
-				CreatedAt:             now,
-				UpdatedAt:             now,
-				Version:               1,
+				AccountId:          "acc-123",
+				ExternalIdentifier: tt.identifier,
+				AccountStatus:      currentaccountv1.AccountStatus_ACCOUNT_STATUS_ACTIVE,
+				InstrumentCode:     "GBP",
+				CreatedAt:          now,
+				UpdatedAt:          now,
+				Version:            1,
 			}
 
 			err := validator.Validate(facility)
 			if tt.wantError {
 				if err == nil {
-					t.Errorf("Expected validation error for IBAN %q but got none", tt.iban)
+					t.Errorf("Expected validation error for identifier %q but got none", tt.identifier)
 				}
 			} else {
 				if err != nil {
-					t.Errorf("Unexpected validation error for IBAN %q: %v", tt.iban, err)
+					t.Errorf("Unexpected validation error for identifier %q: %v", tt.identifier, err)
 				}
 			}
 		})
@@ -550,13 +364,13 @@ func TestValidation_AccountIDPattern_CurrentAccount(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			facility := &currentaccountv1.CurrentAccountFacility{
-				AccountId:             tt.accountID,
-				AccountIdentification: "GB29NWBK60161331926819",
-				AccountStatus:         currentaccountv1.AccountStatus_ACCOUNT_STATUS_ACTIVE,
-				BaseCurrency:          commonv1.Currency_CURRENCY_GBP,
-				CreatedAt:             now,
-				UpdatedAt:             now,
-				Version:               1,
+				AccountId:          tt.accountID,
+				ExternalIdentifier: "GB29NWBK60161331926819",
+				AccountStatus:      currentaccountv1.AccountStatus_ACCOUNT_STATUS_ACTIVE,
+				InstrumentCode:     "GBP",
+				CreatedAt:          now,
+				UpdatedAt:          now,
+				Version:            1,
 			}
 
 			err := validator.Validate(facility)
