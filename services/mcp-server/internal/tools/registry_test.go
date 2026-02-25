@@ -33,6 +33,105 @@ func TestRegistry_Register_ValidSchema(t *testing.T) {
 	}
 }
 
+func TestRegistry_Register_EmptyName(t *testing.T) {
+	r := tools.NewRegistry()
+	tool := tools.Tool{
+		Name:        "",
+		InputSchema: map[string]interface{}{"type": "object"},
+		Category:    tools.CategoryRead,
+		Handler: func(_ context.Context, _ json.RawMessage) (interface{}, error) {
+			return nil, nil
+		},
+	}
+
+	err := r.Register(tool)
+	if err == nil {
+		t.Fatal("expected error for empty tool name, got nil")
+	}
+	if !errors.Is(err, tools.ErrToolNameRequired) {
+		t.Errorf("expected ErrToolNameRequired, got %v", err)
+	}
+}
+
+func TestRegistry_Register_NilHandler(t *testing.T) {
+	r := tools.NewRegistry()
+	tool := tools.Tool{
+		Name:        "no.handler",
+		InputSchema: map[string]interface{}{"type": "object"},
+		Category:    tools.CategoryRead,
+		Handler:     nil,
+	}
+
+	err := r.Register(tool)
+	if err == nil {
+		t.Fatal("expected error for nil handler, got nil")
+	}
+	if !errors.Is(err, tools.ErrToolHandlerRequired) {
+		t.Errorf("expected ErrToolHandlerRequired, got %v", err)
+	}
+}
+
+func TestRegistry_Register_SchemaDeepCopy(t *testing.T) {
+	r := tools.NewRegistry()
+	schema := map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"id": map[string]interface{}{"type": "string"},
+		},
+	}
+	tool := tools.Tool{
+		Name:        "isolated.tool",
+		InputSchema: schema,
+		Category:    tools.CategoryRead,
+		Handler: func(_ context.Context, _ json.RawMessage) (interface{}, error) {
+			return nil, nil
+		},
+	}
+
+	if err := r.Register(tool); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	// Mutate the original schema after registration — should not affect registry.
+	schema["type"] = "string"
+
+	listed := r.List()
+	if len(listed) != 1 {
+		t.Fatalf("expected 1 tool, got %d", len(listed))
+	}
+	if listed[0].InputSchema["type"] != "object" {
+		t.Errorf("registry schema was mutated by external change: got type=%v", listed[0].InputSchema["type"])
+	}
+}
+
+func TestRegistry_Call_NilParamsNormalized(t *testing.T) {
+	r := tools.NewRegistry()
+	var receivedParams json.RawMessage
+	tool := tools.Tool{
+		Name:        "empty.params",
+		InputSchema: map[string]interface{}{"type": "object"},
+		Category:    tools.CategoryRead,
+		Handler: func(_ context.Context, params json.RawMessage) (interface{}, error) {
+			receivedParams = params
+			return nil, nil
+		},
+	}
+
+	if err := r.Register(tool); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	// Call with nil params — handler should receive "{}" not nil.
+	if _, err := r.Call(context.Background(), "empty.params", nil); err != nil {
+		t.Fatalf("call: %v", err)
+	}
+
+	var v map[string]interface{}
+	if err := json.Unmarshal(receivedParams, &v); err != nil {
+		t.Errorf("handler received non-unmarshalable params: %v (got %q)", err, string(receivedParams))
+	}
+}
+
 func TestRegistry_Register_InvalidSchema(t *testing.T) {
 	r := tools.NewRegistry()
 	tool := tools.Tool{

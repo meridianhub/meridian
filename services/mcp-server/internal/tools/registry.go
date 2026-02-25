@@ -17,6 +17,12 @@ import (
 // ErrToolNotFound is returned when a tool name is not registered.
 var ErrToolNotFound = errors.New("unknown tool")
 
+// ErrToolNameRequired is returned when a tool is registered without a name.
+var ErrToolNameRequired = errors.New("tool name is required")
+
+// ErrToolHandlerRequired is returned when a tool is registered without a handler.
+var ErrToolHandlerRequired = errors.New("tool handler is required")
+
 // ToolCategory classifies the operational intent of a tool.
 // Clients can use this to apply policies (e.g., require confirmation for writes).
 type ToolCategory int
@@ -61,9 +67,21 @@ func NewRegistry() *Registry {
 }
 
 // Register adds a tool to the registry, compiling its JSON schema.
-// Returns an error if the schema is invalid or compilation fails.
-// Registering a tool with a name that already exists overwrites the previous entry.
+// Returns an error if the tool name or handler is missing, the schema is invalid,
+// or compilation fails. Registering a tool with an existing name overwrites the
+// previous entry.
 func (r *Registry) Register(tool Tool) error {
+	if tool.Name == "" {
+		return ErrToolNameRequired
+	}
+	if tool.Handler == nil {
+		return ErrToolHandlerRequired
+	}
+
+	// Deep-copy InputSchema so external mutations after Register cannot affect
+	// registry state or drift metadata from the compiled validator.
+	tool.InputSchema = deepCopySchema(tool.InputSchema)
+
 	compiled, err := compileSchema(tool.InputSchema)
 	if err != nil {
 		return fmt.Errorf("compile schema for tool %q: %w", tool.Name, err)
@@ -88,11 +106,19 @@ func (r *Registry) Call(ctx context.Context, name string, params json.RawMessage
 		return nil, fmt.Errorf("%w: %q", ErrToolNotFound, name)
 	}
 
-	if err := validateParams(tool.validator, params); err != nil {
+	// Normalize empty params to {} so validation and handler both receive the
+	// same payload, avoiding an unmarshal failure in handlers after successful
+	// schema validation.
+	normalized := params
+	if len(normalized) == 0 {
+		normalized = json.RawMessage(`{}`)
+	}
+
+	if err := validateParams(tool.validator, normalized); err != nil {
 		return nil, fmt.Errorf("validation failed for tool %q: %w", name, err)
 	}
 
-	return tool.Handler(ctx, params)
+	return tool.Handler(ctx, normalized)
 }
 
 // List returns a snapshot of registered tool metadata (without handlers or
@@ -106,7 +132,7 @@ func (r *Registry) List() []Tool {
 		result = append(result, Tool{
 			Name:        t.Name,
 			Description: t.Description,
-			InputSchema: t.InputSchema,
+			InputSchema: deepCopySchema(t.InputSchema),
 			Category:    t.Category,
 		})
 	}
@@ -147,15 +173,29 @@ func compileSchema(schema map[string]interface{}) (*jsonschema.Schema, error) {
 
 // validateParams validates raw JSON params against the compiled schema.
 func validateParams(validator *jsonschema.Schema, params json.RawMessage) error {
-	// Treat nil/empty params as an empty object for schema validation.
-	if len(params) == 0 {
-		params = json.RawMessage(`{}`)
-	}
-
 	var v interface{}
 	if err := json.Unmarshal(params, &v); err != nil {
 		return fmt.Errorf("invalid JSON: %w", err)
 	}
 
 	return validator.Validate(v)
+}
+
+// deepCopySchema returns a deep copy of a JSON schema map via JSON round-trip.
+// This prevents external mutations from affecting registry state.
+func deepCopySchema(schema map[string]interface{}) map[string]interface{} {
+	if schema == nil {
+		return nil
+	}
+	b, err := json.Marshal(schema)
+	if err != nil {
+		// Schema was already marshaled successfully during compileSchema;
+		// this path is unreachable in practice.
+		return schema
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(b, &result); err != nil {
+		return schema
+	}
+	return result
 }
