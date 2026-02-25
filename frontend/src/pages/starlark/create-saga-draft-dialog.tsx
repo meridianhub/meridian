@@ -73,8 +73,10 @@ export function CreateSagaDraftDialog({ open, onOpenChange }: CreateSagaDraftDia
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: referenceKeys.sagas() })
       onOpenChange(false)
-      const sagaId = res.saga?.id ?? ''
-      navigate(`/starlark-config/${sagaId}`)
+      const sagaId = res.saga?.id
+      if (sagaId) {
+        navigate(`/starlark-config/${sagaId}`)
+      }
     },
     onError: (err) => {
       const result = handleConnectError(err)
