@@ -17,6 +17,7 @@ func TestNew_NilAuthConfig(t *testing.T) {
 }
 
 // TestNew_MissingAPIURL verifies that an empty APIUrl is rejected.
+// ErrMissingAPIURL lives in the auth package since LoadFromEnv now also validates it.
 func TestNew_MissingAPIURL(t *testing.T) {
 	cfg := &auth.Config{
 		APIKey: "key",
@@ -24,7 +25,7 @@ func TestNew_MissingAPIURL(t *testing.T) {
 	}
 	_, err := clients.New(cfg)
 	require.Error(t, err)
-	assert.ErrorIs(t, err, clients.ErrMissingAPIURL)
+	assert.ErrorIs(t, err, auth.ErrMissingAPIURL)
 }
 
 // TestNew_AllClientsInitialized verifies that all service clients are

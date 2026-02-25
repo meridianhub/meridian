@@ -44,15 +44,36 @@ func TestLoadFromEnv_WhitespaceKey(t *testing.T) {
 	assert.ErrorIs(t, err, auth.ErrMissingAPIKey)
 }
 
-// TestLoadFromEnv_NoURL verifies that the URL field is optional.
-func TestLoadFromEnv_NoURL(t *testing.T) {
+// TestLoadFromEnv_MissingURL verifies ErrMissingAPIURL is returned when the
+// URL env var is absent.
+func TestLoadFromEnv_MissingURL(t *testing.T) {
 	t.Setenv(auth.EnvAPIKey, "my-key")
 	t.Setenv(auth.EnvAPIURL, "")
 
-	cfg, err := auth.LoadFromEnv()
-	require.NoError(t, err)
-	assert.Equal(t, "my-key", cfg.APIKey)
-	assert.Equal(t, "", cfg.APIUrl)
+	_, err := auth.LoadFromEnv()
+	require.Error(t, err)
+	assert.ErrorIs(t, err, auth.ErrMissingAPIURL)
+}
+
+// TestLoadFromEnv_WhitespaceURL verifies that a whitespace-only URL is treated as missing.
+func TestLoadFromEnv_WhitespaceURL(t *testing.T) {
+	t.Setenv(auth.EnvAPIKey, "my-key")
+	t.Setenv(auth.EnvAPIURL, "   ")
+
+	_, err := auth.LoadFromEnv()
+	require.Error(t, err)
+	assert.ErrorIs(t, err, auth.ErrMissingAPIURL)
+}
+
+// TestConfig_String_RedactsAPIKey verifies the String() method does not expose
+// the raw API key, protecting against accidental logging of secrets.
+func TestConfig_String_RedactsAPIKey(t *testing.T) {
+	cfg := auth.Config{APIKey: "super-secret", APIUrl: "gateway:443"}
+	s := cfg.String()
+
+	assert.NotContains(t, s, "super-secret", "API key must not appear in String() output")
+	assert.Contains(t, s, "[REDACTED]")
+	assert.Contains(t, s, "gateway:443")
 }
 
 // capturedMetadataServer captures the incoming metadata from gRPC calls for

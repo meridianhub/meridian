@@ -22,8 +22,12 @@ const (
 	EnvAPIURL = "MERIDIAN_API_URL"
 )
 
-// ErrMissingAPIKey is returned when the API key environment variable is not set.
-var ErrMissingAPIKey = errors.New("MERIDIAN_API_KEY environment variable is required")
+var (
+	// ErrMissingAPIKey is returned when the API key environment variable is not set.
+	ErrMissingAPIKey = errors.New("MERIDIAN_API_KEY environment variable is required")
+	// ErrMissingAPIURL is returned when the gateway URL environment variable is not set.
+	ErrMissingAPIURL = errors.New("MERIDIAN_API_URL environment variable is required")
+)
 
 // Config holds the API key and gateway URL used to authenticate outgoing
 // gRPC calls from the MCP server to Meridian Core services.
@@ -34,8 +38,15 @@ type Config struct {
 	APIUrl string
 }
 
+// String returns a safe representation of Config that redacts the API key,
+// preventing accidental secret leakage via fmt.Printf or structured loggers.
+func (a Config) String() string {
+	return fmt.Sprintf("Config{APIKey: [REDACTED], APIUrl: %q}", a.APIUrl)
+}
+
 // LoadFromEnv reads Config from environment variables.
-// It returns ErrMissingAPIKey when MERIDIAN_API_KEY is absent or blank.
+// It returns ErrMissingAPIKey when MERIDIAN_API_KEY is absent or blank,
+// and ErrMissingAPIURL when MERIDIAN_API_URL is absent or blank.
 func LoadFromEnv() (*Config, error) {
 	apiKey := strings.TrimSpace(os.Getenv(EnvAPIKey))
 	if apiKey == "" {
@@ -43,6 +54,9 @@ func LoadFromEnv() (*Config, error) {
 	}
 
 	apiURL := strings.TrimSpace(os.Getenv(EnvAPIURL))
+	if apiURL == "" {
+		return nil, fmt.Errorf("load auth config: %w", ErrMissingAPIURL)
+	}
 
 	return &Config{
 		APIKey: apiKey,

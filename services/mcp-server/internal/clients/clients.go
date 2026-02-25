@@ -18,12 +18,8 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 )
 
-var (
-	// ErrNilAuthConfig is returned when New is called with a nil auth.Config.
-	ErrNilAuthConfig = errors.New("auth config must not be nil")
-	// ErrMissingAPIURL is returned when the gateway URL is empty.
-	ErrMissingAPIURL = errors.New("MERIDIAN_API_URL is required")
-)
+// ErrNilAuthConfig is returned when New is called with a nil auth.Config.
+var ErrNilAuthConfig = errors.New("auth config must not be nil")
 
 // MeridianClients holds typed gRPC clients for all Meridian Core services.
 // All clients share a single connection to the gateway.
@@ -60,9 +56,13 @@ func New(cfg *auth.Config) (*MeridianClients, error) {
 		return nil, fmt.Errorf("clients.New: %w", ErrNilAuthConfig)
 	}
 	if cfg.APIUrl == "" {
-		return nil, fmt.Errorf("clients.New: %w", ErrMissingAPIURL)
+		return nil, fmt.Errorf("clients.New: %w", auth.ErrMissingAPIURL)
 	}
 
+	// insecure.NewCredentials() is intentional: TLS termination is handled at the
+	// infrastructure layer (Kubernetes service mesh / Envoy sidecar). The Bearer
+	// token carried by the auth interceptor is protected by the mesh mTLS tunnel
+	// between pods, consistent with every other service client in this repository.
 	conn, err := grpc.NewClient(
 		cfg.APIUrl,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
