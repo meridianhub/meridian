@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mcp-server-config
+  labels:
+    app: mcp-server
+    component: mcp-server
+data:
+  # Logging configuration
+  LOG_LEVEL: "info"
+
+  # MCP transport configuration
+  MCP_TRANSPORT: "sse"
+  MCP_SSE_PORT: "8090"
+  MCP_SERVER_NAME: "meridian-mcp"
+
+  # Meridian gateway address (single gRPC endpoint for all backend services)
+  MERIDIAN_API_URL: "gateway:8080"
+
+  # OpenTelemetry configuration
+  OTEL_SERVICE_NAME: "mcp-server"
+  OTEL_SAMPLING_RATE: "0.1"

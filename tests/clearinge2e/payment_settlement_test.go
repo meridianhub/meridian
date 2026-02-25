@@ -27,7 +27,7 @@ import (
 // Flow:
 // 1. Payment Order: Initiate outbound payment
 // 2. Current Account: Create lien on customer account
-// 3. Internal Bank Account: Resolve settlement clearing account
+// 3. Internal Account: Resolve settlement clearing account
 // 4. Financial Accounting: Create multi-leg posting (Customer → Clearing → Gateway)
 // 5. Position Keeping: Record all position movements
 // 6. Verify: All legs balanced
@@ -45,17 +45,17 @@ func TestPaymentSettlementFlow(t *testing.T) {
 		// Step 1: Setup accounts
 		// Deposit clearing (to fund the customer)
 		depositClearingID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-DEP", "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
 		// Settlement clearing (for payment processing)
 		settlementClearingID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-SETTLEMENT", "GBP", "CLEARING_PURPOSE_SETTLEMENT")
 
 		// Gateway account (represents external payment network)
 		gatewayAccountID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"GATEWAY-GBP-FPS", "GBP", "CLEARING_PURPOSE_UNSPECIFIED")
 
 		// Customer account
@@ -149,19 +149,19 @@ func TestPaymentSettlementFlow(t *testing.T) {
 
 		// Setup accounts
 		depositClearingID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-DEP", "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
 		settlementClearingID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-SETTLE", "GBP", "CLEARING_PURPOSE_SETTLEMENT")
 
 		feeClearingID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-FEE", "GBP", "CLEARING_PURPOSE_UNSPECIFIED")
 
 		gatewayAccountID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"GATEWAY-GBP", "GBP", "CLEARING_PURPOSE_UNSPECIFIED")
 
 		partyID := uuid.New().String()
@@ -265,11 +265,11 @@ func TestPaymentSettlementFlow(t *testing.T) {
 
 		// Setup
 		depositClearingID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-DEP", "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
 		settlementClearingID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-SETTLE", "GBP", "CLEARING_PURPOSE_SETTLEMENT")
 
 		partyID := uuid.New().String()

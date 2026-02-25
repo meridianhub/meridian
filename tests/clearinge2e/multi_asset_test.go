@@ -31,17 +31,17 @@ func TestMultiAssetClearingFlows(t *testing.T) {
 
 		// Create GBP clearing accounts
 		gbpDepositID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-DEP", "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
 		// Create USD clearing account (should NOT be used)
 		_ = createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-USD-DEP", "USD", "CLEARING_PURPOSE_DEPOSIT")
 
 		// Resolve GBP deposit clearing account
 		resolvedID, code, found := getClearingAccountByPurpose(t, ctx,
-			infra.internalBankAccountDB, schemaName, "GBP", "CLEARING_PURPOSE_DEPOSIT")
+			infra.internalAccountDB, schemaName, "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
 		require.True(t, found, "GBP deposit clearing account should be found")
 		assert.Equal(t, gbpDepositID, resolvedID)
@@ -54,11 +54,11 @@ func TestMultiAssetClearingFlows(t *testing.T) {
 
 		// Create KWH clearing accounts for energy trading
 		kwhDepositID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-KWH-DEP", "KWH", "CLEARING_PURPOSE_DEPOSIT")
 
 		kwhWithdrawID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-KWH-WDR", "KWH", "CLEARING_PURPOSE_WITHDRAWAL")
 
 		// Create customer account for energy
@@ -73,7 +73,7 @@ func TestMultiAssetClearingFlows(t *testing.T) {
 
 		// Resolve deposit clearing account
 		resolvedID, _, found := getClearingAccountByPurpose(t, ctx,
-			infra.internalBankAccountDB, schemaName, "KWH", "CLEARING_PURPOSE_DEPOSIT")
+			infra.internalAccountDB, schemaName, "KWH", "CLEARING_PURPOSE_DEPOSIT")
 		require.True(t, found)
 		assert.Equal(t, kwhDepositID, resolvedID)
 
@@ -97,11 +97,11 @@ func TestMultiAssetClearingFlows(t *testing.T) {
 
 		// Verify withdrawal clearing account is separate
 		_, _, withdrawFound := getClearingAccountByPurpose(t, ctx,
-			infra.internalBankAccountDB, schemaName, "KWH", "CLEARING_PURPOSE_WITHDRAWAL")
+			infra.internalAccountDB, schemaName, "KWH", "CLEARING_PURPOSE_WITHDRAWAL")
 		require.True(t, withdrawFound)
 
 		withdrawResolvedID, _, _ := getClearingAccountByPurpose(t, ctx,
-			infra.internalBankAccountDB, schemaName, "KWH", "CLEARING_PURPOSE_WITHDRAWAL")
+			infra.internalAccountDB, schemaName, "KWH", "CLEARING_PURPOSE_WITHDRAWAL")
 		assert.Equal(t, kwhWithdrawID, withdrawResolvedID)
 		assert.NotEqual(t, kwhDepositID, kwhWithdrawID, "deposit and withdrawal should be different accounts")
 	})
@@ -112,11 +112,11 @@ func TestMultiAssetClearingFlows(t *testing.T) {
 
 		// Create GPU-HOUR clearing accounts
 		gpuDepositID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GPU-DEP", "GPU-HOUR", "CLEARING_PURPOSE_DEPOSIT")
 
 		gpuWithdrawID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GPU-WDR", "GPU-HOUR", "CLEARING_PURPOSE_WITHDRAWAL")
 
 		// Create AI company account
@@ -178,11 +178,11 @@ func TestMultiAssetClearingFlows(t *testing.T) {
 
 		// Create CARBON clearing accounts
 		carbonDepositID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-CARBON-DEP", "CARBON", "CLEARING_PURPOSE_DEPOSIT")
 
 		carbonRetireID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-CARBON-RETIRE", "CARBON", "CLEARING_PURPOSE_WITHDRAWAL")
 
 		// Create company account
@@ -256,13 +256,13 @@ func TestMultiAssetClearingFlows(t *testing.T) {
 		for _, asset := range assets {
 			depositCode := asset.prefix + "-DEP"
 			depositID := createClearingAccount(t, ctx,
-				infra.internalBankAccountDB, schemaName,
+				infra.internalAccountDB, schemaName,
 				depositCode, asset.code, "CLEARING_PURPOSE_DEPOSIT")
 			clearingAccounts[asset.code+"-DEPOSIT"] = depositID
 
 			withdrawCode := asset.prefix + "-WDR"
 			withdrawID := createClearingAccount(t, ctx,
-				infra.internalBankAccountDB, schemaName,
+				infra.internalAccountDB, schemaName,
 				withdrawCode, asset.code, "CLEARING_PURPOSE_WITHDRAWAL")
 			clearingAccounts[asset.code+"-WITHDRAWAL"] = withdrawID
 		}
@@ -270,13 +270,13 @@ func TestMultiAssetClearingFlows(t *testing.T) {
 		// Verify each asset type resolves to its own clearing account
 		for _, asset := range assets {
 			depositID, _, found := getClearingAccountByPurpose(t, ctx,
-				infra.internalBankAccountDB, schemaName, asset.code, "CLEARING_PURPOSE_DEPOSIT")
+				infra.internalAccountDB, schemaName, asset.code, "CLEARING_PURPOSE_DEPOSIT")
 			require.True(t, found, "%s deposit clearing should exist", asset.code)
 			assert.Equal(t, clearingAccounts[asset.code+"-DEPOSIT"], depositID,
 				"%s should resolve to correct deposit clearing account", asset.code)
 
 			withdrawID, _, found := getClearingAccountByPurpose(t, ctx,
-				infra.internalBankAccountDB, schemaName, asset.code, "CLEARING_PURPOSE_WITHDRAWAL")
+				infra.internalAccountDB, schemaName, asset.code, "CLEARING_PURPOSE_WITHDRAWAL")
 			require.True(t, found, "%s withdrawal clearing should exist", asset.code)
 			assert.Equal(t, clearingAccounts[asset.code+"-WITHDRAWAL"], withdrawID,
 				"%s should resolve to correct withdrawal clearing account", asset.code)
@@ -293,11 +293,11 @@ func TestMultiAssetClearingFlows(t *testing.T) {
 
 		// Create clearing accounts
 		gbpDepositID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-DEP", "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
 		kwhDepositID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-KWH-DEP", "KWH", "CLEARING_PURPOSE_DEPOSIT")
 
 		// Create customer accounts (one per asset type)

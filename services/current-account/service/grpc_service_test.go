@@ -348,9 +348,9 @@ func TestInitiateCurrentAccount(t *testing.T) {
 	svc := mustNewService(t, repo, nil)
 
 	req := &pb.InitiateCurrentAccountRequest{
-		AccountIdentification: "GB82WEST12345698765432",
-		PartyId:               uuid.New().String(),
-		BaseCurrency:          commonpb.Currency_CURRENCY_GBP,
+		ExternalIdentifier: "GB82WEST12345698765432",
+		PartyId:            uuid.New().String(),
+		InstrumentCode:     "GBP",
 	}
 
 	resp, err := svc.InitiateCurrentAccount(ctx, req)
@@ -366,8 +366,8 @@ func TestInitiateCurrentAccount(t *testing.T) {
 		t.Fatal("Expected facility in response")
 	}
 
-	if resp.Facility.AccountIdentification != req.AccountIdentification {
-		t.Errorf("Expected IBAN %s, got %s", req.AccountIdentification, resp.Facility.AccountIdentification)
+	if resp.Facility.ExternalIdentifier != req.ExternalIdentifier {
+		t.Errorf("Expected external identifier %s, got %s", req.ExternalIdentifier, resp.Facility.ExternalIdentifier)
 	}
 
 	if resp.Facility.AccountStatus != pb.AccountStatus_ACCOUNT_STATUS_ACTIVE {
@@ -659,14 +659,14 @@ func TestInitiateCurrentAccountUnsupportedCurrency(t *testing.T) {
 	svc := mustNewService(t, repo, nil)
 
 	req := &pb.InitiateCurrentAccountRequest{
-		AccountIdentification: "GB82WEST12345698765432",
-		PartyId:               uuid.New().String(),
-		BaseCurrency:          commonpb.Currency_CURRENCY_JPY,
+		ExternalIdentifier: "GB82WEST12345698765432",
+		PartyId:            uuid.New().String(),
+		InstrumentCode:     "",
 	}
 
 	_, err := svc.InitiateCurrentAccount(ctx, req)
 	if err == nil {
-		t.Fatal("Expected error for unsupported currency")
+		t.Fatal("Expected error for missing instrument code")
 	}
 
 	st, ok := status.FromError(err)
@@ -1220,7 +1220,7 @@ func TestListCurrentAccounts(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.Len(t, resp.Accounts, 1)
-		require.Equal(t, "GB82WEST12345698765432", resp.Accounts[0].AccountIdentification)
+		require.Equal(t, "GB82WEST12345698765432", resp.Accounts[0].ExternalIdentifier)
 	})
 
 	t.Run("paginates results", func(t *testing.T) {

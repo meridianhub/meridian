@@ -51,7 +51,7 @@ boundaries, error handling, and validation logic.
 | Service | Test File | Lines | Coverage Quality |
 |---------|-----------|-------|------------------|
 | **reference-data** | `services/reference-data/e2e/e2e_test.go` | 1,547 | Comprehensive - lifecycle, multi-tenant isolation, cache invalidation, performance baselines |
-| **internal-bank-account** | `services/internal-bank-account/e2e/e2e_test.go` | 1,852 | Comprehensive - complete lifecycle, multi-asset accounts, position-keeping integration, concurrent operations |
+| **internal-account** | `services/internal-account/e2e/e2e_test.go` | 1,852 | Comprehensive - complete lifecycle, multi-asset accounts, position-keeping integration, concurrent operations |
 | **market-information** | `services/market-information/e2e/e2e_test.go` | 1,101 | Comprehensive - FX rates, energy tariffs, quality ladder supersession, bi-temporal audit |
 
 #### ❌ Critical Services WITHOUT E2E Tests
@@ -509,7 +509,7 @@ go s.sendFreezeWebhook(tenantID.String(), accountID, req.Reason, timestamp)
 - `TestBucketIsolation_E2E` - Cross-bucket position isolation
 - `TestMultiTenantIsolation_E2E` - Tenant A cannot see tenant B positions
 
-**Pattern**: Follow `internal-bank-account/e2e/e2e_test.go` structure
+**Pattern**: Follow `internal-account/e2e/e2e_test.go` structure
 
 **Success Criteria**: All critical position-keeping paths have e2e coverage
 
@@ -754,7 +754,7 @@ func (o *PaymentOrchestrator) evaluateBucketID(...) (string, error) {
 
 ### Pattern 1: Comprehensive Lifecycle Testing
 
-Based on `internal-bank-account/e2e/e2e_test.go`:
+Based on `internal-account/e2e/e2e_test.go`:
 
 ```go
 func TestAccountLifecycle_E2E(t *testing.T) {
@@ -1029,7 +1029,7 @@ while the bug ships to production.
 | **gateway** | ❌ None | ⚠️ Auth/routing untested | **MEDIUM** |
 | **tenant** | ⚠️ Partial | ✅ Good | **MEDIUM** |
 | **reference-data** | ✅ Comprehensive | ✅ Good | **LOW** |
-| **internal-bank-account** | ✅ Comprehensive | ✅ Good | **LOW** |
+| **internal-account** | ✅ Comprehensive | ✅ Good | **LOW** |
 | **audit-worker** | ❌ None | ⚠️ Kafka consumption untested | **LOW** |
 | **utilization-metering-consumer** | ❌ None | ⚠️ Event processing untested | **LOW** |
 
@@ -1069,7 +1069,7 @@ while the bug ships to production.
 - [ADR 0028: Starlark Saga CEL Valuation](../adr/0028-starlark-saga-cel-valuation.md)
 - Existing E2E Tests:
   - `services/reference-data/e2e/e2e_test.go`
-  - `services/internal-bank-account/e2e/e2e_test.go`
+  - `services/internal-account/e2e/e2e_test.go`
   - `services/market-information/e2e/e2e_test.go`
   - `tests/audit-e2e/audit_writer_e2e_test.go`
 

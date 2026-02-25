@@ -272,11 +272,11 @@ describe('CreateLienDialog - current account API', () => {
 })
 
 describe('CreateLienDialog - internal account API', () => {
-  it('calls InternalBankAccountService with input field instead of amount', async () => {
+  it('calls InternalAccountService with input field instead of amount', async () => {
     let capturedBody: unknown
     server.use(
       http.post(
-        '*/meridian.internal_bank_account.v1.InternalBankAccountService/InitiateLien',
+        '*/meridian.internal_account.v1.InternalAccountService/InitiateLien',
         async ({ request }) => {
           capturedBody = await request.json()
           return HttpResponse.json({ lien: { lienId: 'lien-internal-001' } })
@@ -302,7 +302,7 @@ describe('CreateLienDialog - internal account API', () => {
     let capturedBody: unknown
     server.use(
       http.post(
-        '*/meridian.internal_bank_account.v1.InternalBankAccountService/InitiateLien',
+        '*/meridian.internal_account.v1.InternalAccountService/InitiateLien',
         async ({ request }) => {
           capturedBody = await request.json()
           return HttpResponse.json({ lien: { lienId: 'lien-internal-001' } })
@@ -325,7 +325,7 @@ describe('CreateLienDialog - internal account API', () => {
   it('shows lien ID on success for internal accounts', async () => {
     server.use(
       http.post(
-        '*/meridian.internal_bank_account.v1.InternalBankAccountService/InitiateLien',
+        '*/meridian.internal_account.v1.InternalAccountService/InitiateLien',
         () => HttpResponse.json({ lien: { lienId: 'lien-internal-001' } }),
       ),
     )

@@ -20,7 +20,7 @@ import (
 	serviceobs "github.com/meridianhub/meridian/services/financial-accounting/observability"
 	"github.com/meridianhub/meridian/services/financial-accounting/service"
 	"github.com/meridianhub/meridian/services/financial-accounting/worker"
-	ibaclient "github.com/meridianhub/meridian/services/internal-bank-account/client"
+	ibaclient "github.com/meridianhub/meridian/services/internal-account/client"
 	"github.com/meridianhub/meridian/services/reference-data/cache"
 	refclient "github.com/meridianhub/meridian/services/reference-data/client"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
@@ -208,9 +208,10 @@ func run(logger *slog.Logger) error {
 	// Create ledger repository
 	ledgerRepo := persistence.NewLedgerRepository(db)
 
-	// Initialize Internal Bank Account client (optional - for dynamic clearing account lookup)
+	// Initialize Internal Account client (optional - for dynamic clearing account lookup)
 	var accountResolver *service.AccountResolver
-	ibaServiceURL := env.GetEnvOrDefault("INTERNAL_BANK_ACCOUNT_SERVICE_URL", "")
+	ibaServiceURL := env.GetEnvOrDefault("INTERNAL_ACCOUNT_SERVICE_URL",
+		env.GetEnvOrDefault("INTERNAL_BANK_ACCOUNT_SERVICE_URL", ""))
 	if ibaServiceURL != "" {
 		ibaClient, ibaCleanup, err := ibaclient.New(ibaclient.Config{
 			Target:  ibaServiceURL,
@@ -218,7 +219,7 @@ func run(logger *slog.Logger) error {
 		})
 		if err != nil {
 			// Non-fatal: fall back to static config
-			logger.Warn("failed to create Internal Bank Account client, using static clearing account",
+			logger.Warn("failed to create Internal Account client, using static clearing account",
 				"error", err,
 				"service_url", ibaServiceURL)
 		} else {
@@ -238,7 +239,7 @@ func run(logger *slog.Logger) error {
 			}
 		}
 	} else {
-		logger.Info("dynamic clearing account resolution disabled (INTERNAL_BANK_ACCOUNT_SERVICE_URL not set)")
+		logger.Info("dynamic clearing account resolution disabled (INTERNAL_ACCOUNT_SERVICE_URL not set)")
 	}
 
 	// Create posting service with optional AccountResolver

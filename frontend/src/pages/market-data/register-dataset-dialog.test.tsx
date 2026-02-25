@@ -26,7 +26,7 @@ vi.mock('@/api/clients', () => ({
     referenceData: {},
     accountTypeRegistry: {},
     node: {},
-    internalBankAccount: {},
+    internalAccount: {},
     marketInformation: {
       registerDataSet: vi.fn(),
     },
@@ -53,7 +53,7 @@ function setupMock(registerDataSet: ReturnType<typeof vi.fn> = vi.fn()) {
     referenceData: {} as never,
     accountTypeRegistry: {} as never,
     node: {} as never,
-    internalBankAccount: {} as never,
+    internalAccount: {} as never,
     marketInformation: {
       registerDataSet,
     } as never,

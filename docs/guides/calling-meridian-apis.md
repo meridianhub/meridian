@@ -222,7 +222,7 @@ directly to the local gateway on port 8090.
 | Payment Order | `/v1/payment-orders` | `meridian.payment_order.v1.PaymentOrderService` |
 | Market Information | `/v1/market-information` | `meridian.market_information.v1.MarketInformationService` |
 | Reconciliation | `/v1/reconciliation` | `meridian.reconciliation.v1.ReconciliationService` |
-| Internal Bank Account | `/v1/internal-bank-accounts` | `meridian.internal_bank_account.v1.InternalBankAccountService` |
+| Internal Account | `/v1/internal-accounts` | `meridian.internal_account.v1.InternalAccountService` |
 | Saga Registry | `/v1/sagas` | `meridian.saga.v1.SagaRegistryService` |
 | Tenant | `/v1/tenants` | `meridian.tenant.v1.TenantService` |
 | Admin | `/v1/admin` | `meridian.control_plane.v1.AdminService` |

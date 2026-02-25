@@ -65,18 +65,18 @@ type ServiceDatabase struct {
 // Two services (tenant, control-plane) share meridian_platform.
 // Their migrations are applied in service-name order (control-plane before tenant).
 var ServiceDatabases = map[string]ServiceDatabase{
-	"control-plane":         {Database: "meridian_platform", User: "meridian_platform_user", Password: ""},
-	"tenant":                {Database: "meridian_platform", User: "meridian_platform_user", Password: ""},
-	"current-account":       {Database: "meridian_current_account", User: "meridian_current_account_user", Password: ""},
-	"financial-accounting":  {Database: "meridian_financial_accounting", User: "meridian_financial_accounting_user", Password: ""},
-	"position-keeping":      {Database: "meridian_position_keeping", User: "meridian_position_keeping_user", Password: ""},
-	"payment-order":         {Database: "meridian_payment_order", User: "meridian_payment_order_user", Password: ""},
-	"party":                 {Database: "meridian_party", User: "meridian_party_user", Password: ""},
-	"internal-bank-account": {Database: "meridian_internal_bank_account", User: "meridian_internal_bank_account_user", Password: ""},
-	"market-information":    {Database: "meridian_market_information", User: "meridian_market_information_user", Password: ""},
-	"reconciliation":        {Database: "meridian_reconciliation", User: "meridian_reconciliation_user", Password: ""},
-	"forecasting":           {Database: "meridian_forecasting", User: "meridian_forecasting_user", Password: ""},
-	"reference-data":        {Database: "meridian_reference_data", User: "meridian_reference_data_user", Password: ""},
+	"control-plane":        {Database: "meridian_platform", User: "meridian_platform_user", Password: ""},
+	"tenant":               {Database: "meridian_platform", User: "meridian_platform_user", Password: ""},
+	"current-account":      {Database: "meridian_current_account", User: "meridian_current_account_user", Password: ""},
+	"financial-accounting": {Database: "meridian_financial_accounting", User: "meridian_financial_accounting_user", Password: ""},
+	"position-keeping":     {Database: "meridian_position_keeping", User: "meridian_position_keeping_user", Password: ""},
+	"payment-order":        {Database: "meridian_payment_order", User: "meridian_payment_order_user", Password: ""},
+	"party":                {Database: "meridian_party", User: "meridian_party_user", Password: ""},
+	"internal-account":     {Database: "meridian_internal_bank_account", User: "meridian_internal_bank_account_user", Password: ""},
+	"market-information":   {Database: "meridian_market_information", User: "meridian_market_information_user", Password: ""},
+	"reconciliation":       {Database: "meridian_reconciliation", User: "meridian_reconciliation_user", Password: ""},
+	"forecasting":          {Database: "meridian_forecasting", User: "meridian_forecasting_user", Password: ""},
+	"reference-data":       {Database: "meridian_reference_data", User: "meridian_reference_data_user", Password: ""},
 }
 
 // serviceMigration holds a single migration file for a service.

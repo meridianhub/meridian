@@ -8,7 +8,7 @@ triggers:
 instructions: |
   Use the ClearingPurpose enum to distinguish clearing accounts by their operational purpose.
   Set clearing_purpose field only when account_type is CLEARING. Filter clearing accounts
-  by purpose using clearing_purpose_filter in ListInternalBankAccounts RPC.
+  by purpose using clearing_purpose_filter in ListInternalAccounts RPC.
 ---
 
 # 25. Clearing Purpose Specialization
@@ -21,7 +21,7 @@ Accepted
 
 ## Context
 
-The Internal Bank Account service supports multiple clearing accounts per instrument (e.g., CLR-GBP-DEPOSIT, CLR-GBP-WITHDRAW). Initially, these accounts were distinguished only by naming convention. This created ambiguity when services needed to programmatically resolve the correct clearing account for a specific operation.
+The Internal Account service supports multiple clearing accounts per instrument (e.g., CLR-GBP-DEPOSIT, CLR-GBP-WITHDRAW). Initially, these accounts were distinguished only by naming convention. This created ambiguity when services needed to programmatically resolve the correct clearing account for a specific operation.
 
 ### Problems with Naming-Only Approach
 
@@ -70,12 +70,12 @@ enum ClearingPurpose {
   CLEARING_PURPOSE_GENERAL = 4;
 }
 
-message InternalBankAccountFacility {
+message InternalAccountFacility {
   // ... existing fields ...
   ClearingPurpose clearing_purpose = 12;
 }
 
-message ListInternalBankAccountsRequest {
+message ListInternalAccountsRequest {
   // ... existing fields ...
   ClearingPurpose clearing_purpose_filter = 5;
 }
@@ -84,12 +84,12 @@ message ListInternalBankAccountsRequest {
 **Database schema:**
 
 ```sql
-ALTER TABLE internal_bank_accounts
+ALTER TABLE internal_accounts
 ADD COLUMN clearing_purpose VARCHAR(32);
 
 -- Constraint ensures clearing_purpose is set for CLEARING accounts
 -- and UNSPECIFIED for non-CLEARING accounts
-ALTER TABLE internal_bank_accounts
+ALTER TABLE internal_accounts
 ADD CONSTRAINT chk_clearing_purpose_consistency
 CHECK (
   (account_type = 'CLEARING' AND clearing_purpose IS NOT NULL AND clearing_purpose != 'UNSPECIFIED')
@@ -107,7 +107,7 @@ CHECK (
 ### Positive Consequences
 
 * **Type-safe resolution**: Services can filter by ClearingPurpose enum instead of parsing account codes
-* **Database-level filtering**: `clearing_purpose_filter` in ListInternalBankAccounts enables efficient queries
+* **Database-level filtering**: `clearing_purpose_filter` in ListInternalAccounts enables efficient queries
 * **Clear semantics**: Unambiguous distinction between deposit/withdrawal/settlement operations
 * **Validation enforcement**: Cannot accidentally use a deposit clearing account for withdrawals
 * **Backward compatible**: Existing clearing accounts can be migrated with appropriate purpose assignment
@@ -162,14 +162,14 @@ Create separate tables: `deposit_clearing_accounts`, `withdrawal_clearing_accoun
 * Bad, because data duplication across tables
 * Bad, because complex queries spanning purposes
 * Bad, because difficult to add new purposes
-* Bad, because breaks Internal Bank Account service domain model
+* Bad, because breaks Internal Account service domain model
 
 ## Links
 
-* [ADR-0024: Internal Bank Account Service](0024-internal-bank-account-service.md)
-* [Internal Bank Account README](../../services/internal-bank-account/README.md)
-* [Proto Definitions](../../api/proto/meridian/internal_bank_account/v1/internal_bank_account.proto)
-* [BIAN v13.0 Internal Bank Account Service Domain](https://bian.org/semantic-apis/internal-bank-account/)
+* [ADR-0024: Internal Account Service](0024-internal-account-service.md)
+* [Internal Account README](../../services/internal-account/README.md)
+* [Proto Definitions](../../api/proto/meridian/internal_account/v1/internal_account.proto)
+* [BIAN v13.0 Internal Account Service Domain](https://bian.org/semantic-apis/internal-account/)
 
 ## Notes
 

@@ -17,7 +17,6 @@ import (
 	"github.com/lib/pq"
 	"github.com/santhosh-tekuri/jsonschema/v5"
 
-	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
@@ -163,10 +162,10 @@ func TestInitiateCurrentAccount_WithProductType_Success(t *testing.T) {
 	}
 
 	req := &pb.InitiateCurrentAccountRequest{
-		AccountIdentification: "GB82WEST12345698765432",
-		PartyId:               newTestPartyID(),
-		BaseCurrency:          commonpb.Currency_CURRENCY_GBP,
-		ProductTypeCode:       "CURRENT_GBP",
+		ExternalIdentifier: "GB82WEST12345698765432",
+		PartyId:            newTestPartyID(),
+		InstrumentCode:     "GBP",
+		ProductTypeCode:    "CURRENT_GBP",
 	}
 	resp, err := svc.InitiateCurrentAccount(ctx, req)
 
@@ -207,11 +206,11 @@ func TestInitiateCurrentAccount_WithProductType_VersionOverride(t *testing.T) {
 
 	requestedVersion := int32(2)
 	req := &pb.InitiateCurrentAccountRequest{
-		AccountIdentification: "GB82WEST12345698765432",
-		PartyId:               newTestPartyID(),
-		BaseCurrency:          commonpb.Currency_CURRENCY_GBP,
-		ProductTypeCode:       "CURRENT_GBP",
-		ProductTypeVersion:    &requestedVersion,
+		ExternalIdentifier: "GB82WEST12345698765432",
+		PartyId:            newTestPartyID(),
+		InstrumentCode:     "GBP",
+		ProductTypeCode:    "CURRENT_GBP",
+		ProductTypeVersion: &requestedVersion,
 	}
 	resp, err := svc.InitiateCurrentAccount(ctx, req)
 
@@ -244,10 +243,10 @@ func TestInitiateCurrentAccount_WithProductType_NotFound(t *testing.T) {
 	}
 
 	req := &pb.InitiateCurrentAccountRequest{
-		AccountIdentification: "GB82WEST12345698765432",
-		PartyId:               newTestPartyID(),
-		BaseCurrency:          commonpb.Currency_CURRENCY_GBP,
-		ProductTypeCode:       "NONEXISTENT",
+		ExternalIdentifier: "GB82WEST12345698765432",
+		PartyId:            newTestPartyID(),
+		InstrumentCode:     "GBP",
+		ProductTypeCode:    "NONEXISTENT",
 	}
 	resp, err := svc.InitiateCurrentAccount(ctx, req)
 
@@ -299,10 +298,10 @@ func TestInitiateCurrentAccount_WithProductType_NonCustomerBehaviorClass(t *test
 			}
 
 			req := &pb.InitiateCurrentAccountRequest{
-				AccountIdentification: "GB82WEST12345698765432",
-				PartyId:               newTestPartyID(),
-				BaseCurrency:          commonpb.Currency_CURRENCY_GBP,
-				ProductTypeCode:       "INTERNAL_" + tt.name,
+				ExternalIdentifier: "GB82WEST12345698765432",
+				PartyId:            newTestPartyID(),
+				InstrumentCode:     "GBP",
+				ProductTypeCode:    "INTERNAL_" + tt.name,
 			}
 			resp, err := svc.InitiateCurrentAccount(ctx, req)
 
@@ -355,10 +354,10 @@ func TestInitiateCurrentAccount_WithProductType_CELEligibility(t *testing.T) {
 		}
 
 		req := &pb.InitiateCurrentAccountRequest{
-			AccountIdentification: "GB82WEST12345698765432",
-			PartyId:               newTestPartyID(),
-			BaseCurrency:          commonpb.Currency_CURRENCY_GBP,
-			ProductTypeCode:       "PERSONAL_CURRENT",
+			ExternalIdentifier: "GB82WEST12345698765432",
+			PartyId:            newTestPartyID(),
+			InstrumentCode:     "GBP",
+			ProductTypeCode:    "PERSONAL_CURRENT",
 		}
 		resp, err := svc.InitiateCurrentAccount(ctx, req)
 
@@ -402,10 +401,10 @@ func TestInitiateCurrentAccount_WithProductType_CELEligibility(t *testing.T) {
 		}
 
 		req := &pb.InitiateCurrentAccountRequest{
-			AccountIdentification: "GB82WEST12345698765432",
-			PartyId:               newTestPartyID(),
-			BaseCurrency:          commonpb.Currency_CURRENCY_GBP,
-			ProductTypeCode:       "PERSONAL_CURRENT",
+			ExternalIdentifier: "GB82WEST12345698765432",
+			PartyId:            newTestPartyID(),
+			InstrumentCode:     "GBP",
+			ProductTypeCode:    "PERSONAL_CURRENT",
 		}
 		resp, err := svc.InitiateCurrentAccount(ctx, req)
 
@@ -448,10 +447,10 @@ func TestInitiateCurrentAccount_WithProductType_EligibilityRequiresPartyClient(t
 	}
 
 	req := &pb.InitiateCurrentAccountRequest{
-		AccountIdentification: "GB82WEST12345698765432",
-		PartyId:               newTestPartyID(),
-		BaseCurrency:          commonpb.Currency_CURRENCY_GBP,
-		ProductTypeCode:       "PERSONAL_CURRENT",
+		ExternalIdentifier: "GB82WEST12345698765432",
+		PartyId:            newTestPartyID(),
+		InstrumentCode:     "GBP",
+		ProductTypeCode:    "PERSONAL_CURRENT",
 	}
 	resp, err := svc.InitiateCurrentAccount(ctx, req)
 
@@ -493,11 +492,11 @@ func TestInitiateCurrentAccount_WithProductType_VersionExceedsLatest(t *testing.
 
 	requestedVersion := int32(5) // higher than latest version 3
 	req := &pb.InitiateCurrentAccountRequest{
-		AccountIdentification: "GB82WEST12345698765432",
-		PartyId:               newTestPartyID(),
-		BaseCurrency:          commonpb.Currency_CURRENCY_GBP,
-		ProductTypeCode:       "CURRENT_GBP",
-		ProductTypeVersion:    &requestedVersion,
+		ExternalIdentifier: "GB82WEST12345698765432",
+		PartyId:            newTestPartyID(),
+		InstrumentCode:     "GBP",
+		ProductTypeCode:    "CURRENT_GBP",
+		ProductTypeVersion: &requestedVersion,
 	}
 	resp, err := svc.InitiateCurrentAccount(ctx, req)
 
@@ -555,11 +554,11 @@ func TestInitiateCurrentAccount_WithProductType_AttributeValidation(t *testing.T
 		}
 
 		req := &pb.InitiateCurrentAccountRequest{
-			AccountIdentification: "GB82WEST12345698765432",
-			PartyId:               newTestPartyID(),
-			BaseCurrency:          commonpb.Currency_CURRENCY_GBP,
-			ProductTypeCode:       "RISK_CURRENT",
-			Attributes:            map[string]string{"risk_level": "LOW"},
+			ExternalIdentifier: "GB82WEST12345698765432",
+			PartyId:            newTestPartyID(),
+			InstrumentCode:     "GBP",
+			ProductTypeCode:    "RISK_CURRENT",
+			Attributes:         map[string]string{"risk_level": "LOW"},
 		}
 		resp, err := svc.InitiateCurrentAccount(ctx, req)
 
@@ -599,11 +598,11 @@ func TestInitiateCurrentAccount_WithProductType_AttributeValidation(t *testing.T
 		}
 
 		req := &pb.InitiateCurrentAccountRequest{
-			AccountIdentification: "GB82WEST12345698765432",
-			PartyId:               newTestPartyID(),
-			BaseCurrency:          commonpb.Currency_CURRENCY_GBP,
-			ProductTypeCode:       "RISK_CURRENT",
-			Attributes:            map[string]string{"risk_level": "EXTREME"}, // Invalid enum value
+			ExternalIdentifier: "GB82WEST12345698765432",
+			PartyId:            newTestPartyID(),
+			InstrumentCode:     "GBP",
+			ProductTypeCode:    "RISK_CURRENT",
+			Attributes:         map[string]string{"risk_level": "EXTREME"}, // Invalid enum value
 		}
 		resp, err := svc.InitiateCurrentAccount(ctx, req)
 
@@ -647,11 +646,11 @@ func TestInitiateCurrentAccount_WithProductType_AttributeValidation(t *testing.T
 		}
 
 		req := &pb.InitiateCurrentAccountRequest{
-			AccountIdentification: "GB82WEST12345698765432",
-			PartyId:               newTestPartyID(),
-			BaseCurrency:          commonpb.Currency_CURRENCY_GBP,
-			ProductTypeCode:       "RISK_CURRENT",
-			Attributes:            map[string]string{}, // Missing required risk_level
+			ExternalIdentifier: "GB82WEST12345698765432",
+			PartyId:            newTestPartyID(),
+			InstrumentCode:     "GBP",
+			ProductTypeCode:    "RISK_CURRENT",
+			Attributes:         map[string]string{}, // Missing required risk_level
 		}
 		resp, err := svc.InitiateCurrentAccount(ctx, req)
 
@@ -715,10 +714,10 @@ func TestInitiateCurrentAccount_WithProductType_ValuationFeatureSeeding(t *testi
 	}
 
 	req := &pb.InitiateCurrentAccountRequest{
-		AccountIdentification: "GB82WEST12345698765432",
-		PartyId:               newTestPartyID(),
-		BaseCurrency:          commonpb.Currency_CURRENCY_GBP,
-		ProductTypeCode:       "MULTI_CCY_CURRENT",
+		ExternalIdentifier: "GB82WEST12345698765432",
+		PartyId:            newTestPartyID(),
+		InstrumentCode:     "GBP",
+		ProductTypeCode:    "MULTI_CCY_CURRENT",
 	}
 	resp, err := svc.InitiateCurrentAccount(ctx, req)
 
@@ -770,9 +769,9 @@ func TestInitiateCurrentAccount_BackwardsCompatibility(t *testing.T) {
 
 	// No product_type_code - legacy behavior
 	req := &pb.InitiateCurrentAccountRequest{
-		AccountIdentification: "GB82WEST12345698765432",
-		PartyId:               newTestPartyID(),
-		BaseCurrency:          commonpb.Currency_CURRENCY_GBP,
+		ExternalIdentifier: "GB82WEST12345698765432",
+		PartyId:            newTestPartyID(),
+		InstrumentCode:     "GBP",
 	}
 	resp, err := svc.InitiateCurrentAccount(ctx, req)
 
@@ -805,10 +804,10 @@ func TestInitiateCurrentAccount_WithProductType_NoCacheConfigured(t *testing.T) 
 	}
 
 	req := &pb.InitiateCurrentAccountRequest{
-		AccountIdentification: "GB82WEST12345698765432",
-		PartyId:               newTestPartyID(),
-		BaseCurrency:          commonpb.Currency_CURRENCY_GBP,
-		ProductTypeCode:       "CURRENT_GBP", // Provided but will be ignored
+		ExternalIdentifier: "GB82WEST12345698765432",
+		PartyId:            newTestPartyID(),
+		InstrumentCode:     "GBP",
+		ProductTypeCode:    "CURRENT_GBP", // Provided but will be ignored
 	}
 	resp, err := svc.InitiateCurrentAccount(ctx, req)
 
@@ -840,10 +839,10 @@ func TestInitiateCurrentAccount_WithProductType_MissingTenantContext(t *testing.
 	}
 
 	req := &pb.InitiateCurrentAccountRequest{
-		AccountIdentification: "GB82WEST12345698765432",
-		PartyId:               newTestPartyID(),
-		BaseCurrency:          commonpb.Currency_CURRENCY_GBP,
-		ProductTypeCode:       "CURRENT_GBP",
+		ExternalIdentifier: "GB82WEST12345698765432",
+		PartyId:            newTestPartyID(),
+		InstrumentCode:     "GBP",
+		ProductTypeCode:    "CURRENT_GBP",
 	}
 	resp, err := svc.InitiateCurrentAccount(ctx, req)
 
@@ -880,10 +879,10 @@ func TestInitiateCurrentAccount_WithProductType_CacheError(t *testing.T) {
 	}
 
 	req := &pb.InitiateCurrentAccountRequest{
-		AccountIdentification: "GB82WEST12345698765432",
-		PartyId:               newTestPartyID(),
-		BaseCurrency:          commonpb.Currency_CURRENCY_GBP,
-		ProductTypeCode:       "CURRENT_GBP",
+		ExternalIdentifier: "GB82WEST12345698765432",
+		PartyId:            newTestPartyID(),
+		InstrumentCode:     "GBP",
+		ProductTypeCode:    "CURRENT_GBP",
 	}
 	resp, err := svc.InitiateCurrentAccount(ctx, req)
 

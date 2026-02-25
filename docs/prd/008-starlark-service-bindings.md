@@ -222,7 +222,7 @@ market_price = market_information.get_spot_price(
 )
 
 step(name="get_contract_terms")
-contract = internal_bank_account.get_contract(
+contract = internal_account.get_contract(
     contract_id=contract_id,
 )
 
@@ -631,7 +631,7 @@ func TestValuationWorkflow_E2E(t *testing.T) {
             timestamp=input_data["valuation_at"],
         )
 
-        contract = internal_bank_account.get_contract(
+        contract = internal_account.get_contract(
             contract_id=input_data["contract_id"],
         )
 

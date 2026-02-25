@@ -23,7 +23,7 @@ vi.mock('@/api/clients', () => ({
     referenceData: {},
     accountTypeRegistry: {},
     node: {},
-    internalBankAccount: {},
+    internalAccount: {},
     marketInformation: {},
     forecasting: {
       computeForwardCurve: vi.fn(),
@@ -75,7 +75,7 @@ function setupMock({
     referenceData: {} as never,
     accountTypeRegistry: {} as never,
     node: {} as never,
-    internalBankAccount: {} as never,
+    internalAccount: {} as never,
     marketInformation: {} as never,
     forecasting: { computeForwardCurve } as never,
   })

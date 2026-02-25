@@ -230,7 +230,7 @@ Run Atlas migrations per service in the following order to respect provisioning 
 5. `financial-accounting`
 6. `position-keeping`
 7. `current-account`
-8. `internal-bank-account`
+8. `internal-account`
 9. `market-information`
 10. `payment-order`
 11. `forecasting`
@@ -262,7 +262,7 @@ use `dev = "docker://postgres/16/dev"` for schema diffing and lint validation.
 | current-account | 16 | None | Compatible |
 | financial-accounting | 5 | None (DROP+CREATE workarounds) | Compatible |
 | forecasting | 2 | None | Compatible |
-| internal-bank-account | 9 | None | Compatible |
+| internal-account | 9 | None | Compatible |
 | market-information | 6 | None | Compatible |
 | party | 12 | None | Compatible |
 | payment-order | 11 | None (DROP+CREATE workarounds) | Compatible |

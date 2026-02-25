@@ -24,7 +24,7 @@ import (
 // PostProvisioningHook is called after schema provisioning succeeds but before
 // marking the tenant as active. Hooks are non-blocking - errors are logged but
 // do not prevent tenant activation. This allows for best-effort initialization
-// of tenant-specific resources (e.g., default internal bank accounts).
+// of tenant-specific resources (e.g., default internal accounts).
 type PostProvisioningHook func(ctx context.Context, tenantID tenant.TenantID) error
 
 // ProvisioningWorker polls for tenants in PROVISIONING_PENDING status
@@ -228,7 +228,7 @@ func (w *ProvisioningWorker) Stop() {
 // RegisterPostProvisioningHook adds a hook to be called after schema provisioning succeeds.
 // Hooks are executed in registration order and are non-blocking - errors are logged
 // but do not prevent tenant activation. Use this for best-effort initialization like
-// creating default internal bank accounts.
+// creating default internal accounts.
 //
 // The name parameter is used for logging to identify which hook succeeded or failed.
 func (w *ProvisioningWorker) RegisterPostProvisioningHook(name string, hook PostProvisioningHook) {
@@ -483,7 +483,7 @@ func (w *ProvisioningWorker) checkContextCancellation(ctx context.Context, tenan
 
 // markTenantAsActive updates tenant status to active after successful provisioning.
 // Before marking as active, it executes any registered post-provisioning hooks
-// (e.g., creating default internal bank accounts). Hook failures are logged but
+// (e.g., creating default internal accounts). Hook failures are logged but
 // do not prevent tenant activation.
 func (w *ProvisioningWorker) markTenantAsActive(ctx context.Context, tenantID tenant.TenantID, attempt int) {
 	w.logger.Info("provisioning succeeded",
@@ -491,7 +491,7 @@ func (w *ProvisioningWorker) markTenantAsActive(ctx context.Context, tenantID te
 		"attempt", attempt)
 
 	// Execute post-provisioning hooks (non-blocking)
-	// These hooks can initialize tenant-specific resources like default internal bank accounts.
+	// These hooks can initialize tenant-specific resources like default internal accounts.
 	// Failures are logged but do not prevent tenant activation.
 	w.executePostProvisioningHooks(ctx, tenantID)
 

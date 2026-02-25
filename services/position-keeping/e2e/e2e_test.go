@@ -39,7 +39,7 @@ func setupE2ETest(t *testing.T) (*gorm.DB, func()) {
 }
 
 // setupTenantSchema creates a tenant schema and applies position-keeping schema.
-// This matches the pattern from internal-bank-account/e2e/e2e_test.go.
+// This matches the pattern from internal-account/e2e/e2e_test.go.
 func setupTenantSchema(t *testing.T, db *gorm.DB, tenantID string) context.Context {
 	t.Helper()
 

@@ -208,7 +208,7 @@ var (
 	clearingAccountLookupDuration = promauto.NewHistogram(
 		prometheus.HistogramOpts{
 			Name:    "payment_order_clearing_account_lookup_duration_seconds",
-			Help:    "Duration of clearing account lookups from Internal Bank Account service",
+			Help:    "Duration of clearing account lookups from Internal Account service",
 			Buckets: []float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5},
 		},
 	)

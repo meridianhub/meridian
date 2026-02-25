@@ -780,7 +780,7 @@ func TestLoadConfig_AccountValidation_CustomValues(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://localhost:5432/testdb")
 	t.Setenv("ACCOUNT_VALIDATION_ENABLED", "true")
 	t.Setenv("CURRENT_ACCOUNT_SERVICE_URL", "current-account:50051")
-	t.Setenv("INTERNAL_BANK_ACCOUNT_SERVICE_URL", "internal-bank-account:50052")
+	t.Setenv("INTERNAL_ACCOUNT_SERVICE_URL", "internal-account:50052")
 	t.Setenv("ACCOUNT_VALIDATION_CACHE_TTL", "5m")
 	t.Setenv("ACCOUNT_VALIDATION_CONNECTION_TIMEOUT", "10s")
 
@@ -796,9 +796,9 @@ func TestLoadConfig_AccountValidation_CustomValues(t *testing.T) {
 		t.Errorf("AccountValidation.CurrentAccountServiceURL = %s, want current-account:50051",
 			config.AccountValidation.CurrentAccountServiceURL)
 	}
-	if config.AccountValidation.InternalBankAccountServiceURL != "internal-bank-account:50052" {
-		t.Errorf("AccountValidation.InternalBankAccountServiceURL = %s, want internal-bank-account:50052",
-			config.AccountValidation.InternalBankAccountServiceURL)
+	if config.AccountValidation.InternalAccountServiceURL != "internal-account:50052" {
+		t.Errorf("AccountValidation.InternalAccountServiceURL = %s, want internal-account:50052",
+			config.AccountValidation.InternalAccountServiceURL)
 	}
 	if config.AccountValidation.CacheTTL != 5*time.Minute {
 		t.Errorf("AccountValidation.CacheTTL = %v, want 5m", config.AccountValidation.CacheTTL)
@@ -824,12 +824,12 @@ func TestLoadConfig_AccountValidation_Disabled(t *testing.T) {
 	}
 }
 
-func TestLoadConfig_AccountValidation_OnlyInternalBankAccount(t *testing.T) {
+func TestLoadConfig_AccountValidation_OnlyInternalAccount(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("DATABASE_URL", "postgres://localhost:5432/testdb")
 	t.Setenv("ACCOUNT_VALIDATION_ENABLED", "true")
-	// Only Internal Bank Account URL - should be valid
-	t.Setenv("INTERNAL_BANK_ACCOUNT_SERVICE_URL", "internal-bank-account:50052")
+	// Only Internal Account URL - should be valid
+	t.Setenv("INTERNAL_ACCOUNT_SERVICE_URL", "internal-account:50052")
 
 	config, err := LoadConfig()
 	if err != nil {
@@ -839,9 +839,9 @@ func TestLoadConfig_AccountValidation_OnlyInternalBankAccount(t *testing.T) {
 	if !config.AccountValidation.Enabled {
 		t.Error("AccountValidation.Enabled = false, want true")
 	}
-	if config.AccountValidation.InternalBankAccountServiceURL != "internal-bank-account:50052" {
-		t.Errorf("AccountValidation.InternalBankAccountServiceURL = %s, want internal-bank-account:50052",
-			config.AccountValidation.InternalBankAccountServiceURL)
+	if config.AccountValidation.InternalAccountServiceURL != "internal-account:50052" {
+		t.Errorf("AccountValidation.InternalAccountServiceURL = %s, want internal-account:50052",
+			config.AccountValidation.InternalAccountServiceURL)
 	}
 }
 
@@ -875,7 +875,7 @@ func clearEnv(t *testing.T) {
 		"COMPACTION_ENABLED", "COMPACTION_RUN_INTERVAL",
 		"COMPACTION_FRAGMENT_THRESHOLD", "COMPACTION_BATCH_SIZE",
 		"ACCOUNT_VALIDATION_ENABLED", "CURRENT_ACCOUNT_SERVICE_URL",
-		"INTERNAL_BANK_ACCOUNT_SERVICE_URL", "ACCOUNT_VALIDATION_CACHE_TTL",
+		"INTERNAL_ACCOUNT_SERVICE_URL", "ACCOUNT_VALIDATION_CACHE_TTL",
 		"ACCOUNT_VALIDATION_CONNECTION_TIMEOUT",
 	}
 	for _, key := range envVars {

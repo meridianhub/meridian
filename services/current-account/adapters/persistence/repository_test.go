@@ -38,7 +38,8 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 		account_id VARCHAR(100) NOT NULL UNIQUE,
 		account_identification VARCHAR(34) NOT NULL UNIQUE,
 		account_type VARCHAR(50) NOT NULL DEFAULT 'current',
-		currency CHAR(3) NOT NULL DEFAULT 'GBP',
+		instrument_code VARCHAR(32) NOT NULL DEFAULT 'GBP',
+		dimension VARCHAR(20) NOT NULL DEFAULT 'CURRENCY',
 		status VARCHAR(20) NOT NULL DEFAULT 'active',
 		party_id UUID NOT NULL,
 		org_party_id UUID NULL,
@@ -346,14 +347,15 @@ func TestOptimisticLocking(t *testing.T) {
 // Defensive tests for toDomain error handling per ADR-008
 
 func TestToDomain_InvalidCurrency_ReturnsError(t *testing.T) {
-	// Test: Empty currency in database should return error, not silently create invalid Money
+	// Test: Empty instrument_code in database should return error, not silently create invalid Money
 	// Note: Balance fields removed - balance now computed by Position Keeping service
 	entity := &CurrentAccountEntity{
 		ID:                    uuid.New(),
 		AccountIdentification: "GB82WEST12345698765432",
 		AccountType:           "current",
 		PartyID:               uuid.New(),
-		Currency:              "", // Invalid: empty currency
+		InstrumentCode:        "", // Invalid: empty instrument_code
+		Dimension:             "CURRENCY",
 		Status:                "active",
 		OverdraftLimit:        0,
 		CreatedAt:             time.Now(),
@@ -388,7 +390,8 @@ func TestFindByID_CorruptedData_ReturnsError(t *testing.T) {
 		AccountIdentification: "GB82WEST12345698765432",
 		AccountType:           "current",
 		PartyID:               uuid.New(),
-		Currency:              "", // Corrupted: empty currency
+		InstrumentCode:        "", // Corrupted: empty instrument_code
+		Dimension:             "CURRENCY",
 		Status:                "active",
 		OverdraftLimit:        0,
 		CreatedAt:             time.Now(),
@@ -429,7 +432,8 @@ func TestFindByPartyID_PartialCorruption_ReturnsError(t *testing.T) {
 		AccountIdentification: "GB82WEST12345698765432",
 		AccountType:           "current",
 		PartyID:               partyID,
-		Currency:              "GBP",
+		InstrumentCode:        "GBP",
+		Dimension:             "CURRENCY",
 		Status:                "active",
 		OverdraftLimit:        0,
 		CreatedAt:             time.Now(),
@@ -445,7 +449,8 @@ func TestFindByPartyID_PartialCorruption_ReturnsError(t *testing.T) {
 		AccountIdentification: "GB82WEST99999999999999",
 		AccountType:           "current",
 		PartyID:               partyID, // Same party
-		Currency:              "",      // Corrupted
+		InstrumentCode:        "",      // Corrupted
+		Dimension:             "CURRENCY",
 		Status:                "active",
 		OverdraftLimit:        0,
 		CreatedAt:             time.Now(),

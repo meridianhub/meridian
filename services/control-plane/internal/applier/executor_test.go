@@ -137,7 +137,7 @@ func TestNewManifestExecutor(t *testing.T) {
 // TestApplyManifestSaga_ZeroLocalSagaDefinitions is the critical test for subtask 7.7.
 // It validates the complete end-to-end path for a tenant with 0 local saga definitions:
 //  1. Load the embedded apply_manifest.star from platform defaults
-//  2. Register all manifest handlers (reference_data + internal_bank_account)
+//  2. Register all manifest handlers (reference_data + internal_account)
 //  3. Build typed Starlark service modules from handlers.yaml schema
 //  4. Execute the saga with a full manifest input
 //  5. Verify all 4 phases execute in order and produce correct results
@@ -188,7 +188,7 @@ func TestApplyManifestSaga_ZeroLocalSagaDefinitions(t *testing.T) {
 			}, nil
 		},
 	}
-	mockIBA := &mockInternalBankAccount{
+	mockIBA := &mockInternalAccount{
 		initiateAccountFn: func(_ *saga.StarlarkContext, params map[string]any) (any, error) {
 			handlerCalls = append(handlerCalls, "initiate_account:"+params["account_code"].(string))
 			return map[string]any{
@@ -203,8 +203,8 @@ func TestApplyManifestSaga_ZeroLocalSagaDefinitions(t *testing.T) {
 	}
 
 	deps := &HandlerDependencies{
-		ReferenceData:       mockRefData,
-		InternalBankAccount: mockIBA,
+		ReferenceData:   mockRefData,
+		InternalAccount: mockIBA,
 	}
 	err = RegisterManifestHandlers(registry, deps)
 	require.NoError(t, err)

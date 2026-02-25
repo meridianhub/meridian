@@ -22,7 +22,7 @@ Accepted
 
 ## Context
 
-The `GetBalance` method in `services/internal-bank-account/service/server.go` includes a nil check on the `positionKeepingClient` field before calling Position Keeping:
+The `GetBalance` method in `services/internal-account/service/server.go` includes a nil check on the `positionKeepingClient` field before calling Position Keeping:
 
 ```go
 if s.positionKeepingClient == nil {
@@ -82,8 +82,8 @@ Retain the explicit nil check with a descriptive error.
 ## Links
 
 * [ADR-0023: Balance Delegation to Position Keeping](0023-balance-delegation-to-position-keeping.md)
-* [ADR-0024: Internal Bank Account Service](0024-internal-bank-account-service.md)
-* Related code: `services/internal-bank-account/service/server.go` (GetBalance method)
+* [ADR-0024: Internal Account Service](0024-internal-account-service.md)
+* Related code: `services/internal-account/service/server.go` (GetBalance method)
 
 ## Notes
 

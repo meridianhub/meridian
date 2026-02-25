@@ -1,0 +1,23 @@
+# ServiceMonitor for internal-account service
+# Enables Prometheus Operator to scrape metrics from the service
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: internal-account
+  labels:
+    app: internal-account
+    component: microservice
+    prometheus: kube-prometheus
+spec:
+  selector:
+    matchLabels:
+      app: internal-account
+  endpoints:
+  - port: http-metrics
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s
+    scheme: http
+  namespaceSelector:
+    matchNames:
+    - meridian

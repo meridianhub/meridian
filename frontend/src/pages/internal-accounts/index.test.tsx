@@ -23,8 +23,8 @@ vi.mock('@/api/clients', () => ({
     referenceData: {},
     accountTypeRegistry: {},
     node: {},
-    internalBankAccount: {
-      listInternalBankAccounts: vi.fn(),
+    internalAccount: {
+      listInternalAccounts: vi.fn(),
     },
     marketInformation: {},
   })),
@@ -66,8 +66,8 @@ function setupMock(accounts = [makeAccount()], nextPageToken = '') {
     referenceData: {} as never,
     accountTypeRegistry: {} as never,
     node: {} as never,
-    internalBankAccount: {
-      listInternalBankAccounts: vi.fn().mockResolvedValue({
+    internalAccount: {
+      listInternalAccounts: vi.fn().mockResolvedValue({
         facilities: accounts,
         pagination: { nextPageToken, totalCount: BigInt(accounts.length) },
       }),
@@ -149,8 +149,8 @@ describe('InternalAccountsPage', () => {
       referenceData: {} as never,
       accountTypeRegistry: {} as never,
       node: {} as never,
-      internalBankAccount: {
-        listInternalBankAccounts: vi.fn().mockReturnValue(new Promise(() => {})),
+      internalAccount: {
+        listInternalAccounts: vi.fn().mockReturnValue(new Promise(() => {})),
       } as never,
       marketInformation: {} as never,
     })

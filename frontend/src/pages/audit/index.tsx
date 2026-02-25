@@ -144,7 +144,7 @@ const TABLE_OPTIONS = [
   { label: 'Account Reconciliation', value: 'account_reconciliation' },
   { label: 'Party', value: 'party' },
   { label: 'Reference Data', value: 'reference_data' },
-  { label: 'Internal Bank Account', value: 'internal_bank_account' },
+  { label: 'Internal Account', value: 'internal_account' },
 ]
 
 const OPERATION_OPTIONS = [

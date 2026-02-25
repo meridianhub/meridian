@@ -500,8 +500,8 @@ func TestRunPreFlight_BalanceMismatch(t *testing.T) {
 func TestRunPreFlight_DefaultConfig(t *testing.T) {
 	mockClient := &mockCurrentAccountClient{
 		initiateFunc: func(_ context.Context, req *currentaccountv1.InitiateCurrentAccountRequest) (*currentaccountv1.InitiateCurrentAccountResponse, error) {
-			// Verify GBP currency is used
-			assert.Equal(t, commonv1.Currency_CURRENCY_GBP, req.GetBaseCurrency())
+			// Verify GBP instrument code is used
+			assert.Equal(t, "GBP", req.GetInstrumentCode())
 			return &currentaccountv1.InitiateCurrentAccountResponse{
 				AccountId: "test-account",
 				Facility:  &currentaccountv1.CurrentAccountFacility{},

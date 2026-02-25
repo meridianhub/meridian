@@ -3,13 +3,13 @@
 # Smoke test for GetBalance in a Tilt environment.
 #
 # Verifies that:
-#   1. internal-bank-account and position-keeping services are healthy
-#   2. A test account can be created via InitiateInternalBankAccount
+#   1. internal-account and position-keeping services are healthy
+#   2. A test account can be created via InitiateInternalAccount
 #   3. GetBalance returns a response (not an error) for the created account
 #
 # Prerequisites:
 #   - grpcurl installed
-#   - Services running in Tilt (internal-bank-account on 50057, position-keeping on 50053)
+#   - Services running in Tilt (internal-account on 50057, position-keeping on 50053)
 #
 # Usage:
 #   ./scripts/smoke-test-get-balance.sh
@@ -54,7 +54,7 @@ wait_for_health() {
 
 # --- Step 1: Wait for services to be healthy ---
 
-wait_for_health "$IBA_ADDR" "internal-bank-account" "Internal Bank Account"
+wait_for_health "$IBA_ADDR" "internal-account" "Internal Account"
 wait_for_health "$PK_ADDR"  "position-keeping"      "Position Keeping"
 
 # --- Step 2: Create a test account ---
@@ -71,7 +71,7 @@ CREATE_RESP=$(grpcurl -plaintext -d "{
   \"instrument_code\": \"GBP\",
   \"clearing_purpose\": \"CLEARING_PURPOSE_GENERAL\",
   \"idempotency_key\": {\"key\": \"${IDEMPOTENCY_KEY}\"}
-}" "$IBA_ADDR" meridian.internal_bank_account.v1.InternalBankAccountService/InitiateInternalBankAccount 2>&1) || true
+}" "$IBA_ADDR" meridian.internal_account.v1.InternalAccountService/InitiateInternalAccount 2>&1) || true
 
 ACCOUNT_ID=$(echo "$CREATE_RESP" | grep -o '"accountId":[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"accountId":[[:space:]]*"\([^"]*\)".*/\1/')
 
@@ -88,7 +88,7 @@ log_info "Created account: ${ACCOUNT_ID}"
 log_info "Calling GetBalance for account ${ACCOUNT_ID}..."
 
 BALANCE_RESP=$(grpcurl -plaintext -d "{\"account_id\": \"${ACCOUNT_ID}\"}" \
-    "$IBA_ADDR" meridian.internal_bank_account.v1.InternalBankAccountService/GetBalance 2>&1) || BALANCE_EXIT=$?
+    "$IBA_ADDR" meridian.internal_account.v1.InternalAccountService/GetBalance 2>&1) || BALANCE_EXIT=$?
 BALANCE_EXIT=${BALANCE_EXIT:-0}
 
 if [ "$BALANCE_EXIT" -ne 0 ]; then

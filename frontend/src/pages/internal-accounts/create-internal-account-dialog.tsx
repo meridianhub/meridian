@@ -96,7 +96,7 @@ export function CreateInternalAccountDialog({ open, onOpenChange }: CreateIntern
 
   const mutation = useMutation({
     mutationFn: async () => {
-      return clients.internalBankAccount.initiateInternalBankAccount({
+      return clients.internalAccount.initiateInternalAccount({
         name: formData.accountName.trim(),
         accountCode: formData.accountCode.trim(),
         productTypeCode: formData.accountType,
@@ -185,7 +185,7 @@ export function CreateInternalAccountDialog({ open, onOpenChange }: CreateIntern
         <DialogHeader>
           <DialogTitle>New Internal Account</DialogTitle>
           <DialogDescription>
-            Create a new internal bank account such as a clearing, nostro, vostro, or suspense account.
+            Create a new internal account such as a clearing, nostro, vostro, or suspense account.
           </DialogDescription>
         </DialogHeader>
 

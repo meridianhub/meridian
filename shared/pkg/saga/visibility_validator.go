@@ -31,7 +31,7 @@ type VisibilityManifest struct {
 	ReferencedParties []uuid.UUID
 
 	// AuthorizedLookups lists lookup types that are authorized for cross-party access.
-	// Valid values: "resolve_account", "internal_bank_account"
+	// Valid values: "resolve_account", "internal_account"
 	// These lookups are validated per-step, not during pre-flight.
 	AuthorizedLookups []string
 }
