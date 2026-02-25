@@ -60,14 +60,6 @@ export function CreateSagaDraftDialog({ open, onOpenChange }: CreateSagaDraftDia
   const [formData, setFormData] = React.useState<FormData>(INITIAL_FORM)
   const [errors, setErrors] = React.useState<FormErrors>({})
 
-  React.useEffect(() => {
-    if (!open) {
-      setFormData(INITIAL_FORM)
-      setErrors({})
-      mutation.reset()
-    }
-  }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
-
   const mutation = useMutation({
     mutationFn: () =>
       clients.sagaRegistry.createSagaDraft({
@@ -101,6 +93,14 @@ export function CreateSagaDraftDialog({ open, onOpenChange }: CreateSagaDraftDia
       }
     },
   })
+
+  React.useEffect(() => {
+    if (!open) {
+      setFormData(INITIAL_FORM)
+      setErrors({})
+      mutation.reset()
+    }
+  }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function validate(): boolean {
     const next: FormErrors = {}
