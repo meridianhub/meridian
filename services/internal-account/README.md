@@ -513,7 +513,7 @@ sequenceDiagram
 
 ```mermaid
 erDiagram
-    internal_accounts {
+    internal_account {
         uuid id PK "KSUID"
         string account_code UK "Business code"
         string name "Display name"
@@ -536,7 +536,7 @@ erDiagram
         string correspondent_type "NOSTRO|VOSTRO"
     }
 
-    internal_accounts ||--o| correspondent_bank_details : "has (nostro/vostro only)"
+    internal_account ||--o| correspondent_bank_details : "has (nostro/vostro only)"
 ```
 
 ## Service Dependencies

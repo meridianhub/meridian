@@ -230,7 +230,8 @@ material.
 ### Service Wiring (Micro-PRDs)
 
 - [Current Account Withdrawal Persistence](018-current-account-withdrawal-persistence.md) - Wire withdrawal-by-ID gRPC handlers
-- [IBA - Position Keeping Client](019-internal-account-position-keeping-client.md) - Wire PK gRPC client in IBA service
+- [Internal Account - PK Client](019-internal-account-position-keeping-client.md) -
+  Wire PK gRPC client in Internal Account service
 - [Party KYC/AML Provider Integration](020-party-kyc-aml-provider-integration.md) - External KYC/AML provider adapter
 
 ### Deployment Targets

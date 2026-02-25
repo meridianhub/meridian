@@ -210,7 +210,8 @@ func run(logger *slog.Logger) error {
 
 	// Initialize Internal Account client (optional - for dynamic clearing account lookup)
 	var accountResolver *service.AccountResolver
-	ibaServiceURL := env.GetEnvOrDefault("INTERNAL_ACCOUNT_SERVICE_URL", "")
+	ibaServiceURL := env.GetEnvOrDefault("INTERNAL_ACCOUNT_SERVICE_URL",
+		env.GetEnvOrDefault("INTERNAL_BANK_ACCOUNT_SERVICE_URL", ""))
 	if ibaServiceURL != "" {
 		ibaClient, ibaCleanup, err := ibaclient.New(ibaclient.Config{
 			Target:  ibaServiceURL,

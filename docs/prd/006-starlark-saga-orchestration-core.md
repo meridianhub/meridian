@@ -1082,7 +1082,7 @@ func (r *Runtime) ResolveLookup(sagaDef SagaDefinition, lookupType string, key a
     case "internal_account.by_attributes":
         // Generic lookup - matches against attributes JSONB
         attrs := key.(map[string]any)
-        return r.internalBankClient.GetByAttributes(ctx, attrs)
+        return r.internalAccountClient.GetByAttributes(ctx, attrs)
     }
 }
 
