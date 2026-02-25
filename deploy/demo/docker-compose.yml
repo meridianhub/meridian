@@ -124,7 +124,7 @@ services:
 
       # --- Meridian API ---
       MERIDIAN_API_URL: meridian:50051
-      MCP_API_KEY: ${MCP_API_KEY:?MCP_API_KEY must be set in the env file}
+      MERIDIAN_API_KEY: ${MERIDIAN_API_KEY:?MERIDIAN_API_KEY must be set in the env file}
 
       # --- Application ---
       LOG_LEVEL: ${LOG_LEVEL:-info}
