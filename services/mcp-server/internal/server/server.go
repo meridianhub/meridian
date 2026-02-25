@@ -10,6 +10,8 @@ import (
 	"log/slog"
 	"sort"
 
+	"github.com/meridianhub/meridian/services/mcp-server/internal/prompts"
+	"github.com/meridianhub/meridian/services/mcp-server/internal/resources"
 	"github.com/meridianhub/meridian/services/mcp-server/internal/transport"
 )
 
@@ -24,11 +26,24 @@ type Info struct {
 
 // Capabilities describes the server's MCP capabilities.
 type Capabilities struct {
-	Tools *ToolsCapability `json:"tools,omitempty"`
+	Tools     *ToolsCapability     `json:"tools,omitempty"`
+	Resources *ResourcesCapability `json:"resources,omitempty"`
+	Prompts   *PromptsCapability   `json:"prompts,omitempty"`
 }
 
 // ToolsCapability describes the server's tool-related capabilities.
 type ToolsCapability struct {
+	ListChanged bool `json:"listChanged,omitempty"`
+}
+
+// ResourcesCapability describes the server's resource-related capabilities.
+type ResourcesCapability struct {
+	Subscribe   bool `json:"subscribe,omitempty"`
+	ListChanged bool `json:"listChanged,omitempty"`
+}
+
+// PromptsCapability describes the server's prompt-related capabilities.
+type PromptsCapability struct {
 	ListChanged bool `json:"listChanged,omitempty"`
 }
 
@@ -72,6 +87,38 @@ type ContentBlock struct {
 // ToolHandler is a function that handles a tool invocation.
 type ToolHandler func(ctx context.Context, arguments json.RawMessage) (*ToolCallResult, error)
 
+// ResourcesListResult is the response to the resources/list method.
+type ResourcesListResult struct {
+	Resources []resources.Resource `json:"resources"`
+}
+
+// ResourceReadParams are the parameters for the resources/read method.
+type ResourceReadParams struct {
+	URI string `json:"uri"`
+}
+
+// ResourceReadResult is the response to the resources/read method.
+type ResourceReadResult struct {
+	Contents []resources.ResourceContent `json:"contents"`
+}
+
+// PromptsListResult is the response to the prompts/list method.
+type PromptsListResult struct {
+	Prompts []prompts.Prompt `json:"prompts"`
+}
+
+// PromptGetParams are the parameters for the prompts/get method.
+type PromptGetParams struct {
+	Name      string            `json:"name"`
+	Arguments map[string]string `json:"arguments,omitempty"`
+}
+
+// PromptGetResult is the response to the prompts/get method.
+type PromptGetResult struct {
+	Description string            `json:"description,omitempty"`
+	Messages    []prompts.Message `json:"messages"`
+}
+
 // Config holds configuration for the MCP server.
 type Config struct {
 	ServerName    string
@@ -80,11 +127,13 @@ type Config struct {
 
 // MCPServer implements the MCP protocol over a given transport.
 type MCPServer struct {
-	transport transport.Transport
-	config    Config
-	logger    *slog.Logger
-	tools     map[string]Tool
-	handlers  map[string]ToolHandler
+	transport        transport.Transport
+	config           Config
+	logger           *slog.Logger
+	tools            map[string]Tool
+	handlers         map[string]ToolHandler
+	resourceProvider *resources.Provider
+	promptRegistry   *prompts.Registry
 }
 
 // New creates a new MCPServer.
@@ -96,6 +145,18 @@ func New(t transport.Transport, cfg Config, logger *slog.Logger) *MCPServer {
 		tools:     make(map[string]Tool),
 		handlers:  make(map[string]ToolHandler),
 	}
+}
+
+// SetResourceProvider attaches a resource provider to the server. It must be
+// called before Run; calling it concurrently with Run is not safe.
+func (s *MCPServer) SetResourceProvider(p *resources.Provider) {
+	s.resourceProvider = p
+}
+
+// SetPromptRegistry attaches a prompt registry to the server. It must be
+// called before Run; calling it concurrently with Run is not safe.
+func (s *MCPServer) SetPromptRegistry(r *prompts.Registry) {
+	s.promptRegistry = r
 }
 
 // RegisterTool registers a tool with the server. It must be called before Run;
@@ -152,6 +213,14 @@ func (s *MCPServer) handleRequest(ctx context.Context, msg *transport.JSONRPCMes
 		return s.handleToolsList(msg)
 	case "tools/call":
 		return s.handleToolsCall(ctx, msg)
+	case "resources/list":
+		return s.handleResourcesList(msg)
+	case "resources/read":
+		return s.handleResourcesRead(ctx, msg)
+	case "prompts/list":
+		return s.handlePromptsList(msg)
+	case "prompts/get":
+		return s.handlePromptsGet(msg)
 	default:
 		return transport.NewErrorResponse(msg.ID, transport.CodeMethodNotFound,
 			fmt.Sprintf("method not found: %s", msg.Method))
@@ -159,11 +228,19 @@ func (s *MCPServer) handleRequest(ctx context.Context, msg *transport.JSONRPCMes
 }
 
 func (s *MCPServer) handleInitialize(msg *transport.JSONRPCMessage) *transport.JSONRPCMessage {
+	caps := Capabilities{
+		Tools: &ToolsCapability{},
+	}
+	if s.resourceProvider != nil {
+		caps.Resources = &ResourcesCapability{}
+	}
+	if s.promptRegistry != nil {
+		caps.Prompts = &PromptsCapability{}
+	}
+
 	result := InitializeResult{
 		ProtocolVersion: ProtocolVersion,
-		Capabilities: Capabilities{
-			Tools: &ToolsCapability{},
-		},
+		Capabilities:    caps,
 		Info: Info{
 			Name:    s.config.ServerName,
 			Version: s.config.ServerVersion,
@@ -210,6 +287,100 @@ func (s *MCPServer) handleToolsCall(ctx context.Context, msg *transport.JSONRPCM
 			fmt.Sprintf("tool execution failed: %v", err))
 	}
 
+	resp, err := transport.NewResponse(msg.ID, result)
+	if err != nil {
+		return transport.NewErrorResponse(msg.ID, transport.CodeInternalError, "failed to marshal response")
+	}
+	return resp
+}
+
+func (s *MCPServer) handleResourcesList(msg *transport.JSONRPCMessage) *transport.JSONRPCMessage {
+	if s.resourceProvider == nil {
+		return transport.NewErrorResponse(msg.ID, transport.CodeMethodNotFound, "resources not supported")
+	}
+
+	result := ResourcesListResult{Resources: s.resourceProvider.List()}
+	resp, err := transport.NewResponse(msg.ID, result)
+	if err != nil {
+		return transport.NewErrorResponse(msg.ID, transport.CodeInternalError, "failed to marshal response")
+	}
+	return resp
+}
+
+func (s *MCPServer) handleResourcesRead(ctx context.Context, msg *transport.JSONRPCMessage) *transport.JSONRPCMessage {
+	if s.resourceProvider == nil {
+		return transport.NewErrorResponse(msg.ID, transport.CodeMethodNotFound, "resources not supported")
+	}
+
+	var params ResourceReadParams
+	if err := json.Unmarshal(msg.Params, &params); err != nil {
+		return transport.NewErrorResponse(msg.ID, transport.CodeInvalidParams, "invalid resource read params")
+	}
+	if params.URI == "" {
+		return transport.NewErrorResponse(msg.ID, transport.CodeInvalidParams, "uri is required")
+	}
+
+	readResult, err := s.resourceProvider.Read(ctx, params.URI)
+	if err != nil {
+		if errors.Is(err, resources.ErrResourceNotFound) {
+			return transport.NewErrorResponse(msg.ID, transport.CodeInvalidParams,
+				fmt.Sprintf("resource not found: %q", params.URI))
+		}
+		return transport.NewErrorResponse(msg.ID, transport.CodeInternalError,
+			fmt.Sprintf("resource read failed: %v", err))
+	}
+
+	result := ResourceReadResult{Contents: readResult.Contents}
+	resp, err := transport.NewResponse(msg.ID, result)
+	if err != nil {
+		return transport.NewErrorResponse(msg.ID, transport.CodeInternalError, "failed to marshal response")
+	}
+	return resp
+}
+
+func (s *MCPServer) handlePromptsList(msg *transport.JSONRPCMessage) *transport.JSONRPCMessage {
+	if s.promptRegistry == nil {
+		return transport.NewErrorResponse(msg.ID, transport.CodeMethodNotFound, "prompts not supported")
+	}
+
+	result := PromptsListResult{Prompts: s.promptRegistry.List()}
+	resp, err := transport.NewResponse(msg.ID, result)
+	if err != nil {
+		return transport.NewErrorResponse(msg.ID, transport.CodeInternalError, "failed to marshal response")
+	}
+	return resp
+}
+
+func (s *MCPServer) handlePromptsGet(msg *transport.JSONRPCMessage) *transport.JSONRPCMessage {
+	if s.promptRegistry == nil {
+		return transport.NewErrorResponse(msg.ID, transport.CodeMethodNotFound, "prompts not supported")
+	}
+
+	var params PromptGetParams
+	if err := json.Unmarshal(msg.Params, &params); err != nil {
+		return transport.NewErrorResponse(msg.ID, transport.CodeInvalidParams, "invalid prompt get params")
+	}
+	if params.Name == "" {
+		return transport.NewErrorResponse(msg.ID, transport.CodeInvalidParams, "name is required")
+	}
+
+	getResult, err := s.promptRegistry.Get(params.Name, params.Arguments)
+	if err != nil {
+		if errors.Is(err, prompts.ErrPromptNotFound) {
+			return transport.NewErrorResponse(msg.ID, transport.CodeInvalidParams,
+				fmt.Sprintf("prompt not found: %q", params.Name))
+		}
+		if errors.Is(err, prompts.ErrMissingRequiredArgument) {
+			return transport.NewErrorResponse(msg.ID, transport.CodeInvalidParams, err.Error())
+		}
+		return transport.NewErrorResponse(msg.ID, transport.CodeInternalError,
+			fmt.Sprintf("prompt get failed: %v", err))
+	}
+
+	result := PromptGetResult{
+		Description: getResult.Description,
+		Messages:    getResult.Messages,
+	}
 	resp, err := transport.NewResponse(msg.ID, result)
 	if err != nil {
 		return transport.NewErrorResponse(msg.ID, transport.CodeInternalError, "failed to marshal response")
