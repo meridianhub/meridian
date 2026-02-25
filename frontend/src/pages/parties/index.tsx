@@ -6,6 +6,11 @@ import { TimeDisplay } from '@/components/shared/time-display'
 import { StatusBadge } from '@/components/shared/status-badge'
 import { useClients } from '@/api/context'
 import { Card } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { tenantKeys } from '@/lib/query-keys'
+import { useTenantSlug } from '@/hooks/use-tenant-context'
+import { RegisterPartyDialog } from './dialogs/register-party-dialog'
+import { RegisterPartyTypeDialog } from './dialogs/register-party-type-dialog'
 
 export interface Party {
   partyId: string
@@ -30,6 +35,9 @@ interface ListPartiesResult {
 export function PartiesPage() {
   const navigate = useNavigate()
   const clients = useClients()
+  const tenantSlug = useTenantSlug()
+  const [registerOpen, setRegisterOpen] = React.useState(false)
+  const [addPartyTypeOpen, setAddPartyTypeOpen] = React.useState(false)
 
   const columns: ColumnDef<Party>[] = [
     {
@@ -90,7 +98,7 @@ export function PartiesPage() {
     },
   ]
 
-  const queryFn = async (params: ListPartiesParams): Promise<ListPartiesResult> => {
+  const queryFn = React.useCallback(async (params: ListPartiesParams): Promise<ListPartiesResult> => {
     const response = await clients.party.listParties({
       pageToken: params.pageToken,
       pageSize: params.pageSize,
@@ -112,24 +120,40 @@ export function PartiesPage() {
       items: parties,
       nextPageToken: response.nextPageToken,
     }
-  }
+  }, [clients.party])
 
   const handleRowClick = (party: Party) => {
     navigate(`/parties/${party.partyId}`)
   }
 
+  if (!tenantSlug) return null
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Parties</h1>
-        <p className="mt-2 text-muted-foreground">
-          Manage parties, their demographics, and linked accounts.
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Parties</h1>
+          <p className="mt-2 text-muted-foreground">
+            Manage parties, their demographics, and linked accounts.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Button onClick={() => setRegisterOpen(true)}>Register Party</Button>
+          <Button variant="outline" onClick={() => setAddPartyTypeOpen(true)}>
+            Add Party Type
+          </Button>
+        </div>
       </div>
+
+      <RegisterPartyDialog open={registerOpen} onOpenChange={setRegisterOpen} />
+      <RegisterPartyTypeDialog
+        open={addPartyTypeOpen}
+        onOpenChange={setAddPartyTypeOpen}
+      />
 
       <Card className="p-6">
         <DataTable
-          queryKey={['parties']}
+          queryKey={tenantKeys.parties(tenantSlug)}
           queryFn={queryFn}
           columns={columns}
           pageSize={25}

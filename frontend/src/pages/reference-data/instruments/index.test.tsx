@@ -15,12 +15,16 @@ const mockEvaluateInstrument = vi.fn().mockResolvedValue({
   fungibilityKey: 'USD:1',
   errorMessage: '',
 })
+const mockRegisterInstrument = vi.fn().mockResolvedValue({
+  instrument: { id: 'test-id', code: 'KWH', version: 1, dimension: 2, precision: 6, status: 1 },
+})
 
 vi.mock('@/api/context', () => ({
   useApiClients: vi.fn(() => ({
     referenceData: {
       listInstruments: mockListInstruments,
       evaluateInstrument: mockEvaluateInstrument,
+      registerInstrument: mockRegisterInstrument,
     },
   })),
 }))
@@ -318,6 +322,31 @@ describe('InstrumentsPage', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('cel-result')).toBeInTheDocument()
+    })
+  })
+
+  it('renders Register Instrument button in the header', () => {
+    render(
+      <Wrapper>
+        <InstrumentsPage />
+      </Wrapper>,
+    )
+    expect(screen.getByRole('button', { name: /register instrument/i })).toBeInTheDocument()
+  })
+
+  it('opens RegisterInstrumentDialog when Register Instrument button is clicked', async () => {
+    const user = userEvent.setup()
+
+    render(
+      <Wrapper>
+        <InstrumentsPage />
+      </Wrapper>,
+    )
+
+    await user.click(screen.getByRole('button', { name: /register instrument/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
     })
   })
 })

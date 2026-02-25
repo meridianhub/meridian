@@ -26,7 +26,12 @@ vi.mock('@/api/clients', () => ({
     internalBankAccount: {},
     marketInformation: {
       listDataSets: vi.fn(),
+      registerDataSet: vi.fn(),
     },
+    mapping: {},
+    forecasting: {},
+    manifestHistory: {},
+    manifestApplier: {},
   })),
 }))
 
@@ -73,7 +78,12 @@ function setupMock(datasets = [makeDataset()], nextPageToken = '') {
         datasets,
         nextPageToken,
       }),
+      registerDataSet: vi.fn(),
     } as never,
+    mapping: {} as never,
+    forecasting: {} as never,
+    manifestHistory: {} as never,
+    manifestApplier: {} as never,
   })
 }
 
@@ -154,7 +164,12 @@ describe('MarketDataPage', () => {
       internalBankAccount: {} as never,
       marketInformation: {
         listDataSets: vi.fn().mockReturnValue(new Promise(() => {})),
+        registerDataSet: vi.fn(),
       } as never,
+      mapping: {} as never,
+      forecasting: {} as never,
+      manifestHistory: {} as never,
+      manifestApplier: {} as never,
     })
     renderPage()
     expect(screen.getAllByTestId('skeleton-row').length).toBeGreaterThan(0)
@@ -180,5 +195,21 @@ describe('MarketDataPage', () => {
     setupMock()
     renderPage()
     expect(screen.getByRole('combobox', { name: /status/i })).toBeInTheDocument()
+  })
+
+  it('renders Register Dataset button', () => {
+    setupMock()
+    renderPage()
+    expect(screen.getByRole('button', { name: /register dataset/i })).toBeInTheDocument()
+  })
+
+  it('opens registration dialog when Register Dataset button is clicked', async () => {
+    const { default: userEvent } = await import('@testing-library/user-event')
+    const user = userEvent.setup()
+    setupMock()
+    renderPage()
+    await user.click(screen.getByRole('button', { name: /register dataset/i }))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /register data set/i })).toBeInTheDocument()
   })
 })

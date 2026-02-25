@@ -1,19 +1,35 @@
+import * as React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter } from 'react-router-dom'
 
 // Mock the API context to avoid loading ungenerated proto files
-vi.mock('@/api/context', () => ({
-  useClients: vi.fn(() => ({
-    party: {
-      listParties: vi.fn().mockResolvedValue({
-        parties: [],
-        nextPageToken: '',
-        totalCount: 0n,
-      }),
-    },
-  })),
+const mockPartyClient = {
+  listParties: vi.fn().mockResolvedValue({
+    parties: [],
+    nextPageToken: '',
+    totalCount: 0n,
+  }),
+  listPartyTypes: vi.fn().mockResolvedValue({ partyTypeDefinitions: [] }),
+  registerPartyType: vi.fn().mockResolvedValue({}),
+}
+
+vi.mock('@/api/context', async () => {
+  const actual = await vi.importActual('@/api/context')
+  return {
+    ...actual,
+    useClients: vi.fn(() => ({ party: mockPartyClient })),
+    useApiClients: vi.fn(() => ({ party: mockPartyClient })),
+  }
+})
+
+vi.mock('@/hooks/use-tenant-context', () => ({
+  useTenantSlug: () => 'test-tenant',
+  useCurrentTenant: () => null,
+  useIsPlatformAdmin: () => false,
+  useSwitchTenant: () => vi.fn(),
+  useClearTenant: () => vi.fn(),
 }))
 
 import { PartiesPage } from './index'
