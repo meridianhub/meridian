@@ -53,7 +53,7 @@ func main() {
 	nostroReq := &ibav1.InitiateInternalAccountRequest{
 		AccountCode:     "NOSTRO-EUR-DEUTSCHE",
 		Name:            "EUR Nostro at Deutsche Bank Frankfurt",
-		ProductTypeCode: "NOSTRO_USD",
+		ProductTypeCode: "NOSTRO_EUR",
 		InstrumentCode:  "EUR",
 		Description:     "Primary EUR nostro account for European settlements",
 
@@ -108,7 +108,7 @@ func main() {
 	vostroReq := &ibav1.InitiateInternalAccountRequest{
 		AccountCode:     "VOSTRO-JPY-MUFG",
 		Name:            "JPY Vostro for MUFG Tokyo",
-		ProductTypeCode: "VOSTRO_USD",
+		ProductTypeCode: "VOSTRO_JPY",
 		InstrumentCode:  "JPY",
 		Description:     "MUFG Bank's JPY account held at our institution",
 

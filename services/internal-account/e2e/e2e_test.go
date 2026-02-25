@@ -1057,16 +1057,20 @@ func TestE2E_CounterpartyBanking(t *testing.T) {
 	})
 
 	t.Run("CLEARING account rejects counterparty details", func(t *testing.T) {
-		// The domain should reject counterparty details for non-NOSTRO/VOSTRO accounts
-		// First create the account successfully
-		resp, err := tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
+		// The domain should reject counterparty details on non-NOSTRO/VOSTRO accounts
+		_, err := tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
 			AccountCode:     "GBP_CLEARING_ONLY",
 			Name:            "GBP Clearing Only",
 			ProductTypeCode: "CLEARING_GBP",
 			InstrumentCode:  "GBP",
+			CounterpartyDetails: &pb.CounterpartyDetails{
+				CounterpartyId:          "BANK001",
+				CounterpartyName:        "Test Bank",
+				CounterpartyExternalRef: "REF123",
+			},
 		})
-		require.NoError(t, err)
-		assert.Nil(t, resp.Facility.CounterpartyDetails)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "counterparty")
 	})
 
 	t.Run("Update counterparty details on NOSTRO account", func(t *testing.T) {

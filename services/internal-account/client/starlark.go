@@ -5,11 +5,19 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	internalaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
 	"github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
+)
+
+var (
+	// ErrCounterpartyAttributesNotMap is returned when counterparty_attributes is not a map.
+	ErrCounterpartyAttributesNotMap = errors.New("counterparty_attributes must be a map[string]any")
+	// ErrCounterpartyAttributeValueNotString is returned when a counterparty_attributes value is not a string.
+	ErrCounterpartyAttributeValueNotString = errors.New("counterparty_attributes value must be a string")
 )
 
 // RegisterStarlarkHandlers registers all Starlark service bindings for Internal Account.
@@ -251,10 +259,27 @@ func addCounterpartyDetails(req *internalaccountv1.InitiateInternalAccountReques
 		counterpartyType = internalaccountv1.CounterpartyType_COUNTERPARTY_TYPE_VOSTRO
 	}
 
+	// Parse optional attributes map (e.g., swift_code, bic_code)
+	attributes := map[string]string{}
+	if raw, ok := params["counterparty_attributes"]; ok {
+		rawMap, ok := raw.(map[string]any)
+		if !ok {
+			return fmt.Errorf("%w: got %T", ErrCounterpartyAttributesNotMap, raw)
+		}
+		for k, v := range rawMap {
+			s, ok := v.(string)
+			if !ok {
+				return fmt.Errorf("%w: key %s got %T", ErrCounterpartyAttributeValueNotString, k, v)
+			}
+			attributes[k] = s
+		}
+	}
+
 	req.CounterpartyDetails = &internalaccountv1.CounterpartyDetails{
 		CounterpartyId:          counterpartyID,
 		CounterpartyName:        getOptionalString(params, "counterparty_name"),
 		CounterpartyExternalRef: getOptionalString(params, "counterparty_external_ref"),
+		Attributes:              attributes,
 		CounterpartyType:        counterpartyType,
 	}
 

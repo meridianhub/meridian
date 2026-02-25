@@ -50,9 +50,9 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 		instrument_code VARCHAR(32) NOT NULL,
 		dimension VARCHAR(20) NOT NULL,
 		status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
-		counterparty_id VARCHAR(100),
+		counterparty_id VARCHAR(50),
 		counterparty_name VARCHAR(255),
-		counterparty_external_ref VARCHAR(255),
+		counterparty_external_ref VARCHAR(100),
 		attributes JSONB NOT NULL DEFAULT '{}',
 		version BIGINT NOT NULL DEFAULT 1
 	)`, pq.QuoteIdentifier(schemaName))).Error
@@ -357,9 +357,9 @@ func TestTenantIsolation(t *testing.T) {
 			instrument_code VARCHAR(32) NOT NULL,
 			dimension VARCHAR(20) NOT NULL,
 			status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
-			counterparty_id VARCHAR(100),
+			counterparty_id VARCHAR(50),
 			counterparty_name VARCHAR(255),
-			counterparty_external_ref VARCHAR(255),
+			counterparty_external_ref VARCHAR(100),
 			attributes JSONB NOT NULL DEFAULT '{}',
 			version BIGINT NOT NULL DEFAULT 1
 		)`, pq.QuoteIdentifier(schemaName))).Error
