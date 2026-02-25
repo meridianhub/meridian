@@ -21,7 +21,7 @@ ALTER INDEX "idx_internal_bank_account_product_type_code" RENAME TO "idx_interna
 
 -- Rename foreign key constraints
 ALTER TABLE "lien" RENAME CONSTRAINT "fk_lien_internal_bank_account" TO "fk_lien_internal_account";
-ALTER TABLE "valuation_feature" RENAME CONSTRAINT "fk_valuation_feature_internal_bank_account" TO "fk_valuation_feature_internal_account";
+ALTER TABLE "valuation_features" RENAME CONSTRAINT "fk_valuation_feature_internal_bank_account" TO "fk_valuation_feature_internal_account";
 
 -- Update table comments
 COMMENT ON TABLE "internal_account" IS
