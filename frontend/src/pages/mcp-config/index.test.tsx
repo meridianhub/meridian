@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
@@ -21,9 +21,22 @@ function Wrapper({ children }: { children: React.ReactNode }) {
   return <MemoryRouter>{children}</MemoryRouter>
 }
 
+const defaultTenantContext = {
+  tenantSlug: 'test-tenant',
+  currentTenant: { id: 'tid', slug: 'test-tenant', name: 'Test Tenant' },
+  isPlatformAdmin: false,
+  switchTenant: vi.fn(),
+  clearTenant: vi.fn(),
+}
+
 describe('McpConfigPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(useTenantContext).mockReturnValue(defaultTenantContext)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
   })
 
   describe('rendering', () => {
@@ -119,8 +132,6 @@ describe('McpConfigPage', () => {
       })
 
       expect(writeText).toHaveBeenCalledWith(expect.stringContaining('/sse'))
-
-      vi.unstubAllGlobals()
     })
 
     it('shows Copied! feedback after clicking copy', async () => {
@@ -137,8 +148,6 @@ describe('McpConfigPage', () => {
       await waitFor(() => {
         expect(screen.getByText('Copied!')).toBeInTheDocument()
       })
-
-      vi.unstubAllGlobals()
     })
 
     it('copies Claude Desktop config on button click', async () => {
@@ -153,8 +162,6 @@ describe('McpConfigPage', () => {
       })
 
       expect(writeText).toHaveBeenCalledWith(expect.stringContaining('mcpServers'))
-
-      vi.unstubAllGlobals()
     })
 
     it('copies OAuth URL on button click', async () => {
@@ -169,8 +176,6 @@ describe('McpConfigPage', () => {
       })
 
       expect(writeText).toHaveBeenCalledWith(expect.stringContaining('/oauth/authorize'))
-
-      vi.unstubAllGlobals()
     })
   })
 
