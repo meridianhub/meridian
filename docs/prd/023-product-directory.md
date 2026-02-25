@@ -20,7 +20,7 @@ instructions: |
   Product types also define accepted valuation methods (conversion rules) -- ValuationFeatures are
   configured at the product type level and seeded to accounts on creation, not per-account.
   The manifest remains the authoring surface; the registry is the runtime query surface.
-  Both CurrentAccount and InternalBankAccount services must migrate to product_type_code (mandatory).
+  Both CurrentAccount and InternalAccount services must migrate to product_type_code (mandatory).
   Multi-tenancy: schema-per-tenant (no tenant_id column), isolation via GORM tenant scope.
 ---
 
@@ -48,7 +48,7 @@ Account type definitions exist in three disconnected locations:
 
 | Location | Type | Enforcement | Scope |
 |----------|------|-------------|-------|
-| `internal_bank_account/v1::InternalAccountType` | Proto enum (9 values) | Compile-time + SQL CHECK | Internal accounts only |
+| `internal_account/v1::InternalAccountType` | Proto enum (9 values) | Compile-time + SQL CHECK | Internal accounts only |
 | `common/v1/types.proto::AccountType` | Proto enum (6 values) | Compile-time | Financial accounting classification |
 | `control_plane/v1/manifest.proto::AccountTypeDefinition` | Manifest message with CEL policies | Runtime validation | Tenant configuration |
 
@@ -707,7 +707,7 @@ The compilation pipeline validates:
 ### Read-Through Cache Requirement (Stream H -- Critical Path)
 
 **This is the highest-risk item for performance.** Consuming services
-(`services/current-account`, `services/internal-bank-account`) **MUST**
+(`services/current-account`, `services/internal-account`) **MUST**
 implement a `LocalAccountTypeCache` exactly mirroring the
 `LocalInstrumentCache` in
 `services/reference-data/cache/instrument_cache.go`.
@@ -783,7 +783,7 @@ Tenants extend with their own entries (e.g., `ENERGY_SETTLEMENT_KWH`,
 
 ## Consumer API Contract Changes (Mandatory)
 
-Both `CurrentAccount` and `InternalBankAccount` services **must**
+Both `CurrentAccount` and `InternalAccount` services **must**
 migrate from hardcoded type fields to registry-backed product
 references. This is not optional -- leaving either service on the old
 enum creates two incompatible mental models and prevents the registry
@@ -823,14 +823,14 @@ field is accepted but mapped to a product code (e.g., `"CURRENT"` →
 `"CURRENT_GBP"` based on the account's instrument). Once all clients
 have migrated, the old field is removed.
 
-### InternalBankAccount Service
+### InternalAccount Service
 
-`InternalBankAccount` currently uses a strict proto enum
+`InternalAccount` currently uses a strict proto enum
 (`InternalAccountType`: CLEARING, NOSTRO, VOSTRO, etc.). Replace with
 the same `product_type_code` pattern:
 
 ```protobuf
-message InitiateInternalBankAccountRequest {
+message InitiateInternalAccountRequest {
     // Deprecated: InternalAccountType type field removed.
     // Use product_type_code instead.
     string product_type_code = N;             // Required. e.g., "CLEARING_GBP"
@@ -865,12 +865,12 @@ Both services use `BehaviorClass` to gate which product types they
 accept:
 
 - **CurrentAccount**: Only accepts `BehaviorClass == CUSTOMER`
-- **InternalBankAccount**: Accepts all non-CUSTOMER behavior classes
+- **InternalAccount**: Accepts all non-CUSTOMER behavior classes
 
 This replaces the hardcoded enum with a dynamic check that works for
 any product type code, including tenant-defined ones. A tenant can
 create `ENERGY_SETTLEMENT_KWH` with `BehaviorClass = CLEARING` and
-InternalBankAccount will accept it without code changes.
+InternalAccount will accept it without code changes.
 
 ## EligibilityCEL: Data Flow and Dependencies
 
@@ -905,9 +905,9 @@ Client → CurrentAccount.Initiate(product_type_code, party_id, ...)
 already have a Party service client dependency. CurrentAccount already
 integrates with Party service for party association (see
 `services/current-account/service/grpc_service_party_integration_test.go`).
-InternalBankAccount may not have this dependency today -- the
+InternalAccount may not have this dependency today -- the
 implementation plan must include adding a Party client to
-InternalBankAccount if eligibility checks are needed for internal
+InternalAccount if eligibility checks are needed for internal
 account types.
 
 **Optimisation:** When `EligibilityCEL` is empty or `true` (no
@@ -965,7 +965,7 @@ checks (e.g., internal clearing accounts).
     and deterministic UUID generation respectively. Re-applying the
     same manifest produces identical state.
 13. `InitiateCurrentAccountRequest` and
-    `InitiateInternalBankAccountRequest` accept `product_type_code`
+    `InitiateInternalAccountRequest` accept `product_type_code`
     (and optional `product_type_version`) instead of hardcoded type
     enums. Both services validate `BehaviorClass` to gate which
     product types they accept.
@@ -986,7 +986,7 @@ in the current account type system.
 
 All string-based fields with a fixed set of allowed values must be
 declared as Go typed string constants with an `IsValid()` method,
-following the pattern in `internal-bank-account/domain/account_type.go`
+following the pattern in `internal-account/domain/account_type.go`
 and `reference-data/registry/instrument_status.go`.
 
 ```go
@@ -1079,7 +1079,7 @@ BehaviorClass behavior_class = 6 [(buf.validate.field).enum = {
 
 This guarantees that gRPC callers cannot send an unrecognised
 behavior class. The existing pattern is proven in
-`internal_bank_account.proto::InternalAccountType`.
+`internal_account.proto::InternalAccountType`.
 
 ### Immutability Invariants
 
@@ -1252,7 +1252,7 @@ codebase that the AccountTypeRegistry eliminates:
   account creation with product_type_code, saga routing verification,
   valuation feature seeding from templates, re-application
   idempotency (apply same manifest twice, verify identical state),
-  consumer service integration (CurrentAccount and InternalBankAccount
+  consumer service integration (CurrentAccount and InternalAccount
   accepting product_type_code, BehaviorClass gating, EligibilityCEL
   evaluation with Party context, old enum field backwards compatibility
   during migration).
@@ -1271,8 +1271,8 @@ codebase that the AccountTypeRegistry eliminates:
 - **JSON Schema validator**: `cmd/position-tool/internal/validation/schema.go`
 - **Party service proto**: `api/proto/meridian/party/v1/party.proto`
 - **CurrentAccount proto** (consumer -- needs `product_type_code`): `api/proto/meridian/current_account/v1/`
-- **InternalBankAccount proto** (consumer -- needs `product_type_code`): `api/proto/meridian/internal_bank_account/v1/`
-- **InternalAccountType enum** (to be removed): `services/internal-bank-account/domain/account_type.go`
+- **InternalAccount proto** (consumer -- needs `product_type_code`): `api/proto/meridian/internal_account/v1/`
+- **InternalAccountType enum** (to be removed): `services/internal-account/domain/account_type.go`
 - **Multi-tenant isolation**: `shared/platform/db/gorm_tenant_scope.go` (schema-per-tenant, no `tenant_id` column)
 - **BIAN alignment PRD**: `.taskmaster/docs/prd-bian-alignment.md`
 - **BIAN 13.0 Product Directory**: SD-CR-006 (external)

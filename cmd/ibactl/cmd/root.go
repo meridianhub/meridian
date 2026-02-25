@@ -1,4 +1,4 @@
-// Package cmd implements the ibactl CLI commands for Internal Bank Account management.
+// Package cmd implements the ibactl CLI commands for Internal Account management.
 package cmd
 
 import (
@@ -6,13 +6,13 @@ import (
 	"os"
 	"time"
 
-	"github.com/meridianhub/meridian/services/internal-bank-account/client"
+	"github.com/meridianhub/meridian/services/internal-account/client"
 	"github.com/meridianhub/meridian/shared/platform/ports"
 	"github.com/spf13/cobra"
 )
 
 var (
-	// serviceURL is the internal bank account service URL.
+	// serviceURL is the internal account service URL.
 	serviceURL string
 	// timeout is the gRPC call timeout.
 	timeout time.Duration
@@ -21,11 +21,11 @@ var (
 // rootCmd represents the base command when called without any subcommands.
 var rootCmd = &cobra.Command{
 	Use:   "ibactl",
-	Short: "Internal Bank Account management CLI",
-	Long: `ibactl is a command-line tool for managing internal bank accounts in Meridian.
+	Short: "Internal Account management CLI",
+	Long: `ibactl is a command-line tool for managing internal accounts in Meridian.
 
 It provides commands to provision default accounts, list accounts, and manage
-internal bank account lifecycle. Internal bank accounts include clearing, nostro,
+internal account lifecycle. Internal accounts include clearing, nostro,
 vostro, holding, suspense, revenue, expense, and inventory accounts.
 
 Examples:
@@ -35,7 +35,7 @@ Examples:
   # Provision default accounts for all active tenants
   ibactl provision-defaults --all
 
-  # List internal bank accounts for a tenant
+  # List internal accounts for a tenant
   ibactl list --tenant=acme_bank`,
 }
 
@@ -48,8 +48,8 @@ func Execute() {
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&serviceURL, "service-url",
-		getEnvOrDefault("IBA_SERVICE_URL", fmt.Sprintf("localhost:%d", ports.InternalBankAccount)),
-		"Internal Bank Account service URL")
+		getEnvOrDefault("IBA_SERVICE_URL", fmt.Sprintf("localhost:%d", ports.InternalAccount)),
+		"Internal Account service URL")
 	rootCmd.PersistentFlags().DurationVar(&timeout, "timeout", 30*time.Second, "gRPC call timeout")
 }
 
@@ -61,7 +61,7 @@ func getEnvOrDefault(key, defaultValue string) string {
 	return defaultValue
 }
 
-// newClient creates a new InternalBankAccount client using global flags.
+// newClient creates a new InternalAccount client using global flags.
 func newClient() (*client.Client, func(), error) {
 	cfg := client.Config{
 		Target:  serviceURL,

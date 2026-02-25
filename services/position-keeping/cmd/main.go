@@ -13,7 +13,7 @@ import (
 	"time"
 
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
-	internalbankaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_bank_account/v1"
+	internalaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/meridianhub/meridian/services/position-keeping/app"
 	"github.com/meridianhub/meridian/services/position-keeping/observability"
@@ -288,11 +288,11 @@ func run(logger *slog.Logger) error {
 	// Create account validator if validation is enabled
 	var serviceOpts []service.Option
 	var currentAccountConn *grpc.ClientConn
-	var internalBankAccountConn *grpc.ClientConn
+	var internalAccountConn *grpc.ClientConn
 
 	if config.AccountValidation.Enabled {
 		var currentAccountValidator *service.CurrentAccountValidator
-		var internalBankAccountValidator *service.InternalBankAccountValidator
+		var internalAccountValidator *service.InternalAccountValidator
 
 		// Create Current Account validator if URL is configured
 		if config.AccountValidation.CurrentAccountServiceURL != "" {
@@ -322,25 +322,25 @@ func run(logger *slog.Logger) error {
 				"url", config.AccountValidation.CurrentAccountServiceURL)
 		}
 
-		// Create Internal Bank Account validator if URL is configured
-		if config.AccountValidation.InternalBankAccountServiceURL != "" {
+		// Create Internal Account validator if URL is configured
+		if config.AccountValidation.InternalAccountServiceURL != "" {
 			var connErr error
-			internalBankAccountConn, connErr = grpc.NewClient(
-				config.AccountValidation.InternalBankAccountServiceURL,
+			internalAccountConn, connErr = grpc.NewClient(
+				config.AccountValidation.InternalAccountServiceURL,
 				grpc.WithTransportCredentials(insecure.NewCredentials()),
 			)
 			if connErr != nil {
 				if currentAccountConn != nil {
 					currentAccountConn.Close()
 				}
-				return fmt.Errorf("failed to create internal bank account client at %s: %w",
-					config.AccountValidation.InternalBankAccountServiceURL, connErr)
+				return fmt.Errorf("failed to create internal account client at %s: %w",
+					config.AccountValidation.InternalAccountServiceURL, connErr)
 			}
 
-			internalBankAccountClient := internalbankaccountv1.NewInternalBankAccountServiceClient(internalBankAccountConn)
+			internalAccountClient := internalaccountv1.NewInternalAccountServiceClient(internalAccountConn)
 			var validatorErr error
-			internalBankAccountValidator, validatorErr = service.NewInternalBankAccountValidator(service.InternalBankAccountValidatorConfig{
-				Client:        &internalBankAccountClientAdapter{client: internalBankAccountClient},
+			internalAccountValidator, validatorErr = service.NewInternalAccountValidator(service.InternalAccountValidatorConfig{
+				Client:        &internalAccountClientAdapter{client: internalAccountClient},
 				Logger:        logger,
 				CacheTTL:      config.AccountValidation.CacheTTL,
 				LookupTimeout: config.AccountValidation.ConnectionTimeout,
@@ -349,25 +349,25 @@ func run(logger *slog.Logger) error {
 				if currentAccountConn != nil {
 					currentAccountConn.Close()
 				}
-				internalBankAccountConn.Close()
-				return fmt.Errorf("failed to create internal bank account validator: %w", validatorErr)
+				internalAccountConn.Close()
+				return fmt.Errorf("failed to create internal account validator: %w", validatorErr)
 			}
-			logger.Info("internal bank account validator configured",
-				"url", config.AccountValidation.InternalBankAccountServiceURL)
+			logger.Info("internal account validator configured",
+				"url", config.AccountValidation.InternalAccountServiceURL)
 		}
 
 		// Create composite validator that checks both services
 		compositeValidator, compositeErr := service.NewCompositeAccountValidator(service.CompositeAccountValidatorConfig{
-			CurrentAccountValidator:      currentAccountValidator,
-			InternalBankAccountValidator: internalBankAccountValidator,
-			Logger:                       logger,
+			CurrentAccountValidator:  currentAccountValidator,
+			InternalAccountValidator: internalAccountValidator,
+			Logger:                   logger,
 		})
 		if compositeErr != nil {
 			if currentAccountConn != nil {
 				currentAccountConn.Close()
 			}
-			if internalBankAccountConn != nil {
-				internalBankAccountConn.Close()
+			if internalAccountConn != nil {
+				internalAccountConn.Close()
 			}
 			return fmt.Errorf("failed to create composite account validator: %w", compositeErr)
 		}
@@ -379,7 +379,7 @@ func run(logger *slog.Logger) error {
 
 		logger.Info("account validation enabled",
 			"current_account_url", config.AccountValidation.CurrentAccountServiceURL,
-			"internal_bank_account_url", config.AccountValidation.InternalBankAccountServiceURL,
+			"internal_account_url", config.AccountValidation.InternalAccountServiceURL,
 			"cache_ttl", config.AccountValidation.CacheTTL)
 	} else {
 		logger.Info("account validation disabled")
@@ -392,9 +392,9 @@ func run(logger *slog.Logger) error {
 				logger.Error("failed to close current account connection", "error", err)
 			}
 		}
-		if internalBankAccountConn != nil {
-			if err := internalBankAccountConn.Close(); err != nil {
-				logger.Error("failed to close internal bank account connection", "error", err)
+		if internalAccountConn != nil {
+			if err := internalAccountConn.Close(); err != nil {
+				logger.Error("failed to close internal account connection", "error", err)
 			}
 		}
 	}()
@@ -699,14 +699,14 @@ func (a *currentAccountClientAdapter) RetrieveCurrentAccount(ctx context.Context
 	return a.client.RetrieveCurrentAccount(ctx, req)
 }
 
-// internalBankAccountClientAdapter adapts the generated gRPC client to the service.InternalBankAccountClient interface.
+// internalAccountClientAdapter adapts the generated gRPC client to the service.InternalAccountClient interface.
 // This adapter is needed because the service package defines its own interface for testability,
 // while the generated client has a different method signature.
-type internalBankAccountClientAdapter struct {
-	client internalbankaccountv1.InternalBankAccountServiceClient
+type internalAccountClientAdapter struct {
+	client internalaccountv1.InternalAccountServiceClient
 }
 
-// RetrieveInternalBankAccount implements service.InternalBankAccountClient by delegating to the generated client.
-func (a *internalBankAccountClientAdapter) RetrieveInternalBankAccount(ctx context.Context, req *internalbankaccountv1.RetrieveInternalBankAccountRequest) (*internalbankaccountv1.RetrieveInternalBankAccountResponse, error) {
-	return a.client.RetrieveInternalBankAccount(ctx, req)
+// RetrieveInternalAccount implements service.InternalAccountClient by delegating to the generated client.
+func (a *internalAccountClientAdapter) RetrieveInternalAccount(ctx context.Context, req *internalaccountv1.RetrieveInternalAccountRequest) (*internalaccountv1.RetrieveInternalAccountResponse, error) {
+	return a.client.RetrieveInternalAccount(ctx, req)
 }

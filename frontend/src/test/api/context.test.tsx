@@ -21,7 +21,7 @@ vi.mock('@/api/clients', () => ({
     referenceData: { __transport: transport },
     accountTypeRegistry: { __transport: transport },
     node: { __transport: transport },
-    internalBankAccount: { __transport: transport },
+    internalAccount: { __transport: transport },
     marketInformation: { __transport: transport },
   })),
 }))

@@ -9,6 +9,7 @@ package domain
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/meridianhub/meridian/shared/platform/quantity"
 	"github.com/shopspring/decimal"
@@ -89,6 +90,29 @@ func NewMoney(currency string, amountCents int64) (Money, error) {
 	}
 	// Convert cents to major units based on currency precision
 	precision := currencyPrecision(currency)
+	amount := decimal.NewFromInt(amountCents).Shift(-int32(precision))
+	return Money{
+		qty: quantity.NewMoney(amount, inst),
+	}, nil
+}
+
+// NewMoneyFromInstrument creates Money from persisted instrument_code + dimension and minor-unit amount.
+// This is used by the persistence layer to reconstruct Money without losing the stored dimension.
+//
+// Currently only CURRENCY dimension is supported by this service. Other dimensions return an error.
+// This enforces the current-account service constraint while preserving the dimension field in the
+// domain model for future multi-asset support.
+func NewMoneyFromInstrument(instrumentCode, dimension string, amountCents int64) (Money, error) {
+	normalizedDimension := strings.ToUpper(dimension)
+	if normalizedDimension != quantity.DimensionCurrency {
+		return Money{}, fmt.Errorf("%w: current-account only supports CURRENCY dimension, got %s",
+			ErrInvalidCurrency, dimension)
+	}
+	inst, err := currencyInstrument(instrumentCode)
+	if err != nil {
+		return Money{}, err
+	}
+	precision := currencyPrecision(instrumentCode)
 	amount := decimal.NewFromInt(amountCents).Shift(-int32(precision))
 	return Money{
 		qty: quantity.NewMoney(amount, inst),

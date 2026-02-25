@@ -1,0 +1,31 @@
+name: Tag Develop
+
+on:
+  push:
+    branches: [develop]
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    name: Create development tag
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create lightweight tag
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const sha = context.sha.substring(0, 7);
+            const now = new Date();
+            const d = now.toISOString().replace(/[-:T]/g, '').substring(0, 14);
+            const tag = `dev-${d.substring(0, 8)}-${d.substring(8)}-${sha}`;
+
+            await github.rest.git.createRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: `refs/tags/${tag}`,
+              sha: context.sha,
+            });
+
+            core.info(`Created tag: ${tag}`);

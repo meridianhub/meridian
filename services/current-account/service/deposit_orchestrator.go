@@ -47,7 +47,7 @@ type DepositOrchestratorConfig struct {
 	PosKeepingClient PositionKeepingClient
 	FinAcctClient    FinancialAccountingClient
 	AccountConfig    *config.AccountConfig
-	// AccountResolver enables dynamic clearing account resolution from Internal Bank Account service.
+	// AccountResolver enables dynamic clearing account resolution from Internal Account service.
 	// If provided, takes precedence over AccountConfig for clearing account lookup.
 	// If nil, falls back to static AccountConfig environment variables.
 	AccountResolver *AccountResolver
@@ -261,7 +261,7 @@ func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.Cu
 
 // resolveClearingAccountID resolves the clearing account ID for deposit operations.
 // Priority:
-//  1. AccountResolver (dynamic lookup from Internal Bank Account service)
+//  1. AccountResolver (dynamic lookup from Internal Account service)
 //  2. AccountConfig (static environment variable fallback)
 //
 // Returns empty string if neither is configured (single-entry mode).

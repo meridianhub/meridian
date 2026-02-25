@@ -1,0 +1,164 @@
+# Port Configuration: See shared/platform/ports/ports.go for canonical port assignments.
+# This service uses port 8090 for SSE transport (MCP_SSE_PORT).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-server
+  labels:
+    app: mcp-server
+    component: mcp-server
+    tier: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mcp-server
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: mcp-server
+        component: mcp-server
+        tier: backend
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+      - name: wait-for-control-plane
+        image: busybox:1.36
+        command:
+        - sh
+        - -c
+        - |
+          echo 'Waiting for control-plane...'
+          until nc -z control-plane 50062; do
+            echo 'control-plane not ready, retrying in 2s'
+            sleep 2
+          done
+          echo 'control-plane is ready'
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            cpu: 50m
+            memory: 32Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 65532
+          capabilities:
+            drop:
+            - ALL
+      - name: wait-for-gateway
+        image: busybox:1.36
+        command:
+        - sh
+        - -c
+        - |
+          echo 'Waiting for gateway...'
+          until nc -z gateway 8080; do
+            echo 'gateway not ready, retrying in 2s'
+            sleep 2
+          done
+          echo 'gateway is ready'
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            cpu: 50m
+            memory: 32Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 65532
+          capabilities:
+            drop:
+            - ALL
+      containers:
+      - name: mcp-server
+        image: mcp-server:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: sse
+          containerPort: 8090
+          protocol: TCP
+        envFrom:
+        - configMapRef:
+            name: mcp-server-config
+        env:
+        - name: MERIDIAN_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: mcp-server-secrets
+              key: MERIDIAN_API_KEY
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+        livenessProbe:
+          tcpSocket:
+            port: sse
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 3
+        readinessProbe:
+          tcpSocket:
+            port: sse
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 3
+        startupProbe:
+          tcpSocket:
+            port: sse
+          initialDelaySeconds: 0
+          periodSeconds: 2
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 30
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 65532
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      terminationGracePeriodSeconds: 30

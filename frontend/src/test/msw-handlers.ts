@@ -91,8 +91,8 @@ export const handlers = [
     return HttpResponse.json({})
   }),
 
-  // InternalBankAccountService - internal accounts
-  http.post('*/meridian.internal_bank_account.v1.InternalBankAccountService/*', () => {
+  // InternalAccountService - internal accounts
+  http.post('*/meridian.internal_account.v1.InternalAccountService/*', () => {
     return HttpResponse.json({})
   }),
 

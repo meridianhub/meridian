@@ -8,7 +8,7 @@ import (
 	"time"
 
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
-	internalbankaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_bank_account/v1"
+	internalaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
 	"github.com/meridianhub/meridian/shared/pkg/clients"
 	"golang.org/x/sync/singleflight"
 	"google.golang.org/grpc/codes"
@@ -247,19 +247,19 @@ func (v *CurrentAccountValidator) InvalidateCacheEntry(accountID string) {
 		"account_id", accountID)
 }
 
-// InternalBankAccountClient defines the interface for the Internal Bank Account gRPC client.
+// InternalAccountClient defines the interface for the Internal Account gRPC client.
 // This abstraction allows for easy testing and decoupling from the generated client.
-type InternalBankAccountClient interface {
-	RetrieveInternalBankAccount(ctx context.Context, req *internalbankaccountv1.RetrieveInternalBankAccountRequest) (*internalbankaccountv1.RetrieveInternalBankAccountResponse, error)
+type InternalAccountClient interface {
+	RetrieveInternalAccount(ctx context.Context, req *internalaccountv1.RetrieveInternalAccountRequest) (*internalaccountv1.RetrieveInternalAccountResponse, error)
 }
 
-// InternalBankAccountValidator validates accounts using the Internal Bank Account service.
+// InternalAccountValidator validates accounts using the Internal Account service.
 // It implements the AccountValidator interface with caching and graceful degradation.
 //
 // Thread-safe: All methods can be called concurrently from multiple goroutines.
 // Uses singleflight to prevent cache stampede (multiple concurrent requests for the same key).
-type InternalBankAccountValidator struct {
-	client InternalBankAccountClient
+type InternalAccountValidator struct {
+	client InternalAccountClient
 	logger *slog.Logger
 
 	// Cache configuration
@@ -274,10 +274,10 @@ type InternalBankAccountValidator struct {
 	sfGroup singleflight.Group
 }
 
-// InternalBankAccountValidatorConfig holds configuration for creating an InternalBankAccountValidator.
-type InternalBankAccountValidatorConfig struct {
-	// Client is the Internal Bank Account gRPC client.
-	Client InternalBankAccountClient
+// InternalAccountValidatorConfig holds configuration for creating an InternalAccountValidator.
+type InternalAccountValidatorConfig struct {
+	// Client is the Internal Account gRPC client.
+	Client InternalAccountClient
 
 	// Logger is used for logging validator operations.
 	Logger *slog.Logger
@@ -286,16 +286,16 @@ type InternalBankAccountValidatorConfig struct {
 	// Defaults to 1 minute if not specified.
 	CacheTTL time.Duration
 
-	// LookupTimeout is the timeout for individual lookup requests to the Internal Bank Account service.
+	// LookupTimeout is the timeout for individual lookup requests to the Internal Account service.
 	// Defaults to 2 seconds if not specified.
 	LookupTimeout time.Duration
 }
 
-// NewInternalBankAccountValidator creates a new InternalBankAccountValidator with the given configuration.
+// NewInternalAccountValidator creates a new InternalAccountValidator with the given configuration.
 // Returns an error if required configuration is missing.
-func NewInternalBankAccountValidator(cfg InternalBankAccountValidatorConfig) (*InternalBankAccountValidator, error) {
+func NewInternalAccountValidator(cfg InternalAccountValidatorConfig) (*InternalAccountValidator, error) {
 	if cfg.Client == nil {
-		return nil, status.Error(codes.Internal, "internal bank account client cannot be nil")
+		return nil, status.Error(codes.Internal, "internal account client cannot be nil")
 	}
 	if cfg.Logger == nil {
 		return nil, ErrAccountValidatorLoggerNil
@@ -311,7 +311,7 @@ func NewInternalBankAccountValidator(cfg InternalBankAccountValidatorConfig) (*I
 		lookupTimeout = DefaultValidationLookupTimeout
 	}
 
-	return &InternalBankAccountValidator{
+	return &InternalAccountValidator{
 		client:        cfg.Client,
 		logger:        cfg.Logger,
 		cacheTTL:      ttl,
@@ -320,10 +320,10 @@ func NewInternalBankAccountValidator(cfg InternalBankAccountValidatorConfig) (*I
 	}, nil
 }
 
-// ValidateExists checks if an account exists using the Internal Bank Account service.
+// ValidateExists checks if an account exists using the Internal Account service.
 // Returns nil if the account exists or if the service is unavailable (graceful degradation).
 // Returns codes.InvalidArgument if the account does not exist.
-func (v *InternalBankAccountValidator) ValidateExists(ctx context.Context, accountID string) error {
+func (v *InternalAccountValidator) ValidateExists(ctx context.Context, accountID string) error {
 	// Check cache first (read lock)
 	v.mu.RLock()
 	if entry, ok := v.cache[accountID]; ok && time.Now().Before(entry.expiresAt) {
@@ -332,7 +332,7 @@ func (v *InternalBankAccountValidator) ValidateExists(ctx context.Context, accou
 			"account_id", accountID,
 			"exists", entry.exists)
 		if !entry.exists {
-			return status.Errorf(codes.InvalidArgument, "internal bank account not found: %s", accountID)
+			return status.Errorf(codes.InvalidArgument, "internal account not found: %s", accountID)
 		}
 		return nil
 	}
@@ -353,11 +353,11 @@ func (v *InternalBankAccountValidator) ValidateExists(ctx context.Context, accou
 		lookupCtx, cancel := clients.WithTimeout(ctx, v.lookupTimeout)
 		defer cancel()
 
-		// Query the Internal Bank Account service
-		exists, lookupErr := v.queryInternalBankAccount(lookupCtx, accountID)
+		// Query the Internal Account service
+		exists, lookupErr := v.queryInternalAccount(lookupCtx, accountID)
 		if lookupErr != nil {
 			// Graceful degradation: if service is unavailable, allow the operation
-			v.logger.Warn("internal bank account service unavailable, skipping validation",
+			v.logger.Warn("internal account service unavailable, skipping validation",
 				"account_id", accountID,
 				"error", lookupErr)
 			return true, nil // Return true to allow operation
@@ -395,22 +395,22 @@ func (v *InternalBankAccountValidator) ValidateExists(ctx context.Context, accou
 		"shared", shared)
 
 	if !exists {
-		return status.Errorf(codes.InvalidArgument, "internal bank account not found: %s", accountID)
+		return status.Errorf(codes.InvalidArgument, "internal account not found: %s", accountID)
 	}
 
 	return nil
 }
 
-// queryInternalBankAccount queries the Internal Bank Account service to check if an account exists.
+// queryInternalAccount queries the Internal Account service to check if an account exists.
 // Returns (true, nil) if account exists, (false, nil) if not found, or (false, error) on service error.
-func (v *InternalBankAccountValidator) queryInternalBankAccount(ctx context.Context, accountID string) (bool, error) {
-	resp, err := v.client.RetrieveInternalBankAccount(ctx, &internalbankaccountv1.RetrieveInternalBankAccountRequest{
+func (v *InternalAccountValidator) queryInternalAccount(ctx context.Context, accountID string) (bool, error) {
+	resp, err := v.client.RetrieveInternalAccount(ctx, &internalaccountv1.RetrieveInternalAccountRequest{
 		AccountId: accountID,
 	})
 	if err != nil {
 		// Check if it's a NotFound error - that means the account doesn't exist
 		if st, ok := status.FromError(err); ok && st.Code() == codes.NotFound {
-			v.logger.Debug("account not found in internal bank account service",
+			v.logger.Debug("account not found in internal account service",
 				"account_id", accountID)
 			return false, nil
 		}
@@ -425,18 +425,18 @@ func (v *InternalBankAccountValidator) queryInternalBankAccount(ctx context.Cont
 
 // CompositeAccountValidator validates accounts by checking multiple services.
 // It tries each validator in order and returns success if any validator finds the account.
-// This allows Position Keeping to validate accounts from both Current Account and Internal Bank Account.
+// This allows Position Keeping to validate accounts from both Current Account and Internal Account.
 //
-// Validation order: Current Account -> Internal Bank Account
+// Validation order: Current Account -> Internal Account
 // - If found in Current Account: success
-// - If NotFound in Current Account, check Internal Bank Account
-// - If found in Internal Bank Account: success
+// - If NotFound in Current Account, check Internal Account
+// - If found in Internal Account: success
 // - If NotFound in both: return InvalidArgument error
 // - If any service is unavailable: graceful degradation (allow operation)
 type CompositeAccountValidator struct {
-	currentAccountValidator      *CurrentAccountValidator
-	internalBankAccountValidator *InternalBankAccountValidator
-	logger                       *slog.Logger
+	currentAccountValidator  *CurrentAccountValidator
+	internalAccountValidator *InternalAccountValidator
+	logger                   *slog.Logger
 }
 
 // CompositeAccountValidatorConfig holds configuration for creating a CompositeAccountValidator.
@@ -445,9 +445,9 @@ type CompositeAccountValidatorConfig struct {
 	// Optional - if nil, current account validation is skipped.
 	CurrentAccountValidator *CurrentAccountValidator
 
-	// InternalBankAccountValidator validates internal bank accounts.
-	// Optional - if nil, internal bank account validation is skipped.
-	InternalBankAccountValidator *InternalBankAccountValidator
+	// InternalAccountValidator validates internal accounts.
+	// Optional - if nil, internal account validation is skipped.
+	InternalAccountValidator *InternalAccountValidator
 
 	// Logger is used for logging validator operations.
 	Logger *slog.Logger
@@ -456,7 +456,7 @@ type CompositeAccountValidatorConfig struct {
 // NewCompositeAccountValidator creates a new CompositeAccountValidator with the given configuration.
 // At least one validator must be provided.
 func NewCompositeAccountValidator(cfg CompositeAccountValidatorConfig) (*CompositeAccountValidator, error) {
-	if cfg.CurrentAccountValidator == nil && cfg.InternalBankAccountValidator == nil {
+	if cfg.CurrentAccountValidator == nil && cfg.InternalAccountValidator == nil {
 		return nil, status.Error(codes.Internal, "at least one account validator must be provided")
 	}
 	if cfg.Logger == nil {
@@ -464,14 +464,14 @@ func NewCompositeAccountValidator(cfg CompositeAccountValidatorConfig) (*Composi
 	}
 
 	return &CompositeAccountValidator{
-		currentAccountValidator:      cfg.CurrentAccountValidator,
-		internalBankAccountValidator: cfg.InternalBankAccountValidator,
-		logger:                       cfg.Logger,
+		currentAccountValidator:  cfg.CurrentAccountValidator,
+		internalAccountValidator: cfg.InternalAccountValidator,
+		logger:                   cfg.Logger,
 	}, nil
 }
 
 // ValidateExists checks if an account exists by trying multiple services.
-// Returns nil if the account exists in either Current Account or Internal Bank Account.
+// Returns nil if the account exists in either Current Account or Internal Account.
 // Returns codes.InvalidArgument if the account is not found in any service.
 // Returns nil on service unavailability (graceful degradation).
 func (v *CompositeAccountValidator) ValidateExists(ctx context.Context, accountID string) error {
@@ -487,8 +487,8 @@ func (v *CompositeAccountValidator) ValidateExists(ctx context.Context, accountI
 
 		// Check if it's an InvalidArgument (not found) vs other errors
 		if st, ok := status.FromError(err); ok && st.Code() == codes.InvalidArgument {
-			// Not found in Current Account - try Internal Bank Account
-			v.logger.Debug("account not found in current account, trying internal bank account",
+			// Not found in Current Account - try Internal Account
+			v.logger.Debug("account not found in current account, trying internal account",
 				"account_id", accountID)
 		} else {
 			// Other error (service unavailable) - graceful degradation already handled
@@ -496,20 +496,20 @@ func (v *CompositeAccountValidator) ValidateExists(ctx context.Context, accountI
 		}
 	}
 
-	// Try Internal Bank Account
-	if v.internalBankAccountValidator != nil {
-		err := v.internalBankAccountValidator.ValidateExists(ctx, accountID)
+	// Try Internal Account
+	if v.internalAccountValidator != nil {
+		err := v.internalAccountValidator.ValidateExists(ctx, accountID)
 		if err == nil {
-			// Found in Internal Bank Account
-			v.logger.Debug("account found in internal bank account service",
+			// Found in Internal Account
+			v.logger.Debug("account found in internal account service",
 				"account_id", accountID)
 			return nil
 		}
 
 		// Check if it's an InvalidArgument (not found)
 		if st, ok := status.FromError(err); ok && st.Code() == codes.InvalidArgument {
-			// Not found in Internal Bank Account either
-			v.logger.Debug("account not found in internal bank account service",
+			// Not found in Internal Account either
+			v.logger.Debug("account not found in internal account service",
 				"account_id", accountID)
 		} else {
 			// Other error (service unavailable) - graceful degradation already handled

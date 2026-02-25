@@ -38,7 +38,8 @@ func setupValuationFeatureServiceTest(t *testing.T) (*Service, context.Context, 
 		org_party_id UUID NULL,
 		balance BIGINT NOT NULL DEFAULT 0,
 		available_balance BIGINT NOT NULL DEFAULT 0,
-		currency VARCHAR(3) NOT NULL DEFAULT 'GBP',
+		instrument_code VARCHAR(32) NOT NULL DEFAULT 'GBP',
+		dimension VARCHAR(20) NOT NULL DEFAULT 'CURRENCY',
 		status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
 		overdraft_limit BIGINT NOT NULL DEFAULT 0,
 		overdraft_enabled BOOLEAN NOT NULL DEFAULT FALSE,
@@ -108,8 +109,8 @@ func createTestAccountForVF(t *testing.T, db *gorm.DB, currency string) (uuid.UU
 	accountID := fmt.Sprintf("ACC-%s", uuid.New().String()[:8])
 	iban := fmt.Sprintf("GB%s", uuid.New().String()[:20])
 
-	err := db.Exec(`INSERT INTO account (id, account_id, account_identification, party_id, currency, status, created_by, updated_by)
-		VALUES (?, ?, ?, ?, ?, 'ACTIVE', 'test', 'test')`,
+	err := db.Exec(`INSERT INTO account (id, account_id, account_identification, party_id, instrument_code, dimension, status, created_by, updated_by)
+		VALUES (?, ?, ?, ?, ?, 'CURRENCY', 'ACTIVE', 'test', 'test')`,
 		accountUUID, accountID, iban, uuid.New(), currency).Error
 	require.NoError(t, err)
 

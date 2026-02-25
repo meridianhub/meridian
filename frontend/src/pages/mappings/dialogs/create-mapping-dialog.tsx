@@ -18,7 +18,7 @@ const TARGET_SERVICE_OPTIONS = [
   { label: 'Payment Order', value: 'meridian.payment_order.v1.PaymentOrderService' },
   { label: 'Position Keeping', value: 'meridian.position_keeping.v1.PositionKeepingService' },
   { label: 'Party', value: 'meridian.party.v1.PartyService' },
-  { label: 'Internal Bank Account', value: 'meridian.internal_bank_account.v1.InternalBankAccountService' },
+  { label: 'Internal Account', value: 'meridian.internal_account.v1.InternalAccountService' },
   { label: 'Financial Accounting', value: 'meridian.financial_accounting.v1.FinancialAccountingService' },
 ]
 

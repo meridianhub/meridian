@@ -23,7 +23,7 @@ vi.mock('@/api/clients', () => ({
     referenceData: {},
     accountTypeRegistry: {},
     node: {},
-    internalBankAccount: {},
+    internalAccount: {},
     marketInformation: {
       listDataSets: vi.fn(),
       registerDataSet: vi.fn(),
@@ -72,7 +72,7 @@ function setupMock(datasets = [makeDataset()], nextPageToken = '') {
     referenceData: {} as never,
     accountTypeRegistry: {} as never,
     node: {} as never,
-    internalBankAccount: {} as never,
+    internalAccount: {} as never,
     marketInformation: {
       listDataSets: vi.fn().mockResolvedValue({
         datasets,
@@ -161,7 +161,7 @@ describe('MarketDataPage', () => {
       referenceData: {} as never,
       accountTypeRegistry: {} as never,
       node: {} as never,
-      internalBankAccount: {} as never,
+      internalAccount: {} as never,
       marketInformation: {
         listDataSets: vi.fn().mockReturnValue(new Promise(() => {})),
         registerDataSet: vi.fn(),

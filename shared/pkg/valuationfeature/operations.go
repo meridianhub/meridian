@@ -10,7 +10,7 @@ import (
 )
 
 // AccountResolver bridges the shared CRUD logic to service-specific account lookups.
-// Each service (Current Account, Internal Bank Account) provides its own implementation.
+// Each service (Current Account, Internal Account) provides its own implementation.
 type AccountResolver interface {
 	// ResolveAccount looks up an account and returns its UUID and native instrument.
 	// Returns an error if the account is not found.

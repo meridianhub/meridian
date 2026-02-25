@@ -185,7 +185,7 @@ None identified. All P0 functional requirements are implemented.
 ## Recommendations
 
 1. **Create NFR Performance Validation Suite** (Priority: HIGH)
-   - Implement benchmark tests following internal-bank-account pattern
+   - Implement benchmark tests following internal-account pattern
    - Set CI thresholds with production targets as documentation
 
 2. **Implement CEL Playground** (Priority: MEDIUM)

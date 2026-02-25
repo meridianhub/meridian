@@ -1,25 +1,25 @@
 ---
-name: prd-internal-bank-account-position-keeping-client
-description: Wire Position Keeping client in internal-bank-account service to enable balance retrieval via GetBalance RPC
+name: prd-internal-account-position-keeping-client
+description: Wire Position Keeping client in internal-account service to enable balance retrieval via GetBalance RPC
 triggers:
-  - Working on internal-bank-account balance queries
+  - Working on internal-account balance queries
   - Fixing Unimplemented gRPC response for GetBalance
-  - Integrating Internal Bank Account with Position Keeping
+  - Integrating Internal Account with Position Keeping
 instructions: |
-  The internal-bank-account service has a GetBalance RPC that returns codes.Unimplemented
+  The internal-account service has a GetBalance RPC that returns codes.Unimplemented
   when positionKeepingClient == nil. The client adapter, interface, and even the wiring in
   cmd/main.go all exist. The issue is that the Position Keeping client is passed to the
   service constructor but the GetBalance handler guards on nil because the client might
   not connect successfully at startup.
 
   Key files:
-  - services/internal-bank-account/adapters/grpc/position_keeping_client.go (client adapter)
-  - services/internal-bank-account/service/client_interfaces.go (interface definition)
-  - services/internal-bank-account/service/server.go (handler at line 573)
-  - services/internal-bank-account/cmd/main.go (wiring at line 320-323)
+  - services/internal-account/adapters/grpc/position_keeping_client.go (client adapter)
+  - services/internal-account/service/client_interfaces.go (interface definition)
+  - services/internal-account/service/server.go (handler at line 573)
+  - services/internal-account/cmd/main.go (wiring at line 320-323)
 ---
 
-# PRD: Internal Bank Account - Position Keeping Client Wiring
+# PRD: Internal Account - Position Keeping Client Wiring
 
 **Status:** Draft
 **Version:** 1.0
@@ -34,7 +34,7 @@ instructions: |
 
 **Related PRDs:**
 
-- [Internal Bank Account Service](002-internal-bank-account.md) -
+- [Internal Account Service](002-internal-account.md) -
   Parent service PRD (FR-3: Balance Retrieval via Position Keeping)
 - [Reconciliation gRPC Wiring](017-reconciliation-grpc-wiring.md) -
   Appendix: Cross-Service Unimplemented RPC Audit (source of this work)
@@ -43,14 +43,14 @@ instructions: |
 
 ## Problem Statement
 
-The `GetBalance` RPC in the internal-bank-account service returns `codes.Unimplemented` when `positionKeepingClient == nil`:
+The `GetBalance` RPC in the internal-account service returns `codes.Unimplemented` when `positionKeepingClient == nil`:
 
 | Handler | File | Line | Error Message |
 |---------|------|------|---------------|
 | `GetBalance` | `service/server.go` | 594-596 | "position keeping service not configured" |
 
 **Severity:** Medium - Balance retrieval is non-functional without Position Keeping
-integration. This is a core requirement (FR-3 in the Internal Bank Account PRD)
+integration. This is a core requirement (FR-3 in the Internal Account PRD)
 because Position Keeping is the single source of truth for all account balance data.
 
 ---
@@ -117,7 +117,7 @@ Position Keeping is reachable.
 
 The remaining work is:
 
-1. Ensure Position Keeping is deployed alongside internal-bank-account in all environments
+1. Ensure Position Keeping is deployed alongside internal-account in all environments
 2. Add integration tests that verify the GetBalance flow end-to-end
 3. Consider removing the nil guard and letting the gRPC call fail naturally with
    a descriptive error (since the client is always non-nil after successful creation)
@@ -151,17 +151,17 @@ graph LR
 
 **Modified files:**
 
-- `services/internal-bank-account/service/server.go` - Consider replacing nil guard
+- `services/internal-account/service/server.go` - Consider replacing nil guard
   with descriptive error from gRPC call failure (optional, defensive pattern is
   acceptable)
 
 **New files:**
 
-- `services/internal-bank-account/service/server_balance_test.go` - Integration test for GetBalance flow
+- `services/internal-account/service/server_balance_test.go` - Integration test for GetBalance flow
 
 **Deployment:**
 
-- Ensure Position Keeping service is deployed in all environments where internal-bank-account runs
+- Ensure Position Keeping service is deployed in all environments where internal-account runs
 - Kubernetes deployment should declare Position Keeping as a dependency (readiness probe)
 
 ### Service Dependency
@@ -210,7 +210,7 @@ test coverage.
 
 ### Integration Tests
 
-- Start both internal-bank-account and position-keeping in testcontainers
+- Start both internal-account and position-keeping in testcontainers
 - Create an internal account, record a transaction via Financial Accounting, then call `GetBalance`
 - Verify balance amount and instrument code match
 

@@ -27,7 +27,7 @@ data:
   # Account validation - validates accounts exist before creating position logs
   ACCOUNT_VALIDATION_ENABLED: "true"
   CURRENT_ACCOUNT_SERVICE_URL: "current-account:50051"
-  INTERNAL_BANK_ACCOUNT_SERVICE_URL: "internal-bank-account:50057"
+  INTERNAL_ACCOUNT_SERVICE_URL: "internal-account:50057"
 
   # OpenTelemetry configuration
   OTEL_SERVICE_NAME: "position-keeping-service"

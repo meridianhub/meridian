@@ -8,7 +8,7 @@
 // settlement operations that involve:
 //
 //   - Current Account: Initiates customer-facing operations
-//   - Internal Bank Account: Resolves clearing accounts by purpose (deposit/withdrawal)
+//   - Internal Account: Resolves clearing accounts by purpose (deposit/withdrawal)
 //   - Position Keeping: Records position logs for balance tracking
 //   - Financial Accounting: Creates balanced ledger postings
 //   - Payment Order: Orchestrates payment settlement flows

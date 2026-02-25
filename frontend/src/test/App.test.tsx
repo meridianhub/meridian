@@ -24,7 +24,7 @@ vi.mock('@/api/clients', () => ({
     referenceData: {},
     accountTypeRegistry: {},
     node: {},
-    internalBankAccount: {},
+    internalAccount: {},
     marketInformation: {},
     mapping: {},
     forecasting: {},

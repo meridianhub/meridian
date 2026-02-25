@@ -20,7 +20,7 @@ import (
 //
 // Flow:
 // 1. Customer initiates a withdrawal (Current Account)
-// 2. System resolves the withdrawal clearing account (Internal Bank Account)
+// 2. System resolves the withdrawal clearing account (Internal Account)
 // 3. Ledger posting created: Debit Customer Account, Credit Clearing Account (Financial Accounting)
 // 4. Position logs recorded for both accounts (Position Keeping)
 // 5. Verify: Ledger is balanced, customer balance reduced
@@ -37,12 +37,12 @@ func TestWithdrawalClearingFlow(t *testing.T) {
 
 		// Step 1: Create deposit clearing account (for initial funding)
 		depositClearingAccountID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-DEPOSIT", "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
 		// Step 2: Create withdrawal clearing account
 		withdrawalClearingAccountID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-WITHDRAW", "GBP", "CLEARING_PURPOSE_WITHDRAWAL")
 
 		// Step 3: Create customer account
@@ -81,7 +81,7 @@ func TestWithdrawalClearingFlow(t *testing.T) {
 
 		// Resolve withdrawal clearing account
 		resolvedAccountID, resolvedAccountCode, found := getClearingAccountByPurpose(t, ctx,
-			infra.internalBankAccountDB, schemaName, "GBP", "CLEARING_PURPOSE_WITHDRAWAL")
+			infra.internalAccountDB, schemaName, "GBP", "CLEARING_PURPOSE_WITHDRAWAL")
 		require.True(t, found, "withdrawal clearing account should be found")
 		assert.Equal(t, withdrawalClearingAccountID, resolvedAccountID)
 		assert.Equal(t, "CLR-GBP-WITHDRAW", resolvedAccountCode)
@@ -124,11 +124,11 @@ func TestWithdrawalClearingFlow(t *testing.T) {
 
 		// Setup
 		depositClearingAccountID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-DEP", "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
 		withdrawalClearingAccountID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-WDR", "GBP", "CLEARING_PURPOSE_WITHDRAWAL")
 
 		partyID := uuid.New().String()
@@ -183,11 +183,11 @@ func TestWithdrawalClearingFlow(t *testing.T) {
 
 		// Setup
 		depositClearingAccountID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-DEP", "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
 		withdrawalClearingAccountID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-WDR", "GBP", "CLEARING_PURPOSE_WITHDRAWAL")
 
 		partyID := uuid.New().String()
@@ -246,11 +246,11 @@ func TestWithdrawalClearingFlow(t *testing.T) {
 
 		// Create both clearing accounts
 		depositClearingID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-DEP", "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
 		withdrawalClearingID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-WDR", "GBP", "CLEARING_PURPOSE_WITHDRAWAL")
 
 		partyID := uuid.New().String()

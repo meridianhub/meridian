@@ -1,28 +1,28 @@
 ---
-name: prd-internal-bank-account
-description: BIAN Internal Bank Account service for managing non-customer-facing accounts
+name: prd-internal-account
+description: BIAN Internal Account service for managing non-customer-facing accounts
 triggers:
-  - Creating or working on internal bank accounts
+  - Creating or working on internal accounts
   - Implementing clearing, nostro, vostro, or holding accounts
   - Working on the "other leg" of double-entry transactions
   - Managing correspondent bank relationships
   - Tracking balances for non-customer accounts
   - Integrating with FinancialAccounting for balance updates
 instructions: |
-  This PRD defines the Internal Bank Account service following BIAN v13.0.
+  This PRD defines the Internal Account service following BIAN v13.0.
   Key patterns: Multi-asset support via InstrumentAmount, real-time O(1) balance queries.
   Uses Dimension from reference_data/v1, InstrumentAmount from quantity/v1.
-  Service structure follows ADR-0015. Proto package: internal_bank_account (with underscores).
-  BIAN spec: https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/InternalBankAccount.yaml
+  Service structure follows ADR-0015. Proto package: internal_account (with underscores).
+  BIAN spec: https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/InternalAccount.yaml
 ---
 
-# PRD: Internal Bank Account Service
+# PRD: Internal Account Service
 
 **Status:** Implemented
 **Version:** 1.0
 **Date:** 2026-01-06
 **Author:** Architecture Team
-**Task Master Tag:** `internal-bank-account` (33/33 tasks done)
+**Task Master Tag:** `internal-account` (33/33 tasks done)
 
 **ADRs:**
 
@@ -39,7 +39,7 @@ instructions: |
   - This service queries Position Keeping for balance, does NOT store it locally
   - Must be implemented before or alongside this service
 
-**Target Task Master Tag:** `internal-bank-account`
+**Target Task Master Tag:** `internal-account`
 
 ---
 
@@ -58,7 +58,7 @@ instructions: |
 
 ## Executive Summary
 
-This PRD defines the requirements for implementing the **Internal Bank Account** service
+This PRD defines the requirements for implementing the **Internal Account** service
 in Meridian, following the BIAN v13.0 Service Domain specification. This service fills a
 critical architectural gap: managing the "other leg" of double-entry transactions that
 are not customer-facing accounts.
@@ -83,7 +83,7 @@ This creates several problems:
 
 ### Solution
 
-Implement the **BIAN Internal Bank Account** service domain as a multi-asset account
+Implement the **BIAN Internal Account** service domain as a multi-asset account
 registry with real-time balance tracking, enabling:
 
 - O(1) balance queries for any internal account
@@ -98,7 +98,7 @@ registry with real-time balance tracking, enabling:
 
 ### Primary Service Domain
 
-**Internal Bank Account** (BIAN v13.0)
+**Internal Account** (BIAN v13.0)
 
 > "Manages holding accounts, mirror accounts, working accounts etc. that are required
 > for the booking of that part of a transaction in the bank world (so not in the
@@ -106,12 +106,12 @@ registry with real-time balance tracking, enabling:
 
 **BIAN Semantic API Specification:**
 
-- [InternalBankAccount.yaml](https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/InternalBankAccount.yaml)
+- [InternalAccount.yaml](https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/InternalAccount.yaml)
 
 **BIAN References:**
 
-- [BIAN Internal Bank Account Service Domain](https://bian.org/servicelandscape-13-0-0/views/view_153620.html)
-- [BIAN Internal Bank Account Capability](https://bian.org/servicelandscape-12-0-0/object_22.html?object=46477)
+- [BIAN Internal Account Service Domain](https://bian.org/servicelandscape-13-0-0/views/view_153620.html)
+- [BIAN Internal Account Capability](https://bian.org/servicelandscape-12-0-0/object_22.html?object=46477)
 - [BIAN v13.0.0 Release Notes](https://bian.org/wp-content/uploads/2024/12/BIAN-v12.0-Release-Notes-v0.4.pdf)
 
 ### Functional Pattern
@@ -138,7 +138,7 @@ This indicates the service actively manages account lifecycles, not just tracks 
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
-| FR-1.1 | System SHALL maintain a registry of internal bank accounts (tenant isolation via schema-per-tenant) | P0 |
+| FR-1.1 | System SHALL maintain a registry of internal accounts (tenant isolation via schema-per-tenant) | P0 |
 | FR-1.2 | Each account SHALL have a unique account_id within its schema | P0 |
 | FR-1.3 | Accounts SHALL support multiple types: CLEARING, NOSTRO, VOSTRO, HOLDING, SUSPENSE, REVENUE, EXPENSE | P0 |
 | FR-1.4 | Accounts SHALL be scoped to a single instrument (currency or asset type) | P0 |
@@ -156,7 +156,7 @@ This indicates the service actively manages account lifecycles, not just tracks 
 
 #### FR-3: Balance Retrieval (via Position Keeping)
 
-> **Note**: Per BIAN architecture, Position Keeping owns balance computation. Internal Bank Account
+> **Note**: Per BIAN architecture, Position Keeping owns balance computation. Internal Account
 > queries Position Keeping for balance - it does NOT store balance locally. See
 > Position Keeping Balance Ownership PRD (Task Master tag: `position-keeping-balance`).
 
@@ -181,11 +181,11 @@ This indicates the service actively manages account lifecycles, not just tracks 
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
-| FR-5.1 | InitiateInternalBankAccountFacility - Create new account | P0 |
-| FR-5.2 | UpdateInternalBankAccountFacility - Modify account settings | P0 |
-| FR-5.3 | ControlInternalBankAccountFacility - Lifecycle state transitions | P0 |
-| FR-5.4 | RetrieveInternalBankAccountFacility - Get account by ID | P0 |
-| FR-5.5 | ListInternalBankAccountFacilities - Query accounts with filters | P0 |
+| FR-5.1 | InitiateInternalAccountFacility - Create new account | P0 |
+| FR-5.2 | UpdateInternalAccountFacility - Modify account settings | P0 |
+| FR-5.3 | ControlInternalAccountFacility - Lifecycle state transitions | P0 |
+| FR-5.4 | RetrieveInternalAccountFacility - Get account by ID | P0 |
+| FR-5.5 | ListInternalAccountFacilities - Query accounts with filters | P0 |
 | FR-5.6 | GetBalance - Query balance from Position Keeping | P0 |
 
 > **Note**: No `RecordPosting` RPC - postings are recorded via FinancialAccounting → Position Keeping.
@@ -238,7 +238,7 @@ This indicates the service actively manages account lifecycles, not just tracks 
 Following [ADR-0015](../adr/0015-standard-service-directory-structure.md) (Standard Service Directory Structure):
 
 ```text
-services/internal-bank-account/
+services/internal-account/
 ├── cmd/
 │   ├── main.go
 │   └── Dockerfile
@@ -273,15 +273,15 @@ services/internal-bank-account/
 
 ### Proto Definition
 
-Location: `api/proto/meridian/internal_bank_account/v1/internal_bank_account.proto`
+Location: `api/proto/meridian/internal_account/v1/internal_account.proto`
 
-> **Note**: Package uses underscores (`internal_bank_account`) to match existing conventions
+> **Note**: Package uses underscores (`internal_account`) to match existing conventions
 > (`current_account`, `financial_accounting`, `reference_data`).
 
 ```protobuf
 syntax = "proto3";
 
-package meridian.internal_bank_account.v1;
+package meridian.internal_account.v1;
 
 import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
@@ -290,14 +290,14 @@ import "meridian/common/v1/types.proto";
 import "meridian/quantity/v1/quantity.proto";
 import "meridian/reference_data/v1/instrument.proto";
 
-option go_package = "github.com/meridianhub/meridian/api/proto/meridian/internal_bank_account/v1;internalbankaccountv1";
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1;internalaccountv1";
 
 // =============================================================================
 // Enums
 // =============================================================================
 
 // InternalAccountType defines the purpose of the internal account.
-// Maps to BIAN Internal Bank Account types.
+// Maps to BIAN Internal Account types.
 enum InternalAccountType {
   INTERNAL_ACCOUNT_TYPE_UNSPECIFIED = 0;
 
@@ -370,9 +370,9 @@ message CorrespondentDetails {
   string external_account_ref = 3 [(buf.validate.field).string.max_len = 100];
 }
 
-// InternalBankAccountFacility is the BIAN Control Record for internal accounts.
-// This is the aggregate root for the Internal Bank Account domain.
-message InternalBankAccountFacility {
+// InternalAccountFacility is the BIAN Control Record for internal accounts.
+// This is the aggregate root for the Internal Account domain.
+message InternalAccountFacility {
   // account_id is the unique identifier (replaces hardcoded env vars)
   string account_id = 1 [(buf.validate.field).string = {
     min_len: 1
@@ -437,9 +437,9 @@ message InternalBankAccountFacility {
 // Request/Response Messages
 // =============================================================================
 
-// InitiateInternalBankAccountRequest creates a new internal account.
+// InitiateInternalAccountRequest creates a new internal account.
 // BIAN: Initiate Control Record (InCR)
-message InitiateInternalBankAccountRequest {
+message InitiateInternalAccountRequest {
   string account_code = 1 [(buf.validate.field).string = {
     min_len: 1
     max_len: 50
@@ -472,13 +472,13 @@ message InitiateInternalBankAccountRequest {
   meridian.common.v1.IdempotencyKey idempotency_key = 8;
 }
 
-message InitiateInternalBankAccountResponse {
-  InternalBankAccountFacility facility = 1;
+message InitiateInternalAccountResponse {
+  InternalAccountFacility facility = 1;
 }
 
-// UpdateInternalBankAccountRequest modifies account settings.
+// UpdateInternalAccountRequest modifies account settings.
 // BIAN: Update Control Record (UpCR)
-message UpdateInternalBankAccountRequest {
+message UpdateInternalAccountRequest {
   string account_id = 1 [(buf.validate.field).string = {
     min_len: 1
     max_len: 100
@@ -492,13 +492,13 @@ message UpdateInternalBankAccountRequest {
   map<string, string> attributes = 4;
 }
 
-message UpdateInternalBankAccountResponse {
-  InternalBankAccountFacility facility = 1;
+message UpdateInternalAccountResponse {
+  InternalAccountFacility facility = 1;
 }
 
-// ControlInternalBankAccountRequest performs lifecycle transitions.
+// ControlInternalAccountRequest performs lifecycle transitions.
 // BIAN: Control Control Record (CoCR)
-message ControlInternalBankAccountRequest {
+message ControlInternalAccountRequest {
   string account_id = 1 [(buf.validate.field).string = {
     min_len: 1
     max_len: 100
@@ -513,14 +513,14 @@ message ControlInternalBankAccountRequest {
   string reason = 3 [(buf.validate.field).string.max_len = 1000];
 }
 
-message ControlInternalBankAccountResponse {
-  InternalBankAccountFacility facility = 1;
+message ControlInternalAccountResponse {
+  InternalAccountFacility facility = 1;
   google.protobuf.Timestamp action_timestamp = 2;
 }
 
-// RetrieveInternalBankAccountRequest gets an account by ID.
+// RetrieveInternalAccountRequest gets an account by ID.
 // BIAN: Retrieve Control Record (ReCR)
-message RetrieveInternalBankAccountRequest {
+message RetrieveInternalAccountRequest {
   string account_id = 1 [(buf.validate.field).string = {
     min_len: 1
     max_len: 100
@@ -528,12 +528,12 @@ message RetrieveInternalBankAccountRequest {
   }];
 }
 
-message RetrieveInternalBankAccountResponse {
-  InternalBankAccountFacility facility = 1;
+message RetrieveInternalAccountResponse {
+  InternalAccountFacility facility = 1;
 }
 
-// ListInternalBankAccountsRequest queries accounts with filters.
-message ListInternalBankAccountsRequest {
+// ListInternalAccountsRequest queries accounts with filters.
+message ListInternalAccountsRequest {
   InternalAccountType account_type = 1;
   string instrument_code = 2;
   meridian.reference_data.v1.Dimension dimension = 3;
@@ -542,8 +542,8 @@ message ListInternalBankAccountsRequest {
   string page_token = 6;
 }
 
-message ListInternalBankAccountsResponse {
-  repeated InternalBankAccountFacility facilities = 1;
+message ListInternalAccountsResponse {
+  repeated InternalAccountFacility facilities = 1;
   string next_page_token = 2;
 }
 
@@ -570,9 +570,9 @@ message GetBalanceResponse {
 // Service Definition
 // =============================================================================
 
-// InternalBankAccountService provides BIAN-compliant internal account management.
+// InternalAccountService provides BIAN-compliant internal account management.
 //
-// BIAN Service Domain: Internal Bank Account
+// BIAN Service Domain: Internal Account
 // Functional Pattern: Fulfill
 //
 // This service manages accounts that are not customer-facing but are required
@@ -583,51 +583,51 @@ message GetBalanceResponse {
 // - Account registry with full lifecycle management
 // - Balance queries via Position Keeping (source of truth)
 // - Multi-asset support (fiat, energy, compute, carbon, custom instruments)
-service InternalBankAccountService {
-  // InitiateInternalBankAccount creates a new internal account.
+service InternalAccountService {
+  // InitiateInternalAccount creates a new internal account.
   // BIAN: Initiate Control Record (InCR)
-  rpc InitiateInternalBankAccount(InitiateInternalBankAccountRequest)
-      returns (InitiateInternalBankAccountResponse) {
+  rpc InitiateInternalAccount(InitiateInternalAccountRequest)
+      returns (InitiateInternalAccountResponse) {
     option (google.api.http) = {
-      post: "/v1/internal-bank-accounts"
+      post: "/v1/internal-accounts"
       body: "*"
     };
   }
 
-  // UpdateInternalBankAccount modifies account settings.
+  // UpdateInternalAccount modifies account settings.
   // BIAN: Update Control Record (UpCR)
-  rpc UpdateInternalBankAccount(UpdateInternalBankAccountRequest)
-      returns (UpdateInternalBankAccountResponse) {
+  rpc UpdateInternalAccount(UpdateInternalAccountRequest)
+      returns (UpdateInternalAccountResponse) {
     option (google.api.http) = {
-      put: "/v1/internal-bank-accounts/{account_id}"
+      put: "/v1/internal-accounts/{account_id}"
       body: "*"
     };
   }
 
-  // ControlInternalBankAccount performs lifecycle state transitions.
+  // ControlInternalAccount performs lifecycle state transitions.
   // BIAN: Control Control Record (CoCR)
-  rpc ControlInternalBankAccount(ControlInternalBankAccountRequest)
-      returns (ControlInternalBankAccountResponse) {
+  rpc ControlInternalAccount(ControlInternalAccountRequest)
+      returns (ControlInternalAccountResponse) {
     option (google.api.http) = {
-      post: "/v1/internal-bank-accounts/{account_id}/control"
+      post: "/v1/internal-accounts/{account_id}/control"
       body: "*"
     };
   }
 
-  // RetrieveInternalBankAccount gets account details by ID.
+  // RetrieveInternalAccount gets account details by ID.
   // BIAN: Retrieve Control Record (ReCR)
-  rpc RetrieveInternalBankAccount(RetrieveInternalBankAccountRequest)
-      returns (RetrieveInternalBankAccountResponse) {
+  rpc RetrieveInternalAccount(RetrieveInternalAccountRequest)
+      returns (RetrieveInternalAccountResponse) {
     option (google.api.http) = {
-      get: "/v1/internal-bank-accounts/{account_id}"
+      get: "/v1/internal-accounts/{account_id}"
     };
   }
 
-  // ListInternalBankAccounts queries accounts with filters.
-  rpc ListInternalBankAccounts(ListInternalBankAccountsRequest)
-      returns (ListInternalBankAccountsResponse) {
+  // ListInternalAccounts queries accounts with filters.
+  rpc ListInternalAccounts(ListInternalAccountsRequest)
+      returns (ListInternalAccountsResponse) {
     option (google.api.http) = {
-      get: "/v1/internal-bank-accounts"
+      get: "/v1/internal-accounts"
     };
   }
 
@@ -635,7 +635,7 @@ service InternalBankAccountService {
   // This service does not store balance - Position Keeping is the source of truth.
   rpc GetBalance(GetBalanceRequest) returns (GetBalanceResponse) {
     option (google.api.http) = {
-      get: "/v1/internal-bank-accounts/{account_id}/balance"
+      get: "/v1/internal-accounts/{account_id}/balance"
     };
   }
 
@@ -647,16 +647,16 @@ service InternalBankAccountService {
 
 ### Database Schema
 
-Location: `services/internal-bank-account/migrations/20260106000001_initial.sql`
+Location: `services/internal-account/migrations/20260106000001_initial.sql`
 
 ```sql
--- Internal Bank Account initial schema
--- BIAN Service Domain: Internal Bank Account
+-- Internal Account initial schema
+-- BIAN Service Domain: Internal Account
 -- Manages non-customer-facing accounts for bank operations
 
--- Create internal_bank_account table (singular, unqualified per ADR-0015)
+-- Create internal_account table (singular, unqualified per ADR-0015)
 -- Tenant isolation is at schema level (schema-per-tenant), not via tenant_id column
-CREATE TABLE internal_bank_account (
+CREATE TABLE internal_account (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     -- Unique identifier (replaces hardcoded env vars)
@@ -708,15 +708,15 @@ CREATE TABLE internal_bank_account (
 );
 
 -- Indexes for common queries
-CREATE INDEX idx_internal_bank_account_type ON internal_bank_account(account_type);
-CREATE INDEX idx_internal_bank_account_instrument ON internal_bank_account(instrument_code);
-CREATE INDEX idx_internal_bank_account_status ON internal_bank_account(status);
-CREATE INDEX idx_internal_bank_account_code ON internal_bank_account(account_code);
+CREATE INDEX idx_internal_account_type ON internal_account(account_type);
+CREATE INDEX idx_internal_account_instrument ON internal_account(instrument_code);
+CREATE INDEX idx_internal_account_status ON internal_account(status);
+CREATE INDEX idx_internal_account_code ON internal_account(account_code);
 
 -- Status history for audit trail
-CREATE TABLE internal_bank_account_status_history (
+CREATE TABLE internal_account_status_history (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    account_id VARCHAR(100) NOT NULL REFERENCES internal_bank_account(account_id),
+    account_id VARCHAR(100) NOT NULL REFERENCES internal_account(account_id),
     from_status VARCHAR(20) NOT NULL,
     to_status VARCHAR(20) NOT NULL,
     reason TEXT,
@@ -724,23 +724,23 @@ CREATE TABLE internal_bank_account_status_history (
     changed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_status_history_account ON internal_bank_account_status_history(account_id);
-CREATE INDEX idx_status_history_changed_at ON internal_bank_account_status_history(changed_at);
+CREATE INDEX idx_status_history_account ON internal_account_status_history(account_id);
+CREATE INDEX idx_status_history_changed_at ON internal_account_status_history(changed_at);
 
 -- Comments
-COMMENT ON TABLE internal_bank_account IS 'BIAN Internal Bank Account - Non-customer-facing accounts for bank operations';
-COMMENT ON COLUMN internal_bank_account.account_id IS 'Unique identifier replacing hardcoded environment variables';
-COMMENT ON COLUMN internal_bank_account.dimension IS 'Asset dimension from Universal Asset System';
+COMMENT ON TABLE internal_account IS 'BIAN Internal Account - Non-customer-facing accounts for bank operations';
+COMMENT ON COLUMN internal_account.account_id IS 'Unique identifier replacing hardcoded environment variables';
+COMMENT ON COLUMN internal_account.dimension IS 'Asset dimension from Universal Asset System';
 ```
 
 ### Integration Points
 
 #### 1. Position Keeping Integration (Balance Queries)
 
-Internal Bank Account queries Position Keeping for balance - it does NOT store balance locally:
+Internal Account queries Position Keeping for balance - it does NOT store balance locally:
 
 ```go
-// In internal-bank-account/service/balance_service.go
+// In internal-account/service/balance_service.go
 func (s *Service) GetBalance(ctx context.Context, req *GetBalanceRequest) (*GetBalanceResponse, error) {
     // 1. Validate account exists and is active
     account, err := s.accountRepo.FindByID(ctx, req.AccountId)
@@ -772,11 +772,11 @@ func (s *Service) GetBalance(ctx context.Context, req *GetBalanceRequest) (*GetB
 
 #### 2. FinancialAccounting Flow (Postings)
 
-Postings flow through FinancialAccounting → Position Keeping. Internal Bank Account is NOT involved:
+Postings flow through FinancialAccounting → Position Keeping. Internal Account is NOT involved:
 
 ```text
 ┌─────────────────────┐     ┌─────────────────────┐     ┌─────────────────────┐
-│ FinancialAccounting │────►│   Position Keeping  │     │ InternalBankAccount │
+│ FinancialAccounting │────►│   Position Keeping  │     │ InternalAccount │
 │   (creates posting) │     │ (tracks positions)  │     │  (account registry) │
 └─────────────────────┘     └─────────────────────┘     └─────────────────────┘
          │                           │                           │
@@ -793,7 +793,7 @@ Postings flow through FinancialAccounting → Position Keeping. Internal Bank Ac
          │                           │                           │
 ```
 
-> **Key Insight**: Internal Bank Account is a registry/metadata service.
+> **Key Insight**: Internal Account is a registry/metadata service.
 > It does NOT receive posting notifications or update balance.
 > Balance is always computed by Position Keeping from the transaction log.
 
@@ -807,7 +807,7 @@ DepositClearingAccountID: os.Getenv("DEPOSIT_CLEARING_ACCOUNT_ID")
 
 // After:
 func (s *Service) initializeAccounts(ctx context.Context) error {
-    resp, err := s.internalAccountClient.ListInternalBankAccounts(ctx, &ListRequest{
+    resp, err := s.internalAccountClient.ListInternalAccounts(ctx, &ListRequest{
         AccountType:    INTERNAL_ACCOUNT_TYPE_CLEARING,
         InstrumentCode: "GBP",
         Status:         INTERNAL_ACCOUNT_STATUS_ACTIVE,
@@ -839,7 +839,7 @@ func (p *SchemaProvisioner) createDefaultAccounts(ctx context.Context, tenantID 
     }
 
     for _, acct := range defaults {
-        _, err := s.client.InitiateInternalBankAccount(ctx, &InitiateRequest{
+        _, err := s.client.InitiateInternalAccount(ctx, &InitiateRequest{
             AccountCode:    acct.Code,
             Name:           acct.Name,
             AccountType:    acct.Type,
@@ -864,7 +864,7 @@ func (p *SchemaProvisioner) createDefaultAccounts(ctx context.Context, tenantID 
 |---------|-------------|----------|
 | IBA-001 | Create service skeleton following ADR-0015 structure | 2 |
 | IBA-002 | Define proto file with BIAN-aligned messages | 3 |
-| IBA-003 | Implement domain model (InternalBankAccount entity) | 3 |
+| IBA-003 | Implement domain model (InternalAccount entity) | 3 |
 | IBA-004 | Create database migration | 2 |
 | IBA-005 | Implement repository layer | 3 |
 | IBA-006 | Implement service layer with BIAN operations | 5 |
@@ -905,7 +905,7 @@ func (p *SchemaProvisioner) createDefaultAccounts(ctx context.Context, tenantID 
 
 | Task ID | Description | Estimate |
 |---------|-------------|----------|
-| IBA-024 | Write ADR-0023 for Internal Bank Account | 2 |
+| IBA-024 | Write ADR-0023 for Internal Account | 2 |
 | IBA-025 | Update architecture diagrams | 2 |
 | IBA-026 | Create runbook for account management | 2 |
 
@@ -1007,14 +1007,14 @@ Each ledger stays balanced. External bank transfer settles the clearing accounts
 
 ## Appendix B: BIAN Semantic API Reference
 
-The implementation should align with the BIAN v13.0 Internal Bank Account semantic API.
+The implementation should align with the BIAN v13.0 Internal Account semantic API.
 
 BIAN Semantic API specification:
-[InternalBankAccount.yaml](https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/InternalBankAccount.yaml)
+[InternalAccount.yaml](https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/InternalAccount.yaml)
 
 Key BIAN operations from the spec:
 
-- **Initiate** - Create new internal bank account
+- **Initiate** - Create new internal account
 - **Update** - Modify account settings
 - **Control** - Lifecycle state transitions
 - **Retrieve** - Get account by ID

@@ -30,7 +30,7 @@ vi.mock('@/api/clients', () => ({
     referenceData: {},
     accountTypeRegistry: {},
     node: {},
-    internalBankAccount: {},
+    internalAccount: {},
     marketInformation: {},
   })),
 }))
@@ -154,7 +154,7 @@ function setupMockClients({
     referenceData: {} as never,
     accountTypeRegistry: {} as never,
     node: {} as never,
-    internalBankAccount: {} as never,
+    internalAccount: {} as never,
     marketInformation: {} as never,
   })
 
@@ -248,7 +248,7 @@ describe('LedgerPage - list view', () => {
       referenceData: {} as never,
       accountTypeRegistry: {} as never,
       node: {} as never,
-      internalBankAccount: {} as never,
+      internalAccount: {} as never,
       marketInformation: {} as never,
     })
 

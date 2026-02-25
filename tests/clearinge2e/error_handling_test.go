@@ -38,7 +38,7 @@ func TestClearingErrorHandling(t *testing.T) {
 		// Don't create any clearing accounts
 		// Attempt to resolve should indicate not found
 		_, _, found := getClearingAccountByPurpose(t, ctx,
-			infra.internalBankAccountDB, schemaName, "GBP", "CLEARING_PURPOSE_DEPOSIT")
+			infra.internalAccountDB, schemaName, "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
 		assert.False(t, found, "should gracefully handle missing clearing account")
 
@@ -52,12 +52,12 @@ func TestClearingErrorHandling(t *testing.T) {
 
 		// Create clearing account
 		createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-DEP", "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
 		// Suspend the account
-		_, err := infra.internalBankAccountDB.pool.Exec(ctx, fmt.Sprintf(`
-			UPDATE %s.internal_bank_accounts
+		_, err := infra.internalAccountDB.pool.Exec(ctx, fmt.Sprintf(`
+			UPDATE %s.internal_accounts
 			SET status = 'SUSPENDED'
 			WHERE account_code = 'CLR-GBP-DEP'
 		`, pq.QuoteIdentifier(schemaName)))
@@ -65,7 +65,7 @@ func TestClearingErrorHandling(t *testing.T) {
 
 		// Should not resolve suspended account
 		_, _, found := getClearingAccountByPurpose(t, ctx,
-			infra.internalBankAccountDB, schemaName, "GBP", "CLEARING_PURPOSE_DEPOSIT")
+			infra.internalAccountDB, schemaName, "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
 		assert.False(t, found, "should not resolve suspended clearing account")
 	})
@@ -76,12 +76,12 @@ func TestClearingErrorHandling(t *testing.T) {
 
 		// Create clearing account
 		createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-DEP", "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
 		// Close the account
-		_, err := infra.internalBankAccountDB.pool.Exec(ctx, fmt.Sprintf(`
-			UPDATE %s.internal_bank_accounts
+		_, err := infra.internalAccountDB.pool.Exec(ctx, fmt.Sprintf(`
+			UPDATE %s.internal_accounts
 			SET status = 'CLOSED'
 			WHERE account_code = 'CLR-GBP-DEP'
 		`, pq.QuoteIdentifier(schemaName)))
@@ -89,7 +89,7 @@ func TestClearingErrorHandling(t *testing.T) {
 
 		// Should not resolve closed account
 		_, _, found := getClearingAccountByPurpose(t, ctx,
-			infra.internalBankAccountDB, schemaName, "GBP", "CLEARING_PURPOSE_DEPOSIT")
+			infra.internalAccountDB, schemaName, "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
 		assert.False(t, found, "should not resolve closed clearing account")
 	})
@@ -100,11 +100,11 @@ func TestClearingErrorHandling(t *testing.T) {
 
 		// Create primary clearing account (but suspend it)
 		createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-DEP-PRIMARY", "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
-		_, err := infra.internalBankAccountDB.pool.Exec(ctx, fmt.Sprintf(`
-			UPDATE %s.internal_bank_accounts
+		_, err := infra.internalAccountDB.pool.Exec(ctx, fmt.Sprintf(`
+			UPDATE %s.internal_accounts
 			SET status = 'SUSPENDED'
 			WHERE account_code = 'CLR-GBP-DEP-PRIMARY'
 		`, pq.QuoteIdentifier(schemaName)))
@@ -112,12 +112,12 @@ func TestClearingErrorHandling(t *testing.T) {
 
 		// Create fallback clearing account (active)
 		fallbackID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-DEP-FALLBACK", "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
 		// Should resolve to fallback
 		resolvedID, code, found := getClearingAccountByPurpose(t, ctx,
-			infra.internalBankAccountDB, schemaName, "GBP", "CLEARING_PURPOSE_DEPOSIT")
+			infra.internalAccountDB, schemaName, "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
 		require.True(t, found, "should find fallback account")
 		assert.Equal(t, fallbackID, resolvedID)
@@ -130,7 +130,7 @@ func TestClearingErrorHandling(t *testing.T) {
 
 		// Setup accounts
 		clearingID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-DEP", "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
 		partyID := uuid.New().String()
@@ -165,7 +165,7 @@ func TestClearingErrorHandling(t *testing.T) {
 
 		// Create account
 		createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-DEP", "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
 		// Test with very short context timeout
@@ -180,12 +180,12 @@ func TestClearingErrorHandling(t *testing.T) {
 		// Attempt query with expired context - should not find result
 		// (the getClearingAccountByPurpose function handles context cancellation gracefully)
 		_, _, found := getClearingAccountByPurpose(t, shortCtx,
-			infra.internalBankAccountDB, schemaName, "GBP", "CLEARING_PURPOSE_DEPOSIT")
+			infra.internalAccountDB, schemaName, "GBP", "CLEARING_PURPOSE_DEPOSIT")
 		assert.False(t, found, "query with expired context should not succeed")
 
 		// Operations with fresh context should still work
 		_, _, found = getClearingAccountByPurpose(t, ctx,
-			infra.internalBankAccountDB, schemaName, "GBP", "CLEARING_PURPOSE_DEPOSIT")
+			infra.internalAccountDB, schemaName, "GBP", "CLEARING_PURPOSE_DEPOSIT")
 		assert.True(t, found, "operations with valid context should succeed")
 	})
 
@@ -195,7 +195,7 @@ func TestClearingErrorHandling(t *testing.T) {
 
 		// Setup
 		clearingID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-DEP", "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
 		partyID := uuid.New().String()
@@ -285,7 +285,7 @@ func TestClearingErrorHandling(t *testing.T) {
 
 		// Setup
 		clearingID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-DEP", "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
 		partyID := uuid.New().String()
@@ -336,7 +336,7 @@ func TestClearingErrorHandling(t *testing.T) {
 		schemaA := tenantA.SchemaName()
 
 		clearingA := createClearingAccount(t, ctxA,
-			infra.internalBankAccountDB, schemaA,
+			infra.internalAccountDB, schemaA,
 			"CLR-GBP-DEP", "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
 		// Setup Tenant B
@@ -344,18 +344,18 @@ func TestClearingErrorHandling(t *testing.T) {
 		schemaB := tenantB.SchemaName()
 
 		clearingB := createClearingAccount(t, ctxB,
-			infra.internalBankAccountDB, schemaB,
+			infra.internalAccountDB, schemaB,
 			"CLR-GBP-DEP", "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
 		// Verify Tenant A can only access Tenant A accounts
 		resolvedA, _, foundA := getClearingAccountByPurpose(t, ctxA,
-			infra.internalBankAccountDB, schemaA, "GBP", "CLEARING_PURPOSE_DEPOSIT")
+			infra.internalAccountDB, schemaA, "GBP", "CLEARING_PURPOSE_DEPOSIT")
 		require.True(t, foundA)
 		assert.Equal(t, clearingA, resolvedA)
 
 		// Verify Tenant B can only access Tenant B accounts
 		resolvedB, _, foundB := getClearingAccountByPurpose(t, ctxB,
-			infra.internalBankAccountDB, schemaB, "GBP", "CLEARING_PURPOSE_DEPOSIT")
+			infra.internalAccountDB, schemaB, "GBP", "CLEARING_PURPOSE_DEPOSIT")
 		require.True(t, foundB)
 		assert.Equal(t, clearingB, resolvedB)
 
@@ -364,7 +364,7 @@ func TestClearingErrorHandling(t *testing.T) {
 
 		// Verify Tenant A cannot resolve from Tenant B schema
 		_, _, crossFound := getClearingAccountByPurpose(t, ctxA,
-			infra.internalBankAccountDB, schemaB, "GBP", "CLEARING_PURPOSE_DEPOSIT")
+			infra.internalAccountDB, schemaB, "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
 		// Note: Schema-level isolation means the query would work but return different results
 		// The key is that each tenant's context uses its own schema
@@ -386,12 +386,12 @@ func TestServiceRecoveryScenarios(t *testing.T) {
 
 		// Create clearing account
 		clearingID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-DEP", "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
 		// Verify it exists
 		_, _, found1 := getClearingAccountByPurpose(t, ctx,
-			infra.internalBankAccountDB, schemaName, "GBP", "CLEARING_PURPOSE_DEPOSIT")
+			infra.internalAccountDB, schemaName, "GBP", "CLEARING_PURPOSE_DEPOSIT")
 		require.True(t, found1)
 
 		// Simulate brief disconnection (pool handles this automatically)
@@ -402,7 +402,7 @@ func TestServiceRecoveryScenarios(t *testing.T) {
 
 		// Operations should still work
 		resolvedID, _, found2 := getClearingAccountByPurpose(t, ctx,
-			infra.internalBankAccountDB, schemaName, "GBP", "CLEARING_PURPOSE_DEPOSIT")
+			infra.internalAccountDB, schemaName, "GBP", "CLEARING_PURPOSE_DEPOSIT")
 		require.True(t, found2)
 		assert.Equal(t, clearingID, resolvedID, "should resolve same account after reconnect")
 	})
@@ -413,7 +413,7 @@ func TestServiceRecoveryScenarios(t *testing.T) {
 
 		// Setup
 		clearingID := createClearingAccount(t, ctx,
-			infra.internalBankAccountDB, schemaName,
+			infra.internalAccountDB, schemaName,
 			"CLR-GBP-DEP", "GBP", "CLEARING_PURPOSE_DEPOSIT")
 
 		partyID := uuid.New().String()

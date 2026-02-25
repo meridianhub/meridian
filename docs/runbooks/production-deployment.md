@@ -52,7 +52,7 @@ CockroachDB is the primary database for all Meridian services.
 | `meridian_party` | Party service |
 | `meridian_reference_data` | Reference Data service |
 | `meridian_market_information` | Market Information service |
-| `meridian_internal_bank_account` | Internal Bank Account service |
+| `meridian_internal_account` | Internal Account service |
 
 ```bash
 # Create databases (run from CockroachDB SQL shell)
@@ -66,7 +66,7 @@ CREATE DATABASE IF NOT EXISTS meridian_payment_order;
 CREATE DATABASE IF NOT EXISTS meridian_party;
 CREATE DATABASE IF NOT EXISTS meridian_reference_data;
 CREATE DATABASE IF NOT EXISTS meridian_market_information;
-CREATE DATABASE IF NOT EXISTS meridian_internal_bank_account;
+CREATE DATABASE IF NOT EXISTS meridian_internal_account;
 SQL
 ```
 
@@ -207,7 +207,7 @@ SERVICES=(
   "party"
   "tenant"
   "gateway"
-  "internal-bank-account"
+  "internal-account"
   "market-information"
   "utilization-metering-consumer"
 )
@@ -261,7 +261,7 @@ SERVICES_WITH_DB=(
   "financial-accounting"
   "position-keeping"
   "payment-order"
-  "internal-bank-account"
+  "internal-account"
   "market-information"
 )
 
@@ -301,7 +301,7 @@ SERVICES_WITH_DB=(
   "financial-accounting"
   "position-keeping"
   "payment-order"
-  "internal-bank-account"
+  "internal-account"
   "market-information"
   "audit-worker"
 )
@@ -357,7 +357,7 @@ flowchart TD
 
     subgraph Tier2["Tier 2: Core Domain Services"]
         MI["MarketInformation :50058"]
-        IBA["InternalBankAccount :50057"]
+        IBA["InternalAccount :50057"]
         PK["PositionKeeping :50053"]
         FA["FinancialAccounting :50052"]
     end
@@ -428,7 +428,7 @@ These services depend on Tier 1 services and CockroachDB. Some optionally depend
 Deploy in this order:
 
 1. **Market Information** (:50058) -- Price benchmarks and market data. No upstream service dependencies.
-2. **Internal Bank Account** (:50057) -- Counterparty and operational accounts. No upstream service dependencies.
+2. **Internal Account** (:50057) -- Counterparty and operational accounts. No upstream service dependencies.
 3. **Position Keeping** (:50053) -- Financial position tracking. Optionally calls Reference Data for instrument
    lookup. Publishes transaction events to Kafka.
 4. **Financial Accounting** (:50052) -- Ledger postings. Consumes transaction events from Position Keeping
@@ -436,7 +436,7 @@ Deploy in this order:
 
 ```bash
 # Deploy Tier 2 services
-for svc in market-information internal-bank-account position-keeping financial-accounting; do
+for svc in market-information internal-account position-keeping financial-accounting; do
   kubectl apply -k deployments/k8s/overlays/production/
   kubectl wait --for=condition=Available deployment/${svc} -n production --timeout=120s
 done
@@ -450,7 +450,7 @@ These services orchestrate workflows across multiple Tier 1 and Tier 2 services.
    - Party (validate party exists)
    - Position Keeping (create position logs)
    - Financial Accounting (record ledger postings)
-   - Internal Bank Account (resolve clearing accounts, optional)
+   - Internal Account (resolve clearing accounts, optional)
    - Reference Data (fungibility validation, optional)
    - Redis (idempotency, optional)
    - Kafka (outbox worker for audit events, optional)
@@ -517,7 +517,7 @@ SERVICES_GRPC=(
   "party:50055"
   "reference-data:50059"
   "market-information:50058"
-  "internal-bank-account:50057"
+  "internal-account:50057"
   "position-keeping:50053"
   "financial-accounting:50052"
   "current-account:50051"
@@ -574,7 +574,7 @@ Verify each service can reach its database:
 ```bash
 # Check pod logs for successful database connection
 for svc in tenant party reference-data current-account financial-accounting \
-           position-keeping payment-order internal-bank-account market-information; do
+           position-keeping payment-order internal-account market-information; do
   echo "=== ${svc} ==="
   kubectl logs -n production -l app=${svc} --tail=20 | grep -i "database"
 done
@@ -654,7 +654,7 @@ kubectl rollout status deployment/<service-name> -n production
 
 1. Tier 4: Gateway, Audit Consumers, Audit Worker, Utilization Metering Consumer
 2. Tier 3: Payment Order, Current Account
-3. Tier 2: Financial Accounting, Position Keeping, Internal Bank Account, Market Information
+3. Tier 2: Financial Accounting, Position Keeping, Internal Account, Market Information
 4. Tier 1: Reference Data, Party, Tenant
 
 ### 5.2 Database Migration Rollback
@@ -712,7 +712,7 @@ kubectl scale deployment <service>-audit-consumer -n production --replicas=<prev
 | Party | 50055 | - | 9090 | `party` |
 | Reference Data | 50059 | - | 9090 | `reference-data` |
 | Market Information | 50058 | - | 9090 | `market-information` |
-| Internal Bank Account | 50057 | - | 9090 | `internal-bank-account` |
+| Internal Account | 50057 | - | 9090 | `internal-account` |
 | Position Keeping | 50053 | - | 9090 | `position-keeping` |
 | Financial Accounting | 50052 | - | 9090 | `financial-accounting` |
 | Current Account | 50051 | - | 9090 | `current-account` |
