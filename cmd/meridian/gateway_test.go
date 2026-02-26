@@ -12,6 +12,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestWireGateway_Config(t *testing.T) {
@@ -23,7 +24,8 @@ func TestWireGateway_Config(t *testing.T) {
 	databaseURL := "postgres://root@localhost:26257/defaultdb?sslmode=disable"
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	srv, err := wireGateway(grpcPort, httpPort, databaseURL, logger)
+	// Pass nil DB — health endpoints bypass tenant resolution so DB is not exercised.
+	srv, err := wireGateway(grpcPort, httpPort, databaseURL, (*gorm.DB)(nil), logger)
 	require.NoError(t, err)
 	require.NotNil(t, srv)
 
