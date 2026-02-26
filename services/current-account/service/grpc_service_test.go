@@ -293,7 +293,7 @@ func TestNewServiceWithIdempotency_DefensiveTests(t *testing.T) {
 }
 
 // mustNewMoney is a test helper that creates Money or panics
-func mustNewMoney(currency string, amountCents int64) domain.Money {
+func mustNewMoney(currency string, amountCents int64) domain.Amount {
 	m, err := domain.NewMoney(currency, amountCents)
 	if err != nil {
 		panic(err)
@@ -675,7 +675,7 @@ func TestInitiateCurrentAccountUnsupportedCurrency(t *testing.T) {
 func TestToMoneyAmount(t *testing.T) {
 	tests := []struct {
 		name          string
-		input         domain.Money
+		input         domain.Amount
 		expectedUnits int64
 		expectedNanos int32
 	}{
@@ -721,8 +721,8 @@ func TestToMoneyAmount(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := toMoneyAmount(tt.input)
 
-			if result.Amount.CurrencyCode != tt.input.CurrencyCode() {
-				t.Errorf("Expected currency %s, got %s", tt.input.CurrencyCode(), result.Amount.CurrencyCode)
+			if result.Amount.CurrencyCode != tt.input.InstrumentCode() {
+				t.Errorf("Expected currency %s, got %s", tt.input.InstrumentCode(), result.Amount.CurrencyCode)
 			}
 
 			if result.Amount.Units != tt.expectedUnits {

@@ -1,30 +1,39 @@
-// Package domain re-exports the shared instrument-aware Money type for the current-account service.
+// Package domain re-exports the shared dimension-agnostic Amount type for the current-account service.
 //
 // This file provides backward-compatible type aliases, constructors, and errors
-// delegating to shared/pkg/money. The Currency() and AmountCents() methods are
-// preserved for API compatibility during the migration.
+// delegating to shared/pkg/amount. The Money type is preserved as an alias for Amount
+// for API compatibility during the migration. Callers within the service boundary
+// may use either Money or Amount; they refer to the same underlying type.
 //
-// Cross-service note: External services should import shared/pkg/money directly
-// rather than this package's Money type. This re-export layer maintains backward
+// Cross-service note: External services should import shared/pkg/amount directly
+// rather than this package's Amount type. This re-export layer maintains backward
 // compatibility for callers within the current-account service boundary.
 package domain
 
 import (
+	"strings"
+
+	sharedamount "github.com/meridianhub/meridian/shared/pkg/amount"
 	sharedmoney "github.com/meridianhub/meridian/shared/pkg/money"
 	"github.com/meridianhub/meridian/shared/platform/quantity"
 )
 
-// Re-export errors from shared package for API compatibility.
+// Re-export errors from shared packages for API compatibility.
 var (
 	// ErrInvalidCurrency is returned when a currency code is not recognized.
 	ErrInvalidCurrency = sharedmoney.ErrInvalidCurrency
 
-	// ErrCurrencyMismatch is returned when arithmetic operations are attempted
-	// on Money values with different instruments.
-	ErrCurrencyMismatch = sharedmoney.ErrCurrencyMismatch
+	// ErrInstrumentMismatch is returned when arithmetic operations are attempted
+	// on Amount values with different instruments.
+	ErrInstrumentMismatch = sharedamount.ErrInstrumentMismatch
+
+	// ErrCurrencyMismatch is an alias for ErrInstrumentMismatch for backward compatibility.
+	//
+	// Deprecated: Use ErrInstrumentMismatch for new code.
+	ErrCurrencyMismatch = sharedamount.ErrInstrumentMismatch
 
 	// ErrAmountOverflow is returned when converting to minor units would overflow int64.
-	ErrAmountOverflow = sharedmoney.ErrAmountOverflow
+	ErrAmountOverflow = sharedamount.ErrAmountOverflow
 )
 
 // Instrument is re-exported from the quantity package.
@@ -45,38 +54,55 @@ const (
 	CurrencyAUD Currency = sharedmoney.CurrencyAUD
 )
 
-// Money is the instrument-aware monetary type for the current-account service.
-// It is a type alias for shared/pkg/money.Money, allowing full backward compatibility.
-type Money = sharedmoney.Money
+// Amount is the dimension-agnostic value type used for all account balances.
+// It supports CURRENCY, ENERGY, CARBON, COMPUTE, and other valid dimensions.
+// This is a type alias for shared/pkg/amount.Amount.
+type Amount = sharedamount.Amount
 
-// Constructor re-exports delegating to shared/pkg/money.
+// Money is an alias for Amount, preserved for backward compatibility.
+//
+// Deprecated: Use Amount for new code.
+type Money = sharedamount.Amount
 
-// NewMoney creates a new Money instance from a currency string and amount in minor units (cents).
+// Constructor re-exports for Amount.
+
+// NewAmountFromInstrument creates an Amount from persisted instrument_code, dimension, precision,
+// and a minor-unit amount. For CURRENCY dimension, the precision parameter is ignored and the
+// canonical precision from the currency registry is used instead.
+// Returns ErrInstrumentMismatch (wrapped) if the dimension is not recognized.
+var NewAmountFromInstrument = sharedamount.NewFromInstrument
+
+// NewMoney creates a new Amount (Money) instance from a currency string and amount in minor units (cents).
 // This preserves backward compatibility with the previous int64-based API.
+// Only CURRENCY instruments are supported via this constructor.
+// Returns ErrInvalidCurrency if the currency code is not recognized.
 //
 // Example: NewMoney("GBP", 10000) creates £100.00
-var NewMoney = sharedmoney.New
+var NewMoney = func(currencyCode string, amountMinorUnits int64) (Amount, error) {
+	a, err := sharedamount.NewFromInstrument(currencyCode, "CURRENCY", 2, amountMinorUnits)
+	if err != nil {
+		return Amount{}, ErrInvalidCurrency
+	}
+	return a, nil
+}
 
-// NewMoneyFromInstrument creates Money from persisted instrument_code + dimension and minor-unit amount.
+// NewMoneyFromInstrument creates an Amount from persisted instrument_code + dimension and minor-unit amount.
 // Returns ErrInvalidCurrency if dimension is not "CURRENCY".
-var NewMoneyFromInstrument = sharedmoney.NewFromInstrument
-
-// NewMoneyFromMajorUnits creates Money from a currency code and major-unit int64 amount.
 //
-// Example: NewMoneyFromMajorUnits("GBP", 100) creates £100.00
-var NewMoneyFromMajorUnits = sharedmoney.NewFromMajorUnits
+// Deprecated: Use NewAmountFromInstrument for new code which supports all dimensions.
+var NewMoneyFromInstrument = func(instrumentCode, dimension string, amountMinorUnits int64) (Amount, error) {
+	if strings.ToUpper(dimension) != quantity.DimensionCurrency {
+		return Amount{}, ErrInvalidCurrency
+	}
+	return sharedamount.NewFromInstrument(instrumentCode, quantity.DimensionCurrency, 2, amountMinorUnits)
+}
 
-// NewMoneyDecimal creates Money from a decimal amount and Currency type.
+// ZeroAmount creates a zero Amount for the given instrument.
+var ZeroAmount = sharedamount.Zero
+
+// ZeroMoney creates a zero Amount for the given currency code.
 //
-// Example: NewMoneyDecimal(decimal.NewFromInt(100), CurrencyGBP) creates £100.00
-var NewMoneyDecimal = sharedmoney.NewFromDecimal
-
-// MustNewMoneyDecimal creates Money from a decimal, panicking on invalid currency.
-// Use only in tests or when currency is known valid.
-var MustNewMoneyDecimal = sharedmoney.MustNewFromDecimal
-
-// NewMoneyFromQuantity creates a Money wrapper from a quantity.Money value.
-var NewMoneyFromQuantity = sharedmoney.NewFromQuantity
-
-// ZeroMoney creates a zero Money value for the given currency.
-var ZeroMoney = sharedmoney.Zero
+// Deprecated: Use NewAmountFromInstrument with 0 minor units for new code.
+var ZeroMoney = func(currencyCode string) (Amount, error) {
+	return sharedamount.NewFromInstrument(currencyCode, "CURRENCY", 2, 0)
+}

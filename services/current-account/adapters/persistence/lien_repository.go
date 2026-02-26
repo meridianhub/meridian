@@ -332,7 +332,7 @@ func toLienEntity(lien *domain.Lien) *LienEntity {
 		ID:                    lien.ID,
 		AccountID:             lien.AccountID,
 		AmountCents:           lien.Amount.ToMinorUnitsUnchecked(),
-		Currency:              string(lien.Amount.Currency()),
+		Currency:              lien.Amount.InstrumentCode(),
 		BucketID:              lien.BucketID,
 		Status:                string(lien.Status),
 		PaymentOrderReference: lien.PaymentOrderReference,

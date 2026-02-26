@@ -124,7 +124,7 @@ func TestWithdrawalRepository_Create_Success(t *testing.T) {
 	amountCents, err := retrieved.Amount.ToMinorUnits()
 	require.NoError(t, err)
 	assert.Equal(t, int64(10000), amountCents)
-	assert.Equal(t, domain.CurrencyGBP, retrieved.Amount.Currency())
+	assert.Equal(t, "GBP", retrieved.Amount.InstrumentCode())
 	assert.Equal(t, domain.WithdrawalStatusPending, retrieved.Status)
 	assert.Equal(t, "WD-001", retrieved.Reference)
 	assert.Equal(t, 1, retrieved.Version)

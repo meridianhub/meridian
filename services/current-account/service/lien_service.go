@@ -114,7 +114,7 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 	// Determine mode: multi-asset (input) or legacy (amount)
 	useValuation := req.Input != nil && req.Input.Amount != "" && req.Input.InstrumentCode != ""
 
-	var lienAmount domain.Money
+	var lienAmount domain.Amount
 	var valuationResult *valuateInternalResult
 
 	if useValuation {
@@ -232,7 +232,7 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		}
 
 		// Validate currency matches account
-		if lienAmount.Currency() != account.Balance().Currency() {
+		if lienAmount.InstrumentCode() != account.Balance().InstrumentCode() {
 			return errTxCurrencyMismatch
 		}
 
@@ -319,7 +319,7 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 
 	// Calculate new available balance after this lien
 	newAvailableBalance := availableBalance - lienAmount.ToMinorUnitsUnchecked()
-	availableMoney, err := domain.NewMoney(string(account.Balance().Currency()), newAvailableBalance)
+	availableMoney, err := domain.NewMoney(account.Balance().InstrumentCode(), newAvailableBalance)
 	if err != nil {
 		s.logger.Error("failed to create available balance money", "error", err)
 	}
@@ -833,10 +833,10 @@ func (s *Service) RetrieveLien(ctx context.Context, req *pb.RetrieveLienRequest)
 
 // Helper functions for lien service
 
-// protoToMoney converts a proto MoneyAmount to domain Money
-func (s *Service) protoToMoney(amount *commonpb.MoneyAmount) (domain.Money, error) {
+// protoToMoney converts a proto MoneyAmount to domain Amount
+func (s *Service) protoToMoney(amount *commonpb.MoneyAmount) (domain.Amount, error) {
 	if amount == nil || amount.Amount == nil {
-		return domain.Money{}, ErrAmountRequired
+		return domain.Amount{}, ErrAmountRequired
 	}
 
 	// Calculate nanosCents first to include in overflow check
@@ -846,7 +846,7 @@ func (s *Service) protoToMoney(amount *commonpb.MoneyAmount) (domain.Money, erro
 	// Validate units won't overflow when multiplied by 100 and added to nanosCents
 	// Reserve space for nanosCents (max 100) to prevent overflow in final addition
 	if amount.Amount.Units > (math.MaxInt64-100)/100 || amount.Amount.Units < (math.MinInt64+100)/100 {
-		return domain.Money{}, ErrAmountOverflow
+		return domain.Amount{}, ErrAmountOverflow
 	}
 
 	// Convert to cents
@@ -1000,7 +1000,7 @@ func (s *Service) hydrateAccountWithBalance(ctx context.Context, account domain.
 	}
 
 	// Create balance Money object
-	balance, err := domain.NewMoneyFromInstrument(account.InstrumentCode(), account.Dimension(), balanceCents)
+	balance, err := domain.NewAmountFromInstrument(account.InstrumentCode(), account.Dimension(), 0, balanceCents)
 	if err != nil {
 		return domain.CurrentAccount{}, fmt.Errorf("failed to create balance: %w", err)
 	}
@@ -1036,7 +1036,7 @@ func (s *Service) hydrateAccountWithBalance(ctx context.Context, account domain.
 // The balanceCents parameter should be fetched from Position Keeping BEFORE entering the transaction.
 func (s *Service) hydrateAccountWithPrefetchedBalance(account domain.CurrentAccount, balanceCents int64) (domain.CurrentAccount, error) {
 	// Create balance Money object
-	balance, err := domain.NewMoneyFromInstrument(account.InstrumentCode(), account.Dimension(), balanceCents)
+	balance, err := domain.NewAmountFromInstrument(account.InstrumentCode(), account.Dimension(), 0, balanceCents)
 	if err != nil {
 		return domain.CurrentAccount{}, fmt.Errorf("failed to create balance: %w", err)
 	}
@@ -1131,7 +1131,7 @@ func (s *Service) getAccountBalanceCents(ctx context.Context, accountID string) 
 // calculateAvailableBalance calculates available balance with active liens.
 // Logs errors but returns best-effort values since primary operations already succeeded.
 // Context is required for organization scoping in multi-org mode.
-func (s *Service) calculateAvailableBalance(ctx context.Context, accountID uuid.UUID, currentBalance domain.Money) domain.Money {
+func (s *Service) calculateAvailableBalance(ctx context.Context, accountID uuid.UUID, currentBalance domain.Amount) domain.Amount {
 	return s.calculateAvailableBalanceByBucket(ctx, accountID, "", currentBalance)
 }
 
@@ -1139,7 +1139,7 @@ func (s *Service) calculateAvailableBalance(ctx context.Context, accountID uuid.
 // If bucketID is empty, calculates against all liens for the account (backward compatible).
 // Logs errors but returns best-effort values since primary operations already succeeded.
 // Context is required for organization scoping in multi-org mode.
-func (s *Service) calculateAvailableBalanceByBucket(ctx context.Context, accountID uuid.UUID, bucketID string, currentBalance domain.Money) domain.Money {
+func (s *Service) calculateAvailableBalanceByBucket(ctx context.Context, accountID uuid.UUID, bucketID string, currentBalance domain.Amount) domain.Amount {
 	if s.lienRepo == nil {
 		// Lien repository not configured - return balance without lien adjustment
 		return currentBalance
@@ -1167,7 +1167,7 @@ func (s *Service) calculateAvailableBalanceByBucket(ctx context.Context, account
 	}
 
 	availableBalance := currentBalanceCents - activeLiensTotal
-	availableMoney, err := domain.NewMoney(string(currentBalance.Currency()), availableBalance)
+	availableMoney, err := domain.NewMoney(currentBalance.InstrumentCode(), availableBalance)
 	if err != nil {
 		s.logger.Error("failed to create available balance for response", "error", err)
 		return currentBalance // Best effort

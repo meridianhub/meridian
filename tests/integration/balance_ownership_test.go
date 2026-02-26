@@ -29,7 +29,6 @@ import (
 	cadomain "github.com/meridianhub/meridian/services/current-account/domain"
 	pkdomain "github.com/meridianhub/meridian/services/position-keeping/domain"
 	"github.com/meridianhub/meridian/shared/domain/money"
-	sharedmoney "github.com/meridianhub/meridian/shared/pkg/money"
 	"github.com/meridianhub/meridian/shared/platform/await"
 )
 
@@ -261,8 +260,8 @@ func (m *MockCurrentAccountService) Deposit(ctx context.Context, accountID strin
 	if !ok {
 		return fmt.Errorf("account not found: %s", accountID)
 	}
-	// Convert money.Money to sharedmoney.Money (cadomain.Money = sharedmoney.Money)
-	caAmount, err := sharedmoney.NewFromDecimal(amount.Amount(), sharedmoney.Currency(amount.Currency().String()))
+	// Convert legacy money.Money to cadomain.Amount via minor units
+	caAmount, err := cadomain.NewMoney(amount.Currency().String(), amount.AmountCents())
 	if err != nil {
 		return err
 	}
@@ -282,8 +281,8 @@ func (m *MockCurrentAccountService) Withdraw(ctx context.Context, accountID stri
 	if !ok {
 		return fmt.Errorf("account not found: %s", accountID)
 	}
-	// Convert money.Money to sharedmoney.Money (cadomain.Money = sharedmoney.Money)
-	caAmount, err := sharedmoney.NewFromDecimal(amount.Amount(), sharedmoney.Currency(amount.Currency().String()))
+	// Convert legacy money.Money to cadomain.Amount via minor units
+	caAmount, err := cadomain.NewMoney(amount.Currency().String(), amount.AmountCents())
 	if err != nil {
 		return err
 	}
@@ -303,9 +302,17 @@ func (m *MockCurrentAccountService) GetBalance(ctx context.Context, accountID st
 	if !ok {
 		return money.Money{}, fmt.Errorf("account not found: %s", accountID)
 	}
-	// Convert sharedmoney.Money (= cadomain.Money) to the legacy money.Money type
+	// Convert cadomain.Amount to the legacy money.Money type via minor units
 	caBalance := account.Balance()
-	return money.MustNew(caBalance.Amount(), money.Currency(string(caBalance.Currency()))), nil
+	minorUnits, err := caBalance.ToMinorUnits()
+	if err != nil {
+		return money.Money{}, fmt.Errorf("failed to convert balance to minor units: %w", err)
+	}
+	result, err := money.NewFromMinorUnits(minorUnits, money.Currency(caBalance.InstrumentCode()))
+	if err != nil {
+		return money.Money{}, fmt.Errorf("failed to convert balance to money: %w", err)
+	}
+	return result, nil
 }
 
 // AddLien adds a lien to an account.
