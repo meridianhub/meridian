@@ -245,6 +245,24 @@ func TestLien_CanTerminate(t *testing.T) {
 	}
 }
 
+func TestNewLien_EnergyAccount(t *testing.T) {
+	accountID := uuid.New()
+	amount, err := NewAmountFromInstrument("KWH", "ENERGY", 0, 5000) // 5000 KWH
+	require.NoError(t, err)
+
+	lien, err := NewLien(accountID, amount, "bucket-energy", "PO-ENERGY-001", nil)
+
+	require.NoError(t, err)
+	assert.NotEqual(t, uuid.Nil, lien.ID)
+	assert.Equal(t, accountID, lien.AccountID)
+	assert.Equal(t, int64(5000), toMinorUnits(lien.Amount))
+	assert.Equal(t, "KWH", lien.Amount.InstrumentCode())
+	assert.Equal(t, "ENERGY", lien.Amount.Dimension())
+	assert.Equal(t, "bucket-energy", lien.BucketID)
+	assert.Equal(t, LienStatusActive, lien.Status)
+	assert.Equal(t, "PO-ENERGY-001", lien.PaymentOrderReference)
+}
+
 // createTestLien is a helper to create a lien with a specific status for testing
 func createTestLien(t *testing.T, status LienStatus) *Lien {
 	t.Helper()
@@ -262,4 +280,60 @@ func createTestLien(t *testing.T, status LienStatus) *Lien {
 		CreatedAt:             now,
 		UpdatedAt:             now,
 	}
+}
+
+func TestNewLien_KWHAmountHelper(t *testing.T) {
+	account := createKWHTestAccount(t, "ACC-KWH-LIEN-001", 10000)
+	lienAmount := createKWHAmount(t, 3000)
+
+	lien, err := NewLien(account.ID(), lienAmount, "bucket-kwh", "PO-KWH-001", nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(3000), toMinorUnits(lien.Amount))
+	assert.Equal(t, "KWH", lien.Amount.InstrumentCode())
+	assert.Equal(t, "ENERGY", lien.Amount.Dimension())
+	assert.Equal(t, account.ID(), lien.AccountID)
+}
+
+func TestNewLien_CarbonCreditAmountHelper(t *testing.T) {
+	creditAmount := createCarbonCreditAmount(t, 50)
+
+	lien, err := NewLien(uuid.New(), creditAmount, "bucket-carbon", "PO-CC-001", nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(50), toMinorUnits(lien.Amount))
+	assert.Equal(t, "CARBON_CREDIT", lien.Amount.InstrumentCode())
+	assert.Equal(t, "CARBON", lien.Amount.Dimension())
+}
+
+// createKWHTestAccount creates a KWH energy account with an optional initial balance for testing.
+func createKWHTestAccount(t *testing.T, accountID string, initialKWH int64) CurrentAccount {
+	t.Helper()
+	account, err := NewCurrentAccountWithDimension(accountID, "KWH-"+accountID, "PARTY-TEST", "KWH", "ENERGY", 0)
+	require.NoError(t, err)
+
+	if initialKWH > 0 {
+		deposit, err := NewAmountFromInstrument("KWH", "ENERGY", 0, initialKWH)
+		require.NoError(t, err)
+		account, err = account.Deposit(deposit)
+		require.NoError(t, err)
+	}
+
+	return account
+}
+
+// createKWHAmount creates a KWH energy Amount for test assertions.
+func createKWHAmount(t *testing.T, minorUnits int64) Amount {
+	t.Helper()
+	a, err := NewAmountFromInstrument("KWH", "ENERGY", 0, minorUnits)
+	require.NoError(t, err)
+	return a
+}
+
+// createCarbonCreditAmount creates a CARBON_CREDIT Amount for test assertions.
+func createCarbonCreditAmount(t *testing.T, minorUnits int64) Amount {
+	t.Helper()
+	a, err := NewAmountFromInstrument("CARBON_CREDIT", "CARBON", 0, minorUnits)
+	require.NoError(t, err)
+	return a
 }
