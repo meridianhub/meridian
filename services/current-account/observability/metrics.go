@@ -41,7 +41,7 @@ var (
 			Name: "current_account_balance_cents",
 			Help: "Current account balance in cents",
 		},
-		[]string{"currency"},
+		[]string{"instrument_code"},
 	)
 
 	// Saga metrics
@@ -214,8 +214,8 @@ func RecordWithdrawal(currency string) {
 }
 
 // RecordBalance records the current account balance
-func RecordBalance(balanceCents int64, currency string) {
-	balanceGauge.WithLabelValues(currency).Set(float64(balanceCents))
+func RecordBalance(balanceCents int64, instrumentCode string) {
+	balanceGauge.WithLabelValues(instrumentCode).Set(float64(balanceCents))
 }
 
 // RecordSagaFailure records a saga failure

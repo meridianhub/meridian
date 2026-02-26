@@ -15,6 +15,7 @@ import (
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
 	"github.com/meridianhub/meridian/services/reference-data/accounttype"
 	celutil "github.com/meridianhub/meridian/services/reference-data/cel"
+	"github.com/meridianhub/meridian/services/reference-data/registry"
 	vf "github.com/meridianhub/meridian/shared/pkg/valuationfeature"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc/codes"
@@ -51,12 +52,22 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 	if s.instrumentGetter != nil {
 		cachedInstrument, err := s.instrumentGetter.GetInstrument(ctx, instrumentCode, 0)
 		if err != nil {
-			operationStatus = "instrument_not_found"
-			s.logger.Warn("instrument not found in Reference Data, cannot create account",
+			if errors.Is(err, registry.ErrNotFound) {
+				// Instrument does not exist in Reference Data - caller supplied an invalid instrument_code
+				operationStatus = "instrument_not_found"
+				s.logger.Warn("instrument not found in Reference Data, cannot create account",
+					"instrument_code", instrumentCode,
+					"account_id", accountID)
+				return nil, status.Errorf(codes.InvalidArgument, "unknown instrument_code: %s", instrumentCode)
+			}
+			// Transient failure (network error, service unavailable, timeout)
+			operationStatus = "instrument_lookup_failed"
+			s.logger.Error("instrument lookup failed due to transient error, cannot create account",
 				"instrument_code", instrumentCode,
 				"account_id", accountID,
 				"error", err)
-			return nil, status.Errorf(codes.InvalidArgument, "unknown instrument_code: %s", instrumentCode)
+			caobservability.RecordExternalServiceError("reference_data", "get_instrument")
+			return nil, status.Errorf(codes.Unavailable, "instrument lookup failed, please retry")
 		}
 		// Map from reference-data registry dimension ("MONETARY") to domain quantity
 		// dimension ("CURRENCY"). The registry uses "MONETARY" while the domain quantity
