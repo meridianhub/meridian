@@ -18,8 +18,11 @@ import (
 
 // RegisterApplyManifestService creates and registers the ApplyManifestService
 // on the given gRPC server. It wires together the validator, differ, planner,
-// and registers the handler.
-func RegisterApplyManifestService(server *grpc.Server, pool *pgxpool.Pool, logger *slog.Logger) error {
+// and optionally an executor for saga-based manifest application.
+//
+// When executor is nil, the handler validates, diffs, and plans manifests but
+// does not execute them (suitable for lightweight deployments).
+func RegisterApplyManifestService(server *grpc.Server, pool *pgxpool.Pool, executor *applier.ManifestExecutor, logger *slog.Logger) error {
 	v, err := validator.New()
 	if err != nil {
 		return fmt.Errorf("manifest validator: %w", err)
@@ -33,6 +36,7 @@ func RegisterApplyManifestService(server *grpc.Server, pool *pgxpool.Pool, logge
 		Validator:    v,
 		Differ:       d,
 		Planner:      p,
+		Executor:     executor,
 		VersionStore: versionStore,
 		Logger:       logger,
 	})

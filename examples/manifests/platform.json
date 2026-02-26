@@ -1,0 +1,100 @@
+{
+  "version": "1.0",
+  "metadata": {
+    "name": "Meridian Platform Economy",
+    "industry": "platform",
+    "description": "Base platform economy manifest providing shared instruments, standard account types, and FX valuation rules for all tenants"
+  },
+  "instruments": [
+    {
+      "code": "GBP",
+      "name": "British Pound Sterling",
+      "type": "INSTRUMENT_TYPE_FIAT",
+      "dimensions": {
+        "unit": "GBP",
+        "precision": 2
+      }
+    },
+    {
+      "code": "EUR",
+      "name": "Euro",
+      "type": "INSTRUMENT_TYPE_FIAT",
+      "dimensions": {
+        "unit": "EUR",
+        "precision": 2
+      }
+    },
+    {
+      "code": "USD",
+      "name": "United States Dollar",
+      "type": "INSTRUMENT_TYPE_FIAT",
+      "dimensions": {
+        "unit": "USD",
+        "precision": 2
+      }
+    },
+    {
+      "code": "NZD",
+      "name": "New Zealand Dollar",
+      "type": "INSTRUMENT_TYPE_FIAT",
+      "dimensions": {
+        "unit": "NZD",
+        "precision": 2
+      }
+    }
+  ],
+  "accountTypes": [
+    {
+      "code": "CLEARING",
+      "name": "Clearing Account",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": ["GBP", "EUR", "USD", "NZD"],
+      "policies": {
+        "validation": "amount > 0"
+      }
+    },
+    {
+      "code": "SETTLEMENT",
+      "name": "Settlement Account",
+      "normalBalance": "NORMAL_BALANCE_CREDIT",
+      "allowedInstruments": ["GBP", "EUR", "USD", "NZD"],
+      "policies": {
+        "validation": "amount > 0"
+      }
+    },
+    {
+      "code": "NOSTRO",
+      "name": "Nostro Account",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": ["GBP", "EUR", "USD", "NZD"],
+      "policies": {
+        "validation": "amount > 0"
+      }
+    }
+  ],
+  "valuationRules": [
+    {
+      "fromInstrument": "EUR",
+      "toInstrument": "GBP",
+      "method": "VALUATION_METHOD_SPOT_RATE",
+      "source": "ecb_fx"
+    },
+    {
+      "fromInstrument": "USD",
+      "toInstrument": "GBP",
+      "method": "VALUATION_METHOD_SPOT_RATE",
+      "source": "ecb_fx"
+    },
+    {
+      "fromInstrument": "NZD",
+      "toInstrument": "GBP",
+      "method": "VALUATION_METHOD_SPOT_RATE",
+      "source": "ecb_fx"
+    }
+  ],
+  "sagas": [],
+  "seedData": {},
+  "paymentRails": [],
+  "partyTypes": [],
+  "mappings": []
+}

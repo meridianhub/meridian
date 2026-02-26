@@ -11,6 +11,7 @@
 // Flags:
 //
 //	--migrate       Apply all embedded SQL migrations and exit
+//	--bootstrap     Provision master tenant schemas and validate platform manifest, then exit
 //	--grpc-port     gRPC listen port (default 50051)
 //	--http-port     Gateway HTTP listen port (default 8090)
 //	--database-url  Superuser DSN for migrations (or DATABASE_URL env var)
@@ -82,6 +83,7 @@ import (
 	"github.com/meridianhub/meridian/services/gateway"
 
 	// Shared platform
+	masterbootstrap "github.com/meridianhub/meridian/internal/bootstrap"
 	"github.com/meridianhub/meridian/internal/migrations"
 	"github.com/meridianhub/meridian/services"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
@@ -100,6 +102,7 @@ import (
 
 func main() {
 	migrate := flag.Bool("migrate", false, "Apply all embedded SQL migrations to CockroachDB and exit")
+	bootstrapFlag := flag.Bool("bootstrap", false, "Provision master tenant schemas and validate platform manifest, then exit")
 	databaseURL := flag.String("database-url", "", "Superuser DSN for CockroachDB (e.g., postgres://root@localhost:26257/defaultdb?sslmode=disable)")
 	grpcPort := flag.Int("grpc-port", 50051, "gRPC server listen port")
 	httpPort := flag.Int("http-port", 8090, "Gateway HTTP server listen port")
@@ -130,6 +133,15 @@ func main() {
 		}
 
 		logger.Info("all migrations applied successfully")
+		return
+	}
+
+	if *bootstrapFlag {
+		if err := runBootstrap(logger); err != nil {
+			logger.Error("bootstrap failed", "error", err)
+			os.Exit(1)
+		}
+		logger.Info("bootstrap completed successfully")
 		return
 	}
 
@@ -612,11 +624,54 @@ func wireAudit(server *grpc.Server, db *gorm.DB, logger *slog.Logger) error {
 // ─── Control Plane Wiring ────────────────────────────────────────────────────
 
 func wireControlPlane(server *grpc.Server, pool *pgxpool.Pool, logger *slog.Logger) error {
-	if err := controlplaneservice.RegisterApplyManifestService(server, pool, logger); err != nil {
+	// Register ApplyManifestService without executor for now.
+	// The executor requires gRPC client adapters for downstream services
+	// (reference-data, internal-account) which will be wired in a follow-up.
+	if err := controlplaneservice.RegisterApplyManifestService(server, pool, nil, logger); err != nil {
 		return err
 	}
 	logger.Info("registered control-plane service (ApplyManifestService)")
 	return nil
+}
+
+// ─── Bootstrap ──────────────────────────────────────────────────────────────
+
+// runBootstrap provisions master tenant schemas and validates the platform manifest.
+// It establishes database connections, runs the bootstrap process, and exits.
+func runBootstrap(logger *slog.Logger) error {
+	ctx := context.Background()
+
+	baseDSN := env.GetEnvOrDefault("DATABASE_URL",
+		"postgres://root@localhost:26257/defaultdb?sslmode=disable")
+
+	// Both tenant and control-plane share meridian_platform database.
+	platformDSN := replaceDSNDatabase(baseDSN, "meridian_platform")
+	cfg := bootstrap.DatabaseConfig{
+		DSN:             platformDSN,
+		MaxOpenConns:    5,
+		MaxIdleConns:    2,
+		ConnMaxLifetime: 5 * time.Minute,
+		ConnMaxIdleTime: 10 * time.Minute,
+		Logger:          logger,
+	}
+	platformDB, err := bootstrap.NewDatabase(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("platform database: %w", err)
+	}
+	defer bootstrap.CloseDatabase(platformDB, logger)
+
+	// Control-plane also uses meridian_platform (see internal/migrations/runner.go)
+	platformPool, err := connectPgxPool(ctx, platformDSN, logger)
+	if err != nil {
+		return fmt.Errorf("platform pgxpool: %w", err)
+	}
+	defer platformPool.Close()
+
+	return masterbootstrap.Run(ctx, masterbootstrap.Config{
+		PlatformDB:       platformDB,
+		ControlPlanePool: platformPool,
+		Logger:           logger,
+	})
 }
 
 // ─── Gateway Wiring ──────────────────────────────────────────────────────────
