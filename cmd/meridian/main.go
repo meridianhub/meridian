@@ -11,6 +11,7 @@
 // Flags:
 //
 //	--migrate       Apply all embedded SQL migrations and exit
+//	--bootstrap     Provision master tenant schemas and validate platform manifest, then exit
 //	--grpc-port     gRPC listen port (default 50051)
 //	--http-port     Gateway HTTP listen port (default 8090)
 //	--database-url  Superuser DSN for migrations (or DATABASE_URL env var)
@@ -82,12 +83,14 @@ import (
 	"github.com/meridianhub/meridian/services/gateway"
 
 	// Shared platform
+	masterbootstrap "github.com/meridianhub/meridian/internal/bootstrap"
 	"github.com/meridianhub/meridian/internal/migrations"
 	"github.com/meridianhub/meridian/services"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/events"
+	platformgateway "github.com/meridianhub/meridian/shared/platform/gateway"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 
 	"google.golang.org/grpc"
@@ -108,6 +111,7 @@ var (
 
 func main() {
 	migrate := flag.Bool("migrate", false, "Apply all embedded SQL migrations to CockroachDB and exit")
+	bootstrapFlag := flag.Bool("bootstrap", false, "Provision master tenant schemas and validate platform manifest, then exit")
 	databaseURL := flag.String("database-url", "", "Superuser DSN for CockroachDB (e.g., postgres://root@localhost:26257/defaultdb?sslmode=disable)")
 	grpcPort := flag.Int("grpc-port", 50051, "gRPC server listen port")
 	httpPort := flag.Int("http-port", 8090, "Gateway HTTP server listen port")
@@ -138,6 +142,23 @@ func main() {
 		}
 
 		logger.Info("all migrations applied successfully")
+		return
+	}
+
+	if *bootstrapFlag {
+		dsn := *databaseURL
+		if dsn == "" {
+			dsn = os.Getenv("DATABASE_URL")
+		}
+		if dsn == "" {
+			fmt.Fprintln(os.Stderr, "error: --database-url flag or DATABASE_URL environment variable required for --bootstrap")
+			os.Exit(1)
+		}
+		if err := runBootstrap(dsn, logger); err != nil {
+			logger.Error("bootstrap failed", "error", err)
+			os.Exit(1)
+		}
+		logger.Info("bootstrap completed successfully")
 		return
 	}
 
@@ -259,7 +280,7 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 	// ─── Start Gateway HTTP Server ───────────────────────────────────────
 
 	platformDSN := replaceDSNDatabase(baseDSN, "meridian_platform")
-	gwServer, err := wireGateway(grpcPort, httpPort, platformDSN, logger)
+	gwServer, err := wireGateway(grpcPort, httpPort, platformDSN, conns.gormDB("tenant"), logger)
 	if err != nil {
 		return fmt.Errorf("gateway init: %w", err)
 	}
@@ -620,11 +641,51 @@ func wireAudit(server *grpc.Server, db *gorm.DB, logger *slog.Logger) error {
 // ─── Control Plane Wiring ────────────────────────────────────────────────────
 
 func wireControlPlane(server *grpc.Server, pool *pgxpool.Pool, logger *slog.Logger) error {
-	if err := controlplaneservice.RegisterApplyManifestService(server, pool, logger); err != nil {
+	// Register ApplyManifestService without executor for now.
+	// The executor requires gRPC client adapters for downstream services
+	// (reference-data, internal-account) which will be wired in a follow-up.
+	if err := controlplaneservice.RegisterApplyManifestService(server, pool, nil, logger); err != nil {
 		return err
 	}
 	logger.Info("registered control-plane service (ApplyManifestService)")
 	return nil
+}
+
+// ─── Bootstrap ──────────────────────────────────────────────────────────────
+
+// runBootstrap provisions master tenant schemas and validates the platform manifest.
+// It establishes database connections, runs the bootstrap process, and exits.
+func runBootstrap(baseDSN string, logger *slog.Logger) error {
+	ctx := context.Background()
+
+	// Both tenant and control-plane share meridian_platform database.
+	platformDSN := replaceDSNDatabase(baseDSN, "meridian_platform")
+	cfg := bootstrap.DatabaseConfig{
+		DSN:             platformDSN,
+		MaxOpenConns:    5,
+		MaxIdleConns:    2,
+		ConnMaxLifetime: 5 * time.Minute,
+		ConnMaxIdleTime: 10 * time.Minute,
+		Logger:          logger,
+	}
+	platformDB, err := bootstrap.NewDatabase(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("platform database: %w", err)
+	}
+	defer bootstrap.CloseDatabase(platformDB, logger)
+
+	// Control-plane also uses meridian_platform (see internal/migrations/runner.go)
+	platformPool, err := connectPgxPool(ctx, platformDSN, logger)
+	if err != nil {
+		return fmt.Errorf("platform pgxpool: %w", err)
+	}
+	defer platformPool.Close()
+
+	return masterbootstrap.Run(ctx, masterbootstrap.Config{
+		PlatformDB:       platformDB,
+		ControlPlanePool: platformPool,
+		Logger:           logger,
+	})
 }
 
 // ─── Gateway Wiring ──────────────────────────────────────────────────────────
@@ -668,15 +729,18 @@ var serviceNames = []string{
 // wireGateway creates the gateway HTTP server with the Vanguard transcoder
 // routing REST/JSON, Connect, and gRPC-Web requests to the shared gRPC server
 // running on grpcPort.
-func wireGateway(grpcPort, httpPort int, databaseURL string, logger *slog.Logger) (*gateway.Server, error) {
+func wireGateway(grpcPort, httpPort int, databaseURL string, tenantDB *gorm.DB, logger *slog.Logger) (*gateway.Server, error) {
 	grpcTarget := fmt.Sprintf("localhost:%d", grpcPort)
 
 	authConfig := gateway.LoadAuthConfig()
 
+	baseDomain := env.GetEnvOrDefault("BASE_DOMAIN", "localhost")
+	localDevMode := env.GetEnvAsBool("LOCAL_DEV_MODE", false)
+
 	config := &gateway.Config{
 		Port:         httpPort,
-		BaseDomain:   env.GetEnvOrDefault("BASE_DOMAIN", "localhost"),
-		LocalDevMode: env.GetEnvAsBool("LOCAL_DEV_MODE", true),
+		BaseDomain:   baseDomain,
+		LocalDevMode: localDevMode,
 		DatabaseURL:  databaseURL,
 		Auth:         authConfig,
 	}
@@ -717,7 +781,16 @@ func wireGateway(grpcPort, httpPort int, databaseURL string, logger *slog.Logger
 		BuildDate: BuildDate,
 	}))
 
-	return gateway.NewServer(config, logger, nil, opts...), nil
+	// Wire tenant resolver middleware — resolves tenant from X-Tenant-Slug header
+	// (LOCAL_DEV_MODE) or subdomain-based resolution.
+	slugCache := platformgateway.NewInMemorySlugCache()
+	tenantRepo := tenantpersistence.NewRepository(tenantDB)
+	tenantResolver, err := platformgateway.NewTenantResolverMiddleware(slugCache, tenantRepo, baseDomain, logger, localDevMode)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create tenant resolver: %w", err)
+	}
+
+	return gateway.NewServer(config, logger, tenantResolver, opts...), nil
 }
 
 // ─── Per-Service Database Connections ────────────────────────────────────────

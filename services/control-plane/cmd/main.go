@@ -99,7 +99,7 @@ func run(logger *slog.Logger) error {
 		Build()
 
 	// Register ApplyManifestService
-	if err := service.RegisterApplyManifestService(grpcServer, pool, logger); err != nil {
+	if err := service.RegisterApplyManifestService(grpcServer, pool, nil, logger); err != nil {
 		return fmt.Errorf("failed to register control-plane service: %w", err)
 	}
 
