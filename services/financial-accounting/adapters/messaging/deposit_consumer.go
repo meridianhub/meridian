@@ -9,7 +9,6 @@ import (
 
 	"buf.build/go/protovalidate"
 	"github.com/google/uuid"
-	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
 	"github.com/meridianhub/meridian/services/financial-accounting/service"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
@@ -179,12 +178,12 @@ func (dc *DepositConsumer) handleDepositEvent(ctx context.Context, event *events
 	// Convert proto timestamp to time.Time
 	valueDate := event.ValueDate.AsTime()
 
-	// Convert proto currency enum to ISO code (e.g., CURRENCY_GBP -> GBP)
-	currencyCode := convertCurrencyToISO(event.Currency)
+	// Validate instrument code
+	currencyCode := event.InstrumentCode
 	if currencyCode == "" {
 		// Store failure result before returning error
-		dc.storeFailureResult(ctx, idempotencyKey, fmt.Sprintf("%v: %v", ErrInvalidCurrency, event.Currency))
-		return fmt.Errorf("%w: %v", ErrInvalidCurrency, event.Currency)
+		dc.storeFailureResult(ctx, idempotencyKey, fmt.Sprintf("%v: %v", ErrInvalidCurrency, event.InstrumentCode))
+		return fmt.Errorf("%w: %v", ErrInvalidCurrency, event.InstrumentCode)
 	}
 
 	// Create service event
@@ -240,31 +239,6 @@ func extractTenantID(ctx context.Context) string {
 		return string(tenantID)
 	}
 	return ""
-}
-
-// convertCurrencyToISO converts proto Currency enum to ISO 4217 code string.
-// Example: CURRENCY_GBP -> "GBP"
-func convertCurrencyToISO(currency commonv1.Currency) string {
-	switch currency {
-	case commonv1.Currency_CURRENCY_UNSPECIFIED:
-		return ""
-	case commonv1.Currency_CURRENCY_GBP:
-		return "GBP"
-	case commonv1.Currency_CURRENCY_USD:
-		return "USD"
-	case commonv1.Currency_CURRENCY_EUR:
-		return "EUR"
-	case commonv1.Currency_CURRENCY_JPY:
-		return "JPY"
-	case commonv1.Currency_CURRENCY_CHF:
-		return "CHF"
-	case commonv1.Currency_CURRENCY_CAD:
-		return "CAD"
-	case commonv1.Currency_CURRENCY_AUD:
-		return "AUD"
-	default:
-		return ""
-	}
 }
 
 // Start begins consuming DepositEvent messages from the specified topics.

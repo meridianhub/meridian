@@ -34,10 +34,11 @@ message FinancialBookingLogInitiatedEvent {
     max_len: 255
   }];
 
-  // base_currency is the currency for this booking log
-  meridian.common.v1.Currency base_currency = 5 [(buf.validate.field).enum = {
-    defined_only: true
-    not_in: [0]
+  // base_instrument_code is the instrument code for this booking log (e.g., "GBP", "USD", "kWh").
+  // Replaces the deprecated base_currency enum field.
+  string base_instrument_code = 5 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 50
   }];
 
   // correlation_id links related events across services

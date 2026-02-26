@@ -16,7 +16,6 @@ import (
 	"github.com/meridianhub/meridian/services/payment-order/domain"
 	poobservability "github.com/meridianhub/meridian/services/payment-order/observability"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
-	"github.com/meridianhub/meridian/shared/pkg/proto/mappers"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/grpc/codes"
@@ -383,10 +382,9 @@ func (s *Service) reverseLedgerPosting(ctx context.Context, po *domain.PaymentOr
 		return "", fmt.Errorf("failed to get contra-account for gateway %s: %w", gatewayID, err)
 	}
 
-	// Convert domain currency to proto currency
+	// Extract instrument code from domain amount
 	currencyCode := domain.CurrencyCode(po.Amount)
-	protoCurrency := mappers.CurrencyCodeToProto(currencyCode)
-	if protoCurrency == commonpb.Currency_CURRENCY_UNSPECIFIED {
+	if currencyCode == "" {
 		s.logger.Warn("unsupported currency for reversal posting",
 			"currency", currencyCode,
 			"payment_order_id", po.ID.String())
@@ -400,7 +398,7 @@ func (s *Service) reverseLedgerPosting(ctx context.Context, po *domain.PaymentOr
 		ProductServiceReference: "payment-order-reversal",
 		BusinessUnitReference:   "payment-order-service",
 		ChartOfAccountsRules:    "payment-reversal",
-		BaseCurrency:            protoCurrency,
+		BaseInstrumentCode:      currencyCode,
 		IdempotencyKey: &commonpb.IdempotencyKey{
 			Key: reversalBookingLogIDempKey,
 		},

@@ -8,7 +8,6 @@ import (
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
-	"github.com/meridianhub/meridian/shared/pkg/proto/mappers"
 	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -72,10 +71,9 @@ func (o *PaymentOrchestrator) PostLedgerEntries(ctx context.Context, po *domain.
 		return "", fmt.Errorf("failed to get contra-account for gateway %s: %w", gatewayID, err)
 	}
 
-	// Convert domain currency to proto currency
+	// Extract instrument code from domain amount
 	currencyCode := domain.CurrencyCode(po.Amount)
-	protoCurrency := mappers.CurrencyCodeToProto(currencyCode)
-	if protoCurrency == commonpb.Currency_CURRENCY_UNSPECIFIED {
+	if currencyCode == "" {
 		o.logger.Warn("unsupported currency for ledger posting - payment will be marked as failed",
 			"currency", currencyCode,
 			"payment_order_id", po.ID.String(),
@@ -90,7 +88,7 @@ func (o *PaymentOrchestrator) PostLedgerEntries(ctx context.Context, po *domain.
 		ProductServiceReference: "payment-order",
 		BusinessUnitReference:   "payment-order-service",
 		ChartOfAccountsRules:    "outbound-payment",
-		BaseCurrency:            protoCurrency,
+		BaseInstrumentCode:      currencyCode,
 		IdempotencyKey: &commonpb.IdempotencyKey{
 			Key: bookingLogIDempKey,
 		},

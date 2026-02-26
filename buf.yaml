@@ -42,4 +42,12 @@ breaking:
     # Package renamed from internal_bank_account to internal_account
     # All consumers updated in this PR
     - api/proto/meridian/internal_bank_account/v1/internal_bank_account.proto
+    # Intentional breaking changes: Remove Currency enum (asset-agnostic-accounts task 9)
+    # Fields changed from Currency enum to string instrument_code for Universal Asset System
+    # All consumers updated - see services/*/service/ and services/*/adapters/
+    - api/proto/meridian/events/v1/current_account_events.proto
+    - api/proto/meridian/events/v1/deposit_event.proto
+    - api/proto/meridian/events/v1/financial_accounting_events.proto
+    - api/proto/meridian/events/v1/position_keeping_events.proto
+    - api/proto/meridian/financial_accounting/v1/financial_accounting.proto
   ignore_unstable_packages: true

@@ -50,7 +50,7 @@ func TestTransactionCaptured_ToProto(t *testing.T) {
 	assert.Equal(t, "ACC-123", proto.AccountId)
 	assert.Equal(t, txID.String(), proto.TransactionId)
 	assert.Equal(t, int64(10000), proto.AmountCents)
-	assert.Equal(t, commonv1.Currency_CURRENCY_GBP, proto.Currency)
+	assert.Equal(t, "GBP", proto.InstrumentCode)
 	assert.Equal(t, "DEBIT", proto.Direction)
 	assert.Equal(t, "AUTOMATED", proto.Source)
 	assert.Equal(t, "Test transaction", proto.Description)
@@ -98,7 +98,7 @@ func TestTransactionCaptured_ToProto_JPY(t *testing.T) {
 	// Critical assertion: JPY amount should be 1000, not 100000
 	// JPY has 0 decimal places, so no multiplication by 100
 	assert.Equal(t, int64(1000), proto.AmountCents, "JPY should not be multiplied by 100")
-	assert.Equal(t, commonv1.Currency_CURRENCY_JPY, proto.Currency)
+	assert.Equal(t, "JPY", proto.InstrumentCode)
 
 	// Verify InstrumentAmount is populated for JPY
 	require.NotNil(t, proto.InstrumentAmount, "InstrumentAmount should be populated")
@@ -484,18 +484,18 @@ func TestDomainEvent_OccurredAt(t *testing.T) {
 	}
 }
 
-// TestTransactionCaptured_AllCurrencies tests currency conversion for all supported currencies
+// TestTransactionCaptured_AllCurrencies tests instrument code conversion for all supported currencies
 func TestTransactionCaptured_AllCurrencies(t *testing.T) {
 	tests := []struct {
-		name             string
-		currency         domain.Currency
-		expectedProtoCur commonv1.Currency
+		name                   string
+		currency               domain.Currency
+		expectedInstrumentCode string
 	}{
-		{"USD", domain.CurrencyUSD, commonv1.Currency_CURRENCY_USD},
-		{"EUR", domain.CurrencyEUR, commonv1.Currency_CURRENCY_EUR},
-		{"CHF", domain.CurrencyCHF, commonv1.Currency_CURRENCY_CHF},
-		{"CAD", domain.CurrencyCAD, commonv1.Currency_CURRENCY_CAD},
-		{"AUD", domain.CurrencyAUD, commonv1.Currency_CURRENCY_AUD},
+		{"USD", domain.CurrencyUSD, "USD"},
+		{"EUR", domain.CurrencyEUR, "EUR"},
+		{"CHF", domain.CurrencyCHF, "CHF"},
+		{"CAD", domain.CurrencyCAD, "CAD"},
+		{"AUD", domain.CurrencyAUD, "AUD"},
 	}
 
 	for _, tt := range tests {
@@ -517,7 +517,7 @@ func TestTransactionCaptured_AllCurrencies(t *testing.T) {
 			protoEvent := event.ToProto()
 			proto, ok := protoEvent.(*eventsv1.TransactionCapturedEvent)
 			require.True(t, ok)
-			assert.Equal(t, tt.expectedProtoCur, proto.Currency)
+			assert.Equal(t, tt.expectedInstrumentCode, proto.InstrumentCode)
 		})
 	}
 }

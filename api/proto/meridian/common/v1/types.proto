@@ -34,22 +34,37 @@ enum TransactionStatus {
 }
 
 // Currency defines ISO 4217 currency codes commonly used in banking.
+//
+// Deprecated: Use string instrument_code fields instead. This enum is retained
+// for backward compatibility with existing serialized messages and will be
+// removed in a future version. New fields should use string instrument_code
+// (e.g., "GBP", "USD", "EUR") which supports the Universal Asset System
+// for non-currency instruments such as energy (kWh) and carbon credits.
 enum Currency {
+  option deprecated = true;
+
   // CURRENCY_UNSPECIFIED means the currency is unknown.
   CURRENCY_UNSPECIFIED = 0;
   // CURRENCY_GBP is British Pound Sterling.
+  // Deprecated: Use instrument_code = "GBP" instead.
   CURRENCY_GBP = 1;
   // CURRENCY_USD is United States Dollar.
+  // Deprecated: Use instrument_code = "USD" instead.
   CURRENCY_USD = 2;
   // CURRENCY_EUR is Euro.
+  // Deprecated: Use instrument_code = "EUR" instead.
   CURRENCY_EUR = 3;
   // CURRENCY_JPY is Japanese Yen.
+  // Deprecated: Use instrument_code = "JPY" instead.
   CURRENCY_JPY = 4;
   // CURRENCY_CHF is Swiss Franc.
+  // Deprecated: Use instrument_code = "CHF" instead.
   CURRENCY_CHF = 5;
   // CURRENCY_CAD is Canadian Dollar.
+  // Deprecated: Use instrument_code = "CAD" instead.
   CURRENCY_CAD = 6;
   // CURRENCY_AUD is Australian Dollar.
+  // Deprecated: Use instrument_code = "AUD" instead.
   CURRENCY_AUD = 7;
 }
 

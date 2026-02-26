@@ -14,8 +14,6 @@ import (
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
-	domainmoney "github.com/meridianhub/meridian/shared/domain/money"
-	"github.com/meridianhub/meridian/shared/pkg/proto/mappers"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"github.com/shopspring/decimal"
 	"google.golang.org/genproto/googleapis/type/money"
@@ -467,7 +465,7 @@ func currentAccountFinAcctInitiateBookingLog(ctx *saga.StarlarkContext, params m
 			ProductServiceReference: accountID,
 			BusinessUnitReference:   "current-account-service",
 			ChartOfAccountsRules:    transactionType,
-			BaseCurrency:            mappers.DomainCurrencyToProto(domainmoney.Currency(currency)),
+			BaseInstrumentCode:      currency,
 			IdempotencyKey: &commonpb.IdempotencyKey{
 				Key: fmt.Sprintf("booking-log-%s", transactionID),
 			},

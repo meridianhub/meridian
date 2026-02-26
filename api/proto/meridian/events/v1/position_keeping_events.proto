@@ -5,7 +5,6 @@ package meridian.events.v1;
 import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 import "meridian/common/v1/error.proto";
-import "meridian/common/v1/types.proto";
 import "meridian/quantity/v1/quantity.proto";
 
 option go_package = "github.com/meridianhub/meridian/api/proto/meridian/events/v1;eventsv1";
@@ -29,10 +28,11 @@ message TransactionCapturedEvent {
   // amount_cents is the transaction amount in cents (or smallest currency unit)
   int64 amount_cents = 4 [(buf.validate.field).int64 = {gt: 0}];
 
-  // currency is the ISO 4217 currency code
-  meridian.common.v1.Currency currency = 5 [(buf.validate.field).enum = {
-    defined_only: true
-    not_in: [0]
+  // instrument_code is the ISO 4217 currency code or other instrument identifier (e.g., "GBP", "USD").
+  // Replaces the deprecated currency enum field.
+  string instrument_code = 5 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 50
   }];
 
   // direction indicates debit or credit
@@ -333,10 +333,11 @@ message OpeningBalanceRecordedEvent {
   // May be negative for overdrawn accounts
   int64 amount_cents = 3;
 
-  // currency is the ISO 4217 currency code
-  meridian.common.v1.Currency currency = 4 [(buf.validate.field).enum = {
-    defined_only: true
-    not_in: [0]
+  // instrument_code is the ISO 4217 currency code or other instrument identifier (e.g., "GBP", "USD").
+  // Replaces the deprecated currency enum field.
+  string instrument_code = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 50
   }];
 
   // effective_date is when the opening balance becomes effective

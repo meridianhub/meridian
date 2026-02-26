@@ -64,18 +64,18 @@ func (e *TransactionCaptured) ToProto() interface{} {
 	amountCents := MoneyToMinorUnitsUnchecked(e.Amount)
 
 	return &eventsv1.TransactionCapturedEvent{
-		LogId:         e.LogID.String(),
-		AccountId:     e.AccountID,
-		TransactionId: e.TransactionID.String(),
-		AmountCents:   amountCents,
-		Currency:      currencyToProto(MoneyCurrency(e.Amount)),
-		Direction:     e.Direction.String(),
-		Source:        e.Source.String(),
-		Description:   e.Description,
-		Reference:     e.Reference,
-		CorrelationId: e.CorrelationID,
-		Timestamp:     timestamppb.New(e.Timestamp),
-		Version:       e.Version,
+		LogId:          e.LogID.String(),
+		AccountId:      e.AccountID,
+		TransactionId:  e.TransactionID.String(),
+		AmountCents:    amountCents,
+		InstrumentCode: string(MoneyCurrency(e.Amount)),
+		Direction:      e.Direction.String(),
+		Source:         e.Source.String(),
+		Description:    e.Description,
+		Reference:      e.Reference,
+		CorrelationId:  e.CorrelationID,
+		Timestamp:      timestamppb.New(e.Timestamp),
+		Version:        e.Version,
 		// Universal Asset System: InstrumentAmount provides full multi-asset support
 		// while legacy fields (amount_cents, currency) are maintained for backward compatibility
 		InstrumentAmount: moneyToInstrumentAmountProto(e.Amount),
@@ -358,7 +358,7 @@ func (e *OpeningBalanceRecorded) ToProto() interface{} {
 		LogId:              e.LogID.String(),
 		AccountId:          e.AccountID,
 		AmountCents:        amountCents,
-		Currency:           currencyToProto(MoneyCurrency(e.OpeningBalance)),
+		InstrumentCode:     string(MoneyCurrency(e.OpeningBalance)),
 		EffectiveDate:      timestamppb.New(e.EffectiveDate),
 		MigrationReference: e.MigrationReference,
 		CorrelationId:      e.CorrelationID,
@@ -427,27 +427,6 @@ func (e *BulkTransactionCaptured) ToProto() interface{} {
 }
 
 // Helper functions for conversions
-
-func currencyToProto(currency Currency) commonv1.Currency {
-	switch currency {
-	case CurrencyGBP:
-		return commonv1.Currency_CURRENCY_GBP
-	case CurrencyUSD:
-		return commonv1.Currency_CURRENCY_USD
-	case CurrencyEUR:
-		return commonv1.Currency_CURRENCY_EUR
-	case CurrencyJPY:
-		return commonv1.Currency_CURRENCY_JPY
-	case CurrencyCHF:
-		return commonv1.Currency_CURRENCY_CHF
-	case CurrencyCAD:
-		return commonv1.Currency_CURRENCY_CAD
-	case CurrencyAUD:
-		return commonv1.Currency_CURRENCY_AUD
-	default:
-		return commonv1.Currency_CURRENCY_UNSPECIFIED
-	}
-}
 
 func reconciliationStatusToString(status ReconciliationStatus) string {
 	switch status {
