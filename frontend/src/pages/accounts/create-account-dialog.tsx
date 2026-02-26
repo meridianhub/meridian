@@ -15,17 +15,14 @@ import { tenantKeys } from '@/lib/query-keys'
 
 const CURRENCIES = ['GBP', 'USD', 'EUR']
 
-// IBAN pattern: 2 letter country code + 2 digits + up to 30 alphanumeric chars
-const IBAN_PATTERN = /^[A-Z]{2}[0-9]{2}[A-Z0-9]{1,30}$/
-
 interface FormData {
-  iban: string
+  externalReference: string
   currency: string
   partyId: string
 }
 
 interface FormErrors {
-  iban?: string
+  externalReference?: string
   partyId?: string
   general?: string
 }
@@ -38,7 +35,7 @@ interface CreateAccountDialogProps {
 
 async function createAccount(
   tenantSlug: string,
-  iban: string,
+  externalReference: string,
   currency: string,
   partyId: string,
 ): Promise<string> {
@@ -51,7 +48,7 @@ async function createAccount(
         'X-Tenant-Slug': tenantSlug,
       },
       body: JSON.stringify({
-        accountIdentification: iban,
+        accountIdentification: externalReference,
         baseCurrency: currency,
         partyId,
       }),
@@ -74,7 +71,7 @@ export function CreateAccountDialog({ open, onOpenChange, onCreated }: CreateAcc
   const { tenantSlug } = useTenantContext()
   const queryClient = useQueryClient()
   const [formData, setFormData] = React.useState<FormData>({
-    iban: '',
+    externalReference: '',
     currency: 'GBP',
     partyId: '',
   })
@@ -82,7 +79,7 @@ export function CreateAccountDialog({ open, onOpenChange, onCreated }: CreateAcc
 
   React.useEffect(() => {
     if (!open) {
-      setFormData({ iban: '', currency: 'GBP', partyId: '' })
+      setFormData({ externalReference: '', currency: 'GBP', partyId: '' })
       setErrors({})
     }
   }, [open])
@@ -93,11 +90,9 @@ export function CreateAccountDialog({ open, onOpenChange, onCreated }: CreateAcc
       next.general = 'No tenant selected'
       return next
     }
-    const iban = formData.iban.trim().toUpperCase()
-    if (!iban) {
-      next.iban = 'IBAN is required'
-    } else if (!IBAN_PATTERN.test(iban)) {
-      next.iban = 'Enter a valid IBAN (e.g. GB82WEST12345698765432)'
+    const ref = formData.externalReference.trim()
+    if (!ref) {
+      next.externalReference = 'External reference is required'
     }
     if (!formData.partyId.trim()) {
       next.partyId = 'Party ID is required'
@@ -109,7 +104,7 @@ export function CreateAccountDialog({ open, onOpenChange, onCreated }: CreateAcc
     mutationFn: () =>
       createAccount(
         tenantSlug ?? '',
-        formData.iban.trim().toUpperCase(),
+        formData.externalReference.trim(),
         formData.currency,
         formData.partyId.trim(),
       ),
@@ -158,20 +153,20 @@ export function CreateAccountDialog({ open, onOpenChange, onCreated }: CreateAcc
         <form onSubmit={(e) => void handleSubmit(e)} id="create-account-form">
           <div className="space-y-4 py-2">
             <div className="space-y-1">
-              <label htmlFor="account-iban" className="text-sm font-medium">
-                IBAN
+              <label htmlFor="account-external-reference" className="text-sm font-medium">
+                External Reference
               </label>
               <Input
-                id="account-iban"
-                value={formData.iban}
-                onChange={handleChange('iban')}
-                placeholder="GB82WEST12345698765432"
-                aria-label="IBAN"
-                aria-describedby={errors.iban ? 'account-iban-error' : undefined}
+                id="account-external-reference"
+                value={formData.externalReference}
+                onChange={handleChange('externalReference')}
+                placeholder="e.g. GB82WEST12345698765432 or 12-34-56-78901234"
+                aria-label="External Reference"
+                aria-describedby={errors.externalReference ? 'account-external-reference-error' : undefined}
               />
-              {errors.iban && (
-                <p id="account-iban-error" className="text-sm text-destructive">
-                  {errors.iban}
+              {errors.externalReference && (
+                <p id="account-external-reference-error" className="text-sm text-destructive">
+                  {errors.externalReference}
                 </p>
               )}
             </div>

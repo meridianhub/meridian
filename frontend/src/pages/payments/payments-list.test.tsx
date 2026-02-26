@@ -41,7 +41,7 @@ const samplePayments = [
   {
     paymentOrderId: 'po-001',
     debtorAccountId: 'acct-debtor-1',
-    creditorIban: 'GB29 NWBK 6016 1331 9268 19',
+    creditorReference: 'GB29 NWBK 6016 1331 9268 19',
     amount: '10050',
     currency: 'GBP',
     status: 'COMPLETED',
@@ -50,7 +50,7 @@ const samplePayments = [
   {
     paymentOrderId: 'po-002',
     debtorAccountId: 'acct-debtor-2',
-    creditorIban: 'DE89 3704 0044 0532 0130 00',
+    creditorReference: 'DE89 3704 0044 0532 0130 00',
     amount: '50000',
     currency: 'EUR',
     status: 'EXECUTING',
@@ -83,7 +83,7 @@ describe('PaymentsPage - list rendering', () => {
     await waitFor(() => {
       expect(screen.getByRole('columnheader', { name: /payment id/i })).toBeInTheDocument()
       expect(screen.getByRole('columnheader', { name: /debtor account/i })).toBeInTheDocument()
-      expect(screen.getByRole('columnheader', { name: /creditor iban/i })).toBeInTheDocument()
+      expect(screen.getByRole('columnheader', { name: /creditor reference/i })).toBeInTheDocument()
       expect(screen.getByRole('columnheader', { name: /amount/i })).toBeInTheDocument()
       expect(screen.getByRole('columnheader', { name: /status/i })).toBeInTheDocument()
       expect(screen.getByRole('columnheader', { name: /created/i })).toBeInTheDocument()

@@ -246,8 +246,8 @@ export function AccountDetailPage() {
             <h1 className="text-2xl font-semibold">{account.accountId}</h1>
             <StatusBadge status={account.status} />
           </div>
-          {account.iban && (
-            <p className="mt-1 font-mono text-sm text-muted-foreground">{account.iban}</p>
+          {account.externalReference && (
+            <p className="mt-1 font-mono text-sm text-muted-foreground">{account.externalReference}</p>
           )}
         </div>
         <AccountActions
@@ -293,7 +293,7 @@ export function AccountDetailPage() {
               <CardContent>
                 <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <DetailField label="Account ID">{account.accountId}</DetailField>
-                  <DetailField label="IBAN">{account.iban || '—'}</DetailField>
+                  <DetailField label="External Reference">{account.externalReference || '—'}</DetailField>
                   <DetailField label="Status">
                     <StatusBadge status={account.status} />
                   </DetailField>

@@ -37,8 +37,8 @@ const columns: ColumnDef<PaymentOrder>[] = [
     header: 'Debtor Account',
   },
   {
-    accessorKey: 'creditorIban',
-    header: 'Creditor IBAN',
+    accessorKey: 'creditorReference',
+    header: 'Creditor Reference',
   },
   {
     accessorKey: 'amount',

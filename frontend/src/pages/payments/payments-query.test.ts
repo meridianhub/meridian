@@ -6,7 +6,7 @@ const mockPaymentOrders = [
   {
     paymentOrderId: 'po-001',
     debtorAccountId: 'acc-100',
-    creditorIban: 'GB29NWBK60161331926819',
+    creditorReference: 'GB29NWBK60161331926819',
     amount: '5000',
     currency: 'GBP',
     status: 'COMPLETED',
@@ -15,7 +15,7 @@ const mockPaymentOrders = [
   {
     paymentOrderId: 'po-002',
     debtorAccountId: 'acc-200',
-    creditorIban: 'DE89370400440532013000',
+    creditorReference: 'DE89370400440532013000',
     amount: '15000',
     currency: 'EUR',
     status: 'PENDING',

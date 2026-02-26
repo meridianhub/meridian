@@ -42,13 +42,13 @@ test.describe('Accounts page', () => {
     ).toBeVisible()
   })
 
-  test('Create Account dialog contains IBAN, Currency, and Party ID fields', async ({
+  test('Create Account dialog contains External Reference, Currency, and Party ID fields', async ({
     authenticatedPage,
   }) => {
     await navigateTo(authenticatedPage, '/accounts')
     await authenticatedPage.getByRole('button', { name: 'Create Account' }).click()
     const dialog = authenticatedPage.getByRole('dialog')
-    await expect(dialog.getByLabel('IBAN')).toBeVisible()
+    await expect(dialog.getByLabel('External Reference')).toBeVisible()
     await expect(dialog.getByLabel('Currency')).toBeVisible()
     await expect(dialog.getByLabel('Party ID')).toBeVisible()
   })
@@ -67,18 +67,8 @@ test.describe('Accounts page', () => {
     const dialog = authenticatedPage.getByRole('dialog')
     // Submit without filling any fields
     await dialog.getByRole('button', { name: 'Create Account', exact: true }).click()
-    await expect(dialog.getByText('IBAN is required')).toBeVisible()
+    await expect(dialog.getByText('External reference is required')).toBeVisible()
     await expect(dialog.getByText('Party ID is required')).toBeVisible()
-  })
-
-  test('Create Account dialog validates IBAN format', async ({ authenticatedPage }) => {
-    await navigateTo(authenticatedPage, '/accounts')
-    await authenticatedPage.getByRole('button', { name: 'Create Account' }).click()
-    const dialog = authenticatedPage.getByRole('dialog')
-    await dialog.getByLabel('IBAN').fill('not-a-valid-iban')
-    await dialog.getByLabel('Party ID').fill('party-001')
-    await dialog.getByRole('button', { name: 'Create Account', exact: true }).click()
-    await expect(dialog.getByText(/valid IBAN/i)).toBeVisible()
   })
 
   test('Create Account dialog resets fields after cancel and reopen', async ({
@@ -88,14 +78,14 @@ test.describe('Accounts page', () => {
     // Open and fill the dialog
     await authenticatedPage.getByRole('button', { name: 'Create Account' }).click()
     let dialog = authenticatedPage.getByRole('dialog')
-    await dialog.getByLabel('IBAN').fill('GB82WEST12345698765432')
+    await dialog.getByLabel('External Reference').fill('GB82WEST12345698765432')
     await dialog.getByLabel('Party ID').fill('party-001')
     // Cancel
     await authenticatedPage.getByRole('button', { name: 'Cancel' }).click()
     // Reopen - fields should be reset
     await authenticatedPage.getByRole('button', { name: 'Create Account' }).click()
     dialog = authenticatedPage.getByRole('dialog')
-    await expect(dialog.getByLabel('IBAN')).toHaveValue('')
+    await expect(dialog.getByLabel('External Reference')).toHaveValue('')
     await expect(dialog.getByLabel('Party ID')).toHaveValue('')
   })
 
@@ -157,7 +147,7 @@ test.describe('Account lifecycle (requires backend)', () => {
 
     // Step 3: Fill and submit form (scope to dialog to avoid collision with DataTable filter)
     const createDialog = authenticatedPage.getByRole('dialog')
-    await createDialog.getByLabel('IBAN').fill(testIban)
+    await createDialog.getByLabel('External Reference').fill(testIban)
     await createDialog.getByLabel('Currency').selectOption(currency)
     await createDialog.getByLabel('Party ID').fill('dev-party-001')
     await createDialog.getByRole('button', { name: 'Create Account', exact: true }).click()

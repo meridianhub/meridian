@@ -30,7 +30,7 @@ function makeWrapper() {
 const mockPaymentOrder = {
   paymentOrderId: 'po-123',
   debtorAccountId: 'acc-456',
-  creditorIban: 'GB29NWBK60161331926819',
+  creditorReference: 'GB29NWBK60161331926819',
   amount: '10000',
   currency: 'GBP',
   status: 'COMPLETED',

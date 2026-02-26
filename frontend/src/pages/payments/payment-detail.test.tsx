@@ -56,7 +56,7 @@ function Wrapper({
 const sampleDetail = {
   paymentOrderId: 'po-001',
   debtorAccountId: 'acct-debtor-1',
-  creditorIban: 'GB29 NWBK 6016 1331 9268 19',
+  creditorReference: 'GB29 NWBK 6016 1331 9268 19',
   amount: '10050',
   currency: 'GBP',
   status: 'COMPLETED',
@@ -159,7 +159,7 @@ describe('PaymentDetailPage - Overview tab', () => {
     })
   })
 
-  it('shows creditor IBAN', async () => {
+  it('shows creditor reference', async () => {
     render(
       <Wrapper>
         <PaymentDetailPage />
