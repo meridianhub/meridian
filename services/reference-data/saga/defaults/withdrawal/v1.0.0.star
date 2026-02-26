@@ -35,7 +35,6 @@ withdrawal_saga = saga(name="current_account_withdrawal")
 def execute_withdrawal():
     # Extract input data
     account_id = input_data["account_id"]
-    external_identifier = input_data["external_identifier"]
     amount = Decimal(input_data["amount"])
     instrument_code = input_data["instrument_code"]
     transaction_id = input_data["transaction_id"]
@@ -44,7 +43,7 @@ def execute_withdrawal():
     # Step 1: Log position in PositionKeeping service with DEBIT direction
     step(name="log_position")
     log_position_result = position_keeping.initiate_log(
-        position_id=external_identifier,
+        position_id=account_id,
         amount=amount,
         instrument_code=instrument_code,
         direction="DEBIT",
