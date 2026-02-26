@@ -65,6 +65,13 @@ COPY --from=builder /build/seed-demo /seed-demo
 # Copy manifest files for seed-demo
 COPY --from=builder /build/examples/manifests/ /app/examples/manifests/
 
+# Copy saga assets for Starlark saga execution (deposit, withdrawal scripts + handlers schema)
+COPY --from=builder /build/services/reference-data/saga/defaults/ /app/services/reference-data/saga/defaults/
+COPY --from=builder /build/shared/pkg/saga/schema/handlers.yaml /app/shared/pkg/saga/schema/handlers.yaml
+
+# SAGA_ASSET_DIR tells loadSagaAsset where to find saga scripts and schema files
+ENV SAGA_ASSET_DIR=/app
+
 # Use non-root user (distroless provides nonroot user at uid 65532)
 USER nonroot:nonroot
 
