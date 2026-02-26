@@ -137,7 +137,15 @@ func main() {
 	}
 
 	if *bootstrapFlag {
-		if err := runBootstrap(logger); err != nil {
+		dsn := *databaseURL
+		if dsn == "" {
+			dsn = os.Getenv("DATABASE_URL")
+		}
+		if dsn == "" {
+			fmt.Fprintln(os.Stderr, "error: --database-url flag or DATABASE_URL environment variable required for --bootstrap")
+			os.Exit(1)
+		}
+		if err := runBootstrap(dsn, logger); err != nil {
 			logger.Error("bootstrap failed", "error", err)
 			os.Exit(1)
 		}
@@ -638,11 +646,8 @@ func wireControlPlane(server *grpc.Server, pool *pgxpool.Pool, logger *slog.Logg
 
 // runBootstrap provisions master tenant schemas and validates the platform manifest.
 // It establishes database connections, runs the bootstrap process, and exits.
-func runBootstrap(logger *slog.Logger) error {
+func runBootstrap(baseDSN string, logger *slog.Logger) error {
 	ctx := context.Background()
-
-	baseDSN := env.GetEnvOrDefault("DATABASE_URL",
-		"postgres://root@localhost:26257/defaultdb?sslmode=disable")
 
 	// Both tenant and control-plane share meridian_platform database.
 	platformDSN := replaceDSNDatabase(baseDSN, "meridian_platform")
