@@ -41,6 +41,15 @@
         "unit": "NZD",
         "precision": 2
       }
+    },
+    {
+      "code": "ACTIVE_PARTY",
+      "name": "Active Party Unit",
+      "type": "INSTRUMENT_TYPE_COMMODITY",
+      "dimensions": {
+        "unit": "PARTY",
+        "precision": 0
+      }
     }
   ],
   "accountTypes": [
@@ -70,6 +79,33 @@
       "policies": {
         "validation": "amount > 0"
       }
+    },
+    {
+      "code": "USAGE_METERING",
+      "name": "Usage Metering Account",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": ["ACTIVE_PARTY"],
+      "policies": {
+        "validation": "amount > 0"
+      }
+    },
+    {
+      "code": "PLATFORM_RECEIVABLE",
+      "name": "Platform Receivable Account",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": ["GBP"],
+      "policies": {
+        "validation": "amount > 0"
+      }
+    },
+    {
+      "code": "PLATFORM_REVENUE",
+      "name": "Platform Revenue Account",
+      "normalBalance": "NORMAL_BALANCE_CREDIT",
+      "allowedInstruments": ["GBP"],
+      "policies": {
+        "validation": "amount > 0"
+      }
     }
   ],
   "valuationRules": [
@@ -90,6 +126,12 @@
       "toInstrument": "GBP",
       "method": "VALUATION_METHOD_SPOT_RATE",
       "source": "ecb_fx"
+    },
+    {
+      "fromInstrument": "ACTIVE_PARTY",
+      "toInstrument": "GBP",
+      "method": "VALUATION_METHOD_FIXED",
+      "source": "platform_pricing"
     }
   ],
   "sagas": [],
