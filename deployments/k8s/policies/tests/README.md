@@ -165,9 +165,9 @@ Add to your CI pipeline:
 1. **`envFrom` references are not checked at the Pod/Deployment level**: When a container uses
    `envFrom` to reference a ConfigMap, the policy cannot detect `LOCAL_DEV_MODE=true` at the
    workload level. However, the ConfigMap itself is validated when created/updated, providing
-   defense-in-depth.
+   defence-in-depth.
 
-2. **"product" namespace prefix matches are intentional**: Namespaces like `product-catalog` will
+2. **"product" namespace prefix matches are intentional**: Namespaces like `product-catalogue` will
    be flagged as production due to the `prod*` prefix match. This is by design - false positives
    are safer than false negatives for security policies. If needed, adjust the namespace matching
    logic in the Rego policy.

@@ -69,7 +69,7 @@ This function registers all handlers for your service with the saga registry:
 // RegisterStarlarkHandlers registers all Starlark service bindings for {ServiceName}.
 // These handlers adapt the Starlark interface (map[string]any) to gRPC client calls.
 //
-// This function is called during service initialization to register {ServiceName} handlers
+// This function is called during service initialisation to register {ServiceName} handlers
 // with the saga execution engine. Each handler includes metadata for conservation rule
 // enforcement and operational categorization.
 //
@@ -337,7 +337,7 @@ func TestOperationHandler_MissingRequiredParam(t *testing.T) {
 
 ## Step 5: Wire into Saga Executor
 
-Update the service's `cmd/main.go` to register handlers during initialization:
+Update the service's `cmd/main.go` to register handlers during initialisation:
 
 ```go
 package main
@@ -348,7 +348,7 @@ import (
 )
 
 func main() {
-    // ... existing service initialization ...
+    // ... existing service initialisation ...
 
     // Create handler registry for saga orchestration
     handlerRegistry := saga.NewHandlerRegistry()

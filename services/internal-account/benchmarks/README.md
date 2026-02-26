@@ -144,7 +144,7 @@ Flag >20% degradation in P99 latencies for investigation.
 
 ## Testcontainer Considerations
 
-- Container startup adds ~2-5 seconds to test initialization
+- Container startup adds ~2-5 seconds to test initialisation
 - Container is reused across benchmark iterations via `setupBenchContainer`
 - Each NFR test creates a fresh container via `setupTestContainer`
 - Uses `shared/platform/testdb.SetupPostgres` for consistent setup

@@ -103,7 +103,7 @@ boundaries, error handling, and validation logic.
 - Complete posting workflows (debit/credit pairing)
 - Trial balance generation (sum debits = sum credits)
 - Reconciliation with position-keeping
-- NoOp fallback behavior under Redis/Kafka failure
+- NoOp fallback behaviour under Redis/Kafka failure
 - Orphaned booking logs from partial failures
 
 **Current Coverage**: Integration tests with Testcontainers (`service/grpc_integration_test.go`)
@@ -122,7 +122,7 @@ boundaries, error handling, and validation logic.
 - Compensation scenarios (failed payment → reverse lien)
 - Concurrent lien execution (race condition testing)
 - Bucket ID evaluation failure handling
-- Gateway timeout and retry behavior
+- Gateway timeout and retry behaviour
 
 **Current Coverage**: Integration tests with mocked current-account and financial-accounting (`service/integration_test.go`)
 
@@ -600,7 +600,7 @@ if os.Getenv("KYC_STUB_ENABLED") != "true" {
 
 **Tasks**:
 
-1. Uncomment database initialization code (lines 75-84)
+1. Uncomment database initialisation code (lines 75-84)
 2. Register Market Information gRPC service (lines 98-99)
 3. Enable ECB worker (lines 205-208)
 4. Enable database cleanup (lines 258-261)
@@ -912,18 +912,18 @@ func TestAsyncOperation_E2E(t *testing.T) {
 
 **CRITICAL TESTING PRINCIPLE**: When e2e tests fail, **fix the production code, not the test assertions**.
 
-**The Problem**: It's tempting to "fix" failing tests by adjusting expected values to match incorrect behavior. This
+**The Problem**: It's tempting to "fix" failing tests by adjusting expected values to match incorrect behaviour. This
 defeats the entire purpose of testing.
 
 **The Rule**:
 
 ```go
-// ❌ WRONG - Making test match incorrect behavior
+// ❌ WRONG - Making test match incorrect behaviour
 func TestWithdrawal_E2E(t *testing.T) {
     withdrawal := executeWithdrawal(t, ctx, service, 100)
 
     // Test discovers withdrawal status is stuck in PENDING
-    // Developer changes assertion to match broken behavior:
+    // Developer changes assertion to match broken behaviour:
     assert.Equal(t, StatusPending, withdrawal.Status) // ❌ Makes test pass, hides bug
 }
 
@@ -935,7 +935,7 @@ func TestWithdrawal_E2E(t *testing.T) {
     // Developer investigates and finds the bug in current-account/service/grpc_service.go:896-913
     // Developer implements Outbox Pattern to fix eventual consistency issue
     // Now test passes with correct assertion:
-    assert.Equal(t, StatusCompleted, withdrawal.Status) // ✅ Verifies correct behavior
+    assert.Equal(t, StatusCompleted, withdrawal.Status) // ✅ Verifies correct behaviour
 }
 ```
 
@@ -944,7 +944,7 @@ func TestWithdrawal_E2E(t *testing.T) {
 | Scenario | Action | Reason |
 |----------|--------|--------|
 | Test expects COMPLETED but gets PENDING | Fix production code | Status should transition to COMPLETED |
-| Test expects balance 100 but gets 95 | Fix production code | Math is wrong, not the expectation |
+| Test expects balance 100 but gets 95 | Fix production code | Maths is wrong, not the expectation |
 | Test expects 3 audit logs but gets 2 | Fix production code | Missing audit trail entry |
 | Test expects response in 50ms but takes 500ms | Fix production code OR adjust baseline | Performance regression |
 | Test uses wrong tenant ID in assertion | Fix test | Test bug, not production bug |
@@ -963,20 +963,20 @@ func TestWithdrawal_E2E(t *testing.T) {
 1. **Test fails** - E2E test discovers withdrawal status stuck in PENDING
 2. **Investigate** - Why is the status not updating? Found eventual consistency bug
 3. **Fix production code** - Implement Outbox Pattern (not just change assertion)
-4. **Test passes** - Now verifies correct behavior
+4. **Test passes** - Now verifies correct behaviour
 5. **Document** - Add comment explaining the fix: "Fixed eventual consistency issue with Outbox Pattern"
 
 **Exception**: Only "fix" tests when the test itself has a bug (wrong tenant ID, outdated API expectations, etc.) - not
-when production behavior is incorrect.
+when production behaviour is incorrect.
 
 **Why This Matters**:
 
 - E2E tests are our **truth detector** - they expose real production issues
 - Weakening assertions to make tests pass **hides bugs** that will hit customers
-- **Tests should fail** when behavior is wrong - that's their job
+- **Tests should fail** when behaviour is wrong - that's their job
 - If a test is "too strict", the production code is probably **not strict enough**
 
-**Bottom Line**: **Tests that pass by hiding broken behavior are worse than no tests at all.** They give false confidence
+**Bottom Line**: **Tests that pass by hiding broken behaviour are worse than no tests at all.** They give false confidence
 while the bug ships to production.
 
 ---

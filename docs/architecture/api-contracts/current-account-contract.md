@@ -235,7 +235,7 @@ Response: {
 
 ### ExecuteDeposit
 
-Processes a deposit transaction (BIAN Behavior Qualifier: Deposits).
+Processes a deposit transaction (BIAN Behaviour Qualifier: Deposits).
 
 **Proto Definition:**
 
@@ -844,7 +844,7 @@ facility.CurrentBalance = mapBalancesToResponse(balances)
 
 ### Error Handling for Balance Queries
 
-| Error | Handling | Client Behavior |
+| Error | Handling | Client Behaviour |
 |-------|----------|-----------------|
 | Position Keeping unavailable | Circuit breaker, return UNAVAILABLE | Retry with backoff |
 | Timeout | Return DEADLINE_EXCEEDED | Retry with longer timeout |

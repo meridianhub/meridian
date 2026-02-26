@@ -320,7 +320,7 @@ unchanged.
 a `version` column for optimistic locking.
 `UpdateVerificationStatus` requires the current version and
 increments it. Concurrent updates to the same verification will
-fail with a conflict, which is the intended behavior to prevent
+fail with a conflict, which is the intended behaviour to prevent
 race conditions between webhook delivery and timeout handler.
 
 **Webhook max body size**: The handler limits request body reads to

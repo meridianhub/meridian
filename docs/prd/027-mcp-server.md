@@ -36,7 +36,7 @@ instructions: |
 - [1. Executive Summary](#1-executive-summary)
 - [2. The Junior Operator Principle](#2-the-junior-operator-principle)
 - [3. Functional Requirements](#3-functional-requirements)
-- [4. MCP Tool Catalog](#4-mcp-tool-catalog)
+- [4. MCP Tool Catalogue](#4-mcp-tool-catalogue)
 - [5. Technical Architecture](#5-technical-architecture)
 - [6. Safety Model](#6-safety-model)
 - [7. Authentication and Multi-Tenancy](#7-authentication-and-multi-tenancy)
@@ -67,12 +67,12 @@ because safety is enforced at the engine level, not the client level:
 
 - **CEL expressions** have cost limits and guaranteed termination
 - **Starlark scripts** cannot loop infinitely or recurse
-- **The immutable ledger** rejects invalid double-entry math
+- **The immutable ledger** rejects invalid double-entry maths
 - **Dry-run mode** executes the full pipeline with zero side effects
 - **Protovalidate constraints** reject malformed input before it reaches business logic
 
 The LLM cannot hallucinate a corrupt ledger state because the engine rejects
-invalid math or logic at compile time. This is the architectural prerequisite
+invalid maths or logic at compile time. This is the architectural prerequisite
 that makes an MCP server viable.
 
 ### The Market Insight
@@ -156,7 +156,7 @@ Predict outcomes without side effects.
 
 ### FR-4: Reference Data Tools
 
-Query the catalog of available definitions.
+Query the catalogue of available definitions.
 
 **FR-4.1**: Query market data (rates, prices) for instruments.
 **FR-4.2**: List and describe available saga handler schemas (what service methods exist).
@@ -174,7 +174,7 @@ MCP resources that provide context to the LLM without tool invocation.
 
 ---
 
-## 4. MCP Tool Catalog
+## 4. MCP Tool Catalogue
 
 ### 4.1 Economy Design Tools (Write Path)
 
@@ -958,7 +958,7 @@ that all tool handlers call before returning error responses.
 
 ## 6. Safety Model
 
-### 6.1 Defense in Depth
+### 6.1 Defence in Depth
 
 ```mermaid
 graph LR
@@ -984,7 +984,7 @@ graph LR
     subgraph "Layer 4: Engine"
         L4A["CEL cost limits (10,000)"]
         L4B["Starlark termination proof"]
-        L4C["Double-entry math correctness"]
+        L4C["Double-entry maths correctness"]
         L4D["Immutable ledger append-only"]
     end
 
@@ -1040,7 +1040,7 @@ sequenceDiagram
 
     Note over LLM,MCP: MCP config provides API key
     LLM->>MCP: Tool call (with API key in env)
-    MCP->>GW: gRPC call + Authorization header
+    MCP->>GW: gRPC call + Authorisation header
     GW->>CP: ValidateAPIKey RPC
     CP-->>GW: Tenant ID, permissions
     GW-->>MCP: Response (tenant-scoped)

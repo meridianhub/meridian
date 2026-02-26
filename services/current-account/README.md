@@ -368,7 +368,7 @@ Key design decisions:
 
 **Safe to Retry (Idempotent):**
 
-| Method | Idempotency Key | Behavior |
+| Method | Idempotency Key | Behaviour |
 |--------|-----------------|----------|
 | `InitiateLien` | `PaymentOrderReference` | Returns existing lien if key matches |
 | `ExecuteLien` | Lien ID (path param) | No-op if already EXECUTED |

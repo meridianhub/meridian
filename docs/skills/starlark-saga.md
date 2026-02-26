@@ -268,8 +268,8 @@ def execute_operation():
     result = service2.process(amount=amount)
 
     # Step 3
-    step(name="finalize")
-    final = service3.finalize(result_id=result.id)
+    step(name="finalise")
+    final = service3.finalise(result_id=result.id)
 
     return {
         "status": "COMPLETED",
@@ -583,6 +583,6 @@ return {
 ## Further Reading
 
 - **[Starlark Style Guide](../guides/starlark-style-guide.md)** - Comprehensive syntax and conventions
-- **[Saga Service Catalog](../saga-service-catalog.md)** - Service module documentation
+- **[Saga Service Catalogue](../saga-service-catalogue.md)** - Service module documentation
 - **[handlers.yaml](../saga-handlers.schema.json)** - Available handlers schema
 - **[ADR-0028: Starlark Saga & CEL Valuation](../adr/0028-starlark-saga-cel-valuation.md)** - Architecture decision

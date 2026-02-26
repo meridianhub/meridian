@@ -5,7 +5,7 @@
 This PRD defines remediation work identified during a comprehensive codebase
 scan covering project structure, Go code quality, CI/CD configuration,
 documentation consistency, and security posture. Findings are organized into
-parallel work streams to maximize concurrent execution.
+parallel work streams to maximise concurrent execution.
 
 ## Goals
 
@@ -18,7 +18,7 @@ parallel work streams to maximize concurrent execution.
 ## Non-Goals
 
 - New feature development
-- Performance optimization or benchmarking
+- Performance optimisation or benchmarking
 - Withdrawal persistence (covered in prd-technical-debt-remediation.md)
 - Idempotency gap fixes (covered in prd-technical-debt-remediation.md)
 - ADR-0013/0014/0017 implementation (separate PRDs)
@@ -157,7 +157,7 @@ Vulnerability-introducing PRs pass CI without image scanning.
 **Acceptance Criteria**:
 
 1. Trivy scan runs on PR builds (at minimum as non-blocking warning)
-2. Existing non-PR scanning behavior unchanged
+2. Existing non-PR scanning behaviour unchanged
 3. PR build time increase is reasonable (< 2 min added)
 
 ---
@@ -428,7 +428,7 @@ exists. Deployment knowledge is locked in people.
 
 1. Step-by-step production deployment procedure documented
 2. Infrastructure prerequisites listed (CockroachDB, Kafka, Redis, Keycloak)
-3. Database initialization and migration procedures
+3. Database initialisation and migration procedures
 4. Service startup order and health check verification
 5. Rollback procedure documented
 

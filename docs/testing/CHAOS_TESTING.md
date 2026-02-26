@@ -5,14 +5,14 @@
 
 ## Overview
 
-Chaos testing validates system resilience by intentionally injecting failures and verifying recovery behavior. This
+Chaos testing validates system resilience by intentionally injecting failures and verifying recovery behaviour. This
 document outlines the chaos testing strategy for the position-keeping service.
 
 ## Objectives
 
 1. **Validate Resilience**: Verify system handles failures gracefully
 2. **Identify Weaknesses**: Discover failure modes before production
-3. **Document Behavior**: Establish expected recovery patterns
+3. **Document Behaviour**: Establish expected recovery patterns
 4. **Prevent Regressions**: Automated tests catch resilience issues
 
 ## Chaos Scenarios
@@ -279,7 +279,7 @@ func TestChaos_DatabaseConnectionLoss(t *testing.T) {
 
 **Use Case**: Network partition testing (Phase 3)
 
-## Test Organization
+## Test Organisation
 
 ### Directory Structure
 
@@ -368,7 +368,7 @@ package repository
    - `InjectNetworkLatency(tc *TestContainer, latencyMs int)`
 
 1. **Document Runbooks**: Operational guidance
-   - Expected behavior during failures
+   - Expected behaviour during failures
    - Recovery procedures
    - Monitoring and alerting setup
 

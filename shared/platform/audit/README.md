@@ -176,7 +176,7 @@ Call from your `AfterUpdate` hook. The function:
 
 Writes an audit outbox entry for a DELETE operation. Call from your `AfterDelete` hook.
 
-## Behavior Notes
+## Behaviour Notes
 
 ### Empty IDs
 
@@ -241,7 +241,7 @@ See ADR-0009 for complete metrics reference and alerting thresholds.
 
 ### Worker Configuration
 
-The audit worker can be customized with functional options:
+The audit worker can be customised with functional options:
 
 ```go
 worker := audit.NewAuditWorker(db, "my_service", logger,

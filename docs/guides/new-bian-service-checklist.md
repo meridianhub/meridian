@@ -509,7 +509,7 @@ Create the application entry point.
   - Structured logging (slog JSON handler)
   - Environment variable configuration
   - Database connection with GORM
-  - OpenTelemetry tracer initialization
+  - OpenTelemetry tracer initialisation
   - gRPC server with interceptors
   - Health service registration
   - Graceful shutdown handling
@@ -983,9 +983,9 @@ For Kafka integration:
 - Follow [ADR-004](../adr/0004-event-schema-evolution.md) for event schema evolution
 - Reference: `services/financial-accounting/adapters/messaging/`
 
-### Multi-Tenancy / Organization Scoping
+### Multi-Tenancy / Organisation Scoping
 
-Use `shared/platform/organization` context patterns for tenant isolation.
+Use `shared/platform/organisation` context patterns for tenant isolation.
 
 ### Audit Logging
 

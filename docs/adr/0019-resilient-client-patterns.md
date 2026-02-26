@@ -44,7 +44,7 @@ The team identified code duplication across services: each service implementing 
 * **Support distributed transactions** (e.g., CurrentAccount -> PositionKeeping -> FinancialAccounting)
 * **Reduce boilerplate**: Avoid duplicating ~200 lines of resilience code per service
 * **Standardize patterns** across all services for consistency
-* **Observability**: Centralized logging for circuit breaker state changes and retries
+* **Observability**: Centralised logging for circuit breaker state changes and retries
 * **Idempotency awareness**: Distinguish between operations safe to retry and those that are not
 
 ## Considered Options
@@ -83,7 +83,7 @@ Chosen option: **"Shared resilient client patterns in `shared/pkg/clients`"**, b
 
 ### Option 1: Shared Resilient Client Patterns (Chosen)
 
-Centralized implementation in `shared/pkg/clients/` with:
+Centralised implementation in `shared/pkg/clients/` with:
 * Circuit breaker wrapping `sony/gobreaker/v2`
 * Retry with exponential backoff using `cenkalti/backoff/v4`
 * Resilient client combining both patterns
@@ -114,7 +114,7 @@ Each service implements its own resilience patterns.
 
 * Good, because tailored to each service's specific needs
 * Bad, because code duplication (~200 lines per service x 6 services = 1200 LOC)
-* Bad, because inconsistent behavior across services
+* Bad, because inconsistent behaviour across services
 * Bad, because harder to maintain and test
 
 ### Option 4: No Resilience Patterns
@@ -187,7 +187,7 @@ err := clients.Retry(ctx, config, func() error {
 **Non-retryable status codes:**
 * `InvalidArgument` - Client error, won't succeed on retry
 * `NotFound` - Resource doesn't exist
-* `PermissionDenied` - Authorization failure
+* `PermissionDenied` - Authorisation failure
 * `Unauthenticated` - Authentication failure
 
 ### Pattern 3: Resilient Client (Recommended)

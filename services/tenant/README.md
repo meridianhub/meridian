@@ -17,7 +17,7 @@ instructions: |
   - Optimistic locking via version field
   - Cached registry with async refresh (60s interval)
 
-  Note: Distinct from BIAN Party.Organization which represents legal entities.
+  Note: Distinct from BIAN Party.Organisation which represents legal entities.
 
   Port: 50056 (gRPC)
 ---
@@ -37,7 +37,7 @@ Platform infrastructure service for multi-tenant management with PostgreSQL sche
 | **Standalone** | Yes |
 
 **Note**: This service is not part of the BIAN standard. It provides essential multi-tenancy
-infrastructure for shared-cluster deployments requiring data isolation between organizations.
+infrastructure for shared-cluster deployments requiring data isolation between organisations.
 
 ## gRPC Methods
 

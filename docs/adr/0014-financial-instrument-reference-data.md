@@ -4,7 +4,7 @@ description: BIAN Financial Instrument Reference Data Management service for ten
 triggers:
   - Adding new instrument types without code deployment
   - Defining instrument validation rules with CEL expressions
-  - Implementing tenant-specific instrument catalogs
+  - Implementing tenant-specific instrument catalogues
   - Determining fungibility between position attributes
 instructions: |
   Financial Instruments are defined via the BIAN Financial Instrument Reference Data Management
@@ -38,7 +38,7 @@ This ADR implements **BIAN Financial Instrument Reference Data Management** (v13
 | Service Domain | Financial Instrument Reference Data Management |
 | Control Record | `FinancialInstrumentDirectoryEntry` |
 | Business Object | `FinancialInstrument` |
-| Behavior Qualifiers | Currency, DebtInstrument, Equity, Futures, Option, Warrant |
+| Behaviour Qualifiers | Currency, DebtInstrument, Equity, Futures, Option, Warrant |
 
 **BIAN Instrument Types** (from `financialinstrumenttypevalues`):
 
@@ -588,7 +588,7 @@ VALUES
 
 **CEL validation logic**:
 - `int(attrs.vintage) >= 2000 && int(attrs.vintage) <= timestamp(now()).getFullYear()` - Vintage cannot be in the future
-- `attrs.registry in ["VERRA", "GOLD_STANDARD", "ACR", "CAR"]` - Registry must be recognized
+- `attrs.registry in ["VERRA", "GOLD_STANDARD", "ACR", "CAR"]` - Registry must be recognised
 
 **Fungibility rule**: Credits from the same project, registry, and vintage can merge.
 Different registries require separate positions for regulatory compliance.
@@ -712,7 +712,7 @@ VALUES
      'Rice Voucher');
 ```
 
-**Migration behavior**:
+**Migration behaviour**:
 
 ```go
 // Existing v1 positions remain valid - they keep their version

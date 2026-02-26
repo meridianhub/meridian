@@ -19,7 +19,7 @@ instructions: |
 This document outlines the security measures implemented in Meridian to ensure production-grade security and compliance.
 
 > **⚠️ Note for Learning Environment**: This is a comprehensive security architecture guide for the Meridian learning
-project. When deploying to production, you should customize the following with your organization's specific details:
+project. When deploying to production, you should customise the following with your organisation's specific details:
 >
 > - Contact information and escalation procedures
 > - Monitoring and alerting integrations
@@ -41,7 +41,7 @@ project. When deploying to production, you should customize the following with y
 
 ## Security Principles
 
-Meridian follows defense-in-depth security principles:
+Meridian follows defence-in-depth security principles:
 
 1. **Least Privilege**: Minimal permissions at every layer
 2. **Secure by Default**: Security features enabled out-of-the-box
@@ -218,10 +218,10 @@ strategy:
 - **External APIs**: API keys stored in Kubernetes Secrets
 - **Monitoring**: Datadog agent authentication
 
-### Authorization
+### Authorisation
 
 - **RBAC**: Least-privilege roles for Kubernetes access
-- **API Authorization**: Role-based access in application layer (future)
+- **API Authorisation**: Role-based access in application layer (future)
 
 ### Audit Logging
 
@@ -326,7 +326,7 @@ data:
 
 ### Contact Information
 
-> **⚠️ Production Setup Required**: Configure with your organization's actual contact details
+> **⚠️ Production Setup Required**: Configure with your organisation's actual contact details
 
 - **Security Team**: `security@your-domain.com`
 - **On-Call**: [PagerDuty rotation or on-call schedule]
@@ -352,7 +352,7 @@ Meridian is designed to meet:
 All security-relevant events are logged:
 
 - Authentication attempts
-- Authorization failures
+- Authorisation failures
 - Secret access
 - Configuration changes
 - Network policy violations

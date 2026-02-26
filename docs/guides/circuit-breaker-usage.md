@@ -187,9 +187,9 @@ case gobreaker.StateHalfOpen:
 1. **Service-Level Circuit Breakers**: Create one circuit breaker per downstream service, not per method
 2. **Appropriate Thresholds**: Set `ReadyToTrip` based on your service's SLA and expected error rates
 3. **Timeout Configuration**: Set `Timeout` to allow enough time for service recovery (typically 30-60 seconds)
-4. **Fallback Logic**: Always provide fallback behavior when circuit is open
+4. **Fallback Logic**: Always provide fallback behaviour when circuit is open
 5. **Monitoring**: Integrate circuit breaker state changes with your observability platform
-6. **Testing**: Test circuit breaker behavior in your integration tests with simulated failures
+6. **Testing**: Test circuit breaker behaviour in your integration tests with simulated failures
 
 ## Error Handling
 

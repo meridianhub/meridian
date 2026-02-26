@@ -149,7 +149,7 @@ The provider abstraction layer (ADR-021) supports adding providers without code 
 
 * **US market**: Evaluate Jumio or Persona as the US-focused provider
 * **Global sanctions**: Consider ComplyAdvantage as a dedicated sanctions screening provider if Onfido's coverage proves insufficient
-* **Cost optimization**: Re-evaluate Sumsub for high-volume tenants where per-check costs become significant
+* **Cost optimisation**: Re-evaluate Sumsub for high-volume tenants where per-check costs become significant
 
 ### Re-evaluation Triggers
 

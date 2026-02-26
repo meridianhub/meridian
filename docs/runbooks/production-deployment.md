@@ -20,7 +20,7 @@ instructions: |
 **When to use this runbook**: Initial production deployment, new environment provisioning, major version upgrades,
 or re-deployment after disaster recovery.
 
-> **Customization Note**: This guide documents Meridian's architecture and deployment order. You must customize
+> **Customisation Note**: This guide documents Meridian's architecture and deployment order. You must customise
 infrastructure details (cloud provider, DNS, TLS certificates, backup locations) for your specific environment.
 
 ## 1. Infrastructure Prerequisites
@@ -165,7 +165,7 @@ Keycloak provides OAuth 2.0 / OpenID Connect authentication.
 1. Create realm: `meridian`
 2. Create client: `meridian-service` (confidential, service account enabled)
 3. Configure JWKS endpoint: `https://<keycloak-host>/realms/meridian/protocol/openid-connect/certs`
-4. Define roles and scopes per your authorization requirements
+4. Define roles and scopes per your authorisation requirements
 
 ### 1.5 Kubernetes Cluster
 

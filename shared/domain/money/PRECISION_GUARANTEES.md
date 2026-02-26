@@ -8,7 +8,7 @@ requirements, and ensuring mathematical correctness across the entire system.
 
 The money package guarantees **exact decimal precision** for monetary amounts throughout the complete data lifecycle:
 
-- **Protobuf serialization**: Lossless encoding and decoding
+- **Protobuf serialisation**: Lossless encoding and decoding
 - **Database storage**: Exact precision using `DECIMAL(28,9)` columns
 - **Arithmetic operations**: Arbitrary precision using `shopspring/decimal`
 - **Rounding**: IEEE 754 banker's rounding (round-half-to-even)
@@ -66,7 +66,7 @@ amount2 := decimal.NewFromString("0.2")  // Exactly 0.2
 sum := amount1.Add(amount2)              // Exactly 0.3 (not 0.30000000000000004)
 ```
 
-### 2. Protobuf Serialization
+### 2. Protobuf Serialisation
 
 **Schema**: Uses protobuf `google.type.Money` message format
 
@@ -80,7 +80,7 @@ message Money {
 
 **Guarantees**:
 
-- Lossless round-trip serialization (Money → bytes → Money)
+- Lossless round-trip serialisation (Money → bytes → Money)
 - Exact preservation of values up to 9 decimal places
 - Currency-aware encoding (respects ISO 4217 decimal places)
 - Wire format compatibility across all gRPC services
@@ -116,7 +116,7 @@ $0.01   → {currency_code: "USD", units: 0, nanos: 10000000}
 - Index-friendly comparison
 - Compatible with PostgreSQL, CockroachDB, and most SQL databases
 
-**Precision Behavior**:
+**Precision Behaviour**:
 
 - Round-trip guarantee: `Store(x) → Retrieve() → x` (exact equality)
 - No lossy conversions at database boundary
@@ -231,7 +231,7 @@ money.NewFromMinorUnits(1000, CurrencyJPY)  // ¥1000 (0 decimals)
 
 ### Division and Repeating Decimals
 
-**Behavior**:
+**Behaviour**:
 
 ```go
 // Division maintains arbitrary precision internally
@@ -271,7 +271,7 @@ zero.ToMinorUnits() // 0 (exact)
 
 - `Money` values are **immutable** (safe for concurrent reads)
 - All operations return new `Money` instances (value semantics)
-- No synchronization required for read-only access
+- No synchronisation required for read-only access
 - Underlying `decimal.Decimal` is not thread-safe for writes (not applicable due to immutability)
 
 **Example**:
@@ -315,12 +315,12 @@ go func() { result, _ := original.Multiply(rate) }() // Safe: creates new Money
 └─────────────────────────────────────────────────────────┘
 
 For financial systems: Choose decimal.Decimal
-Regulatory requirement > Performance optimization
+Regulatory requirement > Performance optimisation
 ```
 
 **When Performance Matters**:
 
-- High-frequency trading: May need custom optimizations
+- High-frequency trading: May need custom optimisations
 - Bulk operations (1000s of transactions): ~100ms overhead (acceptable)
 - Real-time pricing: Consider caching computed values
 
@@ -553,7 +553,7 @@ logger.Info("converting to minor units",
 
 ```text
 Symptom: Client receives 100.99999999 instead of 100.00
-Cause: JSON serialization of float64
+Cause: JSON serialisation of float64
 Solution: Serialize Money.Amount().String() as JSON string
 ```
 

@@ -4,7 +4,7 @@ This directory contains Kubernetes manifests for deploying the `utilization-mete
 
 ## Overview
 
-The utilization-metering-consumer is a centralized Kafka consumer that:
+The utilization-metering-consumer is a centralised Kafka consumer that:
 
 - Consumes audit events from all 6 Meridian services
 - Transforms audit events into utilization measurements
@@ -111,7 +111,7 @@ The HPA scales based on:
 2. CPU utilization (70% threshold)
 3. Memory utilization (80% threshold)
 
-**Scaling behavior:**
+**Scaling behaviour:**
 
 - Scale up: After 1 minute of sustained load (100% increase per minute)
 - Scale down: After 5 minutes of reduced load (50% decrease per minute)
@@ -176,4 +176,4 @@ Unlike per-service audit-consumer deployments, this consumer:
 - Writes to **tenant-zero** in Position Keeping (platform billing)
 - Uses **HPA** for scaling based on aggregate load
 
-This centralized design simplifies utilization tracking while maintaining isolation through tenant-zero position-keeping.
+This centralised design simplifies utilization tracking while maintaining isolation through tenant-zero position-keeping.

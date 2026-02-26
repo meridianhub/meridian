@@ -8,9 +8,9 @@ triggers:
   - Multi-currency and multi-commodity conversion with full audit trail
 instructions: |
   Account Services (CurrentAccount, InternalAccount) host the Asset Valuation service domain via
-  shared library (Virtual Service pattern). Each account's ValuationFeature (Behavior Qualifier) defines
+  shared library (Virtual Service pattern). Each account's ValuationFeature (Behaviour Qualifier) defines
   how it accepts value. The shared/pkg/valuation library executes Starlark ValuationMethods that invoke
-  named CEL Policies via run_policy(). Math lives in Policies; Starlark is pure procedure.
+  named CEL Policies via run_policy(). Maths lives in Policies; Starlark is pure procedure.
 
   BIAN Action Terms:
   - EvaluateAssetValuation: Non-binding inquiry (mobile apps, dashboards)
@@ -23,7 +23,7 @@ instructions: |
 # PRD: Asset Valuation Service Domain (BIAN-Native)
 
 **Status:** Draft - BIAN Refinement
-**Version:** 3.0 (Referenced Policies - No Inline Math)
+**Version:** 3.0 (Referenced Policies - No Inline Maths)
 **BIAN Service Domain:** Asset Valuation (Fulfilment Pattern)
 **Task Master Tag:** `valuation-engine`
 **Story Points:** 82 (11 streams)
@@ -53,7 +53,7 @@ To ensure 100% compatibility with the BIAN Service Landscape, this PRD adopts st
 | `EvaluateAssetValuation` | **`EvaluateAssetValuation`** | "Evaluate" is BIAN term for computational inquiry |
 | Valuation Strategy | **ValuationMethod** | BIAN uses "Method" for algorithmic variants |
 | `ValuationAnalysis` | **`ValuationAnalysis`** | Describes evidentiary audit data |
-| `valuation_assignments` | **`ValuationFeature`** | Behavior Qualifier on Account CR |
+| `valuation_assignments` | **`ValuationFeature`** | Behaviour Qualifier on Account CR |
 | Account with valuation | **`AccountFulfillmentArrangement`** | Control Record with BQ features |
 
 **Action Terms Compliance:**
@@ -69,7 +69,7 @@ To ensure 100% compatibility with the BIAN Service Landscape, this PRD adopts st
 ## 1. Executive Summary
 
 The Account-Scoped Valuation Engine enables multi-asset ledgers by making **accounts responsible for defining
-how they accept value**. Instead of a centralized pricing service, valuation logic is embedded within
+how they accept value**. Instead of a centralised pricing service, valuation logic is embedded within
 Account Services (CurrentAccount, InternalAccount) via a shared library.
 
 ### The "Probe Pattern"
@@ -99,7 +99,7 @@ services/internal-account/ # Implements EvaluateAssetValuation RPC
 **Why Embedded Library > Standalone Service:**
 
 - **Performance**: Eliminates 1 network hop (3 hops vs 4)
-- **Domain Modeling**: Valuation is Account's capability, not external service
+- **Domain Modelling**: Valuation is Account's capability, not external service
 - **Operational Simplicity**: No additional microservice to deploy/monitor
 - **Follows Existing Patterns**: Matches shared/pkg/saga library approach
 
@@ -127,7 +127,7 @@ architecture with BIAN's Service Domain decomposition:
 │  │                   services/current-account                         │  │
 │  │  ┌─────────────────────────────────────────────────────────────┐  │  │
 │  │  │  shared/pkg/valuation (embedded library)                     │  │  │
-│  │  │  • Starlark procedure execution (no inline math)             │  │  │
+│  │  │  • Starlark procedure execution (no inline maths)             │  │  │
 │  │  │  • CEL Policy resolution via run_policy()                    │  │  │
 │  │  │  • ValuationMethod + ValuationPolicy resolution              │  │  │
 │  │  │  • Market data integration                                   │  │  │
@@ -140,7 +140,7 @@ architecture with BIAN's Service Domain decomposition:
 **Why Virtual Service?**
 
 1. **BIAN Conceptual Compliance**: Asset Valuation IS a distinct Service Domain in the BIAN landscape,
-   with its own Control Records, Behavior Qualifiers, and Action Terms
+   with its own Control Records, Behaviour Qualifiers, and Action Terms
 2. **Implementation Pragmatism**: A separate microservice adds latency, operational complexity, and
    transactional boundaries that complicate atomic valuation
 3. **Future Flexibility**: If scale demands separation, the library can be extracted to a service
@@ -149,7 +149,7 @@ architecture with BIAN's Service Domain decomposition:
 **External Consumers See:**
 
 - `EvaluateAssetValuation` RPC (BIAN Action Term: Evaluate)
-- `ValuationFeature` Behavior Qualifier
+- `ValuationFeature` Behaviour Qualifier
 - `ValuationMethod` reference data
 - `ValuationAnalysis` audit records
 
@@ -222,11 +222,11 @@ We implement an **Account Responsibility Pattern**:
 2. **Account Ownership**: Account Services implement `EvaluateAssetValuation` RPC
 3. **Feature Assignment**: Accounts store ValuationFeature (BQ) with `valuation_method_id` + parameters
 4. **In-Process Execution**: Valuation happens within Account Service process boundary
-5. **No Inline Math**: Starlark scripts invoke named Policies via `run_policy()` - CEL strings forbidden
+5. **No Inline Maths**: Starlark scripts invoke named Policies via `run_policy()` - CEL strings forbidden
 
-### 3.1 Control Record / Behavior Qualifier Pattern (BIAN)
+### 3.1 Control Record / Behaviour Qualifier Pattern (BIAN)
 
-Instead of a bespoke `valuation_assignments` table, we model valuation as a **Behavior Qualifier (BQ)**
+Instead of a bespoke `valuation_assignments` table, we model valuation as a **Behaviour Qualifier (BQ)**
 of the Account Fulfillment Arrangement (Control Record). This allows accounts to have multiple features
 (Position tracking, Interest calculation, Valuation) governed by the same aggregate root.
 
@@ -238,17 +238,17 @@ message AccountFulfillmentArrangement {  // Control Record (CR)
   string account_id = 1;
   string account_type = 2;  // "CURRENT_ACCOUNT", "INTERNAL_ACCOUNT"
 
-  // Behavior Qualifiers (BQ) - each feature is a separate BQ
+  // Behaviour Qualifiers (BQ) - each feature is a separate BQ
   ValuationFeature valuation_feature = 3;
   PositionFeature position_feature = 4;
   // Future: InterestFeature, FeeFeature, LimitFeature, etc.
 }
 ```
 
-#### The ValuationFeature (Behavior Qualifier)
+#### The ValuationFeature (Behaviour Qualifier)
 
 ```protobuf
-message ValuationFeature {  // Behavior Qualifier (BQ)
+message ValuationFeature {  // Behaviour Qualifier (BQ)
   string feature_id = 1;
 
   // Reference to ValuationMethod in Reference Data
@@ -274,7 +274,7 @@ message ValuationFeature {  // Behavior Qualifier (BQ)
 
 ```sql
 -- Added to CurrentAccount and InternalAccount schemas
--- Named as BIAN Behavior Qualifier
+-- Named as BIAN Behaviour Qualifier
 CREATE TABLE valuation_features (
     feature_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     account_id UUID NOT NULL,
@@ -379,7 +379,7 @@ domain (per-tenant schema):
 ```sql
 -- Lives in Reference Data service (tenant-scoped via PostgreSQL schemas)
 -- BIAN terminology: ValuationMethod (not "strategy")
--- NOTE: Methods are Starlark-only (procedures). Math lives in Policies.
+-- NOTE: Methods are Starlark-only (procedures). Maths lives in Policies.
 CREATE TABLE valuation_methods (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
@@ -391,7 +391,7 @@ CREATE TABLE valuation_methods (
     input_instrument VARCHAR(32) NOT NULL,  -- "KWH"
     output_instrument VARCHAR(32) NOT NULL, -- "GBP"
 
-    -- Logic (Starlark script ONLY - no inline math)
+    -- Logic (Starlark script ONLY - no inline maths)
     -- Starlark calls run_policy() for calculations
     logic_script TEXT NOT NULL,
     logic_hash VARCHAR(64) NOT NULL,     -- SHA-256 for cache invalidation
@@ -427,7 +427,7 @@ CREATE INDEX idx_valuation_methods_bitemporal
 
 ### 3.3 ValuationPolicy Definition (Referenced CEL Expressions)
 
-**The "No-Inline-Math" Principle:**
+**The "No-Inline-Maths" Principle:**
 
 Starlark scripts are **procedures** - they orchestrate data flow, handle branching, and aggregate results.
 They should NOT contain mathematical formulas as inline strings. Instead, all calculations are stored as
@@ -438,10 +438,10 @@ They should NOT contain mathematical formulas as inline strings. Instead, all ca
 | Concern | Inline CEL (`cel_eval(string)`) | Referenced Policy (`run_policy(name)`) |
 |---------|--------------------------------|----------------------------------------|
 | **Auditability** | Formula buried in Starlark | Formula is first-class entity |
-| **Versioning** | Script version includes math | Math versioned independently |
+| **Versioning** | Script version includes maths | Maths versioned independently |
 | **Testing** | Must execute full Starlark | Can unit-test Policy in isolation |
 | **AI Generation** | AI must embed formulas | AI references existing Policies |
-| **Governance** | Math changes require script update | Finance team can update Policies |
+| **Governance** | Maths changes require script update | Finance team can update Policies |
 
 **Policy Table Schema:**
 
@@ -455,7 +455,7 @@ CREATE TABLE valuation_policies (
     name VARCHAR(64) NOT NULL,           -- "energy_rate_calc", "vat_standard", "fx_spread"
     version INTEGER NOT NULL DEFAULT 1,
 
-    -- CEL Expression (the actual math)
+    -- CEL Expression (the actual maths)
     cel_expression TEXT NOT NULL,        -- "spot * coefficient * (1 + markup)"
     cel_hash VARCHAR(64) NOT NULL,       -- SHA-256 for cache invalidation
 
@@ -765,10 +765,10 @@ type Analysis struct {
 The engine executes logic in three tiers:
 
 1. **Starlark (The Procedure):** Aggregates data, handles rounding logic and branching. **No inline math.**
-2. **CEL Policy (The Math):** Named, versioned expressions invoked via `run_policy()` (~100ns).
+2. **CEL Policy (The Maths):** Named, versioned expressions invoked via `run_policy()` (~100ns).
 3. **Market Data (The Fact):** Injects the bi-temporal rates (e.g., FX mid-rate).
 
-**The "No-Inline-Math" Rule:**
+**The "No-Inline-Maths" Rule:**
 
 Starlark scripts MUST NOT contain CEL expression strings. All mathematical calculations MUST be
 delegated to named Policies via `run_policy()`. This ensures:
@@ -784,7 +784,7 @@ delegated to named Policies via `run_policy()`. This ensures:
 # Starlark ValuationMethod loaded from Reference Data
 # SECURITY: Sandboxed execution - no filesystem, no network, no system calls
 # LIMITS: 5s timeout, 64MB memory, Policies limited to 10,000 cost units each
-# CONSTRAINT: No inline math - all calculations via run_policy()
+# CONSTRAINT: No inline maths - all calculations via run_policy()
 def valuate_energy(input_quantity, params, knowledge_at):
     # 1. Validate required parameters
     if "gsp_coefficient" not in params:
@@ -830,7 +830,7 @@ def valuate_energy(input_quantity, params, knowledge_at):
 # ❌ WRONG - Inline CEL expression string
 rate = cel_eval("spot * coeff * markup", {...})
 
-# ❌ WRONG - Math in Starlark
+# ❌ WRONG - Maths in Starlark
 rate = spot_price * gsp_coefficient * Decimal("1.02")
 
 # ✅ CORRECT - Named policy reference
@@ -976,7 +976,7 @@ func (e *Engine) Valuate(ctx context.Context, req Request) (*Response, error) {
         return nil, fmt.Errorf("load method: %w", err)
     }
 
-    // 2. Execute Starlark (which calls run_policy() for math)
+    // 2. Execute Starlark (which calls run_policy() for maths)
     result, err := e.executeScript(ctx, method.LogicScript, req)
     if err != nil {
         return nil, fmt.Errorf("execute script: %w", err)
@@ -1274,7 +1274,7 @@ To achieve faster consistency than the 5-minute TTL, the system SHOULD implement
 2. Account Services subscribe to this topic and invalidate their L1 cache immediately
 3. New transactions use the updated method within milliseconds, not minutes
 
-**Implementation:** This is a P2 enhancement (Stream 8). The 5-minute TTL provides acceptable baseline behavior.
+**Implementation:** This is a P2 enhancement (Stream 8). The 5-minute TTL provides acceptable baseline behaviour.
 
 **Graceful Stale Policy (Resilience):**
 
@@ -1364,7 +1364,7 @@ BAD: Valuation triggers position log → Position log triggers valuation → Loo
 
 1. **Read-Only Contract:** The `EvaluateAssetValuation` RPC is a **stateless inquiry** (pure function).
    It performs NO writes to Position Keeping, NO writes to Account state.
-2. **Domain Boundary:** Valuation is "Math-as-a-Service" - it calculates, it does not transact.
+2. **Domain Boundary:** Valuation is "Maths-as-a-Service" - it calculates, it does not transact.
 3. **Saga Responsibility:** Only the Saga Orchestrator can write to Position Keeping, and only AFTER
    receiving the valuation response.
 4. **Separate Builtin Registry (CRITICAL):** The `shared/pkg/valuation` library MUST use a **different
@@ -1383,7 +1383,7 @@ func newValuationBuiltins() starlark.StringDict {
     return starlark.StringDict{
         "market_data":    builtinMarketData,     // ✅ Read-only
         "run_policy":     builtinRunPolicy,      // ✅ Named policy execution (NEW)
-        "quantity":       builtinQuantity,       // ✅ Math operations
+        "quantity":       builtinQuantity,       // ✅ Maths operations
         "Decimal":        builtinDecimal,        // ✅ Financial precision
         // ❌ NO cel_eval - inline CEL strings forbidden
         // ❌ NO position_keeping, NO financial_accounting
@@ -1404,7 +1404,7 @@ shared/pkg/valuation/
 │   └── builtins/          # Cannot import anything outside shared/pkg/valuation
 │       ├── market_data.go # ✅ Allowed: Reference Data client
 │       ├── run_policy.go  # ✅ Allowed: Policy runtime (NEW)
-│       ├── quantity.go    # ✅ Allowed: Math operations
+│       ├── quantity.go    # ✅ Allowed: Maths operations
 │       └── decimal.go     # ✅ Allowed: Financial precision
 │       # ❌ FORBIDDEN: No cel_eval.go - inline CEL strings not allowed
 │       # ❌ FORBIDDEN: Cannot import positionkeepingclient
@@ -1688,7 +1688,7 @@ message ReleaseReservationRequest {
 #### Idempotency Requirement (CRITICAL)
 
 The `RecordReservation` RPC MUST be **idempotent based on `lien_id`**. If `InitiateLien` retries (network
-timeout, saga replay), Position Keeping must recognize that the reservation for that `lien_id` already
+timeout, saga replay), Position Keeping must recognise that the reservation for that `lien_id` already
 exists and return success without double-counting.
 
 **Implementation:**
@@ -2069,12 +2069,12 @@ shared/pkg/valuation/
 ├── starlark_runtime.go       # Starlark VM wrapper
 │   └── Deterministic execution
 │   └── Timeout controls
-│   └── No-inline-math enforcement
+│   └── No-inline-maths enforcement
 └── types.go                  # Request/Response types
     └── type Request, Response, Analysis
 ```
 
-**No-Inline-Math Enforcement:**
+**No-Inline-Maths Enforcement:**
 
 The Starlark runtime performs static analysis on loaded scripts to reject any that:
 
@@ -2097,11 +2097,11 @@ func (r *StarlarkRuntime) ValidateScript(script string) error {
 ### 5.3 The "Passport Pattern" - Audit Integrity Across Flows
 
 The **Basis** (the valuation receipt) must be persisted to ensure the ledger is auditable. This creates a
-**three-layer persistence model**, with different behavior for inquiry vs transactional flows:
+**three-layer persistence model**, with different behaviour for inquiry vs transactional flows:
 
 #### Layer 1: Account Service
 
-**Inquiry Flow (`EvaluateAssetValuation`)**: Stateless, NO writes. Pure "Math-as-a-Service."
+**Inquiry Flow (`EvaluateAssetValuation`)**: Stateless, NO writes. Pure "Maths-as-a-Service."
 
 - **Why:** 100,000 inquiries/hour shouldn't write to Account database
 - **Performance:** <5ms p99 by eliminating DB contention
@@ -2266,7 +2266,7 @@ func main() {
 
 ### Stream 1: Account Valuation Features (P0, 5 points)
 
-**BIAN Pattern:** This stream implements the ValuationFeature Behavior Qualifier (BQ) for Account
+**BIAN Pattern:** This stream implements the ValuationFeature Behaviour Qualifier (BQ) for Account
 Fulfillment Arrangements (Control Records).
 
 **Tasks:**
@@ -2297,7 +2297,7 @@ Fulfillment Arrangements (Control Records).
 4. Implement Starlark VM wrapper with timeouts
 5. Register built-in functions: `market_data`, `run_policy()`, `quantity`, `Decimal`
 6. **CRITICAL:** NO `cel_eval()` builtin - inline CEL strings forbidden
-7. **CRITICAL:** Implement No-Inline-Math enforcement (reject scripts containing `cel_eval`)
+7. **CRITICAL:** Implement No-Inline-Maths enforcement (reject scripts containing `cel_eval`)
 8. **CRITICAL:** Implement separate read-only builtin registry (exclude position_keeping, financial_accounting)
 9. **CRITICAL:** Use `internal/builtins` package isolation to enforce read-only at Go module level
 10. Implement L1 in-memory cache with graceful stale policy (1-hour grace if backend down)
@@ -2306,7 +2306,7 @@ Fulfillment Arrangements (Control Records).
 13. Implement output instrument validation (runtime type check)
 14. Add comprehensive unit tests
 15. **CRITICAL:** Add security verification test (method cannot call write handlers)
-16. **CRITICAL:** Add No-Inline-Math verification test (script with `cel_eval` is rejected)
+16. **CRITICAL:** Add No-Inline-Maths verification test (script with `cel_eval` is rejected)
 17. **CRITICAL:** Add CI verification script that fails if write imports are added
 18. Add benchmarks (target: <5ms in-process execution)
 19. Document library usage patterns
@@ -2318,7 +2318,7 @@ Fulfillment Arrangements (Control Records).
 - Policy cost validation happens at policy creation (not just runtime)
 - Benchmark shows <5ms execution time for typical methods
 - Cache hit rate >80% after warmup (for same method_id and policy_name)
-- **No-Inline-Math test passes:** Script with `cel_eval("...")` fails with clear error
+- **No-Inline-Maths test passes:** Script with `cel_eval("...")` fails with clear error
 - **Security test passes:** Method attempting `position_keeping.initiate_log` fails with
   `name 'position_keeping' is not defined`
 - **Architecture test passes:** Build fails if valuation package imports write-capable clients
@@ -2376,7 +2376,7 @@ Methods are Starlark procedures; Policies are named CEL expressions.
 2. Update `InitiateLien` to accept `InstrumentAmount` (any asset class)
 3. Update `InitiateLien` response to include `valued_amount` and `basis`
 4. Update `ExecuteDeposit` to perform atomic valuation
-5. Wire up valuation library in service initialization
+5. Wire up valuation library in service initialisation
 6. Add Position Keeping client for projected balance AND reservation RPCs
 7. Implement valuation in `InitiateLien` handler (price lock)
 8. **CRITICAL:** Call `position_keeping.RecordReservation()` after creating lien
@@ -2480,12 +2480,12 @@ Methods are Starlark procedures; Policies are named CEL expressions.
 - TOU tariff applies different rates based on time bands
 - All asset types (energy, carbon, compute) have working methods
 
-### Stream 8: Performance Optimization (P2, 3 points)
+### Stream 8: Performance Optimisation (P2, 3 points)
 
 **Tasks:**
 
 1. Profile valuation execution paths
-2. Optimize cache key generation
+2. Optimise cache key generation
 3. Add connection pooling for Reference Data client
 4. Tune cache sizes and TTLs
 5. Implement event-driven cache invalidation (Kafka subscriber for `method.updated` events)
@@ -2630,7 +2630,7 @@ ALTER TABLE account_positions
 - Policy cost estimation (reject > 10,000)
 - Starlark script parsing and execution
 - `run_policy()` builtin resolution and invocation
-- No-Inline-Math enforcement (`cel_eval` rejection)
+- No-Inline-Maths enforcement (`cel_eval` rejection)
 - Cache hit/miss logic (L1 only - methods and policies)
 - Method validation (including `required_policies` check)
 - Dimension Guard enforcement
@@ -2661,7 +2661,7 @@ ALTER TABLE account_positions
 
 ## 8. Success Metrics
 
-1. **Zero Hardcoded Rates:** All conversion math moves to named Policies by end of Stream 7.
+1. **Zero Hardcoded Rates:** All conversion maths moves to named Policies by end of Stream 7.
 2. **Replay Parity:** Replaying a valuation from 1 year ago using `knowledge_at` produces the exact
    same result (±1 basis point).
 3. **Performance:** 95th percentile valuation latency < 8ms under normal load.
@@ -2689,7 +2689,7 @@ ALTER TABLE account_positions
 ValuationFeatures reference methods by `valuation_method_id`. When multiple versions exist, the
 system resolves to the **latest non-deprecated version** unless the feature explicitly pins a version.
 
-| Scenario | Behavior |
+| Scenario | Behaviour |
 |----------|----------|
 | New method version deployed | Existing features auto-upgrade to latest |
 | Method deprecated (`deprecated_at < now`) | New valuations REJECTED, bi-temporal replay allowed |
@@ -2713,7 +2713,7 @@ to the old version continue using old logic until explicitly migrated.
 - `method.deprecated` event → P3 alert, 7-day countdown to removal
 - `method.removed` event → P2 alert if any features still reference it
 
-**Deprecated Method Behavior:**
+**Deprecated Method Behaviour:**
 
 ```go
 func (s *Service) GetValuationMethod(ctx context.Context, id uuid.UUID) (*ValuationMethod, error) {
@@ -2814,7 +2814,7 @@ to be reproduced exactly.
 | **Latency** | 12-17ms (estimated) | 5-8ms (measured goal) |
 | **Story Points** | 68 points | 75 points (+10% for TOCTOU safety) |
 | **Operational Complexity** | New microservice to deploy/monitor | Reuses existing services |
-| **Domain Modeling** | External service | Account capability |
+| **Domain Modelling** | External service | Account capability |
 | **Dependency Graph** | Saga → Account → Valuation → ... | Saga → Account → ... |
 | **Cache Strategy** | L1 + L2 Redis (complex) | L1 only (simple) |
 | **Failure Modes** | Valuation service down = all accounts blocked | Account service down = only that account blocked |
@@ -2825,7 +2825,7 @@ additional complexity buys: (1) Atomic valuation with price lock eliminating TOC
 (3) Graceful degradation and resilience features (v2.3), (4) Architecture guards and idempotency (v2.5).
 These are not optional features—they're required for correctness under concurrent load.
 
-**Key insight:** Valuation is a **behavior** of the Account aggregate, not a separate Bounded Context.
+**Key insight:** Valuation is a **behaviour** of the Account aggregate, not a separate Bounded Context.
 
 ### Architecture Decision Rationale
 
@@ -2844,7 +2844,7 @@ The embedded library approach follows the same pattern as:
 
 ## 13. Appendix: Example ValuationMethods
 
-**Note:** All examples use `run_policy()` for calculations. No inline math or `cel_eval()`.
+**Note:** All examples use `run_policy()` for calculations. No inline maths or `cel_eval()`.
 
 ### A. Identity Method (Fiat Currency)
 
@@ -2964,14 +2964,14 @@ def valuate(input_quantity, params, knowledge_at):
 # ❌ WRONG: Inline CEL expression string
 final_rate = cel_eval("spot * coeff * markup", {...})
 
-# ❌ WRONG: Math directly in Starlark
+# ❌ WRONG: Maths directly in Starlark
 output_amount = input_quantity.amount * tariff_rate
 
 # ❌ WRONG: Complex formula in Starlark
 vat_amount = base_amount * Decimal("0.20")
 total = base_amount + vat_amount
 
-# ✅ CORRECT: All math via named policies
+# ✅ CORRECT: All maths via named policies
 final_rate = run_policy("energy_rate_calc", {...})
 output_amount = run_policy("SYSTEM_FIXED_RATE", {"amount": qty, "rate": final_rate})
 vat_amount = run_policy("SYSTEM_UK_VAT_STANDARD", {"amount": base_amount})
@@ -3021,11 +3021,11 @@ Semantic API Practitioner Guide V8.1 and BIAN Service Landscape 12.0.
 **Justification:**
 
 1. **Performance:** Eliminates network hop (3 hops vs 4)
-2. **Domain Modeling:** Valuation is behavior of Account aggregate, not external service
+2. **Domain Modelling:** Valuation is behaviour of Account aggregate, not external service
 3. **Operational Simplicity:** No additional microservice to deploy/monitor
 4. **Bounded Context:** Account knows its own ValuationFeature, currency, and state
 
-**BIAN Compatibility:** The embedded approach respects BIAN principles while optimizing for
+**BIAN Compatibility:** The embedded approach respects BIAN principles while optimising for
 performance. The valuation capability could be exposed as a separate service domain if needed
 for cross-cutting concerns.
 
@@ -3038,7 +3038,7 @@ This PRD now uses BIAN-standard terminology throughout:
 | `EvaluateAssetValuation` | ✅ | BIAN "Evaluate" action term |
 | `ValuationAnalysis` | ✅ | BIAN analysis record pattern |
 | `ValuationMethod` | ✅ | BIAN algorithmic method |
-| `ValuationFeature` | ✅ | BIAN Behavior Qualifier |
+| `ValuationFeature` | ✅ | BIAN Behaviour Qualifier |
 | Lien Status: ACTIVE | ✅ | BIAN Lifecycle: Active |
 | Lien Status: EXECUTED | ✅ | BIAN Lifecycle: Fulfilled |
 | Lien Status: TERMINATED | ✅ | BIAN Lifecycle: Terminated |
@@ -3052,7 +3052,7 @@ This PRD now uses BIAN-standard terminology throughout:
 ---
 
 **Architectural Philosophy:** This PRD implements the "Probe Pattern" - accounts are queried for value,
-not commanded to use a centralized pricing service. It's "Particular" (logic is account-scoped) yet
+not commanded to use a centralised pricing service. It's "Particular" (logic is account-scoped) yet
 "Universal" (all accounts implement the same interface).
 
 **Next Steps:** Parse PRD into Task Master (`valuation-engine` tag) and begin with Stream 1

@@ -80,7 +80,7 @@ Event schemas follow the event-sourced architecture pattern, with events publish
 
 1. `LedgerPostingCapturedEvent` - New posting created for a booking log
 2. `LedgerPostingAmendedEvent` - Posting modified before booking log is posted
-3. `LedgerPostingPostedEvent` - Posting finalized
+3. `LedgerPostingPostedEvent` - Posting finalised
 4. `LedgerPostingRejectedEvent` - Posting rejected during validation (terminal state)
 
 #### Validation Events
@@ -116,12 +116,12 @@ message FinancialBookingLog {
 }
 ```
 
-#### Pattern 2: New Event Types for New Behaviors
+#### Pattern 2: New Event Types for New Behaviours
 
-New BIAN behavior qualifiers should create new event types:
+New BIAN behaviour qualifiers should create new event types:
 
 ```protobuf
-// New event for a new behavior
+// New event for a new behaviour
 message FinancialBookingLogSuspendedEvent {
   string booking_log_id = 1;
   string reason = 2;
@@ -227,7 +227,7 @@ Generated files:
 
 ## Testing
 
-Event serialization tests are located in `../events/v1/financial_accounting_events_test.go`.
+Event serialisation tests are located in `../events/v1/financial_accounting_events_test.go`.
 
 Run tests:
 
@@ -238,7 +238,7 @@ go test ./api/proto/meridian/events/v1/... -run TestFinancial
 Tests verify:
 
 - Event marshaling/unmarshaling
-- Field preservation across serialization
+- Field preservation across serialisation
 - Type correctness
 - Validation rules
 

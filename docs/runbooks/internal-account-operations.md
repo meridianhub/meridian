@@ -175,7 +175,7 @@ grpcurl -plaintext \
   -d '{
     "account_id": "2gKVPLwqhSJPgQKX4L8tH3Rymkv",
     "control_action": "CONTROL_ACTION_CLOSE",
-    "reason": "Account no longer required - replaced by CLR-GBP-002. Authorized by operations manager"
+    "reason": "Account no longer required - replaced by CLR-GBP-002. Authorised by operations manager"
   }' \
   internal-account.production.svc.cluster.local:50057 \
   meridian.internal_account.v1.InternalAccountService/ControlInternalAccount

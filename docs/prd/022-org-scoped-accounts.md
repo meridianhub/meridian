@@ -4,14 +4,14 @@ description: Multi-party resource pooling following BIAN Syndicate Pattern
 triggers:
   - Implementing syndicate or group betting features
   - Building multi-party pooled account structures
-  - Tracking member positions within organizations
+  - Tracking member positions within organisations
   - Implementing revenue sharing or profit distribution
   - Building marketplace or platform models with sub-entities
   - Any scenario requiring "Alice's balance within Org X"
 instructions: |
   This PRD extends the Account and Party models to support organizational scoping.
-  Key concept: An account can be owned by a Party AND scoped to an Organization
-  (another Party). This enables proper normalized tracking of member positions
+  Key concept: An account can be owned by a Party AND scoped to an Organisation
+  (another Party). This enables proper normalised tracking of member positions
   within groups/syndicates. Follows double-entry principles: every balance is
   stored, not calculated from metadata. Builds on existing Party associations
   but adds metadata for governance/rules.
@@ -74,11 +74,11 @@ This feature implements the **Syndicated Loan** and
 This PRD extends Meridian to support **Consortium Financial Management**.
 By implementing BIAN's **Syndicate Pattern**, we enable accounts to be owned
 by one Party (the Participant) while being operationally scoped to an
-Organization (the Syndicate).
+Organisation (the Syndicate).
 
 ### Core Capabilities
 
-1. **Normalized Scoping:** Explicit `org_party_id` on accounts to track
+1. **Normalised Scoping:** Explicit `org_party_id` on accounts to track
    "Participant balance *within* Syndicate."
 2. **Governance Metadata:** Enhanced `PartyAssociation` to store
    "Structuring" data (equity share, roles).
@@ -113,7 +113,7 @@ the most volume receive no cost benefit for doing so.
 
 Dynamic platforms solve this with **volume-based fee tiers**, but
 hard-coding tiers into application logic creates maintenance burden
-and prevents tenant-level customization. CEL valuation policies
+and prevents tenant-level customisation. CEL valuation policies
 (ADR-0028) allow fee rules to be expressed as evaluable expressions
 that respond to syndicate metrics at runtime.
 
@@ -235,7 +235,7 @@ WHERE org_party_id IS NOT NULL;
 
 > **Architecture Note:** Internal accounts use schema-per-tenant
 > isolation (`org_{tenant_id}` schema routing). The `org_party_id`
-> here represents a *sub-organization within a tenant* (e.g., a
+> here represents a *sub-organisation within a tenant* (e.g., a
 > syndicate within a betting platform tenant), not the tenant itself.
 > Tenant isolation remains at the schema level.
 >

@@ -277,14 +277,14 @@ These are the existing topics — no new topics needed:
 ```
 
 > **Note**: Topics marked RENAME or ADD VERSION show the target state
-> after the standardization in Section 14. Current topic names are
+> after the standardisation in Section 14. Current topic names are
 > documented there.
 
 **Consumer group strategy**: The `ops-console-events` consumer group is
 separate from all existing service consumers. It can be scaled
 independently, and lag does not affect business operations.
 
-**Prerequisite**: Section 14 defines a topic naming standardization
+**Prerequisite**: Section 14 defines a topic naming standardisation
 that must be completed before or alongside Phase 2. Once
 standardized, all topics follow `service-name.event-name.v1` and
 channel derivation is trivial (strip `.v1` suffix).
@@ -374,7 +374,7 @@ using JSON messages.
 }
 ```
 
-**Channel namespace**: After topic naming standardization
+**Channel namespace**: After topic naming standardisation
 (Section 14), all topics follow `service-name.event-name.v1`.
 Channels are derived by stripping the `.v1` suffix:
 
@@ -536,7 +536,7 @@ The `useEventStream` hook should treat `BUFFER_OVERFLOW` as a
 trigger to re-fetch current state via REST, ensuring the UI
 self-heals without manual refresh.
 
-### 4.8 Authorization & Role-Based Channel Access
+### 4.8 Authorisation & Role-Based Channel Access
 
 Channel access is controlled by JWT roles. These are new role
 definitions to be added to the auth system:
@@ -575,7 +575,7 @@ services/gateway/
 │   ├── connection_test.go
 │   ├── protocol.go           # JSON message types
 │   ├── protocol_test.go
-│   ├── channel.go            # Normalization + glob matching
+│   ├── channel.go            # Normalisation + glob matching
 │   └── channel_test.go
 ├── eventstream/adapters/
 │   ├── kafka_source.go       # KafkaEventSource adapter
@@ -636,7 +636,7 @@ mux.HandleFunc("GET /ws/events", wsHandler.ServeHTTP)
 - WebSocket upgrade handler integrated into gateway `http.ServeMux`
 - Connection manager with tenant-partitioned registry
 - Subscription protocol (subscribe/unsubscribe/event messages)
-- Channel normalization and glob matching
+- Channel normalisation and glob matching
 - Ping/pong keepalive and JWT expiry checking
 - Unit tests for connection lifecycle, tenant isolation, channel
   matching
@@ -650,7 +650,7 @@ mux.HandleFunc("GET /ws/events", wsHandler.ServeHTTP)
 
 ### Phase 2: Kafka Event Source
 
-**Prerequisite:** Kafka topic naming standardization (Section 14)
+**Prerequisite:** Kafka topic naming standardisation (Section 14)
 must be completed first or in parallel.
 
 **Deliverables:**
@@ -658,9 +658,9 @@ must be completed first or in parallel.
 - `KafkaEventSource` adapter consuming all domain event topics
 - Dedicated consumer group (`ops-console-events`)
 - Tenant extraction from Kafka headers (`x-tenant-id`)
-- Protobuf to JSON serialization via `protojson`
-- Channel derivation (strip `.v1` suffix — no normalization needed
-  after standardization)
+- Protobuf to JSON serialisation via `protojson`
+- Channel derivation (strip `.v1` suffix — no normalisation needed
+  after standardisation)
 - Backpressure handling (buffer + drop policy)
 - Metrics: events consumed, delivered, dropped, active connections
 
@@ -702,7 +702,7 @@ the domain-specific payload:
 interface StreamEvent {
   type: "event";
   subscription_id: string;
-  channel: string; // normalized channel name
+  channel: string; // normalised channel name
   event: {
     event_id: string; // UUID
     event_type: string; // e.g., "payment_order.reserved.v1"
@@ -772,7 +772,7 @@ Consistent with ADR-0008 (Defensive Testing Standards):
 
 | Layer | What | How |
 |-------|------|-----|
-| Unit | Channel normalization + glob | Table-driven tests |
+| Unit | Channel normalisation + glob | Table-driven tests |
 | Unit | Subscription filter engine | Property-based tests |
 | Unit | Tenant isolation in registry | Verify no cross-tenant leak |
 | Unit | Backpressure / buffer overflow | Simulate slow client |
@@ -846,7 +846,7 @@ No new infrastructure, databases, or message brokers.
 
 ---
 
-## 14. Prerequisite: Kafka Topic Naming Standardization
+## 14. Prerequisite: Kafka Topic Naming Standardisation
 
 ### Problem
 
@@ -876,7 +876,7 @@ Additionally, infrastructure topics lack version suffixes:
 
 ### Why Fix at Source
 
-Downstream normalization (regex in the event stream module) creates
+Downstream normalisation (regex in the event stream module) creates
 cognitive overhead: developers must remember that topic names and
 channel names are different, debugging requires mentally mapping
 between two naming schemes, and every new topic risks introducing
@@ -885,7 +885,7 @@ yet another convention.
 Fixing at source means:
 
 - Topic name = channel name (minus `.v1`) — zero mental overhead
-- No normalization code to maintain or test
+- No normalisation code to maintain or test
 - Consistent `grep`-ability across the entire codebase
 - New services naturally follow the convention
 
@@ -923,6 +923,6 @@ number of consumers, each rename is a 1-2 point task.
 | Saga default topic | `shared/pkg/saga/step_execution.go` | 1 point |
 | **Total** | | **8 points** |
 
-This standardization should be completed before or alongside Phase 2
+This standardisation should be completed before or alongside Phase 2
 of the event streaming implementation. It can be parallelized — each
 service rename is independent.

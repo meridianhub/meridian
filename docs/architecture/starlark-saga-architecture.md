@@ -4,7 +4,7 @@
 
 Meridian uses [Starlark](https://github.com/google/starlark-go) for saga orchestration, enabling tenant-specific
 workflow definitions without code deployment. This architecture separates orchestration logic (Starlark scripts)
-from service implementation (gRPC services), allowing business teams to customize workflows while maintaining
+from service implementation (gRPC services), allowing business teams to customise workflows while maintaining
 strict type safety and audit compliance.
 
 ## Table of Contents
@@ -150,7 +150,7 @@ Each `starlark.go` file implements:
 ```go
 // services/current-account/client/starlark.go
 
-// 1. Registration function (called during service initialization)
+// 1. Registration function (called during service initialisation)
 func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) error {
     handlers := map[string]struct {
         handler  saga.Handler
@@ -279,7 +279,7 @@ graph LR
 
 ## Dependency Injection Pattern
 
-Services explicitly declare their saga handler dependencies during initialization:
+Services explicitly declare their saga handler dependencies during initialisation:
 
 ### Before (Global Registry - Problematic)
 
@@ -294,7 +294,7 @@ executor := saga.NewExecutor(saga.ExecutorConfig{
 
 - Global state makes testing difficult
 - Hidden dependencies (what services does this saga actually call?)
-- Initialization order matters
+- Initialisation order matters
 - Circular dependencies possible
 
 ### After (Explicit Registration - Current)

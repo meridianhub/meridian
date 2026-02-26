@@ -66,16 +66,16 @@ Chosen option: **"Tilt"**, because:
 * **Superior DX**: Unified UI for logs, status, and debugging across all services
 * **Intelligent builds**: File syncing and incremental compilation without full container rebuilds
 * **Dependency management**: Automatic resource ordering with readiness checks
-* **Team-proven**: Widely adopted in cloud-native organizations
+* **Team-proven**: Widely adopted in cloud-native organisations
 
 ### Positive Consequences
 
 * ✅ **Fast iteration**: Edit Go code → 2-3 seconds → changes live in K8s
-* ✅ **Production parity**: Same K8s manifests, same networking, same behavior
+* ✅ **Production parity**: Same K8s manifests, same networking, same behaviour
 * ✅ **Unified observability**: All logs, status, and errors in one UI
 * ✅ **Easy onboarding**: `tilt up` → full stack running in < 5 minutes
 * ✅ **Catch K8s issues early**: Test readiness probes, resource limits, networking locally
-* ✅ **Resource organization**: Label-based grouping (app, database, messaging, tests)
+* ✅ **Resource organisation**: Label-based grouping (app, database, messaging, tests)
 * ✅ **Parallel operations**: Tests run while services start
 * ✅ **Manual triggers**: Run linters on-demand without slowing startup
 
@@ -107,7 +107,7 @@ Chosen option: **"Tilt"**, because:
 * Good, because **unified UI** - all logs and status in one place
 * Good, because **smart file syncing** - only syncs changed files, no full rebuild
 * Good, because **dependency management** - services start in correct order with health checks
-* Good, because **resource organization** - labels group related services
+* Good, because **resource organisation** - labels group related services
 * Good, because **extensibility** - Python DSL allows custom workflows
 * Good, because **widely adopted** - used by major cloud-native companies
 * Bad, because **requires local Kubernetes** - more setup than Docker alone
@@ -122,7 +122,7 @@ Chosen option: **"Tilt"**, because:
 * Good, because **lightweight** - no K8s overhead, just Docker daemon
 * Good, because **fast onboarding** - most developers know Docker Compose
 * Good, because **good for simple stacks** - works well for < 5 services
-* Bad, because **no production parity** - production uses K8s, dev uses Compose (different behaviors)
+* Bad, because **no production parity** - production uses K8s, dev uses Compose (different behaviours)
 * Bad, because **slow rebuilds** - full container rebuild on code changes (30-60 seconds)
 * Bad, because **limited dependency management** - `depends_on` only waits for start, not readiness
 * Bad, because **different mental model** - developers learn Compose for dev, K8s for prod
@@ -146,7 +146,7 @@ Chosen option: **"Tilt"**, because:
 * Good, because **Google-backed** - well-maintained, integrated with GKE
 * Good, because **CI/CD friendly** - designed for pipelines
 * Bad, because **less polished DX** - no unified UI (terminal only)
-* Bad, because **slower iteration** - not as optimized for hot reload as Tilt
+* Bad, because **slower iteration** - not as optimised for hot reload as Tilt
 * Bad, because **less observability** - requires separate tools for logs/debugging
 * Bad, because **more configuration** - requires more YAML for similar functionality
 
@@ -295,7 +295,7 @@ local_resource(
 )
 ```
 
-#### 5. Resource Organization
+#### 5. Resource Organisation
 
 ```python
 k8s_resource('meridian', labels=['app'])
@@ -590,7 +590,7 @@ We use **Kind (Kubernetes in Docker)** with **ctlptl (Cattle Patrol)** for local
 * ✅ **Fast cluster creation** - Clusters spin up in ~30 seconds
 * ✅ **Reproducible** - Same cluster config across all developers
 * ✅ **Registry integration** - Built-in local registry support
-* ✅ **Tilt optimized** - ctlptl configures clusters specifically for Tilt
+* ✅ **Tilt optimised** - ctlptl configures clusters specifically for Tilt
 * ✅ **Lightweight** - Runs entirely in Docker containers
 * ✅ **Easy cleanup** - `ctlptl delete cluster kind-meridian-local` removes everything
 
@@ -598,7 +598,7 @@ We use **Kind (Kubernetes in Docker)** with **ctlptl (Cattle Patrol)** for local
 
 ```bash
 
-# Create cluster optimized for Tilt with local registry
+# Create cluster optimised for Tilt with local registry
 
 ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
 

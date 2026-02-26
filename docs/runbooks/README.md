@@ -50,7 +50,7 @@ Use runbooks when:
 
 - Responding to production incidents or outages
 - Performing operational procedures (migrations, updates, etc.)
-- Troubleshooting complex system behaviors
+- Troubleshooting complex system behaviours
 - Training new team members on operational procedures
 - Documenting resolution steps for recurring issues
 

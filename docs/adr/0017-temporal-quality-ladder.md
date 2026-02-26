@@ -57,7 +57,7 @@ This ADR builds on:
 This ADR defines:
 
 - **Quality-based precedence** for competing measurements
-- **Temporal modeling** with [Start, End] periods
+- **Temporal modelling** with [Start, End] periods
 - **Supersession tracking** for audit trails
 - **Wash & Reload** correction pattern
 
@@ -156,7 +156,7 @@ func NewPeriod(start, end time.Time) (Period, error) {
 }
 
 // MustPeriod creates a Period, panicking on validation failure.
-// Use only in tests or initialization where failure is fatal.
+// Use only in tests or initialisation where failure is fatal.
 func MustPeriod(start, end time.Time) Period {
     p, err := NewPeriod(start, end)
     if err != nil {
@@ -233,7 +233,7 @@ WHERE period && tstzrange('2025-01-01', '2025-01-02')
 WHERE period_start < '2025-01-02' AND period_end > '2025-01-01'
 ```
 
-For deployments using PostgreSQL or YugabyteDB exclusively, a future optimization path
+For deployments using PostgreSQL or YugabyteDB exclusively, a future optimisation path
 could add a computed `TSTZRANGE` column with GiST index as an enterprise-tier feature.
 
 **Database representation using explicit period columns:**
@@ -315,7 +315,7 @@ WHERE period_start <= '2025-01-15 12:30:00+00'
 
 **Period Query Integration Tests (Required):**
 
-Before production deployment, verify period query behavior with integration tests:
+Before production deployment, verify period query behaviour with integration tests:
 
 ```go
 func TestPeriodQueries(t *testing.T) {
@@ -388,7 +388,7 @@ but this cached value can diverge if the registry is updated post-ingestion.
 
 **Important:** All authoritative decisions (supersession, dispute routing) must consult
 the registry rather than relying solely on denormalized measurement values. The denormalized
-`QualityScore` field on measurements is an optimization for read-heavy queries, not the
+`QualityScore` field on measurements is an optimisation for read-heavy queries, not the
 source of truth.
 
 ```go
@@ -912,7 +912,7 @@ func (r *MeasurementRepository) Supersede(ctx context.Context, oldID, newID uuid
 ```
 
 **Why not SERIALIZABLE?**
-- At 100k TPS, serialization failures would cause cascading retries
+- At 100k TPS, serialisation failures would cause cascading retries
 - Position Key Hash gives O(1) conflict detection via B-tree index
 - Retry logic only needed for actual conflicts, not phantom reads
 
@@ -1150,10 +1150,10 @@ This ADR's concepts map to BIAN (Banking Industry Architecture Network) v13 serv
 | Meridian Concept | BIAN Service Domain | BIAN Entity | Notes |
 |-----------------|---------------------|-------------|-------|
 | `MeasurementLog` | Position Keeping | `FinancialPositionLog` (CR) | "Maintain a log of transactions" |
-| `Measurement` | Position Keeping | `FinancialTransactionCapture` (BQ) | Transaction capture behavior |
+| `Measurement` | Position Keeping | `FinancialTransactionCapture` (BQ) | Transaction capture behaviour |
 | `Period [Start, End]` | Position Keeping | `datetimeperiod` | `FromDateTime` / `ToDateTime` |
 | `TransactionStatus` | Position Keeping | `transactionstatustypevalues` | Initiated, Booked, Confirmed, etc. |
-| `PositionEntry` | Financial Accounting | `LedgerPosting` (BQ) | Ledger posting behavior |
+| `PositionEntry` | Financial Accounting | `LedgerPosting` (BQ) | Ledger posting behaviour |
 | Correction booking | Financial Accounting | `UpdateLedgerPosting` | Explicitly for "repair" |
 | `EntryType.ADJUSTMENT` | Position Keeping | `InterestAdjustmentTransaction` | Adjustment transaction type |
 

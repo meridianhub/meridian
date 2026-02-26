@@ -189,7 +189,7 @@ risk assessment with key imports read.
 Check the PR description for Task Master references (format: `tag.task-id`
 like `mim.9.1`). If present:
 
-- The PR description should summarize the requirements
+- The PR description should summarise the requirements
 - Validate: Does the implementation fulfill those stated requirements?
 - Acknowledge when requirements are met: "This satisfies the requirement
   for X"
@@ -345,10 +345,10 @@ non-trivial change, assess:
 ### Test Coverage Review
 
 For each changed function, check whether the test file is in the diff.
-If it is, review whether the test actually verifies the behavior. If not,
+If it is, review whether the test actually verifies the behaviour. If not,
 check if a `*_test.go` file exists for the package, then note:
 "No test changes for [function] - verify existing tests cover the new
-behavior" or "No test file found for [file]." Focus on domain edge cases,
+behaviour" or "No test file found for [file]." Focus on domain edge cases,
 not generic coverage.
 
 ### Questions for the Author (Nemawashi)

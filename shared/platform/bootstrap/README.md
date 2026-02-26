@@ -1,8 +1,8 @@
 ---
 name: service-bootstrap
-description: Shared service initialization for database, gRPC, Redis, and observability
+description: Shared service initialisation for database, gRPC, Redis, and observability
 triggers:
-  - Service initialization and startup
+  - Service initialisation and startup
   - Database connection setup
   - gRPC server configuration
   - Graceful shutdown handling
@@ -10,12 +10,12 @@ triggers:
 instructions: |
   Bootstrap provides NewDatabase(), NewTracer(), GrpcServerBuilder, and shutdown utilities.
   Use ShutdownOrchestrator for full gRPC lifecycle with LIFO cleanup.
-  See doc.go for complete service initialization example.
+  See doc.go for complete service initialisation example.
 ---
 
 # Bootstrap Package
 
-The bootstrap package provides shared infrastructure initialization utilities for Meridian services.
+The bootstrap package provides shared infrastructure initialisation utilities for Meridian services.
 It consolidates duplicated patterns for database, Redis, gRPC, authentication, observability, and
 graceful shutdown.
 
@@ -57,7 +57,7 @@ See [SHUTDOWN_USAGE.md](./SHUTDOWN_USAGE.md) for detailed examples and migration
 
 ## Quick Start
 
-See `doc.go` for a complete service initialization example.
+See `doc.go` for a complete service initialisation example.
 
 ## Environment Variables
 

@@ -348,7 +348,7 @@ func (s *BookingLogServiceServer) toResponse(d *domain.FinancialBookingLog) *pb.
 The adapter pattern provides critical flexibility for adopting new BIAN releases without coordinated infrastructure
 changes.
 
-### Scenario: BIAN Adds New Behavior Qualifier
+### Scenario: BIAN Adds New Behaviour Qualifier
 
 #### BIAN 13.0 → 14.0 adds "Suspend" to Current Account
 
@@ -377,7 +377,7 @@ const (
     AccountStatusSuspended AccountStatus = "suspended"  // New
 )
 
-// New BIAN 14.0 behavior qualifier
+// New BIAN 14.0 behaviour qualifier
 func (a *CurrentAccount) Suspend(reason string, until time.Time, by string) error {
     if a.AccountStatus != AccountStatusActive {
         return ErrInvalidStatusTransition
@@ -451,7 +451,7 @@ func (r *CurrentAccountRepository) toDomain(e *CurrentAccountEntity) *domain.Cur
 ```go
 // internal/adapters/events/current_account_publisher.go
 
-// New method for BIAN 14.0 behavior qualifier
+// New method for BIAN 14.0 behaviour qualifier
 func (p *CurrentAccountPublisher) PublishSuspended(
     ctx context.Context,
     account *domain.CurrentAccount,
@@ -491,7 +491,7 @@ Old consumers (BIAN 13.0) continue working:
 
 * Database: Nullable columns don't break existing queries
 * Events: New event type on new topic (old consumers unaffected)
-* Domain: New behavior qualifiers only used by v14 clients
+* Domain: New behaviour qualifiers only used by v14 clients
 
 #### 3. Gradual rollout
 
@@ -726,7 +726,7 @@ func (b *BookingLog) Save() error {
 ### Performance Considerations
 
 * **Overhead:** Adapter functions add ~1-5% overhead (negligible)
-* **Optimization:** If profiling shows adapter bottlenecks, consider pooling or caching
+* **Optimisation:** If profiling shows adapter bottlenecks, consider pooling or caching
 * **Bulk operations:** Batch translations for large datasets
 
 ### Team Considerations

@@ -32,7 +32,7 @@ approach would be more appropriate.
 Key concerns:
 - Missed settlement windows during pod restarts or deployments.
 - No audit trail of which windows were triggered, skipped, or missed.
-- No defense-in-depth against duplicate settlement runs at the database level.
+- No defence-in-depth against duplicate settlement runs at the database level.
 
 ## Decision Drivers
 
@@ -60,7 +60,7 @@ resilience without introducing new infrastructure or operational complexity.
 * Catch-up mechanism detects and triggers missed windows on startup.
 * Audit trail enables operators to query scheduler health.
 * Unique constraint on `settlement_run(account_id, period_start, period_end)` provides
-  defense-in-depth against duplicate runs.
+  defence-in-depth against duplicate runs.
 * No new infrastructure required beyond what already exists (Redis, CockroachDB).
 * Cron expressions are evaluated in-process with sub-second precision.
 

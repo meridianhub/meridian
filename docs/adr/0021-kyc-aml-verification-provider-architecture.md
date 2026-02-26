@@ -41,11 +41,11 @@ The system must support both synchronous checks (instant sanctions screening) an
 
 * **Regulatory compliance**: Meet KYC/AML requirements across multiple jurisdictions
 * **Provider flexibility**: Support multiple providers without code changes
-* **Privacy by design**: Minimize PII exposure and retention
+* **Privacy by design**: Minimise PII exposure and retention
 * **Resilience**: Handle provider failures gracefully
 * **Audit trail**: Complete traceability for regulatory examinations
 * **Latency tolerance**: Accept appropriate delays for thorough verification
-* **Cost optimization**: Route to cost-effective providers when equivalent
+* **Cost optimisation**: Route to cost-effective providers when equivalent
 
 ## Considered Options
 
@@ -68,9 +68,9 @@ Chosen option: **"Async-first with synchronous fallback via provider abstraction
 
 * **Provider agnostic**: Add new providers by implementing interface
 * **Graceful degradation**: Provider outages don't block entire flow
-* **Cost optimization**: Route to cheaper providers for low-risk checks
+* **Cost optimisation**: Route to cheaper providers for low-risk checks
 * **Compliance ready**: Audit logs capture complete verification history
-* **Privacy enforced**: PII handling rules centralized in abstraction layer
+* **Privacy enforced**: PII handling rules centralised in abstraction layer
 
 ### Negative Consequences
 
@@ -114,7 +114,7 @@ Full event sourcing with verification events and projections.
 
 ### Option 4: Third-Party Orchestration (Alloy, Unit21)
 
-Delegate verification orchestration to specialized platform.
+Delegate verification orchestration to specialised platform.
 
 * Good, because pre-built provider integrations
 * Good, because compliance expertise built-in

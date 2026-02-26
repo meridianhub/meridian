@@ -118,7 +118,7 @@ graph TD
     G --> I[Financial Accounting]
 ```
 
-### Handler Behavior
+### Handler Behaviour
 
 #### ExecuteWithdrawal (`grpc_withdrawal_execute.go`)
 
@@ -260,6 +260,6 @@ already exists. The gap is the database migration and test coverage.
 - **Low risk**: Repository code already exists and is wired. The gaps are the
   database migration and removing dead-code nil guards.
 - **No breaking changes**: Adding a table is an additive operation.
-- **Graceful degradation preserved**: If migration is not applied, the nil guard behavior continues (no worse than today).
+- **Graceful degradation preserved**: If migration is not applied, the nil guard behaviour continues (no worse than today).
 
 <!-- End of PRD -->

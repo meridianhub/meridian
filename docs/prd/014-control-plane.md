@@ -56,7 +56,7 @@ way to generate it.
 | **Usage Metering** | `services/utilization-metering-consumer/` | Transforms audit events into measurements |
 | **RBAC** | `shared/platform/auth/rbac.go` | Roles (admin, operator, auditor, service), permissions |
 | **API Gateway** | `services/gateway/` | Subdomain routing, JWT auth, rate limiting |
-| **Party Service** | `services/party/` | Organization/party registration (customers) |
+| **Party Service** | `services/party/` | Organisation/party registration (customers) |
 | **Causation Tree** | `api/proto/meridian/saga/v1/saga_admin.proto` | GetCausationTree RPC for audit trails |
 | **Dry-Run Validation** | Reference Data, Position Keeping | Validate before commit |
 | **tenantctl CLI** | `cmd/tenantctl/` | Register, list, get, deprovision tenants |
@@ -429,7 +429,7 @@ sequenceDiagram
     participant Cache
     participant TenantDB as org_{id}.api_keys
 
-    Client->>Gateway: Authorization: pk_motive_a8b9c...
+    Client->>Gateway: Authorisation: pk_motive_a8b9c...
     Gateway->>Gateway: Parse prefix → slug "motive"
     Gateway->>Cache: Resolve slug → tenant_id
     Cache-->>Gateway: tenant_id = "motive"
@@ -439,7 +439,7 @@ sequenceDiagram
     Gateway-->>Client: 200 OK (tenant context set)
 ```
 
-This achieves O(1) routing without a centralized secrets table.
+This achieves O(1) routing without a centralised secrets table.
 
 **Human Login Routing**: API keys self-route via prefix, but human
 login via Auth0/Keycloak only provides an email — no tenant context.
@@ -958,7 +958,7 @@ flowchart LR
 |------|-------------|------------|
 | **8.1** | Set up onboarding web app | 3 |
 | **8.2** | Implement email verification | 2 |
-| **8.3** | Build organization setup step | 1 |
+| **8.3** | Build organisation setup step | 1 |
 | **8.4** | Build plan selection with Stripe Checkout | 3 |
 | **8.5** | Implement provisioning progress view | 2 |
 | **8.6** | Add welcome email with getting started | 2 |

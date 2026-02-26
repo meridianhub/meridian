@@ -31,7 +31,7 @@ for consuming services.
 | Kubernetes DNS discovery | IMPLEMENTED | ServiceName-based connection |
 | Circuit breaker | IMPLEMENTED | Via `clients.ResilientClient` |
 | Retry with backoff | IMPLEMENTED | Configurable via `ResilientClientConfig` |
-| Context propagation | IMPLEMENTED | Tenant ID, Correlation ID, Organization |
+| Context propagation | IMPLEMENTED | Tenant ID, Correlation ID, Organisation |
 | Distributed tracing | IMPLEMENTED | Optional `observability.Tracer` support |
 
 ### Usage Examples
@@ -419,12 +419,12 @@ func (c *CachedMarketClient) GetRate(
 }
 ```
 
-### Batch Size Optimization
+### Batch Size Optimisation
 
 | Use Case | Recommended Batch Size | Rationale |
 |----------|----------------------|-----------|
 | Real-time ingestion | 100-500 | Balance latency and throughput |
-| Bulk historical load | 1000 | Maximize throughput |
+| Bulk historical load | 1000 | Maximise throughput |
 | ETL pipelines | 500-1000 | Depends on source system |
 
 ---
@@ -443,7 +443,7 @@ The client automatically propagates:
 
 - `x-tenant-id` - Tenant isolation
 - `x-correlation-id` - Distributed tracing
-- `x-organization-id` - Organization context
+- `x-organisation-id` - Organisation context
 
 ### mTLS
 

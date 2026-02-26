@@ -129,7 +129,7 @@ The saga definitions become **Administrative Plan Records** - auditable configur
 
 - **Requirement**: Starlark scripts MUST call CEL expressions for financial calculations
 - **Rationale**: CEL provides ~100ns evaluation; Starlark handles orchestration flow
-- **Constraint**: Valuation math MUST NOT be implemented directly in Starlark
+- **Constraint**: Valuation maths MUST NOT be implemented directly in Starlark
 
 ### FR-4: Tenant Default with Override
 
@@ -179,7 +179,7 @@ The saga definitions become **Administrative Plan Records** - auditable configur
 
 - **Requirement**: Saga execution MUST be scoped to the party hierarchy from Party Service
 - **Individual party**: Access only own positions, accounts, and data
-- **Organization party**: Access own + descendant parties (enables aggregate views)
+- **Organisation party**: Access own + descendant parties (enables aggregate views)
 - **Enforcement**: Runtime resolves party tree; injects immutable `ctx.party_scope`
 - **No bypass**: Saga authors cannot access parties outside their scope
 - **Audit**: All executions logged with `party_id` for compliance
@@ -188,7 +188,7 @@ The saga definitions become **Administrative Plan Records** - auditable configur
 
 - **Requirement**: Before a Saga transitions from PENDING to RUNNING, the Runtime SHALL
   generate a "Visibility Manifest" listing all Party IDs that will be accessed
-- **Problem**: "Implicit Authorization" (allowing access mid-execution) is high-risk for
+- **Problem**: "Implicit Authorisation" (allowing access mid-execution) is high-risk for
   auditors and can result in partial executions that fail halfway due to permission issues
 - **Implementation**:
   1. Static analysis extracts all `party_id` references from the Starlark AST
@@ -213,7 +213,7 @@ The saga definitions become **Administrative Plan Records** - auditable configur
 ### FR-27: Starlark Decimal Type
 
 - **Requirement**: The Runtime MUST provide a custom Starlark type for Decimals
-- **Problem**: Starlark natively supports `int`, `float`, `string` but financial math
+- **Problem**: Starlark natively supports `int`, `float`, `string` but financial maths
   requires `shopspring/decimal` precision
 - **Implementation**: Custom `Decimal` type in `shared/pkg/saga` with operator overloading
   (`+`, `-`, `*`, `/`)
@@ -225,10 +225,10 @@ The saga definitions become **Administrative Plan Records** - auditable configur
 ### FR-33: Semantic Logic/Physics Linter
 
 - **Requirement**: The Linter SHALL be semantic, not just syntactic, for Decimal arithmetic
-- **Problem**: Developers may bypass "no math in Starlark" rule using new Decimal type
+- **Problem**: Developers may bypass "no maths in Starlark" rule using new Decimal type
 - **Detection**: Warn on any arithmetic operator (`+`, `-`, `*`, `/`) where operands
   are not derived from simple counters or loop indices
-- **Suggested message**: "Financial math detected. Move this to a CEL Valuation
+- **Suggested message**: "Financial maths detected. Move this to a CEL Valuation
   Strategy in Reference Data."
 - **Exemptions**: Counter arithmetic (`i + 1`), list indexing, percentage calculations
   using pre-validated rates from Valuation Engine
@@ -848,7 +848,7 @@ other parties.
 | Party Type | Visible Data |
 |------------|--------------|
 | **Individual** | Own positions, accounts, transactions only |
-| **Organization** | Own + all descendant parties (recursive) |
+| **Organisation** | Own + all descendant parties (recursive) |
 | **System** | All parties within tenant (admin use only) |
 
 #### Runtime Context Injection
@@ -894,7 +894,7 @@ func positionKeepingList(ctx StarlarkContext, params map[string]any) (any, error
 
 #### Cross-Party Aggregate Views
 
-Organization parties can run sagas that aggregate across their hierarchy:
+Organisation parties can run sagas that aggregate across their hierarchy:
 
 ```python
 # aggregate_positions.star - Only valid for ORG party types
@@ -930,12 +930,12 @@ saga(
 )
 ```
 
-#### Cross-Party Posting Authorization
+#### Cross-Party Posting Authorisation
 
-**Key distinction**: Read isolation != Write authorization.
+**Key distinction**: Read isolation != Write authorisation.
 
 A saga executing under party A may create ledger entries affecting party B
-when authorized by relationship:
+when authorised by relationship:
 
 ```text
 +-----------------------------------------------------------------------------+
@@ -971,7 +971,7 @@ when authorized by relationship:
 +-----------------------------------------------------------------------------+
 ```
 
-#### Read vs Write Authorization Model
+#### Read vs Write Authorisation Model
 
 | Operation | Scope Rule |
 |-----------|------------|
@@ -981,13 +981,13 @@ when authorized by relationship:
 | **WRITE postings** | Contextual lookup - saga resolves target from input data |
 | **WRITE positions** | Contextual lookup - saga resolves target from input data |
 
-#### Cross-Party Authorization: Contextual Lookup Model
+#### Cross-Party Authorisation: Contextual Lookup Model
 
 > **Note**: The Party Service currently has `party_association` for personal
-> relationships (SPOUSE, DEPENDENT, GUARANTOR). Operational authorization
+> relationships (SPOUSE, DEPENDENT, GUARANTOR). Operational authorisation
 > (OPERATOR, CUSTODIAN, BROKER) is **not yet implemented**.
 
-Rather than rigid party-to-party relationship tables, authorization flows from
+Rather than rigid party-to-party relationship tables, authorisation flows from
 **contextual lookup** using the position's flexible attributes:
 
 ```text
@@ -1015,7 +1015,7 @@ Rather than rigid party-to-party relationship tables, authorization flows from
 |    2. ctx.position.attributes -> internal_account.by_attributes()      |
 |       Result: Account matching those attributes                             |
 |                                                                             |
-|  Authorization is IMPLICIT:                                                 |
+|  Authorisation is IMPLICIT:                                                 |
 |    - Saga declares which lookup types it may use                           |
 |    - Runtime validates lookups against declaration                          |
 |    - Posting targets come from resolved lookups, not arbitrary IDs         |
@@ -1023,7 +1023,7 @@ Rather than rigid party-to-party relationship tables, authorization flows from
 +-----------------------------------------------------------------------------+
 ```
 
-#### Saga Authorized Lookups
+#### Saga Authorised Lookups
 
 Each saga declares what account resolution patterns it may use. Lookups are
 **generic** - attribute keys are tenant-defined:
@@ -1070,9 +1070,9 @@ saga(
 ```go
 // Runtime validates lookups against saga's authorized_lookups
 func (r *Runtime) ResolveLookup(sagaDef SagaDefinition, lookupType string, key any) (Account, error) {
-    // Check if saga is authorized for this lookup type
+    // Check if saga is authorised for this lookup type
     if !contains(sagaDef.AuthorizedLookups, lookupType) {
-        return nil, fmt.Errorf("saga %s not authorized for lookup type %s", sagaDef.Name, lookupType)
+        return nil, fmt.Errorf("saga %s not authorised for lookup type %s", sagaDef.Name, lookupType)
     }
 
     // Perform the lookup - attribute keys are tenant-defined
@@ -1100,7 +1100,7 @@ func (s *InternalAccountService) GetByAttributes(ctx context.Context, attrs map[
 
 #### Optional: Explicit Party Relationships
 
-For use cases requiring explicit authorization tracking (audit, compliance), an
+For use cases requiring explicit authorisation tracking (audit, compliance), an
 optional `party_relationships` table can be added to Party Service:
 
 ```sql
@@ -1119,7 +1119,7 @@ CREATE TABLE party_relationships (
 );
 ```
 
-This is **optional** - the contextual lookup model provides authorization implicitly through saga definition.
+This is **optional** - the contextual lookup model provides authorisation implicitly through saga definition.
 
 #### Audit Trail
 
@@ -1682,7 +1682,7 @@ func (r *Runtime) ExecuteWithLimits(
 | Max expression depth | 10 levels |
 | Cost limit | 10,000 units |
 
-### 6.3 Step Handler Authorization
+### 6.3 Step Handler Authorisation
 
 - Handlers are platform-controlled Go functions
 - Starlark cannot invoke arbitrary code
@@ -1706,8 +1706,8 @@ func (r *Runtime) ExecuteWithLimits(
 | Current Test | New Test | What It Validates |
 |--------------|----------|-------------------|
 | `saga_test.go` (14 cases) | `runtime_test.go` | Orchestrator contract: step order, LIFO compensation, context cancellation |
-| `payment_orchestrator_test.go` | `handlers/payment_test.go` | Step handler behavior (Go code, unchanged) |
-| `withdrawal_orchestrator_test.go` | `handlers/current_account_test.go` | Step handler behavior (Go code, unchanged) |
+| `payment_orchestrator_test.go` | `handlers/payment_test.go` | Step handler behaviour (Go code, unchanged) |
+| `withdrawal_orchestrator_test.go` | `handlers/current_account_test.go` | Step handler behaviour (Go code, unchanged) |
 | N/A | `definition_test.go` | Starlark parsing, reference extraction, validation |
 | N/A | `registry_test.go` | CRUD, lifecycle, tenant resolution, caching |
 | Integration tests | Integration tests (same) | End-to-end saga execution, same expected outcomes |
@@ -1875,7 +1875,7 @@ The streams can be parallelized with dependencies as shown below.
 | Task ID | Description | Priority | Owner |
 |---------|-------------|----------|-------|
 | **SAGA-003** | Integrate `go.starlark.net` runtime | P0 | TBD |
-| **SAGA-004a** | Implement Starlark Decimal extension (FR-27: operator overloading for financial math) | P0 | TBD |
+| **SAGA-004a** | Implement Starlark Decimal extension (FR-27: operator overloading for financial maths) | P0 | TBD |
 | **SAGA-004b** | Implement time-injection logic (strip `time.now()`, inject `ctx.knowledge_at`) | P0 | TBD |
 | **SAGA-004c** | Implement core builtins (`cel_eval`, `posting`, `resolve_account`, etc.) | P0 | TBD |
 | **SAGA-072** | Implement external lookup result capture for replay safety (FR-34) | P0 | TBD |
@@ -1903,7 +1903,7 @@ The streams can be parallelized with dependencies as shown below.
 | **SAGA-019** | Implement ACTIVATION phase validation (hard fail) | P0 | TBD |
 | **SAGA-020** | Implement deprecation impact analysis | P1 | TBD |
 | **SAGA-021** | Add validation feedback API endpoint | P1 | TBD |
-| **SAGA-048** | Add Logic/Physics Linter (warn on math in Starlark, enforce Pre-Step Check) | P1 | TBD |
+| **SAGA-048** | Add Logic/Physics Linter (warn on maths in Starlark, enforce Pre-Step Check) | P1 | TBD |
 | **SAGA-071** | Enhance Logic/Physics Linter with semantic Decimal arithmetic detection (FR-33) | P1 | TBD |
 
 ### Stream 5: Party Isolation
@@ -1958,10 +1958,10 @@ The streams can be parallelized with dependencies as shown below.
 | ID | Criterion | Test Method |
 |----|-----------|-------------|
 | **AC-PI-01** | Individual party saga CANNOT read positions of sibling parties | Unit test: assert `position_keeping.list()` returns empty for sibling party_id |
-| **AC-PI-02** | Organization party saga CAN read positions of descendant parties | Unit test: assert `position_keeping.list()` returns descendant positions |
+| **AC-PI-02** | Organisation party saga CAN read positions of descendant parties | Unit test: assert `position_keeping.list()` returns descendant positions |
 | **AC-PI-03** | Saga `ctx.party_scope` is immutable | Unit test: assert mutation throws error |
 | **AC-PI-04** | Cross-party posting governed by contextual lookup model (Section 5.7) | Integration test: posting to unrelated party fails |
-| **AC-PI-05** | Authorized cross-party posting succeeds via contextual visibility rules | Integration test: contextual lookup resolves counterparty accounts correctly |
+| **AC-PI-05** | Authorised cross-party posting succeeds via contextual visibility rules | Integration test: contextual lookup resolves counterparty accounts correctly |
 | **AC-PI-06** | Saga execution log includes `party_id` and `visible_parties` from contextual lookup | Unit test: verify audit fields reflect contextual visibility at execution time |
 | **AC-PI-07** | Child saga inherits parent party scope (cannot escalate) | Unit test: `invoke_saga()` passes same `party_scope` |
 | **AC-PI-08** | Query by `visible_parties` returns correct executions | Query test: GIN index query returns expected results |
@@ -1984,7 +1984,7 @@ The streams can be parallelized with dependencies as shown below.
 | **AC-SC-01** | `invoke_saga()` executes child saga synchronously | Unit test: verify child completes before parent continues |
 | **AC-SC-02** | Parent failure triggers child compensation (LIFO) | Integration test: fail step 3, verify step 2 child compensates |
 | **AC-SC-03** | Circular saga references detected at ACTIVATION | Unit test: A->B->C->A fails activation |
-| **AC-SC-04** | Circular saga references detected at RUNTIME (defense in depth) | Unit test: call stack check prevents re-entry |
+| **AC-SC-04** | Circular saga references detected at RUNTIME (defence in depth) | Unit test: call stack check prevents re-entry |
 | **AC-SC-05** | Nesting depth > 5 rejected | Unit test: 6-level nesting fails |
 | **AC-SC-06** | Total steps > 50 rejected | Unit test: saga with 51 total steps fails |
 | **AC-SC-07** | Child saga result accessible in parent context | Unit test: `result.execution_id` available for compensation |
@@ -2099,4 +2099,4 @@ For tenant communication:
 - [go.starlark.net](https://pkg.go.dev/go.starlark.net/starlark) - Starlark Go implementation
 - [Starlark Language Spec](https://github.com/bazelbuild/starlark/blob/master/spec.md)
 - [google/cel-go](https://github.com/google/cel-go) - CEL Go implementation
-- [Party Service](../adr/0003-party-management.md) - Party hierarchy and relationships (cross-party authorization)
+- [Party Service](../adr/0003-party-management.md) - Party hierarchy and relationships (cross-party authorisation)

@@ -188,7 +188,7 @@ Event-driven communication for eventual consistency:
 **Configuration:**
 
 - Default broker: `kafka:9092`
-- Serialization: Protocol Buffers
+- Serialisation: Protocol Buffers
 - Partition key: `AggregateID` (ensures ordering per entity)
 
 ### HTTP (External Webhooks)
@@ -320,7 +320,7 @@ See [ADR-0009](../docs/adr/0009-application-level-audit-logging.md) for architec
    - **Fallback**: Write to `audit_outbox` table → audit-worker → `audit_log` table
 4. **Kafka Topics**: Per-service audit event topics (e.g., `audit.events.current-account`)
 5. **Audit Consumers**: One Kafka consumer deployment per service (auto-scaling 2-20 replicas)
-6. **Audit Worker**: Centralized service processes outbox entries when Kafka unavailable
+6. **Audit Worker**: Centralised service processes outbox entries when Kafka unavailable
 
 **Key Guarantees:**
 
@@ -378,7 +378,7 @@ See [services/reference-data/README.md](reference-data/README.md) for full docum
 
 ### Utilization Metering Consumer
 
-The Utilization Metering Consumer is a centralized Kafka consumer for platform billing.
+The Utilization Metering Consumer is a centralised Kafka consumer for platform billing.
 
 **Responsibilities:**
 
@@ -432,7 +432,7 @@ strategies with market data from the Market Information service.
 **Responsibilities:**
 
 - **Strategy Management**: DRAFT/ACTIVE/DEPRECATED lifecycle for forecast strategies
-- **Starlark Execution**: Sandboxed script execution with built-in math functions
+- **Starlark Execution**: Sandboxed script execution with built-in maths functions
 - **Scheduled Runs**: Cron-based execution with lease management for distributed safety
 - **Template Library**: Pre-built strategies (moving average, linear regression, etc.)
 
@@ -448,7 +448,7 @@ Stripe billing integration, and administrative operations.
 - **Manifest Management**: Declarative tenant configuration with diff/apply workflow
 - **Stripe Integration**: Payment processing, webhook handling, reconciliation
 - **Admin Operations**: Balance sheet queries, causation tree visualization, CSV exports
-- **Staff Identity**: Internal operator authentication and authorization
+- **Staff Identity**: Internal operator authentication and authorisation
 
 See [services/control-plane/README.md](control-plane/README.md) for full documentation.
 
@@ -602,10 +602,10 @@ go build -o tenantctl ./cmd/tenantctl
 
 **Demo Provisioning:**
 
-The `scripts/demo-provision-organizations.sh` script provisions demo tenants for local development:
+The `scripts/demo-provision-organisations.sh` script provisions demo tenants for local development:
 
 ```bash
-./scripts/demo-provision-organizations.sh
+./scripts/demo-provision-organisations.sh
 ```
 
 This creates: `meridian`, `post_office`, `motive`, `un_wfp`

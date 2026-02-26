@@ -64,7 +64,7 @@ detailed controls.
 ### Replay Attacks
 
 Re-submission of previously valid requests to duplicate transactions or bypass
-authorization. Mitigations include:
+authorisation. Mitigations include:
 
 - **Idempotency keys**: Critical operations (payment orders, ledger postings) require
   idempotency keys. Duplicate submissions return the original result without
@@ -72,7 +72,7 @@ authorization. Mitigations include:
 - **Audit outbox deduplication**: The outbox worker processes entries idempotently;
   retries do not create duplicate audit records.
 
-### Authorization Bypass
+### Authorisation Bypass
 
 Accessing operations or data without proper permissions. Controls include:
 
@@ -157,9 +157,9 @@ Tenant identity flows through the entire request lifecycle:
 - **JWT-tenant validation**: In production (`AUTH_ENABLED=true`), `auth.Interceptor`
   validates that the `x-tenant-id` gRPC metadata matches the JWT's `tenant_id` claim.
   This prevents a caller from specifying a different tenant than their credentials
-  authorize.
+  authorise.
 - **No cross-tenant database access**: Each service connects to its own database with
-  its own credentials. The centralized audit worker pattern was explicitly rejected to
+  its own credentials. The centralised audit worker pattern was explicitly rejected to
   maintain bounded context isolation (see
   [ADR-0020](docs/adr/0020-per-service-audit-workers.md)).
 
@@ -184,7 +184,7 @@ The audit system uses two delivery paths for resilience:
    (e.g., `audit.events.current-account`). Dedicated audit consumer deployments write
    to `audit_log`.
 2. **Fallback (Outbox)**: When Kafka is unavailable (timeout: 5 seconds), audit entries
-   remain in the `audit_outbox` table. A centralized `audit-worker` service polls and
+   remain in the `audit_outbox` table. A centralised `audit-worker` service polls and
    processes these entries.
 
 This dual-path design ensures no audit records are lost during infrastructure failures.
@@ -248,7 +248,7 @@ When contributing to or deploying Meridian:
 - Keep dependencies up to date
 - Follow secure coding practices outlined in our contribution guidelines
 - Use environment variables for sensitive configuration
-- Enable authentication and authorization in production deployments
+- Enable authentication and authorisation in production deployments
   (`AUTH_ENABLED=true`)
 - Regular security audits of your deployment configuration
 - Use `pq.QuoteIdentifier()` for all dynamic SQL identifiers

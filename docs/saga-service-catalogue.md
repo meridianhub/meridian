@@ -1,4 +1,4 @@
-# Saga Service Catalog
+# Saga Service Catalogue
 
 This document provides a reference for all saga handlers available in the Meridian platform.
 

@@ -24,7 +24,7 @@ Accepted
 
 ## Context
 
-Meridian requires a centralized service for managing market data, reference prices, and rate information. This data is critical for:
+Meridian requires a centralised service for managing market data, reference prices, and rate information. This data is critical for:
 
 - **Energy pricing**: Spot prices, tariff rates, carbon credit prices
 - **Foreign exchange**: Currency pair rates from sources like ECB
@@ -61,7 +61,7 @@ Market data is fundamentally different: it represents **observed facts about the
 * Configurable validation without code deployment
 * Multi-tenant data isolation
 * High-throughput batch ingestion (target: 100k TPS as per ADR-0026)
-* Forward-compatible with time-series optimizations
+* Forward-compatible with time-series optimisations
 
 ## Decision Outcome
 
@@ -145,7 +145,7 @@ DataSource
 
 ### Bi-Temporal Data Model
 
-The service implements **bi-temporal modeling** to answer two distinct questions:
+The service implements **bi-temporal modelling** to answer two distinct questions:
 
 | Dimension | Question | Field |
 |-----------|----------|-------|
@@ -397,4 +397,4 @@ The migration includes pre-configured datasets for common use cases:
 * [ADR-0002: Microservices Per BIAN Domain](./0002-microservices-per-bian-domain.md) - Service architecture
 * [ADR-0026: Canonical Ingestion Contract](./0026-canonical-ingestion-contract.md) - ETL off critical path
 * [CEL Specification](https://github.com/google/cel-spec) - Common Expression Language
-* [Temporal Data Modeling](https://martinfowler.com/articles/temporal-modeling.html) - Bi-temporal patterns reference
+* [Temporal Data Modelling](https://martinfowler.com/articles/temporal-modelling.html) - Bi-temporal patterns reference

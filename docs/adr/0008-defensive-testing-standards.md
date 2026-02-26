@@ -43,7 +43,7 @@ testing beyond expected inputs.
 
 We will adopt **Defensive Testing Standards** as our testing philosophy. All tests must cover:
 
-1. **Happy Path Testing**: Expected behavior with valid inputs
+1. **Happy Path Testing**: Expected behaviour with valid inputs
 2. **Unhappy Path Testing**: Graceful failure with invalid inputs
 3. **Edge Case Testing**: Boundary conditions (min/max, zero, empty)
 4. **Negative Testing**: Values that should never occur but might due to bugs

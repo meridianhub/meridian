@@ -150,7 +150,7 @@ def pay_external(ctx):
 ### FR-20: Starlark Dry-Run Testing
 
 - **Requirement**: The service SHALL provide an `ExecuteDryRun` RPC
-- **Behavior**: Runs the Starlark script in a virtual environment where all Step Handlers are mocked
+- **Behaviour**: Runs the Starlark script in a virtual environment where all Step Handlers are mocked
 - **Output**: Returns the intended "Execution Plan" (what steps would have been called, in what order, with what parameters)
 - **No persistence**: Dry-run MUST NOT persist anything to the database
 - **Use case**: Tenants can test their Starlark logic before calling `RegisterDataSet` to deploy to production
@@ -297,7 +297,7 @@ def pay_external(ctx):
   for replay purposes
 - **Persistence**: Once a Valuation result is obtained, the **entire response** (including
   market observation IDs, rates, and basis) MUST be persisted in `saga_step_results`
-- **Replay behavior**: On replay, return the cached valuation result instead of re-calling
+- **Replay behaviour**: On replay, return the cached valuation result instead of re-calling
   the Valuation Engine
 - **Audit continuity**: If market data is purged from MIM after 7 years (per retention
   policy), legacy audit replay still works because the valuation was "snapshotted"
@@ -308,7 +308,7 @@ def pay_external(ctx):
 - **Requirement**: The Runtime MUST support a `ctx.suspend(idempotency_key)` builtin
   for long-running external waits (e.g., DNO payment confirmation webhook)
 - **Problem**: Pod holding lease for days while waiting for webhook is inefficient
-- **Behavior**:
+- **Behaviour**:
   1. `ctx.suspend()` saves current saga state to `saga_step_results`
   2. Releases pod lease
   3. Transitions status to `WAITING_FOR_EVENT`
@@ -317,7 +317,7 @@ def pay_external(ctx):
 - **Idempotency**: Multiple callbacks with same `idempotency_key` are deduplicated
 - **Timeout**: Optional `ctx.suspend(key, timeout=duration)` auto-fails after deadline
 
-### FR-31: Deep-Copy Serialization Boundary
+### FR-31: Deep-Copy Serialisation Boundary
 
 - **Requirement**: When persisting `SagaStepResult.output_snapshot`, the Go runtime
   MUST serialize the Starlark value to JSON and deserialize back
@@ -345,7 +345,7 @@ def pay_external(ctx):
       {"saga_id": "child-789", "name": "wholesale_posting", "status": "FAILED",
        "failed_step": {"index": 2, "error": "Insufficient balance"}}
     ]},
-    {"index": 2, "name": "finalize", "status": "PENDING"}
+    {"index": 2, "name": "finalise", "status": "PENDING"}
   ]
 }
 ```
@@ -355,10 +355,10 @@ def pay_external(ctx):
 ### FR-33: Semantic Logic/Physics Linter
 
 - **Requirement**: The Linter SHALL be semantic, not just syntactic, for Decimal arithmetic
-- **Problem**: Developers may bypass "no math in Starlark" rule using new Decimal type
+- **Problem**: Developers may bypass "no maths in Starlark" rule using new Decimal type
 - **Detection**: Warn on any arithmetic operator (`+`, `-`, `*`, `/`) where operands
   are not derived from simple counters or loop indices
-- **Suggested message**: "Financial math detected. Move this to a CEL Valuation
+- **Suggested message**: "Financial maths detected. Move this to a CEL Valuation
   Strategy in Reference Data."
 - **Exemptions**: Counter arithmetic (`i + 1`), list indexing, percentage calculations
   using pre-validated rates from Valuation Engine
@@ -1218,7 +1218,7 @@ graph TD
         SAGA074[SAGA-074: Outbox integration]
         SAGA064[SAGA-064: Error severity classification]
         SAGA065[SAGA-065: Partition-aware scanning]
-        SAGA069[SAGA-069: Deep-copy serialization]
+        SAGA069[SAGA-069: Deep-copy serialisation]
     end
 
     subgraph "Stream 8: External Integration"
@@ -1314,7 +1314,7 @@ graph TD
 | **SAGA-074** | Implement outbox pattern for domain events (transactional event publishing) | P1 | SAGA-042, SAGA-063 | TBD |
 | **SAGA-064** | Implement step error severity classification (FR-28: TRANSIENT vs FATAL) | P0 | SAGA-005 | TBD |
 | **SAGA-065** | Add partition-aware orphan scanning for high-volume (100k TPS) | P2 | SAGA-044, SAGA-061 | TBD |
-| **SAGA-069** | Implement deep-copy serialization boundary for step results (FR-31) | P0 | SAGA-042 | TBD |
+| **SAGA-069** | Implement deep-copy serialisation boundary for step results (FR-31) | P0 | SAGA-042 | TBD |
 
 ### Stream 8: External Integration & Resilience Tasks
 
@@ -1365,8 +1365,8 @@ graph TD
 | Current Test | New Test | What It Validates |
 |--------------|----------|-------------------|
 | `saga_test.go` (14 cases) | `runtime_test.go` | Orchestrator contract: step order, LIFO compensation, context cancellation |
-| `payment_orchestrator_test.go` | `handlers/payment_test.go` | Step handler behavior (Go code, unchanged) |
-| `withdrawal_orchestrator_test.go` | `handlers/current_account_test.go` | Step handler behavior (Go code, unchanged) |
+| `payment_orchestrator_test.go` | `handlers/payment_test.go` | Step handler behaviour (Go code, unchanged) |
+| `withdrawal_orchestrator_test.go` | `handlers/current_account_test.go` | Step handler behaviour (Go code, unchanged) |
 | N/A | `definition_test.go` | Starlark parsing, reference extraction, validation |
 | N/A | `registry_test.go` | CRUD, lifecycle, tenant resolution, caching |
 | Integration tests | Integration tests (same) | End-to-end saga execution, same expected outcomes |
@@ -1406,7 +1406,7 @@ graph TD
 ### Phase 9: Hardening & Validation (SAGA-047 through SAGA-052)
 
 - `valuate_batch()` for multi-context valuation (same basis guarantee)
-- Logic/Physics Linter warns on math in Starlark ("move to CEL")
+- Logic/Physics Linter warns on maths in Starlark ("move to CEL")
 - Step handler output schemas (typed contracts)
 - Simulation mode enforcement (`ctx.is_simulation`)
 - Causation ID propagation to compensation steps
@@ -1505,7 +1505,7 @@ graph TD
 | **AC-AD-02** | `CompleteSagaStep` resumes suspended saga with provided result | Integration test: suspend saga, call CompleteSagaStep, verify saga continues |
 | **AC-AD-03** | Duplicate `CompleteSagaStep` calls with same idempotency_key are deduplicated | Unit test: call twice, verify saga only resumes once |
 | **AC-AD-04** | Suspended saga auto-fails after timeout deadline | Integration test: suspend with 1s timeout, wait 2s, verify status = FAILED |
-| **AC-AD-05** | Step result serialization boundary prevents Go memory leakage | Unit test: return mutable Go map, modify it, verify persisted value unchanged |
+| **AC-AD-05** | Step result serialisation boundary prevents Go memory leakage | Unit test: return mutable Go map, modify it, verify persisted value unchanged |
 | **AC-AD-06** | Replayed step receives fresh copy (not pointer to original) | Unit test: replay step, modify result in script, verify original unchanged |
 | **AC-AD-07** | Causation tree API returns full parent->child hierarchy | Integration test: create nested saga (3 levels), query tree, verify structure |
 | **AC-AD-08** | Causation tree shows failed step location in child saga | Query test: fail child step 2, verify tree shows `failed_step: {index: 2}` |
@@ -1519,13 +1519,13 @@ graph TD
 
 | Risk | Impact | Likelihood | Mitigation |
 |------|--------|------------|------------|
-| **Replay performance degradation** | High | Medium | Optimize step result caching; use indexed queries |
+| **Replay performance degradation** | High | Medium | Optimise step result caching; use indexed queries |
 | **Lease contention at scale** | High | Medium | Partition-aware scanning (SAGA-065); staggered lease strategy |
 | **Orphan detection too slow** | Medium | Low | Reactive wake-up (SAGA-061); fallback to background scan |
 | **Zombie saga accumulation** | Medium | Medium | Alert on zombie detection (SAGA-056); hot-fix API (SAGA-060) |
 | **Non-deterministic UUIDs** | High | Low | Seed reset on replay (FR-26); comprehensive testing |
 | **External service idempotency gaps** | High | Medium | Pre-Step Check pattern (FR-18); linter enforcement |
-| **Memory leaks from mutable results** | Medium | Low | Deep-copy serialization (FR-31); immutable Structs |
+| **Memory leaks from mutable results** | Medium | Low | Deep-copy serialisation (FR-31); immutable Structs |
 | **Bi-temporal integrity violations** | High | Low | Preserve `knowledge_at` in hot-fix; audit trail validation |
 
 ---

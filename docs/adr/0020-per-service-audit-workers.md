@@ -9,7 +9,7 @@ triggers:
   - Evaluating cross-service database access patterns
 
 instructions: |
-  Embed audit workers as background goroutines within each service, not as a centralized service.
+  Embed audit workers as background goroutines within each service, not as a centralised service.
   Each service processes its own audit_outbox table using the shared/platform/audit package.
   Pass the service's schema name to NewAuditWorker for proper table targeting.
 ---
@@ -24,17 +24,17 @@ Superseded
 
 **Note:** This ADR proposed per-service embedded workers. The actual implementation (2025-12-24) uses a dual-path approach:
 - **Primary path**: Kafka audit consumers (one deployment per service, deployed separately)
-- **Fallback path**: Centralized audit-worker service processes outbox when Kafka unavailable
+- **Fallback path**: Centralised audit-worker service processes outbox when Kafka unavailable
 
 See implementation details in ADR-0009 and `/services/README.md`.
 
 ## Context
 
-ADR-0009 established the transactional outbox pattern for application-level audit logging. The current implementation (`services/audit-worker/main.go`) deploys a centralized audit-worker service that connects to a single database and processes audit_outbox entries.
+ADR-0009 established the transactional outbox pattern for application-level audit logging. The current implementation (`services/audit-worker/main.go`) deploys a centralised audit-worker service that connects to a single database and processes audit_outbox entries.
 
 As the platform grows to 6 services with separate database schemas (current-account, position-keeping, financial-accounting, party, payment-order, tenant), we must decide how to scale audit processing:
 
-1. **Centralized approach**: Extend the existing audit-worker to poll 6 different service schemas
+1. **Centralised approach**: Extend the existing audit-worker to poll 6 different service schemas
 2. **Per-service approach**: Embed audit workers as background goroutines within each service
 
 This decision has significant implications for bounded context isolation, service autonomy, and operational complexity.
@@ -44,14 +44,14 @@ This decision has significant implications for bounded context isolation, servic
 * **ADR-0002 Compliance**: Microservices per BIAN domain requires database-per-service and no cross-service database access
 * **Service Coupling Analysis**: Zero cross-service database access violations is a key compliance criterion
 * **Service Autonomy**: Services should not depend on external workers for core audit functionality
-* **Operational Simplicity**: Minimize credentials management and deployment coupling
+* **Operational Simplicity**: Minimise credentials management and deployment coupling
 * **Performance**: Each service handles its own audit volume without contention
 
 ## Considered Options
 
-1. Centralized audit-worker service polling multiple schemas
+1. Centralised audit-worker service polling multiple schemas
 2. Per-service embedded audit workers
-3. Hybrid approach with centralized worker for high-volume services
+3. Hybrid approach with centralised worker for high-volume services
 
 ## Decision Outcome
 
@@ -74,12 +74,12 @@ Chosen option: "Per-service embedded audit workers", because it maintains bounde
 
 ## Pros and Cons of the Options
 
-### Centralized Audit-Worker (Current Pattern Extended)
+### Centralised Audit-Worker (Current Pattern Extended)
 
 A single audit-worker service connects to all 6 service databases and polls their audit_outbox tables.
 
 * Good, because single deployment for audit processing logic
-* Good, because centralized monitoring (one place to check audit lag)
+* Good, because centralised monitoring (one place to check audit lag)
 * Good, because no changes to existing service binaries
 * Bad, because **violates bounded context isolation** (cross-service database access)
 * Bad, because **operational coupling** (all services depend on audit-worker availability)
@@ -107,12 +107,12 @@ auditWorker.Start(workerCtx)
 * Good, because **aligns with ADR-0002** (microservices per BIAN domain)
 * Good, because **failure isolation** (one service's audit issues don't affect others)
 * Bad, because duplicated worker goroutines (minimal memory overhead ~1MB each)
-* Bad, because requires metric aggregation for centralized monitoring
+* Bad, because requires metric aggregation for centralised monitoring
 * Bad, because worker startup code duplicated across 6 service main.go files
 
 ### Hybrid Approach
 
-High-volume services (current-account, payment-order) use embedded workers; low-volume services share a centralized worker.
+High-volume services (current-account, payment-order) use embedded workers; low-volume services share a centralised worker.
 
 * Good, because reduces total worker count
 * Bad, because **inconsistent architecture** (some services isolated, some not)
@@ -156,7 +156,7 @@ Add worker startup to each service's `main.go`:
 | payment-order | `payment_order_audit` | `services/payment-order/cmd/main.go` |
 | tenant | `tenant_audit` | `services/tenant/cmd/main.go` |
 
-### Phase 3: Deprecate Centralized Audit-Worker
+### Phase 3: Deprecate Centralised Audit-Worker
 
 1. Deploy per-service workers to staging
 2. Monitor for 1 week to verify no audit lag or processing issues
@@ -186,20 +186,20 @@ Add worker startup to each service's `main.go`:
 
 **Status**: Superseded by this decision
 
-Task 16 proposed extending the centralized audit-worker to poll 6 schemas. This decision replaces that approach with per-service workers. Task 16 should be updated to "Embed audit workers in individual services" or closed as superseded.
+Task 16 proposed extending the centralised audit-worker to poll 6 schemas. This decision replaces that approach with per-service workers. Task 16 should be updated to "Embed audit workers in individual services" or closed as superseded.
 
-### Task 6 (Centralized Kafka audit consumer)
+### Task 6 (Centralised Kafka audit consumer)
 
 **Status**: Still valid
 
-The Kafka audit consumer remains centralized for cross-service audit aggregation and analytics. This is architecturally distinct from outbox processing:
+The Kafka audit consumer remains centralised for cross-service audit aggregation and analytics. This is architecturally distinct from outbox processing:
 
 | Component | Scope | Purpose |
 |-----------|-------|---------|
 | Per-service audit worker | Single service | Process outbox → audit_log |
 | Kafka audit consumer | Cross-service | Aggregate audit events for analytics |
 
-The per-service workers publish events to Kafka after processing; the centralized consumer aggregates these events.
+The per-service workers publish events to Kafka after processing; the centralised consumer aggregates these events.
 
 ## ADR Alignment
 
@@ -228,7 +228,7 @@ Choose per-service workers (this decision) if:
 - [x] Service-specific audit processing needs may diverge in future
 - [x] Operational simplicity (single database connection per service) is preferred
 
-Choose centralized worker if:
+Choose centralised worker if:
 
 - [ ] Operational simplicity (single deployment) outweighs architectural purity
 - [ ] Team has strong operational automation for multi-service database access
@@ -237,5 +237,5 @@ Choose centralized worker if:
 ### Future Considerations
 
 * If audit volume grows significantly, consider dedicated audit worker pods per service (separate from main service pods)
-* If audit requirements diverge per service, the per-service architecture enables independent customization
+* If audit requirements diverge per service, the per-service architecture enables independent customisation
 * Consider adding circuit breakers if audit processing affects service health under load

@@ -31,8 +31,8 @@ flowchart TB
 **Proto Definitions:**
 
 - `CurrentAccountFacility` (Control Record)
-- `ExecuteDeposit` (Behavior Qualifier)
-- `ExecuteWithdrawal` (Behavior Qualifier)
+- `ExecuteDeposit` (Behaviour Qualifier)
+- `ExecuteWithdrawal` (Behaviour Qualifier)
 
 **Database:**
 
@@ -231,7 +231,7 @@ CurrentAccount Service (consumer):
 - `CurrentAccountFacility` - Represents account lifecycle
 - `FinancialBookingLog` - Represents booking log lifecycle
 
-**Behavior Qualifiers (BQ):**
+**Behaviour Qualifiers (BQ):**
 
 - `Deposit` - Deposit operation on account
 - `Withdrawal` - Withdrawal operation (future)

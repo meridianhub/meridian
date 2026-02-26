@@ -298,7 +298,7 @@ func main() {
         }
     }
 
-    // ... rest of service initialization
+    // ... rest of service initialisation
 }
 ```
 

@@ -78,7 +78,7 @@ type PositionKeepingClient interface {
 **2. gRPC Client Adapter** (`adapters/grpc/position_keeping_client.go`):
 
 Full implementation with DNS-based service discovery, round-robin load balancing,
-retry logic with exponential backoff, correlation ID and organization context
+retry logic with exponential backoff, correlation ID and organisation context
 propagation, and observability metrics. 305 lines of production-ready code.
 
 **3. Main Wiring** (`cmd/main.go:301-323`):
@@ -217,7 +217,7 @@ test coverage.
 ### Error Scenarios
 
 - Position Keeping returns `NotFound` (no position for account/instrument)
-- Position Keeping is temporarily unavailable (verify retry behavior)
+- Position Keeping is temporarily unavailable (verify retry behaviour)
 - Position Keeping returns no `BALANCE_TYPE_CURRENT` entry
 
 ---

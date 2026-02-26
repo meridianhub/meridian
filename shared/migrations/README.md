@@ -33,7 +33,7 @@ Each BIAN service domain has its own PostgreSQL schemas for business data and au
 Each microservice owns both its business schema and audit schema, ensuring complete service isolation. The shared
 `_audit_factory` schema provides reusable audit infrastructure to eliminate duplication.
 
-### Migration Organization
+### Migration Organisation
 
 ```text
 migrations/
@@ -245,7 +245,7 @@ type BaseModel struct {
 }
 ```
 
-**Note**: `CreatedBy` and `UpdatedBy` are currently optional (nullable) fields. Once authentication/authorization
+**Note**: `CreatedBy` and `UpdatedBy` are currently optional (nullable) fields. Once authentication/authorisation
 context is available in the application layer, these should be populated from the current user context. The audit
 triggers will use these values to track who made changes.
 

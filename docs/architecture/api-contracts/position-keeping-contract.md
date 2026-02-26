@@ -92,7 +92,7 @@ stateDiagram-v2
 **POSTED → REVERSED:**
 
 - Trigger: Reversal request from upstream service
-- Preconditions: Transaction in POSTED state, reversal authorized
+- Preconditions: Transaction in POSTED state, reversal authorised
 - Postconditions: New POSTED transaction created (opposite direction), original marked REVERSED
 - Reversible: No (terminal state, but reversal itself can be reversed)
 
@@ -1527,7 +1527,7 @@ sequenceDiagram
     PK-->>CA: BalanceEntry[] (7 types)
 ```
 
-### Performance Optimization
+### Performance Optimisation
 
 For high-traffic accounts, consider:
 
@@ -1542,7 +1542,7 @@ For high-traffic accounts, consider:
 1. **Streaming API**: gRPC server-streaming for real-time transaction updates
 2. **Compression**: GZIP compression for bulk import requests
 3. **Batch Idempotency**: Idempotency key support for BulkImportTransactions
-4. **Query Optimization**: Materialized views for common queries
+4. **Query Optimisation**: Materialized views for common queries
 5. **Archival**: Automatic archival of old logs (> 1 year)
 6. **Lineage API**: Dedicated RPC for lineage traversal queries
 7. **Aggregate Queries**: Sum/count operations across logs

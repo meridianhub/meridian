@@ -16,7 +16,7 @@ refactored to return errors instead. After thorough analysis, we found:
 
 | Finding | Count | Action Required |
 |---------|-------|-----------------|
-| Startup/initialization panics | 19 | None - follows fail-fast pattern |
+| Startup/initialisation panics | 19 | None - follows fail-fast pattern |
 | Bug detection invariants | 1 | None - defensive programming |
 | Panic propagation (defer cleanup) | 1 | None - standard Go pattern |
 | Test fixture panics | 11 | None - test code only |
@@ -29,12 +29,12 @@ refactored to return errors instead. After thorough analysis, we found:
    20-24) which identified and fixed actual problematic panics, this audit
    confirms the remaining panics are all legitimate uses.
 
-2. **Startup panics are appropriate.** The 19 constructor/initialization panics
+2. **Startup panics are appropriate.** The 19 constructor/initialisation panics
    follow the Go fail-fast pattern for dependency validation. They fire before
    the service handles any requests.
 
 3. **Must* functions follow Go conventions.** Functions with `Must` prefix
-   (like `regexp.MustCompile`) explicitly signal panic behavior and have
+   (like `regexp.MustCompile`) explicitly signal panic behaviour and have
    non-panicking alternatives.
 
 4. **The codebase is healthy.** The previous refactoring work (Tasks 20-24)
@@ -64,7 +64,7 @@ refactored to return errors instead. After thorough analysis, we found:
 
 ### Category A: Startup/Constructor Panics (Acceptable)
 
-These panics occur during service initialization and follow the fail-fast
+These panics occur during service initialisation and follow the fail-fast
 pattern for dependency validation.
 
 | # | File | Line | Function | Message |
@@ -90,13 +90,13 @@ pattern for dependency validation.
 ### Category B: Must* Functions (Acceptable)
 
 These are convenience functions that panic on error, explicitly named with
-`Must` prefix to indicate the behavior. Callers choose to use these when
+`Must` prefix to indicate the behaviour. Callers choose to use these when
 they know the operation cannot fail (e.g., with compile-time constants).
 
 | # | File | Line | Function | Notes |
 |---|------|------|----------|-------|
 | 14 | `shared/domain/money/money.go` | 111 | `MustNew` | For tests/compile-time constants |
-| 15 | `services/audit-worker/domain/measurement.go` | 48 | `MustPeriod` | For tests/initialization |
+| 15 | `services/audit-worker/domain/measurement.go` | 48 | `MustPeriod` | For tests/initialisation |
 | 16 | `shared/platform/tenant/context.go` | 33 | `MustFromContext` | Programming error detection |
 | 17 | `shared/platform/tenant/tenant_id.go` | 32 | `MustNewTenantID` | For compile-time constants |
 | 18 | `shared/platform/db/gorm_tenant_scope.go` | 81 | `MustWithGormTenantScope` | After middleware validation |
@@ -156,7 +156,7 @@ These are in test fixture packages, not production code.
 
 ## Test File Panics (Acceptable)
 
-These are in `*_test.go` files and are expected behavior for test setup or
+These are in `*_test.go` files and are expected behaviour for test setup or
 intentional panic testing.
 
 | # | File | Line | Function | Notes |
@@ -203,7 +203,7 @@ All 47 panic occurrences fall into acceptable categories:
    This is a widely accepted Go pattern for dependency injection constructors.
 
 2. **Must* function variants** (6): These are explicitly named to indicate
-   panic behavior and are documented for use with compile-time constants or
+   panic behaviour and are documented for use with compile-time constants or
    well-validated input.
 
 3. **Bug detection** (1): The overdraft calculation panic indicates an
@@ -233,19 +233,19 @@ was successful. No additional Task Master tasks have been created because:
 
 ---
 
-## Approval Status: Startup and Initialization Panics
+## Approval Status: Startup and Initialisation Panics
 
 **Reviewed**: 2025-12-27
 **Subtask**: tech-debt-cleanup.25.2
 
-This section provides detailed approval rationale for all startup/initialization
+This section provides detailed approval rationale for all startup/initialisation
 panics and Must* function variants identified in the inventory.
 
 ### Approval Criteria
 
 Startup panics are **APPROVED** when they meet ALL of the following criteria:
 
-1. **Fail-fast timing**: Panic occurs during service initialization, before handling any requests
+1. **Fail-fast timing**: Panic occurs during service initialisation, before handling any requests
 2. **Critical dependency**: The nil/empty value would make the service non-functional
 3. **No recovery possible**: Returning an error would just propagate up to main() anyway
 4. **Clear messaging**: Panic message identifies which dependency is missing
@@ -309,8 +309,8 @@ All 6 Must* functions are **APPROVED** with the following rationale:
 
 | # | Function | Usage Pattern | Rationale |
 |---|----------|---------------|-----------|
-| 14 | `money.MustNew` | Tests and compile-time constants | Explicitly named with `Must` prefix. Alternative `New` exists for runtime use. Used in test fixtures and constant initialization. **APPROVED - MUST PATTERN** |
-| 15 | `measurement.MustPeriod` | Tests and initialization | Same Must pattern. Used when period validity is known at compile time. **APPROVED - MUST PATTERN** |
+| 14 | `money.MustNew` | Tests and compile-time constants | Explicitly named with `Must` prefix. Alternative `New` exists for runtime use. Used in test fixtures and constant initialisation. **APPROVED - MUST PATTERN** |
+| 15 | `measurement.MustPeriod` | Tests and initialisation | Same Must pattern. Used when period validity is known at compile time. **APPROVED - MUST PATTERN** |
 | 16 | `tenant.MustFromContext` | After middleware validation | Called only in code paths where tenant middleware has already validated context. Comment in source documents this is a "programming error" detector. **APPROVED - MUST PATTERN** |
 | 17 | `tenant.MustNewTenantID` | Compile-time tenant constants | Used for system-level tenant IDs that are compile-time constants. Alternative `NewTenantID` exists. **APPROVED - MUST PATTERN** |
 | 18 | `db.MustWithGormTenantScope` | After middleware validation | Called in code paths where tenant context is guaranteed by middleware. **APPROVED - MUST PATTERN** |
@@ -334,8 +334,8 @@ a corresponding non-panicking variant. Usage is appropriate:
 | Must* function variants | 6 | APPROVED - MUST PATTERN |
 | **Total reviewed** | **19** | **All APPROVED** |
 
-All startup/initialization panics follow established Go patterns for fail-fast
-initialization and are acceptable. No refactoring is required.
+All startup/initialisation panics follow established Go patterns for fail-fast
+initialisation and are acceptable. No refactoring is required.
 
 ---
 

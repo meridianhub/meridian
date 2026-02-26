@@ -120,7 +120,7 @@ Validates that:
 **Assertions**:
 
 - 3 writes of the same event result in 1 audit log entry
-- No errors on duplicate writes (idempotent behavior)
+- No errors on duplicate writes (idempotent behaviour)
 
 ## Running the Tests
 
@@ -227,7 +227,7 @@ These E2E tests provide:
 
 Not covered (handled by unit tests):
 
-- Kafka message deserialization
+- Kafka message deserialisation
 - Message header extraction
 - Consumer group coordination
 - DLQ routing

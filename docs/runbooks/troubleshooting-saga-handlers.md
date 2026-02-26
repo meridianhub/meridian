@@ -9,7 +9,7 @@ execution errors related to service integration.
 |------------|---------|-----------|------------|
 | **Handler Not Found** | `handler not found: service.operation` | Check registration in main.go | Verify handler exists before script deployment |
 | **Invalid Parameter Type** | `expected string, got int64` | Fix Starlark script params | Use schema validation |
-| **Nil Client Panic** | `panic: nil pointer dereference` | Check client initialization order | Add nil checks in handlers |
+| **Nil Client Panic** | `panic: nil pointer dereference` | Check client initialisation order | Add nil checks in handlers |
 | **Metadata Validation Failure** | `handler produced EUR but declared USD` | Fix ProducesInstruments | Follow Conservation Rule |
 | **gRPC Timeout** | `context deadline exceeded` | Check service health | Increase timeout or fix service |
 | **Idempotency Key Collision** | `duplicate idempotency key` | Check saga replay logic | Verify key uniqueness |
@@ -121,12 +121,12 @@ level=ERROR msg="panic in handler" handler=position_keeping.initiate_log
 
 - gRPC client not initialized before RegisterStarlarkHandlers call
 - Client cleanup called before saga execution
-- Race condition in client initialization
+- Race condition in client initialisation
 
 **Solution:**
 
 ```bash
-# 1. Check service initialization order in main.go
+# 1. Check service initialisation order in main.go
 # CORRECT ORDER:
 # a) Initialize all gRPC clients
 # b) Create handler registry
@@ -210,7 +210,7 @@ if currency != "USD" && currency != "GBP" {
 
 **Prevention:**
 
-- Add integration test that verifies metadata matches actual behavior
+- Add integration test that verifies metadata matches actual behaviour
 - Code review checklist: ProducesInstruments matches handler implementation
 - Use linter to detect metadata/implementation mismatches
 
@@ -314,7 +314,7 @@ psql -d meridian -c "
 # Check prepareClientContext in starlark.go
 
 # 4. If saga genuinely stuck, manually advance
-# ⚠️ WARNING: Only perform this in emergencies with proper authorization
+# ⚠️ WARNING: Only perform this in emergencies with proper authorisation
 # Take a backup before proceeding:
 pg_dump -d meridian -t saga_instances -t step_results > saga_backup_$(date +%Y%m%d_%H%M%S).sql
 

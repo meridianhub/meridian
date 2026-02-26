@@ -21,7 +21,7 @@ instructions: |
 **When to use this runbook**: Complete infrastructure failure, data corruption, regional outage, or catastrophic events
 requiring full system recovery.
 
-> **⚠️ Customization Note**: This is a template runbook for Meridian. In a production deployment, you should customize
+> **⚠️ Customisation Note**: This is a template runbook for Meridian. In a production deployment, you should customise
 this with your specific:
 >
 > - Backup locations and credentials
@@ -524,7 +524,7 @@ Action items:
 
 ## Emergency Contacts
 
-> **⚠️ Production Setup Required**: Add your organization's emergency contacts and escalation procedures
+> **⚠️ Production Setup Required**: Add your organisation's emergency contacts and escalation procedures
 
 | Role | Contact | Backup |
 |------|---------|--------|

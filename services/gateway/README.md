@@ -24,7 +24,7 @@ instructions: |
 # Gateway Service
 
 The Gateway Service is a multi-tenant API gateway that provides authentication,
-authorization, HTTP/JSON transcoding, and request routing for the Meridian platform.
+authorisation, HTTP/JSON transcoding, and request routing for the Meridian platform.
 
 ## Overview
 
@@ -35,7 +35,7 @@ The gateway handles:
 - **JWT Authentication**: Validates Bearer tokens using JWKS (JSON Web Key Set)
 - **API Key Authentication**: Validates service-to-service API keys with rate limiting
 - **Tenant Resolution**: Extracts tenant identity from subdomain or headers
-- **Tenant Authorization**: Verifies authenticated identity is authorized for the resolved tenant
+- **Tenant Authorisation**: Verifies authenticated identity is authorised for the resolved tenant
 - **Identity Propagation**: Injects authenticated user/tenant context as gRPC metadata headers
 
 ## Architecture
@@ -94,7 +94,7 @@ The gateway applies middleware in this order for all routes:
 
 1. **Auth Middleware** (outermost): Validates JWT or API key, returns 401 if invalid
 2. **Tenant Middleware**: Resolves tenant from subdomain/header, injects into context
-3. **Tenant Authorization**: Verifies JWT tenant matches resolved tenant, returns 403 if mismatch
+3. **Tenant Authorisation**: Verifies JWT tenant matches resolved tenant, returns 403 if mismatch
 4. **Identity Propagation**: Strips spoofed identity headers; injects authenticated context as gRPC metadata
 5. **Vanguard Transcoder**: Translates REST/JSON, Connect, or gRPC-Web to native gRPC; routes to backend
 
@@ -233,7 +233,7 @@ The gateway expects JWTs with the following claims:
 ### Optional Claims
 
 - `user_id`: User identifier (defaults to `sub` if not present)
-- `roles`: Array of role names for authorization
+- `roles`: Array of role names for authorisation
 - `scopes`: Array of OAuth2 scopes
 
 ## API Key Authentication
@@ -314,7 +314,7 @@ These endpoints bypass all authentication middleware to ensure Kubernetes probes
 Returned when authentication fails:
 
 ```json
-{"error": "missing authorization header"}
+{"error": "missing authorisation header"}
 {"error": "token expired"}
 {"error": "invalid token signature"}
 {"error": "invalid API key"}
@@ -323,10 +323,10 @@ Returned when authentication fails:
 
 ### 403 Forbidden
 
-Returned when authorization fails:
+Returned when authorisation fails:
 
 ```json
-{"error": "not authorized for this tenant"}
+{"error": "not authorised for this tenant"}
 {"error": "missing tenant claim in token"}
 ```
 

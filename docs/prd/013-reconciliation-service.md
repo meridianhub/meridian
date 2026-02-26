@@ -45,7 +45,7 @@ instructions: |
 |---------------|-------------------|-----------|
 | Reconciliation Service | **Account Reconciliation** | Canonical BIAN Service Domain |
 | Settlement Run | **AccountReconciliationProcedure** | Control Record (CR) for reconciliation lifecycle |
-| Variance | **ReconciliationResult** | Behavior Qualifier capturing detected differences |
+| Variance | **ReconciliationResult** | Behaviour Qualifier capturing detected differences |
 | Settlement Snapshot | **SettlementCapture** | BQ capturing position state at settlement time |
 | Dispute | **ReconciliationDispute** | BQ for post-finality corrections |
 | Adjustment Entry | **ReconciliationAdjustment** | BQ for financial corrections |
@@ -79,7 +79,7 @@ for a specific asset type and settlement period.
 | ReconciliationAdjustment | Output | Financial correction generated from a variance |
 | SettlementCapture | Working Data | Point-in-time snapshot of measurement state |
 
-### Behavior Qualifiers
+### Behaviour Qualifiers
 
 | BQ | Lifecycle | Description |
 |----|-----------|-------------|
@@ -225,7 +225,7 @@ The reconciliation service provides the **detective control** that catches these
 | **Variance Valuation** | Price the delta using the tariff at the original period |
 | **Adjustment Orchestration** | Trigger `reconciliation_adjustment` Starlark saga for variance adjustment booking |
 | **Settlement Finality** | Request position locking in Position Keeping after final run |
-| **Dispute Management** | Handle corrections for locked (finalized) positions |
+| **Dispute Management** | Handle corrections for locked (finalised) positions |
 | **Run Scheduling** | Cron-based execution of settlement runs per asset type |
 | **Cross-Account Balance Assertions** | Verify system-wide debit/credit balance per instrument |
 
@@ -340,7 +340,7 @@ const (
 )
 ```
 
-### 4.2 Settlement Snapshot (Behavior Qualifier)
+### 4.2 Settlement Snapshot (Behaviour Qualifier)
 
 ```go
 // SettlementSnapshot captures the measurement state at settlement time.
@@ -369,7 +369,7 @@ const (
 )
 ```
 
-### 4.3 Variance (Behavior Qualifier)
+### 4.3 Variance (Behaviour Qualifier)
 
 ```go
 // Variance records a detected difference between settled and current positions.
@@ -426,10 +426,10 @@ const (
 )
 ```
 
-### 4.4 Dispute (Behavior Qualifier)
+### 4.4 Dispute (Behaviour Qualifier)
 
 ```go
-// Dispute represents a correction request for a locked (finalized) position.
+// Dispute represents a correction request for a locked (finalised) position.
 type Dispute struct {
     ID                    uuid.UUID
     AccountID             uuid.UUID
@@ -535,7 +535,7 @@ material variance, trigger the `reconciliation_adjustment` Starlark saga
 (fetched from Reference Data) to orchestrate adjustment booking via
 Payment Order.
 
-#### Step 5: Finalize (COMPLETED to FINALIZED, final runs only)
+#### Step 5: Finalise (COMPLETED to FINALIZED, final runs only)
 
 For the final settlement run (e.g., M+14 for energy), request Position Keeping
 to lock all positions in the window. After locking, any new data for these
@@ -714,7 +714,7 @@ CREATE UNIQUE INDEX idx_settlement_runs_unique_period
     ON settlement_runs(asset_code, run_type, period_start, period_end)
     WHERE status != 'FAILED';
 
--- Settlement Snapshots (Behavior Qualifier)
+-- Settlement Snapshots (Behaviour Qualifier)
 CREATE TABLE settlement_snapshots (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     settlement_run_id UUID NOT NULL REFERENCES settlement_runs(id),
@@ -737,7 +737,7 @@ CREATE INDEX idx_snapshots_run ON settlement_snapshots(settlement_run_id);
 CREATE INDEX idx_snapshots_account_period
     ON settlement_snapshots(account_id, asset_code, period_start, period_end);
 
--- Variances (Behavior Qualifier)
+-- Variances (Behaviour Qualifier)
 CREATE TABLE variances (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     settlement_run_id UUID NOT NULL REFERENCES settlement_runs(id),
@@ -769,7 +769,7 @@ CREATE TABLE variances (
 CREATE INDEX idx_variances_run ON variances(settlement_run_id);
 CREATE INDEX idx_variances_account ON variances(account_id, asset_code);
 
--- Disputes (Behavior Qualifier)
+-- Disputes (Behaviour Qualifier)
 CREATE TABLE disputes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     account_id UUID NOT NULL,
@@ -925,7 +925,7 @@ message BalanceImbalanceDetectedEvent {
 | Event | Source | Action |
 |-------|--------|--------|
 | `TransactionPosted` | Position Keeping | Potential trigger for on-demand reconciliation |
-| `MeasurementSuperseded` | Position Keeping | Mark related snapshots as stale (optimization hint) |
+| `MeasurementSuperseded` | Position Keeping | Mark related snapshots as stale (optimisation hint) |
 
 ## 10. Handler Schema Extension
 
@@ -1034,8 +1034,8 @@ def reconciliation_adjustment(ctx):
             posting_type = "reconciliation_credit",
         ))
 
-    # Step 4: Finalize booking
-    step("finalize",
+    # Step 4: Finalise booking
+    step("finalise",
         financial_accounting.update_booking_log(
             booking_log_id = booking["booking_log_id"],
             status = "POSTED",
@@ -1058,7 +1058,7 @@ by the Starlark runner with compensation handled automatically
 | 3 | Proto + gRPC service | 5 | Stream 2 | Proto definitions, service stubs, client library, Starlark handler bindings (`client/starlark.go`) |
 | 4 | Settlement snapshot capture | 8 | Stream 3 | Query PK for measurements (cursor-paginated), create snapshots in chunks |
 | 5 | Variance detection + valuation | 8 | Stream 4 | Compare snapshots to current, price deltas |
-| 6 | Settlement finality + position locking | 5 | Stream 5 | Request PK to lock positions, finalize runs |
+| 6 | Settlement finality + position locking | 5 | Stream 5 | Request PK to lock positions, finalise runs |
 | 7 | Dispute workflow | 8 | Stream 3 | Create/resolve disputes, publish events |
 | 8 | Run scheduler (worker) | 5 | Stream 5 | Cron-based settlement run scheduling |
 | 9 | Balance assertions | 5 | Stream 3 | Cross-account debit/credit verification |
@@ -1234,7 +1234,7 @@ Token validation follows the platform-standard middleware: extract
 JWT from `Authorization` header, verify signature against JWKS
 endpoint, validate `tenant_id` claim matches request context.
 
-### 16.2 Authorization
+### 16.2 Authorisation
 
 | Operation | Allowed Actors |
 |-----------|---------------|
@@ -1243,7 +1243,7 @@ endpoint, validate `tenant_id` claim matches request context.
 | Resolve dispute | Tenant admin (with audit trail) |
 | Execute balance assertion (`POSITION_LEDGER`) | Service account, Tenant admin |
 | Execute balance assertion (`CROSS_ACCOUNT`) | Service account, System admin, Auditor |
-| Lock positions (finalize) | Settlement service account only |
+| Lock positions (finalise) | Settlement service account only |
 
 **CROSS_ACCOUNT restriction:** `ScopeCrossAccount` balance assertions
 may aggregate data across parties within a tenant. Per the Party
@@ -1294,7 +1294,7 @@ enforce coarse ingress limits as an additional layer.
 
 | # | Question | Impact | Decision Needed By | Blocker? |
 |---|----------|--------|-------------------|----------|
-| 1 | Should balance assertions run per-tenant or platform-wide? | Data model (tenant scoping), authorization, query complexity for Stream 9 | PRD review | Yes - affects schema design |
+| 1 | Should balance assertions run per-tenant or platform-wide? | Data model (tenant scoping), authorisation, query complexity for Stream 9 | PRD review | Yes - affects schema design |
 | 2 | Do we need a dedicated Dispute Resolution UI or is CLI sufficient for MVP? | Stream 7 scope | Phase 3 | No |
 | 3 | Should reconciliation results be exposed through Gateway to external consumers? | API surface, security boundaries, authentication model for Stream 3 | PRD review | Yes - affects proto design |
 | 4 | How do we handle reconciliation for cross-tenant transfers (e.g., inter-company energy settlement)? | Multi-tenant settlement assumptions, data isolation model | PRD review | Yes - affects data model |
@@ -1312,7 +1312,7 @@ where practical.
 | Meridian Implementation | BIAN Standard Term | Notes |
 |------------------------|--------------------|-------|
 | `SettlementRun` | `AccountReconciliationProcedure` | Control Record (CR) |
-| `SettlementSnapshot` | `SettlementCapture` | Behavior Qualifier (BQ) - working data |
+| `SettlementSnapshot` | `SettlementCapture` | Behaviour Qualifier (BQ) - working data |
 | `Variance` | `ReconciliationResult` | BQ - detected difference |
 | `Dispute` | `ReconciliationDispute` | BQ - post-finality correction |
 | `BalanceAssertion` | `BalanceAssertion` | BQ - cross-account verification |

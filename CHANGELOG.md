@@ -89,7 +89,7 @@ The following services have handler registration functions you need to call:
 
 - **Clear Dependencies**: Explicit registration shows what services your saga orchestrates
 - **Better Testing**: Inject mock clients for unit testing
-- **No Global State**: Each service initialization creates its own registry
+- **No Global State**: Each service initialisation creates its own registry
 - **Service Ownership**: Service teams own their Starlark bindings
 - **Real Service Integration**: Handlers now call actual gRPC services with validation, resilience, and
   observability
@@ -108,13 +108,13 @@ lien_result = current_account.create_lien(
 )
 ```
 
-Only the Go initialization code in `cmd/main.go` needs to change.
+Only the Go initialisation code in `cmd/main.go` needs to change.
 
 #### Timeline for Migration
 
 - **Removed in this release**: `saga.DefaultRegistry()` global registry
 - **Added in this release**: `{service}client.RegisterStarlarkHandlers` functions
-- **Required action**: Update service initialization code in `cmd/main.go`
+- **Required action**: Update service initialisation code in `cmd/main.go`
 
 #### Documentation
 

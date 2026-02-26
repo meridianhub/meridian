@@ -5,7 +5,7 @@ triggers:
   - Creating a new microservice
   - Restructuring an existing service
   - Adding new functionality to a service (where to place files)
-  - Reviewing service organization or architecture
+  - Reviewing service organisation or architecture
   - Adding documentation (where should it go?)
   - Working with API definitions (proto, OpenAPI)
 instructions: |
@@ -62,7 +62,7 @@ Chosen option: **Flexible standard with required core**, because it provides con
 
 ### Root Project Structure
 
-The Meridian monorepo follows this root-level organization:
+The Meridian monorepo follows this root-level organisation:
 
 ```text
 meridian-main/
@@ -124,11 +124,11 @@ meridian-main/
 | `scripts/` | Tooling | Build scripts, analysis tools |
 | `utilities/` | Utilities | Standalone programs (demo tools, loaders) |
 
-#### Why Centralized `api/` at Root?
+#### Why Centralised `api/` at Root?
 
-We use a centralized `api/proto/` directory rather than placing proto files inside each service for several reasons:
+We use a centralised `api/proto/` directory rather than placing proto files inside each service for several reasons:
 
-1. **Shared types** - Common types (`common/v1/`, `events/v1/`) are used across multiple services. Centralized location avoids circular dependencies.
+1. **Shared types** - Common types (`common/v1/`, `events/v1/`) are used across multiple services. Centralised location avoids circular dependencies.
 2. **Contract-first development** - Protos define contracts between services. Having them together makes the API surface visible at a glance.
 3. **Buf tooling** - Single `buf.yaml` workspace simplifies linting, breaking change detection, and code generation.
 4. **BIAN domain pattern** - Banking services share domain concepts (Money, Account references) that naturally live together.
@@ -220,7 +220,7 @@ services/{service-name}/
 | Directory | When to Add | Example Use Case |
 |-----------|-------------|------------------|
 | `client/` | Service exports client for others | party exporting client for current-account |
-| `app/` | Complex initialization logic | Services needing DI containers, complex config |
+| `app/` | Complex initialisation logic | Services needing DI containers, complex config |
 | `adapters/messaging/` | Kafka integration | Event publishing/consuming |
 | `adapters/gateway/` | External API integration | ISO 20022 gateway adapters |
 | `adapters/http/` | REST endpoints | Health probes, admin endpoints |
@@ -260,12 +260,12 @@ All observability code (metrics, health checks) should live in the `observabilit
 
 ### App Directory Pattern
 
-The `app/` directory is optional and should only be added when a service has complex initialization needs:
+The `app/` directory is optional and should only be added when a service has complex initialisation needs:
 - Dependency injection containers
 - Multi-stage configuration loading
 - Complex resource lifecycle management
 
-Simple services should keep initialization logic in `cmd/main.go`.
+Simple services should keep initialisation logic in `cmd/main.go`.
 
 ### Shared Libraries
 
@@ -293,12 +293,12 @@ The `MetricsInterceptor` and `RecoveryUnaryInterceptor` in `shared/pkg/intercept
 
 ## References
 
-Industry best practices supporting centralized API definitions in Go monorepos:
+Industry best practices supporting centralised API definitions in Go monorepos:
 
-* [Buf: Files and Packages](https://buf.build/docs/reference/protobuf-files-and-packages/) - Official buf.build guidance on proto file organization
-* [Structuring repositories with protocol buffers](https://dev.to/davidsbond/golang-structuring-repositories-with-protocol-buffers-3012) - Go-specific patterns for proto organization
+* [Buf: Files and Packages](https://buf.build/docs/reference/protobuf-files-and-packages/) - Official buf.build guidance on proto file organisation
+* [Structuring repositories with protocol buffers](https://dev.to/davidsbond/golang-structuring-repositories-with-protocol-buffers-3012) - Go-specific patterns for proto organisation
 * [golang/protobuf Issue #391](https://github.com/golang/protobuf/issues/391) - Community discussion on project structure with multiple services
-* [gRPC organization in microservices (Stack Overflow)](https://stackoverflow.com/questions/56082458/grpc-organization-in-microservices) - Centralized vs distributed proto patterns
+* [gRPC organisation in microservices (Stack Overflow)](https://stackoverflow.com/questions/56082458/grpc-organisation-in-microservices) - Centralised vs distributed proto patterns
 
 ## Notes
 

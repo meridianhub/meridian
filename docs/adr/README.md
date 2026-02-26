@@ -69,7 +69,7 @@ Architectural Decision Records) format.
 | [ADR-0023](0023-balance-delegation-to-position-keeping.md) | Balance Delegation to Position Keeping | Accepted | 2026-01-08 |
 | [ADR-0024](0024-internal-account-service.md) | Internal Account Service Domain | Accepted | 2026-01-15 |
 <!-- markdownlint-disable-next-line MD013 -->
-| [ADR-0025](0025-clearing-purpose-specialization.md) | Clearing Purpose Specialization | Accepted | 2026-01-16 |
+| [ADR-0025](0025-clearing-purpose-specialisation.md) | Clearing Purpose Specialisation | Accepted | 2026-01-16 |
 <!-- markdownlint-disable-next-line MD013 -->
 | [ADR-0026](0026-canonical-ingestion-contract.md) | Canonical Ingestion Contract | Accepted | 2026-01-17 |
 <!-- markdownlint-disable-next-line MD013 -->
@@ -130,7 +130,7 @@ graph LR
 - [ADR-0018](0018-settlement-reconciliation.md) - Settlement & Reconciliation (Lifecycle)
 - [ADR-0023](0023-balance-delegation-to-position-keeping.md) - Balance Delegation to Position Keeping
 - [ADR-0024](0024-internal-account-service.md) - Internal Account Service Domain
-- [ADR-0025](0025-clearing-purpose-specialization.md) - Clearing Purpose Specialization
+- [ADR-0025](0025-clearing-purpose-specialisation.md) - Clearing Purpose Specialisation
 - [ADR-0026](0026-canonical-ingestion-contract.md) - Canonical Ingestion Contract
 
 ### Development Environment & Infrastructure

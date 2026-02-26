@@ -156,8 +156,8 @@ Common platform services (database, Kafka, auth, observability) will be in:
 ```text
 platform/
 ├── database/        # Connection pooling, transaction management
-├── kafka/           # Producer/consumer utilities with protobuf serialization
-├── auth/            # JWT validation, authorization
+├── kafka/           # Producer/consumer utilities with protobuf serialisation
+├── auth/            # JWT validation, authorisation
 ├── observability/   # OpenTelemetry, logging, metrics
 └── idempotency/     # Redis-based idempotency keys
 ```
@@ -165,7 +165,7 @@ platform/
 ### Inter-Service Communication
 
 * Synchronous: gRPC with Protobuf (leveraging existing API contracts)
-* Asynchronous: Kafka events with protobuf serialization (validated via `buf breaking` in CI)
+* Asynchronous: Kafka events with protobuf serialisation (validated via `buf breaking` in CI)
 * Service discovery: Kubernetes DNS
 * Load balancing: Kubernetes Service resources + gRPC client-side load balancing
 
@@ -210,8 +210,8 @@ On failure at any step:
 * **Explicit control flow**: Orchestrator explicitly calls each service step-by-step
 * **Business logic visibility**: Saga logic lives in CurrentAccount domain code, not infrastructure
 * **Debugging**: Clear call stack for transaction flow
-* **BIAN alignment**: BIAN's "Execute" behavior qualifiers map naturally to orchestration
-* **Error handling**: Centralized compensation logic in orchestrator
+* **BIAN alignment**: BIAN's "Execute" behaviour qualifiers map naturally to orchestration
+* **Error handling**: Centralised compensation logic in orchestrator
 
 ### Alternatives Considered
 
@@ -320,7 +320,7 @@ func (s *CurrentAccountService) ExecuteDeposit(ctx context.Context, req *pb.Exec
 * ✅ Debuggability: Single call stack for transaction flow
 * ✅ BIAN alignment: Maps naturally to BIAN's orchestration patterns
 * ✅ Testability: Orchestrator logic is unit-testable
-* ✅ Monitoring: Centralized metrics for transaction success/failure
+* ✅ Monitoring: Centralised metrics for transaction success/failure
 
 **Negative:**
 

@@ -33,7 +33,7 @@ AST-based analysis that catches common mistakes:
 
 | Issue | Severity | Description |
 |-------|----------|-------------|
-| Decimal arithmetic | Warning | Decimal math should use CEL expressions |
+| Decimal arithmetic | Warning | Decimal maths should use CEL expressions |
 | Magic numbers | Warning | Hardcoded numeric literals |
 | Nested conditionals | Warning | Deep if/else nesting |
 | Hardcoded codes | Error | Hardcoded instrument or account codes |

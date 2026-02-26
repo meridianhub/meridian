@@ -259,7 +259,7 @@ func TestConcurrentOperations(t *testing.T) {
 
 ## Mocking Guidelines
 
-Minimize mocking. Prefer real implementations where practical:
+Minimise mocking. Prefer real implementations where practical:
 
 1. **Use testcontainers** for database tests (real PostgreSQL)
 2. **Use in-memory implementations** for simple interfaces
@@ -283,7 +283,7 @@ client := new(MockClient)
 client.On("Send", mock.Anything, expectedMsg).Return(nil)
 ```
 
-## Test Organization
+## Test Organisation
 
 ```text
 service/

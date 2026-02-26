@@ -1,16 +1,16 @@
-# Multi-Organization Settlement Demo
+# Multi-Organisation Settlement Demo
 
-This document describes the multi-organization (multi-tenancy) demonstration for
-Meridian, showcasing complete data isolation between organizations while enabling
-cross-organization settlement via external protocols.
+This document describes the multi-organisation (multi-tenancy) demonstration for
+Meridian, showcasing complete data isolation between organisations while enabling
+cross-organisation settlement via external protocols.
 
 ## Overview
 
-Meridian supports multiple organizations running on shared infrastructure with
-complete data isolation. This demo provisions four organizations representing
+Meridian supports multiple organisations running on shared infrastructure with
+complete data isolation. This demo provisions four organisations representing
 diverse use cases:
 
-| Organization | Display Name | Settlement Asset | Use Case |
+| Organisation | Display Name | Settlement Asset | Use Case |
 |--------------|--------------|------------------|----------|
 | `meridian` | Meridian Control Plane | USD | Tenant Zero - hosts control plane |
 | `post_office` | UK Post Office | GBP | Traditional fiat banking |
@@ -48,10 +48,10 @@ diverse use cases:
 
 **Key Points:**
 
-- Each organization gets a dedicated PostgreSQL schema (`org_<id>`)
+- Each organisation gets a dedicated PostgreSQL schema (`org_<id>`)
 - JWT tokens include `x-tenant-id` claim
 - `SET LOCAL search_path = org_<id>` enforces isolation at the database level
-- No cross-organization queries are possible
+- No cross-organisation queries are possible
 
 ## Prerequisites
 
@@ -79,13 +79,13 @@ Before running the demo:
 Run the full demo sequence:
 
 ```bash
-# 1. Provision organizations (creates schemas and registry entries)
-./scripts/demo-provision-organizations.sh
+# 1. Provision organisations (creates schemas and registry entries)
+./scripts/demo-provision-organisations.sh
 
 # 2. Seed demo accounts and balances
 ./scripts/demo-seed-data.sh
 
-# 3. Run cross-organization settlement demo
+# 3. Run cross-organisation settlement demo
 ./scripts/demo-cross-org-settlement.sh
 
 # 4. Validate the environment
@@ -94,11 +94,11 @@ Run the full demo sequence:
 
 ## Demo Scripts
 
-### Organization Provisioning
+### Organisation Provisioning
 
-`./scripts/demo-provision-organizations.sh`
+`./scripts/demo-provision-organisations.sh`
 
-Provisions the four demo organizations using the `orgctl` CLI:
+Provisions the four demo organisations using the `orgctl` CLI:
 
 ```bash
 # Example manual provisioning
@@ -110,8 +110,8 @@ Provisions the four demo organizations using the `orgctl` CLI:
 
 **What it creates:**
 
-- Organization registry entries (stored in `org_meridian.organizations` table)
-- Database schemas for each organization (`org_post_office`, `org_motive`, etc.)
+- Organisation registry entries (stored in `org_meridian.organisations` table)
+- Database schemas for each organisation (`org_post_office`, `org_motive`, etc.)
 - Keycloak client configurations (optional)
 
 ### Seed Data
@@ -120,14 +120,14 @@ Provisions the four demo organizations using the `orgctl` CLI:
 
 Creates demo accounts and balances:
 
-| Organization | Accounts | Initial Balance |
+| Organisation | Accounts | Initial Balance |
 |--------------|----------|-----------------|
 | `post_office` | 5 customer accounts | GBP 1,000 each |
 | `motive` | 3 provider accounts | 100 GPU-hours each |
 | `un_wfp` | 10 beneficiary accounts | 1,000 vouchers each |
 | `meridian` | 1 treasury account | USD 1,000,000 |
 
-### Cross-Organization Settlement
+### Cross-Organisation Settlement
 
 `./scripts/demo-cross-org-settlement.sh`
 
@@ -157,8 +157,8 @@ Automated validation of the demo environment:
 
 - Service health checks
 - Kubernetes pod status
-- Organization provisioning
-- Organization isolation (schema separation)
+- Organisation provisioning
+- Organisation isolation (schema separation)
 - Keycloak configuration
 - Database schema validation
 - Observability stack
@@ -168,10 +168,10 @@ Automated validation of the demo environment:
 
 ## Manual Verification
 
-### Verify Organization Isolation
+### Verify Organisation Isolation
 
 ```bash
-# List organizations
+# List organisations
 ./orgctl list
 
 # Try to access Post Office account from Motive context (should fail)
@@ -179,7 +179,7 @@ grpcurl -plaintext -H "x-tenant-id:motive" \
   -d '{"account_id": "po-customer-1"}' \
   localhost:50051 meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount
 
-# Access account from correct organization context (should succeed)
+# Access account from correct organisation context (should succeed)
 grpcurl -plaintext -H "x-tenant-id:post_office" \
   -d '{"account_id": "po-customer-1"}' \
   localhost:50051 meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount
@@ -191,7 +191,7 @@ grpcurl -plaintext -H "x-tenant-id:post_office" \
 # Connect to CockroachDB
 kubectl exec -it cockroachdb-0 -- ./cockroach sql --insecure
 
-# List organization schemas
+# List organisation schemas
 SELECT schema_name FROM information_schema.schemata
 WHERE schema_name LIKE 'org_%';
 
@@ -213,34 +213,34 @@ open http://localhost:3000
 # Prometheus queries
 open http://localhost:9090
 
-# Query by organization
+# Query by organisation
 # In Prometheus: {tenant="post_office"}
 ```
 
 ## Tenant Zero Pattern
 
-The `meridian` organization is special - it serves as "Tenant Zero" or the
-control plane organization:
+The `meridian` organisation is special - it serves as "Tenant Zero" or the
+control plane organisation:
 
-- Hosts the `organization.organizations` registry table
-- Future: Billing and usage tracking for customer organizations
+- Hosts the `organisation.organisations` registry table
+- Future: Billing and usage tracking for customer organisations
 - Demonstrates dogfooding: Meridian runs on Meridian
 
-**Note:** The control plane organization does NOT participate in customer
+**Note:** The control plane organisation does NOT participate in customer
 settlements - it only provides infrastructure.
 
 ## Security Model
 
 ### Data Isolation
 
-- **Schema-level isolation**: Each organization has a dedicated PostgreSQL
+- **Schema-level isolation**: Each organisation has a dedicated PostgreSQL
   schema
 - **Query enforcement**: `SET LOCAL search_path = org_<id>` executed at the
   start of every transaction
 - **JWT claims**: `x-tenant-id` claim in access tokens
 - **Request validation**: Missing/invalid tenant context routes to DLQ
 
-### Cross-Organization Access
+### Cross-Organisation Access
 
 - **No direct access**: Organizations cannot query each other's data
 - **External settlement**: Cross-org transactions use external DEX protocols
@@ -262,20 +262,20 @@ kubectl get pods
 kubectl logs -l app=current-account --tail=100
 ```
 
-### Organization Not Found
+### Organisation Not Found
 
 ```bash
-# Verify organization exists
+# Verify organisation exists
 ./orgctl list
 
 # Re-run provisioning (idempotent)
-./scripts/demo-provision-organizations.sh
+./scripts/demo-provision-organisations.sh
 ```
 
 ### Account Not Found
 
 ```bash
-# Verify correct organization context
+# Verify correct organisation context
 grpcurl -plaintext -H "x-tenant-id:<correct_org>" \
   -d '{"account_id": "<account_id>"}' \
   localhost:50051 meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount
@@ -303,7 +303,7 @@ After running the demo:
 2. **Explore Tempo traces** with `tenant.id` attribute
 3. **Run the Horizon Integrity Proof** (`./scripts/demo.sh`) to verify
    idempotency
-4. **Scale services** to test load balancing across organizations
+4. **Scale services** to test load balancing across organisations
 
 ## Related Documentation
 

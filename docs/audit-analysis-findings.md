@@ -1,7 +1,7 @@
 # Async Audit Implementation Analysis Findings
 
 **Date**: 2024-12-24
-**Task**: 19.1 - Analysis phase for final optimization and DRY review
+**Task**: 19.1 - Analysis phase for final optimisation and DRY review
 **Scope**: 6 services (tenant, payment-order, party, position-keeping, financial-accounting, current-account)
 
 ## Executive Summary
@@ -31,7 +31,7 @@ The payment-order service maintains a **complete local copy** of the audit infra
 **Impact**:
 
 - Maintenance burden (changes must be made in two places)
-- Inconsistent behavior (local version uses `uuid.UUID` for RecordID, shared uses `string`)
+- Inconsistent behaviour (local version uses `uuid.UUID` for RecordID, shared uses `string`)
 - Missed Kafka integration (local version writes directly to outbox, shared version attempts Kafka first)
 
 **Recommendation**: Migrate payment-order to use shared audit library. This requires:

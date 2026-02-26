@@ -546,7 +546,7 @@ Sagas execute within a party scope, ensuring data isolation across organizationa
 ctx.party_scope = PartyScope(
     party_id = "P001",                    # Executing party
     party_type = "ORGANIZATION",          # INDIVIDUAL, ORGANIZATION
-    visible_parties = ["P001", "P002"],   # Party + authorized children
+    visible_parties = ["P001", "P002"],   # Party + authorised children
 )
 
 # All lookups are automatically scoped
@@ -735,7 +735,7 @@ func createLienHandler(client *Client) saga.Handler {
 
 ### Dependency Injection Over Global Registry
 
-Services explicitly declare their saga handler dependencies during initialization:
+Services explicitly declare their saga handler dependencies during initialisation:
 
 **Before (global registry - problematic)**:
 
@@ -830,7 +830,7 @@ data corruption could occur.
 
 * **Tenant flexibility**: Different posting patterns without code deployment
 * **1:N posting support**: One position entry generates dynamic number of postings
-* **Separation of concerns**: Business logic in Starlark, financial math in CEL
+* **Separation of concerns**: Business logic in Starlark, financial maths in CEL
 * **Hot-reloadable**: Saga changes without service restart
 * **Auditability**: Versioned definitions with full history in reference data
 * **Testability**: Unit test posting rules independently; dry-run API for validation
@@ -901,12 +901,12 @@ For non-technical stakeholders:
 * **CEL is the "Policy"**: "This is the formula for how we calculate the price." Policies are rigid, fast, and auditable.
 * **Starlark is the "Procedure"**: "This is the sequence of steps we take to settle a transaction." Procedures are flexible and handle real-world complexity.
 
-**Value proposition**: The system is **Flexible** (procedures can change without deployment) but **Rock-Solid** (financial math is enforced by a mathematical engine with guaranteed termination).
+**Value proposition**: The system is **Flexible** (procedures can change without deployment) but **Rock-Solid** (financial maths is enforced by a mathematical engine with guaranteed termination).
 
 ### Reconsidering This Decision
 
 Revisit if:
 - Starlark execution becomes a performance bottleneck (>5ms per saga)
 - Debugging complexity outweighs flexibility benefits
-- Tenant-specific saga customization proves unnecessary
+- Tenant-specific saga customisation proves unnecessary
 - A superior embedded scripting solution emerges

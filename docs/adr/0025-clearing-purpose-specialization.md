@@ -1,5 +1,5 @@
 ---
-name: adr-025-clearing-purpose-specialization
+name: adr-025-clearing-purpose-specialisation
 description: Distinguish clearing accounts by purpose (deposit/withdrawal/settlement/general) for precise account resolution
 triggers:
   - Resolving clearing accounts for specific operations
@@ -11,7 +11,7 @@ instructions: |
   by purpose using clearing_purpose_filter in ListInternalAccounts RPC.
 ---
 
-# 25. Clearing Purpose Specialization
+# 25. Clearing Purpose Specialisation
 
 Date: 2026-01-16
 

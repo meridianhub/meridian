@@ -41,7 +41,7 @@ deployments/k8s/
 
 ### Development (dev)
 
-Optimized for local development with minimal resource usage:
+Optimised for local development with minimal resource usage:
 
 - **Replicas**: 1 (single instance)
 - **Resources**:
@@ -155,7 +155,7 @@ diff <(kubectl kustomize deployments/k8s/overlays/staging) \
      <(kubectl kustomize deployments/k8s/overlays/production)
 ```
 
-## Customization Patterns
+## Customisation Patterns
 
 ### Adding Environment-Specific Configuration
 
@@ -237,7 +237,7 @@ patches:
       value: "custom-value"
 ```
 
-### ConfigMap Customization
+### ConfigMap Customisation
 
 Each environment merges ConfigMap values with the base configuration:
 
@@ -246,7 +246,7 @@ configMapGenerator:
 
 - name: meridian-config
 
-  behavior: merge
+  behaviour: merge
   literals:
 
   - log_level=debug
@@ -254,7 +254,7 @@ configMapGenerator:
 
 ```
 
-The `behavior: merge` ensures base configuration is preserved while adding/overriding specific values.
+The `behaviour: merge` ensures base configuration is preserved while adding/overriding specific values.
 
 ## CI/CD Integration
 
@@ -356,14 +356,14 @@ kubectl get all -n production
 
 ### ConfigMap Merge Not Working
 
-Ensure `behavior: merge` is set in the overlay's configMapGenerator:
+Ensure `behaviour: merge` is set in the overlay's configMapGenerator:
 
 ```yaml
 configMapGenerator:
 
 - name: meridian-config
 
-  behavior: merge  # Required for merging with base
+  behaviour: merge  # Required for merging with base
   literals:
 
   - key=value

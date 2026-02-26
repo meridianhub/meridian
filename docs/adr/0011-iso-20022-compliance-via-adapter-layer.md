@@ -82,7 +82,7 @@ Maintain separate internal and external schema sets with no shared types.
 
 - Good, because complete independence between internal and external
 - Bad, because creates significant duplication
-- Bad, because synchronization burden between schema sets
+- Bad, because synchronisation burden between schema sets
 - Bad, because translation errors harder to catch at compile time
 - Bad, because violates DRY principle excessively
 
@@ -97,7 +97,7 @@ maintain clean domain boundaries while supporting external compliance requiremen
 External Systems (ISO 20022)
         ↕
    [Adapter Layer]
-   - ISO 20022 XML/JSON serialization
+   - ISO 20022 XML/JSON serialisation
    - Domain ↔ ISO 20022 mapping
    - Validation against XSD schemas
         ↕
@@ -113,7 +113,7 @@ External Systems (ISO 20022)
 **Key Principles:**
 
 1. **Domain Integrity**: Internal protobuf schemas remain BIAN-focused, simple, and stable
-2. **Adapter Responsibility**: ISO 20022 adapters handle all translation, validation, and serialization
+2. **Adapter Responsibility**: ISO 20022 adapters handle all translation, validation, and serialisation
 3. **Port Abstraction**: Port interfaces define domain operations independent of external formats
 4. **Multiple Implementations**: Each external standard gets its own adapter (ISO 20022, SWIFT MT, etc.)
 
@@ -204,7 +204,7 @@ func mapAmount(m *money.Money) pain001.ActiveCurrencyAndAmount {
 
 ### Negative Consequences
 
-- Translation layer adds runtime overhead (mitigated by one-time serialization cost)
+- Translation layer adds runtime overhead (mitigated by one-time serialisation cost)
 - Mapping logic must be maintained separately from domain model
 - Potential for translation bugs between domain and external format
 - Requires discipline to keep domain pure and resist leaking external concerns
@@ -321,10 +321,10 @@ Current internal schemas require no changes. Adapter implementation is additive:
 
 ### Performance Considerations
 
-- Adapter serialization is one-time cost at system boundary
+- Adapter serialisation is one-time cost at system boundary
 - Caching compiled XSD schemas for validation
 - Streaming XML generation for large message sets
-- Monitor translation overhead, optimize hot paths if needed
+- Monitor translation overhead, optimise hot paths if needed
 
 ### Extensibility
 

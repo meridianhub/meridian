@@ -8,7 +8,7 @@ triggers:
   - Understanding platform economics and cost allocation
   - Debugging utilization metering pipelines
 instructions: |
-  Utilization Metering Consumer is a centralized Kafka consumer that tracks platform usage
+  Utilization Metering Consumer is a centralised Kafka consumer that tracks platform usage
   for billing purposes by consuming audit events from all domain services.
 
   Key concepts:
@@ -21,7 +21,7 @@ instructions: |
   Architecture patterns:
   - Fire-and-forget event consumption (at-least-once semantics)
   - Universal Asset System for multi-dimensional billing (TRANSACTION, API_CALL, STORAGE_GB, etc.)
-  - Centralized transformation logic with service-specific instrument mapping
+  - Centralised transformation logic with service-specific instrument mapping
   - Tenant-zero isolation for platform billing data
 
   Port: 8080 (HTTP - health checks and metrics)
@@ -29,7 +29,7 @@ instructions: |
 
 # Utilization Metering Consumer
 
-Centralized Kafka consumer for platform billing that transforms audit events into utilization measurements.
+Centralised Kafka consumer for platform billing that transforms audit events into utilization measurements.
 
 ## Overview
 
@@ -58,7 +58,7 @@ billing logic into individual domain services.
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/healthz` | GET | Liveness probe (always returns OK) |
-| `/ready` | GET | Readiness probe (checks consumer initialization) |
+| `/ready` | GET | Readiness probe (checks consumer initialisation) |
 | `/metrics` | GET | Prometheus metrics endpoint |
 
 ## Domain Model
@@ -102,7 +102,7 @@ classDiagram
 
 ## Architecture
 
-### Centralized Consumer Design
+### Centralised Consumer Design
 
 Unlike per-service audit consumers, this service:
 
@@ -215,7 +215,7 @@ for each tenant's usage. This allows flexible billing structures (e.g., reseller
 }
 ```
 
-**Default Behavior:** If a tenant is not in the mapping, it maps to itself (tenant bills itself).
+**Default Behaviour:** If a tenant is not in the mapping, it maps to itself (tenant bills itself).
 
 **Tenant-Zero Special Case:** Tenant-zero always maps to itself to prevent circular billing.
 
@@ -269,7 +269,7 @@ The HorizontalPodAutoscaler scales based on:
 
 3. **Memory Utilization** (80% threshold)
 
-**Scaling Behavior:**
+**Scaling Behaviour:**
 
 - **Min Replicas:** 1 (always at least one consumer)
 - **Max Replicas:** 5 (limit concurrent consumers)
@@ -313,7 +313,7 @@ Unlike transactional outbox patterns, this consumer:
 |------------|----------|--------|
 | Invalid Event Format | Log error, skip event, commit offset | Single event lost (logged for investigation) |
 | Unknown Service | Log warning, use default instrument, continue | Measurement recorded with generic type |
-| Missing Tenant Mapping | Use tenant-as-billing-account, continue | Tenant bills itself (default behavior) |
+| Missing Tenant Mapping | Use tenant-as-billing-account, continue | Tenant bills itself (default behaviour) |
 
 ### Position Keeping API Errors
 
@@ -389,7 +389,7 @@ kubectl apply -f services/utilization-metering-consumer/k8s/
 ### Consumer Not Starting
 
 ```bash
-# Check logs for initialization errors
+# Check logs for initialisation errors
 kubectl logs -f deployment/utilization-metering-consumer
 
 # Common issues:

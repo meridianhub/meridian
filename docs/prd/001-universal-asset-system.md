@@ -5,13 +5,13 @@ triggers:
   - Implementing multi-asset or universal asset support
   - Working on InstrumentType, Quantity, or asset definitions
   - Adding new asset types (commodities, energy, vouchers)
-  - Designing tenant-specific asset catalogs
+  - Designing tenant-specific asset catalogues
   - Implementing dimensional safety or asset quantity types
   - Working on reference data service
 instructions: |
   This PRD defines the Universal Asset System for multi-asset ledger support.
   Key patterns: Use Go generics for dimensional safety (Monetary vs Commodity).
-  Assets are configured via database, not code. Each tenant has isolated catalog.
+  Assets are configured via database, not code. Each tenant has isolated catalogue.
   Refer to ADR-0013 (Quantity Types) and ADR-0014 (Reference Data) for implementation.
   Immutable proto contracts are defined in Zero-State Contract section - never modify.
 ---
@@ -36,10 +36,10 @@ dimensional safety.
 1. **Dimensional safety**: Prevent physics errors (money + rice) via Go generics
    > *Clarification*: In a distributed system with dynamic schemas, you cannot have true "compile-time"
    > safety for tenant-defined assets (the compiler doesn't know "Rice" exists). What we have is
-   > **dimensional safety**: the platform knows at compile time that `Monetary` math is distinct from
-   > `Commodity` math, preventing accidental treatment of commodity balances as cash during settlement.
+   > **dimensional safety**: the platform knows at compile time that `Monetary` maths is distinct from
+   > `Commodity` maths, preventing accidental treatment of commodity balances as cash during settlement.
 2. **Runtime flexibility**: New assets via database configuration, not code
-3. **Tenant isolation**: Each tenant has their own asset catalog
+3. **Tenant isolation**: Each tenant has their own asset catalogue
 4. **Valuation foundation**: Rate type for asset-to-currency conversion (providers in future PRD)
 
 ### Non-Goals (Simplified Scope)
@@ -58,7 +58,7 @@ dimensional safety.
 - [Zero-State Contract (IMMUTABLE)](#zero-state-contract-immutable)
 - [CEL Validation Pattern](#cel-validation-pattern)
 - [Data Contract: Proto + CEL + Go](#data-contract-proto--cel--go)
-- [Asset Catalog (Open Source Library)](#asset-catalog-open-source-library)
+- [Asset Catalogue (Open Source Library)](#asset-catalogue-open-source-library)
 - [Fungibility Resolution](#fungibility-resolution)
 - [Service Impact Matrix](#service-impact-matrix)
 - [Work Streams](#work-streams)
@@ -122,7 +122,7 @@ message AttributeEntry {
 // CEL handles the letter (attributes validation, bucket key generation).
 message InstrumentAmount {
     // The quantity magnitude (decimal string for precision).
-    // Native Go math handles this. CEL accesses via 'amount' variable.
+    // Native Go maths handles this. CEL accesses via 'amount' variable.
     string amount = 1;
 
     // The Identity of the asset.
@@ -582,7 +582,7 @@ result, _ := cached.ValidationProgram.Eval(celVars)
 
 ---
 
-## Asset Catalog (Open Source Library)
+## Asset Catalogue (Open Source Library)
 
 The PRD defines a flexible system where tenants can create custom instruments with CEL expressions.
 However, expecting every tenant to write CEL from scratch is operationally impractical. We need a
@@ -679,7 +679,7 @@ tests:
 ### Goal: Asset Marketplace
 
 Enable a library of asset types (EU Carbon Credits, ISDA Swaps, US Treasuries, GPU Compute Hours)
-contributed by domain experts. Tenants select from the catalog rather than writing CEL from scratch.
+contributed by domain experts. Tenants select from the catalogue rather than writing CEL from scratch.
 
 > **Implementation tasks** are defined in Stream F (F.4 and F.5).
 
@@ -688,7 +688,7 @@ contributed by domain experts. Tenants select from the catalog rather than writi
 ## Fungibility Resolution
 
 Beyond ingestion validation, CEL handles **operational predicates** that determine position
-behavior. This extends CEL from "is this data valid?" to "can these positions be combined?"
+behaviour. This extends CEL from "is this data valid?" to "can these positions be combined?"
 
 ### The Bucket Key Pattern (Sole Source of Truth)
 
@@ -759,7 +759,7 @@ bucket_key(['contract_id', 'expiry_month'])
 // Note: Pre-compute expiry_month in validation, store as attribute
 
 // Example 4: Complex matching (Vintage 2023 and 2024 are fungible)
-// Use validation_expression to normalize vintage to "recent" before bucketing:
+// Use validation_expression to normalise vintage to "recent" before bucketing:
 // validation: if int(attributes.vintage) >= 2023 then attributes.vintage = "recent"
 bucket_key(['region', 'vintage'])
 ```
@@ -774,7 +774,7 @@ bucket_key(['region', 'vintage'])
 > These two chemically different positions become fungible and the ledger merges them.
 > The `bucket_key()` function uses length-prefixed hashing to prevent this attack.
 >
-> **Key Design**: If you need "Vintage 2023 matches 2024", normalize in validation
+> **Key Design**: If you need "Vintage 2023 matches 2024", normalise in validation
 > (set `vintage="recent"` for both), then use `bucket_key(['region', 'vintage'])`.
 
 ### How Bucket & Verify Affects the Ledger
@@ -892,7 +892,7 @@ attributes.contract_id + "|" + string(int(attributes.period_start) / 3600)
 - Creates a new distinct position (accumulation), OR
 - Fails with `ErrPositionsNotFungible` (strict mode)
 
-The behavior is configurable per instrument.
+The behaviour is configurable per instrument.
 
 ---
 
@@ -1035,7 +1035,7 @@ Stream I.1 (Position Keeping) is split into **Write Path** and **Read Path** sub
 | Sub-Stream | Focus | Agent Specialty |
 |------------|-------|-----------------|
 | **I.1 (Write)** | `RecordMeasurement`, CEL validation, bucket key | CEL-heavy, AttributeBag pooling |
-| **I.1R (Read)** | `GetAggregatedPosition`, SQL GROUP BY | SQL-heavy, query optimization |
+| **I.1R (Read)** | `GetAggregatedPosition`, SQL GROUP BY | SQL-heavy, query optimisation |
 
 **Rationale**: These are different problem domains. One agent focuses on CEL complexity,
 the other on SQL query performance. This prevents context-switching overhead.
@@ -1064,12 +1064,12 @@ the other on SQL query performance. This prevents context-switching overhead.
    type Instrument struct {
        Code      string    // "USD", "KWH", "GPU-H100"
        Version   uint32    // Schema version
-       Dimension string    // "Monetary" or "Commodity" - required for deserialization
-       Precision int       // Decimal places (for display formatting; math uses arbitrary precision)
+       Dimension string    // "Monetary" or "Commodity" - required for deserialisation
+       Precision int       // Decimal places (for display formatting; maths uses arbitrary precision)
    }
    ```
 
-   > **Serialization note**: `Dimension` is stored as a string (not type parameter) because
+   > **Serialisation note**: `Dimension` is stored as a string (not type parameter) because
    > Go generics are erased at runtime. When deserializing from DB/proto, we use `Dimension`
    > to reconstruct the correct `Quantity[Monetary]` or `Quantity[Commodity]` at the boundary.
 
@@ -1265,7 +1265,7 @@ the other on SQL query performance. This prevents context-switching overhead.
 **Location:** `shared/platform/quantity/`
 **Dependencies:** Stream A (Quantity, Instrument types)
 
-> **Scope boundary**: This stream covers the Rate data structure and basic conversion math only.
+> **Scope boundary**: This stream covers the Rate data structure and basic conversion maths only.
 > ValuationProvider interface and orchestration belongs in a future Valuation Engine PRD (ADR-019).
 
 ### Deliverables
@@ -1347,7 +1347,7 @@ the other on SQL query performance. This prevents context-switching overhead.
 **Dependencies:** Stream A (type design, can work from ADR spec)
 
 > **Proto vs CEL**: Protobuf defines the **Container** (data structure). CEL is the **Gatekeeper**
-> (validation logic). Proto messages are pure data carriers with no behavior. CEL expressions
+> (validation logic). Proto messages are pure data carriers with no behaviour. CEL expressions
 > are compiled and executed by the service layer to validate attribute payloads.
 
 ### Deliverables
@@ -1650,7 +1650,7 @@ the other on SQL query performance. This prevents context-switching overhead.
            // CRITICAL: Use ON CONFLICT DO NOTHING, not UPSERT
            // In distributed deployment (5 replicas starting simultaneously),
            // all will race to insert. Only one wins; others hit conflict.
-           // DO NOT log conflict as error - it's expected behavior.
+           // DO NOT log conflict as error - it's expected behaviour.
            if err := s.repo.InsertIfNotExists(ctx, inst); err != nil {
                return fmt.Errorf("bootstrap instrument %s: %w", inst.Code, err)
            }
@@ -1681,7 +1681,7 @@ the other on SQL query performance. This prevents context-switching overhead.
    > When 5 Kubernetes replicas start simultaneously, they all race to INSERT system instruments.
    > Using `ON CONFLICT DO NOTHING` ensures only one wins, others silently succeed (no error).
    >
-   > **CRITICAL**: Do NOT log "unique constraint violation" as an error. It's expected behavior
+   > **CRITICAL**: Do NOT log "unique constraint violation" as an error. It's expected behaviour
    > in distributed deployments. The InsertIfNotExists pattern treats conflict as success.
    >
    > **Alternative (Kubernetes Job)**: For stricter control, run seeding as a Helm pre-install hook:
@@ -1982,7 +1982,7 @@ the other on SQL query performance. This prevents context-switching overhead.
    > **CEL Version Pinning (CRITICAL for Determinism)**
    >
    > CEL expressions generate `bucket_id` values stored permanently in the database.
-   > If cel-go library behavior changes (function semantics, type coercion), calculated
+   > If cel-go library behaviour changes (function semantics, type coercion), calculated
    > keys may shift, causing position splits or merges.
    >
    > **Requirements:**
@@ -2044,7 +2044,7 @@ the other on SQL query performance. This prevents context-switching overhead.
    }
 
    // SafeParseLib provides safe string parsing functions to avoid "Date Format Hell".
-   // Tenants MUST use these instead of raw CEL type coercion for consistent behavior.
+   // Tenants MUST use these instead of raw CEL type coercion for consistent behaviour.
    //
    // Functions:
    //   parse_iso_date(string) -> timestamp  // Strict ISO 8601: "2025-01-15T00:00:00Z"
@@ -2317,7 +2317,7 @@ the other on SQL query performance. This prevents context-switching overhead.
 - [ ] CEL expression compiled at `CreateDefinition` - syntax errors rejected immediately
 - [ ] `ValidateAttributes` executes compiled CEL and returns clear error on `false`
 
-### Phase 1.5: Asset Catalog (Deferred)
+### Phase 1.5: Asset Catalogue (Deferred)
 
 > **Scope Decision**: The following deliverables are moved to Phase 1.5. For the "Frugal Path,"
 > we only need to prove we can define *one* custom asset manually via API/CLI. Building a
@@ -3369,7 +3369,7 @@ Position Keeping is the **primary consumer** of multi-asset quantities. Changes 
    // RebucketingTool rebuilds position bucket assignments for an instrument.
    // ⚠️ CATASTROPHIC RECOVERY ONLY - violates immutable ledger principle.
    // Prefer Migration-as-Trade pattern for normal corrections.
-   // ADMIN-ONLY: Requires explicit authorization and audit logging.
+   // ADMIN-ONLY: Requires explicit authorisation and audit logging.
    type RebucketingTool struct {
        measurementStore MeasurementStore  // Raw measurements with original attributes
        positionStore    PositionStore
@@ -3390,7 +3390,7 @@ Position Keeping is the **primary consumer** of multi-asset quantities. Changes 
        fromVersion, toVersion uint32,
    ) (*RebucketingReport, error) {
        // 0. SETTLEMENT LOCK CHECK: Cannot rebucket settled history
-       // Positions included in finalized settlements are immutable for audit/regulatory reasons
+       // Positions included in finalised settlements are immutable for audit/regulatory reasons
        settledPositions, err := t.settlementStore.FindSettledPositions(
            ctx, tenantID, instrumentCode, fromVersion,
        )
@@ -3403,7 +3403,7 @@ Position Keeping is the **primary consumer** of multi-asset quantities. Changes 
                Version:        fromVersion,
                SettledCount:   len(settledPositions),
                Message: fmt.Sprintf(
-                   "cannot rebucket: %d positions included in finalized settlements",
+                   "cannot rebucket: %d positions included in finalised settlements",
                    len(settledPositions),
                ),
            }
@@ -3486,7 +3486,7 @@ Position Keeping is the **primary consumer** of multi-asset quantities. Changes 
 - [ ] Existing fiat-only tests still pass (backwards compatible)
 - [ ] No gRPC calls on hot path (cache hit rate > 99%)
 - [ ] Re-bucketing tool can rebuild bucket assignments from raw measurements
-- [ ] Re-bucketing tool fails with `SettlementLockError` if positions are in finalized settlements
+- [ ] Re-bucketing tool fails with `SettlementLockError` if positions are in finalised settlements
 - [ ] Raw measurements preserve original attributes (not discarded during compaction)
 
 **Phase 1 Append-Only Enforcement** (Critical):
@@ -3794,7 +3794,7 @@ Integration validation occurs at dependency boundaries, not calendar dates:
 
 | Gate | Trigger | Exit Criteria |
 |------|---------|---------------|
-| **Contract Freeze** | Before any dependent stream starts | All proto definitions and Go interfaces finalized |
+| **Contract Freeze** | Before any dependent stream starts | All proto definitions and Go interfaces finalised |
 | **Foundation** | Streams A, D, E all complete | Shared types compile together; no interface conflicts |
 | **Service Layer** | Stream F complete | Registry passes tests with real DB; CEL compilation works |
 | **API Layer** | Streams F, G, H complete | End-to-end flow works with mock tenant |
@@ -3822,7 +3822,7 @@ If API Layer gate shows >2x expected integration complexity:
 
 1. Pause downstream streams (I.x)
 2. Assess: Can we reduce to 5 streams (vertical slices)?
-3. Consider: Defer Asset Catalog (streams 11-12 in F) to Phase 2
+3. Consider: Defer Asset Catalogue (streams 11-12 in F) to Phase 2
 4. Replan with reduced scope if necessary
 
 > **Goal**: Catch integration issues at dependency boundaries, not during final Stream J.
@@ -3852,7 +3852,7 @@ If API Layer gate shows >2x expected integration complexity:
 
 ## Open Questions
 
-1. **Initial commodity catalog**: Which non-currency instruments should be seeded (if any)?
+1. **Initial commodity catalogue**: Which non-currency instruments should be seeded (if any)?
 2. **Cache TTL**: What's the acceptable staleness window for instrument definitions? (Proposed: 5 min)
 
 ---

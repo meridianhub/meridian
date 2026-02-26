@@ -41,7 +41,7 @@ validation, resilience, and observability.
 
 - Three services migrated: Current Account, Position Keeping, Financial Accounting
 - Handlers moved from shared platform code to service client packages
-- Integration tests verify real service behavior
+- Integration tests verify real service behaviour
 - Saga metadata propagation (idempotency, tracing, bi-temporal queries)
 
 **See Also:**
@@ -702,7 +702,7 @@ func TestValuationWorkflow_E2E(t *testing.T) {
   }
   ```
 
-- **Idempotency key standardization** (`shared/pkg/clients`):
+- **Idempotency key standardisation** (`shared/pkg/clients`):
 
   **Requirement**: Standardize idempotency key propagation across all service clients.
   Some BIAN services use `meridian.common.v1.IdempotencyKey` field in protobuf, others use
@@ -1193,7 +1193,7 @@ partial failures, and concurrent executions earlier would have caught production
 
 - ✅ **[VERIFIED 2026-02-03]** No increase in handler latency
   - Handlers are thin adapters (~1ms overhead)
-  - Client calls already optimized with connection pooling
+  - Client calls already optimised with connection pooling
 - ✅ **[VERIFIED 2026-02-03]** No degradation in error handling
   - gRPC errors properly propagated to saga runtime
   - Circuit breaker patterns maintained from client layer
@@ -1228,7 +1228,7 @@ partial failures, and concurrent executions earlier would have caught production
 | Risk | Impact | Likelihood | Mitigation |
 |------|--------|------------|------------|
 | **Breaking existing sagas** | High | Low | Maintain handler names/signatures, comprehensive tests |
-| **Handler latency increase** | Medium | Low | Handlers are thin adapters, client calls already optimized |
+| **Handler latency increase** | Medium | Low | Handlers are thin adapters, client calls already optimised |
 | **Dependency injection complexity** | Medium | Medium | Wiring in cmd/main.go (see Phase 1.1), document pattern |
 | **Test environment setup overhead** | Low | Medium | Create reusable test helpers, share across services |
 | **Incomplete e2e coverage** | Medium | Medium | Define minimum coverage requirements upfront |
@@ -1351,7 +1351,7 @@ func lintRecursiveAsset(script *starlark.Script, triggerInstrument string) error
     if contains(outputInstruments, triggerInstrument) {
         return fmt.Errorf(
             "RECURSIVE_ASSET_WARNING: Saga triggered by %s produces %s. "+
-            "This may cause infinite loops. Requires explicit authorization.",
+            "This may cause infinite loops. Requires explicit authorisation.",
             triggerInstrument, triggerInstrument)
     }
     return nil
@@ -1367,7 +1367,7 @@ Reject registration unless tenant provides `recursive_authorization: true` with 
 | **Network** | Kafka/gRPC headers | `causation_depth > max_depth` → Reject |
 | **Service** | Step Registry | Settlement sagas cannot invoke Position Keeping |
 | **Runtime** | Lineage tracker | `account:instrument` in ancestry → Cycle detected |
-| **Governance** | Starlark linter | Script outputs same type as trigger → Require authorization |
+| **Governance** | Starlark linter | Script outputs same type as trigger → Require authorisation |
 
 ### Why This Is Separate Work
 

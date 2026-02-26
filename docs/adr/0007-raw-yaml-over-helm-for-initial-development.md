@@ -82,13 +82,13 @@ deployment becomes necessary
 
 This is a **conscious architectural decision**, not an oversight. We are explicitly choosing transparency and iteration
 velocity over environment abstraction during the bootstrap phase, prioritizing rapid development over premature
-optimization.
+optimisation.
 
 ## Decision Drivers
 
 - **Transparency**: Direct visibility into deployed resources accelerates debugging and understanding
 - **Iteration speed**: Faster feedback loops when configuration changes are immediately visible
-- **Reduced complexity**: Minimize abstraction layers during bootstrap phase when requirements are evolving
+- **Reduced complexity**: Minimise abstraction layers during bootstrap phase when requirements are evolving
 - **Service stability**: Service topology is still evolving; premature abstraction creates unnecessary churn
 - **Deferred value**: Helm's multi-environment capabilities aren't needed until we have multiple deployment targets
 - **Complete but minimal**: Even complex services like Kafka can be configured simply for local development
@@ -114,7 +114,7 @@ optimization.
 
 When service topology stabilizes, migrate to Helm:
 
-1. **Identify parameterization points**: What differs between environments?
+1. **Identify parameterisation points**: What differs between environments?
    - Resource limits (CPU, memory)
    - Storage (local vs cloud)
    - Networking (NodePort vs LoadBalancer)

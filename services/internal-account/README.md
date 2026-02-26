@@ -132,7 +132,7 @@ resp, err := client.GetBalance(ctx, req)
 - Account must be in `ACTIVE` status (suspended/closed accounts return `FailedPrecondition`)
 - A position record must exist in Position Keeping for the account/instrument combination
 
-**Behavior:**
+**Behaviour:**
 
 - Returns `BALANCE_TYPE_CURRENT` from the Position Keeping response
 - O(1) query: Position Keeping maintains pre-computed running balance totals
@@ -281,7 +281,7 @@ classDiagram
 
 ## Clearing Account Purposes
 
-Clearing accounts can be specialized for specific purposes using the `clearing_purpose` field:
+Clearing accounts can be specialised for specific purposes using the `clearing_purpose` field:
 
 | Purpose | Enum Value | Use Case |
 |---------|------------|----------|
@@ -748,7 +748,7 @@ grpcurl -plaintext -d '{"account_id": "2rPxMVkj3tNmqPwT5Wk8Lc4M9xZ"}' \
 - [ADR-0015: Service Directory Structure](../../docs/adr/0015-service-directory-structure.md)
 - [ADR-0023: Balance Delegation to Position Keeping](../../docs/adr/0023-balance-delegation-to-position-keeping.md)
 - [ADR-0024: Internal Account Service](../../docs/adr/0024-internal-account-service.md)
-- [ADR-0025: Clearing Purpose Specialization](../../docs/adr/0025-clearing-purpose-specialization.md)
+- [ADR-0025: Clearing Purpose Specialisation](../../docs/adr/0025-clearing-purpose-specialisation.md)
 - [Proto Definitions](../../api/proto/meridian/internal_account/v1/)
 - [Position Keeping Service](../position-keeping/README.md)
 - [Reference Data Service](../reference-data/README.md)

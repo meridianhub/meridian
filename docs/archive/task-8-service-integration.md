@@ -76,7 +76,7 @@ Implement in phases to maintain working builds:
 
 ### Option 2: Proto-First Approach
 
-1. **Finalize Proto Definitions**: Stabilize APIs for all three services
+1. **Finalise Proto Definitions**: Stabilize APIs for all three services
 2. **Regenerate Code**: Run `buf generate` to ensure consistency
 3. **Implement Against Stable Protos**: Use agent-generated code as reference
 
@@ -143,4 +143,4 @@ issues stem from proto definition mismatches rather than fundamental design prob
 stabilize protos first or implement incrementally starting with simple clients.
 
 All agent-generated code can serve as high-quality reference material for the actual implementation once proto APIs are
-finalized.
+finalised.

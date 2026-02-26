@@ -1,11 +1,11 @@
 ---
 name: prd-product-directory
-description: BIAN-aligned AccountTypeRegistry for runtime-configurable product catalog within Reference Data
+description: BIAN-aligned AccountTypeRegistry for runtime-configurable product catalogue within Reference Data
 triggers:
   - Working on account types or product types
   - Adding new account types to the system
   - Configuring product-specific business logic (Starlark sagas, CEL validation per product)
-  - Multi-tenant product catalog or blueprint configuration
+  - Multi-tenant product catalogue or blueprint configuration
   - Questions about the relationship between accounts and product types
   - Valuation method or conversion configuration per product type
   - BIAN Product Directory service domain
@@ -24,7 +24,7 @@ instructions: |
   Multi-tenancy: schema-per-tenant (no tenant_id column), isolation via GORM tenant scope.
 ---
 
-# Product Directory - Account Type Registry and Runtime-Configurable Product Catalog
+# Product Directory - Account Type Registry and Runtime-Configurable Product Catalogue
 
 ## Status: Not Started
 
@@ -35,7 +35,7 @@ with no single source of truth. Account types are hardcoded as proto enums,
 preventing tenants from defining custom account types at runtime. This PRD
 introduces an AccountTypeRegistry within the Reference Data service -- following
 the established InstrumentRegistry pattern -- to provide a runtime-configurable,
-BIAN-aligned product catalog that supports multi-tenant customization
+BIAN-aligned product catalogue that supports multi-tenant customisation
 and bi-temporal versioning. Product types also define accepted valuation
 methods (asset conversion rules), correcting the current design where
 ValuationFeatures are configured per-account rather than per-product-type.
@@ -74,7 +74,7 @@ column hardcoded to `"current"` with no validation against any registry.
 
 ### Existing Infrastructure (Already Built)
 
-The infrastructure needed for a product catalog largely exists:
+The infrastructure needed for a product catalogue largely exists:
 
 | Capability | Location | Status |
 |------------|----------|--------|
@@ -103,20 +103,20 @@ separations, not deployment mandates. The Product Directory maps to a
 **module within Reference Data**, consistent with how instruments, sagas,
 and nodes already coexist within Reference Data.
 
-### Behavior Qualifier Mapping
+### Behaviour Qualifier Mapping
 
 | BIAN BQ | Meridian Mapping | Implementation |
 |---------|------------------|----------------|
 | **Operations** | CEL policy evaluation, saga routing | Existing CEL compiler + saga naming convention |
 | **Servicing** | AccountTypeRegistry CRUD + lifecycle | New (follows InstrumentRegistry pattern) |
 | **Production** | Manifest compilation and application | Existing manifest applier + validation pipeline |
-| **SalesAndMarketing** | Product catalog browsing and discovery | New read-only projections from registry |
+| **SalesAndMarketing** | Product catalogue browsing and discovery | New read-only projections from registry |
 
 ### Separation of Concerns
 
 BIAN Product Directory stores metadata about products, not executable code. Meridian follows this separation:
 
-- **Product catalog** (AccountTypeRegistry): Stores metadata, CEL policies,
+- **Product catalogue** (AccountTypeRegistry): Stores metadata, CEL policies,
   designated instrument, default saga names. Consistent with how
   InstrumentRegistry stores CEL validation expressions.
 - **Saga registry** (existing): Stores executable Starlark scripts.
@@ -141,7 +141,7 @@ type AccountTypeDefinition struct {
     DisplayName            string        // "GBP Personal Current Account"
     Description            string        // Detailed description of this product type
     NormalBalance          NormalBalance  // DEBIT or CREDIT (typed enum)
-    BehaviorClass          BehaviorClass // Fixed system behavior category (typed enum)
+    BehaviorClass          BehaviorClass // Fixed system behaviour category (typed enum)
     InstrumentCode         string        // Designated instrument: "GBP", "KWH", "TONNE_CO2E"
     DefaultSagaPrefix      string        // e.g., "SAVINGS" for "{prefix}.deposit" routing
     DefaultConversionMethodID      *uuid.UUID // Default same-dimension conversion method
@@ -198,7 +198,7 @@ type ValuationMethodTemplate struct {
 }
 ```
 
-**BehaviorClass** is a fixed set of system behavior categories that
+**BehaviorClass** is a fixed set of system behaviour categories that
 services use to apply hard-coded constraints. The dynamic `Code`
 (e.g., `CLEARING_GBP`) is the user-facing product identifier, but
 the system needs `BehaviorClass = "CLEARING"` to know that
@@ -206,7 +206,7 @@ org-scoping is forbidden, or `BehaviorClass = "CUSTOMER"` to enable
 party association. This replaces the role currently played by the
 `InternalAccountType` enum.
 
-| BehaviorClass | System Behavior |
+| BehaviorClass | System Behaviour |
 |---------------|-----------------|
 | `CUSTOMER` | Party-scoped, eligibility checks, external-facing |
 | `CLEARING` | Global (no org-scoping), settlement operations |
@@ -218,7 +218,7 @@ party association. This replaces the role currently played by the
 | `EXPENSE` | P&L tracking, debit normal balance |
 | `INVENTORY` | Non-cash asset tracking (energy, commodities) |
 
-New behavior classes can be added by extending the CHECK constraint
+New behaviour classes can be added by extending the CHECK constraint
 in a migration, but this is deliberately a platform-level change
 (not tenant-configurable) because it maps to hard-coded service
 logic.
@@ -243,7 +243,7 @@ type AccountTypeRegistry interface {
     ValidateTransaction(ctx context.Context, code string, version int, attrs AttributeBag) (ValidationResult, error)
     CheckEligibility(ctx context.Context, code string, version int, attrs AttributeBag) (ValidationResult, error)
 
-    // SalesAndMarketing BQ -- Catalog browsing
+    // SalesAndMarketing BQ -- Catalogue browsing
     ListByInstrument(ctx context.Context, instrumentCode string) ([]*AccountTypeDefinition, error)
     GetProductFeatures(ctx context.Context, code string, version int) (map[string]any, error)
 }
@@ -370,7 +370,7 @@ Example: Product type `SAVINGS` with `default_saga_prefix = "SAVINGS"`:
 
 - Deposit operation resolves: `SAVINGS.deposit` (tenant) -> `SAVINGS.deposit` (platform) -> **error** (no fallback)
 
-### Multi-Tenant Product Catalogs
+### Multi-Tenant Product Catalogues
 
 Following the saga registry pattern (platform defaults + tenant overrides):
 
@@ -865,7 +865,7 @@ Both services use `BehaviorClass` to gate which product types they
 accept:
 
 - **CurrentAccount**: Only accepts `BehaviorClass == CUSTOMER`
-- **InternalAccount**: Accepts all non-CUSTOMER behavior classes
+- **InternalAccount**: Accepts all non-CUSTOMER behaviour classes
 
 This replaces the hardcoded enum with a dynamic check that works for
 any product type code, including tenant-defined ones. A tenant can
@@ -1007,7 +1007,7 @@ func (s Status) IsValid() bool {
     return false
 }
 
-// BehaviorClass represents a fixed system behavior category.
+// BehaviorClass represents a fixed system behaviour category.
 type BehaviorClass string
 
 const (
@@ -1048,7 +1048,7 @@ All `switch` statements on `Status`, `BehaviorClass`, and
 or panics in tests. This is enforced by code review until the linter
 supports string-based exhaustive checks.
 
-#### Case Normalization
+#### Case Normalisation
 
 All `Code`, `BehaviorClass`, `NormalBalance`, and `InstrumentCode`
 values are stored in uppercase. The domain constructor normalises
@@ -1078,7 +1078,7 @@ BehaviorClass behavior_class = 6 [(buf.validate.field).enum = {
 ```
 
 This guarantees that gRPC callers cannot send an unrecognised
-behavior class. The existing pattern is proven in
+behaviour class. The existing pattern is proven in
 `internal_account.proto::InternalAccountType`.
 
 ### Immutability Invariants
@@ -1102,7 +1102,7 @@ creation, even in DRAFT status:
 
 - `Code` -- immutable primary key (like instrument code)
 - `IsSystem` -- platform blueprints cannot be reclassified
-- `BehaviorClass` -- changing system behavior category after creation
+- `BehaviorClass` -- changing system behaviour category after creation
   would invalidate all accounts created under the old category
 
 Attempted modification returns `ErrFieldImmutable` with the field
@@ -1214,7 +1214,7 @@ variables are not present.
 Attempting to compile a CEL expression that references an
 undeclared variable (e.g., `party.type` in a `ValidationCEL`
 field) returns a compilation error, not a runtime error. This is
-the same behavior as the existing CEL compiler in
+the same behaviour as the existing CEL compiler in
 `services/reference-data/cel/compiler.go`.
 
 ### Concrete Bugs This Design Prevents
@@ -1224,7 +1224,7 @@ codebase that the AccountTypeRegistry eliminates:
 
 | Bug | Current Cause | How Registry Prevents It |
 |-----|---------------|--------------------------|
-| Case mismatch (`"current"` vs `"CURRENT"`) | Current account stores lowercase, IBA stores uppercase | Case normalization at domain layer |
+| Case mismatch (`"current"` vs `"CURRENT"`) | Current account stores lowercase, IBA stores uppercase | Case normalisation at domain layer |
 | No account type validation at creation | `InitiateCurrentAccount` accepts any string | Registry lookup at creation, reject unknown codes |
 | Hardcoded `ACCOUNT_TYPE_CURRENT` in saga handlers | `saga_handlers.go:467` uses proto enum constant | Registry-based lookup replaces hardcoded value |
 | AccountResolver divergence | Copy-pasted 3x across services with different safety checks | Single source of truth in registry |
@@ -1236,7 +1236,7 @@ codebase that the AccountTypeRegistry eliminates:
 ## Testing Strategy
 
 - **Unit tests**: Domain model validation (typed enums, case
-  normalization, immutability guards, write-once fields), lifecycle
+  normalisation, immutability guards, write-once fields), lifecycle
   transitions (including idempotent activation), CEL compilation
   (validation, bucketing, eligibility environments -- including
   cross-environment variable rejection), attribute schema validation,

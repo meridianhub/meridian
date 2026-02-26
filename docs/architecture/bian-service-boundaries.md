@@ -58,7 +58,7 @@ The CurrentAccount service owns:
 
 #### Account Lifecycle Management
 
-- **Account creation and initialization** (`InitiateCurrentAccount` RPC)
+- **Account creation and initialisation** (`InitiateCurrentAccount` RPC)
   - Account ID generation and assignment
   - IBAN validation and storage (`account_identification`)
   - Account status management (ACTIVE, FROZEN, CLOSED)
@@ -376,7 +376,7 @@ The PositionKeeping service owns:
 
 - Observability (OpenTelemetry tracing, structured logging, metrics)
 - Kafka event publishing infrastructure
-- Authentication and authorization (JWT validation)
+- Authentication and authorisation (JWT validation)
 
 **No Direct Service Dependencies:**
 
@@ -485,7 +485,7 @@ The FinancialAccounting service owns:
 
 - **Balance validation**
   - Ensure debits = credits before transitioning booking log to POSTED status
-  - Prevent unbalanced booking logs from being finalized
+  - Prevent unbalanced booking logs from being finalised
   - Validate double-entry integrity at service layer
 
 - **Posting updates** (`UpdateLedgerPosting` RPC)
@@ -821,7 +821,7 @@ Platform code is currently in `internal/platform/` but is being migrated to `pkg
 
 **`kafka/` - Kafka Producer/Consumer Infrastructure**
 
-- Kafka producer with protobuf serialization
+- Kafka producer with protobuf serialisation
 - Kafka consumer with offset management
 - Consumer group coordination
 - Error handling and retry logic
@@ -833,7 +833,7 @@ Platform code is currently in `internal/platform/` but is being migrated to `pkg
 **`testdb/` - Testcontainers Integration**
 
 - PostgreSQL Testcontainers setup
-- Database schema initialization for tests
+- Database schema initialisation for tests
 - Transaction isolation for test cases
 - Connection pool management for tests
 - **Used by:** Current-account, financial-accounting (5 imports detected)
@@ -844,10 +844,10 @@ Platform code is currently in `internal/platform/` but is being migrated to `pkg
   - `internal/financial-accounting/service/posting_service_test.go`
   - `internal/financial-accounting/adapters/messaging/deposit_consumer_test.go`
 
-**`auth/` - JWT Validation and Authorization**
+**`auth/` - JWT Validation and Authorisation**
 
 - JWT token parsing and validation
-- Authorization middleware for gRPC
+- Authorisation middleware for gRPC
 - Role-based access control (RBAC)
 - **Used by:** Position-keeping (1 import detected)
 - **Files:**
@@ -1141,7 +1141,7 @@ db, err := sql.Open("postgres", os.Getenv("POSITION_KEEPING_DB_URL"))
 
 - Domain logic should be co-located with the service that owns the domain
 - Prevents business rule duplication across services
-- Maintains single source of truth for domain behaviors
+- Maintains single source of truth for domain behaviours
 - Supports domain-driven design principles
 - Clear ownership for business rule changes
 
@@ -1243,14 +1243,14 @@ These dependency patterns are architecturally permitted and support the BIAN-ali
 
 - `pkg/platform/observability` - OpenTelemetry tracing, logging, metrics
 - `pkg/platform/kafka` - Kafka producer/consumer infrastructure
-- `pkg/platform/auth` - JWT validation and authorization
+- `pkg/platform/auth` - JWT validation and authorisation
 - `pkg/platform/testdb` - Testcontainers integration for tests
 
 **Justification:**
 
 - Platform code is shared infrastructure, not business logic
 - Prevents duplication of cross-cutting concerns
-- Centralized maintenance of observability and integration patterns
+- Centralised maintenance of observability and integration patterns
 
 ### Forbidden Dependency Patterns
 
@@ -1550,11 +1550,11 @@ This section maps Meridian services to their corresponding BIAN service domains 
 **Meridian Implementation:**
 
 - Account facility creation (`InitiateCurrentAccount` → BIAN Initiate)
-- Deposit execution (`ExecuteDeposit` → BIAN Execute behavior qualifier)
+- Deposit execution (`ExecuteDeposit` → BIAN Execute behaviour qualifier)
 - Account retrieval (`RetrieveCurrentAccount` → BIAN Retrieve)
 
 **BIAN Control Record:** `CurrentAccountFacility`
-**BIAN Behavior Qualifiers:**
+**BIAN Behaviour Qualifiers:**
 
 - Deposits (implemented)
 - Payments (not yet implemented)
@@ -1581,7 +1581,7 @@ This section maps Meridian services to their corresponding BIAN service domains 
 - List logs (`ListFinancialPositionLogs` → BIAN Retrieve with filtering)
 
 **BIAN Control Record:** `FinancialPositionLog`
-**BIAN Behavior Qualifiers:**
+**BIAN Behaviour Qualifiers:**
 
 - TransactionLog (implemented via `TransactionLogEntry`)
 - TransactionLineage (implemented)
@@ -1604,12 +1604,12 @@ This section maps Meridian services to their corresponding BIAN service domains 
 
 - Booking log initiation (`InitiateFinancialBookingLog` → BIAN Initiate)
 - Booking log update (`UpdateFinancialBookingLog` → BIAN Update)
-- Posting capture (`CaptureLedgerPosting` → BIAN Capture behavior qualifier)
+- Posting capture (`CaptureLedgerPosting` → BIAN Capture behaviour qualifier)
 - Posting update (`UpdateLedgerPosting` → BIAN Update)
 - List operations (`ListFinancialBookingLogs`, `ListLedgerPostings` → BIAN Retrieve)
 
 **BIAN Control Record:** `FinancialBookingLog`
-**BIAN Behavior Qualifiers:**
+**BIAN Behaviour Qualifiers:**
 
 - LedgerPosting (implemented via `LedgerPosting` entity)
 
@@ -1633,7 +1633,7 @@ This section maps Meridian services to their corresponding BIAN service domains 
 - Dataset management (`CreateDataSet`, `ActivateDataSet` → BIAN Initiate, Update)
 
 **BIAN Control Record:** `MarketPriceObservation`
-**BIAN Behavior Qualifiers:**
+**BIAN Behaviour Qualifiers:**
 
 - PriceObservation (implemented via `MarketPriceObservation` entity)
 - DataSetConfiguration (implemented via `DataSetDefinition` entity)
@@ -2001,14 +2001,14 @@ graph TD
 **Authentication (JWT):**
 
 - **Used by:** PositionKeeping
-- **Provides:** JWT token validation, authorization middleware, RBAC
+- **Provides:** JWT token validation, authorisation middleware, RBAC
 - **Current Location:** `internal/platform/auth` (migration to `pkg/platform/auth` in progress)
 - **Imports:** 1 file
 
 **Test Infrastructure (Testcontainers):**
 
 - **Used by:** CurrentAccount, FinancialAccounting
-- **Provides:** PostgreSQL Testcontainers setup, database schema initialization
+- **Provides:** PostgreSQL Testcontainers setup, database schema initialisation
 - **Current Location:** `internal/platform/testdb` (migration to `pkg/platform/testdb` in progress)
 - **Imports:** 5 test files
 
@@ -2114,7 +2114,7 @@ graph TD
 - Service boundary changed (ownership transfer)
 - New proto entity defined
 - Coupling analysis reveals new patterns
-- Platform code organization changes
+- Platform code organisation changes
 
 **Review Cadence:**
 

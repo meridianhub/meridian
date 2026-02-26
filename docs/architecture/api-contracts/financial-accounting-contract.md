@@ -55,7 +55,7 @@ stateDiagram-v2
     end note
 
     note right of POSTED
-        All postings balanced and finalized.
+        All postings balanced and finalised.
         Terminal state (immutable).
         No further postings can be added.
         Included in financial reports.
@@ -83,13 +83,13 @@ stateDiagram-v2
     REVERSED --> [*]: Terminal state
 
     note right of PENDING
-        Posting captured but not yet finalized.
+        Posting captured but not yet finalised.
         Parent booking log still PENDING.
         Can be cancelled before log posted.
     end note
 
     note right of POSTED
-        Posting finalized with parent log.
+        Posting finalised with parent log.
         Included in account balances.
         Immutable (can only be reversed).
     end note

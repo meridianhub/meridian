@@ -10,7 +10,7 @@ triggers:
 instructions: |
   Meridian is a high-performance persistence layer (100k TPS target). Keep messy ETL OFF the
   critical path. Services accept ONLY pre-structured Protobuf - all extraction, transformation,
-  and normalization is the caller's responsibility. This extends hexagonal architecture: Meridian
+  and normalisation is the caller's responsibility. This extends hexagonal architecture: Meridian
   defines the Port (structured schema), external systems implement the Adapter (messy translation).
   CEL validation at the boundary enforces the contract. Adapters scale independently from core.
 ---
@@ -111,7 +111,7 @@ data integrity through CEL validation at the boundary.
 │  Responsibility:                   │   Responsibility:                      │
 │  • Connectivity                    │   • Schema Definition                  │
 │  • Extraction                      │   • Contract Enforcement               │
-│  • Normalization                   │   • Bi-Temporal Storage                │
+│  • Normalisation                   │   • Bi-Temporal Storage                │
 │  • Scheduling                      │   • Quality Resolution                 │
 │  • Error Recovery                  │   • Knowledge Lineage                  │
 │                                    │                                        │
@@ -155,7 +155,7 @@ data integrity through CEL validation at the boundary.
 
 ### Option 1: Universal Ingestion Middleware
 
-Build a centralized ETL service that handles all external connectivity and transformation.
+Build a centralised ETL service that handles all external connectivity and transformation.
 
 * Good, because it centralizes integration logic
 * Good, because it provides a single point for monitoring

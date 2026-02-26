@@ -11,7 +11,7 @@ iteration.
 
 ## Our Standards
 
-### Expected Behavior
+### Expected Behaviour
 
 - Focus on technical merit and constructive feedback
 - Communicate clearly and professionally
@@ -19,7 +19,7 @@ iteration.
 - Accept constructive criticism gracefully
 - Support fellow contributors and maintainers
 
-### Unacceptable Behavior
+### Unacceptable Behaviour
 
 - Harassment, intimidation, or discriminatory language
 - Personal attacks or inflammatory comments
@@ -41,7 +41,7 @@ This Code of Conduct applies to:
 
 ### Reporting
 
-If you experience or witness unacceptable behavior:
+If you experience or witness unacceptable behaviour:
 
 1. **Direct Resolution**: If comfortable, address the issue directly with the individual
 2. **Maintainer Report**: Contact project maintainers through:

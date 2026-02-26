@@ -173,7 +173,7 @@ if err != nil {
 }
 
 // Use token in outbound gRPC call
-md := metadata.Pairs("authorization", "Bearer "+token)
+md := metadata.Pairs("authorisation", "Bearer "+token)
 ctx = metadata.NewOutgoingContext(ctx, md)
 ```
 
@@ -221,7 +221,7 @@ error) {
         return nil, status.Error(codes.Unauthenticated, "user not authenticated")
     }
 
-    // Get claims for authorization
+    // Get claims for authorisation
     claims, ok := auth.GetClaimsFromContext(ctx)
     if !ok {
         return nil, status.Error(codes.Unauthenticated, "claims not found")
@@ -333,7 +333,7 @@ type Claims struct {
 }
 ```
 
-### Using Claims for Authorization
+### Using Claims for Authorisation
 
 ```go
 func (s *service) AdminOnlyMethod(ctx context.Context, req *pb.Request) (*pb.Response, error) {
@@ -411,7 +411,7 @@ import (
 )
 
 // Add token to outgoing context
-md := metadata.Pairs("authorization", "Bearer "+token)
+md := metadata.Pairs("authorisation", "Bearer "+token)
 ctx := metadata.NewOutgoingContext(context.Background(), md)
 
 // Make call
@@ -502,14 +502,14 @@ spec:
 
 ### Common Issues
 
-#### "missing authorization header"
+#### "missing authorisation header"
 
 **Cause**: No `Authorization` header in gRPC metadata
 
 **Solution**: Add Bearer token to metadata:
 
 ```go
-md := metadata.Pairs("authorization", "Bearer "+token)
+md := metadata.Pairs("authorisation", "Bearer "+token)
 ctx := metadata.NewOutgoingContext(ctx, md)
 ```
 

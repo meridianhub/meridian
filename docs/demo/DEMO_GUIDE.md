@@ -179,7 +179,7 @@ kubectl exec kafka-0 -- kafka-console-consumer --topic current-account.deposits 
 localhost:9092
 ```
 
-**Expected Behavior:**
+**Expected Behaviour:**
 
 - Topics have replicas on 2 brokers (replication factor 2)
 - Killing 1 broker triggers partition leader election

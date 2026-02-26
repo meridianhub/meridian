@@ -38,7 +38,7 @@ across releases (13.0 → 14.0 → 15.0).
 - **External integration via gRPC** - External systems interact through gRPC APIs, not by consuming Kafka topics
 - **Database is source of truth** - CockroachDB/YugabyteDB provides persistent state; Kafka is ephemeral coordination
 - **Monorepo structure** - All services share `api/proto/` directory with compile-time validation
-- **High throughput goal** - Minimize latency and operational overhead
+- **High throughput goal** - Minimise latency and operational overhead
 - **Learning-focused** - Reference implementation should demonstrate patterns without unnecessary complexity
 
 ### The Schema Registry Question
@@ -48,7 +48,7 @@ value propositions don't align with our architecture:
 
 **Schema Registry provides:**
 
-- Centralized schema storage and runtime discovery
+- Centralised schema storage and runtime discovery
 - Governance for external consumers
 - Compatibility enforcement at registration time
 - Historical schema versions for replay
@@ -96,9 +96,9 @@ message AccountUpdated {
 
 **Validation:** `buf breaking --against main` ensures no breaking changes.
 
-**Consumer behavior:** Old consumers automatically ignore new fields (protobuf feature).
+**Consumer behaviour:** Old consumers automatically ignore new fields (protobuf feature).
 
-### Pattern 2: New BIAN Behavior Qualifier (New Event Type)
+### Pattern 2: New BIAN Behaviour Qualifier (New Event Type)
 
 For new BIAN operations with distinct semantics:
 
@@ -113,7 +113,7 @@ message AccountUpdated {
   string account_status = 4;
 }
 
-// New BIAN 14.0 behavior qualifier = new event type
+// New BIAN 14.0 behaviour qualifier = new event type
 message AccountSuspended {
   string event_id = 1;
   google.protobuf.Timestamp occurred_at = 2;
@@ -124,7 +124,7 @@ message AccountSuspended {
 }
 ```
 
-**Rationale:** BIAN behavior qualifiers (Initiate, Update, Suspend, Terminate) represent distinct operations. Map these
+**Rationale:** BIAN behaviour qualifiers (Initiate, Update, Suspend, Terminate) represent distinct operations. Map these
 to distinct event types rather than overloading a single event schema.
 
 **Topic strategy:** New event type = new Kafka topic (`account-suspended`)
@@ -133,7 +133,7 @@ to distinct event types rather than overloading a single event schema.
 
 - **One topic per event type:** `account-updated`, `account-suspended`, `booking-created`
 - **No version suffixes:** Use semantic names, not `account-updated-v2`
-- **BIAN alignment:** Topic names reflect BIAN behavior qualifiers
+- **BIAN alignment:** Topic names reflect BIAN behaviour qualifiers
 - **Retention policy:** 7 days (events are coordination, not system of record)
 
 ### Compatibility Validation
@@ -163,22 +163,22 @@ to distinct event types rather than overloading a single event schema.
 ## Decision Drivers
 
 - ✅ **Simplicity** - No Schema Registry to operate; protobuf native capabilities are sufficient
-- ✅ **Performance** - No external schema lookup; no network dependency for serialization
-- ✅ **BIAN semantic alignment** - New behavior qualifiers naturally map to new event types
+- ✅ **Performance** - No external schema lookup; no network dependency for serialisation
+- ✅ **BIAN semantic alignment** - New behaviour qualifiers naturally map to new event types
 - ✅ **Database-centric architecture** - Persistent layer is source of truth; Kafka is ephemeral
 - ✅ **Monorepo benefits** - Shared `api/proto/` enables compile-time validation across services
-- ✅ **High throughput** - Minimize latency by eliminating Schema Registry network calls
+- ✅ **High throughput** - Minimise latency by eliminating Schema Registry network calls
 - ✅ **Operational simplicity** - One less stateful service to manage, monitor, and backup
 
 ## Example Workflow: BIAN Evolution
 
-**Scenario:** BIAN 14.0 adds "Suspend" behavior qualifier to Current Account service domain.
+**Scenario:** BIAN 14.0 adds "Suspend" behaviour qualifier to Current Account service domain.
 
 ### Step 1: Decide Event Strategy
 
 Question: Is "Suspend" semantically different from "Update"?
 
-**Answer:** Yes - it's a distinct BIAN behavior qualifier with different business semantics.
+**Answer:** Yes - it's a distinct BIAN behaviour qualifier with different business semantics.
 
 **Decision:** Create new event type `AccountSuspended`.
 
@@ -266,14 +266,14 @@ func (p *CurrentAccountPublisher) PublishSuspended(
 - ✅ **Simpler operations** - No Schema Registry service to deploy, monitor, backup
 - ✅ **Compile-time safety** - `buf breaking` catches incompatibilities before deployment
 - ✅ **Better performance** - No schema registry lookup overhead (~0.01-100ms depending on cache)
-- ✅ **BIAN semantic alignment** - Event taxonomy matches BIAN behavior qualifiers
+- ✅ **BIAN semantic alignment** - Event taxonomy matches BIAN behaviour qualifiers
 - ✅ **Database-centric** - Leverages persistent layer as authoritative source
 - ✅ **Monorepo benefits** - All services have access to latest proto definitions
 - ✅ **Reduced complexity** - Fewer moving parts in production environment
 
 ### Negative
 
-- ❌ **No centralized schema registry** - Cannot discover schemas at runtime (not needed for internal use)
+- ❌ **No centralised schema registry** - Cannot discover schemas at runtime (not needed for internal use)
 - ❌ **Monorepo coupling** - Services must share `api/proto/` directory (acceptable for internal services)
 - ❌ **No polyglot runtime support** - External consumers would need proto file access (mitigated: use gRPC APIs)
 - ❌ **Manual topic creation** - Must explicitly create new topics for new event types (automation possible)
@@ -282,7 +282,7 @@ func (p *CurrentAccountPublisher) PublishSuspended(
 
 **Schema discovery:**
 
-- Document event schemas in `docs/events/event-catalog.md`
+- Document event schemas in `docs/events/event-catalogue.md`
 - Generate schema documentation via `buf` plugins
 - Maintain event type registry in documentation
 
@@ -304,7 +304,7 @@ Consider adding Schema Registry if:
 
 1. **External Kafka consumers** - Systems outside Meridian directly consume Kafka topics
 2. **Polyglot consumers** - Non-Go services need runtime schema discovery
-3. **Multi-team governance** - 20+ independent teams need centralized schema governance
+3. **Multi-team governance** - 20+ independent teams need centralised schema governance
 4. **Compliance requirements** - Audit trail of schema changes required for regulatory purposes
 
 **Currently:** None of these apply. Kafka is internal coordination; external integration uses gRPC.
@@ -313,11 +313,11 @@ Consider adding Schema Registry if:
 
 ### Alternative 1: Schema Registry with Protobuf
 
-**Approach:** Use Confluent Schema Registry for centralized governance.
+**Approach:** Use Confluent Schema Registry for centralised governance.
 
 **Pros:**
 
-- Centralized schema storage and discovery
+- Centralised schema storage and discovery
 - Runtime compatibility validation
 - Historical schema versions preserved
 - Multi-language support via schema ID lookup
@@ -339,7 +339,7 @@ Consider adding Schema Registry if:
 
 - Schema Registry's native format
 - Dynamic schema evolution
-- Compact serialization
+- Compact serialisation
 
 **Cons:**
 
@@ -348,7 +348,7 @@ Consider adding Schema Registry if:
 - No compile-time type safety
 - Steeper learning curve
 
-**Why rejected:** We've standardized on Protobuf for gRPC APIs. Using different serialization for events would fragment
+**Why rejected:** We've standardized on Protobuf for gRPC APIs. Using different serialisation for events would fragment
 tooling.
 
 ### Alternative 3: JSON with JSON Schema
@@ -365,7 +365,7 @@ tooling.
 
 - Verbose (larger messages)
 - No compile-time type safety
-- Slower serialization/deserialization
+- Slower serialisation/deserialisation
 - Inconsistent with gRPC APIs
 
 **Why rejected:** JSON's verbosity and lack of type safety make it unsuitable for high-throughput financial event
@@ -374,7 +374,7 @@ streams.
 ### Chosen: Protobuf Native Versioning (No Schema Registry)
 
 **Rationale:** Balances type safety, performance, simplicity, and consistency with our gRPC APIs. Protobuf's optional
-fields handle 90% of evolution needs. New event types handle the remaining 10% (new BIAN behaviors).
+fields handle 90% of evolution needs. New event types handle the remaining 10% (new BIAN behaviours).
 
 ## Links
 
@@ -405,7 +405,7 @@ fields handle 90% of evolution needs. New event types handle the remaining 10% (
 
 **Rule of thumb:** If unsure, create a new event type. It's safer and aligns with BIAN's semantic model.
 
-### BIAN Behavior Qualifiers
+### BIAN Behaviour Qualifiers
 
 BIAN defines standard operations for each service domain:
 
@@ -420,7 +420,7 @@ BIAN defines standard operations for each service domain:
 - **Grant** - Grant permission
 - **Notify** - Send notification
 
-When BIAN adds new behavior qualifiers in future releases, map each to a distinct event type.
+When BIAN adds new behaviour qualifiers in future releases, map each to a distinct event type.
 
 ### Testing Strategy
 
@@ -434,13 +434,13 @@ When BIAN adds new behavior qualifiers in future releases, map each to a distinc
 
 See `internal/adapters/events/*_test.go` for examples.
 
-### Event Catalog
+### Event Catalogue
 
 Maintain a living document of all event types:
 
 ```markdown
 
-# docs/events/event-catalog.md
+# docs/events/event-catalogue.md
 
 ## Current Account Events
 
@@ -463,7 +463,7 @@ Maintain a living document of all event types:
 
 ```
 
-Update this catalog when adding new event types.
+Update this catalogue when adding new event types.
 
 ## Amendment: Event Topic Naming Convention (2025-11-19)
 
@@ -536,7 +536,7 @@ meridian/position-keeping/transaction-recorded/v1
 **Pros:**
 
 - Even more explicit hierarchy
-- Organization-level namespace
+- Organisation-level namespace
 
 **Cons:**
 

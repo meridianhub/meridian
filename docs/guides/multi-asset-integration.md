@@ -63,7 +63,7 @@ flowchart TB
 | Layer | Purpose | Changes Require |
 |-------|---------|-----------------|
 | Dimensions | Prevent physics errors (Money + Rice) | Code deployment |
-| Definitions | Tenant instrument catalog | Registry update |
+| Definitions | Tenant instrument catalogue | Registry update |
 | Context | Position attributes (expiry, vintage) | Nothing (data) |
 
 ### Services Involved

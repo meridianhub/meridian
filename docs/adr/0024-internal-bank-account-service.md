@@ -182,7 +182,7 @@ Create BIAN-aligned Internal Account service as a multi-asset account registry.
 * **CLOSED**: Account is permanently closed (cannot be reopened)
 
 **Note**: There is no PENDING state. Accounts are created directly in ACTIVE status
-because internal accounts are created by authorized operations, not customer requests.
+because internal accounts are created by authorised operations, not customer requests.
 
 ### Balance Delegation
 

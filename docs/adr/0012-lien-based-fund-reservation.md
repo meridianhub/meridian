@@ -143,7 +143,7 @@ message Lien {
   Timestamp updated_at = 7;
 }
 
-// BIAN Behavior Qualifiers
+// BIAN Behaviour Qualifiers
 service CurrentAccountService {
   rpc InitiateLien(InitiateLienRequest) returns (InitiateLienResponse);
   rpc ExecuteLien(ExecuteLienRequest) returns (ExecuteLienResponse);
@@ -370,7 +370,7 @@ if err := paymentGateway.Submit(order); err != nil {
 
 - [ADR-0005: Adapter Pattern for Layer Translation](0005-adapter-pattern-layer-translation.md)
 - [BIAN v13 Current Account Service Domain](https://bian.org/semantic-apis/current-account/) - Defines the
-  CurrentAccountFacility control record and associated behavior qualifiers
+  CurrentAccountFacility control record and associated behaviour qualifiers
 - [Saga Pattern (Microsoft)](https://docs.microsoft.com/en-us/azure/architecture/reference-architectures/saga/saga)
 - [GitHub Issue #7: Payment Order Service](https://github.com/meridianhub/meridian/issues/7)
 - [PR #153: Add Lien Control Record to CurrentAccount proto](https://github.com/meridianhub/meridian/pull/153)

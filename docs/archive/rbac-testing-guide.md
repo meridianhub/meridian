@@ -81,7 +81,7 @@ server := grpc.NewServer(
 )
 ```
 
-#### Resource-Level Authorization
+#### Resource-Level Authorisation
 
 ```go
 // In your service handlers
@@ -161,13 +161,13 @@ curl -X POST -H "Authorization: Bearer $AUDITOR_TOKEN" \
 
 # Admin can call admin-only gRPC method
 
-grpcurl -H "authorization: Bearer $ADMIN_TOKEN" \
+grpcurl -H "authorisation: Bearer $ADMIN_TOKEN" \
   localhost:9090 \
   meridian.v1.ConfigService/UpdateSystemConfig
 
 # Auditor cannot call admin-only method (should return PERMISSION_DENIED)
 
-grpcurl -H "authorization: Bearer $AUDITOR_TOKEN" \
+grpcurl -H "authorisation: Bearer $AUDITOR_TOKEN" \
   localhost:9090 \
   meridian.v1.ConfigService/UpdateSystemConfig
 ```
@@ -198,7 +198,7 @@ Check that:
 
 1. JWT token contains the required role in the `roles` claim
 2. Token is not expired
-3. Authorization header is properly formatted: `Authorization: Bearer <token>`
+3. Authorisation header is properly formatted: `Authorization: Bearer <token>`
 
 ### 401 Unauthorized
 
@@ -210,13 +210,13 @@ Check that:
 
 ### Debugging
 
-Enable debug logging to see authorization decisions:
+Enable debug logging to see authorisation decisions:
 
 ```go
 import "github.com/meridianhub/meridian/internal/platform/observability"
 
 logger := observability.NewLogger(os.Stdout, observability.LogLevelDebug)
-logger.DebugContext(ctx, "Authorization check", map[string]interface{}{
+logger.DebugContext(ctx, "Authorisation check", map[string]interface{}{
     "user_id": claims.UserID,
     "roles": claims.Roles,
     "required_role": auth.RoleAdmin.String(),
@@ -250,4 +250,4 @@ http.Handle("/admin/endpoint",
 3. **Use resource-level helpers** for clarity: `AuthorizeAccountWrite(ctx)` is clearer than `HasPermission(claims,
 ResourceTypeAccount, PermissionWrite)`
 4. **Test with all roles** during development
-5. **Log authorization failures** for security monitoring
+5. **Log authorisation failures** for security monitoring

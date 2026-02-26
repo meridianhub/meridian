@@ -52,7 +52,7 @@ Most ledgers treat the database as "The State of Now." Meridian manages the **En
 of Value** - past (audit, integrity, settlement) AND future (forecasts, commitments, hedging).
 
 **The Key Insight:** A Forecast is the **Golden Source** for tomorrow, but **Garbage** for
-yesterday. Without modeling this "Temporal Weighting," you get the classic billing disaster:
+yesterday. Without modelling this "Temporal Weighting," you get the classic billing disaster:
 
 1. Bill customer based on Forecast (because Actuals weren't in yet)
 2. Actuals arrive
@@ -482,7 +482,7 @@ measurements via Position Keeping's API, not direct database joins. This maintai
 isolation at the cost of additional API calls during reconciliation.
 
 **Cross-Tenant Reconciliation:** By design, there is no special backdoor for cross-tenant
-reconciliation. When two organizations need to reconcile positions (e.g., inter-company
+reconciliation. When two organisations need to reconcile positions (e.g., inter-company
 settlements, counterparty reconciliation), they are treated as two external systems
 communicating via standard APIs. Each tenant's data remains isolated per ADR-0016; any
 cross-tenant data exchange happens through explicit integration contracts, not internal
@@ -586,7 +586,7 @@ timestamp, tenant_id, correlation_id).
 | `SettlementRunStarted` | Settlement batch begins | run_id, run_type, period_start, period_end | Monitoring, Audit |
 | `SettlementSnapshotCreated` | Position captured for settlement | snapshot_id, run_id, measurement_id | Financial Accounting |
 | `SettlementRunCompleted` | Settlement batch finishes | run_id, positions_settled, total_value | Monitoring, Payment Order |
-| `MeasurementLocked` | Settlement finalized | measurement_id, settlement_run, locked_at | Financial Accounting |
+| `MeasurementLocked` | Settlement finalised | measurement_id, settlement_run, locked_at | Financial Accounting |
 
 ### Reconciliation Events
 
@@ -631,9 +631,9 @@ func (s *SettlementService) CompleteRun(ctx context.Context, runID uuid.UUID) er
 
 ## Security Considerations
 
-### Settlement Locking Authorization
+### Settlement Locking Authorisation
 
-The `LockedAt` field controls position finality. Only authorized services may lock positions:
+The `LockedAt` field controls position finality. Only authorised services may lock positions:
 
 | Actor | Can Lock? | Mechanism |
 |-------|-----------|-----------|
@@ -643,7 +643,7 @@ The `LockedAt` field controls position finality. Only authorized services may lo
 | System Admin | Emergency only | Requires audit log entry + approval |
 
 ```go
-// SettlementService is the only authorized caller
+// SettlementService is the only authorised caller
 func (s *SettlementService) FinalizeRun(ctx context.Context, run string) error {
     // Verify caller identity via context (service account)
     if !auth.IsSettlementService(ctx) {
@@ -948,7 +948,7 @@ var (
     // ErrDisputeRateLimitExceeded indicates too many disputes created for this tenant.
     ErrDisputeRateLimitExceeded = errors.New("dispute rate limit exceeded")
 
-    // ErrUnauthorized indicates the caller is not authorized for this operation.
+    // ErrUnauthorized indicates the caller is not authorised for this operation.
     ErrUnauthorized = errors.New("unauthorized")
 )
 ```
@@ -964,7 +964,7 @@ var (
 | **Backfill Window** | Maximum age of measurements accepted before rejection |
 | **Final Settlement** | Point after which positions are locked and changes become disputes |
 | **Variance** | Difference between settled quantity and current quantity for a position |
-| **Dispute** | Record created when new data arrives for a locked (finalized) position |
+| **Dispute** | Record created when new data arrives for a locked (finalised) position |
 
 ## BIAN v13 Alignment
 
@@ -1008,7 +1008,7 @@ The following Meridian concepts extend or have no direct BIAN equivalent:
   settlement with later reconciliation
 - **Settlement Run scheduling** (D+1, M+14): Industry-specific patterns not in BIAN standard
 - **Dispute workflow for locked positions**: BIAN has case management but not the specific
-  pattern of archiving incoming data and creating disputes for finalized positions
+  pattern of archiving incoming data and creating disputes for finalised positions
 
 ## Links
 

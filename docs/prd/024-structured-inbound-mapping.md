@@ -232,7 +232,7 @@ Most transforms are naturally reversible:
 For the one non-reversible transform (CEL), we provide explicit
 `inbound_cel` and `outbound_cel` fields. This means **one mapping
 definition handles both directions** — no duplicate definitions, no
-pairing logic, no version synchronization problem.
+pairing logic, no version synchronisation problem.
 
 ### Routing Strategy
 

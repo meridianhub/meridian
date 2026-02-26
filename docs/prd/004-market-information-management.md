@@ -199,7 +199,7 @@ the **Vault** (storage) and **Rules** (validation), while external systems provi
 |------------|-------------|---------|
 | **Connectivity** | Maintaining connections to external sources | WebSocket to Bloomberg, TCP to Smart Meters |
 | **Extraction** | Polling APIs, scraping, reading raw feeds | Calling ECB SDMX API, reading meter registers |
-| **Normalization** | Converting source-specific formats to Meridian Protobuf | XML → `MarketPriceObservation`, CSV → gRPC request |
+| **Normalisation** | Converting source-specific formats to Meridian Protobuf | XML → `MarketPriceObservation`, CSV → gRPC request |
 | **Scheduling** | Managing ingestion timing and frequency | Cron jobs, event-driven triggers |
 | **Error Recovery** | Handling source-specific failure modes | API rate limits, connection timeouts |
 
@@ -240,7 +240,7 @@ External World                    │  Meridian Core
 │ External        │               │   └───────────┬───────────┘
 │ Adapter         │  Formatted    │               │
 │ ─────────────── │  Protobuf     │               ▼
-│ Normalize to    ├───────────────┼──►┌───────────────────────┐
+│ Normalise to    ├───────────────┼──►┌───────────────────────┐
 │ MarketPrice     │               │   │ CEL Validator         │
 │ Observation     │               │   │ ─────────────────     │
 └─────────────────┘               │   │ PASS → Store          │
@@ -1321,7 +1321,7 @@ CREATE INDEX idx_observation_superseded ON market_price_observation(superseded_b
 CREATE INDEX idx_observation_created_at ON market_price_observation(created_at);
 
 -- Composite index for full bi-temporal resolution query with supersession filter
--- Optimized for: WHERE resolution_key = ? AND superseded_by IS NULL AND created_at <= ?
+-- Optimised for: WHERE resolution_key = ? AND superseded_by IS NULL AND created_at <= ?
 -- ORDER BY quality DESC, observed_at DESC, created_at DESC
 CREATE INDEX idx_observation_resolution_bitemporal ON market_price_observation(
     resolution_key,
@@ -1604,7 +1604,7 @@ func (w *Worker) provisionMarketInformation(ctx context.Context, tenantID string
 | MIM-013 | Write unit tests (80% coverage) | 5 |
 | MIM-014 | Write integration tests | 3 |
 
-### Phase 2: Temporal Query Optimization (P0)
+### Phase 2: Temporal Query Optimisation (P0)
 
 | Task ID | Description | Estimate |
 |---------|-------------|----------|

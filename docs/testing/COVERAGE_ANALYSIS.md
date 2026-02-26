@@ -68,7 +68,7 @@ in normal operation.
 - Single operations: 0.58-1.4ms (well under 20ms target)
 - Query performance: 0.58-0.71ms
 - Concurrent operations: 0.10-0.17ms
-- Throughput: 2,060 txn/sec (identified optimization opportunity)
+- Throughput: 2,060 txn/sec (identified optimisation opportunity)
 
 **Analysis**: Repository layer has excellent integration test coverage using testcontainers. All major database
 operations are tested with real PostgreSQL, ensuring reliable data persistence.
@@ -115,7 +115,7 @@ with room for improvement in error handling paths.
 
 ### Application Layer: 75.5% ✅
 
-**Status**: Good coverage of configuration and initialization
+**Status**: Good coverage of configuration and initialisation
 
 **Covered Components**:
 
@@ -127,17 +127,17 @@ with room for improvement in error handling paths.
 **Coverage Gaps**:
 
 ```text
-NewContainer                      44.4%  (initialization code)
+NewContainer                      44.4%  (initialisation code)
 initializeTracer                  23.1%  (observability setup)
-initializeDatabase                70.6%  (connection initialization)
-initializeEventPublisher          0.0%   (Kafka initialization)
+initializeDatabase                70.6%  (connection initialisation)
+initializeEventPublisher          0.0%   (Kafka initialisation)
 initializeRepositories            0.0%   (factory methods)
 ```
 
-**Analysis**: Infrastructure initialization code has lower coverage, which is acceptable as these are primarily
+**Analysis**: Infrastructure initialisation code has lower coverage, which is acceptable as these are primarily
 wiring/setup code paths that are validated through integration tests.
 
-## Test Organization
+## Test Organisation
 
 ### Test Suites
 
@@ -178,7 +178,7 @@ wiring/setup code paths that are validated through integration tests.
 **Benefits**:
 
 - Isolated test environments per test
-- Real database behavior validation
+- Real database behaviour validation
 - Fast startup (1-2 seconds)
 - Parallel test execution support
 
@@ -230,7 +230,7 @@ go test -short -v -race -coverprofile=coverage.out -covermode=atomic ./...
 
 ### Priority 2: Infrastructure Testing
 
-1. **Application Container Initialization** (Currently 44.4%)
+1. **Application Container Initialisation** (Currently 44.4%)
    - Dependency injection testing
    - Configuration validation
    - **Impact**: Low - primarily wiring code
@@ -292,7 +292,7 @@ go test -short -v -race -coverprofile=coverage.out -covermode=atomic ./...
 
 1. **Load Testing**
    - Sustained load scenarios
-   - Throughput optimization (10,000+ txn/sec goal)
+   - Throughput optimisation (10,000+ txn/sec goal)
    - Concurrent user simulation
 
 1. **Service Error Coverage**

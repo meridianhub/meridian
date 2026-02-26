@@ -180,7 +180,7 @@ type SemanticLinter struct
 ┌─────────────────────────────────────────────────────────┐
 │ Layer 2: Semantic Linting (EXISTING)                   │
 │ shared/pkg/saga/linter.go                              │
-│ • Decimal math, magic numbers, hardcoded codes         │
+│ • Decimal maths, magic numbers, hardcoded codes         │
 └────────────────┬────────────────────────────────────────┘
                  ↓ Pass
 ┌─────────────────────────────────────────────────────────┐

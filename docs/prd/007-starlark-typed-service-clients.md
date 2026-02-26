@@ -61,10 +61,10 @@ query := `
 |-------|--------|
 | **No Update Propagation** | Bug fixes to `deposit.star` don't reach existing tenants |
 | **Storage Duplication** | Same script content stored N times (once per tenant) |
-| **Inconsistent Behavior** | Older tenants run different code than newer tenants |
+| **Inconsistent Behaviour** | Older tenants run different code than newer tenants |
 | **Manual Migration Required** | Platform updates require explicit migration across all tenants |
 
-**Desired Behavior:**
+**Desired Behaviour:**
 
 ```text
 ┌─────────────────────────────────────────────────────────────────┐
@@ -433,7 +433,7 @@ func BuildTenantPredeclared(tenantID TenantID) starlark.StringDict {
     return predeclared
 }
 
-// Thread initialization
+// Thread initialisation
 thread := &starlark.Thread{Name: sagaName}
 globals, err := starlark.ExecFileOptions(
     &syntax.FileOptions{},
@@ -449,7 +449,7 @@ Loader**, not script logic.
 
 #### 4. No load() Required for Core Services
 
-Service objects are injected into global scope during thread initialization. Scripts access
+Service objects are injected into global scope during thread initialisation. Scripts access
 them directly without imports:
 
 ```starlark
@@ -716,7 +716,7 @@ Store only a reference marker in tenant `saga_definition`, not the script conten
 INSERT INTO saga_definition (name, is_platform_ref, platform_version)
 VALUES ('current_account_deposit', true, '1.2.0');
 
--- Tenant saga_definition for overrides (existing behavior)
+-- Tenant saga_definition for overrides (existing behaviour)
 INSERT INTO saga_definition (name, script, override_reason)
 VALUES ('current_account_deposit', '...custom script...', 'Custom settlement timing');
 ```
@@ -826,7 +826,7 @@ Define handler schemas that serve as single source of truth for both Go and Star
 1.5. **Add schema validation to ValidateDraft/ValidateActivation** - Integrate schema
      checking into existing validation pipeline
 
-1.6. **Automated documentation generator** - Generate Markdown "Service Catalog" from YAML
+1.6. **Automated documentation generator** - Generate Markdown "Service Catalogue" from YAML
      schemas. Ensures up-to-date reference of every `service.method()` and required params.
 
 ### Task 2: Starlark Service Modules

@@ -205,7 +205,7 @@ stateDiagram-v2
 
 - Fire-and-forget (doesn't block main operation)
 - Partition key = LogID (ensures ordering per aggregate)
-- Protobuf serialization
+- Protobuf serialisation
 
 **Fire-and-Forget Semantics:**
 
@@ -414,7 +414,7 @@ sequenceDiagram
 | `GetAccountBalance` | O(n) | Aggregates over POSTED transactions |
 | `GetAccountBalances` | O(n) | Single pass computes all types |
 
-**Optimization:** Balance snapshots may be cached or materialized for high-traffic accounts.
+**Optimisation:** Balance snapshots may be cached or materialized for high-traffic accounts.
 
 ### Opening Balance Support
 

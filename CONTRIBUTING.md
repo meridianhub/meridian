@@ -459,7 +459,7 @@ through coding patterns and conventions.
 
    ```
 
-1. **Constructor Functions for Complex Initialization**
+1. **Constructor Functions for Complex Initialisation**
    - Use `NewX()` constructors that return fully initialized, valid instances
    - Validate inputs in constructors
    - Return errors for invalid states rather than creating invalid objects
@@ -550,7 +550,7 @@ We follow strict TDD practices to ensure code quality, correctness, and maintain
 #### The Cycle
 
 1. **Red**: Write a failing test first
-   - Define the expected behavior before implementation
+   - Define the expected behaviour before implementation
    - Test should fail for the right reason (not compile error)
    - Verify the test fails by running it
 
@@ -559,7 +559,7 @@ We follow strict TDD practices to ensure code quality, correctness, and maintain
    - Don't worry about elegance yet
    - All tests must pass
 
-1. **Refactor**: Improve code quality without changing behavior
+1. **Refactor**: Improve code quality without changing behaviour
    - Apply immutability principles
    - Remove duplication
    - Improve naming and structure
@@ -613,7 +613,7 @@ func (m Money) Add(other Money) Money {
 1. **Write Test Names as Specifications**
 
    ```go
-   // Good: Clear specification of behavior
+   // Good: Clear specification of behaviour
    func TestAccount_Deposit_PositiveAmount_IncreasesBalance(t *testing.T)
    func TestAccount_Deposit_NegativeAmount_ReturnsError(t *testing.T)
 
@@ -663,7 +663,7 @@ func (m Money) Add(other Money) Money {
    // 3. Refactor if needed
    ```
 
-#### Test Organization
+#### Test Organisation
 
 - Write table-driven tests for multiple scenarios
 - Use meaningful test names: `TestFunctionName_Scenario_ExpectedBehavior`
@@ -676,14 +676,14 @@ func (m Money) Add(other Money) Money {
 
 #### Principle
 
-Test not only the expected behavior but also how the system handles unexpected, invalid, or malicious inputs.
+Test not only the expected behaviour but also how the system handles unexpected, invalid, or malicious inputs.
 
 > 📖 **See [ADR-008: Defensive Testing Standards](docs/adr/0008-defensive-testing-standards.md)** for comprehensive
 guidelines, examples, and rationale.
 
 We follow **defensive testing** practices:
 
-1. **Happy Path Testing**: Verify expected behavior with valid inputs
+1. **Happy Path Testing**: Verify expected behaviour with valid inputs
 2. **Unhappy Path Testing**: Verify graceful failure with invalid inputs
 3. **Edge Case Testing**: Test boundary conditions and extreme values
 4. **Negative Testing**: Test with values that should never occur
@@ -1040,7 +1040,7 @@ go test ./...
 
 ### Timing-Sensitive Tests
 
-Some tests validate time-based behavior (e.g., exponential backoff, jitter, timeouts) and are sensitive to CPU
+Some tests validate time-based behaviour (e.g., exponential backoff, jitter, timeouts) and are sensitive to CPU
 scheduler variance in CI environments.
 
 **Local Development:**
@@ -1075,7 +1075,7 @@ scheduler variance in CI environments.
 
 - Use generous tolerance ranges (±30% or more for CI variance)
 - Document why specific tolerance values are chosen
-- Test functional behavior separately without timing assertions
+- Test functional behaviour separately without timing assertions
 
 ### Writing Tests
 
@@ -1085,7 +1085,7 @@ scheduler variance in CI environments.
 4. **Test Fixtures**: Use testdata/ for sample data
 5. **Mocking**: Use interfaces for external dependencies
 
-### Test Organization
+### Test Organisation
 
 ```text
 internal/

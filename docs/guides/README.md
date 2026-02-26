@@ -17,7 +17,7 @@ This directory contains how-to guides and usage documentation for Meridian devel
 | [Starlark Style Guide](starlark-style-guide.md) | Writing conventions and syntax for Starlark saga scripts |
 | [Starlark Built-ins Reference](starlark-built-ins-reference.md) | Available functions, types, and DSL built-ins |
 
-## Documentation Organization
+## Documentation Organisation
 
 All substantial documentation belongs in `docs/`, organized by type:
 

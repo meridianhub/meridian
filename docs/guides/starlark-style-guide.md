@@ -9,7 +9,7 @@
 ## Table of Contents
 
 1. [Critical Syntax Differences from Python](#critical-syntax-differences-from-python)
-2. [File Structure and Organization](#file-structure-and-organization)
+2. [File Structure and Organisation](#file-structure-and-organisation)
 3. [Naming Conventions](#naming-conventions)
 4. [Documentation Standards](#documentation-standards)
 5. [Type Safety and Validation](#type-safety-and-validation)
@@ -156,7 +156,7 @@ amount = Decimal("100.50")
 
 ---
 
-## File Structure and Organization
+## File Structure and Organisation
 
 ### File Naming
 
@@ -906,5 +906,5 @@ For detailed validation documentation, see the [Saga Validation Guide](saga-vali
 
 - **[Saga Validation Guide](saga-validation.md)** - Validation workflow, error interpretation, and monitoring
 - **[Saga Handlers Schema](../saga-handlers.schema.json)** - Available service modules and handlers
-- **[Saga Service Catalog](../saga-service-catalog.md)** - Service module documentation
+- **[Saga Service Catalogue](../saga-service-catalogue.md)** - Service module documentation
 - **[ADR-0028: Starlark Saga & CEL Valuation](../adr/0028-starlark-saga-cel-valuation.md)** - Architecture decision

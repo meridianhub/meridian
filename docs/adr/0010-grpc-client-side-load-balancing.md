@@ -30,7 +30,7 @@ through a single long-lived connection to one pod, leaving other pods idle even 
 
 ### Problem
 
-- **Default Kubernetes behavior**: ClusterIP services use iptables/IPVS for L4 load balancing, which balances
+- **Default Kubernetes behaviour**: ClusterIP services use iptables/IPVS for L4 load balancing, which balances
 connections (not requests)
 - **gRPC HTTP/2 multiplexing**: Single connection carries many requests, defeating L4 load balancing
 - **Consequence**: Horizontal pod scaling doesn't improve performance - new pods receive no traffic from existing
@@ -56,7 +56,7 @@ Implement **client-side load balancing** using:
    - `{"loadBalancingPolicy":"round_robin"}` distributes requests evenly
    - DNS-based discovery automatically picks up pod changes
 
-1. **Centralized client factory** (`pkg/platform/grpc/client.go`)
+1. **Centralised client factory** (`pkg/platform/grpc/client.go`)
    - Enforces consistent configuration across services
    - Encapsulates DNS target construction
    - Provides sensible defaults (keepalive, timeout, blocking dial)
@@ -103,7 +103,7 @@ Client-side load balancing via DNS requires minimal RBAC permissions:
 **Current RBAC Policy** (`deployments/k8s/base/role.yaml`):
 
 ```yaml
-apiVersion: rbac.authorization.k8s.io/v1
+apiVersion: rbac.authorisation.k8s.io/v1
 kind: Role
 metadata:
   name: meridian
@@ -164,7 +164,7 @@ The client factory automatically:
 
 **For New Services**: Use `pkg/platform/grpc.NewClient()` from the start.
 
-**Migrating Existing Clients**: Follow this pattern in service initialization:
+**Migrating Existing Clients**: Follow this pattern in service initialisation:
 
 ```go
 // Before: Direct grpc.Dial
@@ -257,10 +257,10 @@ Load testing confirms:
    - Rotate certificates before expiration
    - Monitor certificate validity in observability stack
 
-### Authentication & Authorization
+### Authentication & Authorisation
 
 - gRPC interceptors handle authentication token validation
-- Authorization policies enforced at application layer
+- Authorisation policies enforced at application layer
 - Consider gRPC metadata for request context propagation
 
 ## Consequences
@@ -275,7 +275,7 @@ Load testing confirms:
 ### Negative
 
 - **Client-side complexity**: Each client must configure DNS resolver and load balancing
-  - *Mitigation*: Centralized `pkg/platform/grpc` package enforces consistency
+  - *Mitigation*: Centralised `pkg/platform/grpc` package enforces consistency
 - **DNS TTL delays**: Pod changes may take 10-30s to propagate
   - *Acceptable*: Brief delay is preferable to complex infrastructure
 - **No weighted routing**: Round-robin assumes uniform pod capacity

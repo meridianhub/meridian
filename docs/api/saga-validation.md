@@ -26,10 +26,10 @@ This endpoint requires authentication via JWT token or API key:
 | Header | Required | Description |
 |--------|----------|-------------|
 | `Content-Type` | Yes | Must be `application/json` or `application/connect+proto` |
-| `Authorization` | Yes* | JWT bearer token for user authentication |
+| `Authorisation` | Yes* | JWT bearer token for user authentication |
 | `X-API-Key` | Yes* | API key for service-to-service authentication |
 
-*One of `Authorization` or `X-API-Key` is required.
+*One of `Authorisation` or `X-API-Key` is required.
 
 ### Request Body (JSON)
 
@@ -145,7 +145,7 @@ When validation fails, the response still returns 200 OK but with `success: fals
 |-------------|-------------|
 | 400 Bad Request | Invalid request body or missing required fields |
 | 401 Unauthorized | Missing or invalid authentication credentials |
-| 403 Forbidden | Authenticated but not authorized for this tenant |
+| 403 Forbidden | Authenticated but not authorised for this tenant |
 | 404 Not Found | Endpoint not found (check URL path) |
 | 500 Internal Server Error | Server error during validation |
 | 503 Service Unavailable | Saga validation service temporarily unavailable |

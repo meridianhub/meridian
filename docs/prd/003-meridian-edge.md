@@ -63,7 +63,7 @@ unreachable or the pricing is complex (half-hourly), the device displays wrong i
 
 ### 2.2 The "Horizon" Risk
 
-Centralized ledgers allow remote tampering. The user has no local, cryptographic proof of their
+Centralised ledgers allow remote tampering. The user has no local, cryptographic proof of their
 transaction history. The Fujitsu/Post Office Horizon scandal demonstrated the catastrophic
 consequences of systems where operators can modify transaction records without cryptographic
 accountability.
@@ -297,7 +297,7 @@ To ensure device longevity on flash storage (SD/eMMC):
 - **Synchronous Normal:** Reduce fsync frequency while maintaining consistency
   (`PRAGMA synchronous = NORMAL` - safe in WAL mode, reduces fsyncs by ~90%)
 - **Batching:** Position Keeping buffers measurements in RAM and flushes to disk every N seconds
-  or M events to minimize write cycles
+  or M events to minimise write cycles
 - **Pruning:** `SyncWorker` aggressively prunes `sync_outbox` after Cloud acknowledgement to
   maintain fixed disk usage footprint (< 100MB ledger data)
 
@@ -400,9 +400,9 @@ The device enrollment lifecycle establishes trust before any transactions occur:
    endpoint, including hardware serial number
 3. **Attestation:** Cloud verifies device hardware ID against manufacturing records
 4. **Certificate Issuance:** Cloud issues a "Ledger Certificate" binding the device's public key
-   to specific authorized accounts
+   to specific authorised accounts
 5. **Genesis Sync:** Device receives its initial state (tariffs, account structure, reference data)
-6. **Operational Mode:** Device can now sign valid transactions for its authorized scope
+6. **Operational Mode:** Device can now sign valid transactions for its authorised scope
 
 **Revocation:** If a device is compromised, the Cloud revokes the Ledger Certificate. The device
 can still operate offline, but its signed events will be rejected on next sync attempt.

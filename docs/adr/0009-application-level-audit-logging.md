@@ -29,7 +29,7 @@ while it would work in production PostgreSQL.
 
 ## Decision Drivers
 
-1. **Development-Production Parity**: Local environment should match production behavior
+1. **Development-Production Parity**: Local environment should match production behaviour
 2. **CockroachDB Compatibility**: Core development database doesn't support PL/pgSQL
 3. **Testability**: Audit logic should be easily testable in unit tests
 4. **Performance**: Audit logging must not significantly impact transaction throughput
@@ -94,7 +94,7 @@ PL/pgSQL dependency. Database-level triggers are not viable without PL/pgSQL sup
 **Cons:**
 
 - ❌ Development-production parity violation
-- ❌ Can't test audit behavior locally
+- ❌ Can't test audit behaviour locally
 - ❌ Deployment complexity (two database systems)
 - ❌ CockroachDB advantages lost (horizontal scaling, multi-region)
 
@@ -219,7 +219,7 @@ Repeat for `position_keeping_audit` schema.
 ### Potential Impact
 
 1. **Additional INSERT per operation**: +1 write per business operation
-2. **JSON serialization overhead**: `toJSON()` conversion cost
+2. **JSON serialisation overhead**: `toJSON()` conversion cost
 3. **Transaction size increase**: Audit INSERT adds to transaction
 
 ### Async Audit Strategy: Transactional Outbox Pattern
@@ -301,8 +301,8 @@ func processAuditOutbox(db *gorm.DB, schema string) {
    - Reduce write amplification by excluding low-risk tables
    - Document which tables are/aren't audited and rationale
 
-1. **Optimize JSON serialization**: Only include fields that change
-   - Compute diff before serialization to reduce JSONB size
+1. **Optimise JSON serialisation**: Only include fields that change
+   - Compute diff before serialisation to reduce JSONB size
    - Set maximum audit record size limits
 
 1. **Batch processing**: Worker processes outbox in batches of 100 for efficiency
@@ -686,7 +686,7 @@ func TestAuditSystem_EndToEnd_CockroachDB(t *testing.T) {
 
 **Test-Driven Development:**
 
-1. Write failing tests for worker behavior (idempotency, resilience)
+1. Write failing tests for worker behaviour (idempotency, resilience)
 2. Implement `AuditWorker()` background goroutine
 3. Implement `processAuditOutbox()` with batch processing
 4. Verify all tests pass (green)
@@ -769,7 +769,7 @@ The async audit system has been fully implemented across all 6 services with a d
    - Writes directly to `audit_log` table
 
 4. **Outbox Fallback Worker** (`services/audit-worker/`)
-   - Centralized service processes `audit_outbox` entries when Kafka is unavailable
+   - Centralised service processes `audit_outbox` entries when Kafka is unavailable
    - Polls every 5 seconds, batch size 100
    - Moves entries from `audit_outbox` → `audit_log`
 

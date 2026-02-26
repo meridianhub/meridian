@@ -52,7 +52,7 @@ Generates Mermaid diagram syntax from the coupling analysis JSON.
 - Proto dependencies (solid arrows, green)
 - Platform coupling (dashed arrows, yellow)
 - Cross-service violations (thick arrows, red)
-- Color-coded service nodes by violation severity
+- Colour-coded service nodes by violation severity
 - HTML comment with analysis summary
 
 **Exit codes:**
@@ -114,7 +114,7 @@ Validates that the Mermaid generation script produces correct output.
 
 ## Mermaid Diagram Legend
 
-**Node Colors:**
+**Node Colours:**
 
 - 🟢 **Green** (Safe) - Services with only proto dependencies
 - 🟡 **Yellow** (Warning) - Services using internal/platform packages

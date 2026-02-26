@@ -37,7 +37,7 @@ Every service exposes gRPC endpoints with full Vanguard JSON transcoding. The AP
 
 - **JWT claims:** `roles: ["admin"]` or `roles: ["operator"]`, `x-tenant-id: "org_acme_uuid"`
 - **Capabilities:** Manage their tenant's accounts, transactions, payments, positions, ledger, parties, reconciliation, and Starlark overrides
-- **Mental model:** "This is my application. I manage my organization's financial operations."
+- **Mental model:** "This is my application. I manage my organisation's financial operations."
 
 ### Tenant Auditor
 
@@ -145,12 +145,12 @@ Tenant Admin Flow:
 The gateway already handles this. A platform admin JWT (no `x-tenant-id` claim) can still reach tenant-scoped services by:
 
 1. Using the tenant's subdomain (`acme.api.meridian.io`) — the gateway's `TenantResolverMiddleware` resolves the subdomain to tenant ID
-2. The `TenantAuthorizationMiddleware` skips JWT tenant matching for platform-admin role (they are authorized for any tenant)
+2. The `TenantAuthorizationMiddleware` skips JWT tenant matching for platform-admin role (they are authorised for any tenant)
 3. The downstream service receives the tenant context via `x-tenant-id` header
 
 **Open item:** The current `TenantAuthorizationMiddleware` compares JWT `x-tenant-id` with resolved tenant and rejects mismatches. For platform admins (no `x-tenant-id` in JWT), this comparison is skipped when the role is `platform-admin` or `super-admin`. **Verify this skip logic exists in `combined_middleware.go` lines 195-271** — the codebase shows API keys bypass this check, but the platform-admin bypass for JWT needs confirmation.
 
-If the bypass doesn't exist yet, the gateway needs a small change: when JWT has `platform-admin` or `super-admin` role and no `x-tenant-id` claim, skip the tenant authorization check but still inject the resolved tenant into context.
+If the bypass doesn't exist yet, the gateway needs a small change: when JWT has `platform-admin` or `super-admin` role and no `x-tenant-id` claim, skip the tenant authorisation check but still inject the resolved tenant into context.
 
 #### Phase 0 Prerequisite: Platform Admin Gateway Bypass
 
@@ -160,11 +160,11 @@ allows JWTs with `platform-admin` or `super-admin` role and
 no `x-tenant-id` claim to pass through when accessing
 tenant-scoped services via subdomain.
 
-**Current behavior (verify):** API keys bypass the tenant
-authorization check. JWT-based access for platform admins
+**Current behaviour (verify):** API keys bypass the tenant
+authorisation check. JWT-based access for platform admins
 may not have the same bypass.
 
-**Required behavior:** When JWT has `platform-admin` or
+**Required behaviour:** When JWT has `platform-admin` or
 `super-admin` role AND no `x-tenant-id` claim, the
 middleware must:
 
@@ -288,7 +288,7 @@ admin's tenant list cache is preserved across switches.
 2. Redirect to identity provider (Keycloak, Auth0, etc.)
 3. OAuth 2.0 PKCE flow → receive JWT access token + refresh token
 4. Store tokens in memory (not localStorage — XSS risk)
-5. Connect-ES interceptor attaches Authorization header to all requests
+5. Connect-ES interceptor attaches Authorisation header to all requests
 6. On 401 response → attempt token refresh
 7. On refresh failure → redirect to login
 ```
@@ -306,7 +306,7 @@ performs the OAuth PKCE exchange and sets a secure,
 httpOnly, SameSite=Strict cookie. The Connect-ES transport
 sends this cookie automatically. The auth proxy is
 stateless — it validates the cookie and injects the
-Authorization header before proxying to the gateway.
+Authorisation header before proxying to the gateway.
 
 This does NOT violate the "no BFF" decision (Section 3.4)
 because it handles only authentication, not data
@@ -551,7 +551,7 @@ Directory pattern with 25 RPCs across 7 functional areas.
 
 - **List view:** DataTable of parties by party type. No
   `ListParties` RPC exists — the list view queries
-  `ListParticipants` scoped to the tenant's organization
+  `ListParticipants` scoped to the tenant's organisation
   party. Columns: Name, Party Type, Status, External
   Reference, Created. Filterable by party type and status.
 - **Detail view:** Party header (status badge, type,
@@ -581,10 +581,10 @@ Directory pattern with 25 RPCs across 7 functional areas.
 #### Party Types (Tenant Configuration)
 
 Party types define behavioral templates for parties,
-similar to how Account Types define account behavior.
+similar to how Account Types define account behaviour.
 
 - **List view:** DataTable of party types: Name, Category
-  (Individual/Organization), Status, Version.
+  (Individual/Organisation), Status, Version.
 - **Detail view:** Party type header with tabs:
   - **Definition:** Name, category, description,
     attribute schema (JSON Schema)
@@ -711,7 +711,7 @@ prominent inline hint: "Expression saved for audit trail.
 Assertions currently use strict equality (total debits ==
 total credits). Custom CEL evaluation is planned for a
 future release." This prevents operators from expecting
-their expressions to affect assertion behavior.
+their expressions to affect assertion behaviour.
 
 #### Design Note: Variance Detection
 
@@ -953,10 +953,10 @@ saga handles their transactions.
 **Layout:**
 
 - **List view:** DataTable with columns: Code, Display Name,
-  Behavior Class, Normal Balance, Instrument, Status, Version.
-  Filterable by behavior class and status.
+  Behaviour Class, Normal Balance, Instrument, Status, Version.
+  Filterable by behaviour class and status.
 - **Detail view:** Account type header with tabs:
-  - **Definition:** Code, display name, behavior class
+  - **Definition:** Code, display name, behaviour class
     (CUSTOMER, CLEARING, NOSTRO, VOSTRO, HOLDING, SUSPENSE,
     REVENUE, EXPENSE, INVENTORY), normal balance (DEBIT/CREDIT),
     instrument code, default saga prefix
@@ -1082,12 +1082,12 @@ COMPUTE, precision 6, validation `amount > 0`.
 **Step 2: Define the Account Type** (Reference Data page)
 
 Create an account type that uses the new instrument. Set
-behavior class, normal balance direction, CEL validation and
+behaviour class, normal balance direction, CEL validation and
 eligibility policies. Link valuation methods for cross-asset
 conversion.
 
 Example: Creating a `COMPUTE_INVENTORY` account type with
-behavior class INVENTORY, normal balance DEBIT, instrument
+behaviour class INVENTORY, normal balance DEBIT, instrument
 `GPU_HOUR`.
 
 **Step 3: Write the Starlark Saga** (Starlark Config page)
@@ -1139,7 +1139,7 @@ dialog. It carries meaningful implementation complexity:
 - Deep links between pages with pre-filled context (e.g.,
   "Create Account Type" pre-selects the instrument from
   Step 1)
-- State synchronization: when a user activates an
+- State synchronisation: when a user activates an
   instrument on the Instruments page, the checklist on the
   Starlark page must reflect this
 
@@ -1355,7 +1355,7 @@ The outer layout that implements the two-lens model.
 └──────────┴───────────────────────────────────────────────┘
 ```
 
-**Behavior:**
+**Behaviour:**
 
 - Reads JWT claims on mount to determine lens (platform vs tenant)
 - Platform admin: shows TenantSelector in header, shows Tenants/Platform nav items below separator
@@ -1414,7 +1414,7 @@ by default.
 
 ### 6.4 StatusBadge
 
-Renders status values with consistent color coding.
+Renders status values with consistent colour coding.
 
 **Loading state:** Show grey pill with shimmer animation
 when status data is loading.
@@ -1575,7 +1575,7 @@ type ErrorCategory =
 ```
 
 **Inline annotations:** Each error renders as a CodeMirror
-diagnostic at the exact line/column. Errors are color-coded
+diagnostic at the exact line/column. Errors are colour-coded
 by category (red for SYNTAX/RUNTIME, orange for TYPE_MISMATCH,
 yellow for UNDEFINED_HANDLER). Hovering shows the message and
 suggestion.
@@ -1593,9 +1593,9 @@ After validation, display `ComplexityMetrics` beside the editor:
 | Handler calls | Count badge (e.g., "7 handlers") |
 | Operations | Count (loops, conditionals, assignments) |
 | Est. duration | Milliseconds (e.g., "~70ms") |
-| Complexity | Score 0-10 with color indicator |
+| Complexity | Score 0-10 with colour indicator |
 
-Complexity score color: 0-3 green, 4-6 yellow, 7-10 red.
+Complexity score colour: 0-3 green, 4-6 yellow, 7-10 red.
 
 #### Handler Autocomplete
 
@@ -1628,7 +1628,7 @@ ESTIMATE → COEFFICIENT → ACTUAL → REVISED
   [○]         [◐]         [●]       [↻]
 ```
 
-Each level has a distinct icon and color, showing the data provenance chain.
+Each level has a distinct icon and colour, showing the data provenance chain.
 
 ### 6.10 SagaTimeline
 
@@ -1770,7 +1770,7 @@ React Query handles three states explicitly:
 **Dashboard resilience:** The dashboard fetches from 3+
 services in parallel. If one service is down, only that
 card shows an error state. Other cards render normally.
-This is the default React Query behavior — each query is
+This is the default React Query behaviour — each query is
 independent.
 
 **gRPC status code mapping:**
@@ -1917,7 +1917,7 @@ frontend/
 │   ├── lib/
 │   │   ├── auth.ts                 # JWT helpers, token storage
 │   │   ├── formatters.ts           # Money formatting, date formatting
-│   │   ├── query-keys.ts           # Centralized query key factory
+│   │   ├── query-keys.ts           # Centralised query key factory
 │   │   └── constants.ts            # Status maps, role definitions
 │   ├── contexts/
 │   │   ├── auth-context.tsx        # JWT claims, user info
@@ -2103,10 +2103,10 @@ by default. The following must be maintained, not broken:
   aria-live regions (e.g., "Payment order status changed
   to COMPLETED"). DataTable rows use proper role="row"
   and role="cell" semantics.
-- **Color independence:** StatusBadge uses both color AND
+- **Colour independence:** StatusBadge uses both colour AND
   text label. QualityLadderBadge uses icons alongside
-  colors. Error states use both red color and error icon.
-  No information conveyed by color alone.
+  colours. Error states use both red colour and error icon.
+  No information conveyed by colour alone.
 - **Focus indicators:** Visible focus rings on all
   interactive elements (Tailwind's ring utilities). Custom
   focus styles for StarlarkEditor and CELEditor (CodeMirror
@@ -2508,7 +2508,7 @@ surfaces.**
 
 ---
 
-## Appendix B: Event Catalog Summary
+## Appendix B: Event Catalogue Summary
 
 Events that drive real-time cache invalidation (Phase 4):
 

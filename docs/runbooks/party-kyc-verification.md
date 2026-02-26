@@ -8,7 +8,7 @@ triggers:
   - Investigating stuck PENDING verifications
   - Webhook signature validation errors
   - High manual review rate from Onfido
-  - Timeout handler behavior questions
+  - Timeout handler behaviour questions
   - Force-updating a verification status
 instructions: |
   Use this runbook for KYC/AML verification operations in the Party service.

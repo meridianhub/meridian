@@ -252,7 +252,7 @@ beyond basic equality on the `input_dataset_codes` and `required_policies` colum
 | party            | `VARCHAR(45)`                                           |
 | payment-order    | `VARCHAR(45)` (initial), then `INET` after fix migration|
 
-This is an internal inconsistency that would benefit from standardization, but is not a
+This is an internal inconsistency that would benefit from standardisation, but is not a
 compatibility blocker. Both `INET` and `VARCHAR(45)` work on both databases.
 
 ---
@@ -299,7 +299,7 @@ For PostgreSQL deployments, ensure:
 
 **Issue**: `CREATE OR REPLACE VIEW` is supported identically in both databases. However, `ORDER BY`
 in a view definition does not guarantee ordering when selecting from the view unless `ORDER BY` is
-repeated in the outer query. This behavior is consistent between CockroachDB and PostgreSQL — it is
+repeated in the outer query. This behaviour is consistent between CockroachDB and PostgreSQL — it is
 not a compatibility issue, but a documentation note.
 
 ---

@@ -30,7 +30,7 @@ Current Account originally stored balance locally in the database with fields `b
 `available_balance`, and `balance_updated_at`. This created several problems:
 
 1. **Dual-write complexity**: Every transaction required updating both Position Keeping
-   (transaction log) and Current Account (balance). This introduced synchronization risks.
+   (transaction log) and Current Account (balance). This introduced synchronisation risks.
 
 2. **Consistency challenges**: If Position Keeping succeeded but Current Account failed,
    the balance could become inconsistent with the transaction history.
@@ -45,14 +45,14 @@ Current Account originally stored balance locally in the database with fields `b
 ## Decision Drivers
 
 * BIAN compliance: Position Keeping is the authoritative domain for position/balance data
-* Eliminate dual-write complexity and synchronization bugs
+* Eliminate dual-write complexity and synchronisation bugs
 * Single source of truth for balance computation
 * Support for 7 BIAN balance types (not just current/available)
 * Simpler Current Account schema (account metadata only)
 
 ## Considered Options
 
-1. Keep balance in Current Account with synchronization
+1. Keep balance in Current Account with synchronisation
 2. Delegate balance computation to Position Keeping (chosen)
 3. Event-sourced balance with eventual consistency
 
@@ -68,8 +68,8 @@ source of truth for balance data.
 * Simplified Current Account: Only stores account metadata, not derived data
 * BIAN compliance: Follows BIAN service domain boundaries
 * Richer balance types: 7 BIAN balance types (OPENING, CLOSING, CURRENT, AVAILABLE, etc.)
-* Eliminated synchronization bugs: No more dual-write consistency issues
-* Cleaner migration: Opening balance support via Position Keeping initialization
+* Eliminated synchronisation bugs: No more dual-write consistency issues
+* Cleaner migration: Opening balance support via Position Keeping initialisation
 
 ### Negative Consequences
 
@@ -79,13 +79,13 @@ source of truth for balance data.
 
 ## Pros and Cons of the Options
 
-### Option 1: Keep balance in Current Account with synchronization
+### Option 1: Keep balance in Current Account with synchronisation
 
 Store balance locally in Current Account and synchronize with Position Keeping.
 
 * Good, because no network hop for balance queries
 * Good, because Current Account is self-contained
-* Bad, because dual-write complexity introduces synchronization bugs
+* Bad, because dual-write complexity introduces synchronisation bugs
 * Bad, because violates single source of truth principle
 * Bad, because limited to 2 balance types (current, available)
 * Bad, because Current Account must understand balance computation logic
@@ -96,7 +96,7 @@ Remove balance storage from Current Account. Position Keeping computes balance o
 from the transaction log.
 
 * Good, because single source of truth (transaction log = balance)
-* Good, because eliminates dual-write synchronization issues
+* Good, because eliminates dual-write synchronisation issues
 * Good, because BIAN-compliant service boundaries
 * Good, because supports 7 balance types
 * Good, because Current Account schema is simpler
@@ -169,7 +169,7 @@ for _, b := range balances.Balances {
 
 * Circuit breaker on Position Keeping client (3 retries, exponential backoff)
 * Graceful degradation when Position Keeping unavailable
-* Optional balance caching for read-heavy workloads (future optimization)
+* Optional balance caching for read-heavy workloads (future optimisation)
 
 ## Links
 

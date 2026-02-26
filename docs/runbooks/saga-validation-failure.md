@@ -184,7 +184,7 @@ kubectl get events -n meridian --sort-by='.lastTimestamp' | head -20
 2. If pods are healthy but endpoints fail, check gRPC routing
 3. Restart the service: `kubectl rollout restart deployment/reference-data -n meridian`
 
-### Runtime initialization failure
+### Runtime initialisation failure
 
 **Symptoms**: Validation returns internal errors mentioning "runtime" or "timeout".
 

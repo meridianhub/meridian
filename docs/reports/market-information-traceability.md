@@ -95,7 +95,7 @@ identifies coverage status, and documents any gaps or edge cases requiring atten
 
 | Requirement ID | Target | Status | Validation Method | Notes |
 |----------------|--------|--------|-------------------|-------|
-| NFR-1.1 | Point-in-time query < 10ms p99 | NEEDS VALIDATION | NFR benchmark tests (to be created) | Bi-temporal index optimized |
+| NFR-1.1 | Point-in-time query < 10ms p99 | NEEDS VALIDATION | NFR benchmark tests (to be created) | Bi-temporal index optimised |
 | NFR-1.2 | Observation ingestion < 50ms p99 | NEEDS VALIDATION | NFR benchmark tests (to be created) | Single insert with supersession |
 | NFR-1.3 | Batch ingestion 1,000 obs/sec | NEEDS VALIDATION | NFR benchmark tests (to be created) | Parallel validation with 50 workers |
 
@@ -139,10 +139,10 @@ None identified. All P0 functional requirements are implemented.
 
 ### Edge Cases Not Covered
 
-| Edge Case | Description | Current Behavior | Recommendation |
+| Edge Case | Description | Current Behaviour | Recommendation |
 |-----------|-------------|------------------|----------------|
 | EC-001 | Concurrent supersession race | Last write wins | Add optimistic locking on supersession |
-| EC-002 | Dataset version mismatch in observations | Uses latest ACTIVE | Document expected behavior |
+| EC-002 | Dataset version mismatch in observations | Uses latest ACTIVE | Document expected behaviour |
 | EC-003 | Knowledge time in future | Query returns all known | Add validation to reject future knowledge times |
 | EC-004 | Empty observation_context with CEL | CEL may fail | Add graceful handling with empty map default |
 

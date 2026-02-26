@@ -405,7 +405,7 @@ tilt up
 
 The Tiltfile will automatically validate that the registry exists and provide helpful error messages if it's not found.
 
-## Performance Optimization
+## Performance Optimisation
 
 ### Fast Rebuilds
 
@@ -544,7 +544,7 @@ This is useful for integration testing in CI pipelines.
 ### Related Skills
 
 - [Schema Evolution](./schema-evolution.md) - Protobuf schema evolution and buf validation
-- [Docker Configuration](./docker.md) - Multi-stage builds and container optimization
+- [Docker Configuration](./docker.md) - Multi-stage builds and container optimisation
 - [Kustomize Deployments](./kustomize.md) - Environment-specific configurations
 - [Security Scanning](./security.md) - Vulnerability detection in images
 

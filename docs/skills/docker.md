@@ -15,7 +15,7 @@ instructions: |
 
 # Docker Configuration
 
-This document describes the Docker setup for Meridian, optimized for production deployments.
+This document describes the Docker setup for Meridian, optimised for production deployments.
 
 ## Overview
 
@@ -88,7 +88,7 @@ docker build \
 
 - **Layer caching**: Go modules downloaded before source code
 - **Static linking**: CGO_ENABLED=0 for fully static binaries
-- **Size optimization**: `-ldflags="-w -s"` strips debug info
+- **Size optimisation**: `-ldflags="-w -s"` strips debug info
 - **.dockerignore**: Excludes unnecessary files from build context
 
 ## Running Containers

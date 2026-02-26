@@ -102,7 +102,7 @@ Full account lifecycle management. Demonstrates:
 - State transitions: ACTIVE -> SUSPENDED -> ACTIVE -> CLOSED
 - Control actions: SUSPEND, ACTIVATE, CLOSE
 - Reason requirements for audit trail
-- Terminal state behavior (CLOSED cannot be reopened)
+- Terminal state behaviour (CLOSED cannot be reopened)
 - Error handling for invalid transitions
 
 ```bash
@@ -117,7 +117,7 @@ All examples require tenant context via gRPC metadata:
 
 ```go
 ctx = metadata.AppendToOutgoingContext(ctx,
-    "x-organization", "your-tenant-id",
+    "x-organisation", "your-tenant-id",
 )
 ```
 
@@ -192,10 +192,10 @@ go run ./services/internal-account/cmd
 
 ### "tenant not found"
 
-Missing `x-organization` header. Add to context:
+Missing `x-organisation` header. Add to context:
 
 ```go
-ctx = metadata.AppendToOutgoingContext(ctx, "x-organization", "your-tenant")
+ctx = metadata.AppendToOutgoingContext(ctx, "x-organisation", "your-tenant")
 ```
 
 ### "Position Keeping unavailable"

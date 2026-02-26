@@ -104,7 +104,7 @@ classDiagram
 
 - CurrentAccountService → Party, PositionKeeping, FinancialAccounting
 - PaymentOrderService → CurrentAccount (for fund reservations via Lien)
-- TenantService → Party (optional: registers organization Party on tenant creation)
+- TenantService → Party (optional: registers organisation Party on tenant creation)
 
 ## Tooling
 
@@ -293,7 +293,7 @@ Event schemas in `api/proto/meridian/events/` use protobuf's native versioning (
 - Schema compatibility validated via `buf breaking` in CI/CD
 - No runtime schema registry needed (Kafka is internal-only)
 - Same protobuf definitions used for both gRPC and Kafka events
-- New BIAN behavior qualifiers → new event types (new topics)
+- New BIAN behaviour qualifiers → new event types (new topics)
 - Backward-compatible changes → add optional fields
 
 See [ADR-0004: Event Schema Evolution Strategy](../../docs/adr/0004-event-schema-evolution.md) for details.

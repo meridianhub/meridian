@@ -42,7 +42,7 @@ because the schema namespace is finite and human-readable IDs are desirable for 
 
 Once a tenant is deprovisioned, its ID (e.g., `acme_bank`) is permanently consumed:
 
-1. A new organization cannot claim this desirable name
+1. A new organisation cannot claim this desirable name
 2. Namespace pollution accumulates over time
 3. Schema names remain visible in logs, connection strings, and error messages
 
@@ -88,7 +88,7 @@ message Tenant {
 }
 ```
 
-**Schema naming**: `org_550e8400_e29b_41d4` (normalized UUID prefix)
+**Schema naming**: `org_550e8400_e29b_41d4` (normalised UUID prefix)
 
 ### Option 3: Hybrid Approach (Internal UUID + External Slug)
 
@@ -131,7 +131,7 @@ and significant.
    - API breaking changes or dual-identifier periods
    - Test suite updates across all services
 
-4. **SaaS Model Not Current**: Meridian is infrastructure for organizations to operate,
+4. **SaaS Model Not Current**: Meridian is infrastructure for organisations to operate,
    not a commercial SaaS platform. Multi-tenancy is for demonstration, not production
    customer isolation with billing and churn.
 
@@ -212,7 +212,7 @@ Stripe uses **prefixed human-readable IDs** (e.g., `cus_xyz123`, `pi_abc456`):
 - Random suffix provides uniqueness without full UUID length
 - Stripe stores the full prefixed ID as primary key (not separated)
 
-This pattern prioritizes debuggability over namespace concerns, even at Stripe's scale.
+This pattern prioritises debuggability over namespace concerns, even at Stripe's scale.
 
 ### Auth0's Approach
 
@@ -275,7 +275,7 @@ Alert if `consumed_ids` exceeds 1,000 or `consumed_ids / active_tenants` exceeds
 
 * [Stripe Object IDs Design](https://dev.to/4thzoa/designing-apis-for-humans-object-ids-3o5a) - Prefixed ID best practices
 * [Auth0 Multi-Tenant Best Practices](https://auth0.com/docs/get-started/auth0-overview/create-tenants/multi-tenant-apps-best-practices)
-* [AWS Multi-Tenant Authorization](https://docs.aws.amazon.com/prescriptive-guidance/latest/saas-multitenant-api-access-authorization/introduction.html)
+* [AWS Multi-Tenant Authorisation](https://docs.aws.amazon.com/prescriptive-guidance/latest/saas-multitenant-api-access-authorisation/introduction.html)
 * [PostgreSQL UUID Documentation](https://www.postgresql.org/docs/current/datatype-uuid.html)
 * GitHub Issue: Multi-tenancy namespace strategy evaluation (Task 51)
 

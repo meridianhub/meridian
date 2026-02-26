@@ -43,7 +43,7 @@ During review of the account service wiring, the question was raised whether thi
 ## Considered Options
 
 1. Remove the nil guard (rely on constructor validation)
-2. Keep the nil guard (current behavior)
+2. Keep the nil guard (current behaviour)
 
 ## Decision Outcome
 

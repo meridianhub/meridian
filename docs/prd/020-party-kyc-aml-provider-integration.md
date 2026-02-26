@@ -63,9 +63,9 @@ without external provider integration"
 
 **Severity:** Medium - By design. This is an intentional production safety guard, not a bug.
 
-### Current Behavior Matrix
+### Current Behaviour Matrix
 
-| Environment | `KYC_STUB_ENABLED` | Behavior |
+| Environment | `KYC_STUB_ENABLED` | Behaviour |
 |-------------|-------------------|----------|
 | production | unset / false | `codes.Unimplemented` - refuses to auto-approve |
 | production | true | Returns VERIFIED (stub) with warning log |

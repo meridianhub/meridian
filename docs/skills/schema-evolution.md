@@ -14,9 +14,9 @@ triggers:
 
 instructions: |
   Follow ADR-0004 for protobuf native versioning. Use Pattern 1 (add optional fields) for
-  backward-compatible changes. Use Pattern 2 (new event type) for new BIAN behavior qualifiers.
+  backward-compatible changes. Use Pattern 2 (new event type) for new BIAN behaviour qualifiers.
   Run 'make proto-breaking' before commit. Pre-commit hooks enforce validation automatically.
-  New BIAN behaviors = new event types, not schema modifications.
+  New BIAN behaviours = new event types, not schema modifications.
 ---
 
 # Schema Evolution Developer Guide
@@ -56,7 +56,7 @@ Protobuf schemas need evolution when:
 
 - **BIAN specification updates** (13.0 → 14.0 adds new fields or operations)
 - **New domain requirements** (additional metadata for observability)
-- **New event types** (new BIAN behavior qualifiers)
+- **New event types** (new BIAN behaviour qualifiers)
 - **Field additions** (enriching existing events with optional data)
 
 ## Decision Tree
@@ -64,7 +64,7 @@ Protobuf schemas need evolution when:
 ```text
 Need to change a proto schema?
 │
-├─ Is this a NEW operation/behavior?
+├─ Is this a NEW operation/behaviour?
 │  └─ YES → Create new event type (Pattern 2)
 │
 ├─ Is this ADDITIONAL optional data?
@@ -146,7 +146,7 @@ git commit -m "feat: Add correlation_id and causation_id to AccountUpdated event
 
 ### What Happens
 
-- **Old consumers**: Ignore new fields (protobuf default behavior)
+- **Old consumers**: Ignore new fields (protobuf default behaviour)
 - **New consumers**: Can read new fields (will be empty in old events)
 - **CI/CD**: `buf breaking` passes ✅
 - **No coordination needed**: Deploy producers and consumers independently
@@ -170,7 +170,7 @@ message AccountUpdated {
   string account_status = 4;
 }
 
-// New event for new BIAN behavior qualifier
+// New event for new BIAN behaviour qualifier
 message AccountSuspended {
   // Event metadata
   string event_id = 1;
@@ -225,7 +225,7 @@ git commit -m "feat: Add AccountSuspended event for BIAN 14.0 Suspend operation"
 ### Topic Strategy
 
 - **One topic per event type**: `account-suspended` (not `account-updated-v2`)
-- **Semantic names**: Reflect BIAN behavior qualifiers
+- **Semantic names**: Reflect BIAN behaviour qualifiers
 - **No version suffixes**: Use new event types instead of versioning topics
 - **7-day retention**: Events are coordination, not source of truth
 
@@ -410,7 +410,7 @@ message AccountUpdated {
 
 **Impact**: None. Optional field, backward compatible.
 
-### Scenario 3: BIAN Adds New Behavior Qualifier
+### Scenario 3: BIAN Adds New Behaviour Qualifier
 
 **Goal**: BIAN 14.0 adds "Freeze" operation distinct from "Suspend".
 
@@ -610,7 +610,7 @@ on:
 ### ✅ DO
 
 - **Add optional fields** for backward-compatible changes
-- **Create new event types** for new BIAN behaviors
+- **Create new event types** for new BIAN behaviours
 - **Run `make proto-breaking`** before every commit
 - **Use semantic event names** aligned with BIAN
 - **Document schema changes** in commit messages

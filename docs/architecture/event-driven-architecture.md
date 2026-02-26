@@ -16,13 +16,13 @@ Meridian's event-driven architecture enables asynchronous communication between 
 2. **At-Least-Once Delivery**: Kafka guarantees at-least-once delivery; consumers must implement idempotency
 3. **Event Sourcing Lite**: Database is the source of truth; events are for coordination, not primary storage
 4. **Schema Evolution via Protobuf**: All events use protobuf with `buf breaking` validation (no Schema Registry)
-5. **BIAN Semantic Alignment**: Event types map to BIAN behavior qualifiers (Initiate, Update, Control, Execute)
+5. **BIAN Semantic Alignment**: Event types map to BIAN behaviour qualifiers (Initiate, Update, Control, Execute)
 6. **Outbox Pattern**: Transactional event publishing using outbox tables for reliability
 
 ### Key Design Decisions
 
 - **No Schema Registry**: Internal-only Kafka usage enables compile-time validation via `buf breaking` (see ADR-0004)
-- **Protobuf Serialization**: Consistent with gRPC APIs, type-safe, efficient
+- **Protobuf Serialisation**: Consistent with gRPC APIs, type-safe, efficient
 - **Topic-per-Event-Type**: One Kafka topic per event type (e.g., `current-account.account-created.v1`)
 - **Partition Key = Aggregate ID**: Events for the same aggregate (account, booking log) go to the same partition for ordering
 - **7-Day Retention**: Events are ephemeral coordination; database is persistent source of truth
@@ -123,7 +123,7 @@ google.type.Money amount = 4 [
 
 ---
 
-## Event Catalog
+## Event Catalogue
 
 ### CurrentAccount Service Events
 
@@ -156,7 +156,7 @@ google.type.Money amount = 4 [
 | `FinancialBookingLogClosedEvent` | `financial-accounting.booking-log-closed.v1` | Booking log closed (terminal state) | Audit, Archival | `booking_log_id` |
 | `LedgerPostingCapturedEvent` | `financial-accounting.ledger-posting-captured.v1` | Debit/credit posting created | Trial-balance, Account-summary | `booking_log_id` |
 | `LedgerPostingAmendedEvent` | `financial-accounting.ledger-posting-amended.v1` | Posting amount amended before posting | Audit, Compliance | `booking_log_id` |
-| `LedgerPostingPostedEvent` | `financial-accounting.ledger-posting-posted.v1` | Posting finalized to general ledger | General-ledger, Reporting | `booking_log_id` |
+| `LedgerPostingPostedEvent` | `financial-accounting.ledger-posting-posted.v1` | Posting finalised to general ledger | General-ledger, Reporting | `booking_log_id` |
 | `LedgerPostingRejectedEvent` | `financial-accounting.ledger-posting-rejected.v1` | Posting rejected during validation (terminal) | Monitoring, DLQ | `booking_log_id` |
 | `BalanceValidationFailedEvent` | `financial-accounting.balance-validation-failed.v1` | Debits ≠ Credits (double-entry violation) | Monitoring, Audit, Alerting | `booking_log_id` |
 
@@ -770,10 +770,10 @@ message AccountCreatedEvent {
 
 **CI Validation:** `buf breaking --against main` passes
 
-✅ **Add new event types** (new BIAN behavior qualifiers)
+✅ **Add new event types** (new BIAN behaviour qualifiers)
 
 ```protobuf
-// New event for BIAN 14.0 "Suspend" behavior qualifier
+// New event for BIAN 14.0 "Suspend" behaviour qualifier
 message AccountSuspendedEvent {
   string event_id = 1;
   string account_id = 2;
@@ -791,7 +791,7 @@ message AccountSuspendedEvent {
 
 ❌ **Change field types** (wire format incompatible)
 
-❌ **Change field numbers** (protobuf uses numbers for serialization)
+❌ **Change field numbers** (protobuf uses numbers for serialisation)
 
 ❌ **Rename fields** (breaks generated code, even though wire format is compatible)
 
@@ -814,7 +814,7 @@ Examples:
 
 - `v1` → `v2` only for breaking changes (rarely needed)
 - Backward-compatible changes stay in `v1` (add optional fields)
-- New BIAN behavior qualifiers = new event types (not version bumps)
+- New BIAN behaviour qualifiers = new event types (not version bumps)
 
 **Example Evolution:**
 
@@ -823,7 +823,7 @@ Examples:
 current-account.account-created.v1
 current-account.account-status-changed.v1
 
-# BIAN 14.0 adds "Suspend" behavior qualifier
+# BIAN 14.0 adds "Suspend" behaviour qualifier
 current-account.account-suspended.v1  ← New event type, NOT v2 of status-changed
 ```
 
@@ -1083,7 +1083,7 @@ log.Error("Failed to process event",
 
 ## Testing Event-Driven Flows
 
-### Unit Tests: Event Serialization
+### Unit Tests: Event Serialisation
 
 ```go
 // api/proto/meridian/events/v1/current_account_events_test.go
@@ -1259,7 +1259,7 @@ kafka-consumer-groups --bootstrap-server kafka:9092 \
 **Resolution:**
 
 1. **Scale consumers horizontally**: Add consumer instances (up to partition count)
-2. **Optimize handler performance**: Profile slow database queries, add indexes
+2. **Optimise handler performance**: Profile slow database queries, add indexes
 3. **Increase partition count**: (requires topic recreation and consumer rebalance)
 4. **Batch processing**: Process events in batches instead of one-by-one
 
@@ -1285,7 +1285,7 @@ LIMIT 10;
 
 1. **Check Kafka broker availability**: `kafka-topics --bootstrap-server kafka:9092 --list`
 2. **Check outbox worker running**: Verify background goroutine started
-3. **Check for serialization errors**: Review `last_error` field in outbox table
+3. **Check for serialisation errors**: Review `last_error` field in outbox table
 4. **Check Kafka ACLs**: Ensure producer has WRITE permission on topics
 5. **Restart service**: Outbox worker may be stuck (restart triggers recovery)
 
@@ -1412,7 +1412,7 @@ sequenceDiagram
 
     Kafka-->>FA: TransactionCompletedEvent
     Kafka-->>PK: TransactionCompletedEvent
-    Note over FA,PK: Services update internal state<br/>to mark transaction finalized
+    Note over FA,PK: Services update internal state<br/>to mark transaction finalised
 ```
 
 **Event Sequence:**

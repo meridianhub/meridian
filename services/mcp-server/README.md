@@ -129,7 +129,7 @@ MCP_TRANSPORT=sse MCP_SSE_PORT=8090 ./mcp-server
 ## OAuth 2.1 Configuration
 
 OAuth 2.1 with PKCE is optional and only applies to the SSE transport. When enabled, the server
-exposes authorization and token endpoints and requires clients to present a bearer token on the
+exposes authorisation and token endpoints and requires clients to present a bearer token on the
 `/sse` and `/message` endpoints.
 
 Example configuration for a production SSE deployment:
@@ -147,7 +147,7 @@ OAuth endpoints exposed when `MCP_OAUTH_ENABLED=true`:
 
 | Endpoint | Purpose |
 |----------|---------|
-| `GET /oauth/authorize` | Authorization endpoint (PKCE challenge) |
+| `GET /oauth/authorise` | Authorisation endpoint (PKCE challenge) |
 | `POST /oauth/token` | Token endpoint (code exchange) |
 
 The current implementation ships a passthrough token issuer and validator suitable for development.

@@ -15,7 +15,7 @@ instructions: |
 
   Example: Use event sourcing with an append-only event store. Events are immutable
   facts representing state changes. Rebuild current state by replaying events from
-  the beginning. Use snapshots for performance optimization.
+  the beginning. Use snapshots for performance optimisation.
 ---
 
 # [number]. [title]

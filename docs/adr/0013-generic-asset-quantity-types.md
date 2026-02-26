@@ -106,7 +106,7 @@ flowchart TB
 | Layer | Purpose | Implementation | Changes Require |
 |-------|---------|----------------|-----------------|
 | **Dimensions** | Prevent physics errors | Empty structs (`Monetary{}`, `Commodity{}`) | Code deployment |
-| **Definitions** | Tenant instrument catalog | `FinancialInstrument` from BIAN Reference Data | Registry update |
+| **Definitions** | Tenant instrument catalogue | `FinancialInstrument` from BIAN Reference Data | Registry update |
 | **Context** | Position attributes | Validated attribute map | Nothing (data) |
 
 ### Core Types
@@ -134,7 +134,7 @@ type Commodity struct{}  // Physical goods, energy, compute resources
 type FinancialInstrument struct {
     Code           string          // BIAN: FinancialInstrumentIdentification ("USD", "KWH")
     Version        uint32          // Schema version (1, 2, 3...)
-    Dimension      string          // "Monetary" or "Commodity" - required for deserialization
+    Dimension      string          // "Monetary" or "Commodity" - required for deserialisation
     InstrumentType InstrumentType  // BIAN: FinancialInstrumentType
     Precision      int             // Decimal places (2, 4, 0)
 }
@@ -349,8 +349,8 @@ flowchart TB
 $100 USD → £X GBP depends on the exchange rate at valuation time. This is temporal
 pricing, just like energy tariffs - the FX provider is simply another ValuationProvider.
 
-**For non-fiat instruments**: Valuation routes to specialized providers (tariff engines,
-market data feeds, custom tenant logic). The ledger doesn't implement the math -
+**For non-fiat instruments**: Valuation routes to specialised providers (tariff engines,
+market data feeds, custom tenant logic). The ledger doesn't implement the maths -
 it just routes to the right provider based on instrument type.
 
 ### Multi-Asset Examples
@@ -458,7 +458,7 @@ func TransferCarbonCredits(
         "registry":   registry, // e.g., "VERRA", "GOLD_STANDARD"
     }
 
-    // Validate attributes - registry must be recognized
+    // Validate attributes - registry must be recognised
     if err := refData.ValidateAttributes(ctx, compiled, attrs); err != nil {
         return fmt.Errorf("invalid carbon credit attributes: %w", err)
     }
@@ -646,7 +646,7 @@ Detailed rate resolution rules will be specified in the ValuationOrchestrator im
 
 ### Pluggable Valuation Architecture
 
-The ledger doesn't implement valuation math. It routes to specialized providers.
+The ledger doesn't implement valuation math. It routes to specialised providers.
 This aligns with BIAN's separation of Position Keeping from Financial Instrument Valuation.
 
 ```go

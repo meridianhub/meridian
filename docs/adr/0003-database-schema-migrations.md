@@ -37,7 +37,7 @@ Financial services require:
 * Schema validation and safety checks
 * Clear audit trail of schema changes
 * Support for CockroachDB/YugabyteDB (PostgreSQL-compatible)
-* **Database entities optimized for persistence concerns** (audit fields, indexes, constraints)
+* **Database entities optimised for persistence concerns** (audit fields, indexes, constraints)
 * **Separation from domain models** to allow independent evolution
 
 ## Decision Drivers
@@ -50,7 +50,7 @@ Financial services require:
 * **Type safety between persistence layer and database schema**
 * Version control migrations alongside service code
 * **Schema linting and safety checks** before deployment
-* **Database entities separate from domain models** for flexibility (audit fields, denormalization, optimization)
+* **Database entities separate from domain models** for flexibility (audit fields, denormalization, optimisation)
 
 ## Considered Options
 
@@ -83,7 +83,7 @@ Chosen option: **"Atlas"**, because:
 * CLI tool integrates with Go build pipeline
 * **Can still write manual migrations** when needed (hybrid approach)
 * **Schema diffing**: Compare environments to detect drift
-* **Separation of concerns**: Database entities can include audit fields, indexes, and optimizations without polluting
+* **Separation of concerns**: Database entities can include audit fields, indexes, and optimisations without polluting
 domain models
 
 ### Negative Consequences
@@ -154,7 +154,7 @@ Database: meridian_current_account
 ```
 
 - Each service has its own PostgreSQL database
-- Each organization gets its own schema within each service database
+- Each organisation gets its own schema within each service database
 - Connection URL includes `search_path` for org routing: `postgres://...?search_path=org_acme_bank`
 - Queries use unqualified table names; PostgreSQL resolves via `search_path`
 
@@ -220,7 +220,7 @@ import (
 )
 
 // BookingLogEntity represents the database persistence model
-// Optimized for database concerns: audit fields, indexes, constraints
+// Optimised for database concerns: audit fields, indexes, constraints
 type BookingLogEntity struct {
     // Primary key
     ID              uuid.UUID  `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
@@ -287,7 +287,7 @@ const (
     BookingStatusFailed  BookingStatus = "failed"
 )
 
-// Domain behavior methods
+// Domain behaviour methods
 func (b *FinancialBookingLog) Post() error {
     if b.Status != BookingStatusPending {
         return ErrInvalidStatusTransition
@@ -499,7 +499,7 @@ While CockroachDB is PostgreSQL-compatible, some PostgreSQL features are **not s
 Use explicit timestamp columns (`period_start`, `period_end`) instead of range types for temporal
 data. See [ADR-0017](0017-temporal-quality-ladder.md) for the temporal data pattern.
 
-For deployments using PostgreSQL or YugabyteDB exclusively, database-specific optimizations
+For deployments using PostgreSQL or YugabyteDB exclusively, database-specific optimisations
 (TSTZRANGE with GiST indexes, exclusion constraints) can be added as an optional enhancement.
 
 ### Future Considerations
@@ -508,4 +508,4 @@ For deployments using PostgreSQL or YugabyteDB exclusively, database-specific op
 * Schema visualization for documentation
 * Multi-tenant schema management patterns
 * Cross-region migration strategies for distributed SQL
-* Database-specific optimization paths (PostgreSQL/YugabyteDB TSTZRANGE support)
+* Database-specific optimisation paths (PostgreSQL/YugabyteDB TSTZRANGE support)

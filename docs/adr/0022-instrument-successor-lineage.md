@@ -270,7 +270,7 @@ func (s *InstrumentService) GetCurrentSuccessor(
 
 The FK constraint is within the tenant schema (per ADR-0016), so successors must be
 instruments within the same tenant. Cross-tenant succession is not possible, which
-is the correct behavior for tenant isolation.
+is the correct behaviour for tenant isolation.
 
 ### Cache Invalidation
 
@@ -321,7 +321,7 @@ func (s *PositionService) GetPositionsWithLineage(
 ### Historical Ledger Entries
 
 Existing ledger entries remain unchanged - they reference the original instrument ID.
-This is correct behavior because:
+This is correct behaviour because:
 
 1. **Immutability**: Ledger entries are append-only (ADR-0017)
 2. **Audit trail**: Historical entries should reflect what was recorded at the time

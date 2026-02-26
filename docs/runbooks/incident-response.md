@@ -19,7 +19,7 @@ instructions: |
 
 **When to use this runbook**: Active security incident, service degradation, or production outage.
 
-> **⚠️ Customization Note**: This is a template runbook for Meridian. In a production deployment, you should customize
+> **⚠️ Customisation Note**: This is a template runbook for Meridian. In a production deployment, you should customise
 this with your specific:
 >
 > - Contact details and escalation paths
@@ -381,7 +381,7 @@ kubectl get all -n production -o yaml > production-backup.yaml
 
 ## Emergency Contacts
 
-> **⚠️ Production Setup Required**: Add your organization's emergency contacts
+> **⚠️ Production Setup Required**: Add your organisation's emergency contacts
 
 - **Security Hotline**: [Phone number]
 - **Infrastructure Team**: [Slack channel]

@@ -8,7 +8,7 @@
 
 - **[Style Guide](starlark-style-guide.md)** - Syntax and conventions
 - **[Patterns](../starlark-patterns.md)** - Common workflow patterns
-- **[Service Catalog](../saga-service-catalog.md)** - Service module handlers
+- **[Service Catalogue](../saga-service-catalogue.md)** - Service module handlers
 
 ---
 
@@ -522,7 +522,7 @@ Sagas execute with thread-local context:
   - `saga_execution_id` - Current execution ID
   - `correlation_id` - Request correlation
   - `knowledge_at` - Bi-temporal timestamp
-  - `party_scope` - Authorization scope
+  - `party_scope` - Authorisation scope
 
 **Accessed via:**
 
@@ -596,17 +596,17 @@ assert.Equal(t, "COMPLETED", result["status"])
 | Operation | Latency | Use Case |
 |-----------|---------|----------|
 | `cel_eval()` | ~100ns | High-frequency calculations |
-| `Decimal()` operations | ~1μs | Financial math |
+| `Decimal()` operations | ~1μs | Financial maths |
 | `resolve_account()` (cached) | ~10ns | Repeated lookups |
 | `resolve_account()` (uncached) | ~5ms | First lookup (RPC) |
 | Service module handler | ~10-50ms | Database operations |
 | `invoke_saga()` | Variable | Child saga execution time |
 
-**Optimization:**
+**Optimisation:**
 
 - Use CEL for stateless calculations
 - Cache reference resolutions (automatic)
-- Minimize service module calls
+- Minimise service module calls
 - Batch operations when possible
 
 ---
@@ -621,7 +621,7 @@ assert.Equal(t, "COMPLETED", result["status"])
 - ✅ Bounded execution (no `while` loops)
 - ✅ Memory limits enforced
 - ✅ CPU timeout enforced
-- ✅ Party scope enforcement (authorization)
+- ✅ Party scope enforcement (authorisation)
 
 **Threat model:**
 

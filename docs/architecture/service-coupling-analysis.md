@@ -112,7 +112,7 @@ which indicates proper BIAN boundary respect.
 | observability | internal/platform/observability | pkg/platform/observability | Shared OpenTelemetry, logging, metrics |
 | kafka | internal/platform/kafka | pkg/platform/kafka | Kafka producer/consumer with protobuf |
 | testdb | internal/platform/testdb | pkg/platform/testdb | Shared Testcontainers infrastructure |
-| auth | internal/platform/auth | pkg/platform/auth | JWT validation and authorization |
+| auth | internal/platform/auth | pkg/platform/auth | JWT validation and authorisation |
 
 ### Table 3: Proto Dependencies (SAFE)
 
@@ -164,7 +164,7 @@ Event-driven patterns detected across services:
 
 - Services use domain-defined EventPublisher interfaces
 - Kafka adapter implementations in `adapters/messaging/` layer
-- Protobuf serialization for events (as per ADR-0004)
+- Protobuf serialisation for events (as per ADR-0004)
 
 **Key Files:**
 
@@ -290,7 +290,7 @@ All items are categorized by priority based on their impact on service independe
 
 - **P0 - Critical**: Breaks service independence and violates BIAN domain boundaries
 - **P1 - High**: Architectural debt that increases technical risk and maintenance burden
-- **P2 - Medium**: Code organization issues that affect code clarity and maintenance
+- **P2 - Medium**: Code organisation issues that affect code clarity and maintenance
 
 ### P0 - Critical (Breaks Service Independence)
 
@@ -472,7 +472,7 @@ func (a *PositionKeepingAdapter) GetBalance(ctx context.Context, accountID strin
 
 ---
 
-### P2 - Medium (Code Organization)
+### P2 - Medium (Code Organisation)
 
 #### P2-1: Document Inter-Service Communication Contracts
 
@@ -684,7 +684,7 @@ After implementing remediation items:
    - Use Pact or similar for consumer-driven contract testing
 
 2. **Chaos Engineering:**
-   - Test service behavior when dependencies are unavailable
+   - Test service behaviour when dependencies are unavailable
    - Validate circuit breaker patterns in resilient_client.go
 
 3. **Coupling Regression Tests:**
@@ -753,4 +753,4 @@ Full metrics available in: `docs/architecture/coupling-metrics.json`
 - **Efferent Coupling (Ce):** Number of classes/services inside a package that depend on classes outside the package
 - **Instability (I):** Measure of package's resilience to change (0=stable, 1=unstable)
 - **Main Sequence:** Ideal balance line between abstractness and instability
-- **Proto:** Protocol Buffers - Google's serialization format used for gRPC and events
+- **Proto:** Protocol Buffers - Google's serialisation format used for gRPC and events
