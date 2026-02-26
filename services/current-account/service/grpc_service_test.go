@@ -583,29 +583,6 @@ func TestRetrieveCurrentAccountNotFound(t *testing.T) {
 	}
 }
 
-func TestCurrencyMapping(t *testing.T) {
-	tests := []struct {
-		name     string
-		currency commonpb.Currency
-		expected string
-	}{
-		{"GBP", commonpb.Currency_CURRENCY_GBP, "GBP"},
-		{"USD", commonpb.Currency_CURRENCY_USD, "USD"},
-		{"EUR", commonpb.Currency_CURRENCY_EUR, "EUR"},
-		{"Unspecified returns empty", commonpb.Currency_CURRENCY_UNSPECIFIED, ""},
-		{"Unsupported JPY returns empty", commonpb.Currency_CURRENCY_JPY, ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := mapCurrency(tt.currency)
-			if result != tt.expected {
-				t.Errorf("Expected %s, got %s", tt.expected, result)
-			}
-		})
-	}
-}
-
 func TestExecuteDepositCurrencyMismatch(t *testing.T) {
 	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()

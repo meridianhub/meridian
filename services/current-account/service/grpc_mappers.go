@@ -10,19 +10,13 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// Currency code constants
-const (
-	currencyGBP = "GBP"
-	currencyUSD = "USD"
-	currencyEUR = "EUR"
-)
-
 func toProtoFacility(account domain.CurrentAccount) *pb.CurrentAccountFacility {
 	return &pb.CurrentAccountFacility{
 		AccountId:          account.AccountID(),
 		ExternalIdentifier: account.ExternalIdentifier(),
 		AccountStatus:      mapStatusToProto(account.Status()),
 		InstrumentCode:     account.InstrumentCode(),
+		Dimension:          account.Dimension(),
 		CreatedAt:          timestamppb.New(account.CreatedAt()),
 		UpdatedAt:          timestamppb.New(account.UpdatedAt()),
 		// #nosec G115 - Version is bounded by database constraints
@@ -117,26 +111,5 @@ func mapStatusToProto(status domain.AccountStatus) pb.AccountStatus {
 		return pb.AccountStatus_ACCOUNT_STATUS_CLOSED
 	default:
 		return pb.AccountStatus_ACCOUNT_STATUS_UNSPECIFIED
-	}
-}
-
-func mapCurrency(currency commonpb.Currency) string {
-	switch currency {
-	case commonpb.Currency_CURRENCY_GBP:
-		return currencyGBP
-	case commonpb.Currency_CURRENCY_USD:
-		return currencyUSD
-	case commonpb.Currency_CURRENCY_EUR:
-		return currencyEUR
-	case commonpb.Currency_CURRENCY_UNSPECIFIED,
-		commonpb.Currency_CURRENCY_JPY,
-		commonpb.Currency_CURRENCY_CHF,
-		commonpb.Currency_CURRENCY_CAD,
-		commonpb.Currency_CURRENCY_AUD:
-		// Return empty string for unsupported currencies
-		// Caller should validate and return error
-		return ""
-	default:
-		return ""
 	}
 }

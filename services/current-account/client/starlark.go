@@ -262,8 +262,6 @@ func terminateLienHandler(client *Client) saga.Handler {
 //
 // Parameters:
 //   - account_id (string): The account identifier to update
-//   - overdraft_limit (decimal): New overdraft limit (optional)
-//   - overdraft_enabled (bool): Enable/disable overdraft (optional)
 //
 // Returns a map containing:
 //   - account_id: The account identifier
@@ -275,28 +273,8 @@ func saveHandler(client *Client) saga.Handler {
 			return nil, err
 		}
 
-		// Build request - all fields are optional except account_id
 		req := &currentaccountv1.UpdateCurrentAccountRequest{
 			AccountId: accountID,
-		}
-
-		// Optional overdraft_limit
-		if overdraftLimitVal, ok := params["overdraft_limit"]; ok {
-			if overdraftLimit, err := saga.RequireDecimalParam(map[string]any{"overdraft_limit": overdraftLimitVal}, "overdraft_limit"); err == nil && !overdraftLimit.IsZero() {
-				// Get currency from params - it should be provided when overdraft_limit is set
-				currency := ""
-				if currencyVal, ok := params["currency"].(string); ok {
-					currency = currencyVal
-				}
-				req.OverdraftLimit = &commonv1.MoneyAmount{
-					Amount: convertDecimalToMoney(overdraftLimit, currency),
-				}
-			}
-		}
-
-		// Optional overdraft_enabled
-		if overdraftEnabled, ok := params["overdraft_enabled"].(bool); ok {
-			req.OverdraftEnabled = &overdraftEnabled
 		}
 
 		clientCtx := prepareClientContext(ctx)

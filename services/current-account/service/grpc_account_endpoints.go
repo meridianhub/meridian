@@ -37,11 +37,28 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 	// Generate account ID
 	accountID := fmt.Sprintf("ACC-%s", uuid.New().String()[:8])
 
-	// Use instrument_code directly as the account's native instrument
-	currency := req.InstrumentCode
-	if currency == "" {
+	// Validate instrument_code is provided
+	instrumentCode := req.InstrumentCode
+	if instrumentCode == "" {
 		operationStatus = operationStatusInvalidCurrency
 		return nil, status.Errorf(codes.InvalidArgument, "instrument_code is required")
+	}
+
+	// Resolve dimension from Reference Data service when available.
+	// Dimension classifies the instrument type (e.g. "CURRENCY", "ENERGY", "COMPUTE").
+	// Falls back to CURRENCY for backward compatibility when the getter is not configured.
+	dimension := "CURRENCY"
+	if s.instrumentGetter != nil {
+		cachedInstrument, err := s.instrumentGetter.GetInstrument(ctx, instrumentCode, 0)
+		if err != nil {
+			operationStatus = "instrument_not_found"
+			s.logger.Warn("instrument not found in Reference Data, cannot create account",
+				"instrument_code", instrumentCode,
+				"account_id", accountID,
+				"error", err)
+			return nil, status.Errorf(codes.InvalidArgument, "unknown instrument_code: %s", instrumentCode)
+		}
+		dimension = string(cachedInstrument.Definition.Dimension)
 	}
 
 	// Validate party exists and is active (if party client is configured)
@@ -185,12 +202,13 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 			"account_id", accountID)
 	}
 
-	// Create domain model
-	account, err := domain.NewCurrentAccount(
+	// Create domain model with resolved instrument and dimension
+	account, err := domain.NewCurrentAccountWithDimension(
 		accountID,
 		req.ExternalIdentifier,
 		req.PartyId,
-		currency,
+		instrumentCode,
+		dimension,
 		opts...,
 	)
 	if err != nil {
@@ -216,7 +234,7 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 	}
 
 	// Record initial balance
-	caobservability.RecordBalance(safeMinorUnits(account.Balance()), currency)
+	caobservability.RecordBalance(safeMinorUnits(account.Balance()), instrumentCode)
 
 	// Convert to proto response
 	return &pb.InitiateCurrentAccountResponse{
