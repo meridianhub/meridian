@@ -649,6 +649,9 @@ func currentAccountFinAcctUpdateBookingLog(ctx *saga.StarlarkContext, params map
 		&financialaccountingv1.UpdateFinancialBookingLogRequest{
 			Id:     bookingLogID,
 			Status: pbStatus,
+			IdempotencyKey: &commonpb.IdempotencyKey{
+				Key: fmt.Sprintf("update-booking-log-%s-%s", bookingLogID, statusStr),
+			},
 		},
 	)
 	if err != nil {
