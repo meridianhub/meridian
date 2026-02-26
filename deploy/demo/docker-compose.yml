@@ -98,6 +98,9 @@ services:
       # --- Multi-tenancy ---
       MASTER_TENANT_ID: ${MASTER_TENANT_ID:-meridian_master}
 
+      # --- Clearing accounts ---
+      DEPOSIT_CLEARING_ACCOUNT_ID: ${DEPOSIT_CLEARING_ACCOUNT_ID:-}
+
       # --- Connection pool ---
       DB_MAX_OPEN_CONNS: ${DB_MAX_OPEN_CONNS:-25}
       DB_MAX_IDLE_CONNS: ${DB_MAX_IDLE_CONNS:-5}
