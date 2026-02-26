@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -32,6 +33,7 @@ type Server struct {
 	transcoderHandler     http.Handler
 	eventStreamHandler    *eventstream.Handler
 	rawEventStreamHandler http.Handler // used by tests and WithEventStreamHandlerHTTP
+	versionInfo           *VersionInfo
 }
 
 // ServerOption is a functional option for configuring the server.
@@ -74,6 +76,13 @@ func WithEventStreamHandler(handler *eventstream.Handler) ServerOption {
 func WithEventStreamHandlerHTTP(handler http.Handler) ServerOption {
 	return func(s *Server) {
 		s.rawEventStreamHandler = handler
+	}
+}
+
+// WithVersionInfo sets the build version metadata returned by the /version endpoint.
+func WithVersionInfo(info *VersionInfo) ServerOption {
+	return func(s *Server) {
+		s.versionInfo = info
 	}
 }
 
@@ -132,6 +141,9 @@ func (s *Server) registerRoutes() {
 	// Legacy health endpoints for backwards compatibility
 	s.mux.HandleFunc("/healthz", s.getOnly(s.handleHealth))
 	s.mux.HandleFunc("/readyz", s.getOnly(s.handleReady))
+
+	// Build version endpoint - NO middleware (public, like health)
+	s.mux.HandleFunc("/version", s.getOnly(s.handleVersion))
 
 	// API routes - with auth and tenant middleware chain.
 	// Prefer the Vanguard transcoder when configured; fall back to the legacy
@@ -299,6 +311,17 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 
 		s.logHealthCheckResult(ctx, report, overallStatus, slog.LevelError)
 	}
+}
+
+// handleVersion returns build version information as JSON.
+// This endpoint does NOT require authentication or tenant context.
+func (s *Server) handleVersion(w http.ResponseWriter, _ *http.Request) {
+	info := s.versionInfo
+	if info == nil {
+		info = &VersionInfo{Version: "dev", Commit: "unknown", BuildDate: "unknown"}
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(info)
 }
 
 // logHealthCheckResult logs the health check result with structured details.
