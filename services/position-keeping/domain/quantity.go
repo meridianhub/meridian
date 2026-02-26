@@ -5,10 +5,15 @@
 //
 // The Money type (Qty[Monetary]) replaces the previous money.Money type while maintaining
 // backward compatibility for existing fiat currency use cases.
+//
+// The Amount type from shared/pkg/amount provides a dimension-agnostic value type that
+// accepts any valid dimension (CURRENCY, ENERGY, CARBON, COMPUTE, etc.) and is the
+// recommended type for cross-service communication involving non-currency instruments.
 package domain
 
 import (
 	"github.com/meridianhub/meridian/shared/domain/money"
+	sharedamount "github.com/meridianhub/meridian/shared/pkg/amount"
 	"github.com/meridianhub/meridian/shared/platform/quantity"
 	"github.com/shopspring/decimal"
 )
@@ -28,6 +33,12 @@ type Money = quantity.Money
 // Asset is a commodity quantity (Qty[Commodity]).
 // Use this for non-monetary assets like energy (KWH), compute (GPU_HOUR), carbon credits, etc.
 type Asset = quantity.Asset
+
+// Amount is a dimension-agnostic value type from shared/pkg/amount.
+// Unlike Money (currency-only) and Asset (commodity-only), Amount accepts any valid dimension
+// (CURRENCY, ENERGY, CARBON, COMPUTE, etc.) and is the recommended type for cross-service
+// communication and persistence when the instrument dimension is not known at compile time.
+type Amount = sharedamount.Amount
 
 // Dimension types for compile-time safety.
 type (
@@ -105,6 +116,9 @@ var (
 
 	// ErrInvalidCurrency is returned when a currency code is not valid.
 	ErrInvalidCurrency = money.ErrInvalidCurrency
+
+	// ErrAmountOverflow is returned when converting an Amount to minor units would overflow int64.
+	ErrAmountOverflow = sharedamount.ErrAmountOverflow
 )
 
 // DimensionCurrency is the canonical dimension name for currencies.
@@ -213,6 +227,32 @@ func NewAssetFromInt(amount int64, instrument Instrument) Asset {
 // ZeroAsset creates a zero-valued Asset for the given instrument.
 func ZeroAsset(instrument Instrument) Asset {
 	return quantity.ZeroAsset(instrument)
+}
+
+// =============================================================================
+// Amount Factory Functions (dimension-agnostic cross-service type)
+// =============================================================================
+
+// NewAmount creates an Amount from an existing instrument and a minor-unit amount.
+// Amount supports any dimension (CURRENCY, ENERGY, CARBON, COMPUTE, etc.).
+func NewAmount(inst Instrument, amountMinorUnits int64) Amount {
+	return sharedamount.New(inst, amountMinorUnits)
+}
+
+// NewAmountFromDecimal creates an Amount from an existing instrument and a decimal major-unit amount.
+func NewAmountFromDecimal(inst Instrument, majorUnits decimal.Decimal) Amount {
+	return sharedamount.NewFromDecimal(inst, majorUnits)
+}
+
+// NewAmountFromInstrument creates an Amount from persisted instrument_code, dimension, precision,
+// and a minor-unit amount. For CURRENCY dimension, precision is resolved from the currency registry.
+func NewAmountFromInstrument(code, dimension string, precision int, amountMinorUnits int64) (Amount, error) {
+	return sharedamount.NewFromInstrument(code, dimension, precision, amountMinorUnits)
+}
+
+// ZeroAmount creates a zero Amount for the given instrument.
+func ZeroAmount(inst Instrument) Amount {
+	return sharedamount.Zero(inst)
 }
 
 // =============================================================================
