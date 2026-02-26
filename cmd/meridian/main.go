@@ -675,7 +675,7 @@ func wireGateway(grpcPort, httpPort int, databaseURL string, tenantDB *gorm.DB, 
 	authConfig := gateway.LoadAuthConfig()
 
 	baseDomain := env.GetEnvOrDefault("BASE_DOMAIN", "localhost")
-	localDevMode := env.GetEnvAsBool("LOCAL_DEV_MODE", true)
+	localDevMode := env.GetEnvAsBool("LOCAL_DEV_MODE", false)
 
 	config := &gateway.Config{
 		Port:         httpPort,
