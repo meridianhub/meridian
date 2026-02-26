@@ -57,6 +57,7 @@ func setupControlTestDB(t *testing.T) (*persistence.Repository, *persistence.Lie
 		status_history JSONB NOT NULL DEFAULT '[]'::jsonb,
 		product_type_code VARCHAR(50) NULL,
 		product_type_version INT NULL,
+		behavior_class VARCHAR(50) NULL,
 		version BIGINT NOT NULL DEFAULT 1,
 		created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
 		created_by VARCHAR(100) NOT NULL DEFAULT 'test',

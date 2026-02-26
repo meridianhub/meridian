@@ -47,6 +47,7 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 		overdraft_rate NUMERIC(5,4) NOT NULL DEFAULT 0,
 		product_type_code VARCHAR(50) NULL,
 		product_type_version INT NULL,
+		behavior_class VARCHAR(50) NULL,
 		opened_at TIMESTAMP WITH TIME ZONE,
 		closed_at TIMESTAMP WITH TIME ZONE,
 		freeze_reason VARCHAR(1000),
