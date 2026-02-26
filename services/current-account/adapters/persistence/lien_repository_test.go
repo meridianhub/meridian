@@ -38,6 +38,9 @@ func setupLienTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 		account_id UUID NOT NULL,
 		amount_cents BIGINT NOT NULL,
 		currency VARCHAR(3) NOT NULL,
+		instrument_code VARCHAR(32) NOT NULL DEFAULT '',
+		dimension VARCHAR(20) NOT NULL DEFAULT 'CURRENCY',
+		precision INT NOT NULL DEFAULT 2,
 		bucket_id VARCHAR(255) NOT NULL DEFAULT '',
 		status VARCHAR(20) NOT NULL,
 		payment_order_reference VARCHAR(255) NOT NULL UNIQUE,
@@ -87,7 +90,7 @@ func TestLienRepository_Create(t *testing.T) {
 	amountCents, err := retrieved.Amount.ToMinorUnits()
 	require.NoError(t, err)
 	assert.Equal(t, int64(10000), amountCents)
-	assert.Equal(t, domain.CurrencyGBP, retrieved.Amount.Currency())
+	assert.Equal(t, "GBP", retrieved.Amount.InstrumentCode())
 	assert.Equal(t, "bucket-abc", retrieved.BucketID)
 	assert.Equal(t, domain.LienStatusActive, retrieved.Status)
 	assert.Equal(t, "PO-001", retrieved.PaymentOrderReference)
@@ -662,6 +665,9 @@ func setupMultiTenantLienTestDB(t *testing.T, tenantIDs ...string) (*gorm.DB, ma
 			account_id UUID NOT NULL,
 			amount_cents BIGINT NOT NULL,
 			currency VARCHAR(3) NOT NULL,
+			instrument_code VARCHAR(32) NOT NULL DEFAULT '',
+			dimension VARCHAR(20) NOT NULL DEFAULT 'CURRENCY',
+			precision INT NOT NULL DEFAULT 2,
 			bucket_id VARCHAR(255) NOT NULL DEFAULT '',
 			status VARCHAR(20) NOT NULL,
 			payment_order_reference VARCHAR(255) NOT NULL UNIQUE,

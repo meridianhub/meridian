@@ -1,4 +1,3 @@
-//nolint:staticcheck // Tests intentionally use deprecated AmountCents() to verify backward compatibility
 package domain
 
 import (
@@ -20,8 +19,8 @@ func TestNewLien_Success(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEqual(t, uuid.Nil, lien.ID)
 	assert.Equal(t, accountID, lien.AccountID)
-	assert.Equal(t, int64(10000), lien.Amount.AmountCents())
-	assert.Equal(t, CurrencyGBP, lien.Amount.Currency())
+	assert.Equal(t, int64(10000), toMinorUnits(lien.Amount))
+	assert.Equal(t, "GBP", lien.Amount.InstrumentCode())
 	assert.Equal(t, "bucket-123", lien.BucketID)
 	assert.Equal(t, LienStatusActive, lien.Status)
 	assert.Equal(t, "PO-001", lien.PaymentOrderReference)

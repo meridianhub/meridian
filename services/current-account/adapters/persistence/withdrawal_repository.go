@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/shared/platform/db"
+	"github.com/meridianhub/meridian/shared/platform/quantity"
 	"gorm.io/gorm"
 )
 
@@ -170,22 +171,39 @@ func (r *WithdrawalRepository) List(ctx context.Context, accountID uuid.UUID, pa
 func toWithdrawalEntity(withdrawal *domain.Withdrawal) *WithdrawalEntity {
 	// ToMinorUnitsUnchecked is safe here: domain layer validates amounts before persistence,
 	// so overflow (>92 quadrillion cents) cannot occur for valid withdrawals
+	// Legacy currency column only holds 3-char ISO codes; populate only for CURRENCY dimension.
+	// Non-CURRENCY instruments use instrument_code/dimension/precision columns exclusively.
+	legacyCurrency := ""
+	if withdrawal.Amount.Dimension() == quantity.DimensionCurrency {
+		legacyCurrency = withdrawal.Amount.InstrumentCode()
+	}
+
 	return &WithdrawalEntity{
-		ID:          withdrawal.ID,
-		AccountID:   withdrawal.AccountID,
-		AmountCents: withdrawal.Amount.ToMinorUnitsUnchecked(),
-		Currency:    string(withdrawal.Amount.Currency()),
-		Status:      string(withdrawal.Status),
-		Reference:   withdrawal.Reference,
-		CreatedAt:   withdrawal.CreatedAt,
-		UpdatedAt:   withdrawal.UpdatedAt,
-		Version:     int64(withdrawal.Version),
+		ID:             withdrawal.ID,
+		AccountID:      withdrawal.AccountID,
+		AmountCents:    withdrawal.Amount.ToMinorUnitsUnchecked(),
+		Currency:       legacyCurrency,
+		InstrumentCode: withdrawal.Amount.InstrumentCode(),
+		Dimension:      withdrawal.Amount.Dimension(),
+		Precision:      withdrawal.Amount.Precision(),
+		Status:         string(withdrawal.Status),
+		Reference:      withdrawal.Reference,
+		CreatedAt:      withdrawal.CreatedAt,
+		UpdatedAt:      withdrawal.UpdatedAt,
+		Version:        int64(withdrawal.Version),
 	}
 }
 
 // toWithdrawalDomain converts database entity to domain model
 func toWithdrawalDomain(entity *WithdrawalEntity) (*domain.Withdrawal, error) {
-	amount, err := domain.NewMoney(entity.Currency, entity.AmountCents)
+	// Prefer instrument_code/dimension/precision (new columns) over legacy currency column.
+	// instrument_code is populated for all rows via backfill migration; fall back to currency
+	// only for rows that pre-date the migration (instrument_code would be empty string).
+	instrumentCode := entity.InstrumentCode
+	if instrumentCode == "" {
+		instrumentCode = entity.Currency
+	}
+	amount, err := domain.NewAmountFromInstrument(instrumentCode, entity.Dimension, entity.Precision, entity.AmountCents)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create withdrawal amount from database: %w", err)
 	}

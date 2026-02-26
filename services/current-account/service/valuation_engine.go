@@ -124,7 +124,7 @@ func (s *Service) valuateInternal(ctx context.Context, accountID string, inputAm
 		return nil, fmt.Errorf("failed to retrieve account: %w", err)
 	}
 
-	nativeInstrument := string(account.Balance().Currency())
+	nativeInstrument := account.Balance().InstrumentCode()
 
 	// If input instrument matches native instrument, no conversion needed
 	if inputCode == nativeInstrument {

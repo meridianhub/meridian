@@ -125,7 +125,7 @@ func NewDepositOrchestrator(cfg DepositOrchestratorConfig) (*DepositOrchestrator
 //     instruments (e.g., RICE-KG with batch tracking), both debit and credit sides
 //     of the double-entry must have matching fungibility keys. If nil, no fungibility
 //     validation is performed (suitable for fully fungible instruments like USD).
-func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.CurrentAccount, amount domain.Money, transactionID string, attributes map[string]string) (*pb.ExecuteDepositResponse, error) {
+func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.CurrentAccount, amount domain.Amount, transactionID string, attributes map[string]string) (*pb.ExecuteDepositResponse, error) {
 	sagaStart := time.Now()
 	sagaStatus := operationStatusSuccess
 	defer func() {
@@ -146,7 +146,7 @@ func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.Cu
 	// For double-entry deposits: DEBIT from clearing account, CREDIT to customer account
 	// Both sides use the same attributes since this is a single incoming deposit.
 	if o.fungibilityValidator != nil {
-		instrumentCode := string(amount.Currency())
+		instrumentCode := amount.InstrumentCode()
 		if err := o.fungibilityValidator.ValidateDoubleEntry(ctx, instrumentCode, 1, attributes, attributes); err != nil {
 			sagaStatus = operationStatusFailed
 			o.logger.Error("fungibility validation failed",
@@ -162,7 +162,7 @@ func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.Cu
 	}
 
 	// Resolve clearing account ID (dynamic resolver preferred, fallback to static config)
-	clearingAccountID := o.resolveClearingAccountID(ctx, string(amount.Currency()))
+	clearingAccountID := o.resolveClearingAccountID(ctx, amount.InstrumentCode())
 
 	// Parse correlation ID safely - fallback to generated ID if invalid
 	correlationUUID, parseErr := uuid.Parse(correlationID)

@@ -71,11 +71,11 @@ func (s *Service) InitiateWithdrawal(ctx context.Context, req *pb.InitiateWithdr
 	}
 
 	// Validate currency matches
-	if req.Amount.Amount.CurrencyCode != account.Balance().CurrencyCode() {
+	if req.Amount.Amount.CurrencyCode != account.Balance().InstrumentCode() {
 		operationStatus = opStatusCurrencyMismatch
 		return nil, status.Errorf(codes.InvalidArgument,
 			"currency mismatch: expected %s, got %s",
-			account.Balance().CurrencyCode(), req.Amount.Amount.CurrencyCode)
+			account.Balance().InstrumentCode(), req.Amount.Amount.CurrencyCode)
 	}
 
 	// Validate overflow: Units*100 must not overflow int64

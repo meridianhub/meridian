@@ -238,6 +238,9 @@ func testLienEntity(t *testing.T, db *gorm.DB) {
 		AccountID:             accountID,
 		AmountCents:           10000,
 		Currency:              "GBP",
+		InstrumentCode:        "GBP",
+		Dimension:             "CURRENCY",
+		Precision:             2,
 		Status:                "ACTIVE",
 		PaymentOrderReference: "PO-LIEN-TEST-001",
 		ExpiresAt:             &expiresAt,
@@ -288,6 +291,9 @@ func testLienEntity(t *testing.T, db *gorm.DB) {
 		AccountID:             accountID,
 		AmountCents:           5000,
 		Currency:              "GBP",
+		InstrumentCode:        "GBP",
+		Dimension:             "CURRENCY",
+		Precision:             2,
 		Status:                "ACTIVE",
 		PaymentOrderReference: "PO-LIEN-TEST-TERM",
 		CreatedAt:             time.Now(),
@@ -307,6 +313,9 @@ func testLienEntity(t *testing.T, db *gorm.DB) {
 		AccountID:             accountID,
 		AmountCents:           0, // Invalid: must be > 0
 		Currency:              "GBP",
+		InstrumentCode:        "GBP",
+		Dimension:             "CURRENCY",
+		Precision:             2,
 		Status:                "ACTIVE",
 		PaymentOrderReference: "PO-LIEN-TEST-002",
 		CreatedAt:             time.Now(),
@@ -322,6 +331,9 @@ func testLienEntity(t *testing.T, db *gorm.DB) {
 		AccountID:             accountID,
 		AmountCents:           5000,
 		Currency:              "GBP",
+		InstrumentCode:        "GBP",
+		Dimension:             "CURRENCY",
+		Precision:             2,
 		Status:                "ACTIVE",
 		PaymentOrderReference: "PO-LIEN-TEST-001", // Duplicate of first lien
 		CreatedAt:             time.Now(),
@@ -337,6 +349,9 @@ func testLienEntity(t *testing.T, db *gorm.DB) {
 		AccountID:             uuid.New(), // Non-existent account
 		AmountCents:           5000,
 		Currency:              "GBP",
+		InstrumentCode:        "GBP",
+		Dimension:             "CURRENCY",
+		Precision:             2,
 		Status:                "ACTIVE",
 		PaymentOrderReference: "PO-LIEN-TEST-003",
 		CreatedAt:             time.Now(),
@@ -375,15 +390,18 @@ func testWithdrawalEntity(t *testing.T, db *gorm.DB) {
 
 	// Create a withdrawal
 	entity := &capersistence.WithdrawalEntity{
-		ID:          uuid.New(),
-		AccountID:   accountID,
-		AmountCents: 10000,
-		Currency:    "GBP",
-		Status:      "PENDING",
-		Reference:   "WD-SCHEMA-TEST-001",
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-		Version:     1,
+		ID:             uuid.New(),
+		AccountID:      accountID,
+		AmountCents:    10000,
+		Currency:       "GBP",
+		InstrumentCode: "GBP",
+		Dimension:      "CURRENCY",
+		Precision:      2,
+		Status:         "PENDING",
+		Reference:      "WD-SCHEMA-TEST-001",
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+		Version:        1,
 	}
 
 	// Create - will fail if columns don't match
@@ -430,15 +448,18 @@ func testWithdrawalEntity(t *testing.T, db *gorm.DB) {
 		{"CANCELLED", "WD-SCHEMA-TEST-CANCEL"},
 	} {
 		wd := &capersistence.WithdrawalEntity{
-			ID:          uuid.New(),
-			AccountID:   accountID,
-			AmountCents: 5000,
-			Currency:    "GBP",
-			Status:      tc.status,
-			Reference:   tc.reference,
-			CreatedAt:   time.Now(),
-			UpdatedAt:   time.Now(),
-			Version:     1,
+			ID:             uuid.New(),
+			AccountID:      accountID,
+			AmountCents:    5000,
+			Currency:       "GBP",
+			InstrumentCode: "GBP",
+			Dimension:      "CURRENCY",
+			Precision:      2,
+			Status:         tc.status,
+			Reference:      tc.reference,
+			CreatedAt:      time.Now(),
+			UpdatedAt:      time.Now(),
+			Version:        1,
 		}
 		err = db.Create(wd).Error
 		assert.NoError(t, err, "Status %s should be accepted by check constraint", tc.status)
@@ -446,60 +467,72 @@ func testWithdrawalEntity(t *testing.T, db *gorm.DB) {
 
 	// Constraint validation: amount_cents must be > 0
 	invalidAmountWd := &capersistence.WithdrawalEntity{
-		ID:          uuid.New(),
-		AccountID:   accountID,
-		AmountCents: 0, // Invalid: must be > 0
-		Currency:    "GBP",
-		Status:      "PENDING",
-		Reference:   "WD-SCHEMA-TEST-002",
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-		Version:     1,
+		ID:             uuid.New(),
+		AccountID:      accountID,
+		AmountCents:    0, // Invalid: must be > 0
+		Currency:       "GBP",
+		InstrumentCode: "GBP",
+		Dimension:      "CURRENCY",
+		Precision:      2,
+		Status:         "PENDING",
+		Reference:      "WD-SCHEMA-TEST-002",
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+		Version:        1,
 	}
 	err = db.Create(invalidAmountWd).Error
 	assert.Error(t, err, "Expected error for amount_cents <= 0 constraint violation")
 
 	// Constraint validation: invalid status rejected
 	invalidStatusWd := &capersistence.WithdrawalEntity{
-		ID:          uuid.New(),
-		AccountID:   accountID,
-		AmountCents: 5000,
-		Currency:    "GBP",
-		Status:      "INVALID_STATUS",
-		Reference:   "WD-SCHEMA-TEST-003",
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-		Version:     1,
+		ID:             uuid.New(),
+		AccountID:      accountID,
+		AmountCents:    5000,
+		Currency:       "GBP",
+		InstrumentCode: "GBP",
+		Dimension:      "CURRENCY",
+		Precision:      2,
+		Status:         "INVALID_STATUS",
+		Reference:      "WD-SCHEMA-TEST-003",
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+		Version:        1,
 	}
 	err = db.Create(invalidStatusWd).Error
 	assert.Error(t, err, "Expected error for invalid status constraint violation")
 
 	// Constraint validation: unique reference
 	duplicateWd := &capersistence.WithdrawalEntity{
-		ID:          uuid.New(),
-		AccountID:   accountID,
-		AmountCents: 5000,
-		Currency:    "GBP",
-		Status:      "PENDING",
-		Reference:   "WD-SCHEMA-TEST-001", // Duplicate of first withdrawal
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-		Version:     1,
+		ID:             uuid.New(),
+		AccountID:      accountID,
+		AmountCents:    5000,
+		Currency:       "GBP",
+		InstrumentCode: "GBP",
+		Dimension:      "CURRENCY",
+		Precision:      2,
+		Status:         "PENDING",
+		Reference:      "WD-SCHEMA-TEST-001", // Duplicate of first withdrawal
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+		Version:        1,
 	}
 	err = db.Create(duplicateWd).Error
 	assert.Error(t, err, "Expected error for duplicate reference")
 
 	// Constraint validation: FK to non-existent account
 	orphanWd := &capersistence.WithdrawalEntity{
-		ID:          uuid.New(),
-		AccountID:   uuid.New(), // Non-existent account
-		AmountCents: 5000,
-		Currency:    "GBP",
-		Status:      "PENDING",
-		Reference:   "WD-SCHEMA-TEST-004",
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-		Version:     1,
+		ID:             uuid.New(),
+		AccountID:      uuid.New(), // Non-existent account
+		AmountCents:    5000,
+		Currency:       "GBP",
+		InstrumentCode: "GBP",
+		Dimension:      "CURRENCY",
+		Precision:      2,
+		Status:         "PENDING",
+		Reference:      "WD-SCHEMA-TEST-004",
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+		Version:        1,
 	}
 	err = db.Create(orphanWd).Error
 	assert.Error(t, err, "Expected error for FK constraint violation")

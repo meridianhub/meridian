@@ -37,6 +37,9 @@ func setupWithdrawalTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 		account_id UUID NOT NULL,
 		amount_cents BIGINT NOT NULL CHECK (amount_cents > 0),
 		currency VARCHAR(3) NOT NULL,
+		instrument_code VARCHAR(32) NOT NULL DEFAULT '',
+		dimension VARCHAR(20) NOT NULL DEFAULT 'CURRENCY',
+		precision INT NOT NULL DEFAULT 2,
 		status VARCHAR(20) NOT NULL CHECK (status IN ('PENDING','COMPLETED','FAILED','CANCELLED')),
 		reference VARCHAR(255) NOT NULL UNIQUE,
 		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
@@ -93,6 +96,9 @@ func createWithdrawalTableInSchema(t *testing.T, db *gorm.DB, schemaName string)
 		account_id UUID NOT NULL,
 		amount_cents BIGINT NOT NULL CHECK (amount_cents > 0),
 		currency VARCHAR(3) NOT NULL,
+		instrument_code VARCHAR(32) NOT NULL DEFAULT '',
+		dimension VARCHAR(20) NOT NULL DEFAULT 'CURRENCY',
+		precision INT NOT NULL DEFAULT 2,
 		status VARCHAR(20) NOT NULL,
 		reference VARCHAR(255) NOT NULL UNIQUE,
 		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
@@ -124,7 +130,7 @@ func TestWithdrawalRepository_Create_Success(t *testing.T) {
 	amountCents, err := retrieved.Amount.ToMinorUnits()
 	require.NoError(t, err)
 	assert.Equal(t, int64(10000), amountCents)
-	assert.Equal(t, domain.CurrencyGBP, retrieved.Amount.Currency())
+	assert.Equal(t, "GBP", retrieved.Amount.InstrumentCode())
 	assert.Equal(t, domain.WithdrawalStatusPending, retrieved.Status)
 	assert.Equal(t, "WD-001", retrieved.Reference)
 	assert.Equal(t, 1, retrieved.Version)

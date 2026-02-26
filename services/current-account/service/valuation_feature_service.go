@@ -75,7 +75,7 @@ func (s *Service) CreateValuationFeature(ctx context.Context, req *pb.CreateValu
 	}
 
 	// CRITICAL VALIDATION: Method output_instrument must match account's native instrument
-	nativeInstrument := string(account.Balance().Currency())
+	nativeInstrument := account.Balance().InstrumentCode()
 	if req.OutputInstrument != nativeInstrument {
 		operationStatus = opStatusMethodOutputMismatch
 		return nil, status.Errorf(codes.FailedPrecondition,

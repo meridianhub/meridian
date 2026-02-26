@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/shared/platform/db"
+	"github.com/meridianhub/meridian/shared/platform/quantity"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -251,11 +252,12 @@ func (r *LienRepository) SumActiveAmountByAccountID(ctx context.Context, account
 	var totalCents int64
 
 	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
-		// First, check for currency consistency (defensive check for data corruption)
+		// First, check for instrument consistency (defensive check for data corruption).
+		// Use instrument_code (not legacy currency) to correctly handle non-CURRENCY liens.
 		countResult := tx.Model(&LienEntity{}).
 			Where("account_id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)",
 				accountID, string(domain.LienStatusActive), now).
-			Select("COUNT(DISTINCT currency)").
+			Select("COUNT(DISTINCT instrument_code)").
 			Scan(&currencyCount)
 
 		if countResult.Error != nil {
@@ -293,11 +295,12 @@ func (r *LienRepository) SumActiveAmountByAccountIDAndBucket(ctx context.Context
 	var totalCents int64
 
 	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
-		// First, check for currency consistency (defensive check for data corruption)
+		// First, check for instrument consistency (defensive check for data corruption).
+		// Use instrument_code (not legacy currency) to correctly handle non-CURRENCY liens.
 		countResult := tx.Model(&LienEntity{}).
 			Where("account_id = ? AND bucket_id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)",
 				accountID, bucketID, string(domain.LienStatusActive), now).
-			Select("COUNT(DISTINCT currency)").
+			Select("COUNT(DISTINCT instrument_code)").
 			Scan(&currencyCount)
 
 		if countResult.Error != nil {
@@ -328,11 +331,21 @@ func (r *LienRepository) SumActiveAmountByAccountIDAndBucket(ctx context.Context
 func toLienEntity(lien *domain.Lien) *LienEntity {
 	// ToMinorUnitsUnchecked is safe here: domain layer validates amounts before persistence,
 	// so overflow (>92 quadrillion cents) cannot occur for valid liens
+	// Legacy currency column only holds 3-char ISO codes; populate only for CURRENCY dimension.
+	// Non-CURRENCY instruments use instrument_code/dimension/precision columns exclusively.
+	legacyCurrency := ""
+	if lien.Amount.Dimension() == quantity.DimensionCurrency {
+		legacyCurrency = lien.Amount.InstrumentCode()
+	}
+
 	entity := &LienEntity{
 		ID:                    lien.ID,
 		AccountID:             lien.AccountID,
 		AmountCents:           lien.Amount.ToMinorUnitsUnchecked(),
-		Currency:              string(lien.Amount.Currency()),
+		Currency:              legacyCurrency,
+		InstrumentCode:        lien.Amount.InstrumentCode(),
+		Dimension:             lien.Amount.Dimension(),
+		Precision:             lien.Amount.Precision(),
 		BucketID:              lien.BucketID,
 		Status:                string(lien.Status),
 		PaymentOrderReference: lien.PaymentOrderReference,
@@ -363,7 +376,14 @@ func toLienEntity(lien *domain.Lien) *LienEntity {
 
 // toLienDomain converts database entity to domain model
 func toLienDomain(entity *LienEntity) (*domain.Lien, error) {
-	amount, err := domain.NewMoney(entity.Currency, entity.AmountCents)
+	// Prefer instrument_code/dimension/precision (new columns) over legacy currency column.
+	// instrument_code is populated for all rows via backfill migration; fall back to currency
+	// only for rows that pre-date the migration (instrument_code would be empty string).
+	instrumentCode := entity.InstrumentCode
+	if instrumentCode == "" {
+		instrumentCode = entity.Currency
+	}
+	amount, err := domain.NewAmountFromInstrument(instrumentCode, entity.Dimension, entity.Precision, entity.AmountCents)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create lien amount from database: %w", err)
 	}
