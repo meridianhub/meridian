@@ -1,4 +1,4 @@
-h1:9x4xA8TXAvRq3scPczAfUR/8NLNU4422u1+E7wJJL2o=
+h1:HOw41JDsICcNZZXU42DQrhAS0/aSnJPP6XP5gl9hCos=
 20251216000001_initial.sql h1:nyRf35O3eYNJqShAvOEhvliXKLIR6e/V8B9JhOHde9w=
 20251216000002_audit_system.sql h1:X/0ZHt9cGTYmFbUUvKAkBgEiGw9fYEqfnbMB8I4SCR8=
 20251217000001_fix_audit_status_constraint.sql h1:yQxsHxbUp5g+ehkKFjOhZs59SbfaQIPw4/sA2xE2rwU=
@@ -19,3 +19,5 @@ h1:9x4xA8TXAvRq3scPczAfUR/8NLNU4422u1+E7wJJL2o=
 20260225000002_migrate_currency_data.sql h1:J+f+xWKGT1sV50ZOojzkZWwtWb3hMxLJyqFHvqygs9I=
 20260225000003_recreate_scope_integrity_index.sql h1:SUUC21+/32puxl/Y8iuY7OYNSj6O6OK4Q0dGNYNk36M=
 20260225000004_drop_currency_column.sql h1:jRdIqJ0UNpaGa+Aw9m+f/sgpkqdEzQibyTYsHl46HQo=
+20260226000001_add_behavior_class_column.sql h1:71oeCIEC9vifK6g6lwprfIw0k4U0c5SdEKR7Uij5igs=
+20260226000002_backfill_behavior_class.sql h1:OODt4MoDBleafId+zY2gHdm6FpSawhUYTNXQhrbdLvU=

@@ -172,6 +172,11 @@ message CurrentAccountFacility {
   // dimension classifies the instrument type (e.g. "CURRENCY", "ENERGY", "COMPUTE", "CARBON").
   // Used for reporting, validation, and routing. Validated by product type CEL rules.
   string dimension = 14;
+
+  // behavior_class categorizes the accounting and operational behavior of the account.
+  // Derived from product_type_code at creation time and stored for query efficiency.
+  // Examples: "CUSTOMER", "CLEARING", "NOSTRO". Empty for legacy accounts.
+  string behavior_class = 15;
 }
 
 // AccountBalance represents the current balance state of an account

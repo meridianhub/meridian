@@ -29,6 +29,7 @@ func toProtoFacility(account domain.CurrentAccount) *pb.CurrentAccountFacility {
 		ProductTypeCode: account.ProductTypeCode(),
 		// #nosec G115 - ProductTypeVersion is bounded by database constraints
 		ProductTypeVersion: int32(account.ProductTypeVersion()),
+		BehaviorClass:      account.BehaviorClass(),
 	}
 }
 

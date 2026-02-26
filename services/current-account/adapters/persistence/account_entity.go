@@ -24,7 +24,7 @@ type CurrentAccountEntity struct {
 	// Business fields - these column names must match the migration schema
 	AccountID             string     `gorm:"column:account_id;type:varchar(100);uniqueIndex;not null"`            // Business account identifier
 	AccountIdentification string     `gorm:"column:account_identification;type:varchar(34);uniqueIndex;not null"` // IBAN format
-	AccountType           string     `gorm:"column:account_type;type:varchar(50);not null"`                       // current, savings, etc.
+	AccountType           string     `gorm:"column:account_type;type:varchar(50);not null"`                       // current, savings, etc. (legacy)
 	InstrumentCode        string     `gorm:"column:instrument_code;type:varchar(32);not null;default:'GBP'"`      // Instrument code (e.g. GBP, kWh)
 	Dimension             string     `gorm:"column:dimension;type:varchar(20);not null;default:'CURRENCY'"`       // Asset dimension (e.g. CURRENCY, ELECTRICITY)
 	Status                string     `gorm:"column:status;type:varchar(20);not null;default:'active'"`
@@ -34,6 +34,7 @@ type CurrentAccountEntity struct {
 	OverdraftRate         float64    `gorm:"column:overdraft_rate;type:numeric(5,4);not null;default:0"`
 	ProductTypeCode       *string    `gorm:"column:product_type_code;type:varchar(50)"` // NULL for legacy accounts
 	ProductTypeVersion    *int       `gorm:"column:product_type_version"`               // NULL for legacy accounts
+	BehaviorClass         *string    `gorm:"column:behavior_class;type:varchar(50)"`    // NULL for legacy accounts; derived from product type
 
 	// Balance fields - NOT persisted to database (gorm:"-"), but kept for in-memory use.
 	// Balance computation is delegated to Position Keeping service per BIAN architecture.

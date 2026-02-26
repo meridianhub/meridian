@@ -209,10 +209,12 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 		}
 
 		opts = append(opts, domain.WithProductType(req.ProductTypeCode, version))
+		opts = append(opts, domain.WithBehaviorClass(string(cachedType.Definition.BehaviorClass)))
 
 		s.logger.Info("product type resolved for account creation",
 			"product_type_code", req.ProductTypeCode,
 			"product_type_version", version,
+			"behavior_class", cachedType.Definition.BehaviorClass,
 			"account_id", accountID)
 	}
 
