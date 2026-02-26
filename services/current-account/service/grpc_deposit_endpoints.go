@@ -100,6 +100,12 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 		}()
 	}
 
+	// Validate amount is present before account fetch to fail fast on malformed requests.
+	if req.Amount == nil || req.Amount.Amount == nil {
+		operationStatus = opStatusMissingAmount
+		return nil, status.Error(codes.InvalidArgument, "amount is required")
+	}
+
 	// Retrieve account (context carries organization for multi-tenant routing)
 	account, err := s.repo.FindByID(ctx, req.AccountId)
 	if err != nil {

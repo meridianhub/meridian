@@ -52,17 +52,21 @@ func safeMinorUnits(m domain.Amount) int64 {
 }
 
 func toMoneyAmount(m domain.Amount) *commonpb.MoneyAmount {
-	amountCents := safeMinorUnits(m)
-	units := amountCents / 100
-	remainder := amountCents % 100
+	amountMinor := safeMinorUnits(m)
+	precision := m.Instrument().Precision
+	// #nosec G115 - precision is bounded by instrument definition (0-9 in practice)
+	scale := int64(math.Pow10(precision))
+	nanosPerMinor := int64(math.Pow10(9 - precision))
 
-	// Convert remainder to nanos (9 digits, but we only use 8 for cents precision)
-	// Per google.type.Money spec: nanos MUST share the sign of units
+	units := amountMinor / scale
+	remainder := amountMinor % scale
+
+	// Per google.type.Money spec: nanos MUST share the sign of units.
 	// - Positive amounts: both units and nanos are positive or zero
 	// - Negative amounts: both units and nanos are negative or zero
-	// Example: -£1.23 = Units=-1, Nanos=-230000000
-	// #nosec G115 - remainder is always -99 to 99, multiplication result fits in int32
-	nanos := int32(remainder * 10000000)
+	// remainder already shares the sign of amountMinor due to Go's truncating division.
+	// #nosec G115 - remainder is always -(scale-1) to (scale-1); product fits in int32
+	nanos := int32(remainder * nanosPerMinor)
 
 	return &commonpb.MoneyAmount{
 		Amount: &money.Money{
@@ -148,9 +152,26 @@ func protoMoneyToAmount(amount *commonpb.MoneyAmount, account domain.CurrentAcco
 	}
 
 	unitsMinor := amount.Amount.Units * scale
-	// Round nanos to nearest minor unit (half-up rounding)
-	nanosMinor := (amount.Amount.Nanos + int32(nanosPerUnit/2)) / int32(nanosPerUnit)
-	totalMinor := unitsMinor + int64(nanosMinor)
+
+	// Round nanos to nearest minor unit using half-away-from-zero (banker's-round alternative).
+	// Simple half-up (+ half) rounds negative nanos toward zero, which is incorrect.
+	// We must branch on sign so that -5_000_001 rounds to -1, not 0.
+	nanos := int64(amount.Amount.Nanos)
+	half := nanosPerUnit / 2
+	var nanosMinor int64
+	if nanos >= 0 {
+		nanosMinor = (nanos + half) / nanosPerUnit
+	} else {
+		nanosMinor = (nanos - half) / nanosPerUnit
+	}
+
+	// Post-rounding overflow guard: unitsMinor + nanosMinor must not overflow int64.
+	if (nanosMinor > 0 && unitsMinor > math.MaxInt64-nanosMinor) ||
+		(nanosMinor < 0 && unitsMinor < math.MinInt64-nanosMinor) {
+		return domain.Amount{}, fmt.Errorf("%w: total minor units would overflow after nanos rounding",
+			ErrAmountOverflow)
+	}
+	totalMinor := unitsMinor + nanosMinor
 
 	return domain.NewAmountFromInstrument(
 		account.Balance().InstrumentCode(),

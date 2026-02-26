@@ -338,6 +338,8 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 	)
 	if err != nil {
 		s.logger.Error("failed to create available balance amount", "error", err)
+		// Fall back to the pre-lien available balance so the response is not zero.
+		availableMoney = account.AvailableBalance()
 	}
 
 	resp := &pb.InitiateLienResponse{
