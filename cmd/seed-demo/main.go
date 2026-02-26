@@ -80,8 +80,12 @@ func run() error {
 		PollInterval(2 * time.Second).
 		WithContext(ctx).
 		Until(func() bool {
-			resp, err := http.Get(gatewayURL + "/healthz") //nolint:noctx
-			if err != nil {
+			req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, gatewayURL+"/healthz", nil)
+			if reqErr != nil {
+				return false
+			}
+			resp, reqErr := http.DefaultClient.Do(req)
+			if reqErr != nil {
 				return false
 			}
 			_ = resp.Body.Close()
