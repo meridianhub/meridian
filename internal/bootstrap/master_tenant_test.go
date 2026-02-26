@@ -40,6 +40,21 @@ func TestLoadPlatformManifest(t *testing.T) {
 
 	// Verify valuation rules (3 FX + 1 usage pricing)
 	assert.Len(t, mf.ValuationRules, 4)
+
+	// Verify billing saga
+	assert.Len(t, mf.Sagas, 1)
+	assert.Equal(t, "tenant_usage_billing", mf.Sagas[0].Name)
+	assert.Equal(t, "scheduled:monthly_billing", mf.Sagas[0].Trigger)
+	assert.Contains(t, mf.Sagas[0].Script, "active_party_rate_gbp")
+	assert.Contains(t, mf.Sagas[0].Script, "position_keeping.initiate_log")
+	assert.Contains(t, mf.Sagas[0].Script, "financial_accounting.post_entries")
+
+	// Verify seed data contains pricing
+	assert.NotNil(t, mf.SeedData)
+	pricing := mf.SeedData.Fields["platform_pricing"]
+	assert.NotNil(t, pricing)
+	rate := pricing.GetStructValue().Fields["active_party_rate_gbp"]
+	assert.Equal(t, "0.50", rate.GetStringValue())
 }
 
 func TestLoadPlatformManifest_ValidJSON(t *testing.T) {
