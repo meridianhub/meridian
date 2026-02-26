@@ -87,6 +87,8 @@ services:
       JWT_ISSUER: ${JWT_ISSUER:-}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-}
       API_KEYS: ${API_KEYS:-}
+      DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:-}
+      DEFAULT_ROLES: ${DEFAULT_ROLES:-}
       BASE_DOMAIN: ${BASE_DOMAIN:-demo.meridianhub.cloud}
       LOCAL_DEV_MODE: ${LOCAL_DEV_MODE:-false}
 
