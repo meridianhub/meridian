@@ -140,6 +140,9 @@ func NewCurrentAccountWithDimension(accountID, externalIdentifier, partyID, inst
 	normalizedDimension := strings.ToUpper(dimension)
 
 	// For CURRENCY, validate precision against canonical registry value.
+	// If the currency code is not in the local registry (e.g. a currency only defined in
+	// the Reference Data service), precision validation is deferred: NewMoneyFromInstrument
+	// will return ErrInvalidCurrency if the code is genuinely unknown.
 	if normalizedDimension == quantity.DimensionCurrency {
 		if inst, ok := currency.ByCode(strings.ToUpper(instrumentCode)); ok {
 			if inst.Precision != precision {

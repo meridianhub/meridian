@@ -82,6 +82,10 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 		// Derive precision from the currency registry for correctness (e.g. JPY needs 0, not 2).
 		if inst, ok := currency.ByCode(strings.ToUpper(instrumentCode)); ok {
 			precision = inst.Precision
+		} else {
+			s.logger.Warn("currency not found in local registry, using default precision",
+				"instrument_code", instrumentCode,
+				"default_precision", precision)
 		}
 	}
 
