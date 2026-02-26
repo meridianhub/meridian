@@ -17,6 +17,7 @@ import (
 	celutil "github.com/meridianhub/meridian/services/reference-data/cel"
 	"github.com/meridianhub/meridian/services/reference-data/registry"
 	vf "github.com/meridianhub/meridian/shared/pkg/valuationfeature"
+	"github.com/meridianhub/meridian/shared/platform/quantity/currency"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -47,9 +48,10 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 
 	// Resolve dimension and precision from Reference Data service when available.
 	// Dimension classifies the instrument type (e.g. "CURRENCY", "ENERGY", "COMPUTE").
-	// Falls back to CURRENCY with precision 2 for backward compatibility when the getter is not configured.
+	// When the getter is not configured, falls back to CURRENCY with precision derived
+	// from the currency registry (so JPY/0-decimal currencies work correctly in the fallback path).
 	dimension := "CURRENCY"
-	precision := 2 // default for CURRENCY fallback (most currencies use 2 decimal places)
+	precision := 2 // safe default, overridden below
 	if s.instrumentGetter != nil {
 		cachedInstrument, err := s.instrumentGetter.GetInstrument(ctx, instrumentCode, 0)
 		if err != nil {
@@ -75,6 +77,12 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 		// package uses "CURRENCY" - other dimensions are identical across both packages.
 		dimension = mapRegistryDimension(string(cachedInstrument.Definition.Dimension))
 		precision = cachedInstrument.Definition.Precision
+	} else {
+		// Fallback path: no Reference Data service configured.
+		// Derive precision from the currency registry for correctness (e.g. JPY needs 0, not 2).
+		if inst, ok := currency.ByCode(strings.ToUpper(instrumentCode)); ok {
+			precision = inst.Precision
+		}
 	}
 
 	// Validate party exists and is active (if party client is configured)
