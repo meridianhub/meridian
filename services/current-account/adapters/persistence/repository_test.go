@@ -32,8 +32,8 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
-	// Create the accounts table in the tenant schema (matching CurrentAccountEntity.TableName())
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.accounts (
+	// Create the account table in the tenant schema (matches CurrentAccountEntity.TableName() = "account")
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.account (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		account_id VARCHAR(100) NOT NULL UNIQUE,
 		account_identification VARCHAR(34) NOT NULL UNIQUE,
@@ -43,11 +43,10 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 		status VARCHAR(20) NOT NULL DEFAULT 'active',
 		party_id UUID NOT NULL,
 		org_party_id UUID NULL,
-		balance BIGINT NOT NULL DEFAULT 0,
-		available_balance BIGINT NOT NULL DEFAULT 0,
 		overdraft_limit BIGINT NOT NULL DEFAULT 0,
 		overdraft_rate NUMERIC(5,4) NOT NULL DEFAULT 0,
-		balance_updated_at TIMESTAMP WITH TIME ZONE,
+		product_type_code VARCHAR(50) NULL,
+		product_type_version INT NULL,
 		opened_at TIMESTAMP WITH TIME ZONE,
 		closed_at TIMESTAMP WITH TIME ZONE,
 		freeze_reason VARCHAR(1000),
@@ -344,6 +343,52 @@ func TestOptimisticLocking(t *testing.T) {
 	}
 }
 
+func TestSave_InstrumentCodeAndDimensionRoundTrip(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	partyID := uuid.New().String()
+	accountID := "ACC-" + uuid.New().String()[:8]
+	iban := "GB82WEST12345698765432"
+
+	account, err := domain.NewCurrentAccount(accountID, iban, partyID, "EUR")
+	require.NoError(t, err)
+
+	err = repo.Save(ctx, account)
+	require.NoError(t, err)
+
+	retrieved, err := repo.FindByID(ctx, accountID)
+	require.NoError(t, err)
+
+	assert.Equal(t, "EUR", retrieved.InstrumentCode(), "InstrumentCode should round-trip correctly")
+	assert.Equal(t, "CURRENCY", retrieved.Dimension(), "Dimension should round-trip correctly")
+}
+
+func TestSave_InstrumentCodePersistedOnEntity(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	partyID := uuid.New().String()
+	accountID := "ACC-" + uuid.New().String()[:8]
+	iban := "GB82WEST12345698765432"
+
+	account, err := domain.NewCurrentAccount(accountID, iban, partyID, "GBP")
+	require.NoError(t, err)
+
+	err = repo.Save(ctx, account)
+	require.NoError(t, err)
+
+	// Read raw entity to verify column values in DB
+	var entity CurrentAccountEntity
+	err = db.Where("account_id = ?", accountID).First(&entity).Error
+	require.NoError(t, err)
+
+	assert.Equal(t, "GBP", entity.InstrumentCode, "instrument_code column should be persisted")
+	assert.Equal(t, "CURRENCY", entity.Dimension, "dimension column should be persisted")
+}
+
 // Defensive tests for toDomain error handling per ADR-008
 
 func TestToDomain_InvalidCurrency_ReturnsError(t *testing.T) {
@@ -579,9 +624,9 @@ func TestSave_UpdatePreservesCreatedByButUpdatesUpdatedBy(t *testing.T) {
 // - Redis key prefixing per organization
 // - Kafka header propagation
 //
-// The entity now uses unqualified table name "accounts" which allows
+// The entity uses unqualified table name "account" which allows
 // PostgreSQL's search_path mechanism to route queries to organization-specific
-// schemas (e.g., org_acme_bank.accounts, org_motive_corp.accounts).
+// schemas (e.g., org_acme_bank.account, org_motive_corp.account).
 //
 // See: shared/platform/db/gorm_organization_scope.go for the implementation
 // See: shared/platform/db/gorm_organization_scope_test.go for unit tests

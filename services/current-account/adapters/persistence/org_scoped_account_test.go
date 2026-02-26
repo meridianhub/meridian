@@ -26,8 +26,8 @@ func setupOrgScopedTestDB(t *testing.T) (*gorm.DB, *Repository, context.Context,
 	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
-	// Create the accounts table in tenant schema with org_party_id column
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.accounts (
+	// Create the account table in tenant schema (matches CurrentAccountEntity.TableName() = "account")
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.account (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		account_id VARCHAR(100) NOT NULL UNIQUE,
 		account_identification VARCHAR(34) NOT NULL UNIQUE,
@@ -37,11 +37,10 @@ func setupOrgScopedTestDB(t *testing.T) (*gorm.DB, *Repository, context.Context,
 		status VARCHAR(20) NOT NULL DEFAULT 'active',
 		party_id UUID NOT NULL,
 		org_party_id UUID NULL,
-		balance BIGINT NOT NULL DEFAULT 0,
-		available_balance BIGINT NOT NULL DEFAULT 0,
 		overdraft_limit BIGINT NOT NULL DEFAULT 0,
 		overdraft_rate NUMERIC(5,4) NOT NULL DEFAULT 0,
-		balance_updated_at TIMESTAMP WITH TIME ZONE,
+		product_type_code VARCHAR(50) NULL,
+		product_type_version INT NULL,
 		opened_at TIMESTAMP WITH TIME ZONE,
 		closed_at TIMESTAMP WITH TIME ZONE,
 		freeze_reason VARCHAR(1000),

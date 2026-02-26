@@ -221,14 +221,12 @@ func (r *Repository) Save(ctx context.Context, account domain.CurrentAccount) er
 			updateResult := tx.Model(&CurrentAccountEntity{}).
 				Where("account_identification = ? AND version = ?", entity.AccountIdentification, originalVersion).
 				Updates(map[string]interface{}{
-					"status":          entity.Status,
-					"freeze_reason":   entity.FreezeReason,
-					"status_history":  entity.StatusHistory,
-					"overdraft_limit": entity.OverdraftLimit,
-					"overdraft_rate":  entity.OverdraftRate,
-					"version":         entity.Version,
-					"updated_at":      entity.UpdatedAt,
-					"updated_by":      entity.UpdatedBy,
+					"status":         entity.Status,
+					"freeze_reason":  entity.FreezeReason,
+					"status_history": entity.StatusHistory,
+					"version":        entity.Version,
+					"updated_at":     entity.UpdatedAt,
+					"updated_by":     entity.UpdatedBy,
 				})
 
 			if updateResult.Error != nil {
