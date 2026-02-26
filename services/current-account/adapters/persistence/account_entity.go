@@ -27,6 +27,7 @@ type CurrentAccountEntity struct {
 	AccountType           string     `gorm:"column:account_type;type:varchar(50);not null"`                       // current, savings, etc. (legacy)
 	InstrumentCode        string     `gorm:"column:instrument_code;type:varchar(32);not null;default:'GBP'"`      // Instrument code (e.g. GBP, kWh)
 	Dimension             string     `gorm:"column:dimension;type:varchar(20);not null;default:'CURRENCY'"`       // Asset dimension (e.g. CURRENCY, ELECTRICITY)
+	Precision             int        `gorm:"column:precision;not null;default:2"`                                 // Decimal places for the instrument (2 for GBP, 3 for kWh, 4 for CARBON_CREDIT)
 	Status                string     `gorm:"column:status;type:varchar(20);not null;default:'active'"`
 	PartyID               uuid.UUID  `gorm:"column:party_id;type:uuid;not null;index"`
 	OrgPartyID            *uuid.UUID `gorm:"column:org_party_id;type:uuid"`             // NULL for personal accounts, set for org-scoped accounts
