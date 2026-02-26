@@ -153,6 +153,7 @@ jobs:
       - name: Start meridian backend
         run: |
           DATABASE_URL="postgres://root@localhost:26257/defaultdb?sslmode=disable" \
+          LOCAL_DEV_MODE=true \
             ./dist/meridian >/tmp/meridian.log 2>&1 &
 
       - name: Seed dev tenant and apply manifest
