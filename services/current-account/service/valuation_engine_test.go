@@ -77,6 +77,7 @@ func setupValuationEngineTestWithEngine(t *testing.T, engine ValuationEngine) (*
 		available_balance BIGINT NOT NULL DEFAULT 0,
 		instrument_code VARCHAR(32) NOT NULL DEFAULT 'GBP',
 		dimension VARCHAR(20) NOT NULL DEFAULT 'CURRENCY',
+		precision INT NOT NULL DEFAULT 2,
 		status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
 		overdraft_limit BIGINT NOT NULL DEFAULT 0,
 		overdraft_enabled BOOLEAN NOT NULL DEFAULT FALSE,

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
@@ -37,6 +36,7 @@ var (
 	ErrLienAmountNotPositive  = errors.New("lien amount must be positive")
 	ErrAmountRequired         = errors.New("amount is required")
 	ErrAmountOverflow         = errors.New("amount too large: would overflow")
+	ErrInvalidPrecision       = errors.New("invalid instrument precision: must be between 0 and 9")
 	ErrInstrumentCodeMismatch = errors.New("instrument code mismatch in balance response")
 	// Transaction operation errors for error detection
 	errTxSaveAccount       = errors.New("save_account")
@@ -114,6 +114,18 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 	// Determine mode: multi-asset (input) or legacy (amount)
 	useValuation := req.Input != nil && req.Input.Amount != "" && req.Input.InstrumentCode != ""
 
+	// Prefetch account BEFORE amount parsing so we can use its instrument for dimension-agnostic
+	// amount construction. This also validates account existence early.
+	prefetchedAccount, err := s.repo.FindByID(ctx, req.AccountId)
+	if err != nil {
+		if errors.Is(err, persistence.ErrAccountNotFound) {
+			operationStatus = opStatusAccountNotFound
+			return nil, status.Errorf(codes.NotFound, "account not found: %s", req.AccountId)
+		}
+		operationStatus = opStatusRetrieveFailed
+		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
+	}
+
 	var lienAmount domain.Amount
 	var valuationResult *valuateInternalResult
 
@@ -159,24 +171,43 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 			}
 		}
 
-		// Convert valued output to domain Money for lien amount (the actual reservation)
-		// The valued amount is in the account's native instrument (currency)
-		valuedCents := valuationResult.OutputAmount.Mul(decimal.NewFromInt(100)).RoundBank(0)
+		// Convert valued output to domain Amount for lien amount (the actual reservation).
+		// Use the account's instrument precision so non-2-decimal instruments work correctly.
+		precision := prefetchedAccount.Balance().Instrument().Precision
+		// #nosec G115 - precision is bounded by instrument definition (0-9 in practice)
+		scale := decimal.NewFromInt(1).Shift(int32(precision))
+		valuedMinor := valuationResult.OutputAmount.Mul(scale).RoundBank(0)
 		maxInt64 := decimal.NewFromInt(math.MaxInt64)
 		minInt64 := decimal.NewFromInt(math.MinInt64)
-		if valuedCents.GreaterThan(maxInt64) || valuedCents.LessThan(minInt64) {
+		if valuedMinor.GreaterThan(maxInt64) || valuedMinor.LessThan(minInt64) {
 			operationStatus = opStatusInvalidAmount
 			return nil, status.Error(codes.InvalidArgument, ErrAmountOverflow.Error())
 		}
-		lienAmount, err = domain.NewMoney(valuationResult.OutputCode, valuedCents.IntPart())
+		lienAmount, err = domain.NewAmountFromInstrument(
+			valuationResult.OutputCode,
+			prefetchedAccount.Dimension(),
+			precision,
+			valuedMinor.IntPart(),
+		)
 		if err != nil {
 			operationStatus = opStatusInvalidAmount
 			return nil, status.Errorf(codes.Internal, "failed to create valued amount: %v", err)
 		}
 	} else {
-		// Legacy mode: convert and validate MoneyAmount
+		// Legacy mode: validate instrument match and convert MoneyAmount using the account's
+		// instrument for dimension-agnostic support.
+		if req.Amount == nil || req.Amount.Amount == nil {
+			operationStatus = opStatusInvalidAmount
+			return nil, status.Error(codes.InvalidArgument, "amount is required")
+		}
+		if req.Amount.Amount.CurrencyCode != prefetchedAccount.InstrumentCode() {
+			operationStatus = opStatusCurrencyMismatch
+			return nil, status.Errorf(codes.InvalidArgument,
+				"currency mismatch: lien currency %s does not match account currency %s",
+				req.Amount.Amount.CurrencyCode, prefetchedAccount.InstrumentCode())
+		}
 		var err error
-		lienAmount, err = s.protoToMoney(req.Amount)
+		lienAmount, err = protoMoneyToAmount(req.Amount, prefetchedAccount)
 		if err != nil {
 			operationStatus = opStatusInvalidAmount
 			return nil, status.Errorf(codes.InvalidArgument, "invalid amount: %v", err)
@@ -186,17 +217,6 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 	if !lienAmount.IsPositive() {
 		operationStatus = opStatusInvalidAmount
 		return nil, status.Error(codes.InvalidArgument, "lien amount must be positive")
-	}
-
-	// Prefetch account and balance from Position Keeping BEFORE entering transaction
-	// to avoid holding database locks during external service calls (deadlock prevention).
-	if _, err := s.repo.FindByID(ctx, req.AccountId); err != nil {
-		if errors.Is(err, persistence.ErrAccountNotFound) {
-			operationStatus = opStatusAccountNotFound
-			return nil, status.Errorf(codes.NotFound, "account not found: %s", req.AccountId)
-		}
-		operationStatus = opStatusRetrieveFailed
-		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
 	}
 
 	bucketID := req.BucketId
@@ -319,9 +339,16 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 
 	// Calculate new available balance after this lien
 	newAvailableBalance := availableBalance - lienAmount.ToMinorUnitsUnchecked()
-	availableMoney, err := domain.NewMoney(account.Balance().InstrumentCode(), newAvailableBalance)
+	availableMoney, err := domain.NewAmountFromInstrument(
+		account.Balance().InstrumentCode(),
+		account.Balance().Dimension(),
+		account.Balance().Instrument().Precision,
+		newAvailableBalance,
+	)
 	if err != nil {
-		s.logger.Error("failed to create available balance money", "error", err)
+		s.logger.Error("failed to create available balance amount", "error", err)
+		// Fall back to the pre-lien available balance so the response is not zero.
+		availableMoney = account.AvailableBalance()
 	}
 
 	resp := &pb.InitiateLienResponse{
@@ -833,30 +860,6 @@ func (s *Service) RetrieveLien(ctx context.Context, req *pb.RetrieveLienRequest)
 
 // Helper functions for lien service
 
-// protoToMoney converts a proto MoneyAmount to domain Amount
-func (s *Service) protoToMoney(amount *commonpb.MoneyAmount) (domain.Amount, error) {
-	if amount == nil || amount.Amount == nil {
-		return domain.Amount{}, ErrAmountRequired
-	}
-
-	// Calculate nanosCents first to include in overflow check
-	// nanosCents is at most 100 (nanos range 0-999999999, (999999999+5000000)/10000000 = 100)
-	nanosCents := (amount.Amount.Nanos + 5000000) / 10000000
-
-	// Validate units won't overflow when multiplied by 100 and added to nanosCents
-	// Reserve space for nanosCents (max 100) to prevent overflow in final addition
-	if amount.Amount.Units > (math.MaxInt64-100)/100 || amount.Amount.Units < (math.MinInt64+100)/100 {
-		return domain.Amount{}, ErrAmountOverflow
-	}
-
-	// Convert to cents
-	// unitsCents is safe due to overflow check above
-	unitsCents := amount.Amount.Units * 100
-	totalCents := unitsCents + int64(nanosCents)
-
-	return domain.NewMoney(amount.Amount.CurrencyCode, totalCents)
-}
-
 // toLienProto converts a domain Lien to proto Lien
 func toLienProto(lien *domain.Lien) *pb.Lien {
 	pbLien := &pb.Lien{
@@ -1167,7 +1170,12 @@ func (s *Service) calculateAvailableBalanceByBucket(ctx context.Context, account
 	}
 
 	availableBalance := currentBalanceCents - activeLiensTotal
-	availableMoney, err := domain.NewMoney(currentBalance.InstrumentCode(), availableBalance)
+	availableMoney, err := domain.NewAmountFromInstrument(
+		currentBalance.InstrumentCode(),
+		currentBalance.Dimension(),
+		currentBalance.Instrument().Precision,
+		availableBalance,
+	)
 	if err != nil {
 		s.logger.Error("failed to create available balance for response", "error", err)
 		return currentBalance // Best effort

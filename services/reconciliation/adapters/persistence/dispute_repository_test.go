@@ -3,14 +3,12 @@ package persistence_test
 import (
 	"context"
 	"fmt"
-	"os"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/reconciliation/adapters/persistence"
 	"github.com/meridianhub/meridian/services/reconciliation/domain"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
-	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -18,138 +16,13 @@ import (
 
 func setupTestDB(t *testing.T) (*gorm.DB, func()) {
 	t.Helper()
-	if os.Getenv("INTEGRATION_TEST") == "" && testing.Short() {
-		t.Skip("Skipping integration test (set INTEGRATION_TEST=1 or remove -short)")
+	if sharedDB == nil {
+		t.Skip("Skipping integration test (shared DB not initialized)")
 	}
 
-	db, cleanup := testdb.SetupCockroachDB(t, nil)
+	truncateAllTables(t, sharedDB)
 
-	// Create tenant schema and tables
-	tid := tenant.TenantID("test-tenant-01")
-	schemaName := tid.SchemaName()
-	quoted := fmt.Sprintf("%q", schemaName)
-
-	err := db.Exec("CREATE SCHEMA IF NOT EXISTS " + quoted).Error
-	require.NoError(t, err)
-
-	// Run migrations in the tenant schema
-	migrationSQL := `
-		SET search_path TO ` + quoted + `, public;
-
-		CREATE TABLE IF NOT EXISTS "settlement_run" (
-			"id" uuid NOT NULL DEFAULT gen_random_uuid(),
-			"created_at" timestamptz NOT NULL DEFAULT now(),
-			"updated_at" timestamptz NOT NULL DEFAULT now(),
-			"run_id" uuid NOT NULL,
-			"account_id" character varying(34) NOT NULL,
-			"scope" character varying(20) NOT NULL DEFAULT 'ACCOUNT',
-			"settlement_type" character varying(20) NOT NULL DEFAULT 'DAILY',
-			"status" character varying(20) NOT NULL DEFAULT 'PENDING',
-			"period_start" timestamptz NOT NULL,
-			"period_end" timestamptz NOT NULL,
-			"initiated_by" character varying(100) NOT NULL,
-			"completed_at" timestamptz NULL,
-			"variance_count" integer NOT NULL DEFAULT 0,
-			"failure_reason" text NULL,
-			"last_completed_phase" character varying(30) NULL,
-			"attributes" jsonb NULL,
-			"version" bigint NOT NULL DEFAULT 1,
-			PRIMARY KEY ("id")
-		);
-		CREATE UNIQUE INDEX IF NOT EXISTS "idx_sr_run_id" ON "settlement_run" ("run_id");
-
-		CREATE TABLE IF NOT EXISTS "settlement_snapshot" (
-			"id" uuid NOT NULL DEFAULT gen_random_uuid(),
-			"created_at" timestamptz NOT NULL DEFAULT now(),
-			"snapshot_id" uuid NOT NULL,
-			"run_id" uuid NOT NULL REFERENCES "settlement_run" ("id") ON DELETE CASCADE,
-			"account_id" character varying(34) NOT NULL,
-			"instrument_code" character varying(20) NOT NULL,
-			"expected_balance" decimal(38, 18) NOT NULL,
-			"actual_balance" decimal(38, 18) NOT NULL,
-			"variance_amount" decimal(38, 18) NOT NULL,
-			"source_system" character varying(100) NOT NULL,
-			"attributes" jsonb NULL,
-			"captured_at" timestamptz NOT NULL,
-			PRIMARY KEY ("id")
-		);
-		CREATE UNIQUE INDEX IF NOT EXISTS "idx_ss_snap_id" ON "settlement_snapshot" ("snapshot_id");
-
-		CREATE TABLE IF NOT EXISTS "variance" (
-			"id" uuid NOT NULL DEFAULT gen_random_uuid(),
-			"created_at" timestamptz NOT NULL DEFAULT now(),
-			"updated_at" timestamptz NOT NULL DEFAULT now(),
-			"variance_id" uuid NOT NULL,
-			"run_id" uuid NOT NULL REFERENCES "settlement_run" ("id") ON DELETE CASCADE,
-			"snapshot_id" uuid NOT NULL REFERENCES "settlement_snapshot" ("id") ON DELETE CASCADE,
-			"account_id" character varying(34) NOT NULL,
-			"instrument_code" character varying(20) NOT NULL,
-			"expected_amount" decimal(38, 18) NOT NULL,
-			"actual_amount" decimal(38, 18) NOT NULL,
-			"variance_amount" decimal(38, 18) NOT NULL,
-			"value_delta" decimal(38, 18) NOT NULL DEFAULT 0,
-			"currency" character varying(10) NOT NULL DEFAULT '',
-			"reason" character varying(30) NOT NULL,
-			"status" character varying(20) NOT NULL DEFAULT 'OPEN',
-			"resolution_note" text NULL,
-			"resolved_by" character varying(100) NULL,
-			"resolved_at" timestamptz NULL,
-			"attributes" jsonb NULL,
-			PRIMARY KEY ("id")
-		);
-		CREATE UNIQUE INDEX IF NOT EXISTS "idx_v_var_id" ON "variance" ("variance_id");
-
-		CREATE TABLE IF NOT EXISTS "dispute" (
-			"id" uuid NOT NULL DEFAULT gen_random_uuid(),
-			"created_at" timestamptz NOT NULL DEFAULT now(),
-			"updated_at" timestamptz NOT NULL DEFAULT now(),
-			"dispute_id" uuid NOT NULL,
-			"variance_id" uuid NOT NULL,
-			"run_id" uuid NOT NULL,
-			"account_id" character varying(34) NOT NULL,
-			"status" character varying(20) NOT NULL DEFAULT 'OPEN',
-			"reason" text NOT NULL,
-			"resolution" text NULL,
-			"raised_by" character varying(100) NOT NULL,
-			"resolved_by" character varying(100) NULL,
-			"resolved_at" timestamptz NULL,
-			"attributes" jsonb NULL,
-			PRIMARY KEY ("id")
-		);
-		CREATE UNIQUE INDEX IF NOT EXISTS "idx_d_disp_id" ON "dispute" ("dispute_id");
-
-		CREATE TABLE IF NOT EXISTS "balance_assertion" (
-			"id" uuid NOT NULL DEFAULT gen_random_uuid(),
-			"created_at" timestamptz NOT NULL DEFAULT now(),
-			"updated_at" timestamptz NOT NULL DEFAULT now(),
-			"assertion_id" uuid NOT NULL,
-			"run_id" uuid NULL,
-			"account_id" character varying(34) NOT NULL,
-			"instrument_code" character varying(20) NOT NULL,
-			"expression" text NOT NULL,
-			"expected_balance" decimal(38, 18) NOT NULL,
-			"actual_balance" decimal(38, 18) NOT NULL DEFAULT 0,
-			"status" character varying(20) NOT NULL DEFAULT 'PENDING',
-			"failure_reason" text NULL,
-			"override_reason" text NULL,
-			"attributes" jsonb NULL,
-			"metadata" jsonb NULL,
-			"asserted_at" timestamptz NULL,
-			"version" bigint NOT NULL DEFAULT 1,
-			PRIMARY KEY ("id")
-		);
-		CREATE UNIQUE INDEX IF NOT EXISTS "idx_ba_assertion_id" ON "balance_assertion" ("assertion_id");
-		CREATE INDEX IF NOT EXISTS "idx_ba_run_id" ON "balance_assertion" ("run_id");
-		CREATE INDEX IF NOT EXISTS "idx_ba_account_id" ON "balance_assertion" ("account_id");
-		CREATE INDEX IF NOT EXISTS "idx_ba_instrument_code" ON "balance_assertion" ("instrument_code");
-		CREATE INDEX IF NOT EXISTS "idx_ba_status" ON "balance_assertion" ("status");
-
-		SET search_path TO public;
-	`
-	err = db.Exec(migrationSQL).Error
-	require.NoError(t, err)
-
-	return db, cleanup
+	return sharedDB, func() { /* container lifecycle managed by TestMain */ }
 }
 
 func tenantCtx() context.Context {

@@ -84,8 +84,8 @@ export function PositionsPage() {
       accessorKey: 'statusTracking',
       header: 'Status',
       cell: ({ row }) => {
-        const status = row.original.statusTracking?.currentStatus ?? '—'
-        return <span className="text-sm">{status.replace(/_/g, ' ')}</span>
+        const status = row.original.statusTracking?.currentStatus
+        return <span className="text-sm">{typeof status === 'string' ? status.replace(/_/g, ' ') : '—'}</span>
       },
     },
     {
