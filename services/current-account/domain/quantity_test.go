@@ -254,6 +254,39 @@ func TestNewAmountFromInstrument_CARBON(t *testing.T) {
 	assert.Equal(t, int64(100), toMinorUnits(a))
 }
 
+func TestNewAmountFromInstrument_COMPUTE(t *testing.T) {
+	a, err := NewAmountFromInstrument("GPU_HOUR", "COMPUTE", 6, 2000000)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "GPU_HOUR", a.InstrumentCode())
+	assert.Equal(t, "COMPUTE", a.Dimension())
+	assert.Equal(t, int64(2000000), toMinorUnits(a))
+}
+
+func TestNewAmountFromInstrument_AllDimensions(t *testing.T) {
+	tests := []struct {
+		instrument string
+		dimension  string
+		precision  int
+		minorUnits int64
+	}{
+		{"GBP", "CURRENCY", 2, 10000},
+		{"KWH", "ENERGY", 3, 1500},
+		{"CARBON_CREDIT", "CARBON", 0, 100},
+		{"GPU_HOUR", "COMPUTE", 6, 2000000},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.instrument, func(t *testing.T) {
+			a, err := NewAmountFromInstrument(tc.instrument, tc.dimension, tc.precision, tc.minorUnits)
+			assert.NoError(t, err)
+			assert.Equal(t, tc.instrument, a.InstrumentCode())
+			assert.Equal(t, tc.dimension, a.Dimension())
+			assert.Equal(t, tc.minorUnits, toMinorUnits(a))
+		})
+	}
+}
+
 func TestNewAmountFromInstrument_InvalidDimension_ReturnsError(t *testing.T) {
 	_, err := NewAmountFromInstrument("XYZ", "INVALID_DIM", 0, 100)
 
