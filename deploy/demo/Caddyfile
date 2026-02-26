@@ -7,6 +7,24 @@
 demo.meridianhub.cloud, *.demo.meridianhub.cloud {
 	tls /etc/caddy/certs/origin-cert.pem /etc/caddy/certs/origin-key.pem
 
+	# Health/readiness probes bypass basic auth (used by Docker and load balancers)
+	@health_probes {
+		path /healthz /readyz
+	}
+	handle @health_probes {
+		reverse_proxy meridian:8090
+	}
+
+	# Protect the entire demo site with HTTP basic auth.
+	# Uses a negated matcher to explicitly exclude health probes from auth,
+	# since Caddy's default directive order runs basicauth before handle blocks.
+	@not_health_probes {
+		not path /healthz /readyz
+	}
+	basicauth @not_health_probes {
+		demo $2a$14$xfFb2xnq6vOhKOEh7TTgTula3G.F6MxoT7DawQLGBPziCgjTcWCrS
+	}
+
 	# Dex OIDC endpoints
 	handle /dex/* {
 		reverse_proxy dex:5556
@@ -21,9 +39,9 @@ demo.meridianhub.cloud, *.demo.meridianhub.cloud {
 		reverse_proxy mcp-server:8090
 	}
 
-	# API: ConnectRPC + health probes + version
+	# API: ConnectRPC + version
 	@api {
-		path /meridian.* /grpc.* /healthz /readyz /version
+		path /meridian.* /grpc.* /version
 	}
 	handle @api {
 		reverse_proxy meridian:8090
