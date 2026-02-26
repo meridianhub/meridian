@@ -138,10 +138,10 @@ func TestSchema_ConstraintsWork(t *testing.T) {
 	err := db.Exec(`
 		INSERT INTO internal_account (
 			account_id, account_code, name, account_type,
-			instrument_code, dimension, created_by, updated_by
+			instrument_code, dimension, clearing_purpose, created_by, updated_by
 		) VALUES (
 			'ACC-001', 'CLEAR-GBP', 'GBP Clearing Account', 'CLEARING',
-			'GBP', 'CURRENCY', 'test', 'test'
+			'GBP', 'CURRENCY', 'CLEARING_PURPOSE_GENERAL', 'test', 'test'
 		)
 	`).Error
 	assert.NoError(t, err, "Valid insert should succeed")
@@ -163,10 +163,10 @@ func TestSchema_ConstraintsWork(t *testing.T) {
 	err = db.Exec(`
 		INSERT INTO internal_account (
 			account_id, account_code, name, account_type,
-			instrument_code, dimension, created_by, updated_by
+			instrument_code, dimension, clearing_purpose, created_by, updated_by
 		) VALUES (
 			'ACC-003', 'INVALID', 'Invalid Dimension', 'CLEARING',
-			'GBP', 'INVALID_DIM', 'test', 'test'
+			'GBP', 'INVALID_DIM', 'CLEARING_PURPOSE_GENERAL', 'test', 'test'
 		)
 	`).Error
 	assert.Error(t, err, "Invalid dimension should be rejected")
@@ -176,10 +176,10 @@ func TestSchema_ConstraintsWork(t *testing.T) {
 	err = db.Exec(`
 		INSERT INTO internal_account (
 			account_id, account_code, name, account_type,
-			instrument_code, dimension, status, created_by, updated_by
+			instrument_code, dimension, status, clearing_purpose, created_by, updated_by
 		) VALUES (
 			'ACC-004', 'INVALID', 'Invalid Status', 'CLEARING',
-			'GBP', 'CURRENCY', 'INVALID_STATUS', 'test', 'test'
+			'GBP', 'CURRENCY', 'INVALID_STATUS', 'CLEARING_PURPOSE_GENERAL', 'test', 'test'
 		)
 	`).Error
 	assert.Error(t, err, "Invalid status should be rejected")
@@ -204,10 +204,10 @@ func TestSchema_ForeignKeyConstraint(t *testing.T) {
 	err := db.Exec(`
 		INSERT INTO internal_account (
 			account_id, account_code, name, account_type,
-			instrument_code, dimension, created_by, updated_by
+			instrument_code, dimension, clearing_purpose, created_by, updated_by
 		) VALUES (
 			'ACC-FK-TEST', 'FK-TEST', 'FK Test Account', 'CLEARING',
-			'GBP', 'CURRENCY', 'test', 'test'
+			'GBP', 'CURRENCY', 'CLEARING_PURPOSE_GENERAL', 'test', 'test'
 		)
 	`).Error
 	require.NoError(t, err)
@@ -304,12 +304,17 @@ func TestSchema_AllAccountTypes(t *testing.T) {
 
 	for _, accountType := range accountTypes {
 		accountID := "ACC-TYPE-" + accountType
+		var clearingPurpose *string
+		if accountType == "CLEARING" {
+			cp := "CLEARING_PURPOSE_GENERAL"
+			clearingPurpose = &cp
+		}
 		err := db.Exec(`
 			INSERT INTO internal_account (
 				account_id, account_code, name, account_type,
-				instrument_code, dimension, created_by, updated_by
-			) VALUES (?, ?, ?, ?, 'GBP', 'CURRENCY', 'test', 'test')
-		`, accountID, "CODE-"+accountType, accountType+" Account", accountType).Error
+				instrument_code, dimension, clearing_purpose, created_by, updated_by
+			) VALUES (?, ?, ?, ?, 'GBP', 'CURRENCY', ?, 'test', 'test')
+		`, accountID, "CODE-"+accountType, accountType+" Account", accountType, clearingPurpose).Error
 		assert.NoError(t, err, "Account type %s should be valid", accountType)
 	}
 }
@@ -361,10 +366,10 @@ func TestSchema_UniqueConstraints(t *testing.T) {
 	err := db.Exec(`
 		INSERT INTO internal_account (
 			account_id, account_code, name, account_type,
-			instrument_code, dimension, created_by, updated_by
+			instrument_code, dimension, clearing_purpose, created_by, updated_by
 		) VALUES (
 			'ACC-UNIQUE', 'UNIQUE-CODE', 'Unique Account', 'CLEARING',
-			'GBP', 'CURRENCY', 'test', 'test'
+			'GBP', 'CURRENCY', 'CLEARING_PURPOSE_GENERAL', 'test', 'test'
 		)
 	`).Error
 	require.NoError(t, err)
@@ -373,10 +378,10 @@ func TestSchema_UniqueConstraints(t *testing.T) {
 	err = db.Exec(`
 		INSERT INTO internal_account (
 			account_id, account_code, name, account_type,
-			instrument_code, dimension, created_by, updated_by
+			instrument_code, dimension, clearing_purpose, created_by, updated_by
 		) VALUES (
 			'ACC-UNIQUE', 'DIFFERENT-CODE', 'Another Account', 'CLEARING',
-			'GBP', 'CURRENCY', 'test', 'test'
+			'GBP', 'CURRENCY', 'CLEARING_PURPOSE_GENERAL', 'test', 'test'
 		)
 	`).Error
 	assert.Error(t, err, "Duplicate account_id should fail")
@@ -400,10 +405,10 @@ func TestSchema_CounterpartyFields(t *testing.T) {
 	err := db.Exec(`
 		INSERT INTO internal_account (
 			account_id, account_code, name, account_type,
-			instrument_code, dimension, created_by, updated_by
+			instrument_code, dimension, clearing_purpose, created_by, updated_by
 		) VALUES (
 			'ACC-NO-COUNTERPARTY', 'NO-COUNTERPARTY', 'No Counterparty', 'CLEARING',
-			'GBP', 'CURRENCY', 'test', 'test'
+			'GBP', 'CURRENCY', 'CLEARING_PURPOSE_GENERAL', 'test', 'test'
 		)
 	`).Error
 	assert.NoError(t, err, "Account without counterparty should succeed")
@@ -454,10 +459,10 @@ func TestSchema_SoftDelete(t *testing.T) {
 	err := db.Exec(`
 		INSERT INTO internal_account (
 			account_id, account_code, name, account_type,
-			instrument_code, dimension, created_by, updated_by
+			instrument_code, dimension, clearing_purpose, created_by, updated_by
 		) VALUES (
 			'ACC-SOFT-DEL', 'SOFT-DEL', 'Soft Delete Test', 'CLEARING',
-			'GBP', 'CURRENCY', 'test', 'test'
+			'GBP', 'CURRENCY', 'CLEARING_PURPOSE_GENERAL', 'test', 'test'
 		)
 	`).Error
 	require.NoError(t, err)
@@ -519,6 +524,7 @@ func applyAllMigrations(t *testing.T, db *gorm.DB, migrationsDir string) {
 		"20260220000001_add_product_type_code.sql",
 		"20260220000002_add_product_type_index.sql",
 		"20260225000001_rename_to_internal_account.sql",
+		"20260225000002_rename_correspondent_to_counterparty.sql",
 	}
 	for _, migration := range migrations {
 		sql, err := readMigrationFile(filepath.Join(migrationsDir, migration))
