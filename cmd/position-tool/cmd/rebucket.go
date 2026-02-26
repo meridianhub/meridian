@@ -189,11 +189,9 @@ var (
 )
 
 // executeRebucket performs the actual rebucket operation.
-// It integrates with the rebucketing-tool's internal packages for:
-// 1) Fetching positions by instrument
-// 2) Recalculating bucket keys using instrument CEL expressions
-// 3) Batch updating positions with audit logging
-// 4) Progress reporting
+// It fetches positions by instrument, recalculates bucket keys using
+// instrument CEL expressions, batch updates positions with audit logging,
+// and reports progress.
 func executeRebucket(ctx context.Context, cfg *rebucketConfig) (*rebucketResult, error) {
 	logger := slog.Default()
 
