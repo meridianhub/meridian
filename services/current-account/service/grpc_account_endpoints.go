@@ -45,10 +45,11 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 		return nil, status.Errorf(codes.InvalidArgument, "instrument_code is required")
 	}
 
-	// Resolve dimension from Reference Data service when available.
+	// Resolve dimension and precision from Reference Data service when available.
 	// Dimension classifies the instrument type (e.g. "CURRENCY", "ENERGY", "COMPUTE").
-	// Falls back to CURRENCY for backward compatibility when the getter is not configured.
+	// Falls back to CURRENCY with precision 2 for backward compatibility when the getter is not configured.
 	dimension := "CURRENCY"
+	precision := 2 // default for CURRENCY fallback (most currencies use 2 decimal places)
 	if s.instrumentGetter != nil {
 		cachedInstrument, err := s.instrumentGetter.GetInstrument(ctx, instrumentCode, 0)
 		if err != nil {
@@ -73,6 +74,7 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 		// dimension ("CURRENCY"). The registry uses "MONETARY" while the domain quantity
 		// package uses "CURRENCY" - other dimensions are identical across both packages.
 		dimension = mapRegistryDimension(string(cachedInstrument.Definition.Dimension))
+		precision = cachedInstrument.Definition.Precision
 	}
 
 	// Validate party exists and is active (if party client is configured)
@@ -218,13 +220,14 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 			"account_id", accountID)
 	}
 
-	// Create domain model with resolved instrument and dimension
+	// Create domain model with resolved instrument, dimension, and precision
 	account, err := domain.NewCurrentAccountWithDimension(
 		accountID,
 		req.ExternalIdentifier,
 		req.PartyId,
 		instrumentCode,
 		dimension,
+		precision,
 		opts...,
 	)
 	if err != nil {

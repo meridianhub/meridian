@@ -36,7 +36,7 @@ func TestNewCurrentAccount_InstrumentAndDimensionFields(t *testing.T) {
 }
 
 func TestNewCurrentAccountWithDimension_ExplicitDimension(t *testing.T) {
-	account, err := NewCurrentAccountWithDimension("ACC-001", "IDENT-001", "PARTY-001", "GBP", "CURRENCY")
+	account, err := NewCurrentAccountWithDimension("ACC-001", "IDENT-001", "PARTY-001", "GBP", "CURRENCY", 2)
 	require.NoError(t, err)
 
 	assert.Equal(t, "GBP", account.InstrumentCode())
@@ -1231,4 +1231,74 @@ func TestBuilder_WithNilOrgPartyID(t *testing.T) {
 
 	assert.False(t, account.IsScopedToOrganization())
 	assert.Nil(t, account.OrgPartyID())
+}
+
+// Precision resolution tests
+
+func TestNewCurrentAccountWithDimension_CURRENCY_CorrectPrecision_Succeeds(t *testing.T) {
+	tests := []struct {
+		currency  string
+		precision int
+	}{
+		{"GBP", 2},
+		{"USD", 2},
+		{"EUR", 2},
+		{"JPY", 0},
+		{"CHF", 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.currency, func(t *testing.T) {
+			account, err := NewCurrentAccountWithDimension("ACC-001", "IDENT-001", "PARTY-001", tt.currency, "CURRENCY", tt.precision)
+			require.NoError(t, err)
+			assert.Equal(t, tt.currency, account.InstrumentCode())
+			assert.Equal(t, "CURRENCY", account.Dimension())
+		})
+	}
+}
+
+func TestNewCurrentAccountWithDimension_CURRENCY_PrecisionMismatch_ReturnsError(t *testing.T) {
+	tests := []struct {
+		name      string
+		currency  string
+		precision int
+	}{
+		{"GBP with precision 3 (expected 2)", "GBP", 3},
+		{"JPY with precision 2 (expected 0)", "JPY", 2},
+		{"USD with precision 0 (expected 2)", "USD", 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewCurrentAccountWithDimension("ACC-001", "IDENT-001", "PARTY-001", tt.currency, "CURRENCY", tt.precision)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, ErrPrecisionMismatch)
+		})
+	}
+}
+
+func TestNewCurrentAccount_DerivesCorrectPrecision(t *testing.T) {
+	// NewCurrentAccount derives precision from the currency registry automatically.
+	tests := []struct {
+		currency string
+	}{
+		{"GBP"},
+		{"JPY"},
+		{"USD"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.currency, func(t *testing.T) {
+			account, err := NewCurrentAccount("ACC-001", "IDENT-001", "PARTY-001", tt.currency)
+			require.NoError(t, err)
+			assert.Equal(t, tt.currency, account.InstrumentCode())
+			assert.Equal(t, "CURRENCY", account.Dimension())
+		})
+	}
+}
+
+func TestNewCurrentAccount_InvalidCurrency_StillReturnsError(t *testing.T) {
+	_, err := NewCurrentAccount("ACC-001", "IDENT-001", "PARTY-001", "INVALID")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidCurrency)
 }
