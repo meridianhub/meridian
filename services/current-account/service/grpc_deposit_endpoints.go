@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"math"
 	"time"
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
@@ -101,6 +100,12 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 		}()
 	}
 
+	// Validate amount is present before account fetch to fail fast on malformed requests.
+	if req.Amount == nil || req.Amount.Amount == nil {
+		operationStatus = opStatusMissingAmount
+		return nil, status.Error(codes.InvalidArgument, "amount is required")
+	}
+
 	// Retrieve account (context carries organization for multi-tenant routing)
 	account, err := s.repo.FindByID(ctx, req.AccountId)
 	if err != nil {
@@ -120,36 +125,13 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 			account.Balance().InstrumentCode(), req.Amount.Amount.CurrencyCode)
 	}
 
-	// Convert amount from proto (MoneyAmount wraps google.type.Money)
-	// Validate overflow: Units*100 must not overflow int64
-	if req.Amount.Amount.Units > math.MaxInt64/100 || req.Amount.Amount.Units < math.MinInt64/100 {
-		operationStatus = opStatusAmountOverflow
-		return nil, status.Errorf(codes.InvalidArgument,
-			"amount too large: units %d would overflow", req.Amount.Amount.Units)
-	}
-
-	// Convert to cents preserving precision
-	unitsCents := req.Amount.Amount.Units * 100
-	// Round nanos to nearest cent (0.5 rounds up)
-	nanosCents := (req.Amount.Amount.Nanos + 5000000) / 10000000
-
-	// Use Money.Add to safely handle potential overflow from adding nanosCents
-	centsMoney, err := domain.NewMoney(req.Amount.Amount.CurrencyCode, unitsCents)
+	// Convert amount from proto (MoneyAmount wraps google.type.Money) using the account's instrument.
+	// The account's instrument determines dimension and precision; the proto CurrencyCode is already
+	// validated against account.Balance().InstrumentCode() above.
+	amount, err := protoMoneyToAmount(req.Amount, account)
 	if err != nil {
-		operationStatus = operationStatusInvalidCurrency
-		return nil, status.Errorf(codes.InvalidArgument, "invalid currency: %v", err)
-	}
-
-	nanosMoney, err := domain.NewMoney(req.Amount.Amount.CurrencyCode, int64(nanosCents))
-	if err != nil {
-		operationStatus = operationStatusInvalidCurrency
-		return nil, status.Errorf(codes.InvalidArgument, "invalid currency: %v", err)
-	}
-
-	amount, err := centsMoney.Add(nanosMoney)
-	if err != nil {
-		operationStatus = operationStatusInvalidCurrency
-		return nil, status.Errorf(codes.InvalidArgument, "invalid currency: %v", err)
+		operationStatus = opStatusInvalidAmount
+		return nil, status.Errorf(codes.InvalidArgument, "invalid amount: %v", err)
 	}
 
 	// Validate amount is positive
@@ -162,7 +144,7 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 	if amountCents <= 0 {
 		operationStatus = opStatusInvalidAmount
 		return nil, status.Errorf(codes.InvalidArgument,
-			"deposit amount must be positive, got %d cents", amountCents)
+			"deposit amount must be positive, got %d minor units", amountCents)
 	}
 
 	// Generate transaction ID (full UUID required by position-keeping service)

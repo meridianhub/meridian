@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -78,41 +77,35 @@ func (s *Service) InitiateWithdrawal(ctx context.Context, req *pb.InitiateWithdr
 			account.Balance().InstrumentCode(), req.Amount.Amount.CurrencyCode)
 	}
 
-	// Validate overflow: Units*100 must not overflow int64
-	if req.Amount.Amount.Units > math.MaxInt64/100 || req.Amount.Amount.Units < math.MinInt64/100 {
-		operationStatus = opStatusAmountOverflow
-		return nil, status.Errorf(codes.InvalidArgument,
-			"amount too large: units %d would overflow", req.Amount.Amount.Units)
+	// Convert amount from proto using the account's instrument (supports any dimension/precision).
+	// The proto CurrencyCode is already validated against the account's instrument code above.
+	amount, err := protoMoneyToAmount(req.Amount, account)
+	if err != nil {
+		operationStatus = operationStatusInvalidCurrency
+		return nil, status.Errorf(codes.InvalidArgument, "invalid amount: %v", err)
 	}
 
-	// Convert and validate amount
-	unitsCents := req.Amount.Amount.Units * 100
-	nanosCents := (req.Amount.Amount.Nanos + 5000000) / 10000000
-	amountCents := unitsCents + int64(nanosCents)
-
-	if amountCents <= 0 {
+	amountMinor, err := amount.ToMinorUnits()
+	if err != nil {
+		operationStatus = opStatusAmountOverflow
+		return nil, status.Errorf(codes.InvalidArgument, "amount too large: %v", err)
+	}
+	if amountMinor <= 0 {
 		operationStatus = opStatusInvalidAmount
 		return nil, status.Errorf(codes.InvalidArgument, "withdrawal amount must be positive")
 	}
 
 	// Check available balance (warning only - balance could change before execution)
-	availCents, _ := account.AvailableBalance().ToMinorUnits()
-	if amountCents > availCents {
+	availMinor, _ := account.AvailableBalance().ToMinorUnits()
+	if amountMinor > availMinor {
 		validationMessages = append(validationMessages,
-			fmt.Sprintf("Warning: requested amount (%d cents) exceeds current available balance (%d cents)", amountCents, availCents))
+			fmt.Sprintf("Warning: requested amount (%d minor units) exceeds current available balance (%d minor units)", amountMinor, availMinor))
 	}
 
 	// Use provided reference if available, otherwise generate one
 	reference := req.Reference
 	if reference == "" {
 		reference = fmt.Sprintf("WTH-%s", uuid.New().String()[:8])
-	}
-
-	// Create domain Money from amount cents
-	amount, err := domain.NewMoney(req.Amount.Amount.CurrencyCode, amountCents)
-	if err != nil {
-		operationStatus = operationStatusInvalidCurrency
-		return nil, status.Errorf(codes.InvalidArgument, "invalid currency: %v", err)
 	}
 
 	// Create domain withdrawal
@@ -138,7 +131,7 @@ func (s *Service) InitiateWithdrawal(ctx context.Context, req *pb.InitiateWithdr
 		"withdrawal_id", domainWithdrawal.ID,
 		"withdrawal_reference", reference,
 		"account_id", req.AccountId,
-		"amount_cents", amountCents)
+		"amount_minor_units", amountMinor)
 
 	// Convert domain withdrawal to proto
 	withdrawal := toProtoWithdrawal(domainWithdrawal, req.AccountId)
