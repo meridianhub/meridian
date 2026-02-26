@@ -14,7 +14,7 @@ permissions:
   security-events: write  # Required for SARIF upload to Security tab
 
 concurrency:
-  group: build-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
