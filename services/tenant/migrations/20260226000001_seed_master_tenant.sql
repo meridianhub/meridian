@@ -13,7 +13,7 @@ INSERT INTO tenant (
 ) VALUES (
     'meridian_master',
     'Meridian Platform',
-    'USD',
+    'GBP',
     'active',
     '{"is_system_tenant": true, "description": "System tenant for shared platform data"}'::jsonb,
     1,
