@@ -745,9 +745,11 @@ var serviceNames = []string{
 	"meridian.financial_accounting.v1.FinancialAccountingService",
 	"meridian.position_keeping.v1.PositionKeepingService",
 	"meridian.forecasting.v1.ForecastingService",
-	// CurrentAccountService excluded from Vanguard: its REST routes (/v1/liens/*)
-	// conflict with InternalAccountService. Still reachable via Connect protocol
-	// (/{package}.{Service}/{Method} paths don't conflict).
+	// CurrentAccountService shares REST routes (/v1/liens/*) with InternalAccountService.
+	// Vanguard resolves the conflict by routing REST lien requests to whichever service
+	// was registered first (InternalAccountService above). Connect protocol paths
+	// (/{package}.{Service}/{Method}) are unique per service and never conflict.
+	"meridian.current_account.v1.CurrentAccountService",
 	"meridian.payment_order.v1.PaymentOrderService",
 	"meridian.reconciliation.v1.AccountReconciliationService",
 	"meridian.saga.v1.SagaRegistryService",
