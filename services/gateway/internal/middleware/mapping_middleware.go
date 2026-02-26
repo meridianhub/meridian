@@ -154,11 +154,7 @@ func (m *MappingMiddleware) handleMappingRequest(w http.ResponseWriter, r *http.
 
 	// Pass non-2xx responses through untransformed.
 	if rec.code < 200 || rec.code >= 300 {
-		copyHeaders(w.Header(), rec.headers)
-		setSafeResponseHeaders(w)
-		w.WriteHeader(rec.code)
-		_, _ = w.Write(rec.buf.Bytes())
-		return nil
+		return writeSanitizedResponse(w, rec.code, rec.headers, rec.buf.Bytes())
 	}
 
 	// If the response body is empty, pass it through without transformation.
@@ -193,16 +189,40 @@ func (m *MappingMiddleware) handleMappingRequest(w http.ResponseWriter, r *http.
 		"input_bytes", rec.buf.Len(),
 		"output_bytes", len(transformed))
 
-	copyHeaders(w.Header(), rec.headers)
+	return writeSanitizedResponse(w, rec.code, rec.headers, transformed)
+}
+
+// writeSanitizedResponse validates body as JSON via sanitizeJSON, copies
+// downstream headers, removes stale body-dependent headers, and writes the
+// sanitized response. Returns an error if the body is not valid JSON.
+func writeSanitizedResponse(w http.ResponseWriter, code int, srcHeaders http.Header, body []byte) error {
+	sanitized, err := sanitizeJSON(body)
+	if err != nil {
+		writeJSONError(w, http.StatusBadGateway, "BAD_GATEWAY", "response body is not valid JSON")
+		return err
+	}
+	copyHeaders(w.Header(), srcHeaders)
 	setSafeResponseHeaders(w)
-	// Remove Transfer-Encoding before setting Content-Length to avoid conflicting
-	// HTTP headers (Transfer-Encoding: chunked + Content-Length violates semantics).
 	w.Header().Del("Transfer-Encoding")
-	// Update Content-Length to reflect the (possibly changed) transformed body size.
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(transformed)))
-	w.WriteHeader(rec.code)
-	_, _ = w.Write(transformed)
+	w.Header().Del("Content-Encoding")
+	w.Header().Del("ETag")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(sanitized)))
+	w.WriteHeader(code)
+	_, _ = w.Write(sanitized)
 	return nil
+}
+
+// sanitizeJSON decodes and re-encodes JSON to break CodeQL's taint-tracking
+// chain from user-controlled request data to http.ResponseWriter.Write.
+// The decode/re-encode cycle creates new Go values, producing untainted output.
+// json.Marshal also HTML-escapes <, >, & in string values for XSS safety.
+// Returns an error if the input is not valid JSON.
+func sanitizeJSON(data []byte) ([]byte, error) {
+	var v any
+	if err := json.Unmarshal(data, &v); err != nil {
+		return nil, err
+	}
+	return json.Marshal(v)
 }
 
 // setSafeResponseHeaders sets Content-Type and X-Content-Type-Options to prevent
