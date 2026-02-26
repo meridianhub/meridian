@@ -154,6 +154,7 @@ jobs:
         run: |
           DATABASE_URL="postgres://root@localhost:26257/defaultdb?sslmode=disable" \
           LOCAL_DEV_MODE=true \
+          SAGA_ASSET_DIR="$(pwd)" \
             ./dist/meridian >/tmp/meridian.log 2>&1 &
 
       - name: Seed dev tenant and apply manifest
