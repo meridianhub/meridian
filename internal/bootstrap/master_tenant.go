@@ -147,7 +147,7 @@ func validatePlatformManifest(logger *slog.Logger) error {
 
 	result, err := controlplaneservice.ValidateManifest(mf, nil)
 	if err != nil {
-		return fmt.Errorf("create validator: %w", err)
+		return fmt.Errorf("validate manifest: %w", err)
 	}
 
 	if !result.Valid {
