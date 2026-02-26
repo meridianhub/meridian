@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lib/pq"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/shared/pkg/health"
 	"github.com/meridianhub/meridian/shared/platform/await"
-	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -24,12 +24,30 @@ import (
 func setupTestRepository(t *testing.T) *persistence.Repository {
 	t.Helper()
 
-	db, cleanup := testdb.SetupPostgres(t, []interface{}{
-		&persistence.CurrentAccountEntity{},
-	})
+	db := openSharedDB(t)
 
-	// Register cleanup to run when test completes
-	t.Cleanup(cleanup)
+	// Each test gets a unique tenant → unique schema for isolation
+	tid := uniqueTenantID()
+	schemaName := tid.SchemaName()
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
+	require.NoError(t, err)
+
+	// Set search_path so AutoMigrate creates tables in the tenant schema
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
+	require.NoError(t, err)
+
+	// AutoMigrate in the tenant schema
+	err = db.AutoMigrate(&persistence.CurrentAccountEntity{})
+	require.NoError(t, err)
+
+	// Clean up schema and close connection when test completes
+	t.Cleanup(func() {
+		_ = db.Exec(fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", pq.QuoteIdentifier(schemaName)))
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			_ = sqlDB.Close()
+		}
+	})
 
 	return persistence.NewRepository(db)
 }

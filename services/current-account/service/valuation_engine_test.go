@@ -13,7 +13,6 @@ import (
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
-	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -22,8 +21,6 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"gorm.io/gorm"
 )
-
-const testTenantIDForValuation = "test_valuation_tenant"
 
 // mockValuationEngine implements ValuationEngine for testing.
 type mockValuationEngine struct {
@@ -56,15 +53,15 @@ func (m *mockValuationEngine) Evaluate(ctx context.Context, params ValuationPara
 	}, nil
 }
 
-func setupValuationEngineTest(t *testing.T) (*Service, context.Context, func()) {
+func setupValuationEngineTest(t *testing.T) (*Service, context.Context, tenant.TenantID, func()) {
 	return setupValuationEngineTestWithEngine(t, nil)
 }
 
-func setupValuationEngineTestWithEngine(t *testing.T, engine ValuationEngine) (*Service, context.Context, func()) {
+func setupValuationEngineTestWithEngine(t *testing.T, engine ValuationEngine) (*Service, context.Context, tenant.TenantID, func()) {
 	t.Helper()
-	db, cleanup := testdb.SetupPostgres(t, nil)
+	db := openSharedDB(t)
 
-	tid := tenant.TenantID(testTenantIDForValuation)
+	tid := uniqueTenantID()
 	schemaName := tid.SchemaName()
 	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
 	require.NoError(t, err)
@@ -142,7 +139,15 @@ func setupValuationEngineTestWithEngine(t *testing.T, engine ValuationEngine) (*
 		svc.valuationEngine = engine
 	}
 
-	return svc, ctx, cleanup
+	cleanup := func() {
+		db.Exec(fmt.Sprintf("DROP SCHEMA IF EXISTS %q CASCADE", schemaName))
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	}
+
+	return svc, ctx, tid, cleanup
 }
 
 // createTestAccountForValuation creates a test account and returns its string account_id.
@@ -188,10 +193,9 @@ func createTestValuationFeature(t *testing.T, _ context.Context, db *gorm.DB, sc
 // --- Tests for EvaluateAssetValuation RPC ---
 
 func TestEvaluateAssetValuation_IdentityConversion(t *testing.T) {
-	svc, ctx, cleanup := setupValuationEngineTest(t)
+	svc, ctx, tid, cleanup := setupValuationEngineTest(t)
 	defer cleanup()
 
-	tid := tenant.TenantID(testTenantIDForValuation)
 	schemaName := tid.SchemaName()
 	createTestAccountForValuation(t, ctx, svc.repo.DB(), schemaName, "ACC-EVAL-001", "GBP")
 
@@ -217,10 +221,9 @@ func TestEvaluateAssetValuation_IdentityConversion(t *testing.T) {
 
 func TestEvaluateAssetValuation_WithEngine(t *testing.T) {
 	engine := &mockValuationEngine{}
-	svc, ctx, cleanup := setupValuationEngineTestWithEngine(t, engine)
+	svc, ctx, tid, cleanup := setupValuationEngineTestWithEngine(t, engine)
 	defer cleanup()
 
-	tid := tenant.TenantID(testTenantIDForValuation)
 	schemaName := tid.SchemaName()
 	accountUUID := createTestAccountForValuation(t, ctx, svc.repo.DB(), schemaName, "ACC-EVAL-002", "GBP")
 	createTestValuationFeature(t, ctx, svc.repo.DB(), schemaName, accountUUID, "USD")
@@ -249,10 +252,9 @@ func TestEvaluateAssetValuation_WithEngine(t *testing.T) {
 
 func TestEvaluateAssetValuation_DegradedMode_NoEngine(t *testing.T) {
 	// No engine configured - should return degraded mode passthrough
-	svc, ctx, cleanup := setupValuationEngineTest(t)
+	svc, ctx, tid, cleanup := setupValuationEngineTest(t)
 	defer cleanup()
 
-	tid := tenant.TenantID(testTenantIDForValuation)
 	schemaName := tid.SchemaName()
 	accountUUID := createTestAccountForValuation(t, ctx, svc.repo.DB(), schemaName, "ACC-EVAL-003", "GBP")
 	createTestValuationFeature(t, ctx, svc.repo.DB(), schemaName, accountUUID, "USD")
@@ -278,7 +280,7 @@ func TestEvaluateAssetValuation_DegradedMode_NoEngine(t *testing.T) {
 }
 
 func TestEvaluateAssetValuation_AccountNotFound(t *testing.T) {
-	svc, ctx, cleanup := setupValuationEngineTest(t)
+	svc, ctx, _, cleanup := setupValuationEngineTest(t)
 	defer cleanup()
 
 	_, err := svc.EvaluateAssetValuation(ctx, &pb.EvaluateAssetValuationRequest{
@@ -297,10 +299,9 @@ func TestEvaluateAssetValuation_AccountNotFound(t *testing.T) {
 }
 
 func TestEvaluateAssetValuation_NoValuationFeature(t *testing.T) {
-	svc, ctx, cleanup := setupValuationEngineTest(t)
+	svc, ctx, tid, cleanup := setupValuationEngineTest(t)
 	defer cleanup()
 
-	tid := tenant.TenantID(testTenantIDForValuation)
 	schemaName := tid.SchemaName()
 	createTestAccountForValuation(t, ctx, svc.repo.DB(), schemaName, "ACC-EVAL-004", "GBP")
 
@@ -321,7 +322,7 @@ func TestEvaluateAssetValuation_NoValuationFeature(t *testing.T) {
 }
 
 func TestEvaluateAssetValuation_InvalidInput_MissingAccountID(t *testing.T) {
-	svc, ctx, cleanup := setupValuationEngineTest(t)
+	svc, ctx, _, cleanup := setupValuationEngineTest(t)
 	defer cleanup()
 
 	_, err := svc.EvaluateAssetValuation(ctx, &pb.EvaluateAssetValuationRequest{
@@ -341,7 +342,7 @@ func TestEvaluateAssetValuation_InvalidInput_MissingAccountID(t *testing.T) {
 }
 
 func TestEvaluateAssetValuation_InvalidInput_MissingInput(t *testing.T) {
-	svc, ctx, cleanup := setupValuationEngineTest(t)
+	svc, ctx, _, cleanup := setupValuationEngineTest(t)
 	defer cleanup()
 
 	_, err := svc.EvaluateAssetValuation(ctx, &pb.EvaluateAssetValuationRequest{
@@ -356,7 +357,7 @@ func TestEvaluateAssetValuation_InvalidInput_MissingInput(t *testing.T) {
 }
 
 func TestEvaluateAssetValuation_InvalidInput_EmptyInstrument(t *testing.T) {
-	svc, ctx, cleanup := setupValuationEngineTest(t)
+	svc, ctx, _, cleanup := setupValuationEngineTest(t)
 	defer cleanup()
 
 	_, err := svc.EvaluateAssetValuation(ctx, &pb.EvaluateAssetValuationRequest{
@@ -375,7 +376,7 @@ func TestEvaluateAssetValuation_InvalidInput_EmptyInstrument(t *testing.T) {
 }
 
 func TestEvaluateAssetValuation_InvalidInput_BadAmount(t *testing.T) {
-	svc, ctx, cleanup := setupValuationEngineTest(t)
+	svc, ctx, _, cleanup := setupValuationEngineTest(t)
 	defer cleanup()
 
 	_, err := svc.EvaluateAssetValuation(ctx, &pb.EvaluateAssetValuationRequest{
@@ -394,7 +395,7 @@ func TestEvaluateAssetValuation_InvalidInput_BadAmount(t *testing.T) {
 }
 
 func TestEvaluateAssetValuation_InvalidInput_NegativeAmount(t *testing.T) {
-	svc, ctx, cleanup := setupValuationEngineTest(t)
+	svc, ctx, _, cleanup := setupValuationEngineTest(t)
 	defer cleanup()
 
 	_, err := svc.EvaluateAssetValuation(ctx, &pb.EvaluateAssetValuationRequest{
@@ -413,7 +414,7 @@ func TestEvaluateAssetValuation_InvalidInput_NegativeAmount(t *testing.T) {
 }
 
 func TestEvaluateAssetValuation_InvalidInput_ZeroAmount(t *testing.T) {
-	svc, ctx, cleanup := setupValuationEngineTest(t)
+	svc, ctx, _, cleanup := setupValuationEngineTest(t)
 	defer cleanup()
 
 	_, err := svc.EvaluateAssetValuation(ctx, &pb.EvaluateAssetValuationRequest{
@@ -452,10 +453,9 @@ func TestEvaluateAssetValuation_RepoNotConfigured(t *testing.T) {
 
 func TestEvaluateAssetValuation_WithKnowledgeAt(t *testing.T) {
 	engine := &mockValuationEngine{}
-	svc, ctx, cleanup := setupValuationEngineTestWithEngine(t, engine)
+	svc, ctx, tid, cleanup := setupValuationEngineTestWithEngine(t, engine)
 	defer cleanup()
 
-	tid := tenant.TenantID(testTenantIDForValuation)
 	schemaName := tid.SchemaName()
 	accountUUID := createTestAccountForValuation(t, ctx, svc.repo.DB(), schemaName, "ACC-EVAL-005", "GBP")
 	createTestValuationFeature(t, ctx, svc.repo.DB(), schemaName, accountUUID, "EUR")
@@ -486,10 +486,9 @@ func TestEvaluateAssetValuation_EngineError(t *testing.T) {
 			return nil, fmt.Errorf("market data unavailable")
 		},
 	}
-	svc, ctx, cleanup := setupValuationEngineTestWithEngine(t, engine)
+	svc, ctx, tid, cleanup := setupValuationEngineTestWithEngine(t, engine)
 	defer cleanup()
 
-	tid := tenant.TenantID(testTenantIDForValuation)
 	schemaName := tid.SchemaName()
 	accountUUID := createTestAccountForValuation(t, ctx, svc.repo.DB(), schemaName, "ACC-EVAL-006", "GBP")
 	createTestValuationFeature(t, ctx, svc.repo.DB(), schemaName, accountUUID, "USD")
@@ -535,10 +534,9 @@ func TestGhostPricingPrevention_IdenticalResults(t *testing.T) {
 		},
 	}
 
-	svc, ctx, cleanup := setupValuationEngineTestWithEngine(t, engine)
+	svc, ctx, tid, cleanup := setupValuationEngineTestWithEngine(t, engine)
 	defer cleanup()
 
-	tid := tenant.TenantID(testTenantIDForValuation)
 	schemaName := tid.SchemaName()
 	accountUUID := createTestAccountForValuation(t, ctx, svc.repo.DB(), schemaName, "ACC-GHOST-001", "GBP")
 	createTestValuationFeature(t, ctx, svc.repo.DB(), schemaName, accountUUID, "USD")
@@ -587,10 +585,9 @@ func TestGhostPricingPrevention_IdenticalResults(t *testing.T) {
 // --- valuateInternal unit tests ---
 
 func TestValuateInternal_IdentityConversion(t *testing.T) {
-	svc, ctx, cleanup := setupValuationEngineTest(t)
+	svc, ctx, tid, cleanup := setupValuationEngineTest(t)
 	defer cleanup()
 
-	tid := tenant.TenantID(testTenantIDForValuation)
 	schemaName := tid.SchemaName()
 	createTestAccountForValuation(t, ctx, svc.repo.DB(), schemaName, "ACC-INT-001", "GBP")
 
@@ -602,7 +599,7 @@ func TestValuateInternal_IdentityConversion(t *testing.T) {
 }
 
 func TestValuateInternal_AccountNotFound(t *testing.T) {
-	svc, ctx, cleanup := setupValuationEngineTest(t)
+	svc, ctx, _, cleanup := setupValuationEngineTest(t)
 	defer cleanup()
 
 	_, err := svc.valuateInternal(ctx, "ACC-NONEXISTENT", decimal.NewFromFloat(100), "USD", time.Now())
@@ -611,10 +608,9 @@ func TestValuateInternal_AccountNotFound(t *testing.T) {
 }
 
 func TestValuateInternal_NoFeature(t *testing.T) {
-	svc, ctx, cleanup := setupValuationEngineTest(t)
+	svc, ctx, tid, cleanup := setupValuationEngineTest(t)
 	defer cleanup()
 
-	tid := tenant.TenantID(testTenantIDForValuation)
 	schemaName := tid.SchemaName()
 	createTestAccountForValuation(t, ctx, svc.repo.DB(), schemaName, "ACC-INT-002", "GBP")
 
@@ -625,10 +621,9 @@ func TestValuateInternal_NoFeature(t *testing.T) {
 
 func TestValuateInternal_WithEngine(t *testing.T) {
 	engine := &mockValuationEngine{}
-	svc, ctx, cleanup := setupValuationEngineTestWithEngine(t, engine)
+	svc, ctx, tid, cleanup := setupValuationEngineTestWithEngine(t, engine)
 	defer cleanup()
 
-	tid := tenant.TenantID(testTenantIDForValuation)
 	schemaName := tid.SchemaName()
 	accountUUID := createTestAccountForValuation(t, ctx, svc.repo.DB(), schemaName, "ACC-INT-003", "GBP")
 	createTestValuationFeature(t, ctx, svc.repo.DB(), schemaName, accountUUID, "USD")
@@ -641,10 +636,9 @@ func TestValuateInternal_WithEngine(t *testing.T) {
 }
 
 func TestValuateInternal_FallbackWithoutEngine(t *testing.T) {
-	svc, ctx, cleanup := setupValuationEngineTest(t)
+	svc, ctx, tid, cleanup := setupValuationEngineTest(t)
 	defer cleanup()
 
-	tid := tenant.TenantID(testTenantIDForValuation)
 	schemaName := tid.SchemaName()
 	accountUUID := createTestAccountForValuation(t, ctx, svc.repo.DB(), schemaName, "ACC-INT-004", "GBP")
 	createTestValuationFeature(t, ctx, svc.repo.DB(), schemaName, accountUUID, "USD")

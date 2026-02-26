@@ -13,7 +13,6 @@ import (
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
-	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/genproto/googleapis/type/money"
@@ -30,21 +29,17 @@ import (
 // tenant A must not be visible or executable from tenant B's context.
 // =============================================================================
 
-const (
-	tenantIsolationTenantA = "tenant_iso_a"
-	tenantIsolationTenantB = "tenant_iso_b"
-)
-
-// setupMultiTenantTestDB creates a testcontainer with two tenant schemas, each
-// containing the account, withdrawal, and event_outbox tables.
+// setupMultiTenantTestDB creates two tenant schemas in the shared container,
+// each containing the account, withdrawal, and event_outbox tables.
 // Returns the shared gorm.DB, per-tenant contexts, and a cleanup function.
 func setupMultiTenantTestDB(t *testing.T) (db *gorm.DB, ctxA context.Context, ctxB context.Context, cleanup func()) {
 	t.Helper()
 
-	db, dbCleanup := testdb.SetupPostgres(t, nil)
+	db = openSharedDB(t)
 
-	tenantA := tenant.TenantID(tenantIsolationTenantA)
-	tenantB := tenant.TenantID(tenantIsolationTenantB)
+	// Use unique tenant IDs so parallel tests don't collide
+	tenantA := uniqueTenantID()
+	tenantB := uniqueTenantID()
 
 	for _, tid := range []tenant.TenantID{tenantA, tenantB} {
 		schema := tid.SchemaName()
@@ -73,7 +68,18 @@ func setupMultiTenantTestDB(t *testing.T) (db *gorm.DB, ctxA context.Context, ct
 	ctxA = tenant.WithTenant(context.Background(), tenantA)
 	ctxB = tenant.WithTenant(context.Background(), tenantB)
 
-	return db, ctxA, ctxB, dbCleanup
+	schemaA := tenantA.SchemaName()
+	schemaB := tenantB.SchemaName()
+	cleanup = func() {
+		_ = db.Exec(fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", pq.QuoteIdentifier(schemaA)))
+		_ = db.Exec(fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", pq.QuoteIdentifier(schemaB)))
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			_ = sqlDB.Close()
+		}
+	}
+
+	return db, ctxA, ctxB, cleanup
 }
 
 // TestTenantIsolation_RetrieveWithdrawal_NotVisibleAcrossTenants verifies that
