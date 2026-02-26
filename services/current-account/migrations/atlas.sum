@@ -1,4 +1,4 @@
-h1:7674mXt42yGS5HJ6zgcxMlMsIehwMCSGCBYyKgeobL8=
+h1:yn9ScPPidHbTE72V7UOZWTBNnnIadlyUwOxTfg3xye0=
 20251216000001_initial.sql h1:nyRf35O3eYNJqShAvOEhvliXKLIR6e/V8B9JhOHde9w=
 20251216000002_audit_system.sql h1:X/0ZHt9cGTYmFbUUvKAkBgEiGw9fYEqfnbMB8I4SCR8=
 20251217000001_fix_audit_status_constraint.sql h1:yQxsHxbUp5g+ehkKFjOhZs59SbfaQIPw4/sA2xE2rwU=
@@ -22,4 +22,4 @@ h1:7674mXt42yGS5HJ6zgcxMlMsIehwMCSGCBYyKgeobL8=
 20260226000001_add_behavior_class_column.sql h1:71oeCIEC9vifK6g6lwprfIw0k4U0c5SdEKR7Uij5igs=
 20260226000002_backfill_behavior_class.sql h1:6jPr/h/Mcfpkv3aWio4LCYFYZrWEcSTThnAGq/FQIFs=
 20260226000003_add_precision_columns.sql h1:CQxOsi81T7wgr6+s3MecR6lKJ6+gHXyJsHFGpSVhw/o=
-20260226000004_backfill_precision.sql h1:Ylh/dLEDz0CEl9eg1vADkR03mIErP6BKR5VHnx7RkN0=
+20260226000004_backfill_precision.sql h1:9WugTQdCanrwNet2p96l8t6H5zNVXu1Nzlf26iIV/yI=

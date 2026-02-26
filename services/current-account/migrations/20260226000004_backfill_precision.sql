@@ -32,3 +32,10 @@ SET "instrument_code" = w."currency",
     "precision" = a."precision"
 FROM "account" a
 WHERE a."id" = w."account_id";
+
+-- Add integrity constraints AFTER backfill to ensure instrument_code is non-empty.
+-- These must be in this migration (not 20260226000003) because the backfill
+-- above populates instrument_code; adding the constraint before backfill would
+-- reject existing rows with the default empty string.
+ALTER TABLE "lien" ADD CONSTRAINT "chk_lien_instrument_code_non_empty" CHECK (char_length("instrument_code") > 0);
+ALTER TABLE "withdrawal" ADD CONSTRAINT "chk_withdrawal_instrument_code_non_empty" CHECK (char_length("instrument_code") > 0);
