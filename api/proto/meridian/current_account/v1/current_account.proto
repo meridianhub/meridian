@@ -1153,7 +1153,7 @@ message ListCurrentAccountsRequest {
   // status filters results to accounts with a specific status (optional).
   AccountStatus status = 3 [(buf.validate.field).enum = {defined_only: true}];
 
-  // iban filters results by IBAN prefix match (optional).
+  // iban filters results by external reference prefix match (optional).
   string iban = 4 [(buf.validate.field).string = {max_len: 34}];
 }
 
@@ -1310,7 +1310,7 @@ service CurrentAccountService {
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "List current accounts"
-      description: "Returns a paginated list of current accounts with optional filtering by status and IBAN."
+      description: "Returns a paginated list of current accounts with optional filtering by status and external reference."
     };
   }
 

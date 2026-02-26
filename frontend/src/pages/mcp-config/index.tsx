@@ -6,7 +6,10 @@ import { Copy, Check, ExternalLink } from 'lucide-react'
 import { useTenantContext } from '@/contexts/tenant-context'
 import { McpToolsSection } from './mcp-tools-section'
 
-const MCP_SERVER_URL = import.meta.env.VITE_MCP_SERVER_URL ?? 'http://localhost:8091'
+const MCP_SERVER_URL =
+  import.meta.env.VITE_MCP_SERVER_URL ??
+  import.meta.env.VITE_API_BASE_URL ??
+  'http://localhost:8091'
 
 function buildClaudeDesktopConfig(serverUrl: string): string {
   const config = {

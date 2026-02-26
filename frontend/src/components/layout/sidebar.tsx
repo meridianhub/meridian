@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { BuildInfo } from './build-info'
 import {
   LayoutDashboard,
   Wallet,
@@ -80,7 +81,7 @@ export function Sidebar({ lens, currentPath = '/', isOpen = false, id, onClose }
         !isOpen && 'max-md:-translate-x-full',
       )}
     >
-      <nav aria-label="Main navigation" className="flex-1 overflow-y-auto py-4">
+      <nav aria-label="Main navigation" className="min-h-0 flex-1 overflow-y-auto py-4">
         <ul role="list" className="space-y-1 px-2">
           {TENANT_NAV_ITEMS.map((item) => {
             const Icon = item.icon
@@ -132,6 +133,7 @@ export function Sidebar({ lens, currentPath = '/', isOpen = false, id, onClose }
           )}
         </ul>
       </nav>
+      <BuildInfo />
     </aside>
     </>
   )

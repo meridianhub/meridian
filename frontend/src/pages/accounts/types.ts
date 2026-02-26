@@ -6,7 +6,7 @@
 
 export interface CurrentAccount {
   accountId: string
-  iban: string
+  externalReference: string
   status: AccountStatus
   baseCurrency: string
   availableBalance: string

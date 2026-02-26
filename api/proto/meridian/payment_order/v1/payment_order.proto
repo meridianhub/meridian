@@ -155,8 +155,8 @@ message PaymentOrder {
     pattern: "^[a-zA-Z0-9_-]+$"
   }];
 
-  // creditor_reference is the external account identifier (IBAN or other standard).
-  // IBAN format: 2 letter country code + 2 check digits + up to 30 alphanumeric characters.
+  // creditor_reference is the external account identifier (e.g. IBAN, sort code + account number,
+  // or any product-type-specific reference).
   string creditor_reference = 3 [(buf.validate.field).string = {
     min_len: 1
     max_len: 34
@@ -271,7 +271,7 @@ message InitiatePaymentOrderRequest {
     pattern: "^[a-zA-Z0-9_-]+$"
   }];
 
-  // creditor_reference is the external account to credit (IBAN format).
+  // creditor_reference is the external account to credit (e.g. IBAN, sort code, or other reference).
   string creditor_reference = 2 [(buf.validate.field).string = {
     min_len: 1
     max_len: 34

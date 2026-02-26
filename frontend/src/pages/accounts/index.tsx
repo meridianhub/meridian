@@ -30,8 +30,8 @@ async function listAccounts(
   if (params.filters?.status) {
     body.status = params.filters.status
   }
-  if (params.filters?.iban) {
-    body.iban = params.filters.iban
+  if (params.filters?.externalReference) {
+    body.iban = params.filters.externalReference
   }
 
   const response = await fetch(
@@ -55,7 +55,7 @@ async function listAccounts(
   // Map proto CurrentAccountFacility fields to frontend CurrentAccount shape
   const accounts: CurrentAccount[] = (data.accounts ?? []).map((a) => ({
     accountId: a.accountId ?? '',
-    iban: a.accountIdentification ?? '',
+    externalReference: a.accountIdentification ?? '',
     status: stripEnumPrefix(a.accountStatus ?? '', 'ACCOUNT_STATUS_') as CurrentAccount['status'],
     baseCurrency: stripEnumPrefix(a.baseCurrency ?? '', 'CURRENCY_'),
     availableBalance: '',
@@ -99,8 +99,8 @@ export function AccountsPage() {
       header: 'Account ID',
     },
     {
-      accessorKey: 'iban',
-      header: 'IBAN',
+      accessorKey: 'externalReference',
+      header: 'External Ref',
     },
     {
       accessorKey: 'status',
@@ -147,8 +147,8 @@ export function AccountsPage() {
             options: STATUS_OPTIONS,
           },
           {
-            field: 'iban',
-            label: 'IBAN',
+            field: 'externalReference',
+            label: 'External Ref',
             type: 'text',
           },
         ]}

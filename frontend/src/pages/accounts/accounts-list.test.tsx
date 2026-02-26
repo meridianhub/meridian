@@ -100,7 +100,7 @@ describe('AccountsPage - list rendering', () => {
       expect(screen.getByRole('columnheader', { name: /account id/i })).toBeInTheDocument()
     })
 
-    expect(screen.getByRole('columnheader', { name: /iban/i })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: /external ref/i })).toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: /status/i })).toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: /currency/i })).toBeInTheDocument()
   })
@@ -146,7 +146,7 @@ describe('AccountsPage - filtering', () => {
     expect(screen.getByRole('combobox', { name: /status/i })).toBeInTheDocument()
   })
 
-  it('renders IBAN text filter', async () => {
+  it('renders External Ref text filter', async () => {
     server.use(
       http.post('*/meridian.current_account.v1.CurrentAccountService/ListCurrentAccounts', () =>
         HttpResponse.json({ accounts: [], nextPageToken: '' }),
@@ -155,7 +155,7 @@ describe('AccountsPage - filtering', () => {
 
     renderAccountsPage()
 
-    expect(screen.getByPlaceholderText(/filter by iban/i)).toBeInTheDocument()
+    expect(screen.getByPlaceholderText(/filter by external ref/i)).toBeInTheDocument()
   })
 
   it('passes status filter to query when selected', async () => {

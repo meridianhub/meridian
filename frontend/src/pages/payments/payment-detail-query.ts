@@ -3,7 +3,7 @@ import type { SagaStep } from '@/components/shared/saga-timeline'
 export interface PaymentOrderDetail {
   paymentOrderId: string
   debtorAccountId: string
-  creditorIban: string
+  creditorReference: string
   amount: string
   currency: string
   status: string

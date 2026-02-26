@@ -100,6 +100,14 @@ import (
 	"gorm.io/gorm"
 )
 
+// Version information injected at build time via ldflags.
+// See Dockerfile: -X main.Version=... -X main.Commit=... -X main.BuildDate=...
+var (
+	Version   = "dev"
+	Commit    = "unknown"
+	BuildDate = "unknown"
+)
+
 func main() {
 	migrate := flag.Bool("migrate", false, "Apply all embedded SQL migrations to CockroachDB and exit")
 	bootstrapFlag := flag.Bool("bootstrap", false, "Provision master tenant schemas and validate platform manifest, then exit")
@@ -762,6 +770,12 @@ func wireGateway(grpcPort, httpPort int, databaseURL string, logger *slog.Logger
 		}
 		opts = append(opts, gateway.WithAuthMiddleware(authMiddleware))
 	}
+
+	opts = append(opts, gateway.WithVersionInfo(&gateway.VersionInfo{
+		Version:   Version,
+		Commit:    Commit,
+		BuildDate: BuildDate,
+	}))
 
 	return gateway.NewServer(config, logger, nil, opts...), nil
 }

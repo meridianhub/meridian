@@ -112,6 +112,13 @@ type AuthConfig struct {
 	RateLimitBurst int
 }
 
+// VersionInfo holds build metadata injected at compile time via ldflags.
+type VersionInfo struct {
+	Version   string `json:"version"`
+	Commit    string `json:"commit"`
+	BuildDate string `json:"build_date"`
+}
+
 // BackendRoute defines a mapping from a URL prefix to a backend service.
 type BackendRoute struct {
 	// Prefix is the URL path prefix to match (e.g., "/v1/party").

@@ -110,7 +110,8 @@ services:
     # Not exposed to host — accessed only by caddy on the internal network
 
   mcp-server:
-    image: ${MCP_SERVER_IMAGE:-ghcr.io/meridianhub/mcp-server:demo}
+    image: ${MERIDIAN_IMAGE:-ghcr.io/meridianhub/meridian:demo}
+    entrypoint: ["/mcp-server"]
     restart: unless-stopped
     depends_on:
       meridian:
@@ -134,8 +135,7 @@ services:
       MCP_OAUTH_CLIENT_ID: ${MCP_OAUTH_CLIENT_ID:-}      # required when MCP_OAUTH_ENABLED=true
       MCP_OAUTH_REDIRECT_URI: ${MCP_OAUTH_REDIRECT_URI:-} # required when MCP_OAUTH_ENABLED=true
     # Not exposed to host — accessed only by caddy on the internal network
-    # Add to Caddyfile: reverse_proxy /sse mcp-server:8090
-    #                   reverse_proxy /message mcp-server:8090
+    # Caddy proxies /sse and /message to this container
 
   caddy:
     image: caddy:2-alpine

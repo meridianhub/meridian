@@ -33,7 +33,7 @@ test.describe('Payments page', () => {
       authenticatedPage.getByRole('columnheader', { name: /debtor account/i }),
     ).toBeVisible()
     await expect(
-      authenticatedPage.getByRole('columnheader', { name: /creditor iban/i }),
+      authenticatedPage.getByRole('columnheader', { name: /creditor reference/i }),
     ).toBeVisible()
     await expect(authenticatedPage.getByRole('columnheader', { name: /amount/i })).toBeVisible()
     await expect(authenticatedPage.getByRole('columnheader', { name: /status/i })).toBeVisible()
@@ -194,7 +194,7 @@ test.describe.serial('Payment lifecycle (requires backend)', () => {
     await expect(dialog).toBeVisible()
 
     await expect(dialog.getByLabel('Debtor Account')).toBeVisible()
-    await expect(dialog.getByLabel('Creditor IBAN')).toBeVisible()
+    await expect(dialog.getByLabel('Creditor Reference')).toBeVisible()
     await expect(dialog.getByLabel('Amount')).toBeVisible()
     await expect(dialog.getByLabel('Currency')).toBeVisible()
   })
@@ -218,22 +218,8 @@ test.describe.serial('Payment lifecycle (requires backend)', () => {
     // Submit without filling any fields
     await dialog.getByRole('button', { name: 'Initiate Payment' }).click()
     await expect(dialog.getByText('Debtor account is required')).toBeVisible()
-    await expect(dialog.getByText('IBAN is required')).toBeVisible()
+    await expect(dialog.getByText('Creditor reference is required')).toBeVisible()
     await expect(dialog.getByText('Amount is required')).toBeVisible()
-  })
-
-  test('Initiate Payment dialog validates IBAN format', async ({ authenticatedPage }) => {
-    await navigateToFirstPayment(authenticatedPage)
-
-    await authenticatedPage.getByRole('button', { name: 'New Payment' }).click()
-    const dialog = authenticatedPage.getByRole('dialog')
-    await expect(dialog).toBeVisible()
-
-    await dialog.getByLabel('Debtor Account').fill('dev-account-001')
-    await dialog.getByLabel('Creditor IBAN').fill('not-a-valid-iban')
-    await dialog.getByLabel('Amount').fill('10.00')
-    await dialog.getByRole('button', { name: 'Initiate Payment' }).click()
-    await expect(dialog.getByText('Invalid IBAN format')).toBeVisible()
   })
 
   test('Initiate Payment dialog closes on Cancel', async ({ authenticatedPage }) => {
@@ -257,7 +243,7 @@ test.describe.serial('Payment lifecycle (requires backend)', () => {
     let dialog = authenticatedPage.getByRole('dialog')
     await expect(dialog).toBeVisible()
     await dialog.getByLabel('Debtor Account').fill('dev-account-001')
-    await dialog.getByLabel('Creditor IBAN').fill('GB29NWBK60161331926819')
+    await dialog.getByLabel('Creditor Reference').fill('GB29NWBK60161331926819')
     await dialog.getByLabel('Amount').fill('10.00')
 
     // Cancel and reopen
@@ -269,7 +255,7 @@ test.describe.serial('Payment lifecycle (requires backend)', () => {
 
     // Fields should be reset
     await expect(dialog.getByLabel('Debtor Account')).toHaveValue('')
-    await expect(dialog.getByLabel('Creditor IBAN')).toHaveValue('')
+    await expect(dialog.getByLabel('Creditor Reference')).toHaveValue('')
     await expect(dialog.getByLabel('Amount')).toHaveValue('')
   })
 
@@ -289,7 +275,7 @@ test.describe.serial('Payment lifecycle (requires backend)', () => {
     // Without string-based BigInt parsing: Math.round(0.29 * 100) = 28 → GBP 0.28 (wrong)
     // With amountToBigInt string parsing: "0.29" → 29n → GBP 0.29 (correct)
     await dialog.getByLabel('Debtor Account').fill('dev-account-001')
-    await dialog.getByLabel('Creditor IBAN').fill('GB29NWBK60161331926819')
+    await dialog.getByLabel('Creditor Reference').fill('GB29NWBK60161331926819')
     await dialog.getByLabel('Amount').fill('0.29')
     await dialog.getByRole('button', { name: 'Initiate Payment' }).click()
 
@@ -320,7 +306,7 @@ test.describe.serial('Payment lifecycle (requires backend)', () => {
       await expect(dialog).toBeVisible()
 
       await dialog.getByLabel('Debtor Account').fill('dev-account-001')
-      await dialog.getByLabel('Creditor IBAN').fill('GB29NWBK60161331926819')
+      await dialog.getByLabel('Creditor Reference').fill('GB29NWBK60161331926819')
       await dialog.getByLabel('Amount').fill(amount)
       await dialog.getByRole('button', { name: 'Initiate Payment' }).click()
 
@@ -336,7 +322,7 @@ test.describe.serial('Payment lifecycle (requires backend)', () => {
     const dialog = authenticatedPage.getByRole('dialog')
     await expect(dialog).toBeVisible()
     await dialog.getByLabel('Debtor Account').fill('dev-account-001')
-    await dialog.getByLabel('Creditor IBAN').fill('GB29NWBK60161331926819')
+    await dialog.getByLabel('Creditor Reference').fill('GB29NWBK60161331926819')
     await dialog.getByLabel('Amount').fill('10.00')
     await dialog.getByRole('button', { name: 'Initiate Payment' }).click()
     await expect(dialog).not.toBeVisible({ timeout: 10_000 })
@@ -361,7 +347,7 @@ test.describe.serial('Payment lifecycle (requires backend)', () => {
     const dialog = authenticatedPage.getByRole('dialog')
     await expect(dialog).toBeVisible()
     await dialog.getByLabel('Debtor Account').fill('dev-account-001')
-    await dialog.getByLabel('Creditor IBAN').fill('GB29NWBK60161331926819')
+    await dialog.getByLabel('Creditor Reference').fill('GB29NWBK60161331926819')
     await dialog.getByLabel('Amount').fill('5.00')
     await dialog.getByRole('button', { name: 'Initiate Payment' }).click()
     await expect(dialog).not.toBeVisible({ timeout: 10_000 })
@@ -386,7 +372,7 @@ test.describe.serial('Payment lifecycle (requires backend)', () => {
     const dialog = authenticatedPage.getByRole('dialog')
     await expect(dialog).toBeVisible()
     await dialog.getByLabel('Debtor Account').fill('dev-account-001')
-    await dialog.getByLabel('Creditor IBAN').fill('GB29NWBK60161331926819')
+    await dialog.getByLabel('Creditor Reference').fill('GB29NWBK60161331926819')
     await dialog.getByLabel('Amount').fill('15.00')
     await dialog.getByRole('button', { name: 'Initiate Payment' }).click()
     await expect(dialog).not.toBeVisible({ timeout: 10_000 })
