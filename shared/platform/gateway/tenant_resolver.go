@@ -67,10 +67,13 @@ type tenantRepository interface {
 }
 
 // platformPaths lists URL path prefixes that operate at the platform level
-// (e.g., tenant creation) and do not require tenant context.
+// (e.g., tenant creation, listing tenants) and do not require tenant context.
 // Requests matching these prefixes bypass tenant resolution entirely.
+// Both REST (gRPC-Gateway transcoding) and Connect/gRPC paths are listed
+// because the Vanguard transcoder accepts requests in either format.
 var platformPaths = []string{
-	"/v1/tenants",
+	"/v1/tenants",                        // REST transcoding path
+	"/meridian.tenant.v1.TenantService/", // Connect/gRPC path
 }
 
 // isPlatformPath returns true if the request path is a platform-level endpoint
