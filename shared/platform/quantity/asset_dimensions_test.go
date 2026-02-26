@@ -133,20 +133,23 @@ func TestAsset_ArithmeticSameDimension(t *testing.T) {
 // TestAsset_ArithmeticMismatchedInstruments verifies that Assets with different instruments
 // return ErrInstrumentMismatch on arithmetic.
 func TestAsset_ArithmeticMismatchedInstruments(t *testing.T) {
-	kwhInst, _ := quantity.NewInstrument("KWH", 0, "ENERGY", 3)
-	gpuInst, _ := quantity.NewInstrument("GPU_HOUR", 0, "COMPUTE", 6)
+	kwhInst, err := quantity.NewInstrument("KWH", 0, "ENERGY", 3)
+	require.NoError(t, err)
+	gpuInst, err := quantity.NewInstrument("GPU_HOUR", 0, "COMPUTE", 6)
+	require.NoError(t, err)
 
 	kwh := quantity.NewAsset(decimal.NewFromFloat(10), kwhInst)
 	gpu := quantity.NewAsset(decimal.NewFromFloat(5), gpuInst)
 
-	_, err := kwh.Add(gpu)
+	_, err = kwh.Add(gpu)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, quantity.ErrInstrumentMismatch)
 }
 
 // TestAsset_AsAsset verifies the AsAsset() conversion returns correctly for commodities.
 func TestAsset_AsAsset(t *testing.T) {
-	inst, _ := quantity.NewInstrument("KWH", 0, "ENERGY", 3)
+	inst, err := quantity.NewInstrument("KWH", 0, "ENERGY", 3)
+	require.NoError(t, err)
 	asset := quantity.NewAsset(decimal.NewFromFloat(5.5), inst)
 
 	result, ok := asset.AsAsset()
@@ -156,7 +159,8 @@ func TestAsset_AsAsset(t *testing.T) {
 
 // TestAsset_AsMoney verifies that commodity quantities return (zero, false) from AsMoney().
 func TestAsset_AsMoney(t *testing.T) {
-	inst, _ := quantity.NewInstrument("KWH", 0, "ENERGY", 3)
+	inst, err := quantity.NewInstrument("KWH", 0, "ENERGY", 3)
+	require.NoError(t, err)
 	asset := quantity.NewAsset(decimal.NewFromFloat(5.5), inst)
 
 	_, ok := asset.AsMoney()

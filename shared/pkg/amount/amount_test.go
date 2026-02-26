@@ -15,11 +15,21 @@ import (
 // Fixtures
 // =============================================================================
 
+// mustInstrument creates a quantity.Instrument, panicking on error.
+// Safe for use in test fixtures where codes and dimensions are compile-time constants.
+func mustInstrument(code string, version uint32, dimension string, precision int) quantity.Instrument {
+	inst, err := quantity.NewInstrument(code, version, dimension, precision)
+	if err != nil {
+		panic("invalid test instrument: " + err.Error())
+	}
+	return inst
+}
+
 var (
-	instGBP, _ = quantity.NewInstrument("GBP", 0, "CURRENCY", 2)
-	instJPY, _ = quantity.NewInstrument("JPY", 0, "CURRENCY", 0)
-	instKWH, _ = quantity.NewInstrument("KWH", 0, "ENERGY", 3)
-	instCC, _  = quantity.NewInstrument("CARBON_CREDIT", 0, "CARBON", 4)
+	instGBP = mustInstrument("GBP", 0, "CURRENCY", 2)
+	instJPY = mustInstrument("JPY", 0, "CURRENCY", 0)
+	instKWH = mustInstrument("KWH", 0, "ENERGY", 3)
+	instCC  = mustInstrument("CARBON_CREDIT", 0, "CARBON", 4)
 )
 
 // =============================================================================
@@ -249,14 +259,12 @@ func TestCompare_SameInstrument(t *testing.T) {
 
 func TestCompare_MismatchedInstruments(t *testing.T) {
 	a := amount.New(instGBP, 10000)
-	b := amount.New(instGBP, 10000)
 	// Use a different version to trigger mismatch
-	instGBPv2, _ := quantity.NewInstrument("GBP", 2, "CURRENCY", 2)
+	instGBPv2 := mustInstrument("GBP", 2, "CURRENCY", 2)
 	bv2 := amount.New(instGBPv2, 10000)
 	_, err := a.Compare(bv2)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, amount.ErrInstrumentMismatch)
-	_ = b
 }
 
 func TestEquals(t *testing.T) {
@@ -298,7 +306,7 @@ func TestToMinorUnits_JPY(t *testing.T) {
 func TestToMinorUnits_Overflow(t *testing.T) {
 	// At precision=2, int64 max is ~9.2*10^18. Store 10^17 major units which after
 	// shifting by 2 = 10^19, exceeding int64 max (~9.2*10^18).
-	inst, _ := quantity.NewInstrument("GBP", 0, "CURRENCY", 2)
+	inst := mustInstrument("GBP", 0, "CURRENCY", 2)
 	// Construct via decimal directly to avoid int64 overflow in New()
 	hugeDecimal := decimal.NewFromInt(1e17) // 100,000,000,000,000,000 → *100 = 10^19 overflows
 	hugeAmount := amount.NewFromDecimal(inst, hugeDecimal)
