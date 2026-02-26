@@ -44,7 +44,7 @@ func TestFinancialBookingLogInitiatedEvent_Serialization(t *testing.T) {
 		t.Errorf("FinancialAccountType mismatch: got %v, want %v", decoded.FinancialAccountType, event.FinancialAccountType)
 	}
 	if decoded.BaseInstrumentCode != event.BaseInstrumentCode {
-		t.Errorf("BaseCurrency mismatch: got %v, want %v", decoded.BaseInstrumentCode, event.BaseInstrumentCode)
+		t.Errorf("BaseInstrumentCode mismatch: got %v, want %v", decoded.BaseInstrumentCode, event.BaseInstrumentCode)
 	}
 	if decoded.Version != event.Version {
 		t.Errorf("Version mismatch: got %v, want %v", decoded.Version, event.Version)

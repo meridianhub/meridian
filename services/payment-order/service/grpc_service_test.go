@@ -2824,12 +2824,18 @@ func TestPostLedgerEntries_FailureModes(t *testing.T) {
 }
 
 // TestPostLedgerEntries_UnsupportedCurrency tests that unsupported currencies are rejected.
-// The postLedgerEntries function now passes instrument codes directly as strings.
-// An empty instrument code causes ErrUnsupportedCurrency.
+// With the migration to string instrument codes, unsupported currencies are rejected at
+// PaymentOrder creation time via domain.NewMoney, not inside PostLedgerEntries itself.
 func TestPostLedgerEntries_UnsupportedCurrency(t *testing.T) {
-	// domain.CurrencyCode returns the instrument code string from a Money amount.
-	// An empty string indicates unsupported/missing currency, which triggers ErrUnsupportedCurrency.
-	assert.Equal(t, "", "") // placeholder: real test is integration-level via postLedgerEntries
+	// Unsupported currencies are rejected when constructing the domain Money value.
+	_, err := domain.NewMoney("UNKNOWN", 10000)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, domain.ErrInvalidCurrency)
+
+	// XBT is not a registered instrument in the currency registry.
+	_, err = domain.NewMoney("XBT", 10000)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, domain.ErrInvalidCurrency)
 }
 
 // TestExtractGatewayIDFromRef tests the gateway ID extraction from reference IDs.
