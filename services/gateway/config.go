@@ -266,7 +266,7 @@ func LoadAuthConfig() AuthConfig {
 	}
 
 	// Parse OIDC fallback defaults
-	config.DefaultTenantID = os.Getenv("DEFAULT_TENANT_ID")
+	config.DefaultTenantID = strings.TrimSpace(os.Getenv("DEFAULT_TENANT_ID"))
 	config.DefaultRoles = env.GetEnvAsSlice("DEFAULT_ROLES", nil)
 
 	return config
