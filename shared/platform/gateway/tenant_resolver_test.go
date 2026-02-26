@@ -928,6 +928,57 @@ func TestServeHTTP(t *testing.T) {
 	})
 }
 
+func TestIsPlatformPath(t *testing.T) {
+	// REST transcoding paths
+	assert.True(t, isPlatformPath("/v1/tenants"))
+	assert.True(t, isPlatformPath("/v1/tenants/acme_corp"))
+
+	// Connect/gRPC paths
+	assert.True(t, isPlatformPath("/meridian.tenant.v1.TenantService/ListTenants"))
+	assert.True(t, isPlatformPath("/meridian.tenant.v1.TenantService/CreateTenant"))
+	assert.True(t, isPlatformPath("/meridian.tenant.v1.TenantService/GetTenant"))
+
+	// Non-platform paths
+	assert.False(t, isPlatformPath("/v1/accounts"))
+	assert.False(t, isPlatformPath("/v1/parties"))
+	assert.False(t, isPlatformPath("/health"))
+	assert.False(t, isPlatformPath("/meridian.party.v1.PartyService/ListParties"))
+}
+
+func TestPlatformPathBypassesTenantResolution(t *testing.T) {
+	middleware := &TenantResolverMiddleware{
+		slugCache:  new(MockSlugCache),
+		tenantRepo: new(MockTenantRepository),
+		baseDomain: "api.meridian.io",
+		logger:     slog.Default(),
+	}
+
+	nextCalled := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		nextCalled = true
+		w.WriteHeader(http.StatusOK)
+	})
+
+	// POST /v1/tenants should bypass tenant resolution (REST transcoding path)
+	req := httptest.NewRequest(http.MethodPost, "http://localhost:8090/v1/tenants", nil)
+	rec := httptest.NewRecorder()
+
+	middleware.Handler(next).ServeHTTP(rec, req)
+
+	assert.True(t, nextCalled, "next handler should be called for platform paths")
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	// Connect/gRPC path should also bypass tenant resolution
+	nextCalled = false
+	req = httptest.NewRequest(http.MethodPost, "http://localhost:8090/meridian.tenant.v1.TenantService/ListTenants", nil)
+	rec = httptest.NewRecorder()
+
+	middleware.Handler(next).ServeHTTP(rec, req)
+
+	assert.True(t, nextCalled, "next handler should be called for Connect/gRPC platform paths")
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
 // TestLocalDevMode tests the X-Tenant-Slug header support in local development mode.
 func TestLocalDevMode(t *testing.T) {
 	ctx := context.Background()

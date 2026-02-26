@@ -66,10 +66,32 @@ type tenantRepository interface {
 	GetBySlug(ctx context.Context, slug string) (*domain.Tenant, error)
 }
 
+// platformPaths lists URL path prefixes that operate at the platform level
+// (e.g., tenant creation, listing tenants) and do not require tenant context.
+// Requests matching these prefixes bypass tenant resolution entirely.
+// Both REST (gRPC-Gateway transcoding) and Connect/gRPC paths are listed
+// because the Vanguard transcoder accepts requests in either format.
+var platformPaths = []string{
+	"/v1/tenants",                        // REST transcoding path
+	"/meridian.tenant.v1.TenantService/", // Connect/gRPC path
+}
+
+// isPlatformPath returns true if the request path is a platform-level endpoint
+// that should bypass tenant resolution.
+func isPlatformPath(path string) bool {
+	for _, prefix := range platformPaths {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // TenantResolverMiddleware extracts tenant information from the Host header
 // and injects the tenant ID into the request context.
 //
 // It follows this resolution flow:
+// 0. Skip resolution for platform-level paths (e.g., /v1/tenants)
 // 1. In LOCAL_DEV_MODE, check for X-Tenant-Slug header first
 // 2. Extract subdomain slug from Host header (e.g., "acme" from "acme.meridian.com")
 // 3. Check slug cache for tenant ID
@@ -123,73 +145,70 @@ func NewTenantResolverMiddleware(
 	}, nil
 }
 
+// extractSlugFromRequest extracts and validates the tenant slug from request
+// headers (local dev mode) or subdomain. Returns the slug or writes an HTTP
+// error response and returns empty string.
+func (m *TenantResolverMiddleware) extractSlugFromRequest(w http.ResponseWriter, r *http.Request) string {
+	// Check for X-Tenant-Slug header in local dev mode
+	if m.localDevMode {
+		slug := r.Header.Get(TenantSlugHeader)
+		if slug != "" {
+			if !isValidSlug(slug) {
+				m.logger.Warn("invalid slug in X-Tenant-Slug header",
+					slog.String("slug", slug),
+				)
+				http.Error(w, "Invalid tenant slug", http.StatusBadRequest)
+				return ""
+			}
+			m.logger.Debug("using X-Tenant-Slug header (LOCAL_DEV_MODE)",
+				slog.String("slug", slug))
+			return slug
+		}
+	}
+
+	// Fall back to subdomain extraction
+	slug := m.extractSlug(r.Host)
+	if slug == "" {
+		m.logger.Warn("invalid subdomain in request",
+			slog.String("host", r.Host),
+		)
+		http.Error(w, "Invalid subdomain", http.StatusNotFound)
+		return ""
+	}
+	return slug
+}
+
 // Handler returns an http.Handler that performs tenant resolution.
 // This method will extract the tenant slug from the Host header,
 // resolve it to a tenant ID, and inject it into the request context.
 //
+// Platform-level paths (e.g., /v1/tenants) bypass tenant resolution entirely.
 // In local dev mode (LOCAL_DEV_MODE=true), the X-Tenant-Slug header is checked first.
 // If the header is present, it takes precedence over subdomain-based resolution.
 func (m *TenantResolverMiddleware) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
-
-		// Step 1: Check for X-Tenant-Slug header in local dev mode
-		var slug string
-		if m.localDevMode {
-			slug = r.Header.Get(TenantSlugHeader)
-			if slug != "" {
-				// Validate the slug from header
-				if !isValidSlug(slug) {
-					m.logger.Warn("invalid slug in X-Tenant-Slug header",
-						slog.String("slug", slug),
-					)
-					http.Error(w, "Invalid tenant slug", http.StatusBadRequest)
-					return
-				}
-				m.logger.Debug("using X-Tenant-Slug header (LOCAL_DEV_MODE)",
-					slog.String("slug", slug))
-			}
-		}
-
-		// Step 2: Fall back to subdomain extraction if no header slug
-		if slug == "" {
-			slug = m.extractSlug(r.Host)
-		}
-
-		if slug == "" {
-			m.logger.Warn("invalid subdomain in request",
-				slog.String("host", r.Host),
-			)
-			http.Error(w, "Invalid subdomain", http.StatusNotFound)
+		// Skip tenant resolution for platform-level endpoints
+		if isPlatformPath(r.URL.Path) {
+			next.ServeHTTP(w, r)
 			return
 		}
 
-		// Step 3: Resolve tenant ID (cache-first with DB fallback)
+		slug := m.extractSlugFromRequest(w, r)
+		if slug == "" {
+			return // error already written by extractSlugFromRequest
+		}
+
+		// Resolve tenant ID (cache-first with DB fallback)
+		ctx := r.Context()
 		startTime := time.Now()
 		tenantID, err := m.resolveTenant(ctx, slug)
 		resolutionTimeMs := time.Since(startTime).Milliseconds()
 
 		if err != nil {
-			// Distinguish between tenant not found (404) and transient errors (503)
-			if errors.Is(err, ErrTenantNotFound) {
-				m.logger.Warn("tenant not found",
-					slog.String("tenant_slug", slug),
-					slog.Int64("resolution_time_ms", resolutionTimeMs),
-				)
-				http.Error(w, "Tenant not found", http.StatusNotFound)
-			} else {
-				// Transient DB/network error - client can retry
-				m.logger.Error("database error during tenant resolution",
-					slog.String("tenant_slug", slug),
-					slog.String("error", err.Error()),
-					slog.Int64("resolution_time_ms", resolutionTimeMs),
-				)
-				http.Error(w, "Service temporarily unavailable", http.StatusServiceUnavailable)
-			}
+			m.handleResolutionError(w, slug, err, resolutionTimeMs)
 			return
 		}
 
-		// Step 4: Log successful resolution
 		m.logger.Debug("tenant resolved successfully",
 			slog.String("tenant_slug", slug),
 			slog.String("tenant_id", tenantID.String()),
@@ -208,6 +227,24 @@ func (m *TenantResolverMiddleware) Handler(next http.Handler) http.Handler {
 		// Step 8: Call next handler
 		next.ServeHTTP(w, r)
 	})
+}
+
+// handleResolutionError writes the appropriate HTTP error for a tenant resolution failure.
+func (m *TenantResolverMiddleware) handleResolutionError(w http.ResponseWriter, slug string, err error, resolutionTimeMs int64) {
+	if errors.Is(err, ErrTenantNotFound) {
+		m.logger.Warn("tenant not found",
+			slog.String("tenant_slug", slug),
+			slog.Int64("resolution_time_ms", resolutionTimeMs),
+		)
+		http.Error(w, "Tenant not found", http.StatusNotFound)
+	} else {
+		m.logger.Error("database error during tenant resolution",
+			slog.String("tenant_slug", slug),
+			slog.String("error", err.Error()),
+			slog.Int64("resolution_time_ms", resolutionTimeMs),
+		)
+		http.Error(w, "Service temporarily unavailable", http.StatusServiceUnavailable)
+	}
 }
 
 // extractSlug extracts the subdomain slug from a Host header value.

@@ -1,0 +1,153 @@
+{
+  "version": "1.0",
+  "metadata": {
+    "name": "Meridian Platform Economy",
+    "industry": "platform",
+    "description": "Base platform economy manifest providing shared instruments, standard account types, and FX valuation rules for all tenants"
+  },
+  "instruments": [
+    {
+      "code": "GBP",
+      "name": "British Pound Sterling",
+      "type": "INSTRUMENT_TYPE_FIAT",
+      "dimensions": {
+        "unit": "GBP",
+        "precision": 2
+      }
+    },
+    {
+      "code": "EUR",
+      "name": "Euro",
+      "type": "INSTRUMENT_TYPE_FIAT",
+      "dimensions": {
+        "unit": "EUR",
+        "precision": 2
+      }
+    },
+    {
+      "code": "USD",
+      "name": "United States Dollar",
+      "type": "INSTRUMENT_TYPE_FIAT",
+      "dimensions": {
+        "unit": "USD",
+        "precision": 2
+      }
+    },
+    {
+      "code": "NZD",
+      "name": "New Zealand Dollar",
+      "type": "INSTRUMENT_TYPE_FIAT",
+      "dimensions": {
+        "unit": "NZD",
+        "precision": 2
+      }
+    },
+    {
+      "code": "ACTIVE_PARTY",
+      "name": "Active Party Unit",
+      "type": "INSTRUMENT_TYPE_COMMODITY",
+      "dimensions": {
+        "unit": "PARTY",
+        "precision": 0
+      }
+    }
+  ],
+  "accountTypes": [
+    {
+      "code": "CLEARING",
+      "name": "Clearing Account",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": ["GBP", "EUR", "USD", "NZD"],
+      "policies": {
+        "validation": "amount > 0"
+      }
+    },
+    {
+      "code": "SETTLEMENT",
+      "name": "Settlement Account",
+      "normalBalance": "NORMAL_BALANCE_CREDIT",
+      "allowedInstruments": ["GBP", "EUR", "USD", "NZD"],
+      "policies": {
+        "validation": "amount > 0"
+      }
+    },
+    {
+      "code": "NOSTRO",
+      "name": "Nostro Account",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": ["GBP", "EUR", "USD", "NZD"],
+      "policies": {
+        "validation": "amount > 0"
+      }
+    },
+    {
+      "code": "USAGE_METERING",
+      "name": "Usage Metering Account",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": ["ACTIVE_PARTY"],
+      "policies": {
+        "validation": "amount > 0"
+      }
+    },
+    {
+      "code": "PLATFORM_RECEIVABLE",
+      "name": "Platform Receivable Account",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": ["GBP"],
+      "policies": {
+        "validation": "amount > 0"
+      }
+    },
+    {
+      "code": "PLATFORM_REVENUE",
+      "name": "Platform Revenue Account",
+      "normalBalance": "NORMAL_BALANCE_CREDIT",
+      "allowedInstruments": ["GBP"],
+      "policies": {
+        "validation": "amount > 0"
+      }
+    }
+  ],
+  "valuationRules": [
+    {
+      "fromInstrument": "EUR",
+      "toInstrument": "GBP",
+      "method": "VALUATION_METHOD_SPOT_RATE",
+      "source": "ecb_fx"
+    },
+    {
+      "fromInstrument": "USD",
+      "toInstrument": "GBP",
+      "method": "VALUATION_METHOD_SPOT_RATE",
+      "source": "ecb_fx"
+    },
+    {
+      "fromInstrument": "NZD",
+      "toInstrument": "GBP",
+      "method": "VALUATION_METHOD_SPOT_RATE",
+      "source": "ecb_fx"
+    },
+    {
+      "fromInstrument": "ACTIVE_PARTY",
+      "toInstrument": "GBP",
+      "method": "VALUATION_METHOD_FIXED",
+      "source": "platform_pricing"
+    }
+  ],
+  "sagas": [
+    {
+      "name": "tenant_usage_billing",
+      "trigger": "scheduled:monthly_billing",
+      "script": "def execute(ctx):\n    party_count = ctx.active_party_count\n    rate = Decimal(ctx.seed_data.platform_pricing.active_party_rate_gbp)\n    bill_amount = rate * party_count\n\n    # Record usage: log active party count to metering account\n    position_keeping.initiate_log(\n        account_id=ctx.tenant_id + \"_usage_metering\",\n        instrument_code=\"ACTIVE_PARTY\",\n        direction=\"DEBIT\",\n        amount=party_count,\n    )\n\n    # Post double-entry: DR receivable, CR revenue\n    financial_accounting.post_entries(\n        entries=[\n            {\n                \"account_id\": ctx.tenant_id + \"_platform_receivable\",\n                \"instrument_code\": \"GBP\",\n                \"direction\": \"DEBIT\",\n                \"amount\": bill_amount,\n                \"description\": \"Tenant billing: \" + str(party_count) + \" active parties @ GBP \" + str(rate) + \"/mo\",\n            },\n            {\n                \"account_id\": \"platform_revenue\",\n                \"instrument_code\": \"GBP\",\n                \"direction\": \"CREDIT\",\n                \"amount\": bill_amount,\n                \"description\": \"Platform revenue: tenant \" + ctx.tenant_id,\n            },\n        ],\n    )\n\n    return {\"billed_amount\": str(bill_amount), \"party_count\": party_count, \"rate\": str(rate)}\n"
+    }
+  ],
+  "seedData": {
+    "platform_pricing": {
+      "active_party_rate_gbp": "0.50",
+      "billing_frequency": "monthly"
+    }
+  },
+  "paymentRails": [],
+  "partyTypes": [],
+  "mappings": []
+}
