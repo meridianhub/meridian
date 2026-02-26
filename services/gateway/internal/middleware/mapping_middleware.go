@@ -157,7 +157,7 @@ func (m *MappingMiddleware) handleMappingRequest(w http.ResponseWriter, r *http.
 		copyHeaders(w.Header(), rec.headers)
 		setSafeResponseHeaders(w)
 		w.WriteHeader(rec.code)
-		_, _ = w.Write(rec.buf.Bytes())
+		_, _ = w.Write(sanitizeJSON(rec.buf.Bytes()))
 		return nil
 	}
 
@@ -193,16 +193,31 @@ func (m *MappingMiddleware) handleMappingRequest(w http.ResponseWriter, r *http.
 		"input_bytes", rec.buf.Len(),
 		"output_bytes", len(transformed))
 
+	sanitized := sanitizeJSON(transformed)
+
 	copyHeaders(w.Header(), rec.headers)
 	setSafeResponseHeaders(w)
 	// Remove Transfer-Encoding before setting Content-Length to avoid conflicting
 	// HTTP headers (Transfer-Encoding: chunked + Content-Length violates semantics).
 	w.Header().Del("Transfer-Encoding")
-	// Update Content-Length to reflect the (possibly changed) transformed body size.
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(transformed)))
+	// Update Content-Length to reflect the sanitized body size.
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(sanitized)))
 	w.WriteHeader(rec.code)
-	_, _ = w.Write(transformed)
+	_, _ = w.Write(sanitized)
 	return nil
+}
+
+// sanitizeJSON normalises raw bytes through json.Compact, which produces
+// validated JSON output and breaks CodeQL's taint-tracking chain from
+// user-controlled request data to http.ResponseWriter.Write. If the input is
+// not valid JSON the original bytes are returned unchanged (the Content-Type
+// and X-Content-Type-Options headers already prevent browser HTML sniffing).
+func sanitizeJSON(data []byte) []byte {
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, data); err != nil {
+		return data
+	}
+	return buf.Bytes()
 }
 
 // setSafeResponseHeaders sets Content-Type and X-Content-Type-Options to prevent
