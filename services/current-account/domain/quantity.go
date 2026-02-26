@@ -4,9 +4,9 @@
 // delegating to shared/pkg/money. The Currency() and AmountCents() methods are
 // preserved for API compatibility during the migration.
 //
-// Deprecated: Direct cross-service imports of cadomain.Money should be replaced
-// with shared/pkg/money.Money. This re-export layer maintains backward compatibility
-// for callers within the current-account service boundary.
+// Cross-service note: External services should import shared/pkg/money directly
+// rather than this package's Money type. This re-export layer maintains backward
+// compatibility for callers within the current-account service boundary.
 package domain
 
 import (
