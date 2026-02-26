@@ -175,6 +175,7 @@ jobs:
             HTTP_CODE=$(curl -sS -o /tmp/tenant_resp.txt -w "%{http_code}" \
               -X POST "${GATEWAY_URL}/v1/tenants" \
               -H "Content-Type: application/json" \
+              -H "X-Tenant-Slug: dev-tenant" \
               -d "$PAYLOAD")
             echo "${TENANT_ID}: HTTP ${HTTP_CODE}"
             if [ "$HTTP_CODE" != "200" ] && [ "$HTTP_CODE" != "201" ] && [ "$HTTP_CODE" != "409" ]; then
