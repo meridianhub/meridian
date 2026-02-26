@@ -1,6 +1,8 @@
 # CLI Tools Reference
 
-Meridian ships several CLI tools for operational tasks. All are built from `cmd/` and connect to services via gRPC.
+Meridian ships several CLI tools for operational tasks built from `cmd/`.
+Most connect to services via gRPC, while `position-tool` connects directly
+to the database and `meridian-cli` runs offline.
 
 ## Overview
 
@@ -44,7 +46,7 @@ tenantctl status acme_bank
 tenantctl deprovision acme_bank --confirm
 ```
 
-**Flags**: `--service-url` (default: `localhost:<tenant-port>`), `--timeout`
+**Flags**: `--service-url` (default: `localhost:50056`), `--timeout`
 
 See also: [Production Deployment Runbook](../runbooks/production-deployment.md)
 
