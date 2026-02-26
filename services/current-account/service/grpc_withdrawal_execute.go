@@ -301,7 +301,7 @@ func (s *Service) ExecuteWithdrawal(ctx context.Context, req *pb.ExecuteWithdraw
 		resp.NewBalance = toMoneyAmount(account.Balance())
 		resp.AvailableBalance = toMoneyAmount(account.AvailableBalance())
 		// Record balance gauge only when we have accurate post-transaction balance
-		caobservability.RecordBalance(safeMinorUnits(account.Balance()), string(account.Balance().Currency()))
+		caobservability.RecordBalance(safeMinorUnits(account.Balance()), account.InstrumentCode())
 	}
 
 	// Mark pending withdrawal as completed (if executing a pending withdrawal)

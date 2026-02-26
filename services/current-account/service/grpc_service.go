@@ -143,6 +143,15 @@ type AccountTypeCache interface {
 // Option is a functional option for configuring optional Service dependencies.
 type Option func(*Service)
 
+// WithInstrumentGetter sets the instrument getter for dimension resolution from Reference Data.
+// When set, the service resolves the account dimension from the instrument_code during account creation.
+// When nil, dimension defaults to CURRENCY (backward-compatible behavior).
+func WithInstrumentGetter(getter InstrumentGetter) Option {
+	return func(s *Service) {
+		s.instrumentGetter = getter
+	}
+}
+
 // WithAccountTypeCache sets the account type cache for product type resolution.
 func WithAccountTypeCache(cache AccountTypeCache) Option {
 	return func(s *Service) {
@@ -198,6 +207,7 @@ type Service struct {
 	posKeepingClient       PositionKeepingClient
 	finAcctClient          FinancialAccountingClient
 	partyClient            PartyClient
+	instrumentGetter       InstrumentGetter // Optional: resolves dimension from instrument_code via Reference Data
 	accountTypeCache       AccountTypeCache // Optional: resolves product type definitions
 	valuationEngine        ValuationEngine  // Optional: executes valuation method logic
 	accountConfig          *config.AccountConfig

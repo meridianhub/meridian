@@ -583,24 +583,25 @@ func TestRetrieveCurrentAccountNotFound(t *testing.T) {
 	}
 }
 
-func TestCurrencyMapping(t *testing.T) {
+func TestMapRegistryDimension(t *testing.T) {
 	tests := []struct {
-		name     string
-		currency commonpb.Currency
+		input    string
 		expected string
 	}{
-		{"GBP", commonpb.Currency_CURRENCY_GBP, "GBP"},
-		{"USD", commonpb.Currency_CURRENCY_USD, "USD"},
-		{"EUR", commonpb.Currency_CURRENCY_EUR, "EUR"},
-		{"Unspecified returns empty", commonpb.Currency_CURRENCY_UNSPECIFIED, ""},
-		{"Unsupported JPY returns empty", commonpb.Currency_CURRENCY_JPY, ""},
+		{"MONETARY", "CURRENCY"},
+		{"CURRENCY", "CURRENCY"},
+		{"ENERGY", "ENERGY"},
+		{"COMPUTE", "COMPUTE"},
+		{"MASS", "MASS"},
+		{"VOLUME", "VOLUME"},
+		{"TIME", "TIME"},
+		{"", ""},
 	}
-
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := mapCurrency(tt.currency)
+		t.Run(tt.input, func(t *testing.T) {
+			result := mapRegistryDimension(tt.input)
 			if result != tt.expected {
-				t.Errorf("Expected %s, got %s", tt.expected, result)
+				t.Errorf("mapRegistryDimension(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
 		})
 	}

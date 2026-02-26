@@ -10,19 +10,13 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// Currency code constants
-const (
-	currencyGBP = "GBP"
-	currencyUSD = "USD"
-	currencyEUR = "EUR"
-)
-
 func toProtoFacility(account domain.CurrentAccount) *pb.CurrentAccountFacility {
 	return &pb.CurrentAccountFacility{
 		AccountId:          account.AccountID(),
 		ExternalIdentifier: account.ExternalIdentifier(),
 		AccountStatus:      mapStatusToProto(account.Status()),
 		InstrumentCode:     account.InstrumentCode(),
+		Dimension:          account.Dimension(),
 		CreatedAt:          timestamppb.New(account.CreatedAt()),
 		UpdatedAt:          timestamppb.New(account.UpdatedAt()),
 		// #nosec G115 - Version is bounded by database constraints
@@ -107,6 +101,18 @@ func mapWithdrawalStatusToProto(status domain.WithdrawalStatus) pb.WithdrawalSta
 	}
 }
 
+// mapRegistryDimension converts a reference-data registry dimension string to the
+// domain quantity dimension string used by the current-account service.
+//
+// The reference-data registry uses "MONETARY" for currency instruments, while the
+// domain quantity package uses "CURRENCY". All other dimension values are identical.
+func mapRegistryDimension(registryDimension string) string {
+	if registryDimension == "MONETARY" {
+		return "CURRENCY"
+	}
+	return registryDimension
+}
+
 func mapStatusToProto(status domain.AccountStatus) pb.AccountStatus {
 	switch status {
 	case domain.AccountStatusActive:
@@ -117,26 +123,5 @@ func mapStatusToProto(status domain.AccountStatus) pb.AccountStatus {
 		return pb.AccountStatus_ACCOUNT_STATUS_CLOSED
 	default:
 		return pb.AccountStatus_ACCOUNT_STATUS_UNSPECIFIED
-	}
-}
-
-func mapCurrency(currency commonpb.Currency) string {
-	switch currency {
-	case commonpb.Currency_CURRENCY_GBP:
-		return currencyGBP
-	case commonpb.Currency_CURRENCY_USD:
-		return currencyUSD
-	case commonpb.Currency_CURRENCY_EUR:
-		return currencyEUR
-	case commonpb.Currency_CURRENCY_UNSPECIFIED,
-		commonpb.Currency_CURRENCY_JPY,
-		commonpb.Currency_CURRENCY_CHF,
-		commonpb.Currency_CURRENCY_CAD,
-		commonpb.Currency_CURRENCY_AUD:
-		// Return empty string for unsupported currencies
-		// Caller should validate and return error
-		return ""
-	default:
-		return ""
 	}
 }

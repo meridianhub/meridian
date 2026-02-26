@@ -570,6 +570,12 @@ func createServiceWithClients(
 		return nil, nil, fmt.Errorf("failed to create service with existing clients: %w", err)
 	}
 
+	// Apply optional service features that use the functional options pattern.
+	if refDataClient != nil {
+		svc.ApplyOptions(service.WithInstrumentGetter(refDataClient))
+		logger.Info("instrument dimension resolution enabled via Reference Data service")
+	}
+
 	// Create Starlark handler registry with service client handlers.
 	// This enables saga scripts to call real services (not mocks).
 	// See PRD: docs/prd/starlark-service-bindings.md

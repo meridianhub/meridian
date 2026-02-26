@@ -15,6 +15,7 @@ import (
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
 	"github.com/meridianhub/meridian/services/reference-data/accounttype"
 	celutil "github.com/meridianhub/meridian/services/reference-data/cel"
+	"github.com/meridianhub/meridian/services/reference-data/registry"
 	vf "github.com/meridianhub/meridian/shared/pkg/valuationfeature"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc/codes"
@@ -37,11 +38,41 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 	// Generate account ID
 	accountID := fmt.Sprintf("ACC-%s", uuid.New().String()[:8])
 
-	// Use instrument_code directly as the account's native instrument
-	currency := req.InstrumentCode
-	if currency == "" {
+	// Validate instrument_code is provided
+	instrumentCode := req.InstrumentCode
+	if instrumentCode == "" {
 		operationStatus = operationStatusInvalidCurrency
 		return nil, status.Errorf(codes.InvalidArgument, "instrument_code is required")
+	}
+
+	// Resolve dimension from Reference Data service when available.
+	// Dimension classifies the instrument type (e.g. "CURRENCY", "ENERGY", "COMPUTE").
+	// Falls back to CURRENCY for backward compatibility when the getter is not configured.
+	dimension := "CURRENCY"
+	if s.instrumentGetter != nil {
+		cachedInstrument, err := s.instrumentGetter.GetInstrument(ctx, instrumentCode, 0)
+		if err != nil {
+			if errors.Is(err, registry.ErrNotFound) {
+				// Instrument does not exist in Reference Data - caller supplied an invalid instrument_code
+				operationStatus = "instrument_not_found"
+				s.logger.Warn("instrument not found in Reference Data, cannot create account",
+					"instrument_code", instrumentCode,
+					"account_id", accountID)
+				return nil, status.Errorf(codes.InvalidArgument, "unknown instrument_code: %s", instrumentCode)
+			}
+			// Transient failure (network error, service unavailable, timeout)
+			operationStatus = "instrument_lookup_failed"
+			s.logger.Error("instrument lookup failed due to transient error, cannot create account",
+				"instrument_code", instrumentCode,
+				"account_id", accountID,
+				"error", err)
+			caobservability.RecordExternalServiceError("reference_data", "get_instrument")
+			return nil, status.Errorf(codes.Unavailable, "instrument lookup failed, please retry")
+		}
+		// Map from reference-data registry dimension ("MONETARY") to domain quantity
+		// dimension ("CURRENCY"). The registry uses "MONETARY" while the domain quantity
+		// package uses "CURRENCY" - other dimensions are identical across both packages.
+		dimension = mapRegistryDimension(string(cachedInstrument.Definition.Dimension))
 	}
 
 	// Validate party exists and is active (if party client is configured)
@@ -185,12 +216,13 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 			"account_id", accountID)
 	}
 
-	// Create domain model
-	account, err := domain.NewCurrentAccount(
+	// Create domain model with resolved instrument and dimension
+	account, err := domain.NewCurrentAccountWithDimension(
 		accountID,
 		req.ExternalIdentifier,
 		req.PartyId,
-		currency,
+		instrumentCode,
+		dimension,
 		opts...,
 	)
 	if err != nil {
@@ -216,7 +248,7 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 	}
 
 	// Record initial balance
-	caobservability.RecordBalance(safeMinorUnits(account.Balance()), currency)
+	caobservability.RecordBalance(safeMinorUnits(account.Balance()), instrumentCode)
 
 	// Convert to proto response
 	return &pb.InitiateCurrentAccountResponse{
