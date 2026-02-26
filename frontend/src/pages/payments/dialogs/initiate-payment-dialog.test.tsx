@@ -81,7 +81,7 @@ describe('InitiatePaymentDialog - rendering', () => {
     )
 
     expect(screen.getByLabelText(/debtor account/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/creditor iban/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/creditor reference/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/amount/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/currency/i)).toBeInTheDocument()
   })
@@ -98,12 +98,12 @@ describe('InitiatePaymentDialog - rendering', () => {
   })
 })
 
-describe('InitiatePaymentDialog - IBAN validation', () => {
+describe('InitiatePaymentDialog - creditor reference validation', () => {
   beforeEach(() => {
     mockUseInitiatePayment.mockReturnValue(makeMockMutation())
   })
 
-  it('shows validation error for empty IBAN on submit', async () => {
+  it('shows validation error for empty creditor reference on submit', async () => {
     const user = userEvent.setup()
 
     render(
@@ -115,28 +115,11 @@ describe('InitiatePaymentDialog - IBAN validation', () => {
     await user.click(screen.getByRole('button', { name: /initiate payment/i }))
 
     await waitFor(() => {
-      expect(screen.getByText(/iban is required/i)).toBeInTheDocument()
+      expect(screen.getByText(/creditor reference is required/i)).toBeInTheDocument()
     })
   })
 
-  it('shows validation error for invalid IBAN format', async () => {
-    const user = userEvent.setup()
-
-    render(
-      <Wrapper>
-        <InitiatePaymentDialog open={true} onOpenChange={vi.fn()} onSuccess={vi.fn()} />
-      </Wrapper>,
-    )
-
-    await user.type(screen.getByLabelText(/creditor iban/i), 'not-an-iban')
-    await user.click(screen.getByRole('button', { name: /initiate payment/i }))
-
-    await waitFor(() => {
-      expect(screen.getByText(/invalid iban format/i)).toBeInTheDocument()
-    })
-  })
-
-  it('accepts valid IBAN format', async () => {
+  it('accepts any non-empty creditor reference', async () => {
     const user = userEvent.setup()
     const mutateAsync = vi.fn().mockResolvedValue({ paymentOrderId: 'po-new' })
     mockUseInitiatePayment.mockReturnValue(makeMockMutation({ mutateAsync }))
@@ -148,12 +131,12 @@ describe('InitiatePaymentDialog - IBAN validation', () => {
     )
 
     await user.type(screen.getByLabelText(/debtor account/i), 'acct-001')
-    await user.type(screen.getByLabelText(/creditor iban/i), 'GB29NWBK60161331926819')
+    await user.type(screen.getByLabelText(/creditor reference/i), '12-34-56-78901234')
     await user.type(screen.getByLabelText(/amount/i), '100.00')
     await user.click(screen.getByRole('button', { name: /initiate payment/i }))
 
     await waitFor(() => {
-      expect(screen.queryByText(/invalid iban format/i)).not.toBeInTheDocument()
+      expect(mutateAsync).toHaveBeenCalledOnce()
     })
   })
 
@@ -167,7 +150,7 @@ describe('InitiatePaymentDialog - IBAN validation', () => {
     )
 
     await user.type(screen.getByLabelText(/debtor account/i), 'acct-001')
-    await user.type(screen.getByLabelText(/creditor iban/i), 'GB29NWBK60161331926819')
+    await user.type(screen.getByLabelText(/creditor reference/i), 'GB29NWBK60161331926819')
     await user.click(screen.getByRole('button', { name: /initiate payment/i }))
 
     await waitFor(() => {
@@ -185,7 +168,7 @@ describe('InitiatePaymentDialog - IBAN validation', () => {
     )
 
     await user.type(screen.getByLabelText(/debtor account/i), 'acct-001')
-    await user.type(screen.getByLabelText(/creditor iban/i), 'GB29NWBK60161331926819')
+    await user.type(screen.getByLabelText(/creditor reference/i), 'GB29NWBK60161331926819')
     await user.type(screen.getByLabelText(/amount/i), '0')
     await user.click(screen.getByRole('button', { name: /initiate payment/i }))
 
@@ -210,7 +193,7 @@ describe('InitiatePaymentDialog - successful submission', () => {
     )
 
     await user.type(screen.getByLabelText(/debtor account/i), 'acct-001')
-    await user.type(screen.getByLabelText(/creditor iban/i), 'GB29NWBK60161331926819')
+    await user.type(screen.getByLabelText(/creditor reference/i), 'GB29NWBK60161331926819')
     await user.type(screen.getByLabelText(/amount/i), '100.00')
     await user.click(screen.getByRole('button', { name: /initiate payment/i }))
 
@@ -244,7 +227,7 @@ describe('InitiatePaymentDialog - successful submission', () => {
 })
 
 describe('InitiatePaymentDialog - error handling', () => {
-  it('shows field-level error for INVALID_ARGUMENT with field violations', async () => {
+  it('shows field-level error for creditor reference validation failure', async () => {
     const user = userEvent.setup()
     const { Code, ConnectError } = await import('@connectrpc/connect')
     const err = new ConnectError('invalid', Code.InvalidArgument)
@@ -254,7 +237,7 @@ describe('InitiatePaymentDialog - error handling', () => {
         value: new Uint8Array(),
         debug: {
           fieldViolations: [
-            { field: 'creditor_reference', description: 'Invalid IBAN checksum' },
+            { field: 'creditor_reference', description: 'Invalid creditor reference' },
           ],
         },
       },
@@ -269,12 +252,12 @@ describe('InitiatePaymentDialog - error handling', () => {
     )
 
     await user.type(screen.getByLabelText(/debtor account/i), 'acct-001')
-    await user.type(screen.getByLabelText(/creditor iban/i), 'GB29NWBK60161331926819')
+    await user.type(screen.getByLabelText(/creditor reference/i), 'GB29NWBK60161331926819')
     await user.type(screen.getByLabelText(/amount/i), '100.00')
     await user.click(screen.getByRole('button', { name: /initiate payment/i }))
 
     await waitFor(() => {
-      expect(screen.getByText('Invalid IBAN checksum')).toBeInTheDocument()
+      expect(screen.getByText('Invalid creditor reference')).toBeInTheDocument()
     })
   })
 
@@ -292,7 +275,7 @@ describe('InitiatePaymentDialog - error handling', () => {
     )
 
     await user.type(screen.getByLabelText(/debtor account/i), 'acct-001')
-    await user.type(screen.getByLabelText(/creditor iban/i), 'GB29NWBK60161331926819')
+    await user.type(screen.getByLabelText(/creditor reference/i), 'GB29NWBK60161331926819')
     await user.type(screen.getByLabelText(/amount/i), '100.00')
     await user.click(screen.getByRole('button', { name: /initiate payment/i }))
 

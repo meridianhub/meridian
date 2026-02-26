@@ -200,7 +200,7 @@ export function PaymentDetailPage() {
               <div className="divide-y">
                 <DetailRow label="Payment Order ID">{data.paymentOrderId}</DetailRow>
                 <DetailRow label="Debtor Account">{data.debtorAccountId}</DetailRow>
-                <DetailRow label="Creditor IBAN">{data.creditorIban}</DetailRow>
+                <DetailRow label="Creditor Reference">{data.creditorReference}</DetailRow>
                 <DetailRow label="Amount">
                   <MoneyDisplay amount={data.amount} currency={data.currency} />
                 </DetailRow>

@@ -24,7 +24,7 @@ function renderDetailPage(accountId = 'acct-001') {
 
 const mockAccount = {
   accountId: 'acct-001',
-  iban: 'GB29NWBK60161331926819',
+  externalReference: 'GB29NWBK60161331926819',
   status: 'ACTIVE',
   baseCurrency: 'GBP',
   availableBalance: '100000',
@@ -90,7 +90,7 @@ describe('AccountDetailPage - account overview', () => {
     })
   })
 
-  it('renders IBAN', async () => {
+  it('renders external reference', async () => {
     server.use(
       http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
         HttpResponse.json({ account: mockAccount }),

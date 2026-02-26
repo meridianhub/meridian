@@ -14,19 +14,16 @@ import { handleConnectError } from '@/lib/error-handling'
 import { useInitiatePayment } from './payment-mutations'
 import { amountToBigInt } from './payment-form-utils'
 
-// IBAN pattern: 2 letter country code + 2 digits + up to 30 alphanumeric chars (no spaces)
-const IBAN_PATTERN = /^[A-Z]{2}[0-9]{2}[A-Z0-9]{1,30}$/
-
 interface FormData {
   debtorAccountId: string
-  creditorIban: string
+  creditorReference: string
   amount: string
   currency: string
 }
 
 interface FormErrors {
   debtorAccountId?: string
-  creditorIban?: string
+  creditorReference?: string
   amount?: string
   currency?: string
   general?: string
@@ -46,7 +43,7 @@ export function InitiatePaymentDialog({
   const initiate = useInitiatePayment()
   const [formData, setFormData] = React.useState<FormData>({
     debtorAccountId: '',
-    creditorIban: '',
+    creditorReference: '',
     amount: '',
     currency: 'GBP',
   })
@@ -54,7 +51,7 @@ export function InitiatePaymentDialog({
 
   React.useEffect(() => {
     if (!open) {
-      setFormData({ debtorAccountId: '', creditorIban: '', amount: '', currency: 'GBP' })
+      setFormData({ debtorAccountId: '', creditorReference: '', amount: '', currency: 'GBP' })
       setErrors({})
       initiate.reset()
     }
@@ -67,10 +64,8 @@ export function InitiatePaymentDialog({
       newErrors.debtorAccountId = 'Debtor account is required'
     }
 
-    if (!formData.creditorIban.trim()) {
-      newErrors.creditorIban = 'IBAN is required'
-    } else if (!IBAN_PATTERN.test(formData.creditorIban.trim())) {
-      newErrors.creditorIban = 'Invalid IBAN format'
+    if (!formData.creditorReference.trim()) {
+      newErrors.creditorReference = 'Creditor reference is required'
     }
 
     if (!formData.amount.trim()) {
@@ -97,7 +92,7 @@ export function InitiatePaymentDialog({
     try {
       const result = await initiate.mutateAsync({
         debtorAccountId: formData.debtorAccountId.trim(),
-        creditorReference: formData.creditorIban.trim(),
+        creditorReference: formData.creditorReference.trim(),
         amount: formData.amount.trim(),
         currency: formData.currency,
       })
@@ -112,7 +107,7 @@ export function InitiatePaymentDialog({
       if (result.code === Code.InvalidArgument && Object.keys(result.fieldErrors).length > 0) {
         const fieldMap: FormErrors = {}
         for (const [field, msg] of Object.entries(result.fieldErrors)) {
-          if (field === 'creditor_reference') fieldMap.creditorIban = msg
+          if (field === 'creditor_reference') fieldMap.creditorReference = msg
           else if (field === 'debtor_account_id') fieldMap.debtorAccountId = msg
           else if (field === 'amount') fieldMap.amount = msg
           else fieldMap.general = msg
@@ -173,19 +168,19 @@ export function InitiatePaymentDialog({
             </div>
 
             <div className="space-y-1">
-              <label htmlFor="creditorIban" className="text-sm font-medium">
-                Creditor IBAN
+              <label htmlFor="creditorReference" className="text-sm font-medium">
+                Creditor Reference
               </label>
               <Input
-                id="creditorIban"
-                value={formData.creditorIban}
-                onChange={handleChange('creditorIban')}
-                placeholder="GB29NWBK60161331926819"
-                aria-describedby={errors.creditorIban ? 'creditorIban-error' : undefined}
+                id="creditorReference"
+                value={formData.creditorReference}
+                onChange={handleChange('creditorReference')}
+                placeholder="e.g. GB29NWBK60161331926819 or sort code"
+                aria-describedby={errors.creditorReference ? 'creditorReference-error' : undefined}
               />
-              {errors.creditorIban && (
-                <p id="creditorIban-error" className="text-sm text-destructive">
-                  {errors.creditorIban}
+              {errors.creditorReference && (
+                <p id="creditorReference-error" className="text-sm text-destructive">
+                  {errors.creditorReference}
                 </p>
               )}
             </div>

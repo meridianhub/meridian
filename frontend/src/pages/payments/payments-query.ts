@@ -3,7 +3,7 @@ import type { DataTableQueryParams, DataTableResult } from '@/components/shared/
 export interface PaymentOrder {
   paymentOrderId: string
   debtorAccountId: string
-  creditorIban: string
+  creditorReference: string
   amount: string
   currency: string
   status: string
