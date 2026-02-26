@@ -128,6 +128,70 @@ func TestRunMigrations_Postgres(t *testing.T) {
 	}
 }
 
+func TestRunMigrations_Postgres_ScramAuth(t *testing.T) {
+	if os.Getenv("CI") == "" && testing.Short() {
+		t.Skip("skipping integration test; use -short=false or set CI=true")
+	}
+
+	t.Setenv("DB_DRIVER", "postgres")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+
+	// Start PostgreSQL WITHOUT trust auth (uses default scram-sha-256).
+	// This simulates production where service users have no passwords.
+	container, err := tcpostgres.Run(ctx,
+		"postgres:16-alpine",
+		tcpostgres.WithDatabase("defaultdb"),
+		tcpostgres.WithUsername("postgres"),
+		tcpostgres.WithPassword("secretpassword"),
+		// NO POSTGRES_HOST_AUTH_METHOD=trust - uses default scram-sha-256
+		testcontainers.WithWaitStrategy(
+			wait.ForLog("database system is ready to accept connections").
+				WithOccurrence(2).
+				WithStartupTimeout(90*time.Second)),
+	)
+	if err != nil {
+		t.Fatalf("start PostgreSQL container: %v", err)
+	}
+	defer func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
+		_ = container.Terminate(cleanupCtx)
+	}()
+
+	connStr, err := container.ConnectionString(ctx, "sslmode=disable")
+	if err != nil {
+		t.Fatalf("get PostgreSQL connection string: %v", err)
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	testFS := testMigrationFS()
+
+	// This should succeed using superuser credentials for migrations.
+	err = migrations.RunMigrations(ctx, testFS, connStr, logger)
+	if err != nil {
+		t.Fatalf("migrations should succeed with scram-sha-256 auth: %v", err)
+	}
+
+	// Verify migrations were applied.
+	caDSN := replaceDSNDatabasePG(t, connStr, "meridian_current_account")
+	caConn, err := pgx.Connect(ctx, caDSN+"&default_query_exec_mode=simple_protocol")
+	if err != nil {
+		t.Fatalf("connect to meridian_current_account: %v", err)
+	}
+	defer caConn.Close(ctx)
+
+	var count int
+	err = caConn.QueryRow(ctx, `SELECT count(*) FROM _meridian_migrations`).Scan(&count)
+	if err != nil {
+		t.Fatalf("count migrations: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("expected 2 migrations recorded, got %d", count)
+	}
+}
+
 func TestRunMigrations_Postgres_Idempotent(t *testing.T) {
 	if os.Getenv("CI") == "" && testing.Short() {
 		t.Skip("skipping integration test; use -short=false or set CI=true")

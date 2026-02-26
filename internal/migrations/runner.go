@@ -135,10 +135,11 @@ func runMigrations(ctx context.Context, migrationFS fs.FS, superuserDSN string, 
 	// Group migrations by target database.
 	byDB := groupByDatabase(migrations)
 
-	// Apply migrations to each database.
+	// Apply migrations to each database using superuser credentials.
+	// Service users may not have password-based auth configured (scram-sha-256),
+	// so we preserve the superuser credentials and only change the database name.
 	for dbName, dbMigrations := range byDB {
-		sdb := dbMigrations[0].sdb
-		dsn := buildServiceDSN(superuserDSN, sdb, driver)
+		dsn := buildSuperuserDSN(superuserDSN, dbName, driver)
 
 		if err := applyDatabaseMigrations(ctx, dsn, dbName, dbMigrations, driver, logger); err != nil {
 			return fmt.Errorf("apply migrations to %s: %w", dbName, err)
@@ -482,6 +483,39 @@ func buildServiceDSN(superuserDSN string, sdb ServiceDatabase, driver Driver) st
 
 	// Replace database in path (postgres://user@host:port/database).
 	parsed.Path = "/" + sdb.Database
+
+	// Ensure default port if not specified.
+	if parsed.Port() == "" {
+		defaultPort := "26257"
+		if driver == DriverPostgres {
+			defaultPort = "5432"
+		}
+		parsed.Host = parsed.Hostname() + ":" + defaultPort
+	}
+
+	// Enable simple protocol so multi-statement migration SQL files work with pgx v5.
+	q := parsed.Query()
+	if q.Get("default_query_exec_mode") == "" {
+		q.Set("default_query_exec_mode", "simple_protocol")
+	}
+	parsed.RawQuery = q.Encode()
+
+	return parsed.String()
+}
+
+// buildSuperuserDSN modifies a superuser DSN to target a specific database while
+// preserving the superuser credentials. This is used for applying migrations where
+// the service user may not have password-based authentication configured.
+//
+// The default port is 26257 for CockroachDB and 5432 for PostgreSQL.
+func buildSuperuserDSN(superuserDSN string, dbName string, driver Driver) string {
+	parsed, err := url.Parse(superuserDSN)
+	if err != nil {
+		return superuserDSN
+	}
+
+	// Preserve superuser credentials, only replace database.
+	parsed.Path = "/" + dbName
 
 	// Ensure default port if not specified.
 	if parsed.Port() == "" {

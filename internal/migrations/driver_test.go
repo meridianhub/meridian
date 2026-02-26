@@ -1,10 +1,13 @@
 package migrations_test
 
 import (
+	"net/url"
 	"strings"
 	"testing"
 
 	"github.com/meridianhub/meridian/internal/migrations"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDriverFromEnv(t *testing.T) {
@@ -117,4 +120,102 @@ func TestBuildServiceDSN_DatabaseAndUser(t *testing.T) {
 	if !strings.Contains(got, "simple_protocol") {
 		t.Errorf("expected simple_protocol query param in DSN, got %q", got)
 	}
+}
+
+func TestBuildSuperuserDSN_PreservesCredentials(t *testing.T) {
+	tests := []struct {
+		name     string
+		superDSN string
+		dbName   string
+		driver   migrations.Driver
+		wantUser string
+		wantPass string
+		wantDB   string
+		wantPort string
+	}{
+		{
+			name:     "CockroachDB preserves root credentials",
+			superDSN: "postgres://root:secretpass@localhost:26257/defaultdb?sslmode=disable",
+			dbName:   "meridian_tenant",
+			driver:   migrations.DriverCockroachDB,
+			wantUser: "root",
+			wantPass: "secretpass",
+			wantDB:   "meridian_tenant",
+			wantPort: "26257",
+		},
+		{
+			name:     "PostgreSQL preserves postgres credentials",
+			superDSN: "postgres://postgres:pgpass@db.example.com:5432/postgres",
+			dbName:   "meridian_party",
+			driver:   migrations.DriverPostgres,
+			wantUser: "postgres",
+			wantPass: "pgpass",
+			wantDB:   "meridian_party",
+			wantPort: "5432",
+		},
+		{
+			name:     "adds default CockroachDB port when missing",
+			superDSN: "postgres://root@localhost/defaultdb",
+			dbName:   "meridian_platform",
+			driver:   migrations.DriverCockroachDB,
+			wantUser: "root",
+			wantDB:   "meridian_platform",
+			wantPort: "26257",
+		},
+		{
+			name:     "adds default PostgreSQL port when missing",
+			superDSN: "postgres://postgres:pass@localhost/postgres",
+			dbName:   "meridian_current_account",
+			driver:   migrations.DriverPostgres,
+			wantUser: "postgres",
+			wantPass: "pass",
+			wantDB:   "meridian_current_account",
+			wantPort: "5432",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := migrations.BuildSuperuserDSN(tt.superDSN, tt.dbName, tt.driver)
+
+			parsed, err := url.Parse(result)
+			require.NoError(t, err)
+
+			assert.Equal(t, tt.wantUser, parsed.User.Username(), "user mismatch")
+			if tt.wantPass != "" {
+				pass, _ := parsed.User.Password()
+				assert.Equal(t, tt.wantPass, pass, "password mismatch")
+			}
+			assert.Equal(t, "/"+tt.wantDB, parsed.Path, "database mismatch")
+			assert.Equal(t, tt.wantPort, parsed.Port(), "port mismatch")
+			assert.Equal(t, "simple_protocol", parsed.Query().Get("default_query_exec_mode"))
+		})
+	}
+}
+
+func TestBuildSuperuserDSN_DiffersFromServiceDSN(t *testing.T) {
+	superDSN := "postgres://postgres:secretpass@localhost:5432/postgres"
+	sdb := migrations.ServiceDatabase{
+		Database: "meridian_party",
+		User:     "meridian_party_user",
+		Password: "",
+	}
+
+	serviceDSN := migrations.BuildServiceDSN(superDSN, sdb, migrations.DriverPostgres)
+	superuserTargetDSN := migrations.BuildSuperuserDSN(superDSN, "meridian_party", migrations.DriverPostgres)
+
+	// Service DSN uses service user (passwordless).
+	serviceParsed, err := url.Parse(serviceDSN)
+	require.NoError(t, err)
+	assert.Equal(t, "meridian_party_user", serviceParsed.User.Username())
+	_, hasPass := serviceParsed.User.Password()
+	assert.False(t, hasPass, "service DSN should not have password")
+
+	// Superuser DSN preserves superuser credentials.
+	superParsed, err := url.Parse(superuserTargetDSN)
+	require.NoError(t, err)
+	assert.Equal(t, "postgres", superParsed.User.Username())
+	pass, hasPass := superParsed.User.Password()
+	assert.True(t, hasPass, "superuser DSN should preserve password")
+	assert.Equal(t, "secretpass", pass)
 }
