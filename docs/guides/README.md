@@ -6,6 +6,7 @@ This directory contains how-to guides and usage documentation for Meridian devel
 
 | Guide | Description |
 |-------|-------------|
+| [CLI Tools Reference](cli-tools.md) | Operational CLIs: tenantctl, ibactl, instrument-cli, position-tool, market-data-tool, meridian-cli |
 | [Calling Meridian APIs](calling-meridian-apis.md) | HTTP/JSON, Connect, and gRPC — authentication, tenant isolation, quick start |
 | [Multi-Asset Integration](multi-asset-integration.md) | End-to-end guide for tracking non-fiat instruments (energy, carbon, compute) |
 | [New BIAN Service Checklist](new-bian-service-checklist.md) | Complete checklist for creating a new BIAN service domain |

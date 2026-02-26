@@ -248,7 +248,7 @@ Potential additions to E2E suite:
 - [ADR-0002: Microservices per BIAN Domain](../../docs/adr/0002-microservices-per-bian-domain.md) -
   Database-per-service architecture
 - [ADR-0020: Per-Service Audit Workers](../../docs/adr/0020-per-service-audit-workers.md) - Audit consumer architecture
-- [Audit Consumer README](../../cmd/audit-consumer/README.md) - Deployment and configuration
+- [Audit Consumer K8s](../../deployments/k8s/audit-consumer/README.md) - Deployment and configuration
 - [Audit Writer Integration Tests][writer-tests] - Unit-level integration tests
 
 [writer-tests]: ../../services/audit-worker/adapters/persistence/tenant_audit_writer_integration_test.go

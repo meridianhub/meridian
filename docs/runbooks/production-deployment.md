@@ -622,10 +622,16 @@ go build -o tenantctl ./cmd/tenantctl
 ./tenantctl get smoke_test_tenant \
   --service-url=tenant.production.svc.cluster.local:50056
 
-# 3. Test Gateway health endpoint (external)
+# 3. Provision default internal accounts via ibactl
+go build -o ibactl ./cmd/ibactl
+./ibactl provision-defaults smoke_test_tenant \
+  --service-url=internal-account.production.svc.cluster.local:50057 \
+  --tenant-service-url=tenant.production.svc.cluster.local:50056
+
+# 4. Test Gateway health endpoint (external)
 curl -s https://<gateway-external-url>/health/ready
 
-# 4. Clean up test tenant
+# 5. Clean up test tenant
 ./tenantctl deprovision smoke_test_tenant --confirm \
   --service-url=tenant.production.svc.cluster.local:50056
 ```
