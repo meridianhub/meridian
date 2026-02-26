@@ -24,6 +24,7 @@ package money
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/meridianhub/meridian/shared/platform/quantity"
@@ -261,7 +262,9 @@ func (m Money) ToMinorUnits() (int64, error) {
 	shifted := m.qty.Amount.Shift(int32(precision))
 	rounded := shifted.RoundBank(0)
 
-	if rounded.Abs().GreaterThan(decimal.NewFromInt(9223372036854775807)) {
+	maxInt64 := decimal.NewFromInt(math.MaxInt64)
+	minInt64 := decimal.NewFromInt(math.MinInt64)
+	if rounded.GreaterThan(maxInt64) || rounded.LessThan(minInt64) {
 		return 0, ErrAmountOverflow
 	}
 	return rounded.IntPart(), nil
