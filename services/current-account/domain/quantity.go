@@ -11,6 +11,8 @@
 package domain
 
 import (
+	"strings"
+
 	sharedamount "github.com/meridianhub/meridian/shared/pkg/amount"
 	sharedmoney "github.com/meridianhub/meridian/shared/pkg/money"
 	"github.com/meridianhub/meridian/shared/platform/quantity"
@@ -89,7 +91,10 @@ var NewMoney = func(currencyCode string, amountMinorUnits int64) (Amount, error)
 //
 // Deprecated: Use NewAmountFromInstrument for new code which supports all dimensions.
 var NewMoneyFromInstrument = func(instrumentCode, dimension string, amountMinorUnits int64) (Amount, error) {
-	return sharedamount.NewFromInstrument(instrumentCode, dimension, 2, amountMinorUnits)
+	if strings.ToUpper(dimension) != quantity.DimensionCurrency {
+		return Amount{}, ErrInvalidCurrency
+	}
+	return sharedamount.NewFromInstrument(instrumentCode, quantity.DimensionCurrency, 2, amountMinorUnits)
 }
 
 // ZeroAmount creates a zero Amount for the given instrument.
