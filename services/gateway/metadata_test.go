@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/meridianhub/meridian/services/gateway/auth"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -232,4 +233,50 @@ func TestMetadataPropagationMiddleware_JWTPrioritizedOverAPIKey(t *testing.T) {
 	assert.Equal(t, "jwt-user", capturedHeaders.Get("x-user-id"))
 	assert.Equal(t, AuthMethodJWT, capturedHeaders.Get("x-auth-method"))
 	assert.Equal(t, "jwt-tenant", capturedHeaders.Get("x-tenant-id"))
+}
+
+// TestMetadataPropagationMiddleware_TenantResolverFallback verifies that when
+// auth is disabled (no JWT or API key identity), the middleware falls back to
+// tenant context set by the tenant resolver middleware.
+func TestMetadataPropagationMiddleware_TenantResolverFallback(t *testing.T) {
+	var capturedHeaders http.Header
+
+	handler := metadataPropagationMiddleware(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		capturedHeaders = r.Header.Clone()
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/meridian.party.v1.PartyService/ListParties", nil)
+	// No auth context (AUTH_ENABLED=false), but tenant resolver injected tenant
+	ctx := tenant.WithTenant(req.Context(), tenant.TenantID("volterra_energy"))
+	req = req.WithContext(ctx)
+
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	// Tenant ID propagated from resolver context
+	assert.Equal(t, "volterra_energy", capturedHeaders.Get("x-tenant-id"))
+	// No auth identity headers
+	assert.Empty(t, capturedHeaders.Get("x-user-id"))
+	assert.Empty(t, capturedHeaders.Get("x-auth-method"))
+}
+
+// TestMetadataPropagationMiddleware_TenantResolverSpoofedHeaderStripped verifies
+// that spoofed x-tenant-id headers are stripped even when tenant resolver context
+// is used as fallback.
+func TestMetadataPropagationMiddleware_TenantResolverSpoofedHeaderStripped(t *testing.T) {
+	var capturedHeaders http.Header
+
+	handler := metadataPropagationMiddleware(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		capturedHeaders = r.Header.Clone()
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/test", nil)
+	req.Header.Set("x-tenant-id", "spoofed-tenant")
+	// Tenant resolver set the real tenant
+	ctx := tenant.WithTenant(req.Context(), tenant.TenantID("real_tenant"))
+	req = req.WithContext(ctx)
+
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	// Spoofed header replaced by resolver tenant
+	assert.Equal(t, "real_tenant", capturedHeaders.Get("x-tenant-id"))
 }

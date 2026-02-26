@@ -208,7 +208,7 @@ export function PositionDetailPage() {
                 <SkeletonField />
               ) : (
                 <span>
-                  {log?.statusTracking?.currentStatus?.replace(/_/g, ' ') ?? '—'}
+                  {typeof log?.statusTracking?.currentStatus === 'string' ? log.statusTracking.currentStatus.replace(/_/g, ' ') : '—'}
                 </span>
               )}
             </LabeledField>
