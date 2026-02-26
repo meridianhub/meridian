@@ -64,6 +64,7 @@ import (
 	misclient "github.com/meridianhub/meridian/services/market-information/client"
 	marketinformationservice "github.com/meridianhub/meridian/services/market-information/service"
 	partypersistence "github.com/meridianhub/meridian/services/party/adapters/persistence"
+	partyclient "github.com/meridianhub/meridian/services/party/client"
 	partyservice "github.com/meridianhub/meridian/services/party/service"
 	paymentorderpersistence "github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
 	paymentorderservice "github.com/meridianhub/meridian/services/payment-order/service"
@@ -374,7 +375,7 @@ func registerServices(
 
 	// Tier 2: Depend on Tier 1 (current-account needs PK, FA loopback clients for saga orchestration)
 	caOutboxRepo := events.NewPostgresOutboxRepository(conns.gormDB("current-account"))
-	if err := wireCurrentAccount(grpcServer, conns.gormDB("current-account"), loopback.pk, loopback.fa, idempotencySvc, caOutboxRepo, tracer, logger); err != nil {
+	if err := wireCurrentAccount(grpcServer, conns.gormDB("current-account"), loopback.pk, loopback.fa, loopback.party, idempotencySvc, caOutboxRepo, tracer, logger); err != nil {
 		return fmt.Errorf("current-account: %w", err)
 	}
 	logger.Info("Tier 2 services registered")
@@ -568,6 +569,7 @@ func wireCurrentAccount(
 	db *gorm.DB,
 	pkLoopback *pkclient.Client,
 	faLoopback *faclient.Client,
+	partyLoopback *partyclient.Client,
 	idempotencySvc idempotency.Service,
 	outboxRepo *events.PostgresOutboxRepository,
 	tracer *observability.Tracer,
@@ -577,11 +579,13 @@ func wireCurrentAccount(
 	lienRepo := currentaccountpersistence.NewLienRepository(db)
 	withdrawalRepo := currentaccountpersistence.NewWithdrawalRepository(db)
 
+	partyWrapper := newPartyClientWrapper(partyLoopback)
+
 	svc, err := currentaccountservice.NewServiceWithExistingClients(
 		repo, lienRepo, withdrawalRepo,
 		outboxRepo, db,
 		pkLoopback, faLoopback,
-		nil, // partyClient — party validation not needed for unified binary
+		partyWrapper,
 		nil, // accountConfig — no static clearing account config needed
 		idempotencySvc, logger, tracer,
 		nil, // accountResolver — no dynamic clearing account resolution
@@ -945,12 +949,14 @@ func (p *noopFAPublisher) PublishBatch(_ context.Context, _ []financialaccountin
 // loopbackClients holds gRPC clients that connect back to the same unified binary
 // for inter-service communication (e.g., current-account calling position-keeping).
 type loopbackClients struct {
-	mds      *misclient.Client
-	mdsClose func()
-	pk       *pkclient.Client
-	pkClose  func()
-	fa       *faclient.Client
-	faClose  func()
+	mds        *misclient.Client
+	mdsClose   func()
+	pk         *pkclient.Client
+	pkClose    func()
+	fa         *faclient.Client
+	faClose    func()
+	party      *partyclient.Client
+	partyClose func()
 }
 
 // newLoopbackClients creates loopback gRPC clients targeting the local gRPC server.
@@ -977,10 +983,19 @@ func newLoopbackClients(ctx context.Context, grpcPort int) (*loopbackClients, er
 		return nil, fmt.Errorf("fa loopback: %w", err)
 	}
 
+	party, partyClose, err := partyclient.New(partyclient.Config{Target: target, DialOptions: opts}) //nolint:contextcheck // partyclient.New does not accept context
+	if err != nil {
+		_ = mdsClose()
+		pkClose()
+		faClose()
+		return nil, fmt.Errorf("party loopback: %w", err)
+	}
+
 	return &loopbackClients{
 		mds: mds, mdsClose: func() { _ = mdsClose() },
 		pk: pk, pkClose: pkClose,
 		fa: fa, faClose: faClose,
+		party: party, partyClose: partyClose,
 	}, nil
 }
 
@@ -994,5 +1009,8 @@ func (l *loopbackClients) closeAll() {
 	}
 	if l.faClose != nil {
 		l.faClose()
+	}
+	if l.partyClose != nil {
+		l.partyClose()
 	}
 }
