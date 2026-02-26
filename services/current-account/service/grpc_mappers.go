@@ -101,6 +101,18 @@ func mapWithdrawalStatusToProto(status domain.WithdrawalStatus) pb.WithdrawalSta
 	}
 }
 
+// mapRegistryDimension converts a reference-data registry dimension string to the
+// domain quantity dimension string used by the current-account service.
+//
+// The reference-data registry uses "MONETARY" for currency instruments, while the
+// domain quantity package uses "CURRENCY". All other dimension values are identical.
+func mapRegistryDimension(registryDimension string) string {
+	if registryDimension == "MONETARY" {
+		return "CURRENCY"
+	}
+	return registryDimension
+}
+
 func mapStatusToProto(status domain.AccountStatus) pb.AccountStatus {
 	switch status {
 	case domain.AccountStatusActive:

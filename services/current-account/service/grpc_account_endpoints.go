@@ -58,7 +58,10 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 				"error", err)
 			return nil, status.Errorf(codes.InvalidArgument, "unknown instrument_code: %s", instrumentCode)
 		}
-		dimension = string(cachedInstrument.Definition.Dimension)
+		// Map from reference-data registry dimension ("MONETARY") to domain quantity
+		// dimension ("CURRENCY"). The registry uses "MONETARY" while the domain quantity
+		// package uses "CURRENCY" - other dimensions are identical across both packages.
+		dimension = mapRegistryDimension(string(cachedInstrument.Definition.Dimension))
 	}
 
 	// Validate party exists and is active (if party client is configured)

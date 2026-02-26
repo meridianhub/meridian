@@ -583,6 +583,30 @@ func TestRetrieveCurrentAccountNotFound(t *testing.T) {
 	}
 }
 
+func TestMapRegistryDimension(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"MONETARY", "CURRENCY"},
+		{"CURRENCY", "CURRENCY"},
+		{"ENERGY", "ENERGY"},
+		{"COMPUTE", "COMPUTE"},
+		{"MASS", "MASS"},
+		{"VOLUME", "VOLUME"},
+		{"TIME", "TIME"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := mapRegistryDimension(tt.input)
+			if result != tt.expected {
+				t.Errorf("mapRegistryDimension(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestExecuteDepositCurrencyMismatch(t *testing.T) {
 	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
