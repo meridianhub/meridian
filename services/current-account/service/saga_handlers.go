@@ -190,7 +190,8 @@ func decimalToMoneyAmount(amount decimal.Decimal, currency string) *commonpb.Mon
 // Required params:
 //   - account_id: string - The account identifier
 //   - amount: decimal.Decimal - The transaction amount
-//   - currency: string - Currency code (e.g., "GBP")
+//   - instrument_code: string - Instrument code (e.g., "GBP", "kWh"). Replaces currency.
+//   - currency: string - Deprecated: use instrument_code instead.
 //   - direction: string - "DEBIT" or "CREDIT"
 //   - transaction_id: string - The saga transaction ID
 //
@@ -224,9 +225,13 @@ func currentAccountPositionKeepingInitiateLog(ctx *saga.StarlarkContext, params 
 		return nil, wrapHandlerError(handlerName, err)
 	}
 
-	currency, err := requireString(params, "currency")
-	if err != nil {
-		return nil, wrapHandlerError(handlerName, err)
+	// Accept instrument_code (preferred) or currency (deprecated alias)
+	currency := optionalString(params, "instrument_code")
+	if currency == "" {
+		currency = optionalString(params, "currency")
+	}
+	if currency == "" {
+		return nil, wrapHandlerError(handlerName, fmt.Errorf("%w: instrument_code", errMissingParameter))
 	}
 
 	direction, err := requireString(params, "direction")
@@ -423,7 +428,8 @@ func currentAccountPositionKeepingCancelLog(ctx *saga.StarlarkContext, params ma
 //
 // Required params:
 //   - account_id: string - The account identifier
-//   - currency: string - Currency code
+//   - instrument_code: string - Instrument code (e.g., "GBP", "kWh"). Replaces currency.
+//   - currency: string - Deprecated: use instrument_code instead.
 //   - transaction_id: string - The saga transaction ID
 //   - transaction_type: string - "WITHDRAWAL" or "DEPOSIT"
 func currentAccountFinAcctInitiateBookingLog(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
@@ -439,9 +445,13 @@ func currentAccountFinAcctInitiateBookingLog(ctx *saga.StarlarkContext, params m
 		return nil, wrapHandlerError(handlerName, err)
 	}
 
-	currency, err := requireString(params, "currency")
-	if err != nil {
-		return nil, wrapHandlerError(handlerName, err)
+	// Accept instrument_code (preferred) or currency (deprecated alias)
+	currency := optionalString(params, "instrument_code")
+	if currency == "" {
+		currency = optionalString(params, "currency")
+	}
+	if currency == "" {
+		return nil, wrapHandlerError(handlerName, fmt.Errorf("%w: instrument_code", errMissingParameter))
 	}
 
 	transactionID, err := requireString(params, "transaction_id")
@@ -496,7 +506,8 @@ func currentAccountFinAcctInitiateBookingLog(ctx *saga.StarlarkContext, params m
 //   - booking_log_id: string - The booking log ID
 //   - account_id: string - The account to post to
 //   - amount: decimal.Decimal - The posting amount
-//   - currency: string - Currency code
+//   - instrument_code: string - Instrument code (e.g., "GBP", "kWh"). Replaces currency.
+//   - currency: string - Deprecated: use instrument_code instead.
 //   - direction: string - "DEBIT" or "CREDIT"
 //   - transaction_id: string - The saga transaction ID
 //   - posting_type: string - "debit" or "credit" (for idempotency key suffix)
@@ -523,9 +534,13 @@ func currentAccountFinAcctCapturePosting(ctx *saga.StarlarkContext, params map[s
 		return nil, wrapHandlerError(handlerName, err)
 	}
 
-	currency, err := requireString(params, "currency")
-	if err != nil {
-		return nil, wrapHandlerError(handlerName, err)
+	// Accept instrument_code (preferred) or currency (deprecated alias)
+	currency := optionalString(params, "instrument_code")
+	if currency == "" {
+		currency = optionalString(params, "currency")
+	}
+	if currency == "" {
+		return nil, wrapHandlerError(handlerName, fmt.Errorf("%w: instrument_code", errMissingParameter))
 	}
 
 	direction, err := requireString(params, "direction")
@@ -657,7 +672,8 @@ func currentAccountFinAcctUpdateBookingLog(ctx *saga.StarlarkContext, params map
 //   - booking_log_id: string - The booking log ID
 //   - account_id: string - The account to post to
 //   - amount: decimal.Decimal - The posting amount
-//   - currency: string - Currency code
+//   - instrument_code: string - Instrument code (e.g., "GBP", "kWh"). Replaces currency.
+//   - currency: string - Deprecated: use instrument_code instead.
 //   - direction: string - "DEBIT" or "CREDIT" (opposite of original)
 //   - transaction_id: string - The saga transaction ID
 //   - posting_type: string - "debit" or "credit" (original posting type being compensated)
@@ -684,9 +700,13 @@ func currentAccountFinAcctCompensatePosting(ctx *saga.StarlarkContext, params ma
 		return nil, wrapHandlerError(handlerName, err)
 	}
 
-	currency, err := requireString(params, "currency")
-	if err != nil {
-		return nil, wrapHandlerError(handlerName, err)
+	// Accept instrument_code (preferred) or currency (deprecated alias)
+	currency := optionalString(params, "instrument_code")
+	if currency == "" {
+		currency = optionalString(params, "currency")
+	}
+	if currency == "" {
+		return nil, wrapHandlerError(handlerName, fmt.Errorf("%w: instrument_code", errMissingParameter))
 	}
 
 	direction, err := requireString(params, "direction")
@@ -810,6 +830,19 @@ func currentAccountRepositorySave(ctx *saga.StarlarkContext, params map[string]a
 }
 
 // Helper functions for parameter extraction
+
+// optionalString extracts a string parameter, returning empty string if absent or wrong type.
+func optionalString(params map[string]any, key string) string {
+	val, ok := params[key]
+	if !ok || val == nil {
+		return ""
+	}
+	str, ok := val.(string)
+	if !ok {
+		return ""
+	}
+	return str
+}
 
 func requireString(params map[string]any, key string) (string, error) {
 	val, ok := params[key]

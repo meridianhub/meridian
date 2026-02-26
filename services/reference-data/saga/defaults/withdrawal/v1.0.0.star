@@ -1,7 +1,7 @@
 # Saga: current_account_withdrawal
 # Version: 1.0.0
 # Previous: none
-# Changed: Migrated from invoke_handler() to typed service modules
+# Changed: Updated field names: account_identification -> external_identifier, currency -> instrument_code
 # Author: Platform Team
 # Date: 2026-01-27
 #
@@ -22,9 +22,9 @@
 #
 # Input data (provided via input_data dictionary):
 #   - account_id: string - Account identifier
-#   - account_identification: string - Account identification for external services
+#   - external_identifier: string - External account identifier (e.g., IBAN)
 #   - amount: string - Decimal amount as string (e.g., "100.50")
-#   - currency: string - Currency code (e.g., "GBP")
+#   - instrument_code: string - Instrument code (e.g., "GBP", "kWh")
 #   - transaction_id: string - Unique transaction identifier
 #   - clearing_account_id: string - Clearing account for double-entry (optional)
 
@@ -35,43 +35,43 @@ withdrawal_saga = saga(name="current_account_withdrawal")
 def execute_withdrawal():
     # Extract input data
     account_id = input_data["account_id"]
-    account_identification = input_data["account_identification"]
+    external_identifier = input_data["external_identifier"]
     amount = Decimal(input_data["amount"])
-    currency = input_data["currency"]
+    instrument_code = input_data["instrument_code"]
     transaction_id = input_data["transaction_id"]
     clearing_account_id = input_data.get("clearing_account_id", "")
-    
+
     # Step 1: Log position in PositionKeeping service with DEBIT direction
     step(name="log_position")
     log_position_result = position_keeping.initiate_log(
-        position_id=account_identification,
+        position_id=external_identifier,
         amount=amount,
-        currency=currency,
+        instrument_code=instrument_code,
         direction="DEBIT",
         transaction_id=transaction_id,
     )
-    
+
     # Step 2: Initiate booking log in FinancialAccounting service
     step(name="initiate_booking_log")
     booking_log_result = financial_accounting.initiate_booking_log(
         account_id=account_id,
-        currency=currency,
+        instrument_code=instrument_code,
         transaction_id=transaction_id,
         transaction_type="WITHDRAWAL",
     )
-    
+
     # Step 3: Capture DEBIT posting to customer account
     step(name="capture_debit_posting")
     debit_result = financial_accounting.capture_posting(
         booking_log_id=booking_log_result.booking_log_id,
         account_id=account_id,
         amount=amount,
-        currency=currency,
+        instrument_code=instrument_code,
         direction="DEBIT",
         transaction_id=transaction_id,
         posting_type="debit",
     )
-    
+
     # Step 4: Capture CREDIT posting to clearing account (if double-entry enabled)
     if clearing_account_id != None and clearing_account_id.strip() != "":
         step(name="capture_credit_posting")
@@ -79,26 +79,26 @@ def execute_withdrawal():
             booking_log_id=booking_log_result.booking_log_id,
             account_id=clearing_account_id,
             amount=amount,
-            currency=currency,
+            instrument_code=instrument_code,
             direction="CREDIT",
             transaction_id=transaction_id,
             posting_type="credit",
         )
-    
+
     # Step 5: Finalize booking log (transition to POSTED)
     step(name="finalize_booking_log")
     finalize_result = financial_accounting.update_booking_log(
         booking_log_id=booking_log_result.booking_log_id,
         status="POSTED",
     )
-    
+
     # Step 6: Save account metadata
     step(name="save_account")
     save_result = current_account.save(
         account_id=account_id,
         transaction_id=transaction_id,
     )
-    
+
     # Output the saga result
     result = {
         "status": "COMPLETED",

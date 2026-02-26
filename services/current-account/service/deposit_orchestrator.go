@@ -180,13 +180,13 @@ func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.Cu
 		SagaExecutionID: uuid.New(),
 		CorrelationID:   correlationUUID,
 		Input: map[string]interface{}{
-			"account_id":             account.AccountID(),
-			"account_identification": account.ExternalIdentifier(),
-			"amount":                 amount.Amount().String(), // Decimal as string
-			"currency":               string(amount.Currency()),
-			"transaction_id":         transactionID,
-			"clearing_account_id":    clearingAccountID,
-			"attributes":             attributes,
+			"account_id":          account.AccountID(),
+			"external_identifier": account.ExternalIdentifier(),
+			"amount":              amount.Amount().String(), // Decimal as string
+			"instrument_code":     account.InstrumentCode(),
+			"transaction_id":      transactionID,
+			"clearing_account_id": clearingAccountID,
+			"attributes":          attributes,
 		},
 	}
 

@@ -20,7 +20,8 @@
 #   - tenant_id: string        - The tenant receiving the payment (e.g., "meridian-ops")
 #   - party_id: string         - The customer party identifier
 #   - amount_cents: int        - Payment amount in smallest currency unit (e.g., pence)
-#   - currency: string         - ISO 4217 currency code (e.g., "gbp")
+#   - instrument_code: string  - Instrument code (e.g., "GBP"). Replaces currency field.
+#   - currency: string         - Deprecated: use instrument_code instead. ISO 4217 currency code (e.g., "gbp")
 #   - charge_id: string        - Stripe Charge ID for reconciliation
 #   - payment_intent_id: string - Stripe PaymentIntent ID
 #   - stripe_event_id: string  - Original Stripe event ID for audit trail
@@ -35,7 +36,12 @@ def execute_stripe_payment_received():
     tenant_id = input_data["tenant_id"]
     party_id = input_data["party_id"]
     amount_cents = input_data["amount_cents"]
-    currency = input_data.get("currency", "GBP")
+    # Accept instrument_code (preferred) or currency (deprecated alias).
+    # Normalize once: strip whitespace, uppercase, default to "GBP".
+    instrument_code = input_data.get("instrument_code", "") or input_data.get("currency", "")
+    instrument_code = instrument_code.strip().upper()
+    if instrument_code == "":
+        instrument_code = "GBP"
     charge_id = input_data["charge_id"]
     payment_intent_id = input_data.get("payment_intent_id", "")
     stripe_event_id = input_data.get("stripe_event_id", "")
@@ -54,7 +60,7 @@ def execute_stripe_payment_received():
     debit_result = position_keeping.initiate_log(
         account_id=nostro_account,
         amount=amount,
-        currency=currency.upper(),
+        instrument_code=instrument_code,
         direction="DEBIT",
         description="Stripe payment received: " + charge_id,
         external_reference_id=charge_id,
@@ -66,7 +72,7 @@ def execute_stripe_payment_received():
     credit_result = position_keeping.initiate_log(
         account_id=prepaid_account,
         amount=amount,
-        currency=currency.upper(),
+        instrument_code=instrument_code,
         direction="CREDIT",
         description="Payment from Stripe: " + charge_id,
         external_reference_id=charge_id,
@@ -78,7 +84,7 @@ def execute_stripe_payment_received():
         "party_id": party_id,
         "prepaid_log_id": credit_result["log_id"],
         "amount_cents": amount_cents,
-        "currency": currency,
+        "instrument_code": instrument_code,
         "charge_id": charge_id,
         "payment_intent_id": payment_intent_id,
         "stripe_event_id": stripe_event_id,
