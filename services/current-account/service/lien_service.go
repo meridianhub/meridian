@@ -171,15 +171,23 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		}
 
 		// Convert valued output to domain Amount for lien amount (the actual reservation).
-		// The valued amount is in the account's native currency; NewMoney handles CURRENCY dimension.
-		valuedCents := valuationResult.OutputAmount.Mul(decimal.NewFromInt(100)).RoundBank(0)
+		// Use the account's instrument precision so non-2-decimal instruments work correctly.
+		precision := prefetchedAccount.Balance().Instrument().Precision
+		// #nosec G115 - precision is bounded by instrument definition (0-9 in practice)
+		scale := decimal.NewFromInt(1).Shift(int32(precision))
+		valuedMinor := valuationResult.OutputAmount.Mul(scale).RoundBank(0)
 		maxInt64 := decimal.NewFromInt(math.MaxInt64)
 		minInt64 := decimal.NewFromInt(math.MinInt64)
-		if valuedCents.GreaterThan(maxInt64) || valuedCents.LessThan(minInt64) {
+		if valuedMinor.GreaterThan(maxInt64) || valuedMinor.LessThan(minInt64) {
 			operationStatus = opStatusInvalidAmount
 			return nil, status.Error(codes.InvalidArgument, ErrAmountOverflow.Error())
 		}
-		lienAmount, err = domain.NewMoney(valuationResult.OutputCode, valuedCents.IntPart())
+		lienAmount, err = domain.NewAmountFromInstrument(
+			valuationResult.OutputCode,
+			prefetchedAccount.Dimension(),
+			precision,
+			valuedMinor.IntPart(),
+		)
 		if err != nil {
 			operationStatus = opStatusInvalidAmount
 			return nil, status.Errorf(codes.Internal, "failed to create valued amount: %v", err)
