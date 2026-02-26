@@ -471,6 +471,17 @@ func seedMarketData(ctx context.Context, conn *grpc.ClientConn) error {
 		fmt.Println("  Registered dataset: WHOLESALE_ENERGY_GBP_KWH")
 	}
 
+	// Activate dataset so observations can be recorded
+	_, err = client.ActivateDataSet(ctx, &marketv1.ActivateDataSetRequest{
+		Code:    "WHOLESALE_ENERGY_GBP_KWH",
+		Version: 1,
+	})
+	if err == nil {
+		fmt.Println("  Activated dataset: WHOLESALE_ENERGY_GBP_KWH")
+	} else if st, ok := status.FromError(err); !ok || st.Code() != codes.FailedPrecondition {
+		return fmt.Errorf("activate dataset: %w", err)
+	}
+
 	// Seed 30 days of wholesale prices.
 	// UK wholesale prices vary between 15-35p/kWh with daily volatility.
 	rng := rand.New(rand.NewSource(42)) //nolint:gosec
