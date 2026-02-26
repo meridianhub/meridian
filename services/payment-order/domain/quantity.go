@@ -2,6 +2,16 @@
 //
 // This replaces the previous money.go which used shared/domain/money,
 // migrating to the new Universal Asset System quantity package.
+//
+// # Design Constraint: Currency-Only
+//
+// Payment Order is intentionally restricted to CURRENCY dimension instruments.
+// This is by design: payment orders represent fiat money movements (bank transfers,
+// direct debits, credit card charges) which are always denominated in a currency.
+//
+// Non-currency assets (energy kWh, compute GPU_HOUR, carbon credits) are NOT
+// supported here. For multi-asset position tracking, see the position-keeping service
+// which uses the dimension-agnostic Amount type from shared/pkg/amount.
 package domain
 
 import (
