@@ -155,6 +155,7 @@ func (m *MappingMiddleware) handleMappingRequest(w http.ResponseWriter, r *http.
 	// Pass non-2xx responses through untransformed.
 	if rec.code < 200 || rec.code >= 300 {
 		copyHeaders(w.Header(), rec.headers)
+		setSafeResponseHeaders(w)
 		w.WriteHeader(rec.code)
 		_, _ = w.Write(rec.buf.Bytes())
 		return nil
@@ -193,6 +194,7 @@ func (m *MappingMiddleware) handleMappingRequest(w http.ResponseWriter, r *http.
 		"output_bytes", len(transformed))
 
 	copyHeaders(w.Header(), rec.headers)
+	setSafeResponseHeaders(w)
 	// Remove Transfer-Encoding before setting Content-Length to avoid conflicting
 	// HTTP headers (Transfer-Encoding: chunked + Content-Length violates semantics).
 	w.Header().Del("Transfer-Encoding")
@@ -201,6 +203,13 @@ func (m *MappingMiddleware) handleMappingRequest(w http.ResponseWriter, r *http.
 	w.WriteHeader(rec.code)
 	_, _ = w.Write(transformed)
 	return nil
+}
+
+// setSafeResponseHeaders sets Content-Type and X-Content-Type-Options to prevent
+// browsers from interpreting JSON API responses as HTML (reflected XSS mitigation).
+func setSafeResponseHeaders(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 }
 
 // copyHeaders copies all headers from src into dst.
