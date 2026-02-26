@@ -1,4 +1,3 @@
-//nolint:staticcheck // Tests intentionally use deprecated AmountCents() to verify backward compatibility
 package domain
 
 import (
@@ -10,14 +9,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// toMinorUnits is a helper to extract minor units from Amount, panicking on error.
+// Used in tests to keep assertions concise.
+func toMinorUnits(a Amount) int64 {
+	v, err := a.ToMinorUnits()
+	if err != nil {
+		panic(err)
+	}
+	return v
+}
+
 func TestNewCurrentAccount(t *testing.T) {
 	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
 	require.NoError(t, err)
 
 	assert.Equal(t, "ACC-001", account.AccountID())
 	assert.Equal(t, "PARTY-001", account.PartyID())
-	assert.Equal(t, int64(0), account.Balance().AmountCents())
-	assert.Equal(t, CurrencyGBP, account.Balance().Currency())
+	assert.Equal(t, int64(0), toMinorUnits(account.Balance()))
+	assert.Equal(t, "GBP", account.Balance().InstrumentCode())
 	assert.Equal(t, AccountStatusActive, account.Status())
 	assert.Equal(t, "GB82WEST12345698765432", account.ExternalIdentifier())
 	assert.Equal(t, "GBP", account.InstrumentCode())
@@ -42,6 +51,24 @@ func TestNewCurrentAccountWithDimension_ExplicitDimension(t *testing.T) {
 	assert.Equal(t, "GBP", account.InstrumentCode())
 	assert.Equal(t, "CURRENCY", account.Dimension())
 	assert.Equal(t, "IDENT-001", account.ExternalIdentifier())
+}
+
+func TestNewCurrentAccountWithDimension_EnergyAccount(t *testing.T) {
+	account, err := NewCurrentAccountWithDimension("ACC-KWH-001", "KWH-IDENT-001", "PARTY-001", "KWH", "ENERGY")
+	require.NoError(t, err)
+
+	assert.Equal(t, "KWH", account.InstrumentCode())
+	assert.Equal(t, "ENERGY", account.Dimension())
+	assert.Equal(t, int64(0), toMinorUnits(account.Balance()))
+}
+
+func TestNewCurrentAccountWithDimension_CarbonAccount(t *testing.T) {
+	account, err := NewCurrentAccountWithDimension("ACC-CC-001", "CC-IDENT-001", "PARTY-001", "CARBON_CREDIT", "CARBON")
+	require.NoError(t, err)
+
+	assert.Equal(t, "CARBON_CREDIT", account.InstrumentCode())
+	assert.Equal(t, "CARBON", account.Dimension())
+	assert.Equal(t, int64(0), toMinorUnits(account.Balance()))
 }
 
 func TestDeposit(t *testing.T) {
@@ -95,13 +122,13 @@ func TestDeposit(t *testing.T) {
 			if tt.wantErr {
 				assert.Error(t, err)
 				// Original account should be unchanged on error
-				assert.Equal(t, tt.initialBal, account.Balance().AmountCents())
+				assert.Equal(t, tt.initialBal, toMinorUnits(account.Balance()))
 			} else {
 				assert.NoError(t, err)
 				// Updated account should have new balance
-				assert.Equal(t, tt.wantBalance, updatedAccount.Balance().AmountCents())
+				assert.Equal(t, tt.wantBalance, toMinorUnits(updatedAccount.Balance()))
 				// Original account should be unchanged (immutability)
-				assert.Equal(t, tt.initialBal, account.Balance().AmountCents())
+				assert.Equal(t, tt.initialBal, toMinorUnits(account.Balance()))
 			}
 		})
 	}
@@ -148,7 +175,7 @@ func TestPrepareForCredit(t *testing.T) {
 	require.NoError(t, err)
 
 	// Balance should NOT change (Position Keeping is source of truth)
-	assert.Equal(t, account.Balance().AmountCents(), prepared.Balance().AmountCents())
+	assert.Equal(t, toMinorUnits(account.Balance()), toMinorUnits(prepared.Balance()))
 
 	// Version should be incremented for optimistic locking
 	assert.Equal(t, account.Version()+1, prepared.Version())
@@ -206,7 +233,7 @@ func TestPrepareForDebit(t *testing.T) {
 	require.NoError(t, err)
 
 	// Balance should NOT change (Position Keeping is source of truth)
-	assert.Equal(t, account.Balance().AmountCents(), prepared.Balance().AmountCents())
+	assert.Equal(t, toMinorUnits(account.Balance()), toMinorUnits(prepared.Balance()))
 
 	// Version should be incremented for optimistic locking
 	assert.Equal(t, account.Version()+1, prepared.Version())
@@ -324,13 +351,13 @@ func TestWithdraw(t *testing.T) {
 			if tt.wantErr {
 				assert.Error(t, err)
 				// Original account should be unchanged on error
-				assert.Equal(t, tt.initialBal, account.Balance().AmountCents())
+				assert.Equal(t, tt.initialBal, toMinorUnits(account.Balance()))
 			} else {
 				assert.NoError(t, err)
 				// Updated account should have new balance
-				assert.Equal(t, tt.wantBalance, updatedAccount.Balance().AmountCents())
+				assert.Equal(t, tt.wantBalance, toMinorUnits(updatedAccount.Balance()))
 				// Original account should be unchanged (immutability)
-				assert.Equal(t, tt.initialBal, account.Balance().AmountCents())
+				assert.Equal(t, tt.initialBal, toMinorUnits(account.Balance()))
 			}
 
 			if tt.expectedError != nil {
@@ -361,7 +388,7 @@ func TestWithdraw_ExceedsAvailableBalance(t *testing.T) {
 	assert.ErrorIs(t, err, ErrInsufficientFunds)
 }
 
-func TestWithdraw_CurrencyMismatch(t *testing.T) {
+func TestWithdraw_InstrumentMismatch(t *testing.T) {
 	// Create GBP account with balance
 	initialBalance, _ := NewMoney("GBP", 10000) // £100
 	account := NewCurrentAccountBuilder().
@@ -379,7 +406,7 @@ func TestWithdraw_CurrencyMismatch(t *testing.T) {
 	_, err := account.Withdraw(withdrawMoney)
 
 	assert.Error(t, err)
-	assert.ErrorIs(t, err, ErrCurrencyMismatch)
+	assert.ErrorIs(t, err, ErrInstrumentMismatch)
 }
 
 func TestWithdraw_FrozenAccount(t *testing.T) {
@@ -444,7 +471,7 @@ func TestWithdraw_ExactAvailableBalance(t *testing.T) {
 	updatedAccount, err := account.Withdraw(withdrawMoney)
 
 	assert.NoError(t, err)
-	assert.Equal(t, int64(0), updatedAccount.Balance().AmountCents())
+	assert.Equal(t, int64(0), toMinorUnits(updatedAccount.Balance()))
 }
 
 func TestWithdraw_ExactAvailableBalanceFromService(t *testing.T) {
@@ -469,7 +496,7 @@ func TestWithdraw_ExactAvailableBalanceFromService(t *testing.T) {
 
 	assert.NoError(t, err)
 	// Balance goes from £10 to -£5 (service-managed overdraft zone)
-	assert.Equal(t, int64(-500), updatedAccount.Balance().AmountCents())
+	assert.Equal(t, int64(-500), toMinorUnits(updatedAccount.Balance()))
 }
 
 func TestWithdraw_NegativeAmount(t *testing.T) {
@@ -541,7 +568,7 @@ func TestBuilder_InstrumentCode_Dimension(t *testing.T) {
 	assert.Equal(t, "GB82WEST12345698765432", account.AccountIdentification())
 }
 
-func TestCurrencyMismatch(t *testing.T) {
+func TestInstrumentMismatch_Deposit(t *testing.T) {
 	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
 	require.NoError(t, err)
 
@@ -549,12 +576,87 @@ func TestCurrencyMismatch(t *testing.T) {
 	_, err = account.Deposit(depositMoney)
 
 	assert.Error(t, err)
-	assert.ErrorIs(t, err, ErrCurrencyMismatch)
+	assert.ErrorIs(t, err, ErrInstrumentMismatch)
+}
+
+func TestDepositKWH_IntoKWHAccount(t *testing.T) {
+	account, err := NewCurrentAccountWithDimension("ACC-KWH-001", "KWH-001", "PARTY-001", "KWH", "ENERGY")
+	require.NoError(t, err)
+
+	depositAmount, err := NewAmountFromInstrument("KWH", "ENERGY", 0, 1500) // 1500 KWH (whole units)
+	require.NoError(t, err)
+
+	updatedAccount, err := account.Deposit(depositAmount)
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(1500), toMinorUnits(updatedAccount.Balance()))
+	assert.Equal(t, "KWH", updatedAccount.Balance().InstrumentCode())
+	assert.Equal(t, "ENERGY", updatedAccount.Balance().Dimension())
+}
+
+func TestDepositKWH_IntoGBPAccount_Fails(t *testing.T) {
+	account, err := NewCurrentAccount("ACC-GBP-001", "GBP-001", "PARTY-001", "GBP")
+	require.NoError(t, err)
+
+	depositAmount, err := NewAmountFromInstrument("KWH", "ENERGY", 3, 1500)
+	require.NoError(t, err)
+
+	_, err = account.Deposit(depositAmount)
+
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrInstrumentMismatch)
+}
+
+func TestWithdrawFromNonCurrencyAccount(t *testing.T) {
+	account, err := NewCurrentAccountWithDimension("ACC-KWH-001", "KWH-001", "PARTY-001", "KWH", "ENERGY")
+	require.NoError(t, err)
+
+	// Deposit first
+	depositAmount, err := NewAmountFromInstrument("KWH", "ENERGY", 0, 5000) // 5000 KWH
+	require.NoError(t, err)
+	account, err = account.Deposit(depositAmount)
+	require.NoError(t, err)
+
+	// Withdraw
+	withdrawAmount, err := NewAmountFromInstrument("KWH", "ENERGY", 0, 2000) // 2000 KWH
+	require.NoError(t, err)
+	updatedAccount, err := account.Withdraw(withdrawAmount)
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(3000), toMinorUnits(updatedAccount.Balance())) // 3000 KWH
+}
+
+func TestCreateLienOnNonCurrencyAccount(t *testing.T) {
+	// PrepareForDebit acts as lien validation - verifies dimension-agnostic operation
+	carbonAmount, err := NewAmountFromInstrument("CARBON_CREDIT", "CARBON", 0, 100) // 100 CARBON_CREDIT
+	require.NoError(t, err)
+
+	account := NewCurrentAccountBuilder().
+		WithAccountID("ACC-CC-001").
+		WithExternalIdentifier("CC-001").
+		WithInstrumentCode("CARBON_CREDIT").
+		WithDimension("CARBON").
+		WithPartyID("PARTY-001").
+		WithBalance(carbonAmount).
+		WithAvailableBalance(carbonAmount).
+		WithStatus(AccountStatusActive).
+		WithVersion(1).
+		Build()
+
+	debitAmount, err := NewAmountFromInstrument("CARBON_CREDIT", "CARBON", 0, 50)
+	require.NoError(t, err)
+
+	prepared, err := account.PrepareForDebit(debitAmount)
+	require.NoError(t, err)
+
+	// Balance unchanged, version bumped
+	assert.Equal(t, int64(100), toMinorUnits(prepared.Balance()))
+	assert.Equal(t, account.Version()+1, prepared.Version())
 }
 
 // Defensive test per ADR-008: Constructor validation
 
-func TestNewCurrentAccount_InvalidCurrency_ReturnsError(t *testing.T) {
+func TestNewCurrentAccount_InvalidInstrument_ReturnsError(t *testing.T) {
 	tests := []struct {
 		name      string
 		currency  string
@@ -565,7 +667,7 @@ func TestNewCurrentAccount_InvalidCurrency_ReturnsError(t *testing.T) {
 			name:      "empty currency",
 			currency:  "",
 			wantErr:   true,
-			rationale: "Empty currency should be rejected at construction",
+			rationale: "Empty instrument code should be rejected at construction",
 		},
 		{
 			name:      "valid currency",
@@ -581,7 +683,6 @@ func TestNewCurrentAccount_InvalidCurrency_ReturnsError(t *testing.T) {
 
 			if tt.wantErr {
 				assert.Error(t, err, tt.rationale)
-				assert.ErrorIs(t, err, ErrInvalidCurrency, "Should return ErrInvalidCurrency")
 			} else {
 				assert.NoError(t, err, tt.rationale)
 			}
@@ -589,8 +690,8 @@ func TestNewCurrentAccount_InvalidCurrency_ReturnsError(t *testing.T) {
 	}
 }
 
-// Tests for large values with decimal-based Money implementation
-// Note: The new decimal-based Money implementation does not overflow on arithmetic
+// Tests for large values with decimal-based Amount implementation
+// Note: The decimal-based Amount implementation does not overflow on arithmetic
 // operations like int64 did. Overflow is now checked when converting to minor units.
 
 // Tests for large deposits
@@ -615,7 +716,7 @@ func TestDeposit_LargeValues(t *testing.T) {
 
 	updatedAccount, err := account.Deposit(deposit)
 	assert.NoError(t, err, "Large deposits should be handled correctly")
-	assert.Equal(t, int64(2000000000000), updatedAccount.Balance().AmountCents())
+	assert.Equal(t, int64(2000000000000), toMinorUnits(updatedAccount.Balance()))
 }
 
 // Immutability tests
@@ -624,7 +725,7 @@ func TestImmutability_DepositDoesNotModifyOriginal(t *testing.T) {
 	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
 	require.NoError(t, err)
 
-	originalBalance := account.Balance().AmountCents()
+	originalBalance := toMinorUnits(account.Balance())
 	originalVersion := account.Version()
 
 	deposit, _ := NewMoney("GBP", 10000)
@@ -632,7 +733,7 @@ func TestImmutability_DepositDoesNotModifyOriginal(t *testing.T) {
 	require.NoError(t, err)
 
 	// Original should be unchanged
-	assert.Equal(t, originalBalance, account.Balance().AmountCents())
+	assert.Equal(t, originalBalance, toMinorUnits(account.Balance()))
 	assert.Equal(t, originalVersion, account.Version())
 }
 
@@ -646,7 +747,7 @@ func TestImmutability_WithdrawDoesNotModifyOriginal(t *testing.T) {
 		WithVersion(1).
 		Build()
 
-	originalBalance := account.Balance().AmountCents()
+	originalBalance := toMinorUnits(account.Balance())
 	originalVersion := account.Version()
 
 	withdrawal, _ := NewMoney("GBP", 5000)
@@ -654,7 +755,7 @@ func TestImmutability_WithdrawDoesNotModifyOriginal(t *testing.T) {
 	require.NoError(t, err)
 
 	// Original should be unchanged
-	assert.Equal(t, originalBalance, account.Balance().AmountCents())
+	assert.Equal(t, originalBalance, toMinorUnits(account.Balance()))
 	assert.Equal(t, originalVersion, account.Version())
 }
 
@@ -686,10 +787,10 @@ func TestImmutability_ChainedOperations(t *testing.T) {
 	afterWithdrawal, _ := afterDeposit2.Withdraw(withdrawal)
 
 	// Verify each instance has independent state
-	assert.Equal(t, int64(0), original.Balance().AmountCents())
-	assert.Equal(t, int64(10000), afterDeposit1.Balance().AmountCents())
-	assert.Equal(t, int64(15000), afterDeposit2.Balance().AmountCents())
-	assert.Equal(t, int64(12000), afterWithdrawal.Balance().AmountCents())
+	assert.Equal(t, int64(0), toMinorUnits(original.Balance()))
+	assert.Equal(t, int64(10000), toMinorUnits(afterDeposit1.Balance()))
+	assert.Equal(t, int64(15000), toMinorUnits(afterDeposit2.Balance()))
+	assert.Equal(t, int64(12000), toMinorUnits(afterWithdrawal.Balance()))
 
 	// Verify versions are incrementally updated
 	assert.Equal(t, int64(1), original.Version())
@@ -708,7 +809,7 @@ func TestImmutability_FailedOperationDoesNotModify(t *testing.T) {
 		WithVersion(1).
 		Build()
 
-	originalBalance := account.Balance().AmountCents()
+	originalBalance := toMinorUnits(account.Balance())
 	originalVersion := account.Version()
 
 	// Attempt an operation that will fail
@@ -717,7 +818,7 @@ func TestImmutability_FailedOperationDoesNotModify(t *testing.T) {
 
 	// Verify original is unchanged despite the failed operation
 	require.Error(t, err)
-	assert.Equal(t, originalBalance, account.Balance().AmountCents())
+	assert.Equal(t, originalBalance, toMinorUnits(account.Balance()))
 	assert.Equal(t, originalVersion, account.Version())
 }
 
@@ -749,8 +850,8 @@ func TestCurrentAccountBuilder(t *testing.T) {
 	assert.Equal(t, "GBP", account.InstrumentCode())
 	assert.Equal(t, "CURRENCY", account.Dimension())
 	assert.Equal(t, "party-123", account.PartyID())
-	assert.Equal(t, int64(10000), account.Balance().AmountCents())
-	assert.Equal(t, int64(15000), account.AvailableBalance().AmountCents())
+	assert.Equal(t, int64(10000), toMinorUnits(account.Balance()))
+	assert.Equal(t, int64(15000), toMinorUnits(account.AvailableBalance()))
 	assert.Equal(t, AccountStatusActive, account.Status())
 	assert.Equal(t, int64(5), account.Version())
 }

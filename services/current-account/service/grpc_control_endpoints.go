@@ -270,7 +270,7 @@ func (s *Service) publishControlActionEvent(
 		// Convert domain balance to google.type.Money
 		balanceCents, _ := account.Balance().ToMinorUnits()
 		closingBalance := &money.Money{
-			CurrencyCode: account.Balance().CurrencyCode(),
+			CurrencyCode: account.Balance().InstrumentCode(),
 			Units:        balanceCents / 100,
 			Nanos:        int32((balanceCents % 100) * 10000000),
 		}
@@ -342,7 +342,7 @@ func (s *Service) sendControlActionWebhook(
 		balanceCents, _ := account.Balance().ToMinorUnits()
 		balanceInfo := &WebhookBalanceInfo{
 			Amount:       balanceCents,
-			CurrencyCode: account.Balance().CurrencyCode(),
+			CurrencyCode: account.Balance().InstrumentCode(),
 		}
 
 		// Send webhook notification asynchronously (fire-and-forget)

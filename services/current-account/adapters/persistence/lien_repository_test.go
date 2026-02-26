@@ -87,7 +87,7 @@ func TestLienRepository_Create(t *testing.T) {
 	amountCents, err := retrieved.Amount.ToMinorUnits()
 	require.NoError(t, err)
 	assert.Equal(t, int64(10000), amountCents)
-	assert.Equal(t, domain.CurrencyGBP, retrieved.Amount.Currency())
+	assert.Equal(t, "GBP", retrieved.Amount.InstrumentCode())
 	assert.Equal(t, "bucket-abc", retrieved.BucketID)
 	assert.Equal(t, domain.LienStatusActive, retrieved.Status)
 	assert.Equal(t, "PO-001", retrieved.PaymentOrderReference)

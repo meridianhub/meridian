@@ -174,7 +174,7 @@ func toWithdrawalEntity(withdrawal *domain.Withdrawal) *WithdrawalEntity {
 		ID:          withdrawal.ID,
 		AccountID:   withdrawal.AccountID,
 		AmountCents: withdrawal.Amount.ToMinorUnitsUnchecked(),
-		Currency:    string(withdrawal.Amount.Currency()),
+		Currency:    withdrawal.Amount.InstrumentCode(),
 		Status:      string(withdrawal.Status),
 		Reference:   withdrawal.Reference,
 		CreatedAt:   withdrawal.CreatedAt,

@@ -44,7 +44,7 @@ var (
 
 // balanceCents returns the balance as cents for test assertions.
 // Panics on error (should never happen in tests with valid Money).
-func balanceCents(m domain.Money) int64 {
+func balanceCents(m domain.Amount) int64 {
 	cents, err := m.ToMinorUnits()
 	if err != nil {
 		panic("ToMinorUnits failed: " + err.Error())

@@ -36,20 +36,20 @@ func toProtoFacility(account domain.CurrentAccount) *pb.CurrentAccountFacility {
 // safeMinorUnits converts Money to minor units (cents) with overflow protection.
 // Returns 0 if overflow occurs (should not happen in practice for valid accounts).
 // Used for logging and metrics where returning an error is not practical.
-func safeMinorUnits(m domain.Money) int64 {
+func safeMinorUnits(m domain.Amount) int64 {
 	cents, err := m.ToMinorUnits()
 	if err != nil {
 		// This should never happen in practice - int64 max is ~92 quadrillion cents
 		// Log the anomaly for visibility, then return 0 rather than panicking
 		slog.Error("amount overflow in metrics conversion",
-			"currency", m.Currency(),
+			"currency", m.InstrumentCode(),
 			"error", err)
 		return 0
 	}
 	return cents
 }
 
-func toMoneyAmount(m domain.Money) *commonpb.MoneyAmount {
+func toMoneyAmount(m domain.Amount) *commonpb.MoneyAmount {
 	amountCents := safeMinorUnits(m)
 	units := amountCents / 100
 	remainder := amountCents % 100
@@ -64,7 +64,7 @@ func toMoneyAmount(m domain.Money) *commonpb.MoneyAmount {
 
 	return &commonpb.MoneyAmount{
 		Amount: &money.Money{
-			CurrencyCode: string(m.Currency()),
+			CurrencyCode: m.InstrumentCode(),
 			Units:        units,
 			Nanos:        nanos,
 		},

@@ -1,4 +1,3 @@
-//nolint:staticcheck // Tests intentionally use deprecated AmountCents() to verify backward compatibility
 package domain
 
 import (
@@ -11,8 +10,8 @@ func TestNewMoney_ValidInput_CreatesMoney(t *testing.T) {
 	money, err := NewMoney("GBP", 100)
 
 	assert.NoError(t, err)
-	assert.Equal(t, CurrencyGBP, money.Currency())
-	assert.Equal(t, int64(100), money.AmountCents())
+	assert.Equal(t, "GBP", money.InstrumentCode())
+	assert.Equal(t, int64(100), toMinorUnits(money))
 }
 
 func TestNewMoney_EmptyCurrency_ReturnsError(t *testing.T) {
@@ -36,8 +35,8 @@ func TestMoney_Add_SameCurrency_ReturnsSum(t *testing.T) {
 	result, err := m1.Add(m2)
 
 	assert.NoError(t, err)
-	assert.Equal(t, int64(150), result.AmountCents())
-	assert.Equal(t, CurrencyGBP, result.Currency())
+	assert.Equal(t, int64(150), toMinorUnits(result))
+	assert.Equal(t, "GBP", result.InstrumentCode())
 }
 
 func TestMoney_Add_DifferentCurrency_ReturnsError(t *testing.T) {
@@ -47,17 +46,17 @@ func TestMoney_Add_DifferentCurrency_ReturnsError(t *testing.T) {
 	_, err := m1.Add(m2)
 
 	assert.Error(t, err)
-	assert.ErrorIs(t, err, ErrCurrencyMismatch)
+	assert.ErrorIs(t, err, ErrInstrumentMismatch)
 }
 
 func TestMoney_Add_DoesNotMutateOriginal(t *testing.T) {
 	original, _ := NewMoney("GBP", 100)
-	originalAmount := original.AmountCents()
+	originalAmount := toMinorUnits(original)
 	other, _ := NewMoney("GBP", 50)
 
 	_, _ = original.Add(other)
 
-	assert.Equal(t, originalAmount, original.AmountCents(),
+	assert.Equal(t, originalAmount, toMinorUnits(original),
 		"original money should not be mutated by Add operation")
 }
 
@@ -68,8 +67,8 @@ func TestMoney_Subtract_SameCurrency_ReturnsDifference(t *testing.T) {
 	result, err := m1.Subtract(m2)
 
 	assert.NoError(t, err)
-	assert.Equal(t, int64(70), result.AmountCents())
-	assert.Equal(t, CurrencyGBP, result.Currency())
+	assert.Equal(t, int64(70), toMinorUnits(result))
+	assert.Equal(t, "GBP", result.InstrumentCode())
 }
 
 func TestMoney_Subtract_DifferentCurrency_ReturnsError(t *testing.T) {
@@ -79,17 +78,17 @@ func TestMoney_Subtract_DifferentCurrency_ReturnsError(t *testing.T) {
 	_, err := m1.Subtract(m2)
 
 	assert.Error(t, err)
-	assert.ErrorIs(t, err, ErrCurrencyMismatch)
+	assert.ErrorIs(t, err, ErrInstrumentMismatch)
 }
 
 func TestMoney_Subtract_DoesNotMutateOriginal(t *testing.T) {
 	original, _ := NewMoney("GBP", 100)
-	originalAmount := original.AmountCents()
+	originalAmount := toMinorUnits(original)
 	other, _ := NewMoney("GBP", 30)
 
 	_, _ = original.Subtract(other)
 
-	assert.Equal(t, originalAmount, original.AmountCents(),
+	assert.Equal(t, originalAmount, toMinorUnits(original),
 		"original money should not be mutated by Subtract operation")
 }
 
@@ -152,20 +151,13 @@ func TestMoney_ValueSemantics_CopyIsIndependent(t *testing.T) {
 	addition, _ := NewMoney("GBP", 50)
 	m2, _ = m2.Add(addition)
 
-	assert.Equal(t, int64(100), m1.AmountCents(), "m1 should remain unchanged")
-	assert.Equal(t, int64(150), m2.AmountCents(), "m2 should have new value")
+	assert.Equal(t, int64(100), toMinorUnits(m1), "m1 should remain unchanged")
+	assert.Equal(t, int64(150), toMinorUnits(m2), "m2 should have new value")
 }
 
-// Test that Money cannot be constructed with invalid state
+// Test that Amount cannot be constructed with invalid state via NewMoney
 func TestMoney_CannotConstructDirectly_FieldsUnexported(t *testing.T) {
-	// This test verifies that struct fields are unexported
-	// If fields are exported, this won't compile (which is what we want)
-
 	money, _ := NewMoney("GBP", 100)
-
-	// These lines should NOT compile if fields are properly unexported:
-	// money.AmountCents = 200  // Should fail: field unexported
-	// money.Currency = "USD"    // Should fail: field unexported
 
 	// Only way to "modify" is through methods that return new instances
 	addition, _ := NewMoney("GBP", 50)
@@ -173,7 +165,7 @@ func TestMoney_CannotConstructDirectly_FieldsUnexported(t *testing.T) {
 	assert.NotEqual(t, money, newMoney, "should be different instances")
 }
 
-// Note: The new shared Money implementation uses decimal.Decimal internally,
+// Note: The Amount implementation uses decimal.Decimal internally,
 // which does not have the same overflow characteristics as int64.
 // These tests verify that very large values are handled correctly.
 
@@ -185,7 +177,7 @@ func TestMoney_Add_LargeValues_Success(t *testing.T) {
 	result, err := m1.Add(m2)
 
 	assert.NoError(t, err)
-	assert.Equal(t, int64(2000000000000), result.AmountCents())
+	assert.Equal(t, int64(2000000000000), toMinorUnits(result))
 }
 
 func TestMoney_Subtract_LargeNegative_Success(t *testing.T) {
@@ -195,7 +187,7 @@ func TestMoney_Subtract_LargeNegative_Success(t *testing.T) {
 	result, err := m1.Subtract(m2)
 
 	assert.NoError(t, err)
-	assert.Equal(t, int64(-1000000000000), result.AmountCents())
+	assert.Equal(t, int64(-1000000000000), toMinorUnits(result))
 }
 
 func TestMoney_Equals_ZeroAmountDifferentCurrency_ReturnsFalse(t *testing.T) {
@@ -217,7 +209,7 @@ func TestNewMoney_SupportedCurrencies(t *testing.T) {
 		t.Run(currency, func(t *testing.T) {
 			money, err := NewMoney(currency, 100)
 			assert.NoError(t, err)
-			assert.Equal(t, currency, string(money.Currency()))
+			assert.Equal(t, currency, money.InstrumentCode())
 		})
 	}
 }
@@ -232,4 +224,40 @@ func TestNewMoney_UnsupportedCurrencies_ReturnsError(t *testing.T) {
 			assert.ErrorIs(t, err, ErrInvalidCurrency)
 		})
 	}
+}
+
+// Tests for NewAmountFromInstrument - multi-asset support
+func TestNewAmountFromInstrument_CURRENCY(t *testing.T) {
+	a, err := NewAmountFromInstrument("GBP", "CURRENCY", 2, 10000)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "GBP", a.InstrumentCode())
+	assert.Equal(t, "CURRENCY", a.Dimension())
+	assert.Equal(t, int64(10000), toMinorUnits(a))
+}
+
+func TestNewAmountFromInstrument_ENERGY(t *testing.T) {
+	a, err := NewAmountFromInstrument("KWH", "ENERGY", 3, 1500)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "KWH", a.InstrumentCode())
+	assert.Equal(t, "ENERGY", a.Dimension())
+	assert.Equal(t, int64(1500), toMinorUnits(a))
+}
+
+func TestNewAmountFromInstrument_CARBON(t *testing.T) {
+	a, err := NewAmountFromInstrument("CARBON_CREDIT", "CARBON", 0, 100)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "CARBON_CREDIT", a.InstrumentCode())
+	assert.Equal(t, "CARBON", a.Dimension())
+	assert.Equal(t, int64(100), toMinorUnits(a))
+}
+
+func TestNewAmountFromInstrument_InvalidDimension_ReturnsError(t *testing.T) {
+	_, err := NewAmountFromInstrument("XYZ", "INVALID_DIM", 0, 100)
+
+	assert.Error(t, err)
+	// NewAmountFromInstrument returns ErrInvalidDimension from shared/pkg/amount for invalid dimensions
+	// (not ErrInstrumentMismatch which is for arithmetic on different instruments)
 }

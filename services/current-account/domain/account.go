@@ -132,16 +132,13 @@ func NewCurrentAccount(accountID, externalIdentifier, partyID, instrumentCode st
 //
 // For non-CURRENCY dimensions, precision is trusted as provided by the caller (validated at the
 // API boundary by the gRPC service layer using Reference Data).
-//
-// NOTE: Balance creation for non-CURRENCY dimensions is gated by the Money type which currently
-// only supports CURRENCY. Full non-currency balance support is handled in task 16.
 func NewCurrentAccountWithDimension(accountID, externalIdentifier, partyID, instrumentCode, dimension string, precision int, opts ...AccountOption) (CurrentAccount, error) {
 	now := time.Now()
 	normalizedDimension := strings.ToUpper(dimension)
 
 	// For CURRENCY, validate precision against canonical registry value.
 	// If the currency code is not in the local registry (e.g. a currency only defined in
-	// the Reference Data service), precision validation is deferred: NewMoneyFromInstrument
+	// the Reference Data service), precision validation is deferred: NewAmountFromInstrument
 	// will return ErrInvalidCurrency if the code is genuinely unknown.
 	if normalizedDimension == quantity.DimensionCurrency {
 		if inst, ok := currency.ByCode(strings.ToUpper(instrumentCode)); ok {
@@ -152,7 +149,7 @@ func NewCurrentAccountWithDimension(accountID, externalIdentifier, partyID, inst
 		}
 	}
 
-	zeroMoney, err := NewMoneyFromInstrument(instrumentCode, normalizedDimension, 0)
+	zeroAmount, err := NewAmountFromInstrument(instrumentCode, normalizedDimension, precision, 0)
 	if err != nil {
 		return CurrentAccount{}, err
 	}
@@ -164,8 +161,8 @@ func NewCurrentAccountWithDimension(accountID, externalIdentifier, partyID, inst
 		instrumentCode:     instrumentCode,
 		dimension:          normalizedDimension,
 		partyID:            partyID,
-		balance:            zeroMoney,
-		availableBalance:   zeroMoney,
+		balance:            zeroAmount,
+		availableBalance:   zeroAmount,
 		status:             AccountStatusActive,
 		balanceUpdatedAt:   now,
 		version:            1,
@@ -200,8 +197,8 @@ func (a CurrentAccount) Deposit(amount Money) (CurrentAccount, error) {
 		return CurrentAccount{}, ErrAccountClosed
 	}
 
-	if amount.Currency() != a.balance.Currency() {
-		return CurrentAccount{}, ErrCurrencyMismatch
+	if amount.InstrumentCode() != a.balance.InstrumentCode() {
+		return CurrentAccount{}, ErrInstrumentMismatch
 	}
 
 	// Use immutable Add method
@@ -294,12 +291,12 @@ func (a CurrentAccount) PrepareForDebit(amount Money) (CurrentAccount, error) {
 		return CurrentAccount{}, ErrAccountClosed
 	}
 
-	if amount.Currency() != a.balance.Currency() {
-		return CurrentAccount{}, ErrCurrencyMismatch
+	if amount.InstrumentCode() != a.balance.InstrumentCode() {
+		return CurrentAccount{}, ErrInstrumentMismatch
 	}
 
 	// Check if sufficient funds (via availableBalance).
-	// Currency match is already verified above, so Compare cannot return an error here.
+	// Instrument match is already verified above, so Compare cannot return an error here.
 	cmp, err := amount.Compare(a.availableBalance)
 	if err != nil {
 		return CurrentAccount{}, err
@@ -347,12 +344,12 @@ func (a CurrentAccount) Withdraw(amount Money) (CurrentAccount, error) {
 		return CurrentAccount{}, ErrAccountClosed
 	}
 
-	if amount.Currency() != a.balance.Currency() {
-		return CurrentAccount{}, ErrCurrencyMismatch
+	if amount.InstrumentCode() != a.balance.InstrumentCode() {
+		return CurrentAccount{}, ErrInstrumentMismatch
 	}
 
 	// Check if sufficient funds.
-	// Currency match is already verified above, so Compare cannot return an error here.
+	// Instrument match is already verified above, so Compare cannot return an error here.
 	cmp, err := amount.Compare(a.availableBalance)
 	if err != nil {
 		return CurrentAccount{}, err

@@ -691,11 +691,11 @@ func toDomain(entity *CurrentAccountEntity) (domain.CurrentAccount, error) {
 	// Use entity's in-memory balance fields if populated (e.g., from recent save),
 	// otherwise initialize with zero values.
 	// The service layer should populate from Position Keeping for authoritative balance.
-	balance, err := domain.NewMoneyFromInstrument(entity.InstrumentCode, entity.Dimension, entity.Balance)
+	balance, err := domain.NewAmountFromInstrument(entity.InstrumentCode, entity.Dimension, 0, entity.Balance)
 	if err != nil {
 		return domain.CurrentAccount{}, fmt.Errorf("failed to create balance: %w", err)
 	}
-	availableBalance, err := domain.NewMoneyFromInstrument(entity.InstrumentCode, entity.Dimension, entity.AvailableBalance)
+	availableBalance, err := domain.NewAmountFromInstrument(entity.InstrumentCode, entity.Dimension, 0, entity.AvailableBalance)
 	if err != nil {
 		return domain.CurrentAccount{}, fmt.Errorf("failed to create available balance: %w", err)
 	}

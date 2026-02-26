@@ -201,11 +201,11 @@ func (s *Service) ExecuteWithdrawal(ctx context.Context, req *pb.ExecuteWithdraw
 	}
 
 	// Validate currency matches account currency
-	if reqAmount.Amount.CurrencyCode != account.Balance().CurrencyCode() {
+	if reqAmount.Amount.CurrencyCode != account.Balance().InstrumentCode() {
 		operationStatus = opStatusCurrencyMismatch
 		return nil, status.Errorf(codes.InvalidArgument,
 			"currency mismatch: expected %s, got %s",
-			account.Balance().CurrencyCode(), reqAmount.Amount.CurrencyCode)
+			account.Balance().InstrumentCode(), reqAmount.Amount.CurrencyCode)
 	}
 
 	// Convert amount from proto (MoneyAmount wraps google.type.Money)
@@ -285,7 +285,7 @@ func (s *Service) ExecuteWithdrawal(ctx context.Context, req *pb.ExecuteWithdraw
 	}
 
 	// Record withdrawal transaction (the withdrawal itself succeeded regardless of balance fetch)
-	caobservability.RecordWithdrawal(string(amount.Currency()))
+	caobservability.RecordWithdrawal(amount.InstrumentCode())
 
 	// After saga completes, query Position Keeping for the new balance
 	account, err = s.hydrateAccountWithBalance(ctx, account)
