@@ -40,19 +40,32 @@ export function parseJWT(token: unknown): JWTClaims | null {
       .padEnd(payload.length + ((4 - (payload.length % 4)) % 4), '=')
     const decoded = JSON.parse(atob(padded)) as Record<string, unknown>
 
+    // Determine user ID: prefer custom userId claim, fall back to standard OIDC sub claim
+    const userId =
+      typeof decoded.userId === 'string' && decoded.userId
+        ? decoded.userId
+        : typeof decoded.sub === 'string' && decoded.sub
+          ? decoded.sub
+          : null
+
     // Strict type validation to prevent expiry bypass and type confusion
     if (
-      typeof decoded.userId !== 'string' ||
+      !userId ||
       typeof decoded.exp !== 'number' ||
       !isFinite(decoded.exp) ||
       typeof decoded.iss !== 'string' ||
-      typeof decoded.aud !== 'string' ||
-      !decoded.userId ||
-      !decoded.iss ||
-      !decoded.aud
+      !decoded.iss
     ) {
       return null
     }
+
+    // Standard OIDC tokens may use aud as string or array
+    const aud =
+      typeof decoded.aud === 'string'
+        ? decoded.aud
+        : Array.isArray(decoded.aud) && decoded.aud.length > 0 && typeof decoded.aud[0] === 'string'
+          ? (decoded.aud[0] as string)
+          : ''
 
     const roles = Array.isArray(decoded.roles)
       ? (decoded.roles as unknown[]).filter((r): r is string => typeof r === 'string')
@@ -62,13 +75,13 @@ export function parseJWT(token: unknown): JWTClaims | null {
       : []
 
     return {
-      userId: decoded.userId,
+      userId,
       tenantId: typeof decoded.tenantId === 'string' ? decoded.tenantId : undefined,
       roles,
       scopes,
       exp: decoded.exp,
       iss: decoded.iss,
-      aud: decoded.aud,
+      aud,
       sub: typeof decoded.sub === 'string' ? decoded.sub : undefined,
     }
   } catch {
@@ -86,7 +99,11 @@ function getUserLens(claims: JWTClaims | null): 'platform' | 'tenant' {
   if (claims.tenantId) return 'tenant'
   const isPlatformLevel =
     claims.roles.includes('platform-admin') || claims.roles.includes('super-admin')
-  return isPlatformLevel ? 'platform' : 'tenant'
+  if (isPlatformLevel) return 'platform'
+  // In demo mode, standard OIDC tokens lack tenant and role claims.
+  // Default to 'platform' lens so DevTenantAutoSelector picks a tenant automatically.
+  if (import.meta.env.VITE_DEMO_MODE === 'true') return 'platform'
+  return 'tenant'
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)

@@ -27,12 +27,18 @@ var (
 
 // Claims represents the JWT claims extracted from a validated token.
 // It contains standard JWT claims plus custom claims for user identification and authorization.
+// It also supports standard OIDC claims (email, name) for compatibility with external
+// identity providers like Dex that issue standard tokens without custom Meridian claims.
 type Claims struct {
 	UserID string `json:"user_id"`
 	// TenantID is the tenant identifier extracted from the x-tenant-id JWT claim.
 	TenantID string   `json:"x-tenant-id"`
 	Roles    []string `json:"roles"`
 	Scopes   []string `json:"scopes"`
+	// Email is the standard OIDC email claim, present in tokens from providers like Dex.
+	Email string `json:"email"`
+	// Name is the standard OIDC name claim.
+	Name string `json:"name"`
 	jwt.RegisteredClaims
 }
 
@@ -93,6 +99,16 @@ func (v *JWTValidator) ValidateToken(tokenString string) (*Claims, error) {
 // Returns an empty string if the user ID claim is not present.
 func (c *Claims) GetUserID() string {
 	return c.UserID
+}
+
+// EffectiveUserID returns the best available user identifier.
+// It prefers the custom UserID claim, falling back to the standard OIDC Subject claim.
+// This enables compatibility with identity providers like Dex that use "sub" instead of "user_id".
+func (c *Claims) EffectiveUserID() string {
+	if c.UserID != "" {
+		return c.UserID
+	}
+	return c.Subject
 }
 
 // GetTenantID extracts and validates the tenant ID from the claims.

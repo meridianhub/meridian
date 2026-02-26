@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useEffect, useRef } from 'react'
+import { type ReactNode, useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { BrowserRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
@@ -54,6 +54,55 @@ function PlaceholderPage({ title }: { title: string }) {
 function LoginPage() {
   const { login } = useAuth()
   const navigate = useNavigate()
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const handleDexLogin = useCallback(
+    async (e: FormEvent) => {
+      e.preventDefault()
+      setError('')
+      setLoading(true)
+
+      try {
+        const body = new URLSearchParams({
+          grant_type: 'password',
+          client_id: 'meridian-service',
+          scope: 'openid email profile',
+          username: email,
+          password,
+        })
+
+        const response = await fetch('/dex/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: body.toString(),
+        })
+
+        if (!response.ok) {
+          const text = await response.text()
+          setError(text.includes('invalid_grant') ? 'Invalid email or password' : 'Authentication failed')
+          return
+        }
+
+        const data = (await response.json()) as { id_token?: string; access_token?: string }
+        const token = data.id_token ?? data.access_token
+        if (!token) {
+          setError('No token received from identity provider')
+          return
+        }
+
+        login(token)
+        navigate('/')
+      } catch {
+        setError('Unable to reach identity provider')
+      } finally {
+        setLoading(false)
+      }
+    },
+    [email, password, login, navigate],
+  )
 
   const devLogin = useCallback(
     (role: 'platform-admin' | 'tenant-user') => {
@@ -78,15 +127,60 @@ function LoginPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center">
-      <div className="text-center space-y-6">
-        <div>
+      <div className="w-full max-w-sm space-y-6 px-4">
+        <div className="text-center">
           <h1 className="text-2xl font-semibold">Meridian Operations Console</h1>
           <p className="mt-2 text-muted-foreground">Please sign in to continue.</p>
         </div>
-        {(import.meta.env.DEV || import.meta.env.VITE_DEMO_MODE === 'true') && (
+
+        {/* Dex login form - shown in demo mode and production */}
+        {(import.meta.env.VITE_DEMO_MODE === 'true' || !import.meta.env.DEV) && (
+          <form onSubmit={(e) => void handleDexLogin(e)} className="space-y-4">
+            <div>
+              <label htmlFor="email" className="block text-sm font-medium mb-1">
+                Email
+              </label>
+              <input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                autoComplete="email"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                placeholder="admin@volterra.energy"
+              />
+            </div>
+            <div>
+              <label htmlFor="password" className="block text-sm font-medium mb-1">
+                Password
+              </label>
+              <input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                autoComplete="current-password"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </div>
+            {error && <p className="text-sm text-destructive">{error}</p>}
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              {loading ? 'Signing in...' : 'Sign in'}
+            </button>
+          </form>
+        )}
+
+        {/* Dev-only fake JWT buttons */}
+        {import.meta.env.DEV && (
           <div className="space-y-2">
-            <p className="text-xs text-muted-foreground uppercase tracking-wider">
-              {import.meta.env.DEV ? 'Development Login' : 'Demo Login'}
+            <p className="text-xs text-muted-foreground uppercase tracking-wider text-center">
+              Development Login
             </p>
             <div className="flex gap-2 justify-center">
               <button
