@@ -18,7 +18,6 @@ import (
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
-	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/genproto/googleapis/type/money"
@@ -28,22 +27,25 @@ import (
 	"gorm.io/gorm"
 )
 
-const lienSvcTestTenantID = "test_tenant"
-
 func setupLienTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	t.Helper()
-	db, cleanup := testdb.SetupPostgres(t, []interface{}{
-		&persistence.CurrentAccountEntity{},
-		&persistence.LienEntity{},
-	})
+	db := openSharedDB(t)
 
-	// Create the tenant schema for tests
-	tid := tenant.TenantID(lienSvcTestTenantID)
+	// Each test gets a unique tenant → unique schema for isolation
+	tid := uniqueTenantID()
 	schemaName := tid.SchemaName()
 	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
-	// Create the lien table in the tenant schema
+	// Set search_path so tables are created in the tenant schema
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
+	require.NoError(t, err)
+
+	// AutoMigrate account and lien entities
+	err = db.AutoMigrate(&persistence.CurrentAccountEntity{}, &persistence.LienEntity{})
+	require.NoError(t, err)
+
+	// Ensure lien table has all required columns (AutoMigrate may not include all)
 	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.lien (
 		id UUID PRIMARY KEY,
 		account_id UUID NOT NULL,
@@ -63,12 +65,15 @@ func setupLienTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
-	// Set default search_path to include tenant schema
-	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
-	require.NoError(t, err)
-
-	// Create context with tenant
 	ctx := tenant.WithTenant(context.Background(), tid)
+
+	cleanup := func() {
+		_ = db.Exec(fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", pq.QuoteIdentifier(schemaName)))
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			_ = sqlDB.Close()
+		}
+	}
 
 	return db, ctx, cleanup
 }
@@ -722,8 +727,9 @@ func TestExecuteLien_IdempotencyReturnsCachedResponse(t *testing.T) {
 	require.NoError(t, lienRepo.Create(ctx, lien))
 
 	// Pre-populate cached response
+	tid, _ := tenant.FromContext(ctx)
 	idempKey := idempotency.Key{
-		TenantID:  lienSvcTestTenantID,
+		TenantID:  string(tid),
 		Namespace: "current-account",
 		Operation: "execute_lien",
 		EntityID:  lien.ID.String(),
@@ -776,8 +782,9 @@ func TestExecuteLien_IdempotencyReturnsAbortedWhenInProgress(t *testing.T) {
 	require.NoError(t, lienRepo.Create(ctx, lien))
 
 	// Mark operation as pending
+	tid, _ := tenant.FromContext(ctx)
 	idempKey := idempotency.Key{
-		TenantID:  lienSvcTestTenantID,
+		TenantID:  string(tid),
 		Namespace: "current-account",
 		Operation: "execute_lien",
 		EntityID:  lien.ID.String(),
@@ -841,8 +848,9 @@ func TestExecuteLien_IdempotencyCleanupOnFailure(t *testing.T) {
 	mockIdemp := newLienMockIdempotencyService()
 	svc := mustNewServiceWithIdempotency(t, repo, lienRepo, mockIdemp)
 
+	tid, _ := tenant.FromContext(ctx)
 	idempKey := idempotency.Key{
-		TenantID:  lienSvcTestTenantID,
+		TenantID:  string(tid),
 		Namespace: "current-account",
 		Operation: "execute_lien",
 		EntityID:  uuid.New().String(), // Non-existent lien ID
@@ -1393,11 +1401,15 @@ func TestGetActiveAmountBlocks_MapsAmountCorrectly(t *testing.T) {
 // mock valuation engine, and mock position keeping client for testing atomic valuation in InitiateLien.
 func setupAtomicValuationLienTest(t *testing.T, engine ValuationEngine, accountBalances map[string]int64) (*Service, context.Context, func()) {
 	t.Helper()
-	db, cleanup := testdb.SetupPostgres(t, nil)
+	db := openSharedDB(t)
 
-	tid := tenant.TenantID(lienSvcTestTenantID)
+	tid := uniqueTenantID()
 	schemaName := tid.SchemaName()
 	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
+	require.NoError(t, err)
+
+	// Set search_path so tables are created in the tenant schema
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create account table (uses "account" table name like valuation engine tests)
@@ -1477,9 +1489,6 @@ func setupAtomicValuationLienTest(t *testing.T, engine ValuationEngine, accountB
 		WHERE lifecycle_status = 'ACTIVE' AND valid_to = '9999-12-31 23:59:59+00'`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
-	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
-	require.NoError(t, err)
-
 	ctx := tenant.WithTenant(context.Background(), tid)
 
 	repo := persistence.NewRepository(db)
@@ -1501,6 +1510,14 @@ func setupAtomicValuationLienTest(t *testing.T, engine ValuationEngine, accountB
 	}
 	mockPosKeeping := &mockPositionKeepingClient{accountBalances: accountBalances}
 	svc.posKeepingClient = mockPosKeeping
+
+	cleanup := func() {
+		_ = db.Exec(fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", pq.QuoteIdentifier(schemaName)))
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			_ = sqlDB.Close()
+		}
+	}
 
 	return svc, ctx, cleanup
 }
@@ -1529,7 +1546,7 @@ func TestInitiateLien_AtomicValuation_Success(t *testing.T) {
 	})
 	defer cleanup()
 
-	tid := tenant.TenantID(lienSvcTestTenantID)
+	tid, _ := tenant.FromContext(ctx)
 	schemaName := tid.SchemaName()
 
 	// Create account and valuation feature
@@ -1586,7 +1603,7 @@ func TestInitiateLien_AtomicValuation_NoValuationFeature(t *testing.T) {
 	})
 	defer cleanup()
 
-	tid := tenant.TenantID(lienSvcTestTenantID)
+	tid, _ := tenant.FromContext(ctx)
 	schemaName := tid.SchemaName()
 
 	// Create account WITHOUT valuation feature
@@ -1633,7 +1650,7 @@ func TestInitiateLien_AtomicValuation_IdempotencyReturnsPriceLock(t *testing.T) 
 	})
 	defer cleanup()
 
-	tid := tenant.TenantID(lienSvcTestTenantID)
+	tid, _ := tenant.FromContext(ctx)
 	schemaName := tid.SchemaName()
 
 	// Create account and valuation feature
@@ -1703,7 +1720,7 @@ func TestInitiateLien_AtomicValuation_InsufficientFunds(t *testing.T) {
 	})
 	defer cleanup()
 
-	tid := tenant.TenantID(lienSvcTestTenantID)
+	tid, _ := tenant.FromContext(ctx)
 	schemaName := tid.SchemaName()
 
 	accountUUID := createTestAccountForValuation(t, ctx, svc.repo.DB(), schemaName, "ACC-INSUF-001", "GBP")
@@ -1738,7 +1755,7 @@ func TestInitiateLien_AtomicValuation_LegacyModeStillWorks(t *testing.T) {
 	})
 	defer cleanup()
 
-	tid := tenant.TenantID(lienSvcTestTenantID)
+	tid, _ := tenant.FromContext(ctx)
 	schemaName := tid.SchemaName()
 	createTestAccountForValuation(t, ctx, svc.repo.DB(), schemaName, "ACC-LEGACY-001", "GBP")
 
@@ -2009,7 +2026,7 @@ func TestInitiateLien_AtomicValuation_ValuationImmutable(t *testing.T) {
 	})
 	defer cleanup()
 
-	tid := tenant.TenantID(lienSvcTestTenantID)
+	tid, _ := tenant.FromContext(ctx)
 	schemaName := tid.SchemaName()
 	accountUUID := createTestAccountForValuation(t, ctx, svc.repo.DB(), schemaName, "ACC-IMMUT-001", "GBP")
 	createTestValuationFeature(t, ctx, svc.repo.DB(), schemaName, accountUUID, "UNIT")

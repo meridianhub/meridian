@@ -25,7 +25,6 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"github.com/meridianhub/meridian/shared/pkg/saga/schema"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
-	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -424,26 +423,33 @@ func (m *mockFinancialAccountingClient) Close() error {
 
 // Helper functions for integration tests
 
-const integrationTestTenantID = "test_tenant"
-
 func setupIntegrationTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	t.Helper()
-	db, cleanup := testdb.SetupPostgres(t, []interface{}{
-		&persistence.CurrentAccountEntity{},
-	})
+	db := openSharedDB(t)
 
-	// Create the tenant schema for tests
-	tid := tenant.TenantID(integrationTestTenantID)
+	// Each test gets a unique tenant → unique schema for isolation
+	tid := uniqueTenantID()
 	schemaName := tid.SchemaName()
 	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
-	// Set default search_path to include tenant schema
+	// Set search_path so AutoMigrate creates tables in the tenant schema
 	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
-	// Create context with tenant
+	// AutoMigrate in the tenant schema
+	err = db.AutoMigrate(&persistence.CurrentAccountEntity{})
+	require.NoError(t, err)
+
 	ctx := tenant.WithTenant(context.Background(), tid)
+
+	cleanup := func() {
+		_ = db.Exec(fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", pq.QuoteIdentifier(schemaName)))
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			_ = sqlDB.Close()
+		}
+	}
 
 	return db, ctx, cleanup
 }

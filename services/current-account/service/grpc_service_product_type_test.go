@@ -24,7 +24,6 @@ import (
 	celutil "github.com/meridianhub/meridian/services/reference-data/cel"
 	vf "github.com/meridianhub/meridian/shared/pkg/valuationfeature"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
-	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
@@ -88,22 +87,19 @@ func (r *jsonStringReader) Read(p []byte) (n int, err error) {
 	return n, nil
 }
 
-const productTypeTestTenantID = "test_product_type_tenant"
-
 func setupProductTypeTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	t.Helper()
-	db, cleanup := testdb.SetupPostgres(t, []interface{}{
-		&persistence.CurrentAccountEntity{},
-		&vf.Entity{},
-	})
+	db := openSharedDB(t)
 
-	tid := tenant.TenantID(productTypeTestTenantID)
+	tid := uniqueTenantID()
 	schemaName := tid.SchemaName()
-	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
+	quotedSchema := pq.QuoteIdentifier(schemaName)
+
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", quotedSchema)).Error
 	require.NoError(t, err)
 
 	// AutoMigrate tables in tenant schema
-	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", quotedSchema)).Error
 	require.NoError(t, err)
 
 	err = db.AutoMigrate(&persistence.CurrentAccountEntity{}, &vf.Entity{})
@@ -113,10 +109,19 @@ func setupProductTypeTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	// AutoMigrate only creates the table structure; partial indexes must be created manually.
 	err = db.Exec(fmt.Sprintf(`CREATE UNIQUE INDEX IF NOT EXISTS idx_valuation_feature_account_instrument_active
 		ON %s.valuation_features (account_id, instrument_code)
-		WHERE lifecycle_status = 'ACTIVE' AND valid_to = '9999-12-31 23:59:59+00'`, pq.QuoteIdentifier(schemaName))).Error
+		WHERE lifecycle_status = 'ACTIVE' AND valid_to = '9999-12-31 23:59:59+00'`, quotedSchema)).Error
 	require.NoError(t, err)
 
 	ctx := tenant.WithTenant(context.Background(), tid)
+
+	cleanup := func() {
+		db.Exec(fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", quotedSchema))
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	}
+
 	return db, ctx, cleanup
 }
 

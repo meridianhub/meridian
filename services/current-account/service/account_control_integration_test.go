@@ -14,7 +14,6 @@ import (
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
-	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -22,21 +21,26 @@ import (
 // Integration tests for Account Control Operations (BIAN CoCR)
 // These tests verify the status_history audit trail and concurrent control operations.
 
-const integrationTestTenant = "control_test_tenant"
-
-// setupControlTestDB creates a PostgreSQL testcontainer with the account table schema.
+// setupControlTestDB creates a test database using the shared PostgreSQL container.
 func setupControlTestDB(t *testing.T) (*persistence.Repository, *persistence.LienRepository, context.Context, func()) {
 	t.Helper()
 
-	// Create PostgreSQL testcontainer
-	db, cleanup := testdb.SetupPostgres(t, nil) // nil models - we'll use DDL
+	db := openSharedDB(t)
 
-	// Setup tenant schema
-	tc := testdb.SetupTenantSchema(t, db, integrationTestTenant)
+	tid := uniqueTenantID()
+	schemaName := tid.SchemaName()
+	quotedSchema := pq.QuoteIdentifier(schemaName)
+
+	// Create tenant schema
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", quotedSchema)).Error
+	require.NoError(t, err)
+
+	// Set search_path
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", quotedSchema)).Error
+	require.NoError(t, err)
 
 	// Create account table with status_history support using raw DDL
-	// We use the entity's TableName() which is "account" (singular, unqualified)
-	accountDDL := `CREATE TABLE IF NOT EXISTS %s.account (
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.account (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		account_id VARCHAR(100) NOT NULL UNIQUE,
 		account_identification VARCHAR(34) NOT NULL UNIQUE,
@@ -64,11 +68,11 @@ func setupControlTestDB(t *testing.T) (*persistence.Repository, *persistence.Lie
 		updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
 		updated_by VARCHAR(100) NOT NULL DEFAULT 'test',
 		deleted_at TIMESTAMP WITH TIME ZONE
-	)`
-	testdb.CreateTable(t, tc.DB, tc.Tenant, accountDDL)
+	)`, quotedSchema)).Error
+	require.NoError(t, err)
 
 	// Create lien table for close validation tests
-	lienDDL := `CREATE TABLE IF NOT EXISTS %s.lien (
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.lien (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		account_id UUID NOT NULL,
 		amount_cents BIGINT NOT NULL,
@@ -84,25 +88,31 @@ func setupControlTestDB(t *testing.T) (*persistence.Repository, *persistence.Lie
 		reserved_quantity JSONB,
 		valued_amount JSONB,
 		valuation_analysis JSONB
-	)`
-	testdb.CreateTable(t, tc.DB, tc.Tenant, lienDDL)
+	)`, quotedSchema)).Error
+	require.NoError(t, err)
 
 	// Create index on status for operational queries
-	quotedSchema := pq.QuoteIdentifier(tc.Tenant.SchemaName())
-	err := tc.DB.Exec(fmt.Sprintf("CREATE INDEX IF NOT EXISTS idx_account_status ON %s.account(status)", quotedSchema)).Error
+	err = db.Exec(fmt.Sprintf("CREATE INDEX IF NOT EXISTS idx_account_status ON %s.account(status)", quotedSchema)).Error
 	require.NoError(t, err)
 
 	// Create GIN index on status_history for audit queries
-	err = tc.DB.Exec(fmt.Sprintf("CREATE INDEX IF NOT EXISTS idx_account_status_history ON %s.account USING GIN(status_history)", quotedSchema)).Error
+	err = db.Exec(fmt.Sprintf("CREATE INDEX IF NOT EXISTS idx_account_status_history ON %s.account USING GIN(status_history)", quotedSchema)).Error
 	require.NoError(t, err)
 
-	repo := persistence.NewRepository(tc.DB)
-	lienRepo := persistence.NewLienRepository(tc.DB)
+	ctx := tenant.WithTenant(context.Background(), tid)
 
-	return repo, lienRepo, tc.Ctx, func() {
-		tc.Cleanup()
-		cleanup()
+	repo := persistence.NewRepository(db)
+	lienRepo := persistence.NewLienRepository(db)
+
+	cleanup := func() {
+		db.Exec(fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", quotedSchema))
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
 	}
+
+	return repo, lienRepo, ctx, cleanup
 }
 
 // createTestAccountForControl creates a test account with a unique ID for control tests.
@@ -217,10 +227,8 @@ func TestAccountControlConcurrent_FreezeRace(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 
-			// Create a new context with tenant for each goroutine
-			goroutineCtx := tenant.WithTenant(context.Background(), tenant.TenantID(integrationTestTenant))
-
-			_, err := svc.ControlCurrentAccount(goroutineCtx, &pb.ControlCurrentAccountRequest{
+			// Reuse test context — tenant context is read-only and safe for concurrent use
+			_, err := svc.ControlCurrentAccount(ctx, &pb.ControlCurrentAccountRequest{
 				AccountId:     accountID,
 				ControlAction: pb.ControlAction_CONTROL_ACTION_FREEZE,
 				Reason:        fmt.Sprintf("Concurrent freeze attempt %d for testing purposes", idx),

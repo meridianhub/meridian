@@ -19,6 +19,7 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"github.com/meridianhub/meridian/shared/pkg/saga/schema"
 	"github.com/meridianhub/meridian/shared/platform/await"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/genproto/googleapis/type/money"
@@ -833,9 +834,10 @@ func TestExecuteWithdrawal_IdempotencyReturnsCachedResponse(t *testing.T) {
 	// Create account with balance
 	_ = createTestAccountWithBalance(t, ctx, repo, "ACC-WTH-IDEMP-001", 100000)
 
-	// Pre-populate cached response
+	// Pre-populate cached response — use tenant from context (dynamic per test)
+	tid, _ := tenant.FromContext(ctx)
 	idempKey := idempotency.Key{
-		TenantID:  svcTestTenantID,
+		TenantID:  string(tid),
 		Namespace: "current-account",
 		Operation: "withdrawal",
 		EntityID:  "ACC-WTH-IDEMP-001",
@@ -883,8 +885,9 @@ func TestExecuteWithdrawal_IdempotencyReturnsAbortedWhenInProgress(t *testing.T)
 	_ = createTestAccountWithBalance(t, ctx, repo, "ACC-WTH-IDEMP-002", 100000)
 
 	// Mark operation as pending
+	tid, _ := tenant.FromContext(ctx)
 	idempKey := idempotency.Key{
-		TenantID:  svcTestTenantID,
+		TenantID:  string(tid),
 		Namespace: "current-account",
 		Operation: "withdrawal",
 		EntityID:  "ACC-WTH-IDEMP-002",
@@ -953,8 +956,9 @@ func TestExecuteWithdrawal_IdempotencyCleanupOnFailure(t *testing.T) {
 	// Create account with insufficient balance
 	_ = createTestAccountWithBalance(t, ctx, repo, "ACC-WTH-IDEMP-004", 5000) // Only $50
 
+	tid, _ := tenant.FromContext(ctx)
 	idempKey := idempotency.Key{
-		TenantID:  svcTestTenantID,
+		TenantID:  string(tid),
 		Namespace: "current-account",
 		Operation: "withdrawal",
 		EntityID:  "ACC-WTH-IDEMP-004",
