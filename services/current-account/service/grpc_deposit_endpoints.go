@@ -130,7 +130,7 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 	// validated against account.Balance().InstrumentCode() above.
 	amount, err := protoMoneyToAmount(req.Amount, account)
 	if err != nil {
-		operationStatus = operationStatusInvalidCurrency
+		operationStatus = opStatusInvalidAmount
 		return nil, status.Errorf(codes.InvalidArgument, "invalid amount: %v", err)
 	}
 

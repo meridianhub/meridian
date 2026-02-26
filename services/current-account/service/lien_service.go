@@ -36,6 +36,7 @@ var (
 	ErrLienAmountNotPositive  = errors.New("lien amount must be positive")
 	ErrAmountRequired         = errors.New("amount is required")
 	ErrAmountOverflow         = errors.New("amount too large: would overflow")
+	ErrInvalidPrecision       = errors.New("invalid instrument precision: must be between 0 and 9")
 	ErrInstrumentCodeMismatch = errors.New("instrument code mismatch in balance response")
 	// Transaction operation errors for error detection
 	errTxSaveAccount       = errors.New("save_account")

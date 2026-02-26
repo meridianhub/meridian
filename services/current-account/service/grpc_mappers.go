@@ -139,6 +139,11 @@ func protoMoneyToAmount(amount *commonpb.MoneyAmount, account domain.CurrentAcco
 	}
 
 	precision := account.Balance().Instrument().Precision
+	// google.type.Money uses nanos (10^9), so precision must be in [0..9].
+	// Values outside this range cannot be represented in nanos without losing precision.
+	if precision < 0 || precision > 9 {
+		return domain.Amount{}, fmt.Errorf("%w: got %d", ErrInvalidPrecision, precision)
+	}
 	// #nosec G115 - precision is bounded by instrument definition (0-9 in practice)
 	scale := int64(math.Pow10(precision))
 	nanosPerUnit := int64(math.Pow10(9 - precision))
