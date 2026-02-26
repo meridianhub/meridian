@@ -453,11 +453,13 @@ func seedMarketData(ctx context.Context, conn *grpc.ClientConn) error {
 
 	// Register wholesale energy price dataset
 	_, err := client.RegisterDataSet(ctx, &marketv1.RegisterDataSetRequest{
-		Code:          "WHOLESALE_ENERGY_GBP_KWH",
-		Category:      marketv1.DataCategory_DATA_CATEGORY_ENERGY_PRICE,
-		Unit:          "GBP/kWh",
-		DisplayName:   "UK Wholesale Electricity Price",
-		EffectiveFrom: timestamppb.New(time.Now().AddDate(0, -1, 0)),
+		Code:                    "WHOLESALE_ENERGY_GBP_KWH",
+		Category:                marketv1.DataCategory_DATA_CATEGORY_ENERGY_PRICE,
+		Unit:                    "GBP/kWh",
+		DisplayName:             "UK Wholesale Electricity Price",
+		ResolutionKeyExpression: "'spot'",
+		ValidationExpression:    "value > 0 && value < 100",
+		EffectiveFrom:           timestamppb.New(time.Now().AddDate(0, -1, 0)),
 	})
 	if err != nil {
 		if st, ok := status.FromError(err); ok && st.Code() == codes.AlreadyExists {

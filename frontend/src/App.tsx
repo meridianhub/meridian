@@ -6,6 +6,7 @@ import { queryClient } from '@/lib/query-client'
 import { PageErrorBoundary } from '@/components/error-boundary'
 import { AuthProvider, useAuth } from '@/contexts/auth-context'
 import { TenantProvider, useTenantContext } from '@/contexts/tenant-context'
+import { useTenants } from '@/hooks/use-tenants'
 import { ApiClientProvider } from '@/api/context'
 import { ProtectedRoute, PlatformOnlyRoute } from '@/components/routing'
 import { AppShell } from '@/components/layout/app-shell'
@@ -228,17 +229,22 @@ function ApiClientBridge({ children }: { children: ReactNode }) {
 }
 
 /**
- * In dev mode, auto-select the seeded dev tenant for platform admins
+ * In dev/demo mode, auto-select the first real tenant for platform admins
  * so pages show data immediately after login.
  */
 function DevTenantAutoSelector() {
   const { isPlatformAdmin, currentTenant, switchTenant } = useTenantContext()
+  const { data: tenants } = useTenants()
 
   useEffect(() => {
-    if (isPlatformAdmin && !currentTenant) {
-      switchTenant({ id: 'dev_tenant', slug: 'dev-tenant', name: 'Dev Tenant' })
+    if (isPlatformAdmin && !currentTenant && tenants?.length) {
+      // Pick the first tenant that has a slug (skip system tenants without one)
+      const tenant = tenants.find((t) => t.slug) ?? tenants[0]
+      if (tenant) {
+        switchTenant({ id: tenant.tenantId, slug: tenant.slug, name: tenant.displayName })
+      }
     }
-  }, [isPlatformAdmin, currentTenant, switchTenant])
+  }, [isPlatformAdmin, currentTenant, tenants, switchTenant])
 
   return null
 }
