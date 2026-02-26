@@ -584,10 +584,15 @@ func wireCurrentAccount(
 
 	// Load clearing account config from env vars (optional — deposits work
 	// without it but produce single-sided postings which FA may reject).
-	acctCfg, err := caconfig.LoadAccountConfig()
-	if err != nil {
-		logger.Info("no clearing account config, deposits will skip debit posting", "reason", err)
-		acctCfg = nil
+	var acctCfg *caconfig.AccountConfig
+	if os.Getenv("DEPOSIT_CLEARING_ACCOUNT_ID") != "" {
+		var err error
+		acctCfg, err = caconfig.LoadAccountConfig()
+		if err != nil {
+			return fmt.Errorf("invalid clearing account config: %w", err)
+		}
+	} else {
+		logger.Info("no clearing account config, deposits will skip debit posting")
 	}
 
 	svc, err := currentaccountservice.NewServiceWithExistingClients(
