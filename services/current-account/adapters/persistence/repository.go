@@ -645,6 +645,13 @@ func toEntity(ctx context.Context, account domain.CurrentAccount) (*CurrentAccou
 		productTypeVersion = &version
 	}
 
+	// Map behavior class (nil for legacy accounts without product type)
+	var behaviorClass *string
+	if account.BehaviorClass() != "" {
+		bc := account.BehaviorClass()
+		behaviorClass = &bc
+	}
+
 	// ToMinorUnitsUnchecked is safe here: domain layer validates amounts before persistence,
 	// so overflow (>92 quadrillion cents) cannot occur for valid accounts
 	// Note: Balance fields are not persisted to DB (gorm:"-") but kept on entity for
@@ -663,6 +670,7 @@ func toEntity(ctx context.Context, account domain.CurrentAccount) (*CurrentAccou
 		OverdraftRate:         0, // Overdraft is now product-type behavior, not domain state
 		ProductTypeCode:       productTypeCode,
 		ProductTypeVersion:    productTypeVersion,
+		BehaviorClass:         behaviorClass,
 		Balance:               account.Balance().ToMinorUnitsUnchecked(),          // gorm:"-" - not persisted
 		AvailableBalance:      account.AvailableBalance().ToMinorUnitsUnchecked(), // gorm:"-" - not persisted
 		FreezeReason:          freezeReason,
@@ -727,6 +735,12 @@ func toDomain(entity *CurrentAccountEntity) (domain.CurrentAccount, error) {
 		productTypeVersion = *entity.ProductTypeVersion
 	}
 
+	// Map behavior class (empty string for legacy accounts without product type)
+	behaviorClass := ""
+	if entity.BehaviorClass != nil {
+		behaviorClass = *entity.BehaviorClass
+	}
+
 	// Use builder pattern to construct immutable domain model
 	// Note: Balance comes from entity's in-memory fields (gorm:"-") if populated,
 	// otherwise zero. Service layer should fetch authoritative balance from Position Keeping.
@@ -749,6 +763,7 @@ func toDomain(entity *CurrentAccountEntity) (domain.CurrentAccount, error) {
 		WithUpdatedAt(entity.UpdatedAt).
 		WithProductTypeCode(productTypeCode).
 		WithProductTypeVersion(productTypeVersion).
+		WithBehaviorClass(behaviorClass).
 		Build(), nil
 }
 

@@ -73,6 +73,7 @@ type CurrentAccount struct {
 	updatedAt          time.Time
 	productTypeCode    string // Immutable after creation - references Product Directory
 	productTypeVersion int    // Immutable after creation - pinned version
+	behaviorClass      string // Derived from product type at creation time, stored for query efficiency
 }
 
 // AccountOption is a functional option for configuring new account creation.
@@ -91,6 +92,14 @@ func WithProductType(code string, version int) AccountOption {
 	return func(a *CurrentAccount) {
 		a.productTypeCode = code
 		a.productTypeVersion = version
+	}
+}
+
+// WithBehaviorClass sets the behavior class derived from the product type at creation time.
+// Stored for query efficiency - not re-derived on reads.
+func WithBehaviorClass(behaviorClass string) AccountOption {
+	return func(a *CurrentAccount) {
+		a.behaviorClass = behaviorClass
 	}
 }
 
@@ -192,6 +201,7 @@ func (a CurrentAccount) Deposit(amount Money) (CurrentAccount, error) {
 		updatedAt:          now,
 		productTypeCode:    a.productTypeCode,
 		productTypeVersion: a.productTypeVersion,
+		behaviorClass:      a.behaviorClass,
 	}, nil
 }
 
@@ -230,6 +240,7 @@ func (a CurrentAccount) PrepareForCredit() (CurrentAccount, error) {
 		updatedAt:          now,
 		productTypeCode:    a.productTypeCode,
 		productTypeVersion: a.productTypeVersion,
+		behaviorClass:      a.behaviorClass,
 	}, nil
 }
 
@@ -287,6 +298,7 @@ func (a CurrentAccount) PrepareForDebit(amount Money) (CurrentAccount, error) {
 		updatedAt:          now,
 		productTypeCode:    a.productTypeCode,
 		productTypeVersion: a.productTypeVersion,
+		behaviorClass:      a.behaviorClass,
 	}, nil
 }
 
@@ -346,6 +358,7 @@ func (a CurrentAccount) Withdraw(amount Money) (CurrentAccount, error) {
 		updatedAt:          now,
 		productTypeCode:    a.productTypeCode,
 		productTypeVersion: a.productTypeVersion,
+		behaviorClass:      a.behaviorClass,
 	}, nil
 }
 
@@ -399,6 +412,7 @@ func (a CurrentAccount) withStatusChange(newStatus AccountStatus, reason string)
 		updatedAt:          now,
 		productTypeCode:    a.productTypeCode,
 		productTypeVersion: a.productTypeVersion,
+		behaviorClass:      a.behaviorClass,
 	}
 }
 
@@ -553,6 +567,10 @@ func (a CurrentAccount) ProductTypeCode() string { return a.productTypeCode }
 // ProductTypeVersion returns the pinned product type version.
 func (a CurrentAccount) ProductTypeVersion() int { return a.productTypeVersion }
 
+// BehaviorClass returns the behavior class derived from the product type at creation time.
+// Returns empty string for legacy accounts created before Product Directory integration.
+func (a CurrentAccount) BehaviorClass() string { return a.behaviorClass }
+
 // Builder pattern for reconstructing accounts from persistence layer.
 // This is needed because the persistence layer needs to set all fields
 // when loading from the database.
@@ -683,6 +701,12 @@ func (b *CurrentAccountBuilder) WithProductTypeCode(code string) *CurrentAccount
 // WithProductTypeVersion sets the product type version.
 func (b *CurrentAccountBuilder) WithProductTypeVersion(version int) *CurrentAccountBuilder {
 	b.account.productTypeVersion = version
+	return b
+}
+
+// WithBehaviorClass sets the behavior class derived from the product type at creation time.
+func (b *CurrentAccountBuilder) WithBehaviorClass(behaviorClass string) *CurrentAccountBuilder {
+	b.account.behaviorClass = behaviorClass
 	return b
 }
 

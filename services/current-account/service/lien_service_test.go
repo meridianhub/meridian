@@ -1426,6 +1426,7 @@ func setupAtomicValuationLienTest(t *testing.T, engine ValuationEngine, accountB
 		freeze_reason TEXT,
 		product_type_code VARCHAR(50) NULL,
 		product_type_version INT NULL,
+		behavior_class VARCHAR(50) NULL,
 		version BIGINT NOT NULL DEFAULT 1
 	)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)

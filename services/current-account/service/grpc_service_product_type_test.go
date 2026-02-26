@@ -893,3 +893,88 @@ func TestInitiateCurrentAccount_WithProductType_CacheError(t *testing.T) {
 	assert.Equal(t, codes.InvalidArgument, st.Code())
 	assert.Contains(t, st.Message(), "product type not found")
 }
+
+// TestInitiateCurrentAccount_WithProductType_BehaviorClassPersisted verifies that
+// behavior_class is derived from the product type definition and persisted with the account.
+func TestInitiateCurrentAccount_WithProductType_BehaviorClassPersisted(t *testing.T) {
+	db, ctx, cleanup := setupProductTypeTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+
+	def := newTestDefinition("CURRENT_GBP", accounttype.BehaviorClassCustomer)
+	cache := &mockAccountTypeCache{
+		entries: map[string]*CachedAccountType{
+			"CURRENT_GBP": {Definition: def},
+		},
+	}
+
+	mockParty := &mockPartyClient{
+		partyExists: true,
+		partyStatus: partyv1.PartyStatus_PARTY_STATUS_ACTIVE,
+	}
+
+	svc := &Service{
+		repo:             repo,
+		partyClient:      mockParty,
+		accountTypeCache: cache,
+		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
+	}
+
+	req := &pb.InitiateCurrentAccountRequest{
+		ExternalIdentifier: "GB82WEST12345698765432",
+		PartyId:            newTestPartyID(),
+		InstrumentCode:     "GBP",
+		ProductTypeCode:    "CURRENT_GBP",
+	}
+	resp, err := svc.InitiateCurrentAccount(ctx, req)
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// behavior_class should be in the response
+	assert.Equal(t, "CUSTOMER", resp.Facility.BehaviorClass)
+
+	// behavior_class should be persisted and retrievable
+	account, err := repo.FindByID(ctx, resp.AccountId)
+	require.NoError(t, err)
+	assert.Equal(t, "CUSTOMER", account.BehaviorClass())
+}
+
+// TestInitiateCurrentAccount_BackwardsCompatibility_NoBehaviorClass verifies that
+// accounts created without a product type have no behavior_class set.
+func TestInitiateCurrentAccount_BackwardsCompatibility_NoBehaviorClass(t *testing.T) {
+	db, ctx, cleanup := setupProductTypeTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+
+	mockParty := &mockPartyClient{
+		partyExists: true,
+		partyStatus: partyv1.PartyStatus_PARTY_STATUS_ACTIVE,
+	}
+
+	svc := &Service{
+		repo:        repo,
+		partyClient: mockParty,
+		logger:      slog.New(slog.NewTextHandler(os.Stdout, nil)),
+	}
+
+	req := &pb.InitiateCurrentAccountRequest{
+		ExternalIdentifier: "GB82WEST12345698765432",
+		PartyId:            newTestPartyID(),
+		InstrumentCode:     "GBP",
+		// No product_type_code - legacy path
+	}
+	resp, err := svc.InitiateCurrentAccount(ctx, req)
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// behavior_class should be empty for legacy accounts
+	assert.Empty(t, resp.Facility.BehaviorClass)
+
+	account, err := repo.FindByID(ctx, resp.AccountId)
+	require.NoError(t, err)
+	assert.Empty(t, account.BehaviorClass())
+}
