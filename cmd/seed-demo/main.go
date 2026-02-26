@@ -253,8 +253,8 @@ func registerParties(ctx context.Context, conn *grpc.ClientConn) (string, []stri
 		PartyType:             partyv1.PartyType_PARTY_TYPE_ORGANIZATION,
 		LegalName:             "UK Power Networks",
 		DisplayName:           "UKPN",
-		ExternalReference:     "UKPN-DNO-001",
-		ExternalReferenceType: partyv1.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_COMPANIES_HOUSE,
+		ExternalReference:     "UKPNDNO001",
+		ExternalReferenceType: partyv1.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_NATIONAL_ID,
 	})
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("register DNO: %w", err)
@@ -268,8 +268,8 @@ func registerParties(ctx context.Context, conn *grpc.ClientConn) (string, []stri
 			PartyType:             partyv1.PartyType_PARTY_TYPE_ORGANIZATION,
 			LegalName:             gsp.name,
 			DisplayName:           gsp.region,
-			ExternalReference:     "GSP-" + gsp.region,
-			ExternalReferenceType: partyv1.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_COMPANIES_HOUSE,
+			ExternalReference:     "GSP" + gsp.region,
+			ExternalReferenceType: partyv1.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_NATIONAL_ID,
 		})
 		if err != nil {
 			return "", nil, nil, fmt.Errorf("register GSP %s: %w", gsp.region, err)
@@ -285,8 +285,8 @@ func registerParties(ctx context.Context, conn *grpc.ClientConn) (string, []stri
 			PartyType:             partyv1.PartyType_PARTY_TYPE_PERSON,
 			LegalName:             cust.legalName,
 			DisplayName:           cust.legalName,
-			ExternalReference:     fmt.Sprintf("CUST-%03d", i+1),
-			ExternalReferenceType: partyv1.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_COMPANIES_HOUSE,
+			ExternalReference:     fmt.Sprintf("CUST%03d", i+1),
+			ExternalReferenceType: partyv1.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_NATIONAL_ID,
 		})
 		if err != nil {
 			return "", nil, nil, fmt.Errorf("register customer %s: %w", cust.legalName, err)
