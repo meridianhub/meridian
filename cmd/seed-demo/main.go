@@ -48,6 +48,12 @@ const (
 	tenantSlug = "volterra-energy"
 )
 
+// Sentinel errors for idempotent lookups.
+var (
+	errPartyNotFoundInListing   = fmt.Errorf("party reported as existing but not found in listing")
+	errAccountNotFoundInListing = fmt.Errorf("account reported as existing but not found in listing")
+)
+
 var (
 	gatewayURL string
 	grpcAddr   string
@@ -292,13 +298,24 @@ func registerParty(ctx context.Context, client partyv1.PartyServiceClient, req *
 	resp, err := client.RegisterParty(ctx, req)
 	if err != nil {
 		if st, ok := status.FromError(err); ok && st.Code() == codes.AlreadyExists {
-			// For idempotency, try to find the party by listing
-			// For now just return a placeholder — real impl would lookup
-			return "existing-" + req.GetExternalReference(), nil
+			return findPartyByExternalRef(ctx, client, req.GetExternalReference())
 		}
 		return "", err
 	}
 	return resp.GetParty().GetPartyId(), nil
+}
+
+func findPartyByExternalRef(ctx context.Context, client partyv1.PartyServiceClient, extRef string) (string, error) {
+	listResp, err := client.ListParties(ctx, &partyv1.ListPartiesRequest{PageSize: 100})
+	if err != nil {
+		return "", fmt.Errorf("list parties to find existing %q: %w", extRef, err)
+	}
+	for _, p := range listResp.GetParties() {
+		if p.GetExternalReference() == extRef {
+			return p.GetPartyId(), nil
+		}
+	}
+	return "", fmt.Errorf("%w: external_reference=%q", errPartyNotFoundInListing, extRef)
 }
 
 // ─── Account Creation ────────────────────────────────────────────────────────
@@ -349,11 +366,27 @@ func createAccountIdempotent(ctx context.Context, client currentaccountv1.Curren
 	})
 	if err != nil {
 		if st, ok := status.FromError(err); ok && st.Code() == codes.AlreadyExists {
-			return "existing-" + extID, nil
+			return findAccountByExternalID(ctx, client, extID)
 		}
 		return "", err
 	}
 	return resp.GetAccountId(), nil
+}
+
+func findAccountByExternalID(ctx context.Context, client currentaccountv1.CurrentAccountServiceClient, extID string) (string, error) {
+	listResp, err := client.ListCurrentAccounts(ctx, &currentaccountv1.ListCurrentAccountsRequest{
+		PageSize: 100,
+		Iban:     extID,
+	})
+	if err != nil {
+		return "", fmt.Errorf("list accounts to find existing %q: %w", extID, err)
+	}
+	for _, a := range listResp.GetAccounts() {
+		if a.GetExternalIdentifier() == extID {
+			return a.GetAccountId(), nil
+		}
+	}
+	return "", fmt.Errorf("%w: external_id=%q", errAccountNotFoundInListing, extID)
 }
 
 // ─── Balance Seeding ─────────────────────────────────────────────────────────
@@ -366,11 +399,6 @@ func seedBalances(ctx context.Context, conn *grpc.ClientConn, accounts []custome
 	rng := rand.New(rand.NewSource(42)) //nolint:gosec // deterministic seed for reproducibility
 
 	for _, acct := range accounts {
-		if acct.gbpAccountID == "existing" || acct.kwhAccountID == "existing" {
-			fmt.Printf("  Skipping %s (accounts already existed)\n", acct.customerName)
-			continue
-		}
-
 		baseDailyKWH := 8.0 + rng.Float64()*4.0
 		if err := seedCustomerBalances(ctx, client, acct, baseDailyKWH, rng); err != nil {
 			return err
