@@ -110,7 +110,7 @@ Provisions the four demo organisations using the `orgctl` CLI:
 
 **What it creates:**
 
-- Organisation registry entries (stored in `org_meridian.organisations` table)
+- Organisation registry entries (stored in `org_meridian.organizations` table)
 - Database schemas for each organisation (`org_post_office`, `org_motive`, etc.)
 - Keycloak client configurations (optional)
 
