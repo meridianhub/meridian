@@ -48,8 +48,9 @@ test.describe('Dashboard', () => {
     })
 
     test('shows tenant context subtitle', async ({ platformAdminPage: page }) => {
-      // Platform admin auto-selects dev-tenant via DevTenantAutoSelector (DEV + E2E mode)
-      await expect(page.getByText(/Overview for dev-tenant/)).toBeVisible({ timeout: 15_000 })
+      // Platform admin auto-selects a tenant via DevTenantAutoSelector (DEV + E2E mode).
+      // The selected tenant depends on API response order, so match any valid slug.
+      await expect(page.getByText(/Overview for \S+/)).toBeVisible({ timeout: 15_000 })
     })
 
     test('stat cards resolve from loading state', async ({ platformAdminPage: page }) => {
