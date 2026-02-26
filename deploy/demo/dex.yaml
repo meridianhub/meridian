@@ -8,8 +8,8 @@
 #     -d "grant_type=password" \
 #     -d "client_id=meridian-service" \
 #     -d "scope=openid email profile" \
-#     -d "username=developer@meridian.local" \
-#     -d "password=<your-password>"
+#     -d "username=admin@volterra.energy" \
+#     -d "password=demo2026"
 
 issuer: https://demo.meridianhub.cloud/dex
 
@@ -36,8 +36,14 @@ staticClients:
 enablePasswordDB: true
 
 staticPasswords:
-  - email: "developer@meridian.local"
-    # Generate with: htpasswd -nbBC 10 "" 'your-password' | tr -d ':\n' | sed 's/$2y/$2a/'
-    hash: "REPLACE_WITH_BCRYPT_HASH"
-    username: "developer"
-    userID: "00000000-0000-0000-0000-000000000001"
+  - email: "admin@volterra.energy"
+    # Password: demo2026
+    # Generate with: htpasswd -nbBC 10 "" 'demo2026' | tr -d ':\n' | sed 's/$2y/$2a/'
+    hash: "$2a$10$lIDConGp2.xX/KXg31kHoezV2HN/hDeF/aVLlAZh4LDX9q9uaj5y."
+    username: "Admin"
+    userID: "admin-volterra-001"
+  - email: "operator@volterra.energy"
+    # Password: demo2026
+    hash: "$2a$10$lIDConGp2.xX/KXg31kHoezV2HN/hDeF/aVLlAZh4LDX9q9uaj5y."
+    username: "Operator"
+    userID: "operator-volterra-001"

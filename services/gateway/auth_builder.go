@@ -47,6 +47,10 @@ func BuildAuthMiddleware(config AuthConfig, logger *slog.Logger) (*auth.Combined
 	// Create combined middleware
 	middleware, err := auth.NewCombinedAuthMiddleware(auth.CombinedAuthConfig{
 		JWTValidator: validatorAdapter,
+		JWTConfig: auth.JWTMiddlewareConfig{
+			DefaultTenantID: config.DefaultTenantID,
+			DefaultRoles:    config.DefaultRoles,
+		},
 		APIKeyConfig: apiKeyConfig,
 		Logger:       logger,
 	})
@@ -56,7 +60,9 @@ func BuildAuthMiddleware(config AuthConfig, logger *slog.Logger) (*auth.Combined
 
 	logger.Info("auth middleware initialized",
 		"jwks_url", config.JWKSURL,
-		"api_keys_configured", len(config.APIKeys) > 0)
+		"api_keys_configured", len(config.APIKeys) > 0,
+		"default_tenant_id", config.DefaultTenantID,
+		"default_roles_configured", len(config.DefaultRoles) > 0)
 
 	return middleware, nil
 }
