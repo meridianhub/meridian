@@ -1,7 +1,9 @@
 package service
 
 import (
+	"fmt"
 	"log/slog"
+	"math"
 
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
@@ -112,6 +114,50 @@ func mapRegistryDimension(registryDimension string) string {
 		return "CURRENCY"
 	}
 	return registryDimension
+}
+
+// protoMoneyToAmount converts a proto MoneyAmount to a domain Amount using the account's
+// instrument for dimension-agnostic precision support. The proto CurrencyCode field carries
+// the instrument code (e.g. "GBP" or "KWH"); the account's dimension and precision are used
+// to construct the correct minor-unit Amount regardless of instrument type.
+//
+// The conversion formula is precision-aware:
+//
+//	scale        = 10^precision
+//	nanosPerUnit = 10^(9-precision)
+//	totalMinor   = Units * scale + round(Nanos / nanosPerUnit)
+//
+// For 2-decimal CURRENCY (e.g. GBP): scale=100, nanosPerUnit=10_000_000
+// For 3-decimal ENERGY (e.g. KWH):   scale=1000, nanosPerUnit=1_000_000
+func protoMoneyToAmount(amount *commonpb.MoneyAmount, account domain.CurrentAccount) (domain.Amount, error) {
+	if amount == nil || amount.Amount == nil {
+		return domain.Amount{}, ErrAmountRequired
+	}
+
+	precision := account.Balance().Instrument().Precision
+	// #nosec G115 - precision is bounded by instrument definition (0-9 in practice)
+	scale := int64(math.Pow10(precision))
+	nanosPerUnit := int64(math.Pow10(9 - precision))
+
+	// Overflow guard: reject units that would cause Units*scale to overflow int64.
+	// Using the same boundary as math.MaxInt64/scale (integer division) which equals
+	// the largest units value where units*scale does not overflow.
+	if amount.Amount.Units > math.MaxInt64/scale || amount.Amount.Units < math.MinInt64/scale {
+		return domain.Amount{}, fmt.Errorf("%w: units %d would overflow for precision %d",
+			ErrAmountOverflow, amount.Amount.Units, precision)
+	}
+
+	unitsMinor := amount.Amount.Units * scale
+	// Round nanos to nearest minor unit (half-up rounding)
+	nanosMinor := (amount.Amount.Nanos + int32(nanosPerUnit/2)) / int32(nanosPerUnit)
+	totalMinor := unitsMinor + int64(nanosMinor)
+
+	return domain.NewAmountFromInstrument(
+		account.Balance().InstrumentCode(),
+		account.Balance().Dimension(),
+		precision,
+		totalMinor,
+	)
 }
 
 func mapStatusToProto(status domain.AccountStatus) pb.AccountStatus {
