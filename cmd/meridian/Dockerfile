@@ -42,8 +42,13 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build \
     -o mcp-server \
     ./services/mcp-server/cmd/
 
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build \
+    -ldflags="-w -s" \
+    -o seed-demo \
+    ./cmd/seed-demo/
+
 # Verify the binaries exist and are executable
-RUN test -x meridian && test -x seed-dev && test -x mcp-server && echo "Binaries built successfully"
+RUN test -x meridian && test -x seed-dev && test -x mcp-server && test -x seed-demo && echo "Binaries built successfully"
 
 # Runtime stage - distroless for minimal attack surface (~2MB base)
 FROM gcr.io/distroless/static-debian12
@@ -55,6 +60,10 @@ COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=builder /build/meridian /meridian
 COPY --from=builder /build/seed-dev /seed-dev
 COPY --from=builder /build/mcp-server /mcp-server
+COPY --from=builder /build/seed-demo /seed-demo
+
+# Copy manifest files for seed-demo
+COPY --from=builder /build/examples/manifests/ /app/examples/manifests/
 
 # Use non-root user (distroless provides nonroot user at uid 65532)
 USER nonroot:nonroot
