@@ -40,6 +40,7 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 		account_type VARCHAR(50) NOT NULL DEFAULT 'current',
 		instrument_code VARCHAR(32) NOT NULL DEFAULT 'GBP',
 		dimension VARCHAR(20) NOT NULL DEFAULT 'CURRENCY',
+		precision INT NOT NULL DEFAULT 2,
 		status VARCHAR(20) NOT NULL DEFAULT 'active',
 		party_id UUID NOT NULL,
 		org_party_id UUID NULL,
