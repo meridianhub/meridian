@@ -21,7 +21,7 @@
 # Input data (provided via input_data dictionary):
 #   - org_id: string - Syndicate organization party ID
 #   - total_amount: string - Total dividend amount as decimal string
-#   - currency: string - Currency code (e.g., "GBP")
+#   - instrument_code: string - Instrument code (e.g., "GBP", "kWh")
 #   - transaction_id: string - Unique transaction identifier
 
 # Define the dividend distribution saga
@@ -31,7 +31,7 @@ def execute_distribution():
     # Extract input data
     org_id = input_data["org_id"]
     total_amount = Decimal(input_data["total_amount"])
-    currency = input_data["currency"]
+    instrument_code = input_data["instrument_code"]
     transaction_id = input_data["transaction_id"]
 
     # Step 1: List all active syndicate participants
@@ -64,7 +64,7 @@ def execute_distribution():
         account_ref = build_org_account_ref(
             party_id=party_id,
             org_id=org_id,
-            currency=currency,
+            instrument_code=instrument_code,
         )
 
         # Resolve the org-scoped account
@@ -75,7 +75,7 @@ def execute_distribution():
         log_result = position_keeping.initiate_log(
             position_id=account_id,
             amount=participant_amount,
-            currency=currency,
+            instrument_code=instrument_code,
             direction="CREDIT",
             transaction_id=transaction_id,
         )

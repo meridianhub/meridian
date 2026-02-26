@@ -51,7 +51,7 @@ def execute_adjustment():
     step(name="initiate_booking")
     booking_result = financial_accounting.initiate_booking_log(
         account_id=account_id,
-        currency=instrument_code,
+        instrument_code=instrument_code,
         transaction_id=transaction_id,
         transaction_type="RECONCILIATION_ADJUSTMENT",
     )
@@ -62,7 +62,7 @@ def execute_adjustment():
         booking_log_id=booking_result.booking_log_id,
         account_id=account_id,
         amount=adjustment_amount,
-        currency=instrument_code,
+        instrument_code=instrument_code,
         direction="DEBIT",
         transaction_id=transaction_id,
         posting_type="debit",
@@ -74,7 +74,7 @@ def execute_adjustment():
         booking_log_id=booking_result.booking_log_id,
         account_id=account_id,
         amount=adjustment_amount,
-        currency=instrument_code,
+        instrument_code=instrument_code,
         direction="CREDIT",
         transaction_id=transaction_id,
         posting_type="credit",

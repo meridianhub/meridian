@@ -307,7 +307,7 @@ func wrapHandler(fullName string, handler saga.Handler, handlerDef *HandlerDef) 
 					//    Compensation handlers often need context from the forward step input
 					inputFieldsForCompensation := []string{
 						"transaction_id", "account_id", "position_id", "direction",
-						"amount", "currency", "booking_log_id", "posting_id", "posting_type",
+						"amount", "instrument_code", "currency", "booking_log_id", "posting_id", "posting_type",
 					}
 					for _, field := range inputFieldsForCompensation {
 						if value, ok := params[field]; ok {
