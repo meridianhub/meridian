@@ -1,7 +1,6 @@
 package persistence_test
 
 import (
-	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -9,47 +8,16 @@ import (
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/reconciliation/adapters/persistence"
 	"github.com/meridianhub/meridian/services/reconciliation/domain"
-	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// setupImbalanceTrendDB creates a test database with the imbalance_trend table.
+// setupImbalanceTrendDB returns a repository backed by the shared test database.
+// The imbalance_trend table is created once in TestMain.
 func setupImbalanceTrendDB(t *testing.T) (*persistence.ImbalanceTrendRepository, func()) {
 	t.Helper()
 	db, cleanup := setupTestDB(t)
-
-	tid := tenant.TenantID("test-tenant-01")
-	quoted := fmt.Sprintf("%q", tid.SchemaName())
-
-	migrationSQL := fmt.Sprintf(`
-		SET search_path TO %s, public;
-
-		CREATE TABLE IF NOT EXISTS "imbalance_trend" (
-			"id" uuid NOT NULL DEFAULT gen_random_uuid(),
-			"created_at" timestamptz NOT NULL DEFAULT now(),
-			"updated_at" timestamptz NOT NULL DEFAULT now(),
-			"trend_id" uuid NOT NULL,
-			"instrument_code" character varying(20) NOT NULL,
-			"first_detected_at" timestamptz NOT NULL,
-			"last_detected_at" timestamptz NOT NULL,
-			"consecutive_days" integer NOT NULL DEFAULT 0,
-			"total_occurrences" integer NOT NULL DEFAULT 0,
-			"last_imbalance_amount" decimal(38, 18) NOT NULL,
-			"last_assertion_id" uuid NULL,
-			"resolved_at" timestamptz NULL,
-			"metadata" jsonb NULL,
-			PRIMARY KEY ("id")
-		);
-		CREATE UNIQUE INDEX IF NOT EXISTS "idx_it_trend_id" ON "imbalance_trend" ("trend_id");
-		CREATE UNIQUE INDEX IF NOT EXISTS "idx_it_instrument_code" ON "imbalance_trend" ("instrument_code");
-
-		SET search_path TO public;
-	`, quoted)
-
-	err := db.Exec(migrationSQL).Error
-	require.NoError(t, err)
 
 	repo := persistence.NewImbalanceTrendRepository(db)
 	return repo, cleanup
