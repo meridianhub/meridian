@@ -37,8 +37,13 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build \
     -o seed-dev \
     ./cmd/seed-dev/
 
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build \
+    -ldflags="-w -s -X main.Version=${VERSION} -X main.Commit=${COMMIT} -X main.BuildDate=${BUILD_DATE}" \
+    -o mcp-server \
+    ./services/mcp-server/cmd/
+
 # Verify the binaries exist and are executable
-RUN test -x meridian && test -x seed-dev && echo "Binaries built successfully"
+RUN test -x meridian && test -x seed-dev && test -x mcp-server && echo "Binaries built successfully"
 
 # Runtime stage - distroless for minimal attack surface (~2MB base)
 FROM gcr.io/distroless/static-debian12
@@ -49,6 +54,7 @@ COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 # Copy binaries from builder
 COPY --from=builder /build/meridian /meridian
 COPY --from=builder /build/seed-dev /seed-dev
+COPY --from=builder /build/mcp-server /mcp-server
 
 # Use non-root user (distroless provides nonroot user at uid 65532)
 USER nonroot:nonroot

@@ -1,3 +1,9 @@
+{
+	# Cloudflare origin certs are provided manually; disable ACME attempts
+	# (otherwise Caddy retries DNS-01 wildcard challenges every 6 hours).
+	auto_https disable_certs
+}
+
 demo.meridianhub.cloud, *.demo.meridianhub.cloud {
 	tls /etc/caddy/certs/origin-cert.pem /etc/caddy/certs/origin-key.pem
 
@@ -6,9 +12,18 @@ demo.meridianhub.cloud, *.demo.meridianhub.cloud {
 		reverse_proxy dex:5556
 	}
 
-	# API: ConnectRPC + health probes
+	# MCP Server: SSE transport + message endpoint
+	# NOTE: Requires mcp-server container to be running; routes will 502 until deployed.
+	handle /sse {
+		reverse_proxy mcp-server:8090
+	}
+	handle /message {
+		reverse_proxy mcp-server:8090
+	}
+
+	# API: ConnectRPC + health probes + version
 	@api {
-		path /meridian.* /grpc.* /healthz /readyz
+		path /meridian.* /grpc.* /healthz /readyz /version
 	}
 	handle @api {
 		reverse_proxy meridian:8090
