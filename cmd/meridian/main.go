@@ -52,6 +52,7 @@ import (
 	currentaccountpersistence "github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	currentaccountservice "github.com/meridianhub/meridian/services/current-account/service"
 	financialaccountingpersistence "github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
+	faclient "github.com/meridianhub/meridian/services/financial-accounting/client"
 	financialaccountingservice "github.com/meridianhub/meridian/services/financial-accounting/service"
 	forecastingmds "github.com/meridianhub/meridian/services/forecasting/adapters/mds"
 	forecastingpersistence "github.com/meridianhub/meridian/services/forecasting/adapters/persistence"
@@ -67,6 +68,7 @@ import (
 	paymentorderpersistence "github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
 	paymentorderservice "github.com/meridianhub/meridian/services/payment-order/service"
 	pkpersistence "github.com/meridianhub/meridian/services/position-keeping/adapters/persistence"
+	pkclient "github.com/meridianhub/meridian/services/position-keeping/client"
 	pkdomain "github.com/meridianhub/meridian/services/position-keeping/domain"
 	positionkeepingservice "github.com/meridianhub/meridian/services/position-keeping/service"
 	reconciliationpersistence "github.com/meridianhub/meridian/services/reconciliation/adapters/persistence"
@@ -244,20 +246,17 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 	outboxPublisher := events.NewOutboxPublisher("unified")
 	outboxRepo := events.NewPostgresOutboxRepository(conns.gormDB("financial-accounting"))
 
-	// MDS loopback client (forecasting → market-information via same gRPC server).
+	// Loopback gRPC clients for inter-service communication within the unified binary.
 	// grpc.NewClient is lazy — connects on first RPC, after the server is listening.
-	mdsClient, mdsCleanup, err := misclient.New(ctx, misclient.Config{
-		Target:      fmt.Sprintf("localhost:%d", grpcPort),
-		DialOptions: []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
-	})
+	loopback, err := newLoopbackClients(ctx, grpcPort)
 	if err != nil {
-		return fmt.Errorf("MDS loopback client: %w", err)
+		return fmt.Errorf("loopback clients: %w", err)
 	}
-	defer func() { _ = mdsCleanup() }()
+	defer loopback.closeAll()
 
 	// ─── Register All Services ──────────────────────────────────────────
 
-	if err := registerServices(grpcServer, conns, idempotencySvc, faEventPublisher, pkEventPublisher, outboxPublisher, outboxRepo, mdsClient, logger); err != nil {
+	if err := registerServices(grpcServer, conns, idempotencySvc, faEventPublisher, pkEventPublisher, outboxPublisher, outboxRepo, loopback, tracer, logger); err != nil {
 		return err
 	}
 
@@ -329,7 +328,8 @@ func registerServices(
 	pkEventPublisher pkdomain.EventPublisher,
 	outboxPublisher *events.OutboxPublisher,
 	outboxRepo *events.PostgresOutboxRepository,
-	mdsClient *misclient.Client,
+	loopback *loopbackClients,
+	tracer *observability.Tracer,
 	logger *slog.Logger,
 ) error {
 	// Tier 0: No gRPC dependencies
@@ -364,7 +364,7 @@ func registerServices(
 		{"position-keeping", func() error {
 			return wirePositionKeeping(grpcServer, conns.pgxPool("position-keeping"), idempotencySvc, pkEventPublisher, logger)
 		}},
-		{"forecasting", func() error { return wireForecasting(grpcServer, conns.pgxPool("forecasting"), mdsClient, logger) }},
+		{"forecasting", func() error { return wireForecasting(grpcServer, conns.pgxPool("forecasting"), loopback.mds, logger) }},
 	} {
 		if err := wire.fn(); err != nil {
 			return fmt.Errorf("%s: %w", wire.name, err)
@@ -372,8 +372,9 @@ func registerServices(
 	}
 	logger.Info("Tier 1 services registered")
 
-	// Tier 2: Depend on Tier 1
-	if err := wireCurrentAccount(grpcServer, conns.gormDB("current-account"), idempotencySvc, logger); err != nil {
+	// Tier 2: Depend on Tier 1 (current-account needs PK, FA loopback clients for saga orchestration)
+	caOutboxRepo := events.NewPostgresOutboxRepository(conns.gormDB("current-account"))
+	if err := wireCurrentAccount(grpcServer, conns.gormDB("current-account"), loopback.pk, loopback.fa, idempotencySvc, caOutboxRepo, tracer, logger); err != nil {
 		return fmt.Errorf("current-account: %w", err)
 	}
 	logger.Info("Tier 2 services registered")
@@ -565,13 +566,27 @@ func wireForecasting(server *grpc.Server, pool *pgxpool.Pool, mdsClient *misclie
 func wireCurrentAccount(
 	server *grpc.Server,
 	db *gorm.DB,
-	_ idempotency.Service,
+	pkLoopback *pkclient.Client,
+	faLoopback *faclient.Client,
+	idempotencySvc idempotency.Service,
+	outboxRepo *events.PostgresOutboxRepository,
+	tracer *observability.Tracer,
 	logger *slog.Logger,
 ) error {
 	repo := currentaccountpersistence.NewRepository(db)
 	lienRepo := currentaccountpersistence.NewLienRepository(db)
+	withdrawalRepo := currentaccountpersistence.NewWithdrawalRepository(db)
 
-	svc, err := currentaccountservice.NewService(repo, lienRepo)
+	svc, err := currentaccountservice.NewServiceWithExistingClients(
+		repo, lienRepo, withdrawalRepo,
+		outboxRepo, db,
+		pkLoopback, faLoopback,
+		nil, // partyClient — party validation not needed for unified binary
+		nil, // accountConfig — no static clearing account config needed
+		idempotencySvc, logger, tracer,
+		nil, // accountResolver — no dynamic clearing account resolution
+		nil, // fungibilityValidator — not needed for demo
+	)
 	if err != nil {
 		return err
 	}
@@ -923,4 +938,61 @@ func (p *noopFAPublisher) Publish(_ context.Context, _ financialaccountingservic
 
 func (p *noopFAPublisher) PublishBatch(_ context.Context, _ []financialaccountingservice.DomainEvent) error {
 	return nil
+}
+
+// ─── Loopback gRPC Clients ──────────────────────────────────────────────────
+
+// loopbackClients holds gRPC clients that connect back to the same unified binary
+// for inter-service communication (e.g., current-account calling position-keeping).
+type loopbackClients struct {
+	mds      *misclient.Client
+	mdsClose func()
+	pk       *pkclient.Client
+	pkClose  func()
+	fa       *faclient.Client
+	faClose  func()
+}
+
+// newLoopbackClients creates loopback gRPC clients targeting the local gRPC server.
+// grpc.NewClient is lazy — it connects on first RPC, after the server is listening.
+func newLoopbackClients(ctx context.Context, grpcPort int) (*loopbackClients, error) {
+	target := fmt.Sprintf("localhost:%d", grpcPort)
+	opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
+
+	mds, mdsClose, err := misclient.New(ctx, misclient.Config{Target: target, DialOptions: opts})
+	if err != nil {
+		return nil, fmt.Errorf("mds loopback: %w", err)
+	}
+
+	pk, pkClose, err := pkclient.New(pkclient.Config{Target: target, DialOptions: opts}) //nolint:contextcheck // pkclient.New does not accept context
+	if err != nil {
+		_ = mdsClose()
+		return nil, fmt.Errorf("pk loopback: %w", err)
+	}
+
+	fa, faClose, err := faclient.New(faclient.Config{Target: target, DialOptions: opts}) //nolint:contextcheck // faclient.New does not accept context
+	if err != nil {
+		_ = mdsClose()
+		pkClose()
+		return nil, fmt.Errorf("fa loopback: %w", err)
+	}
+
+	return &loopbackClients{
+		mds: mds, mdsClose: func() { _ = mdsClose() },
+		pk: pk, pkClose: pkClose,
+		fa: fa, faClose: faClose,
+	}, nil
+}
+
+// closeAll closes all loopback gRPC connections.
+func (l *loopbackClients) closeAll() {
+	if l.mdsClose != nil {
+		l.mdsClose()
+	}
+	if l.pkClose != nil {
+		l.pkClose()
+	}
+	if l.faClose != nil {
+		l.faClose()
+	}
 }
