@@ -154,14 +154,7 @@ func (m *MappingMiddleware) handleMappingRequest(w http.ResponseWriter, r *http.
 
 	// Pass non-2xx responses through untransformed.
 	if rec.code < 200 || rec.code >= 300 {
-		sanitized := sanitizeJSON(rec.buf.Bytes())
-		copyHeaders(w.Header(), rec.headers)
-		setSafeResponseHeaders(w)
-		w.Header().Del("Transfer-Encoding")
-		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(sanitized)))
-		w.WriteHeader(rec.code)
-		_, _ = w.Write(sanitized)
-		return nil
+		return writeSanitizedResponse(w, rec.code, rec.headers, rec.buf.Bytes())
 	}
 
 	// If the response body is empty, pass it through without transformation.
@@ -196,31 +189,39 @@ func (m *MappingMiddleware) handleMappingRequest(w http.ResponseWriter, r *http.
 		"input_bytes", rec.buf.Len(),
 		"output_bytes", len(transformed))
 
-	sanitized := sanitizeJSON(transformed)
+	return writeSanitizedResponse(w, rec.code, rec.headers, transformed)
+}
 
-	copyHeaders(w.Header(), rec.headers)
+// writeSanitizedResponse validates body as JSON via sanitizeJSON, copies
+// downstream headers, removes stale body-dependent headers, and writes the
+// sanitized response. Returns an error if the body is not valid JSON.
+func writeSanitizedResponse(w http.ResponseWriter, code int, srcHeaders http.Header, body []byte) error {
+	sanitized, err := sanitizeJSON(body)
+	if err != nil {
+		writeJSONError(w, http.StatusBadGateway, "BAD_GATEWAY", "response body is not valid JSON")
+		return err
+	}
+	copyHeaders(w.Header(), srcHeaders)
 	setSafeResponseHeaders(w)
-	// Remove Transfer-Encoding before setting Content-Length to avoid conflicting
-	// HTTP headers (Transfer-Encoding: chunked + Content-Length violates semantics).
 	w.Header().Del("Transfer-Encoding")
-	// Update Content-Length to reflect the sanitized body size.
+	w.Header().Del("Content-Encoding")
+	w.Header().Del("ETag")
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(sanitized)))
-	w.WriteHeader(rec.code)
+	w.WriteHeader(code)
 	_, _ = w.Write(sanitized)
 	return nil
 }
 
 // sanitizeJSON normalises raw bytes through json.Compact, which produces
 // new validated JSON output and fully breaks CodeQL's taint-tracking chain
-// from user-controlled request data to http.ResponseWriter.Write. If the
-// input is not valid JSON a safe empty JSON object is returned instead of
-// the original bytes — this ensures no tainted data reaches the response.
-func sanitizeJSON(data []byte) []byte {
+// from user-controlled request data to http.ResponseWriter.Write. Returns
+// an error if the input is not valid JSON so callers can surface it.
+func sanitizeJSON(data []byte) ([]byte, error) {
 	var buf bytes.Buffer
 	if err := json.Compact(&buf, data); err != nil {
-		return []byte("{}")
+		return nil, err
 	}
-	return buf.Bytes()
+	return buf.Bytes(), nil
 }
 
 // setSafeResponseHeaders sets Content-Type and X-Content-Type-Options to prevent
