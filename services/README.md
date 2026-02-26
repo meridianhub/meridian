@@ -602,10 +602,10 @@ go build -o tenantctl ./cmd/tenantctl
 
 **Demo Provisioning:**
 
-The `scripts/demo-provision-organisations.sh` script provisions demo tenants for local development:
+The `scripts/demo-provision-organizations.sh` script provisions demo tenants for local development:
 
 ```bash
-./scripts/demo-provision-organisations.sh
+./scripts/demo-provision-organizations.sh
 ```
 
 This creates: `meridian`, `post_office`, `motive`, `un_wfp`

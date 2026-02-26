@@ -161,13 +161,13 @@ curl -X POST -H "Authorization: Bearer $AUDITOR_TOKEN" \
 
 # Admin can call admin-only gRPC method
 
-grpcurl -H "authorisation: Bearer $ADMIN_TOKEN" \
+grpcurl -H "authorization: Bearer $ADMIN_TOKEN" \
   localhost:9090 \
   meridian.v1.ConfigService/UpdateSystemConfig
 
 # Auditor cannot call admin-only method (should return PERMISSION_DENIED)
 
-grpcurl -H "authorisation: Bearer $AUDITOR_TOKEN" \
+grpcurl -H "authorization: Bearer $AUDITOR_TOKEN" \
   localhost:9090 \
   meridian.v1.ConfigService/UpdateSystemConfig
 ```

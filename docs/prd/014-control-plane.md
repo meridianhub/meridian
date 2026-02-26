@@ -429,7 +429,7 @@ sequenceDiagram
     participant Cache
     participant TenantDB as org_{id}.api_keys
 
-    Client->>Gateway: Authorisation: pk_motive_a8b9c...
+    Client->>Gateway: Authorization: pk_motive_a8b9c...
     Gateway->>Gateway: Parse prefix → slug "motive"
     Gateway->>Cache: Resolve slug → tenant_id
     Cache-->>Gateway: tenant_id = "motive"

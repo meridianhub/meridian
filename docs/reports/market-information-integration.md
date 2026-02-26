@@ -443,7 +443,7 @@ The client automatically propagates:
 
 - `x-tenant-id` - Tenant isolation
 - `x-correlation-id` - Distributed tracing
-- `x-organisation-id` - Organisation context
+- `x-organization-id` - Organisation context
 
 ### mTLS
 

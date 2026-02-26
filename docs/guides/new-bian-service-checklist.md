@@ -985,7 +985,7 @@ For Kafka integration:
 
 ### Multi-Tenancy / Organisation Scoping
 
-Use `shared/platform/organisation` context patterns for tenant isolation.
+Use `shared/platform/organization` context patterns for tenant isolation.
 
 ### Audit Logging
 

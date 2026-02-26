@@ -103,7 +103,7 @@ Client-side load balancing via DNS requires minimal RBAC permissions:
 **Current RBAC Policy** (`deployments/k8s/base/role.yaml`):
 
 ```yaml
-apiVersion: rbac.authorisation.k8s.io/v1
+apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: meridian

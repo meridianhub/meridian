@@ -81,7 +81,7 @@ source of truth for balance data.
 
 ### Option 1: Keep balance in Current Account with synchronisation
 
-Store balance locally in Current Account and synchronize with Position Keeping.
+Store balance locally in Current Account and synchronise with Position Keeping.
 
 * Good, because no network hop for balance queries
 * Good, because Current Account is self-contained

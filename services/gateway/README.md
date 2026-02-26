@@ -314,7 +314,7 @@ These endpoints bypass all authentication middleware to ensure Kubernetes probes
 Returned when authentication fails:
 
 ```json
-{"error": "missing authorisation header"}
+{"error": "missing authorization header"}
 {"error": "token expired"}
 {"error": "invalid token signature"}
 {"error": "invalid API key"}

@@ -19,7 +19,7 @@ This directory contains how-to guides and usage documentation for Meridian devel
 
 ## Documentation Organisation
 
-All substantial documentation belongs in `docs/`, organized by type:
+All substantial documentation belongs in `docs/`, organised by type:
 
 ```text
 docs/

@@ -246,7 +246,7 @@ configMapGenerator:
 
 - name: meridian-config
 
-  behaviour: merge
+  behavior: merge
   literals:
 
   - log_level=debug
@@ -254,7 +254,7 @@ configMapGenerator:
 
 ```
 
-The `behaviour: merge` ensures base configuration is preserved while adding/overriding specific values.
+The `behavior: merge` ensures base configuration is preserved while adding/overriding specific values.
 
 ## CI/CD Integration
 
@@ -356,14 +356,14 @@ kubectl get all -n production
 
 ### ConfigMap Merge Not Working
 
-Ensure `behaviour: merge` is set in the overlay's configMapGenerator:
+Ensure `behavior: merge` is set in the overlay's configMapGenerator:
 
 ```yaml
 configMapGenerator:
 
 - name: meridian-config
 
-  behaviour: merge  # Required for merging with base
+  behavior: merge  # Required for merging with base
   literals:
 
   - key=value

@@ -288,7 +288,7 @@ admin's tenant list cache is preserved across switches.
 2. Redirect to identity provider (Keycloak, Auth0, etc.)
 3. OAuth 2.0 PKCE flow → receive JWT access token + refresh token
 4. Store tokens in memory (not localStorage — XSS risk)
-5. Connect-ES interceptor attaches Authorisation header to all requests
+5. Connect-ES interceptor attaches Authorization header to all requests
 6. On 401 response → attempt token refresh
 7. On refresh failure → redirect to login
 ```
@@ -306,7 +306,7 @@ performs the OAuth PKCE exchange and sets a secure,
 httpOnly, SameSite=Strict cookie. The Connect-ES transport
 sends this cookie automatically. The auth proxy is
 stateless — it validates the cookie and injects the
-Authorisation header before proxying to the gateway.
+Authorization header before proxying to the gateway.
 
 This does NOT violate the "no BFF" decision (Section 3.4)
 because it handles only authentication, not data

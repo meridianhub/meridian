@@ -26,10 +26,10 @@ This endpoint requires authentication via JWT token or API key:
 | Header | Required | Description |
 |--------|----------|-------------|
 | `Content-Type` | Yes | Must be `application/json` or `application/connect+proto` |
-| `Authorisation` | Yes* | JWT bearer token for user authentication |
+| `Authorization` | Yes* | JWT bearer token for user authentication |
 | `X-API-Key` | Yes* | API key for service-to-service authentication |
 
-*One of `Authorisation` or `X-API-Key` is required.
+*One of `Authorization` or `X-API-Key` is required.
 
 ### Request Body (JSON)
 

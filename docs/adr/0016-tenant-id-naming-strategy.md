@@ -275,7 +275,7 @@ Alert if `consumed_ids` exceeds 1,000 or `consumed_ids / active_tenants` exceeds
 
 * [Stripe Object IDs Design](https://dev.to/4thzoa/designing-apis-for-humans-object-ids-3o5a) - Prefixed ID best practices
 * [Auth0 Multi-Tenant Best Practices](https://auth0.com/docs/get-started/auth0-overview/create-tenants/multi-tenant-apps-best-practices)
-* [AWS Multi-Tenant Authorisation](https://docs.aws.amazon.com/prescriptive-guidance/latest/saas-multitenant-api-access-authorisation/introduction.html)
+* [AWS Multi-Tenant Authorisation](https://docs.aws.amazon.com/prescriptive-guidance/latest/saas-multitenant-api-access-authorization/introduction.html)
 * [PostgreSQL UUID Documentation](https://www.postgresql.org/docs/current/datatype-uuid.html)
 * GitHub Issue: Multi-tenancy namespace strategy evaluation (Task 51)
 

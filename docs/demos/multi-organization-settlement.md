@@ -80,7 +80,7 @@ Run the full demo sequence:
 
 ```bash
 # 1. Provision organisations (creates schemas and registry entries)
-./scripts/demo-provision-organisations.sh
+./scripts/demo-provision-organizations.sh
 
 # 2. Seed demo accounts and balances
 ./scripts/demo-seed-data.sh
@@ -96,7 +96,7 @@ Run the full demo sequence:
 
 ### Organisation Provisioning
 
-`./scripts/demo-provision-organisations.sh`
+`./scripts/demo-provision-organizations.sh`
 
 Provisions the four demo organisations using the `orgctl` CLI:
 
@@ -222,7 +222,7 @@ open http://localhost:9090
 The `meridian` organisation is special - it serves as "Tenant Zero" or the
 control plane organisation:
 
-- Hosts the `organisation.organisations` registry table
+- Hosts the `organization.organizations` registry table
 - Future: Billing and usage tracking for customer organisations
 - Demonstrates dogfooding: Meridian runs on Meridian
 
@@ -269,7 +269,7 @@ kubectl logs -l app=current-account --tail=100
 ./orgctl list
 
 # Re-run provisioning (idempotent)
-./scripts/demo-provision-organisations.sh
+./scripts/demo-provision-organizations.sh
 ```
 
 ### Account Not Found

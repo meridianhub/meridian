@@ -1040,7 +1040,7 @@ sequenceDiagram
 
     Note over LLM,MCP: MCP config provides API key
     LLM->>MCP: Tool call (with API key in env)
-    MCP->>GW: gRPC call + Authorisation header
+    MCP->>GW: gRPC call + Authorization header
     GW->>CP: ValidateAPIKey RPC
     CP-->>GW: Tenant ID, permissions
     GW-->>MCP: Response (tenant-scoped)

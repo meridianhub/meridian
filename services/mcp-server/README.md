@@ -147,7 +147,7 @@ OAuth endpoints exposed when `MCP_OAUTH_ENABLED=true`:
 
 | Endpoint | Purpose |
 |----------|---------|
-| `GET /oauth/authorise` | Authorisation endpoint (PKCE challenge) |
+| `GET /oauth/authorize` | Authorisation endpoint (PKCE challenge) |
 | `POST /oauth/token` | Token endpoint (code exchange) |
 
 The current implementation ships a passthrough token issuer and validator suitable for development.

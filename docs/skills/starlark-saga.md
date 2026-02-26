@@ -268,8 +268,8 @@ def execute_operation():
     result = service2.process(amount=amount)
 
     # Step 3
-    step(name="finalise")
-    final = service3.finalise(result_id=result.id)
+    step(name="finalize")
+    final = service3.finalize(result_id=result.id)
 
     return {
         "status": "COMPLETED",

@@ -117,7 +117,7 @@ All examples require tenant context via gRPC metadata:
 
 ```go
 ctx = metadata.AppendToOutgoingContext(ctx,
-    "x-organisation", "your-tenant-id",
+    "x-organization", "your-tenant-id",
 )
 ```
 
@@ -192,10 +192,10 @@ go run ./services/internal-account/cmd
 
 ### "tenant not found"
 
-Missing `x-organisation` header. Add to context:
+Missing `x-organization` header. Add to context:
 
 ```go
-ctx = metadata.AppendToOutgoingContext(ctx, "x-organisation", "your-tenant")
+ctx = metadata.AppendToOutgoingContext(ctx, "x-organization", "your-tenant")
 ```
 
 ### "Position Keeping unavailable"

@@ -157,7 +157,7 @@ data integrity through CEL validation at the boundary.
 
 Build a centralised ETL service that handles all external connectivity and transformation.
 
-* Good, because it centralizes integration logic
+* Good, because it centralises integration logic
 * Good, because it provides a single point for monitoring
 * Bad, because it becomes a bottleneck and single point of failure
 * Bad, because it requires deep knowledge of every possible source format

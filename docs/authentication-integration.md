@@ -173,7 +173,7 @@ if err != nil {
 }
 
 // Use token in outbound gRPC call
-md := metadata.Pairs("authorisation", "Bearer "+token)
+md := metadata.Pairs("authorization", "Bearer "+token)
 ctx = metadata.NewOutgoingContext(ctx, md)
 ```
 
@@ -411,7 +411,7 @@ import (
 )
 
 // Add token to outgoing context
-md := metadata.Pairs("authorisation", "Bearer "+token)
+md := metadata.Pairs("authorization", "Bearer "+token)
 ctx := metadata.NewOutgoingContext(context.Background(), md)
 
 // Make call
@@ -502,14 +502,14 @@ spec:
 
 ### Common Issues
 
-#### "missing authorisation header"
+#### "missing Authorization header"
 
 **Cause**: No `Authorization` header in gRPC metadata
 
 **Solution**: Add Bearer token to metadata:
 
 ```go
-md := metadata.Pairs("authorisation", "Bearer "+token)
+md := metadata.Pairs("authorization", "Bearer "+token)
 ctx := metadata.NewOutgoingContext(ctx, md)
 ```
 
