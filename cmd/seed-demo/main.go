@@ -148,7 +148,7 @@ func run() error {
 	fmt.Printf("Tenant:     %s (slug: %s)\n", tenantID, tenantSlug)
 	fmt.Printf("DNO:        %s\n", dnoPartyID)
 	fmt.Printf("GSPs:       %d grid supply points\n", len(gspPartyIDs))
-	fmt.Printf("Customers:  %d customers with GBP + KWH accounts\n", len(customerPartyIDs))
+	fmt.Printf("Customers:  %d customers with GBP billing accounts\n", len(customerPartyIDs))
 	fmt.Printf("Market:     30 days of wholesale energy prices\n")
 	return nil
 }
@@ -328,7 +328,6 @@ type customerAccountPair struct {
 	customerName string
 	partyID      string
 	gbpAccountID string
-	kwhAccountID string
 }
 
 func createAccounts(ctx context.Context, conn *grpc.ClientConn, dnoPartyID string, customerPartyIDs []string) ([]customerAccountPair, error) {
@@ -340,21 +339,13 @@ func createAccounts(ctx context.Context, conn *grpc.ClientConn, dnoPartyID strin
 		accounts[i].customerName = cust.legalName
 		accounts[i].partyID = partyID
 
-		// GBP billing account
+		// GBP billing account (energy consumption tracked via market data + position-keeping)
 		gbpID, err := createAccountIdempotent(ctx, client, partyID, fmt.Sprintf("VE-GBP-%03d", i+1), "GBP", dnoPartyID)
 		if err != nil {
 			return nil, fmt.Errorf("create GBP account for %s: %w", cust.legalName, err)
 		}
 		accounts[i].gbpAccountID = gbpID
 		fmt.Printf("  GBP: %s (%s)\n", gbpID, cust.legalName)
-
-		// KWH metering account
-		kwhID, err := createAccountIdempotent(ctx, client, partyID, fmt.Sprintf("VE-KWH-%03d", i+1), "KWH", dnoPartyID)
-		if err != nil {
-			return nil, fmt.Errorf("create KWH account for %s: %w", cust.legalName, err)
-		}
-		accounts[i].kwhAccountID = kwhID
-		fmt.Printf("  KWH: %s (%s)\n", kwhID, cust.legalName)
 	}
 
 	return accounts, nil
@@ -427,15 +418,8 @@ func seedCustomerBalances(ctx context.Context, client currentaccountv1.CurrentAc
 		totalKWH += dailyKWH
 		totalGBP += dailyGBP
 
-		if err := depositIdempotent(ctx, client, acct.kwhAccountID, dailyKWH, "KWH",
-			fmt.Sprintf("Metered consumption %s", date.Format("2006-01-02")),
-			fmt.Sprintf("METER-%s-%s", acct.partyID, date.Format("20060102")),
-		); err != nil {
-			return fmt.Errorf("deposit KWH for %s day %d: %w", acct.customerName, day, err)
-		}
-
 		if err := depositIdempotent(ctx, client, acct.gbpAccountID, dailyGBP, "GBP",
-			fmt.Sprintf("Fixed tariff billing %s @ %.1fp/kWh", date.Format("2006-01-02"), fixedRate*100),
+			fmt.Sprintf("Energy billing %s: %.2f kWh @ %.1fp/kWh", date.Format("2006-01-02"), dailyKWH, fixedRate*100),
 			fmt.Sprintf("BILL-%s-%s", acct.partyID, date.Format("20060102")),
 		); err != nil {
 			return fmt.Errorf("deposit GBP for %s day %d: %w", acct.customerName, day, err)
