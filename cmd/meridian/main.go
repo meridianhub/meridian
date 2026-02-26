@@ -50,6 +50,7 @@ import (
 	auditservice "github.com/meridianhub/meridian/services/audit-worker/service"
 	controlplaneservice "github.com/meridianhub/meridian/services/control-plane/service"
 	currentaccountpersistence "github.com/meridianhub/meridian/services/current-account/adapters/persistence"
+	caconfig "github.com/meridianhub/meridian/services/current-account/config"
 	currentaccountservice "github.com/meridianhub/meridian/services/current-account/service"
 	financialaccountingpersistence "github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
 	faclient "github.com/meridianhub/meridian/services/financial-accounting/client"
@@ -581,12 +582,20 @@ func wireCurrentAccount(
 
 	partyWrapper := newPartyClientWrapper(partyLoopback)
 
+	// Load clearing account config from env vars (optional — deposits work
+	// without it but produce single-sided postings which FA may reject).
+	acctCfg, err := caconfig.LoadAccountConfig()
+	if err != nil {
+		logger.Info("no clearing account config, deposits will skip debit posting", "reason", err)
+		acctCfg = nil
+	}
+
 	svc, err := currentaccountservice.NewServiceWithExistingClients(
 		repo, lienRepo, withdrawalRepo,
 		outboxRepo, db,
 		pkLoopback, faLoopback,
 		partyWrapper,
-		nil, // accountConfig — no static clearing account config needed
+		acctCfg,
 		idempotencySvc, logger, tracer,
 		nil, // accountResolver — no dynamic clearing account resolution
 		nil, // fungibilityValidator — not needed for demo
