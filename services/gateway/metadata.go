@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/meridianhub/meridian/services/gateway/auth"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
 // metadataPropagationMiddleware is an HTTP middleware for the Vanguard transcoder
@@ -88,5 +89,14 @@ func writeIdentityMetadata(req *http.Request) {
 		if tenantID, ok := auth.GetTenantIDFromContext(ctx); ok && tenantID != "" {
 			req.Header.Set("x-tenant-id", tenantID)
 		}
+		return
+	}
+
+	// Fall back to tenant resolver context. When auth is disabled
+	// (AUTH_ENABLED=false), the tenant resolver middleware still injects the
+	// tenant ID into the request context via tenant.WithTenant(). Propagate
+	// it as a header so Vanguard forwards it as gRPC metadata.
+	if tenantID, ok := tenant.FromContext(ctx); ok && !tenantID.IsEmpty() {
+		req.Header.Set("x-tenant-id", string(tenantID))
 	}
 }
