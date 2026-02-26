@@ -2,6 +2,7 @@ package persistence_test
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"testing"
@@ -28,7 +29,8 @@ var allTables = []string{
 }
 
 func TestMain(m *testing.M) {
-	if os.Getenv("INTEGRATION_TEST") == "" && isShortMode() {
+	flag.Parse()
+	if os.Getenv("INTEGRATION_TEST") == "" && testing.Short() {
 		os.Exit(m.Run())
 	}
 
@@ -76,15 +78,6 @@ func TestMain(m *testing.M) {
 	}
 	_ = crdbContainer.Terminate(context.Background())
 	os.Exit(code)
-}
-
-func isShortMode() bool {
-	for _, arg := range os.Args {
-		if arg == "-test.short" || arg == "--test.short" {
-			return true
-		}
-	}
-	return false
 }
 
 // runMigrations creates the tenant schema and all tables once for the shared container.
