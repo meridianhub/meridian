@@ -252,11 +252,12 @@ func (r *LienRepository) SumActiveAmountByAccountID(ctx context.Context, account
 	var totalCents int64
 
 	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
-		// First, check for currency consistency (defensive check for data corruption)
+		// First, check for instrument consistency (defensive check for data corruption).
+		// Use instrument_code (not legacy currency) to correctly handle non-CURRENCY liens.
 		countResult := tx.Model(&LienEntity{}).
 			Where("account_id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)",
 				accountID, string(domain.LienStatusActive), now).
-			Select("COUNT(DISTINCT currency)").
+			Select("COUNT(DISTINCT instrument_code)").
 			Scan(&currencyCount)
 
 		if countResult.Error != nil {
@@ -294,11 +295,12 @@ func (r *LienRepository) SumActiveAmountByAccountIDAndBucket(ctx context.Context
 	var totalCents int64
 
 	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
-		// First, check for currency consistency (defensive check for data corruption)
+		// First, check for instrument consistency (defensive check for data corruption).
+		// Use instrument_code (not legacy currency) to correctly handle non-CURRENCY liens.
 		countResult := tx.Model(&LienEntity{}).
 			Where("account_id = ? AND bucket_id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)",
 				accountID, bucketID, string(domain.LienStatusActive), now).
-			Select("COUNT(DISTINCT currency)").
+			Select("COUNT(DISTINCT instrument_code)").
 			Scan(&currencyCount)
 
 		if countResult.Error != nil {
