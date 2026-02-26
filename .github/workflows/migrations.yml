@@ -27,6 +27,7 @@ jobs:
   verify-migrations:
     name: Verify Migration Checksums
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout code
@@ -58,6 +59,7 @@ jobs:
   test-multi-org-migrations:
     name: Test Multi-Organization Migrations
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     services:
       postgres:
