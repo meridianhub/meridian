@@ -277,8 +277,10 @@ test.describe('Tenant Management page', () => {
   test('shows tenant display names', async ({ platformAdminPage: page }) => {
     await navigateTo(page, '/tenants')
 
-    await expect(page.getByText('ACME Corporation')).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByText('Energy Co Ltd')).toBeVisible()
+    // Scope to the table to avoid matching the TenantSelector dropdown in the header
+    const table = page.locator('table')
+    await expect(table.getByText('ACME Corporation')).toBeVisible({ timeout: 15_000 })
+    await expect(table.getByText('Energy Co Ltd')).toBeVisible()
   })
 
   test('shows status badges for tenants', async ({ platformAdminPage: page }) => {
