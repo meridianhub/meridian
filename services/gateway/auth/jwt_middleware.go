@@ -62,17 +62,28 @@ type JWTValidator interface {
 	ValidateToken(tokenString string) (*platformauth.Claims, error)
 }
 
+// JWTMiddlewareConfig holds optional configuration for the JWT middleware.
+type JWTMiddlewareConfig struct {
+	// DefaultTenantID is injected into context when the token lacks an x-tenant-id claim.
+	DefaultTenantID string
+	// DefaultRoles are injected into context when the token lacks a roles claim.
+	DefaultRoles []string
+}
+
 // JWTMiddleware provides HTTP middleware for JWT authentication.
 // It extracts the Authorization header, validates the Bearer token,
 // and injects verified claims into the request context.
 type JWTMiddleware struct {
-	validator JWTValidator
-	logger    *slog.Logger
+	validator       JWTValidator
+	logger          *slog.Logger
+	defaultTenantID string
+	defaultRoles    []string
 }
 
 // NewJWTMiddleware creates a new JWT authentication middleware.
 // Both validator and logger are required parameters.
-func NewJWTMiddleware(validator JWTValidator, logger *slog.Logger) (*JWTMiddleware, error) {
+// An optional config can be provided for OIDC claim defaults.
+func NewJWTMiddleware(validator JWTValidator, logger *slog.Logger, configs ...JWTMiddlewareConfig) (*JWTMiddleware, error) {
 	if validator == nil {
 		return nil, ErrNilValidator
 	}
@@ -80,10 +91,17 @@ func NewJWTMiddleware(validator JWTValidator, logger *slog.Logger) (*JWTMiddlewa
 		return nil, ErrNilLogger
 	}
 
-	return &JWTMiddleware{
+	m := &JWTMiddleware{
 		validator: validator,
 		logger:    logger,
-	}, nil
+	}
+
+	if len(configs) > 0 {
+		m.defaultTenantID = configs[0].DefaultTenantID
+		m.defaultRoles = configs[0].DefaultRoles
+	}
+
+	return m, nil
 }
 
 // Handler returns an http.Handler that performs JWT authentication.
@@ -117,13 +135,28 @@ func (m *JWTMiddleware) Handler(next http.Handler) http.Handler {
 			return
 		}
 
-		// Step 3: Inject claims into context
-		ctx := injectClaimsToContext(r.Context(), claims)
+		// Step 3: Apply OIDC defaults for standard tokens missing custom claims.
+		// Create a shallow copy so the original token claims are not mutated,
+		// but downstream middleware (e.g., TenantAuthorizationMiddleware) sees
+		// the effective values when reading claims from context.
+		effectiveClaims := *claims
+		effectiveClaims.UserID = claims.EffectiveUserID()
 
-		// Step 4: Log successful authentication
+		if effectiveClaims.TenantID == "" && m.defaultTenantID != "" {
+			effectiveClaims.TenantID = m.defaultTenantID
+		}
+		if len(effectiveClaims.Roles) == 0 && len(m.defaultRoles) > 0 {
+			effectiveClaims.Roles = make([]string, len(m.defaultRoles))
+			copy(effectiveClaims.Roles, m.defaultRoles)
+		}
+
+		// Step 4: Inject effective claims into context
+		ctx := injectClaimsToContext(r.Context(), &effectiveClaims)
+
+		// Step 5: Log successful authentication
 		m.logger.Debug("JWT authentication successful",
-			slog.String("user_id", claims.UserID),
-			slog.String("tenant_id", claims.TenantID),
+			slog.String("user_id", effectiveClaims.UserID),
+			slog.String("tenant_id", effectiveClaims.TenantID),
 			slog.String("path", r.URL.Path),
 		)
 

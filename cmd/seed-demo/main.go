@@ -473,7 +473,8 @@ func seedMarketData(ctx context.Context, conn *grpc.ClientConn) error {
 
 	// Activate dataset so observations can be recorded
 	_, err = client.ActivateDataSet(ctx, &marketv1.ActivateDataSetRequest{
-		Code: "WHOLESALE_ENERGY_GBP_KWH",
+		Code:    "WHOLESALE_ENERGY_GBP_KWH",
+		Version: 1,
 	})
 	if err == nil {
 		fmt.Println("  Activated dataset: WHOLESALE_ENERGY_GBP_KWH")

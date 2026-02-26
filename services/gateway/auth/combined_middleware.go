@@ -39,6 +39,9 @@ type CombinedAuthConfig struct {
 	// JWTValidator is the JWT token validator. Required for JWT authentication.
 	JWTValidator JWTValidator
 
+	// JWTConfig holds optional JWT middleware configuration (OIDC defaults).
+	JWTConfig JWTMiddlewareConfig
+
 	// APIKeyConfig is the configuration for API key authentication.
 	// If APIKeys is nil or empty, legacy API key authentication is disabled.
 	APIKeyConfig APIKeyConfig
@@ -64,7 +67,7 @@ func NewCombinedAuthMiddleware(config CombinedAuthConfig) (*CombinedAuthMiddlewa
 	// Set up JWT middleware if validator is provided
 	if config.JWTValidator != nil {
 		var err error
-		jwtMiddleware, err = NewJWTMiddleware(config.JWTValidator, config.Logger)
+		jwtMiddleware, err = NewJWTMiddleware(config.JWTValidator, config.Logger, config.JWTConfig)
 		if err != nil {
 			return nil, err
 		}
