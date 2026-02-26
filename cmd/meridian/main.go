@@ -88,6 +88,7 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/events"
+	platformgateway "github.com/meridianhub/meridian/shared/platform/gateway"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 
 	"google.golang.org/grpc"
@@ -259,7 +260,7 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 	// ─── Start Gateway HTTP Server ───────────────────────────────────────
 
 	platformDSN := replaceDSNDatabase(baseDSN, "meridian_platform")
-	gwServer, err := wireGateway(grpcPort, httpPort, platformDSN, logger)
+	gwServer, err := wireGateway(grpcPort, httpPort, platformDSN, conns.gormDB("tenant"), logger)
 	if err != nil {
 		return fmt.Errorf("gateway init: %w", err)
 	}
@@ -668,15 +669,18 @@ var serviceNames = []string{
 // wireGateway creates the gateway HTTP server with the Vanguard transcoder
 // routing REST/JSON, Connect, and gRPC-Web requests to the shared gRPC server
 // running on grpcPort.
-func wireGateway(grpcPort, httpPort int, databaseURL string, logger *slog.Logger) (*gateway.Server, error) {
+func wireGateway(grpcPort, httpPort int, databaseURL string, tenantDB *gorm.DB, logger *slog.Logger) (*gateway.Server, error) {
 	grpcTarget := fmt.Sprintf("localhost:%d", grpcPort)
 
 	authConfig := gateway.LoadAuthConfig()
 
+	baseDomain := env.GetEnvOrDefault("BASE_DOMAIN", "localhost")
+	localDevMode := env.GetEnvAsBool("LOCAL_DEV_MODE", false)
+
 	config := &gateway.Config{
 		Port:         httpPort,
-		BaseDomain:   env.GetEnvOrDefault("BASE_DOMAIN", "localhost"),
-		LocalDevMode: env.GetEnvAsBool("LOCAL_DEV_MODE", true),
+		BaseDomain:   baseDomain,
+		LocalDevMode: localDevMode,
 		DatabaseURL:  databaseURL,
 		Auth:         authConfig,
 	}
@@ -717,7 +721,16 @@ func wireGateway(grpcPort, httpPort int, databaseURL string, logger *slog.Logger
 		BuildDate: BuildDate,
 	}))
 
-	return gateway.NewServer(config, logger, nil, opts...), nil
+	// Wire tenant resolver middleware — resolves tenant from X-Tenant-Slug header
+	// (LOCAL_DEV_MODE) or subdomain-based resolution.
+	slugCache := platformgateway.NewInMemorySlugCache()
+	tenantRepo := tenantpersistence.NewRepository(tenantDB)
+	tenantResolver, err := platformgateway.NewTenantResolverMiddleware(slugCache, tenantRepo, baseDomain, logger, localDevMode)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create tenant resolver: %w", err)
+	}
+
+	return gateway.NewServer(config, logger, tenantResolver, opts...), nil
 }
 
 // ─── Per-Service Database Connections ────────────────────────────────────────
