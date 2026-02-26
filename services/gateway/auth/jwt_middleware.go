@@ -135,26 +135,28 @@ func (m *JWTMiddleware) Handler(next http.Handler) http.Handler {
 			return
 		}
 
-		// Step 3: Apply OIDC defaults for standard tokens missing custom claims
-		effectiveUserID := claims.EffectiveUserID()
-		effectiveTenantID := claims.TenantID
-		effectiveRoles := claims.GetRoles()
+		// Step 3: Apply OIDC defaults for standard tokens missing custom claims.
+		// Create a shallow copy so the original token claims are not mutated,
+		// but downstream middleware (e.g., TenantAuthorizationMiddleware) sees
+		// the effective values when reading claims from context.
+		effectiveClaims := *claims
+		effectiveClaims.UserID = claims.EffectiveUserID()
 
-		if effectiveTenantID == "" && m.defaultTenantID != "" {
-			effectiveTenantID = m.defaultTenantID
+		if effectiveClaims.TenantID == "" && m.defaultTenantID != "" {
+			effectiveClaims.TenantID = m.defaultTenantID
 		}
-		if len(claims.Roles) == 0 && len(m.defaultRoles) > 0 {
-			effectiveRoles = make([]string, len(m.defaultRoles))
-			copy(effectiveRoles, m.defaultRoles)
+		if len(effectiveClaims.Roles) == 0 && len(m.defaultRoles) > 0 {
+			effectiveClaims.Roles = make([]string, len(m.defaultRoles))
+			copy(effectiveClaims.Roles, m.defaultRoles)
 		}
 
-		// Step 4: Inject claims into context (using effective values)
-		ctx := injectClaimsToContextWithDefaults(r.Context(), claims, effectiveUserID, effectiveTenantID, effectiveRoles)
+		// Step 4: Inject effective claims into context
+		ctx := injectClaimsToContext(r.Context(), &effectiveClaims)
 
 		// Step 5: Log successful authentication
 		m.logger.Debug("JWT authentication successful",
-			slog.String("user_id", effectiveUserID),
-			slog.String("tenant_id", effectiveTenantID),
+			slog.String("user_id", effectiveClaims.UserID),
+			slog.String("tenant_id", effectiveClaims.TenantID),
 			slog.String("path", r.URL.Path),
 		)
 
@@ -248,22 +250,16 @@ func (m *JWTMiddleware) handleValidationError(w http.ResponseWriter, r *http.Req
 // It stores individual claim values for easy access and the full claims object
 // for cases where all claims are needed.
 func injectClaimsToContext(ctx context.Context, claims *platformauth.Claims) context.Context {
-	return injectClaimsToContextWithDefaults(ctx, claims, claims.UserID, claims.TenantID, claims.GetRoles())
-}
-
-// injectClaimsToContextWithDefaults adds JWT claims to context using effective values
-// that may differ from the raw token claims (e.g., when OIDC defaults are applied).
-func injectClaimsToContextWithDefaults(ctx context.Context, claims *platformauth.Claims, effectiveUserID, effectiveTenantID string, effectiveRoles []string) context.Context {
-	ctx = context.WithValue(ctx, UserIDContextKey, effectiveUserID)
-	ctx = context.WithValue(ctx, TenantIDContextKey, effectiveTenantID)
-	ctx = context.WithValue(ctx, RolesContextKey, effectiveRoles)
+	ctx = context.WithValue(ctx, UserIDContextKey, claims.UserID)
+	ctx = context.WithValue(ctx, TenantIDContextKey, claims.TenantID)
+	ctx = context.WithValue(ctx, RolesContextKey, claims.GetRoles())
 	ctx = context.WithValue(ctx, ScopesContextKey, claims.GetScopes())
 	ctx = context.WithValue(ctx, ClaimsContextKey, claims)
 
 	// Also inject tenant into context using the shared tenant package
 	// This allows downstream handlers to use tenant.FromContext()
-	if effectiveTenantID != "" {
-		if tenantID, err := tenant.NewTenantID(effectiveTenantID); err == nil {
+	if claims.TenantID != "" {
+		if tenantID, err := tenant.NewTenantID(claims.TenantID); err == nil {
 			ctx = tenant.WithTenant(ctx, tenantID)
 		}
 	}
