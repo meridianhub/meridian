@@ -247,7 +247,8 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 		}
 	}
 
-	// Record initial balance
+	// Record initial balance using instrument_code (not currency) so the metric works
+	// for all asset types (kWh, GPU_HOUR, GBP, etc.), not just monetary instruments.
 	caobservability.RecordBalance(safeMinorUnits(account.Balance()), instrumentCode)
 
 	// Convert to proto response
