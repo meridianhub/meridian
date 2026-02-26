@@ -36,10 +36,12 @@ def execute_stripe_payment_received():
     tenant_id = input_data["tenant_id"]
     party_id = input_data["party_id"]
     amount_cents = input_data["amount_cents"]
-    # Accept instrument_code (preferred) or currency (deprecated alias)
-    instrument_code = input_data.get("instrument_code", "")
+    # Accept instrument_code (preferred) or currency (deprecated alias).
+    # Normalize once: strip whitespace, uppercase, default to "GBP".
+    instrument_code = input_data.get("instrument_code", "") or input_data.get("currency", "")
+    instrument_code = instrument_code.strip().upper()
     if instrument_code == "":
-        instrument_code = input_data.get("currency", "GBP")
+        instrument_code = "GBP"
     charge_id = input_data["charge_id"]
     payment_intent_id = input_data.get("payment_intent_id", "")
     stripe_event_id = input_data.get("stripe_event_id", "")
@@ -58,7 +60,7 @@ def execute_stripe_payment_received():
     debit_result = position_keeping.initiate_log(
         account_id=nostro_account,
         amount=amount,
-        instrument_code=instrument_code.upper(),
+        instrument_code=instrument_code,
         direction="DEBIT",
         description="Stripe payment received: " + charge_id,
         external_reference_id=charge_id,
@@ -70,7 +72,7 @@ def execute_stripe_payment_received():
     credit_result = position_keeping.initiate_log(
         account_id=prepaid_account,
         amount=amount,
-        instrument_code=instrument_code.upper(),
+        instrument_code=instrument_code,
         direction="CREDIT",
         description="Payment from Stripe: " + charge_id,
         external_reference_id=charge_id,
