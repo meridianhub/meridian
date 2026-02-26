@@ -12,13 +12,11 @@ export function createTenantTransport(
   getToken: TokenGetter,
   getTenantSlug: TenantSlugGetter,
 ): Transport {
-  // In development or demo mode, keep the base URL and route via X-Tenant-Slug header
-  // (the gateway resolves tenants from the header when not using subdomain routing).
+  // In development, keep the base URL and route via X-Tenant-Slug header
+  // (the gateway's LOCAL_DEV_MODE resolves tenants from the header).
   // In production, use subdomain-based URL for tenant routing.
-  const useHeaderRouting =
-    import.meta.env.DEV || import.meta.env.VITE_DEMO_MODE === 'true'
   const baseUrl =
-    tenantSlug && !useHeaderRouting ? buildTenantBaseUrl(tenantSlug) : apiConfig.baseUrl
+    tenantSlug && !import.meta.env.DEV ? buildTenantBaseUrl(tenantSlug) : apiConfig.baseUrl
 
   return createConnectTransport({
     baseUrl,
