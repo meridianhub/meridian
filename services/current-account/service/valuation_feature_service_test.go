@@ -9,7 +9,6 @@ import (
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
-	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
@@ -17,14 +16,12 @@ import (
 	"gorm.io/gorm"
 )
 
-const testTenantIDForVF = "test_tenant"
-
 func setupValuationFeatureServiceTest(t *testing.T) (*Service, context.Context, func()) {
 	t.Helper()
-	db, cleanup := testdb.SetupPostgres(t, nil)
+	db := openSharedDB(t)
 
 	// Create the tenant schema for tests
-	tid := tenant.TenantID(testTenantIDForVF)
+	tid := uniqueTenantID()
 	schemaName := tid.SchemaName()
 	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
 	require.NoError(t, err)
@@ -100,6 +97,14 @@ func setupValuationFeatureServiceTest(t *testing.T) (*Service, context.Context, 
 	// Create service
 	svc, err := NewServiceWithValuationFeatures(repo, valuationFeatureRepo)
 	require.NoError(t, err)
+
+	cleanup := func() {
+		db.Exec(fmt.Sprintf("DROP SCHEMA IF EXISTS %q CASCADE", schemaName))
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	}
 
 	return svc, ctx, cleanup
 }
@@ -502,7 +507,7 @@ func TestValuationFeatureRepoNil(t *testing.T) {
 	svc, err := NewService(repo, nil)
 	require.NoError(t, err)
 
-	ctx := tenant.WithTenant(context.Background(), tenant.TenantID(testTenantIDForVF))
+	ctx := tenant.WithTenant(context.Background(), tenant.TenantID("test_tenant"))
 
 	// All valuation feature operations should fail
 	_, err = svc.CreateValuationFeature(ctx, &pb.CreateValuationFeatureRequest{})

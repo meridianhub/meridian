@@ -22,7 +22,6 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"github.com/meridianhub/meridian/shared/pkg/saga/schema"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
-	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/grpc/codes"
@@ -302,24 +301,33 @@ func mustNewMoney(currency string, amountCents int64) domain.Money {
 	return m
 }
 
-const svcTestTenantID = "test_tenant"
-
 func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	t.Helper()
-	db, cleanup := testdb.SetupPostgres(t, []interface{}{&persistence.CurrentAccountEntity{}})
+	db := openSharedDB(t)
 
-	// Create the tenant schema for tests
-	tid := tenant.TenantID(svcTestTenantID)
+	// Each test gets a unique tenant → unique schema for isolation
+	tid := uniqueTenantID()
 	schemaName := tid.SchemaName()
 	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
-	// Set default search_path to include tenant schema so queries route to tenant-scoped tables
+	// Set search_path so AutoMigrate creates tables in the tenant schema
 	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
-	// Create context with tenant
+	// AutoMigrate in the tenant schema
+	err = db.AutoMigrate(&persistence.CurrentAccountEntity{})
+	require.NoError(t, err)
+
 	ctx := tenant.WithTenant(context.Background(), tid)
+
+	cleanup := func() {
+		_ = db.Exec(fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", pq.QuoteIdentifier(schemaName)))
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			_ = sqlDB.Close()
+		}
+	}
 
 	return db, ctx, cleanup
 }
@@ -966,9 +974,10 @@ func TestExecuteDeposit_IdempotencyReturnsCachedResponse(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, repo.Save(ctx, account))
 
-	// Pre-populate cached response
+	// Pre-populate cached response — use tenant from context (dynamic per test)
+	tid, _ := tenant.FromContext(ctx)
 	idempKey := idempotency.Key{
-		TenantID:  svcTestTenantID,
+		TenantID:  string(tid),
 		Namespace: "current-account",
 		Operation: "deposit",
 		EntityID:  "ACC-IDEMP-001",
@@ -1017,8 +1026,9 @@ func TestExecuteDeposit_IdempotencyReturnsAbortedWhenInProgress(t *testing.T) {
 	require.NoError(t, repo.Save(ctx, account))
 
 	// Mark operation as pending (simulating concurrent request)
+	tid, _ := tenant.FromContext(ctx)
 	idempKey := idempotency.Key{
-		TenantID:  svcTestTenantID,
+		TenantID:  string(tid),
 		Namespace: "current-account",
 		Operation: "deposit",
 		EntityID:  "ACC-IDEMP-002",
@@ -1089,8 +1099,9 @@ func TestExecuteDeposit_IdempotencyCleanupOnFailure(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, repo.Save(ctx, account))
 
+	tid, _ := tenant.FromContext(ctx)
 	idempKey := idempotency.Key{
-		TenantID:  svcTestTenantID,
+		TenantID:  string(tid),
 		Namespace: "current-account",
 		Operation: "deposit",
 		EntityID:  "ACC-IDEMP-004",

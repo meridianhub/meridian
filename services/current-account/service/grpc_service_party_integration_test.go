@@ -20,7 +20,6 @@ import (
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
-	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
@@ -123,27 +122,36 @@ func (m *mockPartyClient) Close() error {
 	return nil
 }
 
-// Helper function for party integration tests
-const partyIntegrationTestTenantID = "test_tenant"
-
 func setupPartyIntegrationTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	t.Helper()
-	db, cleanup := testdb.SetupPostgres(t, []interface{}{
-		&persistence.CurrentAccountEntity{},
-	})
+	db := openSharedDB(t)
 
-	// Create the tenant schema for tests
-	tid := tenant.TenantID(partyIntegrationTestTenantID)
+	tid := uniqueTenantID()
 	schemaName := tid.SchemaName()
-	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
+	quotedSchema := pq.QuoteIdentifier(schemaName)
+
+	// Create the tenant schema
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", quotedSchema)).Error
 	require.NoError(t, err)
 
 	// Set default search_path to include tenant schema
-	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", quotedSchema)).Error
+	require.NoError(t, err)
+
+	// AutoMigrate the account entity in the tenant schema
+	err = db.AutoMigrate(&persistence.CurrentAccountEntity{})
 	require.NoError(t, err)
 
 	// Create context with tenant
 	ctx := tenant.WithTenant(context.Background(), tid)
+
+	cleanup := func() {
+		db.Exec(fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", quotedSchema))
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	}
 
 	return db, ctx, cleanup
 }
