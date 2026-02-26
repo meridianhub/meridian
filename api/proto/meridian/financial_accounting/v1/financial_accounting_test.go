@@ -22,7 +22,7 @@ func TestFinancialBookingLogCreation(t *testing.T) {
 		ProductServiceReference: "prod-456",
 		BusinessUnitReference:   "bu-789",
 		ChartOfAccountsRules:    "rules-001",
-		BaseCurrency:            commonv1.Currency_CURRENCY_GBP,
+		BaseInstrumentCode:      "GBP",
 		Status:                  commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
 		CreatedAt:               now,
 		UpdatedAt:               now,
@@ -35,8 +35,8 @@ func TestFinancialBookingLogCreation(t *testing.T) {
 	if log.FinancialAccountType != "DEBIT" {
 		t.Errorf("Expected DEBIT account type, got %v", log.FinancialAccountType)
 	}
-	if log.BaseCurrency != commonv1.Currency_CURRENCY_GBP {
-		t.Errorf("Expected GBP currency, got %v", log.BaseCurrency)
+	if log.BaseInstrumentCode != "GBP" {
+		t.Errorf("Expected GBP instrument code, got %v", log.BaseInstrumentCode)
 	}
 }
 
@@ -81,7 +81,7 @@ func TestInitiateFinancialBookingLogRequest(t *testing.T) {
 		ProductServiceReference: "prod-123",
 		BusinessUnitReference:   "bu-456",
 		ChartOfAccountsRules:    "rules-001",
-		BaseCurrency:            commonv1.Currency_CURRENCY_GBP,
+		BaseInstrumentCode:      "GBP",
 		IdempotencyKey: &commonv1.IdempotencyKey{
 			Key:        "idem-key-123",
 			TtlSeconds: 3600,
@@ -239,7 +239,7 @@ func TestResponseMessages(t *testing.T) {
 				ProductServiceReference: "prod-456",
 				BusinessUnitReference:   "bu-789",
 				ChartOfAccountsRules:    "rules-001",
-				BaseCurrency:            commonv1.Currency_CURRENCY_GBP,
+				BaseInstrumentCode:      "GBP",
 				Status:                  commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
 				CreatedAt:               now,
 				UpdatedAt:               now,
@@ -258,7 +258,7 @@ func TestResponseMessages(t *testing.T) {
 				ProductServiceReference: "prod-456",
 				BusinessUnitReference:   "bu-789",
 				ChartOfAccountsRules:    "updated-rules",
-				BaseCurrency:            commonv1.Currency_CURRENCY_GBP,
+				BaseInstrumentCode:      "GBP",
 				Status:                  commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
 				CreatedAt:               now,
 				UpdatedAt:               now,
@@ -278,7 +278,7 @@ func TestResponseMessages(t *testing.T) {
 					ProductServiceReference: "prod-1",
 					BusinessUnitReference:   "bu-1",
 					ChartOfAccountsRules:    "rules-1",
-					BaseCurrency:            commonv1.Currency_CURRENCY_GBP,
+					BaseInstrumentCode:      "GBP",
 					Status:                  commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
 					CreatedAt:               now,
 					UpdatedAt:               now,

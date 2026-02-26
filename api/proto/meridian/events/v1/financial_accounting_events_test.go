@@ -17,7 +17,7 @@ func TestFinancialBookingLogInitiatedEvent_Serialization(t *testing.T) {
 		FinancialAccountType:    "DEBIT",
 		ProductServiceReference: "product-456",
 		BusinessUnitReference:   "bu-789",
-		BaseCurrency:            commonv1.Currency_CURRENCY_GBP,
+		BaseInstrumentCode:      "GBP",
 		CorrelationId:           "correlation-abc",
 		CausationId:             "causation-def",
 		Timestamp:               timestamppb.New(time.Now()),
@@ -43,8 +43,8 @@ func TestFinancialBookingLogInitiatedEvent_Serialization(t *testing.T) {
 	if decoded.FinancialAccountType != event.FinancialAccountType {
 		t.Errorf("FinancialAccountType mismatch: got %v, want %v", decoded.FinancialAccountType, event.FinancialAccountType)
 	}
-	if decoded.BaseCurrency != event.BaseCurrency {
-		t.Errorf("BaseCurrency mismatch: got %v, want %v", decoded.BaseCurrency, event.BaseCurrency)
+	if decoded.BaseInstrumentCode != event.BaseInstrumentCode {
+		t.Errorf("BaseInstrumentCode mismatch: got %v, want %v", decoded.BaseInstrumentCode, event.BaseInstrumentCode)
 	}
 	if decoded.Version != event.Version {
 		t.Errorf("Version mismatch: got %v, want %v", decoded.Version, event.Version)
@@ -311,7 +311,7 @@ func TestFinancialBookingLogInitiatedEvent_EmptyFields(t *testing.T) {
 		FinancialAccountType:    "DEBIT",
 		ProductServiceReference: "",
 		BusinessUnitReference:   "",
-		BaseCurrency:            commonv1.Currency_CURRENCY_GBP,
+		BaseInstrumentCode:      "GBP",
 		CorrelationId:           "",
 		CausationId:             "",
 		Timestamp:               timestamppb.New(time.Now()),
@@ -345,7 +345,7 @@ func TestFinancialBookingLogInitiatedEvent_MaxLengthFields(t *testing.T) {
 		FinancialAccountType:    "DEBIT",
 		ProductServiceReference: maxLengthString,
 		BusinessUnitReference:   maxLengthString,
-		BaseCurrency:            commonv1.Currency_CURRENCY_GBP,
+		BaseInstrumentCode:      "GBP",
 		CorrelationId:           maxLengthString,
 		CausationId:             maxLengthString,
 		Timestamp:               timestamppb.New(time.Now()),
@@ -374,7 +374,7 @@ func TestFinancialBookingLogInitiatedEvent_UnspecifiedEnum(t *testing.T) {
 		FinancialAccountType:    "",
 		ProductServiceReference: "product-456",
 		BusinessUnitReference:   "bu-789",
-		BaseCurrency:            commonv1.Currency_CURRENCY_UNSPECIFIED,
+		BaseInstrumentCode:      "",
 		CorrelationId:           "correlation-abc",
 		CausationId:             "causation-def",
 		Timestamp:               timestamppb.New(time.Now()),
@@ -394,8 +394,8 @@ func TestFinancialBookingLogInitiatedEvent_UnspecifiedEnum(t *testing.T) {
 	if decoded.FinancialAccountType != "" {
 		t.Errorf("Expected ACCOUNT_TYPE_UNSPECIFIED, got %v", decoded.FinancialAccountType)
 	}
-	if decoded.BaseCurrency != commonv1.Currency_CURRENCY_UNSPECIFIED {
-		t.Errorf("Expected CURRENCY_UNSPECIFIED, got %v", decoded.BaseCurrency)
+	if decoded.BaseInstrumentCode != "" {
+		t.Errorf("Expected empty BaseInstrumentCode, got %v", decoded.BaseInstrumentCode)
 	}
 }
 
@@ -406,7 +406,7 @@ func TestFinancialBookingLogInitiatedEvent_ZeroVersion(t *testing.T) {
 		FinancialAccountType:    "DEBIT",
 		ProductServiceReference: "product-456",
 		BusinessUnitReference:   "bu-789",
-		BaseCurrency:            commonv1.Currency_CURRENCY_GBP,
+		BaseInstrumentCode:      "GBP",
 		CorrelationId:           "correlation-abc",
 		CausationId:             "causation-def",
 		Timestamp:               timestamppb.New(time.Now()),
@@ -435,7 +435,7 @@ func TestFinancialBookingLogInitiatedEvent_NegativeVersion(t *testing.T) {
 		FinancialAccountType:    "DEBIT",
 		ProductServiceReference: "product-456",
 		BusinessUnitReference:   "bu-789",
-		BaseCurrency:            commonv1.Currency_CURRENCY_GBP,
+		BaseInstrumentCode:      "GBP",
 		CorrelationId:           "correlation-abc",
 		CausationId:             "causation-def",
 		Timestamp:               timestamppb.New(time.Now()),

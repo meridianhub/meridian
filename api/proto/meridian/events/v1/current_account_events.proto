@@ -31,10 +31,11 @@ message AccountCreatedEvent {
     max_len: 34  // IBAN max length
   }];
 
-  // base_currency is the account's base currency
-  meridian.common.v1.Currency base_currency = 4 [(buf.validate.field).enum = {
-    defined_only: true
-    not_in: [0]
+  // base_instrument_code is the account's base instrument code (e.g., "GBP", "USD").
+  // Replaces the deprecated base_currency enum field.
+  string base_instrument_code = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 50
   }];
 
   // account_status is the initial status (typically ACTIVE)

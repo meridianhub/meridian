@@ -76,10 +76,11 @@ message FinancialBookingLog {
   // chart_of_accounts_rules defines the accounting rules to apply.
   string chart_of_accounts_rules = 5 [(buf.validate.field).string = {min_len: 1}];
 
-  // base_currency is the currency for this booking log.
-  meridian.common.v1.Currency base_currency = 6 [(buf.validate.field).enum = {
-    defined_only: true
-    not_in: [0]
+  // base_instrument_code is the instrument code for this booking log (e.g., "GBP", "USD", "kWh").
+  // Replaces the deprecated base_currency enum field. Supports the Universal Asset System.
+  string base_instrument_code = 6 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 50
   }];
 
   // status represents the current lifecycle state.
@@ -190,10 +191,11 @@ message InitiateFinancialBookingLogRequest {
   // chart_of_accounts_rules defines accounting rules.
   string chart_of_accounts_rules = 4 [(buf.validate.field).string = {min_len: 1}];
 
-  // base_currency is the currency for transactions.
-  meridian.common.v1.Currency base_currency = 5 [(buf.validate.field).enum = {
-    defined_only: true
-    not_in: [0]
+  // base_instrument_code is the instrument code for transactions (e.g., "GBP", "USD", "kWh").
+  // Replaces the deprecated base_currency enum field. Supports the Universal Asset System.
+  string base_instrument_code = 5 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 50
   }];
 
   // idempotency_key ensures exactly-once processing.

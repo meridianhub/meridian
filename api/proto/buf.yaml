@@ -3,3 +3,47 @@ deps:
   - buf.build/bufbuild/protovalidate
   - buf.build/googleapis/googleapis
   - buf.build/grpc-ecosystem/grpc-gateway
+
+breaking:
+  # Intentional breaking changes for asset-agnostic-accounts epic:
+  # Replacing deprecated Currency enum fields with string instrument_code fields.
+  # These fields changed from enum to string type and were renamed to reflect
+  # the Universal Asset System (supporting currencies, energy, carbon credits, etc.).
+  # Ignoring specific rules to allow these deliberate proto evolution decisions.
+  ignore_only:
+    FIELD_SAME_JSON_NAME:
+      - meridian/events/v1/current_account_events.proto
+      - meridian/events/v1/deposit_event.proto
+      - meridian/events/v1/financial_accounting_events.proto
+      - meridian/events/v1/position_keeping_events.proto
+      - meridian/financial_accounting/v1/financial_accounting.proto
+    FIELD_SAME_TYPE:
+      - meridian/events/v1/current_account_events.proto
+      - meridian/events/v1/deposit_event.proto
+      - meridian/events/v1/financial_accounting_events.proto
+      - meridian/events/v1/position_keeping_events.proto
+      - meridian/financial_accounting/v1/financial_accounting.proto
+    FIELD_SAME_ONEOF:
+      - meridian/events/v1/current_account_events.proto
+      - meridian/events/v1/deposit_event.proto
+      - meridian/events/v1/financial_accounting_events.proto
+      - meridian/events/v1/position_keeping_events.proto
+      - meridian/financial_accounting/v1/financial_accounting.proto
+    FIELD_SAME_NAME:
+      - meridian/events/v1/current_account_events.proto
+      - meridian/events/v1/deposit_event.proto
+      - meridian/events/v1/financial_accounting_events.proto
+      - meridian/events/v1/position_keeping_events.proto
+      - meridian/financial_accounting/v1/financial_accounting.proto
+    FIELD_WIRE_COMPATIBLE_TYPE:
+      - meridian/events/v1/current_account_events.proto
+      - meridian/events/v1/deposit_event.proto
+      - meridian/events/v1/financial_accounting_events.proto
+      - meridian/events/v1/position_keeping_events.proto
+      - meridian/financial_accounting/v1/financial_accounting.proto
+    FIELD_WIRE_JSON_COMPATIBLE_TYPE:
+      - meridian/events/v1/current_account_events.proto
+      - meridian/events/v1/deposit_event.proto
+      - meridian/events/v1/financial_accounting_events.proto
+      - meridian/events/v1/position_keeping_events.proto
+      - meridian/financial_accounting/v1/financial_accounting.proto

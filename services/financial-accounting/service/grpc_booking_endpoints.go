@@ -89,14 +89,11 @@ func (s *FinancialAccountingService) InitiateFinancialBookingLog(
 		return nil, status.Error(codes.InvalidArgument, "chart_of_accounts_rules is required")
 	}
 
-	// Validate base currency
-	if req.BaseCurrency == commonv1.Currency_CURRENCY_UNSPECIFIED {
-		return nil, status.Error(codes.InvalidArgument, "base_currency must be specified")
+	// Validate base instrument code
+	if req.BaseInstrumentCode == "" {
+		return nil, status.Error(codes.InvalidArgument, "base_instrument_code must be specified")
 	}
-	baseCurrency := fromProtoCurrency(req.BaseCurrency)
-	if baseCurrency == "" {
-		return nil, status.Error(codes.InvalidArgument, "invalid base_currency")
-	}
+	baseCurrency := domain.Currency(req.BaseInstrumentCode)
 
 	// Create domain entity
 	bookingLog := domain.NewFinancialBookingLog(
@@ -126,7 +123,7 @@ func (s *FinancialAccountingService) InitiateFinancialBookingLog(
 		FinancialAccountType:    toProtoAccountType(bookingLog.FinancialAccountType),
 		ProductServiceReference: bookingLog.ProductServiceReference,
 		BusinessUnitReference:   bookingLog.BusinessUnitReference,
-		BaseCurrency:            toProtoCurrency(bookingLog.BaseCurrency),
+		BaseInstrumentCode:      string(bookingLog.BaseCurrency),
 		CorrelationId:           correlationID,
 		CausationId:             correlationID, // Request caused this event
 		Timestamp:               timestamppb.Now(),

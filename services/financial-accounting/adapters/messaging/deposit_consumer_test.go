@@ -9,7 +9,6 @@ import (
 
 	"github.com/lib/pq"
 
-	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
 	"github.com/meridianhub/meridian/services/financial-accounting/service"
@@ -300,48 +299,48 @@ func TestDepositConsumer_HandleDepositEvent(t *testing.T) {
 		{
 			name: "valid deposit event",
 			event: &eventsv1.DepositEvent{
-				AccountId:     "ACC-123",
-				AmountCents:   10000,
-				Currency:      commonv1.Currency_CURRENCY_GBP,
-				CorrelationId: "deposit-001",
-				ValueDate:     timestamppb.Now(),
-				Timestamp:     timestamppb.Now(),
+				AccountId:      "ACC-123",
+				AmountCents:    10000,
+				InstrumentCode: "GBP",
+				CorrelationId:  "deposit-001",
+				ValueDate:      timestamppb.Now(),
+				Timestamp:      timestamppb.Now(),
 			},
 			wantErr: false,
 		},
 		{
 			name: "zero amount",
 			event: &eventsv1.DepositEvent{
-				AccountId:     "ACC-456",
-				AmountCents:   0,
-				Currency:      commonv1.Currency_CURRENCY_GBP,
-				CorrelationId: "deposit-002",
-				ValueDate:     timestamppb.Now(),
-				Timestamp:     timestamppb.Now(),
+				AccountId:      "ACC-456",
+				AmountCents:    0,
+				InstrumentCode: "GBP",
+				CorrelationId:  "deposit-002",
+				ValueDate:      timestamppb.Now(),
+				Timestamp:      timestamppb.Now(),
 			},
 			wantErr: true,
 		},
 		{
 			name: "nil value date",
 			event: &eventsv1.DepositEvent{
-				AccountId:     "ACC-789",
-				AmountCents:   5000,
-				Currency:      commonv1.Currency_CURRENCY_USD,
-				CorrelationId: "deposit-003",
-				ValueDate:     nil,
-				Timestamp:     timestamppb.Now(),
+				AccountId:      "ACC-789",
+				AmountCents:    5000,
+				InstrumentCode: "USD",
+				CorrelationId:  "deposit-003",
+				ValueDate:      nil,
+				Timestamp:      timestamppb.Now(),
 			},
 			wantErr: true,
 		},
 		{
 			name: "unspecified currency",
 			event: &eventsv1.DepositEvent{
-				AccountId:     "ACC-999",
-				AmountCents:   3000,
-				Currency:      commonv1.Currency_CURRENCY_UNSPECIFIED,
-				CorrelationId: "deposit-004",
-				ValueDate:     timestamppb.Now(),
-				Timestamp:     timestamppb.Now(),
+				AccountId:      "ACC-999",
+				AmountCents:    3000,
+				InstrumentCode: "",
+				CorrelationId:  "deposit-004",
+				ValueDate:      timestamppb.Now(),
+				Timestamp:      timestamppb.Now(),
 			},
 			wantErr: true,
 		},
@@ -384,12 +383,12 @@ func TestDepositConsumer_IdempotencyCache(t *testing.T) {
 	}()
 
 	event := &eventsv1.DepositEvent{
-		AccountId:     "ACC-DUPLICATE",
-		AmountCents:   10000,
-		Currency:      commonv1.Currency_CURRENCY_GBP,
-		CorrelationId: "deposit-duplicate",
-		ValueDate:     timestamppb.Now(),
-		Timestamp:     timestamppb.Now(),
+		AccountId:      "ACC-DUPLICATE",
+		AmountCents:    10000,
+		InstrumentCode: "GBP",
+		CorrelationId:  "deposit-duplicate",
+		ValueDate:      timestamppb.Now(),
+		Timestamp:      timestamppb.Now(),
 	}
 
 	testCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
@@ -428,12 +427,12 @@ func TestDepositConsumer_IdempotencyLockAcquisition(t *testing.T) {
 	}()
 
 	event := &eventsv1.DepositEvent{
-		AccountId:     "ACC-LOCK",
-		AmountCents:   10000,
-		Currency:      commonv1.Currency_CURRENCY_GBP,
-		CorrelationId: "deposit-lock-test",
-		ValueDate:     timestamppb.Now(),
-		Timestamp:     timestamppb.Now(),
+		AccountId:      "ACC-LOCK",
+		AmountCents:    10000,
+		InstrumentCode: "GBP",
+		CorrelationId:  "deposit-lock-test",
+		ValueDate:      timestamppb.Now(),
+		Timestamp:      timestamppb.Now(),
 	}
 
 	testCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
@@ -477,12 +476,12 @@ func TestDepositConsumer_IdempotencyStoreSuccess(t *testing.T) {
 	}()
 
 	event := &eventsv1.DepositEvent{
-		AccountId:     "ACC-SUCCESS",
-		AmountCents:   10000,
-		Currency:      commonv1.Currency_CURRENCY_GBP,
-		CorrelationId: "deposit-success-test",
-		ValueDate:     timestamppb.Now(),
-		Timestamp:     timestamppb.Now(),
+		AccountId:      "ACC-SUCCESS",
+		AmountCents:    10000,
+		InstrumentCode: "GBP",
+		CorrelationId:  "deposit-success-test",
+		ValueDate:      timestamppb.Now(),
+		Timestamp:      timestamppb.Now(),
 	}
 
 	testCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
@@ -534,12 +533,12 @@ func TestDepositConsumer_IdempotencyStoreFailure(t *testing.T) {
 
 	// Use unspecified currency - proto validation will fail first (not_in: [0])
 	event := &eventsv1.DepositEvent{
-		AccountId:     "ACC-FAILURE",
-		AmountCents:   10000,
-		Currency:      commonv1.Currency_CURRENCY_UNSPECIFIED,
-		CorrelationId: "deposit-failure-test",
-		ValueDate:     timestamppb.Now(),
-		Timestamp:     timestamppb.Now(),
+		AccountId:      "ACC-FAILURE",
+		AmountCents:    10000,
+		InstrumentCode: "",
+		CorrelationId:  "deposit-failure-test",
+		ValueDate:      timestamppb.Now(),
+		Timestamp:      timestamppb.Now(),
 	}
 
 	testCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
@@ -578,12 +577,12 @@ func TestDepositConsumer_IdempotencyKeyFormat(t *testing.T) {
 	}()
 
 	event := &eventsv1.DepositEvent{
-		AccountId:     "ACC-KEY-FORMAT",
-		AmountCents:   10000,
-		Currency:      commonv1.Currency_CURRENCY_GBP,
-		CorrelationId: "correlation-123",
-		ValueDate:     timestamppb.Now(),
-		Timestamp:     timestamppb.Now(),
+		AccountId:      "ACC-KEY-FORMAT",
+		AmountCents:    10000,
+		InstrumentCode: "GBP",
+		CorrelationId:  "correlation-123",
+		ValueDate:      timestamppb.Now(),
+		Timestamp:      timestamppb.Now(),
 	}
 
 	testCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
@@ -622,12 +621,12 @@ func TestDepositConsumer_IdempotencyCheckFailed(t *testing.T) {
 	}()
 
 	event := &eventsv1.DepositEvent{
-		AccountId:     "ACC-CHECK-FAIL",
-		AmountCents:   10000,
-		Currency:      commonv1.Currency_CURRENCY_GBP,
-		CorrelationId: "deposit-check-fail",
-		ValueDate:     timestamppb.Now(),
-		Timestamp:     timestamppb.Now(),
+		AccountId:      "ACC-CHECK-FAIL",
+		AmountCents:    10000,
+		InstrumentCode: "GBP",
+		CorrelationId:  "deposit-check-fail",
+		ValueDate:      timestamppb.Now(),
+		Timestamp:      timestamppb.Now(),
 	}
 
 	testCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
@@ -660,12 +659,12 @@ func TestDepositConsumer_ConcurrentProcessingRejected(t *testing.T) {
 	}()
 
 	event := &eventsv1.DepositEvent{
-		AccountId:     "ACC-CONCURRENT-REJECT",
-		AmountCents:   10000,
-		Currency:      commonv1.Currency_CURRENCY_GBP,
-		CorrelationId: "deposit-concurrent-reject",
-		ValueDate:     timestamppb.Now(),
-		Timestamp:     timestamppb.Now(),
+		AccountId:      "ACC-CONCURRENT-REJECT",
+		AmountCents:    10000,
+		InstrumentCode: "GBP",
+		CorrelationId:  "deposit-concurrent-reject",
+		ValueDate:      timestamppb.Now(),
+		Timestamp:      timestamppb.Now(),
 	}
 
 	testCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)

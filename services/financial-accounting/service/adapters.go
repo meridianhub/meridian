@@ -201,7 +201,7 @@ func toProtoFinancialBookingLog(log *domain.FinancialBookingLog) *financialaccou
 		ProductServiceReference: log.ProductServiceReference,
 		BusinessUnitReference:   log.BusinessUnitReference,
 		ChartOfAccountsRules:    log.ChartOfAccountsRules,
-		BaseCurrency:            toProtoCurrency(log.BaseCurrency),
+		BaseInstrumentCode:      string(log.BaseCurrency),
 		Status:                  toProtoTransactionStatus(log.Status),
 		CreatedAt:               timestamppb.New(log.CreatedAt),
 		UpdatedAt:               timestamppb.New(log.UpdatedAt),
@@ -217,50 +217,4 @@ func toProtoAccountType(accountType string) string {
 // fromProtoAccountType converts protobuf string field to domain account type string.
 func fromProtoAccountType(accountType string) string {
 	return accountType
-}
-
-// fromProtoCurrency converts protobuf Currency enum to domain Currency.
-func fromProtoCurrency(currency commonv1.Currency) domain.Currency {
-	switch currency {
-	case commonv1.Currency_CURRENCY_UNSPECIFIED:
-		return ""
-	case commonv1.Currency_CURRENCY_GBP:
-		return domain.CurrencyGBP
-	case commonv1.Currency_CURRENCY_USD:
-		return domain.CurrencyUSD
-	case commonv1.Currency_CURRENCY_EUR:
-		return domain.CurrencyEUR
-	case commonv1.Currency_CURRENCY_JPY:
-		return domain.CurrencyJPY
-	case commonv1.Currency_CURRENCY_CHF:
-		return domain.CurrencyCHF
-	case commonv1.Currency_CURRENCY_CAD:
-		return domain.CurrencyCAD
-	case commonv1.Currency_CURRENCY_AUD:
-		return domain.CurrencyAUD
-	default:
-		return ""
-	}
-}
-
-// toProtoCurrency converts domain Currency to protobuf enum.
-func toProtoCurrency(currency domain.Currency) commonv1.Currency {
-	switch currency {
-	case domain.CurrencyGBP:
-		return commonv1.Currency_CURRENCY_GBP
-	case domain.CurrencyUSD:
-		return commonv1.Currency_CURRENCY_USD
-	case domain.CurrencyEUR:
-		return commonv1.Currency_CURRENCY_EUR
-	case domain.CurrencyJPY:
-		return commonv1.Currency_CURRENCY_JPY
-	case domain.CurrencyCHF:
-		return commonv1.Currency_CURRENCY_CHF
-	case domain.CurrencyCAD:
-		return commonv1.Currency_CURRENCY_CAD
-	case domain.CurrencyAUD:
-		return commonv1.Currency_CURRENCY_AUD
-	default:
-		return commonv1.Currency_CURRENCY_UNSPECIFIED
-	}
 }

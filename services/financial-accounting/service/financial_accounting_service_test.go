@@ -1768,7 +1768,7 @@ func TestUpdateFinancialBookingLog_IdempotencyCaching(t *testing.T) {
 				ProductServiceReference: "DEPOSIT-001",
 				BusinessUnitReference:   "RETAIL-UK",
 				ChartOfAccountsRules:    "GAAP-2024",
-				BaseCurrency:            commonv1.Currency_CURRENCY_GBP,
+				BaseInstrumentCode:      "GBP",
 				Status:                  commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
 				CreatedAt:               timestamppb.New(now),
 				UpdatedAt:               timestamppb.New(now),
