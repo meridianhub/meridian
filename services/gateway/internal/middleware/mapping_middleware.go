@@ -154,10 +154,13 @@ func (m *MappingMiddleware) handleMappingRequest(w http.ResponseWriter, r *http.
 
 	// Pass non-2xx responses through untransformed.
 	if rec.code < 200 || rec.code >= 300 {
+		sanitized := sanitizeJSON(rec.buf.Bytes())
 		copyHeaders(w.Header(), rec.headers)
 		setSafeResponseHeaders(w)
+		w.Header().Del("Transfer-Encoding")
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(sanitized)))
 		w.WriteHeader(rec.code)
-		_, _ = w.Write(sanitizeJSON(rec.buf.Bytes()))
+		_, _ = w.Write(sanitized)
 		return nil
 	}
 
