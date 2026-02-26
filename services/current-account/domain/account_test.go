@@ -54,7 +54,7 @@ func TestNewCurrentAccountWithDimension_ExplicitDimension(t *testing.T) {
 }
 
 func TestNewCurrentAccountWithDimension_EnergyAccount(t *testing.T) {
-	account, err := NewCurrentAccountWithDimension("ACC-KWH-001", "KWH-IDENT-001", "PARTY-001", "KWH", "ENERGY")
+	account, err := NewCurrentAccountWithDimension("ACC-KWH-001", "KWH-IDENT-001", "PARTY-001", "KWH", "ENERGY", 0)
 	require.NoError(t, err)
 
 	assert.Equal(t, "KWH", account.InstrumentCode())
@@ -63,7 +63,7 @@ func TestNewCurrentAccountWithDimension_EnergyAccount(t *testing.T) {
 }
 
 func TestNewCurrentAccountWithDimension_CarbonAccount(t *testing.T) {
-	account, err := NewCurrentAccountWithDimension("ACC-CC-001", "CC-IDENT-001", "PARTY-001", "CARBON_CREDIT", "CARBON")
+	account, err := NewCurrentAccountWithDimension("ACC-CC-001", "CC-IDENT-001", "PARTY-001", "CARBON_CREDIT", "CARBON", 0)
 	require.NoError(t, err)
 
 	assert.Equal(t, "CARBON_CREDIT", account.InstrumentCode())
@@ -580,7 +580,7 @@ func TestInstrumentMismatch_Deposit(t *testing.T) {
 }
 
 func TestDepositKWH_IntoKWHAccount(t *testing.T) {
-	account, err := NewCurrentAccountWithDimension("ACC-KWH-001", "KWH-001", "PARTY-001", "KWH", "ENERGY")
+	account, err := NewCurrentAccountWithDimension("ACC-KWH-001", "KWH-001", "PARTY-001", "KWH", "ENERGY", 0)
 	require.NoError(t, err)
 
 	depositAmount, err := NewAmountFromInstrument("KWH", "ENERGY", 0, 1500) // 1500 KWH (whole units)
@@ -608,7 +608,7 @@ func TestDepositKWH_IntoGBPAccount_Fails(t *testing.T) {
 }
 
 func TestWithdrawFromNonCurrencyAccount(t *testing.T) {
-	account, err := NewCurrentAccountWithDimension("ACC-KWH-001", "KWH-001", "PARTY-001", "KWH", "ENERGY")
+	account, err := NewCurrentAccountWithDimension("ACC-KWH-001", "KWH-001", "PARTY-001", "KWH", "ENERGY", 0)
 	require.NoError(t, err)
 
 	// Deposit first
