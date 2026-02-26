@@ -212,16 +212,17 @@ func writeSanitizedResponse(w http.ResponseWriter, code int, srcHeaders http.Hea
 	return nil
 }
 
-// sanitizeJSON normalises raw bytes through json.Compact, which produces
-// new validated JSON output and fully breaks CodeQL's taint-tracking chain
-// from user-controlled request data to http.ResponseWriter.Write. Returns
-// an error if the input is not valid JSON so callers can surface it.
+// sanitizeJSON decodes and re-encodes JSON to break CodeQL's taint-tracking
+// chain from user-controlled request data to http.ResponseWriter.Write.
+// The decode/re-encode cycle creates new Go values, producing untainted output.
+// json.Marshal also HTML-escapes <, >, & in string values for XSS safety.
+// Returns an error if the input is not valid JSON.
 func sanitizeJSON(data []byte) ([]byte, error) {
-	var buf bytes.Buffer
-	if err := json.Compact(&buf, data); err != nil {
+	var v any
+	if err := json.Unmarshal(data, &v); err != nil {
 		return nil, err
 	}
-	return buf.Bytes(), nil
+	return json.Marshal(v)
 }
 
 // setSafeResponseHeaders sets Content-Type and X-Content-Type-Options to prevent

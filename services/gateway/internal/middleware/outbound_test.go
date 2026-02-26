@@ -156,8 +156,8 @@ func TestMappingMiddleware_ErrorResponsePassThrough(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
-	// Body should be passed through unchanged
-	assert.Equal(t, errorBody, rec.Body.String())
+	// Body should be passed through with equivalent JSON (sanitization may reorder keys)
+	assert.JSONEq(t, errorBody, rec.Body.String())
 }
 
 func TestMappingMiddleware_5xxResponsePassThrough(t *testing.T) {
@@ -178,7 +178,7 @@ func TestMappingMiddleware_5xxResponsePassThrough(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
-	assert.Equal(t, errorBody, rec.Body.String())
+	assert.JSONEq(t, errorBody, rec.Body.String())
 }
 
 func TestMappingMiddleware_OutboundUpdatesContentLength(t *testing.T) {
