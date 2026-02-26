@@ -7,13 +7,16 @@
 -- Per CockroachDB rules: DML referencing new columns must be in a separate migration.
 
 ALTER TABLE "account" ADD COLUMN "precision" INT NOT NULL DEFAULT 2;
+ALTER TABLE "account" ADD CONSTRAINT "chk_account_precision_non_negative" CHECK ("precision" >= 0);
 
 ALTER TABLE "lien"
     ADD COLUMN "instrument_code" VARCHAR(32) NOT NULL DEFAULT '',
     ADD COLUMN "dimension" VARCHAR(20) NOT NULL DEFAULT 'CURRENCY',
     ADD COLUMN "precision" INT NOT NULL DEFAULT 2;
+ALTER TABLE "lien" ADD CONSTRAINT "chk_lien_precision_non_negative" CHECK ("precision" >= 0);
 
 ALTER TABLE "withdrawal"
     ADD COLUMN "instrument_code" VARCHAR(32) NOT NULL DEFAULT '',
     ADD COLUMN "dimension" VARCHAR(20) NOT NULL DEFAULT 'CURRENCY',
     ADD COLUMN "precision" INT NOT NULL DEFAULT 2;
+ALTER TABLE "withdrawal" ADD CONSTRAINT "chk_withdrawal_precision_non_negative" CHECK ("precision" >= 0);
