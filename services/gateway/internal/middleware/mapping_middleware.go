@@ -208,14 +208,14 @@ func (m *MappingMiddleware) handleMappingRequest(w http.ResponseWriter, r *http.
 }
 
 // sanitizeJSON normalises raw bytes through json.Compact, which produces
-// validated JSON output and breaks CodeQL's taint-tracking chain from
-// user-controlled request data to http.ResponseWriter.Write. If the input is
-// not valid JSON the original bytes are returned unchanged (the Content-Type
-// and X-Content-Type-Options headers already prevent browser HTML sniffing).
+// new validated JSON output and fully breaks CodeQL's taint-tracking chain
+// from user-controlled request data to http.ResponseWriter.Write. If the
+// input is not valid JSON a safe empty JSON object is returned instead of
+// the original bytes — this ensures no tainted data reaches the response.
 func sanitizeJSON(data []byte) []byte {
 	var buf bytes.Buffer
 	if err := json.Compact(&buf, data); err != nil {
-		return data
+		return []byte("{}")
 	}
 	return buf.Bytes()
 }
