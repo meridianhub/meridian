@@ -7,32 +7,7 @@
 demo.meridianhub.cloud, *.demo.meridianhub.cloud {
 	tls /etc/caddy/certs/origin-cert.pem /etc/caddy/certs/origin-key.pem
 
-	# Health/readiness probes bypass basic auth (used by Docker and load balancers)
-	@health_probes {
-		path /healthz /readyz
-	}
-	handle @health_probes {
-		reverse_proxy meridian:8090
-	}
-
-	# MCP paths bypass basic auth — MCP clients use Bearer tokens, not basic auth.
-	@mcp_paths {
-		path /mcp /sse /message
-	}
-	handle @mcp_paths {
-		reverse_proxy mcp-server:8090
-	}
-
-	# OAuth discovery returns 404 when OAuth is disabled. This prevents the
-	# frontend SPA catch-all from serving HTML to MCP clients doing discovery.
-	@oauth_discovery {
-		path /.well-known/oauth-authorization-server /.well-known/oauth-protected-resource
-	}
-	handle @oauth_discovery {
-		respond 404
-	}
-
-	# Protect the rest of the demo site with HTTP basic auth.
+	# Protect the demo site with HTTP basic auth, excluding specific paths.
 	@protected {
 		not path /healthz /readyz /mcp /sse /message /.well-known/oauth-*
 	}
@@ -40,21 +15,30 @@ demo.meridianhub.cloud, *.demo.meridianhub.cloud {
 		demo $2a$14$xfFb2xnq6vOhKOEh7TTgTula3G.F6MxoT7DawQLGBPziCgjTcWCrS
 	}
 
-	# Dex OIDC endpoints
-	handle /dex/* {
-		reverse_proxy dex:5556
-	}
+	# Use route for explicit ordering — first match wins, no resorting.
+	route {
+		# Health/readiness probes
+		@health_probes path /healthz /readyz
+		reverse_proxy @health_probes meridian:8090
 
-	# API: ConnectRPC + version
-	@api {
-		path /meridian.* /grpc.* /version
-	}
-	handle @api {
-		reverse_proxy meridian:8090
-	}
+		# OAuth discovery returns 404 when OAuth is disabled. Prevents the
+		# SPA catch-all from returning HTML to MCP clients doing discovery.
+		@oauth_discovery path /.well-known/oauth-authorization-server /.well-known/oauth-protected-resource
+		respond @oauth_discovery 404
 
-	# Frontend: static files with SPA fallback
-	handle {
+		# MCP Server: streamable HTTP + legacy SSE transport
+		@mcp_paths path /mcp /sse /message
+		reverse_proxy @mcp_paths mcp-server:8090
+
+		# Dex OIDC endpoints
+		@dex path /dex/*
+		reverse_proxy @dex dex:5556
+
+		# API: ConnectRPC + version
+		@api path /meridian.* /grpc.* /version
+		reverse_proxy @api meridian:8090
+
+		# Frontend: static files with SPA fallback (catch-all, must be last)
 		root * /var/www/html
 		@hashed path /assets/*
 		header @hashed Cache-Control "public, max-age=31536000, immutable"
