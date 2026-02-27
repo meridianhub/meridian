@@ -23,6 +23,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -288,45 +289,60 @@ var instrumentDefs = []instrumentDef{
 // so we register instruments directly to unblock product type activation.
 func registerInstruments(ctx context.Context, conn *grpc.ClientConn) error {
 	client := referencedatav1.NewReferenceDataServiceClient(conn)
-
 	for _, inst := range instrumentDefs {
-		// Check if already active via RetrieveInstrument
-		existing, err := client.RetrieveInstrument(ctx, &referencedatav1.RetrieveInstrumentRequest{
-			Code: inst.code,
-		})
-		if err == nil && existing.GetInstrument().GetStatus() == referencedatav1.InstrumentStatus_INSTRUMENT_STATUS_ACTIVE {
+		if err := ensureInstrumentActive(ctx, client, inst); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ensureInstrumentActive(ctx context.Context, client referencedatav1.ReferenceDataServiceClient, inst instrumentDef) error {
+	existing, err := client.RetrieveInstrument(ctx, &referencedatav1.RetrieveInstrumentRequest{
+		Code: inst.code,
+	})
+	if err == nil {
+		if existing.GetInstrument().GetStatus() == referencedatav1.InstrumentStatus_INSTRUMENT_STATUS_ACTIVE {
 			fmt.Printf("  Instrument: %s (already active)\n", inst.code)
-			continue
+			return nil
 		}
-
-		// Register (creates DRAFT) — idempotent
-		_, err = client.RegisterInstrument(ctx, &referencedatav1.RegisterInstrumentRequest{
-			Code:            inst.code,
-			DisplayName:     inst.displayName,
-			Dimension:       inst.dimension,
-			Precision:       inst.precision,
-			Description:     inst.description,
-			AttributeSchema: "{}", // empty JSON object — column is jsonb, empty string is invalid
-		})
-		if err != nil {
-			if st, ok := status.FromError(err); ok && st.Code() == codes.AlreadyExists {
-				fmt.Printf("  Instrument: %s (draft exists)\n", inst.code)
-			} else {
-				return fmt.Errorf("register instrument %s: %w", inst.code, err)
-			}
+	} else {
+		st, ok := status.FromError(err)
+		if !ok || st.Code() != codes.NotFound {
+			return fmt.Errorf("retrieve instrument %s: %w", inst.code, err)
 		}
-
-		// Activate (DRAFT → ACTIVE)
-		_, err = client.ActivateInstrument(ctx, &referencedatav1.ActivateInstrumentRequest{
-			Code:    inst.code,
-			Version: 1,
-		})
-		if err != nil {
-			return fmt.Errorf("activate instrument %s: %w", inst.code, err)
-		}
-		fmt.Printf("  Instrument: %s (registered and activated)\n", inst.code)
 	}
 
+	// Register (creates DRAFT) — idempotent
+	_, err = client.RegisterInstrument(ctx, &referencedatav1.RegisterInstrumentRequest{
+		Code:            inst.code,
+		DisplayName:     inst.displayName,
+		Dimension:       inst.dimension,
+		Precision:       inst.precision,
+		Description:     inst.description,
+		AttributeSchema: "{}", // empty JSON object — column is jsonb, empty string is invalid
+	})
+	if err != nil {
+		if st, ok := status.FromError(err); ok && st.Code() == codes.AlreadyExists {
+			fmt.Printf("  Instrument: %s (draft exists)\n", inst.code)
+		} else {
+			return fmt.Errorf("register instrument %s: %w", inst.code, err)
+		}
+	}
+
+	// Activate (DRAFT → ACTIVE)
+	_, err = client.ActivateInstrument(ctx, &referencedatav1.ActivateInstrumentRequest{
+		Code:    inst.code,
+		Version: 1,
+	})
+	if err != nil {
+		if st, ok := status.FromError(err); ok && (st.Code() == codes.FailedPrecondition || st.Code() == codes.AlreadyExists) {
+			fmt.Printf("  Instrument: %s (already active)\n", inst.code)
+			return nil
+		}
+		return fmt.Errorf("activate instrument %s: %w", inst.code, err)
+	}
+	fmt.Printf("  Instrument: %s (registered and activated)\n", inst.code)
 	return nil
 }
 
@@ -630,9 +646,14 @@ func createAccounts(ctx context.Context, conn *grpc.ClientConn, dnoPartyID strin
 }
 
 func createAccountIdempotent(ctx context.Context, client currentaccountv1.CurrentAccountServiceClient, partyID, extID, instrument, orgPartyID string) (string, error) {
-	// Check if account already exists first (idempotent)
-	if existingID, err := findAccountByExternalID(ctx, client, extID); err == nil && existingID != "" {
+	// Check if account already exists first (idempotent).
+	// Only suppress "not found" errors — propagate real failures.
+	existingID, err := findAccountByExternalID(ctx, client, extID)
+	if err == nil && existingID != "" {
 		return existingID, nil
+	}
+	if err != nil && !errors.Is(err, errAccountNotFoundInListing) {
+		return "", fmt.Errorf("lookup existing account %s: %w", extID, err)
 	}
 
 	resp, err := client.InitiateCurrentAccount(ctx, &currentaccountv1.InitiateCurrentAccountRequest{

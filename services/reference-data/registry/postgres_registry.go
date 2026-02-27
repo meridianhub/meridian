@@ -374,13 +374,18 @@ func (r *PostgresRegistry) UpdateDefinition(ctx context.Context, code string, ve
 				updated_at = $9
 			WHERE code = $10 AND version = $11 AND updated_at = $12`
 
+		updateAttrSchema := updates.AttributeSchema
+		if len(updateAttrSchema) == 0 {
+			updateAttrSchema = []byte("{}")
+		}
+
 		now := time.Now()
 		result, err := tx.Exec(ctx, updateQuery,
 			string(updates.Dimension), updates.Precision,
 			nullString(updates.ValidationExpression),
 			updates.FungibilityKeyExpression,
 			nullString(updates.ErrorMessageExpression),
-			updates.AttributeSchema,
+			updateAttrSchema,
 			nullString(updates.DisplayName),
 			nullString(updates.Description),
 			now,
