@@ -7,6 +7,14 @@ import { useApiClients } from '@/api/context'
 import { Card } from '@/components/ui/card'
 import { TransactionStatus } from '@/api/gen/meridian/common/v1/types_pb'
 
+const TRANSACTION_STATUS_NAMES: Record<number, string> = {
+  [TransactionStatus.PENDING]: 'PENDING',
+  [TransactionStatus.POSTED]: 'POSTED',
+  [TransactionStatus.FAILED]: 'FAILED',
+  [TransactionStatus.CANCELLED]: 'CANCELLED',
+  [TransactionStatus.REVERSED]: 'REVERSED',
+}
+
 export interface PositionEntry {
   entryId: string
   transactionId: string
@@ -85,7 +93,8 @@ export function PositionsPage() {
       header: 'Status',
       cell: ({ row }) => {
         const status = row.original.statusTracking?.currentStatus
-        return <span className="text-sm">{typeof status === 'string' ? status.replace(/_/g, ' ') : '—'}</span>
+        const label = typeof status === 'number' ? TRANSACTION_STATUS_NAMES[status] : (typeof status === 'string' ? status.replace(/_/g, ' ') : null)
+        return <span className="text-sm">{label ?? '—'}</span>
       },
     },
     {

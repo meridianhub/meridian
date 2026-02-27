@@ -11,6 +11,7 @@ import { TimeDisplay } from '@/components/shared/time-display'
 import { SagaTimeline } from '@/components/shared/saga-timeline'
 import { AuditTrail } from '@/components/shared/audit-trail'
 import { useTenantSlug } from '@/hooks/use-tenant-context'
+import { useAuthenticatedFetch } from '@/hooks/use-authenticated-fetch'
 import { tenantKeys } from '@/lib/query-keys'
 import { fetchPaymentDetail } from './payment-detail-query'
 import {
@@ -103,6 +104,7 @@ function PaymentActions({
 export function PaymentDetailPage() {
   const { paymentOrderId } = useParams<{ paymentOrderId: string }>()
   const tenantSlug = useTenantSlug()
+  const authFetch = useAuthenticatedFetch()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [initiateOpen, setInitiateOpen] = React.useState(false)
@@ -113,7 +115,7 @@ export function PaymentDetailPage() {
 
   const { data, isLoading, isError } = useQuery({
     queryKey,
-    queryFn: () => fetchPaymentDetail(paymentOrderId!),
+    queryFn: () => fetchPaymentDetail(paymentOrderId!, authFetch),
     enabled: !!paymentOrderId,
   })
 

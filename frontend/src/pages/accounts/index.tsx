@@ -6,91 +6,29 @@ import type { DataTableQueryParams, DataTableResult } from '@/components/shared/
 import { StatusBadge } from '@/components/shared/status-badge'
 import { TimeDisplay } from '@/components/shared/time-display'
 import { Button } from '@/components/ui/button'
+import { useApiClients } from '@/api/context'
 import { useTenantContext } from '@/contexts/tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
+import { AccountStatus } from '@/api/gen/meridian/current_account/v1/current_account_pb'
 import { CreateAccountDialog } from './create-account-dialog'
 import type { CurrentAccount } from './types'
 
 const STATUS_OPTIONS = [
-  { label: 'Active', value: 'ACCOUNT_STATUS_ACTIVE' },
-  { label: 'Frozen', value: 'ACCOUNT_STATUS_FROZEN' },
-  { label: 'Closed', value: 'ACCOUNT_STATUS_CLOSED' },
+  { label: 'Active', value: String(AccountStatus.ACTIVE) },
+  { label: 'Frozen', value: String(AccountStatus.FROZEN) },
+  { label: 'Closed', value: String(AccountStatus.CLOSED) },
 ]
 
-async function listAccounts(
-  tenantSlug: string,
-  params: DataTableQueryParams,
-): Promise<DataTableResult<CurrentAccount>> {
-  const body: Record<string, unknown> = {
-    pageSize: params.pageSize,
-  }
-  if (params.pageToken) {
-    body.pageToken = params.pageToken
-  }
-  if (params.filters?.status) {
-    body.status = params.filters.status
-  }
-  if (params.filters?.externalReference) {
-    body.iban = params.filters.externalReference
-  }
-
-  const response = await fetch(
-    `/meridian.current_account.v1.CurrentAccountService/ListCurrentAccounts`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Tenant-Slug': tenantSlug,
-      },
-      body: JSON.stringify(body),
-    },
-  )
-
-  if (!response.ok) {
-    throw new Error(`Failed to list accounts: ${response.status}`)
-  }
-
-  const data = (await response.json()) as RawListCurrentAccountsResponse
-
-  // Map proto CurrentAccountFacility fields to frontend CurrentAccount shape
-  const accounts: CurrentAccount[] = (data.accounts ?? []).map((a) => ({
-    accountId: a.accountId ?? '',
-    externalReference: a.accountIdentification ?? '',
-    status: stripEnumPrefix(a.accountStatus ?? '', 'ACCOUNT_STATUS_') as CurrentAccount['status'],
-    baseCurrency: stripEnumPrefix(a.baseCurrency ?? '', 'CURRENCY_'),
-    availableBalance: '',
-    createdAt: a.createdAt,
-    updatedAt: a.updatedAt,
-  }))
-
-  return {
-    items: accounts,
-    nextPageToken: data.nextPageToken || undefined,
-  }
-}
-
-// Strip proto enum prefix (e.g., "ACCOUNT_STATUS_ACTIVE" -> "ACTIVE")
-function stripEnumPrefix(value: string, prefix: string): string {
-  return value.startsWith(prefix) ? value.slice(prefix.length) : value
-}
-
-// Raw proto response shape before mapping
-interface RawListCurrentAccountsResponse {
-  accounts?: Array<{
-    accountId?: string
-    accountIdentification?: string
-    accountStatus?: string
-    baseCurrency?: string
-    createdAt?: { seconds: number | bigint; nanos?: number }
-    updatedAt?: { seconds: number | bigint; nanos?: number }
-  }>
-  nextPageToken?: string
-  totalCount?: string
+const ACCOUNT_STATUS_NAMES: Record<number, string> = {
+  [AccountStatus.ACTIVE]: 'ACTIVE',
+  [AccountStatus.FROZEN]: 'FROZEN',
+  [AccountStatus.CLOSED]: 'CLOSED',
 }
 
 export function AccountsPage() {
   const navigate = useNavigate()
   const { tenantSlug } = useTenantContext()
+  const clients = useApiClients()
   const [createOpen, setCreateOpen] = React.useState(false)
 
   const columns: ColumnDef<CurrentAccount>[] = [
@@ -108,8 +46,8 @@ export function AccountsPage() {
       cell: ({ row }) => <StatusBadge status={row.original.status} />,
     },
     {
-      accessorKey: 'baseCurrency',
-      header: 'Currency',
+      accessorKey: 'instrumentCode',
+      header: 'Instrument',
     },
     {
       accessorKey: 'createdAt',
@@ -124,8 +62,32 @@ export function AccountsPage() {
   )
 
   const queryFn = React.useCallback(
-    (params: DataTableQueryParams) => listAccounts(tenantSlug ?? '', params),
-    [tenantSlug],
+    async (params: DataTableQueryParams): Promise<DataTableResult<CurrentAccount>> => {
+      if (!tenantSlug) return { items: [] }
+
+      const statusFilter = params.filters?.status
+      const response = await clients.currentAccount.listCurrentAccounts({
+        pageSize: params.pageSize,
+        pageToken: params.pageToken ?? '',
+        ...(statusFilter !== undefined && { status: Number(statusFilter) as AccountStatus }),
+      })
+
+      const accounts: CurrentAccount[] = (response.accounts ?? []).map((a) => ({
+        accountId: a.accountId ?? '',
+        externalReference: a.externalIdentifier ?? '',
+        status: (ACCOUNT_STATUS_NAMES[a.accountStatus] ?? String(a.accountStatus)) as CurrentAccount['status'],
+        instrumentCode: a.instrumentCode || '',
+        availableBalance: '',
+        createdAt: a.createdAt ?? undefined,
+        updatedAt: a.updatedAt ?? undefined,
+      }))
+
+      return {
+        items: accounts,
+        nextPageToken: response.nextPageToken || undefined,
+      }
+    },
+    [tenantSlug, clients],
   )
 
   return (

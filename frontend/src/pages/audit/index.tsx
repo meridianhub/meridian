@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { DataTable, type DataTableQueryParams, type DataTableResult, type FilterConfig } from '@/components/shared/data-table'
 import { TimeDisplay } from '@/components/shared/time-display'
 import { JsonDiffViewer } from '@/components/shared/audit-trail'
+import { useAuthenticatedFetch } from '@/hooks/use-authenticated-fetch'
 import { cn } from '@/lib/utils'
 
 // ---------------------------------------------------------------------------
@@ -208,44 +209,31 @@ const columns: ColumnDef<AuditLogEntry>[] = [
   },
 ]
 
-async function fetchAuditEntries(params: DataTableQueryParams): Promise<DataTableResult<AuditLogEntry>> {
-  const searchParams = new URLSearchParams()
-
-  if (params.pageToken) {
-    searchParams.set('pageToken', params.pageToken)
-  }
-
-  searchParams.set('pageSize', String(params.pageSize))
-
-  if (params.filters) {
-    Object.entries(params.filters).forEach(([key, value]) => {
-      if (value) {
-        searchParams.set(key, value)
-      }
-    })
-  }
-
-  const response = await fetch(`/meridian.audit.v1.AuditService/ListAuditEntries?${searchParams}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-  })
-
-  if (!response.ok) {
-    if (response.status === 501 || response.status === 503) {
-      return { items: [], nextPageToken: undefined }
-    }
-    throw new Error(`Failed to fetch audit entries: ${response.status}`)
-  }
-
-  const data = (await response.json()) as AuditLogResponse
-  return {
-    items: data.entries ?? [],
-    nextPageToken: data.nextPageToken,
-  }
-}
-
 export function AuditLogPage() {
   const [selectedEntry, setSelectedEntry] = useState<AuditLogEntry | null>(null)
+  const authFetch = useAuthenticatedFetch()
+
+  const fetchAuditEntries = useCallback(async (params: DataTableQueryParams): Promise<DataTableResult<AuditLogEntry>> => {
+    const searchParams = new URLSearchParams()
+    if (params.pageToken) searchParams.set('pageToken', params.pageToken)
+    searchParams.set('pageSize', String(params.pageSize))
+    if (params.filters) {
+      Object.entries(params.filters).forEach(([key, value]) => {
+        if (value) searchParams.set(key, value)
+      })
+    }
+    const response = await authFetch(`/meridian.audit.v1.AuditService/ListAuditEntries?${searchParams}`, {
+      method: 'POST',
+    })
+    if (!response.ok) {
+      if (response.status === 501 || response.status === 503) {
+        return { items: [], nextPageToken: undefined }
+      }
+      throw new Error(`Failed to fetch audit entries: ${response.status}`)
+    }
+    const data = (await response.json()) as AuditLogResponse
+    return { items: data.entries ?? [], nextPageToken: data.nextPageToken }
+  }, [authFetch])
 
   return (
     <div className="flex flex-col gap-6">

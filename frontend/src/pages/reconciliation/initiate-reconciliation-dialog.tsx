@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { useTenantContext } from '@/contexts/tenant-context'
+import { useAuthenticatedFetch } from '@/hooks/use-authenticated-fetch'
 
 type Scope = 'ALL_ACCOUNTS' | 'SELECTED_ACCOUNTS'
 
@@ -63,9 +63,9 @@ function validateForm(data: FormData): FormErrors {
 }
 
 async function initiateReconciliation(
-  tenantSlug: string,
   data: FormData,
   idempotencyKey: string,
+  fetchFn: typeof fetch = fetch,
 ): Promise<string> {
   const date = new Date(data.settlementDate)
   const periodStart = new Date(date)
@@ -92,14 +92,11 @@ async function initiateReconciliation(
     body.attributes = { description: data.description }
   }
 
-  const response = await fetch(
+  const response = await fetchFn(
     `/meridian.reconciliation.v1.AccountReconciliationService/InitiateAccountReconciliation`,
     {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Tenant-Slug': tenantSlug,
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     },
   )
@@ -118,7 +115,7 @@ export function InitiateReconciliationDialog({
   onOpenChange,
   onSuccess,
 }: InitiateReconciliationDialogProps) {
-  const { tenantSlug } = useTenantContext()
+  const authFetch = useAuthenticatedFetch()
   const queryClient = useQueryClient()
 
   const [formData, setFormData] = React.useState<FormData>({
@@ -141,7 +138,7 @@ export function InitiateReconciliationDialog({
 
   const mutation = useMutation({
     mutationFn: () =>
-      initiateReconciliation(tenantSlug ?? '', formData, idempotencyKey),
+      initiateReconciliation(formData, idempotencyKey, authFetch),
     onSuccess: (runId) => {
       void queryClient.invalidateQueries({ queryKey: ['reconciliation-runs'] })
       onSuccess(runId)

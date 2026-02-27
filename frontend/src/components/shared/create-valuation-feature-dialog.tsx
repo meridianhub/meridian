@@ -10,7 +10,8 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { useTenantContext } from '@/contexts/tenant-context'
+import { useAuthenticatedFetch } from '@/hooks/use-authenticated-fetch'
+import { useTenantSlug } from '@/hooks/use-tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
 import { handleConnectError } from '@/lib/error-handling'
 import { Code, ConnectError } from '@connectrpc/connect'
@@ -51,7 +52,6 @@ const initialFormData: FormData = {
 }
 
 async function createValuationFeature(
-  tenantSlug: string,
   accountType: AccountType,
   accountId: string,
   instrumentCode: string,
@@ -59,6 +59,7 @@ async function createValuationFeature(
   valuationMethodVersion: number,
   outputInstrument: string,
   parameters: string,
+  fetchFn: typeof fetch = fetch,
 ): Promise<string> {
   const serviceName =
     accountType === 'current'
@@ -77,12 +78,9 @@ async function createValuationFeature(
     body.parameters = parameters.trim()
   }
 
-  const response = await fetch(`/api/${serviceName}/CreateValuationFeature`, {
+  const response = await fetchFn(`/api/${serviceName}/CreateValuationFeature`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Tenant-Slug': tenantSlug,
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
 
@@ -153,7 +151,8 @@ export function CreateValuationFeatureDialog({
   accountType,
   accountCurrency,
 }: CreateValuationFeatureDialogProps) {
-  const { tenantSlug } = useTenantContext()
+  const authFetch = useAuthenticatedFetch()
+  const tenantSlug = useTenantSlug()
   const queryClient = useQueryClient()
 
   const [formData, setFormData] = React.useState<FormData>(initialFormData)
@@ -172,7 +171,6 @@ export function CreateValuationFeatureDialog({
     mutationFn: () => {
       const version = parseInt(formData.valuationMethodVersion, 10)
       return createValuationFeature(
-        tenantSlug ?? '',
         accountType,
         accountId,
         formData.instrumentCode.trim(),
@@ -180,6 +178,7 @@ export function CreateValuationFeatureDialog({
         version,
         formData.outputInstrument.trim(),
         formData.parameters,
+        authFetch,
       )
     },
     onSuccess: (featureId) => {
