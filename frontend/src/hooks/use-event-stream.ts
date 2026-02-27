@@ -1,10 +1,9 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTenantSlug } from './use-tenant-context'
 
 /**
  * Represents a domain event from the backend event stream.
- * This stub supports the Phase 4 WebSocket integration.
  *
  * @example
  * {
@@ -56,10 +55,35 @@ export const EVENT_QUERY_MAP: Record<string, (event: DomainEvent) => unknown[][]
   ],
 }
 
+/** Wire format of a message received from the gateway WebSocket endpoint. */
+interface ServerMessage {
+  type: 'event' | 'subscribed' | 'error' | 'system'
+  subscription_id?: string
+  channel?: string
+  event?: {
+    event_id: string
+    event_type: string
+    aggregate_id?: string
+    aggregate_type?: string
+    tenant_id: string
+    correlation_id?: string
+    causation_id?: string
+    timestamp: string
+    payload: Record<string, unknown>
+  }
+  error_code?: string
+  error_message?: string
+  system_message?: string
+}
+
+const MAX_RECONNECT_ATTEMPTS = 5
+const BASE_RECONNECT_DELAY_MS = 1000
+
 /**
- * React hook for consuming real-time domain events.
- * This is a stub implementation that provides the complete interface for Phase 3 component development.
- * The actual WebSocket connection will be implemented in Phase 4 (PRD-025).
+ * React hook for consuming real-time domain events via WebSocket.
+ *
+ * Connects to the gateway's /ws/events endpoint and delivers events to
+ * the caller through the onEvent callback and React Query cache invalidation.
  *
  * Enforces tenant isolation - events from other tenants are silently ignored.
  *
@@ -72,44 +96,20 @@ export const EVENT_QUERY_MAP: Record<string, (event: DomainEvent) => unknown[][]
  *   onEvent: (event) => console.log('Event received:', event),
  *   autoInvalidate: true
  * })
- *
- * @phase 3 (Stub for Phase 4 WebSocket integration)
  */
 export function useEventStream(options: UseEventStreamOptions = {}) {
   const { autoInvalidate = true, onEvent, eventTypes } = options
   const queryClient = useQueryClient()
   const tenantSlug = useTenantSlug()
 
-  // Phase 4: setConnected will be called from WebSocket onopen/onclose handlers
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [connected, setConnected] = useState(false)
   const [lastEvent, setLastEvent] = useState<DomainEvent | null>(null)
-
-  // Phase 4: WebSocket connection setup
-  // This useEffect will be implemented in Phase 4 (PRD-025) to connect to:
-  // const ws = new WebSocket(`wss://${tenantSlug}.api.meridian.io/events`)
-  // The connection will:
-  // - Set connected = true on open
-  // - Call handleEvent on message with decoded event data
-  // - Set error and connected = false on close/error
-  // - Clean up WebSocket on unmount
-  useEffect(() => {
-    // STUB: Phase 4 implementation
-    // For now, this hook provides the interface without connection logic.
-    // Phase 4 will establish a WebSocket connection here, call _handleEvent
-    // on messages, and set connected = true on open.
-
-    return () => {
-      // Phase 4: Cleanup WebSocket connection
-    }
-  }, [tenantSlug])
 
   /**
    * Internal handler for processing received events.
    * Validates tenant isolation, applies event type filtering, fires callbacks, and triggers cache invalidation.
-   * Prefixed with _ as it's unused until Phase 4 WebSocket integration.
    */
-  const _handleEvent = useCallback(
+  const handleEvent = useCallback(
     (event: DomainEvent) => {
       // Enforce tenant isolation - ignore events from other tenants
       if (event.tenantSlug !== tenantSlug) {
@@ -138,11 +138,90 @@ export function useEventStream(options: UseEventStreamOptions = {}) {
     [eventTypes, onEvent, autoInvalidate, queryClient, tenantSlug]
   )
 
-  // Ensure _handleEvent is referenced for Phase 4
-  void _handleEvent
+  // Stable ref for handleEvent so the WebSocket effect does not re-run when
+  // the callback identity changes.
+  const handleEventRef = useRef(handleEvent)
+  handleEventRef.current = handleEvent
+
+  useEffect(() => {
+    if (!tenantSlug) return
+
+    let ws: WebSocket | null = null
+    let reconnectTimeout: ReturnType<typeof setTimeout> | null = null
+    let reconnectAttempts = 0
+    let intentionalClose = false
+
+    const connect = () => {
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const wsUrl = `${wsProtocol}//${window.location.host}/ws/events`
+
+      ws = new WebSocket(wsUrl)
+
+      ws.onopen = () => {
+        setConnected(true)
+        reconnectAttempts = 0
+
+        // Subscribe to all channels; server-side auth controls access.
+        // Client-side eventTypes filtering is applied in handleEvent.
+        const subscribeMsg = {
+          type: 'subscribe',
+          id: crypto.randomUUID(),
+          channels: ['*'],
+        }
+        ws?.send(JSON.stringify(subscribeMsg))
+      }
+
+      ws.onmessage = (event) => {
+        try {
+          const msg: ServerMessage = JSON.parse(event.data)
+          if (msg.type === 'event' && msg.event) {
+            const domainEvent: DomainEvent = {
+              eventType: msg.event.event_type,
+              tenantSlug: msg.event.tenant_id,
+              payload: msg.event.payload ?? {},
+              timestamp: new Date(msg.event.timestamp),
+            }
+            handleEventRef.current(domainEvent)
+          }
+        } catch {
+          // Malformed message - silently ignore
+        }
+      }
+
+      ws.onclose = () => {
+        setConnected(false)
+
+        // Reconnect with exponential backoff unless intentionally closed
+        if (!intentionalClose && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+          const delay = BASE_RECONNECT_DELAY_MS * Math.pow(2, reconnectAttempts)
+          reconnectTimeout = setTimeout(() => {
+            reconnectAttempts++
+            connect()
+          }, delay)
+        }
+      }
+
+      ws.onerror = () => {
+        // onclose will fire after onerror; reconnect logic lives there.
+        ws?.close()
+      }
+    }
+
+    connect()
+
+    return () => {
+      intentionalClose = true
+      if (reconnectTimeout) clearTimeout(reconnectTimeout)
+      if (ws) {
+        ws.onclose = null // Prevent reconnect on intentional close
+        ws.close()
+      }
+      setConnected(false)
+    }
+  }, [tenantSlug])
 
   return {
-    /** Whether the WebSocket is currently connected (Phase 4) */
+    /** Whether the WebSocket is currently connected */
     connected,
     /** The last event received, or null if no events yet */
     lastEvent,

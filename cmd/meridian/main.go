@@ -87,6 +87,8 @@ import (
 
 	// Gateway
 	"github.com/meridianhub/meridian/services/gateway"
+	"github.com/meridianhub/meridian/services/gateway/eventstream"
+	"github.com/meridianhub/meridian/services/gateway/eventstream/adapters"
 
 	// Shared platform
 	masterbootstrap "github.com/meridianhub/meridian/internal/bootstrap"
@@ -283,12 +285,20 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 	// ─── Start Gateway HTTP Server ───────────────────────────────────────
 
 	platformDSN := replaceDSNDatabase(baseDSN, "meridian_platform")
-	gwServer, err := wireGateway(grpcPort, httpPort, platformDSN, conns.gormDB("tenant"), logger)
+
+	eventRouter, extraGWOpts := wireEventStream(conns.gormDB("financial-accounting"), logger)
+
+	gwServer, err := wireGateway(grpcPort, httpPort, platformDSN, conns.gormDB("tenant"), logger, extraGWOpts...)
 	if err != nil {
 		return fmt.Errorf("gateway init: %w", err)
 	}
 
 	gatewayErrors := make(chan error, 1)
+
+	// Start event router in background (consumes from EventSource and publishes to FanOut).
+	routerCancel := startEventRouter(ctx, eventRouter, logger)
+	defer routerCancel()
+
 	go func() {
 		if err := gwServer.Start(context.Background()); err != nil {
 			gatewayErrors <- err
@@ -870,7 +880,7 @@ var serviceNames = []string{
 // wireGateway creates the gateway HTTP server with the Vanguard transcoder
 // routing REST/JSON, Connect, and gRPC-Web requests to the shared gRPC server
 // running on grpcPort.
-func wireGateway(grpcPort, httpPort int, databaseURL string, tenantDB *gorm.DB, logger *slog.Logger) (*gateway.Server, error) {
+func wireGateway(grpcPort, httpPort int, databaseURL string, tenantDB *gorm.DB, logger *slog.Logger, extraOpts ...gateway.ServerOption) (*gateway.Server, error) {
 	grpcTarget := fmt.Sprintf("localhost:%d", grpcPort)
 
 	authConfig := gateway.LoadAuthConfig()
@@ -931,7 +941,61 @@ func wireGateway(grpcPort, httpPort int, databaseURL string, tenantDB *gorm.DB, 
 		return nil, fmt.Errorf("failed to create tenant resolver: %w", err)
 	}
 
+	// Append caller-provided options (e.g., event stream handler).
+	opts = append(opts, extraOpts...)
+
 	return gateway.NewServer(config, logger, tenantResolver, opts...), nil
+}
+
+// ─── Event Stream Wiring ─────────────────────────────────────────────────────
+
+// startEventRouter launches the event router in a background goroutine and
+// returns a cancel function. If router is nil the returned cancel is a no-op.
+func startEventRouter(ctx context.Context, router *eventstream.Router, logger *slog.Logger) context.CancelFunc {
+	if router == nil {
+		return func() {}
+	}
+	routerCtx, cancel := context.WithCancel(ctx)
+	go func() {
+		if err := router.Start(routerCtx); err != nil {
+			logger.Error("event router error", "error", err)
+		}
+	}()
+	logger.Info("event router started")
+	return cancel
+}
+
+// wireEventStream conditionally builds event stream components and returns the
+// Router (for lifecycle management) and any gateway ServerOptions that should be
+// applied. When EVENT_STREAM_ENABLED is false (or unset in standalone gateway
+// mode), both return values are nil/empty.
+func wireEventStream(faDB *gorm.DB, logger *slog.Logger) (*eventstream.Router, []gateway.ServerOption) {
+	if !env.GetEnvAsBool("EVENT_STREAM_ENABLED", true) {
+		return nil, nil
+	}
+	router, wsHandler := buildUnifiedEventStreamComponents(faDB, logger)
+	logger.Info("event stream components initialized (outbox source, local fan-out)")
+	return router, []gateway.ServerOption{gateway.WithEventStreamHandler(wsHandler)}
+}
+
+// buildUnifiedEventStreamComponents creates event stream components for the unified binary.
+// Uses OutboxEventSource (polls shared outbox table) and LocalFanOut (in-process channels).
+// This matches dev/CI mode from the standalone gateway.
+//
+// The db parameter should be the financial-accounting GORM connection where
+// outbox events are written via OutboxPublisher. The connection is shared with
+// the service — no separate cleanup is needed.
+func buildUnifiedEventStreamComponents(db *gorm.DB, logger *slog.Logger) (*eventstream.Router, *eventstream.Handler) {
+	pollInterval := env.GetEnvAsDuration("OUTBOX_POLL_INTERVAL", 500*time.Millisecond)
+	source := adapters.NewOutboxEventSource(db, pollInterval, logger)
+
+	bufferSize := env.GetEnvAsInt("EVENT_STREAM_BUFFER_SIZE", 256)
+	fanOut := adapters.NewLocalFanOut(bufferSize)
+
+	router := eventstream.NewRouter(source, fanOut)
+	handler := eventstream.NewHandler(router, logger)
+
+	return router, handler
 }
 
 // ─── Per-Service Database Connections ────────────────────────────────────────
