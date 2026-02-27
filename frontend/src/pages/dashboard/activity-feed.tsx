@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { StatusBadge } from '@/components/shared/status-badge'
 import { TimeDisplay } from '@/components/shared/time-display'
 import { cn } from '@/lib/utils'
@@ -9,6 +10,7 @@ export interface ActivityItem {
   description?: string
   timestamp: { seconds: bigint | number; nanos?: number } | null | undefined
   status?: string
+  href?: string
 }
 
 interface ActivityFeedProps {
@@ -59,28 +61,48 @@ export function ActivityFeed({ items, isLoading, className }: ActivityFeedProps)
 
   return (
     <div className={cn('divide-y', className)}>
-      {items.map((item) => (
-        <div key={item.id} className="flex items-start gap-3 py-3">
-          <div
-            className={cn(
-              'mt-2 h-2 w-2 flex-shrink-0 rounded-full',
-              TYPE_COLORS[item.type] ?? 'bg-gray-400',
-            )}
-          />
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span className="truncate text-sm font-medium">{item.title}</span>
-              {item.status && <StatusBadge status={item.status} />}
+      {items.map((item) => {
+        const itemContent = (
+          <>
+            <div
+              className={cn(
+                'mt-2 h-2 w-2 flex-shrink-0 rounded-full',
+                TYPE_COLORS[item.type] ?? 'bg-gray-400',
+              )}
+            />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="truncate text-sm font-medium">{item.title}</span>
+                {item.status && <StatusBadge status={item.status} />}
+              </div>
+              {item.description && (
+                <p className="mt-0.5 truncate text-xs text-muted-foreground">{item.description}</p>
+              )}
             </div>
-            {item.description && (
-              <p className="mt-0.5 truncate text-xs text-muted-foreground">{item.description}</p>
-            )}
+            <div className="flex-shrink-0 text-xs text-muted-foreground">
+              <TimeDisplay timestamp={item.timestamp} format="relative" />
+            </div>
+          </>
+        )
+
+        if (item.href) {
+          return (
+            <Link
+              key={item.id}
+              to={item.href}
+              className="flex items-start gap-3 py-3 transition-colors hover:bg-accent/50 rounded-sm"
+            >
+              {itemContent}
+            </Link>
+          )
+        }
+
+        return (
+          <div key={item.id} className="flex items-start gap-3 py-3">
+            {itemContent}
           </div>
-          <div className="flex-shrink-0 text-xs text-muted-foreground">
-            <TimeDisplay timestamp={item.timestamp} format="relative" />
-          </div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }

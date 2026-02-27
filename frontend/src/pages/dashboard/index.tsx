@@ -114,6 +114,7 @@ export function DashboardPage() {
     description: po.paymentOrderId ? `ID: ${po.paymentOrderId}` : undefined,
     timestamp: po.createdAt ?? null,
     status: po.status?.toString(),
+    href: po.paymentOrderId ? `/payments/${po.paymentOrderId}` : undefined,
   }))
 
   const quickActions: QuickAction[] = [
@@ -166,6 +167,7 @@ export function DashboardPage() {
           showRecentQualifier={!!(paymentsCount?.isEstimate && !paymentsQuery.isLoading && !paymentsQuery.isError)}
           description="Active payment orders"
           icon={<CreditCard className="h-4 w-4" />}
+          href="/payments"
         />
         <StatCard
           title="Booking Logs"
@@ -175,6 +177,7 @@ export function DashboardPage() {
           showRecentQualifier={!!(bookingLogsCount?.isEstimate && !bookingLogsQuery.isLoading && !bookingLogsQuery.isError)}
           description="Financial booking logs"
           icon={<FileText className="h-4 w-4" />}
+          href="/ledger"
         />
         <StatCard
           title="Ledger Postings"
@@ -184,6 +187,7 @@ export function DashboardPage() {
           showRecentQualifier={!!(ledgerPostingsCount?.isEstimate && !ledgerPostingsQuery.isLoading && !ledgerPostingsQuery.isError)}
           description="Double-entry postings"
           icon={<BarChart3 className="h-4 w-4" />}
+          href="/ledger"
         />
       </div>
 
