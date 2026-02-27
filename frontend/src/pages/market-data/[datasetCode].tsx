@@ -196,7 +196,8 @@ export function DatasetDetailPage() {
   if (!tenantSlug) {
     return (
       <div className="p-6">
-        <p className="text-muted-foreground">No tenant selected.</p>
+        <Breadcrumbs items={[{ label: 'Market Data', href: '/market-data' }]} />
+        <p className="mt-4 text-muted-foreground">No tenant selected.</p>
       </div>
     )
   }
@@ -204,7 +205,8 @@ export function DatasetDetailPage() {
   if (!datasetCode) {
     return (
       <div className="p-6">
-        <p className="text-muted-foreground">No dataset selected.</p>
+        <Breadcrumbs items={[{ label: 'Market Data', href: '/market-data' }]} />
+        <p className="mt-4 text-muted-foreground">No dataset selected.</p>
       </div>
     )
   }

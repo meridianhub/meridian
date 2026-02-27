@@ -82,19 +82,19 @@ describe('PositionDetailPage', () => {
     expect(screen.getByText('Position Log')).toBeInTheDocument()
   })
 
-  it('renders back button that links to positions list', () => {
+  it('renders back link to positions list', () => {
     renderDetailPage()
-    const backButton = screen.getByTestId('back-button')
-    expect(backButton).toBeInTheDocument()
-    expect(screen.getByText('Positions')).toBeInTheDocument()
+    const positionsLink = screen.getByRole('link', { name: 'Positions' })
+    expect(positionsLink).toBeInTheDocument()
+    expect(positionsLink).toHaveAttribute('href', '/positions')
   })
 
-  it('navigates back to positions list on back button click', async () => {
+  it('navigates back to positions list on breadcrumb link click', async () => {
     const user = userEvent.setup()
     renderDetailPage()
 
-    const backButton = screen.getByTestId('back-button')
-    await user.click(backButton)
+    const positionsLink = screen.getByRole('link', { name: 'Positions' })
+    await user.click(positionsLink)
 
     await waitFor(() => {
       expect(screen.getByText('Positions List')).toBeInTheDocument()
