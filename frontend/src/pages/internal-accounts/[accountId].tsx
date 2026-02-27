@@ -123,7 +123,7 @@ interface InternalAccountActionsProps {
 function InternalAccountActions({ accountId, accountStatus, queryKey }: InternalAccountActionsProps) {
   const clients = useApiClients()
   const queryClient = useQueryClient()
-  const [isPending, setIsPending] = React.useState(false)
+  const [actionError, setActionError] = React.useState<string | null>(null)
 
   const statusLabel = accountStatusLabel(accountStatus)
 
@@ -134,8 +134,12 @@ function InternalAccountActions({ accountId, accountStatus, queryKey }: Internal
         controlAction: action,
         reason: action === ControlAction.CONTROL_ACTION_SUSPEND ? 'Suspended by operator' : 'Reactivated by operator',
       }),
-    onMutate: () => setIsPending(true),
-    onSettled: () => setIsPending(false),
+    onMutate: () => {
+      setActionError(null)
+    },
+    onError: () => {
+      setActionError('Failed to update account status. Please try again.')
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey })
     },
@@ -146,27 +150,30 @@ function InternalAccountActions({ accountId, accountStatus, queryKey }: Internal
   }
 
   return (
-    <div className="flex gap-2">
-      {statusLabel === 'ACTIVE' && (
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={isPending}
-          onClick={() => controlMutation.mutate(ControlAction.CONTROL_ACTION_SUSPEND)}
-        >
-          Suspend
-        </Button>
-      )}
-      {statusLabel === 'SUSPENDED' && (
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={isPending}
-          onClick={() => controlMutation.mutate(ControlAction.CONTROL_ACTION_ACTIVATE)}
-        >
-          Reactivate
-        </Button>
-      )}
+    <div className="flex flex-col items-end gap-2">
+      <div className="flex gap-2">
+        {statusLabel === 'ACTIVE' && (
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={controlMutation.isPending}
+            onClick={() => controlMutation.mutate(ControlAction.CONTROL_ACTION_SUSPEND)}
+          >
+            Suspend
+          </Button>
+        )}
+        {statusLabel === 'SUSPENDED' && (
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={controlMutation.isPending}
+            onClick={() => controlMutation.mutate(ControlAction.CONTROL_ACTION_ACTIVATE)}
+          >
+            Reactivate
+          </Button>
+        )}
+      </div>
+      {actionError && <p className="text-xs text-destructive">{actionError}</p>}
     </div>
   )
 }
@@ -224,39 +231,46 @@ function InternalAccountTransactions({ accountId, instrumentCode }: { accountId:
           <p className="text-sm text-muted-foreground">No transactions found for this account.</p>
         )}
         {!isLoading && !isError && postings.length > 0 && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-left text-xs font-medium text-muted-foreground">
-                  <th className="pb-2 pr-4">Direction</th>
-                  <th className="pb-2 pr-4">Amount</th>
-                  <th className="pb-2 pr-4">Status</th>
-                  <th className="pb-2">Created</th>
-                </tr>
-              </thead>
-              <tbody>
-                {postings.map((p) => (
-                  <tr key={p.id} className="border-b last:border-0">
-                    <td className="py-2 pr-4">
-                      <StatusBadge status={getDirectionName(p.postingDirection)} />
-                    </td>
-                    <td className="py-2 pr-4 tabular-nums">
-                      <MoneyDisplay
-                        amount={p.postingAmount?.units}
-                        currency={p.postingAmount?.currencyCode ?? instrumentCode}
-                      />
-                    </td>
-                    <td className="py-2 pr-4">
-                      <StatusBadge status={getTransactionStatusName(p.status)} />
-                    </td>
-                    <td className="py-2">
-                      <TimeDisplay timestamp={p.createdAt} format="relative" />
-                    </td>
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left text-xs font-medium text-muted-foreground">
+                    <th className="pb-2 pr-4">Direction</th>
+                    <th className="pb-2 pr-4">Amount</th>
+                    <th className="pb-2 pr-4">Status</th>
+                    <th className="pb-2">Created</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {postings.map((p) => (
+                    <tr key={p.id} className="border-b last:border-0">
+                      <td className="py-2 pr-4">
+                        <StatusBadge status={getDirectionName(p.postingDirection)} />
+                      </td>
+                      <td className="py-2 pr-4 tabular-nums">
+                        <MoneyDisplay
+                          amount={p.postingAmount?.units}
+                          currency={p.postingAmount?.currencyCode ?? instrumentCode}
+                        />
+                      </td>
+                      <td className="py-2 pr-4">
+                        <StatusBadge status={getTransactionStatusName(p.status)} />
+                      </td>
+                      <td className="py-2">
+                        <TimeDisplay timestamp={p.createdAt} format="relative" />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {postings.length >= 50 && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Showing the most recent 50 transactions. Older transactions may not be displayed.
+              </p>
+            )}
+          </>
         )}
       </CardContent>
     </Card>
@@ -304,7 +318,23 @@ export function InternalAccountDetailPage() {
     return <InternalAccountDetailSkeleton />
   }
 
-  if (isError || account === null || account === undefined) {
+  if (isError) {
+    return (
+      <div className="p-6">
+        <Link
+          to="/internal-accounts"
+          className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+          aria-label="Back to Internal Accounts"
+        >
+          <ChevronLeftIcon className="h-4 w-4" />
+          Internal Accounts
+        </Link>
+        <p className="mt-4 text-sm text-destructive">Failed to load account details. Please try again.</p>
+      </div>
+    )
+  }
+
+  if (account === null || account === undefined) {
     return <InternalAccountNotFound />
   }
 
