@@ -10,6 +10,7 @@ import { AssociationsTab } from './tabs/associations-tab'
 import { BankRelationsTab } from './tabs/bank-relations-tab'
 import { PaymentMethodsTab } from './tabs/payment-methods-tab'
 import { AuditTrailTab } from './tabs/audit-trail-tab'
+import { AccountsTab } from './tabs/accounts-tab'
 
 export function PartyDetailPage() {
   const { partyId } = useParams<{ partyId: string }>()
@@ -30,13 +31,14 @@ export function PartyDetailPage() {
 
       <Card>
         <Tabs defaultValue="overview" className="w-full">
-          <TabsList className="grid w-full grid-cols-7 border-b rounded-none">
+          <TabsList className="grid w-full grid-cols-8 border-b rounded-none">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="demographics">Demographics</TabsTrigger>
             <TabsTrigger value="references">References</TabsTrigger>
             <TabsTrigger value="associations">Associations</TabsTrigger>
             <TabsTrigger value="bank-relations">Bank Relations</TabsTrigger>
             <TabsTrigger value="payment-methods">Payment Methods</TabsTrigger>
+            <TabsTrigger value="accounts">Accounts</TabsTrigger>
             <TabsTrigger value="audit-trail">Audit Trail</TabsTrigger>
           </TabsList>
 
@@ -63,6 +65,10 @@ export function PartyDetailPage() {
 
             <TabsContent value="payment-methods" className="mt-0">
               <PaymentMethodsTab partyId={partyId} />
+            </TabsContent>
+
+            <TabsContent value="accounts" className="mt-0">
+              <AccountsTab partyId={partyId} />
             </TabsContent>
 
             <TabsContent value="audit-trail" className="mt-0">
