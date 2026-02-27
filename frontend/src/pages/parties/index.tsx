@@ -12,6 +12,28 @@ import { useTenantSlug } from '@/hooks/use-tenant-context'
 import { RegisterPartyDialog } from './dialogs/register-party-dialog'
 import { RegisterPartyTypeDialog } from './dialogs/register-party-type-dialog'
 
+function partyStatusLabel(status: unknown): string {
+  if (typeof status === 'string') return status
+  const map: Record<number, string> = {
+    0: 'UNSPECIFIED',
+    1: 'PARTY_STATUS_ACTIVE',
+    2: 'PARTY_STATUS_RESTRICTED',
+    3: 'PARTY_STATUS_SUSPENDED',
+    4: 'PARTY_STATUS_TERMINATED',
+  }
+  return map[status as number] ?? 'UNKNOWN'
+}
+
+function partyTypeLabel(partyType: unknown): string {
+  if (typeof partyType === 'string') return partyType
+  const map: Record<number, string> = {
+    0: 'UNSPECIFIED',
+    1: 'PARTY_TYPE_PERSON',
+    2: 'PARTY_TYPE_ORGANIZATION',
+  }
+  return map[partyType as number] ?? 'UNKNOWN'
+}
+
 export interface Party {
   partyId: string
   legalName: string
@@ -110,8 +132,8 @@ export function PartiesPage() {
     const parties: Party[] = response.parties.map((p: Party) => ({
       partyId: p.partyId,
       legalName: p.legalName,
-      partyType: p.partyType,
-      status: p.status,
+      partyType: partyTypeLabel(p.partyType),
+      status: partyStatusLabel(p.status),
       externalReference: p.externalReference,
       createdAt: p.createdAt,
     }))

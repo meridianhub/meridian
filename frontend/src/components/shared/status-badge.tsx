@@ -59,8 +59,9 @@ export function StatusBadge({ status, loading }: StatusBadgeProps) {
     )
   }
 
-  const variant = STATUS_MAP[status] ?? 'neutral'
-  const displayText = status.replace(/_/g, ' ')
+  const statusStr = typeof status === 'string' ? status : String(status)
+  const variant = STATUS_MAP[statusStr] ?? 'neutral'
+  const displayText = statusStr.replace(/_/g, ' ')
 
   return (
     <span

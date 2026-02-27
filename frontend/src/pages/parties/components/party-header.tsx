@@ -4,6 +4,28 @@ import { useClients } from '@/api/context'
 import { StatusBadge } from '@/components/shared/status-badge'
 import { Skeleton } from '@/components/ui/skeleton'
 
+function partyStatusLabel(status: unknown): string {
+  if (typeof status === 'string') return status
+  const map: Record<number, string> = {
+    0: 'UNSPECIFIED',
+    1: 'PARTY_STATUS_ACTIVE',
+    2: 'PARTY_STATUS_RESTRICTED',
+    3: 'PARTY_STATUS_SUSPENDED',
+    4: 'PARTY_STATUS_TERMINATED',
+  }
+  return map[status as number] ?? 'UNKNOWN'
+}
+
+function partyTypeLabel(partyType: unknown): string {
+  if (typeof partyType === 'string') return partyType
+  const map: Record<number, string> = {
+    0: 'UNSPECIFIED',
+    1: 'Person',
+    2: 'Organization',
+  }
+  return map[partyType as number] ?? 'Unknown'
+}
+
 interface PartyHeaderProps {
   partyId: string
 }
@@ -39,9 +61,9 @@ export function PartyHeader({ partyId }: PartyHeaderProps) {
           <h2 className="text-2xl font-bold">{party.legalName}</h2>
           <div className="flex items-center gap-3">
             <span className="text-sm text-muted-foreground">
-              {party.partyType}
+              {partyTypeLabel(party.partyType)}
             </span>
-            <StatusBadge status={party.status} />
+            <StatusBadge status={partyStatusLabel(party.status)} />
           </div>
         </div>
       </div>

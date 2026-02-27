@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { ErrorBoundary, PageErrorBoundary, RouteErrorBoundary } from '@/components/error-boundary'
+import { MemoryRouter } from 'react-router-dom'
+import { ErrorBoundary, PageErrorBoundary, RouteErrorBoundary, RouteErrorBoundaryInner } from '@/components/error-boundary'
 
 // Component that throws an error
 function ThrowError() {
@@ -160,9 +161,11 @@ describe('RouteErrorBoundary', () => {
 
   it('renders inline error instead of full-page crash', () => {
     render(
-      <RouteErrorBoundary>
-        <ThrowError />
-      </RouteErrorBoundary>
+      <MemoryRouter>
+        <RouteErrorBoundary>
+          <ThrowError />
+        </RouteErrorBoundary>
+      </MemoryRouter>
     )
 
     expect(screen.getByText('Failed to load page')).toBeInTheDocument()
@@ -173,9 +176,11 @@ describe('RouteErrorBoundary', () => {
 
   it('shows error message', () => {
     render(
-      <RouteErrorBoundary>
-        <ThrowError />
-      </RouteErrorBoundary>
+      <MemoryRouter>
+        <RouteErrorBoundary>
+          <ThrowError />
+        </RouteErrorBoundary>
+      </MemoryRouter>
     )
 
     expect(screen.getByText('Test error')).toBeInTheDocument()
@@ -183,9 +188,11 @@ describe('RouteErrorBoundary', () => {
 
   it('renders children when no error', () => {
     render(
-      <RouteErrorBoundary>
-        <SafeComponent />
-      </RouteErrorBoundary>
+      <MemoryRouter>
+        <RouteErrorBoundary>
+          <SafeComponent />
+        </RouteErrorBoundary>
+      </MemoryRouter>
     )
 
     expect(screen.getByText('Safe content')).toBeInTheDocument()
@@ -194,17 +201,21 @@ describe('RouteErrorBoundary', () => {
   it('retry button resets error state', async () => {
     const user = userEvent.setup()
     const { rerender } = render(
-      <RouteErrorBoundary>
-        <ThrowError />
-      </RouteErrorBoundary>
+      <MemoryRouter>
+        <RouteErrorBoundaryInner>
+          <ThrowError />
+        </RouteErrorBoundaryInner>
+      </MemoryRouter>
     )
 
     expect(screen.getByText('Failed to load page')).toBeInTheDocument()
 
     rerender(
-      <RouteErrorBoundary>
-        <SafeComponent />
-      </RouteErrorBoundary>
+      <MemoryRouter>
+        <RouteErrorBoundaryInner>
+          <SafeComponent />
+        </RouteErrorBoundaryInner>
+      </MemoryRouter>
     )
 
     const retryButton = screen.getByRole('button', { name: /retry/i })
@@ -215,11 +226,32 @@ describe('RouteErrorBoundary', () => {
 
   it('does not show Go to Dashboard button (stays in layout)', () => {
     render(
-      <RouteErrorBoundary>
-        <ThrowError />
-      </RouteErrorBoundary>
+      <MemoryRouter>
+        <RouteErrorBoundary>
+          <ThrowError />
+        </RouteErrorBoundary>
+      </MemoryRouter>
     )
 
     expect(screen.queryByRole('button', { name: /go to dashboard/i })).not.toBeInTheDocument()
+  })
+
+  it('resets error state when route changes', () => {
+    const { rerender } = render(
+      <RouteErrorBoundaryInner resetKey="/parties">
+        <ThrowError />
+      </RouteErrorBoundaryInner>
+    )
+
+    expect(screen.getByText('Failed to load page')).toBeInTheDocument()
+
+    // Simulate navigation by changing resetKey and providing safe children
+    rerender(
+      <RouteErrorBoundaryInner resetKey="/accounts">
+        <SafeComponent />
+      </RouteErrorBoundaryInner>
+    )
+
+    expect(screen.getByText('Safe content')).toBeInTheDocument()
   })
 })
