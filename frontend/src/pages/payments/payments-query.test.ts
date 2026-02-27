@@ -10,7 +10,7 @@ const mockPaymentOrders = [
     amount: '5000',
     currency: 'GBP',
     status: 'COMPLETED',
-    createdAt: { seconds: 1700000000, nanos: 0 },
+    createdAt: '2023-11-14T22:13:20Z',
   },
   {
     paymentOrderId: 'po-002',
@@ -19,7 +19,7 @@ const mockPaymentOrders = [
     amount: '15000',
     currency: 'EUR',
     status: 'PENDING',
-    createdAt: { seconds: 1700001000, nanos: 0 },
+    createdAt: '2023-11-14T22:30:00Z',
   },
 ]
 
@@ -35,7 +35,10 @@ describe('fetchPayments', () => {
   it('fetches payments and returns items with nextPageToken', async () => {
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
-      json: () => Promise.resolve({ paymentOrders: mockPaymentOrders, nextPageToken: 'token-2' }),
+      json: () => Promise.resolve({
+        paymentOrders: mockPaymentOrders,
+        pagination: { nextPageToken: 'token-2' },
+      }),
     } as Response)
 
     const params: DataTableQueryParams = { pageSize: 20 }
@@ -46,17 +49,17 @@ describe('fetchPayments', () => {
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pageSize: 20 }),
+        body: JSON.stringify({ pagination: { pageSize: 20, pageToken: '' } }),
       },
     )
     expect(result.items).toEqual(mockPaymentOrders)
     expect(result.nextPageToken).toBe('token-2')
   })
 
-  it('includes pageToken in request body when provided', async () => {
+  it('includes pageToken in pagination when provided', async () => {
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
-      json: () => Promise.resolve({ paymentOrders: [], nextPageToken: undefined }),
+      json: () => Promise.resolve({ paymentOrders: [] }),
     } as Response)
 
     const params: DataTableQueryParams = { pageSize: 10, pageToken: 'cursor-abc' }
@@ -64,10 +67,10 @@ describe('fetchPayments', () => {
 
     const callArgs = vi.mocked(fetch).mock.calls[0]
     const body = JSON.parse(callArgs[1]?.body as string)
-    expect(body.pageToken).toBe('cursor-abc')
+    expect(body.pagination.pageToken).toBe('cursor-abc')
   })
 
-  it('does not include pageToken when not provided', async () => {
+  it('sends empty pageToken when not provided', async () => {
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ paymentOrders: [] }),
@@ -78,7 +81,7 @@ describe('fetchPayments', () => {
 
     const callArgs = vi.mocked(fetch).mock.calls[0]
     const body = JSON.parse(callArgs[1]?.body as string)
-    expect(body).not.toHaveProperty('pageToken')
+    expect(body.pagination.pageToken).toBe('')
   })
 
   it('includes status filter in request body when provided', async () => {
@@ -123,6 +126,18 @@ describe('fetchPayments', () => {
     expect(body).not.toHaveProperty('status')
   })
 
+  it('reads nextPageToken from pagination in response', async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ paymentOrders: mockPaymentOrders, pagination: { nextPageToken: 'page-2' } }),
+    } as Response)
+
+    const params: DataTableQueryParams = { pageSize: 20 }
+    const result = await fetchPayments(params)
+
+    expect(result.nextPageToken).toBe('page-2')
+  })
+
   it('returns empty items array when paymentOrders is absent', async () => {
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
@@ -165,7 +180,7 @@ describe('fetchPayments', () => {
     await expect(fetchPayments(params)).rejects.toThrow('Network failure')
   })
 
-  it('returns undefined nextPageToken when not in response', async () => {
+  it('returns undefined nextPageToken when pagination is absent', async () => {
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ paymentOrders: mockPaymentOrders }),
@@ -177,7 +192,7 @@ describe('fetchPayments', () => {
     expect(result.nextPageToken).toBeUndefined()
   })
 
-  it('passes pageSize correctly in request body', async () => {
+  it('passes pageSize correctly in pagination object', async () => {
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ paymentOrders: [] }),
@@ -188,6 +203,6 @@ describe('fetchPayments', () => {
 
     const callArgs = vi.mocked(fetch).mock.calls[0]
     const body = JSON.parse(callArgs[1]?.body as string)
-    expect(body.pageSize).toBe(50)
+    expect(body.pagination.pageSize).toBe(50)
   })
 })

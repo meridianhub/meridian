@@ -55,11 +55,6 @@ const columns: ColumnDef<FinancialBookingLog>[] = [
     cell: ({ row }) => <StatusBadge status={row.original.status} />,
   },
   {
-    id: 'postingCount',
-    header: 'Postings',
-    cell: ({ row }) => row.original.postings?.length ?? 0,
-  },
-  {
     accessorKey: 'createdAt',
     header: 'Created',
     cell: ({ row }) => (

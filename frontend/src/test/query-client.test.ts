@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { ConnectError, Code } from '@connectrpc/connect'
 import { queryClient } from '@/lib/query-client'
 import { QueryClient } from '@tanstack/react-query'
 
@@ -17,9 +18,16 @@ describe('queryClient', () => {
     expect(options.queries?.gcTime).toBe(5 * 60 * 1000)
   })
 
-  it('has correct retry count for queries', () => {
+  it('has correct retry behavior for queries', () => {
     const options = queryClient.getDefaultOptions()
-    expect(options.queries?.retry).toBe(2)
+    const retry = options.queries?.retry as (failureCount: number, error: Error) => boolean
+    expect(typeof retry).toBe('function')
+    // Regular errors retry up to 2 times
+    expect(retry(0, new Error('network'))).toBe(true)
+    expect(retry(1, new Error('network'))).toBe(true)
+    expect(retry(2, new Error('network'))).toBe(false)
+    // Unauthenticated errors should never retry
+    expect(retry(0, new ConnectError('unauth', Code.Unauthenticated))).toBe(false)
   })
 
   it('has no retry for mutations', () => {

@@ -14,6 +14,7 @@ interface ApiClientProviderProps {
   tenantSlug: string | null
   getToken: TokenGetter
   getTenantSlug: TenantSlugGetter
+  onUnauthenticated?: () => void
   children: ReactNode
 }
 
@@ -21,12 +22,13 @@ export function ApiClientProvider({
   tenantSlug,
   getToken,
   getTenantSlug,
+  onUnauthenticated,
   children,
 }: ApiClientProviderProps) {
   const clients = useMemo(() => {
-    const transport = createTenantTransport(tenantSlug, getToken, getTenantSlug)
+    const transport = createTenantTransport(tenantSlug, getToken, getTenantSlug, onUnauthenticated)
     return createServiceClients(transport)
-  }, [tenantSlug, getToken, getTenantSlug])
+  }, [tenantSlug, getToken, getTenantSlug, onUnauthenticated])
 
   return (
     <ApiClientContext.Provider value={{ clients }}>
