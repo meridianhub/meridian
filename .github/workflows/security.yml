@@ -18,6 +18,7 @@ jobs:
   govulncheck:
     name: Go Vulnerability Check
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
     - name: Checkout code
       uses: actions/checkout@v6
@@ -44,6 +45,7 @@ jobs:
   gosec:
     name: Security Scanner (Gosec)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
     - name: Checkout code
       uses: actions/checkout@v6
@@ -92,6 +94,7 @@ jobs:
   trivy-repo:
     name: Trivy Repository Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
     - name: Checkout code
       uses: actions/checkout@v6
@@ -116,6 +119,7 @@ jobs:
   trivy-image:
     name: Trivy Container Image Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: [govulncheck, gosec]  # Only scan image if code passes security checks
     steps:
     - name: Checkout code
@@ -157,6 +161,7 @@ jobs:
   dependency-review:
     name: Dependency Review
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: github.event_name == 'pull_request'
     steps:
     - name: Checkout code
@@ -170,6 +175,7 @@ jobs:
   sbom:
     name: Generate SBOM
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
     - name: Checkout code
       uses: actions/checkout@v6
@@ -216,6 +222,7 @@ jobs:
   secrets-scan:
     name: Secret Scanning with Gitleaks
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
     - name: Checkout code
       uses: actions/checkout@v6
