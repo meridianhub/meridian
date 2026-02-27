@@ -194,7 +194,9 @@ describe('ReconciliationDetailPage - header', () => {
     mockFetch()
     render(<ReconciliationDetailPage />, { wrapper: Wrapper })
     await waitFor(() => {
-      expect(screen.getByText('run-001')).toBeInTheDocument()
+      const matches = screen.getAllByText('run-001')
+      expect(matches.length).toBeGreaterThanOrEqual(1)
+      expect(matches.some((el) => el.tagName === 'H1')).toBe(true)
     })
   })
 
