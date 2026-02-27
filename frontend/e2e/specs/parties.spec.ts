@@ -90,7 +90,7 @@ test.describe('Party detail navigation', () => {
   })
 })
 
-test.describe('Party detail — 7-tab layout', () => {
+test.describe('Party detail — 8-tab layout', () => {
   test.beforeEach(async ({ authenticatedPage: page }) => {
     await navigateTo(page, '/parties')
     const rowCount = await page.locator('table tbody tr').count()
@@ -103,7 +103,7 @@ test.describe('Party detail — 7-tab layout', () => {
     await expect(page.getByRole('heading', { name: 'Party Details' })).toBeVisible()
   })
 
-  test('renders all 7 tab triggers', async ({ authenticatedPage: page }) => {
+  test('renders all 8 tab triggers', async ({ authenticatedPage: page }) => {
     const expectedTabs = [
       'Overview',
       'Demographics',
@@ -111,6 +111,7 @@ test.describe('Party detail — 7-tab layout', () => {
       'Associations',
       'Bank Relations',
       'Payment Methods',
+      'Accounts',
       'Audit Trail',
     ] as const
 
@@ -119,11 +120,11 @@ test.describe('Party detail — 7-tab layout', () => {
     }
   })
 
-  test('tab list has 7-column grid layout', async ({ authenticatedPage: page }) => {
+  test('tab list has 8-column grid layout', async ({ authenticatedPage: page }) => {
     const tabList = page.getByRole('tablist')
     await expect(tabList).toBeVisible()
-    // Verify the CSS grid class from [partyId].tsx:33
-    await expect(tabList).toHaveClass(/grid-cols-7/)
+    // Verify the CSS grid class from [partyId].tsx:34
+    await expect(tabList).toHaveClass(/grid-cols-8/)
   })
 
   test('Overview tab is selected by default', async ({ authenticatedPage: page }) => {
