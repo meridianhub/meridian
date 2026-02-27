@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { ChevronRight } from 'lucide-react'
+import { useApiClients } from '@/api/context'
 
 /**
  * Represents a parameter for a Starlark handler.
@@ -64,7 +65,7 @@ export interface HandlerReferenceProps {
  * HandlerReference component displays available Starlark handlers organized by service.
  *
  * Features:
- * - Loads handler schema from API (currently mock data)
+ * - Loads handler schema from the DescribeHandlers API
  * - Displays handlers grouped by service using accordion
  * - Filters handlers by service name or handler name (case-insensitive)
  * - Shows parameter types, required status, and enum values
@@ -74,90 +75,30 @@ export interface HandlerReferenceProps {
  * @returns React component displaying handler reference
  */
 export function HandlerReference({ filter = '', onInsert, className }: HandlerReferenceProps) {
-  const [schema, setSchema] = useState<HandlerSchemaResponse | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const clients = useApiClients()
 
-  // Fetch handler schema on mount
-  useEffect(() => {
-    const fetchSchema = async () => {
-      try {
-        setLoading(true)
-        // TODO: Replace with actual API call via Connect-ES
-        // For now, use mock data for testing
-        const mockResponse: HandlerSchemaResponse = {
-          services: [
-            {
-              serviceName: 'position_keeping',
-              handlers: [
-                {
-                  name: 'initiate_log',
-                  description: 'Initiates a position log entry',
-                  params: [
-                    {
-                      name: 'amount',
-                      type: 'Decimal',
-                      required: true,
-                      enumValues: [],
-                    },
-                    {
-                      name: 'direction',
-                      type: 'enum',
-                      required: true,
-                      enumValues: ['DEBIT', 'CREDIT'],
-                    },
-                  ],
-                },
-                {
-                  name: 'finalize_log',
-                  description: 'Finalizes a position log entry',
-                  params: [
-                    {
-                      name: 'log_id',
-                      type: 'string',
-                      required: true,
-                      enumValues: [],
-                    },
-                  ],
-                },
-              ],
-            },
-            {
-              serviceName: 'current_account',
-              handlers: [
-                {
-                  name: 'debit',
-                  description: 'Debits an account',
-                  params: [
-                    {
-                      name: 'account_id',
-                      type: 'string',
-                      required: true,
-                      enumValues: [],
-                    },
-                    {
-                      name: 'amount',
-                      type: 'Decimal',
-                      required: true,
-                      enumValues: [],
-                    },
-                  ],
-                },
-              ],
-            },
-          ],
-        }
-        setSchema(mockResponse)
-        setError(null)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load handler schema')
-      } finally {
-        setLoading(false)
+  const { data: schema, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ['handlers', 'schema'],
+    queryFn: async (): Promise<HandlerSchemaResponse> => {
+      const response = await clients.sagaRegistry.describeHandlers({})
+      return {
+        services: response.services.map((s) => ({
+          serviceName: s.name,
+          handlers: s.handlers.map((h) => ({
+            name: h.name,
+            description: h.description,
+            params: h.parameters.map((p) => ({
+              name: p.name,
+              type: p.type,
+              required: p.required,
+              enumValues: p.enumValues ?? [],
+            })),
+          })),
+        })),
       }
-    }
-
-    fetchSchema()
-  }, [])
+    },
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+  })
 
   /**
    * Generates a Starlark call template for a handler with its parameters.
@@ -202,7 +143,7 @@ export function HandlerReference({ filter = '', onInsert, className }: HandlerRe
     }))
     .filter((service) => service.handlers.length > 0)
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div
         data-testid="handler-reference"
@@ -213,13 +154,22 @@ export function HandlerReference({ filter = '', onInsert, className }: HandlerRe
     )
   }
 
-  if (error) {
+  if (isError) {
     return (
       <div
         data-testid="handler-reference"
         className={cn('rounded border border-destructive/30 bg-destructive/5 p-4 text-destructive', className)}
       >
-        Error: {error}
+        <p>Error: {error instanceof Error ? error.message : 'Failed to load handler schema'}</p>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => void refetch()}
+          className="mt-2"
+        >
+          Retry
+        </Button>
       </div>
     )
   }

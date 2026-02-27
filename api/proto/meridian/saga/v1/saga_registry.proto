@@ -204,6 +204,14 @@ service SagaRegistryService {
       get: "/v1/sagas/deprecation-impact"
     };
   }
+
+  // DescribeHandlers returns the platform handler schema registry.
+  // Used by the Starlark editor to display available handlers and their parameter types.
+  rpc DescribeHandlers(DescribeHandlersRequest) returns (DescribeHandlersResponse) {
+    option (google.api.http) = {
+      get: "/v1/sagas/handlers"
+    };
+  }
 }
 
 // CreateSagaDraftRequest contains the data for creating a new saga draft.
@@ -481,4 +489,59 @@ message ComplexityMetrics {
 
   // complexity_score is a 0-10 scale complexity rating.
   int32 complexity_score = 4;
+}
+
+// DescribeHandlersRequest is the request for the DescribeHandlers RPC.
+// No parameters required - returns the full platform handler schema.
+message DescribeHandlersRequest {}
+
+// DescribeHandlersResponse contains the handler schema grouped by service.
+message DescribeHandlersResponse {
+  // services lists all available services with their handlers.
+  repeated HandlerServiceSchema services = 1;
+}
+
+// HandlerServiceSchema describes a single service and its handlers.
+message HandlerServiceSchema {
+  // name is the service name (e.g., "position_keeping").
+  string name = 1;
+
+  // handlers lists the handlers provided by this service.
+  repeated HandlerSchema handlers = 2;
+}
+
+// HandlerSchema describes a single handler with its parameters.
+message HandlerSchema {
+  // name is the handler name (e.g., "initiate_log").
+  string name = 1;
+
+  // description provides human-readable documentation.
+  string description = 2;
+
+  // parameters lists the parameters accepted by this handler.
+  repeated HandlerParameter parameters = 3;
+
+  // is_external indicates this handler calls external systems (non-idempotent).
+  bool is_external = 4;
+
+  // compensate_handler is the handler used for compensation/rollback (if any).
+  string compensate_handler = 5;
+}
+
+// HandlerParameter describes a single parameter for a handler.
+message HandlerParameter {
+  // name is the parameter name.
+  string name = 1;
+
+  // type is the parameter type (e.g., "string", "Decimal", "enum", "bool").
+  string type = 2;
+
+  // required indicates whether the parameter must be provided.
+  bool required = 3;
+
+  // enum_values lists allowed values for enum type parameters.
+  repeated string enum_values = 4;
+
+  // description provides human-readable documentation.
+  string description = 5;
 }

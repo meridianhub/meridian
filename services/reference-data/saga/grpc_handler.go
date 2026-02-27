@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,6 +17,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	sagav1 "github.com/meridianhub/meridian/api/proto/meridian/saga/v1"
+	"github.com/meridianhub/meridian/shared/pkg/saga/schema"
 	"github.com/meridianhub/meridian/shared/pkg/saga/validation"
 )
 
@@ -27,12 +29,14 @@ type RegistryHandler struct {
 	registry        Registry
 	validator       *ReferenceValidator
 	dryRunValidator *validation.DryRunValidator
+	schemaRegistry  *schema.Registry
 	logger          *slog.Logger
 }
 
 // NewRegistryHandler creates a new saga registry gRPC handler.
 // The validator is optional - if nil, ValidateSagaDraft will return empty results.
 // The dryRunValidator is optional - if nil, ValidateSaga will return an error.
+// The schemaRegistry is optional - if nil, DescribeHandlers will load the platform default registry.
 func NewRegistryHandler(registry Registry, validator *ReferenceValidator, dryRunValidator *validation.DryRunValidator, logger *slog.Logger) *RegistryHandler {
 	if logger == nil {
 		logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -43,6 +47,13 @@ func NewRegistryHandler(registry Registry, validator *ReferenceValidator, dryRun
 		dryRunValidator: dryRunValidator,
 		logger:          logger,
 	}
+}
+
+// WithSchemaRegistry sets the schema registry on the handler.
+// Used to inject a pre-loaded registry instead of loading the default.
+func (h *RegistryHandler) WithSchemaRegistry(reg *schema.Registry) *RegistryHandler {
+	h.schemaRegistry = reg
+	return h
 }
 
 // CreateSagaDraft creates a new saga definition in DRAFT status.
@@ -794,4 +805,84 @@ func calculateComplexityScore(handlerCallCount int) int {
 		return 10
 	}
 	return score
+}
+
+// DescribeHandlers returns the platform handler schema registry grouped by service.
+// Used by the Starlark editor to display available handlers and their parameter types.
+func (h *RegistryHandler) DescribeHandlers(
+	_ context.Context,
+	_ *sagav1.DescribeHandlersRequest,
+) (*sagav1.DescribeHandlersResponse, error) {
+	reg := h.schemaRegistry
+	if reg == nil {
+		var err error
+		reg, err = schema.DefaultRegistry()
+		if err != nil {
+			h.logger.Error("failed to load default handler schema registry", "error", err)
+			return nil, status.Errorf(codes.Internal, "failed to load handler schema: %v", err)
+		}
+	}
+
+	// Group handlers by service name (first component of "service.handler" name)
+	handlerNames := reg.ListHandlers()
+	serviceMap := make(map[string][]*sagav1.HandlerSchema)
+	serviceOrder := make([]string, 0)
+
+	for _, fullName := range handlerNames {
+		parts := strings.SplitN(fullName, ".", 2)
+		if len(parts) < 2 {
+			continue
+		}
+		serviceName := parts[0]
+		handlerName := parts[1]
+
+		def, err := reg.GetHandler(fullName)
+		if err != nil {
+			continue
+		}
+
+		params := make([]*sagav1.HandlerParameter, 0, len(def.Params))
+		// Sort parameter names for deterministic output
+		paramNames := make([]string, 0, len(def.Params))
+		for paramName := range def.Params {
+			paramNames = append(paramNames, paramName)
+		}
+		sort.Strings(paramNames)
+
+		for _, paramName := range paramNames {
+			paramDef := def.Params[paramName]
+			params = append(params, &sagav1.HandlerParameter{
+				Name:        paramName,
+				Type:        string(paramDef.Type),
+				Required:    paramDef.Required,
+				EnumValues:  paramDef.Values,
+				Description: paramDef.Description,
+			})
+		}
+
+		if _, exists := serviceMap[serviceName]; !exists {
+			serviceOrder = append(serviceOrder, serviceName)
+		}
+		serviceMap[serviceName] = append(serviceMap[serviceName], &sagav1.HandlerSchema{
+			Name:              handlerName,
+			Description:       def.Description,
+			Parameters:        params,
+			IsExternal:        def.External,
+			CompensateHandler: def.Compensate,
+		})
+	}
+
+	sort.Strings(serviceOrder)
+
+	services := make([]*sagav1.HandlerServiceSchema, 0, len(serviceOrder))
+	for _, serviceName := range serviceOrder {
+		services = append(services, &sagav1.HandlerServiceSchema{
+			Name:     serviceName,
+			Handlers: serviceMap[serviceName],
+		})
+	}
+
+	return &sagav1.DescribeHandlersResponse{
+		Services: services,
+	}, nil
 }
