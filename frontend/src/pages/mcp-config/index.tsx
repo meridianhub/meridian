@@ -11,7 +11,19 @@ const MCP_SERVER_URL =
   import.meta.env.VITE_API_BASE_URL ??
   'http://localhost:8091'
 
-function buildClaudeDesktopConfig(serverUrl: string): string {
+function buildStreamableHttpConfig(serverUrl: string): string {
+  const config = {
+    mcpServers: {
+      meridian: {
+        type: 'streamable-http',
+        url: `${serverUrl}/mcp`,
+      },
+    },
+  }
+  return JSON.stringify(config, null, 2)
+}
+
+function buildLegacySseConfig(serverUrl: string): string {
   const config = {
     mcpServers: {
       meridian: {
@@ -73,9 +85,11 @@ function CopyButton({ text, label }: { text: string; label?: string }) {
 export function McpConfigPage() {
   const { tenantSlug } = useTenantContext()
 
+  const mcpUrl = `${MCP_SERVER_URL}/mcp`
   const sseUrl = `${MCP_SERVER_URL}/sse`
   const oauthUrl = `${MCP_SERVER_URL}/oauth/authorize`
-  const claudeDesktopConfig = buildClaudeDesktopConfig(MCP_SERVER_URL)
+  const streamableHttpConfig = buildStreamableHttpConfig(MCP_SERVER_URL)
+  const legacySseConfig = buildLegacySseConfig(MCP_SERVER_URL)
 
   return (
     <div className="flex flex-col gap-6">
@@ -98,38 +112,57 @@ export function McpConfigPage() {
         <div>
           <h2 className="text-lg font-semibold">Server Connection</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            SSE endpoint for connecting MCP clients to Meridian
+            Streamable HTTP endpoint for connecting MCP clients to Meridian (recommended)
           </p>
         </div>
         <div className="flex items-center gap-3">
           <code
-            data-testid="sse-url"
+            data-testid="mcp-url"
             className="flex-1 rounded-md bg-muted px-3 py-2 font-mono text-sm"
           >
-            {sseUrl}
+            {mcpUrl}
           </code>
-          <CopyButton text={sseUrl} label="Copy SSE URL" />
+          <CopyButton text={mcpUrl} label="Copy MCP URL" />
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">
+            Legacy SSE endpoint also available at{' '}
+            <code className="text-xs">{sseUrl}</code>
+          </p>
         </div>
       </Card>
 
-      {/* Claude Desktop Configuration */}
-      <Card className="p-6 space-y-4">
+      {/* Client Configuration */}
+      <Card className="p-6 space-y-6">
         <div className="flex items-start justify-between">
           <div>
-            <h2 className="text-lg font-semibold">Claude Desktop Configuration</h2>
+            <h2 className="text-lg font-semibold">Client Configuration</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Add this configuration to your Claude Desktop{' '}
-              <code className="text-xs">claude_desktop_config.json</code>
+              Add to your Claude Desktop{' '}
+              <code className="text-xs">claude_desktop_config.json</code>{' '}
+              or Claude Code <code className="text-xs">.mcp.json</code>
             </p>
           </div>
-          <CopyButton text={claudeDesktopConfig} label="Copy Claude Desktop config" />
+          <CopyButton text={streamableHttpConfig} label="Copy streamable HTTP config" />
         </div>
-        <pre
-          data-testid="claude-desktop-config"
-          className="overflow-x-auto rounded-md bg-muted p-4 font-mono text-sm"
-        >
-          {claudeDesktopConfig}
-        </pre>
+        <div>
+          <h3 className="mb-2 text-sm font-medium">Streamable HTTP (recommended)</h3>
+          <pre
+            data-testid="streamable-http-config"
+            className="overflow-x-auto rounded-md bg-muted p-4 font-mono text-sm"
+          >
+            {streamableHttpConfig}
+          </pre>
+        </div>
+        <div>
+          <h3 className="mb-2 text-sm font-medium text-muted-foreground">Legacy SSE</h3>
+          <pre
+            data-testid="legacy-sse-config"
+            className="overflow-x-auto rounded-md bg-muted/60 p-4 font-mono text-sm text-muted-foreground"
+          >
+            {legacySseConfig}
+          </pre>
+        </div>
       </Card>
 
       {/* OAuth Authorization */}

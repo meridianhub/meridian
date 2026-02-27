@@ -9,20 +9,20 @@ triggers:
   - Configuring Claude Desktop for local Meridian development
 instructions: |
   MCP Server is a thin JSON-RPC adapter that exposes Meridian's gRPC services to LLM clients
-  using the Model Context Protocol (MCP 2024-11-05).
+  using the Model Context Protocol (MCP 2025-03-26).
 
   Key patterns:
-  - Transport agnostic: stdio for CLI tools (Claude Desktop), SSE for browser-based clients
+  - Transport agnostic: stdio for CLI tools, streamable HTTP for network clients (recommended), SSE for legacy clients
   - Tool categories: Read (no side effects), Simulate (dry-run), Write (state mutation)
   - Plan-before-apply safety: meridian_manifest_plan must precede meridian_manifest_apply
-  - OAuth 2.1 with PKCE: optional, enabled via MCP_OAUTH_ENABLED=true for SSE mode
+  - OAuth 2.1 with PKCE: optional, enabled via MCP_OAUTH_ENABLED=true for network transports
   - All logs go to stderr; stdout is reserved for the JSON-RPC protocol (stdio mode)
 ---
 
 # MCP Server
 
 Thin JSON-RPC adapter that exposes Meridian's backend services to LLM clients via the
-[Model Context Protocol](https://spec.modelcontextprotocol.io/) (MCP 2024-11-05).
+[Model Context Protocol](https://spec.modelcontextprotocol.io/) (MCP 2025-03-26).
 
 ## Overview
 
@@ -30,9 +30,9 @@ Thin JSON-RPC adapter that exposes Meridian's backend services to LLM clients vi
 |-----------|-------|
 | **Type** | Infrastructure (API Gateway) |
 | **Language** | Go |
-| **Protocol** | MCP 2024-11-05 |
-| **Transports** | stdio, SSE |
-| **Auth** | OAuth 2.1 with PKCE (optional, SSE only) |
+| **Protocol** | MCP 2025-03-26 |
+| **Transports** | stdio, streamable HTTP, SSE (legacy) |
+| **Auth** | OAuth 2.1 with PKCE (optional, network transports) |
 | **Standalone** | No (requires Meridian backend services via `MERIDIAN_API_URL`) |
 
 ## Architecture
@@ -50,7 +50,8 @@ flowchart TB
 
     subgraph "MCP Server"
         ST[stdio Transport]
-        SE[SSE Transport]
+        SH[Streamable HTTP Transport]
+        SE[SSE Transport - Legacy]
         TH[Tool Handlers]
         RH[Resource Handlers]
         PH[Prompt Handlers]
@@ -69,10 +70,12 @@ flowchart TB
 
     CD -->|JSON-RPC| ST
     CLI -->|JSON-RPC| ST
-    CB -->|JSON-RPC + Bearer| SE
+    CB -->|JSON-RPC + Bearer| SH
+    SH <--> OA
     SE <--> OA
 
     ST --> TH
+    SH --> TH
     SE --> TH
     TH --> RH
     TH --> PH
@@ -97,10 +100,28 @@ responses to stdout. Logs are written to stderr to avoid corrupting the protocol
 MCP_TRANSPORT=stdio ./mcp-server
 ```
 
-### SSE
+### Streamable HTTP (recommended for network deployments)
 
-Used by browser-based clients and network-accessible deployments. The server exposes two HTTP
-endpoints:
+The streamable HTTP transport (MCP spec 2025-03-26) uses a single `/mcp` endpoint for all
+communication. Clients POST JSON-RPC requests and receive synchronous JSON responses. Session
+management is handled via the `Mcp-Session-Id` header.
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/mcp` | `POST` | Send JSON-RPC requests (initialize, tools/list, tools/call, etc.) |
+| `/mcp` | `DELETE` | Terminate a session |
+
+The streamable HTTP transport is automatically available alongside SSE when running in `sse`
+mode -- no separate transport flag is needed.
+
+```bash
+MCP_TRANSPORT=sse MCP_SSE_PORT=8090 ./mcp-server
+# Both /mcp (streamable HTTP) and /sse + /message (legacy) are served
+```
+
+### SSE (legacy)
+
+The original SSE transport is still available for clients that do not yet support streamable HTTP.
 
 | Endpoint | Purpose |
 |----------|---------|
@@ -128,9 +149,9 @@ MCP_TRANSPORT=sse MCP_SSE_PORT=8090 ./mcp-server
 
 ## OAuth 2.1 Configuration
 
-OAuth 2.1 with PKCE is optional and only applies to the SSE transport. When enabled, the server
-exposes authorization and token endpoints and requires clients to present a bearer token on the
-`/sse` and `/message` endpoints.
+OAuth 2.1 with PKCE is optional and applies to both the streamable HTTP and SSE transports. When
+enabled, the server exposes authorization and token endpoints and requires clients to present a
+bearer token on the `/mcp`, `/sse`, and `/message` endpoints.
 
 Example configuration for a production SSE deployment:
 
@@ -153,7 +174,22 @@ OAuth endpoints exposed when `MCP_OAUTH_ENABLED=true`:
 The current implementation ships a passthrough token issuer and validator suitable for development.
 For production, configure a real JWT signer and validator.
 
-## Claude Desktop Configuration
+## Client Configuration
+
+### Streamable HTTP (recommended for network deployments)
+
+For Claude Desktop, Claude Code, or any MCP client connecting to a remote Meridian instance:
+
+```json
+{
+  "mcpServers": {
+    "meridian": {
+      "type": "streamable-http",
+      "url": "https://your-domain/mcp"
+    }
+  }
+}
+```
 
 ### stdio mode (recommended for local development)
 
@@ -176,7 +212,7 @@ Add the following to your Claude Desktop configuration file
 }
 ```
 
-### SSE mode (for network-accessible deployments)
+### Legacy SSE (for clients without streamable HTTP support)
 
 ```json
 {
@@ -298,7 +334,7 @@ MERIDIAN_API_URL=localhost:9090 \
   /tmp/meridian-mcp
 ```
 
-### Running standalone (SSE mode)
+### Running standalone (network mode)
 
 ```bash
 MCP_TRANSPORT=sse \
@@ -309,7 +345,24 @@ MCP_TRANSPORT=sse \
   /tmp/meridian-mcp
 ```
 
-Then connect Claude Desktop using the SSE configuration above, or test with curl:
+This starts both the streamable HTTP (`/mcp`) and legacy SSE (`/sse`, `/message`) endpoints.
+
+Test with curl using the streamable HTTP transport:
+
+```bash
+# Initialize a session
+curl -X POST http://localhost:8090/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"curl","version":"1.0"}}}'
+
+# Use the Mcp-Session-Id from the response header for subsequent requests
+curl -X POST http://localhost:8090/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Mcp-Session-Id: <session-id-from-above>' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+```
+
+Or test with the legacy SSE transport:
 
 ```bash
 # Open SSE stream

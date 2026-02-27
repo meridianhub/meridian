@@ -47,21 +47,35 @@ describe('McpConfigPage', () => {
       expect(screen.getByText(/Model Context Protocol/i)).toBeInTheDocument()
     })
 
-    it('renders server connection section with SSE URL', () => {
+    it('renders server connection section with streamable HTTP URL', () => {
       render(<McpConfigPage />, { wrapper: Wrapper })
 
       expect(screen.getByText('Server Connection')).toBeInTheDocument()
-      expect(screen.getByTestId('sse-url')).toHaveTextContent('/sse')
+      expect(screen.getByTestId('mcp-url')).toHaveTextContent('/mcp')
     })
 
-    it('renders Claude Desktop config section with JSON', () => {
+    it('shows legacy SSE endpoint reference', () => {
       render(<McpConfigPage />, { wrapper: Wrapper })
 
-      expect(screen.getByText('Claude Desktop Configuration')).toBeInTheDocument()
-      const configEl = screen.getByTestId('claude-desktop-config')
+      expect(screen.getByText(/Legacy SSE endpoint/i)).toBeInTheDocument()
+    })
+
+    it('renders client configuration section with streamable HTTP config', () => {
+      render(<McpConfigPage />, { wrapper: Wrapper })
+
+      expect(screen.getByText('Client Configuration')).toBeInTheDocument()
+      const configEl = screen.getByTestId('streamable-http-config')
       expect(configEl).toHaveTextContent('mcpServers')
-      expect(configEl).toHaveTextContent('meridian')
+      expect(configEl).toHaveTextContent('streamable-http')
+      expect(configEl).toHaveTextContent('/mcp')
+    })
+
+    it('renders legacy SSE config section', () => {
+      render(<McpConfigPage />, { wrapper: Wrapper })
+
+      const configEl = screen.getByTestId('legacy-sse-config')
       expect(configEl).toHaveTextContent('mcp-remote')
+      expect(configEl).toHaveTextContent('/sse')
     })
 
     it('renders OAuth authorization section', () => {
@@ -120,18 +134,18 @@ describe('McpConfigPage', () => {
   })
 
   describe('copy to clipboard', () => {
-    it('copies SSE URL on button click', async () => {
+    it('copies MCP URL on button click', async () => {
       const writeText = vi.fn().mockResolvedValue(undefined)
       vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
 
       render(<McpConfigPage />, { wrapper: Wrapper })
 
-      const copyButton = screen.getByRole('button', { name: /Copy SSE URL/i })
+      const copyButton = screen.getByRole('button', { name: /Copy MCP URL/i })
       await act(async () => {
         copyButton.click()
       })
 
-      expect(writeText).toHaveBeenCalledWith(expect.stringContaining('/sse'))
+      expect(writeText).toHaveBeenCalledWith(expect.stringContaining('/mcp'))
     })
 
     it('shows Copied! feedback after clicking copy', async () => {
@@ -140,7 +154,7 @@ describe('McpConfigPage', () => {
 
       render(<McpConfigPage />, { wrapper: Wrapper })
 
-      const copyButton = screen.getByRole('button', { name: /Copy SSE URL/i })
+      const copyButton = screen.getByRole('button', { name: /Copy MCP URL/i })
       await act(async () => {
         copyButton.click()
       })
@@ -150,13 +164,13 @@ describe('McpConfigPage', () => {
       })
     })
 
-    it('copies Claude Desktop config on button click', async () => {
+    it('copies streamable HTTP config on button click', async () => {
       const writeText = vi.fn().mockResolvedValue(undefined)
       vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
 
       render(<McpConfigPage />, { wrapper: Wrapper })
 
-      const copyButton = screen.getByRole('button', { name: /Copy Claude Desktop config/i })
+      const copyButton = screen.getByRole('button', { name: /Copy streamable HTTP config/i })
       await act(async () => {
         copyButton.click()
       })
