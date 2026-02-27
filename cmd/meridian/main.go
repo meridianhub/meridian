@@ -990,6 +990,9 @@ func buildUnifiedEventStreamComponents(db *gorm.DB, logger *slog.Logger) (*event
 	source := adapters.NewOutboxEventSource(db, pollInterval, logger)
 
 	bufferSize := env.GetEnvAsInt("EVENT_STREAM_BUFFER_SIZE", 256)
+	if bufferSize < 0 {
+		bufferSize = 256
+	}
 	fanOut := adapters.NewLocalFanOut(bufferSize)
 
 	router := eventstream.NewRouter(source, fanOut)
