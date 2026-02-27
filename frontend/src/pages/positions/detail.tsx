@@ -10,12 +10,9 @@ import { TimeDisplay } from '@/components/shared/time-display'
 import { QualityLadderBadge } from '@/components/shared/quality-ladder-badge'
 import { DirectionBadge } from '@/components/shared/direction-badge'
 import { EntityLink } from '@/components/shared'
+import { Skeleton } from '@/components/ui/skeleton'
 import { useApiClients } from '@/api/context'
 import type { FinancialPositionLog, TransactionLogEntry } from './index'
-
-function SkeletonField() {
-  return <div className="h-5 w-40 animate-pulse rounded bg-muted" />
-}
 
 function LabeledField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -187,51 +184,44 @@ export function PositionDetailPage() {
 
       {(isLoading || log) && (
         <Card className="p-6">
-          <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <LabeledField label="Log ID">
-              {isLoading ? (
-                <SkeletonField />
-              ) : (
+          {isLoading ? (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i}>
+                  <Skeleton className="h-4 w-24 mb-2" />
+                  <Skeleton className="h-5 w-40" />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <LabeledField label="Log ID">
                 <span className="font-mono text-xs">{log?.logId ?? '—'}</span>
-              )}
-            </LabeledField>
+              </LabeledField>
 
-            <LabeledField label="Account ID">
-              {isLoading ? (
-                <SkeletonField />
-              ) : log?.accountId ? (
-                <EntityLink type="account" id={log.accountId} className="font-mono text-xs text-blue-600 hover:underline dark:text-blue-400" />
-              ) : (
-                <span>—</span>
-              )}
-            </LabeledField>
+              <LabeledField label="Account ID">
+                {log?.accountId ? (
+                  <EntityLink type="account" id={log.accountId} className="font-mono text-xs text-blue-600 hover:underline dark:text-blue-400" />
+                ) : (
+                  <span>—</span>
+                )}
+              </LabeledField>
 
-            <LabeledField label="Status">
-              {isLoading ? (
-                <SkeletonField />
-              ) : (
+              <LabeledField label="Status">
                 <span>
                   {typeof log?.statusTracking?.currentStatus === 'string' ? log.statusTracking.currentStatus.replace(/_/g, ' ') : '—'}
                 </span>
-              )}
-            </LabeledField>
+              </LabeledField>
 
-            <LabeledField label="Created">
-              {isLoading ? (
-                <SkeletonField />
-              ) : (
+              <LabeledField label="Created">
                 <TimeDisplay timestamp={log?.createdAt} />
-              )}
-            </LabeledField>
+              </LabeledField>
 
-            <LabeledField label="Last Updated">
-              {isLoading ? (
-                <SkeletonField />
-              ) : (
+              <LabeledField label="Last Updated">
                 <TimeDisplay timestamp={log?.updatedAt} />
-              )}
-            </LabeledField>
-          </dl>
+              </LabeledField>
+            </dl>
+          )}
         </Card>
       )}
 

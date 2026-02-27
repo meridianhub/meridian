@@ -6,6 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { StatusBadge } from '@/components/shared/status-badge'
+import { DetailSkeleton } from '@/components/shared/detail-skeleton'
 import { useApiClients } from '@/api/context'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -437,18 +438,7 @@ export function MappingDetailPage() {
   }
 
   if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Mapping Details</h1>
-        </div>
-        <Card>
-          <div className="p-6">
-            <div className="h-6 w-48 animate-pulse rounded bg-muted" />
-          </div>
-        </Card>
-      </div>
-    )
+    return <DetailSkeleton fieldCount={4} tabCount={3} showBackNav={false} />
   }
 
   if (isError || !data) {
