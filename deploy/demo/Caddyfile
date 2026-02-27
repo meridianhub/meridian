@@ -35,9 +35,9 @@ demo.meridianhub.cloud, *.demo.meridianhub.cloud {
 		reverse_proxy dex:5556
 	}
 
-	# API: ConnectRPC + version
+	# API: REST transcoding + ConnectRPC + version
 	@api {
-		path /meridian.* /grpc.* /version
+		path /v1/* /meridian.* /grpc.* /version
 	}
 	handle @api {
 		reverse_proxy meridian:8090
