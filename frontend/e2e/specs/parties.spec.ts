@@ -199,6 +199,7 @@ test.describe('Tab switching', () => {
     await expect(
       page.getByRole('tabpanel').getByRole('heading', { name: 'References' })
         .or(page.getByRole('tabpanel').getByText('No references information available'))
+        .first()
     ).toBeVisible()
   })
 

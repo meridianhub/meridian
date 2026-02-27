@@ -72,8 +72,9 @@ export function DemographicsTab({ partyId }: DemographicsTabProps) {
       <form onSubmit={handleSubmit((data) => void updateMutation.mutateAsync(data))} className="space-y-6">
         <div className="grid gap-6">
           <div>
-            <label className="text-sm font-medium">Socio-Economic Data</label>
+            <label htmlFor="socioEconomicData" className="text-sm font-medium">Socio-Economic Data</label>
             <Input
+              id="socioEconomicData"
               {...register('socioEconomicData')}
               placeholder="Socio-economic classification"
               className="mt-1"
@@ -81,8 +82,9 @@ export function DemographicsTab({ partyId }: DemographicsTabProps) {
           </div>
 
           <div>
-            <label className="text-sm font-medium">Employment History</label>
+            <label htmlFor="employmentHistory" className="text-sm font-medium">Employment History</label>
             <Input
+              id="employmentHistory"
               {...register('employmentHistory')}
               placeholder="Employment information"
               className="mt-1"
