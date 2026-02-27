@@ -104,7 +104,10 @@ describe('MappingDetailPage', () => {
     renderAtRoute(<MappingDetailPage />, '/gateway-mappings/mapping-abc')
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: /mapping details/i })).toBeInTheDocument()
+      // Breadcrumb link to parent section
+      const gatewayMappingsLink = screen.getByRole('link', { name: 'Gateway Mappings' })
+      expect(gatewayMappingsLink).toBeInTheDocument()
+      expect(gatewayMappingsLink).toHaveAttribute('href', '/mappings')
     })
   })
 
@@ -112,7 +115,7 @@ describe('MappingDetailPage', () => {
     renderAtRoute(<MappingDetailPage />, '/gateway-mappings/mapping-abc')
 
     await waitFor(() => {
-      expect(screen.getByText('Stripe Webhook')).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: 'Stripe Webhook' })).toBeInTheDocument()
     })
   })
 

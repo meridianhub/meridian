@@ -1,4 +1,5 @@
 import { useParams } from 'react-router-dom'
+import { Breadcrumbs } from '@/components/shared'
 import { useQuery } from '@tanstack/react-query'
 import { format } from 'date-fns'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -196,7 +197,8 @@ export function DatasetDetailPage() {
   if (!tenantSlug) {
     return (
       <div className="p-6">
-        <p className="text-muted-foreground">No tenant selected.</p>
+        <Breadcrumbs items={[{ label: 'Market Data', href: '/market-data' }]} />
+        <p className="mt-4 text-muted-foreground">No tenant selected.</p>
       </div>
     )
   }
@@ -204,7 +206,8 @@ export function DatasetDetailPage() {
   if (!datasetCode) {
     return (
       <div className="p-6">
-        <p className="text-muted-foreground">No dataset selected.</p>
+        <Breadcrumbs items={[{ label: 'Market Data', href: '/market-data' }]} />
+        <p className="mt-4 text-muted-foreground">No dataset selected.</p>
       </div>
     )
   }
@@ -243,6 +246,12 @@ export function DatasetDetailPage() {
 
   return (
     <div className="p-6 space-y-6">
+      <Breadcrumbs
+        items={[
+          { label: 'Market Data', href: '/market-data' },
+          { label: dataset?.displayName || datasetCode },
+        ]}
+      />
       <div>
         {datasetQuery.isLoading ? (
           <div className="space-y-2">

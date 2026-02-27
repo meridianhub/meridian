@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { StatusBadge } from '@/components/shared/status-badge'
 import { TimeDisplay } from '@/components/shared/time-display'
 import { StarlarkEditor, type ValidationError, type ComplexityMetrics } from '@/components/shared/starlark-editor'
+import { Breadcrumbs } from '@/components/shared'
 import { useApiClients } from '@/api/context'
 import { SagaStatus, ErrorCategory } from '@/api/gen/meridian/saga/v1/saga_registry_pb'
 import type { SagaDefinition } from '@/api/gen/meridian/saga/v1/saga_registry_pb'
@@ -243,6 +244,14 @@ export function StarlarkDetailPage() {
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Breadcrumb navigation */}
+      <Breadcrumbs
+        items={[
+          { label: 'Starlark Config', href: '/starlark' },
+          { label: sagaData.name },
+        ]}
+      />
+
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>

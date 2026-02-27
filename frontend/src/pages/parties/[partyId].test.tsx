@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 
@@ -22,6 +23,16 @@ vi.mock('@/api/context', () => ({
       retrieveDemographics: vi.fn().mockResolvedValue(null),
     },
   })),
+}))
+
+// Mock useAuth to avoid requiring AuthProvider in tests
+vi.mock('@/contexts/auth-context', () => ({
+  useAuth: vi.fn(() => ({ accessToken: 'test-token', logout: vi.fn() })),
+}))
+
+// Mock useTenantContext to avoid requiring TenantProvider in tests
+vi.mock('@/contexts/tenant-context', () => ({
+  useTenantContext: vi.fn(() => ({ tenantSlug: 'test-tenant', isPlatformAdmin: false, currentTenant: null, switchTenant: vi.fn() })),
 }))
 
 import { PartyDetailPage } from './[partyId]'
@@ -58,7 +69,10 @@ describe('PartyDetailPage', () => {
     renderAtRoute(<PartyDetailPage />, '/parties/test-party-1')
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: /party details/i })).toBeInTheDocument()
+      // Breadcrumb link to parent section
+      const partiesLink = screen.getByRole('link', { name: 'Parties' })
+      expect(partiesLink).toBeInTheDocument()
+      expect(partiesLink).toHaveAttribute('href', '/parties')
     })
   })
 
@@ -72,28 +86,53 @@ describe('PartyDetailPage', () => {
   it('renders overview tab by default', async () => {
     renderAtRoute(<PartyDetailPage />, '/parties/test-party-1')
 
-    // Just verify the component renders without crashing
-    expect(screen.getByRole('heading', { name: /party details/i })).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('data-state', 'active')
+    })
   })
 
   it('switches to demographics tab on click', async () => {
+    const user = userEvent.setup()
     renderAtRoute(<PartyDetailPage />, '/parties/test-party-1')
 
-    // Verify page renders
-    expect(screen.getByRole('heading', { name: /party details/i })).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Demographics' })).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('tab', { name: 'Demographics' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Demographics' })).toHaveAttribute('data-state', 'active')
+    })
   })
 
   it('switches to payment methods tab on click', async () => {
+    const user = userEvent.setup()
     renderAtRoute(<PartyDetailPage />, '/parties/test-party-1')
 
-    // Verify page renders
-    expect(screen.getByRole('heading', { name: /party details/i })).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Payment Methods' })).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('tab', { name: 'Payment Methods' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Payment Methods' })).toHaveAttribute('data-state', 'active')
+    })
   })
 
   it('switches to audit trail tab on click', async () => {
+    const user = userEvent.setup()
     renderAtRoute(<PartyDetailPage />, '/parties/test-party-1')
 
-    // Verify page renders
-    expect(screen.getByRole('heading', { name: /party details/i })).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Audit Trail' })).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('tab', { name: 'Audit Trail' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Audit Trail' })).toHaveAttribute('data-state', 'active')
+    })
   })
 })

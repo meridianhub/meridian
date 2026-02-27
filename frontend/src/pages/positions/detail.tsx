@@ -1,15 +1,13 @@
 import * as React from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowLeft } from 'lucide-react'
-import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { MoneyDisplay } from '@/components/shared/money-display'
 import { TimeDisplay } from '@/components/shared/time-display'
 import { QualityLadderBadge } from '@/components/shared/quality-ladder-badge'
 import { DirectionBadge } from '@/components/shared/direction-badge'
-import { EntityLink } from '@/components/shared'
+import { EntityLink, Breadcrumbs } from '@/components/shared'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useApiClients } from '@/api/context'
 import type { FinancialPositionLog, TransactionLogEntry } from './index'
@@ -143,7 +141,6 @@ function MeasurementHistory({ entries }: MeasurementHistoryProps) {
 
 export function PositionDetailPage() {
   const { logId } = useParams<{ logId: string }>()
-  const navigate = useNavigate()
   const clients = useApiClients()
 
   const { data, isLoading, isError } = useQuery({
@@ -157,17 +154,12 @@ export function PositionDetailPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => navigate('/positions')}
-          data-testid="back-button"
-        >
-          <ArrowLeft className="mr-1 h-4 w-4" />
-          Positions
-        </Button>
-      </div>
+      <Breadcrumbs
+        items={[
+          { label: 'Positions', href: '/positions' },
+          { label: log?.logId ?? logId ?? 'Position Log' },
+        ]}
+      />
 
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Position Log</h1>

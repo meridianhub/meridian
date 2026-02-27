@@ -1,14 +1,13 @@
 import * as React from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ChevronLeftIcon } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { StatusBadge } from '@/components/shared/status-badge'
 import { TimeDisplay } from '@/components/shared/time-display'
 import { MoneyDisplay } from '@/components/shared/money-display'
-import { AuditTrail } from '@/components/shared'
+import { AuditTrail, Breadcrumbs } from '@/components/shared'
 import { ConnectError, Code } from '@connectrpc/connect'
 import { useApiClients } from '@/api/context'
 import { useTenantContext } from '@/contexts/tenant-context'
@@ -92,14 +91,7 @@ function InternalAccountDetailSkeleton() {
 function InternalAccountNotFound() {
   return (
     <div data-testid="internal-account-not-found" className="p-6">
-      <Link
-        to="/internal-accounts"
-        className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-        aria-label="Back to Internal Accounts"
-      >
-        <ChevronLeftIcon className="h-4 w-4" />
-        Internal Accounts
-      </Link>
+      <Breadcrumbs items={[{ label: 'Internal Accounts', href: '/internal-accounts' }, { label: 'Not found' }]} />
       <div className="mt-8 text-center">
         <h2 className="text-xl font-semibold">Account not found</h2>
         <p className="mt-2 text-sm text-muted-foreground">
@@ -321,14 +313,7 @@ export function InternalAccountDetailPage() {
   if (isError) {
     return (
       <div className="p-6">
-        <Link
-          to="/internal-accounts"
-          className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-          aria-label="Back to Internal Accounts"
-        >
-          <ChevronLeftIcon className="h-4 w-4" />
-          Internal Accounts
-        </Link>
+        <Breadcrumbs items={[{ label: 'Internal Accounts', href: '/internal-accounts' }, { label: 'Error' }]} />
         <p className="mt-4 text-sm text-destructive">Failed to load account details. Please try again.</p>
       </div>
     )
@@ -342,15 +327,13 @@ export function InternalAccountDetailPage() {
 
   return (
     <div className="p-6">
-      {/* Back navigation */}
-      <Link
-        to="/internal-accounts"
-        className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-        aria-label="Back to Internal Accounts"
-      >
-        <ChevronLeftIcon className="h-4 w-4" />
-        Internal Accounts
-      </Link>
+      {/* Breadcrumb navigation */}
+      <Breadcrumbs
+        items={[
+          { label: 'Internal Accounts', href: '/internal-accounts' },
+          { label: account.accountCode },
+        ]}
+      />
 
       {/* Page header */}
       <div className="mt-4 flex flex-wrap items-start justify-between gap-4">

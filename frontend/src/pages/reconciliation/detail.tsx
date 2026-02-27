@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { StatusBadge } from '@/components/shared/status-badge'
 import { CELEditor } from '@/components/shared/cel-editor'
+import { Breadcrumbs } from '@/components/shared'
 import { DetailSkeleton } from '@/components/shared/detail-skeleton'
 import {
   VarianceDetail,
@@ -548,7 +549,6 @@ function formatDate(iso: string): string {
 
 export function ReconciliationDetailPage() {
   const { runId } = useParams<{ runId: string }>()
-  const navigate = useNavigate()
   const authFetch = useAuthenticatedFetch()
 
   const { data: run, isLoading, isError } = useQuery({
@@ -573,16 +573,15 @@ export function ReconciliationDetailPage() {
 
   return (
     <div className="p-6">
-      {/* Header */}
+      {/* Breadcrumb navigation */}
       <div className="mb-6">
-        <button
-          onClick={() => void navigate('/reconciliation')}
-          className="mb-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
-          aria-label="Back to reconciliation list"
-        >
-          ← Reconciliation
-        </button>
-        <div className="flex items-center gap-3">
+        <Breadcrumbs
+          items={[
+            { label: 'Reconciliation', href: '/reconciliation' },
+            { label: run.runId },
+          ]}
+        />
+        <div className="mt-4 flex items-center gap-3">
           <h1 className="text-2xl font-semibold font-mono">{run.runId}</h1>
           <StatusBadge status={run.status} />
           {run.varianceCount > 0 && (

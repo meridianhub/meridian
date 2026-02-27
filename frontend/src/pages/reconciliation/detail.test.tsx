@@ -194,7 +194,9 @@ describe('ReconciliationDetailPage - header', () => {
     mockFetch()
     render(<ReconciliationDetailPage />, { wrapper: Wrapper })
     await waitFor(() => {
-      expect(screen.getByText('run-001')).toBeInTheDocument()
+      const matches = screen.getAllByText('run-001')
+      expect(matches.length).toBeGreaterThanOrEqual(1)
+      expect(matches.some((el) => el.tagName === 'H1')).toBe(true)
     })
   })
 
@@ -218,7 +220,7 @@ describe('ReconciliationDetailPage - header', () => {
     mockFetch({ ...sampleRun, varianceCount: 0 })
     render(<ReconciliationDetailPage />, { wrapper: Wrapper })
     await waitFor(() => {
-      expect(screen.getByText('run-001')).toBeInTheDocument()
+      expect(screen.getAllByText('run-001').length).toBeGreaterThanOrEqual(1)
     })
     expect(screen.queryByText(/variances/)).not.toBeInTheDocument()
   })
@@ -237,7 +239,9 @@ describe('ReconciliationDetailPage - header', () => {
     mockFetch()
     render(<ReconciliationDetailPage />, { wrapper: Wrapper })
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /back to reconciliation list/i })).toBeInTheDocument()
+      const reconciliationLink = screen.getByRole('link', { name: 'Reconciliation' })
+      expect(reconciliationLink).toBeInTheDocument()
+      expect(reconciliationLink).toHaveAttribute('href', '/reconciliation')
     })
   })
 
@@ -245,9 +249,9 @@ describe('ReconciliationDetailPage - header', () => {
     mockFetch()
     render(<ReconciliationDetailPage />, { wrapper: Wrapper })
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /back to reconciliation list/i })).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'Reconciliation' })).toBeInTheDocument()
     })
-    await userEvent.click(screen.getByRole('button', { name: /back to reconciliation list/i }))
+    await userEvent.click(screen.getByRole('link', { name: 'Reconciliation' }))
     await waitFor(() => {
       expect(screen.getByText('Reconciliation List')).toBeInTheDocument()
     })
