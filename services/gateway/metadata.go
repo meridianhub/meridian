@@ -65,14 +65,25 @@ func metadataPropagationMiddleware(next http.Handler) http.Handler {
 func writeIdentityMetadata(req *http.Request) {
 	ctx := req.Context()
 
+	// Helper: set x-tenant-id from auth context or tenant resolver context.
+	// Auth context (JWT/API key claims) takes precedence, but when the token
+	// lacks a tenant claim (e.g. standard OIDC providers like Dex), fall back
+	// to the tenant resolved by TenantResolverMiddleware via subdomain/header.
+	setTenantHeader := func() {
+		if tenantID, ok := auth.GetTenantIDFromContext(ctx); ok && tenantID != "" {
+			req.Header.Set("x-tenant-id", tenantID)
+			return
+		}
+		if tenantID, ok := tenant.FromContext(ctx); ok && !tenantID.IsEmpty() {
+			req.Header.Set("x-tenant-id", string(tenantID))
+		}
+	}
+
 	// JWT takes precedence over API key when both are present.
 	if userID, ok := auth.GetUserIDFromContext(ctx); ok && userID != "" {
 		req.Header.Set("x-user-id", userID)
 		req.Header.Set("x-auth-method", AuthMethodJWT)
-
-		if tenantID, ok := auth.GetTenantIDFromContext(ctx); ok && tenantID != "" {
-			req.Header.Set("x-tenant-id", tenantID)
-		}
+		setTenantHeader()
 
 		if roles, ok := auth.GetRolesFromContext(ctx); ok && len(roles) > 0 {
 			req.Header.Set("x-auth-roles", strings.Join(roles, ","))
@@ -85,10 +96,7 @@ func writeIdentityMetadata(req *http.Request) {
 	if identity := auth.GetAPIKeyIdentity(ctx); identity != "" {
 		req.Header.Set("x-user-id", identity)
 		req.Header.Set("x-auth-method", AuthMethodAPIKey)
-
-		if tenantID, ok := auth.GetTenantIDFromContext(ctx); ok && tenantID != "" {
-			req.Header.Set("x-tenant-id", tenantID)
-		}
+		setTenantHeader()
 		return
 	}
 
