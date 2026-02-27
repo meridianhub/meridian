@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"mime"
 	"net/http"
@@ -18,6 +19,8 @@ const (
 	sessionIdleTimeout = 1 * time.Hour
 	// sessionEvictInterval is how often the background goroutine sweeps idle sessions.
 	sessionEvictInterval = 5 * time.Minute
+	// maxRequestBodySize is the maximum size of a JSON-RPC request body (1 MB).
+	maxRequestBodySize = 1 << 20
 )
 
 // Dispatcher handles a single JSON-RPC message and returns the response.
@@ -84,7 +87,7 @@ func (h *StreamableHTTPHandler) evictIdleSessions() {
 	for id, sess := range h.sessions {
 		if time.Since(sess.lastUsed) > sessionIdleTimeout {
 			delete(h.sessions, id)
-			h.logger.Info("evicted idle streamable HTTP session", "session_id", id)
+			h.logger.Info("evicted idle streamable HTTP session", "session_id", redactSessionID(id))
 		}
 	}
 }
@@ -109,7 +112,7 @@ func (h *StreamableHTTPHandler) handlePost(w http.ResponseWriter, r *http.Reques
 	}
 
 	var msg JSONRPCMessage
-	if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
+	if err := json.NewDecoder(io.LimitReader(r.Body, maxRequestBodySize)).Decode(&msg); err != nil {
 		writeJSONError(w, nil, CodeParseError, "invalid JSON")
 		return
 	}
@@ -153,8 +156,12 @@ func (h *StreamableHTTPHandler) handlePost(w http.ResponseWriter, r *http.Reques
 func (h *StreamableHTTPHandler) handleInitialize(w http.ResponseWriter, r *http.Request, msg *JSONRPCMessage) {
 	// Dispatch first — only create the session if initialize succeeds.
 	resp := h.dispatcher.Dispatch(r.Context(), msg)
-	if resp.Error != nil {
-		writeJSON(w, resp)
+	if resp == nil || resp.Error != nil {
+		if resp != nil {
+			writeJSON(w, resp)
+		} else {
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		}
 		return
 	}
 
@@ -169,7 +176,7 @@ func (h *StreamableHTTPHandler) handleInitialize(w http.ResponseWriter, r *http.
 	}
 	h.mu.Unlock()
 
-	h.logger.Info("streamable HTTP session created", "session_id", sessionID)
+	h.logger.Info("streamable HTTP session created", "session_id", redactSessionID(sessionID))
 
 	w.Header().Set("Mcp-Session-Id", sessionID)
 	writeJSON(w, resp)
@@ -194,7 +201,7 @@ func (h *StreamableHTTPHandler) handleDelete(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	h.logger.Info("streamable HTTP session terminated", "session_id", sessionID)
+	h.logger.Info("streamable HTTP session terminated", "session_id", redactSessionID(sessionID))
 	w.WriteHeader(http.StatusAccepted)
 }
 
@@ -237,4 +244,14 @@ func generateSessionID() string {
 		panic("crypto/rand failed: " + err.Error())
 	}
 	return hex.EncodeToString(b)
+}
+
+// redactSessionID returns a truncated session ID safe for logging.
+// Shows only the last 8 characters to aid debugging without exposing
+// the full value (which acts as authorization material).
+func redactSessionID(id string) string {
+	if len(id) <= 8 {
+		return "***"
+	}
+	return "..." + id[len(id)-8:]
 }
