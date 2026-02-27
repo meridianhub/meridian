@@ -195,7 +195,7 @@ func (s *AccountTypeService) CreateDraft(ctx context.Context, req *pb.CreateDraf
 		ValidationCEL:                  req.GetValidationCel(),
 		BucketingCEL:                   req.GetBucketingCel(),
 		EligibilityCEL:                 req.GetEligibilityCel(),
-		AttributeSchema:                json.RawMessage(req.GetAttributeSchema()),
+		AttributeSchema:                toRawJSON(req.GetAttributeSchema()),
 		Attributes:                     stringMapToAnyMap(req.GetAttributes()),
 		Compiler:                       s.compiler,
 	})
@@ -244,7 +244,7 @@ func (s *AccountTypeService) UpdateDefinition(ctx context.Context, req *pb.Updat
 		ValidationCEL:                  req.GetValidationCel(),
 		BucketingCEL:                   req.GetBucketingCel(),
 		EligibilityCEL:                 req.GetEligibilityCel(),
-		AttributeSchema:                json.RawMessage(req.GetAttributeSchema()),
+		AttributeSchema:                toRawJSON(req.GetAttributeSchema()),
 		Attributes:                     stringMapToAnyMap(req.GetAttributes()),
 	}
 
@@ -707,6 +707,16 @@ func parseConversionMethodPair(idStr string, version int32) (*uuid.UUID, *int, e
 	}
 	v := int(version)
 	return &id, &v, nil
+}
+
+// toRawJSON converts a proto string field to json.RawMessage, returning nil for
+// empty strings so that PostgreSQL jsonb columns receive NULL rather than
+// invalid empty-string JSON.
+func toRawJSON(s string) json.RawMessage {
+	if s == "" {
+		return nil
+	}
+	return json.RawMessage(s)
 }
 
 func stringMapToAnyMap(m map[string]string) map[string]any {
