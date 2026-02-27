@@ -16,6 +16,7 @@ export default defineConfig({
   },
   server: {
     proxy: {
+      '/ws/events': { target: 'http://localhost:8090', ws: true },
       '/meridian.': { target: 'http://localhost:8090', changeOrigin: true },
       '/v1': { target: 'http://localhost:8090', changeOrigin: true },
     },
@@ -24,6 +25,7 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: {
+      '/ws/events': { target: 'http://localhost:8090', ws: true },
       '/meridian.': { target: 'http://localhost:8090', changeOrigin: true },
       '/v1': { target: 'http://localhost:8090', changeOrigin: true },
     },
