@@ -6,6 +6,10 @@ import { server } from '@/test/msw-handlers';
 import { AuditTrail } from './audit-trail';
 import { TooltipProvider } from '@/components/ui/tooltip';
 
+vi.mock('@/hooks/use-authenticated-fetch', () => ({
+  useAuthenticatedFetch: () => fetch,
+}));
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------

@@ -4,6 +4,10 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AuditLogPage, type AuditLogEntry } from './index'
 
+vi.mock('@/hooks/use-authenticated-fetch', () => ({
+  useAuthenticatedFetch: () => fetch,
+}))
+
 function makeQueryClient() {
   return new QueryClient({
     defaultOptions: {
