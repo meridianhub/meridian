@@ -15,11 +15,15 @@ export function createAuthInterceptor(
       return await next(req)
     } catch (err) {
       if (err instanceof ConnectError && err.code === Code.Unauthenticated) {
-        try {
-          onUnauthenticated?.()
-        } catch {
-          // Preserve original auth error for downstream handling
-        }
+        // Defer logout so the error propagates to React Query first,
+        // preventing a redirect before the component can handle the error.
+        queueMicrotask(() => {
+          try {
+            onUnauthenticated?.()
+          } catch {
+            // Preserve original auth error for downstream handling
+          }
+        })
       }
       throw err
     }

@@ -43,7 +43,7 @@ test.describe('Ledger page', () => {
     ).toBeVisible()
     await expect(authenticatedPage.getByRole('columnheader', { name: 'Instrument' })).toBeVisible()
     await expect(authenticatedPage.getByRole('columnheader', { name: 'Status' })).toBeVisible()
-    await expect(authenticatedPage.getByRole('columnheader', { name: 'Postings' })).toBeVisible()
+    await expect(authenticatedPage.getByRole('columnheader', { name: 'Created' })).toBeVisible()
   })
 
   test('renders Status filter select', async ({ authenticatedPage }) => {
