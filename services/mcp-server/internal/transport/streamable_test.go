@@ -32,6 +32,7 @@ func newInitializeResponse() *JSONRPCMessage {
 func TestStreamableHTTP_Initialize(t *testing.T) {
 	d := &mockDispatcher{response: newInitializeResponse()}
 	h := NewStreamableHTTPHandler(d, testLogger())
+	defer h.Close()
 
 	body := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}`
 	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
@@ -65,10 +66,32 @@ func TestStreamableHTTP_Initialize(t *testing.T) {
 	}
 }
 
+func TestStreamableHTTP_Initialize_FailedDispatch_NoSession(t *testing.T) {
+	errResp := NewErrorResponse(json.RawMessage(`1`), CodeInternalError, "something broke")
+	d := &mockDispatcher{response: errResp}
+	h := NewStreamableHTTPHandler(d, testLogger())
+	defer h.Close()
+
+	body := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`
+	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Header().Get("Mcp-Session-Id") != "" {
+		t.Error("expected no Mcp-Session-Id header when initialize fails")
+	}
+	if h.SessionCount() != 0 {
+		t.Errorf("expected 0 sessions after failed initialize, got %d", h.SessionCount())
+	}
+}
+
 func TestStreamableHTTP_ToolsList_WithSession(t *testing.T) {
 	toolsResp, _ := NewResponse(json.RawMessage(`2`), map[string]any{"tools": []any{}})
 	d := &mockDispatcher{response: toolsResp}
 	h := NewStreamableHTTPHandler(d, testLogger())
+	defer h.Close()
 
 	// First initialize to get a session.
 	d.response = newInitializeResponse()
@@ -100,6 +123,7 @@ func TestStreamableHTTP_ToolsList_WithSession(t *testing.T) {
 func TestStreamableHTTP_MissingSessionHeader(t *testing.T) {
 	d := &mockDispatcher{}
 	h := NewStreamableHTTPHandler(d, testLogger())
+	defer h.Close()
 
 	body := `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`
 	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
@@ -116,6 +140,7 @@ func TestStreamableHTTP_MissingSessionHeader(t *testing.T) {
 func TestStreamableHTTP_UnknownSession(t *testing.T) {
 	d := &mockDispatcher{}
 	h := NewStreamableHTTPHandler(d, testLogger())
+	defer h.Close()
 
 	body := `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`
 	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
@@ -133,6 +158,7 @@ func TestStreamableHTTP_UnknownSession(t *testing.T) {
 func TestStreamableHTTP_Notification(t *testing.T) {
 	d := &mockDispatcher{response: nil} // Notifications return nil.
 	h := NewStreamableHTTPHandler(d, testLogger())
+	defer h.Close()
 
 	// Create a session first.
 	d.response = newInitializeResponse()
@@ -163,6 +189,7 @@ func TestStreamableHTTP_Notification(t *testing.T) {
 func TestStreamableHTTP_InvalidJSON(t *testing.T) {
 	d := &mockDispatcher{}
 	h := NewStreamableHTTPHandler(d, testLogger())
+	defer h.Close()
 
 	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader("not json"))
 	req.Header.Set("Content-Type", "application/json")
@@ -178,6 +205,7 @@ func TestStreamableHTTP_InvalidJSON(t *testing.T) {
 func TestStreamableHTTP_WrongContentType(t *testing.T) {
 	d := &mockDispatcher{}
 	h := NewStreamableHTTPHandler(d, testLogger())
+	defer h.Close()
 
 	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "text/plain")
@@ -190,9 +218,27 @@ func TestStreamableHTTP_WrongContentType(t *testing.T) {
 	}
 }
 
+func TestStreamableHTTP_ContentTypeWithCharset(t *testing.T) {
+	d := &mockDispatcher{response: newInitializeResponse()}
+	h := NewStreamableHTTPHandler(d, testLogger())
+	defer h.Close()
+
+	body := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`
+	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status %d for Content-Type with charset, got %d", http.StatusOK, rec.Code)
+	}
+}
+
 func TestStreamableHTTP_DeleteSession(t *testing.T) {
 	d := &mockDispatcher{response: newInitializeResponse()}
 	h := NewStreamableHTTPHandler(d, testLogger())
+	defer h.Close()
 
 	// Create a session.
 	initBody := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`
@@ -223,6 +269,7 @@ func TestStreamableHTTP_DeleteSession(t *testing.T) {
 func TestStreamableHTTP_DeleteUnknownSession(t *testing.T) {
 	d := &mockDispatcher{}
 	h := NewStreamableHTTPHandler(d, testLogger())
+	defer h.Close()
 
 	req := httptest.NewRequest(http.MethodDelete, "/mcp", nil)
 	req.Header.Set("Mcp-Session-Id", "nonexistent")
@@ -237,6 +284,7 @@ func TestStreamableHTTP_DeleteUnknownSession(t *testing.T) {
 func TestStreamableHTTP_GetMethodNotAllowed(t *testing.T) {
 	d := &mockDispatcher{}
 	h := NewStreamableHTTPHandler(d, testLogger())
+	defer h.Close()
 
 	req := httptest.NewRequest(http.MethodGet, "/mcp", nil)
 	rec := httptest.NewRecorder()

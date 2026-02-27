@@ -6,9 +6,18 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"log/slog"
+	"mime"
 	"net/http"
 	"sync"
 	"time"
+)
+
+const (
+	methodInitialize = "initialize"
+	// sessionIdleTimeout is how long a session can be idle before eviction.
+	sessionIdleTimeout = 1 * time.Hour
+	// sessionEvictInterval is how often the background goroutine sweeps idle sessions.
+	sessionEvictInterval = 5 * time.Minute
 )
 
 // Dispatcher handles a single JSON-RPC message and returns the response.
@@ -25,6 +34,7 @@ type StreamableHTTPHandler struct {
 	sessions   map[string]*streamSession
 	mu         sync.RWMutex
 	logger     *slog.Logger
+	stop       chan struct{}
 }
 
 type streamSession struct {
@@ -34,11 +44,48 @@ type streamSession struct {
 }
 
 // NewStreamableHTTPHandler creates a handler for the MCP streamable HTTP transport.
+// Call Close to stop the background session eviction goroutine.
 func NewStreamableHTTPHandler(dispatcher Dispatcher, logger *slog.Logger) *StreamableHTTPHandler {
-	return &StreamableHTTPHandler{
+	h := &StreamableHTTPHandler{
 		dispatcher: dispatcher,
 		sessions:   make(map[string]*streamSession),
 		logger:     logger,
+		stop:       make(chan struct{}),
+	}
+	go h.evictLoop()
+	return h
+}
+
+// Close stops the background session eviction goroutine.
+func (h *StreamableHTTPHandler) Close() {
+	select {
+	case <-h.stop:
+	default:
+		close(h.stop)
+	}
+}
+
+func (h *StreamableHTTPHandler) evictLoop() {
+	ticker := time.NewTicker(sessionEvictInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			h.evictIdleSessions()
+		case <-h.stop:
+			return
+		}
+	}
+}
+
+func (h *StreamableHTTPHandler) evictIdleSessions() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for id, sess := range h.sessions {
+		if time.Since(sess.lastUsed) > sessionIdleTimeout {
+			delete(h.sessions, id)
+			h.logger.Info("evicted idle streamable HTTP session", "session_id", id)
+		}
 	}
 }
 
@@ -56,8 +103,7 @@ func (h *StreamableHTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 }
 
 func (h *StreamableHTTPHandler) handlePost(w http.ResponseWriter, r *http.Request) {
-	ct := r.Header.Get("Content-Type")
-	if ct != "application/json" {
+	if !isJSONContentType(r) {
 		http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
 		return
 	}
@@ -69,7 +115,7 @@ func (h *StreamableHTTPHandler) handlePost(w http.ResponseWriter, r *http.Reques
 	}
 
 	// For initialize requests, create a new session.
-	if msg.Method == "initialize" {
+	if msg.Method == methodInitialize {
 		h.handleInitialize(w, r, &msg)
 		return
 	}
@@ -105,6 +151,13 @@ func (h *StreamableHTTPHandler) handlePost(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *StreamableHTTPHandler) handleInitialize(w http.ResponseWriter, r *http.Request, msg *JSONRPCMessage) {
+	// Dispatch first — only create the session if initialize succeeds.
+	resp := h.dispatcher.Dispatch(r.Context(), msg)
+	if resp.Error != nil {
+		writeJSON(w, resp)
+		return
+	}
+
 	sessionID := generateSessionID()
 
 	h.mu.Lock()
@@ -117,8 +170,6 @@ func (h *StreamableHTTPHandler) handleInitialize(w http.ResponseWriter, r *http.
 	h.mu.Unlock()
 
 	h.logger.Info("streamable HTTP session created", "session_id", sessionID)
-
-	resp := h.dispatcher.Dispatch(r.Context(), msg)
 
 	w.Header().Set("Mcp-Session-Id", sessionID)
 	writeJSON(w, resp)
@@ -167,6 +218,17 @@ func writeJSONError(w http.ResponseWriter, id json.RawMessage, code int, message
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusBadRequest)
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// isJSONContentType checks whether the request Content-Type is application/json,
+// tolerating optional parameters like charset (e.g. "application/json; charset=utf-8").
+func isJSONContentType(r *http.Request) bool {
+	ct := r.Header.Get("Content-Type")
+	mediaType, _, err := mime.ParseMediaType(ct)
+	if err != nil {
+		return false
+	}
+	return mediaType == "application/json"
 }
 
 func generateSessionID() string {

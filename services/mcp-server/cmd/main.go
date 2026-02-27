@@ -157,6 +157,7 @@ func runSSE(logger *slog.Logger, cfg server.Config) error {
 	// Streamable HTTP transport (MCP spec 2025-03-26).
 	// Shares the same MCPServer instance so tools/resources/prompts are identical.
 	streamableHandler := transport.NewStreamableHTTPHandler(srv, logger)
+	defer streamableHandler.Close()
 
 	mux := http.NewServeMux()
 
