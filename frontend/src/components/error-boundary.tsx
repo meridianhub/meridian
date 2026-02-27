@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
+import { useLocation } from 'react-router-dom'
 import { AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
@@ -106,20 +107,33 @@ export function PageErrorBoundary({
  * Route-level error boundary that renders inline within the page layout
  * instead of replacing the entire screen. This keeps the sidebar and header
  * visible so the user can navigate to a different page.
+ *
+ * Automatically resets when the user navigates to a different route.
  */
 interface RouteErrorBoundaryState {
   hasError: boolean
   error: Error | null
 }
 
-export class RouteErrorBoundary extends Component<{ children: ReactNode }, RouteErrorBoundaryState> {
-  constructor(props: { children: ReactNode }) {
+interface RouteErrorBoundaryInnerProps {
+  children: ReactNode
+  resetKey?: string
+}
+
+export class RouteErrorBoundaryInner extends Component<RouteErrorBoundaryInnerProps, RouteErrorBoundaryState> {
+  constructor(props: RouteErrorBoundaryInnerProps) {
     super(props)
     this.state = { hasError: false, error: null }
   }
 
   static getDerivedStateFromError(error: Error): RouteErrorBoundaryState {
     return { hasError: true, error }
+  }
+
+  componentDidUpdate(prevProps: RouteErrorBoundaryInnerProps) {
+    if (this.state.hasError && prevProps.resetKey !== this.props.resetKey) {
+      this.setState({ hasError: false, error: null })
+    }
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
@@ -160,4 +174,16 @@ export class RouteErrorBoundary extends Component<{ children: ReactNode }, Route
 
     return this.props.children
   }
+}
+
+/**
+ * Location-aware wrapper that resets the error boundary when the route changes.
+ */
+export function RouteErrorBoundary({ children }: { children: ReactNode }) {
+  const { pathname } = useLocation()
+  return (
+    <RouteErrorBoundaryInner resetKey={pathname}>
+      {children}
+    </RouteErrorBoundaryInner>
+  )
 }
