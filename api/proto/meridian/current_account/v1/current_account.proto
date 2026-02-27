@@ -424,7 +424,10 @@ message ExecuteDepositRequest {
   // clearing_account_id optionally overrides the clearing account for the debit
   // side of the double-entry. Used for meter reads where the debit targets a
   // GSP-specific internal account rather than a generic clearing account.
-  string clearing_account_id = 7 [(buf.validate.field).string = {max_len: 100}];
+  string clearing_account_id = 7 [(buf.validate.field).string = {
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]*$"
+  }];
 }
 
 // Response for deposit execution

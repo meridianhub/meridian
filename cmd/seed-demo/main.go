@@ -57,8 +57,9 @@ const (
 
 // Sentinel errors for idempotent lookups.
 var (
-	errPartyNotFoundInListing   = fmt.Errorf("party reported as existing but not found in listing")
-	errAccountNotFoundInListing = fmt.Errorf("account reported as existing but not found in listing")
+	errPartyNotFoundInListing    = fmt.Errorf("party reported as existing but not found in listing")
+	errAccountNotFoundInListing  = fmt.Errorf("account reported as existing but not found in listing")
+	errMissingGSPClearingAccount = fmt.Errorf("missing GSP KWH clearing account")
 )
 
 var (
@@ -376,13 +377,22 @@ func createGSPInternalAccounts(ctx context.Context, conn *grpc.ClientConn, gspPa
 }
 
 func findInternalAccountByCode(ctx context.Context, client internalaccountv1.InternalAccountServiceClient, accountCode string) (string, error) {
-	listResp, err := client.ListInternalAccounts(ctx, &internalaccountv1.ListInternalAccountsRequest{})
-	if err != nil {
-		return "", fmt.Errorf("list internal accounts to find %q: %w", accountCode, err)
-	}
-	for _, a := range listResp.GetFacilities() {
-		if a.GetAccountCode() == accountCode {
-			return a.GetAccountId(), nil
+	var pageToken string
+	for {
+		listResp, err := client.ListInternalAccounts(ctx, &internalaccountv1.ListInternalAccountsRequest{
+			Pagination: &commonv1.Pagination{PageSize: 100, PageToken: pageToken},
+		})
+		if err != nil {
+			return "", fmt.Errorf("list internal accounts to find %q: %w", accountCode, err)
+		}
+		for _, a := range listResp.GetFacilities() {
+			if a.GetAccountCode() == accountCode {
+				return a.GetAccountId(), nil
+			}
+		}
+		pageToken = listResp.GetPagination().GetNextPageToken()
+		if pageToken == "" {
+			break
 		}
 	}
 	return "", fmt.Errorf("%w: account_code=%q", errAccountNotFoundInListing, accountCode)
@@ -510,6 +520,9 @@ func seedCustomerBalances(ctx context.Context, client currentaccountv1.CurrentAc
 		// DEBIT GSP inventory (liability: energy owed to grid).
 		// The clearing_account_id override routes the debit to the customer's GSP.
 		if acct.kwhAccountID != "" {
+			if acct.gspKwhAccountID == "" {
+				return fmt.Errorf("%w: %s (%s)", errMissingGSPClearingAccount, acct.customerName, acct.gspRegion)
+			}
 			if err := depositIdempotent(ctx, client, acct.kwhAccountID, dailyKWH, "KWH",
 				fmt.Sprintf("Meter reading %s: %.3f kWh consumed", date.Format("2006-01-02"), dailyKWH),
 				fmt.Sprintf("METER-%s-%s", acct.partyID, date.Format("20060102")),
