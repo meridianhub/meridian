@@ -30,11 +30,11 @@ function renderTab(partyId = 'party-001') {
 
 const mockParty = {
   partyId: 'party-001',
-  name: 'Acme Corp',
-  partyType: 'ORGANIZATION',
-  status: 'ACTIVE',
+  legalName: 'Acme Corp',
+  displayName: 'Acme',
+  partyType: 'PARTY_TYPE_ORGANIZATION',
+  status: 'PARTY_STATUS_ACTIVE',
   externalReference: 'EXT-123',
-  verificationStatus: 'VERIFIED',
   createdAt: { seconds: 1700000000, nanos: 0 },
   updatedAt: { seconds: 1700001000, nanos: 0 },
 }
@@ -48,7 +48,7 @@ describe('OverviewTab', () => {
     it('renders skeletons while loading', () => {
       vi.mocked(useClients).mockReturnValue({
         party: {
-          getParticipant: vi.fn(() => new Promise(() => {})),
+          retrieveParty: vi.fn(() => new Promise(() => {})),
         },
       } as ReturnType<typeof useClients>)
 
@@ -63,7 +63,7 @@ describe('OverviewTab', () => {
     it('renders empty state when no party data is returned', async () => {
       vi.mocked(useClients).mockReturnValue({
         party: {
-          getParticipant: vi.fn().mockResolvedValue(null),
+          retrieveParty: vi.fn().mockResolvedValue({ party: undefined }),
         },
       } as ReturnType<typeof useClients>)
 
@@ -77,7 +77,7 @@ describe('OverviewTab', () => {
     it('shows descriptive message in empty state', async () => {
       vi.mocked(useClients).mockReturnValue({
         party: {
-          getParticipant: vi.fn().mockResolvedValue(null),
+          retrieveParty: vi.fn().mockResolvedValue({ party: undefined }),
         },
       } as ReturnType<typeof useClients>)
 
@@ -93,7 +93,7 @@ describe('OverviewTab', () => {
     beforeEach(() => {
       vi.mocked(useClients).mockReturnValue({
         party: {
-          getParticipant: vi.fn().mockResolvedValue(mockParty),
+          retrieveParty: vi.fn().mockResolvedValue({ party: mockParty }),
         },
       } as ReturnType<typeof useClients>)
     })
@@ -105,7 +105,7 @@ describe('OverviewTab', () => {
       })
     })
 
-    it('renders party name', async () => {
+    it('renders party legal name', async () => {
       renderTab()
       await waitFor(() => {
         expect(screen.getByText('Acme Corp')).toBeInTheDocument()
@@ -115,14 +115,14 @@ describe('OverviewTab', () => {
     it('renders party type', async () => {
       renderTab()
       await waitFor(() => {
-        expect(screen.getByText('ORGANIZATION')).toBeInTheDocument()
+        expect(screen.getByText('PARTY_TYPE_ORGANIZATION')).toBeInTheDocument()
       })
     })
 
     it('renders party status', async () => {
       renderTab()
       await waitFor(() => {
-        expect(screen.getByText('ACTIVE')).toBeInTheDocument()
+        expect(screen.getByText('PARTY_STATUS_ACTIVE')).toBeInTheDocument()
       })
     })
 
@@ -133,17 +133,16 @@ describe('OverviewTab', () => {
       })
     })
 
-    it('renders verification status', async () => {
+    it('renders display name', async () => {
       renderTab()
       await waitFor(() => {
-        expect(screen.getByText('VERIFIED')).toBeInTheDocument()
+        expect(screen.getByText('Acme')).toBeInTheDocument()
       })
     })
 
     it('renders TimeDisplay for createdAt timestamp', async () => {
       renderTab()
       await waitFor(() => {
-        // TimeDisplay renders a time representation; just verify the Created label is present
         expect(screen.getByText('Created')).toBeInTheDocument()
       })
     })
@@ -160,11 +159,13 @@ describe('OverviewTab', () => {
     it('renders em dash for missing externalReference', async () => {
       vi.mocked(useClients).mockReturnValue({
         party: {
-          getParticipant: vi.fn().mockResolvedValue({
-            partyId: 'party-001',
-            name: 'Acme Corp',
-            partyType: 'ORGANIZATION',
-            status: 'ACTIVE',
+          retrieveParty: vi.fn().mockResolvedValue({
+            party: {
+              partyId: 'party-001',
+              legalName: 'Acme Corp',
+              partyType: 'PARTY_TYPE_ORGANIZATION',
+              status: 'PARTY_STATUS_ACTIVE',
+            },
           }),
         },
       } as ReturnType<typeof useClients>)
@@ -178,18 +179,20 @@ describe('OverviewTab', () => {
     it('renders em dash for missing timestamps', async () => {
       vi.mocked(useClients).mockReturnValue({
         party: {
-          getParticipant: vi.fn().mockResolvedValue({
-            partyId: 'party-001',
-            name: 'Acme Corp',
-            partyType: 'ORGANIZATION',
-            status: 'ACTIVE',
+          retrieveParty: vi.fn().mockResolvedValue({
+            party: {
+              partyId: 'party-001',
+              legalName: 'Acme Corp',
+              partyType: 'PARTY_TYPE_ORGANIZATION',
+              status: 'PARTY_STATUS_ACTIVE',
+            },
           }),
         },
       } as ReturnType<typeof useClients>)
 
       const { getAllByText } = renderTab()
       await waitFor(() => {
-        // 4 dashes: externalReference, verificationStatus, createdAt, updatedAt
+        // 4 dashes: displayName, externalReference, createdAt, updatedAt
         expect(getAllByText('—').length).toBeGreaterThanOrEqual(4)
       })
     })

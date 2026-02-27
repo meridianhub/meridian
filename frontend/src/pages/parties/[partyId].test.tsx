@@ -7,16 +7,19 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom'
 vi.mock('@/api/context', () => ({
   useClients: vi.fn(() => ({
     party: {
-      getParticipant: vi.fn().mockResolvedValue({
-        partyId: 'test-party-1',
-        name: 'Test Party',
-        partyType: 'ORGANIZATION',
-        status: 'ACTIVE',
+      retrieveParty: vi.fn().mockResolvedValue({
+        party: {
+          partyId: 'test-party-1',
+          legalName: 'Test Party',
+          partyType: 'PARTY_TYPE_ORGANIZATION',
+          status: 'PARTY_STATUS_ACTIVE',
+        },
       }),
-      getPaymentMethods: vi.fn().mockResolvedValue({ paymentMethods: [] }),
-      getReferences: vi.fn().mockResolvedValue({}),
-      getAssociations: vi.fn().mockResolvedValue({}),
-      getBankRelations: vi.fn().mockResolvedValue({}),
+      listPaymentMethods: vi.fn().mockResolvedValue({ paymentMethods: [] }),
+      retrieveReference: vi.fn().mockResolvedValue({}),
+      retrieveAssociations: vi.fn().mockResolvedValue({}),
+      retrieveBankRelations: vi.fn().mockResolvedValue({}),
+      retrieveDemographics: vi.fn().mockResolvedValue(null),
     },
   })),
 }))

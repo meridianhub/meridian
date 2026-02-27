@@ -34,7 +34,7 @@ describe('ReferencesTab', () => {
     it('renders skeletons while loading', () => {
       vi.mocked(useClients).mockReturnValue({
         party: {
-          getReferences: vi.fn(() => new Promise(() => {})),
+          retrieveReference: vi.fn(() => new Promise(() => {})),
         },
       } as ReturnType<typeof useClients>)
 
@@ -47,7 +47,7 @@ describe('ReferencesTab', () => {
     it('does not render empty state while loading', () => {
       vi.mocked(useClients).mockReturnValue({
         party: {
-          getReferences: vi.fn(() => new Promise(() => {})),
+          retrieveReference: vi.fn(() => new Promise(() => {})),
         },
       } as ReturnType<typeof useClients>)
 
@@ -61,7 +61,7 @@ describe('ReferencesTab', () => {
     it('renders empty state heading after data loads', async () => {
       vi.mocked(useClients).mockReturnValue({
         party: {
-          getReferences: vi.fn().mockResolvedValue({}),
+          retrieveReference: vi.fn().mockResolvedValue({}),
         },
       } as ReturnType<typeof useClients>)
 
@@ -75,7 +75,7 @@ describe('ReferencesTab', () => {
     it('renders descriptive message', async () => {
       vi.mocked(useClients).mockReturnValue({
         party: {
-          getReferences: vi.fn().mockResolvedValue({}),
+          retrieveReference: vi.fn().mockResolvedValue({}),
         },
       } as ReturnType<typeof useClients>)
 
@@ -88,16 +88,16 @@ describe('ReferencesTab', () => {
   })
 
   describe('query key', () => {
-    it('calls getReferences with the provided partyId', async () => {
-      const getReferences = vi.fn().mockResolvedValue({})
+    it('calls retrieveReference with the provided partyId', async () => {
+      const retrieveReference = vi.fn().mockResolvedValue({})
       vi.mocked(useClients).mockReturnValue({
-        party: { getReferences },
+        party: { retrieveReference },
       } as ReturnType<typeof useClients>)
 
       renderTab('party-xyz')
 
       await waitFor(() => {
-        expect(getReferences).toHaveBeenCalledWith({ partyId: 'party-xyz' })
+        expect(retrieveReference).toHaveBeenCalledWith({ partyId: 'party-xyz' })
       })
     })
   })

@@ -14,7 +14,7 @@ export function BankRelationsTab({ partyId }: BankRelationsTabProps) {
   const { isLoading } = useQuery({
     queryKey: ['party', partyId, 'bank-relations'],
     queryFn: async () => {
-      return await clients.party.getBankRelations({ partyId })
+      return await clients.party.retrieveBankRelations({ partyId })
     },
   })
 

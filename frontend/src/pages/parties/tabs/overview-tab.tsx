@@ -9,25 +9,14 @@ interface OverviewTabProps {
   partyId: string
 }
 
-interface PartyOverview {
-  partyId: string
-  name: string
-  partyType: string
-  status: string
-  externalReference?: string
-  createdAt?: { seconds: bigint | number; nanos?: number }
-  updatedAt?: { seconds: bigint | number; nanos?: number }
-  verificationStatus?: string
-}
-
 export function OverviewTab({ partyId }: OverviewTabProps) {
   const clients = useClients()
 
   const { data: party, isLoading } = useQuery({
     queryKey: ['party', partyId, 'overview'],
     queryFn: async () => {
-      const response = await clients.party.getParticipant({ partyId })
-      return response as PartyOverview
+      const response = await clients.party.retrieveParty({ partyId })
+      return response.party
     },
   })
 
@@ -47,11 +36,11 @@ export function OverviewTab({ partyId }: OverviewTabProps) {
 
   const infoRows = [
     { label: 'Party ID', value: party.partyId },
-    { label: 'Name', value: party.name },
+    { label: 'Legal Name', value: party.legalName },
+    { label: 'Display Name', value: party.displayName || '—' },
     { label: 'Type', value: party.partyType },
     { label: 'Status', value: party.status },
     { label: 'External Reference', value: party.externalReference || '—' },
-    { label: 'Verification Status', value: party.verificationStatus || '—' },
     { label: 'Created', value: party.createdAt ? <TimeDisplay timestamp={party.createdAt} /> : '—' },
     { label: 'Updated', value: party.updatedAt ? <TimeDisplay timestamp={party.updatedAt} /> : '—' },
   ]

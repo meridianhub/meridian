@@ -29,18 +29,19 @@ function renderTab(partyId = 'party-001') {
 
 const mockPaymentMethods = [
   {
-    paymentMethodId: 'pm-001',
-    type: 'BANK_ACCOUNT',
-    accountNumber: '12345678',
-    routingNumber: '021000021',
-    accountHolderName: 'Acme Corp',
+    id: 'pm-001',
+    provider: 1,
+    providerCustomerId: 'cus_acme',
+    providerMethodId: 'pm_visa_1234',
+    methodType: 1,
     isDefault: true,
   },
   {
-    paymentMethodId: 'pm-002',
-    type: 'CARD',
-    accountNumber: '4111111111111234',
-    accountHolderName: 'John Doe',
+    id: 'pm-002',
+    provider: 1,
+    providerCustomerId: 'cus_doe',
+    providerMethodId: 'pm_mc_5678',
+    methodType: 2,
     isDefault: false,
   },
 ]
@@ -54,7 +55,7 @@ describe('PaymentMethodsTab', () => {
     it('renders skeletons while loading', () => {
       vi.mocked(useClients).mockReturnValue({
         party: {
-          getPaymentMethods: vi.fn(() => new Promise(() => {})),
+          listPaymentMethods: vi.fn(() => new Promise(() => {})),
           addPaymentMethod: vi.fn(),
           removePaymentMethod: vi.fn(),
           setDefaultPaymentMethod: vi.fn(),
@@ -72,7 +73,7 @@ describe('PaymentMethodsTab', () => {
     beforeEach(() => {
       vi.mocked(useClients).mockReturnValue({
         party: {
-          getPaymentMethods: vi.fn().mockResolvedValue({ paymentMethods: [] }),
+          listPaymentMethods: vi.fn().mockResolvedValue({ paymentMethods: [] }),
           addPaymentMethod: vi.fn(),
           removePaymentMethod: vi.fn(),
           setDefaultPaymentMethod: vi.fn(),
@@ -99,7 +100,7 @@ describe('PaymentMethodsTab', () => {
     beforeEach(() => {
       vi.mocked(useClients).mockReturnValue({
         party: {
-          getPaymentMethods: vi.fn().mockResolvedValue({ paymentMethods: mockPaymentMethods }),
+          listPaymentMethods: vi.fn().mockResolvedValue({ paymentMethods: mockPaymentMethods }),
           addPaymentMethod: vi.fn(),
           removePaymentMethod: vi.fn(),
           setDefaultPaymentMethod: vi.fn(),
@@ -110,8 +111,8 @@ describe('PaymentMethodsTab', () => {
     it('renders all payment methods', async () => {
       renderTab()
       await waitFor(() => {
-        expect(screen.getByText('Acme Corp')).toBeInTheDocument()
-        expect(screen.getByText('John Doe')).toBeInTheDocument()
+        expect(screen.getByText('pm_visa_1234')).toBeInTheDocument()
+        expect(screen.getByText('pm_mc_5678')).toBeInTheDocument()
       })
     })
 
@@ -122,24 +123,10 @@ describe('PaymentMethodsTab', () => {
       })
     })
 
-    it('shows masked account number', async () => {
+    it('shows provider customer ID', async () => {
       renderTab()
       await waitFor(() => {
-        expect(screen.getByText(/••••5678/)).toBeInTheDocument()
-      })
-    })
-
-    it('shows payment method type', async () => {
-      renderTab()
-      await waitFor(() => {
-        expect(screen.getByText(/BANK_ACCOUNT/)).toBeInTheDocument()
-      })
-    })
-
-    it('shows routing number when present', async () => {
-      renderTab()
-      await waitFor(() => {
-        expect(screen.getByText(/021000021/)).toBeInTheDocument()
+        expect(screen.getByText(/cus_acme/)).toBeInTheDocument()
       })
     })
 
@@ -155,7 +142,6 @@ describe('PaymentMethodsTab', () => {
       renderTab()
       await waitFor(() => {
         const setDefaultButtons = screen.getAllByRole('button', { name: /set default/i })
-        // Only the non-default method gets "Set Default"
         expect(setDefaultButtons).toHaveLength(1)
       })
     })
@@ -163,9 +149,8 @@ describe('PaymentMethodsTab', () => {
     it('does not render Set Default for already-default method', async () => {
       renderTab()
       await waitFor(() => {
-        expect(screen.getByText('Acme Corp')).toBeInTheDocument()
+        expect(screen.getByText('pm_visa_1234')).toBeInTheDocument()
       })
-      // The default method (Acme Corp, pm-001) should NOT have Set Default
       const setDefaultButtons = screen.getAllByRole('button', { name: /set default/i })
       expect(setDefaultButtons).toHaveLength(1)
     })
@@ -175,7 +160,7 @@ describe('PaymentMethodsTab', () => {
     beforeEach(() => {
       vi.mocked(useClients).mockReturnValue({
         party: {
-          getPaymentMethods: vi.fn().mockResolvedValue({ paymentMethods: [] }),
+          listPaymentMethods: vi.fn().mockResolvedValue({ paymentMethods: [] }),
           addPaymentMethod: vi.fn().mockResolvedValue({}),
           removePaymentMethod: vi.fn(),
           setDefaultPaymentMethod: vi.fn(),
@@ -210,8 +195,8 @@ describe('PaymentMethodsTab', () => {
         expect(screen.getByRole('dialog')).toBeInTheDocument()
       })
 
-      expect(screen.getByPlaceholderText(/account number/i)).toBeInTheDocument()
-      expect(screen.getByPlaceholderText(/routing number/i)).toBeInTheDocument()
+      expect(screen.getByPlaceholderText(/cus_/i)).toBeInTheDocument()
+      expect(screen.getByPlaceholderText(/pm_/i)).toBeInTheDocument()
     })
 
     it('closes dialog when Cancel is clicked in dialog', async () => {
@@ -238,7 +223,7 @@ describe('PaymentMethodsTab', () => {
       const addPaymentMethod = vi.fn().mockResolvedValue({})
       vi.mocked(useClients).mockReturnValue({
         party: {
-          getPaymentMethods: vi.fn().mockResolvedValue({ paymentMethods: [] }),
+          listPaymentMethods: vi.fn().mockResolvedValue({ paymentMethods: [] }),
           addPaymentMethod,
           removePaymentMethod: vi.fn(),
           setDefaultPaymentMethod: vi.fn(),
@@ -257,9 +242,8 @@ describe('PaymentMethodsTab', () => {
         expect(screen.getByRole('dialog')).toBeInTheDocument()
       })
 
-      // Select a type (required field)
-      await userEvent.selectOptions(screen.getByRole('combobox'), 'BANK_ACCOUNT')
-      await userEvent.type(screen.getByPlaceholderText(/account number/i), '987654321')
+      await userEvent.type(screen.getByPlaceholderText(/cus_/i), 'cus_new')
+      await userEvent.type(screen.getByPlaceholderText(/pm_/i), 'pm_new')
       await userEvent.click(screen.getByRole('button', { name: /^add$/i }))
 
       await waitFor(() => {
@@ -273,7 +257,7 @@ describe('PaymentMethodsTab', () => {
       const removePaymentMethod = vi.fn().mockResolvedValue({})
       vi.mocked(useClients).mockReturnValue({
         party: {
-          getPaymentMethods: vi.fn().mockResolvedValue({ paymentMethods: mockPaymentMethods }),
+          listPaymentMethods: vi.fn().mockResolvedValue({ paymentMethods: mockPaymentMethods }),
           addPaymentMethod: vi.fn(),
           removePaymentMethod,
           setDefaultPaymentMethod: vi.fn(),
@@ -301,7 +285,7 @@ describe('PaymentMethodsTab', () => {
       const setDefaultPaymentMethod = vi.fn().mockResolvedValue({})
       vi.mocked(useClients).mockReturnValue({
         party: {
-          getPaymentMethods: vi.fn().mockResolvedValue({ paymentMethods: mockPaymentMethods }),
+          listPaymentMethods: vi.fn().mockResolvedValue({ paymentMethods: mockPaymentMethods }),
           addPaymentMethod: vi.fn(),
           removePaymentMethod: vi.fn(),
           setDefaultPaymentMethod,

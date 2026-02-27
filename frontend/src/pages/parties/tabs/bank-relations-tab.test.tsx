@@ -34,7 +34,7 @@ describe('BankRelationsTab', () => {
     it('renders skeletons while loading', () => {
       vi.mocked(useClients).mockReturnValue({
         party: {
-          getBankRelations: vi.fn(() => new Promise(() => {})),
+          retrieveBankRelations: vi.fn(() => new Promise(() => {})),
         },
       } as ReturnType<typeof useClients>)
 
@@ -47,7 +47,7 @@ describe('BankRelationsTab', () => {
     it('does not render empty state while loading', () => {
       vi.mocked(useClients).mockReturnValue({
         party: {
-          getBankRelations: vi.fn(() => new Promise(() => {})),
+          retrieveBankRelations: vi.fn(() => new Promise(() => {})),
         },
       } as ReturnType<typeof useClients>)
 
@@ -61,7 +61,7 @@ describe('BankRelationsTab', () => {
     it('renders empty state heading after data loads', async () => {
       vi.mocked(useClients).mockReturnValue({
         party: {
-          getBankRelations: vi.fn().mockResolvedValue({}),
+          retrieveBankRelations: vi.fn().mockResolvedValue({}),
         },
       } as ReturnType<typeof useClients>)
 
@@ -75,7 +75,7 @@ describe('BankRelationsTab', () => {
     it('renders descriptive message', async () => {
       vi.mocked(useClients).mockReturnValue({
         party: {
-          getBankRelations: vi.fn().mockResolvedValue({}),
+          retrieveBankRelations: vi.fn().mockResolvedValue({}),
         },
       } as ReturnType<typeof useClients>)
 
@@ -88,16 +88,16 @@ describe('BankRelationsTab', () => {
   })
 
   describe('query key', () => {
-    it('calls getBankRelations with the provided partyId', async () => {
-      const getBankRelations = vi.fn().mockResolvedValue({})
+    it('calls retrieveBankRelations with the provided partyId', async () => {
+      const retrieveBankRelations = vi.fn().mockResolvedValue({})
       vi.mocked(useClients).mockReturnValue({
-        party: { getBankRelations },
+        party: { retrieveBankRelations },
       } as ReturnType<typeof useClients>)
 
       renderTab('party-xyz')
 
       await waitFor(() => {
-        expect(getBankRelations).toHaveBeenCalledWith({ partyId: 'party-xyz' })
+        expect(retrieveBankRelations).toHaveBeenCalledWith({ partyId: 'party-xyz' })
       })
     })
   })

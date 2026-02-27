@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { TooltipProvider } from '@/components/ui/tooltip'
 
 vi.mock('@/api/context', () => ({
   useClients: vi.fn(),
@@ -22,26 +23,18 @@ function makeQueryClient() {
 function renderTab(partyId = 'party-001') {
   return render(
     <QueryClientProvider client={makeQueryClient()}>
-      <DemographicsTab partyId={partyId} />
+      <TooltipProvider>
+        <DemographicsTab partyId={partyId} />
+      </TooltipProvider>
     </QueryClientProvider>,
   )
 }
 
 const mockDemographics = {
   partyId: 'party-001',
-  email: 'contact@acme.com',
-  phoneNumber: '+44 20 1234 5678',
-  businessName: 'Acme Corp',
-  businessRegistration: 'BRN-12345',
-  legalName: 'Acme Corporation Ltd',
-  nationality: 'GB',
-  taxId: 'TAX-9876',
-  website: 'https://acme.com',
-  streetAddress: '123 Main Street',
-  city: 'London',
-  state: 'England',
-  postalCode: 'SW1A 1AA',
-  country: 'GB',
+  socioEconomicData: 'Middle income bracket',
+  employmentHistory: 'Software Engineer at Acme Corp',
+  updatedAt: { seconds: 1700001000, nanos: 0 },
 }
 
 describe('DemographicsTab', () => {
@@ -53,8 +46,8 @@ describe('DemographicsTab', () => {
     it('renders skeletons while loading', () => {
       vi.mocked(useClients).mockReturnValue({
         party: {
-          getParticipant: vi.fn(() => new Promise(() => {})),
-          updateParticipant: vi.fn(),
+          retrieveDemographics: vi.fn(() => new Promise(() => {})),
+          updateDemographics: vi.fn(),
         },
       } as ReturnType<typeof useClients>)
 
@@ -69,8 +62,8 @@ describe('DemographicsTab', () => {
     it('renders empty state when no demographics data is returned', async () => {
       vi.mocked(useClients).mockReturnValue({
         party: {
-          getParticipant: vi.fn().mockResolvedValue(null),
-          updateParticipant: vi.fn(),
+          retrieveDemographics: vi.fn().mockResolvedValue(null),
+          updateDemographics: vi.fn(),
         },
       } as ReturnType<typeof useClients>)
 
@@ -84,8 +77,8 @@ describe('DemographicsTab', () => {
     it('shows descriptive message in empty state', async () => {
       vi.mocked(useClients).mockReturnValue({
         party: {
-          getParticipant: vi.fn().mockResolvedValue(null),
-          updateParticipant: vi.fn(),
+          retrieveDemographics: vi.fn().mockResolvedValue(null),
+          updateDemographics: vi.fn(),
         },
       } as ReturnType<typeof useClients>)
 
@@ -101,44 +94,23 @@ describe('DemographicsTab', () => {
     beforeEach(() => {
       vi.mocked(useClients).mockReturnValue({
         party: {
-          getParticipant: vi.fn().mockResolvedValue(mockDemographics),
-          updateParticipant: vi.fn(),
+          retrieveDemographics: vi.fn().mockResolvedValue(mockDemographics),
+          updateDemographics: vi.fn(),
         },
       } as ReturnType<typeof useClients>)
     })
 
-    it('renders email', async () => {
+    it('renders socio-economic data', async () => {
       renderTab()
       await waitFor(() => {
-        expect(screen.getByText('contact@acme.com')).toBeInTheDocument()
+        expect(screen.getByText('Middle income bracket')).toBeInTheDocument()
       })
     })
 
-    it('renders phone number', async () => {
+    it('renders employment history', async () => {
       renderTab()
       await waitFor(() => {
-        expect(screen.getByText('+44 20 1234 5678')).toBeInTheDocument()
-      })
-    })
-
-    it('renders business name', async () => {
-      renderTab()
-      await waitFor(() => {
-        expect(screen.getByText('Acme Corp')).toBeInTheDocument()
-      })
-    })
-
-    it('renders city', async () => {
-      renderTab()
-      await waitFor(() => {
-        expect(screen.getByText('London')).toBeInTheDocument()
-      })
-    })
-
-    it('renders country', async () => {
-      renderTab()
-      await waitFor(() => {
-        expect(screen.getAllByText('GB').length).toBeGreaterThan(0)
+        expect(screen.getByText('Software Engineer at Acme Corp')).toBeInTheDocument()
       })
     })
 
@@ -154,8 +126,8 @@ describe('DemographicsTab', () => {
     beforeEach(() => {
       vi.mocked(useClients).mockReturnValue({
         party: {
-          getParticipant: vi.fn().mockResolvedValue(mockDemographics),
-          updateParticipant: vi.fn().mockResolvedValue({}),
+          retrieveDemographics: vi.fn().mockResolvedValue(mockDemographics),
+          updateDemographics: vi.fn().mockResolvedValue({}),
         },
       } as ReturnType<typeof useClients>)
     })
@@ -182,8 +154,8 @@ describe('DemographicsTab', () => {
 
       await userEvent.click(screen.getByRole('button', { name: /edit demographics/i }))
 
-      expect(screen.getByPlaceholderText(/email/i)).toBeInTheDocument()
-      expect(screen.getByPlaceholderText(/phone number/i)).toBeInTheDocument()
+      expect(screen.getByPlaceholderText(/socio-economic/i)).toBeInTheDocument()
+      expect(screen.getByPlaceholderText(/employment/i)).toBeInTheDocument()
     })
 
     it('returns to view mode when Cancel is clicked', async () => {
@@ -205,12 +177,12 @@ describe('DemographicsTab', () => {
   })
 
   describe('form submission', () => {
-    it('calls updateParticipant on save', async () => {
-      const updateParticipant = vi.fn().mockResolvedValue({})
+    it('calls updateDemographics on save', async () => {
+      const updateDemographics = vi.fn().mockResolvedValue({})
       vi.mocked(useClients).mockReturnValue({
         party: {
-          getParticipant: vi.fn().mockResolvedValue(mockDemographics),
-          updateParticipant,
+          retrieveDemographics: vi.fn().mockResolvedValue(mockDemographics),
+          updateDemographics,
         },
       } as ReturnType<typeof useClients>)
 
@@ -224,7 +196,7 @@ describe('DemographicsTab', () => {
       await userEvent.click(screen.getByRole('button', { name: /save changes/i }))
 
       await waitFor(() => {
-        expect(updateParticipant).toHaveBeenCalledWith(
+        expect(updateDemographics).toHaveBeenCalledWith(
           expect.objectContaining({ partyId: 'party-001' }),
         )
       })
@@ -233,8 +205,8 @@ describe('DemographicsTab', () => {
     it('returns to view mode on successful save', async () => {
       vi.mocked(useClients).mockReturnValue({
         party: {
-          getParticipant: vi.fn().mockResolvedValue(mockDemographics),
-          updateParticipant: vi.fn().mockResolvedValue({}),
+          retrieveDemographics: vi.fn().mockResolvedValue(mockDemographics),
+          updateDemographics: vi.fn().mockResolvedValue({}),
         },
       } as ReturnType<typeof useClients>)
 
@@ -255,8 +227,8 @@ describe('DemographicsTab', () => {
     it('disables Save button while mutation is pending', async () => {
       vi.mocked(useClients).mockReturnValue({
         party: {
-          getParticipant: vi.fn().mockResolvedValue(mockDemographics),
-          updateParticipant: vi.fn(
+          retrieveDemographics: vi.fn().mockResolvedValue(mockDemographics),
+          updateDemographics: vi.fn(
             () => new Promise((resolve) => setTimeout(resolve, 200)),
           ),
         },

@@ -14,7 +14,7 @@ export function ReferencesTab({ partyId }: ReferencesTabProps) {
   const { isLoading } = useQuery({
     queryKey: ['party', partyId, 'references'],
     queryFn: async () => {
-      return await clients.party.getReferences({ partyId })
+      return await clients.party.retrieveReference({ partyId })
     },
   })
 

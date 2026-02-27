@@ -205,6 +205,28 @@ function DetailField({ label, children }: { label: string; children: React.React
 }
 
 // ---------------------------------------------------------------------------
+// Enum helpers
+// ---------------------------------------------------------------------------
+
+function getDirectionName(direction: unknown): string {
+  if (typeof direction === 'string') return direction
+  if (typeof direction === 'number') {
+    const dirMap: Record<number, string> = { 0: 'UNSPECIFIED', 1: 'DEBIT', 2: 'CREDIT' }
+    return dirMap[direction] ?? String(direction)
+  }
+  return String(direction ?? '')
+}
+
+function getTransactionStatusName(status: unknown): string {
+  if (typeof status === 'string') return status
+  if (typeof status === 'number') {
+    const statusMap: Record<number, string> = { 0: 'UNSPECIFIED', 1: 'PENDING', 2: 'POSTED', 3: 'FAILED', 4: 'CANCELLED', 5: 'REVERSED' }
+    return statusMap[status] ?? String(status)
+  }
+  return String(status ?? '')
+}
+
+// ---------------------------------------------------------------------------
 // Transactions (ledger postings for this account)
 // ---------------------------------------------------------------------------
 
@@ -258,16 +280,16 @@ function AccountTransactions({ accountId, instrumentCode }: { accountId: string;
                 {postings.map((p) => (
                   <tr key={p.id} className="border-b last:border-0">
                     <td className="py-2 pr-4">
-                      <StatusBadge status={String(p.postingDirection ?? '')} />
+                      <StatusBadge status={getDirectionName(p.postingDirection)} />
                     </td>
                     <td className="py-2 pr-4 tabular-nums">
                       <MoneyDisplay
-                        amount={p.postingAmount?.amount?.units}
-                        currency={p.postingAmount?.amount?.currencyCode ?? instrumentCode}
+                        amount={p.postingAmount?.units}
+                        currency={p.postingAmount?.currencyCode ?? instrumentCode}
                       />
                     </td>
                     <td className="py-2 pr-4">
-                      <StatusBadge status={String(p.status ?? '')} />
+                      <StatusBadge status={getTransactionStatusName(p.status)} />
                     </td>
                     <td className="py-2">
                       <TimeDisplay timestamp={p.createdAt} format="relative" />
