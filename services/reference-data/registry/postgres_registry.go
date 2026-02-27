@@ -306,10 +306,16 @@ func (r *PostgresRegistry) CreateDraft(ctx context.Context, def *InstrumentDefin
 		def.UpdatedAt = now
 		def.Status = StatusDraft
 
+		// Default empty attribute_schema to valid JSON — column is jsonb
+		attrSchema := def.AttributeSchema
+		if len(attrSchema) == 0 {
+			attrSchema = []byte("{}")
+		}
+
 		_, err := tx.Exec(ctx, query,
 			def.ID, def.Code, def.Version, string(def.Dimension), def.Precision, string(def.Status), def.IsSystem,
 			nullString(def.ValidationExpression), def.FungibilityKeyExpression, nullString(def.ErrorMessageExpression),
-			def.AttributeSchema, nullString(def.DisplayName), nullString(def.Description),
+			attrSchema, nullString(def.DisplayName), nullString(def.Description),
 			def.CreatedAt, def.UpdatedAt,
 		)
 		if err != nil {
@@ -368,13 +374,18 @@ func (r *PostgresRegistry) UpdateDefinition(ctx context.Context, code string, ve
 				updated_at = $9
 			WHERE code = $10 AND version = $11 AND updated_at = $12`
 
+		updateAttrSchema := updates.AttributeSchema
+		if updateAttrSchema != nil && len(updateAttrSchema) == 0 {
+			updateAttrSchema = []byte("{}")
+		}
+
 		now := time.Now()
 		result, err := tx.Exec(ctx, updateQuery,
 			string(updates.Dimension), updates.Precision,
 			nullString(updates.ValidationExpression),
 			updates.FungibilityKeyExpression,
 			nullString(updates.ErrorMessageExpression),
-			updates.AttributeSchema,
+			updateAttrSchema,
 			nullString(updates.DisplayName),
 			nullString(updates.Description),
 			now,

@@ -346,6 +346,10 @@ func dimensionToProto(d registry.Dimension) referencedatav1.Dimension {
 		return referencedatav1.Dimension_DIMENSION_COMPUTE
 	case registry.DimensionQuantity:
 		return referencedatav1.Dimension_DIMENSION_COUNT
+	case registry.DimensionCarbon:
+		return referencedatav1.Dimension_DIMENSION_CARBON
+	case registry.DimensionData:
+		return referencedatav1.Dimension_DIMENSION_DATA
 	default:
 		return referencedatav1.Dimension_DIMENSION_UNSPECIFIED
 	}
@@ -368,9 +372,11 @@ func dimensionFromProto(d referencedatav1.Dimension) registry.Dimension {
 		return registry.DimensionCompute
 	case referencedatav1.Dimension_DIMENSION_COUNT:
 		return registry.DimensionQuantity
-	case referencedatav1.Dimension_DIMENSION_UNSPECIFIED,
-		referencedatav1.Dimension_DIMENSION_CARBON,
-		referencedatav1.Dimension_DIMENSION_DATA:
+	case referencedatav1.Dimension_DIMENSION_CARBON:
+		return registry.DimensionCarbon
+	case referencedatav1.Dimension_DIMENSION_DATA:
+		return registry.DimensionData
+	case referencedatav1.Dimension_DIMENSION_UNSPECIFIED:
 		return ""
 	default:
 		return ""

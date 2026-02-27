@@ -37,6 +37,8 @@ const (
 	DimensionTime     Dimension = "TIME"
 	DimensionMass     Dimension = "MASS"
 	DimensionVolume   Dimension = "VOLUME"
+	DimensionCarbon   Dimension = "CARBON"
+	DimensionData     Dimension = "DATA"
 )
 
 // Error types for the registry.

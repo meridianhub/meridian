@@ -385,7 +385,7 @@ func registerServices(
 
 	// Tier 2: Depend on Tier 1 (current-account needs PK, FA loopback clients for saga orchestration)
 	caOutboxRepo := events.NewPostgresOutboxRepository(conns.gormDB("current-account"))
-	if err := wireCurrentAccount(grpcServer, conns.gormDB("current-account"), loopback.pk, loopback.fa, loopback.party, idempotencySvc, caOutboxRepo, tracer, logger); err != nil {
+	if err := wireCurrentAccount(grpcServer, conns.gormDB("current-account"), loopback.pk, loopback.fa, loopback.party, idempotencySvc, caOutboxRepo, refDataComps, tracer, logger); err != nil {
 		return fmt.Errorf("current-account: %w", err)
 	}
 	logger.Info("Tier 2 services registered")
@@ -433,6 +433,8 @@ func wireParty(server *grpc.Server, db *gorm.DB, logger *slog.Logger) error {
 type refDataComponents struct {
 	accountTypeRegistry *accounttype.PostgresRegistry
 	celCompiler         *refcel.Compiler
+	refDataService      *refhandler.Service
+	instrumentRegistry  refregistry.InstrumentRegistry
 }
 
 func wireReferenceData(server *grpc.Server, pool *pgxpool.Pool, logger *slog.Logger) (*refDataComponents, error) {
@@ -479,6 +481,8 @@ func wireReferenceData(server *grpc.Server, pool *pgxpool.Pool, logger *slog.Log
 	return &refDataComponents{
 		accountTypeRegistry: acctTypeReg,
 		celCompiler:         compiler,
+		refDataService:      refDataSvc,
+		instrumentRegistry:  instrumentRegistry,
 	}, nil
 }
 
@@ -522,19 +526,57 @@ func (l *registryAccountTypeLoader) ListActiveAccountTypes(ctx context.Context) 
 	return l.registry.ListActive(ctx)
 }
 
+// inProcessRefDataClient adapts the in-process reference-data gRPC handler
+// to the ReferenceDataClient interface used by internal-account service.
+type inProcessRefDataClient struct {
+	svc *refhandler.Service
+}
+
+func (c *inProcessRefDataClient) RetrieveInstrument(ctx context.Context, req *referencedatav1.RetrieveInstrumentRequest) (*referencedatav1.RetrieveInstrumentResponse, error) {
+	return c.svc.RetrieveInstrument(ctx, req)
+}
+
+func (c *inProcessRefDataClient) Close() error { return nil }
+
+// inProcessInstrumentGetter adapts the in-process instrument registry to
+// the InstrumentGetter interface used by the current-account service for
+// dimension resolution during account creation.
+type inProcessInstrumentGetter struct {
+	registry refregistry.InstrumentRegistry
+}
+
+func (g *inProcessInstrumentGetter) GetInstrument(ctx context.Context, code string, version int) (*refcache.CachedInstrument, error) {
+	var def *refregistry.InstrumentDefinition
+	var err error
+	if version > 0 {
+		def, err = g.registry.GetDefinition(ctx, code, version)
+	} else {
+		def, err = g.registry.GetActiveDefinition(ctx, code)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &refcache.CachedInstrument{Definition: def}, nil
+}
+
 func wireInternalAccount(server *grpc.Server, db *gorm.DB, refData *refDataComponents, logger *slog.Logger) error {
 	repo := internalaccountpersistence.NewRepository(db)
 
 	var opts []internalaccountservice.Option
+	var refDataClient internalaccountservice.ReferenceDataClient
 
-	// Wire account type cache if reference-data components are available
+	// Wire account type cache and reference data client if components are available
 	if refData != nil {
 		loader := &registryAccountTypeLoader{registry: refData.accountTypeRegistry}
 		cache := refcache.NewLocalAccountTypeCache(loader, refData.celCompiler)
 		opts = append(opts, internalaccountservice.WithAccountTypeCache(cache))
+
+		if refData.refDataService != nil {
+			refDataClient = &inProcessRefDataClient{svc: refData.refDataService}
+		}
 	}
 
-	svc, err := internalaccountservice.NewServiceFull(repo, nil, nil, logger, nil, opts...)
+	svc, err := internalaccountservice.NewServiceFull(repo, nil, refDataClient, logger, nil, opts...)
 	if err != nil {
 		return err
 	}
@@ -627,6 +669,7 @@ func wireCurrentAccount(
 	partyLoopback *partyclient.Client,
 	idempotencySvc idempotency.Service,
 	outboxRepo *events.PostgresOutboxRepository,
+	refData *refDataComponents,
 	tracer *observability.Tracer,
 	logger *slog.Logger,
 ) error {
@@ -649,6 +692,14 @@ func wireCurrentAccount(
 		logger.Info("no clearing account config, deposits will skip debit posting")
 	}
 
+	var caOpts []currentaccountservice.Option
+
+	// Wire in-process instrument getter for dimension resolution during account creation
+	if refData != nil && refData.instrumentRegistry != nil {
+		caOpts = append(caOpts, currentaccountservice.WithInstrumentGetter(
+			&inProcessInstrumentGetter{registry: refData.instrumentRegistry}))
+	}
+
 	svc, err := currentaccountservice.NewServiceWithExistingClients(
 		repo, lienRepo, withdrawalRepo,
 		outboxRepo, db,
@@ -658,6 +709,7 @@ func wireCurrentAccount(
 		idempotencySvc, logger, tracer,
 		nil, // accountResolver — no dynamic clearing account resolution
 		nil, // fungibilityValidator — not needed for demo
+		caOpts...,
 	)
 	if err != nil {
 		return err
