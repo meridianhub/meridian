@@ -22,21 +22,22 @@ function renderAccountsPage(initialPath = '/accounts') {
   )
 }
 
-// Mock proto response shape (CurrentAccountFacility fields)
+// Mock proto response shape (CurrentAccountFacility fields — Connect-RPC JSON format)
+// Timestamps use RFC 3339 strings per proto3 JSON mapping.
 const mockAccounts = [
   {
     accountId: 'acct-001',
-    accountIdentification: 'GB29NWBK60161331926819',
-    accountStatus: 'ACCOUNT_STATUS_ACTIVE',
-    baseCurrency: 'CURRENCY_GBP',
-    createdAt: { seconds: 1700000000, nanos: 0 },
+    externalIdentifier: 'GB29NWBK60161331926819',
+    accountStatus: 1, // ACCOUNT_STATUS_ACTIVE
+    instrumentCode: 'GBP',
+    createdAt: '2023-11-14T22:13:20Z',
   },
   {
     accountId: 'acct-002',
-    accountIdentification: 'DE89370400440532013000',
-    accountStatus: 'ACCOUNT_STATUS_FROZEN',
-    baseCurrency: 'CURRENCY_EUR',
-    createdAt: { seconds: 1700100000, nanos: 0 },
+    externalIdentifier: 'DE89370400440532013000',
+    accountStatus: 2, // ACCOUNT_STATUS_FROZEN
+    instrumentCode: 'EUR',
+    createdAt: '2023-11-15T01:46:40Z',
   },
 ]
 
@@ -102,7 +103,7 @@ describe('AccountsPage - list rendering', () => {
 
     expect(screen.getByRole('columnheader', { name: /external ref/i })).toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: /status/i })).toBeInTheDocument()
-    expect(screen.getByRole('columnheader', { name: /currency/i })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: /instrument/i })).toBeInTheDocument()
   })
 
   it('shows skeleton rows while loading', () => {
@@ -174,7 +175,7 @@ describe('AccountsPage - filtering', () => {
     await waitFor(() => expect(capturedRequests.length).toBeGreaterThan(0))
 
     const statusSelect = screen.getByRole('combobox', { name: /status/i })
-    await userEvent.selectOptions(statusSelect, 'ACCOUNT_STATUS_ACTIVE')
+    await userEvent.selectOptions(statusSelect, '1')
 
     await waitFor(() => {
       // DataTable passes filters as a record - the page should call the API with the filter

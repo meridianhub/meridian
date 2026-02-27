@@ -22,29 +22,27 @@ function renderDetailPage(accountId = 'acct-001') {
   )
 }
 
-const mockAccount = {
+// Proto shape: RetrieveCurrentAccountResponse.facility (CurrentAccountFacility)
+const mockFacility = {
   accountId: 'acct-001',
-  externalReference: 'GB29NWBK60161331926819',
-  status: 'ACTIVE',
-  baseCurrency: 'GBP',
-  availableBalance: '100000',
-  reservedBalance: '0',
-  name: 'Main Account',
-  partyId: 'party-123',
-  createdAt: { seconds: 1700000000, nanos: 0 },
-  updatedAt: { seconds: 1700000001, nanos: 0 },
+  externalIdentifier: 'GB29NWBK60161331926819',
+  accountStatus: 1, // ACCOUNT_STATUS_ACTIVE
+  instrumentCode: 'GBP',
+  orgPartyId: 'party-123',
+  createdAt: '2023-11-14T22:13:20Z',
+  updatedAt: '2023-11-14T22:13:21Z',
 }
 
-const mockFrozenAccount = {
-  ...mockAccount,
+const mockFrozenFacility = {
+  ...mockFacility,
   accountId: 'acct-frozen',
-  status: 'FROZEN',
+  accountStatus: 2, // ACCOUNT_STATUS_FROZEN
 }
 
-const mockClosedAccount = {
-  ...mockAccount,
+const mockClosedFacility = {
+  ...mockFacility,
   accountId: 'acct-closed',
-  status: 'CLOSED',
+  accountStatus: 3, // ACCOUNT_STATUS_CLOSED
 }
 
 describe('AccountDetailPage - loading and error states', () => {
@@ -79,7 +77,7 @@ describe('AccountDetailPage - account overview', () => {
   it('renders account ID in header', async () => {
     server.use(
       http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
-        HttpResponse.json({ account: mockAccount }),
+        HttpResponse.json({ facility: mockFacility }),
       ),
     )
 
@@ -93,7 +91,7 @@ describe('AccountDetailPage - account overview', () => {
   it('renders external reference', async () => {
     server.use(
       http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
-        HttpResponse.json({ account: mockAccount }),
+        HttpResponse.json({ facility: mockFacility }),
       ),
     )
 
@@ -107,7 +105,7 @@ describe('AccountDetailPage - account overview', () => {
   it('renders status badge', async () => {
     server.use(
       http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
-        HttpResponse.json({ account: mockAccount }),
+        HttpResponse.json({ facility: mockFacility }),
       ),
     )
 
@@ -121,7 +119,7 @@ describe('AccountDetailPage - account overview', () => {
   it('renders currency', async () => {
     server.use(
       http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
-        HttpResponse.json({ account: mockAccount }),
+        HttpResponse.json({ facility: mockFacility }),
       ),
     )
 
@@ -137,7 +135,7 @@ describe('AccountDetailPage - tabs', () => {
   it('renders Overview tab by default', async () => {
     server.use(
       http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
-        HttpResponse.json({ account: mockAccount }),
+        HttpResponse.json({ facility: mockFacility }),
       ),
     )
 
@@ -151,7 +149,7 @@ describe('AccountDetailPage - tabs', () => {
   it('renders all required tabs', async () => {
     server.use(
       http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
-        HttpResponse.json({ account: mockAccount }),
+        HttpResponse.json({ facility: mockFacility }),
       ),
     )
 
@@ -169,7 +167,7 @@ describe('AccountDetailPage - tabs', () => {
   it('switches to Transactions tab when clicked', async () => {
     server.use(
       http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
-        HttpResponse.json({ account: mockAccount }),
+        HttpResponse.json({ facility: mockFacility }),
       ),
     )
 
@@ -190,7 +188,7 @@ describe('AccountDetailPage - tabs', () => {
   it('switches to Audit Trail tab when clicked', async () => {
     server.use(
       http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
-        HttpResponse.json({ account: mockAccount }),
+        HttpResponse.json({ facility: mockFacility }),
       ),
     )
 
@@ -210,7 +208,7 @@ describe('AccountDetailPage - action buttons', () => {
   it('renders Freeze button for ACTIVE account', async () => {
     server.use(
       http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
-        HttpResponse.json({ account: mockAccount }),
+        HttpResponse.json({ facility: mockFacility }),
       ),
     )
 
@@ -224,7 +222,7 @@ describe('AccountDetailPage - action buttons', () => {
   it('renders Unfreeze button for FROZEN account', async () => {
     server.use(
       http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
-        HttpResponse.json({ account: mockFrozenAccount }),
+        HttpResponse.json({ facility: mockFrozenFacility }),
       ),
     )
 
@@ -238,7 +236,7 @@ describe('AccountDetailPage - action buttons', () => {
   it('does not render action buttons for CLOSED account', async () => {
     server.use(
       http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
-        HttpResponse.json({ account: mockClosedAccount }),
+        HttpResponse.json({ facility: mockClosedFacility }),
       ),
     )
 
@@ -255,7 +253,7 @@ describe('AccountDetailPage - action buttons', () => {
   it('renders Close button for ACTIVE account', async () => {
     server.use(
       http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
-        HttpResponse.json({ account: mockAccount }),
+        HttpResponse.json({ facility: mockFacility }),
       ),
     )
 
@@ -269,7 +267,7 @@ describe('AccountDetailPage - action buttons', () => {
   it('hides Close button for FROZEN account (must unfreeze first)', async () => {
     server.use(
       http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
-        HttpResponse.json({ account: mockFrozenAccount }),
+        HttpResponse.json({ facility: mockFrozenFacility }),
       ),
     )
 
@@ -287,7 +285,7 @@ describe('AccountDetailPage - dialog integration', () => {
   it('opens DepositDialog when Deposit button is clicked', async () => {
     server.use(
       http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
-        HttpResponse.json({ account: mockAccount }),
+        HttpResponse.json({ facility: mockFacility }),
       ),
     )
 
@@ -307,7 +305,7 @@ describe('AccountDetailPage - dialog integration', () => {
   it('opens WithdrawDialog when Withdraw button is clicked', async () => {
     server.use(
       http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
-        HttpResponse.json({ account: mockAccount }),
+        HttpResponse.json({ facility: mockFacility }),
       ),
     )
 
@@ -327,7 +325,7 @@ describe('AccountDetailPage - dialog integration', () => {
   it('opens ControlDialog when Freeze button is clicked', async () => {
     server.use(
       http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
-        HttpResponse.json({ account: mockAccount }),
+        HttpResponse.json({ facility: mockFacility }),
       ),
     )
 
@@ -347,7 +345,7 @@ describe('AccountDetailPage - dialog integration', () => {
   it('opens ControlDialog when Unfreeze button is clicked', async () => {
     server.use(
       http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
-        HttpResponse.json({ account: mockFrozenAccount }),
+        HttpResponse.json({ facility: mockFrozenFacility }),
       ),
     )
 
@@ -367,7 +365,7 @@ describe('AccountDetailPage - dialog integration', () => {
   it('opens ControlDialog when Close Account button is clicked', async () => {
     server.use(
       http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
-        HttpResponse.json({ account: mockAccount }),
+        HttpResponse.json({ facility: mockFacility }),
       ),
     )
 
@@ -389,7 +387,7 @@ describe('AccountDetailPage - back navigation', () => {
   it('renders a back link to accounts list', async () => {
     server.use(
       http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
-        HttpResponse.json({ account: mockAccount }),
+        HttpResponse.json({ facility: mockFacility }),
       ),
     )
 

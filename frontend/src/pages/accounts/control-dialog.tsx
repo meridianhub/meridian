@@ -11,6 +11,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { useTenantContext } from '@/contexts/tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
+import { useAuthenticatedFetch } from '@/hooks/use-authenticated-fetch'
 
 export type ControlAction = 'freeze' | 'unfreeze' | 'close'
 
@@ -54,31 +55,9 @@ const ACTION_CONFIG: Record<
   },
 }
 
-async function performAccountControl(
-  tenantSlug: string,
-  accountId: string,
-  endpoint: string,
-): Promise<void> {
-  const response = await fetch(
-    `/meridian.current_account.v1.CurrentAccountService/${endpoint}`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Tenant-Slug': tenantSlug,
-      },
-      body: JSON.stringify({ accountId }),
-    },
-  )
-
-  if (!response.ok) {
-    const data = (await response.json().catch(() => ({}))) as { message?: string }
-    throw new Error(data.message ?? `Failed to ${endpoint}: ${response.status}`)
-  }
-}
-
 export function ControlDialog({ open, onOpenChange, accountId, action }: ControlDialogProps) {
   const { tenantSlug } = useTenantContext()
+  const authFetch = useAuthenticatedFetch()
   const queryClient = useQueryClient()
   const [serverError, setServerError] = React.useState<string | null>(null)
 
@@ -91,8 +70,16 @@ export function ControlDialog({ open, onOpenChange, accountId, action }: Control
   }, [open])
 
   const mutation = useMutation({
-    mutationFn: () =>
-      performAccountControl(tenantSlug ?? '', accountId, config.endpoint),
+    mutationFn: async () => {
+      const response = await authFetch(
+        `/meridian.current_account.v1.CurrentAccountService/${config.endpoint}`,
+        { method: 'POST', body: JSON.stringify({ accountId }) },
+      )
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { message?: string }
+        throw new Error(data.message ?? `Failed to ${config.endpoint}: ${response.status}`)
+      }
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: tenantKeys.account(tenantSlug ?? '', accountId),

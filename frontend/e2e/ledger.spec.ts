@@ -41,7 +41,7 @@ test.describe('Ledger page', () => {
     await expect(
       authenticatedPage.getByRole('columnheader', { name: 'Business Unit' }),
     ).toBeVisible()
-    await expect(authenticatedPage.getByRole('columnheader', { name: 'Currency' })).toBeVisible()
+    await expect(authenticatedPage.getByRole('columnheader', { name: 'Instrument' })).toBeVisible()
     await expect(authenticatedPage.getByRole('columnheader', { name: 'Status' })).toBeVisible()
     await expect(authenticatedPage.getByRole('columnheader', { name: 'Postings' })).toBeVisible()
   })

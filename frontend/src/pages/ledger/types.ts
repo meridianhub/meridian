@@ -34,7 +34,7 @@ export interface FinancialBookingLog {
   productServiceReference: string
   businessUnitReference: string
   chartOfAccountsRules: string
-  baseCurrency: string
+  instrumentCode: string
   status: string
   createdAt: Timestamp | null | undefined
   updatedAt: Timestamp | null | undefined

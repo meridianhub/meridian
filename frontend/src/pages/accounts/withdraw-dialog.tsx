@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useTenantContext } from '@/contexts/tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
+import { useAuthenticatedFetch } from '@/hooks/use-authenticated-fetch'
 import { amountToBigInt } from './account-form-utils'
 
 interface WithdrawDialogProps {
@@ -38,59 +39,9 @@ function validateAmount(value: string): string | null {
   return null
 }
 
-async function initiateWithdrawal(
-  tenantSlug: string,
-  accountId: string,
-  amountMinorUnits: string,
-): Promise<string> {
-  const response = await fetch(
-    `/meridian.current_account.v1.CurrentAccountService/InitiateWithdrawal`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Tenant-Slug': tenantSlug,
-      },
-      body: JSON.stringify({
-        accountId,
-        amount: { amount: amountMinorUnits },
-      }),
-    },
-  )
-
-  if (!response.ok) {
-    const data = (await response.json().catch(() => ({}))) as { message?: string }
-    throw new Error(data.message ?? `Failed to initiate withdrawal: ${response.status}`)
-  }
-
-  const data = (await response.json()) as { withdrawalId?: string }
-  if (!data.withdrawalId) {
-    throw new Error('Withdrawal ID missing from response')
-  }
-  return data.withdrawalId
-}
-
-async function executeWithdrawal(tenantSlug: string, withdrawalId: string): Promise<void> {
-  const response = await fetch(
-    `/meridian.current_account.v1.CurrentAccountService/ExecuteWithdrawal`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Tenant-Slug': tenantSlug,
-      },
-      body: JSON.stringify({ withdrawalId }),
-    },
-  )
-
-  if (!response.ok) {
-    const data = (await response.json().catch(() => ({}))) as { message?: string }
-    throw new Error(data.message ?? `Failed to execute withdrawal: ${response.status}`)
-  }
-}
-
 export function WithdrawDialog({ open, onOpenChange, accountId, currency }: WithdrawDialogProps) {
   const { tenantSlug } = useTenantContext()
+  const authFetch = useAuthenticatedFetch()
   const queryClient = useQueryClient()
   const isOpenRef = React.useRef(open)
   const [step, setStep] = React.useState<Step>('initiate')
@@ -111,9 +62,19 @@ export function WithdrawDialog({ open, onOpenChange, accountId, currency }: With
   }, [open])
 
   const initiateMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       const minorUnits = amountToBigInt(amount).toString()
-      return initiateWithdrawal(tenantSlug ?? '', accountId, minorUnits)
+      const response = await authFetch(
+        `/meridian.current_account.v1.CurrentAccountService/InitiateWithdrawal`,
+        { method: 'POST', body: JSON.stringify({ accountId, amount: { amount: minorUnits } }) },
+      )
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { message?: string }
+        throw new Error(data.message ?? `Failed to initiate withdrawal: ${response.status}`)
+      }
+      const data = (await response.json()) as { withdrawalId?: string }
+      if (!data.withdrawalId) throw new Error('Withdrawal ID missing from response')
+      return data.withdrawalId
     },
     onSuccess: (id) => {
       if (!isOpenRef.current) return
@@ -127,8 +88,15 @@ export function WithdrawDialog({ open, onOpenChange, accountId, currency }: With
   })
 
   const executeMutation = useMutation({
-    mutationFn: () => {
-      return executeWithdrawal(tenantSlug ?? '', withdrawalId ?? '')
+    mutationFn: async () => {
+      const response = await authFetch(
+        `/meridian.current_account.v1.CurrentAccountService/ExecuteWithdrawal`,
+        { method: 'POST', body: JSON.stringify({ withdrawalId }) },
+      )
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { message?: string }
+        throw new Error(data.message ?? `Failed to execute withdrawal: ${response.status}`)
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({

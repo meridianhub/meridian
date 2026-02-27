@@ -11,6 +11,7 @@ import {
   VarianceDetail,
   type Variance,
 } from '@/components/reconciliation/variance-detail'
+import { useAuthenticatedFetch } from '@/hooks/use-authenticated-fetch'
 import { cn } from '@/lib/utils'
 import { CreateDisputeDialog } from './create-dispute-dialog'
 
@@ -54,21 +55,23 @@ export interface BalanceAssertion {
 // API helpers
 // ---------------------------------------------------------------------------
 
-async function fetchRunDetail(runId: string): Promise<ReconciliationRunDetail> {
-  const res = await fetch(`/v1/reconciliation/runs/${runId}`)
+type FetchFn = typeof fetch
+
+async function fetchRunDetail(runId: string, f: FetchFn = fetch): Promise<ReconciliationRunDetail> {
+  const res = await f(`/v1/reconciliation/runs/${runId}`)
   if (!res.ok) throw new Error(`Failed to fetch run detail: ${res.status}`)
   return res.json() as Promise<ReconciliationRunDetail>
 }
 
-async function fetchVariances(runId: string): Promise<Variance[]> {
-  const res = await fetch(`/v1/reconciliation/runs/${runId}/variances`)
+async function fetchVariances(runId: string, f: FetchFn = fetch): Promise<Variance[]> {
+  const res = await f(`/v1/reconciliation/runs/${runId}/variances`)
   if (!res.ok) throw new Error(`Failed to fetch variances: ${res.status}`)
   const data = (await res.json()) as { variances: Variance[]; nextPageToken?: string; totalCount?: number }
   return data.variances ?? []
 }
 
-async function fetchDisputes(runId: string): Promise<Dispute[]> {
-  const res = await fetch(`/v1/reconciliation/runs/${runId}/disputes`)
+async function fetchDisputes(runId: string, f: FetchFn = fetch): Promise<Dispute[]> {
+  const res = await f(`/v1/reconciliation/runs/${runId}/disputes`)
   if (!res.ok) throw new Error(`Failed to fetch disputes: ${res.status}`)
   const data = (await res.json()) as { items: Dispute[] }
   return data.items
@@ -79,8 +82,9 @@ async function updateDisputeStatus(
   disputeId: string,
   status: DisputeStatus,
   resolutionNotes: string,
+  f: FetchFn = fetch,
 ): Promise<void> {
-  const res = await fetch(
+  const res = await f(
     `/v1/reconciliation/runs/${runId}/disputes/${disputeId}`,
     {
       method: 'PATCH',
@@ -91,8 +95,8 @@ async function updateDisputeStatus(
   if (!res.ok) throw new Error(`Failed to update dispute: ${res.status}`)
 }
 
-async function fetchBalanceAssertions(runId: string): Promise<BalanceAssertion[]> {
-  const res = await fetch(`/v1/reconciliation/runs/${runId}/assertions`)
+async function fetchBalanceAssertions(runId: string, f: FetchFn = fetch): Promise<BalanceAssertion[]> {
+  const res = await f(`/v1/reconciliation/runs/${runId}/assertions`)
   if (!res.ok) throw new Error(`Failed to fetch assertions: ${res.status}`)
   const data = (await res.json()) as { items: BalanceAssertion[] }
   return data.items
@@ -101,8 +105,9 @@ async function fetchBalanceAssertions(runId: string): Promise<BalanceAssertion[]
 async function saveBalanceAssertion(
   runId: string,
   assertion: { name: string; expression: string },
+  f: FetchFn = fetch,
 ): Promise<void> {
-  const res = await fetch(`/v1/reconciliation/runs/${runId}/assertions`, {
+  const res = await f(`/v1/reconciliation/runs/${runId}/assertions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(assertion),
@@ -115,9 +120,10 @@ async function saveBalanceAssertion(
 // ---------------------------------------------------------------------------
 
 function VariancesTab({ runId }: { runId: string }) {
+  const authFetch = useAuthenticatedFetch()
   const { data: variances, isLoading, isError } = useQuery({
     queryKey: ['reconciliation-variances', runId],
-    queryFn: () => fetchVariances(runId),
+    queryFn: () => fetchVariances(runId, authFetch),
   })
 
   const [disputeDialogOpen, setDisputeDialogOpen] = React.useState(false)
@@ -212,6 +218,7 @@ function DisputeCard({
   dispute: Dispute
   runId: string
 }) {
+  const authFetch = useAuthenticatedFetch()
   const qc = useQueryClient()
   const [notes, setNotes] = React.useState('')
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -219,7 +226,7 @@ function DisputeCard({
 
   const mutation = useMutation({
     mutationFn: (status: DisputeStatus) =>
-      updateDisputeStatus(runId, dispute.disputeId, status, notes),
+      updateDisputeStatus(runId, dispute.disputeId, status, notes, authFetch),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['reconciliation-disputes', runId] })
       setPendingStatus(null)
@@ -303,11 +310,12 @@ function DisputeCard({
 type DisputeFilter = 'ALL' | DisputeStatus
 
 function DisputesTab({ runId }: { runId: string }) {
+  const authFetch = useAuthenticatedFetch()
   const [filter, setFilter] = React.useState<DisputeFilter>('ALL')
 
   const { data: disputes, isLoading, isError } = useQuery({
     queryKey: ['reconciliation-disputes', runId],
-    queryFn: () => fetchDisputes(runId),
+    queryFn: () => fetchDisputes(runId, authFetch),
   })
 
   const filtered = React.useMemo(() => {
@@ -407,6 +415,7 @@ function AssertionCard({ assertion }: { assertion: BalanceAssertion }) {
 }
 
 function BalanceAssertionsTab({ runId }: { runId: string }) {
+  const authFetch = useAuthenticatedFetch()
   const qc = useQueryClient()
   const [name, setName] = React.useState('')
   const [expression, setExpression] = React.useState('')
@@ -414,11 +423,11 @@ function BalanceAssertionsTab({ runId }: { runId: string }) {
 
   const { data: assertions, isLoading, isError } = useQuery({
     queryKey: ['reconciliation-assertions', runId],
-    queryFn: () => fetchBalanceAssertions(runId),
+    queryFn: () => fetchBalanceAssertions(runId, authFetch),
   })
 
   const saveMutation = useMutation({
-    mutationFn: () => saveBalanceAssertion(runId, { name, expression }),
+    mutationFn: () => saveBalanceAssertion(runId, { name, expression }, authFetch),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['reconciliation-assertions', runId] })
       setName('')
@@ -539,10 +548,11 @@ function formatDate(iso: string): string {
 export function ReconciliationDetailPage() {
   const { runId } = useParams<{ runId: string }>()
   const navigate = useNavigate()
+  const authFetch = useAuthenticatedFetch()
 
   const { data: run, isLoading, isError } = useQuery({
     queryKey: ['reconciliation-run', runId],
-    queryFn: () => fetchRunDetail(runId!),
+    queryFn: () => fetchRunDetail(runId!, authFetch),
     enabled: !!runId,
   })
 

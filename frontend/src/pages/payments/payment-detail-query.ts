@@ -15,8 +15,9 @@ export interface PaymentOrderDetail {
 
 export async function fetchPaymentDetail(
   paymentOrderId: string,
+  fetchFn: typeof fetch = fetch,
 ): Promise<PaymentOrderDetail> {
-  const response = await fetch(
+  const response = await fetchFn(
     '/meridian.payment_order.v1.PaymentOrderService/RetrievePaymentOrder',
     {
       method: 'POST',

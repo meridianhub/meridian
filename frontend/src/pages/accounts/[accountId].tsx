@@ -8,42 +8,23 @@ import { Button } from '@/components/ui/button'
 import { StatusBadge } from '@/components/shared/status-badge'
 import { TimeDisplay } from '@/components/shared/time-display'
 import { AuditTrail } from '@/components/shared'
+import { ConnectError, Code } from '@connectrpc/connect'
+import { useApiClients } from '@/api/context'
 import { useTenantContext } from '@/contexts/tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
+import { AccountStatus } from '@/api/gen/meridian/current_account/v1/current_account_pb'
 import { DepositDialog } from './deposit-dialog'
 import { WithdrawDialog } from './withdraw-dialog'
 import { ControlDialog } from './control-dialog'
 import type { ControlAction } from './control-dialog'
 import { CreateLienDialog } from './create-lien-dialog'
 import { CreateValuationFeatureDialog } from '@/components/shared/create-valuation-feature-dialog'
-import type { AccountStatus, CurrentAccount, RetrieveCurrentAccountResponse } from './types'
+import type { AccountStatus as AccountStatusType, CurrentAccount } from './types'
 
-async function retrieveAccount(
-  tenantSlug: string,
-  accountId: string,
-): Promise<CurrentAccount | null> {
-  const response = await fetch(
-    `/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Tenant-Slug': tenantSlug,
-      },
-      body: JSON.stringify({ accountId }),
-    },
-  )
-
-  if (response.status === 404) {
-    return null
-  }
-
-  if (!response.ok) {
-    throw new Error(`Failed to retrieve account: ${response.status}`)
-  }
-
-  const data = (await response.json()) as RetrieveCurrentAccountResponse
-  return data.account
+const ACCOUNT_STATUS_NAMES: Record<number, string> = {
+  [AccountStatus.ACTIVE]: 'ACTIVE',
+  [AccountStatus.FROZEN]: 'FROZEN',
+  [AccountStatus.CLOSED]: 'CLOSED',
 }
 
 // ---------------------------------------------------------------------------
@@ -97,7 +78,7 @@ function AccountNotFound() {
 // ---------------------------------------------------------------------------
 
 interface AccountActionsProps {
-  status: AccountStatus
+  status: AccountStatusType
   accountId: string
   currency: string
 }
@@ -211,10 +192,30 @@ function DetailField({ label, children }: { label: string; children: React.React
 export function AccountDetailPage() {
   const { accountId } = useParams<{ accountId: string }>()
   const { tenantSlug } = useTenantContext()
+  const clients = useApiClients()
 
   const { data: account, isLoading, isError } = useQuery({
     queryKey: tenantKeys.account(tenantSlug ?? '', accountId ?? ''),
-    queryFn: () => retrieveAccount(tenantSlug ?? '', accountId ?? ''),
+    queryFn: async (): Promise<CurrentAccount | null> => {
+      try {
+        const response = await clients.currentAccount.retrieveCurrentAccount({ accountId: accountId ?? '' })
+        const f = response.facility
+        if (!f) return null
+        return {
+          accountId: f.accountId,
+          externalReference: f.externalIdentifier ?? '',
+          status: (ACCOUNT_STATUS_NAMES[f.accountStatus] ?? String(f.accountStatus)) as AccountStatusType,
+          instrumentCode: f.instrumentCode || '',
+          availableBalance: '',
+          createdAt: f.createdAt ?? undefined,
+          updatedAt: f.updatedAt ?? undefined,
+          partyId: f.orgPartyId || undefined,
+        }
+      } catch (err: unknown) {
+        if (ConnectError.from(err).code === Code.NotFound) return null
+        throw err
+      }
+    },
     enabled: !!accountId,
   })
 
@@ -253,7 +254,7 @@ export function AccountDetailPage() {
         <AccountActions
           status={account.status}
           accountId={account.accountId}
-          currency={account.baseCurrency}
+          currency={account.instrumentCode}
         />
       </div>
 
@@ -261,7 +262,7 @@ export function AccountDetailPage() {
       <Card className="mt-6">
         <CardContent>
           <dl className="grid grid-cols-2 gap-4 pt-2 md:grid-cols-4">
-            <DetailField label="Currency">{account.baseCurrency}</DetailField>
+            <DetailField label="Instrument">{account.instrumentCode}</DetailField>
             <DetailField label="Available Balance">
               {account.availableBalance ?? '—'}
             </DetailField>
@@ -297,7 +298,7 @@ export function AccountDetailPage() {
                   <DetailField label="Status">
                     <StatusBadge status={account.status} />
                   </DetailField>
-                  <DetailField label="Base Currency">{account.baseCurrency}</DetailField>
+                  <DetailField label="Instrument">{account.instrumentCode}</DetailField>
                   <DetailField label="Available Balance">
                     {account.availableBalance ?? '—'}
                   </DetailField>

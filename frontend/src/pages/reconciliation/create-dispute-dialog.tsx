@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { useAuthenticatedFetch } from '@/hooks/use-authenticated-fetch'
 
 const DISPUTE_REASON_OPTIONS = [
   { label: 'Amount Mismatch', value: 'DISPUTE_REASON_AMOUNT_MISMATCH' },
@@ -70,6 +71,7 @@ async function createDispute(
   runId: string,
   varianceId: string,
   data: FormData,
+  fetchFn: typeof fetch = fetch,
 ): Promise<{ disputeId: string }> {
   const body: Record<string, unknown> = {
     varianceId,
@@ -81,7 +83,7 @@ async function createDispute(
     body.expectedAmount = data.expectedAmount
   }
 
-  const response = await fetch(`/api/v1/reconciliation/runs/${runId}/disputes`, {
+  const response = await fetchFn(`/api/v1/reconciliation/runs/${runId}/disputes`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -101,6 +103,7 @@ export function CreateDisputeDialog({
   runId,
   lineItem,
 }: CreateDisputeDialogProps) {
+  const authFetch = useAuthenticatedFetch()
   const queryClient = useQueryClient()
 
   const [formData, setFormData] = React.useState<FormData>({
@@ -119,7 +122,7 @@ export function CreateDisputeDialog({
 
   const mutation = useMutation({
     mutationFn: (vars: { runId: string; varianceId: string; data: FormData }) =>
-      createDispute(vars.runId, vars.varianceId, vars.data),
+      createDispute(vars.runId, vars.varianceId, vars.data, authFetch),
     onSuccess: (_result, vars) => {
       void queryClient.invalidateQueries({ queryKey: ['reconciliation-disputes', vars.runId] })
       if (lineItem.varianceId === vars.varianceId) {

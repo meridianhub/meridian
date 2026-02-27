@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useTenantContext } from '@/contexts/tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
+import { useAuthenticatedFetch } from '@/hooks/use-authenticated-fetch'
 import { amountToBigInt } from './account-form-utils'
 
 interface DepositDialogProps {
@@ -36,34 +37,9 @@ function validateAmount(value: string): string | null {
   return null
 }
 
-async function depositFunds(
-  tenantSlug: string,
-  accountId: string,
-  amountMinorUnits: string,
-): Promise<void> {
-  const response = await fetch(
-    `/meridian.current_account.v1.CurrentAccountService/DepositFunds`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Tenant-Slug': tenantSlug,
-      },
-      body: JSON.stringify({
-        accountId,
-        amount: { amount: amountMinorUnits },
-      }),
-    },
-  )
-
-  if (!response.ok) {
-    const data = (await response.json().catch(() => ({}))) as { message?: string }
-    throw new Error(data.message ?? `Failed to deposit: ${response.status}`)
-  }
-}
-
 export function DepositDialog({ open, onOpenChange, accountId, currency }: DepositDialogProps) {
   const { tenantSlug } = useTenantContext()
+  const authFetch = useAuthenticatedFetch()
   const queryClient = useQueryClient()
   const [amount, setAmount] = React.useState('')
   const [amountError, setAmountError] = React.useState<string | null>(null)
@@ -78,9 +54,19 @@ export function DepositDialog({ open, onOpenChange, accountId, currency }: Depos
   }, [open])
 
   const mutation = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       const minorUnits = amountToBigInt(amount).toString()
-      return depositFunds(tenantSlug ?? '', accountId, minorUnits)
+      const response = await authFetch(
+        `/meridian.current_account.v1.CurrentAccountService/DepositFunds`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ accountId, amount: { amount: minorUnits } }),
+        },
+      )
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { message?: string }
+        throw new Error(data.message ?? `Failed to deposit: ${response.status}`)
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({
