@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { ErrorBoundary, PageErrorBoundary } from '@/components/error-boundary'
+import { ErrorBoundary, PageErrorBoundary, RouteErrorBoundary } from '@/components/error-boundary'
 
 // Component that throws an error
 function ThrowError() {
@@ -150,5 +150,76 @@ describe('PageErrorBoundary', () => {
     )
 
     expect(screen.getByText('Safe content')).toBeInTheDocument()
+  })
+})
+
+describe('RouteErrorBoundary', () => {
+  beforeEach(() => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
+
+  it('renders inline error instead of full-page crash', () => {
+    render(
+      <RouteErrorBoundary>
+        <ThrowError />
+      </RouteErrorBoundary>
+    )
+
+    expect(screen.getByText('Failed to load page')).toBeInTheDocument()
+    expect(
+      screen.getByText('This page encountered an error. Other pages should still work normally.')
+    ).toBeInTheDocument()
+  })
+
+  it('shows error message', () => {
+    render(
+      <RouteErrorBoundary>
+        <ThrowError />
+      </RouteErrorBoundary>
+    )
+
+    expect(screen.getByText('Test error')).toBeInTheDocument()
+  })
+
+  it('renders children when no error', () => {
+    render(
+      <RouteErrorBoundary>
+        <SafeComponent />
+      </RouteErrorBoundary>
+    )
+
+    expect(screen.getByText('Safe content')).toBeInTheDocument()
+  })
+
+  it('retry button resets error state', async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(
+      <RouteErrorBoundary>
+        <ThrowError />
+      </RouteErrorBoundary>
+    )
+
+    expect(screen.getByText('Failed to load page')).toBeInTheDocument()
+
+    rerender(
+      <RouteErrorBoundary>
+        <SafeComponent />
+      </RouteErrorBoundary>
+    )
+
+    const retryButton = screen.getByRole('button', { name: /retry/i })
+    await user.click(retryButton)
+
+    expect(screen.getByText('Safe content')).toBeInTheDocument()
+  })
+
+  it('does not show Go to Dashboard button (stays in layout)', () => {
+    render(
+      <RouteErrorBoundary>
+        <ThrowError />
+      </RouteErrorBoundary>
+    )
+
+    expect(screen.queryByRole('button', { name: /go to dashboard/i })).not.toBeInTheDocument()
   })
 })
