@@ -125,7 +125,10 @@ func NewDepositOrchestrator(cfg DepositOrchestratorConfig) (*DepositOrchestrator
 //     instruments (e.g., RICE-KG with batch tracking), both debit and credit sides
 //     of the double-entry must have matching fungibility keys. If nil, no fungibility
 //     validation is performed (suitable for fully fungible instruments like USD).
-func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.CurrentAccount, amount domain.Amount, transactionID string, attributes map[string]string) (*pb.ExecuteDepositResponse, error) {
+//   - clearingAccountIDOverride: If non-empty, used as the clearing account for the debit
+//     side instead of the dynamically resolved or statically configured clearing account.
+//     Used for energy meter reads where the debit targets a GSP-specific internal account.
+func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.CurrentAccount, amount domain.Amount, transactionID string, attributes map[string]string, clearingAccountIDOverride string) (*pb.ExecuteDepositResponse, error) {
 	sagaStart := time.Now()
 	sagaStatus := operationStatusSuccess
 	defer func() {
@@ -161,8 +164,24 @@ func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.Cu
 			"instrument", instrumentCode)
 	}
 
-	// Resolve clearing account ID (dynamic resolver preferred, fallback to static config)
-	clearingAccountID := o.resolveClearingAccountID(ctx, amount.InstrumentCode())
+	// Resolve clearing account ID: explicit override > dynamic resolver > static config
+	var clearingAccountID string
+	if clearingAccountIDOverride != "" {
+		// Validate override is a well-formed account identifier (UUID format).
+		// The saga will further validate the account exists in Financial Accounting.
+		if _, parseErr := uuid.Parse(clearingAccountIDOverride); parseErr != nil {
+			sagaStatus = operationStatusFailed
+			return nil, status.Errorf(codes.InvalidArgument,
+				"clearing_account_id override is not a valid UUID: %s", clearingAccountIDOverride)
+		}
+		clearingAccountID = clearingAccountIDOverride
+		o.logger.Warn("clearing account override applied",
+			"clearing_account_id", clearingAccountID,
+			"account_id", account.AccountID(),
+			"instrument", amount.InstrumentCode())
+	} else {
+		clearingAccountID = o.resolveClearingAccountID(ctx, amount.InstrumentCode())
+	}
 
 	// Parse correlation ID safely - fallback to generated ID if invalid
 	correlationUUID, parseErr := uuid.Parse(correlationID)

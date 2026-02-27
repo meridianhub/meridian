@@ -4,10 +4,14 @@
 //   - An energy company tenant ("volterra-energy")
 //   - The energy manifest (instruments: GBP, KWH, CARBON_CREDIT)
 //   - A DNO organization (UK Power Networks) with 4 Grid Supply Points
+//   - 4 GSP KWH inventory internal accounts (one per grid supply point)
 //   - 10 residential customers each with:
 //   - A GBP billing account (charges in pounds sterling)
 //   - A KWH consumption tracking account (meter reading credits)
-//   - Initial deposits: GBP billing charges and KWH consumption credits (30 days simulated)
+//   - 30 days of simulated meter reads using double-entry:
+//   - CREDIT customer KWH account (asset: energy consumed)
+//   - DEBIT GSP KWH inventory account (liability: energy owed to grid)
+//   - 30 days of GBP billing at fixed retail tariff (24.5p/kWh)
 //   - A wholesale energy price dataset with 30 days of historical prices
 //
 // All operations are idempotent — safe to run multiple times.
@@ -31,6 +35,7 @@ import (
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
+	internalaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
 	marketv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	tenantv1 "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
@@ -52,8 +57,9 @@ const (
 
 // Sentinel errors for idempotent lookups.
 var (
-	errPartyNotFoundInListing   = fmt.Errorf("party reported as existing but not found in listing")
-	errAccountNotFoundInListing = fmt.Errorf("account reported as existing but not found in listing")
+	errPartyNotFoundInListing    = fmt.Errorf("party reported as existing but not found in listing")
+	errAccountNotFoundInListing  = fmt.Errorf("account reported as existing but not found in listing")
+	errMissingGSPClearingAccount = fmt.Errorf("missing GSP KWH clearing account")
 )
 
 var (
@@ -127,21 +133,28 @@ func run() error {
 		return fmt.Errorf("register parties: %w", err)
 	}
 
-	// 6. Create accounts
-	fmt.Println("\n=== Step 4: Create Current Accounts ===")
-	customerAccounts, err := createAccounts(tCtx, conn, dnoPartyID, customerPartyIDs)
+	// 6. Create GSP internal accounts (KWH inventory — debit side of meter read double-entry)
+	fmt.Println("\n=== Step 4: Create GSP Internal Accounts ===")
+	gspKwhAccountIDs, err := createGSPInternalAccounts(tCtx, conn, gspPartyIDs)
+	if err != nil {
+		return fmt.Errorf("create GSP internal accounts: %w", err)
+	}
+
+	// 7. Create customer accounts
+	fmt.Println("\n=== Step 5: Create Current Accounts ===")
+	customerAccounts, err := createAccounts(tCtx, conn, dnoPartyID, customerPartyIDs, gspKwhAccountIDs)
 	if err != nil {
 		return fmt.Errorf("create accounts: %w", err)
 	}
 
-	// 7. Deposit initial balances
-	fmt.Println("\n=== Step 5: Seed Account Balances ===")
+	// 8. Deposit initial balances (KWH meter reads target GSP clearing accounts)
+	fmt.Println("\n=== Step 6: Seed Account Balances ===")
 	if err := seedBalances(tCtx, conn, customerAccounts); err != nil {
 		return fmt.Errorf("seed balances: %w", err)
 	}
 
-	// 8. Seed market data
-	fmt.Println("\n=== Step 6: Seed Wholesale Energy Prices ===")
+	// 9. Seed market data
+	fmt.Println("\n=== Step 7: Seed Wholesale Energy Prices ===")
 	if err := seedMarketData(tCtx, conn); err != nil {
 		return fmt.Errorf("seed market data: %w", err)
 	}
@@ -149,8 +162,9 @@ func run() error {
 	fmt.Println("\n=== Demo Seed Complete ===")
 	fmt.Printf("Tenant:     %s (slug: %s)\n", tenantID, tenantSlug)
 	fmt.Printf("DNO:        %s\n", dnoPartyID)
-	fmt.Printf("GSPs:       %d grid supply points\n", len(gspPartyIDs))
+	fmt.Printf("GSPs:       %d grid supply points with KWH inventory accounts\n", len(gspPartyIDs))
 	fmt.Printf("Customers:  %d customers with GBP billing + KWH consumption accounts\n", len(customerPartyIDs))
+	fmt.Printf("Double-entry: Each KWH meter read DEBITs GSP inventory, CREDITs customer account\n")
 	fmt.Printf("Market:     30 days of wholesale energy prices\n")
 	return nil
 }
@@ -324,16 +338,78 @@ func findPartyByExternalRef(ctx context.Context, client partyv1.PartyServiceClie
 	return "", fmt.Errorf("%w: external_reference=%q", errPartyNotFoundInListing, extRef)
 }
 
+// ─── GSP Internal Account Creation ──────────────────────────────────────────
+
+// createGSPInternalAccounts creates KWH inventory internal accounts for each GSP.
+// These are the debit side of the meter read double-entry: when a customer consumes
+// energy, the GSP's inventory account is debited (liability to the grid).
+func createGSPInternalAccounts(ctx context.Context, conn *grpc.ClientConn, gspPartyIDs []string) ([]string, error) {
+	client := internalaccountv1.NewInternalAccountServiceClient(conn)
+
+	gspKwhAccountIDs := make([]string, len(gspDefinitions))
+	for i, gsp := range gspDefinitions {
+		accountCode := fmt.Sprintf("GSP-KWH-%s", gsp.region)
+		resp, err := client.InitiateInternalAccount(ctx, &internalaccountv1.InitiateInternalAccountRequest{
+			AccountCode:     accountCode,
+			Name:            fmt.Sprintf("%s KWH Inventory", gsp.name),
+			InstrumentCode:  "KWH",
+			Description:     fmt.Sprintf("KWH inventory for %s — tracks energy owed to the grid", gsp.region),
+			OrgPartyId:      gspPartyIDs[i],
+			ProductTypeCode: "INVENTORY_KWH",
+		})
+		if err != nil {
+			if st, ok := status.FromError(err); ok && st.Code() == codes.AlreadyExists {
+				existingID, findErr := findInternalAccountByCode(ctx, client, accountCode)
+				if findErr != nil {
+					return nil, fmt.Errorf("find existing GSP account %s: %w", gsp.region, findErr)
+				}
+				gspKwhAccountIDs[i] = existingID
+				fmt.Printf("  GSP-KWH: %s (%s, existing)\n", existingID, gsp.region)
+				continue
+			}
+			return nil, fmt.Errorf("create GSP KWH account for %s: %w", gsp.region, err)
+		}
+		gspKwhAccountIDs[i] = resp.GetAccountId()
+		fmt.Printf("  GSP-KWH: %s (%s)\n", resp.GetAccountId(), gsp.region)
+	}
+
+	return gspKwhAccountIDs, nil
+}
+
+func findInternalAccountByCode(ctx context.Context, client internalaccountv1.InternalAccountServiceClient, accountCode string) (string, error) {
+	var pageToken string
+	for {
+		listResp, err := client.ListInternalAccounts(ctx, &internalaccountv1.ListInternalAccountsRequest{
+			Pagination: &commonv1.Pagination{PageSize: 100, PageToken: pageToken},
+		})
+		if err != nil {
+			return "", fmt.Errorf("list internal accounts to find %q: %w", accountCode, err)
+		}
+		for _, a := range listResp.GetFacilities() {
+			if a.GetAccountCode() == accountCode {
+				return a.GetAccountId(), nil
+			}
+		}
+		pageToken = listResp.GetPagination().GetNextPageToken()
+		if pageToken == "" {
+			break
+		}
+	}
+	return "", fmt.Errorf("%w: account_code=%q", errAccountNotFoundInListing, accountCode)
+}
+
 // ─── Account Creation ────────────────────────────────────────────────────────
 
 type customerAccountPair struct {
-	customerName string
-	partyID      string
-	gbpAccountID string
-	kwhAccountID string
+	customerName    string
+	partyID         string
+	gbpAccountID    string
+	kwhAccountID    string
+	gspRegion       string
+	gspKwhAccountID string // GSP internal account for the debit side of KWH double-entry
 }
 
-func createAccounts(ctx context.Context, conn *grpc.ClientConn, dnoPartyID string, customerPartyIDs []string) ([]customerAccountPair, error) {
+func createAccounts(ctx context.Context, conn *grpc.ClientConn, dnoPartyID string, customerPartyIDs []string, gspKwhAccountIDs []string) ([]customerAccountPair, error) {
 	client := currentaccountv1.NewCurrentAccountServiceClient(conn)
 
 	accounts := make([]customerAccountPair, len(customerPartyIDs))
@@ -341,6 +417,8 @@ func createAccounts(ctx context.Context, conn *grpc.ClientConn, dnoPartyID strin
 		cust := customerDefinitions[i]
 		accounts[i].customerName = cust.legalName
 		accounts[i].partyID = partyID
+		accounts[i].gspRegion = gspDefinitions[cust.gspIndex].region
+		accounts[i].gspKwhAccountID = gspKwhAccountIDs[cust.gspIndex]
 
 		// GBP billing account — charges in pounds sterling
 		gbpID, err := createAccountIdempotent(ctx, client, partyID, fmt.Sprintf("VE-GBP-%03d", i+1), "GBP", dnoPartyID)
@@ -356,7 +434,7 @@ func createAccounts(ctx context.Context, conn *grpc.ClientConn, dnoPartyID strin
 			return nil, fmt.Errorf("create KWH account for %s: %w", cust.legalName, err)
 		}
 		accounts[i].kwhAccountID = kwhID
-		fmt.Printf("  KWH: %s (%s)\n", kwhID, cust.legalName)
+		fmt.Printf("  KWH: %s (%s, GSP: %s)\n", kwhID, cust.legalName, accounts[i].gspRegion)
 	}
 
 	return accounts, nil
@@ -433,15 +511,22 @@ func seedCustomerBalances(ctx context.Context, client currentaccountv1.CurrentAc
 		if err := depositIdempotent(ctx, client, acct.gbpAccountID, dailyGBP, "GBP",
 			fmt.Sprintf("Energy billing %s: %.2f kWh @ %.1fp/kWh", date.Format("2006-01-02"), dailyKWH, fixedRate*100),
 			fmt.Sprintf("BILL-%s-%s", acct.partyID, date.Format("20060102")),
+			"", // no clearing override for GBP — uses default clearing account
 		); err != nil {
 			return fmt.Errorf("deposit GBP for %s day %d: %w", acct.customerName, day, err)
 		}
 
-		// KWH consumption deposit — meter reading credit for energy consumed
+		// KWH meter read deposit — CREDIT customer (asset: energy consumed),
+		// DEBIT GSP inventory (liability: energy owed to grid).
+		// The clearing_account_id override routes the debit to the customer's GSP.
 		if acct.kwhAccountID != "" {
+			if acct.gspKwhAccountID == "" {
+				return fmt.Errorf("%w: %s (%s)", errMissingGSPClearingAccount, acct.customerName, acct.gspRegion)
+			}
 			if err := depositIdempotent(ctx, client, acct.kwhAccountID, dailyKWH, "KWH",
 				fmt.Sprintf("Meter reading %s: %.3f kWh consumed", date.Format("2006-01-02"), dailyKWH),
 				fmt.Sprintf("METER-%s-%s", acct.partyID, date.Format("20060102")),
+				acct.gspKwhAccountID, // GSP inventory account as clearing target
 			); err != nil {
 				return fmt.Errorf("deposit KWH for %s day %d: %w", acct.customerName, day, err)
 			}
@@ -452,12 +537,13 @@ func seedCustomerBalances(ctx context.Context, client currentaccountv1.CurrentAc
 	return nil
 }
 
-func depositIdempotent(ctx context.Context, client currentaccountv1.CurrentAccountServiceClient, accountID string, amount float64, currency, description, reference string) error {
+func depositIdempotent(ctx context.Context, client currentaccountv1.CurrentAccountServiceClient, accountID string, amount float64, currency, description, reference, clearingAccountID string) error {
 	_, err := client.ExecuteDeposit(ctx, &currentaccountv1.ExecuteDepositRequest{
-		AccountId:   accountID,
-		Amount:      toMoney(amount, currency),
-		Description: description,
-		Reference:   reference,
+		AccountId:         accountID,
+		Amount:            toMoney(amount, currency),
+		Description:       description,
+		Reference:         reference,
+		ClearingAccountId: clearingAccountID,
 	})
 	if err != nil {
 		if st, ok := status.FromError(err); ok && st.Code() == codes.AlreadyExists {
