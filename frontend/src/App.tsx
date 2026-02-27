@@ -298,7 +298,7 @@ function AppShellLayout() {
  * Must be rendered inside both AuthProvider and TenantProvider.
  */
 function ApiClientBridge({ children }: { children: ReactNode }) {
-  const { accessToken, logout } = useAuth()
+  const { accessToken } = useAuth()
   const { tenantSlug } = useTenantContext()
 
   const tokenRef = useRef(accessToken)
@@ -316,7 +316,7 @@ function ApiClientBridge({ children }: { children: ReactNode }) {
   const getTenantSlug = useCallback(() => slugRef.current, [])
 
   return (
-    <ApiClientProvider tenantSlug={tenantSlug} getToken={getToken} getTenantSlug={getTenantSlug} onUnauthenticated={logout}>
+    <ApiClientProvider tenantSlug={tenantSlug} getToken={getToken} getTenantSlug={getTenantSlug}>
       {children}
     </ApiClientProvider>
   )

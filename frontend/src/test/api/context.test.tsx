@@ -65,7 +65,7 @@ describe('ApiClientProvider and useApiClients', () => {
 
     renderHook(() => useApiClients(), { wrapper })
 
-    expect(createTenantTransport).toHaveBeenCalledWith('acme', getToken, getTenantSlug, undefined)
+    expect(createTenantTransport).toHaveBeenCalledWith('acme', getToken, getTenantSlug)
   })
 
   it('creates transport with null when no tenant slug', () => {
@@ -78,7 +78,7 @@ describe('ApiClientProvider and useApiClients', () => {
 
     renderHook(() => useApiClients(), { wrapper })
 
-    expect(createTenantTransport).toHaveBeenCalledWith(null, getToken, nullSlugGetter, undefined)
+    expect(createTenantTransport).toHaveBeenCalledWith(null, getToken, nullSlugGetter)
   })
 
   it('recreates clients when tenant slug changes', () => {
