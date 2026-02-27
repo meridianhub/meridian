@@ -59,7 +59,6 @@ export function ReferenceDataHubPage() {
     queryFn: async () => {
       const res = await clients.referenceData.listInstruments({
         statusFilter: InstrumentStatus.UNSPECIFIED,
-        dimensionFilter: 0,
         pageSize: 1000,
         pageToken: '',
       })
