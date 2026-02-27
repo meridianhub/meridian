@@ -83,8 +83,12 @@ export function AccountsTab({ partyId }: AccountsTabProps) {
 
       while (collected.length < params.pageSize && pagesScanned < MAX_PAGES) {
         pagesScanned++
+        // Use remaining slots as batch size to avoid dropping same-page overflow:
+        // if the batch were larger than remaining slots, we might get more matches
+        // than pageSize in one batch but nextPageToken would advance past them.
+        const remaining = Math.max(params.pageSize - collected.length, 1)
         const response = await clients.currentAccount.listCurrentAccounts({
-          pageSize: 100,
+          pageSize: remaining,
           pageToken: cursor,
         })
 
