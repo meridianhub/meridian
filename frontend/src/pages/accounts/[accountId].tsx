@@ -7,6 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { StatusBadge } from '@/components/shared/status-badge'
 import { TimeDisplay } from '@/components/shared/time-display'
+import { MoneyDisplay } from '@/components/shared/money-display'
 import { AuditTrail } from '@/components/shared'
 import { ConnectError, Code } from '@connectrpc/connect'
 import { useApiClients } from '@/api/context'
@@ -25,6 +26,20 @@ const ACCOUNT_STATUS_NAMES: Record<number, string> = {
   [AccountStatus.ACTIVE]: 'ACTIVE',
   [AccountStatus.FROZEN]: 'FROZEN',
   [AccountStatus.CLOSED]: 'CLOSED',
+}
+
+/** Extract a display string from google.type.Money (units + nanos/1e9). */
+function formatBalance(money: { units?: bigint | number; nanos?: number; currencyCode?: string } | undefined | null): string {
+  if (!money) return ''
+  const units = typeof money.units === 'bigint' ? Number(money.units) : (money.units ?? 0)
+  const nanos = money.nanos ?? 0
+  const value = units + nanos / 1e9
+  if (money.currencyCode) {
+    try {
+      return new Intl.NumberFormat(undefined, { style: 'currency', currency: money.currencyCode }).format(value)
+    } catch { /* fall through for non-ISO codes */ }
+  }
+  return value.toFixed(2)
 }
 
 // ---------------------------------------------------------------------------
@@ -186,6 +201,85 @@ function DetailField({ label, children }: { label: string; children: React.React
 }
 
 // ---------------------------------------------------------------------------
+// Transactions (ledger postings for this account)
+// ---------------------------------------------------------------------------
+
+function AccountTransactions({ accountId, instrumentCode }: { accountId: string; instrumentCode: string }) {
+  const { tenantSlug } = useTenantContext()
+  const clients = useApiClients()
+
+  const { data, isLoading, isError } = useQuery({
+    queryKey: [...tenantKeys.account(tenantSlug ?? '', accountId), 'postings'],
+    queryFn: () =>
+      clients.financialAccounting.listLedgerPostings({
+        pagination: { pageSize: 50, pageToken: '' },
+        accountId,
+      }),
+    enabled: !!accountId,
+  })
+
+  const postings = data?.ledgerPostings ?? []
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Transactions</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {isLoading && (
+          <div className="animate-pulse space-y-2">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="h-8 rounded bg-muted" />
+            ))}
+          </div>
+        )}
+        {isError && (
+          <p className="text-sm text-muted-foreground">Failed to load transactions.</p>
+        )}
+        {!isLoading && !isError && postings.length === 0 && (
+          <p className="text-sm text-muted-foreground">No transactions found for this account.</p>
+        )}
+        {!isLoading && postings.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-xs font-medium text-muted-foreground">
+                  <th className="pb-2 pr-4">Direction</th>
+                  <th className="pb-2 pr-4">Amount</th>
+                  <th className="pb-2 pr-4">Status</th>
+                  <th className="pb-2">Created</th>
+                </tr>
+              </thead>
+              <tbody>
+                {postings.map((p) => (
+                  <tr key={p.id} className="border-b last:border-0">
+                    <td className="py-2 pr-4">
+                      <StatusBadge status={String(p.postingDirection ?? '')} />
+                    </td>
+                    <td className="py-2 pr-4 tabular-nums">
+                      <MoneyDisplay
+                        amount={p.postingAmount?.amount?.units}
+                        currency={p.postingAmount?.amount?.currencyCode ?? instrumentCode}
+                      />
+                    </td>
+                    <td className="py-2 pr-4">
+                      <StatusBadge status={String(p.status ?? '')} />
+                    </td>
+                    <td className="py-2">
+                      <TimeDisplay timestamp={p.createdAt} format="relative" />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
 
@@ -206,7 +300,7 @@ export function AccountDetailPage() {
           externalReference: f.externalIdentifier ?? '',
           status: (ACCOUNT_STATUS_NAMES[f.accountStatus] ?? String(f.accountStatus)) as AccountStatusType,
           instrumentCode: f.instrumentCode || '',
-          availableBalance: '',
+          availableBalance: formatBalance(f.currentBalance?.availableBalance?.amount),
           createdAt: f.createdAt ?? undefined,
           updatedAt: f.updatedAt ?? undefined,
           partyId: f.orgPartyId || undefined,
@@ -323,16 +417,7 @@ export function AccountDetailPage() {
           </TabsContent>
 
           <TabsContent value="transactions" className="mt-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Transactions</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground">
-                  Transaction history for this account will appear here.
-                </p>
-              </CardContent>
-            </Card>
+            <AccountTransactions accountId={account.accountId} instrumentCode={account.instrumentCode} />
           </TabsContent>
 
           <TabsContent value="liens" className="mt-4">

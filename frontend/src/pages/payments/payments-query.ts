@@ -7,7 +7,7 @@ export interface PaymentOrder {
   amount: string
   currency: string
   status: string
-  createdAt: { seconds: bigint | number; nanos?: number } | null
+  createdAt: string | null
 }
 
 export async function fetchPayments(
@@ -15,11 +15,10 @@ export async function fetchPayments(
   fetchFn: typeof fetch = fetch,
 ): Promise<DataTableResult<PaymentOrder>> {
   const body: Record<string, unknown> = {
-    pageSize: params.pageSize,
-  }
-
-  if (params.pageToken) {
-    body.pageToken = params.pageToken
+    pagination: {
+      pageSize: params.pageSize,
+      pageToken: params.pageToken ?? '',
+    },
   }
 
   if (params.filters?.status) {
@@ -41,11 +40,11 @@ export async function fetchPayments(
 
   const data = (await response.json()) as {
     paymentOrders?: PaymentOrder[]
-    nextPageToken?: string
+    pagination?: { nextPageToken?: string }
   }
 
   return {
     items: data.paymentOrders ?? [],
-    nextPageToken: data.nextPageToken,
+    nextPageToken: data.pagination?.nextPageToken,
   }
 }
