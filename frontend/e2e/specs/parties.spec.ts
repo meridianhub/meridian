@@ -195,8 +195,10 @@ test.describe('Tab switching', () => {
     await switchToTab(page, 'References')
     await expect(page.getByRole('tab', { name: 'References', selected: true })).toBeVisible()
     // ReferencesTab always renders EmptyState when not loading (references-tab.tsx:30)
+    // Scope to tabpanel to avoid matching the tab label itself
     await expect(
-      page.getByText('References').or(page.getByText('No references information available'))
+      page.getByRole('tabpanel').getByRole('heading', { name: 'References' })
+        .or(page.getByRole('tabpanel').getByText('No references information available'))
     ).toBeVisible()
   })
 
