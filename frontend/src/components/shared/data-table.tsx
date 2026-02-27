@@ -2,8 +2,10 @@ import * as React from 'react'
 import {
   flexRender,
   getCoreRowModel,
+  getSortedRowModel,
   useReactTable,
   type ColumnDef,
+  type SortingState,
 } from '@tanstack/react-table'
 import { useQuery, type QueryKey } from '@tanstack/react-query'
 import {
@@ -17,6 +19,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
+import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react'
 
 export interface FilterOption {
   label: string
@@ -50,7 +53,35 @@ export interface DataTableProps<T> {
   filters?: FilterConfig[]
   onRowClick?: (row: T) => void
   className?: string
+  defaultSort?: SortingState
 }
+
+interface SortableHeaderProps {
+  label: string
+  isSorted: false | 'asc' | 'desc'
+  onToggle: () => void
+}
+
+function SortableHeader({ label, isSorted, onToggle }: SortableHeaderProps) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className="flex items-center gap-1 font-medium hover:text-foreground"
+    >
+      {label}
+      {isSorted === 'asc' ? (
+        <ArrowUp className="h-4 w-4" />
+      ) : isSorted === 'desc' ? (
+        <ArrowDown className="h-4 w-4" />
+      ) : (
+        <ArrowUpDown className="h-4 w-4 opacity-50" />
+      )}
+    </button>
+  )
+}
+
+export { SortableHeader }
 
 function SkeletonRow({ colCount }: { colCount: number }) {
   return (
@@ -184,10 +215,12 @@ export function DataTable<T>({
   filters,
   onRowClick,
   className,
+  defaultSort = [],
 }: DataTableProps<T>) {
   const [activeFilters, setActiveFilters] = React.useState<Record<string, string>>({})
   const [pageToken, setPageToken] = React.useState<string | undefined>(undefined)
   const [hasPrev, setHasPrev] = React.useState(false)
+  const [sorting, setSorting] = React.useState<SortingState>(defaultSort)
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: [...(queryKey as unknown[]), { pageToken, ...activeFilters }],
@@ -198,6 +231,9 @@ export function DataTable<T>({
     data: data?.items ?? [],
     columns,
     getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    onSortingChange: setSorting,
+    state: { sorting },
     manualPagination: true,
   })
 
