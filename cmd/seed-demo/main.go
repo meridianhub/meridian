@@ -310,6 +310,11 @@ func registerProductTypes(ctx context.Context, conn *grpc.ClientConn) error {
 			Id: defID,
 		})
 		if err != nil {
+			if st, ok := status.FromError(err); ok &&
+				(st.Code() == codes.AlreadyExists || st.Code() == codes.FailedPrecondition) {
+				fmt.Printf("  Product type: %s (already active)\n", pt.code)
+				continue
+			}
 			return fmt.Errorf("activate %s (id=%s): %w", pt.code, defID, err)
 		}
 		fmt.Printf("  Product type: %s (activated)\n", pt.code)
