@@ -245,6 +245,25 @@ func (m *TenantAuthorizationMiddleware) Handler(next http.Handler) http.Handler 
 			return
 		}
 
+		// Platform-admin/super-admin bypass: when JWT has no tenant claim but has
+		// elevated platform role, allow access without tenant context (platform-level
+		// endpoints like ListTenants) or cross-tenant access (tenant-scoped endpoints
+		// resolved via subdomain).
+		if jwtTenantID == "" {
+			claims, hasClaims := GetClaimsFromContext(ctx)
+			if hasClaims && hasPlatformAdminRole(claims) {
+				m.logger.Debug("platform admin access",
+					slog.String("user_id", claims.UserID),
+					slog.String("path", r.URL.Path),
+				)
+				next.ServeHTTP(w, r)
+				return
+			}
+			// No tenant claim and not a platform admin
+			writeForbidden(w, "missing tenant claim in token")
+			return
+		}
+
 		// Get resolved tenant from context
 		resolvedTenant, hasTenant := tenant.FromContext(ctx)
 		if !hasTenant {
@@ -253,24 +272,6 @@ func (m *TenantAuthorizationMiddleware) Handler(next http.Handler) http.Handler 
 				slog.String("path", r.URL.Path),
 			)
 			writeForbidden(w, "tenant context not resolved")
-			return
-		}
-
-		// Platform-admin/super-admin bypass: when JWT has no tenant claim but has
-		// elevated platform role, allow cross-tenant access via subdomain resolution.
-		if jwtTenantID == "" {
-			claims, hasClaims := GetClaimsFromContext(ctx)
-			if hasClaims && hasPlatformAdminRole(claims) {
-				m.logger.Info("platform admin cross-tenant access",
-					slog.String("user_id", claims.UserID),
-					slog.String("resolved_tenant", resolvedTenant.String()),
-					slog.String("path", r.URL.Path),
-				)
-				next.ServeHTTP(w, r)
-				return
-			}
-			// No tenant claim and not a platform admin
-			writeForbidden(w, "missing tenant claim in token")
 			return
 		}
 
