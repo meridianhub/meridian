@@ -967,10 +967,10 @@ func startEventRouter(ctx context.Context, router *eventstream.Router, logger *s
 
 // wireEventStream conditionally builds event stream components and returns the
 // Router (for lifecycle management) and any gateway ServerOptions that should be
-// applied. When EVENT_STREAM_ENABLED is false (or unset in standalone gateway
-// mode), both return values are nil/empty.
+// applied. When EVENT_STREAM_ENABLED is false or unset, both return values are
+// nil/empty. Set EVENT_STREAM_ENABLED=true to enable.
 func wireEventStream(faDB *gorm.DB, logger *slog.Logger) (*eventstream.Router, []gateway.ServerOption) {
-	if !env.GetEnvAsBool("EVENT_STREAM_ENABLED", true) {
+	if !env.GetEnvAsBool("EVENT_STREAM_ENABLED", false) {
 		return nil, nil
 	}
 	router, wsHandler := buildUnifiedEventStreamComponents(faDB, logger)

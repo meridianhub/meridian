@@ -191,9 +191,10 @@ export function useEventStream(options: UseEventStreamOptions = {}) {
       ws.onclose = () => {
         setConnected(false)
 
-        // Reconnect with exponential backoff unless intentionally closed
+        // Reconnect with exponential backoff + jitter unless intentionally closed
         if (!intentionalClose && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-          const delay = BASE_RECONNECT_DELAY_MS * Math.pow(2, reconnectAttempts)
+          const baseDelay = BASE_RECONNECT_DELAY_MS * Math.pow(2, reconnectAttempts)
+          const delay = baseDelay + Math.random() * baseDelay
           reconnectTimeout = setTimeout(() => {
             reconnectAttempts++
             connect()
