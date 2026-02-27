@@ -256,7 +256,7 @@ var productTypes = []productTypeDef{
 		normalBalance:  referencedatav1.NormalBalance_NORMAL_BALANCE_DEBIT,
 		behaviorClass:  referencedatav1.BehaviorClass_BEHAVIOR_CLASS_INVENTORY,
 		instrumentCode: "KWH",
-		validationCEL:  "amount > 0",
+		validationCEL:  "parse_decimal(amount) > 0.0",
 	},
 	{
 		code:           "ENERGY_TRADING",
@@ -265,7 +265,7 @@ var productTypes = []productTypeDef{
 		normalBalance:  referencedatav1.NormalBalance_NORMAL_BALANCE_DEBIT,
 		behaviorClass:  referencedatav1.BehaviorClass_BEHAVIOR_CLASS_CUSTOMER,
 		instrumentCode: "GBP",
-		validationCEL:  "amount > 0",
+		validationCEL:  "parse_decimal(amount) > 0.0",
 	},
 }
 
