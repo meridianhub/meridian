@@ -26,6 +26,7 @@ import { PositionsPage } from '@/pages/positions'
 import { PositionDetailPage } from '@/pages/positions/detail'
 import { MappingsPage } from '@/pages/mappings'
 import { MappingDetailPage } from '@/pages/mappings/[mappingId]'
+import { ReferenceDataHubPage } from '@/pages/reference-data'
 import { InstrumentsPage } from '@/pages/reference-data/instruments'
 import { AccountTypesPage } from '@/pages/reference-data/account-types'
 import { NodesPage } from '@/pages/reference-data/nodes'
@@ -257,7 +258,7 @@ function AppShellLayout() {
         <Route path="/market-data" element={guarded(<MarketDataPage />)} />
         <Route path="/market-data/:datasetCode" element={guarded(<DatasetDetailPage />)} />
         <Route path="/forecasting" element={guarded(<ForecastingPage />)} />
-        <Route path="/reference-data" element={guarded(<PlaceholderPage title="Reference Data" />)} />
+        <Route path="/reference-data" element={guarded(<ReferenceDataHubPage />)} />
         <Route path="/reference-data/instruments" element={guarded(<InstrumentsPage />)} />
         <Route path="/reference-data/account-types" element={guarded(<AccountTypesPage />)} />
         <Route path="/reference-data/nodes" element={guarded(<NodesPage />)} />
