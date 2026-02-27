@@ -110,10 +110,10 @@ test.describe('Account detail page', () => {
     authenticatedPage,
   }) => {
     await navigateTo(authenticatedPage, '/accounts/non-existent-account-id')
-    await expect(authenticatedPage.getByRole('link', { name: 'Back to Accounts' })).toBeVisible({
+    await expect(authenticatedPage.getByRole('link', { name: 'Accounts' })).toBeVisible({
       timeout: 10_000,
     })
-    await authenticatedPage.getByRole('link', { name: 'Back to Accounts' }).click()
+    await authenticatedPage.getByRole('link', { name: 'Accounts' }).click()
     await expect(authenticatedPage.getByRole('heading', { name: 'Accounts' })).toBeVisible()
   })
 })

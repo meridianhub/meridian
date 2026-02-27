@@ -370,7 +370,7 @@ test.describe('Tenant detail page', () => {
   test('shows Back to Tenants link', async ({ platformAdminPage: page }) => {
     await navigateTo(page, '/tenants/acme_corp')
 
-    await expect(page.getByRole('link', { name: 'Back to Tenants' })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('link', { name: 'Tenants' })).toBeVisible({ timeout: 15_000 })
   })
 
   test('shows Provisioning Status card', async ({ platformAdminPage: page }) => {

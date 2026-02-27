@@ -63,16 +63,15 @@ test.describe('Position detail page', () => {
   test('renders breadcrumb back link on position detail page', async ({ authenticatedPage }) => {
     await navigateTo(authenticatedPage, '/positions/non-existent-log-id')
     await expect(
-      authenticatedPage.getByRole('link', { name: 'Positions' }),
+      authenticatedPage.getByLabel('Breadcrumb').getByRole('link', { name: 'Positions' }),
     ).toBeVisible({ timeout: 10_000 })
   })
 
   test('breadcrumb back link navigates to positions list', async ({ authenticatedPage }) => {
     await navigateTo(authenticatedPage, '/positions/non-existent-log-id')
-    await expect(
-      authenticatedPage.getByRole('link', { name: 'Positions' }),
-    ).toBeVisible({ timeout: 10_000 })
-    await authenticatedPage.getByRole('link', { name: 'Positions' }).click()
+    const breadcrumbLink = authenticatedPage.getByLabel('Breadcrumb').getByRole('link', { name: 'Positions' })
+    await expect(breadcrumbLink).toBeVisible({ timeout: 10_000 })
+    await breadcrumbLink.click()
     await expect(authenticatedPage.getByRole('heading', { name: 'Positions' })).toBeVisible()
   })
 })
