@@ -9,6 +9,7 @@ import { MoneyDisplay } from '@/components/shared/money-display'
 import { TimeDisplay } from '@/components/shared/time-display'
 import { QualityLadderBadge } from '@/components/shared/quality-ladder-badge'
 import { DirectionBadge } from '@/components/shared/direction-badge'
+import { EntityLink } from '@/components/shared'
 import { useApiClients } from '@/api/context'
 import type { FinancialPositionLog, TransactionLogEntry } from './index'
 
@@ -198,8 +199,10 @@ export function PositionDetailPage() {
             <LabeledField label="Account ID">
               {isLoading ? (
                 <SkeletonField />
+              ) : log?.accountId ? (
+                <EntityLink type="account" id={log.accountId} className="font-mono text-xs text-blue-600 hover:underline dark:text-blue-400" />
               ) : (
-                <span className="font-mono text-xs">{log?.accountId ?? '—'}</span>
+                <span>—</span>
               )}
             </LabeledField>
 

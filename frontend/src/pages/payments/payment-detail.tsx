@@ -10,6 +10,7 @@ import { StatusBadge } from '@/components/shared/status-badge'
 import { TimeDisplay } from '@/components/shared/time-display'
 import { SagaTimeline } from '@/components/shared/saga-timeline'
 import { AuditTrail } from '@/components/shared/audit-trail'
+import { EntityLink } from '@/components/shared'
 import { useTenantSlug } from '@/hooks/use-tenant-context'
 import { useAuthenticatedFetch } from '@/hooks/use-authenticated-fetch'
 import { tenantKeys } from '@/lib/query-keys'
@@ -201,7 +202,9 @@ export function PaymentDetailPage() {
             <CardContent>
               <div className="divide-y">
                 <DetailRow label="Payment Order ID">{data.paymentOrderId}</DetailRow>
-                <DetailRow label="Debtor Account">{data.debtorAccountId}</DetailRow>
+                <DetailRow label="Debtor Account">
+                  <EntityLink type="account" id={data.debtorAccountId} />
+                </DetailRow>
                 <DetailRow label="Creditor Reference">{data.creditorReference}</DetailRow>
                 <DetailRow label="Amount">
                   <MoneyDisplay amount={data.amount} currency={data.currency} />

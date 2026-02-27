@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { StatusBadge } from '@/components/shared/status-badge'
 import { TimeDisplay } from '@/components/shared/time-display'
 import { MoneyDisplay } from '@/components/shared/money-display'
-import { AuditTrail } from '@/components/shared'
+import { AuditTrail, EntityLink } from '@/components/shared'
 import { ConnectError, Code } from '@connectrpc/connect'
 import { useApiClients } from '@/api/context'
 import { useTenantContext } from '@/contexts/tenant-context'
@@ -387,7 +387,9 @@ export function AccountDetailPage() {
               {account.availableBalance ?? '—'}
             </DetailField>
             {account.partyId && (
-              <DetailField label="Party ID">{account.partyId}</DetailField>
+              <DetailField label="Party ID">
+                <EntityLink type="party" id={account.partyId} />
+              </DetailField>
             )}
             <DetailField label="Created">
               <TimeDisplay timestamp={account.createdAt} format="absolute" />
@@ -429,7 +431,9 @@ export function AccountDetailPage() {
                     <DetailField label="Name">{account.name}</DetailField>
                   )}
                   {account.partyId && (
-                    <DetailField label="Party ID">{account.partyId}</DetailField>
+                    <DetailField label="Party ID">
+                      <EntityLink type="party" id={account.partyId} />
+                    </DetailField>
                   )}
                   <DetailField label="Created">
                     <TimeDisplay timestamp={account.createdAt} format="both" />
