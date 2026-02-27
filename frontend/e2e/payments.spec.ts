@@ -80,10 +80,9 @@ test.describe('Payment detail page', () => {
 
   test('back link on error page navigates to Payments list', async ({ authenticatedPage }) => {
     await navigateTo(authenticatedPage, '/payments/non-existent-payment-id')
-    await expect(
-      authenticatedPage.getByRole('link', { name: 'Payments' }),
-    ).toBeVisible({ timeout: 10_000 })
-    await authenticatedPage.getByRole('link', { name: 'Payments' }).click()
+    const breadcrumbLink = authenticatedPage.getByLabel('Breadcrumb').getByRole('link', { name: 'Payments' })
+    await expect(breadcrumbLink).toBeVisible({ timeout: 10_000 })
+    await breadcrumbLink.click()
     await expect(authenticatedPage.getByRole('heading', { name: 'Payments' })).toBeVisible()
   })
 })
