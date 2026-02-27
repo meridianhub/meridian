@@ -1,4 +1,4 @@
-import { Link, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import type { ColumnDef } from '@tanstack/react-table'
 import {
@@ -10,7 +10,7 @@ import { useApiClients } from '@/api/context'
 import { useTenantContext } from '@/contexts/tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
 import { StatusBadge } from '@/components/shared/status-badge'
-import { TimeDisplay, EntityLink } from '@/components/shared'
+import { TimeDisplay, EntityLink, Breadcrumbs } from '@/components/shared'
 import { MoneyDisplay } from '@/components/shared/money-display'
 import {
   Table,
@@ -251,13 +251,7 @@ export function BookingLogDetailPage() {
   if (isLoading) {
     return (
       <div className="space-y-6">
-        <div className="flex items-center gap-2">
-          <Link to="/ledger" className="text-sm text-muted-foreground hover:underline">
-            Ledger
-          </Link>
-          <span className="text-muted-foreground">/</span>
-          <span className="text-sm">Loading...</span>
-        </div>
+        <Breadcrumbs items={[{ label: 'Ledger', href: '/ledger' }, { label: 'Loading...' }]} />
         <div className="h-32 animate-pulse rounded-lg bg-muted" />
       </div>
     )
@@ -266,13 +260,7 @@ export function BookingLogDetailPage() {
   if (isError || !data) {
     return (
       <div className="space-y-6">
-        <div className="flex items-center gap-2">
-          <Link to="/ledger" className="text-sm text-muted-foreground hover:underline">
-            Ledger
-          </Link>
-          <span className="text-muted-foreground">/</span>
-          <span className="text-sm">Error</span>
-        </div>
+        <Breadcrumbs items={[{ label: 'Ledger', href: '/ledger' }, { label: 'Error' }]} />
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
           Failed to load booking log. Please try again.
         </div>
@@ -283,13 +271,12 @@ export function BookingLogDetailPage() {
   return (
     <div className="space-y-6">
       {/* Breadcrumb navigation */}
-      <div className="flex items-center gap-2">
-        <Link to="/ledger" className="text-sm text-muted-foreground hover:underline">
-          Ledger
-        </Link>
-        <span className="text-muted-foreground">/</span>
-        <span className="font-mono text-sm">{data.id}</span>
-      </div>
+      <Breadcrumbs
+        items={[
+          { label: 'Ledger', href: '/ledger' },
+          { label: data.id },
+        ]}
+      />
 
       {/* Booking log header with metadata */}
       <BookingLogHeader bookingLog={data} />
