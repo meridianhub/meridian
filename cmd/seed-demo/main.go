@@ -38,6 +38,7 @@ import (
 	internalaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
 	marketv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
+	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
 	tenantv1 "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
 	"github.com/meridianhub/meridian/shared/platform/await"
 	"google.golang.org/genproto/googleapis/type/money"
@@ -125,6 +126,12 @@ func run() error {
 
 	// Tenant-scoped context for all subsequent calls
 	tCtx := withTenant(ctx)
+
+	// 4.5 Register product types (account type definitions)
+	fmt.Println("\n=== Step 2.5: Register Product Types ===")
+	if err := registerProductTypes(tCtx, conn); err != nil {
+		return fmt.Errorf("register product types: %w", err)
+	}
 
 	// 5. Register parties
 	fmt.Println("\n=== Step 3: Register Parties ===")
@@ -225,6 +232,92 @@ func applyManifest(ctx context.Context, conn *grpc.ClientConn) error {
 	if diff := resp.GetDiffSummary(); diff != "" {
 		fmt.Printf("  Changes: %s\n", diff)
 	}
+	return nil
+}
+
+// ─── Product Type Registration ───────────────────────────────────────────────
+
+// productTypeDef defines a product type to register.
+type productTypeDef struct {
+	code           string
+	displayName    string
+	description    string
+	normalBalance  referencedatav1.NormalBalance
+	behaviorClass  referencedatav1.BehaviorClass
+	instrumentCode string
+	validationCEL  string
+}
+
+var productTypes = []productTypeDef{
+	{
+		code:           "INVENTORY_KWH",
+		displayName:    "KWH Inventory Account",
+		description:    "Inventory account for tracking kilowatt-hour energy assets at grid supply points",
+		normalBalance:  referencedatav1.NormalBalance_NORMAL_BALANCE_DEBIT,
+		behaviorClass:  referencedatav1.BehaviorClass_BEHAVIOR_CLASS_INVENTORY,
+		instrumentCode: "KWH",
+		validationCEL:  "amount > 0",
+	},
+	{
+		code:           "ENERGY_TRADING",
+		displayName:    "Energy Trading Account",
+		description:    "Customer-facing account for energy trading in GBP and KWH",
+		normalBalance:  referencedatav1.NormalBalance_NORMAL_BALANCE_DEBIT,
+		behaviorClass:  referencedatav1.BehaviorClass_BEHAVIOR_CLASS_CUSTOMER,
+		instrumentCode: "GBP",
+		validationCEL:  "amount > 0",
+	},
+}
+
+// registerProductTypes creates and activates account type definitions via the
+// AccountTypeRegistryService. Each product type is created as a DRAFT then activated.
+// Idempotent: skips types that already exist.
+func registerProductTypes(ctx context.Context, conn *grpc.ClientConn) error {
+	client := referencedatav1.NewAccountTypeRegistryServiceClient(conn)
+
+	for _, pt := range productTypes {
+		// Check if already active
+		_, err := client.GetActiveDefinition(ctx, &referencedatav1.GetActiveDefinitionRequest{
+			Code: pt.code,
+		})
+		if err == nil {
+			fmt.Printf("  Product type: %s (already active)\n", pt.code)
+			continue
+		}
+		if st, ok := status.FromError(err); !ok || st.Code() != codes.NotFound {
+			return fmt.Errorf("check product type %s: %w", pt.code, err)
+		}
+
+		// Create draft
+		draftResp, err := client.CreateDraft(ctx, &referencedatav1.CreateDraftRequest{
+			Code:           pt.code,
+			DisplayName:    pt.displayName,
+			Description:    pt.description,
+			NormalBalance:  pt.normalBalance,
+			BehaviorClass:  pt.behaviorClass,
+			InstrumentCode: pt.instrumentCode,
+			ValidationCel:  pt.validationCEL,
+		})
+		if err != nil {
+			if st, ok := status.FromError(err); ok && st.Code() == codes.AlreadyExists {
+				fmt.Printf("  Product type: %s (draft exists, skipping activation — re-run to pick up)\n", pt.code)
+				continue
+			}
+			return fmt.Errorf("create draft %s: %w", pt.code, err)
+		}
+		fmt.Printf("  Product type: %s (draft created)\n", pt.code)
+
+		// Activate using the ID from the draft response
+		defID := draftResp.GetDefinition().GetId()
+		_, err = client.ActivateAccountType(ctx, &referencedatav1.ActivateAccountTypeRequest{
+			Id: defID,
+		})
+		if err != nil {
+			return fmt.Errorf("activate %s (id=%s): %w", pt.code, defID, err)
+		}
+		fmt.Printf("  Product type: %s (activated)\n", pt.code)
+	}
+
 	return nil
 }
 

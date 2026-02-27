@@ -45,6 +45,15 @@
       }
     },
     {
+      "code": "INVENTORY_KWH",
+      "name": "KWH Inventory Account",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": ["KWH"],
+      "policies": {
+        "validation": "amount > 0"
+      }
+    },
+    {
       "code": "CARBON_INVENTORY",
       "name": "Carbon Credit Inventory",
       "normalBalance": "NORMAL_BALANCE_DEBIT",

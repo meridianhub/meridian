@@ -75,6 +75,8 @@ import (
 	positionkeepingservice "github.com/meridianhub/meridian/services/position-keeping/service"
 	reconciliationpersistence "github.com/meridianhub/meridian/services/reconciliation/adapters/persistence"
 	reconciliationservice "github.com/meridianhub/meridian/services/reconciliation/service"
+	"github.com/meridianhub/meridian/services/reference-data/accounttype"
+	refcache "github.com/meridianhub/meridian/services/reference-data/cache"
 	refcel "github.com/meridianhub/meridian/services/reference-data/cel"
 	refhandler "github.com/meridianhub/meridian/services/reference-data/handler"
 	refnode "github.com/meridianhub/meridian/services/reference-data/node"
@@ -334,17 +336,24 @@ func registerServices(
 	tracer *observability.Tracer,
 	logger *slog.Logger,
 ) error {
+	// refDataComps is populated by wireReferenceData and used by wireInternalAccount for the account type cache.
+	var refDataComps *refDataComponents
+
 	// Tier 0: No gRPC dependencies
 	for _, wire := range []struct {
 		name string
 		fn   func() error
 	}{
 		{"party", func() error { return wireParty(grpcServer, conns.gormDB("party"), logger) }},
-		{"reference-data", func() error { return wireReferenceData(grpcServer, conns.pgxPool("reference-data"), logger) }},
+		{"reference-data", func() error {
+			var err error
+			refDataComps, err = wireReferenceData(grpcServer, conns.pgxPool("reference-data"), logger)
+			return err
+		}},
 		{"market-information", func() error { return wireMarketInformation(grpcServer, conns.pgxPool("market-information"), logger) }},
 		{"tenant", func() error { return wireTenant(grpcServer, conns.gormDB("tenant"), logger) }},
 		{"internal-account", func() error {
-			return wireInternalAccount(grpcServer, conns.gormDB("internal-account"), logger)
+			return wireInternalAccount(grpcServer, conns.gormDB("internal-account"), refDataComps, logger)
 		}},
 		{"control-plane", func() error { return wireControlPlane(grpcServer, conns.pgxPool("control-plane"), logger) }},
 		{"audit", func() error { return wireAudit(grpcServer, conns.gormDB("tenant"), logger) }}, // audit uses platform DB
@@ -419,36 +428,58 @@ func wireParty(server *grpc.Server, db *gorm.DB, logger *slog.Logger) error {
 	return nil
 }
 
-func wireReferenceData(server *grpc.Server, pool *pgxpool.Pool, logger *slog.Logger) error {
+// refDataComponents holds objects created during wireReferenceData that other
+// services need (e.g., the account type cache loader for internal-account).
+type refDataComponents struct {
+	accountTypeRegistry *accounttype.PostgresRegistry
+	celCompiler         *refcel.Compiler
+}
+
+func wireReferenceData(server *grpc.Server, pool *pgxpool.Pool, logger *slog.Logger) (*refDataComponents, error) {
 	instrumentRegistry, err := refregistry.NewPostgresRegistry(pool)
 	if err != nil {
-		return fmt.Errorf("instrument registry: %w", err)
+		return nil, fmt.Errorf("instrument registry: %w", err)
 	}
 
 	compiler, err := refcel.NewCompiler()
 	if err != nil {
-		return fmt.Errorf("CEL compiler: %w", err)
+		return nil, fmt.Errorf("CEL compiler: %w", err)
 	}
 
 	refDataSvc, err := refhandler.NewService(instrumentRegistry, compiler, logger)
 	if err != nil {
-		return fmt.Errorf("ref data service: %w", err)
+		return nil, fmt.Errorf("ref data service: %w", err)
 	}
 
 	nodeRepo := refnode.NewPostgresRepository(pool)
 	nodeSvc, err := refhandler.NewNodeService(nodeRepo, logger)
 	if err != nil {
-		return fmt.Errorf("node service: %w", err)
+		return nil, fmt.Errorf("node service: %w", err)
 	}
 
 	sagaRegistry := refsaga.NewPostgresRegistry(pool, nil)
 	sagaSvc := refsaga.NewRegistryHandler(sagaRegistry, nil, nil, logger)
 
+	// Account type registry and gRPC service
+	acctTypeReg, err := accounttype.NewPostgresRegistry(pool)
+	if err != nil {
+		return nil, fmt.Errorf("account type registry: %w", err)
+	}
+
+	acctTypeSvc, err := refhandler.NewAccountTypeService(acctTypeReg, instrumentRegistry, compiler, logger)
+	if err != nil {
+		return nil, fmt.Errorf("account type service: %w", err)
+	}
+
 	referencedatav1.RegisterReferenceDataServiceServer(server, refDataSvc)
 	referencedatav1.RegisterNodeServiceServer(server, nodeSvc)
+	referencedatav1.RegisterAccountTypeRegistryServiceServer(server, acctTypeSvc)
 	sagav1.RegisterSagaRegistryServiceServer(server, sagaSvc)
 	logger.Info("registered reference-data service")
-	return nil
+	return &refDataComponents{
+		accountTypeRegistry: acctTypeReg,
+		celCompiler:         compiler,
+	}, nil
 }
 
 func wireMarketInformation(server *grpc.Server, pool *pgxpool.Pool, logger *slog.Logger) error {
@@ -478,9 +509,32 @@ func wireTenant(server *grpc.Server, db *gorm.DB, logger *slog.Logger) error {
 	return nil
 }
 
-func wireInternalAccount(server *grpc.Server, db *gorm.DB, logger *slog.Logger) error {
+// registryAccountTypeLoader adapts accounttype.PostgresRegistry to cache.AccountTypeLoader.
+type registryAccountTypeLoader struct {
+	registry *accounttype.PostgresRegistry
+}
+
+func (l *registryAccountTypeLoader) LoadAccountType(ctx context.Context, code string) (*accounttype.Definition, error) {
+	return l.registry.GetActiveDefinition(ctx, code)
+}
+
+func (l *registryAccountTypeLoader) ListActiveAccountTypes(ctx context.Context) ([]*accounttype.Definition, error) {
+	return l.registry.ListActive(ctx)
+}
+
+func wireInternalAccount(server *grpc.Server, db *gorm.DB, refData *refDataComponents, logger *slog.Logger) error {
 	repo := internalaccountpersistence.NewRepository(db)
-	svc, err := internalaccountservice.NewService(repo)
+
+	var opts []internalaccountservice.Option
+
+	// Wire account type cache if reference-data components are available
+	if refData != nil {
+		loader := &registryAccountTypeLoader{registry: refData.accountTypeRegistry}
+		cache := refcache.NewLocalAccountTypeCache(loader, refData.celCompiler)
+		opts = append(opts, internalaccountservice.WithAccountTypeCache(cache))
+	}
+
+	svc, err := internalaccountservice.NewServiceFull(repo, nil, nil, logger, nil, opts...)
 	if err != nil {
 		return err
 	}
