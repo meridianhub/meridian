@@ -1063,7 +1063,7 @@ func validateSchemaIfPresent(schema json.RawMessage) error {
 // marshalAttributes marshals a map to JSON bytes. Returns nil for nil maps.
 func marshalAttributes(attrs map[string]any) ([]byte, error) {
 	if attrs == nil {
-		return nil, nil
+		return []byte("{}"), nil
 	}
 	b, err := json.Marshal(attrs)
 	if err != nil {
