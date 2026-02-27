@@ -8,37 +8,53 @@ demo.meridianhub.cloud, *.demo.meridianhub.cloud {
 	tls /etc/caddy/certs/origin-cert.pem /etc/caddy/certs/origin-key.pem
 
 	# Protect the demo site with HTTP basic auth, excluding specific paths.
+	# MCP clients authenticate via Bearer tokens (when OAuth is enabled),
+	# not HTTP basic auth.
 	@protected {
-		not path /healthz /readyz /mcp /sse /message /.well-known/oauth-*
+		not path /healthz /readyz /mcp /mcp/* /sse /sse/* /message /message/* /.well-known/*
 	}
 	basicauth @protected {
 		demo $2a$14$xfFb2xnq6vOhKOEh7TTgTula3G.F6MxoT7DawQLGBPziCgjTcWCrS
 	}
 
-	# Use route for explicit ordering — first match wins, no resorting.
-	route {
-		# Health/readiness probes
-		@health_probes path /healthz /readyz
-		reverse_proxy @health_probes meridian:8090
+	# Health/readiness probes (used by Docker and load balancers)
+	handle /healthz {
+		reverse_proxy meridian:8090
+	}
+	handle /readyz {
+		reverse_proxy meridian:8090
+	}
 
-		# OAuth discovery returns 404 when OAuth is disabled. Prevents the
-		# SPA catch-all from returning HTML to MCP clients doing discovery.
-		@oauth_discovery path /.well-known/oauth-authorization-server /.well-known/oauth-protected-resource
-		respond @oauth_discovery 404
+	# OAuth well-known discovery — return 404 when OAuth is not enabled.
+	# This must come before the SPA catch-all so MCP clients get a proper
+	# HTTP error instead of HTML, which they interpret as "needs auth".
+	handle /.well-known/* {
+		respond "Not Found" 404
+	}
 
-		# MCP Server: streamable HTTP + legacy SSE transport
-		@mcp_paths path /mcp /sse /message
-		reverse_proxy @mcp_paths mcp-server:8090
+	# MCP Server: streamable HTTP + legacy SSE transport
+	@mcp_transport {
+		path /mcp /mcp/* /sse /sse/* /message /message/*
+	}
+	handle @mcp_transport {
+		reverse_proxy mcp-server:8090
+	}
 
-		# Dex OIDC endpoints
-		@dex path /dex/*
-		reverse_proxy @dex dex:5556
+	# Dex OIDC endpoints
+	handle /dex/* {
+		reverse_proxy dex:5556
+	}
 
-		# API: ConnectRPC + version
-		@api path /meridian.* /grpc.* /version
-		reverse_proxy @api meridian:8090
+	# API: ConnectRPC + version
+	@api {
+		path /meridian.* /grpc.* /version
+	}
+	handle @api {
+		reverse_proxy meridian:8090
+	}
 
-		# Frontend: static files with SPA fallback (catch-all, must be last)
+	# Frontend: static files with SPA fallback (catch-all, must be last)
+	handle {
 		root * /var/www/html
 		@hashed path /assets/*
 		header @hashed Cache-Control "public, max-age=31536000, immutable"
