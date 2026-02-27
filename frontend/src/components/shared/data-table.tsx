@@ -63,10 +63,17 @@ interface SortableHeaderProps {
 }
 
 function SortableHeader({ label, isSorted, onToggle }: SortableHeaderProps) {
+  const ariaSort = isSorted === 'asc' ? 'ascending' : isSorted === 'desc' ? 'descending' : 'none'
+  const ariaLabel = isSorted
+    ? `${label}, sorted ${isSorted === 'asc' ? 'ascending' : 'descending'}, click to change`
+    : `${label}, click to sort`
+
   return (
     <button
       type="button"
       onClick={onToggle}
+      aria-sort={ariaSort}
+      aria-label={ariaLabel}
       className="flex items-center gap-1 font-medium hover:text-foreground"
     >
       {label}
