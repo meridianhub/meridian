@@ -73,12 +73,16 @@ export function AccountsTab({ partyId }: AccountsTabProps) {
 
       // The API does not support filtering by partyId, so we fetch pages and filter
       // client-side. We continue fetching until we have enough matching rows to fill
-      // pageSize, or the API is exhausted.
+      // pageSize, or the API is exhausted. MAX_PAGES caps sequential API calls to
+      // prevent unbounded fetching when the party owns few accounts in a large dataset.
+      const MAX_PAGES = 10
       const collected: AccountRow[] = []
       let cursor = params.pageToken ?? ''
       let nextPageToken: string | undefined
+      let pagesScanned = 0
 
-      while (collected.length < params.pageSize) {
+      while (collected.length < params.pageSize && pagesScanned < MAX_PAGES) {
+        pagesScanned++
         const response = await clients.currentAccount.listCurrentAccounts({
           pageSize: 100,
           pageToken: cursor,
