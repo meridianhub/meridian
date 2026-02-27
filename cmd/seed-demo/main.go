@@ -538,6 +538,15 @@ func createGSPInternalAccounts(ctx context.Context, conn *grpc.ClientConn, gspPa
 	gspKwhAccountIDs := make([]string, len(gspDefinitions))
 	for i, gsp := range gspDefinitions {
 		accountCode := fmt.Sprintf("GSP-KWH-%s", gsp.region)
+
+		// Check if account already exists first — InitiateInternalAccount
+		// does not return AlreadyExists for duplicate codes, it creates duplicates.
+		if existingID, err := findInternalAccountByCode(ctx, client, accountCode); err == nil && existingID != "" {
+			gspKwhAccountIDs[i] = existingID
+			fmt.Printf("  GSP-KWH: %s (%s, existing)\n", existingID, gsp.region)
+			continue
+		}
+
 		resp, err := client.InitiateInternalAccount(ctx, &internalaccountv1.InitiateInternalAccountRequest{
 			AccountCode:     accountCode,
 			Name:            fmt.Sprintf("%s KWH Inventory", gsp.name),
@@ -547,15 +556,6 @@ func createGSPInternalAccounts(ctx context.Context, conn *grpc.ClientConn, gspPa
 			ProductTypeCode: "INVENTORY_KWH",
 		})
 		if err != nil {
-			if st, ok := status.FromError(err); ok && st.Code() == codes.AlreadyExists {
-				existingID, findErr := findInternalAccountByCode(ctx, client, accountCode)
-				if findErr != nil {
-					return nil, fmt.Errorf("find existing GSP account %s: %w", gsp.region, findErr)
-				}
-				gspKwhAccountIDs[i] = existingID
-				fmt.Printf("  GSP-KWH: %s (%s, existing)\n", existingID, gsp.region)
-				continue
-			}
 			return nil, fmt.Errorf("create GSP KWH account for %s: %w", gsp.region, err)
 		}
 		gspKwhAccountIDs[i] = resp.GetAccountId()

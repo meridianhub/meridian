@@ -11,6 +11,7 @@ export function createTenantTransport(
   tenantSlug: string | null,
   getToken: TokenGetter,
   getTenantSlug: TenantSlugGetter,
+  onUnauthenticated?: () => void,
 ): Transport {
   // In development or demo mode, keep the base URL and route via X-Tenant-Slug header
   // (the gateway's LOCAL_DEV_MODE resolves tenants from the header).
@@ -22,7 +23,10 @@ export function createTenantTransport(
 
   return createConnectTransport({
     baseUrl,
-    interceptors: [createAuthInterceptor(getToken), createTenantInterceptor(getTenantSlug)],
+    interceptors: [
+      createAuthInterceptor(getToken, onUnauthenticated),
+      createTenantInterceptor(getTenantSlug),
+    ],
     useBinaryFormat: apiConfig.useBinaryFormat,
   })
 }

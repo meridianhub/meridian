@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
+import { ConnectError, Code } from '@connectrpc/connect'
 import { createAuthInterceptor } from '@/api/interceptors/auth-interceptor'
 import type { UnaryRequest } from '@connectrpc/connect'
 
@@ -74,5 +75,31 @@ describe('createAuthInterceptor', () => {
     expect(req.header.get('Authorization')).toBe(
       'Bearer eyJhbGciOiJSUzI1NiJ9.payload.signature',
     )
+  })
+
+  it('calls onUnauthenticated and re-throws on Unauthenticated error', async () => {
+    const getToken = vi.fn(() => 'token')
+    const onUnauthenticated = vi.fn()
+    const interceptor = createAuthInterceptor(getToken, onUnauthenticated)
+    const req = makeRequest()
+    const next = vi.fn(async () => {
+      throw new ConnectError('token expired', Code.Unauthenticated)
+    })
+
+    await expect(interceptor(next)(req)).rejects.toThrow(ConnectError)
+    expect(onUnauthenticated).toHaveBeenCalledOnce()
+  })
+
+  it('does not call onUnauthenticated on non-auth errors', async () => {
+    const getToken = vi.fn(() => 'token')
+    const onUnauthenticated = vi.fn()
+    const interceptor = createAuthInterceptor(getToken, onUnauthenticated)
+    const req = makeRequest()
+    const next = vi.fn(async () => {
+      throw new ConnectError('not found', Code.NotFound)
+    })
+
+    await expect(interceptor(next)(req)).rejects.toThrow(ConnectError)
+    expect(onUnauthenticated).not.toHaveBeenCalled()
   })
 })
