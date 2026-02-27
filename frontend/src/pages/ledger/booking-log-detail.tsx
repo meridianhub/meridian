@@ -10,7 +10,7 @@ import { useApiClients } from '@/api/context'
 import { useTenantContext } from '@/contexts/tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
 import { StatusBadge } from '@/components/shared/status-badge'
-import { TimeDisplay } from '@/components/shared'
+import { TimeDisplay, EntityLink } from '@/components/shared'
 import { MoneyDisplay } from '@/components/shared/money-display'
 import {
   Table,
@@ -126,7 +126,7 @@ const postingColumns: ColumnDef<LedgerPosting>[] = [
     accessorKey: 'accountId',
     header: 'Account',
     cell: ({ row }) => (
-      <span className="font-mono text-sm">{row.original.accountId}</span>
+      <EntityLink type="account" id={row.original.accountId} />
     ),
   },
   {

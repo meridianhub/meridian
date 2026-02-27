@@ -13,3 +13,6 @@ export { QualityLadderBadge } from './quality-ladder-badge';
 export { DirectionBadge } from './direction-badge';
 export { CreateValuationFeatureDialog } from './create-valuation-feature-dialog';
 export type { CreateValuationFeatureDialogProps, AccountType } from './create-valuation-feature-dialog';
+
+export { EntityLink } from './entity-link';
+export type { EntityLinkProps, EntityType } from './entity-link';
