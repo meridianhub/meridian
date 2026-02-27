@@ -288,7 +288,7 @@ func registerProductTypes(ctx context.Context, conn *grpc.ClientConn) error {
 			return fmt.Errorf("check product type %s: %w", pt.code, err)
 		}
 
-		// Create draft
+		// Create draft (idempotent: ON CONFLICT returns existing draft)
 		draftResp, err := client.CreateDraft(ctx, &referencedatav1.CreateDraftRequest{
 			Code:           pt.code,
 			DisplayName:    pt.displayName,
@@ -299,16 +299,13 @@ func registerProductTypes(ctx context.Context, conn *grpc.ClientConn) error {
 			ValidationCel:  pt.validationCEL,
 		})
 		if err != nil {
-			if st, ok := status.FromError(err); ok && st.Code() == codes.AlreadyExists {
-				fmt.Printf("  Product type: %s (draft exists, skipping activation — re-run to pick up)\n", pt.code)
-				continue
-			}
 			return fmt.Errorf("create draft %s: %w", pt.code, err)
 		}
-		fmt.Printf("  Product type: %s (draft created)\n", pt.code)
 
 		// Activate using the ID from the draft response
 		defID := draftResp.GetDefinition().GetId()
+		fmt.Printf("  Product type: %s (draft id=%s, activating...)\n", pt.code, defID)
+
 		_, err = client.ActivateAccountType(ctx, &referencedatav1.ActivateAccountTypeRequest{
 			Id: defID,
 		})
