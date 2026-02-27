@@ -313,6 +313,7 @@ func NewServiceWithExistingClients(
 	tracer *observability.Tracer,
 	accountResolver *AccountResolver, // Optional: dynamic clearing account resolution
 	fungibilityValidator *FungibilityValidator, // Optional: validates fungibility for non-fungible instruments
+	opts ...Option,
 ) (*Service, error) {
 	if repo == nil {
 		return nil, ErrRepositoryNil
@@ -405,7 +406,7 @@ func NewServiceWithExistingClients(
 		return nil, fmt.Errorf("failed to create withdrawal orchestrator: %w", err)
 	}
 
-	return &Service{
+	svc := &Service{
 		repo:                   repo,
 		lienRepo:               lienRepo,
 		withdrawalRepo:         withdrawalRepo,
@@ -420,7 +421,11 @@ func NewServiceWithExistingClients(
 		tracer:                 tracer,
 		depositOrchestrator:    depositOrchestrator,
 		withdrawalOrchestrator: withdrawalOrchestrator,
-	}, nil
+	}
+	for _, opt := range opts {
+		opt(svc)
+	}
+	return svc, nil
 }
 
 // loadSagaAsset loads a saga asset (script or schema) from a configurable base directory.

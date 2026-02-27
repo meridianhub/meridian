@@ -597,9 +597,9 @@ func domainDimensionToProto(d registry.Dimension) pb.Dimension {
 		return pb.Dimension_DIMENSION_COMPUTE
 	case registry.DimensionQuantity:
 		return pb.Dimension_DIMENSION_COUNT
-	case "CARBON":
+	case registry.DimensionCarbon:
 		return pb.Dimension_DIMENSION_CARBON
-	case "DATA":
+	case registry.DimensionData:
 		return pb.Dimension_DIMENSION_DATA
 	default:
 		return pb.Dimension_DIMENSION_UNSPECIFIED
@@ -624,9 +624,9 @@ func protoDimensionToDomain(d pb.Dimension) registry.Dimension {
 	case pb.Dimension_DIMENSION_COUNT:
 		return registry.DimensionQuantity
 	case pb.Dimension_DIMENSION_CARBON:
-		return "CARBON" // Domain doesn't have this, map to string
+		return registry.DimensionCarbon
 	case pb.Dimension_DIMENSION_DATA:
-		return "DATA" // Domain doesn't have this, map to string
+		return registry.DimensionData
 	case pb.Dimension_DIMENSION_UNSPECIFIED:
 		return ""
 	default:

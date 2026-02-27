@@ -30,6 +30,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
@@ -58,9 +59,9 @@ const (
 
 // Sentinel errors for idempotent lookups.
 var (
-	errPartyNotFoundInListing    = fmt.Errorf("party reported as existing but not found in listing")
-	errAccountNotFoundInListing  = fmt.Errorf("account reported as existing but not found in listing")
-	errMissingGSPClearingAccount = fmt.Errorf("missing GSP KWH clearing account")
+	errPartyNotFoundInListing   = fmt.Errorf("party reported as existing but not found in listing")
+	errAccountNotFoundInListing = fmt.Errorf("account reported as existing but not found in listing")
+	errManifestValidationFailed = fmt.Errorf("manifest validation failed")
 )
 
 var (
@@ -126,6 +127,12 @@ func run() error {
 
 	// Tenant-scoped context for all subsequent calls
 	tCtx := withTenant(ctx)
+
+	// 4.1 Register instruments directly (manifest executor not wired yet in unified binary)
+	fmt.Println("\n=== Step 2.1: Register Instruments ===")
+	if err := registerInstruments(tCtx, conn); err != nil {
+		return fmt.Errorf("register instruments: %w", err)
+	}
 
 	// 4.5 Register product types (account type definitions)
 	fmt.Println("\n=== Step 2.5: Register Product Types ===")
@@ -232,6 +239,94 @@ func applyManifest(ctx context.Context, conn *grpc.ClientConn) error {
 	if diff := resp.GetDiffSummary(); diff != "" {
 		fmt.Printf("  Changes: %s\n", diff)
 	}
+	if resp.GetStatus() == controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_VALIDATION_FAILED {
+		for _, ve := range resp.GetValidationErrors() {
+			fmt.Printf("  VALIDATION ERROR: [%s] %s — %s\n", ve.GetCode(), ve.GetPath(), ve.GetMessage())
+		}
+		return fmt.Errorf("%w: %d errors", errManifestValidationFailed, len(resp.GetValidationErrors()))
+	}
+	return nil
+}
+
+// ─── Instrument Registration ─────────────────────────────────────────────────
+
+// instrumentDef defines an instrument to register.
+type instrumentDef struct {
+	code        string
+	displayName string
+	dimension   referencedatav1.Dimension
+	precision   int32
+	description string
+}
+
+var instrumentDefs = []instrumentDef{
+	{
+		code:        "GBP",
+		displayName: "British Pound Sterling",
+		dimension:   referencedatav1.Dimension_DIMENSION_CURRENCY,
+		precision:   2,
+		description: "Fiat currency — British Pound Sterling",
+	},
+	{
+		code:        "KWH",
+		displayName: "Kilowatt Hour",
+		dimension:   referencedatav1.Dimension_DIMENSION_ENERGY,
+		precision:   3,
+		description: "Energy unit — Kilowatt Hour",
+	},
+	{
+		code:        "CARBON_CREDIT",
+		displayName: "Carbon Credit",
+		dimension:   referencedatav1.Dimension_DIMENSION_CARBON,
+		precision:   4,
+		description: "Carbon offset — Tonne CO2 Equivalent",
+	},
+}
+
+// registerInstruments creates and activates instruments via the ReferenceDataService.
+// Workaround: the manifest executor is not yet wired in the unified binary,
+// so we register instruments directly to unblock product type activation.
+func registerInstruments(ctx context.Context, conn *grpc.ClientConn) error {
+	client := referencedatav1.NewReferenceDataServiceClient(conn)
+
+	for _, inst := range instrumentDefs {
+		// Check if already active via RetrieveInstrument
+		existing, err := client.RetrieveInstrument(ctx, &referencedatav1.RetrieveInstrumentRequest{
+			Code: inst.code,
+		})
+		if err == nil && existing.GetInstrument().GetStatus() == referencedatav1.InstrumentStatus_INSTRUMENT_STATUS_ACTIVE {
+			fmt.Printf("  Instrument: %s (already active)\n", inst.code)
+			continue
+		}
+
+		// Register (creates DRAFT) — idempotent
+		_, err = client.RegisterInstrument(ctx, &referencedatav1.RegisterInstrumentRequest{
+			Code:            inst.code,
+			DisplayName:     inst.displayName,
+			Dimension:       inst.dimension,
+			Precision:       inst.precision,
+			Description:     inst.description,
+			AttributeSchema: "{}", // empty JSON object — column is jsonb, empty string is invalid
+		})
+		if err != nil {
+			if st, ok := status.FromError(err); ok && st.Code() == codes.AlreadyExists {
+				fmt.Printf("  Instrument: %s (draft exists)\n", inst.code)
+			} else {
+				return fmt.Errorf("register instrument %s: %w", inst.code, err)
+			}
+		}
+
+		// Activate (DRAFT → ACTIVE)
+		_, err = client.ActivateInstrument(ctx, &referencedatav1.ActivateInstrumentRequest{
+			Code:    inst.code,
+			Version: 1,
+		})
+		if err != nil {
+			return fmt.Errorf("activate instrument %s: %w", inst.code, err)
+		}
+		fmt.Printf("  Instrument: %s (registered and activated)\n", inst.code)
+	}
+
 	return nil
 }
 
@@ -310,8 +405,7 @@ func registerProductTypes(ctx context.Context, conn *grpc.ClientConn) error {
 			Id: defID,
 		})
 		if err != nil {
-			if st, ok := status.FromError(err); ok &&
-				(st.Code() == codes.AlreadyExists || st.Code() == codes.FailedPrecondition) {
+			if st, ok := status.FromError(err); ok && st.Code() == codes.AlreadyExists {
 				fmt.Printf("  Product type: %s (already active)\n", pt.code)
 				continue
 			}
@@ -536,6 +630,11 @@ func createAccounts(ctx context.Context, conn *grpc.ClientConn, dnoPartyID strin
 }
 
 func createAccountIdempotent(ctx context.Context, client currentaccountv1.CurrentAccountServiceClient, partyID, extID, instrument, orgPartyID string) (string, error) {
+	// Check if account already exists first (idempotent)
+	if existingID, err := findAccountByExternalID(ctx, client, extID); err == nil && existingID != "" {
+		return existingID, nil
+	}
+
 	resp, err := client.InitiateCurrentAccount(ctx, &currentaccountv1.InitiateCurrentAccountRequest{
 		PartyId:            partyID,
 		ExternalIdentifier: extID,
@@ -544,7 +643,7 @@ func createAccountIdempotent(ctx context.Context, client currentaccountv1.Curren
 		ProductTypeCode:    "ENERGY_TRADING",
 	})
 	if err != nil {
-		if st, ok := status.FromError(err); ok && st.Code() == codes.AlreadyExists {
+		if st, ok := status.FromError(err); ok && (st.Code() == codes.AlreadyExists || strings.Contains(st.Message(), "version conflict")) {
 			return findAccountByExternalID(ctx, client, extID)
 		}
 		return "", err
@@ -611,21 +710,9 @@ func seedCustomerBalances(ctx context.Context, client currentaccountv1.CurrentAc
 			return fmt.Errorf("deposit GBP for %s day %d: %w", acct.customerName, day, err)
 		}
 
-		// KWH meter read deposit — CREDIT customer (asset: energy consumed),
-		// DEBIT GSP inventory (liability: energy owed to grid).
-		// The clearing_account_id override routes the debit to the customer's GSP.
-		if acct.kwhAccountID != "" {
-			if acct.gspKwhAccountID == "" {
-				return fmt.Errorf("%w: %s (%s)", errMissingGSPClearingAccount, acct.customerName, acct.gspRegion)
-			}
-			if err := depositIdempotent(ctx, client, acct.kwhAccountID, dailyKWH, "KWH",
-				fmt.Sprintf("Meter reading %s: %.3f kWh consumed", date.Format("2006-01-02"), dailyKWH),
-				fmt.Sprintf("METER-%s-%s", acct.partyID, date.Format("20060102")),
-				acct.gspKwhAccountID, // GSP inventory account as clearing target
-			); err != nil {
-				return fmt.Errorf("deposit KWH for %s day %d: %w", acct.customerName, day, err)
-			}
-		}
+		// KWH meter read deposits are skipped for now — position-keeping service
+		// does not yet support non-fiat instrument codes in InitiateLog.
+		// TODO: Enable after multi-asset position keeping is implemented.
 	}
 
 	fmt.Printf("  %s: %.1f kWh consumed, £%.2f billed (30 days)\n", acct.customerName, totalKWH, totalGBP)
@@ -681,7 +768,10 @@ func seedMarketData(ctx context.Context, conn *grpc.ClientConn) error {
 	})
 	if err == nil {
 		fmt.Println("  Activated dataset: WHOLESALE_ENERGY_GBP_KWH")
-	} else if st, ok := status.FromError(err); !ok || st.Code() != codes.FailedPrecondition {
+	} else if st, ok := status.FromError(err); ok && (st.Code() == codes.FailedPrecondition || st.Code() == codes.NotFound) {
+		// Already active or dataset not found in current tenant scope — proceed
+		fmt.Printf("  Dataset activation skipped (%s)\n", st.Code())
+	} else {
 		return fmt.Errorf("activate dataset: %w", err)
 	}
 
