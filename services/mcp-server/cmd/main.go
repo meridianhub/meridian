@@ -154,6 +154,11 @@ func runSSE(logger *slog.Logger, cfg server.Config) error {
 
 	srv := server.New(sseTr, cfg, logger)
 
+	// Streamable HTTP transport (MCP spec 2025-03-26).
+	// Shares the same MCPServer instance so tools/resources/prompts are identical.
+	streamableHandler := transport.NewStreamableHTTPHandler(srv, logger)
+	defer streamableHandler.Close()
+
 	mux := http.NewServeMux()
 
 	// OAuth 2.1 endpoints (optional — enabled via MCP_OAUTH_ENABLED=true).
@@ -180,9 +185,11 @@ func runSSE(logger *slog.Logger, cfg server.Config) error {
 		validator := &passthroughValidator{logger: logger}
 		bearerMW := mcpauth.NewBearerMiddleware(validator, meta)
 
+		mux.Handle("/mcp", bearerMW.Handler(streamableHandler))
 		mux.Handle("/sse", bearerMW.Handler(http.HandlerFunc(sseTr.HandleSSE)))
 		mux.Handle("/message", bearerMW.Handler(http.HandlerFunc(sseTr.HandleMessage)))
 	} else {
+		mux.Handle("/mcp", streamableHandler)
 		mux.HandleFunc("/sse", sseTr.HandleSSE)
 		mux.HandleFunc("/message", sseTr.HandleMessage)
 	}

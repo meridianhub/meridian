@@ -30,8 +30,11 @@ demo.meridianhub.cloud, *.demo.meridianhub.cloud {
 		reverse_proxy dex:5556
 	}
 
-	# MCP Server: SSE transport + message endpoint
+	# MCP Server: streamable HTTP + legacy SSE transport
 	# NOTE: Requires mcp-server container to be running; routes will 502 until deployed.
+	handle /mcp {
+		reverse_proxy mcp-server:8090
+	}
 	handle /sse {
 		reverse_proxy mcp-server:8090
 	}
