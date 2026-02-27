@@ -9,19 +9,20 @@ export type EntityType =
   | 'position'
 
 function entityPath(type: EntityType, id: string): string {
+  const encodedId = encodeURIComponent(id)
   switch (type) {
     case 'account':
-      return `/accounts/${id}`
+      return `/accounts/${encodedId}`
     case 'party':
-      return `/parties/${id}`
+      return `/parties/${encodedId}`
     case 'internal-account':
-      return `/internal-accounts/${id}`
+      return `/internal-accounts/${encodedId}`
     case 'payment':
-      return `/payments/${id}`
+      return `/payments/${encodedId}`
     case 'booking-log':
-      return `/ledger/${id}`
+      return `/ledger/${encodedId}`
     case 'position':
-      return `/positions/${id}`
+      return `/positions/${encodedId}`
   }
 }
 
