@@ -80,7 +80,7 @@ func runStdio(logger *slog.Logger, cfg server.Config) error {
 	// Wire tools, resources, and prompts onto the server.
 	cleanup, err := wireServer(srv, logger)
 	if err != nil {
-		logger.Warn("tool wiring incomplete", "error", err)
+		return fmt.Errorf("wire server: %w", err)
 	}
 	if cleanup != nil {
 		defer cleanup()
@@ -166,7 +166,7 @@ func runSSE(logger *slog.Logger, cfg server.Config) error {
 	// Wire tools, resources, and prompts onto the server.
 	cleanup, wireErr := wireServer(srv, logger)
 	if wireErr != nil {
-		logger.Warn("tool wiring incomplete", "error", wireErr)
+		return fmt.Errorf("wire server: %w", wireErr)
 	}
 	if cleanup != nil {
 		defer cleanup()

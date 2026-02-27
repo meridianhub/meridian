@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
@@ -52,7 +53,7 @@ func wireServer(srv *server.MCPServer, logger *slog.Logger) (func(), error) {
 	authCfg, err := mcpauth.LoadFromEnv()
 	if err != nil {
 		logger.Warn("Meridian backend not configured — only local tools available", "error", err)
-		bridgeToolsToServer(srv, toolReg)
+		bridgeToolsToServer(srv, toolReg, logger)
 		// Resource provider with nil manifest client returns a placeholder.
 		srv.SetResourceProvider(resources.New(nil))
 		return nil, nil //nolint:nilnil // partial availability is intentional
@@ -61,7 +62,7 @@ func wireServer(srv *server.MCPServer, logger *slog.Logger) (func(), error) {
 	mc, err := clients.New(authCfg)
 	if err != nil {
 		logger.Warn("failed to create gRPC clients — only local tools available", "error", err)
-		bridgeToolsToServer(srv, toolReg)
+		bridgeToolsToServer(srv, toolReg, logger)
 		srv.SetResourceProvider(resources.New(nil))
 		return nil, nil //nolint:nilnil // partial availability is intentional
 	}
@@ -110,14 +111,14 @@ func wireServer(srv *server.MCPServer, logger *slog.Logger) (func(), error) {
 	tools.RegisterSimulationTools(toolReg, tools.SimulationDeps{})
 
 	// Bridge all registered tools to the server.
-	bridgeToolsToServer(srv, toolReg)
+	bridgeToolsToServer(srv, toolReg, logger)
 
 	return cleanup, nil
 }
 
 // bridgeToolsToServer iterates tools from the registry and registers each
 // with the server, adapting the tools.ToolHandler signature to server.ToolHandler.
-func bridgeToolsToServer(srv *server.MCPServer, reg *tools.Registry) {
+func bridgeToolsToServer(srv *server.MCPServer, reg *tools.Registry, logger *slog.Logger) {
 	for _, t := range reg.List() {
 		name := t.Name // capture for closure
 		srv.RegisterTool(
@@ -126,7 +127,7 @@ func bridgeToolsToServer(srv *server.MCPServer, reg *tools.Registry) {
 				Description: t.Description,
 				InputSchema: t.InputSchema,
 			},
-			toolHandlerFor(reg, name),
+			toolHandlerFor(reg, name, logger),
 		)
 	}
 }
@@ -134,13 +135,17 @@ func bridgeToolsToServer(srv *server.MCPServer, reg *tools.Registry) {
 // toolHandlerFor returns a server.ToolHandler that delegates to the registry.
 // Tool-level errors (validation failures, gRPC errors) are returned as MCP
 // error content blocks rather than Go errors, following MCP convention.
-func toolHandlerFor(reg *tools.Registry, name string) server.ToolHandler {
+// Detailed error information is logged server-side; the client receives a
+// sanitized message to avoid leaking internal details.
+func toolHandlerFor(reg *tools.Registry, name string, logger *slog.Logger) server.ToolHandler {
 	return func(ctx context.Context, args json.RawMessage) (*server.ToolCallResult, error) {
 		result, callErr := reg.Call(ctx, name, args)
 		if callErr != nil {
-			// MCP convention: tool errors are returned as content blocks, not Go errors.
-			// The MCP client displays the error text to the user/LLM.
-			return toolErrorResult(callErr.Error()), nil
+			// Log the full error server-side for debugging.
+			logger.Warn("tool call failed", "tool", name, "error", callErr)
+			// Return a sanitized message to the MCP client.
+			sanitized := fmt.Sprintf("tool %q failed: %s", name, sanitizeError(callErr))
+			return toolErrorResult(sanitized), nil //nolint:nilerr // callErr is logged and returned as MCP content
 		}
 		data, err := json.Marshal(result)
 		if err != nil {
@@ -158,6 +163,16 @@ func toolErrorResult(msg string) *server.ToolCallResult {
 		Content: []server.ContentBlock{{Type: "text", Text: msg}},
 		IsError: true,
 	}
+}
+
+// sanitizeError extracts a user-safe message from the error.
+// gRPC status errors are reduced to their message; other errors pass through
+// as-is since they originate from local validation (CEL, Starlark, etc.).
+func sanitizeError(err error) string {
+	if s, ok := status.FromError(err); ok {
+		return s.Message()
+	}
+	return err.Error()
 }
 
 // ---------------------------------------------------------------------------
