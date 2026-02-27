@@ -15,7 +15,11 @@ export function createAuthInterceptor(
       return await next(req)
     } catch (err) {
       if (err instanceof ConnectError && err.code === Code.Unauthenticated) {
-        onUnauthenticated?.()
+        try {
+          onUnauthenticated?.()
+        } catch {
+          // Preserve original auth error for downstream handling
+        }
       }
       throw err
     }

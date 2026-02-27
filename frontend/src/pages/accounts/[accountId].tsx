@@ -29,9 +29,13 @@ const ACCOUNT_STATUS_NAMES: Record<number, string> = {
 }
 
 /** Extract a display string from google.type.Money (units + nanos/1e9). */
-function formatBalance(money: { units?: bigint | number; nanos?: number; currencyCode?: string } | undefined | null): string {
-  if (!money) return ''
-  const units = typeof money.units === 'bigint' ? Number(money.units) : (money.units ?? 0)
+function formatBalance(money: { units?: bigint | number; nanos?: number; currencyCode?: string } | undefined | null): string | undefined {
+  if (!money) return undefined
+  const rawUnits = typeof money.units === 'bigint' ? money.units : BigInt(Math.trunc(money.units ?? 0))
+  if (rawUnits > BigInt(Number.MAX_SAFE_INTEGER) || rawUnits < BigInt(Number.MIN_SAFE_INTEGER)) {
+    return money.currencyCode ? `${money.currencyCode} ${rawUnits.toString()}` : rawUnits.toString()
+  }
+  const units = Number(rawUnits)
   const nanos = money.nanos ?? 0
   const value = units + nanos / 1e9
   if (money.currencyCode) {

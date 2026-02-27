@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { ConnectError, Code } from '@connectrpc/connect'
 import { queryClient } from '@/lib/query-client'
 import { QueryClient } from '@tanstack/react-query'
 
@@ -25,6 +26,8 @@ describe('queryClient', () => {
     expect(retry(0, new Error('network'))).toBe(true)
     expect(retry(1, new Error('network'))).toBe(true)
     expect(retry(2, new Error('network'))).toBe(false)
+    // Unauthenticated errors should never retry
+    expect(retry(0, new ConnectError('unauth', Code.Unauthenticated))).toBe(false)
   })
 
   it('has no retry for mutations', () => {
