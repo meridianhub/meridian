@@ -25,6 +25,11 @@ vi.mock('@/api/context', () => ({
   })),
 }))
 
+// Mock useAuth to avoid requiring AuthProvider in tests
+vi.mock('@/contexts/auth-context', () => ({
+  useAuth: vi.fn(() => ({ accessToken: 'test-token', logout: vi.fn() })),
+}))
+
 import { PartyDetailPage } from './[partyId]'
 
 function makeQueryClient() {
