@@ -33,6 +33,7 @@ const TENANT_NAV_ITEMS: NavItem[] = [
   { label: 'Accounts', href: '/accounts', icon: Wallet },
   { label: 'Internal Accounts', href: '/internal-accounts', icon: Building },
   { label: 'Payments', href: '/payments', icon: ArrowLeftRight },
+  { label: 'Transactions', href: '/transactions', icon: Activity },
   { label: 'Positions', href: '/positions', icon: TrendingUp },
   { label: 'Ledger', href: '/ledger', icon: BookOpen },
   { label: 'Parties', href: '/parties', icon: Users },
