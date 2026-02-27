@@ -13,15 +13,6 @@ interface PaymentMethodsTabProps {
   partyId: string
 }
 
-interface PaymentMethod {
-  id: string
-  provider: number
-  providerCustomerId: string
-  providerMethodId: string
-  methodType: number
-  isDefault: boolean
-}
-
 interface AddPaymentMethodFormData {
   providerCustomerId: string
   providerMethodId: string
