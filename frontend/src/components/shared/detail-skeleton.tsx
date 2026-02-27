@@ -22,6 +22,9 @@ export function DetailSkeleton({
   showBackNav = true,
   className,
 }: DetailSkeletonProps) {
+  const safeFieldCount = Math.max(0, Math.floor(fieldCount))
+  const safeTabCount = Math.max(0, Math.floor(tabCount))
+
   return (
     <div
       data-testid="detail-skeleton"
@@ -40,17 +43,17 @@ export function DetailSkeleton({
       {/* Summary stats grid */}
       <div className={cn(
         'grid gap-4',
-        fieldCount <= 2 ? 'grid-cols-2' : 'grid-cols-2 md:grid-cols-4'
+        safeFieldCount <= 2 ? 'grid-cols-2' : 'grid-cols-2 md:grid-cols-4'
       )}>
-        {Array.from({ length: fieldCount }).map((_, i) => (
+        {Array.from({ length: safeFieldCount }).map((_, i) => (
           <Skeleton key={i} className="h-20 rounded-lg" />
         ))}
       </div>
 
       {/* Tabs bar */}
-      {tabCount > 0 && (
+      {safeTabCount > 0 && (
         <div className="flex gap-2">
-          {Array.from({ length: tabCount }).map((_, i) => (
+          {Array.from({ length: safeTabCount }).map((_, i) => (
             <Skeleton key={i} className="h-9 w-24 rounded-md" />
           ))}
         </div>
