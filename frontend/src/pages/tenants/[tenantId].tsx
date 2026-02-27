@@ -1,5 +1,6 @@
-import { Link, useParams } from 'react-router-dom'
-import { ChevronLeft, CheckCircle2, Circle, Loader2, XCircle } from 'lucide-react'
+import { useParams } from 'react-router-dom'
+import { CheckCircle2, Circle, Loader2, XCircle } from 'lucide-react'
+import { Breadcrumbs } from '@/components/shared'
 import { StatusBadge } from '@/components/shared/status-badge'
 import { TimeDisplay } from '@/components/shared/time-display'
 import { Button } from '@/components/ui/button'
@@ -127,16 +128,13 @@ export function TenantDetailPage() {
 
   return (
     <div className="p-6 space-y-6">
-      {/* Header */}
-      <div>
-        <Link
-          to="/tenants"
-          className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ChevronLeft className="size-4" />
-          Back to Tenants
-        </Link>
-      </div>
+      {/* Breadcrumb navigation */}
+      <Breadcrumbs
+        items={[
+          { label: 'Tenants', href: '/tenants' },
+          { label: tenant.displayName },
+        ]}
+      />
 
       <div className="flex items-start justify-between gap-4">
         <div>

@@ -1,4 +1,5 @@
 import { useParams } from 'react-router-dom'
+import { Breadcrumbs } from '@/components/shared'
 import { useQuery } from '@tanstack/react-query'
 import { format } from 'date-fns'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -242,6 +243,12 @@ export function DatasetDetailPage() {
 
   return (
     <div className="p-6 space-y-6">
+      <Breadcrumbs
+        items={[
+          { label: 'Market Data', href: '/market-data' },
+          { label: dataset?.displayName || datasetCode },
+        ]}
+      />
       <div>
         <h1 className="text-2xl font-semibold">
           {dataset?.displayName || datasetCode}
