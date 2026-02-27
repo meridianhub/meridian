@@ -375,7 +375,7 @@ func (r *PostgresRegistry) UpdateDefinition(ctx context.Context, code string, ve
 			WHERE code = $10 AND version = $11 AND updated_at = $12`
 
 		updateAttrSchema := updates.AttributeSchema
-		if len(updateAttrSchema) == 0 {
+		if updateAttrSchema != nil && len(updateAttrSchema) == 0 {
 			updateAttrSchema = []byte("{}")
 		}
 
