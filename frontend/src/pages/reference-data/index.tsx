@@ -13,11 +13,12 @@ interface ReferenceDataCardProps {
   description: string
   count: number | undefined
   isLoading: boolean
+  isError: boolean
   href: string
   icon: React.ReactNode
 }
 
-function ReferenceDataCard({ title, description, count, isLoading, href, icon }: ReferenceDataCardProps) {
+function ReferenceDataCard({ title, description, count, isLoading, isError, href, icon }: ReferenceDataCardProps) {
   return (
     <Link to={href} className="group block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-lg">
       <Card className="h-full transition-colors group-hover:border-primary/50 group-focus-visible:border-primary/50">
@@ -29,6 +30,8 @@ function ReferenceDataCard({ title, description, count, isLoading, href, icon }:
           <div className="mb-2">
             {isLoading ? (
               <div className="h-8 w-16 animate-pulse rounded bg-muted" />
+            ) : isError ? (
+              <div className="text-sm text-destructive">Failed to load</div>
             ) : (
               <div className="text-2xl font-bold">
                 {count !== undefined ? count.toLocaleString() : '—'}
@@ -96,6 +99,7 @@ export function ReferenceDataHubPage() {
       description: 'Asset classes and financial instrument definitions with CEL validation.',
       count: instrumentsQuery.data?.length,
       isLoading: instrumentsQuery.isLoading,
+      isError: instrumentsQuery.isError,
       href: '/reference-data/instruments',
       icon: <Tag className="h-4 w-4" />,
     },
@@ -104,6 +108,7 @@ export function ReferenceDataHubPage() {
       description: 'Account type registry with behavior classes and CEL policy configuration.',
       count: accountTypesQuery.data?.length,
       isLoading: accountTypesQuery.isLoading,
+      isError: accountTypesQuery.isError,
       href: '/reference-data/account-types',
       icon: <Layers className="h-4 w-4" />,
     },
@@ -112,6 +117,7 @@ export function ReferenceDataHubPage() {
       description: 'Hierarchical reference data nodes with bi-temporal query support.',
       count: nodesQuery.data?.length,
       isLoading: nodesQuery.isLoading,
+      isError: nodesQuery.isError,
       href: '/reference-data/nodes',
       icon: <GitBranch className="h-4 w-4" />,
     },
