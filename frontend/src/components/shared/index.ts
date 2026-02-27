@@ -19,3 +19,6 @@ export type { EntityLinkProps, EntityType } from './entity-link';
 
 export { Breadcrumbs } from './breadcrumbs';
 export type { BreadcrumbsProps, BreadcrumbItem } from './breadcrumbs';
+
+export { DetailSkeleton } from './detail-skeleton';
+export type { DetailSkeletonProps } from './detail-skeleton';

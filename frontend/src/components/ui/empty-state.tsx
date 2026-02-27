@@ -12,6 +12,8 @@ interface EmptyStateProps {
     label: string
     onClick: () => void
   }
+  /** Compact mode for use inside tables or small containers */
+  compact?: boolean
 }
 
 export function EmptyState({
@@ -19,19 +21,21 @@ export function EmptyState({
   title,
   description,
   action,
+  compact = false,
 }: EmptyStateProps) {
   return (
     <div
       data-slot="empty-state"
       className={cn(
-        "flex min-h-[400px] flex-col items-center justify-center gap-4 px-4 py-8"
+        "flex flex-col items-center justify-center gap-4 px-4",
+        compact ? "min-h-[120px] py-4" : "min-h-[400px] py-8"
       )}
     >
       <div
         data-slot="empty-state-icon"
         className="text-muted-foreground"
       >
-        <Icon className="size-12" />
+        <Icon className={compact ? "size-6" : "size-12"} />
       </div>
 
       <div

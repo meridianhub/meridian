@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { format } from 'date-fns'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { StatusBadge } from '@/components/shared/status-badge'
+import { Skeleton } from '@/components/ui/skeleton'
 import { useApiClients } from '@/api/context'
 import { useTenantContext } from '@/contexts/tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
@@ -252,20 +253,29 @@ export function DatasetDetailPage() {
         ]}
       />
       <div>
-        <h1 className="text-2xl font-semibold">
-          {dataset?.displayName || datasetCode}
-        </h1>
-        {dataset && (
-          <div className="mt-2 flex items-center gap-3">
-            <span className="font-mono text-sm text-muted-foreground">{dataset.code}</span>
-            <StatusBadge status={statusLabel(dataset.status)} />
-            <span className="text-sm text-muted-foreground">
-              Unit: <span className="font-mono">{dataset.unit}</span>
-            </span>
+        {datasetQuery.isLoading ? (
+          <div className="space-y-2">
+            <Skeleton className="h-8 w-64" />
+            <Skeleton className="h-5 w-48" />
           </div>
-        )}
-        {dataset?.description && (
-          <p className="mt-2 text-sm text-muted-foreground">{dataset.description}</p>
+        ) : (
+          <>
+            <h1 className="text-2xl font-semibold">
+              {dataset?.displayName || datasetCode}
+            </h1>
+            {dataset && (
+              <div className="mt-2 flex items-center gap-3">
+                <span className="font-mono text-sm text-muted-foreground">{dataset.code}</span>
+                <StatusBadge status={statusLabel(dataset.status)} />
+                <span className="text-sm text-muted-foreground">
+                  Unit: <span className="font-mono">{dataset.unit}</span>
+                </span>
+              </div>
+            )}
+            {dataset?.description && (
+              <p className="mt-2 text-sm text-muted-foreground">{dataset.description}</p>
+            )}
+          </>
         )}
       </div>
 

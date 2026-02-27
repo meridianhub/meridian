@@ -7,6 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { StatusBadge } from '@/components/shared/status-badge'
+import { DetailSkeleton } from '@/components/shared/detail-skeleton'
 import { useApiClients } from '@/api/context'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -441,11 +442,7 @@ export function MappingDetailPage() {
     return (
       <div className="space-y-6">
         <Breadcrumbs items={[{ label: 'Gateway Mappings', href: '/mappings' }, { label: 'Loading...' }]} />
-        <Card>
-          <div className="p-6">
-            <div className="h-6 w-48 animate-pulse rounded bg-muted" />
-          </div>
-        </Card>
+        <DetailSkeleton fieldCount={4} tabCount={3} showBackNav={false} />
       </div>
     )
   }
