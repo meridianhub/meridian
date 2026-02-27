@@ -5,44 +5,16 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { TimeDisplay } from '@/components/shared/time-display'
 import { useForm } from 'react-hook-form'
 
 interface DemographicsTabProps {
   partyId: string
 }
 
-interface Demographics {
-  partyId: string
-  email?: string
-  phoneNumber?: string
-  businessName?: string
-  businessRegistration?: string
-  legalName?: string
-  dateOfBirth?: { seconds: bigint | number; nanos?: number }
-  nationality?: string
-  taxId?: string
-  website?: string
-  streetAddress?: string
-  city?: string
-  state?: string
-  postalCode?: string
-  country?: string
-}
-
 interface DemographicsFormData {
-  email?: string
-  phoneNumber?: string
-  businessName?: string
-  businessRegistration?: string
-  legalName?: string
-  nationality?: string
-  taxId?: string
-  website?: string
-  streetAddress?: string
-  city?: string
-  state?: string
-  postalCode?: string
-  country?: string
+  socioEconomicData: string
+  employmentHistory: string
 }
 
 export function DemographicsTab({ partyId }: DemographicsTabProps) {
@@ -54,16 +26,16 @@ export function DemographicsTab({ partyId }: DemographicsTabProps) {
   const { data: demographics, isLoading } = useQuery({
     queryKey: ['party', partyId, 'demographics'],
     queryFn: async () => {
-      const response = await clients.party.getParticipant({ partyId })
-      return response as Demographics
+      return await clients.party.retrieveDemographics({ partyId })
     },
   })
 
   const updateMutation = useMutation({
     mutationFn: async (data: DemographicsFormData) => {
-      return await clients.party.updateParticipant({
+      return await clients.party.updateDemographics({
         partyId,
-        ...data,
+        socioEconomicData: data.socioEconomicData,
+        employmentHistory: data.employmentHistory,
       })
     },
     onSuccess: () => {
@@ -74,7 +46,10 @@ export function DemographicsTab({ partyId }: DemographicsTabProps) {
 
   React.useEffect(() => {
     if (demographics) {
-      reset(demographics)
+      reset({
+        socioEconomicData: demographics.socioEconomicData ?? '',
+        employmentHistory: demographics.employmentHistory ?? '',
+      })
     }
   }, [demographics, reset])
 
@@ -95,120 +70,21 @@ export function DemographicsTab({ partyId }: DemographicsTabProps) {
   if (isEditing) {
     return (
       <form onSubmit={handleSubmit((data) => void updateMutation.mutateAsync(data))} className="space-y-6">
-        <div className="grid gap-6 md:grid-cols-2">
+        <div className="grid gap-6">
           <div>
-            <label className="text-sm font-medium">Email</label>
+            <label className="text-sm font-medium">Socio-Economic Data</label>
             <Input
-              {...register('email')}
-              placeholder="Email"
+              {...register('socioEconomicData')}
+              placeholder="Socio-economic classification"
               className="mt-1"
             />
           </div>
 
           <div>
-            <label className="text-sm font-medium">Phone Number</label>
+            <label className="text-sm font-medium">Employment History</label>
             <Input
-              {...register('phoneNumber')}
-              placeholder="Phone Number"
-              className="mt-1"
-            />
-          </div>
-
-          <div>
-            <label className="text-sm font-medium">Business Name</label>
-            <Input
-              {...register('businessName')}
-              placeholder="Business Name"
-              className="mt-1"
-            />
-          </div>
-
-          <div>
-            <label className="text-sm font-medium">Business Registration</label>
-            <Input
-              {...register('businessRegistration')}
-              placeholder="Business Registration"
-              className="mt-1"
-            />
-          </div>
-
-          <div>
-            <label className="text-sm font-medium">Legal Name</label>
-            <Input
-              {...register('legalName')}
-              placeholder="Legal Name"
-              className="mt-1"
-            />
-          </div>
-
-          <div>
-            <label className="text-sm font-medium">Nationality</label>
-            <Input
-              {...register('nationality')}
-              placeholder="Nationality"
-              className="mt-1"
-            />
-          </div>
-
-          <div>
-            <label className="text-sm font-medium">Tax ID</label>
-            <Input
-              {...register('taxId')}
-              placeholder="Tax ID"
-              className="mt-1"
-            />
-          </div>
-
-          <div>
-            <label className="text-sm font-medium">Website</label>
-            <Input
-              {...register('website')}
-              placeholder="Website"
-              className="mt-1"
-            />
-          </div>
-
-          <div className="md:col-span-2">
-            <label className="text-sm font-medium">Street Address</label>
-            <Input
-              {...register('streetAddress')}
-              placeholder="Street Address"
-              className="mt-1"
-            />
-          </div>
-
-          <div>
-            <label className="text-sm font-medium">City</label>
-            <Input
-              {...register('city')}
-              placeholder="City"
-              className="mt-1"
-            />
-          </div>
-
-          <div>
-            <label className="text-sm font-medium">State/Province</label>
-            <Input
-              {...register('state')}
-              placeholder="State/Province"
-              className="mt-1"
-            />
-          </div>
-
-          <div>
-            <label className="text-sm font-medium">Postal Code</label>
-            <Input
-              {...register('postalCode')}
-              placeholder="Postal Code"
-              className="mt-1"
-            />
-          </div>
-
-          <div>
-            <label className="text-sm font-medium">Country</label>
-            <Input
-              {...register('country')}
-              placeholder="Country"
+              {...register('employmentHistory')}
+              placeholder="Employment information"
               className="mt-1"
             />
           </div>
@@ -235,23 +111,13 @@ export function DemographicsTab({ partyId }: DemographicsTabProps) {
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4">
         {[
-          { label: 'Email', value: demographics.email },
-          { label: 'Phone Number', value: demographics.phoneNumber },
-          { label: 'Business Name', value: demographics.businessName },
-          { label: 'Business Registration', value: demographics.businessRegistration },
-          { label: 'Legal Name', value: demographics.legalName },
-          { label: 'Nationality', value: demographics.nationality },
-          { label: 'Tax ID', value: demographics.taxId },
-          { label: 'Website', value: demographics.website },
-          { label: 'Street Address', value: demographics.streetAddress, fullWidth: true },
-          { label: 'City', value: demographics.city },
-          { label: 'State/Province', value: demographics.state },
-          { label: 'Postal Code', value: demographics.postalCode },
-          { label: 'Country', value: demographics.country },
-        ].map(({ label, value, fullWidth }) => (
-          <div key={label} className={fullWidth ? 'md:col-span-2' : ''}>
+          { label: 'Socio-Economic Data', value: demographics.socioEconomicData },
+          { label: 'Employment History', value: demographics.employmentHistory },
+          { label: 'Last Updated', value: demographics.updatedAt ? <TimeDisplay timestamp={demographics.updatedAt} /> : undefined },
+        ].map(({ label, value }) => (
+          <div key={label}>
             <span className="text-sm font-medium text-muted-foreground">{label}</span>
             <p className="mt-1 text-sm">{value || '—'}</p>
           </div>

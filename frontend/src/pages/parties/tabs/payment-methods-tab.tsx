@@ -14,23 +14,17 @@ interface PaymentMethodsTabProps {
 }
 
 interface PaymentMethod {
-  paymentMethodId: string
-  type: string
-  accountNumber: string
-  routingNumber?: string
-  accountHolderName?: string
+  id: string
+  provider: number
+  providerCustomerId: string
+  providerMethodId: string
+  methodType: number
   isDefault: boolean
 }
 
-interface PaymentMethodsResponse {
-  paymentMethods: PaymentMethod[]
-}
-
 interface AddPaymentMethodFormData {
-  type: string
-  accountNumber: string
-  routingNumber?: string
-  accountHolderName?: string
+  providerCustomerId: string
+  providerMethodId: string
 }
 
 export function PaymentMethodsTab({ partyId }: PaymentMethodsTabProps) {
@@ -42,16 +36,17 @@ export function PaymentMethodsTab({ partyId }: PaymentMethodsTabProps) {
   const { data, isLoading } = useQuery({
     queryKey: ['party', partyId, 'payment-methods'],
     queryFn: async () => {
-      const response = await clients.party.getPaymentMethods({ partyId })
-      return response as PaymentMethodsResponse
+      return await clients.party.listPaymentMethods({ partyId })
     },
   })
 
   const addMutation = useMutation({
-    mutationFn: async (paymentMethod: AddPaymentMethodFormData) => {
+    mutationFn: async (data: AddPaymentMethodFormData) => {
       return await clients.party.addPaymentMethod({
         partyId,
-        ...paymentMethod,
+        provider: 1,
+        providerCustomerId: data.providerCustomerId,
+        providerMethodId: data.providerMethodId,
       })
     },
     onSuccess: () => {
@@ -62,10 +57,10 @@ export function PaymentMethodsTab({ partyId }: PaymentMethodsTabProps) {
   })
 
   const removeMutation = useMutation({
-    mutationFn: async (paymentMethodId: string) => {
+    mutationFn: async (id: string) => {
       return await clients.party.removePaymentMethod({
         partyId,
-        paymentMethodId,
+        paymentMethodId: id,
       })
     },
     onSuccess: () => {
@@ -74,10 +69,10 @@ export function PaymentMethodsTab({ partyId }: PaymentMethodsTabProps) {
   })
 
   const setDefaultMutation = useMutation({
-    mutationFn: async (paymentMethodId: string) => {
+    mutationFn: async (id: string) => {
       return await clients.party.setDefaultPaymentMethod({
         partyId,
-        paymentMethodId,
+        paymentMethodId: id,
       })
     },
     onSuccess: () => {
@@ -110,41 +105,19 @@ export function PaymentMethodsTab({ partyId }: PaymentMethodsTabProps) {
             </DialogHeader>
             <form onSubmit={handleSubmit((data) => void addMutation.mutateAsync(data))} className="space-y-4">
               <div>
-                <label className="text-sm font-medium">Type</label>
-                <select
-                  {...register('type', { required: true })}
-                  className="mt-1 h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
-                >
-                  <option value="">Select Type</option>
-                  <option value="BANK_ACCOUNT">Bank Account</option>
-                  <option value="CARD">Card</option>
-                  <option value="WALLET">Wallet</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="text-sm font-medium">Account Number</label>
+                <label className="text-sm font-medium">Provider Customer ID</label>
                 <Input
-                  {...register('accountNumber', { required: true })}
-                  placeholder="Account Number"
+                  {...register('providerCustomerId', { required: true })}
+                  placeholder="e.g. cus_xxx"
                   className="mt-1"
                 />
               </div>
 
               <div>
-                <label className="text-sm font-medium">Routing Number (optional)</label>
+                <label className="text-sm font-medium">Provider Method ID</label>
                 <Input
-                  {...register('routingNumber')}
-                  placeholder="Routing Number"
-                  className="mt-1"
-                />
-              </div>
-
-              <div>
-                <label className="text-sm font-medium">Account Holder Name</label>
-                <Input
-                  {...register('accountHolderName')}
-                  placeholder="Account Holder Name"
+                  {...register('providerMethodId', { required: true })}
+                  placeholder="e.g. pm_xxx"
                   className="mt-1"
                 />
               </div>
@@ -174,11 +147,11 @@ export function PaymentMethodsTab({ partyId }: PaymentMethodsTabProps) {
       ) : (
         <div className="space-y-4">
           {paymentMethods.map((method) => (
-            <Card key={method.paymentMethodId} className="p-4">
+            <Card key={method.id} className="p-4">
               <div className="flex items-start justify-between">
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
-                    <span className="font-medium">{method.accountHolderName || 'Unnamed'}</span>
+                    <span className="font-medium font-mono text-sm">{method.providerMethodId}</span>
                     {method.isDefault && (
                       <span className="inline-block rounded bg-blue-100 px-2 py-1 text-xs font-medium text-blue-700">
                         Default
@@ -186,13 +159,8 @@ export function PaymentMethodsTab({ partyId }: PaymentMethodsTabProps) {
                     )}
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    {method.type}: ••••{method.accountNumber.slice(-4)}
+                    Customer: {method.providerCustomerId}
                   </p>
-                  {method.routingNumber && (
-                    <p className="text-xs text-muted-foreground">
-                      Routing: {method.routingNumber}
-                    </p>
-                  )}
                 </div>
 
                 <div className="flex gap-2">
@@ -200,7 +168,7 @@ export function PaymentMethodsTab({ partyId }: PaymentMethodsTabProps) {
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => void setDefaultMutation.mutateAsync(method.paymentMethodId)}
+                      onClick={() => void setDefaultMutation.mutateAsync(method.id)}
                       disabled={setDefaultMutation.isPending}
                     >
                       Set Default
@@ -209,7 +177,7 @@ export function PaymentMethodsTab({ partyId }: PaymentMethodsTabProps) {
                   <Button
                     size="sm"
                     variant="destructive"
-                    onClick={() => void removeMutation.mutateAsync(method.paymentMethodId)}
+                    onClick={() => void removeMutation.mutateAsync(method.id)}
                     disabled={removeMutation.isPending}
                   >
                     Remove

@@ -28,7 +28,7 @@ function makeQueryClient() {
 }
 
 const mockPartyClient = {
-  getAssociations: vi.fn(),
+  retrieveAssociations: vi.fn(),
   listParties: vi.fn().mockResolvedValue({ parties: [] }),
   registerAssociations: vi.fn(),
 }
@@ -55,7 +55,7 @@ describe('AssociationsTab', () => {
     it('renders skeletons while loading', () => {
       vi.mocked(useClients).mockReturnValue({
         party: {
-          getAssociations: vi.fn(() => new Promise(() => {})),
+          retrieveAssociations: vi.fn(() => new Promise(() => {})),
         },
       } as ReturnType<typeof useClients>)
 
@@ -68,7 +68,7 @@ describe('AssociationsTab', () => {
     it('does not render empty state while loading', () => {
       vi.mocked(useClients).mockReturnValue({
         party: {
-          getAssociations: vi.fn(() => new Promise(() => {})),
+          retrieveAssociations: vi.fn(() => new Promise(() => {})),
         },
       } as ReturnType<typeof useClients>)
 
@@ -82,7 +82,7 @@ describe('AssociationsTab', () => {
     it('renders empty state heading after data loads', async () => {
       vi.mocked(useClients).mockReturnValue({
         party: {
-          getAssociations: vi.fn().mockResolvedValue({}),
+          retrieveAssociations: vi.fn().mockResolvedValue({}),
         },
       } as ReturnType<typeof useClients>)
 
@@ -96,7 +96,7 @@ describe('AssociationsTab', () => {
     it('renders descriptive message', async () => {
       vi.mocked(useClients).mockReturnValue({
         party: {
-          getAssociations: vi.fn().mockResolvedValue({}),
+          retrieveAssociations: vi.fn().mockResolvedValue({}),
         },
       } as ReturnType<typeof useClients>)
 
@@ -110,7 +110,7 @@ describe('AssociationsTab', () => {
     it('renders add association button', async () => {
       vi.mocked(useClients).mockReturnValue({
         party: {
-          getAssociations: vi.fn().mockResolvedValue({}),
+          retrieveAssociations: vi.fn().mockResolvedValue({}),
         },
       } as ReturnType<typeof useClients>)
 
@@ -123,16 +123,16 @@ describe('AssociationsTab', () => {
   })
 
   describe('query key', () => {
-    it('calls getAssociations with the provided partyId', async () => {
-      const getAssociations = vi.fn().mockResolvedValue({})
+    it('calls retrieveAssociations with the provided partyId', async () => {
+      const retrieveAssociations = vi.fn().mockResolvedValue({})
       vi.mocked(useClients).mockReturnValue({
-        party: { getAssociations },
+        party: { retrieveAssociations },
       } as ReturnType<typeof useClients>)
 
       renderTab('party-abc')
 
       await waitFor(() => {
-        expect(getAssociations).toHaveBeenCalledWith({ partyId: 'party-abc' })
+        expect(retrieveAssociations).toHaveBeenCalledWith({ partyId: 'party-abc' })
       })
     })
   })

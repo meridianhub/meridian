@@ -20,7 +20,7 @@ export function AssociationsTab({ partyId }: AssociationsTabProps) {
   const { isLoading } = useQuery({
     queryKey: tenantKeys.partyAssociations(tenantSlug ?? '', partyId),
     queryFn: async () => {
-      return await clients.party.getAssociations({ partyId })
+      return await clients.party.retrieveAssociations({ partyId })
     },
   })
 
