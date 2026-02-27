@@ -49,13 +49,15 @@ function ReferenceDataCard({ title, description, count, isLoading, href, icon }:
 export function ReferenceDataHubPage() {
   const clients = useApiClients()
 
+  // Reference data APIs return no totalCount field, so we fetch all items to count them.
+  // These collections are typically small (< 200 items), so fetching all is acceptable.
   const instrumentsQuery = useQuery({
     queryKey: [...referenceKeys.instruments(), 'hub-count'],
     queryFn: async () => {
       const res = await clients.referenceData.listInstruments({
         statusFilter: InstrumentStatus.UNSPECIFIED,
         dimensionFilter: 0,
-        pageSize: 1,
+        pageSize: 1000,
         pageToken: '',
       })
       return res.instruments
@@ -68,7 +70,7 @@ export function ReferenceDataHubPage() {
     queryFn: async () => {
       const res = await clients.accountTypeRegistry.listActive({
         behaviorClassFilter: BehaviorClass.UNSPECIFIED,
-        pageSize: 1,
+        pageSize: 1000,
         pageToken: '',
       })
       return res.definitions
