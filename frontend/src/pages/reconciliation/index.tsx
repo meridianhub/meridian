@@ -5,6 +5,7 @@ import { DataTable } from '@/components/shared/data-table'
 import { StatusBadge } from '@/components/shared/status-badge'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { useAuthenticatedFetch } from '@/hooks/use-authenticated-fetch'
 import { InitiateReconciliationDialog } from './initiate-reconciliation-dialog'
 
 export interface ReconciliationRun {
@@ -27,7 +28,7 @@ async function fetchReconciliationRuns(params: {
   pageToken?: string
   pageSize: number
   filters?: Record<string, string>
-}): Promise<{ items: ReconciliationRun[]; nextPageToken?: string }> {
+}, fetchFn: typeof fetch = fetch): Promise<{ items: ReconciliationRun[]; nextPageToken?: string }> {
   const url = new URL('/v1/reconciliation/runs', window.location.origin)
   url.searchParams.set('page_size', String(params.pageSize))
   if (params.pageToken) url.searchParams.set('page_token', params.pageToken)
@@ -36,7 +37,7 @@ async function fetchReconciliationRuns(params: {
       if (v) url.searchParams.set(k, v)
     }
   }
-  const res = await fetch(url.toString())
+  const res = await fetchFn(url.toString())
   if (!res.ok) throw new Error(`Failed to fetch reconciliation runs: ${res.status}`)
   const data = await res.json() as {
     runs?: Array<{
@@ -122,6 +123,7 @@ const columns: ColumnDef<ReconciliationRun>[] = [
 
 export function ReconciliationPage() {
   const navigate = useNavigate()
+  const authFetch = useAuthenticatedFetch()
   const [dialogOpen, setDialogOpen] = React.useState(false)
 
   function handleRowClick(run: ReconciliationRun) {
@@ -150,7 +152,7 @@ export function ReconciliationPage() {
       />
       <DataTable
         queryKey={['reconciliation-runs']}
-        queryFn={fetchReconciliationRuns}
+        queryFn={(params) => fetchReconciliationRuns(params, authFetch)}
         columns={columns}
         pageSize={25}
         filters={[

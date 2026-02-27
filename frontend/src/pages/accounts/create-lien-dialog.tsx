@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useTenantContext } from '@/contexts/tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
+import { useAuthenticatedFetch } from '@/hooks/use-authenticated-fetch'
 import { amountToBigInt } from './account-form-utils'
 
 export interface CreateLienDialogProps {
@@ -61,56 +62,6 @@ function validateExpiry(value: string): string | null {
   return null
 }
 
-async function initiateLien(
-  tenantSlug: string,
-  accountId: string,
-  accountType: 'current' | 'internal',
-  amountMinorUnits: string,
-  reason: string,
-  expiresAtSeconds?: string,
-): Promise<string> {
-  const serviceName =
-    accountType === 'current'
-      ? 'meridian.current_account.v1.CurrentAccountService'
-      : 'meridian.internal_account.v1.InternalAccountService'
-
-  const body: Record<string, unknown> = {
-    accountId,
-    paymentOrderReference: reason,
-  }
-
-  if (accountType === 'current') {
-    body.amount = { amount: amountMinorUnits }
-  } else {
-    body.input = { amount: amountMinorUnits }
-  }
-
-  if (expiresAtSeconds) {
-    body.expiresAt = { seconds: expiresAtSeconds }
-  }
-
-  const response = await fetch(`/${serviceName}/InitiateLien`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Tenant-Slug': tenantSlug,
-    },
-    body: JSON.stringify(body),
-  })
-
-  if (!response.ok) {
-    const data = (await response.json().catch(() => ({}))) as { message?: string }
-    throw new Error(data.message ?? `Failed to create lien: ${response.status}`)
-  }
-
-  const data = (await response.json()) as { lien?: { lienId?: string } }
-  const lienId = data.lien?.lienId ?? ''
-  if (!lienId) {
-    throw new Error('Lien ID missing from response')
-  }
-  return lienId
-}
-
 export function CreateLienDialog({
   open,
   onOpenChange,
@@ -120,6 +71,7 @@ export function CreateLienDialog({
   decimalPlaces = 2,
 }: CreateLienDialogProps) {
   const { tenantSlug } = useTenantContext()
+  const authFetch = useAuthenticatedFetch()
   const queryClient = useQueryClient()
 
   const [amount, setAmount] = React.useState('')
@@ -145,19 +97,39 @@ export function CreateLienDialog({
   }, [open])
 
   const mutation = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       const minorUnits = amountToBigInt(amount, decimalPlaces).toString()
       const expiresAtSeconds = expiry
         ? Math.floor(parseDatetimeLocalAsUtc(expiry).getTime() / 1000).toString()
         : undefined
-      return initiateLien(
-        tenantSlug ?? '',
+      const serviceName =
+        accountType === 'current'
+          ? 'meridian.current_account.v1.CurrentAccountService'
+          : 'meridian.internal_account.v1.InternalAccountService'
+      const body: Record<string, unknown> = {
         accountId,
-        accountType,
-        minorUnits,
-        reason.trim(),
-        expiresAtSeconds,
-      )
+        paymentOrderReference: reason.trim(),
+      }
+      if (accountType === 'current') {
+        body.amount = { amount: minorUnits }
+      } else {
+        body.input = { amount: minorUnits }
+      }
+      if (expiresAtSeconds) {
+        body.expiresAt = { seconds: expiresAtSeconds }
+      }
+      const response = await authFetch(`/${serviceName}/InitiateLien`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      })
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { message?: string }
+        throw new Error(data.message ?? `Failed to create lien: ${response.status}`)
+      }
+      const data = (await response.json()) as { lien?: { lienId?: string } }
+      const lienId = data.lien?.lienId ?? ''
+      if (!lienId) throw new Error('Lien ID missing from response')
+      return lienId
     },
     onSuccess: (lienId) => {
       queryClient.invalidateQueries({

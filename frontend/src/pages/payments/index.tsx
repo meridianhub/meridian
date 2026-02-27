@@ -1,3 +1,4 @@
+import { useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { ColumnDef } from '@tanstack/react-table'
 import { DataTable } from '@/components/shared/data-table'
@@ -5,6 +6,7 @@ import { MoneyDisplay } from '@/components/shared/money-display'
 import { StatusBadge } from '@/components/shared/status-badge'
 import { TimeDisplay } from '@/components/shared/time-display'
 import { useTenantSlug } from '@/hooks/use-tenant-context'
+import { useAuthenticatedFetch } from '@/hooks/use-authenticated-fetch'
 import { tenantKeys } from '@/lib/query-keys'
 import { fetchPayments, type PaymentOrder } from './payments-query'
 
@@ -66,7 +68,12 @@ interface PaymentsPageProps {
 export function PaymentsPage({ onRowNavigate }: PaymentsPageProps = {}) {
   const navigate = useNavigate()
   const tenantSlug = useTenantSlug()
+  const authFetch = useAuthenticatedFetch()
   const queryKey = tenantSlug ? tenantKeys.payments(tenantSlug) : ['payments']
+  const queryFn = useCallback(
+    (params: Parameters<typeof fetchPayments>[0]) => fetchPayments(params, authFetch),
+    [authFetch],
+  )
 
   function handleRowClick(row: PaymentOrder) {
     if (onRowNavigate) {
@@ -81,7 +88,7 @@ export function PaymentsPage({ onRowNavigate }: PaymentsPageProps = {}) {
       <h1 className="mb-6 text-2xl font-semibold">Payments</h1>
       <DataTable
         queryKey={queryKey}
-        queryFn={fetchPayments}
+        queryFn={queryFn}
         columns={columns}
         filters={FILTER_CONFIGS}
         onRowClick={handleRowClick}

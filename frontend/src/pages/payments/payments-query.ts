@@ -12,6 +12,7 @@ export interface PaymentOrder {
 
 export async function fetchPayments(
   params: DataTableQueryParams,
+  fetchFn: typeof fetch = fetch,
 ): Promise<DataTableResult<PaymentOrder>> {
   const body: Record<string, unknown> = {
     pageSize: params.pageSize,
@@ -25,7 +26,7 @@ export async function fetchPayments(
     body.status = params.filters.status
   }
 
-  const response = await fetch(
+  const response = await fetchFn(
     '/meridian.payment_order.v1.PaymentOrderService/ListPaymentOrders',
     {
       method: 'POST',

@@ -24,26 +24,9 @@ function getStatusName(status: unknown): string {
   return String(status ?? '')
 }
 
-function getCurrencyName(currency: unknown): string {
-  if (typeof currency === 'string') return currency
-  if (typeof currency === 'number') {
-    const currencyMap: Record<number, string> = {
-      0: 'UNSPECIFIED',
-      1: 'GBP',
-      2: 'USD',
-      3: 'EUR',
-      4: 'JPY',
-      5: 'AUD',
-      6: 'CAD',
-      7: 'CHF',
-      8: 'CNY',
-      9: 'INR',
-      10: 'SGD',
-      11: 'HKD',
-    }
-    return currencyMap[currency] ?? String(currency)
-  }
-  return String(currency ?? '')
+function getInstrumentCode(value: unknown): string {
+  if (typeof value === 'string' && value) return value
+  return ''
 }
 
 const columns: ColumnDef<FinancialBookingLog>[] = [
@@ -63,8 +46,8 @@ const columns: ColumnDef<FinancialBookingLog>[] = [
     header: 'Business Unit',
   },
   {
-    accessorKey: 'baseCurrency',
-    header: 'Currency',
+    accessorKey: 'instrumentCode',
+    header: 'Instrument',
   },
   {
     accessorKey: 'status',
@@ -108,7 +91,7 @@ export function LedgerPage() {
       productServiceReference: String(log.productServiceReference ?? ''),
       businessUnitReference: String(log.businessUnitReference ?? ''),
       chartOfAccountsRules: String(log.chartOfAccountsRules ?? ''),
-      baseCurrency: getCurrencyName(log.baseCurrency),
+      instrumentCode: getInstrumentCode(log.baseInstrumentCode),
       status: getStatusName(log.status),
       createdAt: log.createdAt ?? null,
       updatedAt: log.updatedAt ?? null,

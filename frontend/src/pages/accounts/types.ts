@@ -8,7 +8,7 @@ export interface CurrentAccount {
   accountId: string
   externalReference: string
   status: AccountStatus
-  baseCurrency: string
+  instrumentCode: string
   availableBalance: string
   reservedBalance?: string
   name?: string

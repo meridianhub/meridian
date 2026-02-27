@@ -12,8 +12,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useTenantContext } from '@/contexts/tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
+import { useAuthenticatedFetch } from '@/hooks/use-authenticated-fetch'
 
-const CURRENCIES = ['GBP', 'USD', 'EUR']
+const INSTRUMENTS = ['GBP', 'USD', 'EUR', 'KWH']
 
 interface FormData {
   externalReference: string
@@ -33,42 +34,9 @@ interface CreateAccountDialogProps {
   onCreated?: (accountId: string) => void
 }
 
-async function createAccount(
-  tenantSlug: string,
-  externalReference: string,
-  currency: string,
-  partyId: string,
-): Promise<string> {
-  const response = await fetch(
-    `/meridian.current_account.v1.CurrentAccountService/InitiateCurrentAccount`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Tenant-Slug': tenantSlug,
-      },
-      body: JSON.stringify({
-        accountIdentification: externalReference,
-        baseCurrency: currency,
-        partyId,
-      }),
-    },
-  )
-
-  if (!response.ok) {
-    const data = (await response.json().catch(() => ({}))) as { message?: string }
-    throw new Error(data.message ?? `Failed to create account: ${response.status}`)
-  }
-
-  const data = (await response.json()) as { accountId?: string }
-  if (!data.accountId) {
-    throw new Error('Account ID missing from response')
-  }
-  return data.accountId
-}
-
 export function CreateAccountDialog({ open, onOpenChange, onCreated }: CreateAccountDialogProps) {
   const { tenantSlug } = useTenantContext()
+  const authFetch = useAuthenticatedFetch()
   const queryClient = useQueryClient()
   const [formData, setFormData] = React.useState<FormData>({
     externalReference: '',
@@ -101,13 +69,26 @@ export function CreateAccountDialog({ open, onOpenChange, onCreated }: CreateAcc
   }
 
   const mutation = useMutation({
-    mutationFn: () =>
-      createAccount(
-        tenantSlug ?? '',
-        formData.externalReference.trim(),
-        formData.currency,
-        formData.partyId.trim(),
-      ),
+    mutationFn: async () => {
+      const response = await authFetch(
+        `/meridian.current_account.v1.CurrentAccountService/InitiateCurrentAccount`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            externalIdentifier: formData.externalReference.trim(),
+            instrumentCode: formData.currency,
+            partyId: formData.partyId.trim(),
+          }),
+        },
+      )
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { message?: string }
+        throw new Error(data.message ?? `Failed to create account: ${response.status}`)
+      }
+      const data = (await response.json()) as { accountId?: string }
+      if (!data.accountId) throw new Error('Account ID missing from response')
+      return data.accountId
+    },
     onSuccess: (accountId) => {
       queryClient.invalidateQueries({
         queryKey: tenantKeys.accounts(tenantSlug ?? ''),
@@ -182,7 +163,7 @@ export function CreateAccountDialog({ open, onOpenChange, onCreated }: CreateAcc
                 aria-label="Currency"
                 className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
               >
-                {CURRENCIES.map((c) => (
+                {INSTRUMENTS.map((c) => (
                   <option key={c} value={c}>
                     {c}
                   </option>

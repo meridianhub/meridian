@@ -3,6 +3,7 @@ import { ClockIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { TimeDisplay } from './time-display';
 import { EmptyState } from '@/components/ui/empty-state';
+import { useAuthenticatedFetch } from '@/hooks/use-authenticated-fetch';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -39,8 +40,9 @@ export interface AuditTrailProps {
 async function fetchAuditEntries(
   entityType: string,
   entityId: string,
+  fetchFn: typeof fetch = fetch,
 ): Promise<AuditEntriesResponse> {
-  const response = await fetch(
+  const response = await fetchFn(
     '/meridian.audit.v1.AuditService/ListAuditEntries',
     {
       method: 'POST',
@@ -232,9 +234,10 @@ function AuditEntryItem({ entry }: { entry: AuditEntry }) {
 // ---------------------------------------------------------------------------
 
 export function AuditTrail({ entityType, entityId }: AuditTrailProps) {
+  const authFetch = useAuthenticatedFetch();
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['audit', entityType, entityId],
-    queryFn: () => fetchAuditEntries(entityType, entityId),
+    queryFn: () => fetchAuditEntries(entityType, entityId, authFetch),
     staleTime: 0, // Always refetch audit logs
   });
 
