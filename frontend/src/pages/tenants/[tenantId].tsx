@@ -2,6 +2,7 @@ import { Link, useParams } from 'react-router-dom'
 import { ChevronLeft, CheckCircle2, Circle, Loader2, XCircle } from 'lucide-react'
 import { StatusBadge } from '@/components/shared/status-badge'
 import { TimeDisplay } from '@/components/shared/time-display'
+import { DetailSkeleton } from '@/components/shared/detail-skeleton'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useTenant, useTenantProvisioningStatus, useUpdateTenantStatus } from '@/hooks/use-tenant'
@@ -94,11 +95,7 @@ export function TenantDetailPage() {
   const updateStatus = useUpdateTenantStatus(tenantId ?? '')
 
   if (tenantLoading) {
-    return (
-      <div className="p-6">
-        <div className="h-8 w-48 animate-pulse rounded bg-muted" />
-      </div>
-    )
+    return <DetailSkeleton fieldCount={4} tabCount={0} showBackNav={true} />
   }
 
   if (!tenant) {

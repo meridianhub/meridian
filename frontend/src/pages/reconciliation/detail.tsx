@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { StatusBadge } from '@/components/shared/status-badge'
 import { CELEditor } from '@/components/shared/cel-editor'
+import { DetailSkeleton } from '@/components/shared/detail-skeleton'
 import {
   VarianceDetail,
   type Variance,
@@ -559,12 +560,7 @@ export function ReconciliationDetailPage() {
   if (!runId) return null
 
   if (isLoading) {
-    return (
-      <div className="p-6 space-y-4">
-        <div className="h-8 w-64 animate-pulse rounded bg-muted" />
-        <div className="h-4 w-96 animate-pulse rounded bg-muted" />
-      </div>
-    )
+    return <DetailSkeleton fieldCount={4} tabCount={3} showBackNav={true} />
   }
 
   if (isError || !run) {

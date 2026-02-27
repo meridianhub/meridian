@@ -16,3 +16,6 @@ export type { CreateValuationFeatureDialogProps, AccountType } from './create-va
 
 export { EntityLink } from './entity-link';
 export type { EntityLinkProps, EntityType } from './entity-link';
+
+export { DetailSkeleton } from './detail-skeleton';
+export type { DetailSkeletonProps } from './detail-skeleton';

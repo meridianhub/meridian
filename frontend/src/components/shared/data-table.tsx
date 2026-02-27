@@ -54,6 +54,8 @@ export interface DataTableProps<T> {
   onRowClick?: (row: T) => void
   className?: string
   defaultSort?: SortingState
+  /** Custom empty state rendered inside the table when there are no results */
+  emptyState?: React.ReactNode
 }
 
 interface SortableHeaderProps {
@@ -223,6 +225,7 @@ export function DataTable<T>({
   onRowClick,
   className,
   defaultSort = [],
+  emptyState,
 }: DataTableProps<T>) {
   const [activeFilters, setActiveFilters] = React.useState<Record<string, string>>({})
   const [pageToken, setPageToken] = React.useState<string | undefined>(undefined)
@@ -302,7 +305,15 @@ export function DataTable<T>({
           ) : isError ? (
             <ErrorState onRetry={() => void refetch()} />
           ) : rows.length === 0 ? (
-            <EmptyState />
+            emptyState ? (
+              <TableRow>
+                <TableCell colSpan={99} className="p-0">
+                  {emptyState}
+                </TableCell>
+              </TableRow>
+            ) : (
+              <EmptyState />
+            )
           ) : (
             rows.map((row) => (
               <TableRow
