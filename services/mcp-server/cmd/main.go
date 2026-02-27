@@ -77,6 +77,15 @@ func runStdio(logger *slog.Logger, cfg server.Config) error {
 
 	srv := server.New(tr, cfg, logger)
 
+	// Wire tools, resources, and prompts onto the server.
+	cleanup, err := wireServer(srv, logger)
+	if err != nil {
+		logger.Warn("tool wiring incomplete", "error", err)
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+
 	// For stdio, we run until stdin closes or we receive a signal.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -153,6 +162,15 @@ func runSSE(logger *slog.Logger, cfg server.Config) error {
 	defer sseTr.Close()
 
 	srv := server.New(sseTr, cfg, logger)
+
+	// Wire tools, resources, and prompts onto the server.
+	cleanup, wireErr := wireServer(srv, logger)
+	if wireErr != nil {
+		logger.Warn("tool wiring incomplete", "error", wireErr)
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
 
 	// Streamable HTTP transport (MCP spec 2025-03-26).
 	// Shares the same MCPServer instance so tools/resources/prompts are identical.

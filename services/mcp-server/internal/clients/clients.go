@@ -12,6 +12,7 @@ import (
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	reconciliationv1 "github.com/meridianhub/meridian/api/proto/meridian/reconciliation/v1"
 	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
+	sagav1 "github.com/meridianhub/meridian/api/proto/meridian/saga/v1"
 	"github.com/meridianhub/meridian/services/mcp-server/internal/auth"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -38,6 +39,10 @@ type MeridianClients struct {
 	Reconciliation reconciliationv1.AccountReconciliationServiceClient
 	// MarketInfo retrieves market price and rate data.
 	MarketInfo marketinformationv1.MarketInformationServiceClient
+	// SagaAdmin queries saga causation trees and execution state.
+	SagaAdmin sagav1.SagaAdminServiceClient
+	// SagaRegistry queries saga definitions and lifecycle.
+	SagaRegistry sagav1.SagaRegistryServiceClient
 	// Health allows the MCP server to check gateway liveness.
 	Health grpc_health_v1.HealthClient
 
@@ -80,6 +85,8 @@ func New(cfg *auth.Config) (*MeridianClients, error) {
 		Accounting:      financialaccountingv1.NewFinancialAccountingServiceClient(conn),
 		Reconciliation:  reconciliationv1.NewAccountReconciliationServiceClient(conn),
 		MarketInfo:      marketinformationv1.NewMarketInformationServiceClient(conn),
+		SagaAdmin:       sagav1.NewSagaAdminServiceClient(conn),
+		SagaRegistry:    sagav1.NewSagaRegistryServiceClient(conn),
 		Health:          grpc_health_v1.NewHealthClient(conn),
 		conn:            conn,
 	}, nil
