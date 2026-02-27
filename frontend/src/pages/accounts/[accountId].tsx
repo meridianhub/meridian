@@ -217,7 +217,7 @@ function getDirectionName(direction: unknown): string {
   return String(direction ?? '')
 }
 
-function getPostingStatusName(status: unknown): string {
+function getTransactionStatusName(status: unknown): string {
   if (typeof status === 'string') return status
   if (typeof status === 'number') {
     const statusMap: Record<number, string> = { 0: 'UNSPECIFIED', 1: 'PENDING', 2: 'POSTED', 3: 'FAILED', 4: 'CANCELLED', 5: 'REVERSED' }
@@ -289,7 +289,7 @@ function AccountTransactions({ accountId, instrumentCode }: { accountId: string;
                       />
                     </td>
                     <td className="py-2 pr-4">
-                      <StatusBadge status={getPostingStatusName(p.status)} />
+                      <StatusBadge status={getTransactionStatusName(p.status)} />
                     </td>
                     <td className="py-2">
                       <TimeDisplay timestamp={p.createdAt} format="relative" />

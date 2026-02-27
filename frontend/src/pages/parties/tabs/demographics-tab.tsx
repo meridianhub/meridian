@@ -99,7 +99,10 @@ export function DemographicsTab({ partyId }: DemographicsTabProps) {
             variant="outline"
             onClick={() => {
               setIsEditing(false)
-              reset()
+              reset({
+                socioEconomicData: demographics?.socioEconomicData ?? '',
+                employmentHistory: demographics?.employmentHistory ?? '',
+              })
             }}
           >
             Cancel
