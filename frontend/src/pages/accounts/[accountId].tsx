@@ -243,7 +243,7 @@ function AccountTransactions({ accountId, instrumentCode }: { accountId: string;
         {!isLoading && !isError && postings.length === 0 && (
           <p className="text-sm text-muted-foreground">No transactions found for this account.</p>
         )}
-        {!isLoading && postings.length > 0 && (
+        {!isLoading && !isError && postings.length > 0 && (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
