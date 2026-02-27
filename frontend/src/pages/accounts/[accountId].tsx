@@ -78,7 +78,7 @@ function AccountNotFound() {
 // ---------------------------------------------------------------------------
 
 interface AccountActionsProps {
-  status: AccountStatus
+  status: AccountStatusType
   accountId: string
   currency: string
 }

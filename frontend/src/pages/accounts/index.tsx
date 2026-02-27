@@ -66,10 +66,14 @@ export function AccountsPage() {
       if (!tenantSlug) return { items: [] }
 
       const statusFilter = params.filters?.status
+      const parsedStatus =
+        statusFilter !== undefined && statusFilter !== '' ? Number(statusFilter) : undefined
       const response = await clients.currentAccount.listCurrentAccounts({
         pageSize: params.pageSize,
         pageToken: params.pageToken ?? '',
-        ...(statusFilter !== undefined && { status: Number(statusFilter) as AccountStatus }),
+        ...(parsedStatus !== undefined && Number.isFinite(parsedStatus)
+          ? { status: parsedStatus as AccountStatus }
+          : {}),
       })
 
       const accounts: CurrentAccount[] = (response.accounts ?? []).map((a) => ({
