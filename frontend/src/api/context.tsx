@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useRef, type ReactNode } from 'react'
+import { createContext, useContext, useMemo, type ReactNode } from 'react'
 import { createTenantTransport } from './transport'
 import { createServiceClients, type ServiceClients } from './clients'
 import type { TokenGetter } from './interceptors/auth-interceptor'
@@ -25,13 +25,10 @@ export function ApiClientProvider({
   onUnauthenticated,
   children,
 }: ApiClientProviderProps) {
-  const onUnauthenticatedRef = useRef(onUnauthenticated)
-  onUnauthenticatedRef.current = onUnauthenticated
-
   const clients = useMemo(() => {
-    const transport = createTenantTransport(tenantSlug, getToken, getTenantSlug, () => onUnauthenticatedRef.current?.())
+    const transport = createTenantTransport(tenantSlug, getToken, getTenantSlug, onUnauthenticated)
     return createServiceClients(transport)
-  }, [tenantSlug, getToken, getTenantSlug])
+  }, [tenantSlug, getToken, getTenantSlug, onUnauthenticated])
 
   return (
     <ApiClientContext.Provider value={{ clients }}>
