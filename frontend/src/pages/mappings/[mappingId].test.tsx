@@ -115,8 +115,7 @@ describe('MappingDetailPage', () => {
     renderAtRoute(<MappingDetailPage />, '/gateway-mappings/mapping-abc')
 
     await waitFor(() => {
-      const elements = screen.getAllByText('Stripe Webhook')
-      expect(elements.length).toBeGreaterThan(0)
+      expect(screen.getByRole('heading', { name: 'Stripe Webhook' })).toBeInTheDocument()
     })
   })
 

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 
@@ -76,35 +77,52 @@ describe('PartyDetailPage', () => {
     renderAtRoute(<PartyDetailPage />, '/parties/test-party-1')
 
     await waitFor(() => {
-      // Breadcrumb link to parent section
-      expect(screen.getByRole('link', { name: 'Parties' })).toBeInTheDocument()
+      expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('data-state', 'active')
     })
   })
 
   it('switches to demographics tab on click', async () => {
+    const user = userEvent.setup()
     renderAtRoute(<PartyDetailPage />, '/parties/test-party-1')
 
     await waitFor(() => {
-      // Breadcrumb link to parent section
-      expect(screen.getByRole('link', { name: 'Parties' })).toBeInTheDocument()
+      expect(screen.getByRole('tab', { name: 'Demographics' })).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('tab', { name: 'Demographics' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Demographics' })).toHaveAttribute('data-state', 'active')
     })
   })
 
   it('switches to payment methods tab on click', async () => {
+    const user = userEvent.setup()
     renderAtRoute(<PartyDetailPage />, '/parties/test-party-1')
 
     await waitFor(() => {
-      // Breadcrumb link to parent section
-      expect(screen.getByRole('link', { name: 'Parties' })).toBeInTheDocument()
+      expect(screen.getByRole('tab', { name: 'Payment Methods' })).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('tab', { name: 'Payment Methods' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Payment Methods' })).toHaveAttribute('data-state', 'active')
     })
   })
 
   it('switches to audit trail tab on click', async () => {
+    const user = userEvent.setup()
     renderAtRoute(<PartyDetailPage />, '/parties/test-party-1')
 
     await waitFor(() => {
-      // Breadcrumb link to parent section
-      expect(screen.getByRole('link', { name: 'Parties' })).toBeInTheDocument()
+      expect(screen.getByRole('tab', { name: 'Audit Trail' })).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('tab', { name: 'Audit Trail' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Audit Trail' })).toHaveAttribute('data-state', 'active')
     })
   })
 })
