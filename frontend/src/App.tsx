@@ -30,6 +30,7 @@ import { InstrumentsPage } from '@/pages/reference-data/instruments'
 import { AccountTypesPage } from '@/pages/reference-data/account-types'
 import { NodesPage } from '@/pages/reference-data/nodes'
 import { InternalAccountsPage } from '@/pages/internal-accounts'
+import { InternalAccountDetailPage } from '@/pages/internal-accounts/[accountId]'
 import { MarketDataPage } from '@/pages/market-data'
 import { DatasetDetailPage } from '@/pages/market-data/[datasetCode]'
 import { ForecastingPage } from '@/pages/forecasting'
@@ -237,7 +238,7 @@ function AppShellLayout() {
         <Route path="/accounts" element={guarded(<AccountsPage />)} />
         <Route path="/accounts/:accountId" element={guarded(<AccountDetailPage />)} />
         <Route path="/internal-accounts" element={guarded(<InternalAccountsPage />)} />
-        <Route path="/internal-accounts/:accountId" element={guarded(<PlaceholderPage title="Internal Account Detail" />)} />
+        <Route path="/internal-accounts/:accountId" element={guarded(<InternalAccountDetailPage />)} />
         <Route path="/payments" element={guarded(<PaymentsPage />)} />
         <Route path="/payments/:paymentOrderId" element={guarded(<PaymentDetailPage />)} />
         <Route path="/transactions" element={guarded(<PlaceholderPage title="Transactions" />)} />
