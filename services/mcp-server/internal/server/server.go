@@ -166,6 +166,21 @@ func (s *MCPServer) RegisterTool(tool Tool, handler ToolHandler) {
 	s.handlers[tool.Name] = handler
 }
 
+// Dispatch handles a single JSON-RPC message and returns the response.
+// For notifications it returns nil (no response required by JSON-RPC spec).
+// For non-request/non-notification messages it returns an invalid-request error.
+// This method is safe to call from multiple goroutines concurrently.
+func (s *MCPServer) Dispatch(ctx context.Context, msg *transport.JSONRPCMessage) *transport.JSONRPCMessage {
+	if msg.IsNotification() {
+		s.handleNotification(msg)
+		return nil
+	}
+	if !msg.IsRequest() {
+		return transport.NewErrorResponse(msg.ID, transport.CodeInvalidRequest, "invalid message")
+	}
+	return s.handleRequest(ctx, msg)
+}
+
 // Run starts the server's message processing loop. It blocks until the context
 // is cancelled or an unrecoverable error occurs.
 func (s *MCPServer) Run(ctx context.Context) error {
@@ -182,18 +197,11 @@ func (s *MCPServer) Run(ctx context.Context) error {
 			return fmt.Errorf("read message: %w", err)
 		}
 
-		if msg.IsNotification() {
-			s.handleNotification(msg)
+		resp := s.Dispatch(ctx, msg)
+		if resp == nil {
 			continue
 		}
-
-		if !msg.IsRequest() {
-			s.logger.Warn("ignoring non-request message")
-			continue
-		}
-
-		response := s.handleRequest(ctx, msg)
-		if err := s.transport.WriteMessage(ctx, response); err != nil {
+		if err := s.transport.WriteMessage(ctx, resp); err != nil {
 			s.logger.Error("failed to write response", "error", err)
 		}
 	}
