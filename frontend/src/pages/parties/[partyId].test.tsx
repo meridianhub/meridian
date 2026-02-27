@@ -58,7 +58,10 @@ describe('PartyDetailPage', () => {
     renderAtRoute(<PartyDetailPage />, '/parties/test-party-1')
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: /party details/i })).toBeInTheDocument()
+      // Breadcrumb link to parent section
+      const partiesLink = screen.getByRole('link', { name: 'Parties' })
+      expect(partiesLink).toBeInTheDocument()
+      expect(partiesLink).toHaveAttribute('href', '/parties')
     })
   })
 
@@ -72,28 +75,36 @@ describe('PartyDetailPage', () => {
   it('renders overview tab by default', async () => {
     renderAtRoute(<PartyDetailPage />, '/parties/test-party-1')
 
-    // Just verify the component renders without crashing
-    expect(screen.getByRole('heading', { name: /party details/i })).toBeInTheDocument()
+    await waitFor(() => {
+      // Breadcrumb link to parent section
+      expect(screen.getByRole('link', { name: 'Parties' })).toBeInTheDocument()
+    })
   })
 
   it('switches to demographics tab on click', async () => {
     renderAtRoute(<PartyDetailPage />, '/parties/test-party-1')
 
-    // Verify page renders
-    expect(screen.getByRole('heading', { name: /party details/i })).toBeInTheDocument()
+    await waitFor(() => {
+      // Breadcrumb link to parent section
+      expect(screen.getByRole('link', { name: 'Parties' })).toBeInTheDocument()
+    })
   })
 
   it('switches to payment methods tab on click', async () => {
     renderAtRoute(<PartyDetailPage />, '/parties/test-party-1')
 
-    // Verify page renders
-    expect(screen.getByRole('heading', { name: /party details/i })).toBeInTheDocument()
+    await waitFor(() => {
+      // Breadcrumb link to parent section
+      expect(screen.getByRole('link', { name: 'Parties' })).toBeInTheDocument()
+    })
   })
 
   it('switches to audit trail tab on click', async () => {
     renderAtRoute(<PartyDetailPage />, '/parties/test-party-1')
 
-    // Verify page renders
-    expect(screen.getByRole('heading', { name: /party details/i })).toBeInTheDocument()
+    await waitFor(() => {
+      // Breadcrumb link to parent section
+      expect(screen.getByRole('link', { name: 'Parties' })).toBeInTheDocument()
+    })
   })
 })
