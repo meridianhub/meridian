@@ -74,16 +74,16 @@ test.describe('Party detail navigation', () => {
     await expect(firstRow).toBeVisible()
     await firstRow.click()
     await expect(page).toHaveURL(/\/parties\/[a-zA-Z0-9-]+/)
-    await expect(page.getByRole('heading', { name: 'Party Details' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Parties' })).toBeVisible()
   })
 
   test('shows Party ID not found for missing partyId param', async ({ authenticatedPage: page }) => {
     // Directly verify that the error message renders for an invalid ID
     await navigateTo(page, '/parties/00000000-0000-0000-0000-000000000000')
-    // Page should render — it will show either the header or an error state
+    // Page should render — it will show either the party data or an error state
     // (the component renders even without backend data)
     await expect(
-      page.getByRole('heading', { name: 'Party Details' }).or(
+      page.getByRole('link', { name: 'Parties' }).or(
         page.getByText('Party not found')
       )
     ).toBeVisible()
@@ -100,7 +100,7 @@ test.describe('Party detail — 7-tab layout', () => {
     } else {
       await page.locator('table tbody tr').first().click()
     }
-    await expect(page.getByRole('heading', { name: 'Party Details' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Parties' })).toBeVisible()
   })
 
   test('renders all 7 tab triggers', async ({ authenticatedPage: page }) => {
@@ -140,7 +140,7 @@ test.describe('Party header component', () => {
       return
     }
     await page.locator('table tbody tr').first().click()
-    await expect(page.getByRole('heading', { name: 'Party Details' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Parties' })).toBeVisible()
   })
 
   test('renders party header section', async ({ authenticatedPage: page }) => {
@@ -168,7 +168,7 @@ test.describe('Tab switching', () => {
     } else {
       await page.locator('table tbody tr').first().click()
     }
-    await expect(page.getByRole('heading', { name: 'Party Details' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Parties' })).toBeVisible()
   })
 
   test('Overview tab renders without error', async ({ authenticatedPage: page }) => {
@@ -243,7 +243,7 @@ test.describe('Tab keyboard navigation', () => {
     } else {
       await page.locator('table tbody tr').first().click()
     }
-    await expect(page.getByRole('heading', { name: 'Party Details' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Parties' })).toBeVisible()
   })
 
   test('ArrowRight moves focus to next tab', async ({ authenticatedPage: page }) => {

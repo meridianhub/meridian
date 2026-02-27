@@ -60,19 +60,19 @@ test.describe('Position detail page', () => {
     ).toBeVisible({ timeout: 10_000 })
   })
 
-  test('renders back button on position detail page', async ({ authenticatedPage }) => {
+  test('renders breadcrumb back link on position detail page', async ({ authenticatedPage }) => {
     await navigateTo(authenticatedPage, '/positions/non-existent-log-id')
     await expect(
-      authenticatedPage.getByTestId('back-button'),
+      authenticatedPage.getByRole('link', { name: 'Positions' }),
     ).toBeVisible({ timeout: 10_000 })
   })
 
-  test('back button navigates to positions list', async ({ authenticatedPage }) => {
+  test('breadcrumb back link navigates to positions list', async ({ authenticatedPage }) => {
     await navigateTo(authenticatedPage, '/positions/non-existent-log-id')
     await expect(
-      authenticatedPage.getByTestId('back-button'),
+      authenticatedPage.getByRole('link', { name: 'Positions' }),
     ).toBeVisible({ timeout: 10_000 })
-    await authenticatedPage.getByTestId('back-button').click()
+    await authenticatedPage.getByRole('link', { name: 'Positions' }).click()
     await expect(authenticatedPage.getByRole('heading', { name: 'Positions' })).toBeVisible()
   })
 })
