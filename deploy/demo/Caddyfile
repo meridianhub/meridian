@@ -11,7 +11,7 @@ demo.meridianhub.cloud, *.demo.meridianhub.cloud {
 	# MCP clients authenticate via Bearer tokens (when OAuth is enabled),
 	# not HTTP basic auth.
 	@protected {
-		not path /healthz /readyz /mcp /sse /message /.well-known/*
+		not path /healthz /readyz /mcp /mcp/* /sse /sse/* /message /message/* /.well-known/*
 	}
 	basicauth @protected {
 		demo $2a$14$xfFb2xnq6vOhKOEh7TTgTula3G.F6MxoT7DawQLGBPziCgjTcWCrS
@@ -33,13 +33,10 @@ demo.meridianhub.cloud, *.demo.meridianhub.cloud {
 	}
 
 	# MCP Server: streamable HTTP + legacy SSE transport
-	handle /mcp {
-		reverse_proxy mcp-server:8090
+	@mcp_transport {
+		path /mcp /mcp/* /sse /sse/* /message /message/*
 	}
-	handle /sse {
-		reverse_proxy mcp-server:8090
-	}
-	handle /message {
+	handle @mcp_transport {
 		reverse_proxy mcp-server:8090
 	}
 
