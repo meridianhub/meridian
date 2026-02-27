@@ -1,14 +1,13 @@
 import * as React from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronLeftIcon } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { StatusBadge } from '@/components/shared/status-badge'
 import { TimeDisplay } from '@/components/shared/time-display'
 import { MoneyDisplay } from '@/components/shared/money-display'
-import { AuditTrail, EntityLink } from '@/components/shared'
+import { AuditTrail, EntityLink, Breadcrumbs } from '@/components/shared'
 import { ConnectError, Code } from '@connectrpc/connect'
 import { useApiClients } from '@/api/context'
 import { useTenantContext } from '@/contexts/tenant-context'
@@ -74,14 +73,7 @@ function AccountDetailSkeleton() {
 function AccountNotFound() {
   return (
     <div data-testid="account-not-found" className="p-6">
-      <Link
-        to="/accounts"
-        className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-        aria-label="Back to Accounts"
-      >
-        <ChevronLeftIcon className="h-4 w-4" />
-        Accounts
-      </Link>
+      <Breadcrumbs items={[{ label: 'Accounts', href: '/accounts' }, { label: 'Not found' }]} />
       <div className="mt-8 text-center">
         <h2 className="text-xl font-semibold">Account not found</h2>
         <p className="mt-2 text-sm text-muted-foreground">
@@ -350,15 +342,13 @@ export function AccountDetailPage() {
 
   return (
     <div className="p-6">
-      {/* Back navigation */}
-      <Link
-        to="/accounts"
-        className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-        aria-label="Back to Accounts"
-      >
-        <ChevronLeftIcon className="h-4 w-4" />
-        Accounts
-      </Link>
+      {/* Breadcrumb navigation */}
+      <Breadcrumbs
+        items={[
+          { label: 'Accounts', href: '/accounts' },
+          { label: account.accountId },
+        ]}
+      />
 
       {/* Page header */}
       <div className="mt-4 flex flex-wrap items-start justify-between gap-4">

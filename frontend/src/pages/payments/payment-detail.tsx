@@ -1,7 +1,7 @@
 import * as React from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronLeftIcon, Plus } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -10,7 +10,7 @@ import { StatusBadge } from '@/components/shared/status-badge'
 import { TimeDisplay } from '@/components/shared/time-display'
 import { SagaTimeline } from '@/components/shared/saga-timeline'
 import { AuditTrail } from '@/components/shared/audit-trail'
-import { EntityLink } from '@/components/shared'
+import { EntityLink, Breadcrumbs } from '@/components/shared'
 import { useTenantSlug } from '@/hooks/use-tenant-context'
 import { useAuthenticatedFetch } from '@/hooks/use-authenticated-fetch'
 import { tenantKeys } from '@/lib/query-keys'
@@ -137,13 +137,7 @@ export function PaymentDetailPage() {
   if (isError || !data) {
     return (
       <div data-testid="payment-detail-error" className="p-6">
-        <Link
-          to="/payments"
-          className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ChevronLeftIcon className="h-4 w-4" />
-          Payments
-        </Link>
+        <Breadcrumbs items={[{ label: 'Payments', href: '/payments' }, { label: 'Error' }]} />
         <p className="mt-4 text-sm text-destructive">Failed to load payment order details.</p>
       </div>
     )
@@ -151,14 +145,13 @@ export function PaymentDetailPage() {
 
   return (
     <div className="p-6 space-y-6">
-      {/* Back navigation */}
-      <Link
-        to="/payments"
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ChevronLeftIcon className="h-4 w-4" />
-        Payments
-      </Link>
+      {/* Breadcrumb navigation */}
+      <Breadcrumbs
+        items={[
+          { label: 'Payments', href: '/payments' },
+          { label: data.paymentOrderId },
+        ]}
+      />
 
       {/* Page header */}
       <div className="flex flex-wrap items-center justify-between gap-4">
