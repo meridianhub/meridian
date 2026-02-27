@@ -21,6 +21,7 @@ import type { ControlAction } from './control-dialog'
 import { CreateLienDialog } from './create-lien-dialog'
 import { CreateValuationFeatureDialog } from '@/components/shared/create-valuation-feature-dialog'
 import type { AccountStatus as AccountStatusType, CurrentAccount } from './types'
+import type { AmountBlock } from '@/api/gen/meridian/current_account/v1/current_account_pb'
 
 const ACCOUNT_STATUS_NAMES: Record<number, string> = {
   [AccountStatus.ACTIVE]: 'ACTIVE',
@@ -306,6 +307,96 @@ function AccountTransactions({ accountId, instrumentCode }: { accountId: string;
 }
 
 // ---------------------------------------------------------------------------
+// Liens
+// ---------------------------------------------------------------------------
+
+function getLienTypeName(blockType: number): string {
+  const typeMap: Record<number, string> = {
+    0: 'UNSPECIFIED',
+    1: 'PENDING',
+    2: 'FINAL',
+    3: 'TEMPORARY',
+  }
+  return typeMap[blockType] ?? String(blockType)
+}
+
+function AccountLiens({ accountId, instrumentCode }: { accountId: string; instrumentCode: string }) {
+  const { tenantSlug } = useTenantContext()
+  const clients = useApiClients()
+
+  const { data, isLoading, isError } = useQuery({
+    queryKey: tenantKeys.liens(tenantSlug ?? '', accountId),
+    queryFn: (): Promise<{ blocks: AmountBlock[] }> =>
+      clients.currentAccount.getActiveAmountBlocks({ accountId }),
+    enabled: !!accountId,
+  })
+
+  const blocks = data?.blocks ?? []
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Liens</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {isLoading && (
+          <div className="animate-pulse space-y-2">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="h-8 rounded bg-muted" />
+            ))}
+          </div>
+        )}
+        {isError && (
+          <p className="text-sm text-muted-foreground">Failed to load liens.</p>
+        )}
+        {!isLoading && !isError && blocks.length === 0 && (
+          <p className="text-sm text-muted-foreground">No active liens for this account.</p>
+        )}
+        {!isLoading && !isError && blocks.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-xs font-medium text-muted-foreground">
+                  <th className="pb-2 pr-4">Lien ID</th>
+                  <th className="pb-2 pr-4">Amount</th>
+                  <th className="pb-2 pr-4">Type</th>
+                  <th className="pb-2 pr-4">Purpose</th>
+                  <th className="pb-2">Expiry</th>
+                </tr>
+              </thead>
+              <tbody>
+                {blocks.map((block) => (
+                  <tr key={block.blockId} className="border-b last:border-0">
+                    <td className="py-2 pr-4 font-mono text-xs">{block.blockId}</td>
+                    <td className="py-2 pr-4 tabular-nums">
+                      <MoneyDisplay
+                        amount={block.amount?.units}
+                        currency={block.amount?.currencyCode ?? instrumentCode}
+                      />
+                    </td>
+                    <td className="py-2 pr-4">
+                      <StatusBadge status={getLienTypeName(block.blockType)} />
+                    </td>
+                    <td className="py-2 pr-4 max-w-xs truncate" title={block.purpose}>
+                      {block.purpose || '—'}
+                    </td>
+                    <td className="py-2">
+                      {block.expiresAt
+                        ? <TimeDisplay timestamp={block.expiresAt} format="absolute" />
+                        : <span className="text-muted-foreground">—</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
 
@@ -451,16 +542,7 @@ export function AccountDetailPage() {
           </TabsContent>
 
           <TabsContent value="liens" className="mt-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Liens</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground">
-                  Active liens and reservations for this account will appear here.
-                </p>
-              </CardContent>
-            </Card>
+            <AccountLiens accountId={account.accountId} instrumentCode={account.instrumentCode} />
           </TabsContent>
 
           <TabsContent value="audit" className="mt-4">
