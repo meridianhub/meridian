@@ -12,7 +12,7 @@ interface LedgerPosting {
   id: string
   financialBookingLogId: string
   postingDirection: string
-  amount: bigint | string
+  amount: bigint
   currency: string
   accountId: string
   valueDate: { seconds: bigint | number; nanos?: number } | null | undefined
@@ -31,6 +31,35 @@ function getDirectionName(value: unknown): string {
     return directionMap[value] ?? String(value)
   }
   return String(value ?? '')
+}
+
+function getStatusName(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (typeof value === 'number') {
+    const statusMap: Record<number, string> = {
+      0: 'UNSPECIFIED',
+      1: 'PENDING',
+      2: 'POSTED',
+      3: 'FAILED',
+      4: 'CANCELLED',
+      5: 'REVERSED',
+    }
+    return statusMap[value] ?? String(value)
+  }
+  return String(value ?? '')
+}
+
+function parseUnitsAsBigInt(rawUnits: bigint | string | number | null | undefined): bigint {
+  if (rawUnits === null || rawUnits === undefined) return 0n
+  if (typeof rawUnits === 'bigint') return rawUnits
+  try {
+    const str = String(rawUnits)
+    // Truncate decimal portion if present (e.g. float "1234.56" -> "1234")
+    const intStr = str.includes('.') ? str.split('.')[0] : str
+    return BigInt(intStr)
+  } catch {
+    return 0n
+  }
 }
 
 const columns: ColumnDef<LedgerPosting>[] = [
@@ -116,10 +145,7 @@ export function TransactionsPage() {
       const money = p.postingAmount as { currencyCode?: string; units?: bigint | string | number; nanos?: number } | null | undefined
       const currency = money?.currencyCode ?? ''
       const rawUnits = money?.units
-      let amount: bigint | string = 0n
-      if (rawUnits !== null && rawUnits !== undefined) {
-        amount = typeof rawUnits === 'bigint' ? rawUnits : BigInt(String(rawUnits))
-      }
+      const amount: bigint = parseUnitsAsBigInt(rawUnits)
 
       return {
         id: p.id ?? '',
@@ -130,7 +156,7 @@ export function TransactionsPage() {
         accountId: p.accountId ?? '',
         valueDate: p.valueDate ?? null,
         createdAt: p.createdAt ?? null,
-        status: getDirectionName(p.status),
+        status: getStatusName(p.status),
       }
     }) as LedgerPosting[]
 
