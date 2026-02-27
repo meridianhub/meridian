@@ -77,7 +77,7 @@ export function AccountsPage() {
         externalReference: a.externalIdentifier ?? '',
         status: (ACCOUNT_STATUS_NAMES[a.accountStatus] ?? String(a.accountStatus)) as CurrentAccount['status'],
         instrumentCode: a.instrumentCode || '',
-        availableBalance: '',
+        availableBalance: '', // fetched separately via PositionKeeping; not in ListCurrentAccounts response
         createdAt: a.createdAt ?? undefined,
         updatedAt: a.updatedAt ?? undefined,
       }))

@@ -214,16 +214,19 @@ export function AuditLogPage() {
   const authFetch = useAuthenticatedFetch()
 
   const fetchAuditEntries = useCallback(async (params: DataTableQueryParams): Promise<DataTableResult<AuditLogEntry>> => {
-    const searchParams = new URLSearchParams()
-    if (params.pageToken) searchParams.set('pageToken', params.pageToken)
-    searchParams.set('pageSize', String(params.pageSize))
+    const body: Record<string, unknown> = {
+      pageSize: params.pageSize,
+    }
+    if (params.pageToken) body.pageToken = params.pageToken
     if (params.filters) {
       Object.entries(params.filters).forEach(([key, value]) => {
-        if (value) searchParams.set(key, value)
+        if (value) body[key] = value
       })
     }
-    const response = await authFetch(`/meridian.audit.v1.AuditService/ListAuditEntries?${searchParams}`, {
+    const response = await authFetch('/meridian.audit.v1.AuditService/ListAuditEntries', {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
     })
     if (!response.ok) {
       if (response.status === 501 || response.status === 503) {

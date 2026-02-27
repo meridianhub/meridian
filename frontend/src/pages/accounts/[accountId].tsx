@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { StatusBadge } from '@/components/shared/status-badge'
 import { TimeDisplay } from '@/components/shared/time-display'
 import { AuditTrail } from '@/components/shared'
+import { ConnectError, Code } from '@connectrpc/connect'
 import { useApiClients } from '@/api/context'
 import { useTenantContext } from '@/contexts/tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
@@ -211,8 +212,7 @@ export function AccountDetailPage() {
           partyId: f.orgPartyId || undefined,
         }
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err)
-        if (msg.includes('not_found') || msg.includes('NOT_FOUND')) return null
+        if (ConnectError.from(err).code === Code.NotFound) return null
         throw err
       }
     },

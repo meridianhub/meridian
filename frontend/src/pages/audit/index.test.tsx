@@ -215,7 +215,8 @@ describe('AuditLogPage', () => {
       await waitFor(() => {
         const calls = (global.fetch as vi.MockedFunction<typeof fetch>).mock.calls
         const lastCall = calls[calls.length - 1]
-        expect(lastCall[0]).toContain('tableName=current_account')
+        const body = JSON.parse(lastCall[1]?.body as string)
+        expect(body.tableName).toBe('current_account')
       })
     })
 
@@ -240,7 +241,8 @@ describe('AuditLogPage', () => {
       await waitFor(() => {
         const calls = (global.fetch as vi.MockedFunction<typeof fetch>).mock.calls
         const lastCall = calls[calls.length - 1]
-        expect(lastCall[0]).toContain('operation=UPDATE')
+        const body = JSON.parse(lastCall[1]?.body as string)
+        expect(body.operation).toBe('UPDATE')
       })
     })
 
@@ -265,7 +267,8 @@ describe('AuditLogPage', () => {
       await waitFor(() => {
         const calls = (global.fetch as vi.MockedFunction<typeof fetch>).mock.calls
         const lastCall = calls[calls.length - 1]
-        expect(lastCall[0]).toContain('changedBy=user%40example.com')
+        const body = JSON.parse(lastCall[1]?.body as string)
+        expect(body.changedBy).toBe('user@example.com')
       })
     })
 
@@ -295,7 +298,8 @@ describe('AuditLogPage', () => {
       await waitFor(() => {
         const calls = (global.fetch as vi.MockedFunction<typeof fetch>).mock.calls
         const lastCall = calls[calls.length - 1]
-        expect(lastCall[0]).not.toContain('pageToken=token-1')
+        const body = JSON.parse(lastCall[1]?.body as string)
+        expect(body.pageToken).toBeUndefined()
       })
     })
   })
