@@ -71,24 +71,43 @@ export function AccountsTab({ partyId }: AccountsTabProps) {
     async (params: DataTableQueryParams): Promise<DataTableResult<AccountRow>> => {
       if (!tenantSlug) return { items: [] }
 
-      const response = await clients.currentAccount.listCurrentAccounts({
-        pageSize: params.pageSize,
-        pageToken: params.pageToken ?? '',
-      })
+      // The API does not support filtering by partyId, so we fetch pages and filter
+      // client-side. We continue fetching until we have enough matching rows to fill
+      // pageSize, or the API is exhausted.
+      const collected: AccountRow[] = []
+      let cursor = params.pageToken ?? ''
+      let nextPageToken: string | undefined
 
-      const accounts: AccountRow[] = (response.accounts ?? [])
-        .filter((a) => a.orgPartyId === partyId)
-        .map((a) => ({
-          accountId: a.accountId,
-          externalReference: a.externalIdentifier ?? '',
-          status: ACCOUNT_STATUS_NAMES[a.accountStatus] ?? String(a.accountStatus),
-          instrumentCode: a.instrumentCode || '',
-          createdAt: a.createdAt ?? undefined,
-        }))
+      while (collected.length < params.pageSize) {
+        const response = await clients.currentAccount.listCurrentAccounts({
+          pageSize: 100,
+          pageToken: cursor,
+        })
+
+        for (const a of response.accounts ?? []) {
+          if (a.orgPartyId === partyId) {
+            collected.push({
+              accountId: a.accountId,
+              externalReference: a.externalIdentifier ?? '',
+              status: ACCOUNT_STATUS_NAMES[a.accountStatus] ?? String(a.accountStatus),
+              instrumentCode: a.instrumentCode || '',
+              createdAt: a.createdAt ?? undefined,
+            })
+          }
+        }
+
+        if (!response.nextPageToken) {
+          nextPageToken = undefined
+          break
+        }
+
+        cursor = response.nextPageToken
+        nextPageToken = response.nextPageToken
+      }
 
       return {
-        items: accounts,
-        nextPageToken: response.nextPageToken || undefined,
+        items: collected.slice(0, params.pageSize),
+        nextPageToken,
       }
     },
     [tenantSlug, partyId, clients],
