@@ -167,9 +167,18 @@ func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.Cu
 	// Resolve clearing account ID: explicit override > dynamic resolver > static config
 	var clearingAccountID string
 	if clearingAccountIDOverride != "" {
+		// Validate override is a well-formed account identifier (UUID format).
+		// The saga will further validate the account exists in Financial Accounting.
+		if _, parseErr := uuid.Parse(clearingAccountIDOverride); parseErr != nil {
+			sagaStatus = operationStatusFailed
+			return nil, status.Errorf(codes.InvalidArgument,
+				"clearing_account_id override is not a valid UUID: %s", clearingAccountIDOverride)
+		}
 		clearingAccountID = clearingAccountIDOverride
-		o.logger.Debug("using caller-provided clearing account override",
-			"clearing_account_id", clearingAccountID)
+		o.logger.Warn("clearing account override applied",
+			"clearing_account_id", clearingAccountID,
+			"account_id", account.AccountID(),
+			"instrument", amount.InstrumentCode())
 	} else {
 		clearingAccountID = o.resolveClearingAccountID(ctx, amount.InstrumentCode())
 	}
