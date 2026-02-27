@@ -7,16 +7,6 @@
 demo.meridianhub.cloud, *.demo.meridianhub.cloud {
 	tls /etc/caddy/certs/origin-cert.pem /etc/caddy/certs/origin-key.pem
 
-	# Protect the demo site with HTTP basic auth, excluding specific paths.
-	# MCP clients authenticate via Bearer tokens (when OAuth is enabled),
-	# not HTTP basic auth.
-	@protected {
-		not path /healthz /readyz /mcp /mcp/* /sse /sse/* /message /message/* /.well-known/*
-	}
-	basicauth @protected {
-		demo $2a$14$xfFb2xnq6vOhKOEh7TTgTula3G.F6MxoT7DawQLGBPziCgjTcWCrS
-	}
-
 	# Health/readiness probes (used by Docker and load balancers)
 	handle /healthz {
 		reverse_proxy meridian:8090
