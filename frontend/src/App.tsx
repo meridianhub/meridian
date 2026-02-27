@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route, useLocation, useNavigate } from 'react-ro
 import { QueryClientProvider } from '@tanstack/react-query'
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 import { queryClient } from '@/lib/query-client'
-import { PageErrorBoundary } from '@/components/error-boundary'
+import { PageErrorBoundary, RouteErrorBoundary } from '@/components/error-boundary'
 import { AuthProvider, useAuth } from '@/contexts/auth-context'
 import { TenantProvider, useTenantContext } from '@/contexts/tenant-context'
 import { useTenants } from '@/hooks/use-tenants'
@@ -212,9 +212,17 @@ function NotFoundPage() {
   )
 }
 
+/** Wraps a page element with a route-level error boundary. */
+function guarded(element: ReactNode) {
+  return <RouteErrorBoundary>{element}</RouteErrorBoundary>
+}
+
 /**
  * Layout wrapper that reads the current path from React Router
  * and passes it to AppShell for active nav highlighting.
+ *
+ * Each route is wrapped with RouteErrorBoundary so that a crash in one page
+ * shows an inline error message instead of taking down the entire app.
  */
 function AppShellLayout() {
   const { pathname } = useLocation()
@@ -225,46 +233,46 @@ function AppShellLayout() {
     <AppShell currentPath={pathname}>
       <Routes>
         {/* Tenant-scoped routes */}
-        <Route path="/" element={<DashboardPage />} />
-        <Route path="/accounts" element={<AccountsPage />} />
-        <Route path="/accounts/:accountId" element={<AccountDetailPage />} />
-        <Route path="/internal-accounts" element={<InternalAccountsPage />} />
-        <Route path="/internal-accounts/:accountId" element={<PlaceholderPage title="Internal Account Detail" />} />
-        <Route path="/payments" element={<PaymentsPage />} />
-        <Route path="/payments/:paymentOrderId" element={<PaymentDetailPage />} />
-        <Route path="/transactions" element={<PlaceholderPage title="Transactions" />} />
-        <Route path="/positions" element={<PositionsPage />} />
-        <Route path="/positions/:logId" element={<PositionDetailPage />} />
-        <Route path="/ledger" element={<LedgerPage />} />
-        <Route path="/ledger/:bookingLogId" element={<BookingLogDetailPage />} />
-        <Route path="/parties" element={<PartiesPage />} />
-        <Route path="/parties/:partyId" element={<PartyDetailPage />} />
-        <Route path="/reconciliation" element={<ReconciliationPage />} />
-        <Route path="/reconciliation/:runId" element={<ReconciliationDetailPage />} />
+        <Route path="/" element={guarded(<DashboardPage />)} />
+        <Route path="/accounts" element={guarded(<AccountsPage />)} />
+        <Route path="/accounts/:accountId" element={guarded(<AccountDetailPage />)} />
+        <Route path="/internal-accounts" element={guarded(<InternalAccountsPage />)} />
+        <Route path="/internal-accounts/:accountId" element={guarded(<PlaceholderPage title="Internal Account Detail" />)} />
+        <Route path="/payments" element={guarded(<PaymentsPage />)} />
+        <Route path="/payments/:paymentOrderId" element={guarded(<PaymentDetailPage />)} />
+        <Route path="/transactions" element={guarded(<PlaceholderPage title="Transactions" />)} />
+        <Route path="/positions" element={guarded(<PositionsPage />)} />
+        <Route path="/positions/:logId" element={guarded(<PositionDetailPage />)} />
+        <Route path="/ledger" element={guarded(<LedgerPage />)} />
+        <Route path="/ledger/:bookingLogId" element={guarded(<BookingLogDetailPage />)} />
+        <Route path="/parties" element={guarded(<PartiesPage />)} />
+        <Route path="/parties/:partyId" element={guarded(<PartyDetailPage />)} />
+        <Route path="/reconciliation" element={guarded(<ReconciliationPage />)} />
+        <Route path="/reconciliation/:runId" element={guarded(<ReconciliationDetailPage />)} />
         <Route
           path="/starlark-config"
-          element={<StarlarkConfigPage isPlatformAdmin={isPlatformAdmin} />}
+          element={guarded(<StarlarkConfigPage isPlatformAdmin={isPlatformAdmin} />)}
         />
-        <Route path="/starlark-config/:definitionId" element={<StarlarkDetailPage />} />
-        <Route path="/market-data" element={<MarketDataPage />} />
-        <Route path="/market-data/:datasetCode" element={<DatasetDetailPage />} />
-        <Route path="/forecasting" element={<ForecastingPage />} />
-        <Route path="/reference-data" element={<PlaceholderPage title="Reference Data" />} />
-        <Route path="/reference-data/instruments" element={<InstrumentsPage />} />
-        <Route path="/reference-data/account-types" element={<AccountTypesPage />} />
-        <Route path="/reference-data/nodes" element={<NodesPage />} />
-        <Route path="/gateway-mappings" element={<MappingsPage />} />
-        <Route path="/gateway-mappings/:mappingId" element={<MappingDetailPage />} />
-        <Route path="/manifests" element={<ManifestsPage />} />
-        <Route path="/mcp-config" element={<McpConfigPage />} />
-        <Route path="/audit-log" element={<AuditLogPage />} />
+        <Route path="/starlark-config/:definitionId" element={guarded(<StarlarkDetailPage />)} />
+        <Route path="/market-data" element={guarded(<MarketDataPage />)} />
+        <Route path="/market-data/:datasetCode" element={guarded(<DatasetDetailPage />)} />
+        <Route path="/forecasting" element={guarded(<ForecastingPage />)} />
+        <Route path="/reference-data" element={guarded(<PlaceholderPage title="Reference Data" />)} />
+        <Route path="/reference-data/instruments" element={guarded(<InstrumentsPage />)} />
+        <Route path="/reference-data/account-types" element={guarded(<AccountTypesPage />)} />
+        <Route path="/reference-data/nodes" element={guarded(<NodesPage />)} />
+        <Route path="/gateway-mappings" element={guarded(<MappingsPage />)} />
+        <Route path="/gateway-mappings/:mappingId" element={guarded(<MappingDetailPage />)} />
+        <Route path="/manifests" element={guarded(<ManifestsPage />)} />
+        <Route path="/mcp-config" element={guarded(<McpConfigPage />)} />
+        <Route path="/audit-log" element={guarded(<AuditLogPage />)} />
 
         {/* Platform-only routes */}
         <Route
           path="/tenants"
           element={
             <PlatformOnlyRoute>
-              <TenantsPage />
+              {guarded(<TenantsPage />)}
             </PlatformOnlyRoute>
           }
         />
@@ -272,7 +280,7 @@ function AppShellLayout() {
           path="/tenants/:tenantId"
           element={
             <PlatformOnlyRoute>
-              <TenantDetailPage />
+              {guarded(<TenantDetailPage />)}
             </PlatformOnlyRoute>
           }
         />
@@ -280,7 +288,7 @@ function AppShellLayout() {
           path="/platform"
           element={
             <PlatformOnlyRoute>
-              <PlaceholderPage title="Platform Monitoring" />
+              {guarded(<PlaceholderPage title="Platform Monitoring" />)}
             </PlatformOnlyRoute>
           }
         />
