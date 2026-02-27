@@ -30,6 +30,11 @@ vi.mock('@/contexts/auth-context', () => ({
   useAuth: vi.fn(() => ({ accessToken: 'test-token', logout: vi.fn() })),
 }))
 
+// Mock useTenantContext to avoid requiring TenantProvider in tests
+vi.mock('@/contexts/tenant-context', () => ({
+  useTenantContext: vi.fn(() => ({ tenantSlug: 'test-tenant', isPlatformAdmin: false, currentTenant: null, switchTenant: vi.fn() })),
+}))
+
 import { PartyDetailPage } from './[partyId]'
 
 function makeQueryClient() {
