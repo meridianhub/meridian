@@ -19,7 +19,7 @@ demo.meridianhub.cloud, *.demo.meridianhub.cloud {
 	# Uses a negated matcher to explicitly exclude health probes from auth,
 	# since Caddy's default directive order runs basicauth before handle blocks.
 	@not_health_probes {
-		not path /healthz /readyz
+		not path /healthz /readyz /mcp /sse /message /.well-known/oauth-*
 	}
 	basicauth @not_health_probes {
 		demo $2a$14$xfFb2xnq6vOhKOEh7TTgTula3G.F6MxoT7DawQLGBPziCgjTcWCrS
@@ -32,6 +32,8 @@ demo.meridianhub.cloud, *.demo.meridianhub.cloud {
 
 	# MCP Server: streamable HTTP + legacy SSE transport
 	# NOTE: Requires mcp-server container to be running; routes will 502 until deployed.
+	# OAuth discovery paths must also route to MCP server so Claude Code's
+	# MCP client receives proper JSON (not the frontend SPA HTML).
 	handle /mcp {
 		reverse_proxy mcp-server:8090
 	}
@@ -39,6 +41,12 @@ demo.meridianhub.cloud, *.demo.meridianhub.cloud {
 		reverse_proxy mcp-server:8090
 	}
 	handle /message {
+		reverse_proxy mcp-server:8090
+	}
+	handle /.well-known/oauth-authorization-server {
+		reverse_proxy mcp-server:8090
+	}
+	handle /.well-known/oauth-protected-resource {
 		reverse_proxy mcp-server:8090
 	}
 
