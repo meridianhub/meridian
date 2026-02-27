@@ -161,7 +161,7 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 	}
 
 	// Orchestrate transaction with saga pattern - Position Keeping is the source of truth for balance
-	resp, err := s.depositOrchestrator.Orchestrate(ctx, account, amount, transactionID, req.Attributes)
+	resp, err := s.depositOrchestrator.Orchestrate(ctx, account, amount, transactionID, req.Attributes, req.ClearingAccountId)
 	if err != nil {
 		operationStatus = opStatusSagaFailed
 		return nil, err
