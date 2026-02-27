@@ -42,6 +42,7 @@ import { ReconciliationDetailPage } from '@/pages/reconciliation/detail'
 import { DashboardPage } from '@/pages/dashboard'
 import { ManifestsPage } from '@/pages/manifests'
 import { McpConfigPage } from '@/pages/mcp-config'
+import { TransactionsPage } from '@/pages/transactions'
 
 // Placeholder page components - replaced as each page task is implemented
 function PlaceholderPage({ title }: { title: string }) {
@@ -242,7 +243,7 @@ function AppShellLayout() {
         <Route path="/internal-accounts/:accountId" element={guarded(<InternalAccountDetailPage />)} />
         <Route path="/payments" element={guarded(<PaymentsPage />)} />
         <Route path="/payments/:paymentOrderId" element={guarded(<PaymentDetailPage />)} />
-        <Route path="/transactions" element={guarded(<PlaceholderPage title="Transactions" />)} />
+        <Route path="/transactions" element={guarded(<TransactionsPage />)} />
         <Route path="/positions" element={guarded(<PositionsPage />)} />
         <Route path="/positions/:logId" element={guarded(<PositionDetailPage />)} />
         <Route path="/ledger" element={guarded(<LedgerPage />)} />
