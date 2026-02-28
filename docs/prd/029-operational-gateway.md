@@ -286,6 +286,10 @@ graph TB
   market prices) are handled by dedicated ingestion services. The
   gateway handles discrete non-financial messages, not bulk data
   streams
+- **Routing intelligence or control logic** — The gateway dispatches,
+  it does not decide. Sagas own all "what happens when" logic.
+  Routes support `fallback_connection_id` for transparent failover,
+  but no CEL/Starlark evaluates in the dispatch hot path
 
 ---
 
@@ -385,8 +389,9 @@ operational_gateway:
   instruction_routes:
     - instruction_type: payment.collect
       connection_id: stripe-payments
-      outbound_mapping: payment-collect-to-stripe   # MappingDefinition name
-      inbound_mapping: stripe-response-to-ack       # Response mapping
+      fallback_connection_id: adyen-payments   # Used when primary circuit breaker is open
+      outbound_mapping: payment-collect-to-stripe
+      inbound_mapping: stripe-response-to-ack
       http_method: POST
       path_template: /payment_intents
 
@@ -968,134 +973,116 @@ doesn't address rotation. When a provider API key is rotated:
   vs "broken"
 - Manifest apply: should secret rotation trigger connection re-test?
 
-### 6.10 Relationship to Reference Data and Market Data Services
+### 6.10 Configuration Storage (Resolved)
 
-The Operational Gateway shares an architectural pattern with the
-Forecasting Service: both read from reference data and market data,
-apply tenant-defined logic, and produce outputs that feed back into
-the platform.
+**Decision**: Gateway configuration lives in the Manifest proto as
+a new `operational_gateway` section, applied atomically alongside
+instruments, sagas, and payment rails. Operational telemetry
+(dispatch latency, retry counts, connection health) flows to
+Prometheus metrics.
 
-**Reference Data as input**: Provider connections, instruction
-routes, and inbound routes are effectively reference data — they
-describe "how" the gateway should behave. Should gateway
-configuration live in the gateway's own tables (as currently
-described), or should it be stored in the Reference Data Service as
-hierarchical nodes? The Reference Data Service already provides
-bi-temporal versioning, resolution keys, and audit trails that
-gateway configuration would otherwise need to re-implement.
+**Rationale**: The existing `payment_rails` manifest section is
+the direct precedent — the Operational Gateway generalises it to
+arbitrary providers. The manifest already provides atomic
+versioning, diff/plan/apply validation, history, and AI
+configuration via MCP tools (`meridian_manifest_plan`,
+`meridian_manifest_apply`). Storing gateway config in the Reference
+Data Service would conflate platform configuration with tenant
+business data (nodes, hierarchies) and create a runtime dependency
+on Reference Data for every dispatch.
 
-**Market Data as input or output**: The gateway could consume
-market data to make dispatch decisions (e.g., a pricing threshold
-triggers a hedging instruction to a broker). Conversely, gateway
-outcomes could be published back as observations (e.g., provider
-latency metrics, SLA compliance rates). The Forecasting Service
-already demonstrates this read-process-publish cycle. Should the
-gateway support a similar feedback loop?
+**What was considered and rejected**:
 
-**Implications**: If the gateway reads from reference data and
-market data services rather than maintaining its own configuration
-store, it becomes a stateless dispatch engine whose behaviour is
-entirely derived from platform-wide data. This is consistent with
-the "operating system" model where services compose from shared
-data rather than maintaining private state.
+- *Reference Data for gateway config*: Adds bi-temporal complexity
+  for configuration that only changes at manifest apply time. The
+  instruction record itself captures the route config at creation
+  time, serving as the audit trail.
+- *Publishing to Market Data*: Provider latency is operational
+  telemetry, not instrument valuation. Market data datasets are
+  consumed by forecasting and valuation engines. Prometheus is
+  purpose-built for operational metrics.
 
-### 6.11 Starlark/CEL for Event-Driven Control Logic
+### 6.11 Routing Intelligence Level (Resolved)
 
-The gateway currently uses CEL for inbound message classification
-and MappingDefinition for payload transformation. But could
-Starlark/CEL also define higher-order control logic — the "what
-happens when" rules?
+**Decision**: The gateway is a dispatch engine, not a decision
+engine. Sagas own all "what happens when" logic. Routes support an
+optional `fallback_connection_id` for single-hop failover when the
+primary connection's circuit breaker is open. No CEL expressions or
+Starlark scripts evaluate in the dispatch hot path.
 
-Examples of control logic that might be expressible:
+**Rationale**: Section 4.4 already defines the separation of
+concerns — sagas decide WHAT and WHEN, routes decide WHERE,
+mappings decide HOW. Every example of "control logic" proposed
+(conditional dispatch, market-driven triggers, escalation chains)
+is expressible as saga Starlark today. Adding a second control
+logic layer in the gateway would create two places where business
+intent can hide, complicating debugging and support.
 
-- **Conditional dispatch**: "When instruction type is
-  `payment.collect` and amount exceeds tenant threshold (from
-  reference data), also dispatch a `compliance.notify` instruction"
-- **Market-driven triggers**: "When the carbon credit spot price
-  (from market data) drops below the tenant's buy threshold,
-  dispatch a `trade.execute` instruction to the broker connection"
-- **Provider failover**: "When connection X's circuit breaker is
-  open, route matching instructions to connection Y" (beyond
-  static primary/secondary — dynamic routing based on live state)
-- **Escalation chains**: "When an instruction has been in
-  DISPATCHED state for longer than the route's SLA timeout,
-  dispatch an `alert.escalation` instruction to the notification
-  connection"
+The `fallback_connection_id` handles the one case that genuinely
+belongs in the gateway: transparent failover when a provider is
+down. This is a 2-point field addition rather than a 13-point
+rules engine.
 
-The Forecasting Service demonstrates that Starlark can serve as a
-control logic engine: it reads context (observations, reference
-data), applies a tenant-defined strategy, and produces actions. The
-gateway could follow the same pattern — Starlark strategies that
-read gateway state and produce instruction decisions.
+**Explicit boundary**: If cross-saga operational rules are needed
+in future (e.g., "when any payment saga fails 3 times for
+provider X, pause all dispatches to X"), they belong in a dedicated
+operational rules service consuming gateway Kafka events — not
+embedded in the gateway itself.
 
-**Open sub-questions**:
+### 6.12 Worker Architecture (Resolved)
 
-- Should control logic be per-route (each route has an optional
-  Starlark decision script) or per-tenant (a single gateway
-  strategy evaluates all events)?
-- How does this relate to saga orchestration? Sagas already define
-  "what happens when" — is gateway-level control logic
-  duplicating saga responsibility, or is it a complementary layer
-  for cross-saga operational rules?
-- Could CEL expressions in the manifest handle simpler rules
-  (threshold checks, routing conditions) while Starlark handles
-  complex multi-step logic — the same CEL/Starlark division used
-  elsewhere in the platform?
+**Decision**: All gateway periodic operations use
+`shared/platform/scheduler.WorkerLifecycle` for goroutine-based
+polling. The `CronScheduler` is not used for gateway workers.
 
-### 6.12 Relationship to Platform Scheduler
+| Worker | Mechanism | Frequency |
+|--------|-----------|-----------|
+| Dispatch worker | `WorkerLifecycle` + poll loop | 1-5s |
+| Health check probes | `WorkerLifecycle` + ticker | 15-30s |
+| Instruction expiry sweep | `WorkerLifecycle` + ticker | 30-60s |
+| Circuit breaker transition | In-process timer | Event-driven |
 
-The gateway needs periodic execution for several concerns: health
-check probes, circuit breaker half-open transitions, instruction
-expiry sweeps, and potentially market-driven trigger evaluation.
-The Platform Scheduler (PRD-021) provides shared scheduling
-infrastructure already used by Forecasting and Reconciliation.
+**Rationale**: The `CronScheduler` has a 1-minute minimum
+resolution and requires Redis + database writes per execution. The
+gateway's dispatch worker needs sub-second polling, and health
+checks need sub-30-second detection. `WorkerLifecycle` is the
+established pattern for this — used by the outbox worker, audit
+worker, and dunning worker. It provides clean start/stop lifecycle
+without cron overhead.
 
-**Open sub-questions**:
+`CronScheduler` is reserved for future tenant-defined scheduled
+instructions (e.g., "dispatch a daily settlement report at 6am")
+where minute-level resolution, persistence, and distributed locking
+are appropriate.
 
-- Should the gateway register its workers as scheduler jobs
-  (consistent platform pattern) or manage its own polling loops
-  (simpler, fewer dependencies)?
-- If control logic (6.11) introduces market-driven triggers, those
-  require periodic evaluation. Should this be a scheduled job that
-  evaluates all active trigger rules, or event-driven via Kafka
-  when market data changes?
-- The scheduler supports cron expressions for recurring jobs. Are
-  gateway health checks better modelled as cron jobs (every 30s)
-  or as continuous background goroutines?
+### 6.13 Control Surfaces (Resolved)
 
-### 6.13 Two Control Surfaces: React and MCP
+**Decision**: The gateway exposes standard gRPC RPCs consumed by
+both the React Operations Console (via ConnectRPC) and the MCP
+Server (via gRPC client wrappers). Connection CRUD is handled by
+existing manifest tools. Phase 1 adds at most 3 MCP tools for
+operational visibility. Real-time event delivery uses PRD-025.
 
-Both the React Operations Console and the MCP Server act as
-control surfaces to the same gRPC backend. The gateway introduces
-new operational concerns that both surfaces need to expose:
+**Phase 1 MCP tools**:
 
-- **Connection management**: Create, test, monitor provider
-  connections
-- **Instruction visibility**: View in-flight instructions, retry
-  failed ones, inspect dead letter queue
-- **Inbound message inspection**: View received messages, trace
-  correlation to instructions
-- **Control logic monitoring**: View active rules, see which
-  triggers fired and why
+| Tool | Category | Purpose |
+|------|----------|---------|
+| `meridian_gateway_dispatch_status` | Read | List/filter instructions by status, connection, time range |
+| `meridian_gateway_connection_health` | Read | Connection status, circuit breaker state, recent error rates |
+| `meridian_gateway_retry_instruction` | Write | Retry a failed instruction (resets to PENDING) |
 
-The MCP Server's manifest tools (`meridian_manifest_plan`,
-`meridian_manifest_apply`) already handle gateway configuration
-declaratively. But operational actions (retry an instruction, drain
-a connection, force-trip a circuit breaker) need imperative RPCs
-that both surfaces can call.
+**Rationale**: The MCP server already has 22 tools. Tool sprawl
+degrades AI usability. Connection configuration is manifest state,
+already managed by `meridian_manifest_plan` / `apply`. Operational
+actions (inspect failures, retry) need thin wrappers around gateway
+gRPC RPCs — consistent with how every other service's tools are
+registered. The React frontend calls the same gRPC RPCs directly
+via ConnectRPC with no additional work.
 
-**Open sub-questions**:
-
-- Should the MCP Server expose gateway-specific tools (e.g.,
-  `meridian_gateway_retry_instruction`) or are the generic
-  manifest and saga tools sufficient?
-- The React console needs real-time visibility into dispatch
-  status. Does PRD-025 (Real-Time Event Streaming) cover this,
-  or does the gateway need its own WebSocket channel?
-- For AI-assisted operations, could the MCP Server use gateway
-  state to answer questions like "why did this instruction fail?"
-  by tracing through connection config, circuit breaker state,
-  and dispatch attempts?
+Real-time dispatch visibility is a PRD-025 concern. The gateway
+emits Kafka events for every lifecycle transition (Section 7.4).
+PRD-025 consumes those and streams to the frontend. No
+gateway-specific WebSocket channel needed.
 
 ---
 
