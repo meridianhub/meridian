@@ -190,7 +190,7 @@ graph TB
 |---|------|----------------|
 | G1 | At-least-once delivery for all outbound instructions | Zero lost instructions under failure scenarios |
 | G2 | Manifest-declared provider connections and routes | Tenants configure integrations without code changes |
-| G3 | Starlark-programmable routing and transformation | Business rules determine what gets sent where |
+| G3 | Declarative mapping-based transformation with programmable routing policy | Business rules determine what gets sent where |
 | G4 | Asset-agnostic instruction model | Same service handles payments, notifications, API calls, device commands |
 | G5 | Full audit trail for every outbound instruction | Every send, retry, ack, failure recorded in the ledger |
 | G6 | Provider-independent instruction abstraction | Swap providers by changing manifest, not saga scripts |
@@ -585,6 +585,13 @@ stateDiagram-v2
     CANCELLED --> [*]
 ```
 
+> **Note**: `RETRYING` and `CIRCUIT_OPEN` are transient sub-states of
+> `DISPATCHING` in the proto enum. The dispatch worker tracks retry
+> count and next-attempt time on the instruction record; the circuit
+> breaker state lives on the connection, not the instruction. The
+> diagram shows logical flow; the persisted `status` column uses only
+> the `InstructionStatus` enum values.
+
 **Persistence**: Instructions are written to an `instructions` table
 in the operational gateway's database. The dispatch worker polls for
 PENDING instructions (or consumes from a Kafka topic when enabled).
@@ -642,8 +649,8 @@ External systems respond asynchronously. The gateway supports two
 response patterns:
 
 **Synchronous**: HTTP response from the dispatch call itself. The
-`parse_response` function in the transform script interprets the
-response and updates the instruction status.
+configured inbound mapping (or Starlark fallback when explicitly
+configured) interprets the response and updates the instruction status.
 
 **Asynchronous (Webhook Callback)**: Some providers confirm delivery
 via callback. The gateway exposes an inbound webhook endpoint per
@@ -742,7 +749,7 @@ construction.
 
 ## 6. Service Design
 
-### 5.1 Package Structure
+### 6.1 Package Structure
 
 ```text
 services/operational-gateway/
@@ -811,7 +818,7 @@ Two adapters implement this port:
   complex cases. Used only when the instruction route specifies
   `transform_script` instead of `outbound_mapping`.
 
-### 5.2 Database Schema
+### 6.2 Database Schema
 
 ```sql
 -- Operational Gateway schema (CockroachDB)
@@ -861,7 +868,7 @@ CREATE TABLE instructions (
 -- Worker polling index: find dispatchable instructions
 CREATE INDEX idx_instructions_dispatchable
     ON instructions (tenant_id, status, next_attempt_at)
-    WHERE status IN ('PENDING', 'RETRYING');
+    WHERE status IN ('PENDING', 'DISPATCHING');
 
 -- Correlation lookup: find instructions by saga/event
 CREATE INDEX idx_instructions_correlation
@@ -889,7 +896,7 @@ CREATE TABLE instruction_attempts (
 );
 ```
 
-### 5.3 gRPC Service Definition
+### 6.3 gRPC Service Definition
 
 ```protobuf
 // api/proto/meridian/operational_gateway/v1/service.proto
@@ -935,7 +942,7 @@ service ProviderConnectionService {
 }
 ```
 
-### 5.4 Kafka Events
+### 6.4 Kafka Events
 
 The gateway emits events for every instruction lifecycle transition,
 following the established topic naming convention:
@@ -1036,8 +1043,9 @@ provider response.
 ### Logging (slog)
 
 Structured logging with instruction ID, connection ID, tenant ID,
-and attempt number in every log line. Response bodies are logged at
-DEBUG level only (may contain PII).
+and attempt number in every log line. Raw response bodies are never
+logged. Only redacted or allow-listed fields and payload hashes are
+recorded for debugging purposes.
 
 ---
 
