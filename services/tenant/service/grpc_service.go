@@ -583,30 +583,29 @@ func (s *Service) GetTenantProvisioningStatus(ctx context.Context, req *pb.GetTe
 	s.logger.Debug("getting tenant provisioning status",
 		"tenant_id", req.TenantId)
 
-	// Authorization check - must be performed before any business logic.
+	// Authorization check - when auth middleware is configured, enforce tenant isolation.
+	// When no claims are present (e.g., unified binary without auth middleware), skip
+	// authorization consistent with other tenant endpoints like RetrieveTenant.
 	claims, ok := auth.GetClaimsFromContext(ctx)
-	if !ok {
-		s.logger.Warn("provisioning status query attempted without authentication claims")
-		return nil, status.Error(codes.Unauthenticated, "authentication required")
-	}
+	if ok {
+		// Check authorization: either tenant-scoped access OR platform admin role
+		hasAdminRole := claims.HasRole(auth.RolePlatformAdmin) || claims.HasRole(auth.RoleSuperAdmin)
+		hasTenantAccess := claims.HasTenantID() && claims.TenantID == req.TenantId
 
-	// Check authorization: either tenant-scoped access OR platform admin role
-	hasAdminRole := claims.HasRole(auth.RolePlatformAdmin) || claims.HasRole(auth.RoleSuperAdmin)
-	hasTenantAccess := claims.HasTenantID() && claims.TenantID == req.TenantId
+		if !hasAdminRole && !hasTenantAccess {
+			s.logger.Warn("unauthorized provisioning status query attempt",
+				"user_id", claims.UserID,
+				"requested_tenant", req.TenantId,
+				"user_tenant", claims.TenantID,
+				"roles", claims.Roles)
+			return nil, status.Error(codes.PermissionDenied, "access denied: must be tenant owner or platform administrator")
+		}
 
-	if !hasAdminRole && !hasTenantAccess {
-		s.logger.Warn("unauthorized provisioning status query attempt",
+		s.logger.Debug("provisioning status query authorized",
 			"user_id", claims.UserID,
-			"requested_tenant", req.TenantId,
-			"user_tenant", claims.TenantID,
-			"roles", claims.Roles)
-		return nil, status.Error(codes.PermissionDenied, "access denied: must be tenant owner or platform administrator")
+			"tenant_id", req.TenantId,
+			"admin_access", hasAdminRole)
 	}
-
-	s.logger.Debug("provisioning status query authorized",
-		"user_id", claims.UserID,
-		"tenant_id", req.TenantId,
-		"admin_access", hasAdminRole)
 
 	// Validate tenant ID
 	tenantID, err := tenant.NewTenantID(req.TenantId)
