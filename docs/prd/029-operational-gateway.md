@@ -968,6 +968,135 @@ doesn't address rotation. When a provider API key is rotated:
   vs "broken"
 - Manifest apply: should secret rotation trigger connection re-test?
 
+### 6.10 Relationship to Reference Data and Market Data Services
+
+The Operational Gateway shares an architectural pattern with the
+Forecasting Service: both read from reference data and market data,
+apply tenant-defined logic, and produce outputs that feed back into
+the platform.
+
+**Reference Data as input**: Provider connections, instruction
+routes, and inbound routes are effectively reference data — they
+describe "how" the gateway should behave. Should gateway
+configuration live in the gateway's own tables (as currently
+described), or should it be stored in the Reference Data Service as
+hierarchical nodes? The Reference Data Service already provides
+bi-temporal versioning, resolution keys, and audit trails that
+gateway configuration would otherwise need to re-implement.
+
+**Market Data as input or output**: The gateway could consume
+market data to make dispatch decisions (e.g., a pricing threshold
+triggers a hedging instruction to a broker). Conversely, gateway
+outcomes could be published back as observations (e.g., provider
+latency metrics, SLA compliance rates). The Forecasting Service
+already demonstrates this read-process-publish cycle. Should the
+gateway support a similar feedback loop?
+
+**Implications**: If the gateway reads from reference data and
+market data services rather than maintaining its own configuration
+store, it becomes a stateless dispatch engine whose behaviour is
+entirely derived from platform-wide data. This is consistent with
+the "operating system" model where services compose from shared
+data rather than maintaining private state.
+
+### 6.11 Starlark/CEL for Event-Driven Control Logic
+
+The gateway currently uses CEL for inbound message classification
+and MappingDefinition for payload transformation. But could
+Starlark/CEL also define higher-order control logic — the "what
+happens when" rules?
+
+Examples of control logic that might be expressible:
+
+- **Conditional dispatch**: "When instruction type is
+  `payment.collect` and amount exceeds tenant threshold (from
+  reference data), also dispatch a `compliance.notify` instruction"
+- **Market-driven triggers**: "When the carbon credit spot price
+  (from market data) drops below the tenant's buy threshold,
+  dispatch a `trade.execute` instruction to the broker connection"
+- **Provider failover**: "When connection X's circuit breaker is
+  open, route matching instructions to connection Y" (beyond
+  static primary/secondary — dynamic routing based on live state)
+- **Escalation chains**: "When an instruction has been in
+  DISPATCHED state for longer than the route's SLA timeout,
+  dispatch an `alert.escalation` instruction to the notification
+  connection"
+
+The Forecasting Service demonstrates that Starlark can serve as a
+control logic engine: it reads context (observations, reference
+data), applies a tenant-defined strategy, and produces actions. The
+gateway could follow the same pattern — Starlark strategies that
+read gateway state and produce instruction decisions.
+
+**Open sub-questions**:
+
+- Should control logic be per-route (each route has an optional
+  Starlark decision script) or per-tenant (a single gateway
+  strategy evaluates all events)?
+- How does this relate to saga orchestration? Sagas already define
+  "what happens when" — is gateway-level control logic
+  duplicating saga responsibility, or is it a complementary layer
+  for cross-saga operational rules?
+- Could CEL expressions in the manifest handle simpler rules
+  (threshold checks, routing conditions) while Starlark handles
+  complex multi-step logic — the same CEL/Starlark division used
+  elsewhere in the platform?
+
+### 6.12 Relationship to Platform Scheduler
+
+The gateway needs periodic execution for several concerns: health
+check probes, circuit breaker half-open transitions, instruction
+expiry sweeps, and potentially market-driven trigger evaluation.
+The Platform Scheduler (PRD-021) provides shared scheduling
+infrastructure already used by Forecasting and Reconciliation.
+
+**Open sub-questions**:
+
+- Should the gateway register its workers as scheduler jobs
+  (consistent platform pattern) or manage its own polling loops
+  (simpler, fewer dependencies)?
+- If control logic (6.11) introduces market-driven triggers, those
+  require periodic evaluation. Should this be a scheduled job that
+  evaluates all active trigger rules, or event-driven via Kafka
+  when market data changes?
+- The scheduler supports cron expressions for recurring jobs. Are
+  gateway health checks better modelled as cron jobs (every 30s)
+  or as continuous background goroutines?
+
+### 6.13 Two Control Surfaces: React and MCP
+
+Both the React Operations Console and the MCP Server act as
+control surfaces to the same gRPC backend. The gateway introduces
+new operational concerns that both surfaces need to expose:
+
+- **Connection management**: Create, test, monitor provider
+  connections
+- **Instruction visibility**: View in-flight instructions, retry
+  failed ones, inspect dead letter queue
+- **Inbound message inspection**: View received messages, trace
+  correlation to instructions
+- **Control logic monitoring**: View active rules, see which
+  triggers fired and why
+
+The MCP Server's manifest tools (`meridian_manifest_plan`,
+`meridian_manifest_apply`) already handle gateway configuration
+declaratively. But operational actions (retry an instruction, drain
+a connection, force-trip a circuit breaker) need imperative RPCs
+that both surfaces can call.
+
+**Open sub-questions**:
+
+- Should the MCP Server expose gateway-specific tools (e.g.,
+  `meridian_gateway_retry_instruction`) or are the generic
+  manifest and saga tools sufficient?
+- The React console needs real-time visibility into dispatch
+  status. Does PRD-025 (Real-Time Event Streaming) cover this,
+  or does the gateway need its own WebSocket channel?
+- For AI-assisted operations, could the MCP Server use gateway
+  state to answer questions like "why did this instruction fail?"
+  by tracing through connection config, circuit breaker state,
+  and dispatch attempts?
+
 ---
 
 ## 7. Service Design (Indicative)
