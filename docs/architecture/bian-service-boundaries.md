@@ -22,7 +22,7 @@ Meridian follows a microservices-per-BIAN-domain architecture where:
 
 ### BIAN Compliance
 
-The service boundaries defined in this document adhere to BIAN Service Landscape Release 13.0, which provides:
+The service boundaries defined in this document adhere to BIAN Service Landscape Release 14.0, which provides:
 
 - Standardized service domain definitions for banking operations
 - Well-defined service operation patterns (Initiate, Update, Retrieve, Execute)
@@ -1392,7 +1392,7 @@ pkClient.UpdateFinancialPositionLog(ctx, &pb.UpdateRequest{
 - Data providers (PositionKeeping, FinancialAccounting) maintain domain integrity
 - Event-driven flows support eventual consistency
 
-**Reference:** [BIAN Service Landscape Release 13.0](https://bian.org/servicelandscape-13-0-0/)
+**Reference:** [BIAN Service Landscape Release 14.0](https://bian.org/servicelandscape-14-0-0/)
 
 ### Enforcement Mechanisms
 

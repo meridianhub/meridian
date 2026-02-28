@@ -51,7 +51,7 @@ type LedgerPosting struct {
 //   - Direction (DEBIT/CREDIT) indicates the accounting meaning, not mathematical sign
 //   - Reversals/corrections use opposite direction with positive amounts, not negative amounts
 //
-// Reference: BIAN v13.0.0 FinancialAccounting.yaml CurrencyAndAmount schema
+// Reference: BIAN v14.0.0 FinancialAccounting.yaml CurrencyAndAmount schema
 func NewLedgerPosting(
 	bookingLogID uuid.UUID,
 	direction PostingDirection,

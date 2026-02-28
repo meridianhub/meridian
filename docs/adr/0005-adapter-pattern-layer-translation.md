@@ -350,7 +350,7 @@ changes.
 
 ### Scenario: BIAN Adds New Behavior Qualifier
 
-#### BIAN 13.0 → 14.0 adds "Suspend" to Current Account
+#### BIAN 14.0 → 15.0 adds "Suspend" to Current Account
 
 #### Step 1: Update domain model (business logic)
 
@@ -478,16 +478,16 @@ pace.
 #### 1. Independent layer evolution
 
 ```text
-Domain:      BIAN 14.0 (updated immediately)
+Domain:      BIAN 15.0 (updated immediately)
              ↓
-Persistence: BIAN 13.0 schema + new nullable columns (gradual migration)
+Persistence: BIAN 14.0 schema + new nullable columns (gradual migration)
              ↓
-Events:      New event type with BIAN 14.0 semantics (backward compatible)
+Events:      New event type with BIAN 15.0 semantics (backward compatible)
 ```
 
 #### 2. Backward compatibility
 
-Old consumers (BIAN 13.0) continue working:
+Old consumers (BIAN 14.0) continue working:
 
 * Database: Nullable columns don't break existing queries
 * Events: New event type on new topic (old consumers unaffected)

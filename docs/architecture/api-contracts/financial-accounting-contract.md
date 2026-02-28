@@ -1337,4 +1337,4 @@ Net Income = Revenue - Expenses
 - **ADR-0002**: Microservices Per BIAN Domain
 - **ADR-0004**: Event Schema Evolution
 - **ADR-0005**: Adapter Pattern Layer Translation
-- **BIAN Reference**: Financial Accounting Service Domain (Release 13.0)
+- **BIAN Reference**: Financial Accounting Service Domain (Release 14.0)

@@ -212,6 +212,6 @@ erDiagram
 
 ## References
 
-- [BIAN Financial Accounting Specification](https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/FinancialAccounting.yaml)
+- [BIAN Financial Accounting Specification](https://github.com/bian-official/public/blob/main/release14.0.0/semantic-apis/oas3%20/yamls/FinancialAccounting.yaml)
 - [Service Architecture](../README.md)
 - [Proto Definitions](../../api/proto/meridian/financial_accounting/v1/)

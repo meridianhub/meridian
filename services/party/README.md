@@ -189,6 +189,6 @@ Updates check `WHERE version = expected_version`. Returns conflict error on mism
 
 ## References
 
-- [BIAN Party Reference Data Directory Specification](https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/PartyReferenceDataDirectory.yaml)
+- [BIAN Party Reference Data Directory Specification](https://github.com/bian-official/public/blob/main/release14.0.0/semantic-apis/oas3%20/yamls/PartyReferenceDataDirectory.yaml)
 - [Service Architecture](../README.md)
 - [Proto Definitions](../../api/proto/meridian/party/v1/)

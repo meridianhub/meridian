@@ -966,9 +966,9 @@ var (
 | **Variance** | Difference between settled quantity and current quantity for a position |
 | **Dispute** | Record created when new data arrives for a locked (finalized) position |
 
-## BIAN v13 Alignment
+## BIAN v14 Alignment
 
-This ADR's concepts map to BIAN (Banking Industry Architecture Network) v13 service domains:
+This ADR's concepts map to BIAN (Banking Industry Architecture Network) v14 service domains:
 
 | Meridian Concept | BIAN Service Domain | BIAN Entity | Notes |
 |-----------------|---------------------|-------------|-------|

@@ -10,7 +10,7 @@ triggers:
   - Working with interest rate curves and FX rates
 instructions: |
   Market Information Management maintains market data sets, observations, and data sources
-  following BIAN v13.0 Market Information Management domain.
+  following BIAN v14.0 Market Information Management domain.
 
   Key concepts:
   - DataSetDefinition: Reference data describing market data types with CEL validation
@@ -85,7 +85,7 @@ observations, and data sources with bi-temporal support.
 
 ## BIAN Alignment
 
-This service implements the **Market Information Management** service domain from BIAN v13.0, which provides:
+This service implements the **Market Information Management** service domain from BIAN v14.0, which provides:
 
 - Market data feed management and aggregation
 - Price observation capture with multiple data sources
@@ -621,7 +621,7 @@ go test -tags=integration ./adapters/persistence/...
 
 ## References
 
-- [BIAN Market Information Management Specification](https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/MarketInformationManagement.yaml)
+- [BIAN Market Information Management Specification](https://github.com/bian-official/public/blob/main/release14.0.0/semantic-apis/oas3%20/yamls/MarketInformationManagement.yaml)
 - [Service Architecture](../README.md)
 - [Proto Definitions](../../api/proto/meridian/market_information/v1/)
 - [ADR-0002: Microservices per BIAN Domain](../../docs/adr/0002-microservices-per-bian-domain.md)

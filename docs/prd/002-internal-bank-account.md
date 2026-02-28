@@ -9,11 +9,11 @@ triggers:
   - Tracking balances for non-customer accounts
   - Integrating with FinancialAccounting for balance updates
 instructions: |
-  This PRD defines the Internal Account service following BIAN v13.0.
+  This PRD defines the Internal Account service following BIAN v14.0.
   Key patterns: Multi-asset support via InstrumentAmount, real-time O(1) balance queries.
   Uses Dimension from reference_data/v1, InstrumentAmount from quantity/v1.
   Service structure follows ADR-0015. Proto package: internal_account (with underscores).
-  BIAN spec: https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/InternalAccount.yaml
+  BIAN spec: https://github.com/bian-official/public/blob/main/release14.0.0/semantic-apis/oas3%20/yamls/InternalBankAccount.yaml
 ---
 
 # PRD: Internal Account Service
@@ -59,7 +59,7 @@ instructions: |
 ## Executive Summary
 
 This PRD defines the requirements for implementing the **Internal Account** service
-in Meridian, following the BIAN v13.0 Service Domain specification. This service fills a
+in Meridian, following the BIAN v14.0 Service Domain specification. This service fills a
 critical architectural gap: managing the "other leg" of double-entry transactions that
 are not customer-facing accounts.
 
@@ -98,7 +98,7 @@ registry with real-time balance tracking, enabling:
 
 ### Primary Service Domain
 
-**Internal Account** (BIAN v13.0)
+**Internal Bank Account** (BIAN v14.0)
 
 > "Manages holding accounts, mirror accounts, working accounts etc. that are required
 > for the booking of that part of a transaction in the bank world (so not in the
@@ -106,13 +106,12 @@ registry with real-time balance tracking, enabling:
 
 **BIAN Semantic API Specification:**
 
-- [InternalAccount.yaml](https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/InternalAccount.yaml)
+- [InternalBankAccount.yaml](https://github.com/bian-official/public/blob/main/release14.0.0/semantic-apis/oas3%20/yamls/InternalBankAccount.yaml)
 
 **BIAN References:**
 
-- [BIAN Internal Account Service Domain](https://bian.org/servicelandscape-13-0-0/views/view_153620.html)
-- [BIAN Internal Account Capability](https://bian.org/servicelandscape-12-0-0/object_22.html?object=46477)
-- [BIAN v13.0.0 Release Notes](https://bian.org/wp-content/uploads/2024/12/BIAN-v12.0-Release-Notes-v0.4.pdf)
+- [BIAN Internal Bank Account Service Domain](https://bian.org/servicelandscape-14-0-0/)
+- [BIAN v14.0.0 Release Notes](https://bian.org/wp-content/uploads/2026/02/BIAN-v14.0-Release-Notes-v1.0_-Final-Version.pdf)
 
 ### Functional Pattern
 
@@ -1007,10 +1006,10 @@ Each ledger stays balanced. External bank transfer settles the clearing accounts
 
 ## Appendix B: BIAN Semantic API Reference
 
-The implementation should align with the BIAN v13.0 Internal Account semantic API.
+The implementation should align with the BIAN v14.0 Internal Bank Account semantic API.
 
 BIAN Semantic API specification:
-[InternalAccount.yaml](https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/InternalAccount.yaml)
+[InternalBankAccount.yaml](https://github.com/bian-official/public/blob/main/release14.0.0/semantic-apis/oas3%20/yamls/InternalBankAccount.yaml)
 
 Key BIAN operations from the spec:
 

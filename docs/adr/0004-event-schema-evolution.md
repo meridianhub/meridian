@@ -382,7 +382,7 @@ fields handle 90% of evolution needs. New event types handle the remaining 10% (
 - [ADR-0006: Schema Management with Adapters](./0006-schema-management-adapters.md)
 - [Protocol Buffers Language Guide](https://protobuf.dev/programming-guides/proto3/)
 - [buf CLI Documentation](https://buf.build/docs/)
-- [BIAN Service Landscape 13.0.0](https://bian.org/servicelandscape-13-0-0/)
+- [BIAN Service Landscape 14.0.0](https://bian.org/servicelandscape-14-0-0/)
 - [BIAN Semantic APIs](https://bian.org/semantic-apis/)
 
 ## Notes
