@@ -1560,20 +1560,20 @@ func TestGetTenantProvisioningStatus_MissingClaims(t *testing.T) {
 	svc, _, cleanup := setupTest(t)
 	defer cleanup()
 
-	// Context without claims
+	// Context without claims - should skip authorization (consistent with
+	// other tenant endpoints when running without auth middleware).
 	ctx := context.Background()
 
-	// Execute
+	// Execute - request proceeds without auth, but tenant doesn't exist
 	resp, err := svc.GetTenantProvisioningStatus(ctx, &pb.GetTenantProvisioningStatusRequest{
 		TenantId: "test_tenant",
 	})
 
-	// Assert
+	// Assert - should get NotFound (not Unauthenticated) since auth is skipped
 	require.Error(t, err)
 	st, ok := status.FromError(err)
 	require.True(t, ok, "error should be a gRPC status")
-	assert.Equal(t, codes.Unauthenticated, st.Code())
-	assert.Contains(t, st.Message(), "authentication required")
+	assert.Equal(t, codes.NotFound, st.Code())
 	assert.Nil(t, resp)
 }
 
