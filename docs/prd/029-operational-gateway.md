@@ -1,34 +1,39 @@
 ---
 name: prd-operational-gateway
 description: >-
-  Asset-agnostic control signal gateway that routes non-financial instructions
-  from ledger state changes to external systems. Turns Meridian from a
-  recording system into an operating system that acts on the real world.
+  Bidirectional asset-agnostic gateway for non-financial messages between
+  Meridian and external professional entities. Sends outbound control signals
+  (instructions) triggered by ledger state changes, and receives unsolicited
+  inbound messages (regulatory notices, counterparty updates, status reports).
+  Turns Meridian from a recording system into an operating system.
 triggers:
   - Designing outbound integrations with external systems
   - Implementing control signals triggered by ledger state changes
   - Working on BIAN Operational Gateway or Service Provider Operations
   - Building webhook delivery, payment collection triggers, or IoT commands
   - Routing instructions to external providers (payment processors, registries, APIs)
-  - Working on the Operational Gateway service or outbound message routing
+  - Working on the Operational Gateway service or message routing
   - Questions about OperatingSession, ServiceProviderConnection, or InstructionDispatch
   - Planning the "last mile" between saga workflows and external infrastructure
+  - Receiving unsolicited inbound messages from external parties
+  - Handling regulatory notices, counterparty status updates, or industry communications
 instructions: |
-  The Operational Gateway is the outbound I/O layer — it sends non-financial
-  messages (control signals) to external systems in response to ledger state
-  changes. Three BIAN domains compose the architecture: Operational Gateway
-  (message routing), Service Provider Operations (connection management),
-  and Servicing Order (multi-step orchestration). Connections and routes
-  are declared in the tenant manifest. Routing logic is Starlark-programmable.
-  Instructions flow: Saga detects state change -> evaluates policy ->
+  The Operational Gateway is the bidirectional I/O layer for non-financial
+  messages between Meridian and external professional entities. Three BIAN
+  domains compose the architecture: Operational Gateway (message routing),
+  Service Provider Operations (connection management), and Servicing Order
+  (multi-step orchestration). Connections and routes are declared in the
+  tenant manifest. Outbound: Saga detects state change -> evaluates policy ->
   Operational Gateway routes instruction to the correct external provider.
-  Key design: provider connections are reusable across instruction types,
-  delivery is at-least-once with idempotency, and the gateway is fully
-  asset-agnostic (same service sends payment requests, API calls,
-  webhook notifications, or device commands). Payload transformation
-  reuses the bidirectional MappingDefinition pattern from PRD-024
-  (FieldCorrespondence, auto-reversible transforms, CEL) rather than
-  Starlark scripts. Starlark is reserved for routing policy only.
+  Inbound: External party sends unsolicited message -> gateway validates,
+  maps, and routes to the appropriate internal handler or saga trigger.
+  Key design: provider connections are reusable across instruction types
+  and inbound message sources, delivery is at-least-once with idempotency,
+  and the gateway is fully asset-agnostic. Payload transformation reuses
+  the bidirectional MappingDefinition pattern from PRD-024
+  (FieldCorrespondence, auto-reversible transforms, CEL). Starlark is
+  reserved for routing policy only. Outbound ships first (Phases 1-4),
+  inbound non-financial messages follow (Phase 5).
 ---
 
 # PRD-029: Operational Gateway
@@ -44,16 +49,24 @@ instructions: |
 ## 1. Problem Statement
 
 Meridian records what happened. It does not act on what happened.
+And when the outside world acts, Meridian has no standard way to listen.
 
 The ledger tracks positions, the reconciliation engine detects variances,
 sagas orchestrate internal workflows, and the event stream broadcasts
-state changes to operators. But when a state change demands action in
-the outside world — collecting a payment, notifying a customer, sending
-a registration to an industry body, requesting a meter read, commanding
-an IoT device — there is no standardized outbound pathway.
+state changes to operators. But two gaps exist:
 
-Today, each external integration must be hard-coded into saga scripts
-as direct HTTP calls or bespoke adapter code. This creates problems:
+**Outbound**: When a state change demands action in the outside world —
+collecting a payment, notifying a customer, sending a registration to
+an industry body, requesting a meter read, commanding an IoT device —
+there is no standardized outbound pathway. Each external integration
+must be hard-coded into saga scripts as direct HTTP calls or bespoke
+adapter code.
+
+**Inbound**: When external parties send unsolicited non-financial
+messages to Meridian — regulatory notices, counterparty status updates,
+industry body communications, device telemetry alerts — there is no
+standard reception and routing layer. Each inbound source requires
+custom webhook handlers.
 
 | Problem | Impact |
 |---------|--------|
@@ -63,10 +76,15 @@ as direct HTTP calls or bespoke adapter code. This creates problems:
 | No manifest-declared routing | Tenants cannot configure external integrations declaratively |
 | No provider abstraction | Switching providers requires rewriting saga scripts |
 | No response correlation | No standard way to track acknowledgements from external systems |
+| No inbound message reception | Unsolicited external messages require bespoke handlers |
+| No inbound audit trail | External notifications arrive without structured logging |
 
-The Operational Gateway closes this gap. It is the syscall interface
+The Operational Gateway closes both gaps. It is the syscall interface
 between Meridian's internal state machine and the external world —
-the layer that turns a ledger into an operating system.
+the bidirectional I/O layer that turns a ledger into an operating
+system. BIAN defines this domain as handling "the secure sending
+**and receiving** of non-financial messages to and from professional
+entities outside the organization."
 
 ### What Triggers an Outbound Instruction?
 
@@ -102,16 +120,45 @@ Examples across asset classes:
 | KYC verification expires | Re-verify identity | KYC/AML provider |
 | Forecast variance exceeds tolerance | Adjust hedging position | Trading platform API |
 
-The gateway does not care what the instruction is or what the target
-system does. It routes a structured message to a configured provider
-endpoint, tracks delivery, and records the outcome.
+### What Triggers an Inbound Message?
+
+Inbound non-financial messages are **unsolicited** — they originate
+from external parties, not in response to a Meridian instruction.
+(Webhook callbacks to outbound instructions are handled by the
+response correlation mechanism in Phase 3, not the inbound message
+system.)
+
+```text
+[External Party] - sends unsolicited message
+        |
+   Operational Gateway - receives, validates, maps
+        |
+   Inbound Router - matches to connection + message type
+        |
+   MappingDefinition - transforms to internal format
+        |
+   Saga trigger or internal event
+```
+
+| Source | Inbound Message | Internal Action |
+|--------|-----------------|-----------------|
+| Regulatory body | Compliance notice or rule change | Trigger compliance review saga |
+| Counterparty | Settlement status update | Update reconciliation position |
+| Industry registry | Registration confirmation/rejection | Update party record status |
+| KYC/AML provider | Verification result (async) | Update customer verification state |
+| Device platform | Unsolicited telemetry alert | Trigger exception handling saga |
+| Trading platform | Position or margin call notification | Trigger hedging adjustment |
+
+The gateway treats inbound and outbound symmetrically: same provider
+connections, same mapping engine, same audit trail. The direction
+determines whether the gateway initiates (outbound) or listens (inbound).
 
 ---
 
 ## 2. BIAN Service Domain Alignment
 
-This PRD maps to three BIAN Service Domains that compose the outbound
-instruction architecture:
+This PRD maps to three BIAN Service Domains that compose the
+bidirectional non-financial message architecture:
 
 ### Primary: Operational Gateway (OPERATE)
 
@@ -122,11 +169,12 @@ instruction architecture:
 | **Generic Artifact** | Operating Session |
 | **Definition** | Handles the secure sending and receiving of non-financial messages to and from professional entities outside the organization |
 
-The Operational Gateway handles the routing and delivery of control
-signals — non-payment instructions sent to external professional
-entities. It supports multiple communication channels and mechanisms
-appropriate for the type of information exchanged, governed by service
-level agreements.
+The Operational Gateway handles the **sending and receiving** of
+non-financial messages to and from external professional entities. It
+supports multiple communication channels and mechanisms appropriate
+for the type of information exchanged, governed by service level
+agreements. This PRD implements both directions: outbound instructions
+(Phases 1-4) and inbound unsolicited messages (Phase 5).
 
 ### Secondary: Service Provider Operations (OPERATE)
 
@@ -157,6 +205,25 @@ example: settlement completes -> generate invoice -> collect payment ->
 send confirmation. Each step is tracked as a work item within the
 servicing order.
 
+### BIAN Terminology Mapping
+
+| Meridian Term | BIAN Equivalent | Notes |
+|---------------|-----------------|-------|
+| `Instruction` | Operating Session (outbound control record) | Domain-specific naming; functionally equivalent |
+| `InboundMessage` | Operating Session (inbound control record) | Same BIAN artifact, opposite direction |
+| `ProviderConnection` | Service Provider Operating Session | Bidirectional connection lifecycle |
+| `InstructionRoute` | (Implicit in BIAN routing) | Meridian extension for declarative routing |
+| `InboundRoute` | (Implicit in BIAN routing) | Maps inbound message type to internal handler |
+| `dispatch` | Initiate action term (within OPERATE) | OPERATE is the functional pattern; dispatch is the action |
+| `receive` | Capture action term (within OPERATE) | Inbound counterpart to dispatch |
+| `DISPATCHING` | "Active" in BIAN lifecycle | Acceptable domain-specific status naming |
+
+> **Note on functional patterns**: All three domains use BIAN functional
+> patterns (OPERATE and PROCESS). The `dispatch` verb is an action within
+> the OPERATE pattern, not BIAN's Execute pattern (which applies to
+> different domain types). BIAN auditors should map `dispatch_instruction`
+> to the Initiate action term of the Operational Gateway's OPERATE pattern.
+
 ### Domain Composition
 
 ```mermaid
@@ -164,21 +231,26 @@ graph TB
     subgraph Meridian Core
         L[Ledger Events] --> S[Saga Engine]
         S --> SO[Servicing Order<br/>Multi-step orchestration]
+        IH[Inbound Handler<br/>Saga trigger / event] --> S
     end
 
     subgraph Operational Gateway Service
         SO --> R[Instruction Router<br/>Tenant + type routing]
         R --> SPO[Service Provider Operations<br/>Connection management]
         SPO --> D[Dispatch Engine<br/>At-least-once delivery]
+        IR[Inbound Receiver<br/>Validate + map + route] --> IH
     end
 
     subgraph External World
-        D --> P1[Payment Processor]
-        D --> P2[Industry Registry]
-        D --> P3[IoT Platform]
-        D --> P4[Notification Service]
-        D --> P5[Trading Platform]
-        D --> PN[...]
+        D -->|Outbound| P1[Payment Processor]
+        D -->|Outbound| P2[Industry Registry]
+        D -->|Outbound| P3[IoT Platform]
+        D -->|Outbound| P4[Notification Service]
+        D -->|Outbound| P5[Trading Platform]
+        P2 -->|Inbound| IR
+        P3 -->|Inbound| IR
+        P6[Regulatory Body] -->|Inbound| IR
+        P7[Counterparty] -->|Inbound| IR
     end
 ```
 
@@ -192,14 +264,13 @@ graph TB
 | G2 | Manifest-declared provider connections and routes | Tenants configure integrations without code changes |
 | G3 | Declarative mapping-based transformation with programmable routing policy | Business rules determine what gets sent where |
 | G4 | Asset-agnostic instruction model | Same service handles payments, notifications, API calls, device commands |
-| G5 | Full audit trail for every outbound instruction | Every send, retry, ack, failure recorded in the ledger |
+| G5 | Full audit trail for every message (outbound and inbound) | Every send, retry, ack, failure, and inbound receipt recorded |
 | G6 | Provider-independent instruction abstraction | Swap providers by changing manifest, not saga scripts |
 | G7 | Response correlation and acknowledgement tracking | Instructions have a complete lifecycle from dispatch to confirmation |
+| G8 | Structured inbound message reception | Unsolicited external messages validated, mapped, and routed to internal handlers |
 
 ### Non-Goals
 
-- **Inbound message processing** — Handled by the Structured Mapping
-  Layer (PRD-024) and gateway transcoding
 - **Real-time event streaming to browsers** — Handled by the Event
   Streaming system (PRD-025)
 - **Financial payment execution** — The Payment Order service handles
@@ -207,7 +278,14 @@ graph TB
 - **Building provider-specific SDKs** — Adapters are thin; provider
   SDKs are third-party dependencies
 - **Replacing Kafka for service-to-service events** — The gateway
-  handles outbound-to-external only
+  handles external-facing messages only
+- **File transfer protocols** — BIAN's Operational Gateway includes
+  "messages and files." Bulk file exchange (SFTP, S3 presigned URLs)
+  is deferred to Phase 4 or a separate PRD
+- **Inbound data ingestion** — High-volume data feeds (meter reads,
+  market prices) are handled by dedicated ingestion services. The
+  gateway handles discrete non-financial messages, not bulk data
+  streams
 
 ---
 
@@ -671,6 +749,112 @@ The callback handler:
 This enables multi-step workflows where the saga waits for external
 confirmation before proceeding.
 
+### 4.8 Inbound Non-Financial Messages (Phase 5)
+
+Distinct from webhook callbacks (which correlate to outbound
+instructions), inbound messages are **unsolicited** communications
+from external parties. The gateway receives, validates, transforms,
+and routes them to internal handlers.
+
+#### Inbound Message Model
+
+```protobuf
+message InboundMessage {
+  string message_id = 1;           // UUID, assigned by gateway on receipt
+  string tenant_id = 2;
+  string connection_id = 3;        // Which provider connection received it
+  string message_type = 4;         // e.g., "regulatory.notice", "counterparty.status"
+  string source_identifier = 5;    // External party identifier
+
+  google.protobuf.Struct raw_payload = 6;    // Original payload (preserved for audit)
+  google.protobuf.Struct mapped_payload = 7; // After MappingDefinition transform
+
+  InboundMessageStatus status = 8;
+  google.protobuf.Timestamp received_at = 9;
+  google.protobuf.Timestamp processed_at = 10;
+  string error_message = 11;
+}
+
+enum InboundMessageStatus {
+  INBOUND_MESSAGE_STATUS_UNSPECIFIED = 0;
+  INBOUND_MESSAGE_STATUS_RECEIVED = 1;     // Validated and persisted
+  INBOUND_MESSAGE_STATUS_PROCESSING = 2;   // Mapping + routing in progress
+  INBOUND_MESSAGE_STATUS_DELIVERED = 3;    // Handed to internal handler/saga
+  INBOUND_MESSAGE_STATUS_FAILED = 4;       // Validation or routing failure
+  INBOUND_MESSAGE_STATUS_REJECTED = 5;     // Signature invalid or unknown source
+}
+```
+
+#### Inbound Endpoint
+
+Each provider connection that supports inbound messages exposes a
+receiver endpoint:
+
+```http
+POST /api/v1/gateway/inbound/{connection_id}
+```
+
+The inbound handler:
+
+1. Validates the request signature (same auth config as outbound)
+2. Identifies the message type from the payload (via a CEL classifier
+   expression declared in the inbound route)
+3. Persists the raw payload for audit
+4. Applies the MappingDefinition to transform to internal format
+5. Routes to the configured internal handler:
+   - **Saga trigger**: Enqueues a saga execution with the mapped payload
+   - **Kafka event**: Publishes to a topic for downstream consumers
+   - **gRPC call**: Forwards to an internal service directly
+
+#### Inbound Route Declaration (Manifest)
+
+```yaml
+operational_gateway:
+  inbound_routes:
+    - message_type: regulatory.notice
+      connection_id: industry-registry
+      # CEL expression to classify incoming payload into this type
+      classifier: "has(body.notice_type) && body.category == 'regulatory'"
+      inbound_mapping: registry-notice-to-internal
+      handler:
+        type: saga_trigger
+        saga_name: process_regulatory_notice
+
+    - message_type: counterparty.status
+      connection_id: trading-platform
+      classifier: "has(body.event) && body.event == 'position_update'"
+      inbound_mapping: trading-status-to-internal
+      handler:
+        type: kafka_event
+        topic: operational-gateway.inbound-message.v1
+
+    - message_type: verification.result
+      connection_id: kyc-provider
+      classifier: "has(body.verification_id)"
+      inbound_mapping: kyc-result-to-internal
+      handler:
+        type: grpc_call
+        service: meridian.party.v1.PartyService
+        rpc: UpdateVerificationStatus
+```
+
+#### Symmetry with Outbound
+
+The inbound path reuses the same infrastructure as outbound:
+
+| Component | Outbound | Inbound |
+|-----------|----------|---------|
+| Connection | Same `ProviderConnection` | Same `ProviderConnection` |
+| Auth | Signs outbound requests | Validates inbound signatures |
+| Mapping | `outbound_mapping` (internal → provider) | `inbound_mapping` (provider → internal) |
+| Audit | Instruction + attempts table | Inbound messages table |
+| Events | `instruction-dispatched.v1` etc. | `inbound-message-received.v1` etc. |
+
+This symmetry is the key architectural insight: one connection to a
+provider handles communication in both directions. The mapping engine
+is inherently bidirectional (PRD-024), so the same `FieldCorrespondence`
+definitions work in either direction.
+
 ---
 
 ## 5. Design Pattern: Bidirectional Mapping Reuse
@@ -686,13 +870,14 @@ an internal instruction payload must be mapped to the provider's
 expected JSON format for the outbound HTTP request, and the
 provider's response must be mapped back to an instruction outcome.
 
-This is the same engine running in two directions:
+This is the same engine running in every direction:
 
 ```text
-PRD-024 (Inbound):   Partner JSON  → MappingEngine → Meridian Proto
-PRD-029 (Outbound):  Instruction   → MappingEngine → Provider JSON
-PRD-024 (Response):  Meridian Proto → MappingEngine → Partner JSON
-PRD-029 (Response):  Provider JSON  → MappingEngine → Instruction Outcome
+PRD-024 (Inbound):          Partner JSON   → MappingEngine → Meridian Proto
+PRD-029 (Outbound):         Instruction    → MappingEngine → Provider JSON
+PRD-024 (Response):         Meridian Proto → MappingEngine → Partner JSON
+PRD-029 (Callback):         Provider JSON  → MappingEngine → Instruction Outcome
+PRD-029 (Inbound Message):  External JSON  → MappingEngine → Internal Event/Saga
 ```
 
 ### Shared Infrastructure
@@ -755,26 +940,32 @@ construction.
 services/operational-gateway/
 ├── README.md
 ├── domain/
-│   ├── instruction.go            # Instruction aggregate
+│   ├── instruction.go            # Outbound instruction aggregate
 │   ├── instruction_test.go
-│   ├── provider_connection.go    # Connection aggregate
+│   ├── inbound_message.go        # Inbound message aggregate (Phase 5)
+│   ├── inbound_message_test.go
+│   ├── provider_connection.go    # Connection aggregate (bidirectional)
 │   ├── provider_connection_test.go
 │   ├── dispatch.go               # Dispatch engine domain logic
 │   ├── dispatch_test.go
 │   ├── circuit_breaker.go        # Per-connection circuit breaker
 │   └── circuit_breaker_test.go
 ├── ports/
-│   ├── instruction_repository.go # Persistence port
+│   ├── instruction_repository.go # Outbound persistence port
+│   ├── inbound_repository.go     # Inbound persistence port (Phase 5)
 │   ├── connection_repository.go
 │   ├── dispatcher.go             # HTTP dispatch port
-│   └── payload_transformer.go    # Payload transformation port
+│   ├── payload_transformer.go    # Payload transformation port
+│   └── secret_store.go           # Secret resolution port
 ├── adapters/
 │   ├── grpc/
 │   │   ├── instruction_handler.go
 │   │   ├── callback_handler.go
+│   │   ├── inbound_handler.go    # Inbound message receiver (Phase 5)
 │   │   └── connection_handler.go
 │   ├── persistence/
 │   │   ├── cockroach_instruction_repo.go
+│   │   ├── cockroach_inbound_repo.go  # Phase 5
 │   │   └── cockroach_connection_repo.go
 │   ├── http/
 │   │   ├── http_dispatcher.go       # Makes outbound HTTP calls
@@ -817,6 +1008,39 @@ Two adapters implement this port:
 - **`starlark_transformer.go`** — executes a Starlark script for
   complex cases. Used only when the instruction route specifies
   `transform_script` instead of `outbound_mapping`.
+
+The `secret_store.go` port defines secret resolution:
+
+```go
+// Port: resolves secret references to their values at dispatch time.
+// Secrets are never persisted in instruction payloads or logged.
+type SecretStore interface {
+    // Resolve returns the secret value for a given tenant and secret ref.
+    Resolve(ctx context.Context, tenantID, secretRef string) (string, error)
+}
+```
+
+Phase 1 adapter: `EnvVarSecretStore` — resolves `secret_ref` to
+`os.Getenv("TENANT_{TENANT_SLUG}_{SECRET_REF}")`, consistent with
+the current Stripe integration. Phase 2 introduces a Vault-backed
+adapter without changing the domain or dispatch logic.
+
+#### Correlation Field Contract
+
+Inbound mappings for callback/response handling **must** map the
+external correlation field to the Meridian instruction ID. The gateway
+validates that this field is populated after transformation; if absent,
+the callback cannot be correlated and is rejected with a 422 status.
+
+```yaml
+# Required in every inbound_mapping for callbacks
+fields:
+  - external_path: "metadata.meridian_instruction_id"  # Or provider equivalent
+    internal_path: "context.instruction_id"             # Reserved internal path
+```
+
+This contract ensures that every provider integration includes
+correlation as a first-class mapping concern, not an afterthought.
 
 ### 6.2 Database Schema
 
@@ -894,6 +1118,32 @@ CREATE TABLE instruction_attempts (
     CONSTRAINT fk_instruction FOREIGN KEY (tenant_id, instruction_id)
         REFERENCES instructions (tenant_id, instruction_id)
 );
+
+-- Phase 5: Inbound non-financial messages
+CREATE TABLE inbound_messages (
+    message_id       UUID NOT NULL DEFAULT gen_random_uuid(),
+    tenant_id        UUID NOT NULL,
+    connection_id    VARCHAR(255) NOT NULL,
+    message_type     VARCHAR(255) NOT NULL,
+    source_identifier VARCHAR(255),
+    raw_payload      JSONB NOT NULL,
+    mapped_payload   JSONB,
+    status           VARCHAR(50) NOT NULL DEFAULT 'RECEIVED',
+    error_message    VARCHAR(1024),
+    received_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    processed_at     TIMESTAMPTZ,
+
+    PRIMARY KEY (tenant_id, message_id)
+);
+
+-- Lookup by connection and type
+CREATE INDEX idx_inbound_messages_connection
+    ON inbound_messages (tenant_id, connection_id, message_type);
+
+-- Processing queue
+CREATE INDEX idx_inbound_messages_status
+    ON inbound_messages (tenant_id, status)
+    WHERE status IN ('RECEIVED', 'PROCESSING');
 ```
 
 ### 6.3 gRPC Service Definition
@@ -921,6 +1171,14 @@ service OperationalGatewayService {
   // Process an inbound callback from an external provider
   rpc ProcessCallback(ProcessCallbackRequest)
       returns (ProcessCallbackResponse);
+
+  // Phase 5: Receive an unsolicited inbound message from an external party
+  rpc ReceiveInboundMessage(ReceiveInboundMessageRequest)
+      returns (ReceiveInboundMessageResponse);
+
+  // Phase 5: Query inbound message history
+  rpc ListInboundMessages(ListInboundMessagesRequest)
+      returns (ListInboundMessagesResponse);
 }
 
 service ProviderConnectionService {
@@ -956,6 +1214,10 @@ following the established topic naming convention:
 - operational-gateway.instruction-cancelled.v1
 - operational-gateway.circuit-opened.v1
 - operational-gateway.circuit-closed.v1
+# Phase 5: Inbound message events
+- operational-gateway.inbound-message-received.v1
+- operational-gateway.inbound-message-delivered.v1
+- operational-gateway.inbound-message-failed.v1
 ```
 
 These events integrate with the existing event streaming system
@@ -1025,12 +1287,16 @@ The gateway enforces tenant scoping at every layer:
 ### Metrics (Prometheus)
 
 ```text
+# Outbound
 meridian_gateway_instructions_total{tenant, type, status}     # Counter
 meridian_gateway_instruction_latency_seconds{tenant, type}    # Histogram
 meridian_gateway_dispatch_attempts_total{tenant, connection}  # Counter
 meridian_gateway_circuit_state{tenant, connection}            # Gauge (0=closed, 1=open, 2=half-open)
 meridian_gateway_active_instructions{tenant, status}          # Gauge
 meridian_gateway_provider_health{tenant, connection}          # Gauge (0=unhealthy, 1=healthy)
+# Inbound (Phase 5)
+meridian_gateway_inbound_messages_total{tenant, type, status} # Counter
+meridian_gateway_inbound_latency_seconds{tenant, type}        # Histogram
 ```
 
 ### Tracing (OpenTelemetry)
@@ -1083,13 +1349,17 @@ recorded for debugging purposes.
 
 **Deliverables:**
 
-- Per-connection circuit breaker
+- Per-connection circuit breaker (shared state via Redis for
+  multi-pod consistency — local-only breakers allow N * threshold
+  failures before tripping, which can trigger provider rate limits)
 - Token bucket rate limiter
-- Provider health check worker (periodic probes)
+- Provider health check worker (periodic probes, using the shared
+  `platform/scheduler` package from PRD-021)
 - OAuth2 token refresh (client credentials flow)
 - Connection status tracking and alerting
 - `TestConnection` RPC for manifest validation
 - Circuit breaker events on Kafka
+- Vault-backed `SecretStore` adapter (replaces `EnvVarSecretStore`)
 
 ### Phase 3: Asynchronous Response Handling (8 points)
 
@@ -1113,6 +1383,36 @@ recorded for debugging purposes.
 - Operations console integration (instruction lifecycle view)
 - Runbook and operational documentation
 
+### Phase 5: Inbound Non-Financial Messages (8 points)
+
+**Prerequisites:** Phases 1-3 (outbound infrastructure, connections,
+callback handling)
+
+**Deliverables:**
+
+- Inbound message model and persistence (`inbound_messages` table)
+- Inbound receiver endpoint (`/api/v1/gateway/inbound/{connection_id}`)
+- CEL-based message classifier (routes payload to correct message type)
+- Inbound MappingDefinition transforms (provider format -> internal)
+- Inbound route declaration in manifest (`inbound_routes` section)
+- Three handler types: saga trigger, Kafka event, gRPC forward
+- Signature validation reuse from callback handling (Phase 3)
+- Inbound message Kafka events (`inbound-message-received.v1` etc.)
+- `ReceiveInboundMessage` and `ListInboundMessages` gRPC RPCs
+- Inbound audit trail and observability (metrics, tracing)
+- Unit and integration tests
+
+**Key decisions:**
+
+- Reuses same `ProviderConnection` as outbound (bidirectional)
+- Same MappingDefinition engine in reverse direction
+- Inbound messages are persisted before processing (crash safety)
+- Deduplication via source_identifier + message hash
+- Rate limiting on inbound endpoint per connection (reuses outbound
+  rate limit config)
+
+Total across all phases: 42 points.
+
 ---
 
 ## 11. Testing Strategy
@@ -1128,7 +1428,11 @@ recorded for debugging purposes.
 | Integration | Full lifecycle: saga -> gateway -> provider | CockroachDB testcontainer + HTTP mock |
 | Integration | Callback -> instruction update -> saga event | End-to-end with Kafka |
 | Integration | Manifest apply -> connections created | Through control plane |
+| Integration | Inbound message -> classify -> map -> saga trigger | CockroachDB + HTTP mock |
+| Integration | Inbound signature validation + rejection | Invalid signature fixtures |
+| Integration | Inbound deduplication | Replay same message twice |
 | Load | 1000 instructions/sec sustained dispatch | k6 + provider mock |
+| Load | 500 inbound messages/sec reception | k6 + internal handler mock |
 
 All tests use `testdb.SetupCockroachDB` and `shared/platform/await`
 (no `time.Sleep`).
@@ -1142,6 +1446,7 @@ All tests use `testdb.SetupCockroachDB` and `shared/platform/await`
 | Saga Engine (PRD-006) | Instructions originate from sagas | Implemented |
 | Starlark Service Clients (PRD-007) | Gateway exposes typed Starlark client | Implemented |
 | Control Plane / Manifest (PRD-014) | Connections declared in manifest | Implemented |
+| Platform Scheduler (PRD-021) | Health check and expiry workers use shared scheduler | In Progress |
 | **Structured Mapping (PRD-024)** | **Payload transformation engine (outbound + inbound)** | **Not Started** |
 | Event Streaming (PRD-025) | Gateway events visible in ops console | Not Started |
 | Stripe Connect (PRD-015) | Payment collection is a gateway instruction type | Implemented |
@@ -1190,6 +1495,8 @@ before adding more providers.
 | Transform script complexity | Low | Starlark is intentionally bounded (no while loops, no recursion); max execution time enforced |
 | Callback endpoint abuse | Medium | Signature validation mandatory; rate limiting on callback endpoint |
 | Instruction queue backlog | Medium | Priority queues; monitoring on queue depth; alerting on dispatch lag |
+| Inbound message flood | Medium | Per-connection rate limiting; signature validation rejects unauthenticated traffic early |
+| Inbound message misclassification | Low | CEL classifiers are compile-time validated; DryRun testing before go-live |
 
 ---
 
@@ -1197,12 +1504,15 @@ before adding more providers.
 
 | Criterion | Measurement | Target |
 |-----------|-------------|--------|
-| Delivery reliability | Instructions that reach DELIVERED or ACKNOWLEDGED | > 99.9% (excluding provider errors) |
+| Outbound delivery reliability | Instructions that reach DELIVERED or ACKNOWLEDGED | > 99.9% (excluding provider errors) |
 | Dispatch latency (p95) | Time from PENDING to DISPATCHING | < 2 seconds |
-| End-to-end latency (p95) | Ledger event to provider receipt | < 5 seconds |
+| End-to-end outbound latency (p95) | Ledger event to provider receipt | < 5 seconds |
 | Provider swap time | Time to change provider via manifest | < 5 minutes (manifest apply) |
-| Tenant isolation | Cross-tenant instruction leakage | 0 (zero) |
-| Instruction audit completeness | Instructions with full attempt history | 100% |
+| Tenant isolation | Cross-tenant message leakage (outbound or inbound) | 0 (zero) |
+| Outbound audit completeness | Instructions with full attempt history | 100% |
+| Inbound processing reliability | Messages that reach DELIVERED status | > 99.9% (excluding invalid signatures) |
+| Inbound processing latency (p95) | Receipt to internal handler delivery | < 1 second |
+| Inbound audit completeness | Messages with raw payload preserved | 100% |
 
 ---
 
@@ -1210,10 +1520,12 @@ before adding more providers.
 
 | Capability | When | Notes |
 |------------|------|-------|
+| File transfer protocols (SFTP, S3) | Post-Phase 5 | BIAN includes "messages and files"; bulk file exchange for batch integrations |
 | Bidirectional protocol adapters (MQTT, AMQP) | Phase 4 | IoT and message queue integration |
-| Instruction scheduling (cron-based) | Post-MVP | Recurring instructions (monthly billing) |
+| Recurring instruction scheduling | Post-MVP | Uses `platform/scheduler` (PRD-021) — same shared infrastructure as reconciliation settlement cycles and forecast generation |
 | Provider marketplace | Post-MVP | Pre-built connection templates for common providers |
 | AI-generated transform scripts | Post-MVP | LLM generates Starlark from provider API docs |
 | Multi-region dispatch | Post-MVP | Route to geographically closest provider endpoint |
 | Instruction cost tracking | Post-MVP | Track API call costs per provider per tenant |
 | Dead letter queue with manual retry UI | Phase 3+ | Operations console integration for failed instructions |
+| Inbound message replay | Post-Phase 5 | Re-process failed inbound messages after mapping fix |
