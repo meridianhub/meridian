@@ -768,6 +768,60 @@ provider handles communication in both directions. The mapping engine
 is inherently bidirectional (PRD-024), so the same `FieldCorrespondence`
 definitions work in either direction.
 
+### 4.9 Statelessness and Horizontal Scaling
+
+The Operational Gateway must be stateless — any pod can handle any
+request for any tenant. This is a hard architectural constraint,
+not an optimisation.
+
+**Why statelessness is non-negotiable**: Asynchronous provider
+interactions mean the pod that dispatches an instruction is not the
+pod that receives the callback. A saga dispatches a payment
+instruction on pod A; Stripe's webhook fires 30 minutes later and
+hits pod B. Pod B must correlate the callback to the instruction,
+update its state, and emit the saga continuation event — without
+any knowledge of pod A.
+
+**All state lives in the database or shared infrastructure:**
+
+| Concern | Where state lives | Not in-process |
+|---------|-------------------|----------------|
+| Instruction lifecycle | CockroachDB `instructions` table | No in-memory instruction cache |
+| Connection config | Loaded from manifest at apply time, cached with short TTL | No pod-affinity required |
+| Circuit breaker state | Redis (Phase 2) or CockroachDB | Not per-pod gobreaker |
+| Rate limiter tokens | Redis token bucket (Phase 2) | Not per-pod `rate.Limiter` |
+| Dispatch worker state | `FOR UPDATE SKIP LOCKED` row-level locking | No leader election needed |
+| Callback correlation | Database lookup by `instruction_id` | No in-memory correlation map |
+| Secret resolution | `SecretStore` port (env vars or Vault) | Resolved per-request |
+
+**Dispatch worker scaling**: Multiple pods poll the `instructions`
+table concurrently using `FOR UPDATE SKIP LOCKED`. Each pod claims
+a batch of PENDING instructions without coordination. This is the
+same pattern used by the outbox worker and audit worker — proven
+to scale horizontally without leader election.
+
+**Callback routing**: Inbound webhook and callback endpoints are
+tenant-scoped via the connection ID in the URL path
+(`/api/v1/gateway/callbacks/{connection_id}`). Any pod can handle
+any callback because correlation is a database lookup, not
+in-process state.
+
+**Lesson from existing Stripe integration**: The current
+payment-order service uses per-pod circuit breakers
+(`gobreaker.CircuitBreaker`) and per-pod LRU config caches. In a
+multi-pod deployment, this means N pods each independently track
+failures — one pod can trip its breaker while others continue
+dispatching, exceeding the provider's error threshold. The
+Operational Gateway must not repeat this pattern: circuit breaker
+and rate limiter state must be shared from Phase 2 onward.
+
+**Tenant isolation**: Every database query, Kafka event, and gRPC
+call is scoped by `tenant_id`. The gateway is tenant-agnostic in
+its logic — the same dispatch engine, the same mapping engine, the
+same callback handler — with tenant context injected via gRPC
+metadata and the standard `tenant.WithTenant(ctx, tenantID)`
+pattern used across all Meridian services.
+
 ---
 
 ## 5. Design Pattern: Bidirectional Mapping Reuse
@@ -1575,12 +1629,64 @@ extraction to `shared/pkg/cel/`.
 2. PRD-024 Phase 2 (mapping engine to `shared/pkg/mapping/`)
 3. PRD-029 Phase 1 (instruction dispatch using mapping engine)
 
-### Migration Path for Existing Integrations
+### Design Validation: Stripe Integration Migration
 
-The current Stripe integration (direct HTTP calls from saga scripts)
-should be migrated to use the Operational Gateway once Phase 1 is
-complete. This demonstrates the pattern and validates the architecture
-before adding more providers.
+The existing Stripe integration is the first concrete test of the
+gateway's abstraction. If the gateway cannot subsume Stripe's
+outbound calls and webhook consumption, the design is wrong.
+
+**Current Stripe architecture** (distributed across services):
+
+| Component | Location | What it does |
+|-----------|----------|-------------|
+| `PaymentRails` manifest config | `manifest.proto` | Declares Stripe account ID, webhook secret, payout schedule |
+| `ClientFactory` | `payment-order/adapters/gateway/stripe/` | Creates Stripe API client with per-pod LRU cache + circuit breaker |
+| `GatewayAdapter` | `payment-order/adapters/gateway/stripe/` | Calls Stripe `PaymentIntents.Create()` |
+| `WebhookHandler` | `control-plane/internal/stripe/` | Verifies Stripe signatures, publishes to Kafka |
+| `PaymentEventConsumer` | `control-plane/internal/stripe/` | Hard-coded Go switch routing events to sagas |
+
+**After migration** (unified through gateway):
+
+| Current | Gateway equivalent |
+|---------|-------------------|
+| `PaymentRails` manifest section | `operational_gateway.provider_connections` entry |
+| `ClientFactory` + LRU cache | `ProviderConnection` with shared-state circuit breaker |
+| `GatewayAdapter.Create()` | `DispatchInstruction(type="payment.collect")` |
+| `WebhookHandler` | Callback endpoint with signature validation |
+| `PaymentEventConsumer` Go switch | Inbound route with CEL classifier |
+| Stripe-specific payload construction | `MappingDefinition` (outbound mapping) |
+| Stripe-specific response parsing | `MappingDefinition` (inbound mapping) |
+
+**What moves and what stays**:
+
+- **Moves to gateway**: HTTP calls to Stripe API, webhook
+  reception, signature verification, retry logic, circuit breaking
+- **Stays in payment-order**: Financial domain logic (lien
+  creation, ledger entries, position updates)
+- **Stays in sagas**: Orchestration logic (when to collect, what
+  to do on success/failure, compensation)
+
+**Migration phases**:
+
+1. Build gateway Phase 1 with Stripe as the reference integration
+2. Create `MappingDefinition` for `payment-collect-to-stripe` and
+   `stripe-webhook-to-ack` (the YAML examples in Section 4.3
+   already show this)
+3. Update payment saga to call
+   `operational_gateway.dispatch_instruction()` instead of
+   `payment_order.collect_payment()`
+4. Migrate webhook handler to gateway callback endpoint
+5. Remove `PaymentRails` manifest section (replaced by gateway
+   connection config)
+6. Remove Stripe-specific code from payment-order and
+   control-plane services
+
+**Scaling improvements from migration**: The current Stripe
+integration uses per-pod circuit breakers and per-pod config caches
+(see Section 4.9). The gateway replaces these with shared-state
+circuit breakers (Redis) and database-backed config (manifest
+apply), eliminating the multi-pod consistency issues that exist
+today.
 
 ---
 
