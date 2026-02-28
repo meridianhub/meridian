@@ -9,7 +9,8 @@ triggers:
   - Tracking balances for non-customer accounts
   - Integrating with FinancialAccounting for balance updates
 instructions: |
-  This PRD defines the Internal Account service following BIAN v14.0.
+  This PRD defines Meridian's Internal Account service, which maps to the BIAN
+  "Internal Bank Account" service domain (v14.0). The shortened name is intentional.
   Key patterns: Multi-asset support via InstrumentAmount, real-time O(1) balance queries.
   Uses Dimension from reference_data/v1, InstrumentAmount from quantity/v1.
   Service structure follows ADR-0015. Proto package: internal_account (with underscores).

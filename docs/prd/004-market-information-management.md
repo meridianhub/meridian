@@ -128,7 +128,7 @@ platform with CEL-validated schemas, enabling:
 
 **BIAN Semantic API Specification:**
 
-- [Market Information Management](https://bian.org/servicelandscape-12-0-0/views/view_50991.html)
+- [Market Information Management](https://bian.org/servicelandscape-14-0-0/views/view_50991.html)
 
 **BIAN References:**
 

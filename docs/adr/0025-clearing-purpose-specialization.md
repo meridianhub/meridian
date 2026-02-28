@@ -169,7 +169,7 @@ Create separate tables: `deposit_clearing_accounts`, `withdrawal_clearing_accoun
 * [ADR-0024: Internal Account Service](0024-internal-account-service.md)
 * [Internal Account README](../../services/internal-account/README.md)
 * [Proto Definitions](../../api/proto/meridian/internal_account/v1/internal_account.proto)
-* [BIAN v14.0 Internal Account Service Domain](https://bian.org/semantic-apis/internal-account/)
+* [BIAN Internal Account Service Domain](https://bian.org/semantic-apis/internal-account/)
 
 ## Notes
 
