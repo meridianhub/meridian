@@ -294,121 +294,43 @@ graph TB
 ### 4.1 Instruction Model
 
 Every outbound instruction follows a common envelope regardless of
-asset class or provider:
+asset class or provider. The key fields are:
 
-```protobuf
-// api/proto/meridian/operational_gateway/v1/instruction.proto
+| Field | Purpose |
+|-------|---------|
+| `instruction_id` | UUID, serves as idempotency key |
+| `tenant_id` | Tenant scoping |
+| `instruction_type` | Routing key (e.g., `payment.collect`, `notification.send`) |
+| `provider_connection_id` | References manifest-declared connection |
+| `correlation_id` | Links to originating saga/event |
+| `causation_id` | Parent instruction (for multi-step chains) |
+| `payload` | Instruction-specific data (structured, not typed) |
+| `metadata` | Routing hints, priority, SLA parameters |
+| `priority` | LOW / NORMAL / HIGH / CRITICAL |
+| `scheduled_at` | Null = immediate, otherwise deferred dispatch |
+| `expires_at` | Null = no expiry, otherwise auto-expire if not dispatched |
+| `status` | Lifecycle state (see state machine below) |
+| `attempts` | Ordered list of dispatch attempts with outcome |
 
-message Instruction {
-  string instruction_id = 1;        // UUID, idempotency key
-  string tenant_id = 2;
-  string instruction_type = 3;      // e.g., "payment.collect", "notification.send"
-  string provider_connection_id = 4; // References manifest-declared connection
-  string correlation_id = 5;        // Links to originating saga/event
-  string causation_id = 6;          // Parent instruction (for multi-step)
-
-  google.protobuf.Struct payload = 7;  // Instruction-specific data
-  google.protobuf.Struct metadata = 8; // Routing hints, priority, SLA
-
-  InstructionPriority priority = 9;
-  google.protobuf.Timestamp scheduled_at = 10; // Null = immediate
-  google.protobuf.Timestamp expires_at = 11;   // Null = no expiry
-
-  // Lifecycle (set by the gateway, not the caller)
-  InstructionStatus status = 12;
-  repeated InstructionAttempt attempts = 13;
-}
-
-enum InstructionStatus {
-  INSTRUCTION_STATUS_UNSPECIFIED = 0;
-  INSTRUCTION_STATUS_PENDING = 1;
-  INSTRUCTION_STATUS_DISPATCHING = 2;
-  INSTRUCTION_STATUS_DELIVERED = 3;
-  INSTRUCTION_STATUS_ACKNOWLEDGED = 4;
-  INSTRUCTION_STATUS_FAILED = 5;
-  INSTRUCTION_STATUS_EXPIRED = 6;
-  INSTRUCTION_STATUS_CANCELLED = 7;
-}
-
-enum InstructionPriority {
-  INSTRUCTION_PRIORITY_UNSPECIFIED = 0;
-  INSTRUCTION_PRIORITY_LOW = 1;       // Batch-friendly, no SLA
-  INSTRUCTION_PRIORITY_NORMAL = 2;    // Standard processing
-  INSTRUCTION_PRIORITY_HIGH = 3;      // Priority queue
-  INSTRUCTION_PRIORITY_CRITICAL = 4;  // Immediate dispatch, alerting on failure
-}
-
-message InstructionAttempt {
-  int32 attempt_number = 1;
-  google.protobuf.Timestamp attempted_at = 2;
-  int32 http_status = 3;
-  string response_body = 4;   // Truncated to 4KB
-  string error_message = 5;
-  google.protobuf.Duration latency = 6;
-}
-```
+The exact proto definition will be determined during implementation.
+Field numbers, message nesting, and `oneof` choices are implementation
+decisions.
 
 ### 4.2 Provider Connection Model
 
 Provider connections are declared in the tenant manifest and managed
-by the Service Provider Operations domain:
+by the Service Provider Operations domain. Each connection captures:
 
-```protobuf
-message ProviderConnection {
-  string connection_id = 1;        // Manifest-declared identifier
-  string tenant_id = 2;
-  string provider_name = 3;        // Human-readable (e.g., "Stripe", "Twilio")
-  string provider_type = 4;        // Category (e.g., "payment", "notification", "registry")
+| Aspect | Fields |
+|--------|--------|
+| Identity | `connection_id`, `tenant_id`, `provider_name`, `provider_type` |
+| Transport | `protocol` (HTTPS, gRPC, WEBHOOK, MQTT, AMQP), `base_url` |
+| Authentication | API key, OAuth2, Basic, mTLS, HMAC (one per connection) |
+| Resilience | Retry policy, circuit breaker config, rate limit |
+| Health | Connection status, last health check timestamp |
 
-  ConnectionProtocol protocol = 5;
-  string base_url = 6;
-  AuthConfig auth = 7;
-  RetryPolicy retry_policy = 8;
-  CircuitBreakerConfig circuit_breaker = 9;
-  RateLimitConfig rate_limit = 10;
-
-  ConnectionStatus status = 11;
-  google.protobuf.Timestamp last_health_check = 12;
-}
-
-enum ConnectionProtocol {
-  CONNECTION_PROTOCOL_UNSPECIFIED = 0;
-  CONNECTION_PROTOCOL_HTTPS = 1;
-  CONNECTION_PROTOCOL_GRPC = 2;
-  CONNECTION_PROTOCOL_WEBHOOK = 3;
-  CONNECTION_PROTOCOL_MQTT = 4;      // IoT device protocols
-  CONNECTION_PROTOCOL_AMQP = 5;      // Message queue integration
-}
-
-message AuthConfig {
-  oneof auth_method {
-    ApiKeyAuth api_key = 1;
-    OAuth2Auth oauth2 = 2;
-    BasicAuth basic = 3;
-    MtlsAuth mtls = 4;
-    HmacAuth hmac = 5;
-  }
-}
-
-message RetryPolicy {
-  int32 max_attempts = 1;           // Default: 3
-  google.protobuf.Duration initial_backoff = 2;  // Default: 1s
-  google.protobuf.Duration max_backoff = 3;      // Default: 60s
-  double backoff_multiplier = 4;    // Default: 2.0
-  repeated int32 retryable_status_codes = 5;     // Default: [429, 500, 502, 503, 504]
-}
-
-message CircuitBreakerConfig {
-  int32 failure_threshold = 1;      // Trips after N consecutive failures
-  google.protobuf.Duration reset_timeout = 2;  // Half-open after this duration
-  int32 half_open_max_requests = 3; // Probes before fully closing
-}
-
-message RateLimitConfig {
-  int32 requests_per_second = 1;
-  int32 burst_size = 2;
-}
-```
+Connections are bidirectional — the same connection identity is used
+for outbound dispatch and inbound message reception.
 
 ### 4.3 Manifest Integration
 
@@ -758,32 +680,17 @@ and routes them to internal handlers.
 
 #### Inbound Message Model
 
-```protobuf
-message InboundMessage {
-  string message_id = 1;           // UUID, assigned by gateway on receipt
-  string tenant_id = 2;
-  string connection_id = 3;        // Which provider connection received it
-  string message_type = 4;         // e.g., "regulatory.notice", "counterparty.status"
-  string source_identifier = 5;    // External party identifier
+Each inbound message captures:
 
-  google.protobuf.Struct raw_payload = 6;    // Original payload (preserved for audit)
-  google.protobuf.Struct mapped_payload = 7; // After MappingDefinition transform
-
-  InboundMessageStatus status = 8;
-  google.protobuf.Timestamp received_at = 9;
-  google.protobuf.Timestamp processed_at = 10;
-  string error_message = 11;
-}
-
-enum InboundMessageStatus {
-  INBOUND_MESSAGE_STATUS_UNSPECIFIED = 0;
-  INBOUND_MESSAGE_STATUS_RECEIVED = 1;     // Validated and persisted
-  INBOUND_MESSAGE_STATUS_PROCESSING = 2;   // Mapping + routing in progress
-  INBOUND_MESSAGE_STATUS_DELIVERED = 3;    // Handed to internal handler/saga
-  INBOUND_MESSAGE_STATUS_FAILED = 4;       // Validation or routing failure
-  INBOUND_MESSAGE_STATUS_REJECTED = 5;     // Signature invalid or unknown source
-}
-```
+| Field | Purpose |
+|-------|---------|
+| `message_id` | UUID, assigned by gateway on receipt |
+| `tenant_id`, `connection_id` | Scoping and source identification |
+| `message_type` | Classified type (e.g., `regulatory.notice`) |
+| `source_identifier` | External party identifier |
+| `raw_payload` | Original payload preserved for audit |
+| `mapped_payload` | After MappingDefinition transform |
+| `status` | RECEIVED → PROCESSING → DELIVERED (or FAILED / REJECTED) |
 
 #### Inbound Endpoint
 
@@ -932,9 +839,139 @@ construction.
 
 ---
 
-## 6. Service Design
+## 6. Open Design Questions
 
-### 6.1 Package Structure
+The following architectural questions require resolution during
+implementation. They are listed here to prevent premature specificity
+in the PRD — the right answers will emerge from real-world usage
+(particularly migrating the existing Stripe integration through the
+gateway).
+
+### 6.1 Compensation After Delivery
+
+Once an instruction reaches DELIVERED, it cannot be "undelivered."
+If the originating saga needs to compensate, it must create a **new
+compensating instruction** (e.g., refund, cancellation request), not
+reverse the original dispatch. How should the saga engine express
+"cancel if still pending, otherwise create a compensating instruction"?
+
+This is analogous to the problem in event-driven systems where you
+cannot unpublish a message — compensation must be a forward action,
+not a rollback.
+
+### 6.2 Timeout Composition
+
+A single `expires_at` field is insufficient for real async flows.
+Consider a payment collection via Stripe:
+
+```text
+Dispatch timeout:  5 seconds (HTTP call to Stripe must respond)
+Ack timeout:       24 hours (Stripe webhook should fire within a day)
+SLA timeout:       72 hours (business expectation for settlement)
+Escalation:        If no ack within SLA, create alert instruction
+```
+
+These are three different timeouts with different consequences.
+Should they be modelled as:
+
+- Per-route timeout tiers in the manifest?
+- Per-instruction metadata set by the saga?
+- A composable timeout chain (similar to stream processing throttle
+  composition)?
+
+### 6.3 In-Flight Concurrency
+
+Rate limiting controls requests-per-second, but does not cap the
+number of instructions concurrently awaiting acknowledgement. If a
+provider allows 25 req/s but 500 instructions are awaiting callbacks,
+does that constitute overload? Should the gateway track and limit
+in-flight (dispatched but not yet acknowledged) instructions per
+connection?
+
+This is the backpressure question: in streaming systems, a slow
+consumer causes the producer to slow down. In the gateway, a slow
+provider (delayed callbacks) should arguably throttle the saga engine
+from creating more instructions for that connection.
+
+### 6.4 Dead Letter Handling
+
+The PRD describes retry with exponential backoff, but what happens
+after max retries? Options:
+
+- Mark FAILED and emit event (saga handles recovery)
+- Move to a dead letter table for manual inspection and replay
+- Both (DLQ for ops visibility, event for saga awareness)
+
+Production experience with dead letter queues shows they need:
+replay tooling, filtering by error type, bulk retry, and alerting
+on queue depth. This should be designed in Phase 2, not deferred to
+Phase 4.
+
+### 6.5 Duplicate Callback Idempotency
+
+External systems may deliver the same webhook multiple times. Stripe
+explicitly documents this. The gateway must be idempotent on callback
+processing — receiving the same callback twice should not create
+duplicate events or corrupt instruction state. How is deduplication
+keyed? Options:
+
+- External event ID (provider-assigned, e.g., Stripe event ID)
+- Payload hash
+- Both, with the external ID preferred when available
+
+### 6.6 Ordered vs Unordered Processing
+
+The dispatch worker polls for dispatchable instructions. Should it
+process them strictly in order (FIFO by creation time) or allow
+out-of-order processing for throughput?
+
+In stream processing, `asyncMap()` preserves order while
+`unorderedWaitWithRetry()` trades ordering for throughput. The
+gateway likely needs both modes:
+
+- Ordered within a correlation group (instructions from the same
+  saga should dispatch sequentially)
+- Unordered across correlation groups (independent sagas should
+  not block each other)
+
+### 6.7 Fan-Out / Fan-In
+
+A single saga may create multiple instructions (e.g., settlement
+completes → collect payment + send invoice + notify customer). The
+saga may need to wait for all three to complete before proceeding.
+Is this a gateway concern (track instruction groups) or a saga
+engine concern (saga waits for N events)?
+
+The `correlation_id` links instructions to a saga, but there is no
+"instruction group" concept. If fan-out/fan-in is needed, should the
+gateway provide a `WaitForInstructions` RPC, or should the saga
+engine track completion via Kafka events?
+
+### 6.8 Circuit Breaker Scope in Multi-Pod Deployments
+
+A local-only circuit breaker in a 3-pod deployment allows 3x the
+failure threshold before tripping. For providers with strict rate
+limits, this can cause account suspension. Options:
+
+- Redis-backed shared state (adds latency + Redis dependency)
+- Gossip protocol between pods (eventually consistent)
+- Accept local-only with lower thresholds (simpler, less accurate)
+
+### 6.9 Secret Rotation
+
+The PRD defines a `SecretStore` port for secret resolution, but
+doesn't address rotation. When a provider API key is rotated:
+
+- In-flight instructions using the old key: retry with new key?
+- Connection health check: should detect auth failures as "rotate"
+  vs "broken"
+- Manifest apply: should secret rotation trigger connection re-test?
+
+---
+
+## 7. Service Design (Indicative)
+
+### 7.1 Package Structure
 
 ```text
 services/operational-gateway/
@@ -1042,165 +1079,52 @@ fields:
 This contract ensures that every provider integration includes
 correlation as a first-class mapping concern, not an afterthought.
 
-### 6.2 Database Schema
+### 7.2 Data Model
 
-```sql
--- Operational Gateway schema (CockroachDB)
+Four core tables, all partitioned by `tenant_id` as primary key prefix
+(standard Meridian multi-tenant pattern):
 
-CREATE TABLE provider_connections (
-    connection_id    VARCHAR(255) NOT NULL,
-    tenant_id        UUID NOT NULL,
-    provider_name    VARCHAR(255) NOT NULL,
-    provider_type    VARCHAR(100) NOT NULL,
-    protocol         VARCHAR(50) NOT NULL,
-    base_url         VARCHAR(2048) NOT NULL,
-    auth_config      JSONB NOT NULL DEFAULT '{}',
-    retry_policy     JSONB NOT NULL DEFAULT '{}',
-    circuit_breaker  JSONB NOT NULL DEFAULT '{}',
-    rate_limit       JSONB NOT NULL DEFAULT '{}',
-    status           VARCHAR(50) NOT NULL DEFAULT 'ACTIVE',
-    last_health_check TIMESTAMPTZ,
-    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+| Table | Purpose | Key indexes |
+|-------|---------|-------------|
+| `provider_connections` | Connection config (from manifest) | PK: `(tenant_id, connection_id)` |
+| `instructions` | Outbound instruction lifecycle | Dispatchable (status + next_attempt), correlation, expiry |
+| `instruction_attempts` | Per-attempt outcome log | PK: `(tenant_id, instruction_id, attempt_number)` |
+| `inbound_messages` | Inbound message audit (Phase 5) | Connection + type, processing status |
 
-    PRIMARY KEY (tenant_id, connection_id)
-);
+The `instructions` table doubles as the outbox — the dispatch worker
+polls for dispatchable rows. A dead letter mechanism (see Open
+Questions) handles instructions that exhaust retries.
 
-CREATE TABLE instructions (
-    instruction_id   UUID NOT NULL DEFAULT gen_random_uuid(),
-    tenant_id        UUID NOT NULL,
-    instruction_type VARCHAR(255) NOT NULL,
-    connection_id    VARCHAR(255) NOT NULL,
-    correlation_id   VARCHAR(255) NOT NULL,
-    causation_id     VARCHAR(255),
-    payload          JSONB NOT NULL,
-    metadata         JSONB NOT NULL DEFAULT '{}',
-    priority         VARCHAR(50) NOT NULL DEFAULT 'NORMAL',
-    status           VARCHAR(50) NOT NULL DEFAULT 'PENDING',
-    scheduled_at     TIMESTAMPTZ,
-    expires_at       TIMESTAMPTZ,
-    attempt_count    INT NOT NULL DEFAULT 0,
-    max_attempts     INT NOT NULL DEFAULT 3,
-    next_attempt_at  TIMESTAMPTZ,
-    external_id      VARCHAR(255),       -- ID from external system
-    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+Exact column definitions, JSONB vs typed columns, and index strategies
+are implementation decisions informed by the query patterns that
+emerge during Phase 1.
 
-    PRIMARY KEY (tenant_id, instruction_id)
-);
+### 7.3 Service RPCs
 
--- Worker polling index: find dispatchable instructions
-CREATE INDEX idx_instructions_dispatchable
-    ON instructions (tenant_id, status, next_attempt_at)
-    WHERE status IN ('PENDING', 'DISPATCHING');
+Two gRPC services following standard Meridian patterns:
 
--- Correlation lookup: find instructions by saga/event
-CREATE INDEX idx_instructions_correlation
-    ON instructions (tenant_id, correlation_id);
+**OperationalGatewayService** (instruction lifecycle):
 
--- Expiry index: find expired instructions
-CREATE INDEX idx_instructions_expiry
-    ON instructions (expires_at)
-    WHERE status = 'PENDING' AND expires_at IS NOT NULL;
+| RPC | Phase | Purpose |
+|-----|-------|---------|
+| `DispatchInstruction` | 1 | Create and queue an outbound instruction |
+| `CancelInstruction` | 1 | Cancel a pending instruction |
+| `GetInstruction` | 1 | Query instruction status and attempt history |
+| `ListInstructions` | 1 | List instructions with filtering |
+| `ProcessCallback` | 3 | Handle an inbound webhook callback for a dispatched instruction |
+| `ReceiveInboundMessage` | 5 | Receive an unsolicited inbound message |
+| `ListInboundMessages` | 5 | Query inbound message history |
 
-CREATE TABLE instruction_attempts (
-    attempt_id       UUID NOT NULL DEFAULT gen_random_uuid(),
-    instruction_id   UUID NOT NULL,
-    tenant_id        UUID NOT NULL,
-    attempt_number   INT NOT NULL,
-    attempted_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-    http_status      INT,
-    response_body    VARCHAR(4096),      -- Truncated
-    error_message    VARCHAR(1024),
-    latency_ms       INT,
+**ProviderConnectionService** (connection management):
 
-    PRIMARY KEY (tenant_id, instruction_id, attempt_number),
-    CONSTRAINT fk_instruction FOREIGN KEY (tenant_id, instruction_id)
-        REFERENCES instructions (tenant_id, instruction_id)
-);
+| RPC | Phase | Purpose |
+|-----|-------|---------|
+| `UpsertConnection` | 1 | Create/update connection from manifest apply |
+| `GetConnection` | 1 | Get connection status and health |
+| `ListConnections` | 1 | List all connections for a tenant |
+| `TestConnection` | 2 | Send health check probe to validate connection |
 
--- Phase 5: Inbound non-financial messages
-CREATE TABLE inbound_messages (
-    message_id       UUID NOT NULL DEFAULT gen_random_uuid(),
-    tenant_id        UUID NOT NULL,
-    connection_id    VARCHAR(255) NOT NULL,
-    message_type     VARCHAR(255) NOT NULL,
-    source_identifier VARCHAR(255),
-    raw_payload      JSONB NOT NULL,
-    mapped_payload   JSONB,
-    status           VARCHAR(50) NOT NULL DEFAULT 'RECEIVED',
-    error_message    VARCHAR(1024),
-    received_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    processed_at     TIMESTAMPTZ,
-
-    PRIMARY KEY (tenant_id, message_id)
-);
-
--- Lookup by connection and type
-CREATE INDEX idx_inbound_messages_connection
-    ON inbound_messages (tenant_id, connection_id, message_type);
-
--- Processing queue
-CREATE INDEX idx_inbound_messages_status
-    ON inbound_messages (tenant_id, status)
-    WHERE status IN ('RECEIVED', 'PROCESSING');
-```
-
-### 6.3 gRPC Service Definition
-
-```protobuf
-// api/proto/meridian/operational_gateway/v1/service.proto
-
-service OperationalGatewayService {
-  // Dispatch an instruction to an external provider
-  rpc DispatchInstruction(DispatchInstructionRequest)
-      returns (DispatchInstructionResponse);
-
-  // Cancel a pending instruction
-  rpc CancelInstruction(CancelInstructionRequest)
-      returns (CancelInstructionResponse);
-
-  // Query instruction status and history
-  rpc GetInstruction(GetInstructionRequest)
-      returns (GetInstructionResponse);
-
-  // List instructions with filtering
-  rpc ListInstructions(ListInstructionsRequest)
-      returns (ListInstructionsResponse);
-
-  // Process an inbound callback from an external provider
-  rpc ProcessCallback(ProcessCallbackRequest)
-      returns (ProcessCallbackResponse);
-
-  // Phase 5: Receive an unsolicited inbound message from an external party
-  rpc ReceiveInboundMessage(ReceiveInboundMessageRequest)
-      returns (ReceiveInboundMessageResponse);
-
-  // Phase 5: Query inbound message history
-  rpc ListInboundMessages(ListInboundMessagesRequest)
-      returns (ListInboundMessagesResponse);
-}
-
-service ProviderConnectionService {
-  // Register or update a provider connection (from manifest apply)
-  rpc UpsertConnection(UpsertConnectionRequest)
-      returns (UpsertConnectionResponse);
-
-  // Get connection status and health
-  rpc GetConnection(GetConnectionRequest)
-      returns (GetConnectionResponse);
-
-  // List all connections for a tenant
-  rpc ListConnections(ListConnectionsRequest)
-      returns (ListConnectionsResponse);
-
-  // Test a connection (send health check probe)
-  rpc TestConnection(TestConnectionRequest)
-      returns (TestConnectionResponse);
-}
-```
-
-### 6.4 Kafka Events
+### 7.4 Kafka Events
 
 The gateway emits events for every instruction lifecycle transition,
 following the established topic naming convention:
@@ -1226,31 +1150,83 @@ operations console.
 
 ---
 
-## 7. Manifest Apply Integration
+## 8. Manifest-as-Declaration: Tenant-Defined Intent
+
+The Operational Gateway follows Meridian's core principle: **tenants
+declare intent at definition time, not at runtime.** Provider
+connections, instruction routes, inbound routes, and mapping
+definitions are all declared in the tenant manifest alongside
+instruments, account types, and sagas. The gateway configuration is
+part of the tenant's economy definition — versioned, validated, and
+applied atomically.
+
+This is the "operating system for a business" pattern: the manifest
+is the kernel configuration, and the gateway is the I/O subsystem
+that the kernel configures.
+
+### Declarative Lifecycle
+
+```text
+Tenant defines manifest (v1)
+  → provider_connections: [stripe, twilio, registry]
+  → instruction_routes: [payment.collect, notification.sms]
+  → inbound_routes: [regulatory.notice, verification.result]
+  → mappings: [payment-to-stripe, stripe-response-to-ack, ...]
+
+ApplyManifest(v1) → validates, creates connections, registers routes
+
+Tenant updates manifest (v2)
+  → Adds new provider connection (sendgrid)
+  → Adds new instruction route (notification.email)
+  → Updates mapping (payment-to-stripe with new field)
+
+ApplyManifest(v2) → validates diff, upserts changes, preserves v1 state
+```
+
+### Manifest Apply Steps
 
 When `ApplyManifest` processes the `operational_gateway` section:
 
 1. **Validate connections** — CEL expressions verify required fields,
    valid protocols, sensible retry/rate-limit values
 2. **Validate routes** — Ensure referenced `connection_id` exists,
-   transform script is a valid Starlark script, instruction types
-   follow naming convention
-3. **Upsert connections** — Create or update provider connections
+   referenced mapping names resolve, instruction types follow naming
+   convention
+3. **Validate inbound routes** — Ensure classifier CEL expressions
+   compile, handler targets exist (saga names, Kafka topics, gRPC
+   services)
+4. **Upsert connections** — Create or update provider connections
    via `ProviderConnectionService.UpsertConnection`
-4. **Register routes** — Store instruction type -> connection + script
-   mapping in reference data
-5. **Generate Starlark client** — The `operational_gateway` service
+5. **Register routes** — Store instruction type -> connection + mapping
+   routing in reference data
+6. **Generate Starlark client** — The `operational_gateway` service
    handlers are added to the `handlers.yaml` registry, and
    `BuildServiceModules()` generates the typed Starlark client that
    saga scripts use
 
-This follows the same manifest apply pattern as instruments, account
-types, and sagas — the gateway configuration is part of the tenant's
-economy definition.
+### Versioning and Safety
+
+Gateway configuration follows the same versioning semantics as other
+manifest sections:
+
+- **Additive changes** (new connection, new route) apply immediately
+- **Breaking changes** (remove connection with in-flight instructions)
+  are rejected with a validation error
+- **Route changes** take effect for new instructions only — in-flight
+  instructions continue with the route configuration captured at
+  creation time
+- **Manifest history** tracks every version, enabling rollback if a
+  configuration change causes dispatch failures
+
+This means a tenant can evolve their external integrations — add
+providers, change mappings, adjust retry policies — through manifest
+updates alone, without code changes or redeployments. The same
+pattern used for adding a new instrument or account type applies to
+adding a new external provider.
 
 ---
 
-## 8. Security
+## 9. Security
 
 ### Secret Management
 
@@ -1282,7 +1258,7 @@ The gateway enforces tenant scoping at every layer:
 
 ---
 
-## 9. Observability
+## 10. Observability
 
 ### Metrics (Prometheus)
 
@@ -1315,7 +1291,7 @@ recorded for debugging purposes.
 
 ---
 
-## 10. Implementation Plan
+## 11. Implementation Plan
 
 ### Phase 1: Core Instruction Dispatch (13 points)
 
@@ -1415,7 +1391,7 @@ Total across all phases: 42 points.
 
 ---
 
-## 11. Testing Strategy
+## 12. Testing Strategy
 
 | Layer | What | How |
 |-------|------|-----|
@@ -1439,7 +1415,7 @@ All tests use `testdb.SetupCockroachDB` and `shared/platform/await`
 
 ---
 
-## 12. Dependencies
+## 13. Dependencies
 
 | Component | Relationship | Status |
 |-----------|-------------|--------|
@@ -1484,7 +1460,7 @@ before adding more providers.
 
 ---
 
-## 13. Risks and Mitigations
+## 14. Risks and Mitigations
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
@@ -1500,7 +1476,7 @@ before adding more providers.
 
 ---
 
-## 14. Success Criteria
+## 15. Success Criteria
 
 | Criterion | Measurement | Target |
 |-----------|-------------|--------|
@@ -1516,7 +1492,7 @@ before adding more providers.
 
 ---
 
-## 15. Future Considerations (Out of Scope)
+## 16. Future Considerations (Out of Scope)
 
 | Capability | When | Notes |
 |------------|------|-------|
