@@ -157,8 +157,9 @@ determines whether the gateway initiates (outbound) or listens (inbound).
 
 ## 2. BIAN Service Domain Alignment
 
-This PRD maps to three BIAN Service Domains that compose the
-bidirectional non-financial message architecture:
+This PRD maps to three BIAN Service Domains (Release 14.0) that
+compose the bidirectional non-financial message architecture. All three
+domains are unchanged between Release 13.0 and 14.0.
 
 ### Primary: Operational Gateway (OPERATE)
 
@@ -1396,6 +1397,15 @@ following the established topic naming convention:
 - operational-gateway.inbound-message-delivered.v1
 - operational-gateway.inbound-message-failed.v1
 ```
+
+Topic names follow Meridian's `{service}.{event}.{version}` convention
+rather than BIAN AsyncAPI channel names (`OutboundMessage/Created`,
+`InboundMessage/Updated`). The dot-notation encodes owning service,
+event semantics, and schema version — operationally valuable for ACLs,
+consumer group management, and debugging. BIAN channel names are
+transport-agnostic and omit service ownership. Adopting them would also
+require adopting the BIAN message envelope schema, which diverges from
+Meridian's protobuf event definitions.
 
 These events integrate with the existing event streaming system
 (PRD-025), making outbound instruction lifecycle visible in the
