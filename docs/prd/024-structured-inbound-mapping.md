@@ -28,7 +28,7 @@ instructions: |
 
 # PRD: Structured Mapping Layer
 
-**Status:** Implemented
+**Status:** Not Started
 **Version:** 1.0
 **Date:** 2026-02-21
 **Author:** Architecture Team

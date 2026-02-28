@@ -1689,7 +1689,7 @@ All tests use `testdb.SetupCockroachDB` and `shared/platform/await`
 | Starlark Service Clients (PRD-007) | Gateway exposes typed Starlark client | Implemented |
 | Control Plane / Manifest (PRD-014) | Connections declared in manifest | Implemented |
 | Platform Scheduler (PRD-021) | Health check and expiry workers use shared scheduler | In Progress |
-| Structured Mapping (PRD-024) | Payload transformation engine (outbound + inbound) | Implemented |
+| **Structured Mapping (PRD-024)** | **Payload transformation engine (outbound + inbound)** | **Not Started** |
 | Event Streaming (PRD-025) | Gateway events visible in ops console | Not Started |
 | Stripe Connect (PRD-015) | Payment collection is a gateway instruction type | Implemented |
 | Outbox Pattern | At-least-once dispatch uses outbox | Implemented |
