@@ -44,6 +44,7 @@ stateDiagram-v2
 | [Universal Asset System](001-universal-asset-system.md) | `universal-asset-system` | 36/36 done |
 | [Starlark Service Bindings](008-starlark-service-bindings.md) | N/A (tracked across other tags) | Implemented 2026-02-04 |
 | [Starlark Testing Framework](010-starlark-testing-framework.md) | N/A (tracked across other tags) | Implemented 2026-02-06 |
+| [Structured Mapping Layer](024-structured-inbound-mapping.md) | `structured-mapping-layer` | 16/16 done |
 | [Valuation Service](011-valuation-service.md) | `valuation-engine` | 14/14 done |
 
 #### Paused (Deferred Items Remain)
