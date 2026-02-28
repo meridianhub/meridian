@@ -80,7 +80,7 @@ stateDiagram-v2
 | [Asset-Agnostic Accounts](028-asset-agnostic-accounts.md) | Generalize account fields for non-fiat asset classes |
 | [Meridian Edge](003-meridian-edge.md) | Embedded modular monolith for IoT devices and browser (WASM) |
 | [MCP Server](027-mcp-server.md) | Model Context Protocol server bridging LLMs to Meridian Core |
-| [Operational Gateway](029-operational-gateway.md) | Asset-agnostic control signal gateway for outbound instructions to external systems |
+| [Operational Gateway](029-operational-gateway.md) | Bidirectional asset-agnostic gateway for outbound instructions and inbound messages |
 
 ### Task Master PRDs (`.taskmaster/docs/`)
 

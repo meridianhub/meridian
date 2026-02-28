@@ -598,9 +598,10 @@ PENDING instructions (or consumes from a Kafka topic when enabled).
 This follows the same outbox-based pattern used across Meridian.
 
 **Idempotency**: The `instruction_id` serves as the idempotency key.
-If a provider supports idempotency keys (e.g., Stripe), the transform
-script includes it in the request. The gateway itself deduplicates
-on `instruction_id` — resubmitting the same instruction is a no-op.
+If a provider supports idempotency keys (e.g., Stripe), the outbound
+mapping includes it in the request payload. The gateway itself
+deduplicates on `instruction_id` — resubmitting the same instruction
+is a no-op.
 
 **Circuit Breaking**: Per-connection circuit breakers prevent a failing
 provider from consuming retry budget across all instruction types.
@@ -1043,8 +1044,9 @@ Two adapters implement this port:
   engine (`shared/pkg/mapping/` or gateway middleware). This is the
   default for 90%+ of integrations.
 - **`starlark_transformer.go`** — executes a Starlark script for
-  complex cases. Used only when the instruction route specifies
-  `transform_script` instead of `outbound_mapping`.
+  exceptional cases where MappingDefinition is insufficient. Used
+  only when the instruction route specifies `transform_script`
+  instead of `outbound_mapping`.
 
 The `secret_store.go` port defines secret resolution:
 
@@ -1059,8 +1061,11 @@ type SecretStore interface {
 
 Phase 1 adapter: `EnvVarSecretStore` — resolves `secret_ref` to
 `os.Getenv("TENANT_{TENANT_SLUG}_{SECRET_REF}")`, consistent with
-the current Stripe integration. Phase 2 introduces a Vault-backed
-adapter without changing the domain or dispatch logic.
+the current Stripe integration. Environment variables should be
+injected via Kubernetes Secrets (not plain env vars in deployment
+manifests) to maintain at-rest encryption and RBAC-scoped access.
+Phase 2 introduces a Vault-backed adapter without changing the
+domain or dispatch logic.
 
 #### Correlation Field Contract
 
@@ -1326,8 +1331,11 @@ recorded for debugging purposes.
 **Deliverables:**
 
 - Per-connection circuit breaker (shared state via Redis for
-  multi-pod consistency — local-only breakers allow N * threshold
-  failures before tripping, which can trigger provider rate limits)
+  multi-pod consistency — local-only breakers allow N × threshold
+  failures before tripping, which can trigger provider rate limits).
+  Redis is an infrastructure dependency introduced in Phase 2;
+  Phase 1 uses local-only breakers suitable for single-pod
+  deployments
 - Token bucket rate limiter
 - Provider health check worker (periodic probes, using the shared
   `platform/scheduler` package from PRD-021)
@@ -1500,7 +1508,7 @@ before adding more providers.
 | Bidirectional protocol adapters (MQTT, AMQP) | Phase 4 | IoT and message queue integration |
 | Recurring instruction scheduling | Post-MVP | Uses `platform/scheduler` (PRD-021) — same shared infrastructure as reconciliation settlement cycles and forecast generation |
 | Provider marketplace | Post-MVP | Pre-built connection templates for common providers |
-| AI-generated transform scripts | Post-MVP | LLM generates Starlark from provider API docs |
+| AI-generated mappings | Post-MVP | LLM generates MappingDefinitions from provider API docs |
 | Multi-region dispatch | Post-MVP | Route to geographically closest provider endpoint |
 | Instruction cost tracking | Post-MVP | Track API call costs per provider per tenant |
 | Dead letter queue with manual retry UI | Phase 3+ | Operations console integration for failed instructions |
