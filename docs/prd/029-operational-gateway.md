@@ -822,6 +822,84 @@ same callback handler — with tenant context injected via gRPC
 metadata and the standard `tenant.WithTenant(ctx, tenantID)`
 pattern used across all Meridian services.
 
+### 4.10 Runtime-Configurable Provider Integration
+
+The Operational Gateway requires **zero compiled code per
+provider**. New external system integrations are defined entirely
+at runtime through manifest configuration and MappingDefinitions,
+following the same principle that makes sagas (Starlark) and
+validations (CEL) runtime-configurable.
+
+**Every layer of the dispatch path is data-driven:**
+
+| Layer | Mechanism | Defined at |
+|-------|-----------|------------|
+| What to dispatch and when | Saga Starlark script | Manifest apply |
+| Where to dispatch | Instruction route config | Manifest apply |
+| How to authenticate | Connection auth config + SecretStore | Manifest apply |
+| How to shape the request | Outbound MappingDefinition (CEL + field correspondences) | Manifest apply |
+| The HTTP call itself | Generic: method + URL template + headers + body | No code — parameterised |
+| How to parse the response | Inbound MappingDefinition (reverse direction) | Manifest apply |
+| How to interpret success/failure | HTTP status code + response mapping | Manifest apply |
+
+A tenant adds a new provider — for example a carbon credit
+registry — by applying a manifest change. No deployment, no
+recompilation, no restart:
+
+```yaml
+provider_connections:
+  - connection_id: carbon-registry
+    base_url: https://api.goldstandard.org/v2
+    auth_method: BEARER_TOKEN
+    secret_ref: CARBON_REGISTRY_API_KEY
+    retry_policy: { max_attempts: 3, backoff_base_seconds: 2 }
+
+instruction_routes:
+  - instruction_type: carbon.retire
+    connection_id: carbon-registry
+    outbound_mapping: retire-credits-to-goldstandard
+    inbound_mapping: goldstandard-response-to-ack
+    http_method: POST
+    path_template: /credits/retire
+```
+
+**Consistency with the platform's runtime-configurable model:**
+
+| Concern | Runtime mechanism | Compiled code needed? |
+|---------|-------------------|-----------------------|
+| Workflow orchestration | Starlark sagas | No |
+| Transaction validation | CEL expressions | No |
+| Payload transformation | MappingDefinition + CEL | No |
+| Provider integration | Manifest config + MappingDefinition | No |
+
+This is the same design principle that makes Meridian
+AI-configurable: an LLM can generate a manifest that includes
+provider connections, routes, and mapping definitions — and the
+tenant has a working external integration without any code being
+written or deployed.
+
+**Where compiled code is still required** (platform extensions,
+not tenant code):
+
+- **Non-HTTP transport protocols** (gRPC, MQTT, SFTP) — Phase 4
+  adds protocol adapter plugins. These are compiled Go
+  implementations of the `Dispatcher` port interface, shipped as
+  part of the platform binary. A finite set of transport
+  mechanisms, not per-provider logic.
+- **Auth mechanism plugins** (OAuth2 token refresh, mTLS
+  certificate rotation) — Phase 2 adds auth flow implementations
+  as connection-level concerns. Again, a finite set of auth
+  patterns, not per-provider custom code.
+- **Starlark transform fallback** — For the rare provider whose
+  request construction exceeds MappingDefinition capabilities
+  (multi-part form uploads, conditional field inclusion based on
+  complex logic). Starlark scripts are runtime-defined, so even
+  this fallback path requires no compilation.
+
+The compiled surface area is intentionally small and grows with
+*protocol diversity* (HTTP, gRPC, MQTT), not with *provider
+count*. Adding 100 HTTP/JSON providers requires zero compiled code.
+
 ---
 
 ## 5. Design Pattern: Bidirectional Mapping Reuse
