@@ -80,6 +80,7 @@ stateDiagram-v2
 | [Asset-Agnostic Accounts](028-asset-agnostic-accounts.md) | Generalize account fields for non-fiat asset classes |
 | [Meridian Edge](003-meridian-edge.md) | Embedded modular monolith for IoT devices and browser (WASM) |
 | [MCP Server](027-mcp-server.md) | Model Context Protocol server bridging LLMs to Meridian Core |
+| [Operational Gateway](029-operational-gateway.md) | Asset-agnostic control signal gateway for outbound instructions to external systems |
 
 ### Task Master PRDs (`.taskmaster/docs/`)
 
@@ -219,6 +220,12 @@ material.
 ### Market Data & Pricing
 
 - [Market Data & Dynamic Pricing](016-market-data-dynamic-pricing.md) - Hierarchical reference data and Starlark-based forecasting
+
+### Integration & External Systems
+
+- [Operational Gateway](029-operational-gateway.md) - Asset-agnostic control signal gateway for outbound instructions
+- [Structured Mapping Layer](024-structured-inbound-mapping.md) - Bidirectional JSON mapping engine for data transformation
+- [Real-Time Event Streaming](025-real-time-event-streaming.md) - WebSocket event delivery for operations console
 
 ### Operations & SaaS
 
