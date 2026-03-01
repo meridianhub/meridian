@@ -185,7 +185,7 @@
                 },
                 "apiKeySecretRef": {
                     "type": "string",
-                    "description": "api_key_secret_ref is a reference to the secret store key that holds the API key value. Example: \"sm://stripe/api_key\" or \"env://STRIPE_API_KEY\""
+                    "description": "api_key_secret_ref is a reference to the secret store key that holds the API key value. Must use a supported secret URI scheme: \"sm://\u003cstore\u003e/\u003ckey\u003e\" or \"env://\u003cVAR_NAME\u003e\". Example: \"sm://stripe/api_key\" or \"env://STRIPE_API_KEY\""
                 }
             },
             "additionalProperties": false,
@@ -300,7 +300,7 @@
                 },
                 "passwordSecretRef": {
                     "type": "string",
-                    "description": "password_secret_ref is a reference to the secret store key that holds the password."
+                    "description": "password_secret_ref is a reference to the secret store key that holds the password. Must use a supported secret URI scheme: \"sm://\u003cstore\u003e/\u003ckey\u003e\" or \"env://\u003cVAR_NAME\u003e\"."
                 }
             },
             "additionalProperties": false,
@@ -321,7 +321,7 @@
                 },
                 "secretRef": {
                     "type": "string",
-                    "description": "secret_ref is a reference to the secret store key that holds the HMAC signing secret."
+                    "description": "secret_ref is a reference to the secret store key that holds the HMAC signing secret. Must use a supported secret URI scheme: \"sm://\u003cstore\u003e/\u003ckey\u003e\" or \"env://\u003cVAR_NAME\u003e\"."
                 },
                 "signatureHeader": {
                     "type": "string",
@@ -481,15 +481,15 @@
             "properties": {
                 "clientCertSecretRef": {
                     "type": "string",
-                    "description": "client_cert_secret_ref is a reference to the secret store key holding the PEM-encoded client certificate."
+                    "description": "client_cert_secret_ref is a reference to the secret store key holding the PEM-encoded client certificate. Must use a supported secret URI scheme: \"sm://\u003cstore\u003e/\u003ckey\u003e\" or \"env://\u003cVAR_NAME\u003e\"."
                 },
                 "clientKeySecretRef": {
                     "type": "string",
-                    "description": "client_key_secret_ref is a reference to the secret store key holding the PEM-encoded private key."
+                    "description": "client_key_secret_ref is a reference to the secret store key holding the PEM-encoded private key. Must use a supported secret URI scheme: \"sm://\u003cstore\u003e/\u003ckey\u003e\" or \"env://\u003cVAR_NAME\u003e\"."
                 },
                 "caCertSecretRef": {
                     "type": "string",
-                    "description": "ca_cert_secret_ref is an optional reference to the secret store key holding the CA certificate for verifying the provider's server certificate."
+                    "description": "ca_cert_secret_ref is an optional reference to the secret store key holding the CA certificate for verifying the provider's server certificate. If set, must use a supported secret URI scheme: \"sm://\u003cstore\u003e/\u003ckey\u003e\" or \"env://\u003cVAR_NAME\u003e\"."
                 }
             },
             "additionalProperties": false,
@@ -540,7 +540,7 @@
                 },
                 "clientSecretRef": {
                     "type": "string",
-                    "description": "client_secret_ref is a reference to the secret store key that holds the client secret."
+                    "description": "client_secret_ref is a reference to the secret store key that holds the client secret. Must use a supported secret URI scheme: \"sm://\u003cstore\u003e/\u003ckey\u003e\" or \"env://\u003cVAR_NAME\u003e\"."
                 },
                 "scopes": {
                     "items": {

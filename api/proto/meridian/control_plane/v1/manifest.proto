@@ -490,10 +490,12 @@ message ApiKeyAuthConfig {
   }];
 
   // api_key_secret_ref is a reference to the secret store key that holds the API key value.
+  // Must use a supported secret URI scheme: "sm://<store>/<key>" or "env://<VAR_NAME>".
   // Example: "sm://stripe/api_key" or "env://STRIPE_API_KEY"
   string api_key_secret_ref = 2 [(buf.validate.field).string = {
     min_len: 1
     max_len: 512
+    pattern: "^(sm|env)://.+$"
   }];
 }
 
@@ -507,9 +509,11 @@ message BasicAuthConfig {
   }];
 
   // password_secret_ref is a reference to the secret store key that holds the password.
+  // Must use a supported secret URI scheme: "sm://<store>/<key>" or "env://<VAR_NAME>".
   string password_secret_ref = 2 [(buf.validate.field).string = {
     min_len: 1
     max_len: 512
+    pattern: "^(sm|env)://.+$"
   }];
 }
 
@@ -530,9 +534,11 @@ message OAuth2AuthConfig {
   }];
 
   // client_secret_ref is a reference to the secret store key that holds the client secret.
+  // Must use a supported secret URI scheme: "sm://<store>/<key>" or "env://<VAR_NAME>".
   string client_secret_ref = 3 [(buf.validate.field).string = {
     min_len: 1
     max_len: 512
+    pattern: "^(sm|env)://.+$"
   }];
 
   // scopes lists the OAuth 2.0 scopes to request.
@@ -555,9 +561,11 @@ message HMACAuthConfig {
   }];
 
   // secret_ref is a reference to the secret store key that holds the HMAC signing secret.
+  // Must use a supported secret URI scheme: "sm://<store>/<key>" or "env://<VAR_NAME>".
   string secret_ref = 2 [(buf.validate.field).string = {
     min_len: 1
     max_len: 512
+    pattern: "^(sm|env)://.+$"
   }];
 
   // signature_header is the HTTP header where the computed signature is placed.
@@ -572,20 +580,28 @@ message HMACAuthConfig {
 // All sensitive values are expressed as secret references, never raw values.
 message MTLSAuthConfig {
   // client_cert_secret_ref is a reference to the secret store key holding the PEM-encoded client certificate.
+  // Must use a supported secret URI scheme: "sm://<store>/<key>" or "env://<VAR_NAME>".
   string client_cert_secret_ref = 1 [(buf.validate.field).string = {
     min_len: 1
     max_len: 512
+    pattern: "^(sm|env)://.+$"
   }];
 
   // client_key_secret_ref is a reference to the secret store key holding the PEM-encoded private key.
+  // Must use a supported secret URI scheme: "sm://<store>/<key>" or "env://<VAR_NAME>".
   string client_key_secret_ref = 2 [(buf.validate.field).string = {
     min_len: 1
     max_len: 512
+    pattern: "^(sm|env)://.+$"
   }];
 
   // ca_cert_secret_ref is an optional reference to the secret store key holding the CA certificate
   // for verifying the provider's server certificate.
-  string ca_cert_secret_ref = 3 [(buf.validate.field).string.max_len = 512];
+  // If set, must use a supported secret URI scheme: "sm://<store>/<key>" or "env://<VAR_NAME>".
+  string ca_cert_secret_ref = 3 [(buf.validate.field).string = {
+    max_len: 512
+    pattern: "^$|^(sm|env)://.+$"
+  }];
 }
 
 // AuthConfigManifest defines the authentication configuration for a provider connection.
