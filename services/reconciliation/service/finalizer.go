@@ -55,6 +55,24 @@ type PositionLockRequestedEvent struct {
 	Status      string `json:"status"`
 }
 
+// GetRunID returns the run ID for outbox event routing.
+func (e PositionLockRequestedEvent) GetRunID() string { return e.RunID }
+
+// GetAccountID returns the account ID for outbox event routing.
+func (e PositionLockRequestedEvent) GetAccountID() string { return e.AccountID }
+
+// GetScope returns the scope for outbox event routing.
+func (e PositionLockRequestedEvent) GetScope() string { return e.Scope }
+
+// GetPeriodStart returns the period start for outbox event routing.
+func (e PositionLockRequestedEvent) GetPeriodStart() string { return e.PeriodStart }
+
+// GetPeriodEnd returns the period end for outbox event routing.
+func (e PositionLockRequestedEvent) GetPeriodEnd() string { return e.PeriodEnd }
+
+// GetStatus returns the status for outbox event routing.
+func (e PositionLockRequestedEvent) GetStatus() string { return e.Status }
+
 // SettlementFinalizer handles the finalization of settlement runs by acquiring
 // position locks from Position Keeping and transitioning the run to FINALIZED state.
 type SettlementFinalizer struct {
