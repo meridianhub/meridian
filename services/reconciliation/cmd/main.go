@@ -23,6 +23,9 @@ import (
 	"github.com/meridianhub/meridian/services/reconciliation/worker"
 	"github.com/meridianhub/meridian/shared/pkg/health"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
+	"github.com/meridianhub/meridian/shared/platform/env"
+	"github.com/meridianhub/meridian/shared/platform/events"
+	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/meridianhub/meridian/shared/platform/redislock"
 	"github.com/meridianhub/meridian/shared/platform/scheduler"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -106,24 +109,43 @@ func run(logger *slog.Logger) error {
 
 	logger.Info("database connection established")
 
-	// Wire event publisher based on Kafka configuration
-	var eventPublisher service.EventPublisher
-	if cfg.Kafka.Enabled {
-		kafkaPub, kafkaErr := messaging.NewKafkaPublisher(cfg.Kafka.Brokers, logger)
-		if kafkaErr != nil {
-			return fmt.Errorf("failed to create kafka publisher: %w", kafkaErr)
-		}
-		eventPublisher = kafkaPub
-		logger.Info("kafka publisher configured", "brokers", cfg.Kafka.Brokers)
-	} else {
-		eventPublisher = messaging.NewNoopPublisher(logger)
-		logger.Info("noop publisher configured (kafka disabled)")
+	// Initialize outbox publisher and worker for transactional event publishing
+	outboxRepo := events.NewPostgresOutboxRepository(db)
+	outboxPublisher := events.NewOutboxPublisher("reconciliation")
+
+	var outboxWorker *events.Worker
+	var kafkaProducer *kafka.ProtoProducer
+	bootstrapServers := env.GetEnvOrDefault("KAFKA_BOOTSTRAP_SERVERS", "")
+	if bootstrapServers == "" && cfg.Kafka.Enabled {
+		bootstrapServers = cfg.Kafka.Brokers
 	}
-	defer func() {
-		if closer, ok := eventPublisher.(interface{ Close() }); ok {
-			closer.Close()
+	if bootstrapServers != "" {
+		producer, kafkaErr := kafka.NewProtoProducer(kafka.ProducerConfig{
+			BootstrapServers: bootstrapServers,
+			ClientID:         "reconciliation-outbox-worker",
+			Acks:             "all",
+			Retries:          3,
+			Compression:      "snappy",
+		})
+		if kafkaErr != nil {
+			logger.Warn("failed to create Kafka producer for outbox worker",
+				"error", kafkaErr)
+		} else {
+			kafkaProducer = producer
+			defer kafkaProducer.Close()
+			workerConfig := events.DefaultWorkerConfig("reconciliation")
+			outboxWorker = events.NewWorker(outboxRepo, kafkaProducer, workerConfig, logger)
+			outboxWorker.Start(ctx)
+			defer outboxWorker.Stop()
+			logger.Info("outbox worker started",
+				"bootstrap_servers", bootstrapServers)
 		}
-	}()
+	} else {
+		logger.Warn("outbox worker disabled - KAFKA_BOOTSTRAP_SERVERS not set")
+	}
+
+	// Create outbox-based event publisher (replaces KafkaPublisher/NoopPublisher)
+	eventPublisher := messaging.NewOutboxEventPublisher(db, outboxPublisher)
 
 	// Instantiate persistence repositories
 	runRepo := persistence.NewSettlementRunRepository(db)
@@ -353,6 +375,8 @@ func run(logger *slog.Logger) error {
 		cronScheduler.Stop()
 		logger.Info("settlement scheduler stopped")
 	}
+
+	// Outbox worker and Kafka producer are cleaned up via defer.
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.Server.GracefulShutdownTimeout)
 	defer cancel()

@@ -76,11 +76,18 @@ services:
   financial-accounting:
     description: Financial booking log control events
     topics:
-      - name: financial-accounting.booking-log.controlled
-        constant: FinancialAccountingBookingLogControlled
+      - name: financial-accounting.booking-log-controlled.v1
+        constant: FinancialAccountingBookingLogControlledV1
         description: Published when a booking log receives a control action (SUSPEND, RESUME, TERMINATE)
         event_type: financial_accounting.booking_log_controlled.v1
         proto_message: BookingLogControlledEvent
+
+      - name: financial-accounting.booking-log.controlled
+        constant: FinancialAccountingBookingLogControlled
+        description: Legacy topic for booking log control events (deprecated, retained for dual-publish)
+        event_type: financial_accounting.booking_log_controlled.v1
+        proto_message: BookingLogControlledEvent
+        deprecated: true
         legacy_naming: true
 
   market-information:

@@ -41,6 +41,24 @@ type DisputeCreatedEvent struct {
 	RaisedBy   string `json:"raised_by"`
 }
 
+// GetDisputeID returns the dispute ID for outbox event routing.
+func (e DisputeCreatedEvent) GetDisputeID() string { return e.DisputeID }
+
+// GetVarianceID returns the variance ID for outbox event routing.
+func (e DisputeCreatedEvent) GetVarianceID() string { return e.VarianceID }
+
+// GetRunID returns the run ID for outbox event routing.
+func (e DisputeCreatedEvent) GetRunID() string { return e.RunID }
+
+// GetAccountID returns the account ID for outbox event routing.
+func (e DisputeCreatedEvent) GetAccountID() string { return e.AccountID }
+
+// GetReason returns the dispute reason for outbox event routing.
+func (e DisputeCreatedEvent) GetReason() string { return e.Reason }
+
+// GetRaisedBy returns who raised the dispute for outbox event routing.
+func (e DisputeCreatedEvent) GetRaisedBy() string { return e.RaisedBy }
+
 // DisputeResolvedEvent is published when a dispute is resolved.
 type DisputeResolvedEvent struct {
 	DisputeID  string `json:"dispute_id"`
@@ -51,6 +69,27 @@ type DisputeResolvedEvent struct {
 	Resolution string `json:"resolution"`
 	ResolvedBy string `json:"resolved_by"`
 }
+
+// GetDisputeID returns the dispute ID for outbox event routing.
+func (e DisputeResolvedEvent) GetDisputeID() string { return e.DisputeID }
+
+// GetVarianceID returns the variance ID for outbox event routing.
+func (e DisputeResolvedEvent) GetVarianceID() string { return e.VarianceID }
+
+// GetRunID returns the run ID for outbox event routing.
+func (e DisputeResolvedEvent) GetRunID() string { return e.RunID }
+
+// GetAccountID returns the account ID for outbox event routing.
+func (e DisputeResolvedEvent) GetAccountID() string { return e.AccountID }
+
+// GetAction returns the dispute action for outbox event routing.
+func (e DisputeResolvedEvent) GetAction() string { return e.Action }
+
+// GetResolution returns the resolution for outbox event routing.
+func (e DisputeResolvedEvent) GetResolution() string { return e.Resolution }
+
+// GetResolvedBy returns who resolved the dispute for outbox event routing.
+func (e DisputeResolvedEvent) GetResolvedBy() string { return e.ResolvedBy }
 
 // InitiateDispute raises a formal dispute against a variance.
 func (s *AccountReconciliationService) InitiateDispute(

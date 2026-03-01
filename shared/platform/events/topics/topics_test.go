@@ -69,8 +69,9 @@ type serviceEntry struct {
 }
 
 type topicEntry struct {
-	Name     string `yaml:"name"`
-	Constant string `yaml:"constant"`
+	Name       string `yaml:"name"`
+	Constant   string `yaml:"constant"`
+	Deprecated bool   `yaml:"deprecated"`
 }
 
 func loadTopicsYAML(t *testing.T) topicsYAML {
@@ -116,11 +117,11 @@ func TestTopicsYAML_NoEmptyTopicNames(t *testing.T) {
 func TestTopicsYAML_ConsistentWithGoConstants(t *testing.T) {
 	parsed := loadTopicsYAML(t)
 
-	// Collect all topic names declared in topics.yaml.
+	// Collect all non-deprecated topic names declared in topics.yaml.
 	yamlTopics := make(map[string]bool)
 	for _, entry := range parsed.Services {
 		for _, topic := range entry.Topics {
-			if topic.Name != "" {
+			if topic.Name != "" && !topic.Deprecated {
 				yamlTopics[topic.Name] = true
 			}
 		}
@@ -174,7 +175,7 @@ func TestAll_ContainsAllConstants(t *testing.T) {
 		topics.CurrentAccountAccountUnfrozenV1,
 		topics.CurrentAccountAccountClosedV1,
 		topics.CurrentAccountWithdrawalStatusV1,
-		topics.FinancialAccountingBookingLogControlled,
+		topics.FinancialAccountingBookingLogControlledV1,
 		topics.MarketInformationObservationRecordedV1,
 		topics.PaymentOrderInitiatedV1,
 		topics.PaymentOrderReservedV1,

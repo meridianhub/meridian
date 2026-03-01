@@ -195,7 +195,7 @@ func (s *FinancialAccountingService) ControlFinancialBookingLog(
 			Version:        1,
 		}
 
-		eventTopic := topics.FinancialAccountingBookingLogControlled
+		// Publish to canonical v1 topic
 		if err := s.outboxPublisher.PublishControlEvent(
 			ctx,
 			tx,
@@ -203,10 +203,26 @@ func (s *FinancialAccountingService) ControlFinancialBookingLog(
 			"financial_accounting.booking_log_controlled.v1",
 			bookingLogID.String(),
 			"FinancialBookingLog",
-			eventTopic,
+			topics.FinancialAccountingBookingLogControlledV1,
 			correlationID,
 		); err != nil {
 			return fmt.Errorf("failed to write event to outbox: %w", err)
+		}
+
+		// Dual-publish to legacy topic for backwards compatibility during migration.
+		//nolint:staticcheck // SA1019: intentional use of deprecated topic for dual-publish
+		legacyTopic := topics.FinancialAccountingBookingLogControlled
+		if err := s.outboxPublisher.PublishControlEvent(
+			ctx,
+			tx,
+			controlEvent,
+			"financial_accounting.booking_log_controlled.v1",
+			bookingLogID.String(),
+			"FinancialBookingLog",
+			legacyTopic,
+			correlationID,
+		); err != nil {
+			return fmt.Errorf("failed to write legacy event to outbox: %w", err)
 		}
 
 		return nil

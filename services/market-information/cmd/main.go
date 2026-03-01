@@ -23,6 +23,8 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
+	"github.com/meridianhub/meridian/shared/platform/events"
+	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/meridianhub/meridian/shared/platform/ports"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -92,6 +94,52 @@ func run(logger *slog.Logger) error {
 	}
 	logger.Info("database connection established", "url", dbURL)
 
+	// Initialize GORM database connection for outbox pattern.
+	// The existing pgxpool connection is retained for domain persistence operations.
+	gormDBConfig := bootstrap.DefaultDatabaseConfig()
+	gormDBConfig.DSN = dbURL
+	gormDBConfig.Logger = logger
+	gormDB, err := bootstrap.NewDatabase(ctx, gormDBConfig)
+	if err != nil {
+		return fmt.Errorf("failed to initialize GORM database for outbox: %w", err)
+	}
+	defer bootstrap.CloseDatabase(gormDB, logger)
+
+	// Initialize outbox publisher and worker for transactional event publishing
+	outboxRepo := events.NewPostgresOutboxRepository(gormDB)
+	outboxPublisher := events.NewOutboxPublisher("market-information")
+
+	var outboxWorker *events.Worker
+	var kafkaProducer *kafka.ProtoProducer
+	bootstrapServers := env.GetEnvOrDefault("KAFKA_BOOTSTRAP_SERVERS", "")
+	if bootstrapServers != "" {
+		producer, kafkaErr := kafka.NewProtoProducer(kafka.ProducerConfig{
+			BootstrapServers: bootstrapServers,
+			ClientID:         "market-information-outbox-worker",
+			Acks:             "all",
+			Retries:          3,
+			Compression:      "snappy",
+		})
+		if kafkaErr != nil {
+			logger.Warn("failed to create Kafka producer for outbox worker",
+				"error", kafkaErr)
+		} else {
+			kafkaProducer = producer
+			defer kafkaProducer.Close()
+			workerConfig := events.DefaultWorkerConfig("market-information")
+			outboxWorker = events.NewWorker(outboxRepo, kafkaProducer, workerConfig, logger)
+			outboxWorker.Start(ctx)
+			defer outboxWorker.Stop()
+			logger.Info("outbox worker started",
+				"bootstrap_servers", bootstrapServers)
+		}
+	} else {
+		logger.Warn("outbox worker disabled - KAFKA_BOOTSTRAP_SERVERS not set")
+	}
+
+	// Create outbox-based event publisher (replaces KafkaObservationPublisher)
+	outboxEventPublisher := service.NewOutboxEventPublisher(gormDB, outboxPublisher)
+
 	// Create repositories for persistence
 	masterTenantID := env.GetEnvOrDefault("MASTER_TENANT_ID", "meridian_master")
 	repos := persistence.NewRepositories(dbPool, masterTenantID)
@@ -102,6 +150,7 @@ func run(logger *slog.Logger) error {
 		repos.DataSet,
 		repos.Observation,
 		repos.Source,
+		service.WithEventPublisher(outboxEventPublisher),
 		service.WithLogger(logger.With("component", "market_information_server")),
 	)
 	if err != nil {
@@ -223,6 +272,8 @@ func run(logger *slog.Logger) error {
 
 	// Wait for shutdown signal and orchestrate graceful shutdown
 	orchestrator := bootstrap.NewShutdownOrchestrator(grpcServer, logger)
+
+	// Outbox worker and Kafka producer are cleaned up via defer.
 
 	// Initialize ECB adapter worker (if enabled)
 	// Note: The ECB worker calls RecordObservation on the Server to ingest FX rates.
