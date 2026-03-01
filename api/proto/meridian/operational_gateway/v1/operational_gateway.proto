@@ -272,9 +272,11 @@ message BasicAuth {
 // The gateway manages token acquisition and refresh automatically.
 message OAuth2Auth {
   // token_url is the OAuth 2.0 token endpoint.
+  // Must be a valid URI (e.g., "https://auth.example.com/token").
   string token_url = 1 [(buf.validate.field).string = {
     min_len: 1
     max_len: 2048
+    uri: true
   }];
 
   // client_id is the OAuth 2.0 client identifier.
@@ -372,14 +374,15 @@ message ProviderConnection {
   }];
 
   // base_url is the root URL of the provider's API endpoint.
-  // Example: "https://api.stripe.com", "https://api.modulrfinance.com"
+  // Must be a valid URI. Example: "https://api.stripe.com", "https://api.modulrfinance.com"
   string base_url = 6 [(buf.validate.field).string = {
     min_len: 1
     max_len: 2048
+    uri: true
   }];
 
   // auth_config defines the authentication method for this connection.
-  // Exactly one authentication variant must be set.
+  // Exactly one authentication variant must be set (enforced at the Go service layer).
   oneof auth_config {
     // api_key authenticates using a static API key in a header.
     ApiKeyAuth api_key = 7;
@@ -589,7 +592,16 @@ message ListInstructionsResponse {
 
 // ProcessCallbackRequest handles an inbound callback from a provider.
 // Callbacks acknowledge that the provider has processed a previously dispatched instruction.
+//
+// Cross-field validation: at least one of instruction_id or provider_reference must be provided.
+// This is enforced by the message-level CEL rule below.
 message ProcessCallbackRequest {
+  option (buf.validate.message).cel = {
+    id: "process_callback_requires_lookup_key"
+    message: "at least one of instruction_id or provider_reference must be provided"
+    expression: "this.instruction_id != '' || this.provider_reference != ''"
+  };
+
   // instruction_id is the instruction this callback relates to (UUID).
   // At least one of instruction_id or provider_reference must be provided.
   string instruction_id = 1 [(buf.validate.field).string = {
@@ -638,12 +650,15 @@ message UpsertConnectionRequest {
   }];
 
   // base_url is the root URL of the provider's API endpoint.
+  // Must be a valid URI. Example: "https://api.stripe.com"
   string base_url = 4 [(buf.validate.field).string = {
     min_len: 1
     max_len: 2048
+    uri: true
   }];
 
   // auth_config defines the authentication method for this connection.
+  // Exactly one authentication variant must be set (enforced at the Go service layer).
   oneof auth_config {
     // api_key authenticates using a static API key in a header.
     ApiKeyAuth api_key = 5;
