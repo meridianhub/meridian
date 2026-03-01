@@ -1,6 +1,9 @@
 ---
 name: prd-identity-access-management
-description: Bridge Party service identity (KYC) to authentication and authorization with dynamic user management, role assignment, and multi-level access control
+description: >-
+  Extend Party service with Identity and RoleAssignment business qualifiers
+  for dynamic user management, role assignment, and multi-level access control.
+  Dex as sole OIDC provider across all environments.
 triggers:
   - Working on authentication, authorization, or access control
   - Implementing user management, invitation flows, or role assignment
@@ -11,34 +14,37 @@ triggers:
 instructions: |
   The Party service handles two distinct access control concerns:
 
-  1. Customer Access Control (KYC path) — Party.Individual + verification providers
+  1. Customer Access Control (KYC path) — Party.Individual + verification
      - Handled by: Party service (ExchangeDemographics RPC, verification adapters)
      - PRD: 020-party-kyc-aml-provider-integration
      - Purpose: Verify customer identity for regulatory compliance
 
-  2. Staff/Operator Access Control (IAM path) — Identity + RoleAssignment + JWT claims
-     - Handled by: Identity service (this PRD, 030)
+  2. Staff/Operator Access Control (IAM path) — Identity + RoleAssignment
+     - Handled by: Party service (new business qualifiers, this PRD 030)
      - Purpose: Authenticate staff, assign roles, populate JWT claims
+     - Dex issues JWTs; Party service owns user CRUD and credentials
 
   Both paths create Party.Individual records, but serve different purposes:
   - KYC path: "Is this person who they claim to be?" (regulatory)
   - IAM path: "Can this person log in, and what can they do?" (operational)
 
   Key files:
+  - services/party/ (Identity + RoleAssignment added here)
   - shared/platform/auth/rbac.go (existing RBAC framework)
   - shared/platform/auth/grpc_interceptor.go (JWT validation + tenant context)
   - shared/platform/auth/jwt.go (Claims structure)
   - services/gateway/auth/ (HTTP auth middleware)
   - deploy/demo/dex.yaml (static users to be replaced)
 
-  The Identity service lives in the public schema (cross-tenant) because
-  users may have roles in multiple tenants. Party data remains tenant-scoped.
+  Identity and RoleAssignment tables live in the public schema (cross-tenant)
+  because users may have roles in multiple tenants. Party data remains
+  tenant-scoped. Dex is the sole OIDC provider (no Keycloak).
 ---
 
 # PRD 030: Identity and Access Management
 
 **Status:** Not Started
-**Version:** 1.0
+**Version:** 2.0
 **Date:** 2026-03-01
 **Author:** Architecture Team
 **Task Master Tag:** TBD
@@ -50,15 +56,19 @@ instructions: |
 
 **Related PRDs:**
 
-- [020 - Party KYC/AML Provider Integration](020-party-kyc-aml-provider-integration.md) — Customer-facing identity verification
-- [Multi-Tenancy](.taskmaster/docs/prd-multi-tenancy.md) — Tenant provisioning and isolation
+<!-- markdownlint-disable MD013 -->
+
+- [020 - Party KYC/AML Provider Integration](020-party-kyc-aml-provider-integration.md) —
+  Customer-facing identity verification
+
+<!-- markdownlint-enable MD013 -->
 
 ---
 
 ## The Two Access Control Concerns
 
-The Party service sits at the intersection of two distinct access control problems.
-Understanding this separation is essential to this PRD.
+The Party service handles two distinct access control problems. Both live
+within the Party domain but serve different purposes.
 
 ### Concern 1: Customer Access Control (KYC Path)
 
@@ -85,47 +95,48 @@ Customer → Party.Individual → KYC Provider (Onfido/Stripe Identity)
 This is the gap that this PRD addresses:
 
 ```text
-Staff member → Identity (email + credentials) → JWT (tenant + roles)
+Staff member → Party.Identity (email + credentials)
+  → Dex validates via gRPC connector → JWT (tenant + roles)
   → RBAC enforcement → Access granted/denied
 ```
 
 - **Operational requirement** — control who can operate the system
 - **Cross-tenant** — a user may have roles in multiple tenants
-- **Handled by:** New Identity service (this PRD)
+- **Handled by:** Party service (new Identity + RoleAssignment qualifiers)
 - **Data lives in:** public schema (cross-tenant)
 
 ### How They Connect
 
-Both concerns create `Party.Individual` records, but for different reasons:
+Both concerns anchor to `Party.Individual`, but as different business
+qualifiers — just like Demographics, References, and BankRelation:
 
 ```text
-                    Party.Individual
-                   /                \
-    KYC Path (PRD 020)        IAM Path (PRD 030)
-    "Verify identity"         "Grant system access"
-    Tenant-scoped             Cross-tenant
-    Regulatory                Operational
-    Async (days)              Sync (seconds)
-    External providers        Internal credentials
+Party.Individual
+  ├── Demographics    (employment, income, education)
+  ├── Reference       (passport, driver's license)
+  ├── BankRelation    (account officer, branch)
+  ├── Verification    (KYC result — PRD 020)
+  ├── Identity        (login credentials — PRD 030)   ← NEW
+  └── RoleAssignment  (tenant + role grants — PRD 030) ← NEW
 ```
 
 A staff member who is also a customer of the same tenant has:
 
 - One Party.Individual (their identity)
-- One KYC verification record (customer compliance)
-- One Identity record (login credentials)
-- One or more RoleAssignments (what they can do)
+- One Verification record (KYC compliance — PRD 020)
+- One Identity record (login credentials — PRD 030)
+- One or more RoleAssignments (what they can do — PRD 030)
 
 ---
 
 ## Problem Statement
 
-Meridian has two halves of an access control system that don't talk to each other:
+Meridian has two halves of an access control system that don't connect:
 
 **What exists and works well:**
 
 - JWT validation, JWKS key rotation, gRPC/HTTP interceptors
-- RBAC framework (admin, operator, auditor, service roles with permission matrix)
+- RBAC framework (admin, operator, auditor, service roles + permission matrix)
 - Schema-based multi-tenant isolation with subdomain-hopping prevention
 - Party service with Organization, Individual, KYC verification, references
 - Tenant service with provisioning, lifecycle, Party.Organization linkage
@@ -140,11 +151,14 @@ Meridian has two halves of an access control system that don't talk to each othe
 - No self-service: tenants can't manage their own users
 - Roles come from JWT claims, but nothing populates those claims dynamically
 
-**The result:** A fully-featured authorization enforcement layer with no way to actually manage who is authorized.
+**The result:** A fully-featured authorization enforcement layer with no way
+to actually manage who is authorized.
 
 ## Access Control Levels
 
 Meridian requires four distinct access tiers:
+
+<!-- markdownlint-disable MD013 -->
 
 | Level | Name | Scope | Who | Role |
 |-------|------|-------|-----|------|
@@ -153,12 +167,43 @@ Meridian requires four distinct access tiers:
 | 2 | Tenant Administrator | Single tenant | Staff appointed by tenant owner | `admin` |
 | 3 | Tenant User | Single tenant, restricted | Customers onboarded by tenant | `operator`, `auditor`, custom |
 
-**Level 0** can create/suspend tenants, apply platform manifests, view cross-tenant metrics.
-**Level 1** can manage tenant admins, view billing, apply tenant manifests, access all tenant data.
-**Level 2** can manage users, configure account types, run operations, view audit trails.
-**Level 3** can view own accounts, initiate transactions, complete KYC.
+<!-- markdownlint-enable MD013 -->
 
-## Architecture Context
+**Level 0** creates/suspends tenants, applies platform manifests,
+views cross-tenant metrics.
+**Level 1** manages tenant admins, views billing, applies tenant manifests.
+**Level 2** manages users, configures account types, runs operations.
+**Level 3** views own accounts, initiates transactions, completes KYC.
+
+## Architecture
+
+### OIDC Provider: Dex Everywhere
+
+**Decision:** Dex is the sole OIDC provider across all environments.
+Keycloak is removed entirely.
+
+| Responsibility | Owner |
+|---------------|-------|
+| User CRUD (create, invite, suspend) | Party service |
+| Password storage + validation | Party service |
+| Role assignment | Party service (RoleAssignment table) |
+| JWT issuance + signing | Dex |
+| JWKS endpoint + key rotation | Dex |
+| Federation (upstream IdPs) | Dex connectors |
+| Admin UI for user management | Meridian frontend (future) |
+
+**Why not Keycloak?** Once Identity management lives in the Party service,
+Keycloak becomes a ~500MB middleman duplicating what Meridian already owns.
+Dex does the one thing needed externally — issue and sign JWTs — at ~20MB.
+Dex is also what Kubernetes itself uses for OIDC.
+
+**Environment parity:**
+
+| Environment | OIDC Provider | Auth Enabled | Users |
+|-------------|--------------|:---:|-------|
+| Local (Tilt) | Dex | Yes | Dev users from dex.yaml |
+| Demo | Dex | Yes | Bootstrap from env vars |
+| Production | Dex | Yes | Dynamic via Party service |
 
 ### Current Authentication Flow (Demo)
 
@@ -170,84 +215,63 @@ User → Dex (static password check) → JWT (sub, email, name)
 ```
 
 **Problem:** `DEFAULT_TENANT_ID` and `DEFAULT_ROLES` are env vars.
-Every user gets the same tenant and same roles. No per-user differentiation.
+Every user gets the same tenant and same roles.
 
 ### Target Authentication Flow
 
 ```text
-User → Dex (connector → Meridian Identity Service)
-  → JWT (sub, email, x-tenant-id, roles)
+User → Dex (gRPC connector → Party service)
+  → Party validates credentials, looks up RoleAssignments
+  → Dex issues JWT (sub, email, x-tenant-id, roles)
   → Gateway validates JWT (no defaults needed)
   → Interceptor injects claims into context
   → RBAC enforcement (unchanged)
 ```
 
-Or, for production deployments with external IdPs:
+For production with external IdPs:
 
 ```text
-User → External IdP (Auth0, Okta, Google Workspace)
-  → Meridian Token Exchange enriches token with tenant + roles
+User → Dex (upstream connector → Auth0/Okta/Google)
+  → Dex calls Party service to enrich claims
   → JWT (sub, email, x-tenant-id, roles)
   → Gateway validates JWT
   → RBAC enforcement (unchanged)
 ```
 
+No separate Token Exchange service needed — Dex's connector model
+handles federation natively.
+
 ### BIAN Alignment
 
-BIAN defines a **Party Authentication** service domain for verifying party
-identity for access control:
+BIAN defines a **Party Authentication** service domain. Identity and
+RoleAssignment fit naturally as Party business qualifiers, consistent
+with how Demographics, References, and Verification already work:
 
 | Meridian Concept | BIAN Mapping |
 |-----------------|--------------|
 | Identity (login credentials) | Party Authentication Assessment |
-| Role Assignment | Party Role / Access Right |
+| RoleAssignment | Party Role / Access Right |
 | Session/Token | Authentication Token |
 | Password reset | Authentication Maintenance |
 
-### Local Development: Keycloak vs Dex Mismatch
-
-The local Tilt environment deploys **Keycloak** (v26.0, ~500MB RAM) as its OIDC
-provider, but keeps `AUTH_ENABLED=false` by default — meaning it's running but
-never exercised. The demo environment uses **Dex** (~20MB RAM) with static users
-and `AUTH_ENABLED=true`.
-
-This creates two problems:
-
-1. **Environment divergence**: Different OIDC providers means JWT claim formats,
-   token endpoints, and JWKS paths differ between local and demo
-2. **Auth is never tested locally**: Developers only discover auth issues when
-   deploying to demo
-
-**Recommendation:** Replace Keycloak with Dex in Tilt to match the demo stack.
-Dex is 25x lighter and aligns environments. Enable `AUTH_ENABLED=true` by
-default so auth code is always exercised locally.
-
-```yaml
-# Replace Keycloak deployment with Dex
-# Tilt: deploy/local/dex.yaml (~20MB vs ~500MB for Keycloak)
-# Reuse deploy/demo/dex.yaml as base, add local dev users
-```
-
-This is a prerequisite for Phase 1 — the Dex gRPC connector must be testable locally.
-
 ## Core Features
 
-### 1. Identity Entity — The Party-to-Login Bridge
+### 1. Identity — Party Business Qualifier
 
-Links a Party.Individual to authentication credentials. A Party represents a
-business entity (KYC, demographics, references). An Identity represents
-"this party can authenticate."
+Links a Party.Individual to authentication credentials, just as
+Demographics links to employment history or Reference links to
+identity documents.
 
 ```go
 type Identity struct {
     ID             uuid.UUID
-    PartyID        uuid.UUID       // FK to Party.Individual (nullable until KYC)
-    TenantID       tenant.TenantID
+    PartyID        uuid.UUID       // FK to Party.Individual
+    TenantID       tenant.TenantID // nullable for platform admins
     Email          string          // Login identifier (unique per tenant)
     PasswordHash   string          // bcrypt (Meridian-managed auth)
-    ExternalIDPSub string          // Subject from external IdP (federated auth)
-    ExternalIDP    string          // IdP name ("google", "auth0", "okta")
-    Status         IdentityStatus  // ACTIVE, PENDING_INVITE, SUSPENDED, LOCKED, DEPROVISIONED
+    ExternalIDPSub string          // Subject from external IdP
+    ExternalIDP    string          // "google", "auth0", "okta"
+    Status         IdentityStatus  // ACTIVE, PENDING_INVITE, etc.
     LastLoginAt    *time.Time
     FailedAttempts int
     LockedUntil    *time.Time
@@ -262,12 +286,22 @@ type Identity struct {
 
 - One Party.Individual can have at most one Identity per tenant
 - Email unique within a tenant (can exist across tenants)
-- Password-based and federated auth are mutually exclusive per identity
-- Identity can exist without a Party (invite flow — Party created during KYC)
+- Password-based and federated auth are mutually exclusive
+- Identity can exist without a Party (invite flow — Party created on accept)
 
-### 2. Role Assignment — Dynamic Authorization
+**Why in Party service, not a separate service:**
 
-Stores which roles a user has within which tenant. Replaces the static `DEFAULT_ROLES` mechanism.
+- **Same domain**: Identity is a Party business qualifier, like Demographics
+- **Simpler deployment**: No additional service to operate
+- **Shared context**: Party already has the Individual, Verification, and
+  Reference entities that Identity relates to
+- **Cross-tenant data**: The `identity` table lives in the public schema
+  (same pattern as the `tenant` table in the Tenant service)
+
+### 2. RoleAssignment — Dynamic Authorization
+
+Stores which roles a user has within which tenant. Replaces the static
+`DEFAULT_ROLES` mechanism.
 
 ```go
 type RoleAssignment struct {
@@ -296,29 +330,32 @@ auditor        → can grant: (nothing)
 
 Role changes take effect at next token refresh (not mid-session).
 
-### 3. Token Issuance — Claims Population
+### 3. Dex gRPC Connector — Claims Population
 
-When a user authenticates, their JWT is populated with the correct
-`x-tenant-id` and `roles` claims from RoleAssignment records.
+When a user authenticates, Dex calls the Party service's gRPC connector
+to validate credentials and populate JWT claims:
 
-**3a. Meridian-Managed Auth (Dex + Custom Connector):**
+```text
+Dex receives login request (email + password)
+  → Calls Party service Authenticate RPC
+  → Party validates password hash
+  → Party looks up RoleAssignments for this identity
+  → Returns: sub, email, name, x-tenant-id, roles[]
+  → Dex signs JWT with these claims
+```
 
-Write a Dex gRPC connector that calls the Identity service to validate
-credentials and return claims.
-
-**3b. Federated Auth (External IdP + Token Exchange):**
-
-Implement OAuth 2.0 Token Exchange (RFC 8693) to enrich external IdP tokens
-with Meridian tenant and role claims.
+For federated auth (Phase 3), Dex's upstream connectors handle the
+external IdP interaction, then call Party service to enrich claims
+with tenant and role information.
 
 ### 4. User Lifecycle Operations
 
-**Invitation:** `InviteUser(email, role)` creates a PENDING_INVITE identity with
-a time-limited token. User sets password or links IdP, then Party.Individual is
-created and KYC initiated if required.
+**Invitation:** `InviteUser(email, role)` creates a PENDING_INVITE identity
+with a time-limited token. User sets password or links IdP, then
+Party.Individual is created and KYC initiated if required.
 
-**Password management:** Self-service change, admin reset, forgot-password flow
-with time-limited reset tokens delivered via webhook.
+**Password management:** Self-service change, admin reset, forgot-password
+flow with time-limited reset tokens delivered via webhook.
 
 **Lifecycle:** Suspend (disable login), reactivate, deprovision (soft-delete
 with PII anonymization after retention).
@@ -335,26 +372,17 @@ On first boot, Meridian creates a platform admin identity from
 `PLATFORM_ADMIN_EMAIL` and `PLATFORM_ADMIN_PASSWORD` env vars with forced
 password change. Subsequent admins are created via invitation.
 
-## Service Design
+## Database Schema
 
-**Recommendation: New Identity Service** (separate from Party)
-
-Rationale:
-
-- **Security boundary**: Credentials isolated from business data
-- **BIAN alignment**: Party Authentication is distinct from Party Directory
-- **Scaling**: Auth endpoints have different performance characteristics
-- **Schema**: Identity data is cross-tenant; Party data is tenant-scoped
-
-### Database Schema
-
-Identity data lives in the **public schema** (cross-tenant):
+Identity and RoleAssignment tables live in the **public schema** because
+they span tenants. This is the same pattern used by the `tenant` table
+in the Tenant service.
 
 ```sql
 CREATE TABLE identity (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id       VARCHAR(50) NOT NULL,
     party_id        UUID,
+    tenant_id       VARCHAR(50),
     email           VARCHAR(255) NOT NULL,
     password_hash   VARCHAR(255),
     external_idp    VARCHAR(50),
@@ -369,7 +397,8 @@ CREATE TABLE identity (
     version         INT NOT NULL DEFAULT 1,
 
     UNIQUE (tenant_id, email),
-    UNIQUE (external_idp, external_idp_sub) WHERE external_idp IS NOT NULL
+    UNIQUE (external_idp, external_idp_sub)
+      WHERE external_idp IS NOT NULL
 );
 
 CREATE TABLE role_assignment (
@@ -384,7 +413,8 @@ CREATE TABLE role_assignment (
     revoked_at   TIMESTAMPTZ,
     revoked_by   UUID REFERENCES identity(id),
 
-    UNIQUE (identity_id, tenant_id, role) WHERE revoked = false
+    UNIQUE (identity_id, tenant_id, role)
+      WHERE revoked = false
 );
 
 CREATE TABLE invitation (
@@ -398,59 +428,81 @@ CREATE TABLE invitation (
 );
 ```
 
-### Proto Definition
+## Proto Definition
+
+New RPCs added to the existing Party service proto, grouped as a
+business qualifier (same pattern as RetrieveDemographics,
+RetrieveReference, etc.):
 
 ```protobuf
-service IdentityService {
-  // Identity CRUD
-  rpc CreateIdentity(CreateIdentityRequest) returns (CreateIdentityResponse);
-  rpc RetrieveIdentity(RetrieveIdentityRequest) returns (RetrieveIdentityResponse);
-  rpc UpdateIdentity(UpdateIdentityRequest) returns (UpdateIdentityResponse);
-  rpc ListIdentities(ListIdentitiesRequest) returns (ListIdentitiesResponse);
+// Identity business qualifier RPCs (added to PartyService)
+rpc CreateIdentity(CreateIdentityRequest)
+    returns (CreateIdentityResponse);
+rpc RetrieveIdentity(RetrieveIdentityRequest)
+    returns (RetrieveIdentityResponse);
+rpc UpdateIdentity(UpdateIdentityRequest)
+    returns (UpdateIdentityResponse);
+rpc ListIdentities(ListIdentitiesRequest)
+    returns (ListIdentitiesResponse);
 
-  // Authentication
-  rpc Authenticate(AuthenticateRequest) returns (AuthenticateResponse);
-  rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse);
-  rpc ExchangeToken(ExchangeTokenRequest) returns (ExchangeTokenResponse);
+// Authentication (called by Dex gRPC connector)
+rpc Authenticate(AuthenticateRequest)
+    returns (AuthenticateResponse);
+rpc RefreshToken(RefreshTokenRequest)
+    returns (RefreshTokenResponse);
 
-  // Password management
-  rpc SetPassword(SetPasswordRequest) returns (SetPasswordResponse);
-  rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse);
-  rpc RequestPasswordReset(RequestPasswordResetRequest) returns (RequestPasswordResetResponse);
-  rpc CompletePasswordReset(CompletePasswordResetRequest) returns (CompletePasswordResetResponse);
+// Password management
+rpc SetPassword(SetPasswordRequest)
+    returns (SetPasswordResponse);
+rpc ChangePassword(ChangePasswordRequest)
+    returns (ChangePasswordResponse);
+rpc RequestPasswordReset(RequestPasswordResetRequest)
+    returns (RequestPasswordResetResponse);
+rpc CompletePasswordReset(CompletePasswordResetRequest)
+    returns (CompletePasswordResetResponse);
 
-  // Role management
-  rpc GrantRole(GrantRoleRequest) returns (GrantRoleResponse);
-  rpc RevokeRole(RevokeRoleRequest) returns (RevokeRoleResponse);
-  rpc ListRoleAssignments(ListRoleAssignmentsRequest) returns (ListRoleAssignmentsResponse);
+// Role management
+rpc GrantRole(GrantRoleRequest)
+    returns (GrantRoleResponse);
+rpc RevokeRole(RevokeRoleRequest)
+    returns (RevokeRoleResponse);
+rpc ListRoleAssignments(ListRoleAssignmentsRequest)
+    returns (ListRoleAssignmentsResponse);
 
-  // Invitation
-  rpc InviteUser(InviteUserRequest) returns (InviteUserResponse);
-  rpc AcceptInvitation(AcceptInvitationRequest) returns (AcceptInvitationResponse);
+// Invitation
+rpc InviteUser(InviteUserRequest)
+    returns (InviteUserResponse);
+rpc AcceptInvitation(AcceptInvitationRequest)
+    returns (AcceptInvitationResponse);
 
-  // Tenant resolution
-  rpc ListUserTenants(ListUserTenantsRequest) returns (ListUserTenantsResponse);
-  rpc SwitchTenant(SwitchTenantRequest) returns (SwitchTenantResponse);
+// Tenant resolution
+rpc ListUserTenants(ListUserTenantsRequest)
+    returns (ListUserTenantsResponse);
+rpc SwitchTenant(SwitchTenantRequest)
+    returns (SwitchTenantResponse);
 
-  // Lifecycle
-  rpc SuspendIdentity(SuspendIdentityRequest) returns (SuspendIdentityResponse);
-  rpc ReactivateIdentity(ReactivateIdentityRequest) returns (ReactivateIdentityResponse);
-}
+// Lifecycle
+rpc SuspendIdentity(SuspendIdentityRequest)
+    returns (SuspendIdentityResponse);
+rpc ReactivateIdentity(ReactivateIdentityRequest)
+    returns (ReactivateIdentityResponse);
 ```
 
 ## Implementation Phases
 
-### Phase 1: Replace Static Dex Users (Critical Path)
+### Phase 1: Dex Everywhere + Replace Static Users (Critical Path)
 
-1. Replace Keycloak with Dex in local Tilt stack (environment parity)
-2. Enable `AUTH_ENABLED=true` by default in local dev
-3. Add Identity + RoleAssignment tables to migrations
-4. Bootstrap creates identities for existing demo users
-5. Write Dex gRPC connector to validate against Identity service
-6. Remove `DEFAULT_TENANT_ID` and `DEFAULT_ROLES` env vars
-7. JWT claims populated from RoleAssignment table
+1. Remove Keycloak from Tilt; add Dex to local dev stack
+2. Enable `AUTH_ENABLED=true` by default in all environments
+3. Add Identity + RoleAssignment tables to Party service migrations
+4. Implement Authenticate RPC in Party service
+5. Write Dex gRPC connector that calls Party service
+6. Bootstrap creates platform admin identity from env vars
+7. Remove `DEFAULT_TENANT_ID` and `DEFAULT_ROLES` env vars
+8. JWT claims populated from RoleAssignment table
 
-**Demo works identically**, but credentials are now in the database, not in dex.yaml.
+**Demo and local dev work identically**, but credentials are in the
+database, not in dex.yaml static passwords.
 
 **Estimate:** 13 story points
 
@@ -465,8 +517,8 @@ service IdentityService {
 
 ### Phase 3: Federated Authentication
 
-1. Token Exchange endpoint (RFC 8693)
-2. External IdP support (Auth0, Okta, Google Workspace)
+1. Configure Dex upstream connectors (Auth0, Okta, Google Workspace)
+2. Party service claim enrichment for federated users
 3. SCIM provisioning for enterprise directory sync
 4. MFA support
 
@@ -506,26 +558,26 @@ service IdentityService {
 
 ## Success Criteria
 
-1. Demo environment works with dynamic users (no hard-coded Dex passwords)
-2. First platform admin created from env var, subsequent admins via invitation
-3. Tenant owner can invite admins, admins can invite users
-4. JWT claims reflect actual role assignments, not env var defaults
-5. Identity.party_id links to Party.Individual for KYC-verified users
-6. User with roles in multiple tenants can switch between them
-7. All auth events appear in audit trail
+1. Dex is sole OIDC provider (local, demo, production) — no Keycloak
+2. Demo works with dynamic users (no hard-coded Dex passwords)
+3. Platform admin bootstrapped from env var, subsequent admins invited
+4. Tenant owner can invite admins, admins can invite users
+5. JWT claims reflect actual RoleAssignments, not env var defaults
+6. Identity.party_id links to Party.Individual for KYC-verified users
+7. User with roles in multiple tenants can switch between them
+8. All auth events appear in audit trail
 
 ## Non-Goals
 
 - Frontend UI for user management (API-first; UI is separate)
-- SSO/SAML support (OIDC only)
+- SSO/SAML support (OIDC via Dex connectors only)
 - Custom permission definitions (Phase 4)
 - Biometric authentication (KYC provider concern)
 - Session management (stateless JWT)
 
 ## Dependencies
 
-- Party service (Party.Individual creation during invitation)
+- Dex (gRPC connector for Phase 1)
 - Tenant service (tenant validation, Party.Organization mapping)
 - Audit service (auth event logging)
-- Dex (gRPC connector for Phase 1)
 - Gateway (remove DEFAULT_TENANT_ID / DEFAULT_ROLES fallback)
