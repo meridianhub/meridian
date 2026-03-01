@@ -165,7 +165,7 @@ Meridian requires four distinct access tiers:
 | 0 | Platform Administrator | `meridian_master` | Meridian operators | `platform-admin`, `super-admin` |
 | 1 | Tenant Owner | Single tenant | Organization that contracted Meridian | `tenant-owner` (new) |
 | 2 | Tenant Administrator | Single tenant | Staff appointed by tenant owner | `admin` |
-| 3 | Tenant User | Single tenant, restricted | Customers onboarded by tenant | `operator`, `auditor`, custom |
+| 3 | Tenant User | Single tenant, restricted | End users (staff or customers) | `operator`, `auditor`, custom |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -173,7 +173,9 @@ Meridian requires four distinct access tiers:
 views cross-tenant metrics.
 **Level 1** manages tenant admins, views billing, applies tenant manifests.
 **Level 2** manages users, configures account types, runs operations.
-**Level 3** views own accounts, initiates transactions, completes KYC.
+**Level 3** accesses scoped resources per assigned role (e.g., view
+accounts, initiate transactions). Customer KYC verification is
+handled separately by PRD 020.
 
 ## Architecture
 
