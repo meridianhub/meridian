@@ -162,6 +162,12 @@ func (r *Repository) Save(ctx context.Context, account domain.InternalAccount) e
 	})
 }
 
+// SaveInTx persists a new or updated account within the provided transaction.
+// The caller is responsible for managing the transaction boundary.
+func (r *Repository) SaveInTx(ctx context.Context, account domain.InternalAccount, tx *gorm.DB) error {
+	return r.WithTx(tx).Save(ctx, account)
+}
+
 // FindByID retrieves an account by its UUID.
 func (r *Repository) FindByID(ctx context.Context, id uuid.UUID) (domain.InternalAccount, error) {
 	var account domain.InternalAccount

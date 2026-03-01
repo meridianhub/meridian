@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"gorm.io/gorm"
 )
 
 // Test errors
@@ -54,6 +55,10 @@ func (m *mockRepository) Save(_ context.Context, party *domain.Party) error {
 		m.externalRefs[key] = party
 	}
 	return nil
+}
+
+func (m *mockRepository) SaveInTx(ctx context.Context, party *domain.Party, _ *gorm.DB) error {
+	return m.Save(ctx, party)
 }
 
 func (m *mockRepository) FindByID(_ context.Context, id uuid.UUID) (*domain.Party, error) {

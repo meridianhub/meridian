@@ -58,6 +58,21 @@ services:
         event_type: current_account.withdrawal_status.v1
         proto_message: WithdrawalStatusUpdated
 
+  internal-account:
+    description: Internal account facility lifecycle and booking events
+    topics:
+      - name: internal-account.facility-created.v1
+        constant: InternalAccountFacilityCreatedV1
+        description: Published when a new internal account facility is initiated
+        event_type: internal_account.facility_created.v1
+        proto_message: FacilityCreatedEvent
+
+      - name: internal-account.booking-created.v1
+        constant: InternalAccountBookingCreatedV1
+        description: Published when a new booking is posted to an internal account
+        event_type: internal_account.booking_created.v1
+        proto_message: BookingCreatedEvent
+
   financial-accounting:
     description: Financial booking log control events
     topics:
@@ -178,6 +193,27 @@ services:
         description: Published when an opening balance is recorded for a new account
         event_type: position_keeping.opening_balance_recorded.v1
         proto_message: OpeningBalanceRecorded
+
+  party:
+    description: Party registration and lifecycle events
+    topics:
+      - name: party.created.v1
+        constant: PartyCreatedV1
+        description: Published when a new party is registered in the system
+        event_type: party.created.v1
+        proto_message: PartyCreatedEvent
+
+      - name: party.updated.v1
+        constant: PartyUpdatedV1
+        description: Published when an existing party's details are updated
+        event_type: party.updated.v1
+        proto_message: PartyUpdatedEvent
+
+      - name: party.verification-completed.v1
+        constant: PartyVerificationCompletedV1
+        description: Published when a KYC/AML verification reaches a terminal state (APPROVED, REJECTED, MANUAL_REVIEW)
+        event_type: party.verification_completed.v1
+        proto_message: PartyVerificationCompletedEvent
 
   reconciliation:
     description: Settlement reconciliation run and variance detection events

@@ -21,6 +21,8 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
+	"github.com/meridianhub/meridian/shared/platform/events"
+	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/ports"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -88,6 +90,10 @@ func run(logger *slog.Logger) error {
 	// Create repository
 	repo := persistence.NewRepository(db)
 
+	// Create outbox repository and publisher for event publishing
+	outboxRepo := events.NewPostgresOutboxRepository(db)
+	outboxPublisher := events.NewOutboxPublisher("internal-account")
+
 	// Get Kubernetes namespace from environment (defaults to "default")
 	namespace := env.GetEnvOrDefault("K8S_NAMESPACE", "default")
 
@@ -106,7 +112,34 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("failed to create service: %w", err)
 	}
 
+	// Wire outbox publisher for domain event publishing
+	internalAccountService.SetOutboxPublisher(outboxPublisher, db)
+
 	logger.Info("service initialized with external clients")
+
+	// Start outbox worker for Kafka event delivery (optional - depends on KAFKA_BOOTSTRAP_SERVERS)
+	var outboxWorkerStop func()
+	bootstrapServers := env.GetEnvOrDefault("KAFKA_BOOTSTRAP_SERVERS", "")
+	if bootstrapServers != "" {
+		producer, err := kafka.NewProtoProducer(kafka.ProducerConfig{
+			BootstrapServers: bootstrapServers,
+			ClientID:         "internal-account-outbox-worker",
+			Acks:             "all",
+			Retries:          3,
+			Compression:      "snappy",
+		})
+		if err != nil {
+			logger.Warn("failed to create Kafka producer for outbox worker - events will be persisted but not published",
+				"error", err)
+		} else {
+			w := events.NewWorker(outboxRepo, producer, events.DefaultWorkerConfig("internal-account"), logger)
+			w.Start(ctx)
+			outboxWorkerStop = w.Stop
+			logger.Info("outbox worker started")
+		}
+	} else {
+		logger.Warn("KAFKA_BOOTSTRAP_SERVERS not configured, outbox worker disabled - events will be persisted but not published")
+	}
 
 	// Initialize auth interceptor (optional - based on AUTH_ENABLED)
 	authConfig := bootstrap.DefaultAuthConfig(logger)
@@ -240,6 +273,13 @@ func run(logger *slog.Logger) error {
 		logger.Info("HTTP server stopped")
 		return nil
 	})
+
+	if outboxWorkerStop != nil {
+		orchestrator.AddCleanup(func() error {
+			outboxWorkerStop()
+			return nil
+		})
+	}
 
 	for _, cleanup := range svcClients.cleanupFuncs {
 		fn := cleanup // capture for closure

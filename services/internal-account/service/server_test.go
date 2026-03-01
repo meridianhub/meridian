@@ -19,9 +19,10 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"gorm.io/gorm"
 )
 
-// mockRepository implements domain.Repository for testing.
+// mockRepository implements service.Repository for testing.
 type mockRepository struct {
 	accounts        map[uuid.UUID]domain.InternalAccount
 	accountsByCode  map[string]domain.InternalAccount
@@ -87,6 +88,10 @@ func (m *mockRepository) ExistsByCode(_ context.Context, accountCode string) (bo
 	}
 	_, ok := m.accountsByCode[accountCode]
 	return ok, nil
+}
+
+func (m *mockRepository) SaveInTx(ctx context.Context, account domain.InternalAccount, _ *gorm.DB) error {
+	return m.Save(ctx, account)
 }
 
 // mockPositionKeepingClient implements PositionKeepingClient for testing.
@@ -234,20 +239,20 @@ var standardTestDefs = map[string]*accounttype.Definition{
 // newTestServiceWithCache creates a service with a standard test cache for tests that
 // need to create accounts but are not testing product type resolution behavior.
 // All requests must include a tenant context (use testCtx()).
-func newTestServiceWithCache(repo domain.Repository, opts ...Option) (*Service, error) {
+func newTestServiceWithCache(repo Repository, opts ...Option) (*Service, error) {
 	c := newTestCacheWithDefinitions(standardTestDefs)
 	allOpts := append([]Option{WithAccountTypeCache(c)}, opts...)
 	return NewServiceFull(repo, nil, nil, nil, nil, allOpts...)
 }
 
 // newTestServiceWithCacheAndPosClient creates a service with a cache and position keeping client.
-func newTestServiceWithCacheAndPosClient(repo domain.Repository, posClient PositionKeepingClient) (*Service, error) {
+func newTestServiceWithCacheAndPosClient(repo Repository, posClient PositionKeepingClient) (*Service, error) {
 	c := newTestCacheWithDefinitions(standardTestDefs)
 	return NewServiceFull(repo, posClient, nil, nil, nil, WithAccountTypeCache(c))
 }
 
 // newTestServiceWithCacheAndRefClient creates a service with a cache and reference data client.
-func newTestServiceWithCacheAndRefClient(repo domain.Repository, refClient ReferenceDataClient) (*Service, error) {
+func newTestServiceWithCacheAndRefClient(repo Repository, refClient ReferenceDataClient) (*Service, error) {
 	c := newTestCacheWithDefinitions(standardTestDefs)
 	return NewServiceFull(repo, nil, refClient, nil, nil, WithAccountTypeCache(c))
 }

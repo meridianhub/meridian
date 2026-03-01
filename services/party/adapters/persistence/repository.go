@@ -242,68 +242,81 @@ func (r *Repository) Save(ctx context.Context, party *domain.Party) error {
 	entity := toEntity(ctx, party)
 
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Set organization scope if in multi-org mode
-		tx, err := r.withTenantScope(ctx, tx)
-		if err != nil {
+		return r.saveEntityInTx(ctx, entity, tx)
+	})
+}
+
+// SaveInTx creates or updates a party within an existing database transaction.
+// Use this when the caller manages the transaction boundary — for example, to include
+// an outbox event write in the same transaction for atomic event delivery.
+func (r *Repository) SaveInTx(ctx context.Context, party *domain.Party, tx *gorm.DB) error {
+	entity := toEntity(ctx, party)
+	return r.saveEntityInTx(ctx, entity, tx)
+}
+
+// saveEntityInTx performs the actual upsert logic within the provided GORM transaction.
+func (r *Repository) saveEntityInTx(ctx context.Context, entity *PartyEntity, tx *gorm.DB) error {
+	// Set organization scope if in multi-org mode
+	scopedTx, err := r.withTenantScope(ctx, tx)
+	if err != nil {
+		return err
+	}
+
+	// Check if exists by ID
+	var existing PartyEntity
+	result := scopedTx.Where("id = ? AND deleted_at IS NULL", entity.ID).First(&existing)
+
+	if result.Error == nil {
+		// Update existing with optimistic locking
+		entity.CreatedAt = existing.CreatedAt
+		entity.CreatedBy = existing.CreatedBy
+
+		// The domain model auto-increments version on mutation, so entity.Version
+		// is already the target version. We check that DB still has the previous version.
+		// Example: loaded party with version=1, mutated (now version=2), we check DB has version=1.
+		expectedDBVersion := entity.Version - 1
+
+		// Optimistic locking: only update if version matches expected
+		updateResult := scopedTx.Model(&PartyEntity{}).
+			Where("id = ? AND version = ? AND deleted_at IS NULL", entity.ID, expectedDBVersion).
+			Updates(map[string]interface{}{
+				"party_type":              entity.PartyType,
+				"legal_name":              entity.LegalName,
+				"display_name":            entity.DisplayName,
+				"status":                  entity.Status,
+				"external_reference":      entity.ExternalReference,
+				"external_reference_type": entity.ExternalReferenceType,
+				"attributes":              entity.Attributes,
+				"version":                 entity.Version,
+				"updated_at":              entity.UpdatedAt,
+				"updated_by":              entity.UpdatedBy,
+			})
+
+		if updateResult.Error != nil {
+			return updateResult.Error
+		}
+
+		// If no rows were affected, the version didn't match (concurrent modification)
+		if updateResult.RowsAffected == 0 {
+			return ErrVersionConflict
+		}
+
+		return nil
+	}
+
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		// Create new - version starts at 1 (set by toEntity)
+		if err := scopedTx.Create(&entity).Error; err != nil {
+			// Handle race condition: another transaction created the same external reference
+			if isDuplicateKeyError(err) {
+				return ErrPartyExists
+			}
 			return err
 		}
+		return nil
+	}
 
-		// Check if exists by ID
-		var existing PartyEntity
-		result := tx.Where("id = ? AND deleted_at IS NULL", entity.ID).First(&existing)
-
-		if result.Error == nil {
-			// Update existing with optimistic locking
-			entity.CreatedAt = existing.CreatedAt
-			entity.CreatedBy = existing.CreatedBy
-
-			// The domain model auto-increments version on mutation, so entity.Version
-			// is already the target version. We check that DB still has the previous version.
-			// Example: loaded party with version=1, mutated (now version=2), we check DB has version=1.
-			expectedDBVersion := entity.Version - 1
-
-			// Optimistic locking: only update if version matches expected
-			updateResult := tx.Model(&PartyEntity{}).
-				Where("id = ? AND version = ? AND deleted_at IS NULL", entity.ID, expectedDBVersion).
-				Updates(map[string]interface{}{
-					"party_type":              entity.PartyType,
-					"legal_name":              entity.LegalName,
-					"display_name":            entity.DisplayName,
-					"status":                  entity.Status,
-					"external_reference":      entity.ExternalReference,
-					"external_reference_type": entity.ExternalReferenceType,
-					"attributes":              entity.Attributes,
-					"version":                 entity.Version,
-					"updated_at":              entity.UpdatedAt,
-					"updated_by":              entity.UpdatedBy,
-				})
-
-			if updateResult.Error != nil {
-				return updateResult.Error
-			}
-
-			// If no rows were affected, the version didn't match (concurrent modification)
-			if updateResult.RowsAffected == 0 {
-				return ErrVersionConflict
-			}
-
-			return nil
-		}
-
-		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			// Create new - version starts at 1 (set by toEntity)
-			if err := tx.Create(&entity).Error; err != nil {
-				// Handle race condition: another transaction created the same external reference
-				if isDuplicateKeyError(err) {
-					return ErrPartyExists
-				}
-				return err
-			}
-			return nil
-		}
-
-		return result.Error
-	})
+	return result.Error
 }
 
 // FindByID retrieves a party by its UUID.

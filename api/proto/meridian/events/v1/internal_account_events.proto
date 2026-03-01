@@ -1,0 +1,95 @@
+syntax = "proto3";
+
+package meridian.events.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/events/v1;eventsv1";
+
+// FacilityCreatedEvent is published when a new internal account facility is
+// initiated. Consumers can use this event to react to new internal account
+// creation, such as updating account registries or triggering provisioning.
+message FacilityCreatedEvent {
+  // event_id uniquely identifies this event instance
+  string event_id = 1 [(buf.validate.field).string = {
+    uuid: true
+  }];
+
+  // account_id uniquely identifies the internal account facility
+  string account_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // account_code is the human-readable code for the account
+  string account_code = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // account_type is the classification of the internal account (e.g., "NOSTRO", "VOSTRO")
+  string account_type = 4 [(buf.validate.field).string = {
+    max_len: 100
+  }];
+
+  // instrument_code is the instrument code for the facility (e.g., "GBP", "kWh")
+  string instrument_code = 5 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 50
+  }];
+
+  // correlation_id links related events across services
+  string correlation_id = 6 [(buf.validate.field).string = {
+    max_len: 255
+  }];
+
+  // causation_id identifies the event or command that caused this event
+  string causation_id = 7 [(buf.validate.field).string = {
+    max_len: 255
+  }];
+
+  // timestamp when the event was created
+  google.protobuf.Timestamp timestamp = 8 [(buf.validate.field).required = true];
+}
+
+// BookingCreatedEvent is published when a new booking (position keeping
+// transaction) is posted to an internal account. Consumers can use this
+// event to synchronise balances or trigger downstream processing.
+message BookingCreatedEvent {
+  // event_id uniquely identifies this event instance
+  string event_id = 1 [(buf.validate.field).string = {
+    uuid: true
+  }];
+
+  // account_id identifies the internal account receiving the booking
+  string account_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // transaction_id identifies the position-keeping transaction associated with the booking
+  string transaction_id = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // instrument_code is the instrument for this booking (e.g., "GBP", "kWh")
+  string instrument_code = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 50
+  }];
+
+  // correlation_id links related events across services
+  string correlation_id = 5 [(buf.validate.field).string = {
+    max_len: 255
+  }];
+
+  // causation_id identifies the event or command that caused this event
+  string causation_id = 6 [(buf.validate.field).string = {
+    max_len: 255
+  }];
+
+  // timestamp when the event was created
+  google.protobuf.Timestamp timestamp = 7 [(buf.validate.field).required = true];
+}
