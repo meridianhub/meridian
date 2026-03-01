@@ -317,10 +317,13 @@ func (i *Instruction) MarkFailed(reason string, errorCode string) error {
 	return nil
 }
 
-// MarkExpired transitions the instruction to EXPIRED from any non-terminal, non-dispatching state.
+// MarkExpired transitions the instruction to EXPIRED.
+// Valid from: PENDING, DISPATCHING, RETRYING (per proto state machine).
+// DELIVERED instructions cannot expire (delivery is complete).
 // This is called when the instruction's TTL has elapsed.
 // Idempotent: Returns nil if already expired.
 // Returns ErrInstructionTerminal if in a terminal state other than EXPIRED.
+// Returns ErrInvalidInstructionTransition if in DELIVERED state.
 func (i *Instruction) MarkExpired() error {
 	// Idempotent: already expired
 	if i.Status == InstructionStatusExpired {
@@ -331,7 +334,7 @@ func (i *Instruction) MarkExpired() error {
 		return ErrInstructionTerminal
 	}
 
-	if i.Status == InstructionStatusDispatching || i.Status == InstructionStatusDelivered {
+	if i.Status == InstructionStatusDelivered {
 		return ErrInvalidInstructionTransition
 	}
 
@@ -342,17 +345,19 @@ func (i *Instruction) MarkExpired() error {
 	return nil
 }
 
-// Cancel transitions the instruction to CANCELLED from PENDING or RETRYING.
-// DISPATCHING and DELIVERED instructions cannot be cancelled as delivery is in progress.
+// Cancel transitions the instruction to CANCELLED.
+// Per the proto state machine, only PENDING instructions can be cancelled
+// (before dispatch has started). DISPATCHING, DELIVERED, and RETRYING instructions
+// cannot be cancelled.
 // Idempotent: Returns nil if already cancelled.
-// Returns ErrInstructionNotCancellable if in DISPATCHING, DELIVERED, or other terminal state.
+// Returns ErrInstructionNotCancellable if not in PENDING state.
 func (i *Instruction) Cancel() error {
 	// Idempotent: already cancelled
 	if i.Status == InstructionStatusCancelled {
 		return nil
 	}
 
-	if i.Status != InstructionStatusPending && i.Status != InstructionStatusRetrying {
+	if i.Status != InstructionStatusPending {
 		return ErrInstructionNotCancellable
 	}
 
@@ -382,9 +387,9 @@ func (i *Instruction) IsTerminal() bool {
 }
 
 // CanCancel returns true if the instruction can be cancelled.
-// Only PENDING and RETRYING states are cancellable.
+// Per the proto state machine, only PENDING instructions can be cancelled.
 func (i *Instruction) CanCancel() bool {
-	return i.Status == InstructionStatusPending || i.Status == InstructionStatusRetrying
+	return i.Status == InstructionStatusPending
 }
 
 // CanRetry returns true if the instruction can be retried.

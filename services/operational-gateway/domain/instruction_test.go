@@ -304,6 +304,16 @@ func TestInstruction_MarkExpired_FromPending(t *testing.T) {
 	assert.NotNil(t, instr.CompletedAt)
 }
 
+func TestInstruction_MarkExpired_FromDispatching(t *testing.T) {
+	// Proto: DISPATCHING -> EXPIRED is valid (not delivered before expires_at)
+	instr := createTestInstruction(t, InstructionStatusDispatching)
+
+	err := instr.MarkExpired()
+
+	assert.NoError(t, err)
+	assert.Equal(t, InstructionStatusExpired, instr.Status)
+}
+
 func TestInstruction_MarkExpired_FromRetrying(t *testing.T) {
 	instr := createTestInstruction(t, InstructionStatusRetrying)
 
@@ -322,6 +332,15 @@ func TestInstruction_MarkExpired_Idempotent(t *testing.T) {
 	err = instr.MarkExpired()
 	assert.NoError(t, err)
 	assert.Equal(t, InstructionStatusExpired, instr.Status)
+}
+
+func TestInstruction_MarkExpired_FromDelivered_Fails(t *testing.T) {
+	// DELIVERED means the instruction reached the provider — expiry no longer applies.
+	instr := createTestInstruction(t, InstructionStatusDelivered)
+
+	err := instr.MarkExpired()
+
+	assert.ErrorIs(t, err, ErrInvalidInstructionTransition)
 }
 
 func TestInstruction_MarkExpired_FromAcknowledged_Fails(t *testing.T) {
@@ -344,15 +363,6 @@ func TestInstruction_Cancel_FromPending(t *testing.T) {
 	assert.NotNil(t, instr.CompletedAt)
 }
 
-func TestInstruction_Cancel_FromRetrying(t *testing.T) {
-	instr := createTestInstruction(t, InstructionStatusRetrying)
-
-	err := instr.Cancel()
-
-	assert.NoError(t, err)
-	assert.Equal(t, InstructionStatusCancelled, instr.Status)
-}
-
 func TestInstruction_Cancel_Idempotent(t *testing.T) {
 	instr := createTestInstruction(t, InstructionStatusPending)
 
@@ -362,6 +372,16 @@ func TestInstruction_Cancel_Idempotent(t *testing.T) {
 	err = instr.Cancel()
 	assert.NoError(t, err)
 	assert.Equal(t, InstructionStatusCancelled, instr.Status)
+}
+
+func TestInstruction_Cancel_FromRetrying_Fails(t *testing.T) {
+	// Per proto: CANCELLED can only be set from PENDING.
+	// RETRYING instructions must wait for exhaustion (FAILED) or expiry (EXPIRED).
+	instr := createTestInstruction(t, InstructionStatusRetrying)
+
+	err := instr.Cancel()
+
+	assert.ErrorIs(t, err, ErrInstructionNotCancellable)
 }
 
 func TestInstruction_Cancel_FromDispatching_Fails(t *testing.T) {
@@ -421,7 +441,7 @@ func TestInstruction_CanCancel(t *testing.T) {
 		{InstructionStatusPending, true},
 		{InstructionStatusDispatching, false},
 		{InstructionStatusDelivered, false},
-		{InstructionStatusRetrying, true},
+		{InstructionStatusRetrying, false}, // Per proto: CANCELLED only from PENDING
 		{InstructionStatusAcknowledged, false},
 		{InstructionStatusFailed, false},
 		{InstructionStatusExpired, false},
