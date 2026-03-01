@@ -21,15 +21,21 @@ func setupControlOutboxDB(t *testing.T) (*gorm.DB, *persistence.Repository, *per
 
 	db := openSharedDB(t)
 
+	// Pin to a single connection so that SET search_path (which is connection-scoped)
+	// is reliably applied to every subsequent query on this *gorm.DB instance.
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+
 	tid := uniqueTenantID()
 	schemaName := tid.SchemaName()
 	quotedSchema := pq.QuoteIdentifier(schemaName)
 
 	// Create tenant schema
-	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", quotedSchema)).Error
+	err = db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", quotedSchema)).Error
 	require.NoError(t, err)
 
-	// Set search_path
+	// Set search_path (applies to the pinned connection for all subsequent queries)
 	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", quotedSchema)).Error
 	require.NoError(t, err)
 
@@ -222,14 +228,16 @@ func TestControlCurrentAccount_OutboxEvents(t *testing.T) {
 // This ensures backward compatibility for test environments and services that start without
 // a database connection available at construction time.
 func TestControlCurrentAccount_FallbackWithoutOutbox(t *testing.T) {
-	_, repo, lienRepo, tid, cleanup := setupControlOutboxDB(t)
+	db, repo, lienRepo, tid, cleanup := setupControlOutboxDB(t)
 	defer cleanup()
 
 	ctx := tenant.WithTenant(t.Context(), tid)
 
+	accountID := fmt.Sprintf("ACC-FALLBACK-%s", tid)
+
 	mockPosKeeping := &mockPositionKeepingClient{
 		accountBalances: map[string]int64{
-			"ACC-FALLBACK-001": 0, // zero balance required for CLOSE validation
+			accountID: 0, // zero balance required for CLOSE validation
 		},
 	}
 
@@ -241,7 +249,6 @@ func TestControlCurrentAccount_FallbackWithoutOutbox(t *testing.T) {
 		logger:           testLogger(),
 	}
 
-	accountID := "ACC-FALLBACK-001"
 	_ = createTestAccountForControl(t, ctx, repo, accountID)
 
 	// All three control actions should succeed via fallback (repo.Save only)
@@ -264,4 +271,12 @@ func TestControlCurrentAccount_FallbackWithoutOutbox(t *testing.T) {
 		Reason:        "Close via fallback path",
 	})
 	require.NoError(t, err, "close should succeed without outbox publisher")
+
+	// Confirm no outbox rows were written — the fallback path must not silently emit events.
+	var outboxCount int64
+	err = db.Model(&events.EventOutbox{}).
+		Where("aggregate_id = ? AND service_name = ?", accountID, "current-account").
+		Count(&outboxCount).Error
+	require.NoError(t, err)
+	assert.Zero(t, outboxCount, "fallback path should not write to event_outbox")
 }
