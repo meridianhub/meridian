@@ -39,13 +39,13 @@ type InstructionStatus string
 //
 // Expiry (TTL exceeded):
 //
-//	PENDING  -> EXPIRED
-//	RETRYING -> EXPIRED
+//	PENDING     -> EXPIRED (not dispatched before expires_at)
+//	DISPATCHING -> EXPIRED (not delivered before expires_at)
+//	RETRYING    -> EXPIRED (not delivered before expires_at)
 //
-// Cancellation (system or user initiated):
+// Cancellation (before dispatch only):
 //
-//	PENDING  -> CANCELLED
-//	RETRYING -> CANCELLED
+//	PENDING -> CANCELLED
 //
 // Terminal states: ACKNOWLEDGED, FAILED, EXPIRED, CANCELLED
 const (
