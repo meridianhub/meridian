@@ -275,10 +275,21 @@ func (s *Service) saveWithOutboxEvent(
 
 		case pb.ControlAction_CONTROL_ACTION_CLOSE:
 			balanceCents, _ := account.Balance().ToMinorUnits()
+			// Derive the divisor from the account's precision so the conversion is
+			// correct for any currency (e.g., JPY precision=0, GBP precision=2, KWH precision=3).
+			precision := account.Balance().Precision()
+			divisor := int64(1)
+			for i := 0; i < precision; i++ {
+				divisor *= 10
+			}
+			var nanosMultiplier int32
+			if divisor > 0 {
+				nanosMultiplier = int32(1_000_000_000 / divisor)
+			}
 			closingBalance := &money.Money{
 				CurrencyCode: account.Balance().InstrumentCode(),
-				Units:        balanceCents / 100,
-				Nanos:        int32((balanceCents % 100) * 10000000),
+				Units:        balanceCents / divisor,
+				Nanos:        int32(balanceCents%divisor) * nanosMultiplier,
 			}
 			event := &eventsv1.AccountClosedEvent{
 				EventId:        uuid.New().String(),

@@ -204,10 +204,10 @@ func TestControlCurrentAccount_OutboxEvents(t *testing.T) {
 	})
 }
 
-// TestControlCurrentAccount_OutboxAtomicity verifies that if the outbox write fails,
-// the account state change is also rolled back (transactional guarantee).
-// This test uses a service with a nil outbox publisher to exercise the fallback path
-// and confirm control actions still succeed without outbox.
+// TestControlCurrentAccount_FallbackWithoutOutbox verifies that control actions succeed
+// via the fallback path (direct repo.Save) when the outbox publisher is not configured.
+// This ensures backward compatibility for test environments and services that start without
+// a database connection available at construction time.
 func TestControlCurrentAccount_FallbackWithoutOutbox(t *testing.T) {
 	_, repo, lienRepo, tid, cleanup := setupControlOutboxDB(t)
 	defer cleanup()
