@@ -121,7 +121,10 @@ func (s *PositionKeepingService) InitiateFinancialPositionLogBatch(
 		return nil, status.Errorf(codes.Internal, "failed to persist batch: %v", err)
 	}
 
-	// Publish BulkTransactionCaptured event (fire-and-forget)
+	// Publish BulkTransactionCaptured event to outbox.
+	// NOTE: CreateBatch does not support outbox writes within its internal transaction.
+	// The event is written separately here; the outbox worker delivers it to Kafka.
+	// At-least-once delivery is guaranteed by the outbox pattern.
 	if len(successfulLogs) > 0 {
 		// Safe conversion: successfulLogs length <= MaxBatchSize (10,000)
 		transactionCount := int32(len(successfulLogs)) // #nosec G115
@@ -134,7 +137,9 @@ func (s *PositionKeepingService) InitiateFinancialPositionLogBatch(
 			Timestamp:        time.Now().UTC(),
 			Version:          1,
 		}
-		_ = s.eventPublisher.Publish(batchCtx, event)
+		if err := s.eventPublisher.Publish(batchCtx, event); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to publish batch event: %v", err)
+		}
 	}
 
 	// Store idempotency result if key was provided

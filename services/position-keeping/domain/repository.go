@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 )
 
@@ -47,6 +48,18 @@ type FinancialPositionLogRepository interface {
 	// Returns ErrNotFound if the log doesn't exist.
 	// Returns ErrOptimisticLock if the version doesn't match (concurrent modification).
 	Update(ctx context.Context, log *FinancialPositionLog) error
+
+	// CreateWithOutbox persists a new FinancialPositionLog and runs postFn within the same
+	// database transaction. postFn receives the active pgx.Tx and is intended for writing
+	// events to the outbox atomically with the business operation.
+	// If postFn returns an error the entire transaction is rolled back.
+	CreateWithOutbox(ctx context.Context, log *FinancialPositionLog, postFn func(pgx.Tx) error) error
+
+	// UpdateWithOutbox updates an existing FinancialPositionLog and runs postFn within the same
+	// database transaction. postFn receives the active pgx.Tx and is intended for writing
+	// events to the outbox atomically with the business operation.
+	// If postFn returns an error the entire transaction is rolled back.
+	UpdateWithOutbox(ctx context.Context, log *FinancialPositionLog, postFn func(pgx.Tx) error) error
 
 	// List retrieves FinancialPositionLogs matching the given filter with pagination.
 	// Returns an empty slice if no logs match the filter.

@@ -32,7 +32,8 @@ type Container struct {
 	auditPublisher  *audit.Publisher     // internal, for cleanup
 
 	// Adapters
-	EventPublisher domain.EventPublisher
+	EventPublisher  domain.EventPublisher
+	OutboxPublisher *messaging.OutboxEventPublisher
 
 	// Repository
 	PositionLogRepository domain.FinancialPositionLogRepository
@@ -76,6 +77,8 @@ func NewContainer(ctx context.Context, config *Config, logger *slog.Logger) (*Co
 	container.initializeRepositories()
 
 	container.initializeOutboxRepository()
+
+	container.initializeOutboxPublisher()
 
 	logger.Info("dependency container initialized successfully")
 
@@ -335,6 +338,20 @@ func (c *Container) initializeOutboxRepository() {
 	// when the outbox is backing up (e.g., Kafka unavailable).
 	c.OutboxRepository = events.NewPgxOutboxRepository(c.DBPool)
 	c.Logger.Info("event outbox repository initialized")
+}
+
+// initializeOutboxPublisher initializes the OutboxEventPublisher that writes domain events
+// to the transactional outbox table atomically with business operations.
+func (c *Container) initializeOutboxPublisher() {
+	publisher, err := messaging.NewOutboxEventPublisher(c.OutboxRepository)
+	if err != nil {
+		// NewOutboxEventPublisher only fails if OutboxRepository is nil, which cannot
+		// happen here since initializeOutboxRepository always sets it.
+		c.Logger.Error("failed to create outbox event publisher", "error", err)
+		return
+	}
+	c.OutboxPublisher = publisher
+	c.Logger.Info("outbox event publisher initialized")
 }
 
 // KafkaProducer returns the Kafka producer for use by components that need

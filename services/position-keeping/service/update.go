@@ -107,13 +107,20 @@ func (s *PositionKeepingService) UpdateFinancialPositionLog(
 		}
 	}
 
-	// Update the log in repository
-	if err := s.repository.Update(ctx, log); err != nil {
+	// Collect domain events for the changes
+	updateEvents := s.collectUpdateEvents(ctx, log, req, newEntryAdded, statusChanged)
+
+	// Update the log in repository atomically with outbox event writes.
+	outboxFn := s.outboxPublisher.BuildOutboxFn(ctx, updateEvents)
+	if err := s.repository.UpdateWithOutbox(ctx, log, outboxFn); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, status.Errorf(codes.NotFound, "financial position log not found: %s", logID)
+		}
+		if errors.Is(err, domain.ErrOptimisticLock) {
+			return nil, status.Errorf(codes.Aborted, "version conflict during update: %v", err)
+		}
 		return nil, status.Errorf(codes.Internal, "failed to update financial position log: %v", err)
 	}
-
-	// Publish events for the changes
-	s.publishUpdateEvents(ctx, log, req, newEntryAdded, statusChanged)
 
 	// Store idempotency result if key was provided
 	if idempotencyKey != nil {
@@ -359,18 +366,20 @@ func extractSystemContext(ctx context.Context) map[string]string {
 	return systemCtx
 }
 
-// publishUpdateEvents publishes domain events for update operations
-func (s *PositionKeepingService) publishUpdateEvents(
+// collectUpdateEvents collects domain events for update operations.
+// Returns the events to be written to the outbox within the same transaction as the update.
+func (s *PositionKeepingService) collectUpdateEvents(
 	ctx context.Context,
 	log *domain.FinancialPositionLog,
 	req *positionkeepingv1.UpdateFinancialPositionLogRequest,
 	newEntryAdded *domain.TransactionLogEntry,
 	statusChanged bool,
-) {
+) []domain.DomainEvent {
 	correlationID := clients.ExtractCorrelationID(ctx)
+	var evts []domain.DomainEvent
 
 	if newEntryAdded != nil {
-		event := &domain.TransactionAmended{
+		evts = append(evts, &domain.TransactionAmended{
 			LogID:         log.LogID,
 			AccountID:     log.AccountID,
 			Reason:        "Transaction entry added",
@@ -378,25 +387,29 @@ func (s *PositionKeepingService) publishUpdateEvents(
 			CorrelationID: correlationID,
 			Timestamp:     time.Now().UTC(),
 			Version:       log.Version,
-		}
-		_ = s.eventPublisher.Publish(ctx, event)
+		})
 	}
 
 	if statusChanged {
-		s.publishStatusChangeEvent(ctx, log, req, correlationID)
+		if evt := s.buildStatusChangeEvent(ctx, log, req, correlationID); evt != nil {
+			evts = append(evts, evt)
+		}
 	}
+
+	return evts
 }
 
-// publishStatusChangeEvent publishes appropriate event for status transitions
-func (s *PositionKeepingService) publishStatusChangeEvent(
-	ctx context.Context,
+// buildStatusChangeEvent returns the appropriate domain event for a status transition,
+// or nil if the status does not produce an event.
+func (s *PositionKeepingService) buildStatusChangeEvent(
+	_ context.Context,
 	log *domain.FinancialPositionLog,
 	req *positionkeepingv1.UpdateFinancialPositionLogRequest,
 	correlationID string,
-) {
+) domain.DomainEvent {
 	switch req.StatusUpdate.CurrentStatus {
 	case commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED:
-		event := &domain.TransactionPosted{
+		return &domain.TransactionPosted{
 			LogID:            log.LogID,
 			AccountID:        log.AccountID,
 			PostingReference: "", // Populate when PostingReference is added to proto
@@ -406,9 +419,8 @@ func (s *PositionKeepingService) publishStatusChangeEvent(
 			Timestamp:        time.Now().UTC(),
 			Version:          log.Version,
 		}
-		_ = s.eventPublisher.Publish(ctx, event)
 	case commonv1.TransactionStatus_TRANSACTION_STATUS_FAILED:
-		event := &domain.TransactionFailed{
+		return &domain.TransactionFailed{
 			LogID:         log.LogID,
 			AccountID:     log.AccountID,
 			FailureReason: req.StatusUpdate.StatusReason,
@@ -417,9 +429,8 @@ func (s *PositionKeepingService) publishStatusChangeEvent(
 			Timestamp:     time.Now().UTC(),
 			Version:       log.Version,
 		}
-		_ = s.eventPublisher.Publish(ctx, event)
 	case commonv1.TransactionStatus_TRANSACTION_STATUS_CANCELLED:
-		event := &domain.TransactionCancelled{
+		return &domain.TransactionCancelled{
 			LogID:         log.LogID,
 			AccountID:     log.AccountID,
 			Reason:        req.StatusUpdate.StatusReason,
@@ -428,12 +439,12 @@ func (s *PositionKeepingService) publishStatusChangeEvent(
 			Timestamp:     time.Now().UTC(),
 			Version:       log.Version,
 		}
-		_ = s.eventPublisher.Publish(ctx, event)
 	case commonv1.TransactionStatus_TRANSACTION_STATUS_UNSPECIFIED,
 		commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
 		commonv1.TransactionStatus_TRANSACTION_STATUS_REVERSED:
-		// No events for these statuses (REVERSED cannot be set via Update operation)
+		// No event for unspecified, pending, or reversed status transitions
+		return nil
 	default:
-		// No event for other statuses
+		return nil
 	}
 }

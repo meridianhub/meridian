@@ -502,6 +502,189 @@ func (r *PostgresRepository) Update(ctx context.Context, log *domain.FinancialPo
 	return nil
 }
 
+// CreateWithOutbox persists a new FinancialPositionLog and runs postFn within the same
+// database transaction, enabling atomic event outbox writes.
+func (r *PostgresRepository) CreateWithOutbox(ctx context.Context, log *domain.FinancialPositionLog, postFn func(pgx.Tx) error) error {
+	if log == nil {
+		return ErrNilLog
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	if err := r.setSearchPath(ctx, tx); err != nil {
+		return err
+	}
+
+	userID := audit.GetUserFromContext(ctx)
+	logQuery := `
+		INSERT INTO financial_position_log (
+			id, created_at, created_by, updated_at, updated_by,
+			log_id, account_id, version,
+			current_status, previous_status, status_updated_at, status_reason, failure_reason,
+			reconciliation_status,
+			opening_balance_amount, opening_balance_currency, opening_balance_recorded_at
+		) VALUES (
+			gen_random_uuid(), $1, $2, $3, $4,
+			$5, $6, $7,
+			$8, $9, $10, $11, $12,
+			$13,
+			$14, $15, $16
+		) RETURNING id`
+
+	var dbID uuid.UUID
+	err = tx.QueryRow(ctx, logQuery,
+		log.CreatedAt, userID, log.UpdatedAt, userID,
+		log.LogID, log.AccountID, log.Version,
+		log.StatusTracking.CurrentStatus.String(), nullString(log.StatusTracking.PreviousStatus),
+		log.StatusTracking.StatusUpdatedAt, log.StatusTracking.StatusReason,
+		nullStringValue(log.StatusTracking.FailureReason),
+		log.StatusTracking.ReconciliationStatus.String(),
+		log.OpeningBalance.Amount, openingBalanceCurrencyCode(log.OpeningBalance), nullTime(log.OpeningBalanceRecordedAt),
+	).Scan(&dbID)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return domain.ErrConflict
+		}
+		return fmt.Errorf("failed to insert financial position log: %w", err)
+	}
+
+	if err := r.insertTransactionLogEntries(ctx, tx, dbID, log.TransactionLogEntries); err != nil {
+		return err
+	}
+
+	if log.TransactionLineage != nil {
+		if err := r.insertTransactionLineage(ctx, tx, dbID, log.TransactionLineage); err != nil {
+			return err
+		}
+	}
+
+	if err := r.insertAuditTrailEntries(ctx, tx, dbID, log.AuditTrail); err != nil {
+		return err
+	}
+
+	if postFn != nil {
+		if err := postFn(tx); err != nil {
+			return fmt.Errorf("post-create outbox write failed: %w", err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
+}
+
+// UpdateWithOutbox updates an existing FinancialPositionLog and runs postFn within the same
+// database transaction, enabling atomic event outbox writes.
+func (r *PostgresRepository) UpdateWithOutbox(ctx context.Context, log *domain.FinancialPositionLog, postFn func(pgx.Tx) error) error {
+	if log == nil {
+		return ErrNilLog
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	if err := r.setSearchPath(ctx, tx); err != nil {
+		return err
+	}
+
+	var dbID uuid.UUID
+	err = tx.QueryRow(ctx, "SELECT id FROM financial_position_log WHERE log_id = $1 AND deleted_at IS NULL", log.LogID).Scan(&dbID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.ErrNotFound
+		}
+		return fmt.Errorf("failed to find log for update: %w", err)
+	}
+
+	previousVersion := log.Version - 1
+	userID := audit.GetUserFromContext(ctx)
+
+	updateQuery := `
+		UPDATE financial_position_log
+		SET updated_at = $1, updated_by = $2, version = $3,
+			current_status = $4, previous_status = $5, status_updated_at = $6,
+			status_reason = $7, failure_reason = $8, reconciliation_status = $9
+		WHERE id = $10 AND version = $11 AND deleted_at IS NULL`
+
+	result, err := tx.Exec(ctx, updateQuery,
+		log.UpdatedAt, userID, log.Version,
+		log.StatusTracking.CurrentStatus.String(), nullString(log.StatusTracking.PreviousStatus),
+		log.StatusTracking.StatusUpdatedAt, log.StatusTracking.StatusReason,
+		nullStringValue(log.StatusTracking.FailureReason),
+		log.StatusTracking.ReconciliationStatus.String(),
+		dbID, previousVersion,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update financial position log: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return domain.ErrOptimisticLock
+	}
+
+	_, err = tx.Exec(ctx, "DELETE FROM transaction_log_entry WHERE financial_position_log_id = $1", dbID)
+	if err != nil {
+		return fmt.Errorf("failed to delete old transaction log entries: %w", err)
+	}
+
+	if err := r.insertTransactionLogEntries(ctx, tx, dbID, log.TransactionLogEntries); err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(ctx, "DELETE FROM transaction_lineage WHERE financial_position_log_id = $1", dbID)
+	if err != nil {
+		return fmt.Errorf("failed to delete old transaction lineage: %w", err)
+	}
+
+	if log.TransactionLineage != nil {
+		if err := r.insertTransactionLineage(ctx, tx, dbID, log.TransactionLineage); err != nil {
+			return err
+		}
+	}
+
+	existingAuditIDs, err := r.getExistingAuditIDs(ctx, tx, dbID)
+	if err != nil {
+		return err
+	}
+
+	newAuditEntries := lo.Filter(log.AuditTrail, func(entry *domain.AuditTrailEntry, _ int) bool {
+		_, exists := existingAuditIDs[entry.AuditID]
+		return !exists
+	})
+
+	if len(newAuditEntries) > 0 {
+		if err := r.insertAuditTrailEntries(ctx, tx, dbID, newAuditEntries); err != nil {
+			return err
+		}
+	}
+
+	if postFn != nil {
+		if err := postFn(tx); err != nil {
+			return fmt.Errorf("post-update outbox write failed: %w", err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit update transaction: %w", err)
+	}
+
+	return nil
+}
+
 // List retrieves FinancialPositionLogs matching the given filter with pagination.
 // In multi-tenant mode, the context must contain the tenant ID for schema routing.
 func (r *PostgresRepository) List(ctx context.Context, filter domain.PositionLogFilter) ([]*domain.FinancialPositionLog, error) {
