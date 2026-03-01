@@ -117,10 +117,14 @@ func TestControlCurrentAccount_OutboxEvents(t *testing.T) {
 
 	outboxRepo := events.NewPostgresOutboxRepository(db)
 
+	// Use a unique account ID per test run to avoid cross-test pollution on the shared
+	// public.event_outbox table (which is not scoped to the tenant schema).
+	accountID := fmt.Sprintf("ACC-OUTBOX-%s", tid)
+
 	// Mock position keeping returns zero balance (needed for CLOSE validation)
 	mockPosKeeping := &mockPositionKeepingClient{
 		accountBalances: map[string]int64{
-			"ACC-OUTBOX-001": 0,
+			accountID: 0,
 		},
 	}
 
@@ -135,7 +139,6 @@ func TestControlCurrentAccount_OutboxEvents(t *testing.T) {
 		logger:           testLogger(),
 	}
 
-	accountID := "ACC-OUTBOX-001"
 	_ = createTestAccountForControl(t, ctx, repo, accountID)
 
 	t.Run("FreezeWritesOutboxEntry", func(t *testing.T) {
@@ -146,9 +149,13 @@ func TestControlCurrentAccount_OutboxEvents(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		// Verify exactly one outbox entry was created for the freeze event
+		// Verify exactly one outbox entry was created for the freeze event.
+		// Filter by topic + aggregate_id + service_name to avoid matching rows from other runs.
 		var entries []events.EventOutbox
-		err = db.Where("topic = ?", topics.CurrentAccountAccountFrozenV1).Find(&entries).Error
+		err = db.Where(
+			"topic = ? AND aggregate_id = ? AND service_name = ?",
+			topics.CurrentAccountAccountFrozenV1, accountID, "current-account",
+		).Find(&entries).Error
 		require.NoError(t, err)
 		require.Len(t, entries, 1, "exactly one frozen event should be in outbox")
 
@@ -170,7 +177,10 @@ func TestControlCurrentAccount_OutboxEvents(t *testing.T) {
 		require.NoError(t, err)
 
 		var entries []events.EventOutbox
-		err = db.Where("topic = ?", topics.CurrentAccountAccountUnfrozenV1).Find(&entries).Error
+		err = db.Where(
+			"topic = ? AND aggregate_id = ? AND service_name = ?",
+			topics.CurrentAccountAccountUnfrozenV1, accountID, "current-account",
+		).Find(&entries).Error
 		require.NoError(t, err)
 		require.Len(t, entries, 1, "exactly one unfrozen event should be in outbox")
 
@@ -191,7 +201,10 @@ func TestControlCurrentAccount_OutboxEvents(t *testing.T) {
 		require.NoError(t, err)
 
 		var entries []events.EventOutbox
-		err = db.Where("topic = ?", topics.CurrentAccountAccountClosedV1).Find(&entries).Error
+		err = db.Where(
+			"topic = ? AND aggregate_id = ? AND service_name = ?",
+			topics.CurrentAccountAccountClosedV1, accountID, "current-account",
+		).Find(&entries).Error
 		require.NoError(t, err)
 		require.Len(t, entries, 1, "exactly one closed event should be in outbox")
 
