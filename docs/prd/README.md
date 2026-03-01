@@ -79,6 +79,7 @@ stateDiagram-v2
 | PRD | Description |
 |-----|-------------|
 | [Asset-Agnostic Accounts](028-asset-agnostic-accounts.md) | Generalize account fields for non-fiat asset classes |
+| [Identity and Access Management](030-identity-access-management.md) | Bridge Party service identity to authentication with dynamic user management and RBAC |
 | [Meridian Edge](003-meridian-edge.md) | Embedded modular monolith for IoT devices and browser (WASM) |
 | [MCP Server](027-mcp-server.md) | Model Context Protocol server bridging LLMs to Meridian Core |
 | [Operational Gateway](029-operational-gateway.md) | Bidirectional asset-agnostic gateway for outbound instructions and inbound messages |
@@ -235,12 +236,25 @@ material.
 - [Codebase Health Audit](012-codebase-health-audit.md) - Remediation for documentation, CI/CD, and code hygiene
 - [Production Readiness Review](009-production-readiness-review.md) - Audit and remediation for production gaps
 
+### Identity & Access Control
+
+The Party service handles two distinct access control concerns:
+
+<!-- markdownlint-disable MD013 -->
+
+- [Party KYC/AML Provider Integration](020-party-kyc-aml-provider-integration.md) -
+  **Customer access control**: External KYC/AML verification for customer onboarding (regulatory)
+- [Identity and Access Management](030-identity-access-management.md) -
+  **Staff/operator access control**: Dynamic user management, role assignment,
+  JWT claims population (operational)
+
+<!-- markdownlint-enable MD013 -->
+
 ### Service Wiring (Micro-PRDs)
 
 - [Current Account Withdrawal Persistence](018-current-account-withdrawal-persistence.md) - Wire withdrawal-by-ID gRPC handlers
 - [Internal Account - PK Client](019-internal-account-position-keeping-client.md) -
   Wire PK gRPC client in Internal Account service
-- [Party KYC/AML Provider Integration](020-party-kyc-aml-provider-integration.md) - External KYC/AML provider adapter
 
 ### Deployment Targets
 
