@@ -29,7 +29,7 @@ manages those instrument definitions.
 
 ### BIAN Service Domain
 
-This ADR implements **BIAN Financial Instrument Reference Data Management** (v13.0.0):
+This ADR implements **BIAN Financial Instrument Reference Data Management** (v14.0.0):
 
 > "This Service Domain maintains a directory of financial instrument reference data"
 

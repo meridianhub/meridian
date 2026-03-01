@@ -188,7 +188,7 @@ localhost:9092
 
 ## Next Steps
 
-1. **Payment Stack**: PaymentInitiation → PaymentExecution → PaymentRailOperations
+1. **Payment Stack**: PaymentOrderInitiation → PaymentRail
 2. **Regulatory Compliance**: RegulatoryCompliance rules engine
 3. **Lending**: ConsumerLoan with Interest BQ
 4. **OpenTelemetry**: Distributed tracing with Jaeger

@@ -327,7 +327,7 @@ message ObservationRecorded {
 // ========================================
 
 // MarketInformationService provides operations for managing market data sets,
-// observations, and data sources following BIAN v13.0 Market Information Management.
+// observations, and data sources following BIAN v14.0 Market Information Management.
 service MarketInformationService {
   // ----------------------------------------
   // Data Set Operations

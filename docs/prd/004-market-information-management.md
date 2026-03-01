@@ -9,7 +9,7 @@ triggers:
   - Working with weather data or other contextual datasets
   - Configuring tenant-specific data sources
 instructions: |
-  This PRD defines the Market Information Management service following BIAN v13.0.
+  This PRD defines the Market Information Management service following BIAN v14.0.
   Key patterns: Unified CEL validation (mirrors InstrumentDefinition), loose coupling to Reference Data.
   Uses DataSetDefinition for schema, MarketPriceObservation for data points.
   Supports Time-Bound Quality Ladder (ADR-0017) for source authority.
@@ -78,7 +78,7 @@ instructions: |
 ## Executive Summary
 
 This PRD defines the requirements for implementing the **Market Information Management** service
-in Meridian, following the BIAN v13.0 Service Domain specification. This service provides the
+in Meridian, following the BIAN v14.0 Service Domain specification. This service provides the
 foundational market data layer that enables position valuation across all asset classes.
 
 ### Problem Statement
@@ -121,14 +121,14 @@ platform with CEL-validated schemas, enabling:
 
 ### Primary Service Domain
 
-**Market Information Management** (BIAN v13.0)
+**Market Information Management** (BIAN v14.0)
 
 > "Consolidates and improves market information from multiple sources to build up a bank
 > knowledge base in targeted areas."
 
 **BIAN Semantic API Specification:**
 
-- [Market Information Management](https://bian.org/servicelandscape-12-0-0/views/view_50991.html)
+- [Market Information Management](https://bian.org/servicelandscape-14-0-0/views/view_50991.html)
 
 **BIAN References:**
 

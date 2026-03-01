@@ -13,7 +13,8 @@
                 "seedData",
                 "paymentRails",
                 "partyTypes",
-                "mappings"
+                "mappings",
+                "operationalGateway"
             ],
             "properties": {
                 "version": {
@@ -85,6 +86,11 @@
                     "additionalProperties": false,
                     "type": "array",
                     "description": "mappings defines the bidirectional field mapping definitions available to this tenant. Each mapping describes how an external JSON payload is transformed into an internal Meridian gRPC service call."
+                },
+                "operationalGateway": {
+                    "$ref": "#/definitions/meridian.control_plane.v1.OperationalGatewayConfig",
+                    "additionalProperties": false,
+                    "description": "operational_gateway defines external system integrations for this tenant."
                 }
             },
             "additionalProperties": false,
@@ -167,6 +173,236 @@
             "title": "Account Type Policies",
             "description": "AccountTypePolicies contains CEL expressions that govern account behavior. CEL syntax validation is deferred to the runtime validator - the manifest only stores the expression strings."
         },
+        "meridian.control_plane.v1.ApiKeyAuthConfig": {
+            "required": [
+                "headerName",
+                "apiKeySecretRef"
+            ],
+            "properties": {
+                "headerName": {
+                    "type": "string",
+                    "description": "header_name is the HTTP header used to transmit the API key. Example: \"X-API-Key\", \"Authorization\""
+                },
+                "apiKeySecretRef": {
+                    "type": "string",
+                    "description": "api_key_secret_ref is a reference to the secret store key that holds the API key value. Must use a supported secret URI scheme: \"sm://\u003cstore\u003e/\u003ckey\u003e\" or \"env://\u003cVAR_NAME\u003e\". Example: \"sm://stripe/api_key\" or \"env://STRIPE_API_KEY\""
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "Api Key Auth Config",
+            "description": "ApiKeyAuthConfig configures authentication via a static API key header. All sensitive values are expressed as secret references, never raw values."
+        },
+        "meridian.control_plane.v1.AuthConfigManifest": {
+            "properties": {
+                "apiKey": {
+                    "$ref": "#/definitions/meridian.control_plane.v1.ApiKeyAuthConfig",
+                    "additionalProperties": false,
+                    "description": "api_key authenticates using a static API key in a header."
+                },
+                "basic": {
+                    "$ref": "#/definitions/meridian.control_plane.v1.BasicAuthConfig",
+                    "additionalProperties": false,
+                    "description": "basic authenticates using HTTP Basic authentication."
+                },
+                "oauth2": {
+                    "$ref": "#/definitions/meridian.control_plane.v1.OAuth2AuthConfig",
+                    "additionalProperties": false,
+                    "description": "oauth2 authenticates using OAuth 2.0 client credentials flow."
+                },
+                "hmac": {
+                    "$ref": "#/definitions/meridian.control_plane.v1.HMACAuthConfig",
+                    "additionalProperties": false,
+                    "description": "hmac authenticates by signing requests with HMAC."
+                },
+                "mtls": {
+                    "$ref": "#/definitions/meridian.control_plane.v1.MTLSAuthConfig",
+                    "additionalProperties": false,
+                    "description": "mtls authenticates using mutual TLS client certificates."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "allOf": [
+                {
+                    "oneOf": [
+                        {
+                            "not": {
+                                "anyOf": [
+                                    {
+                                        "required": [
+                                            "apiKey"
+                                        ]
+                                    },
+                                    {
+                                        "required": [
+                                            "basic"
+                                        ]
+                                    },
+                                    {
+                                        "required": [
+                                            "oauth2"
+                                        ]
+                                    },
+                                    {
+                                        "required": [
+                                            "hmac"
+                                        ]
+                                    },
+                                    {
+                                        "required": [
+                                            "mtls"
+                                        ]
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "required": [
+                                "apiKey"
+                            ]
+                        },
+                        {
+                            "required": [
+                                "basic"
+                            ]
+                        },
+                        {
+                            "required": [
+                                "oauth2"
+                            ]
+                        },
+                        {
+                            "required": [
+                                "hmac"
+                            ]
+                        },
+                        {
+                            "required": [
+                                "mtls"
+                            ]
+                        }
+                    ]
+                }
+            ],
+            "title": "Auth Config Manifest",
+            "description": "AuthConfigManifest defines the authentication configuration for a provider connection. Exactly one variant must be set. All sensitive values use secret references."
+        },
+        "meridian.control_plane.v1.BasicAuthConfig": {
+            "required": [
+                "username",
+                "passwordSecretRef"
+            ],
+            "properties": {
+                "username": {
+                    "type": "string",
+                    "description": "username is the Basic auth username (not sensitive - stored directly)."
+                },
+                "passwordSecretRef": {
+                    "type": "string",
+                    "description": "password_secret_ref is a reference to the secret store key that holds the password. Must use a supported secret URI scheme: \"sm://\u003cstore\u003e/\u003ckey\u003e\" or \"env://\u003cVAR_NAME\u003e\"."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "Basic Auth Config",
+            "description": "BasicAuthConfig configures HTTP Basic authentication. All sensitive values are expressed as secret references, never raw values."
+        },
+        "meridian.control_plane.v1.HMACAuthConfig": {
+            "required": [
+                "algorithm",
+                "secretRef",
+                "signatureHeader"
+            ],
+            "properties": {
+                "algorithm": {
+                    "type": "string",
+                    "description": "algorithm is the HMAC signing algorithm. Supported values: \"sha256\", \"sha512\""
+                },
+                "secretRef": {
+                    "type": "string",
+                    "description": "secret_ref is a reference to the secret store key that holds the HMAC signing secret. Must use a supported secret URI scheme: \"sm://\u003cstore\u003e/\u003ckey\u003e\" or \"env://\u003cVAR_NAME\u003e\"."
+                },
+                "signatureHeader": {
+                    "type": "string",
+                    "description": "signature_header is the HTTP header where the computed signature is placed. Example: \"X-Signature\", \"X-Hub-Signature-256\""
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "HMAC Auth Config",
+            "description": "HMACAuthConfig configures HMAC-based request signing. All sensitive values are expressed as secret references, never raw values."
+        },
+        "meridian.control_plane.v1.InboundRouteConfig": {
+            "required": [
+                "externalType",
+                "handlerSaga",
+                "mappingId"
+            ],
+            "properties": {
+                "externalType": {
+                    "type": "string",
+                    "description": "external_type identifies the category of inbound event from the provider. Example: \"stripe.payment_intent.succeeded\", \"modulr.account.credited\""
+                },
+                "handlerSaga": {
+                    "type": "string",
+                    "description": "handler_saga is the name of the SagaDefinition to invoke when this event is received. Must match a name in the manifest's sagas list."
+                },
+                "mappingId": {
+                    "type": "string",
+                    "description": "mapping_id is the name of the MappingDefinition applied to transform the inbound event payload before passing it to the handler saga. Must match a name in the manifest's mappings list. If empty, the payload is passed as-is."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "Inbound Route Config",
+            "description": "InboundRouteConfig declares how inbound events from external providers are handled. This is a Phase 5 placeholder — configuration is captured in the manifest but runtime support is not yet implemented."
+        },
+        "meridian.control_plane.v1.InstructionRouteConfig": {
+            "required": [
+                "instructionType",
+                "connectionId",
+                "fallbackConnectionId",
+                "outboundMappingId",
+                "inboundMappingId",
+                "httpMethod",
+                "pathTemplate"
+            ],
+            "properties": {
+                "instructionType": {
+                    "type": "string",
+                    "description": "instruction_type is the instruction category this route handles. Must be unique within the manifest's instruction_routes list. Example: \"payment.initiate\", \"account.freeze\", \"kyc.verify\""
+                },
+                "connectionId": {
+                    "type": "string",
+                    "description": "connection_id references the primary ProviderConnectionConfig used to dispatch matching instructions. Must match a connection_id defined in operational_gateway.provider_connections."
+                },
+                "fallbackConnectionId": {
+                    "type": "string",
+                    "description": "fallback_connection_id references an optional secondary connection used when the primary is unhealthy. Must match a connection_id defined in operational_gateway.provider_connections, if set. If not set, instructions fail without fallback when the primary connection is unhealthy."
+                },
+                "outboundMappingId": {
+                    "type": "string",
+                    "description": "outbound_mapping_id is the name of the MappingDefinition applied to transform the instruction payload from the internal Meridian format to the provider's expected format before dispatch. Must match a name in the manifest's mappings list. If empty, the payload is sent as-is."
+                },
+                "inboundMappingId": {
+                    "type": "string",
+                    "description": "inbound_mapping_id is the name of the MappingDefinition applied to transform provider callback payloads from the provider's format to the internal Meridian format. Must match a name in the manifest's mappings list. If empty, callback payloads are processed as-is."
+                },
+                "httpMethod": {
+                    "type": "string",
+                    "description": "http_method is the HTTP method used when dispatching via HTTPS or WEBHOOK protocol. Example: \"POST\", \"PUT\", \"PATCH\" Required for HTTPS and WEBHOOK protocols; ignored for GRPC, MQTT, AMQP."
+                },
+                "pathTemplate": {
+                    "type": "string",
+                    "description": "path_template is the URL path template appended to the connection base_url. Supports simple variable substitution using {field_name} placeholders resolved from the payload. Example: \"/v1/payments/{payment_id}/execute\", \"/accounts/{account_id}/freeze\""
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "Instruction Route Config",
+            "description": "InstructionRouteConfig maps an instruction_type to a provider connection for outbound dispatch. Routes determine which connection handles a given type of instruction and how the payload is transformed before dispatch."
+        },
         "meridian.control_plane.v1.InstrumentDefinition": {
             "required": [
                 "code",
@@ -236,6 +472,31 @@
             "title": "Instrument Dimensions",
             "description": "InstrumentDimensions describes the unit and precision of an instrument's quantities."
         },
+        "meridian.control_plane.v1.MTLSAuthConfig": {
+            "required": [
+                "clientCertSecretRef",
+                "clientKeySecretRef",
+                "caCertSecretRef"
+            ],
+            "properties": {
+                "clientCertSecretRef": {
+                    "type": "string",
+                    "description": "client_cert_secret_ref is a reference to the secret store key holding the PEM-encoded client certificate. Must use a supported secret URI scheme: \"sm://\u003cstore\u003e/\u003ckey\u003e\" or \"env://\u003cVAR_NAME\u003e\"."
+                },
+                "clientKeySecretRef": {
+                    "type": "string",
+                    "description": "client_key_secret_ref is a reference to the secret store key holding the PEM-encoded private key. Must use a supported secret URI scheme: \"sm://\u003cstore\u003e/\u003ckey\u003e\" or \"env://\u003cVAR_NAME\u003e\"."
+                },
+                "caCertSecretRef": {
+                    "type": "string",
+                    "description": "ca_cert_secret_ref is an optional reference to the secret store key holding the CA certificate for verifying the provider's server certificate. If set, must use a supported secret URI scheme: \"sm://\u003cstore\u003e/\u003ckey\u003e\" or \"env://\u003cVAR_NAME\u003e\"."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "MTLS Auth Config",
+            "description": "MTLSAuthConfig configures mutual TLS (mTLS) authentication. All sensitive values are expressed as secret references, never raw values."
+        },
         "meridian.control_plane.v1.ManifestMetadata": {
             "required": [
                 "name",
@@ -260,6 +521,76 @@
             "type": "object",
             "title": "========================================\n Manifest Metadata\n ========================================",
             "description": "======================================== Manifest Metadata ========================================  ManifestMetadata contains identifying information about a manifest."
+        },
+        "meridian.control_plane.v1.OAuth2AuthConfig": {
+            "required": [
+                "tokenUrl",
+                "clientId",
+                "clientSecretRef",
+                "scopes"
+            ],
+            "properties": {
+                "tokenUrl": {
+                    "type": "string",
+                    "description": "token_url is the OAuth 2.0 token endpoint."
+                },
+                "clientId": {
+                    "type": "string",
+                    "description": "client_id is the OAuth 2.0 client identifier (not sensitive - stored directly)."
+                },
+                "clientSecretRef": {
+                    "type": "string",
+                    "description": "client_secret_ref is a reference to the secret store key that holds the client secret. Must use a supported secret URI scheme: \"sm://\u003cstore\u003e/\u003ckey\u003e\" or \"env://\u003cVAR_NAME\u003e\"."
+                },
+                "scopes": {
+                    "items": {
+                        "type": "string"
+                    },
+                    "type": "array",
+                    "description": "scopes lists the OAuth 2.0 scopes to request."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "O Auth 2 Auth Config",
+            "description": "OAuth2AuthConfig configures OAuth 2.0 client credentials flow authentication. All sensitive values are expressed as secret references, never raw values."
+        },
+        "meridian.control_plane.v1.OperationalGatewayConfig": {
+            "required": [
+                "providerConnections",
+                "instructionRoutes",
+                "inboundRoutes"
+            ],
+            "properties": {
+                "providerConnections": {
+                    "items": {
+                        "$ref": "#/definitions/meridian.control_plane.v1.ProviderConnectionConfig"
+                    },
+                    "additionalProperties": false,
+                    "type": "array",
+                    "description": "provider_connections defines the external provider endpoints this tenant connects to."
+                },
+                "instructionRoutes": {
+                    "items": {
+                        "$ref": "#/definitions/meridian.control_plane.v1.InstructionRouteConfig"
+                    },
+                    "additionalProperties": false,
+                    "type": "array",
+                    "description": "instruction_routes maps instruction types to provider connections for outbound dispatch."
+                },
+                "inboundRoutes": {
+                    "items": {
+                        "$ref": "#/definitions/meridian.control_plane.v1.InboundRouteConfig"
+                    },
+                    "additionalProperties": false,
+                    "type": "array",
+                    "description": "inbound_routes defines how inbound events from external providers are handled (Phase 5 placeholder)."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "========================================\n Operational Gateway Config\n ========================================",
+            "description": "======================================== Operational Gateway Config ========================================  OperationalGatewayConfig declares the external system integrations for a tenant. It configures provider connections, outbound instruction routing, and inbound event handling."
         },
         "meridian.control_plane.v1.PaymentRails": {
             "required": [
@@ -379,6 +710,131 @@
             "type": "object",
             "title": "Platform Fee",
             "description": "PlatformFee defines the fee structure for payment rail transactions."
+        },
+        "meridian.control_plane.v1.ProviderConnectionConfig": {
+            "required": [
+                "connectionId",
+                "providerName",
+                "providerType",
+                "protocol",
+                "baseUrl",
+                "auth",
+                "retryPolicy",
+                "rateLimit"
+            ],
+            "properties": {
+                "connectionId": {
+                    "type": "string",
+                    "description": "connection_id is the stable, unique identifier for this connection within the manifest. Used by InstructionRouteConfig to reference this connection. Must be unique within the manifest. Example: \"stripe-payments\", \"modulr-uk\", \"kraken-energy-grid\""
+                },
+                "providerName": {
+                    "type": "string",
+                    "description": "provider_name is the human-readable name for the external provider. Example: \"Stripe\", \"Modulr\", \"Kraken Energy Grid\""
+                },
+                "providerType": {
+                    "type": "string",
+                    "description": "provider_type is a machine-readable classifier for the provider category. Example: \"payment_gateway\", \"kyc_provider\", \"energy_scheduler\""
+                },
+                "protocol": {
+                    "enum": [
+                        "PROVIDER_PROTOCOL_UNSPECIFIED",
+                        0,
+                        "PROVIDER_PROTOCOL_HTTPS",
+                        1,
+                        "PROVIDER_PROTOCOL_GRPC",
+                        2,
+                        "PROVIDER_PROTOCOL_WEBHOOK",
+                        3,
+                        "PROVIDER_PROTOCOL_MQTT",
+                        4,
+                        "PROVIDER_PROTOCOL_AMQP",
+                        5
+                    ],
+                    "oneOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "integer"
+                        }
+                    ],
+                    "title": "Provider Protocol",
+                    "description": "ProviderProtocol defines the transport protocol used for a provider connection. Mirrors the runtime Protocol enum but is self-contained in the manifest config."
+                },
+                "baseUrl": {
+                    "type": "string",
+                    "description": "base_url is the root URL of the provider's API endpoint. Must be a valid URI. Example: \"https://api.stripe.com\""
+                },
+                "auth": {
+                    "$ref": "#/definitions/meridian.control_plane.v1.AuthConfigManifest",
+                    "additionalProperties": false,
+                    "description": "auth is the authentication configuration for this connection."
+                },
+                "retryPolicy": {
+                    "$ref": "#/definitions/meridian.control_plane.v1.RetryPolicyConfig",
+                    "additionalProperties": false,
+                    "description": "retry_policy defines how failed dispatch attempts are retried. If not set, a default policy is used by the runtime."
+                },
+                "rateLimit": {
+                    "$ref": "#/definitions/meridian.control_plane.v1.RateLimitConfig",
+                    "additionalProperties": false,
+                    "description": "rate_limit controls the outbound dispatch rate for this connection. If not set, no rate limiting is applied."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "Provider Connection Config",
+            "description": "ProviderConnectionConfig declares a single external provider connection within the manifest. Each connection is identified by a stable connection_id used in InstructionRouteConfig."
+        },
+        "meridian.control_plane.v1.RateLimitConfig": {
+            "required": [
+                "requestsPerSecond",
+                "burstSize"
+            ],
+            "properties": {
+                "requestsPerSecond": {
+                    "type": "number",
+                    "description": "requests_per_second is the maximum sustained dispatch rate."
+                },
+                "burstSize": {
+                    "type": "integer",
+                    "description": "burst_size is the maximum number of requests allowed to exceed the rate limit momentarily."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "Rate Limit Config",
+            "description": "RateLimitConfig controls the outbound dispatch rate for a connection."
+        },
+        "meridian.control_plane.v1.RetryPolicyConfig": {
+            "required": [
+                "maxAttempts",
+                "initialBackoffSeconds",
+                "maxBackoffSeconds",
+                "backoffMultiplier"
+            ],
+            "properties": {
+                "maxAttempts": {
+                    "type": "integer",
+                    "description": "max_attempts is the total number of dispatch attempts (including the first). A value of 1 means no retries (one attempt only)."
+                },
+                "initialBackoffSeconds": {
+                    "type": "integer",
+                    "description": "initial_backoff_seconds is the delay before the first retry in seconds."
+                },
+                "maxBackoffSeconds": {
+                    "type": "integer",
+                    "description": "max_backoff_seconds caps the computed backoff to prevent unbounded delays."
+                },
+                "backoffMultiplier": {
+                    "type": "number",
+                    "description": "backoff_multiplier is the factor by which the backoff duration grows after each attempt. Example: initial=1s, multiplier=2.0 → 1s, 2s, 4s, 8s..."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "Retry Policy Config",
+            "description": "RetryPolicyConfig defines the backoff strategy for failed dispatch attempts."
         },
         "meridian.control_plane.v1.SagaDefinition": {
             "required": [

@@ -639,7 +639,7 @@ on:
 - [ADR-0004: Event Schema Evolution](../adr/0004-event-schema-evolution.md)
 - [Protocol Buffers Language Guide](https://protobuf.dev/programming-guides/proto3/)
 - [buf CLI Documentation](https://buf.build/docs/)
-- [BIAN Service Landscape](https://bian.org/servicelandscape-13-0-0/)
+- [BIAN Service Landscape](https://bian.org/servicelandscape-14-0-0/)
 - [Git Hooks Documentation](../../.githooks/README.md)
 
 ## Getting Help

@@ -437,7 +437,7 @@ This creates an initial transaction entry that establishes the account's startin
 
 ## References
 
-- [BIAN Position Keeping Specification](https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/PositionKeeping.yaml)
+- [BIAN Position Keeping Specification](https://github.com/bian-official/public/blob/main/release14.0.0/semantic-apis/oas3%20/yamls/PositionKeeping.yaml)
 - [Service Architecture](../README.md)
 - [Proto Definitions](../../api/proto/meridian/position_keeping/v1/)
 - [ADR-0023: Balance Delegation to Position Keeping](../../docs/adr/0023-balance-delegation-to-position-keeping.md)

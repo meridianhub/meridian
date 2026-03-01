@@ -97,7 +97,7 @@ The Product Directory is a **composition of existing capabilities behind a new A
 
 ### Service Domain Mapping
 
-BIAN 13.0 defines a **Product Directory** service domain (SD-CR-006) that
+BIAN 14.0 defines a **Product Directory** service domain (SD-CR-006) that
 maintains product/service specifications. BIAN service domains are logical
 separations, not deployment mandates. The Product Directory maps to a
 **module within Reference Data**, consistent with how instruments, sagas,
@@ -1275,4 +1275,4 @@ codebase that the AccountTypeRegistry eliminates:
 - **InternalAccountType enum** (to be removed): `services/internal-account/domain/account_type.go`
 - **Multi-tenant isolation**: `shared/platform/db/gorm_tenant_scope.go` (schema-per-tenant, no `tenant_id` column)
 - **BIAN alignment PRD**: `.taskmaster/docs/prd-bian-alignment.md`
-- **BIAN 13.0 Product Directory**: SD-CR-006 (external)
+- **BIAN 14.0 Product Directory**: SD-CR-006 (external)

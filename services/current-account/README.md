@@ -623,7 +623,7 @@ All webhook delivery attempts are recorded in the `webhook_deliveries` table for
 
 ## References
 
-- [BIAN Current Account Specification](https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/CurrentAccount.yaml)
+- [BIAN Current Account Specification](https://github.com/bian-official/public/blob/main/release14.0.0/semantic-apis/oas3%20/yamls/CurrentAccount.yaml)
 - [Service Architecture](../README.md)
 - [Proto Definitions](../../api/proto/meridian/current_account/v1/)
 - [Event Proto Definitions](../../api/proto/meridian/events/v1/current_account_events.proto)

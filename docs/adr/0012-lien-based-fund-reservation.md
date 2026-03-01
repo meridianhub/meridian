@@ -46,7 +46,7 @@ to reserve funds without immediately debiting them.
 - **Overdraft prevention**: Must guarantee funds exist before initiating external payment
 - **Saga compensation**: Must be able to release funds if external payment fails
 - **Concurrent access**: Multiple payments from same account must work correctly
-- **BIAN alignment**: Follow BIAN v13 Current Account service domain patterns
+- **BIAN alignment**: Follow BIAN v14 Current Account service domain patterns
 - **Audit requirements**: Full traceability of fund reservations for regulatory compliance
 - **Performance**: Avoid blocking concurrent account operations during long-running sagas
 
@@ -369,7 +369,7 @@ if err := paymentGateway.Submit(order); err != nil {
 ## Links
 
 - [ADR-0005: Adapter Pattern for Layer Translation](0005-adapter-pattern-layer-translation.md)
-- [BIAN v13 Current Account Service Domain](https://bian.org/semantic-apis/current-account/) - Defines the
+- [BIAN v14 Current Account Service Domain](https://bian.org/semantic-apis/current-account/) - Defines the
   CurrentAccountFacility control record and associated behavior qualifiers
 - [Saga Pattern (Microsoft)](https://docs.microsoft.com/en-us/azure/architecture/reference-architectures/saga/saga)
 - [GitHub Issue #7: Payment Order Service](https://github.com/meridianhub/meridian/issues/7)
