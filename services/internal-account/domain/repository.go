@@ -5,6 +5,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // Repository defines the persistence port for InternalAccount aggregates.
@@ -17,6 +18,11 @@ type Repository interface {
 	// For new accounts, returns ErrDuplicateAccountCode if the code already exists.
 	// For updates, returns ErrVersionMismatch on optimistic lock failure.
 	Save(ctx context.Context, account InternalAccount) error
+
+	// SaveInTx persists a new or updated account within the provided transaction.
+	// Used when the caller manages the transaction boundary (e.g., to atomically
+	// persist the account and publish an outbox event in the same transaction).
+	SaveInTx(ctx context.Context, account InternalAccount, tx *gorm.DB) error
 
 	// FindByID retrieves an account by its UUID.
 	// Returns ErrAccountNotFound if the account does not exist.

@@ -25,6 +25,8 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
+	"github.com/meridianhub/meridian/shared/platform/events"
+	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/meridianhub/meridian/shared/platform/ports"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
@@ -91,6 +93,10 @@ func run(logger *slog.Logger) error {
 	repo := persistence.NewRepository(db)
 	pmRepo := persistence.NewPaymentMethodRepository(db)
 	partyTypeRepo := persistence.NewPartyTypeDefinitionRepository(db)
+	outboxRepo := events.NewPostgresOutboxRepository(db)
+
+	// Create outbox publisher for event publishing
+	outboxPublisher := events.NewOutboxPublisher("party")
 
 	// Create party service
 	partyService, err := service.NewService(repo, logger)
@@ -98,6 +104,7 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("failed to create party service: %w", err)
 	}
 	partyService.WithPaymentMethodRepository(pmRepo)
+	partyService.WithOutboxPublisher(outboxPublisher, db)
 
 	// Create and wire party type definition service
 	partyTypeSvc, err := service.NewPartyTypeDefinitionService(partyTypeRepo)
@@ -147,11 +154,12 @@ func run(logger *slog.Logger) error {
 		partyService.WithVerificationProvider(provider)
 
 		verificationRepo = persistence.NewVerificationRepository(db)
+		verificationEventPublisher := service.NewOutboxVerificationEventPublisher(outboxPublisher, db)
 		verificationSvc, err = service.NewVerificationService(
 			&partyRepoAdapter{repo: repo},
 			verificationRepo,
 			provider,
-			nil, // eventPublisher - not yet wired
+			verificationEventPublisher,
 			logger,
 		)
 		if err != nil {
@@ -160,6 +168,30 @@ func run(logger *slog.Logger) error {
 	}
 
 	logger.Info("party service initialized")
+
+	// Start outbox worker for Kafka event delivery (optional - depends on KAFKA_BOOTSTRAP_SERVERS)
+	var outboxWorkerStop func()
+	bootstrapServers := env.GetEnvOrDefault("KAFKA_BOOTSTRAP_SERVERS", "")
+	if bootstrapServers != "" {
+		producer, err := kafka.NewProtoProducer(kafka.ProducerConfig{
+			BootstrapServers: bootstrapServers,
+			ClientID:         "party-outbox-worker",
+			Acks:             "all",
+			Retries:          3,
+			Compression:      "snappy",
+		})
+		if err != nil {
+			logger.Warn("failed to create Kafka producer for outbox worker - events will be persisted but not published",
+				"error", err)
+		} else {
+			w := events.NewWorker(outboxRepo, producer, events.DefaultWorkerConfig("party"), logger)
+			w.Start(ctx)
+			outboxWorkerStop = w.Stop
+			logger.Info("outbox worker started")
+		}
+	} else {
+		logger.Warn("KAFKA_BOOTSTRAP_SERVERS not configured, outbox worker disabled - events will be persisted but not published")
+	}
 
 	// Initialize auth interceptor (optional - based on AUTH_ENABLED)
 	authConfig := bootstrap.DefaultAuthConfig(logger)
@@ -291,6 +323,13 @@ func run(logger *slog.Logger) error {
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			return httpServer.Shutdown(shutdownCtx)
+		})
+	}
+
+	if outboxWorkerStop != nil {
+		orchestrator.AddCleanup(func() error {
+			outboxWorkerStop()
+			return nil
 		})
 	}
 

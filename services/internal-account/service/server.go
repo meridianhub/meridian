@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
+	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
@@ -24,11 +25,14 @@ import (
 	"github.com/meridianhub/meridian/services/reference-data/cache"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	vf "github.com/meridianhub/meridian/shared/pkg/valuationfeature"
+	"github.com/meridianhub/meridian/shared/platform/events"
+	"github.com/meridianhub/meridian/shared/platform/events/topics"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"gorm.io/gorm"
 )
 
 // Operation status constants for metrics and logging.
@@ -58,6 +62,8 @@ type Service struct {
 	valuationEngine       ValuationEngine              // Optional: executes valuation method logic
 	idempotencyService    idempotency.Service          // Optional: nil = no Redis idempotency guard
 	accountTypeCache      *cache.LocalAccountTypeCache // Optional: resolves product_type_code
+	outboxPublisher       *events.OutboxPublisher      // Optional: nil = no event publishing
+	db                    *gorm.DB                     // Required when outboxPublisher is set
 	logger                *slog.Logger
 	tracer                *observability.Tracer
 }
@@ -153,6 +159,22 @@ func WithAccountTypeCache(c *cache.LocalAccountTypeCache) Option {
 	return func(s *Service) {
 		s.accountTypeCache = c
 	}
+}
+
+// WithOutboxPublisher sets the outbox publisher and database connection for event publishing.
+// When set, InitiateInternalAccount publishes a FacilityCreatedEvent atomically with the save.
+func WithOutboxPublisher(publisher *events.OutboxPublisher, db *gorm.DB) Option {
+	return func(s *Service) {
+		s.outboxPublisher = publisher
+		s.db = db
+	}
+}
+
+// SetOutboxPublisher wires an outbox publisher into an already-constructed service.
+// This is the preferred approach when using constructors other than NewServiceFull.
+func (s *Service) SetOutboxPublisher(publisher *events.OutboxPublisher, db *gorm.DB) {
+	s.outboxPublisher = publisher
+	s.db = db
 }
 
 // NewServiceFull creates a service with all dependencies using functional options.
@@ -449,8 +471,8 @@ func (s *Service) InitiateInternalAccount(ctx context.Context, req *pb.InitiateI
 		return nil, status.Errorf(codes.InvalidArgument, "counterparty details required for %s accounts", accountType)
 	}
 
-	// Persist via repository
-	if err := s.repo.Save(ctx, account); err != nil {
+	// Persist via repository (atomically with outbox event when publisher is configured)
+	if err := s.saveAccountWithEvent(ctx, account); err != nil {
 		if errors.Is(err, persistence.ErrDuplicateCode) {
 			operationStatus = opStatusDuplicateCode
 			return nil, status.Errorf(codes.AlreadyExists, "account code already exists: %s", req.AccountCode)
@@ -827,6 +849,34 @@ func (s *Service) GetBalance(ctx context.Context, req *pb.GetBalanceRequest) (*p
 		CurrentBalance: currentBalance,
 		AsOf:           asOf,
 	}, nil
+}
+
+// saveAccountWithEvent saves the account and optionally publishes a FacilityCreatedEvent to the outbox
+// in the same database transaction for atomicity.
+func (s *Service) saveAccountWithEvent(ctx context.Context, account domain.InternalAccount) error {
+	if s.outboxPublisher == nil || s.db == nil {
+		return s.repo.Save(ctx, account)
+	}
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := s.repo.SaveInTx(ctx, account, tx); err != nil {
+			return err
+		}
+		proto := &eventsv1.FacilityCreatedEvent{
+			EventId:        uuid.New().String(),
+			AccountId:      account.AccountID(),
+			AccountCode:    account.AccountCode(),
+			AccountType:    account.AccountType().String(),
+			InstrumentCode: account.InstrumentCode(),
+			Timestamp:      timestamppb.New(time.Now().UTC()),
+		}
+		return s.outboxPublisher.Publish(ctx, tx, proto, events.PublishConfig{
+			EventType:     "internal-account.facility-created.v1",
+			AggregateID:   account.AccountID(),
+			AggregateType: "InternalAccount",
+			Topic:         topics.InternalAccountFacilityCreatedV1,
+			CorrelationID: uuid.New().String(),
+		})
+	})
 }
 
 // mapPositionKeepingErrorToGRPC maps Position Keeping service errors to appropriate gRPC status codes.

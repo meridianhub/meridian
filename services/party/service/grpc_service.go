@@ -10,12 +10,15 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"github.com/meridianhub/meridian/services/party/adapters/persistence"
 	"github.com/meridianhub/meridian/services/party/domain"
 	"github.com/meridianhub/meridian/services/party/verification"
 	"github.com/meridianhub/meridian/shared/platform/auth"
+	"github.com/meridianhub/meridian/shared/platform/events"
+	"github.com/meridianhub/meridian/shared/platform/events/topics"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -55,6 +58,10 @@ var (
 // All methods accept context for cancellation, timeout, and tracing support.
 type Repository interface {
 	Save(ctx context.Context, party *domain.Party) error
+	// SaveInTx persists a party within an existing database transaction.
+	// Use this when the caller manages the transaction boundary (e.g., to include
+	// an outbox event write in the same transaction for atomicity).
+	SaveInTx(ctx context.Context, party *domain.Party, tx *gorm.DB) error
 	FindByID(ctx context.Context, partyID uuid.UUID) (*domain.Party, error)
 	FindByIDForUpdate(ctx context.Context, partyID uuid.UUID) (*domain.Party, error)
 	FindByExternalReference(ctx context.Context, ref, refType string) (*domain.Party, error)
@@ -92,6 +99,8 @@ type Service struct {
 	verificationProvider verification.Provider
 	partyTypeService     *PartyTypeDefinitionService
 	attributeValidator   *AttributeValidator
+	outboxPublisher      *events.OutboxPublisher
+	db                   *gorm.DB // raw connection for wrapping transactions with outbox writes
 	logger               *slog.Logger
 }
 
@@ -130,6 +139,15 @@ func (s *Service) WithVerificationProvider(provider verification.Provider) *Serv
 // PartyTypeDefinition schema and CEL rules.
 func (s *Service) WithAttributeValidator(v *AttributeValidator) *Service {
 	s.attributeValidator = v
+	return s
+}
+
+// WithOutboxPublisher enables transactional event publishing via the outbox pattern.
+// When set, RegisterParty and UpdateParty publish domain events atomically with the party save.
+// db must be the same *gorm.DB instance used by the repository.
+func (s *Service) WithOutboxPublisher(publisher *events.OutboxPublisher, db *gorm.DB) *Service {
+	s.outboxPublisher = publisher
+	s.db = db
 	return s
 }
 
@@ -233,8 +251,23 @@ func (s *Service) RegisterParty(ctx context.Context, req *pb.RegisterPartyReques
 		}
 	}
 
-	// Save party
-	if err := s.repo.Save(ctx, party); err != nil {
+	// Save party and publish event atomically
+	if err := s.savePartyWithEvent(ctx, party, func(tx *gorm.DB) error {
+		event := &eventsv1.PartyCreatedEvent{
+			EventId:   uuid.New().String(),
+			PartyId:   party.ID().String(),
+			PartyType: string(party.PartyType()),
+			LegalName: party.LegalName(),
+			Status:    string(party.Status()),
+			Timestamp: timestamppb.New(time.Now().UTC()),
+		}
+		return s.outboxPublisher.Publish(ctx, tx, event, events.PublishConfig{
+			EventType:     "party.created.v1",
+			AggregateID:   party.ID().String(),
+			AggregateType: "Party",
+			Topic:         topics.PartyCreatedV1,
+		})
+	}); err != nil {
 		if errors.Is(err, persistence.ErrPartyExists) {
 			s.logger.Warn("party already exists (race condition)",
 				"party_id", party.ID().String())
@@ -542,8 +575,22 @@ func (s *Service) UpdateParty(ctx context.Context, req *pb.UpdatePartyRequest) (
 		}
 	}
 
-	// Persist updated party
-	if err := s.repo.Save(ctx, party); err != nil {
+	// Persist updated party and publish event atomically
+	if err := s.savePartyWithEvent(ctx, party, func(tx *gorm.DB) error {
+		event := &eventsv1.PartyUpdatedEvent{
+			EventId:   uuid.New().String(),
+			PartyId:   party.ID().String(),
+			PartyType: string(party.PartyType()),
+			Status:    string(party.Status()),
+			Timestamp: timestamppb.New(time.Now().UTC()),
+		}
+		return s.outboxPublisher.Publish(ctx, tx, event, events.PublishConfig{
+			EventType:     "party.updated.v1",
+			AggregateID:   party.ID().String(),
+			AggregateType: "Party",
+			Topic:         topics.PartyUpdatedV1,
+		})
+	}); err != nil {
 		if errors.Is(err, persistence.ErrVersionConflict) {
 			s.logger.Warn("version conflict on save", "party_id", req.PartyId)
 			return nil, status.Errorf(codes.Aborted, "version conflict: party was modified by another transaction")
@@ -1274,4 +1321,23 @@ func relationshipTypeToProto(rt string) pb.RelationshipType {
 	default:
 		return pb.RelationshipType_RELATIONSHIP_TYPE_UNSPECIFIED
 	}
+}
+
+// savePartyWithEvent persists a party and, if an outbox publisher is configured, atomically
+// writes an event to the outbox within the same database transaction.
+//
+// publishFn is called with the active transaction and should call outboxPublisher.Publish.
+// If no outbox publisher is configured, the party is saved without event publishing.
+func (s *Service) savePartyWithEvent(ctx context.Context, party *domain.Party, publishFn func(tx *gorm.DB) error) error {
+	if s.outboxPublisher == nil || s.db == nil {
+		// No outbox configured — fall back to plain save (no event)
+		return s.repo.Save(ctx, party)
+	}
+
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := s.repo.SaveInTx(ctx, party, tx); err != nil {
+			return err
+		}
+		return publishFn(tx)
+	})
 }

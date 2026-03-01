@@ -81,6 +81,24 @@ const (
 	PositionKeepingOpeningBalanceRecordedV1 = "position-keeping.opening-balance-recorded.v1"
 )
 
+// Party topics
+const (
+	// PartyCreatedV1 is the Kafka topic for party created events.
+	PartyCreatedV1 = "party.created.v1"
+	// PartyUpdatedV1 is the Kafka topic for party updated events.
+	PartyUpdatedV1 = "party.updated.v1"
+	// PartyVerificationCompletedV1 is the Kafka topic for party verification completed events.
+	PartyVerificationCompletedV1 = "party.verification-completed.v1"
+)
+
+// Internal Account topics
+const (
+	// InternalAccountFacilityCreatedV1 is the Kafka topic for internal account facility created events.
+	InternalAccountFacilityCreatedV1 = "internal-account.facility-created.v1"
+	// InternalAccountBookingCreatedV1 is the Kafka topic for internal account booking created events.
+	InternalAccountBookingCreatedV1 = "internal-account.booking-created.v1"
+)
+
 // Reconciliation topics
 const (
 	// ReconciliationRunStartedV1 is the Kafka topic for reconciliation run started events.
@@ -125,6 +143,11 @@ func All() []string {
 		PositionKeepingTransactionCancelledV1,
 		PositionKeepingBulkTransactionCapturedV1,
 		PositionKeepingOpeningBalanceRecordedV1,
+		PartyCreatedV1,
+		PartyUpdatedV1,
+		PartyVerificationCompletedV1,
+		InternalAccountFacilityCreatedV1,
+		InternalAccountBookingCreatedV1,
 		ReconciliationRunStartedV1,
 		ReconciliationRunCompletedV1,
 		ReconciliationVarianceDetectedV1,

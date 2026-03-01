@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"gorm.io/gorm"
 )
 
 // mockRepository implements domain.Repository for testing.
@@ -87,6 +88,10 @@ func (m *mockRepository) ExistsByCode(_ context.Context, accountCode string) (bo
 	}
 	_, ok := m.accountsByCode[accountCode]
 	return ok, nil
+}
+
+func (m *mockRepository) SaveInTx(ctx context.Context, account domain.InternalAccount, _ *gorm.DB) error {
+	return m.Save(ctx, account)
 }
 
 // mockPositionKeepingClient implements PositionKeepingClient for testing.
