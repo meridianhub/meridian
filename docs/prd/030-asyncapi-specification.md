@@ -601,7 +601,7 @@ Generate browseable HTML documentation from the specs. Options:
 ```makefile
 .PHONY: asyncapi-ui
 asyncapi-ui: ## Serve AsyncAPI documentation
-    @npx @asyncapi/studio api/asyncapi/position-keeping.yaml
+    @npx -p @asyncapi/cli asyncapi start studio api/asyncapi/position-keeping.yaml
 ```
 
 Or generate static HTML:
@@ -613,7 +613,7 @@ asyncapi-docs: ## Generate AsyncAPI HTML documentation
       @asyncapi/html-template -o api/asyncapi/docs/
 ```
 
-### Work Stream 6: CI Integration (1 point)
+### Work Stream 6: CI Integration (2 points)
 
 #### Task 6.1: AsyncAPI validation in CI
 
@@ -821,7 +821,8 @@ use outbox before migrating to generated publishers).
 
 - WS3-7 depend on WS1-2 for accurate event inventory and consistent outbox usage
 - Requires Node.js for AsyncAPI CLI tooling (already available for buf)
-- No external infrastructure changes (outbox table already exists per service)
+- No external infrastructure changes (outbox table exists in services that already have the
+  infrastructure; WS1 provisions it for services that currently lack it)
 
 ---
 
