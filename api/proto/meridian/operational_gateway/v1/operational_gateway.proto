@@ -1,0 +1,836 @@
+syntax = "proto3";
+
+package meridian.operational_gateway.v1;
+
+import "buf/validate/validate.proto";
+import "google/api/annotations.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "meridian/common/v1/types.proto";
+
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/operational_gateway/v1;operationalgatewayv1";
+
+// InstructionStatus defines the lifecycle state of a dispatched instruction.
+//
+// State Machine:
+//   PENDING → DISPATCHING → DELIVERED → ACKNOWLEDGED (happy path)
+//
+// Retry transitions:
+//   DISPATCHING → RETRYING → DISPATCHING (transient failure, within retry policy)
+//   DISPATCHING → FAILED (all retry attempts exhausted)
+//
+// Expiry:
+//   PENDING → EXPIRED (not dispatched before expires_at)
+//   DISPATCHING → EXPIRED (not delivered before expires_at)
+//
+// Cancellation (before dispatch):
+//   PENDING → CANCELLED
+//
+// Terminal states: DELIVERED, ACKNOWLEDGED, FAILED, EXPIRED, CANCELLED
+enum InstructionStatus {
+  // INSTRUCTION_STATUS_UNSPECIFIED means the status is unknown.
+  INSTRUCTION_STATUS_UNSPECIFIED = 0;
+  // INSTRUCTION_STATUS_PENDING means the instruction has been accepted and is waiting to be dispatched.
+  // Next: DISPATCHING (on dispatch attempt), EXPIRED (on expiry), CANCELLED (on cancellation)
+  INSTRUCTION_STATUS_PENDING = 1;
+  // INSTRUCTION_STATUS_DISPATCHING means the instruction is actively being sent to the provider.
+  // Next: DELIVERED (on success), RETRYING (on transient failure), FAILED (on exhaustion), EXPIRED (on expiry)
+  INSTRUCTION_STATUS_DISPATCHING = 2;
+  // INSTRUCTION_STATUS_DELIVERED means the instruction was successfully sent to the provider endpoint.
+  // The provider has received it but may not have acknowledged processing.
+  // Terminal state unless provider sends an acknowledgement callback.
+  INSTRUCTION_STATUS_DELIVERED = 3;
+  // INSTRUCTION_STATUS_ACKNOWLEDGED means the provider has confirmed it has processed the instruction.
+  // Terminal state. Requires a callback from the provider.
+  INSTRUCTION_STATUS_ACKNOWLEDGED = 4;
+  // INSTRUCTION_STATUS_RETRYING means a previous dispatch attempt failed transiently.
+  // The instruction will be retried according to the retry policy.
+  // Next: DISPATCHING (on next retry), FAILED (on exhaustion), EXPIRED (on expiry)
+  INSTRUCTION_STATUS_RETRYING = 5;
+  // INSTRUCTION_STATUS_FAILED means all dispatch attempts have been exhausted.
+  // Terminal state. Requires manual intervention or re-dispatch.
+  INSTRUCTION_STATUS_FAILED = 6;
+  // INSTRUCTION_STATUS_EXPIRED means the instruction was not delivered before its expires_at timestamp.
+  // Terminal state.
+  INSTRUCTION_STATUS_EXPIRED = 7;
+  // INSTRUCTION_STATUS_CANCELLED means the instruction was explicitly cancelled before dispatch.
+  // Terminal state. Can only be set from PENDING.
+  INSTRUCTION_STATUS_CANCELLED = 8;
+}
+
+// Priority defines the dispatch priority of an instruction.
+// Higher priority instructions are dispatched first when the queue is under load.
+enum Priority {
+  // PRIORITY_UNSPECIFIED means the priority is unknown.
+  PRIORITY_UNSPECIFIED = 0;
+  // PRIORITY_LOW means the instruction is dispatched after NORMAL and HIGH priority instructions.
+  PRIORITY_LOW = 1;
+  // PRIORITY_NORMAL is the default dispatch priority.
+  PRIORITY_NORMAL = 2;
+  // PRIORITY_HIGH means the instruction is dispatched before NORMAL and LOW priority instructions.
+  PRIORITY_HIGH = 3;
+  // PRIORITY_CRITICAL means the instruction bypasses normal queue ordering and is dispatched immediately.
+  PRIORITY_CRITICAL = 4;
+}
+
+// Protocol defines the transport protocol used for a provider connection.
+enum Protocol {
+  // PROTOCOL_UNSPECIFIED means the protocol is unknown.
+  PROTOCOL_UNSPECIFIED = 0;
+  // PROTOCOL_HTTPS dispatches instructions via HTTPS REST calls.
+  PROTOCOL_HTTPS = 1;
+  // PROTOCOL_GRPC dispatches instructions via gRPC.
+  PROTOCOL_GRPC = 2;
+  // PROTOCOL_WEBHOOK sends instructions to a webhook endpoint (HTTPS with specific retry semantics).
+  PROTOCOL_WEBHOOK = 3;
+  // PROTOCOL_MQTT publishes instructions to an MQTT topic.
+  PROTOCOL_MQTT = 4;
+  // PROTOCOL_AMQP publishes instructions to an AMQP queue or exchange.
+  PROTOCOL_AMQP = 5;
+}
+
+// HealthStatus represents the connection health as determined by the most recent health check.
+enum HealthStatus {
+  // HEALTH_STATUS_UNSPECIFIED means the health is unknown (not yet checked).
+  HEALTH_STATUS_UNSPECIFIED = 0;
+  // HEALTH_STATUS_HEALTHY means the connection is reachable and responding correctly.
+  HEALTH_STATUS_HEALTHY = 1;
+  // HEALTH_STATUS_DEGRADED means the connection is reachable but responding slowly or with errors.
+  HEALTH_STATUS_DEGRADED = 2;
+  // HEALTH_STATUS_UNHEALTHY means the connection is unreachable or consistently failing.
+  HEALTH_STATUS_UNHEALTHY = 3;
+}
+
+// InstructionAttempt records the outcome of a single dispatch attempt.
+message InstructionAttempt {
+  // attempt_number is the 1-based ordinal of this attempt (1 = first attempt).
+  int32 attempt_number = 1 [(buf.validate.field).int32.gte = 1];
+
+  // dispatched_at is when this dispatch attempt was initiated.
+  google.protobuf.Timestamp dispatched_at = 2 [(buf.validate.field).required = true];
+
+  // response_status_code is the HTTP or gRPC status code returned by the provider (0 if no response).
+  int32 response_status_code = 3 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 599
+  }];
+
+  // response_body_preview is the first 1KB of the provider's response body for diagnostics.
+  string response_body_preview = 4 [(buf.validate.field).string.max_len = 1024];
+
+  // error_message describes the error if the dispatch attempt failed.
+  string error_message = 5 [(buf.validate.field).string.max_len = 2048];
+
+  // duration_ms is how long the dispatch attempt took in milliseconds.
+  int64 duration_ms = 6 [(buf.validate.field).int64.gte = 0];
+}
+
+// Instruction is the full envelope for an outbound operational directive sent to a provider.
+// Instructions are dispatched via a ProviderConnection and tracked through their lifecycle.
+message Instruction {
+  // id is the unique identifier for this instruction (UUID).
+  string id = 1 [(buf.validate.field).string.uuid = true];
+
+  // tenant_id is the tenant that owns this instruction (UUID).
+  string tenant_id = 2 [(buf.validate.field).string.uuid = true];
+
+  // instruction_type identifies the category of operation being requested.
+  // This is used to route the instruction to the correct ProviderConnection via InstructionRoute.
+  // Example: "payment.initiate", "account.freeze", "kyc.verify"
+  string instruction_type = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // provider_connection_id is the connection used to dispatch this instruction (UUID).
+  string provider_connection_id = 4 [(buf.validate.field).string.uuid = true];
+
+  // correlation_id links all events across services for a single user request.
+  string correlation_id = 5 [(buf.validate.field).string.max_len = 255];
+
+  // causation_id identifies the event or command that caused this instruction to be created.
+  string causation_id = 6 [(buf.validate.field).string.max_len = 255];
+
+  // payload is the instruction-specific data sent to the provider.
+  // The structure is defined by the instruction_type and the InstructionRoute outbound_mapping.
+  google.protobuf.Struct payload = 7;
+
+  // metadata contains additional key-value pairs for routing, filtering, or audit purposes.
+  map<string, string> metadata = 8 [(buf.validate.field).map = {
+    max_pairs: 64
+    keys: {string: {max_len: 128}}
+    values: {string: {max_len: 1024}}
+  }];
+
+  // priority determines the dispatch order relative to other pending instructions.
+  Priority priority = 9 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // scheduled_at is the earliest time at which this instruction may be dispatched.
+  // If not set, the instruction is eligible for immediate dispatch.
+  google.protobuf.Timestamp scheduled_at = 10;
+
+  // expires_at is the deadline by which the instruction must be dispatched.
+  // If not dispatched before this time, it transitions to EXPIRED.
+  google.protobuf.Timestamp expires_at = 11;
+
+  // status is the current lifecycle state of this instruction.
+  InstructionStatus status = 12 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // attempts is the ordered history of dispatch attempts for this instruction.
+  repeated InstructionAttempt attempts = 13 [(buf.validate.field).repeated.max_items = 20];
+
+  // created_at is when this instruction was accepted by the gateway.
+  google.protobuf.Timestamp created_at = 14;
+
+  // updated_at is when this instruction was last modified.
+  google.protobuf.Timestamp updated_at = 15;
+}
+
+// RetryPolicy defines the backoff strategy for failed dispatch attempts.
+message RetryPolicy {
+  // max_attempts is the total number of dispatch attempts (including the first).
+  // A value of 1 means no retries (one attempt only).
+  int32 max_attempts = 1 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 20
+  }];
+
+  // initial_backoff_seconds is the delay before the first retry in seconds.
+  int32 initial_backoff_seconds = 2 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 3600
+  }];
+
+  // max_backoff_seconds caps the computed backoff to prevent unbounded delays.
+  int32 max_backoff_seconds = 3 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 86400
+  }];
+
+  // backoff_multiplier is the factor by which the backoff duration grows after each attempt.
+  // Example: initial=1s, multiplier=2.0 → 1s, 2s, 4s, 8s...
+  double backoff_multiplier = 4 [(buf.validate.field).double = {
+    gte: 1.0
+    lte: 10.0
+  }];
+}
+
+// RateLimit controls the outbound dispatch rate for a connection.
+message RateLimit {
+  // requests_per_second is the maximum sustained dispatch rate.
+  double requests_per_second = 1 [(buf.validate.field).double = {
+    gt: 0.0
+    lte: 10000.0
+  }];
+
+  // burst_size is the maximum number of requests allowed to exceed the rate limit momentarily.
+  int32 burst_size = 2 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 10000
+  }];
+}
+
+// ApiKeyAuth configures authentication via a static API key header.
+message ApiKeyAuth {
+  // header_name is the HTTP header used to transmit the API key.
+  // Example: "X-API-Key", "Authorization"
+  string header_name = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+
+  // secret_ref is a reference to the secret store key that holds the API key value.
+  // The gateway resolves this reference at dispatch time. Never store the key value directly.
+  string secret_ref = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 512
+  }];
+}
+
+// BasicAuth configures HTTP Basic authentication.
+message BasicAuth {
+  // username is the Basic auth username.
+  string username = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // password_secret_ref is a reference to the secret store key that holds the password.
+  string password_secret_ref = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 512
+  }];
+}
+
+// OAuth2Auth configures OAuth 2.0 client credentials flow authentication.
+// The gateway manages token acquisition and refresh automatically.
+message OAuth2Auth {
+  // token_url is the OAuth 2.0 token endpoint.
+  string token_url = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 2048
+  }];
+
+  // client_id is the OAuth 2.0 client identifier.
+  string client_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 512
+  }];
+
+  // client_secret_ref is a reference to the secret store key that holds the client secret.
+  string client_secret_ref = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 512
+  }];
+
+  // scopes lists the OAuth 2.0 scopes to request.
+  repeated string scopes = 4 [(buf.validate.field).repeated = {
+    max_items: 32
+    items: {string: {max_len: 256}}
+  }];
+}
+
+// HMACAuth configures HMAC-based request signing.
+// The gateway signs each outbound request body using the configured algorithm.
+message HMACAuth {
+  // algorithm is the HMAC signing algorithm.
+  // Supported values: "sha256", "sha512"
+  string algorithm = 1 [(buf.validate.field).string = {
+    in: [
+      "sha256",
+      "sha512"
+    ]
+  }];
+
+  // secret_ref is a reference to the secret store key that holds the HMAC signing secret.
+  string secret_ref = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 512
+  }];
+
+  // signature_header is the HTTP header where the computed signature is placed.
+  // Example: "X-Signature", "X-Hub-Signature-256"
+  string signature_header = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+}
+
+// MTLSAuth configures mutual TLS (mTLS) authentication.
+// The gateway presents the client certificate on each outbound connection.
+message MTLSAuth {
+  // client_cert_secret_ref is a reference to the secret store key holding the PEM-encoded client certificate.
+  string client_cert_secret_ref = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 512
+  }];
+
+  // client_key_secret_ref is a reference to the secret store key holding the PEM-encoded private key.
+  string client_key_secret_ref = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 512
+  }];
+
+  // ca_cert_secret_ref is an optional reference to the secret store key holding the CA certificate
+  // for verifying the provider's server certificate.
+  string ca_cert_secret_ref = 3 [(buf.validate.field).string.max_len = 512];
+}
+
+// ProviderConnection defines the configuration for connecting to an external provider endpoint.
+// Connections are reused across multiple instructions of matching instruction_types.
+message ProviderConnection {
+  // connection_id is the unique identifier for this connection (UUID).
+  string connection_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // tenant_id is the tenant that owns this connection (UUID).
+  string tenant_id = 2 [(buf.validate.field).string.uuid = true];
+
+  // provider_name is the human-readable name for the external provider.
+  // Example: "Stripe", "Modulr", "Kraken Energy Grid"
+  string provider_name = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // provider_type is a machine-readable classifier for the provider category.
+  // Example: "payment_gateway", "kyc_provider", "energy_scheduler"
+  string provider_type = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+
+  // protocol is the transport protocol for dispatching instructions to this provider.
+  Protocol protocol = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // base_url is the root URL of the provider's API endpoint.
+  // Example: "https://api.stripe.com", "https://api.modulrfinance.com"
+  string base_url = 6 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 2048
+  }];
+
+  // auth_config defines the authentication method for this connection.
+  // Exactly one authentication variant must be set.
+  oneof auth_config {
+    // api_key authenticates using a static API key in a header.
+    ApiKeyAuth api_key = 7;
+    // basic authenticates using HTTP Basic authentication.
+    BasicAuth basic = 8;
+    // oauth2 authenticates using OAuth 2.0 client credentials flow.
+    OAuth2Auth oauth2 = 9;
+    // hmac authenticates by signing requests with HMAC.
+    HMACAuth hmac = 10;
+    // mtls authenticates using mutual TLS client certificates.
+    MTLSAuth mtls = 11;
+  }
+
+  // retry_policy defines how failed dispatch attempts are retried.
+  // If not set, a default policy of 3 attempts with exponential backoff is used.
+  RetryPolicy retry_policy = 12;
+
+  // rate_limit controls the outbound dispatch rate for this connection.
+  // If not set, no rate limiting is applied.
+  RateLimit rate_limit = 13;
+
+  // health_status is the connection health as determined by the most recent health check.
+  HealthStatus health_status = 14 [(buf.validate.field).enum.defined_only = true];
+
+  // last_health_check_at is when the most recent health check was performed.
+  google.protobuf.Timestamp last_health_check_at = 15;
+
+  // created_at is when this connection was created.
+  google.protobuf.Timestamp created_at = 16;
+
+  // updated_at is when this connection was last modified.
+  google.protobuf.Timestamp updated_at = 17;
+}
+
+// InstructionRoute maps an instruction_type to a ProviderConnection with optional field mapping.
+// Routes determine which connection handles a given type of instruction and how the
+// payload is transformed before dispatch.
+message InstructionRoute {
+  // instruction_type is the instruction category this route handles.
+  // Must be unique within a tenant (one active route per instruction_type).
+  // Example: "payment.initiate", "account.freeze"
+  string instruction_type = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // connection_id is the primary ProviderConnection used to dispatch matching instructions (UUID).
+  string connection_id = 2 [(buf.validate.field).string.uuid = true];
+
+  // fallback_connection_id is an optional secondary connection used when the primary is unhealthy (UUID).
+  // If not set, instructions fail without fallback when the primary connection is unhealthy.
+  string fallback_connection_id = 3 [(buf.validate.field).string = {
+    max_len: 36
+    pattern: "^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$"
+  }];
+
+  // outbound_mapping is the name of the MappingDefinition applied to transform the instruction
+  // payload from the internal Meridian format to the provider's expected format before dispatch.
+  // If empty, the payload is sent as-is.
+  string outbound_mapping = 4 [(buf.validate.field).string.max_len = 255];
+
+  // inbound_mapping is the name of the MappingDefinition applied to transform provider callback
+  // payloads from the provider's format to the internal Meridian format.
+  // If empty, callback payloads are processed as-is.
+  string inbound_mapping = 5 [(buf.validate.field).string.max_len = 255];
+
+  // http_method is the HTTP method used when dispatching via HTTPS or WEBHOOK protocol.
+  // Example: "POST", "PUT", "PATCH"
+  // Required for HTTPS and WEBHOOK protocols; ignored for GRPC, MQTT, AMQP.
+  string http_method = 6 [(buf.validate.field).string = {
+    max_len: 10
+    pattern: "^(GET|POST|PUT|PATCH|DELETE)?$"
+  }];
+
+  // path_template is the URL path template appended to the connection base_url.
+  // Supports simple variable substitution using {field_name} placeholders resolved from the payload.
+  // Example: "/v1/payments/{payment_id}/execute", "/accounts/{account_id}/freeze"
+  string path_template = 7 [(buf.validate.field).string.max_len = 1024];
+}
+
+// CallbackPayload represents an inbound callback from a provider acknowledging an instruction.
+message CallbackPayload {
+  // provider_reference is the provider's own identifier for this instruction (if any).
+  string provider_reference = 1 [(buf.validate.field).string.max_len = 255];
+
+  // status_code is the provider-reported outcome code (protocol-specific).
+  // For webhooks, this mirrors the HTTP status code sent in the callback.
+  int32 status_code = 2 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 599
+  }];
+
+  // body is the raw callback payload received from the provider.
+  google.protobuf.Struct body = 3;
+
+  // received_at is when the callback was received by the gateway.
+  google.protobuf.Timestamp received_at = 4;
+}
+
+// ========================================
+// Service Request/Response Messages
+// ========================================
+
+// DispatchInstructionRequest submits a new instruction for outbound dispatch.
+message DispatchInstructionRequest {
+  // instruction_type identifies the category of operation being requested.
+  string instruction_type = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // payload is the instruction-specific data to send to the provider.
+  google.protobuf.Struct payload = 2 [(buf.validate.field).required = true];
+
+  // correlation_id is optional for distributed tracing (generated if not provided).
+  string correlation_id = 3 [(buf.validate.field).string.max_len = 255];
+
+  // causation_id identifies the event or command that triggered this instruction.
+  string causation_id = 4 [(buf.validate.field).string.max_len = 255];
+
+  // metadata contains additional key-value pairs for routing, filtering, or audit purposes.
+  map<string, string> metadata = 5 [(buf.validate.field).map = {
+    max_pairs: 64
+    keys: {string: {max_len: 128}}
+    values: {string: {max_len: 1024}}
+  }];
+
+  // priority determines the dispatch order relative to other pending instructions.
+  // If not set, NORMAL priority is used.
+  Priority priority = 6 [(buf.validate.field).enum.defined_only = true];
+
+  // scheduled_at is the earliest time at which this instruction may be dispatched.
+  // If not set, the instruction is eligible for immediate dispatch.
+  google.protobuf.Timestamp scheduled_at = 7;
+
+  // expires_at is the deadline by which the instruction must be dispatched.
+  // If not set, no expiry deadline is applied.
+  google.protobuf.Timestamp expires_at = 8;
+
+  // idempotency_key ensures exactly-once dispatch of this instruction.
+  meridian.common.v1.IdempotencyKey idempotency_key = 9 [(buf.validate.field).required = true];
+}
+
+// DispatchInstructionResponse returns the accepted instruction.
+message DispatchInstructionResponse {
+  // instruction is the accepted instruction in PENDING status.
+  Instruction instruction = 1 [(buf.validate.field).required = true];
+}
+
+// CancelInstructionRequest cancels a pending instruction before dispatch.
+// Can only be called when status is PENDING.
+message CancelInstructionRequest {
+  // instruction_id is the unique identifier of the instruction to cancel (UUID).
+  string instruction_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // cancellation_reason explains why the instruction is being cancelled.
+  string cancellation_reason = 2 [(buf.validate.field).string.max_len = 500];
+}
+
+// CancelInstructionResponse returns the cancelled instruction.
+message CancelInstructionResponse {
+  // instruction is the cancelled instruction with status CANCELLED.
+  Instruction instruction = 1 [(buf.validate.field).required = true];
+}
+
+// GetInstructionRequest retrieves a specific instruction by ID.
+message GetInstructionRequest {
+  // instruction_id is the unique identifier of the instruction to retrieve (UUID).
+  string instruction_id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+// GetInstructionResponse returns the requested instruction.
+message GetInstructionResponse {
+  // instruction is the retrieved instruction.
+  Instruction instruction = 1 [(buf.validate.field).required = true];
+}
+
+// ListInstructionsRequest lists instructions with optional filtering and pagination.
+message ListInstructionsRequest {
+  // instruction_type filters by instruction category. Empty means all types.
+  string instruction_type = 1 [(buf.validate.field).string.max_len = 255];
+
+  // status filters by instruction status. Empty means all statuses.
+  repeated InstructionStatus status = 2;
+
+  // provider_connection_id filters by the connection used for dispatch (UUID). Empty means all connections.
+  string provider_connection_id = 3 [(buf.validate.field).string = {
+    max_len: 36
+    pattern: "^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$"
+  }];
+
+  // date_range filters by created_at timestamp.
+  meridian.common.v1.DateRange date_range = 4;
+
+  // pagination controls the page size and cursor.
+  meridian.common.v1.Pagination pagination = 5;
+}
+
+// ListInstructionsResponse returns a paginated list of instructions.
+message ListInstructionsResponse {
+  // instructions is the list of instructions matching the filter criteria.
+  repeated Instruction instructions = 1;
+
+  // pagination contains the next page token and total count.
+  meridian.common.v1.PaginationResponse pagination = 2;
+}
+
+// ProcessCallbackRequest handles an inbound callback from a provider.
+// Callbacks acknowledge that the provider has processed a previously dispatched instruction.
+message ProcessCallbackRequest {
+  // instruction_id is the instruction this callback relates to (UUID).
+  // At least one of instruction_id or provider_reference must be provided.
+  string instruction_id = 1 [(buf.validate.field).string = {
+    max_len: 36
+    pattern: "^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$"
+  }];
+
+  // provider_reference is the provider's own identifier for the instruction.
+  // Used for lookup when instruction_id is not available in the callback.
+  string provider_reference = 2 [(buf.validate.field).string.max_len = 255];
+
+  // callback is the payload received from the provider.
+  CallbackPayload callback = 3 [(buf.validate.field).required = true];
+
+  // idempotency_key ensures exactly-once processing of provider callbacks.
+  // Provider callbacks may be delivered multiple times.
+  meridian.common.v1.IdempotencyKey idempotency_key = 4 [(buf.validate.field).required = true];
+}
+
+// ProcessCallbackResponse returns the updated instruction after callback processing.
+message ProcessCallbackResponse {
+  // instruction is the updated instruction (status ACKNOWLEDGED on success).
+  Instruction instruction = 1 [(buf.validate.field).required = true];
+}
+
+// UpsertConnectionRequest creates or updates a provider connection.
+// If a connection with the given connection_id exists, it is updated.
+// Otherwise, a new connection is created.
+message UpsertConnectionRequest {
+  // provider_name is the human-readable name for the external provider.
+  string provider_name = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // provider_type is a machine-readable classifier for the provider category.
+  string provider_type = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+
+  // protocol is the transport protocol for dispatching instructions to this provider.
+  Protocol protocol = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // base_url is the root URL of the provider's API endpoint.
+  string base_url = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 2048
+  }];
+
+  // auth_config defines the authentication method for this connection.
+  oneof auth_config {
+    // api_key authenticates using a static API key in a header.
+    ApiKeyAuth api_key = 5;
+    // basic authenticates using HTTP Basic authentication.
+    BasicAuth basic = 6;
+    // oauth2 authenticates using OAuth 2.0 client credentials flow.
+    OAuth2Auth oauth2 = 7;
+    // hmac authenticates by signing requests with HMAC.
+    HMACAuth hmac = 8;
+    // mtls authenticates using mutual TLS client certificates.
+    MTLSAuth mtls = 9;
+  }
+
+  // retry_policy defines how failed dispatch attempts are retried.
+  RetryPolicy retry_policy = 10;
+
+  // rate_limit controls the outbound dispatch rate for this connection.
+  RateLimit rate_limit = 11;
+
+  // connection_id is the UUID for upsert semantics.
+  // If provided and a connection with this ID exists, it is updated.
+  // If not provided, a new connection is created with a generated UUID.
+  string connection_id = 12 [(buf.validate.field).string = {
+    max_len: 36
+    pattern: "^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$"
+  }];
+}
+
+// UpsertConnectionResponse returns the created or updated connection.
+message UpsertConnectionResponse {
+  // connection is the created or updated provider connection.
+  ProviderConnection connection = 1 [(buf.validate.field).required = true];
+}
+
+// GetConnectionRequest retrieves a specific provider connection by ID.
+message GetConnectionRequest {
+  // connection_id is the unique identifier of the connection to retrieve (UUID).
+  string connection_id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+// GetConnectionResponse returns the requested provider connection.
+message GetConnectionResponse {
+  // connection is the retrieved provider connection.
+  ProviderConnection connection = 1 [(buf.validate.field).required = true];
+}
+
+// ListConnectionsRequest lists provider connections with optional filtering and pagination.
+message ListConnectionsRequest {
+  // protocol filters by transport protocol. UNSPECIFIED means all protocols.
+  Protocol protocol = 1 [(buf.validate.field).enum.defined_only = true];
+
+  // health_status filters by connection health. UNSPECIFIED means all statuses.
+  HealthStatus health_status = 2 [(buf.validate.field).enum.defined_only = true];
+
+  // pagination controls the page size and cursor.
+  meridian.common.v1.Pagination pagination = 3;
+}
+
+// ListConnectionsResponse returns a paginated list of provider connections.
+message ListConnectionsResponse {
+  // connections is the list of provider connections matching the filter criteria.
+  repeated ProviderConnection connections = 1;
+
+  // pagination contains the next page token and total count.
+  meridian.common.v1.PaginationResponse pagination = 2;
+}
+
+// TestConnectionRequest (Phase 2) - reserved for health check implementation.
+message TestConnectionRequest {
+  // connection_id is the unique identifier of the connection to test (UUID).
+  string connection_id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+// TestConnectionResponse (Phase 2) - reserved for health check implementation.
+message TestConnectionResponse {
+  // health_status is the result of the health check.
+  HealthStatus health_status = 1;
+
+  // message provides details about the health check result.
+  string message = 2;
+
+  // duration_ms is how long the health check took in milliseconds.
+  int64 duration_ms = 3;
+}
+
+// ========================================
+// Service Definitions
+// ========================================
+
+// OperationalGatewayService manages the lifecycle of outbound instructions to external providers.
+// It handles dispatch, retry, expiry, cancellation, and inbound callback processing.
+//
+// Dispatch Flow:
+//   1. DispatchInstruction: Accepts instruction → PENDING
+//   2. Internal worker resolves InstructionRoute → selects ProviderConnection
+//   3. Internal worker dispatches to provider → DISPATCHING → DELIVERED
+//   4. Provider sends callback (optional) → ProcessCallback → ACKNOWLEDGED
+//
+// Retry:
+//   On transient failure: DISPATCHING → RETRYING → DISPATCHING (per RetryPolicy)
+//   On exhaustion: → FAILED
+//
+// Idempotency:
+//   All mutating operations require an idempotency_key.
+//   Duplicate requests within TTL return the cached response.
+service OperationalGatewayService {
+  // DispatchInstruction submits a new instruction for outbound dispatch to an external provider.
+  // The instruction is accepted immediately and queued for async dispatch.
+  // Returns ALREADY_EXISTS if an instruction with the same idempotency_key exists.
+  rpc DispatchInstruction(DispatchInstructionRequest) returns (DispatchInstructionResponse) {
+    option (google.api.http) = {
+      post: "/v1/operational-gateway/instructions"
+      body: "*"
+    };
+  }
+
+  // CancelInstruction cancels a pending instruction before it is dispatched.
+  // Returns NOT_FOUND if the instruction does not exist.
+  // Returns FAILED_PRECONDITION if the instruction is not in PENDING status.
+  rpc CancelInstruction(CancelInstructionRequest) returns (CancelInstructionResponse) {
+    option (google.api.http) = {
+      post: "/v1/operational-gateway/instructions/{instruction_id}/cancel"
+      body: "*"
+    };
+  }
+
+  // GetInstruction retrieves a specific instruction by its ID.
+  // Returns NOT_FOUND if the instruction does not exist.
+  rpc GetInstruction(GetInstructionRequest) returns (GetInstructionResponse) {
+    option (google.api.http) = {
+      get: "/v1/operational-gateway/instructions/{instruction_id}"
+    };
+  }
+
+  // ListInstructions returns a paginated list of instructions with optional filtering.
+  rpc ListInstructions(ListInstructionsRequest) returns (ListInstructionsResponse) {
+    option (google.api.http) = {
+      get: "/v1/operational-gateway/instructions"
+    };
+  }
+
+  // ProcessCallback handles an inbound callback from an external provider.
+  // Transitions the instruction to ACKNOWLEDGED and applies the inbound mapping.
+  // Returns NOT_FOUND if the instruction cannot be resolved.
+  // Idempotent: duplicate callbacks with the same idempotency_key are safely deduplicated.
+  rpc ProcessCallback(ProcessCallbackRequest) returns (ProcessCallbackResponse) {
+    option (google.api.http) = {
+      post: "/v1/operational-gateway/callbacks"
+      body: "*"
+    };
+  }
+}
+
+// ProviderConnectionService manages the configuration of external provider connections.
+// Connections define how the gateway authenticates and communicates with each provider.
+service ProviderConnectionService {
+  // UpsertConnection creates or updates a provider connection configuration.
+  // If connection_id is provided and exists, the connection is updated.
+  // If connection_id is not provided, a new connection is created with a generated UUID.
+  rpc UpsertConnection(UpsertConnectionRequest) returns (UpsertConnectionResponse) {
+    option (google.api.http) = {
+      put: "/v1/operational-gateway/connections"
+      body: "*"
+    };
+  }
+
+  // GetConnection retrieves a specific provider connection by ID.
+  // Returns NOT_FOUND if the connection does not exist.
+  rpc GetConnection(GetConnectionRequest) returns (GetConnectionResponse) {
+    option (google.api.http) = {
+      get: "/v1/operational-gateway/connections/{connection_id}"
+    };
+  }
+
+  // ListConnections returns a paginated list of provider connections with optional filtering.
+  rpc ListConnections(ListConnectionsRequest) returns (ListConnectionsResponse) {
+    option (google.api.http) = {
+      get: "/v1/operational-gateway/connections"
+    };
+  }
+
+  // TestConnection (Phase 2) performs a health check on a provider connection.
+  // Returns NOT_FOUND if the connection does not exist.
+  rpc TestConnection(TestConnectionRequest) returns (TestConnectionResponse) {
+    option (google.api.http) = {
+      post: "/v1/operational-gateway/connections/{connection_id}/test"
+      body: "*"
+    };
+  }
+}
