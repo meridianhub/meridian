@@ -212,6 +212,7 @@ func NewInstruction(
 
 // MarkDispatching transitions the instruction from PENDING or RETRYING to DISPATCHING.
 // This is called when the instruction is being actively sent to the provider.
+// Increments AttemptCount to record that a new dispatch attempt has started.
 // Returns ErrInvalidInstructionTransition if not in PENDING or RETRYING state.
 func (i *Instruction) MarkDispatching() error {
 	if i.Status != InstructionStatusPending && i.Status != InstructionStatusRetrying {
@@ -220,6 +221,7 @@ func (i *Instruction) MarkDispatching() error {
 
 	now := time.Now()
 	i.Status = InstructionStatusDispatching
+	i.AttemptCount++
 	i.DispatchedAt = &now
 	i.UpdatedAt = now
 	return nil
@@ -254,10 +256,12 @@ func (i *Instruction) MarkAcknowledged() error {
 }
 
 // MarkRetrying transitions the instruction from DISPATCHING to RETRYING.
-// Records the failed attempt and schedules a retry.
+// Records the failed attempt and schedules a retry. AttemptCount is already
+// incremented by MarkDispatching, so this method checks whether further
+// retries remain before appending the attempt record.
 // Returns ErrInvalidInstructionTransition if not in DISPATCHING state.
 // Returns ErrMissingFailureReason if reason is empty.
-// Returns ErrMaxAttemptsExhausted if AttemptCount >= MaxAttempts.
+// Returns ErrMaxAttemptsExhausted if no retry attempts remain.
 func (i *Instruction) MarkRetrying(reason string, errorCode string) error {
 	if i.Status != InstructionStatusDispatching {
 		return ErrInvalidInstructionTransition

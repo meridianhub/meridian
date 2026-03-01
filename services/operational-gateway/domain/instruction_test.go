@@ -202,6 +202,7 @@ func TestInstruction_MarkAcknowledged_FromDispatching_Fails(t *testing.T) {
 func TestInstruction_MarkRetrying_FromDispatching(t *testing.T) {
 	instr := createTestInstruction(t, InstructionStatusDispatching)
 	instr.MaxAttempts = 3
+	// AttemptCount=1 simulates having called MarkDispatching() once already
 	instr.AttemptCount = 1
 
 	err := instr.MarkRetrying("timeout", "TIMEOUT")
@@ -215,6 +216,7 @@ func TestInstruction_MarkRetrying_FromDispatching(t *testing.T) {
 func TestInstruction_MarkRetrying_ExhaustedAttempts_Fails(t *testing.T) {
 	instr := createTestInstruction(t, InstructionStatusDispatching)
 	instr.MaxAttempts = 3
+	// AttemptCount=3 simulates MaxAttempts already consumed
 	instr.AttemptCount = 3
 
 	err := instr.MarkRetrying("timeout", "TIMEOUT")
@@ -225,7 +227,7 @@ func TestInstruction_MarkRetrying_ExhaustedAttempts_Fails(t *testing.T) {
 func TestInstruction_MarkRetrying_MissingReason_Fails(t *testing.T) {
 	instr := createTestInstruction(t, InstructionStatusDispatching)
 	instr.MaxAttempts = 3
-	instr.AttemptCount = 0
+	instr.AttemptCount = 1
 
 	err := instr.MarkRetrying("", "TIMEOUT")
 
@@ -543,21 +545,21 @@ func TestInstruction_RetryPath(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// First dispatch attempt
+	// First dispatch attempt — AttemptCount becomes 1
 	err = instr.MarkDispatching()
 	require.NoError(t, err)
-	instr.AttemptCount++
+	assert.Equal(t, 1, instr.AttemptCount)
 
-	// Retry after failure
+	// Retry after failure (AttemptCount=1 < MaxAttempts=3, so retry is allowed)
 	err = instr.MarkRetrying("timeout", "TIMEOUT")
 	require.NoError(t, err)
 	assert.Equal(t, InstructionStatusRetrying, instr.Status)
 	assert.Equal(t, 1, len(instr.Attempts))
 
-	// Second dispatch attempt
+	// Second dispatch attempt — AttemptCount becomes 2
 	err = instr.MarkDispatching()
 	require.NoError(t, err)
-	instr.AttemptCount++
+	assert.Equal(t, 2, instr.AttemptCount)
 
 	// Success
 	err = instr.MarkDelivered()
