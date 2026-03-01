@@ -116,16 +116,16 @@ Party.Individual
   ├── Reference       (passport, driver's license)
   ├── BankRelation    (account officer, branch)
   ├── Verification    (KYC result — PRD 020)
-  ├── Identity        (login credentials — PRD 030)   ← NEW
-  └── RoleAssignment  (tenant + role grants — PRD 030) ← NEW
+  ├── Identity        (login credentials — PRD 031)   ← NEW
+  └── RoleAssignment  (tenant + role grants — PRD 031) ← NEW
 ```
 
 A staff member who is also a customer of the same tenant has:
 
 - One Party.Individual (their identity)
 - One Verification record (KYC compliance — PRD 020)
-- One Identity record (login credentials — PRD 030)
-- One or more RoleAssignments (what they can do — PRD 030)
+- One Identity record (login credentials — PRD 031)
+- One or more RoleAssignments (what they can do — PRD 031)
 
 ---
 
