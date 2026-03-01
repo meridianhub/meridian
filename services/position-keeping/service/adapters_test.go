@@ -13,8 +13,10 @@ import (
 
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
+	messagingpkg "github.com/meridianhub/meridian/services/position-keeping/adapters/messaging"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
 	"github.com/meridianhub/meridian/services/position-keeping/service"
+	eventspkg "github.com/meridianhub/meridian/shared/platform/events"
 )
 
 // TestToProtoMoneyAmount tests conversion of domain.Money to protobuf MoneyAmount
@@ -1012,7 +1014,12 @@ func callToProtoFinancialPositionLog(log *domain.FinancialPositionLog) *position
 	mockIdempotency := new(MockIdempotencyService)
 	mockMeasurementRepo := new(MockMeasurementRepository)
 
-	svc, err := service.NewPositionKeepingService(mockRepo, mockMeasurementRepo, mockEventPublisher, mockIdempotency)
+	outboxPub, err := messagingpkg.NewOutboxEventPublisher(eventspkg.NewPgxOutboxRepository(nil))
+	if err != nil {
+		return nil
+	}
+
+	svc, err := service.NewPositionKeepingService(mockRepo, mockMeasurementRepo, mockEventPublisher, mockIdempotency, outboxPub)
 	if err != nil {
 		return nil
 	}

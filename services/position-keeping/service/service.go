@@ -11,6 +11,7 @@ import (
 
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
+	"github.com/meridianhub/meridian/services/position-keeping/adapters/messaging"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 )
@@ -25,6 +26,8 @@ var (
 	ErrIdempotencyServiceNil = errors.New("position keeping service: idempotency service cannot be nil")
 	// ErrMeasurementRepoNil is returned when attempting to create a service with a nil measurement repository
 	ErrMeasurementRepoNil = errors.New("position keeping service: measurement repository cannot be nil")
+	// ErrOutboxPublisherNil is returned when attempting to create a service with a nil outbox publisher
+	ErrOutboxPublisherNil = errors.New("position keeping service: outbox publisher cannot be nil")
 )
 
 // MaxBucketsPerAccountInstrument is the maximum number of distinct buckets allowed
@@ -39,6 +42,7 @@ type PositionKeepingService struct {
 	repository      domain.FinancialPositionLogRepository
 	measurementRepo domain.MeasurementRepository
 	eventPublisher  domain.EventPublisher
+	outboxPublisher *messaging.OutboxEventPublisher
 	idempotency     idempotency.Service
 	// instrumentCache is OPTIONAL - if nil, CEL validation is skipped.
 	// This allows backwards compatibility with existing deployments.
@@ -137,6 +141,7 @@ func WithPositionRepository(repo domain.PositionRepository) Option {
 //   - measurementRepo: Persistence layer for measurements (must not be nil)
 //   - eventPublisher: Publishes domain events (must not be nil)
 //   - idempotencySvc: Ensures exactly-once processing of idempotent operations (must not be nil)
+//   - outboxPublisher: Publishes events via transactional outbox (must not be nil)
 //
 // Optional dependencies can be provided via Option functions:
 //   - WithInstrumentCache: Enables CEL validation of measurements against instrument definitions
@@ -147,6 +152,7 @@ func NewPositionKeepingService(
 	measurementRepo domain.MeasurementRepository,
 	eventPublisher domain.EventPublisher,
 	idempotencySvc idempotency.Service,
+	outboxPublisher *messaging.OutboxEventPublisher,
 	opts ...Option,
 ) (*PositionKeepingService, error) {
 	if repository == nil {
@@ -161,11 +167,15 @@ func NewPositionKeepingService(
 	if idempotencySvc == nil {
 		return nil, ErrIdempotencyServiceNil
 	}
+	if outboxPublisher == nil {
+		return nil, ErrOutboxPublisherNil
+	}
 
 	svc := &PositionKeepingService{
 		repository:      repository,
 		measurementRepo: measurementRepo,
 		eventPublisher:  eventPublisher,
+		outboxPublisher: outboxPublisher,
 		idempotency:     idempotencySvc,
 	}
 

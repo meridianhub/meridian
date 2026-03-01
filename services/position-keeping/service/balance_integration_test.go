@@ -81,6 +81,7 @@ func SetupBalanceIntegrationTestContainer(t *testing.T) *BalanceIntegrationTestC
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 	)
 	require.NoError(t, err, "Failed to create service")
 
@@ -132,6 +133,7 @@ func SetupBalanceIntegrationTestContainerWithClient(t *testing.T, client domain.
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 		service.WithCurrentAccountClient(client),
 	)
 	require.NoError(t, err, "Failed to create service")

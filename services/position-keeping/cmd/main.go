@@ -405,6 +405,7 @@ func run(logger *slog.Logger) error {
 		container.MeasurementRepository,
 		container.EventPublisher,
 		idempotencySvc,
+		container.OutboxPublisher,
 		serviceOpts...,
 	)
 	if err != nil {

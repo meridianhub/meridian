@@ -69,6 +69,7 @@ import (
 	partyservice "github.com/meridianhub/meridian/services/party/service"
 	paymentorderpersistence "github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
 	paymentorderservice "github.com/meridianhub/meridian/services/payment-order/service"
+	pkmessaging "github.com/meridianhub/meridian/services/position-keeping/adapters/messaging"
 	pkpersistence "github.com/meridianhub/meridian/services/position-keeping/adapters/persistence"
 	pkclient "github.com/meridianhub/meridian/services/position-keeping/client"
 	pkdomain "github.com/meridianhub/meridian/services/position-keeping/domain"
@@ -629,11 +630,18 @@ func wirePositionKeeping(
 	eventPub pkdomain.EventPublisher,
 	logger *slog.Logger,
 ) error {
+	outboxRepo := events.NewPgxOutboxRepository(pool)
+	outboxPub, err := pkmessaging.NewOutboxEventPublisher(outboxRepo)
+	if err != nil {
+		return fmt.Errorf("failed to create position-keeping outbox publisher: %w", err)
+	}
+
 	svc, err := positionkeepingservice.NewPositionKeepingService(
 		pkpersistence.NewPostgresRepository(pool),
 		pkpersistence.NewMeasurementRepository(pool),
 		eventPub,
 		idempotencySvc,
+		outboxPub,
 	)
 	if err != nil {
 		return err

@@ -88,35 +88,11 @@ func (s *PositionKeepingService) InitiateFinancialPositionLog(
 		return nil, status.Errorf(codes.InvalidArgument, "failed to create financial position log: %v", err)
 	}
 
-	// Persist to repository
-	if err := s.repository.Create(ctx, log); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to save financial position log: %v", err)
-	}
-
-	// Publish event using fire-and-forget pattern
-	//
-	// Design Decision: Event publishing does not block the main operation.
-	// The financial position log is already persisted to the database, which is the
-	// authoritative source of truth. Events provide eventual consistency and async
-	// notifications to downstream services.
-	//
-	// Trade-offs:
-	//   - Pro: Request latency is not impacted by event broker availability
-	//   - Pro: Partial failures don't cause transaction rollbacks
-	//   - Con: Events may be lost if publisher fails silently
-	//   - Con: No visibility into publishing failures at request time
-	//
-	// Future Improvements:
-	//   - Add metrics/logging in EventPublisher implementation for observability
-	//   - Consider dead letter queue for failed events
-	//   - Add retry logic with exponential backoff in EventPublisher
-	//   - Monitor event publishing success rates via instrumentation
-	//
-	// The EventPublisher interface returns errors, but we intentionally ignore them
-	// to maintain the fire-and-forget semantics. Error handling and retries should
-	// be implemented within the EventPublisher implementation itself.
+	// Build the domain event (if applicable) before persisting, then write both
+	// the position log and the outbox entry atomically in a single transaction.
+	var events []domain.DomainEvent
 	if initialEntry != nil {
-		event := &domain.TransactionCaptured{
+		events = append(events, &domain.TransactionCaptured{
 			LogID:         log.LogID,
 			AccountID:     log.AccountID,
 			TransactionID: initialEntry.TransactionID,
@@ -127,8 +103,13 @@ func (s *PositionKeepingService) InitiateFinancialPositionLog(
 			Reference:     initialEntry.Reference,
 			Timestamp:     initialEntry.Timestamp,
 			Version:       log.Version,
-		}
-		_ = s.eventPublisher.Publish(ctx, event)
+		})
+	}
+
+	// Persist to repository atomically with outbox event write.
+	outboxFn := s.outboxPublisher.BuildOutboxFn(ctx, events)
+	if err := s.repository.CreateWithOutbox(ctx, log, outboxFn); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to save financial position log: %v", err)
 	}
 
 	// Store idempotency result if key was provided

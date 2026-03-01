@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -15,10 +16,22 @@ import (
 
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
+	"github.com/meridianhub/meridian/services/position-keeping/adapters/messaging"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
 	"github.com/meridianhub/meridian/services/position-keeping/service"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	"github.com/meridianhub/meridian/shared/platform/events"
 )
+
+// newTestOutboxPublisher creates an OutboxEventPublisher backed by a no-op PgxOutboxRepository
+// for use in unit tests. The pool is nil so any actual DB call would fail, but since tests
+// use MockRepository which never calls the outbox fn, this is safe for unit tests.
+func newTestOutboxPublisher(tb testing.TB) *messaging.OutboxEventPublisher {
+	tb.Helper()
+	pub, err := messaging.NewOutboxEventPublisher(events.NewPgxOutboxRepository(nil))
+	require.NoError(tb, err, "unexpected error creating test outbox publisher")
+	return pub
+}
 
 // mustNewPositionKeepingService creates a service and fails the test if an error occurs.
 // Use this for tests where the service should always be created successfully.
@@ -26,7 +39,7 @@ import (
 func mustNewPositionKeepingService(tb testing.TB, repo domain.FinancialPositionLogRepository, publisher domain.EventPublisher, idempotencySvc idempotency.Service) *service.PositionKeepingService {
 	tb.Helper()
 	mockMeasurementRepo := new(MockMeasurementRepository)
-	svc, err := service.NewPositionKeepingService(repo, mockMeasurementRepo, publisher, idempotencySvc)
+	svc, err := service.NewPositionKeepingService(repo, mockMeasurementRepo, publisher, idempotencySvc, newTestOutboxPublisher(tb))
 	require.NoError(tb, err, "unexpected error creating service")
 	return svc
 }
@@ -63,6 +76,16 @@ func (m *MockRepository) FindByAccountID(ctx context.Context, accountID string) 
 }
 
 func (m *MockRepository) Update(ctx context.Context, log *domain.FinancialPositionLog) error {
+	args := m.Called(ctx, log)
+	return args.Error(0)
+}
+
+func (m *MockRepository) CreateWithOutbox(ctx context.Context, log *domain.FinancialPositionLog, _ func(pgx.Tx) error) error {
+	args := m.Called(ctx, log)
+	return args.Error(0)
+}
+
+func (m *MockRepository) UpdateWithOutbox(ctx context.Context, log *domain.FinancialPositionLog, _ func(pgx.Tx) error) error {
 	args := m.Called(ctx, log)
 	return args.Error(0)
 }
@@ -198,7 +221,7 @@ func TestInitiateFinancialPositionLog_Success(t *testing.T) {
 		Return(nil)
 
 	// Mock repository create
-	mockRepo.On("Create", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).
+	mockRepo.On("CreateWithOutbox", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).
 		Return(nil)
 
 	// Mock idempotency store result
@@ -219,10 +242,8 @@ func TestInitiateFinancialPositionLog_Success(t *testing.T) {
 	assert.NotNil(t, resp.Log.StatusTracking, "Expected status tracking to be set")
 	assert.Equal(t, commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING, resp.Log.StatusTracking.CurrentStatus)
 
-	// Verify event was published
-	events := mockEventPublisher.GetPublishedEvents()
-	assert.Len(t, events, 1, "Expected 1 event to be published")
-	assert.Equal(t, "position_keeping.transaction_captured.v1", events[0].EventType())
+	// Verify event was written to outbox transactionally (CreateWithOutbox was called)
+	mockRepo.AssertCalled(t, "CreateWithOutbox", ctx, mock.AnythingOfType("*domain.FinancialPositionLog"))
 
 	mockRepo.AssertExpectations(t)
 	mockIdempotency.AssertExpectations(t)
@@ -270,9 +291,8 @@ func TestInitiateFinancialPositionLog_IdempotencyCheck(t *testing.T) {
 	require.NotNil(t, resp, "Expected non-nil response")
 	assert.Equal(t, cachedLogID, resp.Log.LogId, "Expected cached log ID to be returned")
 
-	// Verify no new events were published
-	events := mockEventPublisher.GetPublishedEvents()
-	assert.Len(t, events, 0, "Expected no new events for idempotent request")
+	// Verify no outbox write occurred (CreateWithOutbox not called for cached response)
+	mockRepo.AssertNotCalled(t, "CreateWithOutbox")
 
 	mockIdempotency.AssertExpectations(t)
 	mockRepo.AssertExpectations(t)
@@ -380,7 +400,7 @@ func TestInitiateFinancialPositionLog_RepositoryError(t *testing.T) {
 		Return(nil)
 
 	// Mock repository create to fail
-	mockRepo.On("Create", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).
+	mockRepo.On("CreateWithOutbox", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).
 		Return(assert.AnError)
 
 	// Mock idempotency delete for cleanup on error
@@ -466,7 +486,7 @@ func TestInitiateFinancialPositionLog_StoreResultError(t *testing.T) {
 		Return(nil)
 
 	// Mock repository create
-	mockRepo.On("Create", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).
+	mockRepo.On("CreateWithOutbox", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).
 		Return(nil)
 
 	// Mock idempotency store result to fail

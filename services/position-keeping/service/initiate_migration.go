@@ -86,11 +86,6 @@ func (s *PositionKeepingService) InitiateWithOpeningBalance(
 		return nil, status.Errorf(codes.InvalidArgument, "failed to create financial position log: %v", err)
 	}
 
-	// Persist to repository
-	if err := s.repository.Create(ctx, log); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to save financial position log: %v", err)
-	}
-
 	// Extract correlation ID from context for end-to-end request tracing,
 	// falling back to log ID if not present in request metadata
 	correlationID := clients.ExtractCorrelationID(ctx)
@@ -98,8 +93,7 @@ func (s *PositionKeepingService) InitiateWithOpeningBalance(
 		correlationID = log.LogID.String()
 	}
 
-	// Publish OpeningBalanceRecorded event using fire-and-forget pattern
-	// (consistent with other endpoints in this service - Kafka producer configured with retries)
+	// Build the OpeningBalanceRecorded event and persist it atomically with the position log.
 	event := &domain.OpeningBalanceRecorded{
 		LogID:              log.LogID,
 		AccountID:          log.AccountID,
@@ -110,7 +104,10 @@ func (s *PositionKeepingService) InitiateWithOpeningBalance(
 		Timestamp:          time.Now().UTC(),
 		Version:            log.Version,
 	}
-	_ = s.eventPublisher.Publish(ctx, event)
+	outboxFn := s.outboxPublisher.BuildOutboxFn(ctx, []domain.DomainEvent{event})
+	if err := s.repository.CreateWithOutbox(ctx, log, outboxFn); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to save financial position log: %v", err)
+	}
 
 	// Store idempotency result if key was provided
 	if idempotencyKey != nil {

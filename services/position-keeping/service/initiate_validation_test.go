@@ -42,6 +42,7 @@ func TestInitiateFinancialPositionLog_AccountValidation_Enabled_ValidAccount(t *
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 		service.WithAccountValidator(mockValidator),
 		service.WithAccountValidationEnabled(true),
 	)
@@ -78,7 +79,7 @@ func TestInitiateFinancialPositionLog_AccountValidation_Enabled_ValidAccount(t *
 	mockValidator.On("ValidateExists", ctx, "valid-account-123").Return(nil)
 
 	// Mock repository create
-	mockRepo.On("Create", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).Return(nil)
+	mockRepo.On("CreateWithOutbox", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).Return(nil)
 
 	// Mock idempotency store result
 	mockIdempotency.On("StoreResult", ctx, mock.AnythingOfType("idempotency.Result")).Return(nil)
@@ -109,6 +110,7 @@ func TestInitiateFinancialPositionLog_AccountValidation_Enabled_InvalidAccount(t
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 		service.WithAccountValidator(mockValidator),
 		service.WithAccountValidationEnabled(true),
 	)
@@ -159,7 +161,7 @@ func TestInitiateFinancialPositionLog_AccountValidation_Enabled_InvalidAccount(t
 
 	// Verify validator was called but repository was NOT called
 	mockValidator.AssertCalled(t, "ValidateExists", ctx, "invalid-account-456")
-	mockRepo.AssertNotCalled(t, "Create")
+	mockRepo.AssertNotCalled(t, "CreateWithOutbox")
 }
 
 func TestInitiateFinancialPositionLog_AccountValidation_Disabled_SkipsValidation(t *testing.T) {
@@ -176,6 +178,7 @@ func TestInitiateFinancialPositionLog_AccountValidation_Disabled_SkipsValidation
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 		service.WithAccountValidator(mockValidator),
 		// WithAccountValidationEnabled not called - defaults to false
 	)
@@ -209,7 +212,7 @@ func TestInitiateFinancialPositionLog_AccountValidation_Disabled_SkipsValidation
 		Return(nil)
 
 	// Mock repository create - should be called since validation is disabled
-	mockRepo.On("Create", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).Return(nil)
+	mockRepo.On("CreateWithOutbox", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).Return(nil)
 	mockIdempotency.On("StoreResult", ctx, mock.AnythingOfType("idempotency.Result")).Return(nil)
 
 	// Act
@@ -222,7 +225,7 @@ func TestInitiateFinancialPositionLog_AccountValidation_Disabled_SkipsValidation
 	// Verify validator was NOT called (validation disabled)
 	mockValidator.AssertNotCalled(t, "ValidateExists")
 	// Verify repository WAS called (position log created)
-	mockRepo.AssertCalled(t, "Create", ctx, mock.AnythingOfType("*domain.FinancialPositionLog"))
+	mockRepo.AssertCalled(t, "CreateWithOutbox", ctx, mock.AnythingOfType("*domain.FinancialPositionLog"))
 }
 
 func TestInitiateFinancialPositionLog_AccountValidation_ValidatorNil_SkipsValidation(t *testing.T) {
@@ -238,6 +241,7 @@ func TestInitiateFinancialPositionLog_AccountValidation_ValidatorNil_SkipsValida
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 		service.WithAccountValidationEnabled(true), // Enabled but...
 		// WithAccountValidator not called - validator is nil
 	)
@@ -271,7 +275,7 @@ func TestInitiateFinancialPositionLog_AccountValidation_ValidatorNil_SkipsValida
 		Return(nil)
 
 	// Mock repository create - should be called since validator is nil
-	mockRepo.On("Create", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).Return(nil)
+	mockRepo.On("CreateWithOutbox", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).Return(nil)
 	mockIdempotency.On("StoreResult", ctx, mock.AnythingOfType("idempotency.Result")).Return(nil)
 
 	// Act
@@ -282,7 +286,7 @@ func TestInitiateFinancialPositionLog_AccountValidation_ValidatorNil_SkipsValida
 	require.NotNil(t, resp)
 
 	// Verify repository WAS called (position log created despite enabled flag)
-	mockRepo.AssertCalled(t, "Create", ctx, mock.AnythingOfType("*domain.FinancialPositionLog"))
+	mockRepo.AssertCalled(t, "CreateWithOutbox", ctx, mock.AnythingOfType("*domain.FinancialPositionLog"))
 }
 
 func TestInitiateFinancialPositionLog_AccountValidation_GracefulDegradation(t *testing.T) {
@@ -298,6 +302,7 @@ func TestInitiateFinancialPositionLog_AccountValidation_GracefulDegradation(t *t
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 		service.WithAccountValidator(mockValidator),
 		service.WithAccountValidationEnabled(true),
 	)
@@ -335,7 +340,7 @@ func TestInitiateFinancialPositionLog_AccountValidation_GracefulDegradation(t *t
 	mockValidator.On("ValidateExists", ctx, "graceful-account-123").Return(nil)
 
 	// Mock repository create - should be called due to graceful degradation
-	mockRepo.On("Create", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).Return(nil)
+	mockRepo.On("CreateWithOutbox", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).Return(nil)
 	mockIdempotency.On("StoreResult", ctx, mock.AnythingOfType("idempotency.Result")).Return(nil)
 
 	// Act
@@ -346,7 +351,7 @@ func TestInitiateFinancialPositionLog_AccountValidation_GracefulDegradation(t *t
 	require.NotNil(t, resp)
 
 	// Verify position log was created despite potential service unavailability
-	mockRepo.AssertCalled(t, "Create", ctx, mock.AnythingOfType("*domain.FinancialPositionLog"))
+	mockRepo.AssertCalled(t, "CreateWithOutbox", ctx, mock.AnythingOfType("*domain.FinancialPositionLog"))
 }
 
 func TestWithAccountValidator_Option(t *testing.T) {
@@ -362,6 +367,7 @@ func TestWithAccountValidator_Option(t *testing.T) {
 			mockMeasurementRepo,
 			mockEventPublisher,
 			mockIdempotency,
+			newTestOutboxPublisher(t),
 			service.WithAccountValidator(mockValidator),
 		)
 		require.NoError(t, err)
@@ -374,6 +380,7 @@ func TestWithAccountValidator_Option(t *testing.T) {
 			mockMeasurementRepo,
 			mockEventPublisher,
 			mockIdempotency,
+			newTestOutboxPublisher(t),
 			service.WithAccountValidator(nil),
 		)
 		require.NoError(t, err)
@@ -393,6 +400,7 @@ func TestWithAccountValidationEnabled_Option(t *testing.T) {
 			mockMeasurementRepo,
 			mockEventPublisher,
 			mockIdempotency,
+			newTestOutboxPublisher(t),
 			service.WithAccountValidationEnabled(true),
 		)
 		require.NoError(t, err)
@@ -405,6 +413,7 @@ func TestWithAccountValidationEnabled_Option(t *testing.T) {
 			mockMeasurementRepo,
 			mockEventPublisher,
 			mockIdempotency,
+			newTestOutboxPublisher(t),
 			service.WithAccountValidationEnabled(false),
 		)
 		require.NoError(t, err)
