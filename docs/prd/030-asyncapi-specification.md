@@ -18,8 +18,9 @@ instructions: |
   with JSON Schema derived from proto for the AsyncAPI payload definitions.
 
   This PRD also addresses event publishing tech debt: aligning all services to the
-  transactional outbox pattern and adding missing domain events for services that
-  currently publish none.
+  transactional outbox pattern, adding missing domain events for services that
+  currently publish none, and generating type-safe event publishers from the
+  AsyncAPI specs so that invalid events cannot compile.
 ---
 
 # PRD-030: AsyncAPI Specification for Kafka Event Contracts
@@ -74,7 +75,33 @@ All other publishers use fire-and-forget Kafka writes outside the database trans
 risking event loss on service crash. Two core BIAN services (Party, InternalBankAccount)
 publish no domain events at all.
 
-### 1.3 Topic Naming Inconsistency
+### 1.3 No Type Safety in Event Publishing
+
+An audit of the event publishing code path reveals that every layer is string-typed with
+no compile-time enforcement:
+
+| Layer | Mechanism | Type Safe? | Risk |
+|-------|-----------|-----------|------|
+| Publisher API | `PublishConfig{EventType, Topic}` strings | No | Typo in EventType or Topic → silent misrouting |
+| Outbox Table | All string columns, `[]byte` payload | No | Invalid data persists in DB unchecked |
+| Domain Events | `EventType() string`, `ToProto() interface{}` | No | String return + untyped interface → runtime errors |
+| Topic Routing | `map[string]string` lookup | No | Missing key → empty topic → silent failure |
+| Proto Validation | `protovalidate` imported but never called | No | Validation rules defined in proto but unenforced |
+| Error Handling | `_ = publish()` in some services | No | Silent event loss, zero observability |
+
+The `protovalidate` annotations on event proto messages (required fields, UUID formats,
+string patterns) are compiled into the generated Go code but **never invoked** in the
+publish path. Events can be written to the outbox with invalid payloads.
+
+Position-keeping service silently discards publish errors (`_ = s.eventPublisher.Publish()`),
+meaning business operations complete successfully but downstream services never receive
+the event.
+
+The core issue: the publish path is a chain of `string → string → []byte` with no
+structural guarantee that the right event reaches the right topic with a valid payload.
+This is the opposite of Correctness by Construction.
+
+### 1.4 Topic Naming Inconsistency
 
 One topic does not follow the `<service>.<event>.<version>` convention from ADR-0004:
 
@@ -103,6 +130,9 @@ Additionally, some services still dual-publish to deprecated topic names during 
 | UI | AsyncAPI Studio or equivalent |
 | Per-service split | One YAML per service domain |
 | Publishing pattern | All services use transactional outbox |
+| Type safety | Generated typed publishers per domain |
+| Payload validation | `protovalidate` enforced at publish boundary |
+| Contract enforcement | CI: `asyncapi diff` + drift detection |
 
 ---
 
@@ -118,15 +148,16 @@ Additionally, some services still dual-publish to deprecated topic names during 
 | G6 | BIAN v14 alignment | Adopt the same specification standard BIAN uses for async contracts |
 | G7 | Consistent event publishing | All event-publishing services use the transactional outbox pattern |
 | G8 | Event coverage | Party and InternalBankAccount services publish domain events |
+| G9 | Type-safe publishing | Generated typed publishers eliminate string-based topic/event routing |
+| G10 | Payload validation | `protovalidate` enforced before outbox write — invalid events rejected at boundary |
+| G11 | Contract enforcement | CI detects breaking async contract changes via `asyncapi diff` |
 
 ### Non-Goals
 
 - Replacing protobuf with JSON for event serialization (protobuf remains the wire format)
 - Adopting BIAN's transport-agnostic channel naming (`OutboundMessage/Created`) — Meridian
   retains `<service>.<event>.<version>` per ADR-0004
-- Code generation from AsyncAPI (proto remains the source of truth for Go types)
 - External consumer portal or developer portal (internal documentation only)
-- AsyncAPI-based contract testing (future consideration, not in scope)
 - Implementing all 82 BIAN AsyncAPI channels — only channels matching existing service
   operations are in scope
 
@@ -595,8 +626,167 @@ Add AsyncAPI spec validation to the GitHub Actions workflow alongside existing `
 
 #### Task 6.2: Drift detection
 
-Optionally, regenerate specs in CI and fail if the committed specs differ from what the
-generator produces (same pattern as checking if generated Go code is up to date).
+Regenerate specs in CI and fail if the committed specs differ from what the generator
+produces (same pattern as checking if generated Go code is up to date).
+
+#### Task 6.3: Breaking change detection
+
+Use [AsyncAPI Diff](https://github.com/asyncapi/diff) to detect breaking changes
+to event contracts in PRs, analogous to `buf breaking` for proto schemas:
+
+```yaml
+- name: Check for breaking async contract changes
+  run: npx @asyncapi/diff api/asyncapi/old/ api/asyncapi/ --breaking-only
+```
+
+### Work Stream 7: Type-Safe Event Publishing (5 points)
+
+Transform AsyncAPI from a documentation tool into an enforcement mechanism. The goal is
+Correctness by Construction: invalid events should not compile, not just fail at runtime.
+
+#### Design Philosophy
+
+The current publish path is a chain of untyped operations:
+
+```text
+Developer writes string literals
+    → PublishConfig{EventType: "string", Topic: "string"}
+        → OutboxEntry{EventPayload: []byte}
+            → Kafka record
+```
+
+The target is a fully typed pipeline where the AsyncAPI spec drives code generation:
+
+```text
+AsyncAPI spec (reviewed contract)
+    → Code generation (asyncapi-codegen or custom)
+        → Typed publisher per service domain
+            → protovalidate at outbox boundary
+                → Proven-valid event in outbox
+                    → Kafka record
+```
+
+#### Task 7.1: Generated typed event publishers
+
+Generate a typed publisher interface per service domain from the AsyncAPI spec. Each
+event gets a dedicated publish method that locks topic, event type, and payload type
+together at compile time.
+
+```go
+// GENERATED from api/asyncapi/position-keeping.yaml
+// DO NOT EDIT
+
+package positionkeepingevents
+
+// Publisher provides type-safe event publishing for the Position Keeping domain.
+// Each method publishes to a specific Kafka topic via the transactional outbox,
+// with protovalidate enforcement on the payload.
+type Publisher struct {
+    outbox *events.OutboxPublisher
+}
+
+// PublishTransactionCaptured publishes a TransactionCapturedEvent to
+// topic "position-keeping.transaction-captured.v1".
+//
+// The event is validated via protovalidate before writing to the outbox.
+// Returns an error if validation fails — the event is never persisted.
+func (p *Publisher) PublishTransactionCaptured(
+    ctx context.Context,
+    tx *gorm.DB,
+    event *eventsv1.TransactionCapturedEvent,
+    opts ...PublishOption,
+) error {
+    if err := protovalidate.Validate(event); err != nil {
+        return fmt.Errorf("invalid TransactionCapturedEvent: %w", err)
+    }
+    return p.outbox.Publish(ctx, tx, event, events.PublishConfig{
+        EventType:     "position_keeping.transaction_captured.v1",
+        Topic:         "position-keeping.transaction-captured.v1",
+        AggregateType: "FinancialPositionLog",
+        AggregateID:   event.GetPositionLogId(),
+    })
+}
+
+// PublishTransactionPosted publishes a TransactionPostedEvent to
+// topic "position-keeping.transaction-posted.v1".
+func (p *Publisher) PublishTransactionPosted(
+    ctx context.Context,
+    tx *gorm.DB,
+    event *eventsv1.TransactionPostedEvent,
+    opts ...PublishOption,
+) error { ... }
+```
+
+This eliminates the entire class of string-typo bugs. A developer cannot:
+
+- Publish a `TransactionCaptured` event to the wrong topic (method enforces it)
+- Use the wrong event type string (hardcoded in generated code)
+- Pass the wrong proto message type (compiler rejects it)
+- Publish an invalid payload (protovalidate rejects it before outbox write)
+
+#### Task 7.2: Protovalidate enforcement at publish boundary
+
+Add `protovalidate.Validate()` call in the generated publishers (as shown above) and
+in the `OutboxPublisher.Publish()` method as a safety net. This ensures that even if
+a service bypasses the generated publisher, the outbox itself rejects invalid payloads.
+
+```go
+// shared/platform/events/publisher.go
+func (p *OutboxPublisher) Publish(ctx context.Context, tx *gorm.DB,
+    msg proto.Message, config PublishConfig) error {
+    // Boundary validation: reject invalid proto messages before persistence
+    if err := protovalidate.Validate(msg); err != nil {
+        return fmt.Errorf("event payload validation failed: %w", err)
+    }
+    // ... existing outbox write logic
+}
+```
+
+This is the "Parse, don't validate" principle: once an event is in the outbox, it is
+structurally proven to be valid. Consumers never see invalid payloads.
+
+#### Task 7.3: Eliminate silent publish errors
+
+Audit all services for `_ = publish()` patterns and replace with proper error
+propagation. Event publishing in a financial platform must be observable:
+
+- Return errors to callers (not discard with `_`)
+- Log publish failures with structured fields (event type, aggregate ID)
+- Add `event.publish.error` metric for monitoring
+
+#### Task 7.4: Service migration to generated publishers
+
+Migrate each service from string-based `PublishConfig` to the generated typed publisher:
+
+| Service | Current | Target |
+|---------|---------|--------|
+| financial-accounting | `OutboxPublisher` + string config | Generated `financialaccountingevents.Publisher` |
+| current-account | Direct Kafka + string config | Generated `currentaccountevents.Publisher` |
+| position-keeping | `KafkaEventPublisher` + string map | Generated `positionkeepingevents.Publisher` |
+| payment-order | Direct Kafka + string config | Generated `paymentorderevents.Publisher` |
+| market-information | Custom publisher + string config | Generated `marketinformationevents.Publisher` |
+| reconciliation | Custom publisher + string config | Generated `reconciliationevents.Publisher` |
+| party | None | Generated `partyevents.Publisher` |
+| internal-account | None | Generated `internalbankaccountevents.Publisher` |
+
+After migration, the string-based `PublishConfig` fields in services become internal
+implementation details of the generated code — developers never construct them manually.
+
+#### Task 7.5: Code generation tooling
+
+Evaluate and implement the generation approach:
+
+- **Option A**: [asyncapi-codegen](https://github.com/lerenn/asyncapi-codegen) — existing
+  Go code generator supporting AsyncAPI 3.0 and Kafka. Generates typed publishers and
+  subscribers. May need adaptation for protobuf payloads (currently JSON-focused).
+- **Option B**: Custom Go generator reading AsyncAPI YAML + proto descriptors. More
+  control over output, direct protobuf integration, but more development effort.
+- **Option C**: Template-based generation using `text/template` with AsyncAPI parsed
+  as input. Middle ground — uses AsyncAPI as source of truth with custom Go output.
+
+Whichever approach, integrate into `make asyncapi` so generated publishers regenerate
+alongside specs. Add generated files to version control (like `.pb.go` files) with
+`// Code generated ... DO NOT EDIT` headers.
 
 ---
 
@@ -609,16 +799,27 @@ generator produces (same pattern as checking if generated Go code is up to date)
 | WS3: AsyncAPI Generation Tooling | 3 | Script, topic registry, Makefile |
 | WS4: Spec Files | 2 | Initial generation, validation, Kafka bindings |
 | WS5: Documentation UI | 2 | Browseable docs, serve target |
-| WS6: CI Integration | 1 | Validation, drift detection |
-| **Total** | **16** | |
+| WS6: CI Integration | 2 | Validation, drift detection, breaking change detection |
+| WS7: Type-Safe Event Publishing | 5 | Generated publishers, protovalidate, error propagation |
+| **Total** | **22** | |
 
-**Critical path:** WS1 → WS2 → WS3 → WS4 → WS5 (WS6 can parallel with WS5)
+**Dependency graph:**
 
-WS1 and WS2 can partially parallel — outbox migration is independent per service.
+```text
+WS1 (Outbox Alignment) ──┐
+                          ├── WS3 (Generation Tooling) ── WS4 (Spec Files) ──┬── WS5 (Docs UI)
+WS2 (Missing Publishers) ┘                                                   ├── WS6 (CI)
+                                                                              └── WS7 (Type Safety)
+```
+
+WS1 and WS2 can parallel — outbox migration is independent per service.
+WS5, WS6, WS7 can parallel — all consume the specs but produce independent outputs.
+WS7 depends on WS3-4 (needs AsyncAPI specs to generate from) and WS1-2 (services must
+use outbox before migrating to generated publishers).
 
 **Dependencies:**
 
-- WS3-6 depend on WS1-2 for accurate event inventory
+- WS3-7 depend on WS1-2 for accurate event inventory and consistent outbox usage
 - Requires Node.js for AsyncAPI CLI tooling (already available for buf)
 - No external infrastructure changes (outbox table already exists per service)
 
@@ -626,20 +827,35 @@ WS1 and WS2 can partially parallel — outbox migration is independent per servi
 
 ## 7. Success Criteria
 
+### Foundational (WS1-2)
+
 - [ ] All event-publishing services use the transactional outbox pattern (`OutboxPublisher`)
 - [ ] Party and InternalBankAccount services publish domain events
 - [ ] All topic names follow `<service>.<event>.<version>` convention
 - [ ] Deprecated dual-published topics are removed
+- [ ] Zero instances of `_ = publish()` (silent error discard)
+
+### Specification (WS3-5)
+
 - [ ] `make asyncapi` generates valid AsyncAPI 3.0 YAML for all 8 services
 - [ ] Every Kafka topic has a corresponding channel definition in the AsyncAPI spec
 - [ ] Payload schemas are derived from proto definitions (not manually duplicated)
 - [ ] Developers can browse event documentation in a UI (locally served)
+
+### Enforcement (WS6-7)
+
 - [ ] CI validates AsyncAPI spec correctness on every PR
+- [ ] CI detects breaking async contract changes via `asyncapi diff`
+- [ ] Generated typed publishers exist for all 8 BIAN service domains
+- [ ] All services use generated publishers (no manual `PublishConfig` construction)
+- [ ] `protovalidate` is enforced before outbox write — invalid events are rejected
 - [ ] ADR-0004 references AsyncAPI specs as the canonical event contract documentation
 
 ---
 
 ## 8. Related Documents
+
+### Internal
 
 - [ADR-0004: Event Schema Evolution](../adr/0004-event-schema-evolution.md) — topic naming,
   outbox pattern, idempotency, BIAN v14 AsyncAPI awareness amendment
@@ -647,6 +863,19 @@ WS1 and WS2 can partially parallel — outbox migration is independent per servi
   translation between BIAN models and internal schemas
 - [PRD-025: Real-Time Event Streaming](025-real-time-event-streaming.md) — WebSocket delivery
   of events to the operations console
-- [BIAN v14 AsyncAPI Specs](https://github.com/bian-official/public/tree/main/release14.0.0/semantic-apis/asyncapi) —
-  BIAN's reference AsyncAPI definitions
+
+### Standards and Specifications
+
 - [AsyncAPI 3.0 Specification](https://www.asyncapi.com/docs/reference/specification/v3.0.0)
+- [BIAN v14 AsyncAPI Specs](https://github.com/bian-official/public/tree/main/release14.0.0/semantic-apis/asyncapi)
+- [protovalidate](https://github.com/bufbuild/protovalidate) — proto validation rules
+  (already in use for gRPC, not yet enforced on event publishing)
+
+### Tooling
+
+- [asyncapi-codegen](https://github.com/lerenn/asyncapi-codegen) — Go code generator
+  for AsyncAPI 3.0, candidate for typed publisher generation
+- [AsyncAPI Diff](https://github.com/asyncapi/diff) — breaking change detection for
+  event contracts
+- [AsyncAPI CLI](https://www.asyncapi.com/tools/cli) — validation, generation, studio
+- [Microcks](https://microcks.io/) — contract testing for async APIs
