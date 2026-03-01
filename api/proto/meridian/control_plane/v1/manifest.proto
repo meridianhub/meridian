@@ -679,12 +679,16 @@ message InstructionRouteConfig {
   string connection_id = 2 [(buf.validate.field).string = {
     min_len: 1
     max_len: 128
+    pattern: "^[a-z][a-z0-9_-]*$"
   }];
 
   // fallback_connection_id references an optional secondary connection used when the primary is unhealthy.
   // Must match a connection_id defined in operational_gateway.provider_connections, if set.
   // If not set, instructions fail without fallback when the primary connection is unhealthy.
-  string fallback_connection_id = 3 [(buf.validate.field).string.max_len = 128];
+  string fallback_connection_id = 3 [(buf.validate.field).string = {
+    max_len: 128
+    pattern: "^$|^[a-z][a-z0-9_-]*$"
+  }];
 
   // outbound_mapping_id is the name of the MappingDefinition applied to transform the instruction
   // payload from the internal Meridian format to the provider's expected format before dispatch.
