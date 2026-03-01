@@ -267,7 +267,7 @@ identity documents.
 ```go
 type Identity struct {
     ID             uuid.UUID
-    PartyID        uuid.UUID       // FK to Party.Individual
+    PartyID        *uuid.UUID      // FK to Party.Individual (nil during invite)
     TenantID       tenant.TenantID // nullable for platform admins
     Email          string          // Login identifier (unique per tenant)
     PasswordHash   string          // bcrypt (Meridian-managed auth)
@@ -404,6 +404,7 @@ CREATE TABLE identity (
     version         INT NOT NULL DEFAULT 1,
 
     UNIQUE (tenant_id, email),
+    UNIQUE (email) WHERE tenant_id IS NULL,
     UNIQUE (external_idp, external_idp_sub)
       WHERE external_idp IS NOT NULL
 );
