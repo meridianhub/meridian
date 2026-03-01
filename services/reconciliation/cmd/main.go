@@ -132,6 +132,7 @@ func run(logger *slog.Logger) error {
 				"error", kafkaErr)
 		} else {
 			kafkaProducer = producer
+			defer kafkaProducer.Close()
 			workerConfig := events.DefaultWorkerConfig("reconciliation")
 			outboxWorker = events.NewWorker(outboxRepo, kafkaProducer, workerConfig, logger)
 			outboxWorker.Start(ctx)
@@ -375,16 +376,7 @@ func run(logger *slog.Logger) error {
 		logger.Info("settlement scheduler stopped")
 	}
 
-	// Stop outbox worker and flush Kafka producer
-	if outboxWorker != nil {
-		outboxWorker.Stop()
-	}
-	if kafkaProducer != nil {
-		if remaining := kafkaProducer.FlushWithTimeout(5000); remaining > 0 {
-			logger.Warn("some outbox messages not delivered before close", "remaining", remaining)
-		}
-		kafkaProducer.Close()
-	}
+	// Outbox worker and Kafka producer are cleaned up via defer.
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.Server.GracefulShutdownTimeout)
 	defer cancel()

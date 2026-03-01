@@ -124,6 +124,7 @@ func run(logger *slog.Logger) error {
 				"error", kafkaErr)
 		} else {
 			kafkaProducer = producer
+			defer kafkaProducer.Close()
 			workerConfig := events.DefaultWorkerConfig("market-information")
 			outboxWorker = events.NewWorker(outboxRepo, kafkaProducer, workerConfig, logger)
 			outboxWorker.Start(ctx)
@@ -271,22 +272,7 @@ func run(logger *slog.Logger) error {
 	// Wait for shutdown signal and orchestrate graceful shutdown
 	orchestrator := bootstrap.NewShutdownOrchestrator(grpcServer, logger)
 
-	// Register outbox worker and Kafka producer cleanup
-	if outboxWorker != nil {
-		orchestrator.AddCleanup(func() error {
-			outboxWorker.Stop()
-			return nil
-		})
-	}
-	if kafkaProducer != nil {
-		orchestrator.AddCleanup(func() error {
-			if remaining := kafkaProducer.FlushWithTimeout(5000); remaining > 0 {
-				logger.Warn("some outbox messages not delivered before close", "remaining", remaining)
-			}
-			kafkaProducer.Close()
-			return nil
-		})
-	}
+	// Outbox worker and Kafka producer are cleaned up via defer.
 
 	// Initialize ECB adapter worker (if enabled)
 	// Note: The ECB worker calls RecordObservation on the Server to ingest FX rates.

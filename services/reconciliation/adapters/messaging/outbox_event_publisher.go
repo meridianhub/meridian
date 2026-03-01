@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
 	"github.com/meridianhub/meridian/shared/platform/events"
@@ -118,22 +117,12 @@ func (p *OutboxEventPublisher) publishPositionLockRequested(ctx context.Context,
 		return fmt.Errorf("%w: expected PositionLockRequestedEvent, got %T", errUnexpectedType, event)
 	}
 
-	// Parse period timestamps
-	periodStart, _ := time.Parse(time.RFC3339, e.GetPeriodStart())
-	periodEnd, _ := time.Parse(time.RFC3339, e.GetPeriodEnd())
-
 	protoEvent := &eventsv1.PositionLockRequestedEvent{
 		RunId:               e.GetRunID(),
 		AccountId:           e.GetAccountID(),
 		LockDurationSeconds: 300, // Default lock duration
 		CorrelationId:       e.GetRunID(),
 		Timestamp:           timestamppb.Now(),
-	}
-	if !periodStart.IsZero() {
-		_ = periodStart // period info carried in correlation context
-	}
-	if !periodEnd.IsZero() {
-		_ = periodEnd
 	}
 
 	return p.publisher.Publish(ctx, tx, protoEvent, events.PublishConfig{

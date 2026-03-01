@@ -203,6 +203,7 @@ func run(logger *slog.Logger) error {
 				"error", kafkaErr)
 		} else {
 			kafkaProducer = producer
+			defer kafkaProducer.Close()
 			workerConfig := events.DefaultWorkerConfig("payment-order")
 			outboxWorker = events.NewWorker(outboxRepo, kafkaProducer, workerConfig, logger)
 			outboxWorker.Start(ctx)
@@ -211,7 +212,7 @@ func run(logger *slog.Logger) error {
 				"bootstrap_servers", bootstrapServers)
 		}
 	} else {
-		logger.Warn("outbox worker disabled - KAFKA_BOOTSTRAP_SERVERS not set")
+		logger.Warn("outbox worker disabled - KAFKA_BOOTSTRAP_SERVERS not set (events will accumulate in outbox)")
 	}
 
 	// Create outbox-based event publisher (replaces direct Kafka producer)
@@ -640,18 +641,6 @@ func run(logger *slog.Logger) error {
 		dunningWorker.Stop()
 		billingWg.Wait()
 		logger.Info("billing workers stopped")
-	}
-
-	// Stop outbox worker and flush Kafka producer before shutting down servers
-	if outboxWorker != nil {
-		outboxWorker.Stop()
-		logger.Info("outbox worker stopped")
-	}
-	if kafkaProducer != nil {
-		if remaining := kafkaProducer.FlushWithTimeout(5000); remaining > 0 {
-			logger.Warn("some outbox messages not delivered before close", "remaining", remaining)
-		}
-		kafkaProducer.Close()
 	}
 
 	// Shutdown HTTP server (stop accepting new webhooks)
