@@ -11,7 +11,8 @@ CREATE TABLE "provider_connections" (
   "tenant_id"          UUID          NOT NULL,
   "connection_id"      VARCHAR(64)   NOT NULL,
   "provider_name"      VARCHAR(255)  NOT NULL,
-  "provider_type"      VARCHAR(64)   NOT NULL,
+  -- provider_type max_len=128 from proto ProviderConnection.provider_type
+  "provider_type"      VARCHAR(128)  NOT NULL,
   "protocol"           VARCHAR(32)   NOT NULL,
   "base_url"           VARCHAR(2048) NOT NULL,
   -- Credentials / connection secrets - encrypted at rest
@@ -56,12 +57,18 @@ CREATE TABLE "instructions" (
   "attempt_count"          INT          NOT NULL DEFAULT 0,
   "created_at"             TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
   "updated_at"             TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-  PRIMARY KEY ("id")
+  PRIMARY KEY ("id"),
+  -- Tenant-scoped FK ensures provider_connection_id cannot be orphaned or reference
+  -- a connection belonging to a different tenant
+  CONSTRAINT "fk_instructions_provider_connection"
+    FOREIGN KEY ("tenant_id", "provider_connection_id")
+    REFERENCES "provider_connections" ("tenant_id", "connection_id")
 );
 
--- Index: outbox polling - worker picks up PENDING/RETRY instructions ordered by priority
+-- Index: outbox polling - worker picks up PENDING/RETRYING instructions ordered by priority.
+-- Status values match InstructionStatus proto enum suffixes (PENDING, RETRYING).
 CREATE INDEX "idx_instructions_outbox_poll" ON "instructions" ("status", "priority", "scheduled_at")
-  WHERE status IN ('PENDING', 'RETRY');
+  WHERE status IN ('PENDING', 'RETRYING');
 
 -- Index: look up by tenant + correlation for saga tracing
 CREATE INDEX "idx_instructions_tenant_correlation" ON "instructions" ("tenant_id", "correlation_id");
@@ -72,9 +79,11 @@ CREATE INDEX "idx_instructions_tenant_type_status" ON "instructions" ("tenant_id
 -- ============================================================
 -- Table: instruction_attempts
 -- Per-attempt outcome log for retry tracking and debugging
+-- tenant_id is included for direct tenant-scoped queries without joining instructions
 -- ============================================================
 CREATE TABLE "instruction_attempts" (
   "id"                    UUID          NOT NULL DEFAULT gen_random_uuid(),
+  "tenant_id"             UUID          NOT NULL,
   "instruction_id"        UUID          NOT NULL REFERENCES "instructions" ("id"),
   "attempt_number"        INT           NOT NULL,
   "dispatched_at"         TIMESTAMPTZ   NULL,
@@ -89,3 +98,6 @@ CREATE TABLE "instruction_attempts" (
 
 -- Index: retrieve all attempts for an instruction (chronological)
 CREATE INDEX "idx_instruction_attempts_instruction" ON "instruction_attempts" ("instruction_id", "attempt_number");
+
+-- Index: tenant-scoped attempt queries (aligns with WithGormTenantScope)
+CREATE INDEX "idx_instruction_attempts_tenant" ON "instruction_attempts" ("tenant_id", "instruction_id");
