@@ -83,6 +83,7 @@ stateDiagram-v2
 | [Meridian Edge](003-meridian-edge.md) | Embedded modular monolith for IoT devices and browser (WASM) |
 | [MCP Server](027-mcp-server.md) | Model Context Protocol server bridging LLMs to Meridian Core |
 | [Operational Gateway](029-operational-gateway.md) | Bidirectional asset-agnostic gateway for outbound instructions and inbound messages |
+| [AsyncAPI Specification](030-asyncapi-specification.md) | Formal AsyncAPI 3.0 specs for Kafka event contracts, mirroring OpenAPI for sync APIs |
 
 ### Task Master PRDs (`.taskmaster/docs/`)
 
@@ -228,6 +229,7 @@ material.
 - [Operational Gateway](029-operational-gateway.md) - Asset-agnostic control signal gateway for outbound instructions
 - [Structured Mapping Layer](024-structured-inbound-mapping.md) - Bidirectional JSON mapping engine for data transformation
 - [Real-Time Event Streaming](025-real-time-event-streaming.md) - WebSocket event delivery for operations console
+- [AsyncAPI Specification](030-asyncapi-specification.md) - Formal AsyncAPI 3.0 specs for Kafka event contracts
 
 ### Operations & SaaS
 
